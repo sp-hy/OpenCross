@@ -111,6 +111,13 @@ struct MainMenu::Impl {
   // Debug tab tools were used: the save screen shows a warning (saving itself stays allowed).
   bool save_locked = false;
   int frames = 0;
+  // Opening a screen from the main list slides the cards (and, for character screens, the portraits) away while it fades to black (state 1),
+  // switches at the darkest point and fades in (state 2); going back reverses the slide. The fade-out ends before the slide does. In ticks.
+  static constexpr int kSlideAway = 18, kOutFade = 10, kInFade = 5, kExitOut = 8;
+  int xfade_state = 0, xfade = 0, xfade_len = kOutFade, xfade_cursor = 0;
+  int slide_t = 0;
+  bool leaving = false, portraits_away = false, xfade_pick = false;
+  MenuScreen xfade_target = MenuScreen::Main;
   // Last-used input device: false = gamepad glyphs, true = keyboard glyphs.
   bool kb_mode = false;
   // pick_for: 0 status, 1 grid, 2 equip.
@@ -241,7 +248,8 @@ struct MainMenu::Impl {
   Nav poll(const platform::Input& in);
   void open(GameState& state, bool allow_save);
   void enter(MenuScreen target);
-  void back_to_main(int cursor);
+  // to_pick: land on the member pick again (cursor on the member just used) instead of the plain list.
+  void back_to_main(int cursor, bool to_pick = false);
 
   // Defined in main_menu_save.cpp.
   void load_previews();
@@ -446,7 +454,7 @@ struct MainMenu::Impl {
   void scroll_arrow(float x, float y, bool up);
   void pointer(float x, float y, bool left);
   void btn(float x, float y, int slot_index, u32 colour = kWhite);
-  void portrait_strip(int character, float x, u32 col);
+  void portrait_strip(int character, float x, u32 col, float dy = 0.0f);
   float fit_rel(const std::u32string& str, float maxw, float rel);
   void TPfit(float x, float y, const std::u32string& str, float maxw, u32 colour = kText, float rel = 0.9f);
 

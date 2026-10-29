@@ -340,14 +340,28 @@ void MainMenu::Impl::build_main() {
   const bool listing = roster != Roster::Off;
   const bool picking = screen == MenuScreen::Main && sub == 1 && !listing;
   const std::vector<int> members = party();
+  // Opening Allocate elements / Equip: the other members slide off to the left, the cards off to the right.
+  float away = 0;
+  if (slide_t > 0) {
+    const float t = static_cast<float>(slide_t) / static_cast<float>(kSlideAway);
+    away = t * t * (3.0f - 2.0f * t);
+  }
   group(Left);
+  size_t chosen = members.size();
+  for (size_t i = 0; i < members.size(); ++i)
+    if (members[i] == cur_char()) chosen = i;
   for (size_t i = 0; i < members.size() && i < 3; ++i) {
     const float x = 16.0f + 72.0f * static_cast<float>(i);
     const bool bright = picking && static_cast<int>(i) == pick_cur;
-    portrait_strip(members[i], x, grey(bright ? 0x80 : 0x40));
+    // On a character screen every portrait but the chosen one slides off the bottom (the strip is two 224-unit halves: the canvas is 448 tall).
+    // The chosen one moves to the first slot, where the character screens draw it.
+    const bool mine = portraits_away && i == chosen;
+    const float dy = portraits_away && i != chosen ? 460.0f * away : 0.0f;
+    portrait_strip(members[i], mine ? x + (16.0f - x) * away : x, grey(bright ? 0x80 : 0x40), dy);
     if (bright) cursor(PX(x) - 40.0f, PY(224) - 8.0f);
   }
-  for (size_t i = 0; i < members.size() && i < 3; ++i) member_card(members[i], 250.0f + 16.0f * static_cast<float>(i), 42.0f + 84.0f * static_cast<float>(i));
+  for (size_t i = 0; i < members.size() && i < 3; ++i)
+    member_card(members[i], 250.0f + 16.0f * static_cast<float>(i) + 500.0f * away, 42.0f + 84.0f * static_cast<float>(i));
   group(Right);
   if (toggle) list_and_bar(1, choice_cur);
   else list_and_bar(0, main_cur, !listing);
