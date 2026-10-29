@@ -83,7 +83,7 @@ class BattleResults {
   int heal_cursor() const;
 
   // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit flash + wait 0x1E.
-  static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180;
+  static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180, kMusicLead = 8;
 
  private:
   struct Impl;

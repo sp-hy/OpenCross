@@ -137,6 +137,7 @@ struct BattleResults::Impl {
   std::string portrait_set = "2021";
   std::function<void(int)> sfx;
   std::function<void()> on_exit;
+  bool music_stopped = false;
 
   // The HD art, drawn in both art modes: the battle_37.tim wallpaper and the portrait strips
   // hd/battle/face/<dir>/pNN.png with <dir> = 1999 in original art, 2021 in HD.
@@ -633,7 +634,7 @@ struct BattleResults::Impl {
       // Exit: black fade over 0x1E frames, the panels slide out, 30 frames. No exit sound.
       phase = Phase::Exit;
       pt = 0;
-      if (on_exit) on_exit();
+      music_stopped = false;
     }
   }
   void begin_spoils() {
@@ -659,6 +660,11 @@ struct BattleResults::Impl {
     if (auto_on && page_age >= kAutoHold && (phase == Phase::PowerUp || phase == Phase::Heal || phase == Phase::Healed || phase == Phase::Spoils)) confirm();
     if (phase == Phase::Exit) {
       slide = slide < 1.0f ? 24.0f : slide * 1.125f;
+      // The victory music ends just before the screen is fully black.
+      if (pt >= kExit - kMusicLead && !music_stopped) {
+        music_stopped = true;
+        if (on_exit) on_exit();
+      }
       if (pt >= kExit) phase = Phase::Done;
     } else {
       // settles from 0x18

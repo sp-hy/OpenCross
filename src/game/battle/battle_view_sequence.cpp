@@ -486,7 +486,12 @@ void BattleView::begin_finish() {
   if (outcome == battle::Outcome::Victory) {
     finish_ = Finish::Victory;
     // Song 0x17 (boss) / 0x16 plays after a win unless the battle flags have 0x10 or the scene is a special one.
-    if (!(start_flags_ & 0x10) && scene_id_ != 0x1D7 && scene_id_ != 0x1D8 && scene_id_ != 0x1DD) audio_.play_song(boss_scene_ ? 0x17 : 0x16);
+    // The battle theme stops at once; the victory song follows after a short pause (see tick_finish).
+    if (!(start_flags_ & 0x10) && scene_id_ != 0x1D7 && scene_id_ != 0x1D8 && scene_id_ != 0x1DD) {
+      victory_song_ = boss_scene_ ? 0x17 : 0x16;
+      victory_stop_delay_ = kVictoryStopDelay;
+      victory_song_delay_ = kVictoryStopDelay + kVictorySongPause;
+    }
     // No victory voice is requested.
     for (int i = 0; i < battle::kPcSlots; ++i) {
       const battle::Unit& unit = battle_->unit(i);
@@ -515,6 +520,11 @@ void BattleView::begin_finish() {
 
 void BattleView::tick_finish() {
   ++finish_ticks_;
+  if (victory_song_ >= 0 && victory_stop_delay_ > 0 && --victory_stop_delay_ == 0) audio_.stop_music();
+  if (victory_song_ >= 0 && --victory_song_delay_ <= 0) {
+    audio_.play_song(victory_song_);
+    victory_song_ = -1;
+  }
   switch (finish_) {
     case Finish::Victory:
       // After the 14 + 14 teardown frames the `bti0` intro layer (bg_00's sea, birds, fish) returns and the stage outro `bto0` plays.

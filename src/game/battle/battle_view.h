@@ -847,6 +847,9 @@ class BattleView {
   static constexpr int kRunTicks = 34, kOutroDelay = 28, kFledFade = 60, kOutroCap = 600;
   bool fled_outro_ = false;
   int finish_ticks_ = 0;
+  // The battle theme stops kVictoryStopDelay ticks after the win; the victory song starts kVictorySongPause ticks after that.
+  static constexpr int kVictoryStopDelay = 30, kVictorySongPause = 45;
+  int victory_song_ = -1, victory_song_delay_ = 0, victory_stop_delay_ = 0;
 
   // ui
   Ui ui_ = Ui::Intro;
