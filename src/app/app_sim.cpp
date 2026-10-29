@@ -207,6 +207,7 @@ void App::apply_flow_action(const game::FlowAction& action) {
 // The pad's Start opens it on the release of a short press (a long one opens the settings window) and closes it on the press.
 bool App::pause_modal(const platform::Input& in) {
   if (!pause_ok) return false;
+  pause_stick.poll(in);
   const bool start_edge = in.key_pressed[platform::kStartKey] || start_tap;
   if (!pause_screen.active()) {
     const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active();
@@ -217,10 +218,10 @@ bool App::pause_modal(const platform::Input& in) {
     }
     return false;
   }
-  const int dx = (platform::action_pressed(in, platform::Action::Right) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_RIGHT])) -
-                 (platform::action_pressed(in, platform::Action::Left) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_LEFT]));
-  const int dy = (platform::action_pressed(in, platform::Action::Down) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN])) -
-                 (platform::action_pressed(in, platform::Action::Up) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP]));
+  const int dx = (platform::action_pressed(in, platform::Action::Right) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_RIGHT] || pause_stick.right))) -
+                 (platform::action_pressed(in, platform::Action::Left) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_LEFT] || pause_stick.left)));
+  const int dy = (platform::action_pressed(in, platform::Action::Down) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN] || pause_stick.down))) -
+                 (platform::action_pressed(in, platform::Action::Up) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP] || pause_stick.up)));
   // Start again or B closes.
   const bool close = in.key_pressed[platform::kStartKey] || platform::action_pressed(in, platform::Action::Cancel) ||
                      (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_START] || in.pad_pressed[SDL_GAMEPAD_BUTTON_EAST]));
@@ -419,10 +420,10 @@ void App::advance(const platform::Input& in, double dt, int ticks) {
   // Modal: the field waits while the key-item list is up.
   if (key_popup_ok && key_popup.active()) {
     // The Item key / pad-button key-item list: the stick / arrows move the hand.
-    const int dx = (platform::action_pressed(in, platform::Action::Right) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_RIGHT])) -
-                   (platform::action_pressed(in, platform::Action::Left) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_LEFT]));
-    const int dy = (platform::action_pressed(in, platform::Action::Down) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN])) -
-                   (platform::action_pressed(in, platform::Action::Up) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP]));
+    const int dx = (platform::action_pressed(in, platform::Action::Right) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_RIGHT] || pause_stick.right))) -
+                   (platform::action_pressed(in, platform::Action::Left) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_LEFT] || pause_stick.left)));
+    const int dy = (platform::action_pressed(in, platform::Action::Down) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN] || pause_stick.down))) -
+                   (platform::action_pressed(in, platform::Action::Up) || (in.pad_connected && (in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP] || pause_stick.up)));
     // Confirm uses the item (sfx 8) or refuses it (0x18); cancel / the list button closes (6). RDE pad: B cancels, X (the list button) closes.
     const bool cancel = platform::action_pressed(in, platform::Action::Cancel) || in.key_pressed[SDL_SCANCODE_ESCAPE] ||
                         platform::action_pressed(in, platform::Action::Item) ||

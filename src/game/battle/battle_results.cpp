@@ -14,6 +14,7 @@
 #include "core/log.h"
 #include "import/tim.h"
 #include "platform/keymap.h"
+#include "platform/stick_nav.h"
 #include "render/text_batch.h"
 #include "render/texture.h"
 #include "ui/ps1_font.h"
@@ -84,6 +85,7 @@ u32 tint(u32 colour, float factor) {
 }  // namespace
 
 struct BattleResults::Impl {
+  platform::StickNav stick;
   // Sampler choice: filtered by [Video] Filter*, filtered + repeating (wallpaper), always nearest (the white pixel).
   enum Kind { kLin, kRep, kFixed };
   struct Tex {
@@ -867,8 +869,9 @@ void BattleResults::update(float dt, const platform::Input& in) {
   if (impl.phase == Phase::Idle || impl.phase == Phase::Done) return;
   using platform::Action;
   const bool ok = platform::action_pressed(in, Action::Ok) || in.pad_pressed[SDL_GAMEPAD_BUTTON_SOUTH];
-  const bool up = platform::action_pressed(in, Action::Up) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP];
-  const bool down = platform::action_pressed(in, Action::Down) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
+  impl.stick.poll(in);
+  const bool up = platform::action_pressed(in, Action::Up) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP] || impl.stick.up;
+  const bool down = platform::action_pressed(in, Action::Down) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN] || impl.stick.down;
   const bool cancel = platform::action_pressed(in, Action::Cancel) || in.pad_pressed[SDL_GAMEPAD_BUTTON_EAST];
   impl.acc += dt * 60.0f;
   int steps = 0;

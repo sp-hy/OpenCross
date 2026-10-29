@@ -720,10 +720,11 @@ void BattleView::handle_input(const platform::Input& in) {
   auto act = [&](Action action) { return platform::action_pressed(in, action); };
   const bool ok = act(Action::Ok) || pad(SDL_GAMEPAD_BUTTON_SOUTH);
   const bool cancel = act(Action::Cancel) || pad(SDL_GAMEPAD_BUTTON_EAST);
-  const bool up = act(Action::Up) || pad(SDL_GAMEPAD_BUTTON_DPAD_UP);
-  const bool down = act(Action::Down) || pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
-  const bool left = act(Action::Left) || pad(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
-  const bool right = act(Action::Right) || pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+  stick_.poll(in);
+  const bool up = act(Action::Up) || pad(SDL_GAMEPAD_BUTTON_DPAD_UP) || stick_.up;
+  const bool down = act(Action::Down) || pad(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || stick_.down;
+  const bool left = act(Action::Left) || pad(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || stick_.left;
+  const bool right = act(Action::Right) || pad(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || stick_.right;
   // In the top command menu Right / Square / R1 = next PC, Left / L1 = previous PC.
   const int swap = (act(Action::SelectRight) || act(Action::Item) || pad(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || pad(SDL_GAMEPAD_BUTTON_WEST) || right ? 1 : 0) -
                    (act(Action::SelectLeft) || pad(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || left ? 1 : 0);

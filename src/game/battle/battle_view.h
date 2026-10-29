@@ -51,6 +51,7 @@
 #include "render/particles.h"
 #include "game/battle/battle_pose.h"
 #include "game/battle/battle_seq.h"
+#include "platform/stick_nav.h"
 #include "platform/window.h"
 #include "render/camera.h"
 #include "render/mesh_pipeline.h"
@@ -938,6 +939,8 @@ class BattleView {
   ui::font::FontSet fonts_;
   // Keyboard glyphs after a key press, pad glyphs after pad input.
   bool kb_mode_ = false;
+  // Left stick as menu direction presses.
+  platform::StickNav stick_;
   struct Tex {
     render::Texture tex;
     render::TexRef set;
