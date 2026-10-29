@@ -210,6 +210,8 @@ bool App::pause_modal(const platform::Input& in) {
   pause_stick.poll(in);
   const bool start_edge = in.key_pressed[platform::kStartKey] || start_tap;
   if (!pause_screen.active()) {
+    // Not over the title scene (its logo / attract movies) or the title's own screens (menu, slot list, name entry).
+    if (flow_ready && (flow.scene_mode() || flow.owns_screen())) return false;
     const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active();
     if (start_edge && (over_battle || movie_open)) {
       open_pause();
