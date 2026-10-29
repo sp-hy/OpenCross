@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "platform/keymap.h"
 #include "ui/lowres.h"
 #include "ui/menu/main_menu.h"
 #include "ui/menu/menu_common.h"
@@ -454,6 +455,8 @@ struct MainMenu::Impl {
   void scroll_arrow(float x, float y, bool up);
   void pointer(float x, float y, bool left);
   void btn(float x, float y, int slot_index, u32 colour = kWhite);
+  void action_glyph(platform::Action action, float x, float y);
+  void key_item_line(const std::string& description, float x, float y, float maxw);
   void portrait_strip(int character, float x, u32 col, float dy = 0.0f);
   float fit_rel(const std::u32string& str, float maxw, float rel);
   void TPfit(float x, float y, const std::u32string& str, float maxw, u32 colour = kText, float rel = 0.9f);

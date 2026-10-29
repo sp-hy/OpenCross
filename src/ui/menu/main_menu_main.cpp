@@ -498,6 +498,28 @@ void MainMenu::Impl::build_status() {
   bar_and_title(0, true, -1.7f);
 }
 
+// A square glyph of the pad button (or key cap) bound to `action`, 12 x 14 PS1 px at (x, y): ui/gamepad.png cells (13 x 4, the plain rows) d-pad
+// up 0, left 1, right 2, down 3; LT 21, RT 22. A key cap is drawn smaller than the cell and lower than a pad glyph.
+void MainMenu::Impl::action_glyph(platform::Action action, float x, float y) {
+  using platform::Action;
+  constexpr float kGlyph = 12.0f, kGlyphH = 14.0f, kKeyCapDx = 1.2f, kKeyCapDy = 1.4f, kKeyCapW = 10.4f, kKeyCapH = 11.7f;
+  if (kb_mode) {
+    if (Tex* keys = texs.load(std::string("ui/keyboard_") + "efigsj"[std::clamp(lang_index(), 0, 5)] + ".png")) {
+      const int cell = platform::keyboard_cell(platform::action_vk(action));
+      Img(keys, PX(x + kKeyCapDx), PY(y + kKeyCapDy), PX(kKeyCapW), PY(kKeyCapH), static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
+          static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f);
+    }
+    return;
+  }
+  const int index = action == Action::Up ? 0 : action == Action::Left ? 1 : action == Action::Right ? 2 : action == Action::Down ? 3
+                    : action == Action::SlowSpeed ? 21 : 22;
+  if (Tex* pad = texs.load("ui/gamepad.png")) {
+    const int col = index % 13, row = (index / 13) * 2 + 1;
+    Img(pad, PX(x), PY(y), PX(kGlyph), PY(kGlyphH), static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
+        static_cast<float>(col + 1) / 13.0f, static_cast<float>(row + 1) / 4.0f);
+  }
+}
+
 // The pad camera's legend (sheet frame 1 at (0x1D6, 0x32) and the L2 / R2 sprites 0xB8 / 0xB9 at (0x1BE, 0x4A) / (0x1BE, 0x53)). PS1 screens
 // draw those disc frames. Otherwise the HD legend: menutim camera.png on the frame's camera part (-120, -28, 24 x 24) and four text lines
 // from cmnmes, {Button..} = a square pad glyph or key cap: "{Up}{Down}: Zoom In/Out" and "{Left}{Right}: Rotate" from the frame's part
@@ -520,8 +542,6 @@ void MainMenu::Impl::camera_legend() {
   // A glyph is a square of 12 PS1 columns (14 rows); the lines are one glyph apart.
   constexpr float kGlyph = 12.0f, kGlyphH = 14.0f, kGlyphToText = 3.2f, kTextToGlyph = -1.4f, kLineTop = 46.6f, kCapDrop = 4.2f;
   constexpr float kGlyphLead = 2.4f, kLabelInk = 1.3f, kTextScale = 0.23f;
-  // A key cap is drawn smaller than the cell and lower than a pad glyph.
-  constexpr float kKeyCapDx = 1.2f, kKeyCapDy = 1.4f, kKeyCapW = 10.4f, kKeyCapH = 11.7f;
   const float shift_x = lang == import::Lang::Fr ? -29.0f : 0.0f;
   if (Tex* camera = texs.load("hd/menu/menutim/camera.png")) Img(camera, PX(kFrameX - 120 + shift_x), PY(kFrameY - 28), PX(24), PY(24));
   using platform::Action;
@@ -573,24 +593,7 @@ void MainMenu::Impl::camera_legend() {
       total += line[i].glyph ? kGlyph : kGlyphToText + text_width(line[i].text) + (i + 1 < line.size() ? kTextToGlyph : 0.0f);
     return total;
   };
-  auto glyph = [&](Action action, float x, float y) {
-    if (kb_mode) {
-      if (Tex* keys = texs.load(std::string("ui/keyboard_") + "efigsj"[std::clamp(lang_index(), 0, 5)] + ".png")) {
-        const int cell = platform::keyboard_cell(platform::action_vk(action));
-        Img(keys, PX(x + kKeyCapDx), PY(y + kKeyCapDy), PX(kKeyCapW), PY(kKeyCapH), static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
-            static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f);
-      }
-      return;
-    }
-    // ui/gamepad.png cells (13 x 4, the plain rows): d-pad up 0, left 1, right 2, down 3; LT 21, RT 22.
-    const int index = action == Action::Up ? 0 : action == Action::Left ? 1 : action == Action::Right ? 2 : action == Action::Down ? 3
-                      : action == Action::SlowSpeed ? 21 : 22;
-    if (Tex* pad = texs.load("ui/gamepad.png")) {
-      const int col = index % 13, row = (index / 13) * 2 + 1;
-      Img(pad, PX(x), PY(y), PX(kGlyph), PY(kGlyphH), static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
-          static_cast<float>(col + 1) / 13.0f, static_cast<float>(row + 1) / 4.0f);
-    }
-  };
+  auto glyph = [&](Action action, float x, float y) { action_glyph(action, x, y); };
   auto draw_line = [&](const std::vector<Piece>& line, float pen, int index) {
     const float top = kLineTop + kGlyphH * static_cast<float>(index);
     for (size_t i = 0; i < line.size(); ++i) {

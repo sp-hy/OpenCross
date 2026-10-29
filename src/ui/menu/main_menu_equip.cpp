@@ -188,6 +188,69 @@ void MainMenu::Impl::build_equip() {
     }
 }
 
+// One description row of a key item, fitted to `maxw` PS1 px; a row may hold several lines. {ButtonFast} / {ButtonSlow} (the Time
+// Shifter's speed buttons) are drawn as the pad glyph or key cap bound to the fast / slow speed action; any other {..} stays as written.
+void MainMenu::Impl::key_item_line(const std::string& description, float x, float y, float maxw) {
+  struct Piece {
+    bool glyph = false;
+    platform::Action action = platform::Action::FastSpeed;
+    std::u32string text;
+  };
+  constexpr float kGlyphW = 12.0f, kGlyphDrop = -1.5f, kGlyphGap = 1.5f;
+  std::vector<std::vector<Piece>> lines(1);
+  std::string run;
+  auto flush = [&] {
+    if (!run.empty()) lines.back().push_back({false, platform::Action::FastSpeed, utf32(run)});
+    run.clear();
+  };
+  for (size_t i = 0; i < description.size(); ++i) {
+    const size_t close = description[i] == '{' ? description.find('}', i) : std::string::npos;
+    const std::string_view name = close == std::string::npos ? std::string_view() : std::string_view(description).substr(i + 1, close - i - 1);
+    if (name == "ButtonFast" || name == "ButtonSlow") {
+      flush();
+      lines.back().push_back({true, name == "ButtonFast" ? platform::Action::FastSpeed : platform::Action::SlowSpeed, {}});
+      i = close;
+    } else if (description[i] == '\n') {
+      flush();
+      lines.emplace_back();
+    } else {
+      run += description[i];
+    }
+  }
+  flush();
+  auto line_width = [&](const std::vector<Piece>& line, float rel) {
+    float width = 0;
+    for (const Piece& piece : line) width += piece.glyph ? kGlyphW + 2.0f * kGlyphGap : twp(piece.text, rel);
+    return width;
+  };
+  float rel = 0.8f;
+  auto widest = [&](float r) {
+    float w = 0;
+    for (const auto& line : lines) w = std::max(w, line_width(line, r));
+    return w;
+  };
+  while (rel > 0.4f && widest(rel) > maxw) rel -= 0.04f;
+  // The line pitch of the face the text renders in.
+  render::FaceId face;
+  float scale;
+  pick_face(utf32(description), rel, face, scale);
+  const float pitch = text->line_height(face, scale) / PY(1.0f);
+  float top = y;
+  for (const auto& line : lines) {
+    float pen = x;
+    for (const Piece& piece : line) {
+      if (piece.glyph) {
+        action_glyph(piece.action, pen + kGlyphGap, top + kGlyphDrop);
+        pen += kGlyphW + 2.0f * kGlyphGap;
+      } else {
+        TP(pen, top, piece.text, kText, rel);
+        pen += twp(piece.text, rel);
+      }
+    }
+    top += pitch;
+  }
+}
+
 // ---- key items: list panel (35,30), picture (234,36), description panel (238,318)
 void MainMenu::Impl::build_keyitems() {
   const auto ids = gs->key_items();
@@ -218,7 +281,7 @@ void MainMenu::Impl::build_keyitems() {
     }
     for (int line = 0; line < 3; ++line) {
       const std::string description = trim(table_row("keyitem", id * 3 + line));
-      if (!description.empty()) TPfit(246, 334.0f + 24.0f * static_cast<float>(line), utf32(description), 228, kText, 0.8f);
+      if (!description.empty()) key_item_line(description, 246, 334.0f + 24.0f * static_cast<float>(line), 228);
     }
   }
 }
