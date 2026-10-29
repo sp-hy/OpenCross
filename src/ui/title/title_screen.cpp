@@ -143,7 +143,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
         fade_ = 0;
         phase_ = Phase::Prompt;
         to_menu_ = true;
-        play(8);
+        play_chime();
       }
       break;
     case Phase::Prompt:
@@ -159,7 +159,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
         fade_ = std::max(0.0f, fade_ - dt / kFade);
       } else if (nav.any) {
         to_menu_ = true;
-        play(8);
+        play_chime();
       }
       break;
     case Phase::Menu: {
