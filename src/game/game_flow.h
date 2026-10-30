@@ -291,7 +291,7 @@ class GameFlow {
   NgPlusResult ngp_result_ = NgPlusResult::None;
   save::SaveSlot ngp_cleared_;
   // Menu-open fade (see begin_menu_open_fade).
-  bool open_pending_ = false, open_ready_ = false;
+  bool open_pending_ = false, open_ready_ = false, quick_in_ = false;
   // A load waits for the fade-out to finish.
   bool load_pending_ = false, load_from_slots_ = false;
   ui::SlotEntry load_entry_;

@@ -372,6 +372,8 @@ bool GameFlow::any_button(const platform::Input& in) {
 // is the title's own: 0.5 s (30 frames) each way, the same as the title screen's fades.
 namespace {
 constexpr float kLoadFade = 0.5f;
+// Opening the field menu: a quick fade to black, and the menu comes in faster still.
+constexpr float kMenuOutFade = 0.2f, kMenuInFade = 0.1f;
 }
 
 void GameFlow::begin_load_fade(const ui::SlotEntry& entry, bool from_slot_list) {
@@ -393,10 +395,11 @@ FlowAction GameFlow::tick_fade(float dt) {
   // A long frame (the room load) must not eat the fade.
   dt = std::clamp(dt, 0.0f, 0.05f);
   if (open_pending_) {
-    veil_ = std::min(1.0f, veil_ + dt / kLoadFade);
+    veil_ = std::min(1.0f, veil_ + dt / kMenuOutFade);
     if (veil_ >= 1.0f) {
       open_pending_ = false;
       open_ready_ = true;
+      quick_in_ = true;
       log::info("fade: menu-open fade-out finished");
     }
   } else if (load_pending_) {
@@ -418,7 +421,8 @@ FlowAction GameFlow::tick_fade(float dt) {
       load_entry_ = {};
     }
   } else if (veil_ > 0.0f) {
-    veil_ = std::max(0.0f, veil_ - dt / kLoadFade);
+    veil_ = std::max(0.0f, veil_ - dt / (quick_in_ ? kMenuInFade : kLoadFade));
+    if (veil_ <= 0.0f) quick_in_ = false;
   }
   return action;
 }

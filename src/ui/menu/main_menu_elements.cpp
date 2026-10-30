@@ -350,7 +350,7 @@ void MainMenu::Impl::update_grid_list(const Nav& nav) {
       to_grid(cell_row, kLockCancelPick, false);
       list_dim = true;
     } else {
-      back_to_main(1);
+      back_to_main(1, true);
     }
   }
 }
