@@ -21,6 +21,8 @@ OpenCross is **in development**. Exploring the world, talking to characters, the
 - **Mods**: replace any of the game's original files, plus textures and voice lines, from the game's `mods` folder, with a priority order and conflict view.
 - **Cheats**: the Radical Dreamers Edition boosts plus extras such as no random encounters or free element use; all off by default.
 - **Updates**: check for and install new releases from the in-game settings.
+- **Steam**: turn on **Steam Connection** in the General settings to show as playing the Radical Dreamers Edition and unlock its achievements, using the Steam client you already have. It's off by default, and Steam isn't required to play.
+- **Launcher button**: an optional `XINPUT9_1_0.dll` adds an OpenCross button to the Radical Dreamers Edition launcher, so you can start from Steam's Play button. It changes no game files.
 
 ## Requirements
 
@@ -34,6 +36,8 @@ OpenCross is **in development**. Exploring the world, talking to characters, the
 1. Download `opencross.exe` from the [releases page](https://github.com/sp-hy/OpenCross/releases).
 2. Put it in your Radical Dreamers Edition folder, for example `C:\Program Files (x86)\Steam\steamapps\common\CHRONO CROSS  THE RADICAL DREAMERS EDITION`.
 3. Run it.
+
+To start OpenCross from the game's own launcher, also put `XINPUT9_1_0.dll` from the same release page in that folder, or use **Update** in the settings, which installs it for you. To remove the button, delete the file.
 
 OpenCross finds your Steam saves on its own and writes its settings to `opencross.ini` next to the executable.
 

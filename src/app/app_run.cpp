@@ -282,6 +282,8 @@ void App::field_frame() {
 
 // What the Esc options window changed this frame.
 void App::apply_options_change(const render::OptionsChange& change) {
+  if (change.quit) quit_requested = true;
+  if (change.restart_game) restart_requested = true;
   if (change.vsync) ctx.set_vsync(config.vsync);
   if (change.msaa) ctx.set_msaa(static_cast<u32>(config.msaa));
   if (change.anisotropy) ctx.set_anisotropy(static_cast<u32>(config.anisotropy));

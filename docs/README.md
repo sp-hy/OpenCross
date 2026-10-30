@@ -1,6 +1,6 @@
 # OpenCross developer guide
 
-OpenCross is a from-scratch native PC engine (C++20, SDL3 with Vulkan, Windows x64) that plays Chrono Cross from the Steam Radical Dreamers Edition (RDE) data files in place. One self-contained `opencross.exe` is dropped into the RDE folder and keeps its settings in `opencross.ini` next to it. PS1 art and RDE HD art can be switched live (F6), music is remastered or original, and every toggle lives in the Esc settings window. The project is GPL-3 and redistributes no Square Enix data or code. Libraries and references are credited in [`CREDITS.md`](../CREDITS.md).
+OpenCross is a from-scratch native PC engine (C++20, SDL3 with Vulkan, Windows x64) that plays Chrono Cross from the Steam Radical Dreamers Edition (RDE) data files in place. One self-contained `opencross.exe` is dropped into the RDE folder and keeps its settings in `opencross.ini` next to it; an optional `XINPUT9_1_0.dll` beside it adds a button to RDE's launcher. PS1 art and RDE HD art can be switched live (F6), music is remastered or original, and every toggle lives in the Esc settings window. The project is GPL-3 and redistributes no Square Enix data or code. Libraries and references are credited in [`CREDITS.md`](../CREDITS.md).
 
 This folder documents the engine, the file formats it reads, and how its behaviour is validated.
 
@@ -23,13 +23,14 @@ This folder documents the engine, the file formats it reads, and how its behavio
 - `src/` engine and game code; `src/main.cpp` game entry, `src/tool_main.cpp` dev-tool dispatcher.
 - `tools/` dev tools linked into `opencross.exe` (`opencross <tool>`; `oc*.cpp`), capture and comparison helper scripts (`duckstation.ps1`, `ours_cast*.ps1`, `quiet_start.ps1`, `rde_*.py`), `ghidra_setup.ps1` with `tools/ghidra/` (Ghidra scripts and the `symbols/` catalogues), and `tools/py/` (Python importers, validators, PS1 reference drivers, comparison scripts).
 - `tests/` unit tests (`test_*.cpp`, ctest) and `tests/routes/` scripted routes (`<name>.ini` + `<name>.txt`, `run.ps1`).
+- `launcher/` the 32-bit proxy DLL for RDE's launcher, a CMake project of its own.
 - `docs/` this guide, `architecture.md`, `validation.md`, `rde_internals.md`, `tools.md`, `formats/` (file formats), `rules/` (game behaviour). `third_party/` vendored libraries (`clhca`, `librempeg`); `scripts/` librempeg build helpers.
 - `build.ps1`, `CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json` the build; `build/` output; `tmp/` scratch (captures, forged saves).
 - `README.md`, `CREDITS.md`, `LICENSE`.
 
 `src/` modules:
 
-- `platform` window, input, key maps, `opencross.ini`, paths, rumble, updater.
+- `platform` window, input, key maps, `opencross.ini`, paths, rumble, updater, Steam.
 - `vfs` RDE ZIP archives (AES), cdrom2 / HD override layering, mods overlay.
 - `import` PS1 / RDE decoders: containers, LZSS, TIM, chip2, rooms, models, battle stages, room effects, text, sprite fonts.
 - `assets` engine-side asset types the importers produce.
@@ -46,7 +47,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 
 ### Build
 
-`.\build.ps1 debug [-Configure] [-Test] [-Target a,b]` / `.\build.ps1 release`. Requirements: Visual Studio C++ toolset, CMake, Ninja Multi-Config, vcpkg (`x64-windows-static`; `-VcpkgRoot` sets the vcpkg root) and the Vulkan SDK. CMake preset `win-x64` (build presets `debug` / `release`, test preset `debug`). Output: `build\win-x64\bin\{Debug,Release}\opencross.exe`.
+`.\build.ps1 debug [-Configure] [-Test] [-Target a,b]` / `.\build.ps1 release`. Requirements: Visual Studio C++ toolset, CMake, Ninja Multi-Config, vcpkg (`x64-windows-static`; `-VcpkgRoot` sets the vcpkg root) and the Vulkan SDK. CMake preset `win-x64` (build presets `debug` / `release`, test preset `debug`). Output: `build\win-x64\bin\{Debug,Release}\opencross.exe`. `.\build.ps1 -Launcher` builds the separate 32-bit launcher proxy (`build\launcher-x86\bin\XINPUT9_1_0.dll`, source in `launcher/`, see [`formats/launcher.md`](formats/launcher.md)).
 
 - LNK1104 means the exe is running; stop it first.
 - A header member change, or a re-configure, can leave stale objects: do a clean rebuild.
@@ -57,7 +58,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 
 ### Dev tools
 
-`opencross tools` lists them: `occ`, `octext`, `ocaudio`, `ochd`, `ocprd`, `ocstage`, `ocbattle`, `ocmovie`, `ocbattleview`, `ocbattleseq`, `ocflow`, `ocmenudemo`, `ocshopdemo`, `ocmodelview`. Every subcommand and flag, the `OC_*` environment variables, the hotkeys and the helper scripts are catalogued in [`tools.md`](tools.md); the settings file in [`formats/config.md`](formats/config.md).
+`opencross tools` lists them: `occ`, `octext`, `ocaudio`, `ochd`, `ocprd`, `ocstage`, `ocbattle`, `ocmovie`, `ocbattleview`, `ocbattleseq`, `ocflow`, `ocmenudemo`, `ocshopdemo`, `ocmodelview`, `ocsteam`. Every subcommand and flag, the `OC_*` environment variables, the hotkeys and the helper scripts are catalogued in [`tools.md`](tools.md); the settings file in [`formats/config.md`](formats/config.md).
 
 - `ocbattle` subcommands: `scenes`, `sim <scene>`, `cast`, `elements`, `xcheck`, `soak`, `pac-disasm <scene>`, `pac-soak`, `fx-reg <scene>`, `fx-audit`, `debug-kill [enemy_id [count]]` (the Debug tab's "Replace the enemies" headless).
 - Gates: `opencross ocbattle fx-audit` (`--find NAME`; must not regress) and `opencross ocbattle pac-soak` (`--scene N`, `--from A --to B`, `OC_SOAK_LIST=1`; zero exceptions, outcome counts unchanged by changes that should not touch battle scripts).
@@ -94,6 +95,8 @@ Formats (`docs/formats/`):
 - `battlescript.md` the `.pac` battle-script VM: opcodes, scheduler, variables.
 - `config.md` `opencross.ini`: every section and key, defaults, clamps, legacy keys, live versus restart.
 - `fieldscript.md` room event bytecode: opcodes and semantics.
+- `launcher.md` RDE's launcher (`ui.csv`, its art) and the proxy DLL that adds the OpenCross button.
+- `launcher.md` RDE's launcher (`ui.csv`, its art) and the proxy DLL that adds the OpenCross button.
 - `model.md` model, skeleton, texture and animation formats.
 - `mods.md` loose-file mods, the Modded art mode, texture tile dump and replacement.
 - `movies.md` which FMV a script plays, file names, play ranges.
@@ -107,6 +110,7 @@ Formats (`docs/formats/`):
 
 Behaviour rules (`docs/rules/`), the game rules the engine implements, every number from the source:
 
+- `achievements.md` when each Steam achievement is earned.
 - `field_actors.md` the field tick, player movement, camera follow, followers, collision and triggers, animation, shadows, field status effects, footsteps, message windows, spawns.
 - `battle.md` battle start, the turn system, targeting, grid and gauge, the field ring, status application, battle end, rewards and growth, Pip and Dopplegang, cheats.
 - `menus.md` main menu, settings and the options word, status and equip formulas, the element grid editor, key items, shops, name entry, save and load screens, party editors, pause, title flow.

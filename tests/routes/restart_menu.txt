@@ -1,0 +1,13 @@
+# Out of the open main menu, back to the title scene as at boot. The wait makes the field clock run past the title scene's own hold.
+0 wait 240
+- request menu
+- wait menu open 120
+- request restart
+- wait menu closed 120
+- wait flow title 120
+# Nothing of the title room shows until its logo movie takes over.
+- wait 30
+- assert title_hold on
+- screenshot rs_hold.png
+- wait movie start 600
+- quit

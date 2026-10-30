@@ -9,6 +9,7 @@
 #include <format>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <system_error>
 
 #include "core/log.h"
@@ -288,6 +289,26 @@ bool looks_like_exe(const std::string& data) {
   return pe + 4 <= data.size() && std::memcmp(data.data() + pe, "PE\0\0", 4) == 0;
 }
 
+#ifdef _WIN32
+// Where the launcher proxy belongs: beside RDE's launcher, which is beside this exe in a normal install. Empty anywhere else.
+fs::path launcher_proxy_path() {
+  std::error_code ec;
+  const fs::path dir = exe_dir();
+  if (dir.empty() || !fs::exists(dir / "CHRONOCROSS_LAUNCHER.exe", ec)) return {};
+  return dir / kLauncherProxyName;
+}
+
+bool launcher_proxy_stale(const ReleaseAsset& asset) {
+  const fs::path target = launcher_proxy_path();
+  if (target.empty()) return false;
+  std::ifstream in(target, std::ios::binary);
+  if (!in) return true;
+  if (asset.sha256.empty()) return false;
+  const std::string bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  return sha256_hex(bytes) != asset.sha256;
+}
+#endif
+
 // opencross.exe at the root of the zip or one folder deep.
 bool exe_from_zip(const std::string& zip, std::string& out) {
   mz_zip_archive archive{};
@@ -391,6 +412,12 @@ const ReleaseAsset* pick_asset(const ReleaseInfo& release) {
   return count == 1 ? only : nullptr;
 }
 
+const ReleaseAsset* pick_launcher_proxy(const ReleaseInfo& release) {
+  for (const ReleaseAsset& asset : release.assets)
+    if (lower(asset.name) == lower(kLauncherProxyName)) return &asset;
+  return nullptr;
+}
+
 Updater::Updater() = default;
 
 Updater::~Updater() {
@@ -422,7 +449,7 @@ void Updater::check() {
 
 void Updater::download() {
   std::lock_guard lock(mu_);
-  if (st_.state != State::Available || !asset_) return;
+  if (st_.state != State::Available || (!asset_ && !proxy_asset_)) return;
   if (worker_.joinable()) worker_.join();
   st_.state = State::Downloading;
   st_.progress = 0.0f;
@@ -436,10 +463,68 @@ void Updater::set_failed(std::string msg) {
   st_.message = std::move(msg);
 }
 
+std::string Updater::fetch(const ReleaseAsset& asset, std::string& body) {
+#ifdef _WIN32
+  HttpResult response = http_get(asset.url, L"Accept: application/octet-stream", cancel_, [&](uint64_t got, uint64_t total) {
+    if (!total) total = asset.size;
+    std::lock_guard lock(mu_);
+    st_.progress = total ? std::min(1.0f, static_cast<float>(static_cast<double>(got) / static_cast<double>(total))) : 0.0f;
+  });
+  if (!response.error.empty()) return response.error;
+  if (response.status != 200) return std::format("Download failed (HTTP {})", response.status);
+  if (asset.size && response.body.size() != asset.size) return "Download incomplete; try again";
+  if (!asset.sha256.empty() && sha256_hex(response.body) != asset.sha256) return "Download damaged (SHA-256 mismatch); try again";
+  body = std::move(response.body);
+  return {};
+#else
+  (void)asset;
+  (void)body;
+  return "Updating is only supported on Windows";
+#endif
+}
+
+// The launcher may be running with the proxy loaded (it stays open behind a game it started), so this is the exe's swap too: a loaded
+// DLL can be renamed but not overwritten.
+std::string Updater::install_launcher_proxy(const ReleaseAsset& asset) {
+#ifdef _WIN32
+  const fs::path target = launcher_proxy_path();
+  if (target.empty()) return {};
+  std::string bytes;
+  if (std::string error = fetch(asset, bytes); !error.empty()) return error;
+  if (!looks_like_exe(bytes)) return std::format("{} is not a Windows library", asset.name);
+  const fs::path fresh = fs::path(target).concat(".new"), old = fs::path(target).concat(".old");
+  {
+    std::ofstream out(fresh, std::ios::binary | std::ios::trunc);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    if (!out.flush()) return std::format("Cannot write {} to the game folder", asset.name);
+  }
+  std::error_code ec;
+  const bool had_target = fs::exists(target, ec);
+  fs::remove(old, ec);
+  if (had_target && !MoveFileExW(target.c_str(), old.c_str(), MOVEFILE_REPLACE_EXISTING)) {
+    const DWORD error = GetLastError();
+    fs::remove(fresh, ec);
+    return std::format("Cannot replace {} (error {})", asset.name, error);
+  }
+  if (!MoveFileExW(fresh.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    const DWORD error = GetLastError();
+    if (had_target) MoveFileExW(old.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING);
+    fs::remove(fresh, ec);
+    return std::format("Cannot replace {} (error {})", asset.name, error);
+  }
+  log::info("update: installed {} ({} bytes)", target.string(), bytes.size());
+  return {};
+#else
+  (void)asset;
+  return "Updating is only supported on Windows";
+#endif
+}
+
 // The worker: `install` false = the release check, true = the download + swap. The downloaded exe's own version resource must be
 // newer than this build (a tag bumped without rebuilding would otherwise be offered again forever). The swap renames the running
 // exe to <exe>.old (a running exe can be renamed but not overwritten) and the download to <exe>; a failed second rename puts the
-// running one back.
+// running one back. The launcher proxy follows: once the exe is in place a proxy failure is logged, not reported as a failed update,
+// and the next check offers it again.
 void Updater::run(bool install) {
 #ifdef _WIN32
   if (!install) {
@@ -453,37 +538,52 @@ void Updater::run(bool install) {
     const auto latest = parse_version(rel.tag), current = parse_version(OC_VERSION_STRING);
     if (!latest || !current) return set_failed(std::format("Unknown release tag \"{}\"", rel.tag));
     const ReleaseAsset* asset = pick_asset(rel);
-    log::info("update: current {}, latest {} ({} assets, pick {})", OC_VERSION_STRING, rel.tag, rel.assets.size(), asset ? asset->name : "none");
+    const ReleaseAsset* proxy = pick_launcher_proxy(rel);
+    const bool proxy_stale = proxy && launcher_proxy_stale(*proxy);
+    log::info("update: current {}, latest {} ({} assets, pick {}, launcher proxy {})", OC_VERSION_STRING, rel.tag, rel.assets.size(), asset ? asset->name : "none",
+              proxy_stale ? "stale" : "current");
     std::lock_guard lock(mu_);
+    asset_.reset();
+    proxy_asset_.reset();
+    if (proxy_stale) proxy_asset_ = *proxy;
     st_.latest = rel.tag;
     st_.html_url = rel.html_url.empty() ? kReleasesUrl : rel.html_url;
     st_.published = rel.published;
-    if (compare_versions(*latest, *current) <= 0) st_.state = State::UpToDate;
-    else if (!installed_.empty() && parse_version(installed_) && compare_versions(*latest, *parse_version(installed_)) <= 0) st_.state = State::Installed;
+    if (compare_versions(*latest, *current) <= 0) {
+      st_.launcher_only = proxy_stale;
+      st_.state = proxy_stale ? State::Available : State::UpToDate;
+    } else if (!installed_.empty() && parse_version(installed_) && compare_versions(*latest, *parse_version(installed_)) <= 0) st_.state = State::Installed;
     else if (!asset) st_.state = State::Failed, st_.message = std::format("{} has no opencross.exe or .zip to download", rel.tag);
     else st_.state = State::Available, asset_ = *asset;
     return;
   }
 
-  ReleaseAsset asset;
+  std::optional<ReleaseAsset> exe_asset, proxy_asset;
   {
     std::lock_guard lock(mu_);
-    asset = *asset_;
+    exe_asset = asset_;
+    proxy_asset = proxy_asset_;
   }
-  const HttpResult response = http_get(asset.url, L"Accept: application/octet-stream", cancel_, [&](uint64_t got, uint64_t total) {
-    if (!total) total = asset.size;
+  const auto finish_with_proxy = [&](bool exe_installed) {
+    const std::string error = proxy_asset ? install_launcher_proxy(*proxy_asset) : std::string();
+    if (!error.empty()) {
+      if (!exe_installed) return set_failed(error);
+      log::warn("update: {}", error);
+    }
     std::lock_guard lock(mu_);
-    st_.progress = total ? std::min(1.0f, static_cast<float>(static_cast<double>(got) / static_cast<double>(total))) : 0.0f;
-  });
-  if (!response.error.empty()) return set_failed(response.error);
-  if (response.status != 200) return set_failed(std::format("Download failed (HTTP {})", response.status));
-  if (asset.size && response.body.size() != asset.size) return set_failed("Download incomplete; try again");
-  if (!asset.sha256.empty() && sha256_hex(response.body) != asset.sha256) return set_failed("Download damaged (SHA-256 mismatch); try again");
+    st_.state = State::Installed;
+    st_.progress = 1.0f;
+  };
+  if (!exe_asset) return finish_with_proxy(false);
+
+  const ReleaseAsset& asset = *exe_asset;
+  std::string downloaded;
+  if (std::string error = fetch(asset, downloaded); !error.empty()) return set_failed(error);
   std::string exe_bytes;
   if (ends_with(lower(asset.name), ".zip")) {
-    if (!exe_from_zip(response.body, exe_bytes)) return set_failed(std::format("{} holds no opencross.exe", asset.name));
+    if (!exe_from_zip(downloaded, exe_bytes)) return set_failed(std::format("{} holds no opencross.exe", asset.name));
   } else {
-    exe_bytes = response.body;
+    exe_bytes = std::move(downloaded);
   }
   if (!looks_like_exe(exe_bytes)) return set_failed("The download is not a Windows program");
 
@@ -528,9 +628,7 @@ void Updater::run(bool install) {
     return set_failed(std::format("Cannot replace the exe (error {}); download it from GitHub by hand instead", error));
   }
   log::info("update: installed {} over {} ({} bytes); old exe kept as {}", asset.name, exe.string(), exe_bytes.size(), old.filename().string());
-  std::lock_guard lock(mu_);
-  st_.state = State::Installed;
-  st_.progress = 1.0f;
+  finish_with_proxy(true);
 #else
   (void)install;
   set_failed("Updating is only supported on Windows");
@@ -557,21 +655,26 @@ bool Updater::restart() {
 }
 
 // Deletes a <exe>.new that never got swapped in and the <exe>.old of a finished update; the latter on a detached thread with
-// retries, since right after a restart the previous process may still be closing and holding its file.
+// retries, since right after a restart the previous process may still be closing and holding its file. The launcher proxy's leftovers
+// the same way; a launcher still running keeps its .old until a later start.
 void Updater::cleanup_after_update() {
+  const auto clean = [](const fs::path& file) {
+    const fs::path old = fs::path(file).concat(".old"), fresh = fs::path(file).concat(".new");
+    std::error_code ec;
+    fs::remove(fresh, ec);
+    if (!fs::exists(old, ec)) return;
+    std::thread([old] {
+      for (int i = 0; i < 40; ++i) {
+        std::error_code retry_ec;
+        if (fs::remove(old, retry_ec) || !fs::exists(old, retry_ec)) return;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+      }
+    }).detach();
+  };
   const fs::path exe = exe_path();
   if (exe.empty()) return;
-  const fs::path old = fs::path(exe).concat(".old"), fresh = fs::path(exe).concat(".new");
-  std::error_code ec;
-  fs::remove(fresh, ec);
-  if (!fs::exists(old, ec)) return;
-  std::thread([old] {
-    for (int i = 0; i < 40; ++i) {
-      std::error_code retry_ec;
-      if (fs::remove(old, retry_ec) || !fs::exists(old, retry_ec)) return;
-      std::this_thread::sleep_for(std::chrono::milliseconds(250));
-    }
-  }).detach();
+  clean(exe);
+  clean(exe.parent_path() / kLauncherProxyName);
 }
 
 }  // namespace oc::platform

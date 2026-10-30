@@ -343,6 +343,14 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     }
     row("Auto-save", "RDE's auto-save (card 1, slot 0) on every location change.");
     if (ImGui::Checkbox("##autosave", &cfg.auto_save)) change.other = true;
+    row("Steam Connection", "Connects to Steam as the Radical Dreamers Edition, so Steam shows you playing it and its achievements unlock. Needs Steam running. "
+                 "Turning it off stops achievements at once; Steam keeps showing you playing until OpenCross closes.");
+    if (ImGui::Checkbox("##steam", &cfg.steam)) change.other = true;
+    row("Session", "Restart goes back to the start of the game without closing OpenCross. Quit closes OpenCross. Either way, progress since your "
+                   "last save is lost.");
+    if (ImGui::Button("Restart##session")) change.restart_game = true;
+    ImGui::SameLine();
+    if (ImGui::Button("Quit##session")) change.quit = true;
     end_rows();
   }
 

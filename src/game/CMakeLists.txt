@@ -35,6 +35,8 @@ add_library(oc_game STATIC
   field_world_effects.cpp
   route_script.h
   route_script.cpp
+  achievements.h
+  achievements.cpp
   autosave.h
   autosave.cpp
   cheats.h

@@ -290,6 +290,7 @@ bool Config::load(const std::filesystem::path& file) {
   bgm_source = ini.get("Audio", "BgmSource", bgm_source) == "original" ? "original" : "remastered";
   debug_exit_after_screenshot = parse_bool(ini.get("Debug", "ExitAfterScreenshot"), debug_exit_after_screenshot);
   debug_log = parse_bool(ini.get("Debug", "Log"), debug_log);
+  steam = parse_bool(ini.get("Game", "Steam"), steam);
   debug_panels = parse_bool(ini.get("Debug", "Panels"), debug_panels);
   debug_entrance = parse_int(ini.get("Debug", "Entrance"), debug_entrance);
   debug_battle = parse_int(ini.get("Debug", "Battle"), debug_battle);
@@ -397,6 +398,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Audio", "BgmSource", bgm_source);
   ini.set("Debug", "ExitAfterScreenshot", on_off(debug_exit_after_screenshot));
   ini.set("Debug", "Log", on_off(debug_log));
+  ini.set("Game", "Steam", on_off(steam));
   ini.set("Debug", "Panels", on_off(debug_panels));
   ini.set("Debug", "Entrance", std::to_string(debug_entrance));
   ini.set("Debug", "AutoConfirm", std::to_string(debug_auto_confirm));

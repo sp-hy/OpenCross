@@ -252,8 +252,75 @@ void App::open_pause() {
   pause_screen.open(world.game_state().option(ui::opt::kVibration), world_row, world_ok && world.vm().var(0x52) != 0);
 }
 
+// Whatever is running stops, and the game starts over from the boot logo in this process.
+void App::restart_game() {
+  restart_requested = false;
+  if (!flow_ready) return;
+  log::info("restart: back to the title");
+  ui.options_open = false;
+  if (pause_ok) pause_screen.close();
+  if (movie_open) {
+    movie_player.close();
+    movie_open = false;
+    ctx.set_clear_color(0.08f, 0.09f, 0.14f);
+  }
+  deferred_flow_set = false;
+  battle_in_field = false;
+  battle_scene = -1;
+  fb_args.reset();
+  if (results_ok) results.abort();
+  if (menu_ok) menu.close();
+  menu_from_script = false;
+  if (shop_ok) shop.close();
+  shop_open = false;
+  mixer.stop();
+  mixer.resume();
+  flow_enabled = true;
+  title_scene_tick0 = world.tick_count();
+  flow.restart(!routing && !replaying);
+}
+
+void App::update_achievements(int ticks) {
+  const bool wanted = steam_allowed && config.steam;
+  if (wanted != steam_wanted) {
+    steam_wanted = wanted;
+    if (wanted) steam.connect();
+    else steam.disconnect();
+  }
+  steam.pump();
+  while (const std::optional<std::string> title = steam.next_unlocked()) ui.toast("Achievement unlocked - " + *title);
+  // Off, nothing is earned, so what happens meanwhile can still count once it is on. Scripted runs evaluate without Steam.
+  if (steam_allowed && !wanted) return;
+  if (!world_ok || (flow_ready && flow.scene_mode())) return;
+  if (ticks > 0) {
+    const save::SaveSlot& slot = world.game_state().slot;
+    game::Achievements::Progress progress;
+    progress.room = world.vm().var(script::var::kMapId);
+    progress.prev_room = world.vm().var(script::var::kPrevMapId);
+    progress.window_frames = slot.frames;
+    progress.stars = slot.stars_total();
+    progress.fled = battle_in_field && battle.outcome() == battle::Outcome::Fled;
+    progress.all_recruited = true;
+    for (int i = 0; i < save::kNumChars; ++i) progress.all_recruited = progress.all_recruited && slot.recruited(i);
+    achievements.tick(ticks, progress, battle_in_field);
+  }
+  if (shop_ok)
+    if (const int forged = shop.take_first_forged()) achievements.forged(forged);
+  if (battle_ready)
+    for (const int element : battle.take_cast_elements()) achievements.element_cast(element);
+  // A session changed by the debug tools earns nothing.
+  for (const char* name : achievements.take_earned()) {
+    if (debug_tools.saving_disabled()) continue;
+    log::info("achievement earned: {}", name);
+    earned_achievements.emplace_back(name);
+    steam.unlock(name);
+  }
+}
+
 // `ticks` field ticks (or battle / menu / movie time) for the input `raw` over `dt` seconds.
 void App::advance(const platform::Input& raw, double dt, int ticks) {
+  if (restart_requested) restart_game();
+  update_achievements(ticks);
   // Every screen below reads the left stick as the d-pad.
   platform::Input in = raw;
   platform::stick_to_dpad(in, stick_dpad);
@@ -303,6 +370,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   }
   // Entering the title: run the title room behind the menu.
   if (flow_ready && flow.take_scene_request()) {
+    title_scene_tick0 = world.tick_count();
     world.reset_for_new_game();
     if (world.load_room(game::kTitleRoom, 0)) {
       log::info("title: scene room {} running", game::kTitleRoom);

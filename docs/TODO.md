@@ -6,6 +6,8 @@ The working list for the engine: behaviour bugs found by reading the code, fidel
 
 - Element mode 47 in `Battle::do_element` has no `break` and falls into `default`, logging "mode 47 not implemented"; establish what mode 47 does and implement it (`battle.cpp`).
 
+- The launcher can crash when a game it started exits: its second helper Initialize faults in the Steam client call straight after `SteamAPI_Init`, seen after returning from OpenCross with an emulated `steam_api.dll`. Check whether the stock launcher returning from `CHRONOCROSS.exe` does the same, and whether Valve's `steam_api.dll` does (`formats/launcher.md`).
+
 ## 2. Fidelity gaps (not modelled)
 
 - After the true-ending cinematic RDE holds the black battle screen about 140 refreshes before the field takes over; ours hands over at once (rule or load time unknown, `formats/battle_effects.md`).
@@ -25,6 +27,11 @@ The working list for the engine: behaviour bugs found by reading the code, fidel
 - Black field-ring slots are drawn as a near-invisible dark fill; check RDE's look on a dark stage (`battle_view_hud.cpp`).
 - Title prompt press: the title room's script starts the fade to black together with the music fade and fades over 32 frames; ours fades from the press over 30 frames. Measure RDE's screen fade against its chime with frame-accurate audio / video alignment (`title_screen.cpp`).
 - Sexy Wink screen copy frame time at 2560x1440, RenderScale 4 (every run so far was on a locked PC).
+
+- Achievement rules (`rules/achievements.md`): compared with RDE for the sample rate, two room pairs, arming from the beach and from elsewhere, the good ending staying armed at room 9, and two ending awards. Still to compare: the other room pair and endings, the awards of the good and bad endings, boss wins, techs, items, the smith and the save-field rules, and a game over in a room entered from room 0x38, which by the rules earns the bad ending.
+- Whether an element caught in an element trap still counts as a cast for its achievement. It counts now.
+- The award delays of fleeing and of element casts are counted in RDE's main-loop passes during a battle; whether a pass there is one 60 Hz tick is not measured. This only moves when an unlock fires.
+- Steam under Proton: connecting as the app, unlocks, and what Steam shows as playing, for a non-Steam shortcut. Only Windows is checked.
 
 ## 4. Code hygiene
 

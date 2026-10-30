@@ -71,14 +71,12 @@ void App::draw_frame(const render::Frame& frame) {
   // frame over the battle): only an enabled flow draws.
   const bool flow_screen = flow_ready && flow_enabled && flow.owns_screen() && !movie_open && !title_scene;
   const bool field_shown = field_visible() && !battle_shown && !flow_screen && !movie_open;
-  // First open: the title room runs ~20 ticks before its script starts the logo FMV; nothing of it may be presented until the movie
-  // takes over (or it was skipped / failed, which marks the logo ready).
-  const bool title_hold = flow_ready && flow.scene_mode() && !flow.title_logo_ready() && !movie_open && (!field_visible() || world.tick_count() < 150);
+  const bool title_held = title_hold();
   if (movie_open) {
     movie_player.draw(frame, vw, vh);
   } else if (boot_logo) {
     flow.draw_boot_logo(frame, vw, vh);
-  } else if (title_hold) {
+  } else if (title_held) {
     // black frame
   } else if (flow_screen) {
     flow.draw(frame, vw, vh);
@@ -93,7 +91,7 @@ void App::draw_frame(const render::Frame& frame) {
     draw_scene(sf);
   }
   // Screen veils go on top of everything drawn: the held last movie frame, the load fades (Letterbox::veil_rect).
-  if (!title_hold) {
+  if (!title_held) {
     if (!movie_open) movie_player.draw_held(frame, vw, vh);
     if (flow_ready) flow.draw_overlay(frame, vw, vh);
   }
@@ -109,7 +107,7 @@ void App::draw_frame(const render::Frame& frame) {
   }
   // RDE's feature icons over the picture, under the pause screen's bars. They belong to play: the boot logo, the movies, the title
   // scene and its slot list / name entry do not show them.
-  const bool before_play = movie_open || boot_logo || title_hold ||
+  const bool before_play = movie_open || boot_logo || title_held ||
                            (flow_ready && flow_enabled && flow.state() != game::FlowState::Opening && flow.state() != game::FlowState::Field);
   if (feature_icons_ok && !before_play && !game::free_cam().hide_overlays()) {
     const bool locked = speed_locked();

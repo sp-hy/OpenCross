@@ -63,6 +63,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 |---|---|---|---|
 | `FastMode` | 0 | bool | RDE fast mode (F2, pad RT). |
 | `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Read as off when `FastMode` is on; the two are exclusive. |
+| `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
 | `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
 | `FastRate` | 0 | 0..5; 1 reads as 0 | Fast mode speed. 0 = RDE's (4x in the field, 2x in battle); 2..5 = that many times in both. |
 | `SlowRate` | 50 | 10..90 | Slow mode speed in percent of normal, in the field and in battle. In the field, one 1/30 s stretch every 10 s (every 300th field frame) runs at normal speed. |
@@ -210,6 +211,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Driver` | Needs a restart; the Backend row offers a *Restart now* button once it differs from the one the run started with. |
 | `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1Res`, `RenderScale`, `Ps1Jitter`, `Crt`, `FrameCap`, all of `[Enhancements]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
 | `Log` | The Debug tab starts or stops the log at once. |
+| `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
 | `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
 
 Editing the file by hand while the game runs has no effect: the file is read once at boot and overwritten by the next save.

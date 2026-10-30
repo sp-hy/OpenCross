@@ -394,6 +394,8 @@ class FieldHost {
   virtual int item_count(int id) = 0;
   // BB b == 0
   virtual void give_item(int id) = 0;
+  // 71: the variable bit `bit_ref` was set
+  virtual void var_bit_set(u32) {}
   // BB b != 0
   virtual void take_item(int id) = 0;
   // BC

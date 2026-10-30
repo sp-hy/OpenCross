@@ -280,6 +280,7 @@ fld_op_learn_tech_level5 = 0x800D5318;  # function: script op FE 74: story tech 
 fld_op_learn_tech_level3 = 0x800D5338;  # function: script op FE 79: story tech for the cell closing star level 3
 fld_op_set_serge_colour = 0x800D5488;  # function: script op FE 7B: Serge's innate colour byte = low 3 bits | 0x08 << mode
 fld_op_open_grand_slam_picker = 0x800D55A0;  # function: script op FE 75: after the gate, stores the round and flags the monster picker for the menu launcher
+fld_exec_opcode = 0x800D5990;  # function: field script opcode dispatcher
 fld_op_set_kid_alt_face = 0x800D568C;  # function: script op FE 71: global flag bit 18, Kid's alternate portrait
 fld_op_mojo_name_change = 0x800D57E0;  # function: script op FE 7E: rewrites two glyphs of Mojo's name when it is still the default one
 fld_dispatch_fe_subop = 0x800D586C;  # function: FE page dispatcher advancing pc then calling sub-handler table
@@ -545,3 +546,5 @@ fld_title_list_pending = 0x800C43E4;  # function: returns -1 while the title lis
 fld_movie_sequence = 0x800E816C;  # data: registry node of the room sequence the playing movie started (0 = none)
 fld_movie_sequence_kill = 0x800DCA94;  # function: unlinks every task running the movie's room sequence
 fld_movie_sequence_stop = 0x800DC9D8;  # function: at the end of a movie, tears down the timelines of the movie's room sequence
+fld_op_item_give_take = 0x800C2430;  # function: script op BB: gives or takes an item by script item id
+fld_op_set_var_bit = 0x800C5B50;  # function: script op 71: sets one bit of the script variables

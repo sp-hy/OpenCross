@@ -1,0 +1,3 @@
+#include "payload_id.h"
+
+kPayloadResource RCDATA "LauncherPatch.dll"

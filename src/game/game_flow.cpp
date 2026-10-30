@@ -358,6 +358,17 @@ void GameFlow::start(FlowState state) {
   }
 }
 
+void GameFlow::restart(bool boot_logo) {
+  if (!ready_) return;
+  keymap_active_ = rename_active_ = rename_finished_ = rename_guide_ = false;
+  party_active_ = party_finished_ = false;
+  ngp_active_ = ngp_slots_ = ngp_load_ = false;
+  ngp_result_ = NgPlusResult::None;
+  open_pending_ = open_ready_ = load_pending_ = load_from_slots_ = false;
+  enter_title();
+  if (boot_logo) begin_boot_logo();
+}
+
 bool GameFlow::any_button(const platform::Input& in) {
   // Not the hotkeys (F-keys, the stick clicks) / the settings key Esc: opening the settings window over the attract demo must not end it.
   // The pad's Start counts on its press (holding it on for the settings window has ended the demo already); Back is the PS1 Select.

@@ -76,6 +76,13 @@ int main(int argc, char** argv) {
   release.assets.push_back({"opencross.exe", "https://github.com/x/opencross.exe", "", 10});
   asset = platform::pick_asset(release);
   CHECK(asset && asset->name == "opencross.exe");
+  CHECK(!platform::pick_launcher_proxy(release));
+  release.assets.push_back({"xinput9_1_0.dll", "https://github.com/x/xinput9_1_0.dll", "abc", 20});
+  const platform::ReleaseAsset* proxy = platform::pick_launcher_proxy(release);
+  CHECK(proxy && proxy->sha256 == "abc");
+  // The proxy never counts as the exe to install.
+  asset = platform::pick_asset(release);
+  CHECK(asset && asset->name == "opencross.exe");
 
   CHECK(!platform::parse_release_json(R"({"message": "Not Found"})", release));
   // Truncated JSON is rejected.

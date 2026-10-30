@@ -1,0 +1,16 @@
+# The room rules are sampled every 60 ticks, and this pair must hold for 20 samples: 1200 ticks.
+0 wait 5
+- set var 0x08 26
+- assert var 0x06 31
+- wait 1140
+- assert unearned ach_eve1_yumemezame
+- wait 130
+- assert earned ach_eve1_yumemezame
+# Straight from the beach to the ending room with nothing armed is the bad ending.
+- load opa_b04f 0
+- wait 130
+- assert unearned ach_end2_bad
+- set var 0x08 57
+- load ending 0
+- wait 130
+- assert earned ach_end2_bad

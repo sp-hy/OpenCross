@@ -571,6 +571,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     if (args.size() < 3) return bad("assert <what> <value>");
     if (args[1] == "room") {
       if (!st.room_valid || st.room != args[2]) return bad("expected room " + args[2] + ", in " + st.room);
+    } else if (args[1] == "title_hold") {
+      if (st.title_hold != (args[2] == "on")) return bad(std::format("the title scene is {}", st.title_hold ? "held" : "not held"));
+    } else if (args[1] == "earned" || args[1] == "unearned") {
+      const bool earned = st.earned_achievements && std::find(st.earned_achievements->begin(), st.earned_achievements->end(), args[2]) != st.earned_achievements->end();
+      if (earned != (args[1] == "earned")) return bad(std::format("achievement {} is {}", args[2], earned ? "earned" : "not earned"));
     } else if (args[1] == "var") {
       int id = 0, want = 0;
       if (args.size() < 4 || !to_hex(args[2], id) || !to_int(args[3], want) || !st.var) return bad("assert var <hexid> <value>");

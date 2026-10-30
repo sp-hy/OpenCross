@@ -66,6 +66,8 @@ class BattleResults {
   // The batch draw() writes text with (the PS1-resolution pass sets its pixel grid).
   render::TextBatch* text_batch();
 
+  // Drops the screen without writing anything back.
+  void abort();
   // open() succeeded and the exit has not finished.
   bool active() const;
   // The exit fade has finished (the host resumes the field).

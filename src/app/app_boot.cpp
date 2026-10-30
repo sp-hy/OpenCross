@@ -86,6 +86,9 @@ void App::init_config(int argc, char** argv) {
   // A previous Update tab install left <exe>.old behind.
   platform::Updater::cleanup_after_update();
 
+  // Scripted runs stay off the player's Steam account.
+  steam_allowed = own_ini && !std::getenv("OC_QUIET");
+
   game_dir = platform::find_game_dir(config.game_dir);
   const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir);
   save_dir = save_pick.dir;
@@ -373,6 +376,8 @@ void App::init_field() {
     const std::string name = item < static_cast<int>(tables.key_item_names.size()) ? tables.key_item_names[static_cast<size_t>(item)] : std::string("?");
     log::info("key item {} obtained: {}", item, name);
   });
+  world.set_on_item_given([this](int id) { achievements.item_given(id, world.vm().var(script::var::kMapId)); });
+  world.set_on_var_bit_set([this](u32 bit_ref) { achievements.var_bit_set(bit_ref, world.vm().var(script::var::kMapId)); });
   world.set_art_mode(platform::art_is_hd(config.art_mode));
   world.set_portrait_set(config.portraits);
   if (!sweeping) world.set_audio(&mixer, sfx_sink);

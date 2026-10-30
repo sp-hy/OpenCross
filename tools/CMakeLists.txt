@@ -1,6 +1,6 @@
 # Developer tools, linked into opencross.exe and run as `opencross <tool> [args]` (src/tool_main.cpp): one shipped binary.
 #   occ (rooms / models / scripts / effects / saves), octext, ocaudio, ochd, ocprd, ocstage, ocbattle, ocmovie,
-#   ocbattleview, ocbattleseq, ocflow, ocmenudemo, ocshopdemo, ocmodelview (the "oc" prefix is optional: `opencross battleview 7`).
+#   ocbattleview, ocbattleseq, ocflow, ocmenudemo, ocshopdemo, ocmodelview, ocsteam (the "oc" prefix is optional: `opencross battleview 7`).
 add_library(oc_tools STATIC
   occ.cpp
   occ_save.cpp
@@ -15,6 +15,7 @@ add_library(oc_tools STATIC
   ocbattle_reg.cpp
   ocmovie.cpp
   ocmodelview.cpp
+  ocsteam.cpp
   model_view.cpp
   tool_util.cpp
   ${CMAKE_SOURCE_DIR}/src/game/battle/demo_main.cpp

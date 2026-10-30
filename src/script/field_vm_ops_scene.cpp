@@ -92,9 +92,10 @@ bool FieldVM::exec_scene(u8 op) {
     case 0x72: {  // CLEAR_VAR_BIT
       const u32 bit_ref = static_cast<u32>(operand_s(1, 3, 0x80));
       u16& slot = vars_[(bit_ref >> 5) & (kVarSlots - 1)];
-      if (op == 0x71)
+      if (op == 0x71) {
         slot = static_cast<u16>(slot | (1u << (bit_ref & 0xF)));
-      else
+        host_.var_bit_set(bit_ref);
+      } else
         slot = static_cast<u16>(slot & ~(1u << (bit_ref & 0xF)));
       advance(4);
       break;

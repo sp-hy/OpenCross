@@ -251,7 +251,11 @@ Sources: `tools/ocmodelview.cpp`, `tools/model_view.*`; the model files are read
 
 It writes nothing: no save, no ini, no mod settings.
 
-### 1.13 Files written by the tools
+### 1.13 `ocsteam` (Steam connection check)
+
+Source: `tools/ocsteam.cpp`. Connects to the running Steam client as the game, waits for the stats, and lists every achievement of the app with its API name, display name and state (`*` = unlocked). Exits 1 when Steam is closed, logged out, the game is not owned, or the stats do not arrive. Read-only: nothing is set or stored, though Steam shows the game as playing while it runs.
+
+### 1.14 Files written by the tools
 
 | Tool | Output |
 |---|---|
@@ -291,7 +295,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | Variable | Read by | Values | Meaning |
 |---|---|---|---|
 | `OPENCROSS_GAMEDIR` | `tools/tool_util.cpp` (`octext`, `ochd`, `ocmovie`, `ocstage`), `tools/occ.cpp`, `tools/ocprd.cpp`, `tools/ocaudio.cpp`, `tools/ocbattle.cpp`, `src/game/battle/seq_tool.cpp`, `tools/py/cc_save_forge.py`, `tests/test_*.cpp` | folder path | Game folder used by the dev tools, the unit tests and `cc_save_forge.py` when no `-g` / `--game` is given. |
-| `OC_QUIET` | `src/platform/window.cpp`, `src/audio/mixer.cpp`; set by `src/game/battle/demo_main.cpp` (`--frames`), `tests/routes/run.ps1`, `tools/ours_cast34.ps1` | set | Test window is shown without activation and never focusable, and the mixer output gain is 0. |
+| `OC_QUIET` | `src/platform/window.cpp`, `src/audio/mixer.cpp`, `src/app/app_boot.cpp` (no Steam connection); set by `src/game/battle/demo_main.cpp` (`--frames`), `tests/routes/run.ps1`, `tools/ours_cast34.ps1` | set | Test window is shown without activation and never focusable, and the mixer output gain is 0. |
 | `OC_FRAMETIME` | `src/app/app_run.cpp` | set; `2` | Logs the wall time of main-loop iterations while a field-to-battle hand-over runs: only those over 20 ms, or every iteration when the value starts with `2`. |
 | `OC_NO_WARP` | `src/app/app_draw.cpp` | `1`, `2` | A/B check of the screen ripple: `1` draws its frame unwarped; `2` (classic art) shows only the deep part, unwarped. |
 | `OC_SLOT_DUMP` | `src/app/app_route.cpp` | path prefix | A route `request slotdump N` writes the encoded save block to `<prefix>N.bin` (an error is logged when unset). |

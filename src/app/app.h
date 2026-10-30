@@ -31,7 +31,9 @@
 #include "game/battle/battle_view.h"
 #include "game/battle/texture_dump.h"
 #include "game/cheats.h"
+#include "game/achievements.h"
 #include "game/debug_tools.h"
+#include "platform/steam.h"
 #include "game/field_world.h"
 #include "game/game_flow.h"
 #include "game/route_script.h"
@@ -141,6 +143,11 @@ class App {
   void open_pause();
   void advance(const platform::Input& raw, double dt, int ticks);
   bool field_visible() const { return world_ok && world.view().loaded(); }
+  // First open: the title room runs ~20 ticks before its script starts the logo FMV; nothing of it may be presented until the movie
+  // takes over (or it was skipped / failed, which marks the logo ready).
+  bool title_hold() const {
+    return flow_ready && flow.scene_mode() && !flow.title_logo_ready() && !movie_open && (!field_visible() || world.tick_count() - title_scene_tick0 < 150);
+  }
 
   // ---- app_battle.cpp ---------------------------------------------------------------------------------------------------------
   FieldBattleArgs make_field_battle_args(const game::FieldWorld::BattleRequest& rq);
@@ -160,6 +167,9 @@ class App {
 
   // ---- app_debug.cpp ----------------------------------------------------------------------------------------------------------
   game::DebugTools::Ctx debug_tools_ctx();
+  // One frame of Steam, then the game's achievement state for `ticks` ticks of play.
+  void update_achievements(int ticks);
+  void restart_game();
   void init_debug_tab();
   void debug_tools_frame();
 
@@ -238,6 +248,12 @@ class App {
   // Set when the Mods tab changed the mod list: re-apply the art mode after the overlay window.
   bool mods_dirty = false;
   platform::Updater updater;
+  platform::SteamClient steam;
+  bool steam_allowed = false;
+  bool steam_wanted = false;
+  game::Achievements achievements;
+  // API names earned this run; routes read them.
+  std::vector<std::string> earned_achievements;
   bool restart_for_update = false;
   render::TexRef background_set;
   // Classic art, [Video] Ps1Res: the field picture is drawn into the PS1 field buffer size (320 x 224) and scaled up with nearest
@@ -362,6 +378,8 @@ class App {
   bool results_shown = false;
   int battle_scene = -1;
   game::TitleBackdrop title_bd;
+  // The field tick the title scene began at.
+  u64 title_scene_tick0 = 0;
   // Routes count sequence starts (an art switch must not restart the title sequence).
   u64 title_plays = 0;
   std::string title_seq;
@@ -382,6 +400,7 @@ class App {
   int exit_countdown = 0;
   u64 frame_count = 0;
   bool quit_requested = false;
+  bool restart_requested = false;
   // [Video] Widescreen: the extra layer columns of this frame's picture, and the columns the HUD / menus spread out by.
   float wide_extra = 0.0f;
   float hud_cols = 0.0f;

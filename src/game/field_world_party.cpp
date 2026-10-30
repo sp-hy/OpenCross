@@ -314,6 +314,7 @@ int FieldWorld::item_count(int id) {
 }
 void FieldWorld::give_item(int id) {
   if (id <= 0) return;
+  if (on_item_given_) on_item_given_(id);
   if (id < 0x200) {
     gs_->add_item(id);
   } else if (id < 0x400) {

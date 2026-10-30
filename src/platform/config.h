@@ -224,6 +224,7 @@ struct Config {
   std::string bgm_source = "remastered";
   bool debug_exit_after_screenshot = false;
   bool debug_log = false;
+  bool steam = false;
   bool debug_panels = false;
   int debug_entrance = 0;
   int debug_auto_confirm = 0;

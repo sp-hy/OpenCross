@@ -56,6 +56,8 @@ class ShopScreen {
 
   // ticks = 60 Hz sim ticks this frame (the animations advance by them).
   void update(const platform::Input& in, int ticks = 1);
+  // The item last forged with none in the bag before, then 0 until the next.
+  int take_first_forged();
   void draw(const render::Frame& frame, float vw, float vh, bool resume = false);
 
  private:

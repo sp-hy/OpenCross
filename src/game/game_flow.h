@@ -173,6 +173,8 @@ class GameFlow {
   }
   // Enters a flow state (Title also restarts the fade-in). Opening / Field only set the state.
   void start(FlowState state);
+  // Back to the title as at boot, from any state; `boot_logo` shows the boot logo first.
+  void restart(bool boot_logo);
   // One frame of input. `dt` in seconds. Returns what the host must do.
   FlowAction update(const platform::Input& in, float dt);
   // In-game menu Save/Load > Load: replaces the state with the slot and returns the room to enter (like Continue). The host applies it.

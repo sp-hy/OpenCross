@@ -46,12 +46,18 @@ void draw_update_tab(platform::Updater& updater, bool* restart) {
     case Updater::State::Checking: ImGui::TextUnformatted("Checking GitHub..."); break;
     case Updater::State::UpToDate: ImGui::TextColored(good, "You have the latest version."); break;
     case Updater::State::Available:
-      ImGui::TextColored(good, "%s is available.", st.latest.c_str());
+      if (st.launcher_only) ImGui::TextColored(good, "The launcher button is missing or out of date.");
+      else ImGui::TextColored(good, "%s is available.", st.latest.c_str());
       if (ImGui::Button("Download and install")) updater.download();
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        ImGuiLayer::tooltip("Downloads the new opencross.exe and puts it in place of this one (the old exe is kept as opencross.exe.old "
-                            "until the next start). Your settings, saves and mods are not touched. You can keep playing; the new "
-                            "version runs after a restart.");
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) {
+        if (st.launcher_only)
+          ImGuiLayer::tooltip("Downloads XINPUT9_1_0.dll into the game folder. It adds an OpenCross button to the Radical Dreamers Edition "
+                              "launcher and changes no game file.");
+        else
+          ImGuiLayer::tooltip("Downloads the new opencross.exe and puts it in place of this one (the old exe is kept as opencross.exe.old "
+                              "until the next start), with the launcher's OpenCross button (XINPUT9_1_0.dll). Your settings, saves and "
+                              "mods are not touched. You can keep playing; the new version runs after a restart.");
+      }
       break;
     case Updater::State::Downloading: {
       ImGui::TextUnformatted("Downloading...");
@@ -59,6 +65,10 @@ void draw_update_tab(platform::Updater& updater, bool* restart) {
       break;
     }
     case Updater::State::Installed:
+      if (st.launcher_only) {
+        ImGui::TextColored(good, "The launcher button is installed.");
+        break;
+      }
       ImGui::TextColored(good, "%s is installed. It runs from the next start.", st.latest.c_str());
       if (ImGui::Button("Restart now")) *restart = true;
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))

@@ -1,6 +1,6 @@
 # Agent guide for OpenCross
 
-Read this first, then `docs/README.md` (the developer guide), `docs/architecture.md` (how the engine runs) and `docs/validation.md` (how behaviour is checked against the original game). Format specs are in `docs/formats/` (`config.md` is `opencross.ini`, `routes.md` the route and replay files), behaviour specs (field actors, battle, menus) in `docs/rules/`; known bugs and open issues in `docs/TODO.md` (remove an entry in the change that fixes it); `docs/tools.md` catalogues the dev tools, `OC_*` variables, hotkeys and scripts.
+Read this first, then `docs/README.md` (the developer guide), `docs/architecture.md` (how the engine runs) and `docs/validation.md` (how behaviour is checked against the original game). Format specs are in `docs/formats/` (`config.md` is `opencross.ini`, `routes.md` the route and replay files), behaviour specs (field actors, battle, menus, achievements) in `docs/rules/`; known bugs and open issues in `docs/TODO.md` (remove an entry in the change that fixes it); `docs/tools.md` catalogues the dev tools, `OC_*` variables, hotkeys and scripts.
 
 ## What this is
 

@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <format>
 #include <map>
+#include <utility>
 
 #include "core/log.h"
 #include "platform/config.h"
@@ -52,6 +53,7 @@ enum class Stage { Top, Category, List, Quantity, Confirm };
 
 // ================================================================================================================
 struct ShopScreen::Impl {
+  int first_forged = 0;
   // ---- services
   render::GpuContext* ctx = nullptr;
   const vfs::Vfs* vfs = nullptr;
@@ -439,12 +441,14 @@ struct ShopScreen::Impl {
     const int id = ids[static_cast<size_t>(cur)];
     shop::Res result = shop::Res::NoRecipe;
     int gain = 0;
+    const bool first_copy = gs->item_count(id) == 0;
     if (operation == Operation::Forge) result = shop::forge(*gs, id, platform::cheats().no_craft_cost);
     else if (operation == Operation::Break) result = shop::breakdown(*gs, id, &gain);
     if (result != shop::Res::Ok) {
       stage = Stage::List;
       return deny(result_text(result));
     }
+    if (operation == Operation::Forge && first_copy) first_forged = id;
     sfx(0xBF);
     say(operation == Operation::Forge ? ss(0x801DF92D) : gain > 0 ? ss(0x801DF92E) + "\n" + ss(0x801DF99C) : ss(0x801DF92E), kText);
     after_change();
@@ -1530,6 +1534,7 @@ struct ShopScreen::Impl {
 
 // ================================================================================================================
 ShopScreen::ShopScreen() : impl_(std::make_unique<Impl>()) {}
+int ShopScreen::take_first_forged() { return std::exchange(impl_->first_forged, 0); }
 ShopScreen::~ShopScreen() { shutdown(); }
 
 bool ShopScreen::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites, render::TextBatch& text,

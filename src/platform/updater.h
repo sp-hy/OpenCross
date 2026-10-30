@@ -6,6 +6,9 @@
 //               the running exe; checked: PE header, the asset size, and its SHA-256 when GitHub lists a digest.
 //               Then the swap, no helper exe: a running exe can be RENAMED on Windows (not overwritten), so
 //               <exe> -> <exe>.old, <exe>.new -> <exe>. The next launch runs the new version; restart() starts it now.
+//   The launcher proxy (asset XINPUT9_1_0.dll, the OpenCross button in RDE's own launcher) goes with it, by the same swap, next to the
+//   exe when RDE's launcher is there. check() also offers it alone when the installed copy is missing or differs from the release's
+//   digest, which is how an install that arrived as a bare opencross.exe gets it.
 //   cleanup_after_update(): at boot, deletes a left-over <exe>.old / <exe>.new (retries a few seconds while the old process exits).
 // All network work runs on one worker thread; the UI polls state().
 #include <atomic>
@@ -23,6 +26,7 @@ namespace oc::platform {
 inline constexpr const char* kReleasesUrl = "https://github.com/sp-hy/OpenCross/releases";
 inline constexpr const char* kNexusUrl = "https://www.nexusmods.com/chronocrosstheradicaldreamersedition/mods/97";
 inline constexpr const char* kNexusBugsUrl = "https://www.nexusmods.com/chronocrosstheradicaldreamersedition/mods/97?tab=bugs";
+inline constexpr const char* kLauncherProxyName = "XINPUT9_1_0.dll";
 
 // "v1.2.3" / "1.2" / "1.2.3.4" -> numbers (missing parts 0); nullopt when it does not start with a number.
 std::optional<std::vector<int>> parse_version(std::string_view text);
@@ -50,10 +54,13 @@ struct ReleaseInfo {
 bool parse_release_json(std::string_view json, ReleaseInfo& out);
 // The asset to install: "opencross.exe", else a .zip whose name starts with "opencross" (case-insensitive), else any single .exe / .zip.
 const ReleaseAsset* pick_asset(const ReleaseInfo& release);
+// The launcher proxy asset (case-insensitive name); null when the release has none.
+const ReleaseAsset* pick_launcher_proxy(const ReleaseInfo& release);
 
 // States: check() takes Idle / UpToDate / Available / Failed / Installed to Checking, download() takes Available to Downloading and
 // then Installed or Failed. Status: `latest` = the tag of the newest release (Available / UpToDate / Installed), `html_url` its page,
-// `message` = what went wrong when Failed, `progress` = 0..1 while Downloading. The destructor cancels and joins the worker.
+// `message` = what went wrong when Failed, `progress` = 0..1 while Downloading, `launcher_only` = the exe is current and Available /
+// Installed is about the launcher proxy alone. The destructor cancels and joins the worker.
 class Updater {
 public:
   enum class State { Idle, Checking, UpToDate, Available, Downloading, Installed, Failed };
@@ -64,6 +71,7 @@ public:
     std::string published;
     std::string message;
     float progress = 0.0f;
+    bool launcher_only = false;
   };
 
   Updater();
@@ -83,10 +91,14 @@ public:
 private:
   void run(bool install);
   void set_failed(std::string msg);
+  // One release asset into `body`, checked against its listed size and digest; the error text, empty when it worked.
+  std::string fetch(const ReleaseAsset& asset, std::string& body);
+  std::string install_launcher_proxy(const ReleaseAsset& asset);
 
   mutable std::mutex mu_;
   Status st_;
   std::optional<ReleaseAsset> asset_;
+  std::optional<ReleaseAsset> proxy_asset_;
   // The tag swapped in this session (a re-check of the same release stays Installed).
   std::string installed_;
   std::thread worker_;

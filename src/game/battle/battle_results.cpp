@@ -917,6 +917,7 @@ void BattleResults::set_wide_columns(float canvas_columns, float layout_columns)
   impl_->layout_cols = std::clamp(layout_columns, 0.0f, impl_->canvas_cols);
 }
 render::TextBatch* BattleResults::text_batch() { return &impl_->text; }
+void BattleResults::abort() { impl_->phase = Phase::Idle; }
 bool BattleResults::active() const { return impl_->phase != Phase::Idle && impl_->phase != Phase::Done; }
 bool BattleResults::done() const { return impl_->phase == Phase::Done; }
 void BattleResults::finish_intro() {

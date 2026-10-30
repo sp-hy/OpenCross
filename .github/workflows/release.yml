@@ -1,6 +1,6 @@
 # Publishes a GitHub release whenever project(OpenCross VERSION x.y.z) in CMakeLists.txt names a version with no v<x.y.z> tag yet.
 # The in-game updater (src/platform/updater.cpp) reads releases/latest, compares the tag with its own version and downloads the
-# asset named opencross.exe, so the release carries exactly that.
+# assets named opencross.exe and XINPUT9_1_0.dll (the 32-bit launcher proxy), so the release carries exactly those.
 name: release
 
 on:
@@ -82,6 +82,10 @@ jobs:
         shell: pwsh
         run: .\build.ps1 release -Target opencross -VcpkgRoot $env:VCPKG_ROOT
 
+      - name: Build the launcher proxy
+        shell: pwsh
+        run: .\build.ps1 -Launcher
+
       - uses: actions/cache/save@v4
         if: always()
         with:
@@ -94,4 +98,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "v${{ needs.version.outputs.version }}"
-          gh release create $tag build\win-x64\bin\Release\opencross.exe --target $env:GITHUB_SHA --title "OpenCross $tag" --generate-notes
+          gh release create $tag build\win-x64\bin\Release\opencross.exe build\launcher-x86\bin\XINPUT9_1_0.dll --target $env:GITHUB_SHA --title "OpenCross $tag" --generate-notes

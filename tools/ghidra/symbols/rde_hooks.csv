@@ -144,7 +144,7 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x8001b4d0,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4da450,0x574d60,hook_native_port_80010000_rep
 0x8001b4d8,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4da450,0x574d60,hook_native_port_80010000_rep
 0x8001b4e0,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e3a30,0x574d60,hook_native_port_8001b4e0_rep
-0x8001b53c,-,observer,save/newgame+,New-game init: sets flag bit 0x20000000 at guest 0x80078024,,0x4493e0,table@6be754,save_give_time_shifter_new_game
+0x8001b53c,-,observer,save/newgame+,New-game init: sets flag bit 0x20000000 at guest 0x80078024,,0x4493e0,table@6be754,ach_tracker_hook
 0x8001b784,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e3af0,0x574d60,hook_native_port_8001b784_rep
 0x8001c04c,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e3c10,0x574d60,hook_native_port_8001c04c_rep
 0x8001c134,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e3cb0,0x574d60,hook_native_port_8001c134_rep
@@ -397,11 +397,11 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x80034ce8,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x513d00,0x575ad0,hook_native_port_80034ce8_rep
 0x80034d08,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x513dc0,0x575ad0,hook_native_port_80034d08_rep
 0x80035008,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x514d50,0x575ad0,hook_native_port_80035008_rep
-0x800353d8,-,observer,achievement,Per-frame achievement tracker (map/flags/counters) and progress checks,,0x4493e0,table@6be754,save_give_time_shifter_new_game
-0x80035424,-,redirect,input,Skips hardware teardown soft-reset call (jump 0x80035438),,0x4493e0,table@6be754,save_give_time_shifter_new_game
-0x8003562c,-,skip,speed/boost,Skips debug-mode check so speed-control code always runs,,0x4493e0,table@6be754,save_give_time_shifter_new_game
-0x80035660,-,redirect,speed/boost,Fast mode: takes speed-up path if fast toggle on else 0x80035680,,0x4493e0,table@6be754,save_give_time_shifter_new_game
-0x80035684,-,redirect,speed/boost,Slow mode: takes slowdown path if slow toggle on else 0x800356F0,,0x4493e0,table@6be754,save_give_time_shifter_new_game
+0x800353d8,-,observer,achievement,Per-frame achievement tracker (map/flags/counters) and progress checks,,0x4493e0,table@6be754,ach_tracker_hook
+0x80035424,-,redirect,input,Skips hardware teardown soft-reset call (jump 0x80035438),,0x4493e0,table@6be754,ach_tracker_hook
+0x8003562c,-,skip,speed/boost,Skips debug-mode check so speed-control code always runs,,0x4493e0,table@6be754,ach_tracker_hook
+0x80035660,-,redirect,speed/boost,Fast mode: takes speed-up path if fast toggle on else 0x80035680,,0x4493e0,table@6be754,ach_tracker_hook
+0x80035684,-,redirect,speed/boost,Slow mode: takes slowdown path if slow toggle on else 0x800356F0,,0x4493e0,table@6be754,ach_tracker_hook
 0x800357f0,-,skip,debug,Skips debug break 1 instruction,,0x4239f0,table@6baee0,hook_other_8001a324_obs
 0x800358a8,ovl@800A9F00==8,observer,other,Battle: offset a0 (+400) before call to 0x8009F28C,-,0x44c1e0,0x44bb7a,hook_other_800358a8_obs
 0x80035900,insn@pc (PC check),skip,other,Skip call to 0x80034D08 (flag 0x800720D8 path),-,0x44c190,0x44bb7a,hook_other_80035900_skip
@@ -416,8 +416,8 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x80036930,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x516380,0x5744c0,hook_native_port_80036930_rep
 0x8003695c,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x516470,0x575ad0,hook_native_port_8003695c_rep
 0x80036ae4,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x516680,0x575ad0,hook_native_port_80036ae4_rep
-0x80036c84,-,replace,ui-pc-menu,Replaces function: toggles RDE PC pause/overlay menu (not on map 0x182),,0x4493e0,table@6be754,save_give_time_shifter_new_game
-0x80036f6c,-,redirect,input,Skips hardware teardown soft-reset call (jump 0x80036F80),,0x4493e0,table@6be754,save_give_time_shifter_new_game
+0x80036c84,-,replace,ui-pc-menu,Replaces function: toggles RDE PC pause/overlay menu (not on map 0x182),,0x4493e0,table@6be754,ach_tracker_hook
+0x80036f6c,-,redirect,input,Skips hardware teardown soft-reset call (jump 0x80036F80),,0x4493e0,table@6be754,ach_tracker_hook
 0x80037478,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x516940,0x575ad0,hook_native_port_80037478_rep
 0x800378ac,-,observer,hd-overlay-sprite,Sprite-draw entry: saves a2 (sheet ptr) and a3 (group) to mailbox 0x80600000/4,-,0x44c8c0,0x44ad10,hook_hd_overlay_sprite_800378ac_obs
 0x80037930,ovl@800A9F00==8 && RA(sp+0x34)==0x80037CC0,skip,hd-overlay-sprite,"Battle sprite draw: (sheet,group,frame) mapped to HD UI sprites; PS1 draw skipped",HD sprites 0x8000/0x8300/0x28900+,0x41b560,0x41a240,hook_hd_overlay_sprite_80037930_skip
@@ -1160,7 +1160,7 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x800bc660,ovl@800A9F00==6,replace,native-port,"native x86 reimplementation of field.prg function (behaviour-preserving, speed)",,0x4c4750,0x4d99fe,hook_native_port_800bc660_rep
 0x800bc684,ovl@800A9F00==6,replace,native-port,"native x86 reimplementation of field.prg function (behaviour-preserving, speed)",,0x4c47b0,0x4d99fe,hook_native_port_800bc684_rep
 0x800bc69c,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x47ff30,0x4aae2c,hook_native_port_800bc69c_rep
-0x800bc6c4,ovl@800A9F00==6 && a0==0x32,return-early,achievement,Unlocks event achievements (0x1B1/0x1CE/0x1D8/0x1D9); a0=0x52 from 0x800CD2A4 returns 0,,0x448dd0,0x448bd0,hook_achievement_800bc6c4_early
+0x800bc6c4,ovl@800A9F00==6 && a0==0x32,return-early,achievement,Unlocks event achievements (0x1B1/0x1CE/0x1D8/0x1D9); a0=0x52 from 0x800CD2A4 returns 0,,0x448dd0,0x448bd0,ach_var_read_hook
 0x800bc728,ovl@800A9F00==6,replace,native-port,"native x86 reimplementation of field.prg function (behaviour-preserving, speed)",,0x4c4820,0x4d99fe,hook_native_port_800bc728_rep
 0x800bc744,ovl@800A9F00==6,replace,native-port,"native x86 reimplementation of field.prg function (behaviour-preserving, speed)",,0x4c4880,0x4d99fe,hook_native_port_800bc744_rep
 0x800bc77c,ovl@800A9F00==6,replace,native-port,"native x86 reimplementation of field.prg function (behaviour-preserving, speed)",,0x4c4930,0x4d99fe,hook_native_port_800bc77c_rep

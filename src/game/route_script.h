@@ -111,6 +111,8 @@ struct RouteState {
   u64 tick = 0;
   std::string room;
   bool room_valid = false;
+  const std::vector<std::string>* earned_achievements = nullptr;
+  bool title_hold = false;
   // Controlled entity position.
   float px = 0, pz = 0;
   int control_yaw = 0;

@@ -148,6 +148,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | Kind | Effect |
 |---|---|
 | `money <n>` | Set the gold. |
+| `restart` | The General tab's Restart. |
 | `keyitem <n>` | Give key item `n` (replacing a copy already held). |
 | `battle <enc>` | Start encounter `enc` on battlefield 0 with the session party. |
 | `battle_disguise <enc>` | Same with the disguise-fight flag (battle flag 4). |
@@ -193,6 +194,8 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 |---|---|
 | `room <name>` | The field room is `<name>`. |
 | `var <hexid> <value>` | The script variable equals `value`. |
+| `title_hold on\|off` | The title scene is / is not held on black until its logo movie takes over. |
+| `earned <api name>`, `unearned <api name>` | The achievement was / was not earned this run. Route runs never connect to Steam; the rules still run. |
 | `dialogue open\|closed` | A dialogue is open / closed. |
 | `text <words...>` | An open dialogue's message contains the words. |
 | `notext <words...>` | A dialogue is open and its message does not contain the words. |

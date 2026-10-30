@@ -11,8 +11,10 @@ add_library(oc_platform STATIC
   window.cpp
   updater.h
   updater.cpp
+  steam.h
+  steam.cpp
 )
 target_link_libraries(oc_platform PUBLIC oc_core SDL3::SDL3 PRIVATE miniz::miniz)
 if(WIN32)
-  target_link_libraries(oc_platform PRIVATE winhttp bcrypt version)
+  target_link_libraries(oc_platform PRIVATE winhttp bcrypt version advapi32)
 endif()

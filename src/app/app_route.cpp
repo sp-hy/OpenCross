@@ -58,6 +58,8 @@ void App::init_route_state() {
 void App::fill_route_state() {
   rstate.tick = route_tick;
   rstate.room = field_visible() ? world.room_name() : std::string();
+  rstate.earned_achievements = &earned_achievements;
+  rstate.title_hold = title_hold();
   rstate.room_valid = field_visible() && !world.room_name().empty();
   rstate.have_player = field_visible() && world.player_xz(rstate.px, rstate.pz);
   rstate.control_yaw = field_visible() ? world.control_yaw() : 0;
@@ -100,6 +102,7 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
   else if (rk == "save") world.request_menu(MK::Save, 0);
   else if (rk == "ngplus") world.request_menu(MK::NewGamePlus, 0);
+  else if (rk == "restart") restart_requested = true;
   else if (rk == "slotdump") {
     world.capture_state();
     const char* dump_prefix = std::getenv("OC_SLOT_DUMP");

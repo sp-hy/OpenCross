@@ -1,0 +1,24 @@
+# Out of a running fight, back to the title scene as at boot.
+0 wait 30
+- request battle 1
+- wait battle start 300
+- wait 120
+- screenshot rs_01_battle.png
+- request restart
+- wait flow title 120
+- assert battle inactive
+- wait movie start 600
+- tap confirm
+- wait movie end 300
+- wait 100
+- screenshot rs_02_title.png
+# The game can be entered again: the menu, New Game, the vibration page, the user guide.
+- tap confirm
+- wait 60
+- screenshot rs_03_menu.png
+- tap confirm
+- wait 20
+- tap confirm
+- wait guide 1 600
+- screenshot rs_04_guide.png
+- quit

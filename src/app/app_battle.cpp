@@ -118,6 +118,7 @@ void App::finish_field_battle() {
   battle_in_field = false;
   // RDE's battle counter: +1 when a fight ends in result 0 or 3, capped.
   if (code == 0 || code == 3) ext_host.battles = std::min<u32>(ext_host.battles + 1, 0xFFFF);
+  achievements.battle_ended(battle_scene, code, ext_host.battles);
   // A monster-party fight (the Grand Slam) writes nothing back: no rewards, records, HP or Dopplegang pool.
   const bool written_back = battle.battle() && !battle.battle()->monster_party();
   if (written_back) game::apply_battle_result(world.game_state(), tables, *battle.battle(), &growth_progress);

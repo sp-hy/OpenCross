@@ -303,6 +303,9 @@ class FieldWorld final : public script::FieldHost {
   // sequences "tit0".."tit3" that the room has no .prd entry for).
   // Host hook: a key item (1..64) was newly obtained through give_item.
   void set_on_key_item(std::function<void(int)> cb) { on_key_item_ = std::move(cb); }
+  // Host hooks for achievements: a script gave item `id` (give_item) / set a variable bit.
+  void set_on_item_given(std::function<void(int)> cb) { on_item_given_ = std::move(cb); }
+  void set_on_var_bit_set(std::function<void(u32)> cb) { on_var_bit_set_ = std::move(cb); }
   // Field key-item list. Tele-Porter (1), Relief Charm (61) and Smith Spirit (63) are usable only
   // while script vars 0x46 and 0x3C are both 1; every other owned item always is.
   bool key_item_usable(int item) const;
@@ -607,6 +610,9 @@ class FieldWorld final : public script::FieldHost {
   void roster_remove(int char_id) override;
   int item_count(int id) override;
   void give_item(int id) override;
+  void var_bit_set(u32 bit_ref) override {
+    if (on_var_bit_set_) on_var_bit_set_(bit_ref);
+  }
   void take_item(int id) override;
   s32 money() override;
   void set_money(s32 amount) override;
@@ -959,6 +965,8 @@ class FieldWorld final : public script::FieldHost {
   MovieState movie_state_ = MovieState::None;
   std::function<bool(script::NamedOp, std::string_view)> effect_tap_;
   std::function<void(int)> on_key_item_;
+  std::function<void(int)> on_item_given_;
+  std::function<void(u32)> on_var_bit_set_;
   MovieRequest movie_req_;
   // the sequence the playing movie started ("" = none)
   std::string movie_sequence_;

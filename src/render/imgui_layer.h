@@ -35,9 +35,12 @@ struct OptionsChange {
   bool widescreen = false;
   bool enhancements = false;
   bool other = false;
+  // The General tab's Quit and Restart buttons.
+  bool quit = false;
+  bool restart_game = false;
   bool any() const {
     return vsync || art_mode || audio || portraits || bgm_source || language || ps1_res || window || filter || msaa || anisotropy ||
-           widescreen || enhancements || other;
+           widescreen || enhancements || other || quit || restart_game;
   }
 };
 
