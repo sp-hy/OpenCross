@@ -128,6 +128,11 @@ struct Unit {
   std::array<u16, data::kGridCells> cells{};
   std::array<bool, data::kGridCells> usable{};
   std::array<bool, data::kGridCells> used{};
+  // The double / triple tech the last element menu build put into the cell, 0 = the cell shows its own element.
+  std::array<u16, data::kGridCells> combo_word{};
+  // The cell's colour-seal flag as the last refresh left it (Battle::open_element_menu, Battle::refresh_seal_flags): a double / triple tech
+  // judges its partners by this flag, not by the live status word.
+  std::array<bool, data::kGridCells> seal_flag{};
   // Copies left of a consumable stack cell (PartyMember::qty); 0 = single / none.
   std::array<u8, data::kGridCells> qty{};
   Equip eq;
@@ -210,6 +215,8 @@ struct ActionEvent {
   bool silent = false;
   // Part of an all-targets element.
   bool all_targets = false;
+  // The cast was caught in the other side's element trap: it fizzles and its own effect never starts.
+  bool caught = false;
   // Pilfer (mode 30): message row of the result window, 0 item / 1 element stolen, 2 failed, 3 nothing to steal; -1 = not a steal.
   int steal_msg = -1;
   // The stolen word (bit 15 = element id, else item id); steal_msg 0 / 1.
@@ -275,6 +282,8 @@ struct ComboTech {
   int element = 0;
   std::array<int, 3> units{-1, -1, -1};
   std::array<int, 3> cells{-1, -1, -1};
+  // The cell each party slot gives up, -1 = the slot does not take part.
+  std::array<int, 3> slot_cells{-1, -1, -1};
 };
 
 struct EnemyAction {
@@ -455,6 +464,13 @@ class Battle {
   bool element_sealed(int pc, int cell) const;
   // A double / triple tech the cell offers now (`ComboTech`, element 0 = none).
   ComboTech combo_at(int pc, int cell) const;
+  // Builds the element menu of a PC (the host calls it when the grid opens; an Element command does it first): every PC's menu table starts
+  // from its own cells, each double / triple tech the PC's cells offer is written into its cells and its partners' cells, and the PC's own
+  // colour-seal flags are judged again by what its cells show now.
+  void open_element_menu(int pc);
+  // Judges the colour-seal flag of every cell of a PC by the element its cell shows (a double / triple tech's colour where the last menu
+  // build put one there); rainbow cells keep their flag.
+  void refresh_seal_flags(int pc);
   // The element the cell casts now: the double / triple tech combo_at offers, else the cell's own id.
   int cell_element(int pc, int cell) const;
   int chain_cost(int strength, const Unit& unit) const { return weapon_stamina_cost(strength, (unit.lo & st::kFatigued) != 0); }
@@ -525,7 +541,7 @@ class Battle {
   WeaponIn weapon_in(const Unit& attacker, const Unit& target_unit, int mult, int strength) const;
   // The element's colour is sealed on the PC.
   bool colour_sealed(int pc, int id) const;
-  // The cell of `pc` that can join a double / triple tech with partner tech `tech`, -1 = none.
+  // The cell of `pc` that can join a double / triple tech with partner tech `tech`, -1 = none. A PC's seal flag, not its live status, decides.
   int combo_partner_cell(int pc, int tech) const;
   void load_monster_record(Unit& unit, const data::StatRec& rec, u32 perm_lo_bits) const;
   // Single target, the whole side (element record byte 4 bit 0x10), or the units of `targets` (EnemyAction::targets) when it names more

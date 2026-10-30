@@ -2,7 +2,7 @@
 // Skinned, textured, alpha-tested 3D mesh drawing with depth test + write.
 //
 // Skinning: each vertex has two joint-local positions, two joint indices and two weights;
-// position = sum(weight[i] * palette[joint[i]] * local[i]). The palette (up to 64 mat4) lives in a per-frame uniform
+// position = sum(weight[i] * palette[joint[i]] * local[i]). The palette (up to 128 mat4) lives in a per-frame uniform
 // buffer together with view-projection, view and model matrices; every draw uses its own slot of that buffer.
 // The fragment shader writes depth = camera z / 16 / kDepthRange so meshes sort against background
 // groups, which carry their z in the same space. Texel alpha 0 (TIM colour 0) is discarded.
@@ -109,7 +109,7 @@ ModelUploads prepare_model_uploads(const assets::ModelAsset& asset);
 
 class MeshPipeline {
  public:
-  static constexpr u32 kMaxJoints = 64;
+  static constexpr u32 kMaxJoints = 128;
   // Distinct model draws (actors) per frame.
   static constexpr u32 kMaxDrawsPerFrame = 96;
 

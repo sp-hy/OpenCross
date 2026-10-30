@@ -153,6 +153,30 @@ int main() {
     achievements.tick(1, progress, true);
     CHECK(took(achievements, "ach_battle4_zero"));
   }
+  {  // One award waits at a time: a later cast replaces the one still waiting and restarts the delay.
+    Achievements achievements;
+    Achievements::Progress progress;
+    achievements.element_cast(158);
+    achievements.tick(30, progress, true);
+    achievements.element_cast(162);
+    achievements.tick(59, progress, true);
+    CHECK(achievements.take_earned().empty());
+    achievements.tick(1, progress, true);
+    CHECK(took(achievements, "ach_battle2_sky"));
+    achievements.tick(600, progress, true);
+    CHECK(achievements.take_earned().empty());
+  }
+  {  // A delay counts main-loop passes: one tick each in a battle, two in the field.
+    Achievements achievements;
+    Achievements::Progress progress;
+    progress.fled = true;
+    achievements.tick(1, progress, true);
+    achievements.tick(100, progress, true);
+    achievements.tick(159, progress, false);
+    CHECK(achievements.take_earned().empty());
+    achievements.tick(1, progress, false);
+    CHECK(took(achievements, "ach_battle1_condition"));
+  }
   {  // Forged rainbow gear.
     Achievements achievements;
     achievements.forged(0x24);

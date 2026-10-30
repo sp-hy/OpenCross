@@ -144,7 +144,7 @@ OpenCross: `render::SkinnedVertex::normal` (n / 128 plus the rotating joint) and
 
 `u32 N` then N records of 20 bytes: `s32 parent (-1 root)`, `s16 rx,ry,rz`, `s16 tx,ty,tz`, `u32 boneRef`. Parent < own index always. N: battle 22-40, field 2-30. `boneRef` is `-1` or `k << 16` (k counts up through the "real" bones in joint order; joint-less helper joints are -1).
 
-OpenCross: the `MeshPipeline` joint palette holds 64 matrices (`kMaxJoints`); a model with more joints (the 98-joint summon `sara`) has joint ids above 63 clamped to 63.
+OpenCross: the `MeshPipeline` joint palette holds 128 matrices (`kMaxJoints`), enough for the largest model (the 98-joint summon `sara`); joint ids above the limit would be clamped.
 
 Angles are 12-bit: **4096 = 360 degrees**. Translations are in model units. A joint is placed in the model by:
 ```

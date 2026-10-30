@@ -47,12 +47,12 @@ A fight started by a script counts as won with result 0 (victory) or 3 (scripted
 | `ach_eve4_darks` | Battle scene 473 won |
 | `ach_eve7_fate` | Battle scene 462 won |
 | `ach_eve9_tokiwokurau` | Battle scene 472 won, or element 526 cast (below) |
-| `ach_battle1_condition` | 180 ticks after a fight turns to fled (a Run, or a script forcing it). Not every result 2 is a flight |
+| `ach_battle1_condition` | 180 main-loop passes after a fight turns to fled (a Run, or a script forcing it). Not every result 2 is a flight |
 | `ach_battle8_master` | The save's battle counter is at least 500 at a win. The counter is per save and counts monster-party fights too |
 
 ## 5. Element casts
 
-Keyed on the element id, whoever casts it, 60 ticks after the cast starts (element 526: 300 ticks). Element 152 shares Forever Zero's name and does not count.
+Keyed on the element id, whoever casts it, 60 main-loop passes after the cast starts (element 526: 300). A pass is one tick in a battle and two in the field, so a delay still running when the battle ends takes longer there. Element 152 shares Forever Zero's name and does not count. A cast caught in an element trap does not count: its effect is replaced by the trap's. One award waits at a time: a cast or a flight replaces the one still waiting and restarts the delay.
 
 | Achievement | Element |
 |---|---|

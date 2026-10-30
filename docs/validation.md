@@ -182,6 +182,8 @@ The sequence presses "any button", moves the cursor to Continue and confirms, th
 
 Safety rule: the tool refuses a `--save` inside `Documents\My Games`. Always pass a copy (or a file made with `tools\py\cc_save_forge.py`) and compare its hash afterwards if it must stay untouched; never save from RDE over a real file. Run only one RDE at a time. `tools\rde_snap.py`, `rde_key.py` and `rde_capture.py` then work on the running window as usual.
 
+For scripted checks use `tools\py\rde_bg.py`: RDE runs behind every other window and never takes focus, input goes into the running game's memory instead of through the keyboard, frames come from window capture, and what you type does not reach the game. Only one RDE runs at a time. The game files are not changed.
+
 ## 4. Ghidra for the RDE exe
 
 ### 4.1 What you are looking at

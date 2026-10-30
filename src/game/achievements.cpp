@@ -176,19 +176,23 @@ void Achievements::earn(int index) {
   earned_.push_back(kApiNames[index]);
 }
 
-void Achievements::earn_after(int index, int ticks) {
-  const bool waiting = std::any_of(delayed_.begin(), delayed_.end(), [&](const Delayed& delayed) { return delayed.index == index; });
-  if (!waiting) delayed_.push_back({index, ticks});
+void Achievements::earn_after(int index, int passes) {
+  pending_ = {index, passes};
 }
 
 void Achievements::tick(int ticks, const Progress& progress, bool in_battle) {
-  for (Delayed& delayed : delayed_) {
-    delayed.ticks -= ticks;
-    if (delayed.ticks <= 0) earn(delayed.index);
+  if (pending_.index != 0) {
+    // The delay counts main-loop passes: one tick each in a battle, two in the field.
+    field_ticks_ = in_battle ? 0 : field_ticks_ + ticks;
+    pending_.passes -= in_battle ? ticks : field_ticks_ / 2;
+    field_ticks_ %= 2;
+    if (pending_.passes <= 0) {
+      earn(pending_.index);
+      pending_ = {0, 0};
+    }
   }
-  std::erase_if(delayed_, [](const Delayed& delayed) { return delayed.ticks <= 0; });
 
-  if (progress.fled && !fled_seen_) earn_after(kFled, kFleeDelay);
+  if (progress.fled && !fled_seen_ && !done_[kFled]) earn_after(kFled, kFleeDelay);
   fled_seen_ = progress.fled;
 
   if (stars_seen_ == kMaxStars - 1 && progress.stars == kMaxStars) earn(kGoldStars);

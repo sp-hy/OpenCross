@@ -927,6 +927,19 @@ void test_field_ring_writes() {
     for (const ActionEvent& event : fixture.battle.events()) CHECK(event.ring == ring0);
   }
   {
+    // mode 47 draws rnd(0, 5) until a colour some party slot lacks (innate byte >> 2 as the colour mask), repaints the whole ring with it and
+    // deals no damage
+    Fixture fixture;
+    elem(fixture, 0x01, 47, 0x00);
+    for (int pc = 0; pc < kPcSlots; ++pc) fixture.battle.unit_mut(pc).innate = 0x1C;
+    for (const int value : {0, 2, 1, 4, 5}) fixture.rng.push(value);
+    const int hp0 = fixture.battle.unit(0).hp;
+    fixture.battle.do_element(3, 4, 0, 0);
+    CHECK(fixture.battle.ring() == (std::array<int, 3>{4, 4, 4}));
+    CHECK_EQ(fixture.battle.unit(0).hp, hp0);
+    CHECK_EQ(fixture.rng.rnd(0, 5), 5);
+  }
+  {
     // innate byte bit 1: the colour mask is bits 2..7 and an element of that colour is absorbed
     Fixture fixture;
     elem(fixture, 0x01, 0, 0x20);
@@ -2735,13 +2748,13 @@ void test_combo_techs() {
       record.raw[0x20] = static_cast<u8>(partner), record.raw[0x26] = static_cast<u8>(result);
     };
     tech(kDash, 0x08, kGash, kXStrike);
-    tech(kGash, 0x80, kDash, kXStrike);
+    tech(kGash, 0x04, kDash, kXStrike);
     tech(kXStrike, 0x20, 0, 0);
     elements[kXStrike].raw[0x14] = 0, elements[kXStrike].raw[0x15] = 2;
     tech(kLumi, 0x08, 0, 0);
     elements[kLumi].raw[0x22] = kPartnerA, elements[kLumi].raw[0x24] = kPartnerB, elements[kLumi].raw[0x28] = kTriple;
-    tech(kPartnerA, 0x40, 0, 0);
-    tech(kPartnerB, 0x04, 0, 0);
+    tech(kPartnerA, 0x04, 0, 0);
+    tech(kPartnerB, 0x80, 0, 0);
     tech(kTriple, 0x08, 0, 0);
     elements[kTriple].raw[0x14] = 0, elements[kTriple].raw[0x15] = 1, elements[kTriple].raw[0x16] = 2;
     const auto place = [&](int unit, int cell, int id) {
@@ -2807,6 +2820,146 @@ void test_combo_techs() {
     CHECK(combo.cells[0] == 47 && combo.cells[1] == 45 && combo.cells[2] == 46);
     fixture->battle.unit_mut(1).usable[45] = false;
     CHECK_EQ(fixture->battle.cell_element(0, 47), kLumi);
+  }
+}
+
+// The double and triple techs of the game's own tables (ids, colours, partner and result words, participants). A partner's colour seal is
+// the flag its cell carries: it is judged when a menu build or an action last touched the PC, by the element the cell showed then, not by
+// the live status word.
+void test_combo_real_tables() {
+  constexpr int kDash = 0xA0, kGash = 0xD9, kXStrike = 0x9F, kLumi = 0xA1, kC9 = 0xC9, kDE = 0xDE, kLumiResult = 0x89;
+  constexpr int kT93 = 0x93, kTA2 = 0xA2, kTA4 = 0xA4, kTripleB = 0x88;
+  constexpr u32 kGreenSeal = 0x800, kRedSeal = 0x800000;
+  const auto place = [](Fixture& fixture, int unit, int cell, int id) {
+    fixture.battle.unit_mut(unit).cells[static_cast<size_t>(cell)] = static_cast<u16>(id);
+    fixture.battle.unit_mut(unit).usable[static_cast<size_t>(cell)] = true;
+  };
+  const auto build = [&](auto&& arrange) {
+    auto fixture = std::make_unique<Fixture>();
+    auto& elements = fixture->tables.elements;
+    elements.resize(0x100);
+    const auto tech = [&](int id, int colour, int partner, int result) {
+      auto& record = elements[static_cast<size_t>(id)];
+      record.raw[1] = 2, record.raw[4] = 0x80, record.raw[5] = static_cast<u8>(colour), record.raw[6] = 3, record.raw[8] = 20, record.raw[0xC] = 20;
+      record.raw[0x14] = record.raw[0x15] = record.raw[0x16] = record.raw[0x17] = 0xFF;
+      record.raw[0x20] = static_cast<u8>(partner), record.raw[0x26] = static_cast<u8>(result);
+    };
+    const auto triple = [&](int id, int colour, int first, int second, int result) {
+      tech(id, colour, 0, 0);
+      elements[static_cast<size_t>(id)].raw[0x22] = static_cast<u8>(first);
+      elements[static_cast<size_t>(id)].raw[0x24] = static_cast<u8>(second);
+      elements[static_cast<size_t>(id)].raw[0x28] = static_cast<u8>(result);
+    };
+    const auto result = [&](int id, int colour) {
+      tech(id, colour, 0, 0);
+      elements[static_cast<size_t>(id)].raw[0x14] = 0, elements[static_cast<size_t>(id)].raw[0x15] = 1, elements[static_cast<size_t>(id)].raw[0x16] = 2;
+    };
+    tech(kDash, 0x08, kGash, kXStrike);
+    tech(kGash, 0x04, kDash, kXStrike);
+    result(kXStrike, 0x20);
+    elements[kXStrike].raw[0x16] = 0xFF;
+    triple(kLumi, 0x08, kC9, kDE, kLumiResult);
+    triple(kC9, 0x04, kLumi, kDE, kLumiResult);
+    triple(kDE, 0x80, kLumi, kC9, kLumiResult);
+    result(kLumiResult, 0x08);
+    triple(kT93, 0x80, kTA2, kTA4, kTripleB);
+    triple(kTA2, 0x08, kT93, kTA4, kTripleB);
+    triple(kTA4, 0x20, kT93, kTA2, kTripleB);
+    result(kTripleB, 0x80);
+    for (int unit = 0; unit < 3; ++unit) {
+      fixture->battle.unit_mut(unit).gauge_max = 7;
+      fixture->battle.unit_mut(unit).gauge = 7;
+    }
+    arrange(*fixture);
+    return fixture;
+  };
+  // The Luminaire trio and the 0x88 trio work from every member's menu.
+  for (int active = 0; active < 3; ++active) {
+    auto fixture = build([&](Fixture& f) {
+      place(f, 0, 47, kLumi), place(f, 1, 45, kC9), place(f, 2, 46, kDE);
+      place(f, 0, 60, kTA2), place(f, 1, 61, kT93), place(f, 2, 62, kTA4);
+    });
+    const int cells[3] = {47, 45, 46}, cells_b[3] = {60, 61, 62};
+    CHECK_EQ(fixture->battle.cell_element(active, cells[active]), kLumiResult);
+    CHECK_EQ(fixture->battle.cell_element(active, cells_b[active]), kTripleB);
+    const ComboTech combo = fixture->battle.combo_at(active, cells[active]);
+    CHECK(combo.slot_cells[0] == 47 && combo.slot_cells[1] == 45 && combo.slot_cells[2] == 46);
+  }
+  // Both partner slots may hold the same partner tech: each only needs one of the two.
+  {
+    auto fixture = build([&](Fixture& f) { place(f, 0, 47, kLumi), place(f, 1, 45, kC9), place(f, 2, 46, kC9); });
+    CHECK_EQ(fixture->battle.cell_element(0, 47), kLumiResult);
+  }
+  // A slot that holds both partner techs does not stand in for the empty one.
+  {
+    auto fixture = build([&](Fixture& f) { place(f, 0, 47, kLumi), place(f, 1, 45, kC9), place(f, 1, 55, kDE); });
+    CHECK_EQ(fixture->battle.cell_element(0, 47), kLumi);
+  }
+  // A slot that holds both gives up the cell of the second partner tech.
+  {
+    auto fixture = build([&](Fixture& f) { place(f, 0, 47, kLumi), place(f, 1, 45, kC9), place(f, 1, 46, kDE), place(f, 2, 50, kDE); });
+    const ComboTech combo = fixture->battle.combo_at(0, 47);
+    CHECK_EQ(combo.element, kLumiResult);
+    CHECK(combo.slot_cells[1] == 46 && combo.slot_cells[2] == 50);
+  }
+  // Double tech: when both partner slots qualify, the first one in slot order joins.
+  {
+    auto fixture = build([&](Fixture& f) { place(f, 0, 27, kDash), place(f, 1, 27, kGash), place(f, 2, 30, kGash); });
+    const ComboTech combo = fixture->battle.combo_at(0, 27);
+    CHECK(combo.element == kXStrike && combo.slot_cells[1] == 27 && combo.slot_cells[2] == -1);
+  }
+  // Only the first cell that holds the partner tech is looked at: when it is used, a later copy does not help.
+  {
+    auto fixture = build([&](Fixture& f) { place(f, 0, 27, kDash), place(f, 1, 20, kGash), place(f, 1, 27, kGash); });
+    fixture->battle.unit_mut(1).used[20] = true;
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kDash);
+  }
+  // Seals: Serge holds Dash & Slash (white), Glenn holds Dash & Gash (green), the result X-Strike is red.
+  const auto duo = [&](Fixture& f) { place(f, 0, 27, kDash), place(f, 1, 27, kGash); };
+  {
+    // Sealed in its own colour with nothing shown over the cell: the flag is set and the partner stays out.
+    auto fixture = build(duo);
+    fixture->battle.unit_mut(1).lo |= kGreenSeal;
+    fixture->battle.refresh_seal_flags(1);
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kDash);
+  }
+  {
+    // Sealed in the colour of the result only: judged by its own tech's colour, it still joins.
+    auto fixture = build(duo);
+    fixture->battle.unit_mut(1).lo |= kRedSeal;
+    fixture->battle.refresh_seal_flags(1);
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kXStrike);
+  }
+  {
+    // The menu built the double tech into the partner's cell first: a seal that lands now is judged by the result's colour, so a green seal
+    // leaves the flag clear and the partner still joins at the next menu; a red one sets it.
+    auto fixture = build(duo);
+    fixture->battle.open_element_menu(0);
+    fixture->battle.unit_mut(1).lo |= kGreenSeal;
+    fixture->battle.refresh_seal_flags(1);
+    fixture->battle.open_element_menu(0);
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kXStrike);
+    fixture->battle.unit_mut(1).lo |= kRedSeal;
+    fixture->battle.refresh_seal_flags(1);
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kDash);
+  }
+  {
+    // A seal that runs out does not clear the flag; the partner's own menu build does.
+    auto fixture = build(duo);
+    fixture->battle.unit_mut(1).lo |= kGreenSeal;
+    fixture->battle.refresh_seal_flags(1);
+    fixture->battle.unit_mut(1).lo &= ~kGreenSeal;
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kDash);
+    fixture->battle.open_element_menu(1);
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kXStrike);
+  }
+  {
+    // The partner's own build judges its cell by the double tech: red-sealed, its flag is set and it stays out of the next build of the other.
+    auto fixture = build(duo);
+    fixture->battle.unit_mut(1).lo |= kRedSeal;
+    fixture->battle.open_element_menu(1);
+    CHECK(fixture->battle.unit(1).seal_flag[27]);
+    CHECK_EQ(fixture->battle.cell_element(0, 27), kDash);
   }
 }
 
@@ -3006,6 +3159,7 @@ int main() {
   test_weapon_tech_record_colour();
   test_weapon_tech_participants();
   test_combo_techs();
+  test_combo_real_tables();
   test_run_drops_stolen_loot();
   test_stat_mode_hero_gate_and_heal();
   test_dopple_form_gauge_cap();

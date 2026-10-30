@@ -34,6 +34,9 @@ constexpr const char32_t* kPrompt[6] = {U"Press any button", U"Appuyez sur une t
 
 // Fade duration in seconds.
 constexpr float kFade = 0.5f;
+// The press: the title holds kPressFadeDelay frames (60 Hz), then a subtractive fade reaches black over kPressFadeFrames.
+constexpr float kPressFadeDelay = 22.0f;
+constexpr float kPressFadeFrames = 32.0f;
 
 // The press-start chime: three global sounds started together, one per layer.
 constexpr int kChimeSounds[3] = {59, 61, 62};
@@ -133,6 +136,7 @@ void TitleScreen::start_song(int song) {
 
 void TitleScreen::press() {
   to_menu_ = true;
+  press_frames_ = 0.0f;
   if (layered_sfx_)
     for (int layer = 0; layer < static_cast<int>(std::size(kChimeSounds)); ++layer) layered_sfx_(kChimeSounds[layer], layer);
   music_frames_ = 0.0f;
@@ -178,7 +182,8 @@ void TitleScreen::update(const Nav& nav, float dt) {
     case Phase::Prompt:
       // After a button press the title fades to black, then the menu fades in; after a cancel the title fades in again from black.
       if (to_menu_) {
-        fade_ = std::min(1.0f, fade_ + dt / kFade);
+        press_frames_ += dt * 60.0f;
+        if (press_frames_ >= kPressFadeDelay) fade_ = std::min(1.0f, fade_ + dt * 60.0f / kPressFadeFrames);
         if (fade_ >= 1.0f) {
           to_menu_ = false;
           menu_in_ = true;

@@ -17,6 +17,13 @@ constexpr int kChronoCrossElement = 0x7E;
 // Lo statuses that keep a PC out of a double / triple tech (KO, confusion, defeat ...).
 constexpr u32 kComboPartnerBlockLo = 0x203000C0u;
 
+// An action's target PC has its colour-seal flags judged again once the action has run, whatever the action was.
+struct SealRefreshOnExit {
+  Battle& battle;
+  int target;
+  ~SealRefreshOnExit() { battle.refresh_seal_flags(target); }
+};
+
 // The armour colour byte's x150/100 step looks its colour MASK up in the six-entry opposite-colour table that is indexed by colour index
 // everywhere else: the green, white and black masks (1, 2, 4) land inside it and raise black, white and green elements; red and yellow (8, 16)
 // read the multiplier table's low bytes (0x99, 0x65: never a colour); blue (32) reads a flag that is 0 whenever damage is computed: green.
@@ -369,6 +376,7 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
     }
   }
   if (slot == kPcSlots) return false;
+  for (int pc = 0; pc < kPcSlots; ++pc) refresh_seal_flags(pc);
   say(std::format("battle start: scene {}  ring [{} {} {}]", scene, data::colour_name(ring_[0]), data::colour_name(ring_[1]),
                   data::colour_name(ring_[2])));
   brain_.begin_battle(*this, rng_);
@@ -398,13 +406,13 @@ bool Battle::colour_sealed(int pc, int id) const {
 }
 
 // The partner's cell for a double / triple tech: the first open grid cell whose word is exactly `tech`; it counts only while that cell is
-// unused and not colour-sealed, the partner's gauge reaches the cell's row, it has 1.0 stamina and none of the lo statuses 0x203000C0.
+// unused and its seal flag is clear, the partner's gauge reaches the cell's row, it has 1.0 stamina and none of the lo statuses 0x203000C0.
 int Battle::combo_partner_cell(int pc, int tech) const {
   const Unit& partner = unit(pc);
   if (!partner.present || !partner.pc) return -1;
   for (int cell = 0; cell < data::kGridCells; ++cell) {
     if (!partner.usable[static_cast<size_t>(cell)] || partner.cells[static_cast<size_t>(cell)] != tech) continue;
-    if (partner.used[static_cast<size_t>(cell)] || colour_sealed(pc, tech)) return -1;
+    if (partner.used[static_cast<size_t>(cell)] || partner.seal_flag[static_cast<size_t>(cell)]) return -1;
     if (partner.gauge < cell / data::kGridCols || partner.stamina < 10 || (partner.lo & kComboPartnerBlockLo)) return -1;
     return cell;
   }
@@ -448,6 +456,7 @@ ComboTech Battle::combo_at(int pc, int cell) const {
     combo.element = tech.rd16(0x28);
   }
   if (combo.element <= 0 || static_cast<size_t>(combo.element) >= tables_.elements.size()) return ComboTech{};
+  combo.slot_cells = given;
   const data::ElemRec& result = tables_.elements[static_cast<size_t>(combo.element)];
   for (size_t k = 0; k < combo.units.size(); ++k) {
     const int char_id = result.b(0x14 + k);
@@ -459,6 +468,33 @@ ComboTech Battle::combo_at(int pc, int cell) const {
       }
   }
   return combo;
+}
+
+// The element menu of a PC. Every PC's table starts again from its own cells; each cell of `pc` that offers a double / triple tech puts
+// it into its own cell and into the cell each partner gives up, and `pc`'s seal flags are judged anew by what its cells show. The
+// partners' flags stay as they were.
+void Battle::open_element_menu(int pc) {
+  if (!is_pc_slot(pc)) return;
+  for (int slot = 0; slot < kPcSlots; ++slot) units_[static_cast<size_t>(slot)].combo_word.fill(0);
+  for (int cell = 0; cell < data::kGridCells; ++cell) {
+    const ComboTech combo = combo_at(pc, cell);
+    if (!combo.element) continue;
+    for (int slot = 0; slot < kPcSlots; ++slot)
+      if (combo.slot_cells[static_cast<size_t>(slot)] >= 0)
+        units_[static_cast<size_t>(slot)].combo_word[static_cast<size_t>(combo.slot_cells[static_cast<size_t>(slot)])] = static_cast<u16>(combo.element);
+  }
+  units_[static_cast<size_t>(pc)].seal_flag.fill(false);
+  refresh_seal_flags(pc);
+}
+
+void Battle::refresh_seal_flags(int pc) {
+  if (!is_pc_slot(pc)) return;
+  Unit& unit = units_[static_cast<size_t>(pc)];
+  for (size_t cell = 0; cell < data::kGridCells; ++cell) {
+    const int id = unit.combo_word[cell] ? unit.combo_word[cell] : unit.cells[cell] & 0x3FFF;
+    if (!unit.usable[cell] || id <= 0 || static_cast<size_t>(id) >= tables_.elements.size() || (element_colour(id) & 0xFC) == 0xFC) continue;
+    unit.seal_flag[cell] = colour_sealed(pc, id);
+  }
 }
 
 int Battle::cell_element(int pc, int cell) const {
@@ -858,6 +894,7 @@ bool Battle::force_status_bits(int target, u32 lo) {
 
 // ------------------------------------------------------------------------------------------------ weapon attack
 void Battle::do_weapon_attack(int actor, int target, int strength) {
+  const SealRefreshOnExit refresh{*this, target};
   Unit& attacker = units_[static_cast<size_t>(actor)];
   Unit& target_unit = units_[static_cast<size_t>(target)];
   // Script var 0x22 / 0x28 + 6 * pc = the hit strength (0 weak / 1 strong / 2 fierce), not the weapon class.
@@ -960,6 +997,7 @@ std::array<int, 6> Battle::tech_participants(int actor, const data::ElemRec& ele
 }
 
 void Battle::do_element(int actor, int element_id, int row, int target, bool push_ring) {
+  const SealRefreshOnExit refresh{*this, target};
   Unit& caster = units_[static_cast<size_t>(actor)];
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(element_id)];
@@ -1582,6 +1620,7 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
       ev.element = element_id;
       ev.row = row;
       ev.code = 2;
+      ev.caught = true;
       ev.hp_before = ev.hp_after = units_[static_cast<size_t>(target)].hp;
       ev.text = log_.back();
       note_event(ev);
@@ -1901,6 +1940,7 @@ void Battle::settle() {
 
 // ------------------------------------------------------------------------------------------------ command application
 bool Battle::apply(const Command& cmd, std::string* why) {
+  if (cmd.kind == Command::Kind::Element) open_element_menu(cmd.actor);
   if (!validate(cmd, why)) return false;
   attacked_.clear();
   begin_action();

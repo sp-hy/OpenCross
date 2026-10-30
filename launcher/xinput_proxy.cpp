@@ -71,7 +71,9 @@ SAFEARRAY* payload_bytes() {
   return bytes;
 }
 
-// Runs inside the CLR the launcher already started: loads the assembly into its default domain and constructs LauncherPatch.
+// Runs inside the runtime the launcher already started: loads the assembly into its default domain and asks for its attributes, which
+// constructs LauncherPatch. The CLR and Mono (the runtime under Wine) order _Assembly differently from its ModuleResolve event on, so
+// only calls from before that point, like this one, reach the same method on both.
 void run_patch() {
   const HMODULE clr = GetModuleHandleW(L"mscoree.dll");
   if (!clr) return;
@@ -85,22 +87,18 @@ void run_patch() {
   mscorlib::_AppDomain* domain = nullptr;
   mscorlib::_Assembly* assembly = nullptr;
   SAFEARRAY* bytes = nullptr;
-  BSTR type_name = nullptr;
-  VARIANT instance;
-  VariantInit(&instance);
+  SAFEARRAY* attributes = nullptr;
 
   if (SUCCEEDED(create_instance(CLSID_CLRMetaHost, IID_ICLRMetaHost, reinterpret_cast<void**>(&meta_host))) &&
       SUCCEEDED(meta_host->GetRuntime(L"v4.0.30319", IID_ICLRRuntimeInfo, reinterpret_cast<void**>(&runtime))) &&
       SUCCEEDED(runtime->GetInterface(CLSID_CorRuntimeHost, IID_ICorRuntimeHost, reinterpret_cast<void**>(&host))) &&
       SUCCEEDED(host->GetDefaultDomain(&domain_unknown)) &&
       SUCCEEDED(domain_unknown->QueryInterface(__uuidof(mscorlib::_AppDomain), reinterpret_cast<void**>(&domain))) &&
-      (bytes = payload_bytes()) != nullptr && SUCCEEDED(domain->Load_3(bytes, &assembly)) &&
-      (type_name = SysAllocString(L"OpenCross.LauncherPatch")) != nullptr) {
-    assembly->CreateInstance(type_name, &instance);
+      (bytes = payload_bytes()) != nullptr && SUCCEEDED(domain->Load_3(bytes, &assembly))) {
+    assembly->GetCustomAttributes_2(VARIANT_FALSE, &attributes);
   }
 
-  VariantClear(&instance);
-  if (type_name) SysFreeString(type_name);
+  if (attributes) SafeArrayDestroy(attributes);
   if (bytes) SafeArrayDestroy(bytes);
   if (assembly) assembly->Release();
   if (domain) domain->Release();

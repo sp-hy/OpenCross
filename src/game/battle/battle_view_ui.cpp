@@ -911,6 +911,7 @@ void BattleView::handle_input(const platform::Input& in) {
         enter_target(Tgt::Enemy);
       } else if (top_cursor_ == 1) {
         pending_cmd_.kind = battle::Command::Kind::Element;
+        battle_->open_element_menu(active_pc_);
         cell_ = elem_open_cell(unit, tables_->elements.size());
         // The row is dim (gauge below level 1 / nothing selectable): the menu does not open.
         if (cell_ < 0 || unit.stamina <= 0) {
@@ -940,6 +941,7 @@ void BattleView::handle_input(const platform::Input& in) {
       }
       if (!ok) break;
       if (chain_cursor_ == 3) {
+        battle_->open_element_menu(active_pc_);
         const int first = elem_open_cell(unit, tables_->elements.size());
         // Dim row: nothing selectable.
         if (first < 0 || unit.stamina <= 0) {

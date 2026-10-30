@@ -317,7 +317,7 @@ The App owns the hand-off because it owns both objects. `BattleView` is initiali
 ### 6.2 Batches and pipelines
 
 - `SpriteBatch`: 2D textured quads in a caller-chosen virtual space; blend modes Alpha, Multiply, Add, Subtract, Average, Premultiplied, AddAlpha. `TextBatch` draws text over it (RDE spritefont faces, the PS1 bitmap font).
-- `MeshPipeline`: skinned, alpha-tested 3D meshes (palette of up to 64 joints) for field actors, battle units and the Status model.
+- `MeshPipeline`: skinned, alpha-tested 3D meshes (palette of up to 128 joints) for field actors, battle units and the Status model.
 - `StagePipeline`: battle stage and title scenery packet meshes as instances placed by object scripts (colour, blend, ordering-table bias per instance).
 - `ParticleBatch`: effect quads, depth-tested against room layers and actors.
 - `CrtPass`: optional full-frame CRT filter, also the pause screen's colour ramp. `RenderTarget`: off-screen colour and depth. `ImGuiLayer`: Dear ImGui over SDL_GPU.
@@ -508,7 +508,7 @@ End:
 7. The rules set the outcome; `begin_finish` / `tick_finish` sets `finished()`.
 8. `advance()` opens `BattleResults` (`results.open`) and updates it until `results.done()`.
 9. `finish_field_battle()`: code from `battle.outcome()`; `game::apply_battle_result` writes rewards, growth and HP into the game state; the Dopplegang mask goes back to the world; the results screen's healed HP is copied; `world.end_battle(code)`.
-10. `FieldWorld::end_battle` writes `BATTLE_RESULT` (var 0x32), starts a 0x30-tick fade-in and restores the saved song (unless flag 0x20). `battle_active()` is now false, so the blocked script resumes and reads the result.
+10. `FieldWorld::end_battle` writes `BATTLE_RESULT` (var 0x32), restores the saved song and starts a 0x30-tick fade-in (8 ticks later after a results screen) (unless flag 0x20). `battle_active()` is now false, so the blocked script resumes and reads the result.
 11. After a wipe in a fight that is not losable, `finish_field_battle` loads map id 9 (`room_stem_for_id(9)`); the title is the fallback if that load fails.
 
 ## 13. Deliberate differences from the original

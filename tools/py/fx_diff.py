@@ -233,7 +233,7 @@ def parse_ours(path):
                 cur = samples.setdefault(g[0], {"seqs": [], "objs": [], "units": {}, "cam": None, "fog": None, "warp": None})
                 cur["cam"] = {"eye": g[1:4], "tgt": g[4:7], "H": g[7]}
                 cur["fog"] = {"on": g[8], "near": g[9], "far": g[10], "rgb": g[11:14]}
-                cur["warp"] = {"on": g[14], "ang": g[15:18], "tr": g[18:21], "col": g[21:24], "off": g[24:26], "abr": g[26], "slow_n": g[27], "slow_x": g[28]}
+                cur["warp"] = {"on": g[14], "ang": g[15:18], "tr": g[18:21], "col": g[21:24], "off": g[24:26], "abr": g[26], "slow_n": g[28], "slow_x": g[27]}
                 mode = None
                 continue
             if cur is not None and mode == "obj":

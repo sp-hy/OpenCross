@@ -1,4 +1,6 @@
-// Runs in the launcher process, constructed by the proxy DLL before the launcher window loads. The launcher builds its whole menu from
+// Runs in the launcher process before the launcher window loads. This is an attribute on its own assembly: the proxy DLL asks for the
+// assembly's attributes, which constructs it, because that is a call both the CLR and Mono place in the same COM slot, where the
+// _Assembly::CreateInstance slot differs. The launcher builds its whole menu from
 // one table (ui.csv: one row per picture, with position, size, action and program) and art files, all read through a single private
 // method, so this redirects that method and serves an edited table and art: the launcher's own code then draws, focuses, clicks and
 // reloads the sixth button like the other five, and its "GAME" action starts opencross.exe. Nothing is written to disk.
@@ -20,9 +22,12 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
+[assembly: OpenCross.LauncherPatch]
+
 namespace OpenCross {
 
-public class LauncherPatch {
+[AttributeUsage(AttributeTargets.Assembly)]
+public class LauncherPatch : Attribute {
   private const string kEngineExe = "opencross.exe";
   private const string kNewButton = "GAME00";
 

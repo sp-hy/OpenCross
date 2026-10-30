@@ -53,6 +53,8 @@ class TitleScreen {
   int page() const { return page_; }
   bool vibration() const { return vibration_; }
   float fade_alpha() const { return fade_; }
+  // The fade after a press subtracts from the picture; every other fade is a black veil.
+  bool fade_subtracts() const { return to_menu_; }
   // Test / screenshot hooks.
   void skip_to_menu() {
     phase_ = Phase::Menu;
@@ -101,6 +103,7 @@ class TitleScreen {
   // Transitions: to_menu_ = Prompt -> Menu, fading the title to black; menu_in_ = the menu still fading in from that black;
   // to_prompt_ = menu cancelled, fading to black before the prompt returns.
   bool to_menu_ = false;
+  float press_frames_ = 0.0f;
   bool menu_in_ = false;
   bool to_prompt_ = false;
   int sel_ = 0;

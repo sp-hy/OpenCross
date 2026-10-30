@@ -153,7 +153,7 @@ class App {
   FieldBattleArgs make_field_battle_args(const game::FieldWorld::BattleRequest& rq);
   void field_battle_load_step();
   void start_field_battle();
-  void finish_field_battle();
+  void finish_field_battle(bool after_results = false);
   void scene_battle();
 
   // ---- app_route.cpp ----------------------------------------------------------------------------------------------------------

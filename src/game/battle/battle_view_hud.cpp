@@ -372,8 +372,8 @@ void BattleView::rebuild_ring() {
   // Cells 0..11 in order, 4 crescent shells per ellipse (a01..a04 outer, a05..a08 middle, a09..a12 inner). A cell with a colour
   // OVERWRITES its mask (m >= 0x80: colour at alpha 0x80; 0 < m < 0x80: rgb += (C - rgb) * m / 128 over a covered texel, C over a clear one,
   // alpha = max(m, alpha)); a cell with no colour (a cast with no colour byte) punches its mask out of what was drawn before. Colours: green,
-  // white, "black" (drawn as a near-black fill), red, yellow, blue; an all-colours slot takes each texel's colour from battle_88.bmp.
-  static const Rgb kRing[6] = {{0, 255, 0}, {255, 255, 255}, {16, 12, 16}, {255, 0, 0}, {255, 255, 0}, {0, 0, 255}};
+  // white, black, red, yellow, blue; an all-colours slot takes each texel's colour from battle_88.bmp.
+  static const Rgb kRing[6] = {{0, 255, 0}, {255, 255, 255}, {0, 0, 0}, {255, 0, 0}, {255, 255, 0}, {0, 0, 255}};
   std::vector<u8> px(208 * 112 * 4, 0);
   bool any = false;
   for (int cell = 0; cell < 12; ++cell) {

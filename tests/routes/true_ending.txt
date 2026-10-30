@@ -35,11 +35,9 @@
 - tap f                                # the field key-item list
 - wait 40
 - screenshot te_03_keylist.png
-- tap down
+- tap right
 - wait 6
-- tap down
-- wait 6
-- tap confirm                         # Time Egg (row 1, left)
+- tap confirm                         # Time Egg (the list holds Tele-Porter, Time Egg, Time Shifter)
 - wait 30
 - screenshot te_04_choice.png
 - choose 0 900                        # "To the darkness of time!"

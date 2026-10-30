@@ -20,7 +20,7 @@ struct FrameSlot {
   // [Enhancements] el[0] = (EnhancedLighting on, key strength, SpellLights count, SmoothReflections on); el[1 + 2i] = light i position (render world) + radius;
   // el[2 + 2i] = light i colour x intensity. All zero = the PS1 look.
   vec4 el[18];  // [17] = scene ambient multiplier (rgb, w = 1 on); el[2 + 2i].w = 1: the light is a PS1 slot light (linear falloff)
-  mat4 palette[64];
+  mat4 palette[128];
 };
 layout(std430, set = 0, binding = 0) readonly buffer Frames { FrameSlot slots[]; };
 #define u slots[int(pc.slot.x + 0.5)]

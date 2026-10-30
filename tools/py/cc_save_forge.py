@@ -16,6 +16,8 @@ plain stored ZIP with the same members, which OpenCross and ps1 read like RDE's 
   --unlock ID          unlock the whole grid of a character without touching its cells
   --var ID=VALUE       script variable (u16 at raw head 0x188 + ID; ID in hex with 0x or decimal)
   --set-bit N / --clear-bit N   SET_VAR_BIT / CLEAR_VAR_BIT semantics: var[N >> 4] bit N & 15
+  --scenario N         scenario (story progression) counter (variable 0 and the preview progression, raw head 0x40)
+  --key-items N[,N..]  the key items held, replacing the source save's (1-based number, raw head 0x180 bit N - 1; Time Egg = 53)
   --stars N            star level (raw head 0x3F preview, 0x5A4 total, 0x5A5 current)
   --gold N             gold (0x58C and the 0x3B preview)
   --cleared            a New Game+ "cleared" save as the ending's FE 85 writes it: variable 0x7E = 3, summary flags (raw head 0x42
@@ -86,7 +88,7 @@ def main(argv):
     src, dst = argv[0], argv[1]
     args = argv[2:]
     opts = {"slot": None, "room": None, "entrance": None, "party": None, "recruit": [], "char": [], "grid": [],
-            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "gold": None, "flags": None, "mcd": None, "mcd_only": False}
+            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "flags": None, "mcd": None, "mcd_only": False}
     i = 0
     while i < len(args):
         a = args[i]
@@ -113,6 +115,10 @@ def main(argv):
             opts["set_bit"].append(int(v, 0))
         elif a == "--clear-bit":
             opts["clear_bit"].append(int(v, 0))
+        elif a == "--scenario":
+            opts["scenario"] = int(v, 0)
+        elif a == "--key-items":
+            opts["key_items"] = [int(x, 0) for x in v.split(",")]
         elif a == "--stars":
             opts["stars"] = int(v, 0)
         elif a == "--gold":
@@ -241,6 +247,15 @@ def main(argv):
     if opts["flags"] is not None:
         blk[0x42] = (blk[0x42] & ~3) | (opts["flags"] & 3)
         log.append("summary flags %d" % (opts["flags"] & 3))
+    if opts["scenario"] is not None:
+        struct.pack_into("<H", blk, 0x40, opts["scenario"])
+        var_set(0, opts["scenario"])
+        log.append("scenario %d" % opts["scenario"])
+    if opts["key_items"] is not None:
+        blk[0x180:0x188] = bytes(8)
+        for n in opts["key_items"]:
+            blk[0x180 + ((n - 1) >> 3)] |= 1 << ((n - 1) & 7)
+        log.append("key items %s" % opts["key_items"])
     if opts["stars"] is not None:
         blk[0x3F] = blk[0x5A4] = blk[0x5A5] = opts["stars"] & 0xFF
         log.append("stars %d" % opts["stars"])

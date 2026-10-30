@@ -503,7 +503,8 @@ class FieldWorld final : public script::FieldHost {
   // `main`'s bracket clock now (the battle continues it from the take-over)
   int transition_main_clock() const;
   BattleRequest take_battle();
-  void end_battle(int result_code);
+  // `fade_delay` ticks pass after the song is restored before the fade-in from black starts (the results screen's exit).
+  void end_battle(int result_code, int fade_delay = 0);
   // BATTLE flag 4: model byte 0x3B on every party member but Poshul / Mojo
   void apply_battle_disguise();
   int battle_result() const { return vm_.var(script::var::kBattleResult); }
@@ -866,6 +867,8 @@ class FieldWorld final : public script::FieldHost {
   float fade_target_ = 0;
   // per tick
   float fade_step_ = 1;
+  // ticks the fade holds before it moves
+  int fade_hold_ = 0;
   // fade_ is the slot-0 screen fade (room changes, A8, menu returns): subtractive toward black (ABR 2, B - F), or additive toward
   // white (ABR 1, B + F) for a kind 2 room change.
   bool fade_add_ = false;

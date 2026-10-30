@@ -45,17 +45,19 @@ public:
 private:
   struct Delayed {
     int index;
-    int ticks;
+    int passes;
   };
 
   void earn(int index);
-  void earn_after(int index, int ticks);
+  void earn_after(int index, int passes);
   void sample(const Progress& progress);
   void update_ending(int room, int prev_room);
 
   std::bitset<38> done_;
   std::vector<const char*> earned_;
-  std::vector<Delayed> delayed_;
+  // The one award waiting out its delay; a later cast or flight replaces it. index 0 = none.
+  Delayed pending_{0, 0};
+  int field_ticks_ = 0;
   std::array<int, 4> pair_left_;
   int sample_ticks_ = 0;
   int ending_ = -1;

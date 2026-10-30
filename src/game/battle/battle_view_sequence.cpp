@@ -256,7 +256,8 @@ void BattleView::start_release() {
   act_.phase = Act::Phase::Release;
   act_.ticks = 0;
   fx_charge_end();
-  if (!act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element) cast_elements_.push_back(act_.ev.front().element);
+  if (!act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && !act_.ev.front().caught)
+    cast_elements_.push_back(act_.ev.front().element);
   // The pack starts the release itself (op 0x4F) and lands the hits.
   if (fx_begin()) return;
   if (battle_audit() && !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && dbg_.effects)

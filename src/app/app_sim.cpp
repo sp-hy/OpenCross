@@ -448,7 +448,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     // The results screen: the rewards are written back when it has exited.
     if (results_ok && results.active()) {
       results.update(static_cast<float>(dt), in);
-      if (results.done()) finish_field_battle();
+      if (results.done()) finish_field_battle(true);
       return;
     }
     battle.update(static_cast<float>(dt), in);

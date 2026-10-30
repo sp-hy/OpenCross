@@ -105,6 +105,7 @@ void FieldWorld::fade(int mode, int arg) {
   fade_black_ = to_black;
   fade_target_ = to_black ? 1.0f : 0.0f;
   fade_add_ = false;
+  fade_hold_ = 0;
   if (arg <= 0) {
     fade_ = fade_target_;
   } else {
@@ -114,6 +115,7 @@ void FieldWorld::fade(int mode, int arg) {
 }
 
 void FieldWorld::begin_entry_fade(int kind) {
+  fade_hold_ = 0;
   fade_ = 1.0f;
   fade_target_ = 0.0f;
   fade_step_ = 1.0f / static_cast<float>(kind == 2 ? kWhiteFadeIn : kRoomFadeIn);
@@ -195,7 +197,7 @@ FieldWorld::BattleRequest FieldWorld::take_battle() {
   return handoff_.battle_req;
 }
 
-void FieldWorld::end_battle(int result_code) {
+void FieldWorld::end_battle(int result_code, int fade_delay) {
   vm_.set_var(script::var::kBattleResult, result_code);
   handoff_.last_battle_code = result_code;
   // A wipe in a fight that is not losable (BATTLE flag 2 clear) is the host's: it loads map 9 (the
@@ -209,6 +211,7 @@ void FieldWorld::end_battle(int result_code) {
   }
   // Field re-entry: a subtractive fade from black over 0x30 ticks.
   begin_entry_fade(0);
+  fade_hold_ = fade_delay;
   // The saved field song is restored after EVERY battle, flag 1 included
   // (the victory song 0x16 / 0x17 and the battle theme are replaced); only BATTLE flag 0x20 skips it (the script plays the next
   // song itself). A song that is still playing is left alone by start_song.
@@ -271,7 +274,9 @@ void FieldWorld::step_fade() {
     for (size_t i = 0; i < 3; ++i) fog_.cur[i] += fog_.step[i];
     if (--fog_.left == 0) fog_.cur = fog_.target;
   }
-  if (fade_ < fade_target_)
+  if (fade_hold_ > 0)
+    --fade_hold_;
+  else if (fade_ < fade_target_)
     fade_ = std::min(fade_target_, fade_ + fade_step_);
   else if (fade_ > fade_target_)
     fade_ = std::max(fade_target_, fade_ - fade_step_);

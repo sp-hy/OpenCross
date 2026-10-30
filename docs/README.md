@@ -72,7 +72,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 
 - Deterministic baselines for refactor checks: `alu_chair`, `art_swap`, `battle_hud` (build a baseline exe first and compare). Standalone `[Debug] Battle=` routes (`battle_run`, `battle_chain`, `battle_dash`, `battle_dash2`, `battle_defend`, `results_heal`, `smoke_battle`) set `[Debug] Seed`, so their RNG is seeded; the fights still run in real time, so only the outcome of a frame-paced run repeats exactly.
 - The route language, the `.env` convention, input records and replays, and the room sweep are specified in [`formats/routes.md`](formats/routes.md).
-- Others include `save`, `continue_save`, `ngplus_title`, `ngplus_continue`, `ngplus_ending`, `pause`, `pause_dialog`, `party_rotate`, `entry_fade` (room-entry fade-in after Continue / `Room=` / `load`), `grand_slam` (the FE 75 monster picker and its monster-party battle) and `true_ending` (Opassa Beach to the planet scene; needs a forged save in its scratch save folder, see the route's `.ini`).
+- Others include `save`, `continue_save`, `ngplus_title`, `ngplus_continue`, `ngplus_ending`, `pause`, `pause_dialog`, `party_rotate`, `entry_fade` (room-entry fade-in after Continue / `Room=` / `load`), `grand_slam` (the FE 75 monster picker and its monster-party battle) and `true_ending` (Opassa Beach to the planet scene; forges its save from `tmp\save.dat` with `true_ending.prep.ps1`).
 
 ## 4. Validating behaviour
 

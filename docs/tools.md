@@ -296,6 +296,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 |---|---|---|---|
 | `OPENCROSS_GAMEDIR` | `tools/tool_util.cpp` (`octext`, `ochd`, `ocmovie`, `ocstage`), `tools/occ.cpp`, `tools/ocprd.cpp`, `tools/ocaudio.cpp`, `tools/ocbattle.cpp`, `src/game/battle/seq_tool.cpp`, `tools/py/cc_save_forge.py`, `tests/test_*.cpp` | folder path | Game folder used by the dev tools, the unit tests and `cc_save_forge.py` when no `-g` / `--game` is given. |
 | `OC_QUIET` | `src/platform/window.cpp`, `src/audio/mixer.cpp`, `src/app/app_boot.cpp` (no Steam connection); set by `src/game/battle/demo_main.cpp` (`--frames`), `tests/routes/run.ps1`, `tools/ours_cast34.ps1` | set | Test window is shown without activation and never focusable, and the mixer output gain is 0. |
+| `OC_SOURCE_SAVE` | `tests/routes/true_ending.prep.ps1` | file path | The save.dat the route forges its Opassa Beach save from (default `tmp\save.dat`). |
 | `OC_FRAMETIME` | `src/app/app_run.cpp` | set; `2` | Logs the wall time of main-loop iterations while a field-to-battle hand-over runs: only those over 20 ms, or every iteration when the value starts with `2`. |
 | `OC_NO_WARP` | `src/app/app_draw.cpp` | `1`, `2` | A/B check of the screen ripple: `1` draws its frame unwarped; `2` (classic art) shows only the deep part, unwarped. |
 | `OC_SLOT_DUMP` | `src/app/app_route.cpp` | path prefix | A route `request slotdump N` writes the encoded save block to `<prefix>N.bin` (an error is logged when unset). |
@@ -622,6 +623,7 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 | `tools/rde_snap.py` | `out.png [width] [height]` | PNG | Best-of-burst screenshot of the RDE window (default 640x512). |
 | `tools/rde_watch.py` | `seconds` | brightest-of-burst mean luma every 0.5 s on stdout | Watches the RDE window brightness. |
 | `tools/rde_montage.py` | `dir out.png n [start end]` | 4-column montage PNG | Tiles n evenly spaced frames of a capture folder. |
+| `tools/py/rde_bg.py` | library: `launch(save)`, `attach(pid)`, `press`, `hold`, `guest`, `Frames`; needs `windows-capture`, OpenCV | none | Drives RDE in the background: no focus change, in-memory pad input, frame capture while covered. Same save rules as `rde_save_redirect.py`. |
 | `tools/py/rde_save_redirect.py` | `--save PATH [--card1 FILE.mcd] [--title-wait S] [--keys LIST] [--shot out.png] [--attach] [--keep-open] [--lang N]`; needs `pydirectinput` | optional 640x512 PNG | Launches RDE, waits for the title, points its save path at a copy or forged `save.dat` and optionally swaps the memory card 1 image; refuses paths inside `Documents\My Games`. Importable: `launch`, `Rde.redirect`, `Rde.replace_card1`, `check_save_path`. Run it under the RDE lock when several agents share the machine. |
 
 ### 5.7 Save checks

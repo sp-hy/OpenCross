@@ -627,7 +627,7 @@ void GameFlow::draw(const render::Frame& frame, float vw, float vh, bool resume)
     if (ngp_slots_) slots_.draw(*list_, kit_);
     else title_.draw(*list_);
     list_->flush(kit_.sprites(), frame, ui::Canvas::fit(vw, vh), resume);
-    if (!ngp_slots_ && title_.fade_alpha() > 0.001f) draw_veil(frame, vw, vh, title_.fade_alpha());
+    if (!ngp_slots_ && title_.fade_alpha() > 0.001f) draw_veil(frame, vw, vh, title_.fade_alpha(), title_.fade_subtracts());
     return;
   }
   switch (machine_.state()) {
@@ -640,7 +640,7 @@ void GameFlow::draw(const render::Frame& frame, float vw, float vh, bool resume)
     default: break;
   }
   list_->flush(kit_.sprites(), frame, ui::Canvas::fit(vw, vh), resume);
-  if (machine_.state() == FlowState::Title && title_.fade_alpha() > 0.001f) draw_veil(frame, vw, vh, title_.fade_alpha());
+  if (machine_.state() == FlowState::Title && title_.fade_alpha() > 0.001f) draw_veil(frame, vw, vh, title_.fade_alpha(), title_.fade_subtracts());
 }
 
 void GameFlow::begin_boot_logo() {
@@ -683,11 +683,14 @@ void GameFlow::draw_boot_logo(const render::Frame& frame, float vw, float vh) {
 
 // A black veil of opacity `alpha` in window space over the screen in use: the 4:3 fit, or the whole widened frame in widescreen
 // (Letterbox::veil_rect; widescreen: the title's 3D sea beside the 4:3 title menu fades with it).
-void GameFlow::draw_veil(const render::Frame& frame, float vw, float vh, float alpha) {
+void GameFlow::draw_veil(const render::Frame& frame, float vw, float vh, float alpha, bool subtract) {
   const render::Letterbox::Rect rect = render::Letterbox::veil_rect(vw, vh);
   render::SpriteBatch& sprites = kit_.sprites();
   sprites.begin(frame, vw, vh, true);
-  sprites.draw(kit_.white(), rect.x, rect.y, rect.w, rect.h, 0, 0, 1, 1, render::pack_rgba(0, 0, 0, static_cast<u8>(std::min(1.0f, alpha) * 255.0f)));
+  const u8 level = static_cast<u8>(std::min(1.0f, alpha) * 255.0f);
+  if (subtract) sprites.set_blend(render::BlendMode::Subtract);
+  sprites.draw(kit_.white(), rect.x, rect.y, rect.w, rect.h, 0, 0, 1, 1, subtract ? render::pack_rgba(level, level, level, 255) : render::pack_rgba(0, 0, 0, level));
+  if (subtract) sprites.set_blend(render::BlendMode::Alpha);
   sprites.end();
 }
 

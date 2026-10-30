@@ -590,8 +590,6 @@ struct BattleResults::Impl {
   }
 
   // ---- state -----------------------------------------------------------------------------------------------------------
-  // The exit sound (0x41) is due on the next tick.
-  bool exit_sfx = false;
   void play(int id) {
     if (sfx && !muted) sfx(id);
   }
@@ -631,12 +629,10 @@ struct BattleResults::Impl {
       if (cur >= static_cast<int>(gain_list.size())) after_powerups();
       else show_member(gain_list[static_cast<size_t>(cur)]);
     } else if (phase == Phase::Spoils) {
-      play(8);
-      // Exit: fade to black over 0x1E frames while the panels slide out. The exit sound (0x41) plays on the next frame, after 8
-      // sounded for one frame.
+      // Exit: fade to black over 0x1E frames while the panels slide out. The exit sound (0x41) replaces the confirm sound.
+      play(0x41);
       phase = Phase::Exit;
       pt = 0;
-      exit_sfx = true;
     }
   }
   void begin_spoils() {
@@ -658,7 +654,6 @@ struct BattleResults::Impl {
   }
   void tick() {
     ++age, ++pt, ++page_age;
-    if (exit_sfx) exit_sfx = false, play(0x41);
     if (debounce > 0) --debounce;
     if (auto_on && page_age >= kAutoHold && (phase == Phase::PowerUp || phase == Phase::Heal || phase == Phase::Healed || phase == Phase::Spoils)) confirm();
     if (phase == Phase::Exit) {
@@ -844,7 +839,6 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
     impl.drops.push_back(std::move(drop));
   }
-  impl.exit_sfx = false;
   impl.phase = Phase::PowerUp;
   impl.age = impl.pt = impl.debounce = 0;
   impl.acc = 0;

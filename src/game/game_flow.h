@@ -245,7 +245,7 @@ class GameFlow {
   bool owns_screen() const;
   void draw(const render::Frame& frame, float view_w, float view_h, bool resume = false);
   void draw_party(ui::DrawList& dl);
-  void draw_veil(const render::Frame& frame, float vw, float vh, float alpha);
+  void draw_veil(const render::Frame& frame, float vw, float vh, float alpha, bool subtract = false);
 
   FlowState state() const { return machine_.state(); }
   FlowMachine& machine() { return machine_; }

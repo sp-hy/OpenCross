@@ -106,7 +106,7 @@ void App::start_field_battle() {
   }
 }
 
-void App::finish_field_battle() {
+void App::finish_field_battle(bool after_results) {
   int code = 0;
   switch (battle.outcome()) {
     case battle::Outcome::Victory: code = 0; break;
@@ -133,7 +133,7 @@ void App::finish_field_battle() {
         save_char.cur_hp = static_cast<u16>(std::clamp(hp[i], 1, static_cast<int>(save_char.max_hp)));
       }
   }
-  world.end_battle(code);
+  world.end_battle(code, after_results ? game::BattleResults::kFieldFadeDelay : 0);
   if (code == 1 && !(battle_flags & 2)) {
     // Party wiped in a fight that is not losable (BATTLE flag 2 clear): the next map becomes 9 (the game-over room, map digit 009 = the
     // room file after the title room 008) and is loaded; its own script shows the screen and leaves. The title is only the fallback

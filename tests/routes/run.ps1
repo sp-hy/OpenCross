@@ -10,6 +10,9 @@ Remove-Item (Join-Path $PSScriptRoot "$Name.log") -ErrorAction SilentlyContinue
 $envFile = Join-Path $PSScriptRoot "$Name.env"
 $routeEnv = @()
 if (Test-Path $envFile) { Get-Content $envFile | Where-Object { $_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)$' } | ForEach-Object { Set-Item "env:$($Matches[1])" $Matches[2]; $routeEnv += $Matches[1] } }
+# Optional <name>.prep.ps1: run first, to generate the scratch files the route needs (e.g. a forged save); a non-zero exit stops the run.
+$prep = Join-Path $PSScriptRoot "$Name.prep.ps1"
+if (Test-Path $prep) { & $prep; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
 # The route's window takes no focus and plays no sound (OC_QUIET).
 $env:OC_QUIET = "1"
 $p = Start-Process -FilePath $exe -ArgumentList @('--config', "`"$ini`"") -WorkingDirectory $root -Wait -PassThru

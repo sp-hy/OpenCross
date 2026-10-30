@@ -45,6 +45,8 @@ The patch serves three things and passes everything else through:
 - `GAME00_MOUSEOFF.png` / `_MOUSEON.png`: the Exit plate with its text painted out, and OPENCROSS assembled from the letters of the English Chrono Cross and Credits buttons (no button has a P, so it is built from R's stem and the top of its bowl, mirrored to close a taller bowl), redrawn with a shadow. The art is the same in every language.
 - `BASE0.png`: the shadow mask read from the bottom button's white strip removes the five baked shadows (divide) and draws six (multiply).
 
+Under Proton the launcher runs on Wine Mono, and Wine prefers its own `xinput9_1_0` unless the game's launch options say `WINEDLLOVERRIDES="xinput9_1_0=n,b" %command%`. Mono's `_Assembly` COM interface declares the `ModuleResolve` event last, where the CLR's declares it before `GetType_4`, so every method from there on is in a different slot, `CreateInstance` included. The patch is therefore an attribute on its own assembly, and the proxy starts it with `GetCustomAttributes`, which is in the same slot on both.
+
 Nothing is written to disk. With `opencross.exe` missing from the game folder, or when the art cannot be built, the launcher stays as it shipped. Removing `XINPUT9_1_0.dll` undoes everything.
 
 ## 4. Build and delivery

@@ -11,6 +11,7 @@ All files live in `tests\routes\` and share a name:
 | `<name>.ini` | The config the run uses (`--config`). Holds `[Debug] Script=...`, `Seed`, `ScriptSpeed`, `[Video] VSync=0`, `[Paths] SaveDir`, `ArtMode`. Keys it omits take their defaults. |
 | `<name>.txt` | The route script (section 3). |
 | `<name>.env` | Optional. One `KEY=VALUE` per line (`KEY` = letters, digits, `_`, not starting with a digit); other lines (comments, blanks) are ignored. Set for this run only and removed afterwards. Used for developer switches such as `OC_BATTLE_NORUN`, `OC_ROUTE_ELEM`, `OC_FXDBG`, `OC_BATTLE_AUDIT`. |
+| `<name>.prep.ps1` | Optional. Run by `run.ps1` before the route starts, to generate the scratch files it needs (`true_ending.prep.ps1` forges the save the route continues from with `tools\py\cc_save_forge.py`, from `tmp\save.dat` or `$env:OC_SOURCE_SAVE`). A non-zero exit code stops the run. |
 | `<name>.log` | Written by the run, next to the ini (a `--config` run always logs). Deleted by `run.ps1` before the run starts. |
 | `shots\` | Next to the ini (`tests\routes\shots\`), created at start. Relative screenshot names land here. |
 | `shots\route_failed.png` | Screenshot taken when a route check fails (section 4). |

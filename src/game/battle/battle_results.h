@@ -86,8 +86,9 @@ class BattleResults {
 
   // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit fade to black 0x1E.
   static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180;
-  // From the last confirm to the field's return (done(): the field fades in and restores its song, which cuts the victory music).
-  static constexpr int kFieldReturn = 43;
+  // From the last confirm to the field's return (done(): the field restores its song, which cuts the victory music); the field's
+  // fade-in from black starts kFieldFadeDelay ticks after that.
+  static constexpr int kFieldReturn = 43, kFieldFadeDelay = 8;
 
  private:
   struct Impl;
