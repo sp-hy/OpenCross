@@ -243,6 +243,11 @@ void MainMenu::Impl::build() {
   }
   cmds.insert(cmds.end(), std::make_move_iterator(key_caps.begin()), std::make_move_iterator(key_caps.end()));
   key_caps.clear();
+  if (transition != Transition::None) {
+    const int span = transition == Transition::Open ? kOpenFade : kBackFade;
+    group(Centre);
+    rect(-canvas_s, 0, kCanvasW + 2.0f * canvas_s, kCanvasH, rgb(0, 0, 0, 255 * std::min(transition_t, span) / span));
+  }
 }
 
 // Face of a font slot (kb / bn / ik); falls back to the label face.
@@ -534,10 +539,10 @@ void MainMenu::Impl::btn(float x, float y, int slot_index, u32 colour) {
   cmds.resize(first);
 }
 
-void MainMenu::Impl::portrait_strip(int character, float x, u32 col) {
+void MainMenu::Impl::portrait_strip(int character, float x, u32 col, float dy) {
   if (const Tex* tex = portrait(character)) {
-    Img(tex, PX(x), PY(0), PX(64), PY(224), 0, 0, 0.5f, 1, col);
-    Img(tex, PX(x), PY(224), PX(64), PY(224), 0.5f, 0, 1, 1, col);
+    Img(tex, PX(x), PY(dy), PX(64), PY(224), 0, 0, 0.5f, 1, col);
+    Img(tex, PX(x), PY(224 + dy), PX(64), PY(224), 0.5f, 0, 1, 1, col);
   }
 }
 

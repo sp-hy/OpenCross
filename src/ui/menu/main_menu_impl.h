@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "platform/keymap.h"
 #include "ui/lowres.h"
 #include "ui/menu/main_menu.h"
 #include "ui/menu/menu_common.h"
@@ -111,6 +112,16 @@ struct MainMenu::Impl {
   // Debug tab tools were used: the save screen shows a warning (saving itself stays allowed).
   bool save_locked = false;
   int frames = 0;
+  // Screen transitions, in ticks. Open (a screen opened from the main list or the Use / Allocate list): the screen fades linearly to
+  // black over kOpenFade ticks while the member cards slide right and, on the way to a character screen, the other portraits drop and the
+  // chosen one moves to the first slot. Back (a screen left for the main list): the screen fades over kBackFade ticks and stays black.
+  // Both last kTransitionTicks; the next tick cuts to the new screen at full brightness. The menu takes no input meanwhile.
+  enum class Transition { None, Open, Back };
+  static constexpr int kOpenFade = 30, kBackFade = 8, kTransitionTicks = 32;
+  Transition transition = Transition::None;
+  int transition_t = 0, back_cursor = 0;
+  bool back_to_pick = false, portraits_away = false;
+  MenuScreen open_target = MenuScreen::Main;
   // Last-used input device: false = gamepad glyphs, true = keyboard glyphs.
   bool kb_mode = false;
   // pick_for: 0 status, 1 grid, 2 equip.
@@ -242,8 +253,14 @@ struct MainMenu::Impl {
   void say(const std::string& message_text, int duration_frames = 150);
   Nav poll(const platform::Input& in);
   void open(GameState& state, bool allow_save);
+  // enter / back_to_main go through the screen transition where one applies; show / land_on_main switch at once.
   void enter(MenuScreen target);
-  void back_to_main(int cursor);
+  void show(MenuScreen target);
+  // to_pick: land on the member pick again (cursor on the member just used) instead of the plain list.
+  void back_to_main(int cursor, bool to_pick = false);
+  void land_on_main(int cursor, bool to_pick);
+  // The member pick for Allocate: the Use / Allocate list stays on screen beside it.
+  bool allocate_pick() const { return screen == MenuScreen::Main && sub == 1 && pick_for == 1; }
 
   // Defined in main_menu_save.cpp.
   void load_previews();
@@ -448,7 +465,11 @@ struct MainMenu::Impl {
   void scroll_arrow(float x, float y, bool up);
   void pointer(float x, float y, bool left);
   void btn(float x, float y, int slot_index, u32 colour = kWhite);
-  void portrait_strip(int character, float x, u32 col);
+  // A pad glyph fills its cell; a key cap sits inside it (left / top inset and size as fractions of the cell).
+  static constexpr float kKeyCapLeft = 0.1f, kKeyCapTop = 0.1f, kKeyCapW = 10.4f / 12.0f, kKeyCapH = 11.7f / 14.0f;
+  void action_glyph(platform::Action action, float x, float y, float w, float h);
+  void key_item_line(const std::string& description, float x, float y, float maxw);
+  void portrait_strip(int character, float x, u32 col, float dy = 0.0f);
   float fit_rel(const std::u32string& str, float maxw, float rel);
   void TPfit(float x, float y, const std::u32string& str, float maxw, u32 colour = kText, float rel = 0.9f);
 

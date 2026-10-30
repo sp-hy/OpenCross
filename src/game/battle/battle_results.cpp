@@ -632,12 +632,11 @@ struct BattleResults::Impl {
       else show_member(gain_list[static_cast<size_t>(cur)]);
     } else if (phase == Phase::Spoils) {
       play(8);
-      // Exit: white fade over 0x1E frames, the panels slide out, 30 frames. The exit sound (0x41) plays on the next frame,
-      // after 8 sounded for one frame.
+      // Exit: fade to black over 0x1E frames while the panels slide out. The exit sound (0x41) plays on the next frame, after 8
+      // sounded for one frame.
       phase = Phase::Exit;
       pt = 0;
       exit_sfx = true;
-      if (on_exit) on_exit();
     }
   }
   void begin_spoils() {
@@ -664,7 +663,11 @@ struct BattleResults::Impl {
     if (auto_on && page_age >= kAutoHold && (phase == Phase::PowerUp || phase == Phase::Heal || phase == Phase::Healed || phase == Phase::Spoils)) confirm();
     if (phase == Phase::Exit) {
       slide = slide < 1.0f ? 24.0f : slide * 1.125f;
-      if (pt >= kExit) phase = Phase::Done;
+      // The screen stays black after the fade; the victory music plays on until the field returns.
+      if (pt >= kFieldReturn) {
+        phase = Phase::Done;
+        if (on_exit) on_exit();
+      }
     } else {
       // settles from 0x18
       slide -= slide / 8.0f;
@@ -903,9 +906,9 @@ void BattleResults::draw(const render::Frame& frame, float vw, float vh, bool re
   impl.draw_panel();
   impl.draw_headline(impl.phase == Phase::Spoils);
   impl.shift = 0;
-  // fades: from black over the first 0x3C frames, to white over the exit's 0x1E frames
+  // fades: from black over the first 0x3C frames, to black over the exit's 0x1E frames
   if (impl.age < kFadeIn) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(0, 0, 0, 255 - 255 * impl.age / kFadeIn));
-  if (impl.phase == Phase::Exit) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(255, 255, 255, std::min(255, 255 * impl.pt / kExit)));
+  if (impl.phase == Phase::Exit) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(0, 0, 0, std::min(255, 255 * impl.pt / kExit)));
   impl.sprites->end();
 }
 

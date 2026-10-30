@@ -9,6 +9,8 @@
 namespace oc::platform {
 
 std::filesystem::path exe_dir();
+// The running exe's own file; empty when unknown.
+std::filesystem::path exe_path();
 
 // Config value if it is a valid install, else the exe dir, else its parents. Empty path if nothing is found.
 std::filesystem::path find_game_dir(std::string_view configured);

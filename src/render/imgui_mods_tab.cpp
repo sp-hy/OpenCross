@@ -14,6 +14,8 @@
 #pragma warning(pop)
 #endif
 
+#include "core/log.h"
+#include "platform/paths.h"
 #include "render/imgui_layer.h"
 #include "render/texture_registry.h"
 #include "vfs/vfs.h"
@@ -103,6 +105,22 @@ void draw_dump_block(platform::Config& cfg, bool* settings_dirty) {
 
 }  // namespace
 
+void open_model_viewer() {
+  const std::u8string exe = platform::exe_path().u8string();
+  const char* args[] = {reinterpret_cast<const char*>(exe.c_str()), "modelview", nullptr};
+  // No standard streams: the game has no console to hand down.
+  const SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, args);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+  SDL_Process* process = SDL_CreateProcessWithProperties(props);
+  SDL_DestroyProperties(props);
+  if (process) SDL_DestroyProcess(process);
+  else log::warn("model viewer did not start: {}", SDL_GetError());
+}
+
 void set_texture_dump_hooks(TextureDumpHooks hooks) { g_dump_hooks = std::move(hooks); }
 
 std::vector<vfs::ModPref> mod_prefs(const platform::Config& cfg) {
@@ -139,6 +157,10 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   ImGui::SameLine();
   if (ImGui::Button("Discover Mods")) SDL_OpenURL("https://www.nexusmods.com/games/chronocrosstheradicaldreamersedition");
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) render::ImGuiLayer::tooltip("Opens the game's page on Nexus Mods in your web browser.");
+  ImGui::SameLine();
+  if (ImGui::Button("Model Viewer")) open_model_viewer();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    render::ImGuiLayer::tooltip("Opens a separate window that shows the character and monster models, with and without the enabled mods.");
   ImGui::SameLine();
   ImGui::AlignTextToFramePadding();
   ImGui::TextDisabled("Top of the list wins a file several mods replace.");

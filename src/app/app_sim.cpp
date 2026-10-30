@@ -216,6 +216,8 @@ bool App::pause_modal(const platform::Input& in) {
   if (!pause_ok) return false;
   const bool start_edge = in.key_pressed[platform::kStartKey] || start_tap;
   if (!pause_screen.active()) {
+    // Not over the title scene (its logo / attract movies) or the title's own screens (menu, slot list, name entry).
+    if (flow_ready && (flow.scene_mode() || flow.owns_screen())) return false;
     const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active();
     if (start_edge && (over_battle || movie_open)) {
       open_pause();
@@ -250,8 +252,11 @@ void App::open_pause() {
   pause_screen.open(world.game_state().option(ui::opt::kVibration), world_row, world_ok && world.vm().var(0x52) != 0);
 }
 
-// `ticks` field ticks (or battle / menu / movie time) for the input `in` over `dt` seconds.
-void App::advance(const platform::Input& in, double dt, int ticks) {
+// `ticks` field ticks (or battle / menu / movie time) for the input `raw` over `dt` seconds.
+void App::advance(const platform::Input& raw, double dt, int ticks) {
+  // Every screen below reads the left stick as the d-pad.
+  platform::Input in = raw;
+  platform::stick_to_dpad(in, stick_dpad);
   // Play time: the retail main loop adds the elapsed vsyncs every iteration, so it runs through field, battle,
   // results, menus and shops alike (+1 per 60 Hz frame in a battle). Not during a movie (the host player owns the loop) or the
   // title scene (New Game / a load replaces the state). The options window pauses the simulation (ticks = 0).
@@ -275,10 +280,10 @@ void App::advance(const platform::Input& in, double dt, int ticks) {
       apply_flow_action(fa);
       return;
     }
-    // Field main menu: the fade-out is over, the menu opens under the veil.
+    // Field main menu: the fade-out and the black hold are over, the menu cuts in.
     if (flow.take_open_ready() && menu_ok && menu.closed()) {
       open_main_menu(false);
-      log::info("fade: menu opened after the fade-out, fading in");
+      log::info("fade: menu opened after the fade-out");
       return;
     }
   }
@@ -336,6 +341,8 @@ void App::advance(const platform::Input& in, double dt, int ticks) {
     if (world.room_name() == game::kTitleRoom) {
       const auto ph = flow.title().phase();
       apply_flow_action(flow.update(in, static_cast<float>(dt)));
+      // Cancel brought the prompt back from the menu: the room's song starts again; the scene keeps running.
+      if (ph == ui::TitleScreen::Phase::Menu && flow.title().phase() == ui::TitleScreen::Phase::Prompt) world.restart_song();
       // Hold the idle timer: in the menu, and while the Debug free camera is on (no attract demo / opening FMV while flying the sea).
       if (ph == ui::TitleScreen::Phase::Menu || ph == ui::TitleScreen::Phase::FadeOut || game::free_cam().on()) world.vm().set_var(0x404, 0);
     // An attract demo is running: any button returns to the title logo.

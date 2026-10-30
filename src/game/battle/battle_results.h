@@ -4,7 +4,7 @@
 // the six stats, the element-grid thumbnail, an "UP" marker on every stat that grew) and the right-hand panel with the
 // "PowerUp" page (per member: the stat-up labels and the gains, or the star-up message after a boss), the gold line and
 // finally the "Spoils" page (dropped items / elements). Confirm advances member -> member -> [heal-item menu when a member
-// is hurt and the grids still hold unused healing elements] -> spoils -> exit (white fade, panels slide out).
+// is hurt and the grids still hold unused healing elements] -> spoils -> exit (black fade, panels slide out).
 // The heal menu changes only party HP: the host reads it back with take_final_hp() after done() and writes it over the
 // HP that apply_battle_result stored (the HP gain of the growth is added to the current HP here, as are the heals). Both art modes draw the same btlexit-levu / btend PNGs;
 // original art only swaps the font files (small_font_*) and the portrait folder (hd/battle/face/1999).
@@ -51,7 +51,7 @@ class BattleResults {
   void set_portrait_set(const std::string& set);
   // Global sound effects (effect00 ids): 0x47 screen open, 0x14 star-up, 1 cursor, 6 cancel, 8 confirm, 0x41 exit.
   void set_sfx(std::function<void(int)> fn);
-  // Called once when the screen exits (the host stops the victory music there, like the view did on its panel).
+  // Called once when the screen is done, kFieldReturn ticks after the last confirm (the host stops the victory music there).
   void set_on_exit(std::function<void()> fn);
   // [Video] Widescreen: `canvas_columns` = layer columns per side the wallpaper and fades extend by; [Video] WideHud: `layout_columns` =
   // the columns the portraits / rows (left) and the panel (right) move out by.
@@ -82,8 +82,10 @@ class BattleResults {
   // Test hook: the heal menu's state (route assertions): -1 not offered, else the cursor (0 heal, 1 heal + stock, 2 do not heal).
   int heal_cursor() const;
 
-  // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit flash + wait 0x1E.
+  // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit fade to black 0x1E.
   static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180;
+  // From the last confirm to the field's return (done(): the field fades in and restores its song, which cuts the victory music).
+  static constexpr int kFieldReturn = 43;
 
  private:
   struct Impl;

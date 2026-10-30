@@ -1,4 +1,4 @@
-# Title route: cold boot -> logo FMV (title room script) -> logo scene behind the title screen -> menu over the scene.
+# Title route: cold boot -> logo FMV (title room script) -> logo scene behind the title screen -> menu over the scene -> back to the prompt.
 0 wait flow title 300
 - wait movie start 300
 - wait 60
@@ -12,4 +12,8 @@
 - tap confirm                         # any button: the menu over the scene
 - wait 60
 - screenshot tt_04_menu.png
+- wait 10
+- tap cancel                          # Cancel: back to the prompt through black, the song starts again
+- wait 90
+- screenshot tt_05_prompt.png
 - quit

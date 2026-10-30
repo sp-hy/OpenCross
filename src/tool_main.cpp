@@ -19,6 +19,7 @@ int ocbattleseq_main(int, char**);
 int ocflow_main(int, char**);
 int ocmenudemo_main(int, char**);
 int ocshopdemo_main(int, char**);
+int ocmodelview_main(int, char**);
 
 namespace {
 
@@ -42,6 +43,7 @@ constexpr Tool kTools[] = {
     {"ocflow", ocflow_main, "title / name entry / slot list screens in a window"},
     {"ocmenudemo", ocmenudemo_main, "main menu in a window (tmp/save.dat slot 4)"},
     {"ocshopdemo", ocshopdemo_main, "shops in a window (tmp/save.dat slot 4)"},
+    {"ocmodelview", ocmodelview_main, "character models in a window: orbit, animation clips, original / modded"},
 };
 
 void attach_console() {

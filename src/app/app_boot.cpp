@@ -261,6 +261,10 @@ void App::init_flow() {
       flow.machine().set_seed(config.debug_seed);
       flow.set_art_mode(platform::art_is_hd(config.art_mode) ? ui::ArtMode::Hd : ui::ArtMode::Original);
       flow.set_sfx(ui_sfx);
+      // The press-start chime: each sound on its own field sound slot (centre pan, full volume), so none cuts another.
+      flow.title().set_layered_sfx([this](int id, int layer) {
+        if (sfx_ok) akao_sfx.play_field(0x100 + id, 127, 64, 1u << (layer + 8));
+      });
       // The title room's script plays no song (the title FMV carries the audio).
       flow.set_title_song(-1);
     } else {

@@ -4,12 +4,14 @@
 
 #include <SDL3/SDL_scancode.h>
 
+#include <algorithm>
 #include <format>
 
 #include <imgui.h>
 
 #include "core/log.h"
 #include "game/free_cam.h"
+#include "render/imgui_mods_tab.h"
 #include "script/field_script.h"
 
 namespace oc::app {
@@ -162,15 +164,53 @@ game::DebugTools::Ctx App::debug_tools_ctx() {
 // [Debug] Panels=1 opens the tab at start.
 void App::init_debug_tab() {
   ui.add_tab("Debug", [this] {
-    if (!log_forced) {
-      if (ImGui::Checkbox("Write log file", &config.debug_log)) {
-        if (config.debug_log) log::init(log_path, true), log::info("log enabled");
-        else log::info("log disabled"), log::close();
-        ui.mark_changed();
+    using render::ImGuiLayer;
+    // Top: the tools (model viewer, log file) and the sound test, side by side.
+    if (ImGuiLayer::begin_panes("dbg_top")) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGuiLayer::section("Tools");
+      if (ImGuiLayer::begin_rows("dbg_tools_rows")) {
+        ImGuiLayer::row("Model viewer", "Opens a separate window that shows the character and monster models, with and without the enabled mods.");
+        if (ImGui::Button("Open##model_viewer")) render::open_model_viewer();
+        if (!log_forced) {
+          ImGuiLayer::row("Write log file", "Writes opencross.log next to the exe (engine messages, warnings, errors) for bug reports. Off by default; "
+                                            "takes effect at once and is remembered.");
+          if (ImGui::Checkbox("##debug_log", &config.debug_log)) {
+            if (config.debug_log) log::init(log_path, true), log::info("log enabled");
+            else log::info("log disabled"), log::close();
+            ui.mark_changed();
+          }
+        }
+        ImGuiLayer::end_rows();
       }
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        render::ImGuiLayer::tooltip("Writes opencross.log next to the exe (engine messages, warnings, errors) for bug reports. Off by default; "
-                                    "takes effect at once and is remembered.");
+      ImGui::TableNextColumn();
+      // Sound test: picks a global sound id (effect00) and plays it on the menus' channel when Play is pressed.
+      ImGuiLayer::section("Sound test");
+      if (!sfx_ok) {
+        ImGui::TextDisabled("The sound effects are not loaded.");
+      } else if (ImGuiLayer::begin_rows("dbg_sound_rows")) {
+        constexpr int kCount = audio::SfxBank::kGlobalCount;
+        static int sound_id = 0;
+        static int undefined_id = -1;
+        ImGuiLayer::row("Sound", "A global sound id (0 to 255). < and > step through them, wrapping at the ends.");
+        if (ImGui::Button("<")) sound_id = (sound_id + kCount - 1) % kCount;
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.0f);
+        if (ImGui::InputInt("##sound_id", &sound_id, 0, 0)) sound_id = std::clamp(sound_id, 0, kCount - 1);
+        ImGui::SameLine();
+        if (ImGui::Button(">")) sound_id = (sound_id + 1) % kCount;
+        ImGui::SameLine();
+        if (ImGui::Button("Play")) {
+          audio::SfxProgram program;
+          undefined_id = sfx_bank.make_global(sound_id, program) ? -1 : sound_id;
+          if (undefined_id < 0) akao_sfx.play_menu(sound_id);
+        }
+        ImGuiLayer::row("Id", "The sound in hex, and whether it has a program.");
+        ImGui::Text("0x%02X%s", sound_id, undefined_id == sound_id ? "  not defined" : "");
+        ImGuiLayer::end_rows();
+      }
+      ImGui::EndTable();
     }
     draw_debug_status(debug_field ? &world : nullptr);
     debug_tools.draw(debug_tools_ctx());

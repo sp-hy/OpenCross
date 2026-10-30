@@ -861,6 +861,11 @@ class BattleView {
   static constexpr int kLootDropWait = 80, kLootDropMsg = 40;
   bool fled_outro_ = false;
   int finish_ticks_ = 0;
+  // Victory music, in ticks: kVictoryThemeFade = from the win to the start of the battle theme's fade to silence; kVictoryThemeFadeTicks =
+  // the length of that fade; kVictorySongDelay = from the start of the fade to the victory song.
+  static constexpr int kVictoryThemeFade = 43, kVictoryThemeFadeTicks = 16, kVictorySongDelay = 20;
+  // The victory song still to start (-1 = none).
+  int victory_song_ = -1;
 
   // ui
   Ui ui_ = Ui::Intro;

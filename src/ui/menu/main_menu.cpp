@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdio>
 #include <map>
 
@@ -137,11 +136,8 @@ Nav MainMenu::Impl::poll(const platform::Input& in) {
   auto key_pressed = [&](Action action) { return platform::action_pressed(in, action); };
   auto pad_down = [&](int button) { return in.pad_down[static_cast<size_t>(button)]; };
   auto pad_pressed = [&](int button) { return in.pad_pressed[static_cast<size_t>(button)]; };
-  const float axis_x = in.pad_axis[SDL_GAMEPAD_AXIS_LEFTX], axis_y = in.pad_axis[SDL_GAMEPAD_AXIS_LEFTY];
-  const bool dir[4] = {key_down(Action::Up) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_UP) || axis_y < -0.6f,
-                       key_down(Action::Down) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || axis_y > 0.6f,
-                       key_down(Action::Left) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || axis_x < -0.6f,
-                       key_down(Action::Right) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || axis_x > 0.6f};
+  const bool dir[4] = {key_down(Action::Up) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_UP), key_down(Action::Down) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_DOWN),
+                       key_down(Action::Left) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_LEFT), key_down(Action::Right) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT)};
   bool fire[4]{};
   repeat.poll(dir, fire);
   nav.up = fire[0], nav.down = fire[1], nav.left = fire[2], nav.right = fire[3];
@@ -176,13 +172,25 @@ void MainMenu::Impl::open(GameState& state, bool allow_save) {
   prompt = GridPrompt::None;
   msg.clear();
   frames = 0;
+  transition = Transition::None, transition_t = 0;
   hand_list = -1, hand_settled = 0, hand_step = 0, hand_angle = table_angle(0, 0);
   repeat.reset();
 }
 
-// Switches to a screen with its cursors at their start positions.
+// Opens a screen: from the main list or the Use / Allocate list through the open transition, else at once.
 void MainMenu::Impl::enter(MenuScreen target) {
+  if ((screen == MenuScreen::Main || screen == MenuScreen::ElementChoice) && target != MenuScreen::ElementChoice) {
+    transition = Transition::Open, transition_t = 0, open_target = target;
+    portraits_away = target == MenuScreen::Status || target == MenuScreen::ElementGrid || target == MenuScreen::Equip;
+    return;
+  }
+  show(target);
+}
+
+// Switches to a screen with its cursors at their start positions.
+void MainMenu::Impl::show(MenuScreen target) {
   screen = target;
+  sub = 0;
   msg.clear();
   switch (target) {
     case MenuScreen::Status: profile = true, restart_model(); break;
@@ -197,11 +205,21 @@ void MainMenu::Impl::enter(MenuScreen target) {
   }
 }
 
+// Returns to the main list: from a screen through the back transition, from the Use / Allocate list at once.
+void MainMenu::Impl::back_to_main(int cursor, bool to_pick) {
+  if (screen != MenuScreen::Main && screen != MenuScreen::ElementChoice) {
+    transition = Transition::Back, transition_t = 0, back_cursor = cursor, back_to_pick = to_pick;
+    return;
+  }
+  land_on_main(cursor, to_pick);
+}
+
 // A screen opened from the roster returns to the roster (same row), not to the main list.
-void MainMenu::Impl::back_to_main(int cursor) {
+void MainMenu::Impl::land_on_main(int cursor, bool to_pick) {
   screen = MenuScreen::Main;
   sub = 0;
   main_cur = cursor;
+  if (to_pick) sub = 1, pick_cur = member;
   if (stand_in >= 0) sub = 1, roster = Roster::On, roster_ask = false;
   stand_in = -1;
   msg.clear();
@@ -217,11 +235,21 @@ void MainMenu::Impl::update(const platform::Input& in, int ticks) {
     bool any_pad = false, any_key = false;
     for (bool pressed : in.pad_pressed) any_pad = any_pad || pressed;
     for (bool pressed : in.key_pressed) any_key = any_key || pressed;
-    if (any_pad || std::fabs(in.pad_axis[SDL_GAMEPAD_AXIS_LEFTX]) > 0.5f || std::fabs(in.pad_axis[SDL_GAMEPAD_AXIS_LEFTY]) > 0.5f) kb_mode = false;
+    if (any_pad) kb_mode = false;
     if (any_key) kb_mode = true;
   }
   if (msg_frames > 0 && --msg_frames == 0) msg.clear();
   roster_anim = std::max(0, roster_anim - std::max(ticks, 0));
+  if (transition != Transition::None) {
+    transition_t += std::max(ticks, 0);
+    if (transition_t > kTransitionTicks) {
+      const Transition done = transition;
+      transition = Transition::None;
+      if (done == Transition::Back) land_on_main(back_cursor, back_to_pick);
+      else show(open_target);
+    }
+    return;
+  }
   const Nav nav = poll(in);
   if (screen == MenuScreen::Status && model_view) step_model_camera(nav, std::max(ticks, 0));
   if (frames < 4) return;
@@ -237,8 +265,8 @@ void MainMenu::Impl::update(const platform::Input& in, int ticks) {
     case MenuScreen::Save: update_save(nav); break;
   }
   // the needle eases once per frame on the screens that draw a dial (main list, Use / Allocate toggle, Save / Load list)
-  if (screen == MenuScreen::Main) hand_tick(0, main_cur, table_angle(0, main_cur));
-  else if (screen == MenuScreen::ElementChoice) hand_tick(1, choice_cur, table_angle(1, choice_cur));
+  if (screen == MenuScreen::ElementChoice || allocate_pick()) hand_tick(1, choice_cur, table_angle(1, choice_cur));
+  else if (screen == MenuScreen::Main) hand_tick(0, main_cur, table_angle(0, main_cur));
   else if (screen == MenuScreen::Save) hand_tick(3, top_cur, save_list_angle(top_cur));
 }
 
@@ -305,7 +333,7 @@ void MainMenu::open(GameState& state, bool can_save) { impl_->open(state, can_sa
 void MainMenu::open_save_list(GameState& state) {
   Impl& impl = *impl_;
   impl.open(state, true);
-  impl.enter(MenuScreen::Save);
+  impl.show(MenuScreen::Save);
   impl.save_only = true;
   impl.save_phase = 2;
   impl.save_card = impl.page && !impl.page->empty() ? 0 : 1;
@@ -360,7 +388,7 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
   impl.stand_in = -1;
   impl.save_only = false;
   impl.msg.clear();
-  impl.enter(screen);
+  impl.show(screen);
   impl.frames = 10;
   impl.model_clock = {};
   if (screen == MenuScreen::ElementGrid) {

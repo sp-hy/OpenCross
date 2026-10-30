@@ -27,6 +27,11 @@ struct Input {
   std::array<float, kAxes> pad_axis{};
 };
 
+// The left stick as the d-pad: a direction tilted past half way holds that d-pad button and presses it on the first call it does, so a
+// screen moves its cursor with the stick at its own d-pad repeat. `held` keeps the stick's directions (up, down, left, right) between
+// calls.
+void stick_to_dpad(Input& input, std::array<bool, 4>& held);
+
 class Window {
  public:
   using EventHook = void (*)(const SDL_Event&, void* user);

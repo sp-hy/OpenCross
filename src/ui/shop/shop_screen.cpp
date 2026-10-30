@@ -191,11 +191,10 @@ struct ShopScreen::Impl {
     auto key_pressed = [&](Action action) { return platform::action_pressed(in, action); };
     auto pad_down = [&](int button) { return in.pad_down[static_cast<size_t>(button)]; };
     auto pad_pressed = [&](int button) { return in.pad_pressed[static_cast<size_t>(button)]; };
-    const float axis_x = in.pad_axis[SDL_GAMEPAD_AXIS_LEFTX], axis_y = in.pad_axis[SDL_GAMEPAD_AXIS_LEFTY];
-    const bool down[5] = {key_down(Action::Up) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_UP) || axis_y < -0.6f,
-                          key_down(Action::Down) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || axis_y > 0.6f,
-                          key_down(Action::Left) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || axis_x < -0.6f,
-                          key_down(Action::Right) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || axis_x > 0.6f,
+    const bool down[5] = {key_down(Action::Up) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_UP),
+                          key_down(Action::Down) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_DOWN),
+                          key_down(Action::Left) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_LEFT),
+                          key_down(Action::Right) || pad_down(SDL_GAMEPAD_BUTTON_DPAD_RIGHT),
                           key_down(Action::Ok) || pad_down(SDL_GAMEPAD_BUTTON_SOUTH)};
     bool fire[5]{};
     repeat.poll(down, fire);

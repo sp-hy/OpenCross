@@ -79,7 +79,6 @@ public:
   // Starts the (new) exe with the same command line; call once the game has shut down. False when CreateProcess failed.
   static bool restart();
   static void cleanup_after_update();
-  static std::filesystem::path exe_path();
 
 private:
   void run(bool install);

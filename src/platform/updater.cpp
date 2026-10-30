@@ -13,6 +13,7 @@
 
 #include "core/log.h"
 #include "core/version.h"
+#include "platform/paths.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -433,20 +434,6 @@ void Updater::set_failed(std::string msg) {
   std::lock_guard lock(mu_);
   st_.state = State::Failed;
   st_.message = std::move(msg);
-}
-
-fs::path Updater::exe_path() {
-#ifdef _WIN32
-  std::wstring buf(MAX_PATH, L'\0');
-  for (;;) {
-    const DWORD length = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
-    if (length == 0) return {};
-    if (length < buf.size()) return fs::path(buf.substr(0, length));
-    buf.resize(buf.size() * 2);
-  }
-#else
-  return {};
-#endif
 }
 
 // The worker: `install` false = the release check, true = the download + swap. The downloaded exe's own version resource must be

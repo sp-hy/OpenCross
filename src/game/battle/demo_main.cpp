@@ -309,9 +309,11 @@ int ocbattleview_main(int argc, char** argv) {
       dbg.overlay_key = true;
       view.set_debug(dbg);
       platform::Input input;
+      std::array<bool, 4> stick_dpad{};
       platform::FrameTimer timer;
       int frames = 0, lost_frames = 0;
       while (rc == 0 && window.pump(input)) {
+        platform::stick_to_dpad(input, stick_dpad);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
         if (input.key_pressed[SDL_SCANCODE_F1]) {
           hd = !hd;

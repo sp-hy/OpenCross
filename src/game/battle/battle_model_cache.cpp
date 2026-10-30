@@ -9,6 +9,7 @@
 #include "battle/battle.h"
 #include "core/log.h"
 #include "data/tables.h"
+#include "game/model_files.h"
 #include "import/model.h"
 #include "import/room_effects.h"
 #include "render/mesh_pipeline.h"
@@ -94,15 +95,8 @@ std::string ModelCache::monster_model(const data::GameTables* tables, int monste
 }
 
 std::optional<assets::ModelAsset> ModelCache::read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err) {
-  auto read = [&](const std::string& path) { return vfs.read("cdrom/" + path).value_or(Bytes{}); };
-  const Bytes obj = read(stem + ".obj");
-  Bytes tex = read(stem + ".ltd");
-  if (tex.empty()) tex = read(stem + ".ltc");
-  const Bytes at0 = read(stem.substr(0, stem.find_last_of('/')) + "/at0.prd");
-  auto asset = import::load_model(obj, tex, at0, err);
+  auto asset = read_model_files(vfs, stem, err);
   if (!asset) return std::nullopt;
-  // The source stem names the texture dump / replacement (model/<stem>/clut<row>.png).
-  asset->source = stem;
   render::resolve_model_textures(*asset);
   return asset;
 }

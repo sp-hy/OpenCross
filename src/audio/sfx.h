@@ -81,6 +81,8 @@ class SfxBank {
   void set_table(std::shared_ptr<const InstrumentTable> table) { table_ = table ? std::move(table) : base_; }
   const std::shared_ptr<const InstrumentTable>& table() const { return table_; }
 
+  // Global SFX ids (effect00 indices) run from 0 to kGlobalCount - 1.
+  static constexpr int kGlobalCount = 256;
   // Global SFX id (effect00 index). Returns false if the id is undefined. Chained ids (chain_count) are appended via
   // `extra` (each a further program).
   bool make_global(int id, SfxProgram& out, std::vector<SfxProgram>* extra = nullptr) const;

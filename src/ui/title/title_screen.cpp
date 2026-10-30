@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 #include "audio/bgm_table.h"
 #include "core/log.h"
@@ -33,6 +34,13 @@ constexpr const char32_t* kPrompt[6] = {U"Press any button", U"Appuyez sur une t
 
 // Fade duration in seconds.
 constexpr float kFade = 0.5f;
+
+// The press-start chime: three global sounds started together, one per layer.
+constexpr int kChimeSounds[3] = {59, 61, 62};
+// After the press the music fades to silence: it starts kMusicFadeDelay frames (60 Hz) after the press, lasts kMusicFadeFrames
+// frames and the song is stopped when it ends.
+constexpr float kMusicFadeDelay = 14.0f;
+constexpr float kMusicFadeFrames = 20.0f;
 
 // Decodes a TIM into an uploaded RGBA image (nearest sampled).
 render::TexRef upload_tim(UiKit& kit, const char* path, float* w, float* h) {
@@ -86,6 +94,8 @@ void TitleScreen::begin(import::Lang lang, ArtMode mode, bool has_saves, int son
   fade_ = backdrop ? 0.0f : 1.0f;
   to_menu_ = menu_in_ = to_prompt_ = false;
   time_ = 0;
+  music_frames_ = -1.0f;
+  song_ = song;
   start_song(song);
 }
 
@@ -104,6 +114,7 @@ void TitleScreen::begin_plus(import::Lang lang, ArtMode mode) {
   sel_ = 0;
   fade_ = 1.0f;
   time_ = 0;
+  music_frames_ = -1.0f;
 }
 
 void TitleScreen::start_song(int song) {
@@ -120,6 +131,24 @@ void TitleScreen::start_song(int song) {
   mixer_->play(std::move(stream), song, 127);
 }
 
+void TitleScreen::press() {
+  to_menu_ = true;
+  if (layered_sfx_)
+    for (int layer = 0; layer < static_cast<int>(std::size(kChimeSounds)); ++layer) layered_sfx_(kChimeSounds[layer], layer);
+  music_frames_ = 0.0f;
+}
+
+void TitleScreen::step_music(float dt) {
+  if (music_frames_ < 0.0f || !mixer_) return;
+  const float before = music_frames_;
+  music_frames_ += dt * 60.0f;
+  if (before < kMusicFadeDelay && music_frames_ >= kMusicFadeDelay) mixer_->fade(0, kMusicFadeFrames / 60.0f);
+  if (music_frames_ >= kMusicFadeDelay + kMusicFadeFrames) {
+    mixer_->stop();
+    music_frames_ = -1.0f;
+  }
+}
+
 std::u32string TitleScreen::label(int i) const {
   const int lang_idx = std::min(lang_index(lang_), 5);
   if (page_ == 1) return i == 0 ? kOn[lang_idx] : kOff[lang_idx];
@@ -134,6 +163,7 @@ std::u32string TitleScreen::label(int i) const {
 
 void TitleScreen::update(const Nav& nav, float dt) {
   time_ += dt;
+  step_music(dt);
   switch (phase_) {
     case Phase::FadeIn:
       fade_ = std::max(0.0f, fade_ - dt / kFade);
@@ -142,8 +172,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
       if (nav.any) {
         fade_ = 0;
         phase_ = Phase::Prompt;
-        to_menu_ = true;
-        play(8);
+        press();
       }
       break;
     case Phase::Prompt:
@@ -158,8 +187,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
       } else if (fade_ > 0.0f) {
         fade_ = std::max(0.0f, fade_ - dt / kFade);
       } else if (nav.any) {
-        to_menu_ = true;
-        play(8);
+        press();
       }
       break;
     case Phase::Menu: {
@@ -183,7 +211,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
         }
         break;
       }
-      // Cancel goes back to the 3D title ("Press any button"), through black like the way in.
+      // Cancel goes back to the 3D title ("Press any button") through black like the way in; the title music starts again.
       if (nav.cancel && !menu_in_ && !to_prompt_ && variant_ != 2) {
         to_prompt_ = true;
         play(6);
@@ -194,6 +222,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
           to_prompt_ = false;
           phase_ = Phase::Prompt;
           time_ = 0;
+          start_song(song_);
         }
         break;
       }

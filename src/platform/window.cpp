@@ -296,6 +296,20 @@ bool Window::pump(Input& input) {
   return running;
 }
 
+void stick_to_dpad(Input& input, std::array<bool, 4>& held) {
+  constexpr float kTilt = 0.5f;
+  const float stick_x = input.pad_axis[SDL_GAMEPAD_AXIS_LEFTX], stick_y = input.pad_axis[SDL_GAMEPAD_AXIS_LEFTY];
+  const bool now[4] = {stick_y < -kTilt, stick_y > kTilt, stick_x < -kTilt, stick_x > kTilt};
+  constexpr SDL_GamepadButton kButtons[4] = {SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN, SDL_GAMEPAD_BUTTON_DPAD_LEFT,
+                                             SDL_GAMEPAD_BUTTON_DPAD_RIGHT};
+  for (size_t i = 0; i < 4; ++i) {
+    const auto button = static_cast<size_t>(kButtons[i]);
+    if (now[i]) input.pad_down[button] = true;
+    if (now[i] && !held[i]) input.pad_pressed[button] = true;
+    held[i] = now[i];
+  }
+}
+
 FrameTimer::FrameTimer() : last_(SDL_GetPerformanceCounter()), freq_(SDL_GetPerformanceFrequency()) {}
 
 double FrameTimer::tick() {

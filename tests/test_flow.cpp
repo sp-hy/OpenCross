@@ -1,6 +1,8 @@
 // Checks for the title / name entry / flow logic: name encoding round trip (game font <-> Unicode, save record), name rules,
 // the keyboard pages, the NameEntry cursor / buffer / validation and the FlowMachine state transitions.
 #include <cstdio>
+#include <utility>
+#include <vector>
 
 #include "game/disc_index.h"
 #include "game/game_flow.h"
@@ -302,6 +304,28 @@ void test_flow() {
     vibration_flow.set_vibration(true);
     vibration_flow.new_game(U"Serge");
     CHECK(vibration_flow.game_state().option(ui::opt::kVibration));
+  }
+  // The prompt press plays the three chime sounds on their own layers and fades into the menu; Cancel there brings the prompt back.
+  {
+    ui::TitleScreen title;
+    std::vector<std::pair<int, int>> layered;
+    std::vector<int> plain;
+    title.set_layered_sfx([&layered](int id, int layer) { layered.emplace_back(id, layer); });
+    title.set_sfx([&plain](int id) { plain.push_back(id); });
+    title.begin(import::Lang::En, ui::ArtMode::Hd, false, -1, true);
+    ui::Nav press;
+    press.any = true;
+    title.update(press, 0.016f);
+    CHECK((layered == std::vector<std::pair<int, int>>{{59, 0}, {61, 1}, {62, 2}}));
+    CHECK(plain.empty());
+    for (int i = 0; i < 120; ++i) title.update(ui::Nav{}, 0.016f);
+    CHECK(title.phase() == ui::TitleScreen::Phase::Menu && title.fade_alpha() == 0.0f);
+    ui::Nav back;
+    back.cancel = back.any = true;
+    title.update(back, 0.016f);
+    CHECK((plain == std::vector<int>{6}));
+    for (int i = 0; i < 60 && title.phase() == ui::TitleScreen::Phase::Menu; ++i) title.update(ui::Nav{}, 0.016f);
+    CHECK(title.phase() == ui::TitleScreen::Phase::Prompt);
   }
 
   // Events in the wrong state do nothing.

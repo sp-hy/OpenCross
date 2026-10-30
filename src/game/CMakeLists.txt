@@ -6,6 +6,8 @@ add_library(oc_game STATIC
   room_view.cpp
   walk_mesh.h
   walk_mesh.cpp
+  model_files.h
+  model_files.cpp
   actor.h
   actor.cpp
   disc_index.h

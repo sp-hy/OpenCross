@@ -127,11 +127,13 @@ int ocflow_main(int argc, char** argv) {
     }
 
     platform::Input input;
+    std::array<bool, 4> stick_dpad{};
     size_t si = 0;
     int step_frame = 0;
     bool step_started = false;
     platform::FrameTimer timer;
     while (rc == 0 && window.pump(input)) {
+      platform::stick_to_dpad(input, stick_dpad);
       if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
       float dt = static_cast<float>(timer.tick());
       if (shots) {

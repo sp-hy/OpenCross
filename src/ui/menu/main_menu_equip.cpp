@@ -17,7 +17,7 @@ void MainMenu::Impl::update_equip(const Nav& nav) {
   if (!eq_list) {
     if (nav.up) eslot = wrap(eslot - 1, 5), sfx(1);
     if (nav.down) eslot = wrap(eslot + 1, 5), sfx(1);
-    if (nav.cancel) back_to_main(2), sfx(6);
+    if (nav.cancel) back_to_main(2, true), sfx(6);
     else if (nav.tri) {
       gs->unequip_accessories(character);
       sfx(0x48);
@@ -188,6 +188,65 @@ void MainMenu::Impl::build_equip() {
     }
 }
 
+// One description row of a key item at PS1 (x, y). A row may hold several lines (split at '\n', a '\r' is dropped), kLinePitch rows
+// apart, each at text scale kTextScale, shrunk to fit `maxw` PS1 px. {ButtonFast} / {ButtonSlow} (the Time Shifter's speed buttons) stand for the
+// key cap bound to the fast / slow speed action (its pad glyph with a pad): a kKeyCap square drawn kKeyCapIndent canvas units right of
+// the token and kKeyCapRise canvas units above the line's top, over the run of spaces that follows; the text after the token resumes
+// kKeyCapAdvance canvas units further on. Any other {..} stays as written.
+void MainMenu::Impl::key_item_line(const std::string& description, float x, float y, float maxw) {
+  constexpr float kLinePitch = 24.0f, kKeyCap = 50.0f, kKeyCapIndent = 65.0f, kKeyCapRise = 16.0f, kKeyCapAdvance = 59.0f, kTextScale = 0.95f;
+  struct Piece {
+    std::u32string text;
+    platform::Action action = platform::Action::FastSpeed;
+    bool glyph = false;
+  };
+  float top = y;
+  size_t start = 0;
+  for (;;) {
+    const size_t end = std::min(description.find('\n', start), description.size());
+    std::vector<Piece> pieces;
+    std::string run;
+    auto flush = [&] {
+      if (!run.empty()) pieces.push_back({utf32(run)});
+      run.clear();
+    };
+    for (size_t i = start; i < end; ++i) {
+      const size_t close = description[i] == '{' ? description.find('}', i) : std::string::npos;
+      const std::string_view name = close < end ? std::string_view(description).substr(i + 1, close - i - 1) : std::string_view();
+      if (name == "ButtonFast" || name == "ButtonSlow") {
+        flush();
+        pieces.push_back({{}, name == "ButtonFast" ? platform::Action::FastSpeed : platform::Action::SlowSpeed, true});
+        i = close;
+      } else if (description[i] != '\r') {
+        run += description[i];
+      }
+    }
+    flush();
+    auto width = [&](float rel) {
+      float total = 0;
+      for (const Piece& piece : pieces) total += piece.glyph ? kKeyCapAdvance / xscale : twp(piece.text, rel);
+      return total;
+    };
+    float rel = kTextScale;
+    while (rel > 0.4f && width(rel) > maxw) rel -= 0.04f;
+    const float cell_w = kKeyCap / kKeyCapW, cell_h = kKeyCap / kKeyCapH;
+    float pen = x;
+    for (const Piece& piece : pieces) {
+      if (piece.glyph) {
+        const float cap_x = PX(pen) + kKeyCapIndent, cap_y = PY(top) - kKeyCapRise;
+        action_glyph(piece.action, cap_x - kKeyCapLeft * cell_w, cap_y - kKeyCapTop * cell_h, cell_w, cell_h);
+        pen += kKeyCapAdvance / xscale;
+      } else {
+        TP(pen, top, piece.text, kText, rel);
+        pen += twp(piece.text, rel);
+      }
+    }
+    if (end == description.size()) break;
+    start = end + 1;
+    top += kLinePitch;
+  }
+}
+
 // ---- key items: list panel (35,30), picture (234,36), description panel (238,318)
 void MainMenu::Impl::build_keyitems() {
   const auto ids = gs->key_items();
@@ -218,7 +277,7 @@ void MainMenu::Impl::build_keyitems() {
     }
     for (int line = 0; line < 3; ++line) {
       const std::string description = trim(table_row("keyitem", id * 3 + line));
-      if (!description.empty()) TPfit(246, 334.0f + 24.0f * static_cast<float>(line), utf32(description), 228, kText, 0.8f);
+      if (!description.empty()) key_item_line(description, 246, 334.0f + 24.0f * static_cast<float>(line), 228);
     }
   }
 }
