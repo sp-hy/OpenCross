@@ -137,6 +137,7 @@ struct BattleResults::Impl {
   std::string portrait_set = "2021";
   std::function<void(int)> sfx;
   std::function<void()> on_exit;
+  bool music_stopped = false;
 
   // The HD art, drawn in both art modes: the battle_37.tim wallpaper and the portrait strips
   // hd/battle/face/<dir>/pNN.png with <dir> = 1999 in original art, 2021 in HD.
@@ -590,8 +591,6 @@ struct BattleResults::Impl {
   }
 
   // ---- state -----------------------------------------------------------------------------------------------------------
-  // The exit sound (0x41) is due on the next tick.
-  bool exit_sfx = false;
   void play(int id) {
     if (sfx && !muted) sfx(id);
   }
@@ -632,12 +631,10 @@ struct BattleResults::Impl {
       else show_member(gain_list[static_cast<size_t>(cur)]);
     } else if (phase == Phase::Spoils) {
       play(8);
-      // Exit: white fade over 0x1E frames, the panels slide out, 30 frames. The exit sound (0x41) plays on the next frame,
-      // after 8 sounded for one frame.
+      // Exit: black fade over 0x1E frames, the panels slide out, 30 frames. No exit sound.
       phase = Phase::Exit;
       pt = 0;
-      exit_sfx = true;
-      if (on_exit) on_exit();
+      music_stopped = false;
     }
   }
   void begin_spoils() {
@@ -659,11 +656,15 @@ struct BattleResults::Impl {
   }
   void tick() {
     ++age, ++pt, ++page_age;
-    if (exit_sfx) exit_sfx = false, play(0x41);
     if (debounce > 0) --debounce;
     if (auto_on && page_age >= kAutoHold && (phase == Phase::PowerUp || phase == Phase::Heal || phase == Phase::Healed || phase == Phase::Spoils)) confirm();
     if (phase == Phase::Exit) {
       slide = slide < 1.0f ? 24.0f : slide * 1.125f;
+      // The victory music ends just before the screen is fully black.
+      if (pt >= kExit - kMusicLead && !music_stopped) {
+        music_stopped = true;
+        if (on_exit) on_exit();
+      }
       if (pt >= kExit) phase = Phase::Done;
     } else {
       // settles from 0x18
@@ -841,7 +842,6 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
     impl.drops.push_back(std::move(drop));
   }
-  impl.exit_sfx = false;
   impl.phase = Phase::PowerUp;
   impl.age = impl.pt = impl.debounce = 0;
   impl.acc = 0;
@@ -903,9 +903,9 @@ void BattleResults::draw(const render::Frame& frame, float vw, float vh, bool re
   impl.draw_panel();
   impl.draw_headline(impl.phase == Phase::Spoils);
   impl.shift = 0;
-  // fades: from black over the first 0x3C frames, to white over the exit's 0x1E frames
+  // fades: from black over the first 0x3C frames, to black over the exit's 0x1E frames
   if (impl.age < kFadeIn) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(0, 0, 0, 255 - 255 * impl.age / kFadeIn));
-  if (impl.phase == Phase::Exit) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(255, 255, 255, std::min(255, 255 * impl.pt / kExit)));
+  if (impl.phase == Phase::Exit) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(0, 0, 0, std::min(255, 255 * impl.pt / kExit)));
   impl.sprites->end();
 }
 

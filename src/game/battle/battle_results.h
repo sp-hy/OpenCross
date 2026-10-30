@@ -4,7 +4,7 @@
 // the six stats, the element-grid thumbnail, an "UP" marker on every stat that grew) and the right-hand panel with the
 // "PowerUp" page (per member: the stat-up labels and the gains, or the star-up message after a boss), the gold line and
 // finally the "Spoils" page (dropped items / elements). Confirm advances member -> member -> [heal-item menu when a member
-// is hurt and the grids still hold unused healing elements] -> spoils -> exit (white fade, panels slide out).
+// is hurt and the grids still hold unused healing elements] -> spoils -> exit (black fade, panels slide out).
 // The heal menu changes only party HP: the host reads it back with take_final_hp() after done() and writes it over the
 // HP that apply_battle_result stored (the HP gain of the growth is added to the current HP here, as are the heals). Both art modes draw the same btlexit-levu / btend PNGs;
 // original art only swaps the font files (small_font_*) and the portrait folder (hd/battle/face/1999).
@@ -83,7 +83,7 @@ class BattleResults {
   int heal_cursor() const;
 
   // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit flash + wait 0x1E.
-  static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180;
+  static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180, kMusicLead = 8;
 
  private:
   struct Impl;
