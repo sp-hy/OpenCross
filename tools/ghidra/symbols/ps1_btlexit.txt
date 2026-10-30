@@ -57,3 +57,4 @@ btl_results_lv99_targets = 0x801F5160;  # data: Per-character Lv99 stat targets 
 btl_results_drops = 0x801F5170;  # data: Drop list for the results screen (up to six).
 btl_results_unlock_flash_dots = 0x801F5DD8;  # data: Flashing state for newly unlocked grid dots.
 btl_gold_bonus_flag = 0x801F5E7B;  # data: Copy of the gear gold bonus flag used for the x125/100 gold bonus.
+btl_summon_shiny_items = 0x801F2B1C;  # data: shiny material item id by colour index, given for a summon kill

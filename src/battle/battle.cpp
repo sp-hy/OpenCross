@@ -17,6 +17,9 @@ constexpr int kChronoCrossElement = 0x7E;
 // Lo statuses that keep a PC out of a double / triple tech (KO, confusion, defeat ...).
 constexpr u32 kComboPartnerBlockLo = 0x203000C0u;
 
+// The shiny material a summon kill gives, by colour index: Leaf, Salt, Soot, Ember, Sand, Dew.
+constexpr std::array<u16, 6> kShinyMaterial = {0x13, 0x15, 0x16, 0x11, 0x14, 0x12};
+
 // An action's target PC has its colour-seal flags judged again once the action has run, whatever the action was.
 struct SealRefreshOnExit {
   Battle& battle;
@@ -318,6 +321,8 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   result_code_ = -1;
   attacked_.clear();
   kill_script_run_ = {};
+  summon_kills_ = {};
+  summon_colour_ = -1;
   field_state_ = 0;
   trap_ = {};
   trap_state_ = 0;
@@ -710,6 +715,14 @@ void Battle::finish_ring(const data::ElemRec& element, int colour) {
 // ------------------------------------------------------------------------------------------------ damage plumbing
 // A knocked-out enemy runs its kill script; the death element it queues (a scripted death) is cast by the dying unit once the killing
 // action has ended (run_reactions). An invincible unit (Debug tab) stays up at 1 HP.
+// An enemy that dies while a summon is the current action is noted under the summon's colour; the first colour to claim it keeps it.
+void Battle::note_summon_kill(int unit_index) {
+  if (summon_colour_ < 0) return;
+  const u16 bit = static_cast<u16>(1u << unit_index);
+  if (std::none_of(summon_kills_.begin(), summon_kills_.end(), [&](u16 mask) { return (mask & bit) != 0; }))
+    summon_kills_[static_cast<size_t>(summon_colour_)] |= bit;
+}
+
 void Battle::kill(int unit_index) {
   Unit& victim = units_[static_cast<size_t>(unit_index)];
   if (invincible(unit_index)) {
@@ -725,6 +738,7 @@ void Battle::kill(int unit_index) {
 }
 
 void Battle::run_kill_script(int unit_index) {
+  note_summon_kill(unit_index);
   kill_script_run_[static_cast<size_t>(unit_index)] = true;
   std::vector<EnemyAction> plan;
   brain_.on_killed(*this, unit_index, rng_, plan);
@@ -895,6 +909,7 @@ bool Battle::force_status_bits(int target, u32 lo) {
 // ------------------------------------------------------------------------------------------------ weapon attack
 void Battle::do_weapon_attack(int actor, int target, int strength) {
   const SealRefreshOnExit refresh{*this, target};
+  summon_colour_ = -1;
   Unit& attacker = units_[static_cast<size_t>(actor)];
   Unit& target_unit = units_[static_cast<size_t>(target)];
   // Script var 0x22 / 0x28 + 6 * pc = the hit strength (0 weak / 1 strong / 2 fierce), not the weapon class.
@@ -1001,6 +1016,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   Unit& caster = units_[static_cast<size_t>(actor)];
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(element_id)];
+  summon_colour_ = (element.b(0) & 0x40) ? data::colour_index_of_bit(element.colour_bit()) : -1;
   Unit& target_unit = units_[static_cast<size_t>(target)];
   const int hp0 = target_unit.hp;
   const bool alive0 = target_unit.alive();
@@ -2127,6 +2143,12 @@ void Battle::compute_rewards() {
     gold += unit.gold;
     // Script op 7C: no drop rolls.
     if (brain_.no_drops()) continue;
+    // An enemy a summon killed skips the roll and gives that colour's shiny material; boss fights keep the roll.
+    const auto summon_kill = std::find_if(summon_kills_.begin(), summon_kills_.end(), [&](u16 mask) { return (mask >> i) & 1; });
+    if (!boss_ && summon_kill != summon_kills_.end()) {
+      rewards_.items.push_back(kShinyMaterial[static_cast<size_t>(summon_kill - summon_kills_.begin())]);
+      continue;
+    }
     int slot = drop_roll(rng_, unit.drop_base);
     const size_t drop_index = static_cast<size_t>(unit.drop_row & 0x3FFF);
     // Cheats: always loot - the rare drop (row slot 1), else the common one (slot 0).

@@ -488,6 +488,7 @@ class Battle {
 
   // ---- primitives (public so tests and tools can drive single actions; they do not run the scheduler)
   void do_weapon_attack(int actor, int target, int strength);
+  void note_summon_kill(int unit_index);
   // `push_ring` = false for the 2nd..nth target of an all-targets cast (the colour enters the field ring once per cast).
   void do_element(int actor, int element_id, int row, int target, bool push_ring = true);
   // The PCs other than `actor` and those in `excluded` (a mask of PC slots) recover stamina; the enemy countdowns run `steps`.
@@ -608,6 +609,9 @@ class Battle {
   std::array<bool, kUnits> death_pending_{};
   // The unit's kill script has run since it last had HP.
   std::array<bool, kUnits> kill_script_run_{};
+  // By colour index: the enemies (one bit per unit) killed during a summon of that colour. summon_colour_ = the current action's, -1 = not a summon.
+  std::array<u16, 6> summon_kills_{};
+  int summon_colour_ = -1;
   int action_id_ = 0, hit_counter_ = 0;
   // The executing scripted entry's / dev cast's caster group (ActionEvent::group).
   std::array<u8, 6> cur_group_{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};

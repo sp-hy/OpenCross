@@ -414,6 +414,7 @@ sys_options_word = 0x800789C0;  # data: settings options bit word
 sys_unlock_masks = 0x800789C4;  # data: per-character grid cell availability masks, 0x10 bytes per character
 sys_cell_use_counts = 0x80078C84;  # data: per-grid-cell consumable use count nibbles
 sys_party_lock_bitmap = 0x800790A4;  # data: bitmap of characters that cannot leave their party-screen slot
+btl_summon_kill_masks = 0x800790F0;  # data: six u16 unit masks by colour index: enemies killed during a summon of that colour
 sys_party_exclude_bitmap = 0x800790AC;  # data: party-screen exclusion bitmap
 sys_element_stack_flags = 0x800790B4;  # data: byte flags of element ids that keep their copy count
 sys_saved_recruited_mask = 0x800790CC;  # data: saved copy of the recruited roster bitmap

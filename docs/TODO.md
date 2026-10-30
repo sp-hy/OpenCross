@@ -6,10 +6,7 @@ The working list for the engine: behaviour bugs found by reading the code, fidel
 
 ## 2. Fidelity gaps (not modelled)
 
-
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
-
-
 
 ## 4. Code hygiene
 
