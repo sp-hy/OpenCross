@@ -143,7 +143,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
         fade_ = 0;
         phase_ = Phase::Prompt;
         to_menu_ = true;
-        play(8);
+        play_chime();
       }
       break;
     case Phase::Prompt:
@@ -159,7 +159,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
         fade_ = std::max(0.0f, fade_ - dt / kFade);
       } else if (nav.any) {
         to_menu_ = true;
-        play(8);
+        play_chime();
       }
       break;
     case Phase::Menu: {
@@ -183,11 +183,7 @@ void TitleScreen::update(const Nav& nav, float dt) {
         }
         break;
       }
-      // Cancel goes back to the 3D title ("Press any button"), through black like the way in.
-      if (nav.cancel && !menu_in_ && !to_prompt_ && variant_ != 2) {
-        to_prompt_ = true;
-        play(6);
-      }
+      // The menu does not go back to the 3D title ("Press any button"); to_prompt_ is only set by a debug jump.
       if (to_prompt_) {
         fade_ = std::min(1.0f, fade_ + dt / kFade);
         if (fade_ >= 1.0f) {

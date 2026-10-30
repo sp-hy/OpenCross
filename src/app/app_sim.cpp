@@ -336,6 +336,8 @@ void App::advance(const platform::Input& in, double dt, int ticks) {
     if (world.room_name() == game::kTitleRoom) {
       const auto ph = flow.title().phase();
       apply_flow_action(flow.update(in, static_cast<float>(dt)));
+      // The title room's music ends as the menu appears.
+      if (ph != ui::TitleScreen::Phase::Menu && flow.title().phase() == ui::TitleScreen::Phase::Menu) world.stop_music();
       // Hold the idle timer: in the menu, and while the Debug free camera is on (no attract demo / opening FMV while flying the sea).
       if (ph == ui::TitleScreen::Phase::Menu || ph == ui::TitleScreen::Phase::FadeOut || game::free_cam().on()) world.vm().set_var(0x404, 0);
     // An attract demo is running: any button returns to the title logo.

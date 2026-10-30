@@ -72,6 +72,8 @@ class TitleScreen {
   void play(int id) {
     if (sfx_) sfx_(id);
   }
+  // The "press start" chime: global sound 62, the one the original plays.
+  void play_chime() { play(62); }
   void start_song(int song);
   std::u32string label(int i) const;
   bool enabled(int i) const { return page_ == 1 || variant_ == 2 || i != 1 || has_saves_; }
