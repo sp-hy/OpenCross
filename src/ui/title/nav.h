@@ -24,10 +24,12 @@ class NavPoller {
     auto held = [&](Action action) { return platform::action_down(in, action); };
     auto pad_edge = [&](int button) { return in.pad_connected && in.pad_pressed[static_cast<size_t>(button)]; };
     auto pad_held = [&](int button) { return in.pad_connected && in.pad_down[static_cast<size_t>(button)]; };
-    const bool up = held(Action::Up) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_UP);
-    const bool down = held(Action::Down) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
-    const bool left = held(Action::Left) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
-    const bool right = held(Action::Right) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    // The left stick counts as the d-pad once pushed past 0.6, as in the in-game menus.
+    const float axis_x = in.pad_connected ? in.pad_axis[SDL_GAMEPAD_AXIS_LEFTX] : 0.0f, axis_y = in.pad_connected ? in.pad_axis[SDL_GAMEPAD_AXIS_LEFTY] : 0.0f;
+    const bool up = held(Action::Up) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_UP) || axis_y < -0.6f;
+    const bool down = held(Action::Down) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || axis_y > 0.6f;
+    const bool left = held(Action::Left) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || axis_x < -0.6f;
+    const bool right = held(Action::Right) || pad_held(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || axis_x > 0.6f;
     nav.up = step(0, up, dt);
     nav.down = step(1, down, dt);
     nav.left = step(2, left, dt);

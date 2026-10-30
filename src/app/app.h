@@ -39,6 +39,7 @@
 #include "import/text.h"
 #include "movie/player.h"
 #include "platform/config.h"
+#include "platform/stick_nav.h"
 #include "platform/updater.h"
 #include "platform/window.h"
 #include "render/crt_pass.h"
@@ -332,6 +333,8 @@ class App {
   // The pad's Start press that may still open the settings window (held long enough) or the pause screen (released before), and when it
   // went down; start_tap = this frame released it early (the pause screen's Start).
   bool start_held = false, start_tap = false;
+  // The left stick as d-pad presses for the pause screen.
+  platform::StickNav pause_stick;
   u64 start_down_ms = 0;
   game::SlowFieldCycle slow_field_cycle;
   // RDE's HD "Home / Another World" name over the world maps.
