@@ -162,9 +162,20 @@ bool draw_cheats_tab(platform::Config& cfg) {
              "RDE's battle boost (F4, or click the right stick): the party's HP, stamina and element gauge are refilled, negative status effects are cleared and nobody is knocked out.");
       toggle("Auto battle", "##c_auto", cheats.auto_battle,
              "RDE's auto-battle (F5, or click both sticks together): every ready party member picks its own attack (a fierce hit on the first enemy). The results screen still waits for you.");
-      toggle("God mode", "##c_god", cheats.god_mode, "The party cannot be knocked out (HP stops at 1). The Debug tab's Invincible party box still works.");
       ImGuiLayer::end_rows();
     }
+    ImGuiLayer::section("Battle");
+    if (ImGuiLayer::begin_rows("cheats_battle")) {
+      toggle("God mode", "##c_god", cheats.god_mode, "The party cannot be knocked out (HP stops at 1). The Debug tab's Invincible party box still works.");
+      toggle("Max stamina", "##c_stam", cheats.max_stamina, "The party's stamina never runs down in battle.");
+      toggle("Free elements", "##c_free", cheats.free_elements, "Casting an element costs no gauge level, a cell can be cast again and consumables (stacks) are not used up.");
+      toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");
+      toggle("Always loot", "##c_loot", cheats.always_loot, "Every enemy drops its rare drop (else the common one) and every steal lands on the rare item.");
+      toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every battle grants each member the full stat-gain cap.");
+      ImGuiLayer::end_rows();
+    }
+  };
+  auto right = [&] {
     ImGuiLayer::section("Game speed");
     if (ImGuiLayer::begin_rows("cheats_speed")) {
       ImGuiLayer::row("Fast mode", "RDE's high-speed mode: the game (field, battle) runs faster. Music and movies keep their normal speed. "
@@ -193,23 +204,20 @@ bool draw_cheats_tab(platform::Config& cfg) {
       if (ImGui::SliderInt("##slowspeed", &cfg.slow_rate, 10, 90, "%d%%")) changed = true;
       ImGuiLayer::end_rows();
     }
-  };
-  auto right = [&] {
-    ImGuiLayer::section("More");
-    if (ImGuiLayer::begin_rows("cheats_more")) {
+    ImGuiLayer::section("Field");
+    if (ImGuiLayer::begin_rows("cheats_field")) {
       toggle("No clip", "##c_noclip", cheats.no_clip,
              "The leader walks through walls, the edge of the walk mesh and solid characters. Triggers, doors and room exits still fire where you stand; "
              "your height follows the floor only while you are above it.");
       toggle("Run speed x2", "##c_speed", cheats.run_speed, "Walking and running are twice as fast in the field.");
+      ImGuiLayer::end_rows();
+    }
+    ImGuiLayer::section("Money and shops");
+    if (ImGuiLayer::begin_rows("cheats_shops")) {
       toggle("Max money", "##c_money", cheats.max_money, "G is kept at the maximum (9,999,999).");
       toggle("Every element in shops", "##c_shop", cheats.shop_all_elements, "Element shops also sell every other element that can be bought, after their own stock.");
       toggle("Every weapon in shops", "##c_wshop", cheats.shop_all_weapons,
              "The blacksmith's forge lists every weapon (and armour / accessory) that has a recipe, after its own stock. Materials and gold are still needed unless No crafting cost is on.");
-      toggle("Max stamina", "##c_stam", cheats.max_stamina, "The party's stamina never runs down in battle.");
-      toggle("Free elements", "##c_free", cheats.free_elements, "Casting an element costs no gauge level, a cell can be cast again and consumables (stacks) are not used up.");
-      toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");
-      toggle("Always loot", "##c_loot", cheats.always_loot, "Every enemy drops its rare drop (else the common one) and every steal lands on the rare item.");
-      toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every battle grants each member the full stat-gain cap.");
       toggle("No crafting cost", "##c_craft", cheats.no_craft_cost,
              "The forge (Zappa's smithy) builds and upgrades without using up materials or gold. Taking a weapon apart still returns its materials as usual.");
       ImGuiLayer::end_rows();

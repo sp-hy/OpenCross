@@ -127,6 +127,8 @@ int run_viewer(const mv::Options& options) {
   render::ImGuiLayer ui;
   if (!ui.init(context, window.handle())) return 1;
   window.set_event_hook(render::ImGuiLayer::event_hook, &ui);
+  // Space / Tab / R are the viewer's own keys: no keyboard navigation of the panel.
+  ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
   Side original, modded;
   // Declared after the sides: its destructor runs first and lets the GPU finish with their models, also on an exception.
   struct WaitBeforeRelease {
@@ -173,7 +175,7 @@ int run_viewer(const mv::Options& options) {
       break;
     }
     const float panel_width = std::min(390.0f, io.DisplaySize.x * 0.42f);
-    if (!io.WantCaptureKeyboard) {
+    if (!io.WantTextInput) {
       if (input.key_pressed[SDL_SCANCODE_SPACE]) playing = !playing;
       if (input.key_pressed[SDL_SCANCODE_TAB]) show_modded = !show_modded;
       if (input.key_pressed[SDL_SCANCODE_R]) reload = true;
@@ -212,8 +214,9 @@ int run_viewer(const mv::Options& options) {
     }
     ImGui::EndChild();
     if (ImGui::Checkbox("HD art", &hd)) reload = true;
+    ImGui::SameLine();
+    ImGui::Checkbox("Modded", &show_modded);
     if (ImGui::Button("Reload models and mods (R)")) reload = true;
-    ImGui::Checkbox("Modded (Tab switches)", &show_modded);
     ImGui::TextWrapped("Original ignores every mod. Modded uses the mods enabled in the Mods tab; change them there and reload.");
 
     ImGui::SeparatorText("Animation");
@@ -233,6 +236,7 @@ int run_viewer(const mv::Options& options) {
           if (ImGui::Selectable(label.c_str(), clip == static_cast<int>(i))) {
             clip = static_cast<int>(i);
             seconds = 0;
+            playing = true;
           }
         }
         ImGui::EndCombo();

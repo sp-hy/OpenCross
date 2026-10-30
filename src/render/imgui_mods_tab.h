@@ -19,6 +19,8 @@ std::vector<vfs::ModPref> mod_prefs(const platform::Config& cfg);
 void store_mod_prefs(platform::Config& cfg, const vfs::ModManager& mods);
 // The overlay mode for an art mode (Original = SD, Hd = HD, Modded = HD + mods).
 vfs::ModArt mod_art(platform::ArtMode mode);
+// Starts `opencross modelview` as a separate process (Mods and Debug tabs); the game keeps running.
+void open_model_viewer();
 
 // The "Dump all textures" button runs game::TextureDumpJob (a worker thread); render cannot see the game library, so the app (app/app_boot.cpp) installs
 // these callbacks. Without hooks the button is not shown.

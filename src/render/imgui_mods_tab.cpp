@@ -53,14 +53,6 @@ TextureDumpHooks g_dump_hooks;
 
 // Texture dump block (bottom of the tab): counters, the Dump button, the category boxes (game::DumpSet bits), progress.
 // Texture replacement (render/texture_registry.h) is always on - a texture mod is switched by its own row; dumping is the button here.
-// `opencross modelview` as a separate process; the game keeps running.
-void open_model_viewer() {
-  const std::u8string exe = platform::exe_path().u8string();
-  const char* args[] = {reinterpret_cast<const char*>(exe.c_str()), "modelview", nullptr};
-  if (SDL_Process* process = SDL_CreateProcess(args, false)) SDL_DestroyProcess(process);
-  else log::warn("mods: model viewer did not start: {}", SDL_GetError());
-}
-
 void draw_dump_block(platform::Config& cfg, bool* settings_dirty) {
   ImGui::Separator();
   const texture_registry::Stats ts = texture_registry::stats();
@@ -112,6 +104,22 @@ void draw_dump_block(platform::Config& cfg, bool* settings_dirty) {
 }
 
 }  // namespace
+
+void open_model_viewer() {
+  const std::u8string exe = platform::exe_path().u8string();
+  const char* args[] = {reinterpret_cast<const char*>(exe.c_str()), "modelview", nullptr};
+  // No standard streams: the game has no console to hand down.
+  const SDL_PropertiesID props = SDL_CreateProperties();
+  SDL_SetPointerProperty(props, SDL_PROP_PROCESS_CREATE_ARGS_POINTER, args);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDIN_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDOUT_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetNumberProperty(props, SDL_PROP_PROCESS_CREATE_STDERR_NUMBER, SDL_PROCESS_STDIO_NULL);
+  SDL_SetBooleanProperty(props, SDL_PROP_PROCESS_CREATE_BACKGROUND_BOOLEAN, true);
+  SDL_Process* process = SDL_CreateProcessWithProperties(props);
+  SDL_DestroyProperties(props);
+  if (process) SDL_DestroyProcess(process);
+  else log::warn("model viewer did not start: {}", SDL_GetError());
+}
 
 void set_texture_dump_hooks(TextureDumpHooks hooks) { g_dump_hooks = std::move(hooks); }
 

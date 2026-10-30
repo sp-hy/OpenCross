@@ -295,9 +295,7 @@ bool DebugTools::element_combo() {
 // ------------------------------------------------------------------------------------------------------------------- the tab
 void DebugTools::draw(const Ctx& ctx) {
   build_caches(ctx);
-  ImGuiLayer::section("Debug tools");
   if (saving_disabled_) ImGui::TextColored(ImVec4(1.0f, 0.65f, 0.25f, 1.0f), "Debug tools were used this session - the Save menu warns about it (saving stays allowed).");
-  else ImGui::TextDisabled("Using any tool below marks the session as debugged (the Save menu shows a warning; saving stays allowed).");
   if (!status_.empty()) ImGui::TextWrapped("%s", status_.c_str());
 
   // ---- free camera (battle 3D and the title's sea)

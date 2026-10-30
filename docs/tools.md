@@ -241,11 +241,11 @@ Sources: `src/game/flow_demo_main.cpp`, `src/ui/menu/demo_main.cpp`, `src/ui/sho
 
 ### 1.12 `ocmodelview` (character models in a window)
 
-Sources: `tools/ocmodelview.cpp`, `tools/model_view.*`; the model files are read by `game::read_model_files` (`src/game/model_files.*`), the same reader the field, battle and texture dump use. Also opened by the **Model Viewer** button of the Mods tab. Flags: `-g <dir>`, `--model <stem>` (a stem as listed, e.g. `fieldobj/player/selju/selju`; default Serge's field model), `--sd` (start in original art). Bad arguments exit 2.
+Sources: `tools/ocmodelview.cpp`, `tools/model_view.*`; the model files are read by `game::read_model_files` (`src/game/model_files.*`), the same reader the field, battle and texture dump use. Also opened by the Mods tab's **Model Viewer** button and the Debug tab's *Model viewer* row (Tools). Flags: `-g <dir>`, `--model <stem>` (a stem as listed, e.g. `fieldobj/player/selju/selju`; default Serge's field model), `--sd` (start in original art). Bad arguments exit 2.
 
 - **Catalog.** Every field character (`fieldobj/player`), battle player (`battle/player`) and monster (`battle/monster`) `.obj` of the cdrom archive, filtered by a search box and a group.
 - **Original / modded.** Two copies of the model: the original reads a VFS without mods and skips texture replacement; the modded copy applies the mods enabled in `opencross.ini` (Modded art set with *HD art*, SD art set without). Tab switches between them without moving the camera or the playback time. *Reload* rescans the mods folder.
-- **Animation.** The model's raw clips (`<source>[<index>] <name>`), with play, loop, speed and a frame slider. The modded copy plays the clip with the same source and index, not the same list position; a missing or ambiguous clip shows the rest pose with a note. No animation-sequence, battle or field scripts run.
+- **Animation.** The model's raw clips (`<source>[<index>] <name>`), with play, loop, speed and a frame slider; picking a clip starts it. The viewer's keys (section 4.4) work whenever the search box is not being typed in. The modded copy plays the clip with the same source and index, not the same list position; a missing or ambiguous clip shows the rest pose with a note. No animation-sequence, battle or field scripts run.
 - **View.** Orbit camera framed on the rest-pose bounds of both copies; Front / Side / Back / Reset. *Inspection light* (off by default) adds a fixed model-space key light and ambient; off, the model is drawn unlit like the game draws it. *Show initially hidden parts* draws the meshes whose S3 shading entry starts them hidden (the game's scripts show those).
 - **Stats.** Vertices, triangles, parts, joints and clips of each copy, and the reader's error when a file is missing or rejected. Models with more joints than the mesh renderer's 64 are drawn as the game draws them, with a note.
 
@@ -482,7 +482,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | F9 | `battle_view_ui.cpp` | Toggles the battle camera debug overlay. |
 | PageDown / PageUp | `app_run.cpp` | Next / previous room; only in the field with the flow disabled and no movie. |
 
-The Debug tab's **Sound test** header (`app_debug.cpp`, shown when the sound effects loaded) picks a global sound id 0..255 (effect00; `<` / `>` step with wrap, or type the id) and plays it on the menus' channel when Play is pressed; an id with no program is reported as not defined.
+The top of the Debug tab (`app_debug.cpp`) has two panes. **Tools**: *Model viewer* (Open starts `opencross modelview`, section 1.12, as a separate process) and *Write log file*. **Sound test** (when the sound effects loaded) picks a global sound id 0..255 (effect00; `<` / `>` step with wrap, or type the id) and plays it on the menus' channel when Play is pressed; an id with no program is reported as not defined.
 
 ### 4.2 Debug free camera (Debug tab, battle 3D or title sea)
 
