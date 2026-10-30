@@ -1,5 +1,6 @@
 #pragma once
 // Title screen. Phases: fade in -> "Press any button" blink -> menu -> fade out.
+//   A press on the prompt plays the chime and fades the music out; Cancel on the menu returns to the prompt.
 //   Both art modes: hd/title/title.png (1280x960 logo splash), or the PS1 menu background
 //   cdrom/menu/title/bg0.tim + bg1.tim (640x448); original art draws the text with the small_font_* files.
 // Menu: New Game / Continue / Settings / Quit (variant 2: New Game + / Continue +). New Game and Continue fade to black before they are
@@ -33,6 +34,8 @@ class TitleScreen {
   void set_mode(ArtMode mode) { mode_ = mode; }
   void set_language(import::Lang lang) { lang_ = lang; }
   void set_sfx(std::function<void(int)> fn) { sfx_ = std::move(fn); }
+  // Sounds started together that must not cut each other (the press-start chime): global sound `id` on channel `layer` (0, 1, 2).
+  void set_layered_sfx(std::function<void(int id, int layer)> fn) { layered_sfx_ = std::move(fn); }
 
   void update(const Nav& nav, float dt);
   // Returns the pending choice once (New Game / Continue / Quit after the fade, Settings at once) and clears it.
@@ -66,14 +69,17 @@ class TitleScreen {
     to_menu_ = menu_in_ = to_prompt_ = false;
     choice_ = pending_ = TitleChoice::None;
     page_ = 0;
+    music_frames_ = -1.0f;
   }
 
  private:
   void play(int id) {
     if (sfx_) sfx_(id);
   }
-  // The "press start" chime: global sound 62, the one the original plays.
-  void play_chime() { play(62); }
+  // The press on the prompt: the chime, then the music fade (music_frames_).
+  void press();
+  // The music fade after the press, stepped in 60 Hz frames.
+  void step_music(float dt);
   void start_song(int song);
   std::u32string label(int i) const;
   bool enabled(int i) const { return page_ == 1 || variant_ == 2 || i != 1 || has_saves_; }
@@ -104,7 +110,12 @@ class TitleScreen {
   bool vibration_ = false;
   float fade_ = 1.0f;
   float time_ = 0;
+  // Frames since the press while the music fade is pending or running; < 0 = none.
+  float music_frames_ = -1.0f;
+  // The title's own song (begin), started again when Cancel brings the prompt back.
+  int song_ = -1;
   std::function<void(int)> sfx_;
+  std::function<void(int, int)> layered_sfx_;
 };
 
 }  // namespace oc::ui

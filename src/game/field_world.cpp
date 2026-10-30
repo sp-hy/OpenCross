@@ -12,6 +12,7 @@
 #include "core/log.h"
 #include "core/timer.h"
 #include "game/field_world_internal.h"
+#include "game/model_files.h"
 #include "game/new_game.h"
 #include "game/new_game_plus.h"
 #include "import/battle_stage.h"
@@ -199,24 +200,12 @@ namespace {
 
 // The field model of a player folder (fieldobj/player/<folder>), its texture mods resolved. Any thread.
 std::optional<assets::ModelAsset> read_character_model(const vfs::Vfs& files, const std::string& folder) {
-  const std::string dir = "cdrom/fieldobj/player/" + folder + "/" + folder;
-  auto obj = files.read(dir + ".obj");
-  auto tim = files.read(dir + ".tim");
-  // The HD file is a 4x texture.
-  auto hd_tim = files.read("hd/fieldobj/player/" + folder + "/" + folder + ".tim");
-  auto ex = files.read("cdrom/fieldobj/ex/" + folder + ".bin");
-  if (!obj || !tim) {
-    log::warn("player model {}: files not found", folder);
-    return std::nullopt;
-  }
   std::string err;
-  auto asset = import::load_field_model(*obj, *tim, ex ? ByteSpan(*ex) : ByteSpan{}, &err, hd_tim ? ByteSpan(*hd_tim) : ByteSpan{});
+  auto asset = read_model_files(files, "fieldobj/player/" + folder + "/" + folder, &err);
   if (!asset) {
     log::warn("player model {}: {}", folder, err);
     return std::nullopt;
   }
-  // Texture dump / replace path: model/<stem>/clut<row>.png
-  asset->source = "fieldobj/player/" + folder + "/" + folder;
   std::string list;
   for (const auto& clip : asset->clips) list += std::format(" {}:{}", clip.name, clip.frame_count);
   log::debug("field: character model {} texture {}x{} hd x{} clips{}", folder, asset->textures.empty() ? 0 : asset->textures[0].width,

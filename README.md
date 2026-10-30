@@ -51,7 +51,7 @@ CHRONO CROSS  THE RADICAL DREAMERS EDITION\
 When the game starts (or when you press **Rescan** in the Mods tab), OpenCross looks through every file in each mod folder, including all sub-folders, and works out what each one replaces:
 
 - **Whole archives**: a file named after one of the game's `data` archives (for example `movie.dat`) replaces that archive. Like the originals, it must be a ZIP file.
-- **Textures**: PNG images anywhere under a `textures` folder (for example `textures\battle_stage\...`) replace the game's textures, at any resolution. To find the right names, use **Dump all textures** in the Mods tab. It writes every texture to a `dump\textures` folder in the game folder, with the same names and layout a mod uses.
+- **Textures**: PNG images anywhere under a `textures` folder (for example `textures\battle_stage\...`) replace the game's textures, at any resolution. To find the right names, use **Dump all textures** in the Mods tab. It writes every texture to a `dump\textures` folder in the game folder, with the same names and layout a mod uses. To check a character or monster texture mod without playing to it, press **Model Viewer** in the Mods tab: it shows each model with and without your mods, with its animations.
 - **Movies**: a `.bk2`, `.mp4` or `.mkv` named after one of the game's movies (for example `a01op_en.mp4` for `a01op_en.bk2`) replaces it; an `.mp4` / `.mkv` wins over any `.bk2`. Video: HEVC (8 or 10-bit), H.264 or Bink 2, at any constant frame rate (30 and 60 fps tested) up to 1440p. Audio: AAC, Opus or Bink audio (other audio codecs play silent). Tag the colour space (BT.709 or BT.601); untagged files are read as BT.709 from 720 lines up. Keep the original's length and timing, since some scenes play only part of a movie.
 - **Voice lines**: MP3 files in a `voices` folder at the top of the mod (or a mod folder that is itself called `voices`) play over the dialogue. CrossFix voice packs work as they are.
 - **Any other game file**: every other file is matched against the files inside the game's archives by name (upper or lower case doesn't matter). If only one game file has that name, it is replaced, wherever the mod file sits, so wrapper folders like `My Mod\files\...` don't get in the way. If several game files share the name, the one whose folder path matches the end of the mod file's path wins; if that still leaves more than one, the file is skipped as **ambiguous**. Files that match nothing are skipped as **unmatched**. The Mods tab shows both counts.
@@ -67,16 +67,6 @@ OpenCross builds on Windows with Visual Studio 2026 (C++ tools), CMake, Ninja an
 ```
 
 The executable is written to `build\win-x64\bin\Release\opencross.exe`. Use `.\build.ps1 debug` for a debug build and add `-Test` to run the unit tests.
-
-## Model viewer
-
-Run `opencross.exe modelview` to help modders test and compare character model mods
-without loading a save or navigating to a specific scene. The native tool lets you
-inspect field characters, battle players and monsters with an orbit camera, animation playback
-and scrubbing, original/modded A/B comparison and controlled lighting. It reads the
-installed game data and existing mod preferences without changing saves or settings.
-See [the model viewer guide](docs/model-viewer.md) for controls, art-style selection
-and limitations.
 
 ## Credits and licence
 

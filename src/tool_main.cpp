@@ -30,7 +30,6 @@ struct Tool {
   const char* what;
 };
 constexpr Tool kTools[] = {
-    {"ocmodelview", ocmodelview_main, "isolated character model / animation viewer with original/modded A/B"},
     {"occ", occ_main, "rooms / models / scripts / effects / saves: list, extract, decode, validate"},
     {"octext", octext_main, "message viewer (lang.dat / PS1 dialogue)"},
     {"ocaudio", ocaudio_main, "decode / play BGM"},
@@ -44,6 +43,7 @@ constexpr Tool kTools[] = {
     {"ocflow", ocflow_main, "title / name entry / slot list screens in a window"},
     {"ocmenudemo", ocmenudemo_main, "main menu in a window (tmp/save.dat slot 4)"},
     {"ocshopdemo", ocshopdemo_main, "shops in a window (tmp/save.dat slot 4)"},
+    {"ocmodelview", ocmodelview_main, "character models in a window: orbit, animation clips, original / modded"},
 };
 
 void attach_console() {

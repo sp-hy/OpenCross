@@ -57,7 +57,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 
 ### Dev tools
 
-`opencross tools` lists them: `occ`, `octext`, `ocaudio`, `ochd`, `ocprd`, `ocstage`, `ocbattle`, `ocmovie`, `ocbattleview`, `ocbattleseq`, `ocflow`, `ocmenudemo`, `ocshopdemo`. Every subcommand and flag, the `OC_*` environment variables, the hotkeys and the helper scripts are catalogued in [`tools.md`](tools.md); the settings file in [`formats/config.md`](formats/config.md).
+`opencross tools` lists them: `occ`, `octext`, `ocaudio`, `ochd`, `ocprd`, `ocstage`, `ocbattle`, `ocmovie`, `ocbattleview`, `ocbattleseq`, `ocflow`, `ocmenudemo`, `ocshopdemo`, `ocmodelview`. Every subcommand and flag, the `OC_*` environment variables, the hotkeys and the helper scripts are catalogued in [`tools.md`](tools.md); the settings file in [`formats/config.md`](formats/config.md).
 
 - `ocbattle` subcommands: `scenes`, `sim <scene>`, `cast`, `elements`, `xcheck`, `soak`, `pac-disasm <scene>`, `pac-soak`, `fx-reg <scene>`, `fx-audit`, `debug-kill [enemy_id [count]]` (the Debug tab's "Replace the enemies" headless).
 - Gates: `opencross ocbattle fx-audit` (`--find NAME`; must not regress) and `opencross ocbattle pac-soak` (`--scene N`, `--from A --to B`, `OC_SOAK_LIST=1`; zero exceptions, outcome counts unchanged by changes that should not touch battle scripts).

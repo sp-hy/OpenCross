@@ -14,7 +14,6 @@
 #include "core/log.h"
 #include "import/tim.h"
 #include "platform/keymap.h"
-#include "platform/stick_nav.h"
 #include "render/text_batch.h"
 #include "render/texture.h"
 #include "ui/ps1_font.h"
@@ -85,7 +84,6 @@ u32 tint(u32 colour, float factor) {
 }  // namespace
 
 struct BattleResults::Impl {
-  platform::StickNav stick;
   // Sampler choice: filtered by [Video] Filter*, filtered + repeating (wallpaper), always nearest (the white pixel).
   enum Kind { kLin, kRep, kFixed };
   struct Tex {
@@ -139,7 +137,6 @@ struct BattleResults::Impl {
   std::string portrait_set = "2021";
   std::function<void(int)> sfx;
   std::function<void()> on_exit;
-  bool music_stopped = false;
 
   // The HD art, drawn in both art modes: the battle_37.tim wallpaper and the portrait strips
   // hd/battle/face/<dir>/pNN.png with <dir> = 1999 in original art, 2021 in HD.
@@ -593,6 +590,8 @@ struct BattleResults::Impl {
   }
 
   // ---- state -----------------------------------------------------------------------------------------------------------
+  // The exit sound (0x41) is due on the next tick.
+  bool exit_sfx = false;
   void play(int id) {
     if (sfx && !muted) sfx(id);
   }
@@ -633,10 +632,11 @@ struct BattleResults::Impl {
       else show_member(gain_list[static_cast<size_t>(cur)]);
     } else if (phase == Phase::Spoils) {
       play(8);
-      // Exit: black fade over 0x1E frames, the panels slide out, 30 frames. No exit sound.
+      // Exit: fade to black over 0x1E frames while the panels slide out. The exit sound (0x41) plays on the next frame, after 8
+      // sounded for one frame.
       phase = Phase::Exit;
       pt = 0;
-      music_stopped = false;
+      exit_sfx = true;
     }
   }
   void begin_spoils() {
@@ -658,16 +658,16 @@ struct BattleResults::Impl {
   }
   void tick() {
     ++age, ++pt, ++page_age;
+    if (exit_sfx) exit_sfx = false, play(0x41);
     if (debounce > 0) --debounce;
     if (auto_on && page_age >= kAutoHold && (phase == Phase::PowerUp || phase == Phase::Heal || phase == Phase::Healed || phase == Phase::Spoils)) confirm();
     if (phase == Phase::Exit) {
       slide = slide < 1.0f ? 24.0f : slide * 1.125f;
-      // The victory music ends just before the screen is fully black.
-      if (pt >= kExit - kMusicLead && !music_stopped) {
-        music_stopped = true;
+      // The screen stays black after the fade; the victory music plays on until the field returns.
+      if (pt >= kFieldReturn) {
+        phase = Phase::Done;
         if (on_exit) on_exit();
       }
-      if (pt >= kExit) phase = Phase::Done;
     } else {
       // settles from 0x18
       slide -= slide / 8.0f;
@@ -844,6 +844,7 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
     impl.drops.push_back(std::move(drop));
   }
+  impl.exit_sfx = false;
   impl.phase = Phase::PowerUp;
   impl.age = impl.pt = impl.debounce = 0;
   impl.acc = 0;
@@ -869,9 +870,8 @@ void BattleResults::update(float dt, const platform::Input& in) {
   if (impl.phase == Phase::Idle || impl.phase == Phase::Done) return;
   using platform::Action;
   const bool ok = platform::action_pressed(in, Action::Ok) || in.pad_pressed[SDL_GAMEPAD_BUTTON_SOUTH];
-  impl.stick.poll(in);
-  const bool up = platform::action_pressed(in, Action::Up) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP] || impl.stick.up;
-  const bool down = platform::action_pressed(in, Action::Down) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN] || impl.stick.down;
+  const bool up = platform::action_pressed(in, Action::Up) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP];
+  const bool down = platform::action_pressed(in, Action::Down) || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
   const bool cancel = platform::action_pressed(in, Action::Cancel) || in.pad_pressed[SDL_GAMEPAD_BUTTON_EAST];
   impl.acc += dt * 60.0f;
   int steps = 0;

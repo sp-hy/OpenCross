@@ -61,6 +61,20 @@ fs::path exe_dir() {
   return base ? fs::path(base) : fs::current_path();
 }
 
+fs::path exe_path() {
+#ifdef _WIN32
+  std::wstring buf(MAX_PATH, L'\0');
+  for (;;) {
+    const DWORD length = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (length == 0) return {};
+    if (length < buf.size()) return fs::path(buf.substr(0, length));
+    buf.resize(buf.size() * 2);
+  }
+#else
+  return {};
+#endif
+}
+
 fs::path find_game_dir(std::string_view configured) {
   if (!configured.empty() && is_game_dir(fs::path(configured))) return fs::path(configured);
   fs::path dir = exe_dir();

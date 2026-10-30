@@ -39,7 +39,6 @@
 #include "import/text.h"
 #include "movie/player.h"
 #include "platform/config.h"
-#include "platform/stick_nav.h"
 #include "platform/updater.h"
 #include "platform/window.h"
 #include "render/crt_pass.h"
@@ -140,7 +139,7 @@ class App {
   void apply_flow_action(const game::FlowAction& action);
   bool pause_modal(const platform::Input& in);
   void open_pause();
-  void advance(const platform::Input& in, double dt, int ticks);
+  void advance(const platform::Input& raw, double dt, int ticks);
   bool field_visible() const { return world_ok && world.view().loaded(); }
 
   // ---- app_battle.cpp ---------------------------------------------------------------------------------------------------------
@@ -333,8 +332,8 @@ class App {
   // The pad's Start press that may still open the settings window (held long enough) or the pause screen (released before), and when it
   // went down; start_tap = this frame released it early (the pause screen's Start).
   bool start_held = false, start_tap = false;
-  // The left stick as d-pad presses for the pause screen.
-  platform::StickNav pause_stick;
+  // The left stick's d-pad directions of the previous advance() (platform::stick_to_dpad).
+  std::array<bool, 4> stick_dpad{};
   u64 start_down_ms = 0;
   game::SlowFieldCycle slow_field_cycle;
   // RDE's HD "Home / Another World" name over the world maps.

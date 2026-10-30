@@ -58,7 +58,9 @@ int ocshopdemo_main(int argc, char** argv) {
       if (shots) demo.screenshot_sequence(ctx, shot_dir.empty() ? exe / "shop_shots" : shot_dir);
       else demo.open(ui::ShopKind::Element, 0);
       platform::Input input;
+      std::array<bool, 4> stick_dpad{};
       while (rc == 0 && window.pump(input)) {
+        platform::stick_to_dpad(input, stick_dpad);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
         const int id = (input.key_down[SDL_SCANCODE_LSHIFT] || input.key_down[SDL_SCANCODE_RSHIFT]) ? 1 : 0;
         if (input.key_pressed[SDL_SCANCODE_F5]) demo.open(ui::ShopKind::Element, id);

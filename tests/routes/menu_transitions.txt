@@ -1,0 +1,64 @@
+# Field to menu: 10 ticks of fade, 40 black, then the menu cuts in (the tap is 1 tick, the press lands on the tick after mark).
+0 wait idle 600
+- request party_add 1
+- request keyitem 62
+- wait idle 60
+- mark time
+- tap triangle 1
+- wait menu open 200
+- assert elapsed 50 56
+- wait 10
+# Status: the cards slide out and the screen fades for 30 ticks; the new screen cuts in on tick 33.
+- tap confirm
+- wait 10
+- mark time
+- tap confirm 1
+- wait 12
+- screenshot mt_status_open.png
+- wait 40
+- screenshot mt_status.png
+# Back: 8 ticks of fade, black until tick 32, then the list.
+- tap cancel 1
+- wait 5
+- screenshot mt_status_back.png
+- wait 40
+# Equip with Kid: Kid moves to the first slot while Serge drops; back lands on the pick with Kid kept.
+- tap down
+- tap down
+- tap confirm
+- tap right
+- wait 10
+- tap confirm 1
+- wait 15
+- screenshot mt_equip_open.png
+- wait 40
+- tap cancel 1
+- wait 40
+- screenshot mt_equip_back_pick.png
+# Items: the Time Shifter row with its key caps.
+- tap cancel
+- tap down
+- wait 10
+- tap confirm 1
+- wait 50
+- screenshot mt_key_items.png
+- tap cancel 1
+- wait 40
+# Allocate: the pick keeps the Use / Allocate list; back from the grid lands on it, Cancel goes to the Use / Allocate list.
+- tap up
+- tap up
+- tap confirm
+- tap down
+- tap confirm
+- wait 10
+- screenshot mt_allocate_pick.png
+- tap confirm 1
+- wait 70
+- tap cancel 1
+- wait 40
+- screenshot mt_allocate_back.png
+- tap cancel
+- wait 10
+- screenshot mt_allocate_cancel.png
+- assert menu open
+- quit

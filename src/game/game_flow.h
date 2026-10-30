@@ -183,12 +183,13 @@ class GameFlow {
   // host must not run the game) and draw_overlay() last in every frame (the black veil over whatever was drawn).
   FlowAction tick_fade(float dt);
   bool fading_out() const { return load_pending_ || open_pending_; }
-  // Field main menu (Tab / Start): fade to black first (retail has no fade here), the host opens the menu when
-  // take_open_ready() reports the fade-out finished; the veil then fades out over the menu.
+  // Field main menu (Tab / Start): the field fades to black and the screen holds black, the host opens the menu when
+  // take_open_ready() reports it; the menu then shows at full brightness (no fade-in).
   void begin_menu_open_fade() { open_pending_ = true; }
   bool take_open_ready() {
     const bool ready = open_ready_;
     open_ready_ = false;
+    if (ready) veil_ = 0.0f;
     return ready;
   }
   void draw_overlay(const render::Frame& frame, float view_w, float view_h);
@@ -291,7 +292,8 @@ class GameFlow {
   NgPlusResult ngp_result_ = NgPlusResult::None;
   save::SaveSlot ngp_cleared_;
   // Menu-open fade (see begin_menu_open_fade).
-  bool open_pending_ = false, open_ready_ = false, quick_in_ = false;
+  bool open_pending_ = false, open_ready_ = false;
+  float open_hold_ = 0.0f;
   // A load waits for the fade-out to finish.
   bool load_pending_ = false, load_from_slots_ = false;
   ui::SlotEntry load_entry_;

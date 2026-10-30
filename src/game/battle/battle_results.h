@@ -51,7 +51,7 @@ class BattleResults {
   void set_portrait_set(const std::string& set);
   // Global sound effects (effect00 ids): 0x47 screen open, 0x14 star-up, 1 cursor, 6 cancel, 8 confirm, 0x41 exit.
   void set_sfx(std::function<void(int)> fn);
-  // Called once when the screen exits (the host stops the victory music there, like the view did on its panel).
+  // Called once when the screen is done, kFieldReturn ticks after the last confirm (the host stops the victory music there).
   void set_on_exit(std::function<void()> fn);
   // [Video] Widescreen: `canvas_columns` = layer columns per side the wallpaper and fades extend by; [Video] WideHud: `layout_columns` =
   // the columns the portraits / rows (left) and the panel (right) move out by.
@@ -82,8 +82,10 @@ class BattleResults {
   // Test hook: the heal menu's state (route assertions): -1 not offered, else the cursor (0 heal, 1 heal + stock, 2 do not heal).
   int heal_cursor() const;
 
-  // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit flash + wait 0x1E.
-  static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180, kMusicLead = 8;
+  // Timing in 60 Hz ticks: fade-in 0x3C, settle 3 + 4 frames, input debounce 0x10, exit fade to black 0x1E.
+  static constexpr int kFadeIn = 60, kSettle = 7, kDebounce = 16, kExit = 30, kAutoHold = 180;
+  // From the last confirm to the field's return (done(): the field fades in and restores its song, which cuts the victory music).
+  static constexpr int kFieldReturn = 43;
 
  private:
   struct Impl;

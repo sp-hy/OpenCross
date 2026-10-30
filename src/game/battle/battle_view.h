@@ -51,7 +51,6 @@
 #include "render/particles.h"
 #include "game/battle/battle_pose.h"
 #include "game/battle/battle_seq.h"
-#include "platform/stick_nav.h"
 #include "platform/window.h"
 #include "render/camera.h"
 #include "render/mesh_pipeline.h"
@@ -862,9 +861,11 @@ class BattleView {
   static constexpr int kLootDropWait = 80, kLootDropMsg = 40;
   bool fled_outro_ = false;
   int finish_ticks_ = 0;
-  // The battle theme stops kVictoryStopDelay ticks after the win; the victory song starts kVictorySongPause ticks after that.
-  static constexpr int kVictoryStopDelay = 30, kVictorySongPause = 45;
-  int victory_song_ = -1, victory_song_delay_ = 0, victory_stop_delay_ = 0;
+  // Victory music, in ticks: kVictoryThemeFade = from the win to the start of the battle theme's fade to silence; kVictoryThemeFadeTicks =
+  // the length of that fade; kVictorySongDelay = from the start of the fade to the victory song.
+  static constexpr int kVictoryThemeFade = 43, kVictoryThemeFadeTicks = 16, kVictorySongDelay = 20;
+  // The victory song still to start (-1 = none).
+  int victory_song_ = -1;
 
   // ui
   Ui ui_ = Ui::Intro;
@@ -959,8 +960,6 @@ class BattleView {
   ui::font::FontSet fonts_;
   // Keyboard glyphs after a key press, pad glyphs after pad input.
   bool kb_mode_ = false;
-  // Left stick as menu direction presses.
-  platform::StickNav stick_;
   struct Tex {
     render::Texture tex;
     render::TexRef set;

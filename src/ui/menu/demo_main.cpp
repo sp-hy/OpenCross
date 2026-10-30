@@ -70,9 +70,11 @@ int ocmenudemo_main(int argc, char** argv) {
       demo.open();
       if (shots) demo.screenshot_sequence(ctx, shot_dir.empty() ? exe / "menu_shots" : shot_dir);
       platform::Input input;
+      std::array<bool, 4> stick_dpad{};
       bool quit_after = shots;
       int drive_frame = 0;
       while (rc == 0 && window.pump(input)) {
+        platform::stick_to_dpad(input, stick_dpad);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
         if (input.key_pressed[SDL_SCANCODE_F3]) demo.open();
         if (input.key_pressed[SDL_SCANCODE_F4]) demo.screenshot_sequence(ctx, exe / "menu_shots");

@@ -3,7 +3,8 @@
 // tag. Sounds are looked up like the engine's one resource list (Resident / Actor / Pack groups, newest first; closing a group cuts its
 // sounds), the chant plays at the start of an element cast with mask 0x100 and the theme is ducked until the pack ends.
 // Music: the field starts a battle with its battle song (the boss theme 0x31 with flag 0x40, else the battle theme 2 / 0x14) unless the
-// battle request keeps the field music (flag 1). There is no victory voice and no victory fade; the results screen starts the victory song.
+// battle request keeps the field music (flag 1). There is no victory voice; after a win the view fades the theme out and starts the
+// victory song (BattleView::tick_finish).
 #include <bitset>
 #include <map>
 #include <memory>

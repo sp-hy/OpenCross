@@ -9,15 +9,21 @@ The working list for the engine: behaviour bugs found by reading the code, fidel
 ## 2. Fidelity gaps (not modelled)
 
 - After the true-ending cinematic RDE holds the black battle screen about 140 refreshes before the field takes over; ours hands over at once (rule or load time unknown, `formats/battle_effects.md`).
+- After the results screen RDE restores the field song 43 ticks after the last confirm but starts the field's fade-in about 8 ticks later; ours does both at 43 (`BattleResults::kFieldReturn`, `FieldWorld::end_battle`).
+- At the results exit RDE's output has no audible confirm sound 8 (the exit sound 0x41 replaces it at once); ours sounds 8 for one tick before 0x41 (`battle_results.cpp`).
 - Enemy script queue entries for a weapon attack with several target bits still attack each unit in turn; the element path now casts once (`pac_vm.cpp`). Check the PS1 weapon path.
 - Double / triple techs: whether a partner's colour seal is judged by its own tech's colour, the triple path (tested with synthetic tables only) and confused / automatic PCs picking a combo cell are unchecked (`battle.cpp` `combo_at`).
+- RDE shows a poem screen when the title menu sits idle and then returns to the menu; ours stays on the menu (the idle timer is held while it is open, `app_sim.cpp`, `title_screen.cpp`).
 
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
 
+- Victory theme fade: RDE starts it 14 ticks after the battle loop's last frame; the 43 ticks from the win assume the PS1's 29 ticks from the win to that frame. Check the win-to-fade time and OpenCross's `begin_finish` moment against an RDE battle (`BattleView::kVictoryThemeFade`).
 - Slow-motion `k` path (summons, Meteor Shower): RDE's 2/(k+1) pacing is inferred; measure an RDE battle where Kid casts Meteor Shower.
 - Status plates: RDE's 20 px left shift of the right column (PS1 x 268 / 230) is unconfirmed (`status_plates.h`).
 - `lasdes2` with HD art on Schala's model: what RDE shows for the eye-blink copy (op 0x10C) (`death_ports.cpp`).
+- Monsters with more than 64 joints (`battle/monster/o_mushi`, `ryu_b`, `ryu_pw`): the mesh renderer keeps 64 joint matrices (`MeshPipeline::kMaxJoints`); check that their parts bound to the higher joints move as in RDE.
 - Black field-ring slots are drawn as a near-invisible dark fill; check RDE's look on a dark stage (`battle_view_hud.cpp`).
+- Title prompt press: the title room's script starts the fade to black together with the music fade and fades over 32 frames; ours fades from the press over 30 frames. Measure RDE's screen fade against its chime with frame-accurate audio / video alignment (`title_screen.cpp`).
 - Sexy Wink screen copy frame time at 2560x1440, RenderScale 4 (every run so far was on a locked PC).
 
 ## 4. Code hygiene

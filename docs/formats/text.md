@@ -108,6 +108,7 @@ OpenCross: `LangTables` in `src/import/text.h` implements this.
 * EN bare tokens (51): `SERGE%`..`PIP%`, `Sir SERGE%`, `Mister S_%`, `Herr SERGE%`, `The-SERGE%`, `◆` (marker, prints nothing), `''` (apostrophe).
 * field sync: `{fset(n)}` `{fwait(n)}`, `{key(0..3,8,up,down,right,left)}` (button icon), `{input(n)}` (number entry, variable 0x18), `{ERROR}` (placeholder).
 * battle only: `{wmode W H}`, `{size W H}` (window size), `{playwork(0)}` `{itemwork(0)}`.
+* key-item descriptions (`keyitem`): `{ButtonFast}` `{ButtonSlow}` (the Time Shifter row, every language), the key cap or pad glyph bound to the fast / slow speed action (`rules/menus.md` section 7). The row's lines are separated by `\n`.
 * An unknown `{...}` is drawn as plain characters.
 
 Placeholders: `{PARTYn%}` = party slot n -> character id; `{playwork(n)}` / `{itemwork(n)}` / `{num(n)}` read script variable `0x1A + 2n`; `{NAME%}` = fixed id. A save name record that still holds the JP default (kana) is "unset" outside JP. Names come from the custom-name map (name entry) or `sysmes[0x10000+id]`, truncated to 15 UTF-16 units; Serge becomes "Lynx" while in Lynx's body.

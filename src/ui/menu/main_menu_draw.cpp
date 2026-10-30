@@ -243,10 +243,10 @@ void MainMenu::Impl::build() {
   }
   cmds.insert(cmds.end(), std::make_move_iterator(key_caps.begin()), std::make_move_iterator(key_caps.end()));
   key_caps.clear();
-  if (xfade_state == 1 || xfade_state == 2) {
-    const int alpha = xfade_state == 1 ? 255 * xfade / xfade_len : 255 * (xfade_len - xfade) / xfade_len;
+  if (transition != Transition::None) {
+    const int span = transition == Transition::Open ? kOpenFade : kBackFade;
     group(Centre);
-    rect(-canvas_s, 0, kCanvasW + 2.0f * canvas_s, kCanvasH, rgb(0, 0, 0, std::clamp(alpha, 0, 255)));
+    rect(-canvas_s, 0, kCanvasW + 2.0f * canvas_s, kCanvasH, rgb(0, 0, 0, 255 * std::min(transition_t, span) / span));
   }
 }
 

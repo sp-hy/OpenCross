@@ -219,6 +219,10 @@ class FieldWorld final : public script::FieldHost {
     pending_song_ = -1;
     last_song_ = -1;
   }
+  // The room's current song from its start, after the mixer was stopped outside the scripts (the title prompt's music fade).
+  void restart_song() {
+    if (last_song_ >= 0) start_song(last_song_, bgm_volume_);
+  }
   void set_bgm_remastered(bool on, bool restart = true);
   bool bgm_remastered() const { return bgm_remastered_; }
   // set: "2021" / "1999"

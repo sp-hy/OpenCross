@@ -14,6 +14,8 @@
 #pragma warning(pop)
 #endif
 
+#include "core/log.h"
+#include "platform/paths.h"
 #include "render/imgui_layer.h"
 #include "render/texture_registry.h"
 #include "vfs/vfs.h"
@@ -51,6 +53,14 @@ TextureDumpHooks g_dump_hooks;
 
 // Texture dump block (bottom of the tab): counters, the Dump button, the category boxes (game::DumpSet bits), progress.
 // Texture replacement (render/texture_registry.h) is always on - a texture mod is switched by its own row; dumping is the button here.
+// `opencross modelview` as a separate process; the game keeps running.
+void open_model_viewer() {
+  const std::u8string exe = platform::exe_path().u8string();
+  const char* args[] = {reinterpret_cast<const char*>(exe.c_str()), "modelview", nullptr};
+  if (SDL_Process* process = SDL_CreateProcess(args, false)) SDL_DestroyProcess(process);
+  else log::warn("mods: model viewer did not start: {}", SDL_GetError());
+}
+
 void draw_dump_block(platform::Config& cfg, bool* settings_dirty) {
   ImGui::Separator();
   const texture_registry::Stats ts = texture_registry::stats();
@@ -139,6 +149,10 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   ImGui::SameLine();
   if (ImGui::Button("Discover Mods")) SDL_OpenURL("https://www.nexusmods.com/games/chronocrosstheradicaldreamersedition");
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) render::ImGuiLayer::tooltip("Opens the game's page on Nexus Mods in your web browser.");
+  ImGui::SameLine();
+  if (ImGui::Button("Model Viewer")) open_model_viewer();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    render::ImGuiLayer::tooltip("Opens a separate window that shows the character and monster models, with and without the enabled mods.");
   ImGui::SameLine();
   ImGui::AlignTextToFramePadding();
   ImGui::TextDisabled("Top of the list wins a file several mods replace.");

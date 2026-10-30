@@ -55,12 +55,15 @@ void MainMenu::Impl::update_main(const Nav& nav) {
     else if (nav.left || nav.up) pick_cur = wrap(pick_cur - 1, party_size), sfx(1);
     if (nav.right || nav.down) pick_cur = wrap(pick_cur + 1, party_size), sfx(1);
     if (roster != Roster::Off) return;
-    if (nav.cancel) sub = 0, sfx(6);
-    else if (nav.ok && party_size > 0) {
+    // The Allocate pick returns to the Use / Allocate list (on Allocate), the others to the main list.
+    if (nav.cancel) {
+      sub = 0;
+      if (pick_for == 1) screen = MenuScreen::ElementChoice, choice_cur = 1;
+      sfx(6);
+    } else if (nav.ok && party_size > 0) {
       member = pick_cur;
       sfx(8);
       enter(pick_for == 0 ? MenuScreen::Status : pick_for == 1 ? MenuScreen::ElementGrid : MenuScreen::Equip);
-      sub = 0;
     }
   }
 }
@@ -336,32 +339,30 @@ void MainMenu::Impl::member_card(int character, float x, float y) {
 // with its dial and the title (right group), the bottom bar (left) and the message (centre). Portraits are dimmed to 0x40 except the
 // member being picked. While the roster is out it covers the portraits and the bar is not drawn.
 void MainMenu::Impl::build_main() {
-  const bool toggle = screen == MenuScreen::ElementChoice;
+  const bool toggle = screen == MenuScreen::ElementChoice || allocate_pick();
   const bool listing = roster != Roster::Off;
   const bool picking = screen == MenuScreen::Main && sub == 1 && !listing;
   const std::vector<int> members = party();
-  // Opening Allocate elements / Equip: the other members slide off to the left, the cards off to the right.
-  float away = 0;
-  if (slide_t > 0) {
-    const float t = static_cast<float>(slide_t) / static_cast<float>(kSlideAway);
-    away = t * t * (3.0f - 2.0f * t);
-  }
+  // Open transition (see Transition): the motion starts one tick after the fade, at constant speed. Cards move right by kCardSlide
+  // PS1 px per tick and, on the way to a character screen, the other portraits drop by kPortraitDrop rows per tick while the chosen one
+  // moves linearly to the first slot over kOpenFade ticks.
+  constexpr float kCardSlide = 8.5f, kPortraitDrop = 16.0f, kFirstSlotX = 16.0f, kSlotPitch = 72.0f;
+  const int moved = transition == Transition::Open ? std::max(transition_t - 1, 0) : 0;
+  const float travel = static_cast<float>(std::min(moved, kOpenFade)) / static_cast<float>(kOpenFade);
   group(Left);
   size_t chosen = members.size();
   for (size_t i = 0; i < members.size(); ++i)
     if (members[i] == cur_char()) chosen = i;
   for (size_t i = 0; i < members.size() && i < 3; ++i) {
-    const float x = 16.0f + 72.0f * static_cast<float>(i);
+    const float x = kFirstSlotX + kSlotPitch * static_cast<float>(i);
     const bool bright = picking && static_cast<int>(i) == pick_cur;
-    // On a character screen every portrait but the chosen one slides off the bottom (the strip is two 224-unit halves: the canvas is 448 tall).
-    // The chosen one moves to the first slot, where the character screens draw it.
     const bool mine = portraits_away && i == chosen;
-    const float dy = portraits_away && i != chosen ? 460.0f * away : 0.0f;
-    portrait_strip(members[i], mine ? x + (16.0f - x) * away : x, grey(bright ? 0x80 : 0x40), dy);
+    const float dy = portraits_away && !mine ? kPortraitDrop * static_cast<float>(moved) : 0.0f;
+    portrait_strip(members[i], mine ? x + (kFirstSlotX - x) * travel : x, grey(bright ? 0x80 : 0x40), dy);
     if (bright) cursor(PX(x) - 40.0f, PY(224) - 8.0f);
   }
   for (size_t i = 0; i < members.size() && i < 3; ++i)
-    member_card(members[i], 250.0f + 16.0f * static_cast<float>(i) + 500.0f * away, 42.0f + 84.0f * static_cast<float>(i));
+    member_card(members[i], 250.0f + 16.0f * static_cast<float>(i) + kCardSlide * static_cast<float>(moved), 42.0f + 84.0f * static_cast<float>(i));
   group(Right);
   if (toggle) list_and_bar(1, choice_cur);
   else list_and_bar(0, main_cur, !listing);
@@ -498,15 +499,14 @@ void MainMenu::Impl::build_status() {
   bar_and_title(0, true, -1.7f);
 }
 
-// A square glyph of the pad button (or key cap) bound to `action`, 12 x 14 PS1 px at (x, y): ui/gamepad.png cells (13 x 4, the plain rows) d-pad
-// up 0, left 1, right 2, down 3; LT 21, RT 22. A key cap is drawn smaller than the cell and lower than a pad glyph.
-void MainMenu::Impl::action_glyph(platform::Action action, float x, float y) {
+// The glyph of the pad button (or key cap) bound to `action` in the canvas cell (x, y, w, h): ui/gamepad.png cells (13 x 4, the plain rows)
+// d-pad up 0, left 1, right 2, down 3; LT 21, RT 22. A key cap is drawn smaller than the cell and lower than a pad glyph.
+void MainMenu::Impl::action_glyph(platform::Action action, float x, float y, float w, float h) {
   using platform::Action;
-  constexpr float kGlyph = 12.0f, kGlyphH = 14.0f, kKeyCapDx = 1.2f, kKeyCapDy = 1.4f, kKeyCapW = 10.4f, kKeyCapH = 11.7f;
   if (kb_mode) {
     if (Tex* keys = texs.load(std::string("ui/keyboard_") + "efigsj"[std::clamp(lang_index(), 0, 5)] + ".png")) {
       const int cell = platform::keyboard_cell(platform::action_vk(action));
-      Img(keys, PX(x + kKeyCapDx), PY(y + kKeyCapDy), PX(kKeyCapW), PY(kKeyCapH), static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
+      Img(keys, x + kKeyCapLeft * w, y + kKeyCapTop * h, kKeyCapW * w, kKeyCapH * h, static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
           static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f);
     }
     return;
@@ -515,7 +515,7 @@ void MainMenu::Impl::action_glyph(platform::Action action, float x, float y) {
                     : action == Action::SlowSpeed ? 21 : 22;
   if (Tex* pad = texs.load("ui/gamepad.png")) {
     const int col = index % 13, row = (index / 13) * 2 + 1;
-    Img(pad, PX(x), PY(y), PX(kGlyph), PY(kGlyphH), static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
+    Img(pad, x, y, w, h, static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
         static_cast<float>(col + 1) / 13.0f, static_cast<float>(row + 1) / 4.0f);
   }
 }
@@ -593,12 +593,11 @@ void MainMenu::Impl::camera_legend() {
       total += line[i].glyph ? kGlyph : kGlyphToText + text_width(line[i].text) + (i + 1 < line.size() ? kTextToGlyph : 0.0f);
     return total;
   };
-  auto glyph = [&](Action action, float x, float y) { action_glyph(action, x, y); };
   auto draw_line = [&](const std::vector<Piece>& line, float pen, int index) {
     const float top = kLineTop + kGlyphH * static_cast<float>(index);
     for (size_t i = 0; i < line.size(); ++i) {
       if (line[i].glyph) {
-        glyph(line[i].action, pen, top);
+        action_glyph(line[i].action, PX(pen), PY(top), PX(kGlyph), PY(kGlyphH));
         pen += kGlyph;
         continue;
       }

@@ -17,6 +17,7 @@ Common conventions:
 | `-l <lang>` | `ocmovie` only: language of the movie (default `en`). |
 | `-v` | Verbose: `ochd`, `ocstage validate`, `ocbattle soak`, `pac-soak`, `fx-audit`, `occ dialogue-*`. |
 | `ocbattleview`, `ocflow`, `ocmenudemo`, `ocshopdemo` | Take no `-g`; they read `opencross.ini` next to the exe (`[Paths] GameDir`, else discovery). |
+| `ocmodelview` | `-g`, else `OPENCROSS_GAMEDIR`, else `[Paths] GameDir` of `opencross.ini` next to the exe, else discovery. |
 
 `ocbattle soak` exits 1 on anomalies or exceptions, `pac-soak` on exceptions, `ochd` on decode or size failures, `ocstage validate` when a stage fails; `ocbattle fx-audit` exits 0 after a completed run.
 
@@ -238,7 +239,19 @@ Sources: `src/game/flow_demo_main.cpp`, `src/ui/menu/demo_main.cpp`, `src/ui/sho
 | `ocmenudemo` | `--shots [dir]`, `--orig`, `--lang <code>`, `--slot N`, `--drive` | Main menu on slot N (default 4). `--shots` writes the sequence to `dir` (default `menu_shots` next to the exe) and exits; `--drive` plays a scripted key sequence through every screen and logs the resulting state. |
 | `ocshopdemo` | `--shots [dir]`, `--orig`, `--lang <code>` | Element shop, blacksmith, trading post. `--shots` writes to `dir` (default `shop_shots` next to the exe) and exits. |
 
-### 1.12 Files written by the tools
+### 1.12 `ocmodelview` (character models in a window)
+
+Sources: `tools/ocmodelview.cpp`, `tools/model_view.*`; the model files are read by `game::read_model_files` (`src/game/model_files.*`), the same reader the field, battle and texture dump use. Also opened by the **Model Viewer** button of the Mods tab. Flags: `-g <dir>`, `--model <stem>` (a stem as listed, e.g. `fieldobj/player/selju/selju`; default Serge's field model), `--sd` (start in original art). Bad arguments exit 2.
+
+- **Catalog.** Every field character (`fieldobj/player`), battle player (`battle/player`) and monster (`battle/monster`) `.obj` of the cdrom archive, filtered by a search box and a group.
+- **Original / modded.** Two copies of the model: the original reads a VFS without mods and skips texture replacement; the modded copy applies the mods enabled in `opencross.ini` (Modded art set with *HD art*, SD art set without). Tab switches between them without moving the camera or the playback time. *Reload* rescans the mods folder.
+- **Animation.** The model's raw clips (`<source>[<index>] <name>`), with play, loop, speed and a frame slider. The modded copy plays the clip with the same source and index, not the same list position; a missing or ambiguous clip shows the rest pose with a note. No animation-sequence, battle or field scripts run.
+- **View.** Orbit camera framed on the rest-pose bounds of both copies; Front / Side / Back / Reset. *Inspection light* (off by default) adds a fixed model-space key light and ambient; off, the model is drawn unlit like the game draws it. *Show initially hidden parts* draws the meshes whose S3 shading entry starts them hidden (the game's scripts show those).
+- **Stats.** Vertices, triangles, parts, joints and clips of each copy, and the reader's error when a file is missing or rejected. Models with more joints than the mesh renderer's 64 are drawn as the game draws them, with a note.
+
+It writes nothing: no save, no ini, no mod settings.
+
+### 1.13 Files written by the tools
 
 | Tool | Output |
 |---|---|
@@ -469,6 +482,8 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | F9 | `battle_view_ui.cpp` | Toggles the battle camera debug overlay. |
 | PageDown / PageUp | `app_run.cpp` | Next / previous room; only in the field with the flow disabled and no movie. |
 
+The Debug tab's **Sound test** header (`app_debug.cpp`, shown when the sound effects loaded) picks a global sound id 0..255 (effect00; `<` / `>` step with wrap, or type the id) and plays it on the menus' channel when Play is pressed; an id with no program is reported as not defined.
+
 ### 4.2 Debug free camera (Debug tab, battle 3D or title sea)
 
 | Input | Action |
@@ -488,7 +503,7 @@ The camera takes W A S D Q E and the pad sticks, triggers and left stick click a
 
 | Action | Set 0 | Set 1 | PS1 pad |
 |---|---|---|---|
-| Up / Down / Left / Right | arrows | W / S / A / D | d-pad |
+| Up / Down / Left / Right | arrows | W / S / A / D | d-pad (the left stick past half way counts as the d-pad) |
 | Ok | Enter | X | Circle |
 | Cancel (also run in the field) | Backspace | Left Shift | Cross |
 | Item (key-item list in the field) | F | R | Square |
@@ -506,7 +521,7 @@ Screens show the key caps of set 0.
 
 | Tool | Key | Action |
 |---|---|---|
-| all four | Esc | Quits. |
+| all five | Esc | Quits. |
 | `ocbattleview` | F1 | Toggles HD / original art. |
 | `ocbattleview` | F3 | Toggles the camera overlay (F9 works too). |
 | `ocbattleview` | Enter | Confirm (scripted by `--auto`, `--keys`); the other keys are the battle keymap. |
@@ -518,6 +533,10 @@ Screens show the key caps of set 0.
 | `ocshopdemo` | F5 / F6 / F7 | Opens the Element / Smith / Trading shop. |
 | `ocshopdemo` | Shift held | With F5..F7, opens shop id 1 instead of 0. |
 | `ocshopdemo` | F4 | Writes the screenshot sequence to `shop_shots`. |
+| `ocmodelview` | Space | Plays / pauses the clip. |
+| `ocmodelview` | Tab | Switches between the original and the modded copy. |
+| `ocmodelview` | R | Reloads both copies and rescans the mods folder. |
+| `ocmodelview` | Left drag / wheel | Orbits / zooms (outside the panel). |
 
 ## 5. Scripts
 

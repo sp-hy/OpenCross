@@ -173,25 +173,24 @@ void App::init_debug_tab() {
         render::ImGuiLayer::tooltip("Writes opencross.log next to the exe (engine messages, warnings, errors) for bug reports. Off by default; "
                                     "takes effect at once and is remembered.");
     }
-    // Sound test: plays one effect00 sound (the menus' and the field's global sound ids) to find what the original used.
+    // Sound test: picks a global sound id (effect00) and plays it on the menus' channel when Play is pressed.
     if (ImGui::CollapsingHeader("Sound test") && sfx_ok) {
+      constexpr int kCount = audio::SfxBank::kGlobalCount;
       static int sound_id = 0;
-      static bool auto_play = true;
-      bool play = false;
-      if (ImGui::Button("<")) sound_id = (sound_id + 255) % 256, play = auto_play;
+      static int undefined_id = -1;
+      if (ImGui::Button("<")) sound_id = (sound_id + kCount - 1) % kCount;
       ImGui::SameLine();
       ImGui::SetNextItemWidth(120);
-      if (ImGui::InputInt("##sound_id", &sound_id, 0, 0)) sound_id = std::clamp(sound_id, 0, 255), play = auto_play;
+      if (ImGui::InputInt("##sound_id", &sound_id, 0, 0)) sound_id = std::clamp(sound_id, 0, kCount - 1);
       ImGui::SameLine();
-      if (ImGui::Button(">")) sound_id = (sound_id + 1) % 256, play = auto_play;
+      if (ImGui::Button(">")) sound_id = (sound_id + 1) % kCount;
       ImGui::SameLine();
-      if (ImGui::Button("Play")) play = true;
-      ImGui::SameLine();
-      ImGui::Checkbox("Play on change", &auto_play);
-      audio::SfxProgram program;
-      const bool defined = sfx_bank.make_global(sound_id, program);
-      ImGui::Text("Sound %d (0x%02X)%s", sound_id, sound_id, defined ? "" : "  - not defined");
-      if (play && defined) akao_sfx.play_menu(sound_id);
+      if (ImGui::Button("Play")) {
+        audio::SfxProgram program;
+        undefined_id = sfx_bank.make_global(sound_id, program) ? -1 : sound_id;
+        if (undefined_id < 0) akao_sfx.play_menu(sound_id);
+      }
+      ImGui::Text("Sound %d (0x%02X)%s", sound_id, sound_id, undefined_id == sound_id ? "  - not defined" : "");
     }
     draw_debug_status(debug_field ? &world : nullptr);
     debug_tools.draw(debug_tools_ctx());

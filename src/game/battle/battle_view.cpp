@@ -143,6 +143,7 @@ void BattleView::unload_scene() {
   pending_.clear();
   act_ = Act{};
   finish_ = Finish::None;
+  victory_song_ = -1;
 }
 
 void BattleView::shutdown() {

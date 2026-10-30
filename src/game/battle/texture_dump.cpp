@@ -15,6 +15,7 @@
 #include "game/battle/battle_fx.h"
 #include "game/battle/model_table.h"
 #include "game/effects/gpu_effects.h"
+#include "game/model_files.h"
 #include "game/title_backdrop.h"
 #include "import/battle_stage.h"
 #include "import/model.h"
@@ -251,36 +252,20 @@ u32 phase_rooms(vfs::Vfs& archive, TextureDumpProgress& progress, unsigned what)
 u32 phase_models(vfs::Vfs& archive, TextureDumpProgress& progress) {
   // HD models (cdrom2 override first) with their hd.dat 4x images; the path-named keys hold the art the game shows by default.
   archive.set_hd_mode(true);
-  std::vector<std::string> stems, menu_stems;
+  const std::vector<std::string> stems = model_stems(archive);
+  std::vector<std::string> menu_stems;
   std::set<std::string> seen;
   for (const std::string& path : archive.list("cdrom")) {
     const std::string lowered = lower(path);
     if (lowered.starts_with("menu/player/") && lowered.ends_with(".ome") && seen.insert(lowered).second) menu_stems.push_back(lowered.substr(12, lowered.size() - 16));
-    if (!lowered.ends_with(".obj") || !(lowered.starts_with("battle/player/") || lowered.starts_with("battle/monster/") || lowered.starts_with("fieldobj/player/"))) continue;
-    if (seen.insert(lowered).second) stems.push_back(lowered.substr(0, lowered.size() - 4));
   }
   Phase ph(progress, "models", static_cast<u32>(stems.size() + menu_stems.size()));
   u32 failed = 0;
   for (const std::string& stem : stems) {
     if (progress.cancel) break;
     try {
-      const bool field = stem.starts_with("fieldobj/");
-      const std::string base = "cdrom/" + stem;
-      const Bytes obj = read_or_empty(archive, base + ".obj");
-      Bytes tex, ext, hd_tim;
-      const std::string name = stem.substr(stem.find_last_of('/') + 1);
-      if (field) {
-        tex = read_or_empty(archive, base + ".tim");
-        hd_tim = read_or_empty(archive, "hd/" + stem + ".tim");
-        ext = read_or_empty(archive, "cdrom/fieldobj/ex/" + name + ".bin");
-      } else {
-        tex = read_or_empty(archive, base + ".ltd");
-        if (tex.empty()) tex = read_or_empty(archive, base + ".ltc");
-        ext = read_or_empty(archive, "cdrom/" + stem.substr(0, stem.find_last_of('/')) + "/at0.prd");
-      }
       std::string err;
-      auto asset = field ? import::load_field_model(obj, tex, ext, &err, hd_tim) : import::load_model(obj, tex, ext, &err);
-      if (asset) dump_model_asset(*asset, stem);
+      if (auto asset = read_model_files(archive, stem, &err)) dump_model_asset(*asset, stem);
       else ++failed;
     } catch (...) {
       ++failed;
