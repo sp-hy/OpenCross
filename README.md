@@ -49,24 +49,29 @@ OpenCross finds your Steam saves on its own and writes its settings to `opencros
 
 ## Mods
 
-Mods live in a `mods` folder inside your Radical Dreamers Edition folder, one sub-folder per mod:
+Put mods in a `mods` folder inside your Radical Dreamers Edition folder. A mod can be a folder, a `.zip`, `.7z` or `.rar` file, or a single `.dat` file:
 
 ```
 CHRONO CROSS  THE RADICAL DREAMERS EDITION\
   mods\
     My Texture Pack\
-    My Voice Pack\
+    My Downloaded Mod.7z
+    lang.dat
 ```
 
-When the game starts (or when you press **Rescan** in the Mods tab), OpenCross looks through every file in each mod folder, including all sub-folders, and works out what each one replaces:
+Archives work without unpacking, but **large mods should be extracted to a folder for better performance**. The Mods tab warns you about 7z and RAR mods that may be slow. Password-protected and multi-part archives must be extracted, and so must any `.dat` file inside an archive.
 
-- **Whole archives**: a file named after one of the game's `data` archives (for example `movie.dat`) replaces that archive. Like the originals, it must be a ZIP file.
-- **Textures**: PNG images anywhere under a `textures` folder (for example `textures\battle_stage\...`) replace the game's textures, at any resolution. To find the right names, use **Dump all textures** in the Mods tab. It writes every texture to a `dump\textures` folder in the game folder, with the same names and layout a mod uses. To check a character or monster texture mod without playing to it, press **Model Viewer** in the Mods tab: it shows each model with and without your mods, with its animations.
-- **Movies**: a `.bk2`, `.mp4` or `.mkv` named after one of the game's movies (for example `a01op_en.mp4` for `a01op_en.bk2`) replaces it; an `.mp4` / `.mkv` wins over any `.bk2`. Video: HEVC (8 or 10-bit), H.264 or Bink 2, at any constant frame rate (30 and 60 fps tested) up to 1440p. Audio: AAC, Opus or Bink audio (other audio codecs play silent). Tag the colour space (BT.709 or BT.601); untagged files are read as BT.709 from 720 lines up. Keep the original's length and timing, since some scenes play only part of a movie.
-- **Voice lines**: MP3 files in a `voices` folder at the top of the mod (or a mod folder that is itself called `voices`) play over the dialogue. CrossFix voice packs work as they are.
-- **Any other game file**: every other file is matched against the files inside the game's archives by name (upper or lower case doesn't matter). If only one game file has that name, it is replaced, wherever the mod file sits, so wrapper folders like `My Mod\files\...` don't get in the way. If several game files share the name, the one whose folder path matches the end of the mod file's path wins; if that still leaves more than one, the file is skipped as **ambiguous**. Files that match nothing are skipped as **unmatched**. The Mods tab shows both counts.
+What a mod can replace:
 
-Mods are managed in the **Mods** tab of the settings window (Esc). There you can turn each mod on or off and change the order. When two mods replace the same file, the one higher in the list wins, and the tab shows these conflicts. Each mod also has a **Load on** setting that picks which art style it applies to: Modded (the default, HD art with mods), SD (the original art), HD, or All. Changes take effect straight away.
+- **Game archives**: a ZIP named after a game archive, such as `lang.dat`. It only needs the files it changes.
+- **Textures**: PNG files under a `textures` folder, at any resolution. **Dump all textures** in the Mods tab shows the names to use, and **Model Viewer** previews character and monster textures.
+- **Movies**: a `.bk2`, `.mp4` or `.mkv` named after a game movie, such as `a01op_en.mp4`. Use HEVC, H.264 or Bink 2 video up to 1440p, with AAC, Opus or Bink audio, and keep the original's length.
+- **Voice lines**: MP3 files in a `voices` folder. CrossFix voice packs work as they are.
+- **Any other game file**: matched by file name, wherever it sits in the mod. Files that match nothing, or more than one game file, are skipped and counted in the Mods tab.
+
+Mods that change game data, such as stats, text or scripts, show **Won't change until restart** in the Mods tab: changes to them apply the next time the game starts.
+
+Manage mods in the **Mods** tab of the settings window (Esc): turn them on or off, change the order, and press **Rescan** after adding one. When two mods replace the same file, the higher one wins. **Load on** picks which art style a mod applies to: Modded (default), SD, HD or All. Game data always applies.
 
 ## Building from source
 

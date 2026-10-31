@@ -7,7 +7,7 @@
 // no idea what the bytes mean.
 //
 // Lookup order for read(path): mod overlay (vfs/mods.h: loose files from <GameDir>\mods\<mod>\..., resolved to these
-// logical paths) -> archive <first path segment>.dat (or a mod's whole-archive replacement of it).
+// logical paths, or members of a mod's <archive>.dat) -> archive <first path segment>.dat.
 // HD-mode override: when set_hd_mode(true), every "cdrom/<x>" read is tried as "cdrom2/<x>" first (RDE's HD
 // override layer: HD-mode rooms, models, textures). In original mode only RDE's fixed exception list goes to cdrom2
 // (see cdrom2_first). Callers always ask for "cdrom/..." paths.
@@ -15,7 +15,6 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
-#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -28,15 +27,24 @@ namespace oc::vfs {
 
 // One mounted .dat (ZIP) file; thread-safe reads.
 class Archive;
+class ModArchive;
+
+// One overlay file: the loose file `file`, or, when `member` is set, that normalised member of the packed mod `file`.
+struct OverlayFile {
+  std::filesystem::path file;
+  std::string member;
+  bool operator==(const OverlayFile&) const = default;
+  // For logs (UTF-8).
+  std::string label() const;
+};
 
 // The active mods' files for the current art mode (built by ModManager::apply). Keys are logical paths, normalised (lower case, '/'):
-// `files` maps "cdrom/<member>" (cdrom2 members are addressed as cdrom/, like every caller does), "hd/<member>", ... to the loose
-// file on disk (first mod in priority wins); `archives` maps an archive name ("movie") to its replacement .dat (ZIP); `textures` maps
-// a canonical texture path ("battle_stage/bg_07/00_m1_c320x480.png") to its replacement PNG.
+// `files` maps "cdrom/<member>" (cdrom2 members are addressed as cdrom/, like every caller does), "hd/<member>", ... to the mod's
+// file (first mod in priority wins); `textures` maps a canonical texture path ("battle_stage/bg_07/00_m1_c320x480.png") to its
+// replacement PNG.
 struct Overlay {
-  std::unordered_map<std::string, std::filesystem::path> files;
-  std::map<std::string, std::filesystem::path> archives;
-  std::unordered_map<std::string, std::filesystem::path> textures;
+  std::unordered_map<std::string, OverlayFile> files;
+  std::unordered_map<std::string, OverlayFile> textures;
   // Modded art: OpenCross's own improvements on RDE's art are on (HD art stays as RDE draws it).
   bool enhance = false;
 };
@@ -67,26 +75,31 @@ class Vfs {
   // blanks in cdrom2 (map/window/w*.tim are all-transparent there). Other archives: as read(). The mod overlay still applies.
   std::optional<Bytes> read_disc(std::string_view path) const;
   bool exists(std::string_view path) const;
-  // The mod's loose file on disk when `path` resolves to one through the active overlay (mod files only, never archive members), so
+  // The mod's loose file on disk when `path` resolves to one through the active overlay (never a member of a packed mod), so
   // big files (movies) can be streamed instead of read whole.
   std::optional<std::filesystem::path> loose_file(std::string_view path) const;
 
-  // Member names of one archive ("cdrom", "hd", ...), in archive order. Empty if the archive is absent. A mod's whole-archive
-  // replacement is listed when it is active.
+  // Member names of one shipped archive ("cdrom", "hd", ...), in archive order. Empty if the archive is absent. Mod path resolution
+  // matches against these; a mod replaces members but never adds any.
   std::vector<std::string> list(std::string_view archive) const;
-  // As list(), but always the shipped archive in <GameDir>\data (mod path resolution matches against these).
-  std::vector<std::string> list_base(std::string_view archive) const;
 
  private:
-  Archive* archive(std::string_view name, bool base = false) const;
+  Archive* archive(std::string_view name) const;
+  std::optional<Bytes> read_overlay(const std::string& logical) const;
   bool cdrom2_first(const std::string& member) const;
   std::shared_ptr<const Overlay> overlay() const;
 
  public:
+  // The packed mod (ZIP, 7z, RAR) at `file`, opened once and reopened when the file changes; null with `error` set if it cannot be read.
+  // Thread-safe. Archives the overlay does not use are closed by the next set_overlay.
+  std::shared_ptr<ModArchive> mod_archive(const std::filesystem::path& file, std::string* error = nullptr) const;
+  // The bytes of a mod's file. Empty on failure.
+  std::optional<Bytes> read_mod_file(const OverlayFile& source) const;
+
   // The active mods' replacement PNG for a dumped texture (render/texture_registry.h: canonical path, lower case, '/'), if any.
-  std::optional<std::filesystem::path> texture_file(std::string_view canonical_path) const;
+  std::optional<OverlayFile> texture_file(std::string_view canonical_path) const;
   // The first (by path) active mod texture whose canonical path starts with `prefix` and ends with `suffix` (tile replacements are matched by their hash only).
-  std::optional<std::filesystem::path> texture_file_matching(std::string_view prefix, std::string_view suffix) const;
+  std::optional<OverlayFile> texture_file_matching(std::string_view prefix, std::string_view suffix) const;
   bool has_textures() const;
   // Overlay::enhance of the installed overlay.
   bool enhanced() const;

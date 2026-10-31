@@ -185,13 +185,13 @@ struct Decoder::Impl {
 Decoder::Decoder() : impl_(std::make_unique<Impl>()) {}
 Decoder::~Decoder() = default;
 
-bool Decoder::open(Bytes file) {
+bool Decoder::open(Bytes file, const std::string& name) {
   Impl& state = *impl_;
   state.file = std::move(file);
   state.mem = {state.file.data(), state.file.size(), 0};
   constexpr int kBuf = 1 << 16;
   state.io = avio_alloc_context(static_cast<unsigned char*>(av_malloc(kBuf)), kBuf, 0, &state.mem, io_read, nullptr, io_seek);
-  return probe("movie.bk2");
+  return probe(name);
 }
 
 bool Decoder::open_file(const std::filesystem::path& path) {

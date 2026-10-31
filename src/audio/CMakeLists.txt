@@ -31,5 +31,5 @@ target_include_directories(oc_audio PRIVATE ${CMAKE_SOURCE_DIR}/third_party/clhc
 target_link_libraries(oc_audio PUBLIC oc_core PRIVATE oc_vfs SDL3::SDL3)
 # voice lines: MP3 decode through Windows Media Foundation (the librempeg build is Bink-only)
 if(WIN32)
-  target_link_libraries(oc_audio PRIVATE mfplat mfreadwrite mfuuid ole32)
+  target_link_libraries(oc_audio PRIVATE mfplat mfreadwrite mfuuid ole32 shlwapi)
 endif()

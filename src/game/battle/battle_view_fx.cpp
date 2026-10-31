@@ -295,7 +295,7 @@ std::string BattleView::fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram
   // Once per session: index the battle models that ship a cdrom2 (HD art) .obj (battle/player, 3 battle/monster).
   if (!fx_hd_mesh_indexed_) {
     fx_hd_mesh_indexed_ = true;
-    for (const std::string& file : vfs_->list_base("cdrom2")) {
+    for (const std::string& file : vfs_->list("cdrom2")) {
       if (!file.starts_with("battle/") || !file.ends_with(".obj")) continue;
       const auto disc = vfs_->read_disc("cdrom/" + file);
       if (!disc) continue;

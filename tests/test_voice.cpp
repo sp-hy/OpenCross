@@ -154,6 +154,12 @@ int main() {
     double rms = 0;
     for (float sample : pcm) rms += double(sample) * sample;
     CHECK(!pcm.empty() && std::sqrt(rms / double(pcm.size())) > 1e-4);
+    // From memory, as a packed mod's line is decoded.
+    std::ifstream in(mp3, std::ios::binary);
+    const Bytes bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    std::vector<float> from_memory;
+    CHECK(decode_mp3_bytes(bytes, from_memory));
+    CHECK(from_memory == pcm);
     std::printf("decoded %s: %zu frames at 48 kHz\n", mp3, pcm.size() / 2);
   } else {
     std::printf("OC_TEST_MP3 not set: MP3 decoder not exercised\n");

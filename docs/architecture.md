@@ -124,7 +124,7 @@ The field takes the tick count: `FieldWorld::update(in, ticks)` calls `sim_tick(
 
 - `open(game_dir)` mounts `<GameDir>\data\*.dat` lazily. Each is a ZIP read through miniz (`class Archive` in `vfs.cpp`). Archives used: `cdrom`, `cdrom2`, `hd`, `lang`, `font`, `ui`, `movie`. See `docs/formats/rde_archives.md`.
 - A path is `<archive>/<member>`, for example `cdrom/map/mapbin/alu_a01f.bin`. `normalise_path` lower-cases and maps `\` to `/`; `split_archive_path` splits off the archive.
-- API: `read`, `read_disc`, `exists`, `list`, `list_base`, `loose_file`. Reads are thread-safe; the loaders use worker threads.
+- API: `read`, `read_disc`, `exists`, `list`, `loose_file`. Reads are thread-safe; the loaders use worker threads.
 - `read` order: mod overlay file, then `cdrom2` for `cdrom/...` paths when `cdrom2_first(member)` is true, then the archive.
 - `read_disc` skips the `cdrom2` override, for original-art screens that need the files RDE blanks there.
 
@@ -142,7 +142,7 @@ Path-keyed texture caches use `Vfs::cache_key(path)` (path plus overlay generati
 
 ### 3.3 Mods
 
-`src/vfs/mods.h`, `docs/formats/mods.md`. `ModManager::scan` walks `<GameDir>\mods\<name>\**` and resolves each loose file to a shipped member by matching trailing path components. `apply` builds an `Overlay`: `files` (member replacements), `archives` (whole `.dat` replacements) and `textures` (replacement PNGs, see `render/texture_registry.*`). Each mod has a `ModLoadOn` (Modded, Sd, Hd, All) and a priority from list order. Voice packs are read by `audio::VoicePlayer` from the enabled mod roots, not through the VFS.
+`src/vfs/mods.h`, `docs/formats/mods.md`. `ModManager::scan` walks `<GameDir>\mods\<name>\**`, plus the bare `.dat` files there and the members of `.zip` / `.7z` / `.rar` files, read live (`mod_archive.*`), and resolves each loose file to a shipped member by matching trailing path components. `apply` builds an `Overlay`: `files` (member replacements: loose files, or `OverlayFile` members read in place from a packed mod or a mod's `<archive>.dat`) and `textures` (replacement PNGs, see `render/texture_registry.*`). Each mod has a `ModLoadOn` (Modded, Sd, Hd, All) and a priority from list order. Game data (`vfs::is_game_data`) ignores `ModLoadOn` and is fixed by the first `apply` until the next launch. Voice packs are read by `audio::VoicePlayer` from the enabled mod roots, not through the overlay (`ModManager::packed_voice` finds a packed mod's lines).
 
 ### 3.4 Importers and assets
 

@@ -1,40 +1,57 @@
 # Mods (loose replacement files) and the Modded art mode
 
-RDE itself has no mod loader; mods for it are folders of loose files that replace members of the `data\*.dat` archives. This document describes how OpenCross loads them (`src/vfs/mods.*`, `src/vfs/vfs.*`): the mod folder layout, how each loose file is matched to an archive member, art modes and priority, the voice-line layout, and the texture dump / replacement system. Everything here is OpenCross behaviour, not an RDE feature.
+RDE itself has no mod loader; mods for it are folders of loose files that replace members of the `data\*.dat` archives. This document describes how OpenCross loads them (`src/vfs/mods.*`, `src/vfs/vfs.*`): the mod folder layout, archive and single-file mods, how each loose file is matched to an archive member, art modes and priority, the voice-line layout, and the texture dump / replacement system. Everything here is OpenCross behaviour, not an RDE feature.
 
 ## 1. Folder rules
 
 ```
 <GameDir>\mods\<mod name>\<replacement files, any depth>
+<GameDir>\mods\<mod name>.zip | .7z | .rar
+<GameDir>\mods\<archive>.dat
 ```
 
 * A missing `<GameDir>\mods` is created at boot (empty; a warning is logged when the folder is read-only).
-* Every sub-folder of `mods` is one mod. Its **folder name** is the name shown in the Esc overlay's *Mods* tab and the `[Mods]` ini key.
-* Everything below it is scanned recursively; each file is resolved on its own (section 2). Layouts seen in the wild:
+* Every sub-folder of `mods` is one mod, and so is every `.zip`, `.7z`, `.rar` and `.dat` file directly in `mods`. Its **folder or file name** (extension included, so `Pack` and `Pack.zip` are two mods) is the name shown in the Esc overlay's *Mods* tab and the `[Mods]` ini key. Other files directly in `mods` are ignored.
+* A bare `.dat` is a mod of that one file, resolved like a file at a mod root: `mods\lang.dat` overlays `data\lang.dat` (section 2, rule 1).
+* An archive reads like a folder (section 1.1).
+* Everything below a mod folder is scanned recursively; each file is resolved on its own (section 2). Layouts seen in the wild:
   * partial path: `Chrono Revision\face\2021\00_seljyu.png` -> `hd/face/2021/00_seljyu.png`;
   * extra wrapper folders: `HD Boat\HD Boat Plus\fieldobj\player\cl_bort\cl_bort.tim` -> `cdrom/fieldobj/player/cl_bort/cl_bort.tim`;
   * flat files at the mod root: `Zeightgeist HD Backgrounds\alu_a01f.chip2` -> `hd/map/mapbin/alu_a01f.chip2`;
-  * whole archive: `Snooty AI Upscale Videos\movie.dat` -> replaces `data\movie.dat`;
+  * archive overlay: `Snooty AI Upscale Videos\movie.dat` -> its members replace those of `data\movie.dat`;
   * loose movie: `a01op_de.mp4` (or `.mkv`, any folder) named after a shipped `a01op_de.bk2` -> replaces that movie (section 2, rule 3).
+
+### 1.1 Archive mods
+
+A ZIP, 7z or RAR (4 or 5, solid included; the extension selects the file, the format is recognised by content) is read live and never unpacked: its files resolve exactly as those of a folder would, and nothing is written to disk (`src/vfs/mod_archive.*`). A file of a packed mod is an overlay file with a `member` (`OverlayFile`), and every consumer takes bytes through `Vfs::read_mod_file`, so textures, game files, voices and movies work the same as loose files. The list is built at the scan whether the mod is enabled or not.
+
+* **ZIP** (stored or deflated members). Each member is read on its own through miniz.
+* **Everything else** (7z, RAR, a ZIP with another method) can only be walked from the start. An archive of up to 256 MiB unpacked is decoded into memory at its first read and served from there. A larger one is walked for each read: fast when its members are stored separately, slow when it is solid, because every read decodes from the start of the data. Such an archive shows *May run slowly: extract it to a folder* under its name in the Mods tab (`Mod::may_be_slow`; whether it is really solid cannot be told in advance), and a read that takes over 0.5 s logs a warning once. The memory goes when the overlay stops using the archive.
+* **Scan cost.** Listing a ZIP or 7z reads its directory only. A solid RAR has no directory: listing it decodes the whole archive, at every scan.
+* **Wrapper folder.** When every member sits in one folder, as from zipping a mod folder, the mod starts inside it (repeatedly), unless the folder is called `voices` or `textures`. This puts `Pack\voices\...` at the top of the mod, where the voice lookup expects it. An archive whose stem is `voices` reads like a folder called `voices`, with no wrapper removed.
+* **Limits.** A password-protected, damaged or multi-part archive shows *cannot read* in the *Issues* column. An `<archive>.dat` inside a packed mod is unmatched: unpack the mod, or put the `.dat` directly in `mods`. A movie inside an archive is read whole into memory when it starts, not streamed.
+* A file held open by the game cannot be replaced or deleted until *Rescan* or a mod switch stops using it. A replaced archive (new size or time) is picked up at the next *Rescan*.
 
 ## 2. Resolution (once per scan, case-insensitive, component-wise)
 
-1. **Whole archive.** A file named `<archive>.dat`, where `data\<archive>.dat` is one of the archives OpenCross reads (`cdrom cdrom2 hd lang font ui movie`) and the file starts with the ZIP signature `PK\3\4`, replaces that archive. Every member of it is then read from the mod's file (if it cannot be opened, the shipped archive is used and a warning is logged).
+1. **Archive overlay.** A file named `<archive>.dat`, where `data\<archive>.dat` is one of the archives OpenCross reads (`cdrom cdrom2 hd lang font ui movie`) and the file starts with the ZIP signature `PK\3\4`, is a set of member replacements, not a new archive. Each of its members is resolved by rule 2 as the path `<archive>/<member>` (`cdrom2.dat` members as `cdrom/<member>`) and read in place from the ZIP, with nothing unpacked; every member it does not hold still comes from the shipped archive, so the file may hold one member or all of them. The members behave like loose files: they count in the mod's files and conflicts, the first active mod in the list wins each one, several mods' copies of the same `.dat` combine, and a `cdrom.dat` member wins over the `cdrom2` copy. A member that cannot be read falls back to the game's copy. A `.dat` not matching this rule is resolved as an ordinary file by rule 2.
 2. **Member.** The candidates are all shipped members with the same file name. Members are named by the path the game reads, `<archive>/<member>`, with `cdrom2` members counted as `cdrom/` (callers always ask for `cdrom/...`; the mod file then wins over both the cdrom2 HD override and the disc file). For each candidate, count how many trailing path components it shares with the mod file's path (inside the mod folder). The candidates with the longest shared run win:
    * exactly one: **matched**. Leading folders of the mod path that do not occur (wrappers such as `HD Boat Plus`) are ignored; a bare file name works when the name is unique (`alu_a01f.chip2`);
    * several: **ambiguous**, not loaded (for example `00_seljyu.png` alone fits both `hd/face/1999/` and `hd/face/2021/`; add the folder);
    * none: **unmatched**, not loaded (for example alternates such as `02_gill alt1.png`, readme files).
-3. **Movie.** An `.mp4` or `.mkv` file whose stem equals a shipped `.bk2` member's stem is a movie replacement, kept as `movie/<name>.mp4|.mkv` whatever its folder (H.264 / HEVC, or any other codec the bundled decoder opens). The movie player looks for `movie/<name>_<lang>` then `movie/<name>`, trying a loose `.mp4`, a loose `.mkv`, then the archive's `.bk2`, so a loose file wins over the shipped Bink movie and over a `movie.dat` replacement.
+3. **Movie.** An `.mp4` or `.mkv` file whose stem equals a shipped `.bk2` member's stem is a movie replacement, kept as `movie/<name>.mp4|.mkv` whatever its folder (H.264 / HEVC, or any other codec the bundled decoder opens). The movie player looks for `movie/<name>_<lang>` then `movie/<name>`, trying a loose `.mp4`, a loose `.mkv`, then the archive's `.bk2`, so a loose file wins over the shipped Bink movie and over a `.bk2` in a mod's `movie.dat`. Rule 3 does not apply inside a `movie.dat`: an `.mp4` there is unmatched.
 4. A mod can only *replace* existing files; it cannot add new ones.
 
-The startup log lists per mod `mods: '<name>' (enabled, load on modded): N matched, A archive(s), T texture(s), V voice(s), U unmatched, B ambiguous`, followed by up to 12 unmatched / ambiguous paths each; `mods: K active mod(s), F file(s), A archive(s), T texture(s)` is logged each time the overlay is built.
+The startup log lists per mod `mods: '<name>' (enabled, load on modded): N matched, D game data, A archive(s), T texture(s), V voice(s), U unmatched, B ambiguous`, followed by up to 12 unmatched / ambiguous paths each (a `.dat` member as `<rel>/<member>`); `mods: K active mod(s), F file(s), T texture(s)` is logged each time the overlay is built.
 
 ## 3. Load on, priority, overlay
 
+**Game data.** A member under `lang/`, `cdrom/battle/data/`, `cdrom/battle/event/`, `cdrom/battle/mes/` or `cdrom/prog/`, one of `cdrom/menu/el_shop.bin`, `waa_shop.bin`, `trade.bin`, `waa_tbl.bin` and `keyitem.dat`, or the base sound banks `cdrom/sound/effect/common/effect00.dat` and `cdrom/sound/wave/wave0000.dat`, is **game data** (`vfs::is_game_data`, `Mod::data`). Everything else follows *Load on* and swaps live: art and the rest of the sound, which takes effect the next time it is read, so a song already playing keeps playing. That includes room files: their scripts and art share one file, and `cdrom2` holds art versions of them. Game data ignores *Load on*: it is active in every art mode. Much of it is read once at boot, so the overlay keeps what the first `ModManager::apply` installed: the enabled mods and order at launch, until the next launch. A switch never changes it, which keeps tables, menus and scripts from different mods apart. The Mods tab shows *Won't change until restart* under a mod with game data, and a mod with neither art member files nor textures shows `All`, fixed, as its Load on. Priority and conflicts work as for art, in any art mode.
+
 * Each mod has **Load on** = `Modded` (default) | `SD` | `HD` | `All` (ini: `modded|sd|hd|all`; `original` reads as `sd`, anything unknown as `modded`): the art modes in which its files are active. Art mode `Modded` = HD art (cdrom2 override on, RDE's HD assets) plus OpenCross's own improvements (`Vfs::enhanced()`) plus the mods set to Modded or All. `HD` and `SD` (original art) load only the mods set to that mode or All, so with the defaults HD and SD stay stock.
-* **Priority** = list order (top first). For each target the first enabled, active mod in the list wins (files and archives alike). The Mods tab shows per mod the conflicts with other enabled mods that share an art mode, and which mod wins each.
-* Lookup order of `Vfs::read` / `read_disc` / `exists`: overlay file -> (cdrom: cdrom2 when the HD rule says so, `docs/formats/rde_archives.md`) -> archive, where the archive is the active mod's whole-archive replacement if there is one. `list_base` always lists the shipped archive.
-* Overlay changes are a pure art swap. `apply_art_mode` rebuilds the overlay; when its content changed (HD <-> Modded, a Mods tab edit), field room art / models and battle unit models are rebuilt even if HD stays HD (`set_art_mode(hd, force)`), and the path-keyed texture caches of the dialogue portraits, main menu, shops and party screen use `Vfs::cache_key` (path + overlay generation), so the next draw loads the mod file. A movie already playing keeps its file. A mod's loose movie (`movie/<name>.mp4|.mkv`) is not read into memory: `Vfs::loose_file(path)` returns the overlay's file on disk and the movie decoder streams it through a file-backed reader; archive members are read whole (`docs/formats/movies.md`).
+* **Priority** = list order (top first). For each target the first enabled, active mod in the list wins (loose files and `.dat` members alike). The Mods tab shows per mod the conflicts with other enabled mods that share an art mode, and which mod wins each.
+* Lookup order of `Vfs::read` / `read_disc` / `exists`: overlay file (loose, or a member of a mod's `.dat`) -> (cdrom: cdrom2 when the HD rule says so, `docs/formats/rde_archives.md`) -> shipped archive. `list` always lists the shipped archive.
+* Overlay changes are a pure art swap. `apply_art_mode` rebuilds the overlay; when its content changed (HD <-> Modded, a Mods tab edit), field room art / models and battle unit models are rebuilt even if HD stays HD (`set_art_mode(hd, force)`), and the path-keyed texture caches of the dialogue portraits, main menu, shops and party screen use `Vfs::cache_key` (path + overlay generation), so the next draw loads the mod file. A movie already playing keeps its file. A mod's loose movie (`movie/<name>.mp4|.mkv`) is not read into memory: `Vfs::loose_file(path)` returns the overlay's file on disk and the movie decoder streams it through a file-backed reader; archive members, those of a packed mod or a mod's `.dat` included, are read whole (`docs/formats/movies.md`).
 
 ## 4. Settings (`opencross.ini`)
 
@@ -45,15 +62,15 @@ The startup log lists per mod `mods: '<name>' (enabled, load on modded): N match
 ArtMode=modded
 
 [Mods]
-; one line per mod folder, in priority order (top = wins): <folder>=<enabled 1|0>,<modded|sd|hd|all>
+; one line per mod, in priority order (top = wins): <folder or file name>=<enabled 1|0>,<modded|sd|hd|all>
 Chrono Revision=1,modded
 HD Boat=1,all
 Zeightgeist HD Backgrounds=0,modded
 ```
 
-Folders missing from `[Mods]` are appended in name order with `1,modded`; entries whose folder is gone are dropped on the next save. F6 cycles SD -> HD -> Modded; the Esc overlay's art-mode setting has the same three values; the route command `art modded` selects it. The `Dump*` category keys (section 7) share the `[Mods]` section with the mod folders; they are not mod names, and the obsolete `DumpTextures` / `ReplaceTextures` keys are ignored and dropped.
+Mods missing from `[Mods]` are appended in name order with `1,modded`; entries whose mod is gone are dropped on the next save. F6 cycles SD -> HD -> Modded; the Esc overlay's art-mode setting has the same three values; the route command `art modded` selects it. The `Dump*` category keys (section 7) share the `[Mods]` section with the mods; they are not mod names, and the obsolete `DumpTextures` / `ReplaceTextures` keys are ignored and dropped.
 
-**Mods tab (Esc overlay).** Per mod: enable checkbox, up / down priority arrows, name (`(active)` when it loads in the current art mode), *Load on* combo, file / archive / unmatched / ambiguous counts, a *Conflicts* list (target -> winning mod), and the unmatched / ambiguous paths. *Rescan* re-reads the `mods` folder (keeping settings by name). *Model Viewer* starts `opencross modelview` as a separate process (`docs/tools.md` 1.12): the models with and without the enabled mods. Every change is saved to the ini and re-applied like an art switch.
+**Mods tab (Esc overlay).** Per mod: enable checkbox, up / down priority arrows, name (`(active)` when it loads in the current art mode), *Load on* combo, file / game data / archive / unmatched / ambiguous counts, a *Conflicts* list (target -> winning mod), and the unmatched / ambiguous paths. *Rescan* re-reads the `mods` folder (keeping settings by name). *Model Viewer* starts `opencross modelview` as a separate process (`docs/tools.md` 1.12): the models with and without the enabled mods. Every change is saved to the ini and re-applied like an art switch.
 
 ## 5. Voices (field layout + battle lines)
 
@@ -94,7 +111,7 @@ Reading chosen so that existing packs work unchanged:
 
 ### 5.3 Lookup, formats, settings
 
-* The player searches the **enabled mods in priority order** ("Load on" is ignored: voices are not art): for each, `<mod>\voices\<scene>\...` and, for a mod folder literally called `voices`, `<mod>\<scene>\...`. The first existing file wins. Files below `voices` are not archive members: the Mods tab counts a pack's `voices\**\*.mp3` (and every `.mp3` of a mod folder called `voices`) as voice files (`Mod::voices`, shown as `N voice` in the Files column), not as "unmatched". Other files below `voices`, and `.mp3` files elsewhere (the player looks only at `<mod>\voices`), stay "unmatched".
+* The player searches the **enabled mods in priority order** ("Load on" is ignored: voices are not art): for each, `<mod>\voices\<scene>\...` and, for a mod folder literally called `voices`, `<mod>\<scene>\...`; a packed mod's lines are found by name in its list and decoded from memory. The first existing file wins. Files below `voices` are not archive members: the Mods tab counts a pack's `voices\**\*.mp3` (and every `.mp3` of a mod folder called `voices`) as voice files (`Mod::voices`, shown as `N voice` in the Files column), not as "unmatched". Other files below `voices`, and `.mp3` files elsewhere (the player looks only at `<mod>\voices`), stay "unmatched".
 * **MP3 only** (any bit rate / sample rate, mono or stereo; decoded to 48 kHz stereo) through Windows Media Foundation, on a worker thread, the whole line before it starts.
 * A page plays when it is first shown; a new page or line stops the previous one; closing the window stops it. A missing file is logged once per path at debug level (`voice: not found voices/<path>`).
 * `opencross.ini`: `[Audio] Voices=1` (default on) and `[Audio] VoiceVolume=100` (0..100, the voice bus gain; Master applies too). Both are rows of the Esc General tab, Audio section. The voice bus is described in `docs/formats/audio.md`.

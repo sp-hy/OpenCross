@@ -140,7 +140,7 @@ std::vector<ModelTile> model_tiles(const assets::ModelAsset& asset) {
 }
 
 FieldCharacterArt::FieldCharacterArt(const vfs::Vfs& vfs) {
-  for (const std::string& member : vfs.list_base("cdrom2")) {
+  for (const std::string& member : vfs.list("cdrom2")) {
     if (!member.starts_with("fieldobj/player/") || !member.ends_with(".tim")) continue;
     const auto bytes = vfs.read("cdrom2/" + member);
     const auto tim = bytes ? import::parse_tim(*bytes) : std::nullopt;

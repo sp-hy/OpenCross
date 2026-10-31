@@ -23,12 +23,12 @@ The Steam edition ships the game data as ZIP archives in `<GameDir>\data`: `cdro
 OpenCross: implemented in `src/vfs/vfs.cpp` (`Vfs::set_hd_mode`, `Vfs::cdrom2_first`). The art-mode toggle (F6 / options) re-points the VFS and re-reads the art of what is on screen, never the simulation. For a room, the cdrom2 variant differs from the disc only in `.bin` subfiles 11+ (room-model meshes and UVs) and the `.ctd` texture pages (213 / 214 of 566 rooms); script, walk mesh, camera, zones, CLUTs and every `.prd` are byte-identical. Models are rebuilt from the new set together with their meshes, so HD models come with their HD meshes (cdrom2 meshes carry the 4x UVs); the animation clips are the same data in both sets.
 
 ## 3. Mod overlay precedence
-Mods are folders of loose files under `<GameDir>\mods\<mod>\` (`docs/formats/mods.md`), resolved once to logical paths and installed as an overlay for the current art mode. Lookup order for `read(path)`:
-1. the overlay's loose file for the exact logical path (first enabled mod in list order wins); an unreadable file falls through;
+Mods are folders of loose files under `<GameDir>\mods\<mod>\`, or archives and bare `.dat` files in `<GameDir>\mods` (`docs/formats/mods.md`), resolved once to logical paths and installed as an overlay for the current art mode. Lookup order for `read(path)`:
+1. the overlay's file for the exact logical path, loose or a member of a packed mod or a mod's `<archive>.dat`, read in place (first enabled mod in list order wins); an unreadable file falls through;
 2. `cdrom2` (only for `cdrom/...` paths and only under the rules of section 2);
-3. the archive named by the first path segment, or a mod's whole-archive replacement of it (a mod file named `<archive>.dat` that is a ZIP, e.g. `movie.dat`); a replacement that cannot be opened falls back to the shipped archive.
+3. the shipped archive named by the first path segment.
 
-A mod member named `cdrom/...` also replaces the cdrom2 copy (cdrom2 members of a mod count as `cdrom/`). `list` includes an active whole-archive replacement; `list_base` is always the shipped archive. `loose_file` returns the on-disk path only for overlay files (never archive members), so large movies can be streamed. The overlay carries a generation counter that changes with its content; texture caches key on it.
+A mod member named `cdrom/...` also replaces the cdrom2 copy (cdrom2 members of a mod count as `cdrom/`). `list` is always the shipped archive: a mod replaces members and adds none. `loose_file` returns the on-disk path only for loose overlay files (never members of a packed mod), so large movies can be streamed. The overlay carries a generation counter that changes with its content; texture caches key on it.
 
 ## 4. Containers inside members
 Importers in `src/import/container.*`, `lzss.*`:

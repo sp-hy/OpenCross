@@ -26,7 +26,7 @@ std::string resolve_member(const vfs::Vfs& fs, std::string_view name, std::strin
   stems.push_back("movie/" + base);
   for (const std::string& stem : stems) {
     for (const char* ext : {".mp4", ".mkv"}) {
-      if (fs.loose_file(stem + ext)) return stem + ext;
+      if (fs.exists(stem + ext)) return stem + ext;
     }
     if (fs.exists(stem + ".bk2")) return stem + ".bk2";
   }
@@ -41,7 +41,7 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
     return false;
   }
   dec_ = std::make_unique<Decoder>();
-  // A mod's loose movie streams from disk (they are hundreds of MB); archive members are read whole.
+  // A mod's loose movie streams from disk (they are hundreds of MB); archive members, a packed mod's included, are read whole.
   if (auto loose = fs.loose_file(member_)) {
     if (!dec_->open_file(*loose)) {
       dec_.reset();
@@ -49,7 +49,7 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
     }
   } else {
     auto bytes = fs.read(member_);
-    if (!bytes || !dec_->open(std::move(*bytes))) {
+    if (!bytes || !dec_->open(std::move(*bytes), member_)) {
       dec_.reset();
       return false;
     }

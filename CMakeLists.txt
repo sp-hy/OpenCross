@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
-project(OpenCross VERSION 0.3.3 LANGUAGES C CXX)
+project(OpenCross VERSION 0.3.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 # One self-contained exe: static vcpkg libraries (x64-windows-static) and the static C runtime (librempeg is built /MT to match).
@@ -25,6 +26,7 @@ endif()
 find_package(SDL3 CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(miniz CONFIG REQUIRED)
+find_package(LibArchive REQUIRED)
 find_package(Stb REQUIRED)
 # shaderc (glslc) and sdl3-shadercross are build tools only (src/render/CMakeLists.txt); neither library is linked.
 

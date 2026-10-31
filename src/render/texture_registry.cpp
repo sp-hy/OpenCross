@@ -238,13 +238,12 @@ bool dump_text(const std::string& rel_path, const std::string& text, bool forced
   return out && static_cast<bool>(out);
 }
 
-static bool load_replacement(const std::filesystem::path& file, const std::string& path, u32& w, u32& h, std::vector<u8>& rgba) {
-  std::ifstream in(file, std::ios::binary);
-  if (!in) return false;
-  const Bytes bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+static bool load_replacement(const vfs::Vfs& vfs, const vfs::OverlayFile& file, const std::string& path, u32& w, u32& h, std::vector<u8>& rgba) {
+  const auto bytes = vfs.read_mod_file(file);
+  if (!bytes) return false;
   DecodedImage img;
-  if (!decode_image(ByteSpan(bytes), img) || !img.width || !img.height) {
-    log::warn("textures: cannot decode replacement {}", file.string());
+  if (!decode_image(ByteSpan(*bytes), img) || !img.width || !img.height) {
+    log::warn("textures: cannot decode replacement {}", file.label());
     return false;
   }
   w = img.width;
@@ -252,7 +251,7 @@ static bool load_replacement(const std::filesystem::path& file, const std::strin
   rgba = std::move(img.rgba);
   State& st = state();
   std::lock_guard lock(st.mutex);
-  if (st.replaced.insert(path).second) log::info("textures: replaced {} ({}x{}) by {}", path, w, h, file.string());
+  if (st.replaced.insert(path).second) log::info("textures: replaced {} ({}x{}) by {}", path, w, h, file.label());
   return true;
 }
 
@@ -266,10 +265,10 @@ bool replace_tile(const std::string& dir, const std::string& hash, u32& w, u32& 
   }
   const std::string clean_dir = sanitise(dir);
   if (auto file = vfs->texture_file_matching(clean_dir + "/tile_", hash + ".png")) {
-    if (load_replacement(*file, clean_dir + "/tile_" + hash, w, h, rgba)) return true;
+    if (load_replacement(*vfs, *file, clean_dir + "/tile_" + hash, w, h, rgba)) return true;
   }
   const std::string global = "tiles/" + hash + ".png";
-  if (auto file = vfs->texture_file(global)) return load_replacement(*file, global, w, h, rgba);
+  if (auto file = vfs->texture_file(global)) return load_replacement(*vfs, *file, global, w, h, rgba);
   return false;
 }
 
@@ -283,21 +282,7 @@ bool replace(const TextureKey& key, u32& w, u32& h, std::vector<u8>& rgba) {
   }
   const std::string path = texture_path(key);
   const auto file = vfs->texture_file(path);
-  if (!file) return false;
-  std::ifstream in(*file, std::ios::binary);
-  if (!in) return false;
-  const Bytes bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-  DecodedImage img;
-  if (!decode_image(ByteSpan(bytes), img) || !img.width || !img.height) {
-    log::warn("textures: cannot decode replacement {}", file->string());
-    return false;
-  }
-  w = img.width;
-  h = img.height;
-  rgba = std::move(img.rgba);
-  std::lock_guard lock(st.mutex);
-  if (st.replaced.insert(path).second) log::info("textures: replaced {} ({}x{}) by {}", path, w, h, file->string());
-  return true;
+  return file && load_replacement(*vfs, *file, path, w, h, rgba);
 }
 
 Stats stats() {

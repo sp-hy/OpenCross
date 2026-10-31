@@ -33,7 +33,7 @@ struct ConflictCache {
 std::string signature(const vfs::ModManager& mods) {
   std::string text;
   for (const vfs::Mod& mod : mods.mods())
-    text += mod.name + (mod.enabled ? "|1|" : "|0|") + vfs::load_on_name(mod.load_on) + "|" + std::to_string(mod.files.size()) + "|" +
+    text += mod.name + (mod.enabled ? "|1|" : "|0|") + vfs::load_on_name(mod.load_on) + "|" + std::to_string(mod.files.size()) + "|" + std::to_string(mod.data.size()) + "|" +
             std::to_string(mod.archives.size()) + "|" + std::to_string(mod.textures.size()) + "|" + std::to_string(mod.voices.size()) + "\n";
   return text;
 }
@@ -178,9 +178,16 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   constexpr ImGuiTableFlags kFlags = ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingFixedFit |
                                      ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | ImGuiTableFlags_PadOuterX;
   const float row_h = ImGui::GetFrameHeightWithSpacing();
-  const float table_h = std::min(row_h * (static_cast<float>(list.size()) + 1.5f), ImGui::GetContentRegionAvail().y * 0.6f);
+  constexpr const char* kSlowWarning = "May run slowly: extract it to a folder";
+  constexpr const char* kRestartNotice = "Won't change until restart";
+  size_t notices = 0;
   float name_w = ImGui::CalcTextSize("Mod").x;
-  for (const vfs::Mod& mod : list) name_w = std::max(name_w, ImGui::CalcTextSize(mod.name.c_str()).x);
+  for (const vfs::Mod& mod : list) {
+    name_w = std::max(name_w, ImGui::CalcTextSize(mod.name.c_str()).x);
+    if (mod.may_be_slow) ++notices, name_w = std::max(name_w, ImGui::CalcTextSize(kSlowWarning).x);
+    if (!mod.data.empty()) ++notices, name_w = std::max(name_w, ImGui::CalcTextSize(kRestartNotice).x);
+  }
+  const float table_h = std::min(row_h * (static_cast<float>(list.size() + notices) + 1.5f), ImGui::GetContentRegionAvail().y * 0.6f);
   name_w += ImGui::GetStyle().ItemSpacing.x * 2.0f;
   if (ImGui::BeginTable("mods", 6, kFlags, ImVec2(0, table_h))) {
     ImGui::TableSetupScrollFreeze(0, 1);
@@ -212,25 +219,45 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
       ImGui::AlignTextToFramePadding();
       ImGui::TextDisabled("%zu", i + 1);
       ImGui::TableNextColumn();
-      const bool active = mod.enabled && vfs::loads_on(mod.load_on, art);
+      // Game data has no art mode.
+      const bool data_only = !mod.data.empty() && mod.files.empty() && mod.textures.empty();
+      const bool active = mod.enabled && (data_only || vfs::loads_on(mod.load_on, art));
       ImGui::AlignTextToFramePadding();
       if (active) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.9f, 0.45f, 1.0f));
       ImGui::TextUnformatted(mod.name.c_str());
       if (active) ImGui::PopStyleColor();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
         render::ImGuiLayer::tooltip(active ? "Active in the current art mode." : "Not active: switched off, or its Load on setting excludes the current art mode.");
-      ImGui::TableNextColumn();
-      int load_on = static_cast<int>(mod.load_on);
-      ImGui::SetNextItemWidth(ImGui::CalcTextSize("Modded").x + ImGui::GetFrameHeight() * 2.0f);
-      if (ImGui::Combo("##loadon", &load_on, "Modded\0SD\0HD\0All\0")) {
-        mod.load_on = static_cast<vfs::ModLoadOn>(load_on);
-        changed = true;
+      if (mod.may_be_slow) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", kSlowWarning);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+          render::ImGuiLayer::tooltip("A large 7z or RAR can only be read from the start, which may cause long pauses while the game loads. Extract it into a folder in mods to avoid them.");
       }
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-        render::ImGuiLayer::tooltip("The art mode this mod loads in: Modded, SD (Original), HD, or All.");
+      if (!mod.data.empty()) {
+        ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", kRestartNotice);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+          render::ImGuiLayer::tooltip("This mod changes game data such as stats, text or scripts. Switching it on or off, or moving it, takes effect the next time the game starts. Game data loads in every art mode.");
+      }
+      ImGui::TableNextColumn();
+      if (data_only) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextDisabled("All");
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) render::ImGuiLayer::tooltip("Game data has no art mode: it loads in every art mode.");
+      } else {
+        int load_on = static_cast<int>(mod.load_on);
+        ImGui::SetNextItemWidth(ImGui::CalcTextSize("Modded").x + ImGui::GetFrameHeight() * 2.0f);
+        if (ImGui::Combo("##loadon", &load_on, "Modded\0SD\0HD\0All\0")) {
+          mod.load_on = static_cast<vfs::ModLoadOn>(load_on);
+          changed = true;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+          render::ImGuiLayer::tooltip(mod.data.empty() ? "The art mode this mod loads in: Modded, SD (Original), HD, or All."
+                                                       : "The art mode this mod loads in: Modded, SD (Original), HD, or All. Its game data loads in every art mode.");
+      }
       ImGui::TableNextColumn();
       {
         std::string files_txt = std::to_string(mod.files.size());
+        if (!mod.data.empty()) files_txt += " + " + std::to_string(mod.data.size()) + " data";
         if (!mod.archives.empty()) files_txt += " + " + std::to_string(mod.archives.size()) + " archive";
         if (!mod.textures.empty()) files_txt += " + " + std::to_string(mod.textures.size()) + " texture";
         if (!mod.voices.empty()) files_txt += " + " + std::to_string(mod.voices.size()) + " voice";
@@ -250,6 +277,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
           add(cc.per_mod[i].size() - wins, "overridden");
           add(wins, "wins");
         }
+        if (!mod.error.empty()) issues += (issues.empty() ? "cannot read: " : ", cannot read: ") + mod.error;
         if (issues.empty()) ImGui::TextDisabled("-");
         else ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", issues.c_str());
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))

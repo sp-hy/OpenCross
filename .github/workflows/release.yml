@@ -43,7 +43,7 @@ jobs:
     runs-on: windows-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
-      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}\..\vcpkg-cache,readwrite
+      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}\vcpkg-cache,readwrite
     steps:
       - uses: actions/checkout@v4
 
@@ -54,12 +54,12 @@ jobs:
           git clone https://github.com/microsoft/vcpkg $env:VCPKG_ROOT
           git -C $env:VCPKG_ROOT checkout -q $baseline
           & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
-          New-Item -ItemType Directory -Force "${{ github.workspace }}\..\vcpkg-cache" | Out-Null
+          New-Item -ItemType Directory -Force "${{ runner.temp }}\vcpkg-cache" | Out-Null
 
       - id: vcpkg-cache
         uses: actions/cache/restore@v4
         with:
-          path: ${{ github.workspace }}\..\vcpkg-cache
+          path: ${{ runner.temp }}\vcpkg-cache
           key: vcpkg-${{ hashFiles('vcpkg.json') }}-${{ github.run_id }}
           restore-keys: |
             vcpkg-${{ hashFiles('vcpkg.json') }}-
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/cache/save@v4
         if: always()
         with:
-          path: ${{ github.workspace }}\..\vcpkg-cache
+          path: ${{ runner.temp }}\vcpkg-cache
           key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}
 
       - name: Publish v${{ needs.version.outputs.version }}

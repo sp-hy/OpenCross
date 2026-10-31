@@ -111,7 +111,7 @@ void App::init_vfs() {
   if (game_dir.empty() || !files.open(game_dir)) log::warn("VFS unavailable; running without game data");
   // RDE: cdrom2 overrides cdrom in HD mode.
   files.set_hd_mode(platform::art_is_hd(config.art_mode));
-  // Mods: <GameDir>\mods\<name>\..., resolved once; the overlay follows the art mode (Modded = HD + mods).
+  // Mods: <GameDir>\mods\<name>\..., archives and bare .dat files there, resolved once; the overlay follows the art mode (Modded = HD + mods).
   if (!files.game_dir().empty()) {
     {  // a missing <GameDir>\mods is created so players see where mods go (the Mods tab's Rescan finds what they drop in)
       std::error_code ec;
@@ -198,8 +198,13 @@ void App::init_audio() {
   voice_player->set_search([this] {
     std::vector<std::filesystem::path> roots;
     for (const vfs::Mod& mod : mods.mods())
-      if (mod.enabled) roots.push_back(mod.root);
+      if (mod.enabled) roots.push_back(mod.root.empty() ? mod.source : mod.root);
     return roots;
+  });
+  voice_player->set_packed_lookup([this](const std::filesystem::path& path) -> audio::VoicePlayer::PackedLine {
+    const auto line = mods.packed_voice(path);
+    if (!line) return {};
+    return [this, file = *line] { return files.read_mod_file(file); };
   });
   apply_audio_config();
   if (!files.game_dir().empty()) mixer.set_vfs(&files);

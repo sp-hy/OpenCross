@@ -7,11 +7,14 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <vector>
+
+#include "core/types.h"
 
 namespace oc::audio {
 
@@ -44,6 +47,8 @@ std::string voice_unit_name(std::string_view unit);
 
 // Decodes an MP3 file to 48 kHz interleaved stereo float. `cancel` (optional) is polled; false = failed, cancelled or no MP3 decoder.
 bool decode_mp3_file(const std::filesystem::path& file, std::vector<float>& out, const std::function<bool()>& cancel = {});
+// The same from the bytes of an MP3.
+bool decode_mp3_bytes(const Bytes& mp3, std::vector<float>& out, const std::function<bool()>& cancel = {});
 
 class VoicePlayer {
  public:
@@ -61,6 +66,10 @@ class VoicePlayer {
   bool enabled() const { return enabled_.load(std::memory_order_relaxed); }
   // Where lines are searched: `roots` returns the enabled mod folders in priority order (called per lookup).
   void set_search(std::function<std::vector<std::filesystem::path>()> roots) { roots_ = std::move(roots); }
+  // Reads the bytes of one line; runs on the worker.
+  using PackedLine = std::function<std::optional<Bytes>()>;
+  // A root may be a packed mod: `lookup` gives the reader of the line at <root>/voices/<rel>, empty when it has none. Main thread.
+  void set_packed_lookup(std::function<PackedLine(const std::filesystem::path&)> lookup) { packed_ = std::move(lookup); }
 
   // First existing `<root>/voices/<rel>` over the roots (a root folder called `voices` also serves `<root>/<rel>`: CrossFix's
   // `mods/voices/...` layout). Empty when none.
@@ -87,12 +96,14 @@ class VoicePlayer {
   Mixer& mixer_;
   std::atomic<bool> enabled_{true};
   std::function<std::vector<std::filesystem::path>()> roots_;
+  std::function<PackedLine(const std::filesystem::path&)> packed_;
 
   std::mutex mu_;
   std::condition_variable cv_;
   std::thread thread_;
   bool quit_ = false;
   std::filesystem::path job_;
+  PackedLine job_packed_;
   unsigned long long job_gen_ = 0;
   std::atomic<unsigned long long> gen_{0};
   std::atomic<bool> busy_{false};

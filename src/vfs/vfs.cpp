@@ -1,15 +1,14 @@
 #include "vfs/vfs.h"
 
-#include <miniz.h>
-
 #include <cctype>
-#include <cstring>
 #include <fstream>
 #include <map>
 #include <mutex>
-#include <unordered_map>
+#include <set>
 
 #include "core/log.h"
+#include "vfs/archive.h"
+#include "vfs/mod_archive.h"
 
 namespace oc::vfs {
 
@@ -36,6 +35,11 @@ std::optional<Bytes> read_loose(const std::filesystem::path& file) {
 
 }  // namespace
 
+std::string OverlayFile::label() const {
+  const std::u8string text = file.generic_u8string();
+  return std::string(text.begin(), text.end()) + (member.empty() ? "" : "|" + member);
+}
+
 std::pair<std::string, std::string> split_archive_path(std::string_view path) {
   std::string normalised = normalise_path(path);
   size_t slash = normalised.find('/');
@@ -43,62 +47,17 @@ std::pair<std::string, std::string> split_archive_path(std::string_view path) {
   return {normalised.substr(0, slash), normalised.substr(slash + 1)};
 }
 
-// One ZIP archive. miniz keeps the central directory in memory; member reads go through the file on demand.
-class Archive {
- public:
-  explicit Archive(const std::filesystem::path& file) {
-    std::memset(&zip_, 0, sizeof(zip_));
-    ok_ = mz_zip_reader_init_file(&zip_, file.string().c_str(), 0) != 0;
-    if (!ok_) {
-      log::warn("vfs: cannot open archive {}", file.string());
-      return;
-    }
-    const mz_uint count = mz_zip_reader_get_num_files(&zip_);
-    names_.reserve(count);
-    for (mz_uint i = 0; i < count; ++i) {
-      char name[1024];
-      mz_zip_reader_get_filename(&zip_, i, name, sizeof(name));
-      names_.emplace_back(name);
-      index_.emplace(normalise_path(name), i);
-    }
-  }
-  ~Archive() {
-    if (ok_) mz_zip_reader_end(&zip_);
-  }
-  Archive(const Archive&) = delete;
-  Archive& operator=(const Archive&) = delete;
-
-  bool ok() const { return ok_; }
-  const std::vector<std::string>& names() const { return names_; }
-
-  bool contains(const std::string& member) const { return index_.contains(member); }
-
-  std::optional<Bytes> read(const std::string& member) const {
-    auto it = index_.find(member);
-    if (it == index_.end()) return std::nullopt;
-    std::lock_guard lock(mutex_);
-    mz_zip_archive_file_stat stat;
-    if (!mz_zip_reader_file_stat(const_cast<mz_zip_archive*>(&zip_), it->second, &stat)) return std::nullopt;
-    Bytes out(static_cast<size_t>(stat.m_uncomp_size));
-    if (!mz_zip_reader_extract_to_mem(const_cast<mz_zip_archive*>(&zip_), it->second, out.data(), out.size(), 0)) {
-      log::warn("vfs: extract failed for {}", member);
-      return std::nullopt;
-    }
-    return out;
-  }
-
- private:
-  mz_zip_archive zip_{};
-  bool ok_ = false;
-  std::vector<std::string> names_;
-  std::unordered_map<std::string, mz_uint> index_;
-  mutable std::mutex mutex_;
-};
-
-// `archives`: archive name (or "mod|<file>" for a mod's replacement) -> the opened archive, nullptr = known missing.
+// `archives`: shipped archive name -> the opened archive, nullptr = known missing. `mods`: packed mod path -> what opening it gave,
+// with the size and time it had then.
 struct Vfs::Impl {
+  struct OpenedMod {
+    std::shared_ptr<ModArchive> archive;
+    std::string error;
+    std::string stamp;
+  };
   mutable std::mutex mutex;
   mutable std::map<std::string, std::unique_ptr<Archive>> archives;
+  mutable std::map<std::filesystem::path, OpenedMod> mods;
   std::shared_ptr<const Overlay> overlay = std::make_shared<Overlay>();
 };
 
@@ -118,11 +77,16 @@ bool Vfs::open(const std::filesystem::path& game_dir) {
 
 void Vfs::set_overlay(Overlay overlay) {
   auto next = std::make_shared<const Overlay>(std::move(overlay));
+  std::set<std::filesystem::path> used;
+  for (const auto* files : {&next->files, &next->textures})
+    for (const auto& [target, source] : *files)
+      if (!source.member.empty()) used.insert(source.file);
   std::lock_guard lock(impl_->mutex);
-  if (next->files != impl_->overlay->files || next->archives != impl_->overlay->archives || next->textures != impl_->overlay->textures ||
-      next->enhance != impl_->overlay->enhance)
+  if (next->files != impl_->overlay->files || next->textures != impl_->overlay->textures || next->enhance != impl_->overlay->enhance)
     ++generation_;
   impl_->overlay = std::move(next);
+  // A reader in progress keeps its archive alive through the shared pointer.
+  std::erase_if(impl_->mods, [&](const auto& entry) { return !used.contains(entry.first); });
 }
 
 std::string Vfs::cache_key(std::string_view path) const {
@@ -135,24 +99,39 @@ std::shared_ptr<const Overlay> Vfs::overlay() const {
   return impl_->overlay;
 }
 
-// Unless `base`, a mod's whole-archive replacement is tried first; it falls back to the shipped archive if it cannot be opened.
-Archive* Vfs::archive(std::string_view name, bool base) const {
+std::shared_ptr<ModArchive> Vfs::mod_archive(const std::filesystem::path& file, std::string* error) const {
+  std::error_code ec;
+  const std::string stamp = std::to_string(std::filesystem::file_size(file, ec)) + "/" +
+                            std::to_string(std::filesystem::last_write_time(file, ec).time_since_epoch().count());
+  std::lock_guard lock(impl_->mutex);
+  auto it = impl_->mods.find(file);
+  if (it == impl_->mods.end() || it->second.stamp != stamp) {
+    Impl::OpenedMod opened;
+    opened.stamp = stamp;
+    opened.archive = open_mod_archive(file, opened.error);
+    it = impl_->mods.insert_or_assign(file, std::move(opened)).first;
+  }
+  if (error) *error = it->second.error;
+  return it->second.archive;
+}
+
+std::optional<Bytes> Vfs::read_mod_file(const OverlayFile& source) const {
+  if (source.member.empty()) return read_loose(source.file);
+  const std::shared_ptr<ModArchive> packed = mod_archive(source.file);
+  return packed ? packed->read(source.member) : std::nullopt;
+}
+
+// The active overlay's file for a logical path; nothing when there is none or it cannot be read, so the caller goes on to the game's copy.
+std::optional<Bytes> Vfs::read_overlay(const std::string& logical) const {
+  auto ov = overlay();
+  auto it = ov->files.find(logical);
+  if (it == ov->files.end()) return std::nullopt;
+  return read_mod_file(it->second);
+}
+
+Archive* Vfs::archive(std::string_view name) const {
   std::lock_guard lock(impl_->mutex);
   std::string key(name);
-  if (!base) {
-    auto replacement = impl_->overlay->archives.find(key);
-    if (replacement != impl_->overlay->archives.end()) {
-      const std::string mod_key = "mod|" + replacement->second.string();
-      auto mod_it = impl_->archives.find(mod_key);
-      if (mod_it == impl_->archives.end()) {
-        auto opened = std::make_unique<Archive>(replacement->second);
-        if (!opened->ok()) opened.reset();
-        else log::info("vfs: {} replaced by {}", key, replacement->second.string());
-        mod_it = impl_->archives.emplace(mod_key, std::move(opened)).first;
-      }
-      if (mod_it->second) return mod_it->second.get();
-    }
-  }
   auto it = impl_->archives.find(key);
   if (it != impl_->archives.end()) return it->second.get();
   auto file = game_dir_ / "data" / (key + ".dat");
@@ -177,12 +156,7 @@ bool Vfs::cdrom2_first(const std::string& member) const {
 
 std::optional<Bytes> Vfs::read(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
-  if (auto ov = overlay(); !ov->files.empty()) {
-    auto it = ov->files.find(arc + "/" + member);
-    if (it != ov->files.end()) {
-      if (auto bytes = read_loose(it->second)) return bytes;
-    }
-  }
+  if (auto bytes = read_overlay(arc + "/" + member)) return bytes;
   if (arc == "cdrom" && cdrom2_first(member)) {
     if (Archive* cdrom2 = archive("cdrom2")) {
       if (auto bytes = cdrom2->read(member)) return bytes;
@@ -196,12 +170,7 @@ std::optional<Bytes> Vfs::read(std::string_view path) const {
 std::optional<Bytes> Vfs::read_disc(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
   if (arc != "cdrom") return read(path);
-  if (auto ov = overlay(); !ov->files.empty()) {
-    auto it = ov->files.find(arc + "/" + member);
-    if (it != ov->files.end()) {
-      if (auto bytes = read_loose(it->second)) return bytes;
-    }
-  }
+  if (auto bytes = read_overlay(arc + "/" + member)) return bytes;
   Archive* shipped = archive(arc);
   if (!shipped) return std::nullopt;
   return shipped->read(member);
@@ -221,44 +190,36 @@ std::optional<std::filesystem::path> Vfs::loose_file(std::string_view path) cons
   auto [arc, member] = split_archive_path(path);
   auto ov = overlay();
   auto it = ov->files.find(arc + "/" + member);
-  if (it == ov->files.end()) return std::nullopt;
+  if (it == ov->files.end() || !it->second.member.empty()) return std::nullopt;
   std::error_code ec;
-  if (!std::filesystem::is_regular_file(it->second, ec)) return std::nullopt;
-  return it->second;
+  if (!std::filesystem::is_regular_file(it->second.file, ec)) return std::nullopt;
+  return it->second.file;
 }
 
 bool Vfs::has_textures() const { return !overlay()->textures.empty(); }
 
 bool Vfs::enhanced() const { return overlay()->enhance; }
 
-std::optional<std::filesystem::path> Vfs::texture_file(std::string_view canonical_path) const {
+std::optional<OverlayFile> Vfs::texture_file(std::string_view canonical_path) const {
   auto ov = overlay();
   if (ov->textures.empty()) return std::nullopt;
   auto it = ov->textures.find(std::string(canonical_path));
   if (it == ov->textures.end()) return std::nullopt;
-  std::error_code ec;
-  if (!std::filesystem::is_regular_file(it->second, ec)) return std::nullopt;
   return it->second;
 }
 
-std::optional<std::filesystem::path> Vfs::texture_file_matching(std::string_view prefix, std::string_view suffix) const {
+std::optional<OverlayFile> Vfs::texture_file_matching(std::string_view prefix, std::string_view suffix) const {
   auto ov = overlay();
   const std::string* best = nullptr;
-  const std::filesystem::path* file = nullptr;
+  const OverlayFile* file = nullptr;
   for (const auto& [target, path] : ov->textures)
     if (target.size() >= prefix.size() + suffix.size() && target.starts_with(prefix) && target.ends_with(suffix) && (!best || target < *best)) best = &target, file = &path;
-  std::error_code ec;
-  if (!file || !std::filesystem::is_regular_file(*file, ec)) return std::nullopt;
+  if (!file) return std::nullopt;
   return *file;
 }
 
 std::vector<std::string> Vfs::list(std::string_view name) const {
   Archive* arc = archive(name);
-  return arc ? arc->names() : std::vector<std::string>{};
-}
-
-std::vector<std::string> Vfs::list_base(std::string_view name) const {
-  Archive* arc = archive(name, true);
   return arc ? arc->names() : std::vector<std::string>{};
 }
 

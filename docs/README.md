@@ -98,7 +98,7 @@ Formats (`docs/formats/`):
 - `launcher.md` RDE's launcher (`ui.csv`, its art) and the proxy DLL that adds the OpenCross button.
 - `launcher.md` RDE's launcher (`ui.csv`, its art) and the proxy DLL that adds the OpenCross button.
 - `model.md` model, skeleton, texture and animation formats.
-- `mods.md` loose-file mods, the Modded art mode, texture tile dump and replacement.
+- `mods.md` loose-file and archive mods, the Modded art mode, texture tile dump and replacement.
 - `movies.md` which FMV a script plays, file names, play ranges.
 - `rde_archives.md` RDE ZIP archives and the cdrom2 override rule.
 - `room.md` room file format (`.bin`, `.ctd`, `.prd`): layers, walk mesh, triggers, camera.

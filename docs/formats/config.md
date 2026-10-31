@@ -1,6 +1,6 @@
 # opencross.ini
 
-OpenCross keeps every user setting, the developer/automation switches and the Esc settings window's geometry in one INI file. This document describes the file location, how it is read and written, and every key (`src/platform/config.*`, `src/app/app_boot.cpp`). Mod folders and the `Dump*` keys also appear in `docs/formats/mods.md`; the save folder in `docs/formats/save.md`.
+OpenCross keeps every user setting, the developer/automation switches and the Esc settings window's geometry in one INI file. This document describes the file location, how it is read and written, and every key (`src/platform/config.*`, `src/app/app_boot.cpp`). Mods and the `Dump*` keys also appear in `docs/formats/mods.md`; the save folder in `docs/formats/save.md`.
 
 ## 1. Location, lifecycle, syntax
 
@@ -82,9 +82,9 @@ Movies stay at normal speed in both speed modes, and both are off in the Radius 
 | `DumpModels` | 1 | bool | ... the character and monster models. |
 | `DumpWeapons` | 1 | bool | ... the battle weapons. |
 | `DumpEffects` | 0 | bool | ... the effect sprite sheets and meshes (large). |
-| `<folder name>` | `1,modded` | `<enabled>,<loadon>` | One line per folder of `<GameDir>\mods`, in priority order (top wins). |
+| `<mod name>` | `1,modded` | `<enabled>,<loadon>` | One line per mod of `<GameDir>\mods` (a folder, or a `.zip` `.7z` `.rar` `.dat` file, by its full name), in priority order (top wins). |
 
-* **Mod line.** `<folder>=<enabled>,<loadon>`: `enabled` is read with `parse_bool` (a value without a comma is `enabled` alone, `loadon` then `modded`); `loadon` is `modded`, `sd`, `hd` or `all`, kept as text here and interpreted by the mod manager (`docs/formats/mods.md`). Folders absent from the list are appended in name order with `1,modded`; lines whose folder no longer exists are dropped on the next save.
+* **Mod line.** `<mod name>=<enabled>,<loadon>`: `enabled` is read with `parse_bool` (a value without a comma is `enabled` alone, `loadon` then `modded`); `loadon` is `modded`, `sd`, `hd` or `all` (a mod's game data loads in every art mode), kept as text here and interpreted by the mod manager (`docs/formats/mods.md`). Mods absent from the list are appended in name order with `1,modded`; lines whose mod no longer exists are dropped on the next save.
 * The `Dump*` keys share the section with the mod lines and are never treated as mod names, except as noted in section 5. `DumpTextures` and `ReplaceTextures` are skipped on load and dropped on save.
 
 ### 2.5 `[Enhancements]`

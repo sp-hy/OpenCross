@@ -15,6 +15,7 @@
 #include <mfidl.h>
 #include <mferror.h>
 #include <mfreadwrite.h>
+#include <shlwapi.h>
 #include <wrl/client.h>
 #endif
 
@@ -100,8 +101,11 @@ std::string voice_unit_name(std::string_view unit) {
 // as 32-bit float at its native channel count and rate, folded to stereo, then linearly resampled to the mixer rate if needed.
 
 #ifdef _WIN32
-bool decode_mp3_file(const std::filesystem::path& file, std::vector<float>& out, const std::function<bool()>& cancel) {
-  using Microsoft::WRL::ComPtr;
+namespace {
+using Microsoft::WRL::ComPtr;
+
+// `open` makes the source reader once Media Foundation is up.
+bool decode_mp3(const std::function<HRESULT(ComPtr<IMFSourceReader>&)>& open, std::vector<float>& out, const std::function<bool()>& cancel) {
   out.clear();
   const HRESULT co_init = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   struct Guard {
@@ -116,7 +120,7 @@ bool decode_mp3_file(const std::filesystem::path& file, std::vector<float>& out,
   guard.mf = true;
 
   ComPtr<IMFSourceReader> reader;
-  if (FAILED(MFCreateSourceReaderFromURL(file.c_str(), nullptr, &reader))) return false;
+  if (FAILED(open(reader))) return false;
   constexpr DWORD kStream = static_cast<DWORD>(MF_SOURCE_READER_FIRST_AUDIO_STREAM);
   reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS), FALSE);
   reader->SetStreamSelection(kStream, TRUE);
@@ -189,8 +193,28 @@ bool decode_mp3_file(const std::filesystem::path& file, std::vector<float>& out,
   }
   return true;
 }
+}  // namespace
+
+bool decode_mp3_file(const std::filesystem::path& file, std::vector<float>& out, const std::function<bool()>& cancel) {
+  return decode_mp3([&](ComPtr<IMFSourceReader>& reader) { return MFCreateSourceReaderFromURL(file.c_str(), nullptr, &reader); }, out, cancel);
+}
+
+bool decode_mp3_bytes(const Bytes& mp3, std::vector<float>& out, const std::function<bool()>& cancel) {
+  const auto open = [&](ComPtr<IMFSourceReader>& reader) -> HRESULT {
+    ComPtr<IStream> memory;
+    memory.Attach(SHCreateMemStream(mp3.data(), static_cast<UINT>(mp3.size())));
+    if (!memory) return E_OUTOFMEMORY;
+    ComPtr<IMFByteStream> stream;
+    if (const HRESULT status = MFCreateMFByteStreamOnStream(memory.Get(), &stream); FAILED(status)) return status;
+    ComPtr<IMFAttributes> attributes;
+    if (SUCCEEDED(stream.As(&attributes))) attributes->SetString(MF_BYTESTREAM_CONTENT_TYPE, L"audio/mpeg");
+    return MFCreateSourceReaderFromByteStream(stream.Get(), nullptr, &reader);
+  };
+  return decode_mp3(open, out, cancel);
+}
 #else
 bool decode_mp3_file(const std::filesystem::path&, std::vector<float>&, const std::function<bool()>&) { return false; }
+bool decode_mp3_bytes(const Bytes&, std::vector<float>&, const std::function<bool()>&) { return false; }
 #endif
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -224,6 +248,7 @@ std::filesystem::path VoicePlayer::find(std::string_view rel) const {
   for (const fs::path& root : roots_()) {
     fs::path candidate = root / "voices" / rel_path;
     if (fs::is_regular_file(candidate, ec)) return candidate;
+    if (packed_ && packed_(candidate)) return candidate;
     std::string leaf = root.filename().string();
     std::transform(leaf.begin(), leaf.end(), leaf.begin(), [](unsigned char ch) { return char(std::tolower(ch)); });
     if (leaf == "voices") {
@@ -236,9 +261,11 @@ std::filesystem::path VoicePlayer::find(std::string_view rel) const {
 
 void VoicePlayer::play(const std::filesystem::path& file, const void* owner) {
   if (!enabled()) return;
+  PackedLine packed = packed_ ? packed_(file) : PackedLine();
   {
     std::lock_guard lk(mu_);
     job_ = file;
+    job_packed_ = std::move(packed);
     job_gen_ = gen_.fetch_add(1) + 1;
     owner_ = owner;
     busy_.store(!file.empty());
@@ -271,17 +298,26 @@ bool VoicePlayer::active() const { return busy_.load() || mixer_.voice_active();
 void VoicePlayer::worker() {
   for (;;) {
     std::filesystem::path file;
+    PackedLine packed;
     unsigned long long gen = 0;
     {
       std::unique_lock lk(mu_);
       cv_.wait(lk, [&] { return quit_ || (!job_.empty() && job_gen_ == gen_.load()); });
       if (quit_) return;
       file = std::move(job_);
+      packed = std::move(job_packed_);
       job_.clear();
       gen = job_gen_;
     }
     auto pcm = std::make_shared<std::vector<float>>();
-    const bool ok = decode_mp3_file(file, *pcm, [&] { return gen_.load() != gen; });
+    const auto cancelled = [&] { return gen_.load() != gen; };
+    bool ok = false;
+    if (packed) {
+      const std::optional<Bytes> bytes = packed();
+      ok = bytes && decode_mp3_bytes(*bytes, *pcm, cancelled);
+    } else {
+      ok = decode_mp3_file(file, *pcm, cancelled);
+    }
     if (gen_.load() == gen) {
       if (ok) {
         log::debug("voice: playing {} ({:.2f} s)", file.string(), double(pcm->size() / 2) / Mixer::kRate);

@@ -27,8 +27,8 @@ class Decoder {
   Decoder(const Decoder&) = delete;
   Decoder& operator=(const Decoder&) = delete;
 
-  // Takes ownership of the .bk2 bytes.
-  bool open(Bytes file);
+  // Takes ownership of the movie's bytes; `name` is the format hint.
+  bool open(Bytes file, const std::string& name = "movie.bk2");
   // Streams a movie file from disk (same probing as open, the file name as the format hint); the file stays open until the decoder
   // is destroyed.
   bool open_file(const std::filesystem::path& path);
