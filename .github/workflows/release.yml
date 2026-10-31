@@ -43,7 +43,6 @@ jobs:
     runs-on: windows-latest
     env:
       VCPKG_ROOT: ${{ github.workspace }}\..\vcpkg
-      VCPKG_BINARY_SOURCES: clear;files,${{ runner.temp }}\vcpkg-cache,readwrite
     steps:
       - uses: actions/checkout@v4
 
@@ -55,6 +54,7 @@ jobs:
           git -C $env:VCPKG_ROOT checkout -q $baseline
           & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           New-Item -ItemType Directory -Force "${{ runner.temp }}\vcpkg-cache" | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,$env:RUNNER_TEMP\vcpkg-cache,readwrite" >> $env:GITHUB_ENV
 
       - id: vcpkg-cache
         uses: actions/cache/restore@v4
