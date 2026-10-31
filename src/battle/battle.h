@@ -323,6 +323,9 @@ class EnemyBrain {
   // Slot 4: run once per unit of the finished action's target list. Attacks the script queues (op 67) are executed like any queued
   // action (counter-attacks); return them in `out`.
   virtual void on_attacked(Battle&, int /*unit*/, Rng&, std::vector<EnemyAction>& /*out*/) {}
+  // The attacks that scripts queued from their idle loops (a hidden unit's arrival cast) since the last call: executed like any queued action by
+  // the unit that queued them. Appended to `out` as (unit, actions).
+  virtual void take_idle_plans(Battle&, std::vector<std::pair<int, std::vector<EnemyAction>>>& /*out*/) {}
   // Any attack about to resolve (kind 0 weapon / 1 element; id = weapon class or element id): scripts read it as vars 0x20..0x36.
   virtual void on_attack(Battle&, int /*actor*/, int /*kind*/, int /*id*/, int /*target*/) {}
   // The first seven entries of the cast colour history (colour + 1, 0 = empty).
@@ -564,6 +567,8 @@ class Battle {
   void enemy_turn(int unit);
   // The queued death casts of killed units (slot 3), run by run_reactions.
   void run_death_plans();
+  // The casts the scripts' idle loops queued, run by run_death_plans.
+  void run_idle_plans();
   // Slot 4 of every unit of the last action's target list, queued counter-attacks executed.
   void run_reactions();
   void confused_turn(int unit);
@@ -603,6 +608,8 @@ class Battle {
   std::vector<int> attacked_;
   // Slot-3 plans of units killed during the running action (kill()), executed once it has ended (run_reactions): unit, queued attacks.
   std::vector<std::pair<int, std::vector<EnemyAction>>> death_plans_;
+  // Casts queued by idle loops, not yet executed: unit, queued attacks.
+  std::vector<std::pair<int, std::vector<EnemyAction>>> idle_plans_;
   // run_death_plans is executing a plan (ActionEvent::death_cast).
   bool in_death_cast_ = false;
   // A kill script queued attacks that have not run yet: the unit still owes its death (check_end).

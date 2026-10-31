@@ -797,6 +797,7 @@ void Battle::damage_unit(int actor, int target, int value, int code) {
 // it has been cast.
 void Battle::run_death_plans() {
   scan_kills();
+  run_idle_plans();
   for (int guard = 0; guard < 16 && !death_plans_.empty() && outcome_ == Outcome::Ongoing; ++guard) {
     auto [unit, plan] = std::move(death_plans_.front());
     death_plans_.erase(death_plans_.begin());
@@ -818,6 +819,21 @@ void Battle::run_death_plans() {
     death_pending_[static_cast<size_t>(unit)] = false;
     post_action(unit, poison_step, timer_steps);
     check_end();
+  }
+}
+
+// What the idle loops queued while the scripts settled (a hidden unit's arrival cast) is one action per unit; casting can wake further loops.
+void Battle::run_idle_plans() {
+  brain_.take_idle_plans(*this, idle_plans_);
+  for (int guard = 0; guard < 16 && !idle_plans_.empty() && outcome_ == Outcome::Ongoing; ++guard) {
+    auto [unit, plan] = std::move(idle_plans_.front());
+    idle_plans_.erase(idle_plans_.begin());
+    if (units_[static_cast<size_t>(unit)].present) {
+      begin_action();
+      run_plan(unit, plan, false);
+      check_end();
+    }
+    brain_.take_idle_plans(*this, idle_plans_);
   }
 }
 

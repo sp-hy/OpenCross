@@ -250,12 +250,14 @@ bool Vm::quiescent() const {
 bool Vm::settle(int max_ticks) {
   for (int tick_index = 0; tick_index < max_ticks; ++tick_index) {
     tick();
-    // An idle-loop frame (slot 1, e.g. Mama Komodo's arrival: 66, 67 self-cast 0x140, A4, ghost_self 0) queues an attack nobody collects
-    // (only run_slot drains a queue): A4 would wait for it forever. The Queue event is already out for the view; the entry is dropped (the executor
-    // would play it in retail; the arrival effect is presentation only).
+    // An idle-loop frame (slot 1, e.g. Mama Komodo's arrival: 66, 67 self-cast 0x140, A4, ghost_self 0) queues an attack that no slot run
+    // drains, and its A4 would wait for it forever. The entries move to the idle list for the executor to play.
     for (int entity = 0; entity < mod_.entities; ++entity) {
       Ctx& ctx = ctx_[static_cast<size_t>(entity)];
-      if (ctx.a4_wait && !ctx.dropped && ctx.unit >= 0 && ctx.unit < kUnits && !queue_[static_cast<size_t>(ctx.unit)].empty()) queue_[static_cast<size_t>(ctx.unit)].clear();
+      if (!ctx.a4_wait || ctx.dropped || ctx.unit < 0 || ctx.unit >= kUnits) continue;
+      std::vector<QueuedAttack>& pending = queue_[static_cast<size_t>(ctx.unit)];
+      for (const QueuedAttack& attack : pending) idle_attacks_.emplace_back(ctx.unit, attack);
+      pending.clear();
     }
     if (quiescent() && !stale_read_) return true;
   }
@@ -1242,6 +1244,20 @@ void ScriptedBrain::to_actions(const Battle& battle, const std::vector<QueuedAtt
         out.push_back(ea);
       }
     }
+  }
+}
+
+void ScriptedBrain::take_idle_plans(Battle& battle, std::vector<std::pair<int, std::vector<EnemyAction>>>& out) {
+  if (!vm_) return;
+  std::vector<std::pair<int, std::vector<QueuedAttack>>> by_unit;
+  for (const auto& [unit, attack] : vm_->take_idle_attacks()) {
+    if (by_unit.empty() || by_unit.back().first != unit) by_unit.emplace_back(unit, std::vector<QueuedAttack>{});
+    by_unit.back().second.push_back(attack);
+  }
+  for (const auto& [unit, queued] : by_unit) {
+    std::vector<EnemyAction> plan;
+    to_actions(battle, queued, plan);
+    if (!plan.empty()) out.emplace_back(unit, std::move(plan));
   }
 }
 

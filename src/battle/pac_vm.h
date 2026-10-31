@@ -218,6 +218,9 @@ class Vm {
   u32 vtime() const { return vtime_; }
   bool quiescent() const;
   bool settle(int max_ticks = 1500);
+  // The attacks the idle loops queued during settle passes (unit, entry), oldest first: nothing else collects them, the executor plays
+  // them like any queued action (a hidden unit's arrival cast).
+  std::vector<std::pair<int, QueuedAttack>> take_idle_attacks() { return std::exchange(idle_attacks_, {}); }
   // Records a Mark event (a slot run starts).
   void mark() { emit(Event::Kind::Mark); }
 
@@ -308,6 +311,7 @@ class Vm {
   std::array<bool, kUnits> untarget_{};
   // Queue of an unbound entity.
   std::vector<QueuedAttack> scratch_;
+  std::vector<std::pair<int, QueuedAttack>> idle_attacks_;
   std::vector<Event> events_;
   std::set<int> unimplemented_, invalid_;
   int lock_ = kNoUnit;
@@ -354,6 +358,7 @@ class ScriptedBrain final : public EnemyBrain {
   void on_killed(Battle& battle, int unit, Rng& rng, std::vector<EnemyAction>& out) override;
   void on_attacked(Battle& battle, int unit, Rng& rng, std::vector<EnemyAction>& out) override;
   void on_attack(Battle& battle, int actor, int kind, int id, int target) override;
+  void take_idle_plans(Battle& battle, std::vector<std::pair<int, std::vector<EnemyAction>>>& out) override;
   std::array<u8, 7> colour_sequence() const override;
   bool end_check_enabled() const override { return !vm_ || vm_->end_check_enabled(); }
   int forced_result() const override { return vm_ ? vm_->forced_result() : -1; }
