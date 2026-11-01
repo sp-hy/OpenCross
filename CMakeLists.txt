@@ -10,6 +10,16 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 # One self-contained exe: static vcpkg libraries (x64-windows-static) and the static C runtime (librempeg is built /MT to match).
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+# Objects are cached by content when ccache is on PATH. A shared compile PDB (/Zi) makes every compile uncacheable, so debug info
+# stays in the objects (/Z7); the linker still writes the exe's PDB.
+option(OC_CCACHE "Compile through ccache when it is installed" ON)
+find_program(OC_CCACHE_PROGRAM ccache)
+if(OC_CCACHE AND OC_CCACHE_PROGRAM)
+  set(CMAKE_C_COMPILER_LAUNCHER ${OC_CCACHE_PROGRAM})
+  set(CMAKE_CXX_COMPILER_LAUNCHER ${OC_CCACHE_PROGRAM})
+  set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<$<CONFIG:Debug>:Embedded>")
+endif()
+
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8 /Zc:preprocessor /MP)
   # Release: function / data sections + whole-program optimisation, unreferenced code folded away (smaller exe).
