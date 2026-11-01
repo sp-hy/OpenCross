@@ -43,7 +43,9 @@ struct FxPrim {
   // pack's VRAM at tpage word `tpage` with CLUT word `clut` (as the overlay writes them into its GT3 / GT4 / FT3 packets), u / w in
   // texels 0..255 (the VRAM moves of FxModels::vram_moves applied). Colours are per corner (Gouraud) for every textured source.
   // PackModel = texture `tex` of the pack's sprite-type-20 model FxModels::pack_model (the trap summons), u / w as Model.
-  enum class TexSrc : u8 { Pack, Model, Vram, PackModel } src = TexSrc::Pack;
+  // Capture = the frame copy FxModels::capture asks for, u / w in layer pixels of the copy (320 x 224, the same grid as the vertices): the host
+  // makes the copy before the first item at or above the request's slot and maps the pixels to the copy at any render scale and aspect.
+  enum class TexSrc : u8 { Pack, Model, Vram, PackModel, Capture } src = TexSrc::Pack;
   int unit = -1;
   u16 tpage = 0, clut = 0;
   // Model only: the texture drawn through a white CLUT (the global rows the battle loads at (0, 243) / (0, 245), or the white
@@ -75,6 +77,8 @@ struct FxHooks {
   std::function<void(int side, int r, int g, int b)> actor_tint;
   std::function<void(int side, const Vec3& pos, float yaw)> actor_pose;  // scripted-motion overlays move the actors
   std::function<void(std::string_view name)> spawn;
+  // Starts the pack's sequence `name` bound to entry `caster` of the acting list.
+  std::function<void(std::string_view name, int caster)> start_for_caster;
   // Scene remaps (seint / unico / etrap override the party / enemy getters; bgchng / miyademo swap the backdrop).
   std::function<void(int side, bool listed)> set_listed;  // actor in / out of the getter lists the sequence ops iterate
   // Replace the battle backdrop (-1 free it, 0..99 bg_NN, 100 battle/bg/kamei,
@@ -82,6 +86,8 @@ struct FxHooks {
   std::function<void(int stage)> set_stage;
   // hensin 0x182 / 0x183: the host's Dopplegang form change (1 = starts, 2 = the new form takes over).
   std::function<void(int phase)> form_swap;
+  // hinsi / lasdes4 / kamedes: sets a unit's idle-pose word (the one the battle script's pose op writes; 1 = stand-by, 8 = dead).
+  std::function<void(int unit, int pose)> set_pose;
   // Clears the depth cue flag the pack's op 0x24 set (kamei state 3).
   std::function<void()> fog_off;
   // The GTE light rows / colour columns built for a world point (PS1 axes) from the battle's light slots, and the back colour (bytes / 256):
@@ -100,7 +106,8 @@ inline constexpr int kPseudoUnit = -2;
 struct FxModel {
   int unit = -1;                         // host unit index
   bool pc = false;
-  // Snapshot when the effect starts: the list entry's s16 home position = the model position.
+  // Snapshot when the effect starts: the list entry's s16 home position = the model position. Rotations are the model block's, rot[1] the
+  // 12-bit yaw: 0xC00 looks along +x, 0x400 along -x.
   Vec3 home{0, 0, 0};
   int home_rot[3] = {0, 0, 0};
   float height = 1000;                   // model extent along y
@@ -136,6 +143,11 @@ struct FxModel {
   // The pack set the model's hidden bit and the host keeps it hidden after the effect ends until the unit's own rules
   // (the script's ghost words) say otherwise (kamei: the shell form once the new form has taken its place).
   bool conceal = false;
+  // The model was rebuilt mid-effect: its block starts clean, so the visibility ops' hide bit is gone, and it plays its spawn script.
+  // Consumed by the host.
+  bool rebuilt = false;
+  // The model's block is given up (ThirdSlotRelease): `hidden` holds through every show op until the reload.
+  bool unloaded = false;
   // Run an anmseq entry on the model: script_entry >= 0x80 = entry of the external table; script_table = tag of the type-0x1A entry
   // assigned as the external table first ("" = keep).
   int script_entry = -1, script_variant = 0;
@@ -228,6 +240,10 @@ struct FxModels {
   // An overlay hung the pack's rigid mesh `mount_mesh` on mount record 0 of the pack's model `mount_model` (seint: the angel's spear).
   std::string mount_model, mount_mesh;
   std::function<bool(int unit, FxSkinnedModel& out)> skin;
+  // The disc read of a unit's model files, in ticks; set by the host.
+  std::function<int(int unit)> model_read_ticks;
+  // The overlay closed the pack before the battle may go on: its sounds are cut. Consumed by the host.
+  bool pack_closed = false;
   // Host: the WORLD position (PS1 axes) of attach point `point` (S3 table) of the posed unit model.
   std::function<bool(int unit, int point, Vec3& out)> attach;
   // caster[-1] (the pack's `act0` pseudo-actor model): the same for that model. Unset / false = no pseudo-actor.
@@ -269,6 +285,9 @@ struct FxModels {
     // A host consumes the requests (BattleView); without one BattleFxRun acknowledges them.
     bool host = false;
     std::array<u8, 4> motion_state{};
+    // A stream in progress: ticks left of its disc read and the state it then reports.
+    std::array<int, 4> motion_read_left{};
+    std::array<u8, 4> motion_read_state{};
     bool at_end = false;
     bool hidden = true;
   } pack_drive;
@@ -297,7 +316,7 @@ struct FxModels {
   bool env_clut_set = false;
   // Pad 0's newly pressed buttons this tick in the PS1 bit layout (0x20 = the confirm button; 155slot stops a reel on it).
   u16 pad_edge = 0;
-  // miki: the picture is copied to VRAM (x, y) at OT entry `ot` every frame (x < 0 = none); the battle host makes the copy and the pack
+  // miki / ripple (its TexSrc::Capture grid also samples it): the picture is copied to VRAM (x, y) at OT entry `ot` every frame (x < 0 = none); the battle host makes the copy and the pack
   // mesh faces on that direct-colour page sample it (BattleView::fx_draw).
   struct Capture {
     int x = -1, y = 0, ot = 0;
@@ -369,6 +388,9 @@ struct FxGround {
   // projection. `draw_bias_add` = extra OT slots of the overlay's own ground draws (46black: OT + 0x640 bytes = 400).
   std::function<void(Vec3&)> warp;
   std::vector<std::string> warp_emitters;
+  // 14bar: the warp reaches only the mesh objects alive when it started, and those that have a blend mode are drawn with the quarter-add
+  // mode (4) whatever their own mode is.
+  bool warp_quarter_add = false;
   int draw_bias_add = 0;
   // Overlay state. `skip_stock` (the stock draw skips the ground) and `bias` (the ground's OT bias: 100, ramped by sequence ops
   // 0x6D / 0x6E, 100 again when the overlay is freed) persist; `draws` (the overlay's own ground draws with a rect: the whole ground
@@ -445,11 +467,13 @@ class BespokeEffect {
   virtual void tick() = 0;
   virtual void draw(std::vector<FxPrim>& out) const = 0;
   virtual bool done() const = 0;
-  // Private overlay op (0x100.. / 0x180..) with its operand words (module-specific, see each module). Unknown ops are ignored.
-  virtual void command(int op, const int* args, int count) {
+  // Private overlay op (0x100.. / 0x180..) with its operand words (module-specific, see each module). Returns true when the module
+  // recognised the op and acted on it, false for an op it ignores.
+  virtual bool command(int op, const int* args, int count) {
     (void)op;
     (void)args;
     (void)count;
+    return false;
   }
   // A stock sequence op (< 0x100) as the overlay's dispatcher sees it before the stock handler: true = the overlay
   // replaced it (the deaths' 0x59), false = the stock handling follows (kamedes' 0x59 prefix falls through).

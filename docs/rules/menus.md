@@ -67,7 +67,7 @@ OK toggles the profile panel and the equipment panel; Cancel returns to the list
 * **Stamina recovery** (Status and Elements-use panels). `min(rate + sum over accessory slots 2..4 of gear.mag where gear flag 0x80 (stamina) is set, 99)`; `rate` is byte +0x1F of the character record.
 * **Ailment badges.** Four badges for record status bits 0x01, 0x10, 0x20, 0x08.
 * **Grid minimap.** One tile per unlocked grid cell.
-* **Profile text.** Table row keyed by the character's model byte when it is at most 0x31, else by the character id; at most 7 lines, trailing blank lines dropped. The 3D model is the menu model with the same key (model byte up to 0x32).
+* **Profile text.** Table row keyed by the character's body (section 14) when it is at most 0x31, else by the character id; at most 7 lines, trailing blank lines dropped. The 3D model is the menu model with the same key (body up to 0x32).
 * **Pad camera.** Triangle toggles between the turning model and the pad camera; in pad mode Square steps the pose 0, 1, 2. The model logic ticks every second 60 Hz frame. Auto turn +8 per tick. Pad camera: Left / Right turn 16, Up / Down move 32 (distance clamped between the model's nearest distance and 0x960); with L2 held the directions pan by 8 (limit 0xAA); with R2 held Up / Down tilt by 16 (limit -0x200..0).
 
 ## 4. Equip screen
@@ -281,3 +281,22 @@ Source: `game/game_flow.*`, `ui/title/title_screen.cpp`, `nav.h`.
 * **User guide.** Two pages (controller, then keyboard) of baked images. Shown at every New Game, and on a script name entry (opcode FE 4A) when script variable 6 (MAP_ID) is 0 or 8. Skipped when the page images are missing. A 45-step counter at 60 steps per second runs the fade-in of page 1, a wait, the fade-in of page 2 over it, a wait and the fade-out of page 2 (15 steps each). Each wait ends on any key press except F1..F12, or on the frame the pad goes from some button or stick held to none (stick clicks and Start excluded).
 * **Continue.** Slot list (section 10); a pick fades the screen out for 0.5 s and then restores the state: the state is replaced by the slot, the Time Shifter key item is granted, record names that are usable and `ext_save.dat` names (same language only) become the custom names, the location word selects the room (a word of 0 with no room name logs a warning and loads no room; a nonzero id is looked up in the disc index and returns to the title when no room is found), the saved leader position (script variables 0x12, 0x14) is restored and the room parameter is variable 0x3A. Cancel on the choice returns to the title menu with the cursor on Continue.
 * **New Game+ variant.** The ending room's script (FE 84 + FE 61) shows variant 2 over the cleared game: rows "New Game +" and "Continue +" only, straight into the menu with no prompt and no cancel. New Game+ goes through the vibration page, then replaces the state in place (carry-over per `formats/save.md` section 14) and the ending script goes on. Continue+ opens the slot list in plus mode: a slot whose two summary flag bits are set (bit 0 completed, bit 1 already New Game+) is refused with sfx 0x18; a pick carries the cleared game into the loaded slot after the fade; the custom names stay those of the cleared game. Cancel on the Continue+ choice returns to the variant 2 list on Continue +.
+
+## 14. Character names
+
+One rule serves every screen (`data::character_name`, `src/data/char_name.h`). A character's own name is its typed name, or the language's `sysmes[0x10000 + id]` when none is set or the language's font cannot draw it (kana outside JP). In JP, battle and the menus add the rank to Viper's name.
+
+Serge (id 0) whose record model byte is 0x31 reads as Lynx, `sysmes[0x10031]` in the game's language, ignoring his typed name. Model bytes 0x3C..0x3E stand for the model held in script variables 0x170..0x174. Only id 0 is special: another character wearing 0x31 keeps its own name. Model byte 0x33, the same body under another byte, keeps his own name on every screen.
+
+| Where | Serge in the Lynx body |
+| --- | --- |
+| Battle HUD, target label, results, battle messages | Lynx |
+| Main menu, status, elements, Current Party | Lynx |
+| Dopple list, first row | own name |
+| `{PARTYn%}`, `{playwork(n)}` in field text | Lynx, own name while `GF.16` is set |
+| `{SERGE%}`, `{SERGE}` | own name |
+| Lynx duel | `battle.md`, section 1 |
+
+The save lists show the default name of the saved leader: they describe another game's party.
+
+The art follows the body the same way (`data::menu_form`): the portrait strip of the main list, the Elements and Equip screens, the weapon pack and the profile text show the body when it is at most 0x31, else the character. So Serge in body 0x31 shows Lynx's portrait, Pip his form's, and body 0x33 Serge's own. This holds for any character, unlike the name rule.

@@ -7,7 +7,16 @@
                                                [--pick U/E,..] [--window N] [--keep-pass1] [--mash Button] [--max-caps N]
                                                [--disc 1|2|PATH | --disc2]
                                                [--p2-every N --p2-lo A --p2-hi B] [--p2-dump N] [--party-ids a,b] [--forge-args "x|y"]
+    python -X utf8 tools/py/ps1_cast.py force  --scene N --ids e[:unit[:g+g]],.. [--char C [--party-ids a,b]] [--unit U] [--target T] [--window N] [--area A] [--menu-frames N]
+                                               [--field-poke ADDR=VAL[:W];..] [--start-limit N]
     python -X utf8 tools/py/ps1_cast.py attack --tag T [--keys "Circle:40,Circle:80,..."] [--frames 560]
+
+force queues one target; --target-mask 3+4 writes every unit an all-targets element hits, as the menu does (ocbattleview hits every present unit of the
+target's side, so give the scene's enemies). force checks every caster, group member and the target against the scene's units before it queues anything (a unit that is absent, hidden or
+dead would hang the cast): unit numbers are the script's bind_unit operand minus 0xE0, and the refusal lists the valid units. A cast that does not
+start within --start-limit run frames, or a GDB timeout, fails that one cast (captures.txt says so) and the batch goes on. --field-poke writes
+field-state memory (field script variables) before the battle id is poked, e.g. 0x80077DE8=2:2 sets field variable 0x1C8. The manifest records
+`area:` (battlefield operand) and `party_ids:` (character ids of the party) for tools/ours_cast34.ps1.
 
 Output per element id: tmp/r34/<id>/ref/{states/state_NNNNNN.sav (every 5 run frames), frames/frame_NNNNNN.png (every 4), manifest.txt}.
 Run frame 0 = the state the capture stage starts from (the cast's target select up; the confirming Circle is the first input).
@@ -49,6 +58,10 @@ SUMMON_RING = {37: 0x20, 38: 0x20, 39: 0x08, 40: 0x08, 41: 0x01, 42: 0x01, 43: 0
 WATCH_FIELDS = "btl_frame,tgt_064b,act_kind,act_actor,tgt0,e05da,elem,fx_load,ovl,ovl0,party0,u0_hp,u3_hp,u4_hp,u5_hp,loc,btl_id,area".split(",")
 
 log = pc.log
+
+
+class CastError(RuntimeError):
+    pass
 
 
 def sess(state=None):
@@ -202,17 +215,24 @@ def retry(fn, *args):
     return fn(*args)
 
 
-def capture_run(g, refdir, frames, state_every=5, dump_every=4, lo=0, hi=None, keys=None, mark=None):
+def capture_run(g, refdir, frames, state_every=5, dump_every=4, lo=0, hi=None, keys=None, mark=None, expect=None):
     """Stepped capture from the current frame: state every `state_every` and frame every `dump_every` run frames.
-    mark = {run frame: callback(g)}. Returns the first run frame with fx_load != 0 and the act_elem seen there."""
+    mark = {run frame: callback(g)}. expect = (element, run frame limit): CastError as soon as the element has not become the running action by
+    then. Returns the first run frame with fx_load != 0 and the act_elem seen there."""
     os.makedirs(os.path.join(refdir, "states"), exist_ok=True)
     os.makedirs(os.path.join(refdir, "frames"), exist_ok=True)
     hi = frames if hi is None else hi
     seen = {"fx": None, "elem": None, "kind": None}
+    started = expect is None
     for r in range(frames + 1):
         if state_every and lo <= r <= hi and r % state_every == 0:
             retry(g.save_state, os.path.join(refdir, "states", "state_%06d.sav" % r))
             w = g.watch(["act_kind", "act_elem", "e05da", "fx_load"])
+            if not started and w["e05da"] == expect[0] and w["act_kind"] == 1:
+                started = True
+            if not started and r >= expect[1]:
+                raise CastError("the forced element %d did not start within %d run frames (e05da %d, act_kind %d, fx_load %d); the caster is probably "
+                                "not taking turns" % (expect[0], expect[1], w["e05da"], w["act_kind"], w["fx_load"]))
             if seen["fx"] is None and w["act_kind"] == 1 and w["fx_load"] != 0:
                 seen["fx"], seen["elem"], seen["kind"], seen["act_elem"] = r, w["e05da"], w["act_kind"], w["act_elem"]
         if dump_every and r % dump_every == 0:
@@ -225,10 +245,6 @@ def capture_run(g, refdir, frames, state_every=5, dump_every=4, lo=0, hi=None, k
 
 
 # ---- PC casts (batch / summon / tech) -------------------------------------------------------------------------------------
-class CastError(RuntimeError):
-    pass
-
-
 def drive_cast(g, cid, idx, cols, extra_keys, steps, limit=3000):
     """Menu driver from the first command menu to the confirmed cast, every step gated on RAM (no fixed frame numbers: the enemy's
     turn order differs between runs, so the HIT% box opens at different times).
@@ -510,9 +526,146 @@ def run_enemy(a):
     log("done: %d captures" % len(jobs))
 
 
+# ---- force ------------------------------------------------------------------------------------------------------------
+def force_queue(g, unit, element, target, group=None, mask_units=None):
+    """Writes one element action into the unit's action queue, as the script's queue_attack op does, so its next turn casts it.
+    mask_units = every unit an all-targets element hits, as the menu's target ring writes them; default the one target."""
+    vb = g.gdb.u(0x800E2FC8, 4)
+    head_addr = vb + unit * 2 + 0x81C
+    head = g.gdb.u(head_addr, 2)
+    head = head - 0x10000 if head >= 0x8000 else head
+    entry = vb + (head + 1) * 8 + unit * 0x28
+    g.poke(vb + unit * 0x28 + 0x6B9, 0, 1)
+    g.poke(entry + 0x6B8, 2 if group else 1, 1)
+    for k in range(6 if group else 0):   # the caster list of a group cast
+        g.poke(vb + 0x832 + k, group[k] if k < len(group) else 0xFF, 1)
+    g.poke(entry + 0x6B6, element, 2)
+    g.poke(entry + 0x6BA, 1, 1)
+    mask = 0
+    for u in mask_units or [target]:
+        mask |= g.gdb.u(0x800DE90C + u * 2, 2)
+    g.poke(entry + 0x6B4, mask, 2)
+    g.poke(head_addr, head + 1, 2)
+
+
+UNIT_BLOCK, UNIT_STRIDE, UNIT_MODEL, UNIT_COUNT = 0x800E06A0, 0x410, 0x800E0830, 9
+RAM_END = 0x80200000
+
+
+def read_units(g):
+    """One dict per unit slot 0..8 of the running battle: current HP, model pointer, position and the reason the slot cannot act (or None)."""
+    out = []
+    for u in range(UNIT_COUNT):
+        base = UNIT_BLOCK + u * UNIT_STRIDE
+        hp = g.gdb.u(base + 0xB8, 2)
+        model = g.gdb.u(UNIT_MODEL + u * UNIT_STRIDE, 4)
+        row = {"unit": u, "hp": hp, "model": model, "x": 0, "z": 0, "why": None}
+        if not (0x80010000 <= model < RAM_END) or model & 3:
+            row["why"] = "no model (pointer 0x%08X): the slot is absent" % model
+        else:
+            row["x"] = g.gdb.u(model + 0x84, 4, True) >> 12
+            row["z"] = g.gdb.u(model + 0x8C, 4, True) >> 12
+            if hp == 0:
+                row["why"] = "hp 0"
+            elif g.gdb.u(base + 0x1C8, 2) or g.gdb.u(base + 0x1CC, 2) or g.gdb.u(model + 0x7E, 1) & 1:
+                row["why"] = "off-stage / hidden"
+        out.append(row)
+    return out
+
+
+def check_units(units, uses, scene):
+    """uses = [(role, unit)]: SystemExit naming the first unit that cannot act or be hit, with the list of the valid ones."""
+    for role, u in uses:
+        row = units[u] if 0 <= u < len(units) else None
+        why = "outside the unit slots 0..%d" % (UNIT_COUNT - 1) if row is None else row["why"]
+        if why:
+            valid = "; ".join("unit %d hp %d x %d z %d" % (r["unit"], r["hp"], r["x"], r["z"]) for r in units if not r["why"])
+            raise SystemExit("unit %d (%s) cannot be used in scene %s: %s. Valid units: %s. Unit numbers are the script's bind_unit operand minus 0xE0, "
+                             "not the entity number." % (u, role, scene, why, valid or "none"))
+
+
+def run_force(a):
+    extra = [x for x in (a.forge_args or "").split("|") if x]
+    party = a.char or extra
+    if (a.scene is None and not party) or not a.ids:
+        raise SystemExit("--ids and --scene or --char are required")
+    scene = a.scene
+    tag = a.tag or "scene%s" % scene
+    if party:
+        enc = ensure_base(tag, a.char, [], a.party_ids or a.char, extra, a.rebuild)[0]
+    elif pc.DISC_NO == 2:
+        enc = ensure_base(tag, 0, list(STD_ROW), None, [], a.rebuild)[0]
+    else:
+        enc = os.path.join(STATES, "field53_encounter.sav")
+    work = os.path.join(OUT, "_work", "force_%s" % tag)
+    if os.path.isdir(work):
+        shutil.rmtree(work)
+    os.makedirs(work)
+    menu = os.path.join(work, "menu.sav")
+    keys = Keys()
+    keys.mash(a.mash, 30, 10, a.menu_frames)
+    mask_units = [int(v) for v in a.target_mask.split("+")] if a.target_mask else None
+    specs = []
+    for spec in [x for x in a.ids.split(",") if x]:
+        parts = spec.split(":")
+        specs.append((int(parts[0]), int(parts[1]) if len(parts) > 1 else a.unit,
+                      [int(v) for v in parts[2].split("+")] if len(parts) > 2 else None))
+    with sess(enc) as g:
+        if a.field_poke:   # field-state memory (script variables) must be set before the battle loads
+            apply_pokes(g, parse_pokes(a.field_poke))
+        if scene is not None:
+            g.poke(0x80075906, 0x200 | scene, 2)
+        if a.area is not None and a.area >= 0:
+            g.poke(0x800790FC, a.area, 2)
+        for k in range(a.menu_frames + 1):
+            if k >= 100 and k % 5 == 0:
+                w = g.watch(["ovl_id", "tgt_064b", "btl_frame"])
+                if w["ovl_id"] == 8 and w["tgt_064b"] == 1 and w["btl_frame"] >= 100:
+                    break
+            g.step(keys.held(k))
+        else:
+            raise RuntimeError("no battle menu reached in scene %d: %s" % (scene, g.watch()))
+        units = read_units(g)
+        for elem, unit, group in specs:
+            check_units(units, [("caster of element %d" % elem, unit)] + [("group member of element %d" % elem, m) for m in group or []] +
+                        [("target", a.target)] + [("target", m) for m in mask_units or []], scene)
+        area = g.gdb.u(0x800790FC, 2)
+        party_ids = a.party_ids or ",".join(str(g.gdb.u(0x800786F4 + i, 1)) for i in range(3))
+        retry(g.save_state, menu)
+    report = []
+    for elem, unit, group in specs:
+        name = "%d" % elem if party else "%d_s%d_u%d" % (elem, scene, unit)
+        ref = os.path.join(OUT, name, "ref")
+        if os.path.isdir(ref):
+            shutil.rmtree(ref)
+        try:
+            with sess(menu) as g:
+                force_queue(g, unit, elem, a.target, group, mask_units)
+                seen = capture_run(g, ref, a.window, state_every=5, dump_every=4, expect=(elem, min(a.start_limit, a.window)))
+        except (CastError, TimeoutError, ConnectionError, OSError, RuntimeError) as e:   # the session closed its emulator; the next cast starts a fresh one
+            report.append("%s\telem %d unit %d target %d FAILED %s: %s" % (name, elem, unit, a.target, type(e).__name__, e))
+            log(report[-1])
+            continue
+        ok = seen["elem"] == elem
+        prune_capture(ref, elem, a.no_prune)
+        write_manifest(ref, elem, "tech" if party else "enemy", ["enemy_unit: %d scene %s" % (unit, scene), "target_unit: %d" % a.target,
+                                            "area: %d" % area, "party_ids: %s" % party_ids,
+                                            "base: first command menu of scene %s, action queue written for unit %d" % (scene, unit),
+                                            "forced cast: e05da=%s at run frame %s -> %s" % (seen["elem"], seen["fx"], "OK" if ok else "MISMATCH")])
+        report.append("%s\telem %d unit %d target %d repro %s" % (name, elem, unit, a.target, "OK" if ok else "MISMATCH"))
+        log(report[-1])
+    os.makedirs(os.path.join(OUT, "scene_%s" % scene), exist_ok=True)
+    with open(os.path.join(OUT, "scene_%s" % scene, "captures.txt"), "w", encoding="utf-8") as fh:
+        fh.write("\n".join(report) + "\n")
+    shutil.rmtree(work, ignore_errors=True)
+
+
 def main(argv):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    ap.add_argument("mode", choices=["batch", "summon", "tech", "enemy", "attack"])
+    ap.add_argument("mode", choices=["batch", "summon", "tech", "enemy", "attack", "force"])
+    ap.add_argument("--unit", type=int, default=3)
+    ap.add_argument("--target", type=int, default=0)
+    ap.add_argument("--target-mask", default="", help="force: a+b.. the units an all-targets element hits (the default is --target alone)")
     ap.add_argument("--ds-dir", default=None, help="emulator folder (default: the private copy tmp/ds_cast, else tools/duckstation)")
     ap.add_argument("--port", type=int, default=None, help="GDB port of that folder (default 2348 for the private copy, 2345 otherwise)")
     ap.add_argument("--tag", default="")
@@ -526,6 +679,8 @@ def main(argv):
     ap.add_argument("--lead", type=int, default=150)
     ap.add_argument("--poke", default="")
     ap.add_argument("--var-poke", default="")
+    ap.add_argument("--field-poke", default="", help="force: ADDR=VAL[:W];.. written in the field state before the battle id (field script variables)")
+    ap.add_argument("--start-limit", type=int, default=400, help="force: run frames the forced cast may take to start before the capture is given up")
     ap.add_argument("--menu-poke", default="")
     ap.add_argument("--pre-poke", default="")
     ap.add_argument("--menu-frames", type=int, default=320)
@@ -562,7 +717,9 @@ def main(argv):
     pc.set_disc("2" if a.disc2 else a.disc)
     if not os.path.isdir(CAST_DS):
         raise SystemExit("private emulator folder %s missing (copy tools/duckstation, set GDBServerPort = %d)" % (CAST_DS, CAST_PORT))
-    if a.mode == "enemy":
+    if a.mode == "force":
+        run_force(a)
+    elif a.mode == "enemy":
         run_enemy(a)
     elif a.mode == "attack":
         run_attack(a)

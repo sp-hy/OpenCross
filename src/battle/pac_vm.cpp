@@ -390,7 +390,7 @@ int Vm::target_mask(int entity, int code) {
   }
 }
 
-std::optional<std::array<u8, 6>> Vm::probe_group(int element) const {
+std::optional<std::array<u8, 6>> Vm::probe_group(int element, int caster) const {
   for (const ScriptExtent& extent : mod_.scripts()) {
     int last8d = -1;
     // The vars as the straight-line assignments of this script (e.g. `set v, self; sub v, 0xE0` before its 8D) leave them.
@@ -421,7 +421,8 @@ std::optional<std::array<u8, 6>> Vm::probe_group(int element) const {
             const int value = raw & 0x8000 ? raw & 0x7FFF : vr(raw);
             if ((value & 0xFFFF) != 0xFF) out[static_cast<size_t>(count++)] = static_cast<u8>(value);
           }
-          return out;
+          // Each enemy's own copy of the script names itself: the caster's copy is the one that lists it.
+          if (std::find(out.begin(), out.end(), static_cast<u8>(caster)) != out.end()) return out;
         }
       }
       pc += static_cast<u32>(len);
@@ -1036,7 +1037,7 @@ class ScriptedBrain::BattleHost final : public Host {
           return;
         case 0xB8:
           state.hp = value & 0xFFFF;
-          if (state.hp == 0 && !state.pc) state.lo |= st::kKO;
+          if (state.hp == 0 && !state.pc) state.lo |= st::kKO, state.hp_written_zero = true;
           return;
         case 0xA2: state.gold = value; return;
         case 0x01: state.innate = static_cast<u8>(value); return;

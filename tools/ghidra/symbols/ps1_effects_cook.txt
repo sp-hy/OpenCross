@@ -2,3 +2,8 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_cook_spot_draw_callback = 0x801C5ECC;  # function: Spot callback that stores the particle and replaces its draw
+fx_cook_init = 0x801C5EF0;  # function: Starts the screen-effect label, runs the pack main table on the acting list and hooks the spot emitter
+fx_cook_vacuum_start = 0x801C5FC8;  # function: Op 0x100: starts the vacuum task on target 0 with the negated model height word
+fx_cook_vacuum_task = 0x801C6040;  # function: Per-tick re-skin that sucks the target into the spot, front falling from the head
+fx_cook_negative_start = 0x801C65D4;  # function: Op 0x101: starts the screen negative task
+fx_cook_negative_task = 0x801C6610;  # function: Draws the screen negative bands for the task duration

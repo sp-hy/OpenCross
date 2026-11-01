@@ -346,6 +346,11 @@ float TextBatch::advance(FaceId id, char32_t ch, float scale) const {
   return glyph_entry->adv * scale;
 }
 
+float TextBatch::glyph_measure(FaceId id, char32_t ch) const {
+  const Face* font_face = face(id);
+  return font_face && !font_face->bitmap && font_face->font ? font_face->font->measure(static_cast<u32>(ch)) : 0.0f;
+}
+
 float TextBatch::line_height(FaceId id, float scale) const {
   const Face* font_face = face(id);
   if (!font_face) return 0;

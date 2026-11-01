@@ -34,6 +34,24 @@ void fx_play_sound(BattleAudio& audio, std::string_view name, int volume, int pa
 }  // namespace
 
 // The effect start saves each listed unit's shadow-off flag; the effect end writes it back.
+// The hide bit survives a pack end: the idle restart shows a living unit again; a dead one has no idle and stays hidden through the next pack.
+void BattleView::fx_show_living() {
+  for (int i = 0; i < battle::kUnits; ++i) {
+    if (battle_->unit(i).present && !battle_->unit(i).alive()) continue;
+    fx_hidden_[static_cast<size_t>(i)] = false;
+    fx_hide_bits_[static_cast<size_t>(i)] = 0;
+  }
+}
+
+// A unit's .obj and .ltc read back to back.
+int BattleView::fx_model_read_ticks(int unit) const {
+  const std::string stem = unit_model_stem(battle_->unit(unit));
+  size_t bytes = 0;
+  for (const char* extension : {".obj", ".ltc"})
+    if (const auto file = vfs_->read("cdrom/" + stem + extension)) bytes += (file->size() + 2047) / 2048 * 2048;
+  return effects::disc_read_ticks(bytes);
+}
+
 void BattleView::fx_hook_start() { shadow_saved_off_ = shadow_off_; }
 void BattleView::fx_hook_end() { shadow_off_ = shadow_saved_off_; }
 
@@ -80,6 +98,12 @@ void BattleView::fx_reset_scene() {
 // queues the element pack load. The charge sequence's op 0x41 (about tick 108, +5 wait) hands over to the pack.
 void BattleView::fx_charge_begin() {
   if (act_.ev.empty() || act_.actor < 0) return;
+  // An element with no colour, or with all six, opens no charge file: no group facing, no cast pose (the casters stay in their idle), no chant.
+  const int cast_element = act_.ev.front().element;
+  const bool known_element = cast_element > 0 && static_cast<size_t>(cast_element) < tables_->elements.size();
+  const int cast_colours = known_element ? tables_->elements[static_cast<size_t>(cast_element)].colour_bit() >> 2 : 1;
+  const bool charged = cast_colours != 0 && cast_colours != 0x3F;
+  if (charged) face_group_cast();
   // The group facing of face_cast_targets follows the charge camera's select, whatever the exit.
   struct GroupFace {
     BattleView& view;
@@ -95,17 +119,17 @@ void BattleView::fx_charge_begin() {
   fx_hand_wait_ = 0;
   // Set once the charge instance exists: only then does S5 entry 5 run, whose 'mag<k>' is the monster's own camera.
   model_cam_ = false;
-  if (actor_visual.scripts && actor_visual.scripts->has_s5) start_script(act_.actor, &actor_visual.scripts->s5, 5, 0, kCast);
+  if (charged && actor_visual.scripts && actor_visual.scripts->has_s5) start_script(act_.actor, &actor_visual.scripts->s5, 5, 0, kCast);
   else actor_visual.script_done = true;
   // S5 entry 5 on EVERY acting-list entry - a group cast's extra casters take the cast pose too.
-  for (size_t i = 1; i < act_.casters.size(); ++i) {
+  for (size_t i = 1; charged && i < act_.casters.size(); ++i) {
     const int cu = act_.casters[i];
     if (cu < 0 || cu >= battle::kUnits || cu == act_.actor) continue;
     Visual& cv = vis_[static_cast<size_t>(cu)];
     if (cv.has_model && cv.scripts && cv.scripts->has_s5) start_script(cu, &cv.scripts->s5, 5, 0, kCast);
   }
   // Chant: mask 0x100, pan 0x80, volume 0x7F; the mask makes the next chant end this one.
-  if (const std::string chant = battle_->unit(act_.actor).pc ? "sing" : "msin"; !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
+  if (const std::string chant = battle_->unit(act_.actor).pc ? "sing" : "msin"; charged && !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
   // The theme fades to 0x66 over 0x6D frames while the spell runs.
   audio_.duck_cast();
   if (!dbg_.effects || fx_) return;
@@ -143,8 +167,7 @@ void BattleView::fx_charge_begin() {
   fx_->set_lights(&fx_lights_);
   fx_spell_run_begin();
   fx_fired_.assign(act_.ev.size(), false);
-  fx_hidden_.fill(false);
-  fx_hide_bits_.fill(0);
+  fx_show_living();
   fx_lit_.fill(false);
   // The charge instance is an effect context of its own.
   fx_hook_start();
@@ -329,6 +352,7 @@ bool BattleView::fx_begin() {
   cb.ambient = [this](int r, int g, int b, int ticks) { fx_ambient_set(r, g, b, ticks); };
   cb.stage = [this](int stage) { fx_swap_stage(stage); };
   cb.form = [this](int ph) { fx_form_phase(ph); };
+  cb.pose = [this](int unit, int pose) { fx_set_pose(unit, pose); };
   cb.song = [this](int song) { audio_.play_song(song); };
   cb.fog_off = [this] {
     fx_fog_on_ = false;
@@ -359,8 +383,7 @@ bool BattleView::fx_begin() {
   audio_.fade_chant();
 
   fx_fired_.assign(act_.ev.size(), false);
-  fx_hidden_.fill(false);
-  fx_hide_bits_.fill(0);
+  fx_show_living();
   fx_lit_.fill(false);
   fx_faded_ = false;
   // A pack start ends the warp bracket and the slow motion.
@@ -395,7 +418,7 @@ bool BattleView::fx_begin() {
   // no such block. The same block is the init tail of the packs listed in kMainTail (stdtech0, soidash, 3mix, 3voice, cook, ghost1, hip,
   // shine, shock, swordbox, uzumaki, xgiri, sky, jigoku, canon): the Boxer Boys' "presents" (element 379 / 380, `shock`) is a caster script that
   // walks / opens the chest model, and jigoku (207 Dinner Guest) starts its cameras from the same `main` loop.
-  static const std::set<std::string_view> kMainTail = {"stdtech0", "soidash", "shock", "3mix", "3voice", "cook", "ghost1", "hip", "shine", "swordbox", "uzumaki", "xgiri", "sky", "jigoku", "canon"};
+  static const std::set<std::string_view> kMainTail = {"stdtech0", "soidash", "shock", "3mix", "3voice", "cook", "ghost1", "hip", "shine", "swordbox", "uzumaki", "xgiri", "sky", "jigoku", "canon", "godhand"};
   bool host_main = false;
   if (kMainTail.count(pack->overlay) && pack->has_anim && pack->tables.count("main") && act_.actor >= 0) {
     // The init tail walks the whole acting list: every caster runs the pack's atk entry with its list index as the variant.
@@ -614,6 +637,10 @@ void BattleView::fx_hide(const std::vector<int>& units, u16 bit, bool on) {
     u16& bits = fx_hide_bits_[static_cast<size_t>(unit)];
     bits = on ? static_cast<u16>(bits | bit) : static_cast<u16>(bits & ~bit);
     fx_hidden_[static_cast<size_t>(unit)] = bits != 0;
+    // The stock ops, the model scripts and the overlays write one hide bit, so a show also ends an overlay's hide; a model whose block was given
+    // up stays off the stage until its reload.
+    if (effects::FxModels* overlay_models = fx_ ? fx_->bespoke_models() : nullptr; !on && bit == 1 && overlay_models && static_cast<size_t>(unit) < overlay_models->units.size() && !overlay_models->units[static_cast<size_t>(unit)].unloaded)
+      overlay_models->units[static_cast<size_t>(unit)].hidden = false;
   }
 }
 
@@ -622,6 +649,7 @@ std::vector<int> BattleView::fx_units(int which) const {
   std::vector<int> us;
   if (which == 1) return act_.targets;
   if (which == 2) {
+    if (!act_.casters.empty()) return act_.casters;
     if (act_.actor >= 0) us.push_back(act_.actor);
     return us;
   }

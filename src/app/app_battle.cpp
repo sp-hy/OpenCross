@@ -14,6 +14,8 @@
 
 namespace oc::app {
 
+data::CharNames App::char_names() { return {flow_ready ? &flow.machine().custom_names() : nullptr, &name_tables, lang}; }
+
 FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleRequest& rq) {
   FieldBattleArgs battle_args;
   battle_args.rq = rq;
@@ -38,9 +40,9 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
       for (int& id : battle_ids)
         if (id == 0) id = relief;
   }
+  const data::CharNames names = char_names();
   if (tables_ok)
-    for (int id : battle_ids) party.push_back(game::party_member_from_state(tables, flow_ready ? flow.game_state() : world.game_state(), id,
-                                                                                       flow_ready ? &flow.machine().custom_names() : nullptr));
+    for (int id : battle_ids) party.push_back(game::party_member_from_state(tables, flow_ready ? flow.game_state() : world.game_state(), id, &names));
   game::BattleView::StartOptions& bopt = battle_args.bopt;
   bopt.flags = rq.flags;
   // An id > 0x1FF plays the stage's 'boss' intro.
@@ -51,7 +53,7 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
     std::vector<int> ids;
     for (const battle::PartyMember& member : party) ids.push_back(member.char_id);
     const ui::GameState& gstate = flow_ready ? flow.game_state() : world.game_state();
-    game::BattleSetup setup = game::battle_setup(tables, gstate, ids, growth_progress, flow_ready ? &flow.machine().custom_names() : nullptr);
+    game::BattleSetup setup = game::battle_setup(tables, gstate, ids, growth_progress, &names);
     bopt.ng_plus = setup.ng_plus;
     bopt.growth = setup.growth;
     bopt.bench = std::move(setup.bench);
@@ -59,6 +61,12 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
     bopt.piggy_bank = world.vm().var(0x176);
     // The last Grand Slam picks; only a monster-party scene uses them.
     bopt.monster_party = world.monster_party();
+    // The Lynx duel's room keeps the party member the third enemy becomes in this variable.
+    bopt.duel_third = world.vm().var(0x1C8);
+    if (battle_args.scene == 0x1DD) {
+      bopt.duel_names = game::duel_names(gstate, names);
+      if (const int relief = gstate.slot.head[ui::kReliefHead]; relief != 0xFF) bopt.duel_relief = relief;
+    }
   }
   battle_args.party = std::move(party);
   return battle_args;

@@ -2,3 +2,7 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_hebi_init_load_wave = 0x801C5F0C;  # function: Init: loads a wave data file for the summon
+fx_hebi_tick_finish_wave = 0x801C5F7C;  # function: Tick: when the wave file read ends, uploads it and starts the main sequence
+fx_hebi_dispatch_op = 0x801C5E04;  # function: Overlay dispatcher; op 0x100 kills an emitter by name, op 0x101 closes the pack and starts the party model reload
+fx_hebi_kill_emitter = 0x801C60A4;  # function: Stops an emitter and expires its live objects on the next tick
+fx_hebi_exit = 0x801C616C;  # function: Exit: removes the debug label

@@ -73,6 +73,8 @@ class SequencePlayer {
   void stop(std::string_view name);
   // D7 "0000": unlinks every task, 'loop' included, and ends the screen shake.
   void stop_all();
+  // The same for an op running inside tick(): the tasks go when the running task's pass ends.
+  void stop_all_after_pass();
 
   // One 60 Hz tick.
   void tick();

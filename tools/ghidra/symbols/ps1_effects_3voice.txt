@@ -1,0 +1,7 @@
+# PS1 project symbol list: effect overlay 3voice.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_3voice_dispatch = 0x801C5E04;  # function: Overlay entry; op 0x100 starts a tagged sequence bound to an acting-list entry
+fx_3voice_init = 0x801C5F00;  # function: Init for Hi-Ho Chorus: registers the caster-change label and runs the main clip on every caster
+fx_3voice_tick = 0x801C5F90;  # function: Empty per-tick handler
+fx_3voice_exit = 0x801C5F98;  # function: Exit: unregisters the caster-change label

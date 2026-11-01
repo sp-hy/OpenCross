@@ -6,8 +6,11 @@
 //   38super  Ultranova   op 0x100 (per-target task)
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 
+#include "game/effects/bespoke/bespoke_util.h"
+#include "game/effects/bespoke/mesh_tech.h"
 #include "game/effects/bespoke/model_draw.h"
 #include "game/effects/bespoke/overlay_base.h"
 #include "game/effects/fx_math.h"
@@ -25,7 +28,7 @@ s16 s16v(float value) { return static_cast<s16>(std::lround(value)); }
 // Copy: part flag bit 1 (semi-transparent) with tpage ABR 1 (B + F).
 class Get44 : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x180) {
       mode_ = 0x180;
       speed_ = arg(args, count, 8);
@@ -39,7 +42,10 @@ class Get44 : public OverlayFx {
     } else if (op == 0x182) {
       mode_ = 0x182;
       duration_ = arg(args, count, 4);
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* victim = target(0);
@@ -88,7 +94,7 @@ class Infe45 : public OverlayFx {
     if (const FxModel* victim = target(0))
       for (int k = 0; k < 3; ++k) pivot_[k] = static_cast<int>(victim->pos[static_cast<size_t>(k)]);
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     FxModel* victim = target(0);
     if (op == 0x180) {
       mode_ = 0x180;
@@ -111,7 +117,10 @@ class Infe45 : public OverlayFx {
         run_script(victim, "dead", 0x80, 7);
       }
       mode_ = 0x182;
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* victim = target(0);
@@ -153,14 +162,15 @@ class Infe45 : public OverlayFx {
 // that sweeps outward from the centre and ends at C when t = dur.
 class Super38 : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100) return false;
     for (int i = 0; i < target_count(); ++i) {
       auto task = std::make_shared<Task>();
       task->model = target(i);
       task->dur = arg(args, count, 4);
       add_task([task] { return step(*task); });
     }
+    return true;
   }
 
  private:
@@ -228,7 +238,7 @@ class Super38 : public OverlayFx {
 // (X, Z) turned about y by a = t' << 4: x' = Z sin a + X cos a, z' = Z cos a - X sin a (>> 12 each). Everything spirals into (0, -200, 0).
 class Black46 : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     (void)args;
     (void)count;
     if (op == 0x180) {
@@ -238,7 +248,10 @@ class Black46 : public OverlayFx {
     } else if (op == 0x182) {
       on_ = false;
       tick_ = 0;
+    } else {
+      return op == 0x181;
     }
+    return true;
   }
   void frame() override {
     if (!ctx_.models) return;
@@ -295,67 +308,91 @@ class Black46 : public OverlayFx {
 
 // cook / swordbox (byte-identical but for labels): the 'spot' emitter's op-0x48 callback replaces its draw and stores the
 // particle's position as the centre C. 0x100 (dur @+4, K @+8): target 0 is re-skinned and drawn by the overlay (stock draw hidden) while
-// t <= dur: H = -height, h2 = H / 2, a1 = H + h2, thr = a1 t / dur - a1 - y_M + h2; every skinned vertex with y < thr: tau = (y + H + y_M) dur
-// / a1, ang = (t - tau) 1024 / (dur - tau), v += (v - C) rcos(ang + 0x400) / 4096 and y += rcos(2 ang + 0x400) K / 4096 - the target is sucked
-// into C from the feet up with a bulge. At t > dur the model is put at C and stays hidden. 0x101 = the
-// NEGAPOSI screen negative (band_wipe.cpp; not presented in battle).
-class Vacuum : public OverlayFx {
+// t <= dur: H = the model's height (y up is negative, so H > 0), h2 = H / 2, a1 = H + h2, thr = a1 t / dur - a1 + y_M + h2; every skinned vertex with
+// y < thr: tau = (y + H + y_M) dur / a1, ang = (t - tau) 1024 / (dur - tau), v += (v - C) rcos(ang + 0x400) / 4096 and y += rcos(2 ang + 0x400) K / 4096 -
+// the front falls from the head past the feet and the target is sucked into C behind it, with a bulge. At t > dur the model is put at C and stays hidden until its reaction script shows it and jumps it home. 0x101 = the
+// NEGAPOSI screen negative for u16 @+4 ticks. The deformed model goes through the stock draw, so its env-mapped and semi-transparent parts stay.
+class Vacuum : public MeshTech {
  protected:
   void init() override {
     if (!em()) return;
     em()->set_object_hook("spot", [this](EmitterSystem::ObjectRef& object) {
       for (int k = 0; k < 3; ++k) centre_[k] = static_cast<s16>(object.pos[k] >> 16);
     }, true);
-    em()->set_draw_suppressed("spot", true);
+    em()->set_draw_suppressed("spot", true);  // cook's spot is a mesh
+    em()->set_draw_dropped("spot", true);     // swordbox's is a sprite
   }
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100) return;
+  bool command(int op, const int* args, int count) override {
+    if (op == 0x101) nega_.start(arg(args, count, 4));
+    if (op != 0x100) return op == 0x101;
     FxModel* victim = target(0);
-    if (!victim) return;
+    if (!victim) return true;
     auto task = std::make_shared<Task>();
     task->model = victim;
     task->dur = std::max(1, arg(args, count, 4));
     task->bulge = arg(args, count, 8);
-    task->neg_height = -static_cast<int>(victim->height);
+    task->height = static_cast<int>(victim->height);
     task->centre = centre_;
+    task_ = task;
     add_task([task] { return task->step(); });
+    return true;
   }
+
+  void frame() override { nega_.tick(); }
+  void draw(std::vector<FxPrim>& out) const override {
+    nega_.draw(out);
+    if (!task_ || !task_->deform) return;
+    ModelDrawSpec spec;
+    spec.mask_part_flags = false;
+    spec.tri_far_z = true;
+    spec.env_uv = ModelDrawSpec::EnvUv::Half;
+    spec.env_tpage = 0x95;
+    spec.env_clut = 0x3BC0;
+    spec.face_hook = [this](DrawVert* corners, int count, int, int, int) {
+      for (int k = 0; k < count; ++k) task_->deform(corners[k]);
+      return true;
+    };
+    u32 order = 0;
+    draw_model(task_->model, spec, out, order);
+  }
+  bool done() const override { return OverlayFx::done() && !nega_.active(); }
 
  private:
   struct Task {
     FxModel* model = nullptr;
-    int tick = 0, dur = 1, bulge = 0, neg_height = 0;
+    int tick = 0, dur = 1, bulge = 0, height = 0;
     const int* centre = nullptr;
+    std::function<void(DrawVert&)> deform;
     bool step() {
       tick += 1;
-      model->copies.clear();
       if (dur < tick) {
+        deform = nullptr;
         model->pos = {static_cast<float>(centre[0]), static_cast<float>(centre[1]), static_cast<float>(centre[2])};
-        model->steer = true;
+        model->release = true;
         model->hidden = true;
         return false;
       }
-      const int half_height = neg_height / 2, a1 = neg_height + half_height, my = static_cast<int>(model->pos[1]);
-      const int thr = trunc_div(a1 * tick, dur) - a1 - my + half_height;
-      const int tt = tick, duration = dur, bulge_k = bulge, neg_height_k = neg_height, cx = centre[0], cy = centre[1], cz = centre[2];
-      FxModel::Copy copy;
-      copy.deform = [=](Vec3& vertex) {
-        const int x = s16v(vertex[0]), y = s16v(vertex[1]), z = s16v(vertex[2]);
+      const int half_height = height / 2, a1 = height + half_height, my = static_cast<int>(model->pos[1]);
+      const int thr = trunc_div(a1 * tick, dur) - a1 + my + half_height;
+      const int tt = tick, duration = dur, bulge_k = bulge, model_height = height, cx = centre[0], cy = centre[1], cz = centre[2];
+      deform = [=](DrawVert& vertex) {
+        const int x = vertex.x, y = vertex.y, z = vertex.z;
         if (y >= thr) return;
-        const int tau = trunc_div((y + neg_height_k + my) * duration, a1);
+        const int tau = trunc_div((y + model_height + my) * duration, a1);
         if (duration - tau == 0) return;
         const int ang = trunc_div((tt - tau) * 1024, duration - tau);
         const int c1 = rcos(ang + 0x400);
-        vertex = {static_cast<float>(static_cast<s16>(x + trunc_div((x - cx) * c1, 4096))),
-                  static_cast<float>(static_cast<s16>(y + trunc_div((y - cy) * c1, 4096) + trunc_div(rcos(2 * ang + 0x400) * bulge_k, 4096))),
-                  static_cast<float>(static_cast<s16>(z + trunc_div((z - cz) * c1, 4096)))};
+        vertex.x = static_cast<s16>(x + trunc_div((x - cx) * c1, 4096));
+        vertex.y = static_cast<s16>(y + trunc_div((y - cy) * c1, 4096) + trunc_div(rcos(2 * ang + 0x400) * bulge_k, 4096));
+        vertex.z = static_cast<s16>(z + trunc_div((z - cz) * c1, 4096));
       };
-      model->copies.push_back(std::move(copy));
       model->hidden = true;
       return true;
     }
   };
   int centre_[3] = {0, 0, 0};
+  std::shared_ptr<Task> task_;
+  util::NegativeStrip nega_;
 };
 
 }  // namespace

@@ -11,6 +11,8 @@
 
 #include "data/tables.h"
 #include "game/battle/battle_fx.h"
+#include "game/battle/battle_model_cache.h"
+#include "game/effects/bespoke/bespoke.h"
 #include "import/battle_stage.h"
 #include "import/container.h"
 #include "platform/paths.h"
@@ -45,7 +47,28 @@ static int check_lenz(vfs::Vfs& files) {
   return bad;
 }
 
+// 3voice op 0x100: the operand's tag starts on the named acting-list entry; a zero tag starts nothing.
+static int check_3voice_start() {
+  effects::FxContext ctx;
+  std::string started;
+  int caster = -1;
+  ctx.hooks.start_for_caster = [&](std::string_view name, int entry) {
+    started = name;
+    caster = entry;
+  };
+  auto overlay = effects::BespokeRegistry::instance().create("3voice", ctx);
+  if (!overlay) { std::printf("FAIL 3voice: no overlay\n"); return 1; }
+  const int none[5] = {0, 0, 0, 0, 2};
+  overlay->command(0x100, none, 5);
+  if (!started.empty()) { std::printf("FAIL 3voice: a zero tag started %s\n", started.c_str()); return 1; }
+  const int shut[5] = {0, 0, 'h' << 8 | 's', 't' << 8 | 'u', 2};
+  overlay->command(0x100, shut, 5);
+  if (started != "shut" || caster != 2) { std::printf("FAIL 3voice: started '%s' on %d\n", started.c_str(), caster); return 1; }
+  return 0;
+}
+
 int main() {
+  if (check_3voice_start()) return 1;
   std::string gd = std::getenv("OPENCROSS_GAMEDIR") ? std::getenv("OPENCROSS_GAMEDIR") : "";
   const auto dir = platform::find_game_dir(gd);
   vfs::Vfs files;
@@ -60,6 +83,22 @@ int main() {
     return 1;
   }
   if (check_lenz(files)) return 1;
+  {
+    // A party member's model follows its kind byte: Serge in Lynx's body is the sel_yam2 model.
+    battle::Unit body;
+    body.pc = true;
+    body.src_id = 0;
+    body.kind = 0x31;
+    if (ModelCache::unit_model_stem(files, &tables, body).find("sel_yam2") == std::string::npos) {
+      std::printf("FAIL kind byte: Serge in Lynx's body has the wrong model\n");
+      return 1;
+    }
+    body.kind = 0;
+    if (ModelCache::unit_model_stem(files, &tables, body).find("selju") == std::string::npos) {
+      std::printf("FAIL kind byte: Serge's own body has the wrong model\n");
+      return 1;
+    }
+  }
   BattleFxLibrary lib;
   if (!lib.init(files)) {
     std::printf("FAIL: slot table\n");

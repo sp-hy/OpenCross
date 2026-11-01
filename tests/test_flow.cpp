@@ -1,6 +1,7 @@
 // Checks for the title / name entry / flow logic: name encoding round trip (game font <-> Unicode, save record), name rules,
 // the keyboard pages, the NameEntry cursor / buffer / validation and the FlowMachine state transitions.
 #include <cstdio>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -274,6 +275,22 @@ void test_flow() {
     CHECK(game::party_member_from_state(tb, pg, 43).growth_col == 5);
     pg.slot.chars[43].model_id = 0x2B;
     CHECK(game::party_member_from_state(tb, pg, 43).growth_col == 3);
+    // Serge in Lynx's body: the battle name is Lynx's in the game's language, the Dopple list keeps the typed name; another character in the
+    // same body keeps its own name.
+    import::LangTables lang_tables;
+    lang_tables.set_table("sysmes", "key\ten\tfr\n0x010000\tSerge\tSerge-fr\n0x010001\tKid\tKid-fr\n0x010031\tLynx\tLynx-fr\n");
+    const std::map<int, std::u32string> typed{{0, U"Hero"}};
+    const data::CharNames names{&typed, &lang_tables, import::Lang::Fr};
+    pg.slot.chars[0].max_hp = pg.slot.chars[1].max_hp = 100;
+    pg.slot.chars[0].model_id = pg.slot.chars[1].model_id = 0x31;
+    const battle::PartyMember lynx = game::party_member_from_state(tb, pg, 0, &names);
+    CHECK(lynx.name == "Lynx-fr" && lynx.own_name == "Hero");
+    const battle::PartyMember kid = game::party_member_from_state(tb, pg, 1, &names);
+    CHECK(kid.name == "Kid-fr" && kid.own_name == "Kid-fr");
+    pg.slot.chars[0].model_id = 0;
+    CHECK(game::party_member_from_state(tb, pg, 0, &names).name == "Hero");
+    const std::vector<std::string> duel = game::duel_names(pg, names);
+    CHECK(duel[0] == "Hero" && duel[1] == "Kid-fr" && duel[0x31] == "Lynx-fr" && duel[0x2C].empty());
   }
   // The title's vibration page: New Game -> page 1 -> Off -> the new game starts with options bit 0x400 clear; On sets it.
   {
@@ -416,6 +433,9 @@ void test_disc_index() {
   d2[368 + 3 * 460] = "c:/work/cdrom/dummy/dummy.dat";
   d1[6035 + 1] = "c:/movie/title.stv";
   d1[6035 + 19] = "c:/movie/newop.stv";
+  d1[2679 + 414] = "c:/work/cdrom/battle/event/evt414.pac";
+  d1[2679 + 424] = "c:/work/cdrom/battle/event/evt414.pac";
+  d1[2679 + 22] = "c:/work/cdrom/battle/event/evt0000.pac";
   d2[6035] = "c:/movie/final.stv";
   d2[6035 + 10] = "c:/movie/ending_s.stv";
   game::DiscIndex idx;
@@ -440,6 +460,9 @@ void test_disc_index() {
     game::DiscIndex::movie_range(2, 12, range_start, range_end);
     CHECK(range_start == 1 && range_end == 0);
   }
+  // A battle script goes by the record's file, not by the scene number; no record = the template.
+  CHECK(idx.battle_script(1, 414) == "cdrom/battle/event/evt414.pac" && idx.battle_script(1, 424) == "cdrom/battle/event/evt414.pac");
+  CHECK(idx.battle_script(1, 22) == "cdrom/battle/event/evt0000.pac" && idx.battle_script(1, 512) == "cdrom/battle/event/evt0000.pac");
   // A disc-1 movie is no movie on disc 2.
   CHECK(idx.movie_name_of(2, 19).empty());
 }

@@ -49,13 +49,15 @@ class LineRing : public MeshTech {
   void init() override {
     rng_.state = ctx_.seed ? ctx_.seed : 1;
     if (params_.kind == Ring::Oomono2) {
-      // The loader task starts 'line' once its files are in: here on the first frame (the module is live then).
+      // The loader tail runs the pack's `main` atk script on every acting model, which also lands the hit (its React), then starts 'line'.
+      for (int i = 0; ctx_.models && i < static_cast<int>(ctx_.models->casters.size()); ++i) start_caster_anim(caster(i));
+      // 'line' waits for the first frame: the module's sequence player is live then.
       pending_line_ = true;
     } else {
       start_caster_anim(caster(0));
     }
   }
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     if (std::getenv("OC_LINE_DBG")) std::fprintf(stderr, "LINEOP %X a4=%d a8=%d aA=%d aC=%d aE=%d a10=%d\n", op, arg(args, arg_count, 4), arg(args, arg_count, 8), arg(args, arg_count, 0xA), arg(args, arg_count, 0xC), arg(args, arg_count, 0xE), arg(args, arg_count, 0x10));
     if (op == 0x180) {
       const int group = std::clamp(arg(args, arg_count, 8), 0, 1);
@@ -100,16 +102,15 @@ class LineRing : public MeshTech {
           }
         }
       }
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     // Starts 'line' (and 'mis2' on a miss); without a sequence player there is nothing to start.
     if (pending_line_) {
       pending_line_ = false;
-      // The loader tail: once the files are in, the pack's main / own sequences start, then EVERY acting-list model
-      // runs the pack's `main` atk script (SetAnim 0x80 / 0x81 / React / the `cama` rumble ...), then 'line'.
-      // Without it the caster would stay in its ready pose.
-      for (int i = 0; ctx_.models && i < static_cast<int>(ctx_.models->casters.size()); ++i) start_caster_anim(caster(i));
       if (ctx_.sequences) {
         ctx_.sequences->start("line");
         const FxModel* actor = caster(0);

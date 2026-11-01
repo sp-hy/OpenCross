@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "data/char_name.h"
 #include "platform/keymap.h"
 #include "ui/lowres.h"
 #include "ui/menu/main_menu.h"
@@ -206,6 +207,7 @@ struct MainMenu::Impl {
   };
   std::vector<AuditBox> audit_boxes;
   std::map<int, std::u32string> name_cache;
+  const std::map<int, std::u32string>* custom_names = nullptr;
 
   // Portrait folder of the faces, slot icons and playtim portraits: original art = 1999, HD art = the [Game] Portraits choice.
   std::string face_set() const { return mode == ArtMode::Hd ? portrait_set : std::string("1999"); }
@@ -216,7 +218,9 @@ struct MainMenu::Impl {
   void select_fonts();
   void shutdown();
   std::string menu_str(u32 addr, const char* fallback);
+  // char_name: a party member's name in the open game. default_char_name: the language's name of the id (the save lists: another game's party).
   std::u32string char_name(int id);
+  std::u32string default_char_name(int id);
   std::u32string item_name(int id);
   std::u32string element_name(int id);
   std::u32string key_item_name(int id);
@@ -286,8 +290,10 @@ struct MainMenu::Impl {
   void update_roster(const Nav& nav);
   void update_status(const Nav& nav);
   // Menu models run to 0x32 (the weapon packs to 0x31).
-  static constexpr int kLastMenuModel = 0x32, kLastWeaponModel = 0x31;
-  int model_number(int character, int last) const;
+  static constexpr int kLastMenuModel = 0x32;
+  // The body of a character (data::character_body) and what it picks up to `last` (data::menu_form).
+  int body(int character) const;
+  int model_number(int character, int last = data::kLastFormBody) const;
   void restart_model();
   void step_model_camera(const Nav& nav, int ticks);
   void update_choice(const Nav& nav);
@@ -371,7 +377,7 @@ struct MainMenu::Impl {
   void Digits(float x, float y, const std::string& number, float advance, u32 colour = kText);
   u32 ps1_colour(u32 bgr, int a = 255) const;
   void message(float x, float y);
-  const Tex* portrait(int character);
+  const Tex* portrait(int form);
   void build();
 
   const char* S6(const Str6& strings) const { return strings.by_lang[static_cast<int>(lang)]; }

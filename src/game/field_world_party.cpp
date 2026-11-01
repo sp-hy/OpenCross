@@ -9,6 +9,7 @@
 #include <functional>
 
 #include "core/log.h"
+#include "data/char_name.h"
 #include "game/field_world_internal.h"
 #include "game/new_game_plus.h"
 
@@ -511,26 +512,13 @@ void FieldWorld::set_custom_names(const std::map<int, std::u32string>* names) {
   install_name_hooks();
 }
 
-// {PARTYn%} (control 0x12) names the character in party slot n: slot -> character id (GameState) ->
-// the typed name, else the character's default name. The text layer's own fallback would read the slot number as a character id.
+// {PARTYn%} (control 0x12) names the character in party slot n: slot -> character id (GameState) -> the field's naming rule. The text
+// layer's own fallback would read the slot number as a character id. A character's name token ({SERGE%}) bypasses the rule.
 void FieldWorld::install_name_hooks() {
-  // A save record of a never-renamed character holds the JP default name in game-font codes (kana); outside the JP language the
-  // font cannot show it (blank glyphs: "Miss    , I cannot", an empty speaker line, empty choice lines), so it counts as unset and
-  // the sysmes default of the language applies. Blank / undecodable records are unset in every language.
-  auto custom = [this](int id) -> const std::u32string* {
-    if (!custom_names_) return nullptr;
-    auto it = custom_names_->find(id);
-    if (it == custom_names_->end() || it->second.empty()) return nullptr;
-    const std::u32string& name = it->second;
-    if (name.find_first_not_of(U"　 ") == std::u32string::npos) return nullptr;
-    if (lang_ != import::Lang::Jp)
-      for (char32_t ch : name)
-        if (ch >= 0x3000) return nullptr;
-    return &name;
-  };
-  auto char_name = [this, custom](int id) -> std::u32string {
-    if (const std::u32string* name = custom(id)) return *name;
-    return dialogue_.tables().default_name(id, lang_);
+  auto names = [this] { return data::CharNames{custom_names_, &dialogue_.tables(), lang_}; };
+  auto char_name = [this, names](int id) -> std::u32string {
+    const int body = data::character_body(model_byte(id), [this](int var) { return vm_.var(static_cast<u16>(var)); });
+    return data::character_name(id, body, data::NameContext::Field, (vm_.global_flags() & script::gflag::kKeepCustomName) != 0, names(), false);
   };
   auto wire = [&](ui::DialogueDemo& dialogue) {
     dialogue.char_name = char_name;
@@ -538,7 +526,7 @@ void FieldWorld::install_name_hooks() {
       if (slot < 0 || slot >= static_cast<int>(party_chars_.size())) return {};
       return char_name(party_chars_[static_cast<size_t>(slot)]);
     };
-    dialogue.speaker_name = [char_name](int speaker) -> std::u32string { return char_name(speaker); };
+    dialogue.speaker_name = [names](int speaker) -> std::u32string { return data::own_name(speaker, names(), false); };
     dialogue.script_var = [this](int var) -> int { return vm_.var(static_cast<u16>(var)); };
     // script_set serves {fset(n)} (variable 0x22).
     dialogue.script_set = [this](int var, int value) { vm_.set_var(static_cast<u16>(var), value); };

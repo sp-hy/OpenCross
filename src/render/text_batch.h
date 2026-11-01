@@ -67,6 +67,8 @@ class TextBatch {
 
   // Pen advance of one glyph, line pitch, and the widest line of a LF separated string (pixels at `scale`).
   float advance(FaceId face, char32_t ch, float scale) const;
+  // The sprite font's measure of one character (import::SpriteFont::measure); 0 for a bitmap face.
+  float glyph_measure(FaceId face, char32_t ch) const;
   float line_height(FaceId face, float scale) const;
   float measure(FaceId face, std::u32string_view text, float scale) const;
 

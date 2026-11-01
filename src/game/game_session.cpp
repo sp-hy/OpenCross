@@ -85,8 +85,14 @@ std::string utf8_from_u32(std::u32string_view text) {
 
 int session_star(const ui::GameState& gs) { return std::min<int>(gs.slot.head[kStarOff], 99); }
 
+namespace {
+int record_body(const ui::GameState& gs, int char_id) {
+  return data::character_body(gs.slot.chars[static_cast<size_t>(char_id)].model_id, [&](int var) { return gs.slot.var(var); });
+}
+}  // namespace
+
 battle::PartyMember party_member_from_state(const data::GameTables& tables, const ui::GameState& gs, int char_id,
-                                            const std::map<int, std::u32string>* names) {
+                                            const data::CharNames* names) {
   const int star = session_star(gs);
   // The record set of the state: the dream (char20.bin) until FE 3F, else char.bin (SaveSlot::dream_records, game/new_game.h).
   const bool dream = gs.slot.dream_records && tables.char_sets.count("char20") != 0;
@@ -131,15 +137,26 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
       for (size_t k = 1; k < 7; ++k) member.pending[k] = battle::next_pending_stat(rng, member.stat[k], member.lv99[k], star);
     }
   }
-  if (names) {
-    auto it = names->find(char_id);
-    if (it != names->end() && !it->second.empty()) member.name = utf8_from_u32(it->second);
+  const int body = record_body(gs, char_id);
+  if (names && names->tables) {
+    member.own_name = utf8_from_u32(data::own_name(char_id, *names));
+    member.name = utf8_from_u32(data::character_name(char_id, body, data::NameContext::Menu, false, *names));
+  } else if (data::shows_lynx(char_id, body, data::NameContext::Menu, false)) {
+    member.name = tables.char_name(data::kLynxBody);
   }
   return member;
 }
 
+std::vector<std::string> duel_names(const ui::GameState& gs, const data::CharNames& names) {
+  std::vector<std::string> out(data::kLynxBody + 1);
+  for (int id = 0; id <= data::kLastNamedChar; ++id)
+    out[static_cast<size_t>(id)] = utf8_from_u32(data::character_name(id, record_body(gs, id), data::NameContext::Menu, false, names));
+  if (names.tables) out[data::kLynxBody] = utf8_from_u32(names.tables->default_name(data::kLynxBody, names.lang));
+  return out;
+}
+
 BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs, const std::vector<int>& party_ids, int progress,
-                         const std::map<int, std::u32string>* names) {
+                         const data::CharNames* names) {
   BattleSetup out;
   out.ng_plus = gs.slot.new_game_plus();
   out.growth.star = session_star(gs);

@@ -394,16 +394,25 @@ bool BattleView::fx_warp_ensure(u32 w, u32 h) {
 }
 
 // The overlay's camera cross-fade: a new serial cuts the second camera to key 0 of its shot (in the battle camera's bank); it then steps once per
-// tick. `promote` hands the shot to the battle camera at the second camera's progress (the first camera task ends, the second is the head of the
-// list now), `stop` ends the second camera.
+// tick. `promote` hands the shot to the battle camera at the second camera's progress (the first camera task ends, the next one in the list is
+// the head now: a second camera replaced without a stop, else the running one), `stop` ends the second camera.
 void BattleView::fx_cross_tick() {
   effects::FxModels* ms = fx_ ? fx_->bespoke_models() : nullptr;
   if (!ms) {
-    fx_cross_.on = false;
+    fx_cross_.on = fx_cross_.next_on = false;
     return;
   }
   effects::FxModels::CrossView& view = ms->cross;
+  // A stop that lands in the tick of a replacement belongs to the camera being replaced.
+  bool replaced = false;
   if (view.serial != fx_cross_.serial) {
+    if (fx_cross_.on) {
+      replaced = true;
+      fx_cross_.next = fx_cross_.cam;
+      fx_cross_.next_shot = fx_cross_.shot;
+      fx_cross_.next_ticks = fx_cross_.ticks;
+      fx_cross_.next_on = true;
+    }
     fx_cross_.serial = view.serial;
     fx_cross_.cam = BattleCamera{};
     fx_cross_.cam.set_bank(camera_.bank());
@@ -417,17 +426,28 @@ void BattleView::fx_cross_tick() {
     fx_cross_.cam.tick(events);
     ++fx_cross_.ticks;
   }
+  if (fx_cross_.next_on) {
+    CamEvents events;
+    fx_cross_.next.tick(events);
+    ++fx_cross_.next_ticks;
+  }
   if (view.promote) {
     view.promote = false;
-    if (fx_cross_.on) {
+    if (fx_cross_.next_on) {
       camera_.kill_shot();
-      if (camera_.select(fx_cross_.shot)) camera_.credit_ticks(fx_cross_.ticks);
+      if (camera_.select(fx_cross_.next_shot)) camera_.credit_ticks(fx_cross_.next_ticks);
+      fx_cross_.next_on = false;
+    } else {
+      if (fx_cross_.on) {
+        camera_.kill_shot();
+        if (camera_.select(fx_cross_.shot)) camera_.credit_ticks(fx_cross_.ticks);
+      }
+      fx_cross_.on = false;
     }
-    fx_cross_.on = false;
   }
   if (view.stop) {
     view.stop = false;
-    fx_cross_.on = false;
+    (replaced ? fx_cross_.next_on : fx_cross_.on) = false;
   }
   fx_cross_.alpha = view.alpha;
   fx_cross_.fill = view.fill;
@@ -538,15 +558,16 @@ void BattleView::fx_warp_end(const render::Frame& frame, const render::Letterbox
   const render::Rect scissor{static_cast<int32_t>(x0), static_cast<int32_t>(y0),
                              static_cast<u32>(std::min(fw - x0, std::round(lb.width()))), static_cast<u32>(std::min(fh - y0, std::round(kBufferRows * lb.scale_y)))};
   const float qx[4] = {0, fw, 0, fw}, qy[4] = {0, 0, fh, fh}, qu[4] = {0, 1, 0, 1}, qv[4] = {0, 0, 1, 1};
-  // Feed-back: this tick's finished picture plus the strips go into fx_acc_rt_[cur]; the strips sample the previous tick's output (the scene
-  // itself on the very first step). Then the target is copied to the frame.
+  // Feed-back: this tick's finished picture plus the strips go into fx_acc_rt_[cur]; the strips sample the previous game frame's output (the
+  // scene itself on the very first step). Then the target is copied to the frame.
   const bool acc = fx_acc_ensure(frame);
   render::TexRef src = fx_warp_set_;
   render::Frame af = frame;
   if (acc) {
     if (fx_acc_tick_ != tick_count_) {
-      // A pass every tick; inside an update (4 ticks) the anchor (previous update's output) stays and the other target is rewritten.
-      if (fx_acc_adv_ || !rde_hand_ || fx_acc_tick_ < 0) {
+      // One pass per game tick; in the hand-over the anchor (previous update's output) stays for the 4 ticks of an update and the other target is
+      // rewritten, so the live scene keeps moving while the feed-back advances at the update's rate.
+      if (!rde_hand_ || fx_acc_adv_ || fx_acc_tick_ < 0) {
         fx_acc_cur_ = 1 - fx_acc_cur_;
         fx_acc_have_ = fx_acc_tick_ >= 0;
       }
@@ -837,6 +858,7 @@ void BattleView::fx_tick() {
     ms->skin = [this](int unit, effects::FxSkinnedModel& out) { return fx_skin_unit(unit, out); };
     ms->attach = [this](int unit, int point, effects::Vec3& out) { return fx_attach_unit(unit, point, out); };
     ms->pseudo_attach = [this](int point, effects::Vec3& out) { return pa_attach(point, out); };
+    ms->model_read_ticks = [this](int unit) { return fx_model_read_ticks(unit); };
     ms->skin_pack = [this](effects::FxSkinnedModel& out) { return fx_skin_pack(out); };
     // FxModels::PackDrive requests are consumed here (fx_pack_drive_tick).
     ms->pack_drive.host = true;

@@ -419,6 +419,8 @@ int ocbattleseq_main(int argc, char** argv) {
   if (i < argc) ctx.hit_code = std::atoi(argv[i++]);
   if (i < argc) ctx.dead = std::atoi(argv[i++]) != 0;
   ctx.clip_frames = [](int) { return 8; };
+  // OC_SEQ_MONSTER: the script runs on an enemy (ops 0x63 / 0x67).
+  if (std::getenv("OC_SEQ_MONSTER")) ctx.monster = true, ctx.model_num = 64;
   const bool use_atk = entry < 0 || (entry == 0 && variant == 7) || (entry == 0 && variant == 0 && !has_s5);
   const game::bseq::Table& table = use_atk ? atk : s5;
   game::bseq::Vm vm;

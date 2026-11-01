@@ -67,6 +67,9 @@ struct PackRow {
   std::map<int, u32> unpresented;
   std::map<int, u32> nonvisual;
   u32 private_ops = 0, private_unhandled = 0;
+  std::map<int, u32> private_ignored;
+  // Overlay-private ops the pack's sequences hold, run or not: op -> commands.
+  std::map<int, u32> private_list;
   u64 empty_sprite_quads = 0, quads_total = 0;
   u64 empty_tex_tris = 0, tex_tris = 0;
   u64 missing_part_inst = 0;
@@ -384,7 +387,10 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
   // op lengths for the 0x2A classification: the battle form is 16 bytes
   std::map<int, int> op_len;
   for (const auto& sq : pack->fx.sequences)
-    for (const auto& cmd : sq.cmds) op_len[cmd.op] = std::max(op_len[cmd.op], static_cast<int>(cmd.len));
+    for (const auto& cmd : sq.cmds) {
+      op_len[cmd.op] = std::max(op_len[cmd.op], static_cast<int>(cmd.len));
+      if (cmd.op >= 0x100) ++row.private_list[cmd.op];
+    }
   for (int op = 0; op < 0x100; ++op)
     if (const u32 hits = ss.op_hits[static_cast<size_t>(op)]; hits) {
       const auto op_class = BattleFxRun::op_class(op, op_len[op]);
@@ -393,6 +399,7 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
     }
   row.private_ops = run.private_ops();
   row.private_unhandled = run.private_ops_unhandled();
+  row.private_ignored = run.private_ops_ignored();
 }
 
 void classify(PackRow& row) {
@@ -693,7 +700,7 @@ int cmd_fx_audit(const data::GameTables& tables, const vfs::Vfs& game_fs, const 
     out << "rank,eid,prd,category,overlay,bespoke,bespoke_module,uses,elements,pc_refs,shop_refs,enemy_refs,player,seqs,emitters,sheets,mesh_parts,"
          "ticks,never_ends,first_draw,last_draw,max_quads,max_mesh_tris,max_bespoke_prims,max_live,spawned,emitter_starts,sprite_types,"
          "unresolved_sheets,missing_mesh_parts,weapon_mesh_objects,unresolved_in_data,empty_sprite_quads,quads,empty_tex_tris,tex_tris,non_finite,runaway,ops_not_presented,"
-         "ops_non_visual,private_ops,private_unhandled,generic_issues,bespoke_issues\n";
+         "ops_non_visual,private_ops,private_unhandled,generic_issues,bespoke_issues,private_list,private_ignored\n";
     int rank = 0;
     for (const PackRow& row : rows) {
       out << ++rank << ',' << row.eid << ',' << row.prd << ',' << row.category << ',' << row.overlay << ',' << row.bespoke_state << ',' << row.bespoke_module << ','
@@ -703,7 +710,7 @@ int cmd_fx_audit(const data::GameTables& tables, const vfs::Vfs& game_fs, const 
           << row.starts << ',' << types_str(row) << ',' << row.unresolved_sheets << ',' << row.missing_part_inst << ',' << row.weapon_inst << ','
           << joined(std::vector<std::string>(row.unresolved_data.begin(), row.unresolved_data.end()), " ") << ',' << row.empty_sprite_quads << ','
           << row.quads_total << ',' << row.empty_tex_tris << ',' << row.tex_tris << ',' << row.nonfinite << ',' << row.runaway << ',' << join_ops(row.unpresented)
-          << ',' << join_ops(row.nonvisual) << ',' << row.private_ops << ',' << row.private_unhandled << ',' << joined(row.issues, " ") << ',' << joined(row.bespoke_issues, " ") << '\n';
+          << ',' << join_ops(row.nonvisual) << ',' << row.private_ops << ',' << row.private_unhandled << ',' << joined(row.issues, " ") << ',' << joined(row.bespoke_issues, " ") << ',' << join_ops(row.private_list) << ',' << join_ops(row.private_ignored) << '\n';
     }
   }
 

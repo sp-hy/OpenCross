@@ -507,6 +507,12 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
   std::vector<effects::EmitterSystem::MeshInstance> live;
   em_->collect_meshes(view, alpha, live);
   warp_fn_ = nullptr;
+  const bool mark_warp_objects = static_cast<bool>(ground_.warp) && ground_.warp_quarter_add;
+  if (mark_warp_objects != warp_objects_marked_) {
+    for (const std::string& name : mark_warp_objects ? ground_.warp_emitters : marked_emitters_) em_->mark_mesh_objects(name, mark_warp_objects);
+    marked_emitters_ = mark_warp_objects ? ground_.warp_emitters : std::vector<std::string>{};
+    warp_objects_marked_ = mark_warp_objects;
+  }
   if (ground_.warp)
     warp_fn_ = [this](std::array<float, 3>& point) {
       effects::Vec3 warped{point[0], point[1], point[2]};
@@ -568,10 +574,11 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
       for (const auto& op : em_->header_def(static_cast<size_t>(mi.owner)).ops)
         if (op.op == 0x06)
           if (auto* flags = std::get_if<assets::FxFlags>(&op.arg)) in.depth_cue = (flags->flags >> 17) & 1;
-    if (ground_.warp && mi.sprite_type == 14 && mi.owner >= 0 && static_cast<size_t>(mi.owner) < em_->header_count() &&
+    if (ground_.warp && (!ground_.warp_quarter_add || mi.marked) && mi.sprite_type == 14 && mi.owner >= 0 && static_cast<size_t>(mi.owner) < em_->header_count() &&
         std::find(ground_.warp_emitters.begin(), ground_.warp_emitters.end(), em_->header_def(static_cast<size_t>(mi.owner)).name) !=
             ground_.warp_emitters.end()) {
       in.warp = &warp_fn_;
+      if (ground_.warp_quarter_add && in.blend != 0) in.blend = 4;
       for (size_t k = 0; k < 9; ++k) in.warp_view[k] = view.rot.m[k];
       for (size_t k = 0; k < 3; ++k) in.warp_view[9 + k] = view.trans[k];
     }

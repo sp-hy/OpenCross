@@ -31,6 +31,8 @@ struct SpriteFont {
   const SfGlyph* find(u32 ch) const;
   // Glyph for `ch`, else the default character's glyph, else nullptr.
   const SfGlyph* find_or_default(u32 ch) const;
+  // The file's measure of one character: the glyph box from its x offset, 0 for a blank (a white space with an empty box) or no glyph.
+  float measure(u32 ch) const;
   // One texel as 4 channels R,G,B,A (0..255, 4-bit channels are expanded with *17). False if outside the texture or the
   // format is unsupported.
   bool texel(u32 x, u32 y, u8 rgba[4]) const;

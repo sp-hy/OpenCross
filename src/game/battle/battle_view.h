@@ -46,6 +46,7 @@
 #include "game/battle/battle_fx.h"
 #include "game/battle/battle_fx_textures.h"
 #include "game/battle/cast_header.h"
+#include "game/disc_index.h"
 #include "game/effects/gpu_effects.h"
 #include "game/effects/light_extract.h"
 #include "render/particles.h"
@@ -93,6 +94,10 @@ class BattleView {
     int piggy_bank = 0;
     // The Grand Slam picks: monster records of the party slots in a monster-party scene (battle::BattleOptions::monster_party).
     std::array<int, 3> monster_party{-1, -1, -1};
+    // The Lynx duel: the character the third enemy becomes (battle::BattleOptions::duel_third).
+    int duel_third = -1;
+    std::vector<std::string> duel_names;
+    int duel_relief = -1;
     // The battle id word: an encounter id < 0x200, or scene + 0x200 for a scene started directly; -1 = scene + 0x200.
     int battle_id = -1;
     // The battlefield operand (stage bg_NN); -1: the scene record's default.
@@ -279,10 +284,11 @@ class BattleView {
     } turn;
     // The idle script was started with the guard flag.
     bool guard_shown = false;
-    // The running script is the spawn script (S5 entry 8, start_spawn): its fade-in is not cut by an idle restart; idle_owed = an idle
-    // restart arrived while it ran, done when it ends.
+    // The running script is the spawn script (S5 entry 8, start_spawn): its fade-in is not cut by an idle restart or the victory pose;
+    // idle_owed / victory_owed = one arrived while it ran, done when it ends.
     bool spawn = false;
     bool idle_owed = false;
+    bool victory_owed = false;
     // Elements the spawn script froze / set turning (battle-long tasks a cut script keeps).
     unsigned long long spawn_joints = 0;
     // PC weapon mesh (weapon pack part), drawn rigidly at attach point `weapon_attach`.
@@ -307,6 +313,13 @@ class BattleView {
     bool death_owed = false;
     // The KO is on screen (set by the hit that causes it).
     bool ko_shown = false;
+    // The KO came from a hit, not from a script writing the HP.
+    bool ko_hit = false;
+    // The killing hit ran the target's reaction script: that script owns the death (the dead branch of most reactions fades and hides the model,
+    // a reaction without that branch leaves the unit standing on its dead pose).
+    bool ko_reacted = false;
+    // Actions presented since a script wrote the HP to 0.
+    int zero_hp_actions = 0;
     // Hit flash 1 -> 0, and the enemy fade-out after the KO.
     float flash = 0, flash_prev = 0;
     float fade = 1, fade_prev = 1;
@@ -365,7 +378,7 @@ class BattleView {
   // setup
   std::shared_ptr<ModelHandle> load_model_for(const std::string& dir_stem) { return model_cache_.load_model_for(*vfs_, *meshes_, dir_stem); }
   void prefetch_unit_models();
-  std::shared_ptr<ModelHandle> load_weapon(int char_id, int part) { return model_cache_.load_weapon(*vfs_, *meshes_, char_id, part); }
+  std::shared_ptr<ModelHandle> load_weapon(int kind, int part) { return model_cache_.load_weapon(*vfs_, *meshes_, kind, part); }
   std::shared_ptr<ModelHandle> load_enemy_weapon(int model, int part) { return model_cache_.load_enemy_weapon(*vfs_, *meshes_, model, part); }
   int weapon_digit(const battle::Unit& unit) const { return ModelCache::weapon_digit(tables_, unit); }
   std::shared_ptr<ModelScripts> load_scripts_for(const std::string& dir_stem) { return model_cache_.load_scripts_for(*vfs_, &bank_, dir_stem); }
@@ -440,6 +453,7 @@ class BattleView {
   bool engaged_stance(int unit) const;
   // Model hidden, S5 entry 8 (the spawn script: part words, fade-in) instead of the idle.
   void start_spawn(int unit);
+  int fx_model_read_ticks(int unit) const;
   void start_reaction(int unit, const battle::ActionEvent& event);
   void on_script_event(int unit, const bseq::Event& event);
   // number false: the hit lands (HP, KO) without CallDamage's number / flash.
@@ -469,6 +483,7 @@ class BattleView {
   void face_toward(int unit, int target);
   void face_point(int unit, float x, float z);
   void face_cast_targets(bool turn_targets);
+  void face_group_cast();
   // The group facing of a cast (midpoint / origin) runs after the charge camera is selected (fx_charge_begin).
   bool face_pending_ = false;
   float face_px_ = 0, face_pz_ = 0;
@@ -709,6 +724,8 @@ class BattleView {
   void trail_eye_reset(int unit);
   // The hensin overlay's form phases.
   void fx_form_phase(int phase);
+  // An overlay writes a unit's idle-pose word; a unit at idle restarts its idle script.
+  void fx_set_pose(int unit, int pose);
   void build_result_ui();
   void auto_pick();
   void auto_chain();
@@ -894,6 +911,8 @@ class BattleView {
   // Pip's form change waiting for the tumaru overlay's swap op (or the action's end).
   int pending_form_ = -2, pending_form_unit_ = -1;
   int pending_evolve_unit_ = -1;
+  // The unit whose form swap the action's end shows again (the swap keeps it hidden behind the pack's stand-in figure); -1 none.
+  int form_show_unit_ = -1;
   // active_pc_ stands at engaged_target_ and picks hits from the percentage menu; engaged_after_cast_ = an element was cast from the
   // engaged spot: return afterwards; engage_arrive_ = the approach act is running.
   bool engaged_ = false;
@@ -919,6 +938,7 @@ class BattleView {
   battle::Command::Kind last_kind_ = battle::Command::Kind::Attack;
   // sysmes.txt (element descriptions), bound to the vfs in init().
   import::LangTables lang_tables_;
+  DiscIndex discs_;
   import::Lang lang_ = import::Lang::En;
   // Occupied cells of one grid level (row) of the acting PC, slot order.
   std::vector<int> level_slots(int level) const;
@@ -1220,14 +1240,16 @@ class BattleView {
   render::Frame fx_warp_frame_{};
   // An overlay's camera cross-fade (effects::FxModels::CrossView): `cam` is the second camera task; while `on` the scene is drawn twice, the
   // second time from `cam` into fx_cross_rt_, and composited (fx_cross_draw). `ticks` = ticks since its shot was cut to key 0.
+  // `next` = a second camera replaced before it stopped: it stays in the camera list behind the battle camera and takes over at the next promote.
   struct Cross {
-    BattleCamera cam;
-    std::string shot;
-    int serial = 0, ticks = 0, alpha = 0, fill = 0;
-    bool on = false;
+    BattleCamera cam, next;
+    std::string shot, next_shot;
+    int serial = 0, ticks = 0, next_ticks = 0, alpha = 0, fill = 0;
+    bool on = false, next_on = false;
   } fx_cross_;
   void fx_cross_tick();
   bool fx_cross_draw(const render::Frame& frame, const render::Letterbox& lb, bool sprites_resume);
+  void fx_show_living();
   // The full-screen tint of an overlay (effects::FxModels::Tint), over the finished picture.
   void fx_tint_draw(const render::Frame& frame, const render::Letterbox& lb);
   render::RenderTarget fx_cross_rt_;

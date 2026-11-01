@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <cwctype>
 
 #include "core/span_reader.h"
 
@@ -39,6 +40,12 @@ const SfGlyph* SpriteFont::find(u32 ch) const {
 const SfGlyph* SpriteFont::find_or_default(u32 ch) const {
   if (const SfGlyph* glyph = find(ch)) return glyph;
   return default_char ? find(default_char) : nullptr;
+}
+
+float SpriteFont::measure(u32 ch) const {
+  const SfGlyph* glyph = find_or_default(ch);
+  if (!glyph || (std::iswspace(static_cast<wint_t>(ch)) && glyph->width() <= 1 && glyph->height() <= 1)) return 0.0f;
+  return std::max(0.0f, glyph->x_offset) + static_cast<float>(glyph->width());
 }
 
 bool SpriteFont::texel(u32 x, u32 y, u8 out[4]) const {

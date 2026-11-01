@@ -92,21 +92,31 @@ def extract_ref(refdir):
             t["fog"] = {"near": st.u16(0x8008DBB8), "far": st.u16(0x8008DBB2), "rgb": [st.u8(0x8008DBB4), st.u8(0x8008DBB5), st.u8(0x8008DBB6)], "on": st.u8(0x800721E0)}
             t["warp"] = {"on": st.u8(0x800720D8), "ang": list(fr.s16x3(st, 0x800720E0)), "tr": list(fr.s16x3(st, 0x800720E8)),
                          "col": [st.u8(0x800720F0), st.u8(0x800720F1), st.u8(0x800720F2)], "off": [st.s16(0x800720F4), st.s16(0x800720F6)],
-                         "abr": st.u8(0x800720FC), "slow_n": st.u8(0x80072100), "slow_x": st.u8(0x800720FF)}
+                         "abr": st.u8(0x800720FC), "slow_n": st.u8(0x800720FF), "slow_x": st.u8(0x80072100)}
         except Exception as e:
             print("fx_diff: %s: camera / fog / warp unreadable (%s)" % (os.path.basename(p), e))
         out[f] = t
     return out
 
 
+CLONE_NAME = "sado"  # a per-target / per-caster clone header: it copies another emitter or sequence under this name, so the name carries no identity
+
+
+def norm_name(name):
+    """Both sides compare names with the 4-byte tag's padding removed: NUL shown as '.' (ps1) and trailing spaces ("0   ", "c2 ") are padding."""
+    return name.rstrip(". ")
+
+
 def norm_ref(tabs):
-    """ps1 tags are 4 bytes with NUL shown as '.': '2r3.' = ours '2r3'."""
+    """ps1 tags are 4 bytes with NUL shown as '.': '2r3.' = ours '2r3'. Clone headers (sado) are left out on both sides."""
     for t in tabs.values():
         for s in t["seqs"]:
-            s["name"] = s["name"].rstrip(". ")  # the 4-byte tag keeps trailing spaces ("0   ", "c2 ") that the ours.log \S+ field drops
+            s["name"] = norm_name(s["name"])
         for o in t["objs"]:
-            o["em"] = o["em"].rstrip(". ")
+            o["em"] = norm_name(o["em"])
             o["spr"] = o["spr"].rstrip(".")
+        t["seqs"] = [s for s in t["seqs"] if s["name"] != CLONE_NAME]
+        t["objs"] = [o for o in t["objs"] if o["em"] != CLONE_NAME]
     return tabs
 
 
@@ -173,7 +183,8 @@ RE_UNIT = re.compile(r"\bunit\s+(\d+) flags7e ([0-9a-f]+) ghost (\d) col\s+(\d+)
 RE_CAM = re.compile(r"fx camera tick (\d+) eye (-?\d+) (-?\d+) (-?\d+) tgt (-?\d+) (-?\d+) (-?\d+) H (-?\d+) fog (\d) near (-?\d+) far (-?\d+) rgb (-?\d+) (-?\d+) (-?\d+) "
                     r"warp on (\d) ang (-?\d+) (-?\d+) (-?\d+) trans (-?\d+) (-?\d+) (-?\d+) col (-?\d+) (-?\d+) (-?\d+) off (-?\d+) (-?\d+) abr (\d+) slow (\d+)/(\d+)")
 RE_MARK = re.compile(r"fx tickmark (\d+) (\d+)")
-RE_SEQ = re.compile(r"fxseq: t(\d+) (\S+) #(\d+) op ([0-9A-F]+) wait (-?\d+)")
+RE_SEQ = re.compile(r"fxseq: t(\d+) (.*?) #(\d+) op ([0-9A-F]+) wait (-?\d+)")  # the name may be padded with spaces
+RE_CAMSEQ = re.compile(r"camera: sequence (\S+) op ")  # one line per command of a camera timeline, logged when it starts
 
 
 RE_CREDIT = re.compile(r"battle fx: pack birth credit (\d+) at frame (\d+)")
@@ -192,6 +203,7 @@ def parse_ours(path):
     marked = False
     cur = None
     mode = None
+    last_cam = None
     with open(path, "r", errors="replace") as fh:
         for line in fh:
             line = line.rstrip("\n")
@@ -201,8 +213,17 @@ def parse_ours(path):
                 continue
             m = RE_SEQ.search(line)
             if m:
-                pend.append((int(m.group(1)), m.group(2)))
+                name = norm_name(m.group(2))
+                if name != CLONE_NAME:
+                    pend.append((int(m.group(1)), name))
                 continue
+            m = RE_CAMSEQ.search(line)
+            if m:
+                if m.group(1) != last_cam:  # the commands of one timeline are logged in a row: one start
+                    pend.append((0, norm_name(m.group(1))))
+                last_cam = m.group(1)
+                continue
+            last_cam = None
             m = RE_MARK.search(line)
             if m:  # the fxseq lines since the last mark ran in this tick (their t is task-local)
                 for _, name in pend:
@@ -241,7 +262,8 @@ def parse_ours(path):
                 if m:
                     v = m.groups()
                     n = [int(x) for x in v[3:18]]
-                    cur["objs"].append({"em": v[0], "spr": v[1], "pos": n[0:3], "vel": n[3:6], "sc": n[6:9], "ang": n[9:12], "col": n[12:15], "life": int(v[18]), "fl": int(v[19], 16)})
+                    if norm_name(v[0]) != CLONE_NAME:
+                        cur["objs"].append({"em": norm_name(v[0]), "spr": v[1].rstrip("."), "pos": n[0:3], "vel": n[3:6], "sc": n[6:9], "ang": n[9:12], "col": n[12:15], "life": int(v[18]), "fl": int(v[19], 16)})
             elif cur is not None and mode == "unit":
                 m = RE_UNIT.search(line)
                 if m:
@@ -425,15 +447,26 @@ def tag_cam_pick(ref):
 def dt_schedule(ref):
     """The PS1 game-loop iteration length dt (vsyncs since the last frame) along the 'main' elapsed counter, as "t:N,..".
 
-    A sequence's elapsed counter advances by dt per loop iteration, so across a 5-video-frame sample step it moves by dt * (floor or ceil of
-    5 / dt) iterations: 3 or 6 for dt 3, 4 or 6 for dt 2, 4 or 8 for dt 4, always 5 for dt 1. A step of 5 is also what a 2 / 3 mix gives, so it
-    counts for every dt >= 2 at half weight. Each sample step takes the dt that explains most of its 5 neighbours (ties: the larger)."""
+    A capture frame is one loop iteration and the state's `bf` is the battle refresh counter, so dt is the refresh delta per capture frame over each
+    sample step (rounded, a 2 / 3 mix takes its nearer value).
+    A capture without `bf` holds 5-video-frame sample steps: the elapsed counter advances by dt per loop iteration, so across a step it moves by
+    dt * (floor or ceil of 5 / dt) iterations: 3 or 6 for dt 3, 4 or 6 for dt 2, 4 or 8 for dt 4, always 5 for dt 1. A step of 5 is also what a
+    2 / 3 mix gives, so it counts for every dt >= 2 at half weight. Each sample step takes the dt that explains most of its 5 neighbours (ties:
+    the larger)."""
     pts = []
     for f in sorted(ref):
         for s in ref[f].get("seqs", []):
             if s.get("name") == "main":
-                pts.append((ref[f]["F"], s["elapsed"]))
+                pts.append((ref[f]["F"], s["elapsed"], ref[f].get("bf")))
                 break
+    if pts and all(p[2] is not None for p in pts):
+        out = []
+        for i in range(len(pts) - 1):
+            span = pts[i + 1][0] - pts[i][0]
+            best = max(1, min(10, int((pts[i + 1][2] - pts[i][2]) / span + 0.5))) if span > 0 else 1
+            if not out or out[-1][1] != best:
+                out.append((pts[i][1] if out else 0, best))
+        return ",".join("%d:%d" % p for p in out)
     steps = [(pts[i][1], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1) if pts[i + 1][0] - pts[i][0] == 5]
 
     def score(dd, delta):

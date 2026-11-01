@@ -161,6 +161,7 @@ void BattleView::trail_event(int unit, const bseq::Event& event) {
       // The battle-script ghost ops and the anmseq show / hide ops write the same model bit: a show a pack plays on a script-ghosted unit draws
       // it until the action ends, a later hide takes it off again.
       if (ghosted(unit)) entry_shown_[unit_index] = event.a != 0;
+      if (event.a != 0) fx_hide({unit}, 1, false);
       break;
     case K::WeaponShow:
       for (int slot = 0; slot < 2; ++slot)

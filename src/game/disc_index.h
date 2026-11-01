@@ -1,7 +1,7 @@
 #pragma once
 // The game's two file indexes (cdrom.fnd = disc 1, cdrom2.fnd = disc 2; both members of cdrom.dat). A record is a 0x40 byte NUL
 // padded guest path, record i = file index i. The game never opens a file by name: a map jump asks for map record 368 + 3 * room
-// id, a movie opcode for record 6033 + 2 + movie number, and the disc in the drive decides which index answers. Disc-1-only files
+// id, a movie opcode for record 6033 + 2 + movie number, a battle for record 2679 + scene, and the disc in the drive decides which index answers. Disc-1-only files
 // are dummy\dummy.dat on disc 2, and 240 map records name another room (id 459 is bak_a02f on disc 1, fin_06 on disc 2). Field
 // script FE 65 / the disc check at every map transition (variable 0x42 = disc - 1) switch it.
 #include <string>
@@ -17,9 +17,10 @@ namespace oc::game {
 
 class DiscIndex {
  public:
-  // Record of room id 0 (3 records per room: .bin .prd .ctd) and of movie number 0.
+  // Record of room id 0 (3 records per room: .bin .prd .ctd), of movie number 0 and of scene 0's battle script.
   static constexpr int kMapBase = 368;
   static constexpr int kMovieBase = 6035;
+  static constexpr int kBattleScriptBase = 2679;
 
   // False if cdrom.fnd is missing.
   bool load(const vfs::Vfs& vfs);
@@ -30,6 +31,9 @@ class DiscIndex {
   const std::string& record(int disc, int index) const;
   // "map/mapbin/<stem>.bin" record of a room id -> stem ("" when the record is not a map .bin, e.g. dummy.dat).
   std::string room_stem(int disc, int room_id) const;
+  // Battle script of a scene as a logical path. Several scenes share a file through their record, so the file's number need not be
+  // the scene's; a scene with no script record gets the shared template.
+  std::string battle_script(int disc, int scene) const;
   // "c:/movie/<name>.stv" record of a movie number -> movie.dat base name ("" = no movie); newop is a01op (language suffixes are the
   // player's: a01op / b28end / final have a per-language file).
   std::string movie_name_of(int disc, int number) const;

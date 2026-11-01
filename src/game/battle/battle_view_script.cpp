@@ -346,6 +346,7 @@ void BattleView::script_pump() {
       // The PC walks home first.
       if (engaged_ && act_.phase == Act::Phase::None && queue_.empty() && (front.a == 0x66 || front.a == 0x65 || front.a == 0x2C)) begin_disengage();
       if (!script_barrier_clear(front) && ++script_stall_ < 3600) return;
+      if (script_stall_ >= 3600) battle_audit_note(std::format("script barrier op {:#x} left by the 3600-tick timeout (phase {} queue {} engaged {})", front.a, static_cast<int>(act_.phase), queue_.size(), engaged_));
       script_stall_ = 0;
     }
     const battle::pac::Event ev = front;

@@ -54,7 +54,7 @@ class MotionTasks : public BespokeEffect {
     lerp_dur_ = std::max(8, duration_ / 2);
   }
 
-  void command(int op, const int* args, int nargs) override {
+  bool command(int op, const int* args, int nargs) override {
     if (op == 0x100) {
       duration_ = std::max(1, opnd(args, nargs, 0, duration_));
       const float spin0 = static_cast<float>(opnd(args, nargs, 1, 0x600));
@@ -88,7 +88,10 @@ class MotionTasks : public BespokeEffect {
       phase_ = 1;
       elapsed_ = 0;
       for (auto& obj : obj_) obj.bright0 = obj.bright;
+    } else {
+      return false;
     }
+    return true;
   }
 
   void tick() override {

@@ -195,6 +195,8 @@ struct RouteOut {
   // `art`: hd / original / modded / toggle.
   std::string art;
   int request_arg = 0;
+  int request_arg2 = 0;
+  int request_arg3 = 0;
   bool done = false;
   bool failed = false;
   std::string message;

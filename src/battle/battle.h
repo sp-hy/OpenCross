@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -49,7 +50,8 @@ Equip make_equip(const data::GameTables& tables, int weapon, int armour, const s
 // Persistent per-character state that survives a battle (save record subset + the star-growth fields).
 struct PartyMember {
   int char_id = 0;
-  std::string name;
+  // name: what the battle shows for the member; own_name: the typed or default name, which the Dopple list shows whatever the body.
+  std::string name, own_name;
   // Order: maxHP, ATK, DEF, HIT, EVD, MAG, MDEF. snap is the growth snapshot, pending the pending star-up deltas.
   std::array<int, 7> stat{};
   int hp = 0;
@@ -155,8 +157,12 @@ struct Unit {
   u8 letter = 0;
   // Dopplegang: the monster record (= pool slot) the PC has become; -1 = the character's own form.
   int form = -1;
+  // An enemy drawn as a character: that kind byte (the Lynx duel, scene 0x1DD); -1 = its own model.
+  int body = -1;
   // The kind byte: PCs = the record's (Pip's form), enemies = the monster record's; scripts read it (field 0x002D).
   int kind = 0;
+  // A battle script wrote the HP to 0: the kill script still runs, but the unit never takes the KO of a resolved hit, so its model is not dead.
+  bool hp_written_zero = false;
   bool alive() const { return present && !(lo & (st::kKO | st::kDefeated)); }
   bool can_open_menu() const { return pc && alive() && stamina >= 10 && !(lo & st::kCannotMenuLo) && !defending; }
 };
@@ -248,10 +254,10 @@ enum class Outcome { Ongoing = -1, Victory = 0, Wiped = 1, Fled = 2, Scripted = 
 
 // Who an element can be aimed at: the pgdat byte +4. Bit 0x40 = the cursor ring covers the party (units 0..2), bit 0x80 = the enemies
 // (3..8), 0xC0 = all nine; 0x10 = the whole range at once; 0x04 = the cursor cannot leave the caster; 0x01 = only knocked-out units
-// qualify (Revive). With neither side bit the ring is the enemies.
+// qualify (Revive); 0x02 = a both-sides ring opens on the party. With neither side bit the ring is the enemies.
 struct TargetSpec {
   bool party = false, enemies = true;
-  bool all = false, self_only = false, ko_only = false;
+  bool all = false, self_only = false, ko_only = false, party_first = false;
 };
 inline TargetSpec target_spec(const data::ElemRec& rec) {
   const u8 mask = rec.b(4);
@@ -261,7 +267,28 @@ inline TargetSpec target_spec(const data::ElemRec& rec) {
   spec.all = (mask & 0x10) != 0;
   spec.self_only = (mask & 0x04) != 0;
   spec.ko_only = (mask & 0x01) != 0;
+  spec.party_first = (mask & 0x02) != 0;
   return spec;
+}
+
+// The unit ids a target cursor tries in turn, by the target byte alone, items and elements alike: the caster for a self-only element; a
+// both-sides ring from unit 0 with bit 0x02, else from the first enemy; a party ring from unit 0 (not the caster); an enemy ring from
+// `last_enemy`, the caster's last enemy target, wrapping within the enemies.
+inline std::array<int, 9> target_cursor_order(const TargetSpec& spec, int caster, int last_enemy) {
+  std::array<int, 9> order;
+  order.fill(-1);
+  if (spec.self_only) {
+    order[0] = caster;
+  } else if (spec.party && spec.enemies) {
+    const int first = spec.party_first ? 0 : kPcSlots;
+    for (int i = 0; i < kUnits; ++i) order[static_cast<size_t>(i)] = (first + i) % kUnits;
+  } else if (spec.party) {
+    for (int i = 0; i < kPcSlots; ++i) order[static_cast<size_t>(i)] = i;
+  } else {
+    const int enemy_count = kUnits - kPcSlots, from = (last_enemy >= kPcSlots && last_enemy < kUnits ? last_enemy : kPcSlots) - kPcSlots;
+    for (int i = 0; i < enemy_count; ++i) order[static_cast<size_t>(i)] = kPcSlots + (from + i) % enemy_count;
+  }
+  return order;
 }
 
 struct Command {
@@ -371,6 +398,17 @@ struct BattleOptions {
   // A monster-party scene (scene record byte 0x0F bit 0, the Grand Slam): party slot i fights as monster record monster_party[i] (the
   // Grand Slam picker's pool slots); -1 leaves the slot empty.
   std::array<int, kPcSlots> monster_party{-1, -1, -1};
+  // The Lynx duel (scene 0x1DD): the character the third enemy becomes, -1 = none.
+  int duel_third = -1;
+  // The duel's names by character id, with Lynx's own name at id 0x31 (game::duel_names): the dummy enemies read the character they became,
+  // a Pip form past id 0x2B nothing, and party member 0 reads Lynx. Empty: the record names stay.
+  std::vector<std::string> duel_names;
+  // The Lynx duel: the relief member, whose place in the list of the fight before the duel was Serge's; -1 = none.
+  int duel_relief = -1;
+  // Monster names in the game's language, by monster record. Empty or a blank entry: the table's name.
+  std::vector<std::string> enemy_names;
+  // Kid's name on every battle screen of scene 0x186, results included (data::unnamed_kid_label). Empty: her own name stays.
+  std::string unnamed_kid_label;
 };
 
 class Battle {
@@ -582,6 +620,15 @@ class Battle {
   // slot; an element with record byte 0 bit 0x80 and an element trap (mode 5) leave the ring as it was.
   void finish_ring(const data::ElemRec& element, int colour);
   void init_pc(int slot, const PartyMember& member);
+  // What a dummy enemy of the Lynx duel becomes: its kind, weapon, gender word and colour (-1 = its own).
+  struct DuelBody {
+    int kind;
+    u16 weapon;
+    u16 gender;
+    int innate;
+  };
+  std::optional<DuelBody> duel_body(int slot, int monster_id, int third) const;
+  std::string enemy_label(int monster_id) const;
   void init_enemy(int slot, int monster_id, const BattleOptions& opt);
   void init_party_monster(int slot, int monster_id, const BattleOptions& opt);
   void unlock_monster_grid(Unit& unit) const;
@@ -595,7 +642,8 @@ class Battle {
   EnemyBrain& brain_;
   std::array<Unit, kUnits> units_{};
   std::array<int, 3> ring_{-1, -1, -1};
-  std::vector<PartyMember> party_, bench_;
+  // duel_roster_: the whole party of the Lynx duel, of which only the leader stays in party_.
+  std::vector<PartyMember> party_, bench_, duel_roster_;
   std::vector<std::string> log_;
   std::vector<ActionEvent> events_;
   std::map<std::string, int> stubs_;

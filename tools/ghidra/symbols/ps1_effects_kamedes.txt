@@ -3,3 +3,6 @@
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_kamedes_init = 0x801C5EFC;  # function: Init: sets target 0 to the dead pose
 fx_kamedes_op_100_fade = 0x801C60CC;  # function: Op 0x100: fades target 0 colour down over the given ticks
+fx_kamedes_dispatch = 0x801C5E04;  # function: Op dispatcher: init, exit, op 0x59 prefix (clears a target 0 field), op 0x100, else the stock handler
+fx_kamedes_exit = 0x801C6268;  # function: Exit: clears target 0 semi-transparent flag, releases the effect resource
+fx_kamedes_ghost_slide = 0x801C5F44;  # function: Per-tick task: ghost pair draw of the model, Y raised each tick, frees itself after the duration

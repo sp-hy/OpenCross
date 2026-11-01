@@ -198,7 +198,7 @@ class Vm {
 
   // Dev casts (no script queued them): the group list a type-2 queue_attack of `element` would carry = the operands of the 8D set_slots before it (immediates, or
   // the vars as they stand now). nullopt = the module has no such queue_attack.
-  std::optional<std::array<u8, 6>> probe_group(int element) const;
+  std::optional<std::array<u8, 6>> probe_group(int element, int caster) const;
 
   u16 var(int byte_off) const { return vars_[static_cast<size_t>(byte_off & 0xFFFE) >> 1]; }
   void set_var(int byte_off, int value) { vars_[static_cast<size_t>(byte_off & 0xFFFE) >> 1] = static_cast<u16>(value); }

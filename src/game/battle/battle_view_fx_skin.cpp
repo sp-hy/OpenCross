@@ -122,13 +122,17 @@ void BattleView::fx_model_requests(bool at_init) {
   effects::FxModels* ms = fx_ ? fx_->bespoke_models() : nullptr;
   if (!ms) return;
   if (!at_init) fx_pack_drive_tick(*ms);
+  if (ms->pack_closed) {
+    ms->pack_closed = false;
+    audio_.end_pack();
+  }
   for (effects::FxModel& fx_model : ms->units) {
     if (fx_model.unit < 0 || fx_model.unit >= battle::kUnits) continue;
     Visual& visual = vis_[static_cast<size_t>(fx_model.unit)];
     // A pack brought an off-stage unit on (opthedo's pup): it stays drawn after the effect.
     if (fx_model.reveal) entry_shown_[static_cast<size_t>(fx_model.unit)] = true;
     if (fx_model.face_rot && !fx_model.release) {
-      const float yaw = 3.14159265f - static_cast<float>(fx_model.rot[1] & 0xFFF) * 6.2831853f / 4096.0f;
+      const float yaw = static_cast<float>(fx_model.rot[1] & 0xFFF) * 6.2831853f / 4096.0f;
       visual.face_x = visual.pface_x = -std::sin(yaw);
       visual.face_z = visual.pface_z = -std::cos(yaw);
     }
@@ -138,8 +142,7 @@ void BattleView::fx_model_requests(bool at_init) {
       fx_model.steer = false;
       visual.x = visual.px = fx_model.pos[0];
       visual.z = visual.pz = fx_model.pos[2];
-      // FxModel rot[1] = (pi - yaw) * 4096 / 2 pi.
-      const float yaw = 3.14159265f - static_cast<float>(fx_model.rot[1] & 0xFFF) * 6.2831853f / 4096.0f;
+      const float yaw = static_cast<float>(fx_model.rot[1] & 0xFFF) * 6.2831853f / 4096.0f;
       visual.face_x = visual.pface_x = -std::sin(yaw);
       visual.face_z = visual.pface_z = -std::cos(yaw);
     }
@@ -147,6 +150,11 @@ void BattleView::fx_model_requests(bool at_init) {
     if (fx_model.conceal) {
       fx_model.conceal = false;
       fx_conceal_[static_cast<size_t>(fx_model.unit)] = true;
+    }
+    if (fx_model.rebuilt) {
+      fx_model.rebuilt = false;
+      fx_hide({fx_model.unit}, 1, false);
+      if (battle_->unit(fx_model.unit).alive()) start_spawn(fx_model.unit);
     }
     // Hang the pack's anim pack: the external clip set SetAnim 0x80 + k reads.
     if (!fx_model.clip_pack.empty()) {
@@ -199,6 +207,8 @@ void BattleView::fx_model_requests(bool at_init) {
 void BattleView::fx_pack_drive_tick(effects::FxModels& ms) {
   effects::FxModels::PackDrive& drive = ms.pack_drive;
   if (!drive.active) return;
+  for (size_t k = 0; k < drive.motion_read_left.size(); ++k)
+    if (drive.motion_read_left[k] > 0 && --drive.motion_read_left[k] == 0) drive.motion_state[k] = drive.motion_read_state[k];
   FxGpu* gpu = fx_pack_ ? fx_gpu_for(fx_pack_) : nullptr;
   const auto it = gpu ? gpu->models.find(drive.name) : std::map<std::string, std::unique_ptr<FxGpu::Model>>::iterator{};
   // No such model in the pack: every request is consumed, a stream counts as failed.
@@ -219,6 +229,7 @@ void BattleView::fx_pack_drive_tick(effects::FxModels& ms) {
         mc = -2;
         const std::string& file = fxlib_.summon_motion_file(motion_index);
         std::optional<Bytes> mtc = file.empty() || !vfs_ ? std::nullopt : vfs_->read("cdrom/" + file);
+        if (mtc) drive.motion_read_left[static_cast<size_t>(motion_index)] = effects::disc_read_ticks(mtc->size()) - 1;
         ByteSpan mdl;
         auto drp = import::parse_drp(fx_pack_->prd);
         if (drp)
@@ -242,7 +253,9 @@ void BattleView::fx_pack_drive_tick(effects::FxModels& ms) {
         }
         if (mc < 0) log::warn("battle fx: pack model {}: motion file {} '{}' not loaded{}{}", drive.name, motion_index, file, err.empty() ? "" : ": ", err);
       }
-      drive.motion_state[static_cast<size_t>(motion_index)] = mc >= 0 ? 1 : 2;
+      const size_t request = static_cast<size_t>(motion_index);
+      drive.motion_read_state[request] = mc >= 0 ? 1 : 2;
+      if (drive.motion_read_left[request] <= 0) drive.motion_state[request] = drive.motion_read_state[request];
     }
   }
   if (drive.clip >= 0) {

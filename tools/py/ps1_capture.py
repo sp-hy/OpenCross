@@ -72,8 +72,10 @@ def forge(save, row0, char=0, party=None, extra=(), grid1="37,43,19,1"):
         raise SystemExit("save copy %s not found" % save)
     cmd = [sys.executable, "-X", "utf8", FORGE, save, "x", "--slot", "2", "--room", "53", "--entrance", "1",
            "--party", str(char if party is None else party)] + list(extra) + [
-           "--char", "%d:%s" % (char, SERGE_STATS), "--grid", "%d:0:%s" % (char, row0)]
-    if grid1:
+           "--char", "%d:%s" % (char, SERGE_STATS)]
+    if row0:
+        cmd += ["--grid", "%d:0:%s" % (char, row0)]
+    if grid1 and row0:
         cmd += ["--grid", "%d:1:%s" % (char, grid1)]
     mcd = MCD
     if DISC_NO == 2:

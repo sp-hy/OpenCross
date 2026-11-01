@@ -17,6 +17,40 @@
 
 namespace oc::effects {
 
+// The biggest summons take the third party slot's memory: from the overlay's init the unit is off the stage, whatever the sequence's hide ops
+// say, until the overlay reloads its model. The reload (the disc read of the unit's model files plus the swap stages) holds the effect's end;
+// the unit then comes back with a new model block, even while the sequence still hides the party, and plays its spawn script. An empty slot
+// lends nothing.
+constexpr int kPartyModelReadTicks = 20;  // a mid-sized model, without a host to ask
+constexpr int kPartyModelSwapTicks = 6;
+
+class ThirdSlotRelease {
+ public:
+  void release(FxModels* models) {
+    constexpr size_t kThirdSlot = 2;
+    if (!models || models->units.size() <= kThirdSlot) return;
+    FxModel& model = models->units[kThirdSlot];
+    if (!model.pc || model.hidden) return;
+    model.hidden = model.unloaded = true;
+    unit_ = &model;
+    models_ = models;
+  }
+  // One tick of the reload as a frame task: true until the unit is back.
+  bool reload_tick() {
+    if (!unit_) return false;
+    if (reload_left_ < 0) reload_left_ = (models_->model_read_ticks ? models_->model_read_ticks(unit_->unit) : kPartyModelReadTicks) + kPartyModelSwapTicks;
+    if (reload_left_-- > 0) return true;
+    unit_->hidden = unit_->unloaded = false, unit_->rebuilt = true;
+    unit_ = nullptr;
+    return false;
+  }
+
+ private:
+  FxModels* models_ = nullptr;
+  FxModel* unit_ = nullptr;
+  int reload_left_ = -1;
+};
+
 class OverlayFx : public BespokeEffect {
  public:
   void start(const FxContext& ctx) override {

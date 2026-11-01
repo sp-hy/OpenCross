@@ -38,6 +38,7 @@
 #include "battle/battle.h"
 #include "battle/pac_vm.h"
 #include "data/tables.h"
+#include "game/disc_index.h"
 #include "game/game_session.h"
 #include "platform/paths.h"
 #include "save/cc_save.h"
@@ -180,16 +181,16 @@ std::string ascii(const std::string& text) {
   return out;
 }
 
-// evt%03d.pac for the scene, else the shared template evt0000.pac.
+// The scene's battle script, found through the disc index as the game does.
 std::optional<Bytes> read_pac(const vfs::Vfs& vfs, int scene, std::string* name = nullptr) {
-  char file_name[64];
-  std::snprintf(file_name, sizeof file_name, "evt%03d.pac", scene);
-  if (auto bytes = vfs.read(std::string("cdrom/battle/event/") + file_name)) {
-    if (name) *name = file_name;
-    return bytes;
-  }
-  if (name) *name = "evt0000.pac";
-  return vfs.read("cdrom/battle/event/evt0000.pac");
+  static const game::DiscIndex discs = [&vfs] {
+    game::DiscIndex index;
+    index.load(vfs);
+    return index;
+  }();
+  const std::string path = discs.battle_script(1, scene);
+  if (name) *name = path.substr(path.rfind('/') + 1);
+  return vfs.read(path);
 }
 
 pac::ScriptedBrain::Loader pac_loader(const vfs::Vfs& vfs) {

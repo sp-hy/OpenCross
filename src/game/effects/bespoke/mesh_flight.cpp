@@ -59,8 +59,10 @@ class FaceFlight : public MeshFx {
  public:
   explicit FaceFlight(const FlightParams& params) : params_(params) {}
 
-  void command(int op, const int* args, int nargs) override {
-    if (op == 0x181 || op == 0x183) gravity_ = static_cast<float>(opnd(args, nargs, 0, 0)) * 0.01f + params_.gravity;
+  bool command(int op, const int* args, int nargs) override {
+    if (op != 0x181 && op != 0x183) return false;
+    gravity_ = static_cast<float>(opnd(args, nargs, 0, 0)) * 0.01f + params_.gravity;
+    return true;
   }
   bool done() const override { return tick_ > duration_; }
 
@@ -337,8 +339,10 @@ class DustSweep : public BespokeEffect {
     rng_.state = ctx.seed ? ctx.seed : 1;
     duration_ = ctx.duration > 0 ? ctx.duration : 70;
   }
-  void command(int op, const int* args, int nargs) override {
-    if (op == 0x100) duration_ = std::max(8, opnd(args, nargs, 0, duration_));
+  bool command(int op, const int* args, int nargs) override {
+    if (op != 0x100) return false;
+    duration_ = std::max(8, opnd(args, nargs, 0, duration_));
+    return true;
   }
   void tick() override {
     ++tick_;

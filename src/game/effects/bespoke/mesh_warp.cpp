@@ -66,15 +66,19 @@ class MeshWarp : public ActorScript {
     }
   }
 
-  void command(int op, const int* args, int nargs) override {
+  bool command(int op, const int* args, int nargs) override {
     if (op == 0x100 && kind_ == WarpKind::GodHand) {
       D_ = std::clamp(opnd(args, nargs, 0, D_), 1, 600);
       amp_ = std::clamp(opnd(args, nargs, 1, amp_), -400, 400);
       shift_ = std::clamp(opnd(args, nargs, 2, shift_), 0, 6);
       tick_ = 0;
-    } else if (op == 0x181 && kind_ == WarpKind::Bar14) {
-      finish();
+      return true;
     }
+    if (op == 0x181 && kind_ == WarpKind::Bar14) {
+      finish();
+      return true;
+    }
+    return false;
   }
 
   void step() override {

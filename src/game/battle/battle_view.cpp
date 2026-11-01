@@ -1,4 +1,6 @@
 #include "game/battle/battle_view.h"
+#include "data/char_name.h"
+#include "data/char_name.h"
 #include "game/cheats.h"
 #include "game/battle/battle_view_op.h"
 #include "battle/dopple_table.h"
@@ -54,12 +56,10 @@ bool BattleView::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spri
   shutdown();
   ctx_ = &ctx;
   vfs_ = &vfs;
-  // Enemy AI = the scene's battle script (battle/event/evtNNN.pac, else the shared evt0000.pac):
+  // Enemy AI = the scene's battle script, found through the disc index:
   // slot 2 plans each enemy turn, slot 3 / 4 react to deaths / hits.
-  brain_.set_loader([this](int scene) -> std::optional<Bytes> {
-    if (auto bytes = vfs_->read(std::format("cdrom/battle/event/evt{:03d}.pac", scene))) return bytes;
-    return vfs_->read("cdrom/battle/event/evt0000.pac");
-  });
+  discs_.load(vfs);
+  brain_.set_loader([this](int scene) { return vfs_->read(discs_.battle_script(1, scene)); });
   lang_tables_.init(&vfs);
   sprites_ = &sprites;
   meshes_ = &meshes;
@@ -336,6 +336,13 @@ void BattleView::run_load_step(LoadJob& job) {
   bopt.dopple_mask = opt.dopple_mask;
   bopt.piggy_bank = opt.piggy_bank;
   bopt.monster_party = opt.monster_party;
+  bopt.duel_third = opt.duel_third;
+  bopt.duel_names = opt.duel_names;
+  bopt.duel_relief = opt.duel_relief;
+  bopt.unnamed_kid_label = data::unnamed_kid_label(lang_);
+  bopt.enemy_names.resize(tables_->enemies.size());
+  for (size_t i = 0; i < bopt.enemy_names.size(); ++i)
+    if (const std::string* text = lang_tables_.sysmes((0x19u << 16) | static_cast<u32>(i), lang_)) bopt.enemy_names[i] = *text;
   // Dev: OC_DOPPLE_SLOTS sets the Dopplegang pool slots Big Catch picks from ("26,106"; "all" = all 256 bits, every save var 0x3E0..0x3FE 0xFFFF,
   // Big Catch skips bits past the 220-row table; "debug" = the debug list: every table row whose second halfword (`val`) is non-zero, pool bits ignored).
   if (const char* env = std::getenv("OC_DOPPLE_SLOTS")) {
@@ -490,7 +497,7 @@ void BattleView::run_load_step(LoadJob& job) {
     visual.hp_shown = unit.hp;
     if (!unit.present) return;
     bind_unit_model(unit_id);
-    if (unit.pc && unit.form < 0 && visual.weapon)
+    if (((unit.pc && unit.form < 0) || unit.body >= 0) && visual.weapon)
       if (const data::GearRec* gear = tables_->gear_rec(unit.eq.weapon_id)) {
         visual.weapon_prism = gear->tier() == 5;
         log::debug("battle: unit {} weapon {:#x} tier byte {:#x}{}", unit_id, unit.eq.weapon_id, gear->tier(), visual.weapon_prism ? " (prism lights)" : "");
@@ -517,14 +524,14 @@ void BattleView::prefetch_unit_models() {
     const battle::Unit& unit = battle_->unit(unit_id);
     if (!unit.present) continue;
     stems.push_back(unit_model_stem(unit));
-    if (unit.pc && unit.form < 0) {
-      if (const data::GearRec* gear = tables_->gear_rec(unit.eq.weapon_id)) weapon_parts.emplace_back(ModelCache::player_weapon_bin(unit.src_id), gear->tier() & 0xF);
+    if ((unit.pc && unit.form < 0) || unit.body >= 0) {
+      if (const data::GearRec* gear = tables_->gear_rec(unit.eq.weapon_id)) weapon_parts.emplace_back(ModelCache::weapon_bin(unit.body >= 0 ? unit.body : unit.kind), gear->tier() & 0xF);
       continue;
     }
     const data::StatRec& er = tables_->enemies[static_cast<size_t>(unit.form >= 0 ? unit.form : unit.src_id)];
     if (er.weapon() != 0 && er.weapon_model() != 0) {
       const data::GearRec* wg = tables_->gear_rec(er.weapon());
-      weapon_parts.emplace_back(ModelCache::enemy_weapon_bin(static_cast<int>(er.model())), wg ? (wg->tier() & 0x7F) : 0);
+      weapon_parts.emplace_back(ModelCache::weapon_bin(static_cast<int>(er.model())), wg ? (wg->tier() & 0x7F) : 0);
     }
   }
   model_cache_.prefetch(*vfs_, std::move(stems), std::move(weapon_parts));
@@ -535,7 +542,7 @@ void BattleView::bind_unit_model(int unit_id) {
   const battle::Unit& unit = battle_->unit(unit_id);
   Visual& visual = vis_[static_cast<size_t>(unit_id)];
   // A PC in a creature form uses the creature's model, scripts and weapon.
-  const bool pcm = unit.pc && unit.form < 0;
+  const bool pcm = (unit.pc && unit.form < 0) || unit.body >= 0;
   const int mon = unit.form >= 0 ? unit.form : unit.src_id;
   const std::string stem = unit_model_stem(unit);
   visual.weapon = nullptr, visual.weapon_attach = -1, visual.weapon_prism = false;
@@ -544,6 +551,7 @@ void BattleView::bind_unit_model(int unit_id) {
   visual.tech_clips.clear();
   visual.pose.set_ext_clips(nullptr);
   if (!pcm) log::info("battle: unit {} {} monster {} model {} -> {} (AP {} countdown {} HP {})", unit_id, unit.name, mon, tables_->enemies[static_cast<size_t>(mon)].model(), stem, unit.ap, unit.countdown, unit.max_hp);
+  if (unit.body >= 0) log::debug("battle: unit {} {} drawn as kind {:#x} colour {:#x} gender word {:#x} HP {}", unit_id, unit.name, unit.kind, unit.innate, unit.gender, unit.max_hp);
   if (auto handle = load_model_for(stem)) {
     visual.model = handle;
     visual.has_model = true;
@@ -572,7 +580,7 @@ void BattleView::bind_unit_model(int unit_id) {
       const auto& pts = handle->asset.attach.points;
       const assets::MountPoint& mount = handle->asset.attach.mounts[0];
       if (const data::GearRec* gear = tables_->gear_rec(unit.eq.weapon_id)) {
-        visual.weapon = load_weapon(unit.src_id, gear->tier() & 0xF);
+        visual.weapon = load_weapon(unit.body >= 0 ? unit.body : unit.kind, gear->tier() & 0xF);
         // An all-zero record (Viper, Zoah, Poshul ...: no mount object) uses attach 0x12 (grip) when the model
         // has it, else the right hand (07), else 15 (status screen rule).
         visual.weapon_attach = mount.used ? mount.attach : pts[0x12].used ? 0x12 : pts[7].used ? 7 : 15;

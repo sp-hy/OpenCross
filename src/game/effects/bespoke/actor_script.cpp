@@ -128,14 +128,15 @@ class ScaleMove : public ActorScript {
     phase_ = 0;
     elapsed_ = 0;
   }
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100 && op != 0x101) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100 && op != 0x101) return false;
     D_ = clampi(opnd(args, count, 0, D_), 1, 600);
     phase_ = op == 0x100 ? 0 : 1;
     from_ = a_[1].pos;
     elapsed_ = 0;
     chained_ = false;
     idle_ = false;
+    return true;
   }
   void step() override {
     if (idle_) return;
@@ -179,8 +180,8 @@ class Shine : public ActorScript {
     // End colour = the element colour.
     for (int i = 0; i < 3; ++i) end_[i] = fl(ctx_.colour[i]) / 128.0f;
   }
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100 && op != 0x101) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100 && op != 0x101) return false;
     D_ = clampi(opnd(args, count, 0, D_), 1, 600);
     // 0x100 = list-2 record 0, 0x101 = record 1.
     side_ = op == 0x100 ? 0 : 1;
@@ -188,6 +189,7 @@ class Shine : public ActorScript {
       for (int i = 0; i < 3; ++i) end_[i] = fl(clampi(args[1 + i], 0, 255)) / 128.0f;
     elapsed_ = 0;
     solo_ = true;
+    return true;
   }
   void step() override {
     // channel = start + (end - start) * e / D, e = 0..D, snapped to end at D + 1
@@ -295,10 +297,11 @@ class Grav41 : public ActorScript {
     tgt_ = add(mul(add(ctx_.caster.pos, ctx_.target.pos), 0.5f), Vec3{0, -500.0f * wu_, 0});
     enter(0x180, -200);
   }
-  void command(int op, const int* args, int count) override {
-    if (op < 0x180 || op > 0x183) return;
+  bool command(int op, const int* args, int count) override {
+    if (op < 0x180 || op > 0x183) return false;
     auto_ = false;
     enter(op, op == 0x180 ? clampi(opnd(args, count, 0, -200), -4096, 4096) : clampi(opnd(args, count, 0, 24), 0, 2000));
+    return true;
   }
   void step() override {
     ++state_ticks_;
@@ -360,10 +363,11 @@ class Acce43 : public ActorScript {
  protected:
   int default_duration() const override { return 14; }
   void begin() override { enter(0x180, 48); }
-  void command(int op, const int* args, int count) override {
-    if (op < 0x180 || op > 0x183) return;
+  bool command(int op, const int* args, int count) override {
+    if (op < 0x180 || op > 0x183) return false;
     auto_ = false;
     enter(op, clampi(opnd(args, count, 0, 48), 0, 4000));
+    return true;
   }
   void step() override {
     ++state_ticks_;
@@ -521,12 +525,25 @@ class StateOnly : public ActorScript {
         ctx_.hooks.actor_pose(i, {pos[2] * f1 + pos[0] * f2, pos[1], pos[2] * f2 - pos[0] * f1}, turns_to_rad(fl(turn_)));
       }
   }
-  void command(int op, const int*, int) override {
-    // shock: 0x100 marks the "kill generator" tasks; 0x101 hides every actor except the caster (the target).
-    if (std::string_view(params_.name) == "shock" && op == 0x101 && ctx_.hooks.set_visible) {
-      ctx_.hooks.set_visible(1, false);
-      hidden_ = true;
+  bool command(int op, const int* args, int count) override {
+    bool acted = false;
+    // 3voice: the sequence tag is the word at args 2 / 3 (none = nothing starts), the acting-list entry args 4.
+    if (std::string_view(params_.name) == "3voice" && op == 0x100) {
+      acted = true;
+      if (count >= 5 && (args[2] != 0 || args[3] != 0) && ctx_.hooks.start_for_caster) {
+        const char tag[4] = {static_cast<char>(args[2] & 0xFF), static_cast<char>((args[2] >> 8) & 0xFF), static_cast<char>(args[3] & 0xFF), static_cast<char>((args[3] >> 8) & 0xFF)};
+        ctx_.hooks.start_for_caster(std::string_view(tag, 4), args[4]);
+      }
     }
+    // shock: 0x100 marks the "kill generator" tasks; 0x101 hides every actor except the caster (the target).
+    if (std::string_view(params_.name) == "shock" && op == 0x101) {
+      acted = true;
+      if (ctx_.hooks.set_visible) {
+        ctx_.hooks.set_visible(1, false);
+        hidden_ = true;
+      }
+    }
+    return acted;
   }
   void step() override {
     if (tick_ >= D_) {
@@ -546,7 +563,7 @@ constexpr StateParams kStateOnly[] = {
     {"k_monk", 40, "", "per-part visibility bits of the monster model"},
     // soidash: 0x100 clears / 0x101 sets bit 0x200 of the object flags on every object (show / hide).
     {"soidash", 40, "", "show / hide flag 0x200 on every actor"},
-    // 3voice "CASTER_CHANGE": 0x100 with a non-zero word spawns a type-0x10 resource instance and links it to the caster.
+    // 3voice "CASTER_CHANGE": 0x100 starts the type-0x10 sequence its operand names, bound to an acting-list entry.
     {"3voice", 40, "caster_change", "spawns a linked child and sets the caster's change flag"},
     // bboy: 0x100 sets scale 0xC00 and the position of each record; a callback moves the "bway" child.
     {"bboy", 60, "bway", "scale 0xC00 + positions; drives the 'bway' child object"},

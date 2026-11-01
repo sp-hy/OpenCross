@@ -68,7 +68,7 @@ Exit codes of the process:
 * `#` or `;` starts a comment anywhere on a line (so neither can appear inside arguments). Blank and comment-only lines are skipped. Every other line must have a `<when>` and a command, otherwise loading fails (exit code 2). Integer arguments are read in decimal or with a `0x` prefix; arguments named `hex...` (variable ids, masks, status bits) are read as hex with or without `0x`.
 * The route ends at `quit`, after its last line, or at a failure. There is no global time limit.
 
-Why a run is reproducible: input is synthetic, the step is fixed at 1/60 s regardless of wall time, the frame limiter is skipped while a script, replay or sweep runs, the audio device is not opened for a scripted run, and `[Debug] Seed` fixes the random sources (a non-zero seed seeds the field script RNG, the flow's RNG and, for each battle, `OC_BATTLE_SEED`; seed 0 takes a clock seed for the field RNG and leaves battles unseeded). Set `VSync=0` in the ini so frames are not paced by the display.
+Why a run is reproducible: input is synthetic, the step is fixed at 1/60 s regardless of wall time, the frame limiter is skipped while a script, replay or sweep runs, the audio device is not opened for a scripted run (`OC_ROUTE_AUDIO=1` opens it), no mod is applied, and `[Debug] Seed` fixes the random sources (a non-zero seed seeds the field script RNG, the flow's RNG and, for each battle, `OC_BATTLE_SEED`; seed 0 takes a clock seed for the field RNG and leaves battles unseeded). Set `VSync=0` in the ini so frames are not paced by the display.
 
 A battle started from the field with `[Debug] Seed` set is seeded (`OC_BATTLE_SEED` is derived from the seed and a per-run battle counter). A standalone battle (`[Debug] Battle=<scene>`) takes `[Debug] Seed` as its seed unless the `.env` sets `OC_BATTLE_SEED`; `battle_chain`, `battle_dash`, `battle_dash2`, `battle_defend`, `battle_run`, `results_heal` and `smoke_battle` all set a seed. Deterministic baselines for refactor checks are `alu_chair`, `art_swap`, `battle_hud`.
 
@@ -151,7 +151,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `money <n>` | Set the gold. |
 | `restart` | The General tab's Restart. |
 | `keyitem <n>` | Give key item `n` (replacing a copy already held). |
-| `battle <enc>` | Start encounter `enc` on battlefield 0 with the session party. |
+| `battle <enc> [field] [flags]` | Start encounter `enc` with the session party, on battlefield `field` (default 0) with the battle flags `flags` (default 0), as the A3 / C9 operands give them. |
 | `battle_disguise <enc>` | Same with the disguise-fight flag (battle flag 4). |
 | `rename <char>` | Open name entry for the character, then the main menu. |
 | `party` | Open the party screen. |

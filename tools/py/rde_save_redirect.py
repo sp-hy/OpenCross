@@ -22,7 +22,9 @@ Run from the repo root (it imports tools/rde_win.py for the window helpers).
 import argparse
 import ctypes
 import ctypes.wintypes as wt
+import hashlib
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -40,7 +42,14 @@ CARD_SIZE = 0x20000
 STEAM_APP_ID = "1133760"
 SAFE_BUFFER = 4000
 
+SAVE_ROOT_NAME = 0x006C05A2      # image address of 'My Games' in the save folder format string
+SANDBOX = "OCRdeRun"             # same length; Documents\\OCRdeRun replaces Documents\\My Games for a tool run
+GAME_SUBDIR = "CHRONO CROSS  THE RADICAL DREAMERS EDITION"
+CREATE_SUSPENDED = 4
+
 k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+ntdll = ctypes.WinDLL("ntdll")
+k32.VirtualProtectEx.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD, ctypes.POINTER(wt.DWORD)]
 k32.ReadProcessMemory.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
 k32.WriteProcessMemory.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t)]
 k32.VirtualAllocEx.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_size_t, wt.DWORD, wt.DWORD]
@@ -59,10 +68,90 @@ def check_save_path(path):
     return os.path.abspath(path)
 
 
-def launch():
-    """Start CHRONOCROSS.exe from the game folder and return the Popen."""
+def documents():
+    """The folder the game builds its save path on (the shell's Personal folder, wherever it was moved to)."""
+    path = ctypes.create_unicode_buffer(wt.MAX_PATH)
+    if ctypes.windll.shell32.SHGetFolderPathW(None, 5, None, 0, path):
+        raise SystemExit("no Documents folder")
+    return path.value
+
+
+def real_save_hashes():
+    """{file: sha1} of everything in the real save folder, to prove a run left it alone."""
+    root = os.path.join(documents(), "My Games", GAME_SUBDIR)
+    out = {}
+    for folder, _, files in os.walk(root):
+        for name in files:
+            full = os.path.join(folder, name)
+            with open(full, "rb") as fh:
+                out[full] = hashlib.sha1(fh.read()).hexdigest()
+    return out
+
+
+def check_real_saves(before):
+    after = real_save_hashes()
+    changed = sorted(k for k in set(before) | set(after) if before.get(k) != after.get(k))
+    if changed:
+        raise SystemExit("REAL SAVE FOLDER CHANGED during the run: " + ", ".join(changed))
+
+
+def reset_sandbox(save=None):
+    """Empties the scratch folder the patched game uses, then gives each Steam id the test save and the real config, so the boot,
+    which runs before any redirect, reads and writes only these copies."""
+    root = os.path.join(documents(), SANDBOX, GAME_SUBDIR)
+    shutil.rmtree(os.path.dirname(root), ignore_errors=True)
+    real = os.path.join(documents(), "My Games", GAME_SUBDIR, "Steam")
+    for steam_id in os.listdir(real):
+        folder = os.path.join(root, "Steam", steam_id)
+        os.makedirs(folder)
+        config = os.path.join(real, steam_id, "config.ini")
+        if os.path.isfile(config):
+            shutil.copyfile(config, os.path.join(folder, "config.ini"))
+        if save and os.path.isfile(save):
+            shutil.copyfile(save, os.path.join(folder, "save.dat"))
+
+
+def remove_sandbox():
+    shutil.rmtree(os.path.join(documents(), SANDBOX), ignore_errors=True)
+
+
+def sandbox_save_path(process):
+    """Replaces 'My Games' in the game's one save folder format string, while the process is still suspended, so no game code ever
+    sees the real folder. Same length, in memory only."""
+    info = (ctypes.c_uint64 * 6)()
+    handle = int(process._handle)
+    if ntdll.NtQueryInformationProcess(wt.HANDLE(handle), 0, info, ctypes.sizeof(info), None):
+        raise OSError("no process information")
+    base_bytes = ctypes.create_string_buffer(4)
+    if not k32.ReadProcessMemory(handle, ctypes.c_void_p(info[1] + 0x10), base_bytes, 4, None):
+        raise OSError(ctypes.get_last_error(), "read of the process environment block")
+    addr = struct.unpack("<I", base_bytes.raw)[0] + SAVE_ROOT_NAME - IMAGE_BASE
+    old_name, new_name = "My Games".encode("utf-16-le"), SANDBOX.encode("utf-16-le")
+    now = ctypes.create_string_buffer(len(old_name))
+    if not k32.ReadProcessMemory(handle, ctypes.c_void_p(addr), now, len(old_name), None) or now.raw != old_name:
+        raise SystemExit("the save folder string is not where this exe version keeps it: refusing to run")
+    protect = wt.DWORD()
+    if not k32.VirtualProtectEx(handle, ctypes.c_void_p(addr), len(new_name), 0x04, ctypes.byref(protect)):
+        raise OSError(ctypes.get_last_error(), "protect")
+    if not k32.WriteProcessMemory(handle, ctypes.c_void_p(addr), new_name, len(new_name), None):
+        raise OSError(ctypes.get_last_error(), "write of the save folder string")
+    k32.VirtualProtectEx(handle, ctypes.c_void_p(addr), len(new_name), protect.value, ctypes.byref(protect))
+    if not k32.ReadProcessMemory(handle, ctypes.c_void_p(addr), now, len(new_name), None) or now.raw != new_name:
+        raise SystemExit("the save folder string did not change: refusing to run")
+
+
+def launch(save=None, startupinfo=None):
+    """Starts CHRONOCROSS.exe from the game folder in the scratch save folder and returns the Popen. Never starts it unpatched."""
     env = dict(os.environ, SteamAppId=STEAM_APP_ID, SteamGameId=STEAM_APP_ID)
-    return subprocess.Popen([os.path.join(GAME_DIR, "CHRONOCROSS.exe")], cwd=GAME_DIR, env=env)
+    reset_sandbox(save)
+    process = subprocess.Popen([os.path.join(GAME_DIR, "CHRONOCROSS.exe")], cwd=GAME_DIR, env=env, startupinfo=startupinfo, creationflags=CREATE_SUSPENDED)
+    try:
+        sandbox_save_path(process)
+    except BaseException:
+        process.kill()
+        raise
+    ntdll.NtResumeProcess(wt.HANDLE(int(process._handle)))
+    return process
 
 
 class Rde:
@@ -191,7 +280,8 @@ def main():
             raise SystemExit("CHRONOCROSS.exe is not running")
         pid = pids[0]
     else:
-        proc = launch()
+        before = real_save_hashes()
+        proc = launch(save)
         pid = proc.pid
         print("started pid", pid)
         time.sleep(args.title_wait)
@@ -212,7 +302,10 @@ def main():
     finally:
         if proc is not None and not args.keep_open:
             proc.kill()
+            proc.wait()
             print("killed pid", pid)
+            remove_sandbox()
+            check_real_saves(before)
 
 
 if __name__ == "__main__":

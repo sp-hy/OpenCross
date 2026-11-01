@@ -1,4 +1,5 @@
 // Tests for the bespoke battle-effect overlays (src/game/effects/bespoke): registry, per-family behaviour, determinism, soak.
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
@@ -63,6 +64,28 @@ void test_registry() {
   CHECK(registry.bind_slots({slot}) == 1);
   CHECK(registry.find_element(77) == registry.find("canon"));
   CHECK(registry.find_element(78) == nullptr);
+}
+
+// hebi: the third party slot is off the stage from init; 0x101 starts the model's reload, which holds the effect's end.
+void test_third_slot_reload() {
+  CHECK(disc_read_ticks(72416) == 15 && disc_read_ticks(54144) == 11 && disc_read_ticks(31492) == 7);
+  DummyStage st;
+  FxModels ms;
+  ms.units.resize(4);
+  ms.units[2].pc = true;
+  st.ctx.models = &ms;
+  auto effect = BespokeRegistry::instance().create("hebi", st.ctx);
+  CHECK(effect != nullptr);
+  if (!effect) return;
+  CHECK(ms.units[2].hidden);
+  CHECK(effect->done());
+  effect->command(0x101, nullptr, 0);
+  for (int i = 0; i < 26; ++i) {
+    effect->tick();
+    CHECK(ms.units[2].hidden && !ms.units[2].rebuilt && !effect->done());
+  }
+  effect->tick();
+  CHECK(!ms.units[2].hidden && ms.units[2].rebuilt && effect->done());
 }
 
 void test_negative_strip() {
@@ -325,8 +348,8 @@ void test_actor_scripts() {
   {
     Host host;
     host.tgt().offstage = true;
-    // The door is turned toward the pup's spot (FxModel rot = pi - yaw: retail yaw 3584 = -512 = 45 degrees; the cast-start facing).
-    host.ms.units[0].rot[1] = 2560;
+    // The door is turned toward the pup's spot (yaw 3584 = -512 = 45 degrees; the cast-start facing).
+    host.ms.units[0].rot[1] = 3584;
     host.tgt().home = {-1000.0f + 1536.0f, 0, -1536.0f};
     auto effect = host.make("opthedo");
     cmd(*effect, 0x101, {72, 0, -592, 0});
@@ -428,6 +451,44 @@ void test_actor_scripts() {
     CHECK(host.tgt().hidden && host.tgt().copies.size() == 1);
     host.tick(*effect, 40);
     CHECK(effect->done() && host.tgt().copies.empty());
+  }
+  // swordbox: the front falls from the head; behind it a corner only ever moves toward C, at the end it is at C
+  {
+    Host host;
+    fake_skin(host.ms);
+    host.tgt().height = 500;
+    auto effect = host.make("swordbox");
+    cmd(*effect, 0x100, {60, 0, 0, 0});
+    const auto corner_x = [&](int corner) {
+      const std::vector<FxPrim> prims = frame(*effect);
+      return prims.empty() ? 1e6f : prims[0].v[corner].x - host.st.ctx.view.ox;
+    };
+    host.tick(*effect, 1);
+    const float head_start = corner_x(0), feet_start = corner_x(2);
+    CHECK(host.tgt().hidden && !frame(*effect).empty() && head_start > 0.0f);
+    host.tick(*effect, 29);
+    CHECK(corner_x(0) < 0.7f * head_start && corner_x(2) == feet_start);
+    host.tick(*effect, 28);
+    CHECK(std::fabs(corner_x(0)) < 0.1f * head_start && std::fabs(corner_x(2)) < 0.1f * feet_start);
+    host.tick(*effect, 4);
+    CHECK(frame(*effect).empty() && host.tgt().hidden && host.tgt().release);
+  }
+  // swordbox: the deformed model keeps the stock draw's env-mapped packet over the textured one
+  {
+    Host host;
+    fake_skin(host.ms);
+    host.ms.skin = [stock = host.ms.skin](int unit, FxSkinnedModel& out) {
+      const bool ok = stock(unit, out);
+      out.shading[0][3] = 0x42;
+      return ok;
+    };
+    host.tgt().height = 500;
+    auto effect = host.make("swordbox");
+    cmd(*effect, 0x100, {60, 0, 0, 0});
+    host.tick(*effect, 1);
+    const std::vector<FxPrim> prims = frame(*effect);
+    CHECK(std::any_of(prims.begin(), prims.end(), [](const FxPrim& prim) { return prim.src == FxPrim::TexSrc::Vram && prim.blend == 1; }));
+    CHECK(std::any_of(prims.begin(), prims.end(), [](const FxPrim& prim) { return prim.src == FxPrim::TexSrc::Model; }));
   }
   // kuzira3: thrown out from the origin, then back home
   {
@@ -730,6 +791,7 @@ int main() {
   test_muteki_falloff();
   test_lasdes2();
   test_ring();
+  test_third_slot_reload();
   test_dissolve();
   test_flatten();
   test_actor_scripts();

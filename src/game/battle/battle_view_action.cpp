@@ -73,6 +73,8 @@ void BattleView::update(float dt, const platform::Input& in) {
   // action at tick 2 would cut Serge's entry 8 while the model is still hidden, leaving him invisible for the whole fight.
   bool spawning = false;
   for (int i = 0; i < battle::kUnits; ++i) spawning = spawning || (battle_->unit(i).present && vis_[static_cast<size_t>(i)].spawn && vis_[static_cast<size_t>(i)].vm.running());
+  // Dev: a pending harness cast does not wait for a button on the scene's script windows.
+  if (dbg_.cast_element > 0 && ui_ != Ui::Intro) smsg_input(true);
   // Dev: ocbattleview --cast / --ecast / --weapon.
   if ((dbg_.cast_element > 0 || dbg_.weapon >= 0) && ui_ != Ui::Intro && !busy && !spawning && finish_ == Finish::None) {
     const int el = dbg_.cast_element, weapon = dbg_.weapon;
@@ -333,6 +335,7 @@ void BattleView::open_dopple() {
 void BattleView::apply_form(int unit, int form) {
   if (unit < 0 || unit >= battle::kPcSlots || !battle_->transform(unit, form)) return;
   bind_unit_model(unit);
+  form_show_unit_ = unit;
   Visual& visual = vis_[static_cast<size_t>(unit)];
   visual.script_pose = 1;
   if (visual.has_model) {
@@ -349,10 +352,11 @@ void BattleView::apply_form(int unit, int form) {
 void BattleView::apply_pip_form(int unit) {
   if (unit < 0 || unit >= battle::kPcSlots) return;
   // The model is rebuilt but the unit keeps its hidden flag: the caster's anmseq hid it (op 0x1A at the `chng` start) while the pack's act0
-  // figure stands in, so the unit stays hidden from the hide through the swap until the pack ends.
+  // figure stands in, so the unit stays hidden from the hide through the swap until the action ends (`form_show_unit_`).
   const bool hid = anm_hidden(unit);
   bind_unit_model(unit);
   anm_set_hidden(unit, hid);
+  form_show_unit_ = unit;
   Visual& visual = vis_[static_cast<size_t>(unit)];
   visual.script_pose = 1;
   if (visual.has_model) {
@@ -380,6 +384,14 @@ void BattleView::fx_form_phase(int phase) {
   const int form = pending_form_, unit = pending_form_unit_;
   pending_form_ = -2;
   apply_form(unit, form);
+}
+
+void BattleView::fx_set_pose(int unit, int pose) {
+  if (unit < 0 || unit >= battle::kUnits || !battle_->unit(unit).present) return;
+  Visual& visual = vis_[static_cast<size_t>(unit)];
+  visual.script_pose = pose;
+  // A running idle picks the word up; one that ran out stays on its last pose.
+  if (visual.script_kind == kIdle && visual.vm.running()) start_idle(unit);
 }
 
 int BattleView::next_pc_after(int pc) const {
@@ -466,6 +478,7 @@ void BattleView::sync_shown() {
     const bool ko = !unit.alive();
     if (ko != visual.ko_shown) {
       visual.ko_shown = ko;
+      if (!ko) visual.ko_hit = visual.ko_reacted = false, visual.zero_hp_actions = 0;
       // Re-pick the idle / KO pose.
       if (visual.script_done && visual.script_kind == kIdle) start_idle(i);
     }

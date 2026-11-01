@@ -1023,11 +1023,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
   }
   // request: issued once; the screen it opens is handled by the following wait / tap lines
   if (op == "request") {
-    if (args.size() < 2) return bad("request <kind> [arg]");
+    if (args.size() < 2) return bad("request <kind> [arg] [arg2] [arg3]");
     if (phase_ == 0) {
       out.request = args[1];
-      out.request_arg = 0;
+      out.request_arg = out.request_arg2 = out.request_arg3 = 0;
       if (args.size() > 2) to_int(args[2], out.request_arg);
+      if (args.size() > 3) to_int(args[3], out.request_arg2);
+      if (args.size() > 4) to_int(args[4], out.request_arg3);
       phase_ = 1;
       aux_ = st.tick;
       return false;

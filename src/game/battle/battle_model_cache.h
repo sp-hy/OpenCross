@@ -76,15 +76,14 @@ struct ModelCache {
   // The hit-sound / hit-emitter group digit of a unit: the equipped weapon's material tier & 0xF (the same byte as the weapon model part;
   // NOT the crit class), -1 for monsters (their "_s00" entries are not renamed).
   static int weapon_digit(const data::GameTables* tables, const battle::Unit& unit);
-  // The weapon pack of a character id / of a monster model ("" = none).
-  static std::string player_weapon_bin(int char_id);
-  static std::string enemy_weapon_bin(int model);
+  // The weapon pack of a kind byte: a monster's model, or the kind of a PC (a character id, a Pip form, a body) ("" = none).
+  static std::string weapon_bin(int model);
   // The CPU half of a load (texture mods resolved): any thread.
   static std::optional<assets::ModelAsset> read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err);
   static std::optional<assets::ModelAsset> read_weapon(const vfs::Vfs& vfs, const std::string& bin, int part);
 
   std::shared_ptr<ModelHandle> load_model_for(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& dir_stem);
-  std::shared_ptr<ModelHandle> load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int char_id, int part);
+  std::shared_ptr<ModelHandle> load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int kind, int part);
   std::shared_ptr<ModelHandle> load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int model, int part);
   // Part `part` of the weapon pack `bin` ("battle/wepon/sword.bin"), cached; build_weapon is the uncached load.
   std::shared_ptr<ModelHandle> weapon_part(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& bin, int part);

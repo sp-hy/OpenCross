@@ -44,6 +44,12 @@ const std::string& DiscIndex::record(int disc, int index) const {
   return index >= 0 && static_cast<size_t>(index) < records.size() ? records[static_cast<size_t>(index)] : kEmpty;
 }
 
+std::string DiscIndex::battle_script(int disc, int scene) const {
+  const std::string& rec = record(disc, kBattleScriptBase + scene);
+  const size_t at = rec.find("/battle/event/");
+  return at == std::string::npos ? "cdrom/battle/event/evt0000.pac" : "cdrom" + rec.substr(at);
+}
+
 std::string DiscIndex::room_stem(int disc, int room_id) const {
   if (room_id < 0) return {};
   const std::string& rec = record(disc, kMapBase + 3 * room_id);

@@ -261,7 +261,7 @@ The Dopplegang pool is a 256-bit mask held in 16 script variables of the field. 
 
 ### 5.2 The PAC enemy-script VM
 
-`src/battle/pac_vm.h`, namespace `oc::battle::pac`. Scripts are `battle/event/evtNNN.pac` (fallback `evt0000.pac`); `BattleView` supplies the loader. Format: `docs/formats/battlescript.md`.
+`src/battle/pac_vm.h`, namespace `oc::battle::pac`. Scripts are `battle/event/evtNNN.pac`, resolved by `game::DiscIndex::battle_script` from the scene's file-index record (fallback `evt0000.pac`); `BattleView` supplies the loader. Format: `docs/formats/battlescript.md`.
 
 - `pac_opcodes.inc` is the opcode table, `PAC_OP(code, length, name, confidence)`; `pac_vm.cpp` includes it to build `op_info(code)`. Opcodes not listed get the default stall handler.
 - `Module::parse` reads the entity count, an `[entity][slot]` pointer table (`kSlots = 32`) and the code. `Vm` interprets frames per entity; `tick()` makes one pass over all entities; `launch(unit, slot)` pushes a slot frame; `run_slot(unit, slot, out)` launches and ticks until it returns, collecting attacks queued with op 67 as `QueuedAttack`.

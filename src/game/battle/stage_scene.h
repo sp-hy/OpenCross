@@ -200,6 +200,9 @@ class StageScene {
   std::vector<render::StagePrim> prims_;
   // ground_.warp in the pipeline's vertex type.
   std::function<void(std::array<float, 3>&)> warp_fn_;
+  // The emitters whose live objects carry the 14bar heat wave's mark.
+  std::vector<std::string> marked_emitters_;
+  bool warp_objects_marked_ = false;
 };
 
 }  // namespace oc::game

@@ -78,8 +78,8 @@ class Hevi42 : public GroundFx {
       }
     }, true);
   }
-  void command(int op, const int* args, int arg_count) override {
-    if (op != 0x103) return;
+  bool command(int op, const int* args, int arg_count) override {
+    if (op != 0x103) return false;
     for (int i = 0; i < target_count(); ++i) {
       auto task = std::make_shared<Task>();
       task->model = target(i);
@@ -89,6 +89,7 @@ class Hevi42 : public GroundFx {
       task->step(suri_);
       add_task([task, this] { return task->step(suri_); });
     }
+    return true;
   }
   void frame() override {
     draw_ground(-0x1400, 0x1400, 0x1400, -0x1400);
@@ -251,12 +252,11 @@ class Boru11 : public GroundFx {
       draw.bias = 100;
     };
     const Vec3 centre{static_cast<float>(ox_), static_cast<float>(yc_), static_cast<float>(oz_)};
-    // Phase 0 draws with the morph builder: the mesh colour is the literal 0x808080 (the ground colour is read by the stock draw of
-    // phase 1 only), vertices AND packet colours lerped m0 -> m1, the primitives opaque with the group code. m0i holds the ground's greys,
-    // m1i (240, 8, 8) where the lava mesh had its own colour and the ground greys elsewhere - the morph is also a grey -> red colour ramp.
+    // Phase 0 draws with the morph builder: the mesh colour as in phase 1, vertices AND packet colours lerped m0 -> m1, the primitives
+    // opaque with the group code. m0i holds the ground's greys, m1i (240, 8, 8) where the lava mesh had its own colour and the ground greys
+    // elsewhere - the morph is also a grey -> red colour ramp.
     auto morph_draw = [&](MeshDraw& draw) {
-      for (int channel = 0; channel < 3; ++channel) draw.rgb[channel] = 128;
-      draw.bias = 100;
+      base_draw(draw);
       draw.opaque = true;
     };
     switch (phase_) {
@@ -415,10 +415,12 @@ class Upli25 : public GroundFx {
       em()->set_position("1600", ox_, oy_, oz_);
     }
   }
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     (void)args;
     (void)arg_count;
-    if (op == 0x180) advance();
+    if (op != 0x180) return false;
+    advance();
+    return true;
   }
   void frame() override {
     ++timer_;
@@ -497,14 +499,14 @@ class Upli25 : public GroundFx {
         break;
       default: break;
     }
-    // The pit: two-sided, opaque, colour 0x808080 (not the ground colour), at the static origin.
+    // The pit: two-sided, opaque, in the ground colour, at the static origin.
     if (state_ >= 2 && pit_) {
       MeshDraw draw;
       draw.offset = {static_cast<float>(0x400), 0.0f, static_cast<float>(oz0_)};
       draw.bias = 0x8C;
       draw.two_sided = true;
       draw.opaque = true;
-      for (int k = 0; k < 3; ++k) draw.rgb[k] = 128;
+      for (int k = 0; k < 3; ++k) draw.rgb[k] = rgb[k];
       draw_mesh(*pit_, draw);
     }
     if (em())

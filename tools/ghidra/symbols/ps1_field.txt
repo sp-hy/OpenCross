@@ -257,6 +257,7 @@ fld_grid_nibble_clear = 0x800D3AFC;  # function: clears a packed nibble cell in 
 fld_grid_nibble_get = 0x800D3B88;  # function: reads a grid cell's copy-count nibble from the packed nibble array
 fld_refund_grid_elements = 0x800D3BF8;  # function: returns a character's element grid cells to the stock
 fld_op_save_restore_roster_grids = 0x800D3CBC;  # function: script op FE 6F: saves or restores the recruited roster's element grids
+fld_op_set_keep_custom_name = 0x800D3E28;  # function: script op FE 6B: global flag bit 16, field text keeps Serge's own name in the Lynx body
 fld_op_query_stars_total = 0x800D3F10;  # function: script op FE 82: star total query
 fld_op_set_stars_current = 0x800D3F5C;  # function: script op FE 6D: sets current stars from the total
 fld_op_set_keep_serge_face = 0x800D3F88;  # function: script op FE 6C: global flag bit 17, keeps Serge's own portrait in the Lynx body
