@@ -233,7 +233,7 @@ OpenCross: `ExtFile` (`src/save/ext_save.*`) parses by rule 1 and offers `slot(i
 
 `FieldWorld::capture_state` + `write_slot`: script variables 0x000..0x3FF at `0x188 + 2*id`; location word 0x18E = the script room id of the disc in use; **head 0x40 = the scenario flag (variable 0, u16)**; preview stars 0x3F; preview leader name 0x28 (Shift-JIS); party at 0x59C and 0x34; recruited bits; key items 0x180; header title `クロノ・クロス　` + fullwidth (slot + 1). Script item ids split as: ids < 0x200 search the 0x180 item slots, 0x200.. the 0xC0 element slots (id - 0x200), 0x400.. key-item bit (id - 0x401).
 
-**Continue.** Loading a slot restores the party/inventory block, the script variables and the room/entrance, so scripts resume exactly as a retail Continue. The entrance (room parameter) is **script variable 0x3A**: room init sets 0x3A to the entrance and save events overwrite it (for example `gal_b09i` saves inside its wake-up event with 0x3A = 4 and Continue resumes that event). The room is variable 6. The slot codec is bit-exact (round-trip tested).
+**Continue.** Loading a slot restores the party/inventory block, the script variables and the room/entrance, so scripts resume exactly as a retail Continue. The entrance (room parameter) is **script variable 0x3A**: room init sets 0x3A to the entrance and save events overwrite it (for example `gal_b09i` saves inside its wake-up event with 0x3A = 4 and Continue resumes that event). The room is variable 6. The saved leader position (variables 0x12 / 0x14) is not read: the entrance alone places the party. The slot codec is bit-exact (round-trip tested).
 
 Route check: `tests/routes/run_save.ps1` (scratch copy with `occ save-blank`, `cc_save.py dump`, `tests/routes/check_save_dump.py`).
 

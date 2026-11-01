@@ -177,15 +177,9 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   action.room_id = entry.data.location();
   // ROOM_PARAM of a loaded slot = its variable 0x3A. Room init copies var 2 into 0x3A and save events overwrite it with the
   // entrance they resume at (gal_b09i: `SET $3A, #4` before the save menu, so a Continue re-enters with param 4 and the wake-up
-  // event runs on).
+  // event runs on). The entrance alone places the party: the saved position variables are not read.
   action.param = static_cast<u16>(entry.data.head[0x188 + 0x3A] | (entry.data.head[0x189 + 0x3A] << 8));
-  action.restore_position = true;
-  // The leader's position is the engine-written variables 0x12 (X) / 0x14 (Z) of the saved global block (head 0x188 + id); the
-  // word pair at head 0x488 is the unrelated variable 0x300 / 0x302 (it lies off the walk mesh).
-  const auto var = [&](int id) { return static_cast<s16>(entry.data.head[0x188 + static_cast<size_t>(id)] | (entry.data.head[0x189 + static_cast<size_t>(id)] << 8)); };
-  action.x = var(0x12);
-  action.z = var(0x14);
-  log::info("flow: slot {} room {} ({}) position {}, {}  scenario {}", entry.slot, room ? room : "?", entry.data.location(), action.x, action.z, var(0));
+  log::info("flow: slot {} room {} ({}) entrance {}  scenario {}", entry.slot, room ? room : "?", entry.data.location(), action.param, static_cast<s16>(entry.data.head[0x188] | (entry.data.head[0x189] << 8)));
   return action;
 }
 

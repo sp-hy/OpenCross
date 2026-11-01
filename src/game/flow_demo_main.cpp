@@ -151,7 +151,7 @@ int ocflow_main(int argc, char** argv) {
       const game::FlowAction result = flow.update(input, dt);
       if (result.quit) break;
       if (result.load_room)
-        log::info("flow: load_room {} param {} restore {} ({}, {}) state_changed {}", result.room, result.param, result.restore_position, result.x, result.z, result.state_changed);
+        log::info("flow: load_room {} param {} state_changed {}", result.room, result.param, result.state_changed);
       if (result.open_settings) log::info("flow: open settings");
       if (result.load_room && !shots) {
         log::info("flow: reached {} -> restarting at the title", game::flow_state_name(flow.state()));

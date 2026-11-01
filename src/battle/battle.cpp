@@ -1744,13 +1744,15 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
   // 0x10 with both side bits (Seal-All, the colour fields, Saints, Chrono Cross) covers all nine units (mask 0x1FF); otherwise the target's side
   const bool both_sides = target_spec(element).party && target_spec(element).enemies;
   const bool party_side = is_pc_slot(target);
+  // The targets are fixed when the cast starts: a kill script revealing a unit during it does not add that unit.
+  const u32 reach = cast_mask_;
   int hits = 0;
   cast_all_ = true;
   for (int i = both_sides ? 0 : party_side ? 0 : kPcSlots; i < (both_sides ? kUnits : party_side ? kPcSlots : kUnits); ++i) {
     const Unit& unit = units_[static_cast<size_t>(i)];
     if (!unit.present || (target_spec(element).ko_only || element.mode() == 4 ? !(unit.lo & st::kKO) : !unit.alive())) continue;
     // Enemy-side masks are ANDed with the cast mask (off-stage units).
-    if (!is_pc_slot(i) && !(cast_mask_ >> i & 1u)) continue;
+    if (!is_pc_slot(i) && !(reach >> i & 1u)) continue;
     do_element(actor, element_id, row, i, false);
     ++hits;
     if (outcome_ != Outcome::Ongoing) break;

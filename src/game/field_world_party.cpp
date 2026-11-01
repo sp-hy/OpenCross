@@ -148,10 +148,15 @@ void FieldWorld::walk_party_member(int slot, float x, float z, int final_facing,
   request.x = static_cast<s32>(std::lround(x));
   request.z = static_cast<s32>(std::lround(z));
   start_motion(ent, request);
-  // The formation walk steps the position itself.
-  ents_[static_cast<size_t>(ent)].motion.direct = true;
-  ents_[static_cast<size_t>(ent)].motion.final_facing = final_facing;
-  ents_[static_cast<size_t>(ent)].motion.gate_slot = gate_slot;
+  // The formation walk steps the position itself, to the floor at the target on the leader's level.
+  Motion& motion = ents_[static_cast<size_t>(ent)].motion;
+  motion.direct = true;
+  motion.final_facing = final_facing;
+  motion.gate_slot = gate_slot;
+  const float leader_y = ents_[static_cast<size_t>(party_ent_[0] >= 0 ? party_ent_[0] : ent)].actor.current().y;
+  const int tri = view_.walk().find_triangle(x, z, leader_y);
+  motion.ty = tri >= 0 ? view_.walk().height(tri, x, z) : leader_y;
+  motion.target_y = true;
 }
 
 // Op BE: sets the follow-hold flag while it waits (follow rule 1, the back-off, is skipped then) and a tick counter (0xF0 at
@@ -636,30 +641,6 @@ void FieldWorld::restore_vars() {
   sync_party();
   // The defeated-monster cache is not in the save: it starts empty after every load.
   defeated_ = {};
-}
-
-bool FieldWorld::place_leader(int x, int z) {
-  const int ent = party_ent_[0];
-  if (ent < 0 || !view_.loaded()) return false;
-  const WalkMesh& walk = view_.walk();
-  Ent& ent_state = ents_[static_cast<size_t>(ent)];
-  const int tri = walk.find_triangle(static_cast<float>(x), static_cast<float>(z), 0.0f);
-  if (tri < 0) {
-    log::warn("field: saved position {}, {} is off the walk mesh of {}; keeping the entrance", x, z, view_.room_name());
-    return false;
-  }
-  ent_state.actor.place(walk, tri, static_cast<float>(x), static_cast<float>(z), ent_state.actor.facing());
-  ent_state.placed = true;
-  for (int slot = 1; slot < 3; ++slot)
-    if (party_ent_[static_cast<size_t>(slot)] >= 0) {
-      ents_[static_cast<size_t>(party_ent_[static_cast<size_t>(slot)])].placed = false;
-      place_party_spawn(slot);
-    }
-  // The same spread as a room entry: a V spot that fails (off the mesh, another floor) leaves the member on the leader's spot, and
-  // nothing walked it out here, so a Continue would show the party stacked on the leader. Resets the rings too.
-  settle_spawned_followers();
-  snap_camera_to_player();
-  return true;
 }
 
 void FieldWorld::reset_for_new_game() {

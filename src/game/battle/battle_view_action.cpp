@@ -123,7 +123,8 @@ void BattleView::update(float dt, const platform::Input& in) {
       collect_events();
       ui_ = Ui::Wait;
     } else if (dbg_.cast_actor >= 0 && dbg_.cast_target >= 0 && static_cast<size_t>(el) < tables_->elements.size()) {
-      // Debug tab: an explicit caster and target. An all-targets element (pgdat +4 bit 0x10) hits every present unit on the target's side.
+      // Debug tab: an explicit caster and target. An all-targets element (pgdat +4 bit 0x10) hits every present unit on the target's side that
+      // the all-target cast mask allows.
       const int ca = dbg_.cast_actor, ct = dbg_.cast_target;
       dbg_.cast_actor = dbg_.cast_target = -1;
       if (ca < battle::kUnits && ct < battle::kUnits && battle_->unit(ca).present && battle_->unit(ct).present) {
@@ -134,6 +135,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         const bool both = ts.all && ts.party && ts.enemies;
         const int lo = both ? 0 : ts.all ? (pc_side ? 0 : battle::kPcSlots) : ct, hi = both ? battle::kUnits : ts.all ? (pc_side ? battle::kPcSlots : battle::kUnits) : ct + 1;
         bool ring = true;
+        const u32 reach = battle_->cast_mask();
         dev_group_hint(ca, el);
         // Dev: OC_CAST_PARTY=n limits a party-side all-targets cast to the first n PCs. With Serge alone (units 0, 3, 4, 5) a per-target
         // sequence loop (op 0x4D) runs once, and three times with the full party.
@@ -141,6 +143,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         for (int i = lo; i < hi; ++i) {
           if (!battle_->unit(i).present) continue;
           if (i < battle::kPcSlots && i >= party_cap) continue;
+          if (ts.all && i >= battle::kPcSlots && !(reach >> i & 1u)) continue;
           battle_->do_element(ca, el, 0, i, ring);
           ring = false;
         }

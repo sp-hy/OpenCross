@@ -254,8 +254,6 @@ class FieldWorld final : public script::FieldHost {
   std::array<u16, 16> dopple_mask() const;
   // Sets the VM variables and the head block together (a battle's end).
   void set_dopple_mask(const std::array<u16, 16>& mask);
-  // Puts the party leader at (x, z) on the walk mesh once the room is up (Continue). False if there is no leader.
-  bool place_leader(int x, int z);
   // Resets the transient world (variables, queued requests) for a new game; keeps the state object.
   void reset_for_new_game();
   // ---- discs: the file index in use. The disc is data-driven: FE 65 and the DiscCheck at every

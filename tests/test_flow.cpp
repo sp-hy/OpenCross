@@ -238,11 +238,12 @@ void test_flow() {
   // Room 252 = wld_a01.
   slot_entry.data.head[save::head::kLocation] = 0xFC;
   slot_entry.data.head[save::head::kLocation + 1] = 0;
-  // The leader position is the global variables 0x12 / 0x14 (head 0x188 + id): X = 0x1234, Z = -2.
-  slot_entry.data.head[0x188 + 0x12] = 0x34, slot_entry.data.head[0x188 + 0x13] = 0x12, slot_entry.data.head[0x188 + 0x14] = 0xFE, slot_entry.data.head[0x188 + 0x15] = 0xFF;
+  // The saved position is ignored: the entrance (variable 0x3A) alone places the party.
+  slot_entry.data.head[0x188 + 0x12] = 0x34, slot_entry.data.head[0x188 + 0x13] = 0x12;
+  slot_entry.data.head[0x188 + 0x3A] = 2;
   slot_entry.data.set_gold(1234);
   const game::FlowAction load_action = continued.on_slot(slot_entry);
-  CHECK(load_action.load_room && load_action.room == "wld_a01" && load_action.restore_position && load_action.x == 0x1234 && load_action.z == -2 && load_action.state_changed);
+  CHECK(load_action.load_room && load_action.room == "wld_a01" && load_action.state_changed && load_action.param == 2);
   CHECK(continued.state() == game::FlowState::Field && continued.game_state().gold() == 1234);
   CHECK(continued.custom_names().at(0) == U"Zed");
 

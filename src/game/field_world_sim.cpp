@@ -183,7 +183,9 @@ void FieldWorld::step_motions() {
     const bool y_valid = (script_ent.flags38 & 0x40) != 0;
     const float speed = script_ent.v10c ? static_cast<float>(script_ent.v10c) / 16.0f : kWalkUnitsPerTick;
     const ActorPose cur = ent_state.actor.current();
-    auto move_xz = [&](float x, float z) { ent_state.actor.set_position(walk, x, z, false, y_valid); };
+    // A formation walk steps in 3D toward its target height and takes no height from the mesh on the way: a straight line may cross a gap.
+    const bool free_y = y_valid || motion.direct;
+    auto move_xz = [&](float x, float z) { ent_state.actor.set_position(walk, x, z, false, free_y); };
     // Facing while walking: the start form sets the facing (bearing to the target, gated by the slot flag SET_SLOT_FLAG_126 and by
     // a non-zero turn rate; a script can set the flag so an entity slides sideways without rotating) and the wait form
     // re-asserts that saved value every tick. Only the entity follows (44 / 45) re-aim at the moving target each tick, with the same gate.
@@ -235,13 +237,17 @@ void FieldWorld::step_motions() {
         [[fallthrough]];
       case K::Walk:
       case K::Walk2: {
-        if (motion.target_y && y_valid) {
+        if (motion.target_y && free_y) {
           // WALK_TO with a height on a free-height entity (flyers, lifts) travels the 3D distance at the entity's speed;
           // a pure vertical move (opn_a01i's lift: x, z unchanged) therefore takes distance / speed ticks, not one.
           const float dx = motion.tx - cur.x, dz = motion.tz - cur.z, dy = motion.ty - cur.y;
           const float distance = std::sqrt(dx * dx + dz * dz + dy * dy);
           if (distance <= 0.01f) {
             motion.active = false;
+            if (motion.direct) {
+              ent_state.actor.set_position(walk, motion.tx, motion.tz, false, false);
+              if (motion.final_facing >= 0 && script_ent.rec[static_cast<size_t>(motion.gate_slot & 7)].flag47 == 0 && script_ent.v24e != 0) ent_state.actor.set_facing(to_internal(motion.final_facing));
+            }
             break;
           }
           const float ratio = std::min(speed, distance) / distance;
@@ -251,7 +257,7 @@ void FieldWorld::step_motions() {
           if (speed >= distance) {
             move_xz(motion.tx, motion.tz);
             ent_state.actor.set_height(motion.ty, false);
-            motion.active = false;
+            if (!motion.direct) motion.active = false;
           } else if (motion.frames > 0 && --motion.frames == 0) {
             // 40's slot timer ran out while still far.
             motion.active = false;
@@ -261,7 +267,6 @@ void FieldWorld::step_motions() {
         if (walk_toward(motion.tx, motion.tz, 0, false)) {
           move_xz(motion.tx, motion.tz);
           motion.active = false;
-          if (motion.final_facing >= 0 && script_ent.rec[static_cast<size_t>(motion.gate_slot & 7)].flag47 == 0 && script_ent.v24e != 0) ent_state.actor.set_facing(to_internal(motion.final_facing));
         } else if (motion.frames > 0 && --motion.frames == 0) {
           // 40's slot timer ran out while still far.
           motion.active = false;

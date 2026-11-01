@@ -68,7 +68,7 @@ HD Boat=1,all
 Zeightgeist HD Backgrounds=0,modded
 ```
 
-Mods missing from `[Mods]` are appended in name order with `1,modded`; entries whose mod is gone are dropped on the next save. F6 cycles SD -> HD -> Modded; the Esc overlay's art-mode setting has the same three values; the route command `art modded` selects it. The `Dump*` category keys (section 7) share the `[Mods]` section with the mods; they are not mod names, and the obsolete `DumpTextures` / `ReplaceTextures` keys are ignored and dropped.
+A scripted run (`[Debug] Script`) tests the game as shipped: every mod is off for the whole run, also through a route `art` command, and the ini's choices stay as they are. Mods missing from `[Mods]` are appended in name order with `1,modded`; entries whose mod is gone are dropped on the next save. F6 cycles SD -> HD -> Modded; the Esc overlay's art-mode setting has the same three values; the route command `art modded` selects it. The `Dump*` category keys (section 7) share the `[Mods]` section with the mods; they are not mod names, and the obsolete `DumpTextures` / `ReplaceTextures` keys are ignored and dropped.
 
 **Mods tab (Esc overlay).** Per mod: enable checkbox, up / down priority arrows, name (`(active)` when it loads in the current art mode), *Load on* combo, file / game data / archive / unmatched / ambiguous counts, a *Conflicts* list (target -> winning mod), and the unmatched / ambiguous paths. *Rescan* re-reads the `mods` folder (keeping settings by name). *Model Viewer* starts `opencross modelview` as a separate process (`docs/tools.md` 1.12): the models with and without the enabled mods. Every change is saved to the ini and re-applied like an art switch.
 
