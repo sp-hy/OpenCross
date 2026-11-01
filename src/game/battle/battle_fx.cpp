@@ -429,6 +429,7 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
 
 // ---------------------------------------------------------------------------------------------------------------- run
 BattleFxRun::BattleFxRun(std::shared_ptr<const FxPack> pack, const assets::RoomEffects& particle_lib, u32 seed) : pack_(std::move(pack)) {
+  env_meshes_ = effects::EnvMeshes(ByteSpan(pack_->prd.data(), pack_->prd.size()));
   bank_.add(&pack_->fx);
   if (pack_->extra) bank_.add(pack_->extra.get());
   if (pack_->resident)

@@ -71,11 +71,12 @@ int ocbattleview_main(int argc, char** argv) {
   bool have_ring = false;
   int cast2 = 0, cast2_at = -1, cast2_tgt = -1;
   int shot_every = 0, shot_from = 0, shot_to = 1 << 30, max_frames = -1, win_w = 1280, win_h = 960;
-  std::filesystem::path shot_dir;
+  std::filesystem::path shot_dir, config_file;
   // (frame, key) presses from --keys.
   std::vector<std::pair<int, SDL_Scancode>> key_script;
   for (int i = 1; i < argc; ++i) {
     if (!std::strcmp(argv[i], "--shot") && i + 1 < argc) shot_frames = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--config") && i + 1 < argc) config_file = argv[++i];
     else if (!std::strcmp(argv[i], "--orig")) hd = false;
     else if (!std::strcmp(argv[i], "--auto")) auto_keys = true;
     else if (!std::strcmp(argv[i], "--bauto")) bauto = true;
@@ -174,7 +175,7 @@ int ocbattleview_main(int argc, char** argv) {
   const std::filesystem::path exe = platform::exe_dir();
   log::init((exe / "ocbattleview.log").string());
   platform::Config config;
-  config.load(exe / "opencross.ini");
+  config.load(config_file.empty() ? exe / "opencross.ini" : config_file);
   // [Cheats] of the harness ini (e.g. AlwaysLoot = a Pilfer that lands).
   platform::bind_cheats(&config.cheats);
   const std::filesystem::path game_dir = platform::find_game_dir(config.game_dir);

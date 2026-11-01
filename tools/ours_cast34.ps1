@@ -19,8 +19,9 @@
 # >= 2x the runner-up, the shift is printed); -Frames defaults to CastAt + the ps1 capture span in battle refreshes (fx_diff.py --info `last_refresh:`; one ps1 game frame takes 2-3 refreshes) + 60; -Keep keeps states / frames / shots (no --prune); -NoDiff skips the diff.
 param([int]$Id=-1,[int]$Scene=-1,[int]$Caster=-1,[int]$Tgt=-1,[switch]$Ecast,[switch]$Weapon,[string]$Party="",[int]$Field=-1,[switch]$NoField,[string]$Kind="",[string]$CamPick="",[int]$Seed=1,[int]$CastAt=-1,[int]$Frames=-1,
       [switch]$Keep,[switch]$NoDiff,[switch]$NoCamSearch,[switch]$NoPoolSearch,[string]$CamPool="ch10,ch11,ch12,ch13",[string]$Dt="",[switch]$NoDt,[switch]$NoStats,
-      [string]$Folder="",[int]$Before=0,[switch]$Auto,[int]$AutoFrames=300,[string]$EnemyHp="",[string]$Offset="",[int]$CastIndex=-1,[string]$Exe="",[int]$Ko=-1,[string]$Ring="")
+      [switch]$Orig,[string]$Folder="",[int]$Before=0,[switch]$Auto,[int]$AutoFrames=300,[string]$EnemyHp="",[string]$Offset="",[int]$CastIndex=-1,[string]$Exe="",[int]$Ko=-1,[string]$Ring="")
 $Root=(Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+# -Orig = ocbattleview --orig: without it the OpenCross side runs in HD art.
 # -Before E = cast element E first and <id> as a second cast by the same caster (a pack that needs the one before it, the capture holds both).
 # -Folder <name> (the capture folder: "<id>" = a PC element, "<id>_s<scene>_u<unit>" = an enemy own-cast) takes id / scene / caster / mode from the folder
 # name + ref\manifest.txt (mode: enemy -> -Ecast); -Auto = ocbattleview --auto --autoframes 300 (scripted-dialogue scenes); -Offset N|auto = fx_diff.py --offset; -CastIndex N = fx_diff.py --cast-index (align on the Nth cast, 0 = first, when the capture holds several casts of the id).
@@ -135,6 +136,7 @@ function RunOurs([string]$pick,[string]$outdir,[int]$nframes,[string[]]$shotargs
   if(-not $NoStats){ $a+=@("--stats","hp=1023,atk=1,def=127,hit=127,evd=0,mag=1,mdef=127"); if($eh){ $a+=@("--enemyhp",$eh) } }
   if($Party -ne ""){ $a+=@("--party",$Party) }
   if($Field -ge 0){ $a+=@("--field","$Field") }   # the capture's stage
+  if($Orig){ $a+=@("--orig") }   # the PS1 art, for a comparison of colours against the capture
   if($Kind -ne ""){ $a+=@("--kind",$Kind) }
   if($Ko -ge 0){ $a+=@("--ko","$Ko") }   # that party unit starts KO'd (Revive / Full Revival)
   if($Ring -ne ""){ $a+=@("--ring",$Ring) }   # the field ring at the start (a capture's ring, e.g. blue,green,yellow)

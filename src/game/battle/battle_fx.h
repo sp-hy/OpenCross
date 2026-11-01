@@ -21,6 +21,7 @@
 #include "battle/battle.h"
 #include "data/tables.h"
 #include "game/effects/bespoke/bespoke.h"
+#include "game/effects/bespoke/env_mesh.h"
 #include "game/effects/effect_slots.h"
 #include "game/effects/emitter_system.h"
 #include "game/effects/sequence_player.h"
@@ -253,6 +254,7 @@ class BattleFxRun {
   bool done() const;
   int ticks() const { return ticks_; }
   void collect(const effects::ViewParams& view, float alpha, FxFrame& out) const;
+  effects::EnvMeshes& env_meshes() { return env_meshes_; }
   void collect_meshes(const effects::ViewParams& view, float alpha, std::vector<effects::EmitterSystem::MeshInstance>& out) const {
     em_->collect_meshes(view, alpha, out);
   }
@@ -311,6 +313,7 @@ class BattleFxRun {
   std::unique_ptr<effects::BespokeEffect> bespoke_;
   // Behind bespoke_models().
   effects::FxModels models_;
+  effects::EnvMeshes env_meshes_;
   Callbacks cb_;
   FxScene scene_;
   // Target the per-target loop serves.

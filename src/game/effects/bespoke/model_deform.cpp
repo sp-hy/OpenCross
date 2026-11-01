@@ -470,6 +470,10 @@ void emit_poly(const DrawVert* corners, int count, int unit, int tex, int tex_w,
     for (int k = 0; k < count; ++k) {
       u8 rgb[3] = {pc.rgb[0], pc.rgb[1], pc.rgb[2]};
       if (colour_fn && spec.colour) spec.colour(corners[k], rgb);
+      if (spec.cue && !(pc.byte3 & 0x60)) {
+        const float amount = spec.cue->amount(sz[count - 1]);
+        for (int channel = 0; channel < 3; ++channel) rgb[channel] = static_cast<u8>(std::lround(rgb[channel] + (spec.cue->rgb[channel] - rgb[channel]) * amount));
+      }
       prim.v[k] = {sx[k], sy[k], rgb[0], rgb[1], rgb[2]};
       prim.u[k] = corners[k].u;
       prim.w[k] = corners[k].w;
