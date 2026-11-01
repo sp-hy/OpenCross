@@ -203,8 +203,6 @@ void App::apply_flow_action(const game::FlowAction& action) {
     if (room.empty() || !world.load_room(room, action.param)) {
       log::error("flow: could not load {}", room);
       flow.start(game::FlowState::Title);
-    } else if (action.restore_position) {
-      world.place_leader(action.x, action.z);
     }
   }
 }

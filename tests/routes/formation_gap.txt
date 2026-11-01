@@ -1,0 +1,12 @@
+# opn_a04i, entrance 1: the dialogue on the balcony ends with op 86, which walks the followers to the party V on a line that crosses a gap in the
+# walk mesh. They keep the balcony height: the last dump shows entities 2 and 3 at y -702, near (643, -434) and (643, -252).
+0 wait idle
+- request party_add 1
+- request party_add 22
+- load opn_a04i 1
+- wait room opn_a04i 300
+- wait dialogue open
+- skip 2000
+- wait 240
+- dump
+- quit

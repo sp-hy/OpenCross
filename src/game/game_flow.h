@@ -44,7 +44,7 @@ bool parse_flow_start(std::string_view text, std::optional<FlowState>& out, bool
 
 // What the host (App::apply_flow_action) must do after a flow event. All fields default to "nothing".
 // room: map file stem. room_id: Continue's saved location word; the host re-resolves it on the saved disc
-// (FieldWorld::room_stem_for_id). param: ROOM_PARAM. restore_position: Continue puts the leader at (x, z) after load_room.
+// (FieldWorld::room_stem_for_id). param: ROOM_PARAM.
 // state_changed: GameFlow::game_state() holds a new game / loaded slot to apply to the field. open_settings: show the existing
 // options window. stop_music: stop the title music before the field starts its own. movie_row: >= 0 plays this movie-table row
 // (skippable) first; load_room runs when it ends.
@@ -53,8 +53,6 @@ struct FlowAction {
   std::string room;
   int room_id = -1;
   int param = 0;
-  bool restore_position = false;
-  s16 x = 0, z = 0;
   bool state_changed = false;
   bool open_settings = false;
   bool quit = false;

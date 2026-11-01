@@ -2120,6 +2120,40 @@ Bytes assemble_ghost_pac(bool reveal, bool second = false) {
   return image;
 }
 
+// An arrival: the idle loop arms itself (var 0x40), queues a self-cast, waits on it with A4, then reveals its unit with `34 0`.
+Bytes assemble_idle_cast_pac() {
+  Bytes code;
+  auto emit = [&](std::initializer_list<int> bytes) {
+    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
+  };
+  // rel 0: a lone halt, every other entity's idle loop.
+  emit({0x00});
+  const int init4 = static_cast<int>(code.size());
+  // Entity 4: bind unit 3, var 0x40 := 1, halt.
+  emit({0x0E, 0xE3, 0x80, 0x10, 0x40, 0x00, 0x01, 0x00, 0x40, 0x00});
+  const int idle4 = static_cast<int>(code.size());
+  // Var 0x40 == 1: begin_action, clear_queue, queue_attack element 1 on self, A4, var 0x40 := 2, ghost_self 0.
+  const int end = idle4 + 8 + 1 + 1 + 8 + 1 + 6 + 2;
+  emit({0x02, 0x40, 0x00, 0x01, 0x00, 0x40, end & 0xFF, end >> 8});
+  emit({0x66, 0x87, 0x67, 0x01, 0x00, 0x01, 0x00, 0x20, 0x00, 0xE0, 0xA4});
+  emit({0x10, 0x40, 0x00, 0x02, 0x00, 0x40, 0x34, 0x00, 0x00});
+  const size_t ec = 5, base = 0x94 + ec * 0x40;
+  Bytes image(base, 0);
+  auto put32 = [&](size_t offset, u32 value) {
+    for (int i = 0; i < 4; ++i) image[offset + static_cast<size_t>(i)] = static_cast<u8>(value >> (8 * i));
+  };
+  auto put16 = [&](size_t offset, int value) {
+    image[offset] = static_cast<u8>(value);
+    image[offset + 1] = static_cast<u8>(value >> 8);
+  };
+  put32(0, 2), put32(4, 0x10), put32(8, static_cast<u32>(base + code.size())), put32(0xC, static_cast<u32>(base + code.size() + 8));
+  put32(0x90, static_cast<u32>(ec));
+  put16(0x94 + 4 * 0x40 + 0, init4);
+  put16(0x94 + 4 * 0x40 + 2, idle4);
+  image.insert(image.end(), code.begin(), code.end());
+  return image;
+}
+
 // Pip's form change: the PC entity's slot 1 runs A7 on its own unit,
 // the pending form element blocks every PC menu, Pip's next turn (slot 2) casts it on himself, mode 45 applies the form.
 Bytes assemble_pip_pac() {
@@ -2287,6 +2321,76 @@ void test_hidden_pair_reveal_one() {
   CHECK(!battle.validate(attack, &why) && why == "the target is off-stage");
   attack.target = 3;
   CHECK(battle.validate(attack, &why));
+}
+
+// A unit a script reveals while an all-target cast is resolving (the last Komodo Pup's kill script brings in Mama Komodo) is not hit by it: the
+// cast's targets are fixed when it starts.
+struct RevealBrain final : EnemyBrain {
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.kind = EnemyAction::Kind::None;
+    return action;
+  }
+  void on_killed(Battle& battle, int, Rng&, std::vector<EnemyAction>&) override { battle.set_cast_bit(4, true); }
+};
+
+void test_reveal_during_all_target_cast() {
+  data::GameTables tables = make_tables();
+  // Three enemies, the second kept out of the all-target casts until the first one's kill script reveals it.
+  tables.scenes[0].raw[3] = 3;
+  tables.scenes[0].raw[0x1B] = 2;
+  tables.elements.resize(5);
+  auto& sweep = tables.elements[4];
+  sweep.raw[4] = 0x90, sweep.raw[5] = 0x80, sweep.raw[6] = 1, sweep.raw[8] = 12;
+  RevealBrain brain;
+  ScriptedRng rng(Lo::Fallback::Lo);
+  rng.push(0);
+  rng.push(100);
+  Battle battle(tables, rng, brain);
+  PartyMember caster = make_member(0, "A");
+  caster.cells[0] = 0x4004;
+  CHECK(battle.start({caster, make_member(1, "B"), make_member(2, "C")}, 0));
+  CHECK(battle.unit(4).present && battle.unit(5).present);
+  CHECK_EQ(battle.cast_mask() & (1u << 4), 0u);
+  battle.unit_mut(3).hp = 1;
+  battle.unit_mut(4).hp = battle.unit_mut(4).max_hp = 9999;
+  battle.unit_mut(5).hp = battle.unit_mut(5).max_hp = 9999;
+  battle.unit_mut(0).gauge = 2;
+  Command cast;
+  cast.kind = Command::Kind::Element;
+  cast.actor = 0;
+  cast.cell = 0;
+  cast.target = 3;
+  std::string why;
+  CHECK(battle.apply(cast, &why));
+  CHECK(!battle.unit(3).alive());
+  CHECK(battle.cast_mask() & (1u << 4));
+  CHECK_EQ(battle.unit(4).hp, 9999);
+  CHECK(battle.unit(5).hp < 9999);
+}
+
+// An attack queued by an idle loop is not lost: the unit casts it as an action of its own after the action that woke the loop, and the script
+// goes on past its A4 to the reveal.
+void test_idle_loop_cast() {
+  data::GameTables tables = make_tables();
+  tables.scenes[0].raw[3] = 2;
+  tables.scenes[0].raw[0x1B] = 1;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  pac::ScriptedBrain brain;
+  brain.set_module(0, assemble_idle_cast_pac());
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  CHECK(battle.cast_mask() & (1u << 3));
+  battle.unit_mut(3).hp = battle.unit_mut(3).max_hp = 9999;
+  battle.do_weapon_attack(0, 4, 0);
+  battle.finish_external_action();
+  int casts = 0;
+  for (const ActionEvent& event : battle.events())
+    if (event.kind == ActionEvent::Kind::Element && event.actor == 3 && event.element == 1 && event.target == 3) ++casts;
+  CHECK_EQ(casts, 1);
+  CHECK(brain.vm() && brain.vm()->quiescent());
 }
 
 void test_end_rules() {
@@ -3339,6 +3443,8 @@ int main() {
   test_scripted_hp_write_runs_kill_script();
   test_hidden_units();
   test_hidden_pair_reveal_one();
+  test_reveal_during_all_target_cast();
+  test_idle_loop_cast();
   test_debug_flags();
   test_god_mode();
   test_dopple_pool_and_form();

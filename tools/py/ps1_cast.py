@@ -12,7 +12,7 @@
     python -X utf8 tools/py/ps1_cast.py attack --tag T [--keys "Circle:40,Circle:80,..."] [--frames 560]
 
 force queues one target; --target-mask 3+4 writes every unit an all-targets element hits, as the menu does (ocbattleview hits every present unit of the
-target's side, so give the scene's enemies). force checks every caster, group member and the target against the scene's units before it queues anything (a unit that is absent, hidden or
+target's side that the all-target cast mask allows, so give those enemies). force checks every caster, group member and the target against the scene's units before it queues anything (a unit that is absent, hidden or
 dead would hang the cast): unit numbers are the script's bind_unit operand minus 0xE0, and the refusal lists the valid units. A cast that does not
 start within --start-limit run frames, or a GDB timeout, fails that one cast (captures.txt says so) and the batch goes on. --field-poke writes
 field-state memory (field script variables) before the battle id is poked, e.g. 0x80077DE8=2:2 sets field variable 0x1C8. The manifest records

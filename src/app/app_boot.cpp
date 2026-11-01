@@ -124,8 +124,9 @@ void App::init_vfs() {
     mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config));
     // New folders get their defaults (written with the next save).
     render::store_mod_prefs(config, mods);
-    // Scripted runs test the game as shipped: no mod reaches them.
+    // Scripted runs test the game as shipped: no mod reaches them, also through a later art change. The ini's choices stay as they are.
     if (config.debug_script.empty()) mods.apply(files, render::mod_art(config.art_mode));
+    else for (vfs::Mod& mod : mods.mods()) mod.enabled = false;
   }
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.

@@ -61,7 +61,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
-| `FastMode` | 0 | bool | RDE fast mode (F2, pad RT). |
+| `FastMode` | 0 | bool | RDE fast mode (F2, pad RT). FMVs play at normal speed, as in RDE. |
 | `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Read as off when `FastMode` is on; the two are exclusive. |
 | `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
 | `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
