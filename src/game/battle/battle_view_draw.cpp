@@ -243,6 +243,9 @@ void BattleView::draw(const render::Frame& frame, bool sprites_resume) {
 void BattleView::draw_scene(const render::Frame& frame, const render::Letterbox& lb, bool sprites_resume) {
   if (!scene_visible()) return;
   fx_particle_pass_ = false;
+  // Before the warp and cross-fade targets: both draw the scene from this one mask.
+  collect_shadow_casters();
+  cast_shadow_pass(frame);
   // Effect screen warp (ops 0x3E-0x40): the scene into a target, then copied + warped.
   if (fx_warp_begin(frame)) {
     draw_scene_3d(fx_warp_frame_, lb, sprites_resume);
@@ -264,80 +267,6 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
 
   fx_draw_fog(frame, lb, true, sprites_resume);
   if (stage_scene_.ready()) {
-    // Unit drop shadows: every visible unit with a model casts one; the stage scene builds the hulls.
-    std::vector<StageScene::ShadowCaster> casters;
-    for (int i = 0; i < battle::kUnits; ++i) {
-      const battle::Unit& unit = battle_->unit(i);
-      const Visual& visual = vis_[static_cast<size_t>(i)];
-      if (showcase_on_ || !unit.present || !visual.has_model || !visual.model->gpu || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)] || (ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) || anm_hidden(i)) continue;
-      if (!unit.pc && lerp(visual.fade_prev, visual.fade, alpha_) <= 0.0f) continue;
-      const effects::FxModel* om = fx_ && fx_->bespoke_models() && static_cast<size_t>(i) < fx_->bespoke_models()->units.size()
-                                       ? &fx_->bespoke_models()->units[static_cast<size_t>(i)]
-                                       : nullptr;
-      // The overlay model's shadow flag (0x200) says whether the unit casts its shadow.
-      if (om && (om->hidden || !(om->flags & 0x200)) && !om->own_shadow) continue;
-      // The shadow flag is cleared by S5 op 0x22 / pack op 0x74.
-      if (shadow_off_[static_cast<size_t>(i)]) continue;
-      StageScene::ShadowCaster caster;
-      {
-        // The shadow stays on the floor under the unit; its grey fades with the height.
-        const std::array<float, 3> world = unit_world(i, alpha_);
-        caster.x = world[0];
-        caster.z = world[2];
-        caster.y = std::max(0.0f, world[1]);
-      }
-      caster.yaw = std::atan2(-lerp(visual.pface_x, visual.face_x, alpha_), -lerp(visual.pface_z, visual.face_z, alpha_));
-      caster.height = visual.height;
-      caster.model = &visual.model->asset;
-      // Footprint = the posed joint positions, from the same palette the draw uses.
-      visual.pose.palette(alpha_, palette_);
-      for (size_t j = 0; j < palette_.size(); ++j) {
-        const float jx = palette_[j].at(0, 3), jz = palette_[j].at(2, 3);
-        if (!caster.has_fp) {
-          caster.fp.min_x = caster.fp.max_x = jx;
-          caster.fp.min_z = caster.fp.max_z = jz;
-          caster.has_fp = true;
-        }
-        caster.fp.min_x = std::min(caster.fp.min_x, jx);
-        caster.fp.max_x = std::max(caster.fp.max_x, jx);
-        caster.fp.min_z = std::min(caster.fp.min_z, jz);
-        caster.fp.max_z = std::max(caster.fp.max_z, jz);
-      }
-      casters.push_back(caster);
-    }
-    // The pack's pseudo-actor casts a shadow once the Shadow op set its flag and it is not hidden (or an overlay draws it itself: ghost2).
-    const bool pa_own_shadow = fx_ && fx_->bespoke_models() && fx_->bespoke_models()->pseudo_own_shadow;
-    if (pa_.on && (!pa_.hidden || pa_own_shadow) && pa_.shadow && pa_.asset && pa_.pose) {
-      if (pa_.height < 0) {
-        float ext = 0;
-        for (const assets::Mesh& mesh : pa_.asset->meshes)
-          for (const assets::SkinVertex& sv : mesh.pool) ext = std::max(ext, std::fabs(sv.bind_pos[1]));
-        pa_.height = ext > 50 ? ext : 1000.0f;
-      }
-      StageScene::ShadowCaster caster;
-      caster.x = lerp(pa_.px, pa_.x, alpha_);
-      caster.z = lerp(pa_.pz, pa_.z, alpha_);
-      caster.y = std::max(0.0f, lerp(pa_.py, pa_.y, alpha_));
-      caster.yaw = std::atan2(-lerp(pa_.pface_x, pa_.face_x, alpha_), -lerp(pa_.pface_z, pa_.face_z, alpha_));
-      caster.height = pa_.height * pa_.scale[1];
-      caster.model = pa_.asset;
-      pa_.pose->palette(alpha_, palette_);
-      for (size_t j = 0; j < palette_.size(); ++j) {
-        const float jx = palette_[j].at(0, 3) * pa_.scale[0], jz = palette_[j].at(2, 3) * pa_.scale[2];
-        if (!caster.has_fp) {
-          caster.fp.min_x = caster.fp.max_x = jx;
-          caster.fp.min_z = caster.fp.max_z = jz;
-          caster.has_fp = true;
-        }
-        caster.fp.min_x = std::min(caster.fp.min_x, jx);
-        caster.fp.max_x = std::max(caster.fp.max_x, jx);
-        caster.fp.min_z = std::min(caster.fp.min_z, jz);
-        caster.fp.max_z = std::max(caster.fp.max_z, jz);
-      }
-      casters.push_back(caster);
-    }
-    showcase_shadows(casters);
-    stage_scene_.set_shadow_casters(std::move(casters));
     {
       // GTE depth cue of the stage objects (effects op 0x2D ramps it; the fog flag is set by ops 0x24 / 0x6C).
       render::StagePipeline::DepthCue cue;
@@ -366,23 +295,13 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     if (const CamPose& eye_pose = camera_.current(); i == active_pc_ && ui_ == Ui::Target && cam_dynamic_ && dyn_target_ >= 0 &&
         std::hypot(eye_pose.eye[0] - visual.x, eye_pose.eye[2] - visual.z) < 400.0f && eye_pose.eye[1] < visual.y + visual.height + 300.0f)
       continue;
-    const float x = lerp(visual.px, visual.x, alpha_), z = lerp(visual.pz, visual.z, alpha_), yl = lerp(visual.py, visual.y, alpha_);
-    const float fx = lerp(visual.pface_x, visual.face_x, alpha_), fz = lerp(visual.pface_z, visual.face_z, alpha_);
+    const float yl = lerp(visual.py, visual.y, alpha_);
     // A bespoke effect overlay that steers this model: its block fields replace the placement.
     const effects::FxModel* om = fx_ && fx_->bespoke_models() && static_cast<size_t>(i) < fx_->bespoke_models()->units.size()
                                      ? &fx_->bespoke_models()->units[static_cast<size_t>(i)]
                                      : nullptr;
     if (om && om->hidden) continue;
-    // Model -> world: translate * yaw * (y mirrored: models are y down, the stage y up). Forward is model -Z.
-    render::Mat4 model_mat = render::mat4_translation(x, yl, z) * render::mat4_rotation_y(std::atan2(-fx, -fz));
-    render::Mat4 flip;
-    flip.at(1, 1) = -1.0f;
-    model_mat = model_mat * flip;
-    if (om && om->steer) {
-      const effects::FxModelPose op = effects::fx_model_pose(*om, alpha_);
-      model_mat = render::mat4_translation(op.pos[0], op.pos[1], op.pos[2]) * render::mat4_rotation_y(std::atan2(-fx, -fz)) * flip *
-                  render::mat4_from_rt(op.rel.m, {0, 0, 0});
-    }
+    const render::Mat4 model_mat = unit_model_matrix(i, om);
     visual.pose.palette(alpha_, palette_);
     render::MeshPipeline::DrawParams dp;
     dp.view_proj = vp;
@@ -427,12 +346,8 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     // ops 0x79 / 0x7A n and by the battle-start script, S5 entry 8: most PCs hide slot 1 there, Nikki / Mell swap hands with them, Glenn's second
     // form shows two). Slot 1 needs a record (all-zero = no second mount).
     for (int slot = 0; slot < 2; ++slot) {
-      if (!visual.weapon || !visual.weapon->gpu || anm_weapon_hidden(i, slot)) continue;
-      const assets::MountPoint& mount = visual.model->asset.attach.mounts[static_cast<size_t>(slot)];
-      const int attach = slot == 0 ? visual.weapon_attach : (mount.used ? static_cast<int>(mount.attach) : -1);
-      if (attach < 0) continue;
-      const assets::AttachPoint& ap = visual.model->asset.attach.points[static_cast<size_t>(attach)];
-      if (ap.joint < palette_.size()) {
+      render::Mat4 wm;
+      if (weapon_matrix(i, slot, wm)) {
         render::MeshPipeline::DrawParams wd = dp;
         // Op 0xA0's per-part colours are the unit model's shading entries, not the weapon's; the weapon always files its faces by their average
         // z; the weapon renderers light by their own rule instead of the model's.
@@ -453,15 +368,6 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
             wd.light.spec_eye[k] = cam_.eye[k];
           }
         }
-        // Slot k = JointMatrix(attach.joint) * [RotMatrixZYX(mount.rot) | attach.pos + mount.pos] (the offset in the joint's
-        // space, not turned by the mount rotation; 4096 = a turn). Guile's wand sits on attach 31 = joint 21, a bone the tech clips animate.
-        assets::Vec3 off = ap.pos, deg{0, 0, 0};
-        if (mount.used)
-          for (size_t k = 0; k < 3; ++k) {
-            off[k] += mount.pos[k];
-            deg[k] = mount.rot[k] * (360.0f / 4096.0f);
-          }
-        const render::Mat4 wm = palette_[ap.joint] * render::mat4_from_rt(assets::rotation_zyx(deg), off);
         wd.palette = std::span<const render::Mat4>(&wm, 1);
         if (visual.weapon_prism) prism_weapon_light(wd.model * wm, static_cast<float>(tick_count_) + alpha_, wd);
         meshes_->draw(*visual.weapon->gpu, wd);

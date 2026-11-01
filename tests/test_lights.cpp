@@ -151,6 +151,50 @@ int main() {
     const float white[3] = {1, 1, 1}, orange[3] = {1, 0.5f, 0.1f};
     CHECK(std::fabs(chroma_scale(white) - 0.25f) < 1e-4f && chroma_scale(orange) == 1.0f);
   }
+  // Spell shadow: nothing without live light; a dim light leaves the shadow to the sun, a bright one takes it, a bright one out of reach does not.
+  {
+    const float unit[3] = {0, 500, 0};
+    oc::render::LightSet set;
+    CHECK(oc::render::spell_shadow(set, unit).level == 0.0f);
+    set.light[0] = {{3000, 0, 0}, {2.0f, 2.0f, 2.0f}, 8000.0f, false, 0.0f};
+    set.count = 1;
+    CHECK(oc::render::spell_shadow(set, unit).level == 0.0f);
+    set.light[0].live = 0.1f;
+    CHECK(oc::render::spell_shadow_share(oc::render::spell_shadow(set, unit).level) == 0.0f);
+    set.light[0].live = 2.0f;
+    oc::render::SpellShadow shadow = oc::render::spell_shadow(set, unit);
+    CHECK(oc::render::spell_shadow_share(shadow.level) == 1.0f);
+    set.light[0].radius = 2000.0f;
+    CHECK(oc::render::spell_shadow(set, unit).level == 0.0f);
+    // Away from the light, at most the slope limit; a light overhead throws it shorter.
+    CHECK(shadow.slope_x < 0.0f && std::fabs(shadow.slope_z) < 1e-5f && std::fabs(shadow.slope_x + oc::render::kMaxShadowSlope) < 1e-4f);
+    set.light[0] = {{1500, 3500, 0}, {2.0f, 2.0f, 2.0f}, 8000.0f, false, 2.0f};
+    shadow = oc::render::spell_shadow(set, unit);
+    CHECK(std::fabs(shadow.slope_x + 0.5f) < 1e-4f);
+    // Lights around the unit cancel; one close to its axis barely leans it.
+    set.light[0] = {{1500, 500, 0}, {2.0f, 2.0f, 2.0f}, 8000.0f, false, 2.0f};
+    set.light[1] = {{-1500, 500, 0}, {2.0f, 2.0f, 2.0f}, 8000.0f, false, 2.0f};
+    set.count = 2;
+    shadow = oc::render::spell_shadow(set, unit);
+    CHECK(shadow.level > 3.0f && std::fabs(shadow.slope_x) < 1e-4f);
+    set.light[0] = {{50, 500, 20}, {2.0f, 2.0f, 2.0f}, 8000.0f, false, 2.0f};
+    set.count = 1;
+    shadow = oc::render::spell_shadow(set, unit);
+    CHECK(std::hypot(shadow.slope_x, shadow.slope_z) < 0.1f);
+  }
+  // Live level: the glow eases down after its cluster is gone, the live level drops at once.
+  {
+    LightTracker tracker;
+    LightCluster cluster;
+    cluster.weight = 3.0f;
+    cluster.size = 200.0f;
+    tracker.update(std::vector<LightCluster>{cluster});
+    tracker.update(std::vector<LightCluster>{cluster});
+    CHECK(tracker.set().light[0].live > 1.0f);
+    tracker.update(std::vector<LightCluster>{});
+    const oc::render::LightSet after = tracker.set();
+    CHECK(after.count == 1 && after.light[0].rgb[0] > 0.2f && after.light[0].live == 0.0f);
+  }
   // Cap: however many lights stack, the multiplier stays below 1 + 0.9; typical bursts sit at 1.2-1.5; the hue (blue / red = 10) survives the knee.
   {
     oc::render::LightSet set;

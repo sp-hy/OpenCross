@@ -65,7 +65,7 @@ int main() {
   CHECK(!load_text("").edge_blend && load_text("[Enhancements]\nEdgeBlend=1\n").edge_blend);
   // The old SeamBlend level key maps to EdgeBlend off / on / on.
   CHECK(!load_text("[Enhancements]\nSeamBlend=0\n").edge_blend && load_text("[Enhancements]\nSeamBlend=1\n").edge_blend && load_text("[Enhancements]\nSeamBlend=2\n").edge_blend);
-  CHECK(defaults.smooth_effect_rings && defaults.battle_shadows && !defaults.lighting);
+  CHECK(defaults.smooth_effect_rings && !defaults.lighting);
   // SmoothReflections defaults on; 0 = the PS1 texel steps.
   CHECK(defaults.smooth_reflections && !load_text("[Enhancements]\nSmoothReflections=0\n").smooth_reflections);
   CHECK(defaults.filter_effects == TexFilter::Bilinear && defaults.wide_edge_fade == 4 && !defaults.ps1_res);

@@ -94,12 +94,11 @@ Opt-in improvements, independent of `Ps1Res`; each is also a checkbox in the Gra
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `SmoothWaterLine` | 1 | bool | Submerged actor parts are cut at the exact water plane, not per whole triangle. |
-| `BattleShadows` | 1 | bool | Smooth per-vertex floor darkening with distance in battles; off = the stepped PS1 look. |
 | `AutoHideCastHud` | 0 | bool | Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). |
 | `RetainBattleScenery` | 0 | bool | Keep the battle stage's intro-only scenery layer for the whole battle. |
 | `SmoothEffectRings` | 1 | bool | Ring and tube shaped effect meshes get extra segments. |
 | `SmoothReflections` | 1 | bool | Environment-mapped model parts slide their reflection sub-texel instead of in whole texels. |
-| `Lighting` | 0 | bool | Key light on field and battle characters, and bright spell effects light the battle units and stage. |
+| `Lighting` | 0 | bool | Key light on field and battle characters, bright spell effects light the battle units and stage, and units cast shadows of their real shape on the floor: in battle from the stage's sun and spells (`battle_stage.md` 8.3.2), in the field straight below them (`docs/rules/field_actors.md` section 7). The battle floor also darkens smoothly per vertex with distance; off = the stepped PS1 look. |
 | `EdgeBlend` | 0 | bool | Cross-fade the faces along texture seams of the battle stage and title meshes. |
 
 ### 2.6 `[Audio]`

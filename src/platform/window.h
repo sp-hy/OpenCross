@@ -32,6 +32,12 @@ struct Input {
 // calls.
 void stick_to_dpad(Input& input, std::array<bool, 4>& held);
 
+// The mouse pointer disappears in the fullscreen modes after this long without mouse input, unless the settings window is open.
+inline constexpr u64 kPointerIdleMs = 3000;
+constexpr bool pointer_hidden(bool fullscreen, bool settings_open, u64 idle_ms) {
+  return fullscreen && !settings_open && idle_ms >= kPointerIdleMs;
+}
+
 class Window {
  public:
   using EventHook = void (*)(const SDL_Event&, void* user);
@@ -80,6 +86,9 @@ class Window {
 
   SDL_Window* handle() const { return window_; }
   void pixel_size(int& w, int& h) const;
+  bool fullscreen() const { return !windowed_; }
+  // Milliseconds since the last mouse motion, button or wheel event.
+  u64 mouse_idle_ms() const;
   // Drives the open gamepad's motors (SDL_RumbleGamepad). No-op without a pad or while the window is unfocused (RDE gates
   // XInputSetState on the same flag). Call once per presented frame; repeats the request before SDL's duration lapses.
   void set_rumble(const RumbleOut& out);
@@ -95,6 +104,7 @@ class Window {
   SDL_Gamepad* pad_ = nullptr;
   RumbleOut rumble_{};
   unsigned long long rumble_sent_ms_ = 0;
+  u64 mouse_used_ms_ = 0;
   EventHook hook_ = nullptr;
   void* hook_user_ = nullptr;
 };

@@ -40,6 +40,7 @@
 #include "game/room_lighting.h"
 #include "game/room_view.h"
 #include "render/render_target.h"
+#include "render/shadow_pipeline.h"
 #include "import/text.h"
 #include "platform/window.h"
 #include "script/field_host.h"
@@ -160,6 +161,11 @@ struct Ent {
   u16 wake_count = 0;
   // shadow strength: starts at 0x40, eases toward (R+G+B)/6, 0 on water / stairs
   int shadow_grey = 0x40;
+  // [Enhancements] Lighting: this frame's tile of the shadow mask, -1 = the blob, and the units it spans either way of the actor.
+  int shadow_tile = -1;
+  float shadow_half = 0;
+  // Its floor's rise per unit of x and z, eased: walk-mesh triangles change slope at a step, which the tile's span would show as a jump.
+  float shadow_slope_x = 0, shadow_slope_z = 0;
   // The curved-walk heading of each script slot (FE 2D). 42 / 43 start it at the shown facing; 44 / 45 / 46 keep the
   // slot's last value. Internal angles; 0x800 = the engine's 0.
   std::array<int, 8> curve_h{0x800, 0x800, 0x800, 0x800, 0x800, 0x800, 0x800, 0x800};
@@ -381,6 +387,10 @@ class FieldWorld final : public script::FieldHost {
   void set_draw_slab(float lo, float hi);
   // [Enhancements] SmoothEffectRings
   void set_smooth_rings(bool on) { smooth_rings_ = on; }
+  // [Enhancements] Lighting: actors cast their silhouette, as if lit from straight above.
+  void set_cast_shadows(bool on) { cast_shadows_ = on; }
+  // Draws the frame's shadow tiles: before anything of the frame needs depth (ShadowPipeline::begin_tiles).
+  void prepare_shadows(const render::Frame& frame, float alpha);
   // ---- FE 02 captured-frame transitions (kinds 1 / 3 / 4 additive fade of the old frame, 5 / 6 slide) ------
   // The host hands the next presented frame to FieldWorld when capture_wanted() (GpuContext::request_capture), and draws the overlay as usual.
   bool capture_wanted() const { return capture_.want; }
@@ -685,6 +695,8 @@ class FieldWorld final : public script::FieldHost {
   void step_wakes();
   // per-actor shadow strength
   void step_shadows();
+  // The actor casts a floor shadow at all.
+  bool casts_shadow(size_t index) const;
   void step_fade();
   // Every field entry fades in from black after INIT, whatever INIT's own A8 asked for: kind 2 over 0x20 ticks from white, else
   // over 0x30 from black (a captured kind then sets its own length).
@@ -920,6 +932,9 @@ class FieldWorld final : public script::FieldHost {
   // floor shadows
   ActorShadows shadows_;
   bool shadows_ok_ = false;
+  // [Enhancements] Lighting; created when first used.
+  render::ShadowPipeline shadow_tiles_;
+  bool cast_shadows_ = false, shadow_tiles_failed_ = false;
   // art mode: party actors use their 4x texture
   bool hd_ = true;
 

@@ -174,6 +174,7 @@ void BattleView::shutdown() {
   fx_copy_rt_.destroy();
   particles_.destroy();
   stage_pipe_.destroy();
+  shadow_pipe_.destroy();
   linear_.destroy();
   nearest_.destroy();
   ctx_ = nullptr;

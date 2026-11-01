@@ -246,6 +246,8 @@ void Window::pixel_size(int& w, int& h) const {
   if (window_) SDL_GetWindowSizeInPixels(window_, &w, &h);
 }
 
+u64 Window::mouse_idle_ms() const { return SDL_GetTicks() - mouse_used_ms_; }
+
 bool Window::pump(Input& input) {
   bool running = true;
   input.key_pressed.fill(false);
@@ -272,6 +274,10 @@ bool Window::pump(Input& input) {
       case SDL_EVENT_KEY_UP:
         if (ev.key.scancode < Input::kKeys) input.key_down[ev.key.scancode] = false;
         break;
+      case SDL_EVENT_MOUSE_MOTION:
+      case SDL_EVENT_MOUSE_BUTTON_DOWN:
+      case SDL_EVENT_MOUSE_BUTTON_UP:
+      case SDL_EVENT_MOUSE_WHEEL: mouse_used_ms_ = SDL_GetTicks(); break;
       case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
         if (ev.gbutton.button < Input::kButtons) input.pad_pressed[ev.gbutton.button] = true;
         break;

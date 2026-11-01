@@ -98,6 +98,7 @@ StageScene::LoadResult StageScene::load_step(double budget_ms, std::string* err)
       log::info("stage: light from sun0 at ({}, {}, {})", light_[0], light_[1], light_[2]);
       break;
     }
+  key_light_ = game::key_light(*asset_);
   // Names are not unique across kinds (bg_34 has a scenery `bg34` and the ground `bg34`): the PS1 registry keys them by list type.
   for (size_t i = 0; i < asset_->parts.size(); ++i) (asset_->parts[i].ground ? ground_parts_ : parts_).emplace(asset_->parts[i].name, static_cast<int>(i));
     ld_.phase = 1;
@@ -301,6 +302,8 @@ void StageScene::clear() {
   shadow_verts_.clear();
   shadow_idx_.clear();
   light_ = {0.0f, 3072.0f, 0.0f};
+  key_light_ = KeyLight{};
+  floor_shadow_ = nullptr;
   asset_.reset();
   ctx_ = nullptr;
   drawn_ = 0;
@@ -365,7 +368,7 @@ const StageScene::Footprint& StageScene::footprint(const assets::ModelAsset* mod
 
 // Builds the drop-shadow geometry: hull, light projection, rounding, rings and colours (steps below).
 void StageScene::build_shadow(const ShadowCaster& caster, const Footprint& fp, const std::array<float, 3>& light, std::vector<assets::StageVertex>& verts,
-                              std::vector<u32>& indices) {
+                              std::vector<u32>& indices, float grey_scale) {
   // Model-local x / z on the floor.
   using Point2 = std::array<float, 2>;
   // 1. Footprint rectangle padded by 0x80.
@@ -433,6 +436,7 @@ void StageScene::build_shadow(const ShadowCaster& caster, const Footprint& fp, c
   // 5. Grey level (0xFF) fades as the unit rises: grey -= y * grey / 1024, floor 8.
   float grey = 255.0f;
   if (caster.y > 0) grey = std::max(8.0f, 255.0f - caster.y * 255.0f / 1024.0f);
+  grey *= grey_scale;
   float radius = 0;
   for (const Point2& point : rim) radius = std::max(radius, std::sqrt(point[0] * point[0] + point[1] * point[1]));
   // Near hulls (radius < 0x400): a fan from the centre, centre colour grey, rim 0. Far hulls: the
@@ -492,6 +496,10 @@ void StageScene::build_shadow(const ShadowCaster& caster, const Footprint& fp, c
     }
     prev.swap(ring);
   }
+}
+
+namespace {
+constexpr float kContactShade = 0.3f;
 }
 
 void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, render::Rect scissor, const effects::ViewParams& view,
@@ -679,6 +687,18 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
   // Debug: OC_STAGE_REJECT_LOG logs the packets dropped per frame.
   static const bool log_reject = std::getenv("OC_STAGE_REJECT_LOG") != nullptr;
   if (log_reject) log::info("stage: {} objects, {} packets rejected", inst_.size(), rejected_);
+  std::array<float, 12> floor_cam;
+  for (size_t k = 0; k < 9; ++k) floor_cam[k] = view.rot.m[k];
+  for (size_t k = 0; k < 3; ++k) floor_cam[9 + k] = view.trans[k];
+  // [Enhancements] Lighting: the real shadows on the floor; the sun of a light object throws a harder one than the stand-in key light.
+  if (floor_shadow_) {
+    render::ShadowPipeline::Floor floor;
+    floor.clip = proj * render::mat4_from_rows(floor_cam);
+    floor.rect = floor_rect_;
+    floor.strength = key_light_.source == KeyLightSource::Camera ? 0.42f : 0.5f;
+    floor.lights = &spell_lights_;
+    floor_shadow_->draw_floor(floor);
+  }
   // Unit drop shadows after the scenery: subtractive Gouraud hulls on the floor, depth tested one slot in front of the floor
   // they lie on (the PS1 sorts them 0x19 slots behind the unit; the units are drawn afterwards and win the depth test).
   shadow_verts_.clear();
@@ -686,13 +706,13 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
   // Debug: OC_STAGE_NOSHADOW leaves the unit drop shadows out (reference comparisons).
   static const bool no_shadow = std::getenv("OC_STAGE_NOSHADOW") != nullptr;
   if (!no_shadow)
-    for (const ShadowCaster& caster : casters_) build_shadow(caster, caster.has_fp ? caster.fp : footprint(caster.model), light_, shadow_verts_, shadow_idx_);
-  if (!shadow_idx_.empty()) {
-    std::array<float, 12> cam;
-    for (size_t k = 0; k < 9; ++k) cam[k] = view.rot.m[k];
-    for (size_t k = 0; k < 3; ++k) cam[9 + k] = view.trans[k];
-    pipe.draw_dynamic(proj, cam, shadow_verts_, shadow_idx_, 3, -1);
-  }
+    for (const ShadowCaster& caster : casters_) {
+      const Footprint& fp = caster.has_fp ? caster.fp : footprint(caster.model);
+      // Under real shadows the hull is only the contact shade of the feet: faint, and straight below the unit.
+      if (floor_shadow_) build_shadow(caster, fp, {caster.x, 3072.0f, caster.z}, shadow_verts_, shadow_idx_, kContactShade);
+      else build_shadow(caster, fp, light_, shadow_verts_, shadow_idx_);
+    }
+  if (!shadow_idx_.empty()) pipe.draw_dynamic(proj, floor_cam, shadow_verts_, shadow_idx_, 3, -1);
   pipe.end();
 }
 

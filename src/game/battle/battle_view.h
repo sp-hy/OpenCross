@@ -124,7 +124,7 @@ class BattleView {
   void set_texture_filter(bool linear) { linear_filter_ = linear ? 1 : 0; }
   // [Video] WideHud: layer columns per side the HUD edge groups move out by.
   void set_wide_hud_columns(float columns) { wide_hud_cols_ = std::max(0.0f, columns); }
-  // [Enhancements] SmoothEffectRings (off under Ps1Res), BattleShadows, SpellLights.
+  // [Enhancements] SmoothEffectRings (off under Ps1Res), Lighting (smooth floor darkening, spell lights).
   void set_smooth_rings(bool on) { smooth_rings_ = on; }
   void set_smooth_fog(bool on) { stage_pipe_.set_smooth_fog(on); }
   void set_spell_lights(bool on) { spell_.lights_on = on; }
@@ -401,6 +401,15 @@ class BattleView {
   void showcase_load();
   void showcase_tick();
   void showcase_shadows(std::vector<StageScene::ShadowCaster>& casters);
+  // battle_view_shadows.cpp. Every unit, pseudo-actor and showcase model that casts a drop shadow this frame, handed to the stage scene.
+  void collect_shadow_casters();
+  // [Enhancements] Lighting: draws the casters into the floor mask and tells the stage scene to lay it on the floor.
+  void cast_shadow_pass(const render::Frame& frame);
+  // Model -> world of a unit as drawn: translate * yaw * (y mirrored: models are y down, the stage y up; forward is model -Z), or the placement of the
+  // bespoke overlay `om` that steers it.
+  render::Mat4 unit_model_matrix(int unit, const effects::FxModel* om) const;
+  // The unit's weapon `slot` (0, 1) in the joint space of the model, from palette_ (the unit's pose); false = no weapon there.
+  bool weapon_matrix(int unit, int slot, render::Mat4& out) const;
   void showcase_draw(const render::Mat4& view_proj, const render::Mat4& view);
   bool showcase_on_ = false;
   std::vector<ShowcaseModel> showcase_;
@@ -811,6 +820,17 @@ class BattleView {
   int debug_ui_ = 0;
 
   render::StagePipeline stage_pipe_;
+  // [Enhancements] Lighting; created when first used.
+  render::ShadowPipeline shadow_pipe_;
+  bool shadow_pipe_failed_ = false;
+  // Per unit, the last for the pseudo-actor: the eased part of its shadow that is the spell's (render::spell_shadow_share) and the eased slope of that shadow.
+  struct ShadowLean {
+    float share = 0, slope_x = 0, slope_z = 0;
+  };
+  std::array<ShadowLean, battle::kUnits + 1> shadow_lean_{};
+  // tick_count_ of the last easing step.
+  int shadow_tick_ = -1;
+  std::vector<StageScene::ShadowCaster> shadow_casters_;
   // The stage's object scripts + mesh instances (stage_scene.h).
   StageScene stage_scene_;
   Cam cam_;

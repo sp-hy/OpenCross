@@ -69,6 +69,8 @@ bool SpriteBatch::init(GpuContext& ctx) {
   pd.blend = Blend::Subtract;
   if (!pipeline_sub_.create(ctx, pd)) return false;
   pd.depth_test = true;
+  pd.blend = Blend::Multiply;
+  if (!pipeline_mul_depth_.create(ctx, pd)) return false;
   pd.blend = Blend::Additive;
   if (!pipeline_add_depth_.create(ctx, pd)) return false;
   pd.blend = Blend::Subtract;
@@ -93,6 +95,7 @@ void SpriteBatch::destroy() {
   pipeline_mul_.destroy();
   pipeline_add_.destroy();
   pipeline_sub_.destroy();
+  pipeline_mul_depth_.destroy();
   pipeline_add_depth_.destroy();
   pipeline_sub_depth_.destroy();
   pipeline_avg_depth_.destroy();
@@ -197,7 +200,7 @@ void SpriteBatch::end() {
 }
 
 void SpriteBatch::bind_pipeline() {
-  const Pipeline& pipeline = mode_ == BlendMode::Multiply   ? pipeline_mul_
+  const Pipeline& pipeline = mode_ == BlendMode::Multiply   ? (depth_mode_ ? pipeline_mul_depth_ : pipeline_mul_)
                              : mode_ == BlendMode::Add      ? (depth_mode_ ? pipeline_add_depth_ : pipeline_add_)
                              : mode_ == BlendMode::Subtract ? (depth_mode_ ? pipeline_sub_depth_ : pipeline_sub_)
                              : mode_ == BlendMode::Average  ? (depth_mode_ ? pipeline_avg_depth_ : pipeline_)

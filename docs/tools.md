@@ -122,6 +122,7 @@ Source: `tools/ocstage.cpp`. `<bg_NN>` may also be a path below `cdrom/`, with o
 | `info` | `<bg_NN>` | Parts, atlases, cameras, sequences, emitters, lens tables of one stage. |
 | `export` | `<bg_NN> <outdir>` | `part_<entry>_<name>.obj`, `stage.mtl`, `tex_m*_c*.png`, `stage.json`. |
 | `objects` | `<bg_NN>` | The stage's object scripts as the engine draws them (mesh, sprite type, blend, flags, transform, colour, life). |
+| `light` | `<bg_NN\|all>` | Where `[Enhancements] Lighting` takes the stage's sunlight from: source (`sun`, `flare`, `camera`), elevation, azimuth. |
 | `envpage` | `<bg_NN\|all> [outdir]` | The stock environment page as `<bg>_env.png`; `all` lists every stage's coverage (visible texels, distinct colours). |
 | `validate` | none | Every `battle/bg/*.prd`; exit 0 when all pass; `-v` lists the passing ones too. |
 
@@ -180,7 +181,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--orig` | none | HD art | Original (PS1) art instead of HD. |
 | `--mods` | none | off | Apply the ini's enabled mods in Modded art, texture replacements included. |
 | `--field` | `<n>` | the scene's own | Battlefield operand (stage `bg_NN`). |
-| `--size` | `<w> <h>` | `1280 960` | Window size. |
+| `--size` | `<w> <h>` | `1280 960` | Window size; silently clamped to the display and capped by vsync, so it cannot time render-scale cost (section 6.3). |
 | `--sliced` | none | off | Load in 3 ms slices per frame (the field encounter's way); logs the longest slice. |
 | `--cam` | none | off | Camera overlay on (F3 / F9 toggle). |
 | `--party` | `a[,b[,c]]` | `0,1,22` | Character ids; slot 0 = the acting PC (it makes `--cast` / `--weapon`). The battle seats the party in this order, so `--caster`, `--casttgt`, `--cast2tgt` and `--ko` values 0..2 are slots of this list and units alike. |
@@ -333,7 +334,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_MENU_ONLY` | `src/ui/menu/menu_demo.cpp` | tag substring | Keeps only the menu-demo steps whose tag contains it. |
 | `OC_SHOP_LOG` | `src/ui/shop/shop_screen.cpp` | set | Logs the shop compass selection and angle. |
 | `OC_FREECAM_TRACE` | `src/game/debug_tools.cpp` | set | Logs the raw and smoothed frame time of the free camera. |
-| `OC_LIGHTING` | `src/game/battle/demo_main.cpp` | set | `ocbattleview`: forces `[Enhancements] Lighting` on (mesh lighting and spell lights). |
+| `OC_LIGHTING` | `src/game/battle/demo_main.cpp` | set | `ocbattleview`: forces `[Enhancements] Lighting` on (mesh lighting, spell lights, cast shadows, smooth floor darkening). |
 | `OC_SMOOTH_REFL` | `src/game/battle/demo_main.cpp` | `1`, other | `ocbattleview`: overrides `[Enhancements] SmoothReflections`; `1` on, any other value off. |
 
 ### 3.3 Battle view and effects
@@ -657,3 +658,25 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 | `tools/duckstation.ps1`, `tools/py/ps1ref.py`, `ps1_capture.py`, `ps1_cast.py`, `ps1_audio.py`, `ps1_registry.py`, `ps1_scene.py`, `ps1_state.py` | `README.md` section 3 and `validation.md` section 3 |
 | `tools/ghidra_setup.ps1`, `tools/ghidra/` | `README.md` |
 | `tools/py/cc_*.py` importers and save tools (`cc_audio`, `cc_container`, `cc_effects`, `cc_emitter_ops`, `cc_fieldscript`, `cc_lzss`, `cc_model`, `cc_model_util`, `cc_prd`, `cc_room`, `cc_save`, `cc_save_forge`, `cc_stage`, `cc_tables`, `cc_text`, `cc_tim`) | `README.md`, [`formats/`](formats/) |
+
+## 6. Recipes
+
+### 6.1 Finding a tech's owner
+
+A character-unique tech is cast by its owner in both the reference and OpenCross (`ocbattleview --party <owner>`), since its clips and scripts are built for that model. The owner is the character with a listed grid cell (character record +0x40, the cells of the mask, [`formats/battle_data.md`](formats/battle_data.md)) equal to `0xC000 | element`, in any character set: `char`, `char20` or `char_w0..5`, as some techs exist only in the later sets. Do not search the whole record for the masked value, because stats collide with it. A double or triple tech names its casters in `pgdat` bytes +0x14..+0x16; put all of them in the party.
+
+### 6.2 Undoing a line-ending flip
+
+`git ls-files --eol <files>` shows each file's endings; `git diff --numstat` against `git diff --ignore-space-at-eol --numstat` shows which files flipped. For each one, from bash (a PowerShell `>` re-encodes the patch):
+
+```sh
+git diff --ignore-space-at-eol -- <file> > fix.patch
+git checkout -- <file>
+git apply --ignore-whitespace fix.patch
+```
+
+This restores the committed bytes and re-applies only the real changes.
+
+### 6.3 Timing a GPU feature
+
+Time render-scale cost in the real app, because `ocbattleview --size` stops at the display's size. Copy `tests/routes/battle_hud.ini` to a scratch folder and set `VSync=0`, `Width=2560`, `Height=1440`, `RenderScale=4.00` and `Msaa=2`, then run it with `OC_FRAMETIME=2` and read the `frametime:` log lines (`tools/py/u_ft.py`). Shots and logs land next to the ini. The app paces itself near 120 Hz, so read p50 and p99, not just the mean, and confirm the real size from a shot or the log before trusting a result. Compare against the feature off.

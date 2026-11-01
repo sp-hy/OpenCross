@@ -83,7 +83,7 @@ class SpriteBatch {
   // One pipeline per blend; pipeline_depth_ writes depth, the other *_depth_ ones only test it.
   Pipeline pipeline_;
   Pipeline pipeline_depth_;
-  Pipeline pipeline_mul_, pipeline_add_, pipeline_sub_, pipeline_add_depth_, pipeline_sub_depth_, pipeline_avg_depth_;
+  Pipeline pipeline_mul_, pipeline_add_, pipeline_sub_, pipeline_mul_depth_, pipeline_add_depth_, pipeline_sub_depth_, pipeline_avg_depth_;
   Pipeline pipeline_pre_, pipeline_add_alpha_;
   BlendMode mode_ = BlendMode::Alpha;
   SpriteFilter filter_ = SpriteFilter::Sampler;

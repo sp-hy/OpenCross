@@ -88,6 +88,7 @@ std::vector<LightCluster> cluster_sources(std::vector<LightSource> sources, cons
 // cluster continued decay by orphan_decay and are dropped below 0.01 (stable compaction).
 void LightTracker::update(std::span<const LightCluster> clusters) {
   bool matched[render::LightSet::kMax] = {};
+  for (int i = 0; i < count_; ++i) tracked_[i].live = 0.0f;
   for (const LightCluster& cluster : clusters) {
     const float max_channel = std::max({cluster.rgb[0], cluster.rgb[1], cluster.rgb[2], 1e-4f});
     const float hue[3] = {cluster.rgb[0] / max_channel, cluster.rgb[1] / max_channel, cluster.rgb[2] / max_channel};
@@ -131,6 +132,7 @@ void LightTracker::update(std::span<const LightCluster> clusters) {
     }
     Tracked& light = tracked_[best];
     light.level += (target - light.level) * (target > light.level ? params_.attack : params_.decay);
+    light.live = target;
     matched[best] = true;
   }
   for (int i = 0; i < count_; ++i)
@@ -154,6 +156,7 @@ render::LightSet LightTracker::set() const {
       light.rgb[k] = tracked.hue[k] * tracked.level * params_.strength;
     }
     light.radius = tracked.radius;
+    light.live = tracked.live * params_.strength;
   }
   return lights;
 }

@@ -292,6 +292,7 @@ int ocbattleview_main(int argc, char** argv) {
       const char* smooth_env = std::getenv("OC_SMOOTH_REFL");
       meshes.set_smooth_reflections(smooth_env ? smooth_env[0] == '1' : config.smooth_reflections);
       view.set_spell_lights(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
+      view.set_smooth_fog(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       // The game's [Video] Widescreen / WideHudEdges, from this window's shape.
       if (config.widescreen) {
         const float wx = render::wide_extra_for(static_cast<float>(ctx.extent().width), static_cast<float>(ctx.extent().height));

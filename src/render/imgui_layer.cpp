@@ -251,6 +251,16 @@ void ImGuiLayer::apply_style() {
   io.FontGlobalScale = custom_font_ ? kFontPx * scale / kFontRaster : scale;
 }
 
+void ImGuiLayer::set_pointer_hidden(bool hidden) {
+  ImGuiIO& io = ImGui::GetIO();
+  if (hidden) {
+    io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
+    SDL_HideCursor();
+  } else {
+    io.ConfigFlags &= ~ImGuiConfigFlags_NoMouseCursorChange;
+  }
+}
+
 void ImGuiLayer::new_frame() {
   ImGui_ImplSDLGPU3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
@@ -701,11 +711,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
   auto sec_enh = [&] {
     section("Enhancements");
     if (ImGui::BeginTable("enh", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
-      if (check_cell("Enhanced battle shadows",
-                     "Darkens the battle floor and stage objects smoothly with distance (the PS1 depth cue evaluated per vertex), instead of "
-                     "one flat step per floor tile. Off: the PS1's stepped look.",
-                     cfg.battle_shadows))
-        change.enhancements = true;
       if (check_cell("Smooth effect rings",
                      "The blue contact rings of an encounter and the ring / tube shaped spell effects are 32-sided polygons on the PS1 "
                      "(invisible at 320x224). Each segment is split along a smooth curve through the original corners.",
@@ -722,11 +727,13 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "so the reflection slides smoothly with the movement. Off: the PS1's stepped look.",
                      cfg.smooth_reflections))
         change.enhancements = true;
-      if (check_cell("Enhanced lighting",
+      if (check_cell("Enhanced lighting / shadows",
                      "Real lighting on top of the PS1's flat colours. Characters (field and battle) get a key light from above and in front "
                      "of the camera, so faces turning away are clearly darker and faces turning toward it brighter. In battle, bright spells "
                      "(fire, beams, flashes) glow: they light up the characters, the floor and the scenery around them in the spell's colour "
-                     "while they play. Off: the PS1's flat lighting.",
+                     "while they play. Characters and enemies throw real shadows of their own shape: in the field right under them, in "
+                     "battle away from the stage's sun, or from a spell bright enough to outshine it. The battle floor and stage objects darken "
+                     "smoothly with distance instead of one flat step per floor tile. Off: the PS1's flat lighting, soft blobs and stepped floor.",
                      cfg.lighting))
         change.enhancements = true;
       if (check_cell("Edge blending",

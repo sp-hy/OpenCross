@@ -38,7 +38,7 @@ function(oc_shader out src)
     VERBATIM)
   set(OC_SHADER_INCS ${OC_SHADER_INCS} ${OC_SPV_DIR}/${out} PARENT_SCOPE)
 endfunction()
-foreach(sh sprite.vert sprite.frag mesh.vert mesh.frag particle.vert particle.frag crt.vert crt.frag stage.vert stage.frag)
+foreach(sh sprite.vert sprite.frag mesh.vert mesh.frag particle.vert particle.frag crt.vert crt.frag stage.vert stage.frag shadow_cast.vert shadow_cast.frag shadow_floor.vert shadow_floor.frag shadow_blur.vert shadow_blur.frag)
   oc_shader(${sh}.inc ${sh})
 endforeach()
 oc_shader(stage_affine.vert.inc stage.vert -DAFFINE)
@@ -74,6 +74,8 @@ add_library(oc_render STATIC
   mesh_pipeline.cpp
   stage_pipeline.h
   stage_pipeline.cpp
+  shadow_pipeline.h
+  shadow_pipeline.cpp
   particles.h
   particles.cpp
   crt_pass.h

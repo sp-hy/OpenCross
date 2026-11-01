@@ -225,7 +225,7 @@ class StagePipeline {
     float r = 128, g = 128, b = 128, near = 16384, far = 20480;
   };
   void set_depth_cue(const DepthCue& cue) { cue_ = cue; }
-  // [Enhancements] BattleShadows: the depth cue per vertex (smooth floor darkening) instead of per packet (PS1 stepping); independent of art mode.
+  // [Enhancements] Lighting: the depth cue per vertex (smooth floor darkening) instead of per packet (PS1 stepping); independent of art mode.
   void set_smooth_fog(bool on) { smooth_fog_ = on; }
   // [Enhancements] SpellLights: point lights (the strongest kLights of `s`, render world y up) lighting the OPAQUE scenery drawn until the next begin()
   // (per fragment; the face normal from the screen derivatives; additive on the PS1 colour multiplier). `cam` = StageInstance::cam of the view.
@@ -300,7 +300,7 @@ class StagePipeline {
   float gte_h_ = 512, gte_ox_ = 160, gte_oy_ = 120;
   CullFrame gte_cf_;
   DepthCue cue_;
-  // [Enhancements] BattleShadows: depth cue per vertex instead of per packet.
+  // [Enhancements] Lighting: depth cue per vertex instead of per packet.
   bool smooth_fog_ = false;
   // The current draw() samples the bilinear texture sets.
   bool linear_draw_ = false;

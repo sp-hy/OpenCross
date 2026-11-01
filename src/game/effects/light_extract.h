@@ -72,6 +72,8 @@ class LightTracker {
     // hue: max channel 1.
     float hue[3] = {1, 1, 1};
     float level = 0, radius = 450;
+    // The target of this tick's level, 0 when no cluster continued the light.
+    float live = 0;
   };
   LightParams params_;
   Tracked tracked_[render::LightSet::kMax];

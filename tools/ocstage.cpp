@@ -7,9 +7,11 @@
 //                                                       flags, position / angle / scale, OT bias, colour, life)
 //   ocstage [-g <gamedir>] envpage <bg_NN|all> [outdir] the stage's stock environment page as <bg>_env.png; `all` lists every stage's
 //                                                       coverage (visible texels, distinct colours)
+//   ocstage [-g <gamedir>] light <bg_NN|all>            where [Enhancements] Lighting takes the stage's sunlight from
 //   ocstage [-g <gamedir>] [-v] validate                every battle/bg/*.prd; exit 0 when all pass (-v lists the passing ones too)
 // <bg_NN> may also be a path below cdrom/ (with or without .prd).
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -20,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "game/battle/stage_key_light.h"
 #include "import/battle_stage.h"
 #include "platform/paths.h"
 #include "tool_util.h"
@@ -191,6 +194,30 @@ int cmd_objects(const vfs::Vfs& game_fs, const std::string& arg) {
                 emitter.scale[1] / 4096.0, emitter.scale[2] / 4096.0, emitter.bias, emitter.color[0] >> 4, emitter.color[1] >> 4,
                 emitter.color[2] >> 4, life.c_str(), emitter.ext & 1 ? " uv-scroll" : "",
                 emitter.ext & 0x30 ? (emitter.ext & 0x20 ? " two-sided" : " reversed-cull") : "");
+  }
+  return 0;
+}
+
+// One line per stage: where [Enhancements] Lighting takes its sunlight from, as elevation and azimuth.
+int cmd_light(const vfs::Vfs& game_fs, const std::string& arg) {
+  std::vector<std::string> names{arg};
+  if (arg == "all") {
+    names.clear();
+    for (int i = 0; i < 130; ++i) {
+      char name[16];
+      std::snprintf(name, sizeof name, "bg_%02d", i);
+      if (game_fs.exists("cdrom/" + stage_path(name))) names.emplace_back(name);
+    }
+  }
+  for (const std::string& name : names) {
+    Raw raw;
+    std::string rel;
+    std::optional<assets::StageAsset> stage;
+    if (!load_stage_arg(game_fs, name, rel, raw, stage)) continue;
+    const game::KeyLight light = game::key_light(*stage);
+    static const char* const kSources[] = {"camera", "flare", "sun"};
+    std::printf("%-6s %-6s elevation %5.1f azimuth %6.1f\n", name.c_str(), kSources[static_cast<int>(light.source)], std::asin(std::clamp(light.dir[1], -1.0f, 1.0f)) * 57.29578f,
+                std::atan2(light.dir[2], light.dir[0]) * 57.29578f);
   }
   return 0;
 }
@@ -403,9 +430,9 @@ int ocstage_main(int argc, char** argv) {
     else if (arg == "-v") verbose = true;
     else args.push_back(arg);
   }
-  if (args.empty() || (args[0] != "info" && args[0] != "export" && args[0] != "validate" && args[0] != "objects" && args[0] != "envpage") ||
-      ((args[0] == "info" || args[0] == "objects" || args[0] == "envpage") && args.size() < 2) || (args[0] == "export" && args.size() < 3)) {
-    std::fprintf(stderr, "usage: ocstage [-g <gamedir>] [-v] info <bg_NN> | objects <bg_NN> | envpage <bg_NN|all> [outdir] | export <bg_NN> <outdir> | validate\n");
+  if (args.empty() || (args[0] != "info" && args[0] != "export" && args[0] != "validate" && args[0] != "objects" && args[0] != "envpage" && args[0] != "light") ||
+      ((args[0] == "info" || args[0] == "objects" || args[0] == "envpage" || args[0] == "light") && args.size() < 2) || (args[0] == "export" && args.size() < 3)) {
+    std::fprintf(stderr, "usage: ocstage [-g <gamedir>] [-v] info <bg_NN> | objects <bg_NN> | envpage <bg_NN|all> [outdir] | light <bg_NN|all> | export <bg_NN> <outdir> | validate\n");
     return 2;
   }
   if (gamedir.empty()) gamedir = tool::env_game_dir();
@@ -417,6 +444,7 @@ int ocstage_main(int argc, char** argv) {
   }
   if (args[0] == "info") return cmd_info(game_fs, args[1]);
   if (args[0] == "objects") return cmd_objects(game_fs, args[1]);
+  if (args[0] == "light") return cmd_light(game_fs, args[1]);
   if (args[0] == "envpage") return cmd_envpage(game_fs, args[1], args.size() > 2 ? args[2] : "");
   if (args[0] == "export") return cmd_export(game_fs, args[1], args[2]);
   return cmd_validate(game_fs, verbose);

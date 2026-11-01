@@ -13,18 +13,18 @@ OpenCross is a from-scratch C++20 engine that plays Chrono Cross from the Steam 
 3. **No per-room, per-scene, per-entity hacks.** Fix the general behaviour. If a fix only works for one room, it is wrong.
 4. **Faithful by default.** Classic mode uses only the PS1's own assets; HD mode is exactly RDE's art. Improvements exist only in Modded mode or as opt-in enhancements, off by default.
 5. **Never invent behaviour.** A change is backed by the original game (PS1 in DuckStation, or RDE); where the two differ, RDE is the reference. A verdict is a table or frame comparison, not an impression.
-6. **Docs describe the engine and the formats, nothing else.** No decompiler names, addresses, memory offsets, external sources, history of past attempts, or references to private research material. Credits go in `CREDITS.md`. Every corrected fact lands in `docs/formats` or `docs/architecture.md` in the same change.
-7. **Source comments carry no provenance.** No decompiler names, addresses, measurement notes, doc paths, dates or history. Complicated files and functions get a short header comment saying what they do.
-8. **Naming.** No single-letter identifiers except `i j k` and `x y z w h u v r g b a`. No dead code, no unused includes.
+6. **Docs describe the engine and the formats, nothing else.** No decompiler names, addresses, memory offsets, external sources, history of past attempts, or references to private research material. Credits go in `CREDITS.md`. Every corrected fact lands in `docs/formats` or `docs/architecture.md` in the same change. The one exception is `docs/TODO.md`, which is temporary and may hold RAM addresses and working detail. Write each entry for an agent with no context: what is known, how to reproduce it, when it is done. When an entry is finished, the fact moves to `docs/formats` without the address and the name to `tools/ghidra/symbols/`.
+7. **Source comments carry no provenance.** No decompiler names, addresses, measurement notes, doc paths, dates or history, anywhere in `src/`, `tools/` or `tests/`: not in comments, identifiers, opcode mnemonics or output strings. An address a tool really reads or writes may sit next to that code. Complicated files and functions get a short header comment saying what they do, and every file in `tools/` and `tests/` starts with one. A `case` whose label is not self-explanatory gets a one-line description. No trailing inline comments, and no comments that restate the code.
+8. **Naming and hygiene.** No single-letter identifiers except `i j k` and `x y z w h u v r g b a`. No dead code, no unused includes. `case` labels go in ascending order with `default` last. CI workflow files get no explanatory comments.
 9. **Every function or variable you identify while reverse engineering gets a symbol.** Add it to the matching file in `tools/ghidra/symbols/` in the same change (`name = 0xADDR;  # function|data: what it does`, snake_case with the subsystem prefix, a paraphrase of what you worked out; never a name copied from a third-party symbol list). The address itself never goes into source comments or docs.
-10. **Commits are made by a human.** Agents leave changes uncommitted and report what changed.
+10. **Commits are made by a human.** Agents leave changes uncommitted and report what changed; permission to commit covers only the task it was given for. Never push, open a PR or change anything on the remote without explicit approval for that step.
 
 ## Workflow for a change
 
 1. Build Debug and run the unit tests: `.\build.ps1 debug -Test`. Release: `.\build.ps1 release`. A header change can leave stale objects; when something odd happens after one, clean-rebuild.
 2. Reproduce with a route (`tests/routes/run.ps1 <name>`) or a dev tool (`opencross <tool>`; `opencross tools` lists them) before touching code. The deterministic routes `alu_chair`, `art_swap`, `battle_hud` are the refactor baselines.
 3. Battle gates must not regress: `opencross ocbattle fx-audit` and `opencross ocbattle pac-soak` (zero exceptions, outcome counts unchanged unless the change is meant to alter battle scripts).
-4. Compare against the original game, not against memory: a save state in DuckStation, or RDE itself, next to the OpenCross capture. Automate the PS1 side with `tools/py/ps1_capture.py`, `ps1_audio.py` and `ps1ref.py` (`docs/validation.md`, section 3).
+4. Compare against the original game, not against memory: a save state in DuckStation, or RDE itself, next to the OpenCross capture. Automate the PS1 side with `tools/py/ps1_capture.py`, `ps1_audio.py` and `ps1ref.py` (`docs/validation.md`, section 3). Every bug fix gets a reference capture of the same situation and a table diff before hand-over; a brief never says the reference is not needed.
 5. Update the docs in the same change. Tests for new behaviour go in `tests/` (unit) or `tests/routes/` (scripted).
 6. Report faithfully: failing tests with their output, skipped steps as skipped, verified work as verified.
 
@@ -33,19 +33,25 @@ OpenCross is a from-scratch C++20 engine that plays Chrono Cross from the Steam 
 - **Build and routes.** `.\build.ps1 debug -Test`; routes: `$env:OC_BUILD_DIR="build\win-x64"; tests\routes\run.ps1 <name>`; one battle in a window: `opencross ocbattleview <scene> --cast <id> --shotevery N --shotdir D`.
 - **PS1 reference (DuckStation).** Once per machine: `tools\duckstation.ps1 -Setup -Settings`, copy a PS1 BIOS into `tools\duckstation\bios\`, and put your own disc images of the Japanese game (SLPS-02364 or its re-release; Disc 1 and Disc 2, `.cue`+`.bin` or `.chd`, names containing `Disc 1` / `Disc 2`) into `tools\duckstation\games\` (`OC_PS1_DISC` overrides; `Documents\DuckStation\games\` is the fallback). The English (USA) discs may sit in the same folder: they are only picked with `OC_PS1_REGION=usa` or `--disc`, and only for screenshots and states, since the RAM map applies to the Japanese executable. Then `python -X utf8 tools\py\ps1_capture.py prep` forges the memory card from `tmp\save.dat` (a copy of a save, never the real folder) and writes the base states to `tmp\ref\states\`. Captures: `ps1_capture.py scene <name>`, `ps1_capture.py cast batch|summon|tech|enemy|attack ...`, `ps1_audio.py --state ... --cast N`, `ps1_registry.py`; the OpenCross side and the diff: `tools\ours_cast34.ps1 <id>` then `tools\py\fx_diff.py`. Anything scripted goes through `ps1ref.Session` (frame-exact stepping, pad injection, screenshots, states); details and limits in `docs/validation.md` section 3.
 - **Parallel runs.** One emulator per portable folder and port: copy `tools\duckstation\` to `tmp\ds_<name>\` (keep the `resources` folder; empty `savestates`, `screenshots`, `videos`), set `GDBServerPort` in its `settings.ini`, and pass `--ds-dir`/`--port`. Kill only your own emulator process, never by image name. Audio captures must run at real-time pacing (`realtime=True`), everything else unthrottled.
-- **RDE itself.** HD-art and RDE-only behaviour are checked against the Steam build with `tools\rde_*.py`.
+- **RDE itself.** HD-art and RDE-only behaviour are checked against the Steam build with `tools\rde_*.py`. Running RDE is allowed and is the default when a comparison needs it. Start it only through `tools\py\rde_bg.py` or `rde_save_redirect.py`, never directly (`docs/validation.md`, section 3.7), and time-box real-time waits with a stall watchdog.
 - **Disassembly.** `tools\ghidra_setup.ps1 -Ps1Exe ..\data\cdrom.dat` (a minute) or `-GameDir ..` (hours) downloads Ghidra, imports, analyses, applies the project symbol lists and exports the decompilation outside the repo.
 
 ## Practical rules
 
 - Test windows take no focus and play no sound: set `OC_QUIET=1` (the route runner and `ocbattleview --frames` do).
 - Never touch a real save folder (`Documents\My Games\...\Steam\<id>`); use forged saves under `tmp\` or `[Paths] SaveDir`.
-- Unique techs are cast by their owner character in tests, not by Serge.
-- Performance checks run at the settings a player uses (high resolution, render scale), not at route defaults.
-- Several files have mixed line endings; a bulk `sed -i` flips them. Compare `git diff -w --stat` with `git diff --stat` before handing over, and fix flips rather than committing them.
+- Unique techs are cast by their owner character in tests, not by Serge (`docs/tools.md`, section 6.1, finds the owner).
+- Every test and comparison runs with mods off. A `[Debug] Script` run does not apply mods and `ocbattleview` applies them only with `--mods`; give any other plain run a config with mods disabled.
+- Special and scripted battles run on the room's real battlefield with the story's party at that point, and the report says which conditions were used.
+- Use the smallest window that answers the question. Prefer stats, logs and table diffs to viewing images, and crop or downscale any image you do read. Performance runs are the exception.
+- Do not run the real launcher helper: it plays music and writes to the real save folder, so use a silent stand-in that exports the same names. Never store a real Steam unlock unasked; `opencross ocsteam` is read-only and safe.
+- Performance checks run at the settings a player uses, 2560x1440 with RenderScale 4, not at route defaults, and are read from logs (`docs/tools.md`, section 6.3). Run the baseline exe in the same batch: if both builds sit at about 250 ms a frame the Windows session is locked (`Get-Process LockApp`) and the timing is void.
+- Several files have mixed line endings; a bulk `sed -i` flips them. Compare `git diff -w --stat` with `git diff --stat` before handing over, and fix flips rather than committing them (`docs/tools.md`, section 6.2).
 - `tmp\` is scratch: captures, forged saves, agent work. Keep it tidy and never reference it from code or docs.
 - Decompilations and disc dumps you make for yourself stay outside the repo and are never committed.
 
 ## Delegating to agents
 
 Use cheaper models for inventories, mechanical edits and build-and-verify loops; keep design, review and behaviour verdicts with the strongest model. Give each agent the files to read, the exact scope, and the rules above. Every agent reports sizes, what it verified in `src/`, and what it was unsure about; the lead re-checks before hand-over.
+
+Ask scoping questions first, in plain text and one at a time, then launch all the agents together: an interrupted turn kills running background agents. Run short tests the maintainer is watching in the main thread. Every brief repeats the quiet window, mods off, smallest window and line ending rules.

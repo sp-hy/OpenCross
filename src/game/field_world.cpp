@@ -85,6 +85,7 @@ void FieldWorld::shutdown() {
   capture_.set = {};
   capture_.tex.destroy();
   if (sprites_) shadows_.shutdown(*sprites_);
+  shadow_tiles_.destroy();
   dialogue_.shutdown();
 }
 

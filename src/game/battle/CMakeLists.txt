@@ -24,6 +24,8 @@ add_library(oc_battle_view STATIC
   battle_model_cache.cpp
   battle_spell_lights.h
   battle_spell_lights.cpp
+  stage_key_light.h
+  stage_key_light.cpp
   battle_fx_textures.h
   battle_fx_textures.cpp
   battle_audit.h
@@ -44,6 +46,7 @@ add_library(oc_battle_view STATIC
   battle_view_camera.cpp
   battle_view_hud.cpp
   battle_view_draw.cpp
+  battle_view_shadows.cpp
   battle_view_trail.cpp
   battle_view_pseudo.cpp
   battle_view_showcase.cpp
