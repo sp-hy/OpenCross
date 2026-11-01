@@ -204,6 +204,7 @@ class LangTables {
   void set_mesgen(Lang lang, std::string_view utf8);
   void set_wend_csv(std::string_view utf8);
   void set_battle_csv(Lang lang, std::string_view utf8);
+  void set_table(std::string_view name, std::string_view utf8);
 
   // Field dialogue (RDE 0x4517B0): row (room, msg) of <lang>.csv with the mess_wend, Ex_<lang> and mesgen steps. The
   // result uses LF newlines. `speaker` is the script's speaker (0 = unknown) when the text carries no name tag.

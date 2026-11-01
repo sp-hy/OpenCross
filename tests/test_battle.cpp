@@ -5,6 +5,8 @@
 #include <cstring>
 #include <utility>
 
+#include "data/char_name.h"
+#include "data/char_name.h"
 #include "battle/battle.h"
 #include "battle/pac_vm.h"
 #include "game/game_session.h"
@@ -750,7 +752,7 @@ void test_big_catch() {
     int creature = -9, code = -9, value = -9;
     size_t events = 0;
   };
-  const auto run = [](const std::array<u16, 16>& mask, const std::vector<int>& rolls, int row = 0) {
+  const auto run = [](const std::array<u16, 16>& mask, const std::vector<int>& rolls, int row = 0, int target_hp = 0) {
     data::GameTables tables = make_tables();
     tables.elements.resize(5);
     auto& element = tables.elements[4];
@@ -764,6 +766,7 @@ void test_big_catch() {
     opt.dopple_mask = mask;
     battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0, opt);
     for (const int roll : rolls) rng.push(roll);
+    if (target_hp > 0) battle.unit_mut(3).hp = target_hp;
     battle.do_element(0, 4, row, 3);
     Out out;
     out.events = battle.events().size();
@@ -778,6 +781,13 @@ void test_big_catch() {
     const Out out = run(pool, {1, 5, 26});
     CHECK_EQ(out.creature, 86);
     CHECK(out.code == 0 || out.code == 1);
+  }
+  {
+    // an overkill shows the damage rolled, not the HP the target had left
+    const Out full = run(pool, {1, 26});
+    const Out overkill = run(pool, {1, 26}, 0, 1);
+    CHECK(full.value > 1);
+    CHECK_EQ(overkill.value, full.value);
   }
   {
     // the pick runs through the roll order: slot 40 = model 98
@@ -3080,6 +3090,185 @@ void test_monster_party() {
 }
 
 // Pilfered loot reaches the stock on a victory only.
+void test_lynx_duel_bodies() {
+  data::GameTables tables = make_tables();
+  tables.scenes.resize(0x1DE);
+  tables.scenes[0x1DD] = tables.scenes[0];
+  tables.scenes[0x1DD].raw[0] = 0, tables.scenes[0x1DD].raw[1] = 0xFF, tables.scenes[0x1DD].raw[2] = 0xFF;
+  tables.scenes[0x1DD].raw[3] = 3;
+  auto& records = tables.char_sets["char"].rec;
+  const auto set_gender = [&](int char_id, u16 word) {
+    records[static_cast<size_t>(char_id)].raw[0x14] = static_cast<u8>(word);
+    records[static_cast<size_t>(char_id)].raw[0x15] = static_cast<u8>(word >> 8);
+  };
+  set_gender(0, 0x4012), set_gender(1, 0x8034), set_gender(2, 0x4056), set_gender(0x2B, 0x8078);
+  PartyMember serge = make_member(0, "A"), other = make_member(2, "C");
+  serge.eq.weapon_id = 0x20;
+  other.eq.weapon_id = 0x30;
+  other.innate = 3;
+  BattleOptions options;
+  options.duel_third = 2;
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    ForcedWinBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start({serge, other}, 0x1DD, options));
+    // The leader fights alone.
+    CHECK(battle.unit(0).present);
+    CHECK(!battle.unit(1).present);
+    CHECK_EQ(battle.unit(3).body, 0);
+    CHECK_EQ(battle.unit(3).kind, 0);
+    CHECK_EQ(static_cast<int>(battle.unit(3).eq.weapon_id), 0x20);
+    CHECK_EQ(static_cast<int>(battle.unit(3).gender), 0x4012);
+    CHECK_EQ(battle.unit(3).max_hp, 9999 * 0x69 / 100);
+    // Kid is not in the party: the default weapon, and her record's gender word scales the HP.
+    CHECK_EQ(battle.unit(4).body, 1);
+    CHECK_EQ(battle.unit(4).kind, 1);
+    CHECK_EQ(static_cast<int>(battle.unit(4).eq.weapon_id), 0x29);
+    CHECK_EQ(static_cast<int>(battle.unit(4).gender), 0x8034);
+    CHECK_EQ(battle.unit(4).max_hp, 9999 * 0x5F / 100);
+    CHECK_EQ(battle.unit(5).body, 2);
+    CHECK_EQ(battle.unit(5).kind, 2);
+    CHECK_EQ(static_cast<int>(battle.unit(5).eq.weapon_id), 0x30);
+    CHECK_EQ(static_cast<int>(battle.unit(5).gender), 0x4056);
+    CHECK_EQ(static_cast<int>(battle.unit(5).innate), 3);
+  }
+  {
+    // The dummies read the character they became, party member 0 Lynx; a body past the named ids reads nothing.
+    std::vector<std::string> names(0x32);
+    names[0] = "Lynx-body", names[1] = "Kid-name", names[2] = "Third-name", names[0x31] = "Lynx-name";
+    BattleOptions named = options;
+    named.duel_names = names;
+    ScriptedRng rng{Lo::Fallback::Lo};
+    ForcedWinBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start({serge, other}, 0x1DD, named));
+    CHECK(battle.unit(0).name == "Lynx-name");
+    CHECK(battle.unit(3).name == "Lynx-body");
+    CHECK(battle.unit(4).name == "Kid-name");
+    CHECK(battle.unit(5).name == "Third-name");
+  }
+  {
+    // The relief member stood in for Serge in the fight before: Serge's body gets the default weapon, hers the member's.
+    PartyMember relief = make_member(1, "K");
+    relief.eq.weapon_id = 0x33;
+    options.bench = {relief};
+    options.duel_relief = 1;
+    ScriptedRng rng{Lo::Fallback::Lo};
+    ForcedWinBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start({serge, other}, 0x1DD, options));
+    CHECK_EQ(static_cast<int>(battle.unit(0).src_id), 0);
+    CHECK_EQ(static_cast<int>(battle.unit(3).eq.weapon_id), 0x22);
+    CHECK_EQ(static_cast<int>(battle.unit(4).eq.weapon_id), 0x33);
+    CHECK_EQ(static_cast<int>(battle.unit(5).eq.weapon_id), 0x30);
+    options.bench.clear();
+    options.duel_relief = -1;
+  }
+  {
+    // A third that is not in the party leaves the enemy as it is.
+    options.duel_third = 7;
+    ScriptedRng rng{Lo::Fallback::Lo};
+    ForcedWinBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start({serge, other}, 0x1DD, options));
+    CHECK_EQ(battle.unit(5).body, -1);
+    CHECK_EQ(battle.unit(5).kind, static_cast<int>(tables.enemies[0].model()));
+    CHECK_EQ(static_cast<int>(battle.unit(5).innate), static_cast<int>(tables.enemies[0].innate()));
+    CHECK_EQ(static_cast<int>(battle.unit(5).gender), static_cast<int>(tables.enemies[0].rd16(0x14)));
+  }
+  {
+    // Pip keeps his form: the search goes by his character id, the kind comes from his record.
+    PartyMember pip = make_member(0x2B, "P");
+    pip.kind = 0x2D;
+    pip.innate = 4;
+    pip.eq.weapon_id = 0x31;
+    options.duel_third = 0x2B;
+    ScriptedRng rng{Lo::Fallback::Lo};
+    ForcedWinBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start({serge, pip}, 0x1DD, options));
+    CHECK_EQ(battle.unit(5).body, 0x2D);
+    CHECK_EQ(battle.unit(5).kind, 0x2D);
+    CHECK_EQ(static_cast<int>(battle.unit(5).eq.weapon_id), 0x31);
+    CHECK_EQ(static_cast<int>(battle.unit(5).gender), 0x8078);
+    CHECK_EQ(static_cast<int>(battle.unit(5).innate), 4);
+  }
+  // Any other scene keeps its enemies.
+  ScriptedRng plain_rng{Lo::Fallback::Lo};
+  ForcedWinBrain plain_brain;
+  Battle plain{tables, plain_rng, plain_brain};
+  CHECK(plain.start({serge, other}, 0));
+  CHECK_EQ(plain.unit(3).body, -1);
+}
+
+void test_enemy_names_follow_the_language() {
+  data::GameTables tables = make_tables();
+  tables.enemy_names = {"Beach Bum"};
+  PartyMember serge = make_member(0, "Serge");
+  BattleOptions options;
+  options.enemy_names = {"Strandpenner"};
+  ScriptedRng rng{Lo::Fallback::Lo};
+  ForcedWinBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start({serge}, 0, options));
+  CHECK(battle.unit(3).name == "Strandpenner");
+  // No row for the language: the table's name.
+  ScriptedRng plain_rng{Lo::Fallback::Lo};
+  ForcedWinBrain plain_brain;
+  Battle plain{tables, plain_rng, plain_brain};
+  CHECK(plain.start({serge}, 0));
+  CHECK(plain.unit(3).name == "Beach Bum");
+}
+
+void test_unnamed_kid_label() {
+  data::GameTables tables = make_tables();
+  tables.scenes.resize(data::kUnnamedKidScene + 1);
+  tables.scenes[data::kUnnamedKidScene] = tables.scenes[0];
+  PartyMember serge = make_member(0, "Serge"), kid = make_member(data::kKid, "Kid");
+  BattleOptions options;
+  options.unnamed_kid_label = data::unnamed_kid_label(import::Lang::De);
+  ScriptedRng rng{Lo::Fallback::Lo};
+  ForcedWinBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start({serge, kid}, data::kUnnamedKidScene, options));
+  CHECK(battle.unit(0).name == "Serge");
+  CHECK(battle.unit(1).name == "Mädchen");
+  CHECK(battle.party()[1].name == "Mädchen");
+  // Every other scene keeps her name, and so does a run with no label.
+  ScriptedRng other_rng{Lo::Fallback::Lo};
+  ForcedWinBrain other_brain;
+  Battle other{tables, other_rng, other_brain};
+  CHECK(other.start({serge, kid}, 0, options));
+  CHECK(other.unit(1).name == "Kid");
+  ScriptedRng plain_rng{Lo::Fallback::Lo};
+  ForcedWinBrain plain_brain;
+  Battle plain{tables, plain_rng, plain_brain};
+  CHECK(plain.start({serge, kid}, data::kUnnamedKidScene));
+  CHECK(plain.unit(1).name == "Kid");
+  CHECK(std::string(data::unnamed_kid_label(import::Lang::En)) == "Girl");
+  CHECK(std::string(data::unnamed_kid_label(import::Lang::Jp)) == "旅の娘");
+}
+
+void test_target_cursor_order() {
+  const auto order = [](u8 mask, int caster, int last_enemy) {
+    data::ElemRec record;
+    record.raw[4] = mask;
+    return battle::target_cursor_order(battle::target_spec(record), caster, last_enemy);
+  };
+  // A consumable (0x40) and a party element open on unit 0, not on the caster or an enemy.
+  CHECK(order(0x40, 2, 5)[0] == 0 && order(0x40, 2, 5)[2] == 2 && order(0x40, 2, 5)[3] == -1);
+  CHECK(order(0x41, 1, 5)[0] == 0);
+  // Both sides: the enemies first, unless bit 0x02 asks for the party (the Cure line).
+  CHECK(order(0xC0, 1, 5)[0] == 3 && order(0xC0, 1, 5)[6] == 0 && order(0xC0, 1, 5)[8] == 2);
+  CHECK(order(0xC2, 1, 5)[0] == 0 && order(0xC2, 1, 5)[8] == 8);
+  // Self only pins the caster.
+  CHECK(order(0x44, 2, 5)[0] == 2 && order(0x44, 2, 5)[1] == -1);
+  // An enemy ring resumes on the last enemy and wraps within the enemies; a party id is no memory.
+  CHECK(order(0x80, 0, 5)[0] == 5 && order(0x80, 0, 5)[3] == 8 && order(0x80, 0, 5)[4] == 3 && order(0x80, 0, 5)[5] == 4);
+  CHECK(order(0x80, 0, 1)[0] == 3);
+}
+
 void test_stolen_loot_needs_victory() {
   for (const bool win : {false, true}) {
     Fixture fixture;
@@ -3110,6 +3299,7 @@ void test_stolen_loot_needs_victory() {
 int main() {
   test_gear();
   test_rng();
+  test_target_cursor_order();
   test_formulas();
   test_encounter_variant();
   test_hit_chance();
@@ -3165,6 +3355,9 @@ int main() {
   test_dopple_form_gauge_cap();
   test_stolen_loot_needs_victory();
   test_monster_party();
+  test_lynx_duel_bodies();
+  test_unnamed_kid_label();
+  test_enemy_names_follow_the_language();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

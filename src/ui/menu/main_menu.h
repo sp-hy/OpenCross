@@ -9,6 +9,7 @@
 // draw() runs its own SpriteBatch begin()/end() pair (resume = continue the frame's quad buffer after an earlier pair).
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -46,6 +47,8 @@ class MainMenu {
   void set_model_view(MenuModelView* view);
   // Must outlive the menu; needed before open().
   void set_rules(const MenuRules* rules);
+  // The typed names by character id; must outlive the menu.
+  void set_custom_names(const std::map<int, std::u32string>* names);
   void set_mode(ArtMode mode);
   ArtMode mode() const;
   void set_language(import::Lang lang);

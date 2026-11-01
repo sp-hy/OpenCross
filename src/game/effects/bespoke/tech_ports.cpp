@@ -33,10 +33,10 @@ u8 hi_byte(int word) { return static_cast<u8>((word >> 8) & 0xFF); }
 // c = e and the task ends; written to the model colour.
 class Shine : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100 && op != 0x101) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100 && op != 0x101) return false;
     FxModel* model = caster(op == 0x100 ? 0 : 1);
-    if (!model) return;
+    if (!model) return true;
     auto task = std::make_shared<Task>();
     task->model = model;
     task->dur = arg(args, count, 4);
@@ -44,6 +44,7 @@ class Shine : public OverlayFx {
     for (int i = 0; i < 3; ++i) task->start_rgb[i] = model->rgb[i], task->end_rgb[i] = end_rgb[i];
     task->step();
     add_task([task] { return task->step(); });
+    return true;
   }
 
  private:
@@ -103,13 +104,13 @@ class GhostPair : public MeshTech {
 // block, shown again and released to the host, which takes it home from where it stands.
 class Opthedo : public GhostPair {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       set_anim(caster(arg(args, count, 10)), arg(args, count, 8), 0x20);
     } else if (op == 0x101) {
       FxModel* caster_model = caster(0);
       FxModel* target_model = target(ctx_.models ? ctx_.models->cursor : 0);
-      if (!caster_model || !target_model) return;
+      if (!caster_model || !target_model) return true;
       target_model->pos = caster_model->pos;
       for (int k = 0; k < 3; ++k) target_model->rot[k] = caster_model->rot[k];
       target_model->steer = true;
@@ -125,7 +126,10 @@ class Opthedo : public GhostPair {
         if (!on) live_.erase(std::remove(live_.begin(), live_.end(), task), live_.end());
         return on;
       });
+    } else {
+      return false;
     }
+    return true;
   }
   void draw(std::vector<FxPrim>& out) const override {
     u32 order = 0;
@@ -138,10 +142,9 @@ class Opthedo : public GhostPair {
   struct Task {
     FxModel* model = nullptr;
     int elapsed = 0, dur = 1, speed = 0;
-    // FxModel::rot[1] is pi minus the unit's yaw; the retail task rotates by the PS1 yaw = 2048 - rot[1], so the slide runs along the
-    // unit's forward (-sin yaw, -cos yaw).
+    // The slide runs along the unit's forward (-sin yaw, -cos yaw).
     bool step() {
-      const Mat3 rotation = Mat3::from_angles(model->rot[0], (2048 - model->rot[1]) & 0xFFF, model->rot[2]);
+      const Mat3 rotation = Mat3::from_angles(model->rot[0], model->rot[1], model->rot[2]);
       const Vec3 offset = rotation.apply({0, 0, static_cast<float>(speed)});
       model->pos[0] += unfixed(static_cast<int>(offset[0]) * 0x100);
       model->pos[2] += unfixed(static_cast<int>(offset[2]) * 0x100);
@@ -163,13 +166,17 @@ class Opthedo : public GhostPair {
 };
 
 // kamedes: 0x100 (D = @+4): target 0 fades out, colour c = 0x80 - (t << 7) / D, through the ghost pair each tick; after D the task frees
-// itself and the model stays hidden. Its op-0x59 prefix falls through to the stock op. The dead-pose word its init writes is not tracked.
+// itself and the model stays hidden. Its op-0x59 prefix falls through to the stock op. Init puts target 0's idle-pose word at 8 (dead).
 class Kamedes : public GhostPair {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100) return;
+  void init() override {
+    const FxModel* model = target(0);
+    if (model && ctx_.hooks.set_pose) ctx_.hooks.set_pose(model->unit, 8);
+  }
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100) return false;
     FxModel* model = target(0);
-    if (!model) return;
+    if (!model) return true;
     model_ = model;
     tick_ = 0;
     duration_ = std::max(1, arg(args, count, 4));
@@ -183,6 +190,7 @@ class Kamedes : public GhostPair {
       set_colour(model_, 0x80 - ((tick_ << 7) / duration_));
       return true;
     });
+    return true;
   }
   void draw(std::vector<FxPrim>& out) const override {
     if (!on_) return;
@@ -202,9 +210,10 @@ class Kamedes : public GhostPair {
 // target 0: 0x100 hides parts 2..5, shows 0, 1, 6, 7 and turns its shadow on; 0x101 SetAnim(M, s16 @+8, s16 @+4); 0x102 hides parts 0..7.
 class KMonk : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100 && op != 0x101 && op != 0x102) return false;
     FxModel* model = target(0);
-    if (!model) return;
+    if (!model) return true;
     if (op == 0x100) {
       model->part_hide = (model->part_hide | 0x3Cu) & ~0xC3u;
       model->part_show = (model->part_show | 0xC3u) & ~0x3Cu;
@@ -215,47 +224,71 @@ class KMonk : public OverlayFx {
       model->part_hide |= 0xFFu;
       model->part_show &= ~0xFFu;
     }
+    return true;
   }
 };
 
 // ---- soidash -----------------------------------------------------------------------------------------------------------------------
 class Soidash : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     (void)args;
     (void)count;
-    if ((op != 0x100 && op != 0x101) || !ctx_.models) return;
+    if (op != 0x100 && op != 0x101) return false;
+    if (!ctx_.models) return true;
     for (size_t i = 0; i < ctx_.models->casters.size(); ++i) (op == 0x100 ? flag_clear : flag_set)(caster(static_cast<int>(i)), 0x200);
+    return true;
   }
 };
 
 // ---- bboy --------------------------------------------------------------------------------------------------------------------------
 // 'bway' gets a replacement draw callback through its op 0x48 record: the sprite is not drawn, the model of its op-0x39 selector (2 = the
-// loop's target) is shown and put at the particle (pos >> 4). 0x100: every target faces 0xC00 and stands on its home.
+// loop's target) is shown and put at the particle (pos >> 4). 0x100: every target faces 0xC00 and stands on its home; the particle's basis is
+// that target, so the wave always runs along +x, whichever side the targets are on.
 class Bboy : public OverlayFx {
  protected:
   void init() override {
     if (!em()) return;
     em()->set_object_hook("bway", [this](EmitterSystem::ObjectRef& object) {
-      FxModel* model = target(ctx_.models ? ctx_.models->cursor : 0);
+      // 2 / 0xD = target 0, 0xD + n = target n: each target's clone of the emitter carries its own selector.
+      FxModel* model = target(object.basis_sel > 0xD ? object.basis_sel - 0xD : 0);
       if (!model) return;
       model->hidden = false;
+      model->reveal = true;
       model->pos = {static_cast<float>(object.pos[0]) / 65536.0f, static_cast<float>(object.pos[1]) / 65536.0f, static_cast<float>(object.pos[2]) / 65536.0f};
       model->steer = true;
+      last_ride_[static_cast<size_t>(model->unit)] = ticks_;
     }, true);
-    em()->set_draw_suppressed("bway", true);
+    em()->set_draw_dropped("bway", true);
   }
-  void command(int op, const int* args, int count) override {
+  // A rider whose particle has died stays where it landed, with the yaw of the ride: the unit takes over that placement.
+  void frame() override {
+    ++ticks_;
+    for (int i = 0; i < target_count(); ++i) {
+      FxModel* model = target(i);
+      int& last = last_ride_[static_cast<size_t>(model->unit)];
+      if (last == 0 || ticks_ - last < kRideGapTicks) continue;
+      last = 0;
+      model->release = true;
+    }
+  }
+  bool command(int op, const int* args, int count) override {
     (void)args;
     (void)count;
-    if (op != 0x100) return;
+    if (op != 0x100) return false;
     for (int i = 0; i < target_count(); ++i) {
       FxModel* model = target(i);
       model->rot[1] = 0xC00;
       model->pos = model->home;
       model->steer = true;
     }
+    return true;
   }
+
+ private:
+  static constexpr int kRideGapTicks = 4;
+  std::array<int, 16> last_ride_{};
+  int ticks_ = 1;
 };
 
 // ---- shock -------------------------------------------------------------------------------------------------------------------------
@@ -263,22 +296,27 @@ class Bboy : public OverlayFx {
 // caster's side.
 class Shock : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op == 0x100 && em()) {
+  bool command(int op, const int* args, int count) override {
+    if (op == 0x100) {
+      if (!em()) return true;
       const u32 packed = static_cast<u16>(arg(args, count, 8)) | (static_cast<u32>(static_cast<u16>(arg(args, count, 10))) << 16);
       std::string name;
       for (int i = 0; i < 4 && ((packed >> (8 * i)) & 0xFF); ++i) name.push_back(static_cast<char>((packed >> (8 * i)) & 0xFF));
-      if (name.empty()) return;
+      if (name.empty()) return true;
       em()->stop(name);
       em()->for_each_object(name, [](EmitterSystem::ObjectRef& object) {
         if (*object.life != 0) *object.life = 1, *object.flags |= 0x40000;
       });
-    } else if (op == 0x101 && ctx_.models) {
+    } else if (op == 0x101) {
+      if (!ctx_.models) return true;
       const FxModel* caster_model = caster(0);
-      if (!caster_model) return;
+      if (!caster_model) return true;
       for (FxModel& model : ctx_.models->units)
         if (&model != caster_model && model.unit >= 0 && model.pc == caster_model->pc) model.hidden = true;
+    } else {
+      return false;
     }
+    return true;
   }
 };
 
@@ -350,10 +388,10 @@ struct Orbit {
 // 0x101 (D @+4): return.
 class Uzumaki : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       const FxModel* caster_model = caster(0);
-      if (!caster_model) return;
+      if (!caster_model) return true;
       const int cx = static_cast<s16>(static_cast<int>(caster_model->pos[0])), cz = static_cast<s16>(static_cast<int>(caster_model->pos[2]));
       for (int i = 0; i < target_count(); ++i) {
         FxModel* model = target(i);
@@ -376,7 +414,10 @@ class Uzumaki : public OverlayFx {
       }
     } else if (op == 0x101) {
       add_returns(arg(args, count, 4), false);
+    } else {
+      return false;
     }
+    return true;
   }
   void add_returns(int dur, bool mix) {
     for (int i = 0; i < target_count(); ++i) {
@@ -396,10 +437,10 @@ class Uzumaki : public OverlayFx {
 // R - R t / D to 0 and y += vy * -0x40. 0x101 (D @+4): the return with rot y = y while running.
 class Mix3 : public Uzumaki {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       const FxModel* target0 = target(0);
-      if (!target0) return;
+      if (!target0) return true;
       const int cx = target0->pos[0] <= 0 ? -0x800 : 0x800, cz = 0;
       for (int i = 0; i < target_count(); ++i) {
         FxModel* model = target(i);
@@ -423,7 +464,10 @@ class Mix3 : public Uzumaki {
       }
     } else if (op == 0x101) {
       add_returns(arg(args, count, 4), true);
+    } else {
+      return false;
     }
+    return true;
   }
 };
 
@@ -432,13 +476,14 @@ class Mix3 : public Uzumaki {
 // moved by y' = y + (rsin(P + (y << S)) * A >> 12), z' = z + (rcos(P + (y' << S)) * A >> 12) (y' already updated), P += 0x40 per tick.
 class Godhand : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100) return false;
     on_ = true;
     tick_ = 0;
     duration_ = arg(args, count, 4);
     amp_ = arg(args, count, 12);
     shift_ = arg(args, count, 14);
+    return true;
   }
   void frame() override {
     FxModel* model = target(0);
@@ -473,15 +518,17 @@ class Godhand : public OverlayFx {
 // ---- tumaru (Pip's form changes: base2p base2m p2pp p2pm m2pm m2mm) ---------------------------------------------------------------
 // The live overlay draws nothing (the ghost-copy code in it is never called): init starts every caster's external anmseq entry 0x80 with
 // its list index (that script starts the 'chng' sequence), hides the pack's own 'act0' actor and shows caster 0 (OpenCross draws no extra
-// actor); ops 0x180 / 0x181 only call the host's unit swap of Pip's new form: 0x181 is where the new model is bound.
+// actor); ops 0x180 / 0x181 only call the host's unit swap of Pip's new form: 0x180 arms it with the unit already hidden by the 'chng' entry,
+// so nothing shows and the swap needs no state ahead of 0x181, where the new model is bound.
 class Tumaru : public OverlayFx {
  protected:
   void init() override {
     for (int i = 0; FxModel* model = caster(i); ++i) run_script(model, "", 0x80, i);
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x181 && ctx_.hooks.form_swap) ctx_.hooks.form_swap(2);
-    OverlayFx::command(op, args, count);
+    const bool handled = OverlayFx::command(op, args, count);
+    return handled || op == 0x180 || op == 0x181;
   }
 };
 

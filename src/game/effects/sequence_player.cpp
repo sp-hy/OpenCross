@@ -15,6 +15,8 @@ int g_pools_seen = 0;
 
 constexpr int kMaxTasks = 24;
 constexpr int kMaxStepsPerTick = 512;
+// Op 0x6A reads bttim.ltd; op 0x42 waits for that read.
+constexpr int kStockTextureReadTicks = disc_read_ticks(31492);
 
 // off counts from the command start (the stored data begins at +4).
 u16 u16_at(const assets::SeqCmd& cmd, size_t off) {
@@ -89,6 +91,9 @@ struct SequencePlayer::Impl {
   int disp_cursor = 0, disp_inherited = 0, disp_caster = 0;
   // Ticks since this player was created (OC_FX_SEQ trace only).
   long long tick_n = 0;
+  // Ticks left of the op 0x6A read; a stop asked for inside the pass.
+  int read_left = 0;
+  bool stop_pending = false;
 
   Impl(const EffectBank& effect_bank, EmitterSystem& emitters, u32 seed) : bank(effect_bank), em(emitters) { rng.state = seed ? seed : 1; }
 
@@ -311,26 +316,36 @@ struct SequencePlayer::Impl {
         case 0x55: em.stop_expire(cmd.name); break;
         case 0x5A: em.kill(cmd.name); break;
         // Wait for CD idle: the data is resident, so nothing to do.
-        case 0x42: break;
+        case 0x42:
+          if (read_left > 0) {
+            task.wait = 1;
+            return;
+          }
+          break;
         // Loop label: the next command becomes the loop start, the target cursor resets to 0.
         case 0x4E: task.loop_pc = task.pc + 1; task.cursor = 0; break;
         case 0x4D:
           // Only sequences with header flag bit0 loop over the targets; when the next one exists the cursor advances and the pc returns to the label.
           // A served loop returns at once with the wait reset (the op's own wait is NOT taken - only the
-          // last target's pass waits it out).
+          // last target's pass waits it out). The next tick overshoots that zero wait by one, which the pass's first wait pays back.
           if (hooks.has_target) {
             if ((task.seq->flags & 1) && hooks.has_target(task.cursor + 1)) {
               ++task.cursor;
               task.pc = task.loop_pc;
-              task.wait = 0;
+              task.wait = -1;
               // Continues next tick.
               return;
             }
           } else if (hooks.next_target && hooks.next_target()) {
             task.pc = task.loop_pc;
-            task.wait = 0;
+            task.wait = -1;
             return;
           }
+          break;
+        case 0x6A:
+          read_left = kStockTextureReadTicks;
+          ++st.other_ops;
+          if (hooks.other) hooks.other(cmd);
           break;
         case 0x50:
           if (hooks.actor_busy && hooks.actor_busy()) {
@@ -366,12 +381,19 @@ struct SequencePlayer::Impl {
     ++tick_n;
     ambient.step();
     shake.step();
+    if (read_left > 0) --read_left;
     platform::Rumble& pad = platform::Rumble::instance();
     for (size_t i = 0; i < tasks.size(); ++i) {
       if (tasks[i].done) continue;
       vib_step(tasks[i], pad);
       if (tasks[i].wait > 0) --tasks[i].wait;
       run(i);
+      if (stop_pending) break;
+    }
+    if (stop_pending) {
+      stop_pending = false;
+      tasks.clear();
+      shake = Tween{};
     }
     tasks.erase(std::remove_if(tasks.begin(), tasks.end(), [](const Task& task) { return task.done; }), tasks.end());
   }
@@ -398,6 +420,7 @@ void SequencePlayer::stop_all() {
   impl_->tasks.clear();
   impl_->shake = Tween{};
 }
+void SequencePlayer::stop_all_after_pass() { impl_->stop_pending = true; }
 void SequencePlayer::tick() { impl_->tick(); }
 size_t SequencePlayer::active() const { return impl_->tasks.size(); }
 size_t SequencePlayer::active_non_loop() const {

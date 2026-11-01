@@ -28,9 +28,9 @@ class Grav41 : public OverlayFx {
       for (int k = 0; k < 3; ++k) home_rot_[k] = victim->rot[k];
     }
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     FxModel* victim = target(0);
-    if (!victim) return;
+    if (!victim) return op >= 0x180 && op <= 0x183;
     switch (op) {
       case 0x180: {  // v = (A - B) * k >> 12 with A = target 0, B = caster 0 (20.12), k = s16 @+8; SetAnim(A, 5, 1)
         const int k = arg(args, count, 8);
@@ -60,8 +60,9 @@ class Grav41 : public OverlayFx {
         speed_ = 400;
         state_ = 0x183;
         break;
-      default: break;
+      default: return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* victim = target(0);
@@ -125,9 +126,9 @@ class Acce43 : public OverlayFx {
     em()->set_position("rn1-", x, static_cast<s16>(0xFC81), z);
     em()->set_position("rn0-", x, static_cast<s16>(0xFA41), z);
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     FxModel* victim = target(0);
-    if (!victim) return;
+    if (!victim) return op >= 0x180 && op <= 0x183;
     switch (op) {
       case 0x180:  // v = s16 @+8, SetAnim(T, 7, 0x1E)
         v_ = arg(args, count, 8);
@@ -148,8 +149,9 @@ class Acce43 : public OverlayFx {
       case 0x183:  // the last 'dead' table
         run_script(victim, "dead", 0x80, 7);
         break;
-      default: break;
+      default: return false;
     }
+    return true;
   }
   // dt = 1.
   void frame() override {
@@ -181,10 +183,10 @@ class Acce43 : public OverlayFx {
 // Position p = S + (E - S) * e / D in whole units; e += 1 per tick; when e > D the task snaps to the end and frees itself.
 class Helf19 : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100 && op != 0x101) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100 && op != 0x101) return false;
     const int duration = arg(args, count, 4);
-    // E = the midpoint of the targets' bounding box per axis ((max + min) / 2 on s16 values), not their mean
+    // E =the midpoint of the targets' bounding box per axis ((max + min) / 2 on s16 values), not their mean
     Vec3 centre{0, 0, 0};
     const int target_total = target_count();
     for (size_t k = 0; k < 3; ++k) {
@@ -210,6 +212,7 @@ class Helf19 : public OverlayFx {
       step(*task);
       add_task([this, task] { return step(*task); });
     }
+    return true;
   }
 
  private:
@@ -243,8 +246,8 @@ class Helf19 : public OverlayFx {
 // ticks (v = a + (b - a) * e / D, e += 1, snap to b when e > D). 0x101: shadow back, y scale 0x200 -> 0x1000.
 class Golem : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100 && op != 0x101) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100 && op != 0x101) return false;
     const int duration = arg(args, count, 4);
     for (int i = 0; i < target_count(); ++i) {
       FxModel* victim = target(i);
@@ -262,6 +265,7 @@ class Golem : public OverlayFx {
       step(*task);
       add_task([task] { return step(*task); });
     }
+    return true;
   }
 
  private:

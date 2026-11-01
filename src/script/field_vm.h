@@ -43,7 +43,7 @@ namespace flag270 {
 constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000;
 }
 namespace gflag {
-constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kPauseAllowed = 0x4000;
+constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kPauseAllowed = 0x4000, kKeepCustomName = 0x10000;
 }
 
 // One script slot record of an entity. `state` is the priority class (the lowest runs): 0xF idle, 7 the default UPDATE

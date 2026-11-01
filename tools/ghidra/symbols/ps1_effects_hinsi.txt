@@ -1,0 +1,6 @@
+# PS1 project symbol list: effect overlay hinsi.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_hinsi_dispatch = 0x801C5E04;  # function: Op dispatcher: init, exit, else the stock handler
+fx_hinsi_init = 0x801C5EAC;  # function: Init: sets target 0 to the dead pose
+fx_hinsi_exit = 0x801C5EF4;  # function: Exit: releases the effect resource

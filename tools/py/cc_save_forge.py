@@ -208,6 +208,8 @@ def main(argv):
                 struct.pack_into("<H", img, b + 0x16, v)   # max HP
                 struct.pack_into("<H", img, b + 0xB8, v)   # current HP
                 struct.pack_into("<H", img, b + 0xBC, v)   # max-HP related
+            elif k == "model":   # model id at +0x2D (Serge 0 / Lynx 0x31, Pip forms 0x2B..0x30)
+                img[b + 0x2D] = v
             elif k == "curhp":   # current HP only (0 = the character starts the battle KO'd); max HP is left alone
                 struct.pack_into("<H", img, b + 0xB8, min(v, 1023))
             elif k in ("atk", "def", "hit", "evd", "mag", "mdef"):

@@ -7,12 +7,12 @@
 // fields rec+BC/BE (HP) and rec+C0..CB (ATK, HIT, DEF, EVD, MAG, MDEF: snapshot, pending). Stars: head 0x5A4 (star) / 0x5A5
 // (counter). The growth progress counter is not stored anywhere in the save: the host keeps it for the session
 // (battle_setup / apply_battle_result take and return it; a loaded or new game starts at 0).
-#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "battle/battle.h"
+#include "data/char_name.h"
 #include "ui/menu/game_state.h"
 
 namespace oc::game {
@@ -20,10 +20,14 @@ namespace oc::game {
 // Star (0..99) the save is at.
 int session_star(const ui::GameState& gs);
 
-// PartyMember for character `char_id` from the saved state. `names` (optional) maps a character id to the typed name (UTF-32).
+// PartyMember for character `char_id` from the saved state. `names` (optional) gives the typed names and the language of the member's
+// names; without it the member has the English default names.
 // A record whose growth snapshot was never written (new game) gets snapshot = stats and a deterministic first pending roll.
 battle::PartyMember party_member_from_state(const data::GameTables& tables, const ui::GameState& gs, int char_id,
-                                            const std::map<int, std::u32string>* names = nullptr);
+                                            const data::CharNames* names = nullptr);
+
+// The Lynx duel's names (battle::BattleOptions::duel_names).
+std::vector<std::string> duel_names(const ui::GameState& gs, const data::CharNames& names);
 
 struct BattleSummary {
   int gold = 0;
@@ -39,7 +43,7 @@ struct BattleSetup {
   std::vector<battle::PartyMember> bench;
 };
 BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs, const std::vector<int>& party_ids, int progress,
-                         const std::map<int, std::u32string>* names = nullptr);
+                         const data::CharNames* names = nullptr);
 
 // Writes a finished Battle back into the state: HP (min(HP, max), at least 1), persistent status bits (poison, burn, sprain,
 // flu), stats / snapshots / pending deltas from the growth, gold (cap 9,999,999), dropped items and elements, the star

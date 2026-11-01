@@ -44,8 +44,10 @@ bool BattleView::pa_ref_point(int attach, std::array<float, 3>& point, float& ya
 bool BattleView::unit_ref_point(int unit, int attach, std::array<float, 3>& point, float& yaw) const {
   if (unit < 0 || unit >= battle::kUnits || !battle_->unit(unit).present) return false;
   const Visual& visual = vis_[static_cast<size_t>(unit)];
-  // The model's own yaw (forward = local -Z), as the model matrix in draw().
+  // The model's own yaw (forward = local -Z), as the model matrix in draw(); a model an overlay steers has the yaw the overlay gave it.
   yaw = std::atan2(-visual.face_x, -visual.face_z);
+  if (const effects::FxModels* models = fx_ ? fx_->bespoke_models() : nullptr; models && static_cast<size_t>(unit) < models->units.size() && models->units[static_cast<size_t>(unit)].steer)
+    yaw = static_cast<float>(models->units[static_cast<size_t>(unit)].rot[1] & 0xFFF) * (2.0f * kPi / 4096.0f);
   // The model block position: the home / script position, or where an overlay put it.
   const std::array<float, 3> world = unit_world(unit, 1.0f);
   point = {world[0], attach == 0x22 ? 0.0f : world[1], world[2]};

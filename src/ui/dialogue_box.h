@@ -38,8 +38,8 @@ class DialogueBox {
   ArtMode mode() const { return mode_; }
 
   // Lays out `flat` (import::flatten output) and opens the window (WindowOpening: it grows first, then the typewriter starts). Call
-  // outside SpriteBatch begin()/end(). `canvas_width` is the canvas width in canvas units (wrap limit = 70 % of it for non-JP text).
-  void open(const import::Message& flat, render::FaceId face, float text_scale, bool wrap, float canvas_width,
+  // outside SpriteBatch begin()/end(). `wrap_width` is the wrap limit at glyph scale 0.5 (ui::wrap_limit).
+  void open(const import::Message& flat, render::FaceId face, float text_scale, bool wrap, float wrap_width,
             render::FaceId italic = render::kNoFace);
   // A window opened without the grow (field window flag 0x20): full size at once. Call right after open().
   void skip_grow() { opening_.start(false); }
@@ -175,7 +175,7 @@ class DialogueBox {
   // The open message (kept for swap_faces).
   import::Message flat_;
   bool wrap_ = true;
-  float canvas_w_ = 1280;
+  float wrap_width_ = 0;
   // JP text: no word wrap, own choice cursor offsets.
   bool jp_ = false;
   float scale_ = 1;
@@ -229,7 +229,8 @@ class DialogueDemo {
   void shutdown();
 
   // speaker: lang.dat speaker id of the E3/E4 caller (0 = unknown).
-  void show(int room_id, int msg_index, int speaker = 0);
+  // `line_speaker` (default: `speaker`) picks the line's generated words; `speaker` stays the window's owner for the voice lines.
+  void show(int room_id, int msg_index, int speaker = 0, int line_speaker = -1);
   void show(std::string_view room_name, int msg_index);
   void set_language(import::Lang lang);
   // Re-shows the demo message.

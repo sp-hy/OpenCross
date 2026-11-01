@@ -211,6 +211,44 @@ void test_model() {
 
 // R = Rz * Ry * Rx, x applied first: (90, 90, 0) maps +y to +z (Rx) and then to +x (Ry); (0, 0, 90) maps +x to +y; the
 // quaternion of a 90-degree x rotation agrees with the matrix.
+// An anim pack with entries for two skeletons: the entry for another joint count keeps its index as an empty clip.
+Bytes anim_entry(u32 joints, u32 flag_words) {
+  Bytes out;
+  p32(out, 1);
+  for (u32 i = 0; i < flag_words; ++i) p32(out, 0);
+  p32(out, 8 + 4 * flag_words);
+  out.resize(out.size() + 12ull * joints, 0);
+  return out;
+}
+
+Bytes cpt_of(const std::vector<Bytes>& entries) {
+  Bytes out;
+  p32(out, static_cast<u32>(entries.size()));
+  u32 offset = 8 + 4 * static_cast<u32>(entries.size());
+  for (const Bytes& entry : entries) {
+    p32(out, offset);
+    offset += static_cast<u32>(entry.size());
+  }
+  p32(out, offset);
+  for (const Bytes& entry : entries) out.insert(out.end(), entry.begin(), entry.end());
+  return out;
+}
+
+void test_mixed_skeleton_pack() {
+  const Bytes mdl = build_mdl();
+  std::string err;
+  const Bytes mixed = cpt_of({anim_entry(39, 3), anim_entry(2, 1), anim_entry(39, 3), anim_entry(2, 1)});
+  const auto clips = import::load_mdl_clips(mdl, mixed, "tech", &err);
+  CHECK(clips.has_value());
+  if (clips) {
+    CHECK(clips->size() == 4);
+    CHECK((*clips)[0].frame_count == 0 && (*clips)[1].frame_count == 1 && (*clips)[2].frame_count == 0 && (*clips)[3].frame_count == 1);
+    CHECK((*clips)[1].index == 1 && (*clips)[3].index == 3);
+  }
+  const Bytes foreign = cpt_of({anim_entry(39, 3)});
+  CHECK(!import::load_mdl_clips(mdl, foreign, "tech", &err).has_value());
+}
+
 void test_rotation_order() {
   const assets::Mat3 rot_xy = assets::rotation_zyx({90.0f, 90.0f, 0.0f});
   const float rotated_y[3] = {rot_xy[1], rot_xy[4], rot_xy[7]};
@@ -366,6 +404,7 @@ int main() {
   test_eye_swap();
   test_hd();
   test_model();
+  test_mixed_skeleton_pack();
   test_rotation_order();
   if (failures) {
     std::printf("%d failure(s)\n", failures);

@@ -1,0 +1,6 @@
+# PS1 project symbol list: effect overlay bboy.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_bboy_command = 0x801C5E04;  # function: pack command handler; 0x100 turns every target to yaw 0xC00 and puts it on its list home
+fx_bboy_init = 0x801C5FDC;  # function: registers the overlay and hooks the Bway op-0x48 record to the draw callback
+fx_bboy_bway_draw_callback = 0x801C5F44;  # function: Bway op-0x48 callback that replaces the sprite draw: shows the op-0x39 model and puts it at the particle

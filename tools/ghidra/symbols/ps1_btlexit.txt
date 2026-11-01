@@ -2,6 +2,7 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 btl_exit_sfx_play = 0x801EB808;  # function: Results screen sound wrapper that plays an effect with mask 1.
+btl_exit_print_text_by_kind = 0x801EBC14;  # function: Prints one results text by kind: table text, element, item or member name; a member wearing model 0x31 prints Lynx's name; RDE prints the typed name for 0x33, the PS1 may differ.
 btl_exit_results_screen_draw = 0x801EB89C;  # function: Results screen driver that frees the stage and draws the wallpaper and portraits (ambiguous)
 btl_exit_store_vars_free_stage = 0x801EC724;  # function: Frees the battle stage and copies the creature pool variables back.
 btl_exit_free_battle_stage = 0x801ECD6C;  # function: Frees the battle stage before the results screen.

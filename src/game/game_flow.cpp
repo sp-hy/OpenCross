@@ -4,6 +4,7 @@
 #include <random>
 
 #include "core/log.h"
+#include "data/char_name.h"
 #include "game/new_game.h"
 #include "game/new_game_plus.h"
 #include "render/camera.h"
@@ -87,12 +88,7 @@ save::SaveSlot FlowMachine::new_game_slot(const data::GameTables* tables, const 
 }
 
 bool FlowMachine::usable_name(const std::u32string& name, import::Lang lang) {
-  if (name.empty() || name.find(U'�') != std::u32string::npos || name.find_first_not_of(U"　 ") == std::u32string::npos) return false;
-  if (lang != import::Lang::Jp)
-    for (char32_t ch : name)
-      // Kana / JP symbols: the non-JP fonts have no glyphs.
-      if (ch >= 0x3000) return false;
-  return true;
+  return data::usable_name(name, lang);
 }
 
 void FlowMachine::set_language(import::Lang lang) {

@@ -26,7 +26,7 @@ bool BattleView::start_script(int unit, const bseq::Table* table, int entry, int
   // Starting a script replaces the running one; the model keeps what entry 8 has written so far.
   if (visual.spawn && visual.vm.running())
     log::info("battle: unit {} spawn script (S5 entry 8) cut by entry {} variant {} at tick {}", unit, entry, variant, tick_count_);
-  visual.spawn = visual.idle_owed = false;
+  visual.spawn = visual.idle_owed = visual.victory_owed = false;
   if (!visual.has_model || !table || !visual.vm.start(table, entry, variant)) {
     visual.script_done = true;
     return false;
@@ -106,12 +106,24 @@ void BattleView::set_rot_now(int unit, int yaw4096) {
 }
 
 // Dev casts (ocbattleview --cast / --ecast, the Debug tab) skip the script that would queue the attack; a monster element with a caster group
-// takes the list the script's 8D slots before its type-2 queue_attack give (Vm::probe_group, the vars as they stand).
+// takes the list the script's 8D slots before its type-2 queue_attack give (Vm::probe_group, the vars as they stand). A PC's double / triple tech
+// takes the party members the record's character bytes name, in that order.
 void BattleView::dev_group_hint(int actor, int element) {
-  if (actor < battle::kPcSlots || element <= 0 || static_cast<size_t>(element) >= tables_->elements.size() || !brain_.vm()) return;
+  if (element <= 0 || static_cast<size_t>(element) >= tables_->elements.size()) return;
+  if (actor < battle::kPcSlots) {
+    const auto& record = tables_->elements[static_cast<size_t>(element)];
+    if (record.b(0x14) == 0xFF) return;
+    std::array<u8, 6> group{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    for (int k = 0; k < 3; ++k)
+      for (int pc = 0; pc < battle::kPcSlots; ++pc)
+        if (battle_->unit(pc).present && battle_->unit(pc).src_id == record.b(0x14 + k)) group[static_cast<size_t>(k)] = static_cast<u8>(pc);
+    battle_->set_group_hint(group);
+    return;
+  }
+  if (!brain_.vm()) return;
   const int caster_count = tables_->elements[static_cast<size_t>(element)].b(0x17);
   if (caster_count == 0 || caster_count == 0xFF) return;
-  if (const auto group = brain_.vm()->probe_group(element)) battle_->set_group_hint(*group);
+  if (const auto group = brain_.vm()->probe_group(element, actor)) battle_->set_group_hint(*group);
 }
 
 int BattleView::script_list_unit(int list, int idx) const {
@@ -152,9 +164,11 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   // A unit that owes a scripted death (op 5C, death cast parked by Battle::kill) has no death bit set: its idle / reaction scripts keep it
   // standing until the death cast has run.
   if (visual.death_owed) ctx.dead = false;
+  // HP a battle script wrote to 0 is not a KO: the idle script stays up and reads the low-HP bit.
+  if (unit_rec.hp_written_zero && unit_rec.hp <= 0) ctx.dead = false;
   // Flags: bit 0 dead, bit 9 (0x200) guarding (set by Defend, cleared by the PC's next menu: the idle script picks the block pose from it),
   // bit 31 HP <= max / 4.
-  ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard ? 0x200u : 0u) | ((visual.hp_shown * 4 <= unit_rec.max_hp && !ctx.dead) ? 0x80000000u : 0u);
+  ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard ? 0x200u : 0u) | (((visual.zero_hp_actions >= 2 || visual.hp_shown * 4 <= unit_rec.max_hp) && !ctx.dead) ? 0x80000000u : 0u);
   // Equipment bits set once per party unit (read by anmseq ops 0xA6 / 0xA7 / 0xA8 and by the sky pack): 0x2000 weapon
   // item 0x26 (Mastermune), 0x4000 any accessory 0xC1 (Hero's Shield), 0x8000 the hero set (Unit::hero_set).
   if (unit_rec.pc) {
@@ -634,7 +648,8 @@ void BattleView::on_damage(int unit, bool number) {
     }
   }
   if (event.ko) {
-    visual.ko_shown = true;
+    visual.ko_shown = visual.ko_hit = true;
+    visual.ko_reacted = visual.script_kind == kReact && visual.has_react && visual.react_ev.ko;
     if (event.ko_owed) visual.death_owed = true;
     // No reaction script (element hit): the idle script re-reads the death flag (op 0x48) and plays the death clips; restart it if it had ended.
     if (!visual.has_react && visual.script_kind == kIdle && visual.script_done) start_idle(unit);
@@ -679,13 +694,12 @@ void BattleView::tick_units() {
     visual.flash_prev = visual.flash;
     visual.fade_prev = visual.fade;
     visual.flash = std::max(0.0f, visual.flash - 1.0f / 20.0f);
-    // The enemy's death fade is S5 entry 9 (ColorRamp 32 ticks to 0, then ModelShow 0), run by the battle script's KO check AFTER the action that
-    // killed it has finished - not at the lethal hit (the model keeps colour 128 from the rules' hp 0 to the end of the pack). Once started the
-    // fade runs on its own.
+    // An enemy's death fade is the tail of the reaction script that took the killing hit (its dead branch: death clips, ColorRamp, ModelShow 0).
+    // This fallback only covers a kill no reaction script took: it starts after the action and runs on its own. HP a script wrote to 0 never fades.
     const bool action_over = act_.phase == Act::Phase::None && !fx_active();
-    // A boss with a scripted death (op 5C) owns its death presentation: no S5 fade while its death cast is still owed / queued (the pack hides it).
+    // A boss with a scripted death (op 5C) owns its death presentation: no fade while its death cast is still owed / queued (the pack hides it).
     const bool death_cast = visual.death_owed || battle_->death_pending(i) || (!queue_.empty() && visual.fade >= 1.0f && battle_->unit(i).hp <= 0 && !unit_rec.pc);
-    if (!unit_rec.pc && !death_cast && visual.ko_shown && visual.script_done && visual.script_kind == kIdle && (visual.fade < 1.0f || action_over)) visual.fade = std::max(0.0f, visual.fade - 1.0f / 40.0f);
+    if (!unit_rec.pc && !death_cast && !visual.ko_reacted && !unit_rec.hp_written_zero && visual.ko_shown && visual.script_done && visual.script_kind == kIdle && (visual.fade < 1.0f || (action_over && (visual.ko_hit || battle_->outcome() == battle::Outcome::Ongoing)))) visual.fade = std::max(0.0f, visual.fade - 1.0f / 40.0f);
     // Dev: OC_DEATH_TRACE logs the KO / fade state of a dying monster per tick.
     if (static const bool dt = std::getenv("OC_DEATH_TRACE") != nullptr; dt && !unit_rec.pc && (unit_rec.hp <= 0 || visual.death_owed)) {
       static std::array<std::string, battle::kUnits> last;
@@ -750,7 +764,8 @@ void BattleView::tick_units() {
       // The spawn script's end (0x4C): the clip-1 loop it set goes on; an idle restart that waited runs now.
       if (!visual.vm.running() && visual.spawn) {
         visual.spawn = false;
-        if (visual.idle_owed) start_idle(i);
+        if (visual.victory_owed) start_script(i, &visual.scripts->s5, 11, 0, kVictory);
+        else if (visual.idle_owed) start_idle(i);
       }
     }
     // When the guard flag changes (Defend set it, the PC's next menu clears it) the idle script is restarted so it re-picks the pose.

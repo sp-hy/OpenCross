@@ -1056,6 +1056,8 @@ const std::string* LangTables::battle_event(u32 battle_id, u32 msg, Lang lang) {
   return per(lang).battle.find(battle_id, msg);
 }
 
+void LangTables::set_table(std::string_view name, std::string_view utf8) { tables_[std::string(name)].parse(utf8); }
+
 const TextTable* LangTables::table(std::string_view name) {
   std::string key(name);
   auto it = tables_.find(key);

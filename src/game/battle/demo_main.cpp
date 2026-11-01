@@ -55,6 +55,7 @@ int ocbattleview_main(int argc, char** argv) {
   int ui_mode = 0, cast_element = 0, cast_at = -1;
   bool fx_on = true, enemy_cast = false, overlay = false, with_mods = false, sliced = false;
   std::vector<int> party_ids;
+  int lead_kind = -1;
   int weapon = -1, field = -1, auto_frames = 1 << 30, trans_frame = -1;
   int caster = -1, casttgt = -1;
   // --stats overrides in the order hp, atk, def, hit, evd, mag, mdef (-1 = keep).
@@ -95,6 +96,7 @@ int ocbattleview_main(int argc, char** argv) {
         if (*cursor == ',') ++cursor;
       }
     }
+    else if (!std::strcmp(argv[i], "--kind") && i + 1 < argc) lead_kind = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--stats") && i + 1 < argc) {
       static const char* const kNames[7] = {"hp", "atk", "def", "hit", "evd", "mag", "mdef"};
       std::string list = argv[++i];
@@ -216,6 +218,7 @@ int ocbattleview_main(int argc, char** argv) {
 
   std::vector<battle::PartyMember> party;
   for (size_t k = 0; k < party_ids.size() && k < 3; ++k) party.push_back(battle::make_party_member(tables, party_ids[k], 0, "char"));
+  if (lead_kind >= 0 && !party.empty()) party[0].kind = lead_kind;
   // --stats: the default party when none was given, then the overrides on every member (hp = max HP and current HP).
   if (have_stats) {
     if (party.empty())

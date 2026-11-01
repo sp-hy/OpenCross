@@ -57,8 +57,8 @@ class Wipeoff : public GroundFx {
     set_skip(true);
     caster_anmseq_0x80();
   }
-  void command(int op, const int* args, int arg_count) override {
-    if (op != 0x100) return;
+  bool command(int op, const int* args, int arg_count) override {
+    if (op != 0x100) return false;
     duration_ = arg(args, arg_count, 4);
     tick_ = 0;
     static constexpr int kStart[8] = {0, 3, 3, 0, 4, 0, 4, 0}, kPhase[8] = {7, 0x12, 0xC, 0x18, 0x12, 7, 0x1A, 0x14};
@@ -80,6 +80,7 @@ class Wipeoff : public GroundFx {
       px -= 0x2000;
     }
     active_ = true;
+    return true;
   }
   void frame() override {
     if (active_) {
@@ -206,11 +207,11 @@ class Tekken : public GroundFx {
     own_emitter_meshes(baked_names);
     caster_anmseq_0x80();
   }
-  void command(int op, const int* args, int arg_count) override {
-    if (op != 0x100) return;
+  bool command(int op, const int* args, int arg_count) override {
+    if (op != 0x100) return false;
     const FxModel* tm = target(0);
     const FxModel* cm = caster(0);
-    if (!tm || !cm) return;
+    if (!tm || !cm) return true;
     auto grid = [](int x, int z, int& gx, int& gz) {
       gx = (x + 0x1400) >> 9;
       gz = (z + 0x1400) >> 8;
@@ -243,6 +244,7 @@ class Tekken : public GroundFx {
       if (nn == 0) break;
       zf += trunc_div((gzT - gzC) * 0x1000, nn);
     }
+    return true;
   }
   void frame() override {
     draw_emitter_meshes();
@@ -349,10 +351,10 @@ class Jitanda : public GroundFx {
     bake_mesh(mesh("mdl1"), 1, 0, 0);
     caster_anmseq_0x80();
   }
-  void command(int op, const int* args, int arg_count) override {
-    if (op != 0x180) return;
+  bool command(int op, const int* args, int arg_count) override {
+    if (op != 0x180) return false;
     const int amp = static_cast<s16>(arg(args, arg_count, 8)), side = static_cast<s16>(arg(args, arg_count, 10));
-    if (side <= 0) return;
+    if (side <= 0) return true;
     const int half = side >> 1;
     auto& newest = ripple_.buf[static_cast<size_t>(ripple_.cur)];
     for (int i = 0; i < side; ++i)
@@ -360,6 +362,7 @@ class Jitanda : public GroundFx {
         const int row = base_row_ + i - half, col = base_col_ + j - half;
         if (row >= 1 && row <= 19 && col > 0 && col < 20) newest[static_cast<size_t>(row * 21 + col)] = amp;
       }
+    return true;
   }
   void frame() override {
     draw_ground(-0x1400, 0x1400, 0x1400, -0x1400);
@@ -447,13 +450,13 @@ class Boll2 : public GroundFx {
 // FIRST = 1, PIT = 1; LOADING = 0, READY[NEXT] = 1, NEXT += 1. (3) The model's animation over (a 1-frame clip is over at once) and FIRST:
 // K < 3 -> READY[K] ? (the type-2 sound channels resumed if PAUSED; buffer K attached, SetAnim(0x80, 1), for K == 0 one pose step at once,
 // shown, buffer K - 1 freed, K += 1) : (the type-2 sound channels suspended, dt = 0 for the rest of the frame, PAUSED = 1); K == 3 and
-// buffer 2 still held -> detached, SetAnim(0, 0), the buffer overwritten with 1s and freed (a battle-side call not reproduced).
+// buffer 2 still held -> detached, SetAnim(0, 0), the buffer overwritten with 1s and freed, the third party slot released at init reloaded.
 // (4) Every frame: position (P.x, 0, P.z) (0 before 0x180), rotation y = 0x400, anim speed dt << 6, the pose step, shadow bit 0x200 cleared,
 // and the draw (nothing while the hidden bit is set; the lit mode is not reproduced). Ops: 0x181 PIT = 1 (its operands are read by nothing),
 // 0x182 clears an unread flag, 0x183 the loader for file NEXT ('main' sends it twice: files 1 and 2), 0x184 hides 'sara' and PIT = 0.
 // Exit: stock ground on, the buffers freed. The PS1's dt = 0 stall also held every task and emitter that ran after the overlay in that
-// frame (a CD-speed artefact); the host streams a file within the tick it is asked for, so the wait branch runs only for a missing file,
-// where the host reports it as loaded with no clip rather than stalling.
+// frame (a CD-speed artefact); the host reports a stream after its disc read and a missing file as loaded with no clip, so the wait branch
+// does not stall the summon.
 class Saraman : public GroundFx {
  public:
   ~Saraman() override {
@@ -485,21 +488,22 @@ class Saraman : public GroundFx {
     }
     if (ctx_.sequences) ctx_.sequences->start("init");
     hold_ = true;
+    third_slot_.release(ctx_.models);
   }
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     switch (op) {
       case 0x181:  // pit on
         pit_ = true;
-        break;
+        return true;
       case 0x182:  // no effect
-        break;
+        return true;
       case 0x183:  // the loader for file NEXT
         request_file();
-        break;
+        return true;
       case 0x184:  // hide 'sara', pit off
         if (ctx_.models) ctx_.models->pack_drive.hidden = true;
         pit_ = false;
-        break;
+        return true;
       case 0x180: {
         const int cx = static_cast<s16>(arg(args, arg_count, 8)), cz = static_cast<s16>(arg(args, arg_count, 10));
         rect_ = {s16c(s16c(cx * 0x400) - 0x800), s16c(s16c(cz * 0x400) + 0x800), s16c(s16c(cx * 0x400) + 0x800), s16c(s16c(cz * 0x400) - 0x800)};
@@ -515,9 +519,9 @@ class Saraman : public GroundFx {
         bake_mesh(mesh("base"), 1, px_, pz_);
         for (Piece& piece : pieces_) bake_mesh(piece.mesh, 1, px_, pz_);
         positioned_ = true;
-        break;
+        return true;
       }
-      default: break;
+      default: return false;
     }
   }
   void request_file() {
@@ -581,6 +585,7 @@ class Saraman : public GroundFx {
           drive->clip = 0, drive->clip_flags = 0;
         }
         held_[2] = false;
+        add_task([this] { return third_slot_.reload_tick(); });
       }
     }
     // (4)
@@ -661,6 +666,7 @@ class Saraman : public GroundFx {
   bool bank_ = false, loading_ = false, first_ = false, paused_ = false, hold_ = false;
   int next_ = 0, attached_ = 0;
   std::array<bool, 3> ready_{}, held_{};
+  ThirdSlotRelease third_slot_;
 };
 
 }  // namespace

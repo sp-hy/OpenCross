@@ -211,13 +211,13 @@ void MainMenu::Impl::message(float x, float y) {
   T(x, y, msg, kGold, 0.85f);
 }
 
-// Portrait strip of a character: hd/menu/playtim/<1999|2021>/pCC.png, or the PS1 strip (8bpp 128 x 224, the same two-half layout).
-const Tex* MainMenu::Impl::portrait(int character) {
-  if (character < 0 || character > 49) return nullptr;
+// Portrait strip of a body (model_number): hd/menu/playtim/<1999|2021>/pNN.png, or the PS1 strip (8bpp 128 x 224, the same two-half layout).
+const Tex* MainMenu::Impl::portrait(int form) {
+  if (form < 0 || form > 49) return nullptr;
   if (ps1_screen())
-    if (Tex* disc = texs.ps1("ps1:portrait" + std::to_string(character), [&] { return ps1::portrait(*vfs, character); })) return disc;
+    if (Tex* disc = texs.ps1("ps1:portrait" + std::to_string(form), [&] { return ps1::portrait(*vfs, form); })) return disc;
   char path[64];
-  std::snprintf(path, sizeof path, "hd/menu/playtim/%s/p%02d.png", face_set().c_str(), character);
+  std::snprintf(path, sizeof path, "hd/menu/playtim/%s/p%02d.png", face_set().c_str(), form);
   return texs.load(path);
 }
 
@@ -540,7 +540,7 @@ void MainMenu::Impl::btn(float x, float y, int slot_index, u32 colour) {
 }
 
 void MainMenu::Impl::portrait_strip(int character, float x, u32 col, float dy) {
-  if (const Tex* tex = portrait(character)) {
+  if (const Tex* tex = portrait(model_number(character))) {
     Img(tex, PX(x), PY(dy), PX(64), PY(224), 0, 0, 0.5f, 1, col);
     Img(tex, PX(x), PY(224 + dy), PX(64), PY(224), 0.5f, 0, 1, 1, col);
   }
@@ -619,7 +619,7 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
     MenuModelSlot slot;
     slot.char_id = character;
     slot.model = model_number(character, kLastMenuModel);
-    slot.weapon_model = model_number(character, kLastWeaponModel);
+    slot.weapon_model = model_number(character);
     slot.origin_x = ox, slot.origin_y = oy;
     slot.unit_x = xscale * zoom, slot.unit_y = PY(1) * zoom;
     slot.camera = model_cam;

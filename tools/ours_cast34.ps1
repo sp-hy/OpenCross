@@ -1,4 +1,4 @@
-# Our side of one per-id battle-effect comparison against the ps1 capture. usage: tools\ours_cast34.ps1 <element id> [-Scene N] [-Caster U] [-Tgt U] [-Ecast] [-Weapon] [-Party a,b,c] [-CamPick s] [-Seed n] [-CastAt f] [-Frames n]
+# Our side of one per-id battle-effect comparison against the ps1 capture. usage: tools\ours_cast34.ps1 <element id> [-Scene N] [-Caster U] [-Tgt U] [-Ecast] [-Weapon] [-Party a,b,c] [-Field N | -NoField] [-CamPick s] [-Seed n] [-CastAt f] [-Frames n]
 #   [-Keep] [-NoDiff] [-NoCamSearch] [-CamPool a,b,c] [-Dt "t:N,t:N" | -NoDt] [-NoStats] [-Ring c,c,c]
 # OC_FX_DT = the PS1 loop iteration length the ps1 capture shows (fx_diff.py --info `dt:`), so an overlay's
 # per-call emitter fires happen once per dt ticks as in ps1; -Dt gives a schedule / constant by hand, -NoDt = the 60 Hz pace (dt 1).
@@ -8,15 +8,20 @@
 # row (u3_hp u4_hp u5_hp) are passed as ocbattleview --stats / --enemyhp, so the target survives like in ps1 (-NoStats = the table stats). -Tgt default: the
 # manifest's target_unit:, else the ps1 target (tgt0= of the first watch row with act_kind=1), else the element's pgdat byte +4 side bits (party only / self
 # -> 0), else 3; the one used is printed.
-# Defaults come from tmp\r34\<id>\ref\manifest.txt (scene: caster: target: cam_pick: cast_frame:) when present.
+# Defaults come from tmp\r34\<id>\ref\manifest.txt (scene: caster: target: area: party_ids: cam_pick: cast_frame:) when present. -Scene default: scene:, else the
+# btl_id= of the first watch row (the room's encounter roll depends on the party, so it is not always the same scene), else 7.
+# -Field N = ocbattleview --field N (the battlefield operand, stage bg_NN); default: the capture's stage, the manifest's area: (ps1_cast.py force) or, in an older
+# manifest, the area= column of the first watch row; -NoField = the scene's own stage. -Party default: the manifest's party_ids: when it names more than one
+# member (the full cast of a double / triple tech) or a member other than Serge, else party0:.
 # fx_diff.py --extract first when ref\tables.json is missing (it also fills cam_pick: from the sequence tags); with no pick known the camera
 # pool (-CamPool) is probed - one short parallel run per member, scored against the ps1 camera by fx_diff.py --cam-score - and the winner is written to the
 # manifest (-NoCamSearch = the old default ch13; every member is scored at the time shifts -1 / 0 / +1 sample, accepted at >= 50 % or when it is
 # >= 2x the runner-up, the shift is printed); -Frames defaults to CastAt + the ps1 capture span in battle refreshes (fx_diff.py --info `last_refresh:`; one ps1 game frame takes 2-3 refreshes) + 60; -Keep keeps states / frames / shots (no --prune); -NoDiff skips the diff.
-param([int]$Id=-1,[int]$Scene=-1,[int]$Caster=-1,[int]$Tgt=-1,[switch]$Ecast,[switch]$Weapon,[string]$Party="",[string]$CamPick="",[int]$Seed=1,[int]$CastAt=-1,[int]$Frames=-1,
+param([int]$Id=-1,[int]$Scene=-1,[int]$Caster=-1,[int]$Tgt=-1,[switch]$Ecast,[switch]$Weapon,[string]$Party="",[int]$Field=-1,[switch]$NoField,[string]$Kind="",[string]$CamPick="",[int]$Seed=1,[int]$CastAt=-1,[int]$Frames=-1,
       [switch]$Keep,[switch]$NoDiff,[switch]$NoCamSearch,[switch]$NoPoolSearch,[string]$CamPool="ch10,ch11,ch12,ch13",[string]$Dt="",[switch]$NoDt,[switch]$NoStats,
-      [string]$Folder="",[switch]$Auto,[int]$AutoFrames=300,[string]$EnemyHp="",[string]$Offset="",[int]$CastIndex=-1,[string]$Exe="",[int]$Ko=-1,[string]$Ring="")
+      [string]$Folder="",[int]$Before=0,[switch]$Auto,[int]$AutoFrames=300,[string]$EnemyHp="",[string]$Offset="",[int]$CastIndex=-1,[string]$Exe="",[int]$Ko=-1,[string]$Ring="")
 $Root=(Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+# -Before E = cast element E first and <id> as a second cast by the same caster (a pack that needs the one before it, the capture holds both).
 # -Folder <name> (the capture folder: "<id>" = a PC element, "<id>_s<scene>_u<unit>" = an enemy own-cast) takes id / scene / caster / mode from the folder
 # name + ref\manifest.txt (mode: enemy -> -Ecast); -Auto = ocbattleview --auto --autoframes 300 (scripted-dialogue scenes); -Offset N|auto = fx_diff.py --offset; -CastIndex N = fx_diff.py --cast-index (align on the Nth cast, 0 = first, when the capture holds several casts of the id).
 # Inside a .claude\worktrees\<x> checkout the capture tree (tmp\r34) and, when the worktree has none, the exe come from MAIN (-Exe overrides the exe).
@@ -61,7 +66,11 @@ if((-not (Test-Path $tj)) -and $haveStates){ & python $py $dir --extract }
 $m=ReadManifest
 function Num($k){ if($m.ContainsKey($k) -and $m[$k] -match '^(-?\d+)'){ return [int]$matches[1] } return $null }
 if((-not $Ecast) -and $m.ContainsKey('mode') -and $m['mode'] -match '^enemy'){ $Ecast=$true }
-if($Scene -lt 0){ $v=Num 'scene'; $Scene= if($null -ne $v){$v}else{7} }
+if($Scene -lt 0){
+  $v=Num 'scene'
+  if($null -eq $v -and (Test-Path $man)){ foreach($l in (Get-Content $man -Encoding UTF8)){ if($null -eq $v -and $l -match '\bbtl_id=(\d+)'){ $v=[int]$matches[1] -band 0x1FF } } }
+  $Scene= if($null -ne $v){$v}else{7}
+}
 if($Caster -lt 0){ $v=Num 'caster'; $Caster= if($null -ne $v){$v}else{0} }
 if($Tgt -lt 0){
   $v=Num 'target'
@@ -90,6 +99,16 @@ if($Frames -lt 0){
 # cam_probe: = this script's own scored pick (trusted). cam_pick: is written by ps1_state.py campick / fx_diff --extract from the ps1
 # sequence-task tags, which are the PACK's own sequences (ch04, ch05, 0000 ...), not the camera pool: accept it only when it is a pool member.
 # -Party a,b,c = ocbattleview --party (character ids, slot 0 = the acting PC); T1 tech manifests carry party0: <character id> -> party0,0 automatically
+if($Party -eq "" -and $m.ContainsKey('party_ids')){   # ps1_cast.py force: the party's character ids, 255 = empty slot
+  $pids=@($m['party_ids'] -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' -and [int]$_ -lt 255 })
+  if($pids.Count -gt 1 -or ($pids.Count -eq 1 -and [int]$pids[0] -ne 0)){ $Party=($pids -join ',') }
+}
+if($NoField){ $Field=-1 }
+elseif($Field -lt 0){
+  $v=Num 'area'
+  if($null -eq $v -and (Test-Path $man)){ foreach($l in (Get-Content $man -Encoding UTF8)){ if($null -eq $v -and $l -match '\barea=(\d+)'){ $v=[int]$matches[1] } } }
+  if($null -ne $v){ $Field=$v; "field default: $Field (ps1 battlefield operand of the capture)" }
+}
 if($Party -eq "" -and (Test-Path $man) -and ((Get-Content $man -Raw -Encoding UTF8) -match 'party0:\s*(\d+)') -and [int]$matches[1] -ne 0){ $Party="$($matches[1])" }   # R8: "X,0" puts Serge on unit 0 and X on unit 1 (log: unit 0 weapon kai, Serge casts), so the tech ran as Serge; a one-member party keeps X on unit 0
 if($CamPick -eq "" -and $m.ContainsKey('cam_probe') -and $m['cam_probe'] -ne ''){ $CamPick=($m['cam_probe'] -split '\s')[0] }
 elseif($CamPick -eq "" -and $m.ContainsKey('cam_pick') -and $m['cam_pick'] -match '^(ch1[0-3]|apr\d)(,tgt\d+)?$'){ $CamPick=$m['cam_pick'] }
@@ -107,12 +126,16 @@ function RunOurs([string]$pick,[string]$outdir,[int]$nframes,[string[]]$shotargs
   $env:OC_BATTLE_SEED="$Seed"; $env:OC_CAST_PARTY= $(if($Ko -ge 0 -or $Tgt -in 1,2){"3"}else{"1"});   # a single-target cast on PC 1 / 2 is skipped by OC_CAST_PARTY=1 (battle_view_action.cpp party_cap)
    $env:OC_CAM_PICK=$pick; $env:OC_FX_OBJECTS="5"; $env:OC_FX_SEQ="1"; $env:OC_FX_UNITS="5"; if($Dt -ne ""){ $env:OC_FX_DT=$Dt } else { Remove-Item Env:OC_FX_DT -ErrorAction SilentlyContinue }
   $castflag= if($Ecast){"--ecast"}else{"--cast"}
-  $a=@("ocbattleview","$Scene",$castflag,"$Id","--castat","$CastAt","--frames","$nframes")+$shotargs
+  $first= if($Before -gt 0){$Before}else{$Id}
+  $a=@("ocbattleview","$Scene",$castflag,"$first","--castat","$CastAt","--frames","$nframes")+$shotargs
+  if($Before -gt 0){ $a+=@("--cast2","$Id","--cast2at","$($CastAt+60)") }
   $a+=@("--caster","$Caster","--casttgt","$Tgt")   # R9: an enemy own-cast folder passes its unit too (--ecast + --caster = that enemy casts)
   if($Auto){ $a+=@("--auto","--autoframes","$AutoFrames") }
   if($Weapon){ $a+=@("--weapon","0") }
   if(-not $NoStats){ $a+=@("--stats","hp=1023,atk=1,def=127,hit=127,evd=0,mag=1,mdef=127"); if($eh){ $a+=@("--enemyhp",$eh) } }
   if($Party -ne ""){ $a+=@("--party",$Party) }
+  if($Field -ge 0){ $a+=@("--field","$Field") }   # the capture's stage
+  if($Kind -ne ""){ $a+=@("--kind",$Kind) }
   if($Ko -ge 0){ $a+=@("--ko","$Ko") }   # that party unit starts KO'd (Revive / Full Revival)
   if($Ring -ne ""){ $a+=@("--ring",$Ring) }   # the field ring at the start (a capture's ring, e.g. blue,green,yellow)
   $q=$a | ForEach-Object { if($_.Contains(" ")){'"'+$_+'"'}else{$_} }

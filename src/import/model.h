@@ -44,7 +44,8 @@ std::optional<std::vector<assets::AnimationClip>> load_ex_clips(ByteSpan obj, By
 // An animation pack (a cpt of animations, e.g. the summon motion streams `battle/effects/syoukan/st_0N.mtc`
 // attached to the 'sara' model as the external clip table) decoded against the skeleton of a Mdl of any
 // class, the type-0x0B record of an effect drp included. Clip source `source`, index k = pack entry k (the engine plays entry 0 as SetAnim
-// 0x80 after the attach). Fails when a pack entry's joint count differs from the model's.
+// 0x80 after the attach). A pack entry for another joint count keeps its index as an empty clip (no keyframes): one pack can serve two
+// skeletons in different index ranges. Fails when no entry fits.
 std::optional<std::vector<assets::AnimationClip>> load_mdl_clips(ByteSpan mdl, ByteSpan pack, const char* source, std::string* err = nullptr);
 
 // Section `index` (0 = S1 mesh, 1 = S2 skeleton, ... 5 = S6) of a 6-section Mdl, up to the next non-zero section / the EOF word.

@@ -61,7 +61,7 @@ int UnitPose::clip_for(int id) const {
   const bool ext = id >= 0x80;
   const u32 idx = static_cast<u32>(ext ? id - 0x80 : id);
   // The pack's clips replace at0.
-  if (ext && ext_clips_) return idx < ext_clips_->size() ? kExtBase + static_cast<int>(idx) : -1;
+  if (ext && ext_clips_) return idx < ext_clips_->size() && (*ext_clips_)[idx].frame_count > 0 ? kExtBase + static_cast<int>(idx) : -1;
   for (size_t i = 0; i < asset_->clips.size(); ++i) {
     const auto& clip = asset_->clips[i];
     if (clip.index == idx && clip.source == (ext ? "at0" : "s4")) return static_cast<int>(i);

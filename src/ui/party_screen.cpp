@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "data/char_name.h"
 #include "game/party_editor.h"
 #include "import/tim.h"
 #include "ui/lowres.h"
@@ -51,7 +52,7 @@ struct Rec {
   int hp = 0, max_hp = 0;
   // The six stats in the screen's order.
   std::array<int, 6> st{};
-  int innate = 0, portrait = 0;
+  int innate = 0, portrait = 0, body = 0;
 };
 
 }  // namespace
@@ -198,19 +199,9 @@ struct PartyScreen::Impl {
     *found = false;
     return to_u32(key);
   }
-  // Character name: Serge's record showing Lynx (portrait byte 0x31) is "Lynx"; custom names; JP Viper suffix.
   std::u32string name(int character) {
     if (character < 0 || character >= 44) return {};
-    if (character == 0 && recs[0].portrait == 0x31) {
-      if (const std::string* lynx = lt.sysmes(0x10031, lang); lynx) return to_u32(*lynx);
-    }
-    std::u32string result;
-    if (custom)
-      if (auto it = custom->find(character); it != custom->end() && !it->second.empty()) result = it->second;
-    if (result.empty())
-      if (const std::string* default_name = lt.sysmes(0x10000u + static_cast<u32>(character), lang); default_name) result = to_u32(*default_name);
-    if (jp() && character == 5) result += to_u32("大佐");
-    return result;
+    return data::character_name(character, recs[static_cast<size_t>(character)].body, data::NameContext::Menu, false, {custom, &lt, lang});
   }
 
   // One text entry: canvas X = x * 2 + offX * scale, Y = y * 960/216 + offY * scale, scale = slot scale * mul.
@@ -343,6 +334,7 @@ void PartyScreen::open(const GameState& gs) {
     rec.st = {ch.atk, ch.hit, ch.def, ch.evd, ch.mag, ch.mdef};
     rec.innate = gs.innate(character);
     rec.portrait = ch.model_id;
+    rec.body = data::character_body(ch.model_id, [&](int var) { return sl.var(var); });
   }
   impl.phase = Impl::Phase::Run;
   impl.frame = 0, impl.close_frame = 0, impl.acc = 0;

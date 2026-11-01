@@ -617,6 +617,17 @@ RawAnim parse_anim(ByteSpan data, u32 nj) {
   return anim;
 }
 
+// Frame 0 holds 12 bytes per joint right behind the pointer table, so the words tell whether an animation was authored for `nj` joints.
+bool anim_fits(ByteSpan data, u32 nj) {
+  if (data.size() < 4) return false;
+  SpanReader reader(data);
+  const u32 frames = reader.at<u32>(0);
+  const size_t ptr_o = 4 + ((2ull * nj + 31) / 32) * 4, frame0 = ptr_o + 4ull * frames;
+  if (frames == 0 || frame0 + 12ull * nj > data.size()) return false;
+  const size_t next = frames > 1 ? reader.at<u32>(ptr_o + 4) : data.size();
+  return reader.at<u32>(ptr_o) == frame0 && next - frame0 == 12ull * nj;
+}
+
 // Anim cpt -> raw anims (joint count inferred when 0). Returns nullopt-by-throw semantics via Fail.
 std::vector<RawAnim> parse_anim_pack(ByteSpan pack, u32 nj) {
   auto cpt = parse_cpt(pack);
@@ -1238,12 +1249,23 @@ std::optional<std::vector<AnimationClip>> load_mdl_clips(ByteSpan mdl, ByteSpan 
     const u32 s2 = reader.at<u32>(8), s3 = reader.at<u32>(12);
     if (!(s2 < s3 && s3 <= mdl.size())) fail("skeleton section pointers");
     const auto raw = parse_skeleton(reader, s2, s3);
-    const auto raws = parse_anim_pack(pack, static_cast<u32>(raw.size()));
+    const auto cpt = parse_cpt(pack);
+    if (!cpt) fail("anim pack: not a cpt");
+    const u32 joints = static_cast<u32>(raw.size());
     std::vector<AnimationClip> out;
-    for (size_t i = 0; i < raws.size(); ++i) {
-      if (raws[i].joints != raw.size()) failf("pack anim J={} != model J={}", raws[i].joints, raw.size());
-      out.push_back(make_clip(raws[i], raw, source ? source : "pack", static_cast<u32>(i)));
+    bool any_fits = false;
+    for (size_t i = 0; i < cpt->entries.size(); ++i) {
+      const ByteSpan data = cpt->entries[i].data;
+      if (anim_fits(data, joints)) {
+        out.push_back(make_clip(parse_anim(data, joints), raw, source ? source : "pack", static_cast<u32>(i)));
+        any_fits = true;
+      } else {
+        AnimationClip slot;
+        slot.index = static_cast<u32>(i);
+        out.push_back(std::move(slot));
+      }
     }
+    if (!any_fits) failf("no pack anim fits the model's {} joints", joints);
     return out;
   });
 }

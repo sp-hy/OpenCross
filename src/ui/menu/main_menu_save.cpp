@@ -409,7 +409,7 @@ void MainMenu::Impl::build_save() {
       const SavePrev& row = page_prev[number];
       if (!row.used) continue;
       std::u32string name = number == 0 ? utf32(sl::auto_save_caption(lang_index()))
-                                         : row.party[0] < save::kNumChars ? char_name(row.party[0]) : std::u32string();
+                                         : row.party[0] < save::kNumChars ? default_char_name(row.party[0]) : std::u32string();
       std::replace(name.begin(), name.end(), U'\n', U' ');
       labels[number] = {std::move(name), sl::row_location(utf32(location_lines(row.scenario).first))};
       for (const std::u32string* str : {&labels[number].first, &labels[number].second}) {
@@ -510,7 +510,7 @@ void MainMenu::Impl::build_save() {
   for (int i = 0; i < 3; ++i)
     if (cp.party[static_cast<size_t>(i)] < save::kNumChars)
       avatar(cp.party[static_cast<size_t>(i)], PX(sl::kFaceX + sl::kFaceStep * static_cast<float>(i)), PY(sl::kFaceY), PX(sl::kFace), PY(sl::kFace));
-  const std::u32string leader = cp.party[0] < save::kNumChars ? char_name(cp.party[0]) : std::u32string();
+  const std::u32string leader = cp.party[0] < save::kNumChars ? default_char_name(cp.party[0]) : std::u32string();
   // The auto-save FILES (card 1's CHRONO00, the page's file 0) show their caption wherever their box is.
   const bool auto_file = cp.slot == 0 && save_card <= 1;
   const std::u32string name = auto_file ? utf32(sl::auto_save_caption(lang_index())) : leader;

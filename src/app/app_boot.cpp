@@ -109,6 +109,7 @@ bool App::init_window() {
 
 void App::init_vfs() {
   if (game_dir.empty() || !files.open(game_dir)) log::warn("VFS unavailable; running without game data");
+  name_tables.init(&files);
   // RDE: cdrom2 overrides cdrom in HD mode.
   files.set_hd_mode(platform::art_is_hd(config.art_mode));
   // Mods: <GameDir>\mods\<name>\..., archives and bare .dat files there, resolved once; the overlay follows the art mode (Modded = HD + mods).
@@ -123,7 +124,8 @@ void App::init_vfs() {
     mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config));
     // New folders get their defaults (written with the next save).
     render::store_mod_prefs(config, mods);
-    mods.apply(files, render::mod_art(config.art_mode));
+    // Scripted runs test the game as shipped: no mod reaches them.
+    if (config.debug_script.empty()) mods.apply(files, render::mod_art(config.art_mode));
   }
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
@@ -215,8 +217,8 @@ void App::init_audio() {
     // Menu sounds use the menus' mask; a new sound cuts the last one.
     if (sfx_ok) akao_sfx.play_menu(id);
   };
-  // Scripted runs stay silent.
-  if (!sweeping && config.debug_script.empty() && !mixer.open_device()) log::warn("audio: no output device, running silent");
+  // Scripted runs stay silent, unless OC_ROUTE_AUDIO asks for the live device (OC_QUIET keeps it at zero gain).
+  if (!sweeping && (config.debug_script.empty() || std::getenv("OC_ROUTE_AUDIO")) && !mixer.open_device()) log::warn("audio: no output device, running silent");
   // OC_AUDIO_DUMP captures the mix of a scripted run, rendered per game tick (Mixer::capture_tick).
   if (const char* dump = std::getenv("OC_AUDIO_DUMP"); dump && *dump && !mixer.device_open())
     mixer.start_capture(dump);
@@ -336,6 +338,7 @@ void App::init_menus() {
       // A rotating 3D member on the Status screen.
       menu.set_model_view(&status_model);
       menu.set_rules(&flow.machine().rules());
+      menu.set_custom_names(&flow.machine().custom_names());
       menu.set_mode(art);
       menu.set_portrait_set(config.portraits);
       menu.set_sfx(ui_sfx);

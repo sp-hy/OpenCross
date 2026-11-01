@@ -6,7 +6,7 @@
 //   etrap     the two lists swapped
 //   bgchng    no shipped sequence reaches its ops: draws nothing
 //   miyademo  cycles the backdrop through nine stages
-//   hinsi / lasdes4  write the idle-pose word only (not tracked by OpenCross)
+//   hinsi / lasdes4  write target 0's idle-pose word only
 #include <memory>
 
 #include "game/effects/bespoke/overlay_base.h"
@@ -51,10 +51,10 @@ class Seint : public Remap {
     const std::vector<int> none;
     set_lists(&none, &filtered);
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     (void)args;
     (void)count;
-    if (op != 0x100 && op != 0x101) return;
+    if (op != 0x100 && op != 0x101) return false;
     std::vector<int> filtered;
     for (int unit : snap_) {
       const FxModel* target_model = unit_model(unit);
@@ -62,6 +62,7 @@ class Seint : public Remap {
       if (op == 0x100 ? (target_model->hit == 3 && !target_model->dead) : target_model->hit != 3) filtered.push_back(unit);
     }
     set_lists(nullptr, &filtered);
+    return true;
   }
 
  private:
@@ -115,26 +116,42 @@ class Miyademo : public Remap {
     rng.state = ctx_.seed ? ctx_.seed : 1;
     roll_ = rng.next();
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     (void)args;
     (void)count;
     static constexpr int kBg[9] = {0x0D, 0x0E, 0x0F, 0x16, 0x17, 0x1F, 0x27, 0x3F, 0x40};
     if (op == 0x100) {
       queued_ = kBg[roll_ % 9];
       ++roll_;
-    } else if (op == 0x101 && queued_ >= 0) {
+      return true;
+    }
+    if (op != 0x101) return false;
+    if (queued_ >= 0) {
       if (ctx_.hooks.set_stage) ctx_.hooks.set_stage(queued_);
       queued_ = -1;
       if (swaps_++ < 5 && ctx_.sequences) ctx_.sequences->start("miya");
     }
+    return true;
   }
 
  private:
   int roll_ = 0, queued_ = -1, swaps_ = 0;
 };
 
-// hinsi / lasdes4: target 0's idle-pose word := 8 / 0; not tracked by OpenCross.
-class PoseWord : public Remap {};
+// hinsi / lasdes4: init writes target 0's idle-pose word := 8 (dead) / 0; nothing else.
+class PoseWord : public Remap {
+ public:
+  explicit PoseWord(int pose) : pose_(pose) {}
+
+ protected:
+  void init() override {
+    const FxModel* model = target(0);
+    if (model && ctx_.hooks.set_pose) ctx_.hooks.set_pose(model->unit, pose_);
+  }
+
+ private:
+  int pose_;
+};
 
 }  // namespace
 
@@ -144,7 +161,8 @@ void register_scene_remaps(BespokeRegistry& registry) {
   registry.add({"etrap", "scene-remap", "Etrap", [] { return std::make_unique<Etrap>(); }});
   registry.add({"bgchng", "scene-remap", "BgChng", [] { return std::make_unique<BgChng>(); }});
   registry.add({"miyademo", "scene-remap", "Miyademo", [] { return std::make_unique<Miyademo>(); }});
-  for (const char* name : {"hinsi", "lasdes4"}) registry.add({name, "shell-only", "PoseWord", [] { return std::make_unique<PoseWord>(); }});
+  registry.add({"hinsi", "shell-only", "PoseWord", [] { return std::make_unique<PoseWord>(8); }});
+  registry.add({"lasdes4", "shell-only", "PoseWord", [] { return std::make_unique<PoseWord>(0); }});
 }
 
 // Exposed for the trap summon tunico (mesh_techs.cpp), which installs the same pair of getters as unico.

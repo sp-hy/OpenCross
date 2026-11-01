@@ -63,6 +63,12 @@ void EmitterSystem::for_each_object(std::string_view name, const std::function<v
     visit(object_ref);
   }
 }
+void EmitterSystem::mark_mesh_objects(std::string_view name, bool on) {
+  for (auto& obj : impl_->objs) {
+    if (!obj.alive || obj.owner < 0 || static_cast<size_t>(obj.owner) >= impl_->headers.size()) continue;
+    if (impl_->headers[static_cast<size_t>(obj.owner)].nm() == name && obj.stype == 14) obj.marked = on;
+  }
+}
 void EmitterSystem::begin_overlay_tick(bool new_window) {
   if (new_window) impl_->pace_sites.clear();
   impl_->pace_ord.clear();

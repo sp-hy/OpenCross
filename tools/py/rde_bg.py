@@ -102,6 +102,9 @@ class Game:
     def close(self):
         if self.process:
             self.process.kill()
+            self.process.wait()
+            redirect_tool.remove_sandbox()
+            redirect_tool.check_real_saves(self.real_saves)
 
 
 def give_focus_back(hwnd):
@@ -114,11 +117,11 @@ def launch(save, wait=25, card1=None):
     the foreground once, when its window appears; it goes straight back to the window that had it."""
     previous = win32gui.GetForegroundWindow()
     redirect_tool.check_save_path(save)
-    env = dict(os.environ, SteamAppId=redirect_tool.STEAM_APP_ID, SteamGameId=redirect_tool.STEAM_APP_ID)
+    before = redirect_tool.real_save_hashes()
     startup = subprocess.STARTUPINFO()
     startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = win32con.SW_SHOWNOACTIVATE
-    process = subprocess.Popen([os.path.join(redirect_tool.GAME_DIR, "CHRONOCROSS.exe")], cwd=redirect_tool.GAME_DIR, env=env, startupinfo=startup)
+    process = redirect_tool.launch(save, startup)
     start = time.time()
     while not window_of(process.pid):
         if time.time() - start > 30:
@@ -126,6 +129,7 @@ def launch(save, wait=25, card1=None):
             raise SystemExit("no RDE window")
         time.sleep(0.01)
     game = Game(process.pid, process)
+    game.real_saves = before
     try:
         game.take_input()
         while time.time() - start < wait:

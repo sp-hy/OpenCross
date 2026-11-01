@@ -3,3 +3,5 @@
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_14bar_op_180_wave = 0x801C6110;  # function: Op 0x180 heat wave
 fx_14bar_op_181_wave = 0x801C61F0;  # function: Op 0x181 heat wave
+fx_14bar_near_draw_hook = 0x801C6004;  # function: per-object draw hook of the stage near objects during the wave; sets the semi-transparent flag and mode 3 when the object has a blend mode, clears it otherwise, then draws through the warp
+fx_14bar_warped_model_draw = 0x801C5ECC;  # function: copies the model's vertices with y += rcos(z + 16 T) 100 >> 12 and z += rcos(y + 64 T) 200 >> 12, draws the copy, restores the vertex pointer

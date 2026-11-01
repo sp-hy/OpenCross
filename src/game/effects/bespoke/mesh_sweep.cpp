@@ -38,13 +38,17 @@ class SweepCollapse : public MeshFx {
  public:
   explicit SweepCollapse(const SweepParams& params) : params_(params) {}
 
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     if (op == 0x100) {
       duration_ = std::max(1, opnd(args, arg_count, 0, duration_));
       if (arg_count > 2) lift_ = static_cast<float>(opnd(args, arg_count, 2, 0));
-    } else if (op == 0x101 && params_.strip) {
-      strip_.start(opnd(args, arg_count, 0, 10));
+      return true;
     }
+    if (op == 0x101 && params_.strip) {
+      strip_.start(opnd(args, arg_count, 0, 10));
+      return true;
+    }
+    return false;
   }
   bool done() const override { return tick_ > duration_ + 4 && !strip_.active(); }
 
@@ -96,11 +100,11 @@ class SweepCollapse : public MeshFx {
 // ---- WaveRise (44get) ---------------------------------------------------------------------------------------------------------------
 class WaveRise : public MeshFx {
  public:
-  void command(int op, const int* args, int arg_count) override {
-    if (op == 0x181) {
-      shift_ = opnd(args, arg_count, 0, shift_);
-      amp_rate_ = static_cast<float>(opnd(args, arg_count, 1, 1));
-    }
+  bool command(int op, const int* args, int arg_count) override {
+    if (op != 0x181) return false;
+    shift_ = opnd(args, arg_count, 0, shift_);
+    amp_rate_ = static_cast<float>(opnd(args, arg_count, 1, 1));
+    return true;
   }
   bool done() const override { return tick_ >= duration_; }
 
@@ -147,16 +151,20 @@ class GateFx : public MeshFx {
  public:
   explicit GateFx(const GateParams& params) : params_(params) {}
 
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     // mushi / garadeth mode 1: falling plane at `rate`; mode 2: growing band.
     if (op == 0x181) {
       gate_ = Gate::PlaneUp;
       rate_ = static_cast<float>(opnd(args, arg_count, 0, 1)) * rate_scale_;
-    } else if (op == 0x182) {
+      return true;
+    }
+    if (op == 0x182) {
       gate_ = Gate::Band;
       rate_ = static_cast<float>(opnd(args, arg_count, 0, 1)) * rate_scale_;
       band_t0_ = tick_;
+      return true;
     }
+    return false;
   }
   bool done() const override { return tick_ > duration_; }
 
@@ -307,15 +315,23 @@ class BlackHole : public BespokeEffect {
     }
     build_grid();
   }
-  void command(int op, const int* args, int arg_count) override {
-    if (op == 0x180) tick_ = std::max(tick_, 0) + 40;
+  bool command(int op, const int* args, int arg_count) override {
+    if (op == 0x180) {
+      tick_ = std::max(tick_, 0) + 40;
+      return true;
+    }
     if (op == 0x181) {
       spin_shift_ = opnd(args, arg_count, 0, spin_shift_);
       dist_shift_ = std::clamp(opnd(args, arg_count, 1, dist_shift_), 0, 12);
       collapse_ticks_ = std::max(1, opnd(args, arg_count, 2, collapse_ticks_));
       tick_ = 0;
+      return true;
     }
-    if (op == 0x182) stopped_ = true;
+    if (op == 0x182) {
+      stopped_ = true;
+      return true;
+    }
+    return false;
   }
   void tick() override { ++tick_; }
   void draw(std::vector<FxPrim>& out) const override {

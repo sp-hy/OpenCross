@@ -100,6 +100,14 @@ void EmitterSystem::Impl::replay(Object& obj, Header& header) {
 }
 
 // -- per-object update (one tick) -------------------------------------------------------------------
+static void apply_rates(Object& obj) {
+  for (int i = 0; i < 3; ++i) {
+    obj.col[i] = static_cast<u16>(obj.col[i] + obj.crate[i]);
+    obj.ang[i] = add16(obj.ang[i], obj.arate[i]);
+    obj.scale[i] = add16(obj.scale[i], obj.srate[i]);
+  }
+}
+
 void EmitterSystem::Impl::update(size_t idx) {
   for (int i = 0; i < 3; ++i) {
     objs[idx].ppos[i] = add32(objs[idx].pos[i], objs[idx].born_shift[i]);
@@ -115,15 +123,17 @@ void EmitterSystem::Impl::update(size_t idx) {
     const int nl = static_cast<s16>(obj.life - 1);
     obj.life = static_cast<u16>(nl);
     if (nl <= 0) {
-      die(idx, !(obj.flags & kFlagNoDeathSpawn));
+      // An object with a death child runs its last tick first, so the child starts from the position after it.
+      const bool spawns = !(obj.flags & kFlagNoDeathSpawn);
+      if (spawns && obj.death >= 0) {
+        apply_rates(obj);
+        integrate_step(obj, cfg.pos_shift);
+      }
+      die(idx, spawns);
       return;
     }
   }
-  for (int i = 0; i < 3; ++i) {
-    obj.col[i] = static_cast<u16>(obj.col[i] + obj.crate[i]);
-    obj.ang[i] = add16(obj.ang[i], obj.arate[i]);
-    obj.scale[i] = add16(obj.scale[i], obj.srate[i]);
-  }
+  apply_rates(obj);
   // The model's motion advances by ticks * rate / 256 keyframes.
   if (obj.stype == 20) {
     obj.motion_prev = obj.motion;
@@ -307,6 +317,7 @@ EmitterSystem::ObjectRef EmitterSystem::Impl::ref(Object& obj) {
   object_ref.life = &obj.life;
   object_ref.flags = &obj.flags;
   object_ref.owner = obj.owner;
+  if (obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size()) object_ref.basis_sel = headers[static_cast<size_t>(obj.owner)].basis_sel[0];
   object_ref.shift = cfg.pos_shift;
   return object_ref;
 }

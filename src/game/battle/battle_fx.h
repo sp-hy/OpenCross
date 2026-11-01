@@ -208,6 +208,8 @@ class BattleFxRun {
     std::function<bool(const effects::Vec3& pos, effects::LightMatrices& matrices, std::array<float, 3>& back)> lights;
     // hensin ops 0x182 / 0x183: phase 1 = the form change starts (the old model goes), 2 = the unit takes its new form.
     std::function<void(int phase)> form;
+    // An overlay writes a unit's idle-pose word (effects::FxHooks::set_pose).
+    std::function<void(int unit, int pose)> pose;
     // An overlay changes the music (effects::FxHooks::play_song).
     std::function<void(int song)> song;
   };
@@ -264,9 +266,14 @@ class BattleFxRun {
   // done() only because of the hard cap.
   bool capped() const { return ticks_ > kTickCap; }
   const effects::BespokeEffect* bespoke() const { return bespoke_.get(); }
-  // Overlay-private ops (>= 0x100) met, and those met with no bespoke module running.
+  // Overlay-private ops (>= 0x100) met, and those no bespoke module acted on (none running, or the module ignored the op), per op.
   u32 private_ops() const { return private_ops_; }
-  u32 private_ops_unhandled() const { return private_unhandled_; }
+  u32 private_ops_unhandled() const {
+    u32 total = 0;
+    for (const auto& entry : private_ignored_) total += entry.second;
+    return total;
+  }
+  const std::map<int, u32>& private_ops_ignored() const { return private_ignored_; }
   // Sequence ops the battle presentation carries out (BattleFxRun itself, SequencePlayer, BattleView::fx_other); the audit counts every other
   // stock op it meets as "not presented".
   enum class OpClass { Presented, Missing, NonVisual, Private };
@@ -314,7 +321,8 @@ class BattleFxRun {
   bool pace_fixed_ = false;
   // Ticks left in the current pacing window.
   int pace_left_ = 0;
-  u32 private_ops_ = 0, private_unhandled_ = 0;
+  u32 private_ops_ = 0;
+  std::map<int, u32> private_ignored_;
   // Model copies of ops 0x6F / 0x71 / 0x77.
   std::array<std::optional<FxUnit>, battle::kUnits> frozen_{};
   bool damage_seen_ = false, ready_seen_ = false;

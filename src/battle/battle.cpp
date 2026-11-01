@@ -7,6 +7,8 @@
 #include <tuple>
 #include <utility>
 
+#include "data/char_name.h"
+
 namespace oc::battle {
 
 namespace {
@@ -138,7 +140,7 @@ PartyMember make_party_member(const data::GameTables& tables, int char_id, int s
   const auto& rec = chars.rec[static_cast<size_t>(char_id)];
   const auto& lv99 = chars.lv99[static_cast<size_t>(char_id)];
   member.char_id = char_id;
-  member.name = tables.char_name(char_id);
+  member.name = member.own_name = tables.char_name(char_id);
   member.stat = {rec.max_hp(), rec.atk(), rec.def(), rec.hit(), rec.evd(), rec.mag(), rec.mdef()};
   member.lv99 = {lv99.hp, lv99.atk, lv99.def, lv99.hit, lv99.evd, lv99.mag, lv99.mdef};
   member.hp = member.stat[0];
@@ -162,6 +164,31 @@ PartyMember make_party_member(const data::GameTables& tables, int char_id, int s
 // Pip's tech cells follow his CURRENT form whatever the record holds: ids 0x11F / 0x121 / 0x123 become the form's first tech,
 // 0x120 / 0x122 / 0x124 its second, and his 18 techs take his innate colour. A gear HP% flag scales max HP by (100 + n) / 100 (+1 when
 // that changes nothing), cap 999.
+// The Lynx duel: the party's leader fights alone against three dummy enemies drawn as Serge, Kid and a party member. Serge and Kid take the
+// weapon of their party member, or their defaults when they are not in the party, and their gender word from their character record. The
+// third changes only when that character is in the party: it also takes the member's colour, and Pip keeps his form as the kind.
+std::optional<Battle::DuelBody> Battle::duel_body(int slot, int monster_id, int third) const {
+  const auto member_of = [&](int char_id) {
+    return std::find_if(duel_roster_.begin(), duel_roster_.end(), [&](const PartyMember& member) { return member.char_id == char_id; });
+  };
+  const u16 own_gender = tables_.enemies[static_cast<size_t>(monster_id)].rd16(0x14);
+  const auto gender_of = [&](int char_id) {
+    const auto chars = tables_.char_sets.find("char");
+    if (chars == tables_.char_sets.end() || char_id < 0 || char_id >= data::kNumChars) return own_gender;
+    return static_cast<u16>(chars->second.rec[static_cast<size_t>(char_id)].rd16(0x14));
+  };
+  const auto fixed = [&](int char_id, u16 fallback_weapon) {
+    const auto member = member_of(char_id);
+    return DuelBody{char_id, member != duel_roster_.end() ? static_cast<u16>(member->eq.weapon_id) : fallback_weapon, gender_of(char_id), -1};
+  };
+  if (slot == kPcSlots) return fixed(0, 0x22);
+  if (slot == kPcSlots + 1) return fixed(1, 0x29);
+  const auto member = member_of(third);
+  if (slot != kPcSlots + 2 || member == duel_roster_.end()) return std::nullopt;
+  const int kind = pip_form(third) && member->kind >= 0 ? member->kind : third;
+  return DuelBody{kind, static_cast<u16>(member->eq.weapon_id), gender_of(third), member->innate};
+}
+
 void Battle::init_pc(int slot, const PartyMember& member) {
   Unit& unit = units_[static_cast<size_t>(slot)];
   unit = Unit{};
@@ -236,6 +263,11 @@ void Battle::load_monster_record(Unit& unit, const data::StatRec& rec, u32 perm_
 
 // Max HP: NG+ doubles it (cap 30000, not in the final battle), a rolled / recorded gender scales it x105/100 (male) or x95/100 (female);
 // the unit HP field is a signed 16-bit word, so it is clamped to 32767. AP gets + rnd(0, AP / 4); the first countdown is rnd(0 or 1, AP).
+std::string Battle::enemy_label(int monster_id) const {
+  const size_t index = static_cast<size_t>(monster_id);
+  return index < opt_.enemy_names.size() && !opt_.enemy_names[index].empty() ? opt_.enemy_names[index] : tables_.enemy_name(monster_id);
+}
+
 void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
   Unit& unit = units_[static_cast<size_t>(slot)];
   const auto& rec = tables_.enemies[static_cast<size_t>(monster_id)];
@@ -243,17 +275,20 @@ void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
   unit.present = true;
   unit.pc = false;
   unit.src_id = monster_id;
-  unit.name = tables_.enemy_name(monster_id);
+  unit.name = enemy_label(monster_id);
   if (unit.name.empty()) unit.name = std::format("monster{}", monster_id);
   int max_hp = std::min<int>(rec.max_hp(), 32767);
   if (opt.ng_plus && scene_ != 0x1DD) max_hp = std::min(max_hp * 2, 30000);
-  int gender = rec.gender() & 0xC0;
+  // The duel's bodies replace the gender word before it is rolled and scales the HP.
+  const std::optional<DuelBody> duel = scene_ == 0x1DD ? duel_body(slot, monster_id, opt.duel_third) : std::nullopt;
+  const u16 gender_word = duel ? duel->gender : rec.rd16(0x14);
+  int gender = (gender_word >> 8) & 0xC0;
   if (gender == 0) gender = rng_.rnd(1, 2) << 6;
   if (gender & 0x40) max_hp = max_hp * 0x69 / 100;
   else if (gender & 0x80) max_hp = std::max(1, max_hp * 0x5F / 100);
   max_hp = std::min(max_hp, 32767);
   unit.max_hp = unit.hp = max_hp;
-  unit.gender = static_cast<u16>((rec.rd16(0x14) & 0x3FFF) | (gender << 8));
+  unit.gender = static_cast<u16>((gender_word & 0x3FFF) | (gender << 8));
   load_monster_record(unit, rec, 0x400u);
   if (monster_party_) unlock_monster_grid(unit);
   // The gauge tops out at the deepest grid row holding an element in a cell without the lock bit (0x4000); every stock monster cell
@@ -270,6 +305,12 @@ void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
   unit.drop_row = rec.drop_row();
   unit.kind = rec.model();
   unit.drop_base = rec.drop_base();
+  if (duel) {
+    unit.body = unit.kind = duel->kind;
+    unit.eq.weapon_id = duel->weapon;
+    if (duel->innate >= 0) unit.innate = static_cast<u8>(duel->innate);
+    if (!opt.duel_names.empty()) unit.name = static_cast<size_t>(duel->kind) < opt.duel_names.size() ? opt.duel_names[static_cast<size_t>(duel->kind)] : std::string();
+  }
 }
 
 // A monster-party scene: every monster record's grid cells of rows 1..7 outside column 8 lose their flag bits (0xC000), so the
@@ -292,7 +333,7 @@ void Battle::init_party_monster(int slot, int monster_id, const BattleOptions& o
   unit.present = unit.pc = true;
   unit.src_id = char_id;
   unit.form = monster_id;
-  unit.name = tables_.enemy_name(monster_id);
+  unit.name = enemy_label(monster_id);
   if (unit.name.empty()) unit.name = std::format("monster{}", monster_id);
   int max_hp = rec.max_hp();
   if (opt.ng_plus && scene_ != 0x1DD) max_hp = std::min(max_hp * 2, 30000);
@@ -336,6 +377,15 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   reset_chain();
   units_ = {};
   party_ = std::move(party);
+  duel_roster_.clear();
+  if (scene_ == 0x1DD) {
+    duel_roster_ = party_;
+    // The list the bodies search comes from the fight before, where the relief member stood in for Serge.
+    if (const auto relief = std::find_if(opt.bench.begin(), opt.bench.end(), [&](const PartyMember& member) { return member.char_id == opt.duel_relief; }); relief != opt.bench.end())
+      for (PartyMember& member : duel_roster_)
+        if (member.char_id == 0) member = *relief;
+    party_.erase(party_.begin() + 1, party_.end());
+  }
   colour_row_ = std::any_of(party_.begin(), party_.end(), [](const PartyMember& member) {
     return std::any_of(member.cells.begin(), member.cells.end(), [](u16 cell) { return (cell & 0x7FFF) == kChronoCrossElement; });
   });
@@ -356,7 +406,11 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
       ring_[k] = colour < 6 ? colour : -1;
     }
 
-  for (size_t i = 0; i < party_.size(); ++i) init_pc(static_cast<int>(i), party_[i]);
+  for (size_t i = 0; i < party_.size(); ++i) {
+    if (scene_ == data::kUnnamedKidScene && party_[i].char_id == data::kKid && !opt.unnamed_kid_label.empty()) party_[i].name = opt.unnamed_kid_label;
+    init_pc(static_cast<int>(i), party_[i]);
+    if (scene_ == 0x1DD && party_[i].char_id == 0 && opt.duel_names.size() > data::kLynxBody) units_[i].name = opt.duel_names[data::kLynxBody];
+  }
   // Monster-party scene: each party slot takes its pick, a slot without one stays empty. Without any pick (dev tools) the party fights.
   monster_party_ = (scene_rec.raw[0x0F] & 1) &&
                    std::any_of(opt.monster_party.begin(), opt.monster_party.end(), [&](int record) {
@@ -637,7 +691,7 @@ bool Battle::transform(int unit_index, int form) {
   fresh.present = fresh.pc = true;
   fresh.src_id = old.src_id;
   fresh.form = form;
-  fresh.name = tables_.enemy_name(form);
+  fresh.name = enemy_label(form);
   if (fresh.name.empty()) fresh.name = std::format("monster{}", form);
   fresh.max_hp = old.max_hp, fresh.hp = old.hp;
   fresh.ap = 8, fresh.countdown = 8, fresh.stamina = old.stamina, fresh.gauge = -1;
@@ -730,6 +784,7 @@ void Battle::kill(int unit_index) {
     return;
   }
   victim.hp = 0;
+  victim.hp_written_zero = false;
   victim.lo |= st::kKO;
   victim.guard = false;
   victim.defending = false;
@@ -1072,9 +1127,12 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     in.exploit = (element.status_hi() & target_unit.hi & 0xE007FFFFu) != 0;
     return in;
   };
+  // The damage rolled, which is what the number shows; an overkill is not cut to the target's HP. -1 = no damage roll.
+  int rolled_damage = -1;
   auto deal = [&](const ElementIn& in) {
     DamageOut damage = element_damage(rng_, in);
     god_filter(target, damage);
+    if (damage.code != 3) rolled_damage = damage.value;
     say(std::format("{} casts {} on {}: {}{} (mode {}, slot {}, x{})", caster.name, nm, target_unit.name, damage.value, damage.code == 3 ? " healed" : "", mode, slot, cmul));
     damage_unit(actor, target, damage.value, damage.code);
     return damage;
@@ -1566,6 +1624,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       }
       say(std::format("{} uses {} on {}: {} ({} hits)", caster.name, nm, target_unit.name, any ? total : 0, hits));
       damage_unit(actor, target, total, total == 0 ? 1 : 0);
+      rolled_damage = total;
       break;
     }
     default:
@@ -1584,7 +1643,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   ev.hp_after = target_unit.hp;
   ev.ko = alive0 && !target_unit.alive();
   ev.ko_owed = ev.ko && death_pending_[static_cast<size_t>(target)];
-  ev.value = std::abs(target_unit.hp - hp0);
+  ev.value = rolled_damage >= 0 ? rolled_damage : std::abs(target_unit.hp - hp0);
   const bool friendly_mode = mode == 3 || mode == 43 || mode == 4 || mode == 7;
   ev.code = target_unit.hp > hp0 || friendly_mode ? 3 : 0;
   if (code_override >= 0) ev.code = code_override;

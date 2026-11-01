@@ -1,0 +1,35 @@
+# PS1 project symbol list: effect overlay ripple.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_ripple_dispatch = 0x801C5E04;  # function: Command dispatcher: init, frame, exit and ops 0x180 to 0x182
+fx_ripple_bake_ground = 0x801C5EF8;  # function: Bakes the stage ground cells into every textured packet group of a mesh
+fx_ripple_bake_corner = 0x801C6038;  # function: Bilinear texture coordinate and colour of one packet corner from a ground cell
+fx_ripple_bake_ft3 = 0x801C62F0;  # function: Ground bake of the flat textured triangle group
+fx_ripple_bake_ft4 = 0x801C65A4;  # function: Ground bake of the flat textured quad group
+fx_ripple_bake_gt3 = 0x801C68E0;  # function: Ground bake of the gouraud textured triangle group
+fx_ripple_bake_gt4 = 0x801C6B9C;  # function: Ground bake of the gouraud textured quad group
+fx_ripple_mesh_centroid = 0x801C6EE4;  # function: Mean of a mesh's vertices
+fx_ripple_set_pivot_matrix = 0x801C6FF0;  # function: Loads the view matrix turned about a pivot and moved by an offset
+fx_ripple_share_packets = 0x801C71D4;  # function: Points the hand shapes at the packet lists of the baked hand mesh
+fx_ripple_op_advance = 0x801C7268;  # function: Op 0x182: next scene state and the motion set-up of the state that follows
+fx_ripple_reset_scene = 0x801C74CC;  # function: Sets the hand pivot and clears the scene position
+fx_ripple_init = 0x801C7580;  # function: Init: finds the ground and the ring and hand meshes, bakes them, clears the field
+fx_ripple_op_stamp = 0x801C7818;  # function: Op 0x180: writes a square of height into the height field
+fx_ripple_op_clear = 0x801C791C;  # function: Op 0x181: clears both height buffers and switches the field off
+fx_ripple_frame = 0x801C7984;  # function: Frame: draws the scene state, the ground with its hole and steps the field
+fx_ripple_exit = 0x801C82DC;  # function: Exit: gives the stock ground back
+fx_ripple_field_frame = 0x801C82EC;  # function: Steps the height field and draws the warp grid when the field is on
+fx_ripple_warp_copy = 0x801C8474;  # function: Copies the frame to the warp page and restores the draw environment
+fx_ripple_warp_draw = 0x801C8528;  # function: Draw entry of the warp grid
+fx_ripple_warp_grid = 0x801C854C;  # function: Draws the 32 x 32 grid of textured quads lifted by the field heights
+fx_ripple_state = 0x801C89F0;  # data: scene state 0..6
+fx_ripple_state_clock = 0x801C89E8;  # data: ticks since the last state change or bob reversal
+fx_ripple_total_clock = 0x801C89F4;  # data: ticks since the last op 0x182
+fx_ripple_field_newest = 0x801C89FC;  # data: index of the height buffer a stamp writes and a step reads
+fx_ripple_field_oldest = 0x801C8A00;  # data: index of the height buffer a step writes
+fx_ripple_field_active = 0x801C8A14;  # data: height field switched on
+fx_ripple_position = 0x801C8A88;  # data: hand position x, y, z (three halfwords)
+fx_ripple_pivot = 0x801C8A98;  # data: hand rotation pivot (0, -0x800, 0)
+fx_ripple_lift = 0x801C8ABC;  # data: vertical speed, or the arc angle in the flight state
+fx_ripple_lift_accel = 0x801C8B98;  # data: acceleration of the lift
+fx_ripple_height_field = 0x801C8BB8;  # data: two 33 x 33 int height buffers

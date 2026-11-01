@@ -4,8 +4,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <string>
 
+#include "data/char_name.h"
 #include "import/spritefont.h"
 #include "import/text.h"
 #include "ui/dialogue_box.h"
@@ -233,6 +235,141 @@ void test_lang() {
 // breaks at spaces; choice mode: a line opened by three spaces lays its indent out with the choice space widths (63,
 // then 18, 18) and is never wrapped, so the option text starts at 99 while plain lines keep the font advance; {fset(n)}
 // / {fwait(n)} write and poll the field event register, and neither time nor a confirm passes an unanswered {fwait}.
+// The naming rule: only character 0 in Lynx's body reads as Lynx; battle and menus ignore global flag 16, field text honours it; the typed
+// name wins over the language's name otherwise, and a kana record is unset outside JP.
+void test_char_names() {
+  using data::NameContext;
+  CHECK(data::shows_lynx(0, 0x31, NameContext::Menu, false));
+  CHECK(data::shows_lynx(0, 0x31, NameContext::Menu, true));
+  CHECK(data::shows_lynx(0, 0x31, NameContext::Field, false));
+  CHECK(!data::shows_lynx(0, 0x31, NameContext::Field, true));
+  CHECK(!data::shows_lynx(0, 0, NameContext::Menu, false));
+  CHECK(!data::shows_lynx(1, 0x31, NameContext::Menu, false));
+  CHECK(!data::shows_lynx(1, 0x31, NameContext::Field, false));
+  CHECK(!data::shows_lynx(43, 0x2F, NameContext::Menu, false));
+
+  const auto var = [](int id) { return id == 0x172 ? 0x1131 : 0x05; };
+  CHECK(data::character_body(0x31, var) == 0x31);
+  CHECK(data::character_body(0x131, var) == 0x31);
+  CHECK(data::character_body(0x3D, var) == 0x31);
+  CHECK(data::character_body(0x3C, var) == 0x05);
+  CHECK(data::character_body(0x3F, var) == 0x3F);
+
+  import::LangTables tables;
+  tables.set_table("sysmes",
+                   "key\ten\tde\tjp\n"
+                   "0x010000\tSerge\tSerge-de\t\xE3\x82\xBB\xE3\x83\xAB\xE3\x82\xB8\xE3\x83\xA5\n"
+                   "0x010001\tKid\tKid-de\tKid-jp\n"
+                   "0x010005\tViper\tViper-de\tViper-jp\n"
+                   "0x010031\tLynx\tLynx-de\tLynx-jp\n");
+  const std::map<int, std::u32string> custom{{0, U"Hero"}, {1, U"\u30AD\u30C3\u30C9"}};
+  data::CharNames names{&custom, &tables, import::Lang::En};
+  CHECK(data::character_name(0, 0x31, NameContext::Menu, false, names) == U"Lynx");
+  CHECK(data::character_name(0, 0x31, NameContext::Menu, true, names) == U"Lynx");
+  CHECK(data::character_name(0, 0x31, NameContext::Field, false, names) == U"Lynx");
+  CHECK(data::character_name(0, 0x31, NameContext::Field, true, names) == U"Hero");
+  CHECK(data::character_name(0, 0, NameContext::Menu, false, names) == U"Hero");
+  CHECK(data::own_name(0, names) == U"Hero");
+  CHECK(data::character_name(1, 0x31, NameContext::Menu, false, names) == U"Kid");
+  names.lang = import::Lang::De;
+  CHECK(data::character_name(0, 0x31, NameContext::Menu, false, names) == U"Lynx-de");
+  CHECK(data::character_name(5, 5, NameContext::Menu, false, names) == U"Viper-de");
+  names.custom = nullptr;
+  CHECK(data::character_name(0, 0, NameContext::Menu, false, names) == U"Serge-de");
+  names.custom = &custom;
+  names.lang = import::Lang::Jp;
+  CHECK(data::character_name(1, 1, NameContext::Menu, false, names) == U"\u30AD\u30C3\u30C9");
+  CHECK(data::character_name(5, 5, NameContext::Menu, false, names) == U"Viper-jp\u5927\u4F50");
+  CHECK(data::character_name(5, 5, NameContext::Field, false, names, false) == U"Viper-jp");
+
+  CHECK(data::usable_name(U"Hero", import::Lang::En));
+  CHECK(!data::usable_name(U"\u30BB\u30EB", import::Lang::En));
+  CHECK(data::usable_name(U"\u30BB\u30EB", import::Lang::Jp));
+  CHECK(!data::usable_name(U"\u3000 ", import::Lang::Jp));
+  CHECK(!data::usable_name(U"a\uFFFD", import::Lang::Jp));
+
+  CHECK(data::line_speaker(0, true) == 0x31);
+  CHECK(data::line_speaker(0, false) == 0);
+  CHECK(data::line_speaker(7, true) == 7);
+  tables.set_field_csv(import::Lang::En, "27\t1\t{SUFFIX}\n");
+  std::string columns = "{SUFFIX}";
+  for (int column = 0; column < 50; ++column) columns += "," + std::to_string(column);
+  tables.set_mesgen(import::Lang::En, columns + "\n");
+  CHECK(tables.lookup_field(27, 1, import::Lang::En, data::line_speaker(0, true)) == "49");
+}
+
+void test_menu_forms() {
+  CHECK(data::menu_form(0, 0x31) == 0x31);
+  CHECK(data::menu_form(0, 0x33) == 0);
+  CHECK(data::menu_form(0, 0x32) == 0);
+  CHECK(data::menu_form(0, 0x32, 0x32) == 0x32);
+  CHECK(data::menu_form(0, 0) == 0);
+  CHECK(data::menu_form(43, 0x2D) == 0x2D);
+  CHECK(data::menu_form(1, 1) == 1);
+  const auto read_var = [](int var) { return var == 0x172 ? 0x31 : 0; };
+  CHECK(data::menu_form(0, data::character_body(0x3D, read_var)) == 0x31);
+  CHECK(data::menu_form(0, data::character_body(0x3C, read_var)) == 0);
+}
+
+void test_word_wrap() {
+  using namespace ui;
+  LayoutMetrics lm;
+  lm.advance = [](char32_t) { return 10.0f; };
+  lm.line_height = 20;
+  lm.wrap = true;
+  const auto layout = [&](const char* markup, float limit) {
+    lm.max_width = limit;
+    return layout_pages(import::flatten(import::parse_markup(markup, import::Lang::En), {}), lm);
+  };
+  // The width is checked before each glyph: the last glyph of a page may overhang the limit.
+  CHECK(layout("abcde fghij{mend}", 105)[0].lines == 1);
+  const auto broken = layout("abcde fghijk{mend}", 105);
+  CHECK(broken[0].lines == 2 && broken[0].glyphs.size() == 11 && broken[0].glyphs[5].ch == U'f' && broken[0].glyphs[5].x == 0);
+  // A space that crosses the limit breaks before the word in front of it.
+  CHECK(layout("ab cdefgh ij{mend}", 85)[0].lines == 2);
+  // The limit is at least the widest word, and a word is never cut.
+  CHECK(layout("a abcdefghij b{mend}", 45)[0].lines == 3);
+  CHECK(layout("abcdefghij{mend}", 45)[0].lines == 1);
+  // No limit, no wrap.
+  CHECK(layout("abcde fghij klmno{mend}", 0)[0].lines == 1);
+  // Events stay on their glyphs when a space leaves the page.
+  const auto waiting = layout("abcd efgh{bwait}ij{mend}", 65);
+  CHECK(waiting[0].lines == 2 && waiting[0].glyphs.size() == 10 && waiting[0].events.size() == 1 && waiting[0].events[0].at == 8);
+  // The wrap counts the measured widths, not the pen advances.
+  CHECK(wrap_glyph_width(64.0f, false) == 0.45f * 54.0f);
+  CHECK(wrap_glyph_width(0.0f, false) == 18.0f);
+  lm.wrap_advance = [](char32_t, bool) { return 20.0f; };
+  CHECK(layout("abcde fghij{mend}", 105)[0].lines == 2);
+  CHECK(layout("abcde fghij{mend}", 105)[0].glyphs[5].x == 0);
+  lm.wrap_advance = nullptr;
+  // A choice line is never wrapped.
+  lm.choice_space_first = 63;
+  lm.choice_space = 18;
+  CHECK(layout("Q?\n   abcde fghij klmno pqrst{mend}", 105)[0].lines == 2);
+}
+
+void test_wrap_limit() {
+  using import::Lang;
+  using ui::wrap_limit;
+  const auto chars = [](const char* markup) { return ui::disc_line_chars(import::parse_markup(markup, Lang::Jp)); };
+  CHECK(chars("ab{SERGE%}c\nabcd{mend}") == 9);
+  CHECK(chars("abcd{bwait}ef\nabc{mend}") == 4);
+  CHECK(chars("ab{bpage}abc{wait(10)}d{mend}") == 4);
+  CHECK(ui::disc_line_chars({}) == 0);
+
+  CHECK(wrap_limit(74, 34, Lang::De, 11) == 682.0f);
+  CHECK(wrap_limit(74, 34, Lang::De, 15) == 925.0f);
+  CHECK(wrap_limit(74, 34, Lang::De, 0) == 1000.0f);
+  CHECK(wrap_limit(74, 34, Lang::Jp, 11) == 0.0f);
+  // The messages shown as authored are per language.
+  CHECK(wrap_limit(387, 6, Lang::En, 5) == 0.0f);
+  CHECK(wrap_limit(387, 6, Lang::Fr, 5) == 310.0f);
+  CHECK(wrap_limit(387, 8, Lang::Fr, 10) == 0.0f);
+  CHECK(wrap_limit(414, 19, Lang::En, 26) == 0.0f);
+  CHECK(wrap_limit(414, 19, Lang::De, 26) == 925.0f);
+  CHECK(wrap_limit(1490, 1, Lang::En, 9) == 925.0f);
+}
+
 void test_typewriter() {
   using namespace ui;
   import::Message message = import::parse_markup("ab{wait(30)}c{bpage}d{wait}{mend}", import::Lang::En);
@@ -432,8 +569,12 @@ int main() {
   test_markup();
   test_spritefont();
   test_lang();
+  test_char_names();
   test_typewriter();
   test_choice_lines();
+  test_menu_forms();
+  test_word_wrap();
+  test_wrap_limit();
   test_frame_rows();
   test_digit_entry();
   test_window_opening();

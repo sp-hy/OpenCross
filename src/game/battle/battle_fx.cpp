@@ -21,6 +21,9 @@ using effects::Vec3;
 // ------------------------------------------------------------------------------------------------------------ VRAM sections
 namespace {
 
+// The stock host overlays have no private ops: a pack's op >= 0x100 does nothing under them.
+bool stock_host(std::string_view overlay) { return overlay == "stdtech0" || overlay == "stdtech1" || overlay == "stdmag0" || overlay == "magtest"; }
+
 // Does the pack-table script (entry, variant) reach an op of this kind, for a landed or a failed hit? React = 0x59 / 0x5A (CallDamTarget /
 // CallDamTargetAll: the targets run variant 7), Damage = 0x41 (CallDamage, the number).
 bool script_emits(const bseq::Table& table, int entry, int variant, bseq::Event::Kind kind) {
@@ -380,7 +383,10 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
           else if (cmd.op == 0x4F || cmd.op == 0x57) own_s5 = true;
       pack->overlay = effects::overlay_stem(slot_entry->prg);
       pack->bespoke = effects::BespokeRegistry::instance().find_element(eid);
-      if (auto drp = import::parse_drp(pack->prd))
+      // Entries register from nested archives (type 1) as well: the Element Shot packs keep `main` and `tech` inside `elda`.
+      const std::function<void(ByteSpan)> register_scripts = [&](ByteSpan bytes) {
+        const auto drp = import::parse_drp(bytes);
+        if (!drp) return;
         for (const auto& entry : drp->entries)
           if (entry.type == 0x1A) {
             // The last one registered wins.
@@ -390,7 +396,11 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
           } else if (entry.type == 0x19) {
             // The caster's tech clips.
             pack->clip_packs.emplace_back(entry.name, Bytes(entry.data.begin(), entry.data.end()));
+          } else if (entry.type == 0x01) {
+            register_scripts(entry.data);
           }
+      };
+      register_scripts(pack->prd);
       // The caster variant = its acting-list index ; up to three casters (a group cast).
       if (pack->has_anim)
         for (const int entry : caster_entries)
@@ -545,7 +555,6 @@ void BattleFxRun::on_other(const assets::SeqCmd& original) {
   }
   if (cmd.op >= 0x100) {
     ++private_ops_;
-    if (!bespoke_) ++private_unhandled_;
   }
   if (cmd.op >= 0x100 && bespoke_) {
     int args[16];
@@ -553,10 +562,11 @@ void BattleFxRun::on_other(const assets::SeqCmd& original) {
     for (size_t i = 0; i + 1 < cmd.data.size() && arg_count < 16; i += 2) args[arg_count++] = static_cast<s16>(cmd.data[i] | (cmd.data[i + 1] << 8));
     // The per-target loop index some overlays address the target list with.
     models_.cursor = cursor_;
-    bespoke_->command(cmd.op, args, arg_count);
+    if (!bespoke_->command(cmd.op, args, arg_count)) ++private_ignored_[cmd.op];
     apply_list_overrides();
     return;
   }
+  if (cmd.op >= 0x100 && !stock_host(pack_->overlay)) ++private_ignored_[cmd.op];
   if (cb_.other) cb_.other(cmd);
 }
 
@@ -582,7 +592,9 @@ effects::FxContext BattleFxRun::make_context(const effects::ViewParams& view) co
   if (cb_.fog_off) ctx.hooks.fog_off = cb_.fog_off;
   if (cb_.lights) ctx.hooks.lights = cb_.lights;
   if (cb_.form) ctx.hooks.form_swap = cb_.form;
+  if (cb_.pose) ctx.hooks.set_pose = cb_.pose;
   if (cb_.song) ctx.hooks.play_song = cb_.song;
+  ctx.hooks.start_for_caster = [this](std::string_view name, int caster) { seq_->start_caster_clone(name, caster); };
   ctx.hooks.script_gate = [] { return bseq::Vm::global(0); };
   ctx.hooks.clear_script_gate = [] { bseq::Vm::set_global(0, 0); };
   return ctx;
@@ -599,7 +611,7 @@ void BattleFxRun::init_models() {
     model.unit = i;
     model.pc = fu.pc;
     model.home = model.pos = {fu.x, 0.0f, fu.z};
-    model.home_rot[1] = model.rot[1] = static_cast<int>(std::lround((3.14159265f - fu.yaw) * 4096.0f / 6.2831853f)) & 0xFFF;
+    model.home_rot[1] = model.rot[1] = static_cast<int>(std::lround(fu.yaw * 4096.0f / 6.2831853f)) & 0xFFF;
     model.height = fu.height;
     model.hidden = !fu.present;
     model.offstage = fu.offstage;
@@ -824,6 +836,12 @@ bool BattleFxRun::point_of(int sel, int joint, Vec3& pos, float& yaw) const {
       default: return -height * 0.55f;
     }
   };
+  // A model the overlay steers owns its yaw as well (bboy's targets turn to 0xC00 before the 'bway' basis is read).
+  auto yaw_of = [&](int unit) {
+    if (bespoke_ && static_cast<size_t>(unit) < models_.units.size() && models_.units[static_cast<size_t>(unit)].steer)
+      return static_cast<float>(models_.units[static_cast<size_t>(unit)].rot[1] & 0xFFF) * 6.2831853f / 4096.0f;
+    return unit_at(unit).yaw;
+  };
   std::vector<int> us;
   bool ground = false;
   switch (sel) {
@@ -885,7 +903,8 @@ bool BattleFxRun::point_of(int sel, int joint, Vec3& pos, float& yaw) const {
     if (joint == 0x22) oy = 0;
     if (joint >= 2 && joint != 0x22 && joint != 0x23 && fu.attach && fu.attach(joint - 2, ax, ay, az)) {
       // the attach point through the model's yaw (the same rotation the basis gets), on the model origin
-      const float cs = std::cos(fu.yaw), sn = std::sin(fu.yaw);
+      const float unit_yaw = yaw_of(unit);
+      const float cs = std::cos(unit_yaw), sn = std::sin(unit_yaw);
       float dx = cs * ax + sn * az, dy = ay, dz = -sn * ax + cs * az;
       // Rz in front of the yaw (RotMatrix = Rz * Ry * Rx).
       if (fu.rot_z != 0.0f) {
@@ -904,13 +923,13 @@ bool BattleFxRun::point_of(int sel, int joint, Vec3& pos, float& yaw) const {
     sx += ox;
     sy += oy;
     sz += oz;
-    syaw += fu.yaw;
+    syaw += yaw_of(unit);
     const float pt[3] = {sx, sy, sz};
     for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], pt[k]), hi[k] = std::max(hi[k], pt[k]);
     sx = sy = sz = 0;
   }
   const float count = static_cast<float>(us.size());
-  yaw = us.size() == 1 ? unit_at(us.front()).yaw : syaw / count;
+  yaw = syaw / count;
   auto mid = [&](int axis) { return us.size() == 1 ? lo[axis] : std::trunc((std::round(hi[axis]) + std::round(lo[axis])) * 0.5f); };
   // PS1 world: y down, feet at 0.
   pos = {mid(0), ground ? 0.0f : mid(1), mid(2)};

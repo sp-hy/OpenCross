@@ -10,6 +10,7 @@
 #include <map>
 
 #include "core/log.h"
+#include "data/char_name.h"
 #include "platform/keymap.h"
 #include "ui/lowres.h"
 #include "ui/menu/menu_common.h"
@@ -77,7 +78,17 @@ std::string MainMenu::Impl::menu_str(u32 addr, const char* fallback) {
   return fallback;
 }
 
+int MainMenu::Impl::body(int character) const {
+  return data::character_body(gs->slot.chars[static_cast<size_t>(character)].model_id, [this](int var) { return gs->slot.var(var); });
+}
+
 std::u32string MainMenu::Impl::char_name(int id) {
+  if (!gs || id < 0 || id >= save::kNumChars) return default_char_name(id);
+  const std::u32string name = data::character_name(id, body(id), data::NameContext::Menu, false, {custom_names, &lt, lang});
+  return name.empty() ? default_char_name(id) : name;
+}
+
+std::u32string MainMenu::Impl::default_char_name(int id) {
   auto it = name_cache.find(id);
   if (it != name_cache.end()) return it->second;
   std::u32string name = lt.default_name(id, lang);
@@ -308,6 +319,7 @@ void MainMenu::shutdown() {
 }
 void MainMenu::set_model_view(MenuModelView* view) { impl_->model_view = view; }
 void MainMenu::set_rules(const MenuRules* rules) { impl_->rules = rules; }
+void MainMenu::set_custom_names(const std::map<int, std::u32string>* names) { impl_->custom_names = names; }
 void MainMenu::set_mode(ArtMode mode) { impl_->mode = mode; }
 ArtMode MainMenu::mode() const { return impl_->mode; }
 void MainMenu::set_language(import::Lang lang) {

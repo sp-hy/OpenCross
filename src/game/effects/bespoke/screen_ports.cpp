@@ -26,13 +26,14 @@ namespace {
 class Muteki : public MeshTech {
  protected:
   void init() override { start_caster_anim(caster(0)); }
-  void command(int op, const int* args, int count) override {
-    if (op != 0x180) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x180) return false;
     Flare flare;
     flare.x = arg(args, count, 8), flare.y = arg(args, count, 0xA), flare.vx = arg(args, count, 0xC), flare.vy = arg(args, count, 0xE);
     flare.life = arg(args, count, 4);
     flare.rgb = {arg(args, count, 0x10) & 0xFF, arg(args, count, 0x12) & 0xFF, arg(args, count, 0x14) & 0xFF};
     flares_.push_back(flare);
+    return true;
   }
   void frame() override {
     shown_.clear();
@@ -127,21 +128,26 @@ class Slot155 : public MeshTech {
  protected:
   void init() override {
     load_drums();
+    if (ctx_.models) ctx_.models->suppress_main = true;
     if (ctx_.sequences) ctx_.sequences->start("init");
     for (int i = 0; i < 3; ++i) {
       reels_[static_cast<size_t>(i)].index = i;
       advance(reels_[static_cast<size_t>(i)]);
     }
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     (void)args;
     (void)count;
     if (op == 0x100) {
       enabled_ = true;
-    } else if (op == 0x101 && em()) {
+      return true;
+    }
+    if (op != 0x101) return false;
+    if (em()) {
       for (const char* name : {"dr@0", "dr@1", "dr@2"}) em()->start(name);
       for (const char* name : {"dra0", "dra1", "dra2"}) em()->kill(name);
     }
+    return true;
   }
   void frame() override {
     for (Reel& reel : reels_)

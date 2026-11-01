@@ -2,7 +2,7 @@
 //   kuzira3  Blue Whale    op 0x100 throws each target out from the origin, op 0x101 brings them home
 //   mido2    Genie         op 0x100 orbits the targets round their centroid, op 0x101 brings them home
 //   enrou    Red Wolf      op 0x100 stops an emitter by name and expires its particles
-//   hebi     Thunda Snake  op 0x100 the same
+//   hebi     Thunda Snake  op 0x100 the same, op 0x101 brings the third party member back
 //   theend   Grim Reaper   op 0x180 sets a point, op 0x181 drifts the targets toward it, op 0x182 restores them
 #include <algorithm>
 #include <cmath>
@@ -11,6 +11,7 @@
 
 #include "game/effects/bespoke/overlay_base.h"
 #include "game/effects/fx_math.h"
+#include "game/effects/sequence_player.h"
 
 namespace oc::effects {
 namespace {
@@ -80,11 +81,11 @@ struct ReturnTask {
 // dur + 0x400 (0x1000 once t > dur, the task ends). 0x101 (dur @+4): the 0x100 tasks are killed and every target returns.
 class Whale : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       const int target_index = ctx_.models ? ctx_.models->cursor : 0;
       FxModel* model = target(target_index);
-      if (!model) return;
+      if (!model) return true;
       const int slots = target_count() + 1;
       const int angle_step = 0x1000 / slots;
       auto fly = std::make_shared<Fly>();
@@ -116,7 +117,10 @@ class Whale : public OverlayFx {
         ret->step();
         add_task([ret] { return ret->step(); });
       }
+    } else {
+      return false;
     }
+    return true;
   }
 
  private:
@@ -156,7 +160,7 @@ class Whale : public OverlayFx {
 // 0x101 (dur @+4): the return task without scale.
 class Genie : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       const Vec3 centre = centroid(ctx_.models, false);
       const int cx = static_cast<int>(centre[0]), cz = static_cast<int>(centre[2]);
@@ -188,7 +192,10 @@ class Genie : public OverlayFx {
         ret->step();
         add_task([ret] { return ret->step(); });
       }
+    } else {
+      return false;
     }
+    return true;
   }
 
  private:
@@ -215,12 +222,13 @@ class Genie : public OverlayFx {
   };
 };
 
-// ---- enrou / hebi: op 0x100 stops the emitter named by the s32 @+8 and lets its live particles expire on the next tick ------------------
+// ---- enrou / hebi (whose init also starts the pack's `init` sequence): op 0x100 stops the emitter named by the s32 @+8 and lets its live particles expire on the next tick ------------------
 // (life = 1 and flag 0x40000 on every live object of it).
 class KillByName : public OverlayFx {
  protected:
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100 || !em()) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100) return false;
+    if (!em()) return true;
     const u32 packed = static_cast<u16>(arg(args, count, 8)) | (static_cast<u32>(static_cast<u16>(arg(args, count, 10))) << 16);
     std::string name;
     for (int i = 0; i < 4; ++i) {
@@ -235,7 +243,40 @@ class KillByName : public OverlayFx {
         *object.flags |= 0x40000;
       }
     });
+    return true;
   }
+};
+
+constexpr size_t kSoundGroupFileBytes = 72416;
+
+// The overlay reads the pack's sound group before anything else: the `init` sequence holds the screen meanwhile and `main` starts when the file is in.
+// The third party slot is released at init and reloaded at 0x101.
+class Hebi : public KillByName {
+ protected:
+  void init() override {
+    if (ctx_.models) ctx_.models->suppress_main = true;
+    if (ctx_.sequences) ctx_.sequences->start("init");
+    third_slot_.release(ctx_.models);
+  }
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x101) return KillByName::command(op, args, count);
+    // The pack closes here: the sequences go, 'main' never reaches what follows this op.
+    if (ctx_.sequences) ctx_.sequences->stop_all_after_pass();
+    if (ctx_.models) ctx_.models->pack_closed = true;
+    add_task([this] { return third_slot_.reload_tick(); });
+    return true;
+  }
+  void frame() override {
+    if (read_ticks_ == 0) return;
+    if (--read_ticks_ > 0 || !ctx_.sequences) return;
+    const FxModel* first_caster = caster(0);
+    const FxModel* first_target = target(0);
+    ctx_.sequences->start_main(first_caster && first_target && first_caster == first_target);
+  }
+
+ private:
+  int read_ticks_ = disc_read_ticks(kSoundGroupFileBytes);
+  ThirdSlotRelease third_slot_;
 };
 
 // ---- theend (the target part) ----------------------------------------------------------------------------------------------------------
@@ -255,7 +296,7 @@ class TheEnd : public OverlayFx {
       items_.push_back(item);
     }
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x180) {
       point_[0] = arg(args, count, 8), point_[1] = arg(args, count, 10), point_[2] = arg(args, count, 12);
     } else if (op == 0x181) {
@@ -274,7 +315,10 @@ class TheEnd : public OverlayFx {
         for (int k = 0; k < 3; ++k) item.model->rot[k] = item.home_rot[k];
         item.model->steer = true;
       }
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     if (!on_) return;
@@ -306,7 +350,7 @@ void register_summon_ports(BespokeRegistry& registry) {
   registry.add({"kuzira3", "summon", "Whale", [] { return std::make_unique<Whale>(); }});
   registry.add({"mido2", "summon", "Genie", [] { return std::make_unique<Genie>(); }});
   registry.add({"enrou", "summon", "KillByName", [] { return std::make_unique<KillByName>(); }});
-  registry.add({"hebi", "summon", "KillByName", [] { return std::make_unique<KillByName>(); }});
+  registry.add({"hebi", "summon", "Hebi", [] { return std::make_unique<Hebi>(); }});
   registry.add({"theend", "summon", "TheEnd", [] { return std::make_unique<TheEnd>(); }});
 }
 

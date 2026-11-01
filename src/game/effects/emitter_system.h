@@ -286,6 +286,8 @@ class EmitterSystem {
     std::array<int, 4> uv_window{};
     // Header index of the emitter that spawned the object (header_def()).
     int owner = -1;
+    // mark_mesh_objects().
+    bool marked = false;
     // Op 05 type: 14 = type-0x02 mesh, 19 = the battle stage ground (type 0x12 `ring`), 20 = type-0x0B model.
     int sprite_type = 14;
     // Sprite type 20 (the model follows the particle): world position / object matrix without the view, and the motion
@@ -364,6 +366,8 @@ class EmitterSystem {
     u32* flags = nullptr;
     // Header index.
     int owner = -1;
+    // First actor selector of the emitter's op 0x39 (an overlay's per-target clone carries the target's own).
+    int basis_sel = 0;
     // The engine's position shift (3 field / title, 5 battle): hook bodies that re-do the integration must use it.
     int shift = 3;
   };
@@ -372,6 +376,8 @@ class EmitterSystem {
   // The hook must not spawn objects (start emitters instead).
   bool set_object_hook(std::string_view name, std::function<void(ObjectRef&)> fn, bool after_step = false);
   void for_each_object(std::string_view name, const std::function<void(ObjectRef&)>& fn);
+  // Marks the live type-14 mesh objects of emitter `name` (MeshInstance::marked); objects spawned later stay unmarked. `on` = false clears them.
+  void mark_mesh_objects(std::string_view name, bool on);
   // The overlay draws the mesh objects of emitter `name` itself, collect_meshes() leaves them out.
   bool set_draw_suppressed(std::string_view name, bool on);
   // Op 0x48: the record's callback REPLACES the object's draw function. A callback that

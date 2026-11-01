@@ -54,14 +54,18 @@ class BandWipe : public BespokeEffect {
     }
   }
 
-  void command(int op, const int* args, int nargs) override {
+  bool command(int op, const int* args, int nargs) override {
     switch (params_.style) {
       case WipeStyle::Negative:
-        if (op == 0x100) strip_.start(opnd(args, nargs, 0, ticks_));
+        if (op == 0x100) {
+          strip_.start(opnd(args, nargs, 0, ticks_));
+          return true;
+        }
         if (op == 0x101 && params_.tint_op) {
           tint_dur_ = std::max(1, opnd(args, nargs, 0, 30));
           tint_t_ = 0;
           for (int channel = 0; channel < 3; ++channel) tint_end_[channel] = opnd(args, nargs, 1 + channel, 128);
+          return true;
         }
         break;
       case WipeStyle::Flare:
@@ -74,18 +78,27 @@ class BandWipe : public BespokeEffect {
           flare.vy = static_cast<float>(opnd(args, nargs, 4, 2));
           for (int channel = 0; channel < 3; ++channel) flare.rgb[channel] = opnd(args, nargs, 5 + channel, 255);
           if (flares_.size() < 16) flares_.push_back(flare);
+          return true;
         }
         break;
       case WipeStyle::Reels:
         if (op == 0x100) {
           armed_ = true;
           reel_vel_ = {6.0f, 6.0f, 6.0f};
+          return true;
         }
-        if (op == 0x101) released_ = true;
-        if (op == 0x1FF) press();
+        if (op == 0x101) {
+          released_ = true;
+          return true;
+        }
+        if (op == 0x1FF) {
+          press();
+          return true;
+        }
         break;
       case WipeStyle::Capture: break;
     }
+    return false;
   }
 
   void tick() override {

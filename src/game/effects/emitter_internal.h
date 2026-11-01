@@ -108,6 +108,8 @@ struct Object {
   // 0 = A, 1 = B.
   int slot_reg = -1;
   bool alive = true;
+  // EmitterSystem::mark_mesh_objects().
+  bool marked = false;
   // >= 0: an overlay replaced the draw callback and draws the object itself (fire_at / collect_tagged).
   int poly_tag = -1;
 };

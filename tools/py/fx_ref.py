@@ -191,9 +191,9 @@ def walk(st, base, end):
 def tasks(st):
     """Entries: +0 u32 (bit 31 active, bits 16-30 previous index, bits 0-15 next index; indices in 4-byte units from the work base), +4 the
     tick callback, +8 the draw callback, +0xC the task data (the 0x94-byte particle object, the sequence task, ...). The work size is the
-    allocation size argument (0xC000 on the PS1; some builds differ), so it is searched."""
+    allocation size argument (0xC000 on the PS1, 0x13000 in RDE, which keeps it above the first 2 MB), so it is searched."""
     end = st.u32(0x80072118)
-    if not (0x80000000 <= end < 0x80200000):
+    if not (0x80000000 <= end < 0x80000000 + st.ram_size):
         return None, []
     for size in (WORK_SIZE, 0x13000, 0x4000, 0x100) + tuple(range(0x1000, 0x40000, 4)):
         base = end + 0xC - size

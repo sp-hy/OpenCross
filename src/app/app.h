@@ -25,6 +25,7 @@
 #include "audio/mixer.h"
 #include "audio/sfx.h"
 #include "audio/voice.h"
+#include "data/char_name.h"
 #include "data/tables.h"
 #include "game/autosave.h"
 #include "game/battle/battle_results.h"
@@ -318,6 +319,9 @@ class App {
   // ---- game data, flow, saves -------------------------------------------------------------------------------------------------
   data::GameTables tables;
   bool tables_ok = false;
+  // The language tables of the battle's character names.
+  import::LangTables name_tables;
+  data::CharNames char_names();
   game::GameFlow flow;
   bool flow_ready = false;
   save::SaveDat save_dat;

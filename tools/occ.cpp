@@ -44,6 +44,7 @@
 #include "import/lzss.h"
 #include "import/model.h"
 #include "import/room.h"
+#include "import/spritefont.h"
 #include "import/text.h"
 #include "script/field_script.h"
 #include "script/field_vm.h"
@@ -776,11 +777,18 @@ std::vector<ChoiceInst> find_choices(const script::FieldScriptModule& script_mod
 }
 
 // Blast radius of the "no 3-line minimum" window rule: every room message (EN row) whose tallest page has 1 or 2 lines has a
-// window that is 2 / 1 rows (61.75 canvas units each) shorter than before. Lines come from layout_pages with a fixed 22-unit advance
-// (the 62 % wrap limit), so a wrapped line near the limit may differ by one from the real font.
+// window that is 2 / 1 rows (61.75 canvas units each) shorter than before. Lines come from layout_pages with the message's own wrap limit and
+// the HD font's widths; default names stand in for typed ones.
 int cmd_dialogue_sizes(const vfs::Vfs& fs, const std::string& only_room, bool verbose) {
   import::LangTables tables;
   tables.init(&fs);
+  import::JpGlyphs jpg;
+  std::optional<import::SpriteFont> font;
+  if (auto font_bytes = fs.read("font/large_font_gn_70.spritefont")) font = import::parse_spritefont(std::move(*font_bytes));
+  if (!font) {
+    std::printf("dialogue-sizes: the message font is missing\n");
+    return 1;
+  }
   size_t total = 0, one = 0, two = 0, errs = 0;
   std::vector<std::string> examples1, examples2;
   for (const auto& room : list_rooms(fs)) {
@@ -800,8 +808,9 @@ int cmd_dialogue_sizes(const vfs::Vfs& fs, const std::string& only_room, bool ve
       ++total;
       ui::LayoutMetrics lm;
       lm.advance = [](char32_t) { return 22.0f; };
+      lm.wrap_advance = [&font](char32_t ch, bool italic) { return ui::wrap_glyph_width(font->measure(static_cast<u32>(ch)), italic); };
       lm.line_height = 57.78f;
-      lm.max_width = 1280.0f * 0.62f;
+      lm.max_width = ui::wrap_limit(rid, static_cast<int>(idx), import::Lang::En, ui::disc_line_chars(import::parse_ps1(blk->records[idx].bytes, jpg)));
       lm.wrap = true;
       const auto pages = ui::layout_pages(import::flatten(import::parse_markup(*raw, import::Lang::En), {}), lm);
       int lines = 1;
@@ -886,7 +895,9 @@ int cmd_dialogue_choices(const vfs::Vfs& fs, const std::string& only_room, bool 
         // About the large_ gn_70 average advance at scale 0.5.
         lm.advance = [](char32_t) { return 18.0f; };
         lm.line_height = 56.0f;
-        lm.max_width = 1280 * 0.62f;
+        lm.max_width = ui::wrap_limit(rid, choice.msg, lang, guest_block && static_cast<size_t>(choice.msg) < guest_block->records.size()
+                                                                     ? ui::disc_line_chars(import::parse_ps1(guest_block->records[static_cast<size_t>(choice.msg)].bytes, jpg))
+                                                                     : 0);
         lm.wrap = lang != import::Lang::Jp;
         if (lm.wrap) {
           lm.choice_space_first = 2.0f * 70.0f * 0.45f;

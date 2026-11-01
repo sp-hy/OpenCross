@@ -236,6 +236,60 @@ assets::Emitter make_emitter(const char* name, s16 start, s16 duration, u16 peri
   return emitter;
 }
 
+// A dying object with a death child runs its last tick first: life 3 means three velocity steps before the child takes the position.
+void test_death_child_position() {
+  assets::RoomEffects fx = make_pack();
+  auto parent = make_emitter("par", 0, 0, 0, {xyz(0x08, 0, 0, 0), xyz(0x0A, 128, 0, 0), val(0x0F, 3), mk(0x33, assets::FxNamed{0, "chd"})});
+  parent.flags = 4;
+  fx.emitters.push_back(parent);
+  auto child = make_emitter("chd", 0, 0, 0, {xyz(0x08, 0, 0, 0), val(0x0F, 100)});
+  child.flags = 4;
+  fx.emitters.push_back(child);
+  effects::EffectBank bank;
+  bank.add(&fx);
+  effects::EmitterSystem sys(bank);
+  sys.register_all();
+  CHECK(sys.start("par"));
+  for (int tick = 0; tick < 10; ++tick) sys.tick();
+  const float one_step = static_cast<float>((128 << 6) << 3) / 65536.0f;
+  bool found_child = false;
+  effects::EmitterSystem::ObjectView view;
+  for (size_t i = 0; i < sys.live_objects(); ++i)
+    if (sys.object_view(i, view) && view.owner == 1) found_child = std::fabs(view.pos[0] - 3.0f * one_step) < 1e-3f;
+  CHECK(found_child);
+}
+
+// mark_mesh_objects marks the mesh objects alive at the call: what the emitter spawns later stays unmarked, and the mark can be taken off.
+void test_mark_mesh_objects() {
+  assets::RoomEffects fx = make_pack();
+  assets::Emitter near_emitter = make_emitter("near", 0, 0, 1, {xyz(0x08, 0, 0, 0), val(0x0F, 1000)});
+  near_emitter.ops[1] = mk(5, assets::FxSprite{1, 0, "mesh", 14});
+  fx.emitters.push_back(near_emitter);
+  effects::EffectBank bank;
+  bank.add(&fx);
+  effects::EmitterSystem sys(bank);
+  sys.register_all();
+  CHECK(sys.start("near"));
+  for (int tick = 0; tick < 3; ++tick) sys.tick();
+  const effects::ViewParams view;
+  auto marked_of = [&](std::size_t& total) {
+    std::vector<effects::EmitterSystem::MeshInstance> meshes;
+    sys.collect_meshes(view, 1.0f, meshes);
+    total = meshes.size();
+    return static_cast<std::size_t>(std::count_if(meshes.begin(), meshes.end(), [](const auto& mesh) { return mesh.marked; }));
+  };
+  std::size_t alive = 0;
+  CHECK(marked_of(alive) == 0);
+  CHECK(alive > 0);
+  sys.mark_mesh_objects("near", true);
+  const std::size_t at_mark = alive;
+  for (int tick = 0; tick < 3; ++tick) sys.tick();
+  CHECK(marked_of(alive) == at_mark);
+  CHECK(alive > at_mark);
+  sys.mark_mesh_objects("near", false);
+  CHECK(marked_of(alive) == 0);
+}
+
 // Stepper maths of three ops, VEL (0A), ACC (0C) and LIFE (0F), checked against the PS1 integer recurrence: pos 0, vel = 128 << 6 (1 unit
 // per tick), acc = 4 << 3 = 32 per tick, life 10. Period 100 would fire on tick 101; start() sets countdown = 1 so the object spawns on the
 // second tick and is updated once in that tick; it dies when its life reaches 0.
@@ -930,6 +984,8 @@ int main() {
   test_rot_order();
   test_strip_smooth();
   test_object_screen_test();
+  test_mark_mesh_objects();
+  test_death_child_position();
   std::printf(failures ? "%d failure(s)\n" : "ok\n", failures);
   return failures ? 1 : 0;
 }

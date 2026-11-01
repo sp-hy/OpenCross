@@ -41,14 +41,17 @@ class GaraDeth : public MeshTech {
   void init() override {
     if (const FxModel* model = caster(0)) cz_ = static_cast<int>(model->pos[2]);
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x180) {
       duration_ = arg(args, count, 4), mode_ = 0x180, tick_ = 0, state_ = 0;
     } else if (op == 0x181 && !mushi_) {
       kill_y_ = 0, state_ = 1, sp1_ = arg(args, count, 8);
     } else if (op == 0x182 && !mushi_) {
       width_ = 0, state_ = 2, sp2_ = arg(args, count, 8);
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* model = caster(0);
@@ -104,7 +107,7 @@ class GaraDeth : public MeshTech {
 // stays hidden and its height offset is reset to 0.
 class KiDeth : public MeshTech {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     FxModel* model = caster(0);
     if (op == 0x180) {
       duration_ = arg(args, count, 4), mode_ = 0x180, tick_ = 0;
@@ -114,7 +117,10 @@ class KiDeth : public MeshTech {
       if (model) model->grey = -1;
     } else if (op == 0x182) {
       duration_ = arg(args, count, 4), mode_ = 0x182, tick_ = 0;
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* model = caster(0);
@@ -217,7 +223,7 @@ class KiDeth : public MeshTech {
 // and are not drawn here.
 class DrgDeth : public MeshTech {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x182) {
       all_ = true;
     } else if (op == 0x183) {
@@ -229,7 +235,10 @@ class DrgDeth : public MeshTech {
           sphere.r2 = radius * radius;
           break;
         }
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* model = caster(0);
@@ -373,7 +382,7 @@ class DrgDeth : public MeshTech {
 // emitters 'hika' 'kona' 'kemu' 'kem1' at (x + 400, L, z); afterwards M stays hidden.
 class OctDeth : public MeshTech {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     FxModel* model = caster(0);
     if (op == 0x180) {
       duration_ = arg(args, count, 4), mode_ = 0x180, tick_ = 0;
@@ -384,7 +393,10 @@ class OctDeth : public MeshTech {
     } else if (op == 0x182) {
       mode_ = 0x182, tick_ = 0, duration_ = arg(args, count, 4);
       step_ = trunc_div(1500, duration_ - 15);
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* model = caster(0);
@@ -435,9 +447,10 @@ class Daimou : public MeshTech {
   void init() override {
     if (FxModel* model = caster(0)) model->hidden = false;
   }
-  void command(int op, const int* args, int count) override {
-    if (op != 0x180) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x180) return false;
     state_ = 0x180, tick_ = 0, duration_ = arg(args, count, 4), sink_speed_ = arg(args, count, 8), mode_ = arg(args, count, 10);
+    return true;
   }
   void frame() override {
     FxModel* model = caster(0);
@@ -529,7 +542,8 @@ class Dissolve : public MeshTech {
   explicit Dissolve(const FbParams& params) : params_(params) {}
 
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
+    bool acted = true;
     if (op == 0x100) {
       Task task;
       task.dur = arg(args, count, 4), task.reach = arg(args, count, 8), task.band = arg(args, count, 10), task.y = arg(args, count, 12);
@@ -553,13 +567,18 @@ class Dissolve : public MeshTech {
       }
     } else if (params_.lasdes3 && op == 0x106) {
       velocity_div_ = arg(args, count, 8);
+    } else {
+      acted = false;
     }
     // Op 0x102 starts the CLUT fade task (t = 0, D = s16 @+4); op 0x103 restores the saved row (0, 239, 256, 1).
     if (params_.env_clut && op == 0x102) {
       clut_t_ = 0, clut_d_ = std::max(1, arg(args, count, 4));
-    } else if (params_.env_clut && op == 0x103 && ctx_.models) {
-      ctx_.models->env_clut = -1, ctx_.models->env_clut_set = true;
+      acted = true;
+    } else if (params_.env_clut && op == 0x103) {
+      if (ctx_.models) ctx_.models->env_clut = -1, ctx_.models->env_clut_set = true;
+      acted = true;
     }
+    return acted;
   }
   bool stock_op(int op, const int* args, int count) override {
     if (op != 0x59 || !params_.op59) return false;
@@ -853,7 +872,7 @@ constexpr FbParams kFb[] = {
 // private ops renumbered: 0x107 / 0x108 part hide /
 // show on target 0, 0x109 / 0x10A the env CLUT fade / restore, op 0x59 replaced. The scene ops (D = s16 @+4; every task runs once in the tick that
 // starts it, then once per tick, and ends once t > D):
-//   0x101 / 0x103  the music changes to song 0x3B / to song s16 @+8 (0x102 restores the sound channels: nothing to do)
+//   0x101 / 0x103  the music changes to song 0x3B / to song s16 @+8
 //   0x104          a second camera plays the pack's shot named @+8 and its view fades in: alpha = 0x80 t / D (the fill is reset)
 //   0x105          the second view fades out (alpha = 0x80 - 0x80 t / D), then the second camera ends
 //   0x106          the battle camera's view fades out (fill = 0xFF t / D, subtracted), then the battle camera ends and the second takes over
@@ -868,7 +887,12 @@ class Lasdes2 : public Dissolve {
   Lasdes2() : Dissolve(kLasdes2Fb) {}
 
  protected:
-  void command(int op, const int* args, int count) override {
+  // The idle-pose word only: the idle ran out on the pose element 341 left, which the target holds through the fall.
+  void init() override {
+    const FxModel* model = target(0);
+    if (model && ctx_.hooks.set_pose) ctx_.hooks.set_pose(model->unit, 8);
+  }
+  bool command(int op, const int* args, int count) override {
     const int duration = arg(args, count, 4);
     switch (op) {
       case 0x100: Dissolve::command(0x100, args, count); break;
@@ -877,6 +901,8 @@ class Lasdes2 : public Dissolve {
       case 0x109: Dissolve::command(0x102, args, count); break;
       case 0x10A: Dissolve::command(0x103, args, count); break;
       case 0x101: song(0x3B); break;
+      // After the song change: the sound channels come back and pausing is allowed again; the audio host needs neither.
+      case 0x102: break;
       case 0x103: song(arg(args, count, 8)); break;
       case 0x104: cross_in(args, count, duration); break;
       case 0x105: cross_ramp(duration, true); break;
@@ -890,8 +916,9 @@ class Lasdes2 : public Dissolve {
         tint(static_cast<u8>(w8 >> 8), static_cast<u8>(w10), static_cast<u8>(w10 >> 8), w8 & 0xFF, duration);
         break;
       }
-      default: break;
+      default: return false;
     }
+    return true;
   }
   bool done() const override { return Dissolve::done() && tasks_.empty(); }
 
@@ -924,10 +951,8 @@ class Lasdes2 : public Dissolve {
   // fade_out: 0x105 (the second view leaves); else 0x106 (the battle camera's view leaves).
   void cross_ramp(int duration, bool fade_out) {
     if (!ctx_.models) return;
-    const int serial = ctx_.models->cross.serial;
-    add_task([this, serial, duration, fade_out, elapsed = 0]() mutable {
+    add_task([this, duration, fade_out, elapsed = 0]() mutable {
       FxModels::CrossView& view = ctx_.models->cross;
-      if (view.serial != serial) return false;
       if (duration < ++elapsed) {
         if (fade_out) view.alpha = 0, view.stop = true;
         else view.fill = 0xFF, view.promote = true;
@@ -989,7 +1014,7 @@ class Lasdes1 : public MeshTech {
     for (const std::string& name : names_)
       em()->set_object_hook(name, [this](EmitterSystem::ObjectRef& object) { paint(object); }, true);
   }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       nega_.start(arg(args, count, 4));
     } else if (op == 0x101) {
@@ -998,7 +1023,10 @@ class Lasdes1 : public MeshTech {
       lerp_.dur = arg(args, count, 4);
       for (int k = 0; k < 3; ++k) lerp_.from[k] = rate_[k], lerp_.to[k] = arg(args, count, 8 + 2 * k);
       lerp_.from[3] = amplitude_, lerp_.to[3] = arg(args, count, 14);
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     nega_.tick();

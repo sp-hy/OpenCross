@@ -20,12 +20,6 @@ namespace oc::game {
 
 namespace {
 
-// Weapon pack (battle/wepon/<name>.bin) of each character id 0..43, same order as the field table: file table 3195 + 3 m; the part = weapon gear tier & 0xF.
-constexpr const char* kWeaponPacks[44] = {
-    "kai",  "knife", "rod",   "gun",   "black", "sword", "rod",  "axe",  "black", "black", "black", "nage", "black", "minirod", "axe",
-    "cook", "tue",   "sword", "cook",  "sword", "cook",  "black", "nage", "ninjin", "black", "gun", "tue",  "black", "sword", "black",
-    "black", "black", "axe",  "harp",  "boom",  "axe",   "boom", "nage", "sword", "nage",  "black", "sword", "black", "black"};
-
 // Folder under battle/player/ (and fieldobj/player/) of every playable character id 0..43, same order as the field table.
 constexpr const char* kCharFolders[44] = {
     "selju",  "kid",     "guill",  "ishito",   "slash",   "jakotu", "riddle", "carshu", "zoah",    "malchera", "colcha",
@@ -116,30 +110,29 @@ std::shared_ptr<ModelHandle> ModelCache::load_model_for(const vfs::Vfs& vfs, ren
 
 // The model stem of a unit.
 std::string ModelCache::unit_model_stem(const vfs::Vfs& vfs, const data::GameTables* tables, const battle::Unit& unit) {
-  // A PC's model is loaded from its kind byte (file group 0xE, kind * 3 + 3): Pip's forms 0x2C..0x30 are
-  // battle/player/tu_p .. tu_mm (kBattleModels 44..48); the other characters keep their player folder.
-  if (unit.pc && unit.form < 0 && battle::pip_form(unit.kind) && unit.kind != 0x2B && static_cast<size_t>(unit.kind) < kBattleModels.size())
+  if (unit.body >= 0) return battle::pip_form(unit.body) ? std::string(kBattleModels[static_cast<size_t>(unit.body)]) : player_model(vfs, unit.body);
+  // A PC's model is loaded from its kind byte (file group 0xE, kind * 3 + 3): Pip's forms are battle/player/tu_p .. tu_mm, Serge's Lynx body
+  // (0x31) is sel_yam2. A kind equal to the character id keeps the character's player folder.
+  if (unit.pc && unit.form < 0 && (unit.kind != unit.src_id || unit.src_id >= 44) && static_cast<size_t>(unit.kind) < kBattleModels.size() &&
+      !kBattleModels[static_cast<size_t>(unit.kind)].empty())
     return std::string(kBattleModels[static_cast<size_t>(unit.kind)]);
   return unit.pc && unit.form < 0 ? player_model(vfs, unit.src_id) : monster_model(tables, unit.form >= 0 ? unit.form : unit.src_id);
 }
 
 int ModelCache::weapon_digit(const data::GameTables* tables, const battle::Unit& unit) {
-  if (!unit.pc || unit.form >= 0) return -1;
+  if ((!unit.pc && unit.body < 0) || unit.form >= 0) return -1;
   const data::GearRec* gear = tables ? tables->gear_rec(unit.eq.weapon_id) : nullptr;
   return gear ? (gear->tier() & 0xF) : 0;
 }
 
-std::string ModelCache::player_weapon_bin(int char_id) {
-  return char_id < 0 || char_id >= 44 ? std::string{} : std::string("battle/wepon/") + kWeaponPacks[char_id] + ".bin";
-}
-
-std::string ModelCache::enemy_weapon_bin(int model) {
+std::string ModelCache::weapon_bin(int model) {
   return model < 0 || static_cast<size_t>(model) >= kBattleWeaponBins.size() ? std::string{} : std::string(kBattleWeaponBins[static_cast<size_t>(model)]);
 }
 
-std::shared_ptr<ModelHandle> ModelCache::load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int char_id, int part) {
-  if (char_id < 0 || char_id >= 44 || part < 0) return nullptr;
-  return weapon_part(vfs, meshes, player_weapon_bin(char_id), part);
+std::shared_ptr<ModelHandle> ModelCache::load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int kind, int part) {
+  const std::string bin = weapon_bin(kind);
+  if (bin.empty() || part < 0) return nullptr;
+  return weapon_part(vfs, meshes, bin, part);
 }
 
 // A monster's weapon, present when its weapon item and weapon model are both non-zero. The texture and the
@@ -149,7 +142,7 @@ std::shared_ptr<ModelHandle> ModelCache::load_weapon(const vfs::Vfs& vfs, render
 // hung on the model's two mount records.
 std::shared_ptr<ModelHandle> ModelCache::load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int model, int part) {
   if (model < 0 || static_cast<size_t>(model) >= kBattleWeaponBins.size() || part < 0) return nullptr;
-  const std::string bin = enemy_weapon_bin(model);
+  const std::string bin = weapon_bin(model);
   if (bin.empty()) {
     log::warn("battle: enemy weapon: model {} has no weapon .bin", model);
     return nullptr;

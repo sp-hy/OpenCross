@@ -229,11 +229,11 @@ void DialogueBox::move_choice(int delta) {
   choice_ = ((choice_ + delta) % count + count) % count;
 }
 
-void DialogueBox::open(const import::Message& flat, render::FaceId face, float text_scale, bool wrap, float canvas_width,
+void DialogueBox::open(const import::Message& flat, render::FaceId face, float text_scale, bool wrap, float wrap_width,
                        render::FaceId italic) {
   flat_ = flat;
   wrap_ = wrap;
-  canvas_w_ = canvas_width;
+  wrap_width_ = wrap_width;
   choice_mode_ = false;
   std::vector<TextPage> pages = layout(face, italic, text_scale);
   int digit_count = 0;
@@ -297,7 +297,6 @@ void DialogueBox::swap_faces(render::FaceId face, render::FaceId italic) {
 std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId italic, float text_scale) {
   const import::Message& flat = flat_;
   const bool wrap = wrap_;
-  const float canvas_width = canvas_w_;
   face_ = face;
   italic_ = italic;
   // Every language but JP word-wraps.
@@ -307,7 +306,10 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   LayoutMetrics metrics;
   metrics.advance = [batch, face, text_scale](char32_t ch) { return batch->advance(face, ch, text_scale); };
   metrics.line_height = batch->line_height(face, text_scale);
-  metrics.max_width = canvas_width * 0.62f;
+  metrics.max_width = wrap_width_ * (text_scale / 0.5f);
+  metrics.wrap_advance = [batch, face, italic, text_scale](char32_t ch, bool slanted) {
+    return wrap_glyph_width(batch->glyph_measure(slanted && italic != render::kNoFace ? italic : face, ch), slanted) * (text_scale / 0.5f);
+  };
   metrics.wrap = wrap;
   // Choice indent: non-JP only.
   if (choice_mode_ && wrap) {
@@ -722,7 +724,6 @@ struct DialogueDemo::Impl {
   font::FontSet fonts;
   import::Lang lang = import::Lang::En;
   ArtMode mode = ArtMode::Hd;
-  float canvas_w = 1280;
   bool ready = false;
   std::string status;
   // The room's PS1 message block (the guest line numbering of the E1 choice rows, DialogueBox::guest_choice_lines).
@@ -800,7 +801,7 @@ void DialogueDemo::show(std::string_view room_name, int msg_index) {
   show(id, msg_index);
 }
 
-void DialogueDemo::show(int room_id, int msg_index, int speaker) {
+void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speaker) {
   Impl& impl = *impl_;
   if (!impl.ready) return;
   room_ = room_id;
@@ -811,10 +812,11 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker) {
 
   // Text = lang.dat in every language and art mode (RDE never draws the PS1 glyph stream; it only parses it for timing).
   const char* room_name = import::room_name_for_id(room_);
-  import::Message msg = tables_.field_message(room_, msg_, lang, speaker);
+  const int text_speaker = line_speaker >= 0 ? line_speaker : speaker;
+  import::Message msg = tables_.field_message(room_, msg_, lang, text_speaker);
   {
     import::LookupInfo li;
-    if (!tables_.lookup_field(room_, msg_, lang, speaker, &li)) li.speaker = speaker;
+    if (!tables_.lookup_field(room_, msg_, lang, text_speaker, &li)) li.speaker = text_speaker;
     impl.last_speaker = li.speaker;
   }
   import::TextContext tctx = tables_.make_context(lang);
@@ -860,22 +862,21 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker) {
   impl.box.set_mode(impl.mode);
   if (script_var && script_set)
     impl.box.set_field_events([this] { return script_var(0x22); }, [this](int value) { script_set(0x22, value); });
-  impl.box.open(flat, face, 0.5f, !jp, impl.canvas_w, italic);
-  if (script_var) impl.box.start_digits(script_var(kDigitEntryVar));
-  {
-    if (impl.guest_room != room_) {
-      impl.guest_room = room_;
-      impl.guest_block.reset();
-      if (room_name)
-        if (auto block_bytes = import::read_room_dialogue_block(*impl.vfs, room_name)) {
-          impl.guest_bytes = std::move(*block_bytes);
-          impl.guest_block = import::parse_dialogue_block(impl.guest_bytes);
-        }
-    }
-    if (impl.guest_block && static_cast<size_t>(msg_) < impl.guest_block->records.size())
-      impl.box.set_guest_choice_lines(DialogueBox::guest_choice_lines(
-          import::parse_ps1(impl.guest_block->records[static_cast<size_t>(msg_)].bytes, impl.guest_glyphs)));
+  if (impl.guest_room != room_) {
+    impl.guest_room = room_;
+    impl.guest_block.reset();
+    if (room_name)
+      if (auto block_bytes = import::read_room_dialogue_block(*impl.vfs, room_name)) {
+        impl.guest_bytes = std::move(*block_bytes);
+        impl.guest_block = import::parse_dialogue_block(impl.guest_bytes);
+      }
   }
+  const bool has_guest = impl.guest_block && static_cast<size_t>(msg_) < impl.guest_block->records.size();
+  const import::Message guest =
+      has_guest ? import::parse_ps1(impl.guest_block->records[static_cast<size_t>(msg_)].bytes, impl.guest_glyphs) : import::Message{};
+  impl.box.open(flat, face, 0.5f, !jp, wrap_limit(room_, msg_, lang, disc_line_chars(guest)), italic);
+  if (script_var) impl.box.start_digits(script_var(kDigitEntryVar));
+  if (has_guest) impl.box.set_guest_choice_lines(DialogueBox::guest_choice_lines(guest));
 
   impl.status = std::string(room_name ? room_name : "?") + " #" + std::to_string(msg_) + "  " + import::lang_code(lang) +
                 (impl.mode == ArtMode::Hd ? "  HD" : "  ORIG") + "   [Enter] next  [PgUp/PgDn] msg  [F5] art  [F6] lang";
@@ -908,7 +909,6 @@ void DialogueDemo::draw(float vw, float vh, const render::CanvasFit* fit) {
   if (!impl.ready) return;
   const render::CanvasFit cf = fit ? *fit : render::canvas_fit(vw, vh);
   const float zoom = cf.s;
-  impl.canvas_w = vw / zoom;
   impl.box.draw(vw, vh, &cf);
   // Status line (top left), debug view only.
   if (impl.status_on)

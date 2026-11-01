@@ -132,11 +132,7 @@ void MainMenu::Impl::update_status(const Nav& nav) {
   if (nav.cancel) back_to_main(0), sfx(6);
 }
 
-// The menu model of a character: its record byte 0x2D (the current model) up to `last`, else the character's own.
-int MainMenu::Impl::model_number(int character, int last) const {
-  const int model = gs->slot.chars[static_cast<size_t>(character)].model_id;
-  return model <= last ? model : character;
-}
+int MainMenu::Impl::model_number(int character, int last) const { return data::menu_form(character, body(character), last); }
 
 void MainMenu::Impl::restart_model() {
   model_cam = MenuCamera{};
@@ -435,13 +431,11 @@ void MainMenu::Impl::status_panel(int character, float panel_x, float panel_y) {
 // ---- status: panel (40, 42), equipment frames below it, title + bottom bar, member-switch glyphs. The PS1 draws a live 3D model on
 // the right standing on the parchment with no panel, casting a flat floor shadow (the host's MenuModelView draws it after the sprite pass);
 // without one the member portrait stands in for it. This screen sits 2 PS1 px left of the other screens' coordinates.
-// Profile of a character (ome.txt): up to 7 lines, keyed by the menu model the character wears (form byte up to 0x31, e.g. Serge's
-// cat form or Pip's forms), else by the character id.
+// Profile of a character (ome.txt): up to 7 lines, keyed by the body the character wears (e.g. Serge's cat form or Pip's forms).
 std::vector<std::u32string> MainMenu::Impl::profile_lines(int character) {
   std::vector<std::u32string> lines;
-  const int form = gs->slot.chars[static_cast<size_t>(character)].model_id & 0xFF;
   const import::TextTable* table = lt.table("ome");
-  const std::string* cell = table ? table->get(static_cast<u64>(form <= 0x31 ? form : character), lang) : nullptr;
+  const std::string* cell = table ? table->get(static_cast<u64>(model_number(character)), lang) : nullptr;
   if (!cell) return lines;
   size_t start = 0;
   while (start <= cell->size() && lines.size() < 7) {

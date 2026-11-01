@@ -2,12 +2,16 @@
 // Fixed-point helpers of the PS1 effect engine (angles 4096 = one turn, trig values 4096 = 1.0) plus the small float
 // matrix type the effect player uses for object / parent / camera frames.
 #include <array>
+#include <cstddef>
 
 #include "core/types.h"
 
 namespace oc::effects {
 
 using Vec3 = std::array<float, 3>;
+
+// A file read from the disc: 2048-byte sectors at 2.5 sectors per tick, in whole ticks.
+constexpr int disc_read_ticks(size_t bytes) { return static_cast<int>(((bytes + 2047) / 2048 * 2 + 4) / 5); }
 
 // PsyQ rsin / rcos: argument masked to 12 bits, result in -4096..4096.
 int rsin(int angle);

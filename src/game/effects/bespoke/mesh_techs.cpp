@@ -96,7 +96,7 @@ class Jakotu : public MeshTech {
 class Fnoise : public MeshTech {
  protected:
   void init() override { start_caster_anim(caster(0)); }
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
     if (op == 0x180) {
       state_ = 0x180;
     } else if (op == 0x181) {
@@ -105,7 +105,10 @@ class Fnoise : public MeshTech {
       state_ = 0x181;
       build_shards();
       rgb_ = {0x64, 0x64, 0x64};
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* model = target(0);
@@ -260,7 +263,8 @@ class Fnoise : public MeshTech {
 // the doodle appears tile by tile. Afterwards the stock draw is back.
 class Rakugaki : public MeshTech {
  protected:
-  void command(int op, const int* args, int count) override {
+  void init() override { start_caster_anim(caster(0)); }
+  bool command(int op, const int* args, int count) override {
     if (op == 0x181) {
       state_ = 0x181, tick_ = 0, duration_ = arg(args, count, 4);
       int out[3] = {0, 0, 0};
@@ -276,7 +280,10 @@ class Rakugaki : public MeshTech {
         const int first = rng.next() % 256, second = rng.next() % 256;
         std::swap(perm_[static_cast<size_t>(first)], perm_[static_cast<size_t>(second)]);
       }
+    } else {
+      return false;
     }
+    return true;
   }
   void frame() override {
     FxModel* model = target(0);
@@ -346,8 +353,10 @@ class Ghost2 : public MeshTech {
     for (int i = 0; i < static_cast<int>(ctx_.models ? ctx_.models->casters.size() : 0); ++i) start_caster_anim(caster(i));
     if (ctx_.models) ctx_.models->pseudo_hide = 1;
   }
-  void command(int op, const int* args, int count) override {
-    if (op == 0x180) state_ = 0x180, timer_ = 0, limit_ = arg(args, count, 4);
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x180) return false;
+    state_ = 0x180, timer_ = 0, limit_ = arg(args, count, 4);
+    return true;
   }
   void frame() override {
     if (!ctx_.models || state_ != 0x180) return;
@@ -399,7 +408,8 @@ class Ghost2 : public MeshTech {
 // OpenCross has no unit swap; the type-0x13 ground objects' skip flag is cleared.
 class Hensin : public MeshTech {
  protected:
-  void command(int op, const int* args, int count) override {
+  bool command(int op, const int* args, int count) override {
+    if (op < 0x180 || op > 0x183) return false;
     if (op == 0x180 || op == 0x181) state_ = op, tick_ = 0, duration_ = arg(args, count, 4);
     if (op == 0x181) {
       // The loader brought the new form's model into the overlay's own block; the port's unit swap (the host's
@@ -423,6 +433,7 @@ class Hensin : public MeshTech {
       // The engine's own build of the unit's new model (the fallback of a swap that did not happen yet).
       if (ctx_.hooks.form_swap) ctx_.hooks.form_swap(2);
     }
+    return true;
   }
   void frame() override {
     FxModel* model = caster(0);
@@ -600,8 +611,8 @@ class Trap : public MeshTech {
     ctx_.models->target_list = ctx_.models->targets;
     ctx_.models->caster_override = ctx_.models->target_override = true;
   }
-  void command(int op, const int* args, int count) override {
-    if (op != 0x100) return;
+  bool command(int op, const int* args, int count) override {
+    if (op != 0x100) return false;
     on_ = true;
     tick_ = 0, duration_ = arg(args, count, 4), reach_ = arg(args, count, 8), bulge_ = arg(args, count, 10);
     if (em() && stop_) em()->kill(stop_);
@@ -613,6 +624,7 @@ class Trap : public MeshTech {
           if (sq.name != "main") ctx_.sequences->stop(sq.name);
     }
     if (ctx_.sequences && ctx_.pack_fx && ctx_.pack_fx->find_sequence("trap")) ctx_.sequences->start("trap");
+    return true;
   }
   void frame() override {
     if (!on_) return;

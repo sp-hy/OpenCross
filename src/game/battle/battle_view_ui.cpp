@@ -607,33 +607,14 @@ void BattleView::enter_target(Tgt mode) {
     return;
   }
   {
-    // Where the cursor starts, by unit id (the ring itself is walked in screen order afterwards). Enemy rings open on the caster's last
-    // confirmed target (3 = the first enemy at battle start; a KO'd or gone one passes the cursor on to the next id, wrapping to 3); a
-    // both-sides ring (0xC0) opens on the first living enemy, or on unit 0 when pgdat +4 has bit 0x02; a party ring (0x40) opens on the first
-    // eligible party id (NOT the caster); bit 0x04 pins the caster; bit 0x01 starts on the first knocked-out party member.
+    // Where the cursor starts, by unit id (the ring itself is walked in screen order afterwards); the first id of the order on the ring wins.
     battle::TargetSpec ts;
-    u8 raw4 = 0x80;
     if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
       const int id = battle_->cell_element(active_pc_, pending_cmd_.cell);
-      if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) {
-        ts = battle::target_spec(tables_->elements[static_cast<size_t>(id)]);
-        raw4 = tables_->elements[static_cast<size_t>(id)].b(4);
-      }
+      if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) ts = battle::target_spec(tables_->elements[static_cast<size_t>(id)]);
     }
-    std::vector<int> order;
-    if (ts.self_only) {
-      order = {active_pc_};
-    } else if (ts.party && ts.enemies) {
-      const int first = (raw4 & 0x02) != 0 ? 0 : battle::kPcSlots;
-      for (int i = 0; i < battle::kUnits; ++i) order.push_back((first + i) % battle::kUnits);
-    } else if (ts.party) {
-      for (int i = 0; i < battle::kPcSlots; ++i) order.push_back(i);
-    } else {
-      const int last = active_pc_ >= 0 && active_pc_ < battle::kPcSlots ? tgt_mem_[active_pc_] : battle::kPcSlots;
-      const int enemy_count = battle::kUnits - battle::kPcSlots, from = std::clamp(last, battle::kPcSlots, battle::kUnits - 1) - battle::kPcSlots;
-      for (int i = 0; i < enemy_count; ++i) order.push_back(battle::kPcSlots + (from + i) % enemy_count);
-    }
-    for (const int id : order) {
+    const int last = active_pc_ >= 0 && active_pc_ < battle::kPcSlots ? tgt_mem_[active_pc_] : battle::kPcSlots;
+    for (const int id : battle::target_cursor_order(ts, active_pc_, last)) {
       const auto it = std::find(targets_.begin(), targets_.end(), id);
       if (it != targets_.end()) {
         target_cursor_ = static_cast<int>(it - targets_.begin());
@@ -991,11 +972,17 @@ void BattleView::handle_input(const platform::Input& in) {
       }
       if (ok) {
         if (elem_valid(unit, nel, level, slot) && battle_->element_usable(active_pc_, cell_)) {
+          pending_cmd_.cell = cell_;
+          const bool creature_list = (unit.cells[static_cast<size_t>(cell_)] & 0x3FFF) == 0xEE;
+          // Nobody on the ring (Revive with no one knocked out): refused, the list stays open.
+          if (!creature_list && target_candidates().empty()) {
+            audio_.play_menu(0x18);
+            break;
+          }
           // The cell confirmed.
           audio_.play_menu(0x28);
-          pending_cmd_.cell = cell_;
           // Element 0xEE opens the creature list, no target ring.
-          if ((unit.cells[static_cast<size_t>(cell_)] & 0x3FFF) == 0xEE) {
+          if (creature_list) {
             // The header float runs as for any element: the element-name
             // banner floats to (8, 22) above the open list.
             hdr_on_ = true, hdr_cell_ = cell_, hdr_.reset((tick_count_ >> 2) & 3);
@@ -1104,8 +1091,8 @@ void BattleView::handle_input(const platform::Input& in) {
       if (ok && !targets_.empty()) {
         audio_.play_menu(0x28);
         pending_cmd_.target = targets_[static_cast<size_t>(target_cursor_)];
-        // The caster remembers its confirmed target.
-        if (active_pc_ >= 0 && active_pc_ < battle::kPcSlots) tgt_mem_[active_pc_] = pending_cmd_.target;
+        // The caster remembers its last confirmed enemy; a party target leaves the memory alone.
+        if (active_pc_ >= 0 && active_pc_ < battle::kPcSlots && pending_cmd_.target >= battle::kPcSlots) tgt_mem_[active_pc_] = pending_cmd_.target;
         if (pending_cmd_.kind == battle::Command::Kind::Attack) begin_engage(active_pc_, pending_cmd_.target);
         else {
           if (engaged_) engaged_after_cast_ = true;
@@ -1558,7 +1545,7 @@ std::u32string BattleView::dop_name(int index) {
   const int entry = dop_list_.at(static_cast<size_t>(index));
   std::string nm;
   if (entry < 0) {
-    nm = static_cast<size_t>(active_pc_) < battle_state.party().size() ? battle_state.party()[static_cast<size_t>(active_pc_)].name : battle_state.unit(active_pc_).name;
+    nm = static_cast<size_t>(active_pc_) < battle_state.party().size() ? battle_state.party()[static_cast<size_t>(active_pc_)].own_name : battle_state.unit(active_pc_).name;
   } else {
     // sysmes[0x190000 + low byte].
     const std::string* text = lang_tables_.sysmes((0x19u << 16) | static_cast<u32>(entry & 0xFF), lang_);

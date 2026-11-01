@@ -87,7 +87,7 @@ void BattleView::fx_end() {
   pa_.handle.reset();
   fx_state_log("pack end");
   fx_grey_apply(true);
-  fx_cross_.on = false;
+  fx_cross_.on = fx_cross_.next_on = false;
   // The screen copy warp (the zoom-blur double image) is a global of the effect system: the pack end does not clear it, the next
   // effect start does, and so does the battle's idle camera handler while no shot / timeline runs. A pack
   // that ends (or is cut short) with the warp still on would leave every later frame doubled until some next pack: off at the pack end, unless
@@ -108,13 +108,13 @@ void BattleView::fx_end() {
   }
   // The pack's sprites go away with it (the lights keep decaying from the tracker's own state).
   spell_.clear_colour_caches();
-  // A monster the pack faded to colour 0 and hid (kamedes 0x100: c = 0x80 - (t << 7) / D) keeps that colour in its model block: the S5 KO
+  // A monster the pack faded to colour 0 and hid (kamedes 0x100: c = 0x80 - (t << 7) / D) keeps that colour in its model block: the KO
   // fade (ColorRamp from the CURRENT colour 0, then ModelShow 0) shows nothing, so it must not come back at full colour and fade a second
   // time when the overlay's copy of the block goes away.
   // The same holds for a DEAD monster the overlay left hidden at any colour. The F-B dissolves draw the model themselves and keep the hide
   // bit set every frame of their task (darkfeit; the CLUT fade 0x102 leaves the model colour at 128); nothing clears the bit at the pack
   // end, so FATE (scene 462, death element 518 feit.prd) stays hidden through to the victory instead of being drawn again in its bind pose
-  // and then falling with the S5 KO fade.
+  // and then falling with the KO fade.
   if (const effects::FxModels* ms = fx_->bespoke_models())
     for (const effects::FxModel& fx_model : ms->units)
       if (fx_model.unit >= 0 && fx_model.unit < battle::kUnits && fx_model.hidden && !fx_model.unhide_at_end && !battle_->unit(fx_model.unit).pc &&
@@ -135,16 +135,21 @@ void BattleView::fx_end() {
   // shows one more; clearing them on every pack end would draw the whole Bulb under the floor after the next cast.
   for (int i = 0; i < battle::kUnits; ++i) {
     const Visual& visual = vis_[static_cast<size_t>(i)];
+    // A running spawn script is not cut: the idle restart waits for its end (start_idle).
+    if (visual.spawn && visual.vm.running()) continue;
+    // A reaction that took the killing hit is not cut either: a pack waits for its scripts, so the fade at its tail always plays out.
+    if (visual.ko_reacted && visual.vm.running()) continue;
     const bool ran_out = !visual.vm.running();
     // A script that ran out keeps its model colour.
     anm_unit_reset(i, ran_out, ran_out || visual.script_kind == kIdle);
+    // No KO on the unit, so the idle restart runs: HP a script wrote to 0 shows as the low-HP pose from here on.
+    if (visual.zero_hp_actions == 2 && visual.script_kind == kIdle) start_idle(i);
   }
   // The tech clips are dropped; nothing plays an external clip afterwards.
   fx_drop_clip_packs();
   // The ground overlay is freed.
   stage_scene_.ground_overlay_end();
-  fx_hidden_.fill(false);
-  fx_hide_bits_.fill(0);
+  fx_show_living();
   fx_lit_.fill(false);
   fx_shake_x_ = fx_shake_y_ = 0;
   if (fx_prev_bank_) camera_.set_bank(fx_prev_bank_);
@@ -266,8 +271,8 @@ void BattleView::fx_dev_logs() {
       if (visual.has_model && visual.pose.attach_now(15, 1.0f, r15x, r15y, r15z)) r15 = std::hypot(r15x, r15z);
       const bool gh = ghosted(unit) && !entry_shown_[ui];
       int yaw = static_cast<int>(std::lround(std::atan2(-visual.face_x, -visual.face_z) * 4096.0 / 6.283185307179586)) & 0xFFF;
-      // An overlay that steers the model owns its rotation too (Gravity Blow's spin); face_rot (opthedo's pup): rot is pi - yaw, the unit's yaw is the PS1 one.
-      if (om && om->steer) yaw = (om->face_rot ? 2048 - om->rot[1] : om->rot[1]) & 0xFFF;
+      // An overlay that steers the model owns its rotation too (Gravity Blow's spin).
+      if (om && om->steer) yaw = om->rot[1] & 0xFFF;
       // The hidden shading entries as drawn (per part: model data | ops 0x1C / 0x91 hides, minus 0x1B / 0x91 shows).
       unsigned parts = 0;
       if (visual.has_model && visual.model)
@@ -474,6 +479,10 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
         set = fx_unit_texture_set(prim.unit, prim.tex, prim.white);
       } else if (prim.src == effects::FxPrim::TexSrc::Vram) {
         set = fx_vram_page_set(prim.tpage, prim.clut);
+      } else if (prim.src == effects::FxPrim::TexSrc::Capture) {
+        if (!copy_on) continue;
+        set = fx_copy_set_;
+        copy_pending = true;
       } else if (prim.src == effects::FxPrim::TexSrc::PackModel) {
         set = fx_pack_model_texture_set(prim.tex);
       } else if (gpu && prim.tex >= 0 && static_cast<size_t>(prim.tex) < gpu->sets.size()) {
@@ -492,6 +501,11 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
         tri.u[corner] = prim.src == effects::FxPrim::TexSrc::Vram ? prim.u[k] / 256.0f : prim.u[k];
         // Model / PackModel: v as is.
         tri.v[corner] = prim.src == effects::FxPrim::TexSrc::Pack ? 1.0f - prim.w[k] : prim.src == effects::FxPrim::TexSrc::Vram ? prim.w[k] / 256.0f : prim.w[k];
+        // Capture: layer pixels of the picture, which the copy holds over the whole frame.
+        if (prim.src == effects::FxPrim::TexSrc::Capture) {
+          tri.u[corner] = (lb.ox + prim.u[k] * lb.scale) / fw;
+          tri.v[corner] = (lb.oy + prim.w[k] * lb.scale_y) / fh;
+        }
         tri.colours[corner][0] = prim.v[k].r, tri.colours[corner][1] = prim.v[k].g, tri.colours[corner][2] = prim.v[k].b;
         if (corner < corner_count) cr += prim.v[k].r, cg += prim.v[k].g, cb += prim.v[k].b;
       }

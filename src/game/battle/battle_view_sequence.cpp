@@ -3,6 +3,7 @@
 #include "game/battle/battle_view_util.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <format>
 
@@ -23,6 +24,9 @@ void BattleView::begin_group() {
   script_actor_ = -1;
   act_.ev = std::move(queue_.front());
   queue_.pop_front();
+  // The low-HP bit is refreshed when the next action resolves, one action after the one a script wrote the HP in.
+  for (int i = 0; i < battle::kUnits; ++i)
+    if (const battle::Unit& unit = battle_->unit(i); unit.hp_written_zero && unit.hp <= 0) ++vis_[static_cast<size_t>(i)].zero_hp_actions;
   const battle::ActionEvent& e0 = act_.ev.front();
   // Dev: OC_DEATH_TRACE.
   if (std::getenv("OC_DEATH_TRACE")) {
@@ -195,12 +199,11 @@ void BattleView::face_cast_targets(bool turn_targets) {
     // An ENEMY cast reaches the cast only through the queue executor: the caster turns to the first target (home yaw for a self target) and that
     // one target turns back; the menu's group facing (midpoint / origin stand-in) never runs (a self-target Hide keeps the formation yaw 3072).
     if (first < 0) return;
-    // A GROUP cast (queue type 2): the caster still turns to the first target but the TARGET never turns back (it keeps its yaw over the whole
-    // cast; single-target casts turn it) and the other listed units are turned by the pack's own Face ops as they launch.
+    // A GROUP cast (queue type 2): the lead caster and the target turn now, the others as the charge starts (face_group_cast).
     Visual& av = vis_[static_cast<size_t>(act_.actor)];
     if (first != act_.actor) {
       face_toward(act_.actor, first);
-      if (turn_targets && act_.casters.size() <= 1) face_toward(first, act_.actor);
+      if (turn_targets) face_toward(first, act_.actor);
     } else if (!av.ko_shown) {
       av.face_x = av.pface_x = av.home_fx;
       av.face_z = av.pface_z = av.home_fz;
@@ -230,6 +233,34 @@ void BattleView::face_cast_targets(bool turn_targets) {
   face_pending_ = true;
   face_px_ = fx;
   face_pz_ = fz;
+}
+
+// A monster cast's charge start: every target faces the midpoint of the casters' bounding box, then every caster the midpoint of the targets'
+// (Surf's Up on two units: both turn, the caster looks between them). A unit standing on the midpoint it should face (a self target) faces the
+// world origin. An element with no charge (a Pterodact combo) never gets here: the second caster keeps its yaw and the target stays turned to
+// the lead caster.
+void BattleView::face_group_cast() {
+  if (act_.actor < battle::kPcSlots || act_.targets.empty()) return;
+  const std::vector<int> casters = act_.casters.empty() ? std::vector<int>{act_.actor} : act_.casters;
+  auto midpoint = [&](const std::vector<int>& units, float& mid_x, float& mid_z) {
+    float lo_x = 1e9f, hi_x = -1e9f, lo_z = 1e9f, hi_z = -1e9f;
+    for (int unit : units) {
+      const Visual& visual = vis_[static_cast<size_t>(unit)];
+      lo_x = std::min(lo_x, visual.x), hi_x = std::max(hi_x, visual.x);
+      lo_z = std::min(lo_z, visual.z), hi_z = std::max(hi_z, visual.z);
+    }
+    mid_x = (lo_x + hi_x) * 0.5f, mid_z = (lo_z + hi_z) * 0.5f;
+  };
+  auto face = [&](int unit, float mid_x, float mid_z) {
+    const Visual& visual = vis_[static_cast<size_t>(unit)];
+    const bool on_midpoint = std::abs(visual.x - mid_x) < 1.0f && std::abs(visual.z - mid_z) < 1.0f;
+    face_point(unit, on_midpoint ? 0.0f : mid_x, on_midpoint ? 0.0f : mid_z);
+  };
+  float mid_x = 0, mid_z = 0;
+  midpoint(casters, mid_x, mid_z);
+  for (int target : act_.targets) face(target, mid_x, mid_z);
+  midpoint(act_.targets, mid_x, mid_z);
+  for (int caster : casters) face(caster, mid_x, mid_z);
 }
 
 void BattleView::start_hit() {
@@ -475,6 +506,9 @@ void BattleView::end_group() {
   audio_.end_actor();
   // A cut-short hensin / tumaru effect never reached its swap op: the form still changes.
   if (pending_form_ != -2 || pending_evolve_unit_ >= 0) fx_form_phase(2);
+  // The swapped unit's new model comes out of hiding with the action's end.
+  if (form_show_unit_ >= 0) anm_set_hidden(form_show_unit_, false);
+  form_show_unit_ = -1;
   // The Chrono Cross colour row takes the colour history of the action's last element cast and plays that colour's chime.
   static constexpr std::array<int, 7> kColourChime = {0xAB, 0xB3, 0xA7, 0xA7, 0xA3, 0xAF, 0xB7};
   for (auto event = act_.ev.rbegin(); event != act_.ev.rend(); ++event) {
@@ -496,7 +530,7 @@ void BattleView::end_group() {
   // A unit whose script was cut still has to settle on its idle / KO pose.
   for (int i = 0; i < battle::kUnits; ++i)
     if (battle_->unit(i).present && vis_[static_cast<size_t>(i)].script_kind != kIdle && vis_[static_cast<size_t>(i)].script_kind != kVictory &&
-        vis_[static_cast<size_t>(i)].script_kind != kRun && !engaged_stance(i))
+        vis_[static_cast<size_t>(i)].script_kind != kRun && !engaged_stance(i) && !(vis_[static_cast<size_t>(i)].ko_reacted && vis_[static_cast<size_t>(i)].vm.running()))
       start_idle(i);
 }
 
@@ -523,6 +557,11 @@ void BattleView::begin_finish() {
       const battle::Unit& unit = battle_->unit(i);
       Visual& visual = vis_[static_cast<size_t>(i)];
       if (!unit.present || !unit.alive() || !visual.scripts || !visual.scripts->has_s5) continue;
+      // A unit a summon's reload brought back finishes its fade-in first.
+      if (visual.spawn && visual.vm.running()) {
+        visual.victory_owed = true;
+        continue;
+      }
       // Victory pose (model state 0xB).
       start_script(i, &visual.scripts->s5, 11, 0, kVictory);
     }

@@ -9,6 +9,7 @@
 
 #include "audio/voice.h"
 #include "core/log.h"
+#include "data/char_name.h"
 #include "game/new_game_plus.h"
 
 namespace oc::game {
@@ -160,7 +161,8 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     dlg.on_page = [vp, &dlg](int room, int msg, int sp, int tag, int page) { vp->field_page(&dlg, room, msg, sp, tag, page); };
     dlg.on_close = [vp, &dlg] { vp->field_close(&dlg); };
   }
-  dlg.show(room_id_, message, speaker_id);
+  const bool lynx_in_party = std::any_of(party_chars_.begin(), party_chars_.end(), [this](int char_id) { return model_byte(char_id) == data::kLynxBody; });
+  dlg.show(room_id_, message, speaker_id, data::line_speaker(speaker_id, lynx_in_party));
   // The portrait panel exists only when the window flags have bit 0; the face is the
   // speaker (name tag of the line / script speaker) unless SET_DIALOG_FACE chose one; (flags & 0x1001) == 1 = left.
   dlg.set_portrait_flags(true, portrait_left_);

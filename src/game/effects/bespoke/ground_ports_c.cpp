@@ -35,9 +35,10 @@ class GroundAddon : public BespokeEffect {
     if (extra_) extra_->draw(out);
   }
   bool done() const override { return (!inner_ || inner_->done()) && (!extra_ || extra_->done()); }
-  void command(int op, const int* args, int arg_count) override {
-    if (inner_) inner_->command(op, args, arg_count);
-    if (extra_) extra_->command(op, args, arg_count);
+  bool command(int op, const int* args, int arg_count) override {
+    const bool inner_acted = inner_ && inner_->command(op, args, arg_count);
+    const bool extra_acted = extra_ && extra_->command(op, args, arg_count);
+    return inner_acted || extra_acted;
   }
   void set_view(const ViewParams& view) override {
     ctx_.view = view;
@@ -58,19 +59,19 @@ class GroundAddon : public BespokeEffect {
 class EndShards : public GroundFx {
  protected:
   void init() override { seed_rng(); }
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     switch (op) {
-      case 0x180: target_point_ = {static_cast<s16>(arg(args, arg_count, 8)), static_cast<s16>(arg(args, arg_count, 10)), static_cast<s16>(arg(args, arg_count, 12))}; break;
+      case 0x180: target_point_ = {static_cast<s16>(arg(args, arg_count, 8)), static_cast<s16>(arg(args, arg_count, 10)), static_cast<s16>(arg(args, arg_count, 12))}; return true;
       case 0x181:
         flight_ticks_ = arg(args, arg_count, 4);
         build();
         active_ = true;
-        break;
+        return true;
       case 0x182:
         active_ = false;
         set_skip(false);
-        break;
-      default: break;
+        return true;
+      default: return false;
     }
   }
   void frame() override {
@@ -209,7 +210,7 @@ class BlackWarp : public GroundFx {
       stage_ground->warp = [this](Vec3& position) { warp(position); };
     }
   }
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     if (op == 0x181 || op == 0x182) log::debug("bespoke 46black: op {:X} (ground / scenery warp {})", op, op == 0x181 ? "starts" : "reset");
     if (op == 0x181) {
       running_ = true;
@@ -217,10 +218,14 @@ class BlackWarp : public GroundFx {
       angle_shift_ = static_cast<s16>(arg(args, arg_count, 8));
       radius_shift_ = static_cast<s16>(arg(args, arg_count, 10));
       span_ = static_cast<s16>(arg(args, arg_count, 12));
-    } else if (op == 0x182) {
+      return true;
+    }
+    if (op == 0x182) {
       running_ = false;
       clock_ = 0;
+      return true;
     }
+    return false;
   }
   void frame() override {
     if (running_) ++clock_;
@@ -300,8 +305,10 @@ class Lasbos : public GroundFx {
       yuka_ = em()->fire("yuka");
     }
   }
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     switch (op) {
+      // The new stage's .ctd streamed behind the pit's warp; the host's set_stage loads both files at 0x102.
+      case 0x100: return true;
       case 0x101:
         if (ground_obj_) {
           ground_obj_ = false;
@@ -311,15 +318,15 @@ class Lasbos : public GroundFx {
         // The stage is freed and local file 3 w + 3 (= slot w + 1's .prd) read over it; 0x102 starts it.
         stage_slot_ = arg(args, arg_count, 8) + 1;
         if (ctx_.hooks.set_stage) ctx_.hooks.set_stage(-1);
-        break;
+        return true;
       case 0x102:
         if (stage_slot_ > 0 && ctx_.hooks.set_stage) ctx_.hooks.set_stage(kStageSlot + stage_slot_);
         stage_slot_ = 0;
-        break;
+        return true;
       case 0x105:
         ground_obj_ = false;
         free_yuka();
-        break;
+        return true;
       case 0x103: {  // the first run is the next tick
         const int duration = arg(args, arg_count, 4);
         auto ticks = std::make_shared<int>(0);
@@ -334,7 +341,7 @@ class Lasbos : public GroundFx {
           if (yuka_) morph_w_ = weight;
           return live;
         });
-        break;
+        return true;
       }
       case 0x104:
         if (!yuka_ && em()) {
@@ -347,10 +354,10 @@ class Lasbos : public GroundFx {
         ground_obj_ = true;
         set_skip(true);
         bake_mesh(anar_, 2, 0, 0);
-        break;
-      case 0x106: spiral(args, arg_count); break;
-      case 0x107: home(args, arg_count); break;
-      default: break;  // 0x100: the new stage's .ctd streamed (the host's set_stage loads both files at 0x102)
+        return true;
+      case 0x106: spiral(args, arg_count); return true;
+      case 0x107: home(args, arg_count); return true;
+      default: return false;
     }
   }
   void frame() override {
@@ -472,17 +479,26 @@ class Lasbos : public GroundFx {
 // 14bar (Inferno) heat wave: from op 0x180 to op 0x181 the stage's 'near' mesh objects are drawn with every vertex y += rcos(z + 16 T) 100 >> 12
 // and z += rcos(y + 64 T) 200 >> 12 (the original y), T = ticks since the overlay's first frame. It needs no ground: it uses the
 // same per-vertex hook of the stage (FxGround::warp, model space of the mesh here, which the hook receives in world space: the scenery
-// objects are unrotated / unscaled, so their file space equals world space minus the position).
+// objects are unrotated / unscaled, so their file space equals world space minus the position). While the wave runs the objects that have
+// a blend mode are drawn with mode 4 (B + F/4) whatever their own mode is; opaque ones stay opaque. The op reaches the objects alive at
+// that moment: objects the emitter spawns later keep the stock draw.
 class BarWave : public GroundFx {
+ public:
+  ~BarWave() override {
+    if (FxGround* stage_ground = fx_ground()) stage_ground->warp_quarter_add = false;
+  }
+
  protected:
-  void command(int op, const int* args, int arg_count) override {
+  bool command(int op, const int* args, int arg_count) override {
     (void)args;
     (void)arg_count;
+    const bool handled = op == 0x180 || op == 0x181;
     FxGround* stage_ground = fx_ground();
-    if (!stage_ground) return;
+    if (!stage_ground) return handled;
     log::debug("bespoke 14bar: op {:X} (heat wave {})", op, op == 0x180 ? "on" : "off");
     if (op == 0x180) {
       owns_warp_ = true;
+      stage_ground->warp_quarter_add = true;
       stage_ground->warp_emitters = {"near"};
       stage_ground->warp = [this](Vec3& position) {
         const int y = static_cast<int>(std::lround(position[1])), z = static_cast<int>(std::lround(position[2]));
@@ -491,8 +507,10 @@ class BarWave : public GroundFx {
       };
     } else if (op == 0x181) {
       stage_ground->warp = nullptr;
+      stage_ground->warp_quarter_add = false;
       stage_ground->warp_emitters.clear();
     }
+    return handled;
   }
   // No ground draws: the per-tick lists stay with the stock path.
   void tick() override { ++clock_; }

@@ -111,7 +111,7 @@ OpenCross: `LangTables` in `src/import/text.h` implements this.
 * key-item descriptions (`keyitem`): `{ButtonFast}` `{ButtonSlow}` (the Time Shifter row, every language), the key cap or pad glyph bound to the fast / slow speed action (`rules/menus.md` section 7). The row's lines are separated by `\n`.
 * An unknown `{...}` is drawn as plain characters.
 
-Placeholders: `{PARTYn%}` = party slot n -> character id; `{playwork(n)}` / `{itemwork(n)}` / `{num(n)}` read script variable `0x1A + 2n`; `{NAME%}` = fixed id. A save name record that still holds the JP default (kana) is "unset" outside JP. Names come from the custom-name map (name entry) or `sysmes[0x10000+id]`, truncated to 15 UTF-16 units; Serge becomes "Lynx" while in Lynx's body.
+Placeholders: `{PARTYn%}` = party slot n -> character id; `{playwork(n)}` / `{itemwork(n)}` / `{num(n)}` read script variable `0x1A + 2n`; `{NAME%}` = fixed id. A save name record that still holds the JP default (kana) is "unset" outside JP. Names come from the custom-name map (name entry) or `sysmes[0x10000+id]`, truncated to 15 UTF-16 units; which of them a screen shows, and when Serge reads as Lynx (`sysmes[0x10031]`), is `docs/rules/menus.md` section 14.
 
 Name entry: a Latin keyboard of 14x10 (`A-Z a-z`, accented rows, digits/punctuation) or the JP kana grid; reserved names クロノ / くろの / chrono / crono; names are stored host-side in `ext_save.dat` (44 x 32-byte UTF-8, `docs/formats/save.md`), while the PS1 save block keeps the default name.
 
@@ -182,7 +182,7 @@ Menu glyphs the PS1 drew from its own sheet but OpenCross still draws from RDE f
 
 There is no 3-line minimum. The frame's row count is `rows = lines + 1`, where `lines` is the tallest page's line count (it starts at 1): a one-line message has 2 rows, a two-line message 3 rows; only a portrait forces `rows >= 5`. Width = the widest line of any page, `cols` = tiles with `x <= XRp + 70`, plus 1. The PS1 header's `lines` / `px` fields are not used. Example: `!{wend(60)}` (dem_02 message 0) gets a wide, one-text-line frame of 2 tile rows. With skin 8 and 2 rows: bottom corner at `last + 0.15 TH - 0.17 TW` (no portrait), corner sheets T0 / R0 v0 = 0.004, B0 / R24 v0 = 0.43. Sizes on the 1280 x 960 canvas (TW 61.75, TH 66.5, no portrait, default skin): one text line = 286 high, three lines = 409; width = W + 281.
 
-OpenCross: `DialogueBox::layout` starts `lines_` at 1 and the frame uses it directly; `DialogueBox::frame_size(skin, W, lines)` is the pure helper; `test_text` `test_frame_rows`. `occ dialogue-sizes` reports the blast radius: of 12,373 EN room messages, 1,386 are 1-line and 3,706 are 2-line.
+OpenCross: `DialogueBox::layout` starts `lines_` at 1 and the frame uses it directly; `DialogueBox::frame_size(skin, W, lines)` is the pure helper; `test_text` `test_frame_rows`. `occ dialogue-sizes` reports the blast radius: of 12,373 EN room messages, 1,274 are 1-line and 3,746 are 2-line.
 
 ### 7.8 Typewriter pacing and window opening
 
@@ -204,6 +204,16 @@ In HD art the world-map rooms show the world name as `map/HomeAnother/{home,anot
 ### 7.11 The PS1 field glyph path (reference only; RDE does not draw it)
 
 The PS1 expands each glyph's 11 rows into one bit-plane of a 16 x 12 4bpp cell uploaded to VRAM. A glyph counter picks the plane (`& 3`), so **four consecutive glyphs share one cell**, and each glyph sprite uses a CLUT chosen by that counter. The four CLUTs (VRAM x 0x380 / 0x390 / 0x3A0 / 0x3B0, y 0xF8) are bit-plane selectors: entry i = 0xFFFF if bit k of i is set, else 0x0000. The colour is the sprite's RGB (0x80 = 1.0); there is no outline or shadow plane. The memmenu name uses plane 0 only (6 cells at VRAM (0x3C0 + 3 i, 0xF3)) and fakes weight by drawing the strip three times (x 66 / 67 / 69, colours 0x64 / 0x64 / 0x40).
+
+### 7.12 Word wrap
+
+Translated text wraps by the width of the disc message it replaces (`ui::wrap_limit`, `ui::layout_pages`). Widths are in layout units at glyph scale 0.5.
+
+* **Disc line width.** The widest line of the disc message in characters (`ui::disc_line_chars`): every glyph counts 1, a typed-name or item token (07, 08, 15, 18) counts 6, other control codes count nothing, and a confirm wait (03) ends a line as a newline, a page turn or the end does. It need not equal the record header's width field.
+* **Glyph width.** A glyph counts `0.45 x (measure - 10)` (`ui::wrap_glyph_width`), where `measure` is the sprite font's box for that one character, `max(0, xOffset) + width`, read at 0.8 for an italic glyph; a blank (a space with an empty box) counts 18. This is not the DirectXTK pen advance.
+* **Limit.** `min(62 x width, 925)`; 1000 when there is no disc message. It is raised to the message's widest word (spaces and newlines end a word, a page turn does not), so a word is never cut. It does not depend on the window or the aspect ratio.
+* **Walk.** A page is walked in reading order. A space that is not the page's first entry is remembered as the break. Before each entry the width reached so far is compared with the limit: when it is past the limit and a break is remembered, the space becomes a newline and the walk continues from there, so the last glyph of a page may overhang and a space that crosses the limit breaks before the word in front of it. A line that has a choice indent (7.6) never breaks. Typed names take part as ordinary glyphs.
+* **Listed messages.** Some translations are longer than their disc lines and are shown as authored: room 387 (`zel_a13f`) per language, en 6 10 11 13 14 16, fr 8 12 13 16 17 26 28 32 39, it 16, de 6 10 11 13, es 6 10 11 16 17 27 34 40 48, and in English room 414 messages 19 21 23 and room 442 message 33. Rooms 1490 messages 1 3 and 1492 messages 0 1 are measured with a width of 30.
 
 ## 8. Coverage of translations over the 566 rooms
 

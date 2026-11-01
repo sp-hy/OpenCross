@@ -118,6 +118,7 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float alpha, st
       mi.uv_phase[k] = std::fmod(std::fmod(raw / 256.0f, 128.0f) + 128.0f, 128.0f);
     }
     mi.owner = obj.owner;
+    mi.marked = obj.marked;
     mi.sprite_type = obj.stype;
     if ((obj.ext & 1) && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].def)
       for (const auto& op : headers[static_cast<size_t>(obj.owner)].def->ops)

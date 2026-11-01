@@ -35,11 +35,14 @@ struct TextPage {
 };
 
 struct LayoutMetrics {
-  // advance: pen advance of one glyph. max_width 0 = never wrap. wrap: automatic word wrap (non-JP).
+  // advance: pen advance of one glyph. max_width: the wrap limit, raised to the message's widest word; 0 = never wrap. wrap: automatic word
+  // wrap (non-JP).
   std::function<float(char32_t)> advance;
   float line_height = 0;
   float max_width = 0;
   bool wrap = false;
+  // The width a glyph counts for against max_width, when it differs from the pen advance (wrap_glyph_width); empty = the advance.
+  std::function<float(char32_t, bool italic)> wrap_advance;
   // Choice mode (non-JP; the message is laid out with a choice flag once the script marks it as a choice): a line that
   // starts with three spaces is a choice line; its indent run is laid out with special space widths - the first space (it and the
   // next two all spaces) w0 = 70, the others w0 = 20, advance = 2 w0 * 0.45 canvas units at glyph scale 0.5 - and the line is
@@ -49,6 +52,15 @@ struct LayoutMetrics {
 
 // Splits a flattened message (import::flatten output) into pages: lines, wrapping, events positioned by glyph index.
 std::vector<TextPage> layout_pages(const import::Message& flat, const LayoutMetrics& metrics);
+
+// The width a glyph counts for in word wrap at glyph scale 0.5, from its sprite-font measure: 0.45 of the measure less the 10 texels of
+// padding, an italic glyph's measure being read at 0.8; a blank (measure 0) counts 18.
+float wrap_glyph_width(float measure, bool italic);
+// The widest line of a disc message in characters: a typed-name or item token counts 6, and a confirm wait ends a line as a newline does.
+int disc_line_chars(const import::Message& ps1);
+// The wrap limit of a field message at glyph scale 0.5, from its disc line width: 62 per character up to 925, 1000 without a disc message,
+// 0 for JP and for the messages shown as authored.
+float wrap_limit(int room, int message, import::Lang lang, int disc_chars);
 
 // Typewriter pacing: `speed` / 64 glyphs per 60 Hz tick (0x80 = 2 per tick, 1 per tick when a message sets no {speed});
 // {wait(n)} / {wend(n)} count 30 Hz field frames.

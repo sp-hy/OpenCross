@@ -102,11 +102,20 @@ class Kamei : public OverlayFx {
       ctx_.models->vram_moves.push_back({256, 237, 256, 1, 0, 239, false});
     }
   }
-  void command(int op, const int*, int) override {
+  bool command(int op, const int*, int) override {
+    // 0x100: the new stage's .ctd streamed while the stage layers are off; the host's set_stage loads both files at 0x102.
+    if (op == 0x100) return true;
     // 0x101: the stage pack's objects freed, the new .prd read over them.
-    if (op == 0x101 && ctx_.hooks.set_stage) ctx_.hooks.set_stage(-1);
+    if (op == 0x101) {
+      if (ctx_.hooks.set_stage) ctx_.hooks.set_stage(-1);
+      return true;
+    }
     // 0x102: the resources registered, the stage's objects started.
-    if (op == 0x102 && ctx_.hooks.set_stage) ctx_.hooks.set_stage(100);
+    if (op == 0x102) {
+      if (ctx_.hooks.set_stage) ctx_.hooks.set_stage(100);
+      return true;
+    }
+    return false;
   }
   void frame() override {
     FxModel* shell = caster(0);
@@ -258,7 +267,7 @@ class Kamei : public OverlayFx {
     draw_a_ = mesh;
     draw_r_ = morph;
     const FxModelPose model_pose = fx_model_pose(actor, 1.0f);
-    const float yaw = 3.14159265f - static_cast<float>(actor.home_rot[1] & 0xFFF) * kTwoPi / 4096.0f;
+    const float yaw = static_cast<float>(actor.home_rot[1] & 0xFFF) * kTwoPi / 4096.0f;
     const float cos_yaw = std::cos(yaw), sin_yaw = std::sin(yaw);
     Mat3 ry;
     ry.m[0] = cos_yaw, ry.m[1] = 0, ry.m[2] = sin_yaw, ry.m[3] = 0, ry.m[4] = 1, ry.m[5] = 0, ry.m[6] = -sin_yaw, ry.m[7] = 0, ry.m[8] = cos_yaw;
