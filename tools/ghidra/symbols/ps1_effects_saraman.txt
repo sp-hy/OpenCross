@@ -21,3 +21,4 @@ fx_saraman_creature_on = 0x801C8BAC;  # data: Set when the first motion file is 
 fx_saraman_bank_done = 0x801C8BB0;  # data: Set when the wave bank is uploaded
 fx_saraman_motion_next = 0x801C8B8C;  # data: Index of the next streamed motion file to attach
 fx_saraman_motion_buffers = 0x801C8FD8;  # data: Three buffers of the streamed motion files; when the last clip ends the third is freed and the party model reload starts
+fx_saraman_draw_mesh_cued = 0x801C80B8;  # function: Draws a baked mesh through the overlay's fog builders

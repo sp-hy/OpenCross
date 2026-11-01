@@ -365,6 +365,8 @@ struct FxGroundPrim {
   bool two_sided = false;   // false: drawn only when NCLIP(0,1,2) > 0 like the builders
   // `p` already in camera space (an emitter mesh object the overlay draws itself), else PS1 world.
   bool camera_space = false;
+  // While the fog flag is up each corner colour moves toward the far colour by that corner's own depth.
+  bool depth_cue = false;
 };
 // A rim triangle of the ground (the ring's FT3 packets, then its GT3 packets, in file order): PS1 positions (y down),
 // corner k <-> uv k <-> colour k (the packet's idx1, idx2, idx0 order).

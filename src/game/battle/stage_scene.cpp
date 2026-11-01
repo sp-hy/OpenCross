@@ -665,6 +665,7 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
       prim.blend = ground_prim.blend;
       prim.bias = ground_prim.bias;
       prim.two_sided = ground_prim.two_sided;
+      prim.depth_cue = ground_prim.depth_cue;
       prims_.push_back(prim);
     }
     static const std::array<float, 12> kIdentity{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0};

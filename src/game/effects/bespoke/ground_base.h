@@ -162,6 +162,8 @@ struct MeshDraw {
   bool opaque = false;
   // jitanda / 2boll: y of each vertex replaced (index = vertex).
   const std::vector<int>* heights = nullptr;
+  // The overlays' private fog builders (FxGroundPrim::depth_cue).
+  bool depth_cue = false;
 };
 
 inline void emit_prim(FxGround& ground, const PackMesh& mesh, const PackPrim& source, const MeshDraw& draw, const std::array<Vec3, 4>& world, bool camera_space) {
@@ -180,6 +182,7 @@ inline void emit_prim(FxGround& ground, const PackMesh& mesh, const PackPrim& so
   prim.blend = draw.opaque ? 0 : draw.semi ? (draw.abr & 3) + 1 : source.semi && source.textured() ? ((source.tpage >> 5) & 3) + 1 : 0;
   prim.bias = draw.bias;
   prim.two_sided = draw.two_sided;
+  prim.depth_cue = draw.depth_cue;
   (void)mesh;
   ground.prims.push_back(prim);
 }

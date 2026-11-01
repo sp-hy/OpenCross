@@ -164,6 +164,8 @@ struct StagePrim {
   std::array<std::array<u8, 3>, 4> rgb{};
   int blend = 0, bias = 0;
   bool two_sided = false;
+  // The corner colours take the depth cue, each at its own depth.
+  bool depth_cue = false;
 };
 
 // The atlas and object textures of a baked stage made on a worker thread, in StageMesh::sets order (atlases, then objects); null = made at upload.

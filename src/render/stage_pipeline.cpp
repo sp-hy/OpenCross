@@ -1018,7 +1018,7 @@ void StagePipeline::draw_prims(const StageMesh& mesh, const assets::StageAsset& 
   struct Item {
     u32 first_vertex;
     int texture, blend, bias;
-    bool two_sided;
+    bool two_sided, depth_cue;
     float depth;
   };
   std::vector<assets::StageVertex> vv;
@@ -1086,7 +1086,7 @@ void StagePipeline::draw_prims(const StageMesh& mesh, const assets::StageAsset& 
       cen[1] -= prim.pos[static_cast<size_t>(k)][1] / static_cast<float>(corner_count);
       cen[2] += prim.pos[static_cast<size_t>(k)][2] / static_cast<float>(corner_count);
     }
-    Item it{static_cast<u32>(vv.size()), tex >= 0 ? tex : white_index, std::clamp(prim.blend, 0, 4), prim.bias, prim.two_sided,
+    Item it{static_cast<u32>(vv.size()), tex >= 0 ? tex : white_index, std::clamp(prim.blend, 0, 4), prim.bias, prim.two_sided, prim.depth_cue,
             cam_z(cam, {cen[0], -cen[1], cen[2]})};
     for (int k = 0; k < 4; ++k) {
       const size_t ks = static_cast<size_t>(k < corner_count ? k : 2);
@@ -1138,26 +1138,27 @@ void StagePipeline::draw_prims(const StageMesh& mesh, const assets::StageAsset& 
     for (int col = 0; col < 3; ++col) cam_matrix.at(row, col) = cam[static_cast<size_t>(row * 3 + col)];
     cam_matrix.at(row, 3) = cam[static_cast<size_t>(9 + row)];
   }
-  // Per-draw uniforms: neutral object colour, no depth cue (the plain builder table), the item's bias.
+  // Per-draw uniforms: neutral object colour, the item's bias, and the depth cue per vertex for the items that take it.
   StageInstance neutral;
   size_t i = 0;
   while (i < items.size()) {
     size_t j = i + 1;
     while (j < items.size() && items[j].texture == items[i].texture && items[j].blend == items[i].blend && items[j].bias == items[i].bias &&
-           items[j].two_sided == items[i].two_sided)
+           items[j].two_sided == items[i].two_sided && items[j].depth_cue == items[i].depth_cue)
       ++j;
     const Item& it = items[i];
     const StageMesh::Sub sub;
     float factor = 1.0f, alpha = 1.0f;
     neutral.blend = it.blend;
     neutral.bias = it.bias;
+    neutral.depth_cue = it.depth_cue;
     const int blend_index = draw_blend(neutral, sub, factor, alpha);
     const Pipeline& pl = (ps1_jitter().on ? pipes_affine_ : pipes_)[it.two_sided ? 2 : 0][blend_index];
     SDL_BindGPUGraphicsPipeline(render_pass, pl.handle());
     bind_texture(*ctx_, render_pass, sets[static_cast<size_t>(it.texture)]);
     PushData pd;
     pd.clip = proj * cam_matrix;
-    fill_push(pd, neutral, DepthCue{}, factor, alpha);
+    fill_push(pd, neutral, cue_, factor, alpha, it.depth_cue);
     push_uniforms(command_buffer, pd);
     SDL_DrawGPUIndexedPrimitives(render_pass, static_cast<u32>((j - i) * 6), 1, dyn_iused_ + static_cast<u32>(i * 6), static_cast<int32_t>(dyn_vused_), 0);
     i = j;

@@ -316,6 +316,7 @@ void draw_sheet(FxGround* stage_ground, const PackMesh* mesh, const Ripple& ripp
   draw.bias = 200;
   draw.two_sided = true;
   draw.heights = &heights;
+  draw.depth_cue = true;
   // Only the GT3 / GT4 packets are drawn, opaque whatever their code (the packets are rebuilt with code 0x3C / 0x34)
   PackMesh sheet = *mesh;
   std::erase_if(sheet.prims, [](const PackPrim& prim) { return prim.code != 0x34 && prim.code != 0x3C; });
@@ -612,6 +613,7 @@ class Saraman : public GroundFx {
       MeshDraw draw;
       draw.offset = pos;
       draw.bias = 100 + 200;
+      draw.depth_cue = true;
       draw_mesh(*base_mesh, draw);
     }
     for (Piece& piece : pieces_) {
@@ -630,6 +632,7 @@ class Saraman : public GroundFx {
       for (int k = 0; k < 3; ++k) draw.rot[k] = piece.rot[static_cast<size_t>(k)];
       draw.offset = piece_pos;
       draw.bias = bias;
+      draw.depth_cue = true;
       // The PS1 guards this draw with an uninitialised stack word; always drawn here.
       draw_mesh(*piece.mesh, draw);
     }

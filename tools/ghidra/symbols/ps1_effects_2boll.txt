@@ -7,3 +7,7 @@ fx_2boll_hook_b = 0x801C7160;  # function: Hook installed by the effect
 fx_2boll_frame = 0x801C7210;  # function: Frame update
 fx_2boll_exit = 0x801C74A4;  # function: Exit for Aqua Ball
 fx_2boll_draw_sheet = 0x801C74B4;  # function: Draws the ground sheet
+fx_2boll_build_gt3_cued = 0x801C7608;  # function: Sheet GT3 builder of the fog path: per-corner colour toward the far colour
+fx_2boll_build_gt4_cued = 0x801C7960;  # function: Sheet GT4 builder of the fog path: per-corner colour toward the far colour
+fx_2boll_build_gt3 = 0x801C7DCC;  # function: Sheet GT3 builder without fog
+fx_2boll_build_gt4 = 0x801C8110;  # function: Sheet GT4 builder without fog
