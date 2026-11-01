@@ -4,6 +4,7 @@
 // the emitters + an "invert backdrop" mode) instead of textured sprites, so it sits next to EmitterSystem's DrawQuads in the same
 // frame. Lifecycle: start(ctx) -> tick() per 60 Hz step -> draw() -> done(). Private overlay ops (0x100.., 0x180..) arrive
 // through command().
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <memory>
@@ -43,9 +44,10 @@ struct FxPrim {
   // pack's VRAM at tpage word `tpage` with CLUT word `clut` (as the overlay writes them into its GT3 / GT4 / FT3 packets), u / w in
   // texels 0..255 (the VRAM moves of FxModels::vram_moves applied). Colours are per corner (Gouraud) for every textured source.
   // PackModel = texture `tex` of the pack's sprite-type-20 model FxModels::pack_model (the trap summons), u / w as Model.
+  // Env = the stock env page (the stage's own picture), u / w in texels 0..255.
   // Capture = the frame copy FxModels::capture asks for, u / w in layer pixels of the copy (320 x 224, the same grid as the vertices): the host
   // makes the copy before the first item at or above the request's slot and maps the pixels to the copy at any render scale and aspect.
-  enum class TexSrc : u8 { Pack, Model, Vram, PackModel, Capture } src = TexSrc::Pack;
+  enum class TexSrc : u8 { Pack, Model, Vram, PackModel, Capture, Env } src = TexSrc::Pack;
   int unit = -1;
   u16 tpage = 0, clut = 0;
   // Model only: the texture drawn through a white CLUT (the global rows the battle loads at (0, 243) / (0, 245), or the white
@@ -222,8 +224,17 @@ struct FxSkinnedModel {
   Vec3 pos{0, 0, 0};                 // model position >> 12 (the pack model: as its emitter object last set it)
   int rgb[3] = {128, 128, 128};      // model colour (the pack model: the object colour >> 4)
 };
+// The GTE depth cue as the frame stands: p = far (z - near) / ((far - near) z), colour moved toward `rgb` (0x80 = neutral) by p.
+struct FxDepthCue {
+  bool on = false;
+  float near_z = 0, far_z = 0;
+  float rgb[3] = {128, 128, 128};
+  float amount(float z) const { return on && far_z > near_z + 1.0f && z > 0.0f ? std::clamp(far_z * (z - near_z) / ((far_z - near_z) * z), 0.0f, 1.0f) : 0.0f; }
+};
 struct FxModels {
   std::vector<FxModel> units;            // indexed by host unit
+  // Set by the host before the overlays draw.
+  FxDepthCue depth_cue;
   std::vector<int> casters, targets;     // the acting / target lists, indices into units
   // "Everybody": the units in the order battle.prg registered them: the enemy units (unit order) first, then the party. kamei's
   // everybody(1) is the second enemy.

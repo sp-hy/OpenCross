@@ -43,6 +43,7 @@ add_library(oc_effects STATIC
   bespoke/mesh_techs.cpp
   bespoke/death_ports.cpp
   bespoke/screen_ports.cpp
+  bespoke/env_mesh.cpp
   bespoke/kamei_port.cpp
   bespoke/summon_ports.cpp
   bespoke/ground_ports.cpp

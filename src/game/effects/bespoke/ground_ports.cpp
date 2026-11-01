@@ -453,7 +453,7 @@ class Boll2 : public GroundFx {
 // shown, buffer K - 1 freed, K += 1) : (the type-2 sound channels suspended, dt = 0 for the rest of the frame, PAUSED = 1); K == 3 and
 // buffer 2 still held -> detached, SetAnim(0, 0), the buffer overwritten with 1s and freed, the third party slot released at init reloaded.
 // (4) Every frame: position (P.x, 0, P.z) (0 before 0x180), rotation y = 0x400, anim speed dt << 6, the pose step, shadow bit 0x200 cleared,
-// and the draw (nothing while the hidden bit is set; the lit mode is not reproduced). Ops: 0x181 PIT = 1 (its operands are read by nothing),
+// and the draw (nothing while the hidden bit is set; under the fog flag each plain face takes the depth cue of its last corner). Ops: 0x181 PIT = 1 (its operands are read by nothing),
 // 0x182 clears an unread flag, 0x183 the loader for file NEXT ('main' sends it twice: files 1 and 2), 0x184 hides 'sara' and PIT = 0.
 // Exit: stock ground on, the buffers freed. The PS1's dt = 0 stall also held every task and emitter that ran after the overlay in that
 // frame (a CD-speed artefact); the host reports a stream after its disc read and a missing file as loaded with no clip, so the wait branch
@@ -650,6 +650,8 @@ class Saraman : public GroundFx {
     ModelDrawSpec spec;
     spec.mask_part_flags = false;
     spec.pack_model = true;
+    spec.cue = &ms->depth_cue;
+    spec.quad_avsz3 = false;
     u32 order = 0;
     model_draw(sk, model, spec, ctx_.view, out, order);
   }

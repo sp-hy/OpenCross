@@ -310,6 +310,11 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
     // FxModels::PackDrive requests are consumed here (fx_pack_drive_tick).
     ms->pack_drive.host = true;
   }
+  if (effects::FxModels* ms = fx_->bespoke_models()) {
+    ms->depth_cue.on = fx_fog_on_;
+    ms->depth_cue.near_z = fog_cur_.near, ms->depth_cue.far_z = fog_cur_.far;
+    ms->depth_cue.rgb[0] = fog_cur_.r, ms->depth_cue.rgb[1] = fog_cur_.g, ms->depth_cue.rgb[2] = fog_cur_.b;
+  }
   fx_->collect(view, alpha_, fx_frame_);
   FxGpu* gpu = fx_gpu_for(fx_pack_);
   // Effect meshes (sprite types 14 / 19): every live mesh object goes through the stage pipeline like the stage's own objects (object
@@ -334,6 +339,7 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
     bool own;
   };
   std::vector<SemiMesh> semi_meshes;
+  std::vector<effects::FxPrim> env_prims;
   FxGpu* rg = fx_gpu_resident(fx_pack_);
   const assets::StageAsset* own_asset = fx_pack_->meshes.get();
   const assets::StageAsset* res_asset = fx_pack_->resident ? fx_pack_->resident->meshes.get() : nullptr;
@@ -358,6 +364,7 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
     std::vector<effects::EmitterSystem::MeshInstance> inst;
     fx_->collect_meshes(view, alpha_, inst);
     std::vector<render::StageInstance> own, res;
+    const bool env_page = static_cast<bool>(stock_env_page_set());
     // Mesh sprites naming a PC's weapon ("02" = Guile's wand).
     std::vector<std::pair<int, const effects::EmitterSystem::MeshInstance*>> weapon_inst;
     for (const auto& mi : inst) {
@@ -379,6 +386,11 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
       }
       if (asset && static_cast<size_t>(pit->second) < asset->parts.size() && mi.off_screen(asset->parts[static_cast<size_t>(pit->second)].cull_points, view))
         continue;
+      // Ext bit 2: the mesh mirrors the stage. A stage without the picture keeps the packets' own UVs.
+      if (env_page && gg == gpu && mi.sprite_type == 14 && mi.ext_path && (mi.ext & 4)) {
+        fx_->env_meshes().emit(mi, mi.morph_t_prev + (mi.morph_t - mi.morph_t_prev) * alpha_, view, env_prims);
+        continue;
+      }
       render::StageInstance in;
       in.part = pit->second;
       for (size_t k = 0; k < 9; ++k) in.cam[k] = mi.mat.m[k];
@@ -471,14 +483,21 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
     // entry keeps the PS1 order (darkfeit links the ABR 1 face, then its ABR 2 white-CLUT copy, so the copy (B - c) is drawn first and the
     // face (+ texel x c) on it; the other way round every partial face of FATE's dissolve would end black).
     const u32 tex_base = tris.empty() ? (fx_frame_.quads.empty() ? 0 : fx_frame_.quads.back().order + 1) : tris.back().order + 1;
-    const u32 tex_top = tex_base + static_cast<u32>(fx_frame_.textured.size());
+    std::vector<effects::FxPrim> textured_prims = fx_frame_.textured;
+    if (!env_prims.empty()) {
+      textured_prims.insert(textured_prims.end(), env_prims.begin(), env_prims.end());
+      effects::sort_prims(textured_prims);
+    }
+    const u32 tex_top = tex_base + static_cast<u32>(textured_prims.size());
     u32 tex_i = 0;
-    for (const effects::FxPrim& prim : fx_frame_.textured) {
+    for (const effects::FxPrim& prim : textured_prims) {
       render::TexRef set;
       if (prim.src == effects::FxPrim::TexSrc::Model) {
         set = fx_unit_texture_set(prim.unit, prim.tex, prim.white);
       } else if (prim.src == effects::FxPrim::TexSrc::Vram) {
         set = fx_vram_page_set(prim.tpage, prim.clut);
+      } else if (prim.src == effects::FxPrim::TexSrc::Env) {
+        set = stock_env_page_set();
       } else if (prim.src == effects::FxPrim::TexSrc::Capture) {
         if (!copy_on) continue;
         set = fx_copy_set_;
@@ -498,9 +517,10 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
         const int k = corner < corner_count ? corner : 2;
         tri.x[corner] = lb.ox + prim.v[k].x * lb.scale;
         tri.y[corner] = lb.oy + prim.v[k].y * lb.scale_y;
-        tri.u[corner] = prim.src == effects::FxPrim::TexSrc::Vram ? prim.u[k] / 256.0f : prim.u[k];
+        const bool page_texels = prim.src == effects::FxPrim::TexSrc::Vram || prim.src == effects::FxPrim::TexSrc::Env;
+        tri.u[corner] = page_texels ? prim.u[k] / 256.0f : prim.u[k];
         // Model / PackModel: v as is.
-        tri.v[corner] = prim.src == effects::FxPrim::TexSrc::Pack ? 1.0f - prim.w[k] : prim.src == effects::FxPrim::TexSrc::Vram ? prim.w[k] / 256.0f : prim.w[k];
+        tri.v[corner] = prim.src == effects::FxPrim::TexSrc::Pack ? 1.0f - prim.w[k] : page_texels ? prim.w[k] / 256.0f : prim.w[k];
         // Capture: layer pixels of the picture, which the copy holds over the whole frame.
         if (prim.src == effects::FxPrim::TexSrc::Capture) {
           tri.u[corner] = (lb.ox + prim.u[k] * lb.scale) / fw;

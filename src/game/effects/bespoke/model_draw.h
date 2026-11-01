@@ -63,6 +63,8 @@ struct ModelDrawSpec {
   std::function<bool(DrawVert* corners, int count, int face, int quad_in_part, int part)> face_hook;
   // The base packets sample the pack model's textures (TexSrc::PackModel) instead of the unit's own.
   bool pack_model = false;
+  // The stock fog builders: the colour word of a plain face takes the depth cue of its last corner, one colour for the face.
+  const FxDepthCue* cue = nullptr;
 };
 
 // Draws unit `unit`'s skinned model `sk` (FxModels::skin) as the overlay does, appending one FxPrim per packet (TexSrc::Model for the face

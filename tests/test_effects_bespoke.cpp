@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "game/effects/bespoke/bespoke.h"
+#include "game/effects/bespoke/env_mesh.h"
 #include "game/effects/soft_raster.h"
 
 using namespace oc;
@@ -801,6 +802,29 @@ int main() {
     std::printf("%d failure(s)\n", failures);
     return 1;
   }
+  // The depth cue: nothing before near, whole from far, hyperbolic between; off = nothing.
+  FxDepthCue cue;
+  cue.near_z = 1000, cue.far_z = 2000;
+  CHECK(cue.amount(1500.0f) == 0.0f);
+  cue.on = true;
+  CHECK(cue.amount(1000.0f) == 0.0f && cue.amount(500.0f) == 0.0f && cue.amount(2000.0f) == 1.0f && cue.amount(4000.0f) == 1.0f);
+  CHECK(std::fabs(cue.amount(1500.0f) - 2.0f / 3.0f) < 0.001f);
+  // Env UVs: the unit normal >> 6 about (0x40, 0xC0), whatever its length; the object matrix turns it.
+  CHECK((env_uv(Mat3{}, {0, 0, 4096}) == std::array<u8, 2>{0x40, 0xC0}));
+  CHECK((env_uv(Mat3{}, {8192, 0, 0}) == std::array<u8, 2>{0x80, 0xC0}));
+  CHECK((env_uv(Mat3{}, {0, -4096, 0}) == std::array<u8, 2>{0x40, 0x80}));
+  Mat3 quarter_turn;
+  quarter_turn.m = {0, 0, 1, 0, 1, 0, -1, 0, 0};
+  CHECK((env_uv(quarter_turn, {0, 0, 4096}) == std::array<u8, 2>{0x80, 0xC0}));
+  // A flat face: every corner takes its one normal.
+  EnvMesh flat;
+  flat.verts = {{0, 0, 0}, {256, 0, 0}, {0, 256, 0}};
+  import::StageFace face;
+  face.n = 3;
+  face.idx = {0, 1, 2, 0};
+  flat.faces.push_back(face);
+  build_normals(flat);
+  CHECK(flat.vnorm.size() == 3 && flat.vnorm[0][0] == 0 && flat.vnorm[0][1] == 0 && std::abs(flat.vnorm[0][2]) == 4096 && flat.vnorm[2] == flat.vnorm[0]);
   std::printf("effects_bespoke: ok (%zu overlays)\n", BespokeRegistry::instance().all().size());
   return 0;
 }

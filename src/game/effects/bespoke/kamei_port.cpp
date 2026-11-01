@@ -23,6 +23,7 @@
 #include <memory>
 #include <string>
 
+#include "game/effects/bespoke/env_mesh.h"
 #include "game/effects/bespoke/overlay_base.h"
 #include "game/effects/fx_math.h"
 #include "import/battle_stage.h"
@@ -48,41 +49,6 @@ struct ClipWait {
     return left <= 0;
   }
 };
-
-struct DomeMesh {
-  std::vector<std::array<s16, 3>> verts;
-  std::vector<import::StageFace> faces;
-  std::vector<std::array<int, 3>> vnorm;  // vertex normals (4.12, length 4096)
-};
-
-// v * 4096 / |v|, 0 for the zero vector.
-std::array<int, 3> normal4096(double x, double y, double z) {
-  const double len = std::sqrt(x * x + y * y + z * z);
-  if (len < 1e-9) return {0, 0, 0};
-  return {static_cast<int>(std::lround(x * 4096.0 / len)), static_cast<int>(std::lround(y * 4096.0 / len)), static_cast<int>(std::lround(z * 4096.0 / len))};
-}
-
-// Per face in file order, the face normal cross(B - A, C - A) >> 6 normalised with A = idx1, B = idx0, C = idx3 (quads) / idx2 (triangles);
-// it is added to every corner and each corner is normalised again at once.
-void build_normals(DomeMesh& mesh) {
-  mesh.vnorm.assign(mesh.verts.size(), {0, 0, 0});
-  for (const import::StageFace& face : mesh.faces) {
-    const size_t corner_a = face.idx[1], corner_b = face.idx[0], corner_c = face.n == 4 ? face.idx[3] : face.idx[2];
-    if (corner_a >= mesh.verts.size() || corner_b >= mesh.verts.size() || corner_c >= mesh.verts.size()) continue;
-    const double ux = mesh.verts[corner_b][0] - mesh.verts[corner_a][0], uy = mesh.verts[corner_b][1] - mesh.verts[corner_a][1],
-                 uz = mesh.verts[corner_b][2] - mesh.verts[corner_a][2];
-    const double vx = mesh.verts[corner_c][0] - mesh.verts[corner_a][0], vy = mesh.verts[corner_c][1] - mesh.verts[corner_a][1],
-                 vz = mesh.verts[corner_c][2] - mesh.verts[corner_a][2];
-    const auto face_normal =
-        normal4096(std::trunc((uy * vz - uz * vy) / 64.0), std::trunc((uz * vx - ux * vz) / 64.0), std::trunc((ux * vy - uy * vx) / 64.0));
-    for (int k = 0; k < face.n; ++k) {
-      const size_t vi = face.idx[static_cast<size_t>(k)];
-      if (vi >= mesh.vnorm.size()) continue;
-      auto& normal = mesh.vnorm[vi];
-      normal = normal4096(normal[0] + face_normal[0], normal[1] + face_normal[1], normal[2] + face_normal[2]);
-    }
-  }
-}
 
 class Kamei : public OverlayFx {
  protected:
@@ -198,8 +164,8 @@ class Kamei : public OverlayFx {
   }
   void draw(std::vector<FxPrim>& out) const override {
     if (draw_a_ < 0) return;
-    const DomeMesh& mesh_a = meshes_[static_cast<size_t>(draw_a_)];
-    const DomeMesh& mesh_b = meshes_[static_cast<size_t>(draw_a_) + 1];
+    const EnvMesh& mesh_a = meshes_[static_cast<size_t>(draw_a_)];
+    const EnvMesh& mesh_b = meshes_[static_cast<size_t>(draw_a_) + 1];
     if (mesh_a.verts.empty() || mesh_a.verts.size() != mesh_b.verts.size()) return;
     const int weight = std::clamp(draw_r_, 0, 0x1000);
     const Mat3& pose_matrix = draw_m_;
@@ -274,15 +240,6 @@ class Kamei : public OverlayFx {
     draw_m_ = ry * model_pose.rel;
     for (size_t k = 0; k < 3; ++k) draw_pos_[k] = actor.pos[k];
   }
-  // The normal turned by the rotation matrix only, normalised to length 4096, then u = (vx >> 6) + 0x40 and v = (vy >> 6) + 0xC0 as the
-  // two bytes of the packet's UV halfword (the window u 0..127, v 128..255 of the env page).
-  static std::array<u8, 2> env_uv(const Mat3& pose_matrix, const std::array<int, 3>& normal) {
-    const Vec3 rotated = pose_matrix.apply({static_cast<float>(normal[0]), static_cast<float>(normal[1]), static_cast<float>(normal[2])});
-    const auto unit = normal4096(rotated[0], rotated[1], rotated[2]);
-    const int u = (unit[0] >> 6) + 0x40, v = (unit[1] >> 6) + 0xC0;
-    const int halfword = ((v << 8) | u) & 0xFFFF;
-    return {static_cast<u8>(halfword & 0xFF), static_cast<u8>(halfword >> 8)};
-  }
   // The corner colour of the lit draw (GTE normal colour): the light rows are built for the shell's position with the light vectors negated
   // and turned into model space by the actor's rotation, so per light c = max(0, -dir . (R n)) with the first mesh's normal n; colour =
   // 0x80 * (back + sum light colour * c), clamped to 255.
@@ -312,7 +269,7 @@ class Kamei : public OverlayFx {
           }
   }
 
-  std::array<DomeMesh, 3> meshes_;
+  std::array<EnvMesh, 3> meshes_;
   int state_ = 0, counter_ = 0, scroll_ = 0, late_ = 0;
   bool armed0_ = false, concealed_ = false;
   ClipWait wait0_, wait1_;
