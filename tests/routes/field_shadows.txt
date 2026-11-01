@@ -1,0 +1,10 @@
+# Field shadows: an actor standing and after a walk (alu_a01f).
+0 wait idle 600
+- wait 30
+- screenshot fs_01_stand.png
+- key down left
+- wait 60
+- key up left
+- wait 20
+- screenshot fs_02_walk.png
+- quit

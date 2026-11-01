@@ -134,9 +134,10 @@ void bind_cheats(const Cheats* set);
 //            scenes; room 3D meshes + models; battle / field unit models; effect sprite sheets + effect meshes - large, off by default).
 //   [Enhancements] (all independent of Ps1Res) SmoothEffectRings: ring / tube effect meshes get extra segments.
 //            SmoothWaterLine: submerged actor parts are cut at the exact water plane, not per whole triangle. Lighting: key light on the
-//            models + bright spell effects light the battle units and stage. EdgeBlend: cross-fades the faces along the texture seams of
+//            models, bright spell effects light the battle units and stage, units cast real shadows (field and battle) and the battle floor darkens
+//            smoothly per vertex. EdgeBlend: cross-fades the faces along the texture seams of
 //            the stage / title meshes, any art mode. SmoothReflections: env-mapped model parts (FATE, Lavos, ...) slide their reflection
-//            sub-texel (off = the PS1's one-texel steps). BattleShadows: smooth per-vertex floor darkening in battles.
+//            sub-texel (off = the PS1's one-texel steps).
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held).
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //   [Audio]  Master / Music / Sfx: bus gains 0..1. Voices: play the voice lines of the mods' voices folders.
@@ -198,7 +199,6 @@ struct Config {
   bool lighting = false;
   bool edge_blend = false;
   bool smooth_reflections = true;
-  bool battle_shadows = true;
   bool autohide_cast_hud = false;
   bool retain_battle_scenery = false;
   bool crt = false;

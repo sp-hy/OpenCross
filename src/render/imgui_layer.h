@@ -65,6 +65,8 @@ class ImGuiLayer {
   // Window::set_event_hook-compatible; `user` is the ImGuiLayer.
   static void event_hook(const SDL_Event& event, void* user);
 
+  // Before new_frame: `hidden` removes the OS mouse pointer; the ImGui backend would otherwise show it again every frame.
+  void set_pointer_hidden(bool hidden);
   void new_frame();
 
   // Registers (or replaces, by name) a settings tab. One line for a new tab:

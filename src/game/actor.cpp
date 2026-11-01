@@ -1217,7 +1217,7 @@ void ActorShadows::floor_normal(const WalkMesh& walk, int tri, float out[3]) {
 }
 
 void ActorShadows::draw(render::SpriteBatch& sprites, const render::FieldCamera& camera, const render::Letterbox& lb, float scroll_x,
-                        float scroll_y, std::span<const ShadowParams> shadows, bool linear) const {
+                        float scroll_y, std::span<const ShadowParams> shadows, bool linear, render::TexRef mask) const {
   const render::TexRef set = linear ? set_linear_ : set_nearest_;
   if (!set || shadows.empty()) return;
   // Subtractive blend, depth tested, never written.
@@ -1252,6 +1252,23 @@ void ActorShadows::draw(render::SpriteBatch& sprites, const render::FieldCamera&
     if (!ok) continue;
     // Ordering index (depth >> 4) + actor layer; +0.5 puts it behind a background layer of the same slot (linked earlier, drawn later).
     const float slot = std::floor(std::max(slot_z, 0.0f) / 16.0f) + shadow.layer + 0.5f;
+    // The actor's silhouette: its tile on the eased floor plane and in the blob's slot, so it meets the backdrop as the blob does. Tile x, z are world x, z.
+    if (shadow.tile_half > 0.0f && mask) {
+      for (int k = 0; k < 4 && ok; ++k) {
+        const float side_x = (kShadowCorner[k][0] > 0.0f ? 1.0f : -1.0f) * shadow.tile_half, side_z = (kShadowCorner[k][1] > 0.0f ? 1.0f : -1.0f) * shadow.tile_half;
+        render::FieldCamera::Projected pr;
+        ok = camera.project({shadow.x + side_x, shadow.y + shadow.tile_slope_x * side_x + shadow.tile_slope_z * side_z, shadow.z + side_z}, pr);
+        xy[k * 2] = lb.ox + (pr.sx + scroll_x) * lb.scale;
+        xy[k * 2 + 1] = lb.oy + (pr.sy + scroll_y) * lb.scale_y;
+        uv[k * 2] = shadow.tile_uv[0] + (side_x > 0.0f ? shadow.tile_uv[2] : -shadow.tile_uv[2]);
+        uv[k * 2 + 1] = shadow.tile_uv[1] + (side_z > 0.0f ? -shadow.tile_uv[2] : shadow.tile_uv[2]);
+      }
+      if (!ok) continue;
+      sprites.set_blend(render::BlendMode::Multiply);
+      sprites.draw_quad_depth(mask, xy, uv, slot / render::kDepthRange);
+      sprites.set_blend(render::BlendMode::Subtract);
+      continue;
+    }
     const u8 grey = static_cast<u8>(std::lround(std::clamp(static_cast<float>(shadow.grey) / 128.0f, 0.0f, 1.0f) * 255.0f));
     sprites.draw_quad_depth(set, xy, uv, slot / render::kDepthRange, render::pack_rgba(grey, grey, grey, 255));
   }

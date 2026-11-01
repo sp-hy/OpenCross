@@ -41,6 +41,11 @@ struct ShadowParams {
   int grey = 64;
   // Actor layer (op 2A), in slots.
   float layer = 0;
+  // [Enhancements] Lighting: the actor's tile of `mask` multiplies the floor over +-tile_half units instead of the blob: uv = centre, half span. 0 = the blob.
+  float tile_half = 0;
+  std::array<float, 3> tile_uv{};
+  // The floor's rise per unit of x and z under the tile.
+  float tile_slope_x = 0, tile_slope_z = 0;
 };
 
 class ActorShadows {
@@ -48,9 +53,9 @@ class ActorShadows {
   // Reads the blob texture from cdrom/map/etc/systim.bin; false (no shadows drawn) when it is missing or not the expected TIM.
   bool init(const vfs::Vfs& files, render::GpuContext& ctx, render::SpriteBatch& sprites);
   void shutdown(render::SpriteBatch& sprites);
-  // Draws inside an open SpriteBatch pass (after the background layers): subtractive, depth tested against the layers, not written.
+  // Draws inside an open SpriteBatch pass (after the background layers): subtractive (a tile: multiplied), depth tested against the layers, not written.
   void draw(render::SpriteBatch& sprites, const render::FieldCamera& camera, const render::Letterbox& lb, float scroll_x, float scroll_y,
-            std::span<const ShadowParams> shadows, bool linear) const;
+            std::span<const ShadowParams> shadows, bool linear, render::TexRef mask = {}) const;
   // The floor-plane normal of walk-mesh triangle `tri` as the engine computes it (+y down; (0, 4096, 0) off the mesh).
   static void floor_normal(const WalkMesh& walk, int tri, float out[3]);
 

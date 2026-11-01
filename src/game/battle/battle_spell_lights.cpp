@@ -201,6 +201,7 @@ bool SpellLights::tick(BattleFxRun* fx, const effects::ViewParams& view, const e
         slot_live[i] = true;
       render::PointLight light;
       if (slot_live[i] && effects::ps1_slot_light(slot.pos, slot.rgb, slot.intensity, slot.falloff, light)) {
+        light.live = any_lit ? std::max({light.rgb[0], light.rgb[1], light.rgb[2]}) : 0.0f;
         for (float& channel : light.rgb) channel *= slot_gate;
         slots.push_back(light);
       }
@@ -213,8 +214,10 @@ bool SpellLights::tick(BattleFxRun* fx, const effects::ViewParams& view, const e
   for (int i = 0; i < glow.count && set.count < render::LightSet::kMax; ++i) set.light[static_cast<size_t>(set.count++)] = glow.light[static_cast<size_t>(i)];
   // The contrast fade applies to the whole set (slots and glow): the ending over a restored ambient stays within ~20 % of the mid-spell level.
   if (contrast < 1.0f)
-    for (int i = 0; i < set.count; ++i)
+    for (int i = 0; i < set.count; ++i) {
       for (float& channel : set.light[static_cast<size_t>(i)].rgb) channel *= contrast;
+      set.light[static_cast<size_t>(i)].live *= contrast;
+    }
   // The scene ambient (1 = neutral).
   for (size_t k = 0; k < 3; ++k) set.ambient[k] = std::clamp(ambient[k] / 128.0f, 0.0f, 2.0f);
   static const bool trace = std::getenv("OC_LIGHT_TRACE") != nullptr;

@@ -143,10 +143,11 @@ void App::apply_frame_options() {
     if (battle_ready) battle.set_autohide_cast(config.autohide_cast_hud);
     if (battle_ready) battle.set_keep_intro_layer(config.retain_battle_scenery);
     if (world_ok) world.set_smooth_rings(rings);
+    if (world_ok) world.set_cast_shadows(config.lighting);
     if (battle_ready) battle.set_smooth_rings(rings);
   }
-  // [Enhancements] BattleShadows (any art mode / filter).
-  if (battle_ready) battle.set_smooth_fog(config.battle_shadows);
+  // [Enhancements] Lighting (any art mode / filter): the smooth floor darkening.
+  if (battle_ready) battle.set_smooth_fog(config.lighting);
   if (battle_ready && world_ok)
     battle.set_menu_options(world.game_state().option(ui::opt::kCursorMemory), world.game_state().option(ui::opt::kAutoAttack));
   if (world_ok) mixer.set_mono(world.game_state().option(ui::opt::kMono));
@@ -161,6 +162,7 @@ void App::apply_frame_options() {
 void App::draw_scene(SceneFrame& sf) {
   const float vw = sf.vw, vh = sf.vh;
   const bool field_shown = sf.field_shown, battle_shown = sf.battle_shown;
+  if (field_shown && world_ok) world.prepare_shadows(sf.frame, step.alpha);
   // The title room's 3D sea scene is the backdrop: drawn first, the room layers (PS1 logo / glow, white fade) blend over it.
   // Widescreen: the sea fills the widened frame like the battle 3D (same H and centre (160, 112), more columns; no clamp).
   sf.title_sea = field_shown && title_bd.running() && world.room_name() == game::kTitleRoom;

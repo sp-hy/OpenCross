@@ -23,6 +23,10 @@ SDL_GPUColorTargetBlendState blend_state(Blend blend) {
   state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
   state.dst_alpha_blendfactor = state.dst_color_blendfactor;
   state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+  if (blend == Blend::Max || blend == Blend::Min) {
+    state.color_blend_op = blend == Blend::Max ? SDL_GPU_BLENDOP_MAX : SDL_GPU_BLENDOP_MIN;
+    state.alpha_blend_op = state.color_blend_op;
+  }
   if (blend == Blend::Invert) {
     state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_DST_COLOR;
     state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;

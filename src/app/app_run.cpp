@@ -68,6 +68,7 @@ int App::run() {
     }
     draw_frame(frame);
 
+    ui.set_pointer_hidden(platform::pointer_hidden(window.fullscreen(), ui.options_open, window.mouse_idle_ms()));
     ui.new_frame();
     // The room's entity / script tables stay while a battle, menu, movie or flow screen covers the field.
     debug_field = field_visible();

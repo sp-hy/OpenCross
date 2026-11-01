@@ -1,4 +1,5 @@
-// The left stick as the d-pad (platform::stick_to_dpad): half-way tilt holds the direction and presses it once.
+// The left stick as the d-pad (platform::stick_to_dpad): half-way tilt holds the direction and presses it once. The idle mouse pointer rule
+// (platform::pointer_hidden).
 #include <SDL3/SDL_gamepad.h>
 
 #include <array>
@@ -61,10 +62,19 @@ void test_stick_to_dpad() {
   platform::stick_to_dpad(input, held);
   CHECK(down(input, SDL_GAMEPAD_BUTTON_DPAD_DOWN) && pressed(input, SDL_GAMEPAD_BUTTON_DPAD_DOWN));
 }
+
+void test_pointer_hidden() {
+  constexpr u64 kIdle = platform::kPointerIdleMs;
+  CHECK(platform::pointer_hidden(true, false, kIdle));
+  CHECK(!platform::pointer_hidden(true, false, kIdle - 1));
+  CHECK(!platform::pointer_hidden(true, true, kIdle));
+  CHECK(!platform::pointer_hidden(false, false, kIdle));
+}
 }  // namespace
 
 int main() {
   test_stick_to_dpad();
+  test_pointer_hidden();
   std::printf("input: %d failure(s)\n", failures);
   return failures ? 1 : 0;
 }

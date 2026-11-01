@@ -79,8 +79,11 @@ void BattleView::showcase_tick() {
 }
 
 void BattleView::showcase_shadows(std::vector<StageScene::ShadowCaster>& casters) {
-  for (const ShowcaseModel& model : showcase_) {
+  for (size_t i = 0; i < showcase_.size(); ++i) {
+    const ShowcaseModel& model = showcase_[i];
     StageScene::ShadowCaster caster;
+    caster.owner = StageScene::CasterOwner::Showcase;
+    caster.index = static_cast<int>(i);
     caster.x = model.x;
     caster.z = model.z;
     caster.yaw = std::atan2(-kShowcaseFaceX, -kShowcaseFaceZ);

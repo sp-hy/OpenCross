@@ -239,7 +239,6 @@ bool Config::load(const std::filesystem::path& file) {
       if (level <= stored_anisotropy) anisotropy = level;
   }
   smooth_water_line = parse_bool(ini.get("Enhancements", "SmoothWaterLine"), smooth_water_line);
-  battle_shadows = parse_bool(ini.get("Enhancements", "BattleShadows"), battle_shadows);
   autohide_cast_hud = parse_bool(ini.get("Enhancements", "AutoHideCastHud"), autohide_cast_hud);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   smooth_effect_rings = parse_bool(ini.get("Enhancements", "SmoothEffectRings"), smooth_effect_rings);
@@ -353,7 +352,6 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "Msaa", std::to_string(msaa));
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
   ini.set("Enhancements", "SmoothWaterLine", on_off(smooth_water_line));
-  ini.set("Enhancements", "BattleShadows", on_off(battle_shadows));
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "SmoothEffectRings", on_off(smooth_effect_rings));

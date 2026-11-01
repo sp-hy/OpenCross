@@ -10,6 +10,7 @@
 // its corners are rounded and the hull is filled with Gouraud rings drawn *subtractively* (B - F), dark at the centre and
 // zero at the rim. The light is the stage's `sun0` object position, by default a point 3072 units above the
 // arena centre, so shadows point away from the centre. The shadow fades with the unit's height above the floor.
+// [Enhancements] Lighting replaces them with the units' real shapes on the floor (render/shadow_pipeline.h) over a faint contact hull.
 #include <functional>
 #include <future>
 #include <map>
@@ -22,12 +23,14 @@
 #include "assets/model.h"
 #include "assets/room_effects.h"
 #include "core/types.h"
+#include "game/battle/stage_key_light.h"
 #include "game/effects/bespoke/bespoke.h"
 #include "game/effects/emitter_system.h"
 #include "game/effects/gpu_effects.h"
 #include "render/camera.h"
 #include "render/gpu_context.h"
 #include "render/particles.h"
+#include "render/shadow_pipeline.h"
 #include "render/sprite_batch.h"
 #include "render/stage_pipeline.h"
 
@@ -72,12 +75,15 @@ class StageScene {
   // A unit that casts a drop shadow this frame. Positions are stage world units (y up); `yaw` is the model yaw in radians as
   // used for drawing (BattleView: rotation_y(atan2(-face_x, -face_z))); `height` the model's extent above the feet; `y` the
   // height of the feet above the floor (0 on the ground); `fp` the joint bounds of the current pose (`has_fp`), else `model`
-  // supplies them from the bind pose (cached).
+  // supplies them from the bind pose (cached). `owner` + `index`: what casts it (the view's unit, its pseudo-actor, its showcase model).
+  enum class CasterOwner { Unit, Pseudo, Showcase };
   struct ShadowCaster {
     float x = 0, z = 0, y = 0, yaw = 0, height = 1000;
     Footprint fp;
     bool has_fp = false;
     const assets::ModelAsset* model = nullptr;
+    CasterOwner owner = CasterOwner::Unit;
+    int index = 0;
   };
   void set_shadow_casters(std::vector<ShadowCaster> casters) { casters_ = std::move(casters); }
 
@@ -97,6 +103,13 @@ class StageScene {
   void set_depth_cue(const render::StagePipeline::DepthCue& cue) { cue_ = cue; }
   // [Enhancements] SpellLights: the lights of the running effect (render world), applied to the opaque scenery of the next draw(); empty = off.
   void set_spell_lights(const render::LightSet& lights) { spell_lights_ = lights; }
+  // [Enhancements] Lighting: the next draw() lays the mask of `shadows` on the floor over `rect` (ShadowPipeline::Floor::rect) and keeps only a faint
+  // contact hull under each unit; null = the PS1's drop shadows.
+  void set_floor_shadow(render::ShadowPipeline* shadows, const std::array<float, 4>& rect) {
+    floor_shadow_ = shadows;
+    floor_rect_ = rect;
+  }
+  const KeyLight& key_light() const { return key_light_; }
   // Packets dropped by the GTE / GPU rules in the last draw().
   size_t rejected_packets() const { return rejected_; }
 
@@ -133,9 +146,9 @@ class StageScene {
   void ground_overlay_end();
 
   // Shadow geometry of one caster in stage world space (y up, the floor at y = 0), as StagePipeline vertices (colour = the
-  // subtracted grey / 255) and triangle indices appended to the vectors. Exposed for tools / tests.
+  // subtracted grey / 255 x `grey_scale`) and triangle indices appended to the vectors. Exposed for tools / tests.
   static void build_shadow(const ShadowCaster& caster, const Footprint& fp, const std::array<float, 3>& light, std::vector<assets::StageVertex>& verts,
-                           std::vector<u32>& indices);
+                           std::vector<u32>& indices, float grey_scale = 1.0f);
 
  private:
   const Footprint& footprint(const assets::ModelAsset* model);
@@ -176,6 +189,9 @@ class StageScene {
   std::vector<assets::StageVertex> shadow_verts_;
   std::vector<u32> shadow_idx_;
   std::array<float, 3> light_{0, 3072, 0};
+  KeyLight key_light_;
+  render::ShadowPipeline* floor_shadow_ = nullptr;
+  std::array<float, 4> floor_rect_{};
   render::GpuContext* ctx_ = nullptr;
   size_t drawn_ = 0, rejected_ = 0, sprites_drawn_ = 0;
   effects::GpuEffects gpu_;
