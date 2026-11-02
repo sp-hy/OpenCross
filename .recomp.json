@@ -1,0 +1,20 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Chrono Cross: The Radical Dreamers Edition",
+  "wikidata": "Q111021896",
+  "system": ["PC (Windows)", "PS1"],
+  "type": "port",
+  "original": { "revision": "Steam", "serial": "1133760" },
+  "project": "OpenCross",
+  "status": "playable",
+  "targets": ["Windows"],
+  "toolchain": "SDL3",
+  "approach": "From-scratch C++20 engine, rewritten from the game's file formats, on the SDL3 GPU API (Vulkan or Direct3D 12)",
+  "maintainers": [{ "name": "sp-hy", "link": "https://github.com/sp-hy" }],
+  "links": [
+    { "label": "Releases", "url": "https://github.com/sp-hy/OpenCross/releases" },
+    { "label": "Issues", "url": "https://github.com/sp-hy/OpenCross/issues" },
+    { "label": "Nexus Mods", "url": "https://www.nexusmods.com/chronocrosstheradicaldreamersedition/mods/97" }
+  ],
+  "notes": "Exploring the world, talking to characters, the story scripts, battles, menus, music and saving all work. Some features are still being polished and there may be bugs. Switches between the HD art and the original PlayStation look, with widescreen, high frame rates and mod support. Linux and Steam Deck run through Proton."
+}
