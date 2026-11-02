@@ -247,6 +247,29 @@ void test_flow() {
   CHECK(continued.state() == game::FlowState::Field && continued.game_state().gold() == 1234);
   CHECK(continued.custom_names().at(0) == U"Zed");
 
+  // No name record stays empty: RDE's name entry refuses every name over an empty record. A new game, a rename with nothing the font
+  // can show and a load all leave the default record.
+  game::FlowMachine::NameRecords defaults{};
+  for (auto& record : defaults) record = codec.pack_record(U"Kid");
+  game::FlowMachine named;
+  named.set_tables(nullptr, &codec);
+  named.set_default_records(defaults);
+  named.new_game(U"Zed");
+  CHECK(codec.unpack_record(named.game_state().slot.chars[0].name) == U"Zed");
+  CHECK(named.game_state().slot.chars[27].name == defaults[27]);
+  named.set_custom_name(27, U"\u0416");
+  CHECK(named.game_state().slot.chars[27].name == defaults[27]);
+  ui::SlotEntry unnamed = slot_entry;
+  unnamed.data.chars[27].name = {};
+  named.on_load(unnamed);
+  CHECK(named.game_state().slot.chars[27].name == defaults[27]);
+
+  // The save lists name a character as the load would: its ext_save.dat name, then its record, else nothing typed.
+  const std::map<int, std::u32string> typed = {{0, U"Typed"}};
+  CHECK(named.saved_custom_name(slot_entry.data, typed, 0) == U"Typed");
+  CHECK(named.saved_custom_name(slot_entry.data, {}, 0) == U"Zed");
+  CHECK(named.saved_custom_name(unnamed.data, {}, 27).empty());
+
   // In-game menu Save/Load > Load: from the Field state, same restore as Continue.
   ui::SlotEntry e2 = slot_entry;
   e2.slot = 5;

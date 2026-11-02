@@ -21,7 +21,7 @@
 - wait 10
 - tap confirm
 - wait flow field 600
-- assert room gal_b09i
+- wait room gal_b09i 600
 - assert var 2 4
 - wait text You're finally awake?
 - skip

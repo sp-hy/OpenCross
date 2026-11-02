@@ -55,8 +55,18 @@ void FlowMachine::set_tables(const data::GameTables* tables, const ui::GameFontC
 
 void FlowMachine::set_custom_name(int char_id, std::u32string name) {
   custom_names_[char_id] = std::move(name);
-  if (codec_ && char_id >= 0 && char_id < save::kNumChars)
+  if (codec_ && char_id >= 0 && char_id < save::kNumChars) {
     gs_.slot.chars[static_cast<size_t>(char_id)].name = codec_->pack_record(custom_names_[char_id]);
+    fill_default_names(gs_.slot);
+  }
+}
+
+// RDE's name entry validates the record, which it never updates: an empty record refuses every name, so no record may stay empty.
+void FlowMachine::fill_default_names(save::SaveSlot& slot) const {
+  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+    auto& record = slot.chars[static_cast<size_t>(char_id)].name;
+    if (record[0] == 0) record = default_records_[static_cast<size_t>(char_id)];
+  }
 }
 
 // The title script (opening.bin 0x2C1..0x2D8): ADD_TO_PARTY #0, #1, then RAND_MOD 14 -> ARRAY8_GET of the code table at 0x310 (bytes
@@ -102,6 +112,7 @@ void FlowMachine::new_game(std::u32string_view name, bool opening_party) {
   custom_names_.clear();
   custom_names_[0] = v.empty() ? std::u32string(name) : v;
   gs_ = ui::GameState(new_game_slot(tables_, codec_, custom_names_[0], seed_, opening_party), &rules_);
+  fill_default_names(gs_.slot);
   gs_.set_option(ui::opt::kVibration, vibration_);
 }
 
@@ -140,6 +151,16 @@ FlowAction FlowMachine::on_name(std::u32string_view name) {
   return action;
 }
 
+std::u32string FlowMachine::saved_custom_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) const {
+  // ext_save.dat names: what the player typed (the record only holds what the game font can show).
+  if (const auto it = ext.find(char_id); it != ext.end() && usable_name(it->second, lang_)) return it->second;
+  if (!codec_ || char_id < 0 || char_id >= save::kNumChars) return {};
+  // Records of characters that were never named hold the JP default (the RDE names live host-side): a name made only of blanks or
+  // undecodable codes, or kana outside JP, is "unset" and the default sysmes name applies.
+  std::u32string name = ui::trim_blanks(codec_->unpack_record(data.chars[static_cast<size_t>(char_id)].name));
+  return usable_name(name, lang_) ? name : std::u32string();
+}
+
 FlowAction FlowMachine::on_slot(const ui::SlotEntry& entry) {
   if (state_ != FlowState::SlotSelect) return {};
   return on_load(entry);
@@ -152,20 +173,13 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   // Every load grants the Time Shifter key item.
   newgame::ensure_time_shifter(gs_.slot);
   custom_names_.clear();
-  if (codec_)
-    for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
-      // Records of characters that were never named hold blanks / padding (the RDE names live host-side): a name made only of
-      // blanks or undecodable codes is "unset" and the default sysmes name applies.
-      std::u32string name = ui::trim_blanks(codec_->unpack_record(entry.data.chars[static_cast<size_t>(char_id)].name));
-      if (usable_name(name, lang_)) custom_names_[char_id] = std::move(name);
-    }
-  // ext_save.dat names: what the player typed (the record only holds what the game font can show).
+  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
+    if (std::u32string name = saved_custom_name(entry.data, ext_names_, char_id); !name.empty()) custom_names_[char_id] = std::move(name);
   for (const auto& [char_id, name] : ext_names_)
-    if (char_id >= 0 && char_id < save::kNumChars && usable_name(name, lang_)) {
-      custom_names_[char_id] = name;
-      if (codec_) gs_.slot.chars[static_cast<size_t>(char_id)].name = codec_->pack_record(name);
-    }
+    if (codec_ && char_id >= 0 && char_id < save::kNumChars && usable_name(name, lang_))
+      gs_.slot.chars[static_cast<size_t>(char_id)].name = codec_->pack_record(name);
   ext_names_.clear();
+  fill_default_names(gs_.slot);
   state_ = FlowState::Field;
   action.state_changed = true;
   action.stop_music = true;
@@ -185,6 +199,7 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
 
 void FlowMachine::new_game_plus(const save::SaveSlot& cleared) {
   gs_ = ui::GameState(ngplus::new_game_plus_slot(tables_, cleared), &rules_);
+  fill_default_names(gs_.slot);
   gs_.set_option(ui::opt::kVibration, vibration_);
   log::info("flow: New Game+: gold {}, stars {}, carry-over bitmap {:08X}:{:03X}", gs_.slot.gold(), gs_.slot.stars_total(), gs_.slot.unk_e1ec,
             gs_.slot.unk_e1f0);
@@ -226,9 +241,13 @@ bool GameFlow::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Sprite
   codec_ = std::make_unique<ui::GameFontCodec>(kit_.glyphs());
   lang_tables_.init(&vfs);
   machine_.set_tables(tables, codec_.get());
+  FlowMachine::NameRecords default_records{};
+  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
+    default_records[static_cast<size_t>(char_id)] = codec_->pack_record(lang_tables_.default_name(char_id, import::Lang::Jp));
+  machine_.set_default_records(default_records);
   if (tables) machine_.rules().load_pg(vfs);
   title_.init(kit_, mixer);
-  slots_.set_name_lookup([this](int id) { return lang_tables_.default_name(id, lang_); });
+  slots_.set_name_lookup([this](const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int id) { return saved_name(data, ext, id); });
   ready_ = true;
   return true;
 }
@@ -314,6 +333,11 @@ std::u32string GameFlow::display_name(int char_id) {
   const auto& cn = machine_.custom_names();
   if (auto it = cn.find(char_id); it != cn.end() && !it->second.empty()) return it->second;
   return lang_tables_.default_name(char_id, lang_);
+}
+
+std::u32string GameFlow::saved_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) {
+  const std::u32string name = machine_.saved_custom_name(data, ext, char_id);
+  return name.empty() ? lang_tables_.default_name(char_id, lang_) : name;
 }
 
 void GameFlow::begin_ng_plus(const save::SaveSlot& cleared) {

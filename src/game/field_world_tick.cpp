@@ -363,7 +363,7 @@ std::string FieldWorld::describe_stuck(const script::FieldVM::StuckInfo& stuck) 
   return detail;
 }
 
-void FieldWorld::sweep_talk(int ticks) {
+void FieldWorld::sweep_talk(int ticks, const std::function<void()>& settle) {
   if (!initialised_ || ents_.empty()) return;
   const std::string room(view_.room_name());
   watchdog_.sweep_probe = true;
@@ -407,6 +407,7 @@ void FieldWorld::sweep_talk(int ticks) {
       if (reload || vm_.triggered_busy()) {
         ++reloads;
         load_room(room, 0);
+        settle();
         watchdog_.sweep_probe = true;
         if (static_cast<size_t>(ent) >= ents_.size()) break;
       }

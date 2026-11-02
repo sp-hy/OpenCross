@@ -20,6 +20,7 @@ sys_init_char_record = 0x800199D4;  # function: Initialises one character record
 sys_growth_roll = 0x80019CA8;  # function: Random stat growth roll scaled by the star count
 sys_apply_star_growth = 0x80019D74;  # function: Applies stat growth for the current star count to all character records
 sys_load_char_record_files = 0x80019EAC;  # function: Loads the character record files of the record directory
+sys_text_entry = 0x80019768;  # function: Address of an entry of a system text category; category 1 holds the default character names
 sys_init_dream_state = 0x80019FB8;  # function: Sets up the opening dream/boot state: records, names, stars, options, relief slot
 sys_init_real_char_records = 0x8001A040;  # function: Rebuilds all character records from the real game character file
 snd_load_boot_wave_bank = 0x8001A120;  # function: Loads the shared sound-effect wave bank from disc at boot

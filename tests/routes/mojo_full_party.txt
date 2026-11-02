@@ -1,0 +1,53 @@
+# Mojo joins a full party: Continue file 02 (alu_b09i, party Serge / Poshul / Leena), key item 2 shown to the man, the way out, name entry,
+# the party screen. The party screen lists Mojo though no slot was free, and the field comes back from it without a script fade-in.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap confirm
+- wait room alu_b09i 900
+- wait idle 600
+- request keyitem 2
+- put -5 -170
+- wait 20
+- tap item
+- wait 30
+- tap down
+- wait 10
+- tap right                           # key item 2
+- wait 10
+- tap confirm
+- wait 30
+- mash until idle 0 6000
+- wait 60
+- wait idle 900
+- walk -740 -168 50 900
+- mash until menu open 6000
+- wait 30
+- screenshot mojo_name.png
+- wait 60
+- tap start
+- wait 60
+- assert menu open
+- screenshot mojo_party.png
+- tap cancel
+- wait idle 1800
+- assert party 0,12,20
+- assert var 0 60
+- wait 90
+- screenshot mojo_back.png
+- quit

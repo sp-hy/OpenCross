@@ -31,6 +31,7 @@
 - wait 90
 - screenshot st_01_status.png
 - tap cancel
+- wait 40
 - tap cancel
 - wait menu closed 300
 - quit

@@ -194,7 +194,7 @@ void App::replay_frame() {
 // Test hook: visit every room, run its scripts for N ticks in one go, count the rooms that fail to load.
 bool App::sweep_frame() {
   world.update(input, config.debug_sweep_ticks);
-  if (config.debug_sweep_talk > 0) world.sweep_talk(config.debug_sweep_talk);
+  if (config.debug_sweep_talk > 0) world.sweep_talk(config.debug_sweep_talk, [this] { ctx.drain_releases(); });
   // No battle view in the sweep: every encounter is "won" so the scripts keep running.
   if (world.battle_ready()) {
     world.take_battle();
@@ -232,6 +232,7 @@ bool App::sweep_frame() {
   }
   // OC_SWEEP_SCENARIO=n: the story counter (variable 0) every swept room is entered with (reaches the story-gated branches).
   if (const char* sc = std::getenv("OC_SWEEP_SCENARIO"); sc && *sc) world.vm().set_var(0, std::atoi(sc));
+  ctx.drain_releases();
   if (!world.load_room(rooms[sweep_idx], 0)) {
     ++sweep_failed;
     log::warn("sweep: {} failed", rooms[sweep_idx]);

@@ -92,6 +92,15 @@ void App::open_main_menu(bool script) {
   log::info("menu: opened ({}, saving {})", script ? "script" : "key", world.can_save() ? "allowed" : "blocked");
 }
 
+// A screen that replaces the field hands it back faded in from black, whatever an A8 left: the main menu, the name entry and the
+// shops over 0x10 ticks, the party and relief screens over 0x20.
+static constexpr int kScreenFadeIn = 0x10, kPartyFadeIn = 0x20;
+
+void App::close_field_screen(int fade_ticks) {
+  world.menu_closed();
+  world.fade_in_from_black(fade_ticks);
+}
+
 void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
   using script::MenuKind;
   switch (rq.kind) {
@@ -422,7 +431,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   }
   if (flow_ready && flow.owns_screen()) {
     apply_flow_action(flow.update(in, static_cast<float>(dt)));
-    if (flow.take_rename_finished()) world.menu_closed();
+    if (flow.take_rename_finished()) close_field_screen(kScreenFadeIn);
     if (flow.ng_plus_active()) {
       // the list stays up
     } else if (flow.take_ng_plus_result() == game::GameFlow::NgPlusResult::NewGamePlus) {
@@ -438,7 +447,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     if (flow.take_party_finished()) {
       // The party changed: rebind the party entities and models.
       world.state_edited();
-      world.menu_closed();
+      close_field_screen(kPartyFadeIn);
     }
     return;
   }
@@ -476,8 +485,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       world.state_edited();
       if (menu_from_script) world.menu_closed(menu.saved() ? 1 : 0);
       menu_from_script = false;
-      // The field fades in from black over 0x10 ticks after the menu.
-      world.fade_in_from_black(0x10);
+      world.fade_in_from_black(kScreenFadeIn);
       log::info("fade: field fade-in after menu close (0x10 ticks)");
     }
     return;
@@ -494,7 +502,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
         // The party changed: rebind the party entities and models.
         world.state_edited();
       }
-      world.menu_closed();
+      close_field_screen(kPartyFadeIn);
     }
     return;
   }
@@ -558,7 +566,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     if (shop.closed()) {
       shop_open = false;
       world.state_edited();
-      world.menu_closed();
+      close_field_screen(kScreenFadeIn);
     }
     return;
   }

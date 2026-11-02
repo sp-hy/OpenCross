@@ -21,8 +21,10 @@
 - skip
 - skip
 - skip
-- wait text Even if you manage
+- wait text That is not possible
 - log msg 32 (PC1 = the party's second member, Guile) must show 'speaker ent 2, face 2' above
+- skip
+- skip
 - skip
 - skip
 - skip

@@ -1,0 +1,64 @@
+# Mojo joins a full party and takes Poshul's slot: mojo_full_party up to the party screen, then slot 2, Mojo from the grid, back out. The
+# scene goes on with him as a party member.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap confirm
+- wait room alu_b09i 900
+- wait idle 600
+- request keyitem 2
+- put -5 -170
+- wait 20
+- tap item
+- wait 30
+- tap down
+- wait 10
+- tap right                           # key item 2
+- wait 10
+- tap confirm
+- wait 30
+- mash until idle 0 6000
+- wait 60
+- wait idle 900
+- walk -740 -168 50 900
+- mash until menu open 6000
+- wait 30
+- screenshot mojo_name.png
+- wait 60
+- tap start
+- wait 60
+- assert menu open
+- screenshot mojo_party.png
+- tap left
+- wait 10
+- tap left                            # slot 2 (Serge's slot is locked)
+- wait 10
+- tap confirm
+- wait 30
+- tap down                            # Mojo
+- wait 40
+- tap confirm
+- wait 30
+- tap cancel
+- wait 30
+- tap cancel
+- wait idle 1800
+- assert party 0,27,20
+- wait 90
+- screenshot mojo_swap_back.png
+- quit

@@ -133,11 +133,16 @@ void OcSaves::write(int number, const SaveSlot& state) {
   files_[number] = std::move(file);
 }
 
-ExtSlot OcSaves::read_ext(int number, u32 language) const {
+ExtSlot OcSaves::peek_ext(int number, u32 language) const {
   ExtSlot record;
   if (const File* found = file(number)) record = found->ext;
-  if (ext_host_) ext_host_->battles = record.battles;
   if (record.language != language) record.names.clear();
+  return record;
+}
+
+ExtSlot OcSaves::read_ext(int number, u32 language) const {
+  ExtSlot record = peek_ext(number, language);
+  if (ext_host_) ext_host_->battles = record.battles;
   return record;
 }
 

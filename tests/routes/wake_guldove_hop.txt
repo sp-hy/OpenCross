@@ -22,7 +22,7 @@
 - wait 10
 - tap confirm
 - wait flow field 600
-- assert room gal_b09i
+- wait room gal_b09i 600
 - assert var 2 4
 - trace -1 700                       # the sit-up (ex_01) and the two scripted looks: the head callback ignores the clip
 - assert traceheadturn 100 800                   # looks one way (ax -512..) then the other (..+419): span 931 in the log

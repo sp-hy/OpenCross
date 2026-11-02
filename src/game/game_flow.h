@@ -8,6 +8,7 @@
 // The new game start was found in the title room's script (opening.bin = room 8, tmp/dis/opening.txt): after "New Game"
 // the script runs  OPEN_MENU (title list), RENAME_CHARACTER #0 (name entry, character 0 = Serge), ADD_TO_PARTY #0, then
 // MAP_JUMP_DC #22, #0  = room 22 `opn_a01i`, ROOM_PARAM 0.
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
@@ -99,6 +100,11 @@ class FlowMachine {
   void set_custom_name(int char_id, std::u32string name);
   // ext_save.dat names of the slot about to load (SaveDat::read_ext; already empty when the record's language differs): on_load applies them over the record's.
   void set_ext_names(std::map<int, std::u32string> names) { ext_names_ = std::move(names); }
+  // The name a saved character gets once `data` is loaded with its ext_save.dat names `ext`; empty = none typed, the default name applies.
+  std::u32string saved_custom_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) const;
+  // The save records of the characters' Japanese default names: what a record holds until a name is typed.
+  using NameRecords = std::array<std::array<u8, ui::kNameRecord>, save::kNumChars>;
+  void set_default_records(const NameRecords& records) { default_records_ = records; }
   ui::MenuRules& rules() { return rules_; }
 
   // Replaces the state with a fresh game named `name` (the dev start without the title, and New Game after name entry).
@@ -118,6 +124,8 @@ class FlowMachine {
   static bool usable_name(const std::u32string& name, import::Lang lang);
 
  private:
+  void fill_default_names(save::SaveSlot& slot) const;
+
   FlowState state_ = FlowState::Title;
   u32 seed_ = 0;
   bool vibration_ = false;
@@ -129,6 +137,7 @@ class FlowMachine {
   ui::GameState gs_;
   std::map<int, std::u32string> custom_names_;
   std::map<int, std::u32string> ext_names_;
+  NameRecords default_records_{};
 };
 
 class GameFlow {
@@ -211,6 +220,8 @@ class GameFlow {
   bool rename_active() const { return rename_active_; }
   // The user guide page on screen (New Game or the FE 4A rename): 1 controller, 2 keyboard, 0 none.
   int guide_page() const { return keymap_active_ || (rename_active_ && rename_guide_) ? keymap_.page() : 0; }
+  // A character's name in a saved game, as the save lists show it: its typed name, else the language's default.
+  std::u32string saved_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id);
   bool take_rename_finished() {
     const bool finished = rename_finished_;
     rename_finished_ = false;

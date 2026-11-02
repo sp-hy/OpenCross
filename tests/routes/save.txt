@@ -55,8 +55,9 @@
 - wait 60
 - screenshot sv_03_saved.png
 - tap cancel
+- wait 40
 - tap cancel
-- wait 20
+- wait 40
 - tap cancel
 - wait menu closed 300
 - wait idle 300
