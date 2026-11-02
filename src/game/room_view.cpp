@@ -155,6 +155,13 @@ bool RoomView::load(std::string_view name) {
 
   const auto& cam = scene_->camera;
   group_scale_ = cam.group_scale;
+  layer_depths_.clear();
+  if (std::ranges::any_of(group_scale_, [](u32 scale) { return scale != 4096u; }))
+    for (const assets::RoomLayer& layer : scene->layers)
+      for (const assets::RoomGroupImage& image : layer.groups) {
+        const draw_offset::LayerDepth depth{image.z, static_cast<int>(image.group)};
+        if (std::ranges::find(layer_depths_, depth) == layer_depths_.end()) layer_depths_.push_back(depth);
+      }
   limits_ = {cam.x_min, cam.x_max, cam.y_min - kYMinBias, cam.y_max};
   camera_ = render::FieldCamera::from_room(cam);
   walk_.init(scene->walk, scene->attr_flags);
@@ -477,6 +484,18 @@ void RoomView::scroll_at(float alpha, float& sx, float& sy) const {
   sy = std::floor(sy);
 }
 
+// 4096 = scrolls with the foreground, larger = slower (farther). Scale 0 = fixed to the screen: its offset is always a multiple of 4096,
+// which the console's 11-bit drawing coordinates wrap to nothing.
+float RoomView::group_parallax(u32 group) const {
+  const u32 scale = group < group_scale_.size() ? group_scale_[group] : 4096u;
+  return scale == 0 ? 0.0f : 4096.0f / static_cast<float>(scale);
+}
+
+float RoomView::slot_parallax(int slot) const {
+  const int group = draw_offset::group_at(layer_depths_, slot);
+  return group == draw_offset::kGlobal ? 1.0f : group_parallax(static_cast<u32>(group));
+}
+
 void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alpha) const {
   const render::Letterbox lb = letterbox(vw, vh);
   const float scale_x = lb.scale, sy = lb.scale_y, ox = lb.ox, oy = lb.oy;
@@ -500,13 +519,11 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     if (it->group < 32 && (!((layer_mask_ >> it->group) & 1) || ((hidden_groups_ >> it->group) & 1))) continue;
     if (const float ot = std::max(8.0f, static_cast<float>(it->z)); ot <= slab_lo_ || ot > slab_hi_) continue;
     if ((it->blend >= 0 && std::max(8.0f, static_cast<float>(it->z)) < late_z_) != late_pass_) continue;
-    // Parallax: off = S * 4096 / scale. 4096 = scrolls with the foreground, larger = slower (farther). Scale 0 = fixed to the screen:
-    // its offset is always a multiple of 4096, which the console's 11-bit drawing coordinates wrap to nothing.
-    const u32 scale = it->group < group_scale_.size() ? group_scale_[it->group] : 4096u;
-    const float parallax = scale == 0 ? 0.0f : 4096.0f / static_cast<float>(scale);
+    // Parallax: off = S * 4096 / scale.
+    const float parallax = group_parallax(it->group);
     // Sub-pixel placement only with the HD art.
     const bool sub = hd_ && it->set_hd;
-    float px = static_cast<float>(it->x) + (scale == 0 ? (fixed_to_edge_ ? lb.x0 : 0.0f) : scroll_x * parallax);
+    float px = static_cast<float>(it->x) + (parallax == 0.0f ? (fixed_to_edge_ ? lb.x0 : 0.0f) : scroll_x * parallax);
     float py = static_cast<float>(it->y) + scroll_y * parallax;
     if (!sub) {
       px = std::floor(px);

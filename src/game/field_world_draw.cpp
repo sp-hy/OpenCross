@@ -633,12 +633,17 @@ void FieldWorld::free_status_icons() {
   icons_tried_ps1_ = icons_tried_hd_ = false;
 }
 
-// While the input lock is clear and no room change is pending: one icon per status any party member has (flu, burn, sprain, poison),
-// right-aligned from x 0x130 in that order, y 8..24. Without HD art the PS1 icons are used.
+// While the input lock is clear and no room change is pending, whenever a party member has a status with an icon.
+bool FieldWorld::status_icons_shown() const {
+  return view_.loaded() && !(vm_.global_flags() & script::gflag::kInputLock) && !jump_.active && trans_ == Trans::None &&
+         (party_status_bits() & (kStFlu | kStBurn | kStSprain | kStPoison));
+}
+
+// One icon per status any party member has (flu, burn, sprain, poison), right-aligned from x 0x130 in that order, y 8..24. Without HD
+// art the PS1 icons are used.
 void FieldWorld::draw_status_icons(render::SpriteBatch& sprites, float vw, float vh, bool ps1) {
-  if (!view_.loaded() || (vm_.global_flags() & script::gflag::kInputLock) || jump_.active || trans_ != Trans::None) return;
+  if (!status_icons_shown()) return;
   const int bits = party_status_bits();
-  if (!(bits & (kStFlu | kStBurn | kStSprain | kStPoison))) return;
   load_status_icons(hd_);
   const auto* icons = &(hd_ ? icons_hd_ : icons_ps1_);
   if (hd_ && !(*icons)[3].set) {

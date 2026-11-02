@@ -14,6 +14,7 @@
 #include "assets/battle_stage.h"
 #include "assets/room_scene.h"
 #include "game/actor.h"
+#include "game/draw_offset.h"
 #include "game/room_lighting.h"
 #include "game/walk_mesh.h"
 #include "import/chip2.h"
@@ -142,6 +143,9 @@ class RoomView {
   // Late layers (FieldWorld::draw_background_late): semi-transparent items (a blend mode) whose OT index is below `z` - nearer than every
   // actor - are skipped by the normal draw() and drawn by a second call with late_pass = true after the actors and effects: the PS1 files
   // them nearer than the models, so they blend over the models (the water layer of the Hydra Marshes). z <= 0 = no late layers.
+  // How fast what the ordering table draws at `slot` scrolls, as a factor of the global scroll: an effect filed under a layer's draw offset
+  // moves with that layer (game/draw_offset.h).
+  float slot_parallax(int slot) const;
   void set_late(float z, bool late_pass) {
     late_z_ = z;
     late_pass_ = late_pass;
@@ -180,6 +184,10 @@ class RoomView {
   // Back to front.
   std::vector<std::unique_ptr<Item>> items_;
   std::vector<u32> group_scale_;
+  // Scroll factor of a group: 4096 / scale, 0 for a group fixed to the screen.
+  float group_parallax(u32 group) const;
+  // Only for rooms with a group that does not scroll 1:1; empty otherwise.
+  std::vector<draw_offset::LayerDepth> layer_depths_;
   std::string name_;
   std::string prd_path_;
   // The .prd the loaded room was imported with (reload_art re-reads it; empty = none).

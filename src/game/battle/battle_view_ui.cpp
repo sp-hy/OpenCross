@@ -1180,6 +1180,7 @@ void BattleView::build_command_ui() {
   if (act_hdr) {
     // The action start hands the same plate over, fixed at (8, 22).
     hdr_on_ = false;
+    cast_header_from_ = op_count();
     const int id = act_.ev.front().element;
     if (id > 0 && static_cast<size_t>(id) < tables_->elements.size() && !(tables_->elements[static_cast<size_t>(id)].b(0) & 0x80)) {
       header_plate(tables_->elements[static_cast<size_t>(id)], 22);
@@ -1188,6 +1189,7 @@ void BattleView::build_command_ui() {
         btext(0x81, import::utf8_to_u32(elem_label(tables_->element_name(id), tables_->elements[static_cast<size_t>(id)], act_.ev.front().row)),
               0x44, 22 + 3, 0x757575);
     }
+    cast_header_to_ = op_count();
   } else if (hdr_on_ && hdr_cell_ >= 0 && hdr_cell_ < data::kGridCells && active_pc_ >= 0) {
     // Cast header float: from the confirm in the list the chosen plate floats to (8, 22) and stays through the
     // target ring; in state 0 the other plates of the level fold away.

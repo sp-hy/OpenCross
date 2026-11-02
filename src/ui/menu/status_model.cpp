@@ -27,6 +27,8 @@ constexpr float kFeetRight = 100, kFeetBelow = 500;
 // The floor shadow: every vertex slides along this ray (PS1 y down) onto the floor y = 0, flat polygons of grey 0x20.
 constexpr int kShadowRay[3] = {-100, 150, -150};
 constexpr float kShadowGrey = 32.0f / 255.0f;
+// [Enhancements] Lighting: the share of the parchment's light the cast shadow removes, and how far of the feet it can fall.
+constexpr float kCastStrength = 0.6f, kCastReach = 3072.0f;
 // Characters whose weapon object is hidden on this screen (its shadow is still cast): Luccia, Harle, Starky, Sneff.
 constexpr int kHiddenWeapon[4] = {0x0B, 0x16, 0x19, 0x25};
 // Weapon tier byte of the prism weapons (drawn under the turning coloured lights instead of the glint).
@@ -302,6 +304,7 @@ void StatusModelView::set_weapon(Entry& shown, int weapon_model, int part) {
 void StatusModelView::release() {
   cache_.clear();
   weapons_.clear();
+  shadow_pipe_.destroy();
   env_page_.destroy();
   env_sampler_.destroy();
   env_page_tried_ = false;
@@ -384,6 +387,14 @@ void StatusModelView::draw_effects(const render::Frame& frame, float vw, float v
   particles_.begin(frame, vw, vh);
   effect_gpu_.draw(particles_, quads, letterbox);
   particles_.end();
+}
+
+bool StatusModelView::shadow_pipe_ready(const render::Frame& frame) {
+  if (!cast_shadows_ || shadow_pipe_failed_ || !frame.ctx) return false;
+  if (shadow_pipe_.ready()) return true;
+  shadow_pipe_failed_ = !shadow_pipe_.init(*frame.ctx);
+  if (shadow_pipe_failed_) log::warn("status model: shadow pipeline failed, flat shadow");
+  return !shadow_pipe_failed_;
 }
 
 // The PS1 view: camera = translate(pan + (100, 500), distance) * Rx(-pitch) * Ry(-yaw) applied to the world (y down, feet on y = 0), screen
@@ -491,18 +502,43 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
   // The menu is drawn over the field / world map in the same render pass, and those leave their depth values behind (room layers, actors):
   // the model would be depth-tested against them and show holes. It is the topmost 3D element of the menu: start from a clean depth buffer.
   frame.clear_depth();
-  meshes_.begin(frame, frame.full());
-  render::MeshPipeline::DrawParams shadow = dp;
-  shadow.model = flatten * model;
-  shadow.solid = true;
-  shadow.solid_rgb[0] = shadow.solid_rgb[1] = shadow.solid_rgb[2] = kShadowGrey;
-  meshes_.draw(*shown->body->gpu, shadow);
-  for (int i = 0; i < hung_count; ++i) {
-    render::MeshPipeline::DrawParams weapon_shadow = shadow;
-    weapon_shadow.palette = std::span<const render::Mat4>(&hung[i].matrix, 1);
-    meshes_.draw(*shown->weapon->gpu, weapon_shadow);
+  if (shadow_pipe_ready(frame)) {
+    // The shadow pipeline's world is y up; the flat shadow's ray is the direction toward its light in it.
+    const float ray[3] = {static_cast<float>(kShadowRay[0]), static_cast<float>(kShadowRay[1]), static_cast<float>(kShadowRay[2])};
+    const float length = std::sqrt(ray[0] * ray[0] + ray[1] * ray[1] + ray[2] * ray[2]);
+    std::array<render::ShadowPipeline::Cast, render::ShadowPipeline::kChannels> casts;
+    casts[0] = {{ray[0] / length, ray[1] / length, ray[2] / length}, 1.0f};
+    render::Mat4 up;
+    up.at(1, 1) = -1.0f;
+    u32 hidden = slot.hidden_meshes, env = 0;
+    const auto& shadow_shading = shown->body->asset.shading;
+    for (size_t k = 0; k < shadow_shading.size() && k < 32; ++k) {
+      if (shadow_shading[k].flags & 1) hidden |= 1u << k;
+      if ((shadow_shading[k].flags & 0x80) && (shadow_shading[k].flags & 0x60)) env |= 1u << k;
+    }
+    shadow_pipe_.begin_mask(frame);
+    shadow_pipe_.cast(*shown->body->gpu, up * model, palette_, hidden, env, casts);
+    for (int i = 0; i < hung_count; ++i) shadow_pipe_.cast(*shown->weapon->gpu, up * model, std::span<const render::Mat4>(&hung[i].matrix, 1), 0, 0, casts);
+    shadow_pipe_.end_mask();
+    render::ShadowPipeline::Floor floor;
+    floor.clip = proj * view;
+    floor.rect = {-kCastReach, -kCastReach, kCastReach, kCastReach};
+    floor.strength = kCastStrength;
+    shadow_pipe_.draw_floor(floor);
+  } else {
+    meshes_.begin(frame, frame.full());
+    render::MeshPipeline::DrawParams shadow = dp;
+    shadow.model = flatten * model;
+    shadow.solid = true;
+    shadow.solid_rgb[0] = shadow.solid_rgb[1] = shadow.solid_rgb[2] = kShadowGrey;
+    meshes_.draw(*shown->body->gpu, shadow);
+    for (int i = 0; i < hung_count; ++i) {
+      render::MeshPipeline::DrawParams weapon_shadow = shadow;
+      weapon_shadow.palette = std::span<const render::Mat4>(&hung[i].matrix, 1);
+      meshes_.draw(*shown->weapon->gpu, weapon_shadow);
+    }
+    meshes_.end();
   }
-  meshes_.end();
   frame.clear_depth();
   meshes_.begin(frame, frame.full());
 
