@@ -288,6 +288,13 @@ void GpuContext::set_clear_color(float r, float g, float b, float a) {
   clear_[3] = a;
 }
 
+void GpuContext::drain_releases() {
+  if (!device_) return;
+  SDL_WaitForGPUIdle(device_);
+  release_queued(~0ull, ~size_t{0});
+  SDL_WaitForGPUIdle(device_);
+}
+
 void GpuContext::wait_idle() {
   if (device_) SDL_WaitForGPUIdle(device_);
 }

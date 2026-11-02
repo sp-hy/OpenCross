@@ -25,6 +25,8 @@ struct SlotEntry {
   int slot = 0;
   int block = 0;
   save::SaveSlot data;
+  // Its ext_save.dat names in the list's language (filled by SlotList::begin).
+  std::map<int, std::u32string> ext_names;
 };
 
 class SlotList {
@@ -42,8 +44,9 @@ class SlotList {
   void begin(const save::SaveDat* dat, const save::OcSaves* page, import::Lang lang, ArtMode mode, bool plus = false);
   bool plus() const { return plus_; }
   void set_mode(ArtMode mode) { mode_ = mode; }
-  // Character id -> display name (default sysmes name); unset = "#id".
-  void set_name_lookup(std::function<std::u32string(int)> fn) { name_of_ = std::move(fn); }
+  // A character's name in a saved game: its data, its ext_save.dat names, the character id.
+  using NameLookup = std::function<std::u32string(const save::SaveSlot&, const std::map<int, std::u32string>&, int)>;
+  void set_name_lookup(NameLookup fn) { name_of_ = std::move(fn); }
   void set_sfx(std::function<void(int)> fn) { sfx_ = std::move(fn); }
 
   void update(const Nav& nav, float dt);
@@ -92,7 +95,7 @@ class SlotList {
   int sel_ = 0, top_ = 0;
   bool picked_ = false, cancelled_ = false;
   bool plus_ = false;
-  std::function<std::u32string(int)> name_of_;
+  NameLookup name_of_;
   std::function<void(int)> sfx_;
 };
 

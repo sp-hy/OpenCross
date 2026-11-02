@@ -1,7 +1,7 @@
 # World map by Arni (wld_a01, entrance 0 = arriving from the village; the leader walks, entity 4 is parked). Dumps the entity table and
 # the effect activity to the log: the party figure's dust emitter (OP9B 'nam1') must follow a drawn model.
 0 wait idle 600
-- set var 1A0 80
+- set var 1A0 0x80
 - load wld_a01 0
 - wait room wld_a01 300
 - wait idle 600

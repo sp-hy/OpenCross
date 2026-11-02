@@ -207,10 +207,11 @@ void FieldWorld::write_party() {
 }
 
 bool FieldWorld::party_add(int char_id) {
-  // Ids >= 0x2C, a character already in the party and a full party are refused.
-  if (in_party(char_id) || party_chars_.size() >= 3 || char_id < 0 || char_id >= 0x2C || char_id >= save::kNumChars) return false;
-  party_chars_.push_back(char_id);
+  // Ids >= 0x2C are refused. Any other id is recruited first: a character already in the party or a full party only refuses the slot.
+  if (char_id < 0 || char_id >= 0x2C || char_id >= save::kNumChars) return false;
   gs_->slot.set_recruited(char_id, true);
+  if (in_party(char_id) || party_chars_.size() >= 3) return false;
+  party_chars_.push_back(char_id);
   write_party();
   return true;
 }

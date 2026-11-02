@@ -194,6 +194,8 @@ class SaveDat {
   // The slot's record as RDE's load hook sees it: the names only when the record's language == `language`; the battle counter replaces
   // the host's (always). Without the member, an empty record.
   ExtSlot read_ext(int card, int slot_no, u32 language) const;
+  // read_ext without taking the battle counter: a save list looking at a file.
+  ExtSlot peek_ext(int card, int slot_no, u32 language) const;
 
   // Cards are written back into their members.
   Bytes serialize(u64 salt_seed = 0) const;

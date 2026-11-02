@@ -38,6 +38,8 @@ class OcSaves {
   void write(int number, const SaveSlot& state);
   // The names only when the file's language == `language`; the battle counter replaces the host's.
   ExtSlot read_ext(int number, u32 language) const;
+  // read_ext without taking the battle counter: a save list looking at a file.
+  ExtSlot peek_ext(int number, u32 language) const;
 
   static std::filesystem::path file_name(int number);
   static Bytes serialize(const SaveSlot& state, const ExtSlot& ext);

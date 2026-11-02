@@ -340,6 +340,7 @@ void App::init_menus() {
       menu.set_model_view(&status_model);
       menu.set_rules(&flow.machine().rules());
       menu.set_custom_names(&flow.machine().custom_names());
+      menu.set_saved_name_lookup([this](const save::SaveSlot& data, const std::map<int, std::u32string>& ext_names, int id) { return flow.saved_name(data, ext_names, id); });
       menu.set_mode(art);
       menu.set_portrait_set(config.portraits);
       menu.set_sfx(ui_sfx);

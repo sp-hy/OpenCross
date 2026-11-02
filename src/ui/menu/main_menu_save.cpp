@@ -31,13 +31,23 @@ SavePrev preview_of(const save::SaveSlot& data, int slot, int block) {
 
 }  // namespace
 
+std::u32string MainMenu::Impl::saved_leader(const save::SaveSlot& data, const std::map<int, std::u32string>& ext_names) {
+  const int leader = data.party()[0];
+  if (leader >= save::kNumChars) return {};
+  return saved_name ? saved_name(data, ext_names, leader) : default_char_name(leader);
+}
+
 // Fills the save-grid boxes from the chosen card in the card's directory (block) order, or the page rows by file number.
 void MainMenu::Impl::load_previews() {
   prev.fill({});
   page_prev.fill({});
   if (save_card == 0) {
     for (int number = 0; page && number <= save::kOcFiles; ++number)
-      if (const save::OcSaves::File* file = page->file(number)) page_prev[static_cast<size_t>(number)] = preview_of(file->data, number, 0);
+      if (const save::OcSaves::File* file = page->file(number)) {
+        SavePrev& row = page_prev[static_cast<size_t>(number)];
+        row = preview_of(file->data, number, 0);
+        row.leader = saved_leader(file->data, page->peek_ext(number, static_cast<u32>(lang)).names);
+      }
     return;
   }
   if (!save_dat) return;
@@ -49,7 +59,10 @@ void MainMenu::Impl::load_previews() {
   for (const save::SlotRef& ref : refs) {
     if (box >= prev.size()) break;
     try {
-      prev[box++] = preview_of(save::read_slot(*card, ref.block), ref.slot, ref.block);
+      const save::SaveSlot data = save::read_slot(*card, ref.block);
+      SavePrev& file = prev[box++];
+      file = preview_of(data, ref.slot, ref.block);
+      file.leader = saved_leader(data, save_dat->peek_ext(save_card, ref.slot, static_cast<u32>(lang)).names);
     } catch (const std::exception& error) {
       log::warn("menu: save slot {} unreadable: {}", ref.slot, error.what());
     }
@@ -408,8 +421,7 @@ void MainMenu::Impl::build_save() {
     for (size_t number = 0; number < page_prev.size(); ++number) {
       const SavePrev& row = page_prev[number];
       if (!row.used) continue;
-      std::u32string name = number == 0 ? utf32(sl::auto_save_caption(lang_index()))
-                                         : row.party[0] < save::kNumChars ? default_char_name(row.party[0]) : std::u32string();
+      std::u32string name = number == 0 ? utf32(sl::auto_save_caption(lang_index())) : row.leader;
       std::replace(name.begin(), name.end(), U'\n', U' ');
       labels[number] = {std::move(name), sl::row_location(utf32(location_lines(row.scenario).first))};
       for (const std::u32string* str : {&labels[number].first, &labels[number].second}) {
@@ -510,7 +522,7 @@ void MainMenu::Impl::build_save() {
   for (int i = 0; i < 3; ++i)
     if (cp.party[static_cast<size_t>(i)] < save::kNumChars)
       avatar(cp.party[static_cast<size_t>(i)], PX(sl::kFaceX + sl::kFaceStep * static_cast<float>(i)), PY(sl::kFaceY), PX(sl::kFace), PY(sl::kFace));
-  const std::u32string leader = cp.party[0] < save::kNumChars ? default_char_name(cp.party[0]) : std::u32string();
+  const std::u32string leader = cp.leader;
   // The auto-save FILES (card 1's CHRONO00, the page's file 0) show their caption wherever their box is.
   const bool auto_file = cp.slot == 0 && save_card <= 1;
   const std::u32string name = auto_file ? utf32(sl::auto_save_caption(lang_index())) : leader;

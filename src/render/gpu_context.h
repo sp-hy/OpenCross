@@ -163,6 +163,8 @@ class GpuContext {
   // textures and megabytes, and the driver's cost grows with both (~0.7 ms per texture), so one frame would stall. Any thread; ignored
   // after shutdown.
   void release_texture(SDL_GPUTexture* texture, u64 bytes);
+  // Waits for the GPU and releases everything queued at once: for the room sweep, which unloads more per frame than the shares free.
+  void drain_releases();
   static constexpr u64 kReleaseBytesPerFrame = 64ull << 20;
   static constexpr size_t kReleaseTexturesPerFrame = 16;
 

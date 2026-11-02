@@ -1,4 +1,4 @@
-# Load save 15 from the copy in tmp/k_save (never the real save folder), walk down into the hall (jac_b22i) and request battle 1 with one shot per tick (ek_NNN).
+# Load save 15 from the copy in tmp/k_save (never the real save folder), in the hall (jac_b22i), and request battle 1 with one shot per tick (ek_NNN).
 # Same-stage comparison: enc_k.env OC_BATTLE_FIELD=54 = jac_b22i's own scripted stage (bg_54, shared with jac_b27i / b29i / b41e), not bg_10.
 0 wait flow title 300
 - wait movie start 300
@@ -26,7 +26,6 @@
 - wait flow field 600
 - wait idle 600
 - wait 60
-- walk 730 -1160 24 300
 - wait 200
 - wait idle 600
 - wait 60

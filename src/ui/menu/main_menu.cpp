@@ -320,6 +320,7 @@ void MainMenu::shutdown() {
 void MainMenu::set_model_view(MenuModelView* view) { impl_->model_view = view; }
 void MainMenu::set_rules(const MenuRules* rules) { impl_->rules = rules; }
 void MainMenu::set_custom_names(const std::map<int, std::u32string>* names) { impl_->custom_names = names; }
+void MainMenu::set_saved_name_lookup(SavedNameLookup lookup) { impl_->saved_name = std::move(lookup); }
 void MainMenu::set_mode(ArtMode mode) { impl_->mode = mode; }
 ArtMode MainMenu::mode() const { return impl_->mode; }
 void MainMenu::set_language(import::Lang lang) {

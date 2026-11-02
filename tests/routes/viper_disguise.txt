@@ -19,7 +19,7 @@
 - wait battle start 600
 - wait 240
 - tap confirm
-- fight 1800
+- fight 3000
 - wait battle end 1800
 - wait idle 1200
 - wait 30

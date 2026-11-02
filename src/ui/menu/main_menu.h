@@ -49,6 +49,9 @@ class MainMenu {
   void set_rules(const MenuRules* rules);
   // The typed names by character id; must outlive the menu.
   void set_custom_names(const std::map<int, std::u32string>* names);
+  // A character's name in a saved game: its data, its ext_save.dat names, the character id.
+  using SavedNameLookup = std::function<std::u32string(const save::SaveSlot&, const std::map<int, std::u32string>&, int)>;
+  void set_saved_name_lookup(SavedNameLookup lookup);
   void set_mode(ArtMode mode);
   ArtMode mode() const;
   void set_language(import::Lang lang);

@@ -139,6 +139,7 @@ class App {
   void start_movie(const game::FieldWorld::MovieRequest& rq);
   void open_main_menu(bool script);
   void handle_script_menu(const game::FieldWorld::MenuRequest& rq);
+  void close_field_screen(int fade_ticks);
   void apply_flow_action(const game::FlowAction& action);
   bool pause_modal(const platform::Input& in);
   void open_pause();

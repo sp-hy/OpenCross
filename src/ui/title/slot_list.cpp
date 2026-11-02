@@ -65,6 +65,11 @@ bool SlotList::any(const save::SaveDat* dat, const save::OcSaves* page) {
 void SlotList::begin(const save::SaveDat* dat, const save::OcSaves* page, import::Lang lang, ArtMode mode, bool plus) {
   for (int card = 0; card < 2; ++card) cards_[static_cast<size_t>(card)] = dat ? collect(*dat, card + 1) : std::vector<SlotEntry>{};
   rows_ = page ? collect(*page) : std::vector<std::optional<SlotEntry>>(save::kOcFiles + 1);
+  const u32 language = static_cast<u32>(lang);
+  for (auto& entries : cards_)
+    for (SlotEntry& entry : entries) entry.ext_names = dat->peek_ext(entry.card, entry.slot, language).names;
+  for (auto& row : rows_)
+    if (row) row->ext_names = page->peek_ext(row->slot, language).names;
   entries_.clear();
   phase_ = Phase::Card;
   card_ = page && !page->empty() ? 0 : 1;
@@ -379,7 +384,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       const save::SaveSlot& data = rows_[file_no]->data;
       const auto party = data.party();
       std::u32string name = file_no == 0 ? import::utf8_to_u32(sl::auto_save_caption(li))
-                                        : party[0] < save::kNumChars && name_of_ ? name_of_(party[0]) : std::u32string();
+                                        : party[0] < save::kNumChars && name_of_ ? name_of_(data, rows_[file_no]->ext_names, party[0]) : std::u32string();
       std::replace(name.begin(), name.end(), U'\n', U' ');
       labels[file_no] = {std::move(name), sl::row_location(location_lines(data).first)};
       while (ink && row_scale > 0.18f && (dl.measure(bnf, labels[file_no].first, row_scale) > canvas_x(name_w) ||
@@ -513,9 +518,9 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     const NamePic fp = face_pic(party[i]);
     const float fx = sl::kFaceX + sl::kFaceStep * static_cast<float>(i);
     if (fp.set) dl.image(fp.set, canvas_x(fx), canvas_y(sl::kFaceY), canvas_x(sl::kFace), canvas_y(sl::kFace));
-    else txt(fx + 2.0f, 262, name_of_ ? name_of_(party[i]) : std::u32string(), white, 0.6f);
+    else txt(fx + 2.0f, 262, name_of_ ? name_of_(save_data, cur->ext_names, party[i]) : std::u32string(), white, 0.6f);
   }
-  const std::u32string leader = !party.empty() && party[0] < save::kNumChars && name_of_ ? name_of_(party[0]) : std::u32string();
+  const std::u32string leader = !party.empty() && party[0] < save::kNumChars && name_of_ ? name_of_(save_data, cur->ext_names, party[0]) : std::u32string();
   // Card 1's CHRONO00 and the page's file 0 are the auto-saves.
   const bool auto_file = cur->slot == 0 && cur->card <= 1;
   const std::u32string name = auto_file ? import::utf8_to_u32(sl::auto_save_caption(li)) : leader;

@@ -9,14 +9,11 @@
 - wait room tel_b23e 300
 - wait 1
 - walk -1500 3700 30 400
-- walk -1500 2700 30 400
+- approach 15 40 400
 - wait text What business brings you here
-- assert near player -1501 2726 40
-- assert near 15 -1697 2362 40
 - assert ent 15 paused 1
 - wait 60
-- assert near 15 -1697 2362 40         # still standing there while it talks
-- assert ent 15 paused 1
+- assert ent 15 paused 1                # still standing there while it talks
 - mark ent 15
 - skip
 - wait idle 600

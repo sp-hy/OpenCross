@@ -1059,7 +1059,8 @@ class FieldWorld final : public script::FieldHost {
   // [Debug] SweepTalk: starts the ON_ACTION and then ON_COLLISION script of every non-party entity of the loaded room, one after the other,
   // presses confirm every 10 ticks and runs `ticks` ticks each (battles are won, movies and menus end at once, a map jump request
   // reloads the room). Scripts that wait for ever are logged by the softlock watchdog (set OC_STUCK_TICKS below `ticks`).
-  void sweep_talk(int ticks);
+  // `settle` runs after every reload: the probes of a room all run inside one frame, so nothing else lets the GPU reclaim the old room.
+  void sweep_talk(int ticks, const std::function<void()>& settle);
  private:
   // LOAD_ANIMATION packs (clips + sequence table) by char/name
   std::map<std::string, ExPack> ex_pack_cache_;

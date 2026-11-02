@@ -68,6 +68,8 @@ struct SavePrev {
   int block = 0;
   u32 scenario = 0;
   u8 flags = 0;
+  // The leader's name in that game.
+  std::u32string leader;
 };
 
 enum class GridPrompt { None, RemoveAll, AutoAllocate, FillBlanks, Sort };
@@ -208,6 +210,7 @@ struct MainMenu::Impl {
   std::vector<AuditBox> audit_boxes;
   std::map<int, std::u32string> name_cache;
   const std::map<int, std::u32string>* custom_names = nullptr;
+  MainMenu::SavedNameLookup saved_name;
 
   // Portrait folder of the faces, slot icons and playtim portraits: original art = 1999, HD art = the [Game] Portraits choice.
   std::string face_set() const { return mode == ArtMode::Hd ? portrait_set : std::string("1999"); }
@@ -218,9 +221,10 @@ struct MainMenu::Impl {
   void select_fonts();
   void shutdown();
   std::string menu_str(u32 addr, const char* fallback);
-  // char_name: a party member's name in the open game. default_char_name: the language's name of the id (the save lists: another game's party).
+  // char_name: a party member's name in the open game. default_char_name: the language's name of the id. saved_leader: the leader of a saved game.
   std::u32string char_name(int id);
   std::u32string default_char_name(int id);
+  std::u32string saved_leader(const save::SaveSlot& data, const std::map<int, std::u32string>& ext_names);
   std::u32string item_name(int id);
   std::u32string element_name(int id);
   std::u32string key_item_name(int id);

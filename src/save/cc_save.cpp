@@ -442,11 +442,16 @@ bool SaveDat::write_ext(int card, int slot_no) {
   return true;
 }
 
-ExtSlot SaveDat::read_ext(int card, int slot_no, u32 language) const {
+ExtSlot SaveDat::peek_ext(int card, int slot_no, u32 language) const {
   ExtSlot record;
   if ((card == 1 || card == 2) && slot_no >= 0 && slot_no <= 14) record = ext().slot(ext_slot_index(card, slot_no));
-  if (ext_host_) ext_host_->battles = record.battles;
   if (record.language != language) record.names.clear();
+  return record;
+}
+
+ExtSlot SaveDat::read_ext(int card, int slot_no, u32 language) const {
+  ExtSlot record = peek_ext(card, slot_no, language);
+  if (ext_host_) ext_host_->battles = record.battles;
   return record;
 }
 

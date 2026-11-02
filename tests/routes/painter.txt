@@ -5,6 +5,7 @@
 0 wait 5
 - request party_add 1
 - assert party 0,1,-
+- wait idle 600
 - approach 7 60 600
 - action
 - wait text Shall I draw you a portrait
