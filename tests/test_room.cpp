@@ -3,6 +3,7 @@
 
 #include "import/room.h"
 #include "import/tim.h"
+#include "game/draw_offset.h"
 #include "game/mirror_copy.h"
 
 using namespace oc;
@@ -170,6 +171,28 @@ void test_mirror_copy() {
 }
 }  // namespace
 
+// A far layer at 3000 (group 1) and a near one at 2000 (group 0): each layer's offset covers the two slots just nearer than it.
+void test_draw_offset() {
+  namespace offset = game::draw_offset;
+  const offset::LayerDepth pier[] = {{3000, 1}, {2000, 0}};
+  CHECK(offset::group_at(pier, 3001) == offset::kGlobal);
+  CHECK(offset::group_at(pier, 3000) == offset::kGlobal);
+  CHECK(offset::group_at(pier, 2999) == 1);
+  CHECK(offset::group_at(pier, 2998) == 1);
+  CHECK(offset::group_at(pier, 2997) == offset::kGlobal);
+  CHECK(offset::group_at(pier, 2000) == offset::kGlobal);
+  CHECK(offset::group_at(pier, 1999) == 0);
+  CHECK(offset::group_at(pier, 1997) == offset::kGlobal);
+  // Layers of one depth: the first in the list sets its offset last.
+  const offset::LayerDepth same[] = {{500, 3}, {500, 2}};
+  CHECK(offset::group_at(same, 499) == 3);
+  // A layer two slots nearer shares a slot with the far layer's global scroll, which runs after the group offset.
+  const offset::LayerDepth close[] = {{502, 3}, {500, 2}};
+  CHECK(offset::group_at(close, 499) == offset::kGlobal);
+  CHECK(offset::group_at(close, 501) == 3);
+  CHECK(offset::group_at({}, 100) == offset::kGlobal);
+}
+
 int main() {
   test_colour();
   test_tim4();
@@ -178,6 +201,7 @@ int main() {
   test_vram();
   test_tile_maths();
   test_mirror_copy();
+  test_draw_offset();
   std::printf(failures ? "%d failure(s)\n" : "ok\n", failures);
   return failures ? 1 : 0;
 }

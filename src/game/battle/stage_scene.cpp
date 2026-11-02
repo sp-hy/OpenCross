@@ -500,6 +500,8 @@ void StageScene::build_shadow(const ShadowCaster& caster, const Footprint& fp, c
 
 namespace {
 constexpr float kContactShade = 0.3f;
+// Height of a unit's lowest joint where the contact shade starts to fade and where it is gone: an ankle stays below the first, a flyer above the second.
+constexpr float kContactFoot = 128.0f, kContactReach = 384.0f;
 }
 
 void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, render::Rect scissor, const effects::ViewParams& view,
@@ -709,9 +711,13 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
   if (!no_shadow)
     for (const ShadowCaster& caster : casters_) {
       const Footprint& fp = caster.has_fp ? caster.fp : footprint(caster.model);
-      // Under real shadows the hull is only the contact shade of the feet: faint, and straight below the unit.
-      if (floor_shadow_) build_shadow(caster, fp, {caster.x, 3072.0f, caster.z}, shadow_verts_, shadow_idx_, kContactShade);
-      else build_shadow(caster, fp, light_, shadow_verts_, shadow_idx_);
+      // Under real shadows the hull is only the contact shade of the feet: faint, straight below the unit, and gone as the feet leave the floor.
+      if (floor_shadow_) {
+        const float touch = 1.0f - std::clamp((caster.clearance - kContactFoot) / (kContactReach - kContactFoot), 0.0f, 1.0f);
+        if (touch > 0.0f) build_shadow(caster, fp, {caster.x, 3072.0f, caster.z}, shadow_verts_, shadow_idx_, kContactShade * touch);
+      } else {
+        build_shadow(caster, fp, light_, shadow_verts_, shadow_idx_);
+      }
     }
   if (!shadow_idx_.empty()) pipe.draw_dynamic(proj, floor_cam, shadow_verts_, shadow_idx_, 3, -1);
   pipe.end();

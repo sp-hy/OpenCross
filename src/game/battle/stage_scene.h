@@ -79,6 +79,8 @@ class StageScene {
   enum class CasterOwner { Unit, Pseudo, Showcase };
   struct ShadowCaster {
     float x = 0, z = 0, y = 0, yaw = 0, height = 1000;
+    // Height of the lowest posed joint above the floor.
+    float clearance = 0;
     Footprint fp;
     bool has_fp = false;
     const assets::ModelAsset* model = nullptr;

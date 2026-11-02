@@ -623,8 +623,24 @@ void BattleView::build_message_window(const std::vector<std::pair<std::u32string
   }
 }
 
+// [Enhancements] AutoHideCastHud: of the HUD only the cast header stays, 2 seconds and then a half-second fade from the start of the cast.
+void BattleView::keep_cast_header() {
+  constexpr int kHoldFrames = 120, kFadeFrames = 30;
+  const float level = 1.0f - std::clamp(static_cast<float>(frame_count_ - cast_began_ - kHoldFrames) / kFadeFrames, 0.0f, 1.0f);
+  std::vector<Op> header;
+  if (level > 0.0f) header.assign(std::make_move_iterator(ops_.begin() + static_cast<std::ptrdiff_t>(cast_header_from_)), std::make_move_iterator(ops_.begin() + static_cast<std::ptrdiff_t>(cast_header_to_)));
+  auto faded = [&](u32 colour) { return (colour & 0x00FFFFFFu) | static_cast<u32>(static_cast<float>(colour >> 24) * level) << 24; };
+  for (Op& op : header) {
+    op.color = faded(op.color);
+    op.ink.normal = faded(op.ink.normal);
+    op.ink.outline = faded(op.ink.outline);
+  }
+  ops_ = std::move(header);
+}
+
 void BattleView::build_hud() {
   ops_.clear();
+  cast_header_from_ = cast_header_to_ = 0;
   const bool intro = ui_ == Ui::Intro;
   step_ring();
 
@@ -669,7 +685,10 @@ void BattleView::build_hud() {
   // Debug free camera, "Hide overlays", or Select held / [Enhancements] AutoHideCastHud while an element / tech / summon is charged or
   // released: no HUD / menus / windows / results (the F9 text below stays; the damage digits are drawn elsewhere).
   const bool casting = act_.phase == Act::Phase::Cast || act_.phase == Act::Phase::Release;
-  if (free_cam().hide_overlays() || ((select_held_ || autohide_cast_) && casting)) ops_.clear();
+  if (!casting) cast_began_ = -1;
+  else if (cast_began_ < 0) cast_began_ = frame_count_;
+  if (free_cam().hide_overlays() || (select_held_ && casting)) ops_.clear();
+  else if (autohide_cast_ && casting) keep_cast_header();
   if (dbg_.overlay) build_camera_overlay();
 }
 

@@ -450,7 +450,7 @@ void FieldWorld::step_wakes() {
 // Depth-tested particle quads of the room's emitters plus the sprite-type-14 mesh objects (the room's own textured packet meshes and
 // the encounter's untextured ones, Gouraud-shaded from their vertex colours times the object colour / 128). Everything is merged into
 // one painter's order: farther ordering-table slot first, inside a slot the later-submitted primitive first. Only the content inside
-// the current draw slab (the 8F split) is drawn.
+// the current draw slab (the 8F split) is drawn. What is filed under a layer's draw offset scrolls with that layer, not with the camera.
 void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, float alpha) {
   alpha = interp_alpha(alpha);
   if (!emitters_ || !particles_ok_ || !effects_gpu_ || !view_.loaded() || !view_.scene()) return;
@@ -461,6 +461,12 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
   if (slab_min_ > -1e8f || slab_max_ < 1e8f)
     quads.erase(std::remove_if(quads.begin(), quads.end(), [&](const effects::DrawQuad& quad) { return !in_slab(static_cast<float>(quad.slot)); }),
                 quads.end());
+  for (effects::DrawQuad& quad : quads)
+    if (const float shift = view_.slot_parallax(quad.slot) - 1.0f; shift != 0.0f)
+      for (int corner = 0; corner < 4; ++corner) {
+        quad.x[corner] += vp.scroll_x * shift;
+        quad.y[corner] += vp.scroll_y * shift;
+      }
   effects::sort_draw_order(quads);
   struct Tri {
     float x[4], y[4];
@@ -551,6 +557,12 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
       }
     }
   }
+  for (Tri& tri : tris)
+    if (const float shift = view_.slot_parallax(tri.slot) - 1.0f; shift != 0.0f)
+      for (int corner = 0; corner < 4; ++corner) {
+        tri.x[corner] += vp.scroll_x * shift * lb.scale;
+        tri.y[corner] += vp.scroll_y * shift * lb.scale_y;
+      }
   if (static const bool fx_log = std::getenv("OC_FIELD_FX_LOG") != nullptr; fx_log && tick_count_ % 60 == 0) {
     const effects::EmitterStats stats = emitters_->stats();
     log::info("field fx: tick {} {} quads, {} live, {} spawned, {} unresolved sprites", tick_count_, quads.size(), stats.live, stats.spawned,

@@ -180,7 +180,7 @@ class BattleView {
   bool paused() const { return paused_; }
   // RDE: the pad's Select held during a cast hides the HUD, menus and windows (the damage digits stay). Pushed by the host every frame.
   void set_select_held(bool held) { select_held_ = held; }
-  // [Enhancements] AutoHideCastHud: the same hiding during every cast, without Select.
+  // [Enhancements] AutoHideCastHud: the same hiding during every cast, without Select, but the cast header stays a moment so the spell is named.
   void set_autohide_cast(bool on) { autohide_cast_ = on; }
   // [Enhancements] RetainBattleScenery: the stage's `bti0` layer is not stopped when the intro ends (nor by a pack's op 0x60).
   void set_keep_intro_layer(bool on);
@@ -741,6 +741,7 @@ class BattleView {
 
   // hud
   void build_hud();
+  void keep_cast_header();
   void build_camera_overlay();
   // Plain HUD text (dev overlay, the standalone result / game-over stub): RDE battle font (slot 2) at 0.42 x scale_mul, canvas units.
   void add_text(const std::string& text, float x, float y, u32 color, int align = 0, float scale_mul = 1.0f);
@@ -1360,6 +1361,9 @@ class BattleView {
   bool hud_script_off_ = false;
   bool select_held_ = false;
   bool autohide_cast_ = false;
+  // ops_ range of this frame's cast header, and the frame the current cast began (-1 = no cast).
+  size_t cast_header_from_ = 0, cast_header_to_ = 0;
+  int cast_began_ = -1;
   bool keep_intro_layer_ = false;
   // The intro has ended and the outro has not yet brought the `bti0` layer back.
   bool intro_layer_cut_ = false;

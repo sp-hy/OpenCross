@@ -138,7 +138,7 @@ void bind_cheats(const Cheats* set);
 //            smoothly per vertex. EdgeBlend: cross-fades the faces along the texture seams of
 //            the stage / title meshes, any art mode. SmoothReflections: env-mapped model parts (FATE, Lavos, ...) slide their reflection
 //            sub-texel (off = the PS1's one-texel steps).
-//            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held).
+//            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //   [Audio]  Master / Music / Sfx: bus gains 0..1. Voices: play the voice lines of the mods' voices folders.
 //            VoiceVolume 0..100 (the voice bus gain, times Master). BgmSource: remastered (RDE HCA files) or original (PS1 AKAO sequences).

@@ -243,7 +243,7 @@ A hit sets `jolt` = 8. `step_camera` decrements it and publishes `n = 7 .. 0`, o
 
 ### 8.7 Status icons
 
-Shown while the input lock is clear and no room change is pending: one icon per status that any party member has, placed from the right edge (x = 304, 0x130) leftwards in the order flu, burn, sprain, poison, top at y = 8, 16 rows high. PS1 widths 0x19, 0x23, 0x23, 0x12; HD icons are drawn at a quarter of their image size. When the HD set lacks the poison icon the PS1 icons are used.
+Shown while the input lock is clear and no room change is pending, with or without a window on screen: one icon per status that any party member has, placed from the right edge (x = 304, 0x130) leftwards in the order flu, burn, sprain, poison, top at y = 8, 16 rows high. PS1 widths 0x19, 0x23, 0x23, 0x12; HD icons are drawn at a quarter of their image size. When the HD set lacks the poison icon the PS1 icons are used.
 
 ## 9. Footsteps
 

@@ -357,7 +357,7 @@ class FieldWorld final : public script::FieldHost {
   void draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_transition(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh);
-  bool overlay_needed() const { return any_window_open() || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold(); }
+  bool overlay_needed() const { return any_window_open() || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold() || status_icons_shown(); }
 
   // ---- 8F / 90 screen ripple (render/render_target.h build_screen_warp) ---------------------------------------------
   // On while the ripple is set; `ot` = the grid's ordering-table index (>= 7): content filed deeper (slot > ot) is warped, the rest is
@@ -1237,6 +1237,7 @@ class FieldWorld final : public script::FieldHost {
   render::Sampler icon_sampler_;
   void load_status_icons(bool hd);
   void free_status_icons();
+  bool status_icons_shown() const;
   void draw_status_icons(render::SpriteBatch& sprites, float vw, float vh, bool ps1 = false);
 };
 

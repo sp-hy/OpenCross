@@ -2,7 +2,8 @@
 // Status-screen 3D model: the member's MENU model (cdrom menu/player/<stem>.ome: cpt entry 1 = the eye-block positions, entry 2 = the
 // nearest camera distance in ASCII, entry 3 = Mdl, entry 4 = the closed-eye TIM, entry 5 = Atim pair; HD 4x texture
 // hd/menu/player/<stem>.tim) in its pose clip with the eye blink, the equipped weapon (the model's weapon pack, part = weapon record tier)
-// hung on the model's mount records like a battle model, its flat floor shadow and the status effects of menu/stef.prd. Drawn with
+// hung on the model's mount records like a battle model, its flat floor shadow ([Enhancements] Lighting: the real shadow of its shape, from
+// the same direction) and the status effects of menu/stef.prd. Drawn with
 // MeshPipeline between the menu's parchment and the rest of its sprites (frames, text, swirls, key caps and legend go over it), through the
 // menu's own camera and projection (MenuModelSlot).
 #include <map>
@@ -16,6 +17,7 @@
 #include "game/effects/emitter_system.h"
 #include "game/effects/gpu_effects.h"
 #include "render/particles.h"
+#include "render/shadow_pipeline.h"
 #include "render/sprite_batch.h"
 #include "render/texture.h"
 #include "ui/menu/menu_model.h"
@@ -28,6 +30,8 @@ class StatusModelView : public MenuModelView {
   StatusModelView(render::MeshPipeline& meshes, const vfs::Vfs& vfs) : meshes_(meshes), vfs_(vfs) {}
   void draw(const render::Frame& frame, float vw, float vh, const MenuModelSlot& slot) override;
   int min_distance(int model) override;
+  // [Enhancements] Lighting.
+  void set_cast_shadows(bool on) { cast_shadows_ = on; }
   // Drops the GPU models and effect textures before the pipeline is destroyed.
   void release();
 
@@ -56,7 +60,11 @@ class StatusModelView : public MenuModelView {
   // The status effects: menu/stef.prd restarted for a new session, the effects of the absent statuses stopped.
   void start_effects(const render::Frame& frame, u32 status);
   void draw_effects(const render::Frame& frame, float vw, float vh, const MenuModelSlot& slot, const effects::Mat3& rotation, float alpha);
+  // The pipeline is made on first use: false = none, keep the flat shadow.
+  bool shadow_pipe_ready(const render::Frame& frame);
   render::MeshPipeline& meshes_;
+  render::ShadowPipeline shadow_pipe_;
+  bool cast_shadows_ = false, shadow_pipe_failed_ = false;
   const vfs::Vfs& vfs_;
   std::map<int, std::unique_ptr<Entry>> cache_;  // key = model * 2 + hd_art
   std::map<std::string, std::shared_ptr<game::ModelHandle>> weapons_;  // "<pack>#<part>"

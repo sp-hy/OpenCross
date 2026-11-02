@@ -732,7 +732,7 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "of the camera, so faces turning away are clearly darker and faces turning toward it brighter. In battle, bright spells "
                      "(fire, beams, flashes) glow: they light up the characters, the floor and the scenery around them in the spell's colour "
                      "while they play. Characters and enemies throw real shadows of their own shape: in the field right under them, in "
-                     "battle away from the stage's sun, or from a spell bright enough to outshine it. The battle floor and stage objects darken "
+                     "battle away from the stage's sun, or from a spell bright enough to outshine it, and on the status screen. The battle floor and stage objects darken "
                      "smoothly with distance instead of one flat step per floor tile. Off: the PS1's flat lighting, soft blobs and stepped floor.",
                      cfg.lighting))
         change.enhancements = true;
@@ -743,7 +743,7 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
         change.enhancements = true;
       if (check_cell("Hide menus during casts",
                      "Hides the battle HUD, menus, field effect ring and message windows while an element, tech or summon plays, as holding "
-                     "the pad's Select does. The damage numbers still show.",
+                     "the pad's Select does. The damage numbers still show, and the spell's name stays for 2 seconds before it fades.",
                      cfg.autohide_cast_hud))
         change.enhancements = true;
       if (check_cell("Retain battle scenery",

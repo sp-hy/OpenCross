@@ -325,10 +325,22 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
   mini_grid(character, card_x + 0x83, card_y + 6);
 }
 
-// One party card of the main list at PS1 (x, y).
+// One party card of the main list at PS1 (x, y), and for each ailment its mark beside the card: sheet frames 0xAE + mark, each one 8 x 16 cut of
+// one strip of the menu texture, 18 rows apart from (176, 10). menutim_41.png is that strip at 4x, 64 rows per mark.
 void MainMenu::Impl::member_card(int character, float x, float y) {
   Frame(7, x, y);
   card_hd(x, y, character, true, false);
+  static constexpr u8 kAilmentMark[4] = {0x08, 0x01, 0x20, 0x10};
+  const u8 status = gs->slot.chars[static_cast<size_t>(character)].status;
+  Tex* strip = ps1_screen() ? nullptr : texs.load("hd/menu/menutim/menutim_41.png");
+  for (int mark = 0; mark < 4; ++mark) {
+    if (!(status & kAilmentMark[mark])) continue;
+    if (strip) {
+      Img(strip, PX(x + 176), PY(y + 10 + 18.0f * static_cast<float>(mark)), PX(8), PY(16), 0, static_cast<float>(mark) / 4, 1, static_cast<float>(mark + 1) / 4);
+    } else if (Tex* tex = texs.ps1("ps1:sheet" + std::to_string(0xAE + mark), [&] { return ps1::sheet_frame(*vfs, 0xAE + mark); })) {
+      Img(tex, PX(x - ps1::kSheetFrameOriginX), PY(y - ps1::kSheetFrameOriginY), PX(ps1::kSheetFrameW), PY(ps1::kSheetFrameH));
+    }
+  }
 }
 
 // Main list: the portrait strip and the member cards (left group; they sit against each other, so they move out together), the list
