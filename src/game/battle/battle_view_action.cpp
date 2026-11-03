@@ -140,7 +140,9 @@ void BattleView::update(float dt, const platform::Input& in) {
         // Dev: OC_CAST_PARTY=n limits a party-side all-targets cast to the first n PCs. With Serge alone (units 0, 3, 4, 5) a per-target
         // sequence loop (op 0x4D) runs once, and three times with the full party.
         static const int party_cap = std::getenv("OC_CAST_PARTY") ? std::atoi(std::getenv("OC_CAST_PARTY")) : 99;
-        for (int i = lo; i < hi; ++i) {
+        // A cast the other side's trap holds is caught instead (ocbattleview --etrap / --ptrap).
+        const bool caught = battle_->catch_in_trap(ca, el, 0, ct);
+        for (int i = lo; i < hi && !caught; ++i) {
           if (!battle_->unit(i).present) continue;
           if (i < battle::kPcSlots && i >= party_cap) continue;
           if (ts.all && i >= battle::kPcSlots && !(reach >> i & 1u)) continue;
@@ -157,7 +159,7 @@ void BattleView::update(float dt, const platform::Input& in) {
       // The enemy's own side for the party-side elements (party-only target spec), else the first PC.
       const battle::TargetSpec ts = battle::target_spec(tables_->elements[static_cast<size_t>(el)]);
       dev_group_hint(first, el);
-      battle_->do_element(first, el, 0, ts.party && !ts.enemies ? first : 0, true);
+      if (const int target = ts.party && !ts.enemies ? first : 0; !battle_->catch_in_trap(first, el, 0, target)) battle_->do_element(first, el, 0, target, true);
       battle_->set_group_hint(std::array<u8, 6>{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF});
       battle_->finish_external_action();
       collect_events();
@@ -167,7 +169,8 @@ void BattleView::update(float dt, const platform::Input& in) {
       // ally: the party side.
       const bool ally = ts.party && !ts.enemies;
       const int lo = ally ? 0 : first, hi = ally || !ts.enemies ? battle::kPcSlots : battle::kUnits;
-      for (int i = lo; i < hi; ++i) {
+      const bool caught = battle_->catch_in_trap(dbg_.lead, el, 0, lo);
+      for (int i = lo; i < hi && !caught; ++i) {
         if (!battle_->unit(i).present || (ts.ko_only ? battle_->unit(i).alive() : !battle_->unit(i).alive()) || (!ts.all && i != lo)) continue;
         battle_->do_element(dbg_.lead, el, 0, i, i == lo);
       }

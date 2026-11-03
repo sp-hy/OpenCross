@@ -1,5 +1,5 @@
-// Screen-band overlays: canon, hip, jigoku, xgiri, ghost1, sky (screen negatives), muteki (flare), 155slot (reels), yamanek0
-// (frame capture). Four styles over one parameter struct:
+// Screen-band overlays: canon, hip, jigoku, xgiri, ghost1, sky (screen negatives), muteki (flare), 155slot (reels). Three styles over
+// one parameter struct:
 //   Negative  nothing is drawn until the script's op 0x100 (operand = ticks) starts the countdown; while it runs the frame is redrawn as
 //             5 columns of 64 px under a white quad, i.e. the backdrop is inverted. sky adds op 0x101 (ticks, end rgb): the target's tint
 //             ramps from 0x80 to the end colour over the ticks.
@@ -8,7 +8,6 @@
 //   Reels     three 32 x 192 reels (21 symbols of 64 px) scrolling up; op 0x100 arms them, each pad press (op 0x1FF, or ticks 40 / 70 / 100
 //             with auto input) stops the next reel: it decelerates by 0x600 / 65536 px per tick down to 1 px / tick and snaps to a symbol
 //             boundary. op 0x101 releases the effect.
-//   Capture   draws nothing and ends after the tick count (the frame copy itself is the host's).
 #include <algorithm>
 #include <cmath>
 
@@ -20,7 +19,7 @@ namespace {
 
 using util::opnd;
 
-enum class WipeStyle { Negative, Flare, Reels, Capture };
+enum class WipeStyle { Negative, Flare, Reels };
 
 // default_ticks = the countdown when the context carries no operand; tint_op = op 0x101 is the actor tint fade (sky).
 struct WipeParams {
@@ -50,7 +49,6 @@ class BandWipe : public BespokeEffect {
           reel_vel_ = {6.0f, 6.0f, 6.0f};
         }
         break;
-      case WipeStyle::Capture: life_ = ticks_; break;
     }
   }
 
@@ -96,7 +94,6 @@ class BandWipe : public BespokeEffect {
           return true;
         }
         break;
-      case WipeStyle::Capture: break;
     }
     return false;
   }
@@ -123,9 +120,6 @@ class BandWipe : public BespokeEffect {
         flares_.erase(std::remove_if(flares_.begin(), flares_.end(), [](const Flare& flare) { return flare.age > flare.life; }), flares_.end());
         break;
       case WipeStyle::Reels: tick_reels(); break;
-      case WipeStyle::Capture:
-        if (life_ > 0) --life_;
-        break;
     }
   }
 
@@ -134,7 +128,6 @@ class BandWipe : public BespokeEffect {
       case WipeStyle::Negative: strip_.draw(out); break;
       case WipeStyle::Flare: draw_flares(out); break;
       case WipeStyle::Reels: draw_reels(out); break;
-      case WipeStyle::Capture: break;
     }
   }
 
@@ -143,7 +136,6 @@ class BandWipe : public BespokeEffect {
       case WipeStyle::Negative: return !strip_.active() && tint_t_ < 0;
       case WipeStyle::Flare: return flares_.empty();
       case WipeStyle::Reels: return released_ || (stopped_ == 3 && age_ > settle_until_);
-      case WipeStyle::Capture: return life_ <= 0;
     }
     return true;
   }
@@ -220,7 +212,7 @@ class BandWipe : public BespokeEffect {
   }
 
   WipeParams params_;
-  int ticks_ = 30, age_ = 0, life_ = 0;
+  int ticks_ = 30, age_ = 0;
   util::NegativeStrip strip_;
   int tint_t_ = -1, tint_dur_ = 1, tint_end_[3] = {128, 128, 128};
   std::vector<Flare> flares_;
@@ -239,15 +231,13 @@ constexpr WipeParams kParams[] = {
     {"sky", WipeStyle::Negative, 40, true},
     {"muteki", WipeStyle::Flare, 60, false},
     {"155slot", WipeStyle::Reels, 0, false},
-    {"yamanek0", WipeStyle::Capture, 60, false},
 };
 
 }  // namespace
 
 void register_band_wipes(BespokeRegistry& registry) {
   for (const WipeParams& params : kParams) {
-    const char* module = params.style == WipeStyle::Negative ? "BandWipe/Negative" : params.style == WipeStyle::Flare ? "BandWipe/Flare"
-                         : params.style == WipeStyle::Reels  ? "BandWipe/Reels" : "BandWipe/Capture";
+    const char* module = params.style == WipeStyle::Negative ? "BandWipe/Negative" : params.style == WipeStyle::Flare ? "BandWipe/Flare" : "BandWipe/Reels";
     registry.add({params.name, "band-wipe", module, [params] { return std::make_unique<BandWipe>(params); }});
   }
 }

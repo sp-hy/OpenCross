@@ -3,10 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <iterator>
 #include <optional>
 #include <set>
 
 #include "core/log.h"
+#include "game/battle/model_table.h"
 #include "import/battle_stage.h"
 #include "import/container.h"
 #include "import/lzss.h"
@@ -205,6 +207,26 @@ Bytes with_unpacked_block(Bytes prd, const char* tag, int eid) {
   return prd;
 }
 
+// Registering a nested drp (type 0x01) registers each of its entries as the pack's own (nested drps recurse), so the lookups of a sequence, an
+// emitter or a sheet find them like top-level entries. The trap-summon packs keep the jar's sequence `test` and its emitters in `tubo`.
+void add_nested_entries(assets::RoomEffects& fx, ByteSpan prd, const import::Vram& vram, int depth) {
+  auto drp = import::parse_drp(prd);
+  if (!drp || depth >= 4) return;
+  for (const auto& entry : drp->entries) {
+    if (entry.type != 1 || !import::is_drp(entry.data)) continue;
+    assets::RoomEffects inner = import::load_battle_effects(entry.data, {}, vram, {});
+    log::debug("battle fx: nested '{}' depth {}: {} emitters, {} sequences", entry.name, depth, inner.emitters.size(), inner.sequences.size());
+    std::move(inner.sheets.begin(), inner.sheets.end(), std::back_inserter(fx.sheets));
+    std::move(inner.emitters.begin(), inner.emitters.end(), std::back_inserter(fx.emitters));
+    std::move(inner.sequences.begin(), inner.sequences.end(), std::back_inserter(fx.sequences));
+    std::move(inner.blobs.begin(), inner.blobs.end(), std::back_inserter(fx.blobs));
+    std::move(inner.errors.begin(), inner.errors.end(), std::back_inserter(fx.errors));
+    fx.tims += inner.tims;
+    fx.meshes += inner.meshes;
+    add_nested_entries(fx, entry.data, vram, depth + 1);
+  }
+}
+
 }  // namespace
 
 import::Vram FxPack::build_vram() const {
@@ -264,6 +286,36 @@ void BattleFxLibrary::load_resident() {
       }
     }
   resident_ = std::move(resident);
+}
+
+std::set<u32> actor_script_tags(const vfs::Vfs& vfs) {
+  std::set<u32> tags;
+  const std::function<void(ByteSpan)> walk = [&](ByteSpan bytes) {
+    const auto drp = import::parse_drp(bytes);
+    if (!drp) return;
+    for (const auto& entry : drp->entries)
+      if (entry.type == 0x1A) {
+        bseq::Table table;
+        if (table.parse(entry.data)) table.sequence_tags(tags);
+      } else if (entry.type == 1 && import::is_drp(entry.data)) {
+        walk(entry.data);
+      }
+  };
+  if (const auto prd = vfs.read("cdrom/battle/battle.prd")) walk(*prd);
+  std::set<std::string> seen;
+  for (const std::string_view sv : kBattleModels) {
+    const std::string stem(sv);
+    if (stem.empty() || !seen.insert(stem).second) continue;
+    if (const auto at0 = vfs.read("cdrom/" + stem.substr(0, stem.find_last_of('/')) + "/at0.prd")) walk(*at0);
+    const auto obj = vfs.read("cdrom/" + stem + ".obj");
+    if (!obj) continue;
+    bseq::Table table;
+    if (bseq::load_model_table(*obj, table)) table.sequence_tags(tags);
+    if (obj->size() < 32) continue;
+    const u32 s6 = static_cast<u32>((*obj)[24]) | (*obj)[25] << 8 | (*obj)[26] << 16 | static_cast<u32>((*obj)[27]) << 24;
+    if (s6 && s6 + 12 < obj->size()) walk(ByteSpan(obj->data() + s6, obj->size() - s6));
+  }
+  return tags;
 }
 
 // ------------------------------------------------------------------------------------------------------------ library
@@ -370,6 +422,7 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
       }
       pack->ctd = std::move(ctd);
       pack->prd = std::move(*prd);
+      add_nested_entries(pack->fx, pack->prd, pack->build_vram(), 0);
       pack->has_main = pack->fx.find_sequence("main") != nullptr;
       // Pack-table entries the sequences start on the casters (ops 0x43 / 0x45, entry s16 at data +4).
       std::set<int> caster_entries;
@@ -671,8 +724,14 @@ void BattleFxRun::start(const FxScene& scene, const effects::ViewParams& view) {
   }
 }
 
-int BattleFxRun::start_script_sequences() {
+int BattleFxRun::start_script_sequences(const std::set<u32>& actor_tags) {
   if (!pack_->start_seq.empty()) return 0;
+  // A pack that carries caster scripts or clips (types 0x1A / 0x19), or has no 'main', is driven by scripts of its own: every root
+  // sequence may start. One played by its 'main' alone runs another root sequence only when a unit's script names it. A root
+  // sequence already running (the overlay's init started it) or one the overlay starts later from its own op is left to the overlay.
+  const bool own_scripts = !pack_->has_main || !pack_->tables.empty() || !pack_->clip_packs.empty();
+  std::set<std::string> named;
+  for (const u32 tag : actor_tags) named.insert(bseq::tag_str(tag));
   std::set<std::string> children, reached;
   for (const auto& sq : pack_->fx.sequences)
     for (const auto& cmd : sq.cmds)
@@ -688,7 +747,9 @@ int BattleFxRun::start_script_sequences() {
   }
   int started = 0;
   for (const auto& sq : pack_->fx.sequences)
-    if (!children.count(sq.name) && !reached.count(sq.name) && sq.name != "loop") started += start_sequence(sq.name) ? 1 : 0;
+    if (!children.count(sq.name) && !reached.count(sq.name) && sq.name != "loop" && !seq_->running(sq.name) &&
+        !(bespoke_ && bespoke_->starts_sequence(sq.name)) && (own_scripts || named.count(sq.name)))
+      started += start_sequence(sq.name) ? 1 : 0;
   return started;
 }
 

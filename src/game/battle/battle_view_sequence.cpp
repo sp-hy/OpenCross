@@ -186,7 +186,18 @@ void BattleView::face_cast_targets(bool turn_targets) {
   const Visual& actor_visual = vis_[static_cast<size_t>(act_.actor)];
   float lo_x = 1e9f, hi_x = -1e9f, lo_z = 1e9f, hi_z = -1e9f;
   int others = 0, first_other = -1, first = -1;
-  for (int target : act_.targets) {
+  // A caught cast keeps one event, on its first target, but the menu faces the range it selected: a caught all-targets summon turns the
+  // caster to the midpoint of the whole side, as the uncaught cast does.
+  std::vector<int> facing = act_.targets;
+  if (const battle::ActionEvent* e0 = act_.ev.empty() ? nullptr : &act_.ev.front();
+      e0 && e0->caught && e0->target >= 0 && e0->element > 0 && static_cast<size_t>(e0->element) < tables_->elements.size() &&
+      battle::target_spec(tables_->elements[static_cast<size_t>(e0->element)]).all) {
+    const bool pc_side = e0->target < battle::kPcSlots;
+    facing.clear();
+    for (int i = pc_side ? 0 : battle::kPcSlots; i < (pc_side ? battle::kPcSlots : battle::kUnits); ++i)
+      if (battle_->unit(i).present && battle_->unit(i).alive() && (pc_side || (battle_->cast_mask() >> i & 1u))) facing.push_back(i);
+  }
+  for (int target : facing) {
     if (target < 0 || target >= battle::kUnits) continue;
     const Visual& target_visual = vis_[static_cast<size_t>(target)];
     lo_x = std::min(lo_x, target_visual.x), hi_x = std::max(hi_x, target_visual.x);
@@ -325,6 +336,8 @@ void BattleView::tick_action() {
   }
 
   if (act_.phase == Act::Phase::None) {
+    // After a party element command the ring step runs to its end, then the menu's last steps (kCastHandoverTail ticks).
+    if (cast_handover_ > 0) cast_handover_ = ring_settled() ? cast_handover_ - 1 : std::max(cast_handover_ - 1, kCastHandoverTail + 1);
     if (queue_.empty() || ui_ == Ui::Intro) return;
     // The executor serialises actions: a PC standing at its target (the chain menu's `engaged_`) ends its turn - the return walk
     // (S5 entry 3) - before another actor's queued action starts.
@@ -335,7 +348,7 @@ void BattleView::tick_action() {
     // The script has not reached this queue_attack yet (a window / delay before it).
     if (script_gated(queue_.front().front())) return;
     // The field ring's shift after the last action runs to its end first.
-    if (!ring_settled()) return;
+    if (!ring_settled() || cast_handover_ > 0) return;
     begin_group();
     return;
   }
@@ -467,6 +480,8 @@ void BattleView::end_group() {
   // After a cast the last pack shot stays until the next command's camera takes over (the pack's shot holds, then the next PC's orbit cuts in,
   // no zen0 in between); the effect end hook selects no shot.
   const bool cast_end = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && queue_.empty();
+  if (!act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && act_.actor >= 0 && act_.actor < battle::kPcSlots)
+    cast_handover_ = kCastHandover;
   if (battle_audit() && (fx_ || !pending_.empty()))
     battle_audit_note(std::format("group of action {} ended with {} (fx pack running {}, {} pending reactions)", act_.ev.empty() ? -1 : act_.ev.front().action,
                                   fx_ ? "the effect cut short" : "reactions unshown", fx_ != nullptr, pending_.size()));
@@ -477,6 +492,11 @@ void BattleView::end_group() {
     fx_fog_reset();
   }
   fx_charge_ = fx_ready_ = false;
+  // The orbit counter runs again once no PC element command is left in the queue.
+  if (std::none_of(queue_.begin(), queue_.end(), [](const std::vector<battle::ActionEvent>& group) {
+        return !group.empty() && group.front().kind == battle::ActionEvent::Kind::Element && group.front().actor >= 0 && group.front().actor < battle::kPcSlots;
+      }))
+    orbit_held_ = false;
   // The dying unit's death cast ended (its last queued group; the element's mode does not matter: Bomber's / Potpourri's cast hits the party).
   if (act_.actor >= 0 && !act_.ev.empty() && act_.ev.front().death_cast &&
       std::none_of(queue_.begin(), queue_.end(), [&](const std::vector<battle::ActionEvent>& group) { return !group.empty() && group.front().death_cast && group.front().actor == act_.actor; }))

@@ -436,7 +436,8 @@ int EmitterSystem::Impl::spawn(size_t hi, const Basis* parent) {
       case 0x40:
         if (sprite_set) {
           obj.slot_reg = op.op == 0x3F ? 0 : 1;
-          obj.flags |= 0x80000000u;
+          // A particle without a model is bound itself and clears the slot when it is freed.
+          if (obj.stype != 20) obj.flags |= 0x80000000u;
         }
         break;
       case 0x41:

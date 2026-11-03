@@ -1015,6 +1015,15 @@ class BattleView {
   // A battle-script cutscene (op 2C) takes the orbit's PC away until a command menu opens again; the begin event takes effect after the
   // next menu camera pass (the camera of the tick the action ended runs before the script resumes).
   bool orbit_blocked_ = false, orbit_block_next_ = false;
+  // The orbit angle counter: +2 every video frame from the battle start, except while a PC's element command runs (from its cast phase to
+  // the end of its group), so the orbit after a cast resumes where it stopped.
+  int orbit_clock_ = 0;
+  bool orbit_held_ = false;
+  // The command menu's steps after a party element command: the ring step (at least kCastHandover - kCastHandoverTail ticks, longer while
+  // the drawn ring still shifts), then kCastHandoverTail ticks (the units' facing goes home, the menu resets) before the next queued action.
+  // Ticks left, set by end_group, counted down while no action runs.
+  int cast_handover_ = 0;
+  static constexpr int kCastHandover = 10, kCastHandoverTail = 3;
   float time_ = 0;
   int auto_delay_ = 0;
   // BattleAuto rotation state.

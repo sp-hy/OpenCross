@@ -327,10 +327,12 @@ struct FxModels {
   bool env_clut_set = false;
   // Pad 0's newly pressed buttons this tick in the PS1 bit layout (0x20 = the confirm button; 155slot stops a reel on it).
   u16 pad_edge = 0;
-  // miki / ripple (its TexSrc::Capture grid also samples it): the picture is copied to VRAM (x, y) at OT entry `ot` every frame (x < 0 = none); the battle host makes the copy and the pack
-  // mesh faces on that direct-colour page sample it (BattleView::fx_draw).
+  // miki / yamanek0 / ripple (its TexSrc::Capture grid also samples it): the picture is copied to VRAM (x, y) at OT entry `ot` every frame (x < 0 = none); the battle host makes the copy and the pack
+  // mesh faces on that direct-colour page sample it (BattleView::fx_draw). mask: the copy is made with the mask bit set, so a black pixel is
+  // an opaque texel instead of a transparent one.
   struct Capture {
     int x = -1, y = 0, ot = 0;
+    bool mask = false;
   } capture;
   // A camera cross-fade (lasdes2 ops 0x104 - 0x106): a second camera task plays shot `shot` of the pack's bank (`serial` changes on every
   // start; the host cuts it to key 0 then) while the battle camera keeps running. The picture is the battle camera's view, every channel
@@ -494,6 +496,11 @@ class BespokeEffect {
     (void)op;
     (void)args;
     (void)count;
+    return false;
+  }
+  // True for a sequence of the pack that the overlay starts itself (from a private op), so no other caller starts it.
+  virtual bool starts_sequence(std::string_view name) const {
+    (void)name;
     return false;
   }
   // The current camera (the host calls it every frame before draw(); the overlays read the live camera).

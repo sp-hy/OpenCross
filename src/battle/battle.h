@@ -220,7 +220,7 @@ struct ActionEvent {
   bool silent = false;
   // Part of an all-targets element.
   bool all_targets = false;
-  // The cast was caught in the other side's element trap: it fizzles and its own effect never starts.
+  // The cast was caught in the other side's element trap: it fizzles, and the trap pack of its colour plays instead of its own effect.
   bool caught = false;
   // Pilfer (mode 30): message row of the result window, 0 item / 1 element stolen, 2 failed, 3 nothing to steal; -1 = not a steal.
   int steal_msg = -1;
@@ -429,6 +429,8 @@ class Battle {
   const std::array<int, 3>& ring() const { return ring_; }
   // Dev: replaces the field ring (colour indices 0..5, kRingAllColours or -1 per slot).
   void set_ring(const std::array<int, 3>& ring) { ring_ = ring; }
+  // Dev: arms one side's element trap with that element id (0 = none) without showing the trap block, as a write of the trap word alone does.
+  void set_trap(bool enemy_side, int element) { trap_[enemy_side ? 1 : 0] = element; }
   // The element-trap block once the running action has ended: a trap set by it shows, a trap that sprang during it hides the whole block
   // (even while the other side's trap stays armed).
   TrapHud trap_hud() const { return {trap_state_ == 1 || trap_state_ == 2, trap_[0], trap_[1]}; }
@@ -533,6 +535,8 @@ class Battle {
   void note_summon_kill(int unit_index);
   // `push_ring` = false for the 2nd..nth target of an all-targets cast (the colour enters the field ring once per cast).
   void do_element(int actor, int element_id, int row, int target, bool push_ring = true);
+  // Before every cast: an element the other side's trap holds is caught (it fizzles, the trap clears, one `caught` miss event). True when caught.
+  bool catch_in_trap(int actor, int element_id, int row, int target);
   // The PCs other than `actor` and those in `excluded` (a mask of PC slots) recover stamina; the enemy countdowns run `steps`.
   void step_after_pc_action(int actor, int steps, bool weapon, u32 excluded = 0);
   void post_action(int actor, int poison_amount, int timer_steps);

@@ -321,6 +321,8 @@ class EmitterSystem {
   bool slot_position(int slot, Vec3& out) const;
   // Same with the registering particle's velocity (the camera anchor types 8 / 12 take their yaw from it).
   bool slot_object(int slot, Vec3& pos, Vec3& vel) const;
+  // The slot holds a sprite's type-0x14 model: its yaw (12-bit angle of the registering particle's y rotation).
+  bool slot_model_yaw(int slot, int& yaw) const;
 
   // Read-only view of a live object (tests / debug overlays). Index < live_objects().
   struct ObjectView {

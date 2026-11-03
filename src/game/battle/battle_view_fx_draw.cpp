@@ -426,6 +426,7 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
         const auto& subs = asset->parts[static_cast<size_t>(in.part)].submeshes;
         in.screen = fx_copy_set_;
         in.screen_origin = copy_origin;
+        in.screen_opaque = copy_models->capture.mask;
         in.screen_uv = {lb.scale / fw, lb.scale_y / fh, lb.ox / fw, lb.oy / fh};
         int dx = 0, dy = 0;
         if (std::any_of(subs.begin(), subs.end(), [&](const assets::StageSubMesh& sub) { return in.screen_offset(sub.direct_page, dx, dy); })) {

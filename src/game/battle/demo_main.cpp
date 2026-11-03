@@ -15,8 +15,10 @@
 //   --party a[,b[,c]]  character ids, slot 0 = the acting PC (default party {0, 1, 22}); the battle seats the party in this order, so
 //                      --caster / --casttgt / --cast2tgt / --ko 0..2 are the party slots of this list
 //   --ring c,c,c  the field ring at the start: colour names (green white black red yellow blue), indices 0..5, 'all' or 'none'
+//   --etrap <element> / --ptrap <element>  the enemy / party side's element trap holds that element id at the start (a cast of it by the other side is caught)
 //   --cast2 <element> --cast2at <frame> [--cast2tgt <unit>]  a second cast (consecutive casts)
 //   --keys "Down:200,Right:240"  a key press (SDL scancode name) at that frame
+//   --grid <element>  every occupied grid cell of party slot 0 holds that element (a menu-driven cast with --keys)
 //   --auto  feeds a confirm every 12 frames (Attack, Weak, target, repeat) for smoke tests
 //   --bauto the battle plays itself (BattleView::set_auto); --ui <1|2|3> opens the element grid / attack chain / element targeting
 //   --mods  the ini's enabled mods in Modded art (texture replacements included), as the game installs them
@@ -64,11 +66,13 @@ int ocbattleview_main(int argc, char** argv) {
   int ko_unit = -1;
   // --status unit:lo[,unit:lo]: inflicted status bits OR-ed into the units' merged lo words.
   std::vector<std::pair<int, u32>> status_lo;
-  int equip_weapon = -1;
+  int equip_weapon = -1, grid_element = 0;
   std::array<int, 3> enemy_hp{-1, -1, -1};
   // --ring: the field ring set after the start (unset = the stage's own).
   std::array<int, 3> start_ring{-1, -1, -1};
   bool have_ring = false;
+  // --etrap / --ptrap: the element id each side's trap holds at the start (0 = none).
+  int enemy_trap = 0, party_trap = 0;
   int cast2 = 0, cast2_at = -1, cast2_tgt = -1;
   int shot_every = 0, shot_from = 0, shot_to = 1 << 30, max_frames = -1, win_w = 1280, win_h = 960;
   std::filesystem::path shot_dir, config_file;
@@ -135,6 +139,8 @@ int ocbattleview_main(int argc, char** argv) {
       }
       have_ring = true;
     }
+    else if (!std::strcmp(argv[i], "--etrap") && i + 1 < argc) enemy_trap = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--ptrap") && i + 1 < argc) party_trap = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--ko") && i + 1 < argc) ko_unit = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--status") && i + 1 < argc) {
       for (char* cursor = argv[++i]; *cursor;) {
@@ -146,7 +152,8 @@ int ocbattleview_main(int argc, char** argv) {
       }
     }
     else if (!std::strcmp(argv[i], "--equip") && i + 1 < argc) equip_weapon = static_cast<int>(std::strtol(argv[++i], nullptr, 0));
-    else if (!std::strcmp(argv[i], "--autoframes") && i + 1 < argc) auto_frames = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--grid") && i + 1 < argc) grid_element = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--autoframes")&& i + 1 < argc) auto_frames = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--field") && i + 1 < argc) field = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--trans") && i + 1 < argc) trans_frame = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--cam")) overlay = true;
@@ -237,6 +244,12 @@ int ocbattleview_main(int argc, char** argv) {
     const auto& rec = tables.chars("char").rec[static_cast<size_t>(lead.char_id)];
     lead.eq = battle::make_equip(tables, equip_weapon, rec.armour(), lead.eq.acc);
   }
+  if (grid_element > 0) {
+    if (party.empty())
+      for (int id : {0, 1, 22}) party.push_back(battle::make_party_member(tables, id, 0, "char"));
+    for (u16& cell : party.front().cells)
+      if (cell & 0x3FFF) cell = static_cast<u16>(grid_element);
+  }
   int rc = 0;
   {
     game::BattleView view;
@@ -271,6 +284,11 @@ int ocbattleview_main(int argc, char** argv) {
       view.set_art_mode(hd);
       // --ring
       if (battle::Battle* current = view.battle_mut(); current && have_ring) current->set_ring(start_ring);
+      // --etrap / --ptrap
+      if (battle::Battle* current = view.battle_mut()) {
+        if (enemy_trap) current->set_trap(true, enemy_trap);
+        if (party_trap) current->set_trap(false, party_trap);
+      }
       // --enemyhp
       if (battle::Battle* current = view.battle_mut())
         for (int k = 0; k < 3; ++k)

@@ -775,7 +775,7 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
       PushData pd;
       pd.clip = proj * cam;
       fill_push(pd, plain, cue_, factor, alpha, smooth_fog_, linear_draw_);
-      if (on_screen) pd.params[1] += 32.0f;
+      if (on_screen) pd.params[1] += in.screen_opaque ? 96.0f : 32.0f;
       fill_lights(pd, proj, blend, lights_);
       push_uniforms(command_buffer, pd);
       SDL_DrawGPUIndexedPrimitives(render_pass, asub.index_count, 1, dyn_iused_ + asub.first_index, static_cast<int32_t>(dyn_vused_), 0);

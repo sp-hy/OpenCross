@@ -1110,6 +1110,7 @@ void test_trap_hud() {
   battle.unit_mut(1).stamina = 0;
   battle.unit_mut(2).stamina = 0;
   battle.unit_mut(3).countdown = 30;
+  battle.set_ring({0, 1, 2});
   const size_t before = battle.events().size();
   battle.settle();
   CHECK(battle.events().size() > before);
@@ -1119,8 +1120,57 @@ void test_trap_hud() {
     CHECK_EQ(caught.code, 2);
     CHECK(caught.trap == (TrapHud{true, 2, 0}));
     CHECK(caught.trap_before == (TrapHud{true, 2, 0}));
+    // no number, and the caught red cast still enters the ring
+    CHECK(caught.caught && caught.silent);
+    CHECK(caught.ring == (std::array<int, 3>{0, 1, 2}));
   }
+  CHECK(battle.ring() == (std::array<int, 3>{1, 2, 3}));
   CHECK(battle.trap_hud() == TrapHud{});
+  CHECK_EQ(battle.rewards().trapped.size(), size_t{1});
+}
+
+// The trap tests only an element with a colour (record byte 5 bits 0xFC): a colourless element is not caught and the trap stays set,
+// for a party cast and an enemy cast alike; the two low bits of byte 5 do not count as a colour.
+void test_trap_needs_colour() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  data::ElemRec& colourless = tables.elements[4];
+  colourless = tables.elements[1];
+  colourless.raw[5] = 0x03;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  CastBrain brain;
+  Battle battle{tables, rng, brain};
+  PartyMember caster = make_member(0, "A");
+  caster.cells[0] = 0x4004;
+  CHECK(battle.start({caster, make_member(1, "B"), make_member(2, "C")}, 0));
+  battle.set_trap(true, 4);
+  CHECK(!battle.catch_in_trap(0, 4, 0, 3));
+  CHECK_EQ(battle.trap_hud().enemy, 4);
+  battle.set_trap(false, 4);
+  CHECK(!battle.catch_in_trap(3, 4, 0, 0));
+  CHECK_EQ(battle.trap_hud().pc, 4);
+  CHECK(battle.rewards().trapped.empty());
+  // the uncaught colourless cast runs and pushes an empty slot into the field ring
+  battle.set_ring({0, 1, 2});
+  battle.set_trap(true, 4);
+  const size_t before = battle.events().size();
+  battle.unit_mut(0).gauge = 2;
+  Command cast;
+  cast.kind = Command::Kind::Element;
+  cast.actor = 0;
+  cast.cell = 0;
+  std::string why;
+  CHECK(battle.apply(cast, &why));
+  CHECK(battle.events().size() > before);
+  if (battle.events().size() > before) CHECK(!battle.events()[before].caught);
+  CHECK(battle.ring() == (std::array<int, 3>{1, 2, -1}));
+  CHECK_EQ(battle.trap_hud().enemy, 4);
+  battle.set_trap(true, 2);
+  CHECK(battle.catch_in_trap(0, 2, 0, 3));
+  CHECK_EQ(battle.trap_hud().enemy, 0);
+  battle.set_trap(false, 2);
+  CHECK(battle.catch_in_trap(3, 2, 0, 0));
+  CHECK_EQ(battle.trap_hud().pc, 0);
   CHECK_EQ(battle.rewards().trapped.size(), size_t{1});
 }
 
@@ -3458,6 +3508,7 @@ int main() {
   test_field_ring_writes();
   test_queued_cast_targets();
   test_trap_hud();
+  test_trap_needs_colour();
   test_pilfer();
   test_forced_victory_pays_defeated_only();
   test_victory_and_growth();

@@ -321,7 +321,7 @@ bool BattleView::fx_begin() {
   const data::ElemRec& rec = tables_->elements[static_cast<size_t>(e0.element)];
   if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
   if (!fxlib_ready_) return false;
-  int eid = BattleFxLibrary::element_eid(rec);
+  int eid = e0.caught ? BattleFxLibrary::caught_eid(rec) : BattleFxLibrary::element_eid(rec);
   // A MONSTER that casts a trap element runs montrap.prd (eid 397: `main` = camera
   // `cam` + ENEMY_B_FN + per-target `tgef`, emitters cr1 / clr1 / iz32 ...), not the party's etrap (396) / sumtrap (395) pack (`camr`, `atk5`, pt / pt1).
   // The eid is chosen by the monster's battle script, not the element table; the three trap eids are the whole set.

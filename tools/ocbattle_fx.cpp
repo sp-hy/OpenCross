@@ -72,6 +72,8 @@ struct PackRow {
   std::map<int, u32> private_list;
   u64 empty_sprite_quads = 0, quads_total = 0;
   u64 empty_tex_tris = 0, tex_tris = 0;
+  // Textured faces of the pack's own meshes, under a stock host, through a CLUT that no VRAM source of the pack fills (not counted in tex_tris).
+  u64 unloaded_clut_tris = 0;
   u64 missing_part_inst = 0;
   // Mesh objects naming a PC's weapon by its two-digit character number (drawn from the caster's weapon, BattleView::fx_weapon_mesh_unit).
   u64 weapon_inst = 0;
@@ -82,9 +84,10 @@ struct PackRow {
   // issues: generic-path issue classes.
   std::vector<std::string> issues;
   std::vector<std::string> bespoke_issues;
-  // op-05 names that resolve nowhere (type 3 sheets "s:", type 14 meshes "m:", type 20 models "o:").
+  // op-05 names that resolve nowhere (type 3 sheets "s:", type 14 meshes "m:", type 20 models "o:" of objects the run spawned).
   std::set<std::string> missing_names;
-  // A type-20 object names no loadable type-0x0B model of the pack (BattleView::fx_load_models).
+  // A spawned type-20 object names no loadable type-0x0B model of the pack (BattleView::fx_load_models). The model is looked up when an
+  // object spawns, so an emitter no sequence reaches never needs its model.
   bool missing_model = false;
 };
 
@@ -116,9 +119,9 @@ bool sprite_empty(const assets::EffectSprite& sp) {
 // Per stage part: which textured triangles sample at least one visible texel (a barycentric grid of 15 points, corners included: a ring or
 // strip texture is transparent at the face corners and opaque inside).
 struct PartTex {
-  // Per triangle (indices / 3); tri_page = the sub-mesh's direct-colour page (StageSubMesh::direct_page).
+  // Per triangle (indices / 3); tri_page = the sub-mesh's direct-colour page (StageSubMesh::direct_page), tri_texture its StageAsset::textures index.
   std::vector<u8> tri_textured, tri_visible;
-  std::vector<int> tri_page;
+  std::vector<int> tri_page, tri_texture;
 };
 std::vector<PartTex> part_textures(const assets::StageAsset& st) {
   std::vector<PartTex> out(st.parts.size());
@@ -129,6 +132,7 @@ std::vector<PartTex> part_textures(const assets::StageAsset& st) {
     pt.tri_textured.assign(ntri, 0);
     pt.tri_visible.assign(ntri, 0);
     pt.tri_page.assign(ntri, -1);
+    pt.tri_texture.assign(ntri, -1);
     for (const assets::StageSubMesh& sm : part.submeshes) {
       if (sm.texture < 0 || static_cast<size_t>(sm.texture) >= st.textures.size()) continue;
       const import::Image& im = st.textures[static_cast<size_t>(sm.texture)].image;
@@ -142,6 +146,7 @@ std::vector<PartTex> part_textures(const assets::StageAsset& st) {
         const size_t tri = k / 3;
         pt.tri_textured[tri] = 1;
         pt.tri_page[tri] = sm.direct_page;
+        pt.tri_texture[tri] = sm.texture;
         const assets::StageVertex& c0 = part.vertices[part.indices[k]];
         const assets::StageVertex& c1 = part.vertices[part.indices[k + 1]];
         const assets::StageVertex& c2 = part.vertices[part.indices[k + 2]];
@@ -225,6 +230,17 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
     if (it == tex_cache.end()) it = tex_cache.emplace(asset, part_textures(*asset)).first;
     return it->second;
   };
+  // Under a stock host only the pack's egfx, its TIMs and battle.prd write VRAM while it plays. A CLUT row of its own meshes that none of
+  // them fills (every entry 0) holds whatever earlier rooms and effects left there on the PS1: data, not a texture the loader misses.
+  std::vector<u8> clut_unloaded;
+  if (pack->meshes && row.bespoke_state == "-") {
+    const import::Vram vram = pack->build_vram();
+    for (const assets::StageTexture& tx : pack->meshes->textures) {
+      bool unloaded = tx.mode != 2;
+      for (int i = 0; unloaded && i < (tx.mode == 0 ? 16 : 256); ++i) unloaded = vram.at(tx.clut_x + i, tx.clut_y) == 0;
+      clut_unloaded.push_back(unloaded ? 1 : 0);
+    }
+  }
   if (pack->meshes && std::getenv("FXA_TEX")) {
     const assets::StageAsset& st = *pack->meshes;
     const auto& pt = ptex_of(&st);
@@ -240,6 +256,8 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
       std::printf("    part %s tris %zu textured %zu visible %zu\n", st.parts[i].name.c_str(), st.parts[i].indices.size() / 3, textured, visible);
     }
   }
+  // Type-20 model names of the pack's emitters that no type-0x0B record of the pack holds.
+  std::set<std::string> unresolved_models;
   {
     effects::EffectBank bank;
     bank.add(&pack->fx);
@@ -261,10 +279,7 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
                 for (const auto& entry : drp->entries)
                   found = found || (entry.type == 0x0B && entry.name == sp->name && entry.name.size() == 4 &&
                                     std::all_of(entry.name.begin(), entry.name.end(), [](char ch) { return std::isxdigit(static_cast<unsigned char>(ch)) != 0; }));
-              if (!found) {
-                row.missing_names.insert("o:" + sp->name);
-                row.missing_model = true;
-              }
+              if (!found) unresolved_models.insert(sp->name);
             }
           }
   }
@@ -291,7 +306,8 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
   run.set_callbacks(cb);
   run.start(scene, view);
   // Stand-in for the anmseq scripts (ops 0x68 / 0x7D).
-  row.anmseq = run.start_script_sequences() > 0;
+  static const std::set<u32> actor_tags = actor_script_tags(game_fs);
+  row.anmseq = run.start_script_sequences(actor_tags) > 0;
   if (run.sequences_active() == 0) row.started_seq = false;
   FxFrame frame;
   std::vector<effects::EmitterSystem::MeshInstance> mi;
@@ -312,6 +328,10 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
         continue;
       }
       if (std::fabs(instance.world_pos[0]) > 60000 || std::fabs(instance.world_pos[1]) > 60000 || std::fabs(instance.world_pos[2]) > 60000) ++row.runaway;
+      if (instance.sprite_type == 20 && instance.name && unresolved_models.count(*instance.name)) {
+        row.missing_names.insert("o:" + *instance.name);
+        row.missing_model = true;
+      }
       // Types 19 / 20 are counted by type.
       if (instance.sprite_type != 14) continue;
       size_t part = 0;
@@ -339,6 +359,11 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
       };
       for (size_t k = 0; k < pt.tri_textured.size(); ++k)
         if (pt.tri_textured[k] && !on_copy(pt.tri_page[k])) {
+          const int texture = pt.tri_texture[k];
+          if (asset == pack->meshes.get() && texture >= 0 && static_cast<size_t>(texture) < clut_unloaded.size() && clut_unloaded[static_cast<size_t>(texture)]) {
+            ++row.unloaded_clut_tris;
+            continue;
+          }
           ++row.tex_tris;
           if (!pt.tri_visible[k]) ++row.empty_tex_tris;
         }
@@ -439,7 +464,7 @@ void classify(PackRow& row) {
       break;
     }
   }
-  if (row.missing_model && row.types.count(20)) add("model-missing");
+  if (row.missing_model) add("model-missing");
   if (row.unpresented.count(0x65) || row.unpresented.count(0x66)) add("lit-path");
   if (row.nonfinite) add("non-finite");
   if (row.runaway) add("runaway");
@@ -699,7 +724,7 @@ int cmd_fx_audit(const data::GameTables& tables, const vfs::Vfs& game_fs, const 
     std::ofstream out(csv_path, std::ios::binary);
     out << "rank,eid,prd,category,overlay,bespoke,bespoke_module,uses,elements,pc_refs,shop_refs,enemy_refs,player,seqs,emitters,sheets,mesh_parts,"
          "ticks,never_ends,first_draw,last_draw,max_quads,max_mesh_tris,max_bespoke_prims,max_live,spawned,emitter_starts,sprite_types,"
-         "unresolved_sheets,missing_mesh_parts,weapon_mesh_objects,unresolved_in_data,empty_sprite_quads,quads,empty_tex_tris,tex_tris,non_finite,runaway,ops_not_presented,"
+         "unresolved_sheets,missing_mesh_parts,weapon_mesh_objects,unresolved_in_data,empty_sprite_quads,quads,empty_tex_tris,tex_tris,unloaded_clut_tris,non_finite,runaway,ops_not_presented,"
          "ops_non_visual,private_ops,private_unhandled,generic_issues,bespoke_issues,private_list,private_ignored\n";
     int rank = 0;
     for (const PackRow& row : rows) {
@@ -709,7 +734,7 @@ int cmd_fx_audit(const data::GameTables& tables, const vfs::Vfs& game_fs, const 
           << ',' << row.last_draw << ',' << row.max_quads << ',' << row.max_tris << ',' << row.max_flats << ',' << row.max_live << ',' << row.spawned << ','
           << row.starts << ',' << types_str(row) << ',' << row.unresolved_sheets << ',' << row.missing_part_inst << ',' << row.weapon_inst << ','
           << joined(std::vector<std::string>(row.unresolved_data.begin(), row.unresolved_data.end()), " ") << ',' << row.empty_sprite_quads << ','
-          << row.quads_total << ',' << row.empty_tex_tris << ',' << row.tex_tris << ',' << row.nonfinite << ',' << row.runaway << ',' << join_ops(row.unpresented)
+          << row.quads_total << ',' << row.empty_tex_tris << ',' << row.tex_tris << ',' << row.unloaded_clut_tris << ',' << row.nonfinite << ',' << row.runaway << ',' << join_ops(row.unpresented)
           << ',' << join_ops(row.nonvisual) << ',' << row.private_ops << ',' << row.private_unhandled << ',' << joined(row.issues, " ") << ',' << joined(row.bespoke_issues, " ") << ',' << join_ops(row.private_list) << ',' << join_ops(row.private_ignored) << '\n';
     }
   }

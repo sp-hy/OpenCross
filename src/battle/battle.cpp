@@ -1682,6 +1682,41 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   if (push_ring) finish_ring(element, ring_colour_of(element_colour(element_id)));
 }
 
+bool Battle::catch_in_trap(int actor, int element_id, int row, int target) {
+  Unit& caster = units_[static_cast<size_t>(actor)];
+  int& trap = trap_[caster.pc ? 1 : 0];
+  if (trap == 0 || trap != element_id || element_id >= static_cast<int>(tables_.elements.size())) return false;
+  // Only an element with a colour (record byte 5 bits 0xFC) is tested against the trap; a colourless one casts normally and leaves the trap set.
+  if ((tables_.elements[static_cast<size_t>(element_id)].colour_bit() & 0xFC) == 0) return false;
+  fizzled_ = true;
+  trap_state_ = caster.pc ? 4 : 3;
+  if (caster.pc) say(std::format("{} casts {}: caught in the element trap, the element is lost", caster.name, tables_.element_name(element_id)));
+  else {
+    // The PC side's trap takes the element into the stock.
+    rewards_.trapped.push_back(static_cast<u16>(element_id));
+    say(std::format("{} casts {}: caught in the element trap, the element is taken", caster.name, tables_.element_name(element_id)));
+  }
+  ActionEvent ev;
+  ev.kind = ActionEvent::Kind::Element;
+  ev.actor = actor;
+  ev.death_cast = in_death_cast_;
+  ev.target = target;
+  ev.element = element_id;
+  ev.row = row;
+  ev.code = 2;
+  ev.caught = true;
+  // The trap pack lands no hit: no number, no miss text.
+  ev.silent = true;
+  ev.hp_before = ev.hp_after = units_[static_cast<size_t>(target)].hp;
+  ev.text = log_.back();
+  note_event(ev);
+  trap = 0;
+  // The caught cast still enters the field ring with its colour.
+  ring_repainted_ = false;
+  finish_ring(tables_.elements[static_cast<size_t>(element_id)], ring_colour_of(element_colour(element_id)));
+  return true;
+}
+
 void Battle::cast_element(int actor, int element_id, int row, int target, u32 targets) {
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(element_id)];
@@ -1690,34 +1725,7 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
   if (element_id == kVaryInnateElement) vary_innate_colour_ = static_cast<u8>(units_[static_cast<size_t>(actor)].innate & 0xFC);
   // The creature state is cleared for each cast.
   creature_state_ = 0, creature_model_ = 0, creature_slot_ = 0;
-  {  // Before every cast: an element the other side has trapped (mode 5) fizzles and clears the trap
-    Unit& caster = units_[static_cast<size_t>(actor)];
-    int& trap = trap_[caster.pc ? 1 : 0];
-    if (trap != 0 && trap == element_id) {
-      fizzled_ = true;
-      trap_state_ = caster.pc ? 4 : 3;
-      if (caster.pc) say(std::format("{} casts {}: caught in the element trap, the element is lost", caster.name, tables_.element_name(element_id)));
-      else {
-        // The PC side's trap takes the element into the stock.
-        rewards_.trapped.push_back(static_cast<u16>(element_id));
-        say(std::format("{} casts {}: caught in the element trap, the element is taken", caster.name, tables_.element_name(element_id)));
-      }
-      ActionEvent ev;
-      ev.kind = ActionEvent::Kind::Element;
-      ev.actor = actor;
-      ev.death_cast = in_death_cast_;
-      ev.target = target;
-      ev.element = element_id;
-      ev.row = row;
-      ev.code = 2;
-      ev.caught = true;
-      ev.hp_before = ev.hp_after = units_[static_cast<size_t>(target)].hp;
-      ev.text = log_.back();
-      note_event(ev);
-      trap = 0;
-      return;
-    }
-  }
+  if (catch_in_trap(actor, element_id, row, target)) return;
   // Element record byte 4 bit 0x10: every unit of the target's side.
   if (!(element.b(4) & 0x10)) {
     // A scripted cast at several units: each of them that is still standing (KO'd for a KO-only element) takes the cast, then the ring

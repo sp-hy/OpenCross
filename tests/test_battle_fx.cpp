@@ -100,9 +100,34 @@ int main() {
     }
   }
   BattleFxLibrary lib;
+  const std::set<u32> actor_tags = actor_script_tags(files);
   if (!lib.init(files)) {
     std::printf("FAIL: slot table\n");
     return 1;
+  }
+  {
+    // A caught cast plays the trap pack of its colour: an etrap pack for an element, the colour's trap summon for a summon.
+    static const char* const kTrapSummons[6] = {"t53mido1", "tunico", "t59ufo", "tfleaf", "tgolem", "tgfrog"};
+    int summons = 0, bad = 0;
+    for (const data::ElemRec& rec : tables.elements) {
+      const int colour = data::colour_index_of_bit(rec.colour_bit() & 0xFC);
+      if (rec.empty() || colour < 0) continue;
+      const bool summon = (rec.flags0() & 0x40) != 0;
+      summons += summon;
+      const int eid = BattleFxLibrary::caught_eid(rec);
+      const auto pack = lib.get(eid);
+      const bool right_pack = pack && (summon ? pack->slot.prd == std::string("battle/effects/syoukan/") + kTrapSummons[colour] + ".prd" : pack->overlay == "etrap");
+      // The jar scene: `test` and its emitters, top-level or in the nested drp `tubo`, register with the pack.
+      const bool jar = !summon || (pack && pack->fx.find_sequence("test") && pack->fx.find_emitter("tb"));
+      if (eid != (summon ? 203 : 197) + colour || !right_pack || !jar) {
+        std::printf("caught eid %d: overlay %s prd %s\n", eid, pack ? pack->overlay.c_str() : "none", pack ? pack->slot.prd.c_str() : "");
+        ++bad;
+      }
+    }
+    if (bad || summons != 12 || BattleFxLibrary::caught_eid(tables.elements[39]) != 206) {
+      std::printf("FAIL caught casts: %d wrong trap packs, %d summons\n", bad, summons);
+      return 1;
+    }
   }
   FxScene scene;
   for (int i = 0; i < battle::kUnits; ++i) {
@@ -354,7 +379,7 @@ int main() {
       run.set_callbacks(cb);
       run.start(scene, view);
       // The sequences the actors' anmseq scripts start in battle (ops 0x68 / 0x7D).
-      run.start_script_sequences();
+      run.start_script_sequences(actor_tags);
       size_t drawn = 0;
       FxFrame frame;
       for (int tick = 0; tick < 600; ++tick) {

@@ -188,6 +188,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--party` | `a[,b[,c]]` | `0,1,22` | Character ids; slot 0 = the acting PC (it makes `--cast` / `--weapon`). The battle seats the party in this order, so `--caster`, `--casttgt`, `--cast2tgt` and `--ko` values 0..2 are slots of this list and units alike. |
 | `--kind` | `<model id>` | the character | The lead's body: `--party 0 --kind 49` is Serge in Lynx's body, as the game's model byte does. |
 | `--ring` | `c,c,c` | the stage's ring | Field ring at the start: colour names (`green white black red yellow blue`), indices 0..5, `all` or `none` per slot. Matches a PS1 capture's ring for enemy-cast damage comparisons. |
+| `--etrap`, `--ptrap` | `<element id>` | none | The enemy / party side's element trap holds that element at the start, as a write of the trap word alone does (the trap block stays hidden until the trap springs). A `--cast` (or `--ecast`) of that element is then caught and plays its trap pack. |
 | `--stats` | `hp=..,atk=..,def=..,hit=..,evd=..,mag=..,mdef=..` | unchanged | Base stats of every party member. |
 | `--enemyhp` | `u3,u4,u5` | unchanged | HP (and max HP) of enemy units 3 / 4 / 5; empty or -1 keeps. |
 | `--ko` | `<unit>` | none | That party unit starts KO'd. |
@@ -205,6 +206,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--bauto` | none | off | The battle plays itself (auto-battle). |
 | `--ui` | `<1\|2\|3>` | none | Opens the element grid / attack chain / element targeting. |
 | `--keys` | `"Name:frame,..."` | none | Presses SDL scancode names at frames, e.g. `Down:200,Right:240`. |
+| `--grid` | `<element id>` | the character's grid | Every occupied grid cell of party slot 0 holds that element, so a cast can be driven through the real menu with `--keys` (stamina, turn flow and enemy turns included). |
 | `--trans` | `<frame>` | none | Starts the battle transition at that frame. |
 | `--shot` | `<frames>` | none | Writes `battle_shot.png` after N frames and exits. |
 | `--shotevery` | `<n>` | 0 | Write a shot every n frames. |
@@ -368,7 +370,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_CAM_PICK` | `battle_camera.cpp`, `battle_view_util.h`, `src/game/effects/sequence_player.cpp` | camera name (e.g. `apr0`, `p01`) | Forces the camera pick; in an effect sequence's random camera pool a comma list is accepted and `name@k` limits the match to the k-th pool of the run. |
 | `OC_CAM_KEYS` | `battle_camera.cpp` | set | Logs the keys of each camera shot. |
 | `OC_CAM_TRACE` | `battle_camera.cpp` | set | Logs the camera pose every tick. |
-| `OC_DRAW_CAM` | `battle_view_camera.cpp` | set | Logs the interpolated camera of each drawn frame. |
+| `OC_DRAW_CAM` | `battle_view_camera.cpp` | set | Logs the interpolated camera of each drawn frame (eye, target, H and the orbit counter). |
 | `OC_STAGE_ONLY` | `stage_scene.cpp`, `title_backdrop.cpp` | `a,b` | Keeps only these stage parts (the title backdrop matches by substring). |
 | `OC_STAGE_SKIP` | `title_backdrop.cpp` | names | Skips title-backdrop objects whose name occurs in the value. |
 | `OC_STAGE_CULL` | `stage_scene.cpp`, `title_backdrop.cpp` | `swap`, `none`, other | Overrides the cull side of every stage object: `swap` inverted, `none` off, any other value forces side 0. |
