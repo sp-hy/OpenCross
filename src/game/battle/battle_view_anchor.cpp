@@ -142,13 +142,19 @@ CamFrame BattleView::anchor_frame(int type, int attach) const {
   // The target list is written in ascending slot order; the acting list keeps the script's 8D slot order.
   std::sort(tgts.begin(), tgts.end());
   tgts.erase(std::unique(tgts.begin(), tgts.end()), tgts.end());
+  // A running overlay that replaced the list getters (etrap swaps the two lists) frames the shots by its lists too.
+  const effects::FxModels* models = fx_ ? fx_->bespoke_models() : nullptr;
+  const bool targets_overridden = models && models->target_override;
+  if (models && models->caster_override) actors = models->caster_list;
+  if (targets_overridden) tgts = models->target_list;
   const int tgt = tgts.empty() ? -1 : tgts.front();
   auto world = [&] {
     frame.valid = true;
     frame.x = frame.y = frame.z = frame.yaw = 0.0f;
   };
   // Pseudo-actor slot A / B: the particle an effect registered with op 0x3F / 0x40; its frame is the particle's position and the yaw
-  // -atan2(vel z, vel x). No such particle: no frame (the identity matrix at the origin).
+  // -atan2(vel z, vel x); a sprite's model bound there gives its own yaw and keeps its last place after the particle is freed. No such particle: no frame
+  // (the identity matrix at the origin).
   auto slot_frame = [&](int slot) {
     effects::Vec3 pos{}, vel{};
     if (!fx_ || !fx_->slot_object(slot, pos, vel)) {
@@ -170,7 +176,8 @@ CamFrame BattleView::anchor_frame(int type, int attach) const {
     // PS1 world y is down.
     frame.y = -pos[1];
     frame.z = pos[2];
-    frame.yaw = -std::atan2(vel[2], vel[0]);
+    int model_yaw = 0;
+    frame.yaw = fx_->slot_model_yaw(slot, model_yaw) ? static_cast<float>(model_yaw) * (2.0f * kPi / 4096.0f) : -std::atan2(vel[2], vel[0]);
   };
   auto nth = [&](const std::vector<int>& list, int index) { return index >= 0 && index < static_cast<int>(list.size()) ? list[static_cast<size_t>(index)] : -1; };
   auto frame_of = [&](int unit) {
@@ -224,7 +231,7 @@ CamFrame BattleView::anchor_frame(int type, int attach) const {
       battle_audit_note(std::format("anchor type {} (acting list) asked while the list is empty: world frame", type));
     } else if (tgt_ref && tgts.empty() && anchor_targets_set_) {
       battle_audit_note(std::format("anchor type {} (target list) asked while the list is empty: world frame", type));
-    } else if (tgt_ref && act_.phase != Act::Phase::None && !act_.ev.empty() && tgt >= 0) {
+    } else if (tgt_ref && !targets_overridden && act_.phase != Act::Phase::None && !act_.ev.empty() && tgt >= 0) {
       bool known = false;
       for (const battle::ActionEvent& event : act_.ev) known = known || event.target == tgt;
       if (!known) battle_audit_note(std::format("anchor type {} on unit {} which is no target of action {}", type, tgt, act_.ev.front().action));

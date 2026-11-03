@@ -74,15 +74,15 @@ bool BattleView::Cam::project(float x, float y, float z, float& cx, float& cy) c
 }
 
 // The command-menu orbit: the eye circles the acting PC at 2400 units, height (model height word + 0x100), the target is the PC at 2/3 of its
-// height, H = 0x200. The angle is `(((yaw_byte) + 0x30) & 0x3F) * 0x40 + 2 * tick` in 4096 = turn, where the unit byte is the unit's yaw / 64
-// (0x10 for a PC facing yaw 1024); eye = (x - cos a * d, y, z + sin a * d).
+// height, H = 0x200. The angle is `(((yaw_byte) + 0x30) & 0x3F) * 0x40 + orbit_clock_` in 4096 = turn, where the unit byte is the unit's yaw
+// / 64 (0x10 for a PC facing yaw 1024); eye = (x - cos a * d, y, z + sin a * d).
 CamPose BattleView::orbit_pose(int pc) const {
   const Visual& visual = vis_[static_cast<size_t>(pc)];
   // Unit yaw in PS1 units (place_units: face = (-sin yaw, -cos yaw), 4096 = turn), truncated to the unit's yaw byte (yaw / 64).
   float yaw_units = std::atan2(-visual.face_x, -visual.face_z) * (4096.0f / (2.0f * kPi));
   if (yaw_units < 0.0f) yaw_units += 4096.0f;
   const int yaw_byte = static_cast<int>(yaw_units) / 64;
-  const int angle_units = ((yaw_byte + 0x30) & 0x3F) * 0x40 + 2 * tick_count_;
+  const int angle_units = ((yaw_byte + 0x30) & 0x3F) * 0x40 + orbit_clock_;
   const float angle = static_cast<float>(angle_units) * (2.0f * kPi / 4096.0f) + kOrbitBias;
   const float dist = 2400.0f;
   CamPose pose;
@@ -218,8 +218,8 @@ void BattleView::apply_camera(float alpha) {
   }
   // Dev: the camera as DRAWN (draw alpha, PS1 axes: y down).
   if (static const bool trace = std::getenv("OC_DRAW_CAM") != nullptr; trace)
-    log::debug("draw camera frame {} alpha {:.3f} eye {:.0f} {:.0f} {:.0f} tgt {:.0f} {:.0f} {:.0f}", frame_count_, alpha, pose.eye[0], -pose.eye[1], pose.eye[2],
-               pose.target[0], -pose.target[1], pose.target[2]);
+    log::debug("draw camera frame {} alpha {:.3f} eye {:.0f} {:.0f} {:.0f} tgt {:.0f} {:.0f} {:.0f} H {:.0f} orbit {}", frame_count_, alpha, pose.eye[0], -pose.eye[1],
+               pose.eye[2], pose.target[0], -pose.target[1], pose.target[2], pose.h, orbit_clock_);
   cam_.eye = pose.eye;
   cam_.h = pose.h * render::fov_scale();
   const std::array<float, 3> forward = normalize({pose.target[0] - pose.eye[0], pose.target[1] - pose.eye[1], pose.target[2] - pose.eye[2]}, {0, 0, 1});
@@ -252,6 +252,8 @@ void BattleView::apply_camera(float alpha) {
 // ------------------------------------------------------------------------------------------------------------ update
 void BattleView::tick() {
   ++frame_count_;
+  if (act_.phase == Act::Phase::Cast && act_.actor >= 0 && act_.actor < battle::kPcSlots) orbit_held_ = true;
+  if (!orbit_held_) orbit_clock_ += 2;
   // Effect slow motion skips the game tick.
   if (fx_slow_skip()) return;
   ++tick_count_;

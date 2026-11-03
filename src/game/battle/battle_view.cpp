@@ -654,6 +654,9 @@ bool BattleView::finish_start() {
   orbit_pc_ = dyn_target_ = -1;
   menu_glide_ = false;
   orbit_blocked_ = orbit_block_next_ = false;
+  orbit_clock_ = 0;
+  orbit_held_ = false;
+  cast_handover_ = 0;
   auto_delay_ = 0;
   auto_pc_ = auto_target_ = -1;
   auto_step_ = 0;

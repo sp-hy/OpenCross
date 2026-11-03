@@ -1,0 +1,7 @@
+# PS1 project symbol list: effect overlay yamanek0.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_yamanek0_dispatch = 0x801C5E04;  # function: Overlay entry; init, frame and exit, other ops go to the stock sequence dispatcher
+fx_yamanek0_init = 0x801C5E9C;  # function: Init: only auto-starts the pack's own and main sequences
+fx_yamanek0_frame = 0x801C5EBC;  # function: Frame: copies the displayed frame to VRAM (0x1C0, 0x100) at OT entry 2, between mask-bit-set on and off packets
+fx_yamanek0_exit = 0x801C5FAC;  # function: Exit: does nothing

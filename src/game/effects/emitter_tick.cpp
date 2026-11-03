@@ -295,7 +295,12 @@ void EmitterSystem::Impl::tick() {
   for (size_t read = 0; read < objs.size(); ++read) {
     if (!objs[read].alive) continue;
     if (write != read) objs[write] = std::move(objs[read]);
-    if (objs[write].slot_reg >= 0) slot_idx[objs[write].slot_reg] = write;
+    if (const int slot = objs[write].slot_reg; slot >= 0) {
+      slot_idx[slot] = write;
+      slot_model[slot] = !(objs[write].flags & 0x80000000u);
+      for (int i = 0; i < 3; ++i) slot_pos[slot][i] = objs[write].pos[i], slot_vel[slot][i] = objs[write].vel[i];
+      slot_yaw[slot] = objs[write].ang[1];
+    }
     ++write;
   }
   objs.resize(write);

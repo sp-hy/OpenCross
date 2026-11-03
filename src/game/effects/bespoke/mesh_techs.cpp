@@ -6,6 +6,7 @@
 //   hensin   eid 11  caster 0 erased from the head down by a plane (0x180) with shards along the cut
 //   ghost2   eids 302 306 309 310 527  the pack's pseudo-actor rises out of the ground (0x180: drawn clipped at y = 0)
 //   miki     eid 17  copies the displayed frame to VRAM (0x1C0, 0x100) every frame
+//   yamanek0 eid 3   the same copy, filed nearer and with the mask bit set
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -573,16 +574,26 @@ class Hensin : public MeshTech {
   std::vector<Shard> shards_;
 };
 
-// ---- miki -----------------------------------------------------------------------------------------------------------------------------
-// Init: caster 0 plays entry 0 of the pack's 0x1A table. Frame: the displayed frame is copied to VRAM
-// (0x1C0, 0x100) at OT entry 50 - the page the haze meshes grid / gnr0 / gnr1 of sexy2.prd sample. Draws nothing.
+// ---- miki, yamanek0 -------------------------------------------------------------------------------------------------------------------
+// Frame: the displayed frame is copied to VRAM (0x1C0, 0x100) at OT entry `ot`, the page the pack's direct-colour meshes sample (miki: entry 50,
+// the haze meshes grid / gnr0 / gnr1 of sexy2.prd; yamanek0: entry 2, its panels scrn / scr1, the copy made with the mask bit set so that
+// black pixels stay opaque). Draws nothing. Init: miki's caster 0 plays entry 0 of the pack's 0x1A table; yamanek0 only starts the sequences.
 // The capture request is posted every frame (FxModels::capture); the battle host copies the picture and the meshes on that page sample it.
-class Miki : public MeshTech {
+class FrameCopy : public MeshTech {
+ public:
+  FrameCopy(int ot, bool mask, bool caster_anim) : ot_(ot), mask_(mask), caster_anim_(caster_anim) {}
+
  protected:
-  void init() override { start_caster_anim(caster(0)); }
-  void frame() override {
-    if (ctx_.models) ctx_.models->capture = {0x1C0, 0x100, 50};
+  void init() override {
+    if (caster_anim_) start_caster_anim(caster(0));
   }
+  void frame() override {
+    if (ctx_.models) ctx_.models->capture = {0x1C0, 0x100, ot_, mask_};
+  }
+
+ private:
+  int ot_;
+  bool mask_, caster_anim_;
 };
 
 // ---- trap summons: tfleaf tgfrog tgolem tunico --------------------------------------------------------------------------------------
@@ -626,6 +637,7 @@ class Trap : public MeshTech {
     if (ctx_.sequences && ctx_.pack_fx && ctx_.pack_fx->find_sequence("trap")) ctx_.sequences->start("trap");
     return true;
   }
+  bool starts_sequence(std::string_view name) const override { return name == "trap"; }
   void frame() override {
     if (!on_) return;
     if (duration_ < static_cast<s16>(++tick_)) {
@@ -691,7 +703,8 @@ void register_mesh_techs(BespokeRegistry& registry) {
   registry.add({"rakugaki", "mesh-tech", "Rakugaki", [] { return std::make_unique<Rakugaki>(); }});
   registry.add({"ghost2", "mesh-tech", "Ghost2", [] { return std::make_unique<Ghost2>(); }});
   registry.add({"hensin", "mesh-tech", "Hensin", [] { return std::make_unique<Hensin>(); }});
-  registry.add({"miki", "mesh-tech", "Miki", [] { return std::make_unique<Miki>(); }});
+  registry.add({"miki", "mesh-tech", "FrameCopy", [] { return std::make_unique<FrameCopy>(50, false, true); }});
+  registry.add({"yamanek0", "mesh-tech", "FrameCopy", [] { return std::make_unique<FrameCopy>(2, true, false); }});
   registry.add({"tfleaf", "trap", "Trap", [] { return std::make_unique<Trap>(0, 0, 0, "wlf2", false, false, 4); }});
   registry.add({"tgfrog", "trap", "Trap", [] { return std::make_unique<Trap>(0, 0, 0, nullptr, true, false, 32); }});
   registry.add({"tgolem", "trap", "Trap", [] { return std::make_unique<Trap>(-8960, -1664, -18880, nullptr, false); }});

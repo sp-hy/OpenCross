@@ -142,6 +142,8 @@ struct StageInstance {
   int screen_origin = -1;
   std::array<int, 2> screen_size{320, 224};
   std::array<float, 4> screen_uv{0, 0, 0, 0};
+  // The copy's black pixels are opaque texels (a copy made with the mask bit set); otherwise they are transparent.
+  bool screen_opaque = false;
   // The offset of a direct-colour page inside the screen copy; false when there is no copy or the page lies outside it.
   bool screen_offset(int direct_page, int& dx, int& dy) const {
     if (!screen || screen_origin < 0 || direct_page < 0) return false;

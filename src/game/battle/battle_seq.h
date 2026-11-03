@@ -10,6 +10,7 @@
 // Not interpreted (length-correct no-ops): the particle / light / colour-fade ops (0x52 0x5d 0x5f 0x70 ...); the weapon-trail ops 0x23-0x25 0x46 0x5b 0x85 0x86 are events.
 #include <array>
 #include <functional>
+#include <set>
 #include <vector>
 
 #include "core/types.h"
@@ -27,6 +28,9 @@ class Table {
   // Index into words() of the first op of (entry, variant), or -1.
   int start(int entry, int variant) const;
   const std::vector<s16>& words() const { return words_; }
+  // Adds the tag of every op 0x68 / 0x7D (start an effect sequence) in the table: each variant's code is swept op by op up to the
+  // next entry, so branches the VM would skip count too.
+  void sequence_tags(std::set<u32>& out) const;
   // The unit's own S5 table seen from its atk table: op 0x44 reads the
   // blend table in S5 entry 0. Set by the loader for atk tables.
   void set_model_table(const Table* table) { model_ = table; atk_ = true; }

@@ -154,6 +154,10 @@ struct EmitterSystem::Impl {
   int pending_child = -1;
   // objs index of the particle registered as slot A / B.
   size_t slot_idx[2]{~size_t{0}, ~size_t{0}};
+  // A slot that holds a sprite's type-0x14 model keeps it after the particle is freed: the model stays where the particle last placed it.
+  bool slot_model[2]{};
+  s32 slot_pos[2][3]{}, slot_vel[2][3]{};
+  s16 slot_yaw[2]{};
 
   // OC_FX_ONLY=<emitter names, comma-separated>: only those emitters' objects are drawn.
   std::string dev_only;

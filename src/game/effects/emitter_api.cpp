@@ -333,19 +333,28 @@ void EmitterSystem::collect_meshes(const ViewParams& view, float alpha, std::vec
 bool EmitterSystem::slot_object(int slot, Vec3& pos, Vec3& vel) const {
   if (slot < 0 || slot > 1) return false;
   const size_t i = impl_->slot_idx[slot];
-  if (i >= impl_->objs.size()) return false;
+  if (i < impl_->objs.size()) {
+    for (size_t k = 0; k < 3; ++k) {
+      pos[k] = static_cast<float>(impl_->objs[i].pos[k]) / 65536.0f;
+      vel[k] = static_cast<float>(impl_->objs[i].vel[k]) / 65536.0f;
+    }
+    return true;
+  }
+  if (!impl_->slot_model[slot]) return false;
   for (size_t k = 0; k < 3; ++k) {
-    pos[k] = static_cast<float>(impl_->objs[i].pos[k]) / 65536.0f;
-    vel[k] = static_cast<float>(impl_->objs[i].vel[k]) / 65536.0f;
+    pos[k] = static_cast<float>(impl_->slot_pos[slot][k]) / 65536.0f;
+    vel[k] = static_cast<float>(impl_->slot_vel[slot][k]) / 65536.0f;
   }
   return true;
 }
-bool EmitterSystem::slot_position(int slot, Vec3& out) const {
-  if (slot < 0 || slot > 1) return false;
-  const size_t i = impl_->slot_idx[slot];
-  if (i >= impl_->objs.size()) return false;
-  for (size_t k = 0; k < 3; ++k) out[k] = static_cast<float>(impl_->objs[i].pos[k]) / 65536.0f;
+bool EmitterSystem::slot_model_yaw(int slot, int& yaw) const {
+  if (slot < 0 || slot > 1 || !impl_->slot_model[slot]) return false;
+  yaw = impl_->slot_yaw[slot];
   return true;
+}
+bool EmitterSystem::slot_position(int slot, Vec3& out) const {
+  Vec3 vel{};
+  return slot_object(slot, out, vel);
 }
 bool EmitterSystem::object_view(size_t i, ObjectView& out) const {
   if (i >= impl_->objs.size()) return false;

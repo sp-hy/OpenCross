@@ -93,6 +93,23 @@ int Table::initial_shadow() const {
   return shadow;
 }
 
+void Table::sequence_tags(std::set<u32>& out) const {
+  for (int entry = 0; entry < entries(); ++entry) {
+    const u32 base = entry_off_[static_cast<size_t>(entry)];
+    u32 end = static_cast<u32>(words_.size() * 2);
+    for (const u32 offset : entry_off_)
+      if (offset > base) end = std::min(end, offset);
+    for (int variant = 0; variant < 8; ++variant)
+      for (int pc = start(entry, variant); pc >= 0 && static_cast<u32>(pc) * 2 < end;) {
+        const int op = words_[static_cast<size_t>(pc)];
+        if (op < 0 || op >= 0xAD) break;
+        if ((op == 0x68 || op == 0x7D) && static_cast<size_t>(pc) + 2 < words_.size())
+          out.insert(tag_of(words_[static_cast<size_t>(pc) + 1], words_[static_cast<size_t>(pc) + 2]));
+        pc += kLen[op];
+      }
+  }
+}
+
 int Table::start(int entry, int variant) const {
   if (entry < 0 || entry >= entries() || variant < 0 || variant > 7) return -1;
   const u32 base = entry_off_[static_cast<size_t>(entry)];

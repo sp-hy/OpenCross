@@ -6,6 +6,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include "game/effects/bespoke/bespoke.h"
@@ -44,7 +45,9 @@ void test_registry() {
       if (info->family == names[k]) fam[k].insert(info->name);
   CHECK(fam[1].size() == 4);
   CHECK(fam[2].size() == 11);
-  CHECK(fam[0].size() >= 9);
+  CHECK(fam[0].size() >= 8);
+  // yamanek0 is miki's frame copy, not a screen band.
+  CHECK(registry.find("yamanek0") != nullptr && registry.find("yamanek0")->family == "mesh-tech");
   // wipeoff tekken jitanda 2boll saraman left the mesh-deform stand-ins for the ground ports (ground_ports.cpp).
   // Every overlay stays registered while the ports take the stand-ins' places (the mesh-deform family shrinks).
   CHECK(registry.all().size() >= 89);
@@ -87,6 +90,22 @@ void test_third_slot_reload() {
   }
   effect->tick();
   CHECK(!ms.units[2].hidden && ms.units[2].rebuilt && effect->done());
+}
+
+// miki and yamanek0 post the frame copy to (0x1C0, 0x100) every tick: miki at OT entry 50, yamanek0 at entry 2 with the mask bit set.
+void test_frame_copy() {
+  for (const auto& [name, ot, mask] : {std::tuple<const char*, int, bool>{"miki", 50, false}, {"yamanek0", 2, true}}) {
+    DummyStage st;
+    FxModels ms;
+    ms.units.resize(4);
+    st.ctx.models = &ms;
+    auto effect = BespokeRegistry::instance().create(name, st.ctx);
+    CHECK(effect != nullptr);
+    if (!effect) continue;
+    effect->tick();
+    CHECK(ms.capture.x == 0x1C0 && ms.capture.y == 0x100 && ms.capture.ot == ot && ms.capture.mask == mask);
+    CHECK(frame(*effect).empty());
+  }
 }
 
 void test_negative_strip() {
@@ -789,6 +808,7 @@ void test_flatten() {
 int main() {
   test_registry();
   test_negative_strip();
+  test_frame_copy();
   test_muteki_falloff();
   test_lasdes2();
   test_ring();

@@ -22,9 +22,12 @@ void main() {
   vec2 t = uv;
   // +16: [Enhancements] EdgeBlend strip (StagePipeline::draw_seams): the face drawn again with its neighbour's texture mirrored across the shared edge;
   // uv_tex.x = the fragment's distance from the seam edge in band widths (0 on the edge), uv_tex.y = 1: alpha 1/2 on the edge fading to 0 one band away.
-  // +32: the texture is a copy of the picture; a copied pixel that is black in 15-bit colour is a transparent texel.
-  bool copy = pc.params.y >= 31.5;
-  float pyc = copy ? pc.params.y - 32.0 : pc.params.y;
+  // +32: the texture is a copy of the picture; a copied pixel that is black in 15-bit colour is a transparent texel. +96: a copy made with the
+  // mask bit set, whose black pixels are opaque.
+  bool opaque_copy = pc.params.y >= 95.5;
+  float pyo = opaque_copy ? pc.params.y - 64.0 : pc.params.y;
+  bool copy = pyo >= 31.5;
+  float pyc = copy ? pyo - 32.0 : pyo;
   bool seam = pyc >= 15.5;
   float pyr = seam ? pyc - 16.0 : pyc;
   float py = pyr >= 7.5 ? pyr - 8.0 : pyr;  // +8: HD per-vertex depth cue (vertex shader)
@@ -68,7 +71,7 @@ void main() {
     c = texture(tex, t);
   }
   if (c.a < 0.5) discard;
-  if (copy && all(lessThan(c.rgb, vec3(7.5 / 255.0)))) discard;
+  if (copy && !opaque_copy && all(lessThan(c.rgb, vec3(7.5 / 255.0)))) discard;
   // The packet builders multiply the corner colour by the object colour (DCPL: saturates at 255), then the depth cue (DPCS / DPCT) moves
   // it toward the far colour by fog_p; textured colours are modulation values (128 = 1.0), untextured ones raw (255 = 1.0).
   bool textured = uv_scale.x > 0.0;

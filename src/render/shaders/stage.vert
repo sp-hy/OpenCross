@@ -33,7 +33,9 @@ void main() {
   ot_z = (pc.clip * vec4(in_centre.x, -in_centre.y, in_centre.z, 1.0)).w;  // the packet's average camera z: its ordering-table depth
   // GTE depth cue: constant over the packet (its OT depth) in original art mode; HD art mode (params.y >= 8) evaluates it per vertex so it
   // varies smoothly across the big ground cells and meets at shared edges.
-  float pyc = pc.params.y >= 31.5 ? pc.params.y - 32.0 : pc.params.y;  // +32: the texture is a picture copy (fragment shader)
+  // +32: the texture is a picture copy, +96: a picture copy whose black pixels are opaque (fragment shader).
+  float pyo = pc.params.y >= 95.5 ? pc.params.y - 64.0 : pc.params.y;
+  float pyc = pyo >= 31.5 ? pyo - 32.0 : pyo;
   float pym = pyc >= 15.5 ? pyc - 16.0 : pyc;  // +16: an EdgeBlend strip (fragment shader)
   float fog_z = pym >= 7.5 ? cam_z : ot_z;
   fog_p = pc.fogc.w == 0.0 ? 0.0 : clamp(pc.fogc.w + pc.params.w / max(fog_z, 1.0), 0.0, 1.0);

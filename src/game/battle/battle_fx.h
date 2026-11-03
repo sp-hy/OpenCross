@@ -12,6 +12,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -90,6 +91,10 @@ struct FxPack {
   import::Vram build_vram() const;
 };
 
+// Tags of every effect sequence the units' anmseq scripts can start (ops 0x68 / 0x7D): the S5 tables of the battle models' .obj and the
+// type-0x1A tables of their at0.prd, their S6 drps and battle.prd. Reads all of them (tools and tests).
+std::set<u32> actor_script_tags(const vfs::Vfs& vfs);
+
 class BattleFxLibrary {
  public:
   // slot table, particle library, bespoke bindings. False if the slot table is missing. `bind_globals` false (the texture dump worker thread, a second
@@ -104,6 +109,13 @@ class BattleFxLibrary {
   // battle.prd or for colour < 0.
   std::shared_ptr<const FxPack> charge_pack(int colour);
   static int element_eid(const data::ElemRec& elem) { return elem.raw[0x10] | (elem.raw[0x11] << 8); }
+  // The pack a cast caught in an element trap plays instead of its own: 197 + colour for an element, 203 + colour for a summon (record
+  // byte 0 bit 0x40), colour 0..5 as the charge's; 0 for a record without a single colour.
+  static int caught_eid(const data::ElemRec& elem) {
+    const int colour = data::colour_index_of_bit(elem.colour_bit() & 0xFC);
+    if (colour < 0) return 0;
+    return ((elem.flags0() & 0x40) ? 203 : 197) + colour;
+  }
   const assets::RoomEffects& particle_lib() const { return lib_; }
   size_t slot_count() const { return slots_.size(); }
   const std::vector<effects::EffectSlot>& slots() const { return slots_; }
@@ -228,9 +240,10 @@ class BattleFxRun {
   // anmseq ops 0x68 / 0x7D: start the pack's sequence `tag` (the scripts drive the packs without
   // 'main'). False if neither the pack nor the resident library holds it (the caller then plays its camera timeline).
   bool start_sequence(std::string_view tag);
-  // Tools / tests without actor scripts: starts every root sequence that 'main' / 'own' does not reach (none starts it with op 0x2F), as
-  // the anmseq scripts would over the action. Returns the number started.
-  int start_script_sequences();
+  // Tools / tests without actor scripts: starts the root sequences that 'main' / 'own' does not reach (none starts it with op 0x2F), as
+  // the anmseq scripts would over the action. A pack with 'main' and no caster scripts or clips of its own (types 0x1A / 0x19) gets only
+  // those whose tag a unit's script names (`actor_tags`, actor_script_tags): its other root sequences never run. Returns the number started.
+  int start_script_sequences(const std::set<u32>& actor_tags);
   // One 60 Hz tick.
   void tick(const FxScene& scene);
   // The birth credit of the pack's `main`: sequence tasks + emitters only, `ticks` ticks (no overlay call).
@@ -263,6 +276,7 @@ class BattleFxRun {
   const effects::EmitterSystem& emitters() const { return *em_; }
   // The particle the pack registered as pseudo-actor slot A (0, op 0x3F) / B (1, op 0x40): position and velocity (PS1 world, y down).
   bool slot_object(int slot, effects::Vec3& pos, effects::Vec3& vel) const { return em_ && em_->slot_object(slot, pos, vel); }
+  bool slot_model_yaw(int slot, int& yaw) const { return em_ && em_->slot_model_yaw(slot, yaw); }
   const effects::SequenceStats& sequence_stats() const { return seq_->stats(); }
   const effects::SequencePlayer& sequences() const { return *seq_; }
   // done() only because of the hard cap.
