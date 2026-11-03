@@ -635,6 +635,9 @@ bool BattleView::finish_start() {
   fx_screen_menu_clear_ = true;
   unplaced_.fill(false);
   active_pc_ = -1;
+  entry_pc_ = -1;
+  entry_live_ = -1;
+  entry_ready_ = turn_open_ = false;
   menu_chime_ = true;
   top_cursor_ = chain_cursor_ = 0;
   // The per-unit memory bytes start clear (target memory 3) in a new battle.

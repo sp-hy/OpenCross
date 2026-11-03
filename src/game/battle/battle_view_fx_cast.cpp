@@ -375,6 +375,9 @@ bool BattleView::fx_begin() {
   fx_prev_bank_ = actor_visual.scripts ? &actor_visual.scripts->cam : &bank_;
   fx_cam_->set_parent(fx_prev_bank_);
   camera_.set_bank(fx_cam_.get());
+  // The pack's first shot ends the camera tasks of the earlier actions (a death cast right after the killing blow: the attack's shot is not
+  // resumed when the pack's shorter one ends).
+  camera_.retire_tasks();
   fx_sound_key_ = std::format("fx{}", eid);
   // The pack registers at the head of the resource list.
   audio_.load_group(fx_sound_key_, pack->prd, -1, BattleAudio::Kind::Pack);

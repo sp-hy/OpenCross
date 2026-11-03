@@ -59,21 +59,20 @@ After the units exist `brain_.begin_battle` runs the scripts' init slot, then `s
 
 ### 2.2 Commands (`apply`)
 
-`apply` runs `validate` (section 3) and does nothing when it fails. Then, for the acting PC: its guard flag is cleared and every PC's "defended" flag is cleared. Per kind:
+`apply` runs `validate` (section 3) and does nothing when it fails. Then the acting PC's guard ends (a command comes from the PC's own menu, whose opening ends it; see the guard note). Per kind:
 
 | Command | Cost and effect | After each unit of the command |
 |---|---|---|
 | Attack, 1 to 4 chained strengths (`kMaxChain` = 4) | each hit costs stamina (`battle_data.md` section 10; weak 10 / 12, medium 20 / 25, heavy 30 / 37 when fatigued); the whole chain must fit the stamina at the time of the command, strengths must be 0 to 2; the cost is paid per hit, also on a miss | other PCs recover (2.3), enemies count down `s + 1`, `post_action(s + 1, s + 1)`, `check_end`; the chain stops when the battle ends or the actor is down |
 | Element (a grid cell) | stamina `- 70`; gauge `- (row + 1)`, floor -1; the cell is marked used (section 4). A double / triple tech (section 4.1): every caster pays 70 and gives up its cell; caster entry k's gauge becomes party slot k's gauge `- (its own cell row + 1)`, clamped to `[-1, slot k's gauge_max]` | other PCs recover 1 step (not the casters, not the target if it is a PC), enemies count down 1, `post_action(7, 1)` |
-| Defend | stamina `+ 10`, cap 70; guard on; "defended" flag on | other PCs recover 1 step, enemies count down 1, `post_action(1, 1)` |
+| Defend | stamina `+ 10`, cap 70; guard on | other PCs recover 1 step, enemies count down 1, `post_action(1, 1)`; then, when no PC could take the menu (`can_open_menu`, a guarding PC counted as unable), one `time_advance` (2.5) before the menu passes on |
 | Run | the fight ends at once as Fled (2.7, 7): no roll, no cost, no check of the scene | none |
 
 Notes:
 
 * Automatic target. An Attack uses the given target only when it is a living, targetable enemy; otherwise (target -1, a party unit, a dead or off-stage enemy) it takes the living, targetable enemy with the lowest current HP (first on ties), and re-picks the same way inside a chain when the target dies. An Element is re-targeted only when its target is -1 or an empty slot: a self-only element picks the caster, a party-only element the living PC with the lowest HP fraction (compared by cross-multiplication, the caster first), any other the enemy as for an Attack.
 * Chain counter: the PC's hit chance bonus (`battle_data.md` section 10) survives from one Attack command to the next only against the same target; a miss, a retarget, any other command, a confused turn or an enemy turn resets it.
-* Guard: from a Defend until the PC's next applied command or its KO. It halves weapon damage taken (`battle_data.md` section 10; element damage is not halved).
-* "Defended" flag: closes that PC's own command menu. It is cleared when any PC command is applied, by every time advance (2.5) and on KO.
+* Guard: from a Defend until the PC's top command menu takes over (`open_menu`, called by the host whenever the top menu starts for a PC: the menu passing to it, an L1 / R1 switch landing on it, the menu reopening on it after enemy turns) or its KO. The menu does not take over the tick it reaches the PC: its window opens first (section 3.4), about 20 ticks during which the PC keeps the guard and the block pose. Other PCs' commands and time advances leave it on. It halves weapon damage taken (`battle_data.md` section 10; element damage is not halved), so a hit that lands after the PC's menu has taken over, even when the PC has not acted yet, is not halved. While it is set the unit's flag 0x200 is on and the idle script (anmseq op 0x49 reads the flag) holds the block pose; the script restarts when the flag changes, so the pose drops when the menu takes over.
 * After the command: reactions (slot-4 and kill scripts, section 7), then `settle()` when the fight is still on.
 
 ### 2.3 Stamina recovery of the others (`step_after_pc_action`)
@@ -92,11 +91,11 @@ Run once per hit of a chain, once per cast or defend, and once per enemy turn, s
 
 ### 2.5 Time advance (`time_advance`)
 
-Runs only when nobody can act (2.6).
+Runs when nobody can act (2.6), and once after a Defend that leaves no PC free to take the menu (2.2).
 
 1. `step` = the smallest positive countdown among living, non-hidden enemies that are not 0xFFFF; 255 when there is none.
 2. Every living unit: countdown `- step`, floor 0 (not for 0xFFFF).
-3. Every living PC: `stamina = min(70, stamina + step x rate)` (no flu factor); the "defended" flag is cleared.
+3. Every living PC: `stamina = min(70, stamina + step x rate)` (no flu factor).
 
 The cheat state is applied first (section 10).
 
@@ -110,7 +109,7 @@ Loop (at most 20000 iterations; exceeding it ends the fight as Stalled):
 4. Otherwise, if any PC `can_act`, the loop returns: the host picks which PC. While a form change is pending nobody can act, so time runs on until a PC's countdown reaches 0 and step 2 casts the form element.
 5. Otherwise `time_advance` and repeat.
 
-`can_open_menu`: a PC, alive, stamina 10 or more, none of the `lo` bits 0x20304080 (KO 0x80, asleep 0x4000, confused 0x100000, 0x200000, defeated / frozen 0x20000000), and not defended. `can_act` also requires the fight to be on and no pending form change.
+`can_open_menu`: a PC, alive, stamina 10 or more, none of the `lo` bits 0x20304080 (KO 0x80, asleep 0x4000, confused 0x100000, 0x200000, defeated / frozen 0x20000000). A guard does not close the menu. `can_act` also requires the fight to be on and no pending form change.
 
 ### 2.7 Flee
 
@@ -142,9 +141,16 @@ Refused, with the reason string, when: the battle is over; the actor is not a pa
 
 `cast_element` (record byte +4 bit 0x10) hits every qualifying unit of the target's side, or all nine units when both side bits are set (colour fields, Chrono Cross, the seal-all elements). A unit qualifies when it is present and alive (KO'd for a KO-only element or mode 4), and, for an enemy slot, bit `unit` of `cast_mask` is set; the party side is never masked. `cast_mask` starts as `~(scene byte 0x1B << 3) & 0x1FF`; script ops 34, 35 and 5B (argument 0) set a unit's bit. A cast reads the mask once, when it starts, so a unit a kill script reveals during the cast is not hit by it. The cast stops when the fight ends. If nobody qualified, the cast is made once on the chosen target. An enemy's scripted element (op 67) aimed at several units is likewise one cast: each unit of its target mask that is alive (KO'd for a KO-only element) takes it once. The ring takes the cast colour once, after the last target (section 5).
 
-### 3.4 The "defended" flag
+### 3.4 Guard and the command menu
 
-See 2.2. It is a command-menu gate only; it does not affect targeting.
+See 2.2. The menu order (attacker, else actor + 1, actor + 2, the actor last) and the L1 / R1 switch walk the PCs by `can_open_menu` alone, so the menu can come to a guarding PC, which ends its guard. The guard counts as "cannot take the menu" only in Defend's own time-step check. It does not affect targeting.
+
+**Menu entry.** Whenever the menu reaches a PC (the first menu of the battle, the end of a PC's turn, an L1 / R1 press, a PC that can act again after nobody could) the PC's command window opens before its top menu runs. The window rect (x 36, bottom y 204, PS1 pixels) grows by three sub-steps per draw pass, 3 px wide and 3 x 36 / 52 px high (8.8 fixed point), to 52 x 36: 18 draw passes. Until it is full only a white chamfered outline is drawn, from (x - 6, y - h - 6) to (x + w + 4, y + 5); the command box, its cursor and the command headline are not drawn. On the first frame after the window is full in which no action runs, the menu state steps on; on the next frame the top menu runs for the first time: the PC's guard ends and its idle restarts (2.2), the box is drawn, and from that frame on it takes cursor moves and confirms; L1 / R1 count one frame later. A button pressed before is dropped, not kept. The draw passes run once per video frame, so on RDE and in OpenCross (one game frame per video frame) the top menu takes over 20 ticks after the tick the menu reached the PC; the PS1, at two or three video frames per game frame, takes 7 to 11 game frames (20 to 23 video frames).
+
+* When the menu passes: right after the PC's own action (Defend at once, an attack turn once the PC is home, an element once its cast is over), before the enemy actions that follow; the window grows during them and the top menu takes over on the second frame after the last of them, when the window is already full.
+* L1 / R1 restart the menu entry even when nobody else can act (the menu stays on the PC, without the switch sound), and restart the PC's idle at the press, so a guarding PC's block pose plays again until its top menu takes over.
+* Leaving the HIT% menu (Cross) is not an entry: the window stays open, and the top menu runs again on the first frame after the PC is home.
+* OpenCross: `BattleView::begin_menu_entry`, `tick_menu_entry`, `build_entry_outline`; routes `battle_defend`, `battle_camera` and `battle_menu_entry`.
 
 ## 4. Element grid and gauge
 
@@ -222,7 +228,7 @@ Used by the colour curse (mode 36): `lo` bits only, no roll and no weakness doub
 
 1. Each element mode orders its parts: mode 0 rolls the status first, a landed status cancels the damage when record word +0xE bit 15 is set, and with bit 14 a target with hi 0x2000000 is knocked out outright; modes 32 and 33 damage first, then roll the status; mode 15 rolls the status first and deals damage only when nothing landed.
 2. `damage_unit`: a KO'd target is untouched (HP stays 0, no healing). Code 3 heals up to max HP. Code 2 or a negative value does nothing. Otherwise HP `- value`; a target with `lo` 0x40000 also loses 10 stamina; HP at or below 0 becomes 1 for an invincible unit and for a self-inflicted hit, else `kill`.
-3. `kill`: HP 0, KO bit (0x80), guard and "defended" cleared, and for an enemy its kill script starts (section 7).
+3. `kill`: HP 0, KO bit (0x80), guard cleared, and for an enemy its kill script starts (section 7).
 4. A unit is alive when it is present and its `lo` has neither KO (0x80) nor defeated / frozen (0x20000000). A status that sets one of those bits removes the unit from play without touching its HP.
 
 ### 6.6 Status plates on the HUD
@@ -248,6 +254,10 @@ The menu shows a unit's statuses as a column of name plates (`status_plates.h`, 
 * Target selection: the cursor unit's plates on the left, columns x 16 and 54. An element's target ring shows them only while it holds one unit; under the Dopplegang creature list they are not shown. The chain menu and the element list show none.
 * DYNAMIC target camera: the target cursor is not drawn unless the target mode is the whole range (an element whose record byte 4 has bit 0x10; mode 1 = a single-target Attack or element), and then element targeting shows no plates either; Attack targeting still shows them. The NORMAL camera draws both.
 * Each plate is one frame of the battle menu sprite sheet: the 3 x 6 triangle part at (0, +1) (cells u 212 / 215 / 218 / 221 / 224 / 227 = red / green / blue / yellow / white / black) and the name glyphs from (+4, 0); frame = 7 + the status's rank among the bits of 0x33377339. Captured on the PS1 (all twelve statuses in both columns): every triangle colour, the y rows and the left columns match; the right column is drawn at 268 there.
+
+### 6.7 The menu cursor
+
+The red diamond left of the selected row of the command box (the top menu and the HIT% box) and of the Dopplegang creature list is one of two frames of the battle menu sprite sheet, both one part at offset (0, 0) of the draw point, so they share the top-left corner: frame 1 the 9 x 8 diamond, frame 2 the 7 x 8 diamond turned edge-on (`battle_11.png`: the left 9 and the right 7 of its 16 columns). The frame is `((battle tick >> 4) & 1) + 1`: each shows for 16 ticks, a full turn takes 32, and the phase follows the battle's tick counter, not the moment the menu opened (`BattleView::add_menu_cursor`). The command box draws it at (box x + 2, box y - 42 + 10 x row) in the original's coordinates; nothing else about it changes (no colour, brightness or position animation). The original also leaves it out on frames when the disc drive is busy; the engine has no disc and always draws it. The element list has no diamond (its selected plate pulses and the grid column blinks instead).
 
 ## 7. Battle end
 
@@ -298,7 +308,7 @@ The party records: `hp = min(unit HP, record max HP)`, raised to 1 if 0; persist
 
 Row `{battles, pendingTenths, step}` of the star table (`battle_data.md` sections 1 and 3 for the table and the formulas); `cap = (short)(step x battles)`.
 
-* Normal fight: `progress = min(progress + step, cap)` (the instant-growth cheat sets it to `cap`). For every party member that is alive: for each of the 7 stats, `gain = minor_growth(snap, pending, stat, pendingTenths, progress, cap)`, limited to the room below the Lv 99 value; the stat is raised and the gain recorded in `Rewards::gains`. Max HP is capped at 999 (the core raises the stat, not the current HP). Knocked-out members get nothing.
+* Normal fight: `progress = min(progress + step, cap)` (the instant-growth cheat sets it to `cap`). For every party member that is alive: for each of the 7 stats, `gain = minor_growth(snap, pending, stat, pendingTenths, progress, cap)` (with the instant-growth cheat `full_minor_growth`, the whole distance `round_half_up((snap + pending x pendingTenths / 10) - stat)`, floor 0), limited to the room below the Lv 99 value; the stat is raised and the gain recorded in `Rewards::gains`. Max HP is capped at 999 (the core raises the stat, not the current HP). Knocked-out members get nothing.
 * Boss fight (scene boss bit): `star_up`. Every living party member and every bench member (the bench regardless of state) gains its whole pending delta, limited to the Lv 99 room. Then `progress = 0`, `star + 1`, `counter + 1`. Then everyone (the whole party including the knocked-out, and the bench, merged and rolled in character id order with the battle RNG) takes `snap = stat` and new pending deltas (`next_pending_hp`, `next_pending_stat`), and their grid unlocks are recomputed: the populated cells of rows 0 and 1 plus the `el_mask` unlocks up to the new star.
 
 ### 8.3 What the host writes (`apply_battle_result`)
@@ -363,4 +373,4 @@ After the screen is done it returns, per party slot, the displayed HP `clamp(HP,
 | `free_elements` | a cast does not mark the cell used, does not spend a consumable stack and does not spend gauge; stamina is still paid |
 | `always_hit` | the hit chance of a PC weapon attack is 100 (also the chance figure the pilfer reads) |
 | `always_loot` | a PC's pilfer skips the chance roll and takes the rare word when it is non-zero; kill drops take row slot 1 when non-zero, else slot 0 (the drop roll is still drawn) |
-| `instant_growth` | a normal victory sets `progress` to `cap` (the whole star's growth at once); boss fights are unchanged |
+| `instant_growth` | a normal victory sets `progress` to `cap` and raises every stat straight to its minor-growth target (`full_minor_growth`), so one win gives all the growth the star's normal fights can give and later wins give nothing until the next star-up; boss fights are unchanged |

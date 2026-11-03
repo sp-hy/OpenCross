@@ -314,7 +314,7 @@ std::string BattleView::fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram
     if (d1.size() != s1.size() || std::memcmp(d1.data(), s1.data(), s1.size()) != 0) continue;
     // The page must hold the model's own disc texture (same indices, CLUT row 0 at the binding) - else the pack recoloured / repainted it.
     auto tex_of = [&](bool disc_only) -> std::optional<import::AtimMain> {
-      for (const char* ext : {".ltd", ".ltc"}) {
+      for (const char* ext : {".ltc", ".ltd"}) {
         const std::string path = "cdrom/" + stem + ext;
         if (auto bytes = disc_only ? vfs_->read_disc(path) : vfs_->read(path)) return import::load_atim_main(*bytes);
       }

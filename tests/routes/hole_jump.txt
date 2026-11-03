@@ -1,0 +1,27 @@
+# Lizard Rock hole: MOVE_TWEEN (5B) into the hole is a ballistic hop like JUMP_MOVE (5C): Serge is high in the air (apex about -240)
+# 40 ticks after the press, lands on the underground floor, then hops out at (-356, -287); the way back the same.
+0 wait idle
+- load opa_a03f 0
+- wait room opa_a03f 300
+- wait idle 300
+- put -1450 -1200
+- wait 10
+- approach 4
+- key down confirm
+- wait 3
+- key up confirm
+- wait 37
+- assert height p0 -250 -200
+- wait idle 400
+- assert near player -356 -287 4
+- assert height p0 220 240
+- approach 5
+- key down confirm
+- wait 3
+- key up confirm
+- wait 37
+- assert height p0 -40 20
+- wait idle 400
+- assert near player -1516 -1246 4
+- assert height p0 -30 -10
+- quit

@@ -146,14 +146,20 @@ bool FieldVM::exec_scene(u8 op) {
       }
       break;
     }
-    case 0x7B:  // ADD_TO_PARTY: a refused add also skips the 7C that follows
-      advance(host_.party_add(operand_u(1)) ? 3 : 4);
+    case 0x7B: {  // ADD_TO_PARTY: a refused add also skips the 7C that follows
+      const s32 char_id = operand_u(1);
+      const bool added = host_.party_add(char_id);
+      if (added) staged_char_ = char_id;
+      advance(added ? 3 : 4);
       break;
-    case 0x7C:  // COMMIT_PARTY_MODEL: refreshes the party models once no model swap is pending
+    }
+    case 0x7C:  // COMMIT_PARTY_MODEL: refreshes the party models once no model swap is pending, then re-runs the new member's entity
       if (host_.model_swap_busy()) {
         yield_ = true;
       } else {
         host_.refresh_party_models();
+        relink_party_entity(staged_char_);
+        host_.place_followers();
         advance(1);
       }
       break;
@@ -219,13 +225,15 @@ bool FieldVM::exec_scene(u8 op) {
       }
       yield_ = true;
       break;
-    case 0x86:  // CAMERA_AUTO_FOLLOW: b == 1 waits for the formation then switches it off, else switches it on
+    case 0x86:  // CAMERA_AUTO_FOLLOW: b != 1 holds the party and sends it into the V; b == 1 waits for the walk, then releases the hold
       if (byte_at(1) == 1) {
         if (host_.formation_done()) {
           host_.camera_auto_follow(false);
+          gflags_ &= ~gflag::kFormationHold;
           advance(2);
         }
       } else {
+        gflags_ |= gflag::kFormationHold;
         host_.camera_auto_follow(true);
         advance(2);
       }

@@ -1,0 +1,17 @@
+# hid_a05f: stepping on the trigger plays the flyby. The Wingapede (ent 9) flies a 3D chase after the invisible guide (ent 10) along
+# its WALK_TO path high above the walk mesh; touching the guide ends the loop. On the PS1 the flight takes 440 ticks and ends at
+# (2459, 5010), height -4166; the followers stand still while it flies and the controls come back after the dialogue.
+0 wait idle 600
+- request party_add 2
+- request party_add 4
+- load hid_a05f 0
+- wait room hid_a05f 300
+- wait idle 300
+- put 2506 -1839
+- wait 40
+- mash until idle 0 1500
+- assert near 9 2459 5011 20
+- assert room hid_a05f
+- assert near 2 2506 -1839 250
+- assert near 3 2506 -1839 250
+- quit

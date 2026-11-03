@@ -48,6 +48,8 @@ class SpriteBatch {
 
   // `resume` continues the frame's quad buffer after an earlier begin()/end() pair (e.g. a UI pass after the 3D pass).
   void begin(const Frame& frame, float view_width, float view_height, bool resume = false);
+  // Changes the size of the virtual space for the following quads (the quads already batched keep theirs).
+  void set_view(float view_width, float view_height);
   void draw(TexRef texture, float x, float y, float w, float h, float u0 = 0.0f, float v0 = 0.0f,
             float u1 = 1.0f, float v1 = 1.0f, u32 color = 0xFFFFFFFFu);
   // Same as draw(), but the quad is depth tested and written at `depth` (0..1, larger = farther) and texels with

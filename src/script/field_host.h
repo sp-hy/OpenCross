@@ -117,6 +117,9 @@ enum class Predicate : u8 {
   GameStateLt2,
 };
 
+// The wait forms of the scripted camera moves: 5D (the start form's target again), 5E, 61.
+enum class CameraWait : u8 { Position, Actor, Follow };
+
 // Head-turn family (FE 30 31 32 35 49 53 54 55 56 57). Every form but Reset stores a world target in the model and starts the
 // head turn at the entity's turn rate; Reset releases it.
 enum class HeadOp : u8 {
@@ -204,6 +207,10 @@ class FieldHost {
 
   // ---- entity setup (0E 0F D1) -------------------------------------------------------------------------------------
   virtual void setup_pc(int ent, int char_id, int flags) = 0;
+  // 7C: a party entity whose INIT was re-run takes the controlled entity's position and facing.
+  virtual void place_on_controlled(int ent) = 0;
+  // 7C: the party members of slots 1 and 2 stand in the V behind the controlled entity, facing its way, and the follower trails restart.
+  virtual void place_followers() = 0;
   virtual void setup_npc(int ent, int model) = 0;
   // D1: room model `model` for the entity (the room's model list, as 0F) placed on floor level 0; returns
   // the room's D1 ordinal = the entity's bit in the room's defeated-monster mask.
@@ -275,7 +282,8 @@ class FieldHost {
   virtual void camera_to_actor(int frames) = 0;
   // 61
   virtual void camera_follow(int ent, int frames) = 0;
-  virtual bool camera_busy() = 0;
+  // one tick of a 5D / 5E / 61 wait form; true when the move is over (x, y: the 5D target)
+  virtual bool camera_wait(CameraWait kind, s32 x, s32 y) = 0;
   // 83
   virtual void camera_limits(s32 x0, s32 x1, s32 y0, s32 y1) = 0;
   // 86 (mode != 1)
@@ -284,7 +292,9 @@ class FieldHost {
   virtual std::pair<s32, s32> camera_position() = 0;
   // FE 50
   virtual void set_camera_origin(s32 x, s32 y) = 0;
-  // 5F 60 FE 4C (-1 = clear)
+  // 5F 60: the entity the scroll follows (-1 = clear; the controlled entity, the pad and the followers stay)
+  virtual void set_camera_target(int ent) = 0;
+  // FE 4C
   virtual void set_controlled_entity(int ent) = 0;
   // FE 21
   virtual void shake(int x, int y, int time) = 0;
@@ -460,6 +470,8 @@ class NullHost : public FieldHost {
   int character_entity(int char_id) override;
   int party_slot_of_entity(int ent) override;
   void setup_pc(int ent, int char_id, int flags) override;
+  void place_on_controlled(int ent) override;
+  void place_followers() override;
   void setup_npc(int ent, int model) override;
   int load_model(int ent, int model) override;
   bool monster_defeated(int ordinal) override;
@@ -492,11 +504,12 @@ class NullHost : public FieldHost {
   void camera_set_position(s32 x, s32 y, int frames) override;
   void camera_to_actor(int frames) override;
   void camera_follow(int ent, int frames) override;
-  bool camera_busy() override;
+  bool camera_wait(CameraWait kind, s32 x, s32 y) override;
   void camera_limits(s32 x0, s32 x1, s32 y0, s32 y1) override;
   void camera_auto_follow(bool on) override;
   std::pair<s32, s32> camera_position() override;
   void set_camera_origin(s32 x, s32 y) override;
+  void set_camera_target(int ent) override;
   void set_controlled_entity(int ent) override;
   void shake(int x, int y, int time) override;
   void formation(u16 key, std::span<const s32> args) override;

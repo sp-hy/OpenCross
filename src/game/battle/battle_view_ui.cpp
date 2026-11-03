@@ -768,7 +768,10 @@ void BattleView::handle_input(const platform::Input& in) {
       menu_chime_ = false;
       audio_.play_menu(0x16);
     }
+    begin_menu_entry(active_pc_);
   }
+  // The top menu takes no input until its entry is over; what is pressed before is dropped.
+  if (ui_ == Ui::Top && !menu_live()) return;
   if (auto_ && ui_ == Ui::Top) {
     auto_pick();
     return;
@@ -865,8 +868,11 @@ void BattleView::handle_input(const platform::Input& in) {
     debug_ui_ = 0;
     return;
   }
-  // Switching PC plays SFX 0x16, restarts the idle script and restores the cursor memory.
-  if (ui_ == Ui::Top && swap != 0) switch_active_pc(swap);
+  // Switching PC plays SFX 0x16, restarts the idle script and restores the cursor memory; L1 / R1 count from the second tick of the top menu.
+  if (ui_ == Ui::Top && swap != 0 && entry_live_ >= 1) {
+    switch_active_pc(swap);
+    return;
+  }
   // The next opening slides in again.
   if (ui_ != Ui::Element) elem_shown_ = -1, elem_state_ = 0;
   const battle::Unit& unit = battle_->unit(active_pc_);
@@ -890,6 +896,7 @@ void BattleView::handle_input(const platform::Input& in) {
         chain_.clear();
         // Target first, the PC runs up to it, then the hit percentages.
         enter_target(Tgt::Enemy);
+        if (ui_ == Ui::Target) top_command_camera();
       } else if (top_cursor_ == 1) {
         pending_cmd_.kind = battle::Command::Kind::Element;
         battle_->open_element_menu(active_pc_);
@@ -900,11 +907,14 @@ void BattleView::handle_input(const platform::Input& in) {
           audio_.play_menu(0x18);
           break;
         }
+        top_command_camera();
         ui_ = Ui::Element;
       } else if (top_cursor_ == 2) {
+        top_command_camera();
         pending_cmd_.kind = battle::Command::Kind::Defend;
         execute(pending_cmd_);
       } else {
+        top_command_camera();
         pending_cmd_.kind = battle::Command::Kind::Run;
         execute(pending_cmd_);
       }
@@ -913,10 +923,12 @@ void BattleView::handle_input(const platform::Input& in) {
     case Ui::Chain: {
       step(chain_cursor_, 4, vdir);
       if (vdir != 0) audio_.play_menu(1);
-      // Leave: the PC returns, back to the command menu.
+      // Leave: the PC returns under the approach shot, back to the command menu.
       if (cancel) {
         audio_.play_menu(6);
-        begin_disengage();
+        // The top menu comes back on this PC with its window still open: no new entry.
+        turn_open_ = false;
+        begin_disengage(true);
         ui_ = Ui::Wait;
         break;
       }
@@ -965,8 +977,10 @@ void BattleView::handle_input(const platform::Input& in) {
       // The grid cursor tick.
       if (level * data::kGridCols + slot != cell_) audio_.play_menu(1);
       cell_ = level * data::kGridCols + slot;
+      // Leaving the list or opening the target ring ends the list's shot.
       if (cancel) {
         audio_.play_menu(6);
+        end_camera_tasks();
         ui_ = engaged_ ? Ui::Chain : Ui::Top;
         break;
       }
@@ -993,6 +1007,7 @@ void BattleView::handle_input(const platform::Input& in) {
           hdr_on_ = true;
           hdr_cell_ = cell_;
           hdr_.reset((tick_count_ >> 2) & 3);
+          end_camera_tasks();
           enter_target(target_mode(cell_));
         } else {
           audio_.play_menu(0x18);
@@ -1156,6 +1171,26 @@ void BattleView::add_skin_box(float x, float y, float w, float h) {
   for (size_t i = 1; i < 9; ++i) add_img(hud_[kHSkinOpaque], pieces[i].x, pieces[i].y, pieces[i].w, pieces[i].h, pieces[i].u0, pieces[i].v0, pieces[i].u1, pieces[i].v1);
 }
 
+// battle_11.png holds the two frames side by side: the full diamond in the left 9 of 16 columns, the turned one in the right 7. Both frames
+// share the top-left corner.
+void BattleView::add_menu_cursor(float x, float y) {
+  if (((tick_count_ >> 4) & 1) == 0)
+    add_img(hud_[kHDiamond], x, y, 9 * kPs1Px, 8 * kRowScale, 0, 0, 0.5625f, 1);
+  else
+    add_img(hud_[kHDiamond], x, y, 7 * kPs1Px, 8 * kRowScale, 0.5625f, 0, 1, 1);
+}
+
+// The command window opening: its rect (x 36, bottom y 204) grows 3 px wide and 3 x 36 / 52 px high per tick up to 52 x 36, and every tick
+// before it is full draws only the white chamfered outline from (x - 6, y - h - 6) to (x + w + 4, y + 5); the box itself comes with the top menu.
+void BattleView::build_entry_outline() {
+  if (entry_pc_ < 0 || entry_live_ >= 0 || entry_age_ < 1 || entry_age_ >= kEntryGrowTicks || finish_ != Finish::None) return;
+  constexpr int kX = 36, kBottom = 204, kW = 52, kH = 36;
+  const int w = std::min(3 * entry_age_, kW), h = std::min((3 * entry_age_ * ((kH << 8) / kW)) >> 8, kH);
+  const size_t outline0 = op_count();
+  add_box(static_cast<float>(kX - 6) * kPs1Px, static_cast<float>(kBottom - h - 6) * kRowScale, static_cast<float>(w + 11) * kPs1Px, static_cast<float>(h + 12) * kRowScale, false);
+  set_group(outline0, -1, -21 * kPs1Px);
+}
+
 void BattleView::build_command_ui() {
   const battle::Battle& battle_state = *battle_;
   const int li = std::clamp(static_cast<int>(lang_), 0, 5);
@@ -1214,14 +1249,15 @@ void BattleView::build_command_ui() {
     }
   }
   if (active_pc_ >= 0 && ui_ == Ui::Dopple) build_dopple_ui();
+  build_entry_outline();
   if (active_pc_ < 0 || !(ui_ == Ui::Top || ui_ == Ui::Chain || ui_ == Ui::Element || ui_ == Ui::Target)) return;
   const battle::Unit& unit = battle_state.unit(active_pc_);
-  // Command window (white-bordered black box at PS1 (28, 177), 68 x 54; rows 11 px apart, red diamond cursor). The box is the PS1's
-  // own line box in both art modes. Top: Attack / Element / Defend / Run Away (sheet 0x04 g1..4,
+  // Command window (white-bordered black box at PS1 (28, 177), 68 x 54; rows 11 px apart, the animated red diamond cursor left of the row).
+  // The box is the PS1's own line box in both art modes. Top: Attack / Element / Defend / Run Away (sheet 0x04 g1..4,
   // XLAT 0x10002 -> style 2, gn_70 x 0.425). Engaged (the PC stands at its target): "1-(92%)" "2-(79%)" "3-(69%)" + Element, with the "HIT%"
   // caption; a strength the stamina cannot pay is dimmed.
   const size_t cmd0 = op_count();
-  if (ui_ == Ui::Top || ui_ == Ui::Chain) {
+  if (menu_live() || ui_ == Ui::Chain) {
     // A pickable level exists (used cells count).
     const bool any_element = elem_open_level(unit, tables_->elements.size()) >= 0;
     // Row colours (PS1 colour words 0x808080 white / 0x8080 yellow / 0x404040 dim, remapped for the HD text):
@@ -1260,11 +1296,7 @@ void BattleView::build_command_ui() {
         label = kCommand[li][1];
         if (!any_element || unit.gauge < 0 || unit.stamina <= 0) row_colour = kDim;
       }
-      // Red diamond cursor: battle_11.png {0, 0, 0.5625, 1}, 9 x 8 PS1 px.
-      if (sel) {
-        const float cx = 37 * kPs1Px, cy = (yl * kRowScale) + ref_y(5);
-        add_img(hud_[kHDiamond], cx - 4.5f * kPs1Px, cy - 4 * kRowScale, 9 * kPs1Px, 8 * kRowScale, 0, 0, 0.5625f, 1);
-      }
+      if (sel) add_menu_cursor(32.5f * kPs1Px, yl * kRowScale + ref_y(5) - 4 * kRowScale);
       btext(cmd_flags, label, 44, yl, remap_text_colour(row_colour));
     }
     if (ui_ == Ui::Chain) {
@@ -1279,9 +1311,11 @@ void BattleView::build_command_ui() {
   // Top menu: the command under the cursor as a headline (sheet 0x00 g1..4, style 0xA) right-aligned at PS1 (300, 22); Japanese shows the
   // English words. The right group.
   if (ui_ == Ui::Top) {
-    const size_t caption0 = op_count();
-    btext(0xA, jp ? kCommandCaptionJp[top_cursor_ & 3] : kCommand[li][top_cursor_ & 3], 300, 22, 0);
-    set_group(caption0, 1);
+    if (menu_live()) {
+      const size_t caption0 = op_count();
+      btext(0xA, jp ? kCommandCaptionJp[top_cursor_ & 3] : kCommand[li][top_cursor_ & 3], 300, 22, 0);
+      set_group(caption0, 1);
+    }
     build_status_plates(active_pc_, true);
   }
   if (ui_ == Ui::Element) build_element_ui();
@@ -1580,10 +1614,7 @@ void BattleView::build_dopple_ui() {
   add_skin_box((wx - 8.0f) * kPs1Px, (wy - 8.0f) * kRowScale, (ww + 16.0f) * kPs1Px, (wh + 16.0f) * kRowScale);
   const int entry_count = static_cast<int>(dop_list_.size());
   const int cc = dop_cur_ & 1, row = dop_cur_ >> 1;
-  if (((tick_count_ >> 4) & 1) == 0)
-    add_img(hud_[kHDiamond], (0x36 + 0x68 * static_cast<float>(cc)) * kPs1Px, (0x3A + 16 * static_cast<float>(row)) * kRowScale, 9 * kPs1Px, 8 * kRowScale, 0, 0, 0.5625f, 1);
-  else
-    add_img(hud_[kHDiamond], (0x36 + 0x68 * static_cast<float>(cc)) * kPs1Px, (0x3A + 16 * static_cast<float>(row)) * kRowScale, 7 * kPs1Px, 8 * kRowScale, 0.5625f, 0, 0.4375f, 1);
+  add_menu_cursor((0x36 + 0x68 * static_cast<float>(cc)) * kPs1Px, (0x3A + 16 * static_cast<float>(row)) * kRowScale);
   for (int screen_slot = 0; screen_slot < 12; ++screen_slot) {
     const int index = dop_top_ * 2 + screen_slot;
     if (index >= entry_count) break;

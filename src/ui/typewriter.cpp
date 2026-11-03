@@ -9,7 +9,21 @@ using import::TokKind;
 
 namespace {
 
-// Lays glyphs out line by line at the metrics' advances; a finished page is then word-wrapped (wrap_page). Events are recorded at the
+// The pen of one line. width sums the advances; with a grid the glyphs sit on whole grid steps, the pen dropping the fraction of a step
+// at every glyph.
+struct Pen {
+  float grid = 0;
+  float width = 0;
+  int steps = 0;
+
+  float x() const { return grid > 0 ? static_cast<float>(steps) * grid : width; }
+  void advance(float by) {
+    width += by;
+    if (grid > 0) steps = static_cast<int>(static_cast<float>(steps) + by / grid);
+  }
+};
+
+// Collects a page's glyphs with their advances; a finished page is then word-wrapped and placed (place_page). Events are recorded at the
 // glyph index they fire before.
 struct PageBuilder {
   const LayoutMetrics& metrics;
@@ -17,7 +31,6 @@ struct PageBuilder {
   float limit = 0;
   std::vector<TextPage> pages;
   TextPage cur;
-  float x = 0, y = 0;
   int line_start = 0;
   // Per glyph of the page: its pen advance, the width it counts for in word wrap, and whether it sits on a choice line.
   std::vector<float> advances;
@@ -40,20 +53,17 @@ struct PageBuilder {
   float advance(char32_t ch) const { return metrics.advance ? metrics.advance(ch) : 0.0f; }
 
   void new_line() {
-    x = 0;
-    y += metrics.line_height;
     line_start = static_cast<int>(cur.glyphs.size());
     newlines.push_back(line_start);
     choice_line = in_indent = false;
   }
 
-  // advance_override >= 0 replaces the font advance (the choice indent).
+  // advance_override >= 0 replaces the glyph's own advance (the choice indent, a button glyph).
   void add_glyph(char32_t ch, float advance_override = -1.0f) {
-    const float glyph_advance = advance_override >= 0 ? advance_override : advance(ch);
+    const float layout_width = advance_override >= 0 || !metrics.glyph_width ? -1.0f : metrics.glyph_width(ch, italic);
+    const float glyph_advance = advance_override >= 0 ? advance_override : metrics.pen_grid > 0 && layout_width >= 0 ? layout_width : advance(ch);
     LayoutGlyph glyph;
     glyph.ch = ch;
-    glyph.x = x;
-    glyph.y = y;
     glyph.color = color;
     glyph.italic = italic;
     if (digits_left > 0) {
@@ -62,16 +72,16 @@ struct PageBuilder {
     }
     cur.glyphs.push_back(glyph);
     advances.push_back(glyph_advance);
-    wrap_widths.push_back(advance_override >= 0 || !metrics.wrap_advance ? glyph_advance : metrics.wrap_advance(ch, italic));
+    wrap_widths.push_back(layout_width >= 0 ? layout_width : glyph_advance);
     on_choice_line.push_back(choice_line);
-    x += glyph_advance;
   }
 
   // The page as a reading-order walk of glyphs and newlines. A space remembers where the line may break, and the walk checks the width it
   // has reached before each entry: past the limit it turns the remembered space into a newline and walks on from there. So the last glyph
   // of a page may overhang, a space on the page's first entry never breaks, a line without a space since the last break stays whole, and a
-  // space remembered before a newline still breaks when the next line overflows without a space of its own. Choice lines never break.
-  void wrap_page() {
+  // space remembered before a newline still breaks when the next line overflows without a space of its own. Choice lines never break; with
+  // no limit nothing breaks. The kept glyphs are then placed line by line at their advances.
+  void place_page() {
     struct Entry {
       int glyph;
       bool choice;
@@ -90,7 +100,7 @@ struct PageBuilder {
     int candidate = -1;
     for (int i = 0; i < static_cast<int>(entries.size()); ++i) {
       const Entry& entry = entries[static_cast<size_t>(i)];
-      if (candidate < 0 || width <= limit || entry.choice) {
+      if (limit <= 0 || candidate < 0 || width <= limit || entry.choice) {
         if (i > 0 && !entry.newline && cur.glyphs[static_cast<size_t>(entry.glyph)].ch == U' ') candidate = i;
       } else {
         entries[static_cast<size_t>(candidate)].newline = true;
@@ -106,19 +116,22 @@ struct PageBuilder {
     std::vector<LayoutGlyph> kept;
     kept.reserve(cur.glyphs.size());
     std::vector<u32> new_index(cur.glyphs.size() + 1, 0);
-    float pen_x = 0, pen_y = 0;
+    Pen pen{metrics.pen_grid};
+    float pen_y = 0;
+    cur.width = 0;
     for (const Entry& entry : entries) {
       if (entry.glyph >= 0) new_index[static_cast<size_t>(entry.glyph)] = static_cast<u32>(kept.size());
       if (entry.newline) {
-        pen_x = 0;
+        pen = Pen{metrics.pen_grid};
         pen_y += metrics.line_height;
         continue;
       }
       LayoutGlyph glyph = cur.glyphs[static_cast<size_t>(entry.glyph)];
-      glyph.x = pen_x;
+      glyph.x = pen.x();
       glyph.y = pen_y;
       kept.push_back(glyph);
-      pen_x += advances[static_cast<size_t>(entry.glyph)];
+      pen.advance(advances[static_cast<size_t>(entry.glyph)]);
+      cur.width = std::max(cur.width, pen.width);
     }
     new_index[cur.glyphs.size()] = static_cast<u32>(kept.size());
     for (PageEvent& page_event : cur.events) page_event.at = new_index[page_event.at];
@@ -131,18 +144,13 @@ struct PageBuilder {
 
   void finish_page(bool ends_message) {
     cur.ends_message = ends_message;
-    if (limit > 0) wrap_page();
-    float widest = 0;
+    place_page();
     int lines = 0;
-    for (const LayoutGlyph& glyph : cur.glyphs) {
-      widest = std::max(widest, glyph.x + advance(glyph.ch));
+    for (const LayoutGlyph& glyph : cur.glyphs)
       if (metrics.line_height > 0) lines = std::max(lines, static_cast<int>(glyph.y / metrics.line_height + 0.5f) + 1);
-    }
-    cur.width = widest;
     cur.lines = lines;
     pages.push_back(std::move(cur));
     cur = TextPage();
-    x = y = 0;
     line_start = 0;
     advances.clear();
     wrap_widths.clear();
@@ -152,30 +160,19 @@ struct PageBuilder {
   }
 };
 
-char32_t button_glyph(int button) {
-  switch (button) {
-    // Circle, cross, triangle, square.
-    case 0: return 0x25CB;
-    case 1: return 0x00D7;
-    case 2: return 0x25B3;
-    case 3: return 0x25A1;
-    default: return U'?';
-  }
-}
-
 // The widest run of glyphs between spaces and newlines over the whole message; a page turn does not end a run.
 float widest_word(const import::Message& flat, const LayoutMetrics& metrics) {
   float word = 0, widest = 0;
   bool italic = false;
   const auto add = [&](char32_t ch) {
-    word += metrics.wrap_advance ? metrics.wrap_advance(ch, italic) : metrics.advance ? metrics.advance(ch) : 0.0f;
+    word += metrics.glyph_width ? metrics.glyph_width(ch, italic) : metrics.advance ? metrics.advance(ch) : 0.0f;
     widest = std::max(widest, word);
   };
   for (const import::Token& token : flat.tokens) {
     if (token.kind == TokKind::End) break;
     if (token.kind == TokKind::Newline) word = 0;
     if (token.kind == TokKind::Italic) italic = token.arg != 0;
-    if (token.kind == TokKind::Button) add(button_glyph(token.arg));
+    if (token.kind == TokKind::Button) add(button_placeholder(metrics.wrap));
     if (token.kind != TokKind::Text) continue;
     for (const char32_t ch : token.text) {
       if (ch == U' ') word = 0;
@@ -192,6 +189,13 @@ float wrap_glyph_width(float measure, bool italic) {
   const float slant = italic ? kItalic : 1.0f;
   const float width = std::max(0.0f, measure * slant - kPadding);
   return (width > 0 ? width : kBlank * slant) * kPerTexel;
+}
+
+float jp_glyph_width(char32_t ch, float measure) {
+  constexpr float kPerTexel = 0.45f, kCell = 70.0f, kHalfCell = 40.0f, kCellPerTexel = 0.35f;
+  const bool latin = (ch >= U'a' && ch <= U'z') || (ch >= U'A' && ch <= U'Z') || ch == U'-' || ch == U'[' || ch == U']';
+  const bool half_digit = (ch >= U'0' && ch <= U'9') || ch == 0xB2 || ch == 0xB3 || ch == 0xB9;
+  return latin ? measure * kPerTexel : 2.0f * (half_digit ? kHalfCell : kCell) * kCellPerTexel;
 }
 
 int disc_line_chars(const import::Message& ps1) {
@@ -280,7 +284,15 @@ std::vector<TextPage> layout_pages(const import::Message& flat, const LayoutMetr
       case TokKind::End: ended = true; break;
       case TokKind::Color: builder.color = static_cast<u8>(token.arg); break;
       case TokKind::Italic: builder.italic = token.arg != 0; break;
-      case TokKind::Button: builder.add_glyph(button_glyph(token.arg)); break;
+      case TokKind::Button: {
+        const size_t at = static_cast<size_t>(&token - flat.tokens.data());
+        const import::Token* next = at + 1 < flat.tokens.size() ? &flat.tokens[at + 1] : nullptr;
+        const bool spaced = next && next->kind == TokKind::Text && !next->text.empty() && (next->text[0] == U' ' || next->text[0] == U' ');
+        const float advance = spaced ? metrics.button_advance_spaced : metrics.button_advance;
+        builder.add_glyph(button_placeholder(metrics.wrap), advance > 0 ? advance : -1.0f);
+        builder.cur.glyphs.back().button = token.arg;
+        break;
+      }
       case TokKind::FWait: builder.event(PageEvent::Kind::FWait, token.arg); break;
       case TokKind::FSet: builder.event(PageEvent::Kind::FSet, token.arg); break;
       case TokKind::Input:

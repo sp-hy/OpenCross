@@ -59,6 +59,34 @@ constexpr float kBottomMargin = 36;
 // Script variable of the number entry ({input(n)}): read when the message opens, written while the entry takes input.
 constexpr int kDigitEntryVar = 0x18;
 
+// What a {key(n)} button glyph shows: the ui/gamepad.png cell of the pad button (13 x 4 atlas, the plain rows: column cell % 13, row
+// (cell / 13) * 2 + 1) and the virtual key whose key cap stands for it. n 0..3 are the confirm, cancel, key-item and menu functions, 8 is
+// Start, 0x10..0x13 the d-pad up, down, right and left. pad_cell -1 = no glyph.
+struct ButtonArt {
+  int pad_cell = -1;
+  int vk = 0;
+};
+
+ButtonArt button_art(int key) {
+  using platform::Action;
+  switch (key) {
+    case 0: return {8, platform::action_vk(Action::Ok)};
+    case 1: return {9, platform::action_vk(Action::Cancel)};
+    case 2: return {0xB, platform::action_vk(Action::Item)};
+    case 3: return {0xA, platform::action_vk(Action::Menu)};
+    case 8: return {13, platform::kStartVk};
+    case 0x10: return {0, platform::action_vk(Action::Up)};
+    case 0x11: return {3, platform::action_vk(Action::Down)};
+    case 0x12: return {2, platform::action_vk(Action::Right)};
+    case 0x13: return {1, platform::action_vk(Action::Left)};
+    default: return {};
+  }
+}
+
+// A button glyph is a kButtonSize square at its placeholder glyph's pen x, kButtonDrop below the top of the line (canvas units at text
+// scale 0.5).
+constexpr float kButtonSize = 45.0f, kButtonDrop = 5.0f;
+
 // Stem of an RDE face name ("00_seljyu" -> "seljyu"): the PS1 face files cdrom/face/<stem>.tim carry the same names.
 std::string face_stem(const char* name) {
   std::string stem(name);
@@ -114,20 +142,25 @@ bool DialogueBox::load_skin(int index) {
   skin_h_ = static_cast<float>(h);
   skin_idx_ = index;
   skin_mode_ = mode_;
+  skin_generation_ = vfs_->generation();
   return true;
+}
+
+// The loaded skin is sheet `index` in the current art mode, read through the current mod overlay.
+bool DialogueBox::skin_current(int index) const {
+  return skin_set_ && index == skin_idx_ && skin_mode_ == mode_ && vfs_ && skin_generation_ == vfs_->generation();
 }
 
 void DialogueBox::set_mode(ArtMode mode) {
   mode_ = mode;
-  if (!skin_set_ || skin_mode_ != mode) load_skin(skin_idx_);
+  if (!skin_current(skin_idx_)) load_skin(skin_idx_);
   refresh_face();
 }
 
 void DialogueBox::set_skin_byte(int config_byte) {
   // Engine table 0x5B3E30: 0 -> 3, 1 -> 0, 2 -> 1, 3 -> 2, 4..14 -> same, else 15.
   const int idx = config_byte == 0 ? 3 : config_byte >= 1 && config_byte <= 3 ? config_byte - 1 : config_byte <= 14 ? config_byte : 15;
-  if (idx == skin_idx_ && skin_set_ && skin_mode_ == mode_) return;
-  load_skin(idx);
+  if (!skin_current(idx)) load_skin(idx);
 }
 
 void DialogueBox::destroy() {
@@ -135,6 +168,7 @@ void DialogueBox::destroy() {
   skin_set_ = {};
   faces_.clear();
   face_now_ = nullptr;
+  button_sheets_.clear();
   white_.destroy();
   skin_.destroy();
   linear_.destroy();
@@ -189,6 +223,45 @@ void DialogueBox::refresh_face() {
   face->set = render::TexRef(face->tex, nearest ? nearest_ : linear_);
   face_now_ = face.get();
   faces_[key] = std::move(face);
+}
+
+const render::TexRef* DialogueBox::button_sheet(const std::string& member) {
+  if (!vfs_ || !ctx_) return nullptr;
+  const std::string key = vfs_->cache_key(member);
+  if (auto it = button_sheets_.find(key); it != button_sheets_.end()) return it->second ? &it->second->set : nullptr;
+  auto png = vfs_->read(member);
+  render::DecodedImage img;
+  auto sheet = std::make_unique<Face>();
+  if (!png || !render::decode_image(*png, img) || !sheet->tex.create(*ctx_, img.width, img.height, render::TextureFormat::Rgba8, img.rgba.data())) {
+    log::warn("dialogue: button glyph sheet {} unavailable", member);
+    button_sheets_[key] = nullptr;
+    return nullptr;
+  }
+  sheet->set = render::TexRef(sheet->tex, linear_);
+  const render::TexRef* set = &sheet->set;
+  button_sheets_[key] = std::move(sheet);
+  return set;
+}
+
+// The button glyph of {key(n)} at canvas (x, y): the key cap of the bound key in keyboard style, else the pad glyph.
+void DialogueBox::draw_button(int key, float x, float y, float zoom, float alpha) {
+  const ButtonArt art = button_art(key);
+  const u32 colour = pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha));
+  const float size = kButtonSize * (scale_ / 0.5f);
+  if (key_caps_) {
+    const int cell = platform::keyboard_cell(art.vk);
+    const std::string member = std::string("ui/keyboard_") + "efigsj"[std::clamp(key_cap_lang_, 0, 5)] + ".png";
+    if (const render::TexRef* sheet = button_sheet(member); sheet && cell > 0)
+      sprites_->draw(*sheet, x * zoom, y * zoom + yo_, size * zoom, size * zoom, static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
+                     static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f, colour);
+    return;
+  }
+  if (art.pad_cell < 0) return;
+  if (const render::TexRef* sheet = button_sheet("ui/gamepad.png")) {
+    const int col = art.pad_cell % 13, row = (art.pad_cell / 13) * 2 + 1;
+    sprites_->draw(*sheet, x * zoom, y * zoom + yo_, size * zoom, size * zoom, static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
+                   static_cast<float>(col + 1) / 13.0f, static_cast<float>(row + 1) / 4.0f, colour);
+  }
 }
 
 void DialogueBox::set_portrait(int face_id) {
@@ -304,24 +377,32 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   scale_ = text_scale;
   render::TextBatch* batch = text_;
   LayoutMetrics metrics;
-  metrics.advance = [batch, face, text_scale](char32_t ch) { return batch->advance(face, ch, text_scale); };
   metrics.line_height = batch->line_height(face, text_scale);
   metrics.max_width = wrap_width_ * (text_scale / 0.5f);
-  metrics.wrap_advance = [batch, face, italic, text_scale](char32_t ch, bool slanted) {
-    return wrap_glyph_width(batch->glyph_measure(slanted && italic != render::kNoFace ? italic : face, ch), slanted) * (text_scale / 0.5f);
-  };
+  // Glyphs advance by the width they count for, on the 2-unit grid of the 640-wide layout.
+  if (wrap)
+    metrics.glyph_width = [batch, face, italic, text_scale](char32_t ch, bool slanted) {
+      return wrap_glyph_width(batch->glyph_measure(slanted && italic != render::kNoFace ? italic : face, ch), slanted) * (text_scale / 0.5f);
+    };
+  else
+    metrics.glyph_width = [batch, face, text_scale](char32_t ch, bool) { return jp_glyph_width(ch, batch->glyph_measure(face, ch)) * (text_scale / 0.5f); };
+  metrics.pen_grid = 2.0f;
   metrics.wrap = wrap;
   // Choice indent: non-JP only.
   if (choice_mode_ && wrap) {
     metrics.choice_space_first = 2.0f * 70.0f * 0.45f * (text_scale / 0.5f);
     metrics.choice_space = 2.0f * 20.0f * 0.45f * (text_scale / 0.5f);
   }
+  if (wrap) {
+    metrics.button_advance_spaced = 0.9f * 40.0f * (text_scale / 0.5f);
+    metrics.button_advance = 0.9f * 55.0f * (text_scale / 0.5f);
+  }
   line_h_ = metrics.line_height;
   // Make every glyph of the message available before the first frame that draws it.
   std::u32string all;
   for (const auto& tok : flat.tokens)
     if (tok.kind == import::TokKind::Text) all += tok.text;
-  all += U"○×△□0123456789";
+  all += U"  0123456789";
   batch->prepare(face, all);
   if (italic != render::kNoFace) batch->prepare(italic, all);
   for (const auto& choice : choices_) batch->prepare(face, choice);
@@ -364,21 +445,25 @@ void DialogueBox::rect(float x, float y, float w, float h, u32 color) {
   sprites_->draw(white_set_, x, y, w, h, 0, 0, 1, 1, color);
 }
 
-// Frame geometry for a text origin (x, y), widest line `text_width`, `lines` text lines.
+// Frame geometry for a text origin (x, y) (the first glyph's pen), widest line `text_width`, `lines` text lines. The frame's base line is
+// 10 units right of the text origin (23.5 with the portrait on the left; JP: 6 left of it), less 270 with the portrait on the left (the
+// face sits between the frame's left edge and the text). The left edge X0 is 40 left of the base line (JP: 25, 5 with the portrait on the
+// left). The right corner starts past the end of the widest line by 36 (4 before it from three text lines on), by 253 with the portrait
+// on the right (the face's room), by 233 with it on the left.
 DialogueBox::Geo DialogueBox::frame_geo(float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left) const {
-  return frame_geo_for(skin_idx_, x, y, text_width, lines, has_portrait, portrait_left);
+  return frame_geo_for(skin_idx_, jp_, x, y, text_width, lines, has_portrait, portrait_left);
 }
 
-DialogueBox::Geo DialogueBox::frame_geo_for(int skin_idx, float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left) {
+DialogueBox::Geo DialogueBox::frame_geo_for(int skin_idx, bool jp, float x, float y, float text_width, int lines, bool has_portrait,
+                                            bool portrait_left) {
   Geo geo;
   geo.skin = skin_idx;
-  const float base = x + 10;
-  geo.X0 = base - 40;
+  const bool face_left = has_portrait && portrait_left;
+  const float base = x + (jp ? -6.0f : face_left ? 23.5f : 10.0f) - (face_left ? 270.0f : 0.0f);
+  geo.X0 = base - (!jp ? 40.0f : face_left ? 5.0f : 25.0f);
   geo.Y0 = y - 35;
   geo.rows = lines + 1;
   if (has_portrait && geo.rows < 5) geo.rows = 5;
-  const float XRp = base + text_width + (portrait_left ? 0 : 30);
-  const float portrait_extra = (has_portrait && !portrait_left) ? 4 * kTW + 10 : 0;
   geo.T0x = geo.X0 - 1.28f * kTW * (skin_idx == 0 ? 1.013f : 1.0f);
   geo.T0y = geo.Y0 - 1.35f * kTW - (skin_idx == 0 ? 1.0f : 0.0f);
   geo.last = geo.Y0 + static_cast<float>(geo.rows - 1) * kTW;
@@ -386,15 +471,15 @@ DialogueBox::Geo DialogueBox::frame_geo_for(int skin_idx, float x, float y, floa
   const bool skin8_two_rows = skin_idx == 8 && geo.rows == 2;
   geo.B0y = (skin8_two_rows && !has_portrait) ? geo.last + 0.15f * kTH - 0.17f * kTW
                                               : geo.last + 0.5f * kTH - (skin8_two_rows ? 0.425f : 0.95f) * kTW;
-  geo.R0x = XRp + 6 - 110 + 70 + portrait_extra;
+  geo.R0x = base + text_width + (!has_portrait ? (lines >= 3 ? -4.0f : 36.0f) : face_left ? 233.0f : 253.0f);
+  // Fill columns up to the right corner's far edge (the fill is cut at the corner's middle).
   geo.cols = 0;
-  while (geo.X0 + static_cast<float>(geo.cols) * kTW <= XRp + 70 && geo.cols < 25) ++geo.cols;
-  geo.cols += has_portrait ? 6 : 1;
+  while (geo.X0 + static_cast<float>(geo.cols) * kTW <= geo.R0x + kCorner && geo.cols < 25) ++geo.cols;
   return geo;
 }
 
 DialogueBox::FrameSize DialogueBox::frame_size(int skin_idx, float text_width, int lines) {
-  const Geo geo = frame_geo_for(skin_idx, 0, 0, text_width, std::max(1, lines), false, false);
+  const Geo geo = frame_geo_for(skin_idx, false, 0, 0, text_width, std::max(1, lines), false, false);
   FrameSize size;
   size.w = geo.R0x + kCorner - geo.T0x;
   size.h = geo.B0y + kCorner - geo.T0y;
@@ -554,15 +639,23 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
   if (!open_ || tw_.closed() || !sprites_) return;
   const float alpha = opening_.alpha();
   if (alpha * 255.0f < 1.0f) return;
-  const render::CanvasFit cf = fit ? *fit : render::canvas_fit(vw, vh);
-  const float zoom = cf.s;
-  yo_ = cf.oy;
-  // The PS1-resolution pass (explicit fit): the view is the target's pixels, so the text snaps to its pixel grid.
-  struct Grid {
+  // The window draws RDE's canvas (render::overlay_fit), flatter than wide, in a view whose y unit is sy / sx pixels so that one zoom
+  // serves both axes; the PS1-resolution pass (explicit fit) draws into the target's own pixels. The text snaps to the pixel grid.
+  const render::OverlayFit of = fit ? render::OverlayFit{fit->s, fit->s, fit->ox, fit->oy} : render::overlay_fit(vw, vh);
+  const float zoom = of.sx;
+  const float flat = of.sy / of.sx;
+  yo_ = of.oy / flat;
+  struct View {
+    render::SpriteBatch* sprites;
     render::TextBatch* batch;
-    ~Grid() { if (batch) batch->set_pixel_grid(0.0f, 0.0f); }
-  } grid{fit && text_ ? text_ : nullptr};
-  if (grid.batch) grid.batch->set_pixel_grid(1.0f, 1.0f);
+    float vw, vh;
+    ~View() {
+      sprites->set_view(vw, vh);
+      if (batch) batch->set_pixel_grid(0.0f, 0.0f);
+    }
+  } view{sprites_, text_, vw, vh};
+  sprites_->set_view(vw, vh / flat);
+  if (text_) text_->set_pixel_grid(1.0f, flat);
   // Both art modes draw the same frame model; only the skin texture (and the font face chosen by the caller) differs.
   const bool tiled = skin_set_ && skin_mode_ == mode_ && !label_;
   const float cw = vw / zoom;
@@ -571,17 +664,15 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
   Geo geo;
   if (tiled) {
     const int lines = std::max(1, lines_);
-    // Text origin: portrait_left (portrait on the left) moves the text right of the face.
-    const float xoff = has_portrait && portrait_left_ ? 280.0f : 0.0f;
-    Geo g0 = frame_geo(0, 0, text_w_ + xoff, lines, has_portrait, has_portrait && portrait_left_);
+    Geo g0 = frame_geo(0, 0, text_w_, lines, has_portrait, has_portrait && portrait_left_);
     const float minx = g0.T0x, maxx = g0.R0x + kCorner;
     float ox, oy;
     if (has_win_) {
       // Glyph 0 at ((2 x + (portrait left ? 124 : -4)) * 2, 2 y * 960 / 432); the frame is kept inside the
       // canvas (screen clamp).
-      ox = (cw - 1280.0f) * 0.5f + 4.0f * static_cast<float>(win_x_) + (has_portrait && portrait_left_ ? 248.0f - xoff : -8.0f);
+      ox = (cw - 1280.0f) * 0.5f + 4.0f * static_cast<float>(win_x_) + (has_portrait && portrait_left_ ? 248.0f : -8.0f);
       oy = 2.0f * static_cast<float>(win_y_) * kCanvasHeight / 432.0f;
-      const Geo g1 = frame_geo(ox, oy, text_w_ + xoff, lines, has_portrait, has_portrait && portrait_left_);
+      const Geo g1 = frame_geo(ox, oy, text_w_, lines, has_portrait, has_portrait && portrait_left_);
       const float frame_left = g1.T0x, frame_right = g1.R0x + kCorner, frame_bottom = g1.B0y + kCorner;
       if (frame_right - frame_left >= cw) ox += (cw - (frame_right + frame_left)) * 0.5f;
       else if (frame_right > cw) ox -= frame_right - cw;
@@ -591,8 +682,8 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
       ox = (cw - (maxx - minx)) * 0.5f - minx;
       oy = kCanvasHeight - 8.0f - (g0.B0y + kCorner);
     }
-    geo = frame_geo(ox, oy, text_w_ + xoff, lines, has_portrait, has_portrait && portrait_left_);
-    tx = ox + xoff;
+    geo = frame_geo(ox, oy, text_w_, lines, has_portrait, has_portrait && portrait_left_);
+    tx = ox;
     ty = oy;
     bx = geo.T0x;
     by = geo.T0y;
@@ -627,6 +718,7 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
     for (render::TextBatch::Pass pass : {render::TextBatch::Pass::Backdrop, render::TextBatch::Pass::Fill}) {
       for (u32 i = 0; i < shown; ++i) {
         const LayoutGlyph& glyph = page->glyphs[i];
+        if (glyph.button >= 0) continue;
         bool hl = choosing && line_h_ > 0 && static_cast<int>(std::lround(glyph.y / line_h_)) == hl_line;
         char32_t ch = glyph.ch;
         // A number-entry digit shows the entry's value; the cursor digit is orange.
@@ -638,6 +730,10 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
         text_->draw_glyph(glyph_face, ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_, text_color(hl ? 6 : glyph.color, a), scale_ * zoom,
                           pass);
       }
+    }
+    for (u32 i = 0; i < shown; ++i) {
+      const LayoutGlyph& glyph = page->glyphs[i];
+      if (glyph.button >= 0) draw_button(glyph.button, tx + glyph.x, ty + glyph.y + kButtonDrop * (scale_ / 0.5f), zoom, alpha);
     }
   }
 
@@ -681,10 +777,10 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
     float lxo = 56.0f, lyo = 28.0f;
     if (tiled) {
       const int choice_count = static_cast<int>(choices_.size());
-      const Geo g0 = frame_geo(0, 0, cwid + 70.0f, choice_count, false, false);
+      const Geo g0 = frame_geo(0, 0, cwid + 30.0f, choice_count, false, false);
       const float right = bx + bw;
       const float ox = right - (g0.R0x + kCorner), oy = by + 60.0f - (g0.B0y + kCorner);
-      draw_tiles(frame_geo(ox, oy, cwid + 70.0f, choice_count, false, false), zoom, 1.0f, false, false);
+      draw_tiles(frame_geo(ox, oy, cwid + 30.0f, choice_count, false, false), zoom, 1.0f, false, false);
       // Pen origin = ox, cursor 40 left of it.
       px = ox - 40.0f;
       py = oy;
@@ -907,9 +1003,9 @@ void DialogueDemo::voice_sync() {
 void DialogueDemo::draw(float vw, float vh, const render::CanvasFit* fit) {
   Impl& impl = *impl_;
   if (!impl.ready) return;
+  impl.box.draw(vw, vh, fit);
   const render::CanvasFit cf = fit ? *fit : render::canvas_fit(vw, vh);
   const float zoom = cf.s;
-  impl.box.draw(vw, vh, &cf);
   // Status line (top left), debug view only.
   if (impl.status_on)
     impl.fonts.draw(font::kGn, import::utf8_to_u32(impl.status), 16, 12 + cf.oy / zoom, font::message(1, 1, 1), 0.4f, font::kLeft, zoom);
@@ -934,6 +1030,7 @@ void DialogueDemo::move_digit(int step, int shift) {
 void DialogueDemo::set_portrait(int id) { impl_->box.set_portrait(id); }
 void DialogueDemo::set_portrait_flags(bool on, bool left) { impl_->box.set_portrait_flags(on, left); }
 void DialogueDemo::set_skin_byte(int config_byte) { impl_->box.set_skin_byte(config_byte); }
+void DialogueDemo::set_key_caps(bool keyboard) { impl_->box.set_button_style(keyboard, static_cast<int>(impl_->lang)); }
 int DialogueDemo::speaker() const { return impl_->last_speaker; }
 const std::string& DialogueDemo::text() const { return impl_->plain; }
 void DialogueDemo::set_portrait_set(const std::string& set) { impl_->box.set_portrait_set(set); }

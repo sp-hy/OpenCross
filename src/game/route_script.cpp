@@ -605,6 +605,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       else return bad("assert ent: unknown key " + args[3]);
       log::info("route: entity {} {} = {} (want {})", ent_id, args[3], got, want);
       if (got != want) return bad(std::format("entity {} {} is {}, expected {}", ent_id, args[3], got, want));
+    } else if (args[1] == "scroll") {
+      // assert scroll <x> <y> [tol]: the field scroll
+      int want_x = 0, want_y = 0, tol = 0;
+      if (args.size() < 4 || !to_int(args[2], want_x) || !to_int(args[3], want_y) || (args.size() > 4 && !to_int(args[4], tol))) return bad("assert scroll <x> <y> [tol]");
+      log::info("route: scroll {},{} (want {},{} tol {})", st.scroll_x, st.scroll_y, want_x, want_y, tol);
+      if (std::abs(st.scroll_x - want_x) > tol || std::abs(st.scroll_y - want_y) > tol)
+        return bad(std::format("scroll is {},{}, expected {},{} (tol {})", st.scroll_x, st.scroll_y, want_x, want_y, tol));
     } else if (args[1] == "elapsed") {
       // assert elapsed <min> <max>: driver ticks since `mark time`
       int lo = 0, hi = 0;
@@ -791,6 +798,17 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       for (size_t i = 0; i < got.size(); ++i) have += (i ? " " : "") + got[i];
       if (args.size() < 4 || have.compare(0, want.size(), want) != 0 || (have.size() > want.size() && have[want.size()] != ' '))
         return bad("battle events are [" + have + "], expected to start with [" + want + "]");
+    } else if (args[1] == "battle" && args[2] == "camera") {
+      std::string want;
+      for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
+      const std::string got = st.battle_camera ? st.battle_camera() : std::string();
+      if (got != want) return bad("battle camera is '" + got + "', expected '" + want + "'");
+    } else if (args[1] == "battle" && args[2] == "menu") {
+      // assert battle menu <slot|-> <guards>: the PC whose top menu is up and the guard digit of each party slot
+      std::string want;
+      for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
+      const std::string got = st.battle_menu ? st.battle_menu() : std::string();
+      if (got != want) return bad("battle menu is '" + got + "', expected '" + want + "'");
     } else if (args[1] == "battle") {
       if (st.battle != (args[2] == "active")) return bad("battle is " + std::string(st.battle ? "active" : "inactive"));
     } else if (args[1] == "guide") {
@@ -962,8 +980,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       }
       if (yw != trace_y_) ++trace_yaw_moves_;
       trace_yaw_octants_ |= 1 << (((yw + 0x100) & 0xFFF) >> 9);
-      log::info("route: trace ent {} t {} x {:.1f} z {:.1f} step {:.2f} facing {:03X} dturn {} yaw {:03X}", ent_id, aux_, static_cast<double>(x),
-                static_cast<double>(z), static_cast<double>(dist), facing, dt, yw);
+      float y = 0, anim_bits = 0;
+      st.ent_xz(-3000 - ent_id, y, anim_bits);
+      log::info("route: trace ent {} t {} x {:.1f} z {:.1f} y {:.1f} anim {} step {:.2f} facing {:03X} dturn {} yaw {:03X}", ent_id, aux_,
+                static_cast<double>(x), static_cast<double>(z), static_cast<double>(y), static_cast<int>(anim_bits) & 0xFFFF,
+                static_cast<double>(dist), facing, dt, yw);
       trace_y_ = yw;
       trace_x_ = x;
       trace_z_ = z;

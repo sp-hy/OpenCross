@@ -1,6 +1,7 @@
 #include "game/walk_mesh.h"
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <limits>
 
@@ -10,7 +11,35 @@ namespace {
 // The original also bounds a move at 64 triangle crossings.
 constexpr int kMaxSteps = 64;
 constexpr float kEps = 1e-3f;
+
+// The sum of squares reduced to its eight leading bits: `lead` in 64..255 and the even count of leading zero bits it was found at.
+void leading_bits(u32 value, u32& lead, int& zeros) {
+  zeros = std::countl_zero(value) & ~1;
+  lead = zeros >= 24 ? value << (zeros - 24) : value >> (24 - zeros);
+}
 }  // namespace
+
+int mover_sqrt(int value) {
+  if (value <= 0) return 0;
+  u32 lead;
+  int zeros;
+  leading_bits(static_cast<u32>(value), lead, zeros);
+  const int root = static_cast<int>(512.0 * std::sqrt(static_cast<double>(lead)));
+  return (root << ((31 - zeros) >> 1)) >> 12;
+}
+
+void mover_normalise(const int in[3], int out[3]) {
+  const u32 sum = static_cast<u32>(in[0] * in[0] + in[1] * in[1] + in[2] * in[2]);
+  if (sum == 0) {
+    out[0] = out[1] = out[2] = 0;
+    return;
+  }
+  u32 lead;
+  int zeros;
+  leading_bits(sum, lead, zeros);
+  const int scale = static_cast<int>(32768.0 / std::sqrt(static_cast<double>(lead)));
+  for (int i = 0; i < 3; ++i) out[i] = (in[i] * scale) >> ((31 - zeros) >> 1);
+}
 
 void WalkMesh::init(const assets::WalkMesh& mesh, std::vector<u32> attr_flags) {
   mesh_ = mesh;
@@ -66,6 +95,15 @@ float WalkMesh::height(int tri, float x, float z) const {
   plane_normal(tri, nx, ny, nz);
   if (std::fabs(ny) < 1e-6f) return v0[1];
   return v0[1] + (-(nz * (z - v0[2])) - nx * (x - v0[0])) / ny;
+}
+
+int WalkMesh::floor_height(int tri, float x, float z) const {
+  const auto& v0 = mesh_.vertices[tris_[static_cast<size_t>(tri)].v[0]];
+  float nx, ny, nz;
+  plane_normal(tri, nx, ny, nz);
+  const int base = static_cast<int>(v0[1]);
+  if (std::fabs(ny) < 1e-6f) return base;
+  return base + static_cast<int>((-(nz * (std::floor(z) - v0[2])) - nx * (std::floor(x) - v0[0])) / ny);
 }
 
 bool WalkMesh::normal_xz(int tri, float& nx, float& nz) const {

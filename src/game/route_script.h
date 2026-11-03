@@ -40,6 +40,7 @@
 //   autoshot <every> <count> <prefix>   background screenshots every <every> ticks (<prefix>NN.png) while later commands run
 //   screenshot <file.png>         capture the next rendered frame (relative names go to shots/ next to the route's ini file)
 //   assert room <name> | assert var <hexid> <value> | assert dialogue open|closed | assert battle active|inactive | assert battle events <w1|a|w2 ...> (the window / action order starts with these tokens) |
+//   assert battle camera orbit <slot>|shot|target|hold   (what drove the battle camera on the last tick)
 //   assert result <n>             (BATTLE_RESULT)       assert flow <state> | assert menu open|closed | assert shop open|closed |
 //   assert movie playing|idle      assert guide <0|1|2>     assert pause open|closed (the RDE pause screen)
 //   assert text <words...>        the open dialogue's message contains the words
@@ -104,6 +105,8 @@ namespace oc::game {
 //   char_name(char) -> typed name (UTF-8, "" = none); party() -> party ids "0,1,22" in slot order; disc() -> disc in use (1 / 2);
 //   location() -> saved location word of the state; path(...) -> walk-mesh waypoints;
 //   battle_events() -> route events of the battle view ("w<msg>" script window opened, "a" action began), empty without a view;
+//   battle_camera() -> what drives the battle camera ("orbit <slot>", "shot", "target", "hold"), "" = no battle view;
+//   battle_menu() -> "<slot> <guards>": the party slot whose top command menu is up ("-" none), one digit per slot (1 = guarding);
 //   battle_sig() -> battle state summary (scene, unit HP / KO / outcome), "" = no battle;
 //   char_stat(char, 0 current HP | 1 max HP | 2 status bits) -> value, -1 = none; set_char_stat is the debug write of the same.
 struct RouteState {
@@ -117,6 +120,8 @@ struct RouteState {
   float px = 0, pz = 0;
   int control_yaw = 0;
   bool have_player = false;
+  // Field scroll (layer pixels, before the shake offset).
+  int scroll_x = 0, scroll_y = 0;
   bool dialogue = false;
   // A choice is pending in the open dialogue.
   bool dialogue_choice = false;
@@ -166,6 +171,8 @@ struct RouteState {
   // The last title sequence started.
   std::string title_seq;
   std::function<std::vector<std::string>()> battle_events;
+  std::function<std::string()> battle_camera;
+  std::function<std::string()> battle_menu;
   std::function<std::string()> battle_sig;
   std::function<int(int, int)> char_stat;
   std::function<void(int, int, int)> set_char_stat;

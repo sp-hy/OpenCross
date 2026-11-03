@@ -275,7 +275,7 @@ void FieldWorld::clear_room() {
   std::erase_if(ex_pack_cache_, [](const auto& kv) { return kv.first.starts_with("room:"); });
   party_ent_ = {-1, -1, -1};
   controlled_override_ = -1;
-  controlled_cleared_ = false;
+  camera_target_ = -1;
   jump_ = {};
   camera_.reset();
   shake_ = Shake{};
@@ -287,7 +287,6 @@ void FieldWorld::clear_room() {
   dialogue_face_ = -1;
   auto_target_ = -1;
   auto_teleported_ = false;
-  party_follow_ = true;
   follow_hold_ = false;
   input_.reset();
   fog_ = {};

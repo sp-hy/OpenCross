@@ -18,13 +18,14 @@ The behaviour rules of the field game mode as `src/game/` implements them: how a
 
 ## 2. Player movement
 
-The player is the controlled entity (the party leader unless a script chose another). `step_player` runs after the scripts of the tick and does nothing while a scripted motion is active or the actor is not placed.
+The player is the controlled entity (the party leader unless FE 4C or B2 chose another; 5F only moves the scroll). `step_player` runs after the scripts of the tick and does nothing while a scripted motion is active or the actor is not placed. The pad gives no heading while the party hold is on (global flag 0x10: a formation, 84 / DF, the end of BE's wait and 86 b != 1 set it; the end of the 86 b == 1 regroup and the next room load clear it; a battle keeps it).
 
 ### 2.1 Speed
 
 - The raw speed `S` is the entity's 0x10C value (set by the speed ops, `fieldscript.md`). 0 means `kDefaultSpeed` = 0x50.
 - The velocity is 16.16, so a step is `S / 16` units. Walk: `S / 16` (5 at the default, `kWalkUnitsPerTick`). Run: `(2 * S + S / 2) / 16` (12.5, `kRunUnitsPerTick`). No acceleration, no analog speed scaling. The cheat "run speed" doubles `S`.
 - Scripted walks step `S / 16`, or 5 when `S` is 0.
+- Every velocity move ends in the mover's 3D re-make (`room.md` 3.4): the step's length is taken in sixteenths of a unit with each axis truncated and a coarse square root, so a step is slightly shorter than `S / 16` off the axes (2 units at a slight angle: 30 / 16), and a step that rises or drops a whole unit of floor height is shortened further (2 units over a 1-unit rise: 1.79). WALK_TO_XZ aims from the whole-unit position (`fieldscript.md`, 42).
 - Tiles with flag 0xC800 (stairs, ladders, forced slide) take the run away. Flag 0x1000 on the tile the actor stands on halves its velocity: the pad step (walk or run, and the step a pushed actor takes from it) as well as the terrain push (5.5).
 
 ### 2.2 Walk or run
@@ -54,12 +55,12 @@ The player is the controlled entity (the party leader unless a script chose anot
 ### 2.4 Facing, yaw, turn rate
 
 - Model yaw = facing - `kModelYawBias` (0x400); a model with yaw `h - 0x400` faces heading `h`. The renderer rotates by `yaw + 0x800`.
-- Each tick (`turn_step`, first thing in the clip pick) the yaw moves toward `facing - 0x400` by the actor's turn rate, the short way, landing on the target when within one step. The rate is the entity's 0x24E value, initially `kTurnPerTick` = 0x80 (180 degrees in 16 ticks); ops A5 / CF set it. A rate of 0 or less never turns the model.
+- Each tick (`turn_step`, first thing in the clip pick) the yaw moves toward `facing - 0x400` by the actor's turn rate, the short way, landing on the target when within one step. An exact half turn counts as the long way down: the yaw turns down only while it is less than half a turn above the target, so a half turn goes up. The rate is the entity's 0x24E value, initially `kTurnPerTick` = 0x80 (180 degrees in 16 ticks); ops A5 / CF set it. A rate of 0 or less never turns the model.
 - An inactive actor (flag 0x10) neither turns nor picks a clip; a culled one still does.
 
 ### 2.5 Scripted turns (`step_turn_rates`)
 
-Runs on odd ticks; the resulting rate is copied to the actor every tick. Bits of the entity's 0x270 word: 13 (0x2000) fixed-time turns on, 14 (0x4000) a rotation op asked for a turn, 15 (0x8000) a fixed-time turn is running.
+Runs on odd ticks; the resulting rate is copied to the actor every tick, except while bits 13 and 14 are both set: a request that waits for its odd tick holds the yaw still (rate 0 for the tick). The engine steps the yaw once per frame, after this bookkeeping, so a turn always starts from the shown facing the request was made at: an exact half turn stays exact, takes `kSlotTurnL` and turns up (2.4). Bits of the entity's 0x270 word: 13 (0x2000) fixed-time turns on, 14 (0x4000) a rotation op asked for a turn, 15 (0x8000) a fixed-time turn is running.
 
 - Bits 13 and 14 set: unless bit 15 is set, the current rate is saved. `diff` = the angular distance between the shown facing and the target. The rate becomes `diff / 0x30`, so any turn lasts about 0x30 ticks. Rate 0: the model snaps to the facing and the saved rate returns (bits 14 and 15 cleared). Otherwise, with `diff > 0x13F`, the entity's 0x4000 flag (0x38 word) clear and the model owning the clip, the turn clip starts and restarts even if it is in force: slot `kSlotTurnR` when `(shown - facing) & 0xFFF < 0x800`, else `kSlotTurnL`. Bit 14 is cleared and bit 15 set.
 - Bit 13 set, bit 14 clear, bit 15 set, and the model yaw equal to the facing: the saved rate returns and bits 14 and 15 clear. Bit 13 clear with bit 15 set: the same.
@@ -88,12 +89,12 @@ With the controls free and a pad heading active, a leader that stands outside th
 
 ## 4. Followers
 
-Followers are party slots 1 and 2. "The leader" in the rules below is the controlled entity (party slot 0 unless a script handed the pad to another entity): ring 0 records its walk, rule 1 measures against it, follower 1 follows it, and it never takes the follower branch itself. A non-party actor whose script runs the follow op and that is not player-controlled (flag 0x1) is treated as a third follower on ring 1. Follower logic runs only on a tick on which the member's own script ran the update-character op (`updating`); a member whose script is busy does not follow. Rule 3 never uses the walk-mesh mover (4.3).
+Followers are party slots 1 and 2. "The leader" in the rules below is the controlled entity (party slot 0 unless FE 4C or B2 handed the pad to another entity; 5F does not): ring 0 records its walk, rule 1 measures against it, follower 1 follows it, and it never takes the follower branch itself. A non-party actor whose script runs the follow op and that is not player-controlled (flag 0x1) is treated as a third follower on ring 1. Follower logic runs only on a tick on which the member's own script ran the update-character op (`updating`); a member whose script is busy does not follow. Rule 3 never uses the walk-mesh mover (4.3).
 
 ### 4.1 Trail rings
 
 - Two rings of `0x80` entries `{x, y, z, triangle, flags}`; ring 0 is the leader's, ring 1 follower 1's. Both are filled with one spot at room entry and after a spawn settle (ring 0 with the leader's spot, ring 1 with follower 1's, or the leader's when follower 1 is not placed).
-- Ring 0 gets the spot the controlled entity stood on before its step, on each tick with a pad heading. A leader moved by a script adds his new spot when he is more than 0.5 units from where his last pad walk ended and from the newest entry. Ring 1 gets follower 1's spot after each of its rule 1 or rule 3 steps, and when a script moves it (more than 0.5 units from the newest entry).
+- Ring 0 gets the spot the controlled entity stood on before its step, on each tick with a pad heading. A leader moved by a script adds his new spot when he is more than 0.5 units from where his last pad walk ended and from the newest entry, on a tick on which his own script ran the update-character op: a controlled entity that never runs it (a flyer selected with FE 4C so that it fires a guide entity's collision, hid_a05f's Wingapede) adds nothing, and the followers do not chase it through the air. Ring 1 gets follower 1's spot after each of its rule 1 or rule 3 steps, and when a script moves it (more than 0.5 units from the newest entry).
 - The rules measure against the leader's spot before this tick's pad step, and distances are floored whole-unit 3D distances (200.9 counts as 200). Follower 2 measures against follower 1's new position.
 
 ### 4.2 Rules
@@ -110,7 +111,7 @@ Broken-chain guard: if the chosen entry is not the newest and is already within 
 
 - A rule 3 step is a direct position write copying the entry's triangle. Rule 1 is bounded by the mesh (12): a step to a point with no triangle, or whose mesh height differs from the step's height by more than 64 units, is replaced by the probe-and-slide step, and a refused step is standing.
 - The walk and run flags are cleared at the start of every follower step, so a member a script froze does not walk on the spot; a member under a scripted motion keeps its flags and plays the walk clip.
-- The whole follower pass is skipped when following is switched off, or when the controlled entity was cleared and the controls are not free.
+- The whole follower pass is skipped while the party hold (global flag 0x10, section 2) is on. The hold is the cutscene rule: a scene starts with BE (wait until the followers stand, then hold) or a formation (84 / DF), so a member stays where it stood or where the scene's own walks put it, even when a script makes another entity the controlled one (5F); the scene ends with the 86 regroup, which walks slots 1 and 2 to the V behind the controlled entity, puts them there exactly, restarts both trails and releases the hold. Controls locked by 2C alone do not stop the followers.
 
 ### 4.4 Exit fade
 
@@ -206,7 +207,7 @@ SETUP_NPC and D1 on a model without an animation-sequence table set the stand sl
 
 - Drawn for each loaded actor that is drawn (`ent_not_drawn` false), has strength above 0, has none of the flags 0x10C420 (0x20, 0x400, 0x4000, 0x8000, 0x100000) and whose slot lies in the current draw slab.
 - Strength (`shadow_grey`) starts at 0x40 and eases every tick by 2 toward `(R + G + B) / 6` of the actor's entity colour (128 each, so 64), or toward 0 on a triangle with any flag of 0x6E000 (`room.md` 3.5). An actor with one of the flags above is set to 0 at once.
-- Geometry: a quad with corners `(+-512, +-512)` in a frame built from the floor normal, scaled by the entity's x and z scale (raw 0x200 gives +-64 units; in general `scale / 8`), centred on the actor's floor point (its y, or the ground under it during a jump). The normal is the cross product of the two unit edges from vertex 0, not renormalised, `(0, 4096, 0)` off the mesh. The frame is `A = norm(-N.y, N.x, 0)`, `B = norm(A x N)`; it is not rotated by the facing.
+- Geometry: a quad with corners `(+-512, +-512)` in a frame built from the floor normal, scaled by the entity's x and z scale (raw 0x200 gives +-64 units; in general `scale / 8`), centred on the actor's floor point (its y, or the ground under it during a 5B / 5C hop). The normal is the cross product of the two unit edges from vertex 0, not renormalised, `(0, 4096, 0)` off the mesh. The frame is `A = norm(-N.y, N.x, 0)`, `B = norm(A x N)`; it is not rotated by the facing.
 - Texture: the 32 x 32 4bpp blob that is TIM 0 of `map/etc/systim.bin` (UVs 0 and 30 of 32), nearest-sampled, bilinear in HD art. Colour = `clamp(strength / 128, 0, 1) * 255` on all channels. If the file is missing or TIM 0 is not that blob, no shadows are drawn.
 - Blend: subtractive, depth tested, never depth-written.
 - Ordering slot: `floor(max(z, 0) / 16)` of the projected corner 2, plus the actor's layer word (op 2A), plus 0.5 so that a background layer of the same slot is drawn over it; depth = slot / `kDepthRange` (8192).
@@ -284,6 +285,7 @@ The animation sequence of a model raises foot events in model variable 1: bits 0
 - Followers: placed in the party V behind the leader. With `h` the leader's engine heading, slot 1 stands at angle `h + 0x200` and slot 2 at `h - 0x200`, 128 units away: `(x - cos a * 128, z + sin a * 128)`. The spot is accepted when the mesh has a triangle there within 64 units of the leader's height. Half fallback: otherwise the same V at 64 units; if that fails too the follower takes the leader's spot and is spread by settling. The V spot is set without any walk test, so it may lie across a blocked edge. A follower's facing is the leader's.
 - Settling (`settle_spawned_followers`, also after the leader is put on a saved position): each follower still on the leader's spot runs rule 1 up to 80 times until it is 80 units from the leader in 3D. Slot 2 takes the other swing side when follower 1 also stood on the leader. The result snaps its facing, takes its height from its triangle without a glide, and the rings are refilled. A follower a script moved in INIT keeps its place.
 - A saved position off the mesh is refused with a warning and the entrance spot is kept.
+- A member who joins mid-room (7B then 7C): the first entity whose INIT opens with SETUP_PC naming the new character (an `0E FE` that found its slot empty at the load, say) has its INIT re-run and takes the controlled entity's position and facing; then the members of slots 1 and 2 are put in the party V behind the controlled entity (128 units at its heading +- 0x200, its height, no walk-mesh test), facing its way, and both follower trails restart there (`fieldscript.md`, op 7C; `FieldVM::relink_party_entity`, `FieldWorld::place_followers`). A script that places the newcomer itself (alu_a04f's Poshul, set on the spot of the dog she was) does so after the 7C.
 
 ## 12. Known deviations
 

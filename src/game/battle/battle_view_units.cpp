@@ -166,8 +166,8 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   if (visual.death_owed) ctx.dead = false;
   // HP a battle script wrote to 0 is not a KO: the idle script stays up and reads the low-HP bit.
   if (unit_rec.hp_written_zero && unit_rec.hp <= 0) ctx.dead = false;
-  // Flags: bit 0 dead, bit 9 (0x200) guarding (set by Defend, cleared by the PC's next menu: the idle script picks the block pose from it),
-  // bit 31 HP <= max / 4.
+  // Flags: bit 0 dead, bit 9 (0x200) guarding (set by Defend, cleared when the PC's command menu opens: the idle script picks the block pose
+  // from it), bit 31 HP <= max / 4.
   ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard ? 0x200u : 0u) | (((visual.zero_hp_actions >= 2 || visual.hp_shown * 4 <= unit_rec.max_hp) && !ctx.dead) ? 0x80000000u : 0u);
   // Equipment bits set once per party unit (read by anmseq ops 0xA6 / 0xA7 / 0xA8 and by the sky pack): 0x2000 weapon
   // item 0x26 (Mastermune), 0x4000 any accessory 0xC1 (Hero's Shield), 0x8000 the hero set (Unit::hero_set).
@@ -768,7 +768,7 @@ void BattleView::tick_units() {
         else if (visual.idle_owed) start_idle(i);
       }
     }
-    // When the guard flag changes (Defend set it, the PC's next menu clears it) the idle script is restarted so it re-picks the pose.
+    // When the guard flag changes (Defend set it, the PC's command menu opening clears it) the idle script is restarted so it re-picks the pose.
     if (visual.script_kind == kIdle && visual.script_done && visual.guard_shown != unit_rec.guard && unit_rec.pc) start_idle(i);
 
     // Back to the idle script once an action script is over (the actor is released by the action phases).

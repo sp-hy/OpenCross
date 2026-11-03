@@ -165,10 +165,13 @@ void FieldWorld::start_motion(int ent, const script::MotionRequest& req) {
     case K::FollowEnt:
     case K::FollowEnt3D:
     case K::FollowEntTimed:
-    case K::FollowEnt3DTimed:
       motion.walking = true;
-      if (req.kind == K::FollowEntTimed || req.kind == K::FollowEnt3DTimed)
-        motion.frames = req.params[0] > 0 && req.params[0] != 0x7FFF ? req.params[0] : 0;
+      if (req.kind == K::FollowEntTimed) motion.frames = req.params[0] > 0 && req.params[0] != 0x7FFF ? req.params[0] : 0;
+      break;
+    case K::FollowEnt3DTimed:
+      // B9's slot timer U is tested before it is decremented and the wait form steps first: U + 1 steps while far.
+      motion.walking = true;
+      motion.frames = req.params[0] + 1;
       break;
     case K::Move:
     case K::Move3D:
@@ -177,35 +180,31 @@ void FieldWorld::start_motion(int ent, const script::MotionRequest& req) {
       motion.frames = req.kind == K::Move ? std::max(0, req.params[1]) + 1 : std::max(0, req.params[2]) + 1;
       motion.walking = true;
       break;
-    case K::Tween: {
-      motion.tx = static_cast<float>(req.x);
-      motion.tz = static_cast<float>(req.z);
-      motion.ty = static_cast<float>(req.y);
-      motion.target_y = true;
-      const float distance = std::hypot(motion.tx - cur.x, motion.tz - cur.z);
-      int dur = req.params[0];
-      if ((req.mode & 3) == 1) dur = dur > 0 ? static_cast<int>(distance / static_cast<float>(dur)) : 1;
-      motion.total = std::max(1, dur);
-      break;
-    }
+    case K::Tween:
     case K::Jump: {
-      // JUMP_MOVE 5C start form: target (x, z) = S@2 / S@4, landing height = the walk-mesh floor at the target picked
-      // with level U@9 (the entrance floor selector). Frames n: mode 0 = S@6; mode 1 = distance / S@6;
-      // mode 2: S@6 is the apex height h (negative = up) and n = sqrt(-h) + sqrt(-h - (landing - y)) (the ticks to rise and to fall
-      // under the 2-unit/tick^2 gravity). Ballistic: vy = -n + (landing - y) / n, then each tick y += vy, vy += 2 (Y down), xz += d / (n+1).
+      // MOVE_TWEEN 5B and JUMP_MOVE 5C start forms: a ballistic hop to (x, z) = S@2 / S@4. 5B lands at its own height S@6 and takes
+      // its count from S@8; 5C lands on the walk-mesh floor at the target picked with level U@9 (the entrance floor selector) and takes
+      // its count from S@6. Ticks n: mode 0 = the count; mode 1 = distance / count; mode 2: the count is the apex height h (negative =
+      // up) and n = sqrt(-h) + sqrt(-h - (landing - y)) (the ticks to rise and to fall under the 2-unit/tick^2 gravity).
+      // Ballistic: vy = -n + (landing - y) / n, then each tick y += vy, vy += 2 (Y down), xz += d / (n+1).
       motion.tx = static_cast<float>(req.x);
       motion.tz = static_cast<float>(req.z);
-      const WalkMesh& walk = view_.walk();
-      const int tri = walk.empty() ? -1 : walk.find_triangle_level(motion.tx, motion.tz, req.params[0]);
-      motion.ty = tri >= 0 ? walk.height(tri, motion.tx, motion.tz) : cur.y;
+      const int count = req.kind == K::Tween ? req.params[0] : req.y;
+      if (req.kind == K::Tween) {
+        motion.ty = static_cast<float>(req.y);
+      } else {
+        const WalkMesh& walk = view_.walk();
+        const int tri = walk.empty() ? -1 : walk.find_triangle_level(motion.tx, motion.tz, req.params[0]);
+        motion.ty = tri >= 0 ? walk.height(tri, motion.tx, motion.tz) : cur.y;
+      }
       motion.target_y = true;
       const float dx = motion.tx - cur.x, dz = motion.tz - cur.z;
       auto isqrt = [](int value) { return value > 0 ? static_cast<int>(std::sqrt(static_cast<double>(value))) : 0; };
-      int jump_ticks = req.y;
-      if ((req.mode & 3) == 1) jump_ticks = req.y != 0 ? static_cast<int>(std::hypot(dx, dz)) / req.y : 0;
+      int jump_ticks = count;
+      if ((req.mode & 3) == 1) jump_ticks = count != 0 ? static_cast<int>(std::hypot(dx, dz)) / count : 0;
       else if ((req.mode & 3) == 2) {
-        const int rem = -req.y - (static_cast<int>(motion.ty) - static_cast<int>(cur.y));
-        jump_ticks = std::abs(isqrt(-req.y) + (rem < 0 ? -isqrt(-rem) : isqrt(rem)));
+        const int rem = -count - (static_cast<int>(motion.ty) - static_cast<int>(cur.y));
+        jump_ticks = std::abs(isqrt(-count) + (rem < 0 ? -isqrt(-rem) : isqrt(rem)));
       }
       if (jump_ticks <= 0) jump_ticks = 1;
       motion.total = jump_ticks;

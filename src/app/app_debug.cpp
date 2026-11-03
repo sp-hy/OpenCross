@@ -36,8 +36,8 @@ void draw_debug_status(game::FieldWorld* world) {
     const game::RoomView& view = world->view();
     ImGui::Text("%zu layers, %zu groups, %zu textures, layer mask %08X", view.layer_count(), view.group_count(), view.draw_count(),
                 view.layer_mask());
-    ImGui::Text("scroll %d, %d  camera mode %s  control yaw %03X  fade %.2f", view.scroll_x(), view.scroll_y(),
-                world->camera_mode() == 0 ? "auto" : world->camera_mode() == 1 ? "fixed" : "follow", world->control_yaw(),
+    ImGui::Text("scroll %d, %d  camera %s  control yaw %03X  fade %.2f", view.scroll_x(), view.scroll_y(),
+                world->camera_scripted() ? "scripted" : "follow", world->control_yaw(),
                 static_cast<double>(world->fade_level()));
   }
   ImGui::TableNextColumn();

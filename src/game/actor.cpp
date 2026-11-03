@@ -495,23 +495,31 @@ bool Actor::move_on_mesh(const WalkMesh& walk, float dx, float dz) {
   return std::fabs(cur_.x - ox) > 1e-4f || std::fabs(cur_.z - oz) > 1e-4f;
 }
 
-// The end of the engine's mover (every actor): after the probe / wall-slide the accepted xz move (length L) is re-made as a
-// 3D move of the same length along the plane: the direction (dx, dy, dz) to the new plane height is normalised and scaled by L, so the
-// xz part shrinks to L * L / |(L, dy)| and a ladder (130 units across for 1270 of height) is climbed at the walking speed instead of
-// shooting up 10x faster. The position is then found again with the shorter move and the height follows the plane.
+// The end of the engine's mover (every actor): after the probe / wall-slide the accepted xz move d is re-made as a 3D move along
+// the plane. Its length L is taken in sixteenths of a unit, each axis truncated toward zero, through mover_sqrt (a 2-unit step at
+// a slight angle, 31 and 1 sixteenths, is 30 / 16). The direction (d, dy) is normalised (mover_normalise, from d in 1/256 units)
+// and scaled by L, where dy is the difference of the whole-unit floor heights (WalkMesh::floor_height) at the end of the move and
+// at the start. On a gentle slope dy is 0 or 1 from tick to tick, so a step with a rise is shortened to L * |d| / |(d, 1)|, and a
+// ladder (130 units across for 1270 of height) is climbed at L instead of shooting up 10x faster. The position is then found
+// again with the new move and the height follows the plane.
 bool Actor::slope_step(const WalkMesh& walk, float dx, float dz) {
   const float ox = cur_.x, oz = cur_.z;
   const int otri = tri_;
   auto step = walk.move_actor(otri, ox, oz, dx, dz, class_bits, kProbeAhead);
   const float mdx = step.x - ox, mdz = step.z - oz;
-  const float len = std::hypot(mdx, mdz);
-  if (len > 1e-4f && step.tri >= 0) {
-    const float dy = walk.height(step.tri, step.x, step.z) - walk.height(otri, ox, oz);
-    if (std::fabs(dy) > 1e-3f) {
-      const float shrink = len / std::hypot(len, dy);
-      // the shorter move goes through the same mover (wall probe ahead + slide): a plain move() let the actor creep closer to a wall
+  if (std::hypot(mdx, mdz) > 1e-4f && step.tri >= 0) {
+    const int sx = static_cast<int>(mdx * 16.0f), sz = static_cast<int>(mdz * 16.0f);
+    const int length = mover_sqrt(sx * sx + sz * sz);
+    const int dy = walk.floor_height(step.tri, step.x, step.z) - walk.floor_height(otri, ox, oz);
+    // Normalised backwards, as the engine does: the rounding of the shift then falls the same way.
+    const int dir[3] = {static_cast<int>(-mdx * 256.0f), dy * 256, static_cast<int>(-mdz * 256.0f)};
+    int unit[3];
+    mover_normalise(dir, unit);
+    const float ndx = static_cast<float>(-length * unit[0]) / 65536.0f, ndz = static_cast<float>(-length * unit[2]) / 65536.0f;
+    if (std::fabs(ndx - mdx) > 1e-5f || std::fabs(ndz - mdz) > 1e-5f) {
+      // the new move goes through the same mover (wall probe ahead + slide): a plain move() let the actor creep closer to a wall
       // than move_actor allows and wedge in corners on gentle slopes
-      const auto m2 = walk.move_actor(otri, ox, oz, mdx * shrink, mdz * shrink, class_bits, kProbeAhead);
+      const auto m2 = walk.move_actor(otri, ox, oz, ndx, ndz, class_bits, kProbeAhead);
       if (m2.tri >= 0 && !m2.blocked) {
         step.tri = m2.tri;
         step.x = m2.x;
@@ -603,10 +611,13 @@ bool Actor::turning() const {
 }
 
 void Actor::turn_step() {
-  // Chase the facing: yaw -> facing - 0x400 by turn_rate per tick, snapping when within one step.
+  // Chase the facing: yaw -> facing - 0x400 by turn_rate per tick, snapping when within one step. The yaw turns down while it is
+  // less than half a turn above the target, else up, so an exact half turn goes up.
   // A turn rate of 0 means the engine never touches the yaw.
   if (turn_rate <= 0) return;
-  const float diff = wrap_units(static_cast<float>(facing_ - kModelYawBias) - cur_.yaw);
+  float above = std::fmod(cur_.yaw - static_cast<float>(facing_ - kModelYawBias), 4096.0f);
+  if (above < 0) above += 4096.0f;
+  const float diff = above < 2048.0f ? -above : 4096.0f - above;
   const float step = static_cast<float>(turn_rate);
   float y = std::fabs(diff) <= step ? cur_.yaw + diff : cur_.yaw + (diff < 0 ? -step : step);
   y = std::fmod(y, 4096.0f);

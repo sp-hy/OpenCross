@@ -130,6 +130,14 @@ void SpriteBatch::begin(const Frame& frame, float view_width, float view_height,
   SDL_BindGPUIndexBuffer(ctx_->pass(), &index_binding, SDL_GPU_INDEXELEMENTSIZE_16BIT);
 }
 
+void SpriteBatch::set_view(float view_width, float view_height) {
+  if (2.0f / view_width == view_transform_[0] && 2.0f / view_height == view_transform_[1]) return;
+  flush();
+  view_transform_[0] = 2.0f / view_width;
+  view_transform_[1] = 2.0f / view_height;
+  if (vertex_data_) SDL_PushGPUVertexUniformData(ctx_->cmd(), 0, view_transform_, sizeof view_transform_);
+}
+
 void SpriteBatch::flush() {
   if (quad_count_ == flushed_quads_ || !current_) return;
   vertices_.mark_used(quad_count_ * 4 * sizeof(SpriteVertex));

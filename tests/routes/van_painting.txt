@@ -1,0 +1,31 @@
+# Termina, Van's house (tel_b19i, room 108), scenario 50, party Serge / Kid / Guile: talking to Van at his easel plays the scene with his
+# father Gogh. 84 / 85 walk the party to its formation spots and hold it (party hold) while Gogh is the scroll's entity (5F): the followers
+# do not chase him, and Gogh leaving over the exit trigger (ent 6) does not change the room. After Van is back at his easel, 86 00 / 86 01
+# regroup the party into the V behind Serge and release the hold (PS1: Kid (-526, -84), Guile (-584, -255)).
+0 wait 5
+- set var 0x00 50
+- request party_add 1
+- request party_add 2
+- load tel_b19i 0
+- wait idle 600
+- approach 4 60 600
+- action
+- wait 300
+- assert near 2 -579 -188 2
+- assert near 3 -703 -138 2
+- choose 0
+- skip
+- wait text When did you come home
+- assert near 2 -579 -188 2
+- assert near 3 -703 -138 2
+- mash until idle x 4000
+- assert room tel_b19i
+- assert near player -469 -198 2
+- assert near 2 -526 -84 4
+- assert near 3 -584 -255 4
+- mark ent 1
+- key down up
+- wait 30
+- key up up
+- assert moved 1 60
+- quit

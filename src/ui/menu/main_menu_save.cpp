@@ -124,7 +124,14 @@ void MainMenu::Impl::update_save(const Nav& nav) {
       }
       save_phase = 1;
       if (save_card == 0) {
-        // As the card grid: Load starts on the first used row (the auto-save when it exists), Save on the first savable row (file 1).
+        // The page comes back where it was left this session (Save and Load apart). The first visit starts as the card grid: Load on
+        // the first used row (the auto-save when it exists), Save on the first savable row (file 1).
+        const PageMemory& memory = page_memory[load_mode ? 1 : 0];
+        if (memory.cur >= 0) {
+          page_cur = memory.cur;
+          page_top = memory.top;
+          return;
+        }
         page_cur = 1;
         if (load_mode) {
           page_cur = 0;
@@ -183,6 +190,7 @@ void MainMenu::Impl::update_save(const Nav& nav) {
     if (nav.right) page_cur = std::min(kCount - 1, page_cur + save_layout::kPageRows);
     if (page_cur != before) sfx(1);
     page_top = std::clamp(page_top, std::max(0, page_cur - save_layout::kPageRows + 1), page_cur);
+    page_memory[load_mode ? 1 : 0] = {page_cur, page_top};
     if (!nav.ok) return;
     if (!load_mode && page_cur == 0) {
       sfx(0x18);

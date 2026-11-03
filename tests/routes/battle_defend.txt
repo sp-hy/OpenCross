@@ -1,17 +1,35 @@
 # Battle Defend: Serge (slot 0) defends; the menu must pass to Kid (slot 1, fixed order) and Serge holds the guard
-# pose from the idle script (ctrl flag 0x200). Shots: bd_01 top menu, bd_02 cursor on Defend, bd_03 Kid's menu with Serge guarding.
+# pose from the idle script (ctrl flag 0x200). L1 (left) from Kid's menu lands on Serge: the guard holds while his window opens
+# (20 ticks, no input taken), then his top menu ends the guard and the pose drops; Kid's menu after Defend comes the same way. Shots: bd_01 top menu, bd_01b the same 16 ticks later (the other diamond cursor frame), bd_02 cursor on Defend,
+# bd_03 Kid's menu with Serge guarding, bd_04b Serge's window opening (outline only), bd_05 Serge's menu.
 0 wait 30
 - tap confirm                         # skip the intro shots
 - wait 90
 - screenshot bd_01_top.png
+- wait 16
+- screenshot bd_01b_top_cursor_turn.png
 - tap down
 - wait 8
 - tap down
 - wait 8
 - screenshot bd_02_cursor_defend.png
 - tap confirm                         # Defend
-- wait 90
+- wait 13
+- assert battle menu - 100            # Kid's window still opening: no top menu yet, Serge guards
+- wait 1
+- assert battle menu 1 100
+- wait 76
 - screenshot bd_03_next_pc.png
 - wait 60
 - screenshot bd_04_next_pc_later.png
+- assert battle menu 1 100
+- tap left
+- assert battle menu - 100            # L1: Serge's window opens, his guard holds until his top menu takes over
+- screenshot bd_04b_entry_outline.png
+- wait 10
+- assert battle menu - 100
+- wait 1
+- assert battle menu 0 000
+- wait 60
+- screenshot bd_05_switch_back.png
 - quit

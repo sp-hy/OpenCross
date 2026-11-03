@@ -15,6 +15,13 @@ constexpr u32 kFlagBlockClassA = 0x200000;
 constexpr u32 kFlagBlockClassB = 0x400000;
 constexpr u32 kFlagBlockAll = 0x800000;
 
+// The integer square root and vector normalisation of the engine's mover. Both look at the eight leading bits of the sum of
+// squares only (shifted by an even count into 64..255), so they are a little coarse: mover_sqrt(962) is 30, and a unit vector
+// can come out up to about 0.5 % long.
+int mover_sqrt(int value);
+// `in` scaled to length 4096 (4.12); zero stays zero.
+void mover_normalise(const int in[3], int out[3]);
+
 class WalkMesh {
  public:
   void init(const assets::WalkMesh& mesh, std::vector<u32> attr_flags);
@@ -34,6 +41,8 @@ class WalkMesh {
   bool contains(int tri, float x, float z) const;
   // Plane height at (x, z) of triangle `tri` (Y down); the first vertex height if the plane is vertical.
   float height(int tri, float x, float z) const;
+  // The engine's whole-unit floor height: the plane at (floor x, floor z), its offset from the first vertex truncated toward zero.
+  int floor_height(int tri, float x, float z) const;
   // Horizontal part (Nx, Nz) of the plane normal N = (v1-v0) x (v2-v0) (the same N the height uses). On a stair / ladder tile
   // the engine turns the actor toward the engine direction (cos h, -sin h) = (Nx, Nz), i.e. uphill. False for a bad index.
   bool normal_xz(int tri, float& nx, float& nz) const;

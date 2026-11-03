@@ -83,6 +83,40 @@ void FieldWorld::setup_pc(int ent, int char_ref, int) {
   if (slot < static_cast<int>(party_chars_.size()) && !ent_state.placed && lead_ready) place_party_spawn(slot);
 }
 
+void FieldWorld::place_on_controlled(int ent) {
+  const int lead = player_entity();
+  if (ent < 0 || ent >= static_cast<int>(ents_.size()) || lead < 0 || lead == ent || !ents_[static_cast<size_t>(lead)].placed) return;
+  const Actor& lead_actor = ents_[static_cast<size_t>(lead)].actor;
+  Ent& ent_state = ents_[static_cast<size_t>(ent)];
+  ent_state.actor.place(view_.walk(), lead_actor.triangle(), lead_actor.current().x, lead_actor.current().z, lead_actor.facing());
+  ent_state.actor.set_height(lead_actor.current().y, true);
+  ent_state.placed = true;
+  ent_state.spawned_on_leader = false;
+}
+
+// The V spot of each follower (party_v_spot with the controlled entity's heading), at the controlled entity's height, without a
+// walk-mesh test; then both follower trails restart where the party now stands, as FE 66 does.
+void FieldWorld::place_followers() {
+  const int lead = player_entity();
+  if (lead < 0 || !ents_[static_cast<size_t>(lead)].placed) return;
+  const Actor& lead_actor = ents_[static_cast<size_t>(lead)].actor;
+  const ActorPose lp = lead_actor.current();
+  const int facing = lead_actor.facing();
+  for (int slot = 1; slot < 3; ++slot) {
+    const int ent = party_ent_[static_cast<size_t>(slot)];
+    if (ent < 0 || ent == lead || slot >= static_cast<int>(party_chars_.size())) continue;
+    float x = 0, z = 0;
+    party_v_spot(slot, lp.x, lp.z, (facing - 0x800) & 0xFFF, x, z);
+    Ent& ent_state = ents_[static_cast<size_t>(ent)];
+    ent_state.actor.place(view_.walk(), view_.walk().find_triangle(x, z, lp.y), x, z, facing);
+    ent_state.actor.set_height(lp.y, true);
+    ent_state.placed = true;
+    ent_state.spawned_on_leader = false;
+  }
+  trail_fill(0, trail_entry_of(lead_actor));
+  if (party_ent_[1] >= 0) trail_fill(1, trail_entry_of(ents_[static_cast<size_t>(party_ent_[1])].actor));
+}
+
 void FieldWorld::setup_npc(int ent, int model) {
   if (ent < 0 || ent >= static_cast<int>(ents_.size())) return;
   Ent& ent_state = ents_[static_cast<size_t>(ent)];

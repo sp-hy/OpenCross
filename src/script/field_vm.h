@@ -43,7 +43,7 @@ namespace flag270 {
 constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000;
 }
 namespace gflag {
-constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kPauseAllowed = 0x4000, kKeepCustomName = 0x10000;
+constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kPauseAllowed = 0x4000, kKeepCustomName = 0x10000;
 }
 
 // One script slot record of an entity. `state` is the priority class (the lowest runs): 0xF idle, 7 the default UPDATE
@@ -233,6 +233,8 @@ class FieldVM {
   bool ended_ = false;
   bool run_mode_ = false;
   int budget_ = 8;
+  // The character the last accepted 7B put into the party (-1 none): the 7C after it re-runs that character's entity.
+  int staged_char_ = -1;
 
   // Operand access relative to base_: raw bytes / words, the U form (literal when bit 15 is set, else a variable) and
   // the S form (literal when `mask` is set in the mode byte at `mode_off`, else a variable).
@@ -255,6 +257,8 @@ class FieldVM {
   void dispatch(int ent, int rec_index, bool run_mode);
   void run_entity(int ent);
   void run_init(int ent);
+  void relink_party_entity(int char_id);
+  u32 load_flags(size_t ent) const;
   void release();
   void forget_child();
   void exec(u8 op);

@@ -8,6 +8,8 @@ Entries that need a PS1 comparison use `python -X utf8 tools\py\ps1_cast.py forc
 
 ## 2. Fidelity gaps (not modelled)
 
+- **Four effect packs fail `fx-audit`** (`tools/ocbattle_fx.cpp`, mesh and model loading in `src/game/effects/`). `opencross ocbattle fx-audit` prints `542 packs (538 clean ...)`; a pack counts as clean when its `generic_issues` and `bespoke_issues` columns are empty. The four that are not, from `battle_effects_audit.csv`: eid 3 `tech/yamanek0.prd` and eid 142 `tech/hensin.prd` (`mesh-texture-missing`), eid 204 `syoukan/tunico.prd` (`mesh-texture-partial`), eid 206 `syoukan/tfleaf.prd` (`model-missing`). The same four were already flagged before the dialogue and effect-timeline batch, so they are not a regression of it. Reproduce with `opencross ocbattle fx-audit --eid <N> -v`, then cast the effect in `ocbattleview` and against the PS1 (`ps1_cast.py force`) to see whether the texture or model really is missing on screen or whether the audit misses an indirect source (a texture or model reached through another pack or the caster's model). Done when each pack is either fixed or shown to look the same as the PS1, with the audit taught that case, and `fx-audit` reports 542 clean.
+
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
 
 ## 4. Code hygiene

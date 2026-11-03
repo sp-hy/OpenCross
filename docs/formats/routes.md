@@ -70,7 +70,7 @@ Exit codes of the process:
 
 Why a run is reproducible: input is synthetic, the step is fixed at 1/60 s regardless of wall time, the frame limiter is skipped while a script, replay or sweep runs, the audio device is not opened for a scripted run (`OC_ROUTE_AUDIO=1` opens it), no mod is applied, and `[Debug] Seed` fixes the random sources (a non-zero seed seeds the field script RNG, the flow's RNG and, for each battle, `OC_BATTLE_SEED`; seed 0 takes a clock seed for the field RNG and leaves battles unseeded). Set `VSync=0` in the ini so frames are not paced by the display.
 
-A battle started from the field with `[Debug] Seed` set is seeded (`OC_BATTLE_SEED` is derived from the seed and a per-run battle counter). A standalone battle (`[Debug] Battle=<scene>`) takes `[Debug] Seed` as its seed unless the `.env` sets `OC_BATTLE_SEED`; `battle_chain`, `battle_dash`, `battle_dash2`, `battle_defend`, `battle_run`, `results_heal` and `smoke_battle` all set a seed. Deterministic baselines for refactor checks are `alu_chair`, `art_swap`, `battle_hud`.
+A battle started from the field with `[Debug] Seed` set is seeded (`OC_BATTLE_SEED` is derived from the seed and a per-run battle counter). A standalone battle (`[Debug] Battle=<scene>`) takes `[Debug] Seed` as its seed unless the `.env` sets `OC_BATTLE_SEED`; `battle_camera`, `battle_chain`, `battle_dash`, `battle_dash2`, `battle_defend`, `battle_menu_entry`, `battle_run`, `results_heal` and `smoke_battle` all set a seed. Deterministic baselines for refactor checks are `alu_chair`, `art_swap`, `battle_hud`.
 
 ## 3. Verbs
 
@@ -181,7 +181,7 @@ An unknown kind logs `route: unknown request <kind>` and exits with code 1.
 | `mark ent <n>` | Remember entity `n`'s world position (for `assert moved`). |
 | `mark time` | Remember the driver tick (for `assert elapsed`). |
 | `snap [hexvar...]` | Remember the simulation state: room, flow, room-load / battle-start / title-sequence / field-tick counters, the battle summary, every entity's position, facing and model yaw, the message windows' typewriter positions and the listed variables. |
-| `trace <ent> <ticks>` | For `ticks` ticks log the entity's position, step, facing, facing change, model yaw, animation clip and keyframe (and the head-turn angles while a head callback is on), then a summary of speed, turns and clip behaviour. The statistics feed the `assert trace*` lines. |
+| `trace <ent> <ticks>` | For `ticks` ticks log the entity's position, height, submitted animation id, step, facing, facing change, model yaw, animation clip and keyframe (and the head-turn angles while a head callback is on), then a summary of speed, turns and clip behaviour. The statistics feed the `assert trace*` lines. |
 | `dump` | Log the room's entity table. |
 | `pos` | Log tick, room, player position and control yaw. |
 | `log <text...>` | Log `route: <text>`. |
@@ -203,6 +203,8 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `choiceline <n>` | The choice hand sits on message line `n` of the open list (translated numbering). |
 | `battle active\|inactive` | A battle is / is not active. |
 | `battle events <tokens...>` | The battle view's route events (`w<msg>` = script window opened, `a` = action began) start with exactly those tokens. |
+| `battle menu <slot\|-> <guards>` | The party slot whose top command menu is up and has taken over from the menu entry (`-` = none, or the window still opening), then one digit per party slot: 1 = the unit holds Defend's guard. Example: `battle menu 1 100`. |
+| `battle camera orbit <slot>\|shot\|target\|hold` | What drove the battle camera on the last tick: the menu orbit round that party slot, a camera shot or timeline, a target-selection glide, or nothing (the pose stays). |
 | `result <n>` | The battle-result variable equals `n`. |
 | `flow <state>` | The flow state name equals `state`. |
 | `menu open\|closed`, `shop open\|closed` | The screen is up / not up. |
@@ -226,6 +228,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `anim <who> <id\|stair>` | Submitted clip id equals `id`, or the entity stands on a stair tile. |
 | `offmesh <p1\|p2\|ent N\|npcs> <max>` | Ticks the member stood off the walkable mesh is at most `max`; `npcs` takes the worst placed non-party model entity. |
 | `elapsed <min> <max>` | Driver ticks since `mark time` within the range. |
+| `scroll <x> <y> [tol]` | The field scroll (layer pixels, before the shake offset) is within `tol` (default 0) of `(x, y)` on each axis. |
 | `same [tol]` | Nothing from the `snap` changed: room, flow, room-load / battle-start / title-sequence counters, battle summary, every entity's position (within `tol` units, default 0), facing and yaw, listed variables. |
 | `frozen` | No field tick ran and no message window's typewriter moved since `snap`. |
 | `swaps <n>` | Exactly `n` in-place art swaps of the field room since `snap`. |

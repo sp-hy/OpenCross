@@ -446,7 +446,7 @@ bool FieldVM::exec_core(u8 op) {
         request.kind = op == 0x44 ? MotionKind::FollowEnt : MotionKind::FollowEnt3D;
         request.mode = byte_at(1);
         request.target = target;
-        begin_motion(request, false);
+        begin_motion(request, op == 0xB8);
         advance(3);
       }
       break;
@@ -463,7 +463,7 @@ bool FieldVM::exec_core(u8 op) {
         request.kind = op == 0x45 ? MotionKind::FollowEntTimed : MotionKind::FollowEnt3DTimed;
         request.target = target;
         request.params[0] = operand_u(3);
-        begin_motion(request, false);
+        begin_motion(request, op == 0xB9);
         advance(5);
       }
       break;
@@ -591,7 +591,8 @@ bool FieldVM::exec_core(u8 op) {
         const s32 frames = operand_s(6, 8, 0x20);
         host_.camera_set_position(operand_s(2, 8, 0x80), operand_s(4, 8, 0x40), frames);
         advance(frames == 0 ? 11 : 9);
-      } else if (!host_.camera_busy()) {
+      } else if (host_.camera_wait(CameraWait::Position, operand_s(static_cast<u32>(-7), static_cast<u32>(-1), 0x80),
+                                   operand_s(static_cast<u32>(-5), static_cast<u32>(-1), 0x40))) {
         advance(2);
       }
       yield_ = true;
@@ -601,26 +602,26 @@ bool FieldVM::exec_core(u8 op) {
         const s32 frames = operand_u(2);
         host_.camera_to_actor(frames);
         advance(frames == 0 ? 6 : 4);
-      } else if (!host_.camera_busy()) {
+      } else if (host_.camera_wait(CameraWait::Actor, 0, 0)) {
         advance(2);
       }
       yield_ = true;
       break;
-    case 0x5F:  // SET_CONTROLLED_ENTITY
-      host_.set_controlled_entity(entity_operand(1));
+    case 0x5F:  // SET_CONTROLLED_ENTITY: the scroll follows entity c
+      host_.set_camera_target(entity_operand(1));
       advance(2);
       break;
-    case 0x60:  // CLEAR_CONTROLLED_ENTITY
-      host_.set_controlled_entity(-1);
+    case 0x60:  // CLEAR_CONTROLLED_ENTITY: the scroll follows the controlled entity again
+      host_.set_camera_target(-1);
       advance(1);
       break;
     case 0x61:  // CAMERA_FOLLOW (b == 0 start form: 7 bytes without a target or frames, else 5; b != 0 wait form)
       if (byte_at(1) == 0) {
         const int target = entity_operand(2);
         const s32 frames = operand_u(3);
-        if (target >= 0) host_.camera_follow(target, frames);
+        host_.camera_follow(target, frames);
         advance(target < 0 || frames == 0 ? 7 : 5);
-      } else if (!host_.camera_busy()) {
+      } else if (host_.camera_wait(CameraWait::Follow, 0, 0)) {
         advance(2);
       }
       yield_ = true;

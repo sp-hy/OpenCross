@@ -28,8 +28,10 @@ std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const 
     const std::string name = stem.substr(slash + 1);
     asset = import::load_field_model(obj, tim, read("cdrom/fieldobj/ex/" + name + ".bin"), err, read("hd/" + stem + ".tim"));
   } else {
-    Bytes texture = read(base + ".ltd");
-    if (texture.empty()) texture = read(base + ".ltc");
+    // A player folder holds a .ltc (main image + closed-eye strip); its .ltd is a copy of the main image that HD art did not redraw for the
+    // cdrom2 mesh, so the .ltc is read whenever there is one, for the party and for the enemies sharing the model.
+    Bytes texture = read(base + ".ltc");
+    if (texture.empty()) texture = read(base + ".ltd");
     asset = import::load_model(obj, texture, read("cdrom/" + folder + "/at0.prd"), err);
   }
   if (asset) asset->source = stem;

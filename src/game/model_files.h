@@ -1,7 +1,7 @@
 #pragma once
 // The files of a character model, found from its member stem (no "cdrom/", no ".obj") and decoded without texture
 // replacement. Field models (fieldobj/player/<dir>/<name>) pair <stem>.tim, the 4x hd/<stem>.tim and the animation pack
-// fieldobj/ex/<name>.bin; battle models (battle/player/.., battle/monster/..) pair <stem>.ltd (else .ltc) and the at0.prd of
+// fieldobj/ex/<name>.bin; battle models (battle/player/.., battle/monster/..) pair <stem>.ltc (else .ltd) and the at0.prd of
 // their folder. The asset's source is the stem (it names the texture dump / replacement folder).
 #include <optional>
 #include <string>

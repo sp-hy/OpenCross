@@ -289,6 +289,22 @@ int main() {
   walker.tick(slow, 0x800, false);
   CHECK(near(walker.current().x, 27.5f) && near(walker.pad_step_x(), 2.5f));
 
+  // The mover's coarse square root and unit vector look at the eight leading bits of the sum of squares only: 31 * 31 + 1 = 962
+  // counts as 960 (root 30), and (100, 0, 0) comes out 4098 long.
+  CHECK(game::mover_sqrt(962) == 30 && game::mover_sqrt(1025) == 32 && game::mover_sqrt(2245) == 47 && game::mover_sqrt(0) == 0);
+  const int axis[3] = {100, 0, 0};
+  int unit[3];
+  game::mover_normalise(axis, unit);
+  CHECK(unit[0] == 4098 && unit[1] == 0 && unit[2] == 0);
+
+  // On the slope (y = 0.2 per unit of x) a 5-unit step from x = 180 rises a whole unit of floor height (16 -> 17), so the 3D
+  // re-make shortens it to 5 * 5 / |(5, 1)|.
+  CHECK(wm.floor_height(2, 180.5f, 50.5f) == 16 && wm.floor_height(2, 185.2f, 50) == 17);
+  game::Actor climber;
+  climber.place(wm, 2, 180, 50, 0x800);
+  climber.tick(wm, 0x800, false);
+  CHECK(near(climber.current().x, 184.904f));
+
   if (failures) return 1;
   std::printf("walk mesh checks passed\n");
   return 0;

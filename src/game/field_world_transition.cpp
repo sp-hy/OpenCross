@@ -26,25 +26,37 @@ constexpr int kRoomFadeOut = 0x50, kRoomFadeIn = 0x30, kWhiteFadeOut = 0x40, kWh
 
 }  // namespace
 
-void FieldWorld::camera_set_position(s32 x, s32 y, int frames) { camera_.set_position(view_, vm_.global_flags(), x, y, frames); }
+void FieldWorld::camera_set_position(s32 x, s32 y, int frames) { camera_.set_position(x, y, frames); }
 
-void FieldWorld::camera_to_actor(int frames) { camera_.to_actor(view_, vm_.global_flags(), pose_of(player_entity()), frames); }
+void FieldWorld::camera_to_actor(int frames) { camera_.to_actor(view_, vm_.global_flags(), pose_of(camera_entity()), camera_override(), frames); }
 
-void FieldWorld::camera_follow(int ent, int frames) { camera_.follow(view_, vm_.global_flags(), pose_of(ent), ent, frames); }
+void FieldWorld::camera_follow(int ent, int frames) { camera_.follow(view_, vm_.global_flags(), pose_of(ent), frames); }
 
-bool FieldWorld::camera_busy() { return camera_.busy(); }
+bool FieldWorld::camera_wait(script::CameraWait kind, s32 x, s32 y) {
+  FieldCamera::Wait wait = FieldCamera::Wait::Position;
+  if (kind == script::CameraWait::Actor) wait = FieldCamera::Wait::Actor;
+  if (kind == script::CameraWait::Follow) wait = FieldCamera::Wait::Follow;
+  return camera_.wait(wait, x, y, view_, vm_.global_flags(), pose_of(camera_entity()), camera_override());
+}
+
+bool FieldWorld::camera_override() const { return camera_target_ >= 0 && camera_target_ < static_cast<int>(ents_.size()); }
+
+int FieldWorld::camera_entity() const { return camera_override() ? camera_target_ : player_entity(); }
 
 void FieldWorld::camera_limits(s32 x0, s32 x1, s32 y0, s32 y1) { camera_.set_limits(x0, x1, y0, y1); }
 
 void FieldWorld::camera_auto_follow(bool on) {
-  // Op 86 drives the party followers (they replay the leader's trail), not the scroll.
-  // 86 mode 0 sets the follow-freeze flag (`on` here), mode 1 waits for the formation and clears it. The follower logic is skipped
-  // while the flag is set, so `on` freezes the followers.
-  party_follow_ = !on;
-  if (on && party_ent_[0] >= 0) {
-    // Mode 0 also records where each follower has to stand: the party V around the leader's current spot (opn_a01i: the row of the
-    // opening after the run-out); mode 1 waits until they got there (formation_done) and then releases the follow logic.
-    const Ent& le = ents_[static_cast<size_t>(party_ent_[0])];
+  // Op 86 regroups the party (the VM sets and clears the party hold around it), not the scroll. Mode 1 ends once every member got to
+  // its spot: the followers then stand in the V and both trails restart there.
+  const int lead = player_entity();
+  if (!on) {
+    place_followers();
+    return;
+  }
+  if (lead >= 0) {
+    // Mode 0 records where each follower has to stand: the party V around the controlled entity's current spot (opn_a01i: the row of
+    // the opening after the run-out).
+    const Ent& le = ents_[static_cast<size_t>(lead)];
     const ActorPose& lp = le.actor.current();
     for (int slot = 1; slot < 3; ++slot) {
       float x = 0, z = 0;
@@ -61,10 +73,14 @@ std::pair<s32, s32> FieldWorld::camera_position() { return camera_.position(); }
 
 void FieldWorld::set_camera_origin(s32 x, s32 y) { camera_.set_origin(x, y); }
 
+void FieldWorld::set_camera_target(int ent) {
+  log::debug("field: tick {} camera target -> {} (script of ent {})", tick_count_, ent, vm_.current_entity());
+  camera_target_ = ent;
+}
+
 void FieldWorld::set_controlled_entity(int ent) {
   log::debug("field: tick {} controlled entity -> {} (script of ent {})", tick_count_, ent, vm_.current_entity());
   controlled_override_ = ent;
-  controlled_cleared_ = ent < 0;
 }
 
 void FieldWorld::shake(int x, int y, int ticks) {
@@ -236,7 +252,7 @@ void FieldWorld::snap_camera_to_player() {
 }
 
 void FieldWorld::step_camera() {
-  camera_.advance(view_, vm_.global_flags(), pose_of(player_entity()), pose_of(camera_.cam.follow_ent));
+  camera_.advance(view_, vm_.global_flags(), pose_of(camera_entity()), camera_override());
   // Screen shake: advance the amplitude ramp, then offset the scroll (re-clamped to the pan limits unless limits are off).
   if (shake_.frames > 0) {
     shake_.ax += shake_.dx;
@@ -267,6 +283,9 @@ void FieldWorld::step_camera() {
     jolt_n_ = -1;
   }
   view_.set_scroll(sx, sy, false);
+  if (static const bool trace = std::getenv("OC_FIELD_CAM_TRACE") != nullptr; trace)
+    log::info("field camera: tick {} scroll {},{} scripted {} target {},{} frames {} gflags {:X}", tick_count_, camera_.cam.x, camera_.cam.y, camera_.cam.scripted,
+              camera_.cam.tx >> 16, camera_.cam.ty >> 16, camera_.cam.frames, vm_.global_flags());
 }
 
 void FieldWorld::step_fade() {

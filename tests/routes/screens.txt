@@ -28,8 +28,10 @@
 - wait idle 600
 - assert party 0,1,39                 # Serge, Kid and the title script's random third member (Doc for [Debug] Seed=1)
 # ---- FE 4A: name entry for Kid (character 1)
+- mark time
 - request rename 1
 - wait menu open 120
+- assert elapsed 50 60                # the field fades out (10 ticks) and holds black (40) before the name entry cuts in
 - screenshot sc_01_rename.png
 - tap e
 - tap e                             # R1 x2: the position moves onto the 'd'

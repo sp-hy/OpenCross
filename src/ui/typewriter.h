@@ -15,7 +15,13 @@ struct LayoutGlyph {
   bool italic = false;
   // Number entry ({input(n)}): the glyph shows digit `digit` (0 = leftmost) of the entry; -1 = an ordinary glyph.
   int digit = -1;
+  // Button glyph ({key(n)}): n, the glyph `ch` being its placeholder (button_placeholder); -1 = an ordinary glyph.
+  int button = -1;
 };
+
+// The character a {key(n)} button glyph is laid out as: a no-break space, a plain space in the JP layout (no word wrap). The button
+// picture is drawn over it.
+inline char32_t button_placeholder(bool wraps) { return wraps ? U' ' : U' '; }
 
 struct PageEvent {
   enum class Kind : u8 { Delay, Speed, Wait, FWait, AutoClose, FSet };
@@ -28,7 +34,7 @@ struct PageEvent {
 struct TextPage {
   std::vector<LayoutGlyph> glyphs;
   std::vector<PageEvent> events;
-  // width: widest line. ends_message is false when a {bpage} follows.
+  // width: widest line (the sum of its glyphs' advances). ends_message is false when a {bpage} follows.
   float width = 0;
   int lines = 0;
   bool ends_message = true;
@@ -41,13 +47,21 @@ struct LayoutMetrics {
   float line_height = 0;
   float max_width = 0;
   bool wrap = false;
-  // The width a glyph counts for against max_width, when it differs from the pen advance (wrap_glyph_width); empty = the advance.
-  std::function<float(char32_t, bool italic)> wrap_advance;
+  // The width a glyph counts for in the message's layout (wrap_glyph_width, JP jp_glyph_width): against max_width, and as the pen advance
+  // on a pen grid; empty = the advance.
+  std::function<float(char32_t, bool italic)> glyph_width;
   // Choice mode (non-JP; the message is laid out with a choice flag once the script marks it as a choice): a line that
   // starts with three spaces is a choice line; its indent run is laid out with special space widths - the first space (it and the
   // next two all spaces) w0 = 70, the others w0 = 20, advance = 2 w0 * 0.45 canvas units at glyph scale 0.5 - and the line is
   // never wrapped. choice_space_first / choice_space are those advances at the caller's scale (0 = rule off).
   float choice_space_first = 0, choice_space = 0;
+  // Pen advance of a {key(n)} button glyph (non-JP: it counts 40 when a space follows, else 55, advance = 0.9 w at glyph scale 0.5), at
+  // the caller's scale; 0 = the placeholder's font advance.
+  float button_advance_spaced = 0, button_advance = 0;
+  // Pen grid: the pen advances by the width each glyph counts for (glyph_width, or the choice and button advances) and the glyphs sit
+  // on whole steps of the grid, the pen dropping the fraction of a step at every glyph; a line's width is the sum of its glyphs' widths.
+  // 0 = the pen advances by `advance`.
+  float pen_grid = 0;
 };
 
 // Splits a flattened message (import::flatten output) into pages: lines, wrapping, events positioned by glyph index.
@@ -56,6 +70,10 @@ std::vector<TextPage> layout_pages(const import::Message& flat, const LayoutMetr
 // The width a glyph counts for in word wrap at glyph scale 0.5, from its sprite-font measure: 0.45 of the measure less the 10 texels of
 // padding, an italic glyph's measure being read at 0.8; a blank (measure 0) counts 18.
 float wrap_glyph_width(float measure, bool italic);
+// The width a glyph counts for in the JP layout at glyph scale 0.5: a Latin letter, '-', '[' or ']' 0.45 of its sprite-font measure, a
+// half-width digit (0-9 and the superscripts one, two and three) 28, any other glyph (kana, kanji, full-width digits, spaces, a button
+// glyph) 49.
+float jp_glyph_width(char32_t ch, float measure);
 // The widest line of a disc message in characters: a typed-name or item token counts 6, and a confirm wait ends a line as a newline does.
 int disc_line_chars(const import::Message& ps1);
 // The wrap limit of a field message at glyph scale 0.5, from its disc line width: 62 per character up to 925, 1000 without a disc message,

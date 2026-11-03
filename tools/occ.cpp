@@ -808,7 +808,7 @@ int cmd_dialogue_sizes(const vfs::Vfs& fs, const std::string& only_room, bool ve
       ++total;
       ui::LayoutMetrics lm;
       lm.advance = [](char32_t) { return 22.0f; };
-      lm.wrap_advance = [&font](char32_t ch, bool italic) { return ui::wrap_glyph_width(font->measure(static_cast<u32>(ch)), italic); };
+      lm.glyph_width = [&font](char32_t ch, bool italic) { return ui::wrap_glyph_width(font->measure(static_cast<u32>(ch)), italic); };
       lm.line_height = 57.78f;
       lm.max_width = ui::wrap_limit(rid, static_cast<int>(idx), import::Lang::En, ui::disc_line_chars(import::parse_ps1(blk->records[idx].bytes, jpg)));
       lm.wrap = true;

@@ -1,0 +1,23 @@
+# alu_b03i at scenario 28, Kid's first join: the room INIT empties party slots 1 and 2 before the party entities run SETUP_PC, so the
+# slot-1 entity (0E FE) finds no character and stays out of play. The scene's ADD_TO_PARTY Kid + COMMIT_PARTY_MODEL then re-runs the
+# INIT of the first entity whose SETUP_PC now names Kid; that entity speaks her two lines and hands Serge the Tele-Porter.
+# Party Serge, Kid, Leena at the load. The 7C puts Kid on Serge's spot and then, in the same frame, in the party V 128 units behind
+# him; the PS1 holds Serge at (233, -275) and Kid at (233, -403) from the 7C to the end of the scene.
+0 wait 20
+- request party_add 1
+- request party_add 20
+- set var 0x00 28
+- load alu_b03i 0
+- wait room alu_b03i 300
+- wait text Termina
+- assert party 0,1,-
+- assert ent 2 shown 1
+- assert near 1 233 -275 2
+- assert near 2 233 -403 2
+- dump
+- skip
+- wait text Tele-Porter
+- skip
+- wait idle 900
+- assert var 0x00 30
+- quit

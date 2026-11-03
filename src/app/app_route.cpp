@@ -44,6 +44,8 @@ void App::init_route_state() {
     return static_cast<int>(world.game_state().slot.location());
   };
   rstate.battle_events = [this] { return battle_ready ? battle.route_events() : std::vector<std::string>(); };
+  rstate.battle_camera = [this] { return battle_ready ? battle.route_camera() : std::string(); };
+  rstate.battle_menu = [this] { return battle_ready ? battle.route_menu() : std::string(); };
   // For route `snap` / `assert same`: what an art switch must not change in a battle.
   rstate.battle_sig = [this] {
     const battle::Battle* active_battle = battle_ready ? battle.battle() : nullptr;
@@ -63,6 +65,9 @@ void App::fill_route_state() {
   rstate.room_valid = field_visible() && !world.room_name().empty();
   rstate.have_player = field_visible() && world.player_xz(rstate.px, rstate.pz);
   rstate.control_yaw = field_visible() ? world.control_yaw() : 0;
+  const std::pair<s32, s32> scroll = field_visible() ? world.camera_position() : std::pair<s32, s32>{0, 0};
+  rstate.scroll_x = scroll.first;
+  rstate.scroll_y = scroll.second;
   rstate.dialogue = field_visible() && world.dialogue_is_open();
   rstate.dialogue_choice = field_visible() && world.dialogue_choice_pending();
   rstate.choice_line = field_visible() ? world.dialogue_choice_line() : -1;

@@ -293,7 +293,7 @@ int main() {
     std::printf("FAIL: 9boll (eid 38) missing\n");
     ++lit_failures;
   }
-  // The six cast charge packs (battle.prd > sato > ch00..ch05): each loads, draws, and hands over with op 0x41 at tick 108.
+  // The six cast charge packs (battle.prd > sato > ch00..ch05): each loads, draws, and hands over with op 0x41, whose waits sum to 108 ticks.
   int charge_ok = 0;
   for (int colour = 0; colour < 6; ++colour) {
     auto pack = lib.charge_pack(colour);
@@ -318,8 +318,8 @@ int main() {
       drawn += frame.quads.size() + mi.size();
     }
     const auto st = run.emitters().stats();
-    // Op 0x41 fires at sequence tick 108 (ticks() counts completed ticks).
-    const bool ok = ready_tick == 107 && cams >= 1 && drawn > 0 && st.unresolved_sprites == 0;
+    // The start's own step pays one tick of the waits, so op 0x41 fires in sequence tick 107 (ticks() counts completed ticks).
+    const bool ok = ready_tick == 106 && cams >= 1 && drawn > 0 && st.unresolved_sprites == 0;
     if (std::getenv("BFX_CHARGE") || !ok)
       std::printf("charge %s: sheets %zu (+%zu shared) emitters %zu ready at tick %d cameras %d drawn %zu spawned %llu unresolved %u mesh %u%s\n",
                   pack->start_seq.c_str(), pack->fx.sheets.size(), pack->extra ? pack->extra->sheets.size() : size_t{0}, pack->fx.emitters.size(), ready_tick,

@@ -101,6 +101,12 @@ void App::close_field_screen(int fade_ticks) {
   world.fade_in_from_black(fade_ticks);
 }
 
+void App::open_name_entry(int char_id) {
+  // RDE shows the user guide first when MAP_ID (variable 6) is 0 or 8 (New Game+).
+  const int map_var = world.vm().var(script::var::kMapId);
+  flow.begin_rename(char_id, map_var == 0 || map_var == 8);
+}
+
 void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
   using script::MenuKind;
   switch (rq.kind) {
@@ -146,10 +152,11 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
       }
       break;
     case MenuKind::NameEntry:
+      // The field fades out and holds black as before the main menu, then the name entry cuts in.
       if (flow_ready) {
-        // RDE shows the user guide first when MAP_ID (variable 6) is 0 or 8 (New Game+).
-        const int map_var = world.vm().var(script::var::kMapId);
-        flow.begin_rename(rq.arg < 0 ? 0 : rq.arg, map_var == 0 || map_var == 8);
+        name_entry_after_fade = rq.arg < 0 ? 0 : rq.arg;
+        flow.begin_menu_open_fade();
+        log::info("fade: name-entry fade-out started");
         return;
       }
       break;
@@ -354,11 +361,19 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       apply_flow_action(fa);
       return;
     }
-    // Field main menu: the fade-out and the black hold are over, the menu cuts in.
-    if (flow.take_open_ready() && menu_ok && menu.closed()) {
-      open_main_menu(false);
-      log::info("fade: menu opened after the fade-out");
-      return;
+    // Field main menu or script name entry: the fade-out and the black hold are over, the screen cuts in.
+    if (flow.take_open_ready()) {
+      if (name_entry_after_fade >= 0) {
+        open_name_entry(name_entry_after_fade);
+        name_entry_after_fade = -1;
+        log::info("fade: name entry opened after the fade-out");
+        return;
+      }
+      if (menu_ok && menu.closed()) {
+        open_main_menu(false);
+        log::info("fade: menu opened after the fade-out");
+        return;
+      }
     }
   }
   // The pause screen (any context) owns the input; battle / movie / field stand still under it.
