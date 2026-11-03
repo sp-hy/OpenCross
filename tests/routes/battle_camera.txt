@@ -1,0 +1,48 @@
+# Battle camera at turn hand-over and target selection: Serge (slot 0) defends and the orbit moves to Kid (slot 1) at once; Kid attacks,
+# cancels the HIT% menu (the hop home runs under the approach shot, which the reopened menu keeps), confirms Attack while that shot still
+# runs (the shot ends, the target glide starts); then Kid spends the stamina: the turn ends with no shot left and the orbit goes to slot 2.
+0 wait 30
+- tap confirm                         # skip the intro shots
+- wait 90
+- assert battle camera orbit 0
+- tap down
+- wait 8
+- tap down
+- wait 8
+- tap confirm                         # Defend
+- wait 12
+- assert battle camera orbit 1
+- wait 108
+- tap confirm                         # Kid: Attack -> target selection
+- wait 20
+- assert battle camera target
+- tap confirm                         # target -> Kid runs up
+- wait 150
+- tap confirm                         # weak hit
+- wait 150
+- tap cancel                          # leave the HIT% menu: the hop home
+- wait 40
+- assert battle camera shot
+- assert battle menu 1 100            # back in the top menu with no new entry
+- tap confirm                         # Attack while the approach shot runs
+- wait 4
+- assert battle camera target
+- wait 26
+- tap confirm                         # target -> Kid runs up
+- wait 150
+- tap down
+- wait 6
+- tap down
+- wait 6
+- tap confirm                         # fierce hit
+- wait 160
+- tap confirm                         # fierce again: the stamina is spent
+- wait 80
+- assert battle camera hold
+- wait 34
+- assert battle menu - 100            # the turn ended: slot 2's window is opening
+- wait 1
+- assert battle menu 2 100
+- wait 25
+- assert battle camera orbit 2
+- quit

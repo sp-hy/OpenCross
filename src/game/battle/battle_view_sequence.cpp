@@ -102,14 +102,19 @@ void BattleView::begin_group() {
       // Weapon pick: both face each other (unless a unit's pose word is 8 = dead), and the target KEEPS that facing afterwards (the Sand Squirt
       // stays turned from the approach through the hit and the HIT% box).
       if (e0.target != act_.actor) face_toward(e0.target, act_.actor);
-      // Already standing at the target: hit at once (the approach shot again only when an enemy action interrupted the turn).
+      // Already standing at the target: hit at once (the approach shot again only when an enemy action interrupted the turn). An approach
+      // shot first ends every camera task, so no earlier shot resumes behind it.
       if (engaged_ && act_.actor == active_pc_ && e0.target == engaged_target_) {
-        if (engage_interrupted_) select_approach();
+        if (engage_interrupted_) {
+          end_camera_tasks();
+          select_approach();
+        }
         engage_interrupted_ = false;
         act_.phase = Act::Phase::Hit;
         start_hit();
         break;
       }
+      end_camera_tasks();
       select_approach();
       if (actor_visual.scripts && actor_visual.scripts->has_s5 && start_script(act_.actor, &actor_visual.scripts->s5, 2, 0, kApproach)) {
         act_.phase = Act::Phase::Approach;
@@ -149,9 +154,10 @@ void BattleView::begin_group() {
       break;
     case battle::ActionEvent::Kind::Defend:
       // The guard bit is set and the idle script (S5 entry 1) is restarted: it reads the flag (op 0x49) and holds the block pose itself.
-      // No separate clip is forced here (a forced clip would never hand back to the idle script).
+      // No separate clip is forced here (a forced clip would never hand back to the idle script). The command itself takes no time: the pose
+      // plays on while the next PC's menu entry runs.
       start_idle(act_.actor);
-      act_.phase = Act::Phase::Defend;
+      act_.phase = Act::Phase::Settle;
       break;
     case battle::ActionEvent::Kind::Run:
       for (int i = 0; i < battle::kPcSlots; ++i) {
@@ -348,6 +354,8 @@ void BattleView::tick_action() {
           engaged_ = true;
           break;
         }
+        // A queued attack arrived: its approach shot ends before the hit's own shots.
+        end_camera_tasks();
         act_.phase = Act::Phase::Hit;
         start_hit();
       }
@@ -369,11 +377,14 @@ void BattleView::tick_action() {
         if (act_.hit < act_.ev.size()) {
           if (script_gated(act_.ev[act_.hit])) act_.hit_wait = true;
           else start_hit();
-        // Stay at the enemy until the PC's turn ends.
+        // Stay at the enemy until the PC's turn ends; any other attacker goes home with the camera holding its pose.
         } else if (engaged_ && act_.actor == active_pc_) {
           act_.phase = Act::Phase::Settle;
           act_.ticks = 0;
-        } else start_return();
+        } else {
+          end_camera_tasks();
+          start_return();
+        }
       }
       break;
     case Act::Phase::Return:
@@ -408,13 +419,6 @@ void BattleView::tick_action() {
           battle_audit_note(std::format("release of element {} (unit {}) left by the {}-tick timeout (script_done {} pending {} pack {})", act_.ev.front().element, act_.actor,
                                         fx_ ? BattleFxRun::kTickCap : 600, actor_visual.script_done, pending_.size(), fx_ != nullptr));
         actor_visual.vm.stop();
-        act_.phase = Act::Phase::Settle;
-        act_.ticks = 0;
-      }
-      break;
-    case Act::Phase::Defend:
-      // The pose change is visible, then the next PC's menu opens.
-      if (act_.ticks > 24) {
         act_.phase = Act::Phase::Settle;
         act_.ticks = 0;
       }

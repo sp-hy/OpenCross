@@ -115,6 +115,8 @@ void FieldWorld::step_turn_rates() {
   // the facing, else mode 7, with the anim-done bit set (re-submitted even when it is the id in force). What ends it is the
   // model's animation sequence of that id: Serge's entries 6 / 7 play the turn clip once (loop off), wait for its end and
   // 8 ticks, then start clip 1 (stand) and set var 0.
+  // The yaw chase follows the bookkeeping in the engine's frame step, so the yaw holds still while a request waits for its odd tick:
+  // the turn starts from the shown facing the request was made at (an exact half turn stays exact and takes the left clip).
   const bool frame_tick = (tick_count_ & 1u) != 0;
   for (int i = 0; i < static_cast<int>(ents_.size()); ++i) {
     script::Entity& script_ent = vm_.entity(i);
@@ -151,7 +153,8 @@ void FieldWorld::step_turn_rates() {
         restore();
       }
     }
-    actor.turn_rate = static_cast<s16>(script_ent.v24e);
+    const bool request_waiting = (script_ent.flags270 & 0x6000u) == 0x6000u;
+    actor.turn_rate = request_waiting ? 0 : static_cast<s16>(script_ent.v24e);
   }
 }
 
@@ -207,15 +210,22 @@ void FieldWorld::step_motions() {
           // the actor moves with the wall probe and slide, like the pad. An NPC therefore stops at fences / walls (and
           // keeps pushing until the slot timer of 43 runs out) instead of walking through them; the arrival test is dist > S / 8,
           // then the position snaps to the target. 3F / 44 / 45 (direct position writes) stay unconstrained.
-          const float dx = motion.tx - cur.x, dz = motion.tz - cur.z;
-          const float distance = std::hypot(dx, dz);
-          if (!(distance * 16.0f > 2.0f * speed * 16.0f)) {
+          // The engine aims from the whole-unit position: the offset to the target is an integer vector, its length goes through
+          // mover_sqrt and its direction through mover_normalise (4.12), times S (16.16 velocity).
+          const int ix = static_cast<int>(motion.tx) - static_cast<int>(std::floor(cur.x));
+          const int iz = static_cast<int>(motion.tz) - static_cast<int>(std::floor(cur.z));
+          const float dx = static_cast<float>(ix), dz = static_cast<float>(iz);
+          const int raw_speed = script_ent.v10c ? script_ent.v10c : kDefaultSpeed;
+          if (!(mover_sqrt(ix * ix + iz * iz) * 16 > 2 * raw_speed)) {
             move_xz(motion.tx, motion.tz);
             motion.active = false;
             break;
           }
           ent_state.actor.set_facing(motion.facing);
-          float vx = dx / distance * speed, vz = dz / distance * speed;
+          const int offset[3] = {ix, 0, iz};
+          int unit[3];
+          mover_normalise(offset, unit);
+          float vx = static_cast<float>(unit[0] * raw_speed) / 65536.0f, vz = static_cast<float>(unit[2] * raw_speed) / 65536.0f;
           if (script_ent.flags270 & 0x2000000u) {
             // Curved walk (FE 2D): the per-slot heading turns toward the bearing to the target by the curve turn rate
             // per tick, the model yaw is written from it and the velocity follows it, so the entity walks an
@@ -282,6 +292,23 @@ void FieldWorld::step_motions() {
           break;
         }
         const ActorPose& target_pose = ents_[static_cast<size_t>(motion.target_ent)].actor.current();
+        if (motion.kind == K::FollowEnt3D || motion.kind == K::FollowEnt3DTimed) {
+          // B8 / B9 wait form: the chase of 44 / 45 in 3D. Faces the target (gated like 42), then while the 3D distance exceeds
+          // the same stop distance the position moves straight toward the target's position by S (a direct write: no wall probe,
+          // the height free), so a flyer follows a guide entity through the air. At the stop distance it stands.
+          const float dx = target_pose.x - cur.x, dy = target_pose.y - cur.y, dz = target_pose.z - cur.z;
+          const float distance = std::sqrt(dx * dx + dy * dy + dz * dz);
+          const float stop = 2.0f * speed + ent_radius(motion.target_ent) / 16.0f + ent_radius(i);
+          if (distance <= stop) {
+            motion.active = false;
+            break;
+          }
+          if (turn_to_walk && (dx != 0.0f || dz != 0.0f)) ent_state.actor.set_facing(bearing(dx, dz));
+          ent_state.actor.set_position(walk, cur.x + dx / distance * speed, cur.z + dz / distance * speed, false, true);
+          ent_state.actor.set_height(cur.y + dy / distance * speed, false);
+          if (motion.frames > 0 && --motion.frames == 0) motion.active = false;
+          break;
+        }
         // 44 / 45 wait form: faces the target (gated like 42), then while `16 d > 2 S + r_target + 16 r_self`
         // (S = speed; the target's radius is added unscaled: default stop = 10 + 2.4 + 38 units)
         // it sets the VELOCITY to unit(target - self) * S, and the entity moves through the wall probe and the slide
@@ -361,8 +388,10 @@ void FieldWorld::step_motions() {
         if (--motion.frames <= 0) motion.active = false;
         break;
       }
+      case K::Tween:
       case K::Jump: {
-        // Jump mode 3, once per tick: n ballistic steps, then one tick that snaps to the target (x, z, landing floor).
+        // MOVE_TWEEN / JUMP_MOVE wait form, once per tick: n ballistic steps, then one tick that snaps to the target (x, z and the landing
+        // height: 5B's own operand, 5C's floor).
         if (motion.elapsed < motion.total) {
           ent_state.actor.set_position(walk, cur.x + motion.step_x, cur.z + motion.step_z, false, true);
           ent_state.actor.set_height(cur.y + motion.vy, false);
@@ -375,19 +404,6 @@ void FieldWorld::step_motions() {
         } else {
           ent_state.actor.set_position(walk, motion.tx, motion.tz, false, true);
           ent_state.actor.set_height(motion.ty, false);
-          if (!y_valid) ent_state.actor.set_position(walk, motion.tx, motion.tz, false, false);
-          motion.active = false;
-        }
-        break;
-      }
-      case K::Tween: {
-        ++motion.elapsed;
-        const float progress = std::min(1.0f, static_cast<float>(motion.elapsed) / static_cast<float>(motion.total));
-        const float x = motion.sx + (motion.tx - motion.sx) * progress, z = motion.sz + (motion.tz - motion.sz) * progress;
-        ent_state.actor.set_position(walk, x, z, false, true);
-        const float y = motion.sy + (motion.ty - motion.sy) * progress;
-        if (motion.target_y) ent_state.actor.set_height(y, false);
-        if (motion.elapsed >= motion.total) {
           if (!y_valid) ent_state.actor.set_position(walk, motion.tx, motion.tz, false, false);
           motion.active = false;
         }
@@ -410,7 +426,7 @@ void FieldWorld::step_player() {
   if (pe.motion.active || !pe.placed) return;
   bool run = false;
   int heading = kNoHeading;
-  if (controls_free()) {
+  if (controls_free() && !(vm_.global_flags() & script::gflag::kFormationHold)) {
     const bool auto_active = debug_.auto_walk && auto_target_ >= 0 && tick_count_ < static_cast<u64>(debug_.action_tick);
     if (auto_active) {
       const ActorPose& pose = pe.actor.current();
@@ -640,8 +656,9 @@ void FieldWorld::step_followers() {
   if (follow_hold_ && follow_hold_ticks_ > 0) --follow_hold_ticks_;
   // A leader moved by a script (MOVE / WALK_TO, e.g. opn_a01i's run out of the lift) must grow the ring too, or the followers
   // resumed afterwards replay the spawn position and walk back to where the party started. The spot a pad walk ended on is
-  // not such a move: the ring keeps the spot before the last pad step.
-  if (!pad_pushed && std::hypot(lp.x - lead_pad_end_.x, lp.z - lead_pad_end_.z) > 0.5f) {
+  // not such a move: the ring keeps the spot before the last pad step. Only the update op grows the ring: a controlled entity that
+  // does not run it (a flyer selected with FE 4C so that it fires its guide's collision) leaves the followers standing.
+  if (!pad_pushed && ents_[static_cast<size_t>(lead)].updating && std::hypot(lp.x - lead_pad_end_.x, lp.z - lead_pad_end_.z) > 0.5f) {
     const TrailEntry& last = trails_[0].entries[static_cast<size_t>((trails_[0].head - 1) & 0x7F)];
     if (std::hypot(lp.x - last.x, lp.z - last.z) > 0.5f) trail_push(0, trail_entry_of(ents_[static_cast<size_t>(lead)].actor));
   }
@@ -662,10 +679,9 @@ void FieldWorld::step_followers() {
     ents_[static_cast<size_t>(ent)].motion.walking = false;
     ents_[static_cast<size_t>(ent)].motion.running = false;
   }
-  if (!party_follow_) return;
-  // CLEAR_CONTROLLED_ENTITY + locked controls: the party is scripted, the followers stay where the
-  // script left them until the controls return.
-  if (controlled_cleared_ && !controls_free()) return;
+  // The party hold (a formation 84 / DF, the end of BE, 86 mode 0; released by 86 mode 1 and the room load): the update op neither
+  // follows nor takes the pad.
+  if (vm_.global_flags() & script::gflag::kFormationHold) return;
   // The engine measures between whole-unit positions and floors the root: a member 200.9 units away counts as 200.
   auto dist3 = [](const ActorPose& pose, float x, float y, float z) {
     const float dx = std::floor(pose.x) - std::floor(x), dy = std::floor(pose.y) - std::floor(y), dz = std::floor(pose.z) - std::floor(z);

@@ -1,0 +1,12 @@
+# Arni, the fisherman's house (alu_a09i), scenario 20: the fisherman gives Serge the Shark Tooth. The leader's script loads the event
+# pack with `C1 00 FF` (FF = the leader's entity) and plays clip 0x85, Serge reaching for the tooth, from selju00 (20 frames); the log
+# must show `LOAD_ANIMATION selju00` before `clip ex_05`. Without the load the clip came from Serge's own pack, a crouch.
+0 wait 5
+- wait idle 600
+- set var 0x00 20
+- set var 0x80 0
+- approach 4 60 600
+- action
+- wait dialogue open
+- mash until idle x 3000
+- quit

@@ -138,6 +138,7 @@ Developer and automation switches, read once at boot (except `Log` and `Panels`,
 | `ShowChoice` | -1 | int | Make lines 0..N the in-window choices; -1 = plain message. |
 | `ShowChoiceFirst` | 0 | int | First choice line (operand high nibble). |
 | `ShowFace` | -1 | int | Force this portrait (face) id on the message; -1 = the scripts' own. |
+| `ShowFlags` | 0 | int | Window flags of the message: the dialog op's flag byte (2 = the fixed window, `fieldscript.md` section 9) in the low byte; 0x800 / 0x1000 put the portrait on the right / left. |
 | `Battle` | -1 | int | Start directly in the battle with this encounter scene id; -1 = off. |
 | `BattleAuto` | 0 | bool | The battle plays itself (first ready PC: Attack, fierce on the first enemy). |
 | `Showcase` | 0 | bool | With `Battle`: every playable character on stage, free camera on. |

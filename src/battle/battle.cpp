@@ -787,7 +787,6 @@ void Battle::kill(int unit_index) {
   victim.hp_written_zero = false;
   victim.lo |= st::kKO;
   victim.guard = false;
-  victim.defending = false;
   say(std::format("  {} is knocked out", victim.name));
   if (!victim.pc) run_kill_script(unit_index);
 }
@@ -1820,8 +1819,6 @@ void Battle::time_advance() {
     if (!unit.alive()) continue;
     if (unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - step);
     if (unit.pc) unit.stamina = cap_stamina(unit.stamina + step * (unit.rate));
-    // The time step is what a lone defender waits for before its menu can reopen.
-    if (unit.pc) unit.defending = false;
   }
 }
 
@@ -2032,16 +2029,18 @@ void Battle::settle() {
 }
 
 // ------------------------------------------------------------------------------------------------ command application
+void Battle::open_menu(int pc) {
+  if (is_pc_slot(pc)) units_[static_cast<size_t>(pc)].guard = false;
+}
+
 bool Battle::apply(const Command& cmd, std::string* why) {
   if (cmd.kind == Command::Kind::Element) open_element_menu(cmd.actor);
   if (!validate(cmd, why)) return false;
   attacked_.clear();
   begin_action();
   Unit& unit = units_[static_cast<size_t>(cmd.actor)];
+  // A command comes from the actor's own menu, whose opening ended its guard.
   unit.guard = false;
-  // A menu was used: every "defended" flag is released (the next PC is picked without looking at the flag, so a defender's menu reopens
-  // once another PC has acted).
-  for (int i = 0; i < kPcSlots; ++i) units_[static_cast<size_t>(i)].defending = false;
   // The automatic target: the weakest unit the cursor ring could reach (hidden units are never on it).
   auto pick_enemy = [&]() {
     if (cmd.target >= kPcSlots && units_[static_cast<size_t>(cmd.target)].alive() && !brain_.untargetable(cmd.target)) return cmd.target;
@@ -2148,8 +2147,6 @@ bool Battle::apply(const Command& cmd, std::string* why) {
     case Command::Kind::Defend:
       unit.stamina = std::min(70, unit.stamina + 10);
       unit.guard = true;
-      // The menu passes to the next PC (order pc+1, pc+2, pc).
-      unit.defending = true;
       say(std::format("{} defends", unit.name));
       {
         ActionEvent ev;
@@ -2160,6 +2157,11 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       }
       step_after_pc_action(cmd.actor, 1, false);
       post_action(cmd.actor, 1, 1);
+      // When no PC could take the menu now, a guarding one counted as unable, time runs one step before the menu passes on.
+      {
+        const auto free_menu = [](const Unit& pc_unit) { return pc_unit.can_open_menu() && !pc_unit.guard; };
+        if (outcome_ == Outcome::Ongoing && std::none_of(units_.begin(), units_.begin() + kPcSlots, free_menu)) time_advance();
+      }
       break;
     case Command::Kind::Run:
       say(std::format("{} flees", unit.name));
@@ -2247,13 +2249,14 @@ void Battle::compute_rewards() {
   const StarRow sr{row[0], row[1], row[2] | (row[3] << 8)};
   const int cap = progress_cap(sr);
   if (!boss_) {
-    // Cheats: instant growth = the full star's growth.
+    // Cheats: instant growth fills the progress and takes every stat all the way to its minor-growth target.
     growth_.progress = cheats_.instant_growth ? cap : std::min(growth_.progress + sr.step, cap);
     for (size_t i = 0; i < party_.size(); ++i) {
       if (!units_[i].alive()) continue;
       PartyMember& member = party_[i];
       for (size_t k = 0; k < 7; ++k) {
-        int gain = minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths, growth_.progress, cap);
+        int gain = cheats_.instant_growth && cap > 0 ? full_minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths)
+                                                     : minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths, growth_.progress, cap);
         const int room = std::max(0, member.lv99[k] - member.stat[k]);
         gain = std::min(gain, room);
         member.stat[k] += gain;

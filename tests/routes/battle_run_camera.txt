@@ -1,0 +1,15 @@
+# Run from the bg_00 command menu: the confirm ends the running shot and the camera holds while the party turns and runs; the battle
+# loop ends 17 ticks after the confirm and the stage outro `bto0` cuts in 14 ticks later (31 after the confirm).
+0 wait 30
+- tap confirm                         # skip the intro shots
+- wait 200
+- assert battle camera orbit 0
+- tap up                              # cursor wraps to Run Away
+- wait 8
+- tap confirm
+- wait 22
+- assert battle camera hold
+- wait 8
+- assert battle camera shot
+- wait 30
+- quit

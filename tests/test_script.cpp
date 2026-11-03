@@ -526,6 +526,88 @@ void test_dialogue_none_speaker() {
   CHECK_EQ(host.opened, 1);
 }
 
+// Host with a real party table: SETUP_PC binds by character reference, 7B fills the first empty slot.
+class PartyHost : public NullHost {
+ public:
+  std::vector<int> party{0};
+  std::vector<int> setup_calls;
+  std::vector<int> placed_on_leader;
+  int party_member(int slot) override { return slot < static_cast<int>(party.size()) ? party[static_cast<size_t>(slot)] : -1; }
+  bool party_add(int char_id) override {
+    if (party.size() >= 3) return false;
+    party.push_back(char_id);
+    return true;
+  }
+  void setup_pc(int ent, int, int) override { setup_calls.push_back(ent); }
+  void place_on_controlled(int ent) override { placed_on_leader.push_back(ent); }
+  void place_followers() override { ++followers_placed; }
+  int followers_placed = 0;
+};
+
+// 7C after a 7B re-runs the INIT of the first entity whose SETUP_PC names the new member through the party table as it is now
+// (an `0E FE` that found slot 1 empty at the room load), clears the flags the failed SETUP_PC left, puts it on the controlled
+// entity and lets the running script go on after the 7C.
+void test_commit_relinks_new_member() {
+  Asm script;
+  const u16 noop = script.here();
+  script.stop();
+  const u16 upd = script.here();
+  script.raw({0x7B}).word(I(1)).raw({0x7C});
+  script.set(V(0), 5);
+  script.park();
+  const u16 lead = script.here();
+  script.raw({0x0E, 0xFD, 0x80}).stop();
+  const u16 second = script.here();
+  script.raw({0x0E, 0xFE, 0x80}).stop();
+  const u16 third = script.here();
+  script.raw({0x0E, 0xFF, 0x80}).stop();
+  PartyHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, noop}, {1, upd}}}, {{{0, lead}}}, {{{0, second}}}, {{{0, third}}}}));
+  CHECK_EQ(host.setup_calls.size(), 3);
+  vm.entity(2).flags38 |= flag38::kInactive;
+  vm.tick();
+  CHECK_EQ(vm.var(V(0)), 5);
+  CHECK_EQ(host.setup_calls.size(), 4);
+  CHECK_EQ(host.setup_calls.back(), 2);
+  CHECK_EQ(host.placed_on_leader.size(), 1);
+  CHECK_EQ(host.placed_on_leader.front(), 2);
+  CHECK_EQ(host.followers_placed, 1);
+  CHECK((vm.entity(2).flags38 & flag38::kInactive) == 0);
+  CHECK_EQ(vm.entity(2).rec[0].state, kRecIdle);
+}
+
+// C1 / BF resolve their entity operand like any entity reference: `C1 00 FF` loads onto the leader's entity (party slot 0), and
+// only a reference that resolves to no entity (an empty party slot) skips the start and stop forms and yields.
+class AnimPackHost : public NullHost {
+ public:
+  std::vector<int> loads;
+  int party_entity(int slot) override { return slot == 0 ? 1 : -1; }
+  void extra_animation(u16 key, bool start, int ent, int arg) override {
+    if (start && key == 0xC1) loads.push_back(ent * 0x1000 + arg);
+  }
+};
+
+void test_load_animation_resolves_entity() {
+  Asm script;
+  const u16 noop = script.here();
+  script.stop();
+  const u16 upd = script.here();
+  script.raw({0xC1, 0x00, 0xFF}).word(I(0)).raw({0xC1, 0x01});
+  script.set(V(0), 1);
+  script.raw({0xC1, 0x00, 0xFE}).word(I(0x105)).raw({0xC1, 0x01});
+  script.set(V(1), 1);
+  script.park();
+  AnimPackHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, noop}, {1, upd}}}, {{{0, noop}}}}));
+  for (int i = 0; i < 4; ++i) vm.tick();
+  CHECK_EQ(host.loads.size(), 1);
+  CHECK_EQ(host.loads.front(), 0x1000);
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
 void test_scenario_and_rng() {
   Asm script;
   const u16 init = script.here();
@@ -822,6 +904,8 @@ int main() {
   test_run_script_and_wait();
   test_party_slot_and_choice_result();
   test_dialogue_none_speaker();
+  test_commit_relinks_new_member();
+  test_load_animation_resolves_entity();
   test_scenario_and_rng();
   test_opcode_table();
   test_get_position_order();

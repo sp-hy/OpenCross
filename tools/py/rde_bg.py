@@ -34,6 +34,7 @@ import win32gui
 import win32process
 
 import rde_save_redirect as redirect_tool
+from backstop import Backstop
 
 KEYBOARD_TO_PAD = 0x0042A250     # image address of the function that returns the pressed-buttons word
 GUEST_RAM_HOST = 0x00A2F28C      # image address of guest address 0x80000000
@@ -68,6 +69,7 @@ class Game:
         self.rde = redirect_tool.Rde(pid)
         self.hwnd = window_of(pid)
         self.cell = None
+        self.backstop = None
 
     def to_back(self):
         flags = win32con.SWP_NOMOVE | win32con.SWP_NOSIZE | win32con.SWP_NOACTIVATE
@@ -100,6 +102,9 @@ class Game:
         return struct.unpack("<I", self.guest(addr, 4))[0]
 
     def close(self):
+        if self.backstop:
+            self.backstop.stop()
+            self.backstop = None
         if self.process:
             self.process.kill()
             self.process.wait()
@@ -113,22 +118,34 @@ def give_focus_back(hwnd):
 
 
 def launch(save, wait=25, card1=None):
-    """Starts RDE behind everything; `wait` = seconds until the title is up, when the save path can be redirected. The game takes
-    the foreground once, when its window appears; it goes straight back to the window that had it."""
+    """Starts RDE behind everything; `wait` = seconds until the title is up, when the save path can be redirected. Foreground
+    changes stay locked while it boots and a window-event hook keeps its window at the back, so it never takes the focus or shows
+    over other windows; should the lock be lifted early (a key press of the user releases it), the foreground goes straight back."""
     previous = win32gui.GetForegroundWindow()
     redirect_tool.check_save_path(save)
     before = redirect_tool.real_save_hashes()
     startup = subprocess.STARTUPINFO()
     startup.dwFlags = subprocess.STARTF_USESHOWWINDOW
     startup.wShowWindow = win32con.SW_SHOWNOACTIVATE
+    ctypes.windll.user32.LockSetForegroundWindow(1)
+    try:
+        return _boot(save, wait, card1, previous, before, startup)
+    finally:
+        ctypes.windll.user32.LockSetForegroundWindow(2)
+
+
+def _boot(save, wait, card1, previous, before, startup):
     process = redirect_tool.launch(save, startup)
+    backstop = Backstop(process.pid)
     start = time.time()
     while not window_of(process.pid):
         if time.time() - start > 30:
+            backstop.stop()
             process.kill()
             raise SystemExit("no RDE window")
         time.sleep(0.01)
     game = Game(process.pid, process)
+    game.backstop = backstop
     game.real_saves = before
     try:
         game.take_input()
@@ -139,6 +156,7 @@ def launch(save, wait=25, card1=None):
             time.sleep(0.01)
         game.to_back()
     except Exception:
+        backstop.stop()
         process.kill()
         raise
     game.rde.redirect(os.path.abspath(save))
@@ -150,6 +168,7 @@ def launch(save, wait=25, card1=None):
 
 def attach(pid):
     game = Game(pid)
+    game.backstop = Backstop(pid)
     game.to_back()
     game.take_input()
     return game

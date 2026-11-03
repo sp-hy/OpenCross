@@ -97,8 +97,9 @@ struct KeyItemPopup::Impl {
   // Texture index (option byte 0 -> 3 = w04).
   int skin = 3;
   std::unique_ptr<Pic> skin_tex;
-  // Texture index + 16 * (original art) of skin_tex.
+  // Texture index + 16 * (original art) of skin_tex, and the mod overlay generation (vfs::Vfs::generation) it was read through.
   int skin_loaded = -1;
+  std::uint32_t skin_generation = 0;
   // Field display order: key item code (id - 1) per position.
   std::array<u8, kSlots> order{};
   bool order_from_disc = false;
@@ -133,7 +134,7 @@ struct KeyItemPopup::Impl {
   // same pieces.
   Pic* skin_pic() {
     const int key = std::clamp(skin, 0, 15) + (hd ? 0 : 16);
-    if (skin_loaded == key) return skin_tex.get();
+    if (skin_loaded == key && skin_generation == vfs->generation()) return skin_tex.get();
     static constexpr int kNn[16] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17};
     const int sheet = kNn[std::clamp(skin, 0, 15)];
     if (hd) {
@@ -145,6 +146,7 @@ struct KeyItemPopup::Impl {
       if (!skin_tex) log::warn("keyitem list: PS1 window skin w{}.tim unavailable", sheet);
     }
     skin_loaded = key;
+    skin_generation = vfs->generation();
     return skin_tex.get();
   }
   std::unique_ptr<Pic> from_rgba(const ps1::Rgba& img) {

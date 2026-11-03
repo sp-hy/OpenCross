@@ -10,7 +10,7 @@
 // its corners are rounded and the hull is filled with Gouraud rings drawn *subtractively* (B - F), dark at the centre and
 // zero at the rim. The light is the stage's `sun0` object position, by default a point 3072 units above the
 // arena centre, so shadows point away from the centre. The shadow fades with the unit's height above the floor.
-// [Enhancements] Lighting replaces them with the units' real shapes on the floor (render/shadow_pipeline.h) over a faint contact hull.
+// [Enhancements] Lighting replaces them with the units' real shapes on the floor (render/shadow_pipeline.h); no hull is drawn then.
 #include <functional>
 #include <future>
 #include <map>
@@ -79,8 +79,6 @@ class StageScene {
   enum class CasterOwner { Unit, Pseudo, Showcase };
   struct ShadowCaster {
     float x = 0, z = 0, y = 0, yaw = 0, height = 1000;
-    // Height of the lowest posed joint above the floor.
-    float clearance = 0;
     Footprint fp;
     bool has_fp = false;
     const assets::ModelAsset* model = nullptr;
@@ -105,8 +103,8 @@ class StageScene {
   void set_depth_cue(const render::StagePipeline::DepthCue& cue) { cue_ = cue; }
   // [Enhancements] SpellLights: the lights of the running effect (render world), applied to the opaque scenery of the next draw(); empty = off.
   void set_spell_lights(const render::LightSet& lights) { spell_lights_ = lights; }
-  // [Enhancements] Lighting: the next draw() lays the mask of `shadows` on the floor over `rect` (ShadowPipeline::Floor::rect) and keeps only a faint
-  // contact hull under each unit; null = the PS1's drop shadows.
+  // [Enhancements] Lighting: the next draw() lays the mask of `shadows` on the floor over `rect` (ShadowPipeline::Floor::rect) in place of the
+  // drop shadow hulls; null = the PS1's drop shadows.
   void set_floor_shadow(render::ShadowPipeline* shadows, const std::array<float, 4>& rect) {
     floor_shadow_ = shadows;
     floor_rect_ = rect;
@@ -148,9 +146,9 @@ class StageScene {
   void ground_overlay_end();
 
   // Shadow geometry of one caster in stage world space (y up, the floor at y = 0), as StagePipeline vertices (colour = the
-  // subtracted grey / 255 x `grey_scale`) and triangle indices appended to the vectors. Exposed for tools / tests.
+  // subtracted grey / 255) and triangle indices appended to the vectors. Exposed for tools / tests.
   static void build_shadow(const ShadowCaster& caster, const Footprint& fp, const std::array<float, 3>& light, std::vector<assets::StageVertex>& verts,
-                           std::vector<u32>& indices, float grey_scale = 1.0f);
+                           std::vector<u32>& indices);
 
  private:
   const Footprint& footprint(const assets::ModelAsset* model);

@@ -32,6 +32,8 @@ int NullHost::party_entity(int) { NOTE("party_entity"); return -1; }
 int NullHost::character_entity(int) { NOTE("character_entity"); return -1; }
 int NullHost::party_slot_of_entity(int) { NOTE("party_slot_of_entity"); return -1; }
 void NullHost::setup_pc(int, int, int) { NOTE("setup_pc"); }
+void NullHost::place_on_controlled(int) { NOTE("place_on_controlled"); }
+void NullHost::place_followers() { NOTE("place_followers"); }
 void NullHost::setup_npc(int, int) { NOTE("setup_npc"); }
 int NullHost::load_model(int, int) { NOTE("load_model"); return 0; }
 bool NullHost::monster_defeated(int) { NOTE("monster_defeated"); return false; }
@@ -64,11 +66,12 @@ bool NullHost::extra_animation_busy() { NOTE("extra_animation_busy"); return fal
 void NullHost::camera_set_position(s32, s32, int) { NOTE("camera_set_position"); }
 void NullHost::camera_to_actor(int) { NOTE("camera_to_actor"); }
 void NullHost::camera_follow(int, int) { NOTE("camera_follow"); }
-bool NullHost::camera_busy() { NOTE("camera_busy"); return false; }
+bool NullHost::camera_wait(CameraWait, s32, s32) { NOTE("camera_wait"); return true; }
 void NullHost::camera_limits(s32, s32, s32, s32) { NOTE("camera_limits"); }
 void NullHost::camera_auto_follow(bool) { NOTE("camera_auto_follow"); }
 std::pair<s32, s32> NullHost::camera_position() { NOTE("camera_position"); return {0, 0}; }
 void NullHost::set_camera_origin(s32, s32) { NOTE("set_camera_origin"); }
+void NullHost::set_camera_target(int) { NOTE("set_camera_target"); }
 void NullHost::set_controlled_entity(int) { NOTE("set_controlled_entity"); }
 void NullHost::shake(int, int, int) { NOTE("shake"); }
 void NullHost::formation(u16, std::span<const s32>) { NOTE("formation"); }

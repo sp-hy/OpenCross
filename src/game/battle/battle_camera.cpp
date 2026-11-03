@@ -301,6 +301,10 @@ bool BattleCamera::select(const std::string& name) {
     prev_ = cur_ = goal;
     lift_ = false;
   }
+  if (retired_) {
+    retired_ = false;
+    kill_shot();
+  }
   if (shot->keys.size() < 2) return true;
   const bool list_alive = task_running();
   if (select_mode == 1u && list_alive) {

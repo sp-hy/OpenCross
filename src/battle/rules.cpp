@@ -242,6 +242,12 @@ int minor_growth(int snap, int pending, int cur, int pending_tenths, int progres
   return rounded < 0 ? 0 : rounded;
 }
 
+int full_minor_growth(int snap, int pending, int cur, int pending_tenths) {
+  const double gain = (snap + pending * pending_tenths / 10.0) - cur;
+  const int rounded = static_cast<int>(std::floor(gain + 0.5));
+  return rounded < 0 ? 0 : rounded;
+}
+
 // ------------------------------------------------------------------------------------------------ victory
 int gold_reward(int base_total, bool bonus) { return bonus ? base_total * 125 / 100 : base_total; }
 

@@ -309,6 +309,10 @@ void test_growth() {
   CHECK_EQ(minor_growth(50, 20, 50, 7, 2, 8), 4);
   CHECK_EQ(minor_growth(50, 20, 70, 7, 8, 8), 0);
   CHECK_EQ(minor_growth(50, 20, 50, 7, 8, 0), 0);
+  // The full step: (50 + 14) - 50 = 14; 20 x 5 / 10 = 10 -> 7 left from 53; above the target: 0.
+  CHECK_EQ(full_minor_growth(50, 20, 50, 7), 14);
+  CHECK_EQ(full_minor_growth(50, 20, 53, 5), 7);
+  CHECK_EQ(full_minor_growth(50, 20, 70, 7), 0);
   CHECK_EQ(progress_cap({8, 7, 1}), 8);
   CHECK_EQ(progress_cap({10, 9, 64}), 640);
 }
@@ -550,20 +554,26 @@ void test_stamina_sequence() {
   CHECK_EQ(battle.unit(0).stamina, 50);
   CHECK(battle.unit(1).guard);
   CHECK_EQ(battle.unit(3).countdown, 96);
-  // The defender's own menu stays closed while the others can still act ...
-  CHECK(battle.unit(1).defending && !battle.can_act(1));
-  CHECK(battle.can_act(0) && battle.can_act(2));
-  // ... and reopens once another PC has used a menu (the check does not look at the flag).
+  // The guard does not close the defender's menu (an L1 / R1 switch may land on it) and outlasts the other PCs' commands ...
+  CHECK(battle.can_act(1) && battle.can_act(0) && battle.can_act(2));
   Command d0;
   d0.kind = Command::Kind::Defend;
   d0.actor = 0;
   CHECK(battle.apply(d0));
-  CHECK(!battle.unit(1).defending && battle.can_act(1));
-  CHECK(battle.unit(0).defending && !battle.can_act(0));
-  // or when time advances (the lone defender case runs the time step)
-  battle.time_advance();
-  CHECK(!battle.unit(0).defending && battle.can_act(0));
-  battle.unit_mut(0).guard = battle.unit_mut(1).guard = false;
+  CHECK(battle.unit(0).guard && battle.unit(1).guard);
+  CHECK_EQ(battle.unit(3).countdown, 95);
+  // ... until the PC's command menu opens.
+  battle.open_menu(0);
+  CHECK(!battle.unit(0).guard && battle.unit(1).guard);
+  // A Defend that leaves no PC free to take the menu (the others guarding or unable) runs one time step: the enemy's countdown reaches
+  // 0 and it acts (countdown back to ap = 100 with the Lo rng) before the menu passes on.
+  battle.unit_mut(2).stamina = -100;
+  CHECK(battle.apply(d0));
+  CHECK_EQ(battle.unit(3).countdown, 100);
+  CHECK(battle.unit(0).guard && battle.unit(1).guard);
+  battle.open_menu(0);
+  battle.open_menu(1);
+  CHECK(!battle.unit(0).guard && !battle.unit(1).guard);
 
   // element: flat 70 stamina whatever the level, gauge cost row+1 (row 0 -> 1); others recover 1 step
   battle.unit_mut(0).stamina = 70;
@@ -1292,6 +1302,30 @@ void test_victory_and_growth() {
     CHECK_EQ(battle.party()[0].stat[1], 11);
     // The snapshot only moves on a star-up.
     CHECK_EQ(battle.party()[0].snap[1], 9);
+  }
+  // instant growth: one normal victory takes ATK the whole way to its target 9 + 14 = 23, not half of it
+  {
+    Fixture fixture;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    rng.push(0);
+    rng.push(100);
+    NullBrain nb;
+    Battle battle(fixture.tables, rng, nb);
+    battle.set_cheats({.instant_growth = true});
+    auto member = make_member(0, "A");
+    member.pending = {0, 20, 0, 0, 0, 0, 0};
+    member.lv99 = {850, 60, 78, 95, 25, 52, 43};
+    CHECK(battle.start({member}, 0));
+    battle.unit_mut(3).hp = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK(battle.outcome() == Outcome::Victory);
+    CHECK_EQ(battle.growth().progress, 8);
+    CHECK_EQ(battle.rewards().gains[0][1], 14);
+    CHECK_EQ(battle.party()[0].stat[1], 23);
   }
   // star-up: KO'd member gets no gain and 1 HP but does receive next pending; bench (non-party) member gets its old pending
   {

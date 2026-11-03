@@ -407,6 +407,7 @@ void App::init_field() {
   dbg.show_choice = config.debug_show_choice;
   dbg.show_choice_first = config.debug_show_choice_first;
   dbg.show_face = config.debug_show_face;
+  dbg.show_flags = config.debug_show_flags;
   world.set_debug(dbg);
   if (flow_ready) {
     world.set_game_state(&flow.game_state());

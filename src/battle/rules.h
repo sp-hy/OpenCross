@@ -195,6 +195,8 @@ int next_pending_hp(Rng& rng, int max_hp, int lv99_hp, int star);
 int next_pending_stat(Rng& rng, int cur, int lv99, int star);
 // Minor post-battle gain for one stat: round_half_up(0.5*((snap+d)-cur)*sqrt(P/S)), d = pending*pending_tenths/10, floor 0.
 int minor_growth(int snap, int pending, int cur, int pending_tenths, int progress, int progress_cap);
+// The whole way to the minor-growth target in one step: round_half_up((snap+d)-cur), floor 0 (the instant-growth cheat).
+int full_minor_growth(int snap, int pending, int cur, int pending_tenths);
 inline int progress_cap(const StarRow& row) { return static_cast<short>(row.step * row.battles); }
 
 // ---- victory

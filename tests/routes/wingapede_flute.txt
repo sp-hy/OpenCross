@@ -1,0 +1,24 @@
+# hid_a07f: the Beeba Flute used at the branch tip makes the Wingapede (ent 4) the controlled entity; it chases the guide (ent 5) in
+# 3D through the air until it touches it, then the boss battle starts. Before, the flyer walked on the floor into the room's exit.
+0 wait idle 600
+- request party_add 2
+- request party_add 4
+- load hid_a07f 0
+- wait room hid_a07f 300
+- wait idle 300
+- request keyitem 5
+- wait 50
+- tap confirm
+- wait idle 120
+- put -135 -330
+- wait 20
+- tap item
+- wait 30
+- tap right                           # the Beeba Flute
+- wait 10
+- tap confirm
+- wait dialogue open 1500
+- skip 1500
+- wait battle start 1500
+- assert room hid_a07f
+- quit

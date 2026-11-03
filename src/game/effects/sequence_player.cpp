@@ -63,6 +63,8 @@ struct Task {
   const assets::Sequence* seq = nullptr;
   size_t pc = 0, loop_pc = 0;
   int wait = 0;
+  // ended: op 0x21 (or the last command) ran; the task finishes, or restarts, once its wait runs out.
+  bool ended = false;
   bool done = false;
   bool is_loop = false;
   // cursor: the target its per-target loop serves. inherited: the target of the parent when it started this one (0 = none).
@@ -108,7 +110,7 @@ struct SequencePlayer::Impl {
     task.caster = caster;
     tasks.push_back(task);
     ++st.started;
-    run(tasks.size() - 1);
+    step(tasks.size() - 1);
     return true;
   }
 
@@ -186,15 +188,54 @@ struct SequencePlayer::Impl {
     }
   }
 
-  // Runs the commands of one task while its accumulated wait is not positive (a negative wait = commands overdue).
-  // A negative command wait is signed and carries into the following commands.
-  void run(size_t ti) {
+  // One step of a task by the pass delta (one tick). The wait falls by the delta; at 0 the due commands run. A wait below 0 is an
+  // overshoot: the task runs from wait 0 and the overshoot comes off the first non-zero wait it meets, stepping on while that stays
+  // below 0. A wait that lands on exactly 0 ends the step, so the next command runs in the next one. start() steps a new task at once.
+  void step(size_t ti) {
+    vib_step(tasks[ti], platform::Rumble::instance());
+    --tasks[ti].wait;
     for (int guard = 0; guard < kMaxStepsPerTick; ++guard) {
-      if (ti >= tasks.size() || tasks[ti].done || tasks[ti].wait > 0) return;
+      int carry = 0;
+      if (tasks[ti].wait < 0) {
+        carry = -tasks[ti].wait;
+        tasks[ti].wait = 0;
+      }
+      if (tasks[ti].ended && tasks[ti].wait == 0) {
+        Task& task = tasks[ti];
+        if (!task.is_loop) {
+          // A sequence with header flag bit0 serves the next target (cursor + 1) from its loop label (the start unless an op 0x4E
+          // moved it) while has_target finds one.
+          if ((task.seq->flags & 1) && hooks.has_target && hooks.has_target(task.cursor + 1)) {
+            ++task.cursor;
+            task.pc = task.loop_pc;
+            task.ended = false;
+            return;
+          }
+          task.done = true;
+          return;
+        }
+        task.pc = task.loop_pc;
+        task.ended = false;
+      }
+      if (tasks[ti].wait == 0) {
+        if (!run(ti) || ti >= tasks.size()) return;
+        tasks[ti].wait -= carry;
+      }
+      if (tasks[ti].wait >= 0) return;
+    }
+    // Runaway loop of zero-wait commands: continue next tick.
+    tasks[ti].wait = 1;
+  }
+
+  // Runs the commands of a due task while the sum of their waits is 0 (a signed negative wait also stops it). False when a command
+  // ends the step itself: the end, a served target loop, a yield or a stall.
+  bool run(size_t ti) {
+    for (int guard = 0; guard < kMaxStepsPerTick; ++guard) {
+      if (ti >= tasks.size()) return false;
       Task& task = tasks[ti];
       if (task.pc >= task.seq->cmds.size()) {
-        task.done = true;
-        return;
+        task.ended = true;
+        return false;
       }
       const assets::SeqCmd& cmd = task.seq->cmds[task.pc];
       disp_cursor = task.cursor;
@@ -206,27 +247,13 @@ struct SequencePlayer::Impl {
       if (static const bool trace = std::getenv("OC_FX_SEQ") != nullptr; trace)
         std::fprintf(stderr, "fxseq: t%lld %s #%zu op %02X wait %d %s\n", tick_n, task.caster > 0 ? "sado" : std::string(task.seq->name).c_str(), task.pc, cmd.op, static_cast<int>(static_cast<s16>(cmd.wait)), cmd.name.c_str());
       int wait = static_cast<s16>(cmd.wait);
-      bool advance = true;
       switch (cmd.op) {
         case 0x20: break;
+        // The end waits out its own wait; step() then finishes the task, restarts a 'loop' or serves the next target.
         case 0x21:
-          if (task.is_loop) {
-            task.pc = task.loop_pc;
-            // Never spin inside one tick.
-            task.wait = std::max(wait, 1);
-            return;
-          }
-          // At the end a sequence with header flag bit0 serves the next target (cursor + 1) from its loop label (the
-          // start unless an op 0x4E moved it) while has_target finds one.
-          if ((task.seq->flags & 1) && hooks.has_target && hooks.has_target(task.cursor + 1)) {
-            ++task.cursor;
-            task.pc = task.loop_pc;
-            task.wait = 0;
-            // Continues next tick (the task's time is reset).
-            return;
-          }
-          task.done = true;
-          return;
+          task.wait += wait;
+          task.ended = true;
+          return false;
         case 0x22: em.start_for_actor(cmd.name, task.caster, task.target()); break;
         case 0x2F: {
           // Copy: start() may reallocate `tasks`.
@@ -319,27 +346,26 @@ struct SequencePlayer::Impl {
         case 0x42:
           if (read_left > 0) {
             task.wait = 1;
-            return;
+            return false;
           }
           break;
         // Loop label: the next command becomes the loop start, the target cursor resets to 0.
         case 0x4E: task.loop_pc = task.pc + 1; task.cursor = 0; break;
         case 0x4D:
           // Only sequences with header flag bit0 loop over the targets; when the next one exists the cursor advances and the pc returns to the label.
-          // A served loop returns at once with the wait reset (the op's own wait is NOT taken - only the
-          // last target's pass waits it out). The next tick overshoots that zero wait by one, which the pass's first wait pays back.
+          // A served loop ends the step with the wait reset (the op's own wait is NOT taken - only the last target's pass waits it out),
+          // so the next step overshoots that zero wait by one and the pass's first wait pays it back.
           if (hooks.has_target) {
             if ((task.seq->flags & 1) && hooks.has_target(task.cursor + 1)) {
               ++task.cursor;
               task.pc = task.loop_pc;
-              task.wait = -1;
-              // Continues next tick.
-              return;
+              task.wait = 0;
+              return false;
             }
           } else if (hooks.next_target && hooks.next_target()) {
             task.pc = task.loop_pc;
-            task.wait = -1;
-            return;
+            task.wait = 0;
+            return false;
           }
           break;
         case 0x6A:
@@ -351,30 +377,35 @@ struct SequencePlayer::Impl {
           if (hooks.actor_busy && hooks.actor_busy()) {
             // Stall: re-test next tick.
             task.wait = 1;
-            return;
+            return false;
           }
           break;
         case 0x7A:
           if (hooks.wait_cond && hooks.wait_cond()) {
             task.wait = 1;
-            return;
+            return false;
           }
           break;
-        // Yield.
-        case 0x67: wait = std::max(wait, 1); break;
+        // Yield: the next command runs next tick, whatever this one's wait and any overshoot.
+        case 0x67:
+          ++task.pc;
+          task.wait = 1;
+          return false;
         default:
           ++st.other_ops;
           if (hooks.other) hooks.other(cmd);
           break;
       }
-      // Refetch: a child start may have grown the vector.
+      // Refetch: a child start may have grown the vector, a hook may have stopped tasks.
+      if (ti >= tasks.size()) return false;
       Task& refetched = tasks[ti];
-      if (advance) ++refetched.pc;
+      ++refetched.pc;
       refetched.wait += wait;
-      if (refetched.wait > 0) return;
+      if (refetched.wait != 0) return true;
     }
     // Runaway loop of zero-wait commands: continue next tick.
     if (ti < tasks.size()) tasks[ti].wait = 1;
+    return false;
   }
 
   void tick() {
@@ -382,12 +413,9 @@ struct SequencePlayer::Impl {
     ambient.step();
     shake.step();
     if (read_left > 0) --read_left;
-    platform::Rumble& pad = platform::Rumble::instance();
     for (size_t i = 0; i < tasks.size(); ++i) {
       if (tasks[i].done) continue;
-      vib_step(tasks[i], pad);
-      if (tasks[i].wait > 0) --tasks[i].wait;
-      run(i);
+      step(i);
       if (stop_pending) break;
     }
     if (stop_pending) {

@@ -338,14 +338,57 @@ void test_word_wrap() {
   // The wrap counts the measured widths, not the pen advances.
   CHECK(wrap_glyph_width(64.0f, false) == 0.45f * 54.0f);
   CHECK(wrap_glyph_width(0.0f, false) == 18.0f);
-  lm.wrap_advance = [](char32_t, bool) { return 20.0f; };
+  lm.glyph_width = [](char32_t, bool) { return 20.0f; };
   CHECK(layout("abcde fghij{mend}", 105)[0].lines == 2);
   CHECK(layout("abcde fghij{mend}", 105)[0].glyphs[5].x == 0);
-  lm.wrap_advance = nullptr;
+  lm.glyph_width = nullptr;
   // A choice line is never wrapped.
   lm.choice_space_first = 63;
   lm.choice_space = 18;
   CHECK(layout("Q?\n   abcde fghij klmno pqrst{mend}", 105)[0].lines == 2);
+}
+
+// On a pen grid the pen advances by each glyph's layout width and drops the fraction of a grid step at every glyph, while the line's width
+// sums the widths. "{key(0)} to jump." with the gn_70 widths (the button 36 before a space, the space 18, a letter 0.45 (measure - 10))
+// sits at 0 36 54 70 94 112 124 146 180 204 and makes a 225-unit line.
+void test_pen_grid() {
+  using namespace ui;
+  LayoutMetrics lm;
+  lm.advance = [](char32_t) { return 10.0f; };
+  lm.line_height = 20;
+  lm.wrap = true;
+  lm.button_advance_spaced = 36;
+  lm.button_advance = 49.5f;
+  lm.pen_grid = 2;
+  const std::u32string word = U" to jump.";
+  const float widths[] = {18.0f, 17.55f, 25.2f, 18.0f, 13.05f, 22.95f, 34.2f, 24.75f, 15.3f};
+  lm.glyph_width = [&](char32_t ch, bool) {
+    for (size_t i = 0; i < word.size(); ++i)
+      if (word[i] == ch) return widths[i];
+    return 0.0f;
+  };
+  const auto pages = layout_pages(import::flatten(import::parse_markup("{key(0)} to jump.{mend}", import::Lang::En), {}), lm);
+  const float rde_x[] = {0, 36, 54, 70, 94, 112, 124, 146, 180, 204};
+  CHECK(pages.size() == 1 && pages[0].glyphs.size() == 10);
+  for (size_t i = 0; i < pages[0].glyphs.size() && i < 10; ++i) CHECK(pages[0].glyphs[i].x == rde_x[i]);
+  CHECK(std::fabs(pages[0].width - 225.0f) < 0.01f);
+  // Without a grid the pen sums the advances.
+  lm.pen_grid = 0;
+  lm.glyph_width = nullptr;
+  const auto plain = layout_pages(import::flatten(import::parse_markup("ab{mend}", import::Lang::En), {}), lm);
+  CHECK(plain[0].glyphs[1].x == 10.0f && plain[0].width == 20.0f);
+  // JP: a Latin letter counts 0.45 of its measure, a half-width digit 28, any other glyph 49 (48 apart on the grid); names are not set
+  // apart. RDE lays "コ1３枚" out at 952, 1000, 1028, 1076.
+  CHECK(jp_glyph_width(U'P', 86.0f) == 0.45f * 86.0f);
+  CHECK(jp_glyph_width(U'ジ', 0.0f) == 49.0f);
+  CHECK(jp_glyph_width(U'3', 60.0f) == 28.0f);
+  CHECK(jp_glyph_width(0xFF13, 60.0f) == 49.0f);
+  lm.pen_grid = 2;
+  lm.glyph_width = [](char32_t ch, bool) { return jp_glyph_width(ch, 0.0f); };
+  const auto jp = layout_pages(import::flatten(import::parse_markup("コ1３枚{mend}", import::Lang::Jp), {}), lm);
+  const float jp_x[] = {0, 48, 76, 124};
+  CHECK(jp.size() == 1 && jp[0].glyphs.size() == 4);
+  for (size_t i = 0; i < jp[0].glyphs.size() && i < 4; ++i) CHECK(jp[0].glyphs[i].x == jp_x[i]);
 }
 
 void test_wrap_limit() {
@@ -514,6 +557,8 @@ void test_frame_rows() {
   CHECK(skin8_one_line.second.rows == 2 && skin8_one_line.second.h > bang.second.h);
   const auto skin8_two_lines = frame_of("a\nb{mend}", 8);
   CHECK(skin8_two_lines.second.rows == 3);
+  // The right corner starts 36 past the widest line: the frame is W + 321.29 wide with skin 3.
+  CHECK(std::fabs(DialogueBox::frame_size(3, 225.0f, 1).w - (225.0f + 321.29f)) < 0.01f);
 }
 
 // Number entry: {input(n)} survives flatten and marks the next n glyphs (the placeholder digits) as digits 0..n-1; the text after them
@@ -574,6 +619,7 @@ int main() {
   test_choice_lines();
   test_menu_forms();
   test_word_wrap();
+  test_pen_grid();
   test_wrap_limit();
   test_frame_rows();
   test_digit_entry();

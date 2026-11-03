@@ -424,10 +424,14 @@ void FieldWorld::sim_tick() {
   view_.set_interp_frozen(exit_frozen());
   if (debug_.auto_walk && tick_count_ == static_cast<u64>(debug_.action_tick)) input_.action_pending = true;
   if (debug_.show_message >= 0 && tick_count_ == 30) {
-    open_dialogue(-1, debug_.show_message, 0);
+    open_dialogue(-1, debug_.show_message, debug_.show_flags & 0xFF);
     if (debug_.show_face >= 0) {
       dialogue_face_ = debug_.show_face;
       dialogue_.set_portrait(dialogue_face_);
+    }
+    if (debug_.show_flags & 0x1800) {
+      portrait_left_ = (debug_.show_flags & 0x800) == 0;
+      dialogue_.set_portrait_flags(true, portrait_left_);
     }
     if (debug_.show_choice >= 0) dialogue_choice(debug_.show_choice_first, debug_.show_choice);
   }
@@ -614,9 +618,15 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     for (auto& window : extra_win_)
       if (window.box && window.box->is_open() && window.label) window.box->confirm();
   }
+  if (std::any_of(in.pad_pressed.begin(), in.pad_pressed.end(), [](bool pressed) { return pressed; })) key_caps_ = false;
+  if (std::any_of(in.key_pressed.begin(), in.key_pressed.end(), [](bool pressed) { return pressed; })) key_caps_ = true;
+  dialogue_.set_key_caps(key_caps_);
   dialogue_.update(static_cast<float>(ticks) / 60.0f);
-  for (auto& window : extra_win_)
-    if (window.box) window.box->update(static_cast<float>(ticks) / 60.0f);
+  for (auto& window : extra_win_) {
+    if (!window.box) continue;
+    window.box->set_key_caps(key_caps_);
+    window.box->update(static_cast<float>(ticks) / 60.0f);
+  }
 
   for (int i = 0; i < ticks; ++i) {
     sim_tick();
@@ -637,8 +647,8 @@ std::string FieldWorld::dump_entities() const {
       out += std::format("  zone {}: ({},{}) ({},{}) ({},{}) ({},{}) y {}\n", zi, zone.corner[0][0], zone.corner[0][2], zone.corner[1][0], zone.corner[1][2], zone.corner[2][0],
                          zone.corner[2][2], zone.corner[3][0], zone.corner[3][2], zone.corner[0][1]);
     }
-  out += std::format("  camera: tween {} frames {} at {},{} -> {},{} mode {} limits {}\n", camera_.cam.tween, camera_.cam.frames, camera_.cam.x, camera_.cam.y, camera_.cam.to_x, camera_.cam.to_y,
-                     static_cast<int>(camera_.cam_mode), camera_.cam.has_limits);
+  out += std::format("  camera: scripted {} frames {} at {},{} -> {},{} limits {}\n", camera_.cam.scripted, camera_.cam.frames, camera_.cam.x, camera_.cam.y,
+                     camera_.cam.tx >> 16, camera_.cam.ty >> 16, camera_.cam.has_limits);
   {
     float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
     for (const auto& vertex : view_.walk().mesh().vertices) {

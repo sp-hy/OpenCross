@@ -66,6 +66,16 @@ void set_pixel_size(SDL_Window* win, int width, int height) {
   }
 }
 
+// A test window (OC_QUIET) sits behind every other window, so it never covers the work on the desktop; the swapchain still presents.
+void send_to_back(SDL_Window* win) {
+#if defined(_WIN32)
+  auto* hwnd = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(win), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+  if (hwnd) SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+#else
+  (void)win;
+#endif
+}
+
 }  // namespace
 
 Window::~Window() { destroy(); }
@@ -94,8 +104,10 @@ bool Window::create(const char* title, int width, int height, int window_mode, i
     return false;
   }
   apply_video(window_mode, width, height, display);
+  if (quiet) send_to_back(window_);
   SDL_ShowWindow(window_);
   SDL_SyncWindow(window_);
+  if (quiet) send_to_back(window_);
   resized_ = false;
   open_gamepad();
   return true;

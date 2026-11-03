@@ -143,6 +143,9 @@ class BattleCamera {
   void finish_shot() { bg_.clear(); if (shot_) progress_ = 4096.0f; }
   // Unlinks every camera task and ends a glide; the pose keeps its last value, so the camera holds where it is until the next select.
   void kill_shot() { bg_.clear(); glide_rate_ = 0; if (shot_) { prev_ = cur_; shot_ = nullptr; } }
+  // An effect pack starts: the tasks of the earlier actions keep running until the next select, which unlinks them instead of pushing them
+  // back, so they are never resumed after the pack's own shots.
+  void retire_tasks() { retired_ = true; }
   // Task birth credit (dev harness, OC_FX_DT): the camera task a pack command creates is run at once with the pass delta, so it starts `ticks`
   // ahead of the select.
   void credit_ticks(int ticks) {
@@ -199,6 +202,8 @@ class BattleCamera {
   std::function<bool(int)> target_hook_;
   // Set by timeline op 0x73.
   bool intro_hold_ = false;
+  // Set by retire_tasks(), cleared by the next select.
+  bool retired_ = false;
   // The camera task list: shot_ is the HEAD (the one that drives the pose registers); bg_ holds the tasks behind it, which keep advancing
   // their own progress. A select of a mode 0 / 3+ shot pushes the running head back (it is not killed), a mode 1 shot queues at the tail;
   // when the head ends it is unlinked and the next task takes over at ITS progress.

@@ -195,6 +195,8 @@ struct FieldDebug {
   int show_choice_first = 0;
   // ... with this portrait id forced (-1 = none)
   int show_face = -1;
+  // ... with these window flags (the dialog op's flag byte; 0x800 / 0x1000 put the portrait right / left)
+  int show_flags = 0;
 };
 
 class FieldWorld final : public script::FieldHost {
@@ -430,7 +432,7 @@ class FieldWorld final : public script::FieldHost {
     fade_kind_ = 0;
   }
   const std::string& status() const { return status_; }
-  int camera_mode() const { return static_cast<int>(camera_.cam_mode); }
+  bool camera_scripted() const { return camera_.cam.scripted; }
   int control_yaw() const { return control_yaw_; }
   const std::map<std::string, u64>& stub_hits() const { return stub_hits_; }
   int auto_target_entity() const { return auto_target_; }
@@ -524,6 +526,8 @@ class FieldWorld final : public script::FieldHost {
   int character_entity(int char_id) override;
   int party_slot_of_entity(int ent) override;
   void setup_pc(int ent, int char_id, int flags) override;
+  void place_on_controlled(int ent) override;
+  void place_followers() override;
   void setup_npc(int ent, int model) override;
   int load_model(int ent, int model) override;
   bool monster_defeated(int ordinal) override;
@@ -557,11 +561,12 @@ class FieldWorld final : public script::FieldHost {
   void camera_set_position(s32 x, s32 y, int frames) override;
   void camera_to_actor(int frames) override;
   void camera_follow(int ent, int frames) override;
-  bool camera_busy() override;
+  bool camera_wait(script::CameraWait kind, s32 x, s32 y) override;
   void camera_limits(s32 x0, s32 x1, s32 y0, s32 y1) override;
   void camera_auto_follow(bool on) override;
   std::pair<s32, s32> camera_position() override;
   void set_camera_origin(s32 x, s32 y) override;
+  void set_camera_target(int ent) override;
   void set_controlled_entity(int ent) override;
   void shake(int x, int y, int ticks) override;
   void formation(u16 key, std::span<const s32> args) override;
@@ -703,6 +708,10 @@ class FieldWorld final : public script::FieldHost {
   void begin_entry_fade(int kind);
   void step_transition();
   void update_input_lock();
+  // A script gave the scroll another entity to follow (5F): the camera follows it before any scripted target.
+  bool camera_override() const;
+  // the 5F entity while camera_override(), else the controlled entity
+  int camera_entity() const;
   bool controls_free() const;
   int pad_heading(bool& run) const;
   bool blocked_by_solids(int player, float x, float z, float old_x, float old_z);
@@ -761,6 +770,8 @@ class FieldWorld final : public script::FieldHost {
   // entity -> the window slot (0 = dialogue_, 1.. = extra_win_) of its last message
   std::map<int, int> owner_window_;
   std::string portrait_set_ = "2021";
+  // Button glyphs in the message windows: key caps after a key press, pad glyphs after a pad press.
+  bool key_caps_ = false;
   ui::DialogueDemo* window_owned_by(int ent);
   ui::DialogueDemo& window_of(int ent);
   bool any_window_open() const;
@@ -794,9 +805,10 @@ class FieldWorld final : public script::FieldHost {
   void sync_party();
   // state's party <- party_chars_
   void write_party();
+  // FE 4C: the controlled entity when not the party leader (-1)
   int controlled_override_ = -1;
-  // CLEAR_CONTROLLED_ENTITY ran and nothing set a controlled entity since
-  bool controlled_cleared_ = false;
+  // 5F: the entity the scroll follows (-1 = the controlled entity)
+  int camera_target_ = -1;
 
   std::string status_;
   // lang.dat room id (dialogue text); map_id_ below is the script / save id on the current disc
@@ -834,7 +846,6 @@ class FieldWorld final : public script::FieldHost {
   int shake_offset(s32 amp);
   // Sequence op 2E: the display offset of one frame for the integer amplitude `amp`, in [amp / 2, amp).
   int display_shake_offset(int amp);
-  bool party_follow_ = true;
   // op BE in progress: follow rule 1 is skipped
   bool follow_hold_ = false;
   // counts down from 0xF0 while the hold is set

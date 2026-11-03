@@ -1,4 +1,4 @@
-// FieldCamera: scroll clamping, tweens, the follow ease and the room-entry snap.
+// FieldCamera: scroll clamping, the scripted camera target, the follow ease and the room-entry snap.
 #include "game/field_camera.h"
 
 #include <algorithm>
@@ -8,17 +8,18 @@ namespace oc::game {
 
 namespace {
 
-// Script global-flag bits: FE 04 disables the camera pan-limit clamp, FE 11 snaps the camera.
-constexpr u32 kGfNoCameraClamp = 0x100, kGfCameraSnap = 0x200;
+// Script global-flag bits: GF.1 the input lock, FE 04 disables the camera pan-limit clamp, FE 11 snaps the camera.
+constexpr u32 kGfInputLock = 0x2, kGfNoCameraClamp = 0x100, kGfCameraSnap = 0x200;
 // Scroll easing: S -= (S - T) / 12 per tick.
 constexpr int kEaseDivisor = 12;
 constexpr int kEntryEaseIterations = 64;
+// A frame count of 0x7FFF makes the move last as many ticks as the distance in pixels.
+constexpr int kFramesFromDistance = 0x7FFF;
 
 }  // namespace
 
 void FieldCamera::reset() {
   cam = Camera{};
-  cam_mode = CamMode::Auto;
   camera_y_offset = 0;
 }
 
@@ -37,62 +38,89 @@ int FieldCamera::clamp_y(const RoomView& view, u32 global_flags, int value) cons
   return std::clamp(value, std::min(limits.y_min, limits.y_max), std::max(limits.y_min, limits.y_max));
 }
 
-void FieldCamera::target_for(const RoomView& view, u32 global_flags, const ActorPose* pose, int& tx, int& ty) const {
-  tx = cam.x;
-  ty = cam.y;
-  if (!pose) return;
+bool FieldCamera::aim(const RoomView& view, const ActorPose* pose, float y_offset, int& tx, int& ty) const {
+  if (!pose) return false;
   render::FieldCamera::Projected pr;
-  if (!view.camera().project({pose->x, pose->y + camera_y_offset, pose->z}, pr)) return;
-  // Target = (160 - sx, 120 - sy), clamped to the pan limits.
-  tx = clamp_x(view, global_flags, static_cast<int>(160.0f - pr.sx));
-  ty = clamp_y(view, global_flags, static_cast<int>(120.0f - pr.sy));
+  if (!view.camera().project({pose->x, pose->y + y_offset, pose->z}, pr)) return false;
+  // Target = (160 - sx, 120 - sy) on the whole screen pixel the point falls in.
+  tx = 160 - static_cast<int>(std::floor(pr.sx));
+  ty = 120 - static_cast<int>(std::floor(pr.sy));
+  return true;
 }
 
-void FieldCamera::start_tween(int to_x, int to_y, int frames, CamMode after, int follow_ent) {
-  cam.after = after;
-  cam.follow_ent = follow_ent;
-  if (frames <= 0) {
-    cam.x = to_x;
-    cam.y = to_y;
-    cam.tween = false;
-    cam_mode = after;
+// A timed move starts the scripted target on the current scroll and steps it linearly ((to - from) / frames + 1 per tick, 16.16) for
+// `frames` ticks; the scroll itself keeps easing toward it, so it lags behind and stops short where the ease stalls.
+void FieldCamera::start_move(int to_x, int to_y, int frames) {
+  cam.tx = cam.x * 65536;
+  cam.ty = cam.y * 65536;
+  if (frames == kFramesFromDistance)
+    frames = static_cast<int>(std::sqrt(static_cast<double>((to_x - cam.x) * (to_x - cam.x) + (to_y - cam.y) * (to_y - cam.y))));
+  frames = std::max(1, frames);
+  cam.dx = (to_x * 65536 - cam.tx) / frames + 1;
+  cam.dy = (to_y * 65536 - cam.ty) / frames + 1;
+  cam.frames = frames - 1;
+}
+
+void FieldCamera::set_position(s32 x, s32 y, int frames) {
+  cam.scripted = true;
+  if (frames == 0) {
+    cam.tx = x * 65536;
+    cam.ty = y * 65536;
+    cam.frames = -1;
     return;
   }
-  cam.tween = true;
-  cam.frames = frames;
-  cam.to_x = to_x;
-  cam.to_y = to_y;
-  cam.fx = static_cast<float>(cam.x);
-  cam.fy = static_cast<float>(cam.y);
-  cam.dx = static_cast<float>(to_x - cam.x) / static_cast<float>(frames);
-  cam.dy = static_cast<float>(to_y - cam.y) / static_cast<float>(frames);
+  start_move(x, y, frames);
 }
 
-void FieldCamera::set_position(const RoomView& view, u32 global_flags, s32 x, s32 y, int frames) {
-  // 5D's target is clamped like every scroll target ([x_min..x_max] x [y_min-24..y_max], the loader's bias included, or the
-  // script's own limits). y_min-24 is no overscan: the field shows 216 rows, so the lowest scroll puts the bottom of the layer
-  // bounding box exactly on the last displayed row.
-  if (!(global_flags & kGfNoCameraClamp)) {
-    const RoomView::Limits limits = scroll_limits(view);
-    x = std::clamp<s32>(x, std::min(limits.x_min, limits.x_max), std::max(limits.x_min, limits.x_max));
-    y = std::clamp<s32>(y, std::min(limits.y_min, limits.y_max), std::max(limits.y_min, limits.y_max));
+void FieldCamera::to_actor(const RoomView& view, u32 global_flags, const ActorPose* follow_pose, bool override_follow, int frames) {
+  cam.scripted = true;
+  if (frames == 0) {
+    cam.dx = cam.dy = 0;
+    cam.scripted = false;
+    advance(view, global_flags, follow_pose, override_follow);
+    return;
   }
-  if (frames == 0x7FFF) frames = std::max(1, static_cast<int>(std::hypot(static_cast<float>(x - cam.x), static_cast<float>(y - cam.y))));
-  start_tween(x, y, frames, CamMode::Fixed, -1);
+  int tx = cam.x, ty = cam.y;
+  aim(view, follow_pose, camera_y_offset, tx, ty);
+  start_move(tx, ty, frames);
 }
 
-void FieldCamera::to_actor(const RoomView& view, u32 global_flags, const ActorPose* player_pose, int frames) {
+void FieldCamera::follow(const RoomView& view, u32 global_flags, const ActorPose* pose, int frames) {
+  cam.scripted = true;
   int tx, ty;
-  target_for(view, global_flags, player_pose, tx, ty);
-  if (frames == 0x7FFF) frames = std::max(1, static_cast<int>(std::hypot(static_cast<float>(tx - cam.x), static_cast<float>(ty - cam.y))));
-  start_tween(tx, ty, frames, CamMode::Auto, -1);
+  if (!aim(view, pose, 0.0f, tx, ty)) return;
+  tx = clamp_x(view, global_flags, tx);
+  ty = clamp_y(view, global_flags, ty);
+  if (frames == 0) {
+    cam.tx = tx * 65536;
+    cam.ty = ty * 65536;
+    return;
+  }
+  start_move(tx, ty, frames);
 }
 
-void FieldCamera::follow(const RoomView& view, u32 global_flags, const ActorPose* pose, int ent, int frames) {
-  int tx, ty;
-  target_for(view, global_flags, pose, tx, ty);
-  if (frames == 0x7FFF) frames = std::max(1, static_cast<int>(std::hypot(static_cast<float>(tx - cam.x), static_cast<float>(ty - cam.y))));
-  start_tween(tx, ty, frames, CamMode::FollowEnt, ent);
+bool FieldCamera::wait(Wait kind, s32 x, s32 y, const RoomView& view, u32 global_flags, const ActorPose* follow_pose, bool override_follow) {
+  if (cam.frames >= 0) {
+    cam.tx += cam.dx;
+    cam.ty += cam.dy;
+    --cam.frames;
+    return false;
+  }
+  cam.dx = cam.dy = 0;
+  switch (kind) {
+    case Wait::Position:
+      cam.tx = x * 65536;
+      cam.ty = y * 65536;
+      break;
+    case Wait::Actor:
+      // The camera goes back to following, with one extra ease on the spot.
+      cam.scripted = false;
+      advance(view, global_flags, follow_pose, override_follow);
+      break;
+    case Wait::Follow:
+      break;
+  }
+  return true;
 }
 
 void FieldCamera::set_limits(s32 x0, s32 x1, s32 y0, s32 y1) {
@@ -101,49 +129,47 @@ void FieldCamera::set_limits(s32 x0, s32 x1, s32 y0, s32 y1) {
 }
 
 // FE 50: only the scroll position is written from variables 0x330 / 0x332; the follow logic of the field loop
-// goes on (the world-map Continue, ROOM_PARAM 6), so the camera mode stays as it is.
+// goes on (the world-map Continue, ROOM_PARAM 6), so the camera target stays as it is.
 void FieldCamera::set_origin(s32 x, s32 y) {
   cam.x = x;
   cam.y = y;
-  cam.tween = false;
 }
 
 void FieldCamera::snap(const RoomView& view, u32 global_flags, const ActorPose* player_pose) {
-  cam_mode = CamMode::Auto;
-  cam.tween = false;
+  cam.scripted = false;
+  cam.frames = -1;
   cam.x = cam.y = 0;
+  int tx = 0, ty = 0;
+  aim(view, player_pose, camera_y_offset, tx, ty);
+  tx = clamp_x(view, global_flags, tx);
+  ty = clamp_y(view, global_flags, ty);
   // Room entry runs the ease 0x40 times.
   for (int i = 0; i < kEntryEaseIterations; ++i) {
-    int tx, ty;
-    target_for(view, global_flags, player_pose, tx, ty);
     cam.x -= (cam.x - tx) / kEaseDivisor;
     cam.y -= (cam.y - ty) / kEaseDivisor;
   }
 }
 
-void FieldCamera::advance(const RoomView& view, u32 global_flags, const ActorPose* player_pose, const ActorPose* follow_pose) {
-  if (cam.tween) {
-    cam.fx += cam.dx;
-    cam.fy += cam.dy;
-    cam.x = static_cast<int>(std::lround(cam.fx));
-    cam.y = static_cast<int>(std::lround(cam.fy));
-    if (--cam.frames <= 0) {
-      cam.tween = false;
-      cam.x = cam.to_x;
-      cam.y = cam.to_y;
-      cam_mode = cam.after;
-    }
-  } else if (cam_mode != CamMode::Fixed) {
-    int tx, ty;
-    target_for(view, global_flags, cam_mode == CamMode::FollowEnt ? follow_pose : player_pose, tx, ty);
-    // FE 11: put the scroll on the target instead of easing. The ease uses C division (truncates toward zero).
-    if (global_flags & kGfCameraSnap) {
-      cam.x = tx;
-      cam.y = ty;
-    } else {
-      cam.x -= (cam.x - tx) / kEaseDivisor;
-      cam.y -= (cam.y - ty) / kEaseDivisor;
-    }
+// The target, in order: the entity a script made the controlled one; the scripted target; while the input lock is on, the scroll itself
+// (the camera holds still through a cutscene unless a script moves it); else the party leader. It is clamped to the pan limits, then the
+// scroll eases toward it (C division, so it stalls short of a target less than 12 px away) or, with FE 11, jumps onto it.
+void FieldCamera::advance(const RoomView& view, u32 global_flags, const ActorPose* follow_pose, bool override_follow) {
+  int tx = cam.x, ty = cam.y;
+  if (override_follow)
+    aim(view, follow_pose, camera_y_offset, tx, ty);
+  else if (cam.scripted) {
+    tx = cam.tx >> 16;
+    ty = cam.ty >> 16;
+  } else if (!(global_flags & kGfInputLock))
+    aim(view, follow_pose, camera_y_offset, tx, ty);
+  tx = clamp_x(view, global_flags, tx);
+  ty = clamp_y(view, global_flags, ty);
+  if (global_flags & kGfCameraSnap) {
+    cam.x = tx;
+    cam.y = ty;
+  } else {
+    cam.x -= (cam.x - tx) / kEaseDivisor;
+    cam.y -= (cam.y - ty) / kEaseDivisor;
   }
 }
 

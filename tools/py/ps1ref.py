@@ -28,6 +28,8 @@ import sys
 import time
 from ctypes import wintypes
 
+from backstop import Backstop
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DS_DIR = os.path.join(ROOT, "tools", "duckstation")
@@ -207,7 +209,12 @@ class Window:
             time.sleep(0.2)
         if not self.hwnd:
             raise RuntimeError("DuckStation window not found")
-        self.u32.ShowWindow(self.hwnd, 4)   # SW_SHOWNOACTIVATE: a minimised window renders 8x8 screenshots
+        # Restored without activation (a minimised window renders 8x8 screenshots) and put behind every other window.
+        self.u32.ShowWindow(self.hwnd, 4)
+        self.to_back()
+
+    def to_back(self):
+        self.u32.SetWindowPos(self.hwnd, 1, 0, 0, 0, 0, 0x0013)
 
     def _find(self):
         found = []
@@ -266,6 +273,8 @@ class Session:
         """realtime=False runs the emulator unthrottled (frame stepping is then bound only by the stop/continue round trip,
         about 4x faster); realtime=True keeps 60 Hz pacing, which a wall-clock audio capture on a free run needs."""
         self.ds_dir = ds_dir
+        self.proc = None
+        self.backstop = None
         _set_speed(ds_dir, realtime)
         self.exe = next(iter(glob.glob(os.path.join(ds_dir, "duckstation-qt*.exe"))), None)
         if not self.exe:
@@ -282,7 +291,18 @@ class Session:
         if state:
             args += ["-statefile", os.path.abspath(state)]
         args += ["--", self.disc]
+        # DuckStation activates its window when it comes up; foreground changes stay locked until the window is found and shown
+        # without activation, so a capture never takes the focus from the desktop.
+        user32 = ctypes.windll.user32
+        user32.LockSetForegroundWindow(1)
+        try:
+            self._start(args, ds_dir, port, boot_timeout)
+        finally:
+            user32.LockSetForegroundWindow(2)
+
+    def _start(self, args, ds_dir, port, boot_timeout):
         self.proc = subprocess.Popen(args, cwd=ds_dir, creationflags=0x08000000)  # CREATE_NO_WINDOW for the console
+        self.backstop = Backstop(self.proc.pid)
         self.frame = 0
         self.held = 0
         self.gdb = None
@@ -317,6 +337,9 @@ class Session:
         if self.proc and self.proc.poll() is None:
             self.proc.kill()
             self.proc.wait(10)
+        if self.backstop:
+            self.backstop.stop()
+            self.backstop = None
 
     # -- frame stepping --------------------------------------------------------------------------------------------
     def _to_hook(self):

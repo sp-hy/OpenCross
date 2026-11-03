@@ -1,0 +1,17 @@
+# The cliff of opa_a02f: walking into its edge trigger opens message 4, "{key(0)} to jump." The button glyph is the key cap of the
+# confirm key after keyboard input and the pad's confirm glyph after pad input.
+0 wait idle 600
+- set var 0xC2 47                     # the trigger's story bit (bit 15) clear
+- put -251 600
+- wait 10
+- approach 16 4 300                    # the edge trigger: the walk ends when the message takes the controls
+- wait dialogue open 300
+- assert text to jump
+- wait 60
+- tap up                              # a key press that leaves the message open
+- wait 10
+- screenshot kg_keyboard.png
+- pad tap y                           # a pad press that leaves the message open
+- wait 10
+- screenshot kg_pad.png
+- quit

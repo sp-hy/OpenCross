@@ -154,7 +154,8 @@ void bind_cheats(const Cheats* set);
 //            ticks, log failures, then exit (0 = off); SweepTalk: with SweepTicks, also start every entity's ON_ACTION / ON_COLLISION for
 //            N ticks (softlock hunt). ShowMessage: open this dialogue message of the debug room at tick 30 (-1 = off); ShowChoice: make
 //            lines 0..N the in-window choices (-1 = plain message); ShowChoiceFirst: the first choice line (E1 operand high nibble);
-//            ShowFace: force this portrait (face) id on the message (-1 = the scripts' own). Script: route file of timed inputs / commands
+//            ShowFace: force this portrait (face) id on the message (-1 = the scripts' own); ShowFlags: its window flags (the dialog op's
+//            flag byte; 0x800 / 0x1000 put the portrait right / left). Script: route file of timed inputs / commands
 //            (src/game/route_script.h); the run exits when it ends; ScriptSpeed: simulation ticks per rendered frame while it runs.
 //            Record: write the real session's inputs to this file (replayable); Replay: replay a recorded session (room / entrance come
 //            from the file). Battle: start directly in a battle with this encounter scene id (-1 = off); BattleAuto: the battle plays
@@ -235,6 +236,7 @@ struct Config {
   int debug_show_choice = -1;
   int debug_show_choice_first = 0;
   int debug_show_face = -1;
+  int debug_show_flags = 0;
   std::string debug_script;
   int debug_script_speed = 2;
   std::string debug_record;

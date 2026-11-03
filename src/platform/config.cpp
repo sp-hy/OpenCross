@@ -308,6 +308,7 @@ bool Config::load(const std::filesystem::path& file) {
   debug_show_choice = parse_int(ini.get("Debug", "ShowChoice"), debug_show_choice);
   debug_show_choice_first = parse_int(ini.get("Debug", "ShowChoiceFirst"), debug_show_choice_first);
   debug_show_face = parse_int(ini.get("Debug", "ShowFace"), debug_show_face);
+  debug_show_flags = parse_int(ini.get("Debug", "ShowFlags"), debug_show_flags);
   return true;
 }
 
@@ -407,6 +408,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Debug", "ShowChoice", std::to_string(debug_show_choice));
   ini.set("Debug", "ShowChoiceFirst", std::to_string(debug_show_choice_first));
   ini.set("Debug", "ShowFace", std::to_string(debug_show_face));
+  ini.set("Debug", "ShowFlags", std::to_string(debug_show_flags));
   ini.set("Debug", "Battle", std::to_string(debug_battle));
   ini.set("Debug", "BattleAuto", on_off(debug_battle_auto));
   ini.set("Debug", "Showcase", on_off(debug_showcase));

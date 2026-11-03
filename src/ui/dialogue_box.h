@@ -76,6 +76,12 @@ class DialogueBox {
   int skin_index() const { return skin_idx_; }
   void set_portrait_set(std::string set);
   const std::string& portrait_set() const { return portrait_set_; }
+  // Button glyphs ({key(n)}): the key caps of the keyboard bindings (ui/keyboard_<e f i g s j>.png by `lang_index`) when `keyboard`, else
+  // the pad glyphs (ui/gamepad.png).
+  void set_button_style(bool keyboard, int lang_index) {
+    key_caps_ = keyboard;
+    key_cap_lang_ = lang_index;
+  }
   // Shown when the last page waits for confirm.
   void set_choices(std::vector<std::u32string> choices);
   // In-window choice (field MULTI_CHOICE): lines first..last of the message are the options; a cursor is drawn at the
@@ -127,8 +133,9 @@ class DialogueBox {
   void update(float dt);
   void confirm();
   // Between SpriteBatch::begin() and end(). vw/vh: the view size passed to begin().
-  // The canvas (1280 x 960 units, wider in widescreen) maps to the window with the shared zoom and vertical origin (render::canvas_fit), so
-  // the box lands on the same pixels as the picture; `fit` overrides it (the PS1-resolution pass: {0.25, 0, 0} into a (320 + 2e) x 240 target).
+  // The canvas (1280 x 960 units) maps to the window as RDE draws it over the field (render::overlay_fit: RDE's 4:3 viewport, flatter
+  // than wide), so the box covers RDE's screen pixels; `fit` overrides it (the PS1-resolution pass: {0.25, 0, 0} into a (320 + 2e) x 240
+  // target).
   void draw(float vw, float vh, const render::CanvasFit* fit = nullptr);
 
   const Typewriter& typewriter() const { return tw_; }
@@ -144,11 +151,12 @@ class DialogueBox {
     float X0 = 0, Y0 = 0, T0x = 0, T0y = 0, R0x = 0, B0y = 0, last = 0;
   };
   Geo frame_geo(float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left) const;
-  static Geo frame_geo_for(int skin_idx, float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left);
+  static Geo frame_geo_for(int skin_idx, bool jp, float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left);
   void draw_tiles(const Geo& geo, float zoom, float alpha, bool has_portrait, bool portrait_left);
   // Window y of canvas y 0 for the draw in progress (render::canvas_fit oy).
   float yo_ = 0;
   bool load_skin(int index);
+  bool skin_current(int index) const;
   std::vector<TextPage> layout(render::FaceId face, render::FaceId italic, float text_scale);
   void rect(float x, float y, float w, float h, u32 color);
 
@@ -160,8 +168,9 @@ class DialogueBox {
   render::TexRef white_set_ = {};
   render::TexRef skin_set_ = {};
   float skin_w_ = 0, skin_h_ = 0;
-  // Art mode the loaded skin texture belongs to.
+  // Art mode and mod overlay generation (vfs::Vfs::generation) the loaded skin texture belongs to.
   ArtMode skin_mode_ = ArtMode::Hd;
+  std::uint32_t skin_generation_ = 0;
 
   ArtMode mode_ = ArtMode::Hd;
   bool open_ = false;
@@ -200,6 +209,12 @@ class DialogueBox {
   std::map<std::string, std::unique_ptr<Face>> faces_;
   Face* face_now_ = nullptr;
   void refresh_face();
+  // Button glyph sheets by member name, loaded on demand.
+  std::map<std::string, std::unique_ptr<Face>> button_sheets_;
+  bool key_caps_ = false;
+  int key_cap_lang_ = 0;
+  const render::TexRef* button_sheet(const std::string& member);
+  void draw_button(int key, float x, float y, float zoom, float alpha);
   std::vector<std::u32string> choices_;
   int choice_ = 0;
   int chosen_ = -1;
@@ -261,6 +276,8 @@ class DialogueDemo {
   void set_portrait(int id);
   void set_portrait_flags(bool on, bool left);
   void set_skin_byte(int config_byte);
+  // Button glyphs as key caps (`keyboard`, the device the player used last) or pad glyphs; DialogueBox::set_button_style.
+  void set_key_caps(bool keyboard);
   // Speaker id resolved for the open message (name tag or script speaker).
   int speaker() const;
   // Plain UTF-8 text of the last shown message (newlines / pages as spaces).

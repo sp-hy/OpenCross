@@ -82,10 +82,8 @@ void BattleView::collect_shadow_casters() {
     caster.model = &visual.model->asset;
     // Footprint = the posed joint positions, from the same palette the draw uses.
     visual.pose.palette(alpha_, palette_);
-    float lowest = palette_.empty() ? 0.0f : -palette_[0].at(1, 3);
     for (size_t j = 0; j < palette_.size(); ++j) {
       const float jx = palette_[j].at(0, 3), jz = palette_[j].at(2, 3);
-      lowest = std::min(lowest, -palette_[j].at(1, 3));
       if (!caster.has_fp) {
         caster.fp.min_x = caster.fp.max_x = jx;
         caster.fp.min_z = caster.fp.max_z = jz;
@@ -96,7 +94,6 @@ void BattleView::collect_shadow_casters() {
       caster.fp.min_z = std::min(caster.fp.min_z, jz);
       caster.fp.max_z = std::max(caster.fp.max_z, jz);
     }
-    caster.clearance = std::max(0.0f, caster.y + lowest);
     shadow_casters_.push_back(caster);
   }
   // The pack's pseudo-actor casts a shadow once the Shadow op set its flag and it is not hidden (or an overlay draws it itself: ghost2).

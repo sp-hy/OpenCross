@@ -1,0 +1,32 @@
+# Cape Howl grave: after the formation (84) the party hold keeps Poshul on his formation spot instead of following Serge; his
+# script then back-pedals and walks to (136, -106) before the room changes.
+0 wait idle
+- request party_add 12
+- load mis_b02e 0
+- wait room mis_b02e 300
+- wait idle 300
+- put -1120 50
+- wait 10
+- walk -1205 52 6
+- key down confirm
+- wait 3
+- key up confirm
+- wait 197
+- assert near 2 -565 -66 2
+# Poshul's back-pedal and walk climb the slope at the engine's step (a step that rises a whole unit is shortened): still moving one
+# tick before each arrival. Then the exact half turn (SET_ROTATION from 0x058 to 0x858) takes the left turn clip, id 6.
+- wait 147
+- assert near 2 -494.5 -52.2 1
+- wait 1
+- assert near 2 -492 -52 1
+- wait 90
+- assert near 2 -325 -43.8 1
+- wait 1
+- assert near 2 -322 -44 1
+- wait 170
+- assert near 2 132.1 -104.9 1
+- wait 1
+- assert near 2 136 -106 1
+- wait 5
+- assert anim 2 6
+- quit

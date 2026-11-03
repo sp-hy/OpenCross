@@ -199,12 +199,15 @@ bool FieldVM::exec_game(u8 op) {
       advance(4);
       break;
     }
-    case 0xBE:
+    case 0xBE:  // CAMERA_AUTO_FOLLOW_WAIT: waits until the party stands (or 0xF0 ticks), then holds it
       if (gflags_ & gflag::kFormation) {
         yield_ = true;
         break;
       }
-      if (host_.follow_wait()) advance(1);
+      if (host_.follow_wait()) {
+        gflags_ |= gflag::kFormationHold;
+        advance(1);
+      }
       yield_ = true;
       break;
     case 0xBF:
@@ -214,17 +217,16 @@ bool FieldVM::exec_game(u8 op) {
           yield_ = true;
           break;
         }
-        if (op == 0xBF) {
-          host_.extra_animation(0xBF, true, entity_operand(2), 0);
+        // An entity that resolves to none also skips the stop form behind the start form.
+        if (const int target = entity_operand(2); target < 0) {
+          advance(op == 0xBF ? 5 : 7);
+          yield_ = true;
+        } else if (op == 0xBF) {
+          host_.extra_animation(0xBF, true, target, 0);
           advance(3);
         } else {
-          if (byte_at(2) == 0xFF) {
-            advance(7);
-            yield_ = true;
-          } else {
-            host_.extra_animation(0xC1, true, entity_operand(2), operand_u(3));
-            advance(5);
-          }
+          host_.extra_animation(0xC1, true, target, operand_u(3));
+          advance(5);
         }
       } else if (host_.extra_animation_busy()) {
         yield_ = true;

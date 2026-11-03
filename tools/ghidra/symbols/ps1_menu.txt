@@ -302,6 +302,7 @@ menu_party_slot_index = 0x801F471C;  # data: Current slot index of the party edi
 menu_party_cursor_col = 0x801F4720;  # data: Party grid cursor column.
 menu_grid_arrow_phase = 0x801F4A44;  # data: Animation phase of the grid editor side arrows.
 menu_equip_commit_flag = 0x801F4A54;  # data: Equip screen commit state flag.
+menu_load_grid_cursor = 0x801F4FE4;  # data: Load grid cursor box; part of the menu overlay, so it survives leaving and re-entering the grid but starts over when the menu reopens.
 menu_stat_buffer = 0x801F4FE8;  # data: Menu stat buffer of 0x15 u16 values.
 menu_save_card_choice_mode = 0x801F5008;  # data: Save menu card choice entry mode flag.
 menu_save_load_result = 0x801F5010;  # data: Save load result: 1 ok, 2 data corrupted.

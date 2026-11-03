@@ -208,6 +208,44 @@ void FieldVM::run_init(int ent) {
   dispatch(ent, 0, true);
 }
 
+// 7C: a party entity whose SETUP_PC found no character at the room load (its slot was still empty) stays out of play. Once a
+// character joins, the first entity whose INIT opens with SETUP_PC naming that character (FD / FE / FF read as the party slots
+// are now) gets its room-load flags back and its INIT re-run to completion in the middle of the running script, then stands on
+// the controlled entity's spot, facing its way.
+void FieldVM::relink_party_entity(int char_id) {
+  if (char_id < 0) return;
+  for (int ent = 0; ent < static_cast<int>(ents_.size()); ++ent) {
+    const u16 ptr = mod_.script_ptr(static_cast<size_t>(ent), 0);
+    if (mod_.code_byte(ptr) != 0x0E) continue;
+    const u8 ref = mod_.code_byte(ptr + 1);
+    const s32 named = ref >= 0xFD ? party_table(ref - 0xFD) : ref < 0x2C ? ref : 0xFF;
+    if (named != char_id) continue;
+    Entity& target = ents_[static_cast<size_t>(ent)];
+    const ScriptRecord kept_record = target.rec[0];
+    const u8 kept_cur = target.cur;
+    const int kept_ent = ent_;
+    Entity* const kept_self = self_;
+    ScriptRecord* const kept_rec = rec_;
+    const u32 kept_base = base_;
+    const bool kept_yield = yield_, kept_ended = ended_, kept_run_mode = run_mode_;
+    const int kept_budget = budget_;
+    target.flags38 = load_flags(static_cast<size_t>(ent));
+    run_init(ent);
+    target.rec[0] = kept_record;
+    target.cur = kept_cur;
+    ent_ = kept_ent;
+    self_ = kept_self;
+    rec_ = kept_rec;
+    base_ = kept_base;
+    yield_ = kept_yield;
+    ended_ = kept_ended;
+    run_mode_ = kept_run_mode;
+    budget_ = kept_budget;
+    host_.place_on_controlled(ent);
+    return;
+  }
+}
+
 // Executes one record: up to `budget_` instructions (8 plus the bonuses ops grant) and kCallCap handler calls per tick,
 // or to completion in run mode (INIT). A record that yields or ends stops the loop. Afterwards the watchdog counters
 // are updated: an instruction that waits in place counts as `stuck`, a dispatch that starts at the same pc as the
@@ -350,6 +388,16 @@ void FieldVM::tick() {
 
 // The FE 29 sound slot register is the one register the room init clears; the water levels of the first
 // three slots default to 10. Every room starts with the pause allowed (FE 42 0 forbids it).
+// An entity with no ON_ACTION or ON_COLLISION script (or entity 0) starts with the matching no-trigger flag.
+u32 FieldVM::load_flags(size_t ent) const {
+  u32 flags = 0;
+  for (size_t slot : {size_t{2}, size_t{3}}) {
+    const u16 ptr = mod_.script_ptr(ent, slot);
+    if (ptr == 0 || mod_.code_byte(ptr) == 0 || ent == 0) flags |= slot == 2 ? flag38::kNoAction : flag38::kNoCollision;
+  }
+  return flags;
+}
+
 void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
   mod_ = std::move(module);
   ents_.assign(mod_.entity_count(), Entity{});
@@ -364,14 +412,9 @@ void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
   table_9fdc_.fill(0);
   for (size_t i = 0; i < 3; ++i) table_9fdc_[i] = 10;
   slot_ent_.fill(0xFF);
+  staged_char_ = -1;
   for (auto& table : ent_ref_tables_) table.fill(0xFF);
-  for (size_t ent = 0; ent < ents_.size(); ++ent) {
-    for (size_t slot : {size_t{2}, size_t{3}}) {
-      const u16 ptr = mod_.script_ptr(ent, slot);
-      const bool empty = ptr == 0 || mod_.code_byte(ptr) == 0 || ent == 0;
-      if (empty) ents_[ent].flags38 |= slot == 2 ? flag38::kNoAction : flag38::kNoCollision;
-    }
-  }
+  for (size_t ent = 0; ent < ents_.size(); ++ent) ents_[ent].flags38 |= load_flags(ent);
   for (int ent = 0; ent < static_cast<int>(ents_.size()); ++ent) run_init(ent);
 }
 

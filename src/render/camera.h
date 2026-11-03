@@ -104,6 +104,25 @@ inline CanvasFit canvas_fit(float vw, float vh, float cw = 1280.0f, float ch = 9
   return {scale, (vw - cw * scale) * 0.5f, (vh - ch * scale) * 0.5f};
 }
 
+// RDE's canvas over the field and the world map (the message windows): the 1280 x 960 canvas on RDE's game viewport, the 4:3 fit of the
+// window (height h = min(vh, vw * 3 / 4), centred) less a band of 8/960 h at the top and the bottom. x: canvas x -> ox + x sx with
+// sx = h / 960. y: canvas 0 is the top of the band-less viewport, whose 944/960 h the 960 rows fill scaled by 928/960 (the 216-line
+// display: canvas 960 is display line 216 of the 224 shown), so the canvas is drawn flatter than it is wide: sy = sx * 944/960 * 928/960.
+// Not the field picture's own zoom (Letterbox).
+struct OverlayFit {
+  float sx = 1, sy = 1, ox = 0, oy = 0;
+};
+inline OverlayFit overlay_fit(float vw, float vh) {
+  constexpr float kCanvasW = 1280.0f, kCanvasH = 960.0f, kBand = 8.0f, kBandFree = 944.0f / 960.0f, kDisplayLines = 928.0f / 960.0f;
+  const float h = std::min(vh, vw * kCanvasH / kCanvasW);
+  OverlayFit fit;
+  fit.sx = h / kCanvasH;
+  fit.sy = fit.sx * kBandFree * kDisplayLines;
+  fit.ox = (vw - kCanvasW * fit.sx) * 0.5f;
+  fit.oy = (vh - h) * 0.5f + kBand * fit.sx;
+  return fit;
+}
+
 // The area of the window that shows layer space (4:3, or wider in widescreen: see field()). `scale` is horizontal; `scale_y` vertical
 // (= scale except in the field frame). Layer column x maps to window x `ox + x * scale`; the visible columns are [x0, x0 + w]
 // (x0 = -wide_extra(), w = 320 + 2 * wide_extra() in widescreen).

@@ -217,7 +217,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
     if (!casts_shadow(index)) continue;
     const script::Entity& vm_ent = vm_.entity(static_cast<int>(index));
     const ActorPose pose = entity.actor.pose(alpha);
-    const bool jumping = entity.motion.active && entity.motion.kind == script::MotionKind::Jump;
+    const bool jumping = entity.motion.active && (entity.motion.kind == script::MotionKind::Jump || entity.motion.kind == script::MotionKind::Tween);
     ShadowParams shadow;
     shadow.x = pose.x;
     shadow.y = jumping ? ground_y(entity) : pose.y;
@@ -269,7 +269,7 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
     if (!casts_shadow(index) || !entity.actor.gpu()) continue;
     if (tile == 0) shadow_tiles_.begin_tiles(frame);
     const ActorPose pose = entity.actor.pose(alpha);
-    const bool jumping = entity.motion.active && entity.motion.kind == script::MotionKind::Jump;
+    const bool jumping = entity.motion.active && (entity.motion.kind == script::MotionKind::Jump || entity.motion.kind == script::MotionKind::Tween);
     const render::Mat4 model = entity.actor.model_matrix(alpha);
     entity.actor.palette(alpha, palette);
     float reach = 0.0f;

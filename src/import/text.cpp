@@ -378,6 +378,11 @@ Message parse_markup(std::string_view text, Lang lang) {
         // An unknown {...} is kept as plain characters.
         if (!handle_tag(builder, tag)) builder.run.append(chars, i, j - i + 1);
         i = j + 1;
+        // The JP text writes a number entry of 1..4 digits as "{input(n)}0123456789" followed by the n placeholder digits; the digit
+        // row belongs to the token.
+        static constexpr std::u32string_view kDigitRow = U"0123456789";
+        if (tag.size() == 8 && tag.rfind("input(", 0) == 0 && tag[6] >= '1' && tag[6] <= '4' && std::u32string_view(chars).substr(i, kDigitRow.size()) == kDigitRow)
+          i += kDigitRow.size();
       } else {
         builder.run.push_back(ch);
         ++i;

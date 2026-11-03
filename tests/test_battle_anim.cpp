@@ -365,6 +365,24 @@ void test_camera() {
   CHECK(cam.shot_name() == "cam2" || cam.shot_name() == "cam3");
   for (int i = 0; i < 30; ++i) cam.tick(ev);
   CHECK(!cam.sequence_running());
+
+  // A newer shot pushes the running one back, which takes over again at its own progress when the newer one ends.
+  BattleCamera pushed;
+  pushed.set_bank(&bank);
+  CHECK(pushed.select("cam1"));
+  for (int i = 0; i < 10; ++i) pushed.tick(ev);
+  CHECK(pushed.select("cam2"));
+  for (int i = 0; i < 55; ++i) pushed.tick(ev);
+  CHECK(pushed.task_running() && pushed.pose(1.0f).eye[0] < 900.0f);
+  // After retire_tasks (an effect pack starts) the next select unlinks it: the pose holds the newer shot's last key.
+  BattleCamera retired;
+  retired.set_bank(&bank);
+  CHECK(retired.select("cam1"));
+  for (int i = 0; i < 10; ++i) retired.tick(ev);
+  retired.retire_tasks();
+  CHECK(retired.select("cam2"));
+  for (int i = 0; i < 55; ++i) retired.tick(ev);
+  CHECK(!retired.task_running() && near(retired.pose(1.0f).eye[0], 1000.0f, 1.0f));
 }
 
 // The ticks (1-based) on which a timeline played its 0x4C sound, and the first tick after which it no longer runs.

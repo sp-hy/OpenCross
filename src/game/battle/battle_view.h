@@ -218,6 +218,12 @@ class BattleView {
   // Route vocabulary (`assert battle events`): the order of the script windows and actions since the view started: "w<msg>" = battle script window <msg> opened,
   // "a" = a queued action began (begin_group).
   const std::vector<std::string>& route_events() const { return route_events_; }
+  // Route vocabulary (`assert battle camera`): "shot" = a camera task or timeline is alive, "orbit <slot>" = the menu orbit round that party
+  // slot, "target" = a target-selection glide, "hold" = the pose stays.
+  std::string route_camera() const;
+  // Route vocabulary (`assert battle menu`): the party slot whose top command menu is up ("-" = none), a space, then one digit per party
+  // slot, 1 = the unit holds Defend's guard.
+  std::string route_menu() const;
   // The host shows the btlexit results screen (BattleResults) after a victory: the view finishes right after the victory pose /
   // camera sequence without its own result panel and leaves the victory music playing (stop_music() ends it when that screen exits).
   void set_external_results(bool on) { external_results_ = on; }
@@ -358,7 +364,7 @@ class BattleView {
   // [actor] or a monster cast's group, index = the script variant; `cast_after_return` = an element cast starts after the return script
   // (S5 entry 3) has run; `hit_wait` = the next hit's queue_attack was not released yet by the script stream (script_gated).
   struct Act {
-    enum class Phase { None, Approach, Hit, Return, Cast, Release, Defend, Run, Settle } phase = Phase::None;
+    enum class Phase { None, Approach, Hit, Return, Cast, Release, Run, Settle } phase = Phase::None;
     std::vector<battle::ActionEvent> ev;
     size_t hit = 0;
     int actor = -1;
@@ -414,16 +420,24 @@ class BattleView {
   bool showcase_on_ = false;
   std::vector<ShowcaseModel> showcase_;
   void apply_camera(float alpha);
-  // The command-menu orbit around the active PC at this tick.
-  CamPose orbit_pose() const;
+  // The command-menu orbit around party slot `pc` at this tick.
+  CamPose orbit_pose(int pc) const;
   // The DYNAMIC target-selection shot from the active PC toward `target`.
   CamPose dynamic_pose(int target) const;
   // The menu camera, once per tick while no camera task and no timeline is alive.
   void menu_camera();
   // The approach shot of an attack: apr0 / apr1 at random, apr2 / apr3 in the DYNAMIC camera mode.
   void select_approach();
+  // Every camera task and timeline ends and the screen warp goes off (the pose stays): run by the command-menu steps. True when a task or a
+  // timeline was alive.
+  bool end_camera_tasks();
+  // A top-menu command confirmed: end_camera_tasks; when a shot was running, the orbit pose round the active PC is written at once, so the
+  // next menu camera (the target glide, the next PC's orbit) starts from it.
+  void top_command_camera();
   // The next PC with an open menu in slot order pc+1, pc+2, pc; -1 = none.
   int next_pc_after(int pc) const;
+  // The PC the command menu goes to after the last PC command: the attacker while it can still act, else next_pc_after.
+  int menu_pc_after() const;
 
   // frame tick
   void tick();
@@ -448,9 +462,10 @@ class BattleView {
   void execute(const battle::Command& command);
   void collect_events();
   void begin_group();
-  // Attack + target: the PC runs up to the enemy and stays there; begin_disengage: the engaged PC returns home.
+  // Attack + target: the PC runs up to the enemy and stays there; begin_disengage: the engaged PC returns home, under the approach shot when
+  // `approach_shot` (the HIT% menu cancelled), else with the camera holding its pose.
   void begin_engage(int pc, int target);
-  void begin_disengage();
+  void begin_disengage(bool approach_shot = false);
   void chain_pick(int strength);
   void start_hit();
   void start_return();
@@ -753,6 +768,8 @@ class BattleView {
   void add_plate(int colour_index, float x, float y, float w, float h, u32 tint = 0xFFFFFFFFu);
   struct Tex;
   void add_img(const Tex& tex, float x, float y, float w, float h, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, u32 tint = 0xFFFFFFFFu, int blend = 0);
+  // The red diamond menu cursor with its top-left at canvas (x, y): the 9 x 8 diamond and the 7 x 8 turned one alternate every 16 ticks.
+  void add_menu_cursor(float x, float y);
   // RDE battle text list entry at PS1 draw coordinates (x, y), sx = 4, sy = 960 / 216: `flags` = style | 0x10000 (JP font) | 0x20000 (non-JP
   // font); `colour` = PS1 colour word 0x00BBGGRR. Picks the font slot, multiplier, shrink rule and colour helper of the style. Both art
   // modes: only the font files differ (ui::font::FontSet small_ / large_).
@@ -895,9 +912,9 @@ class BattleView {
   enum class Finish { None, Victory, Wiped, Fled } finish_ = Finish::None;
   // A wipe: 14 + 14 idle frames, then the fade to black over 0x3C ticks.
   static constexpr int kWipeIdle = 28, kWipeFade = 0x3C;
-  // Running away: `bto0` starts ~62 ticks after the Run confirm (the party runs, then the 14 + 14 teardown frames); kFledFade = the fade of a stage
-  // without `bto0`.
-  static constexpr int kRunTicks = 34, kOutroDelay = 28, kFledFade = 60, kOutroCap = 600;
+  // Running away: the battle loop ends right after the Run confirm and `bto0` starts after the 14 + 14 teardown frames, 31 ticks after the
+  // confirm; the party's run scripts play on meanwhile. kFledFade = the fade of a stage without `bto0`.
+  static constexpr int kRunTicks = 1, kOutroDelay = 28, kFledFade = 60, kOutroCap = 600;
   // Running away with pilfered loot: the escape waits kLootDropWait more ticks; the system window (btmes row 5) opens kLootDropMsg ticks into it.
   static constexpr int kLootDropWait = 80, kLootDropMsg = 40;
   bool fled_outro_ = false;
@@ -965,8 +982,26 @@ class BattleView {
   std::vector<int> level_slots(int level) const;
   // Menu-time facing, the L1 / R1 PC switch, the DYNAMIC-camera translucency (battle_view_action.cpp).
   void sync_menu_facing();
-  // Top command menu: +1 next / -1 previous PC that can act (plays SFX 0x16); false = nobody else.
-  bool switch_active_pc(int dir);
+  // Top command menu: +1 next / -1 previous PC that can act (plays SFX 0x16); with nobody else the menu re-enters on the same PC. Always
+  // restarts the menu entry.
+  void switch_active_pc(int dir);
+  // The menu entry: whenever the command menu reaches a PC (battle start, the end of a PC's turn, L1 / R1, a PC that can act again) its
+  // window grows for kEntryGrowTicks ticks, drawn as the white outline. On the first tick after that with no action running the menu state
+  // steps on, and on the next tick the top menu takes over: from then on it takes cursor moves and confirms and ends the PC's guard, L1 / R1
+  // one tick later. Input before that is dropped. A cancelled HIT% menu returns to the top menu without a new entry. entry_pc_ = the PC whose
+  // window opens or is open (-1 none); entry_age_ = ticks grown; entry_ready_ = the menu state stepped on; entry_live_ = ticks since the top
+  // menu took over (-1 = not yet). turn_open_ = a PC's command is still running: its end starts the entry of the next menu PC.
+  static constexpr int kEntryGrowTicks = 18;
+  int entry_pc_ = -1, entry_age_ = 0, entry_live_ = -1;
+  bool entry_ready_ = false;
+  bool turn_open_ = false;
+  void begin_menu_entry(int pc);
+  void tick_menu_entry();
+  // The PC's command turn has ended (its own action and return are over; enemy actions may follow).
+  bool turn_over() const;
+  bool menu_live() const { return ui_ == Ui::Top && entry_pc_ >= 0 && entry_pc_ == active_pc_ && entry_live_ >= 0; }
+  // The growing command window outline while the entry runs.
+  void build_entry_outline();
   // Every unit but the cursor unit while the DYNAMIC target camera is on.
   bool dynamic_translucent(int unit) const;
   Ui menu_face_ui_ = Ui::Intro;

@@ -140,10 +140,9 @@ struct Unit {
   Equip eq;
   // The PC wore the hero set at battle start (Hero's Blade + two Hero's Shield / Medal); a Dopplegang form keeps it.
   bool hero_set = false;
+  // Set by Defend: weapon damage taken is halved and the idle script holds the block pose. It ends when the PC's command menu opens
+  // (Battle::open_menu, also implied by its next command) and on KO.
   bool guard = false;
-  // PC "defended" flag: the PC's own menu stays closed until another PC has used a menu or time has advanced; cleared by the PC's next
-  // menu and on KO.
-  bool defending = false;
   // Model shade set by script op 85 (presentation only).
   u8 shade = 0;
   // Remembered command-menu cursor of a PC, set by script op 7B (reset value 3).
@@ -164,7 +163,7 @@ struct Unit {
   // A battle script wrote the HP to 0: the kill script still runs, but the unit never takes the KO of a resolved hit, so its model is not dead.
   bool hp_written_zero = false;
   bool alive() const { return present && !(lo & (st::kKO | st::kDefeated)); }
-  bool can_open_menu() const { return pc && alive() && stamina >= 10 && !(lo & st::kCannotMenuLo) && !defending; }
+  bool can_open_menu() const { return pc && alive() && stamina >= 10 && !(lo & st::kCannotMenuLo); }
 };
 
 struct Rewards {
@@ -524,6 +523,8 @@ class Battle {
   int alive_count(bool pcs) const;
 
   // ---- commands
+  // The host opened the PC's command menu (the menu passed to it, an L1 / R1 switch, a re-entry): its guard ends.
+  void open_menu(int pc);
   // False if invalid (nothing happens).
   bool apply(const Command& cmd, std::string* why = nullptr);
 

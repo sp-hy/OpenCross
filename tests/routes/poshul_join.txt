@@ -1,0 +1,29 @@
+# Arni (alu_a04f), scenario 20, Serge alone: showing Poshul the Heckran Bone ends in her name entry, ADD_TO_PARTY 12 and the
+# COMMIT_PARTY_MODEL after it. The slot-1 party entity (0E FE) found no character at the room load; the commit re-runs its INIT, so
+# Poshul is in play at once (entity 2 shown) instead of after the next room change. The 7C sets her in the party V behind Serge, then her
+# scene puts her on the spot of the dog she was (entity 10, hidden); about 30 ticks later the scene's 86 00 / 86 01 regroup walks her back
+# to her V spot behind Serge and releases the party hold (the PS1 does the same).
+0 wait 5
+- wait idle 600
+- set var 0x00 20
+- set var 0x80 0
+- request keyitem 9
+- put 1380 5150
+- wait 10
+- approach 10 60 600
+- tap item
+- wait 30
+- tap right                           # the Heckran Bone, after the Time Shifter
+- wait 10
+- tap confirm
+- mash until menu open 3000
+- wait 30
+- tap start
+- wait 2
+- assert gap 2 10 0 12
+- wait 60
+- mash until idle x 3000
+- assert party 0,12,-
+- assert ent 2 shown 1
+- assert gap 2 1 124 132              # back on her V spot, 128 units behind Serge (where the blocked approach left him)
+- quit

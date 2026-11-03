@@ -76,8 +76,8 @@ bool BattleView::Cam::project(float x, float y, float z, float& cx, float& cy) c
 // The command-menu orbit: the eye circles the acting PC at 2400 units, height (model height word + 0x100), the target is the PC at 2/3 of its
 // height, H = 0x200. The angle is `(((yaw_byte) + 0x30) & 0x3F) * 0x40 + 2 * tick` in 4096 = turn, where the unit byte is the unit's yaw / 64
 // (0x10 for a PC facing yaw 1024); eye = (x - cos a * d, y, z + sin a * d).
-CamPose BattleView::orbit_pose() const {
-  const Visual& visual = vis_[static_cast<size_t>(active_pc_)];
+CamPose BattleView::orbit_pose(int pc) const {
+  const Visual& visual = vis_[static_cast<size_t>(pc)];
   // Unit yaw in PS1 units (place_units: face = (-sin yaw, -cos yaw), 4096 = turn), truncated to the unit's yaw byte (yaw / 64).
   float yaw_units = std::atan2(-visual.face_x, -visual.face_z) * (4096.0f / (2.0f * kPi));
   if (yaw_units < 0.0f) yaw_units += 4096.0f;
@@ -131,20 +131,25 @@ CamPose BattleView::dynamic_pose(int target) const {
   return pose;
 }
 
-// The menu camera runs only while no camera task and no timeline is alive (a running shot keeps the picture). Top menu, and between actions
-// once nothing is queued: the orbit pose round the last menu's PC is written every tick (a cut when it starts or the PC changes); a
-// battle-script cutscene takes that PC away until a command menu opens again, so the pose written last stays. Target selection in NORMAL
-// mode, and any all-targets selection: one glide from the pose on screen to `zen0`'s first key at 0x40 / 256 per tick. DYNAMIC mode with a cursor: a glide at 0x14 / 256 per tick to the
-// DYNAMIC shot whenever the cursor unit changes. Other menus (element list, waiting) keep what is on screen.
+// The menu camera runs only while no camera task and no timeline is alive (a running shot keeps the picture; the command-menu steps end the
+// shots, end_camera_tasks). Top menu, and between actions once nothing is queued: the orbit pose round the menu's PC is written every tick (a
+// cut when it starts or the PC changes). Between actions that PC is already the one the menu goes to next (menu_pc_after), and a Defend
+// action leaves the camera to the orbit: the defending PC's guard pose plays while the camera circles the next PC. A battle-script cutscene
+// takes the orbit's PC away until a command menu opens again, so the pose written last stays. Target selection in NORMAL mode, and any
+// all-targets selection: one glide from the pose on screen to `zen0`'s first key at 0x40 / 256 per tick. DYNAMIC mode with a cursor: a glide
+// at 0x14 / 256 per tick to the DYNAMIC shot whenever the cursor unit changes. Other menus (element list, waiting) keep what is on screen.
 void BattleView::menu_camera() {
   if (ui_ == Ui::Intro || ui_ == Ui::Result || camera_.task_running() || camera_.sequence_running()) {
     orbit_pc_ = -1;
     return;
   }
-  const bool idle = active_pc_ >= 0 && act_.phase == Act::Phase::None && queue_.empty() && finish_ == Finish::None;
+  const bool defending = act_.phase != Act::Phase::None && !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Defend;
+  const bool idle = active_pc_ >= 0 && (act_.phase == Act::Phase::None || defending) && queue_.empty() && finish_ == Finish::None;
   const bool between = ui_ == Ui::Wait && !orbit_blocked_ && pending_.empty();
-  const bool top = idle && (ui_ == Ui::Top || between) && vis_[static_cast<size_t>(active_pc_)].has_model;
-  const bool target = idle && ui_ == Ui::Target && !targets_.empty();
+  const int next_pc = between ? menu_pc_after() : -1;
+  const int orbit_pc = next_pc >= 0 ? next_pc : active_pc_;
+  const bool top = idle && (ui_ == Ui::Top || between) && vis_[static_cast<size_t>(orbit_pc)].has_model;
+  const bool target = idle && !defending && ui_ == Ui::Target && !targets_.empty();
   const bool all_targets = target && (tgt_mode_ == Tgt::EnemyAll || tgt_mode_ == Tgt::AllyAll);
   if (target && (!cam_dynamic_ || all_targets)) {
     orbit_pc_ = -1;
@@ -158,8 +163,8 @@ void BattleView::menu_camera() {
   }
   menu_glide_ = false;
   if (top) {
-    camera_.write_pose(orbit_pose(), orbit_pc_ != active_pc_);
-    orbit_pc_ = active_pc_;
+    camera_.write_pose(orbit_pose(orbit_pc), orbit_pc_ != orbit_pc);
+    orbit_pc_ = orbit_pc;
     dyn_target_ = -1;
     return;
   }
@@ -175,6 +180,27 @@ void BattleView::menu_camera() {
 
 void BattleView::select_approach() {
   if (!camera_.select(apr_pick(cam_dynamic_)) && cam_dynamic_) camera_.select(apr_pick(false));
+}
+
+bool BattleView::end_camera_tasks() {
+  const bool alive = camera_.task_running() || camera_.sequence_running();
+  camera_.kill_shot();
+  camera_.stop_sequences();
+  fx_warp_.on = false;
+  return alive;
+}
+
+std::string BattleView::route_camera() const {
+  if (camera_.task_running() || camera_.sequence_running()) return "shot";
+  if (orbit_pc_ >= 0) return "orbit " + std::to_string(orbit_pc_);
+  if (menu_glide_ || dyn_target_ >= 0) return "target";
+  return "hold";
+}
+
+void BattleView::top_command_camera() {
+  if (!end_camera_tasks() || active_pc_ < 0 || !vis_[static_cast<size_t>(active_pc_)].has_model) return;
+  camera_.write_pose(orbit_pose(active_pc_), true);
+  orbit_pc_ = active_pc_;
 }
 
 void BattleView::apply_camera(float alpha) {
@@ -247,6 +273,7 @@ void BattleView::tick() {
   showcase_tick();
   tick_links();
   tick_action();
+  tick_menu_entry();
   fx_tick();
   for (const auto& [unit, yaw] : pending_rot_) set_rot_now(unit, yaw);
   pending_rot_.clear();

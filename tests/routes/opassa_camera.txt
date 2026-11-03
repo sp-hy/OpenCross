@@ -1,0 +1,22 @@
+# Scripted camera pans on Opassa Beach (opa_a04f). The scripts step a camera target and the scroll eases after it (S -= (S - T) / 12), so it
+# stops short of a target closer than 12 px. Arrival through the portal (entrance 1, var 0x1C6 bit 0): 5E pans 20 ticks toward the leader's
+# spot (39, -69 unclamped, -48 clamped) from (28, -37); the scroll never moves. Leena's scene (scenario 16, var 0x1C0 bit 2, walk into the
+# trigger west of the entrance): 5D (-240, -48) over 60 ticks with the clamp off; the scroll settles at (-229, -37), not on the bottom edge.
+0 wait idle 600
+- set var 0 60
+- set var 1C6 1
+- load opa_a04f 1
+- wait 800
+- assert scroll 28 -37
+- set var 0 16
+- set var 1C0 13
+- load opa_a04f 0
+- wait idle 600
+- key down left
+- wait 330
+- key up left
+- wait dialogue open 400
+- skip 300
+- wait 200
+- assert scroll -229 -37
+- quit

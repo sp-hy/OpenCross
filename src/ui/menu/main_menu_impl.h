@@ -174,6 +174,11 @@ struct MainMenu::Impl {
   int save_phase = 0;
   int save_card = 1;
   int page_cur = 1, page_top = 0;
+  // The page's cursor row and first visible row as last left, for the rest of the session: [0] Save, [1] Load (cur -1 = not visited).
+  struct PageMemory {
+    int cur = -1, top = 0;
+  };
+  std::array<PageMemory, 2> page_memory{};
   int card_msg_start = 0;
   bool load_mode = false;
   // Opened by open_save_list: the save choice is the first screen and its Cancel closes the menu.
