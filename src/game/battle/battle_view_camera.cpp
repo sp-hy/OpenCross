@@ -148,7 +148,8 @@ void BattleView::menu_camera() {
   const bool between = ui_ == Ui::Wait && !orbit_blocked_ && pending_.empty();
   const int next_pc = between ? menu_pc_after() : -1;
   const int orbit_pc = next_pc >= 0 ? next_pc : active_pc_;
-  const bool top = idle && (ui_ == Ui::Top || between) && vis_[static_cast<size_t>(orbit_pc)].has_model;
+  const bool cast_held = cast_handover_ > 0 || (cast_hold_pc_ >= 0 && orbit_pc != cast_hold_pc_ && !menu_live());
+  const bool top = idle && (ui_ == Ui::Top || between) && !cast_held && vis_[static_cast<size_t>(orbit_pc)].has_model;
   const bool target = idle && !defending && ui_ == Ui::Target && !targets_.empty();
   const bool all_targets = target && (tgt_mode_ == Tgt::EnemyAll || tgt_mode_ == Tgt::AllyAll);
   if (target && (!cam_dynamic_ || all_targets)) {
@@ -163,6 +164,7 @@ void BattleView::menu_camera() {
   }
   menu_glide_ = false;
   if (top) {
+    cast_hold_pc_ = -1;
     camera_.write_pose(orbit_pose(orbit_pc), orbit_pc_ != orbit_pc);
     orbit_pc_ = orbit_pc;
     dyn_target_ = -1;
@@ -216,10 +218,20 @@ void BattleView::apply_camera(float alpha) {
     pose.roll_deg = 0.0f;
     camera_.set_free_pose(pose);
   }
-  // Dev: the camera as DRAWN (draw alpha, PS1 axes: y down).
-  if (static const bool trace = std::getenv("OC_DRAW_CAM") != nullptr; trace)
-    log::debug("draw camera frame {} alpha {:.3f} eye {:.0f} {:.0f} {:.0f} tgt {:.0f} {:.0f} {:.0f} H {:.0f} orbit {}", frame_count_, alpha, pose.eye[0], -pose.eye[1],
-               pose.eye[2], pose.target[0], -pose.target[1], pose.target[2], pose.h, orbit_clock_);
+  // Dev: the camera as DRAWN (draw alpha, PS1 axes: y down), then every unit's facing in 4096ths of a turn (- = absent).
+  if (static const bool trace = std::getenv("OC_DRAW_CAM") != nullptr; trace) {
+    std::string yaws;
+    for (int i = 0; i < battle::kUnits; ++i) {
+      const Visual& visual = vis_[static_cast<size_t>(i)];
+      if (!battle_->unit(i).present) {
+        yaws += " -";
+        continue;
+      }
+      yaws += std::format(" {}", static_cast<int>(std::lround(std::atan2(-visual.face_x, -visual.face_z) * (4096.0f / (2.0f * kPi)))) & 0xFFF);
+    }
+    log::debug("draw camera frame {} alpha {:.3f} eye {:.0f} {:.0f} {:.0f} tgt {:.0f} {:.0f} {:.0f} H {:.0f} orbit {} yaw{}", frame_count_, alpha, pose.eye[0], -pose.eye[1],
+               pose.eye[2], pose.target[0], -pose.target[1], pose.target[2], pose.h, orbit_clock_, yaws);
+  }
   cam_.eye = pose.eye;
   cam_.h = pose.h * render::fov_scale();
   const std::array<float, 3> forward = normalize({pose.target[0] - pose.eye[0], pose.target[1] - pose.eye[1], pose.target[2] - pose.eye[2]}, {0, 0, 1});

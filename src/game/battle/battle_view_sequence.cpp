@@ -16,6 +16,7 @@ using namespace bv;
 // ------------------------------------------------------------------------------------------------------------- action
 void BattleView::begin_group() {
   act_ = Act{};
+  cast_hold_pc_ = -1;
   links_.clear();
   // The action's setup: op 0x68 starts any timeline again; the next action clears the system message window; the command setup rewrites the
   // acting list.
@@ -83,18 +84,8 @@ void BattleView::begin_group() {
     log::debug("battle: combo tech {} caster list {} units (first {})", e0.element, act_.casters.size(), act_.casters.front());
   }
 
-  // The home pass outside the actor's own end of queue: after an ELEMENT command of a PC was issued every eligible unit goes home before the
-  // cast starts. There is NO such pass at an ENEMY's action start: a bystander that was turned to Serge by his earlier attack keeps its yaw
-  // through the enemy's whole cast.
-  if (e0.kind == battle::ActionEvent::Kind::Element && act_.actor < battle::kPcSlots)
-    for (int i = 0; i < battle::kUnits; ++i) {
-      Visual& visual = vis_[static_cast<size_t>(i)];
-      if (!battle_->unit(i).present || visual.ko_shown || visual.move.on || (engaged_ && i == active_pc_)) continue;
-      visual.turn.on = false;
-      visual.face_x = visual.pface_x = visual.home_fx;
-      visual.face_z = visual.pface_z = visual.home_fz;
-    }
-
+  // No unit goes home at an action start: a unit turned by an earlier action keeps its yaw through the cast (the target an engaged PC hit
+  // still faces it while the PC hops home). Every unit goes home only in the menu's step after a PC's element command (tick_action).
   switch (e0.kind) {
     case battle::ActionEvent::Kind::Weapon: {
       act_.targets = {e0.target};
@@ -130,8 +121,14 @@ void BattleView::begin_group() {
       {
         // Facing both ways (element pick, as for a weapon). Several targets: every one of them turns to the caster and the caster faces the
         // midpoint of their bounding box (Tornado: all three enemies turn toward Serge, Serge straight at the group, 1024). A self
-        // target faces the world origin (below).
-        face_cast_targets(true);
+        // target faces the world origin (below). A PC's targets turn to it with the charge shot (fx_charge_begin), not at the confirm, whether
+        // it casts from home or hops home first (Return below): a bystander enemy looks at the PC's home position, not at the spot it hops
+        // from. No other unit turns at the confirm: a bystander turned by an earlier action keeps its yaw until the facing step after the
+        // command (tick_action).
+        const bool pc = act_.actor < battle::kPcSlots;
+        const bool hop_home = engaged_ && act_.actor == active_pc_ && actor_visual.scripts && actor_visual.scripts->has_s5;
+        face_cast_targets(!pc);
+        act_.turn_targets_at_charge = pc && !hop_home;
       }
       fx_charge_ = fx_ready_ = false;
       // The element confirm (and the item confirm) hops home ONLY if the PC is engaged (standing at the enemy); a PC at home goes straight to
@@ -337,7 +334,18 @@ void BattleView::tick_action() {
 
   if (act_.phase == Act::Phase::None) {
     // After a party element command the ring step runs to its end, then the menu's last steps (kCastHandoverTail ticks).
-    if (cast_handover_ > 0) cast_handover_ = ring_settled() ? cast_handover_ - 1 : std::max(cast_handover_ - 1, kCastHandoverTail + 1);
+    if (cast_handover_ > 0) {
+      cast_handover_ = ring_settled() ? cast_handover_ - 1 : std::max(cast_handover_ - 1, kCastHandoverTail + 1);
+      // The first of the menu's last steps: every living unit snaps to its home facing (KO'd units keep theirs). A finished battle has no menu.
+      if (cast_handover_ == kCastHandoverTail && finish_ == Finish::None)
+        for (int i = 0; i < battle::kUnits; ++i) {
+          Visual& visual = vis_[static_cast<size_t>(i)];
+          if (!battle_->unit(i).alive()) continue;
+          visual.turn.on = false;
+          visual.face_x = visual.pface_x = visual.home_fx;
+          visual.face_z = visual.pface_z = visual.home_fz;
+        }
+    }
     if (queue_.empty() || ui_ == Ui::Intro) return;
     // The executor serialises actions: a PC standing at its target (the chain menu's `engaged_`) ends its turn - the return walk
     // (S5 entry 3) - before another actor's queued action starts.
@@ -407,8 +415,10 @@ void BattleView::tick_action() {
         // The return has run, now the cast.
         if (act_.cast_after_return) {
           act_.cast_after_return = false;
-          // Face from the home position now; the apr confirm cut is over: the charge shot (ch10..) replaces it at the cast start.
+          // Face from the home position now (the targets turn toward it with the charge shot); the apr confirm cut is over: the charge shot
+          // (ch10..) replaces it at the cast start.
           face_cast_targets(false);
+          act_.turn_targets_at_charge = true;
           camera_.finish_shot();
           act_.phase = Act::Phase::Cast;
           act_.ticks = 0;
@@ -480,8 +490,10 @@ void BattleView::end_group() {
   // After a cast the last pack shot stays until the next command's camera takes over (the pack's shot holds, then the next PC's orbit cuts in,
   // no zen0 in between); the effect end hook selects no shot.
   const bool cast_end = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && queue_.empty();
-  if (!act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && act_.actor >= 0 && act_.actor < battle::kPcSlots)
+  if (!act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && act_.actor >= 0 && act_.actor < battle::kPcSlots) {
     cast_handover_ = kCastHandover;
+    cast_hold_pc_ = act_.actor;
+  }
   if (battle_audit() && (fx_ || !pending_.empty()))
     battle_audit_note(std::format("group of action {} ended with {} (fx pack running {}, {} pending reactions)", act_.ev.empty() ? -1 : act_.ev.front().action,
                                   fx_ ? "the effect cut short" : "reactions unshown", fx_ != nullptr, pending_.size()));
@@ -510,8 +522,9 @@ void BattleView::end_group() {
   }
   // Only the ACTOR gets its yaw set to the home facing (byte << 6), once its whole queue is done. Targets keep the facing they were given (the PC
   // an enemy attacked keeps it into the top menu and long after; the enemy is home). A pack script's absolute RotateT / op 0x76 turn on the actor
-  // is overwritten here too. A PC engaged at the enemy keeps facing it.
-  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0) {
+  // is overwritten here too. A PC engaged at the enemy keeps facing it. After a PC's element command the menu's hand-over step turns every
+  // unit home instead (tick_action), so the caster keeps its cast facing until then.
+  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && cast_handover_ == 0) {
     const int i = act_.actor;
     Visual& visual = vis_[static_cast<size_t>(i)];
     if (battle_->unit(i).present && !visual.ko_shown && !visual.move.on) {

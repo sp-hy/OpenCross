@@ -163,6 +163,8 @@ with Session(disc, state="tmp/ref/states/bg00_menu.sav") as g:  # state is optio
 3. For sound, build the reference event list with `python -X utf8 tools\py\sfx_cmp2.py ps1 <dir>`, then `sfx_cmp2.py cmp <ps1 events.csv> <ours events.csv>` lists missing, extra and mistimed sounds.
 4. Fix the engine, rerun step 2, and read the verdict tables; a screenshot only proves what was on screen.
 
+Timing tolerance: OpenCross runs at a steady 60 Hz with no loading stalls, while the PS1 (and RDE, which emulates it) advances the battle at 30 Hz or slower, drops frames under load and holds while a pack or file loads. A phase that starts or ends a few refreshes off the reference (up to about 10, the spread the PS1 and RDE show against each other) is not a bug and is not chased. What counts is order, what is drawn, positions and poses, and differences that grow over a cast or are visible in play.
+
 ### 3.6 Speed and limits
 
 - About 45 game frames per second unthrottled (the stop / continue round trip dominates; 12 at real-time pacing): 3000 frames take about a minute.

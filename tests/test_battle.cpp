@@ -1377,6 +1377,37 @@ void test_victory_and_growth() {
     CHECK_EQ(battle.rewards().gains[0][1], 14);
     CHECK_EQ(battle.party()[0].stat[1], 23);
   }
+  // shared growth: without it a KO'd member and the bench get nothing from a normal win; with it (and instant growth) they reach the target
+  for (const bool shared : {false, true}) {
+    Fixture fixture;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    rng.push(0);
+    rng.push(100);
+    NullBrain nb;
+    Battle battle(fixture.tables, rng, nb);
+    battle.set_cheats({.instant_growth = true, .shared_growth = shared});
+    auto lead = make_member(0, "A"), ko = make_member(1, "B"), bench = make_member(9, "Z");
+    for (auto* member : {&lead, &ko, &bench}) {
+      member->pending = {0, 20, 0, 0, 0, 0, 0};
+      member->lv99 = {850, 60, 78, 95, 25, 52, 43};
+    }
+    ko.hp = 0;
+    BattleOptions opt;
+    opt.bench = {bench};
+    CHECK(battle.start({lead, ko}, 0, opt));
+    battle.unit_mut(3).hp = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK(battle.outcome() == Outcome::Victory);
+    CHECK_EQ(battle.party()[0].stat[1], 23);
+    CHECK_EQ(battle.rewards().gains[1][1], shared ? 14 : 0);
+    CHECK_EQ(battle.party()[1].stat[1], shared ? 23 : 9);
+    CHECK_EQ(battle.bench()[0].stat[1], shared ? 23 : 9);
+    CHECK_EQ(battle.rewards().bench_gains.size(), shared ? 1u : 0u);
+  }
   // star-up: KO'd member gets no gain and 1 HP but does receive next pending; bench (non-party) member gets its old pending
   {
     Fixture f2;
@@ -2066,14 +2097,14 @@ Bytes assemble_slot2(const Bytes& body) {
 void test_pac_resolved_ops() {
   struct ResolvedHost final : pac::Host {
     bool busy = true;
-    int shade_unit = -1, shade = -1, cursor = -1;
+    int facing_unit = -1, facing = -1, cursor = -1;
     u32 alive_mask() const override { return 0xF; }
     int read_field(int, u16) override { return 0; }
     void write_field(int, u16, int) override {}
     int rnd(int lo, int) override { return lo; }
     // The tag 0x65636166 spells "face".
     bool effect_busy(int pool, u32 tag) const override { return busy && pool == 1 && tag == 0x65636166; }
-    void set_shade(int unit, int value) override { shade_unit = unit, shade = value; }
+    void set_home_facing(int unit, int value) override { facing_unit = unit, facing = value; }
     void set_menu_cursor(int value) override { cursor = value; }
   };
   CHECK_EQ(pac::op_info(0xAB).conf, 'C');
@@ -2110,7 +2141,7 @@ void test_pac_resolved_ops() {
     CHECK_EQ(vm.colour_history()[1], 0);
   }
   {
-    // engine flags, scripted-death flag, shade, menu cursor
+    // engine flags, scripted-death flag, home facing, menu cursor
     pac::Module module;
     const Bytes body = {0x81, 0x00, 0xAF, 0x01, 0x39, 0x00, 0x7D, 0x01, 0x5C, 0x00, 0xE3, 0x80,
                         0x85, 0x05, 0x80, 0xE3, 0x80, 0x7B, 0x02, 0x80};
@@ -2122,8 +2153,8 @@ void test_pac_resolved_ops() {
     CHECK(vm.run_slot(3, 2, queued));
     CHECK(!vm.end_check_enabled() && !vm.ui_enabled() && vm.menu_locked() && vm.menu_entry100());
     CHECK(vm.scripted_death(3));
-    CHECK_EQ(host.shade_unit, 3);
-    CHECK_EQ(host.shade, 5);
+    CHECK_EQ(host.facing_unit, 3);
+    CHECK_EQ(host.facing, 5);
     CHECK_EQ(host.cursor, 2);
   }
   {

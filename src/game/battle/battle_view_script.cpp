@@ -4,6 +4,7 @@
 #include "game/battle/battle_view_util.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 
@@ -130,6 +131,11 @@ std::vector<std::vector<SmsgSeg>> smsg_segments(const std::string& src) {
 
 // The message window grows 8 steps per frame; the half extent counts them down.
 constexpr int kSmsgGrowStep = 8;
+
+// The events that hold the stream until the action executor is idle: the blocking ops, and the start of an attacked (slot 4) run.
+bool holds_stream(const battle::pac::Event& event) {
+  return event.kind == battle::pac::Event::Kind::Barrier || (event.kind == battle::pac::Event::Kind::Mark && event.a == 4);
+}
 // PS1 y -> HUD canvas.
 constexpr float kSmsgPY = kCanvasH / 216.0f;
 
@@ -181,6 +187,15 @@ void BattleView::script_event(const battle::pac::Event& event) {
       smsg_pos_x_ = event.a;
       smsg_pos_y_ = event.b;
       break;
+    // 85: the home facing becomes yaw a << 6 (4096 = 360 deg) and the model turns to it at once.
+    case EK::HomeFacing:
+      if (unit_ok) {
+        Visual& visual = vis_[static_cast<size_t>(event.unit)];
+        const float yaw = static_cast<float>(event.a) * (2.0f * kPi / 64.0f);
+        visual.home_fx = visual.face_x = visual.pface_x = -std::sin(yaw);
+        visual.home_fz = visual.face_z = visual.pface_z = -std::cos(yaw);
+      }
+      break;
     case EK::Pose:  // 3D: the pose = a, read by the idle script (GetPose); 8 = dead, 1 = stand-by
       if (unit_ok) {
         Visual& visual = vis_[static_cast<size_t>(event.unit)];
@@ -217,7 +232,7 @@ void BattleView::script_event(const battle::pac::Event& event) {
       }
       break;
     default:
-      // Shade (85: unit bytes, kept by the rules), SyncPos (91), QuarterHp, Invuln,
+      // SyncPos (91), QuarterHp, Invuln,
       // SfxMute, ScriptedDeath (5C: Battle::check_end), EngineFlag (7D / 81 / AF: VM state; 7D is read by the target label),
       // SetResult, NoDrops, Defeated, Killed, Ghost, MenuCursor: consumed by the rules.
       break;
@@ -315,7 +330,7 @@ bool BattleView::script_barrier_clear(const battle::pac::Event& barrier) const {
 bool BattleView::ghosted(int unit) const {
   bool barrier = false;
   for (const battle::pac::Event& event : script_stream_) {
-    if (event.kind == battle::pac::Event::Kind::Barrier) barrier = true;
+    if (holds_stream(event)) barrier = true;
     else if (event.kind == battle::pac::Event::Kind::Ghost && event.unit == unit) {
       if (barrier && event.a != 0) return false;
       break;
@@ -342,7 +357,7 @@ void BattleView::script_pump() {
     if (front.kind == EK::Dialogue || front.kind == EK::WaitDialogue) {
       // E0 blocks while the script window is not closed; E2 until it has closed (the system message is a separate window).
       if (smsg_.open != 0 && !smsg_.sys) return;
-    } else if (front.kind == EK::Barrier) {
+    } else if (holds_stream(front)) {
       // The PC walks home first.
       if (engaged_ && act_.phase == Act::Phase::None && queue_.empty() && (front.a == 0x66 || front.a == 0x65 || front.a == 0x2C)) begin_disengage();
       if (!script_barrier_clear(front) && ++script_stall_ < 3600) return;

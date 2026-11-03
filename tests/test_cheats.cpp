@@ -30,14 +30,14 @@ int main() {
   platform::Config config;
   const platform::Cheats& cheats = config.cheats;
   CHECK(!cheats.no_encounters && !cheats.battle_boost && !cheats.auto_battle && !cheats.god_mode && !cheats.no_clip && !cheats.max_stamina && !cheats.free_elements &&
-        !cheats.always_hit && !cheats.max_money && !cheats.shop_all_elements && !cheats.shop_all_weapons && !cheats.run_speed && !cheats.always_loot && !cheats.instant_growth && !cheats.no_craft_cost);
-  config.cheats.no_encounters = config.cheats.no_clip = config.cheats.always_loot = config.cheats.no_craft_cost = config.cheats.shop_all_weapons = true;
+        !cheats.always_hit && !cheats.max_money && !cheats.shop_all_elements && !cheats.shop_all_weapons && !cheats.run_speed && !cheats.always_loot && !cheats.instant_growth && !cheats.no_craft_cost && !cheats.shared_growth);
+  config.cheats.no_encounters = config.cheats.no_clip = config.cheats.always_loot = config.cheats.no_craft_cost = config.cheats.shop_all_weapons = config.cheats.shared_growth = true;
   const std::filesystem::path path = std::filesystem::temp_directory_path() / "oc_test_cheats.ini";
   CHECK(config.save(path));
   platform::Config reloaded;
   CHECK(reloaded.load(path));
   std::filesystem::remove(path);
-  CHECK(reloaded.cheats.no_encounters && reloaded.cheats.no_clip && reloaded.cheats.always_loot && reloaded.cheats.no_craft_cost && reloaded.cheats.shop_all_weapons);
+  CHECK(reloaded.cheats.no_encounters && reloaded.cheats.no_clip && reloaded.cheats.always_loot && reloaded.cheats.no_craft_cost && reloaded.cheats.shop_all_weapons && reloaded.cheats.shared_growth);
   CHECK(!reloaded.cheats.god_mode && !reloaded.cheats.max_money && !reloaded.cheats.instant_growth);
 
   // --- [Ui] settings window geometry: default -1, round trip

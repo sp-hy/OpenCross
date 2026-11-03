@@ -98,6 +98,10 @@ void BattleView::fx_reset_scene() {
 // queues the element pack load. The charge sequence's op 0x41 (about tick 108, +5 wait) hands over to the pack.
 void BattleView::fx_charge_begin() {
   if (act_.ev.empty() || act_.actor < 0) return;
+  if (act_.turn_targets_at_charge) {
+    act_.turn_targets_at_charge = false;
+    face_cast_targets(true);
+  }
   // An element with no colour, or with all six, opens no charge file: no group facing, no cast pose (the casters stay in their idle), no chant.
   const int cast_element = act_.ev.front().element;
   const bool known_element = cast_element > 0 && static_cast<size_t>(cast_element) < tables_->elements.size();

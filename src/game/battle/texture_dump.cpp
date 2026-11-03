@@ -137,11 +137,18 @@ u32 phase_stages(const vfs::Vfs& archive, TextureDumpProgress& progress) {
   return failed;
 }
 
+// The title scene: its baked tiles, and the manta / turtle models as room-model tiles cut the way the backdrop cuts them.
 u32 phase_title(const vfs::Vfs& archive, TextureDumpProgress& progress) {
   Phase ph(progress, "title backdrop", 1);
   auto st = load_title_stage(archive);
   if (!st) return 1;
   dump_stage_asset(*st, "title");
+  const Bytes prd = read_or_empty(archive, "cdrom/title.prd");
+  const std::vector<TitleModel> models = load_title_models(prd, *st);
+  if (!models.empty()) {
+    const render::FieldCharacterArt characters(archive);
+    for (const TitleModel& model : models) render::dump_room_model_tiles(model.asset, characters, true);
+  }
   progress.done = 1;
   return 0;
 }

@@ -99,8 +99,8 @@ struct Event {
     Killed,
     // 84: unit.
     QuarterHp,
-    // 85: unit, a = shade value.
-    Shade,
+    // 85: unit, a = home facing byte (the model turns to yaw a << 6 at once).
+    HomeFacing,
     // 91: unit (refresh the cached model position).
     SyncPos,
     // 5C: unit, a = flag value (1 = the script owns the death presentation).
@@ -119,7 +119,8 @@ struct Event {
     Queue,
     // 2C / 65 / 66 / A4 / 2A passed: the real op blocks until the action executor is idle (a = op, b = Battle action id at that moment).
     Barrier,
-    // ScriptedBrain: a slot run starts here (vt = its start); only carries the virtual time.
+    // ScriptedBrain: a slot run starts here (vt = its start; a = the slot, b = the Battle action id at that moment). A slot-4 (attacked) run
+    // holds the stream like a Barrier: the script reacts to an action that has played.
     Mark,
   } kind = Kind::Dialogue;
   int unit = -1, a = 0, b = 0;
@@ -168,7 +169,7 @@ class Host {
   virtual bool effect_busy(int /*pool*/, u32 /*tag*/) const { return false; }
   // 7B / 85: unit state the core does not simulate but keeps for the presentation.
   virtual void set_menu_cursor(int /*v*/) {}
-  virtual void set_shade(int /*unit*/, int /*v*/) {}
+  virtual void set_home_facing(int /*unit*/, int /*v*/) {}
   // 55 / 8F: pick a usable grid cell of `unit` (levels 0..limit, limit < 0 = the unit's gauge) and its target mask.
   virtual PickResult pick_element(int /*unit*/, int /*limit*/) { return {}; }
   // 34 / 35 / 5B with arg 0: the unit joins the all-target cast masks (Battle::cast_mask).
@@ -223,7 +224,7 @@ class Vm {
   // them like any queued action (a hidden unit's arrival cast).
   std::vector<std::pair<int, QueuedAttack>> take_idle_attacks() { return std::exchange(idle_attacks_, {}); }
   // Records a Mark event (a slot run starts).
-  void mark() { emit(Event::Kind::Mark); }
+  void mark(int slot = 0, int action = 0) { emit(Event::Kind::Mark, -1, slot, action); }
 
   // diagnostics: 'U' ops executed (advanced by length), and opcodes with no length that were reached.
   const std::set<int>& unimplemented() const { return unimplemented_; }

@@ -103,7 +103,7 @@ struct BattleResults::Impl {
     bool has_gain = false, shown = false;
     std::array<u16, data::kGridCells> cells{};
     int gauge = -1;
-    // KO (status 0x80): no gains, not healed.
+    // KO (status 0x80): no gains (unless the shared-growth cheat is on), not healed.
     bool ko = false;
     // The battle unit's grid (heal menu: healing elements in cells that are open now), and which cells are open
     // (unlocked and not used, flags & 0xC1 == 0).
@@ -576,12 +576,13 @@ struct BattleResults::Impl {
     }
     pt = 0;
   }
-  // The member's gains are applied to the live values - max HP and current HP both rise by the HP gain (cap 999).
+  // The member's gains are applied to the live values - max HP and current HP both rise by the HP gain (cap 999). A knocked-out
+  // member (only with the shared-growth cheat) stays at 0 HP.
   void show_member(int slot) {
     Row& row = rows[static_cast<size_t>(slot)];
     if (row.shown) return;
     row.shown = true;
-    row.hp = std::min(row.hp + row.gain[0], 999);
+    if (!row.ko) row.hp = std::min(row.hp + row.gain[0], 999);
   }
   int first_present() const {
     for (int i = 0; i < battle::kPcSlots; ++i)
