@@ -171,16 +171,15 @@ bool TitleBackdrop::init(const vfs::Vfs& vfs, render::GpuContext& ctx, render::S
 // scale are copied into the model each tick and its motion advances). The record carries no texture words: the *record name* is
 // decoded as hex digits - chars 0-1 = CLUT row (`ed9b` -> 0xED = 237), char 2 = a nibble whose bit 0 is
 // the tpage y (1 -> 256) and bit 3 the CLUT x (8 -> 256), char 3 = tpage x / 64 (`b` -> 704, `a` -> 640) - and bound to the model.
-bool TitleBackdrop::load_models(render::MeshPipeline& meshes) {
-  models_.clear();
-  const auto drp = import::parse_drp(prd_);
-  if (!drp || !meshes_) return false;
+std::vector<TitleModel> load_title_models(ByteSpan prd, const assets::StageAsset& stage) {
+  std::vector<TitleModel> out;
+  const auto drp = import::parse_drp(prd);
+  if (!drp) return out;
   auto hexval = [](char digit) -> int {
     if (digit >= '0' && digit <= '9') return digit - '0';
     if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
     return -1;
   };
-  int loaded = 0;
   for (const import::DrpEntry& entry : drp->entries) {
     if (entry.type != 0x0B) continue;
     std::string err;
@@ -193,15 +192,15 @@ bool TitleBackdrop::load_models(render::MeshPipeline& meshes) {
     const int tpage_y = (nib & 1) ? 256 : 0, clut_x = (nib & 8) ? 256 : 0;
     const int tpx = hexval(entry.name[3]) * 64;
     // The title's pages are 8bpp; a 4bpp CLUT would be a 16-entry row.
-    int tex = meshes_->find_texture(1, clut_x, clut_y);
-    if (tex < 0) tex = meshes_->find_texture(0, clut_x, clut_y);
+    int tex = stage.find_texture(1, clut_x, clut_y);
+    if (tex < 0) tex = stage.find_texture(0, clut_x, clut_y);
     if (tex < 0 || tpage_y != 256) {
       log::warn("title backdrop: model {}: texture (tpage {},{} CLUT {},{}) not in the title VRAM atlas", entry.name, tpx, tpage_y, clut_x, clut_y);
       continue;
     }
-    const assets::StageTexture& texture = meshes_->textures[static_cast<size_t>(tex)];
+    const assets::StageTexture& texture = stage.textures[static_cast<size_t>(tex)];
     const int ppw = texture.mode == 0 ? 4 : 2;
-    const int x0 = (tpx - meshes_->atlas_x0_hw) * ppw;
+    const int x0 = (tpx - stage.atlas_x0_hw) * ppw;
     import::Image page;
     page.width = 128;
     page.height = 256;
@@ -218,27 +217,49 @@ bool TitleBackdrop::load_models(render::MeshPipeline& meshes) {
       log::warn("title backdrop: model {}: {}", entry.name, err);
       continue;
     }
+    asset->source = "@room_model";
+    out.push_back({entry.name, tpx, tpage_y, clut_x, clut_y, std::move(*asset)});
+  }
+  return out;
+}
+
+bool TitleBackdrop::load_models(render::MeshPipeline& meshes) {
+  models_.clear();
+  if (!meshes_) return false;
+  int loaded = 0;
+  for (TitleModel& model : load_title_models(prd_, *meshes_)) {
     auto res = std::make_unique<ModelRes>();
-    res->asset = std::move(*asset);
-    // Texture dump / replace: room_model/<content tag>.png.
-    res->asset.source = "@room_model";
+    res->asset = std::move(model.asset);
     render::resolve_model_textures(res->asset);
     res->gpu = meshes.create_model(res->asset);
     if (!res->gpu) {
-      log::warn("title backdrop: model {}: GPU upload failed", entry.name);
+      log::warn("title backdrop: model {}: GPU upload failed", model.name);
       continue;
     }
     res->pose.set_model(&res->asset);
     // Motion: the clip with the most keyframes (the single-frame clip is the rest pose) [I: op 05 frame0 = 1 may be the motion index].
     for (size_t i = 0; i < res->asset.clips.size(); ++i)
       if (res->clip < 0 || res->asset.clips[i].frame_count > res->asset.clips[static_cast<size_t>(res->clip)].frame_count) res->clip = static_cast<int>(i);
-    log::info("title backdrop: model {}: {} joints, {} clips (motion {} x {} keyframes), tpage {},{} / CLUT ({},{}) from the name", entry.name,
+    log::info("title backdrop: model {}: {} joints, {} clips (motion {} x {} keyframes), tpage {},{} / CLUT ({},{}) from the name", model.name,
               res->asset.skeleton.joints.size(), res->asset.clips.size(), res->clip,
-              res->clip >= 0 ? res->asset.clips[static_cast<size_t>(res->clip)].frame_count : 0, tpx, tpage_y, clut_x, clut_y);
-    models_.emplace(entry.name, std::move(res));
+              res->clip >= 0 ? res->asset.clips[static_cast<size_t>(res->clip)].frame_count : 0, model.tpage_x, model.tpage_y, model.clut_x,
+              model.clut_y);
+    models_.emplace(model.name, std::move(res));
     ++loaded;
   }
   return loaded > 0;
+}
+
+// The models' pristine pages stay in the asset; only the replacement images are dropped and resolved again, and the GPU copy rebuilt.
+// The motion lives in the emitter objects, so the swim carries on.
+void TitleBackdrop::reload_model_textures() {
+  if (!mesh_pipe_) return;
+  for (auto& [name, res] : models_) {
+    res->asset.mod_textures.clear();
+    render::resolve_model_textures(res->asset);
+    if (auto gpu = mesh_pipe_->create_model(res->asset)) res->gpu = std::move(gpu);
+    else log::warn("title backdrop: model {}: GPU upload failed", name);
+  }
 }
 
 void TitleBackdrop::shutdown() {
@@ -384,11 +405,14 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
   // Mesh objects (sprite type 14): one StageInstance per live object, as StageScene::draw builds them for a battle stage. The
   // pipeline clips at the near plane, writes per-pixel depth (camera z / 16 + OT bias, the particle batch's slot units) and
   // draws the opaque faces first, then the blended ones back to front.
-  // The mod overlay changed: re-apply the tile replacements live.
-  if (stage_mesh_ && meshes_ && tile_gen_ != render::texture_registry::generation()) {
+  // The mod overlay changed: re-apply the tile replacements and the models' texture replacements live.
+  if (meshes_ && tile_gen_ != render::texture_registry::generation()) {
     tile_gen_ = render::texture_registry::generation();
-    render::apply_tile_textures(*meshes_, "title");
-    stage_pipe_.reload_textures(*stage_mesh_, *meshes_);
+    if (stage_mesh_) {
+      render::apply_tile_textures(*meshes_, "title");
+      stage_pipe_.reload_textures(*stage_mesh_, *meshes_);
+    }
+    reload_model_textures();
   }
   if (stage_mesh_) {
     std::vector<effects::EmitterSystem::MeshInstance> live;

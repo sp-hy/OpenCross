@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <csignal>
 #include <cstdio>
@@ -979,7 +980,11 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
     else if (arg == "--scene" && i + 1 < args.size()) from = to = std::atoi(args[++i].c_str());
     else if (arg == "--from" && i + 1 < args.size()) from = std::atoi(args[++i].c_str());
     else if (arg == "--to" && i + 1 < args.size()) to = std::atoi(args[++i].c_str());
-    else turns = std::atoi(arg.c_str());
+    else if (!arg.empty() && std::all_of(arg.begin(), arg.end(), [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; })) turns = std::atoi(arg.c_str());
+    else {
+      std::fprintf(stderr, "pac-soak: unknown argument '%s'\n", arg.c_str());
+      return 2;
+    }
   }
   int started = 0, no_pac = 0, failed = 0, cmds = 0, scenes = 0;
   u64 ops = 0;

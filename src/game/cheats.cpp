@@ -19,6 +19,7 @@ battle::Battle::Cheats battle_cheats() {
   out.always_hit = cheats.always_hit;
   out.always_loot = cheats.always_loot;
   out.instant_growth = cheats.instant_growth;
+  out.shared_growth = cheats.shared_growth;
   return out;
 }
 
@@ -172,6 +173,10 @@ bool draw_cheats_tab(platform::Config& cfg) {
       toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");
       toggle("Always loot", "##c_loot", cheats.always_loot, "Every enemy drops its rare drop (else the common one) and every steal lands on the rare item.");
       toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every battle grants each member the full stat-gain cap.");
+      toggle("Growth for everyone", "##c_shared", cheats.shared_growth,
+             "Every won battle also grows the stats of every recruited character outside the party, and of members who were knocked out, "
+             "just as it grows the fighters (with Max stat growth on, one win gives everyone the full amount for the star). "
+             "Knocked-out members also get their star-up bonus from a boss.");
       ImGuiLayer::end_rows();
     }
   };

@@ -192,6 +192,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--stats` | `hp=..,atk=..,def=..,hit=..,evd=..,mag=..,mdef=..` | unchanged | Base stats of every party member. |
 | `--enemyhp` | `u3,u4,u5` | unchanged | HP (and max HP) of enemy units 3 / 4 / 5; empty or -1 keeps. |
 | `--ko` | `<unit>` | none | That party unit starts KO'd. |
+| `--gauge` | `<n>` | the character's | Party slot 0 starts with that element level (-1 none, 0 = row 1 usable): an element cast from the top menu as the first action, the way a PS1 capture pokes the gauge. |
 | `--status` | `<unit>:<lo>[,...]` | none | OR these status bits into the units' merged `lo` words at the start (e.g. `0:0x19,3:0x100020`); for checking the status plates and icons. |
 | `--equip` | `<item id>` | character table | Party slot 0 holds that weapon (e.g. `0x26`). |
 | `--cast` | `<element id>` | none | First PC casts that element on the first enemy once the view ticks. |
@@ -370,7 +371,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_CAM_PICK` | `battle_camera.cpp`, `battle_view_util.h`, `src/game/effects/sequence_player.cpp` | camera name (e.g. `apr0`, `p01`) | Forces the camera pick; in an effect sequence's random camera pool a comma list is accepted and `name@k` limits the match to the k-th pool of the run. |
 | `OC_CAM_KEYS` | `battle_camera.cpp` | set | Logs the keys of each camera shot. |
 | `OC_CAM_TRACE` | `battle_camera.cpp` | set | Logs the camera pose every tick. |
-| `OC_DRAW_CAM` | `battle_view_camera.cpp` | set | Logs the interpolated camera of each drawn frame (eye, target, H and the orbit counter). |
+| `OC_DRAW_CAM` | `battle_view_camera.cpp` | set | Logs the interpolated camera of each drawn frame (eye, target, H and the orbit counter) and every unit's facing (4096ths of a turn, `-` = absent slot). |
 | `OC_STAGE_ONLY` | `stage_scene.cpp`, `title_backdrop.cpp` | `a,b` | Keeps only these stage parts (the title backdrop matches by substring). |
 | `OC_STAGE_SKIP` | `title_backdrop.cpp` | names | Skips title-backdrop objects whose name occurs in the value. |
 | `OC_STAGE_CULL` | `stage_scene.cpp`, `title_backdrop.cpp` | `swap`, `none`, other | Overrides the cull side of every stage object: `swap` inverted, `none` off, any other value forces side 0. |

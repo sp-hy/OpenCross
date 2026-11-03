@@ -316,7 +316,8 @@ btl_op5a_play_anim_of = 0x800D2688;  # function: battle-script op 5A: starts a m
 btl_op5b_ghost_unit = 0x800D272C;  # function: battle-script op 5B: sets untargetable flag and all-target mask bit
 btl_op5c_scripted_death_flag = 0x800D27FC;  # function: battle-script op 5C: stores the scripted-death flag
 btl_op83_set_result = 0x800D2A00;  # function: battle-script op 83: sets the forced battle result code
-btl_op85_set_home_facing = 0x800D2B20;  # function: battle-script op 85: rewrites the unit's home facing byte
+btl_op85_set_home_facing = 0x800D2B20;  # function: battle-script op 85: writes the value to the unit's home facing byte and its current facing byte and turns its model to value << 6 at once
+btl_script_operand_unit = 0x800D00F4;  # function: resolves the instruction's unit operand to a unit slot (code - 0xE0, or the running entity's own unit for 0xE9)
 fld_op_heal_group = 0x800D2BBC;  # function: script op FE 36: sets current HP to max HP of the target characters (ambiguous)
 btl_op86_set_camera_target = 0x800D2BC4;  # function: battle-script op 86: rewrites the camera/acting list to one unit
 btl_op_a7_pip_evolution = 0x800D3218;  # function: battle-script op A7: Pip form change by colour points
@@ -647,4 +648,5 @@ btl_element_command_confirm = 0x800CCDFC;  # function: queues the confirmed elem
 btl_ring_step_reset = 0x800C9A0C;  # function: Clears the ring step counter and sets its end to 5 (four one-cell shifts).
 btl_ring_step_counter = 0x800E05B3;  # data: Ring step counter: 0 idle, 1..end-1 shifting one ring cell per even battle frame, end = done.
 btl_ring_step_end = 0x800E062E;  # data: End value of the ring step counter: 5 for a normal push, 13 for a full repaint.
+btl_menu_next_pc = 0x800E0653;  # data: PC slot the command menu goes to next; the step after an element command writes it once every unit faces home, before the next window opens
 btl_action_queue_index = 0x800E065E;  # data: Signed index of the running action queue entry; negative when no action is queued.

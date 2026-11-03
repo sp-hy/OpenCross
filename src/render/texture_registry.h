@@ -49,6 +49,11 @@ TextureKey model_texture_key(const std::string& source, size_t index, size_t mai
 // the original: the original's own flag when every texel shares it, else the flag of the original texel it covers.
 std::vector<u8> model_file_pixels(u32 w, u32 h, const u8* rgba);
 void model_restore_stp(u32 original_w, u32 original_h, const u8* original, u32 w, u32 h, std::vector<u8>& rgba);
+// Share (0..1) of the original's 8 x 8 texel blocks whose luminance a replacement does not follow (correlation under 0.5), both box-filtered
+// to the smaller size; only blocks that are mostly opaque in the original and not flat count. A replacement painted on the texture
+// scores near 0 (a recolour too); one made for another arrangement of the atlas scores high (kModelLayoutMismatch).
+float model_layout_mismatch(u32 original_w, u32 original_h, const u8* original, u32 w, u32 h, const u8* rgba);
+inline constexpr float kModelLayoutMismatch = 0.1f;
 // Short content tag (8 hex digits, FNV-1a over size + pixels): names effect sheets that share a name but differ in content.
 std::string texture_content_tag(u32 w, u32 h, const u8* rgba);
 

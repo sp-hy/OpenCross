@@ -205,6 +205,25 @@ int main() {
     model_restore_stp(2, 2, all_stp.data(), 4, 4, full);
     CHECK(std::all_of(full.begin(), full.end(), [&, i = 0](u8 v) mutable { return (i++ % 4 != 3) || v == 0xBF; }));
   }
+  {
+    // Layout check: a 4x upscale and a recolour of a 32 x 32 texture follow it; the same texture with its two halves swapped does not.
+    auto image = [](u32 size, int scale, bool swapped, bool recolour) {
+      std::vector<u8> out(size_t(size) * size * 4);
+      for (u32 y = 0; y < size; ++y)
+        for (u32 x = 0; x < size; ++x) {
+          const u32 sx = x / scale, sy = y / scale;
+          const u32 src_y = swapped ? (sy + 16) % 32 : sy;
+          const u8 value = static_cast<u8>(src_y < 16 ? (sx * 37 + src_y * 11) % 200 : (sx * 5 + src_y * 53) % 200);
+          u8* texel = &out[(size_t(y) * size + x) * 4];
+          texel[0] = recolour ? static_cast<u8>(value / 2) : value, texel[1] = value, texel[2] = recolour ? u8{255} : value, texel[3] = 0xBF;
+        }
+      return out;
+    };
+    const std::vector<u8> original = image(32, 1, false, false);
+    CHECK(model_layout_mismatch(32, 32, original.data(), 128, 128, image(128, 4, false, false).data()) == 0.0f);
+    CHECK(model_layout_mismatch(32, 32, original.data(), 32, 32, image(32, 1, false, true).data()) <= kModelLayoutMismatch);
+    CHECK(model_layout_mismatch(32, 32, original.data(), 128, 128, image(128, 4, true, false).data()) > kModelLayoutMismatch);
+  }
   CHECK(texture_content_tag(4, 4, a.data()) == texture_content_tag(4, 4, a.data()));
   CHECK(texture_content_tag(4, 4, a.data()) != texture_content_tag(4, 4, b.data()));
   CHECK(texture_content_tag(4, 4, a.data()).size() == 8);

@@ -805,9 +805,9 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
       emit(Event::Kind::MenuCursor, -1, operand_w(1));
       break;
     case 0x85: {
-      const int unit = unit_of(operand_w(3)), shade = operand_w(1);
-      host_.set_shade(unit, shade);
-      emit(Event::Kind::Shade, unit, shade);
+      const int unit = unit_of(operand_w(3)), facing = operand_w(1) & 0xFF;
+      host_.set_home_facing(unit, facing);
+      emit(Event::Kind::HomeFacing, unit, facing);
       break;
     }
     case 0x91: emit(Event::Kind::SyncPos, unit_of(operand_w(1))); break;
@@ -907,8 +907,8 @@ class ScriptedBrain::BattleHost final : public Host {
   void set_menu_cursor(int value) override {
     for (int i = 0; i < kPcSlots; ++i) battle->unit_mut(i).menu_cursor = {static_cast<u8>(value), static_cast<u8>(value)};
   }
-  void set_shade(int unit, int value) override {
-    if (unit >= 0 && unit < kUnits) battle->unit_mut(unit).shade = static_cast<u8>(value);
+  void set_home_facing(int unit, int value) override {
+    if (unit >= 0 && unit < kUnits) battle->unit_mut(unit).home_facing = static_cast<u8>(value);
   }
   void reveal(int unit) override { battle->set_cast_bit(unit, true); }
   void conceal(int unit) override { battle->set_cast_bit(unit, false); }
@@ -975,8 +975,7 @@ class ScriptedBrain::BattleHost final : public Host {
         case 0x16C: return state.countdown;
         case 0x16E: return state.gauge;
         case 0x19E: return state.stamina;
-        case 0x19B:
-        case 0x1BF: return state.shade;
+        case 0x1BF: return state.home_facing;
         // The kind byte (Pip's form: the PC entities test 0x2B..0x2D before A7).
         case 0x2D: return state.kind;
         default: break;
@@ -1060,8 +1059,7 @@ class ScriptedBrain::BattleHost final : public Host {
         case 0x16C: state.countdown = value & 0xFFFF; return;
         case 0x16E: state.gauge = std::clamp(value, -1, state.gauge_max); return;
         case 0x19E: state.stamina = value; return;
-        case 0x19B:
-        case 0x1BF: state.shade = static_cast<u8>(value); return;
+        case 0x1BF: state.home_facing = static_cast<u8>(value); return;
         default: break;
       }
     }
@@ -1191,7 +1189,7 @@ void ScriptedBrain::begin_battle(Battle& battle, Rng& rng) {
 
 // One slot run on virtual time, then the settle pass (the other entities' slot-1 loops react to what the slot did).
 bool ScriptedBrain::run(int unit, int slot, std::vector<QueuedAttack>& queued) {
-  vm_->mark();
+  vm_->mark(slot, host_->action_serial());
   if (!vm_->run_slot(unit, slot, queued, 30000)) return false;
   vm_->settle();
   return true;

@@ -143,8 +143,8 @@ struct Unit {
   // Set by Defend: weapon damage taken is halved and the idle script holds the block pose. It ends when the PC's command menu opens
   // (Battle::open_menu, also implied by its next command) and on KO.
   bool guard = false;
-  // Model shade set by script op 85 (presentation only).
-  u8 shade = 0;
+  // Home facing byte (home yaw = byte << 6, 4096 = 360 deg): the formation facing byte << 3 at battle start, rewritten by script op 85.
+  u8 home_facing = 0;
   // Remembered command-menu cursor of a PC, set by script op 7B (reset value 3).
   std::array<u8, 2> menu_cursor{3, 3};
   int gold = 0, drop_row = 0, drop_base = 0;
@@ -178,7 +178,7 @@ struct Rewards {
   // once (cell &= 0xC000, whatever the outcome); the host does it when it applies the battle result.
   std::vector<std::pair<int, int>> lost_cells;
   bool star_up = false;
-  // Stat deltas applied by growth: per party slot, and per BattleOptions::bench entry (star-up only).
+  // Stat deltas applied by growth: per party slot, and per BattleOptions::bench entry (star-up, or any victory with shared growth).
   std::array<std::array<int, 7>, kPcSlots> gains{};
   std::vector<std::array<int, 7>> bench_gains;
 };
@@ -551,7 +551,7 @@ class Battle {
   bool invincible(int unit) const { return unit < kPcSlots ? (inv_party_ || cheats_.god_mode || cheats_.boost) : inv_enemies_; }
   // Cheats tab: the rules' bypasses, all off by default; the host pushes the live set every update.
   struct Cheats {
-    bool god_mode = false, boost = false, max_stamina = false, free_elements = false, always_hit = false, always_loot = false, instant_growth = false;
+    bool god_mode = false, boost = false, max_stamina = false, free_elements = false, always_hit = false, always_loot = false, instant_growth = false, shared_growth = false;
   };
   void set_cheats(const Cheats& cheats) { cheats_ = cheats; }
   const Cheats& cheats() const { return cheats_; }

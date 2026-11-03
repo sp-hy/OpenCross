@@ -32,6 +32,17 @@ namespace oc::game {
 // texture dump tool (`opencross occ dump-textures title`). nullopt when the files are missing.
 std::optional<assets::StageAsset> load_title_stage(const vfs::Vfs& vfs);
 
+// The title's sprite-type-20 models (the type-0x0B records of title.prd: manta rays `ed9a`, turtle `ed9b`), each on the 128 x 256 page its
+// record name binds, cut from `stage`'s VRAM atlas; source "@room_model" (texture dump / replace as room-model tiles). No GPU: the backdrop's
+// own load and the texture dump. A record whose name is no binding or whose page is not in the atlas is skipped with a warning.
+struct TitleModel {
+  std::string name;
+  // The binding the name decodes to: tpage (halfwords, rows) and CLUT.
+  int tpage_x = 0, tpage_y = 0, clut_x = 0, clut_y = 0;
+  assets::ModelAsset asset;
+};
+std::vector<TitleModel> load_title_models(ByteSpan prd, const assets::StageAsset& stage);
+
 class TitleBackdrop {
  public:
   TitleBackdrop() = default;
@@ -93,6 +104,8 @@ class TitleBackdrop {
     int clip = -1;
   };
   bool load_models(render::MeshPipeline& meshes);
+  // The mod overlay changed: the models' texture replacements again, from their own pages.
+  void reload_model_textures();
   struct VramBlock {
     // Halfwords / rows of one title.ltd image upload.
     int x = 0, y = 0, w = 0, h = 0;

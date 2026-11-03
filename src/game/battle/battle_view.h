@@ -374,6 +374,8 @@ class BattleView {
     std::vector<int> casters;
     bool cast_after_return = false;
     bool hit_wait = false;
+    // The cast's targets turn to the caster when its charge starts (a PC that hopped home from the enemy).
+    bool turn_targets_at_charge = false;
   };
   // A reaction scheduled for a later tick (element casts hit one target after the other).
   struct Pending {
@@ -1021,8 +1023,11 @@ class BattleView {
   bool orbit_held_ = false;
   // The command menu's steps after a party element command: the ring step (at least kCastHandover - kCastHandoverTail ticks, longer while
   // the drawn ring still shifts), then kCastHandoverTail ticks (the units' facing goes home, the menu resets) before the next queued action.
-  // Ticks left, set by end_group, counted down while no action runs.
+  // Ticks left, set by end_group, counted down while no action runs. The menu does not pass or reopen before they have run out.
   int cast_handover_ = 0;
+  // The PC whose element command ended last (-1 = none): the pack's last shot holds through the hand-over steps, and a menu passing to
+  // another PC keeps it until that PC's top menu takes over; the orbit round the same PC starts with the hand-over's end.
+  int cast_hold_pc_ = -1;
   static constexpr int kCastHandover = 10, kCastHandoverTail = 3;
   float time_ = 0;
   int auto_delay_ = 0;

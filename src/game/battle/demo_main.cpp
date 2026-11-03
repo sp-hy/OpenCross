@@ -11,6 +11,7 @@
 //   --shotfrom <f> --shotto <f>  with --shotevery: only frames f1..f2 (inclusive; default 0..unbounded) write a shot
 //   --stats hp=1023,atk=1,def=127,hit=127,evd=0,mag=1,mdef=127  base stats of every party member (default party {0,1,22} when no --party); --enemyhp u3,u4,u5  HP (and max HP) of the enemy units 3 / 4 / 5 (-1 or empty = unchanged)
 //   --ko <unit>  that party unit starts KO'd (hp 0 + status KO: Revive / Full Revival targets)
+//   --gauge <n>  party slot 0 starts with that element level (-1 = none, 0 = row 1 open: an element as the first action)
 //   --equip <item id>  party slot 0 holds that weapon (e.g. 0x26 = Mastermune); armour / accessories stay the character table's
 //   --party a[,b[,c]]  character ids, slot 0 = the acting PC (default party {0, 1, 22}); the battle seats the party in this order, so
 //                      --caster / --casttgt / --cast2tgt / --ko 0..2 are the party slots of this list
@@ -63,7 +64,7 @@ int ocbattleview_main(int argc, char** argv) {
   // --stats overrides in the order hp, atk, def, hit, evd, mag, mdef (-1 = keep).
   std::array<int, 7> stat_set{-1, -1, -1, -1, -1, -1, -1};
   bool have_stats = false;
-  int ko_unit = -1;
+  int ko_unit = -1, start_gauge = -2;
   // --status unit:lo[,unit:lo]: inflicted status bits OR-ed into the units' merged lo words.
   std::vector<std::pair<int, u32>> status_lo;
   int equip_weapon = -1, grid_element = 0;
@@ -142,6 +143,7 @@ int ocbattleview_main(int argc, char** argv) {
     else if (!std::strcmp(argv[i], "--etrap") && i + 1 < argc) enemy_trap = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--ptrap") && i + 1 < argc) party_trap = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--ko") && i + 1 < argc) ko_unit = std::atoi(argv[++i]);
+    else if (!std::strcmp(argv[i], "--gauge") && i + 1 < argc) start_gauge = std::atoi(argv[++i]);
     else if (!std::strcmp(argv[i], "--status") && i + 1 < argc) {
       for (char* cursor = argv[++i]; *cursor;) {
         char* end = cursor;
@@ -300,6 +302,11 @@ int ocbattleview_main(int argc, char** argv) {
       if (battle::Battle* current = view.battle_mut(); current && ko_unit >= 0) {
         battle::Unit& unit = current->unit_mut(ko_unit);
         if (unit.present) unit.hp = 0, unit.lo |= battle::st::kKO;
+      }
+      // --gauge
+      if (battle::Battle* current = view.battle_mut(); current && start_gauge >= -1) {
+        battle::Unit& unit = current->unit_mut(0);
+        if (unit.present) unit.gauge = std::min(start_gauge, unit.gauge_max);
       }
       // --status
       if (battle::Battle* current = view.battle_mut())

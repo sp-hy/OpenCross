@@ -435,6 +435,8 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
     }
   }
   if (slot == kPcSlots) return false;
+  // The scene record's facing byte of each slot (0x11 + slot, yaw byte << 9) is kept in the finer home facing unit (yaw byte << 6).
+  for (int i = 0; i < kUnits; ++i) units_[static_cast<size_t>(i)].home_facing = static_cast<u8>(scene_rec.raw[static_cast<size_t>(0x11 + i)] << 3);
   for (int pc = 0; pc < kPcSlots; ++pc) refresh_seal_flags(pc);
   say(std::format("battle start: scene {}  ring [{} {} {}]", scene, data::colour_name(ring_[0]), data::colour_name(ring_[1]),
                   data::colour_name(ring_[2])));
@@ -697,6 +699,7 @@ bool Battle::transform(int unit_index, int form) {
   fresh.ap = 8, fresh.countdown = 8, fresh.stamina = old.stamina, fresh.gauge = -1;
   fresh.gender = old.gender;
   fresh.hero_set = old.hero_set;
+  fresh.home_facing = old.home_facing;
   load_monster_record(fresh, rec, 0x400400u);
   // The form's grid loses its lock bits, so the gauge tops out at the deepest row holding an element.
   fresh.gauge_max = -1;
@@ -2259,23 +2262,28 @@ void Battle::compute_rewards() {
   if (!boss_) {
     // Cheats: instant growth fills the progress and takes every stat all the way to its minor-growth target.
     growth_.progress = cheats_.instant_growth ? cap : std::min(growth_.progress + sr.step, cap);
-    for (size_t i = 0; i < party_.size(); ++i) {
-      if (!units_[i].alive()) continue;
-      PartyMember& member = party_[i];
+    auto grow = [&](PartyMember& member, std::array<int, 7>& gains) {
       for (size_t k = 0; k < 7; ++k) {
         int gain = cheats_.instant_growth && cap > 0 ? full_minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths)
                                                      : minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths, growth_.progress, cap);
         const int room = std::max(0, member.lv99[k] - member.stat[k]);
         gain = std::min(gain, room);
         member.stat[k] += gain;
-        rewards_.gains[i][k] = gain;
+        gains[k] = gain;
       }
       member.stat[0] = stat_hp_cap(member.stat[0]);
+    };
+    // Cheats: shared growth also grows the knocked-out members and every character outside the party.
+    for (size_t i = 0; i < party_.size(); ++i)
+      if (units_[i].alive() || cheats_.shared_growth) grow(party_[i], rewards_.gains[i]);
+    if (cheats_.shared_growth) {
+      rewards_.bench_gains.assign(bench_.size(), {});
+      for (size_t i = 0; i < bench_.size(); ++i) grow(bench_[i], rewards_.bench_gains[i]);
     }
   } else {
     rewards_.star_up = true;
     for (size_t i = 0; i < party_.size(); ++i) {
-      if (!units_[i].alive()) continue;
+      if (!units_[i].alive() && !cheats_.shared_growth) continue;
       PartyMember& member = party_[i];
       for (size_t k = 0; k < 7; ++k) {
         const int gain = std::min(member.pending[k], std::max(0, member.lv99[k] - member.stat[k]));

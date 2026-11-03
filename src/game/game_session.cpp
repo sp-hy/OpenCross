@@ -266,6 +266,13 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
       write_growth(save_char, member);
       write_unlocks(gs, tables, member.char_id, star);
     }
+  } else if (!rewards.bench_gains.empty()) {
+    // Shared growth: the bench grew with the party in a normal fight.
+    for (const battle::PartyMember& member : finished_battle.bench()) {
+      if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
+      save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
+      for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
+    }
   }
   log::info("session: battle result written back (gold +{}, {} items, {} elements{}; star {} progress {})", sum.gold, sum.items, sum.elements,
             sum.star_up ? ", star up" : "", finished_battle.growth().star, finished_battle.growth().progress);

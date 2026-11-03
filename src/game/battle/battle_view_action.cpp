@@ -61,7 +61,9 @@ void BattleView::update(float dt, const platform::Input& in) {
   std::erase_if(log_, [](const LogLine& line) { return line.ttl <= 0; });
   if (ui_ == Ui::Result) result_age_ += dt;
 
-  const bool busy = !queue_.empty() || act_.phase != Act::Phase::None || !pending_.empty() || script_busy();
+  // The menu's hand-over steps after a PC's element command hold the next menu (not the end of a finished battle).
+  const bool handing_over = cast_handover_ > 0 && battle_->outcome() == battle::Outcome::Ongoing;
+  const bool busy = !queue_.empty() || act_.phase != Act::Phase::None || !pending_.empty() || script_busy() || handing_over;
   // Dev (route battle_dash): every grid cell of PC 0 = element <id>, the other enemies down, the last one at 1 HP when an element is confirmed.
   if (const char* re = std::getenv("OC_ROUTE_ELEM"); re && !route_elem_done_) {
     route_elem_done_ = true;
@@ -486,14 +488,14 @@ void BattleView::tick_menu_entry() {
 }
 
 bool BattleView::turn_over() const {
-  if (ui_ != Ui::Wait || engaged_ || engage_arrive_) return false;
+  if (ui_ != Ui::Wait || engaged_ || engage_arrive_ || cast_handover_ > 0) return false;
   if (!queue_.empty() && queue_.front().front().actor == last_actor_) return false;
   const bool defending = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Defend;
   return act_.phase == Act::Phase::None || act_.actor != last_actor_ || defending;
 }
 
 // The facing of the units outside an action.
-//  * Entering the top menu turns nobody home; the home pass belongs to the step after a PC's ELEMENT command (see below).
+//  * Entering the top menu turns nobody home; the home pass belongs to the step after a PC's ELEMENT command (tick_action).
 //  * While the target ring is open every cursor placement (opening, or a move) turns the active PC to the cursor unit (atan2 of the position
 //    difference); the cursor on the PC itself gives the home facing byte. Dead units are skipped.
 //    Cancelling back to the top menu does NOT run it (the PC keeps the cursor yaw).
@@ -507,7 +509,7 @@ void BattleView::sync_menu_facing() {
   // Entering the top menu runs NO home pass: the home pass is the step AFTER AN ELEMENT COMMAND was issued; an attack and Defend only
   // re-enter the menu, and so do the L1 / R1 switch and the end of an enemy turn.
   // So a unit keeps the yaw an action gave it (the PC an enemy attacked stays turned to the attacker) until its own action ends (end_group)
-  // or a PC element command sweeps everyone (begin_group).
+  // or the step after a PC's element command sweeps everyone (tick_action).
   if (ui_ == Ui::Target && !targets_.empty()) {
     const int cursor_unit = targets_[static_cast<size_t>(std::clamp(target_cursor_, 0, static_cast<int>(targets_.size()) - 1))];
     if (cursor_unit != tgt_face_unit_ || menu_face_ui_ != Ui::Target) {

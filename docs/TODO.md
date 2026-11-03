@@ -8,8 +8,6 @@ Entries that need a PS1 comparison use `python -X utf8 tools\py\ps1_cast.py forc
 
 ## 2. Fidelity gaps (not modelled)
 
-- **Unit timing around an element command's hand-over** (`src/game/battle/battle_view_sequence.cpp`, `end_group` / `tick_action`). Reproduce with `opencross ocbattleview 6 --party 0 --grid 39 --etrap 39 --keys ...` (menu-driven cast, `docs/tools.md`), `OC_BATTLE_SEED=14`, a plain config, `OC_DRAW_CAM=1`, against a PS1 menu cast of element 39 in battle scene 6 with Serge alone. The camera matches RDE within a few frames, but three unit-side differences remain. (1) The enemy's approach run lasts about 5 frames longer than RDE's, so the attack shot cuts in later; on the PS1 the unit arrives about 5 frames later than ours. (2) On the original, every unit's facing snaps home about 8 frames after the orbit camera resumes (the menu step after an element command, 0x800CD0AC, sets every unit's facing to its home byte). OpenCross turns only the actor home, at the end of its group. (3) Not checked: an element cast that hands the menu straight to another PC with no enemy action in between. Done when a per-frame table of unit positions and yaws matches RDE within a few frames for these three cases.
-
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
 
 ## 4. Code hygiene

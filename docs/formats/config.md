@@ -180,6 +180,7 @@ All off by default; they never lock saving. The first three also toggle from the
 | `RunSpeed` | 0 | Field walk / run speed x2. |
 | `AlwaysLoot` | 0 | Every enemy drops its rare drop (the common one when it has no rare drop), and every PC steal succeeds and takes the rare word when the enemy has one. |
 | `InstantGrowth` | 0 | In a non-boss fight, the star's growth progress jumps to its cap, so each living member gets the full stat gain of that star at once. |
+| `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |
 | `NoCraftCost` | 0 | The forge builds without needing materials or gold and takes neither. |
 
 ## 3. First-launch defaults

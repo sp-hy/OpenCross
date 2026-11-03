@@ -77,6 +77,7 @@ enum class TexFilter { Nearest, Bilinear };
 //   always_loot        every enemy drops its rarest drop, every steal lands
 //   no_craft_cost      the forge (Zappa) builds without using materials or gold
 //   instant_growth     a won fight grants the stat growth of a full star
+//   shared_growth      a won fight's growth also reaches the bench and the knocked-out members
 struct Cheats {
   bool no_encounters = false;
   bool battle_boost = false;
@@ -93,6 +94,7 @@ struct Cheats {
   bool always_loot = false;
   bool no_craft_cost = false;
   bool instant_growth = false;
+  bool shared_growth = false;
 };
 // The live cheat set (a default all-off one until bind_cheats is called).
 const Cheats& cheats();

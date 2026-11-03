@@ -284,6 +284,7 @@ bool Config::load(const std::filesystem::path& file) {
   cheats.run_speed = parse_bool(ini.get("Cheats", "RunSpeed"), cheats.run_speed);
   cheats.always_loot = parse_bool(ini.get("Cheats", "AlwaysLoot"), cheats.always_loot);
   cheats.instant_growth = parse_bool(ini.get("Cheats", "InstantGrowth"), cheats.instant_growth);
+  cheats.shared_growth = parse_bool(ini.get("Cheats", "SharedGrowth"), cheats.shared_growth);
   cheats.no_craft_cost = parse_bool(ini.get("Cheats", "NoCraftCost"), cheats.no_craft_cost);
   portraits = ini.get("Game", "Portraits", portraits) == "1999" ? "1999" : "2021";
   bgm_source = ini.get("Audio", "BgmSource", bgm_source) == "original" ? "original" : "remastered";
@@ -392,6 +393,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Cheats", "RunSpeed", on_off(cheats.run_speed));
   ini.set("Cheats", "AlwaysLoot", on_off(cheats.always_loot));
   ini.set("Cheats", "InstantGrowth", on_off(cheats.instant_growth));
+  ini.set("Cheats", "SharedGrowth", on_off(cheats.shared_growth));
   ini.set("Cheats", "NoCraftCost", on_off(cheats.no_craft_cost));
   ini.set("Game", "Portraits", portraits);
   ini.set("Audio", "BgmSource", bgm_source);
