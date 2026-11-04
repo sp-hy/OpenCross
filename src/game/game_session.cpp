@@ -1,6 +1,7 @@
 #include "game/game_session.h"
 
 #include <algorithm>
+#include <array>
 
 #include "battle/rng.h"
 #include "battle/rules.h"
@@ -189,7 +190,14 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   BattleSummary sum;
   const bool victory = finished_battle.outcome() == battle::Outcome::Victory;
   const auto& party = finished_battle.party();
-  for (const battle::PartyMember& member : party) {
+  // The party, and with party swap the characters that fought and left the field (bench records).
+  std::vector<const battle::PartyMember*> fought;
+  for (const battle::PartyMember& member : party) fought.push_back(&member);
+  for (const battle::PartyMember& member : finished_battle.bench())
+    if (std::find(finished_battle.swapped_out().begin(), finished_battle.swapped_out().end(), member.char_id) != finished_battle.swapped_out().end())
+      fought.push_back(&member);
+  for (const battle::PartyMember* fought_member : fought) {
+    const battle::PartyMember& member = *fought_member;
     if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
     save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
     for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
@@ -227,9 +235,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   int trapped = 0, lost = 0;
   for (u16 id : rewards.trapped)
     if (gs.add_element(id & 0xFF)) ++trapped;
-  for (const auto& [slot, cell] : rewards.lost_cells) {
-    if (slot < 0 || static_cast<size_t>(slot) >= party.size()) continue;
-    const int char_id = party[static_cast<size_t>(slot)].char_id;
+  for (const auto& [char_id, cell] : rewards.lost_cells) {
     if (char_id < 0 || char_id >= save::kNumChars) continue;
     const int k = gs.cell_index(char_id, cell / ui::GameState::kCols, cell % ui::GameState::kCols);
     if (k < 0) continue;
@@ -277,6 +283,26 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   log::info("session: battle result written back (gold +{}, {} items, {} elements{}; star {} progress {})", sum.gold, sum.items, sum.elements,
             sum.star_up ? ", star up" : "", finished_battle.growth().star, finished_battle.growth().progress);
   return sum;
+}
+
+bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in) {
+  if (finished_battle.swaps() == 0) return false;
+  const std::array<u8, 3> saved = gs.slot.party();
+  std::array<u8, 3> ids{0xFF, 0xFF, 0xFF};
+  const auto& party = finished_battle.party();
+  for (size_t i = 0; i < party.size() && i < ids.size(); ++i) ids[i] = static_cast<u8>(party[i].char_id);
+  const auto holds = [&](u8 char_id) { return std::find(ids.begin(), ids.end(), char_id) != ids.end(); };
+  if (stand_in >= 0 && !holds(0))
+    for (u8& id : ids)
+      if (id == stand_in) id = 0;
+  // The party lock bitmap: words 0-1 of the slot's FE 5D / FE 60 table (FieldWorld::table_op).
+  const auto locked = [&](u8 char_id) { return char_id < 0x40 && (gs.slot.unk_e1b8[static_cast<size_t>(char_id >> 5)] >> (char_id & 31) & 1u) != 0; };
+  for (size_t i = 0; i < saved.size(); ++i)
+    if (saved[i] != 0xFF && locked(saved[i]) && !holds(saved[i])) ids[i] = saved[i];
+  if (ids == saved) return false;
+  gs.slot.set_party(ids);
+  log::info("session: party swap keeps the lineup {} {} {}", ids[0], ids[1], ids[2]);
+  return true;
 }
 
 }  // namespace oc::game

@@ -57,7 +57,7 @@ int ocbattleview_main(int argc, char** argv) {
   bool hd = true, auto_keys = false, bauto = false;
   int ui_mode = 0, cast_element = 0, cast_at = -1;
   bool fx_on = true, enemy_cast = false, overlay = false, with_mods = false, sliced = false;
-  std::vector<int> party_ids;
+  std::vector<int> party_ids, swap_ids;
   int lead_kind = -1;
   int weapon = -1, field = -1, auto_frames = 1 << 30, trans_frame = -1;
   int caster = -1, casttgt = -1;
@@ -98,6 +98,13 @@ int ocbattleview_main(int argc, char** argv) {
     else if (!std::strcmp(argv[i], "--party") && i + 1 < argc) {
       for (const char* cursor = argv[++i]; *cursor;) {
         party_ids.push_back(std::atoi(cursor));
+        while (*cursor && *cursor != ',') ++cursor;
+        if (*cursor == ',') ++cursor;
+      }
+    }
+    else if (!std::strcmp(argv[i], "--swap") && i + 1 < argc) {
+      for (const char* cursor = argv[++i]; *cursor;) {
+        swap_ids.push_back(std::atoi(cursor));
         while (*cursor && *cursor != ',') ++cursor;
         if (*cursor == ',') ++cursor;
       }
@@ -264,6 +271,12 @@ int ocbattleview_main(int argc, char** argv) {
     }
     game::BattleView::StartOptions options;
     options.battlefield = field;
+    // --swap: party swap on, these characters on the bench and in the reserve.
+    for (int id : swap_ids) {
+      options.bench.push_back(battle::make_party_member(tables, id, 0, "char"));
+      options.swap_reserve.push_back(id);
+    }
+    options.party_swap = !swap_ids.empty();
     bool view_ok = view.init(ctx, files, sprites, meshes, tables, mixer);
     // --sliced: the load in 3 ms slices, one per 60 Hz frame, as the field encounter runs it behind the transition.
     if (view_ok && sliced && view.begin_load(scene, party, options)) {

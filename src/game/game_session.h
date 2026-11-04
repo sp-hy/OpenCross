@@ -48,9 +48,15 @@ BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs
 // Writes a finished Battle back into the state: HP (min(HP, max), at least 1), persistent status bits (poison, burn, sprain,
 // flu), stats / snapshots / pending deltas from the growth, gold (cap 9,999,999), dropped items and elements, the star
 // counters and (after a boss) the new grid unlocks. Stamina is not carried (every battle starts at 7.0).
-// Rewards only on Outcome::Victory; HP / status / growth state are written for every outcome.
+// Rewards only on Outcome::Victory; HP / status / growth state are written for every outcome, also for the characters that fought and
+// were swapped out (party swap). The saved party itself is not changed (keep_swapped_lineup).
 // `progress` (optional) receives the growth progress counter after the battle.
 BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tables, const battle::Battle& finished_battle, int* progress = nullptr);
+
+// Party swap's "keep lineup" setting: the saved party becomes the lineup the battle ended with, then every locked character (party lock
+// bitmap, FE 5D) that ended on the bench goes back to the slot it held in the saved party, and `stand_in` (the Relief Charm's member that
+// took Serge's slots, -1 = none) is written as Serge unless Serge himself came in. True when the saved party changed.
+bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in);
 
 std::string utf8_from_u32(std::u32string_view text);
 

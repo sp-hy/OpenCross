@@ -544,6 +544,7 @@ Features (the U of `GET_FEATURE_LEVEL`):
 | Id | Feature | Levels |
 |---|---|---|
 | 0 | The extension range itself | 1: the framing and the ops of this section |
+| 1 | Party swap (`rules/battle.md` section 11) | 1: the Swap command, the formation restored or kept after the battle |
 
 
 ## 8. Entity and global flag bits

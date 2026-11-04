@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <utility>
 
@@ -104,6 +105,68 @@ void draw_dump_block(platform::Config& cfg, bool* settings_dirty) {
   }
 }
 
+// Engine features (core/features.h): per setting the value of this run's mods and defaults, and the player's own value ([Features] in
+// opencross.ini), which wins. Features are read at launch, so a change takes effect the next time the game starts.
+void draw_features_block(platform::Config& cfg, const vfs::ModManager& mods, bool* settings_dirty) {
+  ImGui::Separator();
+  ImGui::AlignTextToFramePadding();
+  ImGui::TextUnformatted("Engine features");
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+    render::ImGuiLayer::tooltip("Gameplay features that mods turn on with their mod.ini. Your own setting here wins over every mod.");
+  ImGui::SameLine();
+  ImGui::TextDisabled("Changes take effect the next time the game starts.");
+  const auto same_key = [](std::string_view lhs, std::string_view rhs) {
+    return std::equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end(), [](char a, char b) { return std::tolower(static_cast<unsigned char>(a)) == std::tolower(static_cast<unsigned char>(b)); });
+  };
+  const std::vector<features::ModInput> inputs = mods.feature_inputs();
+  const features::Resolved now = features::resolve(inputs, cfg.features);
+  bool settings = false;
+  for (const features::Feature& feature : features::table()) {
+    if (!*feature.section) continue;
+    ImGui::PushID(feature.id);
+    ImGui::TextDisabled("%s", feature.label);
+    for (size_t k = 0; k < feature.settings.size(); ++k) {
+      const features::Setting& setting = feature.settings[k];
+      ImGui::PushID(static_cast<int>(k));
+      const std::string key = std::string(feature.section) + "." + setting.key;
+      const auto own = std::find_if(cfg.features.begin(), cfg.features.end(), [&](const auto& entry) { return same_key(entry.first, key); });
+      const std::string& source = now.sources.at(feature.id)[k];
+      int value = now.values.at(feature.id)[k];
+      bool edited = false;
+      ImGui::Indent();
+      if (setting.min == 0 && setting.max == 1) {
+        bool on = value != 0;
+        edited = ImGui::Checkbox(setting.label, &on);
+        value = on ? 1 : 0;
+      } else {
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+        edited = ImGui::SliderInt(setting.label, &value, setting.min, setting.max);
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", source.empty() ? "(default)" : source == "opencross.ini" ? "(your setting)" : ("(" + source + ")").c_str());
+      if (own != cfg.features.end()) {
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Reset")) {
+          cfg.features.erase(own);
+          settings = true;
+          edited = false;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) render::ImGuiLayer::tooltip("Drops your setting: the mods' value (or the default) applies again.");
+      }
+      if (edited) {
+        const auto entry = std::find_if(cfg.features.begin(), cfg.features.end(), [&](const auto& item) { return same_key(item.first, key); });
+        if (entry != cfg.features.end()) entry->second = std::to_string(value);
+        else cfg.features.emplace_back(key, std::to_string(value));
+        settings = true;
+      }
+      ImGui::Unindent();
+      ImGui::PopID();
+    }
+    ImGui::PopID();
+  }
+  if (settings && settings_dirty) *settings_dirty = true;
+}
+
 }  // namespace
 
 void open_model_viewer() {
@@ -169,6 +232,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
     render::ImGuiLayer::tooltip(mods.dir().empty() ? "<GameDir>/mods" : reinterpret_cast<const char*>(mods.dir().u8string().c_str()));
   if (list.empty()) {
     ImGui::TextDisabled("No mods found.");
+    draw_features_block(cfg, mods, settings_dirty);
     draw_dump_block(cfg, settings_dirty);
     if (changed) store_mod_prefs(cfg, mods);
     return changed;
@@ -187,6 +251,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
     name_w = std::max(name_w, ImGui::CalcTextSize(mod.name.c_str()).x);
     if (mod.may_be_slow) ++notices, name_w = std::max(name_w, ImGui::CalcTextSize(kSlowWarning).x);
     if (!mod.data.empty()) ++notices, name_w = std::max(name_w, ImGui::CalcTextSize(kRestartNotice).x);
+    if (mod.has_manifest && !mod.manifest.sections.empty()) ++notices;
   }
   const float table_h = std::min(row_h * (static_cast<float>(list.size() + notices) + 1.5f), ImGui::GetContentRegionAvail().y * 0.6f);
   name_w += ImGui::GetStyle().ItemSpacing.x * 2.0f;
@@ -307,6 +372,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
     changed = true;
   }
 
+  draw_features_block(cfg, mods, settings_dirty);
   draw_dump_block(cfg, settings_dirty);
   if (changed) store_mod_prefs(cfg, mods);
   return changed;
