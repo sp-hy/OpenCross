@@ -147,6 +147,9 @@ struct EmitterSystem::Impl {
   std::vector<Object> objs;
   EmitterStats st;
   u64 tick_count = 0;
+  // set_frame_ticks: 60 Hz ticks per frame step, and the ticks counted since the last step.
+  int frame_ticks = 1;
+  int frame_phase = 0;
   // Last op-08 position (16.16) of a spawn.
   s32 origin[3]{};
   int depth = 0;
@@ -183,24 +186,27 @@ struct EmitterSystem::Impl {
   int spawn(size_t hi, const Basis* parent);
   static void build_matrix(Object& obj);
   static void integrate_step(Object& obj, int shift);
+  static void integrate(Object& obj, int shift, int steps);
   int fire(size_t hi, const Object* parent_obj);
   void die(size_t idx, bool spawn_children);
 
   // -- header stepper
   void step_header(size_t hi);
-  void replay(Object& obj, Header& header);
-  void update(size_t idx);
-  void ext_step(Object& obj);
-  void periodic_spawn(size_t idx);
+  void replay(Object& obj, Header& header, int ticks);
+  void update(size_t idx, int ticks);
+  void ext_step(Object& obj, int ticks);
+  void periodic_spawn(size_t idx, int ticks);
   bool anchor_at(int id, float alpha, Basis& basis) const;
   void tick();
+  void step_frame(int ticks);
+  float frame_blend(float alpha) const;
   EmitterSystem::ObjectRef ref(Object& obj);
 
   // -- quads
   void collect_meshes(const ViewParams& view, float alpha, std::vector<MeshInstance>& out, bool with_suppressed) const;
   void collect_tagged(const ViewParams& view, float alpha, std::vector<EmitterSystem::TaggedInstance>& out) const;
   void collect_builtin(const Object& obj, const ViewParams& view, float alpha, u32& order, std::vector<DrawQuad>& out) const;
-  void collect_flare(const Object& obj, const ViewParams& view, float alpha, u32& order, std::vector<DrawQuad>& out) const;
+  void collect_flare(const Object& obj, const ViewParams& view, float alpha, float tick_alpha, u32& order, std::vector<DrawQuad>& out) const;
   void collect(const ViewParams& view, float alpha, std::vector<DrawQuad>& out) const;
 };
 

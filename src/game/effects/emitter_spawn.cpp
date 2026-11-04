@@ -550,11 +550,16 @@ void EmitterSystem::Impl::build_matrix(Object& obj) {
 }
 
 // pos += vel << shift (`shift`: 3 field / title, 5 battle), the floor at floor_y << shift.
-void EmitterSystem::Impl::integrate_step(Object& obj, int shift) {
-  for (int i = 0; i < 3; ++i) obj.pos[i] = add32(obj.pos[i], shl32(obj.vel[i], shift));
-  for (int i = 0; i < 3; ++i) obj.vel[i] = add32(obj.vel[i], obj.acc[i]);
-  if (obj.drag != 0)
-    for (int i = 0; i < 3; ++i) obj.vel[i] = ((obj.vel[i] >> 6) * obj.drag) >> 6;
+void EmitterSystem::Impl::integrate_step(Object& obj, int shift) { integrate(obj, shift, 1); }
+
+// `steps` integration steps, then one floor test.
+void EmitterSystem::Impl::integrate(Object& obj, int shift, int steps) {
+  for (int step = 0; step < steps; ++step) {
+    for (int i = 0; i < 3; ++i) obj.pos[i] = add32(obj.pos[i], shl32(obj.vel[i], shift));
+    for (int i = 0; i < 3; ++i) obj.vel[i] = add32(obj.vel[i], obj.acc[i]);
+    if (obj.drag != 0)
+      for (int i = 0; i < 3; ++i) obj.vel[i] = ((obj.vel[i] >> 6) * obj.drag) >> 6;
+  }
   if ((obj.flags & kFlagFloor) && shl32(static_cast<s32>(obj.floor_y) << shift, 16) < obj.pos[1]) {
     // Handled by the caller (die).
     if (obj.flags & kFlagNoDeathSpawn) return;

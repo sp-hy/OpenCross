@@ -259,6 +259,46 @@ void test_death_child_position() {
   CHECK(found_child);
 }
 
+// Frame stepping (2 ticks per frame, the field): an emitter firing every 10 ticks with life 12 never has its object and the successor
+// alive together after a step, while a step per tick shows both on the tick the successor spawns. Life, colour and position advance by
+// the frame's 2 ticks per step and stay put between steps.
+void test_frame_stepping() {
+  assets::RoomEffects fx = make_pack();
+  fx.emitters.push_back(make_emitter("lmp", 0, 0, 9, {xyz(0x08, 0, 0, 0), xyz(0x0A, 128, 0, 0), xyz(0x20, 0x800, 0x800, 0x800),
+                                                       xyz(0x22, static_cast<u16>(-29), 0, 0), val(0x0F, 12)}));
+  effects::EffectBank bank;
+  bank.add(&fx);
+  int most_per_tick = 0;
+  {
+    effects::EmitterSystem sys(bank);
+    sys.register_all();
+    for (int tick = 0; tick < 60; ++tick) {
+      sys.tick();
+      most_per_tick = std::max(most_per_tick, static_cast<int>(sys.live_objects()));
+    }
+  }
+  CHECK(most_per_tick == 2);
+  effects::EmitterSystem sys(bank);
+  sys.set_frame_ticks(2);
+  sys.register_all();
+  int most_per_frame = 0;
+  bool steps_ok = true;
+  effects::EmitterSystem::ObjectView view, before;
+  const float one_step = static_cast<float>((128 << 6) << 3) / 65536.0f;
+  for (int tick = 1; tick <= 60; ++tick) {
+    const bool had = sys.live_objects() == 1 && sys.object_view(0, before);
+    sys.tick();
+    if (tick % 2 == 1 && had && sys.object_view(0, view)) steps_ok = steps_ok && view.life == before.life && view.color[0] == before.color[0];
+    if (tick % 2 != 0) continue;
+    most_per_frame = std::max(most_per_frame, static_cast<int>(sys.live_objects()));
+    if (had && sys.object_view(0, view) && view.life < before.life)
+      steps_ok = steps_ok && view.life == before.life - 2 && view.color[0] == before.color[0] - 2 * 29 &&
+                 std::fabs(view.pos[0] - before.pos[0] - 2.0f * one_step) < 1e-3f;
+  }
+  CHECK(most_per_frame == 1);
+  CHECK(steps_ok);
+}
+
 // mark_mesh_objects marks the mesh objects alive at the call: what the emitter spawns later stays unmarked, and the mark can be taken off.
 void test_mark_mesh_objects() {
   assets::RoomEffects fx = make_pack();
@@ -986,6 +1026,7 @@ int main() {
   test_object_screen_test();
   test_mark_mesh_objects();
   test_death_child_position();
+  test_frame_stepping();
   std::printf(failures ? "%d failure(s)\n" : "ok\n", failures);
   return failures ? 1 : 0;
 }

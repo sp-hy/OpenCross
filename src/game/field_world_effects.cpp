@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <format>
+#include <string>
 
 #include "core/log.h"
 #include "game/effects/strip_smooth.h"
@@ -329,6 +331,8 @@ void FieldWorld::build_effects() {
   effects::EmitterSystem::Config cfg;
   cfg.seed = seed_ ? seed_ * 0x9E3779B1u + static_cast<u32>(room_id_ < 0 ? 0 : room_id_) * 7919u + 1u : 1u;
   emitters_ = std::make_unique<effects::EmitterSystem>(bank_, cfg);
+  // The field draws every second refresh; its effects advance once per drawn frame with that frame's 2 ticks.
+  emitters_->set_frame_ticks(2);
   lights_ = effects::LightTable{};
   emitters_->set_lights(&lights_);
   effects::ActorHooks hooks;
@@ -582,6 +586,13 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
       }
     log::info("field fx: tick {} {} mesh triangles, screen x {:.0f}..{:.0f} y {:.0f}..{:.0f}, slot {} rgb {} {} {} blend {}", tick_count_, tris.size(),
               x0, x1, y0, y1, tris[0].slot, tris[0].rgb[0][0], tris[0].rgb[0][1], tris[0].rgb[0][2], tris[0].blend);
+  }
+  if (fx_tick_log && std::getenv("OC_FIELD_FX_LOG")[0] == '2') {
+    std::string lives;
+    effects::EmitterSystem::ObjectView object;
+    for (size_t i = 0; i < emitters_->live_objects(); ++i)
+      if (emitters_->object_view(i, object)) lives += std::format(" {}:{}", object.emitter ? *object.emitter : std::string("?"), object.life);
+    log::info("field fx: tick {} objects{}", tick_count_, lives);
   }
   if (fx_tick_log && seq_dim_shown() && tick_count_ % 4 == 0)
     log::info("field fx: tick {} sequence dim {} {} {} mode {}", tick_count_, seq_dim_[0].cur[0], seq_dim_[0].cur[1], seq_dim_[0].cur[2],

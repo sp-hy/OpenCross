@@ -253,14 +253,20 @@ class EmitterSystem {
   int attach_all(std::string_view name, int anchor_id, int& duration);
   bool start_index(size_t i);
 
-  // One 60 Hz tick: header stepper for every linked emitter, then the update of every live object (new ones included).
+  // One 60 Hz tick. The system advances in frames of set_frame_ticks() ticks: when a frame is complete, the header stepper runs once
+  // per tick of the frame for every linked emitter, then every live object (new ones included) gets one update with the frame's tick
+  // count. With 1 tick per frame (the default) that is every tick.
   void tick();
+  // Field rooms: the game draws every second refresh and steps its effects once per drawn frame with 2 ticks. The collectors then
+  // blend over the whole frame step (the ticks since the last step plus the tick alpha); an anchor entity is still taken at the tick
+  // alpha.
+  void set_frame_ticks(int ticks);
   // The field actor wake / footprint spawner: one firing of emitter `name` (whatever its header state), then the object is moved to the world point (x, y, z) with angle Z = -angle. False if the name
   // is unknown or the object cap refused it. `normal` (optional, debug logs) receives the unit normal of the sprite plane of the
   // object's rotation (RotMatrix of its angles, before the camera): (0, +-1, 0) = lying flat on the ground / water.
   bool spawn_at(std::string_view name, int x, int y, int z, int angle, Vec3* normal = nullptr);
 
-  // Live objects -> quads at interpolation factor alpha (0 = previous tick, 1 = current). Appends to `out`.
+  // Live objects -> quads at the tick alpha (0 = previous tick, 1 = current; spread over the frame step, set_frame_ticks). Appends to `out`.
   void collect_quads(const ViewParams& view, float alpha, std::vector<DrawQuad>& out) const;
 
   // Live mesh sprites (sprite type 14, battle effects). `centre` / `mat` already include the view: camera-space = centre + mat * v with v

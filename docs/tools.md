@@ -329,7 +329,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_NO_CULL` | `src/game/field_world_collide.cpp` | set | A/B check of the off-screen animation freeze: keeps the cull grace on permanently. |
 | `OC_FIELD_SHADOWS` | `src/game/field_world_draw.cpp` | `0` | Disables field shadows. |
 | `OC_NO_MODEL_FX` | `src/game/field_world_draw.cpp` | set | Field models are drawn without their blend mode and their flash. |
-| `OC_FIELD_FX_LOG` | `src/game/field_world_effects.cpp` | set | Logs field effect state once a second and each effect tick. |
+| `OC_FIELD_FX_LOG` | `src/game/field_world_effects.cpp` | set; `2` | Logs field effect state once a second and each effect tick; `2` also logs every drawn tick's live objects as `emitter:life`. |
 | `OC_ROOM_LAYERS` | `src/game/room_view.cpp` | `i,j,k` | Draws only these background layer indices. |
 | `OC_TITLE_SEQ` | `src/game/title_backdrop.cpp` | `tit0`..`tit3` | Forces the title backdrop sequence instead of the script's random pick. |
 | `OC_TITLE_MODEL_REST` | `src/game/title_backdrop.cpp` | set | Draws the title models in their rest pose. |

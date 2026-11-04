@@ -50,7 +50,8 @@ bool origin_off_screen(u32 flags, const Vec3& origin, const ViewParams& view) {
 
 using namespace emitter_detail;
 
-void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
+void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float tick_alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
+  const float alpha = frame_blend(tick_alpha);
   for (const Object& obj : objs) {
     if (!obj.alive || (obj.stype != 14 && obj.stype != 19 && obj.stype != 20) || !obj.mesh_name || obj.poly_tag >= 0 || dev_skip(obj)) continue;
     if (!with_suppressed && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].draw_off) continue;
@@ -59,6 +60,8 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float alpha, st
     mi.world_mat = obj.mat;
     mi.motion = obj.motion;
     mi.motion_prev = obj.motion_prev;
+    // The drawer blends motion and morph by the tick alpha: over a longer frame step they are resolved here.
+    if (frame_ticks > 1) mi.motion = mi.motion_prev = obj.motion_prev + (obj.motion - obj.motion_prev) * alpha;
     mi.clip = obj.model_clip;
     mi.loop = obj.model_loop;
     Vec3 wpos;
@@ -70,7 +73,7 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float alpha, st
       const Header& header = headers[static_cast<size_t>(std::max(obj.owner, 0))];
       Basis basis;
       bool ok = false;
-      if (header.has_anchor_op && header.anchor >= 0 && (hooks.anchor_basis_at || hooks.anchor_basis)) ok = anchor_at(header.anchor, alpha, basis);
+      if (header.has_anchor_op && header.anchor >= 0 && (hooks.anchor_basis_at || hooks.anchor_basis)) ok = anchor_at(header.anchor, tick_alpha, basis);
       else if (header.has_basis_op && hooks.actor_basis) {
         int sc = 0;
         ok = hooks.actor_basis(header.basis_sel[0], header.basis_sel[1], header.basis_sel[2], header.basis_sel[3], basis, sc);
@@ -95,6 +98,7 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float alpha, st
       mi.morph_name = obj.morph_name;
       mi.morph_t = blend_of(obj.morph_phase);
       mi.morph_t_prev = blend_of(obj.morph_phase_prev);
+      if (frame_ticks > 1) mi.morph_t = mi.morph_t_prev = mi.morph_t_prev + (mi.morph_t - mi.morph_t_prev) * alpha;
     }
     Vec3 vc = (obj.flags & kFlagViewSpace) ? wpos : view.rot.apply(wpos);
     // Camera-relative z (flag bit 24): view.h << pos_shift.
@@ -111,7 +115,7 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float alpha, st
     mi.frame = obj.frame;
     mi.ext = obj.ext;
     mi.ext_path = (obj.flags & kFlagExt) != 0;
-    // The 24.8 phase between the previous tick and this one, in texels wrapped to 0..128 (the 7-bit texel field).
+    // The 24.8 phase between the previous step and this one, in texels wrapped to 0..128 (the 7-bit texel field).
     for (size_t k = 0; k < 2; ++k) {
       const s32 delta = static_cast<s32>(static_cast<u32>(obj.uv_phase[k]) - static_cast<u32>(obj.uv_phase_prev[k]));
       const float raw = static_cast<float>(obj.uv_phase_prev[k] & 0x7FFF) + static_cast<float>(delta) * alpha;
@@ -158,7 +162,8 @@ bool EmitterSystem::MeshInstance::off_screen(const ViewParams& view) const {
 }
 
 // Objects whose draw an overlay replaced (poly_tag >= 0): the object transform set up for it (the mesh-sprite one above).
-void EmitterSystem::Impl::collect_tagged(const ViewParams& view, float alpha, std::vector<EmitterSystem::TaggedInstance>& out) const {
+void EmitterSystem::Impl::collect_tagged(const ViewParams& view, float tick_alpha, std::vector<EmitterSystem::TaggedInstance>& out) const {
+  const float alpha = frame_blend(tick_alpha);
   for (const Object& obj : objs) {
     if (!obj.alive || obj.poly_tag < 0) continue;
     EmitterSystem::TaggedInstance ti;
@@ -278,7 +283,8 @@ void EmitterSystem::Impl::collect_builtin(const Object& obj, const ViewParams& v
 // its mirror point through the screen centre. If the object's colour bytes (colour >> 4) are not all 0, a full-screen POLY_F4
 // (0,0)-(320,224) at OT entry 0, additive blend, channel c * (0x25400 - (dx^2 + dy^2)) / 0x25400 with integer steps
 // d / (0x25400 / c), dx = 320 - 2 sx, dy = 224 - 2 sy (0x25400 = 320^2 + 224^2): brightest when the light is at the centre.
-void EmitterSystem::Impl::collect_flare(const Object& obj, const ViewParams& view, float alpha, u32& order, std::vector<DrawQuad>& out) const {
+void EmitterSystem::Impl::collect_flare(const Object& obj, const ViewParams& view, float alpha, float tick_alpha, u32& order,
+                                        std::vector<DrawQuad>& out) const {
   if (!obj.sheet || obj.sheet->frames.empty()) return;
   Vec3 wpos;
   for (size_t i = 0; i < 3; ++i) {
@@ -289,7 +295,7 @@ void EmitterSystem::Impl::collect_flare(const Object& obj, const ViewParams& vie
     const Header& header = headers[static_cast<size_t>(std::max(obj.owner, 0))];
     Basis basis;
     bool ok = false;
-    if (header.has_anchor_op && header.anchor >= 0 && (hooks.anchor_basis_at || hooks.anchor_basis)) ok = anchor_at(header.anchor, alpha, basis);
+    if (header.has_anchor_op && header.anchor >= 0 && (hooks.anchor_basis_at || hooks.anchor_basis)) ok = anchor_at(header.anchor, tick_alpha, basis);
     else if (header.has_basis_op && hooks.actor_basis) {
       int sc = 0;
       ok = hooks.actor_basis(header.basis_sel[0], header.basis_sel[1], header.basis_sel[2], header.basis_sel[3], basis, sc);
@@ -363,7 +369,8 @@ void EmitterSystem::Impl::collect_flare(const Object& obj, const ViewParams& vie
   out.push_back(quad);
 }
 
-void EmitterSystem::Impl::collect(const ViewParams& view, float alpha, std::vector<DrawQuad>& out) const {
+void EmitterSystem::Impl::collect(const ViewParams& view, float tick_alpha, std::vector<DrawQuad>& out) const {
+  const float alpha = frame_blend(tick_alpha);
   u32 order = out.empty() ? 0 : out.back().order + 1;
   for (const Object& obj : objs) {
     // Drawn by its overlay (collect_tagged) / filtered out by OC_FX_ONLY.
@@ -374,7 +381,7 @@ void EmitterSystem::Impl::collect(const ViewParams& view, float alpha, std::vect
       continue;
     }
     if (obj.alive && obj.stype == 21) {
-      collect_flare(obj, view, alpha, order, out);
+      collect_flare(obj, view, alpha, tick_alpha, order, out);
       continue;
     }
     if (!obj.alive || !obj.sheet || (obj.stype != 3 && obj.stype != 21)) continue;
@@ -414,7 +421,7 @@ void EmitterSystem::Impl::collect(const ViewParams& view, float alpha, std::vect
       const Header& header = headers[static_cast<size_t>(std::max(obj.owner, 0))];
       Basis basis;
       bool ok = false;
-      if (header.has_anchor_op && header.anchor >= 0 && (hooks.anchor_basis_at || hooks.anchor_basis)) ok = anchor_at(header.anchor, alpha, basis);
+      if (header.has_anchor_op && header.anchor >= 0 && (hooks.anchor_basis_at || hooks.anchor_basis)) ok = anchor_at(header.anchor, tick_alpha, basis);
       else if (header.has_basis_op && hooks.actor_basis) {
         int sc = 0;
         ok = hooks.actor_basis(header.basis_sel[0], header.basis_sel[1], header.basis_sel[2], header.basis_sel[3], basis, sc);
