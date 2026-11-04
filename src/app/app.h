@@ -25,6 +25,7 @@
 #include "audio/mixer.h"
 #include "audio/sfx.h"
 #include "audio/voice.h"
+#include "core/features.h"
 #include "data/char_name.h"
 #include "data/tables.h"
 #include "game/autosave.h"
@@ -237,6 +238,8 @@ class App {
   platform::Window window;
   vfs::Vfs files;
   vfs::ModManager mods;
+  // The engine features of this run (core/features.h): the enabled mods' mod.ini and [Features], resolved once at launch.
+  features::Resolved features;
   game::TextureDumpJob texture_dump_job;
 
   // ---- rendering --------------------------------------------------------------------------------------------------------------

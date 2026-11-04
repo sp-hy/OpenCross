@@ -5,24 +5,12 @@
 
 #include <cstdlib>
 
+#include "core/features.h"
 #include "core/log.h"
 
 namespace oc::script {
 
 namespace {
-
-// Feature ids of GET_FEATURE_LEVEL.
-namespace feature {
-constexpr s32 kExtensionRange = 0;
-}  // namespace feature
-
-// The level of a feature this build implements, 0 when it has none.
-s32 feature_level(s32 id) {
-  switch (id) {
-    case feature::kExtensionRange: return 1;
-    default: return 0;
-  }
-}
 
 u32 payload_size(const OpInfo& info) { return static_cast<u32>(std::atoi(info.lengths)) - 3; }
 
@@ -48,7 +36,7 @@ void FieldVM::exec_extension(u8 sub) {
     return;
   }
   switch (sub) {
-    case 0xC0: write_var(word_at(2), feature_level(operand_u(4))); break;
+    case 0xC0: write_var(word_at(2), features::level(operand_u(4))); break;
     default:
       ++stats_.unimplemented;
       if (logged_.insert(key).second) log::warn("field script: extension op FE {:02X} ({}) has no handler", sub, info->name);

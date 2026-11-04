@@ -213,6 +213,7 @@ bool Config::load(const std::filesystem::path& file) {
     if (comma != std::string::npos) mod.load_on = std::string(trim(std::string_view(value).substr(comma + 1)));
     mods.push_back(std::move(mod));
   }
+  features = ini.entries("Features");
   {
     const std::string legacy_3d = ini.get("Video", "Ps1Res3D");
     bool legacy_on = parse_bool(legacy_3d, false);
@@ -347,6 +348,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Mods", "DumpWeapons", on_off(dump_weapons));
   ini.set("Mods", "DumpEffects", on_off(dump_effects));
   for (const ModSetting& mod : mods) ini.set("Mods", mod.name, std::string(mod.enabled ? "1," : "0,") + mod.load_on);
+  for (const auto& [key, value] : features) ini.set("Features", key, value);
   ini.set("Video", "Ps1Res", on_off(ps1_res));
   ini.set("Video", "RenderScale", fmt_float(render_scale));
   ini.set("Video", "Ps1Jitter", on_off(ps1_jitter));

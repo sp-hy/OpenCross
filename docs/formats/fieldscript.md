@@ -533,6 +533,7 @@ FE sub size payload[size]          instruction length = 3 + size
 * An op the build does not know is stepped over whole (3 + size bytes), and so is an op whose payload is shorter than its operands (logged once, counted with the unknown opcodes). The disassemblers show an unknown op as `EXTENSION`.
 * A mod asks for a feature with `GET_FEATURE_LEVEL` before it relies on it. A build without the range reads `FE C0`-`FE FF` as 2-byte no-ops and runs the payload as code, so a mod that uses the range needs a build that has it (feature 0).
 * Adding an op: a row in `field_opcodes.inc` (lengths = 3 + the operand bytes) and in `tools/py/cc_fieldscript.py`, its case in `FieldVM::exec_extension`, a row below and a unit test. Op numbers and feature ids are never reused for something else.
+* Features: the build's table is `src/core/features.cpp` (id, level, the `mod.ini` section and settings). A mod turns a feature on for the whole game with its `mod.ini` (`mods.md` section 8); the ops here query it and change it from the mod's own scripts.
 
 | Op | Len | Operands | Name | Effect |
 |---|---|---|---|---|
