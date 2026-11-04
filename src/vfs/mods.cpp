@@ -107,6 +107,21 @@ int resolve(const Index& idx, const std::vector<std::string>& rel, std::string& 
   return 1;
 }
 
+// A file that matches no shipped member is a new member when its path names an archive: the first folder called after one (cdrom2 as
+// cdrom) starts the target; with none, `root` (the archive the mod folder is called after, or "") does.
+bool added_target(const Index& idx, const std::vector<std::string>& rel, std::string_view root, std::string& target) {
+  const auto prefix = [](std::string_view arc) { return std::string(arc == "cdrom2" ? "cdrom" : arc); };
+  for (size_t i = 0; i + 1 < rel.size(); ++i) {
+    if (!idx.archives.contains(rel[i])) continue;
+    target = prefix(rel[i]);
+    for (size_t k = i + 1; k < rel.size(); ++k) target += "/" + rel[k];
+    return true;
+  }
+  if (root.empty()) return false;
+  target = prefix(root) + "/" + join(rel);
+  return true;
+}
+
 // "[wrapper/]textures/<category>/..." (lower-case components) with a known category -> the canonical texture path.
 bool texture_target(const std::vector<std::string>& rel, std::string& target) {
   for (size_t i = 0; i + 2 < rel.size(); ++i) {
@@ -153,7 +168,7 @@ size_t wrapper_length(const std::vector<std::string>& names) {
 }
 
 // A mod's <archive>.dat: every member is resolved as if it were a loose file at <archive>/<member>, so an exact path wins and a member
-// the game does not have stays unmatched.
+// the game does not have is added at <archive>/<member>, except a loose movie (.mp4 / .mkv), which only ever replaces a movie by name.
 void add_archive(Mod& mod, const Vfs& vfs, const Index& idx, ModFile dat, const std::string& arc) {
   const std::string prefix = arc == "cdrom2" ? "cdrom" : arc;
   std::string error;
@@ -167,16 +182,25 @@ void add_archive(Mod& mod, const Vfs& vfs, const Index& idx, ModFile dat, const 
     switch (resolve(idx, split(prefix + "/" + member), mod_file.target)) {
       case 1: add_matched(mod, std::move(mod_file)); break;
       case 2: mod.ambiguous.push_back(mod_file.rel); break;
-      default: mod.unmatched.push_back(mod_file.rel); break;
+      default:
+        mod_file.target = normalise_path(prefix + "/" + member);
+        if (mod_file.target.ends_with(".mp4") || mod_file.target.ends_with(".mkv")) {
+          mod.unmatched.push_back(mod_file.rel);
+          break;
+        }
+        mod.added.push_back(mod_file.rel);
+        add_matched(mod, std::move(mod_file));
+        break;
     }
   }
   dat.target = arc;
   mod.archives.push_back(std::move(dat));
 }
 
-// Classifies one file of a mod (`rel` set, plus `member` inside an archive); `voice_folder` = the mod is called "voices". An <archive>.dat
-// inside an archive stays unmatched: a ZIP cannot be read from within another archive without unpacking it.
-void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool voice_folder) {
+// Classifies one file of a mod (`rel` set, plus `member` inside an archive); `voice_folder` = the mod is called "voices"; `root` = the
+// archive a mod folder is called after, or "". An <archive>.dat inside an archive stays unmatched: a ZIP cannot be read from within
+// another archive without unpacking it.
+void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool voice_folder, std::string_view root) {
   const std::vector<std::string> rel = split(lower(mod_file.rel));
   if (rel.empty()) return;
   const std::string& fname = rel.back();
@@ -209,7 +233,14 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
   switch (resolve(idx, rel, mod_file.target)) {
     case 1: add_matched(mod, std::move(mod_file)); break;
     case 2: mod.ambiguous.push_back(mod_file.rel); break;
-    default: mod.unmatched.push_back(mod_file.rel); break;
+    default:
+      if (added_target(idx, rel, root, mod_file.target)) {
+        mod.added.push_back(mod_file.rel);
+        add_matched(mod, std::move(mod_file));
+      } else {
+        mod.unmatched.push_back(mod_file.rel);
+      }
+      break;
   }
 }
 
@@ -256,7 +287,7 @@ bool loads_on(ModLoadOn load_on, ModArt art) {
 // that is a ZIP = its members are resolved one by one (add_archive); textures\<category>\...png = a dumped texture's replacement; an .mp3 under voices\ (or
 // anywhere in a mod called "voices") = a voice line (its "voices/<name>" target is not a VFS target, kept for the count / display);
 // an .mp4 / .mkv named after a shipped movie (a01op_de.mp4 for a01op_de.bk2) = its replacement, kept as "movie/<name>.mp4|.mkv";
-// everything else is resolved against the shipped member index.
+// everything else is resolved against the shipped member index, and what matches nothing there but names an archive is added (added_target).
 void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vector<ModPref>& prefs) {
   dir_ = mods_dir;
   mods_.clear();
@@ -303,26 +334,29 @@ void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vecto
       }
       std::sort(files.begin(), files.end());
       const bool voice_folder = lower(mod.name) == "voices";
-      for (const fs::path& file : files) add_file(mod, vfs, idx, {{}, file, {}, u8(file.lexically_relative(mod.root))}, voice_folder);
+      const std::string root = idx.archives.contains(lower(mod.name)) ? lower(mod.name) : std::string();
+      for (const fs::path& file : files) add_file(mod, vfs, idx, {{}, file, {}, u8(file.lexically_relative(mod.root))}, voice_folder, root);
     } else if (is_packed(lower(mod.name))) {
       const bool voice_folder = lower(u8(mod.source.stem())) == "voices";
       const std::shared_ptr<ModArchive> packed = vfs.mod_archive(mod.source, &mod.error);
       mod.may_be_slow = packed && packed->may_be_slow();
       const size_t wrapper = packed && !voice_folder ? wrapper_length(packed->names()) : 0;
       for (const std::string& member : packed ? packed->names() : std::vector<std::string>{})
-        add_file(mod, vfs, idx, {{}, mod.source, member, member.substr(wrapper)}, voice_folder);
+        add_file(mod, vfs, idx, {{}, mod.source, member, member.substr(wrapper)}, voice_folder, {});
       for (const ModFile& voice : mod.voices) {
         const fs::path rel = fs::path(std::u8string(voice.rel.begin(), voice.rel.end()));
         const fs::path path = voice.rel.starts_with("voices/") ? mod.source / rel : mod.source / "voices" / rel;
         packed_voices_.emplace(lower(u8(path)), OverlayFile{voice.file, voice.member});
       }
     } else {
-      add_file(mod, vfs, idx, {{}, mod.source, {}, mod.name}, false);
+      add_file(mod, vfs, idx, {{}, mod.source, {}, mod.name}, false, {});
     }
-    log::info("mods: '{}' ({}, load on {}): {} matched, {} game data, {} archive(s), {} texture(s), {} voice(s), {} unmatched, {} ambiguous{}{}", mod.name,
-              mod.enabled ? "enabled" : "disabled", load_on_name(mod.load_on), mod.files.size(), mod.data.size(), mod.archives.size(), mod.textures.size(),
-              mod.voices.size(), mod.unmatched.size(), mod.ambiguous.size(), mod.error.empty() ? "" : ", cannot read: ", mod.error);
+    log::info("mods: '{}' ({}, load on {}): {} matched, {} game data, {} archive(s), {} texture(s), {} voice(s), {} added, {} unmatched, {} ambiguous{}{}",
+              mod.name, mod.enabled ? "enabled" : "disabled", load_on_name(mod.load_on), mod.files.size(), mod.data.size(), mod.archives.size(),
+              mod.textures.size(), mod.voices.size(), mod.added.size(), mod.unmatched.size(), mod.ambiguous.size(),
+              mod.error.empty() ? "" : ", cannot read: ", mod.error);
     for (const ModFile& archive : mod.archives) log::info("mods:     archive: {} overlays data\\{}.dat", archive.rel, archive.target);
+    log_list("added", mod.added);
     log_list("unmatched", mod.unmatched);
     log_list("ambiguous", mod.ambiguous);
   }

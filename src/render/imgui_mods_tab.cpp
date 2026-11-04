@@ -261,6 +261,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
         if (!mod.archives.empty()) files_txt += " + " + std::to_string(mod.archives.size()) + " archive";
         if (!mod.textures.empty()) files_txt += " + " + std::to_string(mod.textures.size()) + " texture";
         if (!mod.voices.empty()) files_txt += " + " + std::to_string(mod.voices.size()) + " voice";
+        if (!mod.added.empty()) files_txt += " (" + std::to_string(mod.added.size()) + " new)";
         ImGui::TextUnformatted(files_txt.c_str());
       }
       ImGui::TableNextColumn();
@@ -281,7 +282,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
         if (issues.empty()) ImGui::TextDisabled("-");
         else ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", issues.c_str());
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
-          render::ImGuiLayer::tooltip("unmatched: files that match no game file. ambiguous: files that match several. overridden: another mod above wins "
+          render::ImGuiLayer::tooltip("unmatched: files that match no game file and sit in no archive folder (cdrom, hd, ...). ambiguous: files that match several. overridden: another mod above wins "
                             "a file. wins: this mod wins a file another mod also has.");
       }
       ImGui::PopID();

@@ -38,11 +38,16 @@ A ZIP, 7z or RAR (4 or 5, solid included; the extension selects the file, the fo
 2. **Member.** The candidates are all shipped members with the same file name. Members are named by the path the game reads, `<archive>/<member>`, with `cdrom2` members counted as `cdrom/` (callers always ask for `cdrom/...`; the mod file then wins over both the cdrom2 HD override and the disc file). For each candidate, count how many trailing path components it shares with the mod file's path (inside the mod folder). The candidates with the longest shared run win:
    * exactly one: **matched**. Leading folders of the mod path that do not occur (wrappers such as `HD Boat Plus`) are ignored; a bare file name works when the name is unique (`alu_a01f.chip2`);
    * several: **ambiguous**, not loaded (for example `00_seljyu.png` alone fits both `hd/face/1999/` and `hd/face/2021/`; add the folder);
-   * none: **unmatched**, not loaded (for example alternates such as `02_gill alt1.png`, readme files).
+   * none: rule 4.
 3. **Movie.** An `.mp4` or `.mkv` file whose stem equals a shipped `.bk2` member's stem is a movie replacement, kept as `movie/<name>.mp4|.mkv` whatever its folder (H.264 / HEVC, or any other codec the bundled decoder opens). The movie player looks for `movie/<name>_<lang>` then `movie/<name>`, trying a loose `.mp4`, a loose `.mkv`, then the archive's `.bk2`, so a loose file wins over the shipped Bink movie and over a `.bk2` in a mod's `movie.dat`. Rule 3 does not apply inside a `movie.dat`: an `.mp4` there is unmatched.
-4. A mod can only *replace* existing files; it cannot add new ones.
+4. **New member.** A file that rule 2 matches with nothing is **added** when its path names an archive, and is then read exactly like a replacement (overlay, priority, conflicts, game data):
+   * below a folder named after one of the archives above: the first such folder starts the member path, `cdrom2` counting as `cdrom` (`My Mod\Rooms\cdrom\map\mapbin\newroom.bin` -> `cdrom/map/mapbin/newroom.bin`);
+   * a member of a mod's `<archive>.dat` (rule 1): `<archive>/<member>`; an `.mp4` / `.mkv` there stays unmatched (rule 3);
+   * any file of a mod **folder** named after an archive, the loose-file layout of `mods\cdrom\...`: `mods\cdrom\flux\ui.bin` -> `cdrom/flux/ui.bin`.
 
-The startup log lists per mod `mods: '<name>' (enabled, load on modded): N matched, D game data, A archive(s), T texture(s), V voice(s), U unmatched, B ambiguous`, followed by up to 12 unmatched / ambiguous paths each (a `.dat` member as `<rel>/<member>`); `mods: K active mod(s), F file(s), T texture(s)` is logged each time the overlay is built.
+   Anything else is **unmatched**, not loaded (for example alternates such as `02_gill alt1.png`, readme files). A file that matches a shipped member by name (rule 2) is never added, so a new file needs a name the game does not use. `Vfs::list` still lists only the shipped archive. The game finds most files by number through `cdrom/cdrom.fnd` (`docs/architecture.md` 3.6): a new room or file is reached through a mod's own `cdrom.fnd` naming it.
+
+The startup log lists per mod `mods: '<name>' (enabled, load on modded): N matched, D game data, A archive(s), T texture(s), V voice(s), W added, U unmatched, B ambiguous` (matched and game data include the added files), followed by up to 12 added / unmatched / ambiguous paths each (a `.dat` member as `<rel>/<member>`); `mods: K active mod(s), F file(s), T texture(s)` is logged each time the overlay is built.
 
 ## 3. Load on, priority, overlay
 
