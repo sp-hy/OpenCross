@@ -15,8 +15,8 @@
 #include "game/model_files.h"
 #include "game/new_game.h"
 #include "game/new_game_plus.h"
+#include "game/room_models.h"
 #include "import/battle_stage.h"
-#include "import/model.h"
 #include "import/room_effects.h"
 #include "import/tim.h"
 #include "render/texture.h"
@@ -116,6 +116,7 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
 void FieldWorld::swap_art() {
   // Room art (layers, room-model meshes / pages, effect sprite pixels) from the other file set, in place.
   view_.reload_art(hd_);
+  room_prepared_.clear();
   // Models: rebuild every one an entity shows and hand it over without touching the playback state. Unused cache entries are dropped
   // (built again on first use).
   const auto old_room = std::move(room_models_);
@@ -176,22 +177,19 @@ std::shared_ptr<ModelHandle> FieldWorld::room_model(int index) {
   const size_t i = static_cast<size_t>(index);
   if (room_model_tried_[i]) return room_models_[i];
   room_model_tried_[i] = true;
-  const auto& model = scene->models[i];
+  if (i < room_prepared_.size() && room_prepared_[i] && room_prepared_[i]->generation == render::texture_registry::generation()) {
+    ScopedTimer model_timer("field: room model load (prepared ahead)");
+    PreparedRoomModel prepared = std::move(*room_prepared_[i]);
+    room_prepared_[i].reset();
+    room_models_[i] = Actor::make_resolved_model(*meshes_, std::move(prepared.asset), &prepared.uploads, &prepared.textures);
+    return room_models_[i];
+  }
   ScopedTimer model_timer("field: room model load");
   std::string err;
-  // Page window + CLUT rows clut_y / clut_y + 1 (faces with the CLUT / page bits); the bare TIM if a scene lacks them.
-  auto asset = model.page_textures.empty() ? import::load_room_model(model.mdl, model.texture, &err) : import::load_room_model(model.mdl, model.page_textures, &err);
+  auto asset = build_room_model(*scene, i, &err);
   if (!asset) {
     log::warn("room {}: model {}: {}", view_.room_name(), index, err);
     return nullptr;
-  }
-  // Texture dump / replace path: room_model/<content tag>.png
-  asset->source = "@room_model";
-  // S3 shading entry k (low nybble = transparency mode: 2 transparent, 6 bright, A inverted, E faint, odd invisible) applies to construct k;
-  // opn_a01i's lower door pair (models 3 / 4, entry 0 = 0x0A) is the subtractive floor shadow of the doors, not an opaque black slab.
-  for (size_t mi = 0; mi < asset->meshes.size() && mi < asset->shading.size(); ++mi) {
-    const u8 shading_flags = asset->shading[mi].flags & 0xF;
-    asset->meshes[mi].trans = (shading_flags & 1) ? u8{0xFF} : (shading_flags & 2) ? static_cast<u8>(1 + ((shading_flags >> 2) & 3)) : u8{0};
   }
   room_models_[i] = Actor::make_model(*meshes_, std::move(*asset));
   return room_models_[i];
@@ -227,7 +225,7 @@ std::shared_ptr<ModelHandle> FieldWorld::character_model(int char_id) {
     std::optional<PrefetchedCharacter> prefetched = it->second.get();
     char_prefetch_.erase(it);
     if (prefetched && prefetched->generation == render::texture_registry::generation())
-      handle = Actor::make_resolved_model(*meshes_, std::move(prefetched->asset), &prefetched->uploads);
+      handle = Actor::make_resolved_model(*meshes_, std::move(prefetched->asset), &prefetched->uploads, &prefetched->textures);
   }
   if (!handle) {
     ScopedTimer model_timer("field: character model load (first use)");
@@ -246,12 +244,13 @@ void FieldWorld::prefetch_character_model(int model_byte) {
   if (model_byte < 0 || model_byte >= 0x100 || !files_ || char_models_.contains(model_byte) || char_prefetch_.contains(model_byte)) return;
   std::string folder = model_folder(model_byte);
   if (folder.empty()) return;
-  char_prefetch_[model_byte] = std::async(std::launch::async, [files = files_, folder = std::move(folder)]() -> std::optional<PrefetchedCharacter> {
+  char_prefetch_[model_byte] = std::async(std::launch::async, [files = files_, ctx = ctx_, folder = std::move(folder)]() -> std::optional<PrefetchedCharacter> {
     const unsigned generation = render::texture_registry::generation();
     std::optional<assets::ModelAsset> asset = read_character_model(*files, folder);
     if (!asset) return std::nullopt;
     render::ModelUploads uploads = render::prepare_model_uploads(*asset);
-    return PrefetchedCharacter{std::move(*asset), std::move(uploads), generation};
+    render::ModelTextures textures = ctx ? render::prepare_model_textures(*ctx, *asset, uploads) : render::ModelTextures{};
+    return PrefetchedCharacter{std::move(*asset), std::move(uploads), std::move(textures), generation};
   });
 }
 
@@ -271,6 +270,7 @@ void FieldWorld::clear_room() {
   ents_.clear();
   room_models_.clear();
   room_model_tried_.clear();
+  room_prepared_.clear();
   // Room entries are decoded against this room's models.
   std::erase_if(ex_pack_cache_, [](const auto& kv) { return kv.first.starts_with("room:"); });
   party_ent_ = {-1, -1, -1};
@@ -321,14 +321,9 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   bool view_ok;
   {
     ScopedTimer timer("field: view_.load");
-    // The room's .prd is disc index record 368 + 3 * id + 1 (bin, prd, ctd), which names another room's .prd in 195 rooms (dem_05 ->
-    // hid_a02f, alu_b01f -> alu_a01f, opn_a01i -> ryu_a24i, ...). title.prd (outside map/mapbin, the opening room's
-    // record) is the title overlay's scene, run by TitleBackdrop.
-    const int prd_id = map_id_for(name);
-    const std::string& prd_rec = prd_id < 0 ? std::string() : discs_.record(disc_, DiscIndex::kMapBase + 3 * prd_id + 1);
-    const size_t prd_at = prd_rec.find("/map/mapbin/");
-    view_.set_prd_path(prd_at != std::string::npos && prd_rec.ends_with(".prd") ? "cdrom" + prd_rec.substr(prd_at) : std::string());
+    view_.set_prd_path(prd_path_for(name));
     view_ok = view_.load(name);
+    room_prepared_ = view_.take_prepared_models();
   }
   if (!view_ok) {
     status_ = std::format("room {}: load failed", name);
@@ -415,7 +410,8 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   reset_trails();
   settle_spawned_followers();
   update_input_lock();
-  snap_camera_to_player();
+  // A world-map Continue eases on from the scroll FE 50 restored; every other entry starts from 0.
+  snap_camera_to_player(vm_.world_continue());
   entry_cut_ = 4;
   // Nothing is culled right after a room load.
   cull_grace_ = 4;
@@ -638,6 +634,24 @@ void FieldWorld::set_disc(int disc) {
   log::info("field: disc {} -> {} (file index cdrom{}.fnd)", disc_, disc, disc == 2 ? "2" : "");
   disc_ = disc;
   stem_ids_.clear();
+}
+
+// The room's .prd is disc index record 368 + 3 * id + 1 (bin, prd, ctd), which names another room's .prd in 195 rooms (dem_05 ->
+// hid_a02f, alu_b01f -> alu_a01f, opn_a01i -> ryu_a24i, ...). title.prd (outside map/mapbin, the opening room's record) is the title
+// overlay's scene, run by TitleBackdrop. Empty = the room's own <room>.prd.
+std::string FieldWorld::prd_path_for(std::string_view name) {
+  const int prd_id = map_id_for(name);
+  const std::string& prd_rec = prd_id < 0 ? std::string() : discs_.record(disc_, DiscIndex::kMapBase + 3 * prd_id + 1);
+  const size_t prd_at = prd_rec.find("/map/mapbin/");
+  return prd_at != std::string::npos && prd_rec.ends_with(".prd") ? "cdrom" + prd_rec.substr(prd_at) : std::string();
+}
+
+void FieldWorld::prefetch_room(int room_id, int disc) {
+  if (disc != disc_) return;
+  const std::string stem = room_stem_for_id(room_id);
+  const auto& rooms = view_.rooms();
+  if (stem.empty() || std::find(rooms.begin(), rooms.end(), stem) == rooms.end()) return;
+  view_.prefetch(stem, prd_path_for(stem));
 }
 
 std::string FieldWorld::room_stem_for_id(int room_id) const {

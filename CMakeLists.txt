@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(OpenCross VERSION 0.4.4 LANGUAGES C CXX)
+project(OpenCross VERSION 0.4.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,7 @@ find_package(imgui CONFIG REQUIRED)
 find_package(miniz CONFIG REQUIRED)
 find_package(LibArchive REQUIRED)
 find_package(Stb REQUIRED)
+find_package(SPNG CONFIG REQUIRED)
 # shaderc (glslc) and sdl3-shadercross are build tools only (src/render/CMakeLists.txt); neither library is linked.
 
 add_subdirectory(src)

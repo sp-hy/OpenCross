@@ -246,8 +246,8 @@ void FieldWorld::request_map_jump(int room, int param) {
 }
 
 
-void FieldWorld::snap_camera_to_player() {
-  camera_.snap(view_, vm_.global_flags(), pose_of(player_entity()));
+void FieldWorld::snap_camera_to_player(bool keep_scroll) {
+  camera_.snap(view_, vm_.global_flags(), pose_of(player_entity()), keep_scroll);
   view_.set_scroll(camera_.cam.x, camera_.cam.y, true);
 }
 
@@ -304,8 +304,12 @@ void FieldWorld::step_fade() {
 }
 
 
-void FieldWorld::begin_jump(int, int) {
+void FieldWorld::begin_jump(int room) {
   trans_ = Trans::Out;
+  // The target room is prepared on a worker while the screen fades out (or the frame is captured); step_transition takes it when the
+  // screen is black. The disc is the one step_transition will switch to.
+  const int need = vm_.var(0x42) + 1;
+  prefetch_room(room, need == 1 || need == 2 ? need : disc_);
   // The kind is set by FE 02 (forced 0 while the 8F wave runs), then reset to 0; the next room's fade-in
   // uses the same kind. 0 = subtractive fade to black, 2 = additive fade to white.
   // 1 / 3 / 4 / 5 / 6: no fade out; the shown frame is captured and drawn as 5 screen-space tiles

@@ -4,6 +4,8 @@
 #include <bit>
 #include <cstring>
 
+#include <spng.h>
+
 #include "core/log.h"
 
 #if defined(_MSC_VER)
@@ -30,7 +32,41 @@ void copy_rows(void* dst, const void* src, u32 row_bytes, u32 pitch, u32 rows) {
 
 }  // namespace
 
+namespace {
+
+constexpr u8 kPngSignature[8] = {0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+
+// PNG through libspng: any bit depth and colour type to RGBA8, tRNS applied, no
+// gamma correction (as stb_image). The chunk CRCs are not checked: the files are local mod data, not network input.
+bool decode_png(ByteSpan file, DecodedImage& out) {
+  spng_ctx* ctx = spng_ctx_new(0);
+  if (!ctx) return false;
+  spng_set_crc_action(ctx, SPNG_CRC_USE, SPNG_CRC_USE);
+  spng_set_image_limits(ctx, 1u << 15, 1u << 15);
+  size_t size = 0;
+  spng_ihdr ihdr{};
+  int err = spng_set_png_buffer(ctx, file.data(), file.size());
+  if (!err) err = spng_get_ihdr(ctx, &ihdr);
+  if (!err) err = spng_decoded_image_size(ctx, SPNG_FMT_RGBA8, &size);
+  if (!err) {
+    out.rgba.resize(size);
+    err = spng_decode_image(ctx, out.rgba.data(), size, SPNG_FMT_RGBA8, SPNG_DECODE_TRNS);
+  }
+  spng_ctx_free(ctx);
+  if (err) {
+    log::error("image decode failed: {}", spng_strerror(err));
+    out.rgba.clear();
+    return false;
+  }
+  out.width = ihdr.width;
+  out.height = ihdr.height;
+  return true;
+}
+
+}  // namespace
+
 bool decode_image(ByteSpan file, DecodedImage& out) {
+  if (file.size() >= sizeof(kPngSignature) && std::memcmp(file.data(), kPngSignature, sizeof(kPngSignature)) == 0) return decode_png(file, out);
   int w = 0, h = 0, channels = 0;
   stbi_uc* px = stbi_load_from_memory(file.data(), static_cast<int>(file.size()), &w, &h, &channels, 4);
   if (!px) {

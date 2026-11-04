@@ -1,6 +1,7 @@
 // Texture registry: key -> canonical path, dump -> mod folder -> replace round trip through the mods overlay.
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -17,6 +18,7 @@
 #include "import/battle_stage.h"
 #include "import/room_effects.h"
 #include "platform/paths.h"
+#include "render/mesh_pipeline.h"
 #include "render/model_tiles.h"
 #include "render/stage_tiles.h"
 #include "render/texture_registry.h"
@@ -148,8 +150,53 @@ static void scan_morph_bake(vfs::Vfs& files) {
   CHECK(broken == 0);
 }
 
+// The transparent-texel fill as one serial loop over the transparent texels per pass: bleed_transparent must give the same bytes.
+std::vector<u8> bleed_reference(const std::vector<u8>& src, u32 w, u32 h) {
+  std::vector<u8> out = src;
+  std::vector<u8> known(size_t(w) * h);
+  for (size_t i = 0; i < known.size(); ++i) known[i] = out[i * 4 + 3] != 0;
+  for (int pass = 0; pass < 2; ++pass) {
+    std::vector<std::pair<size_t, std::array<u8, 3>>> fills;
+    for (size_t i = 0; i < known.size(); ++i) {
+      if (known[i]) continue;
+      const int x = static_cast<int>(i % w), y = static_cast<int>(i / w);
+      int neighbours = 0, r = 0, g = 0, b = 0;
+      for (int dy = -1; dy <= 1; ++dy)
+        for (int dx = -1; dx <= 1; ++dx) {
+          const int nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h) || !known[size_t(ny) * w + size_t(nx)]) continue;
+          const size_t j = size_t(ny) * w + size_t(nx);
+          r += out[j * 4], g += out[j * 4 + 1], b += out[j * 4 + 2];
+          ++neighbours;
+        }
+      if (neighbours) fills.push_back({i, {static_cast<u8>(r / neighbours), static_cast<u8>(g / neighbours), static_cast<u8>(b / neighbours)}});
+    }
+    for (const auto& [i, rgb] : fills) {
+      std::memcpy(&out[i * 4], rgb.data(), 3);
+      known[i] = 1;
+    }
+  }
+  return out;
+}
+
+void test_bleed_transparent() {
+  // A small image (one job) and one above a megapixel (rows on worker threads), sparse opaque texels so both passes fill.
+  for (const auto& [w, h] : {std::pair<u32, u32>{37, 29}, std::pair<u32, u32>{1031, 1100}}) {
+    std::vector<u8> img(size_t(w) * h * 4);
+    u32 seed = 12345;
+    for (size_t i = 0; i < size_t(w) * h; ++i) {
+      seed = seed * 1664525u + 1013904223u;
+      const bool opaque = (seed >> 24) < 40;
+      img[i * 4] = static_cast<u8>(seed >> 8), img[i * 4 + 1] = static_cast<u8>(seed >> 13), img[i * 4 + 2] = static_cast<u8>(seed >> 18);
+      img[i * 4 + 3] = opaque ? 255 : 0;
+    }
+    CHECK(render::bleed_transparent(img, w, h) == bleed_reference(img, w, h));
+  }
+}
+
 int main() {
   using namespace render;
+  test_bleed_transparent();
   CHECK(texture_path(stage_texture_key("battle_stage", "bg_07", 3, 1, 320, 480)) == "battle_stage/bg_07/03_m1_c320x480.png");
   CHECK(texture_path(stage_texture_key("title", "", 0, 0, 0, 225)) == "title/00_m0_c0x225.png");
   CHECK(texture_path({"effects", "Ice 0", -1, "1A2B3C4D"}) == "effects/ice_0/1a2b3c4d.png");
@@ -297,6 +344,18 @@ int main() {
   u32 rw = 0, rh = 0;
   std::vector<u8> rpx;
   CHECK(texture_registry::replace({"room_mesh", "", -1, "0123abcd"}, rw, rh, rpx) && rw == 2 && rh == 2);
+  // Decoded replacements are kept: the same file again gives the same image; a rewritten file (a newer write time) is decoded again.
+  CHECK(texture_registry::replace(key, w, h, out) && w == 2 && h == 2 && out == px);
+  {
+    const fs::path file = dst / "00_m1_c256x230.png";
+    const auto stamp = fs::last_write_time(file);
+    fs::copy_file(tmp / "dump" / "scratch" / "one.png", file, fs::copy_options::overwrite_existing);
+    fs::last_write_time(file, stamp + std::chrono::seconds(2));
+    CHECK(texture_registry::replace(key, w, h, out) && w == 1 && h == 1);
+    fs::copy_file(dumped, file, fs::copy_options::overwrite_existing);
+    fs::last_write_time(file, stamp + std::chrono::seconds(4));
+    CHECK(texture_registry::replace(key, w, h, out) && w == 2 && h == 2 && out == px);
+  }
 
   // ReplaceTextures off.
   texture_registry::configure({false, false});

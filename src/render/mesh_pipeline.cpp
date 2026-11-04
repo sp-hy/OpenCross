@@ -8,6 +8,7 @@
 #include <map>
 
 #include "core/log.h"
+#include "core/parallel.h"
 #include "render/camera.h"
 #include "render/model_tiles.h"
 #include "render/ps1_jitter.h"
@@ -22,40 +23,49 @@ namespace oc::render {
 std::vector<u8> bleed_transparent(const std::vector<u8>& src, u32 w, u32 h) {
   std::vector<u8> out(src.begin(), src.begin() + static_cast<std::ptrdiff_t>(std::min<size_t>(src.size(), size_t(w) * h * 4)));
   if (out.size() < size_t(w) * h * 4) return out;
-  std::vector<u8> known(size_t(w) * h);
-  // Only the transparent texels are visited; a pass reads the previous pass's colours and applies its fills at the end.
-  std::vector<size_t> unknown;
+  // known: opaque or filled by an earlier pass. A pass reads only `known` and the colours of known texels and writes only the colours
+  // and `filled` marks of unknown ones, so its rows run in parallel; the marks join `known` when the pass is over.
+  std::vector<u8> known(size_t(w) * h), filled(size_t(w) * h);
+  bool any_unknown = false;
   for (size_t i = 0; i < known.size(); ++i) {
     known[i] = out[i * 4 + 3] != 0;
-    if (!known[i]) unknown.push_back(i);
+    any_unknown |= !known[i];
   }
-  struct Fill {
-    size_t index;
-    u8 rgb[3];
-  };
-  std::vector<Fill> fills;
-  for (int pass = 0; pass < 2 && !unknown.empty(); ++pass) {
-    fills.clear();
-    for (size_t i : unknown) {
-      const int x = static_cast<int>(i % w), y = static_cast<int>(i / w);
-      int neighbours = 0, r = 0, g = 0, b = 0;
-      for (int dy = -1; dy <= 1; ++dy)
-        for (int dx = -1; dx <= 1; ++dx) {
-          const int nx = x + dx, ny = y + dy;
-          if (nx < 0 || ny < 0 || nx >= int(w) || ny >= int(h)) continue;
-          const size_t j = size_t(ny) * w + size_t(nx);
-          if (!known[j]) continue;
-          r += out[j * 4], g += out[j * 4 + 1], b += out[j * 4 + 2];
-          ++neighbours;
+  // Images below a megapixel run as one job (no worker threads).
+  const u32 rows_per_job = size_t(w) * h < (size_t{1} << 20) ? std::max(h, 1u) : 64u;
+  const size_t jobs = (size_t(h) + rows_per_job - 1) / rows_per_job;
+  for (int pass = 0; pass < 2 && any_unknown; ++pass) {
+    parallel_for(jobs, [&](size_t job) {
+      const u32 y0 = static_cast<u32>(job) * rows_per_job, y1 = std::min(h, y0 + rows_per_job);
+      for (u32 y = y0; y < y1; ++y)
+        for (u32 x = 0; x < w; ++x) {
+          const size_t i = size_t(y) * w + x;
+          if (known[i]) continue;
+          int neighbours = 0, r = 0, g = 0, b = 0;
+          for (int dy = -1; dy <= 1; ++dy) {
+            const int ny = static_cast<int>(y) + dy;
+            if (ny < 0 || ny >= static_cast<int>(h)) continue;
+            for (int dx = -1; dx <= 1; ++dx) {
+              const int nx = static_cast<int>(x) + dx;
+              if (nx < 0 || nx >= static_cast<int>(w)) continue;
+              const size_t j = size_t(ny) * w + size_t(nx);
+              if (!known[j]) continue;
+              r += out[j * 4], g += out[j * 4 + 1], b += out[j * 4 + 2];
+              ++neighbours;
+            }
+          }
+          if (neighbours == 0) continue;
+          out[i * 4] = static_cast<u8>(r / neighbours);
+          out[i * 4 + 1] = static_cast<u8>(g / neighbours);
+          out[i * 4 + 2] = static_cast<u8>(b / neighbours);
+          filled[i] = 1;
         }
-      if (neighbours == 0) continue;
-      fills.push_back({i, {static_cast<u8>(r / neighbours), static_cast<u8>(g / neighbours), static_cast<u8>(b / neighbours)}});
+    });
+    any_unknown = false;
+    for (size_t i = 0; i < known.size(); ++i) {
+      known[i] |= filled[i];
+      any_unknown |= !known[i];
     }
-    for (const Fill& fill : fills) {
-      std::memcpy(&out[fill.index * 4], fill.rgb, 3);
-      known[fill.index] = 1;
-    }
-    std::erase_if(unknown, [&](size_t i) { return known[i] != 0; });
   }
   return out;
 }
@@ -260,9 +270,43 @@ ModelUploads prepare_model_uploads(const assets::ModelAsset& asset) {
   return out;
 }
 
-std::unique_ptr<MeshModel> MeshPipeline::create_model(const assets::ModelAsset& asset, const ModelUploads* uploads) {
+ModelTextures prepare_model_textures(GpuContext& ctx, const assets::ModelAsset& asset, const ModelUploads& uploads) {
+  ModelTextures out;
+  auto make = [&ctx](u32 width, u32 height, const std::vector<u8>& pixels) -> std::unique_ptr<Texture> {
+    if (pixels.empty()) return nullptr;
+    auto tex = std::make_unique<Texture>();
+    return tex->create_blocking(ctx, width, height, TextureFormat::Rgba8, pixels.data()) ? std::move(tex) : nullptr;
+  };
+  out.main.resize(asset.textures.size());
+  out.hd.resize(asset.textures.size());
+  for (size_t i = 0; i < asset.textures.size() && i < uploads.main.size(); ++i) {
+    const import::Image& img = asset.textures[i];
+    if (img.width == 0 || img.height == 0 || img.indexed) continue;
+    const import::Image& drawn = asset.drawn_texture(i, false);
+    out.main[i] = make(drawn.width, drawn.height, uploads.main[i]);
+    if (const import::Image* hd = hd_image(asset, i); hd && i < uploads.hd.size()) out.hd[i] = make(hd->width, hd->height, uploads.hd[i]);
+  }
+  if (asset.eye.valid && !asset.textures.empty()) {
+    const import::Image& drawn = asset.drawn_texture(0, false);
+    const import::Image* hd = hd_image(asset, 0);
+    for (size_t frame_index = 0; frame_index < uploads.eye.size(); ++frame_index) {
+      out.eye.push_back(make(drawn.width, drawn.height, uploads.eye[frame_index]));
+      out.hd_eye.push_back(hd && frame_index < uploads.hd_eye.size() ? make(hd->width, hd->height, uploads.hd_eye[frame_index]) : nullptr);
+    }
+  }
+  return out;
+}
+
+std::unique_ptr<MeshModel> MeshPipeline::create_model(const assets::ModelAsset& asset, const ModelUploads* uploads, ModelTextures* textures) {
   const ModelUploads made = uploads ? ModelUploads{} : prepare_model_uploads(asset);
   const ModelUploads& up = uploads ? *uploads : made;
+  // A texture made ahead, else one created and uploaded here.
+  auto take = [&](std::vector<std::unique_ptr<Texture>> ModelTextures::*list, size_t index, u32 width, u32 height,
+                  const std::vector<u8>& pixels) -> std::unique_ptr<Texture> {
+    if (textures && index < (textures->*list).size() && (textures->*list)[index]) return std::move((textures->*list)[index]);
+    auto tex = std::make_unique<Texture>();
+    return tex->create(*ctx_, width, height, TextureFormat::Rgba8, pixels.data()) ? std::move(tex) : nullptr;
+  };
   auto model = std::make_unique<MeshModel>();
   model->joint_count = std::min<u32>(static_cast<u32>(asset.skeleton.joints.size()), kMaxJoints);
 
@@ -285,11 +329,12 @@ std::unique_ptr<MeshModel> MeshPipeline::create_model(const assets::ModelAsset& 
       continue;
     }
     const import::Image& drawn = asset.drawn_texture(i, false);
-    if (!model->textures[i]->create(*ctx_, drawn.width, drawn.height, TextureFormat::Rgba8, up.main[i].data())) return nullptr;
+    model->textures[i] = take(&ModelTextures::main, i, drawn.width, drawn.height, up.main[i]);
+    if (!model->textures[i]) return nullptr;
     make_sets(*model->textures[i], model->sets_nearest, model->sets_linear);
     if (const import::Image* hd = hd_image(asset, i)) {
-      model->hd_textures[i] = std::make_unique<Texture>();
-      if (!model->hd_textures[i]->create(*ctx_, hd->width, hd->height, TextureFormat::Rgba8, up.hd[i].data())) return nullptr;
+      model->hd_textures[i] = take(&ModelTextures::hd, i, hd->width, hd->height, up.hd[i]);
+      if (!model->hd_textures[i]) return nullptr;
       make_sets(*model->hd_textures[i], model->hd_sets_nearest, model->hd_sets_linear);
     } else {
       model->hd_sets_nearest.push_back(TexRef());
@@ -305,14 +350,14 @@ std::unique_ptr<MeshModel> MeshPipeline::create_model(const assets::ModelAsset& 
     const import::Image* hd = hd_image(asset, 0);
     if (up.eye.size() == 2 && !up.eye[0].empty() && !up.eye[1].empty()) {
       for (size_t frame_index = 0; frame_index < 2; ++frame_index) {
-        auto tex = std::make_unique<Texture>();
-        if (!tex->create(*ctx_, drawn.width, drawn.height, TextureFormat::Rgba8, up.eye[frame_index].data())) return nullptr;
+        std::unique_ptr<Texture> tex = take(&ModelTextures::eye, frame_index, drawn.width, drawn.height, up.eye[frame_index]);
+        if (!tex) return nullptr;
         make_sets(*tex, model->sets_nearest, model->sets_linear);
         model->textures.push_back(std::move(tex));
         std::unique_ptr<Texture> hd_tex;
         if (hd && !up.hd_eye[frame_index].empty()) {
-          hd_tex = std::make_unique<Texture>();
-          if (!hd_tex->create(*ctx_, hd->width, hd->height, TextureFormat::Rgba8, up.hd_eye[frame_index].data())) return nullptr;
+          hd_tex = take(&ModelTextures::hd_eye, frame_index, hd->width, hd->height, up.hd_eye[frame_index]);
+          if (!hd_tex) return nullptr;
           make_sets(*hd_tex, model->hd_sets_nearest, model->hd_sets_linear);
         } else {
           model->hd_sets_nearest.push_back(TexRef());

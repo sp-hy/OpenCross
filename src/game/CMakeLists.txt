@@ -4,6 +4,8 @@ add_library(oc_game STATIC
   room_lighting.cpp
   room_view.h
   room_view.cpp
+  room_models.h
+  room_models.cpp
   walk_mesh.h
   walk_mesh.cpp
   model_files.h

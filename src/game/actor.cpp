@@ -74,10 +74,11 @@ std::shared_ptr<ModelHandle> Actor::make_model(render::MeshPipeline& pipeline, a
   return make_resolved_model(pipeline, std::move(asset));
 }
 
-std::shared_ptr<ModelHandle> Actor::make_resolved_model(render::MeshPipeline& pipeline, assets::ModelAsset asset, const render::ModelUploads* uploads) {
+std::shared_ptr<ModelHandle> Actor::make_resolved_model(render::MeshPipeline& pipeline, assets::ModelAsset asset, const render::ModelUploads* uploads,
+                                                       render::ModelTextures* textures) {
   auto handle = std::make_shared<ModelHandle>();
   handle->asset = std::move(asset);
-  handle->gpu = pipeline.create_model(handle->asset, uploads);
+  handle->gpu = pipeline.create_model(handle->asset, uploads, textures);
   if (!handle->gpu) return nullptr;
   return handle;
 }

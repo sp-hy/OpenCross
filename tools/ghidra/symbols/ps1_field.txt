@@ -566,3 +566,6 @@ fld_op_item_give_take = 0x800C2430;  # function: script op BB: gives or takes an
 fld_op_camera_position = 0x800C5410;  # function: script op 5D: steps the scripted camera target from the scroll to a point, then snaps it there
 fld_op_set_var_bit = 0x800C5B50;  # function: script op 71: sets one bit of the script variables
 fld_op_camera_to_leader = 0x800C8D74;  # function: script op 5E: steps the scripted camera target to the controlled entity, then hands the camera back to the follow
+fld_room_init_scripts = 0x800CF3B0;  # function: runs every entity's INIT; after an FE 50 restores the slot entities, else eases the scroll in from 0 and places the followers
+fld_field_loop = 0x800B0840;  # function: field main loop; its start sets the room-entry frame count and runs two full entry eases of the scroll
+fld_world_continue_pending = 0x800EC720;  # data: cleared by FE 50; zero at the end of INIT restores the slot entities

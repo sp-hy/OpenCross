@@ -277,7 +277,7 @@ void FieldVM::exec_ext(u8 sub) {
     }
     case 0x50:
       host_.set_camera_origin(read_var(0x330), read_var(0x332));
-      restore_slots_ = true;
+      world_continue_ = true;
       advance(1);
       break;
     case 0x51: opaque(0xFE51, 1, 2); advance(3); break;

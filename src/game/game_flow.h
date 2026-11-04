@@ -192,6 +192,8 @@ class GameFlow {
   // host must not run the game) and draw_overlay() last in every frame (the black veil over whatever was drawn).
   FlowAction tick_fade(float dt);
   bool fading_out() const { return load_pending_ || open_pending_; }
+  // The slot a running load fade-out is about to start (null otherwise): the host prepares its room meanwhile.
+  const ui::SlotEntry* loading_slot() const { return load_pending_ ? &load_entry_ : nullptr; }
   // Field main menu (Tab / Start) and script name entry: the field fades to black and the screen holds black, the host opens the
   // screen when take_open_ready() reports it; the screen then shows at full brightness (no fade-in).
   void begin_menu_open_fade() { open_pending_ = true; }

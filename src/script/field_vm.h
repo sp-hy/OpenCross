@@ -167,6 +167,8 @@ class FieldVM {
   s32 global(Global which) const { return globals_[static_cast<size_t>(which)]; }
   // The FE 4F slot table: entity index in slot `slot`, -1 when empty.
   int slot_entity(size_t slot) const { return slot < slot_ent_.size() && slot_ent_[slot] != 0xFF ? slot_ent_[slot] : -1; }
+  // FE 50 ran since the room load (the world-map Continue).
+  bool world_continue() const { return world_continue_; }
   // The entity whose script is executing (valid inside host calls).
   int current_entity() const { return ent_; }
   const VmStats& stats() const { return stats_; }
@@ -222,14 +224,14 @@ class FieldVM {
   std::set<u16> logged_;
 
   // Execution context of the record currently running. `base_` is the offset of the opcode (main page) or sub-opcode
-  // (FE page); operands are addressed from it. `restore_slots_` = FE 50 ran: restore the FE 4F slot entities from
-  // variables 0x300.. on the next tick. `ended_` = the record was released / reset: stop the dispatcher loop.
+  // (FE page); operands are addressed from it. `world_continue_` = FE 50 ran since the room load: at the end of INIT the FE 4F
+  // slot entities are restored from variables 0x300.. and the room entry keeps the saved scroll. `ended_` = the record was released / reset: stop the dispatcher loop.
   int ent_ = 0;
   Entity* self_ = nullptr;
   ScriptRecord* rec_ = nullptr;
   u32 base_ = 0;
   bool yield_ = false;
-  bool restore_slots_ = false;
+  bool world_continue_ = false;
   bool ended_ = false;
   bool run_mode_ = false;
   int budget_ = 8;

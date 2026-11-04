@@ -476,11 +476,18 @@ void FieldWorld::set_limit_mode(int mode) {
 }
 // D9 / DA / DB: the saved character record model byte selects the field model: obj file 2b + 2, tim
 // 2b + 3, normally the character id, 0x31 = Serge's Lynx body, 0x3B / 0x3C.. other bodies.
-int FieldWorld::model_byte(int char_id) const {
+int FieldWorld::model_byte(int char_id) const { return model_byte_in(gs_->slot, char_id); }
+
+int FieldWorld::model_byte_in(const save::SaveSlot& slot, int char_id) {
   if (char_id < 0 || char_id >= save::kNumChars) return char_id;
-  const int model_id = gs_->slot.chars[static_cast<size_t>(char_id)].model_id;
+  const int model_id = slot.chars[static_cast<size_t>(char_id)].model_id;
   // A record OpenCross' new-game builder did not fill (byte 0 on a character other than Serge) shows the character's own model.
-  return model_id == 0 && char_id != 0 && gs_->slot.chars[static_cast<size_t>(char_id)].max_hp == 0 ? char_id : model_id;
+  return model_id == 0 && char_id != 0 && slot.chars[static_cast<size_t>(char_id)].max_hp == 0 ? char_id : model_id;
+}
+
+void FieldWorld::prefetch_party_models(const save::SaveSlot& slot) {
+  for (const u8 char_id : slot.party())
+    if (char_id < save::kNumChars) prefetch_character_model(model_byte_in(slot, char_id));
 }
 
 std::string FieldWorld::model_folder(int model_byte) const {
