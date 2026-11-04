@@ -13,6 +13,22 @@ namespace {
 // Copies of a consumable a grid cell can hold.
 constexpr int kStackMax = 5;
 
+// Glenn with the second Einlanzer: the two-sword model and the two-sword versions of Sonic Sword and Dive & Drive.
+constexpr int kGlenn = 0x13, kGlennTwinModel = 0x32, kTwinEinlanzer = 0x40;
+struct TechPair {
+  u16 one_sword, two_swords;
+};
+constexpr TechPair kGlennTechs[] = {{0xDA, 0x9A}, {0xDB, 0x9B}};
+
+// A weapon change on Glenn rewrites his model byte and swaps his sword techs in every grid cell (the cell's 0x4000 bit stays).
+void apply_glenn_weapon(save::SaveChar& ch) {
+  const bool twin = ch.weapon == kTwinEinlanzer;
+  ch.model_id = static_cast<u16>((ch.model_id & 0xFF00) | (twin ? kGlennTwinModel : kGlenn));
+  for (u16& cell : ch.grid)
+    for (const TechPair& pair : kGlennTechs)
+      if ((cell & 0x3FFF) == (twin ? pair.one_sword : pair.two_swords)) cell = static_cast<u16>((cell & 0x4000) | (twin ? pair.two_swords : pair.one_sword));
+}
+
 int opposite_bit(int colour_bit) {
   switch (colour_bit) {
     case 0x04: return 0x40;
@@ -575,8 +591,10 @@ bool GameState::equip(int character, int eslot, int item) {
     if (item) add_item(item);
     return false;
   }
-  if (eslot == 0) ch.weapon = static_cast<u16>(item);
-  else if (eslot == 1) ch.armour = static_cast<u16>(item);
+  if (eslot == 0) {
+    ch.weapon = static_cast<u16>(item);
+    if (character == kGlenn) apply_glenn_weapon(ch);
+  } else if (eslot == 1) ch.armour = static_cast<u16>(item);
   else ch.accessory[static_cast<size_t>(eslot - 2)] = static_cast<u16>(item);
   return true;
 }

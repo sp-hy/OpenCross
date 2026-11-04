@@ -373,6 +373,26 @@ void test_equip() {
   for (auto& stack : game_state.slot.items)
     if (stack.id == 0) stack.id = 0x1FF, stack.qty = 1;
   CHECK(!game_state.equip(0, 0, 34) && game_state.equipped(0, 0) == 32 && game_state.item_count(34) == 2 && game_state.item_count(32) == 0);
+  // Glenn: the second Einlanzer (0x40) sets the two-sword model 0x32 and the two-sword techs 0x9A / 0x9B; any other weapon sets 0x13 and
+  // 0xDA / 0xDB. The cell's 0x4000 bit is kept.
+  for (auto& stack : game_state.slot.items)
+    if (stack.id == 0x1FF) stack = {};
+  item(0x3F, 0, 1u << 0x13);
+  item(0x40, 0, 1u << 0x13);
+  game_state.add_item(0x3F);
+  game_state.add_item(0x40);
+  save::SaveChar& glenn = game_state.slot.chars[0x13];
+  glenn.model_id = 0x13;
+  glenn.grid[3] = 0x4000 | 0xDA;
+  glenn.grid[9] = 0xDB;
+  CHECK(game_state.equip(0x13, 0, 0x40));
+  CHECK(glenn.model_id == 0x32 && glenn.grid[3] == (0x4000 | 0x9A) && glenn.grid[9] == 0x9B);
+  CHECK(game_state.equip(0x13, 0, 0x3F));
+  CHECK(glenn.model_id == 0x13 && glenn.grid[3] == (0x4000 | 0xDA) && glenn.grid[9] == 0xDB);
+  // Another character's weapon change leaves the record's model byte alone.
+  game_state.slot.chars[0].model_id = 0x31;
+  game_state.add_item(32);
+  CHECK(game_state.equip(0, 0, 32) && game_state.slot.chars[0].model_id == 0x31);
 }
 
 void test_use_and_options() {
