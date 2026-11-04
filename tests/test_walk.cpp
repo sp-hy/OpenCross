@@ -1,13 +1,15 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
-// by attr flags, boundary stop and wall sliding.
+// by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, and the screen ripple grid.
 #include <cmath>
 #include <cstdio>
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "game/actor.h"
 #include "game/walk_mesh.h"
+#include "render/render_target.h"
 
 using namespace oc;
 
@@ -217,11 +219,57 @@ void test_attached_rigid() {
   rider.clear_attached();
   CHECK(!rider.attached());
 }
+// The script-set model axes are drawn blended between ticks: a roll of 0 then 8 draws as 4 at half a tick; a jump past the snap limit,
+// a scale reset and the first tick after creation draw the current value.
+void test_axes_blend() {
+  auto ticked = [](float roll0, float roll1, float scale0, float scale1) {
+    game::Actor actor;
+    actor.begin_tick();
+    actor.roll = roll0;
+    actor.axis_scale[0] = scale0;
+    actor.begin_tick();
+    actor.roll = roll1;
+    actor.axis_scale[0] = scale1;
+    return actor;
+  };
+  auto same = [](const render::Mat4& lhs, const render::Mat4& rhs) {
+    for (int row = 0; row < 4; ++row)
+      for (int col = 0; col < 4; ++col)
+        if (!near(lhs.at(row, col), rhs.at(row, col), 1e-4f)) return false;
+    return true;
+  };
+  CHECK(same(ticked(0, 8, 0.5f, 0.6f).model_matrix(0.5f), ticked(4, 4, 0.55f, 0.55f).model_matrix(0.5f)));
+  CHECK(same(ticked(4090, 6, 1, 1).model_matrix(0.5f), ticked(0, 0, 1, 1).model_matrix(0.5f)));
+  CHECK(same(ticked(0, 2000, 1365.0f / 4096, 1.0f / 4096).model_matrix(0.5f), ticked(2000, 2000, 1.0f / 4096, 1.0f / 4096).model_matrix(0.5f)));
+  game::Actor fresh;
+  fresh.begin_tick();
+  fresh.roll = 100;
+  CHECK(same(fresh.model_matrix(0.25f), ticked(100, 100, 1, 1).model_matrix(0.25f)));
+}
+// Screen ripple grid line of column 19 (the first grid quad's left edge): the exact cosine of the phase, and a fractional phase lands
+// between its neighbours.
+void test_screen_warp() {
+  auto line19 = [](float phase) {
+    render::ScreenWarpParams params;
+    params.amp_x = 4;
+    params.step_x = 128;
+    params.phase_x = phase;
+    std::vector<render::WarpQuad> quads;
+    render::build_screen_warp(params, quads, 0);
+    return quads.size() > 2 ? quads[2].xy[0] - 304.0f : 1e9f;
+  };
+  const double angle = (64.0 + 19.0 * 128.0) * (6.283185307179586 / 4096.0);
+  CHECK(near(line19(64), static_cast<float>(std::cos(angle) * 4.0), 1e-3f));
+  const float lo = line19(64), mid = line19(64.5f), hi = line19(65);
+  CHECK((mid - lo) * (hi - mid) > 0.0f);
+}
 }  // namespace
 
 int main() {
   test_actor_anim();
   test_attached_rigid();
+  test_axes_blend();
+  test_screen_warp();
   test_anim_seq();
   game::WalkMesh wm;
   wm.init(build(), {0, game::kFlagBlockAll});

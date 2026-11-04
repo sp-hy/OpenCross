@@ -32,9 +32,17 @@ bool FieldWorld::player_xz(float& x, float& z) const {
 }
 
 bool FieldWorld::entity_xz(int ent, float& x, float& z) const {
-  // Route-test queries use negative ids: -3000 - n = entity n's height (x, world y, down = +) and clip state (z = submitted anim id,
-  // + 0x10000 on a stair tile); -2000 - n = entity n's state (x = room model, -1 none; z = bits); -1000 - n = entity n's off-mesh tick
+  // Route-test queries use negative ids: -4000 - n = entity n's script pitch (x) and whether it is drawn (z = 1); -3000 - n = entity
+  // n's height (x, world y, down = +) and clip state (z = submitted anim id, + 0x10000 on a stair tile); -2000 - n = entity n's state (x = room model, -1 none; z = bits); -1000 - n = entity n's off-mesh tick
   // count (x); -100 - n = entity n's layer-space screen position; -1 = the controlled entity's layer-space screen position (scroll included).
+  if (ent <= -4000) {
+    const int target = -4000 - ent;
+    if (target >= static_cast<int>(ents_.size())) return false;
+    const Ent& ent_state = ents_[static_cast<size_t>(target)];
+    x = ent_state.actor.pitch;
+    z = ent_state.actor.loaded() && !ent_not_drawn(target) ? 1.0f : 0.0f;
+    return true;
+  }
   if (ent <= -3000) {
     const int target = -3000 - ent;
     if (target >= static_cast<int>(ents_.size())) return false;
@@ -371,7 +379,7 @@ void FieldWorld::step_triggers() {
 
 // Off-screen culling (every tick, before the animation steps): the cull flag is cleared for every entity and set again for a
 // model entity whose bounding box misses the 320 x 224 screen, unless the entity is exempt: the FE 01 flag or the
-// first two frames after a room load skip the test, and entities with the never-cull flags are always kept. The test projects
+// room-entry window (the first two frames after a room load or a battle return) skip the test, and entities with the never-cull flags are always kept. The test projects
 // four points of the box (scale applied, camera rotation, no yaw: the entity's own pitch / roll are ignored here):
 // P0 / P1 = (-/+ w/2, 0, 0), P2 = (0, 0, -w/2), P3 = (0, -h, +w/2) around (x, y + height offset, z), where w = max(model extent x, z) and
 // h = extent y, and keeps the entity when P0.x + scroll < 321, P1.x + scroll >= 0, P2.y + scroll >= 0 and
@@ -380,8 +388,8 @@ void FieldWorld::step_triggers() {
 void FieldWorld::step_cull() {
   // Debug: A/B check of the off-screen animation freeze.
   static const bool no_cull = std::getenv("OC_NO_CULL") != nullptr;
-  const bool grace = cull_grace_ > 0 || no_cull;
-  if (cull_grace_ > 0) --cull_grace_;
+  const bool grace = entry_window_ > 0 || no_cull;
+  if (entry_window_ > 0) --entry_window_;
   const float ex = std::floor(render::wide_extra());
   const float scx = static_cast<float>(view_.scroll_x()), scy = static_cast<float>(view_.scroll_y());
   for (size_t i = 0; i < ents_.size(); ++i) {

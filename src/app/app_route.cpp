@@ -76,6 +76,7 @@ void App::fill_route_state() {
   // The results screen is up (route: wait battle results).
   rstate.battle_finished = results_ok && results.active();
   rstate.field_idle = field_visible() && world.idle() && world.fade_level() < 0.05f && !movie_open && !(menu_ok && !menu.closed()) && !shop_open && !(key_popup_ok && key_popup.active()) && !(pause_ok && pause_screen.active()) && !(party_ok && party_screen.active()) && !(monster_picker_ok && monster_picker.active());
+  rstate.fade = world_ok ? world.fade_level() : 0.0f;
   rstate.battle_result = field_visible() ? world.battle_result() : 0;
   rstate.flow = flow_ready && flow_enabled ? game::flow_state_name(flow.state()) : "field";
   rstate.movie = movie_open;

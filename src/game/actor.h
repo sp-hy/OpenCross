@@ -172,7 +172,12 @@ class Actor {
 
   // ---- script-driven use -----------------------------------------------------------------------------------------
   // Call before anything moves the actor this tick.
-  void begin_tick() { prev_ = cur_; }
+  void begin_tick() {
+    prev_ = cur_;
+    axes_prev_ = axes_now();
+    axes_prev_ok_ = axes_ticked_;
+    axes_ticked_ = true;
+  }
   // The off-screen cull: the animation sequence, the clip playback and the head callback do not run.
   void set_culled(bool culled) { culled_ = culled; }
   bool culled() const { return culled_; }
@@ -426,6 +431,19 @@ class Actor {
   std::string empty_;
 
   ActorPose prev_, cur_;
+  // The script-set model rotation (pitch, local_yaw, roll) and per-axis scale, drawn blended from their values at the start of the
+  // tick (begin_tick) by the draw fraction. A step of more than kAxisSnapUnits or a scale jump (sign change, ratio > kAxisSnapRatio) is
+  // a reset and drawn at once; so is everything before the second tick.
+  struct Axes {
+    float pitch = 0, local_yaw = 0, roll = 0;
+    float scale[3] = {1.0f, 1.0f, 1.0f};
+  };
+  static constexpr float kAxisSnapUnits = 512.0f;
+  static constexpr float kAxisSnapRatio = 1.5f;
+  Axes axes_now() const { return {pitch, local_yaw, roll, {axis_scale[0], axis_scale[1], axis_scale[2]}}; }
+  Axes axes_at(float alpha) const;
+  Axes axes_prev_;
+  bool axes_prev_ok_ = false, axes_ticked_ = false;
   // Display segment of one channel (position x, y, z / yaw).
   struct Chan {
     float from[3]{}, to[3]{}, ref[3]{};

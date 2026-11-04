@@ -249,6 +249,8 @@ struct MainMenu::Impl {
   MenuModelView* model_view = nullptr;
   bool model_wanted = false;
   MenuCamera model_cam;
+  // model_cam before the last model tick.
+  MenuCamera model_cam_prev;
   bool model_cam_manual = false;
   int model_pose = 0;
   u32 model_session = 0;

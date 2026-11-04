@@ -379,6 +379,7 @@ void GameFlow::restart(bool boot_logo) {
   ngp_active_ = ngp_slots_ = ngp_load_ = false;
   ngp_result_ = NgPlusResult::None;
   open_pending_ = open_ready_ = load_pending_ = load_from_slots_ = false;
+  open_fade_in_ = 0.0f;
   enter_title();
   if (boot_logo) begin_boot_logo();
 }
@@ -447,7 +448,8 @@ FlowAction GameFlow::tick_fade(float dt) {
       load_entry_ = {};
     }
   } else if (veil_ > 0.0f) {
-    veil_ = std::max(0.0f, veil_ - dt / kLoadFade);
+    veil_ = std::max(0.0f, veil_ - dt / (open_fade_in_ > 0.0f ? open_fade_in_ : kLoadFade));
+    if (veil_ <= 0.0f) open_fade_in_ = 0.0f;
   }
   return action;
 }

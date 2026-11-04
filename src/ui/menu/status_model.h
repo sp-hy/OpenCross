@@ -59,7 +59,9 @@ class StatusModelView : public MenuModelView {
   void step_blink();
   // The status effects: menu/stef.prd restarted for a new session, the effects of the absent statuses stopped.
   void start_effects(const render::Frame& frame, u32 status);
-  void draw_effects(const render::Frame& frame, float vw, float vh, const MenuModelSlot& slot, const effects::Mat3& rotation, float alpha);
+  // `trans` = the camera translation (feet offset, pan, distance) the model is drawn with.
+  void draw_effects(const render::Frame& frame, float vw, float vh, const MenuModelSlot& slot, const effects::Mat3& rotation, const effects::Vec3& trans,
+                    float alpha);
   // The pipeline is made on first use: false = none, keep the flat shadow.
   bool shadow_pipe_ready(const render::Frame& frame);
   render::MeshPipeline& meshes_;

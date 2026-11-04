@@ -225,9 +225,10 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
     apply_battle_disguise();
     rebind_party();
   }
-  // Field re-entry: a subtractive fade from black over 0x30 ticks.
+  // Field re-entry: a subtractive fade from black over 0x30 ticks, and the field restarts with the room-entry window open.
   begin_entry_fade(0);
   fade_hold_ = fade_delay;
+  entry_window_ = 4;
   // The saved field song is restored after EVERY battle, flag 1 included
   // (the victory song 0x16 / 0x17 and the battle theme are replaced); only BATTLE flag 0x20 skips it (the script plays the next
   // song itself). A song that is still playing is left alone by start_song.

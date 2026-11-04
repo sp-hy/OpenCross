@@ -413,8 +413,7 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   // A world-map Continue eases on from the scroll FE 50 restored; every other entry starts from 0.
   snap_camera_to_player(vm_.world_continue());
   entry_cut_ = 4;
-  // Nothing is culled right after a room load.
-  cull_grace_ = 4;
+  entry_window_ = 4;
   pick_auto_target();
   status_ = std::format("{} (room id {}, entrance {})", name, room_id_, param);
   log::info("field: {} loaded, {} entities, {} models, {} zones, auto target {}", name, ents_.size(), scene->models.size(),
@@ -532,7 +531,8 @@ void FieldWorld::place_party_spawn(int slot) {
 }
 
 // ------------------------------------------------------------------------------------------------ host: entities
-bool FieldWorld::system_ready() { return in_init_ || (trans_ == Trans::None && std::fabs(fade_ - fade_target_) < 1e-4f); }
+// A screen fade alone does not hold the gate: the scripts of a battle return, a menu close or a room entry run under the fade-in.
+bool FieldWorld::system_ready() { return in_init_ || (trans_ == Trans::None && !jump_.active); }
 
 // Ops 75 / 76 / 78 edit the attr -> flag table that the walk mesh blocks by.
 void FieldWorld::sync_flag_table() {

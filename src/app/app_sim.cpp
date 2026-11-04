@@ -110,6 +110,14 @@ void App::open_name_entry(int char_id) {
   flow.begin_rename(char_id, map_var == 0 || map_var == 8);
 }
 
+void App::open_shop(const game::FieldWorld::MenuRequest& rq) {
+  using script::MenuKind;
+  const ui::ShopKind kind = rq.kind == MenuKind::ElementShop ? ui::ShopKind::Element : rq.kind == MenuKind::TradingPost ? ui::ShopKind::Trading : ui::ShopKind::Smith;
+  shop.open(flow.game_state(), kind, rq.arg);
+  shop_open = true;
+  log::info("shop: {} {} opened", kind == ui::ShopKind::Element ? "element shop" : kind == ui::ShopKind::Trading ? "trading post" : "blacksmith", rq.arg);
+}
+
 void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
   using script::MenuKind;
   switch (rq.kind) {
@@ -132,10 +140,15 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
     case MenuKind::ElementShop:
     case MenuKind::WeaponShop:
     case MenuKind::TradingPost:
+      // The field fades out and holds black as before the main menu, then the shop fades in.
       if (shop_ok) {
-        shop.open(flow.game_state(), rq.kind == MenuKind::ElementShop ? ui::ShopKind::Element : rq.kind == MenuKind::TradingPost ? ui::ShopKind::Trading : ui::ShopKind::Smith, rq.arg);
-        shop_open = true;
-        log::info("shop: {} {} opened", rq.kind == MenuKind::ElementShop ? "element shop" : rq.kind == MenuKind::TradingPost ? "trading post" : "blacksmith", rq.arg);
+        if (flow_ready) {
+          screen_after_fade = rq;
+          flow.begin_menu_open_fade();
+          log::info("fade: shop fade-out started");
+        } else {
+          open_shop(rq);
+        }
         return;
       }
       break;
@@ -157,7 +170,7 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
     case MenuKind::NameEntry:
       // The field fades out and holds black as before the main menu, then the name entry cuts in.
       if (flow_ready) {
-        name_entry_after_fade = rq.arg < 0 ? 0 : rq.arg;
+        screen_after_fade = game::FieldWorld::MenuRequest{rq.kind, rq.arg < 0 ? 0 : rq.arg};
         flow.begin_menu_open_fade();
         log::info("fade: name-entry fade-out started");
         return;
@@ -290,6 +303,7 @@ void App::restart_game() {
   menu_from_script = false;
   if (shop_ok) shop.close();
   shop_open = false;
+  screen_after_fade.reset();
   mixer.stop();
   flow_enabled = true;
   title_scene_tick0 = world.tick_count();
@@ -369,12 +383,19 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       apply_flow_action(fa);
       return;
     }
-    // Field main menu or script name entry: the fade-out and the black hold are over, the screen cuts in.
-    if (flow.take_open_ready()) {
-      if (name_entry_after_fade >= 0) {
-        open_name_entry(name_entry_after_fade);
-        name_entry_after_fade = -1;
-        log::info("fade: name entry opened after the fade-out");
+    // Field main menu, script name entry or shop: the fade-out and the black hold are over, the screen cuts in; a shop fades in
+    // from black as the field does when it closes.
+    const bool shop_next = screen_after_fade && screen_after_fade->kind != script::MenuKind::NameEntry;
+    if (flow.take_open_ready(shop_next ? kScreenFadeIn / 60.0f : 0.0f)) {
+      if (screen_after_fade) {
+        const game::FieldWorld::MenuRequest rq = *screen_after_fade;
+        screen_after_fade.reset();
+        if (rq.kind == script::MenuKind::NameEntry) {
+          open_name_entry(rq.arg);
+          log::info("fade: name entry opened after the fade-out");
+        } else {
+          open_shop(rq);
+        }
         return;
       }
       if (menu_ok && menu.closed()) {

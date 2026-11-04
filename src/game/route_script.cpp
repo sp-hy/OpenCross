@@ -590,14 +590,16 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       log::info("route: entity {} moved {:.1f} since the mark", ent_id, static_cast<double>(dist));
       if (dist < static_cast<float>(want)) return bad(std::format("entity {} moved only {:.1f}, expected at least {}", ent_id, static_cast<double>(dist), want));
     } else if (args[1] == "ent") {
-      // assert ent <n> model|shown|moving|paused|wet <value>: entity state
+      // assert ent <n> model|shown|moving|paused|wet|pitch <value>: entity state
       int ent_id = 0, want = 0;
-      float model = 0, bits_f = 0;
-      if (args.size() < 5 || !to_int(args[2], ent_id) || !to_int(args[4], want) || !st.ent_xz || !st.ent_xz(-2000 - ent_id, model, bits_f))
-        return bad("assert ent <n> model|shown|moving|paused|wet <value>");
+      float model = 0, bits_f = 0, pitch = 0, drawn = 0;
+      if (args.size() < 5 || !to_int(args[2], ent_id) || !to_int(args[4], want) || !st.ent_xz || !st.ent_xz(-2000 - ent_id, model, bits_f) ||
+          !st.ent_xz(-4000 - ent_id, pitch, drawn))
+        return bad("assert ent <n> model|shown|moving|paused|wet|pitch <value>");
       const int bits = static_cast<int>(bits_f);
       int got = 0;
       if (args[3] == "model") got = static_cast<int>(model);
+      else if (args[3] == "pitch") got = static_cast<int>(pitch);
       else if (args[3] == "shown") got = (bits & 2) ? 1 : 0;
       else if (args[3] == "moving") got = (bits & 4) ? 1 : 0;
       else if (args[3] == "paused") got = (bits & 8) ? 1 : 0;
@@ -988,9 +990,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       trace_yaw_octants_ |= 1 << (((yw + 0x100) & 0xFFF) >> 9);
       float y = 0, anim_bits = 0;
       st.ent_xz(-3000 - ent_id, y, anim_bits);
-      log::info("route: trace ent {} t {} x {:.1f} z {:.1f} y {:.1f} anim {} step {:.2f} facing {:03X} dturn {} yaw {:03X}", ent_id, aux_,
-                static_cast<double>(x), static_cast<double>(z), static_cast<double>(y), static_cast<int>(anim_bits) & 0xFFFF,
-                static_cast<double>(dist), facing, dt, yw);
+      float pitch = 0, drawn = 0;
+      st.ent_xz(-4000 - ent_id, pitch, drawn);
+      log::info("route: trace ent {} t {} x {:.1f} z {:.1f} y {:.1f} anim {} step {:.2f} facing {:03X} dturn {} yaw {:03X} pitch {} drawn {} fade {:.3f}",
+                ent_id, aux_, static_cast<double>(x), static_cast<double>(z), static_cast<double>(y), static_cast<int>(anim_bits) & 0xFFFF,
+                static_cast<double>(dist), facing, dt, yw, static_cast<int>(pitch), static_cast<int>(drawn), static_cast<double>(st.fade));
       trace_y_ = yw;
       trace_x_ = x;
       trace_z_ = z;

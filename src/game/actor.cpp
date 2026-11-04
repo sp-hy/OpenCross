@@ -1032,6 +1032,25 @@ ActorPose Actor::pose(float alpha) const {
   return result;
 }
 
+Actor::Axes Actor::axes_at(float alpha) const {
+  const Axes now = axes_now();
+  if (!axes_prev_ok_) return now;
+  Axes result = now;
+  auto angle = [&](float prev, float cur) {
+    const float diff = wrap_units(cur - prev);
+    return std::fabs(diff) > kAxisSnapUnits ? cur : prev + diff * alpha;
+  };
+  result.pitch = angle(axes_prev_.pitch, now.pitch);
+  result.local_yaw = angle(axes_prev_.local_yaw, now.local_yaw);
+  result.roll = angle(axes_prev_.roll, now.roll);
+  for (int i = 0; i < 3; ++i) {
+    const float prev = axes_prev_.scale[i], cur = now.scale[i];
+    const float lo = std::min(std::fabs(prev), std::fabs(cur)), hi = std::max(std::fabs(prev), std::fabs(cur));
+    if (prev * cur > 0.0f && hi <= lo * kAxisSnapRatio) result.scale[i] = prev + (cur - prev) * alpha;
+  }
+  return result;
+}
+
 render::Mat4 Actor::model_matrix(float alpha) const {
   // Attached: the parent's joint at the same render fraction x the joint-space transform.
   if (attached_) {
@@ -1040,14 +1059,15 @@ render::Mat4 Actor::model_matrix(float alpha) const {
     if (attach_parent_->attach_joint(attach_point_, alpha, joint_world, joint_offset)) return joint_world * attach_local_;
   }
   const ActorPose actor_pose = pose(alpha);
+  const Axes axes = axes_at(alpha);
   // A model with yaw (h - 0x400) faces heading h; movement is (-cos h, sin h). With this renderer's mat4_rotation_y the
   // model's forward is -Z, which gives the angle yaw + 0x800.
   const float angle = (actor_pose.yaw + static_cast<float>(kModelYawBias) * 2.0f) * kUnitsToRad;
   render::Mat4 rotation = render::mat4_rotation_y(angle);
-  if (pitch != 0.0f || roll != 0.0f || (local_yaw != 0.0f && !tilt_world)) {
+  if (axes.pitch != 0.0f || axes.roll != 0.0f || (axes.local_yaw != 0.0f && !tilt_world)) {
     // The model matrix is RotMatrix({pitch, yaw, roll}) = pitch about X, yaw about Y, roll about Z
     // (a sword stuck in the ground is pitch 1100 = ~97 deg).
-    const float pitch_rad = pitch * kUnitsToRad, local_yaw_rad = local_yaw * kUnitsToRad, roll_rad = roll * kUnitsToRad;
+    const float pitch_rad = axes.pitch * kUnitsToRad, local_yaw_rad = axes.local_yaw * kUnitsToRad, roll_rad = axes.roll * kUnitsToRad;
     render::Mat4 rx, ry, rz;
     rx.at(1, 1) = std::cos(pitch_rad);
     rx.at(1, 2) = -std::sin(pitch_rad);
@@ -1075,7 +1095,7 @@ render::Mat4 Actor::model_matrix(float alpha) const {
     rotation = tilt * rotation;
   }
   render::Mat4 scaling = render::mat4_scale(scale);
-  for (int i = 0; i < 3; ++i) scaling.at(i, i) *= axis_scale[i];
+  for (int i = 0; i < 3; ++i) scaling.at(i, i) *= axes.scale[i];
   return render::mat4_translation(actor_pose.x, actor_pose.y + y_offset, actor_pose.z) * rotation * scaling;
 }
 

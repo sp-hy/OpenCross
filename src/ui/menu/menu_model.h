@@ -17,6 +17,18 @@ struct MenuCamera {
   int pan_y = 0;
 };
 
+// The camera drawn between two model ticks: `prev` blended into `cur` by `alpha` (0..1), so the turn moves at the drawing rate like the pose.
+// Yaw and pitch start from the previous angle within one turn (0..4095) and move by the unwrapped difference.
+struct MenuCameraNow {
+  float yaw = 0, pitch = 0, distance = 0, pan_x = 0, pan_y = 0;
+};
+
+inline MenuCameraNow menu_camera_at(const MenuCamera& prev, const MenuCamera& cur, float alpha) {
+  auto mix = [alpha](int a, int b) { return static_cast<float>(a) + static_cast<float>(b - a) * alpha; };
+  auto turn = [alpha](int a, int b) { return static_cast<float>(a & 0xFFF) + static_cast<float>(b - a) * alpha; };
+  return {turn(prev.yaw, cur.yaw), turn(prev.pitch, cur.pitch), mix(prev.distance, cur.distance), mix(prev.pan_x, cur.pan_x), mix(prev.pan_y, cur.pan_y)};
+}
+
 struct MenuModelSlot {
   // Character record id (0 Serge .. 43).
   int char_id = 0;
@@ -34,6 +46,8 @@ struct MenuModelSlot {
   float origin_x = 0, origin_y = 0;
   float unit_x = 1, unit_y = 1;
   MenuCamera camera;
+  // The camera before the last model tick: drawn blended into `camera` over the tick, like the pose.
+  MenuCamera camera_prev;
   // Animation of the menu model: 0..2 the square-button poses, 3 hurt.
   int pose = 0;
   // Changes whenever the screen (re)starts the model: the pose then starts without a blend.
