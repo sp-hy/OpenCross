@@ -1,5 +1,5 @@
 // Menu rule tests on synthetic data: grid allocation legality, stock accounting, auto-fill, the three sort orders,
-// equipment compatibility / stat previews, element use and the options word.
+// equipment compatibility / stat previews, element use, the options word and the Status model camera between ticks.
 #include <cstdio>
 
 #include <cmath>
@@ -8,6 +8,7 @@
 
 #include "ui/menu/game_state.h"
 #include "ui/menu/hand.h"
+#include "ui/menu/menu_model.h"
 #include "ui/menu/ps1_art.h"
 
 using namespace oc;
@@ -439,10 +440,26 @@ void test_ps1_art() {
   CHECK(ps1::caption_gap_end(49) == 79 && ps1::caption_gap_end(64) == 61 && ps1::caption_gap_end(82) == 48 && ps1::caption_gap_end(7) == 0);
   CHECK(std::string(ps1::face_name(0)) == "seljyu" && std::string(ps1::face_name(1)) == "kid" && ps1::face_name(50) == nullptr);
 }
+
+// The Status camera drawn between two model ticks: the previous tick's camera at 0, the current one at 1, linear in between; the turn
+// carries on across the wrap of 4096 instead of spinning back.
+void test_menu_camera_blend() {
+  MenuCamera prev, cur;
+  prev.yaw = 4092, prev.pitch = -16, prev.distance = 2000, prev.pan_x = 8, prev.pan_y = -8;
+  cur.yaw = 4100, cur.pitch = -32, cur.distance = 2032, cur.pan_x = 16, cur.pan_y = -16;
+  const MenuCameraNow start = menu_camera_at(prev, cur, 0.0f), half = menu_camera_at(prev, cur, 0.5f), end = menu_camera_at(prev, cur, 1.0f);
+  CHECK(start.yaw == 4092.0f && start.distance == 2000.0f && start.pan_x == 8.0f && start.pan_y == -8.0f);
+  CHECK(half.yaw == 4096.0f && half.distance == 2016.0f && half.pan_x == 12.0f && half.pan_y == -12.0f);
+  CHECK(end.yaw == 4100.0f && end.distance == 2032.0f);
+  CHECK(std::fmod(start.pitch, 4096.0f) == 4080.0f && end.pitch - start.pitch == -16.0f);
+  const MenuCameraNow still = menu_camera_at(cur, cur, 0.7f);
+  CHECK(still.yaw == static_cast<float>(cur.yaw & 0xFFF) && still.distance == 2032.0f);
+}
 }  // namespace
 
 int main() {
   test_ps1_art();
+  test_menu_camera_blend();
   test_grid();
   test_autofill();
   test_autofill_order();

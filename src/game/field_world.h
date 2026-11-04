@@ -378,7 +378,8 @@ class FieldWorld final : public script::FieldHost {
     int ot = 7;
     render::ScreenWarpParams warp;
   };
-  WaveView wave_view() const;
+  // `alpha` = the draw fraction between the last two ticks: the ramped values and the phases are blended from the previous tick's.
+  WaveView wave_view(float alpha) const;
   // ---- damage-floor blur: for 8 frames after a hit the host blends the previous
   // picture over the new one at 50 %, shifted by (tx, ty) PS1 px and scaled about the picture centre.
   struct JoltView {
@@ -835,8 +836,9 @@ class FieldWorld final : public script::FieldHost {
   u64 tick_count_ = 0;
   // ticks after a room load in which clip cross-fades are cut (INIT's first pose is not a visible move)
   u32 entry_cut_ = 0;
-  // 2 frames (4 ticks) after a room load in which nothing is culled
-  u32 cull_grace_ = 0;
+  // The room-entry window: 2 frames (4 ticks) after a room load or a battle return (the field restarts) in which nothing is culled
+  // and every model that can turn takes its facing at once
+  u32 entry_window_ = 0;
   u64 room_loads_ = 0, art_swaps_ = 0;
   // art mode changed while a window was open: applied when the next window opens
   bool dialogue_mode_pending_ = false;
@@ -1145,6 +1147,9 @@ class FieldWorld final : public script::FieldHost {
     int frames = 0;
     int ot = 7;
     s32 phase_x = 0, phase_y = 0;
+    // The values before the last step_wave, the start of the drawn blend.
+    std::array<s64, 6> prev_cur{};
+    s32 prev_phase_x = 0, prev_phase_y = 0;
   } wave_;
   // op 92: background group key -> its tiles' semi-transparency bit
   std::map<u32, bool> bg_group_abe_;

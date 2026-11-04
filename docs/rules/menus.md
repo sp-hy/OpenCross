@@ -70,6 +70,7 @@ OK toggles the profile panel and the equipment panel; Cancel returns to the list
 * **Grid minimap.** One tile per unlocked grid cell.
 * **Profile text.** Table row keyed by the character's body (section 14) when it is at most 0x31, else by the character id; at most 7 lines, trailing blank lines dropped. The 3D model is the menu model with the same key (body up to 0x32).
 * **Pad camera.** Triangle toggles between the turning model and the pad camera; in pad mode Square steps the pose 0, 1, 2. The model logic ticks every second 60 Hz frame. Auto turn +8 per tick. Pad camera: Left / Right turn 16, Up / Down move 32 (distance clamped between the model's nearest distance and 0x960); with L2 held the directions pan by 8 (limit 0xAA); with R2 held Up / Down tilt by 16 (limit -0x200..0).
+* **Model drawing rate.** The original (PS1 and RDE) draws the Status model once per model tick, so the turn, the pose, the body and the weapon all move at 30 Hz. OpenCross draws at the display rate: the pose is interpolated between its steps and the camera (turn, tilt, zoom, pan) between the camera of the previous tick and the current one by the same time drawn, so neither moves in 30 Hz steps while the other runs smoothly. The weapon hangs on the joint matrix of the same pose the body is drawn with in that frame.
 
 ## 4. Equip screen
 
@@ -171,6 +172,8 @@ Source: `main_menu_equip.cpp` (menu list), `keyitem_popup.*` and `game/field_wor
 Source: `shop_logic.cpp` (rules), `shop_screen.cpp` (flow).
 
 Script requests: ElementShop opens the element shop, TradingPost the trading post, WeaponShop the blacksmith (forge, break down, sell); the Smith Spirit key item opens the blacksmith too. The argument is the shop row id. Sounds: 1 cursor, 8 confirm, 6 cancel, 0x18 denied, 5 bought or sold, 0xBF forged or broken down, 0x1B traded. Gold gains from selling and breaking down are clamped to 9999999 (kMaxGold) without a refusal.
+
+**Opening and closing.** A shop request (script op or the Smith Spirit) opens as the main menu does (section 1, *Opening*): the field fades to black over 10 frames, the screen stays black for 40 more, then the shop fades in from black over 0x10 ticks; the game stands still until the fade-in starts. The original has no fade-in (the PS1 cuts to black and shows the shop a few frames later; RDE fades out and holds as described, then cuts the shop in); OpenCross adds one. Closing the shop hands the field back faded in from black over 0x10 ticks.
 
 **Flow.** Top list (Element: Buy, Sell; Smith: Forge, Break down, Sell; Up / Down wrap; Cancel closes the shop). Smith goes through a category list (weapon, armour, accessory = item kind 0, 1, 2). Then the item list (wrap, 11 rows visible, Cancel one level up), then quantity (Buy, Sell element, Sell gear) or a Yes / No confirm (Forge, Break down; default No). An empty list on entering is refused (sfx 0x18). Quantity: Right / Left +-1, Up / Down +-10, clamped to 1..max without wrap; OK commits at once (no confirm). After a change the list is rebuilt and the flow falls back one level when the list is empty.
 

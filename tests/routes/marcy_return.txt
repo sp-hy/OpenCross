@@ -1,0 +1,33 @@
+# Battle return with a scripted reposition: jac_b16i's win branch runs while the field's return fade-in is still dark (PLAY_SONG and
+# RUN_SCRIPT do not wait for a plain fade), takes the screen to black (FADE 1) and puts Marcy (entity 4) at the stairs, so she is
+# never seen at her pre-battle spot.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1
+- wait 20
+- tap right                           # file 01
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait 30
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 6000
+- trace 4 8
+- assert near 4 -900 -550 4
+- trace 4 120
+- quit

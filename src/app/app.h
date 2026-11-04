@@ -140,6 +140,7 @@ class App {
   void open_main_menu(bool script);
   void handle_script_menu(const game::FieldWorld::MenuRequest& rq);
   void open_name_entry(int char_id);
+  void open_shop(const game::FieldWorld::MenuRequest& rq);
   void close_field_screen(int fade_ticks);
   void apply_flow_action(const game::FlowAction& action);
   bool pause_modal(const platform::Input& in);
@@ -418,8 +419,8 @@ class App {
   std::string ghost_room;
   u64 ghost_tick0 = 0;
   bool menu_from_script = false, shop_open = false;
-  // Character whose script name entry opens once the menu-open fade-out is over (-1 = none).
-  int name_entry_after_fade = -1;
+  // Script screen (name entry or shop) that opens once the menu-open fade-out is over.
+  std::optional<game::FieldWorld::MenuRequest> screen_after_fade;
   int battle_flags = 0;
   // The growth progress counter is not in the save, kept for the session.
   int growth_progress = 0;

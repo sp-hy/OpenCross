@@ -117,6 +117,7 @@ void FieldWorld::step_turn_rates() {
   // 8 ticks, then start clip 1 (stand) and set var 0.
   // The yaw chase follows the bookkeeping in the engine's frame step, so the yaw holds still while a request waits for its odd tick:
   // the turn starts from the shown facing the request was made at (an exact half turn stays exact and takes the left clip).
+  // In the room-entry window a model whose rate is not 0 takes its facing at once instead.
   const bool frame_tick = (tick_count_ & 1u) != 0;
   for (int i = 0; i < static_cast<int>(ents_.size()); ++i) {
     script::Entity& script_ent = vm_.entity(i);
@@ -155,6 +156,7 @@ void FieldWorld::step_turn_rates() {
     }
     const bool request_waiting = (script_ent.flags270 & 0x6000u) == 0x6000u;
     actor.turn_rate = request_waiting ? 0 : static_cast<s16>(script_ent.v24e);
+    if (entry_window_ > 0 && actor.turn_rate != 0) actor.set_shown_facing(actor.facing());
   }
 }
 

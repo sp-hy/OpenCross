@@ -135,7 +135,7 @@ void MainMenu::Impl::update_status(const Nav& nav) {
 int MainMenu::Impl::model_number(int character, int last) const { return data::menu_form(character, body(character), last); }
 
 void MainMenu::Impl::restart_model() {
-  model_cam = MenuCamera{};
+  model_cam = model_cam_prev = MenuCamera{};
   model_cam_manual = false;
   model_pose = 0;
   ++model_session;
@@ -150,9 +150,11 @@ void MainMenu::Impl::step_model_camera(const Nav& nav, int ticks) {
   const int nearest = model_view->min_distance(model_number(cur_char(), kLastMenuModel));
   auto axis = [](bool minus, bool plus, int step) { return (plus ? step : 0) - (minus ? step : 0); };
   model_cam.distance = std::min(std::max(model_cam.distance, nearest), kFarthest);
+  model_cam_prev.distance = std::min(std::max(model_cam_prev.distance, nearest), kFarthest);
   const int steps = (model_frames + ticks) / 2 - model_frames / 2;
   model_frames += ticks;
   for (int tick = 0; tick < steps; ++tick) {
+    model_cam_prev = model_cam;
     if (!model_cam_manual) {
       model_cam.yaw += kAutoTurn;
     } else if (nav.l2) {

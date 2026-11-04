@@ -194,13 +194,17 @@ class GameFlow {
   bool fading_out() const { return load_pending_ || open_pending_; }
   // The slot a running load fade-out is about to start (null otherwise): the host prepares its room meanwhile.
   const ui::SlotEntry* loading_slot() const { return load_pending_ ? &load_entry_ : nullptr; }
-  // Field main menu (Tab / Start) and script name entry: the field fades to black and the screen holds black, the host opens the
-  // screen when take_open_ready() reports it; the screen then shows at full brightness (no fade-in).
+  // Field main menu (Tab / Start), script name entry and shops: the field fades to black and the screen holds black, the host opens the
+  // screen when take_open_ready() reports it; the screen then shows at full brightness, or fades in from black over
+  // fade_in_seconds when that is above 0.
   void begin_menu_open_fade() { open_pending_ = true; }
-  bool take_open_ready() {
+  bool take_open_ready(float fade_in_seconds = 0.0f) {
     const bool ready = open_ready_;
     open_ready_ = false;
-    if (ready) veil_ = 0.0f;
+    if (ready) {
+      veil_ = fade_in_seconds > 0.0f ? 1.0f : 0.0f;
+      open_fade_in_ = fade_in_seconds;
+    }
     return ready;
   }
   void draw_overlay(const render::Frame& frame, float view_w, float view_h);
@@ -307,6 +311,8 @@ class GameFlow {
   // Menu-open fade (see begin_menu_open_fade).
   bool open_pending_ = false, open_ready_ = false;
   float open_hold_ = 0.0f;
+  // Length of the fade-in after a menu-open fade (0 = the load fade's length).
+  float open_fade_in_ = 0.0f;
   // A load waits for the fade-out to finish.
   bool load_pending_ = false, load_from_slots_ = false;
   ui::SlotEntry load_entry_;

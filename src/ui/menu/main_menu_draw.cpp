@@ -623,6 +623,7 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
     slot.origin_x = ox, slot.origin_y = oy;
     slot.unit_x = xscale * zoom, slot.unit_y = PY(1) * zoom;
     slot.camera = model_cam;
+    slot.camera_prev = model_cam_prev;
     slot.session = model_session;
     slot.hd = mode == ArtMode::Hd;
     slot.status = ch.status;

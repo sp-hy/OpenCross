@@ -67,9 +67,9 @@ std::string model_stem(int model) {
 }
 
 // The camera rotation Rx(-pitch) * Ry(-yaw), row-major.
-assets::Mat3 camera_rotation(const MenuCamera& camera) {
-  const assets::Mat3 rx = assets::rotation_zyx({-static_cast<float>(camera.pitch & 0xFFF) * kTurnDegrees, 0, 0});
-  const assets::Mat3 ry = assets::rotation_zyx({0, -static_cast<float>(camera.yaw & 0xFFF) * kTurnDegrees, 0});
+assets::Mat3 camera_rotation(const MenuCameraNow& camera) {
+  const assets::Mat3 rx = assets::rotation_zyx({-camera.pitch * kTurnDegrees, 0, 0});
+  const assets::Mat3 ry = assets::rotation_zyx({0, -camera.yaw * kTurnDegrees, 0});
   assets::Mat3 out{};
   for (size_t row = 0; row < 3; ++row)
     for (size_t col = 0; col < 3; ++col)
@@ -368,12 +368,11 @@ void StatusModelView::start_effects(const render::Frame& frame, u32 status) {
 }
 
 void StatusModelView::draw_effects(const render::Frame& frame, float vw, float vh, const MenuModelSlot& slot, const effects::Mat3& rotation,
-                                   float alpha) {
+                                   const effects::Vec3& trans, float alpha) {
   if (!emitters_ || !effects_ready_) return;
   effects::ViewParams view;
   view.rot = rotation;
-  view.trans = {static_cast<float>(slot.camera.pan_x) + kFeetRight, static_cast<float>(slot.camera.pan_y) + kFeetBelow,
-                static_cast<float>(slot.camera.distance)};
+  view.trans = trans;
   view.h = kProjection;
   view.ox = kCentreX, view.oy = kCentreY;
   std::vector<effects::DrawQuad> quads;
@@ -452,11 +451,10 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
   effect_palette_ = palette_;
   set_weapon(*shown, slot.weapon_model, slot.weapon_part);
 
-  const MenuCamera& camera = slot.camera;
+  const MenuCameraNow camera = menu_camera_at(slot.camera_prev, slot.camera, shown->accum);
   const assets::Mat3 camera_rot = camera_rotation(camera);
-  const render::Mat4 view = render::mat4_translation(static_cast<float>(camera.pan_x) + kFeetRight, static_cast<float>(camera.pan_y) + kFeetBelow,
-                                                     static_cast<float>(camera.distance)) *
-                            render::mat4_from_rt(camera_rot, {0, 0, 0});
+  const effects::Vec3 camera_trans{camera.pan_x + kFeetRight, camera.pan_y + kFeetBelow, camera.distance};
+  const render::Mat4 view = render::mat4_translation(camera_trans[0], camera_trans[1], camera_trans[2]) * render::mat4_from_rt(camera_rot, {0, 0, 0});
   render::Mat4 proj;
   proj.at(0, 0) = 2.0f * slot.unit_x * kProjection / vw;
   proj.at(0, 2) = 2.0f * (slot.origin_x + slot.unit_x * kCentreX) / vw - 1.0f;
@@ -587,8 +585,8 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
       // The glint: light = the unit vector from the weapon toward the light, eye = the point (d sin yaw, d cos yaw, 0) the menu leaves for it.
       float to_light[3] = {kWeaponLight[0] - world.at(0, 3), kWeaponLight[1] - world.at(1, 3), kWeaponLight[2] - world.at(2, 3)};
       const float length = std::sqrt(to_light[0] * to_light[0] + to_light[1] * to_light[1] + to_light[2] * to_light[2]);
-      const float yaw = static_cast<float>(camera.yaw & 0xFFF) * (2.0f * kPi / 4096.0f);
-      const float eye[3] = {static_cast<float>(camera.distance) * std::sin(yaw), static_cast<float>(camera.distance) * std::cos(yaw), 0.0f};
+      const float yaw = camera.yaw * (2.0f * kPi / 4096.0f);
+      const float eye[3] = {camera.distance * std::sin(yaw), camera.distance * std::cos(yaw), 0.0f};
       wd.light.spec = length > 0.0f;
       for (size_t k = 0; k < 3; ++k) wd.light.spec_dir[k] = length > 0.0f ? to_light[k] / length : 0.0f, wd.light.spec_eye[k] = eye[k];
     }
@@ -597,7 +595,7 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
   meshes_.end();
   effects::Mat3 effect_rot;
   std::copy(camera_rot.begin(), camera_rot.end(), effect_rot.m.begin());
-  draw_effects(frame, vw, vh, slot, effect_rot, shown->accum);
+  draw_effects(frame, vw, vh, slot, effect_rot, camera_trans, shown->accum);
 }
 
 }  // namespace oc::ui

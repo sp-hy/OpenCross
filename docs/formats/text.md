@@ -103,6 +103,7 @@ OpenCross: `LangTables` in `src/import/text.h` implements this.
 157 tokens exist. The engine must support, for field dialogue:
 
 * flow: `{bpage}` `{bpage}\n` `{bwait}` `{mend}` `{wend(n)}` `{wait(n)}` `{speed(n)}`, LF.
+* A malformed auto-close ends the text: nothing after it is shown, and its leading digits are the close delay. `mess_wend.csv` row (186, 1), Lynx in jac_b36e, is `{wend(160})` in every language; RDE shows the text up to the token and drops the `)`, and in a test `{wend(30}Z\nQ` showed neither the `Z`, the line break nor the `Q`.
 * style: `{color(0..4,GRAY)}` (0 white, 1 blue, ...), `{italic}` `{italic_end}`, `{66}` `{99}` `{♪}` `{♪♪}` (curly quotes, notes).
 * names: `{SERGE%}`..`{PIP%}` (id = token index), `{SERGE%1}` / `{SERGE%2}` (JP: first 1 / 2 characters), `{RAZ%}`, `{PARTY0%}`..`{PARTY2%}`, `{playwork(0)}`, `{itemwork(0..3)}`, `{num(0..3)}`, `{HIDE}` (suppress next name), `{-y}` `{-i}` name suffix, `{Cap}` `{CAP}` `{CapL}` capitalisation.
 * EN bare tokens (51): `SERGE%`..`PIP%`, `Sir SERGE%`, `Mister S_%`, `Herr SERGE%`, `The-SERGE%`, `◆` (marker, prints nothing), `''` (apostrophe).

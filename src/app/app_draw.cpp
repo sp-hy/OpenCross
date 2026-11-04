@@ -199,7 +199,7 @@ void App::draw_scene(SceneFrame& sf) {
   static const int warp_debug = std::getenv("OC_NO_WARP") ? std::atoi(std::getenv("OC_NO_WARP")) : 0;
   static const bool no_warp = warp_debug == 1;
   sf.warp_debug = warp_debug;
-  sf.wave = field_shown && !sf.title_sea && !no_warp ? world.wave_view() : game::FieldWorld::WaveView{};
+  sf.wave = field_shown && !sf.title_sea && !no_warp ? world.wave_view(step.alpha) : game::FieldWorld::WaveView{};
   sf.wave_hd = sf.wave.on && !sf.field_lowres;
   // Submerged actor faces first (opaque, depth written), so the water layer blends over them; the rest after the layers.
   if (field_shown && !sf.field_lowres && !sf.wave_hd)

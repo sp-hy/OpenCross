@@ -70,7 +70,7 @@
 //   assert gap <a> <b> <min> <max>      xz distance between two entities (same names) is in [min, max]
 //   mark time / assert elapsed <min> <max>   driver ticks since `mark time` are within [min, max]
 //   assert height <p0..p2|ent> <min> <max>   world y (down = +) of the entity; assert anim <who> <id|stair>   submitted clip id / on a stair tile
-//   trace <ent> <ticks>           log an entity's position / facing / model yaw every tick for N ticks and a speed / turn summary
+//   trace <ent> <ticks>           log an entity's position / facing / model yaw / screen fade every tick for N ticks and a speed / turn summary
 //   (trace also logs clip / keyframe*4 per tick) assert traceclip <max_src_moves> <max_clip_changes>   cross-fade source keyframe moves / clip changes of the last trace
 //   (trace also logs the head-turn angles while the head callback is on) assert traceheadturn <ticks> <span>   the last trace saw the head turn on >= ticks ticks over an ax range >= span (4096/turn)
 //   assert traceyaw <ticks> <octants>   the last trace saw the model yaw change on >= ticks ticks and visit >= octants of the 8 45-deg sectors
@@ -149,6 +149,8 @@ struct RouteState {
   std::function<std::vector<int>()> dialogue_progress;
   // Controls free.
   bool field_idle = false;
+  // Field screen fade: 0 = the picture, 1 = black or white.
+  float fade = 0;
   // BATTLE_RESULT script variable.
   int battle_result = 0;
   std::function<bool(int, float&, float&)> ent_xz;

@@ -1,0 +1,61 @@
+# Battle return with a scripted pose: jac_b20i's win branch runs while the field's return fade-in is still dark (PLAY_SONG and
+# RUN_SCRIPT do not wait for a plain fade); Lynx (entity 7) is put at -130,140, turned to facing 0 and laid on the ground (op 27
+# pitch 1024) before the picture is up, so he is never seen standing at his pre-battle spot. The field restarts with the room-entry
+# window open, so the turn to facing 0 snaps and the pitch lands on the third tick.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1
+- wait 20
+- tap right                           # file 01
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait 230
+- approach 4 20 1500                  # the trigger in front of the desk
+- tap confirm
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 6000
+- trace 7 4
+- assert near 7 -130 140 4
+- assert ent 7 pitch 1024
+- trace 7 120
+- quit

@@ -375,6 +375,12 @@ Message parse_markup(std::string_view text, Lang lang) {
       size_t j = chars.find(U'}', i);
       if (j != std::u32string::npos) {
         std::string tag = u32_to_utf8(std::u32string_view(chars).substr(i + 1, j - i - 1));
+        // A malformed auto-close ("{wend(160})", "{wend(30}") ends the text: its leading digits are the close delay and nothing
+        // after it is shown.
+        if (tag.rfind("wend(", 0) == 0 && !split_call(tag).has_arg) {
+          builder.push(TokKind::AutoClose, std::atoi(tag.c_str() + 5));
+          break;
+        }
         // An unknown {...} is kept as plain characters.
         if (!handle_tag(builder, tag)) builder.run.append(chars, i, j - i + 1);
         i = j + 1;

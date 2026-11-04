@@ -455,6 +455,23 @@ void test_typewriter() {
   instant.update(1.1f);
   CHECK(instant.closed());
 
+  // A malformed auto-close ends the text: nothing after it is shown and its digits still time the close.
+  for (const char* broken : {"{speed(255)}hello{wend(30})", "{speed(255)}hello{wend(30}Z\\nQ"}) {
+    flat = import::flatten(import::parse_markup(broken, import::Lang::En), {});
+    std::u32string shown;
+    for (const auto& token : flat.tokens) {
+      if (token.kind == import::TokKind::Text) shown += token.text;
+      CHECK(token.kind != import::TokKind::Newline);
+    }
+    CHECK(shown == U"hello");
+    Typewriter cut;
+    cut.start(layout_pages(flat, lm));
+    cut.update(0.02f);
+    CHECK(cut.visible() == 5 && cut.state() == Typewriter::State::Closing);
+    cut.update(1.1f);
+    CHECK(cut.closed());
+  }
+
   flat = import::flatten(import::parse_markup("{speed(8)}abcdef{wait(90)}g{mend}", import::Lang::En), {});
   Typewriter fast_forward;
   fast_forward.start(layout_pages(flat, lm));

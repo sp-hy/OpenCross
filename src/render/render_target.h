@@ -17,14 +17,15 @@ namespace oc::render {
 // * amp_x >> 12 (column 0 at 0, the right edge at 321); line y of row r = 16r + 32 + rcos(phase_y + r * step_y) * amp_y >> 12 for rows
 // 1..12 (row 0 pinned at 32), rows 14..16 at 16r - 48 + rcos(phase_y + (r - 3) * step_y) * amp_y >> 12. Buffer rows 0..31 are never
 // redrawn: they keep the moved copy (rows 32..63). Everything already in the frame at OT index > p8 is warped; what is drawn later
-// (nearer) is not.
+// (nearer) is not. The lines here take the exact cosine of fractional values instead of the table cosine truncated to whole pixels, so
+// they move by sub-pixel amounts.
 struct ScreenWarpParams {
-  // p1 / p2: pixels (the integer part of the ramped 16.16 values).
-  int amp_x = 0, amp_y = 0;
+  // p1 / p2: pixels.
+  float amp_x = 0, amp_y = 0;
   // p3 / p4: phase step per column / row (4096 = one turn).
-  int step_x = 0, step_y = 0;
+  float step_x = 0, step_y = 0;
   // Advanced by p5 / p6 every tick.
-  int phase_x = 0, phase_y = 0;
+  float phase_x = 0, phase_y = 0;
 };
 // One quad in PS1 POLY_FT4 corner order (0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right), in buffer pixels of the 320 x 224 field
 // frame: xy = destination, uv = source texel coordinates in the frame as it was before the warp.

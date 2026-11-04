@@ -51,7 +51,7 @@ void FieldWorld::set_layer_opacity(int layer, int r, int g, int b) {
 // 8F screen ripple: the six parameters (x / y amplitude in pixels, x / y phase step per column / row, x / y phase advance per tick)
 // ramp linearly (16.16) to their targets over p[6] ticks; while active, each column of the warp grid is shifted by
 // sin(phase_x + col * step_x) * amp_x and each row by sin(phase_y + row * step_y) * amp_y, the frame drawn so far re-drawn warped at
-// ordering-table index p[7] (>= 7). The state and timing run here; the host draws the warp from wave_view().
+// ordering-table index p[7] (>= 7). The state and timing run here; the host draws the warp from wave_view(alpha).
 void FieldWorld::bg_wave_start(std::span<const s32> params) {
   if (params.size() < 8) return;
   wave_.active = true;
@@ -84,6 +84,9 @@ bool FieldWorld::bg_wave(int mode, int arg) {
 // A ramp tick while the count is above 0; with the stop flag the tick AFTER the count reached 0 zeroes the six values and switches
 // the ripple off, so the last ramp value is shown one more tick. The phases advance every tick (by 0 on the switch-off tick).
 void FieldWorld::step_wave() {
+  wave_.prev_cur = wave_.cur;
+  wave_.prev_phase_x = wave_.phase_x;
+  wave_.prev_phase_y = wave_.phase_y;
   if (!wave_.active) return;
   if (wave_.frames > 0) {
     for (size_t i = 0; i < 6; ++i) wave_.cur[i] += wave_.step[i];
@@ -97,18 +100,28 @@ void FieldWorld::step_wave() {
   wave_.phase_y += static_cast<s32>(wave_.cur[5] >> 16);
 }
 
-// The integer parts (high halfwords) of the ramped 16.16 values; the phases are 16-bit accumulators.
-FieldWorld::WaveView FieldWorld::wave_view() const {
+// The ramped 16.16 values and the phase accumulators blended from the previous tick's by the draw fraction, kept fractional so the
+// grid lines move by sub-pixel amounts; only phase & 0xFFF matters, so the phases are given modulo one turn.
+FieldWorld::WaveView FieldWorld::wave_view(float alpha) const {
+  alpha = interp_alpha(alpha);
   WaveView view;
   view.on = wave_.active;
   view.ot = std::max(7, wave_.ot);
-  auto hi = [&](size_t i) { return static_cast<int>(static_cast<s16>(static_cast<u16>(static_cast<u64>(wave_.cur[i]) >> 16))); };
-  view.warp.amp_x = hi(0);
-  view.warp.amp_y = hi(1);
-  view.warp.step_x = hi(2);
-  view.warp.step_y = hi(3);
-  view.warp.phase_x = static_cast<s16>(static_cast<u16>(wave_.phase_x));
-  view.warp.phase_y = static_cast<s16>(static_cast<u16>(wave_.phase_y));
+  auto value = [&](size_t i) {
+    const double blend = static_cast<double>(wave_.prev_cur[i]) + static_cast<double>(wave_.cur[i] - wave_.prev_cur[i]) * alpha;
+    return static_cast<float>(blend / 65536.0);
+  };
+  auto phase = [&](s32 prev, s32 cur) {
+    const s32 diff = static_cast<s32>(static_cast<u32>(cur) - static_cast<u32>(prev));
+    const double blend = static_cast<double>(prev & 0xFFF) + static_cast<double>(diff) * alpha;
+    return static_cast<float>(std::fmod(blend, 4096.0));
+  };
+  view.warp.amp_x = value(0);
+  view.warp.amp_y = value(1);
+  view.warp.step_x = value(2);
+  view.warp.step_y = value(3);
+  view.warp.phase_x = phase(wave_.prev_phase_x, wave_.phase_x);
+  view.warp.phase_y = phase(wave_.prev_phase_y, wave_.phase_y);
   return view;
 }
 

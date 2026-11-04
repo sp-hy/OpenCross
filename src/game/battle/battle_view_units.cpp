@@ -470,8 +470,12 @@ void BattleView::on_script_event(int unit, const bseq::Event& event) {
       }
       break;
     }
+    // CallDamage shows the calling unit's own result in the running action. A unit no event of the action reaches has none (an attack script
+    // that calls it on the attacker after its target's reaction): nothing shows, no flash, and its HP display stays.
     case K::Damage:
-      if (!fx_land(unit)) on_damage(unit);
+      if (fx_land(unit)) break;
+      if (act_.phase != Act::Phase::None && std::none_of(act_.ev.begin(), act_.ev.end(), [unit](const battle::ActionEvent& ev) { return ev.target == unit; })) break;
+      on_damage(unit);
       break;
     case K::React: {
       if (act_.ev.empty()) break;

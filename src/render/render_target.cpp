@@ -9,9 +9,9 @@ namespace oc::render {
 
 namespace {
 
-// Cosine of a 12-bit angle (4096 = one turn) in 4.12 fixed point.
-int rcos12(int angle) {
-  return static_cast<int>(std::lround(std::cos(static_cast<double>(angle & 0xFFF) * (6.283185307179586 / 4096.0)) * 4096.0));
+// One grid line's offset at `angle` (phase + index * step, 4096 = one turn) with amplitude `amp`, in buffer pixels.
+float warp_offset(float angle, float amp) {
+  return static_cast<float>(std::cos(static_cast<double>(angle) * (6.283185307179586 / 4096.0)) * static_cast<double>(amp));
 }
 
 }  // namespace
@@ -48,10 +48,10 @@ void build_screen_warp(const ScreenWarpParams& params, std::vector<WarpQuad>& ou
     const int col = i - extra_cols;
     grid_x[static_cast<size_t>(i)] = i == 0      ? -extra_f
                                      : i == cols ? 321.0f + extra_f
-                                                 : static_cast<float>(16 * col + (rcos12(params.phase_x + col * params.step_x) * params.amp_x >> 12));
+                                                 : static_cast<float>(16 * col) + warp_offset(params.phase_x + static_cast<float>(col) * params.step_x, params.amp_x);
   }
   auto u_at = [&](int i) { return i == 0 ? -extra_f : i == cols ? 320.0f + extra_f : static_cast<float>(16 * (i - extra_cols)); };
-  auto dy = [&](int row) { return rcos12(params.phase_y + row * params.step_y) * params.amp_y >> 12; };
+  auto dy = [&](int row) { return warp_offset(params.phase_y + static_cast<float>(row) * params.step_y, params.amp_y); };
   for (int row = 13; row >= -2; --row) {
     const float v0 = static_cast<float>(row <= 11 ? 16 * row + 32 : 16 * row);
     for (int i = cols - 1; i >= 0; --i) {
