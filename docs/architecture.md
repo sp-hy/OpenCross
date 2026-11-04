@@ -143,7 +143,7 @@ Path-keyed texture caches use `Vfs::cache_key(path)` (path plus overlay generati
 
 ### 3.3 Mods
 
-`src/vfs/mods.h`, `docs/formats/mods.md`. `ModManager::scan` walks `<GameDir>\mods\<name>\**`, plus the bare `.dat` files there and the members of `.zip` / `.7z` / `.rar` files, read live (`mod_archive.*`), and resolves each loose file to a shipped member by matching trailing path components, or adds it as a new member when it matches none and sits below a folder named after an archive. `apply` builds an `Overlay`: `files` (member replacements: loose files, or `OverlayFile` members read in place from a packed mod or a mod's `<archive>.dat`) and `textures` (replacement PNGs, see `render/texture_registry.*`). Each mod has a `ModLoadOn` (Modded, Sd, Hd, All) and a priority from list order. Game data (`vfs::is_game_data`) ignores `ModLoadOn` and is fixed by the first `apply` until the next launch. Voice packs are read by `audio::VoicePlayer` from the enabled mod roots, not through the overlay (`ModManager::packed_voice` finds a packed mod's lines).
+`src/vfs/mods.h`, `docs/formats/mods.md`. `ModManager::scan` walks `<GameDir>\mods\<name>\**`, plus the bare `.dat` files there and the members of `.zip` / `.7z` / `.rar` files, read live (`mod_archive.*`), and resolves each loose file to a shipped member by matching trailing path components, or adds it as a new member when it matches none and sits below a folder named after an archive. `apply` builds an `Overlay`: `files` (member replacements: loose files, or `OverlayFile` members read in place from a packed mod or a mod's `<archive>.dat`) and `textures` (replacement PNGs, see `render/texture_registry.*`). Each mod has a `ModLoadOn` (Modded, Sd, Hd, All) and a priority from list order. Game data (`vfs::is_game_data`) ignores `ModLoadOn` and is fixed by the first `apply` until the next launch. Voice packs are read by `audio::VoicePlayer` from the enabled mod roots, not through the overlay (`ModManager::packed_voice` finds a packed mod's lines). A `mod.ini` at a mod's root is its manifest (`Mod::manifest`, `core/features.h`); `feature_inputs` hands the enabled ones to `features::resolve`, whose result `App::features` holds for the run.
 
 ### 3.4 Importers and assets
 
@@ -415,7 +415,7 @@ All in `src/audio/`; output is 48 kHz stereo float.
 | `<exe>.new`, `<exe>.old`, `XINPUT9_1_0.dll.new`, `XINPUT9_1_0.dll.old` | transient files of the updater |
 | `XINPUT9_1_0.dll` next to the exe | the launcher proxy, installed by the updater when `CHRONOCROSS_LAUNCHER.exe` is there (`docs/formats/launcher.md`) |
 
-- `src/core/`: `log` (stderr plus optional file), `ScopedTimer`, `span_reader.h`, `parallel.h`, `types.h`, `version.h.in`.
+- `src/core/`: `log` (stderr plus optional file), `ScopedTimer`, `span_reader.h`, `parallel.h`, `types.h`, `version.h.in`, `features` (the engine features mods turn on: the build's table, the `mod.ini` parser and `resolve`, `docs/formats/mods.md` section 8).
 
 ## 11. Testing and tooling
 

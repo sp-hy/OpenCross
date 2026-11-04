@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace oc::platform {
@@ -134,6 +135,8 @@ void bind_cheats(const Cheats* set);
 //   [Mods]   one line per mod folder (ModSetting; folders not listed get the defaults, Esc overlay "Mods" tab). DumpStages / DumpTitle /
 //            DumpRooms / DumpModels / DumpEffects: which categories the Mods tab "Dump all textures" button writes (battle stage + title 3D
 //            scenes; room 3D meshes + models; battle / field unit models; effect sprite sheets + effect meshes - large, off by default).
+//   [Features] the player's settings of the engine features mods turn on: <Feature>.<Setting>=<value> (core/features.h), winning over
+//            every mod's mod.ini; kept as written, read at launch.
 //   [Enhancements] (all independent of Ps1Res) SmoothEffectRings: ring / tube effect meshes get extra segments.
 //            SmoothWaterLine: submerged actor parts are cut at the exact water plane, not per whole triangle. Lighting: key light on the
 //            models, bright spell effects light the battle units and stage, units cast real shadows (field and battle) and the battle floor darkens
@@ -192,6 +195,7 @@ struct Config {
   bool widescreen = false;
   ArtMode art_mode = ArtMode::Hd;
   std::vector<ModSetting> mods;
+  std::vector<std::pair<std::string, std::string>> features;
   bool dump_stages = true, dump_title = true, dump_rooms = true, dump_models = true, dump_weapons = true, dump_effects = false;
   bool ps1_res = false;
   float render_scale = 1.0f;
