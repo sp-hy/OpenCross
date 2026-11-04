@@ -1,8 +1,6 @@
 #include "render/texture_registry.h"
 
-#include <algorithm>
 #include <cctype>
-#include <cmath>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
@@ -132,66 +130,6 @@ void model_restore_stp(u32 original_w, u32 original_h, const u8* original, u32 w
       }
       alpha = flag ? import::kStpAlpha : u8{0xFF};
     }
-}
-
-namespace {
-
-// Luminance of a w x h RGBA image box-filtered to out_w x out_h (out_w <= w, out_h <= h), averaged over the texels with alpha >= `min_alpha`;
-// `covered` = at least half of each output texel's source texels pass.
-void box_luminance(u32 w, u32 h, const u8* rgba, u8 min_alpha, u32 out_w, u32 out_h, std::vector<float>& luma, std::vector<u8>& covered) {
-  luma.assign(size_t(out_w) * out_h, 0.0f);
-  covered.assign(size_t(out_w) * out_h, 0);
-  for (u32 y = 0; y < out_h; ++y)
-    for (u32 x = 0; x < out_w; ++x) {
-      const u32 x0 = x * w / out_w, x1 = std::max(x0 + 1, (x + 1) * w / out_w);
-      const u32 y0 = y * h / out_h, y1 = std::max(y0 + 1, (y + 1) * h / out_h);
-      double sum = 0.0;
-      u32 kept = 0;
-      for (u32 sy = y0; sy < y1; ++sy)
-        for (u32 sx = x0; sx < x1; ++sx) {
-          const u8* texel = &rgba[(size_t(sy) * w + sx) * 4];
-          if (texel[3] < min_alpha) continue;
-          sum += 0.299 * texel[0] + 0.587 * texel[1] + 0.114 * texel[2];
-          ++kept;
-        }
-      const size_t at = size_t(y) * out_w + x;
-      if (kept) luma[at] = static_cast<float>(sum / kept);
-      covered[at] = 2 * kept >= (x1 - x0) * (y1 - y0) ? 1 : 0;
-    }
-}
-
-}  // namespace
-
-float model_layout_mismatch(u32 original_w, u32 original_h, const u8* original, u32 w, u32 h, const u8* rgba) {
-  constexpr u32 kBlock = 8;
-  const u32 out_w = std::min(original_w, w), out_h = std::min(original_h, h);
-  std::vector<float> base, mod;
-  std::vector<u8> base_covered, mod_covered;
-  box_luminance(original_w, original_h, original, 1, out_w, out_h, base, base_covered);
-  box_luminance(w, h, rgba, 0x80, out_w, out_h, mod, mod_covered);
-  u32 blocks = 0, unfollowed = 0;
-  for (u32 by = 0; by + kBlock <= out_h; by += kBlock)
-    for (u32 bx = 0; bx + kBlock <= out_w; bx += kBlock) {
-      double sum_a = 0, sum_b = 0, sum_aa = 0, sum_bb = 0, sum_ab = 0;
-      u32 count = 0;
-      for (u32 y = by; y < by + kBlock; ++y)
-        for (u32 x = bx; x < bx + kBlock; ++x) {
-          const size_t at = size_t(y) * out_w + x;
-          if (!base_covered[at]) continue;
-          const double a = base[at], b = mod[at];
-          sum_a += a, sum_b += b, sum_aa += a * a, sum_bb += b * b, sum_ab += a * b;
-          ++count;
-        }
-      if (count < kBlock * kBlock * 3 / 4) continue;
-      const double var_a = sum_aa / count - (sum_a / count) * (sum_a / count);
-      const double var_b = sum_bb / count - (sum_b / count) * (sum_b / count);
-      // Flat blocks (luminance spread under 6) say nothing about the layout.
-      if (var_a < 36.0) continue;
-      const double covariance = sum_ab / count - (sum_a / count) * (sum_b / count);
-      ++blocks;
-      if (var_b <= 0.0 || covariance / std::sqrt(var_a * var_b) < 0.5) ++unfollowed;
-    }
-  return blocks ? static_cast<float>(unfollowed) / static_cast<float>(blocks) : 0.0f;
 }
 
 std::string texture_content_tag(u32 w, u32 h, const u8* rgba) {

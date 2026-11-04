@@ -219,12 +219,6 @@ void resolve_model_textures(assets::ModelAsset& asset) {
     mod.width = img.width, mod.height = img.height;
     mod.pixels.assign(img.pixels.begin(), img.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(img.width) * img.height * 4));
     if (!texture_registry::replace(key, mod.width, mod.height, mod.pixels)) continue;
-    // A replacement made for another arrangement of the atlas (an older file set's copy) would paint other parts over the mesh.
-    if (const float mismatch = model_layout_mismatch(best.width, best.height, best.pixels.data(), mod.width, mod.height, mod.pixels.data());
-        mismatch > kModelLayoutMismatch) {
-      log::warn("texture mod {}: skipped, it does not follow the texture's layout ({:.0f}% of the blocks differ)", texture_path(key), mismatch * 100.0f);
-      continue;
-    }
     model_restore_stp(best.width, best.height, best.pixels.data(), mod.width, mod.height, mod.pixels);
     asset.mod_textures.resize(asset.textures.size());
     asset.mod_textures[i] = std::move(mod);
