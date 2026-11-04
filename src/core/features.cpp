@@ -9,8 +9,16 @@ namespace oc::features {
 
 namespace {
 
-constexpr std::array<Feature, 1> kFeatures = {{
-    {0, 1, "", "Extension ops (FE C0-FE FF)", {}},
+// Party swap: a battle command that trades the acting PC with a reserve member; the formation is restored after the battle unless
+// KeepLineup.
+constexpr std::array<Setting, 2> kPartySwapSettings = {{
+    {"Enabled", 0, 0, 1, "Party swap in battle"},
+    {"KeepLineup", 0, 0, 1, "Keep the swapped party after the battle"},
+}};
+
+constexpr std::array<Feature, 2> kFeatures = {{
+    {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
+    {kPartySwap, 1, "PartySwap", "Party swap", kPartySwapSettings},
 }};
 
 std::string_view trim(std::string_view text) {
