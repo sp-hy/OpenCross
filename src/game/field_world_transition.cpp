@@ -349,7 +349,12 @@ void FieldWorld::step_transition() {
   if (const int need = vm_.var(0x42) + 1; need != disc_ && (need == 1 || need == 2)) set_disc(need);
   const std::string target = room_stem_for_id(pending.room);
   const auto& rooms = view_.rooms();
-  if (target.empty() || std::find(rooms.begin(), rooms.end(), target) == rooms.end()) {
+  // A shipped room (RoomView::rooms lists the archive), or a .bin + .ctd pair a mod adds and names in its cdrom.fnd.
+  const auto is_room = [&](const std::string& stem) {
+    if (std::find(rooms.begin(), rooms.end(), stem) != rooms.end()) return true;
+    return files_ && files_->exists("cdrom/map/mapbin/" + stem + ".bin") && files_->exists("cdrom/map/mapbin/" + stem + ".ctd");
+  };
+  if (target.empty() || !is_room(target)) {
     finish_jump_failed(std::format("room id {} ({}) is not a field room", pending.room, target.empty() ? "unknown" : target));
     return;
   }
