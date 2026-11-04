@@ -356,6 +356,8 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   }
   room_id_ = import::room_id_from_name(name);
   map_id_ = map_id_for(name);
+  // A room a mod adds is not in the lang.dat room table: its text rows are under its own room id, the one RDE reads.
+  if (room_id_ < 0) room_id_ = map_id_;
   // The defeated-monster record is set up before INIT runs its D1 spawns.
   defeated_enter_room();
   entrance_param_ = param;
@@ -644,6 +646,38 @@ std::string FieldWorld::room_stem_for_id(int room_id) const {
   if (std::string stem = discs_.room_stem(disc_, room_id); !stem.empty()) return stem;
   const char* name = import::room_name_for_id(room_id);
   return name ? name : std::string();
+}
+
+bool FieldWorld::script_map_jump(int& room_id, int& param) const {
+  const script::FieldScriptModule& module = vm_.module();
+  std::vector<u32> todo;
+  for (size_t entity = 0; entity < module.entity_count(); ++entity)
+    for (size_t slot = 0; slot < static_cast<size_t>(script::kScriptSlots); ++slot)
+      if (const u16 ptr = module.script_ptr(entity, slot)) todo.push_back(ptr);
+  std::vector<bool> seen(module.code.size());
+  std::optional<std::pair<int, int>> found;
+  while (!todo.empty()) {
+    u32 off = todo.back();
+    todo.pop_back();
+    while (off < module.code.size() && !seen[off]) {
+      seen[off] = true;
+      const std::optional<script::Insn> insn = script::decode_insn(module.code, off);
+      if (!insn) break;
+      if (insn->key == 0xDC && insn->ops.size() == 2 && insn->ops[0].kind == script::OperandKind::Imm &&
+          insn->ops[1].kind == script::OperandKind::Imm) {
+        const std::pair<int, int> jump{insn->ops[0].value, insn->ops[1].value};
+        if (found && *found != jump) return false;
+        found = jump;
+      }
+      for (const auto& target : insn->targets) todo.push_back(target.first);
+      if (insn->flow != script::Flow::Next) break;
+      off += insn->length;
+    }
+  }
+  if (!found) return false;
+  room_id = found->first;
+  param = found->second;
+  return true;
 }
 
 int FieldWorld::map_id_for(std::string_view stem) {

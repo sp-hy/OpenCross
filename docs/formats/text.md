@@ -75,7 +75,7 @@ bitmap = FONT + idx * 22
 
 | Context | Key | Table |
 |---|---|---|
-| Field dialogue | `(room id, message index)`; room id = map id (+1000 for `fin_*` maps) | `<lang>.csv`, `Ex_<lang>.csv` (FR IT DE ES), `mess_wend.csv`, `mesgen_en.csv` / `mesgen.csv` |
+| Field dialogue | `(room id, message index)`; room id = map id (+1000 for `fin_*` maps); a room a mod adds (not in `text_room_ids.csv`) uses its own map id, as RDE (`FieldWorld::load_room`) | `<lang>.csv`, `Ex_<lang>.csv` (FR IT DE ES), `mess_wend.csv`, `mesgen_en.csv` / `mesgen.csv` |
 | Battle event messages | `(battle id << 16) | msg` (with an id remap list) | `btel_<lang>.csv` |
 | Battle system messages | byte id (0-3 Pilfer, 5 run-away drop, 6 Frozen, 7 / 8 wipe, 33-59 = status / field rows) | `btmes.txt` |
 | Menus, shops | the address of the JP string in the PS1 menu overlay (e.g. 「はい」) | `menutest.txt`, `shopmenu.txt` |
