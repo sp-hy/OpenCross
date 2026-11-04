@@ -754,8 +754,8 @@ void test_run_script_inactive_target() {
   CHECK_EQ(vm.var(V(0)), 7);
 }
 
-// FE 4F registers a slot entity, FE 50 restores the camera (variables 0x330 / 0x332) and, on the next tick, the registered entities from
-// variables 0x300 + 6k (X, Z, facing) - the world-map Continue.
+// FE 4F registers a slot entity, FE 50 restores the camera (variables 0x330 / 0x332) and, at the end of INIT, the registered entities
+// from variables 0x300 + 6k (X, Z, facing) - the world-map Continue.
 class RestoreHost : public NullHost {
  public:
   int ent = -1, x = 0, z = 0, face = -1;
@@ -777,9 +777,8 @@ void test_fe50_restore() {
   vm.load(make_module(script, {{{{0, init}}}, {{}}}));
   CHECK_EQ(host.cam_x, 77);
   CHECK_EQ(host.cam_y, 88);
-  // The entity restore is deferred to the first tick.
-  CHECK_EQ(host.ent, -1);
-  vm.tick();
+  CHECK(vm.world_continue());
+  // The entity restore is done before the first tick (the room entry places the camera on the restored party).
   CHECK_EQ(host.ent, 1);
   CHECK_EQ(host.x, 123);
   CHECK_EQ(host.z, -45);

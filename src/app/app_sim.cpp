@@ -37,6 +37,8 @@ void App::apply_audio_config() {
 void App::apply_art_mode() {
   const bool hd = platform::art_is_hd(config.art_mode);
   const ui::ArtMode am = hd ? ui::ArtMode::Hd : ui::ArtMode::Original;
+  // A room being prepared ahead reads the file set that is about to change.
+  if (world_ok) world.drop_room_prefetch();
   const std::uint32_t mod_gen = files.generation();
   mods.apply(files, render::mod_art(config.art_mode));
   const bool mods_changed = files.generation() != mod_gen;
@@ -354,6 +356,12 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   // Screen fades around a load (title Continue / in-game Load): the game stands still while it fades out.
   if (flow_ready) {
     const bool out = flow.fading_out();
+    // The saved room is prepared on a worker during the fade-out; a save made on disc 2 continues on disc 2.
+    if (const ui::SlotEntry* slot = flow.loading_slot(); slot && world_ok) {
+      const int need = slot->data.var(0x42) + 1;
+      world.prefetch_room(slot->data.location(), need == 1 || need == 2 ? need : world.disc());
+      world.prefetch_party_models(slot->data);
+    }
     const game::FlowAction fa = flow.tick_fade(static_cast<float>(dt));
     if (out) {
       // Continue+ (New Game+ list): the ending room's FE 61 is answered before the loaded room replaces it.

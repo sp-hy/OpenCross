@@ -532,7 +532,7 @@ void FieldWorld::sim_tick() {
   for (auto& ent_state : ents_) ent_state.actor.end_tick();
   if (static const bool drift_log = std::getenv("OC_ATTACH_DRIFT") != nullptr; drift_log) check_attach_drift();
   // The fade ran at the top of this tick: switch rooms once it is black / white.
-  if (jump_.active && trans_ == Trans::None && !watchdog_.sweep_probe) begin_jump(jump_.room, jump_.param);
+  if (jump_.active && trans_ == Trans::None && !watchdog_.sweep_probe) begin_jump(jump_.room);
   else if (trans_ == Trans::Out) step_transition();
 }
 

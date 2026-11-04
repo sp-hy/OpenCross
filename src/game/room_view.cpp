@@ -11,7 +11,9 @@
 #include <thread>
 
 #include "core/log.h"
+#include "core/parallel.h"
 #include "core/timer.h"
+#include "game/room_models.h"
 #include "import/battle_stage.h"
 #include "import/chip2.h"
 #include "import/room.h"
@@ -31,7 +33,7 @@ struct RoomView::Item {
   render::Texture texture;
   render::TexRef set;
   // 4x set, built lazily (same 1x rectangle).
-  render::Texture texture_hd;
+  std::unique_ptr<render::Texture> texture_hd;
   render::TexRef set_hd;
   // (layer index, group) images merged into this item.
   std::vector<std::pair<u32, u32>> parts;
@@ -43,15 +45,63 @@ struct RoomView::Item {
   int x = 0, y = 0, w = 0, h = 0;
 };
 
+struct RoomView::Prepared {
+  // The import failed when `scene` is empty (`err` says why).
+  std::optional<assets::RoomScene> scene;
+  std::string err;
+  // The .prd actually read (empty = none).
+  std::string prd_path;
+  std::vector<std::unique_ptr<Item>> items;
+  // 1x image per item; 4x per item when composed ahead (empty = ensure_hd composes them).
+  std::vector<std::vector<u8>> px, px_hd;
+  // With a GPU context: the 4x textures made from px_hd on the worker (Texture::create_blocking); a null entry is uploaded from px_hd.
+  std::vector<std::unique_ptr<render::Texture>> tex_hd;
+  // Prepared ahead only: the room's own models, built and resolved (an empty entry: build failed, loaded at first use instead).
+  std::vector<std::optional<PreparedRoomModel>> models;
+  // HD art: the chip2 read still running, or (chip2_done) its result.
+  std::future<Chip2Result> chip2_future;
+  Chip2Result chip2;
+  bool chip2_done = false;
+};
+
+namespace {
+// The 4x images composed ahead are held until the load uploads them; a room above this many bytes composes them at load time instead
+// (ensure_hd streams them through a small window).
+constexpr size_t kPrefetchHdBytes = size_t{512} << 20;
+}  // namespace
+
 RoomView::RoomView() = default;
 RoomView::~RoomView() {
+  drop_prefetch();
   clear();
+}
+
+void RoomView::drop_prefetch() {
+  if (prefetch_.valid()) prefetch_.get();
+  prefetch_name_.clear();
+}
+
+void RoomView::prefetch(std::string_view name, std::string prd_path) {
+  if (!files_) return;
+  const u32 generation = files_->generation();
+  if (prefetch_.valid() && prefetch_name_ == name && prefetch_prd_ == prd_path && prefetch_hd_ == hd_ && prefetch_generation_ == generation) return;
+  drop_prefetch();
+  prefetch_name_ = std::string(name);
+  prefetch_prd_ = std::move(prd_path);
+  prefetch_hd_ = hd_;
+  prefetch_generation_ = generation;
+  log::debug("room {}: preparing ahead on a worker", prefetch_name_);
+  prefetch_ = std::async(std::launch::async, [files = files_, ctx = ctx_, name = prefetch_name_, prd = prefetch_prd_, hd = hd_]() {
+    ScopedTimer timer("room: prepare ahead (worker)");
+    return prepare(*files, ctx, name, prd, true, hd);
+  });
 }
 
 void RoomView::clear() {
   if (chip2_future_.valid()) chip2_future_.wait();
   chip2_future_ = {};
   items_.clear();
+  prepared_models_.clear();
   scene_.reset();
   chip2_.reset();
   group_tint_.clear();
@@ -118,40 +168,111 @@ void RoomView::set_scroll(int x, int y, bool snap) {
   pan_y_ = y;
 }
 
-bool RoomView::load(std::string_view name) {
-  clear();
-  name_ = std::string(name);
-  const std::string base = "cdrom/map/mapbin/" + name_;
-  if (hd_) prefetch_chip2();
+// The CPU half of a load. The chip2 read (inflate of several MB) is independent of the bin / ctd import, so it overlaps it.
+std::unique_ptr<RoomView::Prepared> RoomView::prepare(const vfs::Vfs& files, render::GpuContext* ctx, const std::string& name,
+                                                      const std::string& prd_request, bool ahead, bool hd) {
+  auto prep = std::make_unique<Prepared>();
+  if (hd)
+    prep->chip2_future = std::async(std::launch::async, [&files, name]() {
+      Chip2Result result;
+      result.first = read_chip2(files, name, &result.second);
+      return result;
+    });
+  const std::string base = "cdrom/map/mapbin/" + name;
   std::optional<Bytes> bin, ctd, prd;
   {
     ScopedTimer timer("room: zip reads (bin/ctd/prd)");
-    bin = files_->read(base + ".bin");
-    ctd = files_->read(base + ".ctd");
+    bin = files.read(base + ".bin");
+    ctd = files.read(base + ".ctd");
     if (!bin || !ctd) {
-      log::error("room {}: .bin/.ctd not found", name_);
-      return false;
+      prep->err = ".bin/.ctd not found";
+      return prep;
     }
-    const std::string prd_path = prd_path_.empty() ? base + ".prd" : prd_path_;
-    prd_path_.clear();
-    prd = files_->read(prd_path);
-    if (prd && prd_path != base + ".prd") log::info("room {}: effects from {} (disc index .prd record)", name_, prd_path);
-    loaded_prd_path_ = prd ? prd_path : std::string();
+    const std::string prd_path = prd_request.empty() ? base + ".prd" : prd_request;
+    prd = files.read(prd_path);
+    if (prd && prd_path != base + ".prd") log::info("room {}: effects from {} (disc index .prd record)", name, prd_path);
+    if (prd) prep->prd_path = prd_path;
   }
-  std::string err;
-  std::optional<assets::RoomScene> loaded_scene;
   {
     ScopedTimer timer("room: import (lzss + 1x composition + effects)");
-    loaded_scene = import::load_room(name_, *bin, *ctd, prd ? ByteSpan(*prd) : ByteSpan{}, &err);
+    prep->scene = import::load_room(name, *bin, *ctd, prd ? ByteSpan(*prd) : ByteSpan{}, &prep->err);
   }
-  if (!loaded_scene) {
-    log::error("room {}: {}", name_, err);
+  if (!prep->scene) return prep;
+  {
+    ScopedTimer timer("room: 1x merge");
+    prep->items = plan_items(*prep->scene);
+    prep->px = compose_1x(*prep->scene, prep->items);
+  }
+  if (ahead) {
+    ScopedTimer timer("room: room models (ahead)");
+    prep->models.resize(prep->scene->models.size());
+    parallel_for(prep->models.size(), [&](size_t i) { prep->models[i] = prepare_room_model(*prep->scene, i, ctx); });
+  }
+  if (!hd || !ahead) return prep;
+  prep->chip2 = prep->chip2_future.get();
+  prep->chip2_done = true;
+  if (!prep->chip2.first) return prep;
+  size_t bytes = 0;
+  for (const auto& item : prep->items)
+    bytes += static_cast<size_t>(item->w) * static_cast<size_t>(item->h) * import::kChip2Scale * import::kChip2Scale * 4;
+  if (bytes > kPrefetchHdBytes) return prep;
+  ScopedTimer timer("room: chip2 4x composition (ahead)");
+  prep->px_hd.resize(prep->items.size());
+  parallel_for(prep->items.size(), [&](size_t i) { prep->px_hd[i] = compose_pixels(*prep->scene, &*prep->chip2.first, *prep->items[i], true); });
+  if (!ctx) return prep;
+  prep->tex_hd.resize(prep->items.size());
+  for (size_t i = 0; i < prep->items.size(); ++i) {
+    const Item& item = *prep->items[i];
+    auto tex = std::make_unique<render::Texture>();
+    if (!tex->create_blocking(*ctx, static_cast<u32>(item.w * import::kChip2Scale), static_cast<u32>(item.h * import::kChip2Scale), render::TextureFormat::Rgba8,
+                              prep->px_hd[i].data()))
+      continue;
+    prep->tex_hd[i] = std::move(tex);
+    prep->px_hd[i] = {};
+  }
+  return prep;
+}
+
+bool RoomView::load(std::string_view name) {
+  const std::string prd_request = std::move(prd_path_);
+  prd_path_.clear();
+  std::unique_ptr<Prepared> prep;
+  if (prefetch_.valid()) {
+    const bool match = prefetch_name_ == name && prefetch_prd_ == prd_request && prefetch_hd_ == hd_ && files_ &&
+                       prefetch_generation_ == files_->generation();
+    {
+      ScopedTimer timer("room: wait for the prepared room");
+      prep = prefetch_.get();
+    }
+    if (!match) {
+      log::debug("room {}: the room prepared ahead ({}) does not match; loading normally", name, prefetch_name_);
+      prep.reset();
+    }
+    prefetch_name_.clear();
+  }
+  clear();
+  name_ = std::string(name);
+  if (!prep) prep = prepare(*files_, ctx_, name_, prd_request, false, hd_);
+  if (!prep->scene) {
+    log::error("room {}: {}", name_, prep->err);
     return false;
   }
-  scene_ = std::make_unique<assets::RoomScene>(std::move(*loaded_scene));
+  loaded_prd_path_ = prep->prd_path;
+  prepared_models_ = std::move(prep->models);
+  scene_ = std::make_unique<assets::RoomScene>(std::move(*prep->scene));
   const assets::RoomScene* scene = scene_.get();
+  if (prep->chip2_done) {
+    chip2_ = std::move(prep->chip2.first);
+    if (!chip2_) {
+      log::warn("room {}: {}", name_, prep->chip2.second);
+      hd_failed_ = true;
+    }
+  } else {
+    chip2_future_ = std::move(prep->chip2_future);
+  }
   layer_mask_ = 0xFFFFFFFFu;
-  if (!build_items()) return false;
+  items_ = std::move(prep->items);
+  if (!upload_items(prep->px)) return false;
 
   const auto& cam = scene_->camera;
   group_scale_ = cam.group_scale;
@@ -169,14 +290,30 @@ bool RoomView::load(std::string_view name) {
   groups_ = scene->group_image_count();
   loaded_ = true;
   set_scroll(0, 0, true);
-  if (hd_) ensure_hd();
+  if (hd_ && !prep->px_hd.empty()) {
+    ScopedTimer timer("room: HD texture uploads (composed ahead)");
+    bool uploaded = true;
+    for (size_t i = 0; i < items_.size() && uploaded; ++i) {
+      if (i < prep->tex_hd.size() && prep->tex_hd[i]) {
+        items_[i]->texture_hd = std::move(prep->tex_hd[i]);
+        items_[i]->set_hd = render::TexRef(*items_[i]->texture_hd, sampler_);
+      } else {
+        uploaded = upload_set(*items_[i], true, prep->px_hd[i]);
+      }
+    }
+    hd_ready_ = uploaded;
+    hd_failed_ = !uploaded;
+    if (uploaded) log::info("room {}: built {} HD (4x) textures", name_, items_.size());
+    else log::error("room {}: HD texture upload failed", name_);
+  } else if (hd_) {
+    ensure_hd();
+  }
   log::info("room {}: {} layers, {} group images, {} textures, {} tris, pan x[{}..{}] y[{}..{}]", name_, layers_, groups_,
             items_.size(), scene->walk.triangles.size(), cam.x_min, cam.x_max, cam.y_min, cam.y_max);
   return true;
 }
 
-bool RoomView::build_items() {
-  const assets::RoomScene* scene = scene_.get();
+std::vector<std::unique_ptr<RoomView::Item>> RoomView::plan_items(const assets::RoomScene& scene) {
   // Merge the (layer, group) images that share a group and z (they sort identically) into one texture each, so a
   // room needs few textures. Within a merge, later layers are drawn over earlier ones.
   struct Key {
@@ -191,7 +328,7 @@ bool RoomView::build_items() {
     }
   };
   std::map<Key, std::vector<std::pair<u32, const assets::RoomGroupImage*>>> merged;
-  for (const auto& layer : scene->layers)
+  for (const auto& layer : scene.layers)
     for (const auto& image : layer.groups) merged[{image.group, image.blend, image.z}].emplace_back(layer.index, &image);
 
   // Draw order: z is depth, larger = farther. Sort by z descending, then first layer, then group.
@@ -210,7 +347,7 @@ bool RoomView::build_items() {
     return lhs.key.blend < rhs.key.blend;
   });
 
-  std::optional<ScopedTimer> upload_timer(std::in_place, "room: 1x merge + texture uploads");
+  std::vector<std::unique_ptr<Item>> items;
   for (const Ordered& ordered : order) {
     int x0 = INT32_MAX, y0 = INT32_MAX, x1 = INT32_MIN, y1 = INT32_MIN;
     for (const auto& part : *ordered.parts) {
@@ -229,12 +366,25 @@ bool RoomView::build_items() {
     item->first_layer = ordered.first_layer;
     item->z = ordered.key.z;
     for (const auto& part : *ordered.parts) item->parts.emplace_back(part.first, part.second->group);
-    if (!build_set(*item, false)) {
+    items.push_back(std::move(item));
+  }
+  return items;
+}
+
+std::vector<std::vector<u8>> RoomView::compose_1x(const assets::RoomScene& scene, const std::vector<std::unique_ptr<Item>>& items) {
+  std::vector<std::vector<u8>> px;
+  px.reserve(items.size());
+  for (const auto& item : items) px.push_back(compose_pixels(scene, nullptr, *item, false));
+  return px;
+}
+
+bool RoomView::upload_items(const std::vector<std::vector<u8>>& px) {
+  ScopedTimer timer("room: 1x texture uploads");
+  for (size_t i = 0; i < items_.size(); ++i)
+    if (!upload_set(*items_[i], false, px[i])) {
       log::error("room {}: texture upload failed", name_);
       return false;
     }
-    items_.push_back(std::move(item));
-  }
   art_x0_ = INT32_MAX, art_x1_ = INT32_MIN;
   for (const auto& it : items_) art_x0_ = std::min(art_x0_, it->x), art_x1_ = std::max(art_x1_, it->x + it->w);
   if (art_x0_ >= art_x1_) art_x0_ = 0, art_x1_ = static_cast<int>(kViewW);
@@ -258,6 +408,7 @@ std::optional<assets::StageAsset> RoomView::effect_meshes() const {
 }
 
 bool RoomView::reload_art(bool hd) {
+  drop_prefetch();
   hd_ = hd;
   if (!loaded_ || !scene_) return false;
   // RDE's two file sets differ only in art for a room (checked over all 566 rooms of cdrom.dat / cdrom2.dat): .bin subfiles 11+ (room
@@ -301,9 +452,10 @@ bool RoomView::reload_art(bool hd) {
     }
   }
   if (skipped) log::warn("room {}: art swap: {} effect sheets did not match and keep their pixels", name_, skipped);
-  items_.clear();
   hd_ready_ = hd_failed_ = false;
-  if (!build_items()) {
+  chip2_.reset();
+  items_ = plan_items(*scene_);
+  if (!upload_items(compose_1x(*scene_, items_))) {
     log::error("room {}: art swap: texture upload failed", name_);
     return false;
   }
@@ -314,9 +466,9 @@ bool RoomView::reload_art(bool hd) {
   return true;
 }
 
-std::vector<u8> RoomView::compose_pixels(const Item& item, bool hd) const {
-  // Merge the item's (layer, group) images into one texture covering its 1x rectangle, at 1x or 4x. Pure CPU, const:
-  // safe to run on worker threads (ensure_hd composes the HD textures of all items in parallel).
+std::vector<u8> RoomView::compose_pixels(const assets::RoomScene& scene, const import::Chip2* chip2, const Item& item, bool hd) {
+  // Merge the item's (layer, group) images into one texture covering its 1x rectangle, at 1x or 4x (`chip2` required). Pure CPU:
+  // safe to run on worker threads (the HD textures of all items are composed in parallel).
   const int scale = hd ? import::kChip2Scale : 1;
   const size_t w = static_cast<size_t>(item.w * scale), h = static_cast<size_t>(item.h * scale);
   std::vector<u8> px(w * h * 4, 0);
@@ -326,10 +478,10 @@ std::vector<u8> RoomView::compose_pixels(const Item& item, bool hd) const {
     std::optional<assets::RoomGroupImage> hd_img;
     const assets::RoomGroupImage* image = nullptr;
     if (hd) {
-      hd_img = import::compose_hd_group(*scene_, layer, group, *chip2_, nullptr, nullptr, item.blend);
+      hd_img = import::compose_hd_group(scene, layer, group, *chip2, nullptr, nullptr, item.blend);
       if (hd_img) image = &*hd_img;
     } else {
-      for (const auto& cand : scene_->layers[layer].groups)
+      for (const auto& cand : scene.layers[layer].groups)
         if (cand.group == group && cand.blend == item.blend) image = &cand;
     }
     if (!image) continue;
@@ -348,14 +500,13 @@ bool RoomView::upload_set(Item& item, bool hd, const std::vector<u8>& px) {
   const int scale = hd ? import::kChip2Scale : 1;
   const size_t w = static_cast<size_t>(item.w * scale), h = static_cast<size_t>(item.h * scale);
   ScopedTimer upload_t("upload", hd_upload_ms_, false);
-  render::Texture& tex = hd ? item.texture_hd : item.texture;
+  if (hd) item.texture_hd = std::make_unique<render::Texture>();
+  render::Texture& tex = hd ? *item.texture_hd : item.texture;
   render::TexRef& set = hd ? item.set_hd : item.set;
   if (!tex.create(*ctx_, static_cast<u32>(w), static_cast<u32>(h), render::TextureFormat::Rgba8, px.data())) return false;
   set = render::TexRef(tex, sampler_);
   return true;
 }
-
-bool RoomView::build_set(Item& item, bool hd) { return upload_set(item, hd, compose_pixels(item, hd)); }
 
 bool RoomView::has_group(u32 group) const {
   if (!scene_) return false;
@@ -402,26 +553,17 @@ std::optional<import::Chip2> RoomView::read_chip2(const vfs::Vfs& files, const s
   return import::parse_chip2(*file, err);
 }
 
-void RoomView::prefetch_chip2() {
-  // The chip2 read (inflate of several MB) is independent of the bin/ctd import: overlap them.
-  chip2_future_ = std::async(std::launch::async, [this, room = name_]() {
-    std::pair<std::optional<import::Chip2>, std::string> result;
-    result.first = read_chip2(*files_, room, &result.second);
-    return result;
-  });
-}
-
 void RoomView::ensure_hd() {
   if (hd_ready_ || hd_failed_ || !loaded_ || !scene_) return;
   // Failed until proven otherwise; draw() then falls back to the 1x set.
   hd_failed_ = true;
   ScopedTimer hd_total("room: HD total (chip2 wait/read+parse+compose+upload)");
   std::string err;
-  if (chip2_future_.valid()) {
+  if (!chip2_ && chip2_future_.valid()) {
     auto fetched = chip2_future_.get();
     chip2_ = std::move(fetched.first);
     err = std::move(fetched.second);
-  } else {
+  } else if (!chip2_) {
     chip2_ = read_chip2(*files_, name_, &err);
   }
   if (!chip2_) {
@@ -435,7 +577,7 @@ void RoomView::ensure_hd() {
   auto launch = [&](size_t i) {
     jobs[i] = std::async(std::launch::async, [this, i] {
       ScopedTimer timer("compose", nullptr, false);
-      return compose_pixels(*items_[i], true);
+      return compose_pixels(*scene_, &*chip2_, *items_[i], true);
     });
   };
   double compose_wait_ms = 0, upload_ms = 0;
@@ -466,6 +608,7 @@ void RoomView::ensure_hd() {
 }
 
 void RoomView::set_art_mode(bool hd) {
+  if (hd != hd_) drop_prefetch();
   hd_ = hd;
   if (hd_ && loaded_) ensure_hd();
 }

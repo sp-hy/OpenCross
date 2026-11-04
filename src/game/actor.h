@@ -141,9 +141,9 @@ class Actor {
  public:
   static std::shared_ptr<ModelHandle> make_model(render::MeshPipeline& pipeline, assets::ModelAsset asset);
   // make_model of an asset whose texture mods are already resolved (render::resolve_model_textures, run on a worker thread), with its
-  // uploads optionally made there too.
+  // uploads and GPU textures optionally made there too (the textures are taken).
   static std::shared_ptr<ModelHandle> make_resolved_model(render::MeshPipeline& pipeline, assets::ModelAsset asset,
-                                                          const render::ModelUploads* uploads = nullptr);
+                                                          const render::ModelUploads* uploads = nullptr, render::ModelTextures* textures = nullptr);
 
   // Takes the asset (kept for the skeleton and clips) and uploads it.
   bool load(render::MeshPipeline& pipeline, assets::ModelAsset asset);

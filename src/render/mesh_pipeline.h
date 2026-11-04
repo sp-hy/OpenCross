@@ -107,6 +107,13 @@ struct ModelUploads {
 };
 ModelUploads prepare_model_uploads(const assets::ModelAsset& asset);
 
+// The GPU textures create_model makes from prepared uploads, made ahead on a worker thread (Texture::create_blocking), in ModelUploads'
+// order; a null entry is made by create_model itself.
+struct ModelTextures {
+  std::vector<std::unique_ptr<Texture>> main, hd, eye, hd_eye;
+};
+ModelTextures prepare_model_textures(GpuContext& ctx, const assets::ModelAsset& asset, const ModelUploads& uploads);
+
 class MeshPipeline {
  public:
   static constexpr u32 kMaxJoints = 128;
@@ -121,8 +128,9 @@ class MeshPipeline {
   bool init(GpuContext& ctx);
   void destroy();
 
-  // `uploads`: prepare_model_uploads(asset) made ahead (on a worker); null = made here.
-  std::unique_ptr<MeshModel> create_model(const assets::ModelAsset& asset, const ModelUploads* uploads = nullptr);
+  // `uploads`: prepare_model_uploads(asset) made ahead (on a worker); null = made here. `textures`: prepare_model_textures of those
+  // uploads (taken; null = every texture made here).
+  std::unique_ptr<MeshModel> create_model(const assets::ModelAsset& asset, const ModelUploads* uploads = nullptr, ModelTextures* textures = nullptr);
 
   // Binds the pipeline and restricts drawing to a scissor rectangle (the 4:3 game area); end() restores the full window.
   void begin(const Frame& frame, Rect scissor);

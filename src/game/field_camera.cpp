@@ -135,16 +135,19 @@ void FieldCamera::set_origin(s32 x, s32 y) {
   cam.y = y;
 }
 
-void FieldCamera::snap(const RoomView& view, u32 global_flags, const ActorPose* player_pose) {
+// Room entry: INIT's end eases the scroll 0x40 times from 0 toward the leader (skipped when FE 50 restored a saved scroll), then the
+// start of the field loop runs that ease twice more from wherever the scroll is. From FE 50's scroll the camera so comes to rest on
+// the side of the target it was saved on (the ease stalls short of it).
+void FieldCamera::snap(const RoomView& view, u32 global_flags, const ActorPose* player_pose, bool keep_scroll) {
   cam.scripted = false;
   cam.frames = -1;
-  cam.x = cam.y = 0;
-  int tx = 0, ty = 0;
+  if (!keep_scroll) cam.x = cam.y = 0;
+  int tx = cam.x, ty = cam.y;
   aim(view, player_pose, camera_y_offset, tx, ty);
   tx = clamp_x(view, global_flags, tx);
   ty = clamp_y(view, global_flags, ty);
-  // Room entry runs the ease 0x40 times.
-  for (int i = 0; i < kEntryEaseIterations; ++i) {
+  const int passes = keep_scroll ? 2 : 3;
+  for (int i = 0; i < passes * kEntryEaseIterations; ++i) {
     cam.x -= (cam.x - tx) / kEaseDivisor;
     cam.y -= (cam.y - ty) / kEaseDivisor;
   }

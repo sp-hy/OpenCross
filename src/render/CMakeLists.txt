@@ -96,4 +96,5 @@ target_link_libraries(oc_render PUBLIC
   oc_text
   SDL3::SDL3
   imgui::imgui)
+target_link_libraries(oc_render PRIVATE $<IF:$<TARGET_EXISTS:spng::spng>,spng::spng,spng::spng_static>)
 target_compile_definitions(oc_render PRIVATE OC_SHADER_FORMATS=${OC_SHADER_FORMATS})

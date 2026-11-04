@@ -212,6 +212,12 @@ class FieldWorld final : public script::FieldHost {
 
   // Loads a room by file stem and runs its INIT scripts. `param` = ROOM_PARAM (selects the entrance record).
   bool load_room(std::string_view name, int param = 0);
+  // Starts preparing the room a load_room is about to enter (script room id, the disc it is on) on a worker thread, while the screen
+  // fades out; a room on the other disc is not prepared. drop_room_prefetch waits for it and throws it away.
+  void prefetch_room(int room_id, int disc);
+  void drop_room_prefetch() { view_.drop_prefetch(); }
+  // Starts loading the field models of a save's party on worker threads (the load fade-out), so the first room after a load has them.
+  void prefetch_party_models(const save::SaveSlot& slot);
   const std::string& room_name() const { return view_.room_name(); }
   const std::vector<std::string>& room_list() const { return view_.rooms(); }
 
@@ -734,8 +740,10 @@ class FieldWorld final : public script::FieldHost {
   u32 walk_flags(int i) const;
   float ground_y(const Ent& ent_state) const;
   int bearing(float dx, float dz) const;
-  void snap_camera_to_player();
-  void begin_jump(int room, int param);
+  void snap_camera_to_player(bool keep_scroll);
+  void begin_jump(int room);
+  // The .prd path RoomView::set_prd_path takes for a room on the current disc.
+  std::string prd_path_for(std::string_view name);
   void finish_jump_failed(const std::string& why);
   void stub(const char* what);
   bool tint_active() const;
@@ -788,11 +796,14 @@ class FieldWorld final : public script::FieldHost {
   // by room model index (null = not loaded / failed)
   std::vector<std::shared_ptr<ModelHandle>> room_models_;
   std::vector<bool> room_model_tried_;
+  // The room's models built by its prefetch (RoomView::take_prepared_models), taken by room_model on first use.
+  std::vector<std::optional<PreparedRoomModel>> room_prepared_;
   // by character id, kept across rooms
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
   struct PrefetchedCharacter {
     assets::ModelAsset asset;
     render::ModelUploads uploads;
+    render::ModelTextures textures;
     unsigned generation = 0;
   };
   // by model byte: prefetch_character_model's workers, taken by character_model
@@ -1103,6 +1114,7 @@ class FieldWorld final : public script::FieldHost {
   std::string model_folder(int model_byte) const;
   // character record model byte (D9 / DB)
   int model_byte(int char_id) const;
+  static int model_byte_in(const save::SaveSlot& slot, int char_id);
   // B5; room init 5
   int push_strength_ = 5;
   // FE 02: transition of the next room change; 0 after use

@@ -368,20 +368,8 @@ std::string FieldVM::describe_records() const {
   return out;
 }
 
-// After FE 50 the first pass of the field loop puts the FE 4F slot entities back on the positions and facings saved in
-// variables 0x300 + 6 * slot.
 void FieldVM::tick() {
   ++stats_.ticks;
-  if (restore_slots_) {
-    restore_slots_ = false;
-    for (size_t slot = 0; slot < slot_ent_.size(); ++slot) {
-      const int entity = slot_entity(slot);
-      if (entity < 0 || entity >= static_cast<int>(ents_.size())) continue;
-      const u32 var_id = static_cast<u32>(0x300 + 6 * slot);
-      host_.set_position_xz(entity, read_var(var_id), read_var(var_id + 2), 0);
-      host_.set_facing(entity, read_var(var_id + 4) & 0xFFF);
-    }
-  }
   for (int ent = 0; ent < static_cast<int>(ents_.size()); ++ent) run_entity(ent);
   host_.end_of_tick(*this);
 }
@@ -404,7 +392,7 @@ void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
   std::fill(vars_.begin() + kGlobalVarSlots, vars_.end(), u16{0});
   vars_[0x46 >> 1] = 1;
   gflags_ = gflag::kPauseAllowed;
-  restore_slots_ = false;
+  world_continue_ = false;
   globals_[static_cast<size_t>(Global::KeepSfxSlots)] = 0;
   flag_table_.fill(0);
   std::copy_n(flag_table.begin(), std::min<size_t>(flag_table.size(), flag_table_.size()), flag_table_.begin());
@@ -416,6 +404,16 @@ void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
   for (auto& table : ent_ref_tables_) table.fill(0xFF);
   for (size_t ent = 0; ent < ents_.size(); ++ent) ents_[ent].flags38 |= load_flags(ent);
   for (int ent = 0; ent < static_cast<int>(ents_.size()); ++ent) run_init(ent);
+  // An FE 50 in INIT (the world-map Continue) puts the FE 4F slot entities back on the positions and facings saved in variables
+  // 0x300 + 6 * slot as soon as INIT is over.
+  if (!world_continue_) return;
+  for (size_t slot = 0; slot < slot_ent_.size(); ++slot) {
+    const int entity = slot_entity(slot);
+    if (entity < 0 || entity >= static_cast<int>(ents_.size())) continue;
+    const u32 var_id = static_cast<u32>(0x300 + 6 * slot);
+    host_.set_position_xz(entity, read_var(var_id), read_var(var_id + 2), 0);
+    host_.set_facing(entity, read_var(var_id + 4) & 0xFFF);
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ helpers

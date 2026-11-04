@@ -9,6 +9,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "assets/battle_stage.h"
@@ -16,6 +17,7 @@
 #include "game/actor.h"
 #include "game/draw_offset.h"
 #include "game/room_lighting.h"
+#include "game/room_models.h"
 #include "game/walk_mesh.h"
 #include "import/chip2.h"
 #include "render/camera.h"
@@ -34,9 +36,18 @@ class RoomView {
 
   // Builds the sorted list of rooms (map/mapbin/*.bin that have a .ctd).
   bool init(const vfs::Vfs& files, render::GpuContext& ctx, render::SpriteBatch& sprites, render::MeshPipeline& meshes);
-  // Loads the room's background, camera and walk mesh. The scroll starts at (0, 0) with all layers visible.
+  // Loads the room's background, camera and walk mesh. The scroll starts at (0, 0) with all layers visible. A matching prefetch()
+  // hands over its work, so only the GPU uploads are left.
   bool load(std::string_view name);
   void unload() { clear(); }
+  // Starts the CPU part of a later load(name) with this .prd path (set_prd_path's form) on a worker thread: file reads, the import,
+  // the 1x composition and, in HD art, the 4x one. load() uses it when the room, the .prd, the art mode and the file set still match,
+  // else throws it away. A second request for the same room is ignored.
+  void prefetch(std::string_view name, std::string prd_path);
+  // Waits for a running prefetch and throws it away (the file set is about to change).
+  void drop_prefetch();
+  // The loaded room's models built by its prefetch (empty when it was loaded without one); index = RoomScene::models. The caller takes them.
+  std::vector<std::optional<PreparedRoomModel>> take_prepared_models() { return std::exchange(prepared_models_, {}); }
   // The .prd of the next load() (VFS path): the room's effect file is the disc index record after its .bin, which names another
   // room's .prd in 195 rooms. Empty = "<room>.prd". Consumed by load().
   void set_prd_path(std::string path) { prd_path_ = std::move(path); }
@@ -154,19 +165,31 @@ class RoomView {
  private:
   // One texture drawn as one quad: all (layer, group) images sharing the same group and z.
   struct Item;
+  // The CPU half of a load (prepare), made on the calling thread or by prefetch().
+  struct Prepared;
+  using Chip2Result = std::pair<std::optional<import::Chip2>, std::string>;
 
-  // Merges the scene's (layer, group) images into items_ and uploads their 1x textures.
-  bool build_items();
-  bool build_set(Item& item, bool hd);
-  // CPU only, thread-safe.
-  std::vector<u8> compose_pixels(const Item& item, bool hd) const;
+  // CPU only, thread-safe. `ahead` (a prefetch) also builds the room's models and composes the 4x images (within a memory budget);
+  // without it the chip2 read is left running in the result for ensure_hd.
+  static std::unique_ptr<Prepared> prepare(const vfs::Vfs& files, render::GpuContext* ctx, const std::string& name, const std::string& prd_request,
+                                           bool ahead, bool hd);
+  // The scene's (layer, group) images merged into items, back to front, without textures.
+  static std::vector<std::unique_ptr<Item>> plan_items(const assets::RoomScene& scene);
+  static std::vector<std::vector<u8>> compose_1x(const assets::RoomScene& scene, const std::vector<std::unique_ptr<Item>>& items);
+  static std::vector<u8> compose_pixels(const assets::RoomScene& scene, const import::Chip2* chip2, const Item& item, bool hd);
+  // Uploads the 1x textures of items_ from `px` (one image per item) and records the painted columns.
+  bool upload_items(const std::vector<std::vector<u8>>& px);
   bool upload_set(Item& item, bool hd, const std::vector<u8>& px);
   static std::optional<import::Chip2> read_chip2(const vfs::Vfs& files, const std::string& room, std::string* err);
-  void prefetch_chip2();
   void ensure_hd();
   // Phase accumulator for the debug timing log (set only while ensure_hd runs).
   double* hd_upload_ms_ = nullptr;
-  std::future<std::pair<std::optional<import::Chip2>, std::string>> chip2_future_;
+  std::future<Chip2Result> chip2_future_;
+  // The running prefetch and what it was started for (room, .prd request, art mode, file set generation).
+  std::future<std::unique_ptr<Prepared>> prefetch_;
+  std::string prefetch_name_, prefetch_prd_;
+  bool prefetch_hd_ = false;
+  u32 prefetch_generation_ = 0;
   void clear();
 
   const vfs::Vfs* files_ = nullptr;
@@ -194,7 +217,7 @@ class RoomView {
   std::string loaded_prd_path_;
   size_t layers_ = 0, groups_ = 0;
   Limits limits_;
-  // The painted extent in layer columns: the union of the layer groups' tile boxes (build_items). Widescreen shows the picture out to it
+  // The painted extent in layer columns: the union of the layer groups' tile boxes (upload_items). Widescreen shows the picture out to it
   // rather than to the camera block's pan limits: several rooms carry art beyond what 4:3 panning can reach (man_bo1f), and the frame
   // beyond the tiles stays black.
   int art_x0_ = 0, art_x1_ = 320;
@@ -216,6 +239,7 @@ class RoomView {
   bool late_pass_ = false;
   bool hd_ = true, hd_ready_ = false, hd_failed_ = false;
   std::unique_ptr<assets::RoomScene> scene_;
+  std::vector<std::optional<PreparedRoomModel>> prepared_models_;
   std::optional<import::Chip2> chip2_;
 };
 

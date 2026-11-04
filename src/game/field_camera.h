@@ -46,8 +46,9 @@ struct FieldCamera {
   void set_limits(s32 x0, s32 x1, s32 y0, s32 y1);
   std::pair<s32, s32> position() const { return {cam.x, cam.y}; }
   void set_origin(s32 x, s32 y);
-  // Room entry: the ease run to the player's spot, without the display step.
-  void snap(const RoomView& view, u32 global_flags, const ActorPose* player_pose);
+  // Room entry: the ease run to the player's spot, without the display step; `keep_scroll` starts it from the current scroll
+  // (a world-map Continue) instead of 0.
+  void snap(const RoomView& view, u32 global_flags, const ActorPose* player_pose, bool keep_scroll);
   // One tick of the scroll ease, before the shake offset. `follow_pose` = the controlled entity (`override_follow`: a script chose it,
   // which takes precedence over a scripted target) or the party leader.
   void advance(const RoomView& view, u32 global_flags, const ActorPose* follow_pose, bool override_follow);
