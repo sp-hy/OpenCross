@@ -170,7 +170,8 @@ void MainMenu::Impl::build_equip() {
       TP(305, y, utf32(menu_str(0x801F2A20, "Remove")), col, 0.9f);
     } else {
       TPfit(305, y, item_name(cand.item), 138, col, 0.9f);
-      Digits(449, y, padded_number(std::min(cand.qty, 99), 2), 16, col);
+      // The second Einlanzer (item 0x40) is a pair: its row always shows 2.
+      Digits(449, y, padded_number(cand.item == 0x40 ? 2 : std::min(cand.qty, 99), 2), 16, col);
     }
   }
   if (eq_list) tri(273, 43.0f + 24.0f * static_cast<float>(eq_cur - eq_scroll), true);

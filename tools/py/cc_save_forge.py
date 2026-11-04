@@ -20,6 +20,8 @@ plain stored ZIP with the same members, which OpenCross and ps1 read like RDE's 
   --key-items N[,N..]  the key items held, replacing the source save's (1-based number, raw head 0x180 bit N - 1; Time Egg = 53)
   --stars N            star level (raw head 0x3F preview, 0x5A4 total, 0x5A5 current)
   --gold N             gold (0x58C and the 0x3B preview)
+  --item ID:QTY        gear / material stock (ids 0xD13C, counts 0xD43C, 384 slots): the stack of ID gets QTY (0 empties it),
+                       else the first free slot takes it
   --cleared            a New Game+ "cleared" save as the ending's FE 85 writes it: variable 0x7E = 3, summary flags (raw head 0x42
                        bits 0-1) = 3, location = map 9 (the ending room) with entrance 3 (Continue opens the New Game+ title list)
   --flags N            only the 2 summary flag bits (raw head 0x42; 2 = a New Game+ game, 3 = cleared)
@@ -88,7 +90,7 @@ def main(argv):
     src, dst = argv[0], argv[1]
     args = argv[2:]
     opts = {"slot": None, "room": None, "entrance": None, "party": None, "recruit": [], "char": [], "grid": [],
-            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "flags": None, "mcd": None, "mcd_only": False}
+            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "item": [], "flags": None, "mcd": None, "mcd_only": False}
     i = 0
     while i < len(args):
         a = args[i]
@@ -123,6 +125,8 @@ def main(argv):
             opts["stars"] = int(v, 0)
         elif a == "--gold":
             opts["gold"] = int(v, 0)
+        elif a == "--item":
+            opts["item"].append(v)
         elif a == "--cleared":
             opts["flags"] = 3
             opts["var"].append("0x7E=3")
@@ -265,6 +269,14 @@ def main(argv):
         struct.pack_into("<I", blk, 0x58C, opts["gold"])
         struct.pack_into("<I", blk, 0x3B, opts["gold"])
         log.append("gold %d" % opts["gold"])
+
+    for spec in opts["item"]:
+        iid, qty = (int(x, 0) for x in spec.split(":"))
+        ids = [struct.unpack_from("<H", img, 0xD13C + 2 * k)[0] for k in range(0x180)]
+        k = ids.index(iid) if iid in ids else ids.index(0)
+        struct.pack_into("<H", img, 0xD13C + 2 * k, iid if qty else 0)
+        img[0xD43C + k] = qty & 0xFF
+        log.append("item 0x%X x%d (stock slot %d)" % (iid, qty, k))
 
     new_blk = c.pack_block(bytes(blk), bytes(img))
     data = bytearray(card_member.data)
