@@ -216,7 +216,9 @@ class Vm {
   // Virtual time (ticks of the 2D delay counter) and the settle pass: after a slot run every entity's idle loop (slot 1: the other units'
   // reactions to what the slot just did, e.g. the Boxer Boys' var 0x84 -> dialogue) is ticked until all entities are back at the start of
   // their idle script with nothing armed, or `max_ticks`. False = still busy at the cap. A tick in which an entity changed a var that an
-  // earlier entity had already read in that tick does not settle: the reader sees the new value only on the next tick.
+  // earlier entity had already read in that tick does not settle: the reader sees the new value only on the next tick. A var an entity
+  // wrote itself before reading it in that tick is scratch (the PC entities' shared unit argument of A7): a later entity's write
+  // does not reach that reader, which writes its own value again before its next read.
   u32 vtime() const { return vtime_; }
   bool quiescent() const;
   bool settle(int max_ticks = 1500);
@@ -298,10 +300,13 @@ class Vm {
   const Module& mod_;
   Host& host_;
   std::vector<u16> vars_;
-  // Per var: the tick of its last script read and the lowest entity that read it in that tick; the script writes of the op being run
-  // (var index, value before); set when a write changed a var an earlier entity read this tick.
+  // Per var: the tick of its last script read and the lowest entity that read it in that tick (a read of the entity's own write of that
+  // tick does not count), the tick and entity of its last script write; the script writes of the op being run (var index, value before);
+  // set when a write changed a var an earlier entity read this tick.
   std::vector<u32> read_tick_;
   std::vector<u8> read_entity_;
+  std::vector<u32> write_tick_;
+  std::vector<u8> write_entity_;
   std::vector<std::pair<size_t, u16>> writes_;
   bool stale_read_ = false;
   std::vector<Ctx> ctx_;
@@ -369,6 +374,7 @@ class ScriptedBrain final : public EnemyBrain {
   bool menu_locked() const override { return vm_ && vm_->menu_locked(); }
   bool hidden(int unit) const override { return vm_ && vm_->hidden(unit); }
   bool untargetable(int unit) const override { return vm_ && vm_->untargetable(unit); }
+  bool has_script_vars() const override { return vm_ != nullptr; }
   int script_var(int byte_off) const override { return vm_ ? vm_->var(byte_off) : 0; }
   void set_script_var(int byte_off, int value) override {
     if (vm_) vm_->set_var(byte_off, value);

@@ -665,6 +665,21 @@ void FieldWorld::set_dopple_mask(const std::array<u16, 16>& mask) {
   }
 }
 
+std::array<u16, 8> FieldWorld::battle_saved_vars() const {
+  std::array<u16, 8> vars{};
+  for (size_t i = 0; i < vars.size(); ++i) vars[i] = static_cast<u16>(vm_.var(static_cast<u16>(0x3D0 + 2 * i)));
+  return vars;
+}
+
+void FieldWorld::set_battle_saved_vars(const std::array<u16, 8>& vars) {
+  for (size_t i = 0; i < vars.size(); ++i) {
+    const u16 id = static_cast<u16>(0x3D0 + 2 * i);
+    vm_.set_var(id, vars[i]);
+    gs_->slot.head[0x188 + id] = static_cast<u8>(vars[i] & 0xFF);
+    gs_->slot.head[0x188 + id + 1] = static_cast<u8>(vars[i] >> 8);
+  }
+}
+
 void FieldWorld::restore_vars() {
   const save::SaveSlot& sl = gs_->slot;
   for (int id = 0; id < 0x400; id += 2) {

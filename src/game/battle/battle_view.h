@@ -90,6 +90,8 @@ class BattleView {
     std::vector<battle::PartyMember> bench;
     // The Dopplegang pool bits.
     std::array<u16, 16> dopple_mask{};
+    // The save's variables 0x3D0..0x3DE (battle::BattleOptions::saved_vars).
+    std::array<u16, 8> saved_vars{};
     // Van's piggy-bank savings (script variable 0x176).
     int piggy_bank = 0;
     // The Grand Slam picks: monster records of the party slots in a monster-party scene (battle::BattleOptions::monster_party).
@@ -224,6 +226,8 @@ class BattleView {
   // Route vocabulary (`assert battle menu`): the party slot whose top command menu is up ("-" = none), a space, then one digit per party
   // slot, 1 = the unit holds Defend's guard.
   std::string route_menu() const;
+  // Route vocabulary (`assert battle facing`): the yaw each party slot's model shows (12 bit, 4096 = 360 deg), "-" = no unit.
+  std::string route_facing() const;
   // The host shows the btlexit results screen (BattleResults) after a victory: the view finishes right after the victory pose /
   // camera sequence without its own result panel and leaves the victory music playing (stop_music() ends it when that screen exits).
   void set_external_results(bool on) { external_results_ = on; }
@@ -735,6 +739,8 @@ class BattleView {
   Tgt target_mode(int cell) const;
   void enter_target(Tgt mode);
   std::vector<int> target_candidates() const;
+  // Index into `targets` where the target cursor starts (the PC's remembered target, by the pending command's target order).
+  int target_start(const std::vector<int>& targets) const;
   void build_command_ui();
   void build_element_ui();
   // Dopplegang (element 238): the creature pick list and the form change. open_dopple: element 238 confirmed on the active PC's grid builds
@@ -1071,9 +1077,11 @@ class BattleView {
   // HUD art: waku panel base / frame / active frame, gauge cells gg-1 / gg-2, field frame, damage digits, cursor frames, the field ring,
   // the HIT% caption leader (osak), pad / key glyph atlases, the camera icon, the element list plate (win4), the target info window
   // (waku-03), the red cursor diamonds (battle_11), the status icons (battle_34), the window skin halves (battle_04 STP / opaque texels) and
-  // the script window's page / end cursor (battle_86, 8 x 16 PS1 px cells) and the seven Chrono Cross colour row dots (16 x 16).
+  // the script window's page / end cursor (battle_86, 8 x 16 PS1 px cells), the seven Chrono Cross colour row dots (16 x 16) and the party
+  // panel's colour status corners (waku-04..09, one per colour index).
   enum HudTex { kHWakuBase, kHWaku, kHWakuAct, kHGg1, kHGg2, kHField, kHDigits, kHCursor, kHRing, kHOsak, kHPad, kHCam, kHWin4Base, kHWin4Frame,
-                kHWaku03, kHKeys, kHDiamond, kHStatus, kHSkinSemi, kHSkinOpaque, kHPageCur, kHColourDot, kHCount = kHColourDot + 7 };
+                kHWaku03, kHKeys, kHDiamond, kHStatus, kHSkinSemi, kHSkinOpaque, kHPageCur, kHColourDot, kHWakuColour = kHColourDot + 7,
+                kHCount = kHWakuColour + 6 };
   std::array<Tex, kHCount> hud_;
   // 12 cell masks, 208x112 each (elementfield/a01..a12.bmp).
   std::vector<u8> ring_masks_;

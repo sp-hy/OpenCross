@@ -391,6 +391,7 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   });
   bench_ = opt.bench;
   dopple_mask_ = opt.dopple_mask;
+  saved_vars_ = opt.saved_vars;
   const auto& scene_rec = tables_.scenes[static_cast<size_t>(scene)];
   boss_ = scene_rec.boss();
   cast_mask_ = ~(static_cast<u32>(scene_rec.raw[0x1B]) << 3) & 0x1FFu;
@@ -719,11 +720,11 @@ void Battle::evolve(int unit_index, int form) {
   Unit& unit = units_[static_cast<size_t>(unit_index)];
   int best_points = 0, best_colour = 0;
   for (int k = 0; k < 6; ++k) {
-    const int points = brain_.script_var(4 + 2 * k) & 0xFFFF;
+    const int points = saved_var(2 + k);
     if (best_points <= points) best_points = points, best_colour = k;
   }
   unit.innate = static_cast<u8>((unit.innate & 3) | (4 << best_colour));
-  for (int k = 0; k < 6; ++k) brain_.set_script_var(4 + 2 * k, 0);
+  for (int k = 0; k < 6; ++k) set_saved_var(2 + k, 0);
   evo_pending_ = 0;
   unit.kind = form;
   unit.ap = 8, unit.countdown = 8;
@@ -745,6 +746,30 @@ void Battle::evolve(int unit_index, int form) {
     member.growth_col = kPipGrowthCol[static_cast<size_t>(form - 0x2B)];
   }
   say(std::format("{} changes form: kind {:#x}, innate {:#x}", unit.name, form, unit.innate));
+}
+
+int Battle::saved_var(int index) const {
+  return (brain_.has_script_vars() ? brain_.script_var(2 * index) : saved_vars_[static_cast<size_t>(index)]) & 0xFFFF;
+}
+
+void Battle::set_saved_var(int index, int value) {
+  if (brain_.has_script_vars()) brain_.set_script_var(2 * index, value & 0xFFFF);
+  else saved_vars_[static_cast<size_t>(index)] = static_cast<u16>(value);
+}
+
+std::array<u16, 8> Battle::saved_vars() const {
+  std::array<u16, 8> out{};
+  for (size_t k = 0; k < out.size(); ++k) out[k] = static_cast<u16>(saved_var(static_cast<int>(k)));
+  return out;
+}
+
+void Battle::count_colour_point(int actor, const data::ElemRec& element) {
+  auto is_pip = [](const PartyMember& member) { return member.char_id == kPipCharId; };
+  if (std::none_of(party_.begin(), party_.end(), is_pip)) return;
+  const int colour = data::colour_index_of_bit(static_cast<u8>(element.colour_bit() & 0xFC));
+  if (colour < 0) return;
+  const bool pip_casts = is_pc_slot(actor) && static_cast<size_t>(actor) < party_.size() && pip_form(party_[static_cast<size_t>(actor)].char_id);
+  set_saved_var(2 + colour, saved_var(2 + colour) + (pip_casts ? 2 : 1));
 }
 
 u8 Battle::element_colour(int id) const {
@@ -927,10 +952,13 @@ void Battle::set_status_bit(int target, int set, int bit) {
 // Nothing lands on an immune target. Hi bits 29..31 only stay when one of the target's accessories is 0xF9..0xFB (then an old one of them
 // in the permanent word goes, the element's colour joins as the shield bits, and bits 29..31 / 0..5 land without a roll), else bits 0..5 and
 // 29..31 are stripped. A colour shield in the mask replaces the inflicted one. Per bit: skipped when the skip mask has it, chance doubled
-// when the weakness mask has it, lands on rnd(1,99) <= chance unless already set. No bit is special (lo bit 31 is the blue seal, not a kill).
+// when the weakness mask has it, lands on rnd(1,99) <= chance unless already set. "Already set" reads the hi word as it was before the
+// colour shield was cleared, so the colour the target already has is cleared and not set again (its old timer stays). No bit is special
+// (lo bit 31 is the blue seal, not a kill).
 bool Battle::apply_status_bits(int target, u32 lo, u32 hi, int chance, u8 colour_bit) {
   Unit& target_unit = units_[static_cast<size_t>(target)];
   if (target_unit.hi & st::kHiImmune) return false;
+  u32 hi_before = target_unit.hi;
   bool special = false;
   if (hi & 0xE0000000u) {
     special = std::any_of(target_unit.eq.acc.begin(), target_unit.eq.acc.end(), [](u16 id) { return id >= 0xF9 && id <= 0xFB; });
@@ -939,6 +967,7 @@ bool Battle::apply_status_bits(int target, u32 lo, u32 hi, int chance, u8 colour
         target_unit.hi &= ~(target_unit.perm_hi & ~0x1FFFFFC0u);
         target_unit.perm_hi &= 0x1FFFFFC0u;
       }
+      hi_before &= 0x1FFFFFC0u;
       hi |= static_cast<u32>(colour_bit >> 2);
     } else {
       hi &= 0x1FFFFFC0u;
@@ -955,7 +984,7 @@ bool Battle::apply_status_bits(int target, u32 lo, u32 hi, int chance, u8 colour
       const bool direct = special && set == 1 && (bit < 6 || bit > 28);
       if (!direct && !status_roll(rng_, chance, weak)) continue;
       any = true;
-      if ((set == 0 ? target_unit.lo : target_unit.hi) >> bit & 1u) continue;
+      if ((set == 0 ? target_unit.lo : hi_before) >> bit & 1u) continue;
       set_status_bit(target, set, bit);
       say(std::format("  {} gains status {}:{:#x}", target_unit.name, set, 1u << bit));
     }
@@ -1726,6 +1755,7 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
   ring_repainted_ = false;
   fizzled_ = false;
   if (element_id == kVaryInnateElement) vary_innate_colour_ = static_cast<u8>(units_[static_cast<size_t>(actor)].innate & 0xFC);
+  count_colour_point(actor, element);
   // The creature state is cleared for each cast.
   creature_state_ = 0, creature_model_ = 0, creature_slot_ = 0;
   if (catch_in_trap(actor, element_id, row, target)) return;
@@ -1881,13 +1911,17 @@ void Battle::run_enemy_action(int ui, const EnemyAction& act) {
   post_action(ui, poison_step, timer_steps);
 }
 
-// Executes a scripted plan (several queued attacks = one turn). Stops early when the battle ends or the actor dies.
+// Executes a scripted plan (several queued attacks = one turn). Stops early when the battle ends or the actor dies. Every element entry is its
+// own executor action (its own cast presentation, and the field ring takes its colour before the next entry starts); consecutive weapon
+// entries stay one action.
 bool Battle::run_plan(int ui, const std::vector<EnemyAction>& plan, bool set_countdown) {
   Unit& unit = units_[static_cast<size_t>(ui)];
   int poison_step = 1, timer_steps = 1;
   if (plan.empty()) say(std::format("{} waits", unit.name));
-  for (const EnemyAction& action : plan) {
+  for (size_t i = 0; i < plan.size(); ++i) {
+    const EnemyAction& action = plan[i];
     if (outcome_ != Outcome::Ongoing || !unit.alive()) break;
+    if (i > 0 && (action.kind == EnemyAction::Kind::Element || plan[i - 1].kind == EnemyAction::Kind::Element)) begin_action();
     cur_script_seq_ = action.seq;
     cur_group_ = action.group;
     std::tie(poison_step, timer_steps) = exec_action(ui, action);

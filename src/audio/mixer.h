@@ -89,8 +89,9 @@ class Mixer {
 
   // Movie PCM stream (own bus): the movie player pushes interleaved stereo float at kRate from its decoder thread
   // (single producer); the audio thread drains it. movie_frames_played() is the audio clock for A/V sync.
-  // movie_start clears the ring and the clock and stays silent until movie_run starts consuming (and the clock counting).
-  void movie_start();
+  // movie_start clears the ring and the clock and stays silent until movie_run starts consuming (and the clock counting). `level`
+  // scales this movie's sound on top of the movie bus (the field movie table row's volume / 127). The music keeps playing.
+  void movie_start(float level = 1.0f);
   void movie_run();
   void movie_stop();
   // Returns the frames accepted (the ring may be full).
@@ -171,6 +172,7 @@ class Mixer {
   std::vector<float> movie_ring_;                // kMovieRing * 2 floats
   std::atomic<u64> movie_w_{0}, movie_r_{0}, movie_played_{0};
   std::atomic<bool> movie_on_{false}, movie_flush_{false};
+  std::atomic<float> movie_level_{1.0f};
   std::shared_ptr<const std::vector<float>> voice_;  // audio thread
   size_t voice_pos_ = 0;                             // frames played
   std::atomic<bool> voice_on_{false};

@@ -40,8 +40,9 @@ class Player {
   // Optional, before open(): movie audio goes to this mixer's movie bus and drives the clock.
   void set_mixer(audio::Mixer* mixer) { mixer_ = mixer; }
   // `start` / `end`: play only movie frames [start, end) at the table's 15 fps (the field movie table's range; start 0 = from the
-  // beginning, end 0 = to the end). Earlier frames / audio are decoded and dropped, the clock starts at `start`.
-  bool open(const vfs::Vfs& fs, std::string_view name, std::string_view lang = "en", u32 start = 0, u32 end = 0);
+  // beginning, end 0 = to the end). Earlier frames / audio are decoded and dropped, the clock starts at `start`. `level` scales the
+  // movie's sound (Mixer::movie_start).
+  bool open(const vfs::Vfs& fs, std::string_view name, std::string_view lang = "en", u32 start = 0, u32 end = 0, float level = 1.0f);
   // `keep_frame`: the movie ended on screen - keep the last decoded frame's texture alive so it can be faded into the next scene
   // (held() / draw_held() / fade_held()); the next open() / close() / release_held() frees it.
   void close(bool keep_frame = false);

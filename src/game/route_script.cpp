@@ -809,6 +809,12 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
       const std::string got = st.battle_menu ? st.battle_menu() : std::string();
       if (got != want) return bad("battle menu is '" + got + "', expected '" + want + "'");
+    } else if (args[1] == "battle" && args[2] == "facing") {
+      // assert battle facing <yaw|-> x3: the yaw each party slot's model shows
+      std::string want;
+      for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
+      const std::string got = st.battle_facing ? st.battle_facing() : std::string();
+      if (got != want) return bad("battle facing is '" + got + "', expected '" + want + "'");
     } else if (args[1] == "battle") {
       if (st.battle != (args[2] == "active")) return bad("battle is " + std::string(st.battle ? "active" : "inactive"));
     } else if (args[1] == "guide") {

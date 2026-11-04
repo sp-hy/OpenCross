@@ -1,5 +1,6 @@
 # The true ending: Continue file 04 (opa_a04f, scenario 209, party Kid / Grobyc / Serge) -> the Time Egg on Opassa Beach -> the
-# Time Devourer -> PC 0 casts the Chrono Cross after the six colours (true_ending.env) -> lasdes2 -> end_a01e.
+# Time Devourer -> PC 0 casts the Chrono Cross after the six colours (true_ending.env) -> lasdes2 -> end_a01e -> opa_b04f (b28end)
+# -> ending (the staff roll, final) -> ending's THE END.
 0 wait flow title 300
 - wait movie start 300
 - tap confirm
@@ -64,4 +65,20 @@
 - assert result 4
 - wait 600
 - screenshot te_90_end.png
+- autoshot 1200 60 te_end_
+- mash until room opa_b04f 12000      # end_a01e's lines, then Opassa Beach (entrance 2)
+- screenshot te_91_beach.png
+- mash until movie start 12000         # b28end (silent) over song 7
+- wait 900
+- screenshot te_92_b28end.png
+- wait movie end 20000
+- wait movie start 3000               # ending room 1: ending_s, the staff roll
+- wait 900
+- screenshot te_93_staff.png
+- wait movie end 60000
+- wait movie start 600                # final
+- wait movie end 9000
+- wait room ending 1200               # ending room 2: THE END over song 15
+- wait 400
+- screenshot te_94_theend.png
 - quit

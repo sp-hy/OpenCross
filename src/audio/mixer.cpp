@@ -77,9 +77,10 @@ void Mixer::voice_stop() {
 }
 
 // Without a device (or with a stalled callback) the ring is reset directly instead of by the audio thread.
-void Mixer::movie_start() {
+void Mixer::movie_start(float level) {
   if (movie_ring_.empty()) movie_ring_.assign(size_t(kMovieRing) * 2, 0.0f);
   movie_on_.store(false, std::memory_order_release);
+  movie_level_.store(std::clamp(level, 0.0f, 1.0f), std::memory_order_release);
   movie_flush_.store(true, std::memory_order_release);
   for (int i = 0; i < 200 && movie_flush_.load(std::memory_order_acquire) && stream_; ++i) SDL_Delay(1);
   if (movie_flush_.exchange(false)) {
@@ -417,7 +418,7 @@ void Mixer::render(float* out, u32 frames) {
   if (!hold && movie_on_.load(std::memory_order_acquire)) {
     const u64 read_pos = movie_r_.load(std::memory_order_relaxed);
     const u32 count = u32(std::min<u64>(frames, movie_w_.load(std::memory_order_acquire) - read_pos));
-    const float gain = master * bus_gain(Bus::Movie);
+    const float gain = master * bus_gain(Bus::Movie) * movie_level_.load(std::memory_order_acquire);
     for (u32 i = 0; i < count; ++i) {
       const size_t at = size_t((read_pos + i) & (kMovieRing - 1)) * 2;
       out[size_t(i) * 2] += movie_ring_[at] * gain;

@@ -752,6 +752,18 @@ void test_turn_colour_status() {
   const int red = hit(true), white = hit(false);
   CHECK(white > 0);
   CHECK(red > white);
+  // Cast again on a target that already has that colour, it clears the colour and leaves its timer running; a third cast sets it again.
+  Fixture fixture;
+  add_support_elements(fixture.tables);
+  Battle& battle = fixture.battle;
+  battle.do_element(1, 6, 0, 0);
+  CHECK_EQ(battle.unit(0).hi & 0x3Fu, 0x08u);
+  CHECK_EQ(battle.unit(0).timers.count(35), 1u);
+  battle.do_element(1, 6, 0, 0);
+  CHECK_EQ(battle.unit(0).hi & 0x3Fu, 0u);
+  CHECK_EQ(battle.unit(0).timers.count(35), 1u);
+  battle.do_element(1, 6, 0, 0);
+  CHECK_EQ(battle.unit(0).hi & 0x3Fu, 0x08u);
 }
 
 void test_big_catch() {
@@ -1072,6 +1084,43 @@ void test_queued_cast_targets() {
       if (event.kind == ActionEvent::Kind::Element && event.actor == 3 && is_pc_slot(event.target)) ++hits[static_cast<size_t>(event.target)];
     CHECK(hits == (std::array<int, kPcSlots>{1, 1, 1}));
     CHECK(battle.ring() == (std::array<int, 3>{-1, -1, 5}));
+  }
+  // One turn queuing two element entries and two weapon entries: each element is its own action, so the second cast starts with the
+  // first one's colour already in the ring; the weapon entries after them share one action.
+  {
+    data::GameTables tables = make_tables();
+    tables.elements.resize(5);
+    tables.elements[4] = tables.elements[1];
+    tables.elements[4].raw[5] = 0x20;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    QueueBrain brain;
+    pac::QueuedAttack blue;
+    blue.type = 1;
+    blue.value = 1;
+    blue.mask = 0x1;
+    pac::QueuedAttack red = blue;
+    red.value = 4;
+    pac::QueuedAttack hit = weapon;
+    hit.mask = 0x1;
+    brain.queued = {blue, red, hit, hit};
+    Battle battle(tables, rng, brain);
+    rng.push(0);
+    rng.push(100);
+    CHECK(battle.start({make_member(0, "A", 999), make_member(1, "B", 999), make_member(2, "C", 999)}, 0));
+    for (int pc = 0; pc < kPcSlots; ++pc) battle.unit_mut(pc).stamina = 0;
+    battle.unit_mut(3).countdown = 30;
+    battle.settle();
+    std::vector<ActionEvent> turn;
+    for (const ActionEvent& event : battle.events())
+      if (event.actor == 3 && event.kind != ActionEvent::Kind::Defend) turn.push_back(event);
+    CHECK_EQ(turn.size(), size_t{4});
+    if (turn.size() == 4) {
+      CHECK(turn[0].element == 1 && turn[1].element == 4);
+      CHECK(turn[1].action != turn[0].action && turn[2].action != turn[1].action && turn[3].action == turn[2].action);
+      CHECK(turn[0].ring == (std::array<int, 3>{-1, -1, -1}));
+      CHECK(turn[1].ring == (std::array<int, 3>{-1, -1, 5}));
+    }
+    CHECK(battle.ring() == (std::array<int, 3>{-1, 5, 3}));
   }
 }
 
@@ -2371,6 +2420,144 @@ void test_pip_evolution() {
   CHECK_EQ(battle.element_colour(0x123), 0x04);
 }
 
+// The PC entities' idle loops as the scenes have them: every PC entity writes its own unit into one shared global (v9C) each tick, and
+// the entity of a Pip whose form can still change passes it to A7. Entity 1 = Pip (unit 0), entity 2 = the member after him (unit 1).
+Bytes assemble_shared_unit_pac() {
+  Bytes code;
+  auto emit = [&](std::initializer_list<int> bytes) {
+    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
+  };
+  const int idle = static_cast<int>(code.size());
+  emit({0x00});
+  const int init1 = static_cast<int>(code.size());
+  emit({0x0E, 0xE0, 0x80, 0x00});
+  const int init2 = static_cast<int>(code.size());
+  emit({0x0E, 0xE1, 0x80, 0x00});
+  const int tick1 = static_cast<int>(code.size());
+  // v9C = E0; v9E = 0; A7 v9E v9C.
+  emit({0x59, 0x10, 0x9C, 0x00, 0xE0, 0x00, 0x40, 0x10, 0x9E, 0x00, 0x00, 0x00, 0x40});
+  emit({0xA7, 0x9E, 0x00, 0x9C, 0x00});
+  emit({0x00});
+  const int tick2 = static_cast<int>(code.size());
+  // v9C = E1.
+  emit({0x59, 0x10, 0x9C, 0x00, 0xE1, 0x00, 0x40, 0x00});
+  const size_t ec = 3, base = 0x94 + ec * 0x40;
+  Bytes image(base, 0);
+  auto put32 = [&](size_t offset, u32 value) {
+    for (int i = 0; i < 4; ++i) image[offset + static_cast<size_t>(i)] = static_cast<u8>(value >> (8 * i));
+  };
+  auto put16 = [&](size_t offset, int value) {
+    image[offset] = static_cast<u8>(value);
+    image[offset + 1] = static_cast<u8>(value >> 8);
+  };
+  put32(0, 2), put32(4, 0x10), put32(8, static_cast<u32>(base + code.size())), put32(0xC, static_cast<u32>(base + code.size() + 8));
+  put32(0x90, static_cast<u32>(ec));
+  for (size_t entity = 0; entity < ec; ++entity)
+    for (int slot = 0; slot < 5; ++slot) put16(0x94 + entity * 0x40 + static_cast<size_t>(slot) * 2, idle);
+  put16(0x94 + 0x40 + 0, init1);
+  put16(0x94 + 0x40 + 2, tick1);
+  put16(0x94 + 0x80 + 0, init2);
+  put16(0x94 + 0x80 + 2, tick2);
+  image.insert(image.end(), code.begin(), code.end());
+  return image;
+}
+
+// A Pip that can still change form, in a party slot before another member: the later entity's write of the shared unit global does not
+// keep the settle pass going (Pip's entity wrote the global itself before A7 read it), so no slot run costs the 1500-tick cap and the
+// view's script stream gets no 1500-tick gap after every action.
+void test_pip_idle_loop_settles() {
+  data::GameTables tables = make_tables();
+  for (const int kind : {0x2B, 0x2C, 0x2D}) {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    pac::ScriptedBrain brain;
+    brain.set_module(0, assemble_shared_unit_pac());
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    PartyMember pip = make_member(43, "Pip");
+    pip.kind = kind;
+    CHECK(battle.start({pip, make_member(1, "B"), make_member(2, "C")}, 0));
+    CHECK(brain.active());
+    CHECK(brain.vm()->vtime() < 10);
+    const u32 before = brain.vm()->vtime();
+    CHECK(brain.vm()->settle());
+    CHECK(brain.vm()->vtime() - before < 10);
+    CHECK_EQ(battle.evo_pending(), 0);
+    CHECK_EQ(brain.vm()->var(0x9C), 0xE1);
+  }
+}
+
+// Pip's colour points: script vars 0x00..0x0E start as BattleOptions::saved_vars and come back out of saved_vars(); every element action adds 1
+// to the point of its record colour while Pip is in the party (2 when Pip casts it), nothing without him or for an action without one colour.
+void test_pip_colour_points() {
+  const std::array<u16, 8> saved{0x11, 0x3F, 0, 0, 0, 0, 0, 5};
+  auto cast = [&](int pip_slot, int caster, u8 colour) {
+    data::GameTables tables = make_tables();
+    tables.elements[1].raw[5] = colour;
+    ScriptedRng rng{Lo::Fallback::Lo};
+    NullBrain brain;
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    std::vector<PartyMember> party{make_member(0, "A"), make_member(1, "B"), make_member(2, "C")};
+    if (pip_slot >= 0) party[static_cast<size_t>(pip_slot)] = make_member(kPipCharId, "Pip");
+    BattleOptions opt;
+    opt.saved_vars = saved;
+    CHECK(battle.start(party, 0, opt));
+    battle.unit_mut(caster).gauge = 2;
+    Command command;
+    command.kind = Command::Kind::Element;
+    command.actor = caster;
+    command.cell = 0;
+    command.target = 3;
+    std::string why;
+    CHECK(battle.apply(command, &why));
+    return battle.saved_vars();
+  };
+  std::array<u16, 8> want = saved;
+  CHECK(cast(-1, 0, 0x80) == want);
+  want[7] = 6;
+  CHECK(cast(1, 0, 0x80) == want);
+  want[7] = 7;
+  CHECK(cast(1, 1, 0x80) == want);
+  want = saved;
+  want[2] = 1;
+  CHECK(cast(2, 0, 0x04) == want);
+  CHECK(cast(1, 0, 0xFC) == saved);
+
+  // An enemy's cast counts too.
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  CastBrain brain;
+  brain.element = 1;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(kPipCharId, "Pip"), make_member(2, "C")}, 0));
+  for (int i = 0; i < kPcSlots; ++i) battle.unit_mut(i).stamina = 0;
+  battle.settle();
+  int enemy_casts = 0;
+  for (const ActionEvent& event : battle.events())
+    if (event.kind == ActionEvent::Kind::Element && event.actor == 3) ++enemy_casts;
+  CHECK(enemy_casts > 0);
+  CHECK_EQ(battle.saved_vars()[7], enemy_casts);
+
+  // With a scene script the points are its variables.
+  pac::ScriptedBrain scripted;
+  scripted.set_module(0, assemble_shared_unit_pac());
+  ScriptedRng scripted_rng{Lo::Fallback::Lo};
+  Battle scripted_battle{tables, scripted_rng, scripted};
+  scripted_rng.push(0);
+  scripted_rng.push(100);
+  BattleOptions opt;
+  opt.saved_vars = saved;
+  CHECK(scripted_battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0, opt));
+  CHECK_EQ(scripted.vm()->var(0x02), 0x3F);
+  CHECK_EQ(scripted.vm()->var(0x0E), 5);
+  scripted.vm()->set_var(0x04, 9);
+  CHECK_EQ(scripted_battle.saved_vars()[2], 9);
+}
+
 void test_hidden_units() {
   for (int reveal = 0; reveal < 2; ++reveal) {
     data::GameTables tables = make_tables();
@@ -3529,6 +3716,8 @@ int main() {
   test_enemy_gauge_cap();
   test_ring_battlefield_fallback();
   test_settle_with_pending_evolution();
+  test_pip_idle_loop_settles();
+  test_pip_colour_points();
   test_stamina_sequence();
   test_action_events();
   test_status_and_poison();

@@ -107,6 +107,7 @@ namespace oc::game {
 //   battle_events() -> route events of the battle view ("w<msg>" script window opened, "a" action began), empty without a view;
 //   battle_camera() -> what drives the battle camera ("orbit <slot>", "shot", "target", "hold"), "" = no battle view;
 //   battle_menu() -> "<slot> <guards>": the party slot whose top command menu is up ("-" none), one digit per slot (1 = guarding);
+//   battle_facing() -> "<yaw> <yaw> <yaw>": the yaw each party slot's model shows (4096/turn), "-" = no unit;
 //   battle_sig() -> battle state summary (scene, unit HP / KO / outcome), "" = no battle;
 //   char_stat(char, 0 current HP | 1 max HP | 2 status bits) -> value, -1 = none; set_char_stat is the debug write of the same.
 struct RouteState {
@@ -173,6 +174,7 @@ struct RouteState {
   std::function<std::vector<std::string>()> battle_events;
   std::function<std::string()> battle_camera;
   std::function<std::string()> battle_menu;
+  std::function<std::string()> battle_facing;
   std::function<std::string()> battle_sig;
   std::function<int(int, int)> char_stat;
   std::function<void(int, int, int)> set_char_stat;

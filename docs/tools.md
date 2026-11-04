@@ -169,7 +169,7 @@ Source: `tools/ocmovie.cpp`. `<name>` is a `movie.dat` member without extension 
 |---|---|---|
 | `play` | `<name> [seconds]` | Window and audio, A/V synced; Esc / Enter / Space skips. |
 | `dump` | `<name> <frame> <out.png>` | Headless decode to frame N (0-based), saved as PNG. |
-| `info` | `<name>` | Size, frame rate, frame count, duration, audio. |
+| `info` | `<name>` | Size, frame rate, frame count, duration, audio; the sound's peak and its RMS per 10 s in dBFS (`b28end`'s track is digital silence). |
 | `table` | none | The field script's movie operand to `movie.dat` member mapping of both discs. |
 
 ### 1.9 `ocbattleview` (one battle in a window)
@@ -302,7 +302,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 |---|---|---|---|
 | `OPENCROSS_GAMEDIR` | `tools/tool_util.cpp` (`octext`, `ochd`, `ocmovie`, `ocstage`), `tools/occ.cpp`, `tools/ocprd.cpp`, `tools/ocaudio.cpp`, `tools/ocbattle.cpp`, `src/game/battle/seq_tool.cpp`, `tools/py/cc_save_forge.py`, `tests/test_*.cpp` | folder path | Game folder used by the dev tools, the unit tests and `cc_save_forge.py` when no `-g` / `--game` is given. |
 | `OC_QUIET` | `src/platform/window.cpp`, `src/audio/mixer.cpp`, `src/app/app_boot.cpp` (no Steam connection); set by `src/game/battle/demo_main.cpp` (`--frames`), `tests/routes/run.ps1`, `tools/ours_cast34.ps1` | set | Test window is shown without activation, never focusable and kept behind every other window (sent to the back before and after it is shown, Windows only), and the mixer output gain is 0. |
-| `OC_SOURCE_SAVE` | `tests/routes/true_ending.prep.ps1`, `mojo_full_party.prep.ps1`, `mojo_swap_in.prep.ps1`, `relief_save.prep.ps1`, `relief_save_orig.prep.ps1`, `enc_k.prep.ps1`, `enc_l.prep.ps1`, `enc_p1.prep.ps1`, `ngplus_ending.prep.ps1` | file path | The save.dat the route forges its Opassa Beach save from (default `tmp\save.dat`). |
+| `OC_SOURCE_SAVE` | `tests/routes/true_ending.prep.ps1`, `mojo_full_party.prep.ps1`, `mojo_swap_in.prep.ps1`, `relief_save.prep.ps1`, `relief_save_orig.prep.ps1`, `enc_k.prep.ps1`, `enc_l.prep.ps1`, `enc_p1.prep.ps1`, `ngplus_ending.prep.ps1`, `shop_ending.prep.ps1` | file path | The save.dat the route forges its Opassa Beach save from (default `tmp\save.dat`). |
 | `OC_FRAMETIME` | `src/app/app_run.cpp` | set; `2` | Logs the wall time of main-loop iterations while a field-to-battle hand-over runs: only those over 20 ms, or every iteration when the value starts with `2`. |
 | `OC_NO_WARP` | `src/app/app_draw.cpp` | `1`, `2` | A/B check of the screen ripple: `1` draws its frame unwarped; `2` (classic art) shows only the deep part, unwarped. |
 | `OC_SLOT_DUMP` | `src/app/app_route.cpp` | path prefix | A route `request slotdump N` writes the encoded save block to `<prefix>N.bin` (an error is logged when unset). |

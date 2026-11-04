@@ -1,0 +1,65 @@
+# The shop ending ("The Shop Staff and the Three Unlikely Heroes"): Continue file 04 (opa_b04f, scenario 58, bit 7206) -> the Time
+# Egg -> the Time Devourer (shop_ending.env) -> fin_01 entrance 1 (Lisa's element shop) -> fin_34 -> fin_16 -> fin_17 -> the
+# ending room.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right                           # file 04
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait room opa_b04f 600
+- mash until idle 1 3000              # the beach's arrival lines
+- assert var 0x7E 2
+- walk -178 -870 24 900
+- walk -705 -870 24 900               # the Time Egg spot
+- tap f                               # the field key-item list: Time Egg, Time Shifter
+- wait 40
+- tap confirm
+- wait 30
+- choose 0 900                        # "To the darkness of time!"
+- skip 1200
+- skip 1200
+- skip 1200
+- wait battle start 3000
+- wait 1500                           # boss intro: PC 0's command menu
+- tap down                            # Element
+- wait 10
+- tap confirm
+- wait 30
+- tap confirm
+- wait 30
+- tap confirm
+- wait battle end 6000
+- wait room fin_01 1800
+- assert var 0x02 1
+- wait text used to working here       # her father's greeting (message 0)
+- wait 90
+- tap confirm
+- wait text Daddy                     # Lisa's first line (message 1)
+- wait 90
+- tap confirm
+- wait text free time                 # her father's answer (message 2)
+- mash until room fin_34 6000         # bit 7206 set, Doc not recruited
+- mash until room fin_16 6000
+- mash until room fin_17 6000
+- mash until room ending 6000
+- assert earned ach_end6_shop
+- quit

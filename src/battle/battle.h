@@ -76,6 +76,7 @@ struct PartyMember {
 
 // Pip's forms. Kind byte 0x2B base, 0x2C / 0x2D first forms, 0x2E..0x30 second.
 inline bool pip_form(int kind) { return kind >= 0x2B && kind <= 0x30; }
+inline constexpr int kPipCharId = 43;
 // Per form three tech element ids (0x11F..0x12D).
 inline constexpr std::array<u16, 18> kPipTechs = {0x11F, 0x120, 0x120, 0x121, 0x122, 0x122, 0x123, 0x124, 0x124,
                                                   0x125, 0x126, 0x127, 0x128, 0x129, 0x12A, 0x12B, 0x12C, 0x12D};
@@ -340,6 +341,8 @@ class EnemyBrain {
   // (possibly none = the script passes); false = no script, fall back to `choose` / the built-in behaviour.
   virtual bool plan_turn(Battle&, int /*unit*/, Rng&, std::vector<EnemyAction>& /*out*/) { return false; }
   // The scene script variable at that byte offset (mode 41 reads var 45 at 0xDE); mode 45 zeroes the colour-point vars 4..0xE.
+  // has_script_vars: a scene script runs, so these are its variables (otherwise the battle keeps the saved ones itself).
+  virtual bool has_script_vars() const { return false; }
   virtual int script_var(int /*byte_off*/) const { return 0; }
   virtual void set_script_var(int /*byte_off*/, int /*value*/) {}
   // Slot 3 (enemy units): the kill script runs once the unit's HP is 0. What it queues with op 67 (the death element of a boss with a
@@ -395,6 +398,8 @@ struct BattleOptions {
   std::vector<PartyMember> bench;
   // The Dopplegang pool (the save's 16 words, also battle script vars 0x60..0x7F): 256 bits, bit n of word w = pool slot w * 16 + n.
   std::array<u16, 16> dopple_mask{};
+  // The save's variables 0x3D0..0x3DE, which are battle script vars 0x00..0x0E (0x04..0x0E: Pip's six colour points).
+  std::array<u16, 8> saved_vars{};
   // Script variable 0x176: Van's piggy-bank savings in hundreds of G (element mode 46 adds it to the power).
   int piggy_bank = 0;
   // A monster-party scene (scene record byte 0x0F bit 0, the Grand Slam): party slot i fights as monster record monster_party[i] (the
@@ -469,6 +474,10 @@ class Battle {
   int evo_pending() const { return evo_pending_; }
   void set_evo_pending(int element) { evo_pending_ = element; }
   void evolve(int unit, int form);
+  // Script vars 0x00..0x0E as they stand (BattleOptions::saved_vars at the start): the host writes them back to the save's variables
+  // 0x3D0..0x3DE after the fight. Each element action (PC or enemy, a technique, item or summon alike) adds 1 to the colour point of its
+  // record colour while Pip is in the party, and 1 more when Pip casts it; an action without a single colour adds nothing.
+  std::array<u16, 8> saved_vars() const;
   // Element colour (pgdat +5) as the battle sees it: Pip's 18 techs take Pip's innate colour, Vary Innate its last caster's.
   u8 element_colour(int id) const;
   // The colour an element cast enters in the colour history: 0..5 (an element without a colour byte enters as 0), 6 for the all-colour
@@ -594,6 +603,10 @@ class Battle {
   // Single target, the whole side (element record byte 4 bit 0x10), or the units of `targets` (EnemyAction::targets) when it names more
   // than one: one cast in every case, so the field ring takes its colour once.
   void cast_element(int actor, int element_id, int row, int target, u32 targets = 0);
+  // Script var 0x00..0x0E number `index` (saved_vars): the scene script's variable while one runs.
+  int saved_var(int index) const;
+  void set_saved_var(int index, int value);
+  void count_colour_point(int actor, const data::ElemRec& element);
   void damage_unit(int actor, int target, int value, int code);
   void kill(int unit);
   // Runs the kill script (slot 3) of a dead enemy once and parks the death cast it queued.
@@ -696,6 +709,8 @@ class Battle {
   int creature_state_ = 0, creature_model_ = 0, creature_slot_ = 0;
   // Pip's pending form element (cleared at battle init and by mode 45).
   int evo_pending_ = 0;
+  // Script vars 0x00..0x0E while no scene script holds them (saved_vars).
+  std::array<u16, 8> saved_vars_{};
   // The colour kPipTechs take (0 = no Pip in the party).
   u8 pip_tech_colour_ = 0;
   // See cast_mask().

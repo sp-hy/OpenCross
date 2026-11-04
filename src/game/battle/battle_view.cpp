@@ -335,6 +335,7 @@ void BattleView::run_load_step(LoadJob& job) {
   bopt.growth = opt.growth;
   bopt.bench = opt.bench;
   bopt.dopple_mask = opt.dopple_mask;
+  bopt.saved_vars = opt.saved_vars;
   bopt.piggy_bank = opt.piggy_bank;
   bopt.monster_party = opt.monster_party;
   bopt.duel_third = opt.duel_third;

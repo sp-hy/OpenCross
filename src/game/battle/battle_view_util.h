@@ -33,6 +33,15 @@ inline const u32 kWhite = render::pack_rgba(255, 255, 255), kYellow = render::pa
 
 inline float lerp(float from, float to, float amount) { return from + (to - from) * amount; }
 
+// The end yaw (radians, unwrapped from `from`) of a RotateT to the 12-bit yaw `to`: the 12-bit difference taken as signed, so an exact half
+// turn goes the negative way.
+inline float rotate_end(float from, int to) {
+  const int current = static_cast<int>(std::lround(from * (4096.0f / (2.0f * kPi)))) & 0xFFF;
+  int diff = (to - current) & 0xFFF;
+  if (diff >= 0x800) diff -= 0x1000;
+  return from + static_cast<float>(diff) * (2.0f * kPi / 4096.0f);
+}
+
 inline std::array<float, 3> cross(const std::array<float, 3>& lhs, const std::array<float, 3>& rhs) {
   return {lhs[1] * rhs[2] - lhs[2] * rhs[1], lhs[2] * rhs[0] - lhs[0] * rhs[2], lhs[0] * rhs[1] - lhs[1] * rhs[0]};
 }

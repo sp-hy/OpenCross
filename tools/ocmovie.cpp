@@ -1,12 +1,14 @@
 // ocmovie: Bink 2 FMV tool.
 //   ocmovie [-g <game dir>] [-l <lang>] play <name> [seconds]        window + audio, A/V synced; Esc/Enter/Space skips
 //   ocmovie [-g <game dir>] [-l <lang>] dump <name> <frame> <out.png>  decode to frame N (0-based) and save it (headless)
-//   ocmovie [-g <game dir>] [-l <lang>] info <name>
+//   ocmovie [-g <game dir>] [-l <lang>] info <name>           size, rate, length, audio peak and rms per 10 s
 //   ocmovie [-g <game dir>] [-l <lang>] table             the field script's movie operand -> movie.dat member mapping of both discs
 // <name> is a movie.dat member without extension ("a01op", "title"); <lang> (default en) picks a01op_<lang> etc.
 // The game dir defaults to $OPENCROSS_GAMEDIR, then the exe directory and its parents.
 #include <SDL3/SDL.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -75,9 +77,19 @@ int cmd_info(const vfs::Vfs& game_fs, const std::string& lang, const std::string
   std::string member;
   if (!load_decoder(game_fs, name, lang, decoder, member)) return 1;
   u64 frames = 0, samples = 0;
+  constexpr u64 kWindow = 10ull * movie::Decoder::kAudioRate;
+  std::vector<double> window_sum;
+  float peak = 0.0f;
   while (decoder.step()) {
     frames += decoder.video().size();
-    samples += decoder.audio().size() / 2;
+    const auto& pcm = decoder.audio();
+    for (size_t i = 0; i < pcm.size(); ++i) {
+      const u64 window = (samples + i / 2) / kWindow;
+      if (window >= window_sum.size()) window_sum.resize(window + 1, 0.0);
+      window_sum[window] += static_cast<double>(pcm[i]) * pcm[i];
+      peak = std::max(peak, std::abs(pcm[i]));
+    }
+    samples += pcm.size() / 2;
     decoder.video().clear();
     decoder.audio().clear();
   }
@@ -85,6 +97,14 @@ int cmd_info(const vfs::Vfs& game_fs, const std::string& lang, const std::string
   std::printf("%s: %ux%u @ %.3f fps, %llu frames (%.2f s), audio %s %.2f s\n", member.c_str(), decoder.width(), decoder.height(),
               decoder.fps(), static_cast<unsigned long long>(frames), static_cast<double>(frames) / decoder.fps(),
               decoder.has_audio() ? "yes" : "no", static_cast<double>(samples) / movie::Decoder::kAudioRate);
+  if (samples == 0) return 0;
+  const auto db = [](double power) { return power > 0.0 ? 10.0 * std::log10(power) : -999.0; };
+  std::printf("audio peak %.1f dBFS, rms per 10 s (dBFS):", 20.0 * std::log10(std::max(peak, 1e-12f)));
+  for (size_t i = 0; i < window_sum.size(); ++i) {
+    const u64 count = std::min<u64>(kWindow, samples - i * kWindow) * 2;
+    std::printf(" %.1f", db(window_sum[i] / static_cast<double>(count)));
+  }
+  std::printf("\n");
   return 0;
 }
 

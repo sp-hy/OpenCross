@@ -523,11 +523,13 @@ void BattleView::end_group() {
   // Only the ACTOR gets its yaw set to the home facing (byte << 6), once its whole queue is done. Targets keep the facing they were given (the PC
   // an enemy attacked keeps it into the top menu and long after; the enemy is home). A pack script's absolute RotateT / op 0x76 turn on the actor
   // is overwritten here too. A PC engaged at the enemy keeps facing it. After a PC's element command the menu's hand-over step turns every
-  // unit home instead (tick_action), so the caster keeps its cast facing until then.
-  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && cast_handover_ == 0) {
+  // unit home instead (tick_action), so the caster keeps its cast facing until then. A PC that chose Run turns and runs with the rest of the
+  // party: its run script keeps the facing. Defend keeps the yaw the command confirm gave.
+  const bool defended = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Defend;
+  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && cast_handover_ == 0 && !defended) {
     const int i = act_.actor;
     Visual& visual = vis_[static_cast<size_t>(i)];
-    if (battle_->unit(i).present && !visual.ko_shown && !visual.move.on) {
+    if (battle_->unit(i).present && !visual.ko_shown && !visual.move.on && visual.script_kind != kRun) {
       visual.turn.on = false;
       visual.face_x = visual.pface_x = visual.home_fx;
       visual.face_z = visual.pface_z = visual.home_fz;

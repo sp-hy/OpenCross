@@ -361,9 +361,15 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   entrance_param_ = param;
   ents_.clear();
   ents_.resize(mod->entity_count());
-  // Every entity starts at engine heading 0 (= world +X); after INIT the shown facing is that minus 0x400. An entity
-  // INIT never turns (tel_b23e's fisherman next to Korcha's boat, ent 10) keeps that heading: internal 0x800, not internal 0.
-  for (Ent& ent_state : ents_) ent_state.actor.set_facing(to_internal(0));
+  // Every entity starts on the centroid of walk triangle 0 (scripts and the entrance record move it from there) at engine heading
+  // 0 (= world +X); after INIT the shown facing is that minus 0x400. An entity INIT never turns (tel_b23e's fisherman next to
+  // Korcha's boat, ent 10) keeps that heading: internal 0x800, not internal 0.
+  const WalkMesh& walk = view_.walk();
+  const auto start = walk.empty() ? std::array<float, 2>{} : walk.centroid(0);
+  for (Ent& ent_state : ents_) {
+    if (!walk.empty()) ent_state.actor.place(walk, 0, start[0], start[1], to_internal(0));
+    ent_state.actor.set_facing(to_internal(0));
+  }
   room_models_.assign(scene->models.size(), nullptr);
   room_model_tried_.assign(scene->models.size(), false);
 
@@ -440,6 +446,13 @@ void FieldWorld::place_party_spawn(int slot) {
   int level = -1;
   int v_tri = -1;
   const auto& pos = vm_.module().positions;
+  // A room without an entrance table (the cutscene rooms) places nobody: every party member stays where the room load put each
+  // entity, on the centroid of walk triangle 0, until a script moves it.
+  if (pos.empty() && !walk.empty()) {
+    ent_state.placed = true;
+    if (slot == 0) log::debug("field: {} has no entrance table, the party stays on walk triangle 0", view_.room_name());
+    return;
+  }
   if (slot > 0 && party_ent_[0] >= 0 && ents_[static_cast<size_t>(party_ent_[0])].placed) {
     const ActorPose& lp = ents_[static_cast<size_t>(party_ent_[0])].actor.current();
     // Followers spawn in the party V behind the leader (the geometry of the formation op DF): with heading h the
@@ -513,14 +526,8 @@ void FieldWorld::place_party_spawn(int slot) {
       x = centroid[0];
       z = centroid[1];
     }
-    // Cutscene rooms carry no entrance table at all (their scripts place the party later); only a missing record in a
-    // room that has a table is worth a warning. Once per load, not once per party slot.
-    if (slot == 0) {
-      if (pos.empty())
-        log::debug("field: {} has no entrance table (cutscene room), party spawns at the mesh centre", view_.room_name());
-      else
-        log::warn("field: no entrance record {} in {}, spawning at the mesh centre", entrance_param_, view_.room_name());
-    }
+    // Once per load, not once per party slot.
+    if (slot == 0) log::warn("field: no entrance record {} in {}, spawning at the mesh centre", entrance_param_, view_.room_name());
   }
   ent_state.actor.place(walk, tri, x, z, facing);
   ent_state.placed = true;

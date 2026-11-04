@@ -58,7 +58,6 @@ void App::end_movie() {
   ghost_tick0 = world.tick_count();
   movie_open = false;
   ctx.set_clear_color(0.08f, 0.09f, 0.14f);
-  mixer.resume();
   world.movie_finished();
   log::info("movie: finished");
   if (flow_ready) flow.set_title_logo_ready(true);
@@ -66,10 +65,13 @@ void App::end_movie() {
 
 void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
   movie_player.set_mixer(mixer.device_open() ? &mixer : nullptr);
-  // The field movie table's frame range: a few rows play part of a file (the title / Zelbess excerpts).
+  // The field movie table's frame range: a few rows play part of a file (the title / Zelbess excerpts). The row's volume scales the
+  // movie's sound (0 on two disc 2 rows: the movie plays silent under the field's music, which keeps playing through every movie).
   u32 mstart = 0, mend = 0;
   game::DiscIndex::movie_range(world.disc(), rq.index, mstart, mend);
-  if (!movie_player.open(files, rq.name, config.language, mstart, mend) ||
+  const auto* row = game::DiscIndex::movie_row(world.disc(), rq.index);
+  const float level = row ? static_cast<float>(row->volume) / 127.0f : 1.0f;
+  if (!movie_player.open(files, rq.name, config.language, mstart, mend, level) ||
       !movie_player.init_gpu(ctx, sprites)) {
     log::warn("movie: {} could not be opened; skipped", rq.name);
     movie_player.close();
@@ -80,7 +82,6 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
   movie_open = true;
   movie_skippable = rq.skippable;
   ctx.set_clear_color(0.0f, 0.0f, 0.0f);
-  mixer.pause();
   log::info("movie: {} ({}x{}, {:.1f} fps){}", movie_player.member(), movie_player.width(), movie_player.height(), movie_player.fps(),
             rq.skippable ? ", skippable" : "");
 }
@@ -288,7 +289,6 @@ void App::restart_game() {
   if (shop_ok) shop.close();
   shop_open = false;
   mixer.stop();
-  mixer.resume();
   flow_enabled = true;
   title_scene_tick0 = world.tick_count();
   flow.restart(!routing && !replaying);

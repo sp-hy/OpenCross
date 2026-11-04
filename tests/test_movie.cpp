@@ -1,5 +1,5 @@
 // Checks for oc_movie: member resolution, Bink 2 decode of the first frames/audio (needs the RDE install; skipped
-// without it), the mixer's movie PCM clock, and wall-clock Player pacing without a GPU.
+// without it), the mixer's movie PCM clock and level, and wall-clock Player pacing without a GPU.
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -42,6 +42,29 @@ void test_mixer_movie_clock() {
   CHECK(out[2 * 400] == 0.0f);
 }
 
+// The movie table row's volume scales the movie's sound: level 80 / 127 plays at that fraction, level 0 (the silent rows) plays nothing
+// while the clock still runs, and the next movie_start without a level is back at full.
+void test_mixer_movie_level() {
+  audio::Mixer mixer;
+  std::vector<float> pcm(2 * 100, 0.5f);
+  std::vector<float> out(2 * 100);
+  mixer.movie_start(80.0f / 127.0f);
+  CHECK(mixer.movie_push(pcm.data(), 100) == 100);
+  mixer.movie_run();
+  mixer.render(out.data(), 100);
+  CHECK(std::fabs(out[0] - 0.5f * 80.0f / 127.0f) < 1e-6f);
+  mixer.movie_start(0.0f);
+  CHECK(mixer.movie_push(pcm.data(), 100) == 100);
+  mixer.movie_run();
+  mixer.render(out.data(), 100);
+  CHECK(out[0] == 0.0f && mixer.movie_frames_played() == 100);
+  mixer.movie_start();
+  CHECK(mixer.movie_push(pcm.data(), 100) == 100);
+  mixer.movie_run();
+  mixer.render(out.data(), 100);
+  CHECK(std::fabs(out[0] - 0.5f) < 1e-6f);
+}
+
 // Pause screen: Mixer::hold freezes the movie PCM ring and its clock (silent output, SFX engine untouched); release continues exactly there.
 void test_mixer_hold() {
   audio::Mixer mixer;
@@ -80,6 +103,7 @@ void test_player_pause_flag() {
 
 int main() {
   test_mixer_movie_clock();
+  test_mixer_movie_level();
   test_mixer_hold();
   test_player_pause_flag();
 
