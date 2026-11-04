@@ -35,6 +35,7 @@ struct Feature {
 // Feature ids (GET_FEATURE_LEVEL, the table's `id`).
 constexpr int kExtensionRange = 0;
 constexpr int kPartySwap = 1;
+constexpr int kModUi = 2;
 
 std::span<const Feature> table();
 // nullptr when the build has no such feature. Sections compare case-insensitively.

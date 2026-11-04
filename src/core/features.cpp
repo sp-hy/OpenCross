@@ -16,9 +16,11 @@ constexpr std::array<Setting, 2> kPartySwapSettings = {{
     {"KeepLineup", 0, 0, 1, "Keep the swapped party after the battle"},
 }};
 
-constexpr std::array<Feature, 2> kFeatures = {{
+// The mod UI ops have no setting: a mod's own scripts use them (and check the level first).
+constexpr std::array<Feature, 3> kFeatures = {{
     {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
     {kPartySwap, 1, "PartySwap", "Party swap", kPartySwapSettings},
+    {kModUi, 1, "", "Mod UI (building blocks)", {}},
 }};
 
 std::string_view trim(std::string_view text) {

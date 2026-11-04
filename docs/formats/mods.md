@@ -229,3 +229,4 @@ The features this build has:
 |---|---|---|---|
 | (none) | 0 | | The field-script extension range itself (`fieldscript.md` 6.12): not set by mods. |
 | `PartySwap` | 1 | `Enabled` (0), `KeepLineup` (0) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). |
+| (none) | 2 | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12): not set by mods. |

@@ -574,6 +574,8 @@ void FieldWorld::install_name_hooks() {
   wire(dialogue_);
   for (auto& window : extra_win_)
     if (window.box) wire(*window.box);
+  for (auto& window : mod_ui_win_)
+    if (window.box) wire(*window.box);
 }
 
 // The global variables 0x000..0x3FF are the save head block at 0x188 + id (MAP_ID 6 = location 0x18E, the party
