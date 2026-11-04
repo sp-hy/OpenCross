@@ -1,5 +1,6 @@
 #include "game/effects/emitter_internal.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 
@@ -305,6 +306,10 @@ int EmitterSystem::attach_all(std::string_view name, int anchor_id, int& duratio
   return count;
 }
 void EmitterSystem::tick() { impl_->tick(); }
+void EmitterSystem::set_frame_ticks(int ticks) {
+  impl_->frame_ticks = std::max(ticks, 1);
+  impl_->frame_phase = 0;
+}
 bool EmitterSystem::spawn_at(std::string_view name, int x, int y, int z, int angle, Vec3* normal) {
   // Fire the header, then set the object's position := (x, y, z) << 16 and angle Z := -angle.
   const int hi = impl_->find_header(name);

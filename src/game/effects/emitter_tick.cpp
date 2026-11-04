@@ -1,5 +1,6 @@
 #include "game/effects/emitter_internal.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace oc::effects {
@@ -32,8 +33,8 @@ void EmitterSystem::Impl::step_header(size_t hi) {
 }
 
 // -- persistent object replay -------------------------------------------------------------
-void EmitterSystem::Impl::replay(Object& obj, Header& header) {
-  header.frame = static_cast<s16>(header.frame + 1);
+void EmitterSystem::Impl::replay(Object& obj, Header& header, int ticks) {
+  header.frame = static_cast<s16>(header.frame + ticks);
   const u32 obj_flags = obj.flags;
   s16 sv_ang[3], sv_scale[3];
   u16 sv_col[3];
@@ -99,16 +100,18 @@ void EmitterSystem::Impl::replay(Object& obj, Header& header) {
   build_matrix(obj);
 }
 
-// -- per-object update (one tick) -------------------------------------------------------------------
-static void apply_rates(Object& obj) {
+// -- per-object update (one frame of `ticks` ticks) --------------------------------------------------------
+// Each rate term is rate * ticks saturated to s16, then added with wrap-around.
+static void apply_rates(Object& obj, int ticks) {
+  auto term = [ticks](int rate) { return std::clamp(rate * ticks, -0x8000, 0x7FFF); };
   for (int i = 0; i < 3; ++i) {
-    obj.col[i] = static_cast<u16>(obj.col[i] + obj.crate[i]);
-    obj.ang[i] = add16(obj.ang[i], obj.arate[i]);
-    obj.scale[i] = add16(obj.scale[i], obj.srate[i]);
+    obj.col[i] = static_cast<u16>(obj.col[i] + term(static_cast<s16>(obj.crate[i])));
+    obj.ang[i] = add16(obj.ang[i], term(obj.arate[i]));
+    obj.scale[i] = add16(obj.scale[i], term(obj.srate[i]));
   }
 }
 
-void EmitterSystem::Impl::update(size_t idx) {
+void EmitterSystem::Impl::update(size_t idx, int ticks) {
   for (int i = 0; i < 3; ++i) {
     objs[idx].ppos[i] = add32(objs[idx].pos[i], objs[idx].born_shift[i]);
     objs[idx].born_shift[i] = 0;
@@ -118,54 +121,57 @@ void EmitterSystem::Impl::update(size_t idx) {
   }
   Object& obj = objs[idx];
   if (obj.life == 0) {
-    if (obj.owner >= 0) replay(obj, headers[static_cast<size_t>(obj.owner)]);
+    if (obj.owner >= 0) replay(obj, headers[static_cast<size_t>(obj.owner)], ticks);
   } else {
-    const int nl = static_cast<s16>(obj.life - 1);
+    const int remaining = static_cast<s16>(obj.life);
+    const int nl = static_cast<s16>(obj.life - ticks);
     obj.life = static_cast<u16>(nl);
     if (nl <= 0) {
-      // An object with a death child runs its last tick first, so the child starts from the position after it.
+      // An object with a death child first runs the ticks it had left, so the child starts from the position after them.
       const bool spawns = !(obj.flags & kFlagNoDeathSpawn);
-      if (spawns && obj.death >= 0) {
-        apply_rates(obj);
-        integrate_step(obj, cfg.pos_shift);
+      if (spawns && obj.death >= 0 && remaining > 0) {
+        apply_rates(obj, remaining);
+        integrate(obj, cfg.pos_shift, remaining);
       }
       die(idx, spawns);
       return;
     }
   }
-  apply_rates(obj);
+  apply_rates(obj, ticks);
   // The model's motion advances by ticks * rate / 256 keyframes.
   if (obj.stype == 20) {
     obj.motion_prev = obj.motion;
-    obj.motion += static_cast<float>(obj.motion_rate) / 256.0f;
+    obj.motion += static_cast<float>(obj.motion_rate * ticks) / 256.0f;
   }
-  integrate_step(obj, cfg.pos_shift);
+  integrate(obj, cfg.pos_shift, ticks);
   if ((obj.flags & kFlagFloor) && (obj.flags & kFlagNoDeathSpawn) && shl32(static_cast<s32>(obj.floor_y) << cfg.pos_shift, 16) < obj.pos[1]) {
     // Flag bit 27: dies on the floor hit, with its death spawn.
     die(idx, true);
     return;
   }
-  if (obj.flags & kFlagExt) ext_step(obj);
+  if (obj.flags & kFlagExt) ext_step(obj, ticks);
   build_matrix(obj);
   // Sheet animation: advance the frame every `anim_per` ticks.
   if (obj.anim_per != 0) {
-    obj.anim_ctr = static_cast<u8>(obj.anim_ctr - 1);
-    if (obj.anim_ctr == 0) {
-      obj.anim_ctr = obj.anim_per;
-      obj.frame = static_cast<s16>(obj.frame + 1);
+    for (int tick = 0; tick < ticks; ++tick) {
+      obj.anim_ctr = static_cast<u8>(obj.anim_ctr - 1);
+      if (obj.anim_ctr == 0) {
+        obj.anim_ctr = obj.anim_per;
+        obj.frame = static_cast<s16>(obj.frame + 1);
+      }
     }
     // A frame the sheet does not have resets the frame to 1, so the animation loops.
     if (obj.sheet && (obj.stype == 3 || obj.stype == 21) && obj.frame > 0 && static_cast<size_t>(obj.frame) > obj.sheet->frames.size()) obj.frame = 1;
   }
-  if (obj.periodic >= 0) periodic_spawn(idx);
+  if (obj.periodic >= 0) periodic_spawn(idx, ticks);
 }
 
 // Extended object block step: sub-word accumulation of the scale / angle rates, UV scroll, morph phase and path ride.
-void EmitterSystem::Impl::ext_step(Object& obj) {
+void EmitterSystem::Impl::ext_step(Object& obj, int ticks) {
   if (obj.ext & 0x80000) {
     for (int i = 0; i < 3; ++i) {
       s32 comb = static_cast<s32>((static_cast<u32>(static_cast<u16>(obj.srate[i])) << 16) | static_cast<u16>(obj.sub_s[i]));
-      comb = add32(comb, obj.acc_s[i] * 0x20);
+      for (int tick = 0; tick < ticks; ++tick) comb = add32(comb, obj.acc_s[i] * 0x20);
       obj.srate[i] = static_cast<s16>(comb >> 16);
       obj.sub_s[i] = static_cast<s16>(comb & 0xFFFF);
     }
@@ -173,7 +179,7 @@ void EmitterSystem::Impl::ext_step(Object& obj) {
   if (obj.ext & 0x100000) {
     for (int i = 0; i < 3; ++i) {
       s32 comb = static_cast<s32>((static_cast<u32>(static_cast<u16>(obj.arate[i])) << 16) | static_cast<u16>(obj.sub_a[i]));
-      comb = add32(comb, obj.acc_a[i] * 0x20);
+      for (int tick = 0; tick < ticks; ++tick) comb = add32(comb, obj.acc_a[i] * 0x20);
       obj.arate[i] = static_cast<s16>(comb >> 16);
       obj.sub_a[i] = static_cast<s16>(comb & 0xFFFF);
     }
@@ -181,11 +187,11 @@ void EmitterSystem::Impl::ext_step(Object& obj) {
   obj.uv_phase_prev[0] = obj.uv_phase[0];
   obj.uv_phase_prev[1] = obj.uv_phase[1];
   if (obj.ext & 1) {
-    obj.uv_phase[0] += obj.uv_rate[0];
-    obj.uv_phase[1] += obj.uv_rate[1];
+    obj.uv_phase[0] += obj.uv_rate[0] * ticks;
+    obj.uv_phase[1] += obj.uv_rate[1] * ticks;
   }
   obj.morph_phase_prev = obj.morph_phase;
-  if (obj.ext & 2) obj.morph_phase = add16(obj.morph_phase, obj.morph_rate);
+  if (obj.ext & 2) obj.morph_phase = add16(obj.morph_phase, obj.morph_rate * ticks);
   if (obj.path && obj.path_l0 != 0 && obj.life != obj.path_l0) {
     const int mode = (obj.path_mode >= 0 && obj.path_mode <= 7) ? obj.path_mode : 0;
     const int eased = ease(((static_cast<int>(obj.path_l0) - static_cast<int>(static_cast<s16>(obj.life))) * 0x1000) / static_cast<int>(obj.path_l0), mode);
@@ -197,31 +203,33 @@ void EmitterSystem::Impl::ext_step(Object& obj) {
     const Vec3 point = obj.path_basis.m.apply(obj.path->sample(eased));
     for (int i = 0; i < 3; ++i) {
       const s32 target = shl32(static_cast<s16>(static_cast<int>(point[static_cast<size_t>(i)] + obj.path_basis.t[static_cast<size_t>(i)])), 16);
-      // One tick, in the pos >> pos_shift domain.
-      obj.vel[i] = (target - obj.pos[i]) >> cfg.pos_shift;
+      // Reached over the frame's ticks, in the pos >> pos_shift domain.
+      obj.vel[i] = ((target - obj.pos[i]) >> cfg.pos_shift) / ticks;
     }
   }
 }
 
 // The periodic child header runs against this object's heading frame.
-void EmitterSystem::Impl::periodic_spawn(size_t idx) {
+void EmitterSystem::Impl::periodic_spawn(size_t idx, int ticks) {
   const size_t ci = static_cast<size_t>(objs[idx].periodic);
-  Header& ch = headers[ci];
-  ch.countdown = static_cast<s16>(ch.countdown - 1);
-  if (ch.countdown != -1) return;
   const Object me = objs[idx];
-  if (depth < kMaxDepth) {
-    const int reps = ch.def->repeat;
-    for (int k = 0; k <= reps && reps >= 0; ++k) {
-      // fire(): the child's op 45 emission runs too.
-      const int fired = fire(ci, &me);
-      if (fired < 0) break;
-      if (objs[static_cast<size_t>(fired)].life == 0) objs[static_cast<size_t>(fired)].alive = false;
+  for (int tick = 0; tick < ticks; ++tick) {
+    Header& ch = headers[ci];
+    ch.countdown = static_cast<s16>(ch.countdown - 1);
+    if (ch.countdown != -1) continue;
+    if (depth < kMaxDepth) {
+      const int reps = ch.def->repeat;
+      for (int k = 0; k <= reps && reps >= 0; ++k) {
+        // fire(): the child's op 45 emission runs too.
+        const int fired = fire(ci, &me);
+        if (fired < 0) break;
+        if (objs[static_cast<size_t>(fired)].life == 0) objs[static_cast<size_t>(fired)].alive = false;
+      }
     }
+    Header& ch2 = headers[ci];
+    ch2.countdown = static_cast<s16>(ch2.def->period);
+    if (ch2.def->jitter() != 0) ch2.countdown = static_cast<s16>(ch2.countdown + 2 * (rng.next() % static_cast<int>(ch2.def->jitter())));
   }
-  Header& ch2 = headers[ci];
-  ch2.countdown = static_cast<s16>(ch2.def->period);
-  if (ch2.def->jitter() != 0) ch2.countdown = static_cast<s16>(ch2.countdown + 2 * (rng.next() % static_cast<int>(ch2.def->jitter())));
 }
 
 // Anchor frame at a draw: the entity's INTERPOLATED position (the model is drawn at pose(alpha)); a relative object drawn against the
@@ -234,8 +242,20 @@ bool EmitterSystem::Impl::anchor_at(int id, float alpha, Basis& basis) const {
 // -- tick -------------------------------------------------------------------------------------------------------------------
 void EmitterSystem::Impl::tick() {
   ++tick_count;
+  if (++frame_phase < frame_ticks) return;
+  frame_phase = 0;
+  step_frame(frame_ticks);
+}
+
+// Where the drawn picture sits between the last two frame states: the ticks since the last step plus the tick alpha, over the frame.
+float EmitterSystem::Impl::frame_blend(float alpha) const {
+  return frame_ticks <= 1 ? alpha : (static_cast<float>(frame_phase) + alpha) / static_cast<float>(frame_ticks);
+}
+
+// One frame: the header stepper once per tick of the frame, then one update of every live object with the frame's tick count.
+void EmitterSystem::Impl::step_frame(int ticks) {
   for (size_t i = 0; i < headers.size(); ++i)
-    if (headers[i].linked) step_header(i);
+    for (int tick = 0; tick < ticks && headers[i].linked; ++tick) step_header(i);
   // objects (including those spawned above and during this pass)
   for (size_t i = 0; i < objs.size(); ++i)
     if (objs[i].alive) {
@@ -244,7 +264,7 @@ void EmitterSystem::Impl::tick() {
         EmitterSystem::ObjectRef object_ref = ref(objs[i]);
         hh->hook(object_ref);
       }
-      update(i);
+      update(i, ticks);
       if (hh && hh->hook && hh->hook_after && objs[i].alive) {
         EmitterSystem::ObjectRef object_ref = ref(objs[i]);
         hh->hook(object_ref);

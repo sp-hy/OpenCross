@@ -782,3 +782,7 @@ btl_duel_party_weapons = 0x800790E8;  # data: weapon byte of each entry of btl_d
 fx_resource_file_list_head = 0x80072204;  # data: head of the list of registered resource files (packs), each numbered with a free 6-bit file id
 fx_resource_type_hook = 0x800721E8;  # data: optional callback the entry registration calls for an entry type it has no case for
 btl_camera_track_add_pair = 0x8002EF38;  # function: spline callback that appends a sample pair to a camera track (the first call writes both points, later calls the previous and the new one, so every interior point is doubled)
+fx_object_heap = 0x1F800008;  # data: scratchpad pointer to the effect object heap: nodes sized by a u16 word count, bit 31 marks an effect object node (+4 step callback, +8 draw callback, object at +0xC)
+fx_object_step_pass = 0x8003923C;  # function: runs the step callback of every effect object node once per frame (after all headers fired); the draw callbacks run after it
+fx_tick_total = 0x80072124;  # data: running total of effect ticks, advanced by sys_frame_ticks at the end of every header step pass
+fx_header_pass_vsyncs = 0x8008DB50;  # data: vsyncs spent firing the emitter headers in the last pass (profiling)
