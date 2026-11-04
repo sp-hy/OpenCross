@@ -11,7 +11,7 @@ All files live in `tests\routes\` and share a name:
 | `<name>.ini` | The config the run uses (`--config`). Holds `[Debug] Script=...`, `Seed`, `ScriptSpeed`, `[Video] VSync=0`, `[Paths] SaveDir`, `ArtMode`. Keys it omits take their defaults. |
 | `<name>.txt` | The route script (section 3). |
 | `<name>.env` | Optional. One `KEY=VALUE` per line (`KEY` = letters, digits, `_`, not starting with a digit); other lines (comments, blanks) are ignored. Set for this run only and removed afterwards. Used for developer switches such as `OC_BATTLE_NORUN`, `OC_ROUTE_ELEM`, `OC_FXDBG`, `OC_BATTLE_AUDIT`. |
-| `<name>.prep.ps1` | Optional. Run by `run.ps1` before the route starts, to generate the scratch files it needs (`true_ending.prep.ps1` forges the save the route continues from with `tools\py\cc_save_forge.py`, from `tmp\save.dat` or `$env:OC_SOURCE_SAVE`). A non-zero exit code stops the run. |
+| `<name>.prep.ps1` | Optional. Run by `run.ps1` before the route starts, to generate the scratch files it needs (`true_ending.prep.ps1` forges the save the route continues from with `tools\py\cc_save_forge.py`, from `tmp\save.dat` or `$env:OC_SOURCE_SAVE`, on disc 2 so the ending's movies are disc 2's). A non-zero exit code stops the run. |
 | `<name>.log` | Written by the run, next to the ini (a `--config` run always logs). Deleted by `run.ps1` before the run starts. |
 | `shots\` | Next to the ini (`tests\routes\shots\`), created at start. Relative screenshot names land here. |
 | `shots\route_failed.png` | Screenshot taken when a route check fails (section 4). |
@@ -204,6 +204,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `battle active\|inactive` | A battle is / is not active. |
 | `battle events <tokens...>` | The battle view's route events (`w<msg>` = script window opened, `a` = action began) start with exactly those tokens. |
 | `battle menu <slot\|-> <guards>` | The party slot whose top command menu is up and has taken over from the menu entry (`-` = none, or the window still opening), then one digit per party slot: 1 = the unit holds Defend's guard. Example: `battle menu 1 100`. |
+| `battle facing <yaw> <yaw> <yaw>` | The yaw each party slot's model shows (12 bit, 4096 = 360 deg), `-` for an empty slot. Example: `battle facing 1258 1024 1024`. |
 | `battle camera orbit <slot>\|shot\|target\|hold` | What drove the battle camera on the last tick: the menu orbit round that party slot, a camera shot or timeline, a target-selection glide, or nothing (the pose stays). |
 | `result <n>` | The battle-result variable equals `n`. |
 | `flow <state>` | The flow state name equals `state`. |

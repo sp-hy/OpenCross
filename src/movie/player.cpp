@@ -33,7 +33,7 @@ std::string resolve_member(const vfs::Vfs& fs, std::string_view name, std::strin
   return {};
 }
 
-bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view lang, u32 start, u32 end) {
+bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view lang, u32 start, u32 end, float level) {
   close();
   member_ = resolve_member(fs, name, lang);
   if (member_.empty()) {
@@ -58,7 +58,7 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
   height_ = dec_->height();
   fps_ = dec_->fps();
   has_audio_ = dec_->has_audio() && mixer_;
-  if (has_audio_) mixer_->movie_start();
+  if (has_audio_) mixer_->movie_start(level);
   log::info("movie: {} {}x{} @ {:.2f} fps{}", member_, width_, height_, fps_, dec_->has_audio() ? " + audio" : "");
   // Table frames are 1-based (the first shown is max(start, 1)); decoder indices are 0-based, at the file's own rate.
   const double rate_scale = fps_ / kTableFps;

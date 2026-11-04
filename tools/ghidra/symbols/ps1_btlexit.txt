@@ -4,7 +4,7 @@
 btl_exit_sfx_play = 0x801EB808;  # function: Results screen sound wrapper that plays an effect with mask 1.
 btl_exit_print_text_by_kind = 0x801EBC14;  # function: Prints one results text by kind: table text, element, item or member name; a member wearing model 0x31 prints Lynx's name; RDE prints the typed name for 0x33, the PS1 may differ.
 btl_exit_results_screen_draw = 0x801EB89C;  # function: Results screen driver that frees the stage and draws the wallpaper and portraits (ambiguous)
-btl_exit_store_vars_free_stage = 0x801EC724;  # function: Frees the battle stage and copies the creature pool variables back.
+btl_exit_store_vars_free_stage = 0x801EC724;  # function: Frees the battle stage and copies script variables 0x00..0x0E and the creature pool variables back to the field variables 0x3D0..0x3FE.
 btl_exit_free_battle_stage = 0x801ECD6C;  # function: Frees the battle stage before the results screen.
 btl_exit_game_over = 0x801ED2BC;  # function: Game-over path that hands off to the main game loader.
 btl_exit_draw_portrait_strips = 0x801ED4E0;  # function: Draws the three 32x224 party portrait strips.

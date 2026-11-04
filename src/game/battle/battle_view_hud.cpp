@@ -215,6 +215,10 @@ void BattleView::load_hud_art(const vfs::Vfs& vfs) {
   for (size_t frame = 0; frame < kColourDotArt.size(); ++frame)
     png(hud_[kHColourDot + frame], std::format("hd/battle/battle/battle_{}.png", kColourDotArt[frame]).c_str());
   png(hud_[kHPageCur], "hd/battle/battle/battle_86.png");
+  // Party panel colour status corners by colour index (green white black red yellow blue): panel-sized, the triangle in the top right corner.
+  static constexpr std::array<int, 6> kWakuColourArt = {5, 8, 9, 4, 7, 6};
+  for (size_t colour = 0; colour < kWakuColourArt.size(); ++colour)
+    png(hud_[kHWakuColour + colour], std::format("hd/battle/shapes/battle-waku-{:02d}.png", kWakuColourArt[colour]).c_str());
   // Party-panel status icons: a 3 x 2 grid, 6 x 5 PS1 px each.
   png(hud_[kHStatus], "hd/battle/battle/battle_34.png");
   {

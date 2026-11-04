@@ -438,6 +438,16 @@ std::string BattleView::route_menu() const {
   return out;
 }
 
+std::string BattleView::route_facing() const {
+  std::string out;
+  for (int i = 0; i < battle::kPcSlots; ++i) {
+    const Visual& visual = vis_[static_cast<size_t>(i)];
+    const int yaw = static_cast<int>(std::lround(std::atan2(-visual.face_x, -visual.face_z) * (4096.0f / (2.0f * kPi)))) & 0xFFF;
+    out += (i ? " " : "") + (battle_ && battle_->unit(i).present ? std::to_string(yaw) : std::string("-"));
+  }
+  return out;
+}
+
 // In the top command menu Right / Square / R1 pick the NEXT PC and Left / L1 the PREVIOUS one: the three slots are walked from active +- 1
 // (wrapping 0..2) and the first that can act is taken (a character, no KO / blocking status 0x20304080, stamina > 9); the third candidate is the
 // active PC itself = nobody else can act: the menu stays on it, with no sound. Either way the PC's idle clip restarts (a guarding PC's block

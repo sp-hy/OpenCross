@@ -58,6 +58,7 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
     bopt.growth = setup.growth;
     bopt.bench = std::move(setup.bench);
     bopt.dopple_mask = world.dopple_mask();
+    bopt.saved_vars = world.battle_saved_vars();
     bopt.piggy_bank = world.vm().var(0x176);
     // The last Grand Slam picks; only a monster-party scene uses them.
     bopt.monster_party = world.monster_party();
@@ -130,8 +131,11 @@ void App::finish_field_battle(bool after_results) {
   // A monster-party fight (the Grand Slam) writes nothing back: no rewards, records, HP or Dopplegang pool.
   const bool written_back = battle.battle() && !battle.battle()->monster_party();
   if (written_back) game::apply_battle_result(world.game_state(), tables, *battle.battle(), &growth_progress);
-  // The Dopplegang pool goes back to the globals.
-  if (written_back) world.set_dopple_mask(battle.battle()->dopple_mask());
+  // The Dopplegang pool and script vars 0x00..0x0E go back to the globals.
+  if (written_back) {
+    world.set_dopple_mask(battle.battle()->dopple_mask());
+    world.set_battle_saved_vars(battle.battle()->saved_vars());
+  }
   // The results screen's HP: growth gain + heal menu.
   if (std::array<int, battle::kPcSlots> hp; results_ok && written_back && results.take_final_hp(hp)) {
     const auto& pm = battle.battle()->party();

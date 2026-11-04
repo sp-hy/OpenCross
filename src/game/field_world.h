@@ -262,6 +262,9 @@ class FieldWorld final : public script::FieldHost {
   std::array<u16, 16> dopple_mask() const;
   // Sets the VM variables and the head block together (a battle's end).
   void set_dopple_mask(const std::array<u16, 16>& mask);
+  // Global variables 0x3D0..0x3DE (battle script vars 0x00..0x0E: Pip's colour points at 0x3D4..0x3DE); set the same way.
+  std::array<u16, 8> battle_saved_vars() const;
+  void set_battle_saved_vars(const std::array<u16, 8>& vars);
   // Resets the transient world (variables, queued requests) for a new game; keeps the state object.
   void reset_for_new_game();
   // ---- discs: the file index in use. The disc is data-driven: FE 65 and the DiscCheck at every

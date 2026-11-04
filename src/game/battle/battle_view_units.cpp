@@ -544,12 +544,7 @@ void BattleView::on_script_event(int unit, const bseq::Event& event) {
       visual.turn.on = true;
       if (std::getenv("OC_FXDBG")) log::debug("fxdbg: tick {} unit {} RotateT yaw {} over {} ticks (script kind {})", tick_count_, unit, event.a, event.b, static_cast<int>(visual.script_kind));
       visual.turn.from = std::atan2(-visual.face_x, -visual.face_z);
-      visual.turn.to = static_cast<float>(event.a) * (2.0f * kPi / 4096.0f);
-      // The shortest way round.
-      float delta = visual.turn.to - visual.turn.from;
-      while (delta > kPi) delta -= 2.0f * kPi;
-      while (delta < -kPi) delta += 2.0f * kPi;
-      visual.turn.to = visual.turn.from + delta;
+      visual.turn.to = rotate_end(visual.turn.from, event.a & 0xFFF);
       visual.turn.total = visual.turn.left = std::max(1, event.b);
       break;
     }

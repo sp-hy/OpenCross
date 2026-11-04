@@ -91,7 +91,7 @@ The full state:
 | 0x1C2 | u8 | unknown (0x1E, 4, 0 seen) |
 | 0x1CC | u8 | custom window frame |
 | 0x488 / 0x48A | u16 | field position X / Z |
-| 0x55C..0x566 | u16 x6 | Pip colour stats: green, white, black, red, yellow, blue |
+| 0x55C..0x566 | u16 x6 | Pip colour points: green, white, black, red, yellow, blue (variables 0x3D4..0x3DE, the battle's script variables 0x04..0x0E; `rules/battle.md` section 9.1) |
 | 0x568..0x587 | u16 x16 | the Dopplegang pool: 256 bits, bit n of word w = creature slot w * 16 + n. Set when Sprigg (or a Forget-me-not Pot wearer's last command) kills the creature |
 | 0x588 | u32 | play time in frames (/60 = seconds) |
 | 0x58C | u32 | gold |

@@ -732,7 +732,7 @@ Findings from building OpenCross's `FieldWorld` (`src/game/field_world*.cpp`) on
 
 ### 11.2 Rooms, entrances, exits
 
-* The pre-script table (section 2) holds the entrance records; ROOM_PARAM (variable 0x02) = the `5A` / `DC` second operand indexes them (`alu_a01f` record 3 = (-1531, 1180) is exactly where the door of `alu_a02i` leads back to: `5A #27, #3`). Rooms without a table (28 cutscene rooms) place the PC by script only.
+* The pre-script table (section 2) holds the entrance records; ROOM_PARAM (variable 0x02) = the `5A` / `DC` second operand indexes them (`alu_a01f` record 3 = (-1531, 1180) is exactly where the door of `alu_a02i` leads back to: `5A #27, #3`). Rooms without a table (28 cutscene rooms) place the PC by script only. Room load puts every entity on the centroid of walk-mesh triangle 0 (the average of its three vertices, height included) with facing 0, and `SETUP_PC` places a party member only when the table exists, so in such a room the whole party stands on that centroid until a script moves it (end_a01e: (-125, 0, -1619), outside the planet picture; the party members are lit, `FE 64`, but never seen). OpenCross: `FieldWorld::load_room` starts every entity there, `FieldWorld::place_party_spawn` leaves the party on it.
 * Room ids in 5A are the lang.dat room ids (`tools/py/cc_text.py` `text_room_ids`).
 * Entities that script a hop onto a ledge (`5C`, `3F` with Y) leave the actor free-height; the route planner ignores heights.
 

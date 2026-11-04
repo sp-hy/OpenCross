@@ -305,11 +305,7 @@ void BattleView::pa_event(const bseq::Event& event) {
     case K::Rotate: {
       actor.turn.on = true;
       actor.turn.from = std::atan2(-actor.face_x, -actor.face_z);
-      actor.turn.to = static_cast<float>(event.a) * (2.0f * kPi / 4096.0f);
-      float delta = actor.turn.to - actor.turn.from;
-      while (delta > kPi) delta -= 2.0f * kPi;
-      while (delta < -kPi) delta += 2.0f * kPi;
-      actor.turn.to = actor.turn.from + delta;
+      actor.turn.to = rotate_end(actor.turn.from, event.a & 0xFFF);
       actor.turn.total = actor.turn.left = std::max(1, event.b);
       // x / z: the shortest signed difference of the 12-bit angles / n, from the current words (SetRot / earlier ramps).
       {

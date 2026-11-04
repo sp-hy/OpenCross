@@ -12,6 +12,7 @@
 #include <SDL3/SDL_scancode.h>
 
 #include <algorithm>
+#include <bit>
 #include <cstdlib>
 #include <cmath>
 #include <format>
@@ -426,7 +427,8 @@ void battle_waku_prepare(render::DecodedImage& img, bool frame) {
 
 // ------------------------------------------------------------------------------------------------------ party panels
 // One status panel per present party member at PS1 (x, 164), x from a table by party size, the same art in both modes:
-//  * waku: the subtractive base under the frame (the active frame blinks while the PC is choosing), 64 x 48 px at (x, 163);
+//  * waku: the subtractive base under the frame (the active frame blinks while the PC is choosing), 64 x 48 px at (x, 163); a unit with a
+//    colour status (hi bits 0..5; the lowest set bit when there are several) gets that colour's corner triangle over the frame;
 //  * name (style 0x80, shrunk to 54 px) at (x + 4, y + 2); the element level digit (style 4) at (x + 9, y + 12) and "Lv" (style 5) at
 //    (x + 4, y + 18) in green;
 //  * HP: current right-aligned in three 8 px slots from x + 4, "/" at x + 28, max from x + 36, at y + 26 (style 4), the digits in the HP
@@ -459,6 +461,7 @@ void BattleView::build_party_panels() {
     const float waku_x = px * kPs1Px, waku_y = (py - 1) * kRowScale, waku_w = 64 * kPs1Px, waku_h = 48 * kRowScale;
     add_img(hud_[kHWakuBase], waku_x, waku_y, waku_w, waku_h, 0, 0, 1, 1, 0xFFFFFFFFu, 3);
     add_img(blink ? hud_[kHWakuAct] : hud_[kHWaku], waku_x, waku_y, waku_w, waku_h);
+    if (unit.hi & 0x3Fu) add_img(hud_[kHWakuColour + static_cast<size_t>(std::countr_zero(unit.hi & 0x3Fu))], waku_x, waku_y, waku_w, waku_h);
     btext(0x80, import::utf8_to_u32(unit.name), px + 4, py + 2, 0x8A8A8A);
     btext(4, digits_u32(std::clamp(unit.gauge + 1, 0, 9)), px + 9, py + 12, kLvGreen);
     btext(5, U"Lv", px + 4 - (lang == 1 || lang == 2 ? 1.0f : 0.0f), py + 18, kLvGreen);
@@ -598,6 +601,21 @@ std::vector<int> BattleView::target_candidates() const {
   return out;
 }
 
+// Where the cursor starts, by unit id (the ring itself is walked in screen order afterwards); the first id of the order on the ring wins.
+int BattleView::target_start(const std::vector<int>& targets) const {
+  battle::TargetSpec ts;
+  if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
+    const int id = battle_->cell_element(active_pc_, pending_cmd_.cell);
+    if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) ts = battle::target_spec(tables_->elements[static_cast<size_t>(id)]);
+  }
+  const int last = active_pc_ >= 0 && active_pc_ < battle::kPcSlots ? tgt_mem_[active_pc_] : battle::kPcSlots;
+  for (const int id : battle::target_cursor_order(ts, active_pc_, last)) {
+    const auto it = std::find(targets.begin(), targets.end(), id);
+    if (it != targets.end()) return static_cast<int>(it - targets.begin());
+  }
+  return 0;
+}
+
 void BattleView::enter_target(Tgt mode) {
   tgt_mode_ = mode;
   targets_ = target_candidates();
@@ -606,22 +624,7 @@ void BattleView::enter_target(Tgt mode) {
     ui_ = Ui::Top;
     return;
   }
-  {
-    // Where the cursor starts, by unit id (the ring itself is walked in screen order afterwards); the first id of the order on the ring wins.
-    battle::TargetSpec ts;
-    if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
-      const int id = battle_->cell_element(active_pc_, pending_cmd_.cell);
-      if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) ts = battle::target_spec(tables_->elements[static_cast<size_t>(id)]);
-    }
-    const int last = active_pc_ >= 0 && active_pc_ < battle::kPcSlots ? tgt_mem_[active_pc_] : battle::kPcSlots;
-    for (const int id : battle::target_cursor_order(ts, active_pc_, last)) {
-      const auto it = std::find(targets_.begin(), targets_.end(), id);
-      if (it != targets_.end()) {
-        target_cursor_ = static_cast<int>(it - targets_.begin());
-        break;
-      }
-    }
-  }
+  target_cursor_ = target_start(targets_);
   ui_ = Ui::Target;
   // The command setup rewrote the acting list the menu camera's `zen0` / DYNAMIC shots are framed on; a cast leaves the pack's last shot (framed
   // on the caster) and its 7A/86 unit behind, so the previous PC's frame must not survive.
@@ -891,6 +894,11 @@ void BattleView::handle_input(const platform::Input& in) {
       if (top_cursor_ <= 1) audio_.play_menu(8);
       pending_cmd_ = {};
       pending_cmd_.actor = active_pc_;
+      // Every command confirm turns the PC to the unit an enemy target cursor would start on (Defend and Run too; Defend keeps the yaw).
+      if (const std::vector<int> enemies = target_candidates(); !enemies.empty()) {
+        vis_[static_cast<size_t>(active_pc_)].turn.on = false;
+        face_toward(active_pc_, enemies[static_cast<size_t>(target_start(enemies))]);
+      }
       if (top_cursor_ == 0) {
         pending_cmd_.kind = battle::Command::Kind::Attack;
         chain_.clear();

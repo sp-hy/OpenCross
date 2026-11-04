@@ -22,7 +22,7 @@ A spec of the form  sel:MASK{v:spec;v:spec;default}  chooses the layout from (by
 TABLE = r"""
 00 | | STOP | C | End this script instance.
 01 | J | JUMP | C | Unconditional goto (code-area offset).
-02 | T80 T40 M J | IF_JUMP | C | Compare operand0 with operand1 using cond=(M&0xF); jump to J when the comparison holds. cond: 0 ==, 1 !=, 2 >, 3 <, 4 >=, 5 <=, 6 and-nonzero, 7 !=, 8 or, 9 and, A xor-ish (7-A inferred).
+02 | T80 T40 M J | IF_JUMP | C | Compare operand0 with operand1 using cond=(M&0xF); fall through when the comparison holds, else jump to J. cond: 0 ==, 1 !=, 2 >, 3 <, 4 >=, 5 <=, 6 and-nonzero, 7 !=, 8 or, 9 and, A xor-ish (7-A inferred).
 03 | | OP03 | ? | Halts script like STOP (treated as terminator by all decoders); semantics unknown.
 04 | | KILL_SCRIPT | I | Halts script, like a kill-script request.
 05 | J | CALL | C | Call subroutine at J (return stack depth 4); ends with RETURN (0D).

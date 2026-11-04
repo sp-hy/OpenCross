@@ -1,0 +1,24 @@
+# Facing at a command confirm and at Run Away: every command confirm turns the PC to the unit the enemy target cursor would start on, and
+# Defend keeps that yaw into the next menu. Run turns every living PC, the one who chose it included, to yaw 3072 the short way (an exact
+# half turn goes the negative way) and runs.
+0 wait 30
+- tap confirm                         # skip the intro shots
+- wait 72
+- assert battle menu 0 000
+- assert battle facing 1024 1024 1024
+- tap down
+- wait 8
+- tap down
+- wait 8
+- tap confirm                         # Serge: Defend, turned to the first enemy
+- wait 14
+- assert battle menu 1 100
+- assert battle facing 1258 1024 1024
+- tap up                              # Kid: cursor wraps to Run Away
+- wait 8
+- tap confirm
+- wait 1
+- assert battle facing 1938 189 256   # Serge turns up from his Defend yaw, Kid and slot 2 down
+- wait 28
+- assert battle facing 3072 3072 3072
+- quit

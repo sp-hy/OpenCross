@@ -73,7 +73,8 @@ std::vector<ScriptExtent> Module::scripts() const {
 }
 
 // ------------------------------------------------------------------------------------------------ vm
-Vm::Vm(const Module& module, Host& host) : mod_(module), host_(host), vars_(0x8000, 0), read_tick_(0x8000, 0), read_entity_(0x8000, 0) {
+Vm::Vm(const Module& module, Host& host) : mod_(module), host_(host), vars_(0x8000, 0), read_tick_(0x8000, 0), read_entity_(0x8000, 0),
+      write_tick_(0x8000, 0), write_entity_(0x8000, 0) {
   ctx_.resize(static_cast<size_t>(module.entities));
   for (int entity = 0; entity < module.entities; ++entity) {
     Ctx& ctx = ctx_[static_cast<size_t>(entity)];
@@ -311,8 +312,11 @@ void Vm::interpret(int entity) {
     ++op_counts_[op];
     if (oi.conf == 'U') unimplemented_.insert(op);
     const Step result = exec(entity, frame, op, adv);
-    for (const auto& [index, before] : writes_)
+    for (const auto& [index, before] : writes_) {
       if (vars_[index] != before && read_tick_[index] == vtime_ && read_entity_[index] < entity) stale_read_ = true;
+      write_tick_[index] = vtime_;
+      write_entity_[index] = static_cast<u8>(entity);
+    }
     writes_.clear();
     if (op == 0x59 || op == 0x67) budget_ = 0x1F;
     if (result == Step::Next) ctx.frames.back().pc = static_cast<u16>(ctx.frames.back().pc + adv);
@@ -445,7 +449,8 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
   auto r16 = [&](int off) -> u16 { return static_cast<u16>(mod_.at(pc + static_cast<u32>(off)) | (mod_.at(pc + static_cast<u32>(off) + 1) << 8)); };
   auto vr = [&](u16 raw) -> int {
     const size_t index = static_cast<size_t>(raw & 0xFFFE) >> 1;
-    if (read_tick_[index] != vtime_ || read_entity_[index] > entity) {
+    const bool own_write = write_tick_[index] == vtime_ && write_entity_[index] == entity;
+    if (!own_write && (read_tick_[index] != vtime_ || read_entity_[index] > entity)) {
       read_tick_[index] = vtime_;
       read_entity_[index] = static_cast<u8>(entity);
     }
@@ -1146,6 +1151,7 @@ std::vector<Event> ScriptedBrain::drain_events() {
 
 void ScriptedBrain::begin_battle(Battle& battle, Rng& rng) {
   vm_.reset();
+  const std::array<u16, 8> saved_vars = battle.saved_vars();
   host_.reset();
   module_.reset();
   events_.clear();
@@ -1169,6 +1175,8 @@ void ScriptedBrain::begin_battle(Battle& battle, Rng& rng) {
   vm_ = std::make_unique<Vm>(*module_, *host_);
   // The script vars 0x60..0x7F start as the save's Dopplegang pool (scripts read it through the vars; the live mask is the Battle's)
   for (int word = 0; word < 16; ++word) vm_->set_var(0x60 + 2 * word, battle.dopple_mask()[static_cast<size_t>(word)]);
+  // Vars 0x00..0x0E start as the save's variables 0x3D0..0x3DE (Pip's colour points among them); Battle::saved_vars reads them back.
+  for (size_t word = 0; word < saved_vars.size(); ++word) vm_->set_var(static_cast<int>(2 * word), saved_vars[word]);
   {
     const auto& sc = battle.tables().scenes[static_cast<size_t>(battle.scene())];
     u32 hide = 0, owed = 0;

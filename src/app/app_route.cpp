@@ -46,6 +46,7 @@ void App::init_route_state() {
   rstate.battle_events = [this] { return battle_ready ? battle.route_events() : std::vector<std::string>(); };
   rstate.battle_camera = [this] { return battle_ready ? battle.route_camera() : std::string(); };
   rstate.battle_menu = [this] { return battle_ready ? battle.route_menu() : std::string(); };
+  rstate.battle_facing = [this] { return battle_ready ? battle.route_facing() : std::string(); };
   // For route `snap` / `assert same`: what an art switch must not change in a battle.
   rstate.battle_sig = [this] {
     const battle::Battle* active_battle = battle_ready ? battle.battle() : nullptr;
