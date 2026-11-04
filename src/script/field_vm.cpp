@@ -524,7 +524,10 @@ void FieldVM::exec(u8 op) {
     const u8 sub = mod_.code_byte(pc + 1);
     ++stats_.op_hits[0x100 + sub];
     self_->last_op = static_cast<u16>(kExtPage | sub);
-    exec_ext(sub);
+    if (sub >= kExtensionFirst)
+      exec_extension(sub);
+    else
+      exec_ext(sub);
     return;
   }
   if (const OpInfo* info = find_op(op); info && info->conf == '?') ++stats_.uncertain_ops[op];

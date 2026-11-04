@@ -95,7 +95,8 @@ struct Entity {
 
 // Counters for the soak tools: `invalid_pc` scripts ended because the pc left the code area, `init_overruns` INIT
 // scripts that hit the step cap, `call_overflows` CALLs with the 4-entry stack full (the script stalls), `unimplemented`
-// table opcodes without a handler, `unknown_ops` opcodes not in the table (key -> hits; each advances 1 byte, 2 for FE),
+// table opcodes without a handler, `unknown_ops` opcodes not in the table (key -> hits; each advances 1 byte, 2 for FE, the
+// whole instruction for an extension op) and extension ops whose payload is too short for their operands,
 // `uncertain_ops` '?' confidence opcodes that ran, `op_hits` per opcode (FE page at +0x100).
 struct VmStats {
   u64 ticks = 0;
@@ -266,6 +267,7 @@ class FieldVM {
   bool exec_scene(u8 op);
   bool exec_game(u8 op);
   void exec_ext(u8 sub);
+  void exec_extension(u8 sub);
   void note_unknown(u16 key);
   bool menu_request(MenuKind kind, int arg);
   void alu(u8 op);
