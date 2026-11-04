@@ -284,6 +284,12 @@ int main() {
     // Top holds one.txt and a file the game does not have; Bottom holds one.txt and two.txt; a loose file in Top wins over Bottom's member.
     write_archive(game / "mods" / "Top" / "hd.dat", false, {{"ONE.txt", "top one"}, {"new.txt", "not in the game"}});
     std::ofstream(game / "mods" / "Top" / "three.txt", std::ios::binary) << "top loose three";
+    // New loose files: below an archive folder (after a wrapper), in a mod folder called after an archive, and a stray readme.
+    fs::create_directories(game / "mods" / "Top" / "Wrapper" / "cdrom" / "map" / "mapbin");
+    std::ofstream(game / "mods" / "Top" / "Wrapper" / "cdrom" / "map" / "mapbin" / "NewRoom.bin", std::ios::binary) << "new room";
+    std::ofstream(game / "mods" / "Top" / "readme.txt", std::ios::binary) << "about Top";
+    fs::create_directories(game / "mods" / "cdrom" / "flux");
+    std::ofstream(game / "mods" / "cdrom" / "flux" / "ui.bin", std::ios::binary) << "crossfix layout";
     write_archive(game / "mods" / "Bottom" / "hd.dat", false, {{"one.txt", "bottom one"}, {"two.txt", "bottom two"}, {"three.txt", "bottom three"}});
     write_archive(game / "mods" / "cdrom.dat", false, {{"a.bin", "mod a"}, {"map/b.bin", "mod b"}});
 
@@ -297,16 +303,21 @@ int main() {
     const std::vector<vfs::ModPref> order = {{"Top", true, vfs::ModLoadOn::All}, {"Bottom", true, vfs::ModLoadOn::All}, {"cdrom.dat", true, vfs::ModLoadOn::All}};
     game_mods.scan(game_files, game / "mods", order);
     const vfs::Mod* top = find_mod(game_mods, "Top");
-    CHECK(top && top->archives.size() == 1 && top->files.size() == 2 && top->unmatched.size() == 1);
+    CHECK(top && top->archives.size() == 1 && top->files.size() == 4 && top->added.size() == 2 && top->unmatched.size() == 1);
+    const vfs::Mod* crossfix = find_mod(game_mods, "cdrom");
+    CHECK(crossfix && crossfix->added.size() == 1 && crossfix->files.size() == 1 && crossfix->unmatched.empty());
     CHECK(game_mods.conflicts(0).size() == 2);
 
     game_mods.apply(game_files, vfs::ModArt::Modded);
     CHECK(text("hd/one.txt") == "top one");
     CHECK(text("hd/two.txt") == "bottom two");
     CHECK(text("hd/three.txt") == "top loose three");
-    // A mod replaces and never adds.
-    CHECK(text("hd/new.txt") == "(missing)");
-    CHECK(!game_files.exists("hd/new.txt"));
+    // New members are read like replacements; list() still lists only the shipped archive.
+    CHECK(text("hd/new.txt") == "not in the game");
+    CHECK(game_files.exists("hd/new.txt"));
+    CHECK(text("cdrom/map/mapbin/newroom.bin") == "new room");
+    CHECK(text("cdrom/flux/ui.bin") == "crossfix layout");
+    CHECK(!game_files.exists("hd/readme.txt") && !game_files.exists("cdrom/readme.txt"));
     CHECK(game_files.list("hd").size() == 3);
     CHECK(game_files.exists("hd/two.txt"));
     CHECK(!game_files.loose_file("hd/two.txt"));

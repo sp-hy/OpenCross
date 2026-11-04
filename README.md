@@ -67,7 +67,8 @@ What a mod can replace:
 - **Textures**: PNG files under a `textures` folder, at any resolution. **Dump all textures** in the Mods tab shows the names to use, and **Model Viewer** previews character and monster textures.
 - **Movies**: a `.bk2`, `.mp4` or `.mkv` named after a game movie, such as `a01op_en.mp4`. Use HEVC, H.264 or Bink 2 video up to 1440p, with AAC, Opus or Bink audio, and keep the original's length.
 - **Voice lines**: MP3 files in a `voices` folder. CrossFix voice packs work as they are.
-- **Any other game file**: matched by file name, wherever it sits in the mod. Files that match nothing, or more than one game file, are skipped and counted in the Mods tab.
+- **Any other game file**: matched by file name, wherever it sits in the mod. Files that match more than one game file are skipped and counted in the Mods tab.
+- **New files**: a file that matches no game file is added when it sits below a folder named after a game archive, such as `cdrom\map\mapbin\newroom.bin`. Anything else that matches nothing (readme files, alternates) is skipped and counted.
 
 Mods that change game data, such as stats, text or scripts, show **Won't change until restart** in the Mods tab: changes to them apply the next time the game starts.
 
