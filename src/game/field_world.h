@@ -355,6 +355,9 @@ class FieldWorld final : public script::FieldHost {
                    render::MeshPipeline::DrawParams::WetFaces wet = render::MeshPipeline::DrawParams::WetFaces::DryOnly);
   // `windows` = false leaves the status icons and the dialogue / extra windows to draw_windows() (the PS1-resolution pass, [Video] Ps1Res).
   void draw_overlay(render::SpriteBatch& sprites, float vw, float vh, bool windows = true);
+  // The mod UI of the room's scripts (script::ModUi): its rects, lines and cursor, drawn by draw_overlay under the dialogue windows (its
+  // text elements are message windows, sync_mod_ui_windows).
+  void draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh);
   // Party status icons + the dialogue and extra windows. `ps1` = into the PS1-resolution target (vw x vh = (320 + 2e) x 240 pixels, 1 layer
   // column = 1 pixel, canvas unit = 1/4 pixel); otherwise the window's letterbox / render::canvas_fit.
   void draw_windows(render::SpriteBatch& sprites, float vw, float vh, bool ps1 = false);
@@ -362,7 +365,8 @@ class FieldWorld final : public script::FieldHost {
   void draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_transition(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh);
-  bool overlay_needed() const { return any_window_open() || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold() || status_icons_shown(); }
+  // A shown mod UI (its rects, lines and text windows) also needs the overlay pass.
+  bool overlay_needed() const { return any_window_open() || vm_.mod_ui().shown || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold() || status_icons_shown(); }
 
   // ---- 8F / 90 screen ripple (render/render_target.h build_screen_warp) ---------------------------------------------
   // On while the ripple is set; `ot` = the grid's ordering-table index (>= 7): content filed deeper (slot > ot) is warped, the rest is
@@ -770,6 +774,16 @@ class FieldWorld final : public script::FieldHost {
     bool label = false;
   };
   std::array<ExtraWindow, 3> extra_win_;
+  // The mod UI's text elements (script::ModUi::kText): a message window each, created on first use, shown again when the element's revision
+  // changes; `element` = the element id it shows (-1 free).
+  struct ModUiWindow {
+    std::unique_ptr<ui::DialogueDemo> box;
+    int element = -1;
+    u16 revision = 0;
+  };
+  std::array<ModUiWindow, 8> mod_ui_win_;
+  bool mod_ui_full_logged_ = false;
+  void sync_mod_ui_windows();
   // entity -> the window slot (0 = dialogue_, 1.. = extra_win_) of its last message
   std::map<int, int> owner_window_;
   std::string portrait_set_ = "2021";

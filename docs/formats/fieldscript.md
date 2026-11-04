@@ -533,11 +533,23 @@ FE sub size payload[size]          instruction length = 3 + size
 * An op the build does not know is stepped over whole (3 + size bytes), and so is an op whose payload is shorter than its operands (logged once, counted with the unknown opcodes). The disassemblers show an unknown op as `EXTENSION`.
 * A mod asks for a feature with `GET_FEATURE_LEVEL` before it relies on it. A build without the range reads `FE C0`-`FE FF` as 2-byte no-ops and runs the payload as code, so a mod that uses the range needs a build that has it (feature 0).
 * Adding an op: a row in `field_opcodes.inc` (lengths = 3 + the operand bytes) and in `tools/py/cc_fieldscript.py`, its case in `FieldVM::exec_extension`, a row below and a unit test. Op numbers and feature ids are never reused for something else.
+* **Mod UI** (feature 2, `script::ModUi`): building blocks a mod's field script puts together into its own screens over the room (a route map, a shop or party picker, a status panel). Up to 64 elements, each a rect, a line, a text window or an item, drawn in id order; the room's VM owns them (a room change clears them). `FieldWorld::draw_mod_ui` draws the rects (filled or one-pixel outlines; translucent at 5 / 8 alpha) and lines under the dialogue windows, in field screen pixels (320 x 224, the dialogue windows' space), and the cursor on its item (an outline 2 pixels out pulsing 1 pixel every 8 ticks, or a translucent highlight); `FieldWorld::sync_mod_ui_windows` keeps up to 8 message windows for the text elements (the same windows as the scripts' own, under them, wired for `{num(n)}` and the names). The pick moves between the visible, enabled items: among those strictly that way from the cursor's item (by centres), the one with the smallest `along + 2 * |across|`. Default palette: 0 white, 1 red, 2 orange, 3 purple, 4 yellow, 5 green, 6 blue, 7 cyan, 8 grey, 9 black, 10 dark blue, 11 dark grey, 12 light grey, the rest white. A shown mod UI also turns on the field's overlay pass (`overlay_needed`). A shown UI that has picked holds the controls (`ModUi::holds_controls`, checked by `FieldWorld::controls_free`).
 * Features: the build's table is `src/core/features.cpp` (id, level, the `mod.ini` section and settings). A mod turns a feature on for the whole game with its `mod.ini` (`mods.md` section 8); the ops here query it and change it from the mod's own scripts.
 
 | Op | Len | Operands | Name | Effect |
 |---|---|---|---|---|
 | FE C0 | 7 | `V@0 U@2` | GET_FEATURE_LEVEL | var[V] = the level of feature U in this build; 0 when the build does not have it. Never yields. |
+| FE C1 | 3 | `-` | UI_CLEAR | Mod UI (feature 2, below): every element off, hidden, the default palette. |
+| FE C2 | 5 | `U@0` | UI_SHOW | Mod UI shown (U != 0) or hidden; hiding it gives the field's controls back (UI_PICK). |
+| FE C3 | 17 | `U@0 U@2 U@4 U@6 U@8 U@10 U@12` | UI_RECT | Element id (0..63, taken mod 64): a rectangle x y w h, palette colour, flags (1 outline, 2 translucent). |
+| FE C4 | 15 | `U@0 U@2 U@4 U@6 U@8 U@10` | UI_LINE | Element id: a line (x0, y0)-(x1, y1), palette colour. |
+| FE C5 | 13 | `U@0 U@2 U@4 U@6 U@8` | UI_TEXT | Element id: room message msg in a window whose text starts at (x, y); flags 1 = framed (the player's window skin), else frameless. Sized by its message, as every message window; it does not block and needs no button. |
+| FE C6 | 15 | `U@0 U@2 U@4 U@6 U@8 U@10` | UI_ITEM | Element id: a selectable item x y w h (where the cursor can stop; not drawn), flags 1 = disabled. |
+| FE C7 | 7 | `U@0 U@2` | UI_CURSOR | The cursor on item id, style (0 outline, 1 highlight, 2 none). |
+| FE C8 | 5 | `V@0` | UI_PICK | Blocks for a new press (a key held when it starts counts only once released, so the press that opened the screen is not taken): a D-pad press moves the cursor to the nearest selectable item that way and writes `0x40 \| item` (a direction with none is ignored); a held direction steps again after 18 ticks, then every 6, as a menu cursor does; Circle writes the cursor's item, Cross `0x80`, Triangle `0x81`, Square `0x82`. Then the record's turn ends: the next instruction runs next tick. From the first pick until UI_SHOW 0 or UI_CLEAR the shown UI holds the field's controls (the player does not walk while the cursor moves); a UI that never picks leaves them free. |
+| FE C9 | 9 | `U@0 V@2 V@4` | UI_GETPOS | Element id's centre (a line's midpoint, a text window's text origin) into two vars. |
+| FE CA | 9 | `U@0 U@2 U@4` | UI_SET | Element id's field = value: 0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg, 6 flags, 7 w, 8 h (a line's end point is (w, h)). A text window is shown again (refreshing `{num(n)}` values). |
+| FE CB | 11 | `U@0 U@2 U@4 U@6` | UI_PALETTE | Palette entry i (0..31) = (r, g, b). |
 
 Features (the U of `GET_FEATURE_LEVEL`):
 
@@ -545,6 +557,7 @@ Features (the U of `GET_FEATURE_LEVEL`):
 |---|---|---|
 | 0 | The extension range itself | 1: the framing and the ops of this section |
 | 1 | Party swap (`rules/battle.md` section 11) | 1: the Swap command, the formation restored or kept after the battle |
+| 2 | Mod UI (ops FE C1-FE CB) | 1: rects, lines, text windows, items, the cursor and the pick |
 
 
 ## 8. Entity and global flag bits

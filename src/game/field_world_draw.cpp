@@ -430,11 +430,117 @@ void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, 
                  render::pack_rgba(to_u8(dim.cur[0]), to_u8(dim.cur[1]), to_u8(dim.cur[2]), alpha));
     sprites.set_blend(render::BlendMode::Alpha);
   }
+  draw_mod_ui(sprites, vw, vh);
   if (windows) {
     draw_veil_transition(sprites, vw, vh);
     draw_windows(sprites, vw, vh);
     draw_veil_fade(sprites, vw, vh);
     draw_capture(sprites, vw, vh);
+  }
+}
+
+// Rects (filled, or a one-pixel outline; translucent ones at 5 / 8 alpha) and lines in their palette colours, in element order; items are not
+// drawn; the cursor on its item: an outline 2 pixels out pulsing 1 pixel every 8 ticks (style 0), a translucent white fill (1) or nothing (2).
+// Coordinates are field screen pixels, as the dialogue windows'.
+void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh) {
+  using script::ModUi;
+  const ModUi& ui = vm_.mod_ui();
+  if (!ui.shown || !white_set_) return;
+  const render::Letterbox lb = view_.letterbox(vw, vh);
+  const auto sx = [&](float x) { return lb.ox + x * lb.scale; };
+  const auto sy = [&](float y) { return lb.oy + y * lb.scale_y; };
+  const auto colour = [&](u8 index, u8 alpha) {
+    const std::array<u8, 3>& rgb = ui.palette[index % ModUi::kPalette];
+    return render::pack_rgba(rgb[0], rgb[1], rgb[2], alpha);
+  };
+  const auto fill = [&](float x0, float y0, float x1, float y1, u32 rgba) {
+    sprites.draw(white_set_, sx(x0), sy(y0), (x1 - x0) * lb.scale, (y1 - y0) * lb.scale_y, 0, 0, 1, 1, rgba);
+  };
+  // One field pixel wide.
+  const auto line = [&](float x0, float y0, float x1, float y1, u32 rgba) {
+    const float dx = x1 - x0, dy = y1 - y0, length = std::hypot(dx, dy);
+    if (length <= 0.0f) return;
+    const float nx = -dy / length * 0.5f, ny = dx / length * 0.5f;
+    const float xy[8] = {sx(x0 + nx), sy(y0 + ny), sx(x1 + nx), sy(y1 + ny), sx(x0 - nx), sy(y0 - ny), sx(x1 - nx), sy(y1 - ny)};
+    const float uv[8] = {0, 0, 1, 0, 0, 1, 1, 1};
+    sprites.draw_quad(white_set_, xy, uv, rgba);
+  };
+  const auto outline = [&](float x0, float y0, float x1, float y1, u32 rgba) {
+    fill(x0, y0, x1, y0 + 1, rgba);
+    fill(x0, y1 - 1, x1, y1, rgba);
+    fill(x0, y0, x0 + 1, y1, rgba);
+    fill(x1 - 1, y0, x1, y1, rgba);
+  };
+  for (const ModUi::Element& element : ui.elements) {
+    if (!element.visible) continue;
+    if (element.kind == ModUi::kRect) {
+      const u32 rgba = colour(element.colour, element.flags & ModUi::kTranslucent ? 0xA0 : 0xFF);
+      const float x1 = static_cast<float>(element.x + element.w), y1 = static_cast<float>(element.y + element.h);
+      if (element.flags & ModUi::kOutline) outline(element.x, element.y, x1, y1, rgba);
+      else fill(element.x, element.y, x1, y1, rgba);
+    } else if (element.kind == ModUi::kLine) {
+      line(element.x, element.y, element.w, element.h, colour(element.colour, 0xFF));
+    }
+  }
+  if (ui.selectable(ui.cursor) && ui.cursor_style != ModUi::kCursorNone) {
+    const ModUi::Element& item = ui.elements[static_cast<size_t>(ui.cursor)];
+    if (ui.cursor_style == ModUi::kCursorHighlight) {
+      fill(item.x, item.y, static_cast<float>(item.x + item.w), static_cast<float>(item.y + item.h), render::pack_rgba(255, 255, 255, 0x50));
+    } else {
+      const float pad = (tick_count_ >> 3) & 1 ? 3.0f : 2.0f;
+      outline(item.x - pad, item.y - pad, item.x + item.w + pad, item.y + item.h + pad, render::pack_rgba(255, 255, 0, 255));
+    }
+  }
+}
+
+// One message window per text element; a hidden or cleared element (and a room change, which clears the UI) closes its window.
+void FieldWorld::sync_mod_ui_windows() {
+  using script::ModUi;
+  const ModUi& ui = vm_.mod_ui();
+  const auto wanted = [&](int id) {
+    const ModUi::Element& element = ui.elements[static_cast<size_t>(id)];
+    return ui.shown && element.kind == ModUi::kText && element.visible && element.msg >= 0;
+  };
+  for (ModUiWindow& window : mod_ui_win_) {
+    if (window.element < 0 || wanted(window.element)) continue;
+    if (window.box) window.box->close();
+    window.element = -1;
+  }
+  if (!ui.shown || !ctx_ || !files_ || !sprites_) return;
+  for (int id = 0; id < ModUi::kElements; ++id) {
+    if (!wanted(id)) continue;
+    const ModUi::Element& element = ui.elements[static_cast<size_t>(id)];
+    ModUiWindow* window = nullptr;
+    for (ModUiWindow& candidate : mod_ui_win_)
+      if (candidate.element == id) window = &candidate;
+    if (!window) {
+      for (ModUiWindow& candidate : mod_ui_win_)
+        if (!window && candidate.element < 0) window = &candidate;
+      if (!window) {
+        if (!mod_ui_full_logged_) log::warn("field: mod UI: more than {} text elements (the rest are not shown)", mod_ui_win_.size());
+        mod_ui_full_logged_ = true;
+        return;
+      }
+      window->revision = static_cast<u16>(element.revision - 1);
+    }
+    if (window->element == id && window->revision == element.revision) continue;
+    if (!window->box) {
+      auto box = std::make_unique<ui::DialogueDemo>();
+      if (!box->init(*ctx_, *files_, *sprites_, lang_)) return;
+      box->show_status(false);
+      box->set_portrait_set(portrait_set_);
+      box->set_mode(hd_ ? ui::ArtMode::Hd : ui::ArtMode::Original);
+      window->box = std::move(box);
+      install_name_hooks();
+    }
+    window->element = id;
+    window->revision = element.revision;
+    ui::DialogueDemo& box = *window->box;
+    box.set_label(!(element.flags & ModUi::kFramed));
+    box.set_portrait(-1);
+    box.show(room_id_, element.msg);
+    box.set_ps1_window(element.x, element.y);
+    box.skip_grow();
   }
 }
 
@@ -471,6 +577,9 @@ void FieldWorld::draw_windows(render::SpriteBatch& sprites, float vw, float vh, 
   draw_status_icons(sprites, vw, vh, ps1);
   const render::CanvasFit ps1_fit{0.25f, 0.0f, 0.0f};
   const render::CanvasFit* fit = ps1 ? &ps1_fit : nullptr;
+  // The mod UI's text windows under the scripts' own message windows.
+  for (auto& window : mod_ui_win_)
+    if (window.box && window.element >= 0) window.box->draw(vw, vh, fit);
   dialogue_.draw(vw, vh, fit);
   for (auto& window : extra_win_)
     if (window.box) window.box->draw(vw, vh, fit);

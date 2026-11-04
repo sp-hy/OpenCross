@@ -685,7 +685,7 @@ void test_extension_ops() {
   const u16 known = script.here();
   script.raw({0xFE, 0xC0, 4}).word(V(0)).word(I(0));
   const u16 unknown = script.here();
-  script.raw({0xFE, 0xC7, 3, 0x11, 0x22, 0x33});
+  script.raw({0xFE, 0xFE, 3, 0x11, 0x22, 0x33});
   const u16 longer = script.here();
   script.raw({0xFE, 0xC0, 6}).word(V(1)).word(I(0)).word(0xBEEF);
   const u16 short_payload = script.here();
@@ -735,6 +735,140 @@ void test_extension_ops() {
   CHECK_EQ(vm.stats().unknown_ops.size(), 2);
 }
 
+
+// The mod UI ops (FE C1-FE CB, feature 2): the elements a room's scripts build, GETPOS, SET, the item step and the blocking pick.
+class KeyHost : public NullHost {
+ public:
+  u16 latch = 0, held = 0;
+  u16 key_latch() override { return latch; }
+  void clear_key_latch() override { latch = 0; }
+  u16 keys_held() override { return held; }
+};
+
+void test_mod_ui_ops() {
+  Asm script;
+  const auto ext = [&](int sub, std::initializer_list<int> words) {
+    script.raw({0xFE, sub, static_cast<int>(2 * words.size())});
+    for (int value : words) script.word(value);
+  };
+  const u16 init = script.here();
+  ext(0xC1, {});
+  // A panel, a framed text window, a line; items 10 (start), 11 to its right, 12 above, 13 further right but disabled.
+  ext(0xC3, {I(0), I(10), I(20), I(300), I(200), I(10), I(2)});
+  ext(0xC5, {I(1), I(7), I(40), I(30), I(1)});
+  ext(0xC4, {I(2), I(50), I(100), I(100), I(100), I(11)});
+  ext(0xC6, {I(10), I(45), I(95), I(10), I(10), I(0)});
+  ext(0xC6, {I(11), I(95), I(95), I(10), I(10), I(0)});
+  ext(0xC6, {I(12), I(45), I(35), I(10), I(10), I(0)});
+  ext(0xC6, {I(13), I(145), I(95), I(10), I(10), I(1)});
+  ext(0xC7, {I(10), I(0)});
+  ext(0xCB, {I(20), I(1), I(2), I(3)});
+  ext(0xC2, {I(1)});
+  ext(0xC9, {I(11), V(5), V(6)});
+  // SET: the panel's colour; the text's message (its revision moves on).
+  ext(0xCA, {I(0), I(2), I(20)});
+  ext(0xCA, {I(1), I(5), I(8)});
+  script.stop();
+  const u16 update = script.here();
+  ext(0xC8, {V(0)});
+  script.inc(V(1));
+  script.park();
+
+  const std::initializer_list<std::pair<int, s32>> presses = {{0x2000, 0x4B}, {0x1000, 0x4C}, {0x20, 10}, {0x40, 0x80}, {0x10, 0x81}, {0x80, 0x82}};
+  for (const auto& [press, want] : presses) {
+    KeyHost host;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{{{0, init}, {1, update}}}}));
+    const ModUi& ui = vm.mod_ui();
+    CHECK(ui.shown && ui.cursor == 10 && ui.cursor_style == ModUi::kCursorOutline);
+    CHECK(ui.elements[0].kind == ModUi::kRect && ui.elements[0].flags == ModUi::kTranslucent && ui.elements[0].colour == 20);
+    CHECK(ui.elements[1].kind == ModUi::kText && ui.elements[1].msg == 8 && ui.elements[1].flags == ModUi::kFramed && ui.elements[1].revision == 2);
+    CHECK(ui.elements[2].kind == ModUi::kLine && ui.elements[2].w == 100);
+    CHECK((ui.palette[20] == std::array<u8, 3>{1, 2, 3}));
+    CHECK_EQ(vm.var(V(5)), 100);
+    CHECK_EQ(vm.var(V(6)), 100);
+    CHECK(ui.selectable(11) && !ui.selectable(13) && !ui.selectable(0));
+    CHECK_EQ(ui.step(1), 11);
+    CHECK_EQ(ui.step(0), 12);
+    CHECK_EQ(ui.step(3), -1);
+    // A press made before the pick started is not a pick (its first tick clears the latch); no press: it waits.
+    host.latch = 0x20;
+    vm.tick();
+    CHECK_EQ(host.latch, 0);
+    vm.tick();
+    CHECK_EQ(vm.var(V(1)), 0);
+    host.latch = static_cast<u16>(press);
+    vm.tick();
+    CHECK_EQ(vm.var(V(0)), want);
+    CHECK_EQ(host.latch, 0);
+    // The pick ended the turn: the next instruction runs next tick.
+    CHECK_EQ(vm.var(V(1)), 0);
+    vm.tick();
+    CHECK_EQ(vm.var(V(1)), 1);
+    if (want & ModUi::kPickMoved && want < ModUi::kPickCancel) CHECK_EQ(vm.mod_ui().cursor, want & 0x3F);
+    CHECK(vm.mod_ui().holds_controls);
+  }
+  {
+    // Held keys: the Circle that opened the screen is no pick; a held Right moves once, then again only after the repeat delay and
+    // then every kRepeatEvery ticks (V(1) counts the moves of a pick loop); hiding the UI gives the controls back.
+    Asm looped;
+    const auto lext = [&](int sub, std::initializer_list<int> words) {
+      looped.raw({0xFE, sub, static_cast<int>(2 * words.size())});
+      for (int value : words) looped.word(value);
+    };
+    const u16 init2 = looped.here();
+    for (int id = 0; id < 4; ++id) lext(0xC6, {I(id), I(40 * id), I(0), I(10), I(10), I(0)});
+    lext(0xC7, {I(0), I(0)});
+    lext(0xC2, {I(1)});
+    looped.stop();
+    const u16 loop = looped.here();
+    lext(0xC8, {V(0)});
+    // IF_JUMP jumps when the condition is false: on 0x80 (cancel) past the INC and the JUMP (8 + 3 + 3 bytes) to UI_SHOW 0.
+    looped.if_jump(V(0), 1, 0x80, static_cast<u16>(looped.here() + 14));
+    looped.inc(V(1));
+    looped.jump(loop);
+    lext(0xC2, {I(0)});
+    looped.park();
+    KeyHost host;
+    FieldVM vm(host);
+    vm.load(make_module(looped, {{{{0, init2}, {1, loop}}}}));
+    host.held = host.latch = 0x20;
+    for (int tick = 0; tick < 4; ++tick) vm.tick();
+    CHECK_EQ(vm.var(V(1)), 0);
+    host.held = 0;
+    vm.tick();
+    host.held = host.latch = 0x2000;
+    vm.tick();
+    vm.tick();
+    CHECK_EQ(vm.var(V(1)), 1);
+    for (int tick = 0; tick < ModUi::kRepeatDelay - 4; ++tick) vm.tick();
+    CHECK_EQ(vm.var(V(1)), 1);
+    for (int tick = 0; tick < 12; ++tick) vm.tick();
+    CHECK(vm.var(V(1)) >= 2 && vm.var(V(1)) <= 3);
+    CHECK(vm.mod_ui().holds_controls);
+    host.held = 0;
+    vm.tick();
+    host.latch = 0x40;
+    for (int tick = 0; tick < 3; ++tick) vm.tick();
+    CHECK(!vm.mod_ui().shown && !vm.mod_ui().holds_controls);
+  }
+  // SET enabled / visible change what the cursor can reach; a new room's VM starts with nothing shown.
+  ModUi ui;
+  ui.elements[1] = {ModUi::kItem, 0, 0, 10, 10, 0, 0};
+  ui.elements[2] = {ModUi::kItem, 40, 0, 10, 10, 0, ModUi::kDisabled};
+  ui.cursor = 1;
+  CHECK_EQ(ui.step(1), -1);
+  CHECK(ui.set(2, ModUi::kFieldEnabled, 1));
+  CHECK_EQ(ui.step(1), 2);
+  CHECK(ui.set(2, ModUi::kFieldVisible, 0));
+  CHECK_EQ(ui.step(1), -1);
+  CHECK(!ui.set(2, 99, 0));
+  KeyHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  vm.load(make_module(script, {{{{0, update}}}}));
+  CHECK(!vm.mod_ui().shown && vm.mod_ui().elements[0].kind == ModUi::kNone);
+}
 
 // GET_POSITION (48) writes X, Z, Y in operand order, like the published player variables 0x12 / 0x14 / 0x16.
 class PosHost : public NullHost {
@@ -969,6 +1103,7 @@ int main() {
   test_scenario_and_rng();
   test_opcode_table();
   test_extension_ops();
+  test_mod_ui_ops();
   test_get_position_order();
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();
