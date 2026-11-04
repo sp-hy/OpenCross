@@ -9,7 +9,10 @@
 //   2. otherwise every shipped member with the same file name is a candidate (cdrom2 members count as cdrom/, the path the game
 //      reads); the candidates sharing the longest trailing run of path components with the mod path win, so leading wrapper
 //      folders are ignored and a bare file name falls back to a unique name match; one winner = matched, several = ambiguous
-//      (not loaded), none = unmatched (not loaded).
+//      (not loaded), none = rule 3;
+//   3. a file that matches nothing is a new member when its path names an archive: below a folder called after one
+//      ("<wrapper>/cdrom/map/mapbin/x.bin" -> cdrom/map/mapbin/x.bin, the first such folder; cdrom2 counts as cdrom), as a member of a
+//      mod's <archive>.dat, or anywhere in a mod folder called after one ("mods\cdrom\map\mapbin\x.bin"); otherwise unmatched (not loaded).
 // Priority: the mod list order; the first enabled mod that loads on the current art mode wins a target.
 //
 // Game data (is_game_data: text, battle tables and scripts, shop tables, program files, the base sound banks) is not art: "load on" does not
@@ -59,8 +62,8 @@ struct ModFile {
 // member replacements that follow "load on", `data` the matched game data, `archives` the <archive>.dat files (their members are in
 // `files` / `data`), `textures` the texture replacements (target = canonical texture
 // path), `voices` the voice lines (<mod>\voices\**\*.mp3, or any .mp3 when the folder itself is called "voices"; played by
-// audio::VoicePlayer, not VFS targets). `unmatched` / `ambiguous` list the rel paths that match no shipped member / whose best match is
-// not unique.
+// audio::VoicePlayer, not VFS targets). `added` lists the rel paths of the new members (rule 3; they are in `files` / `data` too).
+// `unmatched` / `ambiguous` list the rel paths that match no shipped member and name no archive / whose best match is not unique.
 struct Mod {
   std::string name;
   std::filesystem::path root;
@@ -74,6 +77,7 @@ struct Mod {
   std::vector<ModFile> archives;
   std::vector<ModFile> textures;
   std::vector<ModFile> voices;
+  std::vector<std::string> added;
   std::vector<std::string> unmatched;
   std::vector<std::string> ambiguous;
 };
