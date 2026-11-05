@@ -1,15 +1,18 @@
 // Checks for oc_movie: member resolution, Bink 2 decode of the first frames/audio (needs the RDE install; skipped
-// without it), the mixer's movie PCM clock and level, and wall-clock Player pacing without a GPU.
+// without it), the mixer's movie PCM clock and level, wall-clock Player pacing and play ranges without a GPU, the staff-roll strip.
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "audio/mixer.h"
 #include "movie/decoder.h"
 #include "movie/player.h"
 #include "platform/paths.h"
+#include "render/texture.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
@@ -99,6 +102,35 @@ void test_player_pause_flag() {
   player.set_paused(false);
   CHECK(!player.paused());
 }
+
+// The staff roll's strip (144 x 8950, as RDE's): 240 rows on screen; the first row enters at the bottom at frame 0, the end of the strip
+// stands 52 % of the span above the bottom at the last frame; the Japanese strip only for Japanese.
+void test_staff_strip() {
+  const float span = movie::staff_strip_span(144, 8950);
+  CHECK(std::fabs(span * 8950.0f - 240.0f) < 1e-2f);
+  CHECK(std::fabs(movie::staff_strip_top(0, 8951, 144, 8950) + span) < 1e-6f);
+  CHECK(std::fabs(movie::staff_strip_top(8951, 8951, 144, 8950) - (1.0f - 0.48f * span)) < 1e-5f);
+  CHECK(std::fabs(movie::staff_strip_top(1000, 8951, 144, 8950) * 8950.0f - 773.83f) < 0.05f);
+  CHECK(movie::staff_strip_top(4065, 8130, 144, 8950) > movie::staff_strip_top(4065, 8951, 144, 8950));
+  CHECK(movie::staff_strip_member("jp") == "hd/staff/staff24.png");
+  CHECK(movie::staff_strip_member("en") == "hd/staff/staff24us.png" && movie::staff_strip_member("de") == "hd/staff/staff24us.png");
+}
+
+// Plays `name` [start, end) on the wall clock and returns the first and last 0-based frame index shown.
+std::pair<u64, u64> shown_range(const vfs::Vfs& files, const char* name, u32 start, u32 end) {
+  movie::Player player;
+  if (!player.open(files, name, "en", start, end)) return {~0ull, ~0ull};
+  u64 first = ~0ull, last = 0;
+  for (int guard = 0; !player.finished() && guard < 200000; ++guard) {
+    player.update(1.0 / 60.0);
+    if (player.frame_rgba().size()) {
+      first = std::min(first, player.frame_index());
+      last = std::max(last, player.frame_index());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return {first, last};
+}
 }  // namespace
 
 int main() {
@@ -106,6 +138,7 @@ int main() {
   test_mixer_movie_level();
   test_mixer_hold();
   test_player_pause_flag();
+  test_staff_strip();
 
   const auto dir = platform::find_game_dir("");
   vfs::Vfs files;
@@ -167,6 +200,19 @@ int main() {
   }
   player.skip();
   CHECK(player.finished());
+
+  // Ranges are the file's own 1-based frame numbers, end exclusive; a whole-file row stops before the last frame (a05kid: 140 frames).
+  CHECK(shown_range(files, "a05kid", 130, 135) == std::make_pair(u64{129}, u64{133}));
+  CHECK(shown_range(files, "a05kid", 0, 0) == std::make_pair(u64{0}, u64{138}));
+  // The staff roll's strips and the ending_s frame count the strip timing uses.
+  movie::Decoder ending;
+  auto ending_bytes = files.read("movie/ending_s.bk2");
+  CHECK(ending_bytes && ending.open(std::move(*ending_bytes)) && ending.frame_count() == 8951);
+  for (const char* lang : {"en", "jp"}) {
+    auto png = files.read(movie::staff_strip_member(lang));
+    render::DecodedImage strip;
+    CHECK(png && render::decode_image(*png, strip) && strip.width == 144 && strip.height == 8950);
+  }
 
   std::printf(failures ? "movie: %d FAILED\n" : "movie: ok\n", failures);
   return failures ? 1 : 0;

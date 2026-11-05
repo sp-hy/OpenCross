@@ -106,6 +106,7 @@ bool NullHost::movie_playing() { NOTE("movie_playing"); return false; }
 void NullHost::request_battle(int, int, int) { NOTE("request_battle"); }
 bool NullHost::battle_active() { NOTE("battle_active"); return false; }
 void NullHost::request_map_jump(int, int) { NOTE("request_map_jump"); }
+void NullHost::set_movie_jump(int, int) { NOTE("set_movie_jump"); }
 void NullHost::request_menu(MenuKind, int) { NOTE("request_menu"); }
 bool NullHost::menu_active() { NOTE("menu_active"); return false; }
 void NullHost::field_reset() { NOTE("field_reset"); }

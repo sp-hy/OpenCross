@@ -621,6 +621,7 @@ class FieldWorld final : public script::FieldHost {
   // the encounter sequence 'enct' runs before a battle (BattleState::Intro)
   bool battle_intro() const;
   void request_map_jump(int room, int param) override;
+  void set_movie_jump(int room, int param) override;
   void request_menu(script::MenuKind kind, int arg) override;
   bool menu_active() override;
   void field_reset() override;
@@ -670,6 +671,8 @@ class FieldWorld final : public script::FieldHost {
   struct PendingJump {
     bool active = false;
     int room = 0, param = 0;
+    // The screen is already off (a movie ended): the room switches with no fade-out.
+    bool cut = false;
   };
 
   // ---- room / model plumbing
@@ -746,6 +749,8 @@ class FieldWorld final : public script::FieldHost {
   // The .prd path RoomView::set_prd_path takes for a room on the current disc.
   std::string prd_path_for(std::string_view name);
   void finish_jump_failed(const std::string& why);
+  // The movie behind DC ended: the recorded jump starts.
+  void start_movie_jump();
   void stub(const char* what);
   bool tint_active() const;
   // True once a room light (type-17 emitter object) has lit a slot. The PS1 shades FE 64 actors from the slots whatever they hold; with all three
@@ -942,6 +947,8 @@ class FieldWorld final : public script::FieldHost {
   float interp_alpha(float alpha) const { return exit_frozen() ? 1.0f : alpha; }
   Trans trans_ = Trans::None;
   PendingJump jump_;
+  // DC's record: the jump the movie behind it starts when it ends or is skipped.
+  PendingJump movie_jump_;
   int trans_wait_ = 0;
   // Op 68 SET_SCREEN_RGB abr, r, g, b, frames: a full-screen flat quad of colour (r, g, b) in
   // 0..255, drawn with PS1 semi-transparency mode `abr` (2 = subtract), its colour interpolated linearly from the current value to the

@@ -1,0 +1,15 @@
+# Movie-end jump: MAP_JUMP_DC only records the jump, so PLAY_MOVIE #18 (b18sikai) behind it plays; the room changes when it ends.
+0 mash until movie start 4000         # the scene: dialogue, the white fog, then DC + 7E
+- assert room bak_a17e
+- assert var 0x08 0                   # PREVIOUS_MAP_ID is not written by DC
+- wait 60
+- assert movie playing
+- screenshot mj_01_movie.png
+- wait movie end 60000
+- wait room bak_a15e 600
+- assert var 0x08 538                 # at the movie end: PREVIOUS_MAP_ID = bak_a17e
+- assert var 0x06 472
+- assert var 0x02 1
+- assert var 0x3A 1
+- screenshot mj_02_bak_a15e.png
+- quit

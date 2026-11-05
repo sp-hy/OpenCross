@@ -457,6 +457,7 @@ void FieldWorld::step_player() {
       if (heading != kNoHeading) heading = (heading + status_flu_wobble()) & 0xFFF;
     }
     if (status_no_run()) run = false;
+    if (vm_.global_flags() & script::gflag::kForceRun) run = true;
     if (heading != kNoHeading && pe.actor.triangle() >= 0) status_on_move(player, view_.walk().flags(pe.actor.triangle()), run);
   }
   // A scripted move (MOVE / WALK_TO with a heading) can leave the leader off the walk mesh; once the player has the controls
@@ -488,6 +489,7 @@ void FieldWorld::step_player() {
   // Right stick: turn on the spot.
   if (controls_free() && heading == kNoHeading && input_.pad_rstick && !pe.motion.active)
     pe.actor.set_facing(static_cast<int>(std::lround(std::atan2(input_.pad_ry, -input_.pad_rx) * kUnitsPerRad)) & 0xFFF);
+  pe.actor.force_run = (vm_.global_flags() & script::gflag::kForceRun) != 0;
   pe.actor.tick(view_.walk(), heading, run);
   pe.motion.walking = false;
   if (heading != kNoHeading) {

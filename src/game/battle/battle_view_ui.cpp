@@ -1247,7 +1247,7 @@ void BattleView::build_command_ui() {
           const data::ElemRec& oe = tables_->elements[static_cast<size_t>(battle_state.cell_element(active_pc_, idx))];
           const int oci = data::colour_index_of_bit(oe.colour_bit());
           const int opc = oci >= 0 && oci < 6 ? oci : (oe.colour_bit() & 0xFC) == 0xFC ? 6 : -1;
-          const bool used = cu.used[static_cast<size_t>(idx)] || battle_state.element_sealed(active_pc_, idx);
+          const bool used = cu.used[static_cast<size_t>(idx)] || battle_state.element_greyed(active_pc_, idx);
           if (opc >= 0)
             add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + opc * 10 + hdr_.fold_frame() - 1)], 8 * kPs1Px, (60.0f + 15.0f * static_cast<float>(idx % data::kGridCols)) * kRowScale, 120 * kPs1Px, 16 * kRowScale);
         }
@@ -1526,7 +1526,7 @@ void BattleView::build_element_ui() {
     const data::ElemRec& elem = tables_->elements[static_cast<size_t>(id)];
     const int ci = data::colour_index_of_bit(elem.colour_bit());
     // Used or colour-sealed = the greyed plate set + 0x404040 text.
-    const bool used = unit.used[static_cast<size_t>(idx)] || battle_state.element_sealed(active_pc_, idx);
+    const bool used = unit.used[static_cast<size_t>(idx)] || battle_state.element_greyed(active_pc_, idx);
     const bool sel = idx == cell_ && rest;
     // PS1 line of the plate.
     const float row_y = 60.0f + 15.0f * static_cast<float>(slot);

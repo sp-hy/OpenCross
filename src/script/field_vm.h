@@ -43,7 +43,7 @@ namespace flag270 {
 constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000;
 }
 namespace gflag {
-constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kPauseAllowed = 0x4000, kKeepCustomName = 0x10000;
+constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kPauseAllowed = 0x4000, kForceRun = 0x8000, kKeepCustomName = 0x10000;
 }
 
 // One script slot record of an entity. `state` is the priority class (the lowest runs): 0xF idle, 7 the default UPDATE
@@ -154,8 +154,10 @@ class FieldVM {
   void set_var(u16 id, s32 value);
   // The water level table op 66 fills (default 10).
   s16 water_level(size_t slot) const { return slot < table_9fdc_.size() ? table_9fdc_[slot] : s16(10); }
-  // The room register that 5A / DC store in PREVIOUS_MAP_ID; the New Game+ launcher sets it to 8.
+  // The room register that 5A and the movie-end jump of DC store in PREVIOUS_MAP_ID; the New Game+ launcher sets it to 8.
   void set_room_register(int room) { room_reg_ = room; }
+  // A room change is committed: PREVIOUS_MAP_ID = the room register, then the register names the next room.
+  void note_room_change(int room);
   // `bit_ref` = (id << 4) | bit, as the bit opcodes 71 / 72 / 73 encode it.
   bool var_bit(u32 bit_ref) const;
   std::span<u16> variables() { return vars_; }
@@ -207,7 +209,7 @@ class FieldVM {
   std::vector<Entity> ents_;
   std::array<u16, kVarSlots> vars_{};
   // The room register: the host's MAP_ID write at a room load / Continue (-1 = none yet: variable 6 is used), 8 after
-  // FE 2F (set while variable 6 ends 0). 5A / DC store it in PREVIOUS_MAP_ID.
+  // FE 2F (set while variable 6 ends 0). 5A and DC's movie-end jump store it in PREVIOUS_MAP_ID.
   int room_reg_ = -1;
   int room_register() const;
   u32 gflags_ = 0;

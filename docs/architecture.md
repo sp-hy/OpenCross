@@ -230,7 +230,7 @@ A script never changes the host mode itself. It records a request in the world a
 
 | Request | Script op | World state | Handler |
 |---|---|---|---|
-| Room switch | map jump (`MAP_JUMP_DC`, ...) | `request_map_jump` sets `jump_`; `begin_jump` starts a fade; `step_transition` calls `load_room` once the screen is dark | inside `FieldWorld` |
+| Room switch | map jump (`SET_NEXT_ROOM`, ...; `MAP_JUMP_DC` only records a jump that the movie end takes, `set_movie_jump`) | `request_map_jump` sets `jump_`; `begin_jump` starts a fade (none for a movie-end jump); `step_transition` calls `load_room` once the screen is dark | inside `FieldWorld` |
 | Battle | `A3`, `C9` | `request_battle`; `handoff_.battle_state`: `None, Intro, Hold, Ready, Running` | `App::field_battle_load_step`, `start_field_battle`, `finish_field_battle` |
 | Menu or shop | the screen ops FE 4A / 5B / 5E / 67 / 68 / 72 / 75 / 84 / 85 open it; the `FE 61` after each waits while it is pending or open | `request_menu`; `menu_state_`: `None, Requested, Open` | `App::handle_script_menu`; `menu_closed(result)` lets the FE 61 step on |
 | Movie | `7E`, `D4` | `play_movie`; `movie_state_` and a `MovieRequest` | `App::start_movie`; `end_movie` calls `movie_finished()` |

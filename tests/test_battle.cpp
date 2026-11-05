@@ -146,10 +146,10 @@ void test_formulas() {
 
   // Heal (Cure, p=18): Serge MAG 7 -> 9 terms * 1800 / 400 = 40
   Lo lh(Lo::Fallback::Lo);
-  CHECK_EQ(heal_amount(lh, 7, 18, 1000, 1000), 40);
+  CHECK_EQ(heal_amount(lh, 7, 18, 1000), 40);
   Lo lh2(Lo::Fallback::Lo);
   // Capped at 999.
-  CHECK_EQ(heal_amount(lh2, 200, 18, 1000, 1500), 999);
+  CHECK_EQ(heal_amount(lh2, 200, 18, 1250), 999);
   CHECK_EQ(slot_mille(0, 3), 750);
   CHECK_EQ(slot_mille(4, 3), 1250);
   CHECK_EQ(slot_mille(2, 3), 1000);
@@ -651,6 +651,11 @@ void test_status_and_poison() {
   // Five steps of timer decay.
   battle.post_action(0, 1, 5);
   CHECK_EQ(battle.unit(1).timers.at(8), 3 * 13 - 5);
+  // An enemy-led action counts but steps no timer.
+  const int actions0 = battle.actions();
+  battle.post_action(3, 1, 5);
+  CHECK_EQ(battle.unit(1).timers.at(8), 3 * 13 - 5);
+  CHECK_EQ(battle.actions(), actions0 + 1);
   battle.post_action(0, 1, 100);
   CHECK((battle.unit(1).lo & st::kAfraid) == 0 && battle.unit(1).timers.empty());
 
@@ -659,6 +664,8 @@ void test_status_and_poison() {
   battle.unit_mut(3).lo |= st::kPoison;
   const int hp2 = battle.unit(2).hp;
   battle.post_action(0, 7, 1);
+  CHECK_EQ(battle.unit(2).hp, hp2 - 7);
+  battle.post_action(3, 7, 1);
   CHECK_EQ(battle.unit(2).hp, hp2 - 7);
   battle.unit_mut(3).hp = 3;
   battle.post_action(0, 7, 1);
@@ -684,6 +691,127 @@ void add_support_elements(data::GameTables& tables) {
   auto& turn_red = tables.elements[6];
   turn_red.raw[0] = 0x08, turn_red.raw[1] = 1, turn_red.raw[4] = 0xC0, turn_red.raw[5] = 0x20, turn_red.raw[6] = 1, turn_red.raw[7] = 1;
   turn_red.raw[0xA] = 100, turn_red.raw[0x1C] = 0x08;
+}
+
+void test_enemy_element_value_shift() {
+  // An enemy's element action halves the result of ids 150..301 and quarters a summon's (record byte 0 bit 0x40), shown and applied; a
+  // lower id, a PC caster and scene 0x1D9 keep the full value. The element: mode 33, 40 % of the target's HP, colourless.
+  struct Hit {
+    int loss = -1, shown = -1;
+  };
+  const auto cast = [](int caster, int id, u8 flags, int scene_index) {
+    data::GameTables tables = make_tables();
+    tables.elements.resize(303);
+    data::ElemRec& element = tables.elements[static_cast<size_t>(id)];
+    element.raw[0] = flags, element.raw[6] = 1, element.raw[7] = 33, element.raw[8] = 40;
+    tables.scenes.resize(static_cast<size_t>(scene_index) + 1);
+    tables.scenes[static_cast<size_t>(scene_index)] = tables.scenes[0];
+    ScriptedRng rng{Lo::Fallback::Lo};
+    NullBrain brain;
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    battle.start({make_member(0, "A", 800), make_member(1, "B"), make_member(2, "C")}, scene_index);
+    const int target = is_pc_slot(caster) ? 3 : 0;
+    battle.unit_mut(target).hp = 800;
+    battle.do_element(caster, id, 0, target);
+    Hit hit;
+    hit.loss = 800 - battle.unit(target).hp;
+    if (!battle.events().empty()) hit.shown = battle.events().back().value;
+    return hit;
+  };
+  const Hit full = cast(3, 149, 0x01, 0);
+  CHECK(full.loss >= 8);
+  CHECK_EQ(full.shown, full.loss);
+  const Hit half = cast(3, 150, 0x01, 0), half_top = cast(3, 301, 0x01, 0);
+  CHECK_EQ(half.loss, full.loss >> 1);
+  CHECK_EQ(half.shown, half.loss);
+  CHECK_EQ(half_top.loss, full.loss >> 1);
+  CHECK_EQ(cast(3, 302, 0x01, 0).loss, full.loss);
+  const Hit quarter = cast(3, 41, 0x41, 0);
+  CHECK_EQ(quarter.loss, full.loss >> 2);
+  CHECK_EQ(quarter.shown, quarter.loss);
+  CHECK_EQ(cast(3, 182, 0x01, 0x1D9).loss, full.loss);
+  CHECK_EQ(cast(0, 182, 0x01, 0).loss, cast(0, 149, 0x01, 0).loss);
+}
+
+void test_ko_drops_pc_statuses() {
+  // A hit that knocks a PC out keeps only its permanent statuses and the inflicted lo 0x400480 / hi 0x1FE00000, drops the other timers and
+  // leaves the stat modifiers; an enemy keeps everything.
+  Fixture fixture;
+  fixture.tables.elements.resize(5);
+  data::ElemRec& finisher = fixture.tables.elements[4];
+  finisher.raw[6] = 1, finisher.raw[7] = 33, finisher.raw[8] = 100;
+  Battle& battle = fixture.battle;
+  Unit& pc = battle.unit_mut(1);
+  pc.perm_lo |= 0x8;
+  pc.lo |= st::kPoison | 0x8 | st::kAfraid | 0x400000;
+  pc.hi |= 0x40 | 0x200000;
+  pc.timers[0] = 9, pc.timers[8] = 9, pc.timers[32 + 6] = 9, pc.timers[32 + 21] = 9;
+  pc.mod[0] = 150;
+  pc.hp = 1;
+  battle.do_element(3, 4, 0, 1);
+  CHECK(!battle.unit(1).alive());
+  CHECK_EQ(battle.unit(1).lo, battle.unit(1).perm_lo | 0x400000u | st::kKO);
+  CHECK_EQ(battle.unit(1).hi, battle.unit(1).perm_hi | 0x200000u);
+  CHECK(battle.unit(1).timers.size() == 1 && battle.unit(1).timers.count(32 + 21) == 1);
+  CHECK_EQ(battle.unit(1).mod[0], 150);
+  battle.unit_mut(3).lo |= st::kPoison;
+  battle.unit_mut(3).hp = 1;
+  battle.do_element(0, 4, 0, 3);
+  CHECK(!battle.unit(3).alive());
+  CHECK((battle.unit(3).lo & st::kPoison) != 0);
+}
+
+void test_poison_ko() {
+  // Poison taking a PC to 0 keeps the inflicted lo bits 1..15 (poison and bits 16..31 go) and the hi word, and empties the stamina.
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  Unit& pc = battle.unit_mut(1);
+  pc.lo |= st::kPoison | st::kFlu | 0x04000000;
+  pc.hi |= 0x40;
+  pc.hp = 3;
+  battle.post_action(0, 7, 1);
+  CHECK(!battle.unit(1).alive());
+  CHECK_EQ(battle.unit(1).hp, 0);
+  CHECK_EQ(battle.unit(1).lo, battle.unit(1).perm_lo | st::kFlu | st::kKO);
+  CHECK((battle.unit(1).hi & 0x40) != 0);
+  CHECK_EQ(battle.unit(1).stamina, 0);
+}
+
+void test_revive_resets_stamina_and_countdown() {
+  // Mode 4 brings a KO'd unit back with max HP x pct / 100 (15 % from an enemy caster), stamina 70 and countdown AP + rnd(0, AP >> 2).
+  Fixture fixture;
+  fixture.tables.elements.resize(5);
+  data::ElemRec& revive = fixture.tables.elements[4];
+  revive.raw[4] = 0x41, revive.raw[6] = 1, revive.raw[7] = 4;
+  Battle& battle = fixture.battle;
+  battle.unit_mut(1).hp = 0;
+  battle.unit_mut(1).lo |= st::kKO;
+  battle.unit_mut(1).stamina = 3;
+  battle.unit_mut(1).countdown = 0;
+  fixture.rng.push(2);
+  battle.do_element(3, 4, 0, 1);
+  CHECK(battle.unit(1).alive());
+  CHECK_EQ(battle.unit(1).hp, battle.unit(1).max_hp * 15 / 100);
+  CHECK_EQ(battle.unit(1).stamina, 70);
+  CHECK_EQ(battle.unit(1).countdown, battle.unit(1).ap + 2);
+}
+
+void test_heal_ignores_ring_colour() {
+  // A heal takes neither the colour multiplier nor the field state: Cure (blue) heals the same on a blue, a red and an empty ring.
+  const auto heal = [](const std::array<int, 3>& ring) {
+    Fixture fixture;
+    Battle& battle = fixture.battle;
+    battle.set_ring(ring);
+    battle.unit_mut(1).hp = 1;
+    battle.do_element(0, 3, 0, 1);
+    return battle.unit(1).hp - 1;
+  };
+  const int plain = heal({-1, -1, -1});
+  CHECK(plain > 0);
+  CHECK_EQ(heal({5, 5, 5}), plain);
+  CHECK_EQ(heal({3, 3, 3}), plain);
 }
 
 void test_saints_by_target_slot() {
@@ -2229,7 +2357,7 @@ void test_pac_resolved_ops() {
 // Op 81 suspends the end test, an op-83 code ends the fight first (Outcome::Scripted, result_code), the
 // party test comes before the enemy test (a mutual KO is a defeat); slot-4 counter-attacks are executed.
 struct CtlBrain final : EnemyBrain {
-  bool end_on = true;
+  bool end_on = true, once = true;
   int forced = -1;
   int reactions = 0;
   EnemyAction choose(const Battle&, int, Rng&) override {
@@ -2240,7 +2368,7 @@ struct CtlBrain final : EnemyBrain {
   bool end_check_enabled() const override { return end_on; }
   int forced_result() const override { return forced; }
   void on_attacked(Battle&, int unit, Rng&, std::vector<EnemyAction>& out) override {
-    if (unit < kPcSlots || reactions > 0) return;
+    if (unit < kPcSlots || (once && reactions > 0)) return;
     ++reactions;
     EnemyAction action;
     action.kind = EnemyAction::Kind::Weapon;
@@ -2744,6 +2872,32 @@ void test_end_rules() {
     bool countered = false;
     for (const ActionEvent& event : battle->drain_events()) countered = countered || (event.actor == 3 && event.target == 0 && event.kind == ActionEvent::Kind::Weapon);
     CHECK(countered);
+  }
+  {
+    // the counter is enemy-led, so it starts no further slot 4
+    CtlBrain br;
+    br.once = false;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    auto battle = fresh(br, rng);
+    battle->unit_mut(3).hp = battle->unit_mut(3).max_hp = 9999;
+    battle->do_weapon_attack(0, 3, 0);
+    battle->finish_external_action();
+    CHECK_EQ(br.reactions, 1);
+  }
+  {
+    // an enemy-led hit and a PC action whose targets include a PC start no slot 4
+    CtlBrain br;
+    br.once = false;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    auto battle = fresh(br, rng);
+    battle->unit_mut(3).hp = battle->unit_mut(3).max_hp = 9999;
+    battle->do_weapon_attack(3, 0, 0);
+    battle->finish_external_action();
+    CHECK_EQ(br.reactions, 0);
+    battle->do_weapon_attack(0, 1, 0);
+    battle->do_weapon_attack(0, 3, 0);
+    battle->finish_external_action();
+    CHECK_EQ(br.reactions, 0);
   }
 }
 
@@ -3702,7 +3856,96 @@ void test_stolen_loot_needs_victory() {
   }
 }
 
+// After a fight every consumable stack cell below 5 copies takes the missing copies from the element stock; a stack that ran out with no
+// spares keeps its element at 0 copies.
+void test_stack_restock() {
+  Fixture fixture;
+  fixture.tables.elements.resize(110);
+  fixture.tables.elements[105].raw[0] = 0x10;
+  fixture.tables.elements[1].raw[0] = 0x01;
+  ui::GameState state;
+  save::SaveChar& serge = state.slot.chars[0];
+  serge.grid[0] = 105;
+  serge.equipped_qty[0] = 3;
+  serge.grid[1] = 105;
+  serge.equipped_qty[1] = 0;
+  serge.grid[2] = 105;
+  serge.equipped_qty[2] = 5;
+  serge.grid[3] = 1;
+  serge.equipped_qty[3] = 2;
+  for (int i = 0; i < 4; ++i) CHECK(state.add_element(105));
+  game::apply_battle_result(state, fixture.tables, fixture.battle);
+  CHECK_EQ(serge.equipped_qty[0], 5);
+  CHECK_EQ(serge.equipped_qty[1], 2);
+  CHECK_EQ(serge.equipped_qty[2], 5);
+  CHECK_EQ(serge.equipped_qty[3], 2);
+  CHECK_EQ(state.element_count(105), 0);
+  game::apply_battle_result(state, fixture.tables, fixture.battle);
+  CHECK(serge.grid[1] == 105 && serge.equipped_qty[1] == 2);
+  serge.equipped_qty[1] = 0;
+  game::apply_battle_result(state, fixture.tables, fixture.battle);
+  CHECK(serge.grid[1] == 105 && serge.equipped_qty[1] == 0);
+}
+
+// A PC summon (record byte 0 bit 0x40) is usable only while every non-empty ring slot holds its colour and a star is left; the cast
+// spends one star, and the stars left go back to the save whatever the outcome. An all-empty ring keeps the last summon colour.
+void test_summon_gate() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  data::ElemRec& summon = tables.elements[4];
+  summon.raw[0] = 0x41, summon.raw[1] = 1, summon.raw[5] = 0x80, summon.raw[6] = 1, summon.raw[8] = 12, summon.raw[0xC] = 20;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  PartyMember caller = make_member(0, "A");
+  caller.cells[0] = 0x4004;
+  BattleOptions options;
+  options.growth.star = 12;
+  options.growth.counter = 1;
+  CHECK(battle.start({caller, make_member(1, "B"), make_member(2, "C")}, 0, options));
+  battle.unit_mut(0).gauge = 2;
+  battle.unit_mut(0).stamina = 70;
+  battle.set_ring({5, 3, 5});
+  CHECK_EQ(battle.ring_summon_colour(), -1);
+  CHECK(battle.summon_blocked(0, 0) && battle.element_greyed(0, 0) && !battle.element_usable(0, 0));
+  battle.set_ring({3, 3, 3});
+  CHECK(battle.summon_blocked(0, 0) && !battle.element_usable(0, 0));
+  battle.set_ring({-1, 5, 5});
+  CHECK_EQ(battle.ring_summon_colour(), 5);
+  CHECK(!battle.summon_blocked(0, 0) && !battle.element_greyed(0, 0) && battle.element_usable(0, 0));
+  battle.set_ring({-1, -1, -1});
+  CHECK_EQ(battle.ring_summon_colour(), 5);
+  CHECK(battle.element_usable(0, 0));
+  // An ordinary element of the same colour is not gated.
+  CHECK(!battle.summon_blocked(0, 10));
+  Command cast;
+  cast.kind = Command::Kind::Element;
+  cast.actor = 0;
+  cast.cell = 0;
+  std::string why;
+  CHECK(battle.apply(cast, &why));
+  CHECK_EQ(battle.growth().counter, 0);
+  battle.unit_mut(0).used[0] = false;
+  battle.unit_mut(0).stamina = 70;
+  battle.unit_mut(0).gauge = 2;
+  battle.set_ring({5, 5, 5});
+  CHECK(battle.summon_blocked(0, 0) && !battle.element_usable(0, 0));
+  Command run;
+  run.kind = Command::Kind::Run;
+  run.actor = 0;
+  CHECK(battle.apply(run));
+  ui::GameState state;
+  state.slot.head[save::head::kStarsTotal] = 12;
+  state.slot.head[save::head::kStarsCurrent] = 1;
+  game::apply_battle_result(state, tables, battle);
+  CHECK_EQ(state.slot.stars_current(), 0);
+  CHECK_EQ(state.slot.head[save::head::kStarsTotal], 12);
+}
+
 int main() {
+  test_stack_restock();
   test_gear();
   test_rng();
   test_target_cursor_order();
@@ -3721,6 +3964,11 @@ int main() {
   test_stamina_sequence();
   test_action_events();
   test_status_and_poison();
+  test_enemy_element_value_shift();
+  test_ko_drops_pc_statuses();
+  test_poison_ko();
+  test_revive_resets_stamina_and_countdown();
+  test_heal_ignores_ring_colour();
   test_saints_by_target_slot();
   test_purify_cures();
   test_turn_colour_status();
@@ -3728,6 +3976,7 @@ int main() {
   test_field_ring_writes();
   test_queued_cast_targets();
   test_trap_hud();
+  test_summon_gate();
   test_trap_needs_colour();
   test_pilfer();
   test_forced_victory_pays_defeated_only();

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "game/actor.h"
+#include "game/field_world.h"
 #include "game/walk_mesh.h"
 #include "render/render_target.h"
 
@@ -263,9 +264,26 @@ void test_screen_warp() {
   const float lo = line19(64), mid = line19(64.5f), hi = line19(65);
   CHECK((mid - lo) * (hi - mid) > 0.0f);
 }
+
+void test_give_item_element_count() {
+  ui::GameState state;
+  game::FieldWorld world;
+  world.set_game_state(&state);
+  world.give_item(0x200 + 0x61);
+  world.give_item(0x200 + 0x6B);
+  world.give_item(0x200 + 0x6C);
+  world.give_item(0x200 + 0x60);
+  CHECK(state.element_count(0x61) == 5);
+  CHECK(state.element_count(0x6B) == 5);
+  CHECK(state.element_count(0x6C) == 1);
+  CHECK(state.element_count(0x60) == 1);
+  for (int i = 0; i < 30; ++i) world.give_item(0x200 + 0x65);
+  CHECK(state.element_count(0x65) == 99);
+}
 }  // namespace
 
 int main() {
+  test_give_item_element_count();
   test_actor_anim();
   test_attached_rigid();
   test_axes_blend();

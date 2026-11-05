@@ -277,6 +277,7 @@ void FieldWorld::clear_room() {
   controlled_override_ = -1;
   camera_target_ = -1;
   jump_ = {};
+  movie_jump_ = {};
   camera_.reset();
   shake_ = Shake{};
   close_windows();

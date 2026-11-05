@@ -54,7 +54,7 @@ void load_records(const data::GameTables* tables, save::SaveSlot& slot, bool dre
   for (auto& item : slot.items) item = {};
   for (auto& element : slot.elements) element = {};
   slot.set_gold(100);
-  std::fill(slot.head.begin() + 0x598, slot.head.begin() + 0x59C, u8{0});
+  slot.set_growth_progress(0);
   const auto vars = globals();
   for (size_t i = 0; i < vars.size(); ++i) slot.set_var(0x3D0 + 2 * static_cast<int>(i), vars[i]);
 }

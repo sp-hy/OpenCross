@@ -422,8 +422,6 @@ class App {
   // Script screen (name entry or shop) that opens once the menu-open fade-out is over.
   std::optional<game::FieldWorld::MenuRequest> screen_after_fade;
   int battle_flags = 0;
-  // The growth progress counter is not in the save, kept for the session.
-  int growth_progress = 0;
   u32 battle_counter = 0;
   // Routes count field battles started (an art switch must not restart a battle).
   u64 battle_starts = 0;

@@ -359,7 +359,8 @@ void FieldWorld::give_item(int id) {
   if (id < 0x200) {
     gs_->add_item(id);
   } else if (id < 0x400) {
-    gs_->add_element(id - 0x200);
+    const int copies = id >= 0x261 && id <= 0x26B ? 5 : 1;
+    for (int i = 0; i < copies; ++i) gs_->add_element(id - 0x200);
   } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= 64) {
     const bool had = gs_->has_key_item(key_item);
     gs_->slot.set_key_items(gs_->slot.key_items() | (1ull << (key_item - 1)));

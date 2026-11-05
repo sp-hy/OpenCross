@@ -1,0 +1,10 @@
+# Staff roll: disc 2 (variable 0x42 = 1), then the ending room's entrance 1, whose script plays 7E #11 = ending_s in the staff-roll
+# layout: the movie in the lower-right panel, the credits strip scrolling up over the left 45 % of the picture.
+0 wait 30
+- set var 42 1
+- load ending 1
+- wait movie start 600
+- wait 600
+- screenshot staff_roll_01.png
+- assert movie playing
+- quit

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <memory>
 #include <set>
 #include <vector>
 
@@ -767,6 +768,78 @@ void test_battle_render() {
   CHECK(full > 0.01 && mid > 0.4 * full && mid < 0.6 * full && end < 0.001 * full);
 }
 
+// Per-note restarts and voice updates, read from the pitch register of the voice every 147 samples (60 samples per 0.2 s note at
+// 120 ticks/s). An A4 armed before a tie bends the held note (+12 then -12 from the moved note: back to the root, 0x1000); a music
+// vibrato with a 10-tick delay holds the root for the first 10 ticks of every key-on note and then runs the same wave from its first
+// sample in each; a +12 bend over 64 ticks (64 register units per tick) on a 24-tick note stops reaching the voice at the SFX gate
+// key-off (21 steps: 0x1540) and on a music channel at the rest, not at the gate 2 ticks before it (23 steps: 0x15C0), instead of
+// running to 0x2000 in the release tail.
+void test_note_restarts() {
+  auto bank = audio::parse_bank(tiny_bank());
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(bank);
+  constexpr int kStep = 147;
+  auto trace = [](audio::AkaoPlayer& player, double seconds) {
+    std::vector<int> regs;
+    std::vector<float> out(size_t(kStep) * 2);
+    for (int i = 0; i < int(seconds * 44100 / kStep); ++i) {
+      player.render(out.data(), kStep);
+      int reg = -1;
+      for (int v = 0; v < audio::AkaoPlayer::kVoices; ++v)
+        if (player.probe_voice(v).active) reg = player.probe_voice(v).reg;
+      regs.push_back(reg);
+    }
+    return regs;
+  };
+  auto get = [](const std::vector<int>& regs, size_t index) { return index < regs.size() ? regs[index] : -2; };
+  auto at = [&](const std::vector<int>& regs, double seconds) { return get(regs, size_t(seconds * 44100 / kStep)); };
+  auto sfx = [&](std::vector<u8> bytes) {
+    auto code = std::make_shared<audio::AkaoCode>();
+    code->data = std::move(bytes);
+    auto player = std::make_unique<audio::AkaoPlayer>(44100, true);
+    player->start_program(code, 0, table);
+    return player;
+  };
+  auto music = [&](std::vector<u8> bytes) {
+    auto seq = std::make_shared<audio::AkaoSeq>();
+    seq->code = std::make_shared<audio::AkaoCode>();
+    seq->code->data = std::move(bytes);
+    seq->channels = {{0, 0}};
+    auto player = std::make_unique<audio::AkaoPlayer>(44100);
+    player->load_music(seq, table);
+    return player;
+  };
+
+  auto tie_bend = sfx({0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0x03, 0xA4, 0x08, 0x0C, 0x87, 0xA4, 0x08, 0xF4, 0x87, 0xA0});
+  const std::vector<int> bent = trace(*tie_bend, 0.75);
+  CHECK(at(bent, 0.15) == 0x1000);
+  CHECK(std::abs(at(bent, 0.42) - 0x2000) <= 2);
+  CHECK(std::abs(at(bent, 0.68) - 0x1000) <= 2);
+
+  auto vibrato = music({0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xB4, 0x0A, 0x07, 0x02, 0xB5, 0xFF, 0x03, 0x03, 0x03, 0xA0});
+  const std::vector<int> vib = trace(*vibrato, 0.6);
+  size_t first = 0;
+  while (first < vib.size() && vib[first] < 0) ++first;
+  bool delayed = true, same_wave = true, moves = false;
+  for (size_t note = 0; note < 3; ++note)
+    for (size_t i = 1; i < 23; ++i) delayed = delayed && get(vib, first + note * 60 + i) == 0x1000;
+  for (size_t i = 23; i < 52; ++i) {
+    same_wave = same_wave && get(vib, first + i) == get(vib, first + 60 + i) && get(vib, first + i) == get(vib, first + 120 + i);
+    moves = moves || get(vib, first + i) != 0x1000;
+  }
+  CHECK(delayed && same_wave && moves);
+
+  auto sfx_tail = sfx({0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xB2, 0x1F, 0xA4, 0x40, 0x0C, 0x03, 0x92, 0x92, 0x92, 0xA0});
+  const std::vector<int> sfx_regs = trace(*sfx_tail, 0.8);
+  CHECK(at(sfx_regs, 0.4) == 0x1540 && at(sfx_regs, 0.7) == 0x1540);
+
+  auto music_tail = music({0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xB2, 0x1F, 0xA4, 0x40, 0x0C, 0x03, 0x92, 0x92, 0xA0});
+  const std::vector<int> music_regs = trace(*music_tail, 0.6);
+  CHECK(at(music_regs, 0.3) == 0x15C0 && at(music_regs, 0.55) == 0x15C0);
+  std::printf("note restarts: tie bend %04X %04X %04X; vibrato delayed %d same wave %d; released bend sfx %04X music %04X\n", at(bent, 0.15),
+              at(bent, 0.42), at(bent, 0.68), delayed, same_wave, at(sfx_regs, 0.7), at(music_regs, 0.55));
+}
+
 }  // namespace
 
 int main() {
@@ -780,6 +853,7 @@ int main() {
   test_sfx_live_ram();
   test_signed_volume();
   test_keyon_volume_slide();
+  test_note_restarts();
   test_battle_render();
   test_pitch_rate();
   test_sab();

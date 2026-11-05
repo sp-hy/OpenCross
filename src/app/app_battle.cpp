@@ -53,7 +53,7 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
     std::vector<int> ids;
     for (const battle::PartyMember& member : party) ids.push_back(member.char_id);
     const ui::GameState& gstate = flow_ready ? flow.game_state() : world.game_state();
-    game::BattleSetup setup = game::battle_setup(tables, gstate, ids, growth_progress, &names);
+    game::BattleSetup setup = game::battle_setup(tables, gstate, ids, static_cast<int>(gstate.slot.growth_progress()), &names);
     bopt.ng_plus = setup.ng_plus;
     bopt.growth = setup.growth;
     bopt.bench = std::move(setup.bench);
@@ -130,7 +130,11 @@ void App::finish_field_battle(bool after_results) {
   achievements.battle_ended(battle_scene, code, ext_host.battles);
   // A monster-party fight (the Grand Slam) writes nothing back: no rewards, records, HP or Dopplegang pool.
   const bool written_back = battle.battle() && !battle.battle()->monster_party();
-  if (written_back) game::apply_battle_result(world.game_state(), tables, *battle.battle(), &growth_progress);
+  if (written_back) {
+    int progress = static_cast<int>(world.game_state().slot.growth_progress());
+    game::apply_battle_result(world.game_state(), tables, *battle.battle(), &progress);
+    world.game_state().slot.set_growth_progress(static_cast<u32>(progress));
+  }
   // The Dopplegang pool and script vars 0x00..0x0E go back to the globals.
   if (written_back) {
     world.set_dopple_mask(battle.battle()->dopple_mask());

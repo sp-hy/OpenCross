@@ -8,210 +8,11 @@ Entries that need a PS1 comparison use `python -X utf8 tools\py\ps1_cast.py forc
 
 Player-visible, high-reach entries; each is described in full in its section below.
 
-- AKAO A4 pitch bend armed before a tie is never applied
-- MAP_JUMP_DC changes room at once, so the movie after it never plays (10 sites)
-- Party status upkeep (poison, regen, status timers) ticks after enemy actions too
-- Enemy-cast elements with id 150..301 deal half, enemy summons a quarter
-- Summons ignore the field colour and the star stock, and spend no star
-- Revive does not reset stamina to 70 or the countdown
-- AKAO vibrato / tremolo do not restart at key-on
-- Heals take the field-colour multiplier; on the PS1 they never do
-- "Attacked" (slot 4) scripts start after every action; the PS1 starts them only after a party action on enemies only
-- BB gives 1 copy of elements 0x61..0x6B; the original gives 5
-- Growth progress counter (save 0x598) is zeroed on every load and never saved
-- A KO'd PC keeps its inflicted statuses
-- Consumable grid stacks are not restocked from the element stock after a battle
-- AKAO voices keep updating through the release tail (PS1 freezes SFX at gate-off, music at the rest)
-- Staff roll: ending_s credits strip and movie panel are not drawn
-- FE 4E (GF.15) forces the controlled entity to run
+None open.
 
 Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changing, P3 = small, rare or invisible. Entries with "Decision (owner)" carry the owner's ruling on RDE versus OpenCross behaviour; follow it.
 
 ## 1. Bugs (behaviour)
-
-### AKAO A4 pitch bend armed before a tie is never applied
-Priority: P1
-Impact: high; confirmed in code.
-Capture (PS1 audio against OpenCross, original-music mode): effect00 #25 bends from 1750 Hz to 3700 Hz on the PS1; OpenCross holds 1745 Hz.
-Original: in 0x800535E4 the bend start block runs for notes AND ties (0x84..0x8E, FC): when the A4 delta (+0xFC, set by 0x80054718
-with length +0xAA, 0 = 256) is non-zero the channel note index moves by the delta, the target pitch is computed, and the per-tick step
-is (target - (current pitch + running slide)) / length in 16.16; the moved note index becomes the base of the next bend. A rest leaves
-the bend armed.
-OpenCross: A4 only stores `bend_len` / `bend_delta` (`akao_player.cpp:823-827`), consumed only in `note_on` (`:590-594`); the tie
-branch (`:798-800`) ignores them, so the bend lands on the next note-on (or never). audio.md:196 says "the next note-on computes".
-Player effect: A4 is followed by a tie in about 1821 SFX units (room ambient layers `alu_*`, most `battle/effects/*` packs) and
-music019 / 020 / 039 / 069: their swoops on held notes are missing and a stray bend hits a later note.
-Repro: `alu_a01f` yos1 frame 4 (`A4 48 -4; note; tie; A4 24 +2; A9; tie; A0`): render against a `ps1_audio.py` capture of the room.
-Done when: the tie path arms the bend like a note (start = current register including the running bend, bent note index kept) and
-the alu_a01f frame 4 second glide matches the PS1 capture; audio.md:196 corrected.
-
-### MAP_JUMP_DC changes room at once, so the movie after it never plays (10 sites)
-Priority: P1
-Impact: high; confirmed in code.
-Original: op DC (0x800C4830) only stores the target room (0x800EBA68, U@1), a 32-bit param (0x800EBA6C, U@3) and pending = 1 (0x800EBA9C), pc += 5.
-It writes no PREVIOUS_MAP_ID (var 8), no room register (0x800852E0), takes no input lock and no gate; 5A (0x800C488C) does those. 7E (0x800C8400),
-D4 (0x800C85E4) and the runner 0x800DD130 OR movie flag 8 into 0x800EBA94 while pending is set; after the movie the field loop 0x800B0840 leaves
-by its exit path when pending is set. Every DC in the data is followed directly by `7E|D4 row; 7F; 3B`: bak_a17e 01F7 (row 18), chi_b03d 043E (6),
-jac_b04f 1B19 (6), jac_b44f 0448 (6), crn_b13i 0E2C (4), des_a06f 0E01 (11), gal_b06i 0F47 (20), opa_a04f 1906 (D4 8) / 1D10 (7E 4), opa_b04f 1D5C (D4 8),
-ending 0059 (D4 #2,#520, the New Game+ fly-in), opening 02D9 (same shape; title flow). None is in an INIT script, so `in_init_` does not help.
-OpenCross: `field_vm_ops_game.cpp:411-416` writes var 8 and the room register and calls `request_map_jump` (`field_world_transition.cpp:243`,
-`jump_.active`). 7E (`field_vm_ops_scene.cpp:171`) and D4 (`field_vm_ops_game.cpp:355`) yield on `system_ready()` (`field_world.cpp:535`, false while
-`jump_.active`); `field_world_tick.cpp:535` begins the jump on the same tick. Checked every other path: `App::advance` starts a movie only from
-`movie_pending()` (`app_sim.cpp:450, 622`), set only by `FieldWorld::play_movie`; the only caller outside scripts is `apply_flow_action` with
-`FlowAction::movie_row` (`app_sim.cpp:214`, set only by New Game, `game_flow.cpp:150`). Nothing reaches the DC sites, including the NG+ ending,
-whose `app_sim.cpp:481-489` comment ("then jumps with movie 2") assumes the movie plays, and which sets the room register to 8 so that DC's var-8 write gives
-opn_a01i PREVIOUS_MAP_ID 8 (FE 84 0x800D36BC sets 0x800852E0 = 8 on the PS1). Player effect: 11 story FMVs (Opassa Home/Another swaps, the
-dimension swap at des_a06f, the NG+ opening) are skipped with a plain fade.
-PS1 consumer not found statically: no exported function reads 0x800EBA68 / 6C, and the field entry 0x800B15B0 reloads 0x800852E0 after the loop
-returns. The variant-0 branch of 0x800DD130 (the one all 48 movie ops use) ends in an endless loop in the export, so the movie-end code is cut off.
-Settle with `ps1ref.Session` on a bak_a17e / New Game state: poll 0x800EBA68 / 0x800852E0 / var 8 / ROOM_PARAM (var 2) / var 0x3A each frame from DC to the new room.
-Done when: DC stores (room, param, pending) in `FieldWorld` and returns with no gate and no var-8 write; 7E / D4 play; the jump starts when the movie
-ends or is skipped (`App::end_movie`); a room load clears the record; var 8 / room register / param follow the PS1 capture (keep NG+ PREVIOUS_MAP_ID 8);
-a route enters bak_a17e's scene and checks for the movie; the `fieldscript.md` DC row and `movies.md` section 6 say so.
-
-### Party status upkeep (poison, regen, status timers) ticks after enemy actions too
-Priority: P1
-Impact: high; confirmed in code.
-Original: the only routine that applies poison (HP minus steps), regen (hi 0x80000, HP plus steps, cap max HP) and counts down every status timer is battle 0x800D7D20 (no other function touches the timer tables 0x800DF050 / 0x800DF090 except the set/clear helpers 0x800DB764 / 0x800DB8DC). Its only callers are the action executor 0x800D8F5C, inside `if (first actor 0x800E0634 < 3)`, and the Defend handler 0x800CD15C; for an enemy-led action the executor's else branch calls only 0x800D7C64(3) (see next entry). Steps: weapon hit = strength + 1 for poison and timers, element = 7 poison / 1 timer step, defend = 1 / 1. A confused or scripted PC action (first actor < 3) takes the party branch.
-OpenCross: `Battle::post_action` (battle.cpp:1822) also runs after every enemy turn and plan (`run_enemy_action` 1911, `run_plan` 1933), every death cast (`run_death_plans` 902) and counter plan (`run_reactions` -> `run_plan`); docs/rules/battle.md 2.4 documents the wrong rule. So poison/regen hit up to twice as often and every timed status, stat modifier and colour status expires faster.
-Repro: poison a PC and let enemies act while no PC has stamina (or Defend vs. an enemy-heavy scene): PS1 HP stays during enemy turns. `ps1_capture.py scene` with a poisoned party, HP and timer bytes logged per action; OpenCross route with `OC_BATTLE_SEED`.
-Done when: post_action runs only for actions whose actor is a PC slot (including confused / scripted PC turns) and for Defend; enemy turns, enemy plans, counters and death casts run only the PC countdown step; battle.md 2.4 corrected.
-
-### Enemy-cast elements with id 150..301 deal half, enemy summons a quarter
-Priority: P1
-Impact: high; confirmed in code.
-Data use (scan of the shipped data): enemy casts of ids 150..301 in scenes 390, 396, 407, 419, 427, 432, 434, 442, 445, 448, 477, 508 (473 exempt); enemy summons (ids 37, 39, 41, 43, 45, 47) in 28 scenes. Best repro: scene 427 (Karsh / Zoah / Marcy, 9 ids in the range) and scene 465 (Luxator casts Unicorn 45, quarter). Some slots cast an element from a variable (scenes 237, 457, 465..470, 190..193, 374..377, 481): check those at fix time.
-Capture (PS1 against OpenCross): PS1 scene 427: Karsh's 182 / 181 and Zoah's 185 on Serge (MDEF 127): raw 4 -> applied 2; control id 5 unshifted; OpenCross applies 4 for 182. Summons (quarter) and the scene 0x1D9 exemption not captured.
-Original: battle 0x800D85E4 (per-target HP application, run once by 0x800D8F5C after the whole target loop) computes a class first: actor 0x800E310E > 2, action type 0x800E0666 == 1 (element), scene halfword 0x80075906 != 0x1D9; then element record byte 0 bit 0x40 (summon) -> each target's result value (+0x2A of its 0x30-byte block) >> 2, else queued element id 0x800E3556 in 150..301 (`id - 0x96 < 0x98`, the unsigned range test) -> >> 1. The id is the one queued before the executor replaced it by the mode byte. The reduced value is the one shown and applied, heals (code 3) included. Weapon attacks are untouched.
-OpenCross: no counterpart (grep 0x1D9 / 0x96 / 0x12D / halving in src\battle): `do_element` passes the value straight to `damage_unit` (battle.cpp:858).
-Player impact: every enemy tech in that id range hits the party for twice the original damage (enemy summons x4), heals by enemies likewise.
-Settle the acceptance numbers with `ps1_cast.py force` of an enemy tech in 150..301 at a PC with known MDEF and the OpenCross side (`tools\ours_cast34.ps1`); confirm with one id < 150 (no reduction) and, if any, a cast in scene 0x1D9. Check the compare is unsigned in the MIPS (`sltiu`), else ids < 150 would halve too.
-Done when: the per-target value is shifted for enemy element actions before the event value is fixed, scene 0x1D9 exempt, documented in battle_data.md section 10.
-More (second audit pass): New facts only: 0x800D85E4 shifts the result value of every unit in the scene mask, the caster's own entry included, so mode 35 drains
-(206 Mystery Menu, 246 Slurp Slurp) also halve the caster's heal, and mode 48 (270 HP Shuffle) shows and applies v >> 1 to the caster.
-The pass is skipped entirely when 0x800DF6BA is set (mode 47, Wet Paint). A caster brought to 0 by its own entry is left at 1 HP.
-
-### Summons ignore the field colour and the star stock, and spend no star
-Priority: P1
-Impact: high; confirmed in code.
-Data use (scan of the shipped data): 12 summon records (37..48, six colours, levels 7 and 8), PC-held after the six dragon fights and the Dragoon (no shop sells them). Repro: the Dragoon's Frog Prince drop (37) with a mixed-colour ring.
-Original: element menu build 0x800CAA90 gives every PC cell whose record byte 0 has bit 0x40 the disabled flag 0x80 (cell flags 0x800E0874), cleared only when the ring summon colour 0x800E3046 (written by the ring HUD 0x800BE76C: the colour all non-empty ring slots share, else 0) equals the record colour (byte 5 >> 2) AND the current-star word 0x800789BE is non-zero. The element confirm 0x800CCDFC decrements 0x800789BE once per PC summon. 0x800789BE is the save's stars current (head +0x5A5, loaded by playinit 0x801EE0B0), 0x800789BC stars total (+0x5A4); field op FE 6D (0x800D3F5C) sets current = total, a boss star-up raises both (btlexit 0x801F0374). The ring HUD prints "current / total". Enemy-cast summons are not gated.
-OpenCross: `Battle::element_usable` (battle.cpp:568) and `combo_partner_cell` (472) test seal / stamina / used / gauge only; the save already holds stars current (`save::head::kStarsCurrent`, restored by FE 6D in field_world_tick.cpp:193, shown in the main menu) but the battle never reads or spends it (`GrowthState.counter` is only raised at a boss).
-Repro: put a summon in a grid with a mixed ring: PS1 greys it and beeps; cast it with a monochrome ring: the menu's star count drops by one.
-Done when: summon cells are disabled unless the ring is one colour equal to the summon's and stars current > 0; a PC summon confirm spends one (written back to +0x5A5 on every outcome); the battle HUD shows current / total beside the ring (layout from a PS1 capture); docs/rules/battle.md documents it.
-
-### Revive does not reset stamina to 70 or the countdown
-Priority: P1
-Impact: high; confirmed in code.
-Original: element mode 4 handler 0x800D46FC: HP = max x pct / 100 (no floor of 1), countdown (+0x16C) := AP byte (+0x2E) + rnd(0, AP >> 2), stamina := 70, KO cleared, for PC and enemy targets.
-OpenCross: battle.cpp:1584-1601 clears KO and sets HP (`max(1, ...)`) only, so a revived PC keeps the stamina it died with (often < 10: no menu until time advances) and an enemy keeps its stale countdown.
-Repro: revive a PC KO'd right after a fierce attack; PS1 shows a full bar.
-Done when: case 4 sets stamina 70 and countdown `ap + rnd(0, ap >> 2)` (RNG draw after the HP step); drop the HP floor only after checking pct can give 0.
-
-### AKAO vibrato / tremolo do not restart at key-on
-Priority: P1
-Impact: med; confirmed in code.
-Capture (PS1 audio against OpenCross, original-music mode): music019: the first note under the tremolo matches (waveform correlation 0.89); the looped notes after it diverge (correlation 0.34, envelope off by 5.6 dB on average, up to 21 dB), most of music019's -1.3 dB level gap. The vibrato part was not measurable (music047's vibrato is +-3 cents).
-Original: 0x800535E4, for every note: vibrato depth recomputed from the new pitch; when the note is a key-on (legato-previous bit 2 of
-+0xB0 clear) vibrato resets its wave pointer to the table start, its step counter (+0xB8) to 1 and its delay (+0xB4) to the B4 delay
-(+0xB2); tremolo the same with +0xC8 / +0xCA / +0xC4; then (every note, legato too) the vibrato output +0x100, the tremolo term +0x102
-and the pitch fraction +0x30 are zeroed. A rest zeroes the two outputs. Autopan is not restarted. 0x8004C5A4 steps an LFO only once
-its delay is 0.
-OpenCross: the wave pointer, `counter` and `delay_cur` are set only by B4 / B8 / BC (`akao_player.cpp:864-905`); `note_on` never
-touches them; `update_lfo` (`:1153`) free-runs and the delay counts down once (`:1123`).
-Player effect: music (22 songs use B4, delays 20-80 ticks) vibrates from the first tick of every note after the first instead of after
-the delay; SFX (B4 in about 2200, B8 in about 1700 units) start every note at a carried-over LFO phase.
-Settle it: `ps1_audio.py` of music004 or music012 (B4 delay 38) and an SFX with B4 over two notes, against `ocaudio render-seq`.
-Done when: `note_on` (key-on path, after `if (keep) return;`) re-arms vib and trem (wave start, counter 1, `delay_cur = delay`), every
-note and rest clears `vib.value` / `trem.value`, and the vibrato onset matches the capture.
-
-### Heals take the field-colour multiplier; on the PS1 they never do
-Priority: P1
-Impact: med; confirmed in code.
-Original: the executor 0x800D8F5C runs, for each target, the target setup 0x800D6C54(1), which writes the colour / field multiplier
-halfword 0x800E310A := 1000, and then the element-mode handler (table 0x800DF570 = dispatch slot 230 + mode). Only 0x800D9F14 (the
-colour routine, which also applies the mode 6 x1/2 / x3/2 field state) changes 0x800E310A, and it is called only from the damage modes
-(0, 15, 29, 32, 35, 37, 39, 46, weapon hit). The heal path (mode 3 = 0x800D4688, mode 14 on a party slot via 0x800D4F9C, mode 7's +0xC
-heal via 0x800D4B68) is 0x800DB2B0 (sum) then 0x800DAAA8 (`x slot / 1000 x 0x800E310A / 1000`, cap 999), so the colour factor is
-always 1000. RDE replaces these functions with behaviour-preserving native ports (rde_hooks.csv, no fix).
-OpenCross: `do_element` computes `cmul` (battle.cpp:1131-1134, with the field state) and passes it to `heal_amount` for modes 3 / 14
-(battle.cpp:1562) and 7 (:1620); `heal_amount` multiplies by it (rules.cpp:178-184); `docs/formats/battle_data.md:213` says `x c / 1000`.
-Player effect: every Cure / Heal / consumable-formula heal is x0.665 .. x1.5 off whenever the ring is coloured or Magnify / Diminish is up.
-Reproduce: Cure (85) with three white vs three black ring slots, `ps1_cast.py force` against `tools\ours_cast34.ps1`; the popped numbers
-must match the neutral-ring value on the PS1. Done when: modes 3 / 7 / 14 pass colour 1000, battle_data.md section 10 heal line drops `c`.
-
-### "Attacked" (slot 4) scripts start after every action; the PS1 starts them only after a party action on enemies only
-Priority: P1
-Impact: med; confirmed in code.
-Original: the target list 0x800E0637.. is built by 0x800CA24C in ascending unit order from the target mask (empty list -> the actor).
-At the end of 0x800D8F5C the attacked state 0x800E066A becomes 1 only if it is 0, the first actor 0x800E0634 < 3 (a PC) and the first
-target > 2 (so no PC is in the list). 0x800D4000 (called per frame by 0x800D4248) then, when the turn-owner byte 0x800E0662 is 0xFF and
-0x800E065D != 0, copies the list to 0x800E3540 and starts slot 4 on one unit at a time (it waits while the unit's entity is busy, skips
-a dead unit, claims 0x800E0662 for the started unit); the time scheduler 0x800D3C0C does not run while the state is non-zero. So enemy
-actions (turns, plans, counters, death casts), PC heals / buffs on PCs and PC elements whose target list holds any PC start no counter,
-and counters can never chain.
-OpenCross: `note_event` queues every Weapon / Element target of any actor (battle.h:584-587); `run_reactions` runs `on_attacked` and loops
-up to 64 rounds (battle.cpp:924-942), called after enemy turns and confused / scripted turns too (battle.cpp:2024-2063, 2234); pac_vm.cpp:1320
-has no gate; docs/rules/battle.md:283 describes our behaviour.
-Player effect (data scan: 766 slot-4 counters in 324 packs): enemies counter an ally's heal or buff, counter party casts that also
-hit a PC, and counters ping-pong. Reproduce: a scene where an enemy heals an ally that has a slot-4 op 67 (`opencross ocbattle pac-disasm`),
-`OC_BATTLE_SEED` run against `ps1_capture.py scene`. Done when: `attacked_` is filled only for a PC-led action whose lowest target unit
-is an enemy, enemy-led actions queue nothing, battle.md 2.1 / battlescript.md section 4 say so; fx-audit / pac-soak counts re-baselined.
-
-### BB gives 1 copy of elements 0x61..0x6B; the original gives 5
-Priority: P1
-Impact: med; confirmed in code.
-Data use (scan of the shipped data): 12 grants of 0x261..0x26B in alu_a03i, alu_b05i, alu_b08i, crn_b03i, crn_b17i, jac_b03f, ryu_a22i, ryu_a25i, ryu_b08i, ryu_b25i. Repro: alu_a03i offset 0656 (the first 0x269 gift).
-Original: BB (0x800C2430) with b == 0 calls 0x800C21A4. That routine gives +1 for an item (id < 0x200), adds an element
-(0x200..0x3FF) with count 5 when id is 0x261..0x26B and count 1 otherwise (stock capped at 99), and sets a key item for ids below 0x440.
-Take (0x800C2220) always removes exactly one. RDE's native port of 0x800C21A4 keeps this. OpenCross: `FieldWorld::give_item`
-(`src/game/field_world_party.cpp:356-368`) calls `add_element` once for every element id. The `docs/formats/fieldscript.md` BB row
-(line 315) says nothing about the count. Player impact: a chest or NPC that gives one of these 11 elements gives 1 instead of 5.
-First step: list the BB 00 operands 0x261..0x26B with `tools/py/cc_fieldscript.py stats` / `disasm`, name the elements, and check
-whether `MenuRules::el_stack` covers the same ids. Done when: `give_item` adds 5 copies for 0x261..0x26B (the id range, not
-`el_stack`, unless the sweep shows they are the same set), the BB row documents it, and a unit test covers one id inside and one outside.
-
-### Growth progress counter (save 0x598) is zeroed on every load and never saved
-Priority: P1
-Impact: med; confirmed in code.
-The PS1 save packer `menu_save_pack_state` (menutest 0x801F0F9C) stores `sys_growth_progress` (RAM 0x800789B8) as stream word
-0x106, right after gold (0x103) and the recruited words (0x104/0x105), i.e. the u32 at block offset 0x598; the unpacker
-0x801F1B1C restores it. Only the new-game initialiser (main 0x800199D4) clears it. RDE runs this guest code unchanged.
-OpenCross keeps it only in `App::growth_progress` (`src/app/app.h:426`) and `apply_flow_action` resets it to 0 on every
-state change incl. Continue (`src/app/app_sim.cpp:209`); `game_session.h:8-9` and `docs/formats/save.md:99` say it is not in
-the save. Player effect: after save + reload, the next normal victories give the small first-fights-of-a-star stat gains
-(`sqrt(progress/cap)` term) instead of the continued ones; an OpenCross save also carries a stale 0x598 back to RDE.
-Reproduce: unit round trip, or win a few fights, save, Continue, compare the PowerUp gains with RDE (`rde_bg.py`) on the
-same save. Done when: `SaveSlot` reads/writes head 0x598 into `growth_progress` on load/save, New Game / NG+ still start at
-0, the comment and `save.md` row are corrected, and a round-trip unit test covers it.
-
-### A KO'd PC keeps its inflicted statuses
-Priority: P1
-Impact: med; confirmed in code.
-Original: 0x800D7B64 (called by 0x800D85E4 for every KO) sets lo 0x80 in the inflicted word (unit +0xB0); for a PC it also ANDs the inflicted lo with 0x400480 and inflicted hi with 0x1FE00000, clears the guard byte 0x800E0679, closes the menu if it was the acting PC. Permanent words (+0xA8/+0xAC) stay. Timer bytes stay but are dead (the countdown only walks set bits; a re-landing restarts them).
-OpenCross: `Battle::kill` (battle.cpp:808) only sets hp 0, KO and guard false. A revived PC (mode 4, 1584) comes back poisoned / asleep / sealed / with stat mods, and `finish` writes `lo & 0x39` (battle.cpp:2251) so poison/burn/sprain/flu of a PC that died holding them reach the save.
-Repro: poison a PC, let it be KO'd, revive in battle: PS1 clean, OpenCross poisoned.
-Done when: kill() of a PC keeps only perm | (inflicted lo & 0x400480) and perm | (inflicted hi & 0x1FE00000) and drops the removed bits' timers; enemies unchanged.
-
-### Consumable grid stacks are not restocked from the element stock after a battle
-Priority: P1
-Impact: med; confirmed in code.
-Original: btlexit 0x801F2104 (party write-back, every battle except monster-party scenes, any outcome) walks the 80 cells of each PC; for an element whose `menu_pg` row byte +0xA has 0x40 and whose cell count nibble (0x80078C84) is < 5 (0 included: the battle only flags an empty stack, it keeps the id) it calls 0x801F2090 to take up to `5 - count` copies from the element stock (192 slots; frees the slot at 0) and adds them to the cell.
-OpenCross: `apply_battle_result` (game_session.cpp:210-221) copies the counted-down qty and empties a cell that reached 0 (`grid & 0xC000`); no refill.
-Repro: two Tablets used from a 5-stack with spares in the bag: PS1 grid shows 5 after the fight, OpenCross 3.
-Done when: after the qty write-back each stack cell with qty < 5 takes `min(5 - qty, stock)` via `GameState::take_element`; decide by a PS1 capture whether an emptied cell with no spares keeps its element id (the original does not clear it here) and align the cell-clearing line.
-
-### AKAO voices keep updating through the release tail (PS1 freezes SFX at gate-off, music at the rest)
-Priority: P1
-Impact: low-med; confirmed in code.
-Original: the SFX tick (0x80052790) clears the channel from the voice-update mask 0x80092AB0 at its gate key-off; the voice
-dispatcher 0x8004D3D4 runs the SFX voice update 0x8004CA1C only for channels in 0x80092AA8 & 0x80092AB0, and the music update only for
-channels in the sounding mask (context +0x14), which a note sets and only a rest (or the end) clears. After that, volume slides, LFOs,
-pan slides and bends no longer reach the voice; the tail decays from frozen registers.
-OpenCross: `update_channel` (`akao_player.cpp:1175`) runs for every channel that still owns a voice, released or ended.
-Player effect: an A9 volume slide or a vibrato spanning the end of an SFX note keeps shaping the tail here.
-Settle it: an SFX whose A9 slide crosses its gate (pick with a corpus scan) on `ps1_audio.py` against OpenCross.
-Done when: SFX channels skip `update_channel` from the gate key-off to the next note-on, music channels from a rest to the next note.
 
 ### Speed / cheat toggles must reset every launch (RDE never saves them)
 Priority: P2
@@ -612,19 +413,6 @@ main 0x8003CA70 (death spawn): when the dying object's own header has an op 0x39
 OpenCross `EmitterSystem::Impl::die` (`src/game/effects/emitter_spawn.cpp:619-646`) calls `fire(dying.death, nullptr)` (no parent basis) and copies `dying.pos` as it is (:636-637).
 Data scan: 504 of 5857 death children of op-0x39 parents use velocity / acceleration ops without their own 0x39 (robo2, saigai, misso, 37comet, hasira, ...), mostly symmetric sprays; exactly 13 chains have the local-position case (syoukan/thndr tam3->tam4, tam6->tam8; tech/balls sb01->sb11, sb0-->sb1-; tech/ganseki iw01->iw04, iw11->iw14, iw21->iw24; tech/kagou san1->san2, mar1->mar2; tech/oodama 5-0, 2-0, 1-0, 0-0 -> *-01).
 Done when: `die()` passes the dying header's op-0x39 basis (translation = dying position for bit 19) and converts a bit-15 dying position to world for a non-bit-15 child; a `ps1_cast.py force` capture of thndr (Thunderstorm) and robo2 / 37comet matches child positions (fx_diff).
-
-### Disc 2 row 12 (ending_s excerpt) should stop at Bink frame 8130; the 15 fps scaling is wrong for the 30 fps ending_s; end frame is exclusive
-Priority: P3
-Impact: low-med; confirmed in code.
-RDE 0x44E140: on disc 2 only row 0xC gets a range (start = row start + 1, end = row end = 0x1FC2 = 8130); every other disc-2 row gets end -1
-(whole file). 0x583750 clamps the end to the Bink frame count, and 0x5AD600 stops when the frame number reached after NextFrame equals the end, so
-frames start..end-1 are shown (whole-file rows drop the last frame too). Frame numbers are used unscaled.
-OpenCross: `DiscIndex::movie_range` (`disc_index.cpp:102-104`) gives row 12 start 1, end 0 (whole file); `movies.md:34` says the same.
-`Player::open` scales start/end by `fps / 15` (`player.cpp:15, 65-68`), which is right only for the 15 fps files. Header scan: `ending_s` is 640x480 at
-30 fps, 8951 frames (not re-checked here). The end test (`player.cpp:141`) keeps 1-based frames start..end, one frame more than RDE.
-Player effect: `7E #12` (opa_a04f 2D0B, opa_b04f 2D5D, ryu_b28i 0481) runs about 27 s (822 frames) longer than RDE.
-Done when: row 12 ends at 8130, unscaled (or the scaling is per file); the end is exclusive as RDE; `movies.md` section 4 fixed.
-Check with `ocmovie table` and a frame count of the shown frames against an `rde_bg.py` capture of the last frames.
 
 ### D4 takes its wipe variant from the wrong operand (skipping stays allowed)
 Priority: P3
@@ -1103,40 +891,6 @@ regardless of pan. A hard-panned voice (L 24576, R 276) averages to 12426 (0.379
 
 ## 2. Fidelity gaps (not modelled)
 
-### Staff roll: ending_s credits strip and movie panel are not drawn
-Priority: P1
-Impact: high; confirmed in code.
-Disc 2 movie rows 11 / 12 (modes 3 / 4, reached from `ending` param 1 and `opa_a04f` / `opa_b04f` / `ryu_b28i`) switch
-the movie loop to the staff layout: `fld_movie_mode` (0x800ECA58) == 2 sets display height 0xD0 and
-`fld_set_display_env` (0x800E04B0) uploads a 0x110-row ring of 0x1B0-byte (144 px, 24-bit) strip rows at y 0xD8 next to
-the movie, advancing a row (0x800ECA24) only while rows are buffered (0x800ECA44). RDE draws the rows from
-`hd/staff/staff24us.png` / `staff24.png` (144 x 8950, row k = movie frame k). OpenCross plays `ending_s` full screen with
-no strip (`docs/formats/movies.md:42` says so; nothing in `src/movie/` or `src/app/app_sim.cpp` handles modes 3/4).
-Player effect: no credits in any ending. Open: the panel position per frame and which PNG RDE uses for FR/IT/DE/ES; settle
-with `rde_bg.py` frame grabs of the staff roll (and a DuckStation capture of the same movie frames). Done when: modes 3/4
-draw the movie in the panel and scroll the strip, panel placement table-diffed against RDE, `movies.md` updated.
-More (second audit pass): RDE 0x5AD600 draws the strip only when the movie is smaller than the render size pair 0x122F440 / 0x122F448 (`ending_s` is 640x480, every other movie
-1280x960), not by row mode. Its x runs 0 .. 0.45 x screen width (constant 0x6CB8E4 = 0.45, read); y moves linearly with frame / end frame, so the whole strip
-scrolls past over the movie; the end frame is the row's end (8950 row 11, 8130 row 12, entry above), so row 12 scrolls faster. The strip uses the movie's fade alpha.
-
-### FE 4E (GF.15) forces the controlled entity to run
-Priority: P1
-Impact: med; confirmed in code.
-Data use (scan of the shipped data): 14 uses, all in the world-map rooms wld_a00, wld_a01, wld_a04, wld_b00, wld_b01, wld_b02, wld_b04: set / clear pairs chosen by a story bit, each paired with FE 17.
-Original 0x800CBF9C (unlocked branch): after the run button / option / analog choice and after the tile 0xC800 and sprain walk
-rules, `if (GF.15)` it sets the run clip (+0xE4) and bit 1 of the 0x270 word, so GF.15 wins over sprain and stair tiles. FE 4E
-(0x800D4CAC) sets the bit. It is used 14 times in the data. OpenCross: `field_vm_ext.cpp:271` only stores the bit. The run choice in
-`field_world_sim.cpp:84-92` and `:459` never reads it, `script::gflag` has no bit 15, and `fieldscript.md` lines 451/530 say "stored".
-Player impact: scripted chase and escape scenes let the player walk. First step: list the 14 FE 4E rooms with `cc_fieldscript.py`.
-Done when: with GF.15 set, the controlled entity runs (overriding sprain and the stair rule, provided the mover's speed also follows the
-run bit there), and the doc rows are updated.
-More (second audit pass): All 14 uses are set / clear pairs in one UPDATE entity per world-map room (wld_a00 e35 1689, wld_a01 e30 1126, wld_a04 e10 0329, wld_b00 e39 187A,
-wld_b01 e30 118B, wld_b02 e15 07B1, wld_b04 e17 08B3), chosen by a story bit and following the `FE 4C` that hands control to entity 4 (the
-dinghy / ship the party is attached to with D6). GF.15 is the world-map vehicle mode, not a chase. The speed helper 0x800BD14C returns v10c * 2.5 while
-bit 1 of the 0x270 word is set; vehicle and party share `SET_MOVE_SPEED #8` (wld_a04 00BB / 0119), so in OpenCross the boat sails at 0.4 of PS1 speed with the walk clip
-unless dash is held (`pad_heading`, `field_world_sim.cpp:83-96`; `actor.cpp` multiplies by 2.5 only when running). Repro: the boat in wld_b02 after
-bak_a14e (bit #6401), compare against a `ps1_capture.py` capture.
-
 ### HD art: battle PCs use the 4x `hd/menu/player/<name>.tim` texture in RDE
 Priority: P2
 Impact: high; needs a capture or data sweep.
@@ -1532,6 +1286,41 @@ Impact: low; measured, no audible effect found.
 The SPU reimplementation otherwise matches the PS1 within about 0.2 dB (all 10 reverb presets and the work-area table identical register for register; songs, jingles and dry SFX within 0.1-0.2 dB; reverb tails equal to -90 dBFS; the reverb mode is always 4 and rooms differ only in their song's depth 0x2500..0x3C00). Remaining: the 44.1 -> 48 kHz resampler loses 1 to 1.7 dB at 14-20 kHz (`mixer.cpp`); the reverb input is scaled to half and back, 6 dB more headroom than the PS1; the PS1 zeroes the reverb depth at song load; the reverb unit resumes with stale content after a 4 s pause; `render-sfx` runs at the boot depth 0x3FFF where a PS1 room uses its song's depth (reverb SFX up to 1.6 dB louder in that tool only). Done when: each is either matched or noted in `docs/formats/audio.md` as accepted.
 
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
+
+### Staff roll skip: the credits strip vanishes at once instead of fading with the movie panel
+Priority: P3
+Impact: low; only when the player skips the ending.
+Known: disc 2 rows 11 / 12 (`ending_s`) draw the movie in a panel at the lower right and scroll the credits strip (`hd/staff/staff24us.png` / `staff24.png`) on the left (`src/movie/player.cpp`). On a skip mid-roll `Player::draw_held` cross-fades only the panel; the strip disappears at once. At a natural end the strip has already scrolled out, so nothing shows. RDE's skip behaviour was not captured.
+Repro: route `tests/routes/staff_roll` plus a confirm press about 600 ticks in; RDE with a forged save (slot 2, room 9, entrance 1, var 0x42 = 1), Continue, skip at the same frame, through `tools\py\rde_bg.py`.
+Done when: the strip follows RDE on a skip (fades with the panel without darkening the scene behind it, or whatever RDE does) and `docs/formats/movies.md` says so.
+
+### AKAO music: vibrato restart at key-on and the rest freeze have no PS1 capture
+Priority: P3
+Impact: low; the effect side is captured and matches.
+Known: every key-on restarts the vibrato / tremolo waves (wave start, step 1, fresh delay), and a music channel stops sending volume / pan / pitch / LFO to its voice from a rest to the next note (`src/audio/akao_player.cpp`). Both are checked on the PS1 for sound effects only: the capture helper plays an effect from the frame hook by a GDB call of the play-effect command, but no songs. Music rests on the code reading and `test_note_restarts` (`tests/test_audio.cpp`).
+Repro: record music004 or music012 (B4 delay 38) on the PS1 with a per-update register trace of the music channels (pitch, volume, update mask), e.g. by changing the field song from the frame hook, and compare against `opencross ocaudio render-seq` with `OC_AUDIO_PROBE`.
+Done when: the vibrato onset after each key-on and the frozen tail after a rest match the trace.
+
+### Scripted PC weapon turns: poison / timer step not checked against the PS1
+Priority: P3
+Impact: low; confirmed only for elements.
+Known: the post-action upkeep runs only for PC-led actions and Defend. A queued PC element (forced action queue, scene 6 from `tmp\ref\states\bg00_menu.sav`) steps poison by 1 on the PS1, a menu element by 7; OpenCross matches both (`Battle::exec_action`, `src/battle/battle.cpp`). A queued PC weapon entry (confused PC script, Pip's form turn) still steps s+1 / s+1 without a reference.
+Repro: queue a weapon entry for unit 0 the way `tools\py\ps1_cast.py force` queues an element, with poison set on every unit (unit +0xB0 bit 0), and log every unit's HP per frame; OpenCross side `opencross ocbattle sim 6 1 --party 0 --attack --poison`.
+Done when: the step matches the capture and `docs/rules/battle.md` 2.4 says so.
+
+### Revive at 0 HP: OpenCross floors the revived HP at 1
+Priority: P3
+Impact: low; rare (very low max HP).
+Known: element mode 4 sets HP = max HP x pct / 100, which is 0 when max HP < 20 at 5 % or < 7 at 15 %. On the PS1 the handler writes HP 0 with KO cleared, then the HP pass runs; whether the unit is knocked out again or stays up at 0 HP is unknown. OpenCross keeps `max(1, ...)` in the mode 4 case of `Battle::do_element` (`src/battle/battle.cpp`).
+Repro: `python -X utf8 tools\py\ps1_cast.py force` of Revive 94 on a KO'd unit whose max HP is poked under 20, against `tools\ours_cast34.ps1`.
+Done when: the floor matches the capture and `docs/formats/battle_data.md` 5.2 mode 4 says so.
+
+### A consumable stack left at 0 copies after a fight: greyed or hidden in the next battle
+Priority: P3
+Impact: low; behaviour chosen without a capture.
+Known: after a battle the party write-back restocks every stack cell below 5 copies from the element stock; a cell with no spares keeps its element at 0 copies (PS1 capture: Capsule cell 0 copies, id kept). OpenCross `party_member_from_state` (`src/game/game_session.cpp`) passes the real count and marks a 0-count stack cell not unlocked, so it is unusable in the next fight. How the PS1 battle menu shows that cell (greyed, hidden, or usable once) was not captured.
+Repro: on the PS1, use every Tablet of a 5-stack with no spares in the bag, win, then open the element menu in the next battle (`ps1ref.Session` on a battle prestart state from `tmp\ref\states`); same with OpenCross.
+Done when: the cell's look and usability match the capture and `docs/rules/battle.md` section 10 says so.
 
 ### Save/Load screen plays sounds 0x19 and 0x76 when its fade-in ends; RDE stops the remastered BGM around 0x76
 Priority: P3

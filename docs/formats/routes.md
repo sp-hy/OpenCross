@@ -134,7 +134,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 
 | Verb | Meaning |
 |---|---|
-| `load <room> [param]` | Warp to a room; `param` is the entrance (default 0). Fails the run (exit 1) if the room cannot load. |
+| `load <room> [param]` | Warp to a room; `param` is the entrance (default 0). The disc follows variable 0x42 as on a map jump (`set var 42 1` first for a disc 2 room). Fails the run (exit 1) if the room cannot load. |
 | `set var <hexid> <value>` | Write a script variable. |
 | `set option <hexmask> <0\|1>` | Set or clear bits of the settings options word (0x200 run/walk toggle, 0x800 analog stick). |
 | `set hp <char> <value>` | Write a character's current HP. |
@@ -170,7 +170,7 @@ An unknown kind logs `route: unknown request <kind>` and exits with code 1.
 
 | Verb | Meaning |
 |---|---|
-| `screenshot <file.png>` | Capture the next rendered frame. Relative names go to `shots\` next to the ini; absolute paths are used as given. The log gets `route: tick N screenshot <path> (room R)`. |
+| `screenshot <file.png>` | Capture the next rendered frame. Relative names go to `shots\` next to the ini; absolute paths are used as given. The log gets `route: tick N screenshot <path> (room R)`, with `, movie frame F` (the 0-based frame on screen) while a movie plays. |
 | `autoshot <every> <count> <prefix>` | In the background, request a screenshot every `every` ticks, `count` times, named `<prefix>00.png`, `<prefix>01.png`, ... while later lines run. Returns at once. A screenshot from `screenshot` on the same tick takes priority. |
 
 ### 3.5 Marks, snapshots and traces

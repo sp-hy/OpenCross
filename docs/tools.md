@@ -86,7 +86,7 @@ Source: `tools/ocaudio.cpp`. `<song>` is a song id or `BGMnnn`.
 | `switch-test` | `<song> <seconds> [volume]` | Headless mixer run of the live BGM source switch (remastered, original, remastered); volume default 100. |
 | `inst-dump` | `<index>` | Instrument table entry of the first bank plus ADPCM block flags and first decoded samples. |
 
-Environment: `OC_SFX_ONLY` (`render-sfx`). The `usage()` text lists only `decode` and `play`. Writes only to the given WAV paths.
+Environment: `OC_SFX_ONLY`, `OC_AUDIO_PROBE` (`render-sfx`). The `usage()` text lists only `decode` and `play`. Writes only to the given WAV paths.
 
 ### 1.4 `ochd` (HD texture validator)
 
@@ -137,7 +137,7 @@ Source: `tools/ocbattle.cpp`, `tools/ocbattle_fx.cpp`, `tools/ocbattle_reg.cpp`.
 | `tables` | none | Counts and a few named rows of the game tables. |
 | `scenes` | none | One line per scene: enemy ids, names, counts, battlefield, boss flag. |
 | `elements` | none | Per element: id, raw name, colour, level, mode, first record bytes. |
-| `sim` | `<scene> [seed] [--party a,b,c] [--star N] [--set char\|char_w0..] [--quiet] [--brain scripted\|random] [--party-from file[:slot]] [--attack] [--field N]` | Plays one battle with the auto policy and prints the log. `--party` default `0,1,2`; `--star` default 0; `--set` default `char`; `--brain` default `scripted`; `--party-from` reads the party of a save slot (default newest); `--attack` = weapon chains only; `--field` = battlefield. |
+| `sim` | `<scene> [seed] [--party a,b,c] [--star N] [--set char\|char_w0..] [--quiet] [--brain scripted\|random] [--party-from file[:slot]] [--attack] [--field N] [--poison]` | Plays one battle with the auto policy and prints the log. `--party` default `0,1,2`; `--star` default 0; `--set` default `char`; `--brain` default `scripted`; `--party-from` reads the party of a save slot (default newest); `--attack` = weapon chains only; `--field` = battlefield; `--poison` poisons every unit at the start and prints after each command an `upkeep:` line (each unit's HP change that no hit or heal explains) and the actors of the actions that ran. |
 | `soak` | `[--seeds N] [--scene S \| --from A --to B] [--cap N] [--party-from file[:slot]] [--brain scripted\|random] [-v]` | Random-policy battles over scenes; checks invariants, stalls, unimplemented ops, stub hits. Defaults: 3 seeds, all scenes, cap 2000 commands, `scripted`. A 60 s watchdog reports hangs; exit 1 on anomalies or exceptions. |
 | `xcheck` | `[--n N] [--seed S]` | Cross-check of the weapon / element damage code against an independent formula transcription over random triples (default 20 cases per kind, seed 1234). |
 | `cast` | `<scene> <actor> <element[,element...]> <target> [seeds]` | Rules-only cast (no view): starts the scene, casts as the Debug tab does, prints the target's status words and the grid cells a seal greys. |
@@ -193,6 +193,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--enemyhp` | `u3,u4,u5` | unchanged | HP (and max HP) of enemy units 3 / 4 / 5; empty or -1 keeps. |
 | `--ko` | `<unit>` | none | That party unit starts KO'd. |
 | `--gauge` | `<n>` | the character's | Party slot 0 starts with that element level (-1 none, 0 = row 1 usable): an element cast from the top menu as the first action, the way a PS1 capture pokes the gauge. |
+| `--stars` | `<current>,<total>` | `0,0` | The stars the battle starts with (the save's stars current / total): a summon needs one left, and the field ring shows them while it is one colour. |
 | `--status` | `<unit>:<lo>[,...]` | none | OR these status bits into the units' merged `lo` words at the start (e.g. `0:0x19,3:0x100020`); for checking the status plates and icons. |
 | `--equip` | `<item id>` | character table | Party slot 0 holds that weapon (e.g. `0x26`). |
 | `--cast` | `<element id>` | none | First PC casts that element on the first enemy once the view ticks. |
@@ -422,6 +423,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_SFX_KEEP` | `akao_player.cpp` | hex mask | Plays only SFX requests whose bit is set; request n tests bit (n-1) mod 8, so only the low 8 bits count. |
 | `OC_SFX_UNIMPL` | `akao_player.cpp` | set | Reports once per op the SFX opcodes with no audible model. |
 | `OC_SFX_ONLY` | `tools/ocaudio.cpp` | `0`, `1` | `render-sfx`: plays only program 0 or 1 of the pair, no chained ids. |
+| `OC_AUDIO_PROBE` | `tools/ocaudio.cpp` | CSV path | `render-sfx`: renders in 1/240 s steps (one sequencer update each) and writes every active voice after each (`step,tick,voice,reg,vl,vr,level`: sequencer tick count, pitch register, left / right voice volume in SPU units, envelope level). |
 | `OC_SFX_VOL` | `seq_tool.cpp`; set by `tools/py/sfx_batch.py` | 0..127 (default 127) | Volume of `ocbattleseq sfx`. |
 | `OC_SFX_PAN` | `seq_tool.cpp`; set by `tools/py/sfx_batch.py` | 0..127 (default -1 = centre) | Pan of `ocbattleseq sfx` (64 = centre). |
 | `OC_SFX_WAV` | `seq_tool.cpp`; set by `tools/py/sfx_batch.py` | file path | `ocbattleseq sfx` writes the render as a 44.1 kHz stereo 16-bit WAV. |

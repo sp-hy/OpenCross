@@ -49,6 +49,10 @@ void FieldVM::set_var(u16 id, s32 value) {
 }
 
 int FieldVM::room_register() const { return room_reg_ >= 0 ? room_reg_ : read_var(var::kMapId); }
+void FieldVM::note_room_change(int room) {
+  write_var(var::kPrevMapId, room_register());
+  room_reg_ = room;
+}
 bool FieldVM::var_bit(u32 bit_ref) const { return (vars_[(bit_ref >> 5) & (kVarSlots - 1)] >> (bit_ref & 0xF)) & 1; }
 void FieldVM::set_global(Global which, s32 value) {
   globals_[static_cast<size_t>(which)] = value;

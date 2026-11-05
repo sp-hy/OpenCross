@@ -36,6 +36,8 @@ class Decoder {
   u32 width() const { return width_; }
   u32 height() const { return height_; }
   double fps() const { return fps_; }
+  // The container's video frame count (0 when it does not say).
+  u64 frame_count() const { return frames_; }
   bool has_audio() const { return has_audio_; }
   // True when the demuxer and decoders are drained (queues may still hold data).
   bool eof() const { return eof_; }
@@ -53,6 +55,7 @@ class Decoder {
   std::unique_ptr<Impl> impl_;
   u32 width_ = 0, height_ = 0;
   double fps_ = 15.0;
+  u64 frames_ = 0;
   bool has_audio_ = false;
   bool eof_ = false;
   std::deque<VideoFrame> video_;

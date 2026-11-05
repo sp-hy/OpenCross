@@ -192,7 +192,10 @@ void FieldWorld::play_movie(int index, int variant, bool skippable) {
   movie_req_ = {index, variant, skippable, name};
   log::info("field: tick {} movie {} ({}) requested{} in {} (disc {})", tick_count_, index, name.empty() ? "no file" : name,
             skippable ? ", skippable" : "", view_.room_name(), disc_);
-  if (name.empty()) return;
+  if (name.empty()) {
+    start_movie_jump();
+    return;
+  }
   movie_state_ = MovieState::Requested;
 }
 
@@ -219,6 +222,7 @@ void FieldWorld::movie_finished() {
   movie_state_ = MovieState::None;
   if (sequences_ && !movie_sequence_.empty()) sequences_->stop(movie_sequence_);
   movie_sequence_.clear();
+  start_movie_jump();
 }
 
 // Room init defaults of the footstep registers: master volume 0x7F, distance band 0x7FFF / 0x7FFF, listener 0. The floor types keep

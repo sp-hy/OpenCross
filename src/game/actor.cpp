@@ -943,7 +943,7 @@ void Actor::tick(const WalkMesh& walk, int heading, bool run) {
   pad_step_[0] = pad_step_[1] = 0.0f;
   const bool moving = heading != kNoHeading;
   // No running on stairs / ladders / slide tiles.
-  if (tile_flags_ & 0xC800u) run = false;
+  if ((tile_flags_ & 0xC800u) && !force_run) run = false;
   if (moving && (tri_ >= 0 || noclip)) {
     const float heading_rad = static_cast<float>(heading & 0xFFF) * kUnitsToRad;
     // 16.16 velocity -> units; a tile with flag 0x1000 halves the velocity.

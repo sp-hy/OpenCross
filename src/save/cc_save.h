@@ -51,6 +51,7 @@ inline constexpr size_t kLocation = 0x18E;
 inline constexpr size_t kPlaytime = 0x588;
 inline constexpr size_t kGold = 0x58C;
 inline constexpr size_t kRecruited = 0x590;
+inline constexpr size_t kGrowthProgress = 0x598;
 inline constexpr size_t kParty = 0x59C;
 inline constexpr size_t kStarsTotal = 0x5A4;
 inline constexpr size_t kStarsCurrent = 0x5A5;
@@ -111,6 +112,8 @@ struct SaveSlot {
   void set_playtime_frames(u32 frame_count);
   u32 gold() const;
   void set_gold(u32 amount);
+  u32 growth_progress() const;
+  void set_growth_progress(u32 value);
   bool recruited(int char_id) const;
   void set_recruited(int char_id, bool on);
   // Summary copy of script variable 0 (SCENARIO), u16: the key of the slot list's location caption.

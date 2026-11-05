@@ -41,7 +41,7 @@ class DiscIndex {
   // holds the movie number (+ play range, mode, volume). -> movie.dat base name, "" when the index has no row / no movie.
   std::string movie_name(int disc, int op) const;
   struct MovieRow {
-    // STR frame range (start 0 = from the beginning, end = frame count).
+    // Frame range (start 0 = from the beginning, end = frame count); mode 3 / 4 = the staff-roll layout.
     u16 start, end;
     u8 mode, number, volume;
   };

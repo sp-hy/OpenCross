@@ -258,7 +258,27 @@ int cmd_render_sfx(const vfs::Vfs& fs, int id, const std::string& out, double se
   for (auto& chained : extra) pl.start_sfx(chained);
   const u32 frames = u32(std::max(0.1, seconds) * rate);
   std::vector<float> buf(size_t(frames) * 2);
-  pl.render(buf.data(), frames);
+  // OC_AUDIO_PROBE=<csv>: renders in 1/240 s steps (one sequencer update each) and logs every active voice after each one (step,
+  // sequencer tick, voice, pitch register, pan gains in voice volume units, envelope level).
+  const char* probe_path = std::getenv("OC_AUDIO_PROBE");
+  FILE* probe = probe_path ? std::fopen(probe_path, "w") : nullptr;
+  if (probe) {
+    std::fprintf(probe, "step,tick,voice,reg,vl,vr,level\n");
+    for (u32 done = 0, step = 0; done < frames; ++step) {
+      const u32 next = std::min(frames, u32((u64(step) + 1) * rate / 240));
+      pl.render(buf.data() + size_t(done) * 2, next - done);
+      done = next;
+      for (int i = 0; i < audio::AkaoPlayer::kVoices; ++i) {
+        const audio::AkaoPlayer::VoiceProbe voice = pl.probe_voice(i);
+        if (voice.active)
+          std::fprintf(probe, "%u,%u,%d,%d,%d,%d,%d\n", step, pl.ticks(), i, voice.reg, int(std::lround(voice.gl * 0x4000)),
+                       int(std::lround(voice.gr * 0x4000)), voice.level);
+      }
+    }
+    std::fclose(probe);
+  } else {
+    pl.render(buf.data(), frames);
+  }
   std::vector<s16> pcm(buf.size());
   for (size_t i = 0; i < buf.size(); ++i) pcm[i] = s16(std::clamp(buf[i], -1.0f, 1.0f) * 32767.0f);
   std::printf("sfx %d: %d programs (+%zu chained), RMS %.1f, finished %s\n", id, program.count, extra.size(), rms(pcm, 0, frames),

@@ -18,7 +18,6 @@
 - tap right                           # slot 2 = the cleared save (left / right step through the files)
 - wait 10
 - tap confirm
-- wait room ending 600
 - wait menu open 600                  # FE 84 + FE 61: the New Game+ title list
 - wait 60
 - screenshot ng_01_list.png
@@ -40,6 +39,7 @@
 - tap confirm
 - wait room opn_a01i 900
 - assert var 0x7E 2
+- assert var 0x08 8                   # the launcher's room register 8, stored by the DC jump at the movie end
 - log New Game+ reached opn_a01i
 - wait 120
 - screenshot ng_02_opening.png

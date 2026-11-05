@@ -116,6 +116,14 @@ class AkaoPlayer {
   u32 rate() const { return rate_; }
   // Diagnostics (ocaudio sfx-pitch): called at every note-on with the sounding note, its instrument and the SPU pitch register.
   std::function<void(int note, const Instrument& in, int reg)> note_trace;
+  // Diagnostics (ocaudio OC_AUDIO_PROBE, tests): one hardware voice's pitch register, pan gains (1.0 = 0x4000) and envelope level.
+  struct VoiceProbe {
+    bool active = false;
+    int reg = 0;
+    float gl = 0, gr = 0;
+    int level = 0;
+  };
+  VoiceProbe probe_voice(int index) const;
 
   // Envelope maths exposed for tests: one hardware-rate (44.1 kHz) step of a SPU ADSR generator.
   struct Env {
@@ -172,6 +180,9 @@ class AkaoPlayer {
     // legato_prev: the previous note op ran under legato (this note does not key on). reverb (C2 / C3): the voice feeds the reverb unit.
     bool legato_prev = false;
     bool reverb = false;
+    // The per-update voice parameters (volume, pan, pitch, LFO steps) reach the voice: set by every note, cleared by a rest and the
+    // channel end, and on SFX channels by the gate key-off. A released voice decays with the registers it had then.
+    bool voice_update = false;
     // instrument
     int inst_index = 0;
     const Instrument* inst = nullptr;
@@ -206,9 +217,13 @@ class AkaoPlayer {
     int porta_steps = 0, porta_left = 0;
     float porta_off = 0, porta_step = 0;
     int bend_left = 0;
-    // A4 pitch bend: a ramp of the pitch REGISTER (bend, bend_step); its operands (bend_len, bend_delta) are armed for the next note.
-    float bend = 0, bend_step = 0;
+    // A4 pitch bend: a 16.16 ramp of the pitch REGISTER (bend, bend_step), zeroed by every note. Its operands (bend_len, bend_delta)
+    // are armed for the next note or tie, which moves bend_note (the note index without transpose) by the delta and ramps from the
+    // current register (running bend included) to that note's pitch; bend_inst is the instrument of the last note.
+    s32 bend = 0, bend_step = 0;
     int bend_len = 0, bend_delta = 0;
+    int bend_note = 0;
+    const Instrument* bend_inst = nullptr;
     Lfo vib, trem, apan;
     // SPU pitch modulation (FM, C6 / C7 / D2 / D3): only the second program of an SFX pair (flag 0x10000) is a carrier;
     // its voice sits right after the first program's voice and is modulated by that voice's output (hardware PMON: voice n by n-1).
@@ -248,6 +263,7 @@ class AkaoPlayer {
   void tick_channel(Channel& channel);
   void run_ops(Channel& channel);
   void note_on(Channel& channel, int key);
+  void start_bend(Channel& channel);
   void sync_voice_adsr(Channel& channel);
   void key_off(Channel& channel);
   void end_channel(Channel& channel);
