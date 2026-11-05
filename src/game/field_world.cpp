@@ -533,7 +533,10 @@ void FieldWorld::place_party_spawn(int slot) {
 
 // ------------------------------------------------------------------------------------------------ host: entities
 // A screen fade alone does not hold the gate: the scripts of a battle return, a menu close or a room entry run under the fade-in.
-bool FieldWorld::system_ready() { return in_init_ || (trans_ == Trans::None && !jump_.active); }
+// A battle holds it from its request through the encounter effect to its end, so a second A3 / C9 waits for its own fight.
+bool FieldWorld::system_ready() {
+  return in_init_ || (trans_ == Trans::None && !jump_.active && handoff_.battle_state == BattleState::None);
+}
 
 // Ops 75 / 76 / 78 edit the attr -> flag table that the walk mesh blocks by.
 void FieldWorld::sync_flag_table() {

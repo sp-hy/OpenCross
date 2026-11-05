@@ -19,6 +19,27 @@
 
 namespace oc::app {
 
+namespace {
+
+// A movie ends on the press of any PS1 button but Start, which opens the pause screen: the d-pad, face and shoulder actions of
+// both keyboard sets, the Select key and the same pad buttons plus Back. The speed keys, triggers and stick clicks stay hotkeys.
+bool movie_skip_edge(const platform::Input& in) {
+  using platform::Action;
+  for (Action action : {Action::Up, Action::Down, Action::Left, Action::Right, Action::Ok, Action::Cancel, Action::Item, Action::Menu,
+                        Action::SelectLeft, Action::SelectRight})
+    if (platform::action_pressed(in, action)) return true;
+  if (in.key_pressed[platform::kSelectKey]) return true;
+  if (!in.pad_connected) return false;
+  for (SDL_GamepadButton button :
+       {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST, SDL_GAMEPAD_BUTTON_NORTH, SDL_GAMEPAD_BUTTON_BACK,
+        SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+        SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT})
+    if (in.pad_pressed[static_cast<size_t>(button)]) return true;
+  return false;
+}
+
+}  // namespace
+
 bool App::confirm_edge(const platform::Input& in) {
   return platform::action_pressed(in, platform::Action::Ok) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_SOUTH]);
 }
@@ -89,11 +110,9 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
   // The two ending_s rows (modes 3 / 4) show the staff roll: the movie in a panel beside the scrolling credits strip.
   if (row && (row->mode == 3 || row->mode == 4)) movie_player.set_staff_roll(files, movie::staff_strip_member(config.language));
   movie_open = true;
-  movie_skippable = rq.skippable;
   movie_fade = rq.fade;
   ctx.set_clear_color(0.0f, 0.0f, 0.0f);
-  log::info("movie: {} ({}x{}, {:.1f} fps){}", movie_player.member(), movie_player.width(), movie_player.height(), movie_player.fps(),
-            rq.skippable ? ", skippable" : "");
+  log::info("movie: {} ({}x{}, {:.1f} fps)", movie_player.member(), movie_player.width(), movie_player.height(), movie_player.fps());
 }
 
 void App::open_main_menu(bool script) {
@@ -223,7 +242,7 @@ void App::apply_flow_action(const game::FlowAction& action) {
   }
   // The title script plays its movie before the jump (its D4 #2,#520).
   if (action.load_room && world_ok && action.movie_row >= 0) {
-    world.play_movie(action.movie_row, 0, true, 0x208);
+    world.play_movie(action.movie_row, 0x208);
     if (world.movie_pending()) {
       deferred_flow = action;
       deferred_flow.movie_row = -1;
@@ -450,7 +469,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     movie_player.update(dt);
     if (world_ok)
       for (int tick = 0; tick < ticks; ++tick) world.movie_tick();
-    if (movie_skippable && confirm_edge(in)) movie_player.skip();
+    if (movie_skip_edge(in)) movie_player.skip();
     if (movie_player.finished()) {
       end_movie();
       if (deferred_flow_set) {
@@ -596,6 +615,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       log::info("key item list: used {}", used);
       world.use_key_item(used);
     }
+    if (const int refused = key_popup.take_refused()) world.refuse_key_item(refused);
     key_popup.update(static_cast<float>(dt));
     if (!key_popup.active()) world.lock_input(kKeyListInputLock);
     return;

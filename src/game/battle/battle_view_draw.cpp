@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
+#include "core/log.h"
 #include "import/text.h"
 namespace oc::game {
 
@@ -355,14 +357,24 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
         wd.near_meshes = wd.env_meshes = 0;
         wd.light.on = false;
         // A plain weapon adds a specular glint per corner (a prism weapon is lit instead, below): light = the unit vector from the unit toward the stage light (straight down when any
-        // component exceeds 0x4000; the default light is 3072 above the arena centre), eye = the live camera eye. It is never 0 in a plain battle.
+        // component exceeds 0x4000; the default light is 3072 above the arena centre), eye = the live camera eye. The glint is drawn only while
+        // the slot's camera-space position lies within 4096 of the eye's world position (y down) on every axis: the two spaces are compared as
+        // they are, so it shows in close shots and in the command orbit and not in wide ones.
         if (!visual.weapon_prism) {
+          const render::Mat4 at_eye = cam_.view() * (wd.model * wm);
+          const float eye_ps1[3] = {cam_.eye[0], -cam_.eye[1], cam_.eye[2]};
+          bool near_eye = true;
+          for (int k = 0; k < 3; ++k) near_eye = near_eye && std::fabs(eye_ps1[k] - at_eye.at(k, 3)) < 4096.0f;
+          static const bool glint_trace = std::getenv("OC_GLINT_TRACE") != nullptr;
+          if (glint_trace)
+            log::debug("weapon glint: frame {} unit {} slot {} shot '{}' {} pos {:.0f} {:.0f} {:.0f} eye {:.0f} {:.0f} {:.0f}", frame_count_, i, slot, camera_.shot_name(),
+                       near_eye ? "on" : "off", at_eye.at(0, 3), at_eye.at(1, 3), at_eye.at(2, 3), eye_ps1[0], eye_ps1[1], eye_ps1[2]);
           // The stage light, y-up world (PS1 (0, -0xC00, 0) default = (0, 3072, 0) here).
           const std::array<float, 3> light = stage_scene_.light();
           float to_light[3] = {light[0] - visual.x, light[1] - yl, light[2] - visual.z};
           if (std::fabs(to_light[0]) > 16384.0f || std::fabs(to_light[1]) > 16384.0f || std::fabs(to_light[2]) > 16384.0f) to_light[0] = 0.0f, to_light[1] = 1.0f, to_light[2] = 0.0f;
           const float len = std::sqrt(to_light[0] * to_light[0] + to_light[1] * to_light[1] + to_light[2] * to_light[2]);
-          wd.light.spec = len > 0.0f;
+          wd.light.spec = near_eye && len > 0.0f;
           for (size_t k = 0; k < 3; ++k) {
             wd.light.spec_dir[k] = len > 0.0f ? to_light[k] / len : 0.0f;
             wd.light.spec_eye[k] = cam_.eye[k];

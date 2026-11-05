@@ -1,5 +1,5 @@
 // Cheats: the [Cheats] ini round trip (all off by default, RDE's toggles session-only), the first-launch language mapping, RDE's
-// encounter tables and its text pace.
+// encounter tables, its hotkeys and Esc-menu chord, and its text pace.
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -190,6 +190,22 @@ int main() {
     CHECK(on.auto_battle && on.encounters && on.boost);
     frame({});
     CHECK(on.auto_battle && on.encounters && on.boost);
+    // The Esc-menu chord LT + L3 also reaches the toggles: the LT press flips slow mode, the L3 release encounters off
+    game::HotkeyLevels chord = lt;
+    chord.l3 = true;
+    const game::Toggles before = on;
+    frame(lt);
+    frame(chord);
+    frame({});
+    CHECK(on.slow != before.slow && on.encounters != before.encounters && on.auto_battle == before.auto_battle);
+  }
+  // --- the Esc-menu chord LT + L3 toggles the frame after it closes (still held), in either order, once per closing
+  {
+    game::MenuChord chord;
+    CHECK(!chord.poll(true, false) && !chord.poll(true, true) && chord.poll(true, true) && !chord.poll(true, true) && !chord.poll(false, false));
+    CHECK(!chord.poll(false, true) && !chord.poll(true, true) && chord.poll(true, false) && !chord.poll(false, false));
+    CHECK(!chord.poll(true, true) && chord.poll(true, true));
+    CHECK(!chord.poll(false, true) && !chord.poll(false, false) && !chord.poll(true, false) && !chord.poll(false, false));
   }
   // --- speed factors: RDE's own = 4x field / 2x battle; slow = percent; nothing in the tutorial
   CHECK(game::speed_factor(true, false, 0, 50, false, false) == 4.0f && game::speed_factor(true, false, 0, 50, true, false) == 2.0f);

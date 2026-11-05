@@ -26,6 +26,7 @@ SavePrev preview_of(const save::SaveSlot& data, int slot, int block) {
   preview.stars = data.stars_total();
   preview.scenario = data.progression();
   preview.flags = data.summary_flags();
+  preview.corrupted = data.corrupted;
   return preview;
 }
 
@@ -80,7 +81,8 @@ int MainMenu::Impl::save_list_angle(int sel) {
 
 // Save / Load: phase 0 = the Save a File / Load a File choice (Save is greyed and unselectable when saving is blocked); phase 2 = the
 // save choice (OpenCross / Slot 1 / Slot 2; starts on OpenCross when the page holds a file); phase 3 = "No save data in ..." (Load on
-// an empty choice; confirm or 120 frames back to phase 0); phase 1 = the card's 2 x 8 box grid (card 1's box 0 is the auto-save, never
+// an empty choice) or "Save data in Slot n is corrupted." (a confirmed load of a file that fails the checksum); confirm or 120 frames
+// back to phase 0; phase 1 = the card's 2 x 8 box grid (card 1's box 0 is the auto-save, never
 // a manual save target; up / down swap rows, boxes 7 and 8 stay) or the page's list (file 0 is its auto-save, never a manual save
 // target; up / down one row, left / right one screen), with the overwrite / load confirmation on a used file. Cancel on the choice or
 // the list returns to phase 0. The save-list-only mode (save_only) has no phase 0: Cancel on the choice closes the menu, on the list it
@@ -119,6 +121,7 @@ void MainMenu::Impl::update_save(const Nav& nav) {
                                       : std::any_of(prev.begin(), prev.end(), [](const SavePrev& box) { return box.used; });
       if (load_mode && !any) {
         save_phase = 3;
+        card_msg_corrupt = false;
         card_msg_start = frames;
         return;
       }
@@ -224,12 +227,20 @@ void MainMenu::Impl::update_save(const Nav& nav) {
   }
 }
 
-// Load: the host picks the request up (take_load_request) after the menu closed and starts the slot like Continue does.
+// Load: the host picks the request up (take_load_request) after the menu closed and starts the slot like Continue does. A card file
+// that fails the checksum loads nothing and shows the corrupted message.
 void MainMenu::Impl::do_load() {
   const SavePrev& file = save_card == 0 ? page_prev[static_cast<size_t>(std::clamp(page_cur, 0, save::kOcFiles))]
                                         : prev[static_cast<size_t>(std::clamp(load_cur, 0, 14))];
   if (!file.used || (save_card == 0 ? !page : !save_dat)) {
     sfx(0x18);
+    return;
+  }
+  if (file.corrupted) {
+    save_phase = 3;
+    card_msg_corrupt = true;
+    card_msg_start = frames;
+    sfx(8);
     return;
   }
   load_card = save_card;
@@ -397,6 +408,10 @@ void MainMenu::Impl::build_save() {
     if (save_phase == 0) return;
     Frame(86, sl::kMsgX, sl::kMsgY);
     auto line = [&](float x, float y, const std::string& str) { HLfit(x + 1.5f, y + 2.5f, utf32(str), sl::kMsgWidth, sl::kMsgScale); };
+    if (save_phase == 3 && card_msg_corrupt) {
+      line(146, 336, menu_str(save_card == 1 ? 0x801F2FF0 : 0x801F300C, save_card == 1 ? "Save data in Slot 1 is corrupted." : "Save data in Slot 2 is corrupted."));
+      return;
+    }
     if (save_phase == 3) {
       if (on_page) line(146, 336, "No save data in OpenCross.");
       else line(146, 336, menu_str(save_card == 1 ? 0x801F3181 : 0x801F3182, save_card == 1 ? "No save data in Slot 1." : "No save data in Slot 2."));

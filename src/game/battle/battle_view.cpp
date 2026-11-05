@@ -653,6 +653,7 @@ bool BattleView::finish_start() {
   time_ = 0;
   intro_ticks_ = 0;
   intro_layer_cut_ = false;
+  speed_gate_ = false;
   orbit_pc_ = dyn_target_ = -1;
   menu_glide_ = false;
   orbit_blocked_ = orbit_block_next_ = false;

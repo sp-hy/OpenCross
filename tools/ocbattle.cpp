@@ -588,15 +588,19 @@ int cmd_cast(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vec
     }
     const Unit& tu = battle.unit(target);
     const u32 lo0 = tu.lo, hi0 = tu.hi;
+    const int countdown0 = tu.countdown;
+    int code = -1;
     for (const int cast : casts) {
       if (battle.outcome() != Outcome::Ongoing) break;
       battle.do_element(actor, cast, 0, target);
+      if (!battle.events().empty()) code = battle.events().back().code;
       battle.finish_external_action();
     }
     if (casts.size() > 1)
       for (const std::string& line : battle.drain_log()) std::printf("   %s\n", line.c_str());
-    std::printf("seed %d: %s casts %d at %s: lo %08x -> %08x, hi %08x -> %08x, outcome %d result %d\n", seed, battle.unit(actor).name.c_str(), el, tu.name.c_str(),
-                lo0, tu.lo, hi0, tu.hi, static_cast<int>(battle.outcome()), battle.result_code());
+    std::printf("seed %d: %s casts %d at %s: lo %08x -> %08x, hi %08x -> %08x, countdown %d -> %d, code %d, outcome %d result %d\n", seed,
+                battle.unit(actor).name.c_str(), el, tu.name.c_str(), lo0, tu.lo, hi0, tu.hi, countdown0, tu.countdown, code, static_cast<int>(battle.outcome()),
+                battle.result_code());
     if (tu.pc) {
       int sealed = 0, filled = 0;
       for (int cell = 0; cell < data::kGridCells; ++cell) {

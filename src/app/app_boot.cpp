@@ -419,6 +419,7 @@ void App::init_field() {
   if (flow_ready) {
     world.set_game_state(&flow.game_state());
     world.set_custom_names(&flow.machine().custom_names());
+    world.set_name_store([this](int char_id, std::u32string name) { flow.machine().set_custom_name(char_id, std::move(name)); });
   }
   world_ok = true;
 }

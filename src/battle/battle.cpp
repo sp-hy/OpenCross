@@ -741,7 +741,8 @@ bool Battle::transform(int unit_index, int form) {
 
 // Pip's form change (pgdat mode 45): the innate colour becomes the colour with the most colour points (script vars 4..0xE = green white
 // black red yellow blue; the last of equal ones), the six counters are zeroed, the kind byte, AP 8, countdown 21, the form's tech cells
-// (bits 14-15 kept; the third only for a second form) and the growth column are written to the unit and the party record.
+// (bits 14-15 kept; the third only for a second form) and the growth column are written to the unit and the party record. A non-empty
+// unit cell that takes a new tech loses its used bit; an empty one stays empty (the party record cell is written either way).
 void Battle::evolve(int unit_index, int form) {
   if (unit_index < 0 || unit_index >= kPcSlots || !pip_form(form)) return;
   Unit& unit = units_[static_cast<size_t>(unit_index)];
@@ -759,7 +760,10 @@ void Battle::evolve(int unit_index, int form) {
   for (size_t k = 0; k < kPipTechCells.size(); ++k) {
     if (k == 2 && form <= 0x2D) break;
     u16& cell = unit.cells[static_cast<size_t>(kPipTechCells[k])];
-    cell = static_cast<u16>((cell & 0xC000) | kPipTechs[tech_base + k]);
+    if (cell != 0) {
+      cell = static_cast<u16>((cell & 0xC000) | kPipTechs[tech_base + k]);
+      unit.used[static_cast<size_t>(kPipTechCells[k])] = false;
+    }
     if (static_cast<size_t>(unit_index) < party_.size()) {
       u16& record_cell = party_[static_cast<size_t>(unit_index)].cells[static_cast<size_t>(kPipTechCells[k])];
       record_cell = static_cast<u16>((record_cell & 0xC000) | kPipTechs[tech_base + k]);
@@ -1011,7 +1015,22 @@ void Battle::set_status_bit(int target, int set, int bit) {
   Unit& target_unit = units_[static_cast<size_t>(target)];
   (set == 0 ? target_unit.lo : target_unit.hi) |= 1u << bit;
   const int idx = bit + 32 * set;
-  if (status_is_timed(set, bit)) target_unit.timers[idx] = status_timer(idx, target_unit.dur, target_unit.eq.dur_mod);
+  if (!status_is_timed(set, bit)) return;
+  target_unit.timers[idx] = status_timer(idx, target_unit.dur, target_unit.eq.dur_mod);
+  // Frozen lands: the countdown word gains 3 and the freeze ends at the unit's next action.
+  if (set == 0 && (1u << bit) == st::kDefeated) {
+    target_unit.freeze_pending = true;
+    target_unit.countdown = (target_unit.countdown + 3) & 0xFFFF;
+  }
+}
+
+void Battle::thaw_on_action(int unit) {
+  Unit& actor = units_[static_cast<size_t>(unit)];
+  if (!actor.freeze_pending) return;
+  actor.freeze_pending = false;
+  actor.lo &= ~0x60000000u;
+  actor.timers.erase(29);
+  actor.timers.erase(30);
 }
 
 // Nothing lands on an immune target. Hi bits 29..31 only stay when one of the target's accessories is 0xF9..0xFB (then an old one of them
@@ -1077,7 +1096,9 @@ bool Battle::force_status_bits(int target, u32 lo) {
 void Battle::do_weapon_attack(int actor, int target, int strength) {
   const SealRefreshOnExit refresh{*this, target};
   summon_colour_ = -1;
+  thaw_on_action(actor);
   Unit& attacker = units_[static_cast<size_t>(actor)];
+  attacker.result_code = 0xFF;
   Unit& target_unit = units_[static_cast<size_t>(target)];
   // Script var 0x22 / 0x28 + 6 * pc = the hit strength (0 weak / 1 strong / 2 fierce), not the weapon class.
   brain_.on_attack(*this, actor, 0, strength, target);
@@ -1188,6 +1209,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   Unit& caster = units_[static_cast<size_t>(actor)];
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(element_id)];
+  caster.result_code = 0xFF;
   summon_colour_ = (element.b(0) & 0x40) ? data::colour_index_of_bit(element.colour_bit()) : -1;
   Unit& target_unit = units_[static_cast<size_t>(target)];
   const int hp0 = target_unit.hp;
@@ -1256,12 +1278,16 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   };
   // The damage rolled, which is what the number shows; an overkill is not cut to the target's HP. -1 = no damage roll.
   int rolled_damage = -1;
-  auto deal = [&](const ElementIn& in) {
+  // replace >= 0: the value a mode writes over the roll of a target that is not immune; the roll's result code stays, and only a non-zero
+  // roll drains.
+  auto deal = [&](const ElementIn& in, int replace = -1) {
     DamageOut damage = element_damage(rng_, in);
+    const bool roll_landed = damage.code != 2 && damage.value != 0;
+    if (replace >= 0 && !in.target_immune) damage.value = replace;
     god_filter(target, damage);
     damage.value = reduce(damage.value);
     if (damage.code != 3) rolled_damage = damage.value;
-    if ((caster.hi & st::kHiDrain) && mode != 35 && damage.code != 2 && damage.value != 0) drain_ = {actor, damage.value};
+    if ((caster.hi & st::kHiDrain) && mode != 35 && roll_landed && damage.value != 0) drain_ = {actor, damage.value};
     say(std::format("{} casts {} on {}: {}{} (mode {}, slot {}, x{})", caster.name, nm, target_unit.name, damage.value, damage.code == 3 ? " healed" : "", mode, slot, cmul));
     damage_unit(actor, target, damage.value, damage.code);
     return damage;
@@ -1298,8 +1324,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   // The mode repainted the field ring itself.
   bool ring_done = false;
   // Mode 0's hit pass: the status roll first; element record +0xE bit 15 = a landed status cancels the damage, bit 14 = a target with hi
-  // 0x2000000 is knocked out outright; else MAG damage.
-  auto hit_pass = [&]() {
+  // 0x2000000 is knocked out outright; else MAG damage (replace: see deal). Returns the result code.
+  auto hit_pass = [&](int replace = -1) {
     const bool status_landed = apply_status(target, element);
     const u16 flags = element.rd16(0xE);
     if ((flags & 0x4000) && (target_unit.hi & 0x2000000u)) {
@@ -1309,10 +1335,11 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       }
       code_override = 0;
     } else if (!(flags & 0x8000) || !status_landed) {
-      deal(elem_in(0));
+      return deal(elem_in(0), replace).code;
     } else {
       code_override = 0;
     }
+    return 0;
   };
 
   gated_target_ = colour_gated(actor, target, element_id) ? target : -1;
@@ -1418,13 +1445,14 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       code_override = ok ? 0 : 2;
       break;
     }
-    case 36: {  // rnd(0,99) < element record +0xA sets the lo bits of the target's innate colour, no further roll
+    case 36: {  // rnd(0,99) < element record +0xA sets the lo bits of the target's innate colour, no further roll; a failed gate clears
+                // `landed`. The mode writes no result code: the target keeps the one its last action left (a miss pop only after a miss).
       // Per colour: green white black red yellow blue.
       static constexpr u32 kCurse[6] = {0x901u, 0xE000u, 0xE0000u, 0x900008u, 0xE000010u, 0xA0000020u};
-      bool ok = false;
-      if (rng_.rnd(0, 99) < element.status_pct() && ct >= 0 && ct < 6) ok = force_status_bits(target, kCurse[static_cast<size_t>(ct)]);
+      landed = rng_.rnd(0, 99) < element.status_pct();
+      const bool ok = landed && ct >= 0 && ct < 6 && force_status_bits(target, kCurse[static_cast<size_t>(ct)]);
       say(std::format("{} casts {} on {}: {}", caster.name, nm, target_unit.name, ok ? "colour curse" : "no effect"));
-      code_override = ok ? 0 : 2;
+      code_override = target_unit.result_code;
       break;
     }
     case 45:  // Pip's form change (elements 0x80..0x85, power = the new kind); no damage list entry of its own
@@ -1566,17 +1594,17 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       say(std::format("{} uses {} on {}: no effect (mode {})", caster.name, nm, target_unit.name, mode));
       code_override = 0;
       break;
-    case 40: {  // Suicide Bomb (348): after the mode 0 hit pass, unless it missed, the damage of the caster
-                // AND the target := the target's HP / 2 (toward zero). The caster is the dying
-                // Bomber (HP 0 already, so it stays at 0), so only the target takes it here.
-      // The hit pass's damage roll leaves its result code and the mode only rewrites the
-      // damage, so a zero roll keeps code 1 ("no damage") and the HP / 2 number is shown with the no-damage digits.
-      DamageOut damage = element_damage(rng_, elem_in(0));
-      god_filter(target, damage);
-      const int half_hp = reduce(target_unit.hp / 2);
-      say(std::format("{} uses {} on {}: {} (half HP)", caster.name, nm, target_unit.name, half_hp));
-      damage_unit(actor, target, half_hp, 0);
-      code_override = damage.value == 0 && damage.code != 3 ? 1 : 0;
+    case 40: {  // Suicide Bomb (348), Toxic Burst (387): the mode 0 hit pass (status roll included); unless the target is immune, the
+                // result value of the target AND of the caster := the target's HP before the hit / 2 (toward zero). The roll keeps its
+                // result code, and the caster's entry takes the same code: a zero roll is code 1 ("no damage") and both still lose the
+                // HP / 2; a non-zero roll on an absorber (code 3) heals both. A dying caster (knocked out) takes nothing; a living one is
+                // left at 1 HP at least. An immune target is a miss for both.
+      const bool immune = (target_unit.hi & st::kHiImmune) != 0;
+      const int half_hp = target_unit.hp / 2;
+      const auto drain_before = drain_;
+      code_override = hit_pass(half_hp);
+      if (!immune && drain_ == drain_before) damage_unit(actor, actor, reduce(half_hp), code_override == 3 ? 3 : 0);
+      say(std::format("{} uses {} on {}: {} (half HP, code {})", caster.name, nm, target_unit.name, immune ? -1 : half_hp, code_override));
       break;
     }
     case 41:  // the caster's control word := script var 45 (nothing else); the Mode Change packs read it back with script op 0x9F
@@ -1676,10 +1704,11 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       break;
     }
     case 1:  // +0xE bit 0 clear: the status roll decides `landed`; set: the statuses are cured instead (the consumables, Purify) and
-             // `landed` stays true
+             // `landed` stays true. Code 0, or 2 (a miss) when nothing landed.
       say(std::format("{} casts {} on {} (status only)", caster.name, nm, target_unit.name));
       if (element.rd16(0xE) & 1) cure();
       else landed = apply_status(target, element);
+      code_override = landed ? 0 : 2;
       break;
     case 4: {
       if (!(target_unit.lo & st::kKO)) {
@@ -1901,6 +1930,7 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
     ~SealSwapScope() { swap = -1; }
   } const seal_scope{seal_swap_};
   seal_swap_ = seal_swap_colour(actor, element_id);
+  thaw_on_action(actor);
   drain_ = {-1, 0};
   ring_repainted_ = false;
   fizzled_ = false;
@@ -1976,12 +2006,12 @@ void Battle::step_after_pc_action(int actor, int steps, bool weapon, u32 exclude
   const int recovery_steps = weapon ? steps : 1;
   for (int i = 0; i < kPcSlots; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
-    if (i == actor || (excluded >> i & 1u) || !unit.alive()) continue;
+    if (i == actor || (excluded >> i & 1u) || !unit.in_turn_order()) continue;
     unit.stamina = cap_stamina(unit.stamina + recovery_step(unit.rate, 0, recovery_steps, (unit.lo & st::kFlu) != 0));
   }
   for (int i = kPcSlots; i < kUnits; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
-    if (unit.alive() && unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - steps);
+    if (unit.in_turn_order() && unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - steps);
   }
   lower_pc_countdowns(steps);
 }
@@ -1989,7 +2019,7 @@ void Battle::step_after_pc_action(int actor, int steps, bool weapon, u32 exclude
 void Battle::lower_pc_countdowns(int steps) {
   for (int i = 0; i < kPcSlots; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
-    if (unit.alive() && unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - steps);
+    if (unit.in_turn_order() && unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - steps);
   }
 }
 
@@ -2027,25 +2057,26 @@ void Battle::time_advance() {
   for (int i = kPcSlots; i < kUnits; ++i) {
     const Unit& unit = units_[static_cast<size_t>(i)];
     // Hidden (off-stage) units do not count.
-    if (unit.alive() && unit.countdown > 0 && unit.countdown != 0xFFFF && !brain_.hidden(i)) step = std::min(step, unit.countdown);
+    if (unit.in_turn_order() && unit.countdown > 0 && unit.countdown != 0xFFFF && !brain_.hidden(i)) step = std::min(step, unit.countdown);
   }
   for (int i = 0; i < kUnits; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
-    if (!unit.alive()) continue;
+    if (!unit.in_turn_order()) continue;
     if (unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - step);
     if (unit.pc) unit.stamina = cap_stamina(unit.stamina + step * (unit.rate));
   }
 }
 
 // ------------------------------------------------------------------------------------------------ scheduler
-// One scheduler pass: the nine units in turn from the one after the last that acted. A living unit at countdown 0 takes its turn, except a
-// PC that is neither confused nor owed a form change: its countdown becomes its AP and the scan goes on.
+// One scheduler pass: the nine units in turn from the one after the last that acted. A unit in the turn order (frozen ones included) at
+// countdown 0 takes its turn, except a PC that is neither confused, frozen nor owed a form change: its countdown becomes its AP and the scan
+// goes on.
 int Battle::next_ready_unit() {
   for (int k = 0; k < kUnits; ++k) {
     const int slot = (cursor_ + k) % kUnits;
     Unit& unit = units_[static_cast<size_t>(slot)];
-    if (!unit.alive() || unit.countdown != 0) continue;
-    if (is_pc_slot(slot) && !(unit.lo & st::kConfused) && !evo_pending_) {
+    if (!unit.in_turn_order() || unit.countdown != 0) continue;
+    if (is_pc_slot(slot) && !(unit.lo & (st::kConfused | st::kDefeated)) && !evo_pending_) {
       unit.countdown = unit.ap;
       continue;
     }
@@ -2084,6 +2115,7 @@ std::pair<int, int> Battle::exec_action(int ui, const EnemyAction& act) {
 
 void Battle::run_enemy_action(int ui, const EnemyAction& act) {
   Unit& unit = units_[static_cast<size_t>(ui)];
+  if (act.kind != EnemyAction::Kind::None) thaw_on_action(ui);
   const auto [poison_step, timer_steps] = exec_action(ui, act);
   end_scripted_action(ui, act);
   // The same countdown reset a script's op 67 type 4 does.
@@ -2116,6 +2148,7 @@ bool Battle::run_plan(int ui, const std::vector<EnemyAction>& plan, bool set_cou
   if (plan.empty()) say(std::format("{} waits", unit.name));
   for (size_t i = 0; i < plan.size(); ++i) {
     const EnemyAction& action = plan[i];
+    if (outcome_ == Outcome::Ongoing && action.kind != EnemyAction::Kind::None) thaw_on_action(ui);
     if (outcome_ != Outcome::Ongoing || !unit.alive()) break;
     if (i > 0 && (action.kind == EnemyAction::Kind::Element || plan[i - 1].kind == EnemyAction::Kind::Element)) begin_action();
     cur_script_seq_ = action.seq;

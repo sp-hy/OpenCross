@@ -222,6 +222,61 @@ void test_slot() {
 }
 
 // ext_save.dat: format, RDE's loader rules, SaveDat write / read.
+// The loader's checksum and version gates: an older block (0x102) is summed without the header frame and lacks the last steps, which
+// take their defaults; a block with one byte changed in the summed range is refused (corrupted) but still decodes for its preview.
+void restamp(Bytes& blk, u32 version) {
+  for (int k = 0; k < 4; ++k) blk[kVersionOffset + k] = static_cast<u8>(version >> (8 * k));
+  u32 sum = 0;
+  for (size_t i = version > 0x102 ? 0 : 0x180; i < kVersionOffset; ++i) sum += blk[i];
+  for (int k = 0; k < 4; ++k) blk[kChecksumOffset + k] = static_cast<u8>(sum >> (8 * k));
+}
+
+void test_version_gates() {
+  SaveSlot slot = synthetic_slot();
+  slot.chars[0].colour_bit = slot.chars[43].colour_bit = 3;
+  slot.frames = 0x3FF;
+  slot.unk_e1ec = 0x11;
+  slot.unk_e1f0 = 0x22;
+  const Bytes current = encode_block(slot);
+  CHECK(block_version(current) == kSaveVersion && !decode_block(current).corrupted);
+
+  Bytes old = current;
+  restamp(old, 0x102);
+  CHECK(block_checksum_ok(old));
+  const SaveSlot v102 = decode_block(old);
+  CHECK(!v102.corrupted);
+  CHECK(v102.frames == 0xFF && v102.chars[0].colour_bit == 8 && v102.chars[43].colour_bit == 8);
+  CHECK(v102.unk_e1ec == 0 && v102.unk_e1f0 == 0);
+  CHECK(v102.unk_e1e0 == slot.unk_e1e0 && v102.unk_e1e4 == slot.unk_e1e4 && v102.chars[9].rec_a8 == slot.chars[9].rec_a8);
+  CHECK(v102.chars[12].grid == slot.chars[12].grid && v102.items[300].id == slot.items[300].id);
+  Bytes old_header = old;
+  old_header[0x10] ^= 0x40;
+  CHECK(block_checksum_ok(old_header));
+
+  Bytes v100 = current;
+  restamp(v100, 0x100);
+  const SaveSlot first = decode_block(v100);
+  CHECK(!first.corrupted && first.unk_e1e0 == 0 && first.unk_e1e4 == 0 && first.chars[9].rec_a8 == 0 && first.frames == 0xFF);
+  Bytes v105 = current;
+  restamp(v105, 0x105);
+  const SaveSlot fifth = decode_block(v105);
+  CHECK(fifth.frames == 0x3FF && fifth.chars[0].colour_bit == 3 && fifth.unk_e1ec == 0 && fifth.unk_e1f0 == 0);
+
+  Bytes summed_without_header = current;
+  restamp(summed_without_header, 0x102);
+  for (int k = 0; k < 4; ++k) summed_without_header[kVersionOffset + k] = static_cast<u8>(kSaveVersion >> (8 * k));
+  CHECK(!block_checksum_ok(summed_without_header));
+
+  Bytes flipped = current;
+  flipped[0x1000] ^= 0x01;
+  CHECK(!block_checksum_ok(flipped));
+  const SaveSlot refused = decode_block(flipped);
+  CHECK(refused.corrupted && refused.head == slot.head && refused.party() == slot.party());
+  Bytes head_flipped = current;
+  head_flipped[0x10] ^= 0x40;
+  CHECK(decode_block(head_flipped).corrupted);
+}
+
 void test_ext() {
   ExtFile ext;
   CHECK(ext.bytes().size() == kExtSize && std::memcmp(ext.bytes().data(), "EXT", 4) == 0 && ext.bytes()[4] == 0x04 && ext.bytes()[5] == 0x01);
@@ -428,6 +483,7 @@ int main() try {
   test_zip();
   test_memcard();
   test_slot();
+  test_version_gates();
   test_ext();
   if (failures) {
     std::printf("%d failure(s)\n", failures);

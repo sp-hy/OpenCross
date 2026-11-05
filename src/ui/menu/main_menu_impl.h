@@ -69,6 +69,8 @@ struct SavePrev {
   int block = 0;
   u32 scenario = 0;
   u8 flags = 0;
+  // The block failed the checksum: it previews, but a load shows the corrupted message.
+  bool corrupted = false;
   // The leader's name in that game.
   std::u32string leader;
 };
@@ -170,8 +172,8 @@ struct MainMenu::Impl {
   int pad_state = 0, pad_cur = 0;
   bool pad_l2 = false, pad_r2 = false;
   // save_cur: save grid cursor, slot - 1 (slots 1..14); top_cur: Save / Load choice (0 save, 1 load);
-  // save_phase: 0 = Save / Load choice, 1 = slot grid / page list, 2 = save choice, 3 = "No save data" message (since frame
-  // card_msg_start); save_card: the choice (0 = the OpenCross page, 1 = Slot 1, 2 = Slot 2); load_mode: the grid is the Load tab;
+  // save_phase: 0 = Save / Load choice, 1 = slot grid / page list, 2 = save choice, 3 = "No save data" message, or with
+  // card_msg_corrupt the "Save data in Slot n is corrupted." message (since frame card_msg_start); save_card: the choice (0 = the OpenCross page, 1 = Slot 1, 2 = Slot 2); load_mode: the grid is the Load tab;
   // load_cur: load grid cursor, slot 0..14 (0 = the auto-save); page_cur / page_top: the page's cursor row (= file number, 0 = its
   // auto-save) and first visible row.
   int save_cur = 0;
@@ -185,6 +187,7 @@ struct MainMenu::Impl {
   };
   std::array<PageMemory, 2> page_memory{};
   int card_msg_start = 0;
+  bool card_msg_corrupt = false;
   bool load_mode = false;
   // Opened by open_save_list: the save choice is the first screen and its Cancel closes the menu.
   bool save_only = false;
@@ -456,7 +459,7 @@ struct MainMenu::Impl {
   static constexpr u32 kCap = 0xFFD8D8E8u;
 
   // Defined in main_menu_equip.cpp.
-  void CapR(u32 flags, float right_x, float y, std::string_view key, const char* fallback, float key_dx, float key_dy, float maxw);
+  void CapL(u32 flags, float left_x, float y, std::string_view key, const char* fallback, float key_dx, float key_dy, float maxw);
 
   // Defined in main_menu_draw.cpp.
   void notch_caption(float frame_x, float frame_y, int kind);

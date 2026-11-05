@@ -409,6 +409,9 @@ void FieldWorld::use_key_item(int item) {
   menu_state_ = MenuState::Requested;
   log::info("field: key item {} used -> menu kind {} arg {}", item,static_cast<int>(menu_req_.kind), menu_req_.arg);
 }
+void FieldWorld::refuse_key_item(int item) {
+  if (item >= 1 && item <= 64) vm_.set_var(0x2A, 0x400 + item);
+}
 s32 FieldWorld::money() { return static_cast<s32>(gs_->gold()); }
 void FieldWorld::set_money(s32 amount) { gs_->set_gold(static_cast<u32>(std::clamp(amount, 0, 9999999))); }
 
@@ -628,9 +631,9 @@ void FieldWorld::capture_state() {
   // Head 0x40 mirrors SCENARIO_FLAG.
   sl.set_progression(static_cast<u16>(vm_.var(0)));
   if (custom_names_ && !party_chars_.empty()) {
-    auto it = custom_names_->find(party_chars_[0]);
-    if (it != custom_names_->end() && !it->second.empty()) {
-      const auto nm = sjis_preview_name(it->second);
+    const std::u32string leader = data::own_name(party_chars_[0], {custom_names_, &dialogue_.tables(), lang_}, false);
+    if (!leader.empty()) {
+      const auto nm = sjis_preview_name(leader);
       std::copy(nm.begin(), nm.end(), sl.head.begin() + save::head::kLeaderName);
     }
   }

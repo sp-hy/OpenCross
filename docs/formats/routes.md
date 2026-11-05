@@ -162,7 +162,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `ngplus` | Open the New Game+ list over the current game. |
 | `menu` | Open the main menu. |
 | `disc <n>` | Disc-change screen (`n` = disc - 1). |
-| `movie <n> [flags]` | Play movie row `n` from the disc in use, skippable, as a `D4` with the second operand `flags` (default 0: the last frame is held; with flag 8 it fades out, `movies.md` section 6). |
+| `movie <n> [flags]` | Play movie row `n` from the disc in use as a `D4` with the second operand `flags` (default 0: the last frame is held; with flag 8 it fades out, `movies.md` section 6). |
 | `trading <row>` | Open the trading post at `row`, then the main menu. |
 | `elementshop <row>` | Open the element shop at `row`. |
 | `slotdump` | Write the current game as one 0x2000-byte save block (section 7). |
@@ -215,10 +215,11 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `movie playing\|idle` | A movie is / is not playing. |
 | `guide <0\|1\|2>` | The user guide page equals the value. |
 | `pause open\|closed` | The pause screen is up / not up. |
-| `name <char> <text>` | The typed name of the character (UTF-8; one word, since arguments split on spaces). |
+| `name <char> <text>` | The typed name of the character (UTF-8; one word, since arguments split on spaces); `-` = no typed name. |
 | `party <id,id,id>` | The party ids in slot order (`-` = empty slot), e.g. `0,1,22`. |
 | `disc <n>` | The disc in use. |
 | `location <id>` | The saved location word of the state. |
+| `option <hexmask> set\|clear` | All mask bits of the settings options word are set / not all set. |
 | `hp <char> <min> <max>` | Current HP in the range. |
 | `status <char> <hexmask> set\|clear` | All mask bits are set / not all set. |
 | `near <ent\|player> <x> <z> <tol>` | World position within `tol` of the point. |

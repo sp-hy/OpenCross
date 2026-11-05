@@ -13,3 +13,5 @@ fx_fnoise_frame = 0x801C7BF0;  # function: Frame: show, draw bracket, hide
 fx_fnoise_frost_colour = 0x801C7EA0;  # function: Per-vertex frost colour by distance from the centre (0x64 inside R/2, 0x40 inside R)
 fx_fnoise_draw_a = 0x801C7F50;  # function: Draw for the effect
 fx_fnoise_draw_b = 0x801C7FEC;  # function: Second draw for the effect
+fx_fnoise_shard_quad = 0x801C67A0;  # function: Draws one shard quad, OT index from the mean depth of its four corners
+fx_fnoise_frost_quad = 0x801C8E1C;  # function: Frost-stage model quad builder, OT index from the depth of corners 1..3 (or the minimum with part flag 0x10)

@@ -80,8 +80,9 @@ class SlotList {
   // Which face folder face_files_ lists: 0 none, 1 = face/2021 (HD), 2 = face/1999 (original art).
   mutable int faces_listed_ = 0;
   mutable std::unique_ptr<import::LangTables> tables_;
-  // Card: OpenCross / Slot 1 / Slot 2 choice; NoData: "No save data in ..." (confirm or 2 s back to the choice); Files: the list.
-  enum class Phase { Card, NoData, Files };
+  // Card: OpenCross / Slot 1 / Slot 2 choice; NoData: "No save data in ..."; Corrupt: "Save data in Slot n is corrupted." (both
+  // confirm or 2 s back to the choice); Files: the list.
+  enum class Phase { Card, NoData, Corrupt, Files };
   Phase phase_ = Phase::Card;
   // card_: 0 = the OpenCross page, 1 = Slot 1, 2 = Slot 2; entries_: the files of a card once chosen; rows_: the page by number.
   // sel_: grid box, or page row (= file number); top_: the page's first visible row.

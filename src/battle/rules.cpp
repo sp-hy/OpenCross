@@ -132,7 +132,8 @@ DamageOut weapon_damage(Rng& rng, const WeaponIn& in) {
 }
 
 // Raw damage per `source` (see ElementIn), then the colour multiplier, the variance roll rnd(0,5) percent (50 on a
-// weakness exploit), the target's MDef% / shield / innate-absorb steps, and the opposite-colour and gear steps.
+// weakness exploit), the target's MDef% / shield / innate-absorb steps, and the opposite-colour and gear steps. A zero result is
+// code 1 ("no damage") even on an absorber; only a non-zero one is absorbed (code 3).
 DamageOut element_damage(Rng& rng, const ElementIn& in) {
   DamageOut out;
   const int elem_colour = in.elem_colour;
@@ -178,7 +179,7 @@ DamageOut element_damage(Rng& rng, const ElementIn& in) {
   if (in.target_immune) {
     out.value = -1;
     out.code = 2;
-  } else if (in.target_absorb) {
+  } else if (in.target_absorb && dmg != 0) {
     out.code = 3;
   }
   return out;

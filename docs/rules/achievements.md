@@ -6,7 +6,7 @@ No achievement reads a story flag. Each is one of the rule kinds below, keyed by
 
 Nothing is earned unless `[Game] Steam` is on. A session in which the debug tools were used earns nothing. Cheats do not block achievements, as RDE's own boosts do not. The ways the engine differs from RDE here are listed in `docs/architecture.md` section 13.
 
-The 38th Steam achievement, `ach_ps41_all`, is the meta one: it is not evaluated by the rules below. `platform::SteamClient` unlocks it, once, right after an unlock it made leaves all 37 names achieved on Steam (the others may have been earned in earlier sessions). It follows the same gates as the 37: nothing is queued in a session where the debug tools were used.
+The 38th Steam achievement, `ach_ps41_all`, is the meta one: it is not evaluated by the rules below. `platform::SteamClient` unlocks it, once, right after an unlock it made leaves all 37 names achieved on Steam (the others may have been earned in earlier sessions). It follows the same gates as the 37: nothing is queued in a session where the debug tools were used. RDE decides the same way: the check runs only inside a new unlock, never on its own, so a player who had all 37 before the session gets the meta only if it was missing and a further unlock happens, which cannot occur; with the meta already stored nothing is set again. `tests/test_steam.cpp` runs `SteamClient` against a stand-in for Steam's user stats calls (`platform::SteamBackend`) and covers these cases: meta stored with the 37th, not with the 36th, not when the 37 were all achieved before, once only, nothing before Steam has delivered the stats.
 
 ## 1. Sampling
 

@@ -122,6 +122,13 @@ void RdeHotkeys::poll(const HotkeyLevels& in, bool speed_locked, Toggles& toggle
   l3_ = in.l3, r3_ = in.r3;
 }
 
+bool MenuChord::poll(bool lt, bool l3) {
+  const bool pulse = lt && l3 && (!lt_ || !l3_);
+  const bool toggle = pulse_ && !pulse;
+  lt_ = lt, l3_ = l3, pulse_ = pulse;
+  return toggle;
+}
+
 float speed_factor(bool fast, bool slow, int fast_rate, int slow_percent, bool in_battle, bool speed_locked) {
   if (speed_locked) return 1.0f;
   if (fast) return fast_rate <= 0 ? (in_battle ? 2.0f : 4.0f) : static_cast<float>(fast_rate);

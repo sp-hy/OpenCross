@@ -791,6 +791,55 @@ void test_enemy_element_value_shift() {
   CHECK_EQ(cast(0, 182, 0x01, 0).loss, cast(0, 149, 0x01, 0).loss);
 }
 
+void test_element_mode40_half_hp() {
+  // Mode 40 (Toxic Burst): the hit pass's status roll lands, then the target and the caster each lose the target's HP / 2. A zero roll keeps
+  // code 1 even on an absorber; a non-zero roll on an absorber heals both by the half; an immune target is a miss and nothing reaches the
+  // caster.
+  struct Out {
+    int target_hp = 0, caster_hp = 0, code = -1;
+    u32 lo = 0;
+  };
+  const auto cast = [](int power, u32 target_hi, int caster_hp, bool caster_ko) {
+    Fixture fixture;
+    fixture.tables.elements.resize(5);
+    data::ElemRec& burst = fixture.tables.elements[4];
+    burst.raw[0] = 1, burst.raw[4] = 0x80, burst.raw[5] = 0x04, burst.raw[7] = 40, burst.raw[8] = static_cast<u8>(power), burst.raw[0xA] = 100;
+    burst.raw[0x18] = static_cast<u8>(st::kPoison);
+    Battle& battle = fixture.battle;
+    Unit& pc = battle.unit_mut(1);
+    pc.max_hp = 900, pc.hp = 601;
+    pc.hi |= target_hi;
+    Unit& enemy = battle.unit_mut(3);
+    enemy.hp = caster_hp;
+    if (caster_ko) enemy.lo |= st::kKO;
+    battle.do_element(3, 4, 0, 1);
+    Out out;
+    out.target_hp = battle.unit(1).hp, out.caster_hp = battle.unit(3).hp, out.lo = battle.unit(1).lo;
+    if (!battle.events().empty()) out.code = battle.events().back().code;
+    return out;
+  };
+  const Out plain = cast(0, 0, 2000, false);
+  CHECK_EQ(plain.target_hp, 301);
+  CHECK((plain.lo & st::kPoison) != 0);
+  CHECK_EQ(plain.caster_hp, 1700);
+  CHECK_EQ(plain.code, 1);
+  const Out absorbed_zero = cast(0, st::kHiAbsorb, 2000, false);
+  CHECK_EQ(absorbed_zero.target_hp, 301);
+  CHECK_EQ(absorbed_zero.code, 1);
+  const Out absorbed = cast(20, st::kHiAbsorb, 1500, false);
+  CHECK_EQ(absorbed.target_hp, 900);
+  CHECK_EQ(absorbed.code, 3);
+  CHECK_EQ(absorbed.caster_hp, 1800);
+  CHECK_EQ(cast(20, 0, 2000, false).target_hp, 301);
+  const Out immune = cast(0, st::kHiImmune, 2000, false);
+  CHECK_EQ(immune.target_hp, 601);
+  CHECK((immune.lo & st::kPoison) == 0);
+  CHECK_EQ(immune.caster_hp, 2000);
+  CHECK_EQ(immune.code, 2);
+  CHECK_EQ(cast(0, 0, 64, false).caster_hp, 1);
+  CHECK_EQ(cast(0, 0, 0, true).caster_hp, 0);
+}
+
 void test_ko_drops_pc_statuses() {
   // A hit that knocks a PC out keeps only its permanent statuses and the inflicted lo 0x400480 / hi 0x1FE00000, drops the other timers and
   // leaves the stat modifiers; an enemy keeps everything.
@@ -1069,6 +1118,103 @@ void test_status_message() {
     fixture.battle.do_element(3, 4, 0, 0);
     if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, -1);
   }
+}
+
+void test_status_mode_codes() {
+  // Mode 1: code 2 when the status roll fails, else 0. Mode 36 writes no code of its own: the target shows the code its last action left
+  // (a caster's own slot reads 0xFF), and only a failed gate clears the landed flag (no record +0x13 row).
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  fixture.tables.elements.resize(6);
+  data::ElemRec& sleep = fixture.tables.elements[4];
+  sleep = data::ElemRec{};
+  sleep.raw[6] = 1, sleep.raw[7] = 1, sleep.raw[0xA] = 30, sleep.raw[0x19] = 0x40;
+  data::ElemRec& heart = fixture.tables.elements[5];
+  heart = data::ElemRec{};
+  heart.raw[6] = 1, heart.raw[7] = 36, heart.raw[0xA] = 80, heart.raw[0x13] = 9;
+  const auto last = [&]() { return battle.events().empty() ? ActionEvent{} : battle.events().back(); };
+  fixture.rng.push(99);
+  battle.do_element(3, 4, 0, 0);
+  CHECK_EQ(last().code, 2);
+  CHECK_EQ(battle.unit(0).result_code, 2);
+  CHECK_EQ(battle.unit(3).result_code, 0xFF);
+  fixture.rng.push(1);
+  battle.do_element(3, 4, 0, 1);
+  CHECK_EQ(last().code, 0);
+  CHECK((battle.unit(1).lo & st::kAsleep) != 0);
+  fixture.rng.push(0);
+  battle.do_element(3, 5, 0, 0);
+  CHECK_EQ(last().code, 2);
+  CHECK_EQ(last().sys_msg, 9);
+  fixture.rng.push(99);
+  battle.do_element(3, 5, 0, 2);
+  CHECK_EQ(last().code, 0);
+  CHECK_EQ(last().sys_msg, -1);
+  fixture.rng.push(0);
+  battle.do_element(3, 5, 0, 3);
+  CHECK_EQ(last().code, 0xFF);
+}
+
+struct AttackBrain final : EnemyBrain {
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.target = 0;
+    return action;
+  }
+};
+
+void test_frozen_turns() {
+  // Frozen landing adds 3 to the countdown; the frozen unit stays out of alive() but its countdown runs, and at 0 an enemy takes its turn:
+  // its first action ends the freeze. A frozen PC at 0 gets its script turn instead of the countdown reset.
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  data::ElemRec& ice = tables.elements[4];
+  ice = data::ElemRec{};
+  ice.raw[6] = 1, ice.raw[7] = 1, ice.raw[0xA] = 100, ice.raw[0x1B] = 0x20;
+  // Two enemies, so the frozen one alone does not end the fight.
+  tables.scenes[0].raw[3] = 2;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  AttackBrain brain;
+  Battle battle{tables, rng, brain};
+  for (int k = 0; k < 2; ++k) {
+    rng.push(0);
+    rng.push(100);
+  }
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  // The PS1 capture: Ice Blast on an enemy at countdown 1 -> 3 after the cast's own step, then 2 and 0 after a weak and a medium hit.
+  battle.unit_mut(3).countdown = 1;
+  rng.push(1);
+  battle.do_element(0, 4, 0, 3);
+  const Unit& enemy = battle.unit(3);
+  CHECK((enemy.lo & st::kDefeated) != 0);
+  CHECK(enemy.freeze_pending);
+  CHECK_EQ(enemy.countdown, 4);
+  CHECK(!enemy.alive() && enemy.in_turn_order());
+  battle.step_after_pc_action(0, 1, false);
+  CHECK_EQ(enemy.countdown, 3);
+  battle.step_after_pc_action(0, 1, true);
+  CHECK_EQ(enemy.countdown, 2);
+  battle.step_after_pc_action(0, 2, true);
+  CHECK_EQ(enemy.countdown, 0);
+  CHECK((enemy.lo & st::kDefeated) != 0);
+  const size_t events0 = battle.events().size();
+  battle.settle();
+  CHECK((enemy.lo & st::kDefeated) == 0);
+  CHECK(!enemy.freeze_pending);
+  CHECK(battle.events().size() > events0);
+  if (battle.events().size() > events0) {
+    CHECK_EQ(battle.events()[events0].actor, 3);
+    CHECK(battle.events()[events0].kind == ActionEvent::Kind::Weapon);
+  }
+  rng.push(1);
+  battle.do_element(3, 4, 0, 1);
+  CHECK((battle.unit(1).lo & st::kDefeated) != 0);
+  battle.unit_mut(1).countdown = 0;
+  battle.unit_mut(3).countdown = 50;
+  battle.unit_mut(4).countdown = 50;
+  battle.settle();
+  CHECK_EQ(battle.unit(1).countdown, battle.unit(1).ap);
+  CHECK((battle.unit(1).lo & st::kDefeated) != 0);
 }
 
 void test_field_ring_writes() {
@@ -2722,6 +2868,8 @@ void test_pip_evolution() {
   CHECK_EQ(brain.vm()->var(0xA0), 0x81);
   // No command menu while the form change is pending.
   CHECK(!battle.can_act(0) && !battle.can_act(1));
+  // Spent cells before the change: the rewritten tech cells become usable again, the others stay spent.
+  for (int cell : {0, 27, 47, 67}) battle.unit_mut(0).used[static_cast<size_t>(cell)] = true;
   battle.settle();
   CHECK_EQ(battle.evo_pending(), 0);
   CHECK_EQ(battle.unit(0).kind, 0x2D);
@@ -2732,8 +2880,19 @@ void test_pip_evolution() {
   CHECK_EQ(battle.unit(0).cells[47], 0xC124);
   // The third tech only for a second form.
   CHECK_EQ(battle.unit(0).cells[67], 0xC121);
+  CHECK(!battle.unit(0).used[27] && !battle.unit(0).used[47]);
+  CHECK(battle.unit(0).used[67] && battle.unit(0).used[0]);
   CHECK(battle.party()[0].evolved && battle.party()[0].kind == 0x2D && battle.party()[0].growth_col == 3);
   CHECK_EQ(battle.element_colour(0x123), 0x04);
+  // A second form rewrites the third cell too; an empty tech cell stays empty and keeps its used bit.
+  battle.unit_mut(0).used[67] = true;
+  battle.unit_mut(0).cells[47] = 0;
+  battle.unit_mut(0).used[47] = true;
+  battle.evolve(0, 0x2E);
+  CHECK_EQ(battle.unit(0).cells[67], 0xC127);
+  CHECK(!battle.unit(0).used[67]);
+  CHECK_EQ(battle.unit(0).cells[47], 0);
+  CHECK(battle.unit(0).used[47]);
 }
 
 // The PC entities' idle loops as the scenes have them: every PC entity writes its own unit into one shared global (v9C) each tick, and
@@ -4414,6 +4573,7 @@ int main() {
   test_action_events();
   test_status_and_poison();
   test_enemy_element_value_shift();
+  test_element_mode40_half_hp();
   test_ko_drops_pc_statuses();
   test_poison_ko();
   test_revive_resets_stamina_and_countdown();
@@ -4422,6 +4582,8 @@ int main() {
   test_purify_cures();
   test_turn_colour_status();
   test_status_message();
+  test_status_mode_codes();
+  test_frozen_turns();
   test_field_ring_writes();
   test_queued_cast_targets();
   test_trap_hud();

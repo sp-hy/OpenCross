@@ -6,6 +6,7 @@
 // line). Battle text goes through btext(), which picks the font slot, multiplier and shrink rule of a PS1 text style.
 #include "game/battle/battle_view.h"
 #include "game/battle/battle_view_util.h"
+#include "game/battle/hud_rules.h"
 #include "game/battle/status_plates.h"
 
 #include <SDL3/SDL_gamepad.h>
@@ -437,8 +438,7 @@ void battle_waku_prepare(render::DecodedImage& img, bool frame) {
 //    colour;
 //  * stamina: the "Sta." label and tens / "." / units digits at x + 42 / 47 / 52 (a hundreds digit at x + 30 shifts them 5 right), style 5;
 //    negative stamina shows "Out.-" and the magnitude in style 0x82 (red). The text row sits at y + 37 (JP) / y + 37.8 so it does not cut into
-//    the bar: a black 52 x 4 frame at (x + 8, y + 35) with a 50 x 2 track, fill = stamina * 100 / 140 px (stamina capped at 70), red below
-//    1.0, yellow to 3.9, cyan from 4.0;
+//    the bar: a black 52 x 4 frame at (x + 8, y + 35) with a black 50 x 2 track and the fill of bhud::stamina_fill;
 //  * grid: one 5 x 3 cell sprite per occupied unlocked cell at (x + 18 + 4 level, y + 6 + 2 slot): the gauge level blinks between the two
 //    cell sprites, levels below it take the first, above it the second;
 //  * status icons: one 6 x 5 icon per status group the unit's status word meets, packed left to right from (x + 6, y - 8).
@@ -478,12 +478,12 @@ void BattleView::build_party_panels() {
 
     const bool out = unit.stamina < 0;
     const int stamina = std::min(std::abs(unit.stamina), 999);
-    const int bar = std::min(out ? 0 : unit.stamina, 70);
     const float bar_x = (px + 8) * kPs1Px, bar_y = (py + 35) * kRowScale;
     add_rect(bar_x, bar_y, 52 * kPs1Px, 4 * kRowScale, col(0, 0, 0));
-    add_rect(bar_x + kPs1Px, bar_y + kRowScale, 50 * kPs1Px, 2 * kRowScale, col(0, 0, 40));
-    const u32 bar_colour = bar / 10 == 0 ? col(255, 0, 0) : bar / 10 < 4 ? col(255, 255, 0) : col(0, 255, 255);
-    if (bar > 0) add_rect(bar_x + kPs1Px, bar_y + kRowScale, static_cast<float>(bar * 100 / 140) * kPs1Px, 2 * kRowScale, bar_colour);
+    add_rect(bar_x + kPs1Px, bar_y + kRowScale, 50 * kPs1Px, 2 * kRowScale, col(0, 0, 0));
+    const bhud::StaminaFill fill = bhud::stamina_fill(unit.stamina);
+    const u32 bar_colour = fill.colour == bhud::BarColour::Red ? col(255, 0, 0) : fill.colour == bhud::BarColour::Yellow ? col(255, 255, 0) : col(0, 255, 255);
+    add_rect(bar_x + kPs1Px, bar_y + kRowScale, static_cast<float>(fill.width) * kPs1Px, 2 * kRowScale, bar_colour);
     const float text_y = jp ? py + 37 : py + 37.8f;
     btext(out ? (jp ? 0x10082 : 0x82) : (jp ? 0x10005 : 5), out ? kOutLabel[lang] : kStaLabel[lang], out ? px + 22 : px + 26, text_y, 0x8A8A8A);
     const int digit_style = out ? 0x82 : 5;
@@ -577,7 +577,7 @@ BattleView::Tgt BattleView::target_mode(int cell) const {
 std::vector<int> BattleView::target_candidates() const {
   std::vector<int> out;
   // The ring: the units of the element's sides (Attack: the enemies), living ones, or only the knocked-out ones for bit 0x01; bit 0x04 pins the
-  // cursor to the caster. Walked left to right on screen (the retail ring is sorted by view angle).
+  // cursor to the caster. Kept left to right on screen; the cursor walks it by bhud::target_step.
   battle::TargetSpec ts;
   if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
     const int id = battle_->cell_element(pending_cmd_.actor, pending_cmd_.cell);
@@ -603,7 +603,22 @@ std::vector<int> BattleView::target_candidates() const {
   return out;
 }
 
-// Where the cursor starts, by unit id (the ring itself is walked in screen order afterwards); the first id of the order on the ring wins.
+// The ring index the cursor moves to for a left (-1) / right (+1) press, under the current camera mode.
+int BattleView::target_step(int dir) const {
+  if (targets_.empty()) return 0;
+  const size_t cursor = static_cast<size_t>(std::clamp(target_cursor_, 0, static_cast<int>(targets_.size()) - 1));
+  std::vector<bhud::RingUnit> ring;
+  for (const int unit : targets_) {
+    const Visual& visual = vis_[static_cast<size_t>(unit)];
+    const float view_x = cam_.right[0] * (visual.x - cam_.eye[0]) - cam_.right[1] * cam_.eye[1] + cam_.right[2] * (visual.z - cam_.eye[2]);
+    ring.push_back({unit, view_x, visual.home_x, visual.home_z});
+  }
+  std::sort(ring.begin(), ring.end(), [](const bhud::RingUnit& lhs, const bhud::RingUnit& rhs) { return lhs.unit < rhs.unit; });
+  const int unit = bhud::target_step(ring, targets_[cursor], dir, cam_dynamic_);
+  return static_cast<int>(std::find(targets_.begin(), targets_.end(), unit) - targets_.begin());
+}
+
+// Where the cursor starts, by unit id (target_step moves it afterwards); the first id of the order on the ring wins.
 int BattleView::target_start(const std::vector<int>& targets) const {
   battle::TargetSpec ts;
   if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
@@ -1116,9 +1131,12 @@ void BattleView::handle_input(const platform::Input& in) {
     case Ui::Target:
       if (tgt_mode_ == Tgt::Enemy || tgt_mode_ == Tgt::Ally) {
         const int before = target_cursor_;
-        step(target_cursor_, static_cast<int>(targets_.size()), vdir + hdir);
+        target_cursor_ = target_step(hdir);
         // The target cursor tick.
-        if (target_cursor_ != before) audio_.play_menu(1);
+        if (target_cursor_ != before) {
+          audio_.play_menu(1);
+          log::debug("battle: target cursor unit {}", targets_[static_cast<size_t>(target_cursor_)]);
+        }
       }
       // Triangle in the attack / element target selection flips the camera mode (NORMAL <-> DYNAMIC), ends the running camera shot and plays
       // SFX 0x16; the menu camera glides to the new mode's shot.

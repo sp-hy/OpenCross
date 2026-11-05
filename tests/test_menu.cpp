@@ -304,6 +304,8 @@ void test_equip() {
     fixture.tables.item_info[static_cast<size_t>(id)].equip_lo = mask_lo;
   };
   item(1, 4, 0xFFFF);
+  // Item 2 is a material no character can wear.
+  item(2, 4, 0);
   // Item 32 is a weapon for character 0, item 33 one for character 1 only.
   item(32, 0, 0x1);
   item(33, 0, 0x2);
@@ -321,13 +323,22 @@ void test_equip() {
   fixture.tables.gear[195].raw[10] = 0x01;
   fixture.tables.gear[196].raw[8] = 0x40;
   fixture.tables.gear[196].raw[4] = 3;
-  for (int id : {1, 32, 33, 150, 194, 195, 196}) game_state.add_item(id);
+  for (int id : {1, 32, 33, 150, 2, 194, 195, 196}) game_state.add_item(id);
 
   auto cands = game_state.equip_candidates(0, 0);
-  // The material and the armour are never candidates; character 0 cannot use item 33; armour does not fit the weapon slot.
-  CHECK(cands.size() == 2);
+  // The materials and the armour are never weapon candidates; character 0 cannot use item 33; the list ends with the reserved row.
+  CHECK(cands.size() == 3);
   CHECK(cands[0].item == 32 && cands[0].ok);
   CHECK(cands[1].item == 33 && !cands[1].ok);
+  CHECK(cands[2].stock_slot == -1 && cands[2].item == 0 && !cands[2].ok);
+  // An accessory list opens with the reserved row (not selectable on an empty slot), then the accessories, then every material, each
+  // in bag order; a material is selectable only through its equippable-by mask.
+  cands = game_state.equip_candidates(0, 2);
+  CHECK(cands.size() == 6);
+  CHECK(cands[0].stock_slot == -1 && cands[0].item == 0 && !cands[0].ok);
+  CHECK(cands[1].item == 194 && cands[2].item == 195 && cands[3].item == 196);
+  CHECK(cands[4].item == 1 && cands[4].ok && cands[5].item == 2 && !cands[5].ok);
+  CHECK(!game_state.can_equip(0, 2, 2));
   CHECK(!game_state.can_equip(0, 0, 33));
   CHECK(!game_state.can_equip(0, 0, 150));
 
@@ -347,13 +358,21 @@ void test_equip() {
   CHECK(saw195 && !ok195);
   CHECK(!game_state.can_equip(0, 3, 195));
   CHECK(game_state.can_equip(0, 3, 196));
-  // The remove row exists only for a filled accessory slot, never for weapon / armour.
-  CHECK(game_state.equip_candidates(0, 2).front().stock_slot == -1);
-  CHECK(game_state.equip_candidates(0, 4).front().stock_slot != -1);
-  CHECK(game_state.equip_candidates(0, 0).front().stock_slot != -1);
+  // The reserved row leads every accessory list and is selectable only on a filled slot; weapon / armour lists end with it.
+  CHECK(game_state.equip_candidates(0, 2).front().stock_slot == -1 && game_state.equip_candidates(0, 2).front().ok);
+  CHECK(game_state.equip_candidates(0, 4).front().stock_slot == -1 && !game_state.equip_candidates(0, 4).front().ok);
+  CHECK(game_state.equip_candidates(0, 0).front().stock_slot != -1 && game_state.equip_candidates(0, 1).back().stock_slot == -1);
   CHECK(!game_state.can_equip(0, 0, 0) && !game_state.can_equip(0, 1, 0));
   game_state.unequip_accessories(0);
   CHECK(game_state.equipped(0, 2) == 0 && game_state.item_count(194) == 1);
+  // A candidate overlapping the accessory it replaces skips the conflict test, even when another worn accessory shares its mask.
+  item(198, 2, 0x3);
+  fixture.tables.gear[198].raw[10] = 0x01;
+  game_state.add_item(198);
+  game_state.slot.chars[0].accessory = {194, 195, 0};
+  CHECK(game_state.can_equip(0, 2, 198) && !game_state.can_equip(0, 4, 198));
+  game_state.slot.chars[0].accessory = {0, 0, 0};
+  game_state.take_item(198);
   // Stamina recovery (status screen "STAMINA RECOVERY"): record +1F plus the MAG byte of stamina accessories.
   fixture.tables.char_sets["char"].rec[0].raw[0x1F] = 10;
   CHECK(game_state.stamina_recovery(0) == 10);

@@ -47,9 +47,11 @@ class KeyItemPopup {
   // `owned` in any order; the list packs them in the field's display order from slot 0 on, the remaining slots stay empty.
   void open_list(std::vector<ListEntry> owned);
   // One frame of list input (edges). dx / dy: -1, 0, 1. Returns the sound effect id to play (0 none, 1 cursor, 6 cancel,
-  // 8 use, 0x18 refused). A confirmed usable item closes the list and is returned once by take_used().
+  // 8 use, 0x18 refused). A confirmed usable item closes the list and is returned once by take_used(); a confirmed disabled
+  // entry keeps the list open and is returned once by take_refused().
   int list_input(int dx, int dy, bool confirm, bool cancel);
   int take_used();
+  int take_refused();
   bool list_mode() const;
   // Item under the hand (0 = empty slot).
   int selected_id() const;

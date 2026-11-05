@@ -165,7 +165,14 @@ struct Unit {
   int kind = 0;
   // A battle script wrote the HP to 0: the kill script still runs, but the unit never takes the KO of a resolved hit, so its model is not dead.
   bool hp_written_zero = false;
+  // Frozen (lo 0x20000000) landed with its timer: the unit's next action first clears lo 0x60000000 (Battle::thaw_on_action).
+  bool freeze_pending = false;
+  // The unit's result code slot (0 hit, 1 no damage, 2 miss, 3 heal; 0xFF = it was the last action's caster). It keeps its value between
+  // actions: a mode that writes no code (36) shows the one the unit's last action left.
+  int result_code = 0;
   bool alive() const { return present && !(lo & (st::kKO | st::kDefeated)); }
+  // In the turn order: a frozen unit is out of alive() but its countdown runs and it takes its turn at 0.
+  bool in_turn_order() const { return present && !(lo & st::kKO); }
   bool can_open_menu() const { return pc && alive() && stamina >= 10 && !(lo & st::kCannotMenuLo); }
 };
 
@@ -619,6 +626,8 @@ class Battle {
     event.ring = ring_;
     event.trap = {trap_state_ == 1 || trap_state_ == 3 || trap_state_ == 4, trap_[0], trap_[1]};
     event.trap_before = trap_before_;
+    if ((event.kind == ActionEvent::Kind::Weapon || event.kind == ActionEvent::Kind::Element) && event.target >= 0 && event.target < kUnits)
+      units_[static_cast<size_t>(event.target)].result_code = event.code;
     events_.push_back(event);
   }
   WeaponIn weapon_in(const Unit& attacker, const Unit& target_unit, int mult, int strength) const;
@@ -651,6 +660,8 @@ class Battle {
   // Per bit, no roll.
   bool force_status_bits(int target, u32 lo);
   void set_status_bit(int target, int set, int bit);
+  // The unit's action is about to run: a pending freeze ends (lo 0x60000000 and their timers cleared).
+  void thaw_on_action(int unit);
   void enemy_turn(int unit);
   // The queued death casts of killed units (slot 3), run by run_reactions.
   void run_death_plans();
@@ -662,7 +673,7 @@ class Battle {
   // A cast swapped to the forced miss: the colour 1..6 (green .. blue) the caster is sealed in when the element can be sealed (id 0x12D at
   // most, record byte 1 bit 0); 0 = none.
   int seal_swap_colour(int actor, int element_id) const;
-  // The three party countdowns run `steps` (living PCs, floor 0).
+  // The three party countdowns run `steps` (PCs in the turn order, floor 0).
   void lower_pc_countdowns(int steps);
   // The stamina an action costs the unit (none while hi kHiNoStaminaCost is set).
   int stamina_cost(const Unit& unit, int cost) const { return (unit.hi & st::kHiNoStaminaCost) ? 0 : cost; }

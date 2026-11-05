@@ -61,6 +61,14 @@ void FlowMachine::set_custom_name(int char_id, std::u32string name) {
   }
 }
 
+void FlowMachine::clear_custom_name(int char_id) {
+  custom_names_.erase(char_id);
+  if (char_id >= 0 && char_id < save::kNumChars) {
+    gs_.slot.chars[static_cast<size_t>(char_id)].name = default_records_[static_cast<size_t>(char_id)];
+    fill_default_names(gs_.slot);
+  }
+}
+
 // RDE's name entry validates the record, which it never updates: an empty record refuses every name, so no record may stay empty.
 void FlowMachine::fill_default_names(save::SaveSlot& slot) const {
   for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
@@ -155,9 +163,11 @@ std::u32string FlowMachine::saved_custom_name(const save::SaveSlot& data, const 
   // ext_save.dat names: what the player typed (the record only holds what the game font can show).
   if (const auto it = ext.find(char_id); it != ext.end() && usable_name(it->second, lang_)) return it->second;
   if (!codec_ || char_id < 0 || char_id >= save::kNumChars) return {};
+  const auto& record = data.chars[static_cast<size_t>(char_id)].name;
+  if (default_records_[static_cast<size_t>(char_id)][0] != 0 && record == default_records_[static_cast<size_t>(char_id)]) return {};
   // Records of characters that were never named hold the JP default (the RDE names live host-side): a name made only of blanks or
   // undecodable codes, or kana outside JP, is "unset" and the default sysmes name applies.
-  std::u32string name = ui::trim_blanks(codec_->unpack_record(data.chars[static_cast<size_t>(char_id)].name));
+  std::u32string name = ui::trim_blanks(codec_->unpack_record(record));
   return usable_name(name, lang_) ? name : std::u32string();
 }
 
@@ -329,6 +339,12 @@ void GameFlow::begin_rename(int char_id, bool guide) {
   name_.begin(setup);
 }
 
+// A confirmed name: the language's own name of the character erases the custom name, any other is stored.
+void GameFlow::store_name(int char_id, const std::u32string& name) {
+  if (data::is_default_name(char_id, name, {nullptr, &lang_tables_, lang_})) machine_.clear_custom_name(char_id);
+  else machine_.set_custom_name(char_id, name);
+}
+
 std::u32string GameFlow::display_name(int char_id) {
   const auto& cn = machine_.custom_names();
   if (auto it = cn.find(char_id); it != cn.end() && !it->second.empty()) return it->second;
@@ -492,7 +508,7 @@ FlowAction GameFlow::update(const platform::Input& in, float dt) {
     }
     name_.update(nav, dt);
     if (name_.done()) {
-      machine_.set_custom_name(rename_char_, name_.result());
+      store_name(rename_char_, name_.result());
       rename_active_ = false;
       rename_finished_ = true;
     }
@@ -561,7 +577,10 @@ FlowAction GameFlow::update(const platform::Input& in, float dt) {
         break;
       }
       name_.update(nav, dt);
-      if (name_.done()) action = machine_.on_name(name_.result());
+      if (name_.done()) {
+        action = machine_.on_name(name_.result());
+        if (action.load_room) store_name(0, name_.result());
+      }
       break;
     case FlowState::Opening:
     case FlowState::Field: break;

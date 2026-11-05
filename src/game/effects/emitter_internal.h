@@ -89,9 +89,13 @@ struct Object {
   bool model_loop = false;
   int owner = -1, death = -1, periodic = -1;
   Mat3 mat;
-  // Sprite type 17 (a light): the GTE light slot and the sprite record name.
+  // Sprite type 17 (a light): the GTE light slot and the sprite record name. `light_release`: the slot was hunted at the spawn
+  // (blend above 4) and is freed with the object; otherwise the slot is the op-05 operand and stays lit.
   s8 light_slot = -1;
+  bool light_release = false;
   const std::string* light_name = nullptr;
+  // A death child: the frame that spawned it does not step it.
+  bool skip_step = false;
   // Extended object block.
   u32 ext = 0;
   s32 uv_phase[2]{}, uv_rate[2]{}, uv_phase_prev[2]{};
@@ -187,7 +191,7 @@ struct EmitterSystem::Impl {
   static void build_matrix(Object& obj);
   static void integrate_step(Object& obj, int shift);
   static void integrate(Object& obj, int shift, int steps);
-  int fire(size_t hi, const Object* parent_obj);
+  int fire(size_t hi, const Basis* parent);
   void die(size_t idx, bool spawn_children);
 
   // -- header stepper

@@ -110,6 +110,9 @@ class BgChng : public Remap {};
 // stage pack and restarts the 'miya' sequence on the first five swaps. The swap goes through FxHooks::set_stage (bg number); the battle
 // host does not swap stages, and the sound / camera of the new pack are not played.
 class Miyademo : public Remap {
+ public:
+  bool holds_game_speed() const override { return true; }
+
  protected:
   void init() override {
     Rng rng;

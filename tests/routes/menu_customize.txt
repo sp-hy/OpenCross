@@ -1,0 +1,61 @@
+# Customize: every row takes the cursor; Left and Right both flip the row's bit; OK on a plain row changes nothing.
+# Rows 6 (Vibration, 0x400) and 7 (Left Stick, 0x800) behave the same with no pad and with a pad connected.
+0 wait 5
+- load alu_a03i 0
+- wait 90
+- set option 400 0
+- set option 800 0
+- request menu
+- wait menu open 300
+- wait 10
+- tap down
+- tap down
+- tap down
+- tap down
+- tap confirm                         # Customize
+- wait 60
+- pad off
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # row 6, no pad
+- tap right
+- assert option 400 set
+- tap right
+- assert option 400 clear
+- tap left
+- assert option 400 set
+- tap confirm
+- assert option 400 set
+- tap down                            # row 7, no pad
+- tap left
+- assert option 800 set
+- tap left
+- assert option 800 clear
+- screenshot menu_customize_nopad.png
+- pad on
+- tap right
+- assert option 800 set
+- tap up                              # row 6, pad connected
+- tap left
+- assert option 400 clear
+- tap down
+- tap down                            # wraps to row 0 (Sound)
+- tap right
+- assert option 4 set
+- tap left
+- assert option 4 clear
+- tap down                            # row 1, Window Frame
+- set option 8 1
+- tap confirm                         # skin picker
+- tap cancel                          # ignored: the picker stays open
+- tap right
+- tap confirm                         # closes the picker
+- tap left
+- assert option 8 clear
+- tap cancel
+- wait 60
+- assert menu open
+- quit

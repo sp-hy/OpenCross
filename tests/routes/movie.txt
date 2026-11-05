@@ -1,11 +1,28 @@
-# FMV route: the title room (opening) plays its movie with D4 PLAY_MOVIE_SKIPPABLE; letterboxed Bink 2 playback, then skipped with confirm.
+# FMV route: the title room (opening) plays its movie with D4 PLAY_MOVIE_SKIPPABLE; letterboxed Bink 2 playback, then skipped with confirm; a
+# `D4 #0,#8` (no 0x200) is skipped too, by Triangle and the pad's north button, but not by a key outside the sets or a stick click.
 0 wait movie start 900
 - wait 150
 - screenshot mv_01_movie_frame.png
 - assert movie playing
-- tap confirm                         # D4 movies are skippable
+- tap confirm
 - wait movie end 300
 - wait 60
 - assert movie idle
 - screenshot mv_02_after_movie.png
+- request movie 0 8
+- wait movie start 300
+- wait 30
+- tap z
+- pad tap l3
+- wait 30
+- assert movie playing
+- tap triangle
+- wait 10
+- assert movie idle
+- request movie 0 8
+- wait movie start 300
+- wait 30
+- pad tap y
+- wait 10
+- assert movie idle
 - quit

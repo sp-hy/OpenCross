@@ -110,7 +110,7 @@ void SlotList::update(const Nav& nav, float dt) {
     return;
   }
   // The message closes on confirm or after 120 frames.
-  if (phase_ == Phase::NoData) {
+  if (phase_ == Phase::NoData || phase_ == Phase::Corrupt) {
     if (nav.confirm || phase_time_ > 120.0f / 60.0f) phase_ = Phase::Card, phase_time_ = 0;
     return;
   }
@@ -143,8 +143,11 @@ void SlotList::update(const Nav& nav, float dt) {
       if (want >= 0 && want < cnt) sel_ = want, play(1);
     }
     if (nav.confirm) {
-      // Continue+ (variant 2): a slot with summary flags != 0 is refused with sfx 0x18.
-      if (refused(entries_[static_cast<size_t>(sel_)])) play(0x18);
+      // Continue+ (variant 2): a slot with summary flags != 0 is refused with sfx 0x18. A file that fails the checksum loads nothing:
+      // the corrupted message, then the choice.
+      const SlotEntry& entry = entries_[static_cast<size_t>(sel_)];
+      if (refused(entry)) play(0x18);
+      else if (entry.data.corrupted) phase_ = Phase::Corrupt, phase_time_ = 0, play(8);
       else picked_ = true, play(8);
     }
   } else if (nav.confirm) {
@@ -332,7 +335,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     }
   };
   // Save choice (no grid): message frame 86 with "Please choose a slot." and the lines OpenCross / Slot 1 / Slot 2 (save_layout
-  // choice_y), the pointer beside the current one; an empty choice's "No save data in ..." replaces them until it closes.
+  // choice_y), the pointer beside the current one; an empty choice's "No save data in ..." or a corrupted file's message replaces them until it closes.
   if (phase_ != Phase::Files) {
     frame(86, sl::kMsgX, sl::kMsgY);
     auto line = [&](float x, float y, const std::u32string& str) {
@@ -342,6 +345,10 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     if (phase_ == Phase::NoData) {
       if (card_ == 0) line(146, 336, U"No save data in OpenCross.");
       else line(146, 336, menu_str(card_ == 1 ? 0x801F3181 : 0x801F3182, card_ == 1 ? "No save data in Slot 1." : "No save data in Slot 2."));
+      return;
+    }
+    if (phase_ == Phase::Corrupt) {
+      line(146, 336, menu_str(card_ == 1 ? 0x801F2FF0 : 0x801F300C, card_ == 1 ? "Save data in Slot 1 is corrupted." : "Save data in Slot 2 is corrupted."));
       return;
     }
     line(146, 336, menu_str(0x801F2CA4, "Please choose a slot."));

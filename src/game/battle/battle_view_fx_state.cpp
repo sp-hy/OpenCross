@@ -217,6 +217,7 @@ void BattleView::fx_other(const assets::SeqCmd& cmd) {
     case 0x5F: case 0x60:
       if (fx_bti_gate_) {
         if (cmd.op == 0x5F || !keep_intro_layer_) fx_stage_layer("bti0", cmd.op == 0x5F, true);
+        speed_gate_ = cmd.op == 0x60;
         if (cmd.op == 0x60) fx_bti_gate_ = false;
       }
       break;

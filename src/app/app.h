@@ -355,6 +355,7 @@ class App {
   ui::FeatureIcons feature_icons;
   bool feature_icons_ok = false;
   game::RdeHotkeys rde_hotkeys;
+  game::MenuChord menu_chord;
   // Pad buttons / axes held while the settings window was open: hidden from the game until let go.
   platform::PadRemap pad_remap;
   std::array<bool, platform::Input::kButtons> settings_held_buttons{};
@@ -432,7 +433,7 @@ class App {
   // ---- overlays driven from the field: FMV, main menu, shops ------------------------------------------------------------------
   movie::Player movie_player;
   // movie_fade: the request's flag 8 (movie::held_frame_alpha); the last frame fades out over the resumed field, else it is held.
-  bool movie_open = false, movie_skippable = false, movie_fade = false;
+  bool movie_open = false, movie_fade = false;
   bool menu_from_script = false, shop_open = false;
   // Script screen (name entry or shop) that opens once the menu-open fade-out is over.
   std::optional<game::FieldWorld::MenuRequest> screen_after_fade;

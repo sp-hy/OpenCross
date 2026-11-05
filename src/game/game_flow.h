@@ -98,6 +98,8 @@ class FlowMachine {
   // Names typed in name entry (UTF-32); the save record only holds what the game font can show (ext_save.dat holds all).
   const std::map<int, std::u32string>& custom_names() const { return custom_names_; }
   void set_custom_name(int char_id, std::u32string name);
+  // Drops the custom name: the character reads as the language's name again and its record goes back to the default.
+  void clear_custom_name(int char_id);
   // ext_save.dat names of the slot about to load (SaveDat::read_ext; already empty when the record's language differs): on_load applies them over the record's.
   void set_ext_names(std::map<int, std::u32string> names) { ext_names_ = std::move(names); }
   // The name a saved character gets once `data` is loaded with its ext_save.dat names `ext`; empty = none typed, the default name applies.
@@ -322,6 +324,7 @@ class GameFlow {
   render::TexRef boot_images_[3] = {};
   PartyEditor party_editor_;
   std::u32string display_name(int char_id);
+  void store_name(int char_id, const std::u32string& name);
   int rename_char_ = 0;
   std::function<void(int)> sfx_;
 };

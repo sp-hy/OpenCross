@@ -113,7 +113,7 @@ struct KeyItemPopup::Impl {
   float text_off = 0;
   // 1 = text moving down (top pair fades), 2 = moving up (bottom pair fades).
   int text_dir = 0;
-  int used = 0;
+  int used = 0, refused = 0;
 
   std::unique_ptr<Pic> load(const char* member) {
     std::unique_ptr<Pic> pic;
@@ -234,7 +234,7 @@ void KeyItemPopup::open_list(std::vector<ListEntry> owned) {
   impl.scroll_dir = impl.scroll_t = 0;
   impl.text_off = 0;
   impl.text_dir = 0;
-  impl.used = 0;
+  impl.used = impl.refused = 0;
   // The list has no slide-out: closing removes it at once.
   impl.open = true;
   impl.ticks = 0;
@@ -252,7 +252,11 @@ int KeyItemPopup::list_input(int dx, int dy, bool confirm, bool cancel) {
   }
   if (confirm) {
     const ListEntry& entry = impl.slots[static_cast<size_t>(impl.cursor())];
-    if (entry.id == 0 || !entry.enabled) return 0x18;
+    if (entry.id == 0) return 0x18;
+    if (!entry.enabled) {
+      impl.refused = entry.id;
+      return 0x18;
+    }
     impl.used = entry.id;
     impl.open = false;
     return 8;
@@ -306,6 +310,11 @@ int KeyItemPopup::take_used() {
   const int used = impl_->used;
   impl_->used = 0;
   return used;
+}
+int KeyItemPopup::take_refused() {
+  const int refused = impl_->refused;
+  impl_->refused = 0;
+  return refused;
 }
 bool KeyItemPopup::list_mode() const { return impl_->open; }
 int KeyItemPopup::selected_id() const { return impl_->slots[static_cast<size_t>(impl_->cursor())].id; }

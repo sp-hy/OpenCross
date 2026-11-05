@@ -387,8 +387,13 @@ bool FieldVM::exec_core(u8 op) {
     case 0x3B:  // STOP_EXEC
       park();
       break;
-    case 0x3C:  // SET_ANIMATION
+    case 0x3C:  // SET_ANIMATION: waits out the room-entry window; one extra instruction this tick for a model entity
+      if (!run_mode_ && host_.entry_window()) {
+        yield_ = true;
+        break;
+      }
       host_.set_animation(ent_, operand_u(1));
+      if (!(self.flags38 & flag38::kNo3dObject)) budget_ += 1;
       advance(3);
       break;
     case 0x3D:  // SET_WALK_ANIMATION (mode 0..8)

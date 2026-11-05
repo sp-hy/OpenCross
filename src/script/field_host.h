@@ -193,6 +193,10 @@ class FieldHost {
   // The "system gate": false while a fade/transition/load/other system activity is in progress. Ops
   // that need it yield without advancing until it is true.
   virtual bool system_ready() = 0;
+  // The room-entry window (the first ticks after a room load or a battle return): 3C / A9 yield while it is open.
+  virtual bool entry_window() = 0;
+  // Any of the message windows (labels included) is open: the launcher ops wait for it as well as for the system gate.
+  virtual bool window_open() = 0;
   // Called once at the end of every VM tick (after all entity scripts ran). The original publishes variables
   // 0x12/0x14/0x16 (player X/Z/Y), 0x0A (facing) and 0x0C/0E/10 (party) here; do it with vm.set_var().
   virtual void end_of_tick(FieldVM& vm) = 0;
@@ -360,7 +364,7 @@ class FieldHost {
   virtual void fade_master_volume(int frames, int volume) = 0;
   virtual void named_effect(NamedOp op, std::string_view name, int ent) = 0;
   // 7E D4; `flags`: D4's second operand (7E: 0)
-  virtual void play_movie(int index, int variant, bool skippable, int flags) = 0;
+  virtual void play_movie(int index, int flags) = 0;
   // 7F wait
   virtual bool movie_playing() = 0;
 
@@ -467,6 +471,8 @@ class NullHost : public FieldHost {
   size_t calls() const { return calls_; }
 
   bool system_ready() override;
+  bool entry_window() override;
+  bool window_open() override;
   void end_of_tick(FieldVM& vm) override;
   int party_entity(int slot) override;
   int character_entity(int char_id) override;
@@ -541,7 +547,7 @@ class NullHost : public FieldHost {
   void sfx_volume(int slot, int frames, int volume) override;
   void fade_master_volume(int frames, int volume) override;
   void named_effect(NamedOp op, std::string_view name, int ent) override;
-  void play_movie(int index, int variant, bool skippable, int flags) override;
+  void play_movie(int index, int flags) override;
   bool movie_playing() override;
   void request_battle(int battle_id, int arg, int flags) override;
   bool battle_active() override;

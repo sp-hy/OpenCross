@@ -283,7 +283,9 @@ def block_sum(blk):
 
 
 def block_checksum_ok(blk):
-    return struct.unpack_from("<I", blk, 0x1FFC)[0] == block_sum(blk)
+    """The loader's test: bytes 0x180..0x1FF7, plus the header frame 0x000..0x17F when the version at 0x1FF8 is above 0x102."""
+    start = 0 if struct.unpack_from("<I", blk, 0x1FF8)[0] > 0x102 else 0x180
+    return struct.unpack_from("<I", blk, 0x1FFC)[0] == sum(blk[start:0x1FF8]) & 0xFFFFFFFF
 
 
 # step = (mode, length, count, offset, special)

@@ -180,6 +180,9 @@ class GameState {
   int stamina_recovery(int character) const;
   // eslot < 0: current gear.
   Stats stats_with(int character, int eslot, int item) const;
+  // The candidate list of a slot. An accessory list opens with a reserved row (stock_slot -1, item 0; selectable when the slot is
+  // filled), then the bag's accessories, then every bag material (no character can wear one), each part in bag order. A weapon or armour list holds the
+  // bag's stacks of its kind and ends with one reserved row, never selectable.
   std::vector<EquipCand> equip_candidates(int character, int eslot) const;
   bool can_equip(int character, int eslot, int item) const;
   // Item 0 clears an accessory slot.
@@ -200,6 +203,10 @@ class GameState {
   int auto_fill_members(const std::vector<int>& members, bool reset);
   const data::StatRec* rec(int character) const;
   int accessory_conflict(int character, int eslot, int item) const;
+  // Bag ids below this are the materials.
+  static constexpr int kFirstGearId = 0x20;
+  // Whether a bag id belongs in the slot's list: its item kind is min(eslot, 2); an accessory list also takes every material id.
+  bool listed(int item, int eslot) const;
 };
 
 }  // namespace oc::ui

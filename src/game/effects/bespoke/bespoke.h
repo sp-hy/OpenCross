@@ -132,6 +132,9 @@ struct FxModel {
   // The overlay lets go of the model: the host copies its x / z / facing into the unit's own placement and stops steering it (the overlay moved the
   // model the way the engine's own tasks do; what the unit's anmseq entry does next - MoveHome - starts from there). opthedo's pup at the end of its slide.
   bool release = false;
+  // The overlay's exit puts the model on its home point with this yaw (-1 = none); the host applies it to the unit's own placement when the
+  // pack ends. opthedo: every target at 0xC00.
+  int exit_yaw = -1;
   u32 part_hide = 0, part_show = 0;      // per-part flag bit 0 forced on / off
   u16 flags = 0x200;                     // model flags (0x200 = drop shadow)
   // Requests the host consumes (and clears) after every tick.
@@ -257,6 +260,9 @@ struct FxModels {
   bool pack_closed = false;
   // Host: the WORLD position (PS1 axes) of attach point `point` (S3 table) of the posed unit model.
   std::function<bool(int unit, int point, Vec3& out)> attach;
+  // Host: the point of the effect actor selector `sel` at joint `joint` (PS1 axes), as the sequence ops read it from the live models (3 = the
+  // bounding-box middle of the acting list). False when the list is empty.
+  std::function<bool(int sel, int joint, Vec3& out)> point;
   // caster[-1] (the pack's `act0` pseudo-actor model): the same for that model. Unset / false = no pseudo-actor.
   std::function<bool(int point, Vec3& out)> pseudo_attach;
   // The pseudo-actor's hidden bit as an overlay writes it (1 set, 0 clear, -1 none); the host applies it after the overlay tick and
@@ -503,6 +509,9 @@ class BespokeEffect {
     (void)name;
     return false;
   }
+  // True for an overlay that holds the game at its normal speed while it runs: [Game] FastMode / SlowMode do not change the battle
+  // rate until the effect ends (the battle's speed gate comes back as it was).
+  virtual bool holds_game_speed() const { return false; }
   // The current camera (the host calls it every frame before draw(); the overlays read the live camera).
   virtual void set_view(const ViewParams& view) { ctx_.view = view; }
   const std::string& label() const { return label_; }

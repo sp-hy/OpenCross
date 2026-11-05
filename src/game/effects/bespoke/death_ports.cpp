@@ -885,6 +885,7 @@ constexpr FbParams kLasdes2Fb = {"lasdes2", Fade::Out, true, true, Centre::RelYO
 class Lasdes2 : public Dissolve {
  public:
   Lasdes2() : Dissolve(kLasdes2Fb) {}
+  bool holds_game_speed() const override { return true; }
 
  protected:
   // The idle-pose word only: the idle ran out on the pose element 341 left, which the target holds through the fall.

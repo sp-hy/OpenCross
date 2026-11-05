@@ -10,6 +10,7 @@
 #include "game/battle/battle_numbers.h"
 #include "game/battle/battle_seq.h"
 #include "game/battle/cast_header.h"
+#include "game/battle/hud_rules.h"
 #include "game/battle/status_plates.h"
 
 using namespace oc;
@@ -800,7 +801,32 @@ void test_status_plates() {
   CHECK(bstat::kPlates[static_cast<size_t>(placed[9].plate)].bit == 0x100000u);
 }
 
+// Target cursor steps and the stamina bar fill: three enemies at their scene-7 home positions, units 4 / 5 / 3 left to right on screen.
+void test_hud_rules() {
+  const std::vector<bhud::RingUnit> ring = {{3, 100, -1280, 1792}, {4, -100, -1280, -2304}, {5, 0, -2304, -256}};
+  CHECK(bhud::target_step(ring, 3, 1, false) == 3);
+  CHECK(bhud::target_step(ring, 3, -1, false) == 5);
+  CHECK(bhud::target_step(ring, 5, -1, false) == 4);
+  CHECK(bhud::target_step(ring, 4, -1, false) == 4);
+  CHECK(bhud::target_step(ring, 4, 1, false) == 5);
+  CHECK(bhud::target_step(ring, 5, 0, false) == 5);
+  CHECK(bhud::target_step(ring, 3, -1, true) == 5);
+  CHECK(bhud::target_step(ring, 5, -1, true) == 4);
+  CHECK(bhud::target_step(ring, 4, -1, true) == 3);
+  CHECK(bhud::target_step(ring, 4, 1, true) == 5);
+  CHECK(bhud::target_step(ring, 5, 1, true) == 3);
+  CHECK(bhud::target_step(ring, 3, 1, true) == 4);
+  const int stamina[] = {70, 35, 9, 1, 0, -1, -2, -9, -10, -25, -40, -69, -70, -75, -150};
+  const int width[] = {50, 25, 6, 1, 1, 1, 1, 6, 7, 17, 28, 49, 50, 50, 50};
+  for (size_t i = 0; i < std::size(stamina); ++i) {
+    const bhud::StaminaFill fill = bhud::stamina_fill(stamina[i]);
+    CHECK(fill.width == width[i]);
+    CHECK(fill.colour == (stamina[i] >= 40 ? bhud::BarColour::Cyan : stamina[i] >= 10 ? bhud::BarColour::Yellow : bhud::BarColour::Red));
+  }
+}
+
 int main() {
+  test_hud_rules();
   test_status_plates();
   test_damage_numbers();
   test_cast_header_float();

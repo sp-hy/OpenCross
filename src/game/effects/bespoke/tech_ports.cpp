@@ -101,9 +101,14 @@ class GhostPair : public MeshTech {
 // opthedo: 0x100: SetAnim(caster(s16 @+10), s16 @+8, 0x20). 0x101 (once per target-loop pass: the loop's target T): T takes caster 0's
 // position and rotation; D = @+4, v = @+8; per tick T moves by RotMatrix(T rot) * (0, 0, v) * 0x100 * ticks (20.12) = v / 16 units along its
 // facing; while t <= D: colour c = (t << 7) / D (so the ghost fades in from nothing) and the ghost pair; at t > D: anmseq 3 of its own S5
-// block, shown again and released to the host, which takes it home from where it stands.
+// block, shown again and released to the host, which takes it home from where it stands. Exit: every target stands on its home point with
+// yaw 0xC00.
 class Opthedo : public GhostPair {
  protected:
+  void init() override {
+    for (int i = 0; i < target_count(); ++i)
+      if (FxModel* model = target(i)) model->exit_yaw = 0xC00;
+  }
   bool command(int op, const int* args, int count) override {
     if (op == 0x100) {
       set_anim(caster(arg(args, count, 10)), arg(args, count, 8), 0x20);
@@ -321,27 +326,56 @@ class Shock : public OverlayFx {
 };
 
 // ---- uzumaki / 3mix: orbit tasks + the shared return task ----------------------------------------------------------------------------
-// The position converges on the home by cur + (home - cur) t / D; at the end the model faces the casters' mean (0, 0xFC00 - yaw, 0).
-// While running the shipped code writes the model's own position into the rotation words (3mix: only y into the yaw) - reproduced.
+// The position converges on the home by cur + (home - cur) t / D; at the end the model faces the casters' point (0, 0xFC00 - yaw, 0), yaw
+// taken from where the model stood before that last step. The casters' point is the acting-list selector's: (max + min) / 2 per axis of
+// their live positions, not the mean. While running the shipped code writes the model's own position into the rotation words (3mix: only y
+// into the yaw) - reproduced.
 struct Return {
   FxModel* model = nullptr;
   FxModels* models = nullptr;
   int elapsed = 0, dur = 0;
   bool mix = false, live = true;
+  // Without a host the casters' model positions stand in for their live ones.
+  Vec3 casters_point() const {
+    Vec3 point{0, 0, 0};
+    if (models->point && models->point(3, 0, point)) return point;
+    if (models->casters.empty()) return point;
+    for (size_t k = 0; k < 3; ++k) {
+      int lo = 0x7FFF, hi = -0x7FFF;
+      for (int unit : models->casters) {
+        const int value = static_cast<s16>(static_cast<int>(models->units[static_cast<size_t>(unit)].pos[k]));
+        lo = std::min(lo, value), hi = std::max(hi, value);
+      }
+      point[k] = static_cast<float>((hi + lo) / 2);
+    }
+    return point;
+  }
+  // The original runs this task once per 30 Hz pass with t += 2 and faces the model from the pose of its last pass. A copy of the
+  // path on that schedule supplies the final yaw, while the drawn model moves at 60 Hz.
+  int pass_pos[3] = {0, 0, 0};
+  int pass_elapsed = 0, pass_yaw = 0, ticks = 0;
+  void step_pass(const Vec3& caster_centre) {
+    if (ticks == 0)
+      for (int k = 0; k < 3; ++k) pass_pos[k] = static_cast<int>(model->pos[static_cast<size_t>(k)]);
+    if (ticks++ % 2 != 0 || dur < pass_elapsed) return;
+    pass_yaw = ratan2(static_cast<int>(caster_centre[2]) - pass_pos[2], static_cast<int>(caster_centre[0]) - pass_pos[0]);
+    if (dur != 0)
+      for (int k = 0; k < 3; ++k)
+        pass_pos[k] = static_cast<s16>(pass_pos[k] + trunc_div((static_cast<int>(model->home[static_cast<size_t>(k)]) - pass_pos[k]) * pass_elapsed, dur));
+    pass_elapsed += 2;
+  }
   bool step() {
     if (!live) return false;
-    Vec3 caster_centre{0, 0, 0};
-    for (int unit : models->casters)
-      for (size_t k = 0; k < 3; ++k) caster_centre[k] += models->units[static_cast<size_t>(unit)].pos[k] / static_cast<float>(models->casters.size());
+    const Vec3 caster_centre = casters_point();
+    step_pass(caster_centre);
     const int mx = static_cast<int>(model->pos[0]), my = static_cast<int>(model->pos[1]), mz = static_cast<int>(model->pos[2]);
-    const int yaw = ratan2(static_cast<int>(caster_centre[2]) - mz, static_cast<int>(caster_centre[0]) - mx);
     int pos[3] = {mx, my, mz};
     if (dur != 0)
       for (int k = 0; k < 3; ++k) pos[k] = static_cast<s16>(pos[k] + trunc_div((static_cast<int>(model->home[static_cast<size_t>(k)]) - pos[k]) * elapsed, dur));
     elapsed += 1;
     if (dur < elapsed) {
       for (int k = 0; k < 3; ++k) pos[k] = static_cast<int>(model->home[static_cast<size_t>(k)]);
-      model->rot[0] = 0, model->rot[1] = (0xFC00 - yaw) & 0xFFF, model->rot[2] = 0;
+      model->rot[0] = 0, model->rot[1] = (0xFC00 - pass_yaw) & 0xFFF, model->rot[2] = 0;
       live = false;
     } else if (mix) {
       model->rot[0] = 0, model->rot[1] = my & 0xFFF, model->rot[2] = 0;

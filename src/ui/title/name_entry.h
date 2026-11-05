@@ -20,8 +20,8 @@ enum class NameKey { Up, Down, Left, Right, Confirm, Backspace, PosLeft, PosRigh
 class NameEntry {
  public:
   struct Setup {
-    // char_id: the character being named (0 = Serge). default_name: what "Default" restores. initial: starting text (empty =
-    // default_name). glyphs: needed for the PS1 pages.
+    // char_id: the character being named (0 = Serge). default_name: the language's name. initial: the custom name (empty = none).
+    // The screen opens with, and "Default" restores, initial when set, else default_name. glyphs: needed for the PS1 pages.
     int char_id = 0;
     import::Lang lang = import::Lang::En;
     ArtMode mode = ArtMode::Hd;

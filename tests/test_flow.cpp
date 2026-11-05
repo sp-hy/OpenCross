@@ -156,6 +156,19 @@ void test_name_entry() {
   ok.press(ui::NameKey::Down);
   ok.press(ui::NameKey::Confirm);
   CHECK(ok.done() && ok.result() == U"Serge");
+  // A rename opens on the custom name, and Default restores it rather than the language's name.
+  ui::NameEntry renamed;
+  auto renamed_setup = latin_setup();
+  renamed_setup.initial = U"Bob";
+  renamed.begin(renamed_setup);
+  CHECK(renamed.buffer().substr(0, 4) == U"Bob ");
+  renamed.press(ui::NameKey::Confirm);
+  renamed.press(ui::NameKey::Left);
+  renamed.press(ui::NameKey::Down);
+  renamed.press(ui::NameKey::Down);
+  CHECK(renamed.button() == ui::NameEntry::Button::Default);
+  renamed.press(ui::NameKey::Confirm);
+  CHECK(renamed.buffer().substr(0, 4) == U"Bob " && !renamed.done());
 
   // Original art = the same RDE keyboard (no graphics-mode test): 12 characters, Latin grid.
   auto original_setup = latin_setup();
@@ -263,6 +276,12 @@ void test_flow() {
   unnamed.data.chars[27].name = {};
   named.on_load(unnamed);
   CHECK(named.game_state().slot.chars[27].name == defaults[27]);
+  // Confirming the language's name drops the custom name and puts the default record back; a default record names nobody.
+  named.set_custom_name(27, U"Bob");
+  CHECK(named.custom_names().at(27) == U"Bob" && codec.unpack_record(named.game_state().slot.chars[27].name) == U"Bob");
+  named.clear_custom_name(27);
+  CHECK(!named.custom_names().contains(27) && named.game_state().slot.chars[27].name == defaults[27]);
+  CHECK(named.saved_custom_name(named.game_state().slot, {}, 27).empty());
 
   // The save lists name a character as the load would: its ext_save.dat name, then its record, else nothing typed.
   const std::map<int, std::u32string> typed = {{0, U"Typed"}};

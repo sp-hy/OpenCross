@@ -63,9 +63,12 @@ int EmitterSystem::Impl::spawn(size_t hi, const Basis* parent) {
             obj.mesh_name = &sprite->name;
           } else if (sprite->type == 15) {
             obj.builtin = sprite->name == "flat" ? 1 : sprite->name == "line" ? 2 : 0;
-          // A light: no primitive, writes a GTE light slot each tick (the slot is chosen below).
+          // A light: no primitive, writes a GTE light slot each tick. Blend above 4: the slot is hunted below and released at the free;
+          // else the operand is the slot.
           } else if (sprite->type == 17) {
             obj.light_name = &sprite->name;
+            obj.light_release = (obj.flags & 7) > 4;
+            obj.light_slot = static_cast<s8>(std::min<int>(sprite->frame0, 0x7F));
           } else if (sprite->type == 0x16 && (obj.flags & 7) > 4 && hooks.akao) {
             hooks.akao(sprite->name);
           }
@@ -490,7 +493,7 @@ int EmitterSystem::Impl::spawn(size_t hi, const Basis* parent) {
   }
   // After the stream: matrix, bits, persistent bookkeeping.
   build_matrix(obj);
-  if (obj.stype == 17) {
+  if (obj.stype == 17 && obj.light_release) {
     // A light object takes the first light slot whose intensity is 0, else slot 2, and an older live
     // object of the same sprite record holding that slot is freed. Without a table every
     // slot reads as free.
@@ -570,18 +573,12 @@ void EmitterSystem::Impl::integrate(Object& obj, int shift, int steps) {
 
 // -- header fire ------------------------------------------------------------------------------------------------------
 // Spawn one object, then the optional op-45 child emission.
-// Returns the main object's index (-1 when refused).
-int EmitterSystem::Impl::fire(size_t hi, const Object* parent_obj) {
+// `parent` = the parent frame of the main object; returns its index (-1 when refused).
+int EmitterSystem::Impl::fire(size_t hi, const Basis* parent) {
   if (depth >= kMaxDepth) return -1;
   ++depth;
   pending_child = -1;
-  const Basis* pb = nullptr;
-  Basis pbs;
-  if (parent_obj) {
-    pbs = heading_basis(*parent_obj);
-    pb = &pbs;
-  }
-  const int oi = spawn(hi, pb);
+  const int oi = spawn(hi, parent);
   if (oi >= 0 && pending_child >= 0) {
     const int child = pending_child;
     pending_child = -1;
@@ -616,25 +613,51 @@ int EmitterSystem::Impl::fire(size_t hi, const Object* parent_obj) {
 
 // The dying object runs its death-child emitter with itself as parent. `spawn_children` is false for a
 // natural expiry of an object with flag bit27 (no death spawn).
+// When the dying object's header has an op-0x39 record, its first one is the children's parent basis (without the record's scale
+// bits), translated by the dying position with flag bit 19, else at the origin; with bit 19 the position is then not added again.
+// A dying object in local coordinates (bit 15) hands a world child (no bit 15) its position turned by that basis; the turned position
+// replaces the dying one, so every further child of the repeat count turns it again.
 void EmitterSystem::Impl::die(size_t idx, bool spawn_children) {
   Object dying = objs[idx];
   objs[idx].alive = false;
   ++st.died;
   if (!spawn_children || dying.death < 0 || depth >= kMaxDepth) return;
+  const bool add_pos = (dying.flags & (1u << 19)) != 0;
+  Basis basis;
+  const Header* owner = dying.owner >= 0 && static_cast<size_t>(dying.owner) < headers.size() ? &headers[static_cast<size_t>(dying.owner)] : nullptr;
+  const bool has_basis = owner && owner->has_basis_op;
+  if (has_basis) {
+    int sc = 0;
+    bool found = false;
+    basis = actor_basis(owner->basis_sel[0], owner->basis_sel[1], owner->basis_sel[2], owner->basis_sel[3], sc, found);
+    basis.t = {0, 0, 0};
+    if (add_pos)
+      for (size_t i = 0; i < 3; ++i) basis.t[i] = static_cast<float>(static_cast<s16>(dying.pos[i] >> 16));
+  }
   // The death child goes through fire(): its op 45 (SPAWN_WITH) emission runs too.
   const int reps = headers[static_cast<size_t>(dying.death)].def->repeat;
   const bool pos_replace = !(dying.flags & (1u << 18));
   for (int k = 0; k <= reps && reps >= 0; ++k) {
-    const int ci = fire(static_cast<size_t>(dying.death), nullptr);
+    const int ci = fire(static_cast<size_t>(dying.death), has_basis ? &basis : nullptr);
     if (ci < 0) break;
     Object& child_obj = objs[static_cast<size_t>(ci)];
     if (child_obj.life == 0) {
       child_obj.alive = false;
       continue;
     }
+    child_obj.skip_step = true;
     if (pos_replace) {
-      if (!(dying.flags & (1u << 19))) for (int i = 0; i < 3; ++i) child_obj.pos[i] = dying.pos[i];
-      else for (int i = 0; i < 3; ++i) child_obj.pos[i] = add32(child_obj.pos[i], dying.pos[i]);
+      if (!add_pos) {
+        if (has_basis && (dying.flags & kFlagRelParent) && !(child_obj.flags & kFlagRelParent)) {
+          int local[3], world[3];
+          for (int i = 0; i < 3; ++i) local[i] = static_cast<s16>(dying.pos[i] >> 16);
+          rot_int(basis, local, world);
+          for (int i = 0; i < 3; ++i) dying.pos[i] = shl32(world[i], 16);
+        }
+        for (int i = 0; i < 3; ++i) child_obj.pos[i] = dying.pos[i];
+      } else if (!has_basis) {
+        for (int i = 0; i < 3; ++i) child_obj.pos[i] = add32(child_obj.pos[i], dying.pos[i]);
+      }
     }
     if (dying.flags & kFlagInheritAngle) for (int i = 0; i < 3; ++i) child_obj.ang[i] = dying.ang[i];
     if (dying.flags & kFlagInheritVel) for (int i = 0; i < 3; ++i) child_obj.vel[i] = dying.vel[i];
