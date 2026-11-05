@@ -361,7 +361,8 @@ void Typewriter::begin_page() {
   fast_ = false;
 }
 
-void Typewriter::update(float dt) {
+void Typewriter::update(float dt, TextPace pace) {
+  pace_ = pace;
   tick_acc_ += dt;
   const float tick = 1.0f / kSpeedTickHz;
   int guard = 0;
@@ -396,7 +397,7 @@ void Typewriter::step() {
       switch (event.kind) {
         case PageEvent::Kind::Delay:
           if (!fast_ && event.arg > 0) {
-            delay_s_ = static_cast<float>(event.arg) / kScriptFrameHz;
+            delay_s_ = static_cast<float>(event.arg) / kScriptFrameHz * pace_.wait;
             return;
           }
           break;
@@ -423,7 +424,7 @@ void Typewriter::step() {
         state_ = State::WaitPage;
       } else if (auto_close_ >= 0) {
         state_ = State::Closing;
-        close_s_ = static_cast<float>(auto_close_) / kScriptFrameHz;
+        close_s_ = static_cast<float>(auto_close_) / kScriptFrameHz * pace_.wait;
       } else {
         state_ = State::WaitClose;
       }
@@ -433,7 +434,7 @@ void Typewriter::step() {
       ++visible_;
       continue;
     }
-    acc_ += static_cast<float>(speed_) / 64.0f;
+    acc_ += static_cast<float>(speed_) / 64.0f * pace_.reveal;
     while (acc_ >= 1.0f && visible_ < page.glyphs.size()) {
       ++visible_;
       acc_ -= 1.0f;

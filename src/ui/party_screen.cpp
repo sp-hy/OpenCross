@@ -10,6 +10,7 @@
 #include "data/char_name.h"
 #include "game/party_editor.h"
 #include "import/tim.h"
+#include "ui/localized_path.h"
 #include "ui/lowres.h"
 #include "ui/menu/game_state.h"
 #include "ui/ps1_font.h"
@@ -480,7 +481,7 @@ void PartyScreen::Impl::draw_screen() {
 
   // Main layer: backdrop, grid cells (visible rows), then the party slots (Party) or the fixed slot 0 + silhouette and icon (Relief).
   grouped = true;
-  if (Tex* bg = png(relief ? "hd/menu/shapes/memmenu2.png" : "hd/menu/shapes/memmenu.png")) draw_quad(bg->set, 0, 0, 640, 216, 0, 0, 1, 1, col(0x808080));
+  if (Tex* bg = png(localized_path(*vfs, relief ? "hd/menu/shapes/memmenu2.png" : "hd/menu/shapes/memmenu.png", lang))) draw_quad(bg->set, 0, 0, 640, 216, 0, 0, 1, 1, col(0x808080));
   const int roster_size = static_cast<int>(party_grid.roster().size());
   for (int i = 0; i < roster_size; ++i) {
     const int grid_row = i >> 2;

@@ -229,7 +229,7 @@ void Vm::tick(const Ctx& ctx, std::vector<Event>& out) {
     pc_ += adv;
     if (pc_ < 0 || pc_ >= static_cast<int>(table_->words().size())) {
       running_ = false;
-      out.push_back({Event::Done});
+      out.push_back({Event::Done, -1});
       return;
     }
   }
@@ -243,7 +243,7 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
   const int op = arg(0);
   auto end = [&]() {
     running_ = false;
-    out.push_back({Event::Done});
+    out.push_back({Event::Done, op});
     return 0;
   };
   // Unknown op: the engine would run off the table.
@@ -366,7 +366,7 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
     case 0x63: wr(arg(2), ctx.monster ? 1 : 0); return 3;
     case 0x65: wr(arg(1), ctx.pose); return 2;
     case 0x67: wr(arg(1), ctx.model_num); return 2;
-    case 0x69: wr(arg(2), 0); return 3;
+    case 0x69: wr(arg(2), ctx.option); return 3;
     case 0x75: wr(arg(1), 0); return 2;
     // GetRot: vars [v] = x rot, [v+1] = z rot, [v+2] = yaw; RotateT reads the same layout, so a flinch "yaw += k; RotateT; yaw -= k; RotateT" turns around the current facing
     case 0x61: wr(arg(1), 0); wr(arg(1) + 1, 0); wr(arg(1) + 2, ctx.yaw); return 2;
@@ -516,6 +516,8 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
       event.ang[0] = static_cast<s16>(arg(6) & 0xFF), event.ang[1] = static_cast<s16>((arg(6) >> 8) & 0xFF), event.ang[2] = static_cast<s16>(arg(7) & 0xFF);
       return len;
     }
+    // GetNumberTarget count index: vars [count] := the target list's length, vars [index] := the running unit's index in it (-1 = not a target).
+    case 0xA1: wr(arg(1), ctx.target_count); wr(arg(2), ctx.target_index); return len;
     // GetCommon list idx out: vars [out] := the unit's common word.
     case 0x9F: wr(arg(2), ctx.common); return len;
     // CheckEquip v: vars [v] := one equipment bit of the running unit, set once at battle init from the equipment. 0xA6 "CheckEquipGrandorion" bit 13 =
@@ -524,6 +526,8 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
     case 0xA6: wr(arg(1), static_cast<int>((ctx.flags >> 13) & 1)); return len;
     case 0xA7: wr(arg(1), static_cast<int>((ctx.flags >> 14) & 1)); return len;
     case 0xA8: wr(arg(1), static_cast<int>((ctx.flags >> 15) & 1)); return len;
+    // GetBeta sel out: vars [out] := the running unit's pending result word.
+    case 0xA9: wr(arg(2), ctx.result); return len;
     case 0x19: emit(Event::ModelShow, 1); return len;
     case 0x1A: emit(Event::ModelShow, 0); return len;
     // 0x79 / 0x7A `n`: the attached-object slot n (0 / 1: the weapon mounts) is shown / hidden; n outside 0..1 writes both. Wanda In hides the wand

@@ -36,6 +36,8 @@ public:
 
   // `api_name` from the app's schema (ach_...). Already unlocked ones are left alone.
   void unlock(std::string_view api_name);
+  // `meta` is unlocked as soon as an unlock made by this client leaves every name in `required` achieved.
+  void set_meta(std::string meta, std::vector<std::string> required);
   // The display name of the next achievement that has just been unlocked, for the on-screen notice.
   std::optional<std::string> next_unlocked();
 
@@ -57,6 +59,8 @@ private:
   bool store_pending_ = false;
   std::chrono::steady_clock::time_point retry_at_{};
   std::vector<std::string> pending_;
+  std::string meta_;
+  std::vector<std::string> meta_required_;
   std::vector<std::string> unlocked_;
 };
 

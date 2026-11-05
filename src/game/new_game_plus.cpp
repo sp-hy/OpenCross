@@ -153,20 +153,14 @@ save::SaveSlot new_game_plus_slot(const data::GameTables* tables, const save::Sa
 }
 
 // Every cell with an element id < 0x80 goes back to the stock: the copies count (the equipped nibble) only for ids flagged in the
-// element table (byte 10 bit 0x40), else 1; the cell keeps only bits 14-15 and its nibble is cleared. Retail quirk kept: the
-// nibble table is addressed with a stride of 44 cells per character (the menus and the save use 48), so character c's cell k reads
-// / clears nibble c * 44 + k of the flat table (= character (c * 44 + k) / 48, cell % 48); identical for Serge (c = 0).
-// Of the five gear words, ids < 0x200 are items.
+// element table (byte 10 bit 0x40), else 1; the cell keeps only bits 14-15 and its nibble is cleared. Of the five gear words, ids
+// < 0x200 are one item, 0x200..0x3FF an element (five copies for 0x261..0x26B, else one), 0x400..0x43F a key item bit.
 void strip_for_cleared_save(ui::GameState& gs) {
   save::SaveSlot& sl = gs.slot;
   const ui::MenuRules* rules = gs.rules;
   for (int char_id = 0; char_id < 0x2C && char_id < save::kNumChars; ++char_id) {
     if (!sl.recruited(char_id) && !bit44(sl.unk_e1e0, sl.unk_e1e4, char_id)) continue;
     save::SaveChar& rec = sl.chars[static_cast<size_t>(char_id)];
-    auto nib = [&](int nib_char, size_t nib_cell) -> u8& {
-      const int flat = nib_char * 44 + static_cast<int>(nib_cell);
-      return sl.chars[static_cast<size_t>(flat / 48)].equipped_qty[static_cast<size_t>(flat % 48)];
-    };
     for (size_t k = 0; k < rec.grid.size(); ++k) {
       const int id = rec.grid[k] & 0x1FF;
       if (id >= 0x80) continue;
@@ -176,15 +170,16 @@ void strip_for_cleared_save(ui::GameState& gs) {
           if (const ui::PgRow* row = rules->pg_row(id)) counted = (row->raw[0xA] & 0x40) != 0;
           else counted = rules->el_stack(id);
         }
-        add_stack(sl.elements, id, counted ? nib(char_id, k) : 1);
+        add_stack(sl.elements, id, counted ? rec.equipped_qty[k] : 1);
       }
-      rec.grid[k] = 0;
-      nib(char_id, k) = 0;
+      rec.grid[k] &= 0xC000;
+      rec.equipped_qty[k] = 0;
     }
     for (u16* gear : {&rec.weapon, &rec.armour, &rec.accessory[0], &rec.accessory[1], &rec.accessory[2]}) {
       if (*gear == 0) continue;
       if (*gear < 0x200) add_stack(sl.items, *gear, 1);
-      else if (*gear < 0x400) add_stack(sl.elements, *gear - 0x200, 1);
+      else if (*gear < 0x400) add_stack(sl.elements, *gear - 0x200, *gear >= 0x261 && *gear <= 0x26B ? 5 : 1);
+      else if (*gear < 0x440) sl.set_key_items(sl.key_items() | 1ull << (*gear - 0x400));
       *gear = 0;
     }
   }

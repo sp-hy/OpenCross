@@ -35,6 +35,11 @@ std::string_view staff_strip_member(std::string_view lang);
 // unit) at the top of the area while the 1-based frame `frame` of a roll whose last frame number is `last` is on screen.
 float staff_strip_span(u32 strip_w, u32 strip_h);
 float staff_strip_top(u64 frame, u64 last, u32 strip_w, u32 strip_h);
+// The last frame of a movie that ended on screen stays over the scene behind it: opaque for kHeldHoldFrames, or fading out over
+// kHeldFadeFrames. Its alpha `frames` 60 Hz frames after the end frame (frame 0); 0 = gone.
+inline constexpr double kHeldHoldFrames = 10.0;
+inline constexpr double kHeldFadeFrames = 160.0;
+double held_frame_alpha(double frames, bool fade);
 
 class Player {
  public:
@@ -49,15 +54,16 @@ class Player {
   // end 0 = the frame count, so the last frame is never shown). Earlier frames / audio are decoded and dropped, the clock starts at
   // `start`. `level` scales the movie's sound (Mixer::movie_start).
   bool open(const vfs::Vfs& fs, std::string_view name, std::string_view lang = "en", u32 start = 0, u32 end = 0, float level = 1.0f);
-  // `keep_frame`: the movie ended on screen - keep the last decoded frame's texture alive so it can be faded into the next scene
-  // (held() / draw_held() / fade_held()); the next open() / close() / release_held() frees it.
-  void close(bool keep_frame = false);
+  // `keep_frame`: the movie ended on screen - keep the last decoded frame's texture alive over the scene behind it (held() /
+  // draw_held() / step_held()): `fade` = it fades out (held_frame_alpha), else it stays opaque for a few frames and is cut. The next
+  // open() / close() / release_held() frees it.
+  void close(bool keep_frame = false, bool fade = false);
   bool held() const { return held_; }
   void release_held() { if (held_) close(); }
   // Draws the held last frame over what is already in the frame (resume pass) at the current hold alpha.
   void draw_held(const render::Frame& frame, float view_w, float view_h);
-  // Lowers the hold alpha by dt / seconds; frees the frame at 0. Returns true while still visible.
-  bool fade_held(double dt, double seconds);
+  // Runs the hold or fade for dt seconds (60 frames a second); frees the frame at its end. Returns true while still visible.
+  bool step_held(double dt);
 
   // Creates the frame texture and sampler. Optional for headless use (then see frame_rgba()).
   bool init_gpu(render::GpuContext& ctx, render::SpriteBatch& sprites);
@@ -114,8 +120,10 @@ class Player {
   double fps_ = 15.0;
   bool has_audio_ = false;
   bool held_ = false;
+  bool held_fade_ = false;
   bool paused_ = false;
   double held_alpha_ = 1.0;
+  double held_frames_ = 0.0;
 
   // Main-thread state.
   VideoFrame current_;

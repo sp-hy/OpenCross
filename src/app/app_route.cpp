@@ -95,7 +95,8 @@ void App::fill_route_state() {
   if (field_visible() && world.fade_level() > 0.05f) rstate.room_valid = false;
 }
 
-// Route `request`: rename selects the character, then name entry; party_add adds a character and rebinds the party; money sets the
+// Route `request`: rename selects the character, then name entry; party_add adds a character and rebinds the party; party_remove
+// empties the slot of a character reference (REMOVE_FROM_PARTY); money sets the
 // gold; save is the ending's cleared-save prompt (strips the roster, variable 0x7E = 3, save list); ngplus is the New Game+ title list
 // over the current game; slotdump writes the game as one 0x2000 save block to $OC_SLOT_DUMP<N>.bin; battle starts an encounter id on
 // battlefield 0 with the session party; battle_disguise is the Dragoon disguise fight (jac_b25i).
@@ -105,6 +106,7 @@ void App::route_request(const game::RouteOut& out) {
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
   else if (rk == "party_add") { world.party_add(out.request_arg); world.state_edited(); }
+  else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
   else if (rk == "save") world.request_menu(MK::Save, 0);
@@ -125,10 +127,11 @@ void App::route_request(const game::RouteOut& out) {
   }
   else if (rk == "menu") world.request_menu(MK::MainMenu, 0);
   else if (rk == "disc") world.request_menu(MK::ChangeDisc, out.request_arg);
-  else if (rk == "movie") world.play_movie(out.request_arg, 0, true);
+  else if (rk == "movie") world.play_movie(out.request_arg, 0, true, out.request_arg2);
   else if (rk == "battle") world.request_battle(out.request_arg, out.request_arg2, out.request_arg3);
   else if (rk == "battle_disguise") world.request_battle(out.request_arg, 0, 4);
   else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);
+  else if (rk == "elementshop") world.request_menu(MK::ElementShop, out.request_arg);
   else {
     log::error("route: unknown request {}", rk);
     exit_code = 1;
@@ -143,6 +146,7 @@ void App::route_frame() {
     game::RouteOut out;
     fill_route_state();
     route.step(rstate, in, out);
+    pad_remap.apply(in, platform::active_map());
     if (out.battle_auto && battle_ready) battle.set_auto(true);
     if (out.battle_auto && results_ok) results.set_auto(true);
     if (out.dump) log::info("route: tick {} entities of {}:\n{}", route_tick, rstate.room, world.dump_entities());
@@ -156,6 +160,7 @@ void App::route_frame() {
     if (out.put)
       for (int slot = 0; slot < 3; ++slot)
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
+    if (out.set_buttons) world.game_state().slot.button_cfg[static_cast<size_t>(out.buttons_index)] = static_cast<u32>(out.buttons_value);
     if (out.set_option) world.game_state().set_option(static_cast<u16>(out.option_mask), out.option_on != 0);
     if (out.set_var) world.vm().set_var(static_cast<u16>(out.var_id), out.var_value);
     // A warp takes the disc from the story variable 0x42 like a map jump.
@@ -180,6 +185,8 @@ void App::route_frame() {
       exit_code = 1;
     }
     if (out.done) route_finished = true;
+    update_loop_speed(1.0 / 60.0);
+    loop_speed.field = loop_speed.field_factor == 1.0f ? platform::FixedStep::Result{1, 0.0f} : field_stepper.advance(loop_speed.field_factor / 60.0);
     advance(in, 1.0 / 60.0, 1);
     mixer.capture_tick(1.0 / 60.0);
     if (recorder.active()) recorder.write(1.0 / 60.0, 1, in);

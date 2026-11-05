@@ -169,7 +169,7 @@ bool FieldVM::exec_scene(u8 op) {
       break;
     case 0x7E:  // PLAY_MOVIE: index in the low byte, variant in the high byte
       if (!system_gate()) break;
-      host_.play_movie(operand_u(1) & 0xFF, (operand_u(1) >> 8) & 0xFF, false);
+      host_.play_movie(operand_u(1) & 0xFF, (operand_u(1) >> 8) & 0xFF, false, 0);
       advance(3);
       break;
     case 0x7F:  // WAIT_MOVIE

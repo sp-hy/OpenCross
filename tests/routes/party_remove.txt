@@ -1,0 +1,21 @@
+# REMOVE_FROM_PARTY (7D) of slot 0 with three members spread out: the member who moves up from slot 2 appears where he stood, the
+# leader's entity keeps its spot with the new slot-0 occupant and the emptied slot 2 is hidden.
+0 wait idle
+- request party_add 1
+- request party_add 22
+- load alu_a01f 0
+- wait idle 300
+- wait 60
+- key down left
+- wait 90
+- key up left
+- wait 1
+- dump
+- request party_remove 253
+- dump
+# Slot 2 stood at 699,220 and slot 1 at 501,234; the member who moved up follows for the request's 4 ticks.
+- assert near 2 699 220 100
+- assert party 1,22,-
+- assert near 1 346 343 1
+- assert ent 3 shown 0
+- quit

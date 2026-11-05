@@ -111,6 +111,55 @@ void test_element_shop() {
   for (int id : list) CHECK(id != 3);
 }
 
+// Element Sell past the bag count: the player picks whose placed copies go; the sale takes exactly those and pays (price * total) >> 2.
+void test_element_sell_picks() {
+  Fixture fixture;
+  GameState& game_state = fixture.gs;
+  fixture.el(5, 1, 0x04, 50);
+  fixture.el(6, 1, 0x04, 50);
+  fixture.tables.elements[6].raw[0] = 0x11;
+  auto& char_set = fixture.tables.char_sets["char"];
+  for (int character = 0; character < 3; ++character) {
+    char_set.rec[static_cast<size_t>(character)].raw[0x30] = 0xFC;
+    char_set.rec[static_cast<size_t>(character)].raw[0x31] = 0x03;
+    game_state.slot.chars[static_cast<size_t>(character)].unlocked[0] = 0x3FC;
+  }
+  game_state.slot.set_recruited(1, true);
+  game_state.slot.set_recruited(2, true);
+  game_state.slot.chars[0].grid[0] = 5;
+  game_state.slot.chars[1].grid[0] = 5;
+  game_state.slot.chars[1].grid[1] = 5;
+  game_state.slot.chars[1].grid[2] = 5;
+  game_state.slot.chars[2].grid[0] = 6;
+  game_state.slot.chars[2].equipped_qty[0] = 4;
+  game_state.slot.chars[2].grid[1] = 5;
+  game_state.add_element(5);
+  game_state.add_element(5);
+  CHECK(shop::placed_copies(game_state, 0, 5) == 1 && shop::placed_copies(game_state, 1, 5) == 3 && shop::placed_copies(game_state, 2, 5) == 1);
+  CHECK(shop::placed_copies(game_state, 2, 6) == 4 && shop::party_copies(game_state, 5) == 5);
+  CHECK(shop::element_sell_max(game_state, 5) == 2);
+  CHECK(shop::element_sell_list(game_state) == (std::vector<int>{5, 6}));
+
+  game_state.set_gold(0);
+  CHECK(shop::sell_element(game_state, 5, 3) == shop::Res::NoStock);
+  CHECK(shop::sell_element(game_state, 5, 0, {3}) == shop::Res::NoStock);
+  CHECK(shop::sell_element(game_state, 5, 2, {0, 4}) == shop::Res::NoStock);
+  CHECK(game_state.gold() == 0 && game_state.element_count(5) == 2 && shop::party_copies(game_state, 5) == 5);
+  CHECK(shop::sell_element(game_state, 5, 2, {1, 3}) == shop::Res::Ok);
+  CHECK(game_state.gold() == (50 * 6) >> 2 && game_state.element_count(5) == 0);
+  CHECK(shop::placed_copies(game_state, 0, 5) == 0 && shop::placed_copies(game_state, 1, 5) == 0 && shop::placed_copies(game_state, 2, 5) == 1);
+  CHECK(game_state.slot.chars[0].grid[0] == 0 && game_state.slot.chars[1].grid[2] == 0 && game_state.slot.chars[2].grid[1] == 5);
+  CHECK(shop::element_sell_list(game_state) == (std::vector<int>{6, 5}));
+
+  game_state.set_gold(0);
+  CHECK(shop::sell_element(game_state, 6, 0, {0, 0, 3}) == shop::Res::Ok);
+  CHECK(game_state.slot.chars[2].grid[0] == 6 && game_state.slot.chars[2].equipped_qty[0] == 1 && game_state.gold() == (50 * 3) >> 2);
+  CHECK(shop::sell_element(game_state, 6, 0, {0, 0, 1}) == shop::Res::Ok);
+  CHECK(game_state.slot.chars[2].grid[0] == 0 && game_state.slot.chars[2].equipped_qty[0] == 0);
+  game_state.slot.set_recruited(2, false);
+  CHECK(shop::sell_element(game_state, 5, 0, {0, 0, 1}) == shop::Res::NoStock);
+}
+
 void test_forge() {
   Fixture fixture;
   GameState& game_state = fixture.gs;
@@ -255,6 +304,7 @@ void test_trade() {
 
 int main() {
   test_element_shop();
+  test_element_sell_picks();
   test_forge();
   test_breakdown_and_sell();
   test_trade();

@@ -315,7 +315,7 @@ def decode_span(code, start, end, hist=None, listing=None, errors=None, tail_ok=
 
 def print_optable(out):
     out("op   args  name")
-    out("00-83 0    note: key=op//11 (+octave*12), length=NOTE_LENGTHS[op%11] %s" % NOTE_LENGTHS)
+    out("00-83 0    note: key=op//11 (+octave*12), length=NOTE_LENGTHS[op%%11] %s" % (NOTE_LENGTHS,))
     out("84-8E 0    tie   (length index op-0x84)")
     out("8F-99 0    rest  (length index op-0x8F)")
     out("F0-FB 1    note with explicit length byte; FC tie, FD rest (same, explicit length)")
@@ -323,7 +323,7 @@ def print_optable(out):
         out("%02X   %-5s %s" % (op, OPS[op][1] or "-", OPS[op][0]))
     for sub in sorted(FE_OPS):
         out("FE%02X %-5s %s" % (sub, FE_OPS[sub][1] or "-", FE_OPS[sub][0]))
-    out("others (E3, E7-EF, FF, FE0C/0D/17/18/1F+): finish the channel (SoundVM_XX_Unimplemented)")
+    out("others (E3, E7-EF, FF, FE0C/0D/17/18/1F+): finish the channel")
 
 
 # ----------------------------------------------------------------- AKAO music

@@ -130,7 +130,7 @@ class DialogueBox {
   };
   static FrameSize frame_size(int skin_idx, float text_width, int lines);
 
-  void update(float dt);
+  void update(float dt, TextPace pace = {});
   void confirm();
   // Between SpriteBatch::begin() and end(). vw/vh: the view size passed to begin().
   // The canvas (1280 x 960 units) maps to the window as RDE draws it over the field (render::overlay_fit: RDE's 4:3 viewport, flatter
@@ -253,7 +253,7 @@ class DialogueDemo {
   // Art swap only: frame skin, portrait and fonts change; an open message keeps its text / typewriter / choice state.
   void set_art_mode(ArtMode mode);
 
-  void update(float dt);
+  void update(float dt, TextPace pace = {});
   // Inside SpriteBatch::begin()/end().
   void draw(float vw, float vh, const render::CanvasFit* fit = nullptr);
 

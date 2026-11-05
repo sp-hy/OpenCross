@@ -3,6 +3,7 @@
 //   resulting state (smoke test of the input handling). F3 opens the menu, F4 runs the screenshot sequence, F1 art mode, Esc quits.
 #include <SDL3/SDL.h>
 
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -35,6 +36,9 @@ int ocmenudemo_main(int argc, char** argv) {
       slot = std::atoi(argv[++i]);
     } else if (!std::strcmp(argv[i], "--drive")) {
       drive = true;
+    } else {
+      std::fprintf(stderr, "usage: ocmenudemo [--shots [dir]] [--lang <code>] [--orig] [--slot <n>] [--drive]\n");
+      return 2;
     }
   }
   const std::filesystem::path exe = platform::exe_dir();

@@ -44,7 +44,8 @@ void App::apply_art_mode() {
   const bool mods_changed = files.generation() != mod_gen;
   files.set_hd_mode(hd);
   if (world_ok) world.set_art_mode(hd, mods_changed);
-  if (battle_ready) battle.set_art_mode(hd, mods_changed);
+  const bool battle_textures_changed = battle_ready && battle.set_hd_textures(config.hd_battle_textures);
+  if (battle_ready) battle.set_art_mode(hd, mods_changed || (battle_textures_changed && hd));
   if (results_ok) results.set_art_mode(hd, mods_changed);
   if (party_ok) party_screen.set_hd(hd);
   if (flow_ready) flow.set_art_mode(am);
@@ -53,14 +54,17 @@ void App::apply_art_mode() {
   log::info("art mode: {}", config.art_mode == platform::ArtMode::Modded ? "modded" : hd ? "hd" : "original");
 }
 
+// A field-script movie hands the field back with the pad locked for 24 field frames, from the first field frame after the movie (the
+// field runs behind the held / fading last frame).
+static constexpr int kMovieInputLock = 24;
+
 void App::end_movie() {
-  // Keep the last frame for the cross-fade.
-  movie_player.close(true);
-  ghost_room = std::string(world.room_name());
-  ghost_tick0 = world.tick_count();
+  // Keep the last frame over the field, which resumes behind it at once.
+  movie_player.close(true, movie_fade);
   movie_open = false;
   ctx.set_clear_color(0.08f, 0.09f, 0.14f);
   world.movie_finished();
+  world.lock_input(kMovieInputLock);
   log::info("movie: finished");
   if (flow_ready) flow.set_title_logo_ready(true);
 }
@@ -78,6 +82,7 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
     log::warn("movie: {} could not be opened; skipped", rq.name);
     movie_player.close();
     world.movie_finished();
+    world.lock_input(kMovieInputLock);
     if (flow_ready) flow.set_title_logo_ready(true);
     return;
   }
@@ -85,6 +90,7 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
   if (row && (row->mode == 3 || row->mode == 4)) movie_player.set_staff_roll(files, movie::staff_strip_member(config.language));
   movie_open = true;
   movie_skippable = rq.skippable;
+  movie_fade = rq.fade;
   ctx.set_clear_color(0.0f, 0.0f, 0.0f);
   log::info("movie: {} ({}x{}, {:.1f} fps){}", movie_player.member(), movie_player.width(), movie_player.height(), movie_player.fps(),
             rq.skippable ? ", skippable" : "");
@@ -100,10 +106,14 @@ void App::open_main_menu(bool script) {
 // A screen that replaces the field hands it back faded in from black, whatever an A8 left: the main menu, the name entry and the
 // shops over 0x10 ticks, the party and relief screens over 0x20.
 static constexpr int kScreenFadeIn = 0x10, kPartyFadeIn = 0x20;
+// The pad lock after a menu screen and after the key-item list (field frames), and the wait before the menu button works again
+// after a menu screen (ticks).
+static constexpr int kScreenInputLock = 4, kKeyListInputLock = 8, kMenuButtonWait = 24;
 
 void App::close_field_screen(int fade_ticks) {
   world.menu_closed();
   world.fade_in_from_black(fade_ticks);
+  world.lock_input(kScreenInputLock, kMenuButtonWait);
 }
 
 void App::open_name_entry(int char_id) {
@@ -211,9 +221,9 @@ void App::apply_flow_action(const game::FlowAction& action) {
     if (flow.state() == game::FlowState::Opening) world.reset_for_new_game();
     else world.restore_vars();
   }
-  // The title script plays its movie before the jump.
+  // The title script plays its movie before the jump (its D4 #2,#520).
   if (action.load_room && world_ok && action.movie_row >= 0) {
-    world.play_movie(action.movie_row, 0, true);
+    world.play_movie(action.movie_row, 0, true, 0x208);
     if (world.movie_pending()) {
       deferred_flow = action;
       deferred_flow.movie_row = -1;
@@ -321,8 +331,8 @@ void App::update_achievements(int ticks) {
   const bool wanted = steam_allowed && config.steam;
   if (wanted != steam_wanted) {
     steam_wanted = wanted;
-    if (wanted) steam.connect();
-    else steam.disconnect();
+    if (!wanted) steam.disconnect();
+    else if (steam.connect()) steam.set_meta(game::Achievements::meta_api_name(), game::Achievements::api_names());
   }
   steam.pump();
   while (const std::optional<std::string> title = steam.next_unlocked()) ui.toast("Achievement unlocked - " + *title);
@@ -369,11 +379,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     pslot.set_playtime_frames(pslot.playtime_frames() + static_cast<u32>(ticks));
   }
   if (title_bd.running() && world.room_name() != game::kTitleRoom) title_bd.stop();
-  // Cross-fade the last movie frame into the scene behind it.
-  if (movie_player.held() && !movie_open && world_ok) {
-    const u64 tk = world.tick_count();
-    if (std::string(world.room_name()) != ghost_room || tk < ghost_tick0 || tk >= ghost_tick0 + 4) movie_player.fade_held(std::min(dt, 0.05), 0.5);
-  }
+  // The held last movie frame over the scene behind it; a long frame (a room load) counts as one.
+  if (movie_player.held() && !movie_open && world_ok) movie_player.step_held(std::min(dt, 1.0 / 60.0));
   // Screen fades around a load (title Continue / in-game Load): the game stands still while it fades out.
   if (flow_ready) {
     const bool out = flow.fading_out();
@@ -419,7 +426,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       results.update(static_cast<float>(dt), in);
       return;
     }
-    battle.update(static_cast<float>(dt), in);
+    apply_loop_speed(loop_speed.battle_factor, false);
+    battle.update(static_cast<float>(dt) * loop_speed.battle_factor, in);
     if (battle.finished() && results_ok && !results_shown && battle.battle()) {
       results_shown = true;
       results.open(*battle.battle(), config.debug_battle);
@@ -475,7 +483,10 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     } else if (game::GameFlow::any_button(in)) {
       if (world.load_room(game::kTitleRoom, 1)) flow.title().restart_prompt(), flow.set_title_logo_ready(true);
     }
-    if (flow.scene_mode()) world.update(platform::Input{}, ticks);
+    if (flow.scene_mode()) {
+      apply_loop_speed(1.0f, true);
+      world.update(platform::Input{}, ticks);
+    }
     if (title_bd.running() && world.room_name() == game::kTitleRoom)
       for (int i = 0; i < ticks; ++i) title_bd.tick();
     return;
@@ -509,7 +520,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       if (results.done()) finish_field_battle(true);
       return;
     }
-    battle.update(static_cast<float>(dt), in);
+    apply_loop_speed(loop_speed.battle_factor, false);
+    battle.update(static_cast<float>(dt) * loop_speed.battle_factor, in);
     if (battle.finished() && !(results_ok && battle.battle() && results.open(*battle.battle(), battle_scene))) finish_field_battle();
     return;
   }
@@ -537,6 +549,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       if (menu_from_script) world.menu_closed(menu.saved() ? 1 : 0);
       menu_from_script = false;
       world.fade_in_from_black(kScreenFadeIn);
+      world.lock_input(kScreenInputLock, kMenuButtonWait);
       log::info("fade: field fade-in after menu close (0x10 ticks)");
     }
     return;
@@ -584,10 +597,11 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       world.use_key_item(used);
     }
     key_popup.update(static_cast<float>(dt));
+    if (!key_popup.active()) world.lock_input(kKeyListInputLock);
     return;
   }
   // Item key (F / R) / pad button (RDE; pad: X = key items): the key-item list panel opens straight over the field, without the main menu.
-  if (key_popup_ok && menu_ok && world_ok && world.view().loaded() && !world.menu_active() && !world.battle_active() && world.idle() && menu.closed() &&
+  if (key_popup_ok && menu_ok && world_ok && world.view().loaded() && !world.menu_active() && !world.battle_active() && world.idle() && !world.input_locked() && menu.closed() &&
       (platform::action_pressed(in, platform::Action::Item) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_WEST]))) {
     std::vector<ui::KeyItemPopup::ListEntry> list;
     for (const int id : world.game_state().key_items()) {
@@ -642,7 +656,10 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     }
     return;
   }
-  world.update(in, ticks);
+  // The field loop: its own ticks under fast / slow mode, drawn at their interpolation.
+  apply_loop_speed(loop_speed.on ? loop_speed.field_factor : 1.0f, true);
+  if (loop_speed.on) step.alpha = loop_speed.field.alpha;
+  world.update(in, loop_speed.on ? loop_speed.field.ticks : ticks);
   if (flow_ready && config.auto_save && have_save_dat && !save_path.empty() && world.view().loaded() && flow.state() == game::FlowState::Field) {
     // RDE auto-save on a location change: card 1 slot 0 in the save.dat the Save menu uses, and / or the OpenCross page's
     // auto-save (Autosave::targets: each only where saves already exist; with none anywhere, the OpenCross page).

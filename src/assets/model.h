@@ -227,7 +227,8 @@ struct ModelAsset {
   } eye;
   // Optional RDE HD override, parallel to `textures` (empty vector = none; an entry with width 0 = no HD for that
   // texture). Same UV space: texel (u,v) of textures[i] is texel (u*hd_scale, v*hd_scale) of hd_textures[i].
-  // Only textures[0] gets an HD image (the HD TIM carries its own single CLUT).
+  // Only textures[0] gets an HD image (the HD TIM carries its own single CLUT), plus the eye strip of a battle player drawn on its
+  // Status-screen TIM (import::apply_battle_hd_tim).
   std::vector<import::Image> hd_textures;
   u32 hd_scale = 4;
   // A replacement image for textures[i] (empty vector / width 0 = none), any size, STP kept: a texture mod's (render::resolve_model_textures)
@@ -272,11 +273,13 @@ struct ModelAsset {
   bool has_mod(size_t i) const { return i < mod_textures.size() && mod_textures[i].width != 0; }
   // The image texture i is drawn with: the mod's, else texture_for(i, hd).
   const import::Image& drawn_texture(size_t i, bool hd) const { return has_mod(i) ? mod_textures[i] : texture_for(i, hd); }
-  // drawn_texture(0, hd) with eye frame `frame` pasted from the drawn strip (the mod's or the model's own). Empty as eye_frame_pixels.
+  // drawn_texture(0, hd) with eye frame `frame` pasted from the drawn strip (the mod's, else the strip's HD image when `hd`, else the
+  // model's own). Empty as eye_frame_pixels.
   std::vector<u8> drawn_eye_frame(int frame, bool hd) const {
     if (textures.empty()) return {};
     const import::Image& base = drawn_texture(0, hd);
-    return eye_frame_pixels(base.pixels, base.width, base.height, frame, has_mod(main_texture_count) ? &mod_textures[main_texture_count] : nullptr);
+    const size_t strip = main_texture_count;
+    return eye_frame_pixels(base.pixels, base.width, base.height, frame, has_mod(strip) ? &mod_textures[strip] : hd && has_hd(strip) ? &hd_textures[strip] : nullptr);
   }
 };
 

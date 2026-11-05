@@ -88,13 +88,21 @@ Res buy_element(GameState& gs, int id, int qty) {
   return Res::Ok;
 }
 
+int placed_copies(const GameState& gs, int character, int id) {
+  if (!gs.rules || id <= 0) return 0;
+  const bool stack = gs.rules->el_stack(id);
+  int copies = 0;
+  for (int row = 0; row < GameState::kRows; ++row)
+    for (int col = 0; col < GameState::kCols; ++col)
+      if (gs.cell_available(character, row, col) && gs.cell_element(character, row, col) == id)
+        copies += stack ? gs.cell_count(character, row, col) : 1;
+  return copies;
+}
+
 int party_copies(const GameState& gs, int id) {
   int copies = 0;
-  for (int character : gs.roster())
-    for (int row = 0; row < GameState::kRows; ++row)
-      for (int col = 0; col < GameState::kCols; ++col)
-        if (gs.cell_element(character, row, col) == id && gs.can_remove(character, row, col) == Why::Ok)
-          copies += gs.rules->el_stack(id) ? std::max(1, gs.cell_count(character, row, col)) : 1;
+  for (int character = 0; character < save::kNumChars; ++character)
+    if (gs.available(character)) copies += placed_copies(gs, character, id);
   return copies;
 }
 
@@ -106,28 +114,56 @@ std::vector<int> element_sell_list(const GameState& gs) {
   for (const auto& stack : gs.slot.elements)
     if (stack.qty > 0) push(stack.id);
   if (gs.rules)
-    for (int character : gs.roster())
+    for (int character = 0; character < save::kNumChars; ++character) {
+      if (!gs.available(character)) continue;
       for (int row = 0; row < GameState::kRows; ++row)
         for (int col = 0; col < GameState::kCols; ++col) {
           const int element = gs.cell_element(character, row, col);
-          if (element > 0 && gs.rules->is_element(element) && gs.can_remove(character, row, col) == Why::Ok) push(element);
+          if (element > 0 && gs.rules->is_element(element) && placed_copies(gs, character, element) > 0) push(element);
         }
+    }
   return out;
 }
-int element_sell_max(const GameState& gs, int id) { return gs.element_count(id) + party_copies(gs, id); }
+int element_sell_max(const GameState& gs, int id) { return gs.element_count(id); }
 
-Res sell_element(GameState& gs, int id, int qty) {
+namespace {
+void take_placed(GameState& gs, int character, int id, int count) {
+  const bool stack = gs.rules->el_stack(id);
+  for (int row = 0; row < GameState::kRows && count > 0; ++row)
+    for (int col = 0; col < GameState::kCols && count > 0; ++col) {
+      if (!gs.cell_available(character, row, col) || gs.cell_element(character, row, col) != id) continue;
+      const size_t cell = static_cast<size_t>(gs.cell_index(character, row, col));
+      save::SaveChar& member = gs.slot.chars[static_cast<size_t>(character)];
+      int left = 1;
+      if (stack) {
+        const int held = member.equipped_qty[cell];
+        left = std::max(0, held - count);
+        count = std::max(0, count - held);
+        member.equipped_qty[cell] = static_cast<u8>(left);
+      } else {
+        --count;
+        left = 0;
+      }
+      if (left < 1) member.grid[cell] = 0;
+    }
+}
+}  // namespace
+
+Res sell_element(GameState& gs, int id, int bag_qty, const std::vector<int>& picks) {
   if (!element_sellable(gs, id)) return Res::NotSellable;
-  if (qty < 1 || qty > element_sell_max(gs, id)) return Res::NoStock;
-  int left = qty;
-  while (left > 0 && gs.element_count(id) > 0) gs.take_element(id), --left;
-  // party copies: the cell is emptied (its copies return to the bag) and then sold from there
-  for (int character : gs.roster())
-    for (int row = 0; row < GameState::kRows && left > 0; ++row)
-      for (int col = 0; col < GameState::kCols && left > 0; ++col)
-        if (gs.cell_element(character, row, col) == id && gs.remove(character, row, col) == Why::Ok)
-          while (left > 0 && gs.element_count(id) > 0) gs.take_element(id), --left;
-  add_gold(gs, element_sell_total(gs, id, qty));
+  int picked = 0;
+  for (size_t character = 0; character < picks.size(); ++character) {
+    if (picks[character] == 0) continue;
+    if (picks[character] < 0 || character >= static_cast<size_t>(save::kNumChars) || !gs.available(static_cast<int>(character)) ||
+        picks[character] > placed_copies(gs, static_cast<int>(character), id))
+      return Res::NoStock;
+    picked += picks[character];
+  }
+  if (bag_qty < 0 || bag_qty > gs.element_count(id)) return Res::NoStock;
+  for (int i = 0; i < bag_qty; ++i) gs.take_element(id);
+  for (size_t character = 0; character < picks.size(); ++character)
+    if (picks[character] > 0) take_placed(gs, static_cast<int>(character), id, picks[character]);
+  add_gold(gs, element_sell_total(gs, id, bag_qty + picked));
   return Res::Ok;
 }
 

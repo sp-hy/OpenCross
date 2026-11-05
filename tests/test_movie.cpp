@@ -1,5 +1,6 @@
 // Checks for oc_movie: member resolution, Bink 2 decode of the first frames/audio (needs the RDE install; skipped
-// without it), the mixer's movie PCM clock and level, wall-clock Player pacing and play ranges without a GPU, the staff-roll strip.
+// without it), the mixer's movie PCM clock and level, wall-clock Player pacing and play ranges without a GPU, the held last frame's
+// hold / fade, the staff-roll strip.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -103,6 +104,19 @@ void test_player_pause_flag() {
   CHECK(!player.paused());
 }
 
+// The held last frame: without flag 8 it stays opaque through frame 9 and is gone at frame 10; with it, frame n is drawn at
+// (160 - n) / 160 until frame 159 and is gone at 160.
+void test_held_frame() {
+  CHECK(movie::held_frame_alpha(0.0, false) == 1.0 && movie::held_frame_alpha(9.0, false) == 1.0);
+  CHECK(movie::held_frame_alpha(10.0, false) == 0.0);
+  CHECK(movie::held_frame_alpha(0.0, true) == 1.0);
+  CHECK(std::fabs(movie::held_frame_alpha(56.0, true) - 104.0 / 160.0) < 1e-9);
+  CHECK(std::fabs(movie::held_frame_alpha(159.0, true) - 1.0 / 160.0) < 1e-9);
+  CHECK(movie::held_frame_alpha(160.0, true) == 0.0);
+  movie::Player player;
+  CHECK(!player.held() && !player.step_held(1.0 / 60.0));
+}
+
 // The staff roll's strip (144 x 8950, as RDE's): 240 rows on screen; the first row enters at the bottom at frame 0, the end of the strip
 // stands 52 % of the span above the bottom at the last frame; the Japanese strip only for Japanese.
 void test_staff_strip() {
@@ -138,6 +152,7 @@ int main() {
   test_mixer_movie_level();
   test_mixer_hold();
   test_player_pause_flag();
+  test_held_frame();
   test_staff_strip();
 
   const auto dir = platform::find_game_dir("");

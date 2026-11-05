@@ -175,6 +175,7 @@ class Actor {
   // Call before anything moves the actor this tick.
   void begin_tick() {
     prev_ = cur_;
+    clip_reverse_ = false;
     axes_prev_ = axes_now();
     axes_prev_ok_ = axes_ticked_;
     axes_ticked_ = true;
@@ -228,6 +229,10 @@ class Actor {
   }
   // Sets the target facing; the model turns at turn_rate per tick.
   void set_facing(int facing) { facing_ = facing & 0xFFF; }
+  // The clip runs backwards for the rest of this tick (off stair tiles).
+  void reverse_clip() { clip_reverse_ = true; }
+  // Takes another actor's position, triangle, tile flags, facing and model yaw at once (REMOVE_FROM_PARTY's slot shift).
+  void copy_pose(const Actor& from);
   void snap_facing() { smooth_warp_ = true; cur_.yaw = prev_.yaw = static_cast<float>((facing_ - kModelYawBias) & 0xFFF); }
   // Sets the model yaw so the model shows `facing` this tick (still interpolated from the previous tick): the curved walks
   // write the yaw directly.
@@ -548,6 +553,10 @@ class Actor {
   bool gt_on_ = false;
   // Walk flags of the current triangle, as last set by tick() / set_tile().
   u32 tile_flags_ = 0;
+  // Whole-unit height at the last clip step taken on a stair tile; only a stair tile refreshes it.
+  int stair_prev_y_ = 0;
+  // The clip plays backwards for this tick (follower back-off); begin_tick clears it.
+  bool clip_reverse_ = false;
   // Script animation id in force, -1 = automatic.
   int requested_ = -1;
   bool requested_loops_ = true;

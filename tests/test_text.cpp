@@ -516,6 +516,23 @@ void test_typewriter() {
   event_register = 1;
   event_tw.update(0.05f);
   CHECK(event_tw.visible() == 3 && event_tw.state() == Typewriter::State::WaitClose);
+
+  // Fast mode's text pace: 2.25 glyphs per tick and the {wait(30)} (1 s) cut to 1/8 s; slow mode: a glyph every second tick.
+  const TextPace fast{2.25f, 0.125f}, slow{0.5f, 2.0f};
+  Typewriter paced;
+  paced.start(pages);
+  paced.update(1.5f / 60.0f, fast);
+  CHECK(paced.visible() == 2 && paced.state() == Typewriter::State::Revealing);
+  paced.update(0.1f, fast);
+  CHECK(paced.visible() == 2);
+  paced.update(0.1f, fast);
+  CHECK(paced.visible() == 3 && paced.state() == Typewriter::State::WaitPage);
+  Typewriter slowed;
+  slowed.start(pages);
+  slowed.update(1.5f / 60.0f, slow);
+  CHECK(slowed.visible() == 0);
+  slowed.update(1.0f / 60.0f, slow);
+  CHECK(slowed.visible() == 1);
 }
 
 // Choice lines: the script's choice rows are guest (PS1) line numbers of the Japanese text, whose last page here has two

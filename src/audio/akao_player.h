@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "audio/akao_bank.h"
@@ -85,6 +86,8 @@ class AkaoPlayer {
   // linearly to volume127 over `frames` 60 Hz steps (every 4th 240 Hz update). The battle effect pack start calls it with
   // (0x100, 60, 0): the spell chant fades out over one second.
   void fade_sfx_volume(u32 mask, int frames, int volume127);
+  // SFX tick rate multiplier (fast / slow mode); 1 = the normal rate.
+  void set_tempo_scale(double scale) { tempo_scale_ = scale; }
   // Union of the masks of the running SFX channels.
   u32 active_sfx_mask() const;
   // SPU reverb: mode = libspu type, depth = vLOUT/vROUT (s16). Music sets both itself (header +8, FE 02 / FE 03);
@@ -114,8 +117,27 @@ class AkaoPlayer {
   void seek_music(double seconds, double warm = 1.0);
   double seconds() const { return double(rendered_) / rate_; }
   u32 rate() const { return rate_; }
+  // Music context push / pop: a copy of the whole sequencer state of the song (every channel with its position, loop stack, note and
+  // gate counters, volumes, pans, LFOs and instrument), the tempo with its slide, the reverb depth and the song clock. Voices are not
+  // part of it: restore_context silences every voice, gives every channel two more ticks on its note and gate counters, and keys the
+  // note of each channel that was inside a note (from its note to the next rest, FE 13 channels excepted) on again from its attack.
+  struct MusicContext;
+  std::shared_ptr<const MusicContext> save_context() const;
+  void restore_context(const MusicContext& context);
   // Diagnostics (ocaudio sfx-pitch): called at every note-on with the sounding note, its instrument and the SPU pitch register.
   std::function<void(int note, const Instrument& in, int reg)> note_trace;
+  // Diagnostics (ocaudio render-seq key list, tests): called at every voice key-on and key-off with the 240 Hz update count, the channel number and the voice.
+  std::function<void(u32 update, int channel, int voice, bool on)> key_trace;
+  // FE 0B: a channel requests effect00 id `id` the way the play-SFX command does (the id, then its chained ids, after the running sounds
+  // of the same mask end). volume = the high byte of the channel balance, pan = the high byte of the channel pan (0x80 = centre),
+  // mask = 1 and 2 by turns (1 at every song start). The player keeps them while `collect_sfx_requests` is set; the owner of the SFX
+  // player takes them after each render (the first ops of a song already run in load_music).
+  struct SfxRequest {
+    int id = 0, volume = 0, pan = 0x80;
+    u32 mask = 0;
+  };
+  bool collect_sfx_requests = false;
+  std::vector<SfxRequest> take_sfx_requests() { return std::exchange(sfx_requests_, {}); }
   // Diagnostics (ocaudio OC_AUDIO_PROBE, tests): one hardware voice's pitch register, pan gains (1.0 = 0x4000) and envelope level.
   struct VoiceProbe {
     bool active = false;
@@ -177,6 +199,8 @@ class AkaoPlayer {
     int octave = 0, transpose = 0;
     int a2_len = 0, fixed_len = 0, last_len = 0;
     bool legato = false, full_length = false, tenuto = false;
+    // FE 13: a resumed music context does not key this channel's note on again (kept until the song is loaded again).
+    bool no_rekey = false;
     // legato_prev: the previous note op ran under legato (this note does not key on). reverb (C2 / C3): the voice feeds the reverb unit.
     bool legato_prev = false;
     bool reverb = false;
@@ -213,9 +237,10 @@ class AkaoPlayer {
     // E1 / E2: random pitch depth (0 = off).
     int random_pitch = 0;
     int pitch_base = 0, fine_delta = 0;
-    int last_note = -1;
-    int porta_steps = 0, porta_left = 0;
-    float porta_off = 0, porta_step = 0;
+    // DA portamento: steps (0 = off). last_note / last_transpose: the note index (without transpose) and the transpose of the last note
+    // or tie, the glide's start; note 0 counts as none.
+    int porta_steps = 0;
+    int last_note = 0, last_transpose = 0;
     int bend_left = 0;
     // A4 pitch bend: a 16.16 ramp of the pitch REGISTER (bend, bend_step), zeroed by every note. Its operands (bend_len, bend_delta)
     // are armed for the next note or tie, which moves bend_note (the note index without transpose) by the delta and ramps from the
@@ -289,6 +314,7 @@ class AkaoPlayer {
   float master_ = 1.0f;
   std::array<Channel, kMaxChannels> ch_{};
   std::array<Voice, kVoices> voice_{};
+  double tempo_scale_ = 1.0;
   double tempo_ = 0x10000;  // FE00 operand units; one sequencer tick per 0x10000 per 240 Hz update
   int tempo_slide_left = 0;
   double tempo_slide_step = 0;
@@ -299,6 +325,8 @@ class AkaoPlayer {
   void tick_60hz();
   // 60 Hz frame counter: the index into kAkaoRandom.
   u8 random_index_ = 0;
+  u32 sfx_request_mask_ = 1;
+  std::vector<SfxRequest> sfx_requests_;
   double upd_left_ = 0;  // SPU samples until the next 240 Hz update
   u64 rendered_ = 0;
   u64 serial_ = 1;

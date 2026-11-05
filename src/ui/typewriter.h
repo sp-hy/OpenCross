@@ -86,6 +86,12 @@ constexpr float kSpeedTickHz = 60.0f;
 constexpr float kScriptFrameHz = 30.0f;
 constexpr int kDefaultSpeed = 64;
 
+// The text clock's pace (RDE's fast / slow modes run the message text on the real clock at their own rate): `reveal` multiplies the
+// glyphs per tick, `wait` the length of a {wait(n)} pause and of a {wend(n)} countdown.
+struct TextPace {
+  float reveal = 1.0f, wait = 1.0f;
+};
+
 // Opening of a field message window. The window grows from nothing to full size in kWindowGrowTicks 60 Hz ticks (scale k / 16 on
 // the k-th tick, counting the tick it opens on as the first); the text, its waits and the number entry start on the tick after it
 // is full, and confirm presses before that are dropped. The window and its text are not drawn while it grows; they fade in over
@@ -116,7 +122,7 @@ class Typewriter {
   void start(std::vector<TextPage> pages);
   // Same message laid out again (other font metrics): keeps the page, the revealed count (clamped), events and state.
   void replace_pages(std::vector<TextPage> pages);
-  void update(float dt);
+  void update(float dt, TextPace pace = {});
   // Confirm key: advances a wait / page / close; while revealing it fast-forwards to the next wait.
   void confirm();
 
@@ -155,6 +161,7 @@ class Typewriter {
   int auto_close_ = -1;
   float close_s_ = 0;
   bool fast_ = false;
+  TextPace pace_;
 };
 
 }  // namespace oc::ui

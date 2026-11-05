@@ -42,6 +42,7 @@
 #include "import/text.h"
 #include "movie/player.h"
 #include "platform/config.h"
+#include "platform/pad_remap.h"
 #include "platform/updater.h"
 #include "platform/window.h"
 #include "render/crt_pass.h"
@@ -180,9 +181,14 @@ class App {
   // ---- app_run.cpp ------------------------------------------------------------------------------------------------------------
   void log_frametime();
   void frame_hotkeys();
+  void frame_pad_remap();
   void settings_pad_filter();
   // RDE's speed toggles do nothing in the Radius tutorial (its field map or its battle).
   bool speed_locked() const;
+  // This frame's LoopSpeed (a frame of `dt` seconds) from the toggles and the field's state.
+  void update_loop_speed(double dt);
+  // The SFX player's tick rate and the field's text clock for a frame that runs the field (or the battle) at `factor`.
+  void apply_loop_speed(float factor, bool field);
   void rde_toggle_keys();
   void frame_settings();
   // Returns false when the run is over (the sweep's last room).
@@ -350,6 +356,7 @@ class App {
   bool feature_icons_ok = false;
   game::RdeHotkeys rde_hotkeys;
   // Pad buttons / axes held while the settings window was open: hidden from the game until let go.
+  platform::PadRemap pad_remap;
   std::array<bool, platform::Input::kButtons> settings_held_buttons{};
   std::array<bool, platform::Input::kAxes> settings_held_axes{};
   // The pad's Start press that may still open the settings window (held long enough) or the pause screen (released before), and when it
@@ -399,6 +406,16 @@ class App {
   platform::FixedStep stepper;
   double frame_dt = 0.0;
   platform::FixedStep::Result step{0, 0.0f};
+  // RDE's fast / slow modes speed only the field loop and the battle loop (run(), per route tick; off in replays): the field ticks on its
+  // own stepper at field_factor, the battle advances by battle_factor times the frame time; everything else keeps the real step.
+  struct LoopSpeed {
+    // ran: this frame ran the field or the battle loop.
+    bool on = false, ran = false;
+    float field_factor = 1.0f, battle_factor = 1.0f;
+    platform::FixedStep::Result field{0, 0.0f};
+  };
+  platform::FixedStep field_stepper;
+  LoopSpeed loop_speed;
   bool screenshot_pending = false;
   u64 screenshot_tick = 0;
   const char* screenshot_name = "screenshot.png";
@@ -414,10 +431,8 @@ class App {
 
   // ---- overlays driven from the field: FMV, main menu, shops ------------------------------------------------------------------
   movie::Player movie_player;
-  bool movie_open = false, movie_skippable = false;
-  // The last movie frame is held and faded into the next scene once the field has run a few ticks (or entered another room).
-  std::string ghost_room;
-  u64 ghost_tick0 = 0;
+  // movie_fade: the request's flag 8 (movie::held_frame_alpha); the last frame fades out over the resumed field, else it is held.
+  bool movie_open = false, movie_skippable = false, movie_fade = false;
   bool menu_from_script = false, shop_open = false;
   // Script screen (name entry or shop) that opens once the menu-open fade-out is over.
   std::optional<game::FieldWorld::MenuRequest> screen_after_fade;

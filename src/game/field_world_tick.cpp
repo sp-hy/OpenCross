@@ -582,10 +582,11 @@ std::string FieldWorld::layer_report(std::string* notes) const {
 void FieldWorld::update(const platform::Input& in, int ticks) {
   if (!initialised_) return;
   // ---- input snapshot
-  auto [confirm, up, down, left, right, repeat, select] = input_.sample(in, ticks);
-  // Select rotates the party order, once per frame before the ticks; not in the first field frames after a room load.
-  if (input_.select_wait > 0) input_.select_wait = std::max(0, input_.select_wait - ticks);
-  else if (select) rotate_party();
+  FieldInput::Edges edges = input_.sample(in, ticks);
+  input_.apply_lock(edges, ticks);
+  auto [confirm, up, down, left, right, repeat, select] = edges;
+  // Select rotates the party order, once per frame before the ticks (not while the pad lock runs, e.g. after a room load).
+  if (select) rotate_party();
   // Number entry: up / down step the cursor digit, left / right move the cursor; a held direction auto-repeats.
   const auto stepping = [&](bool pressed, u32 bit) { return pressed || (repeat & bit) != 0 ? 1 : 0; };
   const int digit_step = stepping(up, 1) - stepping(down, 4), digit_shift = stepping(right, 2) - stepping(left, 8);
@@ -621,11 +622,11 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
   if (std::any_of(in.pad_pressed.begin(), in.pad_pressed.end(), [](bool pressed) { return pressed; })) key_caps_ = false;
   if (std::any_of(in.key_pressed.begin(), in.key_pressed.end(), [](bool pressed) { return pressed; })) key_caps_ = true;
   dialogue_.set_key_caps(key_caps_);
-  dialogue_.update(static_cast<float>(ticks) / 60.0f);
+  dialogue_.update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   for (auto& window : extra_win_) {
     if (!window.box) continue;
     window.box->set_key_caps(key_caps_);
-    window.box->update(static_cast<float>(ticks) / 60.0f);
+    window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   }
 
   for (int i = 0; i < ticks; ++i) {

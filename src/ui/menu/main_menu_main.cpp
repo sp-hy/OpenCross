@@ -381,6 +381,19 @@ void MainMenu::Impl::build_main() {
   message(PX(200), PY(380));
 }
 
+// One roster row: the character's name, the HP label and current / max HP (capped 999) on the baseline `cap`.
+void MainMenu::Impl::roster_line(int character, float cap) {
+  const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
+  const std::u32string name = char_name(character);
+  text->prepare(face_gn, name);
+  const float width = text->measure(face_gn, name, 0.35f) / xscale;
+  HL(24, cap, name, kName, width < 98.0f ? 0.35f : 0.35f * 97.0f / width);
+  HS(0x4, 124, cap, capt("\xEF\xBC\xA8\xEF\xBC\xB0", "HP"));
+  HN(176, cap, std::to_string(std::min<int>(ch.cur_hp, 999)), ch.cur_hp < ch.max_hp / 8 ? kSel : kText, 0.29f);
+  HT(face_kb, 184, cap, utf32("/"), kText, 0.29f);
+  HN(224, cap, std::to_string(std::min<int>(ch.max_hp, 999)), kText, 0.29f);
+}
+
 // Roster panel (frame 141 at (8, 32), slid in from x -250 / out to it with the rows hidden): per row (17 from roster_top, 20 px apart)
 // a recruited character's name, HP label and current / max HP (capped 999); the cursor on the left, the bouncing pointer on the right
 // edge (right returns to the member pick), scroll arrows, and the footer hints or the remove-all prompt.
@@ -397,17 +410,7 @@ void MainMenu::Impl::build_roster() {
   if (roster_top > 0) scroll_arrow(237, 50, true);
   for (int row = 0; row < kRosterRows; ++row) {
     const int character = roster_top + row;
-    if (!gs->available(character)) continue;
-    const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
-    const float cap = 42.2f + 20.0f * static_cast<float>(row);
-    const std::u32string name = char_name(character);
-    text->prepare(face_gn, name);
-    const float width = text->measure(face_gn, name, 0.35f) / xscale;
-    HL(24, cap, name, kName, width < 98.0f ? 0.35f : 0.35f * 97.0f / width);
-    HS(0x4, 124, cap, capt("\xEF\xBC\xA8\xEF\xBC\xB0", "HP"));
-    HN(176, cap, std::to_string(std::min<int>(ch.cur_hp, 999)), ch.cur_hp < ch.max_hp / 8 ? kSel : kText, 0.29f);
-    HT(face_kb, 184, cap, utf32("/"), kText, 0.29f);
-    HN(224, cap, std::to_string(std::min<int>(ch.max_hp, 999)), kText, 0.29f);
+    if (gs->available(character)) roster_line(character, 42.2f + 20.0f * static_cast<float>(row));
   }
   tri(0, 42.0f + 20.0f * static_cast<float>(roster_row), !roster_ask);
   auto line = [&](float x, float y, const std::string& text_line) { TPfit(x, y, utf32(text_line), 232.0f - x, kText, 0.8f); };

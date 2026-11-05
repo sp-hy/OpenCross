@@ -42,10 +42,11 @@ void FieldWorld::draw_room(render::SpriteBatch& sprites, float vw, float vh) {
   if (view_.loaded()) view_.draw(sprites, vw, vh, 1.0f);
 }
 
-// C2: the poly colour (RGB, 128 = neutral) the background group's tiles are modulated with.
-void FieldWorld::set_layer_opacity(int layer, int r, int g, int b) {
+// C2: the colour of the background group (128 = neutral). RDE draws a group with one brightness, the first byte, on all three
+// channels; the second and third bytes are not drawn.
+void FieldWorld::set_layer_opacity(int layer, int r, int, int) {
   if (layer < 0) return;
-  view_.set_group_tint(static_cast<size_t>(layer), r, g, b);
+  view_.set_group_tint(static_cast<size_t>(layer), r, r, r);
 }
 
 // 8F screen ripple: the six parameters (x / y amplitude in pixels, x / y phase step per column / row, x / y phase advance per tick)

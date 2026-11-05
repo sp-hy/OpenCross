@@ -272,7 +272,7 @@ u32 phase_models(vfs::Vfs& archive, TextureDumpProgress& progress) {
     if (progress.cancel) break;
     try {
       std::string err;
-      if (auto asset = read_model_files(archive, stem, &err)) dump_model_asset(*asset, stem);
+      if (auto asset = read_model_files(archive, stem, &err, true)) dump_model_asset(*asset, stem);
       else ++failed;
     } catch (...) {
       ++failed;

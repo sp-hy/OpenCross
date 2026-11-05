@@ -10,6 +10,8 @@ add_library(oc_import STATIC
   room.cpp
   room_effects.h
   room_effects.cpp
+  script_fixes.h
+  script_fixes.cpp
   chip2.h
   chip2.cpp
   model.h

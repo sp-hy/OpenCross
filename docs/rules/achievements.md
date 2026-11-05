@@ -6,6 +6,8 @@ No achievement reads a story flag. Each is one of the rule kinds below, keyed by
 
 Nothing is earned unless `[Game] Steam` is on. A session in which the debug tools were used earns nothing. Cheats do not block achievements, as RDE's own boosts do not. The ways the engine differs from RDE here are listed in `docs/architecture.md` section 13.
 
+The 38th Steam achievement, `ach_ps41_all`, is the meta one: it is not evaluated by the rules below. `platform::SteamClient` unlocks it, once, right after an unlock it made leaves all 37 names achieved on Steam (the others may have been earned in earlier sessions). It follows the same gates as the 37: nothing is queued in a session where the debug tools were used.
+
 ## 1. Sampling
 
 Outside a battle the room rules run once every 60 ticks, whatever the speed mode. A pair of rooms held for fewer samples than listed earns nothing, and leaving it starts the count again.

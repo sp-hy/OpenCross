@@ -1,5 +1,6 @@
 // Checks for oc_audio: SAB header parse on a synthetic blob, loop-wrap maths, the BGM table, the mixer gain formula, and the AKAO side
-// (ADPCM decode, ADSR envelopes, the sequencer, SFX channel allocation, pitch vs output rate, live BGM switching, battle sound rendering).
+// (ADPCM decode, ADSR envelopes, the sequencer, SFX channel allocation, pitch vs output rate, live BGM switching, battle sound rendering,
+// the music gate mask, DA portamento, FE 0B sound requests and music push / pop).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -840,6 +841,190 @@ void test_note_restarts() {
               at(bent, 0.42), at(bent, 0.68), delayed, same_wave, at(sfx_regs, 0.7), at(music_regs, 0.55));
 }
 
+// Music gate mask (header +0x28): two channels play the same three length-24 notes (tempo 0x8000 = 2 updates per tick). The channel
+// whose bit is clear (0) holds every note to its full length: each old voice is keyed off in the update of the next key-on. The masked
+// channel (1) keys off 2 ticks (4 updates) before each next key-on.
+void test_gate_mask() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto seq = std::make_shared<audio::AkaoSeq>();
+  seq->code = std::make_shared<audio::AkaoCode>();
+  seq->code->data = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0x03, 0x03, 0x03, 0xA0};
+  seq->channels = {{0, 0}, {1, 4}};
+  seq->gate_mask = 2;
+  audio::AkaoPlayer player(44100);
+  std::vector<u32> on[2], off[2];
+  player.key_trace = [&](u32 update, int channel, int, bool key_on) { (key_on ? on : off)[channel & 1].push_back(update); };
+  player.load_music(seq, table);
+  std::vector<float> out(size_t(44100) * 2);
+  player.render(out.data(), 44100);
+  CHECK(on[0].size() == 3 && on[1].size() == 3 && off[0].size() == 3 && off[1].size() == 3);
+  if (on[0].size() != 3 || on[1].size() != 3 || off[0].size() < 2 || off[1].size() < 2) return;
+  for (int k = 0; k < 2; ++k) {
+    CHECK(off[0][size_t(k)] == on[0][size_t(k) + 1]);
+    CHECK(off[1][size_t(k)] + 4 == on[1][size_t(k) + 1]);
+  }
+  std::printf("gate mask: full-length key-off at next key-on %u/%u, masked channel %u updates early\n", off[0][0], on[0][1], on[1][1] - off[1][0]);
+}
+
+// DA portamento, an SFX program shaped like a room's (`DA 0A; note 62 len 12; note 59 len 96`, transpose 3): DA clears the remembered
+// note, so the first note keys on at its own pitch; the second is legato (no second key-on) and glides linearly in the pitch register
+// from the first note's register to its own over 10 ticks. After a rest the portamento is off: the next note jumps to its pitch.
+void test_portamento() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto run = [&](std::vector<u8> bytes, std::vector<int>& regs) {
+    auto code = std::make_shared<audio::AkaoCode>();
+    code->data = std::move(bytes);
+    audio::AkaoPlayer player(44100, true);
+    int key_ons = 0;
+    player.key_trace = [&](u32, int, int, bool key_on) { key_ons += key_on; };
+    player.start_program(code, 0, table);
+    std::vector<float> out(size_t(184) * 2);
+    for (int i = 0; i < 400; ++i) {
+      player.render(out.data(), 184);
+      const audio::AkaoPlayer::VoiceProbe voice = player.probe_voice(audio::AkaoPlayer::kSfxVoiceBase + audio::AkaoPlayer::kSfxChannels - 1);
+      if (voice.active) regs.push_back(voice.reg);
+    }
+    return key_ons;
+  };
+  std::vector<int> regs;
+  CHECK(run({0xA1, 0x00, 0xA5, 0x04, 0xC0, 0x03, 0xAD, 0x30, 0xDA, 0x0A, 0x7D, 0x59, 0xA0}, regs) == 1);
+  std::vector<int> steps;
+  for (int reg : regs)
+    if (steps.empty() || steps.back() != reg) steps.push_back(reg);
+  CHECK(steps.size() == 11);
+  if (steps.size() < 11) return;
+  const int from = steps[steps.size() - 11], to = steps.back();
+  bool linear = true;
+  for (int k = 1; k < 10; ++k) linear = linear && std::abs(steps[steps.size() - 11 + size_t(k)] - (from + (to - from) * k / 10)) <= 1;
+  CHECK(from > to && linear);
+  std::printf("portamento: %04X -> %04X in %zu register steps, linear %d\n", from, to, steps.size() - 1, linear);
+
+  std::vector<int> after_rest;
+  run({0xA1, 0x00, 0xA5, 0x04, 0xDA, 0x0A, 0x7D, 0x95, 0x7D, 0x59, 0xA0}, after_rest);
+  std::vector<int> levels;
+  for (int reg : after_rest)
+    if (levels.empty() || levels.back() != reg) levels.push_back(reg);
+  CHECK(levels.size() == 2);
+}
+
+// FE 0B: a music channel requests effect00 ids with its balance and pan high bytes and masks 1, 2, 1 (1 again after a new song start);
+// nothing is kept unless requests are collected. The requests replay on an SFX player like the play-SFX command: a new request ends
+// the running sound of its own mask, so two looping sounds stay (masks 1 and 2).
+void test_sfx_trigger() {
+  Bytes effect00(0x830, 0);
+  std::memcpy(effect00.data(), "AKAO", 4);
+  for (size_t i = 0; i < 256; ++i) put32(effect00, 0x10 + i * 4, 0xFFFFFFFFu);
+  put32(effect00, 0x10 + 5 * 4, 0xFFFF0000u);
+  const u8 loop[] = {0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xC8, 0x03, 0xCA};
+  std::memcpy(&effect00[0x810], loop, sizeof(loop));
+  audio::SfxBank bank;
+  CHECK(bank.load(effect00, tiny_bank()));
+  auto seq = std::make_shared<audio::AkaoSeq>();
+  seq->code = std::make_shared<audio::AkaoCode>();
+  seq->code->data = {0xFE, 0x00, 0x00, 0x80, 0xA3, 0x20, 0xAA, 0x50, 0xFE, 0x0B, 0x05, 0x92, 0xFE, 0x0B, 0x05, 0x92, 0xFE, 0x0B, 0x05, 0x92, 0xA0};
+  seq->channels = {{0, 0}};
+  CHECK(audio::akao_sfx_triggers(*seq) == std::vector<int>{5});
+  const auto triggers = audio::make_sfx_triggers(bank, *seq);
+  CHECK(triggers && triggers->programs.size() == 1);
+  audio::AkaoPlayer music(44100), sfx(44100, true);
+  music.load_music(seq, bank.table());
+  std::vector<float> out(size_t(44100) * 2);
+  music.render(out.data(), 44100);
+  CHECK(music.take_sfx_requests().empty());
+  music.collect_sfx_requests = true;
+  music.load_music(seq, bank.table());
+  std::vector<u32> masks;
+  for (int i = 0; i < 240; ++i) {
+    music.render(out.data(), 184);
+    const auto requests = music.take_sfx_requests();
+    for (const auto& request : requests) {
+      CHECK(request.id == 5 && request.volume == 0x20 && request.pan == 0x90);
+      masks.push_back(request.mask);
+    }
+    if (triggers) triggers->play(sfx, requests);
+    sfx.render(out.data(), 184);
+  }
+  CHECK((masks == std::vector<u32>{1, 2, 1}));
+  CHECK(sfx.active_channels() == 2 && sfx.active_sfx_mask() == 3);
+  music.load_music(seq, bank.table());
+  const auto first = music.take_sfx_requests();
+  CHECK(first.size() == 1 && first[0].mask == 1);
+}
+
+// Music push / pop: a song saved after 1.1 s (inside the gate of its sixth note) and restored into a fresh player of the same song
+// carries the song clock and tick count over, keys the held note on again at once, and reaches the next note two ticks (16.7 ms at
+// 120 ticks/s) later than the song that kept playing; a song saved during a rest restores with no voice sounding,
+// and a channel marked by FE 13 stays silent until its next note.
+void test_music_push() {
+  auto bank = audio::parse_bank(tiny_bank());
+  if (!bank) return;
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(bank);
+  auto song = [&](std::vector<u8> bytes) {
+    auto seq = std::make_shared<audio::AkaoSeq>();
+    seq->code = std::make_shared<audio::AkaoCode>();
+    seq->code->data = std::move(bytes);
+    seq->channels = {{0, 0}};
+    return seq;
+  };
+  auto scale = song({0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xC8, 3, 25, 47, 58, 80, 102, 124, 0xCA});
+  constexpr int kStep = 147;
+  std::vector<float> out(size_t(48510) * 2);
+  auto sounding_reg = [](const audio::AkaoPlayer& player) {
+    for (int v = 0; v < audio::AkaoPlayer::kVoices; ++v)
+      if (player.probe_voice(v).active) return player.probe_voice(v).reg;
+    return -1;
+  };
+  auto first_change = [&](audio::AkaoPlayer& player) {
+    const int start = sounding_reg(player);
+    for (int i = 1; i < 300; ++i) {
+      player.render(out.data(), kStep);
+      if (sounding_reg(player) != start) return i;
+    }
+    return -1;
+  };
+  audio::AkaoPlayer saved(44100), kept(44100), resumed(44100);
+  saved.load_music(scale, table);
+  kept.load_music(scale, table);
+  saved.render(out.data(), 48510);
+  kept.render(out.data(), 48510);
+  const auto context = saved.save_context();
+  resumed.load_music(scale, table);
+  resumed.restore_context(*context);
+  CHECK(resumed.ticks() == saved.ticks() && std::fabs(resumed.seconds() - saved.seconds()) < 1e-9);
+  resumed.render(out.data(), kStep);
+  kept.render(out.data(), kStep);
+  const int held = sounding_reg(kept);
+  CHECK(held > 0 && sounding_reg(resumed) == held);
+  const int kept_change = first_change(kept), resumed_change = first_change(resumed);
+  const double delay_ms = double(resumed_change - kept_change) * kStep * 1000.0 / 44100.0;
+  CHECK(kept_change > 0 && delay_ms > 12.0 && delay_ms < 21.0);
+  CHECK(sounding_reg(resumed) == sounding_reg(kept));
+
+  auto rests = song({0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xB2, 0x00, 0xC8, 0x03, 0x92, 0xCA});
+  audio::AkaoPlayer resting(44100), after_rest(44100);
+  resting.load_music(rests, table);
+  resting.render(out.data(), 15876);
+  after_rest.load_music(rests, table);
+  after_rest.restore_context(*resting.save_context());
+  after_rest.render(out.data(), kStep);
+  CHECK(after_rest.active_voices() == 0 && after_rest.active_channels() == 1);
+
+  auto marked = song({0xFE, 0x00, 0x00, 0x80, 0xFE, 0x13, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xC8, 3, 25, 47, 58, 80, 102, 124, 0xCA});
+  audio::AkaoPlayer marked_saved(44100), marked_resumed(44100);
+  marked_saved.load_music(marked, table);
+  marked_saved.render(out.data(), 48510);
+  marked_resumed.load_music(marked, table);
+  marked_resumed.restore_context(*marked_saved.save_context());
+  marked_resumed.render(out.data(), kStep);
+  const bool silent = marked_resumed.active_voices() == 0;
+  const bool next_note = first_change(marked_resumed) > 0 && marked_resumed.active_voices() == 1;
+  CHECK(silent && next_note);
+  std::printf("music push: held reg %04X, next note %.1f ms later than the song that kept playing\n", held, delay_ms);
+}
+
 }  // namespace
 
 int main() {
@@ -854,6 +1039,9 @@ int main() {
   test_signed_volume();
   test_keyon_volume_slide();
   test_note_restarts();
+  test_gate_mask();
+  test_portamento();
+  test_sfx_trigger();
   test_battle_render();
   test_pitch_rate();
   test_sab();
@@ -861,6 +1049,7 @@ int main() {
   test_table();
   test_mixer_gain();
   test_bgm_switch();
+  test_music_push();
   if (failures == 0) std::printf("test_audio: all passed\n");
   return failures ? 1 : 0;
 }

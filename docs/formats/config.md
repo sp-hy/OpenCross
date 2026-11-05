@@ -7,7 +7,8 @@ OpenCross keeps every user setting, the developer/automation switches and the Es
 * **Location.** `opencross.ini` next to the exe. `--config <file>` (anywhere on the command line, followed by a path) uses that file instead; the path is made absolute.
 * **Log file.** With the default ini the log is `opencross.log` next to the exe and is written only when `[Debug] Log=1` (Debug builds always log). With `--config` the log is the ini's path with the extension replaced by `.log`, and is always written.
 * **First launch.** If the file is missing or cannot be opened, the engine starts with the first-launch values of section 3 and writes the file at once. After the window exists it sets `[Game] Language` from the OS locale and writes the file again.
-* **When it is saved.** Every change made in the Esc settings window (all tabs, including the window's own position, size and tab), F6 (art mode cycle), F7 (widescreen toggle), the RDE hotkeys that flip slow / fast / no encounters / battle boost / auto battle (F1-F5 and the pad equivalents), and the Debug tab's *Write log file* box. There is no save on exit. A write that fails is logged as a warning.
+* **When it is saved.** Every change made in the Esc settings window (all tabs, including the window's own position, size and tab), F6 (art mode cycle), F7 (widescreen toggle) and the Debug tab's *Write log file* box. There is no save on exit. A write that fails is logged as a warning.
+* **Session-only keys.** RDE's five play-time toggles, `[Game] FastMode` / `SlowMode` and `[Cheats] NoEncounters` / `BattleBoost` / `AutoBattle`, are never written, and with the default ini every launch starts with them off (an older build's file may still hold them; they are ignored and the next save drops them), as RDE keeps them only in memory. A `--config` ini may set them (tests); `ocbattleview` reads them only from its `--config` ini. The hotkeys F1-F5 (and the pad equivalents) and the Cheats tab change them for the session only.
 * **Rewrite, not patch.** Saving rebuilds the whole file from the in-memory settings: comments and key order of a hand-edited file are not preserved, unknown sections and keys are dropped, and the file starts with the one-line comment `; OpenCross settings. Leave GameDir/SaveDir empty to auto-discover.` The file is written with LF line endings.
 * **Parsing (`Ini`).**
   * A line is trimmed of spaces, tabs and `\r`. Empty lines and lines starting with `;` or `#` are skipped. A comment must be a whole line; text after a value is part of the value.
@@ -50,6 +51,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `WideEdgeFade` | 4 | 0..96 | Widescreen only: fade the room picture's cut edge to black over this many layer pixels; 0 = hard cut. |
 | `Widescreen` | 0 | bool | The field, world map, battle and title sea fill the window's width; menus, dialogue, logo and movies stay 4:3. Off = 4:3 with black bars. F7 toggles it. |
 | `ArtMode` | `hd` | `hd original modded` | Art set: RDE's HD assets / the PS1 disc assets / HD plus the mods and OpenCross's own improvements. `classic` is accepted as an alias of `original`. Any other value reads as `hd` and logs a warning. F6 cycles it. |
+| `HdBattleTextures` | 1 | bool | HD and Modded art: the battle players are drawn on RDE's 4x textures, the left half of `hd/menu/player/<name>.tim` with the shut-eye frame from its right half (`docs/formats/model.md` section 12). 0 = the cdrom2 `.ltc` at 1x. No effect in the original art mode. |
 | `Ps1Res` | 0 | bool | "Retro look": draw the 3D and the menus at PS1 resolution and scale up with sharp pixels. |
 | `RenderScale` | 1.00 | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1Res`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
 | `Ps1Jitter` | 0 | bool | Integer vertex snapping and affine texture mapping in the 3D passes. |
@@ -61,8 +63,8 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
-| `FastMode` | 0 | bool | RDE fast mode (F2, pad RT). FMVs play at normal speed, as in RDE. |
-| `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Read as off when `FastMode` is on; the two are exclusive. |
+| `FastMode` | 0 | bool | RDE fast mode (F2, pad RT). Session-only (section 1). Only the field and battle loops run faster; menus, shops, name entry, the title, the results, FMVs and play time keep normal speed; message text reveals 2.25 times as fast and its waits last 1/8; sound effects tick as fast as the loop (`docs/architecture.md` 2.4). |
+| `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Session-only (section 1). Read as off when `FastMode` is on; the two are exclusive. The same loops as `FastMode` run slower; message text reveals at half speed and its waits last twice as long. |
 | `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
 | `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
 | `FastRate` | 0 | 0..5; 1 reads as 0 | Fast mode speed. 0 = RDE's (4x in the field, 2x in battle); 2..5 = that many times in both. |
@@ -140,7 +142,7 @@ Developer and automation switches, read once at boot (except `Log` and `Panels`,
 | `ShowFace` | -1 | int | Force this portrait (face) id on the message; -1 = the scripts' own. |
 | `ShowFlags` | 0 | int | Window flags of the message: the dialog op's flag byte (2 = the fixed window, `fieldscript.md` section 9) in the low byte; 0x800 / 0x1000 put the portrait on the right / left. |
 | `Battle` | -1 | int | Start directly in the battle with this encounter scene id; -1 = off. |
-| `BattleAuto` | 0 | bool | The battle plays itself (first ready PC: Attack, fierce on the first enemy). |
+| `BattleAuto` | 0 | bool | The battle plays itself (the player's auto battle rule: each PC attacks its remembered target) and the results pages confirm themselves. |
 | `Showcase` | 0 | bool | With `Battle`: every playable character on stage, free camera on. |
 | `ShowcaseStage` | -1 | int | Battlefield `bg_NN` used by `Showcase`; -1 = the scene's own. |
 | `Script` | empty | file path | Route script of timed inputs and commands; the run exits when it ends. |
@@ -162,7 +164,7 @@ Position and size are used only when both members of the pair are 0 or more.
 
 ### 2.9 `[Cheats]`
 
-All off by default; they never lock saving. The first three also toggle from the RDE hotkeys.
+All off by default; they never lock saving. The first three also toggle from the RDE hotkeys and are session-only: never written, off at every launch with the default ini (section 1).
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -204,7 +206,7 @@ The settings window applies a change as soon as it is made and saves the file in
 |---|---|
 | `VSync`, `Msaa`, `Anisotropy` | Applied to the GPU context at once. |
 | `WindowMode`, `Width`, `Height`, `Display` | Applied at once: the window is reconfigured and the swapchain rebuilt. |
-| `ArtMode`, mod lines | Art swap at once (rooms, models and caches reload); also on F6. |
+| `ArtMode`, `HdBattleTextures`, mod lines | Art swap at once (rooms, models and caches reload); also on F6 (`ArtMode`). `HdBattleTextures` rebuilds the battle unit models in place, like an art switch. |
 | `Master`, `Music`, `Sfx`, `Voices`, `VoiceVolume` | Mixer gains re-applied at once. |
 | `BgmSource` | Field and battle music switch at once. |
 | `Language` | Dialogue, flow, menus, shop and results switch at once. A movie already playing keeps its language. |

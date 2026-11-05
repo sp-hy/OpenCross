@@ -227,9 +227,13 @@ class FieldWorld final : public script::FieldHost {
   // Audio: the BGM mixer and the SFX sink (both optional, not owned). Song ids go through audio/bgm_table.h.
   void set_audio(audio::Mixer* mixer, audio::Sfx* sfx);
   // [Audio] BgmSource: remastered = RDE .sab streams; original = the PS1 AKAO sequence (musicNNN + its bank) on our sequencer.
-  // Flow rule: New Game / Continue end the title music (the title room's song must not carry into the next room).
+  // Flow rule: New Game / Continue end the title music (the title room's song must not carry into the next room) and forget the
+  // music a battle start pushed.
   void stop_music() {
-    if (mixer_) mixer_->stop();
+    if (mixer_) {
+      mixer_->drop_pushed_music();
+      mixer_->stop();
+    }
     pending_song_ = -1;
     last_song_ = -1;
   }
@@ -283,7 +287,15 @@ class FieldWorld final : public script::FieldHost {
   // The save gate of the main menu (FE 72 save points and the menu key): variable 0x3C == 1.
   bool can_save() const { return vm_.var(0x3C) == 1; }
   // FE 18 / FE 7F set global flag bit 12: the main menu does not open from the pad (opening, ending, gal_b06i's bed scene...).
-  bool menu_key_allowed() const { return !(vm_.global_flags() & (1u << 12)); }
+  // Not while the pad lock or the wait after a menu screen runs.
+  bool menu_key_allowed() const { return !(vm_.global_flags() & (1u << 12)) && input_.lock == 0 && input_.menu_wait == 0; }
+  // A menu screen (main menu, shop, name entry, party screen: 4 field frames, then the menu button waits 24 ticks) or the key-item
+  // list (8 field frames) has closed: the field reads the pad as released for that many field frames (2 ticks each).
+  void lock_input(int field_frames, int menu_wait_ticks = 0) {
+    input_.lock = field_frames * 2;
+    input_.menu_wait = menu_wait_ticks;
+  }
+  bool input_locked() const { return input_.lock > 0; }
 
   // ---- scripted menus / shops / movies handed to the host (App::advance) -----------------------------------------------------------
   struct MenuRequest {
@@ -311,6 +323,8 @@ class FieldWorld final : public script::FieldHost {
   struct MovieRequest {
     int index = 0, variant = 0;
     bool skippable = false;
+    // The last frame fades out over the resumed field (flag 8); otherwise it is held opaque for a few frames.
+    bool fade = false;
     // movie.dat member base name ("" = nothing to play)
     std::string name;
   };
@@ -450,6 +464,14 @@ class FieldWorld final : public script::FieldHost {
   bool idle() const { return controls_free(); }
   // the pause screen may open over the field (message windows, choices and locked controls do not prevent it)
   bool pause_allowed() const;
+  // RDE's fast / slow modes may change the field loop's speed: not on the title / ending maps 8 and 9, while variable 0x36 is set,
+  // during a room load or room change, a movie, or the input locks that follow a room load, a menu screen or the key-item list.
+  bool speed_allowed() const;
+  // Fast / slow mode: the field ticks `factor` times as fast as real time and the message windows run on the real clock at `pace`.
+  void set_text_clock(float factor, ui::TextPace pace) {
+    text_seconds_per_tick_ = 1.0f / (60.0f * factor);
+    text_pace_ = pace;
+  }
   // route `assert choiceline`: the message line the hand is on in any open choice window (-1 none)
   int dialogue_choice_line() const {
     int line = dialogue_.is_open() ? dialogue_.picking_line() : -1;
@@ -611,7 +633,7 @@ class FieldWorld final : public script::FieldHost {
   void sfx_pan(int slot, int frames, int pan) override;
   void fade_master_volume(int frames, int volume) override;
   void named_effect(script::NamedOp op, std::string_view name, int ent) override;
-  void play_movie(int index, int variant, bool skippable) override;
+  void play_movie(int index, int variant, bool skippable, int flags) override;
   bool movie_playing() override;
   void request_battle(int battle_id, int arg, int flags) override;
   bool battle_active() override;
@@ -777,6 +799,8 @@ class FieldWorld final : public script::FieldHost {
   render::MeshPipeline* meshes_ = nullptr;
   RoomView view_;
   ui::DialogueDemo dialogue_;
+  float text_seconds_per_tick_ = 1.0f / 60.0f;
+  ui::TextPace text_pace_;
   // The other message windows (the engine keeps 4, one per owning entity; see FieldWorld::open_dialogue), created on first use.
   struct ExtraWindow {
     std::unique_ptr<ui::DialogueDemo> box;

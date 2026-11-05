@@ -61,7 +61,8 @@ enum class WindowMode { Windowed, Borderless, Exclusive };
 enum class TexFilter { Nearest, Bilinear };
 
 // [Cheats] (Esc overlay "Cheats" tab): every toggle off by default, never locks saving. platform::cheats() is the
-// live set (bound to Config::cheats by main) so the rule code in the lower layers can read it.
+// live set (bound to Config::cheats by main) so the rule code in the lower layers can read it. The three RDE toggles are session-only
+// (Config::clear_session_toggles).
 //   no_encounters      RDE "encounters off" (F3 / L3): ordinary field battles are won without being fought
 //   battle_boost       RDE battle boost (F4 / R3): HP / stamina / elements refilled, negative status cleared
 //   auto_battle        RDE auto-battle (F5 / L3 + R3): the party plays itself
@@ -127,9 +128,10 @@ void bind_cheats(const Cheats* set);
 //            supports); the PS1-resolution passes stay aliased. Anisotropy: anisotropic filtering level of the bilinear textures of the
 //            3D models and stages (1 = off, 2, 4, 8, 16).
 //   [Game]   FastMode / SlowMode (RDE's speed toggles; exclusive; hotkeys F2 / F1 (platform/keymap.h),
-//            pad RT / LT): the simulation (field, battle) runs FastRate x faster (0 = RDE's: 4x in the field, 2x in battle; 2..5 =
-//            that many times; FixedStep caps at 5 ticks per frame) or at SlowRate percent (10..90, default RDE's 50); movies stay at
-//            normal speed. Both are off in the Radius tutorial (map / battle 386). AutoSave: RDE's auto-save (card 1 slot 0) on every location change.
+//            pad RT / LT; session-only, see clear_session_toggles): the field and battle loops run FastRate x faster (0 = RDE's: 4x in
+//            the field, 2x in battle; 2..5 = that many times; FixedStep caps at 5 ticks per frame) or at SlowRate percent (10..90,
+//            default RDE's 50); menus, shops, movies and play time keep normal speed. Both are off in the Radius tutorial (map / battle
+//            386). AutoSave: RDE's auto-save (card 1 slot 0) on every location change.
 //            Language: en fr it de es jp (dialogue text). Portraits: 2021 or 1999 (RDE face art set).
 //   [Mods]   one line per mod folder (ModSetting; folders not listed get the defaults, Esc overlay "Mods" tab). DumpStages / DumpTitle /
 //            DumpRooms / DumpModels / DumpEffects: which categories the Mods tab "Dump all textures" button writes (battle stage + title 3D
@@ -191,6 +193,8 @@ struct Config {
   int slow_rate = 50;
   bool widescreen = false;
   ArtMode art_mode = ArtMode::Hd;
+  // HD art: battle players on RDE's 4x Status-screen TIM (false = their 1x .ltc).
+  bool hd_battle_textures = true;
   std::vector<ModSetting> mods;
   bool dump_stages = true, dump_title = true, dump_rooms = true, dump_models = true, dump_weapons = true, dump_effects = false;
   bool ps1_res = false;
@@ -256,7 +260,10 @@ struct Config {
 
   // load() returns false when the file is missing or unreadable (defaults stay in place).
   bool load(const std::filesystem::path& file);
+  // save() never writes RDE's five play-time toggles (FastMode, SlowMode, NoEncounters, BattleBoost, AutoBattle).
   bool save(const std::filesystem::path& file) const;
+  // Switches those five off: RDE starts every launch with them off. load() still reads them (a --config ini for tests).
+  void clear_session_toggles();
 };
 
 // First launch (no opencross.ini): the [Game] Language the OS asks for: en fr it de es -> the same, ja -> jp, anything else en.

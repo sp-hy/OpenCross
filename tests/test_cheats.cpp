@@ -1,4 +1,5 @@
-// Cheats: the [Cheats] ini round trip (all off by default), the first-launch language mapping and RDE's encounter tables.
+// Cheats: the [Cheats] ini round trip (all off by default, RDE's toggles session-only), the first-launch language mapping, RDE's
+// encounter tables and its text pace.
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
@@ -37,8 +38,28 @@ int main() {
   platform::Config reloaded;
   CHECK(reloaded.load(path));
   std::filesystem::remove(path);
-  CHECK(reloaded.cheats.no_encounters && reloaded.cheats.no_clip && reloaded.cheats.always_loot && reloaded.cheats.no_craft_cost && reloaded.cheats.shop_all_weapons && reloaded.cheats.shared_growth);
+  CHECK(reloaded.cheats.no_clip && reloaded.cheats.always_loot && reloaded.cheats.no_craft_cost && reloaded.cheats.shop_all_weapons && reloaded.cheats.shared_growth);
   CHECK(!reloaded.cheats.god_mode && !reloaded.cheats.max_money && !reloaded.cheats.instant_growth);
+  // RDE's five play-time toggles are never written; a hand-written (or --config) ini still sets them, and clear_session_toggles
+  // switches them off as every launch with the player's ini does.
+  CHECK(!reloaded.cheats.no_encounters);
+  {
+    platform::Config toggles;
+    toggles.fast_mode = toggles.cheats.no_encounters = toggles.cheats.battle_boost = toggles.cheats.auto_battle = true;
+    toggles.fast_rate = 3;
+    CHECK(toggles.save(path));
+    std::stringstream text;
+    text << std::ifstream(path).rdbuf();
+    for (const char* key : {"FastMode", "SlowMode", "NoEncounters", "BattleBoost", "AutoBattle"}) CHECK(text.str().find(key) == std::string::npos);
+    CHECK(text.str().find("FastRate=3") != std::string::npos);
+    std::ofstream(path, std::ios::app) << "[Game]\nSlowMode=1\n[Cheats]\nNoEncounters=1\nBattleBoost=1\nAutoBattle=1\n";
+    platform::Config hand;
+    CHECK(hand.load(path));
+    CHECK(hand.slow_mode && hand.cheats.no_encounters && hand.cheats.battle_boost && hand.cheats.auto_battle && hand.fast_rate == 3);
+    hand.clear_session_toggles();
+    CHECK(!hand.fast_mode && !hand.slow_mode && !hand.cheats.no_encounters && !hand.cheats.battle_boost && !hand.cheats.auto_battle && hand.fast_rate == 3);
+    std::filesystem::remove(path);
+  }
 
   // --- [Ui] settings window geometry: default -1, round trip
   platform::Config ui_config;
@@ -198,6 +219,9 @@ int main() {
   {
     platform::Config defaults;
     CHECK(!defaults.fast_mode && !defaults.slow_mode && defaults.fast_rate == 0 && defaults.slow_rate == 50);
+    // RDE's text pace: fast reveals x2.25 with waits / 8, slow x0.5 with waits x2.
+    const ui::TextPace fast = game::text_pace(true, false), slow = game::text_pace(false, true), normal = game::text_pace(false, false);
+    CHECK(fast.reveal == 2.25f && fast.wait == 0.125f && slow.reveal == 0.5f && slow.wait == 2.0f && normal.reveal == 1.0f && normal.wait == 1.0f);
     using platform::Action;
     CHECK(platform::action_keys(Action::SlowSpeed)[0] == SDL_SCANCODE_F1 && platform::action_keys(Action::FastSpeed)[0] == SDL_SCANCODE_F2);
   }

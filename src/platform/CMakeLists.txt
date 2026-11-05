@@ -3,6 +3,8 @@ add_library(oc_platform STATIC
   config.cpp
   keymap.h
   keymap.cpp
+  pad_remap.h
+  pad_remap.cpp
   paths.h
   paths.cpp
   rumble.h

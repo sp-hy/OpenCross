@@ -1,0 +1,37 @@
+# Controller: Custom in battle with the battle words 0x76540213 (Triangle function on the Circle button, Confirm on the Triangle button):
+# the Triangle key confirms Attack, the camera hint shows the Circle glyph, and the Enter key switches the camera to DYNAMIC.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (memory-card choice)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # slot 5
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- set option 100 1
+- set buttons 1 76540213
+- request battle 1
+- wait battle start 600
+- wait 360
+- tap triangle
+- wait 60
+- screenshot prb_swapped.png
+- tap confirm
+- wait 40
+- screenshot prb_swapped_dynamic.png
+- quit

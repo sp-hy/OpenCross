@@ -132,6 +132,12 @@ class BattleView {
   void set_spell_lights(bool on) { spell_.lights_on = on; }
   // force: rebuild even if `hd` is unchanged (HD <-> Modded). HD: large_font_*; original: small_font_* (the HUD art is RDE's in both modes).
   void set_art_mode(bool hd, bool force = false);
+  // [Video] HdBattleTextures for the models loaded from now on; true when it changed (the caller then forces set_art_mode in HD art).
+  bool set_hd_textures(bool on) {
+    if (model_cache_.hd_textures == on) return false;
+    model_cache_.hd_textures = on;
+    return true;
+  }
   // Element descriptions (sysmes 0x1A rows) of the element menu.
   void set_language(import::Lang lang) { lang_ = lang; }
   bool set_bgm_remastered(bool on) { return audio_.set_remastered(on); }
@@ -760,6 +766,7 @@ class BattleView {
   void fx_set_pose(int unit, int pose);
   void build_result_ui();
   void auto_pick();
+  void auto_pick_heuristic();
   void auto_chain();
 
   // hud
@@ -1039,7 +1046,7 @@ class BattleView {
   static constexpr int kCastHandover = 10, kCastHandoverTail = 3;
   float time_ = 0;
   int auto_delay_ = 0;
-  // BattleAuto rotation state.
+  // Driver heuristic state (OC_BATTLE_AUTO_HEURISTICS).
   int auto_pc_ = -1, auto_target_ = -1, auto_step_ = 0;
   int tick_count_ = 0;
   // Video frames (60 Hz) since the view started, counting the frames fx_slow_skip() swallows (tick_count_ = game ticks, which a pack's slow
@@ -1448,6 +1455,8 @@ class BattleView {
   int script_gap_ = -1;
   int script_passed_ = 0;
   int script_stall_ = 0;
+  // Set when an approach (1) or return (2) script starts, cleared when any unit's script ends on op 0x3E: an A6 (Killed) waits for it.
+  int move_wait_ = 0;
   void script_pump();
   bool script_barrier_clear(const battle::pac::Event& event) const;
   bool script_gated(const battle::ActionEvent& event) const { return event.script_seq >= 0 && event.script_seq >= script_passed_; }

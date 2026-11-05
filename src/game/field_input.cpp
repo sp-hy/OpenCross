@@ -18,8 +18,8 @@ constexpr u16 kKeyCircle = 0x20, kKeyCross = 0x40, kKeySelect = 0x100, kKeyStart
               kKeyLeft = 0x8000;
 // A held direction repeats once it has been down for more than this many ticks, then every tick.
 constexpr int kRepeatDelay = 21;
-// After a room load Select is ignored for 24 field frames (2 ticks each).
-constexpr int kSelectWait = 48;
+// After a room load the pad reads as released for 24 field frames (2 ticks each).
+constexpr int kRoomLoadLock = 48;
 using platform::kSelectKey;
 using platform::kStartKey;
 
@@ -30,7 +30,7 @@ void FieldInput::reset() {
   held_ticks = {};
   action_pending = false;
   input_mask = 0xFFFF;
-  select_wait = kSelectWait;
+  lock = kRoomLoadLock;
 }
 
 FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
@@ -55,6 +55,9 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
     // Pad: B (PS1 cross) = dash, X = key items, Y = menu, Start = pause.
     run_held = run_held || in.pad_down[SDL_GAMEPAD_BUTTON_EAST];
     confirm = confirm || in.pad_pressed[SDL_GAMEPAD_BUTTON_SOUTH];
+    // In the field the stick clicks act as the two functions: L3 confirms, R3 runs and cancels (after the Controller assignment).
+    run_held = run_held || in.pad_down[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
+    confirm = confirm || in.pad_pressed[SDL_GAMEPAD_BUTTON_LEFT_STICK];
     up = up || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP];
     down = down || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN];
     left = left || in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_LEFT];
@@ -88,7 +91,8 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
   if (mask & 4) pad_word |= kKeyDown;
   if (mask & 8) pad_word |= kKeyLeft;
   // The script-visible key word (ops 50 / 51: the world map's "enter the location" test reads the circle bit) takes the pad too.
-  const bool pad_a = in.pad_connected && in.pad_down[SDL_GAMEPAD_BUTTON_SOUTH], pad_b = in.pad_connected && in.pad_down[SDL_GAMEPAD_BUTTON_EAST];
+  const bool pad_a = in.pad_connected && (in.pad_down[SDL_GAMEPAD_BUTTON_SOUTH] || in.pad_down[SDL_GAMEPAD_BUTTON_LEFT_STICK]);
+  const bool pad_b = in.pad_connected && (in.pad_down[SDL_GAMEPAD_BUTTON_EAST] || in.pad_down[SDL_GAMEPAD_BUTTON_RIGHT_STICK]);
   if (platform::action_down(in, Action::Ok) || pad_a) pad_word |= kKeyCircle;
   if (platform::action_down(in, Action::Cancel) || pad_b) pad_word |= kKeyCross;
   if (in.key_down[kStartKey] || (in.pad_connected && in.pad_down[SDL_GAMEPAD_BUTTON_START])) pad_word |= kKeyStart;
@@ -96,6 +100,19 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
   key_latch |= static_cast<u16>(pad_word & ~0u);
   const bool select = (in.key_pressed[kSelectKey] || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_BACK])) && (input_mask & kKeySelect);
   return {confirm, up, down, left, right, repeat, select};
+}
+
+void FieldInput::apply_lock(Edges& edges, int ticks) {
+  menu_wait = std::max(0, menu_wait - ticks);
+  if (lock <= 0) return;
+  lock = std::max(0, lock - std::max(ticks, 1));
+  edges = {};
+  held_mask = 0;
+  held_ticks = {};
+  run_held = false;
+  pad_word = 0;
+  key_latch = 0;
+  pad_analog = pad_rstick = false;
 }
 
 }  // namespace oc::game

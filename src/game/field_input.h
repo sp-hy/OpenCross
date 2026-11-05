@@ -18,8 +18,10 @@ struct FieldInput {
   u16 key_latch = 0;
   // FE 77: ANDed with the pad words; room init 0xFFFF
   u16 input_mask = 0xFFFF;
-  // Ticks after a room load in which Select does not rotate the party (24 field frames)
-  int select_wait = 0;
+  // Ticks in which the pad reads as released (24 field frames after a room load, FieldWorld::lock_input after the menu screens and
+  // the key-item list close), and
+  // ticks before the menu button opens the main menu again.
+  int lock = 0, menu_wait = 0;
   float pad_x = 0, pad_y = 0;
   bool pad_analog = false;
   // right stick (up positive), outside the dead zone
@@ -38,10 +40,12 @@ struct FieldInput {
     bool select = false;
   };
 
-  // Room change: no held direction, no pending action, the key mask open again, Select held off for 24 field frames.
+  // Room change: no held direction, no pending action, the key mask open again, the pad locked for 24 field frames.
   void reset();
   // Reads the frame's keyboard and pad state into the snapshot and returns the press edges; `ticks` = game ticks since the last call.
   Edges sample(const platform::Input& in, int ticks);
+  // While `lock` runs: the snapshot of this sample reads as no button held and no press (counted down by `ticks`).
+  void apply_lock(Edges& edges, int ticks);
   u16 keys_held() const { return static_cast<u16>(pad_word & input_mask); }
   u16 latched_keys() const { return static_cast<u16>(key_latch & input_mask); }
   void clear_key_latch() { key_latch = 0; }

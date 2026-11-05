@@ -16,6 +16,7 @@
 #include "game/effects/gpu_effects.h"
 #include "game/free_cam.h"
 #include "platform/keymap.h"
+#include "platform/pad_remap.h"
 #include "render/camera.h"
 
 namespace oc::app {
@@ -25,18 +26,16 @@ int App::run() {
   ft_prev = std::chrono::steady_clock::now();
   while (window.pump(input) && !quit_requested && !restart_for_update) {
     log_frametime();
+    frame_pad_remap();
     frame_hotkeys();
     frame_settings();
     debug_tools_frame();
     frame_dt = timer.tick();
-    // [Game] FastMode / SlowMode: more or fewer 60 Hz ticks per frame.
-    if (!movie_open && !routing && !replaying) {
-      const bool in_battle = battle_ok || battle_in_field, locked = speed_locked();
-      const float factor = game::speed_factor(config.fast_mode, config.slow_mode, config.fast_rate, config.slow_rate, in_battle, locked);
-      const bool field_slow = config.slow_mode && !config.fast_mode && !in_battle && !locked;
-      frame_dt *= slow_field_cycle.apply(frame_dt, field_slow, factor);
-    }
     step = stepper.advance(frame_dt);
+    if (!routing) {
+      update_loop_speed(frame_dt);
+      loop_speed.field = field_stepper.advance(frame_dt * loop_speed.field_factor);
+    }
     // The art mode cycles SD -> HD -> Modded -> SD (also in the options window).
     if (input.key_pressed[SDL_SCANCODE_F6]) {
       config.art_mode = config.art_mode == platform::ArtMode::Original ? platform::ArtMode::Hd
@@ -46,7 +45,10 @@ int App::run() {
       apply_art_mode();
       ui.toast(config.art_mode == platform::ArtMode::Modded ? "Art: Modded" : config.art_mode == platform::ArtMode::Hd ? "Art: HD" : "Art: Original");
     }
+    loop_speed.ran = false;
     if (!simulate()) break;
+    // Menus, shops, the results and the other screens play their sounds at the normal rate (RDE resets the SFX tick rate there).
+    if (!loop_speed.ran) mixer.set_sfx_tempo(1.0f);
 
     ++frame_count;
     if (screenshot_pending && (battle_ok ? frame_count >= screenshot_tick : (world_ok && world.tick_count() >= screenshot_tick))) {
@@ -107,6 +109,23 @@ void App::log_frametime() {
     log::info("frametime: frame {} tick {} {:.1f} ms{}", ++ft_frame, world.tick_count(), ms, ms > 20.0 ? "  <-- SLOW" : "");
 }
 
+// The Customize > Controller: Custom assignment of the loaded game, field pair or battle pair, applied to the frame's input before
+// anything reads it; the assignment page itself reads the pad as it is.
+void App::frame_pad_remap() {
+  platform::ButtonMap map;
+  if (flow_ready && !(menu_ok && menu.pad_page_open())) {
+    const ui::GameState& state = flow.game_state();
+    if (state.option(ui::opt::kControllerEdit)) {
+      const size_t pair = (battle_ok || battle_in_field) ? 1 : 0;
+      map.custom = true;
+      map.face = state.slot.button_cfg[pair];
+      map.aux = state.slot.button_cfg[pair + 2];
+    }
+  }
+  platform::set_active_map(map);
+  if (!routing && !replaying) pad_remap.apply(input, map);
+}
+
 void App::frame_hotkeys() {
   // The settings window: Esc, or the pad's Start held for kStartHoldMs (it opens while still held); a Start press closes it. A shorter
   // Start press is RDE's Start: it opens the pause screen on its release (start_tap), so holding never shows the pause first (the keyboard's
@@ -163,8 +182,32 @@ bool App::speed_locked() const {
   return world_ok && world.map_id() == game::kSpeedLockedMap;
 }
 
+// [Game] FastMode / SlowMode, as RDE: the field loop runs faster or slower only while the field itself is running (FieldWorld::
+// speed_allowed), the battle loop in any battle; menus, shops, name entry, the title, the results, movies and play time keep the real
+// step (App::advance picks which loop a frame runs). A replay runs 1:1 (it holds the ticks the field ran); a route runs them from its
+// ini's FastMode / SlowMode, per route tick.
+void App::update_loop_speed(double dt) {
+  loop_speed.on = !movie_open && !replaying;
+  loop_speed.field_factor = loop_speed.battle_factor = 1.0f;
+  if (!loop_speed.on) return;
+  const bool in_battle = battle_ok || battle_in_field, locked = speed_locked();
+  loop_speed.battle_factor = game::speed_factor(config.fast_mode, config.slow_mode, config.fast_rate, config.slow_rate, true, locked);
+  const bool field_runs = !in_battle && world_ok && world.speed_allowed();
+  const float field = field_runs ? game::speed_factor(config.fast_mode, config.slow_mode, config.fast_rate, config.slow_rate, false, locked) : 1.0f;
+  const bool field_slow = field_runs && config.slow_mode && !config.fast_mode && !locked;
+  loop_speed.field_factor = slow_field_cycle.apply(dt, field_slow, field);
+}
+
+void App::apply_loop_speed(float factor, bool field) {
+  loop_speed.ran = true;
+  mixer.set_sfx_tempo(factor);
+  if (!field) return;
+  const bool live = loop_speed.on && !speed_locked();
+  world.set_text_clock(factor, game::text_pace(live && config.fast_mode, live && config.slow_mode));
+}
+
 // RDE's play-time toggles ([Game] SlowMode / FastMode, [Cheats] NoEncounters / BattleBoost / AutoBattle) from its keys and pad
-// buttons. What is on shows as RDE's icons (draw_frame).
+// buttons. What is on shows as RDE's icons (draw_frame); like RDE they are never saved.
 void App::rde_toggle_keys() {
   if (routing || replaying) return;
   auto held = [&](platform::Action action) {
@@ -196,7 +239,6 @@ void App::rde_toggle_keys() {
   if (toggles == before) return;
   config.slow_mode = toggles.slow, config.fast_mode = toggles.fast;
   cheats.no_encounters = toggles.encounters, cheats.battle_boost = toggles.boost, cheats.auto_battle = toggles.auto_battle;
-  config.save(config_file);
 }
 
 // The live [Video] settings read every frame, so the overlay's changes apply at once.
@@ -214,9 +256,7 @@ void App::frame_settings() {
                                  : 0.0f;
   render::set_wide_extra(wide_extra);
   render::set_screen_extra(wide_extra);
-  // [Video] FovDeg (horizontal degrees of the 4:3 picture) -> the H scale: the PS1's H 512 gives 2 atan(160 / 512); 35 = exactly the PS1 view.
-  render::set_fov_scale(config.fov_deg == 35 ? 1.0f
-                                             : (160.0f / 512.0f) / std::tan(static_cast<float>(config.fov_deg) * 0.5f * 3.14159265f / 180.0f));
+  render::set_fov_scale(render::fov_scale_for(config.fov_deg));
   // [Video] WideHud ("Wide Menus/HUD"): the columns per side the battle HUD edge groups and the main-menu screens spread out by -
   // default 0 (the 4:3 canvas), 16:9 = at most a 16:9 frame's columns (49 at the 236-row fit), full = the window's.
   hud_cols = !config.widescreen || config.wide_hud == 0 ? 0.0f
@@ -245,7 +285,7 @@ bool App::simulate() {
     flow.tick_boot_logo(settings_pause ? 0 : step.ticks, !settings_pause && game::GameFlow::any_button(input));
   } else if (battle_ok || battle_in_field) {
     advance(input, frame_dt, step.ticks);
-    if (recorder.active()) recorder.write(frame_dt, step.ticks, input);
+    if (recorder.active()) recorder.write(frame_dt * loop_speed.battle_factor, step.ticks, input);
   } else if (world_ok && sweeping) {
     if (!sweep_frame()) return false;
   } else if (world_ok) {
@@ -275,9 +315,13 @@ void App::field_frame() {
     // last tick's state: the accumulator's alpha kept cycling between the previous and current states (the title sea jittered).
     const bool settings_pause = ui.options_open && ui.current_tab() != "Debug";
     const int ticks = settings_pause ? 0 : step.ticks;
-    if (settings_pause) step.alpha = 1.0f;
+    if (settings_pause) {
+      step.alpha = 1.0f;
+      loop_speed.field = {0, 1.0f};
+    }
     advance(input, frame_dt, ticks);
-    if (recorder.active()) recorder.write(frame_dt, ticks, input);
+    // A replay runs 1:1: it gets the ticks the field loop ran.
+    if (recorder.active()) recorder.write(frame_dt, loop_speed.on ? loop_speed.field.ticks : ticks, input);
   }
 }
 

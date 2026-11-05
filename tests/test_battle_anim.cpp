@@ -93,6 +93,30 @@ void test_vm_basic() {
   CHECK(result.ev.size() == 3 && result.ev[1].second.kind == bseq::Event::Damage && result.ev[1].first == 0);
 }
 
+// GetOption / GetBeta / GetNumberTarget write the running unit's control-block words into their output variables.
+void test_vm_unit_queries() {
+  bseq::Table table;
+  CHECK(table.parse(make_block({0x69, 1, 1, 0xA9, 0, 2, 0xA1, 3, 4, 0x09, 4, 0x00}, {0x00})));
+  bseq::Ctx ctx;
+  ctx.option = 0x4070;
+  ctx.result = 0x20;
+  ctx.target_count = 3;
+  ctx.target_index = 2;
+  bseq::Vm vm;
+  CHECK(vm.start(&table, 0, 0));
+  std::vector<bseq::Event> out;
+  vm.tick(ctx, out);
+  CHECK(vm.var(1) == 0x4070);
+  CHECK(vm.var(2) == 0x20);
+  CHECK(vm.var(3) == 3);
+  CHECK(vm.var(4) == 2);
+  // The Done event names the op that ended the script (op 0x3E clears the view's move-wait).
+  bseq::Table end_table;
+  CHECK(end_table.parse(make_block({0x3E}, {0x00})));
+  Run result = run(end_table, 0, 0, ctx);
+  CHECK(!result.ev.empty() && result.ev.back().second.kind == bseq::Event::Done && result.ev.back().second.a == 0x3E);
+}
+
 void test_vm_branch() {
   // GetAction(var1, var2); if var1 == 2 jump to the heavy branch (SetAnim 130) else SetAnim 128; end
   //  0: 43 1 2        GetAction
@@ -787,6 +811,7 @@ int main() {
   test_vm_weapon_show();
   test_vm_round35_ops();
   test_vm_branch();
+  test_vm_unit_queries();
   test_vm_waits();
   test_vm_run_away();
   test_vm_jump();

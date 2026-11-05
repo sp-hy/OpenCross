@@ -1,6 +1,9 @@
 // game/achievements.h: the trigger rules, without Steam.
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -42,6 +45,13 @@ void walk(Achievements& achievements, const std::vector<std::pair<int, int>>& mo
 }  // namespace
 
 int main() {
+  {  // The 37 API names are distinct and none is the meta one.
+    const std::vector<std::string> names = Achievements::api_names();
+    CHECK(names.size() == 37);
+    CHECK(std::set<std::string>(names.begin(), names.end()).size() == 37);
+    CHECK(std::find(names.begin(), names.end(), Achievements::meta_api_name()) == names.end());
+    CHECK(std::strcmp(Achievements::meta_api_name(), "ach_ps41_all") == 0);
+  }
   {  // A pair must hold for its samples; leaving restarts them.
     Achievements achievements;
     stay(achievements, 0x1A, 0x1F, 19);

@@ -42,6 +42,8 @@ struct Equip {
   // Accessory ids (0xF9..0xFB let the hi 0xE0000000 statuses land).
   std::array<u16, 3> acc{};
   int stamina_mod = 0, start_gauge = 0;
+  // Sum of the signed +4 bytes of the flag-0x80 accessories, added to the wearer's duration stat when a status timer starts.
+  int dur_mod = 0;
   std::vector<int> hp_pct;
 };
 // Builds the totals from item ids (weapon, armour, 3 accessories).
@@ -134,7 +136,7 @@ struct Unit {
   // The double / triple tech the last element menu build put into the cell, 0 = the cell shows its own element.
   std::array<u16, data::kGridCells> combo_word{};
   // The cell's colour-seal flag as the last refresh left it (Battle::open_element_menu, Battle::refresh_seal_flags): a double / triple tech
-  // judges its partners by this flag, not by the live status word.
+  // judges its partners by this flag, not by the live status word, and an enemy's element pick (script ops 55 / 8F) skips a flagged cell.
   std::array<bool, data::kGridCells> seal_flag{};
   // Copies left of a consumable stack cell (PartyMember::qty); 0 = single / none.
   std::array<u8, data::kGridCells> qty{};
@@ -219,10 +221,18 @@ struct ActionEvent {
   bool death_cast = false;
   // A presentation-only element (mode 50, the death casts): the forced miss shows no number.
   bool silent = false;
+  // Battle script op 96's colour gate cancelled the result: the hit deals 0 and its number shows "0".
+  bool gated = false;
+  // The result word the element mode wrote into the caster's control block (anim op 0xA9 reads it): Beta (mode 47) the field colour
+  // bit << 2, Shuffle (mode 48) the swapped HP value; -1 = the mode wrote none.
+  int caster_word = -1;
   // Part of an all-targets element.
   bool all_targets = false;
   // The cast was caught in the other side's element trap: it fizzles, and the trap pack of its colour plays instead of its own effect.
   bool caught = false;
+  // The effect id the cast plays instead of its record's (+0x10): a caster sealed in the element's colour plays 190 + colour (1 green .. 6
+  // blue); -1 = its own.
+  int fx_eid = -1;
   // Pilfer (mode 30): message row of the result window, 0 item / 1 element stolen, 2 failed, 3 nothing to steal; -1 = not a steal.
   int steal_msg = -1;
   // The stolen word (bit 15 = element id, else item id); steal_msg 0 / 1.
@@ -370,6 +380,10 @@ class EnemyBrain {
   virtual bool defeated(int /*unit*/) const { return false; }
   // Op AF: the player command phase does nothing while set.
   virtual bool menu_locked() const { return false; }
+  // Op 96: a PC's hit on an enemy deals 0 unless it is an element of this colour (1 green .. 6 blue); 0 = no gate.
+  virtual int colour_gate() const { return 0; }
+  // An element revive brought the unit back: its script entity runs again.
+  virtual void on_revived(int /*unit*/) {}
   // Ops 34 / 35 / the scene seed: off-stage (no victory block, no time-step countdown).
   virtual bool hidden(int /*unit*/) const { return false; }
   // Ops 34 / 35 / 5B / the seed: the cursor ring skips it; 5B alone does not hide.
@@ -529,8 +543,8 @@ class Battle {
   // from its own cells, each double / triple tech the PC's cells offer is written into its cells and its partners' cells, and the PC's own
   // colour-seal flags are judged again by what its cells show now.
   void open_element_menu(int pc);
-  // Judges the colour-seal flag of every cell of a PC by the element its cell shows (a double / triple tech's colour where the last menu
-  // build put one there); rainbow cells keep their flag.
+  // Judges the colour-seal flag of every cell of a unit (PC or enemy) by the element its cell shows (a double / triple tech's colour where
+  // the last menu build put one there); rainbow cells keep their flag.
   void refresh_seal_flags(int pc);
   // The element the cell casts now: the double / triple tech combo_at offers, else the cell's own id.
   int cell_element(int pc, int cell) const;
@@ -622,6 +636,8 @@ class Battle {
   void set_saved_var(int index, int value);
   void count_colour_point(int actor, const data::ElemRec& element);
   void damage_unit(int actor, int target, int value, int code);
+  // Op 96's gate holds for this hit (element_id -1 = a weapon hit).
+  bool colour_gated(int actor, int target, int element_id) const;
   void kill(int unit);
   void poison_kill(int unit);
   // Runs the kill script (slot 3) of a dead enemy once and parks the death cast it queued.
@@ -643,9 +659,19 @@ class Battle {
   // Slot 4 of every unit of the last action's target list, queued counter-attacks executed.
   void run_reactions();
   void confused_turn(int unit);
+  // A cast swapped to the forced miss: the colour 1..6 (green .. blue) the caster is sealed in when the element can be sealed (id 0x12D at
+  // most, record byte 1 bit 0); 0 = none.
+  int seal_swap_colour(int actor, int element_id) const;
+  // The three party countdowns run `steps` (living PCs, floor 0).
+  void lower_pc_countdowns(int steps);
+  // The stamina an action costs the unit (none while hi kHiNoStaminaCost is set).
+  int stamina_cost(const Unit& unit, int cost) const { return (unit.hi & st::kHiNoStaminaCost) ? 0 : cost; }
+  // Heals the unit the running action owes a drain heal (drain_).
+  void pay_drain();
   // Returns {poison step, timer steps}.
   std::pair<int, int> exec_action(int unit, const EnemyAction& action);
   void run_enemy_action(int unit, const EnemyAction& action);
+  void end_scripted_action(int unit, const EnemyAction& action);
   bool run_plan(int unit, const std::vector<EnemyAction>& plan, bool set_countdown);
   void finish(Outcome outcome, int code = -1);
   void compute_rewards();
@@ -670,7 +696,7 @@ class Battle {
   void init_enemy(int slot, int monster_id, const BattleOptions& opt);
   void init_party_monster(int slot, int monster_id, const BattleOptions& opt);
   void unlock_monster_grid(Unit& unit) const;
-  int next_ready_enemy();
+  int next_ready_unit();
   void god_filter(int target, DamageOut& dmg) const;
   // Max stamina / battle boost refills, run after every action and hit.
   void apply_cheat_state();
@@ -695,6 +721,8 @@ class Battle {
   bool in_death_cast_ = false;
   // A kill script queued attacks that have not run yet: the unit still owes its death (check_end).
   std::array<bool, kUnits> death_pending_{};
+  // The target whose results op 96's gate cancels while the element mode runs (-1 = none).
+  int gated_target_ = -1;
   // The unit's kill script has run since it last had HP.
   std::array<bool, kUnits> kill_script_run_{};
   // By colour index: the enemies (one bit per unit) killed during a summon of that colour. summon_colour_ = the current action's, -1 = not a summon.
@@ -725,6 +753,10 @@ class Battle {
   int creature_state_ = 0, creature_model_ = 0, creature_slot_ = 0;
   // Pip's pending form element (cleared at battle init and by mode 45).
   int evo_pending_ = 0;
+  // The running cast's seal swap colour (seal_swap_colour), -1 = not judged yet (a lone do_element judges it itself).
+  int seal_swap_ = -1;
+  // The drain heal the running action owes (hi kHiDrain): {unit, value} of the last target it damaged, unit -1 = none.
+  std::pair<int, int> drain_{-1, 0};
   // Script vars 0x00..0x0E while no scene script holds them (saved_vars).
   std::array<u16, 8> saved_vars_{};
   // The colour kPipTechs take (0 = no Pip in the party).

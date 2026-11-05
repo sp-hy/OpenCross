@@ -1,10 +1,12 @@
 // ocaudio: remastered BGM tool.
 //   ocaudio [-g <game dir>] decode <song id | BGMnnn> <out.wav> [seconds]   (no seconds = whole track, no looping)
 //   ocaudio [-g <game dir>] play <song id | BGMnnn> [seconds]
-//   ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate]   original AKAO music through our sequencer
+//   ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate] [keys.txt]   original AKAO music through our sequencer
+//     (with the sound effects its FE 0B ops request; keys.txt lists every voice key-on / key-off: update, KON / KOFF, channel, voice)
 //   ocaudio [-g <game dir>] play-seq <music NNN> [seconds]
 //   ocaudio [-g <game dir>] render-sfx <sfx id> <out.wav> [seconds] [rate] [room]   (rate default 44100 = the SPU rate; 48000 = the mixer;
-//     room = the room whose yos0 bank overlays instruments 208..223; battle:<room> = that room entered again after a battle)
+//     room = the room whose yos0 bank overlays instruments 208..223; battle:<room> = that room entered again after a battle;
+//     sfx id r<n> = the room's yos1 frame n)
 //   ocaudio [-g <game dir>] sfx-pitch | sfx-bytes <id> | room-sfx <room> | banks   pitch-register audit against the retail formula
 //   ocaudio [-g <game dir>] timing | switch-test <song> <seconds> [volume] | inst-dump <index> | sfx-ops
 //   ocaudio [-g <game dir>] play-sfx <sfx id> [seconds]
@@ -42,9 +44,9 @@ int usage() {
   std::fprintf(stderr,
                "usage: ocaudio [-g <game dir>] decode <song id|BGMnnn> <out.wav> [seconds]\n"
                "       ocaudio [-g <game dir>] play <song id|BGMnnn> [seconds]\n"
-               "       ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate]\n"
+               "       ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate] [keys.txt]\n"
                "       ocaudio [-g <game dir>] play-seq <music NNN> [seconds]\n"
-               "       ocaudio [-g <game dir>] render-sfx <sfx id> <out.wav> [seconds] [rate] [room]\n"
+               "       ocaudio [-g <game dir>] render-sfx <sfx id | r<frame>> <out.wav> [seconds] [rate] [room]\n"
                "       ocaudio [-g <game dir>] sfx-pitch\n"
                "       ocaudio [-g <game dir>] room-sfx <room>\n"
                "       ocaudio [-g <game dir>] sfx-bytes <sfx id>\n"
@@ -151,33 +153,51 @@ int cmd_play(const vfs::Vfs& fs, const std::string& which, double seconds) {
   return 0;
 }
 
-int cmd_render_seq(const vfs::Vfs& fs, const std::string& which, const std::string& out, double seconds, u32 rate) {
+int cmd_render_seq(const vfs::Vfs& fs, const std::string& which, const std::string& out, double seconds, u32 rate, const std::string& keys) {
   // `which` is the music file number (musicNNN.dat).
   const int file = std::atoi(which.c_str());
   if (file <= 0) return usage();
   auto music = audio::load_akao_music(fs, file);
   if (!music) return 1;
-  audio::AkaoPlayer pl(rate, false);
+  audio::SfxBank bank;
+  const auto triggers = bank.load(fs) ? audio::make_sfx_triggers(bank, *music->seq) : nullptr;
+  audio::AkaoPlayer pl(rate, false), sfx(rate, true);
+  pl.collect_sfx_requests = triggers != nullptr;
+  FILE* key_file = keys.empty() ? nullptr : std::fopen(keys.c_str(), "w");
+  if (key_file)
+    pl.key_trace = [&](u32 update, int channel, int voice, bool on) { std::fprintf(key_file, "%u %s %d %d\n", update, on ? "KON " : "KOFF", channel, voice); };
   pl.load_music(music->seq, music->table);
   const u32 frames = u32(std::max(0.1, seconds) * rate);
-  std::vector<float> buf(size_t(frames) * 2);
-  int max_voices = 0;
-  // Rendered in chunks so the voice stats are sampled.
+  std::vector<float> buf(size_t(frames) * 2), sfx_buf;
+  int max_voices = 0, requests = 0;
+  // Rendered in 1/240 s chunks (one sequencer update) so the voice stats are sampled and a requested sound effect starts in the update
+  // that requested it.
   for (u32 done = 0; done < frames;) {
-    u32 chunk = std::min<u32>(2048, frames - done);
+    const u32 chunk = std::min<u32>(std::max<u32>(1, rate / 240), frames - done);
     pl.render(&buf[size_t(done) * 2], chunk);
+    if (triggers) {
+      const auto pending = pl.take_sfx_requests();
+      requests += int(pending.size());
+      triggers->play(sfx, pending);
+      sfx.set_reverb(pl.reverb_mode(), pl.reverb_depth());
+      sfx_buf.resize(size_t(chunk) * 2);
+      sfx.render(sfx_buf.data(), chunk);
+      for (size_t i = 0; i < sfx_buf.size(); ++i) buf[size_t(done) * 2 + i] += sfx_buf[i];
+    }
     max_voices = std::max(max_voices, pl.active_voices());
     done += chunk;
   }
+  if (key_file) std::fclose(key_file);
   std::vector<s16> pcm(buf.size());
   float peak = 0;
   for (size_t i = 0; i < buf.size(); ++i) {
     peak = std::max(peak, std::fabs(buf[i]));
     pcm[i] = s16(std::clamp(buf[i], -1.0f, 1.0f) * 32767.0f);
   }
-  std::printf("music%03d: bank %u, %zu channels, %.1f s rendered, ticks %u, max voices %d, channels left %d\n", file,
-              music->seq->bank_id, music->seq->channels.size(), double(frames) / rate, pl.ticks(), max_voices,
-              pl.active_channels());
+  std::printf("music%03d: bank %u, %zu channels, gate mask 0x%X, %.1f s rendered, ticks %u, max voices %d, channels left %d, "
+              "sound effect requests %d\n",
+              file, music->seq->bank_id, music->seq->channels.size(), music->seq->gate_mask, double(frames) / rate, pl.ticks(), max_voices,
+              pl.active_channels(), requests);
   std::printf("RMS %.1f  peak %.3f (full scale 1.0)\n", rms(pcm, 0, frames), double(peak));
   if (!write_wav(out, pcm, rate)) {
     std::fprintf(stderr, "cannot write %s\n", out.c_str());
@@ -207,7 +227,9 @@ int cmd_play_seq(const vfs::Vfs& fs, const std::string& which, double seconds) {
   return 0;
 }
 
-int cmd_render_sfx(const vfs::Vfs& fs, int id, const std::string& out, double seconds, u32 rate, const std::string& room) {
+int cmd_render_sfx(const vfs::Vfs& fs, const std::string& which, const std::string& out, double seconds, u32 rate, const std::string& room) {
+  const bool room_frame = !which.empty() && which[0] == 'r';
+  const int id = std::atoi(which.c_str() + (room_frame ? 1 : 0));
   audio::SfxBank bank;
   if (!bank.load(fs)) {
     std::fprintf(stderr, "cannot load effect00.dat / wave0000.dat\n");
@@ -240,7 +262,7 @@ int cmd_render_sfx(const vfs::Vfs& fs, int id, const std::string& out, double se
   }
   audio::SfxProgram program;
   std::vector<audio::SfxProgram> extra;
-  if (!bank.make_global(id, program, &extra)) {
+  if (room_frame ? !bank.make_room(id, program, &extra) : !bank.make_global(id, program, &extra)) {
     std::fprintf(stderr, "sfx %d is not defined (%d ids defined)\n", id, bank.defined_ids());
     return 1;
   }
@@ -560,11 +582,11 @@ int ocaudio_main(int argc, char** argv) {
   if (args[0] == "play" && args.size() >= 2) return cmd_play(fs, args[1], args.size() > 2 ? std::atof(args[2].c_str()) : 10.0);
   if (args[0] == "render-seq" && args.size() >= 3)
     return cmd_render_seq(fs, args[1], args[2], args.size() > 3 ? std::atof(args[3].c_str()) : 20.0,
-                          args.size() > 4 ? u32(std::atoi(args[4].c_str())) : 44100u);
+                          args.size() > 4 ? u32(std::atoi(args[4].c_str())) : 44100u, args.size() > 5 ? args[5] : std::string());
   if (args[0] == "play-seq" && args.size() >= 2)
     return cmd_play_seq(fs, args[1], args.size() > 2 ? std::atof(args[2].c_str()) : 20.0);
   if (args[0] == "render-sfx" && args.size() >= 3)
-    return cmd_render_sfx(fs, std::atoi(args[1].c_str()), args[2], args.size() > 3 ? std::atof(args[3].c_str()) : 3.0,
+    return cmd_render_sfx(fs, args[1], args[2], args.size() > 3 ? std::atof(args[3].c_str()) : 3.0,
                           args.size() > 4 ? u32(std::atoi(args[4].c_str())) : 44100u,
                           args.size() > 5 ? args[5] : std::string());
   if (args[0] == "sfx-pitch") return cmd_sfx_pitch(fs);

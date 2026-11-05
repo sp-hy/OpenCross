@@ -60,7 +60,14 @@ void attach_console() {
 
 }  // namespace
 
-// Returns the tool's exit code, or -1 when argv[1] names no tool (the game runs).
+static bool game_arguments_valid(int argc, char** argv) {
+  for (int i = 1; i < argc; i += 2)
+    if (std::string_view(argv[i]) != "--config" || i + 1 >= argc) return false;
+  return true;
+}
+
+// Returns the tool's exit code, or -1 when argv[1] names no tool and the arguments are the game's own (the game runs). Arguments
+// that are neither a tool nor the game's `--config <file>` print the usage and return 2.
 int run_tool(int argc, char** argv) {
   if (argc < 2) return -1;
   const std::string_view arg = argv[1];
@@ -74,8 +81,13 @@ int run_tool(int argc, char** argv) {
     const std::string_view name = tool.name;
     if (arg == name || arg == name.substr(2)) {
       attach_console();
-      return tool.run(argc - 1, argv + 1);
+      const int rc = tool.run(argc - 1, argv + 1);
+      return rc < 0 ? 1 : rc;
     }
   }
-  return -1;
+  if (game_arguments_valid(argc, argv)) return -1;
+  attach_console();
+  std::fprintf(stderr, "opencross: unknown tool or argument '%s'\n", argv[1]);
+  std::fprintf(stderr, "usage: opencross [--config <file>] | opencross <tool> [args] | opencross tools\n");
+  return 2;
 }

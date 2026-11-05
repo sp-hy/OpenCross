@@ -256,11 +256,17 @@ void FieldWorld::party_remove(int char_ref) {
   // slot reads as party {0, 0, 0}: every removal finds Serge in slot 0, so three removals still empty it.
   const int char_id = char_from_ref(party_chars_, char_ref);
   auto it = std::find(party_chars_.begin(), party_chars_.end(), char_id);
+  const bool slot2_moves_up = char_id >= 0 && it != party_chars_.end() && it - party_chars_.begin() < 2 && party_chars_.size() == 3;
   if (char_id >= 0 && it != party_chars_.end()) party_chars_.erase(it);
   write_party();
   // The party entities belong to the slots and the model blocks move up with the character ids:
-  // the entity of the emptied last slot loses its model, the others show their new occupant.
+  // the entity of the emptied last slot loses its model and is hidden, the others show their new occupant.
   refresh_party_models();
+  // The member who leaves slot 2 appears where he stood: his pose moves to the slot-1 entity. The new slot-0 occupant takes the leader's
+  // entity as it is.
+  const int to = party_ent_[1], from = party_ent_[2];
+  if (slot2_moves_up && to >= 0 && from >= 0 && to != from && ents_[static_cast<size_t>(from)].placed)
+    ents_[static_cast<size_t>(to)].actor.copy_pose(ents_[static_cast<size_t>(from)].actor);
 }
 
 // B2: enter saves the party entity table and the character table, then sorts both together in three bubble passes: slots j / j+1

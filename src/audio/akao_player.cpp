@@ -248,6 +248,8 @@ void AkaoPlayer::load_music(const std::shared_ptr<const AkaoSeq>& seq, std::shar
   if (!seq) return;
   // The header's reverb mode applies when the song starts.
   rev_.set_mode(seq->reverb_mode);
+  sfx_request_mask_ = 1;
+  sfx_requests_.clear();
   int channel_count = 0;
   for (const auto& [number, pc] : seq->channels) {
     if (channel_count >= kMaxChannels) break;
@@ -260,6 +262,7 @@ void AkaoPlayer::load_music(const std::shared_ptr<const AkaoSeq>& seq, std::shar
     channel.code = seq->code;
     channel.table = table;
     channel.pc = pc;
+    channel.tenuto = !(seq->gate_mask >> (number & 31) & 1);
   }
   for (auto& channel : ch_)
     if (channel.active) run_ops(channel);
@@ -507,6 +510,7 @@ void AkaoPlayer::key_off(Channel& channel) {
     if (voice.active && voice.serial == channel.voice_serial && !voice.released) {
       voice.released = true;
       voice.env.key_off();
+      if (key_trace) key_trace(upd_count_, channel.number, channel.voice, false);
     }
   }
   channel.gate_left = 0;
@@ -590,9 +594,19 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
     if (!channel.music && channel.trace_id >= 1 && channel.trace_id <= 32 && !(keep_mask >> (channel.trace_id - 1) & 1)) return;
   }
 
-  channel.pitch_base = pitch_register(note, *in);
+  // DA portamento after a remembered note: the note starts at the remembered note's pitch and the A4 bend carries it to its own over
+  // the portamento steps.
+  int pitch_note = note;
+  if (!keymap_note) {
+    if (channel.porta_steps > 0 && channel.last_note != 0) {
+      pitch_note = channel.last_note + channel.last_transpose;
+      channel.bend_len = channel.porta_steps;
+      channel.bend_delta = note - pitch_note;
+    }
+    channel.bend_note = pitch_note - channel.transpose;
+  }
+  channel.pitch_base = pitch_register(pitch_note, *in);
   channel.bend_inst = in;
-  if (!keymap_note) channel.bend_note = note - channel.transpose;
   if (note_trace) note_trace(note, *in, channel.pitch_base);
   const int fd = channel.fine_tune;
   if (fd < 0)
@@ -606,15 +620,6 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   // Legato into a sounding voice: re-pitch only.
   const bool keep = channel.legato_prev && channel.voice >= 0 && voice_[size_t(channel.voice)].active &&
                     voice_[size_t(channel.voice)].serial == channel.voice_serial && !voice_[size_t(channel.voice)].released;
-  if (channel.porta_steps > 0 && channel.last_note >= 0) {
-    channel.porta_off = float(channel.last_note - note);
-    channel.porta_left = channel.porta_steps;
-    channel.porta_step = channel.porta_off / float(channel.porta_steps);
-  } else {
-    channel.porta_off = 0;
-    channel.porta_left = 0;
-  }
-  channel.last_note = note;
   if (keep) return;
   // A new key-on on a channel releases the note it still holds (the SPU voice of the channel is keyed off first): a note of length 1
   // has no gate key-off, a full-length / tenuto note none either, and the voice would sound on forever (a stuck note) once the
@@ -670,21 +675,25 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   voice.reg = channel.pitch_base;
   channel.voice = vi;
   channel.voice_serial = voice.serial;
+  if (key_trace) key_trace(upd_count_, channel.number, vi, true);
   voice.started_at = g_sfx_trace_clock.load(std::memory_order_relaxed);
   if (sfx_trace_on() && !channel.music) log::info("sfxtrace {:9.1f} ms VON #{} '{}' voice {} note {} reg {:04X} adsr {:04X} {:04X} base {} ft {} loops {} len {} noise {} fm {}", trace_ms(), channel.trace_id, channel.tag, vi, note, channel.pitch_base, a1, a2, in->base_note, in->fine_tune, voice.smp->loops ? voice.smp->loop_start : -1, voice.smp->pcm.size(), channel.noise, voice.fm);
 }
 
 // A note or a tie consumes the armed A4 delta: the bend note moves by it and the register ramps over the A4 length from where it is
 // now (a tie keeps the running bend) to the moved note's pitch, in 16.16 steps truncated toward zero. A rest leaves the bend armed.
+// Then the bend note and the transpose are remembered as the start of the next portamento glide.
 void AkaoPlayer::start_bend(Channel& channel) {
-  if (!channel.bend_delta || channel.bend_len <= 0 || !channel.bend_inst) return;
-  channel.bend_note += channel.bend_delta;
-  channel.bend_delta = 0;
-  const s64 target = s64(pitch_register(channel.bend_note + channel.transpose, *channel.bend_inst)) * 0x10000;
-  const s64 current = s64(channel.pitch_base) * 0x10000 + channel.bend;
-  channel.bend_left = channel.bend_len;
-  channel.bend_step = s32((target - current) / channel.bend_len);
-  channel.last_note = channel.bend_note + channel.transpose;
+  if (channel.bend_delta && channel.bend_len > 0 && channel.bend_inst) {
+    channel.bend_note += channel.bend_delta;
+    channel.bend_delta = 0;
+    const s64 target = s64(pitch_register(channel.bend_note + channel.transpose, *channel.bend_inst)) * 0x10000;
+    const s64 current = s64(channel.pitch_base) * 0x10000 + channel.bend;
+    channel.bend_left = channel.bend_len;
+    channel.bend_step = s32((target - current) / channel.bend_len);
+  }
+  channel.last_note = channel.bend_note;
+  channel.last_transpose = channel.transpose;
 }
 
 // ADSR ops (AD..B3, B7, BB, BF) mark the channel's ADSR words dirty and the next voice update writes them to the SPU voice that is playing
@@ -706,7 +715,7 @@ void AkaoPlayer::run_ops(Channel& channel) {
   auto rds16 = [&](u32 pos) -> int { return s16(rd8(pos) | rd8(pos + 1) << 8); };
   auto slide = [](int len) { return len == 0 ? 256 : len; };
   // Peeks the next note / tie / rest opcode, skipping ordinary opcodes (A4, A9, ...) and following loop ends,
-  // jumps and calls the way the VM will. A rest or a finishing opcode clears the legato and tenuto flags (flags & 0xFFFA).
+  // jumps and calls the way the VM will. A rest or a finishing opcode clears the legato and full-length (D0) flags.
   auto peek_next = [&](const Channel& ch) -> int {
     u32 pc = ch.pc;
     int sp = ch.loop_top;
@@ -829,9 +838,11 @@ void AkaoPlayer::run_ops(Channel& channel) {
         set_gate();
         channel.legato_prev = channel.legato;
       } else {
-        // Rest: a note still sounding (no gate) is released here, the LFO outputs return to 0 and the voice takes no more updates.
+        // Rest: a note still sounding (no gate) is released here, the LFO outputs return to 0, the voice takes no more updates and
+        // the portamento ends.
         key_off(channel);
         channel.legato_prev = false;
+        channel.porta_steps = 0;
         channel.vib.value = channel.trem.value = 0;
         channel.voice_update = false;
       }
@@ -1019,7 +1030,13 @@ void AkaoPlayer::run_ops(Channel& channel) {
       case 0xE2: channel.random_pitch = 0; break;
       case 0xD8: channel.fine_tune = s8(bytes[1]); break;
       case 0xD9: channel.fine_tune += s8(bytes[1]); break;
-      case 0xDA: channel.porta_steps = bytes[1] ? bytes[1] : 256; break;
+      // DA: portamento on with legato (the legato mode word, as CC); the next note does not glide since the remembered note is cleared.
+      case 0xDA:
+        channel.porta_steps = bytes[1] ? bytes[1] : 256;
+        channel.last_note = channel.last_transpose = 0;
+        channel.legato = true;
+        channel.full_length = channel.legato_prev = false;
+        break;
       case 0xDB: channel.porta_steps = 0; break;
       case 0xDC: {
         int fixed = s8(bytes[1]);
@@ -1083,6 +1100,10 @@ void AkaoPlayer::run_ops(Channel& channel) {
             channel.drum = false;
             channel.patch = -1;
             break;
+          case 0x0B:
+            if (collect_sfx_requests) sfx_requests_.push_back({bytes[2], channel.balance >> 8, channel.pan >> 8, sfx_request_mask_});
+            sfx_request_mask_ ^= 3;
+            break;
           case 0x0E: channel.ret_pc = channel.pc; channel.pc = channel.pc - 2 + u32(rds16(channel.pc - 2)); break;
           case 0x0F: channel.pc = channel.ret_pc; break;
           case 0x12:
@@ -1090,6 +1111,7 @@ void AkaoPlayer::run_ops(Channel& channel) {
             channel.balance &= 0x7F00;
             channel.bal_slide_step = ((bytes[3] << 8) - channel.balance) / channel.bal_slide_left;
             break;
+          case 0x13: channel.no_rekey = true; break;
           case 0x14:
             channel.patch = bytes[2];
             channel.zones = akao_patch_zones(*channel.code, channel.patch);
@@ -1103,7 +1125,7 @@ void AkaoPlayer::run_ops(Channel& channel) {
             break;
           case 0x1A: channel.tenuto = true; break;
           case 0x1B: channel.tenuto = false; break;
-          // Voice reservation, bar timers, SFX trigger: no audible effect here.
+          // Voice reservation, bar timers: no audible effect here.
           default: break;
         }
         break;
@@ -1145,11 +1167,6 @@ void AkaoPlayer::tick_channel(Channel& channel) {
   // The noise / FM state toggles after the delay.
   if (channel.noise_delay && --channel.noise_delay == 0) channel.noise = !channel.noise;
   if (channel.fm_delay && --channel.fm_delay == 0) channel.fm = !channel.fm;
-  if (channel.porta_left) {
-    --channel.porta_left;
-    channel.porta_off -= channel.porta_step;
-    if (channel.porta_left == 0) channel.porta_off = 0;
-  }
   for (Lfo* lfo : {&channel.vib, &channel.trem, &channel.apan}) {
     if (lfo->delay_cur) --lfo->delay_cur;
     if (lfo->rate_slide_left) {
@@ -1242,10 +1259,9 @@ void AkaoPlayer::update_channel(Channel& channel, int) {
   voice.gl = float(left) / 16384.0f;
   voice.gr = float(right) / 16384.0f;
 
-  // pitch register (fine delta + pitch + vibrato, & 0x3FFF); A4 bend as a 16.16 register ramp, portamento as a semitone offset
+  // pitch register (fine delta + pitch + vibrato, & 0x3FFF); the A4 bend and the DA glide as a 16.16 register ramp
   double reg = channel.pitch_base + channel.vib.value + channel.fine_delta;
   reg += double(channel.bend >> 16);
-  if (channel.porta_off != 0.0f) reg *= std::exp2(double(channel.porta_off) / 12.0);
   // Masked, not clamped.
   voice.reg = int(std::max(reg, 0.0) + 0.5) & 0x3FFF;
 }
@@ -1263,7 +1279,7 @@ void AkaoPlayer::render_spu(float* out, u32 frames) {
     if (upd_left_ <= 0) {
       upd_left_ += per_update;
       if ((++upd_count_ & 3) == 0) tick_60hz();
-      tempo_acc_ += u32(std::max(0.0, tempo_));
+      tempo_acc_ += u32(std::max(0.0, tempo_ * tempo_scale_));
       while (tempo_acc_ >= 0x10000) {
         tempo_acc_ -= 0x10000;
         tick_all();
@@ -1464,6 +1480,121 @@ void AkaoPlayer::seek_music(double seconds, double warm) {
     const u32 chunk = u32(std::min<u64>(frames, 4096));
     render(scratch.data(), chunk);
     frames -= chunk;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- music push / pop
+struct AkaoPlayer::MusicContext {
+  // A channel inside a note sounds again on the restore: the sample and envelope it was playing and the gate it then counts down
+  // (0 = no key-off before the next opcode).
+  struct Rekey {
+    bool on = false;
+    std::shared_ptr<const AdpcmSample> smp;
+    u16 adsr1 = 0, adsr2 = 0;
+    int gate = 0;
+  };
+  std::array<Channel, kMaxChannels> channels;
+  std::array<Rekey, kMaxChannels> rekey;
+  double tempo = 0x10000;
+  int tempo_slide_left = 0;
+  double tempo_slide_step = 0;
+  u32 tempo_acc = 0;
+  u32 ticks = 0;
+  s32 rev_depth = 0;
+  int rev_slide_left = 0;
+  s32 rev_slide_step = 0;
+  int noise_clock = 0;
+  u64 rendered = 0;
+};
+
+std::shared_ptr<const AkaoPlayer::MusicContext> AkaoPlayer::save_context() const {
+  auto context = std::make_shared<MusicContext>();
+  context->channels = ch_;
+  for (size_t i = 0; i < ch_.size(); ++i) {
+    const Channel& channel = ch_[i];
+    if (!channel.active || !channel.music || !channel.voice_update || channel.no_rekey) continue;
+    MusicContext::Rekey& rekey = context->rekey[i];
+    const Voice* voice = channel.voice >= 0 ? &voice_[size_t(channel.voice)] : nullptr;
+    if (voice && (!voice->active || voice->serial != channel.voice_serial)) voice = nullptr;
+    if (voice) {
+      rekey.smp = voice->smp;
+      rekey.adsr1 = voice->env.adsr1;
+      rekey.adsr2 = voice->env.adsr2;
+    } else if (channel.bend_inst) {
+      rekey.smp = channel.bend_inst->sample;
+      rekey.adsr1 = channel.adsr1;
+      rekey.adsr2 = channel.adsr2;
+    }
+    rekey.on = rekey.smp && !rekey.smp->pcm.empty();
+    // A pending key-off moves two ticks later; a released note keys off again two ticks before its next opcode, as its gate had.
+    if (channel.gate_left > 0) rekey.gate = channel.gate_left + 2;
+    else if (voice && !voice->released) rekey.gate = 0;
+    else rekey.gate = channel.len_left;
+  }
+  context->tempo = tempo_;
+  context->tempo_slide_left = tempo_slide_left;
+  context->tempo_slide_step = tempo_slide_step;
+  context->tempo_acc = tempo_acc_;
+  context->ticks = ticks_;
+  context->rev_depth = rev_depth_;
+  context->rev_slide_left = rev_slide_left_;
+  context->rev_slide_step = rev_slide_step_;
+  context->noise_clock = noise_clock_music_;
+  context->rendered = rendered_;
+  u32 sounding = 0, held_back = 0, rekeyed = 0;
+  for (size_t i = 0; i < ch_.size(); ++i) {
+    const Channel& channel = ch_[i];
+    if (!channel.active || !channel.music || channel.number < 0 || channel.number > 31) continue;
+    const u32 bit = 1u << channel.number;
+    if (channel.voice_update) sounding |= bit;
+    if (channel.no_rekey) held_back |= bit;
+    if (context->rekey[i].on) rekeyed |= bit;
+  }
+  log::debug("audio: music context saved at tick {}: sounding channels {:08x}, FE 13 {:08x}, keyed again on the resume {:08x}", ticks_,
+             sounding, held_back, rekeyed);
+  return context;
+}
+
+void AkaoPlayer::restore_context(const MusicContext& context) {
+  for (auto& voice : voice_) voice = Voice{};
+  ch_ = context.channels;
+  tempo_ = context.tempo;
+  tempo_slide_left = context.tempo_slide_left;
+  tempo_slide_step = context.tempo_slide_step;
+  tempo_acc_ = context.tempo_acc;
+  ticks_ = context.ticks;
+  rev_depth_ = context.rev_depth;
+  rev_slide_left_ = context.rev_slide_left;
+  rev_slide_step_ = context.rev_slide_step;
+  noise_clock_music_ = context.noise_clock;
+  rendered_ = context.rendered;
+  // The ops the player ran at its song load are replaced, so are the FE 0B requests they made; the request mask stays as the last song
+  // load left it (1: only music063 has FE 0B).
+  sfx_requests_.clear();
+  sfx_request_mask_ = 1;
+  for (size_t i = 0; i < ch_.size(); ++i) {
+    Channel& channel = ch_[i];
+    channel.voice = -1;
+    if (!channel.active || !channel.music) continue;
+    channel.len_left += 2;
+    const MusicContext::Rekey& rekey = context.rekey[i];
+    if (!rekey.on) {
+      if (channel.gate_left > 0) channel.gate_left += 2;
+      continue;
+    }
+    channel.gate_left = rekey.gate;
+    const int index = alloc_voice();
+    Voice& voice = voice_[size_t(index)];
+    voice = Voice{};
+    voice.active = true;
+    voice.chan = int(i);
+    voice.serial = serial_++;
+    voice.smp = rekey.smp;
+    voice.env.key_on(rekey.adsr1, rekey.adsr2);
+    voice.hist[3] = voice.smp->pcm[0];
+    voice.reg = channel.pitch_base;
+    channel.voice = index;
+    channel.voice_serial = voice.serial;
   }
 }
 

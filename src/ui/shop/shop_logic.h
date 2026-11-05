@@ -52,12 +52,16 @@ int element_buy_max(const GameState& gs, int id);
 Res buy_element(GameState& gs, int id, int qty);
 // Cheats "Every element in shops": the shop's own row first, then every other element that can be sold (price > 0), by id.
 std::vector<int> element_row_all(const GameState& gs, std::vector<int> row);
-// party_copies: copies placed in party grids (sold after the bag copies). Sell list: bag elements (slot order), then
-// party-only ones. Sell max: bag + party copies.
+// placed_copies: copies of `id` in the unlocked cells of one character (a stack cell counts its copies); party_copies: the sum over the
+// available characters. Sell list: bag elements (slot order), then the ones only placed in an available character's grid. Sell max: the
+// bag copies; past it the player picks whose placed copies go too. sell_element sells `bag_qty` bag copies and `picks[character]` copies
+// from each character's cells (first cells first, a stack cell is reduced); the total is paid at (price * total) >> 2. Nothing is returned
+// to the bag.
+int placed_copies(const GameState& gs, int character, int id);
 int party_copies(const GameState& gs, int id);
 std::vector<int> element_sell_list(const GameState& gs);
 int element_sell_max(const GameState& gs, int id);
-Res sell_element(GameState& gs, int id, int qty);
+Res sell_element(GameState& gs, int id, int bag_qty, const std::vector<int>& picks = {});
 
 // ---- smith
 struct Mat {

@@ -17,8 +17,10 @@
 #include <cmath>
 #include <format>
 
+#include "core/log.h"
 #include "import/text.h"
 #include "platform/keymap.h"
+#include "platform/pad_remap.h"
 #include "render/texture.h"
 
 namespace oc::game {
@@ -633,12 +635,33 @@ void BattleView::enter_target(Tgt mode) {
 }
 
 // ------------------------------------------------------------------------------------------------------------- input
+// Command pick of the auto battle. The player's auto battle (F5) only attacks: the PC whose menu is open aims at its remembered target (the
+// ring's first living enemy from there when that one is gone), never runs, defends or rotates. The test driver (BattleAuto) keeps the older
+// heuristics, off unless OC_BATTLE_AUTO_HEURISTICS is set.
 void BattleView::auto_pick() {
   if (auto_delay_ > 0) {
     --auto_delay_;
     return;
   }
   if (active_pc_ < 0) return;
+  static const bool heuristics = std::getenv("OC_BATTLE_AUTO_HEURISTICS") != nullptr;
+  if (auto_confirm_ && heuristics) {
+    auto_pick_heuristic();
+    return;
+  }
+  pending_cmd_ = {};
+  pending_cmd_.actor = active_pc_;
+  pending_cmd_.kind = battle::Command::Kind::Attack;
+  targets_ = target_candidates();
+  if (targets_.empty()) return;
+  const int target = targets_[static_cast<size_t>(target_start(targets_))];
+  tgt_mem_[active_pc_] = target;
+  log::info("battle: auto pc {} attacks unit {}", active_pc_, target);
+  auto_delay_ = 20;
+  begin_engage(active_pc_, target);
+}
+
+void BattleView::auto_pick_heuristic() {
   // Rotation: keep one PC while it can still open its menu and chain Weak -> Strong -> Fierce on one target (the single attacks of
   // one PC on one target keep the chain accuracy bonus); when its stamina is spent, the ready PC with the most stamina takes over.
   const bool keep = auto_pc_ == active_pc_;
@@ -769,7 +792,7 @@ void BattleView::handle_input(const platform::Input& in) {
     // weak hit that leaves the PC engaged or kills the target re-opens the menu without it.
     if (menu_chime_) {
       menu_chime_ = false;
-      audio_.play_menu(0x16);
+      if (!auto_) audio_.play_menu(0x16);
     }
     begin_menu_entry(active_pc_);
   }
@@ -1455,13 +1478,16 @@ void BattleView::build_target_ui(bool cam_hint) {
   {
     const float hx = 0xF6, hy = 0xE;
     // Keyboard: the key cap of the Triangle (Menu) key.
+    const int menu_button = platform::map_source(platform::active_map(), 3) & 7;
     if (kb_mode_) {
-      const int cell = platform::keyboard_cell(platform::action_vk(platform::Action::Menu));
+      const int cell = platform::keyboard_cell(platform::action_vk(platform::button_action(menu_button)));
       add_img(hud_[kHKeys], hx * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale, static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
               static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f);
     } else {
-      // Pad: Triangle = Y (gamepad.png column 10, row 1).
-      add_img(hud_[kHPad], hx * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale, 10.0f / 13.0f, 0.25f, 11.0f / 13.0f, 0.5f);
+      // Pad: the glyph of the button on the Triangle function (Y by default: gamepad.png column 10, row 1).
+      const int cell = platform::pad_glyph_cell(menu_button);
+      const float col = static_cast<float>(cell % 13), row = static_cast<float>(cell / 13 * 2 + 1);
+      add_img(hud_[kHPad], hx * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale, col / 13.0f, row / 4.0f, (col + 1.0f) / 13.0f, (row + 1.0f) / 4.0f);
     }
     add_img(hud_[kHCam], (hx + 15) * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale);
     btext(0x20003, cam_dynamic_ ? kCamDynamic[li] : kCamNormal[li], hx + 27, hy + 3, 0x757575);

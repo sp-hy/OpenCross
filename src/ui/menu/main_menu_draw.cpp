@@ -8,6 +8,7 @@
 
 #include "core/log.h"
 #include "platform/keymap.h"
+#include "platform/pad_remap.h"
 #include "render/camera.h"
 #include "ui/lowres.h"
 #include "ui/menu/menu_common.h"
@@ -507,30 +508,33 @@ void MainMenu::Impl::pointer(float x, float y, bool left) {
     Img(tex, PX(x), PY(y), PX(5), PY(9), left ? 6.0f / 24 : 1.0f / 24, 0, left ? 1.0f / 24 : 6.0f / 24, 0.9f);
 }
 
-// Button glyph of function slot `slot_index`: 24 x 24 PS1 px at (x, y). Gamepad: ui/gamepad.png cell
-// i = {8, 9, 0xB, 0xA, 0x17, 0x18, 0x15, 0x16}[slot_index] (13 x 4 atlas: column i % 13, row (i / 13) * 2 + 1); keyboard mode swaps it for the key
-// cap of the action's first key (platform/keymap.h; ui/keyboard_<e f i g s j>.png, 16 x 7 cells, moved up 1; the pad glyph at
-// (0x10, 0x182 / 0x19A) is moved up 5). The slots are the PS1 pad functions, identity-mapped: 0 OK, 1 Cancel, 2 Square, 3 Triangle, 4 L1, 5 R1.
-// Classic art + Ps1ResMenus draws the disc's glyph, frame 0x7C + slot of the menu sheet. Glyphs go to `key_caps`, drawn last.
+// Button glyph of function slot `slot_index`, read through the active Controller assignment (slots 0..3); the glyphs of glyph_button.
 void MainMenu::Impl::btn(float x, float y, int slot_index, u32 colour) {
-  const size_t first = cmds.size();
-  static const int pad_i[8] = {8, 9, 0xB, 0xA, 0x17, 0x18, 0x15, 0x16};
-  using platform::Action;
-  static const Action kAction[6] = {Action::Ok, Action::Cancel, Action::Item, Action::Menu, Action::SelectLeft, Action::SelectRight};
-  static const char* const atlas[6] = {"e", "f", "i", "g", "s", "j"};
   slot_index = std::clamp(slot_index, 0, 7);
+  if (slot_index < 4) slot_index = platform::map_source(platform::active_map(), slot_index) & 7;
+  glyph_button(x, y, slot_index, colour);
+}
+
+// Glyph of the physical button `button` (0..7 Circle .. R2, 8 Start, 9 Select): 24 x 24 PS1 px at (x, y). Gamepad: ui/gamepad.png cell
+// i = pad_glyph_cell(button) (13 x 4 atlas: column i % 13, row (i / 13) * 2 + 1); keyboard mode swaps it for the key
+// cap of the action's first key (platform/keymap.h; ui/keyboard_<e f i g s j>.png, 16 x 7 cells, moved up 1; the pad glyph at
+// (0x10, 0x182 / 0x19A) is moved up 5). The buttons are 0 OK, 1 Cancel, 2 Square, 3 Triangle, 4 L1, 5 R1, 6 L2, 7 R2.
+// Classic art + Ps1ResMenus draws the disc's glyph, frame 0x7C + button of the menu sheet (the assignment page: 0x44..0x47 and 0x4A..0x4D; Start / Select 0x48 / 0x49). Glyphs go to `key_caps`, drawn last.
+void MainMenu::Impl::glyph_button(float x, float y, int button, u32 colour, bool page_frames) {
+  const size_t first = cmds.size();
+  static const char* const atlas[6] = {"e", "f", "i", "g", "s", "j"};
   if (ps1_screen()) {
-    const int frame = 0x7C + slot_index;
+    const int frame = page_frames ? (button < 4 ? 0x44 + button : button < 8 ? 0x46 + button : 0x40 + button) : button < 8 ? 0x7C + button : 0x40 + button;
     if (Tex* tex = texs.ps1("ps1:sheet" + std::to_string(frame), [&] { return ps1::sheet_frame(*vfs, frame); }))
       Img(tex, PX(x - ps1::kSheetFrameOriginX), PY(y - ps1::kSheetFrameOriginY), PX(ps1::kSheetFrameW), PY(ps1::kSheetFrameH), 0, 0, 1, 1, colour);
-  } else if (kb_mode && slot_index < 6) {
+  } else if (kb_mode) {
     if (Tex* tex = texs.load(std::string("ui/keyboard_") + atlas[std::clamp(lang_index(), 0, 5)] + ".png")) {
-      const int cell = platform::keyboard_cell(platform::action_vk(kAction[slot_index]));
+      const int cell = platform::keyboard_cell(button < 8 ? platform::action_vk(platform::button_action(button)) : button == 8 ? platform::kStartVk : platform::kSelectVk);
       Img(tex, PX(x), PY(y - 1.0f), PX(24), PY(24), static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
           static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f, colour);
     }
   } else if (Tex* tex = texs.load("ui/gamepad.png")) {
-    const int i = pad_i[slot_index], col = i % 13, row = (i / 13) * 2 + 1;
+    const int i = platform::pad_glyph_cell(button), col = i % 13, row = (i / 13) * 2 + 1;
     const float dy = (x == 0x10 && (y == 0x182 || y == 0x19A)) ? -5.0f : 0.0f;
     Img(tex, PX(x), PY(y + dy), PX(24), PY(24), static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
         static_cast<float>(col + 1) / 13.0f, static_cast<float>(row + 1) / 4.0f, colour);

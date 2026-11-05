@@ -142,7 +142,7 @@ struct Event {
     ElemTilt,
     // op 0x8D: element 0's z rotation walks back to the saved value over d ticks, then its motion is on again
     ElemTiltBack,
-    Done,        // script ended
+    Done,        // script ended: a = the op that ended it (0x00 / 0x3E / 0x4C, 0x03 on an empty stack, -1 off the table)
   } kind = Done;
   int a = 0, b = 0, c = 0, d = 0;
   u32 tag = 0;
@@ -191,6 +191,14 @@ struct Ctx {
   std::function<bool(int point, int& x, int& z, int& y)> get_attach_self;
   // Op 0x9F GetCommon: a common word of the unit's control block.
   int common = 0;
+  // Op 0x69 GetOption: the option word of the unit's control block, copied from the stat record's u16 at 0x14 (low byte 0 / 1 / 0x70,
+  // bits 14-15 the gender). The tech reactions test bits 0x10 / 0x40 / 0x80 of it.
+  int option = 0;
+  // Op 0xA9 GetBeta: the unit's pending result word (the number its hit shows, -1 = none). Element mode 47 (Beta) writes the field
+  // colour bit << 2 into the caster's word, mode 48 (Shuffle) the swapped HP value.
+  int result = 0;
+  // Op 0xA1 GetNumberTarget: the entries of the target list and the unit's index in it (-1 = not in it).
+  int target_count = 0, target_index = -1;
   // Op 74's y (y down) of that actor; null = 0.
   std::function<int(int list, int idx)> get_pos_y;
   // Frame count of clip id (used by the wait-for-end ops); null = 8.

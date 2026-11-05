@@ -241,6 +241,10 @@ class Vm {
   bool end_check_enabled() const { return flag_end_; }
   // AF: blocks the player command phase.
   bool menu_locked() const { return flag_menu_lock_; }
+  // 96: the colour gate of the PCs' hits on enemies (colour 1 green .. 6 blue, 0 = none).
+  int colour_gate() const { return colour_gate_; }
+  // An element revive brings the unit back: its entity (the first bound to the unit) runs again, a PC's slot-3 flag is cleared.
+  void revive(int unit);
   // 7D: shows list entry 100 in the PC menu.
   bool menu_entry100() const { return flag_831_; }
   // 5C.
@@ -334,6 +338,9 @@ class Vm {
   std::array<u64, 256> op_counts_{};
   bool flag_ui_ = true, flag_end_ = true, flag_menu_lock_ = false, flag_831_ = false, sfx_muted_ = false, no_drops_ = false;
   int forced_result_ = -1;
+  u8 colour_gate_ = 0;
+  // Set by an enemy's A6: the entity leaves the run list once its pass ends.
+  bool leave_run_list_ = false;
   // Op 8C (and A6's own bit is the unit's death, which the rules see as hp 0).
   u32 defeated_mask_ = 0;
   std::array<bool, kUnits> scripted_death_{};
@@ -372,6 +379,10 @@ class ScriptedBrain final : public EnemyBrain {
   bool no_drops() const override { return vm_ && vm_->no_drops(); }
   bool defeated(int unit) const override { return vm_ && vm_->defeated(unit); }
   bool menu_locked() const override { return vm_ && vm_->menu_locked(); }
+  int colour_gate() const override { return vm_ ? vm_->colour_gate() : 0; }
+  void on_revived(int unit) override {
+    if (vm_) vm_->revive(unit);
+  }
   bool hidden(int unit) const override { return vm_ && vm_->hidden(unit); }
   bool untargetable(int unit) const override { return vm_ && vm_->untargetable(unit); }
   bool has_script_vars() const override { return vm_ != nullptr; }

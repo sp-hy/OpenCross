@@ -126,6 +126,51 @@ void test_actor_anim() {
   CHECK(game::in_talk_cone(0x800) && game::in_talk_cone(0x600) && !game::in_talk_cone(0) && !game::in_talk_cone(0x400));
 }
 
+// Clip time on a stair tile follows the whole-unit height: forwards while it falls (climbing), backwards while it rises, still while it
+// stays; off the stairs a back-off tick plays the clip backwards. The slope square (y = 0.2 per unit of x) is the stair here.
+void test_stair_clip() {
+  auto handle = std::make_shared<game::ModelHandle>();
+  handle->asset.skeleton.joints.emplace_back();
+  for (u32 i = 0; i < 6; ++i) {
+    assets::AnimationClip anim_clip;
+    anim_clip.frame_count = 64;
+    anim_clip.tracks.resize(1);
+    handle->asset.clips.push_back(anim_clip);
+  }
+  game::WalkMesh stairs;
+  stairs.init(build(), {0x4000, game::kFlagBlockAll});
+  game::Actor actor;
+  actor.set_model(handle);
+  actor.place(stairs, 2, 152.5f, 50, 0x800);
+  // The first stair tick compares against the height of the last stair visit (none yet).
+  actor.tick(stairs, game::kNoHeading, false);
+  float t = actor.anim_time();
+  actor.tick(stairs, game::kNoHeading, false);
+  CHECK(near(actor.anim_time(), t));
+  // Internal heading 0x800 walks +x: the floor drops away (y grows), so the climb clip runs backwards.
+  t = actor.anim_time();
+  actor.tick(stairs, 0x800, false);
+  CHECK(near(actor.anim_time(), t - game::kKeyframesPerTick));
+  t = actor.anim_time();
+  actor.tick(stairs, 0, false);
+  CHECK(near(actor.anim_time(), t + game::kKeyframesPerTick));
+  // Off the stairs the clip runs forwards, and backwards for a tick that asked for it.
+  game::WalkMesh flat;
+  flat.init(build(), {0, game::kFlagBlockAll});
+  game::Actor walker;
+  walker.set_model(handle);
+  walker.place(flat, 1, 20, 50, 0x800);
+  for (int i = 0; i < 4; ++i) walker.step_visual(true, false);
+  t = walker.anim_time();
+  walker.begin_tick();
+  walker.reverse_clip();
+  walker.step_visual(true, false);
+  CHECK(near(walker.anim_time(), t - game::kKeyframesPerTick));
+  walker.begin_tick();
+  walker.step_visual(true, false);
+  CHECK(near(walker.anim_time(), t));
+}
+
 // Animation-sequence interpreter on Serge-style entries: the sequence starts the clip, sets the loop flag, the foot
 // events (var 1) and the anim-done variable (var 0).
 void test_anim_seq() {
@@ -285,6 +330,7 @@ void test_give_item_element_count() {
 int main() {
   test_give_item_element_count();
   test_actor_anim();
+  test_stair_clip();
   test_attached_rigid();
   test_axes_blend();
   test_screen_warp();

@@ -176,9 +176,12 @@ void test_strip_and_fe3f() {
   // Character 7 is not in the roster: untouched.
   slot.chars[7].weapon = 0x41;
   slot.chars[2].grid[0] = 0x13, slot.chars[2].equipped_qty[45] = 3, slot.chars[1].equipped_qty[40] = 4;
+  slot.chars[2].grid[1] = 0x4014, slot.chars[2].grid[2] = 0x8000 | 0x15;
+  slot.chars[2].accessory[0] = 0x261, slot.chars[2].accessory[1] = 0x270, slot.chars[2].accessory[2] = 0x405;
   ng::strip_for_cleared_save(gs);
-  // The 0x16-byte stride: Guile's (2) cells 0..47 clear flat nibbles 88..135 = Kid's cells 40..47 + his own 0..39; 40..47 stay.
-  CHECK(slot.chars[2].grid[0] == 0 && slot.chars[2].equipped_qty[45] == 3 && slot.chars[1].equipped_qty[40] == 0 && count_el(slot.elements, 0x13) == 1);
+  CHECK(slot.chars[2].grid[0] == 0 && slot.chars[2].equipped_qty[45] == 0 && slot.chars[1].equipped_qty[40] == 4 && count_el(slot.elements, 0x13) == 1);
+  CHECK(slot.chars[2].grid[1] == 0x4000 && slot.chars[2].grid[2] == 0x8000);
+  CHECK(count_el(slot.elements, 0x61) == 5 && count_el(slot.elements, 0x70) == 1 && (slot.key_items() >> 5 & 1) == 1);
   CHECK(slot.chars[0].weapon == 0 && slot.chars[0].accessory[1] == 0 && slot.chars[0].grid[3] == 0 && slot.chars[0].grid[4] == 0xA3);
   CHECK(slot.chars[2].armour == 0 && slot.chars[7].weapon == 0x41);
   CHECK(count(slot.items, 0x40) == 1 && count(slot.items, 0x90) == 1 && count(slot.items, 0x50) == 1 && count(slot.items, 0x41) == 0);

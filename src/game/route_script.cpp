@@ -49,6 +49,8 @@ int pad_button_for(const std::string& name) {
   if (name == "x") return SDL_GAMEPAD_BUTTON_WEST;
   if (name == "y") return SDL_GAMEPAD_BUTTON_NORTH;
   if (name == "start") return SDL_GAMEPAD_BUTTON_START;
+  if (name == "l3") return SDL_GAMEPAD_BUTTON_LEFT_STICK;
+  if (name == "r3") return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
   return -1;
 }
 
@@ -895,6 +897,14 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.put = true;
     out.put_x = static_cast<float>(x);
     out.put_z = static_cast<float>(z);
+    return true;
+  }
+  if (op == "set" && args.size() >= 4 && args[1] == "buttons") {
+    int index = 0, value = 0;
+    if (!to_int(args[2], index) || index < 0 || index > 3 || !to_hex(args[3], value)) return bad("set buttons <0..3> <hexword>");
+    out.set_buttons = true;
+    out.buttons_index = index;
+    out.buttons_value = value;
     return true;
   }
   if (op == "set" && args.size() >= 4 && args[1] == "option") {

@@ -53,6 +53,8 @@ inline void set_screen_extra(float columns) { g_screen_extra = std::max(0.0f, co
 inline float g_fov_scale = 1.0f;
 inline float fov_scale() { return g_fov_scale; }
 inline void set_fov_scale(float scale) { g_fov_scale = std::clamp(scale, 0.1f, 2.0f); }
+// [Video] FovDeg (horizontal degrees of the 4:3 picture) -> that scale: the PS1's H 512 gives 2 atan(160 / 512); 35 = exactly the PS1 view.
+inline float fov_scale_for(int deg) { return deg == 35 ? 1.0f : (160.0f / 512.0f) / std::tan(static_cast<float>(deg) * 0.5f * 3.14159265f / 180.0f); }
 // The packet-culling frame of the PS1 GTE / GPU rules: SX2 in -1024..1023 and a triangle span <= 1023 x 511 are limits of the PS1's
 // 320 x 224 picture. Our picture is (320 + 2 e) columns wide and FovDeg scales H, so the limits are scaled to keep the PS1's ratio of limit to
 // picture: the x limits and the x span by k = 1 + e / 160 about the projection centre 160. FovDeg needs no factor: H, the picture's tangent and

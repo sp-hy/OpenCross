@@ -183,6 +183,32 @@ bool SfxBank::make_room(int frame, SfxProgram& out, std::vector<SfxProgram>* ext
   return true;
 }
 
+std::shared_ptr<const SfxTriggers> make_sfx_triggers(const SfxBank& bank, const AkaoSeq& seq) {
+  auto triggers = std::make_shared<SfxTriggers>();
+  for (int id : akao_sfx_triggers(seq)) {
+    SfxProgram first;
+    std::vector<SfxProgram> programs;
+    if (!bank.make_global(id, first, &programs)) continue;
+    programs.insert(programs.begin(), first);
+    triggers->programs.emplace_back(id, std::move(programs));
+  }
+  return triggers->programs.empty() ? nullptr : triggers;
+}
+
+void SfxTriggers::play(AkaoPlayer& sfx_player, const std::vector<AkaoPlayer::SfxRequest>& requests) const {
+  for (const AkaoPlayer::SfxRequest& request : requests) {
+    const auto found = std::find_if(programs.begin(), programs.end(), [&](const auto& entry) { return entry.first == request.id; });
+    if (found == programs.end()) continue;
+    sfx_player.evict_sfx(request.mask);
+    for (SfxProgram program : found->second) {
+      program.volume = float(request.volume & 0x7F) / 127.0f;
+      program.pan = request.pan >> 1;
+      program.mask = request.mask;
+      sfx_player.start_sfx(program);
+    }
+  }
+}
+
 void AkaoSfx::stop_all() {
   if (mixer_) mixer_->stop_sfx();
 }

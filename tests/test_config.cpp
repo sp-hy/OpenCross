@@ -59,6 +59,7 @@ int main() {
   CHECK(saved.find("FilterHD") == std::string::npos && saved.find("FilterSD") == std::string::npos && saved.find("FilterModded") == std::string::npos);
   Config defaults;
   CHECK(defaults.filter == TexFilter::Bilinear);
+  CHECK(defaults.hd_battle_textures && !load_text("[Video]\nHdBattleTextures=0\n").hd_battle_textures);
   CHECK(defaults.smooth_water_line);
   CHECK(load_text("[Enhancements]\nSmoothWaterLine=1\n").smooth_water_line);
   // EdgeBlend defaults off.

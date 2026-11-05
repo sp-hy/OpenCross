@@ -494,15 +494,17 @@ bool BattleView::fx_cross_draw(const render::Frame& frame, const render::Letterb
 }
 
 // Nothing is drawn while the colour is black. Mode 0 = opaque, 1..4 = ABR mode - 1 (the batch's blend numbering is ABR + 1); the PS1 quad is 352 x 272 from the
-// draw area's corner, i.e. the whole visible picture.
+// draw area's corner, i.e. the whole visible picture (widescreen: widened to the visible columns like every full-width screen primitive).
 void BattleView::fx_tint_draw(const render::Frame& frame, const render::Letterbox& lb) {
   const effects::FxModels* ms = fx_ ? fx_->bespoke_models() : nullptr;
   if (!ms || !white_.set) return;
   const effects::FxModels::Tint& tint = ms->tint;
   if (tint.rgb[0] == 0 && tint.rgb[1] == 0 && tint.rgb[2] == 0) return;
   const float fw = static_cast<float>(frame.extent.width), fh = static_cast<float>(frame.extent.height);
-  const float x0 = std::clamp(std::round(lb.left()), 0.0f, fw), y0 = std::clamp(std::round(lb.oy), 0.0f, fh);
-  const float x1 = std::min(fw, x0 + 352.0f * lb.scale), y1 = std::min(fh, y0 + 272.0f * lb.scale_y);
+  float cols[2] = {0.0f, 352.0f};
+  lb.widen_full_width(cols, 2);
+  const float x0 = std::clamp(std::round(lb.ox + cols[0] * lb.scale), 0.0f, fw), y0 = std::clamp(std::round(lb.oy), 0.0f, fh);
+  const float x1 = std::clamp(lb.ox + cols[1] * lb.scale, x0, fw), y1 = std::min(fh, y0 + 272.0f * lb.scale_y);
   const float qx[4] = {x0, x1, x0, x1}, qy[4] = {y0, y0, y1, y1}, qu[4] = {0, 1, 0, 1}, qv[4] = {0, 0, 1, 1};
   auto channel = [](u8 value) { return static_cast<u8>(value * 128 / 255); };
   particles_.begin(frame, fw, fh, true);

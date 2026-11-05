@@ -182,16 +182,18 @@ void FieldWorld::fade_master_volume(int frames, int volume) {
 
 // 7E / D4: movie number -> file through the index of the disc in the drive. The host plays it and calls movie_finished(); 7F WAIT_MOVIE
 // polls movie_playing(). Numbers whose record is no movie finish at once.
-void FieldWorld::play_movie(int index, int variant, bool skippable) {
+void FieldWorld::play_movie(int index, int variant, bool skippable, int flags) {
   if (movie_state_ != MovieState::None) {
     log::warn("field: tick {} movie row {} ignored in {}: the previous movie is still {}", tick_count_, index, view_.room_name(),
               movie_state_ == MovieState::Requested ? "waiting for the host" : "playing");
     return;
   }
   const std::string name = discs_.movie_name(disc_, index);
-  movie_req_ = {index, variant, skippable, name};
-  log::info("field: tick {} movie {} ({}) requested{} in {} (disc {})", tick_count_, index, name.empty() ? "no file" : name,
-            skippable ? ", skippable" : "", view_.room_name(), disc_);
+  // Flag 8 (any D4 in the data, or a movie that ends in a recorded DC jump) fades the last frame out; without it the frame is held.
+  const bool fade = ((flags | (movie_jump_.active ? 8 : 0)) & 8) != 0;
+  movie_req_ = {index, variant, skippable, fade, name};
+  log::info("field: tick {} movie {} ({}) requested{}{} in {} (disc {})", tick_count_, index, name.empty() ? "no file" : name,
+            skippable ? ", skippable" : "", fade ? ", fades out" : ", held at the end", view_.room_name(), disc_);
   if (name.empty()) {
     start_movie_jump();
     return;

@@ -303,15 +303,34 @@ void test_growth() {
   CHECK_EQ(next_pending_stat(h4, 88, 88, 5), 0);
   Lo h5(Lo::Fallback::Hi);
   CHECK(next_pending_stat(h5, 10, 88, 98) <= 78);
-  // minor growth: 0.5*((snap+pending*b/10)-cur)*sqrt(P/S)
-  // 0.5*14*1 = 7; 0.5*14*0.5 = 3.5 -> 4; already above the target: floor 0.
+  // minor growth: v = ((snap + K) - cur) * sqrt(P/S) * 0.5, K the aim of x = pending * tenths / 10 (ceil(x) - 1 above 2).
+  // x 14 -> K 13: v 6.5 -> 7; v 3.25 -> 4; already above the target: floor 0.
   CHECK_EQ(minor_growth(50, 20, 50, 7, 8, 8), 7);
   CHECK_EQ(minor_growth(50, 20, 50, 7, 2, 8), 4);
   CHECK_EQ(minor_growth(50, 20, 70, 7, 8, 8), 0);
   CHECK_EQ(minor_growth(50, 20, 50, 7, 8, 0), 0);
-  // The full step: (50 + 14) - 50 = 14; 20 x 5 / 10 = 10 -> 7 left from 53; above the target: 0.
-  CHECK_EQ(full_minor_growth(50, 20, 50, 7), 14);
-  CHECK_EQ(full_minor_growth(50, 20, 53, 5), 7);
+  // x 14.8 -> K 14, v 2.12 -> 3 (round half up gives 2); x 24 -> K 23, v exactly 11 -> 11 (round half up of 11.5 gives 12).
+  CHECK_EQ(minor_growth(62, 4, 64, 37, 1, 8), 3);
+  CHECK_EQ(minor_growth(204, 8, 205, 30, 8, 8), 11);
+  // x 2 -> K 2: v 1.5 -> 2, v 1.0 -> 0, v 1.25 -> 1, v 0.5 -> 1, v 0.125 -> 0.
+  CHECK_EQ(minor_growth(10, 2, 9, 10, 4, 4), 2);
+  CHECK_EQ(minor_growth(10, 2, 10, 10, 4, 4), 0);
+  CHECK_EQ(minor_growth(10, 2, 7, 10, 1, 4), 1);
+  CHECK_EQ(minor_growth(10, 2, 10, 10, 1, 4), 1);
+  CHECK_EQ(minor_growth(10, 2, 10, 10, 1, 64), 0);
+  // One PS1 victory per party (star row: tenths 7, progress 6 of cap 30), every stat's gain as the original computed it.
+  struct Gain {
+    int snap, pending, cur, gain;
+  };
+  for (const Gain& g : {Gain{1023, 16, 1023, 3}, Gain{14, 1, 1, 4}, Gain{9, 1, 127, 0}, Gain{85, 0, 127, 0}, Gain{8, 0, 0, 2}, Gain{10, 1, 1, 3},
+                        Gain{1023, 12, 1023, 2}, Gain{7, 1, 127, 0}, Gain{90, 0, 127, 0}, Gain{10, 0, 0, 3}, Gain{6, 0, 1, 1}, Gain{8, 0, 127, 0},
+                        Gain{55, 8, 55, 1}, Gain{5, 0, 5, 0}, Gain{4, 1, 4, 0}, Gain{85, 0, 85, 0}, Gain{8, 0, 8, 0}, Gain{6, 0, 6, 0}})
+    CHECK_EQ(minor_growth(g.snap, g.pending, g.cur, 7, 6, 30), g.gain);
+  // The aims the PS1 computed: pending 16 / 12 / 8 / 1 at tenths 7 -> 11 / 8 / 5 / 1.
+  CHECK(full_minor_growth(0, 16, 0, 7) == 11 && full_minor_growth(0, 12, 0, 7) == 8 && full_minor_growth(0, 8, 0, 7) == 5 && full_minor_growth(0, 1, 0, 7) == 1);
+  // The full step uses the same aim: (50 + 13) - 50 = 13; x 10 -> K 9, 6 left from 53; above the target: 0.
+  CHECK_EQ(full_minor_growth(50, 20, 50, 7), 13);
+  CHECK_EQ(full_minor_growth(50, 20, 53, 5), 6);
   CHECK_EQ(full_minor_growth(50, 20, 70, 7), 0);
   CHECK_EQ(progress_cap({8, 7, 1}), 8);
   CHECK_EQ(progress_cap({10, 9, 64}), 640);
@@ -641,6 +660,38 @@ void test_action_events() {
   CHECK(de.front().action > (ev.empty() ? 0 : ev.front().action));
 }
 
+// Op 96's colour gate: a PC's weapon hit on an enemy lands with result 0 (hit code 0, the number shows "0") and leaves the HP alone.
+void test_colour_gate() {
+  struct GateBrain final : EnemyBrain {
+    EnemyAction choose(const Battle&, int, Rng&) override {
+      EnemyAction action;
+      action.kind = EnemyAction::Kind::None;
+      return action;
+    }
+    int colour_gate() const override { return 4; }
+  };
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  GateBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {0};
+  CHECK(battle.apply(attack));
+  const auto ev = battle.drain_events();
+  CHECK(!ev.empty());
+  if (!ev.empty() && ev[0].code != 2) {
+    CHECK(ev[0].gated);
+    CHECK_EQ(ev[0].value, 0);
+    CHECK_EQ(ev[0].code, 0);
+    CHECK_EQ(ev[0].hp_before, ev[0].hp_after);
+  }
+}
+
 void test_status_and_poison() {
   Fixture fixture;
   Battle& battle = fixture.battle;
@@ -658,6 +709,11 @@ void test_status_and_poison() {
   CHECK_EQ(battle.actions(), actions0 + 1);
   battle.post_action(0, 1, 100);
   CHECK((battle.unit(1).lo & st::kAfraid) == 0 && battle.unit(1).timers.empty());
+  // The target's gear duration modifier joins its duration stat: 3 x (13 - 2).
+  battle.unit_mut(1).eq.dur_mod = -2;
+  battle.do_element(0, 2, 0, 1);
+  CHECK_EQ(battle.unit(1).timers.at(8), 3 * 11);
+  battle.post_action(0, 1, 100);
 
   // poison: 1 per defend step on every living unit, PCs can die, enemies stay >= 1
   battle.unit_mut(2).lo |= st::kPoison;
@@ -1352,10 +1408,66 @@ void test_trap_needs_colour() {
 }
 
 void test_pilfer() {
-  // Mode 30: the chance byte = the heavy attack's HIT% of the command box (72 for Kid and
-  // Serge whatever their growth byte), doubled (byte arithmetic) for the opposite gender (PC 0 vs the male enemy); rnd(0,100) >= chance fails (code 2);
-  // rnd(0,99) < 10 takes slot +6 (rare) else +4; one steal per enemy; both slots empty -> nothing.
-  const auto chance_of = [](const Fixture& fixture) { return static_cast<int>(static_cast<u8>(fixture.battle.hit_chance_for(0, 3, 2) * 2)); };
+  // Mode 30: the chance byte = the caster's raw heavy-hit byte on a fresh target (20 here), doubled (byte arithmetic) for the opposite
+  // gender (PC 0 vs the male enemy); rnd(0,100) >= chance fails (code 2); rnd(0,99) < 10 takes slot +6 (rare) else +4; one steal per
+  // enemy; both slots empty -> nothing.
+  const auto chance_of = [](const Fixture& fixture) { return static_cast<int>(static_cast<u8>(fixture.battle.unit(0).hit_heavy * 2)); };
+  {
+    Fixture fixture;
+    CHECK_EQ(chance_of(fixture), 40);
+  }
+  {
+    // The chance bytes the PS1 rolled against for Kid (heavy-hit byte 20, weapon accuracy 89: heavy HIT% 65) on a female target with no
+    // evade and, poked, a male one: a fresh target 20 / 40; after one weak hit on it (chain counter 1) the box figure 72 / 144.
+    struct Case {
+      bool chained, male;
+      int chance;
+    };
+    for (const Case& c : {Case{false, false, 20}, Case{false, true, 40}, Case{true, false, 72}, Case{true, true, 144}}) {
+      // rnd(0, 100) never reaches a chance above 100.
+      for (const int roll : {std::min(c.chance - 1, 100), c.chance}) {
+        if (roll > 100) continue;
+        Fixture fixture;
+        fixture.tables.elements.resize(5);
+        fixture.tables.elements[4].raw[5] = 0x80, fixture.tables.elements[4].raw[6] = 1, fixture.tables.elements[4].raw[7] = 30;
+        fixture.tables.drops[0].slot = {0x0005, 0x8069, 0x0007, 0x8061};
+        Unit& kid = fixture.battle.unit_mut(0);
+        kid.gender = 0x8000, kid.hit_heavy = 20, kid.eq.wp_acc = 89;
+        Unit& enemy = fixture.battle.unit_mut(3);
+        enemy.gender = c.male ? 0x4000 : 0x8000, enemy.evd = 0;
+        if (c.chained) fixture.battle.do_weapon_attack(0, 3, 0);
+        fixture.rng.push(roll);
+        fixture.rng.push(50);
+        fixture.battle.do_element(0, 4, 0, 3);
+        CHECK_EQ(fixture.battle.unit(3).stolen, roll < c.chance);
+      }
+    }
+  }
+  {
+    // The PS1 after a weak hit and a failed menu Pilfer: the cast leaves the chain counter at 1, so a Pilfer right after still reads 72
+    // (a chain step would give 78); the next turn starts the chain at 0 and the Pilfer reads the raw byte 20.
+    for (const bool next_turn : {false, true}) {
+      const int chance = next_turn ? 20 : 72;
+      for (const int roll : {chance - 1, chance}) {
+        Fixture fixture;
+        fixture.tables.elements.resize(5);
+        fixture.tables.elements[4].raw[5] = 0x80, fixture.tables.elements[4].raw[6] = 1, fixture.tables.elements[4].raw[7] = 30;
+        fixture.tables.drops[0].slot = {0x0005, 0x8069, 0x0007, 0x8061};
+        Unit& kid = fixture.battle.unit_mut(0);
+        kid.gender = 0x8000, kid.hit_heavy = 20, kid.eq.wp_acc = 89;
+        fixture.battle.unit_mut(3).gender = 0x8000, fixture.battle.unit_mut(3).evd = 0;
+        fixture.battle.do_weapon_attack(0, 3, 0);
+        fixture.rng.push(100);
+        fixture.battle.do_element(0, 4, 0, 3);
+        CHECK(!fixture.battle.unit(3).stolen);
+        if (next_turn) fixture.battle.finish_external_action();
+        fixture.rng.push(roll);
+        fixture.rng.push(50);
+        fixture.battle.do_element(0, 4, 0, 3);
+        CHECK_EQ(fixture.battle.unit(3).stolen, roll < chance);
+      }
+    }
+  }
   {
     Fixture fixture;
     fixture.tables.elements.resize(5);
@@ -1505,7 +1617,7 @@ void test_victory_and_growth() {
     // At the Lv99 cap: nothing more to roll.
     CHECK(battle.party()[0].pending[1] == 0);
   }
-  // non-boss victory with pending deltas: ATK 9, snap 9, pending 20, b=7 -> 0.5*(9+14-9)*sqrt(1/8) = 2.47 -> 2
+  // non-boss victory with pending deltas: ATK 9, snap 9, pending 20, b=7: aim 13, (9+13-9)*sqrt(1/8)*0.5 = 2.30 -> 3
   {
     Fixture f2;
     ScriptedRng rng(Lo::Fallback::Lo);
@@ -1525,12 +1637,12 @@ void test_victory_and_growth() {
     CHECK(battle.apply(attack));
     CHECK(battle.outcome() == Outcome::Victory);
     CHECK(!battle.rewards().star_up);
-    CHECK_EQ(battle.rewards().gains[0][1], 2);
-    CHECK_EQ(battle.party()[0].stat[1], 11);
+    CHECK_EQ(battle.rewards().gains[0][1], 3);
+    CHECK_EQ(battle.party()[0].stat[1], 12);
     // The snapshot only moves on a star-up.
     CHECK_EQ(battle.party()[0].snap[1], 9);
   }
-  // instant growth: one normal victory takes ATK the whole way to its target 9 + 14 = 23, not half of it
+  // instant growth: one normal victory takes ATK the whole way to its target 9 + 13 = 22, not half of it
   {
     Fixture fixture;
     ScriptedRng rng(Lo::Fallback::Lo);
@@ -1551,8 +1663,8 @@ void test_victory_and_growth() {
     CHECK(battle.apply(attack));
     CHECK(battle.outcome() == Outcome::Victory);
     CHECK_EQ(battle.growth().progress, 8);
-    CHECK_EQ(battle.rewards().gains[0][1], 14);
-    CHECK_EQ(battle.party()[0].stat[1], 23);
+    CHECK_EQ(battle.rewards().gains[0][1], 13);
+    CHECK_EQ(battle.party()[0].stat[1], 22);
   }
   // shared growth: without it a KO'd member and the bench get nothing from a normal win; with it (and instant growth) they reach the target
   for (const bool shared : {false, true}) {
@@ -1579,10 +1691,10 @@ void test_victory_and_growth() {
     attack.chain = {2};
     CHECK(battle.apply(attack));
     CHECK(battle.outcome() == Outcome::Victory);
-    CHECK_EQ(battle.party()[0].stat[1], 23);
-    CHECK_EQ(battle.rewards().gains[1][1], shared ? 14 : 0);
-    CHECK_EQ(battle.party()[1].stat[1], shared ? 23 : 9);
-    CHECK_EQ(battle.bench()[0].stat[1], shared ? 23 : 9);
+    CHECK_EQ(battle.party()[0].stat[1], 22);
+    CHECK_EQ(battle.rewards().gains[1][1], shared ? 13 : 0);
+    CHECK_EQ(battle.party()[1].stat[1], shared ? 22 : 9);
+    CHECK_EQ(battle.bench()[0].stat[1], shared ? 22 : 9);
     CHECK_EQ(battle.rewards().bench_gains.size(), shared ? 1u : 0u);
   }
   // star-up: KO'd member gets no gain and 1 HP but does receive next pending; bench (non-party) member gets its old pending
@@ -1693,6 +1805,42 @@ void test_gear() {
   const Equip unresolved = make_equip(tables, 0x1000, 0x1000, {0xFC, 0xF9, 0});
   CHECK(unresolved.acc[0] == 0xFC && unresolved.acc[1] == 0xF9);
   CHECK_EQ(make_equip(make_tables(), 0x20, 0x96, {0xFB, 0, 0}).acc[0], 0xFB);
+  // Flag-0x80 accessories: +5 adds to the stamina modifier, +4 to the duration modifier (below 0x50 added, else v & 0x7F taken off):
+  // Resistance Ring 0x81 = -1, Resistance Belt 0x82 = -2, a made-up 0x03 = +3.
+  set(0xE4, {0, 0, 0, 0, 0x81, 0, 0, 0, 0x80});
+  set(0xE5, {0, 0, 0, 0, 0x82, 0, 0, 0, 0x80});
+  set(0xE6, {0, 0, 0, 0, 0x03, 2, 0, 0, 0x80});
+  CHECK_EQ(make_equip(tables, 0x20, 0x96, {0xE4, 0, 0}).dur_mod, -1);
+  CHECK_EQ(make_equip(tables, 0x20, 0x96, {0xE5, 0, 0}).dur_mod, -2);
+  const Equip mixed = make_equip(tables, 0x20, 0x96, {0xE4, 0xE5, 0xE6});
+  CHECK(mixed.dur_mod == 0 && mixed.stamina_mod == 2);
+}
+
+// The PS1 capture of Turn Red (hi 0x08, 100 %) cast by Serge (duration stat 10) on himself: the timer after the cast's own step is 29
+// with no flag-0x80 accessory, 26 with the Resistance Ring (+4 = 0x81) and 23 with the Resistance Belt (0x82).
+void test_gear_duration_modifier() {
+  for (const auto& [acc, timer] : {std::pair{0, 29}, std::pair{0xE4, 26}, std::pair{0xE5, 23}}) {
+    data::GameTables tables = make_tables();
+    tables.gear.resize(256);
+    tables.gear[0x20].raw[4] = 8;
+    tables.gear[0xE4].raw[4] = 0x81, tables.gear[0xE4].raw[8] = 0x80;
+    tables.gear[0xE5].raw[4] = 0x82, tables.gear[0xE5].raw[8] = 0x80;
+    tables.elements.resize(5);
+    auto& turn_red = tables.elements[4];
+    turn_red.raw[5] = 0x20, turn_red.raw[6] = 1, turn_red.raw[7] = 1, turn_red.raw[0xA] = 100, turn_red.raw[0x1C] = 0x08;
+    ScriptedRng rng{Lo::Fallback::Lo};
+    NullBrain brain;
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    PartyMember serge = make_member(0, "Serge");
+    serge.dur = 10;
+    serge.eq = make_equip(tables, 0x20, 0x96, {static_cast<u16>(acc), 0, 0});
+    CHECK(battle.start({serge, make_member(1, "B"), make_member(2, "C")}, 0));
+    battle.do_element(0, 4, 0, 0);
+    battle.post_action(0, 0, 1);
+    CHECK(battle.unit(0).timers.count(35) == 1 && battle.unit(0).timers.at(35) == timer);
+  }
 }
 
 // ------------------------------------------------------------------------------------------------ battle script VM
@@ -1859,6 +2007,46 @@ void test_pac_vm() {
   CHECK(random_vm.run_slot(3, 2, queued));
   CHECK_EQ(random_vm.var(0x408), 1);
   CHECK_EQ(random_host.rnd_calls, 4);
+}
+
+// Op 96 stores the colour gate; an enemy's A6 clears its slot-3 flag and drops the entity after the pass (its halt still runs); a revive
+// puts it back, so the kill script can run again.
+void test_pac_kill_and_revive() {
+  Bytes code = {0x00, 0x00, 0x0E, 0xE3, 0x80, 0x96, 0x04, 0x80, 0x00, 0xA6, 0x00};
+  const size_t ec = 5, base = 0x94 + ec * 0x40;
+  Bytes image(base, 0);
+  auto put32 = [&](size_t offset, u32 value) {
+    for (int i = 0; i < 4; ++i) image[offset + static_cast<size_t>(i)] = static_cast<u8>(value >> (8 * i));
+  };
+  auto put16 = [&](size_t offset, int value) {
+    image[offset] = static_cast<u8>(value);
+    image[offset + 1] = static_cast<u8>(value >> 8);
+  };
+  put32(0, 2), put32(4, 0x10), put32(8, static_cast<u32>(base + code.size())), put32(0xC, static_cast<u32>(base + code.size() + 8));
+  put32(0x90, static_cast<u32>(ec));
+  for (size_t entity = 0; entity < ec; ++entity) put16(0x94 + entity * 0x40 + 2, 1);
+  put16(0x94 + 4 * 0x40 + 0, 2);
+  put16(0x94 + 4 * 0x40 + 6, 9);
+  image.insert(image.end(), code.begin(), code.end());
+  pac::Module module;
+  std::string err;
+  CHECK(module.parse(image, &err));
+  FakeHost host;
+  pac::Vm vm(module, host);
+  vm.tick();
+  vm.tick();
+  CHECK_EQ(vm.colour_gate(), 4);
+  CHECK_EQ(vm.entity_of_unit(3), 4);
+  CHECK(vm.launch(3, 3));
+  CHECK(!vm.launch(3, 3));
+  vm.tick();
+  CHECK(!vm.scripted_death(3));
+  CHECK_EQ(vm.entity_of_unit(3), -1);
+  CHECK(!vm.launch(3, 3));
+  vm.revive(3);
+  CHECK_EQ(vm.entity_of_unit(3), 4);
+  CHECK_EQ(vm.frame_count(4), 1);
+  CHECK(vm.launch(3, 3));
 }
 
 void test_scripted_brain() {
@@ -3204,6 +3392,36 @@ void test_element_modes_revenge_heal_piggy_hero() {
   }
 }
 
+// A sprained attacker (lo 0x10) has its weapon term (after the hero doubling) and its MAG term cut to x300/400: weapon 16 hits as 12,
+// 32 (the hero set) as 24, and MAG gear 3 (term 4) casts as gear 2 (term 3).
+void test_sprained_attacker() {
+  const auto weak_hit = [](bool sprained, bool hero, int wp) {
+    Fixture fixture;
+    Unit& attacker = fixture.battle.unit_mut(0);
+    if (sprained) attacker.lo |= st::kSprain;
+    attacker.hero_set = hero;
+    attacker.eq.wp = wp;
+    fixture.battle.unit_mut(3).innate = 0;
+    const int hp0 = fixture.battle.unit(3).hp;
+    fixture.battle.do_weapon_attack(0, 3, 0);
+    return hp0 - fixture.battle.unit(3).hp;
+  };
+  CHECK(weak_hit(true, false, 16) < weak_hit(false, false, 16));
+  CHECK_EQ(weak_hit(true, false, 16), weak_hit(false, false, 12));
+  CHECK_EQ(weak_hit(true, true, 16), weak_hit(false, false, 24));
+  const auto aqua_beam = [](bool sprained, int mag_gear) {
+    Fixture fixture;
+    Unit& caster = fixture.battle.unit_mut(0);
+    if (sprained) caster.lo |= st::kSprain;
+    caster.eq.mag_gear = mag_gear;
+    const int hp0 = fixture.battle.unit(3).hp;
+    fixture.battle.do_element(0, 1, 0, 3);
+    return hp0 - fixture.battle.unit(3).hp;
+  };
+  CHECK(aqua_beam(true, 3) < aqua_beam(false, 3));
+  CHECK_EQ(aqua_beam(true, 3), aqua_beam(false, 2));
+}
+
 // The colour multipliers of four PS1 enemy casts, from the inputs the PS1 held at the cast (attacker innate = attack colour, the ring
 // as it stood, target white): Multistab 1250 (68 damage from a raw 54), Gnaw Bones 1000, Slash All 1000, element 23 1125.
 void test_ps1_cast_colours() {
@@ -3279,6 +3497,237 @@ void test_weapon_tech_record_colour() {
   const int white = tech_damage(0x08), blue = tech_damage(0x80);
   CHECK(white > 0);
   CHECK(blue > white);
+}
+
+// An element that can be sealed (id 0x12D at most, record byte 1 bit 0) cast by a caster sealed in its colour becomes the forced miss with
+// the seal pack of the colour (190 + colour, 1 green .. 6 blue); the ring still takes the colour. An action's enemy target has its cells'
+// seal flags judged like a PC's.
+void test_sealed_caster_fizzles() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  battle.unit_mut(3).lo |= 0x80000000u;
+  const int hp0 = battle.unit(0).hp;
+  battle.drain_events();
+  battle.do_element(3, 1, 0, 0);
+  CHECK_EQ(battle.unit(0).hp, hp0);
+  const auto ev = battle.drain_events();
+  CHECK(!ev.empty());
+  if (!ev.empty()) {
+    CHECK_EQ(ev.front().fx_eid, 196);
+    CHECK_EQ(ev.front().code, 2);
+    CHECK(ev.front().silent);
+    CHECK_EQ(ev.front().sys_msg, -1);
+  }
+  CHECK_EQ(battle.ring()[2], 5);
+  // A record without byte 1 bit 0 is cast as it is.
+  fixture.tables.elements[1].raw[1] = 0;
+  battle.do_element(3, 1, 0, 0);
+  CHECK(battle.unit(0).hp < hp0);
+  const auto plain = battle.drain_events();
+  CHECK(!plain.empty() && plain.front().fx_eid == -1);
+  fixture.tables.elements[1].raw[1] = 1;
+  // The enemy's blue cell is flagged once the enemy is an action's target; the flag clears when the seal is gone and it is a target again.
+  Unit& enemy = battle.unit_mut(3);
+  enemy.cells[5] = 1, enemy.usable[5] = true;
+  enemy.cells[6] = 3, enemy.usable[6] = true;
+  CHECK(!battle.unit(3).seal_flag[5]);
+  battle.do_weapon_attack(0, 3, 0);
+  CHECK(battle.unit(3).seal_flag[5]);
+  CHECK(battle.unit(3).seal_flag[6]);
+  battle.unit_mut(3).lo &= ~0x80000000u;
+  battle.do_weapon_attack(0, 3, 0);
+  CHECK(!battle.unit(3).seal_flag[5]);
+}
+
+// Every party action lowers all three PC countdowns (the actor's too) by its steps, every enemy action by 3; a confused PC whose countdown
+// runs out takes its turn, paying the weak hit's stamina.
+struct WeakHitBrain final : EnemyBrain {
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.target = 1;
+    return action;
+  }
+};
+
+void test_pc_countdowns_run_with_actions() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  WeakHitBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {0, 1};
+  CHECK(battle.apply(attack));
+  CHECK_EQ(battle.unit(0).countdown, 8 - 1 - 2);
+  CHECK_EQ(battle.unit(1).countdown, 5);
+  CHECK_EQ(battle.unit(2).countdown, 5);
+  // The enemy acts at 0: the PCs lose 3 more.
+  battle.unit_mut(3).countdown = 0;
+  battle.settle();
+  CHECK_EQ(battle.unit(0).countdown, 2);
+  CHECK_EQ(battle.unit(2).countdown, 2);
+  // PC 2 confused: the next weak hit takes it to 1, a medium one to 0, and its turn comes before the menu returns.
+  battle.unit_mut(2).lo |= st::kConfused;
+  battle.unit_mut(2).stamina = 70;
+  battle.unit_mut(1).stamina = 70;
+  Command next;
+  next.kind = Command::Kind::Attack;
+  next.actor = 1;
+  next.chain = {1};
+  CHECK(battle.apply(next));
+  CHECK(battle.unit(2).stamina < 70);
+  CHECK(battle.unit(2).countdown > 0);
+}
+
+// A landed weapon hit wakes the target and ends its confusion, timers included.
+void test_weapon_hit_ends_confusion() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  Unit& target = battle.unit_mut(0);
+  target.lo |= st::kAsleep | st::kConfused;
+  target.timers[14] = 9, target.timers[20] = 9;
+  battle.do_weapon_attack(3, 0, 0);
+  CHECK_EQ(battle.unit(0).lo & (st::kAsleep | st::kConfused), 0u);
+  CHECK(!battle.unit(0).timers.count(14) && !battle.unit(0).timers.count(20));
+}
+
+// Weapon techs: no crit roll (the hero set's threshold included; only the slayer mask), each hit wakes the target unless the record's lo
+// mask names the status, and a drainer heals by the total after the second gear step.
+void test_weapon_tech_wake_crit_drain() {
+  WeaponIn input;
+  input.atk = 9, input.wp = 16, input.def = 0, input.arm = 4, input.mult = 20, input.colour_mille = 1000, input.strength = 1;
+  input.hero_set = true;
+  Lo rolled(Lo::Fallback::Hi);
+  CHECK(weapon_damage(rolled, input).crit);
+  input.crit_roll = false;
+  Lo none(Lo::Fallback::Hi);
+  CHECK(!weapon_damage(none, input).crit);
+  input.slayer = true;
+  Lo slayer(Lo::Fallback::Hi);
+  CHECK(weapon_damage(slayer, input).crit);
+
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  fixture.tables.elements.resize(5);
+  auto& record = fixture.tables.elements[4];
+  record.raw[5] = 0x08, record.raw[6] = 1, record.raw[7] = 29, record.raw[8] = 20, record.raw[0xE] = 2;
+  record.raw[0x1A] = 0x10;
+  Unit& enemy = battle.unit_mut(3);
+  enemy.lo |= st::kAsleep | st::kConfused;
+  Unit& caster = battle.unit_mut(0);
+  caster.hi |= st::kHiDrain;
+  caster.hp = 10;
+  const int hp0 = battle.unit(3).hp;
+  battle.do_element(0, 4, 0, 3);
+  const int dealt = hp0 - battle.unit(3).hp;
+  CHECK(dealt > 0);
+  CHECK_EQ(battle.unit(3).lo & st::kAsleep, 0u);
+  CHECK(battle.unit(3).lo & st::kConfused);
+  CHECK_EQ(battle.unit(0).hp, std::min(battle.unit(0).max_hp, 10 + dealt));
+}
+
+// A PC script that queues nothing for a confused PC (its confusion only permanent), enemies that hit unit 0 and note every unit's
+// countdown on their first turn.
+struct ConfusedScriptBrain final : EnemyBrain {
+  std::array<int, kUnits> first_turn_countdowns{};
+  bool seen = false;
+  bool plan_turn(Battle&, int unit, Rng&, std::vector<EnemyAction>& out) override {
+    out.clear();
+    return unit < kPcSlots;
+  }
+  EnemyAction choose(const Battle& battle, int, Rng&) override {
+    if (!seen) {
+      for (int i = 0; i < kUnits; ++i) first_turn_countdowns[static_cast<size_t>(i)] = battle.unit(i).countdown;
+      seen = true;
+    }
+    EnemyAction action;
+    action.target = 0;
+    return action;
+  }
+};
+
+// Serge alone and confused (permanently) with enemies at 17 and 1: no PC can act, so time runs once as the menu finds nobody and again in
+// the scheduler pass, which takes every countdown to 0 before anyone acts; his empty script turn makes no attack and ends with the A4
+// countdown; time keeps running every pass, so the enemies' fresh countdowns are wiped and they act in turn.
+void test_time_runs_while_nobody_can_act() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  ConfusedScriptBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  battle.unit_mut(4) = battle.unit(3);
+  battle.unit_mut(1).lo |= st::kKO;
+  battle.unit_mut(2).lo |= st::kKO;
+  Unit& serge = battle.unit_mut(0);
+  serge.lo |= st::kConfused, serge.perm_lo |= st::kConfused;
+  serge.stamina = 40;
+  battle.unit_mut(3).countdown = 17;
+  battle.unit_mut(4).countdown = 1;
+  battle.drain_events();
+  battle.settle();
+  CHECK(brain.seen);
+  CHECK_EQ(brain.first_turn_countdowns[0], 0);
+  CHECK_EQ(brain.first_turn_countdowns[3], 0xFFFF);
+  CHECK_EQ(brain.first_turn_countdowns[4], 0);
+  int weapon_by_serge = 0, enemy_turns = 0;
+  for (const ActionEvent& ev : battle.drain_events()) {
+    if (ev.kind == ActionEvent::Kind::Weapon && ev.actor == 0) ++weapon_by_serge;
+    if (ev.kind == ActionEvent::Kind::Weapon && ev.actor >= kPcSlots) ++enemy_turns;
+  }
+  CHECK_EQ(weapon_by_serge, 0);
+  CHECK(enemy_turns > 1);
+  CHECK(battle.outcome() == Outcome::Wiped);
+}
+
+// Weapon techs on a weapon-immune target: every hit is -1 and the result a miss, yet the sum is taken off the HP, so three hits raise it
+// by 3 past its max (one hit changes nothing); a weapon absorber is healed by the sum, up to its max.
+void test_weapon_tech_immune_absorb() {
+  const auto cast = [](int hits, u32 hi, int hp) {
+    auto fixture = std::make_unique<Fixture>();
+    fixture->tables.elements.resize(5);
+    auto& record = fixture->tables.elements[4];
+    record.raw[5] = 0x08, record.raw[6] = 1, record.raw[7] = 29, record.raw[8] = 20, record.raw[0xE] = static_cast<u8>(hits);
+    Unit& enemy = fixture->battle.unit_mut(3);
+    enemy.hi |= hi;
+    enemy.hp = hp;
+    fixture->battle.drain_events();
+    fixture->battle.do_element(0, 4, 0, 3);
+    const auto ev = fixture->battle.drain_events();
+    return std::pair<int, int>{fixture->battle.unit(3).hp, ev.empty() ? -1 : ev.front().code};
+  };
+  Fixture probe;
+  const int max_hp = probe.battle.unit(3).max_hp;
+  CHECK((cast(3, st::kHiWeaponImmune, max_hp) == std::pair<int, int>{max_hp + 3, 2}));
+  CHECK((cast(1, st::kHiWeaponImmune, 100) == std::pair<int, int>{100, 2}));
+  const auto [absorbed_hp, absorbed_code] = cast(3, st::kHiWeaponAbsorb, 10);
+  CHECK(absorbed_hp > 10);
+  CHECK_EQ(absorbed_code, 3);
+  CHECK_EQ(cast(3, st::kHiWeaponAbsorb, max_hp).first, max_hp);
+}
+
+// Hi status 0x20000: the unit's weapon hits and elements cost no stamina.
+void test_no_stamina_cost_status() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  battle.unit_mut(0).hi |= st::kHiNoStaminaCost;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {0, 1};
+  CHECK(battle.apply(attack));
+  CHECK_EQ(battle.unit(0).stamina, 70);
+  Command element;
+  element.kind = Command::Kind::Element;
+  element.actor = 0;
+  element.cell = 0;
+  CHECK(battle.apply(element));
+  CHECK_EQ(battle.unit(0).stamina, 70);
 }
 
 // A double tech's weapon hits are dealt one each by its participants (the party slots of the character ids in record +0x14..+0x16), not
@@ -3983,6 +4432,8 @@ int main() {
   test_victory_and_growth();
   test_determinism();
   test_pac_vm();
+  test_pac_kill_and_revive();
+  test_colour_gate();
   test_scripted_brain();
   test_scripted_heal_on_ko_pc();
   test_pac_script_stream();
@@ -4006,8 +4457,17 @@ int main() {
   test_element_modes_revenge_heal_piggy_hero();
   test_ps1_cast_colours();
   test_hero_set();
+  test_sprained_attacker();
+  test_gear_duration_modifier();
   test_weapon_tech_record_colour();
   test_weapon_tech_participants();
+  test_sealed_caster_fizzles();
+  test_pc_countdowns_run_with_actions();
+  test_weapon_hit_ends_confusion();
+  test_weapon_tech_wake_crit_drain();
+  test_no_stamina_cost_status();
+  test_time_runs_while_nobody_can_act();
+  test_weapon_tech_immune_absorb();
   test_combo_techs();
   test_combo_real_tables();
   test_run_drops_stolen_loot();

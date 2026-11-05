@@ -4,7 +4,7 @@ Reference for everything a developer runs besides the game itself: the tools lin
 
 ## 1. Dev tools linked into `opencross.exe`
 
-`opencross <tool> [args]` runs a tool instead of the game; `opencross tools` lists them. The name is matched exactly or without its `oc` prefix (`opencross ocbattle ...` and `opencross battle ...` are the same; `occ` is also reachable as `c`). An argument that names no tool starts the game.
+`opencross <tool> [args]` runs a tool instead of the game; `opencross tools` lists them. The name is matched exactly or without its `oc` prefix (`opencross ocbattle ...` and `opencross battle ...` are the same; `occ` is also reachable as `c`). The game starts only with no argument or with `--config <file>`; any other first argument that names no tool prints the usage and exits 2. A tool that gets an unknown or incomplete option prints its usage and exits non-zero (2), and a tool never ends with a negative code that would fall through to the game.
 
 The exe is a GUI-subsystem program. A tool attaches to the calling console only when its stdout is not already redirected, so from PowerShell pipe the output to make the shell wait: `opencross occ rooms-check | Out-Host`.
 
@@ -73,9 +73,9 @@ Source: `tools/ocaudio.cpp`. `<song>` is a song id or `BGMnnn`.
 |---|---|---|
 | `decode` | `<song> <out.wav> [seconds]` | Remastered track to WAV; no seconds = whole track, no looping. |
 | `play` | `<song> [seconds]` | Plays the remastered track (default 10 s). |
-| `render-seq` | `<music NNN> <out.wav> [seconds] [rate]` | Original AKAO music through the engine's sequencer (default 20 s, 44100 Hz). |
+| `render-seq` | `<music NNN> <out.wav> [seconds] [rate] [keys.txt]` | Original AKAO music through the engine's sequencer (default 20 s, 44100 Hz), with the sound effects its FE 0B ops request mixed in; prints the header gate mask. `keys.txt` lists every voice key-on / key-off (`update KON|KOFF channel voice`, update = 240 Hz sequencer update). |
 | `play-seq` | `<music NNN> [seconds]` | Plays the same live (default 20 s). |
-| `render-sfx` | `<sfx id> <out.wav> [seconds] [rate] [room]` | Renders one sound effect (default 3 s, 44100 Hz = SPU rate, 48000 = mixer). `room` selects the room bank overlaying instruments 208..223; `battle:<room>` = that room re-entered after a battle. |
+| `render-sfx` | `<sfx id \| r<frame>> <out.wav> [seconds] [rate] [room]` | Renders one sound effect (default 3 s, 44100 Hz = SPU rate, 48000 = mixer). `room` selects the room bank overlaying instruments 208..223; `battle:<room>` = that room re-entered after a battle. `r<frame>` plays the room's yos1 frame instead of an effect00 id. |
 | `play-sfx` | `<sfx id> [seconds]` | Plays one sound effect (default 3 s). |
 | `sfx-pitch` | none | Pitch-register audit of every SFX id against the retail formula; lists mismatches. |
 | `sfx-bytes` | `<id>` | Raw program bytes of a global SFX id (both channels) and its chain count. |
@@ -174,7 +174,7 @@ Source: `tools/ocmovie.cpp`. `<name>` is a `movie.dat` member without extension 
 
 ### 1.9 `ocbattleview` (one battle in a window)
 
-Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scenedat index, default 0). Reads `opencross.ini` next to the exe, logs to `ocbattleview.log` there. With `--frames` it runs deterministically (one tick per frame), takes no focus and plays no sound. `--shot` writes `battle_shot.png` next to the exe; `--shotdir` shots go to that folder (default the exe folder) as `shot_NNNNNN.png`.
+Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scenedat index, default 0). Reads `opencross.ini` next to the exe, logs to `ocbattleview.log` there; `[Video] Widescreen`, `WideHud` and `FovDeg` act as in the game, from the window's shape every frame. With `--frames` it runs deterministically (one tick per frame), takes no focus and plays no sound. `--shot` writes `battle_shot.png` next to the exe; `--shotdir` shots go to that folder (default the exe folder) as `shot_NNNNNN.png`.
 
 | Flag | Argument | Default | Meaning |
 |---|---|---|---|
@@ -282,7 +282,7 @@ Battle changes must not regress these two runs.
 | Gate | What it checks |
 |---|---|
 | `ocbattle fx-audit` | The CSV's `private_list` column holds the overlay-private ops in the pack's sequences (`op:commands`), run or not; `private_ignored` lists the ops that were run but not acted on (no bespoke module on a non-stock overlay, or the module's `command` returned false) as `op:count`. Plays every effect pack headless (a fixed scene, caster PC 0, targets enemies 3 and 4) until it ends or hits the tick cap, plus the six cast-charge packs. Per pack: emitters started, objects spawned, quads / mesh triangles / bespoke primitives per tick, sequence ops not presented, sprites and faces with all-transparent texels, non-finite or runaway coordinates, effects that end at once or never. Prints `fx-audit: N packs (C clean, G clean on the generic path)` and the issue-class counts. |
-| `ocbattle pac-soak` | Starts every scene's battle with the default party and runs its enemy scripts: a direct pass over every slot 2..4 of every unit (twice), then up to N PC commands. Prints scenes, battles started, commands, exceptions, outcome counts (victory / wiped / fled / other), ops executed, scripted-turn statistics, executed opcodes that no shipped script contains (confidence `U`, should stay empty) and invalid opcodes, unmodelled unit fields. |
+| `ocbattle pac-soak` | Starts every scene's battle with the default party and runs its enemy scripts: a direct pass over every slot 2..4 of every unit (twice; slot 3 last, the unit revived after it so its entity is back in the run list), then up to N PC commands. Prints scenes, battles started, commands, exceptions, outcome counts (victory / wiped / fled / other), ops executed, scripted-turn statistics, executed opcodes that no shipped script contains (confidence `U`, should stay empty) and invalid opcodes, unmodelled unit fields. |
 
 "No regression" means: `pac-soak` reports zero exceptions (`0 exceptions`, exit 0) and every number on its output lines (outcome counts, ops, scripted turns, unused / invalid opcode lists) is unchanged against the baseline run, and `fx-audit` keeps the same clean counts and issue-class counts, unless the change is meant to alter battle scripts or effect handling. To diff two builds scene by scene, set `OC_SOAK_LIST=1` (one `scene N outcome K` line per scene) and compare the output files.
 
@@ -350,7 +350,8 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_BATTLE_AUDIT` | `battle_camera.cpp`, `battle_view_anchor.cpp` | set; `2` | Per-tick battle flow checks, one `AUDIT` warning per anomaly (section 2); `2` adds the element-table pair list. |
 | `OC_BATTLE_SEED` | `battle_view.cpp`; set from `[Debug] Seed` by `src/app/app_battle.cpp` (field battles) and `app_boot.cpp` (standalone `[Debug] Battle`) | decimal integer | Fixes the battle RNG seed (and the random camera picks); for a field encounter also its enemy-group variant roll. |
 | `OC_BATTLE_MISS` | `src/battle/battle.cpp` | set | Every PC weapon attack misses. |
-| `OC_BATTLE_NORUN` | `battle_view_ui.cpp` | set | Auto-battle's last-resort run-away is disabled, so a fight ends in a win or a wipe. |
+| `OC_BATTLE_AUTO_HEURISTICS` | `battle_view_ui.cpp` | unset | `BattleAuto` (test driver only) picks the weakest enemy, rotates to the PC with most stamina, Defends when a weak hit is unaffordable and Runs below 12 % party HP, instead of the player's auto battle rule. |
+| `OC_BATTLE_NORUN` | `battle_view_ui.cpp` | set | With OC_BATTLE_AUTO_HEURISTICS, the last-resort run-away is disabled, so a fight ends in a win or a wipe. |
 | `OC_BATTLE_FIELD` | `battle_view.cpp` | stage number | Forces the battle stage (background). |
 | `OC_BATTLE_INTRO` | `battle_view.cpp` | sequence name | Forces the stage intro camera sequence (ignored when the bank has no such sequence). |
 | `OC_DOPPLE_SLOTS` | `battle_view.cpp` | `all`, `debug`, or `n,n,...` | Dopplegang pool slots: all, the table's non-zero rows, or a list. |

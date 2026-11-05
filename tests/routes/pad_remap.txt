@@ -1,0 +1,96 @@
+# Controller: Custom. Field (also: R3 runs like Cross): with the Item function on the Cancel button and Cancel on the Item button (words 0x76543120) the Item key
+# runs and the Cancel key opens the key-item list; with the default words Cancel runs. Menu: the Item key cancels. Glyphs: the confirm /
+# menu glyphs of the main menu and of the battle camera hint follow the words (shots compared by tools/py/pad_remap_diff.py).
+0 wait 5
+- request party_add 1
+- set var 0x00 8
+- load alu_a03i 0
+- wait 90
+- put -84 210
+- wait 10
+- key down right
+- wait 10
+- key up right
+- assert near player -24 210 8
+- put -84 210
+- wait 10
+- key down right
+- key down cancel
+- wait 10
+- key up cancel
+- key up right
+- assert near player 75 210 10
+- put -84 210
+- wait 10
+- key down right
+- pad tap r3 10
+- key up right
+- pad off
+- assert near player 70 210 14
+- set option 100 1
+- set buttons 0 76543120
+- put -84 210
+- wait 10
+- key down right
+- key down cancel
+- wait 10
+- key up cancel
+- key up right
+- assert near player -84 210 12
+- tap item
+- wait 30
+- put -84 210
+- wait 10
+- key down right
+- key down item
+- wait 10
+- key up item
+- key up right
+- assert near player 75 210 10
+- request menu
+- wait menu open
+- wait 30
+- tap cancel
+- wait 20
+- assert menu open
+- tap item
+- wait menu closed
+- set buttons 0 76543210
+- request menu
+- wait menu open
+- wait 40
+- tap down
+- wait 12
+- tap down
+- wait 12
+- tap down
+- wait 12
+- tap down
+- wait 12
+- tap confirm
+- wait 60
+- screenshot pr_custom_default.png
+- tap cancel
+- wait 60
+- tap cancel
+- wait menu closed
+- set buttons 0 76543120
+- request menu
+- wait menu open
+- wait 40
+- tap down
+- wait 12
+- tap down
+- wait 12
+- tap down
+- wait 12
+- tap down
+- wait 12
+- tap confirm
+- wait 60
+- screenshot pr_custom_swapped.png
+- tap item
+- wait 60
+- tap item
+- wait menu closed
+- quit

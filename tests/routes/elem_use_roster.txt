@@ -1,0 +1,58 @@
+# Elements > Use > the first usable element > Left (roster) > OK: the roster cursor's character (Serge, party slot 0 at 5 HP) is healed.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right                           # file 04
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait room opa_b04f 600
+- mash until idle 1 3000              # the beach's arrival lines
+- set hp 0 5
+- request menu
+- wait menu open 300
+- wait 20
+- tap down                            # Elements
+- wait 10
+- tap confirm
+- wait 40
+- tap confirm                         # Use
+- wait 60
+- screenshot use_list.png
+- tap confirm                         # Tablet
+- wait 10
+- tap down
+- wait 5
+- tap left                            # the roster
+- wait 10
+- screenshot use_roster.png
+- tap down
+- wait 5
+- tap up
+- wait 5
+- tap confirm                         # Serge heals 50
+- wait 20
+- assert hp 0 55 56
+- tap cancel
+- wait 5
+- tap cancel
+- wait 5
+- screenshot use_after.png
+- quit
