@@ -89,6 +89,8 @@ constexpr const char* kApiNames[kCount] = {
     "ach_level1_gold",
 };
 
+constexpr const char* kMetaApiName = "ach_ps41_all";
+
 constexpr int kSampleTicks = 60;
 constexpr int kAnyRoom = -1;
 
@@ -277,6 +279,10 @@ void Achievements::forged(int id) {
   if (std::find(std::begin(kRainbowWeapons), std::end(kRainbowWeapons), id) != std::end(kRainbowWeapons)) earn(kRainbowWeapon);
   if (std::find(std::begin(kRainbowArmor), std::end(kRainbowArmor), id) != std::end(kRainbowArmor)) earn(kRainbowArmorMade);
 }
+
+std::vector<std::string> Achievements::api_names() { return {kApiNames + 1, kApiNames + kCount}; }
+
+const char* Achievements::meta_api_name() { return kMetaApiName; }
 
 std::vector<const char*> Achievements::take_earned() {
   std::vector<const char*> names;

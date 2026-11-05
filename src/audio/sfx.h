@@ -2,6 +2,7 @@
 // Sound-effect interface used by the field script host (op C6 PLAY_SOUNDFX) and the battle sequencer; LogSfx records the requests
 // when no audio is available, AkaoSfx plays the original AKAO effects.
 #include <memory>
+#include <utility>
 #include <vector>
 
 #include "audio/akao_player.h"
@@ -101,6 +102,17 @@ class SfxBank {
   std::vector<std::shared_ptr<const Bank>> room_banks_;  // the current room's yos0 banks
   std::vector<std::shared_ptr<AkaoCode>> frames_;  // yos1 frames (null = empty slot)
 };
+
+// The effect00 programs (the id, then its chained ids) a song's FE 0B ops request, built when the song starts (the bank's table is
+// main-thread state; the song plays on the audio thread).
+struct SfxTriggers {
+  std::vector<std::pair<int, std::vector<SfxProgram>>> programs;
+  // Starts the requests like the play-SFX command: the running sounds of the request's mask end, then the id and its chained ids start
+  // with the request's volume and pan modifiers and mask.
+  void play(AkaoPlayer& sfx_player, const std::vector<AkaoPlayer::SfxRequest>& requests) const;
+};
+// Null when the sequence requests no defined id.
+std::shared_ptr<const SfxTriggers> make_sfx_triggers(const SfxBank& bank, const AkaoSeq& seq);
 
 // Sfx sink that plays the original AKAO effects through a Mixer (SFX bus). Not owning the mixer.
 class AkaoSfx final : public Sfx {

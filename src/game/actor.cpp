@@ -460,6 +460,18 @@ void Actor::place(const WalkMesh& walk, int tri, float x, float z, int facing) {
   reset_playback();
 }
 
+void Actor::copy_pose(const Actor& from) {
+  cur_.x = from.cur_.x;
+  cur_.y = from.cur_.y;
+  cur_.z = from.cur_.z;
+  cur_.yaw = from.cur_.yaw;
+  tri_ = from.tri_;
+  tile_flags_ = from.tile_flags_;
+  facing_ = from.facing_;
+  prev_ = cur_;
+  reset_smooth();
+}
+
 void Actor::set_position(const WalkMesh& walk, float x, float z, bool teleport, bool free_y) {
   cur_.x = x;
   cur_.z = z;
@@ -627,12 +639,19 @@ void Actor::turn_step() {
 
 void Actor::advance_anim(bool loop_current) {
   // Animation: 0.25 keyframe per tick. The cross-fade source keeps playing (looping) only for a blend word with bit 0x8000; otherwise
-  // it holds its time.
+  // it holds its time. On a stair tile the step follows the whole-unit height instead: forwards while it falls (climbing), backwards
+  // while it rises, none while it stays.
+  float rate = clip_reverse_ ? -anim_rate : anim_rate;
+  if (tile_flags_ & 0xC000u) {
+    const int whole_y = static_cast<int>(std::floor(cur_.y));
+    rate = whole_y == stair_prev_y_ ? 0.0f : whole_y < stair_prev_y_ ? anim_rate : -anim_rate;
+    stair_prev_y_ = whole_y;
+  }
   auto advance = [&](int clip, float& tp, float& tc, bool loop) {
     tp = tc;
     if (clip < 0) return;
     const float len = clip_length(clip);
-    tc += kKeyframesPerTick * anim_rate;
+    tc += kKeyframesPerTick * rate;
     if (len <= 0) return;
     if (loop) {
       if (tc >= len) {
@@ -642,7 +661,7 @@ void Actor::advance_anim(bool loop_current) {
         tc += len;
         tp += len;
       }
-    } else if (anim_rate < 0) {
+    } else if (rate < 0) {
       if (tc <= 0) {
         tc = 0;
         tp = std::max(tp, tc);

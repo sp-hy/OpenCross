@@ -70,6 +70,8 @@ void App::init_config(int argc, char** argv) {
   log_forced = true;
 #endif
   first_launch = !config.load(config_file);
+  // RDE's play-time toggles start every launch off; an older build's ini may still hold them. A --config ini keeps them (tests).
+  if (own_ini) config.clear_session_toggles();
   if (log_forced || config.debug_log) log::init(log_path);
   if (first_launch) {
     // A first launch (no ini) opens 16:9 widescreen, 1280 x 720. Only here: the Config member defaults (4:3, 1280 x 960,
@@ -213,6 +215,7 @@ void App::init_audio() {
   if (!files.game_dir().empty()) mixer.set_vfs(&files);
   sfx_ok = !files.game_dir().empty() && !sweeping && sfx_bank.load(files);
   if (!sfx_ok && !sweeping) log::warn("audio: effect00.dat / wave0000.dat unavailable; sound effects are only logged");
+  if (sfx_ok) mixer.set_sfx_bank(&sfx_bank);
   sfx_sink = sfx_ok ? static_cast<audio::Sfx*>(&akao_sfx) : static_cast<audio::Sfx*>(&log_sfx);
   ui_sfx = [this](int id) {
     // Menu sounds use the menus' mask; a new sound cuts the last one.
@@ -344,6 +347,9 @@ void App::init_menus() {
       menu.set_mode(art);
       menu.set_portrait_set(config.portraits);
       menu.set_sfx(ui_sfx);
+      menu.set_sfx_layer([this](int id, u32 mask) {
+        if (sfx_ok) akao_sfx.play_menu(id, mask);
+      });
       if (have_save_dat) {
         std::filesystem::path bak = save_path;
         bak += ".ocbak";
@@ -355,6 +361,7 @@ void App::init_menus() {
     shop_ok = shop.init(ctx, files, sprites, menu_text, tables, lang);
     if (shop_ok) {
       shop.set_rules(&flow.machine().rules());
+      shop.set_custom_names(&flow.machine().custom_names());
       shop.set_mode(art);
       shop.set_sfx(ui_sfx);
     }
@@ -422,6 +429,7 @@ void App::init_battle() {
     if (!tables_ok) tables_ok = tables.load(files);
     battle_ready = tables_ok && battle.init(ctx, files, sprites, meshes, tables, &mixer);
     if (battle_ready) {
+      battle.set_hd_textures(config.hd_battle_textures);
       battle.set_art_mode(platform::art_is_hd(config.art_mode));
       battle.set_bgm_remastered(config.bgm_source != "original");
       battle.set_auto(config.debug_battle_auto);

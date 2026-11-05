@@ -84,7 +84,7 @@ The parser accepts 27 top-level verbs. `ent` is an entity index of the room, `ch
 | `tap <name> [ticks]` | Press, hold `ticks` (default 3, minimum 1), release, then 3 free ticks; finishes after the gap. |
 | `action` | `tap` of Enter (the confirm key) with the default timing. |
 | `pad on\|off` | Virtual pad connected with no button held / disconnected; releases its buttons. |
-| `pad tap <a\|b\|x\|y\|start> [ticks]` | Press and release a pad button (a = south, b = east, x = west, y = north); connects the pad; same timing as `tap`. |
+| `pad tap <a\|b\|x\|y\|start\|l3\|r3> [ticks]` | Press and release a pad button (a = south, b = east, x = west, y = north, l3 / r3 = the stick clicks); connects the pad; same timing as `tap`. |
 | `walk <x> <z> [tol] [timeout]` | Steer the virtual stick along a walk-mesh path until the player is within `tol` (default 24) of the world point. Replans every 40 ticks. Succeeds early if the room changed or a battle began. Fails when blocked (no 3-unit move in 150 ticks while the controls are free) or on timeout. |
 | `walk_ent <ent> [tol] [timeout]` | Same toward an entity's current position. Fails if the entity does not exist. |
 | `approach <ent> [tol] [timeout]` | `walk_ent` that never fails: it also ends (with a log line) when blocked for 40 ticks, on timeout, or when a dialogue opens / the controls are taken. |
@@ -137,6 +137,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `load <room> [param]` | Warp to a room; `param` is the entrance (default 0). The disc follows variable 0x42 as on a map jump (`set var 42 1` first for a disc 2 room). Fails the run (exit 1) if the room cannot load. |
 | `set var <hexid> <value>` | Write a script variable. |
 | `set option <hexmask> <0\|1>` | Set or clear bits of the settings options word (0x200 run/walk toggle, 0x800 analog stick). |
+| `set buttons <0..3> <hexword>` | Write one word of the game's button configuration (0 field, 1 battle, 2 field analog, 3 battle analog; `formats/save.md` section 6). It acts while the options word has 0x100 set (`set option 100 1`); the route's keys and pad buttons then pass through the assignment like real input. |
 | `set hp <char> <value>` | Write a character's current HP. |
 | `set status <char> <hexbits>` | Write a character's status bits (1 poison, 8 burn, 10 sprain, 20 flu, hex). |
 | `set model <char> <byte>` | Write the model byte of a party member's character record. |
@@ -156,12 +157,14 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `rename <char>` | Open name entry for the character, then the main menu. |
 | `party` | Open the party screen. |
 | `party_add <char>` | Add a character to the party. |
+| `party_remove <ref>` | Empty a party slot as REMOVE_FROM_PARTY (7D) does; `ref` is a character reference in decimal (253 / 254 / 255 = slot 0 / 1 / 2, else a character id). |
 | `save` | Open the cleared-save prompt (strips the roster, sets variable 0x7E to 3) and the save list. |
 | `ngplus` | Open the New Game+ list over the current game. |
 | `menu` | Open the main menu. |
 | `disc <n>` | Disc-change screen (`n` = disc - 1). |
-| `movie <n>` | Play movie `n` from the disc in use. |
+| `movie <n> [flags]` | Play movie row `n` from the disc in use, skippable, as a `D4` with the second operand `flags` (default 0: the last frame is held; with flag 8 it fades out, `movies.md` section 6). |
 | `trading <row>` | Open the trading post at `row`, then the main menu. |
+| `elementshop <row>` | Open the element shop at `row`. |
 | `slotdump` | Write the current game as one 0x2000-byte save block (section 7). |
 
 An unknown kind logs `route: unknown request <kind>` and exits with code 1.

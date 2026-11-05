@@ -10,6 +10,7 @@
 #include "import/lzss.h"
 #include "import/model.h"
 #include "import/room_effects.h"
+#include "import/script_fixes.h"
 #include "import/tim.h"
 
 namespace oc::import {
@@ -260,6 +261,7 @@ assets::RoomScene build(std::string_view name, ByteSpan bin, ByteSpan ctd, ByteS
   }
   scene.ctd_tims = static_cast<u32>(parsed.tims.size());
   scene.script_bytes = unpack(parsed.bin[kScript], "script");
+  apply_script_fixes(name, scene.script_bytes);
   scene.dialogue_bytes = unpack(parsed.bin[kDialog], "dialogue");
   scene.yos1_bytes.assign(parsed.bin[kSnd1].begin(), parsed.bin[kSnd1].end());
   scene.yos0_bytes.assign(parsed.bin[kSnd0].begin(), parsed.bin[kSnd0].end());

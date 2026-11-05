@@ -41,7 +41,7 @@ void ModelCache::prefetch(const vfs::Vfs& vfs, std::vector<std::string> stems, s
   if (prefetch_job_.valid()) prefetch_job_.wait();
   std::erase_if(stems, [&](const std::string& stem) { return stem.empty() || models.contains(stem); });
   std::erase_if(weapon_parts, [&](const auto& part) { return part.first.empty() || weapons.contains(part.first + "#" + std::to_string(part.second)); });
-  prefetch_job_ = std::async(std::launch::async, [&vfs, stems = std::move(stems), weapon_parts = std::move(weapon_parts)] {
+  prefetch_job_ = std::async(std::launch::async, [&vfs, hd = hd_textures, stems = std::move(stems), weapon_parts = std::move(weapon_parts)] {
     Prefetched out;
     out.generation = render::texture_registry::generation();
     auto add = [](std::map<std::string, PrefetchedModel>& to, const std::string& key, assets::ModelAsset asset) {
@@ -49,7 +49,7 @@ void ModelCache::prefetch(const vfs::Vfs& vfs, std::vector<std::string> stems, s
       to.emplace(key, PrefetchedModel{std::move(asset), std::move(uploads)});
     };
     for (const std::string& stem : stems)
-      if (auto asset = read_model(vfs, stem, nullptr)) add(out.models, stem, std::move(*asset));
+      if (auto asset = read_model(vfs, stem, nullptr, hd)) add(out.models, stem, std::move(*asset));
     for (const auto& [bin, part] : weapon_parts)
       if (auto asset = read_weapon(vfs, bin, part)) add(out.weapons, bin + "#" + std::to_string(part), std::move(*asset));
     return out;
@@ -88,8 +88,8 @@ std::string ModelCache::monster_model(const data::GameTables* tables, int monste
   return model < kBattleModels.size() ? std::string(kBattleModels[model]) : std::string{};
 }
 
-std::optional<assets::ModelAsset> ModelCache::read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err) {
-  auto asset = read_model_files(vfs, stem, err);
+std::optional<assets::ModelAsset> ModelCache::read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err, bool hd_textures) {
+  auto asset = read_model_files(vfs, stem, err, hd_textures);
   if (!asset) return std::nullopt;
   render::resolve_model_textures(*asset);
   return asset;
@@ -101,7 +101,7 @@ std::shared_ptr<ModelHandle> ModelCache::load_model_for(const vfs::Vfs& vfs, ren
   std::shared_ptr<ModelHandle> handle = make_prefetched(meshes, false, stem);
   if (!handle) {
     std::string err;
-    if (std::optional<assets::ModelAsset> asset = read_model(vfs, stem, &err)) handle = Actor::make_resolved_model(meshes, std::move(*asset));
+    if (std::optional<assets::ModelAsset> asset = read_model(vfs, stem, &err, hd_textures)) handle = Actor::make_resolved_model(meshes, std::move(*asset));
     else log::warn("battle: model {}: {}", stem, err);
   }
   models[stem] = handle;

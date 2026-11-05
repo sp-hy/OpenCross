@@ -39,10 +39,10 @@ constexpr int kGridW = kGridCells * kCellW, kGridH = kGridCells * kCellH;
 constexpr int kCopyX = 0x1C0, kCopyY = 0x100, kCopySlot = 117, kGridSlot = 114;
 
 // The two int buffers of the height field. `newest` is the buffer a stamp writes and a step reads, `oldest` the one a step writes (the
-// first step runs in place); the two swap after every step.
+// two buffers alternate from the first step); the two swap after every step.
 struct HeightField {
   std::array<std::array<int, kFieldSide * kFieldSide>, 2> buffer{};
-  int newest = 0, oldest = 0;
+  int newest = 0, oldest = 1;
   bool active = false;
 
   void stamp(int side, int height) {

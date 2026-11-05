@@ -1,0 +1,64 @@
+# Element shop Sell: raising the quantity past the bag count opens the grid picker; OK takes one copy from the character under the cursor,
+# Up from the first row reaches the Confirm cell, and OK there sells the bag copy and the picked copies.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right                           # file 04
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait room opa_b04f 600
+- mash until idle 1 3000              # the beach's arrival lines
+- request elementshop 0
+- wait shop open 300
+- wait 80
+- tap down                            # Sell
+- wait 10
+- tap confirm
+- wait 30
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # Ice Lance, the ninth bag element
+- wait 10
+- screenshot elem_sell_list.png
+- tap confirm
+- wait 20
+- tap right                           # 1 -> past the bag count: the picker
+- wait 50
+- screenshot elem_sell_pick_wait.png
+- wait 20
+- tap confirm                         # a copy from Serge
+- tap confirm                         # and another
+- tap down
+- tap confirm                         # one from Kid
+- wait 10
+- screenshot elem_sell_pick.png
+- tap up
+- tap up
+- wait 10
+- tap confirm                         # Confirm: sell
+- wait 30
+- screenshot elem_sell_done.png
+- quit

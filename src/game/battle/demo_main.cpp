@@ -187,12 +187,17 @@ int ocbattleview_main(int argc, char** argv) {
       }
     }
     else if (!std::strcmp(argv[i], "--size") && i + 2 < argc) win_w = std::atoi(argv[++i]), win_h = std::atoi(argv[++i]);
-    else scene = std::atoi(argv[i]);
+    else if (argv[i][0] != '-') scene = std::atoi(argv[i]);
+    else {
+      std::fprintf(stderr, "ocbattleview: unknown or incomplete option '%s' (flags are listed in the developer tools guide)\n", argv[i]);
+      return 2;
+    }
   }
   const std::filesystem::path exe = platform::exe_dir();
   log::init((exe / "ocbattleview.log").string());
   platform::Config config;
   config.load(config_file.empty() ? exe / "opencross.ini" : config_file);
+  if (config_file.empty()) config.clear_session_toggles();
   // [Cheats] of the harness ini (e.g. AlwaysLoot = a Pilfer that lands).
   platform::bind_cheats(&config.cheats);
   const std::filesystem::path game_dir = platform::find_game_dir(config.game_dir);
@@ -275,6 +280,7 @@ int ocbattleview_main(int argc, char** argv) {
     options.growth.counter = stars_current;
     options.growth.star = stars_total;
     bool view_ok = view.init(ctx, files, sprites, meshes, tables, mixer);
+    view.set_hd_textures(config.hd_battle_textures);
     // --sliced: the load in 3 ms slices, one per 60 Hz frame, as the field encounter runs it behind the transition.
     if (view_ok && sliced && view.begin_load(scene, party, options)) {
       double longest = 0.0;
@@ -330,13 +336,6 @@ int ocbattleview_main(int argc, char** argv) {
       view.set_spell_lights(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_smooth_fog(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_autohide_cast(config.autohide_cast_hud);
-      // The game's [Video] Widescreen / WideHudEdges, from this window's shape.
-      if (config.widescreen) {
-        const float wx = render::wide_extra_for(static_cast<float>(ctx.extent().width), static_cast<float>(ctx.extent().height));
-        render::set_wide_extra(wx);
-        render::set_screen_extra(wx);
-      }
-      view.set_wide_hud_columns(!config.widescreen || config.wide_hud == 0 ? 0.0f : config.wide_hud == 1 ? std::min(render::wide_extra(), render::wide_extra_for(16.0f, 9.0f)) : render::wide_extra());
       view.set_auto(bauto);
       view.debug_ui(ui_mode);
       game::BattleView::Debug dbg;
@@ -368,6 +367,13 @@ int ocbattleview_main(int argc, char** argv) {
         }
         for (const auto& [key_frame, scancode] : key_script)
           if (key_frame == frames) input.key_pressed[static_cast<size_t>(scancode)] = true;
+        // The game's [Video] Widescreen / WideHud / FovDeg, from this window's shape each frame (the swapchain has no size before the first frame).
+        const float wide_cols =
+            config.widescreen ? render::wide_extra_for(static_cast<float>(ctx.extent().width), static_cast<float>(ctx.extent().height)) : 0.0f;
+        render::set_wide_extra(wide_cols);
+        render::set_screen_extra(wide_cols);
+        render::set_fov_scale(render::fov_scale_for(config.fov_deg));
+        view.set_wide_hud_columns(config.wide_hud == 0 ? 0.0f : config.wide_hud == 1 ? std::min(wide_cols, render::wide_extra_for(16.0f, 9.0f)) : wide_cols);
         if (frames == trans_frame) view.begin_transition(ctx);
         // --weapon first, then --castat: the attack gives the cast its history.
         if (cast_at > 0 && frames == cast_at) {

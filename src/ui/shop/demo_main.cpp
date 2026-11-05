@@ -3,6 +3,7 @@
 //   F4 runs the screenshot sequence, F1 art mode, Esc quits.
 #include <SDL3/SDL.h>
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 
@@ -27,6 +28,9 @@ int ocshopdemo_main(int argc, char** argv) {
       import::parse_lang(argv[++i], lang);
     } else if (!std::strcmp(argv[i], "--orig")) {
       hd = false;
+    } else {
+      std::fprintf(stderr, "usage: ocshopdemo [--shots [dir]] [--lang <code>] [--orig]\n");
+      return 2;
     }
   }
   const std::filesystem::path exe = platform::exe_dir();

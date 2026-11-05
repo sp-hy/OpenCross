@@ -167,9 +167,11 @@ void FieldWorld::request_battle(int battle_id, int field, int flags) {
   // There is no screen fade on the field side: the battle's opening clears the screen to white (BattleView::begin_transition).
   if (!(flags & 1) && mixer_) {
     // The song id and its position are saved here and restored when the same song is started again (the post-battle restore),
-    // so the field music resumes where the encounter cut it (remastered source only).
+    // so the field music resumes where the encounter cut it: the remastered stream by its position, the original music by the
+    // sound driver's music push (its next start of the same song resumes the saved sequencer state).
     handoff_.resume_song = bgm_remastered_ ? mixer_->current_song() : -1;
     handoff_.resume_seconds = static_cast<double>(mixer_->bgm_position()) / audio::Mixer::kRate;
+    mixer_->push_music();
     mixer_->stop();
     handoff_.battle_music_stopped = true;
     // The battle song starts DURING the encounter effect, not at the battle load; BattleAudio::start_battle_theme then finds it playing.
@@ -231,9 +233,16 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
   entry_window_ = 4;
   // The saved field song is restored after EVERY battle, flag 1 included
   // (the victory song 0x16 / 0x17 and the battle theme are replaced); only BATTLE flag 0x20 skips it (the script plays the next
-  // song itself). A song that is still playing is left alone by start_song.
-  if (last_song_ >= 0 && !(handoff_.battle_req.flags & 0x20))
+  // song itself). A song that is still playing is left alone by start_song. The original music's restart fades in linearly from
+  // silence to the song volume in 32 steps of the sound driver's 120 Hz volume clock, the first step taken at once.
+  if (last_song_ >= 0 && !(handoff_.battle_req.flags & 0x20)) {
+    const bool restart = mixer_ && mixer_->current_song() != last_song_ && pending_song_ != last_song_;
     start_song(last_song_, bgm_volume_, last_song_ == handoff_.resume_song ? handoff_.resume_seconds : 0.0);
+    if (restart && !bgm_remastered_) {
+      mixer_->fade(bgm_volume_ / 32, 0.0);
+      mixer_->fade(bgm_volume_, 31.0 / 120.0);
+    }
+  }
   handoff_.resume_song = -1;
   handoff_.battle_music_stopped = false;
   log::info("field: battle ended, result {}", result_code);

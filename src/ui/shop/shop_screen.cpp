@@ -4,6 +4,7 @@
 #include <SDL3/SDL_gamepad.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +13,7 @@
 #include <utility>
 
 #include "core/log.h"
+#include "data/char_name.h"
 #include "platform/config.h"
 #include "platform/keymap.h"
 #include "ui/lowres.h"
@@ -26,6 +28,7 @@ using namespace menudraw;
 namespace {
 
 const u32 kText = rgb(240, 240, 240), kGold = rgb(255, 214, 102);
+constexpr int kPickWait = 30;
 
 struct Nav {
   bool up = false, down = false, left = false, right = false, ok = false, cancel = false;
@@ -47,7 +50,7 @@ struct Cmd {
 };
 
 enum class Operation { None, Buy, SellElement, Forge, Break, SellGear };
-enum class Stage { Top, Category, List, Quantity, Confirm };
+enum class Stage { Top, Category, List, Quantity, Confirm, Pick };
 
 }  // namespace
 
@@ -89,6 +92,23 @@ struct ShopScreen::Impl {
   int cur = 0, scroll = 0;
   int qty = 1, qty_max = 1;
   int conf_cur = 1;
+  // Element Sell past the bag count: the copies each character still has placed, the copies picked, the cursor over the 44 characters
+  // (two columns of 22) or the Confirm cell, and the frames since the picker opened (the list answers after 30).
+  struct Pick {
+    std::array<int, save::kNumChars> placed{}, taken{};
+    int cursor = 0, wait = 0;
+    bool on_confirm = false;
+    int taken_total() const {
+      int total = 0;
+      for (int count : taken) total += count;
+      return total;
+    }
+    int placed_total() const {
+      int total = 0;
+      for (int count : placed) total += count;
+      return total;
+    }
+  } pick;
   // Trading post: its own three-stage loop (greeting, goods list, Element offer) over the shop's trade.bin row. The goods and offer
   // lists prepare one row string per frame (`prepared`) and refuse input until every row is ready.
   struct Trade {
@@ -175,6 +195,11 @@ struct ShopScreen::Impl {
   std::u32string element_name(int id) {
     if (const std::string* name = lang_tables.sysmes((0x17u << 16) | static_cast<u32>(id), lang); name && !name->empty()) return utf32(*name);
     return utf32(tables->element_name(id));
+  }
+  const std::map<int, std::u32string>* custom_names = nullptr;
+  std::u32string char_name(int character) {
+    const int body = data::character_body(gs->slot.chars[static_cast<size_t>(character)].model_id, [this](int var) { return gs->slot.var(var); });
+    return data::character_name(character, body, data::NameContext::Menu, false, {custom_names, &lang_tables, lang});
   }
   void sfx(int id) {
     if (sfx_fn) sfx_fn(id);
@@ -286,6 +311,7 @@ struct ShopScreen::Impl {
       case Stage::List: update_list(nav); break;
       case Stage::Quantity: update_quantity(nav); break;
       case Stage::Confirm: update_confirm(nav); break;
+      case Stage::Pick: update_pick(nav); break;
     }
   }
 
@@ -392,17 +418,22 @@ struct ShopScreen::Impl {
   }
 
   void update_quantity(const Nav& nav) {
-    if (nav.right) qty = std::min(qty_max, qty + 1), sfx(1);
-    if (nav.left) qty = std::max(1, qty - 1), sfx(1);
-    if (nav.up) qty = std::min(qty_max, qty + 10), sfx(1);
-    if (nav.down) qty = std::max(1, qty - 10), sfx(1);
+    if (nav.right) qty += 1, sfx(1);
+    if (nav.left) qty -= 1, sfx(1);
+    if (nav.up) qty += 10, sfx(1);
+    if (nav.down) qty -= 10, sfx(1);
+    qty = std::max(1, qty);
+    const int id = ids[static_cast<size_t>(cur)];
+    if (qty > qty_max) {
+      qty = qty_max;
+      if (operation == Operation::SellElement && shop::party_copies(*gs, id) > 0) return start_pick(id);
+    }
     if (nav.cancel) {
       sfx(6);
       stage = Stage::List;
       return;
     }
     if (!nav.ok) return;
-    const int id = ids[static_cast<size_t>(cur)];
     shop::Res result = shop::Res::NoStock;
     if (operation == Operation::Buy) result = shop::buy_element(*gs, id, qty);
     else if (operation == Operation::SellElement) result = shop::sell_element(*gs, id, qty);
@@ -413,7 +444,68 @@ struct ShopScreen::Impl {
     }
     sfx(5);
     say(ss(0x801DF4A4), kText);
+    if (operation == Operation::SellElement) cur = scroll = 0;
     after_change();
+  }
+
+  void start_pick(int id) {
+    for (int character = 0; character < save::kNumChars; ++character)
+      pick.placed[static_cast<size_t>(character)] = gs->available(character) ? shop::placed_copies(*gs, character, id) : 0;
+    pick.taken.fill(0);
+    pick.cursor = 0;
+    pick.wait = 0;
+    pick.on_confirm = false;
+    stage = Stage::Pick;
+  }
+
+  void update_pick(const Nav& nav) {
+    if (nav.cancel) {
+      sfx(6);
+      stage = Stage::List;
+      return;
+    }
+    if (pick.wait <= kPickWait) {
+      ++pick.wait;
+      return;
+    }
+    const int id = ids[static_cast<size_t>(cur)];
+    if (!pick.on_confirm) {
+      const size_t member = static_cast<size_t>(pick.cursor);
+      if (nav.ok_rep && gs->available(pick.cursor) && pick.placed[member] > 0) {
+        --pick.placed[member];
+        ++pick.taken[member];
+        sfx(8);
+      }
+      if (nav.up) {
+        --pick.cursor;
+        if (pick.cursor < 0 || pick.cursor == save::kNumChars / 2 - 1) pick.on_confirm = true;
+        sfx(1);
+      }
+      if (nav.down) {
+        ++pick.cursor;
+        if (pick.cursor >= save::kNumChars || pick.cursor == save::kNumChars / 2) pick.on_confirm = true;
+        sfx(1);
+      }
+      if (nav.left || nav.right) {
+        pick.cursor += pick.cursor < save::kNumChars / 2 ? save::kNumChars / 2 : -save::kNumChars / 2;
+        sfx(1);
+      }
+      return;
+    }
+    if (nav.ok) {
+      const shop::Res result = shop::sell_element(*gs, id, qty, std::vector<int>(pick.taken.begin(), pick.taken.end()));
+      if (result != shop::Res::Ok) {
+        stage = Stage::List;
+        return deny(result_text(result));
+      }
+      sfx(5);
+      say(ss(0x801DF4A4), kText);
+      cur = scroll = 0;
+      after_change();
+      return;
+    }
+    if (nav.up) pick.cursor = save::kNumChars - 1, pick.on_confirm = false, sfx(1);
+    if (nav.down) pick.cursor = 0, pick.on_confirm = false, sfx(1);
   }
 
   // The stock changed: rebuild the list and fall back to the menu above when nothing is left.
@@ -907,7 +999,7 @@ struct ShopScreen::Impl {
   }
 
   // ---- element shop lists: list panel at (20,32), info panel at (314,70)
-  void info_panel_element(int id) {
+  void info_panel_element(int id, int allocated, int stock) {
     Frame(133, 314, 70);
     RT(1, 0x142, 0xA6, ss(0x801DF538));
     RT(1, 0x176, 0x9E, ss(0x801DF540));
@@ -918,8 +1010,8 @@ struct ShopScreen::Impl {
       const int dx = lang_index() == 5 ? (digit_count(value) == 1 ? 3 : 0) : (digit_count(value) == 1 ? 0x21 : 0x1E);
       RT(lang_index() == 5 ? 5 : 0x90, static_cast<float>(0x1B6 + dx), y, fmt("%4d", value));
     };
-    count(0xA0, shop::party_copies(*gs, id));
-    count(0xB2, gs->element_count(id));
+    count(0xA0, allocated);
+    count(0xB2, stock);
     // description: one entry, sysmes 0x1A row id*3+1 at (0x13E, 0x72), style 0x7B (row id*3+2 is never drawn).
     // Consumables (0x61..0x7D, not JP) use 0xBA = 0x7B plus the "(Consum.)" label at canvas (791, Y) with its own scale.
     const bool consum = id >= 0x61 && id <= 0x7D && lang_index() != 5;
@@ -963,27 +1055,54 @@ struct ShopScreen::Impl {
   // Quantity window: labels at (0x15E, 0xD4 / 0xE8) style 1; the count:
   // buying "%2d" at (0x19E, 0xD6), dx (JP 10 : 0x11) + (n < 10 ? 4 : 0), style 0x91; selling "%4d" at (0x186, 0xD6), dx 0x2B - 4 x (JP (9 - x)
   // * 4), x = digits; dy -1 (not JP); then the total (no colour change when it exceeds the gold).
-  void qty_window(u32 lbl1, u32 lbl2, bool selling, long long total) {
+  void qty_window(u32 lbl1, u32 lbl2, bool selling, long long total, int shown) {
     Frame(134, 342, 200);
     RT(1, 0x15E, 0xD4, ss(lbl1));
     RT(1, 0x15E, 0xE8, ss(lbl2));
     const bool jp = lang_index() == 5;
     const float dy = jp ? 0.0f : -1.0f;
     if (selling) {
-      const int x = digit_count(qty);
-      RT(jp ? 4 : 0x91, static_cast<float>(0x186 + (jp ? (9 - x) * 4 : 0x2B - 4 * x)), 0xD6 + dy, fmt("%4d", qty));
+      const int x = digit_count(shown);
+      RT(jp ? 4 : 0x91, static_cast<float>(0x186 + (jp ? (9 - x) * 4 : 0x2B - 4 * x)), 0xD6 + dy, fmt("%4d", shown));
     } else {
-      RT(jp ? 4 : 0x91, static_cast<float>(0x19E + (jp ? 10 : 0x11) + (qty < 10 ? 4 : 0)), 0xD6 + dy, fmt("%2d", qty));
+      RT(jp ? 4 : 0x91, static_cast<float>(0x19E + (jp ? 10 : 0x11) + (shown < 10 ? 4 : 0)), 0xD6 + dy, fmt("%2d", shown));
     }
     total_g(total);
   }
+  void build_pick() {
+    const int id = ids[static_cast<size_t>(cur)];
+    const int shown = qty + pick.taken_total();
+    Frame(135, 20, 16);
+    info_panel_element(id, pick.placed_total(), gs->element_count(id) - qty);
+    qty_window(0x801DF558, 0x801DF560, true, shop::element_sell_total(*gs, id, shown), shown);
+    const bool listed = pick.wait > kPickWait;
+    message(ss(listed ? 0x801DF470 : 0x801DF438));
+    for (int character = 0; character < save::kNumChars; ++character) {
+      if (!gs->available(character)) continue;
+      const int half = save::kNumChars / 2;
+      const float x = character < half ? 40.0f : 168.0f, y = 28.0f + 16.0f * static_cast<float>(character % half);
+      const int count = pick.placed[static_cast<size_t>(character)];
+      RT(1, x, y, char_name(character), count != 0 ? 0x4E77u : 0x808080u);
+      if (count == 0) continue;
+      RT(1, x + 0x60, y, U"×");
+      RT(1, x + 0x68 + (count < 10 ? 8.0f : 0.0f), y, fmt("%d", count));
+    }
+    if (!listed) return;
+    Frame(140, 200, 392);
+    RT(1, 0xFA, 0x194, ss(0x801DF590));
+    if (pick.on_confirm) marker(0xD0, 0x195, true);
+    else marker(pick.cursor < save::kNumChars / 2 ? 16.0f : 144.0f, 16.0f * static_cast<float>(pick.cursor % (save::kNumChars / 2)) + 29.0f, true);
+  }
   void build_element_list() {
+    if (stage == Stage::Pick) return build_pick();
     const bool buying = operation == Operation::Buy;
     Frame(132, 20, 32);
     panel_caption(0x84, 20, 32);
     const int count = static_cast<int>(ids.size());
     int sel_id = (count > 0 && cur < count) ? ids[static_cast<size_t>(cur)] : 0;
-    info_panel_element(sel_id);
+    const bool selling_qty = !buying && stage == Stage::Quantity && sel_id > 0;
+    info_panel_element(sel_id, sel_id > 0 ? shop::party_copies(*gs, sel_id) : 0,
+                       sel_id > 0 ? gs->element_count(sel_id) - (selling_qty ? qty : 0) : 0);
     if (scroll > 0) scroll_arrow(306, 50, true);
     if (scroll + kVisibleRows < std::max(count, kVisibleRows)) scroll_arrow(306, 307, false);
     for (int row = 0; row < kVisibleRows; ++row) {
@@ -1003,7 +1122,7 @@ struct ShopScreen::Impl {
     if (stage == Stage::Quantity && count > 0) {
       const int id = ids[static_cast<size_t>(cur)];
       long long total = buying ? static_cast<long long>(shop::element_price(*gs, id)) * qty : shop::element_sell_total(*gs, id, qty);
-      qty_window(0x801DF558, 0x801DF560, !buying, total);
+      qty_window(0x801DF558, 0x801DF560, !buying, total, qty);
       message(ss(buying ? 0x801DF4D6 : 0x801DF4E6));
     } else if (stage == Stage::List) {
       message(ss(buying ? 0x801DF4D5 : 0x801DF4E5));
@@ -1185,7 +1304,7 @@ struct ShopScreen::Impl {
       RT(1, 0x150, 0x10E + 32, ss(0x801DF8AC));
       marker(336 - 4, 286.0f + 16.0f * static_cast<float>(conf_cur), true);
     } else if (stage == Stage::Quantity) {
-      qty_window(0x801DFB28, 0x801DFB30, false, item > 0 ? static_cast<long long>(shop::gear_sell_unit(*gs, item)) * qty : 0);
+      qty_window(0x801DFB28, 0x801DFB30, false, item > 0 ? static_cast<long long>(shop::gear_sell_unit(*gs, item)) * qty : 0, qty);
       message(ss(0x801DF859));
     } else if (stage == Stage::List) {
       static const u32 kF[3] = {0x801DF892, 0x801DF893, 0x801DF894}, kD[3] = {0x801DF846, 0x801DF847, 0x801DF848}, kS[3] = {0x801DF856, 0x801DF857, 0x801DF858};
@@ -1548,6 +1667,7 @@ void ShopScreen::set_rules(const MenuRules* rules) { impl_->rules = rules; }
 void ShopScreen::set_mode(ArtMode mode) { impl_->mode = mode; }
 ArtMode ShopScreen::mode() const { return impl_->mode; }
 void ShopScreen::set_language(import::Lang lang) { impl_->lang = lang; }
+void ShopScreen::set_custom_names(const std::map<int, std::u32string>* names) { impl_->custom_names = names; }
 void ShopScreen::set_sfx(std::function<void(int)> fn) { impl_->sfx_fn = std::move(fn); }
 void ShopScreen::open(GameState& state, ShopKind kind, int shop_id) { impl_->open(state, kind, shop_id); }
 void ShopScreen::close() { impl_->closed = true; }
@@ -1560,7 +1680,7 @@ std::string ShopScreen::state_name() const {
     const auto& trade = impl_->trade;
     return trade.stage == 0 ? "top" : trade.stage == 1 ? "list" : trade.confirm ? "confirm" : "offer";
   }
-  static const char* const kNames[] = {"top", "category", "list", "quantity", "confirm"};
+  static const char* const kNames[] = {"top", "category", "list", "quantity", "confirm", "pick"};
   return kNames[static_cast<int>(impl_->stage)];
 }
 void ShopScreen::update(const platform::Input& in, int ticks) { impl_->update(in, ticks); }

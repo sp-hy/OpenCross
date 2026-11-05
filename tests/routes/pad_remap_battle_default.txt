@@ -1,0 +1,31 @@
+# Controller: Custom in battle, control run: the default words show the Triangle glyph in the camera hint of the target list.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (memory-card choice)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # slot 5
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- request battle 1
+- wait battle start 600
+- wait 360
+- tap confirm
+- wait 60
+- screenshot prb_default.png
+- quit

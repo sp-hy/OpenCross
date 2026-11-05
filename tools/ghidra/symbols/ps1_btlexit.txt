@@ -26,7 +26,7 @@ btl_results_calc_gold = 0x801EEA80;  # function: Sums gold from defeated enemies
 btl_results_unlock_grid_cells = 0x801EF3E8;  # function: Marks element grid cells unlocked for each star gained.
 btl_results_roll_pending_growth = 0x801EF974;  # function: Folds old pending stat growth into the record and rolls new pending deltas for every character after a star-up.
 btl_results_round_aimed_gain = 0x801EFCE8;  # function: turns pending x tenths / 10 into the integer aim of the minor growth with a six-place digit loop that stops early and a carry pass
-btl_results_calc_stat_gain = 0x801EFECC;  # function: Computes one stat growth gain for a party member from snapshot, pending and progress.
+btl_results_calc_stat_gain = 0x801EFECC;  # function: one stat's minor growth: v = ((snapshot + aim) - current) x sqrt(progress / cap) x 0.5, +1 when v >= 1.5 or 0.5 <= v < 1, then the biased double-to-unsigned conversion
 btl_results_clamp_gain = 0x801F00E0;  # function: Clamps a stat gain so the result does not exceed the Lv99 target.
 btl_results_compute_growth = 0x801F0374;  # function: Computes growth and star-up results when the results screen opens.
 btl_results_apply_rewards = 0x801F0A18;  # function: Runs rewards, growth, gold and drops for a victory.
@@ -65,4 +65,6 @@ btl_results_lv99_targets = 0x801F5160;  # data: Per-character Lv99 stat targets 
 btl_results_drops = 0x801F5170;  # data: Drop list for the results screen (up to six).
 btl_results_unlock_flash_dots = 0x801F5DD8;  # data: Flashing state for newly unlocked grid dots.
 btl_gold_bonus_flag = 0x801F5E7B;  # data: Copy of the gear gold bonus flag used for the x125/100 gold bonus.
+btl_results_pending_tenths = 0x801F5E80;  # data: the current star row's pending-tenths byte, the scale of the minor growth aim
+btl_results_progress_cap = 0x801F5E82;  # data: the current star row's progress cap (step x battles)
 btl_summon_shiny_items = 0x801F2B1C;  # data: shiny material item id by colour index, given for a summon kill

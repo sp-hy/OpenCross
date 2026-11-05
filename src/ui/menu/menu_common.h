@@ -19,6 +19,7 @@
 #include "import/tim.h"
 #include "render/sprite_batch.h"
 #include "render/texture.h"
+#include "ui/localized_path.h"
 #include "ui/menu/hand.h"
 #include "ui/menu/ps1_art.h"
 #include "vfs/vfs.h"
@@ -71,11 +72,6 @@ inline std::string grouped_gold(u32 value) {
   else if (thousands) std::snprintf(buf, sizeof buf, "%d,%03d", thousands, units);
   else std::snprintf(buf, sizeof buf, "%d", units);
   return std::string(11 - std::min<size_t>(11, std::strlen(buf)), ' ') + buf;
-}
-
-inline const char* lang_suffix(import::Lang lang) {
-  static const char* const kSuffix[6] = {"_en", "_fr", "_it", "_de", "_es", "_jp"};
-  return kSuffix[static_cast<int>(lang)];
 }
 
 // hd/menu/shapes/menu-main-NNN<suffix>.png: the HD panel shapes, NNN = the PS1 sheet frame in decimal.

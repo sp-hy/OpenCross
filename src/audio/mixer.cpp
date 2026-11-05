@@ -10,6 +10,7 @@
 #include <string>
 
 #include "audio/bgm_table.h"
+#include "audio/sfx.h"
 #include "core/log.h"
 #include "vfs/vfs.h"
 
@@ -131,13 +132,18 @@ bool Mixer::play_akao_bgm(int song_id, int volume127) {
   auto music = load_akao_music(*vfs_, entry ? entry->file_no : song_id, base_table_);
   if (!music) return false;
   auto player = std::make_shared<AkaoPlayer>(kRate, false);
+  Cmd cmd{Cmd::PlayAkao, nullptr, song_id, std::clamp(volume127, 0, 127), 0};
+  cmd.triggers = sfx_bank_ ? make_sfx_triggers(*sfx_bank_, *music->seq) : nullptr;
+  player->collect_sfx_requests = cmd.triggers != nullptr;
   player->load_music(music->seq, music->table);
   log::debug("audio: song {} -> music{:03} (bank {}) on the AKAO sequencer", song_id, entry ? entry->file_no : song_id, music->seq->bank_id);
-  Cmd cmd{Cmd::PlayAkao, nullptr, song_id, std::clamp(volume127, 0, 127), 0};
   cmd.akao = std::move(player);
   push(std::move(cmd));
   return true;
 }
+
+void Mixer::push_music() { push({Cmd::PushMusic, nullptr, -1, 0, 0}); }
+void Mixer::drop_pushed_music() { push({Cmd::DropPush, nullptr, -1, 0, 0}); }
 
 // 1. Both sources' timing (the AKAO loop is measured by running its sequencer silently). 2. The position now -> the same musical
 // position on the new source. 3. The new source built and positioned there; the time the build took is added at the end so the
@@ -200,6 +206,8 @@ bool Mixer::switch_bgm_source(bool remastered, int song) {
     player->seek_music(target_secs);
     const double build_secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - build_start).count();
     player->seek_music(build_secs, build_secs);
+    cmd.triggers = sfx_bank_ ? make_sfx_triggers(*sfx_bank_, *akao_music->seq) : nullptr;
+    player->collect_sfx_requests = cmd.triggers != nullptr;
     cmd.akao = std::move(player);
     cmd.seconds = target_secs + build_secs;
   }
@@ -208,6 +216,13 @@ bool Mixer::switch_bgm_source(bool remastered, int song) {
              cmd.volume, cmd.vol_target, cmd.fade_secs);
   push(std::move(cmd));
   return true;
+}
+
+void Mixer::play_sfx_requests() {
+  const std::vector<AkaoPlayer::SfxRequest> requests = akao_->take_sfx_requests();
+  if (requests.empty() || !akao_triggers_) return;
+  if (!sfx_player_) sfx_player_ = std::make_unique<AkaoPlayer>(kRate, true);
+  akao_triggers_->play(*sfx_player_, requests);
 }
 
 // The pending mask is published before the queue push so sfx_active() sees the request before the audio thread starts it.
@@ -301,8 +316,15 @@ void Mixer::apply(const Cmd& cmd) {
         break;
       }
       if (!cmd.akao) break;
+      if (pushed_ && pushed_song_ == cmd.song) {
+        cmd.akao->restore_context(*pushed_);
+        log::debug("audio: song {} resumes the pushed music at {:.3f} s (tick {})", cmd.song, cmd.akao->seconds(), cmd.akao->ticks());
+        pushed_.reset();
+        pushed_song_ = -1;
+      }
       bgm_.reset();
       akao_ = cmd.akao;
+      akao_triggers_ = cmd.triggers;
       arm_level(akao_gain(cmd.volume));
       song_.store(cmd.song);
       bgm_akao_.store(true);
@@ -357,6 +379,7 @@ void Mixer::apply(const Cmd& cmd) {
         bgm_frames_ = 0;
       } else {
         akao_ = cmd.akao;
+        akao_triggers_ = cmd.triggers;
       }
       bgm_akao_.store(cmd.akao != nullptr);
       paused_ = false;
@@ -384,6 +407,17 @@ void Mixer::apply(const Cmd& cmd) {
     case Cmd::VoiceStop:
       voice_.reset();
       voice_on_.store(false, std::memory_order_release);
+      break;
+    case Cmd::PushMusic:
+      if (akao_ && song_.load() >= 0 && akao_->active_channels() > 0) {
+        pushed_ = akao_->save_context();
+        pushed_song_ = song_.load();
+        log::debug("audio: song {} pushed at {:.3f} s (tick {})", pushed_song_, akao_->seconds(), akao_->ticks());
+      }
+      break;
+    case Cmd::DropPush:
+      pushed_.reset();
+      pushed_song_ = -1;
       break;
   }
 }
@@ -457,6 +491,7 @@ void Mixer::render(float* out, u32 frames) {
     const float bus_level = master * bus_gain(Bus::Bgm);
     fscratch_.resize(size_t(frames) * 2);
     akao_->render(fscratch_.data(), frames);
+    play_sfx_requests();
     bgm_secs_.store(akao_->seconds(), std::memory_order_relaxed);
     for (u32 i = 0; i < frames; ++i) {
       step_fade();
@@ -472,6 +507,7 @@ void Mixer::render(float* out, u32 frames) {
   if (sfx_player_ && !sfx_player_->finished()) {
     if (akao_) sfx_player_->set_reverb(akao_->reverb_mode(), akao_->reverb_depth());
     else sfx_player_->set_reverb(4, 0x3FFF);
+    sfx_player_->set_tempo_scale(sfx_tempo_.load(std::memory_order_relaxed));
     const float gain = master * bus_gain(Bus::Sfx) * kSfxLevel;
     fscratch_.resize(size_t(frames) * 2);
     sfx_player_->render(fscratch_.data(), frames);

@@ -3,12 +3,19 @@
 #include <algorithm>
 #include <cctype>
 
+#include "game/battle/model_table.h"
 #include "import/model.h"
 #include "vfs/vfs.h"
 
 namespace oc::game {
 
-std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err) {
+namespace {
+// RDE's HD art moves the weapon of battle model 0x14 (Leena) along its mount record 0: offset z, in model units.
+constexpr size_t kMountNudgeModel = 0x14;
+constexpr float kMountNudgeZ = -16.0f;
+}  // namespace
+
+std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err, bool hd_battle_texture) {
   auto read = [&](const std::string& path) { return files.read(path).value_or(Bytes{}); };
   const std::string base = "cdrom/" + stem;
   const Bytes obj = read(base + ".obj");
@@ -33,6 +40,13 @@ std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const 
     Bytes texture = read(base + ".ltc");
     if (texture.empty()) texture = read(base + ".ltd");
     asset = import::load_model(obj, texture, read("cdrom/" + folder + "/at0.prd"), err);
+    if (asset && files.hd_mode() && stem.starts_with("battle/player/")) {
+      if (hd_battle_texture) {
+        const Bytes tim = read("hd/menu/player/" + stem.substr(slash + 1) + ".tim");
+        if (!tim.empty()) import::apply_battle_hd_tim(*asset, tim);
+      }
+      if (stem == kBattleModels[kMountNudgeModel]) asset->attach.mounts[0].pos[2] += kMountNudgeZ;
+    }
   }
   if (asset) asset->source = stem;
   return asset;

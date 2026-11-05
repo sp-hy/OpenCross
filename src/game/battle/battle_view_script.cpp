@@ -231,10 +231,11 @@ void BattleView::script_event(const battle::pac::Event& event) {
         fx_warp_.on = false;
       }
       break;
+    case EK::Killed: log::debug("battle script: unit {} kill script end (A6) at tick {}", event.unit, tick_count_); break;
     default:
       // SyncPos (91), QuarterHp, Invuln,
       // SfxMute, ScriptedDeath (5C: Battle::check_end), EngineFlag (7D / 81 / AF: VM state; 7D is read by the target label),
-      // SetResult, NoDrops, Defeated, Killed, Ghost, MenuCursor: consumed by the rules.
+      // SetResult, NoDrops, Defeated, Ghost, MenuCursor: consumed by the rules.
       break;
   }
 }
@@ -357,6 +358,8 @@ void BattleView::script_pump() {
     if (front.kind == EK::Dialogue || front.kind == EK::WaitDialogue) {
       // E0 blocks while the script window is not closed; E2 until it has closed (the system message is a separate window).
       if (smsg_.open != 0 && !smsg_.sys) return;
+    } else if (front.kind == EK::Killed && move_wait_ != 0) {
+      return;
     } else if (holds_stream(front)) {
       // The PC walks home first.
       if (engaged_ && act_.phase == Act::Phase::None && queue_.empty() && (front.a == 0x66 || front.a == 0x65 || front.a == 0x2C)) begin_disengage();

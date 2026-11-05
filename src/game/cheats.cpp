@@ -129,6 +129,12 @@ float speed_factor(bool fast, bool slow, int fast_rate, int slow_percent, bool i
   return 1.0f;
 }
 
+ui::TextPace text_pace(bool fast, bool slow) {
+  if (fast) return {2.25f, 1.0f / 8.0f};
+  if (slow) return {0.5f, 2.0f};
+  return {};
+}
+
 float SlowFieldCycle::apply(double dt, bool active, float slow) {
   if (!active) clock_ = 0.0;
   if (!active || dt <= 0.0) return slow;
@@ -158,9 +164,10 @@ bool draw_cheats_tab(platform::Config& cfg) {
     if (ImGuiLayer::begin_rows("cheats_rde")) {
       toggle("No encounters", "##c_noenc", cheats.no_encounters,
              "RDE's \"encounters off\" (F3, or click the left stick): ordinary field battles (A3 / C9 ops) are won without being fought and the script goes on as after a win. "
-             "Story battles, forced battles and every battle RDE keeps (its Table A) still run.");
+             "Story battles, forced battles and every battle RDE keeps (its Table A) still run. Every launch starts with it off.");
       toggle("Battle boost", "##c_boost", cheats.battle_boost,
-             "RDE's battle boost (F4, or click the right stick): the party's HP, stamina and element gauge are refilled, negative status effects are cleared and nobody is knocked out.");
+             "RDE's battle boost (F4, or click the right stick): the party's HP, stamina and element gauge are refilled, negative status effects are cleared and nobody is knocked out. "
+             "Every launch starts with it off.");
       toggle("Auto battle", "##c_auto", cheats.auto_battle,
              "RDE's auto-battle (F5, or click both sticks together): every ready party member picks its own attack (a fierce hit on the first enemy). The results screen still waits for you.");
       ImGuiLayer::end_rows();
@@ -183,8 +190,9 @@ bool draw_cheats_tab(platform::Config& cfg) {
   auto right = [&] {
     ImGuiLayer::section("Game speed");
     if (ImGuiLayer::begin_rows("cheats_speed")) {
-      ImGuiLayer::row("Fast mode", "RDE's high-speed mode: the game (field, battle) runs faster. Music and movies keep their normal speed. "
-                                   "F2 or the right trigger (RT) switches it on and off; it turns Slow mode off.");
+      ImGuiLayer::row("Fast mode", "RDE's high-speed mode: the field and battles run faster, message text shows faster. Music, movies, menus, shops and the play time "
+                                   "keep their normal speed. F2 or the right trigger (RT) switches it on and off; it turns Slow mode off. "
+                                   "Like RDE, every launch starts with it off.");
       if (ImGui::Checkbox("##fast", &cfg.fast_mode)) {
         if (cfg.fast_mode) cfg.slow_mode = false;
         changed = true;
@@ -198,8 +206,8 @@ bool draw_cheats_tab(platform::Config& cfg) {
           changed = true;
         }
       }
-      ImGuiLayer::row("Slow mode", "RDE's slow mode: the game (field, battle) runs slower. F1 or the left trigger (LT) switches it on and off; "
-                                   "it turns Fast mode off.");
+      ImGuiLayer::row("Slow mode", "RDE's slow mode: the field and battles run slower, message text shows slower. F1 or the left trigger (LT) switches it on and off; "
+                                   "it turns Fast mode off. Like RDE, every launch starts with it off.");
       if (ImGui::Checkbox("##slow", &cfg.slow_mode)) {
         if (cfg.slow_mode) cfg.fast_mode = false;
         changed = true;

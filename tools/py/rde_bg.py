@@ -117,7 +117,7 @@ def give_focus_back(hwnd):
     ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
 
 
-def launch(save, wait=25, card1=None):
+def launch(save, wait=25, card1=None, language=None):
     """Starts RDE behind everything; `wait` = seconds until the title is up, when the save path can be redirected. Foreground
     changes stay locked while it boots and a window-event hook keeps its window at the back, so it never takes the focus or shows
     over other windows; should the lock be lifted early (a key press of the user releases it), the foreground goes straight back."""
@@ -129,13 +129,13 @@ def launch(save, wait=25, card1=None):
     startup.wShowWindow = win32con.SW_SHOWNOACTIVATE
     ctypes.windll.user32.LockSetForegroundWindow(1)
     try:
-        return _boot(save, wait, card1, previous, before, startup)
+        return _boot(save, wait, card1, previous, before, startup, language)
     finally:
         ctypes.windll.user32.LockSetForegroundWindow(2)
 
 
-def _boot(save, wait, card1, previous, before, startup):
-    process = redirect_tool.launch(save, startup)
+def _boot(save, wait, card1, previous, before, startup, language=None):
+    process = redirect_tool.launch(save, startup, language)
     backstop = Backstop(process.pid)
     start = time.time()
     while not window_of(process.pid):

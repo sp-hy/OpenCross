@@ -1,11 +1,12 @@
 #pragma once
 // Cheats (Esc overlay "Cheats" tab): the toggles live in platform::Cheats ([Cheats] in opencross.ini, all off by default, saving
-// is never locked by them). This file holds the tab, the battle-side translation and the RDE "encounters off" tables.
+// is never locked by them; RDE's three are never saved). This file holds the tab, the battle-side translation and the RDE "encounters off" tables.
 #include <functional>
 #include <span>
 
 #include "battle/battle.h"
 #include "platform/config.h"
+#include "ui/typewriter.h"
 
 namespace oc::game {
 
@@ -54,6 +55,9 @@ class RdeHotkeys {
 // The game-speed factor of the [Game] FastMode / SlowMode settings: fast_rate 0 = RDE's own (4x in the field, 2x in battle), else
 // that many times; slow_percent of normal speed. 1 when neither is on or the speed is locked.
 float speed_factor(bool fast, bool slow, int fast_rate, int slow_percent, bool in_battle, bool speed_locked);
+// RDE's message text under fast / slow mode keeps the real clock at its own pace: fast reveals 2.25 times as fast and divides
+// the {wait} / {wend} counts by 8, slow reveals at half speed and doubles them (whatever FastRate / SlowRate say).
+ui::TextPace text_pace(bool fast, bool slow);
 // RDE's field slow mode runs every 300th field frame at normal speed (the field draws at 30 fps: one 1/30 s stretch at full speed
 // after every 299 slow frames, i.e. every 10 s). `apply` returns the factor for a frame of `dt` real seconds: `slow` outside that
 // stretch, 1 inside it, blended by the overlap. While field slow mode is not `active` the count restarts and `slow` (the frame's

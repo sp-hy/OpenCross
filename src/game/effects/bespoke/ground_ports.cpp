@@ -218,8 +218,10 @@ class Tekken : public GroundFx {
     };
     int gxT = 0, gzT = 0, gxC = 0, gzC = 0;
     grid(static_cast<int>(tm->pos[0]), static_cast<int>(tm->pos[2]), gxT, gzT);
-    // The caster's joint 8 world translation: the host keeps no joint matrices here, so the model position stands in for it.
-    grid(static_cast<int>(cm->pos[0]), static_cast<int>(cm->pos[2]), gxC, gzC);
+    int start[3] = {static_cast<int>(cm->pos[0]), 0, static_cast<int>(cm->pos[2])};
+    Vec3 point{};
+    if (ctx_.models && ctx_.models->attach && ctx_.models->attach(cm->unit, 8, point)) start[0] = static_cast<int>(std::lround(point[0])), start[2] = static_cast<int>(std::lround(point[2]));
+    grid(start[0], start[2], gxC, gzC);
     duration_ = arg(args, arg_count, 4);
     tick_ = 0;
     const int dx = gxT - gxC, nn = std::abs(dx), step = dx < 0 ? -1 : 1;
@@ -382,7 +384,7 @@ class Jitanda : public GroundFx {
 };
 
 // ---- 2boll (Aqua Ball, eid 33) -------------------------------------------------------------------------------------------------------------
-// Init: stock ground off, 'mdl1' baked mode 1, both buffers zero (both indices 0: the first step runs in place). Frame: emitter '2' particles
+// Init: stock ground off, 'mdl1' baked mode 1, both buffers zero (indices cur 0 / other 1: every step reads one buffer and writes the other). Frame: emitter '2' particles
 // above y -0x2EE set their cell to 0x800 (the first one also fires '6' at (x, 0, z) and starts '13' at (x, 0, z) and '3' at (x, -100, z)),
 // emitter '3' particles above y -0x15E set 0x80 (before the particle's own step); the ground drawn with the rect
 // {-0x1400, 0x1400, 0x1400, -0x1400}; one step (damping >> 2); the sheet drawn from the buffer the step read. Exit: stock ground on.
@@ -392,7 +394,7 @@ class Boll2 : public GroundFx {
     load_meshes();
     set_skip(true);
     bake_mesh(mesh("mdl1"), 1, 0, 0);
-    ripple_.cur = ripple_.old = 0;
+    ripple_.cur = 0, ripple_.old = 1;
     if (!em()) return;
     em()->set_object_hook("2", [this](EmitterSystem::ObjectRef& object) {
       const int x = object.pos[0] >> 16, y = object.pos[1] >> 16, z = object.pos[2] >> 16;

@@ -26,7 +26,11 @@ using namespace oc;
 int ocbattleseq_main(int argc, char** argv) {
   std::string game;
   int i = 1;
-  if (i + 1 < argc && std::string(argv[i]) == "-g") {
+  if (i < argc && std::string(argv[i]) == "-g") {
+    if (i + 1 >= argc) {
+      std::fprintf(stderr, "ocbattleseq: -g needs a game directory\n");
+      return 2;
+    }
     game = argv[i + 1];
     i += 2;
   } else if (const char* env_dir = std::getenv("OPENCROSS_GAMEDIR")) {

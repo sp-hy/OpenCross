@@ -62,6 +62,8 @@ class MainMenu {
   void set_save_target(save::SaveDat* dat, std::filesystem::path out, save::OcSaves* page = nullptr);
   // Sound hook: 1 cursor, 8 confirm, 6 cancel, 0x18 denied, 0x17 placed, 0x48 equipped.
   void set_sfx(std::function<void(int)> fn);
+  // A second sound played with the first on its own sound mask (id, mask), so the two do not cut each other.
+  void set_sfx_layer(std::function<void(int, u32)> fn);
   // Debug tab tools were used this session: the save screen shows "Debug tools used this session"; saving stays allowed.
   void set_save_locked(bool on);
   // [Video] Widescreen: `canvas_columns` = layer columns per side the backdrop (parchment) extends by, the window's own; [Video]
@@ -80,6 +82,8 @@ class MainMenu {
   MenuScreen screen() const;
   // The Status model's pad camera is on: L2 / R2 (F1 / F2, the triggers) belong to it, not to the slow / fast toggles.
   bool camera_takes_triggers() const;
+  // The Controller assignment page of Customize is open: the pad is read as it is, without the assignment.
+  bool pad_page_open() const;
 
   // Save/Load > Load: the menu closes and this reports the chosen slot once (card block + decoded data); the host starts it like Continue
   // (GameFlow::load_slot). Load is always available, Save only when `can_save` of open() is set.
@@ -100,8 +104,9 @@ class MainMenu {
   // Test / screenshot hook: jumps straight to a screen (member 0, cursors at the start). `variant` 1 = a sub-state
   // (member pick on Main, element picked over the grid, equip candidate list, equipment view on Status); grid: 2 = the Auto Allocate
   // question, 3 = the Remove All question, 4 = Reorder.
-  // Main: 2 = the roster (Status pick), 3 = the roster's remove-all prompt (Equip pick). Save: 0 = Save/Load choice,
+  // Main: 2 = the roster (Status pick), 3 = the roster's remove-all prompt (Equip pick). ElementUse: 1 = the party target, 2 = the roster. Save: 0 = Save/Load choice,
   // 1 = save grid, 2 = load grid, 3 = load confirm, 4 = choice with saving blocked.
+  // Settings: 1 = the skin picker, 2 / 3 = the Controller assignment page (field / battle).
   void debug_show(MenuScreen screen, int variant = 0);
 
  private:

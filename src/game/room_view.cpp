@@ -682,15 +682,23 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     std::array<float, 3> tint = {1, 1, 1};
     if (it->group < group_tint_.size()) tint = group_tint_[it->group];
     if (tint[0] <= 0.003f && tint[1] <= 0.003f && tint[2] <= 0.003f) continue;
-    // Semi-transparent tiles (flags bit 7) blend their STP texels with the PS1 ABR mode: 0 = (B + F) / 2 (an alpha blend at
-    // 0.5, NOT an add of half the colour: that brightens everything it covers), 1 = B + F, 2 = B - F,
-    // 3 = B + F / 4. The group tint modulates the colour (it fades the glow in / out).
+    // Semi-transparent tiles (flags bit 7) blend their STP texels with the PS1 ABR mode: 0 = (B + F) / 2, 1 = B + F, 2 = B - F,
+    // 3 = B + F / 4. The chip2 HD art draws ABR 0 as RDE does, B + F / 2: additive with the colour halved. The group tint modulates
+    // the colour (it fades the glow in / out).
     float kb = 1.0f;
     u8 texel_a = 255;
     render::BlendMode mode = render::BlendMode::Alpha;
     if (it->blend >= 0) {
       switch (it->blend) {
-        case 0: mode = render::BlendMode::Average; texel_a = 128; break;
+        case 0:
+          if (sub) {
+            mode = render::BlendMode::Add;
+            kb = 0.5f;
+          } else {
+            mode = render::BlendMode::Average;
+            texel_a = 128;
+          }
+          break;
         case 2: mode = render::BlendMode::Subtract; break;
         case 3: mode = render::BlendMode::Add; kb = 0.25f; break;
         default: mode = render::BlendMode::Add; break;

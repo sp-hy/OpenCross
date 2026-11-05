@@ -1005,6 +1005,48 @@ std::optional<Image> load_hd_tim(ByteSpan bytes) {
   return img->indexed ? to_rgba(*img) : std::move(*img);
 }
 
+bool apply_battle_hd_tim(ModelAsset& asset, ByteSpan tim) {
+  if (asset.textures.empty() || asset.main_texture_count == 0) return false;
+  const Image& page = asset.textures[0];
+  if (page.indexed || !page.width || !page.height) return false;
+  auto full = load_hd_tim(tim);
+  if (!full || full->indexed) return false;
+  const u32 half_width = full->width / 2;
+  if (half_width % page.width || full->height % page.height) return false;
+  const u32 scale = half_width / page.width;
+  if (scale < 2 || full->height / page.height != scale) return false;
+  auto copy_rect = [&](Image& to, u32 to_x, u32 to_y, u32 from_x, u32 from_y, u32 w, u32 h) {
+    for (u32 y = 0; y < h; ++y)
+      std::memcpy(&to.pixels[(static_cast<size_t>(to_y + y) * to.width + to_x) * 4],
+                  &full->pixels[(static_cast<size_t>(from_y + y) * full->width + from_x) * 4], static_cast<size_t>(w) * 4);
+  };
+  Image open;
+  open.width = half_width, open.height = full->height;
+  open.pixels.resize(static_cast<size_t>(open.width) * open.height * 4);
+  copy_rect(open, 0, 0, 0, 0, open.width, open.height);
+  asset.hd_scale = scale;
+  asset.hd_textures.assign(asset.textures.size(), Image{});
+  asset.hd_textures[0] = std::move(open);
+  const size_t strip_index = asset.main_texture_count;
+  if (!asset.eye.valid || strip_index >= asset.textures.size()) return true;
+  const Image& strip = asset.textures[strip_index];
+  constexpr u32 kHalf = 32, kShutFrameX = 64;
+  if (strip.indexed || strip.width < kShutFrameX + 2 * kHalf || strip.height < kHalf) return true;
+  for (size_t half = 0; half < 2; ++half)
+    if (asset.eye.x[half] + kHalf > page.width || asset.eye.y[half] + kHalf > page.height) return true;
+  Image shut;
+  shut.width = strip.width * scale, shut.height = strip.height * scale;
+  shut.pixels.resize(static_cast<size_t>(shut.width) * shut.height * 4);
+  for (u32 y = 0; y < shut.height; ++y)
+    for (u32 x = 0; x < shut.width; ++x)
+      std::memcpy(&shut.pixels[(static_cast<size_t>(y) * shut.width + x) * 4], &strip.pixels[(static_cast<size_t>(y / scale) * strip.width + x / scale) * 4], 4);
+  for (size_t half = 0; half < 2; ++half)
+    copy_rect(shut, (kShutFrameX + kHalf * static_cast<u32>(half)) * scale, 0, half_width + asset.eye.x[half] * scale, asset.eye.y[half] * scale,
+              kHalf * scale, kHalf * scale);
+  asset.hd_textures[strip_index] = std::move(shut);
+  return true;
+}
+
 namespace {
 // Header of a 6-section Mdl truncated at its EOF word (load_mdl's rule): section offsets S1..S6 + EOF, or false.
 bool mdl_header(ByteSpan& mdl, std::array<u32, 7>& header) {

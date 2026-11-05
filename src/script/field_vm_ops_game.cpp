@@ -357,7 +357,7 @@ bool FieldVM::exec_game(u8 op) {
         yield_ = true;
         break;
       }
-      host_.play_movie(operand_u(1) & 0xFF, (operand_u(1) >> 8) & 0xFF, true);
+      host_.play_movie(operand_u(1) & 0xFF, (operand_u(1) >> 8) & 0xFF, true, operand_u(3));
       advance(5);
       break;
     case 0xD5: write_var(word_at(1), std::clamp(host_.item_count(operand_u(3)), 0, 255)); advance(5); break;

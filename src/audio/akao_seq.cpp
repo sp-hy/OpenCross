@@ -1,6 +1,7 @@
 #include "audio/akao_seq.h"
 
 #include <cstring>
+#include <set>
 
 #include "audio/byte_io.h"
 
@@ -52,6 +53,7 @@ std::shared_ptr<const AkaoSeq> parse_seq(Bytes data) {
   seq->bank_id = read_u32(header + 0x14);
   seq->reverb_mode = read_u16(header + 8);
   seq->channel_mask = read_u32(header + 0x20);
+  seq->gate_mask = read_u32(header + 0x28);
   const s32 patch_rel = s32(read_u32(header + 0x30)), keymap_rel = s32(read_u32(header + 0x34));
   u32 table = 0x40;
   for (int channel = 0; channel < 32; ++channel) {
@@ -70,6 +72,23 @@ std::shared_ptr<const AkaoSeq> parse_seq(Bytes data) {
   code->data = std::move(data);
   seq->code = std::move(code);
   return seq;
+}
+
+// Each channel is decoded linearly from its start to the first opcode that finishes it; code past an infinite loop belongs to the
+// next channel, so an id found there is that channel's.
+std::vector<int> akao_sfx_triggers(const AkaoSeq& seq) {
+  std::set<int> ids;
+  if (!seq.code) return {};
+  const Bytes& data = seq.code->data;
+  for (const auto& [number, start] : seq.channels) {
+    for (size_t pc = start; pc < data.size();) {
+      const int length = akao_op_length(&data[pc], data.size() - pc);
+      if (length == 0) break;
+      if (data[pc] == 0xFE && data[pc + 1] == 0x0B) ids.insert(data[pc + 2]);
+      pc += size_t(length);
+    }
+  }
+  return {ids.begin(), ids.end()};
 }
 
 // The patch table holds 16 u16 offsets (>= 0x8000 = no patch); the zone list starts 0x20 past the offset and a zone with

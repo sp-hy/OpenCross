@@ -106,7 +106,7 @@ void test_movie_end_jump() {
     int movie_room = -1, movie_param = -1, map_jumps = 0, movies = 0;
     void set_movie_jump(int room, int param) override { movie_room = room, movie_param = param; }
     void request_map_jump(int, int) override { ++map_jumps; }
-    void play_movie(int, int, bool) override { ++movies; }
+    void play_movie(int, int, bool, int) override { ++movies; }
   };
   Asm script;
   const u16 init = script.here();

@@ -1,14 +1,17 @@
 // Menu rule tests on synthetic data: grid allocation legality, stock accounting, auto-fill, the three sort orders,
-// equipment compatibility / stat previews, element use, the options word and the Status model camera between ticks.
+// equipment compatibility / stat previews, element use, the options word, the Status model camera between ticks and the language
+// suffix lookup of HD images.
 #include <cstdio>
 
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include "ui/localized_path.h"
 #include "ui/menu/game_state.h"
 #include "ui/menu/hand.h"
 #include "ui/menu/menu_model.h"
+#include "ui/menu/use_flow.h"
 #include "ui/menu/ps1_art.h"
 
 using namespace oc;
@@ -475,9 +478,120 @@ void test_menu_camera_blend() {
   const MenuCameraNow still = menu_camera_at(cur, cur, 0.7f);
   CHECK(still.yaw == static_cast<float>(cur.yaw & 0xFFF) && still.distance == 2032.0f);
 }
+
+void test_localized_path() {
+  vfs::Vfs files;
+  vfs::Overlay overlay;
+  const std::filesystem::path none;
+  overlay.files["hd/battle/btend/up.png"] = {none, ""};
+  overlay.files["hd/battle/btend/up_en.png"] = {none, ""};
+  overlay.files["hd/menu/shapes/memmenu.png"] = {none, ""};
+  overlay.files["hd/menu/shapes/memmenu_fr.png"] = {none, ""};
+  files.set_overlay(std::move(overlay));
+  CHECK(localized_path(files, "hd/battle/btend/up.png", import::Lang::En) == "hd/battle/btend/up_en.png");
+  CHECK(localized_path(files, "hd/battle/btend/up.png", import::Lang::De) == "hd/battle/btend/up.png");
+  CHECK(localized_path(files, "hd/menu/shapes/memmenu.png", import::Lang::Fr) == "hd/menu/shapes/memmenu_fr.png");
+  CHECK(localized_path(files, "hd/menu/shapes/memmenu.png", import::Lang::Jp) == "hd/menu/shapes/memmenu.png");
+  CHECK(localized_path(files, "hd/menu/shapes/memmenu2.png", import::Lang::Fr) == "hd/menu/shapes/memmenu2.png");
+}
 }  // namespace
 
+// The Use screen's state machine: the party cursor clamps, Left opens a roster of all 44
+// characters whose cursor character stands in for slot 0, a refusal changes nothing, a use with copies left returns to the same target after
+// 6 ticks, the last copy returns to the list with the cursor kept, and the cursor may rest on a blank list row.
+void test_use_flow() {
+  Fixture fixture;
+  GameState& game_state = fixture.gs;
+  fixture.rules.pg[7].raw[0xB] = 0xC0;
+  fixture.rules.pg[7].raw[0xA] = 0x00;
+  fixture.tables.elements[8].raw[0x18] = 0x08;
+  fixture.el(8, 1, 0x04, 0x00);
+  fixture.rules.pg[8].raw[0xB] = 0x80;
+  fixture.stock(7, 3);
+  fixture.stock(8, 1);
+  game_state.slot.set_party({0, 1, 2});
+  const int hp[5] = {5, 100, 30, 10, 95}, max_hp[5] = {100, 100, 100, 90, 90};
+  for (int character = 0; character < 5; ++character) {
+    game_state.slot.set_recruited(character, true);
+    game_state.slot.chars[static_cast<size_t>(character)].cur_hp = static_cast<u16>(hp[character]);
+    game_state.slot.chars[static_cast<size_t>(character)].max_hp = static_cast<u16>(max_hp[character]);
+  }
+  game_state.slot.chars[1].status = 0x08;
+  UseFlow flow;
+  UseFlow::Result last;
+  auto tap = [&](UseFlow::Input input) {
+    last = flow.step(input, game_state, 11);
+    const int sfx = last.sfx;
+    while (flow.wait > 0) flow.step({}, game_state, 11);
+    last.sfx = sfx;
+  };
+  const UseFlow::Input up{true}, down{false, true}, left{false, false, true}, right{false, false, false, true}, ok{false, false, false, false, true},
+      cancel{false, false, false, false, false, true};
+
+  last = flow.step(ok, game_state, 11);
+  CHECK(!flow.target && flow.wait == 3 && last.sfx == 1);
+  flow.step({}, game_state, 11);
+  flow.step({}, game_state, 11);
+  CHECK(!flow.target);
+  flow.step({}, game_state, 11);
+  CHECK(flow.target && !flow.roster && flow.target_cur == 0);
+  tap(up);
+  CHECK(flow.target_cur == 0 && last.sfx == 1);
+  for (int i = 0; i < 4; ++i) tap(down);
+  CHECK(flow.target_cur == 2 && last.sfx == 1);
+  tap(left);
+  CHECK(flow.roster && flow.stand_in == 0 && flow.roster_row == 0 && flow.roster_top == 0);
+  for (int i = 0; i < 14; ++i) tap(down);
+  CHECK(flow.roster_row == 11 && flow.roster_top == 3 && flow.stand_in == 14);
+  for (int i = 0; i < 3; ++i) tap(up);
+  CHECK(flow.roster_row == 8 && flow.roster_top == 3 && flow.stand_in == 11);
+  tap(right);
+  CHECK(!flow.roster && flow.target && flow.stand_in == -1 && flow.target_cur == 2);
+  tap(left);
+  CHECK(flow.roster_row == 0 && flow.roster_top == 0 && flow.stand_in == 0);
+
+  tap(ok);
+  CHECK(game_state.slot.chars[0].cur_hp == 55 && game_state.element_count(7) == 2 && last.sfx == 0x12 && last.layer_sfx == 0x13);
+  CHECK(flow.roster && flow.stand_in == 0);
+  tap(down);
+  tap(ok);
+  CHECK(game_state.slot.chars[1].cur_hp == 100 && game_state.element_count(7) == 2 && last.sfx == 0x18 && flow.roster && flow.stand_in == 1);
+  tap(down);
+  tap(down);
+  tap(ok);
+  CHECK(game_state.slot.chars[3].cur_hp == 60 && game_state.element_count(7) == 1 && flow.roster && flow.stand_in == 3);
+  for (int i = 0; i < 8; ++i) tap(down);
+  CHECK(flow.roster_row == 11 && flow.stand_in == 11);
+  tap(ok);
+  CHECK(last.sfx == 0x18 && game_state.element_count(7) == 1 && flow.roster);
+  tap(cancel);
+  CHECK(!flow.roster && flow.target && flow.stand_in == -1 && last.sfx == 6);
+  tap(cancel);
+  CHECK(!flow.target && !last.leave);
+
+  tap(ok);
+  CHECK(flow.target && flow.target_cur == 2);
+  tap(up);
+  tap(up);
+  tap(ok);
+  CHECK(game_state.slot.chars[0].cur_hp == 100 && game_state.element_count(7) == 0 && !flow.target && flow.wait == 0 && flow.list_cur == 0);
+  CHECK(game_state.usable_elements().size() == 1);
+  tap(ok);
+  tap(down);
+  tap(ok);
+  CHECK(game_state.slot.chars[1].status == 0 && game_state.element_count(8) == 0 && !flow.target && flow.list_cur == 0);
+  CHECK(last.sfx == 0xBE && last.layer_sfx == 0);
+  CHECK(game_state.usable_elements().empty());
+  tap(ok);
+  CHECK(!flow.target && last.sfx == 0);
+  for (int i = 0; i < 12; ++i) tap(down);
+  CHECK(flow.list_cur == 10 && flow.list_scroll == 0 && last.sfx == 1);
+  tap(cancel);
+  CHECK(last.leave && last.sfx == 6);
+}
+
 int main() {
+  test_localized_path();
   test_ps1_art();
   test_menu_camera_blend();
   test_grid();
@@ -487,6 +601,7 @@ int main() {
   test_learn_tech();
   test_equip();
   test_use_and_options();
+  test_use_flow();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

@@ -65,6 +65,9 @@ int ochd_main(int argc, char** argv) {
       model_name = argv[i + 1];
       model_out = argv[i + 2];
       i += 2;
+    } else {
+      std::fprintf(stderr, "usage: ochd [-g <gamedir>] [-v] [-m <model> <out>]\n");
+      return 2;
     }
   }
   if (gamedir.empty()) gamedir = tool::env_game_dir();

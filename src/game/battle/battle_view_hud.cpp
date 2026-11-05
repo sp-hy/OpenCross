@@ -14,6 +14,7 @@
 #include "import/room_effects.h"
 #include "import/text.h"
 #include "import/tim.h"
+#include "ui/localized_path.h"
 namespace oc::game {
 
 using namespace bv;
@@ -171,7 +172,7 @@ void BattleView::load_hud_art(const vfs::Vfs& vfs) {
   png(hud_[kHField], "hd/battle/battle/battle_28_01.png");
   // HIT% caption leader line; 13 x 4 button glyphs (the camera hint uses Y); camera icon of the NORMAL / DYNAMIC hint (12 x 12 PS1 px);
   // element list plate (subtractive base + frame, 152 x 56); target info window (subtractive, 96 x 48); item name plate.
-  png(hud_[kHOsak], "hd/battle/shapes/battle-osak-010.png");
+  png(hud_[kHOsak], ui::localized_path(vfs, "hd/battle/shapes/battle-osak-010.png", lang_).c_str());
   png(hud_[kHPad], "ui/gamepad.png");
   png(hud_[kHCam], "hd/menu/menutim/camera.png");
   png(hud_[kHWin4Base], "hd/battle/shapes/battle-win4-large-base.png");

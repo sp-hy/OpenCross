@@ -8,6 +8,7 @@
 //   s.open(state, ShopKind::Element, shop_id);  per frame: s.update(input); s.draw(frame, vw, vh [, resume]); until s.closed().
 // draw() runs its own SpriteBatch begin()/end() pair (resume = continue the frame's quad buffer after an earlier pair).
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -43,6 +44,8 @@ class ShopScreen {
   void set_mode(ArtMode mode);
   ArtMode mode() const;
   void set_language(import::Lang lang);
+  // Typed character names by id (the picker of the element Sell shows them); must outlive the screen.
+  void set_custom_names(const std::map<int, std::u32string>* names);
   // Sound hook: 1 cursor, 8 confirm, 6 cancel, 0x18 denied, 5 bought/sold, 0xBF forged/broken down, 0x1B traded.
   void set_sfx(std::function<void(int)> fn);
 
@@ -51,7 +54,7 @@ class ShopScreen {
   bool closed() const;
   ShopKind kind() const;
   int shop_id() const;
-  // Current state for logs / demo: "top", "category", "list", "quantity", "confirm", "offer".
+  // Current state for logs / demo: "top", "category", "list", "quantity", "pick", "confirm", "offer".
   std::string state_name() const;
 
   // ticks = 60 Hz sim ticks this frame (the animations advance by them).

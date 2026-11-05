@@ -6,7 +6,11 @@
 
 #include "platform/steam.h"
 
-int ocsteam_main(int, char**) {
+int ocsteam_main(int argc, char** argv) {
+  if (argc > 1) {
+    std::fprintf(stderr, "ocsteam: unexpected argument '%s'\nusage: opencross ocsteam\n", argv[1]);
+    return 2;
+  }
   oc::platform::SteamClient steam;
   if (!steam.connect()) {
     std::printf("not connected: Steam is closed, logged out, or the game is not owned\n");

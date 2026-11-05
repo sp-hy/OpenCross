@@ -67,6 +67,11 @@ bool FieldWorld::pause_allowed() const {
   return menu_state_ == MenuState::None && movie_state_ == MovieState::None && handoff_.battle_state == BattleState::None;
 }
 
+bool FieldWorld::speed_allowed() const {
+  if (in_init_ || trans_ != Trans::None || movie_state_ != MovieState::None || input_.lock > 0) return false;
+  return (vm_.var(0x36) & 0xFF) == 0 && map_id_ != 8 && map_id_ != 9;
+}
+
 void FieldWorld::update_input_lock() {
   // The lock of an inactive entity (SET_VISIBLE 0) does not count.
   bool locked = false;
@@ -541,7 +546,8 @@ void FieldWorld::reset_trails() {
 // ((leader facing + a) & 0xFFF) > 0x7FF + k, where k = follower index: at the exact tie (sum 0x800) follower 1 swings one way and
 // follower 2 the other, which is what fans the party out into a row when all three share a spot.
 // The step is the engine's: the 3D unit vector to the point (the leader's height) times the speed, written straight into the position
-// - no probe, no slide, no mesh test.
+// - no probe, no slide, no mesh test. The member keeps facing the leader (engine facing -swung angle) and steps back with the walk
+// clip played in reverse for the tick.
 // Deviation: a free step that would land off the mesh (or on another floor) is replaced by the probe / slide step, and a
 // blocked one by standing - at a cramped entrance the engine's rule parks the member in the wall / water until the leader walks
 // away. Rule 3 (the trail replay) stays free.
@@ -573,12 +579,13 @@ void FieldWorld::follower_back_off(int slot, bool other_side, int ent_override) 
   const float ang = -static_cast<float>(ar) * kUnitsToRad;
   const float tx = lp.x - std::cos(ang) * 128.0f, tz = lp.z + std::sin(ang) * 128.0f;
   ent_state.motion.walking = true;
+  ent_state.actor.set_facing((0x800 - ar) & 0xFFF);
+  ent_state.actor.reverse_clip();
   const float mx = tx - pose.x, my = lp.y - pose.y, mz = tz - pose.z;
   const float flat_dist = std::hypot(mx, mz);
   if (flat_dist >= 0.01f) {
     // Velocity is 16.16: units/tick = speed / 16.
     const float spd = static_cast<float>(base) / 16.0f;
-    ent_state.actor.set_facing(bearing(mx, mz));
     const float n3 = std::sqrt(mx * mx + my * my + mz * mz);
     const float nx = pose.x + mx / n3 * spd, ny = pose.y + my / n3 * spd, nz = pose.z + mz / n3 * spd;
     const WalkMesh& walk = view_.walk();

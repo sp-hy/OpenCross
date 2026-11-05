@@ -40,6 +40,8 @@ bool BattleView::start_script(int unit, const bseq::Table* table, int entry, int
     };
   visual.script_kind = kind;
   visual.script_done = false;
+  if (kind == kApproach) move_wait_ = 1;
+  else if (kind == kReturn) move_wait_ = 2;
   if (std::getenv("OC_SCRIPT_LOG")) log::debug("battle script: tick {} unit {} kind {} entry {} variant {}", tick_count_, unit, static_cast<int>(kind), entry, variant);
   return true;
 }
@@ -178,6 +180,18 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   }
   // Op 0x9F GetCommon (mode 41): the unit's own common word.
   ctx.common = unit_rec.ctrl12;
+  ctx.option = unit_rec.gender;
+  // Op 0xA9: a reaction reads its own hit's number (a miss: -1); the caster reads the word its element mode wrote.
+  if (reacting) ctx.result = visual.react_ev.code == 2 ? -1 : visual.react_ev.value;
+  if (act_.phase != Act::Phase::None && unit == act_.actor)
+    for (const battle::ActionEvent& event : act_.ev)
+      if (event.caster_word >= 0) ctx.result = event.caster_word;
+  // Op 0xA1: the running action's target list.
+  if (act_.phase != Act::Phase::None) {
+    ctx.target_count = static_cast<int>(act_.targets.size());
+    const auto listed = std::find(act_.targets.begin(), act_.targets.end(), unit);
+    if (listed != act_.targets.end()) ctx.target_index = static_cast<int>(listed - act_.targets.begin());
+  }
   // The spawn script's Rand 4 (its opening wait, the units' appearance stagger) draws from its own per-battle stream, so the battle's other
   // draws (the intro pick, later scripts: the Bulbs' own entry 8 in 437) stay where they were.
   if (visual.spawn) ctx.rand = [this]() { return static_cast<int>(spawn_rng_() & 0x7FFF); };
@@ -558,7 +572,10 @@ void BattleView::on_script_event(int unit, const bseq::Event& event) {
       break;
     // Op 0x1D: emitters on an attach point (battle_view_anm.cpp).
     case K::Effect: anm_effect(unit, event); break;
-    case K::Done: visual.script_done = true; break;
+    case K::Done:
+      visual.script_done = true;
+      if (event.a == 0x3E) move_wait_ = 0;
+      break;
   }
 }
 
@@ -619,7 +636,7 @@ void BattleView::on_damage(int unit, bool number) {
     spawn_pop(unit, 0, 3, event.code);
   } else if (event.code == 3 && event.value > 0) {
     spawn_pop(unit, event.value, 2, event.code);
-  } else if (event.value > 0) {
+  } else if (event.value > 0 || event.gated) {
     spawn_pop(unit, event.value, unit_rec.pc ? 1 : 0, event.code);
     // A reaction script lights the unit itself (ops 0x64 / 0x5C / 0x5E).
     if (visual.script_kind != kReact) visual.flash = 1.0f;

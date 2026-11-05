@@ -16,6 +16,7 @@
 #include "platform/keymap.h"
 #include "render/text_batch.h"
 #include "render/texture.h"
+#include "ui/localized_path.h"
 #include "ui/ps1_font.h"
 
 namespace oc::game {
@@ -221,7 +222,7 @@ struct BattleResults::Impl {
   void load_hd_art() {
     load_png(hd_row, "hd/battle/shapes/btlexit-levu-002.png");
     load_png(hd_panel, "hd/battle/shapes/btlexit-levu-003.png");
-    load_png(hd_up, "hd/battle/btend/up.png");
+    load_png(hd_up, ui::localized_path(*vfs, "hd/battle/btend/up.png", lang));
     load_png(hd_star, "hd/battle/btend/star.png");
     load_png(hd_gg_on, "hd/battle/shapes/battle-gg-1.png");
     load_png(hd_gg_off, "hd/battle/shapes/battle-gg-2.png");

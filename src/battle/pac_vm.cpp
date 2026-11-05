@@ -201,6 +201,15 @@ bool Vm::launch(int unit, int slot) {
   return true;
 }
 
+void Vm::revive(int unit) {
+  for (Ctx& ctx : ctx_) {
+    if (ctx.unit != unit) continue;
+    if (unit < kPcSlots) ctx.s3 = false;
+    ctx.dropped = false;
+    return;
+  }
+}
+
 bool Vm::run_slot(int unit, int slot, std::vector<QueuedAttack>& out, int max_ticks) {
   if (!launch(unit, slot)) return false;
   const int entity = entity_of_unit(unit);
@@ -322,6 +331,9 @@ void Vm::interpret(int entity) {
     if (result == Step::Next) ctx.frames.back().pc = static_cast<u16>(ctx.frames.back().pc + adv);
     else if (result == Step::Block || result == Step::Stop) break;
   }
+  // The run list is read when an entity's pass starts: an entity that left it in this pass finishes the pass (the halt after its A6).
+  if (leave_run_list_) ctx.dropped = true;
+  leave_run_list_ = false;
 }
 
 // ---- targets
@@ -756,7 +768,10 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
       break;
     }
     case 0x8E: ctx.group = operand_w(1); break;
-    case 0x96: emit(Event::Kind::Invuln, -1, operand_w(1)); break;
+    case 0x96:
+      colour_gate_ = static_cast<u8>(operand_w(1));
+      emit(Event::Kind::Invuln, -1, operand_w(1));
+      break;
     case 0xA4:
       if (!myq.empty() || !host_.action_ready()) {
         ctx.a4_wait = true;
@@ -767,9 +782,15 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
       emit(Event::Kind::Barrier, self, op, host_.action_serial());
       release();
       break;
-    case 0xA6:  // an enemy's kill script ends: alive mask bit cleared, unit added to the defeated mask, op 5C's flag cleared
-      if (valid(self) && self >= kPcSlots) scripted_death_[static_cast<size_t>(self)] = false;
+    case 0xA6:  // an enemy's kill script ends: alive mask bit cleared, unit added to the defeated mask, op 5C's flag cleared, its slot-3 flag
+                // cleared and the entity leaves the run list (a revive puts it back); a PC: slot-4 flag cleared, the lock released
       emit(Event::Kind::Killed, self);
+      if (valid(self) && self >= kPcSlots) {
+        scripted_death_[static_cast<size_t>(self)] = false;
+        ctx.s3 = false;
+        leave_run_list_ = true;
+        break;
+      }
       ctx.s4 = false;
       release();
       break;
@@ -968,13 +989,14 @@ class ScriptedBrain::BattleHost final : public Host {
         case 0x2E: return state.ap;
         case 0xA2: return state.gold;
         case 0xA0: return state.drop_row;
-        case 0xB0:
+        // 0xB0..0xB6: the inflicted words (the merged ones without the permanent bits); 0x1B0..0x1B6: the merged words.
+        case 0xB0: return static_cast<int>(state.lo & ~state.perm_lo & 0xFFFF);
+        case 0xB2: return static_cast<int>((state.lo & ~state.perm_lo) >> 16);
+        case 0xB4: return static_cast<int>(state.hi & ~state.perm_hi & 0xFFFF);
+        case 0xB6: return static_cast<int>((state.hi & ~state.perm_hi) >> 16);
         case 0x1B0: return static_cast<int>(state.lo & 0xFFFF);
-        case 0xB2:
         case 0x1B2: return static_cast<int>(state.lo >> 16);
-        case 0xB4:
         case 0x1B4: return static_cast<int>(state.hi & 0xFFFF);
-        case 0xB6:
         case 0x1B6: return static_cast<int>(state.hi >> 16);
         case 0xB8: return state.hp;
         case 0x16C: return state.countdown;
@@ -1076,8 +1098,8 @@ class ScriptedBrain::BattleHost final : public Host {
     PickResult result;
     if (unit < 0 || unit >= kUnits) return result;
     Unit& state = battle->unit_mut(unit);
-    // Ops 0x55 / 0x8F draw a cell of rows 0..gauge (0x8F: rows 0..limit) with rnd(0, cells - 1) until one is free (usable, unused, no
-    // tech flag) and holds an element id < 0x7E whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
+    // Ops 0x55 / 0x8F draw a cell of rows 0..gauge (0x8F: rows 0..limit) with rnd(0, cells - 1) until one is free (usable, unused, its
+    // colour-seal flag clear, no tech flag) and holds an element id < 0x7E whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
     // target is found for it; a free cell that fails is closed and the draw goes on. Techs from id 126 up (Big Catch 192, Dopplegang 238,
     // the enemy-only techs ...) are only ever cast by an explicit queue_attack.
     const int rows = std::clamp((limit < 0 ? state.gauge : limit) + 1, 0, data::kGridRows);
@@ -1086,7 +1108,7 @@ class ScriptedBrain::BattleHost final : public Host {
     int left = 0;
     for (int cell = 0; cell < cells; ++cell) {
       const auto index = static_cast<size_t>(cell);
-      open[index] = state.usable[index] && !state.used[index] && !(state.cells[index] & 0xC000);
+      open[index] = state.usable[index] && !state.used[index] && !state.seal_flag[index] && !(state.cells[index] & 0xC000);
       left += open[index];
     }
     const auto& elements = battle->tables().elements;

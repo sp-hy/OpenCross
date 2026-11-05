@@ -14,11 +14,13 @@ namespace oc::battle {
 
 // ---- status words (merged lo / hi words of a unit)
 namespace st {
-constexpr u32 kPoison = 0x1, kFlu = 0x20, kKO = 0x80, kAfraid = 0x100, kFatigued = 0x2000, kAsleep = 0x4000,
+constexpr u32 kPoison = 0x1, kSprain = 0x10, kFlu = 0x20, kKO = 0x80, kAfraid = 0x100, kFatigued = 0x2000, kAsleep = 0x4000,
               kDark = 0x20000, kStaminaDrain = 0x40000, kConfused = 0x100000, kDizzy = 0x2000000,
               kDefeated = 0x20000000, kInstantDeath = 0x80000000;
 // Absorb / immune come in a weapon pair (0x2000 / 0x8000: Negate Physical) and an element pair (0x4000 / 0x10000: Negate Magic).
 constexpr u32 kHiAlwaysHit = 0x1000, kHiWeaponAbsorb = 0x2000, kHiAbsorb = 0x4000, kHiWeaponImmune = 0x8000, kHiImmune = 0x10000, kHiRegen = 0x80000;
+// The unit's actions cost no stamina; the unit's damage heals it by the same amount.
+constexpr u32 kHiNoStaminaCost = 0x20000, kHiDrain = 0x40000;
 // Lo bits kept after a battle.
 constexpr u32 kPersist = 0x39;
 // Inflicted bits a PC keeps when a hit knocks it out; a poison KO keeps the inflicted lo bits 1..15 and the whole hi word.
@@ -86,6 +88,9 @@ struct ChanceIn {
 };
 // Percent, 0..100.
 int hit_chance(const ChanceIn& in);
+// The HIT% box figure: min(99, base * Hit%) minus evd * Evd% (evd is the target's raw EVD: no gear, hero or dizzy terms), floor 0, the
+// chain pull, then the always-hit 99 and dark halving (no sleeping-target override).
+int hit_chance_shown(const ChanceIn& in);
 // Miss iff chance*10 < rnd(0,1000).
 bool roll_hit(Rng& rng, int chance);
 
@@ -114,6 +119,8 @@ struct WeaponIn {
   int weapon_class = 0;
   // The attacker wears the hero set: the crit roll needs 7 instead of 15.
   bool hero_set = false;
+  // False for a weapon tech: no crit roll is drawn, only the slayer mask makes a critical.
+  bool crit_roll = true;
   bool target_afraid = false, slayer = false;
   // Attack colour == kOpp[target colour].
   bool opposite_colour = false;
@@ -195,9 +202,10 @@ struct StarRow {
 int growth_roll(Rng& rng, int range, int star);
 int next_pending_hp(Rng& rng, int max_hp, int lv99_hp, int star);
 int next_pending_stat(Rng& rng, int cur, int lv99, int star);
-// Minor post-battle gain for one stat: round_half_up(0.5*((snap+d)-cur)*sqrt(P/S)), d = pending*pending_tenths/10, floor 0.
+// Minor post-battle gain for one stat: v = ((snap + K) - cur) * sqrt(P / S) * 0.5, K the aim of x = pending * pending_tenths / 10 (a
+// decimal rounding that gives ceil(x) - 1 for x >= 2), then v + 1 when v >= 1.5 or v in [0.5, 1), less 2.147483648e-9, truncated, floor 0.
 int minor_growth(int snap, int pending, int cur, int pending_tenths, int progress, int progress_cap);
-// The whole way to the minor-growth target in one step: round_half_up((snap+d)-cur), floor 0 (the instant-growth cheat).
+// The whole way to the minor-growth target in one step: (snap + K) - cur with the same aim K, floor 0 (the instant-growth cheat).
 int full_minor_growth(int snap, int pending, int cur, int pending_tenths);
 inline int progress_cap(const StarRow& row) { return static_cast<short>(row.step * row.battles); }
 

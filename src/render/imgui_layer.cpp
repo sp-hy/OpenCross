@@ -664,6 +664,9 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       cfg.art_mode = kArtModes[ai].mode;
       change.art_mode = true;
     }
+    row("HD battle textures", "HD and modded art: the party in battle wears RDE's 4x textures. "
+                              "Off: the PS1-size battle textures of the HD file set.");
+    if (ImGui::Checkbox("##hdbattletex", &cfg.hd_battle_textures)) change.art_mode = true;
     row("Portraits", "RDE face art set.");
     static const std::vector<std::string> kPortraits = {"2021 (Radical Dreamers Edition)", "1999 (original)"};
     int pt = cfg.portraits == "1999" ? 1 : 0;

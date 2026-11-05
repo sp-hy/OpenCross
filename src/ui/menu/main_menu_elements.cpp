@@ -9,31 +9,13 @@
 
 namespace oc::ui {
 
-// A refused action only plays sfx 0x18: the PS1 menus show no text for it.
+// The state machine is UseFlow; the screen maps the pad onto it and plays its sound.
 void MainMenu::Impl::update_use(const Nav& nav) {
-  const std::vector<int> list = gs->usable_elements();
-  const int count = static_cast<int>(list.size());
-  if (!use_target) {
-    if (nav.up && use_cur > 0) --use_cur, sfx(1);
-    if (nav.down && use_cur + 1 < count) ++use_cur, sfx(1);
-    scroll_to(use_cur, use_scroll, kVisibleRows);
-    if (nav.cancel) back_to_main(1), sfx(6);
-    else if (nav.ok && count > 0) use_target = true, target_cur = 0, sfx(8);
-  } else {
-    const int party_size = static_cast<int>(party().size());
-    if (nav.up) target_cur = wrap(target_cur - 1, party_size), sfx(1);
-    if (nav.down) target_cur = wrap(target_cur + 1, party_size), sfx(1);
-    if (nav.cancel) use_target = false, sfx(6);
-    else if (nav.ok && count > 0 && party_size > 0) {
-      const int id = gs->slot.elements[static_cast<size_t>(list[static_cast<size_t>(use_cur)])].id;
-      if (gs->use_element(id, party()[static_cast<size_t>(target_cur)]) == Why::Ok) {
-        sfx(8);
-        if (gs->element_count(id) == 0) use_target = false, use_cur = use_scroll = 0;
-      } else {
-        sfx(0x18);
-      }
-    }
-  }
+  const UseFlow::Result result = use.step({nav.up, nav.down, nav.left, nav.right, nav.ok, nav.cancel}, *gs, kVisibleRows);
+  stand_in = use.stand_in;
+  if (result.sfx != 0) sfx(result.sfx);
+  if (result.layer_sfx != 0 && sfx_layer_fn) sfx_layer_fn(result.layer_sfx, kLayerSoundMask);
+  if (result.leave) back_to_main(1);
 }
 
 // ---- element grid
@@ -420,34 +402,48 @@ void MainMenu::Impl::build_use() {
   // Widescreen: portraits, member panels and their cursors left; the element list and description right.
   group(Left);
   for (size_t i = 0; i < members.size() && i < 3; ++i) portrait_strip(members[i], 16.0f + 72.0f * static_cast<float>(i), grey(0x40));
-  for (size_t i = 0; i < members.size() && i < 3; ++i) status_panel(members[i], 47.0f, 27.0f + 132.0f * static_cast<float>(i));
-  if (use_target) {
-    tri(30, 37.0f + 132.0f * static_cast<float>(target_cur), true);
-    // Roll frame 3.
-    pointer(38.0f - static_cast<float>(((frames % 23) * 0x3000) >> 16), 224.0f, true);
+  const float bounce = static_cast<float>(((frames % 23) * 0x3000) >> 16);
+  if (use.roster) {
+    if (!members.empty() && gs->available(members[0])) status_panel(members[0], 47.0f, 27.0f);
+    else Frame(52, 47, 27);
+    // The roster panel: 12 rows from use.roster_top, 20 px apart; the cursor on the left, the pointer on the right edge.
+    Frame(143, 8, 167);
+    if (use.roster_top + 12 < save::kNumChars) scroll_arrow(237, 394, false);
+    if (use.roster_top > 0) scroll_arrow(237, 185, true);
+    for (int row = 0; row < 12; ++row)
+      if (gs->available(use.roster_top + row)) roster_line(use.roster_top + row, 177.2f + 20.0f * static_cast<float>(row));
+    tri(0, 177.0f + 20.0f * static_cast<float>(use.roster_row), true);
+    pointer(240.0f + bounce, 224.0f, false);
+  } else {
+    for (size_t i = 0; i < members.size() && i < 3; ++i) status_panel(members[i], 47.0f, 27.0f + 132.0f * static_cast<float>(i));
+    if (use.target) {
+      tri(30, 37.0f + 132.0f * static_cast<float>(use.target_cur), true);
+      pointer(38.0f - bounce, 224.0f, true);
+    }
   }
+  const int lit_row = use.roster ? use.roster_row : use.target ? use.target_cur : use.list_cur - use.list_scroll;
   group(Right);
   Frame(186, 253, 27);
   // "Elements" + icon in the list frame's top gap.
   notch_caption(253, 27, 3);
   for (int row = 0; row < kVisibleRows; ++row) {
-    const int idx = use_scroll + row;
+    const int idx = use.list_scroll + row;
     if (idx >= cnt) break;
     const auto& stack = gs->slot.elements[static_cast<size_t>(list[static_cast<size_t>(idx)])];
     const float y = 47.0f + 24.0f * static_cast<float>(row);
     plate(cur_char(), stack.id, 275, 42.0f + 24.0f * static_cast<float>(row));
     const std::u32string nm = element_name(stack.id);
     const float rel = fit_rel(nm, 140, 0.9f);
-    TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y, nm, idx == use_cur && !use_target ? ps1_colour(0x7A6AA5) : kText, rel);
+    TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y, nm, row == lit_row ? ps1_colour(0x7A6AA5) : kText, rel);
     Digits(453, y, padded_number(std::min<int>(stack.qty, 99), 2), 16, kText);
   }
   const int total = std::max(cnt, kVisibleRows);
-  if (use_scroll > 0) scroll_arrow(485, 35, true);
-  if (use_scroll + kVisibleRows < total) scroll_arrow(485, 311, false);
+  if (use.list_scroll > 0) scroll_arrow(485, 35, true);
+  if (use.list_scroll + kVisibleRows < total) scroll_arrow(485, 311, false);
   Frame(0x36, 253, 332, kWhite, nullptr, nullptr, true);
-  if (cnt > 0) tri(251, 47.0f + 24.0f * static_cast<float>(use_cur - use_scroll), !use_target);
-  if (cnt > 0 && use_cur < cnt) {
-    const int id = gs->slot.elements[static_cast<size_t>(list[static_cast<size_t>(use_cur)])].id;
+  tri(251, 47.0f + 24.0f * static_cast<float>(use.list_cur - use.list_scroll), !use.target);
+  if (cnt > 0 && use.list_cur < cnt) {
+    const int id = gs->slot.elements[static_cast<size_t>(list[static_cast<size_t>(use.list_cur)])].id;
     element_info(id, 260, 340, 378.5f, 19.5f);
   }
   group(Centre);

@@ -99,7 +99,7 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
   return true;
 }
 
-void Player::close(bool keep_frame) {
+void Player::close(bool keep_frame, bool fade) {
   stop_ = true;
   if (thread_.joinable()) thread_.join();
   if (mixer_ && has_audio_) mixer_->movie_stop();
@@ -113,7 +113,9 @@ void Player::close(bool keep_frame) {
     sprites_ = nullptr;
   }
   held_ = keep;
+  held_fade_ = fade;
   held_alpha_ = 1.0;
+  held_frames_ = 0.0;
   ready_.clear();
   apend_.clear();
   apend_pos_ = 0;
@@ -339,9 +341,15 @@ void Player::draw_held(const render::Frame& frame, float vw, float vh) {
   sprites_->end();
 }
 
-bool Player::fade_held(double dt, double seconds) {
+double held_frame_alpha(double frames, bool fade) {
+  if (frames >= (fade ? kHeldFadeFrames : kHeldHoldFrames)) return 0.0;
+  return fade ? 1.0 - std::max(0.0, frames) / kHeldFadeFrames : 1.0;
+}
+
+bool Player::step_held(double dt) {
   if (!held_) return false;
-  held_alpha_ -= dt / seconds;
+  held_frames_ += dt * 60.0;
+  held_alpha_ = held_frame_alpha(held_frames_, held_fade_);
   if (held_alpha_ <= 0.0) {
     release_held();
     return false;

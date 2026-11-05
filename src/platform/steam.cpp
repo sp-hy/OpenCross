@@ -186,17 +186,20 @@ void SteamClient::flush_unlocks() {
 #ifdef _WIN32
   if (pending_.empty()) return;
   bool changed = false;
-  for (const std::string& name : pending_) {
-    if (achieved(name)) continue;
+  const auto award = [&](const std::string& name) {
+    if (achieved(name)) return;
     if (!call_slot<bool>(stats_, kSetAchievement, name.c_str())) {
       log::warn("steam: {} is not an achievement of this app", name);
-      continue;
+      return;
     }
     log::info("steam: unlocked {}", name);
     unlocked_.push_back(achievement_title(name));
     changed = true;
-  }
+  };
+  for (const std::string& name : pending_) award(name);
   pending_.clear();
+  if (changed && !meta_.empty() && std::all_of(meta_required_.begin(), meta_required_.end(), [&](const std::string& name) { return achieved(name); }))
+    award(meta_);
   if (!changed) return;
   retry_at_ = std::chrono::steady_clock::now() + kRetryDelay;
   store_pending_ = !call_slot<bool>(stats_, kStoreStats);
@@ -206,6 +209,11 @@ void SteamClient::flush_unlocks() {
 void SteamClient::unlock(std::string_view api_name) {
   if (!connected()) return;
   if (std::find(pending_.begin(), pending_.end(), api_name) == pending_.end()) pending_.emplace_back(api_name);
+}
+
+void SteamClient::set_meta(std::string meta, std::vector<std::string> required) {
+  meta_ = std::move(meta);
+  meta_required_ = std::move(required);
 }
 
 std::optional<std::string> SteamClient::next_unlocked() {

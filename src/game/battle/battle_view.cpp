@@ -130,6 +130,7 @@ void BattleView::unload_scene() {
   script_gap_ = -1;
   script_passed_ = 0;
   script_stall_ = 0;
+  move_wait_ = 0;
   fx_reset_scene();
   anm_reset();
   model_cache_.clear();

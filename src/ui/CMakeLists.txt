@@ -28,6 +28,8 @@ add_library(oc_ui STATIC
   world_name.cpp
   menu/game_state.h
   menu/game_state.cpp
+  menu/use_flow.h
+  menu/use_flow.cpp
   menu/main_menu.h
   menu/main_menu_impl.h
   menu/main_menu.cpp

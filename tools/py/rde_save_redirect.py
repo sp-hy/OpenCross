@@ -15,6 +15,8 @@ usage:
   --keys        comma list sent to the window after patching (a key is tapped, wN waits N seconds,
                 hold:KEY:SECONDS holds a key)
   --shot        screenshot of the window after the keys (640x512)
+  --lang        game language, 0 en 1 fr 2 it 3 de 4 es 5 jp: written to Language= of the scratch config.ini before boot (the game reads it
+                only at boot, so it cannot be combined with --attach)
   --keep-open   leave the game running; otherwise only the process this tool started is killed
 Library: launch(), Rde(pid).redirect(path), Rde.replace_card1(data), check_save_path(path).
 Run from the repo root (it imports tools/rde_win.py for the window helpers).
@@ -24,6 +26,7 @@ import ctypes
 import ctypes.wintypes as wt
 import hashlib
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -37,7 +40,6 @@ import win32process
 IMAGE_BASE = 0x400000
 SAVE_PATH_STRING = 0x012B1F14
 CARD1_IMAGE = 0x009EF200
-LANGUAGE = 0x0122F458
 CARD_SIZE = 0x20000
 STEAM_APP_ID = "1133760"
 SAFE_BUFFER = 4000
@@ -95,9 +97,9 @@ def check_real_saves(before):
         raise SystemExit("REAL SAVE FOLDER CHANGED during the run: " + ", ".join(changed))
 
 
-def reset_sandbox(save=None):
-    """Empties the scratch folder the patched game uses, then gives each Steam id the test save and the real config, so the boot,
-    which runs before any redirect, reads and writes only these copies."""
+def reset_sandbox(save=None, language=None):
+    """Empties the scratch folder the patched game uses, then gives each Steam id the test save and the real config (with Language=
+    set to `language` when given), so the boot, which runs before any redirect, reads and writes only these copies."""
     root = os.path.join(documents(), SANDBOX, GAME_SUBDIR)
     shutil.rmtree(os.path.dirname(root), ignore_errors=True)
     real = os.path.join(documents(), "My Games", GAME_SUBDIR, "Steam")
@@ -106,7 +108,14 @@ def reset_sandbox(save=None):
         os.makedirs(folder)
         config = os.path.join(real, steam_id, "config.ini")
         if os.path.isfile(config):
-            shutil.copyfile(config, os.path.join(folder, "config.ini"))
+            scratch = os.path.join(folder, "config.ini")
+            shutil.copyfile(config, scratch)
+            if language is not None:
+                with open(scratch, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+                text = re.sub(r"(?m)^Language=.*$", "Language=%d" % language, text, count=1)
+                with open(scratch, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(text)
         if save and os.path.isfile(save):
             shutil.copyfile(save, os.path.join(folder, "save.dat"))
 
@@ -140,10 +149,10 @@ def sandbox_save_path(process):
         raise SystemExit("the save folder string did not change: refusing to run")
 
 
-def launch(save=None, startupinfo=None):
+def launch(save=None, startupinfo=None, language=None):
     """Starts CHRONOCROSS.exe from the game folder in the scratch save folder and returns the Popen. Never starts it unpatched."""
     env = dict(os.environ, SteamAppId=STEAM_APP_ID, SteamGameId=STEAM_APP_ID)
-    reset_sandbox(save)
+    reset_sandbox(save, language)
     process = subprocess.Popen([os.path.join(GAME_DIR, "CHRONOCROSS.exe")], cwd=GAME_DIR, env=env, startupinfo=startupinfo, creationflags=CREATE_SUSPENDED)
     try:
         sandbox_save_path(process)
@@ -216,9 +225,6 @@ class Rde:
             raise SystemExit("card 1 image not found in the game (not at the title yet?)")
         self.write(self.va(CARD1_IMAGE), data)
 
-    def set_language(self, index):
-        self.write(self.va(LANGUAGE), struct.pack("<I", index))
-
 
 def send_keys(tokens):
     """Tap keys / wait in the game window: a key is tapped, wN waits N seconds."""
@@ -263,6 +269,8 @@ def main():
     ap.add_argument("--lang", type=int)
     args = ap.parse_args()
 
+    if args.lang is not None and args.attach:
+        raise SystemExit("--lang is read at boot: it cannot be combined with --attach")
     save = check_save_path(args.save)
     if not os.path.isfile(save):
         raise SystemExit("save file not found: " + save)
@@ -281,7 +289,7 @@ def main():
         pid = pids[0]
     else:
         before = real_save_hashes()
-        proc = launch(save)
+        proc = launch(save, language=args.lang)
         pid = proc.pid
         print("started pid", pid)
         time.sleep(args.title_wait)
@@ -292,8 +300,6 @@ def main():
         if card is not None:
             rde.replace_card1(card)
             print("card 1 replaced")
-        if args.lang is not None:
-            rde.set_language(args.lang)
         if args.keys:
             send_keys(args.keys.split(","))
         if args.shot:

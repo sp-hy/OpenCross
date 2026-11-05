@@ -9,6 +9,7 @@
 
 #include "core/log.h"
 #include "platform/keymap.h"
+#include "platform/pad_remap.h"
 #include "ui/ps1_font.h"
 #include "ui/ps1_window.h"
 
@@ -67,13 +68,18 @@ struct ButtonArt {
   int vk = 0;
 };
 
+ButtonArt function_art(int function) {
+  const int source = platform::map_source(platform::active_map(), function);
+  return {platform::pad_glyph_cell(source), platform::action_vk(platform::button_action(source))};
+}
+
 ButtonArt button_art(int key) {
   using platform::Action;
   switch (key) {
-    case 0: return {8, platform::action_vk(Action::Ok)};
-    case 1: return {9, platform::action_vk(Action::Cancel)};
-    case 2: return {0xB, platform::action_vk(Action::Item)};
-    case 3: return {0xA, platform::action_vk(Action::Menu)};
+    case 0:
+    case 1:
+    case 2:
+    case 3: return function_art(key);
     case 8: return {13, platform::kStartVk};
     case 0x10: return {0, platform::action_vk(Action::Up)};
     case 0x11: return {3, platform::action_vk(Action::Down)};
@@ -420,11 +426,11 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   return pages;
 }
 
-void DialogueBox::update(float dt) {
+void DialogueBox::update(float dt, TextPace pace) {
   if (!open_) return;
   blink_ += dt;
   const float text_dt = opening_.update(dt);
-  if (text_dt > 0) tw_.update(text_dt);
+  if (text_dt > 0) tw_.update(text_dt, pace);
 }
 
 void DialogueBox::confirm() {
@@ -980,8 +986,8 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
   impl.fonts.prepare(font::kGn, import::utf8_to_u32(impl.status));
 }
 
-void DialogueDemo::update(float dt) {
-  impl_->box.update(dt);
+void DialogueDemo::update(float dt, TextPace pace) {
+  impl_->box.update(dt, pace);
   if (script_set && impl_->box.digit_entry()) script_set(kDigitEntryVar, impl_->box.digit_value());
   voice_sync();
 }

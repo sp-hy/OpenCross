@@ -27,6 +27,9 @@ namespace oc::audio {
 
 enum class Bus { Master, Bgm, Sfx, Ui, Movie, Voice, Count };
 
+class SfxBank;
+struct SfxTriggers;
+
 // SFX channel pool output level before the SFX/master bus gains. 1.0 = the PS1 SPU's own level: AkaoPlayer's output is the SPU mix
 // at 44.1 kHz (float 1.0 = s16 full scale), and RDE passes the PS1 stream on scaled by MasterVolume x SfxVolume only.
 constexpr float kSfxLevel = 1.0f;
@@ -63,7 +66,14 @@ class Mixer {
   // `song_id` is the game's music number (mapped to the file through the song table like play()). Reads the files on
   // the calling thread; returns false (and plays nothing) if they cannot be loaded. Needs set_vfs().
   void set_vfs(const vfs::Vfs* fs) { vfs_ = fs; }
+  // The effect00 bank the original music's FE 0B ops play from (the SFX channel pool, like the play-SFX command). Main thread.
+  void set_sfx_bank(const SfxBank* bank) { sfx_bank_ = bank; }
   bool play_akao_bgm(int song_id, int volume127 = 127);
+  // Music push / pop (original music): push_music saves the AKAO song that plays now with its whole sequencer state (nothing when no
+  // AKAO song runs; the previous push is kept then). The next play_akao_bgm of that song id resumes from the saved state instead of
+  // the song start and uses the push up. drop_pushed_music forgets it.
+  void push_music();
+  void drop_pushed_music();
   // SFX channel pool (AKAO programs on the SFX bus; up to 40 concurrent channels, 24 voices).
   void play_sfx(const SfxProgram& program);
   void stop_sfx();
@@ -77,6 +87,9 @@ class Mixer {
   void set_sfx_mods(u32 mask, int volume127, int pan127);
   // The channels with an overlapping mask slide to volume127 over `frames` 60 Hz steps.
   void fade_sfx_volume(u32 mask, int frames, int volume127);
+  // Fast / slow mode: the SFX sequencer ticks `scale` times as often (field fast 4, battle fast 2, slow 1/2; music keeps its tempo).
+  // Any thread.
+  void set_sfx_tempo(float scale) { sfx_tempo_.store(scale, std::memory_order_relaxed); }
   // True while a channel started with an overlapping mask runs (or its start is still queued).
   bool sfx_active(u32 mask) const {
     return ((sfx_active_.load(std::memory_order_acquire) | sfx_pending_.load(std::memory_order_acquire)) & mask) != 0;
@@ -146,7 +159,7 @@ class Mixer {
 
  private:
   struct Cmd {
-    enum Type { Play, PlayAkao, Stop, Fade, Pause, Resume, Sfx, StopSfx, EvictSfx, SfxMods, SfxFade, SpuUpload, Switch, VoicePlay, VoiceStop } type;
+    enum Type { Play, PlayAkao, Stop, Fade, Pause, Resume, Sfx, StopSfx, EvictSfx, SfxMods, SfxFade, SpuUpload, Switch, VoicePlay, VoiceStop, PushMusic, DropPush } type;
     std::shared_ptr<HcaStream> stream;
     int song = -1;
     int volume = 0;
@@ -160,6 +173,8 @@ class Mixer {
     int pan = -1;           // SfxMods (volume in `volume`); SfxFade: the frames
     int vol_target = -1;    // Switch: volume the running fade ends at (-1 = none); `seconds` = the start position, fade_secs its rest
     double fade_secs = 0;
+    // PlayAkao / Switch: the programs the song's FE 0B ops request.
+    std::shared_ptr<const SfxTriggers> triggers;
   };
   void push(Cmd cmd);
   void apply(const Cmd& cmd);
@@ -167,6 +182,8 @@ class Mixer {
   void arm_level(float gain);
   // One frame of the linear BGM level ramp.
   void step_fade();
+  // Audio thread: starts the FE 0B requests the AKAO song made in its last render on the SFX pool.
+  void play_sfx_requests();
 
   static constexpr u32 kMovieRing = 1u << 17;  // frames (~2.7 s)
   std::vector<float> movie_ring_;                // kMovieRing * 2 floats
@@ -185,9 +202,13 @@ class Mixer {
   // Audio-thread state.
   std::shared_ptr<HcaStream> bgm_;
   std::shared_ptr<AkaoPlayer> akao_;
+  std::shared_ptr<const SfxTriggers> akao_triggers_;
+  std::shared_ptr<const AkaoPlayer::MusicContext> pushed_;
+  int pushed_song_ = -1;
   std::unique_ptr<AkaoPlayer> sfx_player_;
   std::vector<float> fscratch_;
   const vfs::Vfs* vfs_ = nullptr;
+  const SfxBank* sfx_bank_ = nullptr;
   std::shared_ptr<const InstrumentTable> base_table_;  // wave0000 (shared system bank), loaded on first use
   bool paused_ = false;
   std::atomic<bool> hold_{false};
@@ -196,6 +217,7 @@ class Mixer {
   std::vector<s16> scratch_;
   std::atomic<int> song_{-1};
   std::atomic<bool> mono_{false};
+  std::atomic<float> sfx_tempo_{1.0f};
   std::atomic<u32> sfx_active_{0};   // union of the running SFX channels' masks (audio thread)
   std::atomic<u32> sfx_pending_{0};  // masks of queued SFX starts not applied yet
   std::FILE* capture_ = nullptr;

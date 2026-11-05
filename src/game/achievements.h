@@ -9,6 +9,7 @@
 #include <array>
 #include <bitset>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace oc::game {
@@ -38,6 +39,10 @@ public:
   void element_cast(int element);
   // The smith forged `id` and none was held before.
   void forged(int id);
+
+  // The 37 Steam API names, and the name of the one Steam unlocks when all of them are set.
+  static std::vector<std::string> api_names();
+  static const char* meta_api_name();
 
   // API names earned since the last call, each once per run.
   std::vector<const char*> take_earned();

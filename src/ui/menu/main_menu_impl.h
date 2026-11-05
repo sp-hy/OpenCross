@@ -13,6 +13,7 @@
 #include "ui/lowres.h"
 #include "ui/menu/main_menu.h"
 #include "ui/menu/menu_common.h"
+#include "ui/menu/use_flow.h"
 #include "ui/ps1_font.h"
 
 namespace oc::ui {
@@ -102,6 +103,7 @@ struct MainMenu::Impl {
   LowRes lowres;
   bool ready = false;
   std::function<void(int)> sfx_fn;
+  std::function<void(int, u32)> sfx_layer_fn;
   save::SaveDat* save_dat = nullptr;
   save::OcSaves* page = nullptr;
   std::filesystem::path save_out;
@@ -143,8 +145,7 @@ struct MainMenu::Impl {
   bool roster_ask = false;
   int stand_in = -1;
   // elements: use
-  int use_cur = 0, use_scroll = 0, target_cur = 0;
-  bool use_target = false;
+  UseFlow use;
   // elements: grid. focus 0 = the stock list, 1 = the grid row of `cell_row`. List rows 0 / 1 are Remove All / Remove, or with
   // `arrow_side` (Right on the list) Auto Allocate / Fill Blanks. An element (or Remove) picked in the list first waits for a cell
   // (`pick_element`); a cell picked first waits for an element or Remove from the list (`pick_cell`), or, taken back onto the grid, for a
@@ -164,6 +165,10 @@ struct MainMenu::Impl {
   int ki_cur = 0, ki_scroll = 0;
   int set_cur = 0;
   bool skin_pick = false;
+  // The Controller assignment page: 0 closed, 2 field pair, 3 battle pair; pad_cur = its cursor row, pad_l2 / pad_r2 the trigger
+  // state of the last update.
+  int pad_state = 0, pad_cur = 0;
+  bool pad_l2 = false, pad_r2 = false;
   // save_cur: save grid cursor, slot - 1 (slots 1..14); top_cur: Save / Load choice (0 save, 1 load);
   // save_phase: 0 = Save / Load choice, 1 = slot grid / page list, 2 = save choice, 3 = "No save data" message (since frame
   // card_msg_start); save_card: the choice (0 = the OpenCross page, 1 = Slot 1, 2 = Slot 2); load_mode: the grid is the Load tab;
@@ -310,6 +315,7 @@ struct MainMenu::Impl {
   void update_choice(const Nav& nav);
 
   // Defined in main_menu_elements.cpp.
+  static constexpr u32 kLayerSoundMask = 0x80;
   void update_use(const Nav& nav);
   std::vector<int> grid_list() const;
   int list_element(int index) const;
@@ -460,6 +466,7 @@ struct MainMenu::Impl {
   void member_card(int character, float x, float y);
   void build_main();
   void build_roster();
+  void roster_line(int character, float cap);
   void status_panel(int character, float panel_x, float panel_y);
   std::vector<std::u32string> profile_lines(int character);
   void build_status();
@@ -482,6 +489,7 @@ struct MainMenu::Impl {
   void scroll_arrow(float x, float y, bool up);
   void pointer(float x, float y, bool left);
   void btn(float x, float y, int slot_index, u32 colour = kWhite);
+  void glyph_button(float x, float y, int button, u32 colour = kWhite, bool page_frames = false);
   // A pad glyph fills its cell; a key cap sits inside it (left / top inset and size as fractions of the cell).
   static constexpr float kKeyCapLeft = 0.1f, kKeyCapTop = 0.1f, kKeyCapW = 10.4f / 12.0f, kKeyCapH = 11.7f / 14.0f;
   void action_glyph(platform::Action action, float x, float y, float w, float h);
@@ -498,6 +506,9 @@ struct MainMenu::Impl {
   // Defined in main_menu_settings.cpp.
   void build_settings();
   void skin_preview();
+  void update_pad_page(const Nav& nav, const platform::Input& in);
+  void build_pad_page();
+  void pad_page_text(float x, float y, const std::u32string& str, u32 colour);
 
   // ---- save (states 0x10 / 0x12): slot grid frame 0x52 at (66,84), detail panel 0x54 at (84,230), message box 0x56
   // at (138,320). 2 rows x 8 boxes of 32x32 at (74 + 34 c, 98 + 34 r); slot 0 is the auto-save entry (shown, not selectable).

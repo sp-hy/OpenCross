@@ -3,7 +3,6 @@
 #include "data/tables.h"
 
 #include <algorithm>
-#include <cmath>
 
 namespace oc::battle {
 
@@ -90,11 +89,21 @@ int hit_chance(const ChanceIn& in) {
   return chance;
 }
 
+int hit_chance_shown(const ChanceIn& in) {
+  int chance = std::min(99, in.base * in.hit_mod / 100) - in.evd * in.evd_mod / 100;
+  if (chance < 0) chance = 0;
+  const size_t strength = static_cast<size_t>(std::clamp(in.strength, 0, 2));
+  for (int i = 0; i < in.hits; ++i) chance = std::min(99, chance + (kChainTarget[strength] - chance) * kChainPct[strength] / 100);
+  if (in.always_hit) chance = 99;
+  if (in.dark) chance /= 2;
+  return chance;
+}
+
 bool roll_hit(Rng& rng, int chance) { return !(chance * 10 < rng.rnd(0, 1000)); }
 
 // ------------------------------------------------------------------------------------------------ damage
 // raw = (Sum(ATK+1, wp, wpVar) - Sum(DEF+1, arm, armVar)) * mult / 20000, floor (wp - arm) / 2, negative -> rnd(0,3),
-// x3/4 when resisted, then the colour multiplier; the crit roll rnd(afraid ? 5 : 0, heavy ? 15 : 14) >= 15 (7 with the hero set; or the slayer
+// x3/4 when resisted, then the colour multiplier; the crit roll rnd(afraid ? 5 : 0, heavy ? 15 : 14) >= 15 (7 with the hero set; none for a weapon tech; or the slayer
 // mask) adds the weapon class' kCritBonus percent; finally the opposite-colour x3/2, guard /2 and gear x125 / x75 steps.
 DamageOut weapon_damage(Rng& rng, const WeaponIn& in) {
   DamageOut out;
@@ -109,7 +118,7 @@ DamageOut weapon_damage(Rng& rng, const WeaponIn& in) {
 
   const int lo = in.target_afraid ? 5 : 0;
   const int hi = in.strength == 2 ? 15 : 14;
-  const int crit_roll = rng.rnd(lo, hi);
+  const int crit_roll = in.crit_roll ? rng.rnd(lo, hi) : 0;
   out.crit = crit_roll >= (in.hero_set ? 7 : 15) || in.slayer;
   const int bonus = out.crit ? kCritBonus[static_cast<size_t>(in.weapon_class & 15)] : 0;
   int dmg = coloured * (100 + bonus) / 100;
@@ -234,18 +243,59 @@ int next_pending_stat(Rng& rng, int cur, int lv99, int star) {
   return delta;
 }
 
+namespace {
+
+// Newton's square root from 1 (or from the value when it is larger), stopping at the first step that does not shrink.
+double newton_sqrt(double value) {
+  if (!(value > 0.0)) return 0.0;
+  double root = value > 1.0 ? value : 1.0;
+  for (;;) {
+    const double next = (value / root + root) * 0.5;
+    if (!(next < root)) return root;
+    root = next;
+  }
+}
+
+// The minor-growth aim of a stat: x = pending * (tenths / 10) is split into six byte-sized places from the units down, each place
+// subtracting its weight while what is left stays above twice the weight; a place whose next place is above 4 gains 1 (from the last
+// place up); the units place, read as a signed byte and floored at 0, is the aim.
+int growth_aim(int pending, int tenths) {
+  double rest = pending * (tenths / 10.0);
+  std::array<u8, 6> places{};
+  double weight = 1.0;
+  for (u8& place : places) {
+    if (rest >= weight) {
+      do {
+        rest -= weight;
+        ++place;
+      } while (rest - weight > weight);
+    }
+    weight /= 10.0;
+  }
+  for (size_t i = places.size() - 1; i > 0; --i)
+    if (places[i] > 4) ++places[i - 1];
+  return std::max(0, static_cast<int>(static_cast<s8>(places[0])));
+}
+
+}  // namespace
+
 int minor_growth(int snap, int pending, int cur, int pending_tenths, int progress, int cap) {
   if (cap <= 0) return 0;
-  const double aimed = pending * pending_tenths / 10.0;
-  const double gain = 0.5 * ((snap + aimed) - cur) * std::sqrt(static_cast<double>(progress) / cap);
-  const int rounded = static_cast<int>(std::floor(gain + 0.5));
-  return rounded < 0 ? 0 : rounded;
+  const double aim = growth_aim(pending, pending_tenths);
+  double gain = ((snap + aim) - cur) * newton_sqrt(static_cast<double>(progress) / cap) * 0.5;
+  double rest = gain;
+  if (rest >= 1.0) {
+    do rest -= 1.0;
+    while (rest - 1.0 > 1.0);
+  }
+  if (rest >= 0.5) gain += 1.0;
+  constexpr double kUnsignedBias = 0x1.2725DD1D243ACp-29;
+  const int whole = gain >= kUnsignedBias ? static_cast<int>(gain - kUnsignedBias) : static_cast<int>(gain);
+  return std::max(0, static_cast<int>(static_cast<s16>(whole)));
 }
 
 int full_minor_growth(int snap, int pending, int cur, int pending_tenths) {
-  const double gain = (snap + pending * pending_tenths / 10.0) - cur;
-  const int rounded = static_cast<int>(std::floor(gain + 0.5));
-  return rounded < 0 ? 0 : rounded;
+  return std::max(0, snap + growth_aim(pending, pending_tenths) - cur);
 }
 
 // ------------------------------------------------------------------------------------------------ victory

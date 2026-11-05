@@ -5,6 +5,7 @@
 // Save file for Continue: <exe>\..\..\..\tmp\save.dat if present, else the game's own save folder.
 #include <SDL3/SDL.h>
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <functional>
@@ -42,6 +43,9 @@ int ocflow_main(int argc, char** argv) {
       lang_code = argv[++i];
     } else if (!std::strcmp(argv[i], "--save") && i + 1 < argc) {
       save_path = argv[++i];
+    } else {
+      std::fprintf(stderr, "usage: ocflow [--shots [dir]] [--orig] [--lang <code>] [--save <file>]\n");
+      return 2;
     }
   }
   const std::filesystem::path exe = platform::exe_dir();

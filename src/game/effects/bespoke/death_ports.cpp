@@ -681,8 +681,8 @@ class Dissolve : public MeshTech {
     std::vector<ShardPoly> recs;
     for (const FxSkinFace& face : sk.faces) {
       if (face.part < 0 || face.part >= 16) continue;
-      // The F-B draws do not skip parts by flag bit 0.
       const u8 part_flags = sk.shading[static_cast<size_t>(face.part)][3];
+      if (params_.model_colour && (part_flags & 1)) continue;
       Poly poly;
       poly.count = face.n, poly.tex = face.tex;
       if (params_.model_colour) {
@@ -700,7 +700,7 @@ class Dissolve : public MeshTech {
         if (!project_poly(ctx_.view, poly.corners, poly.count, 2, pp)) continue;
         poly.mode = 0;
         poly.semi = fading || (part_flags & 2);
-        poly.semi_blend = ((part_flags >> 2) & 3) + 1;
+        poly.semi_blend = 2;
         if (fading && poly.rgb[0][0] < 0x30) {
           int sum[3] = {0, 0, 0};
           for (int k = 0; k < face.n; ++k) sum[0] += poly.corners[k].x, sum[1] += poly.corners[k].y, sum[2] += poly.corners[k].z;

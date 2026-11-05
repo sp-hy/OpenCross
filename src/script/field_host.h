@@ -359,8 +359,8 @@ class FieldHost {
   // FE 1D
   virtual void fade_master_volume(int frames, int volume) = 0;
   virtual void named_effect(NamedOp op, std::string_view name, int ent) = 0;
-  // 7E D4
-  virtual void play_movie(int index, int variant, bool skippable) = 0;
+  // 7E D4; `flags`: D4's second operand (7E: 0)
+  virtual void play_movie(int index, int variant, bool skippable, int flags) = 0;
   // 7F wait
   virtual bool movie_playing() = 0;
 
@@ -541,7 +541,7 @@ class NullHost : public FieldHost {
   void sfx_volume(int slot, int frames, int volume) override;
   void fade_master_volume(int frames, int volume) override;
   void named_effect(NamedOp op, std::string_view name, int ent) override;
-  void play_movie(int index, int variant, bool skippable) override;
+  void play_movie(int index, int variant, bool skippable, int flags) override;
   bool movie_playing() override;
   void request_battle(int battle_id, int arg, int flags) override;
   bool battle_active() override;

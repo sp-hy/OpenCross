@@ -49,6 +49,8 @@ struct ModelCache {
   std::map<std::string, std::shared_ptr<ModelScripts>> scripts;
   // Used when a model has no 'atk' table.
   bseq::Table fallback_atk;
+  // [Video] HdBattleTextures: in HD art the battle players are drawn on their 4x Status-screen TIM (game::read_model_files).
+  bool hd_textures = true;
 
   // Drops every loaded model, weapon and script block and the prefetch (the fallback table stays).
   void clear();
@@ -79,7 +81,7 @@ struct ModelCache {
   // The weapon pack of a kind byte: a monster's model, or the kind of a PC (a character id, a Pip form, a body) ("" = none).
   static std::string weapon_bin(int model);
   // The CPU half of a load (texture mods resolved): any thread.
-  static std::optional<assets::ModelAsset> read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err);
+  static std::optional<assets::ModelAsset> read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err, bool hd_textures = false);
   static std::optional<assets::ModelAsset> read_weapon(const vfs::Vfs& vfs, const std::string& bin, int part);
 
   std::shared_ptr<ModelHandle> load_model_for(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& dir_stem);

@@ -206,11 +206,11 @@ void MainMenu::Impl::show(MenuScreen target) {
   switch (target) {
     case MenuScreen::Status: profile = true, restart_model(); break;
     case MenuScreen::ElementChoice: choice_cur = 0; break;
-    case MenuScreen::ElementUse: use_cur = use_scroll = target_cur = 0; use_target = false; break;
+    case MenuScreen::ElementUse: use = UseFlow{}; break;
     case MenuScreen::ElementGrid: grid_reset(); break;
     case MenuScreen::Equip: eslot = 0, eq_cur = eq_scroll = 0, eq_list = false; break;
     case MenuScreen::KeyItems: ki_cur = ki_scroll = 0; break;
-    case MenuScreen::Settings: set_cur = 0, skin_pick = false; break;
+    case MenuScreen::Settings: set_cur = 0, skin_pick = false, pad_state = 0; break;
     case MenuScreen::Save: save_cur = 0, load_cur = 1, top_cur = can_save ? 0 : 1, save_phase = 0, save_card = 1, load_mode = false, save_confirm = false, load_previews(); break;
     default: break;
   }
@@ -336,6 +336,7 @@ void MainMenu::set_save_target(save::SaveDat* dat, std::filesystem::path out, sa
   impl_->save_out = std::move(out);
 }
 void MainMenu::set_sfx(std::function<void(int)> fn) { impl_->sfx_fn = std::move(fn); }
+void MainMenu::set_sfx_layer(std::function<void(int, u32)> fn) { impl_->sfx_layer_fn = std::move(fn); }
 void MainMenu::set_save_locked(bool on) { impl_->save_locked = on; }
 void MainMenu::set_wide_columns(float canvas_columns, float layout_columns) {
   impl_->canvas_cols = std::max(0.0f, canvas_columns);
@@ -358,6 +359,7 @@ MenuScreen MainMenu::screen() const { return impl_->screen; }
 bool MainMenu::camera_takes_triggers() const {
   return !impl_->closed && impl_->screen == MenuScreen::Status && impl_->model_view && impl_->model_cam_manual;
 }
+bool MainMenu::pad_page_open() const { return !impl_->closed && impl_->screen == MenuScreen::Settings && impl_->pad_state != 0; }
 std::optional<MainMenu::LoadRequest> MainMenu::take_load_request() {
   Impl& impl = *impl_;
   if (!impl.load_pending) return std::nullopt;
@@ -414,6 +416,13 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
     if (variant == 4) impl.list_cur = 0, impl.prompt = GridPrompt::Sort;
     impl.grid_unlock = 0;
   }
+  if (screen == MenuScreen::ElementUse && variant >= 1) {
+    impl.use.target = true;
+    impl.use.roster = variant == 2;
+    impl.use.roster_row = 2;
+    impl.use.stand_in = variant == 2 ? 2 : -1;
+    impl.stand_in = impl.use.stand_in;
+  }
   if (screen == MenuScreen::Equip && variant == 1) impl.eq_list = true, impl.eq_cur = 1;
   if (screen == MenuScreen::Main && variant == 1) impl.sub = 1;
   // Variants 2 / 3 of Main: the roster from the Status pick, and from the Equip pick with the remove-all prompt.
@@ -427,6 +436,11 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
   if (screen == MenuScreen::Status && variant == 1) impl.profile = false;
   // Variant 1 of Settings: the Custom Window Frame picker.
   if (screen == MenuScreen::Settings && variant == 1) impl.set_cur = 1, impl.skin_pick = true;
+  // Variants 2 / 3 of Settings: the Controller assignment page, field pair and battle pair.
+  if (screen == MenuScreen::Settings && (variant == 2 || variant == 3)) {
+    impl.gs->set_option(opt::kControllerEdit, true);
+    impl.set_cur = 4, impl.pad_state = variant;
+  }
   if (screen == MenuScreen::Save && variant != 4) impl.can_save = true;
   if (screen == MenuScreen::Save && variant >= 1 && variant <= 3) {
     impl.save_phase = 1;

@@ -13,6 +13,12 @@ namespace oc::import {
 // Decodes an RDE HD .tim (hd.dat: standard TIM layout, 4x the 1x pixel size, own CLUT) to RGBA. nullopt if malformed.
 std::optional<Image> load_hd_tim(ByteSpan bytes);
 
+// HD art of a battle player model from its Status-screen TIM (hd/menu/player/<name>.tim, own CLUT): the left half is the model's main
+// texture page at an integer scale (hd_textures[0], hd_scale); the right half is the same page with the eyes shut. The eye strip's HD
+// image (hd_textures[main_texture_count]) is the 1x strip scaled up, with its shut frame (frame 2) replaced by the two eye rects of the
+// right half. False, asset untouched, when the TIM does not decode or its left half is not a whole multiple of the main texture.
+bool apply_battle_hd_tim(assets::ModelAsset& asset, ByteSpan tim);
+
 // `hd_tim` (optional, last argument of load_model / load_field_model) is the matching hd.dat TIM; when its size is an
 // integer multiple of the 1x main texture it fills ModelAsset::hd_textures[0] / hd_scale, otherwise it is ignored.
 // Battle player/monster model. `tex` is an .ltd or .ltc (may be empty), `at0_prd` the type-0x19 holder

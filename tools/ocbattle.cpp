@@ -1035,7 +1035,8 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
         ++no_pac;
         continue;
       }
-      // Direct pass on a throw-away battle: every slot of every unit's entity, as the scheduler would launch them.
+      // Direct pass on a throw-away battle: every slot of every unit's entity, as the scheduler would launch them. The kill script (slot 3)
+      // runs last; its A6 takes an enemy's entity out of the run list, so the unit is revived for the second pass.
       {
         GameRng rng2(static_cast<u32>(scene) + 1000, tables.rng_table);
         pac::ScriptedBrain brain2(pac_loader(vfs));
@@ -1043,10 +1044,11 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
         if (b2.start(party, scene) && brain2.active()) {
           for (int rep = 0; rep < 2; ++rep)
             for (int unit = 0; unit < kUnits; ++unit)
-              for (int slot : {2, 3, 4}) {
+              for (int slot : {2, 4, 3}) {
                 std::vector<pac::QueuedAttack> queued;
                 brain2.vm()->run_slot(unit, slot, queued);
                 brain2.vm()->tick();
+                if (slot == 3) brain2.vm()->revive(unit);
               }
           ops += brain2.vm()->ops_executed();
           for (size_t i = 0; i < 256; ++i) opc[i] += brain2.vm()->op_counts()[i];
@@ -1105,7 +1107,7 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
 }
 
 // Element ids the enemy battle scripts queue (QueuedAttack type 1/2/3/6), counted once per scene: every slot 2..4 of every unit's entity run
-// twice on a throw-away battle (the pac-soak direct pass). Feeds the usage rank of `fx-audit`.
+// twice on a throw-away battle (the pac-soak direct pass, slot 3 last and the unit revived after it). Feeds the usage rank of `fx-audit`.
 std::map<int, int> enemy_element_refs(const data::GameTables& tables, const vfs::Vfs& vfs) {
   std::map<int, int> refs;
   for (int scene = 0; scene < static_cast<int>(tables.scenes.size()); ++scene) {
@@ -1119,10 +1121,11 @@ std::map<int, int> enemy_element_refs(const data::GameTables& tables, const vfs:
       std::set<int> seen;
       for (int rep = 0; rep < 2; ++rep)
         for (int unit = 0; unit < kUnits; ++unit)
-          for (int slot : {2, 3, 4}) {
+          for (int slot : {2, 4, 3}) {
             std::vector<pac::QueuedAttack> queued;
             brain.vm()->run_slot(unit, slot, queued);
             brain.vm()->tick();
+            if (slot == 3) brain.vm()->revive(unit);
             for (const auto& attack : queued)
               if ((attack.type == 1 || attack.type == 2 || attack.type == 3 || attack.type == 6) && attack.value > 0) seen.insert(attack.value);
           }

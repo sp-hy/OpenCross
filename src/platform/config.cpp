@@ -195,6 +195,7 @@ bool Config::load(const std::filesystem::path& file) {
       art_mode = ArtMode::Hd;
     }
   }
+  hd_battle_textures = parse_bool(ini.get("Video", "HdBattleTextures"), hd_battle_textures);
   mods.clear();
   dump_stages = parse_bool(ini.get("Mods", "DumpStages"), dump_stages);
   dump_title = parse_bool(ini.get("Mods", "DumpTitle"), dump_title);
@@ -333,13 +334,12 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "FovDeg", std::to_string(fov_deg));
   ini.set("Video", "WideHud", kWideHudNames[std::clamp(wide_hud, 0, 2)]);
   ini.set("Video", "WideEdgeFade", std::to_string(wide_edge_fade));
-  ini.set("Game", "FastMode", on_off(fast_mode));
-  ini.set("Game", "SlowMode", on_off(slow_mode));
   ini.set("Game", "AutoSave", on_off(auto_save));
   ini.set("Game", "FastRate", std::to_string(fast_rate));
   ini.set("Game", "SlowRate", std::to_string(slow_rate));
   ini.set("Video", "Widescreen", on_off(widescreen));
   ini.set("Video", "ArtMode", art_mode == ArtMode::Modded ? "modded" : art_mode == ArtMode::Hd ? "hd" : "original");
+  ini.set("Video", "HdBattleTextures", on_off(hd_battle_textures));
   ini.set("Mods", "DumpStages", on_off(dump_stages));
   ini.set("Mods", "DumpTitle", on_off(dump_title));
   ini.set("Mods", "DumpRooms", on_off(dump_rooms));
@@ -379,9 +379,6 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Ui", "SettingsW", std::to_string(settings_w));
   ini.set("Ui", "SettingsH", std::to_string(settings_h));
   ini.set("Ui", "SettingsTab", settings_tab);
-  ini.set("Cheats", "NoEncounters", on_off(cheats.no_encounters));
-  ini.set("Cheats", "BattleBoost", on_off(cheats.battle_boost));
-  ini.set("Cheats", "AutoBattle", on_off(cheats.auto_battle));
   ini.set("Cheats", "GodMode", on_off(cheats.god_mode));
   ini.set("Cheats", "NoClip", on_off(cheats.no_clip));
   ini.set("Cheats", "MaxStamina", on_off(cheats.max_stamina));
@@ -423,6 +420,11 @@ bool Config::save(const std::filesystem::path& file) const {
   if (!out) return false;
   out << "; OpenCross settings. Leave GameDir/SaveDir empty to auto-discover.\n\n" << ini.serialize();
   return static_cast<bool>(out);
+}
+
+void Config::clear_session_toggles() {
+  fast_mode = slow_mode = false;
+  cheats.no_encounters = cheats.battle_boost = cheats.auto_battle = false;
 }
 
 namespace {

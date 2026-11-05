@@ -28,6 +28,8 @@ std::vector<Step> make_steps() {
     steps.push_back({mode, MenuScreen::Status, 1, "status_equip"});
     steps.push_back({mode, MenuScreen::ElementChoice, 0, "element_choice"});
     steps.push_back({mode, MenuScreen::ElementUse, 0, "element_use"});
+    steps.push_back({mode, MenuScreen::ElementUse, 1, "element_use_target"});
+    steps.push_back({mode, MenuScreen::ElementUse, 2, "element_use_roster"});
     steps.push_back({mode, MenuScreen::ElementGrid, 0, "element_list"});
     steps.push_back({mode, MenuScreen::ElementGrid, 1, "element_grid"});
     steps.push_back({mode, MenuScreen::ElementGrid, 2, "element_options"});
@@ -36,6 +38,8 @@ std::vector<Step> make_steps() {
     steps.push_back({mode, MenuScreen::KeyItems, 0, "key_items"});
     steps.push_back({mode, MenuScreen::Settings, 0, "settings"});
     steps.push_back({mode, MenuScreen::Settings, 1, "skin_picker"});
+    steps.push_back({mode, MenuScreen::Settings, 2, "controller_field"});
+    steps.push_back({mode, MenuScreen::Settings, 3, "controller_battle"});
     steps.push_back({mode, MenuScreen::Save, 0, "save_choice"});
     steps.push_back({mode, MenuScreen::Save, 4, "save_choice_nosave"});
     steps.push_back({mode, MenuScreen::Save, 1, "save_grid"});

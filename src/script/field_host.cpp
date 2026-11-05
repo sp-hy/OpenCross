@@ -101,7 +101,7 @@ void NullHost::play_sfx(int, int, int, int, int) { NOTE("play_sfx"); }
 void NullHost::sfx_volume(int, int, int) { NOTE("sfx_volume"); }
 void NullHost::fade_master_volume(int, int) { NOTE("fade_master_volume"); }
 void NullHost::named_effect(NamedOp, std::string_view, int) { NOTE("named_effect"); }
-void NullHost::play_movie(int, int, bool) { NOTE("play_movie"); }
+void NullHost::play_movie(int, int, bool, int) { NOTE("play_movie"); }
 bool NullHost::movie_playing() { NOTE("movie_playing"); return false; }
 void NullHost::request_battle(int, int, int) { NOTE("request_battle"); }
 bool NullHost::battle_active() { NOTE("battle_active"); return false; }
