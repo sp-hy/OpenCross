@@ -1975,11 +1975,11 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x801eec9c,insn@pc==0x27BDFFC8,replace,hd-overlay-sprite,memmenu2: replaces frame/cursor draw with HD UI sprite 0x7001,data/hd/*.png,0x42b760,0x42ac70,hook_hd_overlay_sprite_801eec9c_rep
 0x801eee4c,insn@0x801EEE4C==0x27BDFF90,observer,hd-texture-vram,Frees cached HD menu portrait TIM,,0x4364d0,0x435920,hook_hd_texture_vram_801eee4c_obs
 0x801ef080,insn@pc==0x0C00D222,observer,memory-expansion,Tag allocation 'm' (a0|=0x6D000000) for heap,-,0x580630,0x44b3c6,hook_memory_expansion_801ef080_obs
-0x801ef088,insn@0x801EF080==0x0C00CCB2,observer,hd-texture-vram,Loads/caches HD menu portrait TIM and uploads to VRAM,data\hd\menu\player\<name>.tim,0x436500,0x435920,hook_hd_texture_vram_801ef088_obs
-0x801ef088,insn@0x801EF080==0x0C00CCB2,observer,hd-texture-vram,Loads/caches HD menu portrait TIM and uploads to VRAM,data\hd\menu\player\<name>.tim,0x4366f0,0x435920,hook_hd_texture_vram_801ef088_obs_2
+0x801ef088,insn@0x801EF080==0x0C00CCB2,observer,hd-texture-vram,Loads/caches the HD battle unit TIM and uploads the battle texture page and CLUT to VRAM,data\hd\menu\player\<name>.tim,0x436500,0x435920,hook_hd_texture_vram_801ef088_obs
+0x801ef088,insn@0x801EF080==0x0C00CCB2,observer,hd-texture-vram,Loads/caches the HD battle unit TIM and uploads the battle texture page and CLUT to VRAM,data\hd\menu\player\<name>.tim,0x4366f0,0x435920,hook_hd_texture_vram_801ef088_obs_2
 0x801ef1a4,insn@pc==0x34422000,replace,memory-expansion,Set buffer size v0=0x18000,-,0x44c080,0x44bb7a,hook_memory_expansion_801ef1a4_rep
-0x801ef1f4,insn@0x801EF1F4==0x0C027D17,observer,hd-texture-vram,Uploads HD portrait sub-rects (expression slices) from cached TIM,data\hd\menu\player\<name>.tim,0x436700,0x435920,hook_hd_texture_vram_801ef1f4_obs
-0x801ef1f4,insn@0x801EF1F4==0x0C027D17,observer,hd-texture-vram,Uploads HD portrait sub-rects (expression slices) from cached TIM,data\hd\menu\player\<name>.tim,0x436920,0x435920,hook_hd_texture_vram_801ef1f4_obs_2
+0x801ef1f4,insn@0x801EF1F4==0x0C027D17,observer,hd-texture-vram,Uploads the HD battle unit's expression cells (eyes shut) from the cached TIM,data\hd\menu\player\<name>.tim,0x436700,0x435920,hook_hd_texture_vram_801ef1f4_obs
+0x801ef1f4,insn@0x801EF1F4==0x0C027D17,observer,hd-texture-vram,Uploads the HD battle unit's expression cells (eyes shut) from the cached TIM,data\hd\menu\player\<name>.tim,0x436920,0x435920,hook_hd_texture_vram_801ef1f4_obs_2
 0x801ef2a4,insn@0x801EF29C==0x0C027F44,observer,hd-texture-vram,Char 0x14 portrait: shifts sprite Y by -1 for HD alignment,,0x436930,0x435920,hook_hd_texture_vram_801ef2a4_obs
 0x801ef51c,insn@0x801ef51c==0x0C07B85A,observer,font/text-render,Battle name-list frame: flushes PC text queue,-,0x44d8f0,0x44ad10,hook_font_text_render_801ef51c_obs
 0x801ef7bc,insn@0x801ef7bc==0x0C07B800,skip,hd-overlay-sprite,Battle: draws icon sprite 0x7300+n; skips original draw,data\hd sprites,0x44e010,0x44ad10,hook_hd_overlay_sprite_801ef7bc_skip
@@ -1996,8 +1996,8 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x801efee4,insn@pc==0x8C640000,replace,hd-overlay-sprite,memmenu2: draws HD portrait for active party slot,data/hd/*.png,0x42be70,0x42ac70,hook_hd_overlay_sprite_801efee4_rep
 0x801eff88,insn@pc==0x8CA40000,replace,hd-overlay-sprite,memmenu2: draws HD character portrait using primitive pos/color,data/hd/*.png,0x42baf0,0x42ac70,hook_hd_overlay_sprite_801eff88_rep
 0x801effb4,ovl@801D2800==10 & insn@pc==0x3C02801F && 801F5EE0<0x1E80,redirect,ui-pc-menu,Menu slide step 0x801F581C set to whole remaining distance (instant slide; low confidence),-,0x432840,0x42cf20,hook_ui_pc_menu_801effb4_redir
-0x801f0040,insn@0x801F0038==0x0C00CCB2,observer,hd-texture-vram,Uploads HD portrait matching game TIM filename to VRAM,data\hd\menu\player\<name>.tim,0x4369c0,0x435920,hook_hd_texture_vram_801f0040_obs
-0x801f0040,insn@0x801F0038==0x0C00CCB2,observer,hd-texture-vram,Uploads HD portrait matching game TIM filename to VRAM,data\hd\menu\player\<name>.tim,0x436c30,0x435920,hook_hd_texture_vram_801f0040_obs_2
+0x801f0040,insn@0x801F0038==0x0C00CCB2,observer,hd-texture-vram,Uploads the HD battle texture page for a unit loaded by TIM file name,data\hd\menu\player\<name>.tim,0x4369c0,0x435920,hook_hd_texture_vram_801f0040_obs
+0x801f0040,insn@0x801F0038==0x0C00CCB2,observer,hd-texture-vram,Uploads the HD battle texture page for a unit loaded by TIM file name,data\hd\menu\player\<name>.tim,0x436c30,0x435920,hook_hd_texture_vram_801f0040_obs_2
 0x801f0074,insn@pc==0x8E420000,replace,hd-overlay-sprite,memmenu2: draws HD portrait of lead character at (0x40;0xA5),data/hd/*.png,0x42c1d0,0x42ac70,hook_hd_overlay_sprite_801f0074_rep
 0x801f0138,mem@800720FD==1 && mem@8006AED0!=0; insn@0x801F0138==0x00442821,redirect,bugfix,Adds form-ID (0x2B-0x30) offset to table index (a1) in menu stat lookup,,0x449ec0,table@6be6b0,hook_bugfix_80010414_obs
 0x801f01a8,insn@pc==0x8C640000,replace,hd-overlay-sprite,memmenu2: draws HD portrait for cursor-selected slot,data/hd/*.png,0x42b980,0x42ac70,hook_hd_overlay_sprite_801f01a8_rep

@@ -111,7 +111,7 @@ The actor lock is released by A4 (slot 2), 2A and A6 (slot 4 / PC death), so slo
 * **67** only appends to the unit's attack queue (8-byte entries); it does not wait.
 * The **action executor** takes the first queued entry of any unit every frame, loads kind / strength / element, plays the sequence, applies damage, pops the entry, and when the queue is empty finalises (countdown, action state cleared).
 * **A4** blocks while the action is in progress, so the script resumes only after all queued attacks executed; then it reloads the countdown (`AP + rnd(0, AP>>2)`), clears the slot-2 flag and releases the lock.
-* Slot 3 = `65; A6; 00`: 65 enters scripted-death mode, A6 finalises (enemy: remove from alive mask, add to the defeated mask, kill credit, check "all enemies down"). Slot 4 = `2A; 00` in every normal script.
+* Slot 3 = `65; A6; 00`: 65 enters scripted-death mode, A6 finalises (enemy: remove from alive mask, add to the defeated mask, kill credit, check "all enemies down"). Every PC entity carries this slot 3 too, but slot 3 is launched for enemies only, so the PC branch of A6 never runs. Slot 4 = `2A; 00` in every normal script.
 
 **Radius tutorial timing (retail).** evt386 entity 4 slot 1 writes max HP and current HP (`75/76` words 0x16 / 0xB8): 0x400 each tick while var 0x84 < 2, 0x32 afterwards. Nothing in evt386 writes the countdown, so Radius' countdown is the engine's: AP 12, initial `rnd(1, AP)`, `-= steps` per PC hit (weak 1, strong 2, fierce 3 = stamina spent / 10), reload `AP + rnd(0, AP>>2)` by A4. Radius acts only after the PC has spent its stamina; the PC may hit several times. `66 begin_action` (and 65) waits for the PC to be back to idle, i.e. the return walk must have finished.
 

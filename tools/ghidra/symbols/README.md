@@ -13,7 +13,7 @@ Names this project has established, one `name = 0xADDR;  # function|data: descri
 | `ps1_menu.txt` | `prog/menutest.prg`, `namemenu.prg`, `shopmenu.prg` (and the memmenu/monmenu screens) | `0x801D2800 (0x801EE000 for memmenu, monmenu)` | 197 / 131 |
 | `rde_hooks.csv` | catalogue of the RDE exe's hooks (`CHRONOCROSS.exe`) | n/a | 2,034 rows |
 | `overlays.csv` | catalogue of the PS1 overlays | n/a | 106 overlays plus the main exe |
-| `ps1_effects_<overlay>.txt` (56 files) | `prog/<overlay>.prg`, one file per named effect overlay | `0x801C5E00` | 179 / 23 |
+| `ps1_effects_<overlay>.txt` (77 files) | `prog/<overlay>.prg`, one file per named effect overlay | `0x801C5E00` | 179 / 23 |
 
 ## Which Ghidra program
 

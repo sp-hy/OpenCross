@@ -1,0 +1,6 @@
+# PS1 project symbol list: effect overlay 3mix.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_3mix_init = 0x801C60F8;  # function: Starts the screen label and the casters' main script
+fx_3mix_return_task = 0x801C6190;  # function: Moves a target back home over the duration and turns it to the casters' bounding-box middle (*)
+fx_3mix_orbit_task = 0x801C64C4;  # function: Spirals a target inwards around the side centre while it sinks and spins

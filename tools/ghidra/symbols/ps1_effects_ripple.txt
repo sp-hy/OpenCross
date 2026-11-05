@@ -33,3 +33,5 @@ fx_ripple_pivot = 0x801C8A98;  # data: hand rotation pivot (0, -0x800, 0)
 fx_ripple_lift = 0x801C8ABC;  # data: vertical speed, or the arc angle in the flight state
 fx_ripple_lift_accel = 0x801C8B98;  # data: acceleration of the lift
 fx_ripple_height_field = 0x801C8BB8;  # data: two 33 x 33 int height buffers
+
+fx_ripple_stamp_offset = 0x801C8A08;  # data: Cell offset subtracted from the op 0x180 stamp origin (12, 12); shipped -1, nothing writes it

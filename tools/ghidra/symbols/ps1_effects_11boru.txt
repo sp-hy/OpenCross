@@ -5,3 +5,6 @@ fx_11boru_init_b = 0x801C7178;  # function: Init part: per-unit lift speed
 fx_11boru_init = 0x801C7894;  # function: Init for Volcano
 fx_11boru_frame = 0x801C7BC8;  # function: Frame update with per-unit lift
 fx_11boru_exit = 0x801C850C;  # function: Exit for Volcano
+fx_11boru_piece_rot = 0x801C87C0;  # data: Per-piece rotation: the init roll, read in phase 0, gains the rate in phase 1
+fx_11boru_piece_rate = 0x801C8810;  # data: Per-piece rotation rate (also the targets' spin)
+fx_11boru_piece_vy = 0x801C8890;  # data: Per-piece vertical speed (also the targets' rise speed)

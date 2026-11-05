@@ -1,6 +1,11 @@
 # PS1 project symbol list: battle exit overlay btlexit.prg (base 0x801EA800).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+btl_results_soft_int_to_double = 0x801EA870;  # function: soft-float int to double
+btl_results_soft_double_mul = 0x801EA990;  # function: soft-float double multiply
+btl_results_soft_double_sub = 0x801EAD90;  # function: soft-float double subtract
+btl_results_soft_double_div = 0x801EAFA0;  # function: soft-float double divide
+btl_results_soft_double_gt = 0x801EB2D0;  # function: soft-float double greater-than compare
 btl_exit_sfx_play = 0x801EB808;  # function: Results screen sound wrapper that plays an effect with mask 1.
 btl_exit_print_text_by_kind = 0x801EBC14;  # function: Prints one results text by kind: table text, element, item or member name; a member wearing model 0x31 prints Lynx's name; RDE prints the typed name for 0x33, the PS1 may differ.
 btl_exit_results_screen_draw = 0x801EB89C;  # function: Results screen driver that frees the stage and draws the wallpaper and portraits (ambiguous)
@@ -20,6 +25,7 @@ btl_results_draw_right_panel = 0x801EE754;  # function: Draws the results screen
 btl_results_calc_gold = 0x801EEA80;  # function: Sums gold from defeated enemies with the gear bonus and caps the total; also rolls drops.
 btl_results_unlock_grid_cells = 0x801EF3E8;  # function: Marks element grid cells unlocked for each star gained.
 btl_results_roll_pending_growth = 0x801EF974;  # function: Folds old pending stat growth into the record and rolls new pending deltas for every character after a star-up.
+btl_results_round_aimed_gain = 0x801EFCE8;  # function: turns pending x tenths / 10 into the integer aim of the minor growth with a six-place digit loop that stops early and a carry pass
 btl_results_calc_stat_gain = 0x801EFECC;  # function: Computes one stat growth gain for a party member from snapshot, pending and progress.
 btl_results_clamp_gain = 0x801F00E0;  # function: Clamps a stat gain so the result does not exceed the Lv99 target.
 btl_results_compute_growth = 0x801F0374;  # function: Computes growth and star-up results when the results screen opens.
@@ -35,6 +41,7 @@ btl_results_advance_member_page = 0x801F190C;  # function: Opens or advances to 
 btl_results_exit_sfx_step = 0x801F1B50;  # function: Plays the exit sound on the frame after the results screen closes.
 btl_results_handle_input_code = 0x801F1BE4;  # function: Handles confirm and cancel codes of the heal-element menu.
 btl_results_update_state = 0x801F1DA0;  # function: Per-frame state machine of the results screen: member pages, heal menu and exit.
+btl_results_stock_take = 0x801F2090;  # function: Takes up to n copies of an element from the element stock, frees the slot at 0, returns the count taken
 btl_results_write_back_party = 0x801F2104;  # function: Writes party state back after the results loop, raising KO'd members to 1 HP.
 btl_results_enter = 0x801F2708;  # function: Results screen entry: fades from black, plays open sound and clears the in-fight flag.
 btl_results_heal_cursor_opt = 0x801F29BA;  # data: Heal-menu cursor memory option copied from the session options.

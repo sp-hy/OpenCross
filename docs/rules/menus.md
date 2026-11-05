@@ -74,7 +74,7 @@ OK toggles the profile panel and the equipment panel; Cancel returns to the list
 
 ## 4. Equip screen
 
-Source: `main_menu_equip.cpp`; rules `GameState::equip_candidates`, `can_equip`, `equip`, `stats_with`.
+Source: `main_menu_equip.cpp`; rules `GameState::equip_candidates`, `can_equip`, `equip`, `stats_with`. As on the PS1 the panel shows ATK, DEF, MAG and MDEF above 99 when the gear takes them there, HIT and EVD capped at 99, and base stats capped at 99.
 
 Slots 0 weapon, 1 armour, 2..4 accessories. The slot column (Up / Down wrap over 5): OK opens the candidate list, Cancel returns to the member pick (list row 2, cursor on the member shown), Triangle unequips all three accessories at once (sfx 0x48, no prompt). L1 / R1 change member and close the list. The list: Up / Down without wrap, 11 rows visible (kVisibleRows), Cancel back to the slot column.
 

@@ -8,3 +8,6 @@ fx_46black_tick = 0x801C6370;  # function: Per tick show, private draw, hide on 
 fx_46black_warp_vertices_a = 0x801C663C;  # function: Warps vertices toward a point by distance and time
 fx_46black_warp_vertices_b = 0x801C6848;  # function: Warps ground and scenery vertices
 fx_46black_ground_copy = 0x801C722C;  # function: Copies the stage ground, drawing every cell
+fx_46black_model_clock = 0x801C8E3C;  # data: Clock of the model warp (0x28 at op 0x180)
+fx_46black_ground_clock = 0x801C8E40;  # data: Clock of the ground / scenery warp (0 at op 0x181)
+fx_46black_model_warp_params = 0x801C8E4C;  # data: Op 0x180 operands: angle shift, distance shift, span (three words) (*)

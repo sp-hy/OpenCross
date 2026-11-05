@@ -1,5 +1,7 @@
 # PS1 project symbol list: effect overlay miyademo.prg (base 0x801C5E00).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_miyademo_dispatch = 0x801C5E04;  # function: Overlay entry; op 0x101 swaps in the queued backdrop pack.
+fx_miyademo_kill_pack_objects = 0x801C6554;  # function: Destroys the objects whose owner pack id matches the given pack.
 fx_miyademo_init = 0x801C65BC;  # function: Init: picks a random background number
 fx_miyademo_op_100_queue_bg = 0x801C6728;  # function: Op 0x100: queues the chosen background

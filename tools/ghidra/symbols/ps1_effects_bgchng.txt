@@ -2,3 +2,4 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_bgchng_init_clear_pause_gate = 0x801C60B4;  # function: Clears the start-pause gate
+fx_bgchng_exit_set_pause_gate = 0x801C60F0;  # function: Exit: allows pausing again

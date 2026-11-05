@@ -1,0 +1,4 @@
+# PS1 project symbol list: effect overlay opthedo.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_opthedo_exit = 0x801C6200;  # function: Exit: every target-list unit gets yaw 0xC00 and its home position

@@ -8,6 +8,7 @@ fx_saraman_op_181 = 0x801C7764;  # function: Op 0x181 handler
 fx_saraman_op_182 = 0x801C77B4;  # function: Op 0x182 handler
 fx_saraman_op_184 = 0x801C77C0;  # function: Op 0x184 handler
 fx_saraman_op_183_load_motion = 0x801C77EC;  # function: Op 0x183: loads a motion file into the heap
+fx_saraman_joint_follow = 0x801C785C;  # function: Particle update that puts the particle at joint 1 of the 'sara' model
 fx_saraman_frame = 0x801C798C;  # function: Frame: waits for ticks and CD
 fx_saraman_exit = 0x801C8048;  # function: Exit for Salamander
 fx_saraman_pit_flag = 0x801C8B80;  # data: Pit on flag set when first motion file is loaded

@@ -1,8 +1,9 @@
 # PS1 project symbol list: effect overlay 155slot.prg (base 0x801C5E00).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_155slot_reel_feed_line = 0x801C5F04;  # function: One line step of a reel: records the symbol fed and moves one image row into the window
 fx_155slot_reel_spin = 0x801C60E8;  # function: Reel task for the slot screen effect
 fx_155slot_reel_stop = 0x801C6178;  # function: Stopping task that slows the reel
 fx_155slot_reel_draw = 0x801C6368;  # function: Reel draw
-fx_155slot_exit_store_result = 0x801C6448;  # function: Exit: stores the three reel results into caster 0
+fx_155slot_exit_store_result = 0x801C6448;  # function: Exit: packs the three reel symbols (3 bits each) into acting entry 0's control block +0x2A
 fx_155slot_symbol_order = 0x801C64EC;  # data: Table of reel symbol order
