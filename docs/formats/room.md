@@ -95,7 +95,7 @@ Flags values seen: `0x20` (632,691: opaque), `0x28` (601: bit 3 without bit 7), 
 
 ### 3.4 Subfiles 4 and 5: walk mesh
 Subfile 4: `u32 nTri`, then `nTri` x 14 bytes: `u16 v0,v1,v2; s16 adj0,adj1,adj2; s16 attr`. The section is `4+14*nTri` bytes (+2 pad to a multiple of 4 in 253 rooms). Subfile 5: `u32 byteLen` (= 8*nVert, section = 4+byteLen), then `s16 x,y,z,w` per vertex; `w` is 0 in all 49,767 vertices. Coordinates are world units, Y down (Arni floor y = 83).
-- `adj[k]` = index of the triangle across edge `(v[k], v[(k+1)%3])`, or -1 for a boundary. Of 283,972 non-negative links, every neighbour exists and contains both edge vertices, and 283,969 are reciprocal (the exceptions: `crn_b10i` triangle 51 has three non-reciprocal links; `you_b07i` triangle 19 is degenerate `(115,115,115)` with self-adjacency). Triangles are not necessarily counter-clockwise.
+- `adj[k]` = index of the triangle across edge `(v[k], v[(k+1)%3])`, or -1 for a boundary. Of 283,972 non-negative links, every neighbour exists and contains both edge vertices, and 283,969 are reciprocal (the exceptions: `crn_b10i` triangle 51 has three non-reciprocal links; `you_b07i` triangle 19 is degenerate `(115,115,115)` with self-adjacency). All 115,728 non-degenerate triangles of the shipped rooms share one winding (the 299 zone quads all have the opposite one), so a point test needs only the matching sign; the only degenerate triangles are `cao_a03f` 27, 28, 39, 48, 55, 56 and `you_b07i` 19.
 - `attr` indexes subfile 6 (3.5). 41 distinct values; families 0/1, 11-23, 25-30, 41-45, 57-61, 72-82; most common 1 (43,941), 25 (24,127), 26 (8,635), 11 (8,451).
 
 **Movement and height rules.**

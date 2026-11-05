@@ -2,7 +2,7 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_lasbos_dispatch_op = 0x801C5E04;  # function: Overlay dispatcher; ops 0x100-0x102 swap the arena stage
-fx_lasbos_target_init = 0x801C6200;  # function: Places targets at list position with home yaw
+fx_lasbos_task_morph = 0x801C64B4;  # function: Op 0x103 task: pit morph weight (t << 12) / D
 fx_lasbos_bake_ground = 0x801C655C;  # function: Ground bake used by the stage morph
 fx_lasbos_update_yuka = 0x801C7548;  # function: Update for the yuka object; copies ring angles
 fx_lasbos_bake_ground_entry = 0x801C75C4;  # function: Entry that calls the ground bake
@@ -10,4 +10,5 @@ fx_lasbos_init_pit = 0x801C764C;  # function: Init: loads the pit mesh and pushe
 fx_lasbos_task_spiral_home = 0x801C7848;  # function: Op 0x107 per-target task moving back to home
 fx_lasbos_task_op_106 = 0x801C7B7C;  # function: Op 0x106 per-target spiral task
 fx_lasbos_frame = 0x801C7D30;  # function: Frame: draws stock ground with rim only
+fx_lasbos_exit = 0x801C7DB8;  # function: Exit: clears the pit object's flag bit, removes the frame task, allows pausing again
 fx_lasbos_ground_rect = 0x801C7E14;  # data: Rect used when drawing the stock ground

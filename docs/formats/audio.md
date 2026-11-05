@@ -78,7 +78,7 @@ Channel code starts right after the table and runs to the next channel start / t
 - Each channel has a remaining-length counter; when it reaches 0 the next opcodes execute until a note / tie / rest sets a new length.
 - **Gate rule.** After a note the VM peeks at the next note / tie / rest opcode, skipping every ordinary opcode in between (A4, A9, B4, ... by the operand-length table; it follows C9 / CA to the loop start (C9 on its last pass falls through), FE 06 / 07 / 08 / 09 / 0E jumps and FE 0F returns; CB / CD / D1 / DB are skipped and clear the legato flags; A0 or an unknown opcode stops the peek as "rest-like"). The key-off point is `length - 2` ticks, but `length` (no key-off) when the peeked opcode is a tie (0x84..0x8E, 0xFC), or a note while the channel flags (CC legato = 1, D0 full length = 4) are set; a peeked rest (or a finishing opcode) clears those flags first, so it gets `length - 2`. A length-2 note keys off after 1 tick, a length-1 note has no key-off and runs into the next key-on (a gate of 0 never keys off). Tenuto (FE 1A) lengthens the gate only on music channels.
 - **Legato.** CC sets the flag word to 1; D0 sets it to 4 (assignments, not OR). Each note op copies bit 0 to bit 1 ("previous note was legato"); a note with bit 1 set does not key on (re-pitch only), and a rest clears bit 1. Because CC / D0 assign the whole word, the first note after a CC (e.g. at the top of a loop whose body starts with CC) keys on again.
-- Opcode byte: `0x00..0x83` note: `key = op / 11` (0..11), `length_index = op % 11`, absolute pitch `key + octave*12 (+ transpose)`. `0x84..0x8E` tie (extends the previous note, length index op-0x84); `0x8F..0x99` rest (length index op-0x8F). `0x9A..0x9F` invalid. Length table in ticks: `192 96 48 24 12 6 3 32 16 8 4`. `0xF0..0xFB` note, `0xFC` tie, `0xFD` rest, each followed by one byte = explicit length in ticks (0 = use the A2 value).
+- Opcode byte: `0x00..0x83` note: `key = op / 11` (0..11), `length_index = op % 11`, absolute pitch `key + octave*12 (+ transpose)`. `0x84..0x8E` tie (extends the previous note, length index op-0x84); `0x8F..0x99` rest (length index op-0x8F). `0x9A..0x9F` invalid. Length table in ticks: `192 96 48 24 12 6 3 32 16 8 4`. `0xF0..0xFB` note, `0xFC` tie, `0xFD` rest, each followed by one byte = explicit length in ticks (0 = use the A2 value; no executed note of the shipped data has length 0).
 - Operand lengths come from a per-opcode table (total length including the opcode; 0 = handled specially: A0, C9, CA, CB, CD, D1, DB, F0..FF); `FE` sub-opcodes have their own length table.
 - Loops: `C8` pushes (pc, count 0) on a 4-deep stack (index wraps mod 4); `C9 n` increments the count and jumps to the loop pc until count == n (n = 0 means 256), so the body runs n times; `CA` jumps back unconditionally (infinite loop, bumps count); `FE 08 n rel` jumps when count+1 == n; `FE 09` jumps and pops. `FE 06 rel` unconditional jump; `FE 07 thr rel` jumps if the game-set music threshold >= thr; `FE 0E rel` call (one level) / `FE 0F` return. Relative targets = address of the s16 operand
   + value. `A0` / `FF` / unimplemented opcodes finish the channel; when all channels finish the song ends.
@@ -104,7 +104,7 @@ Channel code starts right after the table and runs to the next channel start / t
 | B4 | u8 delay, u8 rate, u8 type | vibrato on (phase step rate*1024, 0 = 256; type 0..15 selects an entry of the built-in LFO table). On SFX channels the first operand is the depth (`n << 8`, 0 keeps the current depth) and there is no delay |
 | B5 | u8 | vibrato depth (bit 7 = absolute-range flag) |
 | B6 | - | vibrato off |
-| B7 / BB / BF | u8 | attack mode (5 = exponential) / sustain mode (1/3/5/7 -> ADSR2 bits 15:14 = 00/01/10/11, other values 01) / release mode (7 = exponential) |
+| B7 / BB / BF | u8 | attack mode (5 = exponential) / sustain mode (1/3/5/7 -> ADSR2 bits 15:14 = 00/01/10/11, other values 01) / release mode (7 = exponential). BB occurs in no shipped sequence; patch zones and keymap entries use only sustain modes 3 and 7 |
 | B8 / B9 / BA | u8,u8,u8 / u8 / - | tremolo on (delay, rate, type; on SFX channels the first operand is the 7-bit depth) / depth (7 bits) / off |
 | BC / BD / BE | u8 rate, u8 type / u8 / - | pan LFO on / depth / off |
 | C0 / C1 | s8 | transpose absolute / relative (semitones) |
@@ -135,7 +135,7 @@ Channel code starts right after the table and runs to the next channel start / t
 | FE 0B | u8 | trigger SFX program n from the music channel (not modelled: skipped) |
 | FE 0E / 0F | s16 / - | call / return |
 | FE 10 / 11 | u8 / - | reserve voices / free reserved voices (not modelled: skipped) |
-| FE 12 | u8 len, u8 vol | channel master volume slide |
+| FE 12 | u8 len, u8 vol | channel master volume slide (occurs in no shipped music or SFX) |
 | FE 13 | - | do not re-key this channel when music is resumed after a push/pop (not modelled: skipped) |
 | FE 14 | u8 | load patch n (key-split instrument zones, section 4 patch table) |
 | FE 15 / 16 | u8,u8 / u16 | time signature / measure number: bar timer only, no audio effect |

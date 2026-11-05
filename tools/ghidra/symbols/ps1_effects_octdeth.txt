@@ -1,0 +1,16 @@
+# PS1 project symbol list: effect overlay octdeth.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_octdeth_store_matrix = 0x801C5EF8;  # function: Copies the camera matrix into one of the two side slots
+fx_octdeth_set_side_skip = 0x801C5F4C;  # function: Sets whether one side of the plane is skipped
+fx_octdeth_set_plane = 0x801C5F64;  # function: Stores the plane height
+fx_octdeth_draw_model = 0x801C5F70;  # function: Poses and draws the model with the plane clip, remembers its position
+fx_octdeth_draw_parts = 0x801C60B4;  # function: Walks the parts and primitive blocks
+fx_octdeth_edge_cross = 0x801C74F0;  # function: Intersection of an edge with the plane (position, normal bytes, UV)
+fx_octdeth_clip_tri = 0x801C76F8;  # function: Classifies a triangle against the plane and emits the whole or cut pieces
+fx_octdeth_op_fade_start = 0x801CAEC8;  # function: Op 0x180: resets the pose, copies the CLUT rows for the grey fade
+fx_octdeth_op_restore = 0x801CB008;  # function: Op 0x181: writes the saved CLUT rows back
+fx_octdeth_op_sweep_start = 0x801CB0C0;  # function: Op 0x182: plane start -1500 and step 1500 / (D - 15)
+fx_octdeth_init = 0x801CB108;  # function: Init
+fx_octdeth_frame = 0x801CB134;  # function: Frame: grey fade or the plane sweep with the four emitters at the plane
+fx_octdeth_release = 0x801CB4CC;  # function: Release: restores the pose

@@ -1,4 +1,6 @@
 # PS1 project symbol list: effect overlay 44get.prg (base 0x801C5E00).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_44get_frame = 0x801C5FC0;  # function: Frame: freezes target 0's anim (scale 0) and draws the rising additive copy
+fx_44get_exit = 0x801C632C;  # function: Exit: restores target 0's anim scale 0x40 and anim speed
 fx_44get_draw = 0x801C6924;  # function: Draw for the victim levitation effect

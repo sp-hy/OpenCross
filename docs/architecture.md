@@ -519,7 +519,6 @@ End:
 ## 13. Deliberate differences from the original
 
 - The General tab's Restart returns to the boot logo without leaving the process; RDE has no such control.
-- RDE has one slot for an achievement awarded after a delay, so a second one inside the delay replaces the first and the first is lost; here both are earned.
 - The achievement room rules sample every 60 ticks in every speed mode. RDE counts down by a step that depends on the speed mode; the ticks here already scale with it.
 - A session that used the debug tools earns no achievements. RDE has no debug tools.
 - OpenCross shows its own notice for each achievement, since a directly started exe has no Steam overlay.
@@ -529,3 +528,9 @@ End:
 - Start over a movie opens the pause screen; the original never pauses a movie.
 - The debug free camera bypasses the original's near-drop rules (the GPU's near-plane clip applies instead); a widescreen or wide-FOV picture also clips instead of dropping big stage packets.
 - A follower's "too close to the leader" step that would leave the walk mesh or change floor is replaced by a probed slide step, or stands still when blocked; the original writes the position without a mesh test.
+- Start-pause is allowed at any point of a battle, including the effects during which the PS1 and RDE refuse it (the Time Devourer ending, the Bunyip transformation, the final-boss stages, bgchng / miyademo and battle song changes).
+- Title Continue is greyed (sfx 0x18) when there is no save; the original always opens the save screen.
+- First launch starts windowed at 1280x720 with widescreen on, MSAA off and no FXAA; RDE starts in exclusive fullscreen at desktop size, 4:3, MSAA 8x and FXAA on.
+- Every movie can be skipped, including the D4 movies whose second operand lacks bit 0x200 (RDE plays those to the end).
+- Movie sound follows the row volume on the movie bus only; RDE also applies the Music slider and a factor of 0.6.
+- No key rebinding: the keyboard sets are fixed (RDE's Esc menu offers two rebindable keyboard sets). RDE's Brightness, Screen Type, FXAA and Help options and its Quit confirmation are not offered.

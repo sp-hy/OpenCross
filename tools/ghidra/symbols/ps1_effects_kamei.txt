@@ -2,6 +2,8 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_kamei_dispatch_op = 0x801C5E04;  # function: Overlay dispatcher; stage ops 0x100 0x101 0x102
+fx_kamei_form_model_read = 0x801C5FD0;  # function: Starts reading the transformed form's model file (group 0xE); no shipped op reaches it
+fx_kamei_form_model_build = 0x801C6048;  # function: Builds the loaded form model (texture bind, clip 0xD, one pose step); no shipped op reaches it
 fx_kamei_init = 0x801C6174;  # function: Init for the form swap
 fx_kamei_frame = 0x801C6328;  # function: Frame: waits for clip then swaps form
 fx_kamei_exit = 0x801C67E0;  # function: Exit for the form swap

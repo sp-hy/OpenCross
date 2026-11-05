@@ -1,12 +1,15 @@
 # PS1 project symbol list: effect overlay fnoise.prg (base 0x801C5E00).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_fnoise_rotate_about = 0x801C5F00;  # function: Rotates a shard by 100 per tick about its centroid on its axis
 fx_fnoise_shard_a = 0x801C619C;  # function: Shard task
 fx_fnoise_build_shard = 0x801C6938;  # function: Builds one shard
 fx_fnoise_shard_b = 0x801C7000;  # function: Shard setup with random velocity and axis
 fx_fnoise_shard_c = 0x801C7714;  # function: Shard task
+fx_fnoise_op_180 = 0x801C7A90;  # function: Op 0x180: starts the frost growth
 fx_fnoise_op_181 = 0x801C7AA0;  # function: Op 0x181: steps pose and builds one shard
 fx_fnoise_init = 0x801C7B2C;  # function: Init for the effect
 fx_fnoise_frame = 0x801C7BF0;  # function: Frame: show, draw bracket, hide
+fx_fnoise_frost_colour = 0x801C7EA0;  # function: Per-vertex frost colour by distance from the centre (0x64 inside R/2, 0x40 inside R)
 fx_fnoise_draw_a = 0x801C7F50;  # function: Draw for the effect
 fx_fnoise_draw_b = 0x801C7FEC;  # function: Second draw for the effect

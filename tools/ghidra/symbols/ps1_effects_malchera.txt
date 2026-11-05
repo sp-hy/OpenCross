@@ -1,0 +1,11 @@
+# PS1 project symbol list: effect overlay malchera.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_malchera_op_180 = 0x801C5ECC;  # function: Op 0x180: sets a group's slot count and puts all 60 chain points at the caster's attach point
+fx_malchera_op_181 = 0x801C6000;  # function: Op 0x181: per-slot rest length, gravity (operand minus rand % 20), joint and mode
+fx_malchera_pin_prev = 0x801C63A4;  # function: Puts one chain point at exactly rest length from the previous one
+fx_malchera_pin_next = 0x801C64EC;  # function: Puts one chain point at exactly rest length from the next one
+fx_malchera_hang_step = 0x801C691C;  # function: Mode 0: gravity then fixed-length pin from the last point down, last point at the hand
+fx_malchera_rise_step = 0x801C6A44;  # function: Mode 1: tail rises with z jitter, chain follows at a fifth of the gravity
+fx_malchera_draw_lines = 0x801C6B58;  # function: Draws the 59 grey additive line segments with a random base brightness
+fx_malchera_frame = 0x801C7280;  # function: Frame: ages every slot, steps it by mode, draws

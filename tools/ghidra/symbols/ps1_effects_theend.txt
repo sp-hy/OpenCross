@@ -1,7 +1,15 @@
 # PS1 project symbol list: effect overlay theend.prg (base 0x801C5E00).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_theend_dispatch = 0x801C5E04;  # function: Overlay entry; ops 0x180 set point, 0x181 shatter, 0x182 restore.
+fx_theend_free_shards = 0x801C5EF8;  # function: Frees the shard buffer and its owner block.
+fx_theend_rotate_about = 0x801C5F2C;  # function: Rotates a vertex about a pivot around one axis.
 fx_theend_frame = 0x801C61C8;  # function: Frame update for stage-ground shards
 fx_theend_draw_shards = 0x801C66AC;  # function: Draws the stage shards opaque on both sides
 fx_theend_op_181_shards = 0x801C69A4;  # function: Op 0x181 shard setup
 fx_theend_build_shards = 0x801C6A24;  # function: Builds the ground shard triangles
+fx_theend_op_180_set_point = 0x801C7680;  # function: Op 0x180: stores the shatter target point.
+fx_theend_op_182_restore = 0x801C780C;  # function: Op 0x182: restores target positions and rotations, ends the shatter.
+fx_theend_init = 0x801C7910;  # function: Init: snapshots target positions and rotations, rolls spin rates.
+fx_theend_frame_targets = 0x801C7ADC;  # function: Per-tick drift and spin of the targets while 0x181 runs.
+fx_theend_exit = 0x801C7D64;  # function: Exit: frees the shards and clears the active flag.

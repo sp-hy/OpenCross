@@ -185,7 +185,7 @@ The image mirrors the game's working memory; only the stepped fields are non-zer
 | +0x20 / +0x22 / +0x24 / +0x26 / +0x28 | u16 | weapon, armour, accessory 1..3 |
 | +0x2D | u8 | character/model id (Serge 0 / Lynx 0x31 in slot 0; Pip evolutions 0x2B..0x30) |
 | +0x40 | 48 x u16 | element grid: element id placed in cell k (0 = empty) |
-| +0xA8 | u8 | unknown (a status word that is ORed with +0xB0 by every status test; gear/innate related) |
+| +0xA8 | u8 | equip status byte: every equip change rebuilds the record word as its old 0x400400 bits ORed with the gear's +0x14 status words (the resist masks do not count); a load does not rebuild it, and a battle starts each PC from it ORed with the gear words. Every status test ORs it with +0xB0. No gear sets a field status bit (poison, burn, sprain, flu) through it, and the saved byte is 0 in every reachable state |
 | +0xB0 | u8 | status condition bits: 0 poison, 3 burns, 4 sprain, 5 flu (others unknown); set by script op FE 3D, cleared by FE 3E |
 | +0xB8 | u16 | current HP |
 | +0xBC | u16 | "max HP related" (equals max HP in real files; likely the HP the star-up bonus accumulates on) |

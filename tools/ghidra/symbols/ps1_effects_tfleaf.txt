@@ -2,4 +2,5 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_tfleaf_init_unpack = 0x801C5EF4;  # function: Init: unpacks the thre block
+fx_tfleaf_op_100_trap = 0x801C5FE0;  # function: Op 0x100: frees wlf2's live objects, starts the deform task and the trap sequence
 fx_tfleaf_task_pose_step = 0x801C6090;  # function: Task that steps the model pose each tick
