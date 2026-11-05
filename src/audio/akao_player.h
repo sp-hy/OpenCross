@@ -74,10 +74,10 @@ class AkaoPlayer {
   u32 busy_channels() const;
   // OC_SFX_TRACE: lists the channels / voices still running.
   void trace_report(const char* why) const;
-  // Field PLAY_SFX rule: cut running SFX channels (E0-protected ones end at loop end).
+  // Field PLAY_SFX rule: cut running SFX channels (E0-protected ones end at their next CA).
   void evict_sfx();
   // With a non-zero mask: only the channels started with an overlapping
-  // channel mask end (E0-protected ones end at their loop end). `untagged` also ends channels started without a mask.
+  // channel mask end (E0-protected ones end at their next CA). `untagged` also ends channels started without a mask.
   void evict_sfx(u32 mask, bool untagged = false);
   // Commands A0 / A2: the running SFX channels whose
   // mask overlaps `mask` get volume modifier `volume127` (0..127) and pan modifier `pan127` * 2; -1 keeps one.
@@ -146,6 +146,14 @@ class AkaoPlayer {
     int level = 0;
   };
   VoiceProbe probe_voice(int index) const;
+  // Diagnostics (tests): one channel slot's program position and its vibrato / tremolo / autopan rate words and reload counters.
+  struct ChannelProbe {
+    bool active = false;
+    u32 pc = 0;
+    u32 rate[3] = {};
+    int counter[3] = {};
+  };
+  ChannelProbe probe_channel(int index) const;
 
   // Envelope maths exposed for tests: one hardware-rate (44.1 kHz) step of a SPU ADSR generator.
   struct Env {

@@ -541,35 +541,44 @@ Stats GameState::stats_with(int character, int eslot, int item) const {
   return result;
 }
 
+// A candidate whose slot mask overlaps the accessory it replaces is never in conflict; otherwise its mask is tested against every
+// worn accessory.
 int GameState::accessory_conflict(int character, int eslot, int item) const {
   if (eslot < 2 || item <= 0 || !rules->tables) return 0;
-  const data::GearRec* gear = rules->tables->gear_rec(item);
-  if (!gear) return 0;
-  int others = 0;
-  for (int k = 2; k < 5; ++k) {
-    if (k == eslot) continue;
-    if (const data::GearRec* other = rules->tables->gear_rec(equipped(character, k)); other && equipped(character, k) > 0) others |= other->slot_mask();
-  }
-  return gear->slot_mask() & others;
+  auto mask = [&](int id) -> int {
+    const data::GearRec* gear = id > 0 ? rules->tables->gear_rec(id) : nullptr;
+    return gear ? gear->slot_mask() : 0;
+  };
+  const int candidate = mask(item);
+  if (candidate & mask(equipped(character, eslot))) return 0;
+  int worn = 0;
+  for (int k = 2; k < 5; ++k) worn |= mask(equipped(character, k));
+  return candidate & worn;
+}
+
+bool GameState::listed(int item, int eslot) const {
+  const int kind = std::min(eslot, 2);
+  if (kind == 2 && item > 0 && item < kFirstGearId) return true;
+  const data::ItemInfo* info = rules->tables->item(item);
+  return info && info->kind() == kind;
 }
 
 std::vector<EquipCand> GameState::equip_candidates(int character, int eslot) const {
   std::vector<EquipCand> out;
   if (eslot < 0 || eslot >= kEquipSlots || !rules->tables) return out;
-  const int mode = std::min(eslot, 2);
-  if (eslot >= 2 && equipped(character, eslot) != 0) out.push_back({-1, 0, 0, true});
-  for (size_t i = 0; i < slot.items.size(); ++i) {
-    const auto& stack = slot.items[i];
-    if (stack.id == 0 || stack.qty == 0) continue;
-    const data::ItemInfo* info = rules->tables->item(stack.id);
-    if (!info || info->kind() != mode) continue;
-    EquipCand candidate;
-    candidate.stock_slot = static_cast<int>(i);
-    candidate.item = stack.id;
-    candidate.qty = stack.qty;
-    candidate.ok = info->can_equip(character) && accessory_conflict(character, eslot, stack.id) == 0;
-    out.push_back(candidate);
-  }
+  const bool accessory = eslot >= 2;
+  const EquipCand reserved{-1, 0, 0, accessory && equipped(character, eslot) != 0};
+  if (accessory) out.push_back(reserved);
+  // Accessories: gear first (pass 0), then the material ids (pass 1).
+  for (int pass = 0; pass < (accessory ? 2 : 1); ++pass)
+    for (size_t i = 0; i < slot.items.size(); ++i) {
+      const auto& stack = slot.items[i];
+      if (stack.id == 0 || stack.qty == 0 || !listed(stack.id, eslot)) continue;
+      if (accessory && (stack.id < kFirstGearId) != (pass == 1)) continue;
+      const data::ItemInfo* info = rules->tables->item(stack.id);
+      out.push_back({static_cast<int>(i), stack.id, stack.qty, info && info->can_equip(character) && accessory_conflict(character, eslot, stack.id) == 0});
+    }
+  if (!accessory) out.push_back(reserved);
   return out;
 }
 
@@ -577,7 +586,7 @@ bool GameState::can_equip(int character, int eslot, int item) const {
   if (character < 0 || character >= save::kNumChars || eslot < 0 || eslot >= kEquipSlots || !rules->tables) return false;
   if (item == 0) return eslot >= 2 && equipped(character, eslot) != 0;
   const data::ItemInfo* info = rules->tables->item(item);
-  if (!info || info->kind() != std::min(eslot, 2) || !info->can_equip(character)) return false;
+  if (!info || !listed(item, eslot) || !info->can_equip(character)) return false;
   if (accessory_conflict(character, eslot, item) != 0) return false;
   return item_count(item) > 0;
 }

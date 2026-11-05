@@ -27,6 +27,8 @@ void NullHost::note(const char* method) {
 #define NOTE(name) note(name)
 
 bool NullHost::system_ready() { NOTE("system_ready"); return true; }
+bool NullHost::entry_window() { NOTE("entry_window"); return false; }
+bool NullHost::window_open() { NOTE("window_open"); return false; }
 void NullHost::end_of_tick(FieldVM&) { NOTE("end_of_tick"); }
 int NullHost::party_entity(int) { NOTE("party_entity"); return -1; }
 int NullHost::character_entity(int) { NOTE("character_entity"); return -1; }
@@ -101,7 +103,7 @@ void NullHost::play_sfx(int, int, int, int, int) { NOTE("play_sfx"); }
 void NullHost::sfx_volume(int, int, int) { NOTE("sfx_volume"); }
 void NullHost::fade_master_volume(int, int) { NOTE("fade_master_volume"); }
 void NullHost::named_effect(NamedOp, std::string_view, int) { NOTE("named_effect"); }
-void NullHost::play_movie(int, int, bool, int) { NOTE("play_movie"); }
+void NullHost::play_movie(int, int) { NOTE("play_movie"); }
 bool NullHost::movie_playing() { NOTE("movie_playing"); return false; }
 void NullHost::request_battle(int, int, int) { NOTE("request_battle"); }
 bool NullHost::battle_active() { NOTE("battle_active"); return false; }

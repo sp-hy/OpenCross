@@ -636,6 +636,7 @@ void BattleView::tick_finish() {
       // After the 14 + 14 teardown frames the `bti0` intro layer (bg_00's sea, birds, fish) returns and the stage outro `bto0` plays.
       if (finish_ticks_ == kOutroDelay) {
         fx_stage_layer("bti0", true, true);
+        speed_gate_ = false;
         camera_.play_sequence("bto0");
       }
       if (ui_ != Ui::Result && finish_ticks_ > 120 && (!camera_.sequence_running() || finish_ticks_ > 360)) {
@@ -657,6 +658,7 @@ void BattleView::tick_finish() {
       if (finish_ticks_ == kWipeIdle) {
         camera_.set_bank(&bank_);
         fx_stage_layer("bti0", true, true);
+        speed_gate_ = false;
         camera_.play_sequence("bto0");
         camera_.start_fade(1.0f, kWipeFade);
       }
@@ -671,6 +673,7 @@ void BattleView::tick_finish() {
       // its own fade to black); a stage without one fades to black.
       if (finish_ticks_ == kOutroDelay) {
         fx_stage_layer("bti0", true, true);
+        speed_gate_ = false;
         fled_outro_ = camera_.play_sequence("bto0");
         if (!fled_outro_) camera_.start_fade(1.0f, kFledFade);
       }

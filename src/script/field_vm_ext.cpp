@@ -13,14 +13,16 @@ void FieldVM::exec_ext(u8 sub) {
   const u16 key = static_cast<u16>(kExtPage | sub);
   if (const OpInfo* info = find_op(key); info && info->conf == '?') ++stats_.uncertain_ops[key];
   // `base_` is the sub-opcode byte; advance(n) = n bytes from it (instruction length - 1).
-  // Yield always, rewind while busy.
+  // The launcher gate: the system gate, and no message window (labels included) open. Yield always, rewind while busy.
   auto idle_gate = [&]() {
     yield_ = true;
-    return host_.system_ready();
+    return host_.system_ready() && !host_.window_open();
   };
   // The screen ops open their screen through the field's launcher and step on; the FE 61 after each waits until it has closed.
+  // FE 5B waits for the system gate alone.
   auto open_screen = [&](MenuKind kind, int arg, int length) {
-    if (!idle_gate()) return;
+    yield_ = true;
+    if (!host_.system_ready() || (kind != MenuKind::PartyScreen && host_.window_open())) return;
     host_.request_menu(kind, arg);
     advance(length);
   };
@@ -440,6 +442,7 @@ void FieldVM::exec_ext(u8 sub) {
         yield_ = true;
         break;
       }
+      budget_ += 1;
       advance(5);
       break;
     case 0x7A: {

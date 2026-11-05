@@ -1,6 +1,6 @@
 // occ save-* commands (no GameDir needed):
 //   occ save-info <save.dat>                       container members, cards, slot count
-//   occ save-slots <save.dat>                      per-slot preview fields
+//   occ save-slots <save.dat>                      per-slot preview fields, version, checksum and the version-gated fields
 //   occ save-roundtrip <save.dat> <out.dat>        decode -> encode every block (bit-exact check), rewrite + reopen
 //   occ save-blank <save.dat> <out.dat>            copy with card 1 emptied (scratch file for the save route)
 #include <algorithm>
@@ -59,10 +59,11 @@ int cmd_slots(const std::string& path) {
         leader += hex;
       }
       const auto party = slot.party();
-      std::printf("card %d slot %02d block %2d  %u:%02u:%02u  gold %u  stars %u/%u  prog 0x%02X  loc 0x%X  party %s/%s/%s  leader(sjis)=%s  cksum %s\n",
+      std::printf("card %d slot %02d block %2d  %u:%02u:%02u  gold %u  stars %u/%u  prog 0x%02X  loc 0x%X  party %s/%s/%s  leader(sjis)=%s  ver 0x%X  cksum %s  frames 0x%X  colours %u/%u  ng+ 0x%X/0x%X\n",
                   card_no, slot_ref.slot, slot_ref.block, seconds / 3600, seconds / 60 % 60, seconds % 60, slot.gold(), slot.stars_current(),
                   slot.stars_total(), slot.progression(), slot.location(), char_name(party[0]).c_str(), char_name(party[1]).c_str(),
-                  char_name(party[2]).c_str(), leader.c_str(), block_checksum_ok(block) ? "ok" : "BAD");
+                  char_name(party[2]).c_str(), leader.c_str(), block_version(block), slot.corrupted ? "BAD" : "ok", slot.frames,
+                  slot.chars[0].colour_bit, slot.chars[43].colour_bit, slot.unk_e1ec, slot.unk_e1f0);
     }
   }
   return 0;

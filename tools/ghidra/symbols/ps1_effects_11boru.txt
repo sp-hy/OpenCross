@@ -8,3 +8,5 @@ fx_11boru_exit = 0x801C850C;  # function: Exit for Volcano
 fx_11boru_piece_rot = 0x801C87C0;  # data: Per-piece rotation: the init roll, read in phase 0, gains the rate in phase 1
 fx_11boru_piece_rate = 0x801C8810;  # data: Per-piece rotation rate (also the targets' spin)
 fx_11boru_piece_vy = 0x801C8890;  # data: Per-piece vertical speed (also the targets' rise speed)
+fx_11boru_tick = 0x801C85D0;  # data: Phase tick counter, advanced by the frame's tick count and reset at each phase change
+fx_11boru_phase = 0x801C85DC;  # data: Phase 0..3 (morph, rise, hang, fall)

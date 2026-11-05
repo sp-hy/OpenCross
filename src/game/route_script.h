@@ -61,6 +61,7 @@
 //                                 issued once, finishes 4 ticks later (wait for the screen with `wait menu|shop`)
 //   assert name <char> <text>     the typed name of a character (UTF-8)       assert party <id,id,id>   the party ids in slot order (- = empty)
 //   assert disc <n>               the disc in use                             assert location <id>      the saved location word of the state
+//   assert option <hexmask> set|clear   all mask bits of the settings options word are set / not all set
 //   mark / assert screen right|left|up|down   player screen movement since the mark
 //   mark ent <n> / assert moved <n> <min>   entity <n> is at least <min> world units from where `mark ent` saw it
 //   assert ent <n> model|shown|moving|paused|wet <value>   room model index / drawn / script motion active / motion preempted /
@@ -103,7 +104,7 @@ namespace oc::game {
 //   ent_yaw(entity) -> facing the model shows (4096/turn); ent_head(entity) -> head-turn angles (ax, az), false = head not turning;
 //   ent_clip(entity, ...) -> (clip << 12) | keyframe * 4, -1 none; party_ent(slot) -> entity index (-1 none);
 //   char_name(char) -> typed name (UTF-8, "" = none); party() -> party ids "0,1,22" in slot order; disc() -> disc in use (1 / 2);
-//   location() -> saved location word of the state; path(...) -> walk-mesh waypoints;
+//   location() -> saved location word of the state; options() -> settings options word; path(...) -> walk-mesh waypoints;
 //   battle_events() -> route events of the battle view ("w<msg>" script window opened, "a" action began), empty without a view;
 //   battle_camera() -> what drives the battle camera ("orbit <slot>", "shot", "target", "hold"), "" = no battle view;
 //   battle_menu() -> "<slot> <guards>": the party slot whose top command menu is up ("-" none), one digit per slot (1 = guarding);
@@ -165,6 +166,7 @@ struct RouteState {
   std::function<std::string()> party;
   std::function<int()> disc;
   std::function<int()> location;
+  std::function<int()> options;
   std::function<std::vector<std::array<float, 2>>(float, float, float, float, bool)> path;
   // Counters since start: FieldWorld::load_room calls, in-place art swaps of the field room, field battles, title sequences (tit0..3).
   u64 room_loads = 0;

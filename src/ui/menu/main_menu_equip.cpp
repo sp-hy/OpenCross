@@ -10,6 +10,17 @@
 namespace oc::ui {
 
 // ---- equip
+namespace {
+// The row under the list cursor. Rows past the end of the list are blank and act like the reserved row: on an accessory list they take
+// the accessory off when the slot is filled.
+EquipCand row_at(const std::vector<EquipCand>& candidates, int row, bool fill_ok) {
+  if (row >= 0 && row < static_cast<int>(candidates.size())) return candidates[static_cast<size_t>(row)];
+  return EquipCand{-1, 0, 0, fill_ok};
+}
+}  // namespace
+
+// The list cursor is kept between slots and list visits; it resets only when the screen opens. While the slot column has the focus a
+// cursor past the end of the slot's list moves to the row just past the last entry.
 void MainMenu::Impl::update_equip(const Nav& nav) {
   const int character = cur_char();
   if (nav.l1) cycle_member(-1), eq_list = false;
@@ -23,18 +34,19 @@ void MainMenu::Impl::update_equip(const Nav& nav) {
       sfx(0x48);
     } else if (nav.ok) {
       eq_list = true;
-      eq_cur = eq_scroll = 0;
       sfx(8);
     }
+    if (const int count = static_cast<int>(gs->equip_candidates(cur_char(), eslot).size()); eq_cur > count)
+      eq_cur = count, eq_scroll = std::max(0, count - (kVisibleRows - 1));
   } else {
     const std::vector<EquipCand> candidates = gs->equip_candidates(character, eslot);
-    const int count = static_cast<int>(candidates.size());
+    const int rows = std::max(static_cast<int>(candidates.size()), kVisibleRows);
     if (nav.up && eq_cur > 0) --eq_cur, sfx(1);
-    if (nav.down && eq_cur + 1 < count) ++eq_cur, sfx(1);
+    if (nav.down && eq_cur + 1 < rows) ++eq_cur, sfx(1);
     scroll_to(eq_cur, eq_scroll, kVisibleRows);
     if (nav.cancel) eq_list = false, sfx(6);
-    else if (nav.ok && count > 0) {
-      const EquipCand& candidate = candidates[static_cast<size_t>(eq_cur)];
+    else if (nav.ok) {
+      const EquipCand candidate = row_at(candidates, eq_cur, eslot >= 2 && gs->equipped(character, eslot) != 0);
       if (candidate.ok && gs->equip(character, eslot, candidate.item)) {
         sfx(0x48);
         eq_list = false;
@@ -53,11 +65,10 @@ void MainMenu::Impl::update_keyitems(const Nav& nav) {
   if (nav.cancel) back_to_main(3), sfx(6);
 }
 
-// Equip stat-box caption in menutest style `flags`: slot scale x the language's multiplier in the style's slot (JP ik), right edge at
-// PS1 `right_x`, 16-px row at `y`; key_dx / key_dy = per-language offsets relative to English (PS1 px). These styles
-// have no shrink; `maxw` (PS1 px, from the frame edge / the neighbouring column's number) is a guard that only the Italian "POT. MAG." /
-// "DIF. MAG." reach.
-void MainMenu::Impl::CapR(u32 flags, float right_x, float y, std::string_view key, const char* fallback, float key_dx, float key_dy, float maxw) {
+// Equip stat-box caption in menutest style `flags`: slot scale x the language's multiplier in the style's slot (JP ik), left edge at
+// PS1 `left_x`, 16-px row at `y`; key_dx / key_dy = per-language offsets relative to English (PS1 px). These styles
+// have no shrink; `maxw` (PS1 px, from the caption's left edge to the preview arrow or the number field) is a guard.
+void MainMenu::Impl::CapL(u32 flags, float left_x, float y, std::string_view key, const char* fallback, float key_dx, float key_dy, float maxw) {
   const std::u32string caption = capt(key, fallback);
   const MtStyle style = mt_style(flags, lang_index());
   const render::FaceId face = slot_face(style.slot);
@@ -70,7 +81,7 @@ void MainMenu::Impl::CapR(u32 flags, float right_x, float y, std::string_view ke
   cmd.face = face;
   cmd.scale = scale;
   cmd.color = kCap;
-  cmd.x = PX(right_x + key_dx) - text->measure(face, caption, scale);
+  cmd.x = PX(left_x + key_dx);
   cmd.y = PY(y + key_dy) + (PY(16) - text->line_height(face, scale)) * 0.5f;
   emit(std::move(cmd));
 }
@@ -116,8 +127,9 @@ void MainMenu::Impl::build_equip() {
   static const Pos kPos[6] = {{&Stats::atk, 107, 137, 89, 999}, {&Stats::def, 107, 153, 105, 999}, {&Stats::mag, 102, 169, 121, 999},
                               {&Stats::mdef, 182, 169, 121, 999}, {&Stats::hit, 180, 137, 89, 99}, {&Stats::evd, 180, 153, 105, 99}};
   Stats pre = cur;
-  const bool preview = eq_list && cnt > 0 && eq_cur < cnt && cands[static_cast<size_t>(eq_cur)].ok;
-  if (preview) pre = gs->stats_with(character, eslot, cands[static_cast<size_t>(eq_cur)].item);
+  const EquipCand under = row_at(cands, eq_cur, eslot >= 2 && gs->equipped(character, eslot) != 0);
+  const bool preview = eq_list && under.ok;
+  if (preview) pre = gs->stats_with(character, eslot, under.item);
   static const struct {
     const char* jp;
     const char* en;
@@ -140,12 +152,11 @@ void MainMenu::Impl::build_equip() {
   for (int i = 0; i < 6; ++i) {
     // Style 0x67 for HIT%, else 2 (the force-JP bit is cleared on the cmnmes hit).
     const u32 style = i == 4 ? 0x67u : 2u;
-    // left bound of the label: the frame's inner edge (46) for the first column, the first column's number (right edge x + 24, +2) after it
-    const float kBound[6] = {46, 46, 46, 128 + numdx[2], 133 + numdx[0], 133 + numdx[1]};
-    CapR(style, kPos[i].x - 3, kPos[i].y, kCapNames[i].jp, kCapNames[i].en, capdx[i], capdy[i], kPos[i].x - 3 + capdx[i] - kBound[i]);
-    // Left edge of the preview arrows in frame 110 (label right edge).
-    static const float kArrowX[6] = {96, 96, 96, 180, 176, 176};
-    if (eq_list) CapR(style, kArrowX[i], kPos[i].py, kCapNames[i].jp, kCapNames[i].en, capdx[i], capdy[i], kArrowX[i] + capdx[i] - kBound[i]);
+    // English left edge of the caption (the JP sheet caption's x plus the English offset) and the preview arrow that ends its room.
+    static const float kCapX[6] = {47, 47, 47, 132, 133, 133}, kArrowX[6] = {98, 98, 98, 183, 179, 179};
+    const float left = kCapX[i] + capdx[i];
+    CapL(style, kCapX[i], kPos[i].y, kCapNames[i].jp, kCapNames[i].en, capdx[i], capdy[i], kPos[i].x + numdx[i] - left);
+    if (eq_list) CapL(style, kCapX[i], kPos[i].py, kCapNames[i].jp, kCapNames[i].en, capdx[i], capdy[i], kArrowX[i] - left);
   }
   for (int i = 0; i < 6; ++i) {
     const Pos& pos = kPos[i];
@@ -156,6 +167,25 @@ void MainMenu::Impl::build_equip() {
              new_value > old_value ? ps1_colour(0x004E77) : new_value < old_value ? ps1_colour(0x9F6D00) : kText);
     }
   }
+  // Parts of the header's sheet frame that the panel art leaves out, at PS1 positions: "%" after the HIT / EVD values (the current rows
+  // always, the preview rows in list mode, drawn as a number-face glyph over HD art). With the disc art the frame is built from the
+  // "wind" sheet, so the divider and, in list mode, the six preview arrows are drawn from that sheet too.
+  Tex* wind = ps1_screen() ? texs.ps1("ps1:wind", [&] { return ps1::menutim(*vfs, "wind"); }) : nullptr;
+  auto sheet_part = [&](float x, float y, float u, float v, float w, float h) {
+    Img(wind, PX(x), PY(y), PX(w), PY(h), u / wind->w, v / wind->h, (u + w) / wind->w, (v + h) / wind->h);
+  };
+  static const float kPercentY[4] = {137, 153, 89, 105};
+  for (int row = 0; row < (eq_list ? 4 : 2); ++row) {
+    if (wind) sheet_part(203, kPercentY[row], 153, 20, 12, 10);
+    else HT(face_kb != render::kNoFace ? face_kb : face_gn, 205, kPercentY[row] + 1.7f, U"%", kText, 0.275f);
+  }
+  if (wind) {
+    sheet_part(45, 133, 85, 18, 128, 2);
+    sheet_part(173, 133, 88, 18, 42, 2);
+    static const float kArrows[6][2] = {{98, 90}, {98, 106}, {98, 122}, {179, 90}, {179, 106}, {183, 122}};
+    if (eq_list)
+      for (const auto& arrow : kArrows) sheet_part(arrow[0], arrow[1], 212, 86, 7, 8);
+  }
   // candidate panel + rows
   group(Right);
   Frame(0x3A + std::min(eslot, 2), 253, 27);
@@ -164,15 +194,12 @@ void MainMenu::Impl::build_equip() {
     const int idx = eq_scroll + row;
     if (idx >= cnt) break;
     const EquipCand& cand = cands[static_cast<size_t>(idx)];
+    if (cand.stock_slot < 0) continue;
     const float y = 43.0f + 24.0f * static_cast<float>(row);
     const u32 col = cand.ok ? kText : rgb(128, 128, 128);
-    if (cand.stock_slot < 0) {
-      TP(305, y, utf32(menu_str(0x801F2A20, "Remove")), col, 0.9f);
-    } else {
-      TPfit(305, y, item_name(cand.item), 138, col, 0.9f);
-      // The second Einlanzer (item 0x40) is a pair: its row always shows 2.
-      Digits(449, y, padded_number(cand.item == 0x40 ? 2 : std::min(cand.qty, 99), 2), 16, col);
-    }
+    TPfit(305, y, item_name(cand.item), 138, col, 0.9f);
+    // The second Einlanzer (item 0x40) is a pair: its row always shows 2.
+    Digits(449, y, padded_number(cand.item == 0x40 ? 2 : std::min(cand.qty, 99), 2), 16, col);
   }
   if (eq_list) tri(273, 43.0f + 24.0f * static_cast<float>(eq_cur - eq_scroll), true);
   const int total = std::max(cnt, kVisibleRows);
@@ -180,8 +207,7 @@ void MainMenu::Impl::build_equip() {
   if (eq_scroll + kVisibleRows < total) scroll_arrow(485, 311, false);
   // description box (frame 0x36 large: 236x88 at (253,332)) with the waa_spec lines at (268, 340 + 16 l)
   Frame(0x36, 253, 332, kWhite, nullptr, nullptr, true);
-  int item = gs->equipped(character, eslot);
-  if (eq_list && cnt > 0 && eq_cur < cnt) item = cands[static_cast<size_t>(eq_cur)].item;
+  const int item = eq_list ? under.item : gs->equipped(character, eslot);
   if (item > 0)
     for (int ln = 0; ln < 3; ++ln) {
       const std::string spec = trim(table_row("waa_spec", item * 3 + ln));

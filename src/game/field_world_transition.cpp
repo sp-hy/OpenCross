@@ -149,6 +149,7 @@ void FieldWorld::draw_sync() {}
 bool FieldWorld::skip_battle(int arg, bool c9, int ent) {
   if (!platform::cheats().no_encounters) return false;
   if (!game::encounter_auto_won(map_id_, ent, arg & 0x7FF, c9, [this](unsigned var) { return game::story_byte_from_vars(vm_.variables(), var); })) return false;
+  vm_.set_var(script::var::kBattleResult, 2);
   handoff_.last_battle_code = 2;
   log::info("field: cheat No encounters: {} {:#x} skipped in {} (entity {})", c9 ? "C9" : "A3", arg & 0x7FF, view_.room_name(), ent);
   return true;

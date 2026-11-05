@@ -154,7 +154,7 @@ class Hevi42 : public GroundFx {
 // and wak1 mode 2; emitters '1'..'6' at (ox, yc, oz), '7' '8' at (ox, -5000, oz). Frame (tick += 1, T = 16 tick; mesh colours = the ground colour):
 // phase 0 (128 ticks): piece i = m0i morphed toward m1i by w = 2T, rotated by rot_i T >> 11 about its centroid, at (ox, yc, oz); waku -> wak1
 // at (ox, yc, oz) with the last w; the ground with the hole {ox - 0x800, oz + 0x800, ox + 0x800, oz - 0x800}; then SetAnim(target, 6, 0).
-// Phase 1 (128 ticks): rot_i += rate_i, y_i += vy_i, m1i drawn at (ox, y_i, oz) about its centroid; targets rise by vy_i, drift, turn by
+// Phase 1 (128 ticks): rot_i += rate_i (from the init roll, so the piece carries on from its phase-0 end), y_i += vy_i, m1i drawn at (ox, y_i, oz) about its centroid; targets rise by vy_i, drift, turn by
 // rate_i; wak1 at (ox, yc, oz); the ground with the hole. Phase 2 (127 ticks): targets hang at y = -8400 + 800 i, x / z / rotation restored,
 // stock ground on, no meshes; SetAnim(target, 8, 0). Phase 3: the targets fall by 25 d per tick; landing: y = 0, 'k00<i>' at the saved
 // position started, 'dead' entry 0x80 variant 7. Exit: the saved block fields back.
@@ -196,7 +196,7 @@ class Boru11 : public GroundFx {
       if (!piece.m0) continue;
       bake_mesh(piece.m0, 1, ox_, oz_);
       piece.centre = piece.m0->centroid();
-      for (int k = 0; k < 3; ++k) piece.rot0[k] = rand() % 200 - 100;
+      for (int k = 0; k < 3; ++k) piece.rot[k] = rand() % 200 - 100;
       for (int k = 0; k < 3; ++k) piece.rate[k] = rand() % 100 - 0x32;
       piece.vy = -(rand() % 100) - 0x32;
     }
@@ -217,7 +217,7 @@ class Boru11 : public GroundFx {
                  fx_ground() ? fx_ground()->rgb[1] : -1, fx_ground() ? fx_ground()->rgb[2] : -1);
       for (size_t i = 0; i < items_.size(); ++i)
         log::debug("  target {} home {:.0f} {:.0f} {:.0f} drift {} {} rot0 {} {} {} rate {} {} {} vy {}", i, items_[i].home[0], items_[i].home[1], items_[i].home[2],
-                   items_[i].drift[0], items_[i].drift[1], pieces_[i].rot0[0], pieces_[i].rot0[1], pieces_[i].rot0[2], pieces_[i].rate[0], pieces_[i].rate[1],
+                   items_[i].drift[0], items_[i].drift[1], pieces_[i].rot[0], pieces_[i].rot[1], pieces_[i].rot[2], pieces_[i].rate[0], pieces_[i].rate[1],
                    pieces_[i].rate[2], pieces_[i].vy);
       auto dump = [](const char* nm, const PackMesh* dumped) {
         if (!dumped) return;
@@ -267,7 +267,7 @@ class Boru11 : public GroundFx {
           MeshDraw draw;
           morph_draw(draw);
           draw.centre = piece.centre;
-          for (int k = 0; k < 3; ++k) draw.rot[k] = s16c((piece.rot0[k] * ticks16) >> 11);
+          for (int k = 0; k < 3; ++k) draw.rot[k] = s16c((piece.rot[k] * ticks16) >> 11);
           draw.offset = centre;
           draw.morph = piece.m1;
           draw.morph_w = weight;
@@ -317,7 +317,11 @@ class Boru11 : public GroundFx {
           draw_mesh(*wak1_, draw);
         }
         draw_ground(ox_ - 0x800, oz_ + 0x800, ox_ + 0x800, oz_ - 0x800);
-        if (ticks16 > 0x7FF) tick_ = 0, phase_ = 2;
+        if (ticks16 > 0x7FF) {
+          tick_ = 0, phase_ = 2;
+          if (std::getenv("OC_BESPOKE_TRACE"))
+            for (size_t i = 0; i < 10; ++i) log::debug("bespoke 11boru phase 1 end: piece {} rot {} {} {}", i, pieces_[i].rot[0], pieces_[i].rot[1], pieces_[i].rot[2]);
+        }
         break;
       case 2:
         for (size_t i = 0; i < items_.size(); ++i) {
@@ -367,7 +371,7 @@ class Boru11 : public GroundFx {
   struct Piece {
     PackMesh *m0 = nullptr, *m1 = nullptr;
     std::array<int, 3> centre{};
-    int rot0[3] = {0, 0, 0}, rate[3] = {0, 0, 0}, rot[3] = {0, 0, 0};
+    int rot[3] = {0, 0, 0}, rate[3] = {0, 0, 0};
     int vy = 0, yoff = 0;
   };
   std::vector<Item> items_;

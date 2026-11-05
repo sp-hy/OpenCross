@@ -76,25 +76,14 @@ bool FieldVM::exec_game(u8 op) {
         yield_ = true;
         break;
       }
+      // A pending battle holds the system gate, so a second A3 / C9 waits here for its own fight. The request steps on at once:
+      // the FE 10 that follows every A3 / C9 waits for the battle.
+      yield_ = true;
+      if (!host_.system_ready()) break;
       self.flags270 |= flag270::kInputLock;
       gflags_ |= gflag::kInputLock;
-      if (rec_->phase == 0) {
-        if (!host_.system_ready()) {
-          yield_ = true;
-          break;
-        }
-        host_.request_battle(operand_u(1) + (op == 0xC9 ? 0x200 : 0), operand_u(3), operand_u(5));
-        rec_->phase = 1;
-        yield_ = true;
-        break;
-      }
-      if (host_.battle_active()) {
-        yield_ = true;
-        break;
-      }
-      rec_->phase = 0;
+      host_.request_battle(operand_u(1) + (op == 0xC9 ? 0x200 : 0), operand_u(3), operand_u(5));
       advance(7);
-      yield_ = true;
       break;
     case 0xA4: set_global(Global::SubmergedOtPush, operand_u(1)); advance(3); break;
     case 0xA5: self.v24e = static_cast<u16>(operand_u(1)); advance(3); break;
@@ -102,8 +91,15 @@ bool FieldVM::exec_game(u8 op) {
     case 0xA7: opaque(0xA7, 1, 8); advance(9); break;
     case 0xA8: host_.fade(byte_at(1), operand_u(2)); advance(4); break;
     case 0xA9: {
+      if (!run_mode_ && host_.entry_window()) {
+        yield_ = true;
+        break;
+      }
       const int target = entity_operand(1);
-      if (target >= 0) host_.play_animation(target, operand_u(2));
+      if (target >= 0) {
+        host_.play_animation(target, operand_u(2));
+        budget_ += 1;
+      }
       advance(4);
       break;
     }
@@ -352,12 +348,12 @@ bool FieldVM::exec_game(u8 op) {
         advance(1);
       }
       break;
-    case 0xD4:
+    case 0xD4:  // PLAY_MOVIE_SKIPPABLE: table row in the low byte of the first operand, the movie flags in the second
       if (!host_.system_ready()) {
         yield_ = true;
         break;
       }
-      host_.play_movie(operand_u(1) & 0xFF, (operand_u(1) >> 8) & 0xFF, true, operand_u(3));
+      host_.play_movie(operand_u(1) & 0xFF, operand_u(3));
       advance(5);
       break;
     case 0xD5: write_var(word_at(1), std::clamp(host_.item_count(operand_u(3)), 0, 255)); advance(5); break;

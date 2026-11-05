@@ -122,6 +122,17 @@ void BattleView::fx_end() {
         Visual& visual = vis_[static_cast<size_t>(fx_model.unit)];
         visual.fade = visual.fade_prev = 0.0f;
       }
+  // The overlay's exit placement (FxModel::exit_yaw): the unit stands on its home point with that yaw.
+  if (const effects::FxModels* ms = fx_->bespoke_models())
+    for (const effects::FxModel& fx_model : ms->units) {
+      if (fx_model.exit_yaw < 0 || fx_model.unit < 0 || fx_model.unit >= battle::kUnits) continue;
+      Visual& visual = vis_[static_cast<size_t>(fx_model.unit)];
+      visual.x = visual.px = fx_model.home[0];
+      visual.z = visual.pz = fx_model.home[2];
+      const float yaw = static_cast<float>(fx_model.exit_yaw & 0xFFF) * 6.2831853f / 4096.0f;
+      visual.face_x = visual.pface_x = -std::sin(yaw);
+      visual.face_z = visual.pface_z = -std::cos(yaw);
+    }
   fx_.reset();
   // The stage flare returns 3 ticks after the end hook.
   fx_lens_wait_ = 3;
@@ -205,6 +216,11 @@ void BattleView::fx_dev_logs() {
     size_t total = fx_ ? fx_->emitters().live_objects() : 0;
     anm_each_system([&](const effects::EmitterSystem& sys) { total += sys.live_objects(); });
     log::debug("fx objects tick {} fxtick {}: {} objects", frame_count_, fx_ ? fx_->ticks() : 0, total);
+    for (size_t slot = 0; slot < fx_lights_.slot.size(); ++slot) {
+      const effects::LightTable::Slot& light = fx_lights_.slot[slot];
+      log::debug("fx light {} pos {} {} {} rgb {} {} {} intensity {} falloff {}", slot, light.pos[0], light.pos[1], light.pos[2], light.rgb[0], light.rgb[1],
+                 light.rgb[2], light.intensity, light.falloff);
+    }
     // Names are the registry's u32 tag with every non-printable byte shown as '.': a name carrying the 0x7F byte of `hi2<7f>` prints as `hi2.`.
     auto tagged = [](const std::string* name) {
       if (!name) return std::string("?");

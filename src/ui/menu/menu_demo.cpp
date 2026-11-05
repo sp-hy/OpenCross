@@ -35,6 +35,7 @@ std::vector<Step> make_steps() {
     steps.push_back({mode, MenuScreen::ElementGrid, 2, "element_options"});
     steps.push_back({mode, MenuScreen::Equip, 0, "equip"});
     steps.push_back({mode, MenuScreen::Equip, 1, "equip_list"});
+    steps.push_back({mode, MenuScreen::Equip, 2, "equip_accessories"});
     steps.push_back({mode, MenuScreen::KeyItems, 0, "key_items"});
     steps.push_back({mode, MenuScreen::Settings, 0, "settings"});
     steps.push_back({mode, MenuScreen::Settings, 1, "skin_picker"});

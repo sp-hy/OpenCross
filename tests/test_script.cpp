@@ -106,7 +106,7 @@ void test_movie_end_jump() {
     int movie_room = -1, movie_param = -1, map_jumps = 0, movies = 0;
     void set_movie_jump(int room, int param) override { movie_room = room, movie_param = param; }
     void request_map_jump(int, int) override { ++map_jumps; }
-    void play_movie(int, int, bool, int) override { ++movies; }
+    void play_movie(int, int) override { ++movies; }
   };
   Asm script;
   const u16 init = script.here();
@@ -127,6 +127,32 @@ void test_movie_end_jump() {
   CHECK_EQ(vm.var(var::kPrevMapId), 538);
   vm.note_room_change(22);
   CHECK_EQ(vm.var(var::kPrevMapId), 472);
+}
+
+// 7E and D4 take the table row from the low byte of their first operand; D4's movie flags are its whole second operand, 7E's are 0.
+void test_movie_operands() {
+  class MovieHost : public NullHost {
+   public:
+    std::vector<int> rows, flags;
+    void play_movie(int index, int movie_flags) override {
+      rows.push_back(index);
+      flags.push_back(movie_flags);
+    }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xD4}).word(I(0x106)).word(I(0x20B));
+  script.raw({0x7E}).word(I(0x105));
+  script.stop();
+  MovieHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.rows.size(), 2);
+  if (host.rows.size() != 2) return;
+  CHECK_EQ(host.rows[0], 6);
+  CHECK_EQ(host.flags[0], 0x20B);
+  CHECK_EQ(host.rows[1], 5);
+  CHECK_EQ(host.flags[1], 0);
 }
 
 void test_arithmetic() {
@@ -856,6 +882,118 @@ void test_stuck_watchdog() {
 }
 }  // namespace
 
+// 3C (model entity), A9 (target resolves) and FE 78 (song started) each add 1 to the tick budget: behind a WAIT_FRAME, the op and
+// 8 INCs run in one tick; 3C on an entity without a 3D model adds nothing. While the room-entry window is open 3C / A9 wait.
+void test_budget_bonus_and_entry_window() {
+  struct WindowHost : TestHost {
+    int window_ticks = 0;
+    bool entry_window() override { return window_ticks > 0; }
+  };
+  const std::vector<std::vector<int>> bonus_ops = {{0x3C, 0x04, 0x80}, {0xA9, 0x01, 0x04, 0x80}, {0xFE, 0x78, 0x01, 0x80, 0x7F, 0x80}};
+  for (size_t variant = 0; variant < bonus_ops.size() + 1; ++variant) {
+    const bool no_model = variant == bonus_ops.size();
+    Asm script;
+    const u16 upd = script.here();
+    script.wait_frame();
+    for (int byte : bonus_ops[no_model ? 0 : variant]) script.raw({byte});
+    for (int i = 0; i < 8; ++i) script.inc(V(0));
+    script.park();
+    TestHost host;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{}, {{{1, upd}}}}));
+    if (no_model) vm.entity(1).flags38 |= flag38::kNo3dObject;
+    vm.tick();
+    vm.tick();
+    CHECK_EQ(vm.var(V(0)), no_model ? 7 : 8);
+  }
+  for (const int op : {0x3C, 0xA9}) {
+    Asm script;
+    const u16 upd = script.here();
+    script.inc(V(0));
+    if (op == 0x3C)
+      script.raw({0x3C, 0x04, 0x80});
+    else
+      script.raw({0xA9, 0x01, 0x04, 0x80});
+    script.inc(V(1)).park();
+    WindowHost host;
+    host.window_ticks = 3;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{}, {{{1, upd}}}}));
+    for (int tick = 0; tick < 3; ++tick, --host.window_ticks) {
+      vm.tick();
+      CHECK_EQ(vm.var(V(0)), 1);
+      CHECK_EQ(vm.var(V(1)), 0);
+    }
+    vm.tick();
+    CHECK_EQ(vm.var(V(1)), 1);
+  }
+}
+
+// Two entities reach A3 on the same tick: the first one's request holds the system gate, so the second waits, requests its own
+// battle once the first has ended, and goes on only after its own fight; the first goes on (its FE 10) before the second fight.
+void test_second_battle_waits() {
+  struct BattleHost : TestHost {
+    std::vector<int> requests;
+    bool pending = false;
+    bool system_ready() override { return !pending; }
+    void request_battle(int battle_id, int, int) override {
+      requests.push_back(battle_id);
+      pending = true;
+    }
+    bool battle_active() override { return pending; }
+  };
+  Asm script;
+  const u16 first = script.here();
+  script.raw({0xA3}).word(I(5)).word(I(0)).word(I(0)).raw({0xFE, 0x10});
+  script.set(V(0), 1).park();
+  const u16 second = script.here();
+  script.raw({0xA3}).word(I(6)).word(I(0)).word(I(0)).raw({0xFE, 0x10});
+  script.set(V(1), 1).park();
+  BattleHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{}, {{{1, first}}}, {{{1, second}}}}));
+  for (int tick = 0; tick < 10; ++tick) vm.tick();
+  CHECK_EQ(host.requests.size(), 1);
+  CHECK_EQ(host.requests[0], 5);
+  CHECK_EQ(vm.var(V(0)), 0);
+  CHECK_EQ(vm.var(V(1)), 0);
+  host.pending = false;
+  for (int tick = 0; tick < 10; ++tick) vm.tick();
+  CHECK_EQ(host.requests.size(), 2);
+  CHECK_EQ(host.requests[1], 6);
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(vm.var(V(1)), 0);
+  host.pending = false;
+  for (int tick = 0; tick < 10; ++tick) vm.tick();
+  CHECK_EQ(host.requests.size(), 2);
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
+// The launcher ops (here FE 72) also wait while a message window is open; FE 5B waits for the system gate alone.
+void test_launcher_gate_waits_for_windows() {
+  struct WindowMenuHost : TestHost {
+    int requests = 0;
+    bool window = true;
+    bool window_open() override { return window; }
+    void request_menu(MenuKind, int) override { ++requests; }
+  };
+  for (const int screen_op : {0x72, 0x5B}) {
+    Asm script;
+    const u16 upd = script.here();
+    script.raw({0xFE, screen_op});
+    script.set(V(0), 1).park();
+    WindowMenuHost host;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{}, {{{1, upd}}}}));
+    for (int tick = 0; tick < 5; ++tick) vm.tick();
+    CHECK_EQ(host.requests, screen_op == 0x5B ? 1 : 0);
+    host.window = false;
+    for (int tick = 0; tick < 5; ++tick) vm.tick();
+    CHECK_EQ(host.requests, 1);
+    CHECK_EQ(vm.var(V(0)), 1);
+  }
+}
+
 // Cheats "No encounters": a skipped A3 runs entity 0's slot 2 (RDE's patched "09 00 02") and goes on without request_battle.
 void test_skipped_battle() {
   struct SkipHost : TestHost {
@@ -922,7 +1060,11 @@ void test_screen_ops_and_fe61() {
 int main() {
   test_arithmetic();
   test_movie_end_jump();
+  test_movie_operands();
   test_skipped_battle();
+  test_budget_bonus_and_entry_window();
+  test_second_battle_waits();
+  test_launcher_gate_waits_for_windows();
   test_screen_ops_and_fe61();
   test_variables_and_signedness();
   test_bit_ops();

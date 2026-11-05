@@ -571,6 +571,11 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
     const effects::EmitterStats stats = emitters_->stats();
     log::info("field fx: tick {} {} quads, {} live, {} spawned, {} unresolved sprites", tick_count_, quads.size(), stats.live, stats.spawned,
               stats.unresolved_sprites);
+    for (size_t slot = 0; slot < lights_.slot.size(); ++slot) {
+      const effects::LightTable::Slot& light = lights_.slot[slot];
+      log::info("field fx: tick {} light {} pos {} {} {} rgb {} {} {} intensity {} falloff {}", tick_count_, slot, light.pos[0], light.pos[1], light.pos[2],
+                light.rgb[0], light.rgb[1], light.rgb[2], light.intensity, light.falloff);
+    }
   }
   static u64 fx_logged_tick = ~0ull;
   const bool fx_tick_log = std::getenv("OC_FIELD_FX_LOG") != nullptr && fx_logged_tick != tick_count_;

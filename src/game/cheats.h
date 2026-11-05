@@ -52,6 +52,17 @@ class RdeHotkeys {
   bool slow_ = false, fast_ = false, encounters_ = false, boost_ = false, auto_ = false;
   bool l3_ = false, r3_ = false, chord_used_ = false;
 };
+// RDE's pad chord for the Esc menu, LT + L3: both down with one of them pressed this frame is a one-frame pulse, and the menu opens or
+// closes as that pulse ends (the frame after the chord closes, while the buttons are still held). The same LT press and L3 release
+// still reach RdeHotkeys, so the chord also flips slow mode and encounters off, as on RDE.
+class MenuChord {
+ public:
+  // One frame of the raw LT / L3 levels; true on the frame the menu toggles.
+  bool poll(bool lt, bool l3);
+
+ private:
+  bool lt_ = false, l3_ = false, pulse_ = false;
+};
 // The game-speed factor of the [Game] FastMode / SlowMode settings: fast_rate 0 = RDE's own (4x in the field, 2x in battle), else
 // that many times; slow_percent of normal speed. 1 when neither is on or the speed is locked.
 float speed_factor(bool fast, bool slow, int fast_rate, int slow_percent, bool in_battle, bool speed_locked);

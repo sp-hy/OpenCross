@@ -423,7 +423,8 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
     impl.use.stand_in = variant == 2 ? 2 : -1;
     impl.stand_in = impl.use.stand_in;
   }
-  if (screen == MenuScreen::Equip && variant == 1) impl.eq_list = true, impl.eq_cur = 1;
+  // Equip variant 1: the weapon list on row 1; 2: the first accessory slot's list on row 1.
+  if (screen == MenuScreen::Equip && variant >= 1) impl.eq_list = true, impl.eq_cur = 1, impl.eslot = variant == 2 ? 2 : 0;
   if (screen == MenuScreen::Main && variant == 1) impl.sub = 1;
   // Variants 2 / 3 of Main: the roster from the Status pick, and from the Equip pick with the remove-all prompt.
   if (screen == MenuScreen::Main && (variant == 2 || variant == 3)) {

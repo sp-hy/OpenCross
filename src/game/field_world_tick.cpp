@@ -12,6 +12,7 @@
 
 #include "audio/voice.h"
 #include "core/log.h"
+#include "data/char_name.h"
 #include "game/cheats.h"
 #include "game/field_world_internal.h"
 #include "game/new_game_plus.h"
@@ -203,15 +204,17 @@ void FieldWorld::opaque_op(u16 key, std::span<const u8>) {
     if (party_ent_[1] >= 0) trail_fill(1, trail_entry_of(ents_[static_cast<size_t>(party_ent_[1])].actor));
     return;
   }
-  // FE 7E: Mojo's record name, when it is still the default "Lucky Dan" (game-font kana), becomes "Happy Dan" (two glyphs change).
+  // FE 7E: Mojo's record name, when it is still the default "Lucky Dan" (game-font kana), becomes "Happy Dan" (two glyphs change);
+  // a Mojo without a custom name gets the language's "Happy Dan" as one, shown at once and saved with the typed names.
   if (key == 0xFE7E && gs_) {
-    constexpr size_t kMojo = 27;
     constexpr std::array<u8, 12> kLucky = {0xF8, 0x40, 0xF8, 0x66, 0xF8, 0x20, 0xCA, 0xF8, 0x52, 0xF8, 0x47, 0x00};
-    std::array<u8, 16>& name = gs_->slot.chars[kMojo].name;
+    std::array<u8, 16>& name = gs_->slot.chars[data::kMojo].name;
     if (std::equal(kLucky.begin(), kLucky.end(), name.begin())) {
       name[1] = 0x33;
       name[5] = 0x5D;
     }
+    if (std::u32string happy = data::learned_tech_name({custom_names_, &dialogue_.tables(), lang_}); !happy.empty() && name_store_)
+      name_store_(data::kMojo, std::move(happy));
     return;
   }
   // FE 1A: the three defeated-monster records are forgotten (the monsters respawn).

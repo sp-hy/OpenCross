@@ -288,6 +288,23 @@ void test_char_names() {
   CHECK(!data::usable_name(U"\u3000 ", import::Lang::Jp));
   CHECK(!data::usable_name(U"a\uFFFD", import::Lang::Jp));
 
+  names.lang = import::Lang::De;
+  CHECK(data::is_default_name(0, U"Serge-de", names) && !data::is_default_name(0, U"Serge", names) && !data::is_default_name(0, U"Hero", names));
+
+  tables.set_table("cmnmes", "key\ten\tfr\tde\tjp\nハッピーダン\tMojoy\tMojoie\tFrohjo\tハッピーダン\n");
+  names.custom = &custom;
+  CHECK(data::learned_tech_name(names) == U"Frohjo");
+  names.lang = import::Lang::Fr;
+  CHECK(data::learned_tech_name(names) == U"Mojoie");
+  names.lang = import::Lang::Jp;
+  CHECK(data::learned_tech_name(names) == U"ハッピーダン");
+  const std::map<int, std::u32string> typed{{data::kMojo, U"Bob"}};
+  names.custom = &typed;
+  CHECK(data::learned_tech_name(names).empty());
+  names.custom = nullptr;
+  names.lang = import::Lang::En;
+  CHECK(data::learned_tech_name(names) == U"Mojoy");
+
   CHECK(data::line_speaker(0, true) == 0x31);
   CHECK(data::line_speaker(0, false) == 0);
   CHECK(data::line_speaker(7, true) == 7);

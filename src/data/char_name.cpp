@@ -29,6 +29,17 @@ std::u32string character_name(int char_id, int body, NameContext context, bool k
   return own_name(char_id, names, title);
 }
 
+bool is_default_name(int char_id, const std::u32string& name, const CharNames& names) {
+  return names.tables && name == names.tables->default_name(char_id, names.lang);
+}
+
+std::u32string learned_tech_name(const CharNames& names) {
+  if (!names.tables || (names.custom && names.custom->contains(kMojo))) return {};
+  const import::TextTable* rows = names.tables->table("cmnmes");
+  const std::string* text = rows ? rows->get(std::string_view("ハッピーダン"), names.lang) : nullptr;
+  return text ? import::utf8_to_u32(*text) : std::u32string();
+}
+
 const char* unnamed_kid_label(import::Lang lang) {
   switch (lang) {
     case import::Lang::Fr: return "???";

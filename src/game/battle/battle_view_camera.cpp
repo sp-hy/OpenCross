@@ -403,7 +403,7 @@ void BattleView::tick_camera() {
       camera_.stop_sequences();
       // At the end of the intro a cut `pli*` (dev casts / debug UI) must not leave its 3E..40 warp on.
       fx_warp_.on = false;
-      intro_layer_cut_ = true;
+      intro_layer_cut_ = speed_gate_ = true;
       if (!keep_intro_layer_) fx_stage_layer("bti0", false, false);
       // The camera holds the party intro's last pose until the menu camera takes over.
       camera_.kill_shot();

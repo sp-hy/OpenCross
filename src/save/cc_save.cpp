@@ -55,6 +55,16 @@ constexpr Step kSteps[] = {
 };
 static_assert(sizeof(kSteps) / sizeof(kSteps[0]) == 54);
 
+// Version gates: steps 46-47 need a version above 0x100, step 48 above 0x101, step 49 0x104, steps 50-51 0x105, steps 52-53 0x106.
+bool step_in_version(size_t step, u32 version) {
+  if (step >= 52) return version >= 0x106;
+  if (step >= 50) return version >= 0x105;
+  if (step == 49) return version >= 0x104;
+  if (step == 48) return version > 0x101;
+  if (step >= 46) return version > 0x100;
+  return true;
+}
+
 int value_bytes(int length) { return length == 32 ? 4 : length > 8 ? 2 : 1; }
 
 // LSB-first bit stream.
@@ -123,14 +133,25 @@ u32 block_sum(ByteSpan block) {
   for (size_t i = 0; i < 0x1FF8 && i < block.size(); ++i) sum += block[i];
   return sum;
 }
-bool block_checksum_ok(ByteSpan block) { return block.size() == kBlockSize && rd(&block[kChecksumOffset], 4) == block_sum(block); }
+u32 block_version(ByteSpan block) { return block.size() == kBlockSize ? rd(&block[kVersionOffset], 4) : 0; }
+bool block_checksum_ok(ByteSpan block) {
+  if (block.size() != kBlockSize) return false;
+  u32 sum = 0;
+  for (size_t i = block_version(block) > 0x102 ? 0 : 0x180; i < kVersionOffset; ++i) sum += block[i];
+  return rd(&block[kChecksumOffset], 4) == sum;
+}
 
 // ----------------------------------------------------------------- section stream codec
-Bytes unpack_image(ByteSpan packed) {
+Bytes unpack_image(ByteSpan packed, u32 version) {
   if (packed.size() != kPackedSize) throw std::runtime_error("save: packed stream must be 0x1975 bytes");
   BitReader br{packed};
   Bytes img(kImageSize, 0);
-  for (const Step& step : kSteps) {
+  // Defaults of the gated steps: obtained-frames mask 0xFF, the two innate colours 8, everything else 0.
+  if (version < 0x104) wr(&img[kSteps[49].off], 2, 0xFF);
+  if (version < 0x105) img[kSteps[50].off] = img[kSteps[51].off] = 8;
+  for (size_t index = 0; index < std::size(kSteps); ++index) {
+    if (!step_in_version(index, version)) continue;
+    const Step& step = kSteps[index];
     switch (step.mode) {
       case 0: {
         const int sz = value_bytes(step.length);
@@ -292,7 +313,8 @@ SaveSlot decode_block(ByteSpan block) {
   SaveSlot slot;
   std::copy_n(block.begin(), kHeadSize, slot.head.begin());
   std::copy_n(block.begin() + kHeadSize + kPackedSize, kTailSize, slot.tail.begin());
-  image_to_slot(unpack_image(block.subspan(kHeadSize, kPackedSize)), slot);
+  image_to_slot(unpack_image(block.subspan(kHeadSize, kPackedSize), block_version(block)), slot);
+  slot.corrupted = !block_checksum_ok(block);
   return slot;
 }
 

@@ -836,7 +836,8 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     } else if (args[1] == "name") {
       int id = 0;
       if (args.size() < 4 || !to_int(args[2], id) || !st.char_name) return bad("assert name <char> <text>");
-      if (st.char_name(id) != args[3]) return bad(std::format("name of {} is '{}', expected '{}'", id, st.char_name(id), args[3]));
+      const std::string expected = args[3] == "-" ? std::string() : std::string(args[3]);
+      if (st.char_name(id) != expected) return bad(std::format("name of {} is '{}', expected '{}'", id, st.char_name(id), args[3]));
     } else if (args[1] == "party") {
       if (!st.party || st.party() != args[2]) return bad("party is " + (st.party ? st.party() : std::string("?")) + ", expected " + args[2]);
     } else if (args[1] == "disc") {
@@ -845,6 +846,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     } else if (args[1] == "location") {
       int want = 0;
       if (!to_int(args[2], want) || !st.location || st.location() != want) return bad(std::format("location is {}", st.location ? st.location() : -1));
+    } else if (args[1] == "option") {
+      int mask = 0;
+      if (args.size() < 4 || !to_hex(args[2], mask) || !st.options) return bad("assert option <hexmask> set|clear");
+      const int got = st.options();
+      if (((got & mask) == mask) != (args[3] == "set")) return bad(std::format("options word is {:#06x}, expected {:#x} {}", got, mask, args[3]));
     } else if (args[1] == "result") {
       int want = 0;
       if (!to_int(args[2], want) || st.battle_result != want) return bad(std::format("BATTLE_RESULT is {}", st.battle_result));

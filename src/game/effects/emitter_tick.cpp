@@ -212,7 +212,7 @@ void EmitterSystem::Impl::ext_step(Object& obj, int ticks) {
 // The periodic child header runs against this object's heading frame.
 void EmitterSystem::Impl::periodic_spawn(size_t idx, int ticks) {
   const size_t ci = static_cast<size_t>(objs[idx].periodic);
-  const Object me = objs[idx];
+  const Basis heading = heading_basis(objs[idx]);
   for (int tick = 0; tick < ticks; ++tick) {
     Header& ch = headers[ci];
     ch.countdown = static_cast<s16>(ch.countdown - 1);
@@ -221,7 +221,7 @@ void EmitterSystem::Impl::periodic_spawn(size_t idx, int ticks) {
       const int reps = ch.def->repeat;
       for (int k = 0; k <= reps && reps >= 0; ++k) {
         // fire(): the child's op 45 emission runs too.
-        const int fired = fire(ci, &me);
+        const int fired = fire(ci, &heading);
         if (fired < 0) break;
         if (objs[static_cast<size_t>(fired)].life == 0) objs[static_cast<size_t>(fired)].alive = false;
       }
@@ -256,9 +256,12 @@ float EmitterSystem::Impl::frame_blend(float alpha) const {
 void EmitterSystem::Impl::step_frame(int ticks) {
   for (size_t i = 0; i < headers.size(); ++i)
     for (int tick = 0; tick < ticks && headers[i].linked; ++tick) step_header(i);
-  // objects (including those spawned above and during this pass)
+  // Objects, including those spawned above and during this pass; a death child spawned during the pass first steps in the next frame
+  // (its spawn-with children keep their step).
   for (size_t i = 0; i < objs.size(); ++i)
-    if (objs[i].alive) {
+    if (objs[i].skip_step) {
+      objs[i].skip_step = false;
+    } else if (objs[i].alive) {
       const Header* hh = objs[i].owner >= 0 && static_cast<size_t>(objs[i].owner) < headers.size() ? &headers[static_cast<size_t>(objs[i].owner)] : nullptr;
       if (hh && hh->hook && !hh->hook_after) {
         EmitterSystem::ObjectRef object_ref = ref(objs[i]);
@@ -272,9 +275,11 @@ void EmitterSystem::Impl::step_frame(int ticks) {
     }
   // Lights (sprite type 17): every live light writes its slot of the light table once per frame:
   // position = the s16 high halves of the object's position, through the op-39 basis for a parent-relative object
-  // (flag bit 15), colour = colour accumulators >> 4, intensity = scale x, falloff = angle x.
+  // (flag bit 15), colour = colour accumulators >> 4, intensity = scale x, falloff = angle x. The newest object is written first, so of
+  // lights sharing a slot the oldest one's values stay.
   if (lights)
-    for (const Object& obj : objs) {
+    for (auto it = objs.rbegin(); it != objs.rend(); ++it) {
+      const Object& obj = *it;
       if (!obj.alive || obj.stype != 17 || obj.light_slot < 0 || obj.light_slot > 2) continue;
       Vec3 wpos{static_cast<float>(obj.pos[0] >> 16), static_cast<float>(obj.pos[1] >> 16), static_cast<float>(obj.pos[2] >> 16)};
       if ((obj.flags & kFlagRelParent) && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size()) {
@@ -304,7 +309,7 @@ void EmitterSystem::Impl::step_frame(int ticks) {
   // A slot a live light still holds is rewritten by the loop above and keeps its value.
   if (lights)
     for (const Object& obj : objs) {
-      if (obj.alive || obj.stype != 17 || obj.light_slot < 0 || obj.light_slot > 2) continue;
+      if (obj.alive || obj.stype != 17 || !obj.light_release || obj.light_slot < 0 || obj.light_slot > 2) continue;
       bool held = false;
       for (const Object& other : objs) held = held || (other.alive && other.stype == 17 && other.light_slot == obj.light_slot);
       if (!held) lights->slot[static_cast<size_t>(obj.light_slot)].intensity = 0;

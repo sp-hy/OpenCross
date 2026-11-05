@@ -14,321 +14,47 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 1. Bugs (behaviour)
 
-### The "all achievements" meta unlock `ach_ps41_all`: not tested against a Steam client
-Priority: P3
-Impact: low; implemented, unit-tested wiring only.
-Known: `SteamClient::set_meta` (`src/platform/steam.cpp`) sets `ach_ps41_all` after an unlock made this session when all 37 names read as achieved, as RDE's `ach_unlock` does; `docs/rules/achievements.md` has the rule. Not run end to end: `SteamClient` loads the running Steam client's library, not the local `steam_api.dll` emulator, and the only running Steam is the real account (never store a real unlock).
-Done when: a run against a Steam emulator (or a test double of the client interface) shows the meta stored once the 37th is set, and not before.
+### Effect models of unsteered units do not carry the unit's live position (cook / swordbox vacuum reads y 0)
+Priority: P2
+Impact: medium; confirmed by capture. The cook / swordbox vacuum (Mystery Menu, Sword Trick / Sword Storm) and any overlay that reads the model position of a unit it does not steer see the home y 0 while the unit's reaction script has it in the air.
+Known: the PS1 vacuum task 0x801C6040 reads the model block y (+0x88 >> 12) every tick; `thr = a1 t / dur - a1 - y_M + H/2`, `tau = (y + H + y_M) dur / a1` (both signs are now right in `Vacuum::Task::step`, `src/game/effects/bespoke/model_deform.cpp`). In a `ps1_cast.py force --scene 7 --area 1 --char 15 --ids 206:0 --target 3` capture (Mystery Menu, Orcha), target 3's block y while hidden reads -751, -768, -765, -709, -521, -206, 0. OpenCross (`ocbattleview 7 --cast 206 --party 15 --field 1`) reads `model->pos[1]` = 0 every tick while the skinned vertices span y -1639..-710: `FxModel::pos` is only written when an overlay steers the model (`battle_fx.cpp` `BattleFxRun::tick` / `save_prev`; selectors use `-fu.y` for unsteered units); the toss lives in `FxUnit::y` / the view's placement. Unknown: whether the PS1 skinned vertex buffer (0x800A7E34) is world space with the lift, i.e. what the PS1 picture looks like with y_M about -750.
+Reproduce: the capture above and `tools\ours_cast34.ps1 206 -Orig`; compare PS1 frames 100-130 with our ticks 455-530 (offset 209) and log `my` / `thr` in `Vacuum::Task::step`.
+Done when: overlays see the live block position of unsteered units, the vacuum's `my` follows the PS1 values above, and a cropped PS1 vs OpenCross frame set of the vacuum matches; fx-audit / pac-soak stay clean. Also check scene 488's raised Beach Bums (units 4-6 at y -16 / -16 / -48 on the PS1) once they appear in OpenCross (they stay hidden for 3000 frames with no input today).
 
-### Customize Vibration / Left Stick rows: what RDE's emulated pad reports
+### Frozen PC turn and an all-frozen enemy side are not captured
 Priority: P3
-Impact: low; needs a capture or data sweep.
-Capture (RDE against OpenCross): RDE with keyboard input: the cursor lands on both rows, they draw normally and Left / Right toggle them. OpenCross greys them and ignores Left / Right when no pad is connected.
-Decision (owner): match RDE: both rows always active and toggled by Left / Right, pad or not.
-The PS1 cursor skips row 6 unless 0x801E81E4 (pad has actuators) and row 7 unless 0x801E820C (analog pad), separately;
-the rows are never landed on. OpenCross lands on both and greys them on `pad_connected` (`main_menu_settings.cpp:55,84`).
-Neither function is hooked by RDE, so the answer depends on the pad RDE emulates with keyboard vs controller. Capture:
-`rde_bg.py` Customize screen with keyboard only and with a pad, cursor stepped through rows 5..7. Done when: gating
-matches RDE for both input kinds; menus.md section 2 says so.
+Impact: low; follows from the frozen countdown rule (`docs/rules/battle.md` 2.5 / 6.5).
+Known: a frozen enemy keeps counting down, takes its turn at 0 and thaws just before its action (PS1 capture). A frozen PC at 0 gets its script turn in OpenCross, as a confused one does; that part comes from the disassembly only. With every enemy frozen, OpenCross ends the battle as a victory (frozen units fail `alive()` for the win test); not checked against the PS1.
+Reproduce: freeze a PC (a forced Ice Blast from an enemy with the chance set to 100, `ps1_cast.py force`), let its countdown reach 0 and log 0x800E0662, its countdown word and its status words; then freeze every enemy of a fight and watch for the victory.
+Done when: what a frozen PC does on its turn (pass / A4, or an action that thaws it) and the all-frozen outcome match the PS1.
 
-### Save loader ignores the checksum and the version gates
+### No-encounters re-collision interval in opa_b02f: RDE about 3.3 s, OpenCross a fixed 133 ticks
 Priority: P3
-Impact: low; confirmed in code.
-Decision (owner): match the original: refuse a bad-checksum block with its message and honour the version gates.
-`menu_save_unpack_state` 0x801F1B1C reads the version at 0x1FF8, checks the checksum (0x180..0x1FF7, plus 0x000..0x17F when
-> 0x102; failure = "data corrupted", load result 2) and gates fields: > 0x100 two bitmaps, > 0x101 per-character +0xA8
-bytes, < 0x104 frames mask 0xFF, < 0x105 innate colours 8, < 0x106 NG+ words 0. OpenCross `decode_block`
-(`src/save/cc_save.cpp:288`) decodes all 54 steps unconditionally (`docs/rules/menus.md:237` admits it), so an old PS1
-card decodes garbage tail fields. Done when: gates + defaults in `decode_block`, a bad checksum shows the corrupted state
-like RDE, unit tests with a 0x102 block and a corrupted block.
+Impact: low; seen in RDE.
+With encounters off, entrance 1's monster in opa_b02f (entity 4, ON_COLLISION `A3 / FE 10 / D2 / WAIT 128 / STOP`) re-fires its skipped A3 while the player stands on it: RDE every 2.86-4.02 s (about 3.3 s on average, 11 skips in 37 s), OpenCross every 133 ticks (2.2 s). The spread suggests the repeat depends on the monster walking back into the player.
+Reproduce: route `no_encounters` with a longer wait, counting the `cheat No encounters` log lines, against an RDE run (`rde_bg.py`, encounters-off flag set) that counts the variable 0x32 writes (reset it to 5 after each).
+Done when: the interval matches within frame tolerance, or the difference is shown to be RDE pacing.
 
-### Element mode 40 (Suicide Bomb / Toxic Burst) skips the hit pass: no status, no immune / absorb
+### Emitter objects are stepped in spawn order; the PS1 walks its heap newest first
 Priority: P3
-Impact: low-med; confirmed in code.
-Original: 0x800D5CA8 runs the full mode 0 hit pass 0x800D44C4 (status roll, E-bit rules, colour step) and only when the target's hi word
-lacks 0x10000 (immune) replaces the caster's and the target's value by target HP / 2; the hit pass's result code stays (absorb = code 3
-heals, immune = miss).
-OpenCross: battle.cpp:1482-1494 calls `element_damage` and always `damage_unit(actor, target, hp / 2, 0)`; `apply_status` is never called,
-though its comment says "unless it missed". Player effect (record read): Toxic Burst (387, poison 100 %) never poisons; an immune or
-absorbing PC loses half its HP. Done when: mode 40 goes through the mode 0 pass and overrides the value only when not immune, keeping
-code 3; check record 387 / 389 in pgdat with `tools\py\cc_tables.py` first.
+Impact: low; ordering only (which of several objects writes last, the order periodic spawns draw random numbers, possibly the draw order within one depth slot).
+Known: the effect-object allocator cuts each block from the top of a free block while walking backwards from a roving pointer, and the step loop walks the heap in ascending address order, so on a heap without holes newer objects are stepped before older ones. Confirmed in jac_b17i RAM: `lgt0`, `lgt1`, `lgt2` sit at descending addresses 0xA0 apart. OpenCross steps `objs` in spawn order and reverses the order only for the light write (`src/game/effects/emitter_tick.cpp`).
+Reproduce: read the heap order of the live objects in a PS1 state for a pack with periodic spawns, and compare which spawn draws from the random number generator first against ours.
+Done when: the order rule (with holes) is specified in `docs/formats/room_effects.md` 3.2, and either the step order follows it or a capture shows the difference is never visible.
 
-### Pip's form change does not make his used tech cells usable again
+### Lynx's scythe: 4 FT3 faces drawn only on the no-glint path
 Priority: P3
-Impact: low-med; confirmed in code.
-Original: mode 45 (0x800D6158) rewrites each of the form's tech cells (27, 47, 67; the third only for a second form) through 0x800D6044,
-which writes the new id into the battle grid and the unit's cell word and clears bit 0 (used) of the battle cell flags (0x800E0874 area).
-OpenCross: `Battle::evolve` (battle.cpp:718-751) rewrites `unit.cells` and the record cell but leaves `unit.used[cell]` set.
-Player effect: a tech Pip used before evolving stays spent for the rest of the fight. Done when: evolve clears `used` for every rewritten
-non-empty cell; a unit test covers it.
+Impact: low; confirmed in code and data.
+Of the 29 weapon packs only `battle/wepon/yamaneko.bin` and `ply_yama.bin` (Lynx) have mesh groups other than GT3 / GT4: 4 FT3 (0x24) faces in every tier mesh. On the PS1 a plain weapon that passes the eye test (`docs/formats/model.md` 7.1) uses the specular dispatcher, which draws only GT3 / GT4, so these faces are skipped; when the test fails the stock dispatcher draws them. OpenCross `import::parse_mesh` always draws FT3, and a draw can only hide whole meshes (`DrawParams::hidden_meshes`), not one group type.
+Reproduce: `ocbattleview <scene> --party <Lynx id> --orig` with `OC_GLINT_TRACE=1`; compare an "on" frame with a PS1 screenshot of the same orbit frame.
+Done when: the FT3 faces are hidden on frames where the test passes (keep the group type per submesh, add a draw flag), checked against a PS1 capture, and model.md 7.1 no longer says they are always drawn.
 
-### Emitter death children ignore the dying object's op-0x39 basis (and its local position)
+### AKAO channel start keeps the previous program's LFO rate words on the PS1
 Priority: P3
-Impact: low-med; confirmed in code.
-main 0x8003CA70 (death spawn): when the dying object's own header has an op 0x39 record (found with 0x800307B0), it builds that basis with 0x80032154, uses the dying position as its translation only when the object has flag bit 19, and publishes it in 0x80072128 for the child spawns, so the child's parent-relative ops (0x08, 0x0A, 0x0B, 0x0C, 0x27, 0x2F, 0x41, 0x3B / 0x42 / 0x46) are rotated by it. With that basis, a dying object with flag bit 15 (local coordinates) and a child without bit 15 gets its position run through the basis (0x80042168) before it is copied to the child.
-OpenCross `EmitterSystem::Impl::die` (`src/game/effects/emitter_spawn.cpp:619-646`) calls `fire(dying.death, nullptr)` (no parent basis) and copies `dying.pos` as it is (:636-637).
-Data scan: 504 of 5857 death children of op-0x39 parents use velocity / acceleration ops without their own 0x39 (robo2, saigai, misso, 37comet, hasira, ...), mostly symmetric sprays; exactly 13 chains have the local-position case (syoukan/thndr tam3->tam4, tam6->tam8; tech/balls sb01->sb11, sb0-->sb1-; tech/ganseki iw01->iw04, iw11->iw14, iw21->iw24; tech/kagou san1->san2, mar1->mar2; tech/oodama 5-0, 2-0, 1-0, 0-0 -> *-01).
-Done when: `die()` passes the dying header's op-0x39 basis (translation = dying position for bit 19) and converts a bit-15 dying position to world for a non-bit-15 child; a `ps1_cast.py force` capture of thndr (Thunderstorm) and robo2 / 37comet matches child positions (fx_diff).
-
-### D4 takes its wipe variant from the wrong operand (skipping stays allowed)
-Priority: P3
-Impact: low-med; needs a capture or data sweep.
-Data use (scan of the shipped data): 11 of 20 D4 lack 0x200 (crn_b16i, jac_b20i, kji_b06i, sui_a09e, ten_b07f, you_b10e) and are unskippable on the PS1 while OpenCross lets them be skipped; RDE check: crn_b16i row 6. The variant is 0 at every D4 and 7E, so the docs' "variant 1 in the data" is wrong.
-Capture (RDE against OpenCross): RDE: crn_b16i row 6 (`D4 #6,#8`, no 0x200) played its full 51 s through 17 confirm presses; the same movie patched to `#520` was skipped within 3 s. OpenCross skips both. (The movie events start only when crn_b16i is entered by entrance 2.)
-Decision (owner): every movie stays skippable (architecture.md 13); fix only where D4 takes its wipe variant and flags from.
-Original 0x800C85E4 (D4): row = U@1 & 0xFF, flags = U@3 (+8 with the DC movie-end jump), variant = U@3 & 3. Rows 3/4 switch to the
-alternate mode. The runner 0x800DD130 lets the player skip only when flags & 0x200 (or the debug byte). 7E (0x800C8400): variant = high
-byte of U@1, flags 0. OpenCross: D4 (`field_vm_ops_game.cpp:355-360`) takes the variant from U@1's high byte and is always
-skippable. `MovieRequest::variant` is unused (`field_world_audio.cpp:185-197`). The New Game `D4 #2,#520` has 0x200 set. RDE plays
-movies through its own player (0x800DD130 is only an observer hook), so RDE decides. Steps: list every D4's U@3 with `cc_fieldscript.py`.
-For any D4 without 0x200, check in RDE (`rde_bg.py`) whether confirm skips it. Done when: D4 follows RDE and the `fieldscript.md` D4 row is right.
-More (second audit pass): The "any new pad bit skips, then 8 more frames" rule read in 0x800DD130 sits in the variant-1 branch, which no movie op in the data uses; the variant-0
-branch is cut off in the export. So which keys skip is RDE's decision: OpenCross skips on Ok / pad South only (`app_sim.cpp:438`). Add to the RDE check:
-whether d-pad, Triangle or other keyboard keys skip a `#520` movie.
-
-### Mojo's default name does not become "Mojoy" after he learns his tech (FE 7E)
-Priority: P3
-Impact: low-med (only a player who kept the default name sees it); confirmed in code and data.
-Not the recruit rename: that is FE 4A at alu_b09i 08AC (entity 6, right after ADD_TO_PARTY #27), fixed earlier, and naming Mojo works.
-FE 7E is a later, separate scene in the same room: entity 8's ON_ACTION, only with Mojo in the party (JUMP_IF_NOT_IN_PARTY #27 at 09D1),
-messages 53..55 ("A lucky...doll...?", "Mojo changed for the better... Just a little bit.", "Mojo learned <tech>!"), RECEIVE_ITEM #753 at
-0A69, then FE 7E at 0A6D; it is the only FE 7E in the data. PS1: FE 7E turns the default kana record name "Lucky Dan" into "Happy Dan".
-RDE hooks it (field 0x800D57E0, handler 0x424BD0, field overlay only): if the custom-name map has an entry for character 0x1B it does
-nothing; otherwise it stores the `cmnmes` row keyed "ハッピーダン" for the current language as his custom name, at once, saved through
-ext_save (EN "Mojoy", FR "Mojoie", IT "Mojoy", DE "Frohjo", ES "Buduy", JP "ハッピーダン"; the row is in `lang.dat` `cmnmes.txt`).
-It never looks at the record name, so a player who typed a name keeps it in both games. OpenCross (`src/game/field_world_tick.cpp:206-215`)
-only patches the two kana bytes of the record, and non-JP display names come from the custom map or sysmes (`src/data/char_name.cpp`),
-so a player who kept "Mojo" still reads "Mojo" after this scene where RDE shows "Mojoy". This interacts with the name-entry entry
-("confirming the stock name pins it"): RDE erases the custom name when the confirmed name equals the default, OpenCross stores it, so
-even with FE 7E fixed OpenCross would skip it unless that entry is fixed too.
-Reproduce: recruit Mojo and confirm the default name, then trigger entity 8's scene in alu_b09i with Mojo in the party (EN); compare
-the name in the main menu with RDE (`rde_bg.py`).
-Done when: FE 7E inserts custom_names[27] from `cmnmes` when absent (all six languages), shows at once, persists through ext_save,
-the name-entry default rule matches RDE, and the fieldscript.md FE 7E row says so.
-
-### Script instruction budget: 3C / A9 / FE 78 add 1; 3C / A9 wait out the room-entry window
-Priority: P3
-Impact: low-med; confirmed in code.
-Data use (scan of the shipped data): no run of consecutive bonus ops exceeds 5, but about 216 straight-line segments in 104 rooms cross the 8-op budget (approximate yielding-op list). Repro: crn_b16i 07A0, bak_a02f 029C.
-Capture (PS1 against OpenCross): PS1 (patched alu_a04f): with 3C, A9 or FE 78 in front of a run of 24 / 11 / 9 marker ops the first tick runs 9 ops, OpenCross 8; a control run of 22 markers with no bonus op splits at 8 on both. The room-entry window part was not captured.
-Original: the dispatcher 0x800D58CC runs up to the budget (0x800EC778, 8 + bonuses) per record and tick. 3C (0x800C2D20) adds 1 when the
-entity has a 3D model (flags38 & 0x4000 clear). A9 (0x800C2DE4) adds 1 whenever the target resolves. FE 78 (0x800BF4A0) adds 1 when the song
-started (normal mode). 3C and A9 yield without advancing while the room-entry counter 0x800EA4DE is non-zero (2 frames after a load or
-a battle return). OpenCross adds +1 only for 88 (`field_vm_ops_scene.cpp:251`) and the 55/56 false branches. 3C
-(`field_vm_ops_core.cpp:390`), A9 (`field_vm_ops_game.cpp:104`) and FE 78 (`field_vm_ext.cpp:438`) neither add nor yield,
-although the `fieldscript.md` rows 3C and FE 78 say they do. Player impact: cutscene chains of more than 8 non-yielding ops that
-include 3C/A9 split over two ticks in OpenCross, so poses land one tick late. Done when: the three budget bonuses and the 3C/A9
-entry-window yield exist (`entry_window_` in `src/game/field_world.h:841` already counts the window). Check with a script-op trace on
-`alu_chair` and `art_swap` (the timing of the first following WAIT).
-
-### A3 / C9 reached while a battle is pending is dropped; the script gate is a subset
-Priority: P3
-Impact: low-med; confirmed in code.
-Data use (scan of the shipped data): 683 A3 / C9 sites in 221 rooms; 150 rooms have battle ops in more than one entity. Whether two fire on the same tick needs a capture: touch two enemies of tok_a01f / mab_a01f / des_a06f in one frame.
-Capture (PS1 against OpenCross): PS1 (staged in alu_a04f, encounter 1 on battlefield 0): the second entity's A3 waited, a second battle started about 200 frames after the first ended, and that entity's script went on only after its own fight. OpenCross fought one battle and the second script carried on as if it had fought. One PS1 run; repeat on a real double fight to make it firm.
-Original: A3 (0x800C3348) and C9 (0x800C30A4) return without advancing while the early-out byte 0x800EA48C is 1 or the system gate
-0x800C47E4 is busy. That gate is the about-17-flag chain 0x800C4798 (battle/encounter, menu, movie request 0x800EB760, room jump
-0x8008537C, model swap 0x800EB76C, shop / smith 0x800EB768 ...) plus one more term (0x800C44A0, byte 0x800EA4D0). 07/08/09 hold on 0x800C4630.
-The launcher ops (FE 4A/59/5E/67/68/72/84/85) use 0x800D47FC, which is the system gate OR any of the 4 dialogue windows open (0x800D5EAC).
-OpenCross: `FieldWorld::system_ready` (`src/game/field_world.cpp:535`) is only "no transition and no jump". `request_battle`
-(`field_world_transition.cpp:161`) silently returns while `battle_state != None`, but A3/C9 (`field_vm_ops_game.cpp:73-95`) still go to phase 1,
-wait for the first fight and advance. So a second entity's battle is never fought, and its script continues as if it had been
-(it reads the first fight's `$32`). `skip_battle` can also overwrite the running fight's `last_battle_code`. `idle_gate`
-(`field_vm_ext.cpp:17`) ignores open windows. Menu and movie requests are mostly covered because `App` stops ticking the field while
-they are pending (`app_sim.cpp:619-626`). The battle intro (`enct`) is not covered: the field keeps running during it.
-Done when: `system_ready()` (or a battle-op gate) also refuses while `battle_state != None`, `idle_gate` refuses while any dialogue or label window
-is open, and a unit test with two entities issuing A3 on the same tick shows the second one waiting and then fighting.
-
-### "No encounters" auto-win does not write variable 0x32 = 2 as RDE does
-Priority: P3
-Impact: low-med; confirmed in code.
-Data use (scan of the shipped data): variable 0x32 is only read (644 compares: 0 x273, 1 x85, 2 x284, 3 x2). In the four lose-and-retry loops (mja_a04f, mja_b04f, ryu_b29i twice) 2 is the "lost, retry" branch. Capture: ryu_b29i `BATTLE #432,#48,#80` with encounters off on RDE.
-Capture (RDE against OpenCross): RDE: writes 2 to variable 0x32 on the auto-won encounter entering room 53 (opa_b02f); OpenCross leaves the old value (5). RDE fights ryu_b29i's C9 #432 normally even with encounters off. The OpenCross skip also logged three times for one room entry where RDE replaces the battle op once.
-RDE: the encounter hook writes host 0x00B1AD66 = 2 (guest 0x800EBADA = script
-variable 0x32, `fld_battle_result`) and the outcome byte 0x80075909 = 2, then patches in `09 00 02`. OpenCross:
-`FieldWorld::skip_battle` (`src/game/field_world_transition.cpp:148-155`) sets only `handoff_.last_battle_code = 2`. The A3 row and section
-6.11 of `fieldscript.md` (line 520) say "variable 0x32 is untouched", which is wrong. Player impact: with the cheat on, a script that tests
-`$32` after the skipped op takes the branch of the previous fight (usually victory) instead of the fled branch. Done when:
-`skip_battle` also sets `kBattleResult` to 2, the doc line is corrected, and an RDE run (`rde_bg.py`, encounters off) of one table
-entry is compared.
-
-### AKAO C9 ends an evicted protected channel; the PS1 ends it only at CA
-Priority: P3
-Impact: low; confirmed in code.
-Original: only the VM's CA path tests flag 0x200000 (set when an E0-protected channel is evicted) and finishes the channel; C9
-0x800553EC has no such test. OpenCross `case 0xC9` (`akao_player.cpp:931-941`) ends the channel when `stop_at_loop` is set even with
-passes left. Data: E0 plus C9 in `battle/monster/ki`, `komodo`, `opthe` at0 `chit`. Done when: the `stop_at_loop` test leaves C9
-(the peek already matches the PS1).
-
-### AKAO E4 / E5 / E6 rate slides: no 0 -> 256 target substitution, PS1 rounding
-Priority: P3
-Impact: low; confirmed in code.
-Original: E4 0x80054A30 (E5 / E6 alike) substitutes 0 -> 256 only for the slide length; the target is `operand << 10` and the step comes
-from 0x80053D1C: the current rate's low 10 bits are cleared, step = (target - cur) / n, plus 1 when rising, minus 1 (and the low bits
-filled) when falling. OpenCross (`akao_player.cpp:1004-1013`) maps target 0 to 0x40000, keeps the low bits, no bias. Data: target 0 in
-`bak_a14e` frame 1, `tech/onedari` se00, `ryu_b18i` / `ryu_b29i` frame 13 (rate slides to stop vs to max). Done when: target unsubstituted,
-step per the PS1 rule.
-
-### Miss pops of element modes 1 and 36 are inverted
-Priority: P3
-Impact: low; confirmed in code.
-Original: mode 1 (0x800D4580) sets the result code 0, then `landed` from the status roll (or 1 for a cure, E bit 0), and 0x800D99A4 makes
-the code 2 (MISS) when it did not land. Mode 36 (0x800D5988): only a failed `rnd(0,99) < +0xA` gate clears `landed`; a passed gate sets
-the curse through the unconditional setter 0x800DBCB8 and keeps code 0 even when every bit was already on.
-OpenCross: mode 1 (battle.cpp:1579-1583) sets `landed` only, so a failed Turn colour / Negate / Infoscope shows nothing; mode 36
-(battle.cpp:1337-1344) sets code 2 both on a failed gate (right) and when `force_status_bits` set nothing new (wrong: a hit on the PS1).
-Done when: mode 1 sets `code_override = 2` when `!landed`; mode 36 sets code 2 only on a failed gate.
-
-### Emitter death children are stepped in the frame they are born
-Priority: P3
-Impact: low; confirmed in code.
-main 0x8003CA70 runs the object step 0x80038E60 on a new death child with the frame tick count forced to 0 (matrices only) and, when the child sits after the parent in the task list, installs 0x80041F20 so the loop's own step is skipped that frame: a death child first ages one frame after its parent expires.
-OpenCross `step_frame` (`src/game/effects/emitter_tick.cpp:256-270`) walks `objs` up to the live size, so an object appended by `die()` during `update()` gets `ticks` in the same pass. Each generation of a death chain runs one frame ahead (compounds in chains; shows in fx-audit counts).
-Done when: objects created by `die()` skip their birth frame's update (spawn-with children keep their single immediate step), and `opencross ocbattle fx-audit` / `pac-soak` stay clean.
-
-### Light objects (type 0x11) with blend 0..4 use the op-05 operand as slot and are never released
-Priority: P3
-Impact: low; confirmed in code.
-main 0x80039A00 op 0x05: the type-specific setup (light slot hunt, release flag bit 31, also the 0x16 sound start) sits inside `(object flags & 7) > 4`; for blend 0..4 the slot stays the op-05 operand (1 in all 47 shipped lights) and nothing clears it when the object dies.
-OpenCross allocates a slot for every type-17 object (`src/game/effects/emitter_spawn.cpp:493-503`) and zeroes the slot of dead lights (`emitter_tick.cpp:303-311`); it already applies the same `> 4` gate to type 0x16 (`emitter_spawn.cpp:69`).
-Data: 20 of 47 light emitters have blend 0 (dark / darkdark zlg1 lt2 l0 lr0, tekkyu lt, fin_02 litm, rooms bak_a12f, bak_a17f, jac_a29i, jac_b17i lgt0-2, kji_b09e, ryu_a24i, sui_a09e, ten_b05f). In jac_b17i the three lights share slot 1 on the PS1.
-Done when: blend <= 4 lights use the operand as slot without release; a DuckStation screenshot of jac_b17i (`ps1_capture.py scene`) and a `dark` cast match OpenCross lighting; `docs/formats/room_effects.md` 3.6 states the rule.
-
-### 3mix (Delta Force) return faces the casters' mean, the original their bounding-box middle
-Priority: P3
-Impact: low; confirmed in code.
-3mix return task 0x801C6190 (and uzumaki 0x801C61B8) take the caster point from 0x80031A5C selector 3, which runs 0x8002AFDC: per axis (max + min) / 2 of the casters' integer positions; final yaw = -0x400 - ratan2(Cz - z, Cx - x).
-OpenCross `Return::step` (`src/game/effects/bespoke/tech_ports.cpp:333-337`) uses the arithmetic mean (float). Same for two casters (uzumaki); differs for Delta Force's three unless symmetric (a few degrees of final facing). `docs/formats/battle_effects.md` already states the bbox rule for lasbos 0x107.
-Done when: the centre is (max + min) / 2 per axis on the s16 positions; a `ps1_cast.py force` capture of Delta Force shows the same final yaw of each target.
-
-### 11boru (Volcano) phase-1 piece rotation restarts from 0 instead of the init roll
-Priority: P3
-Impact: low; confirmed in code.
-11boru init (0x801C7178) rolls rot0 = r % 200 - 100 per axis into 0x801C87C0; the frame (0x801C7BC8) phase 0 only reads it (rot0 * t16 >> 11, so the piece ends phase 0 turned by rot0), phase 1 adds the rate (0x801C8810) to that same array.
-OpenCross `ground_ports_b.cpp:294` adds the rate to `piece.rot`, zero-initialised (:370) and never seeded: every piece snaps back by up to +-100/4096 per axis at the phase change.
-Done when: `piece.rot = rot0` when phase 1 starts; a `ps1_cast.py force` capture of Volcano around tick 128 matches piece rotations.
-
-### cook / swordbox vacuum front: model-y term has the wrong sign
-Priority: P3
-Impact: low; confirmed in code.
-cook vacuum task 0x801C6040: thr = (a1 t / dur - a1) - (model y >> 12) + H/2; the per-vertex tau uses + model y.
-OpenCross `Vacuum::Task::step` (`src/game/effects/bespoke/model_deform.cpp:376`) adds `my`; same in the comment at :311 and `docs/formats/battle_effects.md:224`. Identical for ground targets (y 0); off by 2 y for a raised target.
-Done when: `thr` uses `- my`, the comment and doc follow; a target with model y != 0 is found (battle placement data) or the entry closes as cosmetic.
-
-### fnoise frost-stage quads sort by AVSZ4; the original uses AVSZ3
-Priority: P3
-Impact: low; confirmed in code.
-fnoise quad builder 0x801C8E1C (0x180 model draw) uses AVSZ3 (GTE 0x158002D: v1 v2 v3) or min SZ with byte-3 bit 0x10; only the shard quads (0x801C67A0) use AVSZ4.
-OpenCross `mesh_techs.cpp:146-147` sets `spec.quad_avsz3 = false` ("Quads use AVSZ4") in `Fnoise::draw`.
-Done when: that line and comment are removed (default true); shards keep the 4-corner mean.
-
-### The user guide's "ESC Menu (LT + L3)" pad chord does not open the settings window
-Priority: P3
-Impact: low; confirmed in code.
-Decision (owner): LT+L3 opens the Esc menu, as RDE.
-NEW.
-RDE: `sys_poll_hotkeys` (0x5860F0) sets the Esc-menu input when the host mask has LT (0x400) and L3 (0x4000) both down, with
-one of the two newly pressed this frame, OR'd with the Esc key; the menu toggles on the RELEASE of that input (current 0, last
-frame non-zero). Back+Start and "hold Start" do nothing on RDE; Start goes straight to the guest, so the PS1 pause opens on the press.
-OpenCross: `src/ui/keymap_screen.cpp:46` draws "ESC Menu (LT + L3)" on the pad page, but `App::frame_hotkeys`
-(`src/app/app_run.cpp:111-133`) opens settings only on Esc press or Start held 500 ms; LT+L3 just toggles slow mode and
-no-encounters. The guide tells the player a chord that does not work. Esc firing on press (not release) and the Start tap
-pausing on release are documented choices (`docs/tools.md` 486); list them in `architecture.md` 13 if they stay.
-Open point (rde_bg.py with an injected XInput state): whether the LT+L3 chord on RDE also flips slow mode and no-encounters on
-the way (the LT and L3 edges also feed those toggles in the same function).
-Done when: LT+L3 opens / closes the settings window on release (alongside Start-hold), the RDE run decides the side toggles,
-and tools.md / menus.md name the chord.
-
-### A refused key item does not write $2A (0x43F on the PS1); invisible unless a script copies it
-Priority: P3
-Impact: low; needs a capture or data sweep.
-Data use (scan of the shipped data): no script compares $2A with the gated item values; only 29 copies of $2A in 18 rooms could show a difference. Capture: refuse the Smith Spirit next to a touch trigger in alu_a04f (03D8) or alu_b01f (02D8) on RDE.
-Capture (PS1 against OpenCross): PS1: a refused Smith Spirit sets $2A = 0x43F and the shown byte; closing the list clears the byte without firing any key-item event, so nothing leaks into the next trigger pass. OpenCross matches what the player sees (no event) but leaves $2A unchanged. Only a script copying $2A right after could differ.
-Original 0x800D6AAC: on confirm, it writes var 0x2A = 0x401 + entry and byte 0x800EBAA3 = 1 BEFORE the usable test. A gated item (Tele-Porter,
-Relief Charm, Smith Spirit without `$46 == 1 && $3C == 1`) then plays sound 0x18 and the list stays open. 0x800AE354 clears 0x800EBAA3
-only for 0x401/0x43D, so a refused Smith Spirit leaves it set for the next trigger pass (key-item event 4 on touch-flag
-entities in range). OpenCross: the popup refuses disabled entries itself (`app_sim.cpp:575-578`), so `use_key_item` (which writes $2A) is
-never called. Capture: in RDE (`rde_bg.py`) or `ps1_capture.py`, refuse Smith Spirit next to a touch-trigger entity and read $2A.
-Done when: OpenCross matches the capture.
-
-### Accessory list: the PS1 always leads with an empty entry and lists bag materials greyed at the end
-Priority: P3
-Impact: low; needs a capture or data sweep.
-Data use (scan of the shipped data): the conflict rule never matters (every accessory slot mask is a single bit or 0). The materials tail does: 22 material ids (1..0x16) exist and 69 of the 72 accessories have a non-zero high nibble in their category byte, so a capture of the RDE accessory list with a material in the bag is still needed.
-Capture (PS1 against OpenCross): PS1 (JP disc 1, forged save): the list always starts with one empty entry, even when the slot is empty, with the cursor on it; then the bag's accessories, then every bag material greyed at the end, both in bag order; confirming a material does nothing. Accessories with category byte 0x62 are listed, so a literal "category byte == 2" rule is wrong. OpenCross shows no empty entry for an empty slot and no materials. The conflict rule was not captured (the data scan says it cannot change any list).
-Original 0x800E3DF0, accessory mode: it includes every bag id < 0x20 with no category test, and ids >= 0x20 when the full category byte
-(+10) == 2. When the candidate's conflict mask overlaps the accessory being replaced, it skips the conflict test entirely. 0x800E3C9C
-puts ids < 0x20 after the real gear, and the list starts with one empty entry. OpenCross `equip_candidates` / `accessory_conflict`
-(`src/ui/menu/game_state.cpp:535-566`) masks the nibble, hides materials and still tests the other two slots. Capture: the RDE equip
-screen (`rde_bg.py`) with materials in the bag and two overlapping-mask accessories. Done when: the list content and greying match RDE.
-More (second audit pass): New facts only (menutest 0x801E599C renderer): entries with 0x4000 are not drawn, so the leading reserved entry is an invisible but
-selectable first row that equips item 0 (take off); entries without 0x8000 are drawn grey 0x404040 (equippable 0x808080); the count column
-shows the bag byte, or 2 for item 0x40; the weapon and armour lists have no reserved entry and compare the category nibble only.
-
-### Fast / slow mode is not suspended during the battle intro, lasdes2 and miyademo
-Priority: P3
-Impact: low; needs a capture or data sweep.
-Capture (RDE against OpenCross): RDE: the battle intro runs at 1x with FastMode on, doubling only after the intro; vblanks to the first command menu are 307 with fast on and off. OpenCross applies the factor in the intro (from the code). lasdes2 and miyademo not captured.
-Decision (owner): mimic RDE (intro at 1x).
-PS1: in battle (0x800720FD == 1) with the time-shift gate 0x800720DB set, the main loop's L2 / R2 speed change (dt doubled or
-tempo -1) runs only while byte 0x800720C4 is non-zero. btlinit (0x801F2BEC) clears it, btl_intro_layer_stop (0x800B08D8) sets it at
-the intro end, btl_stage_layers_restart (0x800B0964) clears it, lasdes2 and miyademo save / zero / restore it. The symbol
-`sys_time_shift_gate` says this L2 / R2 path is RDE's slow / fast mode, so RDE fast mode should run at 1x during the intro, the
-Time Devourer ending and miyademo. OpenCross: `src/app/app_run.cpp:34-36` + `src/game/cheats.cpp:125-130` apply the factor in any
-battle except map 386 (`App::speed_locked`, app_run.cpp:161-164). Capture: `rde_bg.py` with FastMode on, time a battle intro and
-the lasdes2 chain (refresh counts) against FastMode off; also find when btl_stage_layers_restart runs (outro?).
-Done when: the RDE timing shows whether the gate holds; if it does, a battle-side "speed allowed" flag drives `speed_locked()`.
-
-### opthedo exit (Portalgheist, element 359) leaves the target at yaw 0xA00; the PS1 snaps it to 0xC00
-Priority: P3
-Impact: low; needs a capture or data sweep.
-Capture (PS1 against OpenCross): PS1 scene 84: the caster is the Portalgheist door (unit 5, element 359), not a party tech; target pup = unit 3. Same overshoot point (-909, 1651) and home (-1280, 1280) on both sides; pup's final yaw PS1 0xC00, OpenCross 0xA00.
-PS1 opthedo exit (0x801C6200): every target-list unit gets yaw +0xA6 := 0xC00 and position := its home point. OpenCross `Opthedo`
-(`src/game/effects/bespoke/tech_ports.cpp:105`) has no exit; the host returns units from where they stand. Capture the end of the
-tech with `ps1_cast.py force` (owner character) and `tools\ours_cast34.ps1`, diff facing and position of each target.
-Done when: either the host's end-of-action reset already gives the same yaw / position (close) or the port adds the exit.
-
-### Weapon specular glint only near the camera on the PS1
-Priority: P3
-Impact: low; needs a capture or data sweep.
-Capture (PS1 against OpenCross): PS1: frames with a glint: `apr0` 0/131, `atk0` 12/323, `zen0` 3/76, `atk5` 91/92, idle orbit 299/300; the test is per weapon part, |eye - part| < 0x1000 on every axis. OpenCross glints on every frame.
-`sys_weapon_draw` (main 0x800A0104), non-prism weapon: the specular dispatcher `sys_weapon_draw_plain` (0x800A0580, GT3 / GT4 only)
-is installed only when |eye - weapon position| < 0x1000 on all three axes (eye = `sys_weapon_eye_pos` 0x800A7E10); otherwise the
-stock dispatcher draws every group type with no glint. OpenCross `src/game/battle/battle_view_draw.cpp:357-368` always sets
-`wd.light.spec`; `docs/formats/model.md` 7.1 states the GT3/GT4 filter unconditionally.
-Repro: a battle with a plain weapon in a wide and a close camera shot; PS1 (`ps1_capture.py scene`) vs `ocbattleview --shotevery`.
-Done when: the distance gate is added (or shown never to fail in battle cameras) and model.md 7.1 states it.
-
-### Frozen landing adds 3 to the countdown; does a frozen enemy's countdown run?
-Priority: P3
-Impact: low; needs a capture or data sweep.
-Capture (PS1 against OpenCross): PS1 scene 6, unit 4 (Ice Blast freeze forced): countdown 1 -> 3 when Frozen lands (+3, then the cast's own -1) and keeps dropping with every party action (3 -> 2 -> 0); the Frozen timer starts at 12, drops by attack strength + 1 and thaws at 0. OpenCross skips frozen units in the countdown and adds nothing. Not seen: whether a frozen enemy at 0 takes its turn.
-Original: 0x800DB764, when lo 0x20000000 newly lands with a timer: unit flag +0x1CF := 1, message flag 0x800DF7F4 := 1, countdown += 3. The scheduler gives a frozen PC its script turn at 0; enemies keep their turn script.
-OpenCross: Frozen is `kDefeated` (battle.h:166), so a frozen unit is out of `alive()`: no countdown, no turn; no +3.
-Settle with `ps1_capture.py scene` freezing an enemy (Ice Blast type) and logging its countdown word (0x800E080C + 0x410 x unit) until thaw. Done when: the +3 is added and the frozen unit's countdown/turn behaviour matches the capture.
-
-### Japanese equip panel: the "%" after HIT / EVD and the preview arrows are missing
-Priority: P3
-Impact: low; seen in a PS1 capture.
-In Japanese the PS1 equip panel draws a "%" after the HIT and EVD values and the preview arrows; OpenCross leaves both out (`src/ui/menu/main_menu_equip.cpp`). Repro: JP, main menu > Equip, any character. Done when: a JP frame matches the PS1 panel.
-
-### Target cursor wraps in NORMAL camera; retail stops at the ends
-Priority: P3
-Impact: low; confirmed in code.
-0x800C26CC steps through 0x800C2300; with the dynamic camera flag 0 (0x800758B4) it calls 0x800C1F5C, which picks the nearest
-candidate strictly right/left of the current one in projected screen x and returns the current unit when none exists (no wrap).
-With the flag set, 0x800C2300 sorts candidates by -atan2 of their world position and wraps. OpenCross `battle_view_ui.cpp:882`
-`step` wraps in both modes (and also steps on up/down: `:1096` passes `vdir + hdir`); `target_candidates` sorts by screen x for
-both modes. Reproduce: 3 enemies, Attack, Right on the rightmost. Done when: NORMAL does not wrap, the DYNAMIC order and its
-left wrap are taken from a PS1 capture, and docs/rules/battle.md section 3 states both.
-
-### Negative-stamina bar is drawn empty
-Priority: P3
-Impact: low; confirmed in code.
-0x800BECC0: for negative stamina the value is negated, capped at 70, fill width = v*100/140 over the 52x4 track, colour from the
-byte table at 0x800DE808 index (v/10) + 8 (the second half used for "out"). OpenCross `battle_view_ui.cpp:479` sets the fill to 0
-when out. Done when: the fill uses |stamina| and the out colours, whose values come from a PS1 capture (or a dump of 0x800DE808)
-of a PC below 0 stamina.
+Impact: low; seen in a PS1 trace.
+The PS1's channel reset leaves the vibrato, tremolo and autopan rate words (and their slide steps) at whatever the channel's previous sound left (a trace showed 0x800 left over); OpenCross starts each channel at 0x40000 (`src/audio/akao_player.cpp`). This only affects an E4 / E5 / E6 rate slide that runs before B4 / B8 / BC turns the LFO on.
+Reproduce: play two SFX on the same channel slot, the second starting with E4 without B4, and trace the rate word.
+Done when: OpenCross keeps the slot's rate words across starts, or a data scan shows no sequence runs E4 / E5 / E6 before its LFO-on op.
 
 ### Top command rows: Attack and Element not dimmed at stamina 0; HIT% rows ignore hi status 0x20000
 Priority: P3
@@ -458,27 +184,19 @@ not flagged 0x20. Sell OK on a worn-only piece plays 0x18 and shows message 0x32
 is both worn and in the bag becomes sellable on the PS1 (and RDE); decide with the owner whether to copy that. Done when:
 worn pieces listed, refusal message shown, quirk decision recorded in menus.md 8.
 
-### Name entry: Default ignores the stored custom name; confirming the stock name pins it
+### Name entry (Latin): the screen opens on the button column, not the grid
 Priority: P3
-Impact: low; confirmed in code.
-RDE's init/Default hook (namemenu 0x801D31AC, handler 0x44E550 -> 0x44C9F0) loads the custom-map entry for the
-character, else sysmes 0x10000+id, so Default restores the name as it was when the screen opened. RDE's confirm hook
-(0x801D3764, handler 0x44E6E0 -> 0x44CB90) erases the map entry when the trimmed text equals the current-language
-default, else stores it. OpenCross: Default sets `default_` (`src/ui/title/name_entry.cpp:133`, default from
-`game_flow.cpp:325`); `FlowMachine::set_custom_name` (`src/game/game_flow.cpp:56-62`) always stores. Player effect: a kept
-default name stops following a language switch and lands in ext_save; Default on a renamed character jumps to the stock
-name. Done when: Default uses `initial` when set; confirming the language default erases the entry; menus.md 9/14
-updated; unit test.
+Impact: low; seen in RDE.
+RDE (EN, script rename FE 4A #27 reached through a patched door trigger): the Latin screen opens with "Change Name" highlighted, and the PS1 name-entry focus byte (`menu_name_focus` in `tools/ghidra/symbols/ps1_menu.txt`) reads 2; Down goes to Confirm (3), then Default (4); Up goes back. Presses in the first ~2 s after the screen appears seem to be dropped. OpenCross (`NameEntry::begin`, `src/ui/title/name_entry.cpp`) starts the Latin layout in the grid at cell (0,0), and `docs/rules/menus.md` section 9 says the same.
+Reproduce: RDE through `rde_bg.py` with a door trigger patched to run FE 4A #27 (see the `mojo_name` route for the OpenCross side); read the focus byte after each key press.
+Done when: the opening focus and where Left / Right go from the buttons match RDE in a table of the focus byte per key press, and menus.md section 9 is corrected.
 
-### Customize input: Left/Right should XOR the row, OK should only open sub-pages, skin preview ignores Cancel
+### Entities never get `EF.14` (no 3D object) at load
 Priority: P3
-Impact: low; confirmed in code.
-`menu_settings_loop` 0x801EA27C state 0: a Left or Right edge calls 0x801E828C (options word ^= row mask); OK acts only on
-row 1 with Custom frame (skin preview) and row 4 with Custom controller (button page); state 1 (skin preview) leaves
-only on OK. RDE only observes this function (HD backdrop). OpenCross `update_settings`
-(`src/ui/menu/main_menu_settings.cpp:47-71`): Left clears, Right sets, OK toggles any row, the preview closes on Cancel
-too; `docs/rules/menus.md` section 2 documents ours. Done when: XOR on Left/Right, OK gated as above, preview Cancel
-inert; menus.md section 2 corrected.
+Impact: low; confirmed in code and with a script trace.
+The PS1 sets flags38 = 0x4000 on every entity at init (`fld_actor_defaults_init`); 0E, 0F and D1 clear it. OpenCross only clears it (0F / D1 in `setup_npc` and the D1 case in `field_vm_ops_game.cpp`), and `setup_pc` never does, so a model-less entity (talk box, zone watcher) counts as a model for 3C's budget bonus, C4, AC, the head ops and `ent_not_drawn`.
+Reproduce: `OC_VM_TRACE=1` on alu_a04f patched to run 3C on entity 4 (a box): the trace shows `budget 9`, the PS1 gives 8.
+Done when: `kNo3dObject` is set in `FieldVM::load` and cleared in `setup_pc` as well; 3C on a box shows `budget 8`; `alu_chair`, `art_swap`, `battle_hud` and `chair_talk` are unchanged.
 
 ### Main menu input extras not in the original (equip Triangle, L1/R1 with a stand-in, extra directions)
 Priority: P3
@@ -490,6 +208,7 @@ Decision (owner): remove all three (Equip-screen Triangle, L1/R1 on a roster sta
 no prompt (`src/ui/menu/main_menu_equip.cpp:20-23`), `cycle_member` ignores `stand_in` (`main_menu.cpp:126-131`), and
 `main_menu_main.cpp:55-56,176-177` accept the other axis. Rule 5: invented input; a mis-press strips accessories.
 Done when: removed (or made opt-in), menus.md sections 1 and 4 corrected.
+Also check the L1 / R1 member switch on the Equip screen: on the PS1 it returns 4 from the equip loop and the screen setup then puts the slot column on the weapon with list cursor and scroll 0, while OpenCross `update_equip` keeps `eslot` and `eq_cur`. Reproduce in RDE (`rde_bg.py`): open Equip on slot 3, press R1, read 0x801F54A8 / 0x801F54AC. Done when that matches too.
 
 ### Title idle timer keeps counting during the Prompt -> Menu fade
 Priority: P3

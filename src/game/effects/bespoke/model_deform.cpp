@@ -308,7 +308,7 @@ class Black46 : public OverlayFx {
 
 // cook / swordbox (byte-identical but for labels): the 'spot' emitter's op-0x48 callback replaces its draw and stores the
 // particle's position as the centre C. 0x100 (dur @+4, K @+8): target 0 is re-skinned and drawn by the overlay (stock draw hidden) while
-// t <= dur: H = the model's height (y up is negative, so H > 0), h2 = H / 2, a1 = H + h2, thr = a1 t / dur - a1 + y_M + h2; every skinned vertex with
+// t <= dur: H = the model's height (y up is negative, so H > 0), h2 = H / 2, a1 = H + h2, thr = a1 t / dur - a1 - y_M + h2; every skinned vertex with
 // y < thr: tau = (y + H + y_M) dur / a1, ang = (t - tau) 1024 / (dur - tau), v += (v - C) rcos(ang + 0x400) / 4096 and y += rcos(2 ang + 0x400) K / 4096 -
 // the front falls from the head past the feet and the target is sucked into C behind it, with a bulge. At t > dur the model is put at C and stays hidden until its reaction script shows it and jumps it home. 0x101 = the
 // NEGAPOSI screen negative for u16 @+4 ticks. The deformed model goes through the stock draw, so its env-mapped and semi-transparent parts stay.
@@ -373,7 +373,7 @@ class Vacuum : public MeshTech {
         return false;
       }
       const int half_height = height / 2, a1 = height + half_height, my = static_cast<int>(model->pos[1]);
-      const int thr = trunc_div(a1 * tick, dur) - a1 + my + half_height;
+      const int thr = trunc_div(a1 * tick, dur) - a1 - my + half_height;
       const int tt = tick, duration = dur, bulge_k = bulge, model_height = height, cx = centre[0], cy = centre[1], cz = centre[2];
       deform = [=](DrawVert& vertex) {
         const int x = vertex.x, y = vertex.y, z = vertex.z;

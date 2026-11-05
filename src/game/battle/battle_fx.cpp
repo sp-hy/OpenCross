@@ -689,6 +689,10 @@ void BattleFxRun::init_models() {
     if (scene_.unit[static_cast<size_t>(i)].present) models_.everyone.push_back(i);
   for (int i = 0; i < battle::kPcSlots; ++i)
     if (scene_.unit[static_cast<size_t>(i)].present) models_.everyone.push_back(i);
+  models_.point = [this](int sel, int joint, Vec3& out) {
+    float yaw = 0;
+    return point_of(sel, joint, out, yaw);
+  };
 }
 
 void BattleFxRun::start(const FxScene& scene, const effects::ViewParams& view) {

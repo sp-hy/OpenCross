@@ -1,0 +1,16 @@
+# Smith Spirit (key item 63) is disabled while variable 0x3C is not 1 (every room load clears it). Confirming it plays the refusal,
+# writes variable 0x2A = 0x43F all the same and keeps the list open: the next F closes it (were it closed, F would reopen it and
+# the wait idle would fail). Closing it fires no key-item event and leaves 0x2A as it is.
+0 wait idle 600
+- request keyitem 63
+- wait idle 60
+- set var 2a 0
+- tap f
+- wait 40
+- tap confirm
+- wait 10
+- assert var 2a 0x43f
+- tap f
+- wait idle 60
+- assert var 2a 0x43f
+- quit

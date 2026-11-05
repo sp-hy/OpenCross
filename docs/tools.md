@@ -49,7 +49,7 @@ Source: `tools/occ.cpp`, `tools/occ_save.cpp`, `tools/occ_dump_textures.cpp`. `s
 | `battlefields` | `[--inc <file>]` | Which rooms fight on which stage (every battle op of every room script to `bg_NN`); `--inc` writes the per-stage room lists as a C++ initializer. |
 | `world-markers` | `[--inc <file>]` | Overworld location markers: label text (EN) to target room, and the room-prefix to place-name table; `--inc` writes it as a C++ initializer. |
 | `save-info` | `<save.dat>` | Container members, cards, slot count. |
-| `save-slots` | `<save.dat>` | Per-slot preview fields. |
+| `save-slots` | `<save.dat>` | Per-slot preview fields, save version, checksum by the loader's rule, and the version-gated fields (frames mask, innate colours, New Game+ words). |
 | `save-roundtrip` | `<save.dat> <out.dat>` | Decodes and re-encodes every block (bit-exact check), rewrites and reopens the file. |
 | `save-blank` | `<save.dat> <out.dat>` | Copy with card 1 emptied (scratch file for the `save` route). |
 
@@ -140,7 +140,7 @@ Source: `tools/ocbattle.cpp`, `tools/ocbattle_fx.cpp`, `tools/ocbattle_reg.cpp`.
 | `sim` | `<scene> [seed] [--party a,b,c] [--star N] [--set char\|char_w0..] [--quiet] [--brain scripted\|random] [--party-from file[:slot]] [--attack] [--field N] [--poison]` | Plays one battle with the auto policy and prints the log. `--party` default `0,1,2`; `--star` default 0; `--set` default `char`; `--brain` default `scripted`; `--party-from` reads the party of a save slot (default newest); `--attack` = weapon chains only; `--field` = battlefield; `--poison` poisons every unit at the start and prints after each command an `upkeep:` line (each unit's HP change that no hit or heal explains) and the actors of the actions that ran. |
 | `soak` | `[--seeds N] [--scene S \| --from A --to B] [--cap N] [--party-from file[:slot]] [--brain scripted\|random] [-v]` | Random-policy battles over scenes; checks invariants, stalls, unimplemented ops, stub hits. Defaults: 3 seeds, all scenes, cap 2000 commands, `scripted`. A 60 s watchdog reports hangs; exit 1 on anomalies or exceptions. |
 | `xcheck` | `[--n N] [--seed S]` | Cross-check of the weapon / element damage code against an independent formula transcription over random triples (default 20 cases per kind, seed 1234). |
-| `cast` | `<scene> <actor> <element[,element...]> <target> [seeds]` | Rules-only cast (no view): starts the scene, casts as the Debug tab does, prints the target's status words and the grid cells a seal greys. |
+| `cast` | `<scene> <actor> <element[,element...]> <target> [seeds]` | Rules-only cast (no view): starts the scene, casts as the Debug tab does, prints the target's status words, its countdown before / after and the last cast's result code, and the grid cells a seal greys. |
 | `debug-kill` | `[enemy_id [count]] [--scene S] [--keep-script]` | Headless "Replace the enemies": per scene replaces the groups, knocks every enemy out and prints the scenes that do not end in victory. |
 | `pac-disasm` | `<scene>` | Disassembles the scene's battle event script (the `.pac` its file-index record names; the first line prints the file). |
 | `pac-soak` | `[turns] [-v] [--scene N \| --from A --to B]` | Runs every scene's scripts in a dummy battle for N commands (default 40). |
@@ -327,10 +327,11 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 
 | Variable | Read by | Values | Meaning |
 |---|---|---|---|
+| `OC_VM_TRACE` | `src/script/field_vm.cpp` | set | Logs every executed field script instruction: `vm: tick <t> ent <e> rec <r> pc <pc> op <op>[ <sub>][ yield] budget <n>` (the tick budget after the op). Shows where a tick ends and which op waits. |
 | `OC_NO_CULL` | `src/game/field_world_collide.cpp` | set | A/B check of the off-screen animation freeze: keeps the cull grace on permanently. |
 | `OC_FIELD_SHADOWS` | `src/game/field_world_draw.cpp` | `0` | Disables field shadows. |
 | `OC_NO_MODEL_FX` | `src/game/field_world_draw.cpp` | set | Field models are drawn without their blend mode and their flash. |
-| `OC_FIELD_FX_LOG` | `src/game/field_world_effects.cpp` | set; `2` | Logs field effect state once a second and each effect tick; `2` also logs every drawn tick's live objects as `emitter:life`. |
+| `OC_FIELD_FX_LOG` | `src/game/field_world_effects.cpp` | set; `2` | Logs field effect state once a second (with the three light slots) and each effect tick; `2` also logs every drawn tick's live objects as `emitter:life`. |
 | `OC_ROOM_LAYERS` | `src/game/room_view.cpp` | `i,j,k` | Draws only these background layer indices. |
 | `OC_TITLE_SEQ` | `src/game/title_backdrop.cpp` | `tit0`..`tit3` | Forces the title backdrop sequence instead of the script's random pick. |
 | `OC_TITLE_MODEL_REST` | `src/game/title_backdrop.cpp` | set | Draws the title models in their rest pose. |
@@ -374,6 +375,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_CAM_KEYS` | `battle_camera.cpp` | set | Logs the keys of each camera shot. |
 | `OC_CAM_TRACE` | `battle_camera.cpp` | set | Logs the camera pose every tick. |
 | `OC_DRAW_CAM` | `battle_view_camera.cpp` | set | Logs the interpolated camera of each drawn frame (eye, target, H and the orbit counter) and every unit's facing (4096ths of a turn, `-` = absent slot). |
+| `OC_GLINT_TRACE` | `battle_view_draw.cpp` | set | Logs the weapon specular eye test of each drawn plain weapon slot: `weapon glint: frame <f> unit <u> slot <s> shot '<last shot>' on|off pos <camera-space x y z> eye <eye x y z, y down>`. |
 | `OC_STAGE_ONLY` | `stage_scene.cpp`, `title_backdrop.cpp` | `a,b` | Keeps only these stage parts (the title backdrop matches by substring). |
 | `OC_STAGE_SKIP` | `title_backdrop.cpp` | names | Skips title-backdrop objects whose name occurs in the value. |
 | `OC_STAGE_CULL` | `stage_scene.cpp`, `title_backdrop.cpp` | `swap`, `none`, other | Overrides the cull side of every stage object: `swap` inverted, `none` off, any other value forces side 0. |
@@ -388,7 +390,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_FX_HDR` | `src/game/effects/emitter_system.cpp` | name substring | Dumps the op list of matching emitter headers. |
 | `OC_FX_START` | `emitter_api.cpp`, `emitter_spawn.cpp`, `emitter_system.cpp` (`src/game/effects/`) | set | Writes emitter starts, header words and periodic children to stderr. |
 | `OC_FX_SEQ` | `src/game/effects/sequence_player.cpp` | set | Writes one stderr line per executed effect sequence command and per camera pool. |
-| `OC_FX_OBJECTS` | `battle_view_fx_draw.cpp` | N | Every N video frames logs one line per live emitter object. |
+| `OC_FX_OBJECTS` | `battle_view_fx_draw.cpp` | N | Every N video frames logs one line per live emitter object and one per light slot (`fx light`). |
 | `OC_FX_UNITS` | `battle_view_fx_draw.cpp` | N | Every N video frames logs one line per present unit and the effect camera. |
 | `OC_FX_TRACE` | `battle_view_fx_draw.cpp` | set | Every 10 ticks logs the effect camera. |
 | `OC_FX_MESH_TRACE` | `battle_view_fx_draw.cpp` | set | Logs every effect mesh drawn. |
@@ -487,9 +489,10 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 |---|---|---|
 | Esc | `app_run.cpp` | Opens or closes the settings window (not during a route or replay). |
 | Pad Start, held 500 ms | `app_run.cpp` | Opens the settings window (a Start press while it is open closes it); a shorter tap opens the pause screen on release. |
+| Pad LT + L3 | `app_run.cpp`, `cheats.cpp` | Opens or closes the settings window one frame after the chord closes (RDE's "ESC Menu"); as on RDE the LT press also toggles slow speed and the L3 release No Encounters. |
 | Space | `keymap.h`, `app_sim.cpp` | Start (the pause screen), on the press. |
 | K, pad Back | `keymap.h`, `app_run.cpp` | Select (change the lead character); held in battle, hides the overlays during a cast. |
-| F1 / F2 | `app_run.cpp`, `cheats.cpp` | Toggle slow / fast speed on the press (the two exclude each other; pad LT / RT); not during a route or replay, and ignored on the speed-locked map. Saved to the config. |
+| F1 / F2 | `app_run.cpp`, `cheats.cpp` | Toggle slow / fast speed on the press (the two exclude each other; pad LT / RT, also while the settings window is open); not during a route or replay, and ignored on the speed-locked map. Saved to the config. |
 | F3 | `app_run.cpp`, `cheats.cpp` | Toggles No Encounters on the press (pad L3 tap); saved. |
 | F4 | `app_run.cpp`, `cheats.cpp` | Toggles Battle Boost on the press (pad R3 tap); saved. |
 | F5 | `app_run.cpp`, `cheats.cpp` | Toggles Auto-battle on the press (pad L3 + R3); saved. |

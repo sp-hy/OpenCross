@@ -52,8 +52,8 @@ const int kBattleSticks[2] = {0x1B, 0xD};
 
 }  // namespace
 
-// Customize: left / right / OK toggle the row's option bit; the two stick rows need an analog pad. OK on "Window Frame: Custom" opens
-// the skin picker, which steps the skin byte 0..14 (wrapping) to the next skin whose bit in the owned-frames mask is set.
+// Customize: Left or Right flips the row's option bit on every row, pad or not. OK on "Window Frame: Custom" opens the skin picker,
+// which steps the skin byte 0..14 (wrapping) to the next skin whose bit in the owned-frames mask is set; only OK closes it.
 void MainMenu::Impl::update_settings(const Nav& nav, const platform::Input& in) {
   if (pad_state != 0) {
     update_pad_page(nav, in);
@@ -71,29 +71,21 @@ void MainMenu::Impl::update_settings(const Nav& nav, const platform::Input& in) 
     };
     if (nav.left) step_skin(-1);
     if (nav.right) step_skin(1);
-    if (nav.ok || nav.cancel) skin_pick = false, sfx(nav.ok ? 8 : 6);
+    if (nav.ok) skin_pick = false, sfx(8);
     return;
   }
   if (nav.up) set_cur = wrap(set_cur - 1, 8), sfx(1);
   if (nav.down) set_cur = wrap(set_cur + 1, 8), sfx(1);
   const SettingRow& row = kSettings[set_cur];
-  const bool enabled = set_cur < 6 || in.pad_connected;
   if (nav.cancel) {
     back_to_main(4);
     sfx(6);
     return;
   }
-  if (!enabled) {
-    if (nav.left || nav.right || nav.ok) sfx(0x18);
-    return;
-  }
-  if (nav.left) gs->set_option(row.mask, false), sfx(1);
-  if (nav.right) gs->set_option(row.mask, true), sfx(1);
+  if (nav.left || nav.right) gs->set_option(row.mask, !gs->option(row.mask)), sfx(1);
   if (nav.ok) {
-    if (set_cur == 1 && gs->option(opt::kCustomWindow)) skin_pick = true;
-    else if (set_cur == 4 && gs->option(opt::kControllerEdit)) pad_state = 2;
-    else gs->set_option(row.mask, !gs->option(row.mask));
-    sfx(8);
+    if (set_cur == 1 && gs->option(opt::kCustomWindow)) skin_pick = true, sfx(8);
+    else if (set_cur == 4 && gs->option(opt::kControllerEdit)) pad_state = 2, sfx(8);
   }
 }
 
@@ -111,19 +103,16 @@ void MainMenu::Impl::build_settings() {
   for (int i = 0; i < 8; ++i) {
     const SettingRow& setting = kSettings[i];
     const float y = 60.0f + 24.0f * static_cast<float>(i);
-    const bool enabled = i < 6 || pad_present;
     const bool right = gs->option(setting.mask);
-    const u32 dis = ps1_colour(0x404040), chosen = ps1_colour(0x004048);
+    const u32 chosen = ps1_colour(0x004048);
     const std::u32string label = utf32(menu_str(setting.label, "?"));
-    TP(i == 5 ? 100.0f : 72.0f, y, label, enabled ? kText : dis, 0.9f);
+    TP(i == 5 ? 100.0f : 72.0f, y, label, kText, 0.9f);
     // Button glyph of function 1 at (0x48, 0xB0), 24 x 24.
     if (i == 5) btn(72, 176, 1);
     // Chosen-choice highlight, drawn before the choices.
-    if (enabled) {
-      rect(PX(right ? 375.0f : 277.0f), PY(y - 2), PX(82), PY(20), ps1_colour(0x0060A0));
-    }
-    TP(278, y, utf32(menu_str(setting.left, "-")), !enabled ? dis : (!right ? chosen : kText), 0.9f);
-    TP(376, y, utf32(menu_str(setting.right, "-")), !enabled ? dis : (right ? chosen : kText), 0.9f);
+    rect(PX(right ? 375.0f : 277.0f), PY(y - 2), PX(82), PY(20), ps1_colour(0x0060A0));
+    TP(278, y, utf32(menu_str(setting.left, "-")), !right ? chosen : kText, 0.9f);
+    TP(376, y, utf32(menu_str(setting.right, "-")), right ? chosen : kText, 0.9f);
   }
   if (skin_pick) {
     skin_preview();

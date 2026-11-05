@@ -473,6 +473,13 @@ AkaoPlayer::VoiceProbe AkaoPlayer::probe_voice(int index) const {
   return {voice.active, voice.reg, voice.gl, voice.gr, voice.env.level};
 }
 
+AkaoPlayer::ChannelProbe AkaoPlayer::probe_channel(int index) const {
+  if (index < 0 || index >= kMaxChannels) return {};
+  const Channel& channel = ch_[size_t(index)];
+  return {channel.active, channel.pc, {channel.vib.rate_phase, channel.trem.rate_phase, channel.apan.rate_phase},
+          {channel.vib.counter, channel.trem.counter, channel.apan.counter}};
+}
+
 // ---------------------------------------------------------------------------------------------------- voices
 int AkaoPlayer::alloc_voice() {
   int best = 0;
@@ -957,7 +964,7 @@ void AkaoPlayer::run_ops(Channel& channel) {
         lfo.rate_slide_left = 0;
         break;
       }
-      // Protect: eviction only ends the channel at its loop end.
+      // Protect: eviction only ends the channel at its next CA.
       case 0xE0: channel.protect = true; break;
       case 0xBD: channel.apan.depth = bytes[1] << 7; break;
       case 0xBE: channel.apan.on = false; channel.apan.value = 0; break;
@@ -972,15 +979,11 @@ void AkaoPlayer::run_ops(Channel& channel) {
         break;
       case 0xC9: {
         const int want = bytes[1] ? bytes[1] : 256;
-        // An evicted protected channel ends at its loop end.
-        if (channel.stop_at_loop) {
-          end_channel(channel);
-          return;
-        }
         if (++channel.loop_count[channel.loop_top] != want) channel.pc = channel.loop_pc[channel.loop_top];
         else channel.loop_top = (channel.loop_top - 1) & 3;
         break;
       }
+      // An evicted protected channel ends at its next CA; a counted loop (C9) runs all its passes.
       case 0xCA:
         if (channel.stop_at_loop) {
           end_channel(channel);
@@ -1053,10 +1056,20 @@ void AkaoPlayer::run_ops(Channel& channel) {
       }
       case 0xE4: case 0xE5: case 0xE6: {
         Lfo& lfo = op == 0xE4 ? channel.vib : op == 0xE5 ? channel.trem : channel.apan;
+        // The target is not substituted (0 slides the LFO to a stop). The step is computed from the rate with its low 10 bits cleared
+        // and biased by one toward the target; a falling slide fills those bits first, so the slide ends on operand << 10 plus less
+        // than 0x400 and the reload period (rate >> 10) lands on the operand.
         lfo.rate_slide_left = slide(bytes[1]);
-        u32 target = u32(bytes[2]) << 10;
-        if (!target) target = 0x40000;
-        lfo.rate_slide_step = (int(target) - int(lfo.rate_phase)) / lfo.rate_slide_left;
+        const int target = bytes[2] << 10;
+        const int start = int(lfo.rate_phase & ~0x3FFu);
+        lfo.rate_slide_step = (target - start) / lfo.rate_slide_left;
+        if (target < start) {
+          lfo.rate_phase = u32(start | 0x3FF);
+          --lfo.rate_slide_step;
+        } else {
+          lfo.rate_phase = u32(start);
+          ++lfo.rate_slide_step;
+        }
         break;
       }
       case 0xFE: {
@@ -1204,8 +1217,10 @@ void AkaoPlayer::tick_all() {
 void AkaoPlayer::update_lfo(Channel& channel) {
   auto step = [](Lfo& lfo, int& out) {
     if (!lfo.on || !lfo.wave || lfo.delay_cur) return false;
-    if (--lfo.counter > 0) return false;
-    lfo.counter = std::max<int>(1, int(lfo.rate_phase >> 10));
+    // A 16-bit down-counter: a reload of 0 (rate below 0x400) wraps, so the LFO holds for 65536 updates.
+    lfo.counter = s16(lfo.counter - 1);
+    if (lfo.counter != 0) return false;
+    lfo.counter = s16(lfo.rate_phase >> 10);
     if (lfo.wave[0] == 0 && lfo.wave[1] == 0) lfo.wave += lfo.wave[2];
     out = *lfo.wave++;
     return true;

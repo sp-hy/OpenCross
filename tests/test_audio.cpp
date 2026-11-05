@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <set>
 #include <vector>
@@ -1025,6 +1026,68 @@ void test_music_push() {
   std::printf("music push: held reg %04X, next note %.1f ms later than the song that kept playing\n", held, delay_ms);
 }
 
+// Steps an SFX player one sequencer tick at a time and records the probe of the channel slot the program runs on.
+std::vector<audio::AkaoPlayer::ChannelProbe> trace_sfx_ticks(const std::vector<u8>& program, int ticks,
+                                                             const std::function<void(audio::AkaoPlayer&, int)>& at_tick = {}) {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto code = std::make_shared<audio::AkaoCode>();
+  code->data = program;
+  audio::AkaoPlayer player(44100, true);
+  player.start_program(code, 0, table);
+  int slot = -1;
+  for (int k = 0; k < audio::AkaoPlayer::kSfxChannels; ++k)
+    if (player.probe_channel(k).active) slot = k;
+  std::vector<audio::AkaoPlayer::ChannelProbe> rows;
+  std::vector<float> out(16 * 2);
+  for (u32 last = player.ticks(); int(rows.size()) < ticks;) {
+    player.render(out.data(), 16);
+    if (player.ticks() == last) continue;
+    last = player.ticks();
+    rows.push_back(player.probe_channel(slot));
+    if (at_tick) at_tick(player, int(rows.size()));
+  }
+  return rows;
+}
+
+// E4 / E5 / E6 rate slides: the target (operand << 10) is not substituted; the step comes from the rate with its low 10 bits cleared,
+// +1 when rising, -1 with the low bits filled when falling, so every slide ends with rate >> 10 = the operand. A rate below 0x400 reloads
+// the 16-bit LFO counter with 0, which wraps: the LFO holds. Values: the PS1 sound driver running this program.
+void test_lfo_rate_slide() {
+  const std::vector<u8> program = {0xA1, 0x00, 0xA5, 0x03, 0xA8, 0x40, 0xB4, 0x13, 0x01, 0x01, 0xE4, 0x0C, 0x06, 0x03,
+                                   0xE4, 0x0A, 0x00, 0x87, 0x87, 0xE4, 0x00, 0x05, 0x84, 0x85, 0xB8, 0x40, 0x02, 0x01,
+                                   0xE5, 0x07, 0x09, 0x87, 0xBC, 0x03, 0x01, 0xE6, 0x05, 0x00, 0x87, 0x87, 0xA0};
+  const auto rows = trace_sfx_ticks(program, 420);
+  auto seen = [&](int lfo, u32 value) {
+    for (const auto& row : rows)
+      if (row.rate[lfo] == value) return true;
+    return false;
+  };
+  CHECK(seen(0, 0x400 + 427) && seen(0, 0x1804));
+  CHECK(seen(0, 0x1BFF - 615) && seen(0, 0x3F9));
+  CHECK(seen(0, 21) && seen(0, 0x1500));
+  CHECK(seen(1, 0x800 + 1025) && seen(1, 0x2407));
+  CHECK(seen(2, 0xFFF - 615) && seen(2, 0x3FC));
+  bool held = false;
+  for (const auto& row : rows)
+    if (row.rate[0] == 0x3F9 && row.counter[0] < 0) held = true;
+  CHECK(held);
+}
+
+// An evicted E0-protected channel runs every pass of a counted C9 loop and ends at its next CA (C9 ends nothing): 4 passes of a
+// 6-tick note, one more note, then the CA = 30 ticks.
+void test_protected_loop_end() {
+  const std::vector<u8> program = {0xA1, 0x00, 0xA5, 0x03, 0xA8, 0x40, 0xE0, 0xC8, 0x05, 0xC9, 0x04, 0xC8, 0x05, 0xCA, 0xA0};
+  const auto rows = trace_sfx_ticks(program, 40, [](audio::AkaoPlayer& player, int tick) {
+    if (tick == 3) player.evict_sfx();
+  });
+  size_t first = 0, end = 0;
+  while (first < rows.size() && rows[first].pc == 0) ++first;
+  for (end = first; end < rows.size() && rows[end].active;) ++end;
+  CHECK(rows[20].active && rows[20].pc == 9);
+  CHECK(end - first == 30);
+}
+
 }  // namespace
 
 int main() {
@@ -1050,6 +1113,8 @@ int main() {
   test_mixer_gain();
   test_bgm_switch();
   test_music_push();
+  test_lfo_rate_slide();
+  test_protected_loop_end();
   if (failures == 0) std::printf("test_audio: all passed\n");
   return failures ? 1 : 0;
 }

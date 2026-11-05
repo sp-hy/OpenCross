@@ -201,6 +201,9 @@ class BattleView {
   static render::Letterbox picture(float vw, float vh) { return render::Letterbox::field(vw, vh); }
   bool scene_visible() const { return ready_ && battle_ && !trans_run_; }
   int scene_id() const { return scene_id_; }
+  // [Game] FastMode / SlowMode may change the battle rate: from the end of the intro (and a pack's op 0x60) until the outro (or op 0x5F)
+  // brings the `bti0` layer back, and not while an overlay that holds the speed runs (the Time Devourer's end, miyademo).
+  bool speed_allowed() const { return speed_gate_ && !(fx_ && fx_->bespoke() && fx_->bespoke()->holds_game_speed()); }
   // The 3D pass: depth cue, stage, unit shadows, units, effects, mapped by `lb` = picture() of the window or Letterbox::identity(320, 224)
   // for a PS1-resolution target ([Video] Ps1Res; the host scales it up into picture()). Clipped to the 320 x 224 buffer.
   void draw_scene(const render::Frame& frame, const render::Letterbox& lb, bool sprites_resume = false);
@@ -747,6 +750,8 @@ class BattleView {
   std::vector<int> target_candidates() const;
   // Index into `targets` where the target cursor starts (the PC's remembered target, by the pending command's target order).
   int target_start(const std::vector<int>& targets) const;
+  // The `targets_` index a left (-1) / right (+1) press moves the target cursor to (bhud::target_step).
+  int target_step(int dir) const;
   void build_command_ui();
   void build_element_ui();
   // Dopplegang (element 238): the creature pick list and the form change. open_dopple: element 238 confirmed on the active PC's grid builds
@@ -1433,6 +1438,8 @@ class BattleView {
   bool keep_intro_layer_ = false;
   // The intro has ended and the outro has not yet brought the `bti0` layer back.
   bool intro_layer_cut_ = false;
+  // Behind speed_allowed().
+  bool speed_gate_ = false;
   // Op 62: a window position for the next window only.
   bool smsg_pos_set_ = false;
   int smsg_pos_x_ = 0, smsg_pos_y_ = 0;

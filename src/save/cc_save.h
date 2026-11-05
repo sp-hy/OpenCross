@@ -102,6 +102,8 @@ struct SaveSlot {
   // Not saved (session only): the records come from char20.bin (the dream: boot / FE 2F state until FE 3F reloads char.bin).
   // OpenCross looks the file's record bytes (level masks, growth column) up in this set (game/new_game.h).
   bool dream_records = false;
+  // Not saved: the block failed the loader's checksum. Its head still previews; a load is refused with the "corrupted" message.
+  bool corrupted = false;
 
   // Raw-head accessors (writes keep the preview copies in sync where one exists).
   std::array<u8, 3> party() const;
@@ -140,15 +142,20 @@ struct SaveSlot {
   u8 summary_flags() const { return head[head::kFlags42] & 3; }
 };
 
-// Sum of bytes 0..0x1FF7.
+// Sum of bytes 0..0x1FF7 (what a save stores).
 u32 block_sum(ByteSpan block);
+// u32 save version at 0x1FF8 (0 for a short block).
+u32 block_version(ByteSpan block);
+// The loader's test: the u32 at 0x1FFC equals the sum of bytes 0x180..0x1FF7, plus 0x000..0x17F when the version is above 0x102.
 bool block_checksum_ok(ByteSpan block);
 
-// Section stream <-> 0xE1F4 image (the 54-step table): unpack 0x1975 bytes -> 0xE1F4, pack the reverse.
-Bytes unpack_image(ByteSpan packed);
+// Section stream <-> 0xE1F4 image (the 54-step table): unpack 0x1975 bytes -> 0xE1F4, pack the reverse. `version` gates the last
+// steps as the loader does: a step the version lacks is not in the stream and takes its default.
+Bytes unpack_image(ByteSpan packed, u32 version = kSaveVersion);
 Bytes pack_image(ByteSpan image);
 
-// decode_block throws on wrong size; the checksum is not enforced. encode_block returns 0x2000 bytes with a recomputed checksum.
+// decode_block throws on wrong size; it reads the block's version gates and sets SaveSlot::corrupted when the checksum fails.
+// encode_block returns 0x2000 bytes with version 0x106 and a recomputed checksum.
 SaveSlot decode_block(ByteSpan block);
 Bytes encode_block(const SaveSlot& slot);
 

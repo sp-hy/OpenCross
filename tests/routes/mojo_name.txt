@@ -1,0 +1,68 @@
+# Mojo's name: confirming the language's name stores no custom name, Default restores the custom name the screen opened with, and the
+# alu_b09i doll scene (entity 8, FE 7E) gives a Mojo without a custom name "Mojoy" at once; a typed name stays.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap confirm                         # New Game
+- wait 20
+- tap confirm                         # the vibration page: On
+- wait flow name 600
+- wait 90
+- tap confirm
+- wait 90
+- tap confirm
+- wait 110
+- tap start                           # accept "Serge": the language's name, so no custom name
+- wait movie start 300
+- wait 60
+- tap confirm
+- wait movie end 300
+- wait room opn_a01i 900
+- assert name 0 -
+- load alu_b09i 0
+- wait room alu_b09i 300
+- wait idle 600
+- set var 88 4                        # the doll scene's story bit (bit 1 clear: Mojo has not changed yet)
+- request party_remove 255             # slot 2 freed for Mojo
+- request party_add 27
+- assert party 0,1,27
+- wait idle 120
+# ---- rename with the stock name: nothing stored
+- request rename 27
+- wait menu open 120
+- tap start                           # accept "Mojo"
+- wait menu closed 120
+- assert name 27 -
+# ---- the doll scene: FE 7E gives the language's "Happy Dan"
+- wait idle 300
+- set var 410 2                       # the doll puzzle solved: the third touch, both other dolls set
+- set var 412 1
+- set var 414 1
+- approach 8 40 1200
+- action
+- mash until idle any 4000
+- assert name 27 Mojoy
+# ---- Default restores the custom name, not "Mojo"
+- request rename 27
+- wait menu open 120
+- tap e                               # R1: the text cursor onto the second letter
+- tap confirm                         # 'A' there: "MAjoy"
+- tap left                            # grid column 0 -> the button column (Change Name)
+- tap down
+- tap down                            # Default
+- tap confirm                         # back to "Mojoy"
+- tap start
+- wait menu closed 120
+- assert name 27 Mojoy
+# ---- a typed name is stored
+- request rename 27
+- wait menu open 120
+- tap confirm                         # 'A' over the first letter: "Aojoy"
+- tap start
+- wait menu closed 120
+- assert name 27 Aojoy
+- quit

@@ -32,7 +32,8 @@ void NameEntry::begin(const Setup& setup) {
   char_id_ = setup.char_id;
   lang_ = setup.lang;
   mode_ = setup.mode;
-  default_ = setup.default_name;
+  // Default restores the name the screen opened with: the custom name when there is one, else the language's name.
+  default_ = setup.initial.empty() ? setup.default_name : setup.initial;
   // 12 characters non-JP, JP 6 (Viper 4), in both art modes.
   max_ = max_name_length(char_id_, lang_, true);
   done_ = false;
@@ -56,7 +57,7 @@ void NameEntry::begin(const Setup& setup) {
   // The PS1 screen starts on the button column; the RDE keyboard starts in the grid.
   in_buttons_ = ps1_pages();
   button_ = in_buttons_ ? static_cast<int>(page_) : 0;
-  set_name(setup.initial.empty() ? setup.default_name : setup.initial);
+  set_name(default_);
 }
 
 void NameEntry::set_name(const std::u32string& name) {

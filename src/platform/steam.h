@@ -8,6 +8,7 @@
 // Achievements are stored once Steam has delivered the player's stats; unlock() queues until then, and a failed store retries.
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,6 +17,26 @@
 namespace oc::platform {
 
 inline constexpr std::uint64_t kRdeAppId = 1133760;
+
+struct StatsEvent {
+  bool received;
+  bool ok;
+};
+
+// The user stats calls SteamClient needs. The real one talks to the running client; tests supply their own.
+class SteamBackend {
+public:
+  virtual ~SteamBackend() = default;
+  // The next stats message (received, or stored when `received` is false); false when none is waiting.
+  virtual bool poll(StatsEvent& event) = 0;
+  virtual void request_stats() = 0;
+  virtual bool store_stats() = 0;
+  virtual bool set_achievement(const std::string& api_name) = 0;
+  virtual bool achieved(const std::string& api_name) = 0;
+  virtual int achievement_count() = 0;
+  virtual std::string achievement_name(int index) = 0;
+  virtual std::string achievement_title(const std::string& api_name) = 0;
+};
 
 class SteamClient {
 public:
@@ -27,7 +48,9 @@ public:
   // True when a Steam user is connected as the game.
   bool connect();
   void disconnect();
-  bool connected() const { return stats_ != nullptr; }
+  // Use `backend` instead of the running client and ask it for the stats.
+  void attach(std::unique_ptr<SteamBackend> backend);
+  bool connected() const { return backend_ != nullptr; }
   // Steam has delivered the stats, so achievements can be read and set.
   bool ready() const { return ready_; }
 
@@ -51,10 +74,7 @@ private:
   void flush_unlocks();
   void request_stats();
 
-  void* client_ = nullptr;
-  void* stats_ = nullptr;
-  std::int32_t pipe_ = 0;
-  std::int32_t user_ = 0;
+  std::unique_ptr<SteamBackend> backend_;
   bool ready_ = false;
   bool store_pending_ = false;
   std::chrono::steady_clock::time_point retry_at_{};

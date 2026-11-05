@@ -43,6 +43,7 @@ void App::init_route_state() {
     world.capture_state();
     return static_cast<int>(world.game_state().slot.location());
   };
+  rstate.options = [this] { return static_cast<int>(world.game_state().options()); };
   rstate.battle_events = [this] { return battle_ready ? battle.route_events() : std::vector<std::string>(); };
   rstate.battle_camera = [this] { return battle_ready ? battle.route_camera() : std::string(); };
   rstate.battle_menu = [this] { return battle_ready ? battle.route_menu() : std::string(); };
@@ -127,7 +128,7 @@ void App::route_request(const game::RouteOut& out) {
   }
   else if (rk == "menu") world.request_menu(MK::MainMenu, 0);
   else if (rk == "disc") world.request_menu(MK::ChangeDisc, out.request_arg);
-  else if (rk == "movie") world.play_movie(out.request_arg, 0, true, out.request_arg2);
+  else if (rk == "movie") world.play_movie(out.request_arg, out.request_arg2);
   else if (rk == "battle") world.request_battle(out.request_arg, out.request_arg2, out.request_arg3);
   else if (rk == "battle_disguise") world.request_battle(out.request_arg, 0, 4);
   else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);

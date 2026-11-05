@@ -372,6 +372,8 @@ void test_actor_scripts() {
     host.ms.units[0].rot[1] = 3584;
     host.tgt().home = {-1000.0f + 1536.0f, 0, -1536.0f};
     auto effect = host.make("opthedo");
+    // The exit stands every target on its home with yaw 0xC00 (applied by the host at the pack end).
+    CHECK(host.tgt().exit_yaw == 0xC00 && host.ms.units[0].exit_yaw == -1);
     cmd(*effect, 0x101, {72, 0, -592, 0});
     // At the door; the first drawn frame has colour (alpha) 0.
     CHECK(host.tgt().steer && std::fabs(host.tgt().pos[0] + 1000.0f) < 1.0f && host.tgt().pos[2] == 0.0f && !host.tgt().reveal);
@@ -386,6 +388,36 @@ void test_actor_scripts() {
     CHECK(host.tgt().reveal && host.tgt().release && host.tgt().script_entry == 3 && !host.tgt().custom_draw && !host.tgt().hidden);
     // 73 steps of 37 units along the facing = door + 1.2435 x (home - door) (retail: (-909, -2168) from the door (-2816, -256) toward (-1280, -1792))
     CHECK(std::fabs(host.tgt().pos[0] - (-1000.0f + 73.0f * 37.0f * 0.70710678f)) < 3.0f && std::fabs(host.tgt().pos[2] + 73.0f * 37.0f * 0.70710678f) < 3.0f);
+  }
+  // 3mix 0x101: the return ends facing the casters' bounding-box middle, (max + min) / 2 per axis, not their mean. Casters (1024, 0) and
+  // (3328, +-1536): middle (2176, 0), mean (2560, 0).
+  {
+    Host host;
+    host.ms.units.resize(4);
+    host.ms.units[2].unit = 2, host.ms.units[3].unit = 3;
+    host.ms.units[0].home = host.ms.units[0].pos = {1024.0f, 0, 0};
+    host.ms.units[2].home = host.ms.units[2].pos = {3328.0f, 0, 1536.0f};
+    host.ms.units[3].home = host.ms.units[3].pos = {3328.0f, 0, -1536.0f};
+    host.ms.casters = {0, 2, 3};
+    host.tgt().home = host.tgt().pos = {-1280.0f, 0, 1792.0f};
+    auto effect = host.make("3mix");
+    cmd(*effect, 0x101, {4, 0});
+    host.tick(*effect, 6);
+    CHECK(host.tgt().rot[1] == ((0xFC00 - ratan2(-1792, 2176 + 1280)) & 0xFFF));
+    CHECK(host.tgt().rot[1] != ((0xFC00 - ratan2(-1792, 2560 + 1280)) & 0xFFF));
+    // With a host the selector-3 point (the casters' live positions) is read instead of the model blocks.
+    Host live;
+    live.tgt().home = live.tgt().pos = {-1280.0f, 0, 1792.0f};
+    int asked = -1;
+    live.ms.point = [&asked](int sel, int joint, Vec3& out) {
+      asked = sel * 0x100 + joint;
+      out = {2176.0f, 0, 0};
+      return true;
+    };
+    auto mix = live.make("3mix");
+    cmd(*mix, 0x101, {4, 0});
+    live.tick(*mix, 6);
+    CHECK(asked == 0x300 && live.tgt().rot[1] == ((0xFC00 - ratan2(-1792, 2176 + 1280)) & 0xFFF));
   }
   // 43acce: thrown up by 386 - 5 t per tick and back to the ground
   {

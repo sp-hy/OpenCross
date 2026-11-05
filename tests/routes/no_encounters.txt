@@ -1,0 +1,10 @@
+# opa_b02f entrance 1: the monster (entity 4) touches the player at once and its ON_COLLISION runs BATTLE #1. With "No encounters"
+# on the battle is skipped and variable 0x32 becomes 2 (fled), so its D2 does not mark the monster defeated.
+0 wait idle 600
+- set var 32 5
+- load opa_b02f 1
+- wait 120
+- assert battle inactive
+- assert var 32 2
+- assert result 2
+- quit

@@ -46,6 +46,14 @@ std::u32string own_name(int char_id, const CharNames& names, bool title = true);
 // The name a screen shows for a character: Lynx's name when shows_lynx holds, else own_name.
 std::u32string character_name(int char_id, int body, NameContext context, bool keep_custom, const CharNames& names, bool title = true);
 
+// A confirmed name equal to the language's name of the id stores no custom name (the character follows a language switch).
+bool is_default_name(int char_id, const std::u32string& name, const CharNames& names);
+
+// Field op FE 7E, Mojo learning his tech: a Mojo without a custom name gets the language's cmnmes row keyed ハッピーダン ("Mojoy" in
+// English) as one. Empty when he has a custom name already, whatever it is, or the row is missing.
+constexpr int kMojo = 0x1B;
+std::u32string learned_tech_name(const CharNames& names);
+
 // Kid's name on every battle screen of scene 0x186, the fight before the party learns who she is; it replaces a typed name too.
 constexpr int kUnnamedKidScene = 0x186;
 constexpr int kKid = 1;

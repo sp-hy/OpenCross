@@ -143,8 +143,6 @@ class Fnoise : public MeshTech {
       spec.flags = 0x40;
       spec.env_tpage = 0x97;
       spec.env_clut = 0x3890;
-      // Quads use AVSZ4.
-      spec.quad_avsz3 = false;
       const int radius = radius_, cz = cz_;
       // The centre's y is 0, x unused.
       spec.colour = [radius, cz](const DrawVert& vertex, u8 rgb[3]) {

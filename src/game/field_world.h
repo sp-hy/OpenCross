@@ -261,6 +261,8 @@ class FieldWorld final : public script::FieldHost {
   ui::GameState& game_state() { return *gs_; }
   // Typed character names (UTF-32) for the dialogue name placeholders; the map must outlive the world.
   void set_custom_names(const std::map<int, std::u32string>* names);
+  // Where a script-given custom name goes (FE 7E); the host stores it with the typed names.
+  void set_name_store(std::function<void(int, std::u32string)> store) { name_store_ = std::move(store); }
   void install_name_hooks();
   // Writes the world into the state before a save: global script variables 0x000..0x3FF into the head block, the room id, the
   // leader's position and the party ids.
@@ -321,8 +323,7 @@ class FieldWorld final : public script::FieldHost {
   // The room's background layers alone (the picker's backdrop), between SpriteBatch begin() and end().
   void draw_room(render::SpriteBatch& sprites, float vw, float vh);
   struct MovieRequest {
-    int index = 0, variant = 0;
-    bool skippable = false;
+    int index = 0;
     // The last frame fades out over the resumed field (flag 8); otherwise it is held opaque for a few frames.
     bool fade = false;
     // movie.dat member base name ("" = nothing to play)
@@ -341,6 +342,8 @@ class FieldWorld final : public script::FieldHost {
   // A key item chosen in the list: var 0x2A USED_KEY_ITEM = 0x400 + n; Tele-Porter -> party screen (as FE 5B), Smith Spirit -> smith
   // (as FE 68 with shop var 0x4A), any other item is shown to the entities in talk range (ON slot 4 of those that accept an item).
   void use_key_item(int item);
+  // A disabled item confirmed in the list: var 0x2A = 0x400 + n all the same; the list stays open and nothing is shown or opened.
+  void refuse_key_item(int item);
   void set_effect_tap(std::function<bool(script::NamedOp, std::string_view)> tap) { effect_tap_ = std::move(tap); }
   bool movie_pending() const { return movie_state_ == MovieState::Requested; }
   // The host starts the requested movie: the room sequence named after it ("mo1" / "mo2" by the disc, then 'a' + the movie number:
@@ -553,6 +556,8 @@ class FieldWorld final : public script::FieldHost {
 
   // ---- script::FieldHost ----------------------------------------------------------------------------------------------
   bool system_ready() override;
+  bool entry_window() override { return entry_window_ > 0; }
+  bool window_open() override { return any_window_open(); }
   void end_of_tick(script::FieldVM& vm) override;
   int party_entity(int slot) override;
   int character_entity(int char_id) override;
@@ -633,7 +638,7 @@ class FieldWorld final : public script::FieldHost {
   void sfx_pan(int slot, int frames, int pan) override;
   void fade_master_volume(int frames, int volume) override;
   void named_effect(script::NamedOp op, std::string_view name, int ent) override;
-  void play_movie(int index, int variant, bool skippable, int flags) override;
+  void play_movie(int index, int flags) override;
   bool movie_playing() override;
   void request_battle(int battle_id, int arg, int flags) override;
   bool battle_active() override;
@@ -845,6 +850,7 @@ class FieldWorld final : public script::FieldHost {
   ui::GameState own_state_;
   ui::GameState* gs_ = &own_state_;
   const std::map<int, std::u32string>* custom_names_ = nullptr;
+  std::function<void(int, std::u32string)> name_store_;
   // party_chars_ <- the state's party
   void sync_party();
   // state's party <- party_chars_
@@ -866,7 +872,8 @@ class FieldWorld final : public script::FieldHost {
   // ticks after a room load in which clip cross-fades are cut (INIT's first pose is not a visible move)
   u32 entry_cut_ = 0;
   // The room-entry window: 2 frames (4 ticks) after a room load or a battle return (the field restarts) in which nothing is culled
-  // and every model that can turn takes its facing at once
+  // and every model that can turn takes its facing at once. The scripts run after step_cull has counted it down, so 3C / A9 wait
+  // on the first 3 ticks and run on the 4th.
   u32 entry_window_ = 0;
   u64 room_loads_ = 0, art_swaps_ = 0;
   // art mode changed while a window was open: applied when the next window opens

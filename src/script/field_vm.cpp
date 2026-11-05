@@ -5,7 +5,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <memory>
+#include <string>
 
 #include "core/log.h"
 
@@ -17,6 +19,8 @@ namespace {
 // the number of handler calls one dispatcher invocation may make.
 constexpr int kStepCapInit = 65535;
 constexpr int kCallCap = 0x41;
+// Debug: OC_VM_TRACE logs every executed instruction (tick, entity, record, pc, op, yield, budget).
+const bool kTraceOps = std::getenv("OC_VM_TRACE") != nullptr;
 
 u32 default_rng_step(u32& state) {
   state ^= state << 13;
@@ -288,6 +292,9 @@ void FieldVM::dispatch(int ent, int rec_index, bool run_mode) {
     yield_ = false;
     base_ = pc;
     exec(op);
+    if (kTraceOps)
+      log::info("vm: tick {} ent {} rec {} pc {:04X} op {:02X}{}{} budget {}", stats_.ticks, ent, rec_index, pc, op,
+                op == 0xFE ? std::format(" {:02X}", mod_.code_byte(pc + 1)) : std::string(), yield_ ? " yield" : "", budget_);
     ++steps;
     ++calls;
     ++stats_.instructions;

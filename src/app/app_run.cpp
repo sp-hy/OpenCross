@@ -127,10 +127,10 @@ void App::frame_pad_remap() {
 }
 
 void App::frame_hotkeys() {
-  // The settings window: Esc, or the pad's Start held for kStartHoldMs (it opens while still held); a Start press closes it. A shorter
-  // Start press is RDE's Start: it opens the pause screen on its release (start_tap), so holding never shows the pause first (the keyboard's
-  // Start, Space, opens it on the press). The pad's Back / View and the K key are the PS1 Select: it rotates the party in the field and, held,
-  // hides the battle overlays during a cast.
+  // The settings window: Esc, the pad's LT + L3 chord (MenuChord, opens and closes it), or the pad's Start held for kStartHoldMs (it
+  // opens while still held); a Start press closes it. A shorter Start press is RDE's Start: it opens the pause screen on its release
+  // (start_tap), so holding never shows the pause first (the keyboard's Start, Space, opens it on the press). The pad's Back / View
+  // and the K key are the PS1 Select: it rotates the party in the field and, held, hides the battle overlays during a cast.
   constexpr u64 kStartHoldMs = 500;
   const bool start_down = input.pad_connected && input.pad_down[SDL_GAMEPAD_BUTTON_START];
   const bool start_pressed = input.pad_connected && input.pad_pressed[SDL_GAMEPAD_BUTTON_START];
@@ -148,7 +148,12 @@ void App::frame_hotkeys() {
     start_held = false;
     settings_key = !ui.options_open;
   }
+  const bool pad_free = input.pad_connected && !game::free_cam().on();
+  if (menu_chord.poll(pad_free && input.pad_axis[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] >= 0.5f, pad_free && input.pad_down[SDL_GAMEPAD_BUTTON_LEFT_STICK]))
+    settings_key = true;
   if (settings_key && !routing && !replaying) ui.options_open = !ui.options_open;
+  // The play-time toggles read the pad before the settings window takes it: like RDE, they still flip while the window is open.
+  rde_toggle_keys();
   const bool select_down = input.key_down[platform::kSelectKey] || (input.pad_connected && input.pad_down[SDL_GAMEPAD_BUTTON_BACK]);
   battle.set_select_held(select_down && !ui.options_open && !routing && !replaying);
   settings_pad_filter();
@@ -161,7 +166,6 @@ void App::frame_hotkeys() {
     config.save(config_file);
     ui.toast(config.widescreen ? "Widescreen: On" : "Widescreen: Off");
   }
-  rde_toggle_keys();
 }
 
 // The settings window takes the pad (ImGui reads it from SDL directly): while it is open the game sees no pad input, and a button or
@@ -183,15 +187,16 @@ bool App::speed_locked() const {
 }
 
 // [Game] FastMode / SlowMode, as RDE: the field loop runs faster or slower only while the field itself is running (FieldWorld::
-// speed_allowed), the battle loop in any battle; menus, shops, name entry, the title, the results, movies and play time keep the real
-// step (App::advance picks which loop a frame runs). A replay runs 1:1 (it holds the ticks the field ran); a route runs them from its
-// ini's FastMode / SlowMode, per route tick.
+// speed_allowed), the battle loop while the battle allows it (BattleView::speed_allowed: not in the intro or the outro); menus,
+// shops, name entry, the title, the results, movies and play time keep the real step (App::advance picks which loop a frame runs). A
+// replay runs 1:1 (it holds the ticks the field ran); a route runs them from its ini's FastMode / SlowMode, per route tick.
 void App::update_loop_speed(double dt) {
   loop_speed.on = !movie_open && !replaying;
   loop_speed.field_factor = loop_speed.battle_factor = 1.0f;
   if (!loop_speed.on) return;
   const bool in_battle = battle_ok || battle_in_field, locked = speed_locked();
-  loop_speed.battle_factor = game::speed_factor(config.fast_mode, config.slow_mode, config.fast_rate, config.slow_rate, true, locked);
+  const bool battle_held = in_battle && !(battle_ready && battle.speed_allowed());
+  loop_speed.battle_factor = game::speed_factor(config.fast_mode, config.slow_mode, config.fast_rate, config.slow_rate, true, locked || battle_held);
   const bool field_runs = !in_battle && world_ok && world.speed_allowed();
   const float field = field_runs ? game::speed_factor(config.fast_mode, config.slow_mode, config.fast_rate, config.slow_rate, false, locked) : 1.0f;
   const bool field_slow = field_runs && config.slow_mode && !config.fast_mode && !locked;
