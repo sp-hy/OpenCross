@@ -21,6 +21,8 @@ constexpr u32 kPoison = 0x1, kFlu = 0x20, kKO = 0x80, kAfraid = 0x100, kFatigued
 constexpr u32 kHiAlwaysHit = 0x1000, kHiWeaponAbsorb = 0x2000, kHiAbsorb = 0x4000, kHiWeaponImmune = 0x8000, kHiImmune = 0x10000, kHiRegen = 0x80000;
 // Lo bits kept after a battle.
 constexpr u32 kPersist = 0x39;
+// Inflicted bits a PC keeps when a hit knocks it out; a poison KO keeps the inflicted lo bits 1..15 and the whole hi word.
+constexpr u32 kKoKeepLo = 0x400480u, kKoKeepHi = 0x1FE00000u, kPoisonKoKeepLo = 0xFFFEu;
 // Bits whose infliction starts a timer.
 constexpr u32 kTimedLo = 0xBBBFFB00u;
 constexpr u32 kTimedHi = 0xE003FFFFu;
@@ -159,9 +161,9 @@ struct ElementIn {
 };
 DamageOut element_damage(Rng& rng, const ElementIn& in);
 
-// Heal (mode 3): max(1, sum_{i=0..mag+1} (power*100 - rnd(0,power)) / 400) through the slot and colour multipliers, capped at 999.
-// `power` = pgdat +0xA.
-int heal_amount(Rng& rng, int mag, int power, int slot_mille, int colour_mille);
+// Heal (modes 3, 7, 14): max(1, sum_{i=0..mag+1} (power*100 - rnd(0,power)) / 400) through the slot multiplier, capped at 999. A heal never
+// takes the colour multiplier or the field state. `power` = pgdat +0xA.
+int heal_amount(Rng& rng, int mag, int power, int slot_mille);
 // Slot modifier per mille: 1000 +/- 125*n, n = |row-(level-1)| (0 if the element has no level), + when placed above.
 int slot_mille(int row, int level);
 

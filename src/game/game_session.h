@@ -5,8 +5,8 @@
 // Layout notes: the party's saved record gives max HP / stats (SaveChar), current HP (cur_hp), gear, the
 // element grid (GameState::cell_element) and the unlocked-level masks. The growth snapshot / pending deltas live in the record
 // fields rec+BC/BE (HP) and rec+C0..CB (ATK, HIT, DEF, EVD, MAG, MDEF: snapshot, pending). Stars: head 0x5A4 (star) / 0x5A5
-// (counter). The growth progress counter is not stored anywhere in the save: the host keeps it for the session
-// (battle_setup / apply_battle_result take and return it; a loaded or new game starts at 0).
+// (counter). The growth progress counter is head 0x598 (SaveSlot::growth_progress): battle_setup takes it,
+// apply_battle_result returns the new value, and the host stores it back; a new game starts at 0.
 #include <string>
 #include <string_view>
 #include <vector>

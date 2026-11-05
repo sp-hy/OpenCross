@@ -107,6 +107,8 @@ void SaveSlot::set_gold(u32 amount) {
   wr(&head[head::kGold], 4, amount);
   wr(&head[head::kPreviewGold], 4, amount);
 }
+u32 SaveSlot::growth_progress() const { return rd(&head[head::kGrowthProgress], 4); }
+void SaveSlot::set_growth_progress(u32 value) { wr(&head[head::kGrowthProgress], 4, value); }
 bool SaveSlot::recruited(int character) const { return character >= 0 && character < kNumChars && ((head[head::kRecruited + character / 8] >> (character % 8)) & 1); }
 void SaveSlot::set_recruited(int character, bool on) {
   if (character < 0 || character >= kNumChars) return;

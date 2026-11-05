@@ -146,7 +146,7 @@ FlowAction FlowMachine::on_name(std::u32string_view name) {
   action.param = kNewGameParam;
   action.state_changed = true;
   action.stop_music = true;
-  // Title script: MAP_JUMP_DC #22, then D4 #2 + WAIT_MOVIE; the jump happens when the script ends.
+  // Title script: MAP_JUMP_DC #22, then D4 #2 + WAIT_MOVIE; the jump is taken when the movie ends.
   action.movie_row = kNewGameMovieRow;
   return action;
 }

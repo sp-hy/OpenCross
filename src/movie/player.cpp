@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <chrono>
-#include <cmath>
 
 #include "audio/mixer.h"
 #include "core/log.h"
@@ -13,10 +12,29 @@ namespace oc::movie {
 
 namespace {
 
-// The movie table counts frames of the original 15 fps movies.
-constexpr double kTableFps = 15.0;
+// Staff-roll layout, in fractions of the 4:3 picture: the movie panel's corner and size, and the strip's width from the left edge.
+constexpr float kPanelX = 0.48f, kPanelY = 0.46f, kPanelSize = 0.49f;
+constexpr float kStripWidth = 0.45f;
+// By the roll's last frame the end of the strip has risen this part of the visible span above the bottom of the strip area.
+constexpr float kStripEndRise = 0.52f;
 
 }  // namespace
+
+std::string_view staff_strip_member(std::string_view lang) {
+  return lang == "jp" ? "hd/staff/staff24.png" : "hd/staff/staff24us.png";
+}
+
+float staff_strip_span(u32 strip_w, u32 strip_h) {
+  if (!strip_h) return 0.0f;
+  // Square texels on the 4:3 picture: the area is kStripWidth of its width across and the full height down.
+  return static_cast<float>(strip_w) * 3.0f / (static_cast<float>(strip_h) * 4.0f * kStripWidth);
+}
+
+float staff_strip_top(u64 frame, u64 last, u32 strip_w, u32 strip_h) {
+  const float span = staff_strip_span(strip_w, strip_h);
+  if (!last) return -span;
+  return (span * kStripEndRise + 1.0f) * static_cast<float>(frame) / static_cast<float>(last) - span;
+}
 
 std::string resolve_member(const vfs::Vfs& fs, std::string_view name, std::string_view lang) {
   std::string base(name);
@@ -60,11 +78,12 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
   has_audio_ = dec_->has_audio() && mixer_;
   if (has_audio_) mixer_->movie_start(level);
   log::info("movie: {} {}x{} @ {:.2f} fps{}", member_, width_, height_, fps_, dec_->has_audio() ? " + audio" : "");
-  // Table frames are 1-based (the first shown is max(start, 1)); decoder indices are 0-based, at the file's own rate.
-  const double rate_scale = fps_ / kTableFps;
-  start_ = start > 1 ? static_cast<u32>(std::lround((start - 1) * rate_scale)) : 0;
-  const u32 scaled_end = static_cast<u32>(std::lround(end * rate_scale));
-  end_ = scaled_end > start_ ? scaled_end : 0;
+  // Table frames are the file's own 1-based frame numbers: frames max(start, 1) .. last - 1 are shown, last = the end clamped to the
+  // frame count. Decoder indices are 0-based.
+  const u64 count = dec_->frame_count();
+  start_ = start > 1 ? start - 1 : 0;
+  last_ = static_cast<u32>(end && (!count || end < count) ? end : count);
+  end_ = last_ > start_ + 1 ? last_ - 1 : 0;
   skip_floats_ = static_cast<size_t>(static_cast<double>(start_) / fps_ * Decoder::kAudioRate) * 2;
   limit_floats_ = end_ ? static_cast<size_t>(static_cast<double>(end_ - start_) / fps_ * Decoder::kAudioRate) * 2 : 0;
   seen_floats_ = kept_floats_ = 0;
@@ -86,6 +105,7 @@ void Player::close(bool keep_frame) {
   if (mixer_ && has_audio_) mixer_->movie_stop();
   const bool keep = keep_frame && have_frame_ && ctx_ && set_;
   if (!keep) {
+    release_strip();
     set_ = {};
     texture_.destroy();
     sampler_.destroy();
@@ -120,6 +140,59 @@ bool Player::init_gpu(render::GpuContext& ctx, render::SpriteBatch& sprites) {
   ctx_ = &ctx;
   sprites_ = &sprites;
   return static_cast<bool>(set_);
+}
+
+bool Player::set_staff_roll(const vfs::Vfs& fs, std::string_view member) {
+  release_strip();
+  if (!ctx_) return false;
+  auto bytes = fs.read(member);
+  render::DecodedImage image;
+  if (!bytes || !render::decode_image(*bytes, image) ||
+      !strip_texture_.create(*ctx_, image.width, image.height, render::TextureFormat::Rgba8, image.rgba.data())) {
+    log::error("movie: staff strip '{}' could not be read", member);
+    strip_texture_.destroy();
+    return false;
+  }
+  strip_set_ = render::TexRef(strip_texture_, sampler_);
+  strip_w_ = image.width;
+  strip_h_ = image.height;
+  log::info("movie: staff roll, strip {} {}x{}, last frame {}", member, strip_w_, strip_h_, last_);
+  return true;
+}
+
+void Player::release_strip() {
+  strip_set_ = {};
+  strip_texture_.destroy();
+  strip_w_ = strip_h_ = 0;
+}
+
+Player::Rect Player::picture_rect(float vw, float vh) const {
+  if (strip_set_) {
+    // The staff roll's panel sits at the lower right of the plain 4:3 fit of the window.
+    const float h = std::min(vh, vw * 0.75f), w = h * 4.0f / 3.0f;
+    const float x0 = (vw - w) * 0.5f, y0 = (vh - h) * 0.5f;
+    return {x0 + w * kPanelX, y0 + h * kPanelY, w * kPanelSize, h * kPanelSize};
+  }
+  // The shared 4:3 fit zoom.
+  const float scale = render::canvas_fit(vw, vh, static_cast<float>(width_), static_cast<float>(height_)).s;
+  const float w = static_cast<float>(width_) * scale, h = static_cast<float>(height_) * scale;
+  return {(vw - w) * 0.5f, (vh - h) * 0.5f, w, h};
+}
+
+void Player::draw_strip(float vw, float vh) {
+  if (!strip_set_ || !have_frame_) return;
+  // The strip area: the left kStripWidth of RDE's 1280 x 960 canvas, its full height (render::overlay_fit's band and display squash).
+  const render::OverlayFit fit = render::overlay_fit(vw, vh);
+  const float x0 = fit.ox, x1 = fit.ox + 1280.0f * kStripWidth * fit.sx;
+  float y0 = fit.oy, y1 = fit.oy + 960.0f * fit.sy;
+  const float span = staff_strip_span(strip_w_, strip_h_);
+  // The decoder has moved on to the next frame by the time the shown one is drawn: frame number = 0-based index + 2.
+  float v0 = staff_strip_top(shown_ + 2, last_, strip_w_, strip_h_), v1 = v0 + span;
+  if (span <= 0.0f || v1 <= 0.0f || v0 >= 1.0f) return;
+  const float per_v = (y1 - y0) / span;
+  if (v0 < 0.0f) y0 -= v0 * per_v, v0 = 0.0f;
+  if (v1 > 1.0f) y1 -= (v1 - 1.0f) * per_v, v1 = 1.0f;
+  sprites_->draw(strip_set_, x0, y0, x1 - x0, y1 - y0, 0.0f, v0, 1.0f, v1);
 }
 
 // Worker: decode ahead, then feed the mixer's ring as it frees up.
@@ -247,11 +320,10 @@ void Player::update(double dt) {
 
 void Player::draw_held(const render::Frame& frame, float vw, float vh) {
   if (!held_ || !ctx_ || !set_) return;
-  // The shared 4:3 fit zoom.
-  const float scale = render::canvas_fit(vw, vh, static_cast<float>(width_), static_cast<float>(height_)).s;
-  const float w = static_cast<float>(width_) * scale, h = static_cast<float>(height_) * scale;
+  // A staff roll ends with its strip scrolled out (staff_strip_top at the last frame), so only the panel is held.
+  const Rect picture = picture_rect(vw, vh);
+  const float w = picture.w, h = picture.h, x0 = picture.x, y0 = picture.y;
   const u32 a = static_cast<u32>(std::clamp(held_alpha_, 0.0, 1.0) * 255.0 + 0.5);
-  const float x0 = (vw - w) * 0.5f, y0 = (vh - h) * 0.5f;
   sprites_->begin(frame, vw, vh, true);
   sprites_->draw(set_, x0, y0, w, h, 0.0f, 0.0f, 1.0f, 1.0f, 0x00FFFFFFu | (a << 24));
   // The movie's own black bars fade with it over the rest of the screen in use (widescreen: the widened frame, Letterbox::veil_rect):
@@ -279,10 +351,10 @@ bool Player::fade_held(double dt, double seconds) {
 
 void Player::draw(const render::Frame& frame, float vw, float vh) {
   if (!ctx_ || !set_) return;
-  const float scale = render::canvas_fit(vw, vh, static_cast<float>(width_), static_cast<float>(height_)).s;
-  const float w = static_cast<float>(width_) * scale, h = static_cast<float>(height_) * scale;
+  const Rect picture = picture_rect(vw, vh);
   sprites_->begin(frame, vw, vh);
-  sprites_->draw(set_, (vw - w) * 0.5f, (vh - h) * 0.5f, w, h);
+  sprites_->draw(set_, picture.x, picture.y, picture.w, picture.h);
+  draw_strip(vw, vh);
   sprites_->end();
 }
 

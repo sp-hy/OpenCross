@@ -482,7 +482,10 @@ void test_disc_index() {
     game::DiscIndex::movie_range(1, 22, range_start, range_end);
     CHECK(range_start == 281 && range_end == 417);
     game::DiscIndex::movie_range(2, 12, range_start, range_end);
-    CHECK(range_start == 1 && range_end == 0);
+    CHECK(range_start == 1 && range_end == 8130);
+    // The full staff roll plays the whole file.
+    game::DiscIndex::movie_range(2, 11, range_start, range_end);
+    CHECK(range_start == 0 && range_end == 0);
   }
   // A battle script goes by the record's file, not by the scene number; no record = the template.
   CHECK(idx.battle_script(1, 414) == "cdrom/battle/event/evt414.pac" && idx.battle_script(1, 424) == "cdrom/battle/event/evt414.pac");

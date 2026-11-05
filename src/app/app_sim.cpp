@@ -81,6 +81,8 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
     if (flow_ready) flow.set_title_logo_ready(true);
     return;
   }
+  // The two ending_s rows (modes 3 / 4) show the staff roll: the movie in a panel beside the scrolling credits strip.
+  if (row && (row->mode == 3 || row->mode == 4)) movie_player.set_staff_roll(files, movie::staff_strip_member(config.language));
   movie_open = true;
   movie_skippable = rq.skippable;
   ctx.set_clear_color(0.0f, 0.0f, 0.0f);
@@ -206,7 +208,6 @@ void App::apply_flow_action(const game::FlowAction& action) {
   if (action.stop_music && world_ok) world.stop_music();
   if (action.state_changed && world_ok) {
     world.set_game_state(&flow.game_state());
-    growth_progress = 0;
     if (flow.state() == game::FlowState::Opening) world.reset_for_new_game();
     else world.restore_vars();
   }
@@ -231,6 +232,12 @@ void App::apply_flow_action(const game::FlowAction& action) {
     if (action.room_id >= 0) {
       const std::string stem = world.room_stem_for_id(action.room_id);
       if (!stem.empty()) room = stem;
+    }
+    // New Game is the title script's DC jump, taken when its movie ends: PREVIOUS_MAP_ID = the title room's register (8, left by its
+    // FE 2F), and the register names the opening room.
+    if (flow.state() == game::FlowState::Opening && action.room_id < 0) {
+      world.vm().set_room_register(8);
+      world.vm().note_room_change(game::kNewGameRoomId);
     }
     if (room.empty() || !world.load_room(room, action.param)) {
       log::error("flow: could not load {}", room);
@@ -480,7 +487,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       // the list stays up
     } else if (flow.take_ng_plus_result() == game::GameFlow::NgPlusResult::NewGamePlus) {
       // New Game+: the state was replaced in place; the field takes its variables (0x7E = 2, MAP_ID 8, disc 1) and party, then the
-      // ending room's script goes on (it names Serge, the dream party, then jumps with movie 2).
+      // ending room's script goes on (it names Serge, the dream party, then records its DC jump, which movie 2's end takes).
       autosave.note_load();
       world.restore_vars();
       // The previous map id becomes 8 (opn_a01i then has PREVIOUS_MAP_ID 8).

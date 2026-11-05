@@ -175,11 +175,11 @@ DamageOut element_damage(Rng& rng, const ElementIn& in) {
   return out;
 }
 
-int heal_amount(Rng& rng, int mag, int power, int slot_mille, int colour_mille) {
+int heal_amount(Rng& rng, int mag, int power, int slot_mille) {
   long long sum = 0;
   for (int i = 0; i <= mag + 1; ++i) sum += power * 100 - rng.rnd(0, power);
   const int base = std::max(1, static_cast<int>(sum / 400));
-  const long long heal = static_cast<long long>(base) * slot_mille / 1000 * colour_mille / 1000;
+  const long long heal = static_cast<long long>(base) * slot_mille / 1000;
   return static_cast<int>(std::min<long long>(heal, 999));
 }
 

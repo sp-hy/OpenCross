@@ -98,6 +98,37 @@ class TestHost : public NullHost {
   void open_dialogue(int, int, int) override { ++opened; }
 };
 
+// DC only records the movie-end jump: no variable, no room register, no map jump, and the 7E behind it is reached in the same run.
+// Taking the jump (note_room_change) stores the room register in PREVIOUS_MAP_ID and moves the register to the target.
+void test_movie_end_jump() {
+  class JumpHost : public NullHost {
+   public:
+    int movie_room = -1, movie_param = -1, map_jumps = 0, movies = 0;
+    void set_movie_jump(int room, int param) override { movie_room = room, movie_param = param; }
+    void request_map_jump(int, int) override { ++map_jumps; }
+    void play_movie(int, int, bool) override { ++movies; }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xDC}).word(I(472)).word(I(0x102));
+  script.raw({0x7E}).word(I(18));
+  script.stop();
+  JumpHost host;
+  FieldVM vm(host);
+  vm.set_var(var::kMapId, 538);
+  vm.set_var(var::kPrevMapId, 78);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.movie_room, 472);
+  CHECK_EQ(host.movie_param, 0x102);
+  CHECK_EQ(host.map_jumps, 0);
+  CHECK_EQ(host.movies, 1);
+  CHECK_EQ(vm.var(var::kPrevMapId), 78);
+  vm.note_room_change(472);
+  CHECK_EQ(vm.var(var::kPrevMapId), 538);
+  vm.note_room_change(22);
+  CHECK_EQ(vm.var(var::kPrevMapId), 472);
+}
+
 void test_arithmetic() {
   Asm script;
   const u16 init = script.here();
@@ -890,6 +921,7 @@ void test_screen_ops_and_fe61() {
 
 int main() {
   test_arithmetic();
+  test_movie_end_jump();
   test_skipped_battle();
   test_screen_ops_and_fe61();
   test_variables_and_signedness();

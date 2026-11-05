@@ -408,10 +408,8 @@ bool FieldVM::exec_game(u8 op) {
       }
       break;
     case 0xDB: write_var(word_at(3), host_.character_model_byte(operand_u(1))); advance(5); break;
-    case 0xDC:  // the movie-end jump stores the room register like 5A
-      write_var(var::kPrevMapId, room_register());
-      room_reg_ = operand_u(1);
-      host_.request_map_jump(operand_u(1), operand_u(3));
+    case 0xDC:  // MAP_JUMP_DC: records the jump the movie behind it starts when it ends
+      host_.set_movie_jump(operand_u(1), operand_u(3));
       advance(5);
       break;
     case 0xDD:

@@ -124,8 +124,10 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
     for (int row = 0; row < ui::GameState::kRows; ++row)
       for (int col = 0; col < ui::GameState::kCols; ++col) {
         const size_t cell = static_cast<size_t>(row * ui::GameState::kCols + col);
-        if (cell < member.qty.size() && (member.cells[cell] & 0x3FFF) != 0 && (member.cells[cell] & 0x3FFF) < tables.elements.size() && (tables.elements[member.cells[cell] & 0x3FFF].flags0() & 0x10))
-          member.qty[cell] = static_cast<u8>(std::max(1, gs.cell_count(char_id, row, col)));
+        if (cell < member.qty.size() && (member.cells[cell] & 0x3FFF) != 0 && (member.cells[cell] & 0x3FFF) < tables.elements.size() && (tables.elements[member.cells[cell] & 0x3FFF].flags0() & 0x10)) {
+          member.qty[cell] = static_cast<u8>(gs.cell_count(char_id, row, col));
+          if (member.qty[cell] == 0) member.unlocked[cell] = false;
+        }
       }
     member.lo_persist = save_char.status & battle::st::kPersist;
     read_growth(save_char, member);
@@ -183,6 +185,17 @@ void write_unlocks(ui::GameState& gs, const data::GameTables& tables, int char_i
         save_char.unlocked[static_cast<size_t>(row)] |= static_cast<u16>(1u << col);
 }
 
+
+// Every consumable stack cell below 5 copies takes the missing copies from the element stock. A stack that ran out keeps its element.
+void restock_stacks(ui::GameState& gs, const data::GameTables& tables, save::SaveChar& save_char) {
+  constexpr int kStackMax = 5;
+  for (size_t k = 0; k < save_char.grid.size(); ++k) {
+    const size_t id = save_char.grid[k] & 0x3FFF;
+    if (id == 0 || id >= tables.elements.size() || (tables.elements[id].flags0() & 0x30) != 0x10) continue;
+    u8& qty = save_char.equipped_qty[k];
+    while (qty < kStackMax && gs.take_element(static_cast<int>(id))) ++qty;
+  }
+}
 }  // namespace
 
 BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tables, const battle::Battle& finished_battle, int* progress) {
@@ -216,8 +229,8 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
       const u8 before = static_cast<u8>(std::max<int>(1, save_char.equipped_qty[static_cast<size_t>(k)]));
       if (member.qty[cell] >= before) continue;
       save_char.equipped_qty[static_cast<size_t>(k)] = member.qty[cell];
-      if (member.qty[cell] == 0) save_char.grid[static_cast<size_t>(k)] = static_cast<u16>(save_char.grid[static_cast<size_t>(k)] & 0xC000);
     }
+    restock_stacks(gs, tables, save_char);
   }
   if (progress) *progress = finished_battle.growth().progress;
   const battle::Rewards& rewards = finished_battle.rewards();
@@ -238,6 +251,8 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
     ++lost;
   }
   if (trapped || lost) log::info("session: element traps: {} element(s) taken into the stock, {} grid cell(s) lost", trapped, lost);
+  // Stars current: the summons cast spent theirs whatever the outcome (a star-up raised it too).
+  gs.slot.head[kCounterOff] = static_cast<u8>(std::clamp(finished_battle.growth().counter, 0, 255));
   if (!victory) return sum;
   // Pilfered loot (mode 30) is kept only on a victory: bit 15 = element stock (id & 0xFF, as a trapped element), else the item stock.
   for (u16 loot : rewards.stolen) {
@@ -252,9 +267,8 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
     if (gs.add_element(id)) ++sum.elements;
   if (rewards.star_up) {
     sum.star_up = true;
-    // The core ran from the real star: its growth state is the new one (stars 0..99, counter wraps with the byte).
+    // The core ran from the real star: its growth state is the new one (stars 0..99).
     gs.slot.head[kStarOff] = static_cast<u8>(std::min(99, finished_battle.growth().star));
-    gs.slot.head[kCounterOff] = static_cast<u8>(std::min(255, finished_battle.growth().counter));
     const int star = session_star(gs);
     for (const battle::PartyMember& member : party)
       if (member.char_id >= 0 && member.char_id < save::kNumChars) write_unlocks(gs, tables, member.char_id, star);

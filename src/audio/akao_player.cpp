@@ -464,6 +464,11 @@ int AkaoPlayer::active_voices() const {
   for (const auto& voice : voice_) count += voice.active;
   return count;
 }
+AkaoPlayer::VoiceProbe AkaoPlayer::probe_voice(int index) const {
+  if (index < 0 || index >= kVoices) return {};
+  const Voice& voice = voice_[size_t(index)];
+  return {voice.active, voice.reg, voice.gl, voice.gr, voice.env.level};
+}
 
 // ---------------------------------------------------------------------------------------------------- voices
 int AkaoPlayer::alloc_voice() {
@@ -513,15 +518,30 @@ void AkaoPlayer::end_channel(Channel& channel) {
               trace_ms() - channel.started_at * 1000.0 / 48000.0, channel.voice);
   key_off(channel);
   channel.active = false;
+  channel.voice_update = false;
 }
 
 void AkaoPlayer::note_on(Channel& channel, int key) {
-  // A key-on (a legato re-pitch is none) restarts the FE 19 slide from its start volume.
-  if (channel.keyon_slide_len && !channel.legato_prev) {
-    channel.volume = channel.keyon_volume;
-    channel.vol_slide_left = channel.keyon_slide_len;
-    channel.vol_slide_step = channel.keyon_slide_step;
+  // A key-on (a legato re-pitch is none) restarts the FE 19 slide from its start volume, the vibrato and tremolo waves from their
+  // first sample and their delays, and stops a running bend; autopan runs on.
+  if (!channel.legato_prev) {
+    if (channel.keyon_slide_len) {
+      channel.volume = channel.keyon_volume;
+      channel.vol_slide_left = channel.keyon_slide_len;
+      channel.vol_slide_step = channel.keyon_slide_step;
+    }
+    for (Lfo* lfo : {&channel.vib, &channel.trem}) {
+      if (!lfo->on) continue;
+      lfo->wave = akao_lfo(lfo->type);
+      lfo->counter = 1;
+      lfo->delay_cur = lfo->delay;
+    }
+    channel.bend_left = 0;
   }
+  // Every note, legato too: the vibrato and tremolo outputs and the bend restart from 0, and the voice takes updates again.
+  channel.vib.value = channel.trem.value = 0;
+  channel.bend = 0;
+  channel.voice_update = true;
   const int base_note = channel.octave * 12 + key;
   int note = base_note + channel.transpose;
   const Instrument* in = channel.inst;
@@ -571,6 +591,8 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   }
 
   channel.pitch_base = pitch_register(note, *in);
+  channel.bend_inst = in;
+  if (!keymap_note) channel.bend_note = note - channel.transpose;
   if (note_trace) note_trace(note, *in, channel.pitch_base);
   const int fd = channel.fine_tune;
   if (fd < 0)
@@ -584,14 +606,6 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   // Legato into a sounding voice: re-pitch only.
   const bool keep = channel.legato_prev && channel.voice >= 0 && voice_[size_t(channel.voice)].active &&
                     voice_[size_t(channel.voice)].serial == channel.voice_serial && !voice_[size_t(channel.voice)].released;
-  channel.bend = 0;
-  channel.bend_left = 0;
-  // The armed A4 bend: the register ramps linearly to the pitch of note + delta.
-  if (channel.bend_len > 0 && channel.bend_delta != 0) {
-    channel.bend_left = channel.bend_len;
-    channel.bend_step = float(pitch_register(note + channel.bend_delta, *in) - channel.pitch_base) / float(channel.bend_len);
-  }
-  channel.bend_len = channel.bend_delta = 0;
   if (channel.porta_steps > 0 && channel.last_note >= 0) {
     channel.porta_off = float(channel.last_note - note);
     channel.porta_left = channel.porta_steps;
@@ -658,6 +672,19 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   channel.voice_serial = voice.serial;
   voice.started_at = g_sfx_trace_clock.load(std::memory_order_relaxed);
   if (sfx_trace_on() && !channel.music) log::info("sfxtrace {:9.1f} ms VON #{} '{}' voice {} note {} reg {:04X} adsr {:04X} {:04X} base {} ft {} loops {} len {} noise {} fm {}", trace_ms(), channel.trace_id, channel.tag, vi, note, channel.pitch_base, a1, a2, in->base_note, in->fine_tune, voice.smp->loops ? voice.smp->loop_start : -1, voice.smp->pcm.size(), channel.noise, voice.fm);
+}
+
+// A note or a tie consumes the armed A4 delta: the bend note moves by it and the register ramps over the A4 length from where it is
+// now (a tie keeps the running bend) to the moved note's pitch, in 16.16 steps truncated toward zero. A rest leaves the bend armed.
+void AkaoPlayer::start_bend(Channel& channel) {
+  if (!channel.bend_delta || channel.bend_len <= 0 || !channel.bend_inst) return;
+  channel.bend_note += channel.bend_delta;
+  channel.bend_delta = 0;
+  const s64 target = s64(pitch_register(channel.bend_note + channel.transpose, *channel.bend_inst)) * 0x10000;
+  const s64 current = s64(channel.pitch_base) * 0x10000 + channel.bend;
+  channel.bend_left = channel.bend_len;
+  channel.bend_step = s32((target - current) / channel.bend_len);
+  channel.last_note = channel.bend_note + channel.transpose;
 }
 
 // ADSR ops (AD..B3, B7, BB, BF) mark the channel's ADSR words dirty and the next voice update writes them to the SPU voice that is playing
@@ -793,16 +820,20 @@ void AkaoPlayer::run_ops(Channel& channel) {
       channel.len_left = len;
       if (is_note) {
         note_on(channel, key);
+        start_bend(channel);
         set_gate();
         // The next note under legato only re-pitches.
         channel.legato_prev = channel.legato;
       } else if (is_tie) {
+        start_bend(channel);
         set_gate();
         channel.legato_prev = channel.legato;
       } else {
-        // Rest: a note still sounding (no gate) is released here.
+        // Rest: a note still sounding (no gate) is released here, the LFO outputs return to 0 and the voice takes no more updates.
         key_off(channel);
         channel.legato_prev = false;
+        channel.vib.value = channel.trem.value = 0;
+        channel.voice_update = false;
       }
       return;
     }
@@ -1109,7 +1140,7 @@ void AkaoPlayer::tick_channel(Channel& channel) {
   }
   if (channel.bend_left) {
     --channel.bend_left;
-    channel.bend += channel.bend_step;
+    channel.bend = s32(u32(channel.bend) + u32(channel.bend_step));
   }
   // The noise / FM state toggles after the delay.
   if (channel.noise_delay && --channel.noise_delay == 0) channel.noise = !channel.noise;
@@ -1130,7 +1161,10 @@ void AkaoPlayer::tick_channel(Channel& channel) {
       lfo->depth += lfo->depth_slide_step;
     }
   }
-  if (channel.gate_left > 0 && --channel.gate_left == 0) key_off(channel);
+  if (channel.gate_left > 0 && --channel.gate_left == 0) {
+    key_off(channel);
+    if (!channel.music) channel.voice_update = false;
+  }
   if (--channel.len_left <= 0) run_ops(channel);
 }
 
@@ -1179,7 +1213,11 @@ void AkaoPlayer::update_channel(Channel& channel, int) {
     channel.voice = -1;
     return;
   }
+  // The reverb / noise / FM modes reach every voice; volume, pan and pitch only while the channel updates its voice.
   voice.fm = channel.fm && voice.fm_src >= 0;
+  voice.reverb = channel.reverb;
+  voice.noise = channel.noise;
+  if (!channel.voice_update) return;
   // volume: ((Volume>>16) * (Balance>>8)) >> 7, tremolo; music: x master volume (cfg 0x7F) and pan index (pan >> 8) + autopan;
   // SFX: x volume modifier (>> 8) >> 7 and pan index ((pan + pan modifier) >> 8) + autopan
   // + 0x80, no master volume.
@@ -1203,12 +1241,10 @@ void AkaoPlayer::update_channel(Channel& channel, int) {
   }
   voice.gl = float(left) / 16384.0f;
   voice.gr = float(right) / 16384.0f;
-  voice.reverb = channel.reverb;
-  voice.noise = channel.noise;
 
-  // pitch register (fine delta + pitch + vibrato, & 0x3FFF); A4 bend as a register ramp, portamento as a semitone offset
+  // pitch register (fine delta + pitch + vibrato, & 0x3FFF); A4 bend as a 16.16 register ramp, portamento as a semitone offset
   double reg = channel.pitch_base + channel.vib.value + channel.fine_delta;
-  reg += double(channel.bend);
+  reg += double(channel.bend >> 16);
   if (channel.porta_off != 0.0f) reg *= std::exp2(double(channel.porta_off) / 12.0);
   // Masked, not clamped.
   voice.reg = int(std::max(reg, 0.0) + 0.5) & 0x3FFF;
@@ -1241,7 +1277,7 @@ void AkaoPlayer::render_spu(float* out, u32 frames) {
           }
       for (int i = 0; i < kMaxChannels; ++i) {
         Channel& channel = ch_[size_t(i)];
-        if (channel.active) update_lfo(channel);
+        if (channel.active && channel.voice_update) update_lfo(channel);
         update_channel(channel, i);
       }
     }

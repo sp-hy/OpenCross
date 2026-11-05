@@ -29,6 +29,12 @@ namespace oc::movie {
 // Member for a movie name: "<name>_<lang>" if that exists (a01op, b28end, final), else "<name>"; at each, a mod's .mp4 / .mkv
 // replacement before the .bk2. Empty if absent.
 std::string resolve_member(const vfs::Vfs& fs, std::string_view name, std::string_view lang);
+// The staff-roll credits strip for a language: the Japanese strip for "jp", the English one for every other language.
+std::string_view staff_strip_member(std::string_view lang);
+// Staff roll: the part of a strip_w x strip_h strip its area shows (a fraction of the strip's height), and the strip row (same
+// unit) at the top of the area while the 1-based frame `frame` of a roll whose last frame number is `last` is on screen.
+float staff_strip_span(u32 strip_w, u32 strip_h);
+float staff_strip_top(u64 frame, u64 last, u32 strip_w, u32 strip_h);
 
 class Player {
  public:
@@ -39,9 +45,9 @@ class Player {
 
   // Optional, before open(): movie audio goes to this mixer's movie bus and drives the clock.
   void set_mixer(audio::Mixer* mixer) { mixer_ = mixer; }
-  // `start` / `end`: play only movie frames [start, end) at the table's 15 fps (the field movie table's range; start 0 = from the
-  // beginning, end 0 = to the end). Earlier frames / audio are decoded and dropped, the clock starts at `start`. `level` scales the
-  // movie's sound (Mixer::movie_start).
+  // `start` / `end`: play only the file's 1-based frames [start, end) (the field movie table's range; start 0 = from the beginning,
+  // end 0 = the frame count, so the last frame is never shown). Earlier frames / audio are decoded and dropped, the clock starts at
+  // `start`. `level` scales the movie's sound (Mixer::movie_start).
   bool open(const vfs::Vfs& fs, std::string_view name, std::string_view lang = "en", u32 start = 0, u32 end = 0, float level = 1.0f);
   // `keep_frame`: the movie ended on screen - keep the last decoded frame's texture alive so it can be faded into the next scene
   // (held() / draw_held() / fade_held()); the next open() / close() / release_held() frees it.
@@ -55,10 +61,13 @@ class Player {
 
   // Creates the frame texture and sampler. Optional for headless use (then see frame_rgba()).
   bool init_gpu(render::GpuContext& ctx, render::SpriteBatch& sprites);
+  // After init_gpu: switches to the staff-roll layout with the credits strip `member` (a PNG, one row per movie frame). False (and
+  // the plain layout) when the strip cannot be read.
+  bool set_staff_roll(const vfs::Vfs& fs, std::string_view member);
 
   // Advances the clock by dt seconds (when no audio clock applies) and picks the frame due now; uploads it if it changed.
   void update(double dt);
-  // Letterboxed, aspect-preserving full-view draw; wraps its own sprites.begin()/end().
+  // Letterboxed, aspect-preserving full-view draw (the staff roll: the panel and the strip); wraps its own sprites.begin()/end().
   void draw(const render::Frame& frame, float view_w, float view_h);
 
   // Pause (a host feature, not retail behaviour of the PS1 player): update() does nothing while paused - the wall clock
@@ -80,8 +89,15 @@ class Player {
   const std::string& member() const { return member_; }
 
  private:
+  struct Rect {
+    float x, y, w, h;
+  };
   void worker();
   void pump_audio();
+  // Where the movie picture goes: the 4:3 fit, or the staff roll's panel.
+  Rect picture_rect(float view_w, float view_h) const;
+  void draw_strip(float view_w, float view_h);
+  void release_strip();
 
   audio::Mixer* mixer_ = nullptr;
   render::GpuContext* ctx_ = nullptr;
@@ -89,6 +105,9 @@ class Player {
   render::Texture texture_;
   render::Sampler sampler_;
   render::TexRef set_;
+  render::Texture strip_texture_;
+  render::TexRef strip_set_;
+  u32 strip_w_ = 0, strip_h_ = 0;
 
   std::string member_;
   u32 width_ = 0, height_ = 0;
@@ -118,8 +137,8 @@ class Player {
   size_t apend_pos_ = 0;
   static constexpr size_t kReadyMax = 8;
   bool src_done() const { return range_done_ || dec_->eof(); }
-  // Frame indices (0-based), end exclusive, 0 = none.
-  u32 start_ = 0, end_ = 0;
+  // Frame indices (0-based), end exclusive, 0 = none; last_ = the 1-based end frame (the range's end clamped to the frame count).
+  u32 start_ = 0, end_ = 0, last_ = 0;
   size_t skip_floats_ = 0, limit_floats_ = 0, seen_floats_ = 0, kept_floats_ = 0;
   bool range_done_ = false;
 };

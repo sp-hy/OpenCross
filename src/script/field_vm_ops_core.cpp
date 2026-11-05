@@ -562,8 +562,7 @@ bool FieldVM::exec_core(u8 op) {
       self.flags270 |= flag270::kInputLock;
       gflags_ |= gflag::kInputLock;
       if (!system_gate()) break;
-      write_var(var::kPrevMapId, room_register());
-      room_reg_ = operand_u(1);
+      note_room_change(operand_u(1));
       host_.request_map_jump(operand_u(1), operand_u(3) & 0xFF);
       advance(5);
       break;

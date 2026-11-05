@@ -96,12 +96,12 @@ The full state:
 | 0x588 | u32 | play time in frames (/60 = seconds) |
 | 0x58C | u32 | gold |
 | 0x590..0x595 | 44 bits | recruited characters, bit i = character id i (Serge = bit 0 ... Pip = byte 0x595 bit 3) |
-| 0x598 | u32 | growth progress counter; meaning unknown, 0 after every new game; not written by OpenCross |
+| 0x598 | u32 | growth progress counter: the number of normal victories counted towards the stat gains of a star (battle rules, growth); 0 after every new game, saved and restored with the slot |
 | 0x59C..0x59E | u8 x3 | current party / formation, character ids (0 Serge, 1 Kid, 2 Guile, 10 Korcha) |
 | 0x59F | u8 | Relief Charm member (party slot 3; 0xFF none) |
 | 0x5A0 | u8 | option bits (low byte of the options word): 0 cursor memory, 1 accuracy selection (auto), 2 sound mono, 3 window frame custom. A new game starts with 0x0002 |
 | 0x5A1 | u8 | options high byte: bit 0 controller edit, bit 1 "[button] Pressed" = walk, bit 2 vibration, bit 3 left stick analog |
-| 0x5A4 / 0x5A5 | u8 | stars total / current |
+| 0x5A4 / 0x5A5 | u8 | stars total / current (a PC summon in battle spends one of the current, field op FE 6D sets current = total, a boss star-up raises both) |
 
 Character ids (0..43), the engine order used everywhere: Serge, Kid, Guile, Norris, Nikki, Viper, Riddel, Karsh, Zoah, Marcy, Korcha, Luccia, Poshul, Razzly, Zappa, Orcha, Radius, Fargo, Macha, Glenn, Leena, Miki, Harle, Janice, Draggy, Starky, Sprigg, Mojo, Turnip, NeoFio, Greco, Skelly, Funguy, Irenes, Mel, Leah, Van, Sneff, Steena, Doc, Grobyc, Pierre, Orlha, Pip. Other event/story flags sit in 0x100..0x5AB and the tail without names. The raw head is not a plain copy of game memory at a fixed base.
 

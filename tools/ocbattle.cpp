@@ -61,7 +61,7 @@ int usage() {
   std::fprintf(stderr,
                "usage: ocbattle [-g <gamedir>] tables\n"
                "       ocbattle [-g <gamedir>] scenes\n"
-               "       ocbattle [-g <gamedir>] sim <scene> [seed] [--party 0,1,2] [--star N] [--set name] [--quiet] [--brain scripted|random] [--party-from save.dat:slot] [--attack] [--field N]\n"
+               "       ocbattle [-g <gamedir>] sim <scene> [seed] [--party 0,1,2] [--star N] [--set name] [--quiet] [--brain scripted|random] [--party-from save.dat:slot] [--attack] [--field N] [--poison]\n"
                "       ocbattle [-g <gamedir>] xcheck [--n N] [--seed N]\n"
                "       ocbattle [-g <gamedir>] soak [--seeds N] [--scene S | --from A --to B] [--cap N] [--party-from save.dat:slot] [--brain scripted|random] [-v]\n"
                "       ocbattle [-g <gamedir>] pac-disasm <scene>\n"
@@ -749,12 +749,13 @@ int cmd_sim(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vect
   std::string brain_name = "scripted";
   std::string party_from;
   int positional = 0;
-  bool attack_only = false;
+  bool attack_only = false, poison = false;
   int battlefield = -1;
   for (size_t i = 0; i < args.size(); ++i) {
     const std::string& arg = args[i];
     if (arg == "--quiet") quiet = true;
     else if (arg == "--attack") attack_only = true;
+    else if (arg == "--poison") poison = true;
     else if (arg == "--field" && i + 1 < args.size()) battlefield = std::atoi(args[++i].c_str());
     else if (arg == "--brain" && i + 1 < args.size()) brain_name = args[++i];
     else if (arg == "--party-from" && i + 1 < args.size()) party_from = args[++i];
@@ -793,7 +794,33 @@ int cmd_sim(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vect
     std::fprintf(stderr, "scene %d is invalid\n", scene);
     return 1;
   }
+  if (poison)
+    for (int i = 0; i < kUnits; ++i)
+      if (battle.unit(i).present) battle.unit_mut(i).lo |= st::kPoison;
   std::array<int, 3> shown_ring = battle.ring();
+  // --poison: after each command, every unit's HP change that no hit or heal event explains (the poison steps), and the actions that ran.
+  std::array<int, kUnits> hp_before{};
+  const auto note_hp = [&] {
+    for (int i = 0; i < kUnits; ++i) hp_before[static_cast<size_t>(i)] = battle.unit(i).hp;
+  };
+  const auto print_upkeep = [&] {
+    std::array<int, kUnits> explained{};
+    std::string actions;
+    int last_action = -1;
+    for (const ActionEvent& event : battle.drain_events()) {
+      if (event.target >= 0 && event.target < kUnits) explained[static_cast<size_t>(event.target)] += event.hp_after - event.hp_before;
+      const bool acts = event.kind == ActionEvent::Kind::Weapon || event.kind == ActionEvent::Kind::Element || event.kind == ActionEvent::Kind::Defend;
+      if (acts && event.action != last_action) {
+        actions += std::format(" {}{}", event.actor < kPcSlots ? "pc" : "enemy", event.actor);
+        last_action = event.action;
+      }
+    }
+    std::string residual;
+    for (int i = 0; i < kUnits; ++i)
+      if (battle.unit(i).present) residual += std::format(" u{} {:+d}", i, battle.unit(i).hp - hp_before[static_cast<size_t>(i)] - explained[static_cast<size_t>(i)]);
+    std::printf("  upkeep:%s | actions:%s\n", residual.c_str(), actions.c_str());
+  };
+  if (poison) battle.drain_events();
   auto flush = [&] {
     for (const auto& line : battle.drain_log())
       if (!quiet) std::printf("%s\n", ascii(line).c_str());
@@ -828,12 +855,14 @@ int cmd_sim(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vect
       if (command.chain.empty()) command.kind = Command::Kind::Defend;
     }
     std::string why;
+    if (poison) note_hp();
     if (!battle.apply(command, &why)) {
       std::fprintf(stderr, "auto policy produced an invalid command: %s\n", why.c_str());
       return 1;
     }
     ++turns;
     flush();
+    if (poison) print_upkeep();
   }
   flush();
   const char* outcome_names[] = {"victory", "wiped", "fled"};
@@ -1119,7 +1148,7 @@ int cmd_formula(const std::vector<std::string>& args, const std::string& rng_spe
     std::printf(
         "ceil100 x y | colour ci ce r0 r1 r2 ct | hit base hitmod evd evdmod hits strength | slot row level\n"
         "weapon atk wp wpvar def arm armvar mult colour strength | element mag magterm power var mdef mdefterm mdefvar slot colour\n"
-        "heal mag p slot colour | status_timer idx dur mod | growth x star | minor snap pending cur b P S\n"
+        "heal mag p slot | status_timer idx dur mod | growth x star | minor snap pending cur b P S\n"
         "recovery rate mod steps flu | stamina_cost strength fatigued | sum n p v\n");
     return 0;
   }
@@ -1143,7 +1172,7 @@ int cmd_formula(const std::vector<std::string>& args, const std::string& rng_spe
     element.slot_mille = int_arg(8), element.colour_mille = int_arg(9);
     const DamageOut damage = element_damage(*rng, element);
     std::printf("%d code=%d\n", damage.value, damage.code);
-  } else if (formula == "heal") std::printf("%d\n", heal_amount(*rng, int_arg(1), int_arg(2), int_arg(3), int_arg(4)));
+  } else if (formula == "heal") std::printf("%d\n", heal_amount(*rng, int_arg(1), int_arg(2), int_arg(3)));
   else if (formula == "status_timer") std::printf("%d\n", status_timer(int_arg(1), int_arg(2), int_arg(3)));
   else if (formula == "growth") std::printf("%d\n", growth_roll(*rng, int_arg(1), int_arg(2)));
   else if (formula == "minor") std::printf("%d\n", minor_growth(int_arg(1), int_arg(2), int_arg(3), int_arg(4), int_arg(5), int_arg(6)));

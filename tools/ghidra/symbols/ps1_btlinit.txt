@@ -30,3 +30,4 @@ btl_scenedat_ptr = 0x801F4B4C;  # data: Pointer to the loaded scenedat records; 
 btl_colour_row_flag = 0x801F4B54;  # data: Set when a party member's battle grid holds the Chrono Cross element (0x7E); turns on the colour-history row.
 btl_place_party = 0x801F0BB0;  # function: Places the party in ascending character id: the first PC, then (after the held intro wait) starts a random party intro and loads / places the others one by one
 btl_init_party_relief = 0x801F27F8;  # function: first battle-init step, run before the scene select: resets the battle work, copies the party ids and applies the Relief Charm swap unless the battle id is 0x3DD
+btlinit_globals_reset = 0x801F2390;  # function: resets the battle globals at battle start, the ring summon colour (0 = none) among them

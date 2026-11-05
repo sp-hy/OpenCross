@@ -158,6 +158,8 @@ void App::route_frame() {
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
     if (out.set_option) world.game_state().set_option(static_cast<u16>(out.option_mask), out.option_on != 0);
     if (out.set_var) world.vm().set_var(static_cast<u16>(out.var_id), out.var_value);
+    // A warp takes the disc from the story variable 0x42 like a map jump.
+    if (!out.load_room.empty()) world.set_disc(world.vm().var(0x42) + 1);
     if (!out.load_room.empty() && !world.load_room(out.load_room, out.load_param)) {
       log::error("route: load {} failed", out.load_room);
       exit_code = 1;
@@ -167,7 +169,10 @@ void App::route_frame() {
       std::filesystem::path shot = out.screenshot;
       if (shot.is_relative()) shot = shots_dir / shot;
       ctx.request_screenshot(shot);
-      log::info("route: tick {} screenshot {} (room {})", route_tick, shot.string(), rstate.room);
+      if (movie_open)
+        log::info("route: tick {} screenshot {} (room {}, movie frame {})", route_tick, shot.string(), rstate.room, movie_player.frame_index());
+      else
+        log::info("route: tick {} screenshot {} (room {})", route_tick, shot.string(), rstate.room);
     }
     if (out.failed) {
       log::error("route FAILED at tick {}: {}\nentities:\n{}", route_tick, out.message, field_visible() ? world.dump_entities() : std::string("(no room)"));

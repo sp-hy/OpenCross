@@ -28,6 +28,7 @@
 - tap confirm
 - wait movie end 300
 - wait room opn_a01i 900
+- assert var 0x08 8                   # the title DC jump at the movie end: PREVIOUS_MAP_ID = the title room
 - assert flow opening
 - assert var 0x0C 0                   # PARTY_0 = Serge, from the in-memory game state
 - assert var 0x0E 1                   # PARTY_1 = Kid

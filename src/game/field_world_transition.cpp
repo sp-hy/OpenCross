@@ -246,6 +246,23 @@ void FieldWorld::request_map_jump(int room, int param) {
   log::info("field: map jump requested -> room id {} entrance {}", room, param);
 }
 
+// DC only records the jump; the movie op behind it plays and the jump starts when the movie ends (a room load drops the record).
+void FieldWorld::set_movie_jump(int room, int param) {
+  movie_jump_ = {true, room, param, true};
+  log::info("field: tick {} movie-end jump recorded -> room id {} entrance {}", tick_count_, room, param);
+}
+
+// At the movie end PREVIOUS_MAP_ID takes the room register and the register the target, as 5A does at its gate; the screen is the
+// movie's last frame, so the room switches with no fade-out and the param is not masked to a byte.
+void FieldWorld::start_movie_jump() {
+  const PendingJump pending = movie_jump_;
+  movie_jump_ = {};
+  if (!pending.active || jump_.active) return;
+  vm_.note_room_change(pending.room);
+  jump_ = pending;
+  log::info("field: tick {} movie ended: jump -> room id {} entrance {}", tick_count_, pending.room, pending.param);
+}
+
 
 void FieldWorld::snap_camera_to_player(bool keep_scroll) {
   camera_.snap(view_, vm_.global_flags(), pose_of(player_entity()), keep_scroll);
@@ -317,6 +334,13 @@ void FieldWorld::begin_jump(int room) {
   // over everything, frozen for 4 frames, then the room switches (step_capture continues on the new room).
   fade_kind_ = wave_.active ? 0 : exit_kind_;
   exit_kind_ = 0;
+  if (jump_.cut) {
+    fade_kind_ = 0;
+    fade_black_ = true;
+    fade_add_ = false;
+    fade_ = fade_target_ = 1.0f;
+    return;
+  }
   // Debug: OC_EXIT_KIND=n forces the kind of every room change (routes check kinds the data rarely or never uses: 3..6).
   if (const char* env = std::getenv("OC_EXIT_KIND"); env && *env) fade_kind_ = std::clamp(std::atoi(env), 0, 6);
   if (capture_kind(fade_kind_)) {

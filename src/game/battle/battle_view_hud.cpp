@@ -557,6 +557,7 @@ void BattleView::build_field_ring() {
   static const char32_t* kCaption[6] = {U"FIELD EFFECT", U"EFFET DE CHAMP", U"EFFETTO DI CAMPO", U"FELDEFFEKT", U"AMBIENTE ELEMENTAL", U"FiELD EFFECT"};
   btext(0x20086, kCaption[std::clamp(static_cast<int>(lang_), 0, 5)], 60, 23 * kPs1Px / (kCanvasH / 216.0f), 0x757575);
   build_element_trap();
+  build_star_count();
 }
 
 // The element-trap block of the presented action: the one before it while it is queued, its own while it runs, else the rules' block.
@@ -587,6 +588,29 @@ void BattleView::build_element_trap() {
     if (colour >= 0) add_img(trap_marks_[static_cast<size_t>(colour)], 88 * kPs1Px, 39 * kCanvasH / 216.0f, 5 * kPs1Px, 5 * kCanvasH / 216.0f);
   }
   btext(kStyle, trap.enemy != 0 ? xlat("?", U"?") : xlat("NO", U"NO"), 88, 46, kColour);
+}
+
+// Stars current / total, drawn while the non-empty slots of the drawn ring (the first cell of each) share one colour, an empty ring included:
+// the star mark (style 0x10005) at PS1 (62, 28); current's units digit at x 73 with its tens digit at 69; "/" (style 0x10005) at (78, 27);
+// total from x 84 (tens, then units at 88), units alone at 84. Digits style 5 at y 27 (JP 28), colour 0x8A8A8A.
+void BattleView::build_star_count() {
+  int shared = -1;
+  for (size_t slot = 0; slot < 3; ++slot) {
+    const int colour = ring_cells_[slot * 4];
+    if (colour < 0) continue;
+    if (shared >= 0 && colour != shared) return;
+    shared = colour;
+  }
+  constexpr u32 kColour = 0x8A8A8A;
+  const float digit_y = lang_ == import::Lang::Jp ? 28.0f : 27.0f;
+  const int current = std::clamp(battle_->growth().counter, 0, 99), total = std::clamp(battle_->growth().star, 0, 99);
+  auto digit = [](int value) { return std::u32string(1, static_cast<char32_t>(U'0' + value)); };
+  btext(0x10005, U"★", 62, 28, kColour);
+  if (current >= 10) btext(5, digit(current / 10), 69, digit_y, kColour);
+  btext(5, digit(current % 10), 73, digit_y, kColour);
+  btext(0x10005, U"/", 78, 27, kColour);
+  if (total >= 10) btext(5, digit(total / 10), 84, digit_y, kColour);
+  btext(5, digit(total % 10), total >= 10 ? 88.0f : 84.0f, digit_y, kColour);
 }
 
 // Chrono Cross colour row: while a party grid holds the Chrono Cross, the last seven cast colours as 16 x 16 dots at PS1 (0x68 + 16 i, 0x10).

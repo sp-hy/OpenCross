@@ -433,7 +433,10 @@ class Battle {
   Unit& unit_mut(int index) { return units_[static_cast<size_t>(index)]; }
   const std::array<int, 3>& ring() const { return ring_; }
   // Dev: replaces the field ring (colour indices 0..5, kRingAllColours or -1 per slot).
-  void set_ring(const std::array<int, 3>& ring) { ring_ = ring; }
+  void set_ring(const std::array<int, 3>& ring) {
+    ring_ = ring;
+    judge_ring_summon_colour();
+  }
   // Dev: arms one side's element trap with that element id (0 = none) without showing the trap block, as a write of the trap word alone does.
   void set_trap(bool enemy_side, int element) { trap_[enemy_side ? 1 : 0] = element; }
   // The element-trap block once the running action has ended: a trap set by it shows, a trap that sprang during it hides the whole block
@@ -513,6 +516,13 @@ class Battle {
   // Colour-sealed cell: the PC's merged lo has the seal bit of the cell's colour (green 0x800, white 0x8000, black 0x80000, red 0x800000,
   // yellow 0x8000000, blue 0x80000000). Sealed cells stay on the menu, greyed, and refuse the confirm.
   bool element_sealed(int pc, int cell) const;
+  // A PC summon (element record byte 0 bit 0x40) the ring forbids: its colour is not the ring's summon colour, or no star is left.
+  bool summon_blocked(int pc, int cell) const;
+  // The menu greys the cell: colour-sealed or a forbidden summon.
+  bool element_greyed(int pc, int cell) const { return element_sealed(pc, cell) || summon_blocked(pc, cell); }
+  // The ring's summon colour (0..5, kRingAllColours, -1 = none): the colour every non-empty slot shares, none when two differ; an all-empty
+  // ring keeps the last one.
+  int ring_summon_colour() const { return ring_summon_colour_; }
   // A double / triple tech the cell offers now (`ComboTech`, element 0 = none).
   ComboTech combo_at(int pc, int cell) const;
   // Builds the element menu of a PC (the host calls it when the grid opens; an Element command does it first): every PC's menu table starts
@@ -548,6 +558,7 @@ class Battle {
   bool catch_in_trap(int actor, int element_id, int row, int target);
   // The PCs other than `actor` and those in `excluded` (a mask of PC slots) recover stamina; the enemy countdowns run `steps`.
   void step_after_pc_action(int actor, int steps, bool weapon, u32 excluded = 0);
+  // Ends an action. After a PC-led one (its own, confused or scripted turn, Defend) poison, regen and the status timers step.
   void post_action(int actor, int poison_amount, int timer_steps);
   void time_advance();
   // Enemy turns + time advance until a PC can act or the battle ends.
@@ -581,10 +592,12 @@ class Battle {
     trap_before_ = trap_hud();
   }
   void reset_chain() { chain_actor_ = chain_target_ = -1; chain_hits_ = 0; }
+  // A PC-led weapon / element hit adds its target to the attacked list, kept in ascending unit order; enemy-led actions add nothing.
   void note_event(ActionEvent event) {
-    if ((event.kind == ActionEvent::Kind::Weapon || event.kind == ActionEvent::Kind::Element) && event.target >= 0 &&
-        std::find(attacked_.begin(), attacked_.end(), event.target) == attacked_.end())
-      attacked_.push_back(event.target);
+    if ((event.kind == ActionEvent::Kind::Weapon || event.kind == ActionEvent::Kind::Element) && is_pc_slot(event.actor) && event.target >= 0) {
+      const auto at = std::lower_bound(attacked_.begin(), attacked_.end(), event.target);
+      if (at == attacked_.end() || *at != event.target) attacked_.insert(at, event.target);
+    }
     event.action = action_id_;
     event.script_seq = cur_script_seq_;
     event.group = cur_group_;
@@ -597,6 +610,7 @@ class Battle {
   WeaponIn weapon_in(const Unit& attacker, const Unit& target_unit, int mult, int strength) const;
   // The element's colour is sealed on the PC.
   bool colour_sealed(int pc, int id) const;
+  void judge_ring_summon_colour();
   // The cell of `pc` that can join a double / triple tech with partner tech `tech`, -1 = none. A PC's seal flag, not its live status, decides.
   int combo_partner_cell(int pc, int tech) const;
   void load_monster_record(Unit& unit, const data::StatRec& rec, u32 perm_lo_bits) const;
@@ -609,6 +623,7 @@ class Battle {
   void count_colour_point(int actor, const data::ElemRec& element);
   void damage_unit(int actor, int target, int value, int code);
   void kill(int unit);
+  void poison_kill(int unit);
   // Runs the kill script (slot 3) of a dead enemy once and parks the death cast it queued.
   void run_kill_script(int unit);
   // Every enemy whose HP is 0 or that is KO'd without its kill script having run (a script wrote its HP to 0) gets that script now.
@@ -670,7 +685,7 @@ class Battle {
   std::vector<std::string> log_;
   std::vector<ActionEvent> events_;
   std::map<std::string, int> stubs_;
-  // Target list of the running action, in order (slot-4 launches).
+  // Target list of the running PC-led action, ascending (slot-4 launches).
   std::vector<int> attacked_;
   // Slot-3 plans of units killed during the running action (kill()), executed once it has ended (run_reactions): unit, queued attacks.
   std::vector<std::pair<int, std::vector<EnemyAction>>> death_plans_;
@@ -685,6 +700,7 @@ class Battle {
   // By colour index: the enemies (one bit per unit) killed during a summon of that colour. summon_colour_ = the current action's, -1 = not a summon.
   std::array<u16, 6> summon_kills_{};
   int summon_colour_ = -1;
+  int ring_summon_colour_ = -1;
   int action_id_ = 0, hit_counter_ = 0;
   // The executing scripted entry's / dev cast's caster group (ActionEvent::group).
   std::array<u8, 6> cur_group_{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};

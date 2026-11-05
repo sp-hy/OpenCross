@@ -97,7 +97,7 @@ void DiscIndex::movie_range(int disc, int op, u32& start, u32& end) {
     else if (op == 21 || op == 23) start = 1u + row->start, end = row->end;
     else if (op == 22) start = 1u + row->start, end = row->end - 10u;
   } else if (op == 12) {
-    start = 1u + row->start;
+    start = 1u + row->start, end = row->end;
   }
 }
 

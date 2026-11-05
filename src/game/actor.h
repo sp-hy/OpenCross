@@ -164,6 +164,7 @@ class Actor {
   // (stand 1 / walk 3 / run 2, 0x20-tick cross-fade on switches).
   // Cheats "No clip": tick() moves by the full step whatever the walk mesh says (the triangle follows when one is under the actor).
   bool noclip = false;
+  bool force_run = false;
   void tick(const WalkMesh& walk, int heading, bool run);
   // The pad velocity of the last tick() before the walk-mesh probe, wall slide and slope rebuild (0 when standing): what a pushed
   // actor takes over.

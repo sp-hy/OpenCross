@@ -374,8 +374,10 @@ class FieldHost {
   virtual bool skip_battle(int /*arg*/, bool /*c9*/, int /*ent*/) { return false; }
   // Cheats "No encounters": true = op D9 is skipped (the PC advances by 4).
   virtual bool skip_model_swap(int /*ent*/) { return false; }
-  // 5A / DC
+  // 5A
   virtual void request_map_jump(int room, int param) = 0;
+  // DC: the jump the next movie starts when it ends
+  virtual void set_movie_jump(int room, int param) = 0;
   virtual void request_menu(MenuKind kind, int arg) = 0;
   // The menu/shop/save request is still open.
   virtual bool menu_active() = 0;
@@ -544,6 +546,7 @@ class NullHost : public FieldHost {
   void request_battle(int battle_id, int arg, int flags) override;
   bool battle_active() override;
   void request_map_jump(int room, int param) override;
+  void set_movie_jump(int room, int param) override;
   void request_menu(MenuKind kind, int arg) override;
   bool menu_active() override;
   void field_reset() override;

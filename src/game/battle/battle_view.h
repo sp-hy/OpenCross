@@ -810,6 +810,8 @@ class BattleView {
   // The element-trap block under the field ring, for the presented action (like the ring).
   battle::TrapHud presented_trap() const;
   void build_element_trap();
+  // The star count beside the field ring while the drawn ring is one colour.
+  void build_star_count();
   void build_colour_row();
   void replay(const render::Frame& frame, const render::Letterbox& lb, float alpha);
   // draw_ui is replaying into the PS1-resolution target (replay derives the picture rectangle from `lb`).

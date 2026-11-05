@@ -138,6 +138,7 @@ SaveSlot synthetic_slot() {
   for (size_t i = 0; i < slot.tail.size(); ++i) slot.tail[i] = static_cast<u8>(i * 17 + 3);
   slot.set_party({0, 1, 10});
   slot.set_gold(7763);
+  slot.set_growth_progress(0x12345);
   slot.set_playtime_frames(123456);
   slot.set_key_items(0x8000000000000001ull);
   for (int i = 0; i < kNumChars; ++i) {
@@ -191,6 +192,7 @@ void test_slot() {
   CHECK(decoded.chars[7].name == slot.chars[7].name && decoded.chars[43].colour_bit == 8);
   CHECK(decoded.items[300].id == slot.items[300].id && decoded.elements[191].qty == slot.elements[191].qty);
   CHECK(decoded.button_cfg == slot.button_cfg && decoded.frames == 0x203 && decoded.unk_e1e0 == 0xDEADBEEF);
+  CHECK(decoded.growth_progress() == 0x12345);
   CHECK(decoded.gold() == 7763 && decoded.playtime_frames() == 123456 && decoded.key_items() == 0x8000000000000001ull);
   // Decode -> encode is bit exact.
   CHECK(encode_block(decoded) == blk);

@@ -253,6 +253,11 @@ bool Decoder::probe(const std::string& name) {
   const AVStream* video_stream = state.fmt->streams[state.vstream];
   const AVRational frame_rate = video_stream->avg_frame_rate.num ? video_stream->avg_frame_rate : video_stream->r_frame_rate;
   if (frame_rate.num > 0 && frame_rate.den > 0) fps_ = av_q2d(frame_rate);
+  if (video_stream->nb_frames > 0) {
+    frames_ = static_cast<u64>(video_stream->nb_frames);
+  } else if (video_stream->duration > 0) {
+    frames_ = static_cast<u64>(std::llround(static_cast<double>(video_stream->duration) * av_q2d(video_stream->time_base) * fps_));
+  }
   state.pkt = av_packet_alloc();
   state.frame = av_frame_alloc();
   return state.pkt && state.frame && width_ && height_;
