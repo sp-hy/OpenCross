@@ -88,6 +88,8 @@ constexpr int kTurnPerTick = 0x80;
 constexpr int kModelYawBias = 0x400;
 // Collision probe distance in front of the move.
 constexpr float kProbeAhead = 8.0f;
+// A wall push whose heading is within 0x80 of the edge normal stops instead of sliding (radians).
+constexpr float kHeadOn = 0.1963f;
 // The shadow is NOT sized by the radius: +-0x200 x actor scale, ActorShadows.
 constexpr float kDefaultRadius = 38.0f;
 constexpr float kDefaultHeight = 300.0f;
@@ -205,8 +207,9 @@ class Actor {
     if (tri >= 0) tri_ = tri;
   }
   // A script/AI move by (dx, dz) with the leader's probe + wall-slide rule (WalkMesh::move_actor); never leaves the mesh.
-  // Returns false when nothing moved. Falls back to set_position when the actor has no triangle yet.
-  bool move_on_mesh(const WalkMesh& walk, float dx, float dz);
+  // Returns false when nothing moved. Falls back to set_position when the actor has no triangle yet. `heading` (0..0xFFF) is the
+  // heading the mover judges a wall slide by (head-on, which side); -1 = the direction of the move.
+  bool move_on_mesh(const WalkMesh& walk, float dx, float dz, int heading = -1);
   // Stairs / ladders (once per tick for every actor): `tile_flags` = the walk flags of the actor's triangle. A tile with
   // 0x4000 / 0x8000 turns the actor toward the plane normal's horizontal direction (uphill, facing the ladder) and selects the stair clip
   // in step_visual, whether it moves or stands; tiles with 0xC800 take away the run speed.
@@ -266,6 +269,12 @@ class Actor {
   // set_ex_clips marks the entity as holding an extra pack (the field's extra-pack flag); clear_ex_clips releases it.
   void set_ex_clips(std::vector<assets::AnimationClip> clips, assets::AnimSeqTable seq = {});
   void clear_ex_clips();
+  // FREE_EXTRA_ANIMATION waits while this holds: the entity holds a pack and the animation id it was given is a pack id, or a clip
+  // cross-fade is still running.
+  bool ex_pack_in_use() const;
+  // FREE_EXTRA_ANIMATION: the pack goes and the pose stays; the id in force keeps playing (a non-pack pose such as a lying clip
+  // survives the free). Only a clip of the pack still on the model (an id changed on this very tick) restarts the id in force.
+  void free_ex_pack();
   // ANIM_PACK_RESTORE_START (BF): the character's default pack is held again (the model's own ex clips).
   void hold_default_pack();
   bool holds_ex_pack() const { return ex_pack_; }
@@ -550,7 +559,7 @@ class Actor {
   render::Mat4 attach_local_;
 
   // The move keeps its 3D length on a slope.
-  bool slope_step(const WalkMesh& walk, float dx, float dz);
+  bool slope_step(const WalkMesh& walk, float dx, float dz, int heading = -1);
   // Ground tilt matrix (row-major), identity when off.
   float gt_[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
   bool gt_on_ = false;

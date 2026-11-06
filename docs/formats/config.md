@@ -98,6 +98,7 @@ Opt-in improvements, independent of `Ps1Res`; each is also a checkbox in the Gra
 | `SmoothWaterLine` | 1 | bool | Submerged actor parts are cut at the exact water plane, not per whole triangle. |
 | `AutoHideCastHud` | 0 | bool | Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). The cast header naming the spell stays for the first 2 seconds, then fades over half a second. |
 | `RetainBattleScenery` | 0 | bool | Keep the battle stage's intro-only scenery layer for the whole battle. |
+| `FullPrecisionEffects` | 0 | bool | Effect sprites keep the half 5-bit colour level the PS1 loses to rounding, as RDE draws them (`room_effects.md` 4.3): brighter faint glows that pulse about twice as hard when one object ends and the next grows in. Off: the PS1's average loss, without its steps. |
 | `SmoothEffectRings` | 1 | bool | Ring and tube shaped effect meshes get extra segments. |
 | `SmoothReflections` | 1 | bool | Environment-mapped model parts slide their reflection sub-texel instead of in whole texels. |
 | `Lighting` | 0 | bool | Key light on field and battle characters, bright spell effects light the battle units and stage, and units cast shadows of their real shape on the floor: in battle from the stage's sun and spells (`battle_stage.md` 8.3.2), in the field straight below them (`docs/rules/field_actors.md` section 7), on the status screen along the PS1 flat shadow's own ray. The battle floor also darkens smoothly per vertex with distance; off = the stepped PS1 look. |
@@ -181,7 +182,7 @@ All off by default; they never lock saving. The first three also toggle from the
 | `ShopAllWeapons` | 0 | The smith's forge list of the chosen category (weapon, armour, accessory) also gets every item of that category with a price and a recipe. |
 | `RunSpeed` | 0 | Field walk / run speed x2. |
 | `AlwaysLoot` | 0 | Every enemy drops its rare drop (the common one when it has no rare drop), and every PC steal succeeds and takes the rare word when the enemy has one. |
-| `InstantGrowth` | 0 | In a non-boss fight, the star's growth progress jumps to its cap, so each living member gets the full stat gain of that star at once. |
+| `InstantGrowth` | 0 | In a non-boss fight, the star's growth progress jumps to its cap, so each living member gets the full stat gain of that star at once. After every won fight (boss fights too) each grown member is also raised to what a typical character holds after the star-ups so far (the average of the random star-up gains), which makes up star-ups a record missed; the raise shows as part of the fight's gain. |
 | `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |
 | `NoCraftCost` | 0 | The forge builds without needing materials or gold and takes neither. |
 

@@ -1,0 +1,146 @@
+# Continue into ryu_b29i at entrance 1 (no song: ryu_a28i, the stairs below, stops the music) and play the scene through: the
+# two boss fights, movies 13 and 14, the duel with Kid in Lynx's body, the aftermath and movie 15, up to cao_a01f.
+# Every fight starts the boss theme (song 49) over a field with no song; the field return stops it, so the aftermath and the
+# movies play without music until cao_a01f starts its own song.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1
+- wait 20
+- tap right                           # file 01
+- wait 6
+- tap confirm
+- wait flow field 600
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 9000
+- wait 30
+- assert song none
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 9000
+- wait 30
+- assert song none
+- mash until movie start 20000
+- mash until movie end 20000
+- mash until movie start 20000
+- mash until movie end 20000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- wait idle 6000                      # Lynx's body is handed the controls; the scene goes on once it moves
+- key down up
+- wait 20
+- key up up
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 9000
+- wait 30
+- assert song none
+- log duel over
+- mash until movie start 20000
+- log movie 15
+- assert song none
+- wait 600
+- mash until room cao_a01f 60000
+- wait 300
+- assert song 31
+- quit

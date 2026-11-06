@@ -164,6 +164,7 @@ PartyMember make_party_member(const data::GameTables& tables, int char_id, int s
   member.char_id = char_id;
   member.name = member.own_name = tables.char_name(char_id);
   member.stat = {rec.max_hp(), rec.atk(), rec.def(), rec.hit(), rec.evd(), rec.mag(), rec.mdef()};
+  member.base = member.stat;
   member.lv99 = lv99_targets(tables, char_id, set);
   member.hp = member.stat[0];
   member.snap = member.stat;
@@ -2642,17 +2643,39 @@ void Battle::compute_rewards() {
   const auto& row = tables_.star_rows[static_cast<size_t>(growth_.star)];
   const StarRow sr{row[0], row[1], row[2] | (row[3] << 8)};
   const int cap = progress_cap(sr);
+  // Cheats: max growth also raises each grown member to what a typical record holds after the star-ups of the star it ends on (the
+  // mean of many star-up histories, from the character's own generator so the battle's rolls are untouched), which makes up star-ups
+  // the record missed; the raise counts as part of the fight's gain.
+  constexpr int kGrowthHistories = 256;
+  // In a normal fight the star's start is the snapshot, which moves with the raise so the star's minor growth still comes on top; after a
+  // star-up the new star starts at the stats.
+  auto top_up = [&](PartyMember& member, std::array<int, 7>& gains, bool from_snapshot) {
+    if (!cheats_.instant_growth) return;
+    GameRng history_rng(0x5EED1000u + static_cast<u32>(member.char_id) * 977u);
+    const std::array<int, 7> best = typical_star_growth(member.base, member.lv99, growth_.star, history_rng, kGrowthHistories);
+    for (size_t k = 0; k < 7; ++k) {
+      const int start = from_snapshot ? member.snap[k] : member.stat[k];
+      if (best[k] <= start) continue;
+      const int top = k == 0 ? stat_hp_cap(member.lv99[k]) : member.lv99[k];
+      const int raised = std::max(member.stat[k], std::min(top, member.stat[k] + best[k] - start));
+      gains[k] += raised - member.stat[k];
+      member.stat[k] = raised;
+      if (from_snapshot) member.snap[k] = best[k];
+    }
+  };
   if (!boss_) {
     // Cheats: instant growth fills the progress and takes every stat all the way to its minor-growth target.
     growth_.progress = cheats_.instant_growth ? cap : std::min(growth_.progress + sr.step, cap);
     auto grow = [&](PartyMember& member, std::array<int, 7>& gains) {
+      gains = {};
+      top_up(member, gains, true);
       for (size_t k = 0; k < 7; ++k) {
         int gain = cheats_.instant_growth && cap > 0 ? full_minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths)
                                                      : minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths, growth_.progress, cap);
         const int room = std::max(0, member.lv99[k] - member.stat[k]);
         gain = std::min(gain, room);
         member.stat[k] += gain;
-        gains[k] = gain;
+        gains[k] += gain;
       }
       member.stat[0] = stat_hp_cap(member.stat[0]);
     };
@@ -2689,6 +2712,8 @@ void Battle::compute_rewards() {
     growth_.progress = 0;
     ++growth_.star;
     ++growth_.counter;
+    for (size_t i = 0; i < party_.size(); ++i)
+      if (units_[i].alive() || cheats_.shared_growth) top_up(party_[i], rewards_.gains[i], false);
     // Next pending deltas for all characters, in char id order (party members that were KO'd also get them).
     std::vector<PartyMember*> all;
     for (auto& member : party_) all.push_back(&member);

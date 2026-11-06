@@ -849,6 +849,9 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     } else if (args[1] == "location") {
       int want = 0;
       if (!to_int(args[2], want) || !st.location || st.location() != want) return bad(std::format("location is {}", st.location ? st.location() : -1));
+    } else if (args[1] == "song") {
+      int want = -1;
+      if ((args[2] != "none" && !to_int(args[2], want)) || !st.song || st.song() != want) return bad(std::format("song is {}", st.song ? st.song() : -2));
     } else if (args[1] == "gold") {
       int want = 0;
       if (!to_int(args[2], want) || !st.gold || st.gold() != want) return bad(std::format("gold is {}", st.gold ? st.gold() : -1));

@@ -60,6 +60,8 @@ struct PartyMember {
   std::array<int, 7> snap{};
   std::array<int, 7> pending{};
   std::array<int, 7> lv99{};
+  // The record's starting stats (the character data's, before any growth): where the max-growth cheat's path begins.
+  std::array<int, 7> base{};
   // Colour bit.
   u8 innate = 0;
   int growth_col = 0, dur = 10, rate = 10, hit_med = 50, hit_heavy = 20;
