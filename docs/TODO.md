@@ -16,14 +16,6 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 2. Fidelity gaps (not modelled)
 
-### A free-height actor still moves on 42 / 43 / 44 / 46 walks
-Priority: P3
-Impact: an actor with the free-height flag (`EF.6`, 0x40; set by 26, 3F / 40, 5B, B8 / B9, BA, cleared by 25) walks on a 42 / 43 / 44 / 46 in OpenCross; in the original's movement phase it would not move; reach in the data unknown; confidence: code reading (both sides), not captured.
-Original: the actor movement phase after the scripts (`fld_move_actor_collide` and its caller) skips the heading / velocity step for any actor with `(0x38 & 0x50) != 0`, so the velocity a 42 / 43 / 44 / 46 sets moves nobody while 0x40 is set (the record still waits for arrival).
-OpenCross: `FieldWorld::step_motions` (`src/game/field_world_sim.cpp`, `y_valid = flags38 & 0x40`) moves a free-height actor straight to its target on those walks (`free_y`, `move_xz` writing the position directly, the `!motion.direct && !y_valid` branch).
-Repro: scan the room scripts for an entity that runs 42 / 43 / 44 / 46 while its 0x40 is set (after 26 / 3F / 40 / 5B / B8 / B9 / BA without a 25 in between); if one exists, `ps1ref.Session` in that room, poll its 0x38 word and position during the walk, and compare with an OpenCross trace (`OC_VM_TRACE=1`, `npc_trace`-style dump).
-Done when: the scan finds no reachable case (drop this entry with the scan as evidence, and note the rule in the 42 / 44 / 46 rows of `docs/formats/fieldscript.md`), or the capture shows the original's behaviour and `step_motions` follows it with routes `alu_chair`, `art_swap`, `battle_hud`, `opn_wander`, `npc_trace`, `npc_walls`, `script_walk_slide` unchanged.
-
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
 
 ## 4. Code hygiene

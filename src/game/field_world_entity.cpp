@@ -294,7 +294,7 @@ bool FieldWorld::motion_wait(int ent) {
   const float speed = script_ent.v10c ? static_cast<float>(script_ent.v10c) / 16.0f : kWalkUnitsPerTick;
   const ActorPose& cur = ent_state.actor.current();
   const WalkMesh& walk = view_.walk();
-  const bool xz_velocity = (motion.kind == K::WalkXZ || motion.kind == K::WalkXZ2) && !motion.direct && !y_valid;
+  const bool xz_velocity = (motion.kind == K::WalkXZ || motion.kind == K::WalkXZ2) && !motion.direct;
   if (xz_velocity) {
     if (std::hypot(motion.tx - cur.x, motion.tz - cur.z) > 2.0f * speed) return true;
     ent_state.actor.set_position(walk, motion.tx, motion.tz, false, y_valid);

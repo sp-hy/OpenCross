@@ -1472,6 +1472,27 @@ void test_hop_free_height_flag() {
   CHECK((vm.entity(1).flags38 & kFreeHeight) == 0);
 }
 
+// WALK_TO (3F) sets the free-height flag on its wait form too, not only when it starts: the field clears the flag of the party
+// entities before every script pass, so a party member walking a 3F must get it back on every tick the wait form runs.
+void test_walk_to_wait_form_keeps_free_height() {
+  constexpr u32 kFreeHeight = 0x40;
+  Asm script;
+  const u16 walk = script.here();
+  script.raw({0x3F, 0x00}).word(10).word(20).word(-5).raw({0xE0}).raw({0x3F, 0x01});
+  script.stop();
+  TestHost host;
+  host.motion_polls_busy = 3;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{1, walk}}}}));
+  vm.tick();
+  CHECK_EQ(host.motions_started, 1);
+  CHECK((vm.entity(0).flags38 & kFreeHeight) != 0);
+  vm.entity(0).flags38 &= ~kFreeHeight;
+  vm.tick();
+  CHECK_EQ(host.motions_started, 1);
+  CHECK((vm.entity(0).flags38 & kFreeHeight) != 0);
+}
+
 int main() {
   test_status_read_skips_nobody();
   test_arithmetic();
@@ -1487,6 +1508,7 @@ int main() {
   test_song_change_holds_gate_but_not_run_script();
   test_party_ops_wait_for_model_swap();
   test_hop_free_height_flag();
+  test_walk_to_wait_form_keeps_free_height();
   test_variables_and_signedness();
   test_bit_ops();
   test_if_jump_polarity();

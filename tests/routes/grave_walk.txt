@@ -7,6 +7,9 @@
 - wait idle 300
 - put -1120 50
 - wait 10
+# Scripted turns run on odd ticks: align the tick parity so the timeline below (Serge's turn at the grave, then Poshul's walks) does
+# not move by a tick when the room load takes a tick more or less.
+- wait parity odd
 - walk -1205 52 6
 - key down confirm
 - wait 3

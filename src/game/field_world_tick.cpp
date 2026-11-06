@@ -483,6 +483,10 @@ void FieldWorld::sim_tick() {
     ent_state.updating = false;
   }
   step_cull();
+  // The free-height flag of the three party entities lasts one script pass: it is cleared before every pass, so it holds only
+  // while an op that sets it (26, 3F / 40, 5B, B8 / B9, BA, every form) runs in this pass. Other entities keep it until 25.
+  for (const int ent : party_ent_)
+    if (ent >= 0 && ent < static_cast<int>(ents_.size())) vm_.entity(ent).flags38 &= ~0x40u;
   vm_.tick();
   step_watchdog();
   // An entity the scripts left inactive (SET_VISIBLE 0) neither turns nor picks a clip this tick.

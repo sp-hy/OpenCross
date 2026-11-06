@@ -119,6 +119,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | Verb | Finishes when |
 |---|---|
 | `wait <ticks>` | `ticks` ticks have passed since the line began. |
+| `wait parity odd\|even` | The field tick count has that parity. The scripted-turn bookkeeping runs on odd ticks only (`rules/field_actors.md` section 2.5), so a cutscene with a rotation op lasts one tick more or less by the parity it started on; a route that asserts its timing aligns first. |
 | `wait room <name>` | The field room is `<name>`, no battle is active and the screen has faded back in. |
 | `wait dialogue open\|closed` | A dialogue is open (anything other than `open` means closed). |
 | `wait text <words...>` | An open dialogue's message (plain text, newlines as spaces) contains the words joined by single spaces. |

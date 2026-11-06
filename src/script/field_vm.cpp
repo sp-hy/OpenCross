@@ -492,10 +492,9 @@ bool FieldVM::busy_gate() {
   return false;
 }
 
-void FieldVM::begin_motion(const MotionRequest& request, bool free_height) {
+void FieldVM::begin_motion(const MotionRequest& request) {
   host_.start_motion(ent_, request);
   self_->flags270 |= flag270::kMoving;
-  if (free_height) self_->flags38 |= 0x40;
 }
 
 // Head turns need a 3D object on the turning entity (and on the looked-at one); the rate is `rate_entity`'s.

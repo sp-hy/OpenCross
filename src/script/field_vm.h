@@ -300,7 +300,7 @@ class FieldVM {
   void wait_or_advance(bool busy, u32 length);
   bool system_gate();
   bool busy_gate();
-  void begin_motion(const MotionRequest& request, bool free_height);
+  void begin_motion(const MotionRequest& request);
   void head_turn(HeadOp op, int ent, int other, s32 x, s32 y, s32 z, int rate);
 };
 

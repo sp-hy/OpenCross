@@ -298,6 +298,14 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (timed_out(3)) return bad("timed out waiting for flow state " + args[2] + " (in " + st.flow + ")");
       return false;
     }
+    // wait parity odd|even: the field tick count has that parity. The scripted-turn bookkeeping runs on odd ticks only, so a
+    // cutscene's timing after a rotation op depends on the parity it started on; aligning first keeps a route's numbers stable.
+    if (args[1] == "parity") {
+      if (args.size() < 3 || (args[2] != "odd" && args[2] != "even")) return bad("wait parity <odd|even>");
+      if ((st.field_ticks & 1u) == (args[2] == "odd" ? 1u : 0u)) return true;
+      if (timed_out(3)) return bad("timed out waiting for tick parity " + args[2]);
+      return false;
+    }
     if (args[1] == "guide") {
       int page;
       if (args.size() < 3 || !to_int(args[2], page)) return bad("wait guide <0|1|2>");
