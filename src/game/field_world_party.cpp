@@ -54,8 +54,8 @@ void FieldWorld::bind_party_entity(int slot) {
   if (auto model = character_model(ent_state.char_model)) ent_state.actor.set_model(model);
   // In another body: the character's own model is made ready for the switch back.
   if (ent_state.char_model != ent_state.char_id) prefetch_character_model(ent_state.char_id);
-  // Solid; bit 22 marks the player class that attr 4 / 5 walls block.
-  ve.flags38 |= 0x400100;
+  // A 3D object; solid; bit 22 marks the player class that attr 4 / 5 walls block.
+  ve.flags38 = (ve.flags38 & ~script::flag38::kNo3dObject) | 0x400100;
 }
 
 void FieldWorld::rebind_party() {
@@ -73,8 +73,8 @@ void FieldWorld::setup_pc(int ent, int char_ref, int) {
   Ent& ent_state = ents_[static_cast<size_t>(ent)];
   ent_state.pc_slot = slot;
   if (slot < 0) {
-    // That character is not in the party.
-    vm_.entity(ent).flags38 |= script::flag38::kInactive;
+    // That character is not in the party: inactive and hidden.
+    vm_.entity(ent).flags38 |= script::flag38::kInactive | 0x20u;
     return;
   }
   party_ent_[static_cast<size_t>(slot)] = ent;
@@ -303,7 +303,7 @@ void FieldWorld::party_override(bool enter, int key) {
     const int ent = party_ent_[static_cast<size_t>(slot)];
     if (ent < 0 || ent >= static_cast<int>(ents_.size())) continue;
     ents_[static_cast<size_t>(ent)].pc_slot = slot < static_cast<int>(party_chars_.size()) ? slot : -1;
-    vm_.entity(ent).flags38 &= ~0x2u;
+    vm_.entity(ent).flags38 &= ~script::flag38::kSelected;
     if (slot == 0) vm_.entity(ent).flags38 |= script::flag38::kSelected;
   }
   log::debug("field: tick {} party override {} key {}: leader ent {}", tick_count_, enter ? "on" : "off", key, party_ent_[0]);

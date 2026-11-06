@@ -151,7 +151,7 @@ void Mixer::drop_pushed_music() { push({Cmd::DropPush, nullptr, -1, 0, 0}); }
 bool Mixer::switch_bgm_source(bool remastered, int song) {
   const int cur = song_.load();
   if (cur < 0 || !vfs_) return false;
-  if (bgm_akao_.load() == !remastered) return true;
+  if (bgm_akao_.load() == !remastered || !sounding_.load()) return true;
   if (song < 0) song = cur;
   const bool from_akao = remastered;
   if (!base_table_) base_table_ = load_akao_base_table(*vfs_);
@@ -478,7 +478,6 @@ void Mixer::render(float* out, u32 frames) {
       bgm_frames_ += got;
       if (got < want) {
         bgm_.reset();
-        song_.store(-1);
         break;
       }
     }
@@ -487,6 +486,9 @@ void Mixer::render(float* out, u32 frames) {
       bgm_secs_.store(bgm_base_ + double(bgm_frames_) / double(bgm_->sample_rate()), std::memory_order_relaxed);
     }
   }
+  const bool mono = mono_.load(std::memory_order_relaxed);
+  if (akao_) akao_->set_mono(mono);
+  if (sfx_player_) sfx_player_->set_mono(mono);
   if (akao_ && !paused_ && !hold) {
     const float bus_level = master * bus_gain(Bus::Bgm);
     fscratch_.resize(size_t(frames) * 2);
@@ -499,11 +501,9 @@ void Mixer::render(float* out, u32 frames) {
       out[size_t(i) * 2] += fscratch_[size_t(i) * 2] * gain;
       out[size_t(i) * 2 + 1] += fscratch_[size_t(i) * 2 + 1] * gain;
     }
-    if (akao_->finished()) {
-      akao_.reset();
-      song_.store(-1);
-    }
+    if (akao_->finished()) akao_.reset();
   }
+  sounding_.store(bgm_ || akao_, std::memory_order_relaxed);
   if (sfx_player_ && !sfx_player_->finished()) {
     if (akao_) sfx_player_->set_reverb(akao_->reverb_mode(), akao_->reverb_depth());
     else sfx_player_->set_reverb(4, 0x3FFF);
@@ -519,15 +519,20 @@ void Mixer::render(float* out, u32 frames) {
     const size_t count = std::min<size_t>(frames, total - voice_pos_);
     const float gain = master * bus_gain(Bus::Voice);
     const float* src = voice_->data() + voice_pos_ * 2;
-    for (size_t i = 0; i < count * 2; ++i) out[i] += src[i] * gain;
+    if (mono)
+      for (size_t i = 0; i < count; ++i) {
+        const float sample = 0.5f * (src[2 * i] + src[2 * i + 1]) * gain;
+        out[2 * i] += sample;
+        out[2 * i + 1] += sample;
+      }
+    else
+      for (size_t i = 0; i < count * 2; ++i) out[i] += src[i] * gain;
     voice_pos_ += count;
     if (voice_pos_ >= total) {
       voice_.reset();
       voice_on_.store(false, std::memory_order_release);
     }
   }
-  if (mono_.load(std::memory_order_relaxed))
-    for (u32 i = 0; i < frames; ++i) out[2 * i] = out[2 * i + 1] = 0.5f * (out[2 * i] + out[2 * i + 1]);
   level_view_.store(level_, std::memory_order_relaxed);
   level_target_view_.store(level_target_, std::memory_order_relaxed);
   fade_left_view_.store(fade_left_, std::memory_order_relaxed);

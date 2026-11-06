@@ -1,6 +1,7 @@
 # PS1 project symbol list: effect overlay 46black.prg (base 0x801C5E00).
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+fx_46black_op_model_start = 0x801C5EF8;  # function: Op 0x180: model clock on at 0x28, stores the angle shift / distance shift / span operands, SetAnim(5, 0x1E) on every target
 fx_46black_unhook_draw = 0x801C5FD4;  # function: Removes the hooked draw
 fx_46black_hooked_draw = 0x801C6100;  # function: Draw hook installed over target models
 fx_46black_op_target_start = 0x801C61D0;  # function: Target-start op that walks models and hooks the draw

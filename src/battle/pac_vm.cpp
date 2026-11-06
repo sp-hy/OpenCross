@@ -146,7 +146,7 @@ void Vm::note_cast_colour(int colour) {
 
 void Vm::refresh_reserved() {
   for (int k = 0; k < 3; ++k) {
-    set_var(0x38 + 2 * k, host_.ring_colour(k));
+    if (const int slot = host_.ring_colour(k); slot >= 0) set_var(0x38 + 2 * k, slot);
     set_var(0x3E + 2 * k, host_.pc_char_id(k));
   }
   for (int unit = 3; unit < kUnits; ++unit) set_var(0x44 + 2 * (unit - 3), host_.monster_id(unit));
@@ -620,13 +620,19 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
     }
     case 0x2F: {
       u16& dest = dst(1);
-      const int col = operand_w(3);
-      int cnt[6]{};
-      for (int k = 0; k < 3; ++k) {
-        const int rc = host_.ring_colour(k);
-        if (rc >= 0 && rc < 6) ++cnt[rc];
+      // Colours 0..5 count the slots holding that colour, 8..15 the empty slots; any other value gives the size of the largest group of
+      // equal slots, the empty and the all-colour slots forming groups of their own.
+      const int col = operand_w(3) & 0xFF;
+      std::array<int, 3> slots{};
+      for (int k = 0; k < 3; ++k) slots[static_cast<size_t>(k)] = host_.ring_colour(k);
+      int count = 0;
+      if (col < 6 || (col >= 8 && col < 16)) {
+        const int wanted = col < 6 ? col : -1;
+        count = static_cast<int>(std::count(slots.begin(), slots.end(), wanted));
+      } else {
+        for (const int slot : slots) count = std::max(count, static_cast<int>(std::count(slots.begin(), slots.end(), slot)));
       }
-      store(dest, col >= 0 && col < 6 ? cnt[col] : *std::max_element(cnt, cnt + 6));
+      store(dest, count);
       break;
     }
     case 0x34:
@@ -737,8 +743,10 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
       no_drops_ = true;
       emit(Event::Kind::NoDrops);
       break;
-    case 0x83:  // pending result = (s8)(v - 0x80); the end check ends the battle while it is negative and restores the code (- 0x80)
-      if (static_cast<s8>(static_cast<u8>(operand_w(1) - 0x80)) < 0) forced_result_ = operand_w(1) & 0xFF;
+    case 0x83:
+      // Pending result = (s8)(v - 0x80), always written: the end check ends the battle while it is negative and restores the code
+      // (+ 0x80), so a value of 0x80 or more clears a forced result.
+      forced_result_ = static_cast<s8>(static_cast<u8>(operand_w(1) - 0x80)) < 0 ? operand_w(1) & 0xFF : -1;
       emit(Event::Kind::SetResult, -1, operand_w(1));
       break;
     case 0x84: emit(Event::Kind::QuarterHp, unit_of(operand_w(1))); break;
@@ -808,9 +816,22 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
       if (res != 0) host_.set_evo_pending(res);
       break;
     }
-    // B0 / B1: lift / land tween, no model here.
+    // B0 / B1: a 10-pass height tween of the unit's model (B0 takes the step = A / 10 and keeps it for the next B1, which moves the model
+    // back by the same series); the op blocks until the tween ends, two ticks per pass.
     case 0xB0:
-    case 0xB1: break;
+    case 0xB1: {
+      if (!ctx.delay_armed) {
+        if (op == 0xB0) ctx.lift_step = static_cast<s16>(operand_s(0)) / 10;
+        emit(Event::Kind::Lift, self, ctx.lift_step, op == 0xB0 ? 1 : -1);
+        if (skip_delays_) break;
+        ctx.delay_armed = true;
+        ctx.delay = kLiftTicks;
+        return Step::Block;
+      }
+      if (--ctx.delay > 0) return Step::Block;
+      ctx.delay_armed = false;
+      break;
+    }
     case 0xE0: emit(Event::Kind::Dialogue, self, r16(1)); break;
     case 0xE2: emit(Event::Kind::WaitDialogue, self); break;
     case 0x39: flag_ui_ = b8(1) != 0; emit(Event::Kind::EngineFlag, -1, op, b8(1)); break;
@@ -849,6 +870,7 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
     case 0xC5: {
       const u32 tag = r16(1) | (static_cast<u32>(r16(3)) << 16);
       if (host_.effect_busy(op == 0xC5, tag)) return Step::Block;
+      emit(Event::Kind::EffectWait, -1, op == 0xC5, static_cast<int>(tag));
       break;
     }
     case 0xAE: {  // d = (colour history[0..6] == sequence 5,4,1,6,3,2,7 [colour+1: yellow red green blue black white, colourless]); a match mutes battle sfx
@@ -902,7 +924,7 @@ class ScriptedBrain::BattleHost final : public Host {
   u32 alive_mask() const override {
     u32 mask = 0;
     for (int i = 0; i < kUnits; ++i)
-      if (battle->unit(i).alive()) mask |= 1u << i;
+      if (battle->unit(i).standing()) mask |= 1u << i;
     return mask;
   }
   u32 roster_mask() const override {
@@ -927,7 +949,7 @@ class ScriptedBrain::BattleHost final : public Host {
   int monster_id(int unit) const override { return battle->unit(unit).present && !battle->unit(unit).pc ? battle->unit(unit).src_id : 0xFF; }
   int ring_colour(int slot) const override {
     const int colour = battle->ring()[static_cast<size_t>(slot)];
-    return colour < 0 || colour > 5 ? 6 : colour;
+    return colour < 0 || colour > kRingAllColours ? -1 : colour;
   }
   int timer_frames() const override { return battle->actions() * 180; }
   void set_menu_cursor(int value) override {
@@ -1217,10 +1239,12 @@ void ScriptedBrain::begin_battle(Battle& battle, Rng& rng) {
   vm_->settle();
 }
 
-// One slot run on virtual time, then the settle pass (the other entities' slot-1 loops react to what the slot did).
+// One slot run on virtual time, then the settle pass (the other entities' slot-1 loops react to what the slot did). The scheduler's first
+// pass after an attacked script (slot 4) takes the turns that ran out, before those loops get their next pass.
 bool ScriptedBrain::run(int unit, int slot, std::vector<QueuedAttack>& queued) {
   vm_->mark(slot, host_->action_serial());
   if (!vm_->run_slot(unit, slot, queued, 30000)) return false;
+  if (slot == 4) host_->battle->claim_ready_turns();
   vm_->settle();
   return true;
 }
@@ -1261,6 +1285,7 @@ void ScriptedBrain::to_actions(const Battle& battle, const std::vector<QueuedAtt
       if (attack.value <= 0 || attack.value >= static_cast<int>(battle.tables().elements.size())) continue;
       ea.kind = EnemyAction::Kind::Element;
       ea.element = attack.value;
+      ea.trap_fizzle = attack.type == 6;
       ea.target = std::countr_zero(mask);
       ea.targets = mask;
       out.push_back(ea);

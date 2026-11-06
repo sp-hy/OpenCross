@@ -107,17 +107,16 @@ class Etrap : public Remap {
 class BgChng : public Remap {};
 
 // miyademo: init rolls n = rand(); 0x100 queues bg_NN for NN = {13, 14, 15, 22, 23, 31, 39, 63, 64}[n % 9], n += 1; 0x101 swaps it in as the
-// stage pack and restarts the 'miya' sequence on the first five swaps. The swap goes through FxHooks::set_stage (bg number); the battle
-// host does not swap stages, and the sound / camera of the new pack are not played.
+// stage pack (FxHooks::set_stage) and, on the first five swaps, plays the new stage's first sound, selects one of its `i` camera shots at
+// random and restarts the 'miya' sequence.
 class Miyademo : public Remap {
  public:
   bool holds_game_speed() const override { return true; }
 
  protected:
   void init() override {
-    Rng rng;
-    rng.state = ctx_.seed ? ctx_.seed : 1;
-    roll_ = rng.next();
+    rng_.state = ctx_.seed ? ctx_.seed : 1;
+    roll_ = rng_.next();
   }
   bool command(int op, const int* args, int count) override {
     (void)args;
@@ -132,12 +131,17 @@ class Miyademo : public Remap {
     if (queued_ >= 0) {
       if (ctx_.hooks.set_stage) ctx_.hooks.set_stage(queued_);
       queued_ = -1;
-      if (swaps_++ < 5 && ctx_.sequences) ctx_.sequences->start("miya");
+      if (swaps_++ < 5) {
+        if (ctx_.hooks.stage_sound) ctx_.hooks.stage_sound();
+        if (ctx_.hooks.stage_shot) ctx_.hooks.stage_shot('i', rng_.next());
+        if (ctx_.sequences) ctx_.sequences->start("miya");
+      }
     }
     return true;
   }
 
  private:
+  Rng rng_;
   int roll_ = 0, queued_ = -1, swaps_ = 0;
 };
 

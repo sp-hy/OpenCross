@@ -25,7 +25,8 @@ s16 s16v(float value) { return static_cast<s16>(std::lround(value)); }
 // t < dur (t stops at dur; -704 * 80 * 128 >> 12 = -1760 units); the real model stays. 0x181 (dur @+4, amp @+0xC, shift @+0xE, amp rate
 // @+0x10): the copy keeps rising 5 units per tick (t * -0x5000), its colour falls linearly to black ((c * rem * 0x80 / dur) >> 7) and every
 // skinned vertex sways x += (rsin(phase + (y << shift)) * amp) >> 12, phase += 0x80 and amp += rate per tick; at t = dur the mode ends.
-// Copy: part flag bit 1 (semi-transparent) with tpage ABR 1 (B + F).
+// Copy: part flag bit 1 (semi-transparent) with tpage ABR 1 (B + F). While 0x180 / 0x181 run the real model's animation speed is 0 (its pose
+// holds); the end of 0x181 gives it the normal speed back.
 class Get44 : public OverlayFx {
  protected:
   bool command(int op, const int* args, int count) override {
@@ -53,6 +54,7 @@ class Get44 : public OverlayFx {
     victim->copies.clear();
     if (mode_ == 0x180) {
       if (t180_ < duration_) ++t180_;
+      victim->anim_speed = 0;
       FxModel::Copy copy;
       copy.offset = {0, static_cast<float>((speed_ * t180_ * 0x80) >> 12), 0};
       copy.abr = 1;
@@ -60,9 +62,11 @@ class Get44 : public OverlayFx {
     } else if (mode_ == 0x181) {
       const int tt = t181_ + 1, rem = duration_ - tt;
       if (duration_ <= tt) {
+        victim->anim_speed = -1;
         mode_ = 0;
         return;
       }
+      victim->anim_speed = 0;
       phase_ += 0x80;
       amp_ += amp_rate_;
       t181_ = tt;
@@ -231,19 +235,20 @@ class Super38 : public OverlayFx {
 };
 
 // 46black: the overlay draws the warped models itself every frame (the stock draw is hidden). Which models: when target 0 is a PC
-// every unit without the monster bit (and without the flag-8 bit), else the target list. 0x180: model
-// timer on at 40 (+1 per tick), SetAnim(target, 5, 0x1E) on every target; 0x181: the ground / scenery timer (stage ring + 'near' / 'far'
-// meshes, not done here); 0x182: both timers off (identity). Warp of a skinned world vertex (models: shifts 4 / 5, D = 112):
-// r = |v|, t' = max(0, t - (r >> 5)); t' > D -> (0, -200, 0); else X = x + (-x / D) t', Y = y + ((-200 - y) / D) t', Z = z + (-z / D) t' and
-// (X, Z) turned about y by a = t' << 4: x' = Z sin a + X cos a, z' = Z cos a - X sin a (>> 12 each). Everything spirals into (0, -200, 0).
+// every unit without the monster bit (and without the flag-8 bit), else the target list. 0x180 (angle shift A @+8, distance shift S @+10,
+// span D @+12; the shipped pack: 4 / 5 / 112): model timer on at 40 (+1 per tick), SetAnim(target, 5, 0x1E) on every target; 0x181: the
+// ground / scenery timer (stage ring + 'near' / 'far' meshes, not done here); 0x182: both timers off (identity). Warp of a skinned world vertex:
+// r = |v|, t' = max(0, t - (r >> S)); t' > D -> (0, -200, 0); else X = x + (-x / D) t', Y = y + ((-200 - y) / D) t', Z = z + (-z / D) t' and
+// (X, Z) turned about y by a = t' << A: x' = Z sin a + X cos a, z' = Z cos a - X sin a (>> 12 each). Everything spirals into (0, -200, 0).
 class Black46 : public OverlayFx {
  protected:
   bool command(int op, const int* args, int count) override {
-    (void)args;
-    (void)count;
     if (op == 0x180) {
       on_ = true;
       tick_ = 0x28;
+      sh_angle_ = arg(args, count, 8);
+      sh_dist_ = arg(args, count, 10);
+      span_ = arg(args, count, 12);
       for (int i = 0; i < target_count(); ++i) set_anim(target(i), 5, 0x1E);
     } else if (op == 0x182) {
       on_ = false;
@@ -265,7 +270,7 @@ class Black46 : public OverlayFx {
       for (int i = 0; i < target_count(); ++i) warp.push_back(target(i));
     }
     for (FxModel& unit_model : ctx_.models->units) unit_model.copies.clear();
-    const int tick = tick_;
+    const int tick = tick_, sh_angle = sh_angle_, sh_dist = sh_dist_, span = span_;
     for (FxModel* warped : warp) {
       if (!warped) continue;
       // Every tick the model is shown, the overlay draws it itself, and it is hidden again: the hidden bit is SET after every tick from the
@@ -277,7 +282,7 @@ class Black46 : public OverlayFx {
         continue;
       }
       FxModel::Copy copy;
-      copy.deform = [tick](Vec3& vertex) { warp_vertex(vertex, tick, 4, 5, 112); };
+      copy.deform = [tick, sh_angle, sh_dist, span](Vec3& vertex) { warp_vertex(vertex, tick, sh_angle, sh_dist, span); };
       warped->copies.push_back(std::move(copy));
     }
   }
@@ -303,7 +308,7 @@ class Black46 : public OverlayFx {
 
  private:
   bool on_ = false;
-  int tick_ = 0;
+  int tick_ = 0, sh_angle_ = 0, sh_dist_ = 0, span_ = 0;
 };
 
 // cook / swordbox (byte-identical but for labels): the 'spot' emitter's op-0x48 callback replaces its draw and stores the

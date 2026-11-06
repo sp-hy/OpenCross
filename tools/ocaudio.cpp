@@ -170,11 +170,21 @@ int cmd_render_seq(const vfs::Vfs& fs, const std::string& which, const std::stri
   const u32 frames = u32(std::max(0.1, seconds) * rate);
   std::vector<float> buf(size_t(frames) * 2), sfx_buf;
   int max_voices = 0, requests = 0;
-  // Rendered in 1/240 s chunks (one sequencer update) so the voice stats are sampled and a requested sound effect starts in the update
+  // OC_AUDIO_PROBE=<csv>: every active voice after each 1/240 s step, as for render-sfx.
+  const char* probe_path = std::getenv("OC_AUDIO_PROBE");
+  FILE* probe = probe_path ? std::fopen(probe_path, "w") : nullptr;
+  if (probe) std::fprintf(probe, "step,tick,voice,reg,vl,vr,level\n");
+  // Rendered in 1/240 s steps (one sequencer update) so the voice stats are sampled and a requested sound effect starts in the update
   // that requested it.
-  for (u32 done = 0; done < frames;) {
-    const u32 chunk = std::min<u32>(std::max<u32>(1, rate / 240), frames - done);
+  for (u32 done = 0, step = 0; done < frames; ++step) {
+    const u32 chunk = std::min(frames, std::max(done + 1, u32((u64(step) + 1) * rate / 240))) - done;
     pl.render(&buf[size_t(done) * 2], chunk);
+    for (int i = 0; probe && i < audio::AkaoPlayer::kVoices; ++i) {
+      const audio::AkaoPlayer::VoiceProbe voice = pl.probe_voice(i);
+      if (voice.active)
+        std::fprintf(probe, "%u,%u,%d,%d,%d,%d,%d\n", step, pl.ticks(), i, voice.reg, int(std::lround(voice.gl * 0x4000)),
+                     int(std::lround(voice.gr * 0x4000)), voice.level);
+    }
     if (triggers) {
       const auto pending = pl.take_sfx_requests();
       requests += int(pending.size());
@@ -188,6 +198,7 @@ int cmd_render_seq(const vfs::Vfs& fs, const std::string& which, const std::stri
     done += chunk;
   }
   if (key_file) std::fclose(key_file);
+  if (probe) std::fclose(probe);
   std::vector<s16> pcm(buf.size());
   float peak = 0;
   for (size_t i = 0; i < buf.size(); ++i) {

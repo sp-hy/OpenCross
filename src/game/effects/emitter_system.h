@@ -103,6 +103,9 @@ struct ViewParams {
     float near = 0, far = 0;
     float rgb[3] = {0, 0, 0};
   } cue;
+  // Objects drawing the sheet named `shifted_sheet` are moved by `sheet_shift` (x, y) in view space before their corners are projected.
+  std::string_view shifted_sheet;
+  float sheet_shift[2] = {0, 0};
   static ViewParams from_room(const assets::RoomCamera& camera);
 };
 
@@ -189,6 +192,9 @@ class EmitterSystem {
   struct Config {
     u32 seed = 1;
     size_t max_objects = 4096;
+    // Size of the object arena (ObjectHeap): a spawn that finds no room is dropped. Battle 0x13000, the field 0x4000 (0xC000 in
+    // room 8), the title 0x10000.
+    u32 heap_bytes = 0x13000;
     // The engine's position shift: 3 in the field and the title, 5 in battle. Used by the integrator (pos += vel << S, op 0x38),
     // the floor (floor << S, flag bit 4), the op-0x27 radius (<< S), the path ride (op 0x3E: (target - pos) >> S), the camera-relative z
     // (flag bit 24: << S), the sprite-sheet quad corners (sheet x / y / w / h << S) and the type-15 'line'
@@ -383,6 +389,7 @@ class EmitterSystem {
   // `after_step` = after it instead (a replaced draw callback / an op-0x48 callback runs after the tick's integration).
   // The hook must not spawn objects (start emitters instead).
   bool set_object_hook(std::string_view name, std::function<void(ObjectRef&)> fn, bool after_step = false);
+  // Visits the live objects of emitter `name` in arena order (the order they are stepped and drawn).
   void for_each_object(std::string_view name, const std::function<void(ObjectRef&)>& fn);
   // Marks the live type-14 mesh objects of emitter `name` (MeshInstance::marked); objects spawned later stay unmarked. `on` = false clears them.
   void mark_mesh_objects(std::string_view name, bool on);

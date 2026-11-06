@@ -129,14 +129,14 @@ During a room-exit fade only the leader stops: `controls_free()` is false for a 
 
 ### 5.2 Player against solids
 
-- Only the controlled entity is tested, against each other non-party actor that has flag 0x100 (solid) and flag 0x10 (inactive) clear. Vertical overlap: `py - 300 <= oy` and `oy - height <= py` (the player's height is the constant 300).
+- Only the controlled entity is tested, against each other non-party actor that has flag 0x100 (solid) and flag 0x10 (inactive) clear. Vertical overlap: `py - hp <= oy` and `oy - height <= py`, `hp` the player's own height (op 8B; 300 by default).
 - The test point is the player's position after the mesh move. Circle: hit when `|P' - C|^2 < (r_player + r_other)^2`; if the player already overlapped before the move, only a move that shortens the distance is a hit. Box (margin 0): hit when P' is inside and the old position was not.
 - A hit blocks the move unless the actor has the FE 25 flag (0x200000 of its 0x270 word) and its press counter has reached 0x40 (tested before the increment). The counter rises by one (to 0x7FFF) on each tick the player's point lies inside the actor and resets to 0 on any tick it does not, and on any tick the player has no heading.
 - Pushable actors (flag 0x2000, FE 06): `fieldscript.md` 8.2. The pending move is the player's pad step of 2.1 from before the probe, slide and slope steps; the "inside another box actor" test looks at box actors (flag 0x200) with flags 0x400050 clear.
 
 ### 5.3 Triggers (`step_triggers`)
 
-Candidates are the non-party actors from index 1 with flags 0x400012 clear and `py - 300 <= oy <= py + height`. With `d2` the squared centre distance, `rp` and `ro` the radii:
+Candidates are the non-party actors from index 1 with flags 0x400012 clear and `py - hp <= oy <= py + height` (`hp` the player's height, op 8B, 300 by default). With `d2` the squared centre distance, `rp` and `ro` the radii:
 
 | Test | Circle actor | Box actor |
 |---|---|---|
@@ -144,13 +144,13 @@ Candidates are the non-party actors from index 1 with flags 0x400012 clear and `
 | talk (ON_ACTION) | `d2 < (rp + 48 + ro)^2` (`kTalkMargin`) and inside the talk cone | the same rectangle; the cone only if the actor has flag 0x1000 |
 
 - Talk cone: `(player facing - bearing(actor - player) + 0x800) & 0xFFF` in `[0x545, 0xABB]` (`kTalkConeMin`, `kTalkConeMax`; about +-61 degrees).
-- Talk needs `action_pending`, free controls and the no-action flag clear; touch is skipped for the no-collision flag.
-- The actor with the smallest `d2` among the talk candidates gets the button first; if its ON_ACTION cannot start (script busy or locked) the next is tried, and the first that starts consumes the button. An actor that qualified for talk does not also get the touch event that tick.
+- A pending action press while the script input lock (GF.1) is clear claims the talk range: an actor inside it with the no-action flag clear gets the talk event or nothing that tick, never the touch event. It gets the talk event when the controls are free (no modal window) and the cone test passes; a failed cone (or, for a box actor with flag 0x1000, the same) or a modal window means no event at all, even inside the touch radius. Without a press, or with the no-action flag set, the touch test runs; touch is skipped for the no-collision flag.
+- The actor with the smallest `d2` among the talk candidates gets the button first; if its ON_ACTION cannot start (script busy or locked) the next is tried, and the first that starts consumes the button.
 - A key item used from the field list starts the touch-trigger script of every actor with that flag within `rp + 48 + ro` (box: inside the rectangle), without the cone test; those actors get neither talk nor touch that pass.
 
 ### 5.4 Class bits
 
-A party member gets flags 0x400100 when it is bound (player class, solid). SETUP_NPC and D1 set 0x200100 and clear 0x4000 (NPC class, solid). What the class bits block: `room.md` 3.5. Actors never collide with each other except through 5.2.
+A party member gets flags 0x400100 and loses 0x4000 (no 3D object, set on every entity at room load) when it is bound (player class, solid). SETUP_NPC and D1 set 0x200100 and clear 0x4000 (NPC class, solid). What the class bits block: `room.md` 3.5. Actors never collide with each other except through 5.2.
 
 ### 5.5 Terrain push
 

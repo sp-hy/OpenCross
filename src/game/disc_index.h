@@ -5,6 +5,7 @@
 // are dummy\dummy.dat on disc 2, and 240 map records name another room (id 459 is bak_a02f on disc 1, fin_06 on disc 2). Field
 // script FE 65 / the disc check at every map transition (variable 0x42 = disc - 1) switch it.
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "core/types.h"
@@ -31,6 +32,8 @@ class DiscIndex {
   const std::string& record(int disc, int index) const;
   // "map/mapbin/<stem>.bin" record of a room id -> stem ("" when the record is not a map .bin, e.g. dummy.dat).
   std::string room_stem(int disc, int room_id) const;
+  // Some map record of that disc names the room file.
+  bool has_room(int disc, std::string_view stem) const;
   // Battle script of a scene as a logical path. Several scenes share a file through their record, so the file's number need not be
   // the scene's; a scene with no script record gets the shared template.
   std::string battle_script(int disc, int scene) const;

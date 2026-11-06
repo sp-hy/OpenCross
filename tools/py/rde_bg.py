@@ -6,7 +6,8 @@ files are not touched. Frames come from Windows.Graphics.Capture by window handl
 while it is minimised). Run under a copy of a save, like rde_save_redirect.py; run from the repo root.
 
 Library:
-  game = launch(save, card1=None)   start RDE, redirect the save, replace memory card 1, take over input
+  game = launch(save, card1=None, language=None, graphics=None)   start RDE (graphics: 0 original, 1 HD art), redirect the save,
+                              replace memory card 1, take over input
   game = attach(pid)          the same for a running game
   game.press(PAD_START)       hold buttons for a time, then release
   game.hold(buttons)          set the held buttons (0 = none)
@@ -117,7 +118,7 @@ def give_focus_back(hwnd):
     ctypes.windll.user32.SwitchToThisWindow(hwnd, True)
 
 
-def launch(save, wait=25, card1=None, language=None):
+def launch(save, wait=25, card1=None, language=None, graphics=None):
     """Starts RDE behind everything; `wait` = seconds until the title is up, when the save path can be redirected. Foreground
     changes stay locked while it boots and a window-event hook keeps its window at the back, so it never takes the focus or shows
     over other windows; should the lock be lifted early (a key press of the user releases it), the foreground goes straight back."""
@@ -129,13 +130,13 @@ def launch(save, wait=25, card1=None, language=None):
     startup.wShowWindow = win32con.SW_SHOWNOACTIVATE
     ctypes.windll.user32.LockSetForegroundWindow(1)
     try:
-        return _boot(save, wait, card1, previous, before, startup, language)
+        return _boot(save, wait, card1, previous, before, startup, language, graphics)
     finally:
         ctypes.windll.user32.LockSetForegroundWindow(2)
 
 
-def _boot(save, wait, card1, previous, before, startup, language=None):
-    process = redirect_tool.launch(save, startup, language)
+def _boot(save, wait, card1, previous, before, startup, language=None, graphics=None):
+    process = redirect_tool.launch(save, startup, language, graphics)
     backstop = Backstop(process.pid)
     start = time.time()
     while not window_of(process.pid):

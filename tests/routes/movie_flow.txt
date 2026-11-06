@@ -15,7 +15,8 @@
 - wait 90
 - tap confirm
 - wait 90
-- tap start
+- tap down
+- tap confirm                         # Confirm
 - wait movie start 300
 - wait 60
 - tap confirm

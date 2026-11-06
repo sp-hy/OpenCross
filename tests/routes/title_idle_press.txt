@@ -1,0 +1,15 @@
+# Title idle timer under the press: Start pressed 20 ticks before the room's idle timer (variable 0x404) reaches 900 must reach the
+# menu; the timer is held from the press, so the attract demo (dem_01) does not start under the fade to the menu.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 100
+- set var 404 880
+- tap confirm
+- wait 150
+- assert room opening
+- assert var 404 0
+- assert flow title
+- screenshot tip_01_menu.png
+- quit

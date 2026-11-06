@@ -57,7 +57,7 @@ bool BattleAudio::set_remastered(bool on) {
   if (on && song == kPs1BattleSong) song = kRdeBattleSong;
   else if (!on && song == kRdeBattleSong) song = kPs1BattleSong;
   // The jingle ran out: nothing to carry, the battle still owns the music.
-  if (!mixer_->playing()) return true;
+  if (!mixer_->sounding()) return true;
   if (mixer_->switch_bgm_source(on, song)) song_ = song;
   return true;
 }
@@ -210,7 +210,7 @@ bool BattleAudio::play(const std::string& tag, int volume, int pan, uint32_t mas
   programs.insert(programs.begin(), program);
   for (audio::SfxProgram& each : programs) {
     each.mask |= mask;
-    each.volume = std::clamp(static_cast<float>(volume) / 127.0f, 0.0f, 1.5f);
+    each.volume = static_cast<float>(volume & 0x7F) / 127.0f;
     each.pan = pan;
     mixer_->play_sfx(each);
   }
@@ -221,7 +221,7 @@ bool BattleAudio::render(const std::string& tag, std::vector<float>& pcm, int fr
   audio::SfxProgram program;
   std::vector<audio::SfxProgram> extra;
   if (!make_program(tag, program, &extra)) return false;
-  program.volume = std::clamp(static_cast<float>(volume) / 127.0f, 0.0f, 1.5f);
+  program.volume = static_cast<float>(volume & 0x7F) / 127.0f;
   program.pan = pan;
   for (audio::SfxProgram& extra_program : extra) extra_program.volume = program.volume, extra_program.pan = pan;
   audio::AkaoPlayer player(44100, true);

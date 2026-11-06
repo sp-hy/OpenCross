@@ -177,4 +177,30 @@ void rde_playinit_end(const data::GameTables* tables, save::SaveSlot& slot, cons
     for (size_t row = 0; row < 8; ++row) pip.unlocked[row] = static_cast<u16>(pip.unlocked[row] | (*pip_masks)[row]);
 }
 
+void pip_form_stats(const data::GameTables* tables, save::SaveSlot& slot) {
+  save::SaveChar& pip = slot.chars[static_cast<size_t>(kPip)];
+  const int form = pip.model_id;
+  if (!tables || slot.head[save::head::kStarsTotal] != 99 || form < 0x2B || form > 0x30) return;
+  auto it = tables->char_sets.find("char");
+  if (it == tables->char_sets.end()) return;
+  const data::Lv99& lv99 = it->second.lv99[static_cast<size_t>(form)];
+  pip.cur_hp = static_cast<u16>(std::clamp(pip.cur_hp + lv99.hp - pip.max_hp, 0, static_cast<int>(lv99.hp)));
+  pip.max_hp = pip.hp_extra = lv99.hp;
+  pip.atk = lv99.atk, pip.def = lv99.def, pip.hit = lv99.hit, pip.evd = lv99.evd, pip.mag = lv99.mag, pip.mdef = lv99.mdef;
+  pip.bonus[0] = pip.atk, pip.bonus[2] = pip.hit, pip.bonus[4] = pip.def, pip.bonus[6] = pip.evd, pip.bonus[8] = pip.mag,
+  pip.bonus[10] = pip.mdef;
+}
+
+void pip_form_unlocks(const data::GameTables* tables, save::SaveSlot& slot) {
+  save::SaveChar& pip = slot.chars[static_cast<size_t>(kPip)];
+  const int form = pip.model_id;
+  if (!tables || slot.head[save::head::kStarsTotal] != 99 || form < 0x2B || form > 0x30) return;
+  const int column = growth_column(tables, slot, kPip, false) & 7;
+  for (size_t row = 0; row < pip.unlocked.size(); ++row) pip.unlocked[row] = static_cast<u16>(pip.unlocked[row] | kInitialUnlocks[row]);
+  for (const auto& star : tables->growth) {
+    const int cell = star[static_cast<size_t>(column)];
+    if (cell < data::kGridCells) pip.unlocked[static_cast<size_t>(cell / data::kGridCols)] |= static_cast<u16>(1u << (cell % data::kGridCols));
+  }
+}
+
 }  // namespace oc::game::newgame

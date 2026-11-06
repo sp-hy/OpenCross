@@ -414,6 +414,7 @@ std::unique_ptr<MeshModel> MeshPipeline::create_model(const assets::ModelAsset& 
       model_draw.mesh = static_cast<u16>(mesh_index);
       // Mdl constructs and rigid weapon meshes alike are one-sided.
       model_draw.one_sided = true;
+      model_draw.not_gouraud_textured = sm.not_gouraud_textured;
       const assets::Material& mat = mesh.materials[sm.material];
       model_draw.texture = mat.texture;
       if (model_draw.texture >= static_cast<int>(model->sets_nearest.size())) model_draw.texture = -1;
@@ -620,6 +621,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       if (model_draw.trans == 0xFF) continue;
       // Hidden by the shading entry's flag bit 0.
       if (model_draw.mesh < 32 && ((params.hidden_meshes >> model_draw.mesh) & 1u)) continue;
+      if (params.gouraud_textured_only && model_draw.not_gouraud_textured) continue;
       const bool part_semi = model_draw.mesh < 32 && ((params.part_semi >> model_draw.mesh) & 1u) != 0;
       const bool env_over = model_draw.mesh < 32 && ((params.stock_env_over >> model_draw.mesh) & 1u) && static_cast<bool>(params.stock_env_set);
       if (pass.env && !env_over) continue;

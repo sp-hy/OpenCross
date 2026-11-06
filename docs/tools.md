@@ -86,7 +86,7 @@ Source: `tools/ocaudio.cpp`. `<song>` is a song id or `BGMnnn`.
 | `switch-test` | `<song> <seconds> [volume]` | Headless mixer run of the live BGM source switch (remastered, original, remastered); volume default 100. |
 | `inst-dump` | `<index>` | Instrument table entry of the first bank plus ADPCM block flags and first decoded samples. |
 
-Environment: `OC_SFX_ONLY`, `OC_AUDIO_PROBE` (`render-sfx`). The `usage()` text lists only `decode` and `play`. Writes only to the given WAV paths.
+Environment: `OC_SFX_ONLY`, `OC_AUDIO_PROBE` (`render-sfx`, `render-seq`). The `usage()` text lists only `decode` and `play`. Writes only to the given WAV paths.
 
 ### 1.4 `ochd` (HD texture validator)
 
@@ -281,7 +281,7 @@ Battle changes must not regress these two runs.
 
 | Gate | What it checks |
 |---|---|
-| `ocbattle fx-audit` | The CSV's `private_list` column holds the overlay-private ops in the pack's sequences (`op:commands`), run or not; `private_ignored` lists the ops that were run but not acted on (no bespoke module on a non-stock overlay, or the module's `command` returned false) as `op:count`. Plays every effect pack headless (a fixed scene, caster PC 0, targets enemies 3 and 4) until it ends or hits the tick cap, plus the six cast-charge packs. Per pack: emitters started, objects spawned, quads / mesh triangles / bespoke primitives per tick, sequence ops not presented, sprites and faces with all-transparent texels, non-finite or runaway coordinates, effects that end at once or never. Prints `fx-audit: N packs (C clean, G clean on the generic path)` and the issue-class counts. |
+| `ocbattle fx-audit` | The CSV's `private_list` column holds the overlay-private ops in the pack's sequences (`op:commands`), run or not; `private_ignored` lists the ops that were run but not acted on (no bespoke module on a non-stock overlay, or the module's `command` returned false) as `op:count`. Plays every effect pack headless (a fixed scene, caster PC 0, targets enemies 3 and 4) until it ends or hits the tick cap, plus the six cast-charge packs. Per pack: emitters started, objects spawned, quads / mesh triangles / bespoke primitives per tick, sequence ops not presented, sprites and faces with all-transparent texels, non-finite or runaway coordinates, effects that end at once or never. Prints `fx-audit: N packs (C clean, G clean on the generic path)` and the issue-class counts, then `spawns refused at the object arena / cap` with `eid:spawns` for every pack whose emitters asked for an object the arena (or the object cap) had no room for (empty when none). |
 | `ocbattle pac-soak` | Starts every scene's battle with the default party and runs its enemy scripts: a direct pass over every slot 2..4 of every unit (twice; slot 3 last, the unit revived after it so its entity is back in the run list), then up to N PC commands. Prints scenes, battles started, commands, exceptions, outcome counts (victory / wiped / fled / other), ops executed, scripted-turn statistics, executed opcodes that no shipped script contains (confidence `U`, should stay empty) and invalid opcodes, unmodelled unit fields. |
 
 "No regression" means: `pac-soak` reports zero exceptions (`0 exceptions`, exit 0) and every number on its output lines (outcome counts, ops, scripted turns, unused / invalid opcode lists) is unchanged against the baseline run, and `fx-audit` keeps the same clean counts and issue-class counts, unless the change is meant to alter battle scripts or effect handling. To diff two builds scene by scene, set `OC_SOAK_LIST=1` (one `scene N outcome K` line per scene) and compare the output files.
@@ -426,7 +426,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_SFX_KEEP` | `akao_player.cpp` | hex mask | Plays only SFX requests whose bit is set; request n tests bit (n-1) mod 8, so only the low 8 bits count. |
 | `OC_SFX_UNIMPL` | `akao_player.cpp` | set | Reports once per op the SFX opcodes with no audible model. |
 | `OC_SFX_ONLY` | `tools/ocaudio.cpp` | `0`, `1` | `render-sfx`: plays only program 0 or 1 of the pair, no chained ids. |
-| `OC_AUDIO_PROBE` | `tools/ocaudio.cpp` | CSV path | `render-sfx`: renders in 1/240 s steps (one sequencer update each) and writes every active voice after each (`step,tick,voice,reg,vl,vr,level`: sequencer tick count, pitch register, left / right voice volume in SPU units, envelope level). |
+| `OC_AUDIO_PROBE` | `tools/ocaudio.cpp` | CSV path | `render-sfx`, `render-seq`: renders in 1/240 s steps (one sequencer update each) and writes every active voice after each (`step,tick,voice,reg,vl,vr,level`: sequencer tick count, pitch register, left / right voice volume in SPU units, envelope level). |
 | `OC_SFX_VOL` | `seq_tool.cpp`; set by `tools/py/sfx_batch.py` | 0..127 (default 127) | Volume of `ocbattleseq sfx`. |
 | `OC_SFX_PAN` | `seq_tool.cpp`; set by `tools/py/sfx_batch.py` | 0..127 (default -1 = centre) | Pan of `ocbattleseq sfx` (64 = centre). |
 | `OC_SFX_WAV` | `seq_tool.cpp`; set by `tools/py/sfx_batch.py` | file path | `ocbattleseq sfx` writes the render as a 44.1 kHz stereo 16-bit WAV. |
@@ -450,6 +450,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_SEQ_GETPOS` | `seq_tool.cpp` | `ux,uz,tx,tz` | Unit position and the position the get-position op returns. |
 | `OC_SEQ_G` | `seq_tool.cpp` | `idx[=val],...` | Sets sequence VM globals (value defaults to 1). |
 | `OC_SEQ_MONSTER` | `seq_tool.cpp` | set | The script runs on an enemy (the reads of ops 0x63 / 0x67). |
+| `OC_SEQ_MODEL` | `seq_tool.cpp` | integer | The model number op 0x67 returns (a PC's record model byte; 50 = Glenn with the Einlanzer pair). |
 | `OC_PACK_MODEL` | `seq_tool.cpp` | model name | `pack` mode: model whose attack table is loaded. |
 | `OC_PACK_TABLE` | `seq_tool.cpp` | entry name | `pack` mode: restricts to this table entry. |
 | `OCC_WALK` | `tools/occ.cpp` | set | Prints the walk triangles with flags. |
@@ -499,6 +500,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | F6 | `app_run.cpp` | Cycles art mode SD, HD, Modded, then SD; saved to the config. |
 | F7 | `app_run.cpp` | Toggles widescreen; saved (not during a route or replay). |
 | F8 | `app_run.cpp` | Toggles the Debug tab. |
+| Alt+Enter | `app_run.cpp` | Windowed <-> fullscreen (the last fullscreen mode of the session, else borderless); saved (not during a route or replay). The Enter is not passed to the game. |
 | F9 | `battle_view_ui.cpp` | Toggles the battle camera debug overlay. |
 | PageDown / PageUp | `app_run.cpp` | Next / previous room; only in the field with the flow disabled and no movie. |
 
@@ -566,7 +568,7 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 
 | Script | Inputs | Outputs | Purpose |
 |---|---|---|---|
-| `tools/py/fx_diff.py` [np] | a capture folder (`ref\states`, `ref\frames`, `ours\ours.log`, `ours\shots`); `--step N` (default 5), `--offset N\|auto`, `--cast-index N` (align on the Nth cast, 0 = first, when a capture holds several casts of the id; without it the cast under which most other sequences start together wins, ties to the later one, so a capture whose wanted cast is not the best-scoring one needs the flag), `--window A B`, `--info`, `--extract`, `--cam-score LOG..`, `--set-cam-pick S`, `--prune` | `ref\tables.json`, `diff.md`, `diff_full.md`, `shots.png` in the folder; the verdict block on stdout | Mechanical diff of one effect cast (names compare without the tag padding of both sides; camera timelines count as sequences; `sado` clone headers are left out on both sides): sequence tasks, live objects, unit blocks, camera, fog, warp. The PS1 states are placed on a refresh-time axis from the battle refresh counter each carries (one PS1 game frame takes 2-3 refreshes; our ticks are refreshes), `diff.md` times are `R<refresh>`, `--window` takes refresh times and `--info` also prints `last_refresh:`. |
+| `tools/py/fx_diff.py` [np] | a capture folder (`ref\states`, `ref\frames`, `ours\ours.log`, `ours\shots`); `--step N` (default 5), `--offset N\|auto`, `--cast-index N` (align on the Nth cast, 0 = first, when a capture holds several casts of the id; without it the cast under which most other sequences start together wins, ties to the later one, so a capture whose wanted cast is not the best-scoring one needs the flag), `--window A B`, `--info`, `--extract`, `--cam-score LOG..`, `--set-cam-pick S`, `--prune` | `ref\tables.json`, `diff.md`, `diff_full.md`, `shots.png` in the folder; the verdict block on stdout | Mechanical diff of one effect cast (names compare without the tag padding of both sides; camera timelines count as sequences; `sado` clone headers are left out on both sides): sequence tasks, live objects, unit blocks, camera (eye, target and roll; a `tables.json` extracted before the roll was read compares eye and target only), fog, warp. The PS1 states are placed on a refresh-time axis from the battle refresh counter each carries (one PS1 game frame takes 2-3 refreshes; our ticks are refreshes), `diff.md` times are `R<refresh>`, `--window` takes refresh times and `--info` also prints `last_refresh:`. |
 | `tools/py/fx_ref.py` [np] | `frames DIR`, `vram STATE\|DIR`, `objects STATE\|DIR`, `seqs STATE\|DIR`, `warp STATE\|DIR`, `models STATE\|DIR`, `nodes STATE`; `--every --crop x y w h --to W H --grid C R --from --upto --name --mat --bit7` | per-frame statistics on stdout | Brightness and colour curves of frame sequences; display buffers, live effect objects, sequence tasks, warp globals, unit model blocks and effect registry of a state. |
 | `tools/py/cmp_frames.py` [np] | `REFDIR OURSDIR OFFSET FIRST LAST STEP [COLS ROWS]`; env `CROP` | per-frame luma and luma-grid table on stdout | Region statistics of reference frames versus OpenCross shots. |
 | `tools/py/cmp_objs.py` [np] | `REFDIR OURS.log OFFSET FIRST LAST STEP` (log made with `OC_FX_OBJECTS`) | per-emitter live object counts on stdout | Compares live object counts per emitter, state versus OpenCross log (runs `fx_ref.py` per state). |
@@ -640,7 +642,7 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 | `tools/rde_montage.py` | `dir out.png n [start end]` | 4-column montage PNG | Tiles n evenly spaced frames of a capture folder. |
 | `tools/py/rde_bg.py` | library: `launch(save)`, `attach(pid)`, `press`, `hold`, `guest`, `Frames`; needs `windows-capture`, OpenCV | none | Drives RDE in the background: foreground changes locked while it boots and its window kept at the back (`backstop.py`), so it never takes the focus or shows over other windows; in-memory pad input, frame capture while covered. Same save rules as `rde_save_redirect.py`. |
 | `tools/py/backstop.py` | library: `Backstop(pid)`, `.stop()` | none | A window-event hook that sends every window of one process to the back the moment it is shown or comes to the front; used by `ps1ref.Session` and `rde_bg`. |
-| `tools/py/rde_save_redirect.py` | `--save PATH [--card1 FILE.mcd] [--title-wait S] [--keys LIST] [--shot out.png] [--attach] [--keep-open] [--lang N]`; needs `pydirectinput` | optional 640x512 PNG | Launches RDE, waits for the title, points its save path at a copy or forged `save.dat` and optionally swaps the memory card 1 image; refuses paths inside `Documents\My Games`. Importable: `launch`, `Rde.redirect`, `Rde.replace_card1`, `check_save_path`. Run it under the RDE lock when several agents share the machine. |
+| `tools/py/rde_save_redirect.py` | `--save PATH [--card1 FILE.mcd] [--title-wait S] [--keys LIST] [--shot out.png] [--attach] [--keep-open] [--lang N] [--graphics N]`; needs `pydirectinput` | optional 640x512 PNG | Launches RDE, waits for the title, points its save path at a copy or forged `save.dat` and optionally swaps the memory card 1 image; refuses paths inside `Documents\My Games`. Importable: `launch`, `Rde.redirect`, `Rde.replace_card1`, `check_save_path`. Run it under the RDE lock when several agents share the machine. |
 
 ### 5.7 Save checks
 

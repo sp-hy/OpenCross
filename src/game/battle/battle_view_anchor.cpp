@@ -59,10 +59,11 @@ bool BattleView::unit_ref_point(int unit, int attach, std::array<float, 3>& poin
     float mx = 0, my = 0, mz = 0;
     // Model space (y down) -> world: yaw about Y, y mirrored.
     if (visual.has_model && visual.pose.attach_now(attach - 2, 1.0f, mx, my, mz, true)) {
-      const float cs = std::cos(yaw), sn = std::sin(yaw);
-      // A hidden model skips its joint pass: the joint matrices carry the position of the last visible pass, so an attach-point frame stays
+      // A hidden model skips its joint pass: the joint matrices carry the placement of the last visible pass, so an attach-point frame stays
       // where the model stood then (the Bulbs' q001 camera stays 1024 units under the live position until the sprout un-hides).
       const bool held = visual.pose.held();
+      const float point_yaw = held ? std::atan2(-visual.hold_fx, -visual.hold_fz) : yaw;
+      const float cs = std::cos(point_yaw), sn = std::sin(point_yaw);
       const float bx = held ? visual.hold_x : world[0], by = held ? visual.hold_y : world[1], bz = held ? visual.hold_z : world[2];
       point = {bx + mx * cs + mz * sn, by - my, bz - mx * sn + mz * cs};
     } else {

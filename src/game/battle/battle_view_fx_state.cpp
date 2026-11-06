@@ -11,6 +11,7 @@
 #include "game/battle/battle_view.h"
 #include "game/battle/battle_view_util.h"
 #include "game/encounter_strips.h"
+#include "import/container.h"
 
 namespace oc::game {
 
@@ -732,6 +733,18 @@ void BattleView::fx_swap_stage(int id) {
   // lasbos4 swap there is ONE stage zen0, the new stage's, ahead of battle.prd's - the battle view frames the new arena from its own zen0.
   // Names only the old stage had stay in the bank.
   bank_.add_drp(*prd, true);
+  // Its sounds join the battle's sound groups; its first sound entry and its camera shots are what a backdrop swap plays.
+  const std::string sound_key = "stage " + base;
+  audio_.load_group(sound_key, *prd, -1);
+  audio_.activate(sound_key);
+  fx_stage_sound_.clear();
+  fx_stage_shots_.clear();
+  if (const std::optional<import::Drp> drp = import::parse_drp(*prd))
+    for (const import::DrpEntry& entry : drp->entries) {
+      const std::string name = entry.name.substr(0, entry.name.find('\0'));
+      if (entry.type == 0x16 && fx_stage_sound_.empty()) fx_stage_sound_ = name;
+      if (entry.type == 0x0C) fx_stage_shots_.push_back(name);
+    }
   log::info("battle fx: stage {} loaded at tick {}", base, tick_count_);
 }
 

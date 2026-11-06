@@ -412,7 +412,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     hold(SDL_SCANCODE_RETURN, false);
     return ++quiet_ >= 45;
   }
-  // mash until flow <state> | room <name> | movie start|end [timeout]: confirm every 12 ticks
+  // mash until flow <state> | room <name> | movie start|end | message <n> [timeout]: confirm every 12 ticks
   if (op == "mash") {
     if (args.size() < 3 || args[1] != "until") return bad("mash until flow|room|movie|idle <value> [timeout]");
     if (args[2] == "idle") {
@@ -427,6 +427,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     else if (args[2] == "idle") done = st.field_idle && !st.battle;
     else if (args[2] == "shop") done = st.shop == (args[3] == "open");
     else if (args[2] == "menu") done = st.menu == (args[3] == "open");
+    else if (args[2] == "message") done = st.dialogue && std::to_string(st.message) == args[3];
     else return bad("mash until what? " + args[2]);
     if (done) {
       hold(SDL_SCANCODE_RETURN, false);
@@ -794,6 +795,8 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (!st.dialogue || got.find(want) != std::string::npos) return bad("dialogue text is '" + got + "', must not contain '" + want + "'");
     } else if (args[1] == "dialogue") {
       if (st.dialogue != (args[2] == "open")) return bad("dialogue is " + std::string(st.dialogue ? "open" : "closed"));
+    } else if (args[1] == "portrait") {
+      if (!st.dialogue || st.portrait != args[2]) return bad("portrait is " + (st.dialogue ? st.portrait : std::string("closed")) + ", expected " + args[2]);
     } else if (args[1] == "battle" && args[2] == "events") {
       // assert battle events <w1|a|w2...>: the battle view's window / action order STARTS with exactly these tokens
       const std::vector<std::string> got = st.battle_events ? st.battle_events() : std::vector<std::string>();
@@ -846,6 +849,9 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     } else if (args[1] == "location") {
       int want = 0;
       if (!to_int(args[2], want) || !st.location || st.location() != want) return bad(std::format("location is {}", st.location ? st.location() : -1));
+    } else if (args[1] == "gold") {
+      int want = 0;
+      if (!to_int(args[2], want) || !st.gold || st.gold() != want) return bad(std::format("gold is {}", st.gold ? st.gold() : -1));
     } else if (args[1] == "option") {
       int mask = 0;
       if (args.size() < 4 || !to_hex(args[2], mask) || !st.options) return bad("assert option <hexmask> set|clear");
@@ -911,6 +917,14 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.set_buttons = true;
     out.buttons_index = index;
     out.buttons_value = value;
+    return true;
+  }
+  if (op == "set" && args.size() >= 4 && args[1] == "group") {
+    int group = 0, value = 0;
+    if (!to_int(args[2], group) || group < 0 || group > 31 || !to_int(args[3], value)) return bad("set group <0..31> <0|1>");
+    out.set_group = true;
+    out.group = group;
+    out.group_on = value;
     return true;
   }
   if (op == "set" && args.size() >= 4 && args[1] == "option") {

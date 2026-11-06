@@ -22,11 +22,10 @@ constexpr int kCallCap = 0x41;
 // Debug: OC_VM_TRACE logs every executed instruction (tick, entity, record, pc, op, yield, budget).
 const bool kTraceOps = std::getenv("OC_VM_TRACE") != nullptr;
 
+// The game's rand(): a 32-bit linear congruential step, bits 16..30 of the new state.
 u32 default_rng_step(u32& state) {
-  state ^= state << 13;
-  state ^= state >> 17;
-  state ^= state << 5;
-  return state;
+  state = state * 0x41C64E6Du + 0x3039u;
+  return (state >> 16) & FieldVM::kRandMask;
 }
 
 }  // namespace
@@ -385,11 +384,12 @@ void FieldVM::tick() {
   host_.end_of_tick(*this);
 }
 
-// The FE 29 sound slot register is the one register the room init clears; the water levels of the first
-// three slots default to 10. Every room starts with the pause allowed (FE 42 0 forbids it).
-// An entity with no ON_ACTION or ON_COLLISION script (or entity 0) starts with the matching no-trigger flag.
+// The room init clears the FE 29 sound slot register and resets the frame-echo scale (FE 12) to 1.0 and its rotation (FE 13) to 0;
+// the water levels of the first three slots default to 10. Every room starts with the pause allowed (FE 42 0 forbids it).
+// Every entity starts without a 3D object (0E, 0F and D1 give it one); an entity with no ON_ACTION or ON_COLLISION script (or
+// entity 0) starts with the matching no-trigger flag.
 u32 FieldVM::load_flags(size_t ent) const {
-  u32 flags = 0;
+  u32 flags = flag38::kNo3dObject;
   for (size_t slot : {size_t{2}, size_t{3}}) {
     const u16 ptr = mod_.script_ptr(ent, slot);
     if (ptr == 0 || mod_.code_byte(ptr) == 0 || ent == 0) flags |= slot == 2 ? flag38::kNoAction : flag38::kNoCollision;
@@ -405,6 +405,8 @@ void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
   gflags_ = gflag::kPauseAllowed;
   world_continue_ = false;
   globals_[static_cast<size_t>(Global::KeepSfxSlots)] = 0;
+  for (Global which : {Global::OverlayGridA0, Global::OverlayGridA1, Global::OverlayGridA2}) globals_[static_cast<size_t>(which)] = 0x1000;
+  for (Global which : {Global::OverlayGridB0, Global::OverlayGridB1, Global::OverlayGridB2}) globals_[static_cast<size_t>(which)] = 0;
   flag_table_.fill(0);
   std::copy_n(flag_table.begin(), std::min<size_t>(flag_table.size(), flag_table_.size()), flag_table_.begin());
   flag_writes_ = 0;
@@ -496,7 +498,8 @@ void FieldVM::head_turn(HeadOp op, int ent, int other, s32 x, s32 y, s32 z, int 
   host_.head_op(op, ent, other, x, y, z, ents_[static_cast<size_t>(rate_entity)].head_turn_rate);
 }
 
-// The arithmetic ops 10 13 14 15 16 19 1A 1B 20 21: variable op= S operand. Division by zero (and INT32_MIN / -1) gives 0.
+// The arithmetic ops 10 13 14 15 16 19 1A 1B 20 21: variable op= S operand. A zero divisor counts as 1 (the variable keeps its
+// value); both operands are 16-bit, so the quotient cannot overflow.
 void FieldVM::alu(u8 op) {
   const u32 vid = word_at(1);
   const s32 cur = read_var(vid);
@@ -513,7 +516,7 @@ void FieldVM::alu(u8 op) {
     case 0x1A: res = cur | val; break;
     case 0x1B: res = cur ^ val; break;
     case 0x20: res = static_cast<s32>(ucur * uval); break;
-    case 0x21: res = (val == 0 || (cur == INT32_MIN && val == -1)) ? 0 : cur / val; break;
+    case 0x21: res = cur / (val == 0 ? 1 : val); break;
     default: break;
   }
   write_var(vid, res);

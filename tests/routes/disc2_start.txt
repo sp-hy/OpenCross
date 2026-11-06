@@ -1,0 +1,15 @@
+# crn_b16i is named only by the disc 2 index: the start switches to disc 2 and variable 0x42 follows.
+0 wait room crn_b16i
+- assert disc 2
+- assert var 0x42 1
+# alu_a01f is on both discs: the disc stays.
+- load alu_a01f 0
+- wait 30
+- assert disc 2
+# tel_b04f is on disc 1 only (dummy.dat on disc 2): the warp goes back to disc 1.
+- load tel_b04f 0
+- wait 30
+- wait room tel_b04f
+- assert disc 1
+- assert var 0x42 0
+- quit

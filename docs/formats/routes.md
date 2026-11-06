@@ -89,7 +89,7 @@ The parser accepts 27 top-level verbs. `ent` is an entity index of the room, `ch
 | `walk_ent <ent> [tol] [timeout]` | Same toward an entity's current position. Fails if the entity does not exist. |
 | `approach <ent> [tol] [timeout]` | `walk_ent` that never fails: it also ends (with a log line) when blocked for 40 ticks, on timeout, or when a dialogue opens / the controls are taken. |
 | `skip [timeout]` | Press confirm every 10 ticks while a dialogue is open; finishes after 45 consecutive ticks with no dialogue open. Fails if a dialogue stays open past the timeout. |
-| `mash until <what> <value> [timeout]` | Press confirm for 3 of every 12 ticks until the condition holds. `<what> <value>` = `flow <state>`, `room <name>`, `movie start\|end`, `idle <any>` (the argument must be present, its value is ignored), `shop open\|closed`, `menu open\|closed`. |
+| `mash until <what> <value> [timeout]` | Press confirm for 3 of every 12 ticks until the condition holds. `<what> <value>` = `flow <state>`, `room <name>`, `movie start\|end`, `idle <any>` (the argument must be present, its value is ignored), `shop open\|closed`, `menu open\|closed`, `message <n>` (a dialogue is open and the last field window opened shows message `n` of the room). |
 | `choose <n> [timeout]` | Confirm plain messages (3 of every 24 ticks) until a choice is pending, press Down `n` times (every 6 ticks), then confirm every 12 ticks until the dialogue closes. |
 | `fight [timeout]` | Wait for a battle (fail "no battle started" after `timeout`), then switch the battle view and results screen to auto and tap confirm 2 of every 8 ticks until the battle is over. Fails after 3 x `timeout` ticks in the battle. |
 
@@ -134,8 +134,9 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 
 | Verb | Meaning |
 |---|---|
-| `load <room> [param]` | Warp to a room; `param` is the entrance (default 0). The disc follows variable 0x42 as on a map jump (`set var 42 1` first for a disc 2 room). Fails the run (exit 1) if the room cannot load. |
+| `load <room> [param]` | Warp to a room; `param` is the entrance (default 0). The disc follows variable 0x42 as on a map jump; a room that only the other disc's index names (a disc 2 room such as `crn_b16i` from a disc 1 start) switches to that disc and sets variable 0x42 to match. `[Debug] Room` and the debug menu's teleport pick the disc the same way. A room both discs hold keeps the current disc (`set var 42 1` first to start one on disc 2). Fails the run (exit 1) if the room cannot load. |
 | `set var <hexid> <value>` | Write a script variable. |
+| `set group <0..31> <0\|1>` | Show / hide a background tile group as BG_GROUP_ON / OFF (80 / 81) do. |
 | `set option <hexmask> <0\|1>` | Set or clear bits of the settings options word (0x200 run/walk toggle, 0x800 analog stick). |
 | `set buttons <0..3> <hexword>` | Write one word of the game's button configuration (0 field, 1 battle, 2 field analog, 3 battle analog; `formats/save.md` section 6). It acts while the options word has 0x100 set (`set option 100 1`); the route's keys and pad buttons then pass through the assignment like real input. |
 | `set hp <char> <value>` | Write a character's current HP. |
@@ -165,6 +166,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `movie <n> [flags]` | Play movie row `n` from the disc in use as a `D4` with the second operand `flags` (default 0: the last frame is held; with flag 8 it fades out, `movies.md` section 6). |
 | `trading <row>` | Open the trading post at `row`, then the main menu. |
 | `elementshop <row>` | Open the element shop at `row`. |
+| `weaponshop <row>` | Open the blacksmith at `row`. |
 | `slotdump` | Write the current game as one 0x2000-byte save block (section 7). |
 
 An unknown kind logs `route: unknown request <kind>` and exits with code 1.
@@ -201,6 +203,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `title_hold on\|off` | The title scene is / is not held on black until its logo movie takes over. |
 | `earned <api name>`, `unearned <api name>` | The achievement was / was not earned this run. Route runs never connect to Steam; the rules still run. |
 | `dialogue open\|closed` | A dialogue is open / closed. |
+| `portrait left\|right\|none` | A dialogue is open and the last field window opened has its face panel on that side (`none`: no face, or a label). |
 | `text <words...>` | An open dialogue's message contains the words. |
 | `notext <words...>` | A dialogue is open and its message does not contain the words. |
 | `choiceline <n>` | The choice hand sits on message line `n` of the open list (translated numbering). |
@@ -219,6 +222,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `party <id,id,id>` | The party ids in slot order (`-` = empty slot), e.g. `0,1,22`. |
 | `disc <n>` | The disc in use. |
 | `location <id>` | The saved location word of the state. |
+| `gold <n>` | The gold held. |
 | `option <hexmask> set\|clear` | All mask bits of the settings options word are set / not all set. |
 | `hp <char> <min> <max>` | Current HP in the range. |
 | `status <char> <hexmask> set\|clear` | All mask bits are set / not all set. |

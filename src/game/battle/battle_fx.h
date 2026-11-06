@@ -50,6 +50,16 @@ struct FxPack {
   int eid = 0;
   effects::EffectSlot slot;
   assets::RoomEffects fx;
+  // Sheet sprites of `fx` with an HD image (EffectSprite::hd_rgba, RDE's 4x sheet pages).
+  size_t hd_sprites = 0;
+  // RDE's HD-art texels for part of the pack's texture space: 8 bpp indices, kScale finer than the texels of the rect they cover, whose
+  // top left is (x halfwords, y rows). They take the colours of the texture they are copied into (anim ops 0xA2 - 0xA5).
+  struct HdTexels {
+    static constexpr int kScale = 4;
+    int x = 0, y = 0;
+    import::Image indices;
+  };
+  std::optional<HdTexels> hd_texels;
   // Raw eins drp: camera / sound entries are registered from it.
   Bytes prd;
   Bytes ctd;
@@ -215,6 +225,9 @@ class BattleFxRun {
     // An overlay replaces the battle stage (kamei ops 0x101 / 0x102: the stage pack's objects freed, then the new stage's resources registered):
     // -1 = free the stage's objects (nothing drawn), 0..99 = battle/bg/bg_NN, 100 = battle/bg/kamei.
     std::function<void(int stage)> stage;
+    // effects::FxHooks::stage_sound / stage_shot.
+    std::function<void()> stage_sound;
+    std::function<void(char tag, u32 roll)> stage_shot;
     // An overlay clears the depth-cue flag.
     std::function<void()> fog_off;
     // An overlay's lit draw: the light matrices at a world point and the back colour (effects::FxHooks::lights).
@@ -319,6 +332,8 @@ class BattleFxRun {
   void on_other(const assets::SeqCmd& original);
   effects::FxContext make_context(const effects::ViewParams& view) const;
   void init_models();
+  // The models no overlay steers take the units' live position.
+  void sync_unsteered();
 
   std::shared_ptr<const FxPack> pack_;
   effects::EffectBank bank_;

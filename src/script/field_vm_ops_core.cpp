@@ -216,13 +216,13 @@ bool FieldVM::exec_core(u8 op) {
       write_var(word_at(1), read_var(word_at(1)) >> (operand_u(3) & 31));
       advance(5);
       break;
-    case 0x1E:  // RAND
-      write_var(word_at(1), static_cast<s32>(rng_()));
+    case 0x1E:  // RAND: 0..0x7FFF
+      write_var(word_at(1), static_cast<s32>(rng_() & kRandMask));
       advance(3);
       break;
-    case 0x1F: {  // RAND_MOD: the operand is the inclusive maximum (RAND_MOD r,#1 is a coin flip)
-      const s32 max = operand_u(3);
-      write_var(word_at(1), max > 0 ? static_cast<s32>(rng_() % (static_cast<u32>(max) + 1u)) : 0);
+    case 0x1F: {  // RAND_MOD: rand * (U + 1) >> 15, so U is the inclusive maximum (RAND_MOD r,#1 is a coin flip)
+      const s32 draw = static_cast<s32>(rng_() & kRandMask);
+      write_var(word_at(1), draw * (operand_u(3) + 1) >> 15);
       advance(5);
       break;
     }
@@ -282,14 +282,20 @@ bool FieldVM::exec_core(u8 op) {
       budget_ += 0x40;
       advance(1);
       break;
-    case 0x2D:  // WAIT: loads the counter on the first visit, then counts down one per tick
-      if (rec_->wait == 0)
-        rec_->wait = static_cast<u16>(operand_u(1));
-      else
-        --rec_->wait;
-      if (rec_->wait == 0) advance(3);
+    case 0x2D: {  // WAIT: loads the counter on the first visit, then counts down one per tick (or ends on the host's music cue)
+      const int cue = host_.music_wait(operand_u(1));
+      if (cue > 0) {
+        advance(3);
+      } else if (cue < 0) {
+        if (rec_->wait == 0)
+          rec_->wait = static_cast<u16>(operand_u(1));
+        else
+          --rec_->wait;
+        if (rec_->wait == 0) advance(3);
+      }
       yield_ = true;
       break;
+    }
     case 0x2E: {  // TURN_TO_ENTITY
       const int target = entity_operand(1);
       if (target >= 0) {
@@ -546,6 +552,11 @@ bool FieldVM::exec_core(u8 op) {
     case 0x51:  // JUMP_IF_NOT_KEY_LATCH
       jump_or_advance((word_at(1) & host_.key_latch()) == 0, 3, 5);
       break;
+    case 0x52:  // JUMP_IF_NOT_KEY_EQUAL: not used by the shipped data, logged and stepped over
+    case 0x53:  // JUMP_IF_NOT_KEY_LATCH_EQUAL: not used by the shipped data, logged and stepped over
+      opaque(op, 1, 4);
+      advance(5);
+      break;
     case 0x54:  // CLEAR_KEY_LATCH
       host_.clear_key_latch();
       advance(1);
@@ -558,6 +569,11 @@ bool FieldVM::exec_core(u8 op) {
         budget_ += 1;
         pc = word_at(2);
       }
+      break;
+    case 0x57:  // REGION_CALL: not used by the shipped data, logged and stepped over
+    case 0x58:  // REGION_BAND_CALL: not used by the shipped data, logged and stepped over
+      opaque(op, 1, 3);
+      advance(4);
       break;
     case 0x59:  // TICK_BONUS
       budget_ += 0x40;

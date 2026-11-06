@@ -139,12 +139,17 @@ class Mixer {
   // Seconds since the song start, unwrapped across loops.
   double bgm_seconds() const { return bgm_secs_.load(std::memory_order_relaxed); }
 
-  // Status (audio thread updates; relaxed reads). current_song: -1 = none; bgm_position in samples.
+  // Status (audio thread updates; relaxed reads). current_song: -1 = none; bgm_position in samples. A one-shot song that ran out stays
+  // current until a stop or another song (a request for it changes nothing); sounding() is false once it has ended.
   int current_song() const { return song_.load(std::memory_order_relaxed); }
   bool playing() const { return song_.load(std::memory_order_relaxed) >= 0; }
+  bool sounding() const { return sounding_.load(std::memory_order_relaxed); }
   u32 bgm_position() const { return bgm_pos_.load(std::memory_order_relaxed); }
   bool device_open() const { return stream_ != nullptr; }
-  // Settings row "Sound: Stereo / Monaural": the final mix is folded to L = R = (L + R) / 2.
+  // The queue is drained (an output device or a capture runs), so the status above follows the commands.
+  bool live() const { return stream_ != nullptr || capture_ != nullptr; }
+  // Settings row "Sound: Stereo / Monaural": every SPU voice (original music and effects) takes the centre pan gain on both sides
+  // with the reverb return left stereo; the remastered stream and the movie stay stereo, the voice line is folded to L = R = (L + R) / 2.
   void set_mono(bool on) { mono_.store(on, std::memory_order_relaxed); }
   float bgm_level() const { return level_view_.load(std::memory_order_relaxed); }
 
@@ -216,6 +221,7 @@ class Mixer {
   u32 fade_left_ = 0;
   std::vector<s16> scratch_;
   std::atomic<int> song_{-1};
+  std::atomic<bool> sounding_{false};
   std::atomic<bool> mono_{false};
   std::atomic<float> sfx_tempo_{1.0f};
   std::atomic<u32> sfx_active_{0};   // union of the running SFX channels' masks (audio thread)

@@ -275,6 +275,9 @@ void App::init_flow() {
       flow.machine().set_seed(config.debug_seed);
       flow.set_art_mode(platform::art_is_hd(config.art_mode) ? ui::ArtMode::Hd : ui::ArtMode::Original);
       flow.set_sfx(ui_sfx);
+      flow.set_load_sfx([this](int id, u32 mask) {
+        if (sfx_ok) akao_sfx.play_menu(id, mask);
+      });
       // The press-start chime: each sound on its own field sound slot (centre pan, full volume), so none cuts another.
       flow.title().set_layered_sfx([this](int id, int layer) {
         if (sfx_ok) akao_sfx.play_field(0x100 + id, 127, 64, 1u << (layer + 8));
@@ -512,6 +515,7 @@ void App::init_start_state() {
     } else if (!flow_enabled || !flow_ready) {
       if (flow_ready) flow.machine().start(game::FlowState::Field);
       world.reset_for_new_game();
+      world.select_disc_for_room(dev_room);
       world_ok = world.load_room(dev_room, config.debug_entrance);
     } else if (*flow_start == game::FlowState::Opening) {
       world.reset_for_new_game();

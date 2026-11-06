@@ -166,9 +166,11 @@ void BattleView::fx_model_requests(bool at_init) {
       visual.pose.play(fx_model.clip, fx_model.clip_flags & 0x1FFF, false, (fx_model.clip_flags & 0x6000) >> 13);
       // A pack's own clip plays once and holds its last keyframe (the actions' anmseq scripts switch the loop off, op 0x18).
       if (fx_model.clip >= 0x80) visual.pose.set_loop(false);
+      if (fx_model.clip_loop >= 0) visual.pose.set_loop(fx_model.clip_loop != 0);
       // The clip's frame count: what the overlays' wait reads.
       fx_model.clip_frames = visual.pose.frames_of(fx_model.clip);
     }
+    if (fx_model.anim_speed > 0 && visual.has_model) visual.pose.set_speed(fx_model.anim_speed);
     if (fx_model.script_entry >= 0) {
       const bseq::Table* table = nullptr;
       if (fx_model.script_entry >= 0x80) {
@@ -196,6 +198,7 @@ void BattleView::fx_model_requests(bool at_init) {
                  ok ? "started" : "missing", ok && at_init ? " (stepped)" : "");
     }
     fx_model.clip = -1;
+    fx_model.clip_loop = -1;
     fx_model.script_entry = -1;
   }
 }
@@ -325,16 +328,16 @@ bool BattleView::fx_attach_unit(int unit, int point, effects::Vec3& out, bool ra
   const Visual& visual = vis_[static_cast<size_t>(unit)];
   float mx = 0, my = 0, mz = 0;
   if (!visual.has_model || !visual.pose.attach_or_root(point, alpha_, mx, my, mz)) return false;
-  const render::Mat4 model = fx_unit_matrix(unit);
+  render::Mat4 model = fx_unit_matrix(unit);
+  // A held model's joint matrices stay as the last (pre-hide) pass left them, placement and facing included: the link's offset
+  // (attach - pos) is then stale and each tick moves the model by (carrier attach - frozen attach).
+  if (raw && visual.pose.held()) {
+    render::Mat4 flip;
+    flip.at(1, 1) = -1.0f;
+    model = render::mat4_translation(visual.hold_x, visual.hold_y, visual.hold_z) * render::mat4_rotation_y(std::atan2(-visual.hold_fx, -visual.hold_fz)) * flip;
+  }
   effects::Vec3 world{};
   for (int row = 0; row < 3; ++row) world[static_cast<size_t>(row)] = model.at(row, 0) * mx + model.at(row, 1) * my + model.at(row, 2) * mz + model.at(row, 3);
-  // A held model's joint translation stays at the position of the last (pre-hide) pass: the link's offset (attach - pos) is then stale
-  // and each tick moves the model by (carrier attach - frozen attach).
-  if (raw && visual.pose.held()) {
-    world[0] += visual.hold_x - lerp(visual.px, visual.x, alpha_);
-    world[1] += visual.hold_y - lerp(visual.py, visual.y, alpha_);
-    world[2] += visual.hold_z - lerp(visual.pz, visual.z, alpha_);
-  }
   out = {world[0], -world[1], world[2]};
   return true;
 }

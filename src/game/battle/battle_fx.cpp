@@ -227,6 +227,22 @@ void add_nested_entries(assets::RoomEffects& fx, ByteSpan prd, const import::Vra
   }
 }
 
+// RDE's 4x sheet pages: when the pack of `eid` loads, RDE uploads `path` (hd.dat) over the sheet's texture rect and its CLUT over the
+// sheet's CLUT row. Luminaire's lens-flare rings are the only such sheet; OpenCross draws the page in HD art.
+struct HdSheetPage {
+  int eid;
+  std::string_view sheet, path;
+};
+constexpr HdSheetPage kHdSheetPages[] = {{223, "renz", "hd/battle/shine/renz0.tim"}};
+
+// RDE's 4x texel pages without a CLUT, uploaded in HD art over (x, y) of the pack's texture space when the pack of `eid` loads: Canon Cannon's
+// face expressions, which the cast copies into the caster's texture.
+struct HdTexelPage {
+  int eid, x, y;
+  std::string_view path;
+};
+constexpr HdTexelPage kHdTexelPages[] = {{462, 0x2C0, 0x100, "hd/battle/canon/face.tim"}};
+
 }  // namespace
 
 import::Vram FxPack::build_vram() const {
@@ -422,7 +438,22 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
       }
       pack->ctd = std::move(ctd);
       pack->prd = std::move(*prd);
-      add_nested_entries(pack->fx, pack->prd, pack->build_vram(), 0);
+      const import::Vram vram = pack->build_vram();
+      add_nested_entries(pack->fx, pack->prd, vram, 0);
+      for (const HdSheetPage& page : kHdSheetPages) {
+        if (page.eid != eid) continue;
+        const auto tim_file = vfs_->read(std::string(page.path));
+        const auto tim = tim_file ? import::parse_tim(*tim_file) : std::nullopt;
+        for (assets::SpriteSheet& sheet : pack->fx.sheets)
+          if (tim && sheet.name == page.sheet) pack->hd_sprites += import::cut_hd_sheet(sheet, vram, *tim);
+      }
+      for (const HdTexelPage& page : kHdTexelPages) {
+        if (page.eid != eid) continue;
+        const auto tim_file = vfs_->read(std::string(page.path));
+        const auto tim = tim_file ? import::parse_tim(*tim_file) : std::nullopt;
+        auto indices = tim && tim->bpp == 8 ? import::decode_tim(*tim) : std::nullopt;
+        if (indices && indices->indexed) pack->hd_texels = FxPack::HdTexels{page.x, page.y, std::move(*indices)};
+      }
       pack->has_main = pack->fx.find_sequence("main") != nullptr;
       // Pack-table entries the sequences start on the casters (ops 0x43 / 0x45, entry s16 at data +4).
       std::set<int> caster_entries;
@@ -643,6 +674,8 @@ effects::FxContext BattleFxRun::make_context(const effects::ViewParams& view) co
   ctx.pack_fx = &pack_->fx;
   ctx.pack_prd = ByteSpan(pack_->prd.data(), pack_->prd.size());
   if (cb_.stage) ctx.hooks.set_stage = cb_.stage;
+  if (cb_.stage_sound) ctx.hooks.stage_sound = cb_.stage_sound;
+  if (cb_.stage_shot) ctx.hooks.stage_shot = cb_.stage_shot;
   if (cb_.fog_off) ctx.hooks.fog_off = cb_.fog_off;
   if (cb_.lights) ctx.hooks.lights = cb_.lights;
   if (cb_.form) ctx.hooks.form_swap = cb_.form;
@@ -693,6 +726,18 @@ void BattleFxRun::init_models() {
     float yaw = 0;
     return point_of(sel, joint, out, yaw);
   };
+  sync_unsteered();
+}
+
+// A model block the overlay does not steer is where the unit stands: the unit's own scripts move it (a reaction's toss lifts it), and
+// the overlays read that live position (PS1 axes, y down).
+void BattleFxRun::sync_unsteered() {
+  for (int i = 0; i < battle::kUnits; ++i) {
+    effects::FxModel& model = models_.units[static_cast<size_t>(i)];
+    if (model.steer) continue;
+    const FxUnit& fu = scene_.unit[static_cast<size_t>(i)];
+    model.pos = {fu.x, -fu.y, fu.z};
+  }
 }
 
 void BattleFxRun::start(const FxScene& scene, const effects::ViewParams& view) {
@@ -790,9 +835,11 @@ void BattleFxRun::catch_up(const FxScene& scene, int ticks) {
 void BattleFxRun::tick(const FxScene& scene) {
   scene_ = scene;
   apply_list_overrides();
-  if (bespoke_)
+  if (bespoke_) {
+    sync_unsteered();
     // Before the sequence: its private ops reach the overlay during seq_->tick().
     for (auto& model : models_.units) model.save_prev();
+  }
   seq_->tick();
   em_->tick();
   if (bespoke_) {

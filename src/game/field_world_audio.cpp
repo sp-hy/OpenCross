@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 #include "audio/bgm_table.h"
 #include "audio/hca_stream.h"
@@ -68,10 +69,18 @@ void FieldWorld::start_song(int song, int volume, double start_seconds) {
     }
     return;
   }
+  if (play_stream(song, volume, start_seconds) && mixer_->device_open()) {
+    pending_song_ = song;
+    pending_ticks_ = 0;
+  }
+}
+
+// The remastered stream of `song` on the mixer; false when it cannot be loaded.
+bool FieldWorld::play_stream(int song, int volume, double start_seconds) {
   const audio::BgmEntry* entry = audio::bgm_entry(song);
   if (!entry) {
     log::warn("audio: song {} has no BGM entry", song);
-    return;
+    return false;
   }
   std::optional<Bytes> bytes;
   {
@@ -82,14 +91,12 @@ void FieldWorld::start_song(int song, int volume, double start_seconds) {
   ScopedTimer open_timer("audio: bgm HcaStream::open");
   if (!bytes || !stream->open(*bytes)) {
     log::warn("audio: could not load {}", audio::bgm_path(entry->file_no));
-    return;
+    return false;
   }
   log::debug("audio: tick {} play song {} (BGM{:03}) volume {}", tick_count_, song, entry->file_no, volume);
+  cue_song_ = -1;
   mixer_->play(std::move(stream), song, volume, start_seconds);
-  if (mixer_->device_open()) {
-    pending_song_ = song;
-    pending_ticks_ = 0;
-  }
+  return true;
 }
 
 // PLAY_SONG always starts at full volume; only FE 78 keeps its own volume operand.
@@ -97,28 +104,123 @@ bool FieldWorld::play_song(int song) { return play_song_at(song, 127); }
 
 bool FieldWorld::play_song_ex(int song, int volume) {
   log::debug("field: tick {} FE 78 PLAY_SONG_EX song {} volume {}", tick_count_, song, volume & 0x7F);
-  return play_song_at(song, volume & 0x7F);
+  return play_song_at(song, volume & 0x7F, true);
 }
 
-// Song 0xFF is a STOP (scripts that want silence use it); 0xFFFF (FE 6E's "no song was playing") starts nothing.
-bool FieldWorld::play_song_at(int song, int volume) {
+namespace {
+
+// Song change while another song is registered (60 Hz ticks from the request): the music volume slides linearly to 0 over 32 ticks
+// (PLAY_SONG) or 16 (FE 78), the old song is cut at tick 18 and the new one starts at tick 22.
+constexpr int kSongFadeTicks = 32, kSongShortFadeTicks = 16, kSongCutTick = 18, kSongStartTick = 22;
+
+}  // namespace
+
+// Song 0xFF is a STOP (scripts that want silence use it); 0xFFFF (FE 6E's "no song was playing") starts nothing. While a song change
+// runs no other request is taken (false: the op tries again next tick); the stop always is.
+bool FieldWorld::play_song_at(int song, int volume, bool short_fade) {
   if (song == 0xFF) {
     log::debug("audio: tick {} PLAY_SONG 0xFF: stop the music", tick_count_);
     if (mixer_) mixer_->stop();
     last_song_ = -1;
     pending_song_ = -1;
+    song_change_ = {};
     return true;
   }
   if (song < 0 || song > 0xFF) return true;
+  if (song_change_.song >= 0) return false;
   song_volume_ = std::clamp(volume, 0, 127);
+  // The script's own song while a music cue replaced it: the cue's song stays and only takes the volume.
+  if (cue_song_ >= 0 && song == last_song_ && mixer_ && mixer_->current_song() == cue_song_) {
+    bgm_volume_ = song_volume_;
+    mixer_->fade(song_volume_, 0.0);
+    return true;
+  }
+  const bool change = mixer_ && last_song_ >= 0 && mixer_->current_song() != song && pending_song_ != song;
   last_song_ = song;
   bgm_volume_ = song_volume_;
-  start_song(song, song_volume_);
+  if (!change) {
+    start_song(song, song_volume_);
+    return true;
+  }
+  log::debug("audio: tick {} song change to {}: fade-out over {} ticks", tick_count_, song, short_fade ? kSongShortFadeTicks : kSongFadeTicks);
+  mixer_->fade(0, (short_fade ? kSongShortFadeTicks : kSongFadeTicks) / 60.0);
+  song_change_ = {song, song_volume_, 0};
   return true;
 }
 
-// WAIT_SONG: true while the mixer has not yet confirmed the new song (cleared in end_of_tick, with a timeout).
-bool FieldWorld::song_changing() { return pending_song_ >= 0; }
+void FieldWorld::step_song_change() {
+  if (song_change_.song < 0) return;
+  ++song_change_.ticks;
+  if (song_change_.ticks == kSongCutTick && mixer_) mixer_->stop();
+  if (song_change_.ticks < kSongStartTick) return;
+  const SongChange change = std::exchange(song_change_, {});
+  start_song(change.song, change.volume);
+}
+
+// WAIT_SONG: true while a song change runs or the mixer has not yet confirmed the new song (cleared in end_of_tick, with a timeout).
+bool FieldWorld::song_changing() { return pending_song_ >= 0 || song_change_.song >= 0; }
+
+namespace {
+
+// Remastered-soundtrack cues: script points RDE times to the streamed music instead of the script's own count. Active only with the
+// remastered soundtrack.
+// A WAIT of `ticks` while `song` is the requested song ends once the stream position (the song clock modulo the track length) has
+// reached `seconds`; until then it holds.
+struct WaitCue {
+  int song;
+  int ticks;
+  double seconds;
+};
+constexpr WaitCue kWaitCues[] = {{0x17, 0x159, 5.75}};
+
+// Op `op` of room `room` whose code word 4 bytes on is `word`: unless `song` already plays, the music fades to 0 over `fade_out`
+// ticks while the op holds, the op holds `hold` more ticks, then `song` starts at volume 0 and fades to full over `fade_in` ticks and
+// the op runs. The script's own song state is not changed.
+struct SongCue {
+  std::string_view room;
+  int op;
+  u32 word;
+  int song;
+  int fade_out, hold, fade_in;
+};
+constexpr SongCue kSongCues[] = {{"hes_a04f", 0x86, 0x36012B, 8, 30, 72, 45}};
+
+}  // namespace
+
+int FieldWorld::music_wait(int ticks) {
+  if (!bgm_remastered_ || !mixer_ || !mixer_->live()) return -1;
+  for (const WaitCue& cue : kWaitCues) {
+    if (cue.song != last_song_ || cue.ticks != ticks) continue;
+    const audio::BgmEntry* entry = audio::bgm_entry(cue.song);
+    if (!entry || mixer_->current_song() != cue.song || !mixer_->sounding()) return 0;
+    const double length = static_cast<double>(entry->total_samples) / audio::Mixer::kRate;
+    return std::fmod(mixer_->bgm_seconds(), length) >= cue.seconds ? 1 : 0;
+  }
+  return -1;
+}
+
+bool FieldWorld::music_hold(int op, u32 word) {
+  if (!bgm_remastered_ || !mixer_ || !mixer_->live()) return false;
+  for (const SongCue& cue : kSongCues) {
+    if (cue.op != op || cue.word != word || cue.room != view_.room_name()) continue;
+    if (song_cue_.step == 0 && mixer_->current_song() != cue.song) {
+      mixer_->fade(0, cue.fade_out / 60.0);
+      song_cue_ = {1, 0};
+      return true;
+    }
+    if (song_cue_.step == 1 && song_cue_.ticks < cue.hold) {
+      ++song_cue_.ticks;
+      return true;
+    }
+    if (song_cue_.step == 1 && play_stream(cue.song, 0, 0.0)) {
+      cue_song_ = cue.song;
+      mixer_->fade(127, cue.fade_in / 60.0);
+    }
+    song_cue_ = {};
+    return false;
+  }
+  return false;
+}
 
 // C6: id < 256 = frame of the room's yos1 list, id >= 256 = effect00 id - 256. The extended form (mode != 0) is `C6 mode id PAN VOLUME
 // slot`: operand 4 (& 0xFF, default 0x80) is the channel pan, operand 6 (& 0x7F, default 0x7F) the volume, operand 8 (& 7) the channel
@@ -169,6 +271,23 @@ void FieldWorld::step_sfx_slides() {
       slide.cur = --slide.left == 0 ? slide.target : slide.cur + slide.step;
       out.set_field_mods(mask, -1, static_cast<int>(std::lround(slide.cur)));
     }
+  }
+}
+
+// A menu screen over the field (main menu, save list, shops, name entry, party): when it opens every running field sound slides to
+// volume 0 over 32 frames and keeps running; when it closes the C6 slots' sounds slide back over 30 frames to the volume their
+// slot was set to (the C6 volume, or the FE 22 target, whose slide ends there). The other sounds stay silent.
+void FieldWorld::fade_screen_sounds(bool opening) {
+  audio::Sfx& out = sfx_out();
+  if (opening) {
+    out.fade_field(0xFFFFFF, 0x20, 0);
+    return;
+  }
+  for (size_t slot = 0; slot < 8; ++slot) {
+    SfxSlide& slide = sfx_vol_[slot];
+    slide.cur = slide.target;
+    slide.left = 0;
+    out.fade_field(1u << (slot + 8), 0x1E, static_cast<int>(std::lround(slide.target)));
   }
 }
 

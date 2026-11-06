@@ -101,7 +101,29 @@ float per_tick(float per_frame) {
   return 1.0f - std::pow(1.0f - std::max(0.0f, per_frame), 1.0f / kFrameTicks);
 }
 
+using Axis = std::array<float, 3>;
+
+Axis cross3(const Axis& lhs, const Axis& rhs) {
+  return {lhs[1] * rhs[2] - lhs[2] * rhs[1], lhs[2] * rhs[0] - lhs[0] * rhs[2], lhs[0] * rhs[1] - lhs[1] * rhs[0]};
+}
+Axis unit3(const Axis& vec, const Axis& fallback) {
+  const float len = std::sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+  return len > 1e-6f ? Axis{vec[0] / len, vec[1] / len, vec[2] / len} : fallback;
+}
+Axis flip_y(const Axis& vec) { return {vec[0], -vec[1], vec[2]}; }
+
 }  // namespace
+
+CamAxes cam_axes(const std::array<float, 3>& eye, const std::array<float, 3>& target, float roll_deg) {
+  // Built in the PS1's y-down space, where the unrolled up vector is (0, 1, 0).
+  const Axis delta{target[0] - eye[0], eye[1] - target[1], target[2] - eye[2]};
+  const Axis forward = unit3(delta, {0, 0, 1});
+  const float yaw = std::atan2(-delta[0], -delta[2]), roll = roll_deg * kPi / 180.0f;
+  const Axis up{-std::sin(roll) * std::cos(yaw), std::cos(roll), std::sin(roll) * std::sin(yaw)};
+  const Axis right = unit3(cross3(up, forward), {1, 0, 0});
+  const Axis down = unit3(cross3(forward, right), {0, 1, 0});
+  return {flip_y(right), flip_y(down), flip_y(forward)};
+}
 
 bool battle_audit() {
   static const bool on = std::getenv("OC_BATTLE_AUDIT") != nullptr;

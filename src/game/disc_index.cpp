@@ -58,6 +58,13 @@ std::string DiscIndex::room_stem(int disc, int room_id) const {
   return rec.substr(at + 12, rec.size() - at - 12 - 4);
 }
 
+bool DiscIndex::has_room(int disc, std::string_view stem) const {
+  const size_t count = rec_[disc >= 2 ? 1 : 0].size();
+  for (int id = 0; kMapBase + 3 * static_cast<size_t>(id) < count; ++id)
+    if (room_stem(disc, id) == stem) return true;
+  return false;
+}
+
 std::string DiscIndex::movie_name_of(int disc, int number) const {
   if (number < 0) return {};
   const std::string& rec = record(disc, kMovieBase + number);

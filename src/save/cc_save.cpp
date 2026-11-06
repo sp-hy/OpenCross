@@ -102,6 +102,18 @@ std::array<u8, 3> SaveSlot::party() const { return {head[head::kParty], head[hea
 void SaveSlot::set_party(const std::array<u8, 3>& ids) {
   for (int i = 0; i < 3; ++i) head[head::kParty + i] = head[head::kPreviewParty + i] = ids[i];
 }
+void SaveSlot::stamp_preview_party() {
+  constexpr u8 kEmpty = 0xFF;
+  for (size_t i = 0; i < 3; ++i) {
+    const u8 id = head[head::kParty + i];
+    u8 face = kEmpty;
+    if (id < kNumChars) {
+      const u8 model = static_cast<u8>(chars[id].model_id & 0xFF);
+      face = model <= kLastFace ? model : id;
+    }
+    head[head::kPreviewParty + i] = face;
+  }
+}
 u64 SaveSlot::key_items() const { return u64(rd(&head[head::kKeyItems], 4)) | (u64(rd(&head[head::kKeyItems + 4], 4)) << 32); }
 void SaveSlot::set_key_items(u64 bits) {
   wr(&head[head::kKeyItems], 4, static_cast<u32>(bits));
@@ -386,6 +398,7 @@ int write_slot(MemCard& card, int slot, const SaveSlot& src) {
   if (!block) return 0;
   SaveSlot stamped = src;
   stamp_title(stamped, slot);
+  stamped.stamp_preview_party();
   card.write_block(block, encode_block(stamped));
   card.set_dir(block, 0x51, MemCard::kBlock, 0xFFFF, name);
   return block;

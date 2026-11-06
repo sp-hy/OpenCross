@@ -21,6 +21,9 @@ namespace oc::battle::pac {
 constexpr int kSlots = 32;
 constexpr int kMaxFrames = 32;
 constexpr int kNoUnit = 0xFF;
+// B0 / B1 height tween: 10 script passes, two ticks each.
+constexpr int kLiftPasses = 10;
+constexpr int kLiftTicks = 2 * kLiftPasses;
 
 // ---- opcode table (pac_opcodes.inc). len 0 = invalid / default-stall handler.
 // conf: C = handler read, I = purpose inferred, U = in no shipped script (not modelled).
@@ -56,7 +59,7 @@ struct Module {
 
 // ---- what a script asked for / said
 struct QueuedAttack {
-  // 0/5 weapon, 1/2/3/6 element, 4 reset countdown.
+  // 0/5 weapon, 1/2/3/6 element (6: the cast springs the element trap, EnemyAction::trap_fizzle), 4 reset countdown.
   int type = 0;
   // Weapon strength or element id.
   int value = 0;
@@ -97,8 +100,12 @@ struct Event {
     Invuln,
     // A6 reached for unit.
     Killed,
-    // 84: unit.
+    // 84: unit (its low-HP bit is set until a hit recomputes it from its HP).
     QuarterHp,
+    // B0 / B1: unit, a = the height step (world units, y down), b = 1 (B0: y += k * a on pass k = 1..10) or -1 (B1: y -= k * a).
+    Lift,
+    // C4 / C5 passed: a = pool, b = 4-char tag; the stream holds while that effect object still lives.
+    EffectWait,
     // 85: unit, a = home facing byte (the model turns to yaw a << 6 at once).
     HomeFacing,
     // 91: unit (refresh the cached model position).
@@ -141,7 +148,7 @@ struct PickResult {
 class Host {
  public:
   virtual ~Host() = default;
-  // Bit u (0..8): unit present and not KO.
+  // Bit u (0..8): unit present, not KO and HP not 0 (a frozen unit counts).
   virtual u32 alive_mask() const = 0;
   // Bit u: unit in the battle roster (PCs also while KO'd; enemies until their kill script ends).
   virtual u32 roster_mask() const { return alive_mask(); }
@@ -154,8 +161,8 @@ class Host {
   virtual int rnd(int lo, int hi) = 0;
   virtual int pc_char_id(int /*pc*/) const { return 0xFF; }
   virtual int monster_id(int /*unit*/) const { return 0xFF; }
-  // 0..5 colour, 6 empty.
-  virtual int ring_colour(int /*slot*/) const { return 6; }
+  // 0..5 colour, 6 all colours, -1 empty.
+  virtual int ring_colour(int /*slot*/) const { return -1; }
   virtual int timer_frames() const { return 0; }
   // Gate of 66 / 65 / 2C.
   virtual bool action_ready() const { return true; }
@@ -165,7 +172,8 @@ class Host {
   virtual int action_serial() const { return 0; }
   // Op 65 passed its gate for `unit` (an enemy: the Dopplegang pool credit); `last_pc` = script var 0x50.
   virtual void begin_scripted(int /*unit*/, int /*last_pc*/) {}
-  // C4 / C5 block while the engine still has a live effect object in `pool` (tag 0 = any). Headless hosts have none.
+  // C4 / C5 block while the engine still has a live effect object in `pool` (tag 0 = any). Headless hosts have none: the op passes and its
+  // EffectWait event makes the presentation hold instead.
   virtual bool effect_busy(int /*pool*/, u32 /*tag*/) const { return false; }
   // 7B / 85: unit state the core does not simulate but keeps for the presentation.
   virtual void set_menu_cursor(int /*v*/) {}
@@ -289,6 +297,8 @@ class Vm {
     bool s2 = false, s3 = false, s4 = false;
     int delay = 0;
     bool delay_armed = false, a4_wait = false;
+    // B0's height step, kept for the next B1 (0 until a B0 ran).
+    int lift_step = 0;
   };
   enum class Step { Next, Jump, Block, Stop };
 

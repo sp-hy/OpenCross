@@ -7,7 +7,7 @@
 // advance in words, 0 = blocked until the next tick. The VM here runs one script on one unit and reports what it asked the
 // engine for as Events; it never touches rendering. Ticks are 60 Hz.
 //
-// Not interpreted (length-correct no-ops): the particle / light / colour-fade ops (0x52 0x5d 0x5f 0x70 ...); the weapon-trail ops 0x23-0x25 0x46 0x5b 0x85 0x86 are events.
+// Not interpreted (length-correct no-ops): the ops without a case, such as 0x5f and 0x70; the weapon-trail ops 0x23-0x25 0x46 0x5b 0x85 0x86 are events.
 #include <array>
 #include <functional>
 #include <set>
@@ -142,6 +142,14 @@ struct Event {
     ElemTilt,
     // op 0x8D: element 0's z rotation walks back to the saved value over d ticks, then its motion is on again
     ElemTiltBack,
+    PoseWord,    // op 0xAC: the unit's idle-pose word := a (the idle script's GetPose; 8 = dead)
+    // op 0x88: the head turns toward attach point c of list a's entry b, followed every tick (rate 0xE00)
+    HeadLook,
+    HeadRelease, // op 0x89: the head target becomes straight ahead and the head turn ends once settled
+    // op 0xA2 / 0xA3: texture rect A (b 0) / B (b 1) := VRAM x, y, w, h = off[0..2], d (x, w in halfwords)
+    TexRect,
+    TexDest,     // op 0xA4: the rect copies go to list a's entry b's texture at (c halfwords, d rows) from its origin
+    TexFlip,     // op 0xA5: copy A, then B / A in turn every a / b ticks, for c ticks
     Done,        // script ended: a = the op that ended it (0x00 / 0x3E / 0x4C, 0x03 on an empty stack, -1 off the table)
   } kind = Done;
   int a = 0, b = 0, c = 0, d = 0;

@@ -32,6 +32,15 @@ constexpr int kTick = 1;
 
 int s16v(int value) { return static_cast<s16>(value); }
 
+// The PitchDown angle (4096 = turn) toward the direction (dx, dy, dz) from the unit's attach point 9: the direction turned about y so its
+// horizontal part lies on -z (z' = -h, y' = dy), then ratan2(z', -y').
+int pitch_angle(double dx, double dy, double dz) {
+  const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+  if (dist <= 0.0) return 0;
+  const double horizontal = std::hypot(dx, dz) / dist;
+  return static_cast<int>(std::lround(std::atan2(-horizontal, -dy / dist) * (4096.0 / (2.0 * 3.14159265358979323846))));
+}
+
 }  // namespace
 
 std::array<s16, 128> Vm::globals_{};
@@ -484,17 +493,22 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
       // -0x400 for a level target, towards 0 as the target rises above, towards -0x800 as it falls below
       int ax = 0, az = 0, ay = 0, bx = 0, bz = 0, by = 0;
       if (ctx.get_attach_self && ctx.get_attach && ctx.get_attach_self(9, ax, az, ay) && ctx.get_attach(arg(1), arg(2), arg(3), bx, bz, by)) {
-        const double dx = bx - ax, dy = by - ay, dz = bz - az, dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-        int ang = 0;
-        if (dist > 0.0) {
-          const double horizontal = std::hypot(dx, dz) / dist;
-          ang = static_cast<int>(std::lround(std::atan2(-horizontal, -dy / dist) * (4096.0 / (2.0 * 3.14159265358979323846))));
-        }
         emit(Event::ElemTilt, 0, 0, 0, arg(4));
-        out.back().off[2] = static_cast<s16>(ang);
+        out.back().off[2] = static_cast<s16>(pitch_angle(bx - ax, by - ay, bz - az));
       }
       return len;
     }
+    case 0xAA: {  // PitchDown v ticks: as 8C toward the point held in vars [v] x, [v+1] z, [v+2] y
+      int ax = 0, az = 0, ay = 0;
+      if (ctx.get_attach_self && ctx.get_attach_self(9, ax, az, ay)) {
+        const int bx = s16v(rd(arg(1))), bz = s16v(rd(arg(1) + 1)), by = s16v(rd(arg(1) + 2));
+        emit(Event::ElemTilt, 0, 0, 0, arg(2));
+        out.back().off[2] = static_cast<s16>(pitch_angle(bx - ax, by - ay, bz - az));
+      }
+      return len;
+    }
+    // The unit's idle-pose word := w1 (GetPose reads it; 8 = dead).
+    case 0xAC: emit(Event::PoseWord, arg(1)); return len;
     // Back to the z saved by 8C over w1 ticks, motion on at the end.
     case 0x8D: emit(Event::ElemTiltBack, 0, 0, 0, arg(1)); return len;
     case 0x8B: {  // GetKabuShockPos list idx point out: the dive spot of Vege Might (the turnip): 2048 units out from the target's attach point P on the caster's side (horizontal, d = caster - P)
@@ -516,6 +530,18 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
       event.ang[0] = static_cast<s16>(arg(6) & 0xFF), event.ang[1] = static_cast<s16>((arg(6) >> 8) & 0xFF), event.ang[2] = static_cast<s16>(arg(7) & 0xFF);
       return len;
     }
+    // FaceLockOn list idx point / FaceLockOff: the head-turn callback on the running unit's head joint (rate 0xE00), its target refreshed
+    // every tick from the other unit's attach point; off sends the target straight ahead and the callback ends once the head settles.
+    case 0x88: emit(Event::HeadLook, arg(1), arg(2), arg(3)); return len;
+    case 0x89: emit(Event::HeadRelease); return len;
+    // TimRect x y w h (A2 = rect A, A3 = rect B), TimRectTo list idx d (byte 0 = dx, byte 1 = dy), TimFlip t0 t1 total.
+    case 0xA2: case 0xA3: {
+      emit(Event::TexRect, 0, op - 0xA2, 0, arg(4));
+      for (int k = 0; k < 3; ++k) out.back().off[k] = static_cast<s16>(arg(1 + k));
+      return len;
+    }
+    case 0xA4: emit(Event::TexDest, arg(1), arg(2), arg(3) & 0xFF, (arg(3) >> 8) & 0xFF); return len;
+    case 0xA5: emit(Event::TexFlip, arg(1), arg(2), arg(3)); return len;
     // GetNumberTarget count index: vars [count] := the target list's length, vars [index] := the running unit's index in it (-1 = not a target).
     case 0xA1: wr(arg(1), ctx.target_count); wr(arg(2), ctx.target_index); return len;
     // GetCommon list idx out: vars [out] := the unit's common word.

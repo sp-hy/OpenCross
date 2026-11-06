@@ -82,6 +82,7 @@ bool NullHost::follow_wait() { NOTE("follow_wait"); return true; }
 void NullHost::setup_dialog_window(int, std::span<const s32>) { NOTE("setup_dialog_window"); }
 void NullHost::set_dialog_face(int) { NOTE("set_dialog_face"); }
 bool NullHost::dialogue_open() { NOTE("dialogue_open"); return false; }
+bool NullHost::drop_culled_dialogue() { NOTE("drop_culled_dialogue"); return false; }
 bool NullHost::dialogue_blocked() { NOTE("dialogue_blocked"); return false; }
 void NullHost::open_dialogue(int, int, int) { NOTE("open_dialogue"); }
 void NullHost::dialogue_choice(int, int) { NOTE("dialogue_choice"); }

@@ -46,10 +46,11 @@ int dpad_heading(int mask) {
 
 }  // namespace
 
-bool FieldWorld::controls_free() const {
+bool FieldWorld::controls_free(bool menu_request) const {
   if (trans_ != Trans::None || fade_ > kLockFade || jump_.active) return false;
   if (modal_window_open()) return false;
-  if (vm_.global_flags() & script::gflag::kInputLock) return false;
+  const u32 gflags = vm_.global_flags();
+  if ((gflags & script::gflag::kInputLock) && !(menu_request && (gflags & script::gflag::kMenuUnderLock))) return false;
   for (size_t i = 0; i < ents_.size(); ++i) {
     const script::Entity& script_ent = vm_.entity(static_cast<int>(i));
     if (script_ent.flags270 & script::flag270::kActionRunning) return false;

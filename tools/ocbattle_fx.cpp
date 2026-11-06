@@ -59,7 +59,8 @@ struct PackRow {
   int first_draw = -1, last_draw = -1;
   size_t max_quads = 0, max_tris = 0, max_flats = 0, max_live = 0;
   u64 sum_draw = 0;
-  u64 spawned = 0;
+  // dropped: spawns refused because the object arena (or the object cap) was full.
+  u64 spawned = 0, dropped = 0;
   u32 starts = 0, unresolved_sheets = 0;
   // types: sprite type -> objects spawned; unpresented: sequence op -> hits (stock ops the presentation does not carry out);
   // nonvisual: those of them without a picture (rumble, CD / sound queue, music volume).
@@ -404,6 +405,7 @@ void run_pack(PackRow& row, const std::shared_ptr<const FxPack>& pack, const ass
   row.capped = run.capped() || !run.done();
   const auto st = run.emitters().stats();
   row.spawned = st.spawned;
+  row.dropped = st.dropped;
   row.starts = st.starts;
   row.unresolved_sheets = st.unresolved_sprites;
   for (size_t k = 0; k < st.type_spawns.size(); ++k)
@@ -767,6 +769,9 @@ int cmd_fx_audit(const data::GameTables& tables, const vfs::Vfs& game_fs, const 
   for (const auto& [op, ph] : ops) std::printf(" %02X:%d/%llu", op, ph.first, static_cast<unsigned long long>(ph.second));
   std::printf("\nsequence ops without a picture, not carried out (op: packs / hits):");
   for (const auto& [op, ph] : nvops) std::printf(" %02X:%d/%llu", op, ph.first, static_cast<unsigned long long>(ph.second));
+  std::printf("\nspawns refused at the object arena / cap (eid: spawns):");
+  for (const PackRow& row : rows)
+    if (row.dropped) std::printf(" %d:%llu", row.eid, static_cast<unsigned long long>(row.dropped));
   std::printf("\n");
 
   // ---- markdown status table

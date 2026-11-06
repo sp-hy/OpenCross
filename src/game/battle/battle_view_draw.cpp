@@ -375,6 +375,8 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
           if (std::fabs(to_light[0]) > 16384.0f || std::fabs(to_light[1]) > 16384.0f || std::fabs(to_light[2]) > 16384.0f) to_light[0] = 0.0f, to_light[1] = 1.0f, to_light[2] = 0.0f;
           const float len = std::sqrt(to_light[0] * to_light[0] + to_light[1] * to_light[1] + to_light[2] * to_light[2]);
           wd.light.spec = near_eye && len > 0.0f;
+          // The specular routine draws only the GT3 / GT4 groups (Lynx's scythe has 4 FT3 faces the stock dispatcher draws).
+          wd.gouraud_textured_only = near_eye;
           for (size_t k = 0; k < 3; ++k) {
             wd.light.spec_dir[k] = len > 0.0f ? to_light[k] / len : 0.0f;
             wd.light.spec_eye[k] = cam_.eye[k];

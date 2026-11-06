@@ -73,11 +73,11 @@ bool listed(const u8 (&ids)[N], u8 id) {
 }
 
 float pick_nudge(u8 id) {
-  if (listed(kNudgeMinus12, id)) return -12;
-  if (listed(kNudgePlus6, id)) return 6;
-  if (listed(kNudgeMinus6, id)) return -6;
-  if (listed(kNudgeMinus18, id)) return -18;
-  return id == kNudgeMinus24 ? -24 : 0;
+  if (listed(kNudgeMinus12, id)) return -12.0f;
+  if (listed(kNudgePlus6, id)) return 6.0f;
+  if (listed(kNudgeMinus6, id)) return -6.0f;
+  if (listed(kNudgeMinus18, id)) return -18.0f;
+  return id == kNudgeMinus24 ? -24.0f : 0.0f;
 }
 
 // The style of a name in language `lang_i` (0 = no style: the slot's own scale).

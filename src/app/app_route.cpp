@@ -43,6 +43,7 @@ void App::init_route_state() {
     world.capture_state();
     return static_cast<int>(world.game_state().slot.location());
   };
+  rstate.gold = [this] { return static_cast<long long>(world.game_state().gold()); };
   rstate.options = [this] { return static_cast<int>(world.game_state().options()); };
   rstate.battle_events = [this] { return battle_ready ? battle.route_events() : std::vector<std::string>(); };
   rstate.battle_camera = [this] { return battle_ready ? battle.route_camera() : std::string(); };
@@ -72,6 +73,8 @@ void App::fill_route_state() {
   rstate.scroll_y = scroll.second;
   rstate.dialogue = field_visible() && world.dialogue_is_open();
   rstate.dialogue_choice = field_visible() && world.dialogue_choice_pending();
+  rstate.portrait = field_visible() ? world.dialogue_portrait_side() : "none";
+  rstate.message = field_visible() ? world.last_dialogue_message() : -1;
   rstate.choice_line = field_visible() ? world.dialogue_choice_line() : -1;
   rstate.battle = battle_in_field || battle_ok;
   // The results screen is up (route: wait battle results).
@@ -133,6 +136,7 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "battle_disguise") world.request_battle(out.request_arg, 0, 4);
   else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);
   else if (rk == "elementshop") world.request_menu(MK::ElementShop, out.request_arg);
+  else if (rk == "weaponshop") world.request_menu(MK::WeaponShop, out.request_arg);
   else {
     log::error("route: unknown request {}", rk);
     exit_code = 1;
@@ -163,9 +167,13 @@ void App::route_frame() {
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
     if (out.set_buttons) world.game_state().slot.button_cfg[static_cast<size_t>(out.buttons_index)] = static_cast<u32>(out.buttons_value);
     if (out.set_option) world.game_state().set_option(static_cast<u16>(out.option_mask), out.option_on != 0);
+    if (out.set_group) world.bg_layer(out.group, out.group_on != 0);
     if (out.set_var) world.vm().set_var(static_cast<u16>(out.var_id), out.var_value);
-    // A warp takes the disc from the story variable 0x42 like a map jump.
-    if (!out.load_room.empty()) world.set_disc(world.vm().var(0x42) + 1);
+    // A warp takes the disc from the story variable 0x42 like a map jump; a room only the other disc holds takes that disc.
+    if (!out.load_room.empty()) {
+      world.set_disc(world.vm().var(0x42) + 1);
+      world.select_disc_for_room(out.load_room);
+    }
     if (!out.load_room.empty() && !world.load_room(out.load_room, out.load_param)) {
       log::error("route: load {} failed", out.load_room);
       exit_code = 1;

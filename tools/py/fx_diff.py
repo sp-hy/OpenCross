@@ -14,7 +14,7 @@ placed by the battle refresh counter they carry (`bf` in tables.json; old captur
 counter of the first state; a capture without any counter falls back to the run frame. Every ps1 time in diff.md is that refresh time (`R`), the
 frame files keep their run-frame numbers (`F`).
 
-Tolerances: object count +-2 per emitter, first-object numbers 5 % (abs floor 8), unit position / yaw 64, camera eye / target 64, fog 5 %.
+Tolerances: object count +-2 per emitter, first-object numbers 5 % (abs floor 8), unit position / yaw 64, camera eye / target 64, camera roll 2 (1024ths of a turn), fog 5 %.
 Options (the plain call runs the diff):
   --extract           tables only (ref\\tables.json from the states; no ours needed) + `cam_pick:` appended to ref\\manifest.txt from camera-shot sequence-task tags
                       (ch1N / tgtN / aprN / numbered shots; the pack's own first sequence and `main` excluded) unless the manifest already has a non-empty one
@@ -39,6 +39,7 @@ TOL_COUNT = 2
 TOL_REL = 0.05
 TOL_ABS = 8
 TOL_POS = 64
+TOL_ROLL = 2
 TOL_POOL = 300   # cam_score: a pool member is a 60-90 tick shot, so a 1-2 sample timing / anchor-height lag (e.g. a 350 u lag on Fireball) must not lose it to a wrong pick
 
 
@@ -88,7 +89,8 @@ def extract_ref(refdir):
         except Exception as e:
             print("fx_diff: %s: unit blocks unreadable (%s)" % (os.path.basename(p), e))
         try:
-            t["cam"] = {"eye": [st.s16(0x80071F68 + 2 * i) for i in range(3)], "tgt": [st.s16(0x80071F70 + 2 * i) for i in range(3)], "H": st.s16(0x80071F84)}
+            t["cam"] = {"eye": [st.s16(0x80071F68 + 2 * i) for i in range(3)], "tgt": [st.s16(0x80071F70 + 2 * i) for i in range(3)], "H": st.s16(0x80071F84),
+                        "roll": st.s16(0x80071F80)}
             t["fog"] = {"near": st.u16(0x8008DBB8), "far": st.u16(0x8008DBB2), "rgb": [st.u8(0x8008DBB4), st.u8(0x8008DBB5), st.u8(0x8008DBB6)], "on": st.u8(0x800721E0)}
             t["warp"] = {"on": st.u8(0x800720D8), "ang": list(fr.s16x3(st, 0x800720E0)), "tr": list(fr.s16x3(st, 0x800720E8)),
                          "col": [st.u8(0x800720F0), st.u8(0x800720F1), st.u8(0x800720F2)], "off": [st.s16(0x800720F4), st.s16(0x800720F6)],
@@ -181,7 +183,8 @@ RE_OBJ = re.compile(r"\bem (\S+) +spr (\S+) t(\d+) pos\s+(-?\d+)\s+(-?\d+)\s+(-?
 RE_UH = re.compile(r"fx units tick (\d+) fxtick (\d+)")
 RE_UNIT = re.compile(r"\bunit\s+(\d+) flags7e ([0-9a-f]+) ghost (\d) col\s+(\d+)\s+(\d+)\s+(\d+) pos\s+(-?\d+)\s+(-?\d+)\s+(-?\d+) yaw\s+(\d+) clip (-?\d+) motion ([-\d.]+) \((-?\d+)/256\)")
 RE_CAM = re.compile(r"fx camera tick (\d+) eye (-?\d+) (-?\d+) (-?\d+) tgt (-?\d+) (-?\d+) (-?\d+) H (-?\d+) fog (\d) near (-?\d+) far (-?\d+) rgb (-?\d+) (-?\d+) (-?\d+) "
-                    r"warp on (\d) ang (-?\d+) (-?\d+) (-?\d+) trans (-?\d+) (-?\d+) (-?\d+) col (-?\d+) (-?\d+) (-?\d+) off (-?\d+) (-?\d+) abr (\d+) slow (\d+)/(\d+)")
+                    r"warp on (\d) ang (-?\d+) (-?\d+) (-?\d+) trans (-?\d+) (-?\d+) (-?\d+) col (-?\d+) (-?\d+) (-?\d+) off (-?\d+) (-?\d+) abr (\d+) slow (\d+)/(\d+)"
+                    r"(?: roll (-?\d+))?")
 RE_MARK = re.compile(r"fx tickmark (\d+) (\d+)")
 RE_SEQ = re.compile(r"fxseq: t(\d+) (.*?) #(\d+) op ([0-9A-F]+) wait (-?\d+)")  # the name may be padded with spaces
 RE_CAMSEQ = re.compile(r"camera: sequence (\S+) op ")  # one line per command of a camera timeline, logged when it starts
@@ -250,9 +253,9 @@ def parse_ours(path):
                 continue
             m = RE_CAM.search(line)
             if m:
-                g = [int(float(x)) for x in m.groups()]
+                g = [int(float(x)) if x is not None else None for x in m.groups()]
                 cur = samples.setdefault(g[0], {"seqs": [], "objs": [], "units": {}, "cam": None, "fog": None, "warp": None})
-                cur["cam"] = {"eye": g[1:4], "tgt": g[4:7], "H": g[7]}
+                cur["cam"] = {"eye": g[1:4], "tgt": g[4:7], "H": g[7], "roll": g[29]}
                 cur["fog"] = {"on": g[8], "near": g[9], "far": g[10], "rgb": g[11:14]}
                 cur["warp"] = {"on": g[14], "ang": g[15:18], "tr": g[18:21], "col": g[21:24], "off": g[24:26], "abr": g[26], "slow_n": g[28], "slow_x": g[27]}
                 mode = None
@@ -821,8 +824,10 @@ def main(argv):
         if ot is not None and ot["cam"] and rt["cam"]:
             v["cam"][1] += 1
             ce, oe, ct, ot_ = rt["cam"]["eye"], ot["cam"]["eye"], rt["cam"]["tgt"], ot["cam"]["tgt"]
-            if max(abs(ce[i] - oe[i]) for i in range(3)) > TOL_POS or max(abs(ct[i] - ot_[i]) for i in range(3)) > TOL_POS:
-                note(f, "cam", "eye ps1 %s ours %s tgt ps1 %s ours %s H %d/%d" % (ce, oe, ct, ot_, rt["cam"]["H"], ot["cam"]["H"]))
+            rr, orr = rt["cam"].get("roll"), ot["cam"].get("roll")
+            roll_bad = rr is not None and orr is not None and abs(rr - orr) > TOL_ROLL
+            if max(abs(ce[i] - oe[i]) for i in range(3)) > TOL_POS or max(abs(ct[i] - ot_[i]) for i in range(3)) > TOL_POS or roll_bad:
+                note(f, "cam", "eye ps1 %s ours %s tgt ps1 %s ours %s H %d/%d roll %s/%s" % (ce, oe, ct, ot_, rt["cam"]["H"], ot["cam"]["H"], rr, orr))
         if ot is not None and ot["fog"] and rt["fog"] and f >= fog_from:
             v["fog"][1] += 1
             a, b = rt["fog"], ot["fog"]
@@ -843,7 +848,7 @@ def main(argv):
         return "MATCH (%d compared)" % n if bad == 0 else "DIFF (%d of %d)" % (bad, n)
 
     names = [("seq", "sequences"), ("cnt", "object counts"), ("first", "first-object numbers"), ("units", "unit positions / yaw / flags / colour"),
-             ("cam", "camera eye / target"), ("fog", "fog"), ("warp", "warp")]
+             ("cam", "camera eye / target / roll"), ("fog", "fog"), ("warp", "warp")]
     md = ["# fx_diff %s" % d.replace("\\", "/"), "",
           "offset (our tick = ps1 refresh time + offset): **%s** (%s); ps1 states %d (refresh times %s..%s), compared window: %s, our samples %d, step %d" % (
               offset, off_note, len(ref), min(ref) if ref else "-", max(ref) if ref else "-", win_note, len(ours), step), "",

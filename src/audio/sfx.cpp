@@ -35,8 +35,9 @@ std::vector<ByteSpan> split_yos(ByteSpan data, bool keep_empty) {
   return out;
 }
 
-// C6 volume 0..127 -> modifier (1.0 = 0x7F); pan 0..127 (-1 = the programme's own) -> the modifier the channel takes.
-float sfx_volume_modifier(int volume) { return std::clamp(float(volume) / 127.0f, 0.0f, 1.5f); }
+// Request volume -> modifier (1.0 = 0x7F): the sound driver keeps the low 7 bits, so 0x80 is silent and 0xFF full; pan 0..127 (-1 = the
+// programme's own) -> the modifier the channel takes.
+float sfx_volume_modifier(int volume) { return float(volume & 0x7F) / 127.0f; }
 int sfx_pan_modifier(int pan) { return pan >= 0 ? (pan & 0x7F) : -1; }
 
 // Runs of slots 176..239 by the bank id their entry came from, '*' = its sample RAM was overwritten by a later upload
@@ -270,6 +271,10 @@ void AkaoSfx::set_field_mods(u32 mask, int volume, int pan) {
 }
 
 bool AkaoSfx::field_active(u32 mask) const { return mixer_ && mixer_->sfx_active(mask); }
+
+void AkaoSfx::fade_field(u32 mask, int frames, int volume) {
+  if (mixer_ && mask) mixer_->fade_sfx_volume(mask, frames, volume);
+}
 
 void AkaoSfx::evict_field(u32 mask) {
   if (mixer_ && mask) mixer_->evict_sfx(mask);

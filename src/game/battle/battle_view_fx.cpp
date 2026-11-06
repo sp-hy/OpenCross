@@ -172,6 +172,12 @@ effects::ViewParams BattleView::fx_view() const {
   view.cue.rgb[0] = fog_cur_.r;
   view.cue.rgb[1] = fog_cur_.g;
   view.cue.rgb[2] = fog_cur_.b;
+  // HD art: RDE draws the eye-light sheet of the Gravedigger pack 4 units left and 0x1C units down in view space.
+  if (hd_) {
+    view.shifted_sheet = "eyel";
+    view.sheet_shift[0] = -4.0f;
+    view.sheet_shift[1] = 0x1C;
+  }
   return view;
 }
 
@@ -585,6 +591,9 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
     }
   }
   if (fx_lib_gpu_) gpu->sprites->set_shared(fx_lib_gpu_);
+  // RDE's 4x sheet pages (FxPack::hd_sprites) are drawn in HD art; the upload is rebuilt on an art switch.
+  gpu->sprites->set_hd(hd_);
+  gpu->art_dependent = pack->hd_sprites > 0;
   if (!gpu->sprites->init(*ctx_, *sprites_) ||
       !gpu->sprites->load(bank, fx_lib_gpu_ ? effects::GpuEffects::Which::SkipLibraries : effects::GpuEffects::Which::All)) {
     log::warn("battle fx: eid {}: texture upload failed", pack->eid);

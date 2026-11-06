@@ -21,7 +21,8 @@
 - tap confirm
 - wait 90
 - screenshot dlo_n3_name_entry.png     # default name "Serge" is already in the buffer
-- tap start                             # Start: accept the name
+- tap down
+- tap confirm                         # Confirm: accept the name
 - wait movie start 300                # the title script's D4 #2: a02koryu plays first (skippable)
 - wait 60
 - tap confirm

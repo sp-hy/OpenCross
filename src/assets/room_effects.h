@@ -22,6 +22,8 @@ struct EffectSprite {
   u8 w = 0, h = 0;
   u16 flags = 0;
   std::vector<u8> rgba;
+  // RDE's HD image of the same texels (4x: w * 4 x h * 4 RGBA, unmirrored like `rgba`), empty when no HD page covers them.
+  std::vector<u8> hd_rgba;
 
   int page_x() const { return (flags & 0xF) * 64; }
   int page_y() const { return (flags & 0x10) ? 256 : 0; }

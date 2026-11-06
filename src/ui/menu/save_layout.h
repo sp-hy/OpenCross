@@ -3,17 +3,21 @@
 // on the 640-wide display (canvas X = 2.0 x, Y = 960/448 y). Frame and sprite positions follow the PS1 layout;
 // the HD ink positions (x = ink left / right edge, y = cap top) and the
 // bn_70 / kb_70 scales are measured from the HD frames. All values are PS1 px of the 640 mode.
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <string>
 #include <string_view>
 
 namespace oc::ui::save_layout {
 
-// Frames: slot grid 0x52, detail 0x54, message 0x56, Save / Load description 0x55 (state 0 only).
+// Frames: slot grid 0x52, detail 0x54, message 0x56, Save / Load description 0x55 (state 0, and the saving line while saving), progress
+// 0x51 (while saving).
 constexpr float kGridX = 66, kGridY = 84;
 constexpr float kDetailX = 84, kDetailY = 230;
 constexpr float kMsgX = 138, kMsgY = 320;
 constexpr float kTopMsgX = 88, kTopMsgY = 266;
+constexpr float kProgressX = 216, kProgressY = 234, kProgressCapDx = 11;
 // 15 boxes of 32 x 32, 8 per row; then the party faces of the detail panel.
 constexpr float kBoxX = 74, kBoxY = 98, kBoxStep = 34, kBox = 32;
 constexpr float kFaceX = 88, kFaceY = 242, kFaceStep = 64, kFace = 64;
@@ -136,6 +140,17 @@ inline std::string slot_icon_path(std::string_view set, int box) {
 inline int box_icon(int box, int file_no, int cursor, int max_n) {
   if (box == file_no || cursor < 0 || cursor + 1 > max_n) return file_no;
   return cursor;
+}
+// The lowest file number (0..14) not in `used`, -1 when every number is taken. With card 1's 0 counted as used it is the number a new
+// save writes, and the saving screen draws it on the cursor box, over the box's own icon, for a new save and an overwrite alike.
+inline int saving_number(const std::array<bool, 15>& used) {
+  for (int number = 0; number < 15; ++number)
+    if (!used[static_cast<size_t>(number)]) return number;
+  return -1;
+}
+// The icon of that overlay: the box rule above with the drawn number, which counts toward `max_n` as well.
+inline int saving_icon(int cursor, int number, int max_n) {
+  return box_icon(cursor, number, cursor, std::max(max_n, number + 1));
 }
 // "File# N" number field: N = the box file's number + 1 in a 3-wide field ("File#  1" = CHRONO00, "File# 12").
 inline std::string file_number(int box) {

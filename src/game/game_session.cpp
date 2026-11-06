@@ -61,6 +61,13 @@ void write_growth(save::SaveChar& save_char, const battle::PartyMember& member) 
 
 }  // namespace
 
+void settle_pip_form(ui::GameState& gs, const data::GameTables& tables, int form_before) {
+  const int form = gs.slot.chars[static_cast<size_t>(newgame::kPip)].model_id;
+  if (form == form_before || !battle::pip_form(form) || !battle::pip_form(form_before)) return;
+  newgame::pip_form_stats(&tables, gs.slot);
+  newgame::pip_form_unlocks(&tables, gs.slot);
+}
+
 std::string utf8_from_u32(std::u32string_view text) {
   std::string out;
   for (char32_t code_point : text) {
@@ -102,6 +109,8 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
   // the 2-3 tech cells; the grid layout stays record 43's (identical in 43..48). The kind comes from the record's model id.
   member.growth_col = static_cast<u8>(newgame::growth_column(&tables, gs.slot, char_id, dream));
   if (gs.slot.chars[static_cast<size_t>(char_id)].max_hp > 0) member.kind = gs.slot.chars[static_cast<size_t>(char_id)].model_id;
+  // Pip in a form grows toward that form's Lv 99 record: the growth clamp and the star-up's next pending roll.
+  if (char_id == newgame::kPip && battle::pip_form(member.kind)) member.lv99 = battle::lv99_targets(tables, member.kind);
   const save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(char_id)];
   // A record that was never filled keeps the table defaults.
   if (save_char.max_hp > 0) {
@@ -109,8 +118,7 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
     member.hp = std::min<int>(save_char.cur_hp, member.stat[0]);
     if (save_char.colour_bit) member.innate = save_char.colour_bit;
     member.eq = battle::make_equip(tables, save_char.weapon, save_char.armour, save_char.accessory);
-    // Grid: the saved element per cell and the saved unlocks (on top of the starting kit the core applies).
-    const auto kit = member.unlocked;
+    // Grid: the saved element per cell, open exactly where the saved masks open it (what the menu shows).
     member.cells.fill(0);
     member.unlocked.fill(false);
     for (int row = 0; row < ui::GameState::kRows; ++row)
@@ -118,15 +126,14 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
         const size_t cell = static_cast<size_t>(row * ui::GameState::kCols + col);
         if (cell >= member.cells.size()) continue;
         member.cells[cell] = static_cast<u16>(gs.cell_element(char_id, row, col));
-        member.unlocked[cell] = (gs.cell_available(char_id, row, col) || (kit[cell] && row <= 1)) && member.cells[cell] != 0;
+        member.unlocked[cell] = gs.cell_available(char_id, row, col) && member.cells[cell] != 0;
       }
-    battle::unlock_grid(member, tables, star);
     for (int row = 0; row < ui::GameState::kRows; ++row)
       for (int col = 0; col < ui::GameState::kCols; ++col) {
         const size_t cell = static_cast<size_t>(row * ui::GameState::kCols + col);
         if (cell < member.qty.size() && (member.cells[cell] & 0x3FFF) != 0 && (member.cells[cell] & 0x3FFF) < tables.elements.size() && (tables.elements[member.cells[cell] & 0x3FFF].flags0() & 0x10)) {
           member.qty[cell] = static_cast<u8>(gs.cell_count(char_id, row, col));
-          if (member.qty[cell] == 0) member.unlocked[cell] = false;
+          member.stack[cell] = true;
         }
       }
     member.lo_persist = save_char.status & battle::st::kPersist;
@@ -166,7 +173,7 @@ BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs
   out.growth.counter = gs.slot.head[kCounterOff];
   for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
     if (std::find(party_ids.begin(), party_ids.end(), char_id) != party_ids.end()) continue;
-    if (!gs.slot.recruited(char_id) || gs.slot.chars[static_cast<size_t>(char_id)].max_hp == 0) continue;
+    if (gs.slot.chars[static_cast<size_t>(char_id)].max_hp == 0) continue;
     out.bench.push_back(party_member_from_state(tables, gs, char_id, names));
   }
   return out;
@@ -174,15 +181,21 @@ BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs
 
 namespace {
 
-// Grid unlocks of the (new) star for one character, written into the save's per-row masks.
-void write_unlocks(ui::GameState& gs, const data::GameTables& tables, int char_id, int star) {
-  battle::PartyMember member = party_member_from_state(tables, gs, char_id);
-  battle::unlock_grid(member, tables, star);
-  save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(char_id)];
-  for (int row = 0; row < ui::GameState::kRows; ++row)
-    for (int col = 0; col < ui::GameState::kCols; ++col)
-      if (member.unlocked[static_cast<size_t>(row * ui::GameState::kCols + col)] && gs.cell_exists(char_id, row, col))
-        save_char.unlocked[static_cast<size_t>(row)] |= static_cast<u16>(1u << col);
+// The star-up's grid unlocks: in every record, recruited or not, the el_mask cells of stars 0 .. `star` (the new star) that the
+// record's grid has are opened in the save's per-row masks, whatever the cells hold.
+void star_up_unlocks(ui::GameState& gs, const data::GameTables& tables, int star) {
+  const bool dream = gs.slot.dream_records && tables.char_sets.count("char20") != 0;
+  const int last = std::min<int>(star, static_cast<int>(tables.growth.size()) - 1);
+  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+    const int growth_col = newgame::growth_column(&tables, gs.slot, char_id, dream) & 7;
+    save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(char_id)];
+    for (int level = 0; level <= last; ++level) {
+      const int cell = tables.growth[static_cast<size_t>(level)][static_cast<size_t>(growth_col)];
+      if (cell == 0xFF || cell >= data::kGridCells) continue;
+      const int row = cell / ui::GameState::kCols, col = cell % ui::GameState::kCols;
+      if (gs.cell_exists(char_id, row, col)) save_char.unlocked[static_cast<size_t>(row)] |= static_cast<u16>(1u << col);
+    }
+  }
 }
 
 
@@ -269,16 +282,13 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
     sum.star_up = true;
     // The core ran from the real star: its growth state is the new one (stars 0..99).
     gs.slot.head[kStarOff] = static_cast<u8>(std::min(99, finished_battle.growth().star));
-    const int star = session_star(gs);
-    for (const battle::PartyMember& member : party)
-      if (member.char_id >= 0 && member.char_id < save::kNumChars) write_unlocks(gs, tables, member.char_id, star);
+    if (session_star(gs) < 99) star_up_unlocks(gs, tables, session_star(gs));
     // The bench got its old pending deltas and a new roll (stats / snapshots / pending in `bench()`).
     for (const battle::PartyMember& member : finished_battle.bench()) {
       if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
       save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
       for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
       write_growth(save_char, member);
-      write_unlocks(gs, tables, member.char_id, star);
     }
   } else if (!rewards.bench_gains.empty()) {
     // Shared growth: the bench grew with the party in a normal fight.

@@ -223,7 +223,7 @@ void EmitterSystem::Impl::periodic_spawn(size_t idx, int ticks) {
         // fire(): the child's op 45 emission runs too.
         const int fired = fire(ci, &heading);
         if (fired < 0) break;
-        if (objs[static_cast<size_t>(fired)].life == 0) objs[static_cast<size_t>(fired)].alive = false;
+        if (objs[static_cast<size_t>(fired)].life == 0) release(objs[static_cast<size_t>(fired)]);
       }
     }
     Header& ch2 = headers[ci];
@@ -256,9 +256,13 @@ float EmitterSystem::Impl::frame_blend(float alpha) const {
 void EmitterSystem::Impl::step_frame(int ticks) {
   for (size_t i = 0; i < headers.size(); ++i)
     for (int tick = 0; tick < ticks && headers[i].linked; ++tick) step_header(i);
-  // Objects, including those spawned above and during this pass; a death child spawned during the pass first steps in the next frame
-  // (its spawn-with children keep their step).
-  for (size_t i = 0; i < objs.size(); ++i)
+  // Objects in ascending arena order, including those spawned above. An object spawned during this pass is visited in it when it lies
+  // above the object being stepped, otherwise first in the next frame; a death child skips its first visit (its spawn-with children keep
+  // their step).
+  std::vector<size_t> order = heap_order();
+  for (size_t k = 0; k < order.size(); ++k) {
+    const size_t i = order[k];
+    const size_t before = objs.size();
     if (objs[i].skip_step) {
       objs[i].skip_step = false;
     } else if (objs[i].alive) {
@@ -273,13 +277,20 @@ void EmitterSystem::Impl::step_frame(int ticks) {
         hh->hook(object_ref);
       }
     }
+    for (size_t added = before; added < objs.size(); ++added) {
+      if (objs[added].heap_node < objs[i].heap_node) continue;
+      const auto at = std::upper_bound(order.begin() + static_cast<std::ptrdiff_t>(k) + 1, order.end(), objs[added].heap_node,
+                                       [this](u32 node, size_t index) { return node < objs[index].heap_node; });
+      order.insert(at, added);
+    }
+  }
   // Lights (sprite type 17): every live light writes its slot of the light table once per frame:
   // position = the s16 high halves of the object's position, through the op-39 basis for a parent-relative object
-  // (flag bit 15), colour = colour accumulators >> 4, intensity = scale x, falloff = angle x. The newest object is written first, so of
-  // lights sharing a slot the oldest one's values stay.
+  // (flag bit 15), colour = colour accumulators >> 4, intensity = scale x, falloff = angle x. Written in arena order, so of lights
+  // sharing a slot the one highest in the arena keeps its values (on an arena without holes, the oldest).
   if (lights)
-    for (auto it = objs.rbegin(); it != objs.rend(); ++it) {
-      const Object& obj = *it;
+    for (const size_t index : heap_order()) {
+      const Object& obj = objs[index];
       if (!obj.alive || obj.stype != 17 || obj.light_slot < 0 || obj.light_slot > 2) continue;
       Vec3 wpos{static_cast<float>(obj.pos[0] >> 16), static_cast<float>(obj.pos[1] >> 16), static_cast<float>(obj.pos[2] >> 16)};
       if ((obj.flags & kFlagRelParent) && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size()) {
@@ -317,6 +328,8 @@ void EmitterSystem::Impl::step_frame(int ticks) {
   // Register slots A / B and compact the list.
   slot_idx[0] = slot_idx[1] = ~size_t{0};
   size_t write = 0;
+  for (const size_t index : heap_order())
+    if (!objs[index].alive) release(objs[index]);
   for (size_t read = 0; read < objs.size(); ++read) {
     if (!objs[read].alive) continue;
     if (write != read) objs[write] = std::move(objs[read]);
@@ -333,6 +346,13 @@ void EmitterSystem::Impl::step_frame(int ticks) {
   u32 run = 0;
   for (const auto& header : headers) run += header.linked ? 1u : 0u;
   st.running = run;
+}
+
+std::vector<size_t> EmitterSystem::Impl::heap_order() const {
+  std::vector<size_t> order(objs.size());
+  for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+  std::sort(order.begin(), order.end(), [this](size_t lhs, size_t rhs) { return objs[lhs].heap_node < objs[rhs].heap_node; });
+  return order;
 }
 
 // -- quads --------------------------------------------------------------------------------------------------------------------

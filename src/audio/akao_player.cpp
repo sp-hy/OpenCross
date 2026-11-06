@@ -32,22 +32,63 @@ constexpr double kHwRate = 44100.0;
 
 int floor_div(int dividend, int divisor) { return dividend / divisor - ((dividend % divisor != 0) && ((dividend < 0) != (divisor < 0))); }
 
-// Sustain-mode operand (BB / patch zones) -> ADSR2 bits 15:14: 1 linear increase, 3 linear decrease,
-// 5 exponential increase, 7 exponential decrease.
+// Sustain-mode operand (BB / patch zones / keymap entries) -> ADSR2 bits 15:14: 3 linear decrease, 5 exponential increase,
+// 7 exponential decrease, anything else (1 included) linear increase.
 u16 sustain_bits(int mode) {
   switch (mode) {
-    case 1: return 0x0000;
     case 3: return 0x4000;
     case 5: return 0x8000;
     case 7: return 0xC000;
-    default: return 0x4000;
+    default: return 0x0000;
   }
+}
+
+constexpr int kOverrideAttack = 1, kOverrideSustain = 2, kOverrideRelease = 4;
+
+// Envelope of a keymap entry or patch zone, written into the channel's ADSR words: the attack byte (<< 8), the sustain rate byte
+// (<< 6) and the release byte replace the channel's fields unless the AD / B1 / B2 override bit keeps them; the sustain mode sets
+// ADSR2 bits 15:14 (5 = 10, 3 = 01, 7 = 11, anything else 00); the attack mode, decay, sustain level and release mode come from the
+// instrument.
+void zone_envelope(u16& adsr1, u16& adsr2, int overrides, const Instrument& in, int ar, int sr, int mode, int rr) {
+  u16 a1 = (overrides & kOverrideAttack) ? u16(adsr1 & 0x7F00) : u16(ar << 8);
+  a1 = u16(a1 | (in.adsr1 & 0x80FF));
+  u16 a2 = (overrides & kOverrideSustain) ? u16(adsr2 & 0x3FDF) : u16((adsr2 & 0x201F) | sr << 6);
+  a2 |= sustain_bits(mode);
+  if (!(overrides & kOverrideRelease)) a2 = u16((a2 & 0xFFE0) | rr);
+  adsr1 = a1;
+  adsr2 = u16(a2 | (in.adsr2 & 0x20));
+}
+
+// Pitch delta of a fine tune: its low byte scales the pitch, `pitch * b >> 7`, or `(pitch * b >> 8) - pitch` for a negative tune.
+int fine_tune_delta(int pitch, int tune) {
+  const u32 product = u32(pitch) * u32(tune & 0xFF);
+  return tune < 0 ? int(product >> 8) - pitch : int(product >> 7);
+}
+
+// Patch zone of a key-on, from the note without transpose and the remembered note (the previous note's, moved by its bends): the same
+// note keeps the current zone (-1: nothing is loaded again); a higher note, or the first one after FE 14 (current < 0), takes the first
+// zone whose high key reaches it (else the last zone); a lower note the last zone, counted from the first, whose low key it reaches.
+// Gaps and overlaps between the zones therefore resolve by the direction of the melody.
+int patch_zone(const std::vector<AkaoZone>& zones, int note, int remembered, int current) {
+  const size_t last = zones.size() - 1;
+  size_t i = 0;
+  if (current < 0 || u32(note) > u32(remembered)) {
+    while (i < last && zones[i].high_key < note) ++i;
+  } else if (note == remembered) {
+    return -1;
+  } else {
+    while (i < last && zones[i + 1].low_key <= note) ++i;
+  }
+  return int(i);
 }
 
 // Pitch of a note with 32-bit arithmetic: the value returned is
 // `(pitch >> 8) & 0xFFFF` (0x1000 = native rate). The SPU register is written later as `(pitch + modulation) & 0x3FFF`
 // a MASK, not a clamp, so a pitch of 4 octaves or more wraps round to a low value.
-int pitch_register(int note, const Instrument& in) {
+// With `fine` (the channel's stored fine-tune delta, replaced), the delta is taken from the same value before the octave shift and the
+// >> 8 (`p * b >> 7`, or `(p * b >> 8) - p` when the tune's low byte b is 0x80 or more) and shifted with it, so it keeps the bits the
+// 16-bit pitch drops. A tune whose low byte is 0 shifts the stored delta instead (0 unless D9 took the tune to a negative multiple of 256).
+int pitch_register(int note, const Instrument& in, int tune = 0, int* fine = nullptr) {
   const int from_base = note - in.base_note;
   const int oct = floor_div(from_base, 12);
   const int idx = from_base - oct * 12;
@@ -60,11 +101,19 @@ int pitch_register(int note, const Instrument& in) {
     pitch = ((semi * u32(ft)) >> 7) + (semi << 8);
   else
     pitch = (semi * u32(u16(ft))) >> 8;
+  const u32 scale = u32(tune & 0xFF);
+  u32 delta = fine ? u32(*fine) : 0;
+  if (scale) delta = scale < 0x80 ? (pitch * scale) >> 7 : ((pitch * scale) >> 8) - pitch;
   if (oct >= 0) {
     pitch <<= (oct & 31);
+    delta <<= (oct & 31);
   } else {
-    for (int k = oct; k < 0 && pitch; ++k) pitch = u32(s32(pitch) >> 1);
+    for (int k = oct; k < 0; ++k) {
+      pitch = u32(s32(pitch) >> 1);
+      delta = u32(s32(delta) >> 1);
+    }
   }
+  if (fine) *fine = s32(delta) >> 8;
   return int((pitch >> 8) & 0xFFFF);
 }
 
@@ -245,9 +294,12 @@ void AkaoPlayer::load_music(const std::shared_ptr<const AkaoSeq>& seq, std::shar
   tempo_acc_ = 0;
   ticks_ = 0;
   upd_left_ = 0;
+  voice_reserve_ = 0;
   if (!seq) return;
-  // The header's reverb mode applies when the song starts.
+  // The header's reverb mode applies when the song starts; the reverb depth starts at 0 until the song's FE 02 / FE 03.
   rev_.set_mode(seq->reverb_mode);
+  rev_depth_ = 0;
+  rev_slide_left_ = 0;
   sfx_request_mask_ = 1;
   sfx_requests_.clear();
   int channel_count = 0;
@@ -263,9 +315,15 @@ void AkaoPlayer::load_music(const std::shared_ptr<const AkaoSeq>& seq, std::shar
     channel.table = table;
     channel.pc = pc;
     channel.tenuto = !(seq->gate_mask >> (number & 31) & 1);
+    channel.reserved_voices = (seq->reserve_mask >> (number & 31) & 1) != 0;
+    if ((seq->gate_mask >> (number & 31) & 1) && number < kVoices) channel.fixed_voice = number;
   }
+  // The first opcodes run as the first tick's: the slides they arm take their first step with them.
   for (auto& channel : ch_)
-    if (channel.active) run_ops(channel);
+    if (channel.active) {
+      run_ops(channel);
+      step_slides(channel);
+    }
 }
 
 // Starts one request (one entry of a pointer file / one effect00 id: up to two programs, a pair).
@@ -411,10 +469,12 @@ void AkaoPlayer::start_program(const std::shared_ptr<const AkaoCode>& code, u32 
   }
   // The length counter starts at 2: the program's first instructions run on the second SFX
   // tick after the start (~10-20 ms), not at once.
-  if (sfx_mode_)
+  if (sfx_mode_) {
     channel->len_left = 2;
-  else
+  } else {
     run_ops(*channel);
+    step_slides(*channel);
+  }
 }
 
 // Resets SFX channel `slot`: pan = 0x8000, pan modifier = pan << 8, volume modifier = (vol & 0x7F) << 8, balance = 0x6E00,
@@ -424,7 +484,13 @@ AkaoPlayer::Channel* AkaoPlayer::begin_sfx_channel(int slot, const std::shared_p
                                                    std::shared_ptr<const InstrumentTable> table, float volume, int pan, u32 mask,
                                                    const std::string* tag) {
   Channel* channel = &ch_[size_t(slot)];
+  // The reset leaves the LFO rate words and their slide steps at what the slot's last sound left; only the LFO-on ops replace them.
+  Lfo* const lfos[3] = {&channel->vib, &channel->trem, &channel->apan};
+  u32 rates[3];
+  int steps[3];
+  for (int i = 0; i < 3; ++i) rates[i] = lfos[i]->rate_phase, steps[i] = lfos[i]->rate_slide_step;
   *channel = Channel{};
+  for (int i = 0; i < 3; ++i) lfos[i]->rate_phase = rates[i], lfos[i]->rate_slide_step = steps[i];
   channel->active = true;
   channel->music = false;
   channel->serial = serial_++;
@@ -477,23 +543,31 @@ AkaoPlayer::ChannelProbe AkaoPlayer::probe_channel(int index) const {
   if (index < 0 || index >= kMaxChannels) return {};
   const Channel& channel = ch_[size_t(index)];
   return {channel.active, channel.pc, {channel.vib.rate_phase, channel.trem.rate_phase, channel.apan.rate_phase},
-          {channel.vib.counter, channel.trem.counter, channel.apan.counter}};
+          {channel.vib.counter, channel.trem.counter, channel.apan.counter}, {channel.adsr1, channel.adsr2}, channel.pan, channel.reverb};
 }
 
 // ---------------------------------------------------------------------------------------------------- voices
-int AkaoPlayer::alloc_voice() {
-  int best = 0;
-  float best_score = 1e30f;
-  for (int i = 0; i < kVoices; ++i) {
-    const Voice& voice = voice_[size_t(i)];
-    if (!voice.active) return i;
-    // Steal released voices first, then the quietest one.
-    const float score = (voice.released ? 0.0f : 1e6f) + float(voice.env.level) * (std::abs(voice.gl) + std::abs(voice.gr) + 1e-3f);
-    if (score < best_score) {
-      best_score = score;
+// Music voice search from voice `from` up: the first voice whose envelope level is 0, else the voice with the lowest level below 0x7FFF
+// (released or not, whatever its volume); a voice keyed in this update counts as 0x7FFF. With neither the note is dropped (-1).
+int AkaoPlayer::alloc_voice(int from) {
+  u32 fixed = 0;
+  for (const Channel& channel : ch_)
+    if (channel.active && channel.music && channel.fixed_voice >= 0) fixed |= 1u << channel.fixed_voice;
+  auto level = [&](int index) {
+    const Voice& voice = voice_[size_t(index)];
+    if (fixed >> index & 1) return 0x7FFF;
+    return !voice.active ? 0 : voice.keyed_at == upd_count_ ? 0x7FFF : voice.env.level;
+  };
+  int best = -1;
+  int best_level = 0x7FFF;
+  for (int i = from; i < kVoices && best_level > 0; ++i) {
+    const int voice_level = level(i);
+    if (voice_level < best_level) {
+      best_level = voice_level;
       best = i;
     }
   }
+  if (best < 0) return -1;
   const Voice& voice = voice_[size_t(best)];
   if (voice.chan >= 0 && ch_[size_t(voice.chan)].voice == best && ch_[size_t(voice.chan)].voice_serial == voice.serial)
     ch_[size_t(voice.chan)].voice = -1;
@@ -523,20 +597,22 @@ void AkaoPlayer::key_off(Channel& channel) {
   channel.gate_left = 0;
 }
 
-void AkaoPlayer::end_channel(Channel& channel) {
+void AkaoPlayer::end_channel(Channel& channel, bool release) {
   if (sfx_trace_on() && !channel.music && channel.active)
     log::info("sfxtrace {:9.1f} ms CEND #{} '{}' after {:.0f} ms voice {}", trace_ms(), channel.trace_id, channel.tag,
               trace_ms() - channel.started_at * 1000.0 / 48000.0, channel.voice);
-  key_off(channel);
+  if (release) key_off(channel);
   channel.active = false;
   channel.voice_update = false;
 }
 
 void AkaoPlayer::note_on(Channel& channel, int key) {
+  // A keymap (drum) note keys on even under legato; it neither restarts the FE 19 slide nor stops a bend.
+  const bool keymap_note = channel.drum && channel.code->keymap_abs;
   // A key-on (a legato re-pitch is none) restarts the FE 19 slide from its start volume, the vibrato and tremolo waves from their
   // first sample and their delays, and stops a running bend; autopan runs on.
   if (!channel.legato_prev) {
-    if (channel.keyon_slide_len) {
+    if (channel.keyon_slide_len && !keymap_note) {
       channel.volume = channel.keyon_volume;
       channel.vol_slide_left = channel.keyon_slide_len;
       channel.vol_slide_step = channel.keyon_slide_step;
@@ -547,7 +623,7 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
       lfo->counter = 1;
       lfo->delay_cur = lfo->delay;
     }
-    channel.bend_left = 0;
+    if (!keymap_note) channel.bend_left = 0;
   }
   // Every note, legato too: the vibrato and tremolo outputs and the bend restart from 0, and the voice takes updates again.
   channel.vib.value = channel.trem.value = 0;
@@ -556,10 +632,6 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   const int base_note = channel.octave * 12 + key;
   int note = base_note + channel.transpose;
   const Instrument* in = channel.inst;
-  u16 a1 = channel.adsr1, a2 = channel.adsr2;
-  channel.drum_pan = -1;
-  channel.zone_scale = 0;
-  const bool keymap_note = channel.drum && channel.code->keymap_abs;
   if (keymap_note) {
     const size_t off = size_t(channel.code->keymap_abs) + size_t(std::clamp(base_note, 0, 255)) * 8;
     if (off + 8 <= channel.code->data.size()) {
@@ -567,29 +639,29 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
       in = channel.table->get(entry[0]);
       if (!in) return;
       note = entry[1];
-      a1 = in->adsr1;
-      a2 = in->adsr2;
-      if (entry[2] | entry[3] | entry[4] | entry[5]) {
-        a1 = u16((a1 & 0xFF) | entry[2] << 8);
-        a2 = u16((entry[5] & 0x1F) | (a2 & 0x20) | (entry[3] & 0x7F) << 6 | sustain_bits(entry[4]));
-      }
+      // The entry's instrument, envelope, volume scale, pan and reverb bit become the channel's own: they stay for the notes after it,
+      // and a pan slide runs on from the entry's pan.
+      channel.inst_index = entry[0];
+      channel.inst = in;
+      zone_envelope(channel.adsr1, channel.adsr2, channel.adsr_override, *in, entry[2], entry[3], entry[4], entry[5]);
       channel.zone_scale = entry[6];
-      channel.drum_pan = entry[7] & 0x7F;
+      channel.pan = u16(((entry[7] & 0x7F) + 0x40) << 8);
+      channel.reverb = (entry[7] & 0x80) != 0;
     }
-  } else if (channel.patch >= 0 && !channel.zones.empty()) {
-    const AkaoZone* zone = &channel.zones.front();
-    for (const AkaoZone& cand : channel.zones) {
-      if (note >= cand.low_key && note <= cand.high_key) {
-        zone = &cand;
-        break;
-      }
-      if (cand.high_key < note) zone = &cand;
+  } else if (channel.patch >= 0 && !channel.zones.empty() && !channel.legato_prev) {
+    // A key-on picks the zone and loads its instrument, envelope and volume scale; a legato note and a key-on of the same note leave
+    // the channel's instrument, ADSR words (with what AD..BF and B3 wrote since) and scale as they are.
+    const int picked = patch_zone(channel.zones, base_note, channel.bend_note, channel.zone);
+    if (picked >= 0) {
+      channel.zone = picked;
+      const AkaoZone& zone = channel.zones[size_t(picked)];
+      in = channel.table->get(zone.instrument);
+      if (!in) return;
+      channel.inst_index = zone.instrument;
+      channel.inst = in;
+      zone_envelope(channel.adsr1, channel.adsr2, channel.adsr_override, *in, zone.ar, zone.sr, zone.mode, zone.rr);
+      channel.zone_scale = zone.volume;
     }
-    in = channel.table->get(zone->instrument);
-    if (!in) return;
-    a1 = u16((in->adsr1 & 0xFF) | zone->ar << 8);
-    a2 = u16((zone->rr & 0x1F) | (in->adsr2 & 0x20) | (zone->sr & 0x7F) << 6 | sustain_bits(zone->mode));
-    channel.zone_scale = zone->volume;
   }
   if (!in || !in->sample || in->sample->pcm.empty()) return;
   // OC_SFX_KEEP=<hex mask of SFX request numbers (1-based, trace_id)>: dev knob, plays only those channels' notes.
@@ -612,20 +684,15 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
     }
     channel.bend_note = pitch_note - channel.transpose;
   }
-  channel.pitch_base = pitch_register(pitch_note, *in);
+  channel.pitch_base = pitch_register(pitch_note, *in, channel.fine_tune, &channel.fine_delta);
   channel.bend_inst = in;
   if (note_trace) note_trace(note, *in, channel.pitch_base);
-  const int fd = channel.fine_tune;
-  if (fd < 0)
-    channel.fine_delta = ((channel.pitch_base * (fd & 0xFF)) >> 8) - channel.pitch_base;
-  else
-    channel.fine_delta = (channel.pitch_base * fd) >> 7;
   // E1 random pitch moves the base after the fine-tune delta was taken from it; keymap (drum) notes have none.
   if (channel.random_pitch && !keymap_note)
     channel.pitch_base = int(akao_random_pitch(u32(channel.pitch_base), u32(channel.random_pitch), kAkaoRandom[random_index_]));
 
   // Legato into a sounding voice: re-pitch only.
-  const bool keep = channel.legato_prev && channel.voice >= 0 && voice_[size_t(channel.voice)].active &&
+  const bool keep = channel.legato_prev && !keymap_note && channel.voice >= 0 && voice_[size_t(channel.voice)].active &&
                     voice_[size_t(channel.voice)].serial == channel.voice_serial && !voice_[size_t(channel.voice)].released;
   if (keep) return;
   // A new key-on on a channel releases the note it still holds (the SPU voice of the channel is keyed off first): a note of length 1
@@ -651,7 +718,19 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
       if (modulator.active && modulator.voice >= 0 && voice_[size_t(modulator.voice)].active) vi = alloc_voice_after(modulator.voice);
     }
     fm_src = vi >= 1 && channel.fm_carrier && channel.fm_partner >= 0 && ch_[size_t(channel.fm_partner)].voice == vi - 1 ? vi - 1 : -1;
-    if (vi < 0) vi = alloc_voice();
+    if (vi < 0 && channel.fixed_voice >= 0) {
+      vi = channel.fixed_voice;
+      const Voice& old = voice_[size_t(vi)];
+      if (old.active && old.chan >= 0 && ch_[size_t(old.chan)].voice == vi && ch_[size_t(old.chan)].voice_serial == old.serial)
+        ch_[size_t(old.chan)].voice = -1;
+    }
+    if (vi < 0) vi = alloc_voice(channel.reserved_voices ? 0 : voice_reserve_);
+    if (vi < 0) {
+      channel.voice = -1;
+      return;
+    }
+    // A music channel's FM is modulated by whatever the hardware voice before its own plays.
+    if (channel.music && vi >= 1) fm_src = vi - 1;
   }
   Voice& voice = voice_[size_t(vi)];
   voice = Voice{};
@@ -660,6 +739,7 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   voice.active = true;
   voice.chan = int(&channel - ch_.data());
   voice.serial = serial_++;
+  voice.keyed_at = upd_count_;
   voice.smp = in->sample;
   if (sfx_mode_ && !channel.music && channel.table && channel.table->ram()) {
     voice.spu_start = in->spu + in->start;
@@ -673,7 +753,7 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
       voice.ram = ram_;
     }
   }
-  voice.env.key_on(a1, a2);
+  voice.env.key_on(channel.adsr1, channel.adsr2);
   voice.counter = 0;
   // Key on: the filter history before the first block is silence.
   voice.hist[0] = voice.hist[1] = voice.hist[2] = 0;
@@ -684,7 +764,7 @@ void AkaoPlayer::note_on(Channel& channel, int key) {
   channel.voice_serial = voice.serial;
   if (key_trace) key_trace(upd_count_, channel.number, vi, true);
   voice.started_at = g_sfx_trace_clock.load(std::memory_order_relaxed);
-  if (sfx_trace_on() && !channel.music) log::info("sfxtrace {:9.1f} ms VON #{} '{}' voice {} note {} reg {:04X} adsr {:04X} {:04X} base {} ft {} loops {} len {} noise {} fm {}", trace_ms(), channel.trace_id, channel.tag, vi, note, channel.pitch_base, a1, a2, in->base_note, in->fine_tune, voice.smp->loops ? voice.smp->loop_start : -1, voice.smp->pcm.size(), channel.noise, voice.fm);
+  if (sfx_trace_on() && !channel.music) log::info("sfxtrace {:9.1f} ms VON #{} '{}' voice {} note {} reg {:04X} adsr {:04X} {:04X} base {} ft {} loops {} len {} noise {} fm {}", trace_ms(), channel.trace_id, channel.tag, vi, note, channel.pitch_base, channel.adsr1, channel.adsr2, in->base_note, in->fine_tune, voice.smp->loops ? voice.smp->loop_start : -1, voice.smp->pcm.size(), channel.noise, voice.fm);
 }
 
 // A note or a tie consumes the armed A4 delta: the bend note moves by it and the register ramps over the A4 length from where it is
@@ -704,9 +784,9 @@ void AkaoPlayer::start_bend(Channel& channel) {
 }
 
 // ADSR ops (AD..B3, B7, BB, BF) mark the channel's ADSR words dirty and the next voice update writes them to the SPU voice that is playing
-// a note already sounding changes its envelope.
+// a note already sounding changes its envelope. A keymap or patch-zone note keeps its envelope in the same words.
 void AkaoPlayer::sync_voice_adsr(Channel& channel) {
-  if (channel.voice < 0 || channel.drum || channel.patch >= 0) return;
+  if (channel.voice < 0) return;
   Voice& voice = voice_[size_t(channel.voice)];
   if (!voice.active || voice.serial != channel.voice_serial) return;
   voice.env.adsr1 = channel.adsr1;
@@ -788,71 +868,77 @@ void AkaoPlayer::run_ops(Channel& channel) {
     if (channel.pc >= data.size()) return end_channel(channel);
     const u8* bytes = &data[channel.pc];
     const int op_len = akao_op_length(bytes, data.size() - channel.pc);
-    if (op_len == 0) return end_channel(channel);
+    // A0 / FF / an unimplemented opcode: a music channel releases its note, an SFX channel stops without a key-off and its voice
+    // sounds on with its last registers until the slot's next note or the end of its envelope.
+    if (op_len == 0) return end_channel(channel, channel.music);
     const u8 op = bytes[0];
     channel.pc += u32(op_len);
 
     // --- note / tie / rest
+    // The length counter (len_left) is 0 here unless A2 or an F0..FD operand wrote it; the gate counter (gate_left) is 0 (spent)
+    // unless A2 wrote it. DC's fixed length replaces both. A counter still at 0 takes the length table's entry with the gate 2 ticks
+    // shorter; a written one only shortens the gate by 2, so an F0..FD note (whose gate is spent) never keys off by its gate.
     if (op < 0xA0 || (op >= 0xF0 && op <= 0xFD)) {
       bool is_note = false, is_tie = false;
-      int key = 0, len = 0;
+      int key = 0, len_index = 0;
       if (op < 0x84) {
         is_note = true;
         key = op / 11;
-        len = kLenTable[op % 11];
+        len_index = op % 11;
       } else if (op < 0x8F) {
         is_tie = true;
-        len = kLenTable[op - 0x84];
+        len_index = op - 0x84;
       } else if (op < 0x9A) {
-        len = kLenTable[op - 0x8F];
+        len_index = op - 0x8F;
       } else {
-        // F0..FD: explicit length byte.
-        len = bytes[1];
+        // F0..FD: the operand is the length (0 = the table's first entry, 192).
+        channel.len_left = bytes[1];
         if (op < 0xFC) {
           is_note = true;
           key = op - 0xF0;
         } else if (op == 0xFC) {
           is_tie = true;
         }
-        if (len == 0) len = std::max(channel.a2_len, 1);
       }
-      if (is_note) {
-        if (channel.a2_len > 0 && op < 0xF0) len = channel.a2_len;
-        channel.a2_len = 0;
-        if (channel.fixed_len > 0) len = channel.fixed_len;
-        channel.last_len = len;
-      }
-      // Gate rule: key off at len-2 ticks unless the next opcode continues the note (tie, or a note under legato).
+      int len = channel.len_left, gate = channel.gate_left;
+      if (channel.fixed_len > 0) len = gate = channel.fixed_len;
+      // The next opcode continues the note (a tie, or a note under legato / full length; a rest cleared those flags in peek_next).
       const int next = peek_next(channel);
       const bool next_tie = (next >= 0x84 && next <= 0x8E) || next == 0xFC;
       const bool next_note = next < 0x84 || (next >= 0xF0 && next <= 0xFB);
-      // Legato / full-length flags (CC / D0); a rest cleared them in peek_next.
       const bool continues = next_tie || (next_note && (channel.legato || channel.full_length));
-      auto set_gate = [&] {
-        // FE 1A tenuto only counts on music channels.
-        if (continues || (channel.tenuto && channel.music)) channel.gate_left = 0;
-        else channel.gate_left = len > 2 ? len - 2 : (len > 1 ? 1 : 0);
-      };
-      channel.len_left = len;
+      if (len == 0) {
+        len = kLenTable[len_index];
+        gate = continues ? len : len - 2;
+      } else if (!continues) {
+        gate -= 2;
+      }
+      // FE 1A full length only counts on music channels.
+      if (channel.tenuto && channel.music) gate = len;
+      channel.last_len = len;
+      // A gate of 0 or less never fires, nor does one as long as the note (the length runs out in the same tick).
+      if (gate <= 0 || gate >= len) gate = 0;
       if (is_note) {
         note_on(channel, key);
         start_bend(channel);
-        set_gate();
         // The next note under legato only re-pitches.
         channel.legato_prev = channel.legato;
       } else if (is_tie) {
         start_bend(channel);
-        set_gate();
         channel.legato_prev = channel.legato;
       } else {
-        // Rest: a note still sounding (no gate) is released here, the LFO outputs return to 0, the voice takes no more updates and
-        // the portamento ends.
-        key_off(channel);
+        // Rest: a music rest releases a note still sounding at once and the voice takes no more updates; an SFX rest only by its own
+        // gate, like a note. The LFO outputs return to 0 and the portamento ends.
+        if (channel.music) {
+          key_off(channel);
+          channel.voice_update = false;
+        }
         channel.legato_prev = false;
         channel.porta_steps = 0;
         channel.vib.value = channel.trem.value = 0;
-        channel.voice_update = false;
       }
+      channel.len_left = len;
+      channel.gate_left = gate;
       return;
     }
 
@@ -865,9 +951,11 @@ void AkaoPlayer::run_ops(Channel& channel) {
         channel.drum = false;
         channel.patch = -1;
         channel.zone_scale = 0;
+        channel.adsr_override = 0;
         break;
       }
-      case 0xA2: channel.a2_len = bytes[1]; channel.fixed_len = 0; break;
+      // A2: the next note, tie or rest gets this length (written into the length and gate counters); clears DC.
+      case 0xA2: channel.len_left = channel.gate_left = channel.last_len = bytes[1]; channel.fixed_len = 0; break;
       case 0xA3: channel.balance = u16(bytes[1] << 8); break;
       case 0xA4: {
         // Length operand 0 = 256.
@@ -896,17 +984,32 @@ void AkaoPlayer::run_ops(Channel& channel) {
         channel.pan = u16(prev);
         break;
       }
-      case 0xAD: channel.adsr1 = u16((channel.adsr1 & ~0x7F00) | (bytes[1] & 0x7F) << 8); sync_voice_adsr(channel); break;
-      case 0xAE: channel.adsr1 = u16((channel.adsr1 & ~0x00F0) | (bytes[1] & 15) << 4); sync_voice_adsr(channel); break;
-      case 0xAF: channel.adsr1 = u16((channel.adsr1 & ~0x000F) | (bytes[1] & 15)); sync_voice_adsr(channel); break;
-      case 0xB0:
-        channel.adsr1 = u16((channel.adsr1 & ~0x00FF) | (bytes[1] & 15) << 4 | (bytes[2] & 15));
+      // AD AE AF B0 B1 B2 clear their field and OR in the whole operand byte: AD 0x80..0xFF also sets the exponential attack bit, which
+      // a later AD below 0x80 leaves set.
+      case 0xAD:
+        channel.adsr1 = u16((channel.adsr1 & 0x80FF) | bytes[1] << 8);
+        channel.adsr_override |= kOverrideAttack;
         sync_voice_adsr(channel);
         break;
-      case 0xB1: channel.adsr2 = u16((channel.adsr2 & ~0x1FC0) | (bytes[1] & 0x7F) << 6); sync_voice_adsr(channel); break;
-      case 0xB2: channel.adsr2 = u16((channel.adsr2 & ~0x001F) | (bytes[1] & 0x1F)); sync_voice_adsr(channel); break;
+      case 0xAE: channel.adsr1 = u16((channel.adsr1 & 0xFF0F) | bytes[1] << 4); sync_voice_adsr(channel); break;
+      case 0xAF: channel.adsr1 = u16((channel.adsr1 & 0xFFF0) | bytes[1]); sync_voice_adsr(channel); break;
+      case 0xB0:
+        channel.adsr1 = u16((((channel.adsr1 & 0xFF0F) | bytes[1] << 4) & 0xFFF0) | bytes[2]);
+        sync_voice_adsr(channel);
+        break;
+      case 0xB1:
+        channel.adsr2 = u16((channel.adsr2 & 0xE03F) | bytes[1] << 6);
+        channel.adsr_override |= kOverrideSustain;
+        sync_voice_adsr(channel);
+        break;
+      case 0xB2:
+        channel.adsr2 = u16((channel.adsr2 & 0xFFE0) | bytes[1]);
+        channel.adsr_override |= kOverrideRelease;
+        sync_voice_adsr(channel);
+        break;
       case 0xB3:
         if (channel.inst) channel.adsr1 = channel.inst->adsr1, channel.adsr2 = channel.inst->adsr2;
+        channel.adsr_override = 0;
         sync_voice_adsr(channel);
         break;
       case 0xB4: {
@@ -996,8 +1099,8 @@ void AkaoPlayer::run_ops(Channel& channel) {
       // C2 / C3: reverb on / off for this channel's voice.
       case 0xC2: channel.reverb = true; break;
       case 0xC3: channel.reverb = false; break;
-      // C6: FM on; only the flagged second channel of an SFX pair takes effect. C7: FM off.
-      case 0xC6: channel.fm = channel.fm_carrier; break;
+      // C6: FM on; on a music channel always, on an SFX channel only on the flagged second program of a pair. C7: FM off.
+      case 0xC6: channel.fm = channel.music || channel.fm_carrier; break;
       case 0xC7: channel.fm = false; channel.fm_delay = 0; break;
       // C4 / C5: noise on / off. CE: noise on, toggle after N ticks. CF: toggle after N ticks.
       case 0xC4: channel.noise = true; break;
@@ -1012,7 +1115,7 @@ void AkaoPlayer::run_ops(Channel& channel) {
         break;
       }
       // D2: enable FM, toggle it after N ticks. D3: toggle after N ticks.
-      case 0xD2: channel.fm = channel.fm_carrier; channel.fm_delay = bytes[1] ? bytes[1] + 1 : 0x101; break;
+      case 0xD2: channel.fm = channel.music || channel.fm_carrier; channel.fm_delay = bytes[1] ? bytes[1] + 1 : 0x101; break;
       case 0xD3: channel.fm_delay = bytes[1] ? bytes[1] + 1 : 0x101; break;
       case 0xCB:
         channel.reverb = false;
@@ -1031,8 +1134,15 @@ void AkaoPlayer::run_ops(Channel& channel) {
         break;
       case 0xE1: channel.random_pitch = bytes[1]; break;
       case 0xE2: channel.random_pitch = 0; break;
-      case 0xD8: channel.fine_tune = s8(bytes[1]); break;
-      case 0xD9: channel.fine_tune += s8(bytes[1]); break;
+      // D8 / D9 re-tune the sounding note at once: the delta is taken from its pitch (random pitch included).
+      case 0xD8:
+        channel.fine_tune = s8(bytes[1]);
+        channel.fine_delta = fine_tune_delta(channel.pitch_base, channel.fine_tune);
+        break;
+      case 0xD9:
+        channel.fine_tune = s16(channel.fine_tune + s8(bytes[1]));
+        channel.fine_delta = fine_tune_delta(channel.pitch_base, channel.fine_tune);
+        break;
       // DA: portamento on with legato (the legato mode word, as CC); the next note does not glide since the remembered note is cleared.
       case 0xDA:
         channel.porta_steps = bytes[1] ? bytes[1] : 256;
@@ -1091,10 +1201,16 @@ void AkaoPlayer::run_ops(Channel& channel) {
             tempo_slide_step = (double(bytes[3] | bytes[4] << 8) - tempo_) / tempo_slide_left;
             break;
           case 0x04:
-            if (channel.code->keymap_abs) channel.drum = true;
-            channel.patch = -1;
+            if (channel.code->keymap_abs) {
+              channel.drum = true;
+              channel.patch = -1;
+              channel.adsr_override = 0;
+            }
             break;
-          case 0x05: channel.drum = false; break;
+          case 0x05:
+            channel.drum = false;
+            channel.zone_scale = 0;
+            break;
           case 0x06: channel.pc = channel.pc - 2 + u32(rds16(channel.pc - 2)); break;
           case 0x07:
             if (jump_threshold_ >= bytes[2]) channel.pc = channel.pc - 2 + u32(rds16(channel.pc - 2));
@@ -1112,6 +1228,7 @@ void AkaoPlayer::run_ops(Channel& channel) {
             if (channel.inst) channel.adsr1 = channel.inst->adsr1, channel.adsr2 = channel.inst->adsr2;
             channel.drum = false;
             channel.patch = -1;
+            channel.adsr_override = 0;
             break;
           case 0x0B:
             if (collect_sfx_requests) sfx_requests_.push_back({bytes[2], channel.balance >> 8, channel.pan >> 8, sfx_request_mask_});
@@ -1119,17 +1236,28 @@ void AkaoPlayer::run_ops(Channel& channel) {
             break;
           case 0x0E: channel.ret_pc = channel.pc; channel.pc = channel.pc - 2 + u32(rds16(channel.pc - 2)); break;
           case 0x0F: channel.pc = channel.ret_pc; break;
+          // FE 10 n: music voice searches start at voice n, except for the channels marked by FE 1D; FE 11: from 0 again.
+          case 0x10: voice_reserve_ = bytes[2]; break;
+          case 0x11: voice_reserve_ = 0; break;
           case 0x12:
             channel.bal_slide_left = slide(bytes[2]);
             channel.balance &= 0x7F00;
             channel.bal_slide_step = ((bytes[3] << 8) - channel.balance) / channel.bal_slide_left;
             break;
           case 0x13: channel.no_rekey = true; break;
+          // FE 14 without a patch table does nothing; a missing entry ends patch mode and clears the volume scale (drum mode stays).
           case 0x14:
+            if (!channel.code->patch_abs) break;
+            channel.zones = akao_patch_zones(*channel.code, bytes[2]);
+            if (channel.zones.empty()) {
+              channel.patch = -1;
+              channel.zone_scale = 0;
+              break;
+            }
             channel.patch = bytes[2];
-            channel.zones = akao_patch_zones(*channel.code, channel.patch);
+            channel.zone = -1;
             channel.drum = false;
-            if (channel.zones.empty()) channel.patch = -1;
+            channel.adsr_override = 0;
             break;
           case 0x19:  // key-on volume slide: signed start volume, length, signed target volume
             channel.keyon_volume = s32(s8(bytes[2])) * (1 << 23);
@@ -1138,7 +1266,9 @@ void AkaoPlayer::run_ops(Channel& channel) {
             break;
           case 0x1A: channel.tenuto = true; break;
           case 0x1B: channel.tenuto = false; break;
-          // Voice reservation, bar timers: no audible effect here.
+          case 0x1D: channel.reserved_voices = true; break;
+          case 0x1E: channel.reserved_voices = false; break;
+          // Bar timers: no audible effect here.
           default: break;
         }
         break;
@@ -1160,12 +1290,22 @@ void AkaoPlayer::run_ops(Channel& channel) {
 void AkaoPlayer::tick_channel(Channel& channel) {
   // SFX channels count the ticks they have run.
   if (!channel.music) ++channel.age;
-  // slides (sequencer ticks)
+  if (channel.gate_left > 0 && --channel.gate_left == 0) {
+    key_off(channel);
+    if (!channel.music) channel.voice_update = false;
+  }
+  if (--channel.len_left <= 0) run_ops(channel);
+  step_slides(channel);
+}
+
+// The slides, delays and toggles step after the opcodes, so one armed in a tick takes its first step in that tick.
+void AkaoPlayer::step_slides(Channel& channel) {
   if (channel.vol_slide_left) {
     --channel.vol_slide_left;
     channel.volume += channel.vol_slide_step;
   }
-  if (channel.bal_slide_left) {
+  // The FE 12 balance slide only advances on music channels.
+  if (channel.bal_slide_left && channel.music) {
     --channel.bal_slide_left;
     channel.balance = u16(channel.balance + channel.bal_slide_step);
   }
@@ -1191,26 +1331,21 @@ void AkaoPlayer::tick_channel(Channel& channel) {
       lfo->depth += lfo->depth_slide_step;
     }
   }
-  if (channel.gate_left > 0 && --channel.gate_left == 0) {
-    key_off(channel);
-    if (!channel.music) channel.voice_update = false;
-  }
-  if (--channel.len_left <= 0) run_ops(channel);
 }
 
 void AkaoPlayer::tick_all() {
   ++ticks_;
-  // The reverb depth slides by one step per tick.
-  if (rev_slide_left_) {
-    --rev_slide_left_;
-    rev_depth_ += rev_slide_step_;
-  }
+  for (auto& channel : ch_)
+    if (channel.active) tick_channel(channel);
+  // The tempo and reverb depth slides step once per tick, after every channel.
   if (tempo_slide_left) {
     --tempo_slide_left;
     tempo_ += tempo_slide_step;
   }
-  for (auto& channel : ch_)
-    if (channel.active) tick_channel(channel);
+  if (rev_slide_left_) {
+    --rev_slide_left_;
+    rev_depth_ += rev_slide_step_;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------------- per-update
@@ -1256,7 +1391,7 @@ void AkaoPlayer::update_channel(Channel& channel, int) {
   int base = ((channel.volume >> 16) * (channel.balance >> 8)) >> 7;
   if (channel.trem.on) base += int(((s64(base) * (channel.trem.depth >> 8) * 512) >> 16) * channel.trem.value >> 15);
   base = std::clamp(base, -0x8000, 0x7FFF);
-  const int chan_pan = channel.drum_pan >= 0 ? (channel.drum_pan + 0x40) << 8 : channel.pan;
+  const int chan_pan = channel.pan;
   int idx;
   if (channel.music) {
     base = (base * 127) >> 7;
@@ -1265,6 +1400,7 @@ void AkaoPlayer::update_channel(Channel& channel, int) {
     base = (base * channel.vol_mod) >> 7;
     idx = (((chan_pan + (channel.pan_mod << 8)) >> 8) + channel.apan.value + 0x80) & 0xFF;
   }
+  if (mono_) idx = 0x80;
   int left = (base * kAkaoPanGain[idx]) >> 15;
   int right = (base * kAkaoPanGain[idx ^ 0xFF]) >> 15;
   if (channel.zone_scale) {
@@ -1519,6 +1655,7 @@ struct AkaoPlayer::MusicContext {
   int rev_slide_left = 0;
   s32 rev_slide_step = 0;
   int noise_clock = 0;
+  int voice_reserve = 0;
   u64 rendered = 0;
 };
 
@@ -1555,6 +1692,7 @@ std::shared_ptr<const AkaoPlayer::MusicContext> AkaoPlayer::save_context() const
   context->rev_slide_left = rev_slide_left_;
   context->rev_slide_step = rev_slide_step_;
   context->noise_clock = noise_clock_music_;
+  context->voice_reserve = voice_reserve_;
   context->rendered = rendered_;
   u32 sounding = 0, held_back = 0, rekeyed = 0;
   for (size_t i = 0; i < ch_.size(); ++i) {
@@ -1582,6 +1720,7 @@ void AkaoPlayer::restore_context(const MusicContext& context) {
   rev_slide_left_ = context.rev_slide_left;
   rev_slide_step_ = context.rev_slide_step;
   noise_clock_music_ = context.noise_clock;
+  voice_reserve_ = context.voice_reserve;
   rendered_ = context.rendered;
   // The ops the player ran at its song load are replaced, so are the FE 0B requests they made; the request mask stays as the last song
   // load left it (1: only music063 has FE 0B).
@@ -1598,10 +1737,12 @@ void AkaoPlayer::restore_context(const MusicContext& context) {
       continue;
     }
     channel.gate_left = rekey.gate;
-    const int index = alloc_voice();
+    const int index = channel.fixed_voice >= 0 ? channel.fixed_voice : alloc_voice(channel.reserved_voices ? 0 : voice_reserve_);
+    if (index < 0) continue;
     Voice& voice = voice_[size_t(index)];
     voice = Voice{};
     voice.active = true;
+    voice.keyed_at = upd_count_;
     voice.chan = int(i);
     voice.serial = serial_++;
     voice.smp = rekey.smp;

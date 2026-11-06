@@ -132,7 +132,7 @@ bool RenderTarget::prepare_samples(GpuContext& ctx) {
 
 void RenderTarget::release_samples() {
   if (!ctx_) return;
-  const u64 bytes = u64{width_} * height_ * 4 * (1u << static_cast<u32>(samples_));
+  const u64 bytes = u64{width_} * height_ * 4 * (u64{1} << static_cast<u32>(samples_));
   ctx_->release_texture(msaa_color_, bytes);
   ctx_->release_texture(depth_, bytes);
   msaa_color_ = depth_ = nullptr;

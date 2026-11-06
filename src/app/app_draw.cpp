@@ -61,12 +61,16 @@ void App::draw_frame(const render::Frame& frame) {
   // HD art: RDE replaces the PS1 logo layer and prompt with title.png + its own prompt. Classic
   // (SD) art keeps the disc's own title room layers (PS1 logo / (c) / prompt), so nothing is hidden there.
   // HD art: RDE draws its own world name (draw_field_ui) instead of the world maps' screen-fixed name layers.
-  // The world name (a map with var 0x50 set) follows the widescreen edge like RDE's HD name.
+  // HD art: while one of RDE's room cards is up, the room groups the card names are hidden.
+  // The world name (a map with var 0x50 set) follows the widescreen edge like RDE's HD name. Groups RDE shows as screen-fixed sprites
+  // (FieldWorld::sprite_groups) are never drawn as tiles.
   if (world_ok) world.view().set_fixed_to_edge(world.vm().var(0x50) != 0);
   if (world_ok)
     world.view().set_hidden_groups(
         (title_scene && (platform::art_is_hd(config.art_mode) || game::free_cam().hide_overlays()) && world.room_name() == game::kTitleRoom ? 0x7u : 0u) |
-        (platform::art_is_hd(config.art_mode) && world_name_ok && world.vm().var(0x50) != 0 ? world.view().fixed_groups() : 0u));
+        (platform::art_is_hd(config.art_mode) && world_name_ok && world.vm().var(0x50) != 0 ? world.view().fixed_groups() : 0u) |
+        (platform::art_is_hd(config.art_mode) && world.room_card() ? world.room_card()->hidden_groups : 0u) |
+        world.sprite_groups());
   // A disabled flow ([Debug] Battle / sweep / replay) is never started and would still "own the screen" in its initial Title state (black
   // frame over the battle): only an enabled flow draws.
   const bool flow_screen = flow_ready && flow_enabled && flow.owns_screen() && !movie_open && !title_scene;
@@ -442,7 +446,8 @@ void App::draw_field_ui(const SceneFrame& sf) {
                       world.vm().var(0x52) != 0;
     import::Lang name_lang = import::Lang::En;
     import::parse_lang(config.language, name_lang);
-    world_name.draw(frame, vw, vh, world.view().letterbox(vw, vh).left(), show, ui::WorldName::home_map(world.map_id()), name_lang);
+    world_name.draw(frame, vw, vh, world.view().letterbox(vw, vh).left(), show, ui::WorldName::home_map(world.map_id()), name_lang,
+                    screen_clock);
   }
   if (world.overlay_needed()) {
     sprites.begin(frame, vw, vh, true);
@@ -467,12 +472,17 @@ void App::draw_field_ui(const SceneFrame& sf) {
       sprites.end();
     }
   }
+  // RDE's room card (HD art) over the room fade, under the menus.
+  if (world_name_ok)
+    world_name.draw_room_card(frame, vw, vh, world.view().letterbox(vw, vh).left(),
+                              platform::art_is_hd(config.art_mode) && !game::free_cam().hide_overlays() ? world.room_card() : nullptr,
+                              screen_clock);
   if (menu_ok && !menu.closed()) menu.draw(frame, vw, vh, true);
   // Widescreen: the shop is 4:3 (its canvas is Letterbox::fit): the wide field beside it is blacked out, i.e. pillarboxed like the title
   // and the flow screens. The main menu and the party screen cover the widened frame themselves.
   if (wide_extra > 0.0f && shop_open) pillarbox(sprites, frame, render::Letterbox::fit(vw, vh), vw);
   if (shop_open) shop.draw(frame, vw, vh, true);
-  if (key_popup_ok && key_popup.active()) key_popup.draw(frame, vw, vh, true);
+  if (key_popup_ok && key_popup.active() && !world.key_list_held()) key_popup.draw(frame, vw, vh, true);
   if (party_ok && party_screen.active()) {
     party_screen.set_hd(platform::art_is_hd(config.art_mode));
     party_screen.draw(frame, vw, vh, true);

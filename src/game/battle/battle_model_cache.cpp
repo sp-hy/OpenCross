@@ -119,6 +119,11 @@ std::string ModelCache::unit_model_stem(const vfs::Vfs& vfs, const data::GameTab
   return unit.pc && unit.form < 0 ? player_model(vfs, unit.src_id) : monster_model(tables, unit.form >= 0 ? unit.form : unit.src_id);
 }
 
+int ModelCache::model_number(const data::GameTables& tables, const battle::Unit& unit) {
+  if (unit.pc && unit.form < 0) return unit.kind;
+  return static_cast<int>(tables.enemies[static_cast<size_t>(unit.form >= 0 ? unit.form : unit.src_id)].model());
+}
+
 int ModelCache::weapon_digit(const data::GameTables* tables, const battle::Unit& unit) {
   if ((!unit.pc && unit.body < 0) || unit.form >= 0) return -1;
   const data::GearRec* gear = tables ? tables->gear_rec(unit.eq.weapon_id) : nullptr;

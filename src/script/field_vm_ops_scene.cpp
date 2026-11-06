@@ -226,6 +226,10 @@ bool FieldVM::exec_scene(u8 op) {
       yield_ = true;
       break;
     case 0x86:  // CAMERA_AUTO_FOLLOW: b != 1 holds the party and sends it into the V; b == 1 waits for the walk, then releases the hold
+      if (host_.music_hold(0x86, word_at(4) | static_cast<u32>(word_at(6)) << 16)) {
+        yield_ = true;
+        break;
+      }
       if (byte_at(1) == 1) {
         if (host_.formation_done()) {
           host_.camera_auto_follow(false);

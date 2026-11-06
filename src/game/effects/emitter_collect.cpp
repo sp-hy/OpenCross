@@ -52,7 +52,8 @@ using namespace emitter_detail;
 
 void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float tick_alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
   const float alpha = frame_blend(tick_alpha);
-  for (const Object& obj : objs) {
+  for (const size_t index : heap_order()) {
+    const Object& obj = objs[index];
     if (!obj.alive || (obj.stype != 14 && obj.stype != 19 && obj.stype != 20) || !obj.mesh_name || obj.poly_tag >= 0 || dev_skip(obj)) continue;
     if (!with_suppressed && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].draw_off) continue;
     MeshInstance mi;
@@ -139,9 +140,9 @@ bool EmitterSystem::MeshInstance::off_screen(const std::array<std::array<s16, 3>
   if (sprite_type != 14) return off_screen(view);
   if (!(flags & kFlagScreenTest) || render::cull_bypass()) return false;
   // Widescreen columns widen the x limits about the PS1 centre column like the packet rules (render::cull_frame).
-  const render::CullFrame frame = render::cull_frame(render::wide_extra());
-  const float widen = frame.x_span / 1023.0f;
-  const s64 x_min = static_cast<s64>(std::floor(frame.x_lo)), x_max = static_cast<s64>(std::floor(frame.x_hi));
+  const render::CullFrame cull = render::cull_frame(render::wide_extra());
+  const float widen = cull.x_span / 1023.0f;
+  const s64 x_min = static_cast<s64>(std::floor(cull.x_lo)), x_max = static_cast<s64>(std::floor(cull.x_hi));
   const s64 x_in_lo = static_cast<s64>(std::ceil(160.0f - 159.0f * widen)), x_in_hi = static_cast<s64>(std::floor(160.0f + 191.0f * widen));
   const s64 proj_h = std::llround(view.h);
   const s64 ofx = std::llround(view.ox * 65536.0f), ofy = std::llround(view.oy * 65536.0f);
@@ -164,7 +165,8 @@ bool EmitterSystem::MeshInstance::off_screen(const ViewParams& view) const {
 // Objects whose draw an overlay replaced (poly_tag >= 0): the object transform set up for it (the mesh-sprite one above).
 void EmitterSystem::Impl::collect_tagged(const ViewParams& view, float tick_alpha, std::vector<EmitterSystem::TaggedInstance>& out) const {
   const float alpha = frame_blend(tick_alpha);
-  for (const Object& obj : objs) {
+  for (const size_t index : heap_order()) {
+    const Object& obj = objs[index];
     if (!obj.alive || obj.poly_tag < 0) continue;
     EmitterSystem::TaggedInstance ti;
     ti.tag = obj.poly_tag;
@@ -372,7 +374,8 @@ void EmitterSystem::Impl::collect_flare(const Object& obj, const ViewParams& vie
 void EmitterSystem::Impl::collect(const ViewParams& view, float tick_alpha, std::vector<DrawQuad>& out) const {
   const float alpha = frame_blend(tick_alpha);
   u32 order = out.empty() ? 0 : out.back().order + 1;
-  for (const Object& obj : objs) {
+  for (const size_t index : heap_order()) {
+    const Object& obj = objs[index];
     // Drawn by its overlay (collect_tagged) / filtered out by OC_FX_ONLY.
     if (obj.poly_tag >= 0 || dev_skip(obj)) continue;
     if (obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].cb_no_draw) continue;
@@ -439,6 +442,7 @@ void EmitterSystem::Impl::collect(const ViewParams& view, float tick_alpha, std:
     if (obj.flags & kFlagCamRel) vc[2] += view.h * static_cast<float>(1 << cfg.pos_shift);
     else for (size_t i = 0; i < 3; ++i) vc[i] += view.trans[i];
     if (origin_off_screen(obj.flags, vc, view)) continue;
+    if (!view.shifted_sheet.empty() && sh.name == view.shifted_sheet) vc[0] += view.sheet_shift[0], vc[1] += view.sheet_shift[1];
     const Mat3 mc = (obj.flags & kFlagWorldQuad) ? view.rot * mat : mat;
 
     const int blend = static_cast<int>(obj.flags & 7);

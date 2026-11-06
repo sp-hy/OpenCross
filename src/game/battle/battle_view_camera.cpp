@@ -133,8 +133,9 @@ CamPose BattleView::dynamic_pose(int target) const {
 
 // The menu camera runs only while no camera task and no timeline is alive (a running shot keeps the picture; the command-menu steps end the
 // shots, end_camera_tasks). Top menu, and between actions once nothing is queued: the orbit pose round the menu's PC is written every tick (a
-// cut when it starts or the PC changes). Between actions that PC is already the one the menu goes to next (menu_pc_after), and a Defend
-// action leaves the camera to the orbit: the defending PC's guard pose plays while the camera circles the next PC. A battle-script cutscene
+// cut when it starts or the PC changes). Between actions that PC is already the one the menu goes to next (menu_pc_after); when no PC can
+// act yet the camera keeps its pose. A Defend action leaves the camera to the orbit: the defending PC's guard pose plays while the camera
+// circles the next PC. A battle-script cutscene
 // takes the orbit's PC away until a command menu opens again, so the pose written last stays. Target selection in NORMAL mode, and any
 // all-targets selection: one glide from the pose on screen to `zen0`'s first key at 0x40 / 256 per tick. DYNAMIC mode with a cursor: a glide
 // at 0x14 / 256 per tick to the DYNAMIC shot whenever the cursor unit changes. Other menus (element list, waiting) keep what is on screen.
@@ -146,10 +147,9 @@ void BattleView::menu_camera() {
   const bool defending = act_.phase != Act::Phase::None && !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Defend;
   const bool idle = active_pc_ >= 0 && (act_.phase == Act::Phase::None || defending) && queue_.empty() && finish_ == Finish::None;
   const bool between = ui_ == Ui::Wait && !orbit_blocked_ && pending_.empty();
-  const int next_pc = between ? menu_pc_after() : -1;
-  const int orbit_pc = next_pc >= 0 ? next_pc : active_pc_;
+  const int orbit_pc = between ? menu_pc_after() : active_pc_;
   const bool cast_held = cast_handover_ > 0 || (cast_hold_pc_ >= 0 && orbit_pc != cast_hold_pc_ && !menu_live());
-  const bool top = idle && (ui_ == Ui::Top || between) && !cast_held && vis_[static_cast<size_t>(orbit_pc)].has_model;
+  const bool top = idle && orbit_pc >= 0 && (ui_ == Ui::Top || between) && !cast_held && vis_[static_cast<size_t>(orbit_pc)].has_model;
   const bool target = idle && !defending && ui_ == Ui::Target && !targets_.empty();
   const bool all_targets = target && (tgt_mode_ == Tgt::EnemyAll || tgt_mode_ == Tgt::AllyAll);
   if (target && (!cam_dynamic_ || all_targets)) {
@@ -234,18 +234,10 @@ void BattleView::apply_camera(float alpha) {
   }
   cam_.eye = pose.eye;
   cam_.h = pose.h * render::fov_scale();
-  const std::array<float, 3> forward = normalize({pose.target[0] - pose.eye[0], pose.target[1] - pose.eye[1], pose.target[2] - pose.eye[2]}, {0, 0, 1});
-  std::array<float, 3> right = normalize(cross({0, 1, 0}, forward), {1, 0, 0});
-  // Camera up, negated to down.
-  std::array<float, 3> down = cross(forward, right);
-  for (float& component : down) component = -component;
-  // A positive roll turns the picture clockwise.
-  const float cr = std::cos(pose.roll_deg * kPi / 180.0f), sr = std::sin(pose.roll_deg * kPi / 180.0f);
-  for (size_t i = 0; i < 3; ++i) {
-    const float ri = right[i] * cr - down[i] * sr, di = right[i] * sr + down[i] * cr;
-    right[i] = ri;
-    down[i] = di;
-  }
+  const CamAxes axes = cam_axes(pose.eye, pose.target, pose.roll_deg);
+  const std::array<float, 3>& forward = axes.forward;
+  const std::array<float, 3>& right = axes.right;
+  const std::array<float, 3>& down = axes.down;
   // An anchored shot keeps the ground under the eye at least 256 units below the view centre line: the view is raised along its own up axis.
   if (source.ground_lift() && !free_cam().on()) {
     const float ground_y = dot(down, {0.0f, -pose.eye[1], 0.0f});
@@ -286,6 +278,7 @@ void BattleView::tick() {
   tick_units();
   showcase_tick();
   tick_links();
+  tick_tex_flips();
   tick_action();
   tick_menu_entry();
   fx_tick();
@@ -311,7 +304,7 @@ void BattleView::start_stage_intro(bool preroll) {
   intro_started_ = true;
   if (!intro_pending_.empty()) {
     camera_.play_sequence(intro_pending_);
-    log::info("battle: intro timeline {}", intro_pending_);
+    log::info("battle: intro timeline {} at tick {} (hand-over tick {}, bracket clock {})", intro_pending_, tick_count_, white_ticks_, rde_m0_ + tick_count_);
     intro_pending_.clear();
   }
   if (field_battle_ && bank_.sequence("fade")) camera_.play_sequence("fade");
@@ -334,7 +327,7 @@ void BattleView::start_party_intro(const std::string& pli) {
   camera_.stop_sequences();
   fx_warp_.on = false;
   camera_.play_sequence(pli);
-  log::info("battle: party intro timeline {}", pli);
+  log::info("battle: party intro timeline {} at tick {} (hand-over tick {}, bracket clock {})", pli, tick_count_, white_ticks_, rde_m0_ + tick_count_);
   // The PCs placed after a held intro get their model now (S5 entry 8 from its start).
   for (int i = 0; i < battle::kPcSlots; ++i)
     if (unplaced_[static_cast<size_t>(i)]) {

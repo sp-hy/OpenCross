@@ -139,6 +139,13 @@ bool holds_stream(const battle::pac::Event& event) {
 // PS1 y -> HUD canvas.
 constexpr float kSmsgPY = kCanvasH / 216.0f;
 
+// The 4-char tag of ops C0 / C2 / C4 / C5 (little-endian word).
+std::string tag_name(int word) {
+  const char tag[5] = {static_cast<char>(word & 0xFF), static_cast<char>((word >> 8) & 0xFF), static_cast<char>((word >> 16) & 0xFF),
+                       static_cast<char>((word >> 24) & 0xFF), 0};
+  return tag;
+}
+
 }  // namespace
 
 // First present unit whose model's S6 DRP (its `cam` bank) holds the shot / timeline `name` (a resident registry file), or null.
@@ -218,9 +225,7 @@ void BattleView::script_event(const battle::pac::Event& event) {
       break;
     // C0: a type-0x10 timeline by tag; C2: a type-0x0C shot by tag.
     case EK::EffectStart: {
-      const char tag[5] = {static_cast<char>(event.b & 0xFF), static_cast<char>((event.b >> 8) & 0xFF), static_cast<char>((event.b >> 16) & 0xFF),
-                           static_cast<char>((event.b >> 24) & 0xFF), 0};
-      const std::string name(tag);
+      const std::string name = tag_name(event.b);
       const bool ok = event.a == 0 ? camera_.play_sequence(name) : camera_.select(name);
       log::debug("battle script: {} '{}' {}", event.a == 0 ? "timeline" : "shot", name, ok ? "started" : "missing");
       break;
@@ -232,8 +237,18 @@ void BattleView::script_event(const battle::pac::Event& event) {
       }
       break;
     case EK::Killed: log::debug("battle script: unit {} kill script end (A6) at tick {}", event.unit, tick_count_); break;
+    // 84: the low-HP bit (anmseq flag 31) until the next hit on the unit.
+    case EK::QuarterHp:
+      if (unit_ok) vis_[static_cast<size_t>(event.unit)].low_hp_forced = true;
+      break;
+    // B0 / B1: the height tween (tick_units).
+    case EK::Lift:
+      if (unit_ok) vis_[static_cast<size_t>(event.unit)].lift = {event.a, event.b, 0};
+      break;
+    // C4 / C5: held in script_pump while the effect object lives.
+    case EK::EffectWait: break;
     default:
-      // SyncPos (91), QuarterHp, Invuln,
+      // SyncPos (91), Invuln,
       // SfxMute, ScriptedDeath (5C: Battle::check_end), EngineFlag (7D / 81 / AF: VM state; 7D is read by the target label),
       // SetResult, NoDrops, Defeated, Ghost, MenuCursor: consumed by the rules.
       break;
@@ -359,6 +374,9 @@ void BattleView::script_pump() {
       // E0 blocks while the script window is not closed; E2 until it has closed (the system message is a separate window).
       if (smsg_.open != 0 && !smsg_.sys) return;
     } else if (front.kind == EK::Killed && move_wait_ != 0) {
+      return;
+    } else if (front.kind == EK::EffectWait && front.a == 1 && camera_.shot_running(tag_name(front.b))) {
+      // C5: until the shot C2 started with that tag has run out.
       return;
     } else if (holds_stream(front)) {
       // The PC walks home first.

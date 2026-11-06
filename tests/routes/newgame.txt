@@ -22,7 +22,8 @@
 - tap confirm                         # closes the guide (fade out), then the name entry
 - wait 90
 - screenshot ng_03_name_entry.png     # default name "Serge" is already in the buffer
-- tap start                             # Start: accept the name
+- tap down
+- tap confirm                         # Confirm: accept the name
 - wait movie start 300                # the title script's D4 #2: a02koryu plays first (skippable)
 - wait 60
 - tap confirm

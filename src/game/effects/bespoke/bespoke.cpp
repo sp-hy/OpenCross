@@ -207,8 +207,7 @@ BespokeRegistry& BespokeRegistry::instance() {
     auto* reg = new BespokeRegistry();
     register_band_wipes(*reg);
     register_line_rings(*reg);
-    register_mesh_deforms(*reg);
-    register_motion_tasks(*reg);
+    register_mesh_water(*reg);
     register_actor_scripts(*reg);
     register_mesh_warps(*reg);
     register_scene_remaps(*reg);
@@ -221,7 +220,6 @@ BespokeRegistry& BespokeRegistry::instance() {
     register_death_ports(*reg);
     register_screen_ports(*reg);
     register_kamei_port(*reg);
-    // Last: these ports replace the older stand-ins of the same overlays.
     register_model_steers(*reg);
     return reg;
   }();

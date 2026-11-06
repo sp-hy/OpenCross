@@ -1,5 +1,6 @@
 // New Game+: the title variant decision, the Continue+ slot refusal, the playinit carry-over
 // on a fresh game and on a loaded save, the ending's cleared-save strip (FE 85) and FE 3F's New Game+ branch.
+#include <array>
 #include <cstdio>
 
 #include "data/tables.h"
@@ -283,6 +284,20 @@ void test_new_game_state() {
   CHECK(loaded_pip.unk_be <= (850 - 400) / 89 && loaded_pip.bonus[1] <= (88 - 30) / 89 && loaded_pip.bonus[5] == 0);
   CHECK(!(loaded_pip.unlocked[1] & 0x200) && !(loaded_pip.unlocked[7] & 0x1));
   CHECK(nw::growth_column(&tables, ld, nw::kPip, false) == tables.char_sets.at("char").rec[0x2E].growth_col());
+  // Continue+ carries the cleared game's Pip as he is, weaker or stronger than the loaded one, with the cleared game's grid; the loaded
+  // save keeps its form byte (RDE: cleared Pip 300 HP / ATK 20 over a loaded 900 HP / ATK 90 one -> 300 / 20; cleared Demonic Beast
+  // masks over a base Pip -> the cleared masks, form 0x2B).
+  save::SaveSlot weak = cleared_game();
+  weak.head[save::head::kStarsTotal] = 60;
+  weak.chars[nw::kPip].model_id = 0x2E;
+  weak.chars[nw::kPip].max_hp = 300, weak.chars[nw::kPip].atk = 20;
+  weak.chars[nw::kPip].unlocked = {0x3FC, 0x3FC, 0x1F8, 0x1F8, 0x1F0, 0xE0, 0xC0, 0xC0};
+  save::SaveSlot strong;
+  strong.chars[nw::kPip].model_id = 0x2B;
+  strong.chars[nw::kPip].max_hp = 900, strong.chars[nw::kPip].atk = 90;
+  ng::continue_plus(weak, strong, &tables);
+  CHECK(strong.chars[nw::kPip].max_hp == 300 && strong.chars[nw::kPip].atk == 20 && strong.chars[nw::kPip].model_id == 0x2B);
+  CHECK(strong.chars[nw::kPip].unlocked[0] == 0x3FC && strong.chars[nw::kPip].unlocked[7] == 0xC0);
   // RDE's load hook: every loaded game has the Time Shifter.
   save::SaveSlot loaded;
   nw::ensure_time_shifter(loaded);
@@ -309,6 +324,15 @@ void test_box_icons() {
   // cursor + 1 > the largest n: own face.
   CHECK(sl::box_icon(0, 1, 5, 2) == 1);
   CHECK(sl::file_number(1) == "  2");
+  // Saving screen: card holding files 00 01 02 04 in boxes 0..3. A new save on the empty box 5 shows file 03's face there; an
+  // overwrite of box 2 (after 03 was written) draws file 05, whose rule gives the cursor's own face; a full card draws nothing.
+  std::array<bool, 15> used{};
+  used[0] = used[1] = used[2] = used[4] = true;
+  CHECK(sl::saving_number(used) == 3 && sl::saving_icon(5, 3, 5) == 3);
+  used[3] = true;
+  CHECK(sl::saving_number(used) == 5 && sl::saving_icon(2, 5, 5) == 2);
+  used.fill(true);
+  CHECK(sl::saving_number(used) == -1);
 }
 
 int main() {

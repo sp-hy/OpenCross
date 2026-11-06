@@ -50,6 +50,9 @@ struct StatRec {
   u16 gold() const { return rd16(0xA2); }
   u8 hit_med() const { return raw[0xA4]; }
   u8 hit_heavy() const { return raw[0xA5]; }
+  // A creature form's growth: the stars left above star_threshold() raise ATK DEF MAG MDEF by the 2-bit selectors of star_growth().
+  u8 star_threshold() const { return raw[0xA6] & 0x7F; }
+  u8 star_growth() const { return raw[0xA7]; }
   u16 type_bits() const { return static_cast<u16>((raw[0xAE] << 8) | raw[0xAF]); }
   u16 rd16(size_t offset) const { return static_cast<u16>(raw[offset] | (raw[offset + 1] << 8)); }
   u32 rd32(size_t offset) const { return static_cast<u32>(rd16(offset)) | (static_cast<u32>(rd16(offset + 2)) << 16); }

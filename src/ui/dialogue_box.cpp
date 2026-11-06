@@ -280,14 +280,6 @@ void DialogueBox::set_portrait_set(std::string set) {
   refresh_face();
 }
 
-void DialogueBox::set_choices(std::vector<std::u32string> choices) {
-  choices_ = std::move(choices);
-  choice_ = 0;
-  chosen_ = -1;
-  if (text_ && face_ != render::kNoFace)
-    for (const auto& choice : choices_) text_->prepare(face_, choice);
-}
-
 void DialogueBox::set_line_choice(int first, int last) {
   line_first_ = std::max(0, first);
   line_count_ = std::max(0, last - first + 1);
@@ -303,9 +295,8 @@ void DialogueBox::set_line_choice(int first, int last) {
 }
 
 void DialogueBox::move_choice(int delta) {
-  const int count = line_count_ > 0 ? line_count_ : static_cast<int>(choices_.size());
-  if (count <= 0) return;
-  choice_ = ((choice_ + delta) % count + count) % count;
+  if (line_count_ <= 0) return;
+  choice_ = ((choice_ + delta) % line_count_ + line_count_) % line_count_;
 }
 
 void DialogueBox::open(const import::Message& flat, render::FaceId face, float text_scale, bool wrap, float wrap_width,
@@ -411,7 +402,6 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   all += U"  0123456789";
   batch->prepare(face, all);
   if (italic != render::kNoFace) batch->prepare(italic, all);
-  for (const auto& choice : choices_) batch->prepare(face, choice);
 
   auto pages = layout_pages(flat, metrics);
   text_w_ = 0;
@@ -440,8 +430,6 @@ void DialogueBox::confirm() {
   // A message ending in {wend(n)} is in Closing while the list is up: the pick still counts.
   if ((tw_.state() == Typewriter::State::WaitClose || tw_.state() == Typewriter::State::Closing) && line_count_ > 0)
     chosen_ = line_first_ + choice_;
-  else if (tw_.state() == Typewriter::State::WaitClose && !choices_.empty())
-    chosen_ = choice_;
   tw_.confirm();
   // The page cursor animation restarts on every page.
   blink_ = 0;
@@ -771,44 +759,6 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
       const float u0 = 0.125f * static_cast<float>(phase);
       sprites_->draw(skin_set_, (tx + cc.x) * zoom, (ty + cc.y) * zoom + yo_, cc.w * zoom, cc.h * zoom, u0, 0.83333f, u0 + 0.124f, 1.0f,
                      pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha)));
-    }
-  }
-
-  // Choice list stub: a panel above the box once the last page is complete.
-  if (!choices_.empty() && st == Typewriter::State::WaitClose) {
-    float cwid = 0;
-    for (const auto& choice : choices_) cwid = std::max(cwid, text_->measure(face_, choice, scale_));
-    float pw = cwid + 2 * 56.0f, ph = static_cast<float>(choices_.size()) * line_h_ + 2 * 28.0f;
-    float px = bx + bw - pw, py = by - ph - 10;
-    float lxo = 56.0f, lyo = 28.0f;
-    if (tiled) {
-      const int choice_count = static_cast<int>(choices_.size());
-      const Geo g0 = frame_geo(0, 0, cwid + 30.0f, choice_count, false, false);
-      const float right = bx + bw;
-      const float ox = right - (g0.R0x + kCorner), oy = by + 60.0f - (g0.B0y + kCorner);
-      draw_tiles(frame_geo(ox, oy, cwid + 30.0f, choice_count, false, false), zoom, 1.0f, false, false);
-      // Pen origin = ox, cursor 40 left of it.
-      px = ox - 40.0f;
-      py = oy;
-      lxo = 40.0f;
-      lyo = 0;
-    }
-    for (render::TextBatch::Pass pass : {render::TextBatch::Pass::Backdrop, render::TextBatch::Pass::Fill}) {
-      for (size_t i = 0; i < choices_.size(); ++i) {
-        u8 col = static_cast<int>(i) == choice_ ? 6 : 0;
-        float lx = px + lxo, ly = py + lyo + static_cast<float>(i) * line_h_;
-        float pen = lx;
-        for (char32_t ch : choices_[i]) {
-          text_->draw_glyph(face_, ch, pen * zoom, ly * zoom + yo_, text_color(col, 255), scale_ * zoom, pass);
-          pen += text_->advance(face_, ch, scale_);
-        }
-      }
-    }
-    // Cursor next to the selected line: the skin's hand (choice style), as the in-window choice.
-    if (tiled) {
-      const float u0 = 0.125f * static_cast<float>(std::min(3, static_cast<int>(blink_ / (5.0f / 30.0f)) % 5));
-      sprites_->draw(skin_set_, (px + lxo - 40.0f) * zoom, (py + lyo + static_cast<float>(choice_) * line_h_ - 5.0f) * zoom + yo_, 70.0f * zoom,
-                     70.0f * zoom, u0, 0.83333f, u0 + 0.124f, 1.0f, pack_rgba(255, 255, 255, 255));
     }
   }
 }

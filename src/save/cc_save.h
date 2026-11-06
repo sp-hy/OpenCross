@@ -33,6 +33,8 @@ inline constexpr u32 kSummaryBits = 210;
 // Size of the unpacked section image.
 inline constexpr size_t kImageSize = 0xE1F4;
 inline constexpr int kNumChars = 44;
+// Highest face a summary party byte holds: the 44 characters, then the forms 0x2C..0x31.
+inline constexpr u8 kLastFace = 0x31;
 inline constexpr int kNumItems = 384;
 inline constexpr int kNumElements = 192;
 
@@ -108,6 +110,10 @@ struct SaveSlot {
   // Raw-head accessors (writes keep the preview copies in sync where one exists).
   std::array<u8, 3> party() const;
   void set_party(const std::array<u8, 3>& ids);
+  // The summary's party bytes (head 0x34..0x36): 0xFF for an empty seat, else the member's face: its record model byte when that
+  // is at most 0x31 (a Pip form, Serge as Lynx), else its id. The save writes them when it stamps the block.
+  std::array<u8, 3> preview_party() const { return {head[head::kPreviewParty], head[head::kPreviewParty + 1], head[head::kPreviewParty + 2]}; }
+  void stamp_preview_party();
   u64 key_items() const;
   void set_key_items(u64 bits);
   u32 playtime_frames() const;

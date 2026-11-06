@@ -52,8 +52,8 @@ void MainMenu::Impl::update_main(const Nav& nav) {
   } else {
     // Left past the first member opens the roster.
     if (nav.left && pick_cur == 0) roster = Roster::In, roster_anim = kRosterSlide, roster_ask = false, sfx(1);
-    else if (nav.left || nav.up) pick_cur = wrap(pick_cur - 1, party_size), sfx(1);
-    if (nav.right || nav.down) pick_cur = wrap(pick_cur + 1, party_size), sfx(1);
+    else if (nav.left) pick_cur = wrap(pick_cur - 1, party_size), sfx(1);
+    if (nav.right) pick_cur = wrap(pick_cur + 1, party_size), sfx(1);
     if (roster != Roster::Off) return;
     // The Allocate pick returns to the Use / Allocate list (on Allocate), the others to the main list.
     if (nav.cancel) {
@@ -126,8 +126,7 @@ void MainMenu::Impl::update_roster(const Nav& nav) {
 
 // Confirm switches between the profile and the equipment; changing member starts again on the profile with the model's camera reset.
 void MainMenu::Impl::update_status(const Nav& nav) {
-  if (nav.l1) cycle_member(-1), profile = true, restart_model();
-  if (nav.r1) cycle_member(1), profile = true, restart_model();
+  if ((nav.l1 || nav.r1) && stand_in < 0) cycle_member(nav.l1 ? -1 : 1), profile = true, restart_model();
   if (nav.ok) profile = !profile;
   if (nav.cancel) back_to_main(0), sfx(6);
 }
@@ -173,8 +172,8 @@ void MainMenu::Impl::step_model_camera(const Nav& nav, int ticks) {
 }
 
 void MainMenu::Impl::update_choice(const Nav& nav) {
-  if (nav.up || nav.left) choice_cur = wrap(choice_cur - 1, 2), sfx(1);
-  if (nav.down || nav.right) choice_cur = wrap(choice_cur + 1, 2), sfx(1);
+  if (nav.up) choice_cur = wrap(choice_cur - 1, 2), sfx(1);
+  if (nav.down) choice_cur = wrap(choice_cur + 1, 2), sfx(1);
   if (nav.cancel) back_to_main(1), sfx(6);
   else if (nav.ok) {
     sfx(8);

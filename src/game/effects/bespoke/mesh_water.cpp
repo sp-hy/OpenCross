@@ -1,4 +1,4 @@
-// ripple: the staged ground scene of a hand rising out of a baked patch of the battle floor, and the registrar of the mesh-deform modules.
+// ripple: the staged ground scene of a hand rising out of a baked patch of the battle floor.
 //
 // The pack's meshes `ring` (the patch of floor) and `hand` (the donor of the hand's packets) are baked from the stage ground (mode 2, no
 // offset); `han1`, `h2g` and `g00` (the hand's three shapes) take over the packets of `hand` (every packet type: the group's packet list
@@ -22,7 +22,6 @@
 #include <array>
 
 #include "game/effects/bespoke/ground_base.h"
-#include "game/effects/bespoke/mesh_base.h"
 
 namespace oc::effects {
 namespace {
@@ -289,12 +288,6 @@ class Ripple : public GroundFx {
 
 void register_mesh_water(BespokeRegistry& registry) {
   registry.add({"ripple", "ground", "Ripple", [] { return std::make_unique<Ripple>(); }});
-}
-
-void register_mesh_deforms(BespokeRegistry& registry) {
-  register_mesh_sweeps(registry);
-  register_mesh_flights(registry);
-  register_mesh_water(registry);
 }
 
 }  // namespace oc::effects

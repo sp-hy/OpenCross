@@ -12,6 +12,7 @@
 #include "game/battle/cast_header.h"
 #include "game/battle/hud_rules.h"
 #include "game/battle/status_plates.h"
+#include "game/head_turn.h"
 
 using namespace oc;
 using namespace oc::game;
@@ -506,6 +507,41 @@ void test_camera_timeline_flow() {
   CHECK(near(pose.eye[0], 500.0f, 0.5f) && near(pose.eye[1], 0.0f, 0.5f) && near(pose.eye[2], -1000.0f * 1000.0f / 2048.0f, 0.5f));
 }
 
+// The view axes of a rolled pose: the up vector is turned by the roll about the view's heading, not about the view axis. Expected
+// rows (4096 = 1.0, PS1 y down) for eye (-2169, -2864, 831), target (-749, -5772, 2283), roll 59 of 1024.
+void test_camera_axes() {
+  const CamAxes axes = cam_axes({-2169.0f, 2864.0f, 831.0f}, {-749.0f, 5772.0f, 2283.0f}, 59.0f * 360.0f / 1024.0f);
+  const float rows[3][3] = {{1152, -1299, -3730}, {3599, 1968, 425}, {1643, -3367, 1681}};
+  const std::array<float, 3>* axis[3] = {&axes.right, &axes.down, &axes.forward};
+  for (int row = 0; row < 3; ++row) {
+    const std::array<float, 3>& vec = *axis[row];
+    CHECK(near(vec[0], rows[row][0] / 4096.0f, 0.01f) && near(-vec[1], rows[row][1] / 4096.0f, 0.01f) && near(vec[2], rows[row][2] / 4096.0f, 0.01f));
+  }
+  // The title backdrop's shots take the same rule and sign: a negative roll looking down (eye (-11712, -3356, -1033), target
+  // (-7645, -4470, -374), roll -37) and a positive one looking up (eye (-4185, -2956, 4575), target (-1006, -4271, 634), roll 48).
+  struct Shot {
+    std::array<float, 3> eye, target;
+    float roll;
+    float rows[3][3];
+  };
+  const Shot title_shots[] = {
+      {{-11712.0f, 3356.0f, -1033.0f}, {-7645.0f, 4470.0f, -374.0f}, -37.0f, {{881, 920, -3893}, {877, 3858, 1110}, {3916, -1073, 634}}},
+      {{-4185.0f, 2956.0f, 4575.0f}, {-1006.0f, 4271.0f, 634.0f}, 48.0f, {{-3238, -1186, -2214}, {-338, 3791, -1538}, {2493, -1032, -3092}}},
+  };
+  for (const Shot& shot : title_shots) {
+    const CamAxes title = cam_axes(shot.eye, shot.target, shot.roll * 360.0f / 1024.0f);
+    const std::array<float, 3>* title_axis[3] = {&title.right, &title.down, &title.forward};
+    for (int row = 0; row < 3; ++row) {
+      const std::array<float, 3>& vec = *title_axis[row];
+      CHECK(near(vec[0], shot.rows[row][0] / 4096.0f, 0.01f) && near(-vec[1], shot.rows[row][1] / 4096.0f, 0.01f) &&
+            near(vec[2], shot.rows[row][2] / 4096.0f, 0.01f));
+    }
+  }
+  // Without a roll the axes are the plain look-at: right horizontal, down below the forward axis.
+  const CamAxes level = cam_axes({0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 100.0f}, 0.0f);
+  CHECK(near(level.right[0], 1.0f) && near(level.right[1], 0.0f) && near(level.down[1], -1.0f) && near(level.forward[2], 1.0f));
+}
+
 void test_vm_weapon_show() {
   // 0x7A n / 0x79 n: hide / show the attached weapon object n; n outside 0..1 = both.
   // Wanda In's caster script: SetAnim 0x80, wait 40, 7A 0 (the wand leaves the hand), ..., 79 0, SetAnim 0x81 (the catch).
@@ -615,6 +651,57 @@ void test_vm_round35_ops() {
     }
     CHECK(got && back);
   }
+  // AA v ticks: as 8C toward vars [v] x, [v+1] z, [v+2] y (a point 4000 above: -0x200); AC w: the idle-pose word := w.
+  bseq::Table var_tilt;
+  CHECK(var_tilt.parse(make_block({0x40, 0, 4000, 0x40, 1, 0, 0x40, 2, -4000, 0xAA, 0, 30, 0xAC, 8, 0x00}, {0x00})));
+  bseq::Vm vv;
+  CHECK(vv.start(&var_tilt, 0, 0));
+  std::vector<bseq::Event> vo;
+  for (int i = 0; i < 4; ++i) vv.tick(ctx, vo);
+  bool var_got = false, pose_got = false;
+  for (const auto& event : vo) {
+    var_got = var_got || (event.kind == Ev::ElemTilt && event.a == 0 && event.d == 30 && event.off[2] == -512);
+    pose_got = pose_got || (event.kind == Ev::PoseWord && event.a == 8);
+  }
+  CHECK(var_got && pose_got);
+}
+
+// 88 list idx point / 89: the head look-at events; A2 / A3 x y w h, A4 sel idx d (byte 0 dx, byte 1 dy), A5 t0 t1 total: the rect flip.
+void test_vm_head_and_rect_ops() {
+  using Ev = bseq::Event;
+  bseq::Table table;
+  CHECK(table.parse(make_block({0x88, 0, 1, 1, 0x89, 0xA4, 0, 0, 0x1A02, 0xA2, 704, 256, 24, 48, 0xA3, 728, 256, 24, 48, 0xA5, 2, 2, 80, 0x00}, {0x00})));
+  const Run result = run(table, 0, 0, bseq::Ctx{});
+  bool look = false, release = false, dest = false, rect_a = false, rect_b = false, flip = false;
+  for (const auto& [tick, event] : result.ev) {
+    look = look || (event.kind == Ev::HeadLook && event.a == 0 && event.b == 1 && event.c == 1);
+    release = release || event.kind == Ev::HeadRelease;
+    dest = dest || (event.kind == Ev::TexDest && event.a == 0 && event.b == 0 && event.c == 2 && event.d == 26);
+    rect_a = rect_a || (event.kind == Ev::TexRect && event.b == 0 && event.off[0] == 704 && event.off[1] == 256 && event.off[2] == 24 && event.d == 48);
+    rect_b = rect_b || (event.kind == Ev::TexRect && event.b == 1 && event.off[0] == 728);
+    flip = flip || (event.kind == Ev::TexFlip && event.a == 2 && event.b == 2 && event.c == 80);
+  }
+  CHECK(look && release && dest && rect_a && rect_b && flip);
+}
+
+// The head turn: from the forward axis toward the head frame's +y it settles at (0, 0); a target 800 / 4096 of a turn about x is held at the
+// 0x200 clamp; a release removes the callback once settled.
+void test_head_turn() {
+  HeadTurn head;
+  head.rate = 0xE00;
+  const float forward[3] = {0, 0, 1};
+  head.start(forward);
+  CHECK(head.active && near(head.ax, 1024.0f, 0.5f) && near(head.az, 0.0f, 0.5f));
+  const float up[3] = {0, 1, 0};
+  for (int i = 0; i < 200; ++i) head.begin_tick(), head.step(up);
+  CHECK(head.active && !head.moving && std::fabs(head.ax) < 64.0f && std::fabs(head.az) < 64.0f);
+  const float angle = 800.0f * 2.0f * HeadTurn::kPi / 4096.0f;
+  const float tilted[3] = {0, std::cos(angle), std::sin(angle)};
+  for (int i = 0; i < 200; ++i) head.begin_tick(), head.step(tilted);
+  CHECK(near(head.ax, 512.0f, 0.5f));
+  head.returning = true;
+  for (int i = 0; i < 200 && head.active; ++i) head.begin_tick(), head.step(tilted);
+  CHECK(!head.active && head.rate == 0xE00);
 }
 
 }  // namespace
@@ -834,8 +921,11 @@ int main() {
   test_initial_weapon_hide();
   test_retail_arc();
   test_vm_basic();
+  test_camera_axes();
   test_vm_weapon_show();
   test_vm_round35_ops();
+  test_vm_head_and_rect_ops();
+  test_head_turn();
   test_vm_branch();
   test_vm_unit_queries();
   test_vm_waits();

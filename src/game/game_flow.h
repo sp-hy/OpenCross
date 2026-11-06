@@ -102,6 +102,9 @@ class FlowMachine {
   void clear_custom_name(int char_id);
   // ext_save.dat names of the slot about to load (SaveDat::read_ext; already empty when the record's language differs): on_load applies them over the record's.
   void set_ext_names(std::map<int, std::u32string> names) { ext_names_ = std::move(names); }
+  // The slot about to load has no valid ext_save.dat pair (a card slot RDE never saved): on_load runs Pip's stat sync
+  // (newgame::pip_form_stats) when his form is 0x2C..0x30.
+  void set_ext_form_sync(bool sync) { ext_form_sync_ = sync; }
   // The name a saved character gets once `data` is loaded with its ext_save.dat names `ext`; empty = none typed, the default name applies.
   std::u32string saved_custom_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) const;
   // The save records of the characters' Japanese default names: what a record holds until a name is typed.
@@ -139,6 +142,7 @@ class FlowMachine {
   ui::GameState gs_;
   std::map<int, std::u32string> custom_names_;
   std::map<int, std::u32string> ext_names_;
+  bool ext_form_sync_ = false;
   NameRecords default_records_{};
 };
 
@@ -162,6 +166,8 @@ class GameFlow {
   // The memory cards and the OpenCross save page (either may be null).
   void set_save_dat(const save::SaveDat* dat, const save::OcSaves* page = nullptr) { dat_ = dat, page_ = page; }
   void set_sfx(std::function<void(int)> fn);
+  // The load chimes: an effect00 id played with its own channel mask (mask 0x40 is the menus' mask, so a later menu sound cuts it).
+  void set_load_sfx(std::function<void(int id, u32 mask)> fn) { load_sfx_ = std::move(fn); }
 
   // Title scene: with a field world behind it (set_title_scene(true), app/app_boot.cpp) entering Title asks the host to run the title room
   // (opening.bin, ROOM_PARAM 0: logo FMV, then the pulsing logo scene) and the title screen is drawn over it as a menu.
@@ -318,6 +324,8 @@ class GameFlow {
   // A load waits for the fade-out to finish.
   bool load_pending_ = false, load_from_slots_ = false;
   ui::SlotEntry load_entry_;
+  // Seconds the load has waited for its chime since the screen went black (-1 = the chimes have not played yet).
+  float load_chime_wait_ = -1.0f;
   // Black veil alpha: rises while load_pending_, falls (fade-in) after the load.
   float veil_ = 0.0f;
   ui::BootLogo boot_logo_;
@@ -327,6 +335,7 @@ class GameFlow {
   void store_name(int char_id, const std::u32string& name);
   int rename_char_ = 0;
   std::function<void(int)> sfx_;
+  std::function<void(int, u32)> load_sfx_;
 };
 
 }  // namespace oc::game

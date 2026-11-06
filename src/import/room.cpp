@@ -10,6 +10,7 @@
 #include "import/lzss.h"
 #include "import/model.h"
 #include "import/room_effects.h"
+#include "import/room_fixes.h"
 #include "import/script_fixes.h"
 #include "import/tim.h"
 
@@ -243,8 +244,10 @@ assets::RoomScene build(std::string_view name, ByteSpan bin, ByteSpan ctd, ByteS
   scene.clut_rows = static_cast<u32>(parsed.bin[kClut].size() / 512);
   parsed.layer_data = unpack(parsed.bin[kLayers], "layers");
   scene.layers = parse_layers(parsed.layer_data, strict);
-  if (compose)
+  if (compose) {
+    apply_room_bg_fixes(name, scene.layers);
     for (auto& layer : scene.layers) compose_groups(parsed.vram, scene.clut_rows, layer);
+  }
   scene.walk = parse_walk(parsed.bin[kTris], parsed.bin[kVerts]);
   {
     SpanReader const_reader(parsed.bin[kConst]);

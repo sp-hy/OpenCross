@@ -193,7 +193,7 @@ float FieldWorld::ground_y(const Ent& ent_state) const {
 
 bool FieldWorld::blocked_by_solids(int player, float x, float z, float old_x, float old_z) {
   const float py = ents_[static_cast<size_t>(player)].actor.current().y;
-  const float rp = ent_radius(player);
+  const float rp = ent_radius(player), hp = ent_height(player);
   bool blocked = false;
   // The walk-mesh probe on the pending velocity of every pushed actor: a step the mesh refuses clears it (the actor then stays).
   for (Ent& pushed : ents_)
@@ -208,7 +208,7 @@ bool FieldWorld::blocked_by_solids(int player, float x, float z, float old_x, fl
       continue;
     }
     const float oy = ent_state.actor.current().y;
-    if (!(py - kDefaultHeight <= oy && oy - ent_height(i) <= py)) {
+    if (!(py - hp <= oy && oy - ent_height(i) <= py)) {
       ent_state.press_ticks = 0;
       continue;
     }
@@ -323,8 +323,11 @@ void FieldWorld::step_triggers() {
   if (player < 0) return;
   const Ent& pe = ents_[static_cast<size_t>(player)];
   const ActorPose& pp = pe.actor.current();
-  const float rp = ent_radius(player);
-  const bool can_talk = input_.action_pending && controls_free();
+  const float rp = ent_radius(player), hp = ent_height(player);
+  // A pending action press that the script lock allows takes the talk range for itself: an entity there gets the action or
+  // nothing, never the touch event (a failed facing cone or an open modal window included).
+  const bool pressed = input_.action_pending && !(vm_.global_flags() & script::gflag::kInputLock);
+  const bool can_talk = pressed && controls_free();
   std::vector<std::pair<float, int>> cands;
   for (int i = 1; i < static_cast<int>(ents_.size()); ++i) {
     if (i == player) continue;
@@ -333,21 +336,22 @@ void FieldWorld::step_triggers() {
     const script::Entity& script_ent = vm_.entity(i);
     if (script_ent.flags38 & 0x400012) continue;
     const ActorPose& other = ent_state.actor.current();
-    if (!(pp.y - kDefaultHeight <= other.y && other.y <= pp.y + ent_height(i))) continue;
+    if (!(pp.y - hp <= other.y && other.y <= pp.y + ent_height(i))) continue;
     const float dx = other.x - pp.x, dz = other.z - pp.z;
-    bool touch, talk;
+    bool touch, in_talk_range, facing;
     float d2 = dx * dx + dz * dz;
+    const bool cone = in_talk_cone((pe.actor.facing() - bearing(dx, dz) + 0x800) & 0xFFF);
     if (ent_box(i)) {
       // The player point is tested against the outer rectangle (half extents + 0x20; the inner one is the solid
       // body). Inside: the action button talks (a facing cone only for entities with flag 0x1000), otherwise the touch event.
       // Thin exit walls (5..10 wide, on the walk-mesh border) and ON_ACTION doors depend on the margin.
-      touch = talk = in_box(i, pp.x, pp.z, kBoxMargin);
-      if (talk && (script_ent.flags38 & 0x1000)) talk = in_talk_cone((pe.actor.facing() - bearing(dx, dz) + 0x800) & 0xFFF);
+      touch = in_talk_range = in_box(i, pp.x, pp.z, kBoxMargin);
+      facing = !(script_ent.flags38 & 0x1000) || cone;
     } else {
       const float ro = ent_radius(i);
       touch = d2 < (rp + kTouchMargin + ro) * (rp + kTouchMargin + ro);
-      talk = d2 < (rp + kTalkMargin + ro) * (rp + kTalkMargin + ro) &&
-             in_talk_cone((pe.actor.facing() - bearing(dx, dz) + 0x800) & 0xFFF);
+      in_talk_range = d2 < (rp + kTalkMargin + ro) * (rp + kTalkMargin + ro);
+      facing = cone;
     }
     // A key item used from the field list starts ON slot 4 (class 2) of every entity in talk range that has the touch-trigger
     // flag, without the facing test; that entity gets neither the action nor the touch event this pass.
@@ -358,8 +362,8 @@ void FieldWorld::step_triggers() {
         continue;
       }
     }
-    if (talk && can_talk && !(script_ent.flags38 & script::flag38::kNoAction)) {
-      cands.emplace_back(d2, i);
+    if (in_talk_range && pressed && !(script_ent.flags38 & script::flag38::kNoAction)) {
+      if (can_talk && facing) cands.emplace_back(d2, i);
       continue;
     }
     if (touch && !(script_ent.flags38 & script::flag38::kNoCollision)) vm_.trigger_collision(i);
@@ -384,7 +388,8 @@ void FieldWorld::step_triggers() {
 // P0 / P1 = (-/+ w/2, 0, 0), P2 = (0, 0, -w/2), P3 = (0, -h, +w/2) around (x, y + height offset, z), where w = max(model extent x, z) and
 // h = extent y, and keeps the entity when P0.x + scroll < 321, P1.x + scroll >= 0, P2.y + scroll >= 0 and
 // P3.y + scroll < 225. A culled entity's sequence, clip time and head matrices do not run, so
-// a clip waits until the entity is on screen again, and a WAIT_ANIMATION on it with it. In widescreen the test widens by the extra columns.
+// a clip waits until the entity is on screen again, and a WAIT_ANIMATION on it with it. A hidden entity (EF.5) freezes the same way
+// until it is shown again. In widescreen the test widens by the extra columns.
 void FieldWorld::step_cull() {
   // Debug: A/B check of the off-screen animation freeze.
   static const bool no_cull = std::getenv("OC_NO_CULL") != nullptr;
@@ -413,7 +418,8 @@ void FieldWorld::step_cull() {
         culled = !on;
       }
     }
-    ent_state.actor.set_culled(culled);
+    // A hidden entity (EF.5) is never tested, and its animation is frozen as a culled one's.
+    ent_state.actor.set_culled(culled || (script_ent.flags38 & 0x20u));
     script_ent.flags38 = culled ? (script_ent.flags38 | script::flag38::kOffScreen) : (script_ent.flags38 & ~script::flag38::kOffScreen);
   }
 }

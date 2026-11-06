@@ -65,8 +65,10 @@ struct PartyMember {
   int growth_col = 0, dur = 10, rate = 10, hit_med = 50, hit_heavy = 20;
   std::array<u16, data::kGridCells> cells{};
   std::array<bool, data::kGridCells> unlocked{};
-  // Consumable stacks: copies held by the cell, 0 = not a stack; the battle counts it down.
+  // Consumable stacks: copies held by the cell, 0 = not a stack or none left; the battle counts it down.
   std::array<u8, data::kGridCells> qty{};
+  // The cell is a consumable stack the save counts (qty holds its copies, also 0).
+  std::array<bool, data::kGridCells> stack{};
   Equip eq;
   // Poison / burn / sprain / flu carried between battles.
   u32 lo_persist = 0;
@@ -96,9 +98,12 @@ struct GrowthState {
   int star = 0, progress = 0, counter = 0;
 };
 
-// `star` selects the grid unlocks (el_mask rows 0..star). STUB: cells that hold an element in the first two rows are
+// `star` selects the grid unlocks (el_mask rows 0..star). Cells that hold an element in the first two rows are
 // treated as the starting kit (unlocked) in addition to the el_mask unlocks.
 PartyMember make_party_member(const data::GameTables& tables, int char_id, int star = 0, const std::string& set = "char");
+// The Lv 99 targets of lv99para.bin record `record` (a character id, or Pip's form 0x2B..0x30), in PartyMember stat order; all 0
+// without that record set.
+std::array<int, 7> lv99_targets(const data::GameTables& tables, int record, const std::string& set = "char");
 void unlock_grid(PartyMember& member, const data::GameTables& tables, int star);
 
 struct Unit {
@@ -115,8 +120,8 @@ struct Unit {
   // Merged status words = permanent | inflicted.
   u32 lo = 0, hi = 0;
   // Innate + gear statuses, OR-ed into the merged words. Enemies copy them from the monster record (whose hi word also holds the monster
-  // type bits 0x00200000..0x10000000 the weapon slayer masks and the element exploit test read) and get lo 0x400 at spawn; PCs get the
-  // gear's permanent statuses.
+  // type bits 0x00200000..0x10000000 the weapon slayer masks and the element exploit test read) and get st::kInfoShown at spawn; PCs get
+  // the gear's permanent statuses and st::kPartyShown.
   u32 perm_lo = 0, perm_hi = 0;
   // Status weakness masks: the chance of these bits is doubled.
   u32 weak_lo = 0, weak_hi = 0;
@@ -140,6 +145,8 @@ struct Unit {
   std::array<bool, data::kGridCells> seal_flag{};
   // Copies left of a consumable stack cell (PartyMember::qty); 0 = single / none.
   std::array<u8, data::kGridCells> qty{};
+  // PartyMember::stack: a stack cell with no copies left is greyed (used) whenever the element menu opens.
+  std::array<bool, data::kGridCells> stack{};
   Equip eq;
   // The PC wore the hero set at battle start (Hero's Blade + two Hero's Shield / Medal); a Dopplegang form keeps it.
   bool hero_set = false;
@@ -173,6 +180,9 @@ struct Unit {
   bool alive() const { return present && !(lo & (st::kKO | st::kDefeated)); }
   // In the turn order: a frozen unit is out of alive() but its countdown runs and it takes its turn at 0.
   bool in_turn_order() const { return present && !(lo & st::kKO); }
+  // On the target ring and in every script target pick, count and attacked-script test: in the turn order with HP not 0 (a frozen unit
+  // stands).
+  bool standing() const { return in_turn_order() && hp != 0; }
   bool can_open_menu() const { return pc && alive() && stamina >= 10 && !(lo & st::kCannotMenuLo); }
 };
 
@@ -343,6 +353,8 @@ struct EnemyAction {
   int seq = -1;
   // Op 67's group list (QueuedAttack::group).
   std::array<u8, 6> group{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  // Op 67 type 6: the cast springs the element trap whatever the trap holds (it plays the colour's trap pack and lands nothing).
+  bool trap_fizzle = false;
 };
 
 class Battle;
@@ -490,9 +502,14 @@ class Battle {
   // (Sprigg) or wears accessory 0xFC, and the enemy's monster record allows it, the pool gets the enemy's slot bit. True when a bit was set.
   bool dopple_credit(int enemy_unit, int last_pc);
   // Dopplegang's unit swap. form >= 0: PC unit `unit` takes monster record `form` (stats, innate colour, gear, status words, the monster's
-  // element grid, its name); the character's own record is kept for the way back; HP and max HP stay, inflicted statuses and timers are gone,
-  // AP 8, gauge -1. form < 0: back to the character (the saved record, with the HP of now). False when nothing changed.
+  // element grid, its name); the character's own record is kept for the way back; HP stays, inflicted statuses and timers are gone, AP 8,
+  // gauge -1. form < 0: the saved unit comes back (its stamina too) with the HP of now, countdown 8 and the max HP of the last unit to
+  // change form from a character body (Pip's once he has changed form after it), which the party record keeps. False when nothing changed.
   bool transform(int unit, int form);
+  // The unit a PC leaves the fight with (results screen, party record). A PC still in a creature form gets its own unit back: with the
+  // HP of now while it was the last unit to change form from a character body and its creature form the last form change of the fight,
+  // else the whole unit as it was before the form (its HP too).
+  Unit exit_unit(int unit) const;
   // Pip's evolution: script op A7 sets the pending form element (0x80..0x85); while it is set every PC turn is the unit's script slot 2,
   // which casts it; its pgdat mode 45 applies the form: evolve().
   int evo_pending() const { return evo_pending_; }
@@ -559,9 +576,16 @@ class Battle {
   bool validate(const Command& cmd, std::string* why = nullptr) const;
   // Percent, using the current chain counter.
   int hit_chance_for(int actor, int target, int strength) const;
-  // Auto-battle accuracy rule: the strongest hit k = 2, 1, 0 whose chance is above 79 % and whose stamina need is met (30 / 20 / 10,
-  // fatigued 35 / 22 / 10); none -> -1, or weak when `fallback_weak` and it can be paid (the cursor rests on row 0).
+  // The HIT% box figure for the same attack (hit_chance_shown: the target's raw EVD, no hero, dizzy or sleeping-target terms).
+  int hit_chance_shown_for(int actor, int target, int strength) const;
+  // Auto accuracy rule (Accuracy Selection = Auto, and the auto battle): the strongest hit k = 2, 1, 0 whose HIT% figure is above 79 and
+  // whose stamina need is met (30 / 20 / 10, fatigued 35 / 22 / 10); none -> -1, or weak when `fallback_weak` and it can be paid (the cursor
+  // rests on row 0). The figure is hit_figure_fresh while the actor's last confirmed command was by another PC or at another target, else
+  // the HIT% box figure (hit_chance_shown_for).
   int auto_hit_level(int actor, int target, bool fallback_weak = true) const;
+  // The HIT% figure a command confirm writes for a fresh actor / target pair, before the box figures are computed: the strength's raw HIT
+  // stat minus the target's EVD x EVD% / 100 (no weapon accuracy, Hit%, chain, hero, dizzy or sleep term; it may be negative).
+  int hit_figure_fresh(int actor, int target, int strength) const;
   int alive_count(bool pcs) const;
 
   // ---- commands
@@ -590,6 +614,10 @@ class Battle {
   // Debug tools (Debug tab): damage never takes a unit of that side below 1 HP and no instant KO lands on it. Rules stay untouched when off.
   void set_invincible(bool party, bool enemies) { inv_party_ = party, inv_enemies_ = enemies; }
   bool invincible(int unit) const { return unit < kPcSlots ? (inv_party_ || cheats_.god_mode || cheats_.boost) : inv_enemies_; }
+  // RDE's rule for the Radius tutorial (battle 386): its first enemy slot never dies. A hit's damage is cut to HP - 1 and a KO does not
+  // stay (the tutorial's own idle script rewrites that unit's HP every tick).
+  static constexpr int kUndyingScene = 386, kUndyingUnit = 3;
+  bool undying(int unit) const { return scene_ == kUndyingScene && unit == kUndyingUnit; }
   // Cheats tab: the rules' bypasses, all off by default; the host pushes the live set every update.
   struct Cheats {
     bool god_mode = false, boost = false, max_stamina = false, free_elements = false, always_hit = false, always_loot = false, instant_growth = false, shared_growth = false;
@@ -603,6 +631,9 @@ class Battle {
   int action_id() const { return action_id_; }
   // A killed enemy whose kill script (slot 3) queued a death cast that has not been executed yet (the unit still owes its death presentation).
   bool death_pending(int unit) const { return unit >= 0 && unit < kUnits && death_pending_[static_cast<size_t>(unit)]; }
+  // Called when an attacked script (slot 4) ends, before the other scripts' idle loops run again: every enemy in the turn order whose
+  // countdown is 0 has its turn taken (countdown 0xFFFF). A countdown written after that (a reaction cutscene's) does not cancel the turn.
+  void claim_ready_turns();
 
  private:
   void say(std::string line) { log_.push_back(std::move(line)); }
@@ -637,6 +668,8 @@ class Battle {
   // The cell of `pc` that can join a double / triple tech with partner tech `tech`, -1 = none. A PC's seal flag, not its live status, decides.
   int combo_partner_cell(int pc, int tech) const;
   void load_monster_record(Unit& unit, const data::StatRec& rec, u32 perm_lo_bits) const;
+  void scale_creature_form(Unit& unit, const data::StatRec& rec) const;
+  void end_chain_after(size_t first_event);
   // Single target, the whole side (element record byte 4 bit 0x10), or the units of `targets` (EnemyAction::targets) when it names more
   // than one: one cast in every case, so the field ring takes its colour once.
   void cast_element(int actor, int element_id, int row, int target, u32 targets = 0);
@@ -732,6 +765,8 @@ class Battle {
   bool in_death_cast_ = false;
   // A kill script queued attacks that have not run yet: the unit still owes its death (check_end).
   std::array<bool, kUnits> death_pending_{};
+  // Turns taken by claim_ready_turns that have not run yet.
+  std::array<bool, kUnits> turn_claimed_{};
   // The target whose results op 96's gate cancels while the element mode runs (-1 = none).
   int gated_target_ = -1;
   // The unit's kill script has run since it last had HP.
@@ -759,6 +794,12 @@ class Battle {
   std::array<u16, 16> dopple_mask_{};
   // The PC's record before its first Dopplegang form.
   std::array<Unit, kPcSlots> form_backup_{};
+  // A Dopplegang form change into a creature sets it; the way back and Pip's form change clear it.
+  bool form_restore_ = false;
+  // The max HP and the slot of the last unit that changed form from a character body (a Dopplegang form from the own form, Pip's form
+  // change); the way back and a creature form give that max HP to the unit.
+  int form_max_hp_ = 0;
+  int form_body_unit_ = -1;
   // Big Catch (mode 39) per-cast state: 0 not rolled, 1 the roll failed, 2 a creature was picked (reset at the end of a cast); the creature's
   // battle model number (0 = the value the command cleared it to) and pool slot.
   int creature_state_ = 0, creature_model_ = 0, creature_slot_ = 0;
@@ -775,6 +816,12 @@ class Battle {
   // See cast_mask().
   u32 cast_mask_ = 0x1FF;
   int chain_actor_ = -1, chain_target_ = -1, chain_hits_ = 0;
+  // The PC whose weapon turn is open (end_chain_after), -1 = none.
+  int chain_owner_ = -1;
+  // The PC of the last confirmed Attack or Element command, and each PC's target of its last one (-1 = none yet): auto_hit_level's
+  // fresh pair test.
+  int confirm_actor_ = -1;
+  std::array<int, kPcSlots> confirm_target_{-1, -1, -1};
   // Timed field state (mode 6): 1 = elements x1/2, 2 = x3/2.
   int field_state_ = 0;
   // Mode 5: element id the PC side / the enemy side has trapped (0 none).
@@ -792,6 +839,8 @@ class Battle {
   bool colour_row_ = false;
   // The last cast hit the other side's element trap.
   bool fizzled_ = false;
+  // The next cast is a script's forced trap fizzle (EnemyAction::trap_fizzle).
+  bool trap_fizzle_ = false;
 };
 
 // Simple deterministic player policy for `ocbattle sim`: heal when someone is below 40%, else the strongest

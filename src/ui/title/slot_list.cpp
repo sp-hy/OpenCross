@@ -520,12 +520,13 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   if (!cur || refused != game::ngplus::Refusal::None) return;
   const save::SaveSlot& save_data = cur->data;
   const auto party = save_data.party();
+  const auto faces = save_data.preview_party();
   for (size_t i = 0; i < 3 && i < party.size(); ++i) {
-    if (party[i] >= save::kNumChars) continue;
-    const NamePic fp = face_pic(party[i]);
+    if (faces[i] > save::kLastFace) continue;
+    const NamePic fp = face_pic(faces[i]);
     const float fx = sl::kFaceX + sl::kFaceStep * static_cast<float>(i);
     if (fp.set) dl.image(fp.set, canvas_x(fx), canvas_y(sl::kFaceY), canvas_x(sl::kFace), canvas_y(sl::kFace));
-    else txt(fx + 2.0f, 262, name_of_ ? name_of_(save_data, cur->ext_names, party[i]) : std::u32string(), white, 0.6f);
+    else if (party[i] < save::kNumChars) txt(fx + 2.0f, 262, name_of_ ? name_of_(save_data, cur->ext_names, party[i]) : std::u32string(), white, 0.6f);
   }
   const std::u32string leader = !party.empty() && party[0] < save::kNumChars && name_of_ ? name_of_(save_data, cur->ext_names, party[0]) : std::u32string();
   // Card 1's CHRONO00 and the page's file 0 are the auto-saves.

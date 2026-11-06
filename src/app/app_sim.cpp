@@ -117,6 +117,7 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
 
 void App::open_main_menu(bool script) {
   world.capture_state();
+  world.fade_screen_sounds(true);
   menu.open(flow.game_state(), world.can_save());
   menu_from_script = script;
   log::info("menu: opened ({}, saving {})", script ? "script" : "key", world.can_save() ? "allowed" : "blocked");
@@ -131,6 +132,7 @@ static constexpr int kScreenInputLock = 4, kKeyListInputLock = 8, kMenuButtonWai
 
 void App::close_field_screen(int fade_ticks) {
   world.menu_closed();
+  world.fade_screen_sounds(false);
   world.fade_in_from_black(fade_ticks);
   world.lock_input(kScreenInputLock, kMenuButtonWait);
 }
@@ -138,12 +140,14 @@ void App::close_field_screen(int fade_ticks) {
 void App::open_name_entry(int char_id) {
   // RDE shows the user guide first when MAP_ID (variable 6) is 0 or 8 (New Game+).
   const int map_var = world.vm().var(script::var::kMapId);
+  world.fade_screen_sounds(true);
   flow.begin_rename(char_id, map_var == 0 || map_var == 8);
 }
 
 void App::open_shop(const game::FieldWorld::MenuRequest& rq) {
   using script::MenuKind;
   const ui::ShopKind kind = rq.kind == MenuKind::ElementShop ? ui::ShopKind::Element : rq.kind == MenuKind::TradingPost ? ui::ShopKind::Trading : ui::ShopKind::Smith;
+  world.fade_screen_sounds(true);
   shop.open(flow.game_state(), kind, rq.arg);
   shop_open = true;
   log::info("shop: {} {} opened", kind == ui::ShopKind::Element ? "element shop" : kind == ui::ShopKind::Trading ? "trading post" : "blacksmith", rq.arg);
@@ -163,6 +167,7 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
       if (debug_tools.saving_disabled()) ui.toast("Debug tools were used this session");
       if (menu_ok) {
         world.capture_state();
+        world.fade_screen_sounds(true);
         menu.open_save_list(flow.game_state());
         menu_from_script = true;
         return;
@@ -176,6 +181,7 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
         if (flow_ready) {
           screen_after_fade = rq;
           flow.begin_menu_open_fade();
+          world.fade_screen_sounds(true);
           log::info("fade: shop fade-out started");
         } else {
           open_shop(rq);
@@ -186,6 +192,7 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
     case MenuKind::PartyScreen:
       if (party_ok) {
         world.capture_state();
+        world.fade_screen_sounds(true);
         party_screen.set_hd(platform::art_is_hd(config.art_mode));
         // Argument 1 opens the Relief Charm variant.
         if (rq.arg == 1) party_screen.open_relief(world.game_state());
@@ -194,6 +201,7 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
       }
       if (flow_ready) {
         world.capture_state();
+        world.fade_screen_sounds(true);
         flow.begin_party();
         return;
       }
@@ -203,6 +211,7 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
       if (flow_ready) {
         screen_after_fade = game::FieldWorld::MenuRequest{rq.kind, rq.arg < 0 ? 0 : rq.arg};
         flow.begin_menu_open_fade();
+        world.fade_screen_sounds(true);
         log::info("fade: name-entry fade-out started");
         return;
       }
@@ -386,6 +395,7 @@ void App::update_achievements(int ticks) {
 // `ticks` field ticks (or battle / menu / movie time) for the input `raw` over `dt` seconds.
 void App::advance(const platform::Input& raw, double dt, int ticks) {
   if (restart_requested) restart_game();
+  screen_clock += dt * 60.0;
   update_achievements(ticks);
   // Every screen below reads the left stick as the d-pad.
   platform::Input in = raw;
@@ -496,8 +506,10 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       apply_flow_action(flow.update(in, static_cast<float>(dt)));
       // Cancel brought the prompt back from the menu: the room's song starts again; the scene keeps running.
       if (ph == ui::TitleScreen::Phase::Menu && flow.title().phase() == ui::TitleScreen::Phase::Prompt) world.restart_song();
-      // Hold the idle timer: in the menu, and while the Debug free camera is on (no attract demo / opening FMV while flying the sea).
-      if (ph == ui::TitleScreen::Phase::Menu || ph == ui::TitleScreen::Phase::FadeOut || game::free_cam().on()) world.vm().set_var(0x404, 0);
+      // Hold the idle timer from the press on the prompt (the room's script stops counting on Start), in the menu, and while the
+      // Debug free camera is on (no attract demo / opening FMV while flying the sea).
+      if (ph == ui::TitleScreen::Phase::Menu || ph == ui::TitleScreen::Phase::FadeOut || flow.title().leaving_prompt() || game::free_cam().on())
+        world.vm().set_var(0x404, 0);
     // An attract demo is running: any button returns to the title logo.
     } else if (game::GameFlow::any_button(in)) {
       if (world.load_room(game::kTitleRoom, 1)) flow.title().restart_prompt(), flow.set_title_logo_ready(true);
@@ -565,6 +577,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
         return;
       }
       world.state_edited();
+      world.fade_screen_sounds(false);
       if (menu_from_script) world.menu_closed(menu.saved() ? 1 : 0);
       menu_from_script = false;
       world.fade_in_from_black(kScreenFadeIn);
@@ -599,8 +612,10 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     }
     return;
   }
-  // Modal: the field waits while the key-item list is up.
-  if (key_popup_ok && key_popup.active()) {
+  // A room load clears the field windows, a held key-item list with them.
+  if (key_popup_ok && key_popup.active() && world.room_loads() != key_popup_room) key_popup.close();
+  // Modal: the field waits while the key-item list is up (a held list neither runs nor draws, the field goes on).
+  if (key_popup_ok && key_popup.active() && !world.key_list_held()) {
     // The Item key / pad-button key-item list: the stick / arrows move the hand.
     const int dx = (platform::action_pressed(in, platform::Action::Right) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_RIGHT])) -
                    (platform::action_pressed(in, platform::Action::Left) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_LEFT]));
@@ -621,7 +636,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     return;
   }
   // Item key (F / R) / pad button (RDE; pad: X = key items): the key-item list panel opens straight over the field, without the main menu.
-  if (key_popup_ok && menu_ok && world_ok && world.view().loaded() && !world.menu_active() && !world.battle_active() && world.idle() && !world.input_locked() && menu.closed() &&
+  if (key_popup_ok && !key_popup.active() && menu_ok && world_ok && world.view().loaded() && !world.menu_active() && !world.battle_active() && world.idle() && !world.input_locked() && menu.closed() &&
       (platform::action_pressed(in, platform::Action::Item) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_WEST]))) {
     std::vector<ui::KeyItemPopup::ListEntry> list;
     for (const int id : world.game_state().key_items()) {
@@ -637,6 +652,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     log::info("key item list: opened, owned {}", ids);
     // The list opens without a sound.
     key_popup.open_list(std::move(list));
+    key_popup_room = world.room_loads();
     return;
   }
   // Start (RDE: pad Start, keyboard Space): the pause screen over the frozen field / world map, message windows and cutscenes included.
@@ -665,12 +681,14 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     return;
   }
   // The Menu key (I / Tab) / pad Y opens the menu (Start = the pause screen).
-  if (menu_ok && !world.menu_active() && !world.battle_active() && world.idle() && world.menu_key_allowed() &&
+  if (menu_ok && !world.menu_active() && !world.battle_active() && world.menu_idle() && world.menu_key_allowed() &&
+      !(key_popup_ok && key_popup.active()) &&
       (platform::action_pressed(in, platform::Action::Menu) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_NORTH]))) {
     // Fade to black, then open the menu.
     if (flow_ready) {
       log::info("fade: menu-open fade-out started");
       flow.begin_menu_open_fade();
+      world.fade_screen_sounds(true);
     } else {
       open_main_menu(false);
     }

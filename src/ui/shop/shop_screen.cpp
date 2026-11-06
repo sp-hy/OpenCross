@@ -29,6 +29,7 @@ namespace {
 
 const u32 kText = rgb(240, 240, 240), kGold = rgb(255, 214, 102);
 constexpr int kPickWait = 30;
+constexpr int kRefuseTicks = 60;
 
 struct Nav {
   bool up = false, down = false, left = false, right = false, ok = false, cancel = false;
@@ -135,6 +136,7 @@ struct ShopScreen::Impl {
   std::string msg;
   u32 msg_col = kGold;
   int msg_frames = 0;
+  int refuse_ticks = 0;
   int frames = 0;
   // Compass needle of the element shop / smith top lists: eased once per frame toward the table angle of the selection (needle_tick).
   struct Needle {
@@ -245,6 +247,7 @@ struct ShopScreen::Impl {
     needle_tex.reset();
     msg.clear();
     msg_frames = 0;
+    refuse_ticks = 0;
     frames = 0;
     repeat.reset();
     if (kind == ShopKind::Trading) trade_open();
@@ -303,6 +306,10 @@ struct ShopScreen::Impl {
     frames += std::max(ticks, 0);
     if (msg_frames > 0 && --msg_frames == 0) msg.clear();
     const Nav nav = poll(in);
+    if (refuse_ticks > 0) {
+      refuse_ticks -= std::max(ticks, 0);
+      return;
+    }
     if (kind == ShopKind::Trading) return trade_update(nav);
     if (stage == Stage::Top || stage == Stage::Category) needle_tick(stage == Stage::Category && kind == ShopKind::Smith ? cat_cur : top_cur);
     switch (stage) {
@@ -384,17 +391,18 @@ struct ShopScreen::Impl {
         break;
       case Operation::Forge: {
         const shop::Res result = shop::can_forge(*gs, id, platform::cheats().no_craft_cost);
-        if (result == shop::Res::ShortMaterials) return deny(ss(0x801DF8FDu + static_cast<u32>(std::clamp(category, 0, 2))));
-        if (result == shop::Res::NoGold) return deny(ss(0x801DF914));
+        if (result == shop::Res::ShortMaterials) return refuse(ss(0x801DF8FDu + static_cast<u32>(std::clamp(category, 0, 2))), 8);
+        if (result == shop::Res::NoGold) return refuse(ss(0x801DF914), 8);
         if (result != shop::Res::Ok) return deny("");
         start_confirm();
         break;
       }
       case Operation::Break:
-        if (gs->item_count(id) < 1) return deny(ss(0x801DF985));
+        if (gs->item_count(id) < 1) return refuse(ss(0x801DF985), 8);
         start_confirm();
         break;
       case Operation::SellGear:
+        if (gs->item_count(id) < 1) return refuse(ss(0x801DF9E5), 0x18);
         qty_max = gs->item_count(id);
         start_quantity();
         break;
@@ -403,6 +411,13 @@ struct ShopScreen::Impl {
   void deny(const std::string& message_text) {
     sfx(0x18);
     if (!message_text.empty()) say(message_text, kText);
+  }
+  // A smith list refusal (short of materials or gold, a worn-only piece): the message stands for 60 ticks and the shop takes no
+  // input meanwhile. Forge and break down confirm the press (sfx 8), the sale refuses it (sfx 0x18).
+  void refuse(const std::string& message_text, int sound) {
+    sfx(sound);
+    say(message_text, kText, kRefuseTicks);
+    refuse_ticks = kRefuseTicks;
   }
   void start_quantity() {
     sfx(8);
@@ -1231,7 +1246,7 @@ struct ShopScreen::Impl {
       RT(0xAE, 0x44, 0x30 + 24.0f * static_cast<float>(row), item_name(id));
       // Sell price "%6d" at (0xC4, 0x32 + 24 r): dx 0x16 - 4d, style 0x91 (JP 4).
       if (!forge_like) {
-        const int price = shop::gear_sell_unit(*gs, id);
+        const int price = static_cast<int>(shop::gear_sell_price(*gs, id, 1));
         RT(lang_index() == 5 ? 4 : 0x91, static_cast<float>(0xC4 + 0x16 - 4 * digit_count(price)), 0x32 + 24.0f * static_cast<float>(row),
            fmt("%6d", price));
       }
@@ -1304,7 +1319,7 @@ struct ShopScreen::Impl {
       RT(1, 0x150, 0x10E + 32, ss(0x801DF8AC));
       marker(336 - 4, 286.0f + 16.0f * static_cast<float>(conf_cur), true);
     } else if (stage == Stage::Quantity) {
-      qty_window(0x801DFB28, 0x801DFB30, false, item > 0 ? static_cast<long long>(shop::gear_sell_unit(*gs, item)) * qty : 0, qty);
+      qty_window(0x801DFB28, 0x801DFB30, false, item > 0 ? shop::gear_sell_price(*gs, item, qty) : 0, qty);
       message(ss(0x801DF859));
     } else if (stage == Stage::List) {
       static const u32 kF[3] = {0x801DF892, 0x801DF893, 0x801DF894}, kD[3] = {0x801DF846, 0x801DF847, 0x801DF848}, kS[3] = {0x801DF856, 0x801DF857, 0x801DF858};

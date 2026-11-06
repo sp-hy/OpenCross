@@ -177,8 +177,9 @@ void test_arithmetic() {
   // SHL V U.
   script.raw({0x1C});
   script.word(V(5)).word(I(3));
-  // V6: division by zero is guarded.
-  script.set(V(6), 1).alu(0x21, V(6), 0);
+  // V6: a zero divisor counts as 1, the variable keeps its value; V7: the quotient truncates toward zero.
+  script.set(V(6), 9).alu(0x21, V(6), 0);
+  script.set(V(7), -7).alu(0x21, V(7), 2);
   script.stop();
   NullHost host;
   FieldVM vm(host);
@@ -189,7 +190,8 @@ void test_arithmetic() {
   CHECK_EQ(vm.var(V(3)), 0x10);
   CHECK_EQ(vm.var(V(4)), 11);
   CHECK_EQ(vm.var(V(5)), 32);
-  CHECK_EQ(vm.var(V(6)), 0);
+  CHECK_EQ(vm.var(V(6)), 9);
+  CHECK_EQ(vm.var(V(7)), -3);
 }
 
 void test_variables_and_signedness() {
@@ -363,6 +365,43 @@ void test_budget_and_default_restart() {
   CHECK_EQ(vm.var(V(1)), 4);
 }
 
+// A host music cue replaces WAIT's own counter (it holds until the cue reports the end, with the WAIT's tick count passed on), and
+// holds op 86 before it runs, passing the code word 4 bytes after the op.
+void test_music_cues() {
+  class CueHost : public NullHost {
+   public:
+    int wait_calls = 0, wait_ticks = -1, holds_left = 3, hold_op = -1;
+    u32 hold_word = 0;
+    int music_wait(int ticks) override {
+      wait_ticks = ticks;
+      return ++wait_calls >= 5 ? 1 : 0;
+    }
+    bool music_hold(int op, u32 word) override {
+      hold_op = op;
+      hold_word = word;
+      return holds_left-- > 0;
+    }
+  };
+  Asm script;
+  const u16 upd = script.here();
+  script.wait(345).set(V(0), 1);
+  script.raw({0x86, 0x00, 0x06, 0x06, 0x2B, 0x01, 0x36, 0x00, 0xFB}).set(V(1), 1).park();
+  CueHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{1, upd}}}}));
+  for (int tick = 1; tick <= 4; ++tick) vm.tick();
+  CHECK_EQ(vm.var(V(0)), 0);
+  CHECK_EQ(host.wait_ticks, 345);
+  vm.tick();
+  vm.tick();
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(host.hold_op, 0x86);
+  CHECK_EQ(host.hold_word, 0x0036012B);
+  CHECK_EQ(vm.var(V(1)), 0);
+  for (int tick = 0; tick < 4; ++tick) vm.tick();
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
 void test_wait_scheduling() {
   // WAIT n takes n+1 ticks; SET follows on the next tick.
   {
@@ -519,6 +558,47 @@ void test_run_script_and_wait() {
   // The child runs (and keeps running); the parent went on.
   CHECK(vm.var(V(1)) >= 2);
   CHECK_EQ(vm.var(V(0)), 1);
+}
+
+// E2 of an entity culled off screen: its window closes and the record ends, so the op after E2 does not run; a window opened as
+// kept (op 62 flag 0x400) is waited for as usual, as is the window of an entity on screen.
+class CulledHost : public NullHost {
+ public:
+  bool open = true, kept = false;
+  int drops = 0;
+  bool dialogue_open() override { return open; }
+  bool drop_culled_dialogue() override {
+    if (kept) return false;
+    ++drops;
+    open = false;
+    return true;
+  }
+};
+
+void test_e2_culled_speaker() {
+  for (const int kind : {0, 1, 2}) {
+    Asm script;
+    const u16 init = script.here();
+    script.stop();
+    const u16 upd = script.here();
+    script.raw({0xE2});
+    script.set(V(0), 1);
+    script.park();
+    CulledHost host;
+    host.kept = kind == 1;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{{{0, init}, {1, upd}}}}));
+    if (kind != 2) vm.entity(0).flags38 |= flag38::kOffScreen;
+    vm.tick();
+    CHECK_EQ(vm.var(V(0)), 0);
+    CHECK_EQ(host.drops, kind == 0 ? 1 : 0);
+    CHECK_EQ(host.open, kind != 0);
+    if (kind == 0) continue;
+    host.open = false;
+    vm.tick();
+    vm.tick();
+    CHECK_EQ(vm.var(V(0)), 1);
+  }
 }
 
 // 99 reads the party table, whose empty slots hold 0xFF (tel_b02f painter: `$room[8] == #255`).
@@ -686,8 +766,54 @@ void test_scenario_and_rng() {
   CHECK_EQ(vm.var(V(0)), 0);
   CHECK_EQ(vm.var(V(1)), 10);
   CHECK_EQ(vm.var(0x00), 10);
-  // RAND_MOD n gives 0..n inclusive.
-  CHECK_EQ(vm.var(V(2)), 100 % 8);
+  // RAND_MOD n scales the 15-bit draw: draw * (n + 1) >> 15.
+  CHECK_EQ(vm.var(V(2)), 100 * 8 >> 15);
+}
+
+// RAND keeps the low 15 bits of a draw; RAND_MOD n = draw * (n + 1) >> 15, so n is the inclusive maximum and the top draw gives n.
+void test_rand_range() {
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0x1E}).word(V(0));
+  script.raw({0x1F}).word(V(1)).word(I(7));
+  script.raw({0x1F}).word(V(2)).word(I(7));
+  script.raw({0x1F}).word(V(3)).word(I(100));
+  script.raw({0x1F}).word(V(4)).word(I(0));
+  script.stop();
+  NullHost host;
+  const std::vector<u32> draws{0xFFFFFFFFu, 0x4000u, 0x7FFFu, 0x3FFFu, 0x7FFFu};
+  size_t next = 0;
+  FieldVM vm(host, [&] { return draws[next++ % draws.size()]; });
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(vm.var(V(0)), 0x7FFF);
+  CHECK_EQ(vm.var(V(1)), 4);
+  CHECK_EQ(vm.var(V(2)), 7);
+  CHECK_EQ(vm.var(V(3)), 0x3FFF * 101 >> 15);
+  CHECK_EQ(vm.var(V(4)), 0);
+}
+
+// The default generator is the game's rand() step: state * 0x41C64E6D + 0x3039, bits 16..30. Every 32-bit state that gives the
+// first draw is stepped through the next three; one must reproduce all of them.
+void test_default_rand() {
+  Asm script;
+  const u16 init = script.here();
+  for (int k = 0; k < 4; ++k) script.raw({0x1E}).word(V(k));
+  script.stop();
+  NullHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  for (int k = 0; k < 4; ++k) CHECK(vm.var(V(k)) >= 0 && vm.var(V(k)) <= 0x7FFF);
+  const u32 first = static_cast<u32>(vm.var(V(0)));
+  bool chained = false;
+  for (u32 low = 0; low < 0x20000 && !chained; ++low) {
+    u32 state = (low >> 16 << 31) | (first << 16) | (low & 0xFFFF);
+    chained = true;
+    for (int k = 1; k < 4 && chained; ++k) {
+      state = state * 0x41C64E6Du + 0x3039u;
+      chained = static_cast<s32>((state >> 16) & 0x7FFF) == vm.var(V(k));
+    }
+  }
+  CHECK(chained);
 }
 
 // Every table row decodes to a legal length and has a VM handler; linear ops advance exactly their length.
@@ -883,7 +1009,8 @@ void test_stuck_watchdog() {
 }  // namespace
 
 // 3C (model entity), A9 (target resolves) and FE 78 (song started) each add 1 to the tick budget: behind a WAIT_FRAME, the op and
-// 8 INCs run in one tick; 3C on an entity without a 3D model adds nothing. While the room-entry window is open 3C / A9 wait.
+// 8 INCs run in one tick; 3C on an entity without a 3D model (every entity at load, until 0E / 0F / D1 give it one) adds nothing.
+// While the room-entry window is open 3C / A9 wait.
 void test_budget_bonus_and_entry_window() {
   struct WindowHost : TestHost {
     int window_ticks = 0;
@@ -901,7 +1028,8 @@ void test_budget_bonus_and_entry_window() {
     TestHost host;
     FieldVM vm(host);
     vm.load(make_module(script, {{}, {{{1, upd}}}}));
-    if (no_model) vm.entity(1).flags38 |= flag38::kNo3dObject;
+    CHECK(vm.entity(1).flags38 & flag38::kNo3dObject);
+    if (!no_model) vm.entity(1).flags38 &= ~flag38::kNo3dObject;
     vm.tick();
     vm.tick();
     CHECK_EQ(vm.var(V(0)), no_model ? 7 : 8);
@@ -1072,14 +1200,18 @@ int main() {
   test_call_return();
   test_budget_and_default_restart();
   test_wait_scheduling();
+  test_music_cues();
   test_priority_preemption();
   test_blocking_run_script();
   test_run_script_and_wait();
   test_party_slot_and_choice_result();
+  test_e2_culled_speaker();
   test_dialogue_none_speaker();
   test_commit_relinks_new_member();
   test_load_animation_resolves_entity();
   test_scenario_and_rng();
+  test_rand_range();
+  test_default_rand();
   test_opcode_table();
   test_get_position_order();
   test_ca_faces_the_next_walk();

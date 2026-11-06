@@ -144,11 +144,6 @@ static std::string rar5_file(const std::string& name, const std::string& data) {
   return out + header(body);
 }
 
-static std::string read_text(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
-  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
-
 static const vfs::Mod* find_mod(const vfs::ModManager& mods, const std::string& name) {
   for (const vfs::Mod& mod : mods.mods())
     if (mod.name == name) return &mod;

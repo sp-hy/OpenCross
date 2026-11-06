@@ -105,6 +105,8 @@ bool BattleView::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spri
 
 void BattleView::unload_scene() {
   for (Visual& visual : vis_) visual = Visual{};
+  tex_flips_.clear();
+  tex_flip_setup_ = {};
   showcase_.clear();
   entry_shown_.fill(false);
   ghost_view_.fill(false);

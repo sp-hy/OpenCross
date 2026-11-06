@@ -2,9 +2,11 @@
 // Pose of one battle model: plays the clips the animation-sequence scripts select (battle_seq.h SetAnim: id < 0x80 = the model's own
 // s4 clip, id >= 0x80 = clip id-0x80 of its at0.prd) with the engine blend (the previous clip keeps running while the new one fades
 // in over `blend` ticks) and builds the joint palette for MeshPipeline. 15 keyframes per second = 0.25 per 60 Hz tick.
+#include <algorithm>
 #include <vector>
 
 #include "assets/model.h"
+#include "game/head_turn.h"
 #include "render/mat4.h"
 
 namespace oc::game {
@@ -110,6 +112,18 @@ class UnitPose {
   float step_per_tick() const { return speed_; }
   bool joint_now(int point, float alpha, float& x, float& y, float& z) const;
 
+  // Head turn (anmseq ops 0x88 / 0x89, the head-turn callback of head_turn.h on the joint of attach point 1). head_look: the head follows
+  // `target` (model space, y down) at `rate` (1..0xFFF; else the old rate is kept), starting from the model's forward axis when it is
+  // not turning yet. head_target: a new target, nothing else. head_release: the target becomes the point 0x1000 straight ahead of attach
+  // point 1 (model -z) and the callback goes once the head has settled. One step per tick().
+  void head_look(const float target[3], int rate);
+  void head_target(const float target[3]) { std::copy(target, target + 3, head_target_); }
+  void head_release();
+  bool head_active() const { return head_.active; }
+  // Current head angles (4096 per turn): ax about the head joint's x, az the nod.
+  float head_ax() const { return head_.ax; }
+  float head_az() const { return head_.az; }
+
  private:
   struct Local {
     assets::Vec3 rot, trans;
@@ -131,6 +145,13 @@ class UnitPose {
     int sleft = 0;
   };
   JointOv* ov(int joint, bool create);
+  // The joint of attach point 1, -1 without one.
+  int head_joint() const;
+  // The head frame (rotation of the head joint's parent composite x its rest local, scale removed) and attach point 1, model space.
+  bool head_frame(float rot[9], float face[3]) const;
+  void head_step();
+  HeadTurn head_;
+  float head_target_[3]{};
   // Indexed by joint; empty until an op asks.
   std::vector<JointOv> ov_;
 

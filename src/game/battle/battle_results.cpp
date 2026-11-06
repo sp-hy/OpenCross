@@ -783,7 +783,7 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
   impl.gain_list.clear();
   for (size_t i = 0; i < finished.party().size() && i < battle::kPcSlots; ++i) {
     const battle::PartyMember& member = finished.party()[i];
-    const battle::Unit& unit = finished.unit(static_cast<int>(i));
+    const battle::Unit unit = finished.exit_unit(static_cast<int>(i));
     Impl::Row& row = impl.rows[i];
     row.present = unit.present;
     if (!row.present) continue;

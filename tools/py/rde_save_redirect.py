@@ -17,6 +17,7 @@ usage:
   --shot        screenshot of the window after the keys (640x512)
   --lang        game language, 0 en 1 fr 2 it 3 de 4 es 5 jp: written to Language= of the scratch config.ini before boot (the game reads it
                 only at boot, so it cannot be combined with --attach)
+  --graphics    art mode, 0 original 1 HD: written to GraphicsMode= of the scratch config.ini before boot (read only at boot)
   --keep-open   leave the game running; otherwise only the process this tool started is killed
 Library: launch(), Rde(pid).redirect(path), Rde.replace_card1(data), check_save_path(path).
 Run from the repo root (it imports tools/rde_win.py for the window helpers).
@@ -97,9 +98,10 @@ def check_real_saves(before):
         raise SystemExit("REAL SAVE FOLDER CHANGED during the run: " + ", ".join(changed))
 
 
-def reset_sandbox(save=None, language=None):
+def reset_sandbox(save=None, language=None, graphics=None):
     """Empties the scratch folder the patched game uses, then gives each Steam id the test save and the real config (with Language=
-    set to `language` when given), so the boot, which runs before any redirect, reads and writes only these copies."""
+    set to `language` and GraphicsMode= to `graphics` when given), so the boot, which runs before any redirect, reads and writes only
+    these copies."""
     root = os.path.join(documents(), SANDBOX, GAME_SUBDIR)
     shutil.rmtree(os.path.dirname(root), ignore_errors=True)
     real = os.path.join(documents(), "My Games", GAME_SUBDIR, "Steam")
@@ -110,10 +112,13 @@ def reset_sandbox(save=None, language=None):
         if os.path.isfile(config):
             scratch = os.path.join(folder, "config.ini")
             shutil.copyfile(config, scratch)
-            if language is not None:
+            if language is not None or graphics is not None:
                 with open(scratch, "r", encoding="utf-8") as fh:
                     text = fh.read()
-                text = re.sub(r"(?m)^Language=.*$", "Language=%d" % language, text, count=1)
+                if language is not None:
+                    text = re.sub(r"(?m)^Language=.*$", "Language=%d" % language, text, count=1)
+                if graphics is not None:
+                    text = re.sub(r"(?m)^GraphicsMode=.*$", "GraphicsMode=%d" % graphics, text, count=1)
                 with open(scratch, "w", encoding="utf-8", newline="") as fh:
                     fh.write(text)
         if save and os.path.isfile(save):
@@ -149,10 +154,10 @@ def sandbox_save_path(process):
         raise SystemExit("the save folder string did not change: refusing to run")
 
 
-def launch(save=None, startupinfo=None, language=None):
+def launch(save=None, startupinfo=None, language=None, graphics=None):
     """Starts CHRONOCROSS.exe from the game folder in the scratch save folder and returns the Popen. Never starts it unpatched."""
     env = dict(os.environ, SteamAppId=STEAM_APP_ID, SteamGameId=STEAM_APP_ID)
-    reset_sandbox(save, language)
+    reset_sandbox(save, language, graphics)
     process = subprocess.Popen([os.path.join(GAME_DIR, "CHRONOCROSS.exe")], cwd=GAME_DIR, env=env, startupinfo=startupinfo, creationflags=CREATE_SUSPENDED)
     try:
         sandbox_save_path(process)
@@ -267,10 +272,11 @@ def main():
     ap.add_argument("--attach", action="store_true")
     ap.add_argument("--keep-open", action="store_true")
     ap.add_argument("--lang", type=int)
+    ap.add_argument("--graphics", type=int)
     args = ap.parse_args()
 
-    if args.lang is not None and args.attach:
-        raise SystemExit("--lang is read at boot: it cannot be combined with --attach")
+    if (args.lang is not None or args.graphics is not None) and args.attach:
+        raise SystemExit("--lang and --graphics are read at boot: they cannot be combined with --attach")
     save = check_save_path(args.save)
     if not os.path.isfile(save):
         raise SystemExit("save file not found: " + save)
@@ -289,7 +295,7 @@ def main():
         pid = pids[0]
     else:
         before = real_save_hashes()
-        proc = launch(save, language=args.lang)
+        proc = launch(save, language=args.lang, graphics=args.graphics)
         pid = proc.pid
         print("started pid", pid)
         time.sleep(args.title_wait)

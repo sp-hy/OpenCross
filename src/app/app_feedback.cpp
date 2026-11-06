@@ -1,7 +1,8 @@
 // The scene target into the window, with the field's damage-floor jolt and the encounter feed-back pass (sequence ops 3E / 40):
 // out(n) = 0.5 * scene(n) + 0.5 * zoom(out(n - 1)) about the projection centre; the zoom / translation / colour / ABR are the
 // sequence's (SeqPost). One step per game tick, repeated frames show the step again. After the battle-start white one strip pass runs
-// per update from the update's anchor (the previous update's finished output).
+// per update from the update's anchor (the previous update's finished output). The FE 14 frame echo is the same pass with the
+// previous output scaled and turned by FE 12 / FE 13 (FieldWorld::frame_echo_point).
 #include "app/app.h"
 
 #include <algorithm>
@@ -269,8 +270,35 @@ void App::feedback_field_pass(const SceneFrame& sf, const FeedbackRect& rect) {
   const float mode_gain = jolt.mode == 3 ? 0.25f : 1.0f;
   const u8 a = jolt.mode == 0 ? 128 : 255;
   sprites.set_blend(jolt.mode == 1 || jolt.mode == 3 ? render::BlendMode::Add : jolt.mode == 2 ? render::BlendMode::Subtract : render::BlendMode::Alpha);
-  sprites.draw(fb_have ? fb_set[1 - fb_cur] : sset, dx * rect.fx, dy * rect.fy, rect.pw * js * rect.fx, rect.ph * js * rect.fy, rect.u0, rect.v0, rect.u1, rect.v1,
-               render::pack_rgba(c8(jolt.rgb[0], mode_gain), c8(jolt.rgb[1], mode_gain), c8(jolt.rgb[2], mode_gain), a));
+  const render::TexRef prev = fb_have ? fb_set[1 - fb_cur] : sset;
+  const u32 colour = render::pack_rgba(c8(jolt.rgb[0], mode_gain), c8(jolt.rgb[1], mode_gain), c8(jolt.rgb[2], mode_gain), a);
+  if (jolt.echo) {
+    // The frame echo: five strips side by side (64 columns each in 4:3), each corner projected about the field's projection centre.
+    // The texture rectangle is the picture rectangle itself (no half-texel inset), so scale 1.0 copies the picture in place.
+    constexpr int kStrips = 5;
+    const float eu0 = rect.px0 / static_cast<float>(rect.tw) * rect.fx, eu1 = (rect.px0 + rect.pw) / static_cast<float>(rect.tw) * rect.fx;
+    const float ev0 = rect.py0 / static_cast<float>(rect.th) * rect.fy, ev1 = (rect.py0 + rect.ph) / static_cast<float>(rect.th) * rect.fy;
+    const float ecx = rect.lb.ox + 160.0f * rect.lb.scale, ecy = rect.lb.oy + 120.0f * rect.lb.scale_y;
+    auto corner = [&](float wx, float wy, float* xy) {
+      float x = (wx - ecx) / rect.lb.scale, y = (wy - ecy) / rect.lb.scale_y;
+      game::FieldWorld::frame_echo_point(jolt, ue, x, y);
+      xy[0] = (ecx + x * rect.lb.scale) * rect.fx;
+      xy[1] = (ecy + y * rect.lb.scale_y) * rect.fy;
+    };
+    for (int i = 0; i < kStrips; ++i) {
+      const float sx0 = rect.px0 + rect.pw * static_cast<float>(i) / kStrips, sx1 = rect.px0 + rect.pw * static_cast<float>(i + 1) / kStrips;
+      const float su0 = eu0 + (eu1 - eu0) * static_cast<float>(i) / kStrips, su1 = eu0 + (eu1 - eu0) * static_cast<float>(i + 1) / kStrips;
+      float xy[8];
+      corner(sx0, rect.py0, xy);
+      corner(sx1, rect.py0, xy + 2);
+      corner(sx0, rect.py0 + rect.ph, xy + 4);
+      corner(sx1, rect.py0 + rect.ph, xy + 6);
+      const float uv[8] = {su0, ev0, su1, ev0, su0, ev1, su1, ev1};
+      sprites.draw_quad(prev, xy, uv, colour);
+    }
+  } else {
+    sprites.draw(prev, dx * rect.fx, dy * rect.fy, rect.pw * js * rect.fx, rect.ph * js * rect.fy, rect.u0, rect.v0, rect.u1, rect.v1, colour);
+  }
   sprites.set_blend(render::BlendMode::Alpha);
   sprites.end();
   ff.set_scissor(ff.full());

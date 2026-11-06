@@ -949,7 +949,9 @@ Mesh parse_mesh(ByteSpan data, float tw, float th) {
         mesh.tri_quad.push_back(2);
         ++mesh.quad_count;
       }
-      if (mesh.submeshes.empty() || mesh.submeshes.back().material != mi) mesh.submeshes.push_back({mi, first, 0});
+      const bool not_gouraud_textured = !(tex && gour);
+      if (mesh.submeshes.empty() || mesh.submeshes.back().material != mi || mesh.submeshes.back().not_gouraud_textured != not_gouraud_textured)
+        mesh.submeshes.push_back({mi, first, 0, not_gouraud_textured});
       mesh.submeshes.back().index_count += static_cast<u32>(mesh.indices.size()) - first;
       ++faces;
     }
@@ -1009,8 +1011,11 @@ bool apply_battle_hd_tim(ModelAsset& asset, ByteSpan tim) {
   if (asset.textures.empty() || asset.main_texture_count == 0) return false;
   const Image& page = asset.textures[0];
   if (page.indexed || !page.width || !page.height) return false;
-  auto full = load_hd_tim(tim);
-  if (!full || full->indexed) return false;
+  const auto parsed = parse_tim(tim);
+  auto decoded = parsed ? decode_tim(*parsed, 0, true) : std::nullopt;
+  if (!decoded || !decoded->width || !decoded->height) return false;
+  std::vector<u32> palette = decoded->indexed ? decoded->palette : std::vector<u32>{};
+  const std::optional<Image> full = decoded->indexed ? to_rgba(*decoded) : std::move(*decoded);
   const u32 half_width = full->width / 2;
   if (half_width % page.width || full->height % page.height) return false;
   const u32 scale = half_width / page.width;
@@ -1025,6 +1030,7 @@ bool apply_battle_hd_tim(ModelAsset& asset, ByteSpan tim) {
   open.pixels.resize(static_cast<size_t>(open.width) * open.height * 4);
   copy_rect(open, 0, 0, 0, 0, open.width, open.height);
   asset.hd_scale = scale;
+  asset.hd_palette = std::move(palette);
   asset.hd_textures.assign(asset.textures.size(), Image{});
   asset.hd_textures[0] = std::move(open);
   const size_t strip_index = asset.main_texture_count;

@@ -355,6 +355,16 @@ bool BattleView::fx_begin() {
   cb.actor_busy = [this] { return fx_actor_busy(); };
   cb.ambient = [this](int r, int g, int b, int ticks) { fx_ambient_set(r, g, b, ticks); };
   cb.stage = [this](int stage) { fx_swap_stage(stage); };
+  // The swapped-in stage's first sound entry, played as the engine plays a pointer-played sound file: mask 0x100, pan 0x80, volume 0x7F.
+  cb.stage_sound = [this] {
+    if (!fx_stage_sound_.empty()) audio_.play(fx_stage_sound_, 0x7F, 0x80 / 2, 0x100);
+  };
+  cb.stage_shot = [this](char tag, u32 roll) {
+    std::vector<std::string> shots;
+    for (const std::string& shot : fx_stage_shots_)
+      if (!shot.empty() && shot.front() == tag) shots.push_back(shot);
+    if (!shots.empty()) camera_.select(shots[roll % shots.size()]);
+  };
   cb.form = [this](int ph) { fx_form_phase(ph); };
   cb.pose = [this](int unit, int pose) { fx_set_pose(unit, pose); };
   cb.song = [this](int song) { audio_.play_song(song); };

@@ -20,8 +20,17 @@ int EmitterSystem::Impl::spawn(size_t hi, const Basis* parent) {
   }
   Header& header = headers[hi];
   const assets::Emitter& emitter = *header.def;
+  // Header flag bit 10 places the object at the top of the arena.
+  if (emitter.flags & (1u << 10)) heap.search_from_top();
+  const s64 node = heap.alloc(header.huge ? 0xFC : header.big ? 0xD8 : 0x94);
+  if (node < 0) {
+    ++st.dropped;
+    return -1;
+  }
   Object obj;
   obj.owner = static_cast<int>(hi);
+  obj.heap_node = static_cast<u32>(node);
+  obj.heap_held = true;
   const Basis* par = parent;
   // local_par = op 39 result, anchor_par = op 30 result.
   Basis local_par;
@@ -502,7 +511,7 @@ int EmitterSystem::Impl::spawn(size_t hi, const Basis* parent) {
     obj.light_slot = static_cast<s8>(slot == 3 ? 2 : slot);
     for (Object& other : objs)
       if (other.alive && other.stype == 17 && other.light_slot == obj.light_slot && other.light_name && obj.light_name && *other.light_name == *obj.light_name)
-        other.alive = false;
+        release(other);
   }
   if (obj.life == 0) {
     // A persistent object replaces the header's earlier objects, and the header leaves the firing list
@@ -582,26 +591,26 @@ int EmitterSystem::Impl::fire(size_t hi, const Basis* parent) {
   if (oi >= 0 && pending_child >= 0) {
     const int child = pending_child;
     pending_child = -1;
-    const Object parent = objs[static_cast<size_t>(oi)];
+    const Object source = objs[static_cast<size_t>(oi)];
     Basis basis;
     const Header& header = headers[hi];
     bool found = false;
     int sc = 0;
     if (header.has_basis_op) basis = actor_basis(header.basis_sel[0], header.basis_sel[1], header.basis_sel[2], header.basis_sel[3], sc, found);
-    else basis.m = Mat3::from_angles(0, -ratan2(parent.vel[2] >> 4, parent.vel[0] >> 4), 0);
-    basis.t = {static_cast<float>(parent.pos[0] >> 16), static_cast<float>(parent.pos[1] >> 16), static_cast<float>(parent.pos[2] >> 16)};
+    else basis.m = Mat3::from_angles(0, -ratan2(source.vel[2] >> 4, source.vel[0] >> 4), 0);
+    basis.t = {static_cast<float>(source.pos[0] >> 16), static_cast<float>(source.pos[1] >> 16), static_cast<float>(source.pos[2] >> 16)};
     const int reps = headers[static_cast<size_t>(child)].def->repeat;
     for (int k = 0; k <= reps && reps >= 0; ++k) {
       const int ci = spawn(static_cast<size_t>(child), &basis);
       if (ci < 0) break;
       Object& child_obj = objs[static_cast<size_t>(ci)];
       if (child_obj.life == 0) {
-        child_obj.alive = false;
+        release(child_obj);
       } else {
-        if (parent.flags & kFlagInheritAngle) for (int i = 0; i < 3; ++i) child_obj.ang[i] = parent.ang[i];
-        if (parent.flags & kFlagInheritVel) for (int i = 0; i < 3; ++i) child_obj.vel[i] = parent.vel[i];
-        if (parent.flags & kFlagInheritScale) for (int i = 0; i < 3; ++i) child_obj.scale[i] = parent.scale[i];
-        if (parent.flags & kFlagInheritColor) for (int i = 0; i < 3; ++i) child_obj.col[i] = parent.col[i];
+        if (source.flags & kFlagInheritAngle) for (int i = 0; i < 3; ++i) child_obj.ang[i] = source.ang[i];
+        if (source.flags & kFlagInheritVel) for (int i = 0; i < 3; ++i) child_obj.vel[i] = source.vel[i];
+        if (source.flags & kFlagInheritScale) for (int i = 0; i < 3; ++i) child_obj.scale[i] = source.scale[i];
+        if (source.flags & kFlagInheritColor) for (int i = 0; i < 3; ++i) child_obj.col[i] = source.col[i];
         build_matrix(child_obj);
         for (int i = 0; i < 3; ++i) { child_obj.ppos[i] = child_obj.pos[i]; child_obj.pang[i] = child_obj.ang[i]; child_obj.pscale[i] = child_obj.scale[i]; child_obj.pcol[i] = child_obj.col[i]; }
       }
@@ -621,7 +630,11 @@ void EmitterSystem::Impl::die(size_t idx, bool spawn_children) {
   Object dying = objs[idx];
   objs[idx].alive = false;
   ++st.died;
-  if (!spawn_children || dying.death < 0 || depth >= kMaxDepth) return;
+  // The death children are spawned before the dying object's block is freed.
+  if (!spawn_children || dying.death < 0 || depth >= kMaxDepth) {
+    release(objs[idx]);
+    return;
+  }
   const bool add_pos = (dying.flags & (1u << 19)) != 0;
   Basis basis;
   const Header* owner = dying.owner >= 0 && static_cast<size_t>(dying.owner) < headers.size() ? &headers[static_cast<size_t>(dying.owner)] : nullptr;
@@ -642,7 +655,7 @@ void EmitterSystem::Impl::die(size_t idx, bool spawn_children) {
     if (ci < 0) break;
     Object& child_obj = objs[static_cast<size_t>(ci)];
     if (child_obj.life == 0) {
-      child_obj.alive = false;
+      release(child_obj);
       continue;
     }
     child_obj.skip_step = true;
@@ -666,6 +679,7 @@ void EmitterSystem::Impl::die(size_t idx, bool spawn_children) {
     build_matrix(child_obj);
     for (int i = 0; i < 3; ++i) { child_obj.ppos[i] = child_obj.pos[i]; child_obj.pang[i] = child_obj.ang[i]; child_obj.pscale[i] = child_obj.scale[i]; child_obj.pcol[i] = child_obj.col[i]; }
   }
+  release(objs[idx]);
 }
 
 }  // namespace oc::effects

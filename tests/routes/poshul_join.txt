@@ -18,7 +18,8 @@
 - tap confirm
 - mash until menu open 3000
 - wait 30
-- tap start
+- tap down
+- tap confirm                         # Confirm
 - wait 2
 - assert gap 2 10 0 12
 - wait 60

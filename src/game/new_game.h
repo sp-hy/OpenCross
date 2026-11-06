@@ -72,5 +72,12 @@ int growth_column(const data::GameTables* tables, const save::SaveSlot& slot, in
 // target; with 99 stars all 0. Then the 8 host words `pip_masks` are ORed into Pip's masks (and unlock those cells): the masks of the
 // save Continue+ loaded, null = 0 (New Game+).
 void rde_playinit_end(const data::GameTables* tables, save::SaveSlot& slot, const std::array<u16, 8>* pip_masks, u32 seed);
+// RDE's Pip stat sync, only with 99 stars and Pip in a form 0x2B..0x30: max HP and the six stats become the lv99para.bin record of
+// the form, the current HP moves with max HP (clamped 0..the new max HP), the HP and stat snapshots take the new values; the pending
+// growth words stay. Runs after a fight that changed Pip's form and on a card load whose ext_save.dat pair is not valid.
+void pip_form_stats(const data::GameTables* tables, save::SaveSlot& slot);
+// After a fight that changed Pip's form at 99 stars: his masks gain those of a full 99-star growth in the form, the new-game masks
+// plus every el_mask cell of the form's growth column (no cell-existence test).
+void pip_form_unlocks(const data::GameTables* tables, save::SaveSlot& slot);
 
 }  // namespace oc::game::newgame

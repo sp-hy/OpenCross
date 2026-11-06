@@ -88,6 +88,8 @@ class AkaoPlayer {
   void fade_sfx_volume(u32 mask, int frames, int volume127);
   // SFX tick rate multiplier (fast / slow mode); 1 = the normal rate.
   void set_tempo_scale(double scale) { tempo_scale_ = scale; }
+  // Monaural output: every voice takes the pan table's centre gain on both sides, whatever its pan (the reverb stays stereo).
+  void set_mono(bool on) { mono_ = on; }
   // Union of the masks of the running SFX channels.
   u32 active_sfx_mask() const;
   // SPU reverb: mode = libspu type, depth = vLOUT/vROUT (s16). Music sets both itself (header +8, FE 02 / FE 03);
@@ -146,12 +148,16 @@ class AkaoPlayer {
     int level = 0;
   };
   VoiceProbe probe_voice(int index) const;
-  // Diagnostics (tests): one channel slot's program position and its vibrato / tremolo / autopan rate words and reload counters.
+  // Diagnostics (tests): one channel slot's program position, its vibrato / tremolo / autopan rate words and reload counters, its
+  // ADSR words, pan and reverb flag.
   struct ChannelProbe {
     bool active = false;
     u32 pc = 0;
     u32 rate[3] = {};
     int counter[3] = {};
+    u16 adsr[2] = {};
+    u16 pan = 0;
+    bool reverb = false;
   };
   ChannelProbe probe_channel(int index) const;
 
@@ -205,7 +211,8 @@ class AkaoPlayer {
     u32 ret_pc = 0;
     int len_left = 0, gate_left = 0;
     int octave = 0, transpose = 0;
-    int a2_len = 0, fixed_len = 0, last_len = 0;
+    // DC fixed length (0 = none) and the length of the last note, tie or rest (A2 sets it too): DC's base.
+    int fixed_len = 0, last_len = 0;
     bool legato = false, full_length = false, tenuto = false;
     // FE 13: a resumed music context does not key this channel's note on again (kept until the song is loaded again).
     bool no_rekey = false;
@@ -219,9 +226,18 @@ class AkaoPlayer {
     int inst_index = 0;
     const Instrument* inst = nullptr;
     u16 adsr1 = 0, adsr2 = 0;
+    // AD / B1 / B2 set an override bit (attack 1, sustain rate 2, release rate 4): a keymap or patch-zone note keeps the channel's
+    // value. A1, FE 0A, B3, FE 04 and a valid FE 14 clear them.
+    int adsr_override = 0;
     bool drum = false;
     int patch = -1;
     std::vector<AkaoZone> zones;
+    // The zone the last key-on picked (-1: rescan at the next key-on, set by FE 14).
+    int zone = -1;
+    // FE 1D / 1E (initially the header's +0x24 bit): the channel's voice searches start at voice 0, inside the FE 10 reserve.
+    bool reserved_voices = false;
+    // Header gate-mask bit: the hardware voice this channel always plays on (-1 = it searches).
+    int fixed_voice = -1;
     // volume / pan
     s32 volume = 0x3FFF0000;
     u16 balance = 0x7F00;
@@ -238,7 +254,6 @@ class AkaoPlayer {
     int keyon_slide_len = 0, keyon_slide_step = 0;
     int bal_slide_left = 0, bal_slide_step = 0;
     int pan_slide_left = 0, pan_slide_step = 0;
-    int drum_pan = -1;  // keymap pan override for the current note
     int zone_scale = 0;  // instrument volume scale (v * scale >> 7), 0 = none
     // pitch
     int fine_tune = 0;
@@ -258,8 +273,9 @@ class AkaoPlayer {
     int bend_note = 0;
     const Instrument* bend_inst = nullptr;
     Lfo vib, trem, apan;
-    // SPU pitch modulation (FM, C6 / C7 / D2 / D3): only the second program of an SFX pair (flag 0x10000) is a carrier;
-    // its voice sits right after the first program's voice and is modulated by that voice's output (hardware PMON: voice n by n-1).
+    // SPU pitch modulation (FM, C6 / C7 / D2 / D3; hardware PMON: voice n by n-1): a music channel is modulated by whatever the voice
+    // before its own plays; of SFX channels only the second program of a pair (flag 0x10000) is a carrier, its voice right after the
+    // first program's.
     bool fm_carrier = false, fm = false;
     int fm_partner = -1, fm_delay = 0;
     // C4 / C5 / CE / CF: the voice outputs the SPU noise generator instead of its sample; CE / CF toggle it after noise_delay ticks.
@@ -286,6 +302,8 @@ class AkaoPlayer {
     bool noise = false;
     bool fm = false;   // pitch-modulated by voice fm_src (the carrier channel's C6 state, updated every 240 Hz step)
     int fm_src = -1;
+    // The 240 Hz update it was keyed in (the music voice search treats it as at full level during that update).
+    u32 keyed_at = ~0u;
     Env env;
     bool released = false;
     u64 started_at = 0;  // OC_SFX_TRACE
@@ -294,15 +312,17 @@ class AkaoPlayer {
 
   void tick_all();
   void tick_channel(Channel& channel);
+  void step_slides(Channel& channel);
   void run_ops(Channel& channel);
   void note_on(Channel& channel, int key);
   void start_bend(Channel& channel);
   void sync_voice_adsr(Channel& channel);
   void key_off(Channel& channel);
-  void end_channel(Channel& channel);
+  // release = false: the program's own end on an SFX channel, which leaves its voice sounding (no key-off).
+  void end_channel(Channel& channel, bool release = true);
   void update_channel(Channel& channel, int channel_index);
   void update_lfo(Channel& channel);
-  int alloc_voice();
+  int alloc_voice(int from);
   int alloc_voice_after(int prev);  // the voice right after `prev` for an FM carrier, or alloc_voice() when it is taken
   int dropped_ = 0, stolen_ = 0;
   int last_ch_ = -1;  // channel slot of the last start_program
@@ -323,6 +343,7 @@ class AkaoPlayer {
   std::array<Channel, kMaxChannels> ch_{};
   std::array<Voice, kVoices> voice_{};
   double tempo_scale_ = 1.0;
+  bool mono_ = false;
   double tempo_ = 0x10000;  // FE00 operand units; one sequencer tick per 0x10000 per 240 Hz update
   int tempo_slide_left = 0;
   double tempo_slide_step = 0;
@@ -343,6 +364,8 @@ class AkaoPlayer {
   // SPU noise generator (psx-spx): timer reload 0x20000 >> shift, step 4 + (clock & 3), 16-bit LFSR. The clock is the SFX one (AC from an
   // SFX channel) while any SFX channel runs, else the music one; range 0..0x3F.
   int noise_clock_sfx_ = 0, noise_clock_music_ = 0;
+  // FE 10: the first voice a music voice search may take (FE 1D channels search from 0).
+  int voice_reserve_ = 0;
   s32 noise_timer_ = 0;
   u16 noise_lfsr_ = 0;
   std::vector<s16> noise_buf_;

@@ -299,15 +299,18 @@ void BattleView::fx_dev_logs() {
       std::string jsc;
       for (size_t j = 0; visual.has_model && j < visual.pose.joint_override_count(); ++j)
         if (visual.pose.joint_scale(j) != 1.0f) jsc += std::format(" j{}:{:.0f}", j, visual.pose.joint_scale(j) * 4096.0f);
-      log::debug("  unit {:2d} flags7e {:04x} ghost {} col {:3.0f} {:3.0f} {:3.0f} pos {:6.0f} {:6.0f} {:6.0f} yaw {:4d} clip {} motion {:.2f} ({}/256) scale - - - r15 {:.0f} parthide {:x}{}{}",
+      // The head-turn angles (4096 = turn) while op 0x88's callback is on.
+      const std::string head = visual.pose.head_active() ? std::format(" head {:.0f} {:.0f}", visual.pose.head_ax(), visual.pose.head_az()) : "";
+      log::debug("  unit {:2d} flags7e {:04x} ghost {} col {:3.0f} {:3.0f} {:3.0f} pos {:6.0f} {:6.0f} {:6.0f} yaw {:4d} clip {} motion {:.2f} ({}/256) scale - - - r15 {:.0f} parthide {:x}{}{}{}",
                  unit, fl & 0xFFFF, gh ? 1 : 0, cl[0], cl[1], cl[2], pp[0], pp[1], pp[2], yaw, visual.pose.current_clip(),
-                 visual.pose.frame_cur(), static_cast<int>(visual.pose.frame_cur() * 256.0f), r15, parts, jsc.empty() ? "" : " jscale", jsc);
+                 visual.pose.frame_cur(), static_cast<int>(visual.pose.frame_cur() * 256.0f), r15, parts, jsc.empty() ? "" : " jscale", jsc, head);
     }
     const CamPose cp = camera_.pose(1.0f);
-    log::debug("fx camera tick {} eye {:.0f} {:.0f} {:.0f} tgt {:.0f} {:.0f} {:.0f} H {:.0f} fog {} near {:.0f} far {:.0f} rgb {:.0f} {:.0f} {:.0f} warp on {} ang {:.0f} {:.0f} {:.0f} trans {:.0f} {:.0f} {:.0f} col {:.0f} {:.0f} {:.0f} off {:.0f} {:.0f} abr {} slow {}/{}",
+    log::debug("fx camera tick {} eye {:.0f} {:.0f} {:.0f} tgt {:.0f} {:.0f} {:.0f} H {:.0f} fog {} near {:.0f} far {:.0f} rgb {:.0f} {:.0f} {:.0f} warp on {} ang {:.0f} {:.0f} {:.0f} trans {:.0f} {:.0f} {:.0f} col {:.0f} {:.0f} {:.0f} off {:.0f} {:.0f} abr {} slow {}/{} roll {:.0f}",
                frame_count_, cp.eye[0], -cp.eye[1], cp.eye[2], cp.target[0], -cp.target[1], cp.target[2], cp.h, fx_fog_on_ ? 1 : 0, fog_raw_.near, fog_raw_.far,
                fog_raw_.r, fog_raw_.g, fog_raw_.b, fx_warp_.on ? 1 : 0, fx_warp_.ang[0], fx_warp_.ang[1], fx_warp_.ang[2], fx_warp_.tr[0], fx_warp_.tr[1],
-               fx_warp_.tr[2], fx_warp_.rgb[0], fx_warp_.rgb[1], fx_warp_.rgb[2], fx_warp_.off[0], fx_warp_.off[1], fx_warp_.abr, fx_slow_x_, fx_slow_n_);
+               fx_warp_.tr[2], fx_warp_.rgb[0], fx_warp_.rgb[1], fx_warp_.rgb[2], fx_warp_.off[0], fx_warp_.off[1], fx_warp_.abr, fx_slow_x_, fx_slow_n_,
+               cp.roll_deg * 1024.0f / 360.0f);
   }
 }
 

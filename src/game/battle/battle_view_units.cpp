@@ -8,7 +8,9 @@
 #include <format>
 
 #include "core/log.h"
+#include "import/model.h"
 #include "import/text.h"
+#include "import/tim.h"
 
 namespace oc::game {
 
@@ -169,8 +171,9 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   // HP a battle script wrote to 0 is not a KO: the idle script stays up and reads the low-HP bit.
   if (unit_rec.hp_written_zero && unit_rec.hp <= 0) ctx.dead = false;
   // Flags: bit 0 dead, bit 9 (0x200) guarding (set by Defend, cleared when the PC's command menu opens: the idle script picks the block pose
-  // from it), bit 31 HP <= max / 4.
-  ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard ? 0x200u : 0u) | (((visual.zero_hp_actions >= 2 || visual.hp_shown * 4 <= unit_rec.max_hp) && !ctx.dead) ? 0x80000000u : 0u);
+  // from it), bit 31 HP <= max / 4 (or set by battle-script op 84 until the next hit).
+  ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard ? 0x200u : 0u) |
+              (((visual.zero_hp_actions >= 2 || visual.low_hp_forced || visual.hp_shown * 4 <= unit_rec.max_hp) && !ctx.dead) ? 0x80000000u : 0u);
   // Equipment bits set once per party unit (read by anmseq ops 0xA6 / 0xA7 / 0xA8 and by the sky pack): 0x2000 weapon
   // item 0x26 (Mastermune), 0x4000 any accessory 0xC1 (Hero's Shield), 0x8000 the hero set (Unit::hero_set).
   if (unit_rec.pc) {
@@ -200,7 +203,7 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   ctx.attrib = visual.attrib;
   // A Dopplegang creature form runs the creature's scripts.
   ctx.monster = !unit_rec.pc || unit_rec.form >= 0;
-  ctx.model_num = unit_rec.pc && unit_rec.form < 0 ? unit_rec.src_id : static_cast<int>(tables_->enemies[static_cast<size_t>(unit_rec.form >= 0 ? unit_rec.form : unit_rec.src_id)].model());
+  ctx.model_num = ModelCache::model_number(*tables_, unit_rec);
   ctx.yaw = static_cast<int>(std::lround(std::atan2(-visual.face_x, -visual.face_z) * (4096.0f / (2.0f * kPi)))) & 0xFFF;
   ctx.stand_x = static_cast<int>(visual.home_x);
   ctx.stand_z = static_cast<int>(visual.home_z);
@@ -214,7 +217,7 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   ctx.get_attach = [this](int list, int idx, int point, int& ox, int& oz, int& oy) {
     const int listed = script_list_unit(list, idx);
     effects::Vec3 world{};
-    if (listed < 0 || !const_cast<BattleView*>(this)->fx_attach_unit(listed, point, world)) return false;
+    if (listed < 0 || !const_cast<BattleView*>(this)->fx_attach_unit(listed, point, world, true)) return false;
     ox = static_cast<int>(std::lround(world[0]));
     oy = static_cast<int>(std::lround(world[1]));
     oz = static_cast<int>(std::lround(world[2]));
@@ -223,7 +226,7 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   // Op 0x8C: attach point of the running unit's own model.
   ctx.get_attach_self = [this, unit](int point, int& ox, int& oz, int& oy) {
     effects::Vec3 world{};
-    if (!const_cast<BattleView*>(this)->fx_attach_unit(unit, point, world)) return false;
+    if (!const_cast<BattleView*>(this)->fx_attach_unit(unit, point, world, true)) return false;
     ox = static_cast<int>(std::lround(world[0]));
     oy = static_cast<int>(std::lround(world[1]));
     oz = static_cast<int>(std::lround(world[2]));
@@ -572,6 +575,29 @@ void BattleView::on_script_event(int unit, const bseq::Event& event) {
       break;
     // Op 0x1D: emitters on an attach point (battle_view_anm.cpp).
     case K::Effect: anm_effect(unit, event); break;
+    case K::PoseWord: visual.script_pose = event.a; break;
+    case K::HeadLook: {
+      visual.head_unit = script_list_unit(event.a, event.b);
+      visual.head_point = event.c;
+      float target[3];
+      if (head_target_model(unit, target)) visual.pose.head_look(target, 0xE00);
+      break;
+    }
+    case K::HeadRelease:
+      visual.head_unit = -1;
+      visual.pose.head_release();
+      break;
+    case K::TexRect:
+      tex_flip_setup_.rect[static_cast<size_t>(event.b & 1)] = {event.off[0], event.off[1], event.off[2], event.d};
+      break;
+    case K::TexDest:
+      tex_flip_setup_.unit = script_list_unit(event.a == 0 ? 0 : 1, event.b);
+      tex_flip_setup_.dx = event.c;
+      tex_flip_setup_.dy = event.d;
+      break;
+    case K::TexFlip:
+      tex_flips_.push_back({tex_flip_setup_, {event.a, event.b}, 0, 1, event.c});
+      break;
     case K::Done:
       visual.script_done = true;
       if (event.a == 0x3E) move_wait_ = 0;
@@ -641,7 +667,10 @@ void BattleView::on_damage(int unit, bool number) {
     // A reaction script lights the unit itself (ops 0x64 / 0x5C / 0x5E).
     if (visual.script_kind != kReact) visual.flash = 1.0f;
   }
-  if (event.code != 2) visual.hp_shown = event.hp_after;
+  if (event.code != 2) {
+    visual.hp_shown = event.hp_after;
+    visual.low_hp_forced = false;
+  }
   // Pilfer or a status / field element (Frozen row 6): the record's btmes row opens the system message window
   // when the action ends (window 0 at (32, 144), 120 ticks); a whole-side cast queues one record (sys_req_ is shared).
   if (const int msg = event.steal_msg >= 0 ? event.steal_msg : event.sys_msg; msg >= 0) {
@@ -690,6 +719,115 @@ void BattleView::tick_links() {
     if (link.left > 0) --link.left;
   }
   std::erase_if(links_, [](const Link& link) { return link.left == 0; });
+}
+
+bool BattleView::head_target_model(int unit, float target[3]) {
+  const Visual& visual = vis_[static_cast<size_t>(unit)];
+  effects::Vec3 world{};
+  if (visual.head_unit < 0 || !visual.has_model || !fx_attach_unit(visual.head_unit, visual.head_point, world)) return false;
+  // fx_attach_unit gives PS1 y down; the unit matrix maps model space into the render world (y up): invert its affine part.
+  const render::Mat4 model = fx_unit_matrix(unit);
+  const float rel[3] = {world[0] - model.at(0, 3), -world[1] - model.at(1, 3), world[2] - model.at(2, 3)};
+  auto at = [&](int row, int col) { return model.at(row, col); };
+  const float det = at(0, 0) * (at(1, 1) * at(2, 2) - at(1, 2) * at(2, 1)) - at(0, 1) * (at(1, 0) * at(2, 2) - at(1, 2) * at(2, 0)) +
+                    at(0, 2) * (at(1, 0) * at(2, 1) - at(1, 1) * at(2, 0));
+  if (std::fabs(det) < 1e-9f) return false;
+  const float inverse[9] = {(at(1, 1) * at(2, 2) - at(1, 2) * at(2, 1)) / det, (at(0, 2) * at(2, 1) - at(0, 1) * at(2, 2)) / det,
+                            (at(0, 1) * at(1, 2) - at(0, 2) * at(1, 1)) / det, (at(1, 2) * at(2, 0) - at(1, 0) * at(2, 2)) / det,
+                            (at(0, 0) * at(2, 2) - at(0, 2) * at(2, 0)) / det, (at(0, 2) * at(1, 0) - at(0, 0) * at(1, 2)) / det,
+                            (at(1, 0) * at(2, 1) - at(1, 1) * at(2, 0)) / det, (at(0, 1) * at(2, 0) - at(0, 0) * at(2, 1)) / det,
+                            (at(0, 0) * at(1, 1) - at(0, 1) * at(1, 0)) / det};
+  for (int row = 0; row < 3; ++row) target[row] = inverse[row * 3] * rel[0] + inverse[row * 3 + 1] * rel[1] + inverse[row * 3 + 2] * rel[2];
+  return true;
+}
+
+void BattleView::tick_tex_flips() {
+  // Each copy is a GPU packet the task puts at the head of the frame's draw list: of two copies in one tick the older task's lands last.
+  for (auto it = tex_flips_.rbegin(); it != tex_flips_.rend(); ++it) {
+    TexFlip& flip = *it;
+    if (--flip.counter <= 0) {
+      flip.sel ^= 1;
+      flip.counter = flip.hold[static_cast<size_t>(flip.sel)];
+      tex_flip_paste(flip.setup.unit, flip.setup.dx, flip.setup.dy, flip.setup.rect[static_cast<size_t>(flip.sel)]);
+    }
+    --flip.left;
+  }
+  std::erase_if(tex_flips_, [](const TexFlip& flip) { return flip.left <= 0; });
+}
+
+void BattleView::tex_flip_paste(int unit, int dx, int dy, const std::array<int, 4>& rect) {
+  if (unit < 0 || unit >= battle::kUnits || !ctx_ || !fx_vram_ready()) return;
+  const Visual& visual = vis_[static_cast<size_t>(unit)];
+  if (!visual.has_model || !visual.model || !visual.model->gpu || visual.model->asset.textures.empty()) return;
+  assets::ModelAsset& asset = visual.model->asset;
+  render::MeshModel& gpu = *visual.model->gpu;
+  // A replacement texture has its own layout: the PS1 rect means nothing there.
+  if (asset.has_mod(0) || gpu.textures.empty() || !gpu.textures[0]) return;
+  import::Image& image = asset.textures[0];
+  if (image.indexed || image.pixels.size() < static_cast<size_t>(image.width) * image.height * 4u) return;
+  // The texels are CLUT indices: the model's own CLUT row 0 colours them, as its primitives draw them.
+  std::optional<import::AtimMain> own;
+  for (const char* ext : {".ltc", ".ltd"})
+    if (!own)
+      if (const auto bytes = vfs_->read_disc("cdrom/" + asset.source + ext)) own = import::load_atim_main(*bytes);
+  if (!own || own->clut.empty()) return;
+  const import::Vram& vram = fx_textures_.vram;
+  for (int row = 0; row < rect[3]; ++row)
+    for (int col = 0; col < rect[2] * 2; ++col) {
+      const int x = dx * 2 + col, y = dy + row;
+      if (x < 0 || y < 0 || x >= static_cast<int>(image.width) || y >= static_cast<int>(image.height)) continue;
+      const u16 index = vram.texel(rect[0] * 2 + col, rect[1] + row, 8);
+      import::store_rgba(&image.pixels[(static_cast<size_t>(y) * image.width + static_cast<size_t>(x)) * 4],
+                         index < own->clut.size() ? import::bgr555_to_rgba_stp(own->clut[index]) : 0u);
+    }
+  log::debug("battle: tick {} unit {} texture rect ({}, {}) {} x {} -> ({}, {})", tick_count_, unit, rect[0], rect[1], rect[2], rect[3], dx, dy);
+  gpu.textures[0]->update(*ctx_, render::bleed_transparent(image.pixels, image.width, image.height).data());
+  // The eye-blink variants are texture 0 with the shut-eye frames over it.
+  if (gpu.eye_base >= 0)
+    for (int frame = 1; frame <= 2; ++frame) {
+      const size_t index = static_cast<size_t>(gpu.eye_base + frame - 1);
+      const std::vector<u8> pixels = asset.eye_frame_pixels(image.pixels, image.width, image.height, frame);
+      if (index < gpu.textures.size() && gpu.textures[index] && !pixels.empty())
+        gpu.textures[index]->update(*ctx_, render::bleed_transparent(pixels, image.width, image.height).data());
+    }
+  tex_flip_paste_hd(*visual.model, dx, dy, rect);
+}
+
+// The same copy into the unit's HD texture: the pack's HD texels where it has them (FxPack::hd_texels), else its texels enlarged, coloured
+// with the palette of the unit's HD image.
+void BattleView::tex_flip_paste_hd(ModelHandle& model, int dx, int dy, const std::array<int, 4>& rect) {
+  assets::ModelAsset& asset = model.asset;
+  render::MeshModel& gpu = *model.gpu;
+  if (!asset.has_hd(0) || asset.hd_palette.empty() || gpu.hd_textures.empty() || !gpu.hd_textures[0]) return;
+  import::Image& image = asset.hd_textures[0];
+  const int scale = static_cast<int>(asset.hd_scale);
+  if (image.indexed || scale < 1 || image.pixels.size() < static_cast<size_t>(image.width) * image.height * 4u) return;
+  const FxPack::HdTexels* texels = fx_pack_ && fx_pack_->hd_texels ? &*fx_pack_->hd_texels : nullptr;
+  constexpr int kTexelScale = FxPack::HdTexels::kScale;
+  const import::Vram& vram = fx_textures_.vram;
+  for (int row = 0; row < rect[3] * scale; ++row)
+    for (int col = 0; col < rect[2] * 2 * scale; ++col) {
+      const int x = dx * 2 * scale + col, y = dy * scale + row;
+      if (x < 0 || y < 0 || x >= static_cast<int>(image.width) || y >= static_cast<int>(image.height)) continue;
+      const int src_x = rect[0] * 2 * scale + col, src_y = rect[1] * scale + row;
+      u16 index = vram.texel(src_x / scale, src_y / scale, 8);
+      if (texels) {
+        const int hd_x = (src_x - texels->x * 2 * scale) * kTexelScale / scale, hd_y = (src_y - texels->y * scale) * kTexelScale / scale;
+        if (hd_x >= 0 && hd_y >= 0 && hd_x < static_cast<int>(texels->indices.width) && hd_y < static_cast<int>(texels->indices.height))
+          index = texels->indices.pixels[static_cast<size_t>(hd_y) * texels->indices.width + static_cast<size_t>(hd_x)];
+      }
+      import::store_rgba(&image.pixels[(static_cast<size_t>(y) * image.width + static_cast<size_t>(x)) * 4],
+                         index < asset.hd_palette.size() ? asset.hd_palette[index] : 0u);
+    }
+  gpu.hd_textures[0]->update(*ctx_, render::bleed_transparent(image.pixels, image.width, image.height).data());
+  const size_t strip = asset.main_texture_count;
+  if (gpu.eye_base >= 0)
+    for (int frame = 1; frame <= 2; ++frame) {
+      const size_t index = static_cast<size_t>(gpu.eye_base + frame - 1);
+      const std::vector<u8> pixels = asset.eye_frame_pixels(image.pixels, image.width, image.height, frame, asset.has_hd(strip) ? &asset.hd_textures[strip] : nullptr);
+      if (index < gpu.hd_textures.size() && gpu.hd_textures[index] && !pixels.empty())
+        gpu.hd_textures[index]->update(*ctx_, render::bleed_transparent(pixels, image.width, image.height).data());
+    }
 }
 
 void BattleView::tick_units() {
@@ -756,6 +894,13 @@ void BattleView::tick_units() {
       }
     }
 
+    // Script ops B0 / B1: one tween pass every second tick, pass k moving the model by k steps.
+    if (visual.lift.dir != 0) {
+      ++visual.lift.tick;
+      if (visual.lift.tick % 2 == 1) visual.y -= static_cast<float>(visual.lift.dir * (visual.lift.tick + 1) / 2 * visual.lift.step);
+      if (visual.lift.tick >= battle::pac::kLiftTicks) visual.lift.dir = 0;
+    }
+
     if (visual.turn.on) {
       --visual.turn.left;
       const float blend = 1.0f - static_cast<float>(visual.turn.left) / static_cast<float>(visual.turn.total);
@@ -801,10 +946,16 @@ void BattleView::tick_units() {
     // frame-0 pose)
     // ... and the spawn script's hidden opening (hidden until op 0x19; the clip position stays 0 until the show), whose element tasks turn on
     // meanwhile (7star element 16 turns 64 per tick while hidden).
-    const bool spawn_hidden = visual.has_model && visual.spawn && anm_hidden(i);
-    const bool hidden_model = visual.has_model && ((ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) || spawn_hidden);
-    if (visual.has_model && hidden_model && !visual.pose.held()) visual.hold_x = visual.x, visual.hold_y = visual.y, visual.hold_z = visual.z;
+    // A model an animation script hid (Vital Force's jumps) is held the same way: an attach point read while it is hidden (op 0xAA's own
+    // attach 9) is where the model stood at its last visible pass, before the move that came with the hide.
+    const bool hidden_model = visual.has_model && ((ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) || anm_hidden(i));
+    if (visual.has_model && !hidden_model) {
+      visual.hold_x = visual.x, visual.hold_y = visual.y, visual.hold_z = visual.z;
+      visual.hold_fx = visual.face_x, visual.hold_fz = visual.face_z;
+    }
     if (visual.has_model) visual.pose.hold(hidden_model);
+    // Op 0x88's task: the head target follows the other unit's attach point.
+    if (float head_target[3]; visual.pose.head_active() && head_target_model(i, head_target)) visual.pose.head_target(head_target);
     // The element tasks are anm tasks (rotation, scale), not the motion step, so they also run on a script-ghosted model (the hidden Bomber's
     // wick joints scale 4096 -> 0 while it is off-stage).
     if (visual.has_model && !frozen && !hidden_model) visual.pose.tick();
