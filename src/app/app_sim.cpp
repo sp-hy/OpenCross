@@ -238,7 +238,17 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
 }
 
 // Applies what the flow asked for (New Game / Continue load a room, settings, quit).
-void App::apply_flow_action(const game::FlowAction& action) {
+void App::apply_flow_action(const game::FlowAction& flow_action) {
+  game::FlowAction action = flow_action;
+  // New Game goes where the title script's jump says (game_flow.h: #22 #0 as shipped), so a mod's title script can start elsewhere.
+  if (action.load_room && action.movie_row == game::kNewGameMovieRow && world_ok && world.room_name() == game::kTitleRoom) {
+    int room_id = -1, param = 0;
+    if (world.script_map_jump(room_id, param) && room_id != game::kNewGameRoomId) {
+      log::info("flow: New Game starts in room {} entrance {} (the title script's jump)", room_id, param);
+      action.room_id = room_id;
+      action.param = param;
+    }
+  }
   // After a load / Continue / New Game the next tick only records the location.
   if (action.state_changed && flow.state() != game::FlowState::Opening) autosave.note_load();
   if (action.quit) quit_requested = true;
