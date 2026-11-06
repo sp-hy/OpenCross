@@ -1,0 +1,77 @@
+# Party swap with KeepLineup (party_swap_keep.ini): as party_swap.txt, but R1 moves the menu to the second PC (Glenn, not locked by
+# FE 5D), who swaps with the first reserve member; the next PC runs away; the field party keeps the newcomer (log: keeps the lineup).
+# Shots: psk_01 field, psk_02 cursor on Swap, psk_03 the list, psk_04 the swap's fade, psk_05 the newcomer in, psk_06 field after the battle.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # memory card 1 (the encounter route's file)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # the encounter route's file
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- screenshot psk_01_field.png
+- request battle 1
+- wait battle start 900
+- wait 30
+- tap confirm                         # skip the intro shots
+- wait 400
+- assert battle menu 0 000            # Serge's top menu takes input
+- tap right                           # R1: the second PC's menu
+- wait 30
+- assert battle menu 1 000
+- screenshot psk_01b_menu.png
+- tap down
+- wait 8
+- tap down
+- wait 8
+- tap down
+- wait 8
+- screenshot psk_02_cursor_swap.png
+- tap confirm                         # Swap: the list opens
+- wait 20
+- screenshot psk_03_list.png
+- tap confirm                         # the first reserve member
+- wait 16
+- screenshot psk_04_fade.png
+- wait 60
+- screenshot psk_05_swapped.png
+- wait 60
+- tap down
+- wait 8
+- tap down
+- wait 8
+- tap down
+- wait 8
+- tap down
+- wait 8
+- tap confirm                         # Run Away
+- wait battle results 900
+- wait 60
+- tap confirm                         # the results pages
+- wait 40
+- tap confirm                         # the results pages
+- wait 40
+- tap confirm                         # the results pages
+- wait 40
+- tap confirm                         # the results pages
+- wait 40
+- wait battle end 900
+- wait idle 900
+- wait 30
+- screenshot psk_06_field_after.png
+- quit

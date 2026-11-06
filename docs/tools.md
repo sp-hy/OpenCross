@@ -186,6 +186,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--sliced` | none | off | Load in 3 ms slices per frame (the field encounter's way); logs the longest slice. |
 | `--cam` | none | off | Camera overlay on (F3 / F9 toggle). |
 | `--party` | `a[,b[,c]]` | `0,1,22` | Character ids; slot 0 = the acting PC (it makes `--cast` / `--weapon`). The battle seats the party in this order, so `--caster`, `--casttgt`, `--cast2tgt` and `--ko` values 0..2 are slots of this list and units alike. |
+| `--swap` | `a[,b...]` | none | Party swap on (`docs/formats/mods.md` section 8): these character ids sit on the bench as the reserve; the command menu gets its Swap row. |
 | `--kind` | `<model id>` | the character | The lead's body: `--party 0 --kind 49` is Serge in Lynx's body, as the game's model byte does. |
 | `--ring` | `c,c,c` | the stage's ring | Field ring at the start: colour names (`green white black red yellow blue`), indices 0..5, `all` or `none` per slot. Matches a PS1 capture's ring for enemy-cast damage comparisons. |
 | `--etrap`, `--ptrap` | `<element id>` | none | The enemy / party side's element trap holds that element at the start, as a write of the trap word alone does (the trap block stays hidden until the trap springs). A `--cast` (or `--ecast`) of that element is then caught and plays its trap pack. |

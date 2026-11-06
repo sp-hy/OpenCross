@@ -5138,6 +5138,133 @@ void test_unnamed_kid_label() {
   CHECK(std::string(data::unnamed_kid_label(import::Lang::Jp)) == "旅の娘");
 }
 
+// Party swap (BattleOptions::party_swap): a PC's Swap command trades its slot with a reserve member; the newcomer arrives at 0 stamina,
+// the leaver's battle state waits on the bench and comes back with it. The saved party stays as it was unless the host keeps the lineup
+// (game::keep_swapped_lineup: locked characters return to their slots, the Relief Charm's stand-in is Serge).
+void test_party_swap() {
+  data::GameTables tables = make_tables();
+  auto make_battle = [&](Battle& battle, ScriptedRng& rng, BattleOptions opt) {
+    rng.push(0);
+    rng.push(100);
+    auto spare = make_member(9, "D", 40), knocked_out = make_member(10, "E", 40), outside = make_member(11, "F", 40);
+    knocked_out.hp = 0;
+    opt.bench = {spare, knocked_out, outside};
+    return battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0, opt);
+  };
+  BattleOptions opt;
+  opt.party_swap = true;
+  opt.swap_reserve = {9, 10};
+  // Off: no candidates, the command is refused.
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    NullBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(make_battle(battle, rng, {}));
+    CHECK(!battle.swap_enabled() && battle.swap_candidates(0).empty());
+    Command swap;
+    swap.kind = Command::Kind::Swap;
+    swap.swap_in = 9;
+    CHECK(!battle.apply(swap));
+  }
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(make_battle(battle, rng, opt));
+  // The reserve minus the knocked-out member.
+  CHECK(battle.swap_candidates(0) == std::vector<int>{9});
+  CHECK(battle.swap_candidates(1) == std::vector<int>{9});
+  Command swap;
+  swap.kind = Command::Kind::Swap;
+  swap.actor = 0;
+  for (const int refused : {10, 11, 1}) {
+    swap.swap_in = refused;
+    CHECK(!battle.apply(swap));
+  }
+  battle.unit_mut(0).hp = 30;
+  battle.unit_mut(0).lo |= st::kPoison | st::kAfraid;
+  swap.swap_in = 9;
+  CHECK(battle.apply(swap));
+  CHECK(battle.unit(0).src_id == 9 && battle.unit(0).name == "D" && battle.unit(0).hp == 40);
+  CHECK_EQ(battle.unit(0).stamina, 0);
+  CHECK(battle.party()[0].char_id == 9 && battle.bench()[0].char_id == 0);
+  CHECK_EQ(battle.bench()[0].hp, 30);
+  CHECK_EQ(battle.bench()[0].lo_persist, st::kPoison);
+  CHECK(battle.swapped_out() == std::vector<int>{0});
+  CHECK_EQ(battle.swaps(), 1);
+  CHECK(!battle.events().empty() && battle.events().back().kind == ActionEvent::Kind::Swap);
+  CHECK(battle.events().back().actor == 0 && battle.events().back().swap_out == 0 && battle.events().back().swap_in == 9);
+  // The benched character can come back although it is not in the reserve (it fought in this battle).
+  battle.unit_mut(0).stamina = 70;
+  CHECK(battle.swap_candidates(0) == std::vector<int>{0});
+  opt.swap_reserve = {0, 9};
+  {
+    ScriptedRng back_rng{Lo::Fallback::Lo};
+    NullBrain back_brain;
+    Battle back{tables, back_rng, back_brain};
+    CHECK(make_battle(back, back_rng, opt));
+    back.unit_mut(0).lo |= st::kAfraid;
+    swap.swap_in = 9;
+    CHECK(back.apply(swap));
+    back.unit_mut(0).stamina = 70;
+    CHECK(back.swap_candidates(0) == std::vector<int>{0});
+    swap.swap_in = 0;
+    CHECK(back.apply(swap));
+    CHECK(back.unit(0).src_id == 0 && (back.unit(0).lo & st::kAfraid) && back.unit(0).stamina == 0);
+    CHECK(back.swapped_out() == std::vector<int>{9});
+  }
+  // After the battle (fled here): the leaver's record is written, the saved party is not.
+  Command run;
+  run.kind = Command::Kind::Run;
+  run.actor = 1;
+  CHECK(battle.apply(run));
+  ui::GameState state;
+  state.slot.set_party({0, 1, 2});
+  for (const int char_id : {0, 1, 2, 9}) state.slot.chars[static_cast<size_t>(char_id)].max_hp = 50;
+  game::apply_battle_result(state, tables, battle);
+  CHECK(state.slot.party() == (std::array<u8, 3>{0, 1, 2}));
+  CHECK_EQ(state.slot.chars[0].cur_hp, 30);
+  CHECK_EQ(state.slot.chars[0].status, st::kPoison);
+  // Keep lineup: the ended lineup, unless a locked character is on the bench (it takes its slot back).
+  {
+    ui::GameState kept = state;
+    CHECK(game::keep_swapped_lineup(kept, battle, -1));
+    CHECK(kept.slot.party() == (std::array<u8, 3>{9, 1, 2}));
+    ui::GameState locked = state;
+    locked.slot.unk_e1b8 = {1u, 0u, 0u, 0u};
+    CHECK(!game::keep_swapped_lineup(locked, battle, -1));
+    CHECK(locked.slot.party() == (std::array<u8, 3>{0, 1, 2}));
+  }
+  // The Relief Charm: character 2 stood in for Serge (saved party 0 1 x) and stayed on the field, so the kept lineup holds Serge.
+  {
+    ui::GameState relief = state;
+    relief.slot.set_party({1, 0, 0xFF});
+    CHECK(game::keep_swapped_lineup(relief, battle, 2));
+    CHECK(relief.slot.party() == (std::array<u8, 3>{9, 1, 0}));
+  }
+  // Nothing swapped: nothing to keep. A monster-party scene has no swap.
+  {
+    ScriptedRng idle_rng{Lo::Fallback::Lo};
+    NullBrain idle_brain;
+    Battle idle{tables, idle_rng, idle_brain};
+    CHECK(make_battle(idle, idle_rng, opt));
+    ui::GameState untouched = state;
+    CHECK(!game::keep_swapped_lineup(untouched, idle, -1));
+  }
+  {
+    data::GameTables monster_tables = make_tables();
+    monster_tables.scenes[0].raw[0x0F] = 1;
+    ScriptedRng monster_rng{Lo::Fallback::Lo};
+    NullBrain monster_brain;
+    Battle monster{monster_tables, monster_rng, monster_brain};
+    BattleOptions monster_opt = opt;
+    monster_opt.monster_party = {0, 0, 0};
+    monster_rng.push(0);
+    monster_rng.push(100);
+    CHECK(monster.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0, monster_opt));
+    CHECK(!monster.swap_enabled() && monster.swap_candidates(0).empty());
+  }
+}
+
 void test_target_cursor_order() {
   const auto order = [](u8 mask, int caster, int last_enemy) {
     data::ElemRec record;
@@ -5574,6 +5701,7 @@ int main() {
   test_lynx_duel_bodies();
   test_unnamed_kid_label();
   test_enemy_names_follow_the_language();
+  test_party_swap();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

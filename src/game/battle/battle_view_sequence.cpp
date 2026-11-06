@@ -169,6 +169,20 @@ void BattleView::begin_group() {
       play_tag_sound("esc", 127);
       act_.phase = Act::Phase::Run;
       break;
+    case battle::ActionEvent::Kind::Swap:
+      // The battle already holds the newcomer in the slot (the HUD shows it at once, its HP counted from its own); the leaving model fades
+      // out, then the newcomer's is bound there (Phase::Swap).
+      actor_visual.hp_disp = static_cast<float>(battle_->unit(act_.actor).hp);
+      actor_visual.hp_shown = battle_->unit(act_.actor).hp;
+      // The hop back: the return script jumps to the stand point, moved behind the spot until the newcomer is bound.
+      act_.swap_home_x = actor_visual.home_x, act_.swap_home_z = actor_visual.home_z;
+      actor_visual.home_x -= actor_visual.home_fx * kSwapBack;
+      actor_visual.home_z -= actor_visual.home_fz * kSwapBack;
+      if (actor_visual.scripts && actor_visual.scripts->has_s5) start_script(act_.actor, &actor_visual.scripts->s5, 3, 0, kReturn);
+      // Two ticks longer than the wait: Phase::Swap rebinds the slot before the ramp's end would draw the old model opaque.
+      anm_fade_out(act_.actor, kSwapFadeOut + 2);
+      act_.phase = Act::Phase::Swap;
+      break;
   }
 }
 
@@ -469,6 +483,22 @@ void BattleView::tick_action() {
       }
       break;
     }
+    case Act::Phase::Swap:
+      if (act_.ticks == kSwapFadeOut) {
+        actor_visual.home_x = act_.swap_home_x, actor_visual.home_z = act_.swap_home_z;
+        bind_swapped_unit(act_.actor);
+      }
+      // The newcomer has run in: it stands idle and the action ends.
+      if ((act_.ticks > kSwapFadeOut && !actor_visual.move.on) || act_.ticks > kSwapCap) {
+        if (actor_visual.move.on) {
+          actor_visual.move.on = false;
+          actor_visual.x = actor_visual.home_x, actor_visual.z = actor_visual.home_z;
+        }
+        start_idle(act_.actor);
+        act_.phase = Act::Phase::Settle;
+        act_.ticks = 0;
+      }
+      break;
     case Act::Phase::Settle: {
       bool calm = true;
       for (int i = 0; i < battle::kUnits; ++i) {

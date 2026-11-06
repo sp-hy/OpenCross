@@ -606,6 +606,40 @@ void BattleView::anm_set_hidden(int unit, bool hidden) {
   trail_->model[static_cast<size_t>(unit)].hidden = hidden;
 }
 
+// The spawn script's fade-in (S5 entry 8: colour 0, op 0x20 3, the op 0x8E ramp to 128) run backwards: the 0x8E ramp from the model's colour
+// to 0, drawn with the flash routine, so at colour 0 nothing of the model is left on the screen. At the ramp's end the model would draw
+// opaque (the 0x8E end), so the caller rebinds or hides it first.
+void BattleView::anm_fade_out(int unit, int ticks) {
+  if (unit < 0 || unit >= battle::kUnits || ticks < 1) return;
+  if (!trail_) trail_ = std::make_shared<TrailState>();
+  TrailState::UnitModel& model = trail_->model[static_cast<size_t>(unit)];
+  const s16 from[3] = {static_cast<s16>(model.tinted ? model.rgb[0] : 128), static_cast<s16>(model.tinted ? model.rgb[1] : 128),
+                       static_cast<s16>(model.tinted ? model.rgb[2] : 128)};
+  const s16 to[3] = {0, 0, 0};
+  model.tinted = true;
+  model.abr = 2;
+  model.fade = {};
+  model.fade.on = true;
+  model.fade.left = ticks;
+  start_colour_ramp(ticks, from, to, model.fade.cur, model.fade.step, model.fade.to);
+}
+
+void BattleView::anm_fade_in(int unit, int ticks) {
+  if (unit < 0 || unit >= battle::kUnits || ticks < 1) return;
+  if (!trail_) trail_ = std::make_shared<TrailState>();
+  TrailState::UnitModel& model = trail_->model[static_cast<size_t>(unit)];
+  const s16 from[3] = {0, 0, 0};
+  const s16 to[3] = {128, 128, 128};
+  model.hidden = false;
+  model.tinted = true;
+  model.abr = 2;
+  model.fade = {};
+  model.fade.on = true;
+  model.fade.left = ticks;
+  start_colour_ramp(ticks, from, to, model.fade.cur, model.fade.step, model.fade.to);
+  for (size_t k = 0; k < 3; ++k) model.rgb[k] = 0;
+}
+
 void BattleView::anm_eye_arm(int unit) {
   if (unit < 0 || unit >= battle::kPcSlots) return;
   if (!trail_) trail_ = std::make_shared<TrailState>();

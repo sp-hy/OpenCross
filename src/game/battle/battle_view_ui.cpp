@@ -51,6 +51,12 @@ const char32_t* kCommand[6][4] = {{U"Attack", U"Element", U"Defend", U"Run Away"
                                   {U"Atacar", U"Elementos", U"Defenderse", U"Escapar"},
                                   {U"攻撃", U"エレメント", U"防御", U"逃走"}};
 const char32_t* kCommandCaptionJp[4] = {U"Attack", U"Element", U"Defend", U"RunAway"};
+// Party swap's command row per language (an OpenCross command: no game text).
+const char32_t* kSwapLabel[6] = {U"Swap", U"Échanger", U"Cambio", U"Wechseln", U"Cambiar", U"交代"};
+constexpr int kSwapCommand = 4;
+// The command on top menu row `row`: 0 Attack, 1 Element, 2 Defend, 3 Run Away, kSwapCommand Swap. With party swap Swap is row 3, so Run Away
+// stays the last row.
+int top_row_command(int row, bool swap) { return swap && row >= 3 ? (row == 3 ? kSwapCommand : 3) : row; }
 const char32_t* kHitCaption[6] = {U"HIT%", U"%RÉUS.", U"PREC.", U"TRF%", U"%ACIERTO", U"命中率"};
 const char32_t* kCamNormal[6] = {U"NORMAL", U"NORMALE", U"NORMALE", U"NORMAL", U"NORMAL", U"NORMAL"};
 const char32_t* kCamDynamic[6] = {U"DYNAMIC", U"DYNAMIQUE", U"DINAMICA", U"DYNAMISCH", U"DINÁMICO", U"DYNAMIC"};
@@ -458,7 +464,7 @@ void BattleView::build_party_panels() {
     if (!unit.present) continue;
     const float px = kPanelX[std::min(count, 3) - 1][std::min(placed++, 2)];
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    const bool choosing = i == active_pc_ && (ui_ == Ui::Top || ui_ == Ui::Chain || ui_ == Ui::Element || ui_ == Ui::Target || ui_ == Ui::Dopple);
+    const bool choosing = i == active_pc_ && (ui_ == Ui::Top || ui_ == Ui::Chain || ui_ == Ui::Element || ui_ == Ui::Target || ui_ == Ui::Dopple || ui_ == Ui::Swap);
     const bool blink = choosing && (tick_count_ & 0x1F) > 15;
     const float waku_x = px * kPs1Px, waku_y = (py - 1) * kRowScale, waku_w = 64 * kPs1Px, waku_h = 48 * kRowScale;
     add_img(hud_[kHWakuBase], waku_x, waku_y, waku_w, waku_h, 0, 0, 1, 1, 0xFFFFFFFFu, 3);
@@ -937,28 +943,34 @@ void BattleView::handle_input(const platform::Input& in) {
   const int hdir = (right ? 1 : 0) - (left ? 1 : 0);
 
   switch (ui_) {
-    case Ui::Top:
-      step(top_cursor_, 4, vdir);
+    case Ui::Top: {
+      const int rows = battle_->swap_enabled() ? 5 : 4;
+      // A cursor remembered on the Swap row of a fight that has none.
+      if (top_cursor_ >= rows) top_cursor_ = 0;
+      step(top_cursor_, rows, vdir);
       // Menu SFX 1 is the cursor tick.
       if (vdir != 0) audio_.play_menu(1);
       if (!ok) break;
       if (cursor_memory_ && active_pc_ >= 0 && active_pc_ < battle::kPcSlots) top_mem_[active_pc_] = top_cursor_;
       // Attack / Element confirmed (the element row may still be refused with 0x18 below).
       if (top_cursor_ <= 1) audio_.play_menu(8);
+      const int command = top_row_command(top_cursor_, rows == 5);
       pending_cmd_ = {};
       pending_cmd_.actor = active_pc_;
       // Every command confirm turns the PC to the unit an enemy target cursor would start on (Defend and Run too; Defend keeps the yaw).
-      if (const std::vector<int> enemies = target_candidates(); !enemies.empty()) {
+      // Swap does not: its list keeps the orbit, whose angle follows the PC's yaw, so a turn (a newcomer that has not faced an enemy yet)
+      // jolted the camera.
+      if (const std::vector<int> enemies = target_candidates(); command != kSwapCommand && !enemies.empty()) {
         vis_[static_cast<size_t>(active_pc_)].turn.on = false;
         face_toward(active_pc_, enemies[static_cast<size_t>(target_start(enemies))]);
       }
-      if (top_cursor_ == 0) {
+      if (command == 0) {
         pending_cmd_.kind = battle::Command::Kind::Attack;
         chain_.clear();
         // Target first, the PC runs up to it, then the hit percentages.
         enter_target(Tgt::Enemy);
         if (ui_ == Ui::Target) top_command_camera();
-      } else if (top_cursor_ == 1) {
+      } else if (command == 1) {
         pending_cmd_.kind = battle::Command::Kind::Element;
         battle_->open_element_menu(active_pc_);
         cell_ = elem_open_cell(unit, tables_->elements.size());
@@ -970,16 +982,23 @@ void BattleView::handle_input(const platform::Input& in) {
         }
         top_command_camera();
         ui_ = Ui::Element;
-      } else if (top_cursor_ == 2) {
+      } else if (command == 2) {
         top_command_camera();
         pending_cmd_.kind = battle::Command::Kind::Defend;
         execute(pending_cmd_);
-      } else {
+      } else if (command == 3) {
         top_command_camera();
         pending_cmd_.kind = battle::Command::Kind::Run;
         execute(pending_cmd_);
+      } else if (battle_->swap_candidates(active_pc_).empty()) {
+        // Nobody can come in: refused.
+        audio_.play_menu(0x18);
+      } else {
+        audio_.play_menu(8);
+        open_swap();
       }
       break;
+    }
     // 1 / 2 / 3 hit (percentages) + Element, with the PC standing at the enemy; each pick executes at once.
     case Ui::Chain: {
       step(chain_cursor_, 4, vdir);
@@ -1138,6 +1157,23 @@ void BattleView::handle_input(const platform::Input& in) {
       if (!hdr_on_) hdr_on_ = true, hdr_cell_ = cell_, hdr_.reset((tick_count_ >> 2) & 3);
       // The caster only.
       pending_cmd_.target = active_pc_;
+      execute(pending_cmd_);
+      break;
+    }
+    case Ui::Swap: {
+      const int before = swap_cur_;
+      step(swap_cur_, static_cast<int>(swap_list_.size()), vdir);
+      if (swap_cur_ != before) audio_.play_menu(1);
+      if (cancel) {
+        audio_.play_menu(6);
+        ui_ = Ui::Top;
+        break;
+      }
+      if (!ok || swap_list_.empty()) break;
+      audio_.play_menu(0x28);
+      top_command_camera();
+      pending_cmd_.kind = battle::Command::Kind::Swap;
+      pending_cmd_.swap_in = swap_list_[static_cast<size_t>(swap_cur_)];
       execute(pending_cmd_);
       break;
     }
@@ -1311,6 +1347,7 @@ void BattleView::build_command_ui() {
     }
   }
   if (active_pc_ >= 0 && ui_ == Ui::Dopple) build_dopple_ui();
+  if (active_pc_ >= 0 && ui_ == Ui::Swap) build_swap_ui();
   build_entry_outline();
   if (active_pc_ < 0 || !(ui_ == Ui::Top || ui_ == Ui::Chain || ui_ == Ui::Element || ui_ == Ui::Target)) return;
   const battle::Unit& unit = battle_state.unit(active_pc_);
@@ -1330,24 +1367,31 @@ void BattleView::build_command_ui() {
     //  +1.2, white above), and without their red part while the PC has hi status 0x20000 (no stamina cost). Element: dim when gauge < 0 /
     //  stamina 0 / no usable cell.
     constexpr u32 kDim = 0x404040, kYellowWord = 0x008080, kWhiteWord = 0x808080;
-    const float bx = 28 * kPs1Px, by = ref_y(177), bw = 68 * kPs1Px;
+    // Party swap adds a fifth top row: the box grows upward by one row pitch.
+    const int rows = ui_ == Ui::Top && battle_state.swap_enabled() ? 5 : 4;
+    const float lift = 11.0f * static_cast<float>(rows - 4);
+    const float bx = 28 * kPs1Px, by = ref_y(177 - lift), bw = 68 * kPs1Px;
     // Interior 52 x 36 + the 8 px skin frame; 0.8 row shorter than the nominal 52 so the top and bottom padding round the text are equal (0.67 row pitch).
-    add_skin_box(bx, by, bw, 51.2f * kRowScale);
+    add_skin_box(bx, by, bw, 51.2f * kRowScale + ref_y(lift));
     const int cur = ui_ == Ui::Top ? top_cursor_ : chain_cursor_;
     const bool fatigued = (unit.lo & battle::st::kFatigued) != 0;
     const u32 hit_row_mask = (unit.hi & battle::st::kHiNoStaminaCost) ? 0xFFFF00u : 0xFFFFFFu;
     // The translated text clears bit 16; JP keeps the JP font.
     const int cmd_flags = jp ? 0x10002 : 2;
-    for (int k = 0; k < 4; ++k) {
+    for (int k = 0; k < rows; ++k) {
       // PS1 line of the row (+1.1: top pad = bottom pad with the 0.8 row shorter box).
-      const float yl = (182 + 11.0f * static_cast<float>(k)) * kRefLineY + 1.1f;
+      const float yl = (182 - lift + 11.0f * static_cast<float>(k)) * kRefLineY + 1.1f;
       const bool sel = k == cur;
       u32 row_colour = kWhiteWord;
       std::u32string label;
-      if (ui_ == Ui::Top) {
-        label = kCommand[li][k];
-        if (k == 0 && unit.stamina == 0) row_colour = kDim;
-        if (k == 1 && (!any_element || unit.gauge < 0 || unit.stamina == 0)) row_colour = kDim;
+      const int command = top_row_command(k, rows == 5);
+      if (ui_ == Ui::Top && command == kSwapCommand) {
+        label = kSwapLabel[li];
+        if (battle_state.swap_candidates(active_pc_).empty()) row_colour = kDim;
+      } else if (ui_ == Ui::Top) {
+        label = kCommand[li][command];
+        if (command == 0 && unit.stamina == 0) row_colour = kDim;
+        if (command == 1 && (!any_element || unit.gauge < 0 || unit.stamina == 0)) row_colour = kDim;
       } else if (k < 3) {
         const int pct = battle_state.hit_chance_shown_for(active_pc_, engaged_target_, k);
         label = import::utf8_to_u32(std::format("{}-({}%)", k + 1, pct));
@@ -1380,7 +1424,9 @@ void BattleView::build_command_ui() {
   if (ui_ == Ui::Top) {
     if (menu_live()) {
       const size_t caption0 = op_count();
-      btext(0xA, jp ? kCommandCaptionJp[top_cursor_ & 3] : kCommand[li][top_cursor_ & 3], 300, 22, 0);
+      const int command = top_row_command(top_cursor_, battle_state.swap_enabled());
+      const char32_t* caption = command == kSwapCommand ? kSwapLabel[jp ? 0 : li] : jp ? kCommandCaptionJp[command & 3] : kCommand[li][command & 3];
+      btext(0xA, caption, 300, 22, 0);
       set_group(caption0, 1);
     }
     build_status_plates(active_pc_, true);
@@ -1710,6 +1756,48 @@ void BattleView::build_dopple_ui() {
     if (last || dop_top_ != 0) tri(0x90, 0x96, false);
   }
   if (!targets_.empty()) build_target_ui(false);
+}
+
+// Party swap's list: a window of the Dopplegang list's geometry, one column, six rows of 16 px (scrolling with the cursor): each character
+// that can come in, its name and HP / max HP (white words, the cursor entry not recoloured, as the Dopplegang list); the command box stays
+// hidden while it is open.
+// Opening the list reads the listed characters' models and weapons on the model cache's worker while the player picks: the swap's bind takes
+// them from there.
+void BattleView::open_swap() {
+  swap_list_ = battle_->swap_candidates(active_pc_);
+  swap_cur_ = 0;
+  ui_ = Ui::Swap;
+  std::vector<std::string> stems;
+  std::vector<std::pair<std::string, int>> weapon_parts;
+  for (const battle::PartyMember& member : battle_->bench()) {
+    if (std::find(swap_list_.begin(), swap_list_.end(), member.char_id) == swap_list_.end()) continue;
+    battle::Unit reserve;
+    reserve.pc = true;
+    reserve.src_id = member.char_id;
+    reserve.kind = member.kind >= 0 ? member.kind : member.char_id;
+    stems.push_back(unit_model_stem(reserve));
+    if (const data::GearRec* gear = tables_->gear_rec(member.eq.weapon_id)) weapon_parts.emplace_back(ModelCache::weapon_bin(reserve.kind), gear->tier() & 0xF);
+  }
+  model_cache_.prefetch(*vfs_, std::move(stems), std::move(weapon_parts));
+}
+
+void BattleView::build_swap_ui() {
+  constexpr float wx = 0x38, wy = 0x34, ww = 0xd0;
+  constexpr int kRows = 6;
+  const int count = static_cast<int>(swap_list_.size());
+  const int shown = std::min(count, kRows), top = std::clamp(swap_cur_ - (kRows - 1), 0, std::max(0, count - kRows));
+  const float wh = 16.0f * static_cast<float>(std::max(1, shown));
+  add_skin_box((wx - 8.0f) * kPs1Px, (wy - 8.0f) * kRowScale, (ww + 16.0f) * kPs1Px, (wh + 16.0f) * kRowScale);
+  add_menu_cursor(0x36 * kPs1Px, (0x3A + 16 * static_cast<float>(swap_cur_ - top)) * kRowScale);
+  const std::vector<battle::PartyMember>& bench = battle_->bench();
+  for (int row = 0; row < shown; ++row) {
+    const int char_id = swap_list_[static_cast<size_t>(top + row)];
+    const auto member = std::find_if(bench.begin(), bench.end(), [&](const battle::PartyMember& entry) { return entry.char_id == char_id; });
+    if (member == bench.end()) continue;
+    const float y = static_cast<float>(0x38 + row * 16);
+    btext(0xB8, import::utf8_to_u32(member->name), 0x40, y, 0x808080);
+    btext(2, import::utf8_to_u32(std::format("{}/{}", member->hp, member->stat[0])), 0xC0, y, 0x808080);
+  }
 }
 
 // ------------------------------------------------------------------------------------------------------------- results

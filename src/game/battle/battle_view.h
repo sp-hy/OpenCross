@@ -100,6 +100,9 @@ class BattleView {
     int duel_third = -1;
     std::vector<std::string> duel_names;
     int duel_relief = -1;
+    // Party swap (battle::BattleOptions::party_swap / swap_reserve).
+    bool party_swap = false;
+    std::vector<int> swap_reserve;
     // The battle id word: an encounter id < 0x200, or scene + 0x200 for a scene started directly; -1 = scene + 0x200.
     int battle_id = -1;
     // The battlefield operand (stage bg_NN); -1: the scene record's default.
@@ -377,7 +380,7 @@ class BattleView {
     std::u32string text;
     float ttl = 0;
   };
-  enum class Ui { Intro, Top, Chain, Element, Target, Wait, Result, Dopple };
+  enum class Ui { Intro, Top, Chain, Element, Target, Wait, Result, Dopple, Swap };
   struct Op;
   float wide_hud_cols_ = 0.0f;
 
@@ -386,7 +389,7 @@ class BattleView {
   // [actor] or a monster cast's group, index = the script variant; `cast_after_return` = an element cast starts after the return script
   // (S5 entry 3) has run; `hit_wait` = the next hit's queue_attack was not released yet by the script stream (script_gated).
   struct Act {
-    enum class Phase { None, Approach, Hit, Return, Cast, Release, Run, Settle } phase = Phase::None;
+    enum class Phase { None, Approach, Hit, Return, Cast, Release, Run, Swap, Settle } phase = Phase::None;
     std::vector<battle::ActionEvent> ev;
     size_t hit = 0;
     int actor = -1;
@@ -396,6 +399,8 @@ class BattleView {
     std::vector<int> casters;
     bool cast_after_return = false;
     bool hit_wait = false;
+    // Party swap: the slot's stand point while the leaving model hops back to a point behind it.
+    float swap_home_x = 0, swap_home_z = 0;
     // The cast's targets turn to the caster when its charge starts (a PC that hopped home from the enemy).
     bool turn_targets_at_charge = false;
   };
@@ -613,6 +618,10 @@ class BattleView {
   unsigned anm_part_hide(int unit, unsigned base) const;
   // The hidden bit of the anmseq model state.
   void anm_set_hidden(int unit, bool hidden);
+  // Fades the unit's model colour to 0 over `ticks` as the spawn fade-in in reverse (party swap); rebind or hide it before the ramp ends.
+  void anm_fade_out(int unit, int ticks);
+  // The spawn script's fade-in (colour 0 -> 128 drawn with the flash routine, opaque at the end) without the rest of the script (party swap).
+  void anm_fade_in(int unit, int ticks);
   // The party eye blink bit as op 0x72 sets it.
   void anm_eye_arm(int unit);
   // The part words / blinks of the spawn script's first tick (S5 entry 8), also the state a cut script returns to.
@@ -791,6 +800,15 @@ class BattleView {
   void build_dopple_ui();
   void apply_form(int unit, int form);
   void apply_pip_form(int unit);
+  // Party swap (battle::BattleOptions::party_swap): the command menu's Swap row (above Run Away) opens the list of the characters that can come in. The
+  // action: the leaving model hops back (its return script, S5 entry 3, to a stand point kSwapBack behind its spot) while it fades out
+  // (kSwapFadeOut ticks); then the newcomer's model is bound in the slot kSwapRunFrom behind its spot and runs in (clip 3, the run clip of
+  // the flee script) over kSwapRunIn ticks while it fades in as the spawn script does, and stands idle there.
+  void open_swap();
+  void build_swap_ui();
+  void bind_swapped_unit(int unit);
+  static constexpr int kSwapFadeOut = 24, kSwapRunIn = 30, kSwapCap = 120;
+  static constexpr float kSwapBack = 3000.0f, kSwapRunFrom = 1800.0f;
   // Camera case 8 on the pack's act0 model (slot A).
   bool pa_ref_point(int attach, std::array<float, 3>& point, float& yaw) const;
   // battle_view_trail.cpp: the blink state of a unit whose model changed.
@@ -998,6 +1016,9 @@ class BattleView {
   // being uploaded and its glyphs still to go, dop_len_ = glyphs per entry (the names as drawn).
   std::vector<int> dop_list_;
   int dop_cur_ = 0, dop_top_ = 0;
+  // The party swap list: the character ids that can come in (battle::Battle::swap_candidates) and the cursor row.
+  std::vector<int> swap_list_;
+  int swap_cur_ = 0;
   int dop_max_ = 0;
   int dop_named_ = 0;
   int dop_typing_ = 0, dop_left_ = 0;

@@ -149,7 +149,8 @@ void BattleView::menu_camera() {
   const bool between = ui_ == Ui::Wait && !orbit_blocked_ && pending_.empty();
   const int orbit_pc = between ? menu_pc_after() : active_pc_;
   const bool cast_held = cast_handover_ > 0 || (cast_hold_pc_ >= 0 && orbit_pc != cast_hold_pc_ && !menu_live());
-  const bool top = idle && orbit_pc >= 0 && (ui_ == Ui::Top || between) && !cast_held && vis_[static_cast<size_t>(orbit_pc)].has_model;
+  // The party swap list keeps the top menu's orbit (the orbit clock runs on, so a held camera would jump when the list closes).
+  const bool top = idle && orbit_pc >= 0 && (ui_ == Ui::Top || ui_ == Ui::Swap || between) && !cast_held && vis_[static_cast<size_t>(orbit_pc)].has_model;
   const bool target = idle && !defending && ui_ == Ui::Target && !targets_.empty();
   const bool all_targets = target && (tgt_mode_ == Tgt::EnemyAll || tgt_mode_ == Tgt::AllyAll);
   if (target && (!cam_dynamic_ || all_targets)) {
