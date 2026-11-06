@@ -351,13 +351,16 @@ void FieldWorld::roster_remove(int char_id) {
   if (char_id >= 0 && char_id < save::kNumChars) gs_->slot.set_recruited(char_id, false);
 }
 
-// Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x400.. key items (id - 0x400 = key
-// item number, 1-based as in GameState::has_key_item).
+// Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x401..0x43F key items (id - 0x400 =
+// key item number, 1-based as in GameState::has_key_item); the scripts reach only the first 63 of the 64 bits, higher ids are refused.
+namespace {
+constexpr int kScriptKeyItems = 63;
+}
 int FieldWorld::item_count(int id) {
   if (id < 0) return 0;
   if (id < 0x200) return gs_->item_count(id);
   if (id < 0x400) return gs_->element_count(id - 0x200);
-  return gs_->has_key_item(id - 0x400) ? 1 : 0;
+  return id - 0x400 <= kScriptKeyItems && gs_->has_key_item(id - 0x400) ? 1 : 0;
 }
 void FieldWorld::give_item(int id) {
   if (id <= 0) return;
@@ -367,7 +370,7 @@ void FieldWorld::give_item(int id) {
   } else if (id < 0x400) {
     const int copies = id >= 0x261 && id <= 0x26B ? 5 : 1;
     for (int i = 0; i < copies; ++i) gs_->add_element(id - 0x200);
-  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= 64) {
+  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
     const bool had = gs_->has_key_item(key_item);
     gs_->slot.set_key_items(gs_->slot.key_items() | (1ull << (key_item - 1)));
     if (!had && on_key_item_) on_key_item_(key_item);
@@ -379,7 +382,7 @@ void FieldWorld::take_item(int id) {
     gs_->take_item(id);
   } else if (id < 0x400) {
     gs_->take_element(id - 0x200);
-  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= 64) {
+  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
     gs_->slot.set_key_items(gs_->slot.key_items() & ~(1ull << (key_item - 1)));
   }
 }
@@ -438,7 +441,7 @@ void FieldWorld::change_char_life(script::LifeOp op, int char_ref, s32 value) {
 }
 int FieldWorld::char_status(int char_ref) {
   const int char_id = char_from_ref(party_chars_, char_ref);
-  if (char_id < 0 || char_id >= save::kNumChars) return 0;
+  if (char_id < 0 || char_id >= save::kNumChars) return -1;
   return gs_->slot.chars[static_cast<size_t>(char_id)].status;
 }
 // The character operand of FE 36 / 3D / 3E: 0xF9 = every recruited character (chars 0..43), 0xFA = the three party slots (empty slots skipped), 0xFD / 0xFE / 0xFF = party slot 0 / 1 / 2, any other
@@ -531,8 +534,9 @@ int FieldWorld::set_character_model(int char_ref, int value) {
   model_swap_slot_ = slot;
   return 1;
 }
-// The files are read synchronously, so a swap is never busy.
+// The files are read synchronously, so a swap is never busy; it is pending from D9 until the DA behind it installs it.
 bool FieldWorld::model_swap_busy() { return false; }
+bool FieldWorld::model_swap_pending() { return model_swap_slot_ >= 0; }
 void FieldWorld::model_swap_commit() {
   if (model_swap_slot_ >= 0) bind_party_entity(model_swap_slot_);
   model_swap_slot_ = -1;

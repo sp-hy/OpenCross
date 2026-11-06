@@ -49,7 +49,7 @@
 //   load <room> [param]           debug warp to a room
 //   set var <hexid> <value>       debug write of a script variable
 //   set option <hexmask> <0|1>    debug write of one bit of the Settings options word (0x200 = [button] Pressed: Run / Walk, 0x800 = analog stick)
-//   put <x> <z>                   debug: place the party (leader and followers) at a world point on the walk mesh
+//   put [ent <n>] <x> <z>         debug: place the party (leader and followers), or entity n, at a world point on the walk mesh
 //   set model <char> <byte>       D9 + DA on a party member (the character record model byte)
 //   set hp <char> <value> | set status <char> <hexbits>   debug write of a character's current HP / status bits (1 poison, 8 burn,
 //                                 10 sprain, 20 flu)
@@ -156,6 +156,8 @@ struct RouteState {
   std::function<std::vector<int>()> dialogue_progress;
   // Controls free.
   bool field_idle = false;
+  // The pad lock or menu-button wait after a room load or screen, or a load / menu-open fade, is still running.
+  bool settling = false;
   // Field screen fade: 0 = the picture, 1 = black or white.
   float fade = 0;
   // BATTLE_RESULT script variable.
@@ -199,8 +201,9 @@ struct RouteOut {
   // Debug warp.
   std::string load_room;
   int load_param = 0;
-  // `put x z`: place the party at a world point.
+  // `put x z`: place the party at a world point; `put ent n x z`: entity n only.
   bool put = false;
+  int put_ent = -1;
   float put_x = 0, put_z = 0;
   bool set_var = false;
   // `set option <hexmask> <0|1>`: one bit of the Settings options word.

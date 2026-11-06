@@ -80,6 +80,7 @@ bool FieldWorld::play_stream(int song, int volume, double start_seconds) {
   const audio::BgmEntry* entry = audio::bgm_entry(song);
   if (!entry) {
     log::warn("audio: song {} has no BGM entry", song);
+    failed_stream_ = song;
     return false;
   }
   std::optional<Bytes> bytes;
@@ -91,8 +92,10 @@ bool FieldWorld::play_stream(int song, int volume, double start_seconds) {
   ScopedTimer open_timer("audio: bgm HcaStream::open");
   if (!bytes || !stream->open(*bytes)) {
     log::warn("audio: could not load {}", audio::bgm_path(entry->file_no));
+    failed_stream_ = song;
     return false;
   }
+  if (failed_stream_ == song) failed_stream_ = -1;
   log::debug("audio: tick {} play song {} (BGM{:03}) volume {}", tick_count_, song, entry->file_no, volume);
   cue_song_ = -1;
   mixer_->play(std::move(stream), song, volume, start_seconds);
@@ -191,8 +194,10 @@ int FieldWorld::music_wait(int ticks) {
   if (!bgm_remastered_ || !mixer_ || !mixer_->live()) return -1;
   for (const WaitCue& cue : kWaitCues) {
     if (cue.song != last_song_ || cue.ticks != ticks) continue;
+    // A stream that cannot be loaded never reaches the mark: the WAIT counts its frames as with the original music.
     const audio::BgmEntry* entry = audio::bgm_entry(cue.song);
-    if (!entry || mixer_->current_song() != cue.song || !mixer_->sounding()) return 0;
+    if (!entry || failed_stream_ == cue.song) return -1;
+    if (mixer_->current_song() != cue.song || !mixer_->sounding()) return 0;
     const double length = static_cast<double>(entry->total_samples) / audio::Mixer::kRate;
     return std::fmod(mixer_->bgm_seconds(), length) >= cue.seconds ? 1 : 0;
   }
@@ -247,10 +252,10 @@ void FieldWorld::sfx_volume(int slot, int frames, int volume) {
   sfx_out().set_field_mods(1u << ((slot & 7) + 8), static_cast<int>(std::lround(slide.cur)), -1);
 }
 
-// FE 23: the same slide for the pan (64 = centre).
+// FE 23: the same slide for the pan. The operand is a pan byte on C6's scale (0x80 = centre), halved like C6's.
 void FieldWorld::sfx_pan(int slot, int frames, int pan) {
   SfxSlide& slide = sfx_pan_[static_cast<size_t>(slot & 7)];
-  slide.target = static_cast<float>(std::clamp(pan, 0, 127));
+  slide.target = static_cast<float>((pan & 0xFF) >> 1);
   slide.left = std::max(0, frames);
   slide.step = slide.left > 0 ? (slide.target - slide.cur) / static_cast<float>(slide.left) : 0.0f;
   if (slide.left == 0) slide.cur = slide.target;

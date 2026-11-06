@@ -1,0 +1,14 @@
+# Action button order (tel_b11i). The grandmother (ent 4) and ent 5 stand on one line in front of the leader, both in the talk
+# range and the facing cone; ent 5 is nearer. The entities are tested in index order and the first that answers takes the press,
+# so the grandmother answers, not the nearer ent 5.
+0 wait 5
+- request party_add 1
+- put -500 180
+- put ent 4 -500 476
+- put ent 5 -500 344
+- wait 2
+- walk -500 248 6 200
+- wait 10
+- action
+- wait text Who might you be
+- quit

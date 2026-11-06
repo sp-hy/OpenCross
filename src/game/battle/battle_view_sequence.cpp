@@ -18,10 +18,10 @@ void BattleView::begin_group() {
   act_ = Act{};
   cast_hold_pc_ = -1;
   links_.clear();
-  // The action's setup: op 0x68 starts any timeline again; the next action clears the system message window; the command setup rewrites the
+  // The action's setup: op 0x68 starts any timeline again; the next action closes the system plate; the command setup rewrites the
   // acting list.
   bseq::Vm::reset_sequence();
-  if (smsg_.sys) smsg_ = ScriptMsg{};
+  plate_ = ScriptMsg{};
   script_actor_ = -1;
   act_.ev = std::move(queue_.front());
   queue_.pop_front();
@@ -38,6 +38,7 @@ void BattleView::begin_group() {
   act_.actor = e0.actor;
   // An enemy action while a PC stands at its target resets that PC's menu: its next attack confirms the target again.
   if (engaged_ && e0.actor >= battle::kPcSlots) engage_interrupted_ = true;
+  if (e0.kind == battle::ActionEvent::Kind::Element) froze_ = false;
   // Pip's form element (mode 45): tumaru 0x181 swaps the model.
   if (e0.evolve_form >= 0) pending_evolve_unit_ = e0.actor;
   Visual& actor_visual = vis_[static_cast<size_t>(act_.actor)];
@@ -366,7 +367,7 @@ void BattleView::tick_action() {
     case Act::Phase::Approach:
       if ((actor_visual.script_done && !actor_visual.move.on) || act_.ticks > 600) {
         if (battle_audit() && !(actor_visual.script_done && !actor_visual.move.on)) battle_audit_note(std::format("approach of unit {} left by the 600-tick timeout (script_done {} moving {})", act_.actor, actor_visual.script_done, actor_visual.move.on));
-        actor_visual.vm.stop();
+        cut_script(act_.actor);
         // Engage: arrived, the percentage menu opens.
         if (act_.ev.empty()) {
           act_ = Act{};
@@ -393,7 +394,7 @@ void BattleView::tick_action() {
       if (actor_visual.script_done || act_.ticks > 900) {
         if (battle_audit() && !actor_visual.script_done)
           battle_audit_note(std::format("hit {} of action {} (unit {} -> {}) left by the 900-tick timeout: the attack script never finished", act_.hit, act_.ev.front().action, act_.actor, act_.ev[act_.hit].target));
-        actor_visual.vm.stop();
+        cut_script(act_.actor);
         ++act_.hit;
         if (act_.hit < act_.ev.size()) {
           if (script_gated(act_.ev[act_.hit])) act_.hit_wait = true;
@@ -411,7 +412,7 @@ void BattleView::tick_action() {
     case Act::Phase::Return:
       if ((actor_visual.script_done && !actor_visual.move.on) || act_.ticks > 600) {
         if (battle_audit() && !(actor_visual.script_done && !actor_visual.move.on)) battle_audit_note(std::format("return of unit {} left by the 600-tick timeout (script_done {} moving {})", act_.actor, actor_visual.script_done, actor_visual.move.on));
-        actor_visual.vm.stop();
+        cut_script(act_.actor);
         // The return has run, now the cast.
         if (act_.cast_after_return) {
           act_.cast_after_return = false;
@@ -441,7 +442,7 @@ void BattleView::tick_action() {
         if (battle_audit() && !(actor_visual.script_done && pending_.empty() && !fx_))
           battle_audit_note(std::format("release of element {} (unit {}) left by the {}-tick timeout (script_done {} pending {} pack {})", act_.ev.front().element, act_.actor,
                                         fx_ ? BattleFxRun::kTickCap : 600, actor_visual.script_done, pending_.size(), fx_ != nullptr));
-        actor_visual.vm.stop();
+        cut_script(act_.actor);
         act_.phase = Act::Phase::Settle;
         act_.ticks = 0;
       }
@@ -517,7 +518,7 @@ void BattleView::end_group() {
   for (size_t i = 0; i < vis_.size(); ++i) {
     Visual& visual = vis_[i];
     if (!visual.vm.running() || visual.script_kind == kIdle || visual.script_kind == kRun) continue;
-    visual.vm.stop();
+    cut_script(static_cast<int>(i));
     anm_unit_reset(static_cast<int>(i));
   }
   // Only the ACTOR gets its yaw set to the home facing (byte << 6), once its whole queue is done. Targets keep the facing they were given (the PC
@@ -558,6 +559,7 @@ void BattleView::end_group() {
     }
     break;
   }
+  for (const battle::ActionEvent& event : act_.ev) froze_ = froze_ || event.froze;
   act_ = Act{};
   // The flagged record opens the plate at (32, 144) and arms its 0x78-tick timer.
   if (sys_pending_) {
@@ -582,6 +584,9 @@ void BattleView::begin_finish() {
   sync_shown();
   finish_ticks_ = 0;
   ui_ = Ui::Wait;
+  // The battle loop's teardown takes the system plate down, whatever its timer.
+  plate_ = ScriptMsg{};
+  sys_pending_ = false;
   // The depth cue a last cast left on must not dim the victory / defeat camera.
   fx_fog_on_ = false;
   fx_unit_fog_.fill(false);
@@ -606,7 +611,8 @@ void BattleView::begin_finish() {
     }
     camera_.set_bank(&bank_);
   // Scripted: op 83 ended the fight (no result screen).
-  } else if (outcome == battle::Outcome::Fled) {
+  } else if (outcome == battle::Outcome::Fled || outcome == battle::Outcome::Stalled) {
+    // The engine's stall guard ends like a flight too (the host reports it as fled).
     finish_ = Finish::Fled;
     fled_outro_ = false;
     camera_.set_bank(&bank_);

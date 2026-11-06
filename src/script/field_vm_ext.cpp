@@ -143,14 +143,17 @@ void FieldVM::exec_ext(u8 sub) {
     case 0x2C: set_flag(self.flags270, 23, byte_at(1) & 1); advance(2); break;
     case 0x2D: self.v114 = static_cast<u16>(operand_u(1)); self.flags270 |= 0x2000000; advance(3); break;
     case 0x2E: self.flags270 &= ~0x2000000u; advance(1); break;
-    case 0x2F:
+    case 0x2F: {
+      // DEBUG_MODE (variable 0x34) survives the clear. MAP_ID = 8 is written before the clear, so variable 6 ends 0.
+      const s32 debug_mode = read_var(0x34);
       std::fill(vars_.begin(), vars_.begin() + 0x1E8, u16{0});
       std::fill(vars_.begin() + kGlobalVarSlots, vars_.end(), u16{0});
-      // MAP_ID = 8 is written before the clear, so variable 6 ends 0.
+      write_var(0x34, debug_mode);
       host_.field_reset();
       room_reg_ = 8;
       advance(1);
       break;
+    }
     case 0x30: {  // head turn: target (x S@1, y S@5, z S@3) of the executing entity
       if (!(self.flags38 & flag38::kNo3dObject))
         host_.head_op(HeadOp::Point, ent_, -1, operand_s(1, 7, 0x80), operand_s(5, 7, 0x20), operand_s(3, 7, 0x40), self.head_turn_rate);
@@ -190,7 +193,10 @@ void FieldVM::exec_ext(u8 sub) {
                              operand_s(1, 5, 0x80));
       advance(6);
       break;
-    case 0x3B: write_var(word_at(1), host_.char_status(operand_u(3)) & 0xFF); advance(5); break;
+    case 0x3B:
+      if (const int status = host_.char_status(operand_u(3)); status >= 0) write_var(word_at(1), status & 0xFF);
+      advance(5);
+      break;
     case 0x3C: self.head_turn_rate = static_cast<u16>(operand_u(1)); advance(3); break;
     // FE 3D: inflict (OR).
     case 0x3D: host_.change_status(operand_u(1), operand_u(3), true); advance(5); break;
@@ -401,7 +407,7 @@ void FieldVM::exec_ext(u8 sub) {
       break;
     case 0x68: open_screen(MenuKind::WeaponShop, operand_u(1), 3); break;
     case 0x69: host_.table_op(0xFE69, byte_at(1), 0); advance(2); break;
-    case 0x6A: set_global(Global::Reg6A, operand_u(1)); advance(3); break;
+    case 0x6A: set_global(Global::PortraitYaw, operand_u(1)); advance(3); break;
     case 0x6B: set_global_bit(16, byte_at(1) & 1); advance(2); break;
     case 0x6C: set_global_bit(17, byte_at(1) & 1); advance(2); break;
     case 0x6D: opaque(0xFE6D, 0, 0); advance(1); break;

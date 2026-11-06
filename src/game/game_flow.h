@@ -190,6 +190,9 @@ class GameFlow {
   void start(FlowState state);
   // Back to the title as at boot, from any state; `boot_logo` shows the boot logo first.
   void restart(bool boot_logo);
+  // The field reset the game to its boot state during play (FE 2F: the title room entered after a game over or the credits): the title
+  // as at boot, over the room already running, which plays its own logo FMV. No boot logo, no reload.
+  void return_to_title();
   // One frame of input. `dt` in seconds. Returns what the host must do.
   FlowAction update(const platform::Input& in, float dt);
   // In-game menu Save/Load > Load: replaces the state with the slot and returns the room to enter (like Continue). The host applies it.
@@ -200,6 +203,8 @@ class GameFlow {
   // host must not run the game) and draw_overlay() last in every frame (the black veil over whatever was drawn).
   FlowAction tick_fade(float dt);
   bool fading_out() const { return load_pending_ || open_pending_; }
+  // A load or menu-open fade is running or its black veil is still over the screen.
+  bool veiled() const { return fading_out() || open_ready_ || veil_ > 0.05f; }
   // The slot a running load fade-out is about to start (null otherwise): the host prepares its room meanwhile.
   const ui::SlotEntry* loading_slot() const { return load_pending_ ? &load_entry_ : nullptr; }
   // Field main menu (Tab / Start), script name entry and shops: the field fades to black and the screen holds black, the host opens the
@@ -279,6 +284,8 @@ class GameFlow {
   const save::SaveDat* save_dat() const { return dat_; }
 
  private:
+  // Closes every flow screen and pending fade (restart, return_to_title).
+  void drop_screens();
   void enter_title(bool fresh = true);
   void enter_slots();
   void enter_name();

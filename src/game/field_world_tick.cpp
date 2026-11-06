@@ -21,6 +21,14 @@ namespace oc::game {
 
 using namespace field_internal;
 
+namespace {
+// FE 6F / FE 7D for one character: every grid element and the three accessories go back to the stock.
+void strip_character(ui::GameState& gs, int char_id) {
+  gs.strip_grid(char_id);
+  for (u16& accessory : gs.slot.chars[static_cast<size_t>(char_id)].accessory) gs.return_gear(accessory);
+}
+}  // namespace
+
 void FieldWorld::table_op(u16 key, int arg, int index) {
   // FE 5D / FE 60: arg == 0 sets, else clears bit `index` (< 0x2C) of the party lock bitmap or the party-screen exclusion bitmap
   // (both saved in the slot).
@@ -36,30 +44,47 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
     return;
   }
   if (key == 0xFE69 && gs_) {
-    // FE 69, character record 1 (Kid): b == 0 SAVE empties her element grid cell by cell - every cell whose id (& 0x1FF) is a real
-    // element (< 0x80) keeps only its flag bits (& 0xC000) - and remembers (id, copies) WITHOUT refunding the stock; b != 0 RESTORE adds each
-    // remembered element to the element STOCK (not back into the grid; she must place them again) and forgets them.
-    // The pending list is kept in memory only: a save made inside the scene loses it.
+    // FE 69 on character record 1 (Kid). The pending list lives in script variables, so a save inside the scene keeps it.
+    // b == 0 SAVE: both lists' first 24 words are zeroed; then each cell k whose id (& 0x1FF) is below 0x80, empty ones included, writes
+    // its id to variable kIds + 2k and ORs its copy count into nibble (k & 1) of variable kCounts + 2 * (k >> 1); the cell keeps only
+    // its flag bits and its count is cleared; the stock is untouched. b != 0 RESTORE adds the 48 listed elements to the STOCK (not
+    // back into the grid): the count of entry k is read from nibble (k & 1) of variable kCounts + 2k, one word per entry rather than
+    // the packed word SAVE wrote, and only for elements whose copies count (one copy otherwise); then the 48 ids and 24 count words
+    // are zeroed.
+    constexpr u16 kIds = 0x334, kCounts = 0x394;
     save::SaveChar& ch = gs_->slot.chars[1];
+    const auto put = [&](u16 id, u16 value) {
+      vm_.set_var(id, value);
+      gs_->slot.set_var(id, value);
+    };
     if (arg == 0) {
-      fe69_saved_.clear();
+      for (u16 i = 0; i < 24; ++i) {
+        put(static_cast<u16>(kIds + 2 * i), 0);
+        put(static_cast<u16>(kCounts + 2 * i), 0);
+      }
       for (size_t k = 0; k < ch.grid.size(); ++k) {
-        const u16 cell = ch.grid[k];
-        if ((cell & 0x1FF) == 0 || (cell & 0x1FF) >= 0x80) continue;
-        fe69_saved_.emplace_back(cell & 0x1FF, std::max<int>(1, ch.equipped_qty[k]));
-        ch.grid[k] = static_cast<u16>(cell & 0xC000);
+        const int id = ch.grid[k] & 0x1FF;
+        if (id >= 0x80) continue;
+        put(static_cast<u16>(kIds + 2 * k), static_cast<u16>(id));
+        const u16 word = static_cast<u16>(kCounts + 2 * (k >> 1));
+        put(word, static_cast<u16>(vm_.var(word) | (ch.equipped_qty[k] & 0xF) << (4 * (k & 1))));
+        ch.grid[k] &= 0xC000;
         ch.equipped_qty[k] = 0;
       }
     } else {
-      for (const auto& [id, copies] : fe69_saved_)
+      for (u16 k = 0; k < 48; ++k) {
+        const int id = vm_.var(static_cast<u16>(kIds + 2 * k)) & 0xFFFF;
+        const int copies = gs_->counts_copies(id) ? vm_.var(static_cast<u16>(kCounts + 2 * k)) >> (4 * (k & 1)) & 0xF : 1;
         for (int i = 0; i < copies; ++i) gs_->add_element(id);
-      fe69_saved_.clear();
+        put(static_cast<u16>(kIds + 2 * k), 0);
+      }
+      for (u16 i = 0; i < 24; ++i) put(static_cast<u16>(kCounts + 2 * i), 0);
     }
     return;
   }
   if (key == 0xFE6F && gs_) {
-    // FE 6F on the recruited roster (44 bits): b == 0 SAVE refunds every recruited character's element grid
-    // and accessories to the stock, saves the roster, leaves only Serge recruited and
+    // FE 6F on the recruited roster (44 bits): b == 0 SAVE refunds every recruited character's element grid (every cell, locked
+    // ones too) and accessories to the stock, saves the roster, leaves only Serge recruited and
     // sets the party lock bitmap to 1 (the rest 0); b != 0 RESTORE ORs the saved roster back. Grids and accessories stay
     // empty.
     save::SaveSlot& sl = gs_->slot;
@@ -68,8 +93,7 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
       for (int char_id = 0; char_id < 0x2C; ++char_id) {
         if (!sl.recruited(char_id)) continue;
         (char_id < 32 ? lo : hi) |= 1u << (char_id & 31);
-        gs_->clear_all(char_id);
-        gs_->unequip_accessories(char_id);
+        strip_character(*gs_, char_id);
       }
       sl.unk_e1e0 = lo;
       sl.unk_e1e4 = hi;
@@ -91,8 +115,7 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
   }
   // FE 7D: character `arg` leaves its grid elements and its three accessories in the stock (FE 6F's per-character step).
   if (key == 0xFE7D && gs_ && arg >= 0 && arg < save::kNumChars) {
-    gs_->clear_all(arg);
-    gs_->unequip_accessories(arg);
+    strip_character(*gs_, arg);
     return;
   }
   // FE 1B: window skin = U (variable 0x44 too, set by the VM).
@@ -156,6 +179,7 @@ void FieldWorld::set_global(script::Global which, s32 value) {
       if (gs_) gs_->slot.frames = static_cast<u16>(value);
       break;
     case Global::ControlYaw: control_yaw_ = value & 0xFFF; break;
+    case Global::PortraitYaw: portrait_yaw_ = static_cast<s16>(value); break;
     case Global::CameraYOffset: camera_.camera_y_offset = static_cast<float>(value); break;
     case Global::SubmergedOtPush: water_bias_ = value & 0x7FFF; break;
     case Global::PushStrength: push_strength_ = static_cast<s16>(value); break;
@@ -601,14 +625,14 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
       if (up) dialogue_.move_choice(-1);
       if (down) dialogue_.move_choice(1);
       if (dialogue_.digit_entry() && (digit_step != 0 || digit_shift != 0)) dialogue_.move_digit(digit_step, digit_shift);
-      if (confirm) dialogue_.confirm();
+      if (confirm) confirm_window(dialogue_, dialogue_owner_);
     }
     for (auto& window : extra_win_) {
       if (!window.box || !window.box->is_open() || window.label) continue;
       if (up) window.box->move_choice(-1);
       if (down) window.box->move_choice(1);
       if (window.box->digit_entry() && (digit_step != 0 || digit_shift != 0)) window.box->move_digit(digit_step, digit_shift);
-      if (confirm) window.box->confirm();
+      if (confirm) confirm_window(*window.box, window.owner);
     }
     input_.action_pending = false;
   } else if (confirm) {
@@ -632,7 +656,7 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   }
 
-  for (int i = 0; i < ticks; ++i) {
+  for (int i = 0; i < ticks && !room_lost_; ++i) {
     sim_tick();
     // A key edge lasts one tick.
     input_.action_pending = false;

@@ -35,7 +35,10 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
   std::vector<battle::PartyMember> party;
   std::vector<int> battle_ids = world.party_chars();
   {  // Relief Charm: outside battle 0x3DD the relief member takes every battle slot holding Serge
-    const int relief = world.game_state().slot.head[ui::kReliefHead];
+    // A relief member who is no longer recruited is cleared first, as the field does when it leaves for a battle.
+    save::SaveSlot& slot = world.game_state().slot;
+    if (const int member = slot.head[ui::kReliefHead]; member != 0xFF && (member >= 0x2C || !slot.recruited(member))) slot.head[ui::kReliefHead] = 0xFF;
+    const int relief = slot.head[ui::kReliefHead];
     if (rq.battle_id != 0x3DD && relief != 0xFF && std::find(battle_ids.begin(), battle_ids.end(), relief) == battle_ids.end())
       for (int& id : battle_ids)
         if (id == 0) id = relief;

@@ -324,11 +324,12 @@ void FieldWorld::step_triggers() {
   const Ent& pe = ents_[static_cast<size_t>(player)];
   const ActorPose& pp = pe.actor.current();
   const float rp = ent_radius(player), hp = ent_height(player);
-  // A pending action press that the script lock allows takes the talk range for itself: an entity there gets the action or
-  // nothing, never the touch event (a failed facing cone or an open modal window included).
-  const bool pressed = input_.action_pending && !(vm_.global_flags() & script::gflag::kInputLock);
-  const bool can_talk = pressed && controls_free();
-  std::vector<std::pair<float, int>> cands;
+  // Entities are tested in index order. A pending action press that the script lock allows takes the talk range for itself: an
+  // entity there gets the action or nothing, never the touch event (a failed facing cone or an open modal window included). The
+  // first entity that answers takes the press, also when its ON_ACTION cannot start (already running, no free record), so the
+  // entities after it see no press and run the touch test; a box entity with flag 0x1000 answers without taking the press.
+  const bool locked = (vm_.global_flags() & script::gflag::kInputLock) != 0;
+  const bool talk_free = controls_free();
   for (int i = 1; i < static_cast<int>(ents_.size()); ++i) {
     if (i == player) continue;
     const Ent& ent_state = ents_[static_cast<size_t>(i)];
@@ -362,23 +363,17 @@ void FieldWorld::step_triggers() {
         continue;
       }
     }
-    if (in_talk_range && pressed && !(script_ent.flags38 & script::flag38::kNoAction)) {
-      if (can_talk && facing) cands.emplace_back(d2, i);
+    if (in_talk_range && input_.action_pending && !locked && !(script_ent.flags38 & script::flag38::kNoAction)) {
+      if (talk_free && facing) {
+        if (!ent_box(i) || !(script_ent.flags38 & 0x1000)) input_.action_pending = false;
+        vm_.trigger_action(i);
+      }
       continue;
     }
     if (touch && !(script_ent.flags38 & script::flag38::kNoCollision)) vm_.trigger_collision(i);
   }
   // The key-item flag lasts one pass.
   key_item_shown_ = false;
-  // The nearest talkable entity gets the action; when its ON_ACTION cannot start (script busy / locked) the next one is tried
-  // (each entity has its own event queue in the engine; a busy neighbour must not swallow the button).
-  std::sort(cands.begin(), cands.end());
-  for (const auto& candidate : cands) {
-    if (vm_.trigger_action(candidate.second)) {
-      input_.action_pending = false;
-      break;
-    }
-  }
 }
 
 // Off-screen culling (every tick, before the animation steps): the cull flag is cleared for every entity and set again for a

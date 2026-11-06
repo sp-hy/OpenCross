@@ -141,7 +141,7 @@ int main() {
   // Other maps: never skipped.
   CHECK(!game::model_swap_skipped(0xA0, 6, b7));
 
-  // --- RDE hotkeys: toggles flip on the press only; slow / fast exclude each other; the speed keys do nothing in the Radius tutorial
+  // --- RDE hotkeys: toggles flip on the press only; slow / fast exclude each other; the speed keys do nothing while speed-locked (room 386)
   {
     game::RdeHotkeys keys;
     game::Toggles on;
@@ -207,7 +207,7 @@ int main() {
     CHECK(!chord.poll(true, true) && chord.poll(true, true));
     CHECK(!chord.poll(false, true) && !chord.poll(false, false) && !chord.poll(true, false) && !chord.poll(false, false));
   }
-  // --- speed factors: RDE's own = 4x field / 2x battle; slow = percent; nothing in the tutorial
+  // --- speed factors: RDE's own = 4x field / 2x battle; slow = percent; nothing while speed-locked
   CHECK(game::speed_factor(true, false, 0, 50, false, false) == 4.0f && game::speed_factor(true, false, 0, 50, true, false) == 2.0f);
   CHECK(game::speed_factor(true, false, 3, 50, true, false) == 3.0f && game::speed_factor(false, true, 0, 50, false, false) == 0.5f);
   CHECK(game::speed_factor(true, false, 0, 50, false, true) == 1.0f && game::speed_factor(false, false, 0, 50, false, false) == 1.0f);

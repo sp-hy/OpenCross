@@ -278,12 +278,17 @@ void FieldWorld::clear_room() {
   party_ent_ = {-1, -1, -1};
   controlled_override_ = -1;
   camera_target_ = -1;
+  // A room entry drops every pending request of the room before: a running exit (a direct load during an exit fade), its frame
+  // capture, and a script screen still Requested or Open (a Load picked from a save point's menu).
   jump_ = {};
   movie_jump_ = {};
+  trans_ = Trans::None;
+  capture_.want = capture_.active = false;
+  menu_state_ = MenuState::None;
+  room_lost_ = false;
   camera_.reset();
   shake_ = Shake{};
   close_windows();
-  owner_window_.clear();
   choice_pending_ = false;
   label_ = false;
   handoff_.reset();
@@ -372,8 +377,9 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   room_models_.assign(scene->models.size(), nullptr);
   room_model_tried_.assign(scene->models.size(), false);
 
-  // The control yaw is 0 at every room load; only a room script's op 63 turns the pad.
+  // The control yaw (op 63) and the portrait yaw (FE 6A) are 0 at every room load.
   control_yaw_ = 0;
+  portrait_yaw_ = 0;
   const RoomView::Limits lim = view_.default_limits();
   camera_.cam.limits = lim;
 
@@ -537,10 +543,16 @@ void FieldWorld::place_party_spawn(int slot) {
 
 // ------------------------------------------------------------------------------------------------ host: entities
 // A screen fade alone does not hold the gate: the scripts of a battle return, a menu close or a room entry run under the fade-in.
-// A battle holds it from its request through the encounter effect to its end, so a second A3 / C9 waits for its own fight.
-bool FieldWorld::system_ready() {
-  return in_init_ || (trans_ == Trans::None && !jump_.active && handoff_.battle_state == BattleState::None);
+// A battle holds it from its request through the encounter effect to its end, so a second A3 / C9 waits for its own fight. A screen
+// (menu, shop, name entry, party screen, save list) or a movie holds it from its request until it has closed, and a party model swap
+// from D9 until its DA: a second screen op waits and opens its screen after the first one. The full gate also holds while a song
+// change runs (the WAIT_SONG condition); RUN_SCRIPT tests the gate without that term.
+bool FieldWorld::busy_clear() {
+  return in_init_ || (trans_ == Trans::None && !jump_.active && handoff_.battle_state == BattleState::None && menu_state_ == MenuState::None &&
+                      movie_state_ == MovieState::None && !model_swap_pending());
 }
+
+bool FieldWorld::system_ready() { return busy_clear() && (in_init_ || !song_changing()); }
 
 // Ops 75 / 76 / 78 edit the attr -> flag table that the walk mesh blocks by.
 void FieldWorld::sync_flag_table() {
@@ -622,18 +634,22 @@ void FieldWorld::defeated_enter_room() {
 // member whose script is busy (inside WALK_TO / MOVE / a wait, or preempted by a script of a higher class) therefore does not
 // follow; step_followers() only moves members that ran this op during the tick.
 
+// FE 2F: the boot state. Variable 0x34 (debug) survives; variable 0x42 names the disc in use, which stays.
 void FieldWorld::field_reset() {
   const u16 debug = static_cast<u16>(vm_.var(0x34));
+  const u16 disc_var = static_cast<u16>(disc_ - 1);
   if (gs_) {
     gs_->slot = game::newgame::boot_state(gs_->rules ? gs_->rules->tables : nullptr, static_cast<u32>(tick_count_) * 2654435761u | 1u);
     gs_->slot.set_var(0x34, debug);
+    gs_->slot.set_var(0x42, disc_var);
   }
   for (u16 id = 0; id < 0x3D0; id += 2) vm_.set_var(id, 0);
   const auto globals = game::newgame::globals();
   for (size_t i = 0; i < globals.size(); ++i) vm_.set_var(static_cast<u16>(0x3D0 + 2 * i), globals[i]);
   vm_.set_var(0x34, debug);
-  set_disc(1);
+  vm_.set_var(0x42, disc_var);
   defeated_ = {};
+  game_reset_ = true;
 }
 
 // ------------------------------------------------------------------------------------------------ host: party and items

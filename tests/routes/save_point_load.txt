@@ -1,0 +1,69 @@
+# Load from a save point: the save-point menu (FE 72, `request menu`) loads a file through Save/Load > Load; afterwards the menu
+# key opens the main menu and a script screen (an element shop) opens: no menu state survives the load.
+0 wait flow title 300
+- wait movie start 300                # cold boot: the title room plays its logo FMV first
+- tap confirm                         # skip it
+- wait movie end 300
+- wait 150
+- tap confirm                         # any button: the menu
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (memory-card choice)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # slot 5
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 900
+- load tel_b03f 0                     # Termina (the save's own room is the world map)
+- wait room tel_b03f 300
+- wait idle 600
+- set var 0x3C 1                      # saving allowed, as a save point's room sets it
+- request menu                        # FE 72: the save point's main menu
+- wait menu open 120
+- wait 30
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # Save / Load
+- wait 20
+- tap confirm
+- wait 30
+- tap down                            # Load a File
+- wait 10
+- tap confirm                         # the save choice
+- wait 20
+- tap confirm                         # the choice the screen starts on
+- wait 20
+- tap right
+- tap right
+- tap right
+- tap right
+- tap right                           # file 6: a town, not the world map
+- wait 10
+- tap confirm                         # the pick loads at once
+- wait menu closed 300
+- wait room jac_b23i 900              # the loaded file's room has faded in
+- wait idle 900
+- tap tab                             # the menu key
+- wait menu open 120
+- wait 30
+- tap cancel
+- wait menu closed 300
+- wait idle 300
+- request elementshop 0               # a script screen after the load
+- wait shop open 120
+- wait 30
+- tap cancel
+- wait shop closed 300
+- wait idle 300
+- quit

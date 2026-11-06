@@ -209,6 +209,20 @@ void test_slot() {
   const auto slots = list_slots(card);
   CHECK(slots.size() == 2 && slots[0].slot == 0 && slots[1].slot == 4);
   CHECK(read_slot(card, slots[1].block).chars[5].weapon == slot.chars[5].weapon);
+  // A US-named file of the same number is rewritten in place under its own name.
+  MemCard us_card = MemCard::blank();
+  const int us_block = us_card.allocate();
+  us_card.write_block(us_block, encode_block(slot));
+  us_card.set_dir(us_block, 0x51, MemCard::kBlock, 0xFFFF, "BASLUSP01041USCHRO07");
+  CHECK(write_slot(us_card, 7, slot) == us_block);
+  CHECK(list_slots(us_card).size() == 1 && list_slots(us_card)[0].name == "BASLUSP01041USCHRO07");
+  // Values wider than their stream field saturate instead of wrapping.
+  SaveSlot wide = slot;
+  wide.items[3].qty = 130;
+  wide.chars[2].max_hp = 1500;
+  wide.chars[2].weapon = 600;
+  const SaveSlot narrowed = decode_block(encode_block(wide));
+  CHECK(narrowed.items[3].qty == 127 && narrowed.chars[2].max_hp == 1023 && narrowed.chars[2].weapon == 511);
   // The summary's faces follow the model byte up to 0x31: Serge as Lynx (0x31) shows Lynx, Glenn with two swords (0x32) his own face.
   SaveSlot forms = slot;
   forms.set_party({0, 0x13, 0xFF});

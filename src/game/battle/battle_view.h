@@ -490,6 +490,8 @@ class BattleView {
   // `approach_shot` (the HIT% menu cancelled), else with the camera holding its pose.
   void begin_engage(int pc, int target);
   void begin_disengage(bool approach_shot = false);
+  // Leaving the HIT% menu, also while the PC still runs up to the target: Cross (pass 0) or a switch key (+1 next / -1 previous PC).
+  void leave_hit_menu(int pass);
   void chain_pick(int strength);
   void start_hit();
   void start_return();
@@ -963,6 +965,8 @@ class BattleView {
   enum class Finish { None, Victory, Wiped, Fled } finish_ = Finish::None;
   // A wipe: 14 + 14 idle frames, then the fade to black over 0x3C ticks.
   static constexpr int kWipeIdle = 28, kWipeFade = 0x3C;
+  // A wipe by an action that landed Frozen: the battle runs this many ticks more before it ends.
+  static constexpr int kFrozenWipeHold = 0x78;
   // Running away: the battle loop ends right after the Run confirm and `bto0` starts after the 14 + 14 teardown frames, 31 ticks after the
   // confirm; the party's run scripts play on meanwhile. kFledFade = the fade of a stage without `bto0`.
   static constexpr int kRunTicks = 1, kOutroDelay = 28, kFledFade = 60, kOutroCap = 600;
@@ -982,6 +986,12 @@ class BattleView {
   // SFX 0x16 owed when the command menu opens again after nobody could act.
   bool menu_chime_ = true;
   int top_cursor_ = 0, chain_cursor_ = 0, cell_ = 0, target_cursor_ = 0;
+  // The HIT% visit's stamina budget (Battle::hit_budget), taken while the top menu runs; each accepted strength pick takes its cost.
+  int hit_budget_ = 0;
+  // Leaving the HIT% menu: the PC the top menu reopens on once the leaving PC is home (-1 = menu_pc_after); pass_switch_ = it was a switch
+  // key, so the menu entry starts again with SFX 0x16.
+  int pass_pc_ = -1;
+  bool pass_switch_ = false;
   // The Dopplegang pick list: -1 = the character's own form (entry 0), then the pool slots ascending. dop_cur_ = cursor entry (2 per row),
   // dop_top_ = first visible row (6 rows show), dop_max_ = the first-row clamp 1 + ceil((n8 - 11) / 2) with the BYTE creature count n8 (>= 0),
   // dop_named_ = inline names the text renderer has finished (the scroll gate), dop_typing_ / dop_left_ = the renderer's position: the entry
@@ -1036,15 +1046,19 @@ class BattleView {
   // Top command menu: +1 next / -1 previous PC that can act (plays SFX 0x16); with nobody else the menu re-enters on the same PC. Always
   // restarts the menu entry.
   void switch_active_pc(int dir);
-  // The menu entry: whenever the command menu reaches a PC (battle start, the end of a PC's turn, L1 / R1, a PC that can act again) its
-  // window grows for kEntryGrowTicks ticks, drawn as the white outline. On the first tick after that with no action running the menu state
-  // steps on, and on the next tick the top menu takes over: from then on it takes cursor moves and confirms and ends the PC's guard, L1 / R1
-  // one tick later. Input before that is dropped. A cancelled HIT% menu returns to the top menu without a new entry. entry_pc_ = the PC whose
-  // window opens or is open (-1 none); entry_age_ = ticks grown; entry_ready_ = the menu state stepped on; entry_live_ = ticks since the top
-  // menu took over (-1 = not yet). turn_open_ = a PC's command is still running: its end starts the entry of the next menu PC.
+  // The PC a switch key passes the menu to: +1 next / -1 previous that can act, the active PC itself when nobody else can.
+  int switch_target(int dir) const;
+  // The menu entry: whenever the command menu reaches a PC (battle start, the end of a PC's turn, L1 / R1, a PC that can act again, the end
+  // of enemy actions) its window grows for kEntryGrowTicks ticks, drawn as the white outline. On the first tick after that with no action
+  // running the menu state steps on, and on the next tick the top menu takes over: from then on it takes cursor moves and confirms and ends
+  // the PC's guard, L1 / R1 one tick later. Input before that is dropped. An enemy action closes the window and the entry starts again after
+  // it. A cancelled HIT% menu returns to the top menu without a new entry. entry_pc_ = the PC whose window opens or is open (-1 none);
+  // entry_age_ = ticks grown; entry_ready_ = the menu state stepped on; entry_live_ = ticks since the top menu took over (-1 = not yet);
+  // entry_chime_ = SFX 0x16 owed when the entry starts again after enemy actions. turn_open_ = a PC's command is still running: its end
+  // starts the entry of the next menu PC.
   static constexpr int kEntryGrowTicks = 18;
   int entry_pc_ = -1, entry_age_ = 0, entry_live_ = -1;
-  bool entry_ready_ = false;
+  bool entry_ready_ = false, entry_chime_ = false;
   bool turn_open_ = false;
   void begin_menu_entry(int pc);
   void tick_menu_entry();
@@ -1425,7 +1439,7 @@ class BattleView {
   // the running one; `wend` = frames left before the window closes by itself ({wend(n)}), -1 = none; `unit` = the script's unit
   // ({playwork(0)}); (x, y) = the window rect origin and `ty` the text y (PS1 px); `cells` / `lines` = 12-px cells, 16-px lines; `open` = 0
   // closed, > 0 frames since the open (grows from the centre), -k closing; `item` = {itemwork(0)}: the stolen item / element name (system
-  // message window, Pilfer); `sys` = the system message window (text at (32, 144)): closes by itself, after the action. The system plate is a
+  // message window, Pilfer); `sys` = the system message plate (text at (32, 144)): closes by itself, after the action. The system plate is a
   // fixed 256 x 10 rect whatever the text with no grow step: the skin box snaps on and off, no outline frames.
   struct ScriptMsg {
     std::vector<std::string> pages;
@@ -1454,10 +1468,17 @@ class BattleView {
     std::string text, item;
     bool sys = false;
   };
+  // The event window (E0 / E2) and the system message plate: two windows, open and drawn independently. The plate holds nothing: the
+  // next command confirm or action start closes it, and the battle's end takes it down.
   ScriptMsg smsg_;
+  ScriptMsg plate_;
   // Pilfer's result: shown when the action ends.
   ScriptMsgReq sys_req_;
   bool sys_pending_ = false;
+  // Frozen newly landed in an ended action; cleared when an element action starts. A wipe while it is set runs wipe_hold_ more ticks
+  // (the Frozen plate up, no command menu) before the battle ends.
+  bool froze_ = false;
+  int wipe_hold_ = 0;
   // Ops 2C .. 38 (script cut scene): the party panels, ring and command box are not drawn.
   bool hud_off_ = false;
   // Op 39 with 0: the per-frame HUD (panels, ring, command box) is not drawn until the script sets it again.
@@ -1480,6 +1501,8 @@ class BattleView {
   void script_event(const battle::pac::Event& event);
   void smsg_open(const ScriptMsgReq& req);
   void smsg_tick();
+  void tick_window(ScriptMsg& msg);
+  void build_window(const ScriptMsg& msg);
   // True while a message window owns the confirm button.
   bool smsg_input(bool ok);
   // Battle-script stream. The scripts run synchronously inside the rules (ScriptedBrain), so everything they said arrives as one ordered
@@ -1494,8 +1517,13 @@ class BattleView {
   int script_gap_ = -1;
   int script_passed_ = 0;
   int script_stall_ = 0;
-  // Set when an approach (1) or return (2) script starts, cleared when any unit's script ends on op 0x3E: an A6 (Killed) waits for it.
+  // Set when an approach (1) or return (2) script starts, cleared when any unit's script ends on op 0x3E: an A6 (Killed) waits for it. The
+  // engine can also stop or replace that script before its end (a phase timeout, the end-of-action cleanup): that clears it too, as the
+  // op that would have cleared it never runs. move_wait_unit_ = the unit whose script set it.
   int move_wait_ = 0;
+  int move_wait_unit_ = -1;
+  bool holds_move_wait(int unit) const;
+  void cut_script(int unit);
   void script_pump();
   bool script_barrier_clear(const battle::pac::Event& event) const;
   bool script_gated(const battle::ActionEvent& event) const { return event.script_seq >= 0 && event.script_seq >= script_passed_; }

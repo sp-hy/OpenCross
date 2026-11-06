@@ -143,14 +143,14 @@ bool FieldVM::exec_game(u8 op) {
       break;
     case 0xB2:
       if (byte_at(1) == 0) {
-        if (gflags_ & 0x40) {
+        if (gflags_ & gflag::kPartyOverride) {
           host_.party_override(false, 0);
-          gflags_ &= ~0x40u;
+          gflags_ &= ~gflag::kPartyOverride;
         }
         advance(2);
       } else {
-        if (!(gflags_ & 0x40)) {
-          gflags_ |= 0x40;
+        if (!(gflags_ & gflag::kPartyOverride)) {
+          gflags_ |= gflag::kPartyOverride;
           host_.party_override(true, operand_u(2));
         }
         advance(4);
@@ -436,6 +436,7 @@ bool FieldVM::exec_game(u8 op) {
       // Blocked ("-1"): retried by the dispatcher.
       if (host_.dialogue_blocked()) break;
       host_.open_dialogue(-1, word_at(1), byte_at(3));
+      self_->last_choice = kNoChoice;
       advance(4);
       break;
     case 0xE1:
@@ -454,9 +455,7 @@ bool FieldVM::exec_game(u8 op) {
         yield_ = true;
         break;
       }
-      // var 0x04 = the entity's last choice, which only a confirmed choice writes, so a plain message
-      // leaves the entity's previous result.
-      if (const int r = host_.dialogue_result(); r >= 0) self_->last_choice = static_cast<u8>(r);
+      // var 0x04 = the entity's dialogue result byte: 0xFF from the window's opening, the confirmed line after a choice.
       write_var(var::kChoiceResult, self_->last_choice);
       budget_ += 0x20;
       advance(1);
@@ -472,6 +471,7 @@ bool FieldVM::exec_game(u8 op) {
       }
       if (host_.dialogue_blocked()) break;
       host_.open_dialogue(speaker, word_at(2), byte_at(4));
+      self_->last_choice = kNoChoice;
       advance(5);
       break;
     }

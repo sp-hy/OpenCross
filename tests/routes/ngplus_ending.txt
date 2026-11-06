@@ -22,5 +22,8 @@
 - wait 20
 - tap cancel
 - wait menu closed 300
-- wait room opening 900
+- wait movie start 900                # SET_NEXT_ROOM 8: the title room plays its logo FMV
+- tap confirm                         # skip it
+- wait movie end 300
+- wait room opening 600                # the title room after its FMV
 - quit

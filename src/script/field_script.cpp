@@ -151,8 +151,6 @@ std::optional<Insn> decode_insn(ByteSpan code, u32 off, std::string* error) {
       const u16 value = rd16(code, operand_pos);
       if (mode & mask) {
         operand = {OperandKind::Imm, static_cast<s16>(value), {}};
-      } else if (token[0] == 'T' && (value & 0x8000)) {
-        operand = {OperandKind::Imm, value & 0x7FFF, {}};
       } else {
         operand = {OperandKind::Var, value, {}};
       }

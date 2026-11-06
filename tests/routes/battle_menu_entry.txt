@@ -1,8 +1,8 @@
 # Battle menu entry: whenever the command menu reaches a PC its window opens first (an outline growing for 18 ticks) and the top menu takes
 # over two ticks later; only then does it take input and end the PC's guard. Asserts the entry's last tick and the first top-menu tick for
-# the first menu of the battle, for the menu passing on after a Defend (Serge, then Kid), and after the enemy actions that follow the third
-# Defend: that window opens when the menu passes, before the enemies act, so the top menu comes two ticks after they are done. A confirm and an
-# L1 pressed while slot 2's window opens are dropped.
+# the first menu of the battle, for the menu passing on after a Defend (Serge, then Kid), and after the enemy action that follows the third
+# Defend: the enemy action closes the window, so Serge's entry runs in full once it is over. A confirm and an L1 pressed while slot 2's
+# window opens are dropped.
 0 wait 30
 - tap confirm                         # skip the intro shots
 - wait 71
@@ -36,9 +36,9 @@
 - wait 8
 - tap confirm                         # slot 2: Defend; nobody is free, the enemies act
 - wait 100
-- assert battle menu - 111            # an enemy acts; Serge's window is already full
-- wait 85
-- assert battle menu - 111
+- assert battle menu - 111            # an enemy acts; Serge's window is closed
+- wait 100
+- assert battle menu - 111            # the enemy is done; Serge's window is still opening
 - wait 1
 - assert battle menu 0 011            # Serge's top menu ends his guard
 - quit

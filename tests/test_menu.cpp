@@ -445,6 +445,20 @@ void test_use_and_options() {
   game_state.set_option(opt::kAutoAttack, false);
   CHECK(!game_state.option(opt::kAutoAttack) && game_state.option(opt::kAnalogStick));
   CHECK(game_state.party().size() == 2 && game_state.roster().size() == 2);
+  // The skin byte travels in variable 0x44: kept with Window Frame Custom, 0 with Default, clamped on a load.
+  game_state.set_option(opt::kCustomWindow, true);
+  game_state.skin = 6;
+  game_state.store_window_frame();
+  CHECK(game_state.slot.var(0x44) == 6);
+  game_state.skin = 0;
+  game_state.load_window_frame();
+  CHECK(game_state.skin == 6);
+  game_state.slot.set_var(0x44, 40);
+  game_state.load_window_frame();
+  CHECK(game_state.skin == 14 && game_state.slot.var(0x44) == 14);
+  game_state.set_option(opt::kCustomWindow, false);
+  game_state.store_window_frame();
+  CHECK(game_state.skin == 0 && game_state.slot.var(0x44) == 0);
 }
 
 // Original-art frame pieces (ps1::frame_pieces) and the dial needle angle (hand.h).

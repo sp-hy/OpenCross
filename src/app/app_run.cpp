@@ -199,7 +199,7 @@ void App::settings_pad_filter() {
 }
 
 bool App::speed_locked() const {
-  if (battle_ok || battle_in_field) return battle_ready && battle.scene_id() == game::kSpeedLockedMap;
+  if (battle_ok) return false;
   return world_ok && world.map_id() == game::kSpeedLockedMap;
 }
 

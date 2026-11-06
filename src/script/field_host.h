@@ -175,7 +175,7 @@ enum class Global : u8 {
   MusicSwapArmed,      // FE 63
   TradingPostRow,      // FE 67
   TradingPostCue,      // FE 67
-  Reg6A,               // FE 6A (purpose unknown)
+  PortraitYaw,         // FE 6A: added to the speaker heading in the dialogue portrait-side test
   BattleIntroAnchor,   // FE 70
   SavePointPreamble,   // FE 72
   Selection,           // FE 75
@@ -191,8 +191,10 @@ class FieldHost {
 
   // ---- system ---------------------------------------------------------------------------------------------------
   // The "system gate": false while a fade/transition/load/other system activity is in progress. Ops
-  // that need it yield without advancing until it is true.
+  // that need it yield without advancing until it is true. It also holds while a song change runs.
   virtual bool system_ready() = 0;
+  // The system gate without the song-change term: RUN_SCRIPT 07 / 08 / 09 wait only for this.
+  virtual bool busy_clear() = 0;
   // The room-entry window (the first ticks after a room load or a battle return): 3C / A9 yield while it is open.
   virtual bool entry_window() = 0;
   // Any of the message windows (labels included) is open: the launcher ops wait for it as well as for the system gate.
@@ -324,10 +326,9 @@ class FieldHost {
   virtual bool dialogue_blocked() = 0;
   // E0 (speaker -1) E3 E4
   virtual void open_dialogue(int speaker, int message, int flags) = 0;
-  // E1
+  // E1: makes the running entity's own open window a choice of lines first..last; the host stores a confirmed line in the owning
+  // entity's `last_choice`
   virtual void dialogue_choice(int first, int last) = 0;
-  // E2: confirmed choice line, -1 none
-  virtual int dialogue_result() = 0;
 
   // ---- screen -------------------------------------------------------------------------------------------------------
   // 80 81
@@ -429,7 +430,7 @@ class FieldHost {
   // FE 37
   virtual int char_life(int char_id) = 0;
   virtual void change_char_life(LifeOp op, int char_id, s32 value) = 0;
-  // FE 3B
+  // FE 3B: the status byte, -1 when the reference resolves to nobody.
   virtual int char_status(int char_id) = 0;
   // FE 36
   virtual void heal_group(int group) = 0;
@@ -444,6 +445,8 @@ class FieldHost {
   virtual int set_character_model(int char_ref, int value) = 0;
   // DA wait
   virtual bool model_swap_busy() = 0;
+  // A D9 replacement waits for its DA (7B / 7D hold meanwhile).
+  virtual bool model_swap_pending() = 0;
   // DA
   virtual void model_swap_commit() = 0;
   // DB
@@ -479,6 +482,7 @@ class NullHost : public FieldHost {
   size_t calls() const { return calls_; }
 
   bool system_ready() override;
+  bool busy_clear() override;
   bool entry_window() override;
   bool window_open() override;
   void end_of_tick(FieldVM& vm) override;
@@ -539,7 +543,6 @@ class NullHost : public FieldHost {
   bool dialogue_blocked() override;
   void open_dialogue(int speaker, int message, int flags) override;
   void dialogue_choice(int first, int last) override;
-  int dialogue_result() override;
   void bg_layer(int layer, bool on) override;
   void set_layer_opacity(int layer, int r, int g, int b) override;
   bool bg_wave(int mode, int arg) override;
@@ -588,6 +591,7 @@ class NullHost : public FieldHost {
   void set_limit_mode(int mode) override;
   int set_character_model(int char_ref, int value) override;
   bool model_swap_busy() override;
+  bool model_swap_pending() override;
   void model_swap_commit() override;
   int character_model_byte(int char_id) override;
   void refresh_party_models() override;

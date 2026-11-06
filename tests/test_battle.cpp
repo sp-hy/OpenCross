@@ -738,7 +738,8 @@ void test_status_and_poison() {
   CHECK_EQ(battle.unit(1).timers.at(8), 3 * 11);
   battle.post_action(0, 1, 100);
 
-  // poison: 1 per defend step on every living unit, PCs can die, enemies stay >= 1
+  // poison: 1 per defend step on every living unit, PCs can die; an enemy landing on exactly 0 stays at 1, below 0 it keeps the negative HP
+  // and stands
   battle.unit_mut(2).lo |= st::kPoison;
   battle.unit_mut(3).lo |= st::kPoison;
   const int hp2 = battle.unit(2).hp;
@@ -746,9 +747,14 @@ void test_status_and_poison() {
   CHECK_EQ(battle.unit(2).hp, hp2 - 7);
   battle.post_action(3, 7, 1);
   CHECK_EQ(battle.unit(2).hp, hp2 - 7);
-  battle.unit_mut(3).hp = 3;
+  battle.unit_mut(3).hp = 7;
   battle.post_action(0, 7, 1);
   CHECK_EQ(battle.unit(3).hp, 1);
+  battle.unit_mut(3).hp = 3;
+  battle.post_action(0, 7, 1);
+  CHECK_EQ(battle.unit(3).hp, -4);
+  CHECK(battle.unit(3).standing() && battle.outcome() == Outcome::Ongoing);
+  battle.unit_mut(3).hp = 1;
   battle.unit_mut(2).hp = 5;
   battle.post_action(0, 7, 1);
   CHECK(!battle.unit(2).alive() && battle.unit(2).hp == 0);
@@ -2045,6 +2051,64 @@ void test_victory_and_growth() {
       // Fresh HP pending (roll + 2) for all three, KO'd and bench included.
       CHECK(member->pending[0] >= 2);
     }
+  }
+  // a member still frozen when the fight ends is not knocked out: it takes the minor growth and the star-up gains
+  for (const bool boss : {false, true}) {
+    Fixture f2;
+    if (boss) f2.tables.scenes[0].raw[0x1A] = 0x80;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    rng.push(0);
+    rng.push(100);
+    NullBrain nb;
+    Battle battle(f2.tables, rng, nb);
+    auto lead = make_member(0, "A"), frozen = make_member(1, "B");
+    for (auto* member : {&lead, &frozen}) member->pending = {10, 20, 0, 0, 0, 0, 0};
+    CHECK(battle.start({lead, frozen}, 0));
+    battle.unit_mut(1).lo |= st::kDefeated;
+    battle.unit_mut(3).hp = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK(battle.outcome() == Outcome::Victory);
+    CHECK(battle.unit(1).lo & st::kDefeated);
+    CHECK_EQ(battle.rewards().gains[1][1], battle.rewards().gains[0][1]);
+    CHECK_EQ(battle.rewards().gains[1][1], boss ? 20 : 3);
+  }
+  // the star-up that reaches 99: the party takes its pending gains, the bench keeps its stats, nobody is rolled new deltas
+  {
+    Fixture f2;
+    f2.tables.scenes[0].raw[0x1A] = 0x80;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    rng.push(0);
+    rng.push(100);
+    NullBrain nb;
+    Battle battle(f2.tables, rng, nb);
+    auto lead = make_member(0, "A"), bench = make_member(9, "Z");
+    lead.pending = {10, 3, 0, 0, 0, 0, 0};
+    bench.pending = {7, 4, 0, 0, 0, 0, 0};
+    BattleOptions opt;
+    opt.bench = {bench};
+    opt.growth.star = 98;
+    CHECK(battle.start({lead}, 0, opt));
+    battle.unit_mut(3).hp = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK(battle.outcome() == Outcome::Victory);
+    CHECK(battle.rewards().star_up);
+    CHECK_EQ(battle.growth().star, 99);
+    CHECK_EQ(battle.growth().counter, 1);
+    CHECK_EQ(battle.rewards().gains[0][0], 10);
+    CHECK_EQ(battle.party()[0].stat[0], 60);
+    CHECK(battle.party()[0].pending == lead.pending);
+    CHECK(battle.party()[0].snap == lead.snap);
+    CHECK_EQ(battle.rewards().bench_gains[0][0], 0);
+    CHECK(battle.bench()[0].stat == bench.stat);
+    CHECK(battle.bench()[0].pending == bench.pending);
   }
   // defeat and run
   {
@@ -3574,6 +3638,47 @@ void test_scripted_hp_write_runs_kill_script() {
   CHECK_EQ(brain.kills, 1);
 }
 
+// A kill script that queues a death cast and then forces a result (the Time Devourer's slot 3: 67, A4, 83): the code waits for the cast,
+// also when the killing blow is a weapon command, whose end test runs right after the hit.
+struct DeathCastBrain final : EnemyBrain {
+  int forced = -1;
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.kind = EnemyAction::Kind::None;
+    return action;
+  }
+  int forced_result() const override { return forced; }
+  void on_killed(Battle&, int, Rng&, std::vector<EnemyAction>& out) override {
+    EnemyAction cast;
+    cast.kind = EnemyAction::Kind::Weapon;
+    cast.target = 0;
+    out.push_back(cast);
+    forced = 3;
+  }
+};
+
+void test_forced_result_waits_for_death_cast() {
+  data::GameTables tables = make_tables();
+  DeathCastBrain brain;
+  ScriptedRng rng(Lo::Fallback::Lo);
+  rng.push(0);
+  rng.push(100);
+  Battle battle(tables, rng, brain);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  battle.unit_mut(3).hp = 1;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.target = 3;
+  attack.chain = {0};
+  CHECK(battle.apply(attack));
+  CHECK(battle.outcome() == Outcome::Scripted);
+  CHECK_EQ(battle.result_code(), 3);
+  bool cast = false;
+  for (const ActionEvent& event : battle.events()) cast = cast || (event.death_cast && event.actor == 3);
+  CHECK(cast);
+}
+
 // Debug tools: invincible sides and the end test after a primitive called outside the scheduler (Debug tab cast).
 void test_debug_flags() {
   {
@@ -3637,6 +3742,45 @@ void test_god_mode() {
   fixture.battle.finish_external_action();
   CHECK(fixture.battle.unit(2).alive());
   CHECK(fixture.battle.unit(2).timers.count(29) == 0);
+}
+
+// Battle boost (RDE): a hit's damage on a PC is cancelled into the miss result (code 2, no value; nothing clamped), the hit strips the
+// standing PCs' inflicted negative statuses (innate ones stay), the gauge is held full; HP and stamina are never refilled.
+void test_battle_boost() {
+  Fixture fixture;
+  Battle::Cheats cheats;
+  cheats.boost = true;
+  fixture.battle.set_cheats(cheats);
+  Unit& pc = fixture.battle.unit_mut(0);
+  pc.hp = pc.max_hp / 3;
+  pc.stamina = 20;
+  pc.lo |= 0x8u | 0x20u;
+  pc.perm_lo |= 0x20u;
+  fixture.battle.unit_mut(1).lo |= 0x1u;
+  const int hp0 = pc.hp;
+  for (int k = 0; k < 6; ++k) fixture.battle.do_weapon_attack(3, 0, 2);
+  CHECK_EQ(fixture.battle.unit(0).hp, hp0);
+  CHECK(fixture.battle.unit(0).alive());
+  int hits = 0;
+  for (const ActionEvent& event : fixture.battle.events())
+    if (event.target == 0 && event.kind == ActionEvent::Kind::Weapon && event.code != 2) ++hits;
+  CHECK_EQ(hits, 0);
+  CHECK((fixture.battle.unit(0).lo & 0x28u) == 0x20u);
+  CHECK((fixture.battle.unit(1).lo & 0x1u) == 0);
+  fixture.battle.finish_external_action();
+  CHECK_EQ(fixture.battle.unit(0).hp, hp0);
+  CHECK_EQ(fixture.battle.unit(0).stamina, 20);
+  CHECK_EQ(fixture.battle.unit(0).gauge, fixture.battle.unit(0).gauge_max);
+  // A knocked-out PC stays down: boost revives nobody and refills no HP.
+  fixture.battle.unit_mut(1).hp = 0;
+  fixture.battle.unit_mut(1).lo |= st::kKO;
+  fixture.battle.finish_external_action();
+  CHECK(!fixture.battle.unit(1).alive());
+  CHECK_EQ(fixture.battle.unit(1).hp, 0);
+  // The enemies still take damage.
+  const int enemy_hp = fixture.battle.unit(3).hp;
+  fixture.battle.do_weapon_attack(0, 3, 2);
+  CHECK(fixture.battle.unit(3).hp < enemy_hp);
 }
 
 // RDE auto-battle's hit pick: the strongest affordable hit above 79 %, weak otherwise, -1 when weak cannot be paid.
@@ -4424,6 +4568,47 @@ void test_no_stamina_cost_status() {
   CHECK_EQ(battle.unit(0).stamina, 70);
 }
 
+// The HIT% visit budget: the stamina, plus 10 per step left on the no-stamina-cost timer while the unit has the status. Under the status a
+// hit starts while the stamina covers its unfatigued cost.
+void test_hit_budget() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  CHECK_EQ(battle.hit_budget(0), 70);
+  Unit& pc = battle.unit_mut(0);
+  pc.hi |= st::kHiNoStaminaCost;
+  pc.timers[32 + 17] = 9;
+  CHECK_EQ(battle.hit_budget(0), 160);
+  battle.unit_mut(3).max_hp = battle.unit_mut(3).hp = 9999;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  // Weak, medium, then heavy hits: the status runs out on the fourth hit, which is still free; then stamina is paid.
+  const int strengths[] = {0, 1, 2, 2, 2, 2, 0};
+  const int stamina_after[] = {70, 70, 70, 70, 40, 10, 0};
+  const int timer_after[] = {8, 6, 3, 0, 0, 0, 0};
+  int budget = battle.hit_budget(0);
+  for (int i = 0; i < 7; ++i) {
+    const int cost = battle.chain_cost(strengths[i], battle.unit(0));
+    CHECK(cost <= budget);
+    budget -= cost;
+    attack.chain = {strengths[i]};
+    CHECK(battle.apply(attack));
+    CHECK_EQ(battle.unit(0).stamina, stamina_after[i]);
+    const auto timer = battle.unit(0).timers.find(32 + 17);
+    CHECK_EQ(timer == battle.unit(0).timers.end() ? 0 : timer->second, timer_after[i]);
+  }
+  CHECK_EQ(budget, 0);
+  CHECK(!(battle.unit(0).hi & st::kHiNoStaminaCost));
+  battle.unit_mut(0).hi |= st::kHiNoStaminaCost;
+  battle.unit_mut(0).stamina = 20;
+  attack.chain = {2};
+  std::string why;
+  CHECK(!battle.validate(attack, &why) && why == "not enough stamina for the chain");
+  attack.chain = {1};
+  battle.unit_mut(0).lo |= st::kFatigued;
+  CHECK(battle.validate(attack));
+}
+
 // A double tech's weapon hits are dealt one each by its participants (the party slots of the character ids in record +0x14..+0x16), not
 // twice by the caster; a single tech (+0x14 = FF) hits +0xE times with the caster.
 void test_weapon_tech_participants() {
@@ -5141,6 +5326,36 @@ void test_star_up_grid_unlocks() {
   }
 }
 
+// Scene 0x1D8 saves the party with no persistent status unless it fled; any other scene keeps the poison.
+void test_scene_1d8_clears_status() {
+  for (const int scene : {0, 0x1D8})
+    for (const bool flee : {false, true}) {
+      data::GameTables tables = make_tables();
+      tables.scenes.resize(0x1D9, tables.scenes[0]);
+      ScriptedRng rng{Lo::Fallback::Lo};
+      rng.push(0);
+      rng.push(100);
+      NullBrain brain;
+      Battle battle{tables, rng, brain};
+      CHECK(battle.start({make_member(0, "A"), make_member(1, "B")}, scene));
+      battle.unit_mut(1).lo |= st::kPoison;
+      Command command;
+      command.actor = 0;
+      if (flee) {
+        command.kind = Command::Kind::Run;
+      } else {
+        battle.unit_mut(3).hp = 1;
+        command.kind = Command::Kind::Attack;
+        command.chain = {2};
+      }
+      CHECK(battle.apply(command));
+      CHECK(battle.outcome() == (flee ? Outcome::Fled : Outcome::Victory));
+      ui::GameState state;
+      game::apply_battle_result(state, tables, battle);
+      CHECK_EQ(static_cast<u32>(state.slot.chars[1].status), scene == 0x1D8 && !flee ? 0u : st::kPoison);
+    }
+}
+
 // Pip in a form grows toward the form's Lv 99 record (RDE): a boss win with Pip as Divine Beast (0x30), his stats at record 43's
 // Lv 99 values, gives him his whole pending (30 HP, 3 / 5 / 5 / 5 / 9 / 6) up to the form's targets and rolls the next HP pending
 // against the form's 800 HP. RDE: 750 -> 780 HP, ATK / DEF / HIT / EVD / MAG / MDEF 83 / 75 / 95 / 30 / 49 / 41, next HP pending 2.
@@ -5311,12 +5526,14 @@ int main() {
   test_tutorial_enemy_undying();
   test_end_rules();
   test_scripted_hp_write_runs_kill_script();
+  test_forced_result_waits_for_death_cast();
   test_hidden_units();
   test_hidden_pair_reveal_one();
   test_reveal_during_all_target_cast();
   test_idle_loop_cast();
   test_debug_flags();
   test_god_mode();
+  test_battle_boost();
   test_dopple_pool_and_form();
   test_dopple_exit_unit();
   test_dopple_way_back_after_pip_form();
@@ -5338,6 +5555,7 @@ int main() {
   test_weapon_hit_ends_confusion();
   test_weapon_tech_wake_crit_drain();
   test_no_stamina_cost_status();
+  test_hit_budget();
   test_time_runs_while_nobody_can_act();
   test_scripted_pc_entry_upkeep();
   test_weapon_tech_immune_absorb();
@@ -5348,6 +5566,7 @@ int main() {
   test_dopple_form_gauge_cap();
   test_stolen_loot_needs_victory();
   test_star_up_grid_unlocks();
+  test_scene_1d8_clears_status();
   test_pip_form_growth();
   test_pip_form_settles_at_99();
   test_battle_grid_follows_the_masks();

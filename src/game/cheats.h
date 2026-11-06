@@ -32,8 +32,8 @@ bool model_swap_skipped(int map, int ent, const StoryByte& story);
 
 // ---- RDE's play-time toggles and their keys / pad buttons. Keyboard: the slow / fast keys (default F1 / F2), F3 encounters off,
 // F4 battle boost, F5 auto battle. Pad: LT slow, RT fast, L3 tap encounters off, R3 tap battle boost, L3 + R3 auto battle (fires
-// when one of the two is let go; neither tap fires then). Slow and fast exclude each other; a press in the Radius tutorial
-// (map / battle 386) is swallowed for them. Every toggle flips on the press, not while held.
+// when one of the two is let go; neither tap fires then). Slow and fast exclude each other; a press in room 386 or a battle
+// launched from it is swallowed for them. Every toggle flips on the press, not while held.
 constexpr int kSpeedLockedMap = 386;
 struct HotkeyLevels {
   bool slow_key = false, fast_key = false, encounters_key = false, boost_key = false, auto_key = false;

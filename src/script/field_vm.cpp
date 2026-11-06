@@ -486,6 +486,12 @@ bool FieldVM::system_gate() {
   return false;
 }
 
+bool FieldVM::busy_gate() {
+  if (host_.busy_clear()) return true;
+  yield_ = true;
+  return false;
+}
+
 void FieldVM::begin_motion(const MotionRequest& request, bool free_height) {
   host_.start_motion(ent_, request);
   self_->flags270 |= flag270::kMoving;

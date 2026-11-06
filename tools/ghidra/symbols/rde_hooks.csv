@@ -1184,12 +1184,12 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x800be764,ovl@800A9F00==8,observer,font/text-render,Clear all battle PC text/sprite draw lists (battle init/exit),-,0x41a4f0,0x41a240,hook_font_text_render_800be764_obs
 0x800bebd8,ovl@800A9F00==8,observer,speed/boost,Masks off original debug speed bits (v1&=~3) in battle,,0x449160,0x448bd0,hook_speed_boost_800bebd8_obs
 0x800bf31c,ovl@800A9F00==6 && map==0x1DE,observer,bugfix,Map 0x1DE: adjusts script value by -/+0x1E for steps 4/5,,0x44a0e0,table@6be6f8,save_ext_hook_handler
-0x800bf4c4,ovl@800A9F00==8,observer,battle-feature,Battle boost: copies max value (+0x50) into current (+2) for units,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
+0x800bf4c4,ovl@800A9F00==8,observer,battle-feature,Battle boost: HUD panel loop sets each party unit's level gauge (+2 of the runtime block) to its max (+0x50),,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
 0x800bf568,ovl@800A9F00==8,replace,font/text-render,Draw translated battle message-window string instead of PS1 glyphs,lang text map,0x41bd60,0x41a240,hook_font_text_render_800bf568_rep
 0x800bf568,ovl@800A9F00==8,replace,font/text-render,Draw translated battle message-window string instead of PS1 glyphs,lang text map,0x41bf40,0x41a32d,hook_font_text_render_800bf568_rep_2
 0x800bfa7c,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4841f0,0x4aae2c,hook_native_port_800bfa7c_rep
-0x800bfab4,ovl@800A9F00==8,observer,speed/boost,Battle: sets speed bit1 in v0 from fast toggle (off on map 0x182),,0x449180,0x448bd0,hook_speed_boost_800bfab4_obs
-0x800bfb34,ovl@800A9F00==8,observer,speed/boost,Battle: sets speed bit0 in v0 from slow toggle (off on map 0x182),,0x4491c0,0x448bd0,hook_speed_boost_800bfb34_obs
+0x800bfab4,ovl@800A9F00==8,observer,speed/boost,Battle: sets speed bit1 in v0 from fast toggle (off while the room register 0x800852E0 reads room 0x182; not the battle id),,0x449180,0x448bd0,hook_speed_boost_800bfab4_obs
+0x800bfb34,ovl@800A9F00==8,observer,speed/boost,Battle: sets speed bit0 in v0 from slow toggle (off while the room register 0x800852E0 reads room 0x182; not the battle id),,0x4491c0,0x448bd0,hook_speed_boost_800bfb34_obs
 0x800bfbcc,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x484220,0x4ab2fa,hook_native_port_800bfbcc_rep
 0x800bfbf4,ovl@800A9F00==6 && map in 0x10F/0x1F4,observer,bugfix,Maps 0x10F/0x1F4: patches register args (0x28/0x28/0x14 to 0x19/0xFF/8),,0x44a0e0,table@6be6f8,save_ext_hook_handler
 0x800bfcd4,ovl@800A9F00==8,observer,text-translation,Fetch translated battle message string by id into host text buffer,lang text map,0x41c2a0,0x41a32d,hook_text_translation_800bfcd4_obs
@@ -1345,7 +1345,7 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x800ca9a4,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x48efb0,0x4ab3f9,hook_native_port_800ca9a4_rep
 0x800cb550,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x48f110,0x4ab3f9,hook_native_port_800cb550_rep
 0x800cb598,ovl@800A9F00==6,observer,other,Field: set flag for speaker/character tracking,-,0x454540,0x44b3c6,hook_other_800cb598_obs
-0x800cb714,ovl@800A9F00==6,observer,audio/bgm,Script wait on song 0x17 synced to remastered BGM playback position,remastered BGM,0x57d610,0x44ad10,hook_audio_bgm_800cb714_obs
+0x800cb714,ovl@800A9F00==6,observer,audio/bgm,"Script wait on song 0x17 synced to remastered BGM playback position; for the cue it replaces the frame countdown and yields until the stream reaches the mark",remastered BGM,0x57d610,0x44ad10,hook_audio_bgm_800cb714_obs
 0x800cb7a8,ovl@800A9F00==8,skip,battle-feature,Auto-battle: forces command selection (v1=5/0),,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
 0x800cb7e0,ovl@800A9F00==6 && map==0x32,observer,other,Map 0x32 step 0x14: sets host flags 0x9EF1C4/0x7000FC from script byte,,0x44a0e0,table@6be6f8,save_ext_hook_handler
 0x800cb890,ovl@800A9F00==6 && map==0x32,observer,other,Map 0x32 step 0x14: clears host flags 0x9EF1C4/0x7000FC,,0x44a0e0,table@6be6f8,save_ext_hook_handler
@@ -1599,7 +1599,7 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x800d3e7c,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x49c2c0,0x4ac020,hook_native_port_800d3e7c_rep
 0x800d4000,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x49c810,0x4ac020,hook_native_port_800d4000_rep
 0x800d444c,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x46ef30,0x4ac020,hook_native_port_800b09e4_rep
-0x800d4454,ovl@800A9F00==8,replace,battle-feature,Battle boost: returns max stat halfword for unit a1,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
+0x800d4454,ovl@800A9F00==8,replace,battle-feature,Battle boost: level gauge add after a weapon hit returns unit a1's max gauge,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
 0x800d46fc,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x49ce60,0x4ac020,hook_native_port_800d46fc_rep
 0x800d4860,ovl@800A9F00==6 && map in 0/8,redirect,ui-pc-menu,Title map: after 8000 idle frames toggles PC overlay screen,,0x44a0e0,table@6be6f8,save_ext_hook_handler
 0x800d4a10,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x49d500,0x4ac020,hook_native_port_800d4a10_rep
@@ -1666,14 +1666,14 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x800d7c64,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a2a60,0x4aac80,hook_native_port_800d7c64_rep
 0x800d7cd4,ovl@800A9F00==6,observer,hd-overlay-sprite,Field dialogue window: Initialises HD background layers from guest layer pointers (see docs/overlay_lifecycle.md §1),,0x4532e0,table@6c0388,hook_hd_background_800132b8_obs
 0x800d84dc,ovl@800A9F00==6,observer,hd-overlay-sprite,Field dialogue window: Tracks HD background animation state transitions (see docs/overlay_lifecycle.md §1),,0x4532e0,table@6c0388,hook_hd_background_800132b8_obs
-0x800d86d4,ovl@800A9F00==8,observer,battle-feature,Battle boost: refills stamina/element fields; battle 0x182 special-case,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
+0x800d86d4,ovl@800A9F00==8,observer,battle-feature,Battle boost: at the HP apply, a targeted party unit's KO bit is cleared and its pending damage (state 0/1) cancelled to state 2 / 0xFFFF (heals kept; HP never written); battle 0x182 unit 3 damage cut to HP-1,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
 0x800d8b90,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a2ce0,0x4ac2ae,hook_native_port_800d8b90_rep
 0x800d8cf8,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a3080,0x4ac2ae,hook_native_port_800d8cf8_rep
 0x800d8e00,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a32f0,0x4ac2ae,hook_native_port_800d8e00_rep
 0x800d8ea4,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a33f0,0x4ac2ae,hook_native_port_800d8ea4_rep
 0x800d8f90,ovl@800A9F00==8,skip,bugfix,Forces v1=0 instead of loading object field 0x13E (low confidence),-,0x41d0a0,0x41a240,hook_bugfix_800d8f90_skip
 0x800d93fc,ovl@800A9F00==8 && mem[800E3556]==0xC9,skip,bugfix,Battle 0xC9: forces v1=0x2F instead of struct byte 0x13 (low confidence),-,0x41d100,0x41a240,hook_bugfix_800d93fc_skip
-0x800d95cc,ovl@800A9F00==8,observer,battle-feature,Battle boost: clears negative status bits on party members,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
+0x800d95cc,ovl@800A9F00==8,observer,battle-feature,Battle boost: per resolved target, before the HP apply: party units in the live mask and not KO'd lose the inflicted negative lo bits (keep mask 0x556116C6); the frozen-landed flag is cleared,,0x449660,table@6be6c0,hook_battle_feature_800bf4c4_obs
 0x800d98a8,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a3520,0x4ac2ae,hook_native_port_800d98a8_rep
 0x800d9904,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a3610,0x4ac2ae,hook_native_port_800d9904_rep
 0x800d994c,ovl@800A9F00==8,replace,native-port,"native x86 reimplementation of battle.prg function (behaviour-preserving, speed)",,0x4a36e0,0x4ac2ae,hook_native_port_800d994c_rep

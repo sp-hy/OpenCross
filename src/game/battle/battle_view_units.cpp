@@ -29,6 +29,7 @@ bool BattleView::start_script(int unit, const bseq::Table* table, int entry, int
   if (visual.spawn && visual.vm.running())
     log::info("battle: unit {} spawn script (S5 entry 8) cut by entry {} variant {} at tick {}", unit, entry, variant, tick_count_);
   visual.spawn = visual.idle_owed = visual.victory_owed = false;
+  if (holds_move_wait(unit)) move_wait_ = 0;
   if (!visual.has_model || !table || !visual.vm.start(table, entry, variant)) {
     visual.script_done = true;
     return false;
@@ -42,10 +43,24 @@ bool BattleView::start_script(int unit, const bseq::Table* table, int entry, int
     };
   visual.script_kind = kind;
   visual.script_done = false;
-  if (kind == kApproach) move_wait_ = 1;
-  else if (kind == kReturn) move_wait_ = 2;
+  if (kind == kApproach || kind == kReturn) {
+    move_wait_ = kind == kApproach ? 1 : 2;
+    move_wait_unit_ = unit;
+  }
   if (std::getenv("OC_SCRIPT_LOG")) log::debug("battle script: tick {} unit {} kind {} entry {} variant {}", tick_count_, unit, static_cast<int>(kind), entry, variant);
   return true;
+}
+
+// The unit still runs the approach / return script that set the move-wait, which has not reached its end op yet.
+bool BattleView::holds_move_wait(int unit) const {
+  if (move_wait_ == 0 || unit != move_wait_unit_) return false;
+  const Visual& visual = vis_[static_cast<size_t>(unit)];
+  return visual.vm.running() && (visual.script_kind == kApproach || visual.script_kind == kReturn);
+}
+
+void BattleView::cut_script(int unit) {
+  if (holds_move_wait(unit)) move_wait_ = 0;
+  vis_[static_cast<size_t>(unit)].vm.stop();
 }
 
 // Ready stance at the enemy: the idle is restarted when the turn ends and by the top menu, never by the HIT% menu; a script end (ops 00 / 3E / 4C)
@@ -671,8 +686,8 @@ void BattleView::on_damage(int unit, bool number) {
     visual.hp_shown = event.hp_after;
     visual.low_hp_forced = false;
   }
-  // Pilfer or a status / field element (Frozen row 6): the record's btmes row opens the system message window
-  // when the action ends (window 0 at (32, 144), 120 ticks); a whole-side cast queues one record (sys_req_ is shared).
+  // Pilfer or a status / field element (Frozen row 6): the record's btmes row opens the system message plate
+  // when the action ends (at (32, 144), 120 ticks); a whole-side cast queues one record (sys_req_ is shared).
   if (const int msg = event.steal_msg >= 0 ? event.steal_msg : event.sys_msg; msg >= 0) {
     ScriptMsgReq req;
     req.sys = true;
@@ -852,7 +867,7 @@ void BattleView::tick_units() {
     // This fallback only covers a kill no reaction script took: it starts after the action and runs on its own. HP a script wrote to 0 never fades.
     const bool action_over = act_.phase == Act::Phase::None && !fx_active();
     // A boss with a scripted death (op 5C) owns its death presentation: no fade while its death cast is still owed / queued (the pack hides it).
-    const bool death_cast = visual.death_owed || battle_->death_pending(i) || (!queue_.empty() && visual.fade >= 1.0f && battle_->unit(i).hp <= 0 && !unit_rec.pc);
+    const bool death_cast = visual.death_owed || battle_->death_pending(i) || (!queue_.empty() && visual.fade >= 1.0f && !unit_rec.conscious() && !unit_rec.pc);
     if (!unit_rec.pc && !death_cast && !visual.ko_reacted && !unit_rec.hp_written_zero && visual.ko_shown && visual.script_done && visual.script_kind == kIdle && (visual.fade < 1.0f || (action_over && (visual.ko_hit || battle_->outcome() == battle::Outcome::Ongoing)))) visual.fade = std::max(0.0f, visual.fade - 1.0f / 40.0f);
     // Dev: OC_DEATH_TRACE logs the KO / fade state of a dying monster per tick.
     if (static const bool dt = std::getenv("OC_DEATH_TRACE") != nullptr; dt && !unit_rec.pc && (unit_rec.hp <= 0 || visual.death_owed)) {

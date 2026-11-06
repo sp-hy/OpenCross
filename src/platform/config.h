@@ -64,9 +64,9 @@ enum class TexFilter { Nearest, Bilinear };
 // live set (bound to Config::cheats by main) so the rule code in the lower layers can read it. The three RDE toggles are session-only
 // (Config::clear_session_toggles).
 //   no_encounters      RDE "encounters off" (F3 / L3): ordinary field battles are won without being fought
-//   battle_boost       RDE battle boost (F4 / R3): HP / stamina / elements refilled, negative status cleared
+//   battle_boost       RDE battle boost (F4 / R3): damage to the party cancelled, negative status cleared, element gauge full
 //   auto_battle        RDE auto-battle (F5 / L3 + R3): the party plays itself
-//   god_mode           the party cannot be knocked out (Battle::set_invincible)
+//   god_mode           hits on the party do no damage; KO revived, HP refilled, negative status cleared
 //   no_clip            the leader ignores the walk mesh and the solid entities
 //   max_stamina        PC stamina never drops
 //   free_elements      element casts cost no gauge and consume no stack copy
@@ -130,8 +130,8 @@ void bind_cheats(const Cheats* set);
 //   [Game]   FastMode / SlowMode (RDE's speed toggles; exclusive; hotkeys F2 / F1 (platform/keymap.h),
 //            pad RT / LT; session-only, see clear_session_toggles): the field and battle loops run FastRate x faster (0 = RDE's: 4x in
 //            the field, 2x in battle; 2..5 = that many times; FixedStep caps at 5 ticks per frame) or at SlowRate percent (10..90,
-//            default RDE's 50); menus, shops, movies and play time keep normal speed. Both are off in the Radius tutorial (map / battle
-//            386). AutoSave: RDE's auto-save (card 1 slot 0) on every location change.
+//            default RDE's 50); menus, shops, movies and play time keep normal speed. Both are off in room 386 and the battles launched
+//            from it. AutoSave: RDE's auto-save (card 1 slot 0) on every location change.
 //            Language: en fr it de es jp (dialogue text). Portraits: 2021 or 1999 (RDE face art set).
 //   [Mods]   one line per mod folder (ModSetting; folders not listed get the defaults, Esc overlay "Mods" tab). DumpStages / DumpTitle /
 //            DumpRooms / DumpModels / DumpEffects: which categories the Mods tab "Dump all textures" button writes (battle stage + title 3D

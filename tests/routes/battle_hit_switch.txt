@@ -1,0 +1,56 @@
+# HIT% menu leave keys: R1 (j) / Right pass the menu to the next PC that can act, L1 (h) / Left to the previous one, once the leaving PC is
+# home, with a new menu entry; Square (f) does nothing there; Cross keeps the menu on the same PC, also when another PC attacked last. The
+# leave keys already work while the PC runs up to the target.
+0 wait 30
+- tap confirm                         # skip the intro shots
+- wait 72
+- assert battle menu 0 000
+- tap confirm                         # Serge: Attack
+- wait 20
+- tap confirm                         # target -> Serge runs up
+- wait 150
+- tap j                               # R1 in the HIT% menu, no pick yet
+- wait 120
+- assert battle menu 1 000            # Kid's menu after Serge is home
+- tap confirm                         # Kid: Attack
+- wait 20
+- tap confirm
+- wait 150
+- tap confirm                         # one weak hit
+- wait 150
+- tap h                               # L1 after the hit
+- wait 120
+- assert battle menu 0 000            # back to Serge
+- tap confirm                         # Serge: Attack
+- wait 20
+- tap confirm
+- wait 150
+- tap f                               # Square: nothing
+- wait 20
+- assert battle menu - 000
+- tap cancel                          # Cross: the menu stays on Serge, although Kid attacked last
+- wait 120
+- assert battle menu 0 000
+- tap confirm                         # Serge: Attack
+- wait 20
+- tap confirm
+- wait 150
+- tap right                           # Right = next
+- wait 120
+- assert battle menu 1 000
+- tap confirm                         # Kid: Attack
+- wait 20
+- tap confirm                         # target -> Kid runs up
+- tap j                               # R1 while Kid runs: he hops home from where he stands
+- wait 4
+- assert battle menu - 000
+- wait 60
+- assert battle menu 2 000            # the next PC's menu
+- tap confirm                         # slot 2: Attack
+- wait 20
+- tap confirm
+- wait 10
+- tap cancel                          # Cross while slot 2 runs: the menu stays on slot 2
+- wait 40
+- assert battle menu 2 000
+- quit

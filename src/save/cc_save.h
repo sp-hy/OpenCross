@@ -175,7 +175,7 @@ struct SlotRef {
 std::string slot_file_name(int slot);
 std::vector<SlotRef> list_slots(const MemCard& card);
 SaveSlot read_slot(const MemCard& card, int block);
-// Replaces or allocates; returns the block, or 0 if the card is full.
+// Rewrites the slot's existing file (JP or US name) in place, else allocates; returns the block, or 0 if the card is full.
 int write_slot(MemCard& card, int slot, const SaveSlot& src);
 
 // save.dat: ZIP of memcard1.mcr, memcard2.mcr, rd_save.dat, achievement.dat, ext_save.dat.

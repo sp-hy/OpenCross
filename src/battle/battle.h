@@ -182,6 +182,8 @@ struct Unit {
   bool alive() const { return present && !(lo & (st::kKO | st::kDefeated)); }
   // In the turn order: a frozen unit is out of alive() but its countdown runs and it takes its turn at 0.
   bool in_turn_order() const { return present && !(lo & st::kKO); }
+  // The after-battle growth, star-up and results-screen heal test: only the KO bit counts, so a member still frozen at the end grows.
+  bool conscious() const { return present && !(lo & st::kKO); }
   // On the target ring and in every script target pick, count and attacked-script test: in the turn order with HP not 0 (a frozen unit
   // stands).
   bool standing() const { return in_turn_order() && hp != 0; }
@@ -259,6 +261,8 @@ struct ActionEvent {
   // The message row of the action-end system window: the element record's row of an element whose mode landed on this target, or 6 ("Frozen -- can't move!")
   // when Frozen newly landed on a target left alive; on a Run event, 5 ('Dropped the stolen goods!') when pilfered loot was pending.
   int sys_msg = -1;
+  // Frozen (lo 0x20000000) newly landed on this target, whatever its HP.
+  bool froze = false;
   int hp_before = 0, hp_after = 0;
   // The field ring before this event's cast changed it (the view shows the ring of the action it presents).
   std::array<int, 3> ring{-1, -1, -1};
@@ -575,6 +579,9 @@ class Battle {
   // The element the cell casts now: the double / triple tech combo_at offers, else the cell's own id.
   int cell_element(int pc, int cell) const;
   int chain_cost(int strength, const Unit& unit) const { return weapon_stamina_cost(strength, (unit.lo & st::kFatigued) != 0); }
+  // The stamina one HIT% menu visit may spend, taken while the top menu runs: the stamina, plus 10 per step left on the timer of hi status
+  // kHiNoStaminaCost while the unit has it (the stamina it will have once the status runs out).
+  int hit_budget(int actor) const;
   bool validate(const Command& cmd, std::string* why = nullptr) const;
   // Percent, using the current chain counter.
   int hit_chance_for(int actor, int target, int strength) const;
@@ -744,8 +751,12 @@ class Battle {
   void unlock_monster_grid(Unit& unit) const;
   int next_ready_unit();
   void god_filter(int target, DamageOut& dmg) const;
-  // Max stamina / battle boost refills, run after every action and hit.
+  // Max stamina / God mode / battle boost refills, run after every action and hit.
   void apply_cheat_state();
+  // Battle boost (RDE): a PC's pending damage is cancelled (the result reads as a miss) and every resolved hit or miss strips the negative
+  // statuses of the PCs still standing.
+  bool boost_shields(int unit) const { return cheats_.boost && is_pc_slot(unit); }
+  void boost_cure();
 
   const data::GameTables& tables_;
   Rng& rng_;
@@ -765,6 +776,8 @@ class Battle {
   std::vector<std::pair<int, std::vector<EnemyAction>>> idle_plans_;
   // run_death_plans is executing a plan (ActionEvent::death_cast).
   bool in_death_cast_ = false;
+  // Units whose damage battle boost cancelled during the running hit (bit = unit).
+  u32 boost_cancelled_ = 0;
   // A kill script queued attacks that have not run yet: the unit still owes its death (check_end).
   std::array<bool, kUnits> death_pending_{};
   // Turns taken by claim_ready_turns that have not run yet.

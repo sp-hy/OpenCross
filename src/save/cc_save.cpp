@@ -205,24 +205,26 @@ Bytes unpack_image(ByteSpan packed, u32 version) {
 Bytes pack_image(ByteSpan img) {
   if (img.size() != kImageSize) throw std::runtime_error("save: image must be 0xE1F4 bytes");
   BitWriter bw(kPackedSize);
+  // Counts, stats, HP and ids saturate at the field's largest value; level masks and name glyphs keep their low bits.
   auto mask = [](u32 value, int bit_count) { return bit_count >= 32 ? value : (value & ((1u << bit_count) - 1)); };
+  auto saturate = [](u32 value, int bit_count) { return bit_count >= 32 ? value : std::min(value, (1u << bit_count) - 1); };
   for (const Step& step : kSteps) {
     switch (step.mode) {
       case 0: {
         const int sz = value_bytes(step.length);
-        for (int i = 0; i < step.count; ++i) bw.put(mask(rd(&img[step.off + size_t(i) * step.special], sz), step.length), step.length);
+        for (int i = 0; i < step.count; ++i) bw.put(saturate(rd(&img[step.off + size_t(i) * step.special], sz), step.length), step.length);
         break;
       }
       case 1:
         for (int character = 0; character < step.count; ++character)
           for (int j = 0; j < step.special; ++j) {
             const u8 cell = img[step.off + size_t(character) * 0x18 + (j >> 1)];
-            bw.put((j & 1) ? (cell >> 4) : (cell & 15), step.length);
+            bw.put(saturate((j & 1) ? (cell >> 4) : (cell & 15), step.length), step.length);
           }
         break;
       case 2:
         for (int character = 0; character < step.count; ++character)
-          for (int k = 0; k < 0x30; ++k) bw.put(mask(rd(&img[step.off + size_t(character) * kStride + k * step.special], 2), step.length), step.length);
+          for (int k = 0; k < 0x30; ++k) bw.put(saturate(rd(&img[step.off + size_t(character) * kStride + k * step.special], 2), step.length), step.length);
         break;
       case 3:
         for (int character = 0; character < step.count; ++character)
@@ -392,8 +394,14 @@ void stamp_title(SaveSlot& target, int slot) {
 }  // namespace
 
 int write_slot(MemCard& card, int slot, const SaveSlot& src) {
-  const std::string name = slot_file_name(slot);
-  int block = card.find(name);
+  std::string name = slot_file_name(slot);
+  int block = 0;
+  for (const SlotRef& existing : list_slots(card))
+    if (existing.slot == slot) {
+      block = existing.block;
+      name = existing.name;
+      break;
+    }
   if (!block) block = card.allocate();
   if (!block) return 0;
   SaveSlot stamped = src;

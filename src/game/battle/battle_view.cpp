@@ -117,12 +117,19 @@ void BattleView::unload_scene() {
   // Everything the script presentation keeps between frames starts clean in a new battle (a fight left by running away mid-window
   // must not leave a half-open window / pending position / engaged PC / menu-facing memory in the next scripted fight).
   smsg_ = ScriptMsg{};
+  plate_ = ScriptMsg{};
+  sys_pending_ = false;
+  froze_ = false;
+  wipe_hold_ = 0;
   smsg_pos_set_ = false;
   smsg_pos_x_ = smsg_pos_y_ = 0;
   script_actor_ = -1;
   engaged_ = engage_arrive_ = engaged_after_cast_ = false;
   engaged_target_ = -1;
   engage_interrupted_ = false;
+  pass_pc_ = -1;
+  pass_switch_ = false;
+  hit_budget_ = 0;
   menu_face_ui_ = Ui::Intro;
   menu_face_pc_ = tgt_face_unit_ = -2;
   last_actor_ = -1;
@@ -133,6 +140,7 @@ void BattleView::unload_scene() {
   script_passed_ = 0;
   script_stall_ = 0;
   move_wait_ = 0;
+  move_wait_unit_ = -1;
   fx_reset_scene();
   anm_reset();
   model_cache_.clear();
@@ -641,7 +649,7 @@ bool BattleView::finish_start() {
   active_pc_ = -1;
   entry_pc_ = -1;
   entry_live_ = -1;
-  entry_ready_ = turn_open_ = false;
+  entry_ready_ = turn_open_ = entry_chime_ = false;
   menu_chime_ = true;
   top_cursor_ = chain_cursor_ = 0;
   // The per-unit memory bytes start clear (target memory 3) in a new battle.

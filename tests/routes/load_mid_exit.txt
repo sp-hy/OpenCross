@@ -1,0 +1,24 @@
+# A route load during the Smithy door's exit fade (tel_b03f -> tel_b12i): the load drops the running exit, the room fades in
+# and the controls come back.
+0 wait 5
+- request party_add 1
+- request party_add 39
+- set var 0x00 32
+- load tel_b03f 0
+- wait room tel_b03f 300
+- wait idle 600
+- wait 60
+- walk 625 585 12 3000
+- walk 612 556 6 600
+- wait 30
+- tap left 2
+- wait 20
+- action                              # the door: the exit fade starts
+- wait 30
+- load tel_b03f 0                     # while the screen fades out
+- wait room tel_b03f 300
+- wait idle 600
+- assert room tel_b03f
+- wait 200
+- assert room tel_b03f                # the dropped exit does not run later
+- quit

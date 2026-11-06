@@ -11,11 +11,11 @@ fld_display_window_set = 0x800ABCE0;  # function: sets the field display window 
 fld_draw_env_init = 0x800ABD18;  # function: sets up the 320x224 draw and display environment for the field
 fld_light_back_color_reset = 0x800ABDD0;  # function: zeroes the lit-actor back colour at room init
 fld_room_load = 0x800AC790;  # function: room loader: layers, display ordering depth and effect getters
-fld_effect_lists_reset = 0x800AD230;  # function: fills the caster or target effect selector bytes with 0xFF
-fld_room_init = 0x800AD37C;  # function: resets room state registers at room entry (ambiguous)
+fld_effect_lists_reset = 0x800AD230;  # function: empties one of the six effect entity lists (caster, target, table A, three pseudo-lists): bytes 0xFF, cached matrices cleared
+fld_room_init = 0x800AD37C;  # function: per-room init run by the room loader on every field entry (map jump, load, battle return): clears the menu launcher flags (save point, menu key, shops, name entry, New Game Plus list), the disc-change flag, the movie-end jump and the other per-room request registers
 fld_disc_sprite_build = 0x800AD99C;  # function: builds the Disc N prompt sprite
 fld_room_teardown = 0x800ADB04;  # function: frees room state and evicts sounds when leaving the field (ambiguous)
-fld_init = 0x800ADD3C;  # function: field init entry that calls room init
+fld_init = 0x800ADD3C;  # function: field entry: clears the pending room change and the model-swap flag, resets the pad, then runs the room loader
 fld_pad_reset = 0x800ADCF4;  # function: clears the field pad words and the key latch and sets the input lock to 24 field frames (room init; the menu screen and key-item list returns then set 4 / 8)
 fld_pad_filter_update = 0x800ADD80;  # function: masks pad words and forces stick centre while input is locked
 fld_effect_ot_setup = 0x800AE080;  # function: points the effect drawers at the shared ordering table
@@ -35,7 +35,7 @@ fld_transition_capture_step = 0x800B0D54;  # function: per-frame blend of the ca
 fld_room_entry_fade = 0x800B102C;  # function: fades the new room in according to the exit transition kind
 fld_room_exit_transition = 0x800B11B0;  # function: room exit transition and map load set
 fld_battle_return_init = 0x800B13C0;  # function: field entry after a load or a battle: resets room registers, entry transition kind 0 (fade in from black)
-fld_load_set = 0x800B15B0;  # function: field entry after load or battle return, unpacks the party
+fld_load_set = 0x800B15B0;  # function: field entry after load or battle return, unpacks the party; after a load it sets the window skin byte from variable 0x44
 fld_status_icon_texture_load = 0x800B1CEC;  # function: loads the status icon texture into VRAM
 fld_sound_emitter_ramp = 0x800B1EB8;  # function: ramps the volume of an entity's sound emitter record over frames
 fld_sound_emitter_add = 0x800B1F40;  # function: adds or reuses a positional sound emitter record
@@ -94,7 +94,7 @@ fld_step_model_pose = 0x800B9EA0;  # function: per-frame clip time and pose buil
 fld_step_clip_lod = 0x800B9F5C;  # function: sets the joint-matrix LOD skip bit on every second model entity by frame parity (not while walking, running or blending) and steps the idle clip hold
 fld_update_models_frame = 0x800BA188;  # function: per-frame model pass that advances animation and draws actors
 fld_push_block = 0x800BA238;  # function: pushes a pushable actor if its path is free
-fld_move_actor_collide = 0x800BA3F4;  # function: moves an actor by its velocity with wall probe, slide and push
+fld_move_actor_collide = 0x800BA3F4;  # function: actor movement phase after the script pass: for each actor that is neither inactive (0x10) nor free-height (0x40) the heading-target step (its speed, x2.5 with state bit 1) plus the terrain push becomes its velocity, a 0x1000 tile halves it, then the wall probe / slide and the solid-actor test move it; the heading target is cleared
 fld_step_anim_request_turn = 0x800BAEF0;  # function: per-frame animation request, scripted turn and anim-done refresh
 fld_test_triggers = 0x800BB530;  # function: tests the player against trigger rectangles
 fld_actor_light_snap_target = 0x800BBC14;  # function: copies the actor's target light colour from the zone table without ramping
@@ -125,7 +125,8 @@ fld_op_party_settle_hold = 0x800BEA88;  # function: script op BE: waits until no
 fld_party_formation_v = 0x800BEBB0;  # function: script op DF: places party in a V behind the leader
 fld_op_setup_formation = 0x800BEE70;  # function: script op 84: per-slot formation targets; sets the formation and party-hold global bits
 fld_set_scroll_limits = 0x800BF10C;  # function: script op that sets the camera pan limits
-fld_op_set_position_xz = 0x800BF31C;  # function: script op 25: sets X / Z from the operands at +1 / +3 and the floor level
+fld_op_set_position_xz = 0x800BF31C;  # function: script op 25: sets X / Z from the operands at +1 / +3 and the floor level; clears the free-height flag
+fld_op_set_position_xyz = 0x800BF1EC;  # function: script op 26: sets X / Z / Y from the operands and the free-height flag, sets the moving bit
 fld_op_bg_group_semitrans = 0x800BF9DC;  # function: script op 92: toggles semi-transparency of a background group's tiles
 fld_set_bg_group_tint = 0x800BFBB0;  # function: script op C2: sets a background group's colour modulation
 fld_op_bg_wave_on = 0x800BFDA8;  # function: script op 8F: starts the background wave effect (ambiguous)
@@ -147,7 +148,7 @@ fld_resolve_character_ref = 0x800C1620;  # function: resolves a character refere
 fld_op_set_visible = 0x800C18A8;  # function: script op 36: shows or hides an entity
 fld_op_set_flag_02 = 0x800C1A90;  # function: script op 37: sets or clears entity flag bit 1
 fld_stock_find_slot = 0x800C1E24;  # function: finds the stock slot for an element id
-fld_stock_add_element = 0x800C1F7C;  # function: adds an element to the stock
+fld_stock_add_element = 0x800C1F7C;  # function: adds a count of an element to the stock (cap 99); with the third argument set an element without the copy-count flag adds one
 fld_stock_find_item_slot = 0x800C205C;  # function: finds the item slot for a script item id
 fld_stock_add_item = 0x800C211C;  # function: adds items to the stock with a cap of 99
 fld_stock_add_by_id = 0x800C21A4;  # function: adds a stock entry by id range (item, element or key item); elements 0x261..0x26B are added as 5 copies
@@ -169,7 +170,7 @@ fld_op_walk_chase_b8 = 0x800C3A84;  # function: Entity walk handler for ops B8/B
 fld_op_walk_to_wait = 0x800C3E9C;  # function: Start and wait forms of walk ops 3F/40 moving the entity straight to its target.
 fld_busy_gate_mask_compute = 0x800C4580;  # function: Computes the bitmask of busy subsystems published as a script variable.
 fld_script_busy_gate = 0x800C4630;  # function: Returns -1 while a jump, battle, menu, movie or shop is pending so scripts yield.
-fld_system_gate = 0x800C47E4;  # function: Returns -1 while a room change, model swap, movie, shop, battle request or portrait load is in progress (no screen-fade term).
+fld_system_gate = 0x800C47E4;  # function: Returns -1 while a room change, model swap, movie, shop, battle request, song change or portrait load is in progress (no screen-fade term).
 fld_room_change_request = 0x800C488C;  # function: Room change op handler that locks input and requests the room switch.
 fld_point_in_quad_test = 0x800C4970;  # function: Tests a point against a quad with four edge sign tests.
 fld_region_call_if_leader_inside = 0x800C4A14;  # function: Script op 57: calls a script subroutine when the leader stands inside a region quad
@@ -208,8 +209,8 @@ fld_actor_scale_by_mask = 0x800C87B8;  # function: Applies a script scale per ax
 fld_control_yaw_set = 0x800C8A0C;  # function: Script setter for the per-room control yaw added to the pad heading.
 fld_op_camera_to_entity = 0x800C8ACC;  # function: script op 61: steps the scripted camera target to an entity's clamped screen spot; the target stays there afterwards
 fld_op_get_position = 0x800C913C;  # function: Script op that reads an entity X, Z, Y into variables.
-fld_op_jump_move_step = 0x800C9254;  # function: Jump move op: parabolic step toward the target with a landing height.
-fld_op_move_tween = 0x800C96FC;  # function: script op 5B: the same parabolic hop as 5C, landing at an explicit height from the operands.
+fld_op_jump_move_step = 0x800C9254;  # function: script op 5C: parabolic hop toward the target, landing on the floor of the given level; leaves the free-height flag alone
+fld_op_move_tween = 0x800C96FC;  # function: script op 5B: the same parabolic hop as 5C, landing at an explicit height from the operands; sets the free-height flag on every form
 fld_op_move_46 = 0x800C9BC0;  # function: Start and wait forms of the move op 46 with a slot counter.
 fld_op_move_3d_ba = 0x800CA070;  # function: 3D move op BA with pitch and a slot counter.
 fld_op_walk_to_xz = 0x800CA524;  # function: Walk ops 42/43 that set velocity toward an XZ target.
@@ -228,7 +229,7 @@ fld_entity_ref_resolve = 0x800CD734;  # function: Resolves an entity operand, in
 fld_op_run_script_07 = 0x800CD838;  # function: Script op 07 that starts a script on a target entity.
 fld_op_run_script_blocking = 0x800CDA2C;  # function: Script op 09 that starts a script on a target and waits.
 fld_op_run_script_and_wait = 0x800CDDA8;  # function: Script op 08 that starts a script on a target and waits until it runs.
-fld_op_wait_dialog = 0x800CE0E8;  # function: script op E2: waits while the running entity's own dialogue window is open
+fld_op_wait_dialog = 0x800CE0E8;  # function: script op E2: waits while the running entity's own dialogue window is open, then copies the entity's dialogue result byte to variable 4
 fld_op_multi_choice = 0x800CE254;  # function: script op E1: turns on in-window choice, sets first/last choice lines and cursor
 fld_op_speaker_dialog_e4 = 0x800CE388;  # function: script op E4: dialogue with an entity reference; a none speaker skips op and wait
 fld_op_character_dialog = 0x800CE428;  # function: script op E3: message spoken by an entity; none speaker skips the op and its wait
@@ -249,8 +250,8 @@ fld_op_fe16_noop = 0x800D0BE0;  # function: stub handler for FE 16 that returns 
 fld_op_fe18_set_flag12 = 0x800D0C3C;  # function: FE 18 handler: sets global flag bit 12 from the operand
 fld_op_fe7f_alias = 0x800D0C90;  # function: FE 7F handler: alias that calls the FE 18 body
 fld_load_window_skin = 0x800D10B8;  # function: script op: loads the window skin texture chosen by the option byte
-fld_op_sfx_volume_slide = 0x800D13A0;  # function: script op FE 22: slides the volume of sounds started on a slot
-fld_op_sfx_pan_slide = 0x800D1438;  # function: script op FE 23: slides the pan of sounds started on a slot
+fld_op_sfx_pan_slide = 0x800D13A0;  # function: script op FE 23: stores the pan in the slot record and slides the pan of the slot's sounds to it
+fld_op_sfx_pitch_slide = 0x800D1438;  # function: script op FE 24: stores the pitch offset in the slot record and slides the pitch offset of the slot's sounds to it
 fld_op_setup_shake = 0x800D1528;  # function: script op FE 21: sets up screen shake amplitude ramp
 fld_op_mark_sounds_survive_room = 0x800D15DC;  # function: script op FE 29: marks sound slots whose sound survives the next room change
 fld_op_face_target_yaw_a = 0x800D1740;  # function: script op: head faces a target with yaw offset and height
@@ -267,7 +268,7 @@ fld_op_heal_group = 0x800D2BBC;  # function: script op FE 36: sets current HP to
 fld_op_set_status = 0x800D2DE4;  # function: script op FE 3D: ORs a status mask into target characters
 fld_op_cure_status = 0x800D2F74;  # function: script op FE 3E: clears status bits on target characters
 fld_op_set_head_turn_rate = 0x800D3604;  # function: script op: sets an entity's head-turn rate
-fld_op_reset_field_state = 0x800D36BC;  # function: script op FE 2F: resets the boot/dream state when the title is re-entered
+fld_op_reset_field_state = 0x800D36BC;  # function: script op FE 2F: resets the game to the boot state (title room INIT with ROOM_PARAM 0); keeps variable 0x34, sets 0x42 = disc - 1
 fld_op_start_after_dream = 0x800D379C;  # function: script op FE 3F: begins the real game after the dream, rebuilds records and party
 fld_op_set_footstep_sound = 0x800D38CC;  # function: script op: sets left/right footstep sound ids on the executing entity
 fld_grid_nibble_clear = 0x800D3AFC;  # function: clears a packed nibble cell in the element grid nibble array (44 cells per character here, the Steam build fixes it to 48)
@@ -315,7 +316,7 @@ fld_window_play_sfx = 0x800D6124;  # function: plays a menu sound effect by id f
 fld_window_alloc_free = 0x800D614C;  # function: picks the first free of the four dialogue window slots
 fld_keyitem_draw_row = 0x800D6348;  # function: draws a row of the field key-item list
 fld_keyitem_has = 0x800D67C8;  # function: tests a key-item bit by id
-fld_keyitem_give = 0x800D6808;  # function: sets a key-item bit for an id
+fld_keyitem_set = 0x800D6808;  # function: sets (flag non-zero) or clears the bit of a 1-based key item number
 fld_keyitem_build_rows = 0x800D68B0;  # function: builds the key-item list rows in display order
 fld_keyitem_list_loop = 0x800D6AAC;  # function: key-item list loop: input, scrolling and confirm
 fld_window_update = 0x800D7CD4;  # function: per-frame dialogue window update: typewriter, cursor and confirm
@@ -343,7 +344,7 @@ fld_movie_sound_suspend = 0x800E1D48;  # function: per movie frame: suspends sou
 fld_menu_launch = 0x800E2144;  # function: Launches the menu overlay by mode and returns the save result
 fld_menu_list_active_set = 0x800E24EC;  # function: Marks the save screen's Save / Load list as the live list (drawn at full brightness).
 fld_menu_list_active_clear = 0x800E24FC;  # function: Marks the Save / Load list as not live: the list and dial draw dimmed while another save state runs.
-fld_settings_apply = 0x800E2508;  # function: Applies option bits such as speaker mode on load and exit
+fld_settings_apply = 0x800E2508;  # function: Applies option bits such as speaker mode on load and on leaving the Customize screen; with Window Frame Default the skin byte becomes 0, then script variable 0x44 takes the skin byte (the argument also reloads the skin texture)
 fld_char_is_recruited = 0x800E2D98;  # function: Tests whether a character is recruited and not excluded
 fld_cell_use_count_get = 0x800E2DFC;  # function: Reads the use count nibble of an element grid cell
 fld_cell_use_count_set = 0x800E2E44;  # function: Stores the use count of an element grid cell
@@ -470,7 +471,7 @@ fld_global_flags = 0x800EA42C;  # data: Global field flag word (camera, input lo
 fld_pad_word = 0x800EA488;  # data: Active-low field pad word used for movement and key tests
 fld_cleared_game_buffer = 0x800EA490;  # data: Copy of the cleared game state used to start New Game Plus
 fld_window_table = 0x800EA498;  # data: Table of pointers to open message windows
-fld_continue_title_flag = 0x800EA4AC;  # data: Set to select the title Continue launcher mode
+fld_title_list_flag = 0x800EA4AC;  # data: title list request (launcher mode 3): set by FE 59, FE 61 waits while set, cleared when the list returns with New Game
 fld_positional_sound_count = 0x800EA4B8;  # data: Number of positional sound records in use
 fld_portrait_load_pending = 0x800EA4D0;  # data: Nonzero while a portrait load is pending
 fld_ngplus_list_flag = 0x800EA4DA;  # data: Set to select the New Game Plus title list launcher mode
@@ -590,13 +591,14 @@ fld_op_set_var_bit = 0x800C5B50;  # function: script op 71: sets one bit of the 
 fld_op_camera_to_leader = 0x800C8D74;  # function: script op 5E: steps the scripted camera target to the controlled entity, then hands the camera back to the follow
 fld_room_init_scripts = 0x800CF3B0;  # function: end of entity init: runs every entity's INIT and restores the default heading; after an FE 50 restores the slot entities, else eases the scroll in from 0 and places the followers
 fld_field_loop = 0x800B0840;  # function: field main loop; its start sets the room-entry frame count and runs two full entry eases of the scroll
-fld_party_swap_apply = 0x800B0F58;  # function: applies the deferred party reorder while global flag bit 6 is set
+fld_party_override_exit_restore = 0x800B0F58;  # function: room exit: while global flag bit 6 (an op B2 override) is set, restores the saved party entity and character tables and the controlled entity, then clears the bit
 fld_sound_emitters_reset = 0x800B2078;  # function: clears the nine positional sound records and the slot sound records
 fld_menu_input_gate = 0x800B6714;  # function: 0 when the menu or key-item list may run: GF.19 set or the input lock (GF.1) clear, and no room jump pending
 fld_op_end_slot_sounds = 0x800BC920;  # function: script op C7: ends a sound slot's voices and resets its id and volume record
 fld_op_sin = 0x800BF3E4;  # function: script op 22: variable = amplitude * sine of the angle >> 12
 fld_op_play_song_ex = 0x800BF4A0;  # function: script op FE 78: starts a song at a volume; retries while busy, budget +1 on success
 fld_op_play_song = 0x800BF5C0;  # function: script op 88: starts a song; budget +1 on success
+fld_op_play_song_poll = 0x800BF6B4;  # function: script op 89: system gate, then starts a song like 88 (no budget bonus); retried while refused
 fld_op_wait_song = 0x800BF728;  # function: script op 8A: waits while a song change is pending
 fld_op_cos = 0x800BF7C8;  # function: script op 23: variable = amplitude * cosine of the angle >> 12
 fld_op_set_radius_height = 0x800BF884;  # function: script op 8B: stores the entity's trigger radius and height
@@ -635,8 +637,8 @@ fld_op_set_rotation = 0x800C16FC;  # function: script op 30: sets the facing tar
 fld_op_adjust_rotation = 0x800C1764;  # function: script op 32: adds or subtracts a delta from the facing target
 fld_op_set_self_axis_1 = 0x800BD078;  # function: script op 28: sets the running entity's own model yaw (axis 1), which also enters the portrait-side test
 fld_op_set_axis_rotation = 0x800BCF1C;  # function: script op AA: sets axis 0, 1 or 2 of another entity's own model rotation
-fld_op_set_control_yaw = 0x800D4564;  # function: script op 63: sets the control yaw added to pad headings and the portrait-side test
-fld_script_control_yaw = 0x800EA42A;  # data: control yaw (s16, 4096 per turn) set by op 63, zeroed at room load
+fld_op_set_portrait_yaw = 0x800D4564;  # function: script op FE 6A: sets the yaw offset added to the speaker heading in the dialogue portrait-side test
+fld_dialog_portrait_yaw = 0x800EA42A;  # data: s16 yaw offset of the dialogue portrait-side test, set by FE 6A, zeroed at room init
 fld_item_owned = 0x800C1DC0;  # function: 0 when an item, element or key item id (key items below 0x440) is owned, else -1
 fld_op_jump_if_money_below = 0x800C22F8;  # function: script op BC: jumps when the gold is below a 32-bit threshold
 fld_op_money = 0x800C2388;  # function: script op BD: adds gold (cap 9999999) or subtracts it (floor 0)
@@ -648,12 +650,12 @@ fld_op_play_animation = 0x800C2DE4;  # function: script op A9: sets another enti
 fld_op_entity_rgb = 0x800C2F2C;  # function: script op A1: stores three colour tint bytes on an entity
 fld_busy_smith_pending = 0x800C43C4;  # function: -1 while the smith / weapon-shop screen flag is set
 fld_busy_model_swap = 0x800C441C;  # function: -1 while a party model load is pending
-fld_busy_room_jump = 0x800C443C;  # function: -1 while a room jump is requested
+fld_busy_song_change = 0x800C443C;  # function: system-gate term: -1 while the song-change state word is not idle (a PLAY_SONG still fading the old song out or starting the new one)
 fld_busy_battle_request = 0x800C44E0;  # function: system-gate term: -1 while the battle request byte is set (from A3 / C9 through the encounter effect)
 fld_busy_portrait_load = 0x800C44A0;  # function: system-gate term: -1 while a portrait load is pending
 fld_busy_movie_request = 0x800C4480;  # function: -1 while a movie request is up
 fld_world_continue_pending = 0x800EC720;  # data: cleared by FE 50; zero at the end of INIT restores the slot entities
-fld_system_gate_inner = 0x800C4798;  # function: first half of the system gate: the busy-flag chain, then one request word that must be -1; no screen-fade term
+fld_system_gate_inner = 0x800C4798;  # function: the system gate without the portrait-load term: the busy-flag chain, then the song-change term; no screen-fade term
 fld_op_movie_end_jump_set = 0x800C4830;  # function: script op DC: stores the room to jump to when the movie ends
 fld_op_jump_unless_latch_equal = 0x800C4F38;  # function: script op 53: jumps unless the latched pad word equals the operand
 fld_op_jump_unless_key_equal = 0x800C4F60;  # function: script op 52: jumps unless the held pad word equals the operand
@@ -672,7 +674,7 @@ fld_op_input_disable = 0x800CB890;  # function: script op 2C: sets the input loc
 fld_op_end_record = 0x800CD14C;  # function: script op 00: ends the running script record
 fld_op_if_jump = 0x800CD1D4;  # function: script op 02: compares two operands with one of 11 conditions, jumps when false
 fld_op_return_or_end = 0x800CD4E8;  # function: script op 0D: pops the call stack, or ends the record when it is empty
-fld_op_kill_all_scripts = 0x800CD67C;  # function: script op 04: resets the entity's records and call stack
+fld_op_kill_all_scripts = 0x800CD67C;  # function: script op 04: resets the running entity's eight records, pc and input lock, and clears the call depth and action bit of entity 8 (not of the running entity)
 fld_op_store_global_byte = 0x800D0040;  # function: script op that stores an operand byte into a global and advances 3
 fld_op_set_gf13 = 0x800D0CB0;  # function: script op FE 80: sets global flag bit 13 (key-item list disabled)
 fld_op_fade_master_pitch = 0x800D1294;  # function: script op FE 1E: music master pitch scale fade (unused by the shipped scripts)
@@ -681,7 +683,7 @@ fld_op_fade_music_pan = 0x800D1344;  # function: script op FE 20: music channel 
 fld_op_damage_hp = 0x800D333C;  # function: script op FE 3A: damages a character's HP (doubled with burn), never below 1
 fld_op_read_status = 0x800D3460;  # function: script op FE 3B: variable = low byte of both status words when the character resolves
 fld_op_party_footstep_bit = 0x800D3820;  # function: script op FE 41: sets the footstep flag on every party entity
-fld_op_kid_grid_save_restore = 0x800D45A4;  # function: script op FE 69: stashes Kid's element grid or returns it to the stock
+fld_op_kid_grid_save_restore = 0x800D45A4;  # function: script op FE 69: stashes Kid's element grid in script variables 0x334.. / 0x394.. or returns the stashed elements to the stock
 fld_op_set_gf15 = 0x800D4CAC;  # function: script op FE 4E: sets global flag bit 15 (controlled entity forced to run)
 fld_op_set_lock_bitmap = 0x800D4D4C;  # function: script op FE 5D: sets or clears a character in the party lock bitmap
 fld_op_set_exclude_bitmap = 0x800D4DD4;  # function: script op FE 60: sets or clears a character in the party-screen exclusion bitmap
@@ -704,3 +706,82 @@ fld_sfx_slots_fade_back = 0x800DDBE8;  # function: after a field menu screen, sl
 fld_op_sfx_slot_volume = 0x800BC888;  # function: script op FE 22: stores the target volume in the slot record and fades the slot's sounds to it
 fld_script_entry_pointer = 0x800BC660;  # function: code offset of script slot n of an entity, read from the room script's entity table
 fld_modal_window_open = 0x800D5E40;  # function: non-zero while one of the four message windows is open in its modal mode; the trigger pass then starts no action event
+fld_script_record_has_id = 0x800CD808;  # function: -1 when any of the target entity's 8 records already holds the requested script id, else 0
+fld_op_fe00_ground_tilt = 0x800CF9D8;  # function: FE 00: b == 0 sets the entity's ground-tilt and snap bits, else the global tilt bit
+fld_op_fe01_never_culled = 0x800CFA50;  # function: FE 01: entity status bit 9 = b & 1 (never culled)
+fld_op_fe02_exit_transition = 0x800CFA98;  # function: FE 02: stores the next room-exit transition kind
+fld_op_fe04_no_pan_clamp = 0x800CFFEC;  # function: FE 04: global flag bit 8 = b & 1 (skip pan clamps)
+fld_op_fe06_pushable = 0x800D0080;  # function: FE 06: sets the pushable entity flag when b is 0, clears it otherwise
+fld_op_fe07_scripted_turn = 0x800D00E8;  # function: FE 07: entity status bit 13; on clear restores the saved turn rate and clears bits 14 / 15
+fld_op_fe08_store_ref_a = 0x800D0530;  # function: FE 08: stores a resolved entity in table A, the third effect entity list
+fld_op_fe09_store_caster = 0x800D0598;  # function: FE 09: stores a resolved entity in the effect caster list
+fld_op_fe0a_store_target = 0x800D0600;  # function: FE 0A: stores a resolved entity in the effect target list
+fld_op_fe0b_effect_list_reset = 0x800D0668;  # function: FE 0B: empties effect entity list b (0 caster, 1 target, 2 table A, 3..5 pseudo-lists)
+fld_op_fe0c_entity_scripted_turn = 0x800D018C;  # function: FE 0C: FE 07 applied to another entity
+fld_op_fe0e_self_speed_raw = 0x800C36F8;  # function: FE 0E: own speed word = operand, unshifted
+fld_op_fe10_battle_release = 0x800D06C4;  # function: FE 10: waits while an encounter is pending, then releases the entity input lock
+fld_op_fe11_camera_snap = 0x800D0734;  # function: FE 11: global flag bit 9 = U & 1 (scroll snaps to the follow target)
+fld_op_fe14_frame_echo = 0x800D0B4C;  # function: FE 14: global flag bit 10 = b & 1 (frame echo on)
+fld_op_fe15_echo_ot = 0x800D0BA0;  # function: FE 15: ordering-table slot of the frame echo
+fld_op_fe17_rotate_lock = 0x800D0BE8;  # function: FE 17: global flag bit 11 = b & 1 (leader rotate locked)
+fld_op_fe19_status_bit19 = 0x800D0D5C;  # function: FE 19: entity status bit 19 = b & 1
+fld_op_fe1a_forget_defeated = 0x800D107C;  # function: FE 1A: forgets the three defeated-monster records
+fld_op_fe1c_upload_window_skin = 0x800D1190;  # function: FE 1C: waits for the skin read, uploads it and clears the busy byte
+fld_entity_ref_table_a = 0x800EA3D0;  # data: FE 08 entity table A (six bytes), read by the third effect entity getter
+fld_window_skin_busy = 0x800EBAA1;  # data: set by FE 1B while the window-skin file read runs, cleared by FE 1C
+fld_shake_duration = 0x800EA41C;  # data: FE 21 shake ramp length in frames (operand + 1)
+fld_shake_step_x = 0x800EA3FC;  # data: FE 21 per-frame step of the horizontal shake amplitude (16.16)
+fld_op_set_pass_through_bit = 0x800D0FE4;  # function: script op FE 25: entity state bit 21 = operand bit 0
+fld_op_movie_display_request = 0x800D0DA8;  # function: script op FE 26: asks the field-movie loop for a display change with the byte operand
+fld_op_movie_stop_request = 0x800D0DEC;  # function: script op FE 27: asks the running field movie to stop early
+fld_op_movie_frames_left = 0x800D14D0;  # function: script op FE 28: variable = movie end frame minus current movie frame
+fld_op_set_state_bit22 = 0x800D0E14;  # function: script op FE 2A: entity state bit 22 = operand bit 0
+fld_op_footstep_register = 0x800D0EAC;  # function: script op FE 2B: selector 0x10 / 0x11 / 0x12 stores footstep volume / dry floor / water floor
+fld_op_set_no_footprints = 0x800D0E60;  # function: script op FE 2C: entity state bit 23 (no footprints) = operand bit 0
+fld_op_curve_walk_on = 0x800D0F70;  # function: script op FE 2D: curve turn rate = operand and entity state bit 25 set
+fld_op_curve_walk_off = 0x800D0FB8;  # function: script op FE 2E: clears entity state bit 25
+fld_op_set_state_bit26 = 0x800D1030;  # function: script op FE 33: entity state bit 26 = operand bit 0
+fld_op_footstep_listener = 0x800D1638;  # function: script op FE 34: stores the footstep listener point and near / far distances
+fld_op_get_char_hp = 0x800D3118;  # function: script op FE 37: variable = current HP of a character reference, 0 when none
+fld_op_set_char_hp_clamped = 0x800D31BC;  # function: script op FE 38: current HP = value clamped to 1 .. max HP
+fld_op_add_char_hp_capped = 0x800D3280;  # function: script op FE 39: current HP += value, capped at max HP, no floor
+fld_op_set_self_head_rate = 0x800D3680;  # function: script op FE 3C: the running entity's head turn rate = operand
+fld_op_set_footstep_walker = 0x800D399C;  # function: script op FE 40: footstep walker id and entity state bit 24 unless the entity has no 3D object
+fld_op_set_pause_allowed = 0x800D3A70;  # function: script op FE 42: global flag bit 14 (field pause allowed) = operand bit 0
+fld_op_emitter_ramp = 0x800D3A10;  # function: script op FE 43: ramps the running entity's sound emitter to a volume over frames
+fld_heal_party_slot = 0x800D2B6C;  # function: current HP = max HP of the character in a field party slot, empty slot skipped
+fld_status_or_party_slot = 0x800D2D34;  # function: ORs a mask into the status word of the character in a field party slot
+fld_status_clear_party_slot = 0x800D2D88;  # function: clears low-byte status bits of the character in a field party slot
+fld_movie_stop_request = 0x800EBA9A;  # data: non-zero asks the field-movie loop to end the movie
+fld_movie_display_request = 0x800EBA96;  # data: non-zero makes the field-movie loop apply the display parameter once
+fld_movie_display_param = 0x800EBA98;  # data: display parameter for the field-movie loop's one-shot request
+fld_op_draw_sync = 0x800D3FE0;  # function: script op FE 44: waits for the GPU draw queue, pc += 1
+fld_op_set_not_drawn = 0x800D441C;  # function: script op FE 4B: entity flag 0x100000 (not drawn, still animated) = operand != 0
+fld_op_select_entity_exclusive = 0x800D4348;  # function: script op FE 4C: clears the selected bit on every entity, makes the operand entity the controlled one and selects it
+fld_op_set_vibration_byte = 0x800D3AC4;  # function: script op FE 4D: stores the operand in the vibration option byte (unused by the shipped scripts)
+fld_op_register_slot_entity = 0x800D42D8;  # function: script op FE 4F: stores an entity in the 8-entry slot table whose positions are published to variables 0x300..
+fld_op_refresh_mirror_object = 0x800CFAD8;  # function: script op FE 51: rebuilds the mirror copy's display object from the room model or an alternative asset (unused)
+fld_op_set_flat_light = 0x800D56E4;  # function: script op FE 5A: entity bit 31 = flat light (ignores the zone colour table)
+fld_op_set_lod_skip_bit = 0x800D4D04;  # function: script op FE 5F: model flag bit 9 of the executing entity
+fld_op_arm_song_change = 0x800D3598;  # function: script op FE 63: after the system gate, arms the song-change state machine
+fld_op_set_lit = 0x800D34F8;  # function: script op FE 64: model lit flag (bit 10) of an entity
+fld_effect_getter_caster = 0x800AC4CC;  # function: effect entity getter registered at room load: caster list slot i (i >= 0) or caster pseudo-list ~i, returns the entity's matrix record or null
+fld_effect_getter_target = 0x800AC5B8;  # function: effect entity getter registered at room load: target list slot i (i >= 0) or the target pseudo-list ~i (battle intro anchor)
+fld_effect_getter_table_a = 0x800AC6A4;  # function: effect entity getter registered at room load: table A slot i (FE 08) or its pseudo-list ~i
+fld_busy_party_screen = 0x800C4520;  # function: system-gate term: -1 while the party screen request flag is set
+fld_busy_window_skin = 0x800C4500;  # function: system-gate term: -1 while the FE 1B window-skin read runs
+fld_busy_monster_picker = 0x800C4540;  # function: system-gate term: -1 while the FE 75 monster picker flag is set
+fld_busy_extra_anim_load = 0x800C4560;  # function: system-gate term: -1 while the DD extra animation file read runs
+fld_busy_trading_post = 0x800C43A4;  # function: system-gate term: -1 while the trading post screen flag is set
+fld_busy_menu_key = 0x800C4344;  # function: system-gate term: -1 while the field menu-button flag is set
+fld_busy_save_list = 0x800C4324;  # function: system-gate term: -1 while the save-list-only screen flag is set
+fld_busy_name_entry = 0x800C4364;  # function: system-gate term: -1 while the name entry screen flag is set
+fld_busy_element_shop = 0x800C4384;  # function: system-gate term: -1 while the element shop screen flag is set
+fld_busy_anim_pack = 0x800C44C0;  # function: system-gate term: -1 while a BF / C1 animation pack read runs
+fld_extra_anim_load_pending = 0x800EBAA0;  # data: set by DD mode 0 when it starts the extra animation file read, cleared by DD's wait form once the read has ended
+fld_op_extra_anim_load = 0x800BE5B4;  # function: script op DD: mode 0 waits for the system gate and starts the extra animation file read; any other mode waits for the read and installs it
+fld_extra_anim_buffer = 0x800EC2A8;  # data: buffer of the DD extra animation file read
+fld_trigger_talk_hit = 0x800E7840;  # data: trigger pass: index of the last circle actor whose talk range holds the leader
+fld_trigger_touch_hit = 0x800E7844;  # data: trigger pass: index of the last circle actor whose touch range holds the leader
+fld_trigger_box_hit = 0x800E783C;  # data: trigger pass: index of the last box actor whose rectangle holds the leader
+fld_op_call = 0x800CD470;  # function: script op 05: pushes the return pc on the entity's 4-entry stack and jumps; with the stack full it yields in place

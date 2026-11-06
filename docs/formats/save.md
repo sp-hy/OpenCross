@@ -89,7 +89,7 @@ The full state:
 | 0x18E | u16 | location (room/area) id |
 | 0x194/0x196/0x198 | u8 | party ids again (hidden copy) |
 | 0x1C2 | u8 | unknown (0x1E, 4, 0 seen) |
-| 0x1CC | u8 | custom window frame |
+| 0x1CC | u8 | window frame: script variable 0x44 = the skin byte 0..14 (FE 1B, leaving Customize, closing the menu); a load reads the skin byte from it, 0 when the options word has Window Frame Default |
 | 0x488 / 0x48A | u16 | field position X / Z |
 | 0x55C..0x566 | u16 x6 | Pip colour points: green, white, black, red, yellow, blue (variables 0x3D4..0x3DE, the battle's script variables 0x04..0x0E; `rules/battle.md` section 9.1) |
 | 0x568..0x587 | u16 x16 | the Dopplegang pool: 256 bits, bit n of word w = creature slot w * 16 + n. Set when Sprigg (or a Forget-me-not Pot wearer's last command) kills the creature |
@@ -207,12 +207,12 @@ Examples: Serge `F827 F842 F84E F868` = セルジュ, Kid `F820 F866 F856` = キ
 2. Edit raw fields in place (section 4) and/or the 0xE1F4 image (section 6).
 3. `packed = compress(image)` (exactly the 54 steps, same bit order); write it to bytes 0x05AC..0x1F20 (always 0x1975 bytes).
 4. Keep 0x1F21..0x1FFB unchanged unless you know the field; set `u32 at 0x1FFC = sum(block[0:0x1FF8]) & 0xFFFFFFFF`.
-5. Put the block at `0x2000 * n` and make the directory frame valid: state 0x51, size 0x2000, next 0xFFFF, name `BISLPSP02364CHRONOnn`, XOR byte at +0x7F (frame 0 untouched). A new slot uses the first free (0xA0) frame. The card stays exactly 0x20000 bytes.
+5. Put the block at `0x2000 * n` and make the directory frame valid: state 0x51, size 0x2000, next 0xFFFF, name `BISLPSP02364CHRONOnn`, XOR byte at +0x7F (frame 0 untouched). An existing file of that slot number is rewritten in place under its own name, the US `BASLUSP01041USCHROnn` included; a new slot uses the first free (0xA0) frame. The card stays exactly 0x20000 bytes.
 6. Keep the preview in sync (0x28 name as Shift-JIS, 0x34..0x36 party, 0x37 time, 0x3B gold, 0x3F stars, 0x40 progression, 0x588/0x58C/0x59C/0x5A4) so the load menu matches; the header title carries the slot number.
 7. Rewrite `save.dat`: replace only `memcardN.mcr` (deflate level 9 + AES-256 AE-2, fresh random 16-byte salt, same password), keep `rd_save.dat`, `achievement.dat`, `ext_save.dat`; write to `save.dat.<hex>` and rename over it. Do this only when the game is not running.
 8. `ext_save.dat`: the record for slot `(card-1)*15 + n` carries language, battle counter, custom names and the form byte (section 9). A block imported without a record leaves it default (zero record, valid flag 0).
 
-Values wider than the field width (item counts above 127, stats above 127, ids above 511) cannot be stored: clamp them. RDE loads OpenCross-written saves: a fresh new-game auto-save appears in the Continue list with portraits, time and location text, and loads into the right room with the right party, with no "data corrupted".
+Values wider than the field width (item counts above 127, stats above 127, HP above 1023, ids above 511) cannot be stored: they are clamped to the field's largest value. Level masks and name glyphs are bit fields and keep their low bits. RDE loads OpenCross-written saves: a fresh new-game auto-save appears in the Continue list with portraits, time and location text, and loads into the right room with the right party, with no "data corrupted".
 
 ## 9. `ext_save.dat`, `achievement.dat`, `rd_save.dat`
 

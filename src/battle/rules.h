@@ -35,6 +35,8 @@ constexpr u32 kTimedHi = 0x0003FFFFu;
 constexpr u32 kHiApplyMask = 0xE007FFFFu;
 // Lo bits that keep a PC's command menu closed.
 constexpr u32 kCannotMenuLo = 0x20304080u;
+// The negative lo statuses the God mode and battle boost cures clear (Frozen included).
+constexpr u32 kNegative = 0xAA9EE939u;
 }  // namespace st
 
 // ---- helpers

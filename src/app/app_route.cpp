@@ -80,6 +80,7 @@ void App::fill_route_state() {
   rstate.battle = battle_in_field || battle_ok;
   // The results screen is up (route: wait battle results).
   rstate.battle_finished = results_ok && results.active();
+  rstate.settling = (world_ok && world.input_settling()) || (flow_ready && flow.veiled());
   rstate.field_idle = field_visible() && world.idle() && world.fade_level() < 0.05f && !movie_open && !(menu_ok && !menu.closed()) && !shop_open && !(key_popup_ok && key_popup.active()) && !(pause_ok && pause_screen.active()) && !(party_ok && party_screen.active()) && !(monster_picker_ok && monster_picker.active());
   rstate.fade = world_ok ? world.fade_level() : 0.0f;
   rstate.battle_result = field_visible() ? world.battle_result() : 0;
@@ -163,7 +164,9 @@ void App::route_frame() {
       apply_art_mode();
     }
     if (!out.request.empty()) route_request(out);
-    if (out.put)
+    if (out.put && out.put_ent >= 0)
+      world.set_position_xz(out.put_ent, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
+    else if (out.put)
       for (int slot = 0; slot < 3; ++slot)
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
     if (out.set_buttons) world.game_state().slot.button_cfg[static_cast<size_t>(out.buttons_index)] = static_cast<u32>(out.buttons_value);
