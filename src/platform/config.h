@@ -250,6 +250,8 @@ struct Config {
   int debug_show_face = -1;
   int debug_show_flags = 0;
   std::string debug_script;
+  // [Debug] ScriptMods: a scripted run keeps the enabled mods (and their mod.ini features), to test a mod's rooms and features.
+  bool debug_script_mods = false;
   int debug_script_speed = 2;
   std::string debug_record;
   std::string debug_replay;

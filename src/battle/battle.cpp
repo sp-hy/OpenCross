@@ -43,6 +43,13 @@ int armour_boost_colour(u8 armour_colour) {
 
 int stat_hp_cap(int value) { return std::min(value, 999); }
 
+// A party member's grid holds the Chrono Cross element (the HUD's colour history row).
+bool holds_chrono_cross(const std::vector<PartyMember>& party) {
+  return std::any_of(party.begin(), party.end(), [](const PartyMember& member) {
+    return std::any_of(member.cells.begin(), member.cells.end(), [](u16 cell) { return (cell & 0x7FFF) == kChronoCrossElement; });
+  });
+}
+
 // Starting kit: the populated cells of grid rows 0..1 are unlocked whatever the star unlocks say.
 void unlock_starting_kit(PartyMember& member) {
   for (int cell = 0; cell < data::kGridCells; ++cell)
@@ -409,6 +416,9 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   form_max_hp_ = 0;
   form_body_unit_ = -1;
   party_ = std::move(party);
+  benched_units_.clear();
+  swapped_out_.clear();
+  swaps_ = 0;
   duel_roster_.clear();
   if (scene_ == 0x1DD) {
     duel_roster_ = party_;
@@ -418,9 +428,7 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
         if (member.char_id == 0) member = *relief;
     party_.erase(party_.begin() + 1, party_.end());
   }
-  colour_row_ = std::any_of(party_.begin(), party_.end(), [](const PartyMember& member) {
-    return std::any_of(member.cells.begin(), member.cells.end(), [](u16 cell) { return (cell & 0x7FFF) == kChronoCrossElement; });
-  });
+  colour_row_ = holds_chrono_cross(party_);
   bench_ = opt.bench;
   dopple_mask_ = opt.dopple_mask;
   saved_vars_ = opt.saved_vars;
@@ -714,6 +722,12 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
       break;
     case Command::Kind::Defend:
     case Command::Kind::Run: break;
+    case Command::Kind::Swap: {
+      if (!swap_enabled()) return no("party swap is off in this battle");
+      const std::vector<int> candidates = swap_candidates(cmd.actor);
+      if (std::find(candidates.begin(), candidates.end(), cmd.swap_in) == candidates.end()) return no("that character cannot swap in");
+      break;
+    }
   }
   if (cmd.target >= kUnits) return no("bad target");
   if (cmd.target >= 0 && cmd.kind != Command::Kind::Defend && cmd.kind != Command::Kind::Run && !is_pc_slot(cmd.target) && brain_.untargetable(cmd.target))
@@ -730,6 +744,22 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
     }
   }
   return true;
+}
+
+// ------------------------------------------------------------------------------------------------ party swap
+std::vector<int> Battle::swap_candidates(int pc) const {
+  std::vector<int> out;
+  if (!swap_enabled() || !is_pc_slot(pc) || static_cast<size_t>(pc) >= party_.size() || !can_act(pc)) return out;
+  const Unit& leaving = unit(pc);
+  if (leaving.form >= 0) return out;
+  for (const PartyMember& member : bench_) {
+    // A character that left the field in this battle can always come back; the others must be in the reserve.
+    const auto kept = benched_units_.find(member.char_id);
+    if (kept == benched_units_.end() && std::find(opt_.swap_reserve.begin(), opt_.swap_reserve.end(), member.char_id) == opt_.swap_reserve.end()) continue;
+    if (kept != benched_units_.end() ? !kept->second.alive() : member.hp <= 0) continue;
+    out.push_back(member.char_id);
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ Dopplegang / Pip
@@ -2555,7 +2585,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         unit.usable[static_cast<size_t>(cmd.cell)] = false;
         if (unit.form < 0 && static_cast<size_t>(cmd.actor) < party_.size()) party_[static_cast<size_t>(cmd.actor)].cells[static_cast<size_t>(cmd.cell)] &= 0xC000;
         // A creature form's grid is not a save cell.
-        if (unit.form < 0) rewards_.lost_cells.emplace_back(cmd.actor, cmd.cell);
+        if (unit.form < 0 && static_cast<size_t>(cmd.actor) < party_.size()) rewards_.lost_cells.emplace_back(party_[static_cast<size_t>(cmd.actor)].char_id, cmd.cell);
       }
       if (!combo.element) {
         unit.stamina = cap_stamina(unit.stamina - stamina_cost(unit, kElementCost));
@@ -2612,6 +2642,45 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       }
       finish(Outcome::Fled);
       break;
+    case Command::Kind::Swap: {
+      // The leaving character's record takes its HP, persistent statuses and consumables (qty is kept in step with every use) and its battle
+      // state waits on the bench; the newcomer comes back with the state it left with, or fresh from its record, at 0 stamina.
+      const size_t slot = static_cast<size_t>(cmd.actor);
+      const auto in = std::find_if(bench_.begin(), bench_.end(), [&](const PartyMember& member) { return member.char_id == cmd.swap_in; });
+      PartyMember& leaving = party_[slot];
+      leaving.hp = std::min(unit.hp, leaving.stat[0]);
+      leaving.lo_persist = unit.lo & st::kPersist;
+      benched_units_[leaving.char_id] = unit;
+      swapped_out_.push_back(leaving.char_id);
+      const Unit before = unit;
+      std::swap(leaving, *in);
+      std::erase(swapped_out_, party_[slot].char_id);
+      if (const auto kept = benched_units_.find(party_[slot].char_id); kept != benched_units_.end()) {
+        unit = kept->second;
+        benched_units_.erase(kept);
+      } else {
+        if (scene_ == data::kUnnamedKidScene && party_[slot].char_id == data::kKid && !opt_.unnamed_kid_label.empty()) party_[slot].name = opt_.unnamed_kid_label;
+        init_pc(cmd.actor, party_[slot]);
+      }
+      unit.stamina = 0;
+      unit.guard = false;
+      unit.countdown = before.countdown;
+      unit.home_facing = before.home_facing;
+      refresh_seal_flags(cmd.actor);
+      colour_row_ = holds_chrono_cross(party_);
+      ++swaps_;
+      say(std::format("{} swaps out for {}", before.name, unit.name));
+      ActionEvent ev;
+      ev.kind = ActionEvent::Kind::Swap;
+      ev.actor = cmd.actor;
+      ev.swap_out = before.src_id;
+      ev.swap_in = unit.src_id;
+      ev.text = log_.back();
+      note_event(ev);
+      step_after_pc_action(cmd.actor, 1, false);
+      post_action(cmd.actor, 1, 1);
+      break;
+    }
   }
   // The chain bonus survives between single-strength commands of the same PC / target (the menu applies each attack at
   // once); anything else the PC does ends the chain. While the attacking PC can go on, its turn stays open, so the counter-attacks

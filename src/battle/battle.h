@@ -198,8 +198,8 @@ struct Rewards {
   std::vector<u16> stolen;
   // Enemy casts caught by the party's element trap (mode 5): added to the element stock whatever the outcome.
   std::vector<u16> trapped;
-  // Grid cells the enemy side's element trap destroyed: (party slot, grid cell row * 10 + col). The retail game writes the save record at
-  // once (cell &= 0xC000, whatever the outcome); the host does it when it applies the battle result.
+  // Grid cells the enemy side's element trap destroyed: (character id, grid cell row * 10 + col). The retail game writes the save record
+  // at once (cell &= 0xC000, whatever the outcome); the host does it when it applies the battle result.
   std::vector<std::pair<int, int>> lost_cells;
   bool star_up = false;
   // Stat deltas applied by growth: per party slot, and per BattleOptions::bench entry (star-up, or any victory with shared growth).
@@ -217,10 +217,12 @@ struct TrapHud {
 // One resolved effect on one target, in the order the rules produced it (the presentation replays them).
 // `action` numbers the player command / enemy turn they belong to; hit_index counts the events of one actor inside one action.
 struct ActionEvent {
-  enum class Kind { Weapon, Element, Defend, Run } kind = Kind::Weapon;
+  enum class Kind { Weapon, Element, Defend, Run, Swap } kind = Kind::Weapon;
   int action = 0, hit_index = 0;
-  // Unit indices (target -1 for Defend / Run).
+  // Unit indices (target -1 for Defend / Run / Swap).
   int actor = -1, target = -1;
+  // Swap: the character ids that left and took the actor's slot.
+  int swap_out = -1, swap_in = -1;
   // Weapon: 0 weak, 1 medium, 2 heavy.
   int strength = 0;
   // Element: pgdat id; grid row in `row`.
@@ -325,9 +327,11 @@ inline std::array<int, 9> target_cursor_order(const TargetSpec& spec, int caster
 }
 
 struct Command {
-  enum class Kind { Attack, Element, Defend, Run } kind = Kind::Defend;
+  enum class Kind { Attack, Element, Defend, Run, Swap } kind = Kind::Defend;
   // PC slot 0..2.
   int actor = 0;
+  // Swap: the character id that takes the actor's slot (Battle::swap_candidates).
+  int swap_in = -1;
   // Attack: strengths (0 weak, 1 medium, 2 heavy), max 4.
   std::vector<int> chain;
   // Element: grid cell 0..79.
@@ -455,6 +459,10 @@ struct BattleOptions {
   std::vector<std::string> enemy_names;
   // Kid's name on every battle screen of scene 0x186, results included (data::unnamed_kid_label). Empty: her own name stays.
   std::string unnamed_kid_label;
+  // Party swap (an OpenCross feature that mods turn on, off in the game as shipped): a PC's Swap command trades its slot with a bench
+  // member. swap_reserve = the character ids that may come in (each must be in `bench`; the host applies the reserve rules).
+  bool party_swap = false;
+  std::vector<int> swap_reserve;
 };
 
 class Battle {
@@ -492,6 +500,17 @@ class Battle {
   int scene() const { return scene_; }
   // The party slots fight as monsters (BattleOptions::monster_party): nothing of the fight goes back to the party records.
   bool monster_party() const { return monster_party_; }
+  // ---- party swap (BattleOptions::party_swap)
+  // On for this fight: never in a monster-party scene or the Lynx duel.
+  bool swap_enabled() const { return opt_.party_swap && !monster_party_ && scene_ != 0x1DD; }
+  // The character ids that can take PC slot `pc`'s place now, in bench order: in the reserve or swapped out earlier in this battle, alive
+  // (with the HP they left with when they fought earlier in this battle). Empty when the PC cannot act or is in a Dopplegang form. Any character may leave: the party lock
+  // (FE 5D) is a rule of the field party, which the battle does not change (game::keep_swapped_lineup).
+  std::vector<int> swap_candidates(int pc) const;
+  // The characters that fought and are on the bench now: their records in bench() hold the HP, statuses and consumables to write back.
+  const std::vector<int>& swapped_out() const { return swapped_out_; }
+  // Swap commands applied in this battle.
+  int swaps() const { return swaps_; }
   int actions() const { return actions_; }
   // Hidden / off-stage units (script ops 34 / 35 / 5B): never on the cursor ring, rejected by `validate`, drawn by nothing.
   bool hidden(int unit) const { return brain_.hidden(unit); }
@@ -815,6 +834,11 @@ class Battle {
   // change); the way back and a creature form give that max HP to the unit.
   int form_max_hp_ = 0;
   int form_body_unit_ = -1;
+  // Party swap: the battle state of each character that left the field (statuses and timers included), by character id, restored when it
+  // comes back; swapped_out_ = those of them still on the bench.
+  std::map<int, Unit> benched_units_;
+  std::vector<int> swapped_out_;
+  int swaps_ = 0;
   // Big Catch (mode 39) per-cast state: 0 not rolled, 1 the roll failed, 2 a creature was picked (reset at the end of a cast); the creature's
   // battle model number (0 = the value the command cleared it to) and pool slot.
   int creature_state_ = 0, creature_model_ = 0, creature_slot_ = 0;

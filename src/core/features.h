@@ -32,6 +32,10 @@ struct Feature {
   std::span<const Setting> settings;
 };
 
+// Feature ids (GET_FEATURE_LEVEL, the table's `id`).
+constexpr int kExtensionRange = 0;
+constexpr int kPartySwap = 1;
+
 std::span<const Feature> table();
 // nullptr when the build has no such feature. Sections compare case-insensitively.
 const Feature* find(std::span<const Feature> features, int id);

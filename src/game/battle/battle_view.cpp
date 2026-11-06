@@ -352,6 +352,8 @@ void BattleView::run_load_step(LoadJob& job) {
   bopt.duel_third = opt.duel_third;
   bopt.duel_names = opt.duel_names;
   bopt.duel_relief = opt.duel_relief;
+  bopt.party_swap = opt.party_swap;
+  bopt.swap_reserve = opt.swap_reserve;
   bopt.unnamed_kid_label = data::unnamed_kid_label(lang_);
   bopt.enemy_names.resize(tables_->enemies.size());
   for (size_t i = 0; i < bopt.enemy_names.size(); ++i)

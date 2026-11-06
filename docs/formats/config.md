@@ -148,6 +148,7 @@ Developer and automation switches, read once at boot (except `Log` and `Panels`,
 | `Showcase` | 0 | bool | With `Battle`: every playable character on stage, free camera on. |
 | `ShowcaseStage` | -1 | int | Battlefield `bg_NN` used by `Showcase`; -1 = the scene's own. |
 | `Script` | empty | file path | Route script of timed inputs and commands; the run exits when it ends. |
+| `ScriptMods` | 0 | bool | A scripted run keeps the enabled mods and their `mod.ini` features (otherwise it runs the game as shipped): for routes that test a mod's rooms or features. |
 | `ScriptSpeed` | 2 | min 1 | Simulation ticks per rendered frame while a route script runs. |
 | `Record` | empty | file path | Write the session's inputs to this file (replayable). Ignored while replaying. |
 | `Replay` | empty | file path | Replay a recorded session; its room and entrance replace `Room` and `Entrance`. |

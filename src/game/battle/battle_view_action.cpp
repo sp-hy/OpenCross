@@ -437,6 +437,36 @@ void BattleView::apply_pip_form(int unit) {
   log::info("battle: tick {} unit {} form -> kind {:#x} ({})", tick_count_, unit, battle_->unit(unit).kind, unit_model_stem(battle_->unit(unit)));
 }
 
+void BattleView::bind_swapped_unit(int unit) {
+  if (unit < 0 || unit >= battle::kPcSlots) return;
+  const battle::Unit& unit_rec = battle_->unit(unit);
+  Visual& visual = vis_[static_cast<size_t>(unit)];
+  visual.vm.stop();
+  bind_unit_model(unit);
+  if (visual.weapon)
+    if (const data::GearRec* gear = tables_->gear_rec(unit_rec.eq.weapon_id)) visual.weapon_prism = gear->tier() == 5;
+  // The leaver's display state goes with it: the HUD counts from the newcomer's own HP.
+  visual.hp_disp = static_cast<float>(unit_rec.hp);
+  visual.hp_shown = unit_rec.hp;
+  visual.ko_shown = visual.ko_hit = visual.ko_reacted = visual.death_owed = false;
+  visual.zero_hp_actions = 0;
+  visual.flash = visual.flash_prev = 0.0f;
+  visual.fade = visual.fade_prev = 1.0f;
+  visual.script_pose = 1;
+  trail_eye_reset(unit);
+  anm_eye_arm(unit);
+  // Run in from behind the spot, facing the enemies, fading in.
+  visual.x = visual.home_x - visual.home_fx * kSwapRunFrom;
+  visual.z = visual.home_z - visual.home_fz * kSwapRunFrom;
+  visual.face_x = visual.pface_x = visual.home_fx;
+  visual.face_z = visual.pface_z = visual.home_fz;
+  visual.spawn = false;
+  if (visual.has_model) visual.pose.play(3, 0);
+  begin_move(unit, visual.home_x, visual.home_z, kSwapRunIn, true);
+  anm_fade_in(unit, kSwapRunIn);
+  log::info("battle: tick {} unit {} swapped in {} ({})", tick_count_, unit, unit_rec.name, unit_model_stem(unit_rec));
+}
+
 void BattleView::fx_form_phase(int phase) {
   log::debug("battle: hensin form phase {} (pending form {})", phase, pending_form_);
   // tumaru 0x181 or the action's end.
