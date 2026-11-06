@@ -527,6 +527,12 @@ int main() {
   // The probe at 208 leaves the mesh: head-on, cancelled.
   step = wm.move_actor(2, 195, 50, 5, 0, 0);
   CHECK(step.blocked && !step.slid && near(step.x, 195));
+  // A push 5.7 degrees off the wall normal is head-on by its own direction; with a heading of 45 degrees (a script walk's start
+  // heading) it slides along the wall at full length.
+  step = wm.move_actor(2, 195, 50, 5, 0.5f, 0);
+  CHECK(step.blocked && !step.slid && near(step.z, 50));
+  step = wm.move_actor(2, 195, 50, 5, 0.5f, 0, 8.0f, 0.1963f, 0.70710678f, 0.70710678f);
+  CHECK(step.slid && near(step.x, 195) && near(step.z, 50 + std::hypot(5.0f, 0.5f), 1e-2f));
   // Wall tri 3 across x = 100: sliding along the edge keeps |move| = 10.
   step = wm.move_actor(0, 88, 50, 7.07f, 7.07f, 0);
   CHECK(step.blocked);

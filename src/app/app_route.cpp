@@ -43,6 +43,7 @@ void App::init_route_state() {
     world.capture_state();
     return static_cast<int>(world.game_state().slot.location());
   };
+  rstate.song = [this] { return mixer.sounding() ? mixer.current_song() : -1; };
   rstate.gold = [this] { return static_cast<long long>(world.game_state().gold()); };
   rstate.options = [this] { return static_cast<int>(world.game_state().options()); };
   rstate.battle_events = [this] { return battle_ready ? battle.route_events() : std::vector<std::string>(); };

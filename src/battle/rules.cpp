@@ -221,27 +221,36 @@ int recovery_step(int rate, int mod, int steps, bool flu) {
 }
 
 // ------------------------------------------------------------------------------------------------ growth
-int growth_roll(Rng& rng, int range, int star) {
+namespace {
+
+constexpr int kRollMax = 999;
+
+int growth_delta(long long roll, int range, int star) {
   const long long den = 101 - star;
-  const long long roll = rng.rnd(1, 999);
   const long long scaled = (roll * range * 1000) / den;
   long long doubled = scaled * 2;
   if (doubled % 1000000 > 499999) doubled += 1000000;
   return static_cast<int>(doubled / 1000000);
 }
 
+int pending_from_delta(int delta, int cur, int lv99, bool hp) {
+  if (cur >= lv99) return 0;
+  if (hp) delta += 2;
+  return std::min(delta, lv99 - cur);
+}
+
+}  // namespace
+
+int growth_roll(Rng& rng, int range, int star) { return growth_delta(rng.rnd(1, kRollMax), range, star); }
+
 int next_pending_hp(Rng& rng, int max_hp, int lv99_hp, int star) {
   if (max_hp >= lv99_hp) return 0;
-  int delta = growth_roll(rng, lv99_hp - max_hp, star) + 2;
-  if (max_hp + delta > lv99_hp) delta = lv99_hp - max_hp;
-  return delta;
+  return pending_from_delta(growth_roll(rng, lv99_hp - max_hp, star), max_hp, lv99_hp, true);
 }
 
 int next_pending_stat(Rng& rng, int cur, int lv99, int star) {
   if (cur >= lv99) return 0;
-  int delta = growth_roll(rng, lv99 - cur, star);
-  if (cur + delta > lv99) delta = lv99 - cur;
-  return delta;
+  return pending_from_delta(growth_roll(rng, lv99 - cur, star), cur, lv99, false);
 }
 
 namespace {
@@ -297,6 +306,30 @@ int minor_growth(int snap, int pending, int cur, int pending_tenths, int progres
 
 int full_minor_growth(int snap, int pending, int cur, int pending_tenths) {
   return std::max(0, snap + growth_aim(pending, pending_tenths) - cur);
+}
+
+std::array<int, 7> star_growth(const std::array<int, 7>& base, const std::array<int, 7>& lv99, int star, Rng& rng) {
+  constexpr int kHpCap = 999;
+  std::array<int, 7> stat = base;
+  for (size_t k = 0; k < stat.size(); ++k) {
+    const int top = k == 0 ? std::min(lv99[k], kHpCap) : lv99[k];
+    for (int level = 0; level < star && stat[k] < lv99[k]; ++level) {
+      const int pending = pending_from_delta(growth_roll(rng, lv99[k] - stat[k], level), stat[k], lv99[k], k == 0);
+      stat[k] = std::max(stat[k], std::min(top, stat[k] + pending));
+    }
+  }
+  return stat;
+}
+
+std::array<int, 7> typical_star_growth(const std::array<int, 7>& base, const std::array<int, 7>& lv99, int star, Rng& rng, int runs) {
+  std::array<long long, 7> sum{};
+  for (int run = 0; run < runs; ++run) {
+    const std::array<int, 7> path = star_growth(base, lv99, star, rng);
+    for (size_t k = 0; k < sum.size(); ++k) sum[k] += path[k];
+  }
+  std::array<int, 7> mean{};
+  for (size_t k = 0; k < mean.size(); ++k) mean[k] = runs > 0 ? static_cast<int>((sum[k] + runs / 2) / runs) : base[k];
+  return mean;
 }
 
 // ------------------------------------------------------------------------------------------------ victory

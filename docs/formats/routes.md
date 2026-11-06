@@ -221,6 +221,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `name <char> <text>` | The typed name of the character (UTF-8; one word, since arguments split on spaces); `-` = no typed name. |
 | `party <id,id,id>` | The party ids in slot order (`-` = empty slot), e.g. `0,1,22`. |
 | `disc <n>` | The disc in use. |
+| `song <id\|none>` | The music mixer is sounding song `id` (`none`: no song, or a one-shot that has ended). The mixer follows its commands only while it runs, so the route needs an output device or `OC_AUDIO_DUMP` (its `.env`). |
 | `location <id>` | The saved location word of the state. |
 | `gold <n>` | The gold held. |
 | `option <hexmask> set\|clear` | All mask bits of the settings options word are set / not all set. |

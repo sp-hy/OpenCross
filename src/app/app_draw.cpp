@@ -10,6 +10,7 @@
 
 #include "core/log.h"
 #include "game/free_cam.h"
+#include "render/particles.h"
 #include "render/ps1_jitter.h"
 #include "render/stage_pipeline.h"
 
@@ -136,13 +137,15 @@ void App::apply_frame_options() {
   // The filter covers the stage, units and weapons of the battle.
   if (battle_ready) battle.set_texture_filter(config.filter == platform::TexFilter::Bilinear);
   // The [Enhancements] are independent of Ps1Res: SmoothEffectRings, SmoothWaterLine, SmoothReflections (env-mapped parts), Lighting
-  // (the key light for field + battle models, and the spell glow), EdgeBlend (the stage pipelines draw the modded tiles' seam strips).
+  // (the key light for field + battle models, and the spell glow), EdgeBlend (the stage pipelines draw the modded tiles' seam strips),
+  // FullPrecisionEffects (every particle batch).
   {
     const bool rings = config.smooth_effect_rings;
     meshes.set_smooth_water_line(config.smooth_water_line);
     meshes.set_smooth_reflections(config.smooth_reflections);
     meshes.set_enhanced_lighting(config.lighting);
     render::set_edge_blend(config.edge_blend);
+    render::ParticleBatch::set_full_precision(config.full_precision_effects);
     if (battle_ready) battle.set_spell_lights(config.lighting);
     if (battle_ready) battle.set_autohide_cast(config.autohide_cast_hud);
     if (battle_ready) battle.set_keep_intro_layer(config.retain_battle_scenery);

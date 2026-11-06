@@ -80,6 +80,16 @@ int main() {
   { std::ifstream in(f2); ss2 << in.rdbuf(); }
   std::filesystem::remove(f2);
   CHECK(ss2.str().find("SmoothEffectRings=1") != std::string::npos);
+  // FullPrecisionEffects defaults off and is written back.
+  CHECK(!defaults.full_precision_effects);
+  Config full_precision = load_text("[Enhancements]\nFullPrecisionEffects=1\n");
+  CHECK(full_precision.full_precision_effects);
+  const std::filesystem::path f4 = std::filesystem::temp_directory_path() / "oc_test_config_out4.ini";
+  CHECK(full_precision.save(f4));
+  std::stringstream ss4;
+  { std::ifstream in(f4); ss4 << in.rdbuf(); }
+  std::filesystem::remove(f4);
+  CHECK(ss4.str().find("FullPrecisionEffects=1") != std::string::npos);
   // [Mods] dump categories: defaults, parse, save, reload (the Mods tab's "Dump all textures" checkboxes).
   {
     Config mods_defaults;

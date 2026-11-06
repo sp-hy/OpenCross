@@ -62,6 +62,7 @@
 //   assert name <char> <text>     the typed name of a character (UTF-8)       assert party <id,id,id>   the party ids in slot order (- = empty)
 //   assert disc <n>               the disc in use                             assert location <id>      the saved location word of the state
 //   assert gold <n>               the gold held
+//   assert song <id|none>         the song the music mixer plays (none = no song or it has ended; needs a running mix)
 //   assert option <hexmask> set|clear   all mask bits of the settings options word are set / not all set
 //   mark / assert screen right|left|up|down   player screen movement since the mark
 //   mark ent <n> / assert moved <n> <min>   entity <n> is at least <min> world units from where `mark ent` saw it
@@ -105,7 +106,7 @@ namespace oc::game {
 //   ent_yaw(entity) -> facing the model shows (4096/turn); ent_head(entity) -> head-turn angles (ax, az), false = head not turning;
 //   ent_clip(entity, ...) -> (clip << 12) | keyframe * 4, -1 none; party_ent(slot) -> entity index (-1 none);
 //   char_name(char) -> typed name (UTF-8, "" = none); party() -> party ids "0,1,22" in slot order; disc() -> disc in use (1 / 2);
-//   location() -> saved location word of the state; options() -> settings options word; path(...) -> walk-mesh waypoints;
+//   location() -> saved location word of the state; song() -> the sounding song id (-1 none); options() -> settings options word; path(...) -> walk-mesh waypoints;
 //   battle_events() -> route events of the battle view ("w<msg>" script window opened, "a" action began), empty without a view;
 //   battle_camera() -> what drives the battle camera ("orbit <slot>", "shot", "target", "hold"), "" = no battle view;
 //   battle_menu() -> "<slot> <guards>": the party slot whose top command menu is up ("-" none), one digit per slot (1 = guarding);
@@ -171,6 +172,7 @@ struct RouteState {
   std::function<std::string()> party;
   std::function<int()> disc;
   std::function<int()> location;
+  std::function<int()> song;
   std::function<long long()> gold;
   std::function<int()> options;
   std::function<std::vector<std::array<float, 2>>(float, float, float, float, bool)> path;

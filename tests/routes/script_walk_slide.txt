@@ -1,0 +1,10 @@
+# fin_05: Harle (entity 6) walks from 2189,651 to 1767,2533 and meets the wall z = 828 at 13 degrees off its normal. The mover judges
+# the slide by the heading the walk started with, so she slides along the wall to its end and walks on to the target instead of
+# stopping mid-wall when the re-aimed velocity turns within 11.25 degrees of the normal.
+0 wait flow field 600
+- load fin_05
+- wait flow field 600
+- mash until message 6 4000
+- wait 60
+- assert near 6 1767 2533 4
+- quit

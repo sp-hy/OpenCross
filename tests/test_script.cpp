@@ -745,6 +745,39 @@ void test_load_animation_resolves_entity() {
   CHECK_EQ(vm.var(V(1)), 1);
 }
 
+// FREE_EXTRA_ANIMATION (C0) waits without advancing while the entity's pack is still in use (a pack clip in force or a cross-fade
+// running), then frees it.
+class PackInUseHost : public NullHost {
+ public:
+  bool in_use = true;
+  std::vector<int> frees;
+  bool extra_pack_in_use(int ent) override { return in_use && ent == 1; }
+  void extra_animation(u16 key, bool, int ent, int) override {
+    if (key == 0xC0) frees.push_back(ent);
+  }
+};
+
+void test_free_animation_waits_for_pack() {
+  Asm script;
+  const u16 noop = script.here();
+  script.stop();
+  const u16 upd = script.here();
+  script.raw({0xC0, 0x01});
+  script.set(V(0), 1);
+  script.park();
+  PackInUseHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, noop}, {1, upd}}}, {{{0, noop}}}}));
+  for (int i = 0; i < 3; ++i) vm.tick();
+  CHECK_EQ(host.frees.size(), 0);
+  CHECK_EQ(vm.var(V(0)), 0);
+  host.in_use = false;
+  vm.tick();
+  CHECK_EQ(host.frees.size(), 1);
+  CHECK_EQ(host.frees.front(), 1);
+  CHECK_EQ(vm.var(V(0)), 1);
+}
+
 void test_scenario_and_rng() {
   Asm script;
   const u16 init = script.here();
@@ -1209,6 +1242,7 @@ int main() {
   test_dialogue_none_speaker();
   test_commit_relinks_new_member();
   test_load_animation_resolves_entity();
+  test_free_animation_waits_for_pack();
   test_scenario_and_rng();
   test_rand_range();
   test_default_rand();

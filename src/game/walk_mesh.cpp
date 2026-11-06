@@ -249,8 +249,11 @@ WalkMesh::Move WalkMesh::move(int tri, float x, float z, float dx, float dz, u32
 // up to 3 times, so the actor follows the wall round the corner instead of wedging in it. A chained slide that runs back
 // against the push is a concave corner (two walls facing the move): the move is rejected and the actor stands, instead of
 // flipping between the two edges every tick.
+// The first slide decides head-on and the side from the heading, not from the move: a script walk keeps the heading of its start
+// while its velocity re-aims at the target each tick, so a walker sliding along a wall at a shallow angle to its target goes on
+// sliding to the wall's end instead of stopping once the live direction turns head-on.
 WalkMesh::Move WalkMesh::move_actor(int tri, float x, float z, float dx, float dz, u32 class_mask, float standoff,
-                                    float head_on) const {
+                                    float head_on, float hx, float hz) const {
   Move result;
   result.tri = tri;
   result.x = x;
@@ -281,6 +284,7 @@ WalkMesh::Move WalkMesh::move_actor(int tri, float x, float z, float dx, float d
   };
 
   const float ux = dx / len, uz = dz / len;
+  const bool own_heading = hx != 0.0f || hz != 0.0f;
   constexpr float kHalfSqrt2 = 0.70710678f;
   const float fx[2] = {(ux - uz) * kHalfSqrt2, (ux + uz) * kHalfSqrt2};
   const float fz[2] = {(ux + uz) * kHalfSqrt2, (uz - ux) * kHalfSqrt2};
@@ -310,7 +314,7 @@ WalkMesh::Move WalkMesh::move_actor(int tri, float x, float z, float dx, float d
     if (edge_len < 1e-6f) return result;
     ex /= edge_len;
     ez /= edge_len;
-    const float along = (cx * ex + cz * ez) / len;
+    const float along = pass == 0 && own_heading ? hx * ex + hz * ez : (cx * ex + cz * ez) / len;
     if (std::fabs(along) < std::sin(head_on)) return result;
     const float sgn = along < 0 ? -1.0f : 1.0f;
     if (pass > 0 && (ex * sgn * dx + ez * sgn * dz) <= 0) return result;

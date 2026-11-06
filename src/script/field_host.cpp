@@ -65,6 +65,7 @@ void NullHost::entity_effect(u16, int, std::span<const s32>) { NOTE("entity_effe
 void NullHost::attach_entity(int, int, int) { NOTE("attach_entity"); }
 void NullHost::extra_animation(u16, bool, int, int) { NOTE("extra_animation"); }
 bool NullHost::extra_animation_busy() { NOTE("extra_animation_busy"); return false; }
+bool NullHost::extra_pack_in_use(int) { NOTE("extra_pack_in_use"); return false; }
 void NullHost::camera_set_position(s32, s32, int) { NOTE("camera_set_position"); }
 void NullHost::camera_to_actor(int) { NOTE("camera_to_actor"); }
 void NullHost::camera_follow(int, int) { NOTE("camera_follow"); }

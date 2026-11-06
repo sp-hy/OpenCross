@@ -231,14 +231,20 @@ bool FieldVM::exec_game(u8 op) {
         advance(2);
       }
       break;
-    case 0xC0:
+    case 0xC0: {
       if (!host_.system_ready() || host_.extra_animation_busy()) {
         yield_ = true;
         break;
       }
-      host_.extra_animation(0xC0, false, entity_operand(1), 0);
+      const int target = entity_operand(1);
+      if (target >= 0 && host_.extra_pack_in_use(target)) {
+        yield_ = true;
+        break;
+      }
+      host_.extra_animation(0xC0, false, target, 0);
       advance(2);
       break;
+    }
     case 0xC2:
       host_.set_layer_opacity(operand_u(1), operand_u(3), operand_u(5), operand_u(7));
       advance(9);

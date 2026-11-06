@@ -756,6 +756,13 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "original behaviour.",
                      cfg.retain_battle_scenery))
         change.enhancements = true;
+      if (check_cell("Full-precision effects",
+                     "Draws glows, light shafts, sparkles, smoke and spell particles at full colour precision, as RDE does. The PS1 rounds "
+                     "their colour down, and the effects were tuned with that loss, so they come out brighter. Warning: faint glows that "
+                     "fade out and restart (light patches, lamp shimmer) pulse about twice as hard and may flicker. Off: the PS1's "
+                     "brightness, with smooth gradients.",
+                     cfg.full_precision_effects))
+        change.enhancements = true;
       ImGui::EndTable();
     }
   };

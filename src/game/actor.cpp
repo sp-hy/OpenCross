@@ -499,13 +499,13 @@ void Actor::set_height(float y, bool teleport) {
   }
 }
 
-bool Actor::move_on_mesh(const WalkMesh& walk, float dx, float dz) {
+bool Actor::move_on_mesh(const WalkMesh& walk, float dx, float dz, int heading) {
   if (tri_ < 0 || walk.empty()) {
     set_position(walk, cur_.x + dx, cur_.z + dz, false, false);
     return true;
   }
   const float ox = cur_.x, oz = cur_.z;
-  slope_step(walk, dx, dz);
+  slope_step(walk, dx, dz, heading);
   return std::fabs(cur_.x - ox) > 1e-4f || std::fabs(cur_.z - oz) > 1e-4f;
 }
 
@@ -516,10 +516,12 @@ bool Actor::move_on_mesh(const WalkMesh& walk, float dx, float dz) {
 // at the start. On a gentle slope dy is 0 or 1 from tick to tick, so a step with a rise is shortened to L * |d| / |(d, 1)|, and a
 // ladder (130 units across for 1270 of height) is climbed at L instead of shooting up 10x faster. The position is then found
 // again with the new move and the height follows the plane.
-bool Actor::slope_step(const WalkMesh& walk, float dx, float dz) {
+bool Actor::slope_step(const WalkMesh& walk, float dx, float dz, int heading) {
   const float ox = cur_.x, oz = cur_.z;
   const int otri = tri_;
-  auto step = walk.move_actor(otri, ox, oz, dx, dz, class_bits, kProbeAhead);
+  const float heading_rad = static_cast<float>(heading & 0xFFF) * kUnitsToRad;
+  const float hx = heading < 0 ? 0.0f : -std::cos(heading_rad), hz = heading < 0 ? 0.0f : std::sin(heading_rad);
+  auto step = walk.move_actor(otri, ox, oz, dx, dz, class_bits, kProbeAhead, kHeadOn, hx, hz);
   const float mdx = step.x - ox, mdz = step.z - oz;
   if (std::hypot(mdx, mdz) > 1e-4f && step.tri >= 0) {
     const int sx = static_cast<int>(mdx * 16.0f), sz = static_cast<int>(mdz * 16.0f);
@@ -533,7 +535,7 @@ bool Actor::slope_step(const WalkMesh& walk, float dx, float dz) {
     if (std::fabs(ndx - mdx) > 1e-5f || std::fabs(ndz - mdz) > 1e-5f) {
       // the new move goes through the same mover (wall probe ahead + slide): a plain move() let the actor creep closer to a wall
       // than move_actor allows and wedge in corners on gentle slopes
-      const auto m2 = walk.move_actor(otri, ox, oz, ndx, ndz, class_bits, kProbeAhead);
+      const auto m2 = walk.move_actor(otri, ox, oz, ndx, ndz, class_bits, kProbeAhead, kHeadOn, hx, hz);
       if (m2.tri >= 0 && !m2.blocked) {
         step.tri = m2.tri;
         step.x = m2.x;
@@ -609,6 +611,30 @@ void Actor::clear_ex_clips() {
   ex_seq_override_.clear();
   // Put the stand clip back before the pack goes.
   if (in_use) stand_reset();
+}
+
+bool Actor::ex_pack_in_use() const {
+  // A fade frozen on a culled or hidden actor does not count: it cannot end before the actor is shown again, and the stand clip of a
+  // finished walk can start one tick before the script hides the actor.
+  return ex_pack_ && (submitted_ >= kExtraAnimBase || (!culled_ && from_clip_ >= 0 && fade_cur_ < fade_len_));
+}
+
+void Actor::free_ex_pack() {
+  ex_pack_ = false;
+  if (ex_override_.empty()) return;
+  const int clip_count = model_ ? static_cast<int>(model_->asset.clips.size()) : 0;
+  if (from_clip_ >= clip_count) finish_fade();
+  const bool in_use = clip_ >= clip_count || (seq_.pc >= 0 && seq_.id >= kExtraAnimBase);
+  ex_override_.clear();
+  ex_seq_override_.clear();
+  if (!in_use) return;
+  int in_force = requested_ >= 0 ? requested_ : submitted_;
+  if (in_force >= kExtraAnimBase || in_force < 0) in_force = slot_anim_[kSlotStand] >= kExtraAnimBase ? 1 : slot_anim_[kSlotStand];
+  if (requested_ >= kExtraAnimBase) requested_ = in_force;
+  clip_ = from_clip_ = -1;
+  seq_.pc = -1;
+  submit(in_force);
+  run_seq();
 }
 
 void Actor::hold_default_pack() {

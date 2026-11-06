@@ -245,7 +245,7 @@ void FieldWorld::step_motions() {
             vx = -std::cos(heading_rad) * speed;
             vz = std::sin(heading_rad) * speed;
           }
-          if (ent_state.actor.move_on_mesh(walk, vx, vz)) motion.stuck = 0;
+          if (ent_state.actor.move_on_mesh(walk, vx, vz, motion.facing)) motion.stuck = 0;
           else ++motion.stuck;
           // The slot timer of 43 ends the walk; so does being stuck too long (never leave a script waiting on a wall for ever).
           if (motion.frames > 0 && --motion.frames == 0) motion.active = false;
@@ -387,7 +387,7 @@ void FieldWorld::step_motions() {
             vx = -std::cos(hc) * speed;
             vz = std::sin(hc) * speed;
           }
-          ent_state.actor.move_on_mesh(walk, vx, vz);
+          ent_state.actor.move_on_mesh(walk, vx, vz, motion.facing);
           if (--motion.frames <= 0) motion.active = false;
           break;
         }

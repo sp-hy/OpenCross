@@ -242,8 +242,12 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
   // The saved field song is restored after EVERY battle, flag 1 included
   // (the victory song 0x16 / 0x17 and the battle theme are replaced); only BATTLE flag 0x20 skips it (the script plays the next
   // song itself). A song that is still playing is left alone by start_song. The original music's restart fades in linearly from
-  // silence to the song volume in 32 steps of the sound driver's 120 Hz volume clock, the first step taken at once.
-  if (last_song_ >= 0 && !(handoff_.battle_req.flags & 0x20)) {
+  // silence to the song volume in 32 steps of the sound driver's 120 Hz volume clock, the first step taken at once. With no field song
+  // the restore is a stop: the battle's song ends with the return instead of playing on under the field.
+  const bool restore = !(handoff_.battle_req.flags & 0x20);
+  if (restore && last_song_ < 0) {
+    play_song_at(0xFF, bgm_volume_);
+  } else if (restore) {
     const bool restart = mixer_ && mixer_->current_song() != last_song_ && pending_song_ != last_song_;
     start_song(last_song_, bgm_volume_, last_song_ == handoff_.resume_song ? handoff_.resume_seconds : 0.0);
     if (restart && !bgm_remastered_) {

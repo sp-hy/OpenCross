@@ -334,6 +334,29 @@ void test_growth() {
   CHECK_EQ(full_minor_growth(50, 20, 70, 7), 0);
   CHECK_EQ(progress_cap({8, 7, 1}), 8);
   CHECK_EQ(progress_cap({10, 9, 64}), 640);
+  // A star-up history with every roll 999: ATK 10 toward 810 has the star-0 pending 16, so one star-up gives 26; no star-up, the record.
+  const std::array<int, 7> base{100, 10, 10, 10, 10, 10, 10}, lv99{1200, 810, 60, 95, 25, 52, 43};
+  CHECK(star_growth(base, lv99, 0, hi) == base);
+  CHECK_EQ(star_growth(base, lv99, 1, hi)[1], 26);
+  // The top history never falls with more stars and never passes Lv 99 (max HP also not 999); a stat already above Lv 99 is never lowered.
+  std::array<int, 7> previous = base;
+  for (int star = 0; star < 100; ++star) {
+    const std::array<int, 7> best = star_growth(base, lv99, star, hi);
+    for (size_t k = 0; k < 7; ++k) {
+      CHECK(best[k] >= previous[k]);
+      CHECK(best[k] <= (k == 0 ? 999 : lv99[k]));
+    }
+    previous = best;
+  }
+  CHECK_EQ(star_growth({100, 10, 70, 10, 10, 10, 10}, lv99, 5, hi)[2], 70);
+  // The typical record (the mean of histories) sits between the starting stats and the top history, well below the top: the rolls
+  // average about half of 999.
+  GameRng history_rng(7);
+  const std::array<int, 7> typical = typical_star_growth(base, lv99, 9, history_rng, 256);
+  const std::array<int, 7> top = star_growth(base, lv99, 9, hi);
+  for (size_t k = 0; k < 7; ++k) CHECK(typical[k] >= base[k] && typical[k] <= top[k]);
+  CHECK(typical[1] - base[1] < (top[1] - base[1]) * 3 / 4);
+  CHECK(typical[1] - base[1] > (top[1] - base[1]) / 4);
 }
 
 // ------------------------------------------------------------------------------------------------ battle fixtures
@@ -1908,6 +1931,40 @@ void test_victory_and_growth() {
     CHECK_EQ(battle.rewards().gains[0][1], 13);
     CHECK_EQ(battle.party()[0].stat[1], 22);
   }
+  // max growth: a member that missed every earlier star (still at its starting stats at star 6) is raised to a typical record of
+  // star 6 by one normal win, and the raise shows as the fight's gain; a member already above it keeps its stats
+  for (const bool behind : {true, false}) {
+    Fixture fixture;
+    ScriptedRng rng(Lo::Fallback::Lo);
+    rng.push(0);
+    rng.push(100);
+    NullBrain nb;
+    Battle battle(fixture.tables, rng, nb);
+    battle.set_cheats({.instant_growth = true});
+    auto member = make_member(0, "A");
+    member.lv99 = {850, 60, 78, 95, 25, 52, 43};
+    member.pending = {};
+    member.base = member.stat;
+    if (!behind) member.stat = member.snap = member.lv99;
+    const std::array<int, 7> before = member.stat;
+    BattleOptions opt;
+    opt.growth.star = 6;
+    CHECK(battle.start({member}, 0, opt));
+    battle.unit_mut(3).hp = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK(battle.outcome() == Outcome::Victory);
+    for (size_t k = 0; k < 7; ++k) {
+      const int after = battle.party()[0].stat[k];
+      CHECK(after >= before[k] && after <= member.lv99[k]);
+      CHECK_EQ(battle.rewards().gains[0][k], after - before[k]);
+      if (!behind) CHECK_EQ(after, before[k]);
+    }
+    if (behind) CHECK(battle.party()[0].stat[0] > before[0] && battle.party()[0].stat[1] > before[1]);
+  }
   // shared growth: without it a KO'd member and the bench get nothing from a normal win; with it (and instant growth) they reach the target
   for (const bool shared : {false, true}) {
     Fixture fixture;
@@ -1938,6 +1995,14 @@ void test_victory_and_growth() {
     CHECK_EQ(battle.party()[1].stat[1], shared ? 22 : 9);
     CHECK_EQ(battle.bench()[0].stat[1], shared ? 22 : 9);
     CHECK_EQ(battle.rewards().bench_gains.size(), shared ? 1u : 0u);
+    // The host writes the shared growth back only for a recruited character; one not yet recruited keeps its record.
+    for (const bool recruited : {false, true}) {
+      ui::GameState state;
+      state.slot.chars[9].atk = 9;
+      state.slot.set_recruited(9, recruited);
+      game::apply_battle_result(state, fixture.tables, battle);
+      CHECK_EQ(state.slot.chars[9].atk, shared && recruited ? 22 : 9);
+    }
   }
   // star-up: KO'd member gets no gain and 1 HP but does receive next pending; bench (non-party) member gets its old pending
   {

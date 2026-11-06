@@ -278,6 +278,8 @@ class FieldHost {
   // BF C0 C1 (start/stop of the extra animation of entity `ent`; C1 arg = pack U)
   virtual void extra_animation(u16 key, bool start, int ent, int arg) = 0;
   virtual bool extra_animation_busy() = 0;
+  // C0: the entity holds an extra pack that is still in use (its animation id in force is a pack id, or a clip cross-fade runs).
+  virtual bool extra_pack_in_use(int ent) = 0;
 
   // ---- camera ---------------------------------------------------------------------------------------------------
   // 5D
@@ -515,6 +517,7 @@ class NullHost : public FieldHost {
   void attach_entity(int ent, int target, int offset) override;
   void extra_animation(u16 key, bool start, int ent, int arg) override;
   bool extra_animation_busy() override;
+  bool extra_pack_in_use(int ent) override;
   void camera_set_position(s32 x, s32 y, int frames) override;
   void camera_to_actor(int frames) override;
   void camera_follow(int ent, int frames) override;

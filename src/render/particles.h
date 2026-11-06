@@ -38,6 +38,9 @@ class ParticleBatch {
             float depth);
   void end();
 
+  // [Enhancements] FullPrecisionEffects: modulate without the half 5-bit level the PS1 loses to rounding; set once per frame by the host.
+  static void set_full_precision(bool on) { full_precision_ = on; }
+
  private:
   void flush();
 
@@ -56,6 +59,7 @@ class ParticleBatch {
   u64 last_serial_ = ~0ull;
   float push_[4]{};
   bool overflow_logged_ = false;
+  static inline bool full_precision_ = false;
 };
 
 }  // namespace oc::render

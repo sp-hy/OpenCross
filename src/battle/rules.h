@@ -210,6 +210,12 @@ int next_pending_stat(Rng& rng, int cur, int lv99, int star);
 int minor_growth(int snap, int pending, int cur, int pending_tenths, int progress, int progress_cap);
 // The whole way to the minor-growth target in one step: (snap + K) - cur with the same aim K, floor 0 (the instant-growth cheat).
 int full_minor_growth(int snap, int pending, int cur, int pending_tenths);
+// One star-up history of a character: the stats (maxHP, ATK, DEF, HIT, EVD, MAG, MDEF) the `star` star-ups give from the record's
+// starting stats, each pending delta rolled from `rng` against the stat it is rolled from, as the star-up rolls it for every record
+// (recruited or not, fighting or not). Each stat stops at lv99, max HP also at 999.
+std::array<int, 7> star_growth(const std::array<int, 7>& base, const std::array<int, 7>& lv99, int star, Rng& rng);
+// The mean of `runs` star-up histories, rounded: what a typical record holds after `star` star-ups.
+std::array<int, 7> typical_star_growth(const std::array<int, 7>& base, const std::array<int, 7>& lv99, int star, Rng& rng, int runs);
 inline int progress_cap(const StarRow& row) { return static_cast<short>(row.step * row.battles); }
 
 // ---- victory

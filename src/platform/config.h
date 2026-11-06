@@ -77,7 +77,7 @@ enum class TexFilter { Nearest, Bilinear };
 //   run_speed          field walk / run speed x2
 //   always_loot        every enemy drops its rarest drop, every steal lands
 //   no_craft_cost      the forge (Zappa) builds without using materials or gold
-//   instant_growth     a won fight grants the stat growth of a full star
+//   instant_growth     a won fight grants the stat growth of a full star and raises each grown member to a typical record for the star count
 //   shared_growth      a won fight's growth also reaches the bench and the knocked-out members
 struct Cheats {
   bool no_encounters = false;
@@ -144,6 +144,7 @@ void bind_cheats(const Cheats* set);
 //            sub-texel (off = the PS1's one-texel steps).
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
+//            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
 //   [Audio]  Master / Music / Sfx: bus gains 0..1. Voices: play the voice lines of the mods' voices folders.
 //            VoiceVolume 0..100 (the voice bus gain, times Master). BgmSource: remastered (RDE HCA files) or original (PS1 AKAO sequences).
 //   [Debug]  Room: jump straight to this field room; empty = start at the title. Flow: title | name | slots | opening | field (field = no
@@ -208,6 +209,7 @@ struct Config {
   bool smooth_reflections = true;
   bool autohide_cast_hud = false;
   bool retain_battle_scenery = false;
+  bool full_precision_effects = false;
   bool crt = false;
   int msaa = 1;
   static constexpr int kMsaaLevels[] = {1, 2, 4, 8};

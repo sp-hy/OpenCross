@@ -110,7 +110,11 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
   member.growth_col = static_cast<u8>(newgame::growth_column(&tables, gs.slot, char_id, dream));
   if (gs.slot.chars[static_cast<size_t>(char_id)].max_hp > 0) member.kind = gs.slot.chars[static_cast<size_t>(char_id)].model_id;
   // Pip in a form grows toward that form's Lv 99 record: the growth clamp and the star-up's next pending roll.
-  if (char_id == newgame::kPip && battle::pip_form(member.kind)) member.lv99 = battle::lv99_targets(tables, member.kind);
+  if (char_id == newgame::kPip && battle::pip_form(member.kind)) {
+    member.lv99 = battle::lv99_targets(tables, member.kind);
+    const data::StatRec& form_rec = tables.chars(dream ? "char20" : "char").rec[static_cast<size_t>(member.kind)];
+    member.base = {form_rec.max_hp(), form_rec.atk(), form_rec.def(), form_rec.hit(), form_rec.evd(), form_rec.mag(), form_rec.mdef()};
+  }
   const save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(char_id)];
   // A record that was never filled keeps the table defaults.
   if (save_char.max_hp > 0) {
@@ -291,9 +295,9 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
       write_growth(save_char, member);
     }
   } else if (!rewards.bench_gains.empty()) {
-    // Shared growth: the bench grew with the party in a normal fight.
+    // Shared growth: the recruited characters outside the party grew with it in a normal fight.
     for (const battle::PartyMember& member : finished_battle.bench()) {
-      if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
+      if (member.char_id < 0 || member.char_id >= save::kNumChars || !gs.slot.recruited(member.char_id)) continue;
       save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
       for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
     }

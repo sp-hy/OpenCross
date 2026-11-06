@@ -644,7 +644,7 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
     return;
   }
   if (key == 0xC0) {
-    ent_state.actor.clear_ex_clips();
+    ent_state.actor.free_ex_pack();
     return;
   }
   if (key != 0xC1 || !start) return;
@@ -710,6 +710,9 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   ent_state.actor.set_ex_clips(it->second.clips, it->second.seq);
 }
 bool FieldWorld::extra_animation_busy() { return false; }
+bool FieldWorld::extra_pack_in_use(int ent) {
+  return ent >= 0 && ent < static_cast<int>(ents_.size()) && ents_[static_cast<size_t>(ent)].actor.ex_pack_in_use();
+}
 
 // ------------------------------------------------------------------------------------------------ host: camera
 // The pan limits every scroll target is clamped to (the room's, or a script's own limits), narrowed in widescreen so the wider

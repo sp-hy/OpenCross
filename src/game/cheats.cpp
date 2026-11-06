@@ -186,7 +186,7 @@ bool draw_cheats_tab(platform::Config& cfg) {
       toggle("Free elements", "##c_free", cheats.free_elements, "Casting an element costs no gauge level, a cell can be cast again and consumables (stacks) are not used up.");
       toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");
       toggle("Always loot", "##c_loot", cheats.always_loot, "Every enemy drops its rare drop (else the common one) and every steal lands on the rare item.");
-      toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every battle grants each member the full stat-gain cap.");
+      toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every won battle grants each member the full stat gain of the star, and raises any stat below what a typical character has from the star-ups so far up to it.");
       toggle("Growth for everyone", "##c_shared", cheats.shared_growth,
              "Every won battle also grows the stats of every recruited character outside the party, and of members who were knocked out, "
              "just as it grows the fighters (with Max stat growth on, one win gives everyone the full amount for the star). "

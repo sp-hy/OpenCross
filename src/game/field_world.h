@@ -628,6 +628,7 @@ class FieldWorld final : public script::FieldHost {
   void attach_entity(int ent, int target, int offset) override;
   void extra_animation(u16 key, bool start, int ent, int arg) override;
   bool extra_animation_busy() override;
+  bool extra_pack_in_use(int ent) override;
   void camera_set_position(s32 x, s32 y, int frames) override;
   void camera_to_actor(int frames) override;
   void camera_follow(int ent, int frames) override;

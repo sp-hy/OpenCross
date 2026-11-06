@@ -21,7 +21,7 @@ bool ParticleBatch::init(GpuContext& ctx) {
   ctx_ = &ctx;
 
   vs_ = create_shader(ctx, SDL_GPU_SHADERSTAGE_VERTEX, particle_vert, ShaderDesc{0, 0, 1}, "particle.vert");
-  fs_ = create_shader(ctx, SDL_GPU_SHADERSTAGE_FRAGMENT, particle_frag, ShaderDesc{1, 0, 0}, "particle.frag");
+  fs_ = create_shader(ctx, SDL_GPU_SHADERSTAGE_FRAGMENT, particle_frag, ShaderDesc{1, 0, 1}, "particle.frag");
   if (!vs_ || !fs_) return false;
 
   const VertexAttribute attributes[] = {
@@ -101,6 +101,8 @@ void ParticleBatch::quad(TexRef texture, int blend, const float x[4], const floa
     const Pipeline& pipeline = pipelines_[static_cast<size_t>(blend)];
     SDL_BindGPUGraphicsPipeline(ctx_->pass(), pipeline.handle());
     SDL_PushGPUVertexUniformData(ctx_->cmd(), 0, push_, sizeof push_);
+    const float mode[4] = {full_precision_ ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
+    SDL_PushGPUFragmentUniformData(ctx_->cmd(), 0, mode, sizeof mode);
   }
   if (texture != current_) {
     flush();
