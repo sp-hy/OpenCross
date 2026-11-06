@@ -1,6 +1,6 @@
 # Mods (loose replacement files) and the Modded art mode
 
-RDE itself has no mod loader; mods for it are folders of loose files that replace members of the `data\*.dat` archives. This document describes how OpenCross loads them (`src/vfs/mods.*`, `src/vfs/vfs.*`): the mod folder layout, archive and single-file mods, how each loose file is matched to an archive member, art modes and priority, the voice-line layout, and the texture dump / replacement system. Everything here is OpenCross behaviour, not an RDE feature.
+RDE itself has no mod loader; mods for it are folders of loose files that replace members of the `data\*.dat` archives. This document describes how OpenCross loads them (`src/vfs/mods.*`, `src/vfs/vfs.*`): the mod folder layout, archive and single-file mods, how each loose file is matched to an archive member, art modes and priority, the voice-line layout, the texture dump / replacement system, and the engine features a mod turns on with its `mod.ini` (section 8). Everything here is OpenCross behaviour, not an RDE feature.
 
 ## 1. Folder rules
 
@@ -197,3 +197,34 @@ opencross occ [-g <GameDir>] dump-textures [stages|title|effects|rooms|models|we
 The same job, blocking, into `<outdir>`; the names are the checkboxes (none named = all); it prints progress every 5 s, then per-phase file counts and the time. `--raw` additionally writes the raw (mode, CLUT) atlases of stages / title / room meshes under `raw/...` (debugging; `raw` is not a replaceable category).
 
 **Modder's workflow.** Tick *Battle stages* / *Title* / *Rooms* and press **Dump all textures**. Open `dump\textures\battle_stage\bg_05\`, find the tile by eye, paint it in any editor (alpha 0 = see-through; keep the layout; any scale factor, same aspect) and save it as `mods\<mod>\textures\battle_stage\bg_05\tile_<NN>_<hash8>.png` (or `textures\tiles\<hash8>.png` to change it everywhere). Enable the mod (Load on Modded / All) and toggle it in the Mods tab: a running battle, the title or the room picks it up at once (6.4). Copy a dumped tree, or part of it, into `mods\<mod name>\textures\...`.
+
+## 8. Engine features (`mod.ini`)
+
+Some OpenCross features change the game's rules, so they are off in the game as shipped and a mod turns them on. A mod does that with a `mod.ini` at its root: in a folder mod `mods\<mod>\mod.ini`, in a packed mod at the top after the wrapper folder (section 1.1). The name is matched case-insensitively. A `mod.ini` deeper in the mod is an ordinary file (unmatched). A mod without one changes no feature.
+
+```
+; comments are whole lines (; or #)
+[Mod]
+Name=Party Swap
+Version=1.0
+Author=Someone
+; features this mod's own field scripts use (fieldscript.md 6.12) without turning them on for the whole game
+Requires=PartySwap
+
+[PartySwap]
+Enabled=1
+KeepLineup=1
+```
+
+* **`[Mod]`**: `Name`, `Version`, `Author` (shown in the log and the Mods tab) and `Requires`, a comma-separated list of feature sections. Any other `[Mod]` key is a problem.
+* **Feature sections**: every other section names a feature of the build's table (`src/core/features.cpp`; the field script's `GET_FEATURE_LEVEL` ids are the same table, `fieldscript.md` 6.12). Its keys are that feature's settings, whole numbers in the feature's range (`on` / `off`, `true` / `false`, `yes` / `no` read as 1 / 0). A feature with settings has `Enabled` first. Sections and keys compare case-insensitively; a repeated section adds to the first.
+* **What the build cannot honour** is listed under the mod in the Mods tab's *Issues* column and in the log (`features: '<mod>': ...`): a section or a `Requires` entry the build has no feature for (*needs a newer OpenCross*), a key the feature does not have, a value that is not a number (ignored) or out of range (clamped), and the lines the parser did not understand (*mod.ini problems*).
+* **Resolution** (`features::resolve`, once at launch, in `App::init_vfs`): every feature starts at its defaults, then the enabled mods with a `mod.ini` apply their values, the first mod in the list winning each key (a key two mods set differently is logged as a conflict with the winner), then the player's `[Features]` overrides in `opencross.ini` (`<Feature>.<Setting>=<value>`, `config.md` 2.4), which win over every mod. *Load on* does not apply: features are not art. Like game data, the result stays as it is until the next launch: the Mods tab shows the mod's features under its name with that notice. A scripted run (`[Debug] Script`) has every feature at its defaults.
+* **Saves.** A feature never stores anything a save without it cannot load, so a mod that turns one on can be removed at any time.
+* **Field-script ops.** A mod's own scripts can query a feature (`GET_FEATURE_LEVEL`) and, for features that have them, change it at run time with their extension ops; the `mod.ini` gives the starting values.
+
+The features this build has:
+
+| Section | Id | Settings | What it does |
+|---|---|---|---|
+| (none) | 0 | | The field-script extension range itself (`fieldscript.md` 6.12): not set by mods. |

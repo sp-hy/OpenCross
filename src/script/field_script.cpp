@@ -95,7 +95,17 @@ std::optional<Insn> decode_insn(ByteSpan code, u32 off, std::string* error) {
     key = static_cast<u16>(kExtPage | code[off + 1]);
     nprefix = 2;
   }
+  const bool extension = is_extension_op(key);
+  u32 payload_end = 0;
+  if (extension) {
+    if (off + 2 >= size) return fail(std::format("truncated extension op FE {:02X} @{:04X}", key & 0xFF, off));
+    payload_end = off + 3 + code[off + 2];
+    if (payload_end > size) return fail(std::format("extension payload runs past end @{:04X}", off));
+    nprefix = 3;
+  }
+  static constexpr OpInfo kUnknownExtension{0, "", "", "EXTENSION", '?'};
   const OpInfo* info = find_op(key);
+  if (!info && extension) info = &kUnknownExtension;
   if (!info) {
     return fail(op == 0xFE ? std::format("unknown opcode FE {:02X} @{:04X}", key & 0xFF, off)
                            : std::format("unknown opcode {:02X} @{:04X}", op, off));
@@ -113,14 +123,17 @@ std::optional<Insn> decode_insn(ByteSpan code, u32 off, std::string* error) {
     }
     pos += static_cast<u32>(token_width(token));
   }
+  if (extension) {
+    if (pos > payload_end) return fail(std::format("operands run past the extension payload @{:04X}", off));
+    pos = payload_end;
+  }
   if (pos > size) return fail(std::format("operands run past end @{:04X}", off));
   Insn ins;
   ins.off = off;
   ins.length = pos - off;
   ins.key = key;
   ins.info = info;
-  if (ins.length > ins.raw.size()) return fail("instruction too long");
-  std::copy(code.begin() + off, code.begin() + pos, ins.raw.begin());
+  ins.raw.assign(code.begin() + off, code.begin() + pos);
   const u8 mode = has_mode ? code[moff] : u8{0};
   for (size_t i = 0; i < toks.size(); ++i) {
     const auto token = toks[i];

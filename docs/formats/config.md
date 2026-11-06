@@ -88,6 +88,7 @@ Movies stay at normal speed in both speed modes, and both are off in room 386 (z
 
 * **Mod line.** `<mod name>=<enabled>,<loadon>`: `enabled` is read with `parse_bool` (a value without a comma is `enabled` alone, `loadon` then `modded`); `loadon` is `modded`, `sd`, `hd` or `all` (a mod's game data loads in every art mode), kept as text here and interpreted by the mod manager (`docs/formats/mods.md`). Mods absent from the list are appended in name order with `1,modded`; lines whose mod no longer exists are dropped on the next save.
 * The `Dump*` keys share the section with the mod lines and are never treated as mod names, except as noted in section 5. `DumpTextures` and `ReplaceTextures` are skipped on load and dropped on save.
+* **`[Features]`**: the player's settings of the engine features mods turn on (`docs/formats/mods.md` section 8): `<Feature>.<Setting>=<value>`, for example `PartySwap.Enabled=0`. They win over every mod's `mod.ini` and are read at launch. Lines are kept as written; one the build has no feature or setting for is reported in the log and ignored.
 
 ### 2.5 `[Enhancements]`
 

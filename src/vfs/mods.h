@@ -25,6 +25,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "core/features.h"
 #include "vfs/vfs.h"
 
 namespace oc::vfs {
@@ -80,6 +81,9 @@ struct Mod {
   std::vector<std::string> added;
   std::vector<std::string> unmatched;
   std::vector<std::string> ambiguous;
+  // mod.ini at the mod's root (after the wrapper folder of a packed mod): the engine features it turns on (core/features.h).
+  bool has_manifest = false;
+  features::Manifest manifest;
 };
 
 // Persisted per-mod settings, in priority order.
@@ -96,6 +100,9 @@ class ModManager {
   // matched / unmatched / ambiguous counts.
   void scan(const Vfs& vfs, const std::filesystem::path& mods_dir, const std::vector<ModPref>& prefs);
   std::vector<ModPref> prefs() const;
+  // The enabled mods with a mod.ini, in priority order ("load on" does not apply: features are not art), for features::resolve. The
+  // pointers live until the next scan.
+  std::vector<features::ModInput> feature_inputs() const;
 
   // The voice line at `path` = <archive>\voices\<rel> inside a scanned archive, if there is one (any case).
   std::optional<OverlayFile> packed_voice(const std::filesystem::path& path) const;

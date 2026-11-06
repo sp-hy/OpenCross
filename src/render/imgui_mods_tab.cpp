@@ -14,6 +14,7 @@
 #pragma warning(pop)
 #endif
 
+#include "core/features.h"
 #include "core/log.h"
 #include "platform/paths.h"
 #include "render/imgui_layer.h"
@@ -238,6 +239,13 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
           render::ImGuiLayer::tooltip("This mod changes game data such as stats, text or scripts. Switching it on or off, or moving it, takes effect the next time the game starts. Game data loads in every art mode.");
       }
+      if (mod.has_manifest && !mod.manifest.sections.empty()) {
+        std::string names;
+        for (const features::Manifest::Section& section : mod.manifest.sections) names += (names.empty() ? "" : ", ") + section.name;
+        ImGui::TextDisabled("Features: %s", names.c_str());
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
+          render::ImGuiLayer::tooltip("Engine features this mod turns on (its mod.ini). Switching the mod on or off, or moving it, takes effect the next time the game starts.");
+      }
       ImGui::TableNextColumn();
       if (data_only) {
         ImGui::AlignTextToFramePadding();
@@ -279,11 +287,16 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
           add(wins, "wins");
         }
         if (!mod.error.empty()) issues += (issues.empty() ? "cannot read: " : ", cannot read: ") + mod.error;
+        add(mod.manifest.problems.size(), "mod.ini problem(s)");
+        if (mod.has_manifest) {
+          const features::ModInput input{mod.name, &mod.manifest};
+          for (const features::Resolved::Issue& issue : features::resolve({&input, 1}, {}).issues) issues += (issues.empty() ? "" : ", ") + issue.text;
+        }
         if (issues.empty()) ImGui::TextDisabled("-");
         else ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "%s", issues.c_str());
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort))
           render::ImGuiLayer::tooltip("unmatched: files that match no game file and sit in no archive folder (cdrom, hd, ...). ambiguous: files that match several. overridden: another mod above wins "
-                            "a file. wins: this mod wins a file another mod also has.");
+                            "a file. wins: this mod wins a file another mod also has. mod.ini: lines of the mod's manifest that are not understood, and features or settings this build does not have.");
       }
       ImGui::PopID();
     }

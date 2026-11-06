@@ -211,6 +211,13 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
       return;
     }
   }
+  if (rel.size() == 1 && fname == "mod.ini") {
+    const std::optional<Bytes> text = vfs.read_mod_file({mod_file.file, mod_file.member});
+    mod.has_manifest = text.has_value();
+    if (text) mod.manifest = features::parse_manifest(std::string_view(reinterpret_cast<const char*>(text->data()), text->size()));
+    else mod.manifest.problems.push_back("mod.ini cannot be read");
+    return;
+  }
   if (fname.size() > 4 && fname.ends_with(".png")) {
     std::string tex;
     if (texture_target(rel, tex)) {
@@ -355,6 +362,10 @@ void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vecto
               mod.name, mod.enabled ? "enabled" : "disabled", load_on_name(mod.load_on), mod.files.size(), mod.data.size(), mod.archives.size(),
               mod.textures.size(), mod.voices.size(), mod.added.size(), mod.unmatched.size(), mod.ambiguous.size(),
               mod.error.empty() ? "" : ", cannot read: ", mod.error);
+    if (mod.has_manifest)
+      log::info("mods: '{}' mod.ini: '{}' {} by {}, {} feature section(s), requires {}, {} problem(s)", mod.name, mod.manifest.name, mod.manifest.version,
+                mod.manifest.author, mod.manifest.sections.size(), mod.manifest.requires_features.size(), mod.manifest.problems.size());
+    for (const std::string& problem : mod.manifest.problems) log::warn("mods: '{}' mod.ini {}", mod.name, problem);
     for (const ModFile& archive : mod.archives) log::info("mods:     archive: {} overlays data\\{}.dat", archive.rel, archive.target);
     log_list("added", mod.added);
     log_list("unmatched", mod.unmatched);
@@ -366,6 +377,13 @@ std::optional<OverlayFile> ModManager::packed_voice(const fs::path& path) const 
   auto it = packed_voices_.find(lower(u8(path)));
   if (it == packed_voices_.end()) return std::nullopt;
   return it->second;
+}
+
+std::vector<features::ModInput> ModManager::feature_inputs() const {
+  std::vector<features::ModInput> out;
+  for (const Mod& mod : mods_)
+    if (mod.enabled && mod.has_manifest) out.push_back({mod.name, &mod.manifest});
+  return out;
 }
 
 std::vector<ModPref> ModManager::prefs() const {

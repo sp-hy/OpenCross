@@ -130,6 +130,15 @@ void App::init_vfs() {
     if (config.debug_script.empty()) mods.apply(files, render::mod_art(config.art_mode));
     else for (vfs::Mod& mod : mods.mods()) mod.enabled = false;
   }
+  // Engine features follow the mods enabled at launch (like game data, a later Mods tab change waits for the next launch). A scripted run has
+  // none, the player's [Features] included.
+  {
+    const std::vector<features::ModInput> inputs = mods.feature_inputs();
+    features = config.debug_script.empty() ? features::resolve(inputs, config.features) : features::resolve({}, {});
+    for (const features::Resolved::Issue& issue : features.issues) log::warn("features: '{}': {}", issue.mod, issue.text);
+    for (const features::Resolved::Conflict& conflict : features.conflicts)
+      log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
+  }
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);

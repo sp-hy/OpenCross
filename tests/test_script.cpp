@@ -923,6 +923,7 @@ void test_opcode_table() {
       script.raw({0xFE, op.key & 0xFF});
     else
       script.raw({op.key});
+    if (is_extension_op(op.key)) script.raw({std::atoi(op.lengths) - 3});
     for (int i = 0; i < 24; ++i) script.raw({0});
     const auto insn = decode_insn(script.code, start);
     CHECK(insn.has_value());
@@ -949,6 +950,65 @@ void test_opcode_table() {
   std::printf("opcode table: %d rows; ops whose first execution does not fall through to pc+len: %zu\n", rows, nonlinear.size());
   for (const auto& name : nonlinear) std::printf(" %s", name.c_str());
   std::printf("\n");
+}
+
+// Extension range: the size byte frames every instruction, so ops a build does not know and payload bytes after an op's own
+// operands are stepped over; a payload too short for its operands is skipped without running.
+void test_extension_ops() {
+  Asm script;
+  const u16 init = script.here();
+  script.set(V(2), 5).set(V(3), 9);
+  const u16 known = script.here();
+  script.raw({0xFE, 0xC0, 4}).word(V(0)).word(I(0));
+  const u16 unknown = script.here();
+  script.raw({0xFE, 0xC7, 3, 0x11, 0x22, 0x33});
+  const u16 longer = script.here();
+  script.raw({0xFE, 0xC0, 6}).word(V(1)).word(I(0)).word(0xBEEF);
+  const u16 short_payload = script.here();
+  script.raw({0xFE, 0xC0, 2}).word(V(2));
+  script.raw({0xFE, 0xC0, 4}).word(V(3)).word(I(0x7FFF));
+  script.set(V(4), 1);
+  script.stop();
+
+  const auto get = decode_insn(script.code, known);
+  CHECK(get.has_value());
+  if (get) {
+    CHECK_EQ(get->length, 7);
+    CHECK(std::string(get->info->name) == "GET_FEATURE_LEVEL");
+    CHECK_EQ(get->ops.size(), 2);
+    if (get->ops.size() == 2) {
+      CHECK(get->ops[0].kind == OperandKind::Var);
+      CHECK(get->ops[1].kind == OperandKind::Imm);
+    }
+  }
+  const auto other = decode_insn(script.code, unknown);
+  CHECK(other.has_value());
+  if (other) {
+    CHECK_EQ(other->length, 6);
+    CHECK_EQ(other->info->conf, '?');
+    CHECK(other->ops.empty());
+  }
+  const auto extra = decode_insn(script.code, longer);
+  CHECK(extra.has_value());
+  if (extra) {
+    CHECK_EQ(extra->length, 9);
+    CHECK_EQ(extra->ops.size(), 2);
+  }
+  std::string error;
+  CHECK(!decode_insn(script.code, short_payload, &error).has_value());
+  CHECK(!error.empty());
+  const Bytes truncated{0xFE, 0xC0, 9, 0x00, 0x04};
+  CHECK(!decode_insn(truncated, 0).has_value());
+
+  NullHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(vm.var(V(1)), 1);
+  CHECK_EQ(vm.var(V(2)), 5);
+  CHECK_EQ(vm.var(V(3)), 0);
+  CHECK_EQ(vm.var(V(4)), 1);
+  CHECK_EQ(vm.stats().unknown_ops.size(), 2);
 }
 
 
@@ -1531,6 +1591,7 @@ int main() {
   test_rand_range();
   test_default_rand();
   test_opcode_table();
+  test_extension_ops();
   test_get_position_order();
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();
