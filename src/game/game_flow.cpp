@@ -180,6 +180,7 @@ FlowAction FlowMachine::on_slot(const ui::SlotEntry& entry) {
 FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   FlowAction action;
   gs_ = ui::GameState(entry.data, &rules_);
+  gs_.load_window_frame();
   // Every load grants the Time Shifter key item.
   newgame::ensure_time_shifter(gs_.slot);
   // A slot without a valid ext_save.dat pair: Pip in an evolved form (0x2C..0x30) gets the stat sync.
@@ -392,16 +393,29 @@ void GameFlow::start(FlowState state) {
   }
 }
 
-void GameFlow::restart(bool boot_logo) {
-  if (!ready_) return;
+void GameFlow::drop_screens() {
   keymap_active_ = rename_active_ = rename_finished_ = rename_guide_ = false;
   party_active_ = party_finished_ = false;
   ngp_active_ = ngp_slots_ = ngp_load_ = false;
   ngp_result_ = NgPlusResult::None;
   open_pending_ = open_ready_ = load_pending_ = load_from_slots_ = false;
   open_fade_in_ = 0.0f;
+}
+
+void GameFlow::restart(bool boot_logo) {
+  if (!ready_) return;
+  drop_screens();
   enter_title();
   if (boot_logo) begin_boot_logo();
+}
+
+void GameFlow::return_to_title() {
+  if (!ready_) return;
+  drop_screens();
+  enter_title(false);
+  // The running title room plays the logo FMV; until it is over a button only skips it.
+  logo_ready_ = !scene_enabled_;
+  log::info("flow: the game was reset; back to the title over the running room");
 }
 
 bool GameFlow::any_button(const platform::Input& in) {

@@ -12,7 +12,7 @@ const char* global_name(Global which) {
       "ExitTransition", "FrameVsyncs", "OverlayGridA0", "OverlayGridA1", "OverlayGridA2", "OverlayGridB0",
       "OverlayGridB1", "OverlayGridB2", "OverlayOt", "KeepSfxSlots", "FootstepVolume", "FootstepDryType",
       "FootstepWaterType", "FootstepListenerX", "FootstepListenerY", "FootstepListenerZ", "FootstepNear", "FootstepFar",
-      "Byte4D", "MenuPreamble3", "MusicSwapArmed", "TradingPostRow", "TradingPostCue", "Reg6A",
+      "Byte4D", "MenuPreamble3", "MusicSwapArmed", "TradingPostRow", "TradingPostCue", "PortraitYaw",
       "BattleIntroAnchor", "SavePointPreamble", "Selection", "SelectionFlag", "PadMask",
   };
   const auto index = static_cast<size_t>(which);
@@ -27,6 +27,7 @@ void NullHost::note(const char* method) {
 #define NOTE(name) note(name)
 
 bool NullHost::system_ready() { NOTE("system_ready"); return true; }
+bool NullHost::busy_clear() { NOTE("busy_clear"); return true; }
 bool NullHost::entry_window() { NOTE("entry_window"); return false; }
 bool NullHost::window_open() { NOTE("window_open"); return false; }
 void NullHost::end_of_tick(FieldVM&) { NOTE("end_of_tick"); }
@@ -87,7 +88,6 @@ bool NullHost::drop_culled_dialogue() { NOTE("drop_culled_dialogue"); return fal
 bool NullHost::dialogue_blocked() { NOTE("dialogue_blocked"); return false; }
 void NullHost::open_dialogue(int, int, int) { NOTE("open_dialogue"); }
 void NullHost::dialogue_choice(int, int) { NOTE("dialogue_choice"); }
-int NullHost::dialogue_result() { NOTE("dialogue_result"); return 0; }
 void NullHost::bg_layer(int, bool) { NOTE("bg_layer"); }
 void NullHost::set_layer_opacity(int, int, int, int) { NOTE("set_layer_opacity"); }
 bool NullHost::bg_wave(int, int) { NOTE("bg_wave"); return true; }
@@ -136,6 +136,7 @@ void NullHost::learn_limit(int, int, int) { NOTE("learn_limit"); }
 void NullHost::set_limit_mode(int) { NOTE("set_limit_mode"); }
 int NullHost::set_character_model(int, int) { NOTE("set_character_model"); return 0; }
 bool NullHost::model_swap_busy() { NOTE("model_swap_busy"); return false; }
+bool NullHost::model_swap_pending() { NOTE("model_swap_pending"); return false; }
 void NullHost::model_swap_commit() { NOTE("model_swap_commit"); }
 int NullHost::character_model_byte(int) { NOTE("character_model_byte"); return 0; }
 void NullHost::refresh_party_models() { NOTE("refresh_party_models"); }

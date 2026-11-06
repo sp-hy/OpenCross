@@ -41,9 +41,6 @@ bool FieldVM::exec_core(u8 op) {
         if (mode & mask) {
           result.value = static_cast<s16>(raw);
           result.literal = true;
-        } else if (raw & 0x8000) {
-          result.value = raw & 0x7FFF;
-          result.literal = true;
         } else {
           result.value = read_var(raw);
           result.is_unsigned_var = var_unsigned(raw);
@@ -53,6 +50,10 @@ bool FieldVM::exec_core(u8 op) {
       Operand lhs = operand(1, 0x80), rhs = operand(3, 0x40);
       if (lhs.literal && rhs.is_unsigned_var) lhs.value = static_cast<u16>(lhs.value);
       if (rhs.literal && lhs.is_unsigned_var) rhs.value = static_cast<u16>(rhs.value);
+      // Two variables: the right value takes the left variable's signedness, not its own.
+      if (!lhs.literal && !rhs.literal)
+        rhs.value = lhs.is_unsigned_var ? static_cast<s32>(static_cast<u16>(rhs.value))
+                                        : static_cast<s32>(static_cast<s16>(rhs.value));
       bool taken = false;
       switch (mode & 0xF) {
         case 0: taken = lhs.value == rhs.value; break;
@@ -82,9 +83,13 @@ bool FieldVM::exec_core(u8 op) {
       yield_ = true;
       ended_ = true;
       break;
-    case 0x04:  // KILL_ALL_SCRIPTS: resets every record and the call stack of the entity
+    case 0x04:  // KILL_ALL_SCRIPTS: resets every record of the entity; the call depth and action bit it clears are entity 8's
       for (auto& record : self.rec) record = ScriptRecord{};
-      self.depth = 0;
+      if (ents_.size() > 8) {
+        Entity& eighth = ents_[8];
+        eighth.depth = 0;
+        eighth.flags270 &= ~flag270::kActionRunning;
+      }
       self.flags270 &= ~flag270::kInputLock;
       rec_->pc = 0;
       yield_ = true;
@@ -110,7 +115,9 @@ bool FieldVM::exec_core(u8 op) {
       // outright, and an 08 / 09 already waiting on it releases its hold and goes on; the scheduler never runs such an
       // entity, so waiting would last for ever. The blocking forms spawn the child held so its record is not reused
       // before the parent saw it. An 08 whose child keeps looping ends its wait as soon as the child became the target's
-      // running record.
+      // running record. All three wait in place (also while waiting for the child) as long as the system gate holds; a song
+      // change alone does not hold them.
+      if (!busy_gate()) break;
       const int target_ent = entity_operand(1);
       const int id = byte_at(2) & 0x1F, cls = byte_at(2) >> 5;
       if (target_ent >= 0 && (ents_[static_cast<size_t>(target_ent)].flags38 & flag38::kInactive)) {
@@ -587,8 +594,9 @@ bool FieldVM::exec_core(u8 op) {
       host_.request_map_jump(operand_u(1), operand_u(3) & 0xFF);
       advance(5);
       break;
-    case 0x5B:  // MOVE_TWEEN ((b & 3) == 3 wait form)
-    case 0x5C: {  // JUMP_MOVE
+    case 0x5B:  // MOVE_TWEEN ((b & 3) == 3 wait form); frees the height on every form
+    case 0x5C: {  // JUMP_MOVE: the same hop, landing on the floor; leaves the free-height flag alone
+      if (op == 0x5B) self.flags38 |= 0x40;
       if ((byte_at(1) & 3) == 3) {
         wait_or_advance(host_.motion_busy(ent_), 2);
         break;
@@ -601,7 +609,7 @@ bool FieldVM::exec_core(u8 op) {
       request.z = operand_s(4, mode_off, 0x40);
       request.y = operand_s(6, mode_off, 0x20);
       request.params[0] = op == 0x5B ? operand_s(8, 10, 0x10) : operand_u(9);
-      begin_motion(request, true);
+      begin_motion(request, false);
       advance(11);
       yield_ = true;
       break;

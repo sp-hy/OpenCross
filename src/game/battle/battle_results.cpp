@@ -795,7 +795,7 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     row.gain = rewards.gains[i];
     row.cells = member.cells;
     row.gauge = unit.gauge;
-    row.ko = !unit.alive();
+    row.ko = !unit.conscious();
     row.unit_cells = unit.cells;
     for (size_t cell = 0; cell < row.open.size(); ++cell) row.open[cell] = unit.usable[cell] && !unit.used[cell];
     for (int gain : row.gain) row.has_gain = row.has_gain || gain > 0;

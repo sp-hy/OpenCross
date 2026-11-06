@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <utility>
 
 #include "core/log.h"
 #include "game/cheats.h"
@@ -166,11 +167,32 @@ void FieldWorld::step_turn_rates() {
   }
 }
 
+// The A0 step of the tick, taken after every script has run: the entity walks one step at its own speed along the heading A0
+// recorded, through the wall probe and the slide, and faces that heading (a slide re-aims the facing along the wall). A tile with
+// flag 0x1000 halves the step. An inactive or free-height entity takes no step. The request is used up either way.
+void FieldWorld::step_wander() {
+  const WalkMesh& walk = view_.walk();
+  for (int i = 0; i < static_cast<int>(ents_.size()); ++i) {
+    Ent& ent_state = ents_[static_cast<size_t>(i)];
+    const int heading = std::exchange(ent_state.wander_heading, -1);
+    if (heading < 0) continue;
+    const script::Entity& script_ent = vm_.entity(i);
+    if (script_ent.flags38 & (script::flag38::kInactive | 0x40u)) continue;
+    float step = static_cast<float>(script_ent.v10c ? script_ent.v10c : kDefaultSpeed) / 16.0f;
+    const int tri = ent_state.actor.triangle();
+    if (tri >= 0 && !walk.empty() && (walk.flags(tri) & 0x1000u)) step *= 0.5f;
+    const float heading_rad = static_cast<float>(heading) * kUnitsToRad;
+    ent_state.actor.set_facing(heading);
+    ent_state.actor.move_on_mesh(walk, -std::cos(heading_rad) * step, std::sin(heading_rad) * step);
+  }
+}
+
 void FieldWorld::step_motions() {
   using K = script::MotionKind;
   const WalkMesh& walk = view_.walk();
   // class_bits: which attribute walls block the entity.
   for (size_t i = 0; i < ents_.size(); ++i) ents_[i].actor.class_bits = vm_.entity(static_cast<int>(i)).flags38 & 0x600000u;
+  step_wander();
   step_turn_rates();
   for (int i = 0; i < static_cast<int>(ents_.size()); ++i) {
     Ent& ent_state = ents_[static_cast<size_t>(i)];
@@ -412,7 +434,6 @@ void FieldWorld::step_motions() {
         } else {
           ent_state.actor.set_position(walk, motion.tx, motion.tz, false, true);
           ent_state.actor.set_height(motion.ty, false);
-          if (!y_valid) ent_state.actor.set_position(walk, motion.tx, motion.tz, false, false);
           motion.active = false;
         }
         break;

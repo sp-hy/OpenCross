@@ -146,7 +146,12 @@ bool FieldVM::exec_scene(u8 op) {
       }
       break;
     }
-    case 0x7B: {  // ADD_TO_PARTY: a refused add also skips the 7C that follows
+    case 0x7B: {  // ADD_TO_PARTY: a refused add also skips the 7C that follows; waits for the system gate and a pending model swap
+      if (!system_gate()) break;
+      if (host_.model_swap_pending()) {
+        yield_ = true;
+        break;
+      }
       const s32 char_id = operand_u(1);
       const bool added = host_.party_add(char_id);
       if (added) staged_char_ = char_id;
@@ -163,7 +168,11 @@ bool FieldVM::exec_scene(u8 op) {
         advance(1);
       }
       break;
-    case 0x7D:  // REMOVE_FROM_PARTY
+    case 0x7D:  // REMOVE_FROM_PARTY: waits while a model swap is pending
+      if (host_.model_swap_pending()) {
+        yield_ = true;
+        break;
+      }
       host_.party_remove(byte_at(1));
       advance(2);
       break;

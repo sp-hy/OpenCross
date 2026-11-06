@@ -78,6 +78,7 @@ void MainMenu::Impl::update_settings(const Nav& nav, const platform::Input& in) 
   if (nav.down) set_cur = wrap(set_cur + 1, 8), sfx(1);
   const SettingRow& row = kSettings[set_cur];
   if (nav.cancel) {
+    gs->store_window_frame();
     back_to_main(4);
     sfx(6);
     return;

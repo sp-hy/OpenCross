@@ -185,10 +185,14 @@ void BattleView::update(float dt, const platform::Input& in) {
     build_hud();
     return;
   }
-  // The PC's turn is over: the menu passes on (the next PC's window grows while any enemy actions run).
+  // The PC's turn is over: the menu passes on with SFX 0x16 (enemy actions that follow close the window again, tick_menu_entry).
   if (turn_open_ && turn_over()) {
     turn_open_ = false;
-    if (battle_->outcome() == battle::Outcome::Ongoing && finish_ == Finish::None) begin_menu_entry(menu_pc_after());
+    if (battle_->outcome() == battle::Outcome::Ongoing && finish_ == Finish::None) {
+      const int pc = menu_pc_after();
+      begin_menu_entry(pc);
+      if (pc >= 0 && !auto_) audio_.play_menu(0x16);
+    }
   }
   if (ui_ != Ui::Intro && !busy && finish_ == Finish::None) {
     if (battle_->outcome() == battle::Outcome::Ongoing) {
@@ -212,11 +216,25 @@ void BattleView::update(float dt, const platform::Input& in) {
         sync_shown();
         // The top menu reopens on the PC that attacked while it can still act - after its chain ends, an enemy turn in between or the
         // target's death; after an Element / Defend command (or when it cannot act) it goes to the next PC in slot order (actor + 1,
-        // actor + 2, the actor itself last). -1 = nobody: handle_input settles / re-picks.
-        active_pc_ = menu_pc_after();
+        // actor + 2, the actor itself last). -1 = nobody: handle_input settles / re-picks. A left HIT% menu names its PC (pass_pc_).
+        const int passed = pass_pc_;
+        const bool switched = pass_switch_;
+        pass_pc_ = -1;
+        pass_switch_ = false;
+        active_pc_ = passed >= 0 && battle_->can_act(passed) ? passed : menu_pc_after();
         if (cursor_memory_ && active_pc_ >= 0 && active_pc_ < battle::kPcSlots) top_cursor_ = top_mem_[active_pc_];
-        // The first menu of the battle, or the PC the turn's end picked can no longer act: the window opens for this PC.
-        if (active_pc_ >= 0 && active_pc_ != entry_pc_) begin_menu_entry(active_pc_);
+        if (switched && active_pc_ >= 0) {
+          // A switch key in the HIT% menu: once the PC is home the menu passes on with SFX 0x16, the new PC's idle restarts and its
+          // window opens again, also when the menu stays on the same PC.
+          audio_.play_menu(0x16);
+          start_idle(active_pc_);
+          begin_menu_entry(active_pc_);
+        } else {
+          // Cross in the HIT% menu: its sound plays once the PC is home.
+          if (passed >= 0) audio_.play_menu(6);
+          // The first menu of the battle, or the PC the turn's end picked can no longer act: the window opens for this PC.
+          if (active_pc_ >= 0 && active_pc_ != entry_pc_) begin_menu_entry(active_pc_);
+        }
       }
       bool any = false;
       for (int i = 0; i < battle::kPcSlots; ++i) any = any || battle_->can_act(i);
@@ -225,6 +243,11 @@ void BattleView::update(float dt, const platform::Input& in) {
         battle_->settle();
         collect_events();
       }
+    } else if (wipe_hold_ > 0) {
+      // The frozen-wipe hold counts down in tick().
+    } else if (froze_ && battle_->outcome() == battle::Outcome::Wiped) {
+      froze_ = false;
+      wipe_hold_ = kFrozenWipeHold;
     } else {
       begin_finish();
     }
@@ -303,13 +326,32 @@ void BattleView::begin_disengage(bool approach_shot) {
   ui_ = Ui::Wait;
 }
 
-// A pick of the percentage menu: one hit at once, from where the PC stands.
+// The HIT% menu is up from the target confirm on, so its leave keys also work while the PC runs up to the target: the run stops where the PC
+// stands and it hops home from there under the approach shot. The top menu opens once the PC is home, with SFX 6 for Cross or SFX 0x16 for
+// a switch key (update).
+void BattleView::leave_hit_menu(int pass) {
+  pass_pc_ = pass == 0 ? active_pc_ : switch_target(pass);
+  pass_switch_ = pass != 0;
+  turn_open_ = false;
+  if (engage_arrive_ && act_.phase == Act::Phase::Approach) {
+    cut_script(active_pc_);
+    vis_[static_cast<size_t>(active_pc_)].move.on = false;
+    act_ = Act{};
+    engaged_ = true;
+  }
+  begin_disengage(true);
+  ui_ = Ui::Wait;
+}
+
+// A pick of the percentage menu: one hit at once, from where the PC stands. A hit the stamina cannot start (a PC without stamina cost whose
+// stamina is below the hit's unfatigued cost) is dropped and the menu stays open.
 void BattleView::chain_pick(int strength) {
   battle::Command cmd;
   cmd.kind = battle::Command::Kind::Attack;
   cmd.actor = active_pc_;
   cmd.target = engaged_target_;
   cmd.chain = {strength};
+  if (!battle_->validate(cmd)) return;
   execute(cmd);
 }
 
@@ -323,6 +365,8 @@ void BattleView::execute(const battle::Command& cmd) {
     return;
   }
   collect_events();
+  // A confirmed command closes the system plate.
+  plate_ = ScriptMsg{};
   chain_.clear();
   // The engaged PC keeps its menu while it can still act; otherwise update() picks the next PC (next_pc_after).
   active_pc_ = cmd.actor;
@@ -453,15 +497,17 @@ std::string BattleView::route_facing() const {
 // active PC itself = nobody else can act: the menu stays on it, with no sound. Either way the PC's idle clip restarts (a guarding PC's block
 // pose plays again until its top menu takes over) and the menu entry starts again. A change also ends the camera's tasks, plays SFX 0x16 and
 // restores the PC's cursor memory (the facing pass is sync_menu_facing).
-void BattleView::switch_active_pc(int dir) {
-  if (ui_ != Ui::Top || active_pc_ < 0 || dir == 0 || engaged_) return;
-  int slot = active_pc_;
+int BattleView::switch_target(int dir) const {
   for (int k = 1; k < battle::kPcSlots; ++k) {
     const int next = ((active_pc_ + (dir > 0 ? k : -k)) % battle::kPcSlots + battle::kPcSlots) % battle::kPcSlots;
-    if (!battle_->can_act(next)) continue;
-    slot = next;
-    break;
+    if (battle_->can_act(next)) return next;
   }
+  return active_pc_;
+}
+
+void BattleView::switch_active_pc(int dir) {
+  if (ui_ != Ui::Top || active_pc_ < 0 || dir == 0 || engaged_) return;
+  const int slot = switch_target(dir);
   if (slot != active_pc_) {
     end_camera_tasks();
     active_pc_ = slot;
@@ -480,16 +526,32 @@ void BattleView::begin_menu_entry(int pc) {
 }
 
 // Once a tick: the window grows; then the menu state steps on and the top menu takes over, each on a tick when the menu is free (the
-// actions in between hold both).
+// actions in between hold both). An enemy action, running or next in the queue, closes the window: the entry starts again from the outline
+// once it is over, with SFX 0x16 when the PC can act.
 void BattleView::tick_menu_entry() {
   if (entry_pc_ < 0) return;
+  const bool enemy_turn = (act_.phase != Act::Phase::None && act_.actor >= battle::kPcSlots) || (!queue_.empty() && queue_.front().front().actor >= battle::kPcSlots);
+  if (enemy_turn) {
+    entry_age_ = 0;
+    entry_ready_ = false;
+    entry_live_ = -1;
+    entry_chime_ = true;
+    return;
+  }
+  if (entry_chime_ && battle_->can_act(entry_pc_) && battle_->outcome() == battle::Outcome::Ongoing && finish_ == Finish::None) {
+    entry_chime_ = menu_chime_ = false;
+    if (!auto_) audio_.play_menu(0x16);
+  }
   if (entry_live_ >= 0) {
     entry_live_ = std::min(entry_live_ + 1, 2);
     return;
   }
   const bool free = ui_ == Ui::Top && active_pc_ == entry_pc_;
   if (entry_ready_) {
-    if (free) entry_live_ = 0;
+    if (free) {
+      entry_live_ = 0;
+      log::debug("battle: top menu takes over at tick {}", tick_count_);
+    }
   } else if (entry_age_ < kEntryGrowTicks) {
     ++entry_age_;
   } else if (free) {

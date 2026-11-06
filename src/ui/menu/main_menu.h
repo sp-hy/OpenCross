@@ -105,7 +105,7 @@ class MainMenu {
   // (member pick on Main, element picked over the grid, equip candidate list, equipment view on Status); grid: 2 = the Auto Allocate
   // question, 3 = the Remove All question, 4 = Reorder.
   // Main: 2 = the roster (Status pick), 3 = the roster's remove-all prompt (Equip pick). ElementUse: 1 = the party target, 2 = the roster. Save: 0 = Save/Load choice,
-  // 1 = save grid, 2 = load grid, 3 = load confirm, 4 = choice with saving blocked.
+  // 1 = save grid, 2 = load grid, 3 = the overwrite confirm on a used file, 4 = choice with saving blocked.
   // Settings: 1 = the skin picker, 2 / 3 = the Controller assignment page (field / battle).
   void debug_show(MenuScreen screen, int variant = 0);
 

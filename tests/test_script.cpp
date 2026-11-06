@@ -301,6 +301,35 @@ void test_if_jump_polarity() {
   }
 }
 
+// IF_JUMP with two variables: the right value is extended by the left variable's signedness. V(0) is signed, V(1) unsigned.
+void test_if_jump_mixed_signedness() {
+  struct Case {
+    u16 lhs, rhs;
+    int cond;
+    bool taken;
+  };
+  // 5 > V(1) = 0xFFFF read as -1: true. 5 < V(0) = 0xFFFF read as 65535: true.
+  for (const Case& test : {Case{V(0), V(1), 2, true}, Case{V(1), V(0), 3, true}}) {
+    Asm script;
+    const u16 init = script.here();
+    script.set(V(0), 5).set(V(1), -1);
+    if (test.lhs == V(1)) script.set(V(0), -1).set(V(1), 5);
+    const size_t at = script.code.size();
+    script.raw({0x02}).word(test.lhs).word(test.rhs).raw({test.cond}).word(0);
+    script.set(V(2), 1);
+    const u16 end = script.here();
+    script.stop();
+    script.code[at + 6] = static_cast<u8>(end);
+    script.code[at + 7] = static_cast<u8>(end >> 8);
+    FieldScriptModule module = make_module(script, {{{{0, init}}}});
+    module.sign_mask[16] = 2;
+    NullHost host;
+    FieldVM vm(host);
+    vm.load(module);
+    CHECK_EQ(vm.var(V(2)), test.taken ? 1 : 0);
+  }
+}
+
 void test_call_return() {
   Asm script;
   const size_t at = script.code.size();
@@ -602,12 +631,14 @@ void test_e2_culled_speaker() {
 }
 
 // 99 reads the party table, whose empty slots hold 0xFF (tel_b02f painter: `$room[8] == #255`).
-// E2 copies the confirmed choice *line*; a plain message leaves the previous value.
+// E0 resets the entity's dialogue result byte to 0xFF; the host writes the confirmed choice *line* into it while the window is
+// still open, and E2 copies the byte once the window is gone, so a plain message yields 0xFF.
 class ChoiceHost : public NullHost {
  public:
-  int result = -1;
+  bool open = false;
   int party_member(int slot) override { return slot == 0 ? 0 : slot == 1 ? 1 : -1; }
-  int dialogue_result() override { return result; }
+  void open_dialogue(int, int, int) override { open = true; }
+  bool dialogue_open() override { return open; }
 };
 
 void test_party_slot_and_choice_result() {
@@ -619,8 +650,10 @@ void test_party_slot_and_choice_result() {
   script.raw({0x98}).word(V(2)).word(I(1));
   script.stop();
   const u16 upd = script.here();
+  script.raw({0xE0}).word(37).raw({0x00});
   script.raw({0xE2});
   script.alu_v(0x10, V(3), 0x04);
+  script.raw({0xE0}).word(7).raw({0x00});
   script.raw({0xE2});
   script.alu_v(0x10, V(4), 0x04);
   script.park();
@@ -630,15 +663,42 @@ void test_party_slot_and_choice_result() {
   CHECK_EQ(vm.var(V(0)), 255);
   CHECK_EQ(vm.var(V(1)), 1);
   CHECK_EQ(vm.var(V(2)), 1);
-  // "No thanks" = line 3 of painter message 37.
-  host.result = 3;
   vm.tick();
-  // The next window has no choice.
-  host.result = -1;
+  CHECK_EQ(vm.entity(0).last_choice, 0xFF);
+  // "No thanks" = line 3 of painter message 37, confirmed: the host stores it, then the window closes.
+  vm.entity(0).last_choice = 3;
+  host.open = false;
   vm.tick();
   vm.tick();
   CHECK_EQ(vm.var(V(3)), 3);
-  CHECK_EQ(vm.var(V(4)), 3);
+  CHECK(host.open);
+  // The next window has no choice.
+  host.open = false;
+  vm.tick();
+  vm.tick();
+  CHECK_EQ(vm.var(V(4)), 255);
+}
+
+// 04 resets the running entity's records but keeps its call depth; the call depth and action bit it clears are entity 8's.
+void test_kill_all_scripts() {
+  Asm script;
+  script.stop();
+  const u16 sub = script.here();
+  script.raw({0x04});
+  const u16 upd = script.here();
+  script.call(sub);
+  script.park();
+  NullHost host;
+  FieldVM vm(host);
+  std::vector<EntScripts> ents(9);
+  ents[0].slot = {{1, upd}};
+  vm.load(make_module(script, ents));
+  vm.entity(8).depth = 2;
+  vm.entity(8).flags270 |= flag270::kActionRunning;
+  vm.tick();
+  CHECK_EQ(vm.entity(0).depth, 1);
+  CHECK_EQ(vm.entity(8).depth, 0);
+  CHECK((vm.entity(8).flags270 & flag270::kActionRunning) == 0);
 }
 
 // E3 / E4 with a "none" speaker (an empty party slot) skip themselves and the wait that follows (pc += 6 / pc += 8)
@@ -1001,6 +1061,27 @@ void test_fe50_restore() {
   CHECK_EQ(host.face, 0x400);
 }
 
+// FE 2F clears the variables but keeps DEBUG_MODE (variable 0x34): the host's reset already sees the kept value.
+void test_fe2f_keeps_debug_mode() {
+  struct ResetHost : NullHost {
+    const FieldVM* vm = nullptr;
+    s32 seen = -1;
+    void field_reset() override { seen = vm->var(0x34); }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xFE, 0x2F}).stop();
+  ResetHost host;
+  FieldVM vm(host);
+  host.vm = &vm;
+  vm.set_var(0x34, 1);
+  vm.set_var(0x40, 7);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.seen, 1);
+  CHECK_EQ(vm.var(0x34), 1);
+  CHECK_EQ(vm.var(0x40), 0);
+}
+
 // Softlock watchdog bookkeeping: a record that yields on one wait instruction is counted (strict), a polling loop of a class < 7 script is
 // counted (loop), WAIT / STOP_EXEC and the idle UPDATE loop are not.
 void test_stuck_watchdog() {
@@ -1218,7 +1299,181 @@ void test_screen_ops_and_fe61() {
   }
 }
 
+// FE 3B writes the status byte of the referenced character; a reference that resolves to nobody (an empty party slot) leaves the
+// variable as it was.
+void test_status_read_skips_nobody() {
+  class StatusHost : public NullHost {
+   public:
+    int char_status(int char_id) override { return char_id == 0xFD ? 0x109 : -1; }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.set(V(0), 0x1234).set(V(1), 0x1234);
+  script.raw({0xFE, 0x3B}).word(V(0)).word(I(0xFF));
+  script.raw({0xFE, 0x3B}).word(V(1)).word(I(0xFD));
+  script.stop();
+  StatusHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(vm.var(V(0)), 0x1234);
+  CHECK_EQ(vm.var(V(1)), 9);
+}
+
+// A screen holds the system gate from its request until it has closed: a second entity's screen op on the same tick waits in place
+// and opens its own screen once the first one has closed.
+void test_screen_ops_queue_behind_a_pending_screen() {
+  struct QueueHost : TestHost {
+    std::vector<MenuKind> requests;
+    bool open = false;
+    bool system_ready() override { return !open; }
+    void request_menu(MenuKind kind, int) override {
+      requests.push_back(kind);
+      open = true;
+    }
+    bool menu_active() override { return open; }
+  };
+  Asm script;
+  const u16 party = script.here();
+  script.raw({0xFE, 0x5B, 0xFE, 0x61});
+  script.set(V(0), 1).park();
+  const u16 name = script.here();
+  script.raw({0xFE, 0x4A}).word(I(1)).raw({0xFE, 0x61});
+  script.set(V(1), 1).park();
+  QueueHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{}, {{{1, party}}}, {{{1, name}}}}));
+  for (int tick = 0; tick < 5; ++tick) vm.tick();
+  CHECK_EQ(host.requests.size(), 1);
+  CHECK(host.requests[0] == MenuKind::PartyScreen);
+  CHECK_EQ(vm.var(V(0)), 0);
+  host.open = false;
+  vm.tick();
+  CHECK_EQ(host.requests.size(), 2);
+  CHECK(host.requests[1] == MenuKind::NameEntry);
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(vm.var(V(1)), 0);
+  host.open = false;
+  for (int tick = 0; tick < 5; ++tick) vm.tick();
+  CHECK_EQ(host.requests.size(), 2);
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
+// 07 / 08 / 09 wait in place while the system gate holds: nothing is spawned, and a 09 whose child has ended goes on only once the
+// gate opens again.
+void test_run_script_waits_for_gate() {
+  struct GateHost : NullHost {
+    bool busy = false;
+    bool system_ready() override { return !busy; }
+    bool busy_clear() override { return !busy; }
+  };
+  Asm script;
+  const u16 parent = script.here();
+  script.raw({0x07, 0x02, 0x05});
+  script.set(V(0), 1);
+  script.raw({0x09, 0x02, 0x06});
+  script.set(V(1), 1).park();
+  const u16 async_child = script.here();
+  script.set(V(2), 1).stop();
+  const u16 blocking_child = script.here();
+  script.wait(3).stop();
+  GateHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{}, {{{1, parent}}}, {{{5, async_child}, {6, blocking_child}}}}));
+  host.busy = true;
+  for (int tick = 0; tick < 5; ++tick) vm.tick();
+  CHECK_EQ(vm.var(V(0)), 0);
+  CHECK_EQ(vm.var(V(2)), 0);
+  host.busy = false;
+  vm.tick();
+  CHECK_EQ(vm.var(V(0)), 1);
+  host.busy = true;
+  for (int tick = 0; tick < 10; ++tick) vm.tick();
+  CHECK_EQ(vm.var(V(2)), 1);
+  CHECK_EQ(vm.var(V(1)), 0);
+  host.busy = false;
+  for (int tick = 0; tick < 3; ++tick) vm.tick();
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
+// A song change holds the full system gate (here a second PLAY_SONG waits) but not the gate of 07 / 08 / 09: the child is spawned
+// while the song changes.
+void test_song_change_holds_gate_but_not_run_script() {
+  struct SongHost : NullHost {
+    bool song_change = true;
+    bool system_ready() override { return !song_change; }
+  };
+  Asm script;
+  const u16 parent = script.here();
+  script.raw({0x07, 0x02, 0x05});
+  script.set(V(0), 1);
+  script.raw({0x88}).word(I(5));
+  script.set(V(1), 1).park();
+  const u16 child = script.here();
+  script.set(V(2), 1).stop();
+  SongHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{}, {{{1, parent}}}, {{{5, child}}}}));
+  for (int tick = 0; tick < 5; ++tick) vm.tick();
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(vm.var(V(2)), 1);
+  CHECK_EQ(vm.var(V(1)), 0);
+  host.song_change = false;
+  vm.tick();
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
+// 7B and 7D wait in place while a party model swap (D9 .. DA) is pending.
+void test_party_ops_wait_for_model_swap() {
+  struct SwapHost : PartyHost {
+    bool swap = true;
+    int removed = 0;
+    bool model_swap_pending() override { return swap; }
+    void party_remove(int) override { ++removed; }
+  };
+  Asm script;
+  const u16 add = script.here();
+  script.raw({0x7B}).word(I(1)).raw({0x7C});
+  script.set(V(0), 1).park();
+  const u16 remove = script.here();
+  script.raw({0x7D, 0xFE});
+  script.set(V(1), 1).park();
+  SwapHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{}, {{{1, add}}}, {{{1, remove}}}}));
+  for (int tick = 0; tick < 5; ++tick) vm.tick();
+  CHECK_EQ(host.party.size(), 1);
+  CHECK_EQ(host.removed, 0);
+  CHECK_EQ(vm.var(V(0)), 0);
+  CHECK_EQ(vm.var(V(1)), 0);
+  host.swap = false;
+  vm.tick();
+  CHECK_EQ(host.party.size(), 2);
+  CHECK_EQ(host.removed, 1);
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK_EQ(vm.var(V(1)), 1);
+}
+
+// MOVE_TWEEN (5B) frees the entity's height; JUMP_MOVE (5C) starts the same hop but leaves the free-height flag alone, so the
+// actor stays grounded for the wander step, the push and the tile flags after it lands.
+void test_hop_free_height_flag() {
+  constexpr u32 kFreeHeight = 0x40;
+  Asm script;
+  const u16 tween = script.here();
+  script.raw({0x5B, 0x00}).word(100).word(200).word(-30).word(10).raw({0xF0});
+  script.stop();
+  const u16 jump = script.here();
+  script.raw({0x5C, 0x00}).word(100).word(200).word(10).raw({0xE0}).word(I(0));
+  script.stop();
+  TestHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, tween}}}, {{{0, jump}}}}));
+  CHECK_EQ(host.motions_started, 2);
+  CHECK((vm.entity(0).flags38 & kFreeHeight) != 0);
+  CHECK((vm.entity(1).flags38 & kFreeHeight) == 0);
+}
+
 int main() {
+  test_status_read_skips_nobody();
   test_arithmetic();
   test_movie_end_jump();
   test_movie_operands();
@@ -1227,9 +1482,15 @@ int main() {
   test_second_battle_waits();
   test_launcher_gate_waits_for_windows();
   test_screen_ops_and_fe61();
+  test_screen_ops_queue_behind_a_pending_screen();
+  test_run_script_waits_for_gate();
+  test_song_change_holds_gate_but_not_run_script();
+  test_party_ops_wait_for_model_swap();
+  test_hop_free_height_flag();
   test_variables_and_signedness();
   test_bit_ops();
   test_if_jump_polarity();
+  test_if_jump_mixed_signedness();
   test_call_return();
   test_budget_and_default_restart();
   test_wait_scheduling();
@@ -1238,6 +1499,7 @@ int main() {
   test_blocking_run_script();
   test_run_script_and_wait();
   test_party_slot_and_choice_result();
+  test_kill_all_scripts();
   test_e2_culled_speaker();
   test_dialogue_none_speaker();
   test_commit_relinks_new_member();
@@ -1251,6 +1513,7 @@ int main() {
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();
   test_fe50_restore();
+  test_fe2f_keeps_debug_mode();
   test_stuck_watchdog();
   if (failures) {
     std::printf("%d failure(s)\n", failures);

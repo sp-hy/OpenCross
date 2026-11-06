@@ -131,6 +131,22 @@ int main() {
     // Arrived: the stick is released.
     CHECK(!in3.pad_connected);
   }
+  // ---- wait idle: not while the pad lock, the menu-button wait or a load fade still runs
+  {
+    Sim sim;
+    std::string err;
+    const auto route_file = write_tmp("oc_route_idle.txt", "0 wait idle 30\n- quit\n");
+    CHECK(sim.route.load(route_file, &err));
+    sim.st.room = "r";
+    sim.st.room_valid = true;
+    sim.st.field_idle = true;
+    sim.st.settling = true;
+    for (int i = 0; i < 5; ++i) CHECK(sim.step());
+    sim.st.settling = false;
+    int guard = 0;
+    while (sim.step() && ++guard < 20) {}
+    CHECK(!sim.last.failed);
+  }
   // ---- bad command
   {
     Sim sim;

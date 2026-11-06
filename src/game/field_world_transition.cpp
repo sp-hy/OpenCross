@@ -395,6 +395,11 @@ void FieldWorld::step_transition() {
   jump_ = {};
   trans_ = Trans::None;
   view_.set_interp_frozen(false);
+  // A B2 party override still active when the exit fade ends is undone here: the next room reads the party in its saved order.
+  if (vm_.global_flags() & script::gflag::kPartyOverride) {
+    party_override(false, 0);
+    vm_.set_global_flags(vm_.global_flags() & ~script::gflag::kPartyOverride);
+  }
   // DiscCheck: the story variable 0x42 names the disc the next room is on.
   if (const int need = vm_.var(0x42) + 1; need != disc_ && (need == 1 || need == 2)) set_disc(need);
   const std::string target = room_stem_for_id(pending.room);
@@ -406,7 +411,9 @@ void FieldWorld::step_transition() {
   const std::string from = view_.room_name();
   const int entry_kind = fade_kind_;
   if (!load_room(target, pending.param)) {
-    finish_jump_failed(std::format("loading {} failed", target));
+    // load_room has cleared the room before, so the "exit unavailable" recovery has nothing to return to: the host leaves the field.
+    log::error("field: {} -> {}: {}; no room to return to", from, target, status_);
+    room_lost_ = true;
     return;
   }
   // Kind 0 fades in over 0x30 ticks (subtractive, from black), kind 2 over 0x20 (additive, from white).

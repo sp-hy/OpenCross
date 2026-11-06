@@ -355,6 +355,13 @@ void App::restart_game() {
   flow.restart(!routing && !replaying);
 }
 
+void App::return_to_title() {
+  menu_from_script = false;
+  screen_after_fade.reset();
+  title_scene_tick0 = world.tick_count();
+  flow.return_to_title();
+}
+
 void App::update_achievements(int ticks) {
   const bool wanted = steam_allowed && config.steam;
   if (wanted != steam_wanted) {
@@ -395,6 +402,10 @@ void App::update_achievements(int ticks) {
 // `ticks` field ticks (or battle / menu / movie time) for the input `raw` over `dt` seconds.
 void App::advance(const platform::Input& raw, double dt, int ticks) {
   if (restart_requested) restart_game();
+  // A reset at the title itself (its room's entry) changes nothing; one during play ends the game.
+  if (world_ok && world.take_game_reset() && flow_ready && flow_enabled &&
+      (flow.state() == game::FlowState::Field || flow.state() == game::FlowState::Opening))
+    return_to_title();
   screen_clock += dt * 60.0;
   update_achievements(ticks);
   // Every screen below reads the left stick as the d-pad.
@@ -517,6 +528,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     if (flow.scene_mode()) {
       apply_loop_speed(1.0f, true);
       world.update(platform::Input{}, ticks);
+      // An attract demo room that could not be entered: the title starts again.
+      if (world.take_room_lost()) flow.start(game::FlowState::Title);
     }
     if (title_bd.running() && world.room_name() == game::kTitleRoom)
       for (int i = 0; i < ticks; ++i) title_bd.tick();
@@ -577,6 +590,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
         return;
       }
       world.state_edited();
+      // The menu hands the skin byte back to the field as variable 0x44.
+      world.vm().set_var(script::var::kCurrentFrame, flow.game_state().skin);
       world.fade_screen_sounds(false);
       if (menu_from_script) world.menu_closed(menu.saved() ? 1 : 0);
       menu_from_script = false;
@@ -698,6 +713,11 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   apply_loop_speed(loop_speed.on ? loop_speed.field_factor : 1.0f, true);
   if (loop_speed.on) step.alpha = loop_speed.field.alpha;
   world.update(in, loop_speed.on ? loop_speed.field.ticks : ticks);
+  // A room change that could not enter its room leaves nothing to play in: back to the title, as a failed game-over room load does.
+  if (world.take_room_lost()) {
+    if (flow_ready) flow.start(game::FlowState::Title);
+    return;
+  }
   if (flow_ready && config.auto_save && have_save_dat && !save_path.empty() && world.view().loaded() && flow.state() == game::FlowState::Field) {
     // RDE auto-save on a location change: card 1 slot 0 in the save.dat the Save menu uses, and / or the OpenCross page's
     // auto-save (Autosave::targets: each only where saves already exist; with none anywhere, the OpenCross page).

@@ -81,11 +81,11 @@ int MainMenu::Impl::save_list_angle(int sel) {
 
 // Save / Load: phase 0 = the Save a File / Load a File choice (Save is greyed and unselectable when saving is blocked); phase 2 = the
 // save choice (OpenCross / Slot 1 / Slot 2; starts on OpenCross when the page holds a file); phase 3 = "No save data in ..." (Load on
-// an empty choice) or "Save data in Slot n is corrupted." (a confirmed load of a file that fails the checksum); confirm or 120 frames
+// an empty choice) or "Save data in Slot n is corrupted." (a picked load of a file that fails the checksum); confirm or 120 frames
 // back to phase 0; phase 1 = the card's 2 x 8 box grid (card 1's box 0 is the auto-save, never
 // a manual save target; up / down swap rows, boxes 7 and 8 stay) or the page's list (file 0 is its auto-save, never a manual save
-// target; up / down one row, left / right one screen), with the overwrite / load confirmation on a used file. Cancel on the choice or
-// the list returns to phase 0. The save-list-only mode (save_only) has no phase 0: Cancel on the choice closes the menu, on the list it
+// target; up / down one row, left / right one screen), with the overwrite confirmation on a used file; a picked used file loads at
+// once. Cancel on the choice or the list returns to phase 0. The save-list-only mode (save_only) has no phase 0: Cancel on the choice closes the menu, on the list it
 // returns to the choice.
 void MainMenu::Impl::update_save(const Nav& nav) {
   if (save_phase == 0) {
@@ -170,8 +170,7 @@ void MainMenu::Impl::update_save(const Nav& nav) {
     else if (nav.ok) {
       save_confirm = false;
       if (confirm_cur == 0) {
-        if (load_mode) do_load();
-        else do_save();
+        do_save();
       } else {
         sfx(6);
       }
@@ -219,6 +218,8 @@ void MainMenu::Impl::update_save(const Nav& nav) {
   }
   if (load_mode && !used) {
     sfx(0x18);
+  } else if (load_mode) {
+    do_load();
   } else if (used) {
     save_confirm = true;
     confirm_cur = 1;
@@ -561,7 +562,7 @@ void MainMenu::Impl::build_save() {
   Frame(86, sl::kMsgX, sl::kMsgY);
   auto msg_line = [&](const std::u32string& str) { HLfit(sl::kMsgInkX, sl::kMsgInkY, str, sl::kMsgWidth, sl::kMsgScale); };
   if (save_confirm) {
-    msg_line(utf32(load_mode ? menu_str(0x801F27D0, "Alright to proceed?") : menu_str(0x801F2EE0, "")));
+    msg_line(utf32(menu_str(0x801F2EE0, "")));
     // Yes / No: frame 0x57 at (0x192, 0x150), cursor at (0x198, 0x160 + 0x16 row).
     Frame(87, 402, 336);
     HL(434, 356, utf32(menu_str(0x801F2BD0, "Yes")), kText, sl::kMsgScale);

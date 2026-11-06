@@ -108,6 +108,16 @@ void GameState::set_option(u16 mask, bool on) {
   slot.head[0x5A1] = static_cast<u8>(bits >> 8);
 }
 
+void GameState::store_window_frame() {
+  if (!option(opt::kCustomWindow)) skin = 0;
+  slot.set_var(0x44, skin);
+}
+
+void GameState::load_window_frame() {
+  skin = static_cast<u8>(std::min<int>(slot.var(0x44), 14));
+  store_window_frame();
+}
+
 int GameState::stamina_recovery(int character) const {
   const data::StatRec* record = rec(character);
   int total = record ? record->stamina_rate() : 0;
@@ -316,6 +326,40 @@ int GameState::clear_all(int character) {
           remove(character, row, col) == Why::Ok)
         ++cleared;
   return cleared;
+}
+
+bool GameState::counts_copies(int id) const {
+  if (!rules) return false;
+  if (const PgRow* row = rules->pg_row(id)) return (row->raw[0xA] & 0x40) != 0;
+  return rules->el_stack(id);
+}
+
+void GameState::strip_grid(int character) {
+  if (character < 0 || character >= save::kNumChars) return;
+  save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
+  for (size_t k = 0; k < ch.grid.size(); ++k) {
+    const int id = ch.grid[k] & 0x1FF;
+    if (id >= 0x80) continue;
+    if (id != 0) {
+      const int copies = counts_copies(id) ? ch.equipped_qty[k] : 1;
+      for (int i = 0; i < copies; ++i) add_element(id);
+    }
+    ch.grid[k] &= 0xC000;
+    ch.equipped_qty[k] = 0;
+  }
+}
+
+void GameState::return_gear(u16& word) {
+  if (word == 0) return;
+  if (word < 0x200) {
+    add_item(word);
+  } else if (word < 0x400) {
+    const int copies = word >= 0x261 && word <= 0x26B ? 5 : 1;
+    for (int i = 0; i < copies; ++i) add_element(word - 0x200);
+  } else if (word > 0x400 && word < 0x440) {
+    slot.set_key_items(slot.key_items() | 1ull << (word - 0x401));
+  }
+  word = 0;
 }
 
 int GameState::learn_tech(int character, int rows, int tech) {

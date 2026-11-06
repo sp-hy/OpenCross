@@ -26,6 +26,8 @@ namespace oc::script {
 constexpr u16 kRecIdle = 0xF;
 constexpr int kRecordsPerEntity = 8;
 constexpr int kCallDepth = 4;
+// Dialogue result byte of an entity whose last window took no confirmed choice.
+constexpr u8 kNoChoice = 0xFF;
 constexpr int kVarSlots = 0x400;
 constexpr int kGlobalVarSlots = 0x200;
 
@@ -43,7 +45,7 @@ namespace flag270 {
 constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000;
 }
 namespace gflag {
-constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kKeyListHold = 0x2000, kPauseAllowed = 0x4000, kForceRun = 0x8000,
+constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kPartyOverride = 0x40, kKeyListHold = 0x2000, kPauseAllowed = 0x4000, kForceRun = 0x8000,
               kKeepCustomName = 0x10000, kMenuUnderLock = 0x80000;
 }
 
@@ -72,9 +74,9 @@ struct ScriptRecord {
 // `v10e`, `v110` (B0 / B1), `v114` (curve turn rate of the walks, FE 2D), `v116` (footstep walker id, FE 40), `v24e`
 // (model turn rate per tick, A5 / CF; 0 = the model never turns) with its saved copy `v240`, `monster_ordinal` (the
 // entity's bit in the room's defeated-monster mask, D1 / D2), `head_turn_rate` (FE 3C / FE 62), `array25a` (footstep
-// sounds, FE 5C), `last_choice` (the confirmed choice line E2 publishes), `timer_acc` (B1) and `scale` (82 / FE 0D,
-// 0x200 per axis = 0.125). flags270 starts with bit 23 set: no footprints until FE 2C 0. `last_op` / `last_pc` are for
-// debug views only.
+// sounds, FE 5C), `last_choice` (the dialogue result byte E2 publishes: kNoChoice when the entity opens a window, the
+// confirmed line once a choice is confirmed), `timer_acc` (B1) and `scale` (82 / FE 0D, 0x200 per axis = 0.125).
+// flags270 starts with bit 23 set: no footprints until FE 2C 0. `last_op` / `last_pc` are for debug views only.
 struct Entity {
   std::array<ScriptRecord, kRecordsPerEntity> rec{};
   std::array<u32, kCallDepth> stack{};
@@ -297,6 +299,7 @@ class FieldVM {
   void jump_or_advance(bool jump, u32 jump_offset, u32 length);
   void wait_or_advance(bool busy, u32 length);
   bool system_gate();
+  bool busy_gate();
   void begin_motion(const MotionRequest& request, bool free_height);
   void head_turn(HeadOp op, int ent, int other, s32 x, s32 y, s32 z, int rate);
 };

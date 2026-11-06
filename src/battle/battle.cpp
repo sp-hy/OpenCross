@@ -679,6 +679,13 @@ int Battle::hit_chance_shown_for(int actor, int target, int strength) const {
   return battle::hit_chance_shown(in);
 }
 
+int Battle::hit_budget(int actor) const {
+  const Unit& actor_unit = unit(actor);
+  if (!(actor_unit.hi & st::kHiNoStaminaCost)) return actor_unit.stamina;
+  const auto timer = actor_unit.timers.find(32 + std::countr_zero(st::kHiNoStaminaCost));
+  return actor_unit.stamina + 10 * (timer == actor_unit.timers.end() ? 0 : timer->second);
+}
+
 // A hidden / off-stage enemy (ops 34 / 35 / 5B) is not on the cursor ring, so a single-target command cannot aim at it.
 bool Battle::validate(const Command& cmd, std::string* why) const {
   auto no = [&](const char* reason) {
@@ -691,12 +698,14 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
   switch (cmd.kind) {
     case Command::Kind::Attack: {
       if (cmd.chain.empty() || cmd.chain.size() > kMaxChain) return no("chain length must be 1..4");
+      // A hit starts only while the stamina covers its unfatigued cost; under kHiNoStaminaCost nothing is paid, so no fatigue term either.
+      const bool free = (actor_unit.hi & st::kHiNoStaminaCost) != 0;
       int budget = actor_unit.stamina;
       for (int strength : cmd.chain) {
         if (strength < 0 || strength > 2) return no("bad strength");
-        const int cost = chain_cost(strength, actor_unit);
+        const int cost = free ? weapon_stamina_cost(strength, false) : chain_cost(strength, actor_unit);
         if (cost > budget) return no("not enough stamina for the chain");
-        budget -= cost;
+        if (!free) budget -= cost;
       }
       break;
     }
@@ -992,7 +1001,8 @@ void Battle::god_filter(int target, DamageOut& dmg) const {
   dmg.code = 1;
 }
 
-// Code 3 heals, code 2 and negative values do nothing; a self-inflicted KO leaves the actor at 1 HP.
+// Code 3 heals, code 2 and negative values do nothing; a self-inflicted KO leaves the actor at 1 HP. Battle boost cancels the damage
+// (code 0 or 1, the value 0 included) a PC would take; its heals still land.
 void Battle::damage_unit(int actor, int target, int value, int code) {
   Unit& target_unit = units_[static_cast<size_t>(target)];
   if (target == gated_target_) value = 0;
@@ -1006,6 +1016,10 @@ void Battle::damage_unit(int actor, int target, int value, int code) {
     return;
   }
   if (code == 2 || value < 0) return;
+  if (boost_shields(target)) {
+    boost_cancelled_ |= 1u << target;
+    return;
+  }
   target_unit.hp -= value;
   if (target_unit.lo & st::kStaminaDrain) target_unit.stamina -= 10;
   if (target_unit.hp <= 0 && invincible(target)) target_unit.hp = 1;
@@ -1197,10 +1211,12 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
   ev.target = target;
   ev.strength = strength;
   ev.hp_before = ev.hp_after = target_unit.hp;
+  boost_cancelled_ = 0;
   if (!hit) {
     say(std::format("{} {} attack on {}: miss ({}%)", attacker.name, kStrName[strength], target_unit.name, chance));
     ev.text = log_.back();
     ev.code = 2;
+    boost_cure();
     note_event(ev);
     return;
   }
@@ -1251,6 +1267,11 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
   const bool alive0 = target_unit.in_turn_order();
   damage_unit(actor, target, damage.value, damage.code);
   if ((attacker.hi & st::kHiDrain) && damage.code != 2 && damage.value != 0) drain_ = {actor, damage.value};
+  if (boost_cancelled_ >> target & 1u) {
+    damage.value = 0;
+    damage.code = 2;
+  }
+  boost_cure();
   ev.value = damage.value;
   ev.code = damage.code == 3 || damage.code == 2 ? damage.code : (damage.value == 0 && !ev.gated ? 1 : 0);
   ev.crit = damage.crit;
@@ -1260,8 +1281,8 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
   note_event(ev);
   // The chain counter: a landed hit of a PC that is not confused adds its strength's step; a miss leaves it.
   if (attacker.pc && !(attacker.lo & st::kConfused)) chain_hits_ += kChainAdd[static_cast<size_t>(strength)];
-  // Any attacker's gauge fills.
-  attacker.gauge = std::clamp(attacker.gauge + strength + 1, -1, attacker.gauge_max);
+  // Any attacker's gauge fills (battle boost: to the top).
+  attacker.gauge = cheats_.boost ? attacker.gauge_max : std::clamp(attacker.gauge + strength + 1, -1, attacker.gauge_max);
   pay_drain();
 }
 
@@ -1292,6 +1313,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   const int hp0 = target_unit.hp;
   const bool alive0 = target_unit.in_turn_order();
   const size_t log0 = log_.size();
+  boost_cancelled_ = 0;
   brain_.on_attack(*this, actor, 1, element_id, target);
   const int ci = colour_of(caster) < 0 ? kNoColour : colour_of(caster);
   int ce = data::colour_index_of_bit(element_colour(element_id));
@@ -1919,6 +1941,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   }
   const bool gated = gated_target_ >= 0;
   gated_target_ = -1;
+  boost_cure();
   ActionEvent ev;
   ev.kind = ActionEvent::Kind::Element;
   ev.actor = actor;
@@ -1936,6 +1959,10 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   const bool friendly_mode = mode == 3 || mode == 43 || mode == 4 || mode == 7;
   ev.code = target_unit.hp > hp0 || friendly_mode ? 3 : 0;
   if (code_override >= 0) ev.code = code_override;
+  if (boost_cancelled_ >> target & 1u) {
+    ev.value = 0;
+    ev.code = 2;
+  }
   ev.all_targets = cast_all_;
   ev.silent = mode == 50 || mode == 45;
   if (seal_swap) ev.fx_eid = 190 + seal_swap;
@@ -1949,7 +1976,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   // After the target loop: Frozen (lo 0x20000000, `kDefeated` here: Ice Blast's status) newly set and the
   // target's HP != 0 -> row 6 'Frozen -- can't move!'; else element record +0x13 != 0 and
   // the mode landed on any target -> that row (opened at the action end for 120 ticks)
-  if (!frozen0 && (target_unit.lo & 0x20000000u) && target_unit.hp != 0) ev.sys_msg = 6;
+  ev.froze = !frozen0 && (target_unit.lo & 0x20000000u);
+  if (ev.froze && target_unit.hp != 0) ev.sys_msg = 6;
   else if (element.b(0x13) != 0 && landed) ev.sys_msg = element.b(0x13);
   if (log_.size() > log0) ev.text = log_[log0];
   note_event(ev);
@@ -2113,10 +2141,9 @@ void Battle::post_action(int actor, int poison_step, int timer_steps) {
     if (!unit.in_turn_order()) continue;
     if (unit.lo & st::kPoison) {
       unit.hp -= poison_step;
-      if (unit.hp <= 0) {
-        if (unit.pc) poison_kill(i);
-        else unit.hp = 1;
-      }
+      // An enemy that lands on exactly 0 is left at 1; below 0 it stays negative and the next hit that lands kills it.
+      if (unit.pc && unit.hp <= 0) poison_kill(i);
+      else if (!unit.pc && unit.hp == 0) unit.hp = 1;
     }
     if (unit.in_turn_order() && (unit.hi & st::kHiRegen)) unit.hp = std::min(unit.max_hp, unit.hp + poison_step);
     for (auto it = unit.timers.begin(); it != unit.timers.end();) {
@@ -2305,37 +2332,50 @@ void Battle::confused_turn(int ui) {
   post_action(ui, 1, 1);
 }
 
-// Cheats tab: Max stamina keeps the PCs' stamina full; Battle boost (gauge to max, negative statuses cured)
-// refills HP, gauge and stamina and clears the negative statuses of every PC (KO itself is prevented in kill() through invincible()).
+// Cheats tab: Max stamina keeps the PCs' stamina full; God mode revives, refills HP and clears the negative statuses of every PC; Battle
+// boost keeps every PC's element gauge full (RDE refills the gauge each HUD frame; it touches neither HP nor stamina).
 void Battle::apply_cheat_state() {
   if (!cheats_.max_stamina && !cheats_.boost && !cheats_.god_mode) return;
   for (int i = 0; i < kPcSlots; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
     if (!unit.present || !unit.pc) continue;
-    // God mode: a KO'd PC is revived, HP full, negative statuses cleared (mask 0xAA9EE939, which holds frozen, so a frozen PC is
-    // freed too); hits do no damage (god_filter). Boost = God mode + gauge + stamina.
-    if (cheats_.god_mode || cheats_.boost) {
+    if (cheats_.boost) unit.gauge = unit.gauge_max;
+    // God mode: a KO'd PC is revived, HP full, negative statuses cleared (st::kNegative holds frozen, so a frozen PC is freed too); hits
+    // do no damage (god_filter).
+    if (cheats_.god_mode) {
       unit.lo &= ~st::kKO;
       unit.hp = unit.max_hp;
-      constexpr u32 kNegative = 0xAA9EE939u;
-      unit.lo &= ~kNegative;
+      unit.lo &= ~st::kNegative;
       for (auto it = unit.timers.begin(); it != unit.timers.end();)
-        it = (it->first < 32 && (kNegative >> it->first & 1)) ? unit.timers.erase(it) : std::next(it);
+        it = (it->first < 32 && (st::kNegative >> it->first & 1)) ? unit.timers.erase(it) : std::next(it);
     }
-    if (!unit.alive()) continue;
-    if (cheats_.max_stamina || cheats_.boost) unit.stamina = 70;
-    if (cheats_.boost) unit.gauge = unit.gauge_max;
+    if (unit.alive() && cheats_.max_stamina) unit.stamina = 70;
   }
 }
 
-// Nothing while script op 81 has switched the test off; a code forced by op 83 (negative = pending) ends the battle first, but not inside a
-// death plan: the kill script forces its code after its end-turn op, i.e. once the executor has run every cast it queued (the Time Devourer's
-// 341 then 526); then the party test (every PC in the alive mask KO'd / defeated -> 1) comes before the enemy test (-> 0), so a mutual KO is a defeat.
+// Battle boost, after each resolved weapon or element target (hit or miss): every PC that is present and not KO'd loses the negative
+// statuses of its inflicted word (the God mode mask; Frozen included, so a freeze never lands); the permanent ones (innate, gear) stay.
+void Battle::boost_cure() {
+  if (!cheats_.boost) return;
+  for (int i = 0; i < kPcSlots; ++i) {
+    Unit& unit = units_[static_cast<size_t>(i)];
+    if (!unit.present || (unit.lo & st::kKO)) continue;
+    const u32 cured = unit.lo & st::kNegative & ~unit.perm_lo;
+    unit.lo &= ~cured;
+    for (auto it = unit.timers.begin(); it != unit.timers.end();)
+      it = (it->first < 32 && (cured >> it->first & 1)) ? unit.timers.erase(it) : std::next(it);
+  }
+}
+
+// Nothing while script op 81 has switched the test off; a code forced by op 83 (negative = pending) ends the battle first, but not while a
+// death plan is running or still queued: the kill script forces its code after its end-turn op, i.e. once the executor has run every cast it
+// queued (the Time Devourer's 341 then 526, or 511), whether the killing blow was an element or a weapon hit; then the party test (every PC in
+// the alive mask KO'd / defeated -> 1) comes before the enemy test (-> 0), so a mutual KO is a defeat.
 void Battle::check_end() {
   apply_cheat_state();
   if (outcome_ != Outcome::Ongoing) return;
   if (!brain_.end_check_enabled()) return;
-  if (const int forced = brain_.forced_result(); forced >= 0 && !in_death_cast_) {
+  if (const int forced = brain_.forced_result(); forced >= 0 && !in_death_cast_ && death_plans_.empty()) {
     finish(forced == 0 ? Outcome::Victory : forced == 1 ? Outcome::Wiped : forced == 2 ? Outcome::Fled : Outcome::Scripted, forced);
     return;
   }
@@ -2638,7 +2678,7 @@ void Battle::compute_rewards() {
     if (pu.present && pu.pc && (pu.eq.gear_flags & data::gearflag::kGold)) gold_gear = true;
   rewards_.gold = gold_reward(gold, gold_gear);
 
-  // Growth: a normal fight grows the living party members, a boss fight is the star-up of the party and the bench.
+  // Growth: a normal fight grows the party members that are not knocked out (a frozen one grows), a boss fight is the star-up of the party and the bench.
   if (growth_.star >= 99 || growth_.star >= static_cast<int>(tables_.star_rows.size())) return;
   const auto& row = tables_.star_rows[static_cast<size_t>(growth_.star)];
   const StarRow sr{row[0], row[1], row[2] | (row[3] << 8)};
@@ -2681,7 +2721,7 @@ void Battle::compute_rewards() {
     };
     // Cheats: shared growth also grows the knocked-out members and every character outside the party.
     for (size_t i = 0; i < party_.size(); ++i)
-      if (units_[i].alive() || cheats_.shared_growth) grow(party_[i], rewards_.gains[i]);
+      if (units_[i].conscious() || cheats_.shared_growth) grow(party_[i], rewards_.gains[i]);
     if (cheats_.shared_growth) {
       rewards_.bench_gains.assign(bench_.size(), {});
       for (size_t i = 0; i < bench_.size(); ++i) grow(bench_[i], rewards_.bench_gains[i]);
@@ -2689,7 +2729,7 @@ void Battle::compute_rewards() {
   } else {
     rewards_.star_up = true;
     for (size_t i = 0; i < party_.size(); ++i) {
-      if (!units_[i].alive() && !cheats_.shared_growth) continue;
+      if (!units_[i].conscious() && !cheats_.shared_growth) continue;
       PartyMember& member = party_[i];
       for (size_t k = 0; k < 7; ++k) {
         const int gain = std::min(member.pending[k], std::max(0, member.lv99[k] - member.stat[k]));
@@ -2698,8 +2738,15 @@ void Battle::compute_rewards() {
       }
       member.stat[0] = stat_hp_cap(member.stat[0]);
     }
-    // Characters outside the party get their old pending deltas first.
+    growth_.progress = 0;
+    ++growth_.star;
+    ++growth_.counter;
+    for (size_t i = 0; i < party_.size(); ++i)
+      if (units_[i].conscious() || cheats_.shared_growth) top_up(party_[i], rewards_.gains[i], false);
     rewards_.bench_gains.assign(bench_.size(), {});
+    // The star-up that reaches 99 ends there: no bench fold, no new snapshot or pending roll, no unlocks.
+    if (growth_.star >= 99) return;
+    // Characters outside the party get their old pending deltas first.
     for (size_t i = 0; i < bench_.size(); ++i) {
       PartyMember& member = bench_[i];
       for (size_t k = 0; k < 7; ++k) {
@@ -2709,11 +2756,6 @@ void Battle::compute_rewards() {
       }
       member.stat[0] = stat_hp_cap(member.stat[0]);
     }
-    growth_.progress = 0;
-    ++growth_.star;
-    ++growth_.counter;
-    for (size_t i = 0; i < party_.size(); ++i)
-      if (units_[i].alive() || cheats_.shared_growth) top_up(party_[i], rewards_.gains[i], false);
     // Next pending deltas for all characters, in char id order (party members that were KO'd also get them).
     std::vector<PartyMember*> all;
     for (auto& member : party_) all.push_back(&member);

@@ -288,7 +288,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       return false;
     }
     if (args[1] == "idle") {
-      if (st.field_idle && !st.battle) return true;
+      if (st.field_idle && !st.settling && !st.battle) return true;
       if (timed_out(2)) return bad("timed out waiting for the controls");
       return false;
     }
@@ -424,7 +424,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     if (args[2] == "flow") done = st.flow == args[3] && !st.movie;
     else if (args[2] == "room") done = st.room_valid && st.room == args[3];
     else if (args[2] == "movie") done = st.movie == (args[3] == "start");
-    else if (args[2] == "idle") done = st.field_idle && !st.battle;
+    else if (args[2] == "idle") done = st.field_idle && !st.settling && !st.battle;
     else if (args[2] == "shop") done = st.shop == (args[3] == "open");
     else if (args[2] == "menu") done = st.menu == (args[3] == "open");
     else if (args[2] == "message") done = st.dialogue && std::to_string(st.message) == args[3];
@@ -905,11 +905,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     st.set_char_stat(id, hp ? 0 : 2, value);
     return true;
   }
-  // put <x> <z>
+  // put [ent <n>] <x> <z>
   if (op == "put") {
-    int x = 0, z = 0;
-    if (args.size() < 3 || !to_int(args[1], x) || !to_int(args[2], z)) return bad("put <x> <z>");
+    int x = 0, z = 0, ent = -1;
+    const size_t at = args.size() > 1 && args[1] == "ent" ? 3 : 1;
+    if (args.size() < at + 2 || (at == 3 && !to_int(args[2], ent)) || !to_int(args[at], x) || !to_int(args[at + 1], z)) return bad("put [ent <n>] <x> <z>");
     out.put = true;
+    out.put_ent = ent;
     out.put_x = static_cast<float>(x);
     out.put_z = static_cast<float>(z);
     return true;

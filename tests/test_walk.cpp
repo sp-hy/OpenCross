@@ -1,11 +1,14 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
 // by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, the screen ripple grid and the
-// frame echo's projection.
+// frame echo's projection, the dialogue portrait side; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
+// the key-item range) and the FE 2F reset.
+#include <array>
 #include <cmath>
 #include <cstdio>
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "game/actor.h"
@@ -456,6 +459,20 @@ void test_frame_echo() {
   CHECK(right > -left && -left < 160.0f);
 }
 
+// Portrait side: heading 0 = left; a portrait yaw of 0x800 turns it right; heading 0x400 stays left (the pad's control yaw is not
+// an input); 0xC00 is the last right heading; the window flags 0x800 / 0x1000 force a side.
+void test_portrait_side() {
+  using game::FieldWorld;
+  CHECK(FieldWorld::portrait_on_left(0, 0, 0, 0));
+  CHECK(!FieldWorld::portrait_on_left(0, 0x800, 0, 0));
+  CHECK(FieldWorld::portrait_on_left(0x400, 0, 0, 0));
+  CHECK(!FieldWorld::portrait_on_left(0x401, 0, 0, 0));
+  CHECK(!FieldWorld::portrait_on_left(0xC00, 0, 0, 0));
+  CHECK(FieldWorld::portrait_on_left(0x200, 0, -0x200, 0));
+  CHECK(!FieldWorld::portrait_on_left(0, 0, 0, 0x800));
+  CHECK(FieldWorld::portrait_on_left(0x800, 0, 0, 0x1000));
+}
+
 void test_give_item_element_count() {
   ui::GameState state;
   game::FieldWorld world;
@@ -471,9 +488,133 @@ void test_give_item_element_count() {
   for (int i = 0; i < 30; ++i) world.give_item(0x200 + 0x65);
   CHECK(state.element_count(0x65) == 99);
 }
+// Element table stand-in: the consumables 0x61..0x7D keep their copy count in a grid cell.
+ui::MenuRules counted_rules() {
+  ui::MenuRules rules;
+  rules.pg.resize(0x80);
+  for (int id = 0x61; id <= 0x7D; ++id) rules.pg[static_cast<size_t>(id)].raw[0xA] = 0x40;
+  return rules;
+}
+
+// FE 69 on the PS1 reference grid: Kid's cells 4 / 9 / 30 / 31 hold consumables, the others single elements, a tech (21) and a
+// fixed cell (34) stay; cell k counts k & 0xF copies. SAVE writes the list into variables 0x334.. / 0x394.., a save and a load
+// keep it, and RESTORE reads each count from variable 0x394 + 2k (cell 4 gets cell 8's count, cell 9 cell 19's, cell 30 the
+// zero of variable 0x3D0, cell 31 the high nibble of 0x3D2), single elements one copy each.
+void test_kid_grid_save_restore() {
+  const ui::MenuRules rules = counted_rules();
+  ui::GameState state;
+  state.rules = &rules;
+  save::SaveChar& kid = state.slot.chars[1];
+  kid.grid.fill(0x4000);
+  for (auto [cell, id] : {std::pair{4, 0x69}, {5, 7}, {9, 0x6A}, {12, 0xA}, {13, 0x40}, {20, 7}, {21, 0xA3}, {30, 0x6B}, {31, 0x6C},
+                          {34, 0x40A4}, {40, 0x4005}, {47, 0}})
+    kid.grid[static_cast<size_t>(cell)] = static_cast<u16>(id);
+  for (size_t k = 0; k < 48; ++k) kid.equipped_qty[k] = static_cast<u8>(k < 44 ? k & 0xF : 5);
+  for (int i = 0; i < 10; ++i) state.add_element(0x69);
+  game::FieldWorld world;
+  world.set_game_state(&state);
+  world.vm().set_var(0x3D2, 0x3F);
+  std::array<u16, 48> stripped = kid.grid;
+  for (u16& cell : stripped)
+    if ((cell & 0x1FF) < 0x80) cell &= 0xC000;
+  world.table_op(0xFE69, 0, 0);
+  CHECK(kid.grid == stripped && kid.grid[21] == 0xA3 && kid.grid[34] == 0x40A4 && kid.grid[40] == 0x4000);
+  CHECK(kid.equipped_qty[4] == 0 && kid.equipped_qty[21] == 5);
+  CHECK(world.vm().var(0x334 + 2 * 4) == 0x69 && world.vm().var(0x334 + 2 * 31) == 0x6C && world.vm().var(0x334 + 2 * 40) == 5);
+  CHECK(world.vm().var(0x334 + 2 * 21) == 0 && world.vm().var(0x334 + 2 * 34) == 0);
+  const u16 counts[24] = {0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE, 0x10, 0x32, 0x04, 0x76,
+                          0x98, 0xBA, 0xDC, 0xFE, 0x10, 0x30, 0x54, 0x76, 0x98, 0xBA, 0x55, 0x55};
+  for (int j = 0; j < 24; ++j) CHECK(world.vm().var(static_cast<u16>(0x394 + 2 * j)) == counts[j]);
+  CHECK(state.element_count(0x69) == 10);
+  world.capture_state();
+
+  ui::GameState loaded;
+  loaded.rules = &rules;
+  loaded.slot = state.slot;
+  game::FieldWorld reloaded;
+  reloaded.set_game_state(&loaded);
+  reloaded.restore_vars();
+  reloaded.table_op(0xFE69, 1, 0);
+  CHECK(loaded.element_count(0x69) == 18);
+  CHECK(loaded.element_count(7) == 2 && loaded.element_count(0xA) == 1 && loaded.element_count(0x40) == 1 && loaded.element_count(5) == 1);
+  CHECK(loaded.element_count(0x6A) == 3 && loaded.element_count(0x6B) == 0 && loaded.element_count(0x6C) == 3);
+  for (u16 id = 0x334; id < 0x3C4; id += 2) CHECK(reloaded.vm().var(id) == 0);
+  CHECK(reloaded.vm().var(0x3D2) == 0x3F);
+}
+
+// FE 7D strips every cell, locked ones included (a fresh record has no unlocked row): copies for a consumable, one otherwise, none
+// for a consumable with no count; techs stay; the accessories go back to the item stock.
+void test_character_strip_locked_cells() {
+  const ui::MenuRules rules = counted_rules();
+  ui::GameState state;
+  state.rules = &rules;
+  save::SaveChar& guile = state.slot.chars[2];
+  guile.grid[3] = 0xA6, guile.grid[9] = 0x40A7, guile.grid[20] = 0x4007, guile.grid[25] = 0x4069, guile.grid[29] = 0x4061;
+  guile.equipped_qty.fill(5);
+  guile.equipped_qty[25] = 3, guile.equipped_qty[29] = 0;
+  guile.accessory = {0x13, 0, 0x58};
+  game::FieldWorld world;
+  world.set_game_state(&state);
+  world.table_op(0xFE7D, 2, 0);
+  CHECK(state.element_count(0x69) == 3 && state.element_count(7) == 1 && state.element_count(0x61) == 0);
+  CHECK(guile.grid[20] == 0x4000 && guile.grid[25] == 0x4000 && guile.grid[29] == 0x4000 && guile.grid[3] == 0xA6 && guile.grid[9] == 0x40A7);
+  CHECK(guile.equipped_qty[25] == 0 && guile.equipped_qty[9] == 5);
+  CHECK(guile.accessory[0] == 0 && guile.accessory[2] == 0 && state.item_count(0x13) == 1 && state.item_count(0x58) == 1);
+}
+
+// The script item ops reach key items 1..63: 0x440 is neither given, taken nor counted, even with its bit set.
+void test_script_key_item_range() {
+  ui::GameState state;
+  game::FieldWorld world;
+  world.set_game_state(&state);
+  world.give_item(0x440);
+  CHECK(state.slot.key_items() == 0);
+  world.give_item(0x43F);
+  CHECK(state.slot.key_items() == 1ull << 62);
+  state.slot.set_key_items(state.slot.key_items() | 1ull << 63);
+  CHECK(world.item_count(0x440) == 0 && world.item_count(0x43F) == 1 && state.has_key_item(64));
+  world.take_item(0x440);
+  CHECK(state.slot.key_items() >> 63 == 1);
+}
+
+// FE 2F: the boot state over a game in progress; the debug variable and the disc in use stay, and the reset is reported once.
+void test_field_reset() {
+  ui::GameState state;
+  game::FieldWorld world;
+  world.set_game_state(&state);
+  world.set_disc(2);
+  state.set_gold(1796);
+  world.vm().set_var(0x34, 1);
+  world.vm().set_var(0x100, 7);
+  world.vm().set_var(0x42, 1);
+  CHECK(!world.take_game_reset());
+  world.field_reset();
+  CHECK(world.vm().var(0x100) == 0);
+  CHECK(world.vm().var(0x34) == 1 && state.slot.var(0x34) == 1);
+  CHECK(world.vm().var(0x42) == 1 && state.slot.var(0x42) == 1 && world.disc() == 2);
+  CHECK(state.gold() != 1796);
+  CHECK(world.take_game_reset());
+  CHECK(!world.take_game_reset());
+}
+
+// FE 65 form 0 is not a screen: it writes variable 0x42 and switches the disc even while a menu request is pending.
+void test_change_disc_with_pending_menu() {
+  game::FieldWorld world;
+  world.request_menu(script::MenuKind::MainMenu, 0);
+  CHECK(world.menu_pending());
+  world.request_menu(script::MenuKind::ChangeDisc, 1);
+  CHECK(world.vm().var(0x42) == 1);
+  CHECK(world.disc() == 2);
+  CHECK(world.menu_pending());
+}
 }  // namespace
 
 int main() {
+  test_field_reset();
+  test_change_disc_with_pending_menu();
+  test_kid_grid_save_restore();
+  test_character_strip_locked_cells();
+  test_script_key_item_range();
   test_give_item_element_count();
   test_actor_anim();
   test_stair_clip();
@@ -484,6 +625,7 @@ int main() {
   test_anim_seq();
   test_battle_pack_handover();
   test_frozen_actor();
+  test_portrait_side();
   game::WalkMesh wm;
   wm.init(build(), {0, game::kFlagBlockAll});
 

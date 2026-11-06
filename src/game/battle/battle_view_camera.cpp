@@ -288,6 +288,7 @@ void BattleView::tick() {
   // The battle-script stream (E0 / E2 / delays / executor waits) and its message window.
   script_pump();
   smsg_tick();
+  if (wipe_hold_ > 0) --wipe_hold_;
   for (Pop& pop : pops_) {
     pop.age_prev = pop.age;
     pop.age += 1.0f;

@@ -258,11 +258,12 @@ void BattleView::script_event(const battle::pac::Event& event) {
 // The event window. Size (non-JP fitting, also used for JP here): cells = clamp((widest line + 11) / 12, 1, 26), lines =
 // clamp(most lines of one chunk, 1, 5); empty pieces followed by a LF are not counted. Place: text x = 32 + (22 - cells) * 6, rect
 // y 0x2C, text y 0x2E; after op 62 rect (x, y), text (x, y + 1). Rect w = cells * 12 & ~3, h = lines * 16 (grows from its
-// centre by 8 px a frame, the text shows once it is open).
+// centre by 8 px a frame, the text shows once it is open). A system request opens the plate instead and leaves the event window alone.
 void BattleView::smsg_open(const ScriptMsgReq& req) {
-  smsg_ = ScriptMsg{};
-  smsg_.sys = req.sys;
-  smsg_.item = req.item;
+  ScriptMsg& msg = req.sys ? plate_ : smsg_;
+  msg = ScriptMsg{};
+  msg.sys = req.sys;
+  msg.item = req.item;
   const std::string sys_row = req.text;
   const std::string* row = req.sys ? &sys_row : lang_tables_.battle_event(static_cast<u32>(btel_battle_id(scene_id_)), static_cast<u32>(req.msg), lang_);
   if (!row || row->empty()) {
@@ -275,20 +276,20 @@ void BattleView::smsg_open(const ScriptMsgReq& req) {
     const size_t bpage = text.find("{bpage}", from);
     std::string chunk = text.substr(from, bpage == std::string::npos ? std::string::npos : bpage - from);
     if (from > 0 && chunk.rfind("\\n", 0) == 0) chunk.erase(0, 2);
-    smsg_.pages.push_back(std::move(chunk));
+    msg.pages.push_back(std::move(chunk));
     if (bpage == std::string::npos) break;
     from = bpage + 7;
   }
   // {playwork(0)} = the current actor's name; the script op carries no unit, so the first PC.
-  smsg_.unit = req.unit >= 0 && req.unit < battle::kUnits ? req.unit : 0;
-  const std::string actor = battle_->unit(smsg_.unit).name;
+  msg.unit = req.unit >= 0 && req.unit < battle::kUnits ? req.unit : 0;
+  const std::string actor = battle_->unit(msg.unit).name;
   const bool jp = lang_ == import::Lang::Jp;
   const int slot = jp ? ui::font::kKb : ui::font::kBn;
   const float sc = ui::font::slot(slot).scale;
   float maxw = 0;
   int maxl = 0;
-  for (const std::string& page : smsg_.pages) {
-    const std::string expanded = smsg_strip_tags(smsg_expand(page, 0x7FFFFFFF, actor, smsg_.item));
+  for (const std::string& page : msg.pages) {
+    const std::string expanded = smsg_strip_tags(smsg_expand(page, 0x7FFFFFFF, actor, msg.item));
     int lines = 0;
     for (size_t start = 0;;) {
       const size_t lf = expanded.find('\n', start);
@@ -306,23 +307,23 @@ void BattleView::smsg_open(const ScriptMsgReq& req) {
     }
     maxl = std::max(maxl, lines);
   }
-  smsg_.cells = std::clamp((static_cast<int>(maxw) + 11) / 12, 1, 26);
-  smsg_.lines = std::clamp(maxl, 1, 5);
+  msg.cells = std::clamp((static_cast<int>(maxw) + 11) / 12, 1, 26);
+  msg.lines = std::clamp(maxl, 1, 5);
   if (req.has_pos) {
-    smsg_.x = static_cast<float>(req.x);
-    smsg_.y = static_cast<float>(req.y);
+    msg.x = static_cast<float>(req.x);
+    msg.y = static_cast<float>(req.y);
     // The system text starts at the rect origin (0x20, 0x90).
-    smsg_.ty = req.sys ? smsg_.y : smsg_.y + 1;
+    msg.ty = req.sys ? msg.y : msg.y + 1;
   } else {
-    smsg_.x = static_cast<float>(32 + (22 - smsg_.cells) * 6);
-    smsg_.y = 0x2C;
-    smsg_.ty = 0x2E;
+    msg.x = static_cast<float>(32 + (22 - msg.cells) * 6);
+    msg.y = 0x2C;
+    msg.ty = 0x2E;
   }
-  smsg_.open = 1;
+  msg.open = 1;
   route_events_.push_back("w" + std::to_string(req.msg));
   // Voices: voices/battle/<scene>/<msg>-<page>-<unit>.mp3.
-  if (audio::VoicePlayer* voices = audio::VoicePlayer::instance()) voices->battle_open(scene_id_, req.msg, actor);
-  log::debug("battle script: message {} ({} page(s), {} x {} cells) at ({}, {}) at tick {}: {}", req.msg, smsg_.pages.size(), smsg_.cells, smsg_.lines, smsg_.x, smsg_.y, tick_count_, *row);
+  if (audio::VoicePlayer* voices = audio::VoicePlayer::instance(); voices && !req.sys) voices->battle_open(scene_id_, req.msg, actor);
+  log::debug("battle script: message {} ({} page(s), {} x {} cells) at ({}, {}) at tick {}: {}", req.msg, msg.pages.size(), msg.cells, msg.lines, msg.x, msg.y, tick_count_, *row);
 }
 
 // The executor (queue_ + act_) has finished everything that was queued before the Barrier: the groups of earlier scripted entries (script_seq below
@@ -371,10 +372,16 @@ void BattleView::script_pump() {
       return;
     }
     if (front.kind == EK::Dialogue || front.kind == EK::WaitDialogue) {
-      // E0 blocks while the script window is not closed; E2 until it has closed (the system message is a separate window).
-      if (smsg_.open != 0 && !smsg_.sys) return;
-    } else if (front.kind == EK::Killed && move_wait_ != 0) {
-      return;
+      // E0 blocks while the event window is not closed; E2 until it has closed. The system plate is another window.
+      if (smsg_.open != 0) return;
+    } else if (front.kind == EK::Killed) {
+      // A6 waits for the move-wait; the barrier's watchdog applies.
+      if (move_wait_ != 0 && ++script_stall_ < 3600) return;
+      if (script_stall_ >= 3600) {
+        battle_audit_note(std::format("script A6 of unit {} left by the 3600-tick timeout (move-wait {} of unit {})", front.unit, move_wait_, move_wait_unit_));
+        move_wait_ = 0;
+      }
+      script_stall_ = 0;
     } else if (front.kind == EK::EffectWait && front.a == 1 && camera_.shot_running(tag_name(front.b))) {
       // C5: until the shot C2 started with that tag has run out.
       return;
@@ -398,48 +405,53 @@ void BattleView::script_pump() {
 
 // Per tick: the opening / closing animation, the {wait(n)} reveal steps and the {wend(n)} self-close (n frames each).
 void BattleView::smsg_tick() {
-  if (smsg_.open == 0) return;
-  if (audio::VoicePlayer* voices = audio::VoicePlayer::instance()) voices->battle_sync(static_cast<int>(smsg_.page), smsg_.open < 0 || smsg_.page >= smsg_.pages.size());
-  const int grow_frames = smsg_.grow_frames(kSmsgGrowStep);
+  tick_window(smsg_);
+  tick_window(plate_);
+}
+
+void BattleView::tick_window(ScriptMsg& msg) {
+  if (msg.open == 0) return;
+  if (audio::VoicePlayer* voices = audio::VoicePlayer::instance(); voices && !msg.sys) voices->battle_sync(static_cast<int>(msg.page), msg.open < 0 || msg.page >= msg.pages.size());
+  const int grow_frames = msg.grow_frames(kSmsgGrowStep);
   // Closing.
-  if (smsg_.open < 0) {
-    if (++smsg_.open >= 0) {
-      smsg_.open = 0;
+  if (msg.open < 0) {
+    if (++msg.open >= 0) {
+      msg.open = 0;
       log::debug("battle script: message closed at tick {}", tick_count_);
-      smsg_.pages.clear();
+      msg.pages.clear();
     }
     return;
   }
-  ++smsg_.open;
-  if (smsg_.open <= grow_frames || smsg_.page >= smsg_.pages.size()) return;
-  const std::string& pg = smsg_.pages[smsg_.page];
+  ++msg.open;
+  if (msg.open <= grow_frames || msg.page >= msg.pages.size()) return;
+  const std::string& pg = msg.pages[msg.page];
   // The next {wait( of this page: n frames, then the text up to the one after it.
-  if (smsg_.waits < smsg_count(pg, "{wait(")) {
-    if (smsg_.wait_left < 0) {
+  if (msg.waits < smsg_count(pg, "{wait(")) {
+    if (msg.wait_left < 0) {
       size_t at = 0;
-      for (int k = 0; k <= smsg_.waits; ++k) at = pg.find("{wait(", k == 0 ? 0 : at + 6);
-      smsg_.wait_left = std::max(0, std::atoi(pg.c_str() + at + 6));
+      for (int k = 0; k <= msg.waits; ++k) at = pg.find("{wait(", k == 0 ? 0 : at + 6);
+      msg.wait_left = std::max(0, std::atoi(pg.c_str() + at + 6));
     }
-    if (smsg_.wait_left-- <= 0) {
-      ++smsg_.waits;
-      smsg_.wait_left = -1;
+    if (msg.wait_left-- <= 0) {
+      ++msg.waits;
+      msg.wait_left = -1;
     }
     return;
   }
-  if (smsg_.wend < 0) {
+  if (msg.wend < 0) {
     const int wend_frames = smsg_tag_arg(pg, "{wend(");
-    if (wend_frames >= 0) smsg_.wend = wend_frames + 1;
+    if (wend_frames >= 0) msg.wend = wend_frames + 1;
   }
   // {wend}: the page / window ends without the button.
-  if (smsg_.wend > 0 && --smsg_.wend == 0) {
-    smsg_.wend = -1;
-    smsg_.waits = 0;
-    if (++smsg_.page >= smsg_.pages.size()) smsg_.open = -grow_frames;
+  if (msg.wend > 0 && --msg.wend == 0) {
+    msg.wend = -1;
+    msg.waits = 0;
+    if (++msg.page >= msg.pages.size()) msg.open = -grow_frames;
   }
 }
 
 bool BattleView::smsg_input(bool ok) {
-  if (smsg_.open == 0 || smsg_.sys) return false;
+  if (smsg_.open == 0) return false;
   if (smsg_.open < 0 || smsg_.page >= smsg_.pages.size()) return true;
   const int grow_frames = smsg_.grow_frames(kSmsgGrowStep);
   const std::string& pg = smsg_.pages[smsg_.page];
@@ -459,25 +471,30 @@ bool BattleView::smsg_input(bool ok) {
 // segments); the page / end cursor is the battle_86 cell ((tick & 0x3F) >> 3), 16 x 16 PS1 px at (text x + 8 + the last line's
 // width, text y + 16 * its line), shown while the stream waits on {bpage} / {mend} (page revealed, no {wend}).
 void BattleView::build_script_msg() {
-  if (smsg_.open == 0) return;
-  const float w = smsg_.rect_w(), h = smsg_.rect_h();
+  build_window(plate_);
+  build_window(smsg_);
+}
+
+void BattleView::build_window(const ScriptMsg& msg) {
+  if (msg.open == 0) return;
+  const float w = msg.rect_w(), h = msg.rect_h();
   const int half = std::max(1, std::max(static_cast<int>(w), static_cast<int>(h)) / 2);
-  const int grow_frames = smsg_.grow_frames(kSmsgGrowStep);
-  const int age = smsg_.open > 0 ? smsg_.open : -smsg_.open;
+  const int grow_frames = msg.grow_frames(kSmsgGrowStep);
+  const int age = msg.open > 0 ? msg.open : -msg.open;
   // The system message has no outline frames.
-  if (smsg_.open < 0 && smsg_.sys) return;
-  if (smsg_.open < 0 || age < grow_frames) {
+  if (msg.open < 0 && msg.sys) return;
+  if (msg.open < 0 || age < grow_frames) {
     const float steps = static_cast<float>(std::min(age * kSmsgGrowStep, half));
     const float cw = 16.0f + w * steps / static_cast<float>(half), ch = 16.0f + h * steps / static_cast<float>(half);
-    const float x0 = smsg_.x + std::trunc(w * 0.5f) - std::trunc(cw * 0.5f), y0 = smsg_.y + std::trunc(h * 0.5f) - std::trunc(ch * 0.5f);
+    const float x0 = msg.x + std::trunc(w * 0.5f) - std::trunc(cw * 0.5f), y0 = msg.y + std::trunc(h * 0.5f) - std::trunc(ch * 0.5f);
     add_box(x0 * kPs1Px, y0 * kSmsgPY, (cw - 2.0f) * kPs1Px, (ch - 2.0f) * kSmsgPY, false);
     return;
   }
-  add_skin_box((smsg_.x - 8.0f) * kPs1Px, (smsg_.y - 8.0f) * kSmsgPY, (w + 16.0f) * kPs1Px, (h + 16.0f) * kSmsgPY);
-  if (smsg_.open <= grow_frames || smsg_.page >= smsg_.pages.size()) return;
-  const std::string actor = battle_->unit(smsg_.unit).name;
-  const std::string& pg = smsg_.pages[smsg_.page];
-  const auto lines = smsg_segments(smsg_expand(pg, smsg_.waits, actor, smsg_.item));
+  add_skin_box((msg.x - 8.0f) * kPs1Px, (msg.y - 8.0f) * kSmsgPY, (w + 16.0f) * kPs1Px, (h + 16.0f) * kSmsgPY);
+  if (msg.open <= grow_frames || msg.page >= msg.pages.size()) return;
+  const std::string actor = battle_->unit(msg.unit).name;
+  const std::string& pg = msg.pages[msg.page];
+  const auto lines = smsg_segments(smsg_expand(pg, msg.waits, actor, msg.item));
   const bool jp = lang_ == import::Lang::Jp;
   const int slot = jp ? ui::font::kKb : ui::font::kBn;
   const float sc = ui::font::slot(slot).scale;
@@ -486,15 +503,15 @@ void BattleView::build_script_msg() {
     float x = 0;
     for (const SmsgSeg& seg : lines[line]) {
       const std::u32string text = import::utf8_to_u32(seg.text);
-      btext(0x83, text, smsg_.x + x, smsg_.ty + 16.0f * static_cast<float>(line), seg.colour);
+      btext(0x83, text, msg.x + x, msg.ty + 16.0f * static_cast<float>(line), seg.colour);
       fonts_.prepare(slot, text);
       x += std::trunc(fonts_.measure(slot, text, sc) / kPs1Px);
     }
     last_w = x;
   }
-  if (smsg_.waits >= smsg_count(pg, "{wait(") && smsg_tag_arg(pg, "{wend(") < 0) {
+  if (msg.waits >= smsg_count(pg, "{wait(") && smsg_tag_arg(pg, "{wend(") < 0) {
     const int cell = (tick_count_ & 0x3F) >> 3;
-    add_img(hud_[kHPageCur], (smsg_.x + 8.0f + last_w) * kPs1Px, (smsg_.ty + 16.0f * static_cast<float>(lines.size() - 1)) * kSmsgPY, 16 * kPs1Px, 16 * kSmsgPY,
+    add_img(hud_[kHPageCur], (msg.x + 8.0f + last_w) * kPs1Px, (msg.ty + 16.0f * static_cast<float>(lines.size() - 1)) * kSmsgPY, 16 * kPs1Px, 16 * kSmsgPY,
             static_cast<float>(cell) / 8.0f, 0, static_cast<float>(cell + 1) / 8.0f, 1);
   }
 }

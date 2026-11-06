@@ -63,6 +63,7 @@ OpenCross: **the title keeps every set** (deliberate departure): `TitleBackdrop:
 
 ## 4. Boot order, menu gating and attract demo
 * The opening FMV plays first on a cold boot (`D4 #0` = a01op, `movies.md`); a button during it only skips the movie. Before it, once per process, RDE's boot logo `ui/logo.png` is shown (SQUARE ENIX, 180 frames, 30-frame fades, skippable; both art modes; the Japanese build shows `notice.png`, `notice2.png` and `logo.png` in turn).
+* After a game over or the credits the game jumps to the title room with ROOM_PARAM 0, as at boot: its INIT resets the game (FE 2F), the logo FMV plays and the same title follows, without RDE's boot logo (`GameFlow::return_to_title`). On disc 2 the logo FMV is `D4 #1` (`titleb`), since the reset keeps the disc.
 * The title menu is not accepted until the logo FMV has ended or been skipped (`GameFlow::set_title_logo_ready`); before that any button only skips the FMV.
 * The press on the prompt plays the chime (global sounds 59, 61, 62 together) and fades the room's song out (14 frames after the press, over 20 frames), then stops it (`menus.md` section 13).
 * Menu: New Game, Continue (disabled without a save), Settings, Quit; fades take 0.5 s. New Game opens a vibration page (On / Off) that starts the game; Cancel there returns to the list. After a cleared game the New Game + / Continue + variant opens directly (no prompt, no way back to it). The prompt text exists in the six languages.

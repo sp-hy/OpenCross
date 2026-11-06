@@ -100,7 +100,7 @@ FxScene BattleView::fx_scene() const {
   // The result code of this action on the unit (the overlays filter the lists by it).
   for (const battle::ActionEvent& event : act_.ev)
     if (event.target >= 0 && event.target < battle::kUnits) scene.unit[static_cast<size_t>(event.target)].hit = event.code;
-  for (int i = 0; i < battle::kUnits; ++i) scene.unit[static_cast<size_t>(i)].dead = battle_->unit(i).present && battle_->unit(i).hp <= 0;
+  for (int i = 0; i < battle::kUnits; ++i) scene.unit[static_cast<size_t>(i)].dead = battle_->unit(i).present && !battle_->unit(i).conscious();
   // The pack's pseudo-actor = slot A: effect selector 8 is its model, attach points through ITS pose, SetRot x / z
   // and scale (the pseudo-actor's draw matrix, pa_matrix), yaw = its facing.
   if (pa_.on && pa_.pose && pa_.asset) {

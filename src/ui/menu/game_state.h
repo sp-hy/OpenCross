@@ -85,7 +85,8 @@ class GameState {
  public:
   save::SaveSlot slot;
   const MenuRules* rules = nullptr;
-  u8 skin = 0;  // window skin byte (0..14), not part of the slot image
+  // Window skin byte (0..14). The slot carries it as variable 0x44 (FRAME).
+  u8 skin = 0;
 
   GameState() = default;
   GameState(save::SaveSlot initial_slot, const MenuRules* menu_rules) : slot(std::move(initial_slot)), rules(menu_rules) {}
@@ -103,6 +104,10 @@ class GameState {
   u16 options() const { return static_cast<u16>(slot.head[0x5A0] | (slot.head[0x5A1] << 8)); }
   bool option(u16 mask) const { return (options() & mask) != 0; }
   void set_option(u16 mask, bool on);
+  // Leaving Customize and every load: with Window Frame Default the skin byte becomes 0; variable 0x44 takes the skin byte.
+  void store_window_frame();
+  // A loaded slot: the skin byte from variable 0x44, then store_window_frame.
+  void load_window_frame();
   // Innate colour bit of a character (0 if none).
   int innate(int character) const;
   // Location caption: the savetbl row key is the number of the 30 progress thresholds (start values 0, 8, 16, ...
@@ -153,8 +158,16 @@ class GameState {
   Why place(int character, int row, int col, int id);
   Why remove(int character, int row, int col);
   Why swap(int character, int row_a, int col_a, int row_b, int col_b);
-  // Returns the number of cells emptied.
+  // The menu's Remove All: unlocked cells only, each through remove(). Returns the number of cells emptied.
   int clear_all(int character);
+  // Copies a grid cell holds count for `id` (the element table's counted flag); other elements are one copy.
+  bool counts_copies(int id) const;
+  // Script strip (FE 6F / FE 7D / the cleared-save strip): every cell whose id is below 0x80, locked or fixed alike, returns its
+  // element to the stock (its counted copies, else one; none when the stock is full), keeps only its flag bits and its count is cleared.
+  void strip_grid(int character);
+  // A gear word given back by a script strip: < 0x200 one item, 0x200..0x3FF an element (five copies for 0x261..0x26B, else one),
+  // 0x401..0x43F the key item bit (key items 1..63, as the script item ops); the word is cleared whatever it held.
+  void return_gear(u16& word);
   // Story tech learning: `tech` goes into the cell that closes grid row `rows - 1` (the last cell of its first 8 columns, counted
   // over the level masks); an element the cell held goes back to the stock, the cell keeps its flag bits. Returns the cell, -1 none.
   int learn_tech(int character, int rows, int tech);

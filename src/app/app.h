@@ -175,6 +175,8 @@ class App {
   // One frame of Steam, then the game's achievement state for `ticks` ticks of play.
   void update_achievements(int ticks);
   void restart_game();
+  // The script reset the game during play (FE 2F in the title room after a game over or the credits): the title over that room.
+  void return_to_title();
   void init_debug_tab();
   void debug_tools_frame();
 
@@ -185,7 +187,8 @@ class App {
   void settings_pad_filter();
   // Alt+Enter: windowed <-> fullscreen.
   void toggle_fullscreen_key();
-  // RDE's speed toggles do nothing in the Radius tutorial (its field map or its battle).
+  // RDE's speed toggles do nothing in room 386 and in the battles launched from it (the room decides, not the battle id); a standalone
+  // battle is never locked.
   bool speed_locked() const;
   // This frame's LoopSpeed (a frame of `dt` seconds) from the toggles and the field's state.
   void update_loop_speed(double dt);

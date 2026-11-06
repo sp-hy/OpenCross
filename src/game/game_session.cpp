@@ -218,13 +218,16 @@ void restock_stacks(ui::GameState& gs, const data::GameTables& tables, save::Sav
 BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tables, const battle::Battle& finished_battle, int* progress) {
   BattleSummary sum;
   const bool victory = finished_battle.outcome() == battle::Outcome::Victory;
+  // Scene 0x1D8 leaves the party with no persistent status unless it fled.
+  const bool fled = finished_battle.outcome() == battle::Outcome::Fled || finished_battle.outcome() == battle::Outcome::Stalled;
+  const bool clear_status = finished_battle.scene() == 0x1D8 && !fled;
   const auto& party = finished_battle.party();
   for (const battle::PartyMember& member : party) {
     if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
     save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
     for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
     save_char.cur_hp = static_cast<u16>(std::clamp(member.hp, 1, static_cast<int>(save_char.max_hp)));
-    save_char.status = static_cast<u8>(member.lo_persist & battle::st::kPersist);
+    save_char.status = clear_status ? 0 : static_cast<u8>(member.lo_persist & battle::st::kPersist);
     write_growth(save_char, member);
     if (member.evolved && battle::pip_form(member.kind)) {
       // Pip's form change, written into the record at once: the kind byte (its growth column follows it,

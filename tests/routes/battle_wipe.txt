@@ -1,5 +1,6 @@
 # Party wipe route: Continue, every party member at 1 HP, encounter 1, auto fight; a wipe in a fight that is not losable loads map 9
-# instead of returning to the field; the battle ends without a result screen.
+# instead of returning to the field; the battle ends without a result screen. The game-over room leaves for the title room, which resets
+# the game (gold 100) and brings back the title; Continue there loads slot 5 again.
 0 wait flow title 300
 - wait movie start 300
 - tap confirm
@@ -38,4 +39,37 @@
 - assert room ending                   # map 9 = the game-over room
 - wait 1800
 - screenshot bw_gameover.png
+- tap confirm                         # the GAME OVER message
+- wait 60
+- tap confirm
+- wait 60
+- tap confirm
+- wait flow title 1800                # the room leaves for the title room, whose reset ends the game: the title as at boot
+- assert gold 100
+- assert var 42 0
+- wait movie start 600                # the title room's own logo FMV
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # slot 5 again
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 900
+- assert flow field
+- assert room wld_b01                  # where slot 5 was saved
+- screenshot bw_continued.png
 - quit

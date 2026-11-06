@@ -1,0 +1,16 @@
+# Party Kid / Razzly / Serge -> bak_a16e: the scene's B2 enter puts Serge first (0, 1, 13); its SET_NEXT_ROOM leaves with the override
+# on, and the exit restores the saved order, so bak_a17e starts with Kid / Razzly / Serge again.
+0 wait 5
+- request party_add 1
+- request party_add 13
+- request party_remove 0
+- request party_add 0
+- assert party 1,13,0
+- load bak_a16e 0
+- wait room bak_a16e 600
+- wait 150
+- assert party 0,1,13
+- mash until room bak_a17e 9000
+- wait 30
+- assert party 1,13,0
+- quit

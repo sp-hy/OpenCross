@@ -11,7 +11,7 @@ All files live in `tests\routes\` and share a name:
 | `<name>.ini` | The config the run uses (`--config`). Holds `[Debug] Script=...`, `Seed`, `ScriptSpeed`, `[Video] VSync=0`, `[Paths] SaveDir`, `ArtMode`. Keys it omits take their defaults. |
 | `<name>.txt` | The route script (section 3). |
 | `<name>.env` | Optional. One `KEY=VALUE` per line (`KEY` = letters, digits, `_`, not starting with a digit); other lines (comments, blanks) are ignored. Set for this run only and removed afterwards. Used for developer switches such as `OC_BATTLE_NORUN`, `OC_ROUTE_ELEM`, `OC_FXDBG`, `OC_BATTLE_AUDIT`. |
-| `<name>.prep.ps1` | Optional. Run by `run.ps1` before the route starts, to generate the scratch files it needs (`true_ending.prep.ps1` forges the save the route continues from with `tools\py\cc_save_forge.py`, from `tmp\save.dat` or `$env:OC_SOURCE_SAVE`, on disc 2 so the ending's movies are disc 2's). A non-zero exit code stops the run. |
+| `<name>.prep.ps1` | Optional. Run by `run.ps1` before the route starts, to generate the scratch files it needs (`true_ending.prep.ps1` forges the save the route continues from with `tools\py\cc_save_forge.py`, from `tmp\save.dat` or `$env:OC_SOURCE_SAVE`, on disc 2 so the ending's movies are disc 2's; `ngplus_ending.prep.ps1` empties card 1 of that save with `opencross occ save-blank`, using the Debug exe of the build tree, else the Release one). A non-zero exit code stops the run. |
 | `<name>.log` | Written by the run, next to the ini (a `--config` run always logs). Deleted by `run.ps1` before the run starts. |
 | `shots\` | Next to the ini (`tests\routes\shots\`), created at start. Relative screenshot names land here. |
 | `shots\route_failed.png` | Screenshot taken when a route check fails (section 4). |
@@ -70,7 +70,7 @@ Exit codes of the process:
 
 Why a run is reproducible: input is synthetic, the step is fixed at 1/60 s regardless of wall time, the frame limiter is skipped while a script, replay or sweep runs, the audio device is not opened for a scripted run (`OC_ROUTE_AUDIO=1` opens it), no mod is applied, and `[Debug] Seed` fixes the random sources (a non-zero seed seeds the field script RNG, the flow's RNG and, for each battle, `OC_BATTLE_SEED`; seed 0 takes a clock seed for the field RNG and leaves battles unseeded). Set `VSync=0` in the ini so frames are not paced by the display.
 
-A battle started from the field with `[Debug] Seed` set is seeded (`OC_BATTLE_SEED` is derived from the seed and a per-run battle counter). A standalone battle (`[Debug] Battle=<scene>`) takes `[Debug] Seed` as its seed unless the `.env` sets `OC_BATTLE_SEED`; `battle_camera`, `battle_chain`, `battle_dash`, `battle_dash2`, `battle_defend`, `battle_menu_entry`, `battle_run`, `results_heal` and `smoke_battle` all set a seed. Deterministic baselines for refactor checks are `alu_chair`, `art_swap`, `battle_hud`.
+A battle started from the field with `[Debug] Seed` set is seeded (`OC_BATTLE_SEED` is derived from the seed and a per-run battle counter). A standalone battle (`[Debug] Battle=<scene>`) takes `[Debug] Seed` as its seed unless the `.env` sets `OC_BATTLE_SEED`; `battle_camera`, `battle_chain`, `battle_dash`, `battle_dash2`, `battle_defend`, `battle_hit_switch`, `battle_menu_entry`, `battle_run`, `results_heal` and `smoke_battle` all set a seed. Deterministic baselines for refactor checks are `alu_chair`, `art_swap`, `battle_hud`.
 
 ## 3. Verbs
 
@@ -123,7 +123,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `wait dialogue open\|closed` | A dialogue is open (anything other than `open` means closed). |
 | `wait text <words...>` | An open dialogue's message (plain text, newlines as spaces) contains the words joined by single spaces. |
 | `wait battle start\|end\|results` | A battle is active / not active / the post-battle results screen is up. |
-| `wait idle` | The controls are free: no dialogue, fade, transition, menu, shop, key-item list, pause, party screen or movie, and no battle. |
+| `wait idle` | The controls are free: no dialogue, fade, transition, menu, shop, key-item list, pause, party screen or movie, and no battle; and the input has settled: the pad lock after a room load or a closed screen and the menu-button wait after a menu screen have run out, and no load or menu-open fade (or its black veil) is running. A menu key tapped right after it opens the menu. `mash until idle` uses the same test. |
 | `wait flow <title\|name\|slots\|opening\|field>` | The game flow is in that state and no movie is playing. |
 | `wait movie start\|end` | A movie is playing / has finished (`start` or `open` = wanted playing). |
 | `wait guide <0\|1\|2>` | The user guide shows that page (1 controller, 2 keyboard, 0 closed). |
@@ -142,7 +142,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `set hp <char> <value>` | Write a character's current HP. |
 | `set status <char> <hexbits>` | Write a character's status bits (1 poison, 8 burn, 10 sprain, 20 flu, hex). |
 | `set model <char> <byte>` | Write the model byte of a party member's character record. |
-| `put <x> <z>` | Place every party entity at a world point (integer coordinates). |
+| `put [ent <n>] <x> <z>` | Place every party entity, or entity `n` only, at a world point (integer coordinates). |
 | `art hd\|original\|modded\|toggle` | Switch the art mode as F6 does, without saving the ini; `toggle` flips between the HD family and original. |
 | `request <kind> [arg]` | Ask the host for what a field opcode would, then wait 4 ticks. The screen it opens is handled by following `wait` / `tap` lines. Kinds in the table below. |
 

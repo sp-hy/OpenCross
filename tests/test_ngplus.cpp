@@ -137,6 +137,12 @@ void test_new_game_plus() {
   // the save image keeps all of it
   const save::SaveSlot reloaded = save::decode_block(save::encode_block(plus));
   CHECK(reloaded.unk_e1ec == plus.unk_e1ec && reloaded.unk_e1f0 == plus.unk_e1f0 && reloaded.ng_flag() == 2 && reloaded.summary_flags() == 2 && reloaded.chars[0].atk == 90);
+  // The picked window frame does not carry: Window Frame Default, variable 0x44 = 0, skin byte 0.
+  save::SaveSlot framed = cleared_game();
+  framed.set_var(0x44, 5);
+  framed.head[0x5A0] = static_cast<u8>(framed.head[0x5A0] | ui::opt::kCustomWindow);
+  const ui::GameState framed_plus(ng::new_game_plus_slot(nullptr, framed), nullptr);
+  CHECK(framed_plus.skin == 0 && framed_plus.slot.var(0x44) == 0 && !framed_plus.option(ui::opt::kCustomWindow));
 }
 
 void test_continue_plus() {
@@ -182,7 +188,7 @@ void test_strip_and_fe3f() {
   ng::strip_for_cleared_save(gs);
   CHECK(slot.chars[2].grid[0] == 0 && slot.chars[2].equipped_qty[45] == 0 && slot.chars[1].equipped_qty[40] == 4 && count_el(slot.elements, 0x13) == 1);
   CHECK(slot.chars[2].grid[1] == 0x4000 && slot.chars[2].grid[2] == 0x8000);
-  CHECK(count_el(slot.elements, 0x61) == 5 && count_el(slot.elements, 0x70) == 1 && (slot.key_items() >> 5 & 1) == 1);
+  CHECK(count_el(slot.elements, 0x61) == 5 && count_el(slot.elements, 0x70) == 1 && (slot.key_items() >> 4 & 1) == 1);
   CHECK(slot.chars[0].weapon == 0 && slot.chars[0].accessory[1] == 0 && slot.chars[0].grid[3] == 0 && slot.chars[0].grid[4] == 0xA3);
   CHECK(slot.chars[2].armour == 0 && slot.chars[7].weapon == 0x41);
   CHECK(count(slot.items, 0x40) == 1 && count(slot.items, 0x90) == 1 && count(slot.items, 0x50) == 1 && count(slot.items, 0x41) == 0);

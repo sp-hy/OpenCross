@@ -724,7 +724,9 @@ void BattleView::auto_pick_heuristic() {
 }
 
 // The HIT% menu with Auto on: the pick (strongest hit above 79 % whose stamina need is met, else weak) every time the menu opens, until
-// weak cannot be paid (stamina < 10, or a dead target: update() then leaves the menu); then the PC returns and auto_pick() rotates.
+// weak cannot be paid (stamina < 10, or a dead target: update() then leaves the menu); then the PC returns and auto_pick() rotates. The
+// pick is judged by the stamina but paid from the visit's budget: a pick above the budget is refused in silence and pressed again, so
+// a PC whose no-stamina-cost status ran out partway through a hit stays in the menu until Auto is turned off.
 void BattleView::auto_chain() {
   if (auto_delay_ > 0) {
     --auto_delay_;
@@ -738,6 +740,9 @@ void BattleView::auto_chain() {
     ui_ = Ui::Wait;
     return;
   }
+  const int cost = battle_->chain_cost(hit_level, battle_->unit(active_pc_));
+  if (cost > hit_budget_) return;
+  hit_budget_ -= cost;
   chain_pick(hit_level);
 }
 
@@ -787,6 +792,15 @@ void BattleView::handle_input(const platform::Input& in) {
     }
     return;
   }
+  // The HIT% menu's leave keys: Cross, and Right / R1 and Left / L1 to pass the menu to the next / previous PC that can act.
+  const int hit_pass = (act(Action::SelectRight) || pad(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || right ? 1 : 0) -
+                       (act(Action::SelectLeft) || pad(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || left ? 1 : 0);
+  // The HIT% menu is up from the target confirm: while the PC runs up to the target the leave keys already work; a strength pick or the
+  // Element row waits for the arrival, so one pressed now is dropped.
+  if (ui_ == Ui::Wait && engage_arrive_ && act_.phase == Act::Phase::Approach && act_.ev.empty() && !auto_) {
+    if (cancel || hit_pass != 0) leave_hit_menu(cancel ? 0 : hit_pass);
+    return;
+  }
   if (ui_ == Ui::Wait) return;
   // Op AF: no command input until the script unlocks the menu.
   if (ui_ == Ui::Top && battle_->menu_locked()) return;
@@ -805,14 +819,15 @@ void BattleView::handle_input(const platform::Input& in) {
     chain_.clear();
     // ... and SFX 0x16 plays once when the menu is enabled again (battle start ~1.4 s in, after a stamina wait). A
     // weak hit that leaves the PC engaged or kills the target re-opens the menu without it.
-    if (menu_chime_) {
-      menu_chime_ = false;
+    if (menu_chime_ || entry_chime_) {
+      menu_chime_ = entry_chime_ = false;
       if (!auto_) audio_.play_menu(0x16);
     }
     begin_menu_entry(active_pc_);
   }
   // The top menu takes no input until its entry is over; what is pressed before is dropped.
   if (ui_ == Ui::Top && !menu_live()) return;
+  if (ui_ == Ui::Top) hit_budget_ = battle_->hit_budget(active_pc_);
   if (auto_ && ui_ == Ui::Top) {
     auto_pick();
     return;
@@ -969,13 +984,10 @@ void BattleView::handle_input(const platform::Input& in) {
     case Ui::Chain: {
       step(chain_cursor_, 4, vdir);
       if (vdir != 0) audio_.play_menu(1);
-      // Leave: the PC returns under the approach shot, back to the command menu.
-      if (cancel) {
-        audio_.play_menu(6);
-        // The top menu comes back on this PC with its window still open: no new entry.
-        turn_open_ = false;
-        begin_disengage(true);
-        ui_ = Ui::Wait;
+      // Leave: the PC returns under the approach shot, back to the command menu. Cross keeps the menu on this PC with its window still
+      // open (no new entry); Right / R1 and Left / L1 pass it to the next / previous PC that can act once the PC is home.
+      if (cancel || hit_pass != 0) {
+        leave_hit_menu(cancel ? 0 : hit_pass);
         break;
       }
       if (!ok) break;
@@ -993,9 +1005,10 @@ void BattleView::handle_input(const platform::Input& in) {
         pending_cmd_.kind = battle::Command::Kind::Element;
         cell_ = first;
         ui_ = Ui::Element;
-      } else if (battle_->chain_cost(chain_cursor_, unit) <= unit.stamina) {
+      } else if (const int cost = battle_->chain_cost(chain_cursor_, unit); cost <= hit_budget_) {
         // A hit row plays SFX 0x27 - row.
         audio_.play_menu(0x27 - chain_cursor_);
+        hit_budget_ -= cost;
         chain_pick(chain_cursor_);
       } else {
         audio_.play_menu(0x18);

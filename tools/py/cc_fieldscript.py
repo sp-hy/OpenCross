@@ -13,7 +13,7 @@ Operand spec tokens (space separated, in byte order, after the opcode [and sub-o
   w   u16 raw           U   u16 immediate-or-variable (bit15 set = immediate, value&0x7FFF)
   V   u16 variable id   J   u16 jump target (offset in code area)
   Shh signed operand: s16 literal if bit hh of the mode byte M is set, else variable id
-  Thh like S but when the mode bit is clear the u16 is a U (bit15 immediate / variable)
+  Thh like S: the mode bit set = s16 immediate, clear = variable id (bit 15 is not an immediate flag)
   M   u8 mode byte holding the literal-flag bits for the S/T operands
   A4  4 ASCII chars
 A spec of the form  sel:MASK{v:spec;v:spec;default}  chooses the layout from (byte1 & MASK).
@@ -595,10 +595,7 @@ def decode_insn(code, off):
                 ins.ops.append(("imm", struct.unpack_from("<h", code, p)[0]))
             else:
                 v = struct.unpack_from("<H", code, p)[0]
-                if t[0] == "T":
-                    ins.ops.append(("imm", v & 0x7FFF) if v & 0x8000 else ("var", v))
-                else:
-                    ins.ops.append(("var", v))
+                ins.ops.append(("var", v))
         else:
             raise ValueError(t)
     if key == 0x02:

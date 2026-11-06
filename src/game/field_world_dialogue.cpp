@@ -38,11 +38,14 @@ ui::DialogueDemo* FieldWorld::window_owned_by(int ent) {
   return nullptr;
 }
 
-ui::DialogueDemo& FieldWorld::window_of(int ent) {
-  const auto it = owner_window_.find(ent);
-  if (it != owner_window_.end() && it->second > 0 && extra_win_[static_cast<size_t>(it->second - 1)].box)
-    return *extra_win_[static_cast<size_t>(it->second - 1)].box;
-  return dialogue_;
+// The confirm button on a window: a confirmed choice line goes into the owning entity's dialogue result byte at once (E2 copies
+// it to variable 0x04 once the window is gone), so it does not depend on which window E2 later finds.
+void FieldWorld::confirm_window(ui::DialogueDemo& box, int owner) {
+  const int before = box.chosen();
+  box.confirm();
+  const int line = box.chosen();
+  if (line < 0 || line == before || owner < 0 || owner >= static_cast<int>(vm_.entity_count())) return;
+  vm_.entity(owner).last_choice = static_cast<u8>(line);
 }
 
 bool FieldWorld::any_window_open() const {
@@ -151,12 +154,10 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     dialogue_face_ = face;
     portrait_left_ = false;
     if (face >= 0) {
-      // Bit 12 of the window flags: ((script heading + control yaw + own model yaw) & 0xFFF) - 0x401 < 0x800 (unsigned); clear =
-      // portrait left. The heading is the one scripts set and read (SET_ROTATION / GET_ROTATION), the model yaw is axis 1 (op 28 / AA).
+      // The heading is the one scripts set and read (SET_ROTATION / GET_ROTATION), the model yaw is axis 1 (op 28 / AA). The control
+      // yaw that turns the pad (op 63) does not enter.
       const int model_yaw = static_cast<s16>(vm_.entity(target).axis[1]);
-      const u32 yaw_delta = static_cast<u32>((get_facing(target) + control_yaw_ + model_yaw) & 0xFFF) - 0x401u;
-      const u32 fl = static_cast<u32>(flags_hi_for(flag_byte));
-      portrait_left_ = !((fl & 0x800u) != 0 || ((fl & 0x1000u) == 0 && yaw_delta < 0x800u));
+      portrait_left_ = portrait_on_left(get_facing(target), portrait_yaw_, model_yaw, static_cast<u32>(flags_hi_for(flag_byte)));
     }
   }
   bool lbl = false, kept = false;
@@ -175,7 +176,6 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     extra_win_[static_cast<size_t>(win_slot - 1)].kept = kept;
     extra_win_[static_cast<size_t>(win_slot - 1)].owner = vm_.current_entity();
   }
-  owner_window_[vm_.current_entity()] = win_slot;
   dlg.set_label(lbl);
   dlg.set_portrait(lbl ? -1 : dialogue_face_);
   last_dialogue_msg_ = message;
@@ -210,6 +210,13 @@ int FieldWorld::flags_hi_for(int) const {
   const int runner = vm_.current_entity();
   const int wf = runner >= 0 && runner < static_cast<int>(ents_.size()) ? ents_[static_cast<size_t>(runner)].win[4] : 0;
   return wf & 0xFF00;
+}
+
+bool FieldWorld::portrait_on_left(int heading, int portrait_yaw, int model_yaw, u32 window_flags) {
+  if (window_flags & 0x800u) return false;
+  if (window_flags & 0x1000u) return true;
+  const u32 yaw_delta = static_cast<u32>((heading + portrait_yaw + model_yaw) & 0xFFF) - 0x401u;
+  return yaw_delta >= 0x800u;
 }
 
 // PS1 text width of a dialogue message in pixels: glyphs below 0x75 are 8 wide, the rest 12; the widest line wins. Names, items,
@@ -415,26 +422,26 @@ bool FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int m
   return (mode == 0 || mode == 1) && !above;
 }
 
+// E1 turns the running entity's own open window into a choice; an entity that owns no open window changes nothing.
 void FieldWorld::dialogue_choice(int first, int last) {
+  ui::DialogueDemo* box = window_owned_by(vm_.current_entity());
+  if (!box) return;
   choice_pending_ = true;
-  (window_of(vm_.current_entity())).set_line_choice(first, last);
-}
-// The entity's last window, also after it closed (E2 reads the pick then); -1: no choice confirmed.
-int FieldWorld::dialogue_result() {
-  return window_of(vm_.current_entity()).chosen();
+  box->set_line_choice(first, last);
 }
 
 // ------------------------------------------------------------------------------------------------ host: screen
 // A8: mode 1 = to black, mode 0 = back to the picture; arg = ticks (0 = at once). Drawn as the room change's subtractive fade.
 
 void FieldWorld::request_menu(script::MenuKind kind, int arg) {
-  if (menu_state_ != MenuState::None) return;
-  // FE 65: arg = disc - 1; PC mode swaps the index at once (the "Disc N" screen only fades).
+  // FE 65: arg = disc - 1; PC mode swaps the index at once (the "Disc N" screen only fades). It is not a screen, so another pending
+  // request does not hold it back.
   if (kind == script::MenuKind::ChangeDisc) {
     vm_.set_var(0x42, arg);
     set_disc(arg + 1);
     return;
   }
+  if (menu_state_ != MenuState::None) return;
   if (kind == script::MenuKind::Save && gs_) {
     // FE 85: the roster's grids and gear go back to the stock and variable 0x7E = 3, so the
     // save written by the list that follows is a cleared save (summary flags 3).

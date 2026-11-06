@@ -45,7 +45,7 @@ std::vector<Step> make_steps() {
     steps.push_back({mode, MenuScreen::Save, 4, "save_choice_nosave"});
     steps.push_back({mode, MenuScreen::Save, 1, "save_grid"});
     steps.push_back({mode, MenuScreen::Save, 2, "load_grid"});
-    steps.push_back({mode, MenuScreen::Save, 3, "load_confirm"});
+    steps.push_back({mode, MenuScreen::Save, 3, "save_confirm"});
   }
   // OC_MENU_ONLY: screenshot only the steps whose tag contains this text.
   if (const char* only = std::getenv("OC_MENU_ONLY"))

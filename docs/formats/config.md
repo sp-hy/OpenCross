@@ -72,7 +72,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `Language` | `en` | `en fr it de es jp` | Dialogue and menu text language. Stored as given; an unknown value is logged at boot and `en` is used. |
 | `Portraits` | `2021` | `2021 1999` | RDE face art set; any other value reads as `2021`. |
 
-Movies stay at normal speed in both speed modes, and both are off in the Radius tutorial (map and battle 386): the factor is 1 there and the speed hotkeys are swallowed.
+Movies stay at normal speed in both speed modes, and both are off in room 386 (zel_a12i) and the battles launched from it (RDE tests the room, not the battle id, so the Radius tutorial, battle 386 from alu_a04f, is not locked): the factor is 1 there and the speed hotkeys are swallowed.
 
 ### 2.4 `[Mods]`
 
@@ -170,8 +170,8 @@ All off by default; they never lock saving. The first three also toggle from the
 | Key | Default | Meaning |
 |---|---|---|
 | `NoEncounters` | 0 | Ordinary field battles are won without being fought (F3, pad L3). |
-| `BattleBoost` | 0 | Every living PC is refilled each update (HP to max, stamina to 70, element gauge to max), a knocked-out PC is revived, and the negative statuses are cleared (F4, pad R3). It includes everything God Mode does. |
-| `AutoBattle` | 0 | The party plays the command menus itself (F5, pad L3 + R3); the results page and message windows stay manual. It keeps one PC while it can still chain Weak, Strong, Fierce on the weakest living enemy (the strongest hit above 79 % whose stamina is paid, else Weak), then hands over to the ready PC with the most stamina; a PC that cannot pay a Weak hit defends, and a party under 12 % HP with stamina under 30 runs. |
+| `BattleBoost` | 0 | RDE's battle boost (F4, pad R3). The damage a hit would do to a PC is cancelled and its result is the miss result (the miss mark, no damage number; nothing is clamped); heals still land and no PC is knocked out. After every resolved hit or miss the PCs still standing lose their negative statuses (Frozen included). Every PC's element gauge is kept full, and a landed weapon hit fills the attacker's gauge to the top. HP and stamina are never refilled (that is God Mode and Max Stamina). |
+| `AutoBattle` | 0 | The party plays the command menus itself (F5, pad L3 + R3); the results page and message windows stay manual. Each ready PC attacks its remembered target (the ring's first living enemy when it is gone); the HIT% menu then picks by the Auto rule (`docs/rules/battle.md` section 4). It never defends, runs or uses elements. |
 | `GodMode` | 0 | Damage to a PC is turned into "no damage" (heals still work), a knocked-out PC is revived at full HP, and the negative statuses are cleared. |
 | `NoClip` | 0 | The leader ignores the walk mesh and solid entities. |
 | `MaxStamina` | 0 | Living PCs' stamina is set to 70 every update. |

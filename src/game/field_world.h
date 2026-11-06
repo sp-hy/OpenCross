@@ -124,6 +124,8 @@ struct Ent {
   bool sway_bit = false;
   // the preferred turn direction of the walk, re-picked with a 1/256 chance per tick
   bool sway_dir = false;
+  // the heading A0 asked to walk this tick (-1 = no step); the movement phase takes the step after every script has run
+  int wander_heading = -1;
   // ENTITY_RGB (A1); 128 = neutral, drawn as a colour multiplier
   std::array<u8, 3> rgb{128, 128, 128};
   int attach_to = -1;
@@ -284,6 +286,12 @@ class FieldWorld final : public script::FieldHost {
   void set_battle_saved_vars(const std::array<u16, 8>& vars);
   // Resets the transient world (variables, queued requests) for a new game; keeps the state object.
   void reset_for_new_game();
+  // The script reset the game to its boot state (FE 2F) since the last call: true once.
+  bool take_game_reset() {
+    const bool reset = game_reset_;
+    game_reset_ = false;
+    return reset;
+  }
   // ---- discs: the file index in use. The disc is data-driven: FE 65 and the DiscCheck at every
   // map transition set it from variable 0x42 (= disc - 1); a loaded save takes it from its variable 0x42 too.
   int disc() const { return disc_; }
@@ -306,6 +314,8 @@ class FieldWorld final : public script::FieldHost {
     input_.menu_wait = menu_wait_ticks;
   }
   bool input_locked() const { return input_.lock > 0; }
+  // The pad lock or the menu-button wait is still running.
+  bool input_settling() const { return input_.lock > 0 || input_.menu_wait > 0; }
 
   // ---- scripted menus / shops / movies handed to the host (App::advance) -----------------------------------------------------------
   struct MenuRequest {
@@ -429,6 +439,9 @@ class FieldWorld final : public script::FieldHost {
   // under the field's projection distance 512, scaled by echo_scale and turned by RotMatrix(echo_rot) (Rx * Ry * Rz). `share` (0..1]
   // is the part of one pass drawn (the half tick of a 30 Hz field: scale^share, angles * share).
   static void frame_echo_point(const JoltView& view, float share, float& x, float& y);
+  // Dialogue portrait side (window flags bit 12): window flag 0x800 forces the right, 0x1000 the left; otherwise the portrait is on
+  // the right when (script heading + portrait yaw + model yaw) & 0xFFF lies in 0x401..0xC00, else on the left.
+  static bool portrait_on_left(int heading, int portrait_yaw, int model_yaw, u32 window_flags);
   // The ordering-table slab every field drawer honours (layers, shadows, actor faces, effect quads): only content with lo < slot <= hi is
   // drawn. The host draws the deep part (ot, inf], warps it, then the near part (-inf, ot]. Reset to everything after use.
   void set_draw_slab(float lo, float hi);
@@ -487,6 +500,12 @@ class FieldWorld final : public script::FieldHost {
     fade_kind_ = 0;
   }
   const std::string& status() const { return status_; }
+  // A room change whose target failed to load after the room before was cleared: no room is left to play in (reported once).
+  bool take_room_lost() {
+    const bool lost = room_lost_;
+    room_lost_ = false;
+    return lost;
+  }
   bool camera_scripted() const { return camera_.cam.scripted; }
   int control_yaw() const { return control_yaw_; }
   const std::map<std::string, u64>& stub_hits() const { return stub_hits_; }
@@ -589,6 +608,7 @@ class FieldWorld final : public script::FieldHost {
 
   // ---- script::FieldHost ----------------------------------------------------------------------------------------------
   bool system_ready() override;
+  bool busy_clear() override;
   bool entry_window() override { return entry_window_ > 0; }
   bool window_open() override { return any_window_open(); }
   void end_of_tick(script::FieldVM& vm) override;
@@ -652,7 +672,6 @@ class FieldWorld final : public script::FieldHost {
   bool dialogue_blocked() override;
   void open_dialogue(int speaker, int message, int flags) override;
   void dialogue_choice(int first, int last) override;
-  int dialogue_result() override;
   void bg_layer(int layer, bool on) override;
   void set_layer_opacity(int layer, int r, int g, int b) override;
   bool bg_wave(int mode, int arg) override;
@@ -714,6 +733,7 @@ class FieldWorld final : public script::FieldHost {
   void set_limit_mode(int mode) override;
   int set_character_model(int char_ref, int value) override;
   bool model_swap_busy() override;
+  bool model_swap_pending() override;
   void model_swap_commit() override;
   int character_model_byte(int char_id) override;
   void refresh_party_models() override;
@@ -759,6 +779,7 @@ class FieldWorld final : public script::FieldHost {
   void sim_tick();
   // turn rates and the scripted-turn state of every entity
   void step_turn_rates();
+  void step_wander();
   void step_motions();
   void step_player();
   void step_followers();
@@ -854,13 +875,11 @@ class FieldWorld final : public script::FieldHost {
     bool below = false;
   };
   std::array<ExtraWindow, 3> extra_win_;
-  // entity -> the window slot (0 = dialogue_, 1.. = extra_win_) of its last message
-  std::map<int, int> owner_window_;
   std::string portrait_set_ = "2021";
   // Button glyphs in the message windows: key caps after a key press, pad glyphs after a pad press.
   bool key_caps_ = false;
   ui::DialogueDemo* window_owned_by(int ent);
-  ui::DialogueDemo& window_of(int ent);
+  void confirm_window(ui::DialogueDemo& box, int owner);
   bool any_window_open() const;
   bool modal_window_open() const;
   void close_windows();
@@ -902,11 +921,13 @@ class FieldWorld final : public script::FieldHost {
   int camera_target_ = -1;
 
   std::string status_;
+  bool room_lost_ = false;
   // lang.dat room id (dialogue text); map_id_ below is the script / save id on the current disc
   int room_id_ = -1;
   int map_id_ = -1;
   DiscIndex discs_;
   int disc_ = 1;
+  bool game_reset_ = false;
   int entrance_param_ = 0;
   bool in_init_ = false;
   u64 tick_count_ = 0;
@@ -924,11 +945,10 @@ class FieldWorld final : public script::FieldHost {
   FieldInput input_;
   // a used key item waits for the next trigger pass
   bool key_item_shown_ = false;
-  // FE 69 SAVE: (element id, copies) taken off Kid's grid, returned to the stock by RESTORE
-  std::vector<std::pair<int, int>> fe69_saved_;
 
   // player / control
   int control_yaw_ = 0;
+  int portrait_yaw_ = 0;
   // FE 21 SETUP_SHAKE: amplitudes in 16.16 screen pixels ramp to the target over ticks + 1 steps; each
   // tick the scroll gets a uniform random offset in [-a/2, a/2].
   struct Shake {
@@ -1089,6 +1109,8 @@ class FieldWorld final : public script::FieldHost {
   SongCueState song_cue_;
   // The song a cue started over the script's own (-1 = none).
   int cue_song_ = -1;
+  // The last song whose remastered stream could not be loaded (-1 = none).
+  int failed_stream_ = -1;
   bool play_stream(int song, int volume, double start_seconds);
   // FE 29: C6 slots kept across the next room change
   u32 sfx_keep_slots_ = 0;

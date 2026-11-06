@@ -173,15 +173,18 @@ bool draw_cheats_tab(platform::Config& cfg) {
              "RDE's \"encounters off\" (F3, or click the left stick): ordinary field battles (A3 / C9 ops) are won without being fought and the script goes on as after a win. "
              "Story battles, forced battles and every battle RDE keeps (its Table A) still run. Every launch starts with it off.");
       toggle("Battle boost", "##c_boost", cheats.battle_boost,
-             "RDE's battle boost (F4, or click the right stick): the party's HP, stamina and element gauge are refilled, negative status effects are cleared and nobody is knocked out. "
+             "RDE's battle boost (F4, or click the right stick): hits on the party do no damage (they read as a miss; heals still work), nobody is knocked out, "
+             "negative status effects are cleared after every hit and the element gauge stays full. HP and stamina are not refilled. "
              "Every launch starts with it off.");
       toggle("Auto battle", "##c_auto", cheats.auto_battle,
-             "RDE's auto-battle (F5, or click both sticks together): every ready party member picks its own attack (a fierce hit on the first enemy). The results screen still waits for you.");
+             "RDE's auto-battle (F5, or click both sticks together): each ready party member attacks its remembered target (the first living enemy when "
+             "it is gone) and the hit is picked by the Auto rule; it never defends, runs or uses elements. The results screen still waits for you.");
       ImGuiLayer::end_rows();
     }
     ImGuiLayer::section("Battle");
     if (ImGuiLayer::begin_rows("cheats_battle")) {
-      toggle("God mode", "##c_god", cheats.god_mode, "The party cannot be knocked out (HP stops at 1). The Debug tab's Invincible party box still works.");
+      toggle("God mode", "##c_god", cheats.god_mode, "Hits on the party do no damage (heals still work), a knocked-out member is revived at full HP and negative status effects are cleared. "
+             "The Debug tab's Invincible party box still works.");
       toggle("Max stamina", "##c_stam", cheats.max_stamina, "The party's stamina never runs down in battle.");
       toggle("Free elements", "##c_free", cheats.free_elements, "Casting an element costs no gauge level, a cell can be cast again and consumables (stacks) are not used up.");
       toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");

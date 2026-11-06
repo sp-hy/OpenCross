@@ -449,13 +449,13 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
   if (screen == MenuScreen::Save && variant != 4) impl.can_save = true;
   if (screen == MenuScreen::Save && variant >= 1 && variant <= 3) {
     impl.save_phase = 1;
-    impl.load_mode = variant >= 2;
-    if (impl.load_mode)
-      for (int k = 1; k < 15; ++k)
-        if (impl.prev[static_cast<size_t>(k)].used) {
-          impl.load_cur = k;
-          break;
-        }
+    impl.load_mode = variant == 2;
+    for (int k = 1; k < 15; ++k)
+      if (impl.prev[static_cast<size_t>(k)].used) {
+        if (impl.load_mode) impl.load_cur = k;
+        else if (variant == 3) impl.save_cur = k - 1;
+        break;
+      }
     impl.save_confirm = variant == 3;
     impl.confirm_cur = 0;
   }

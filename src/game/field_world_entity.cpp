@@ -419,9 +419,10 @@ void FieldWorld::entity_effect(u16 key, int ent, std::span<const s32> args) {
     // A0 = the engine's WANDER, one call per tick. A timer counts down; below zero a new window of (rand & 0x1F) + 0x20 ticks starts
     // and a random bit decides whether it walks. Bit clear: stand clip, done unless the operand is 1. Bit set (or operand 1): walk
     // clip; with a 1/256 chance the preferred turn direction is re-picked; with a 1/16 chance per tick the heading is turned
-    // +-0x80 (the direction bit picks the side, 1 in 8 of those the other side), else the heading = the facing; the entity then
-    // moves along that heading at its own speed through the wall probe and the slide (the facing follows). This is how
-    // opn_a02i's Cybots and every "A0" idler roam.
+    // +-0x80 (the direction bit picks the side, 1 in 8 of those the other side), else the heading = the facing. The op only
+    // records that heading: the step along it is taken in the movement phase after every script of the tick has run
+    // (step_wander), so a script later in the same pass still sees the entity where the tick began. This is how opn_a02i's
+    // Cybots and every "A0" idler roam.
     if (--ent_state.sway_timer < 0) {
       const u32 random = rand_u32();
       ent_state.sway_bit = random & 1;
@@ -429,6 +430,7 @@ void FieldWorld::entity_effect(u16 key, int ent, std::span<const s32> args) {
     }
     const bool walk_window = ent_state.sway_bit || (!args.empty() && args[0] == 1);
     if (!walk_window) {
+      ent_state.wander_heading = -1;
       ent_state.actor.play(ent_state.actor.anim_slot(kSlotStand));
       return;
     }
@@ -437,12 +439,7 @@ void FieldWorld::entity_effect(u16 key, int ent, std::span<const s32> args) {
     const int turn = ent_state.sway_dir ? 0x80 : -0x80;
     int heading = ent_state.actor.facing();
     if ((rand_u32() & 0xF) == 0) heading = (heading + (((rand_u32() & 7) == 0) ? -turn : turn)) & 0xFFF;
-    const WalkMesh& walk = view_.walk();
-    const float heading_rad = static_cast<float>(heading) * kUnitsToRad;
-    const float step = static_cast<float>(vm_.entity(ent).v10c ? vm_.entity(ent).v10c : kDefaultSpeed) / 16.0f;
-    ent_state.actor.set_facing(heading);
-    // A slide re-aims the facing along the wall.
-    ent_state.actor.move_on_mesh(walk, -std::cos(heading_rad) * step, std::sin(heading_rad) * step);
+    ent_state.wander_heading = heading;
     return;
   }
   auto arg = [&](size_t i) { return i < args.size() ? args[i] : 0; };
