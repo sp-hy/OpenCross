@@ -659,6 +659,9 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     window.box->set_key_caps(key_caps_);
     window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   }
+  sync_mod_ui_windows();
+  for (auto& window : mod_ui_win_)
+    if (window.box) window.box->update(static_cast<float>(ticks) / 60.0f);
 
   for (int i = 0; i < ticks && !room_lost_; ++i) {
     sim_tick();

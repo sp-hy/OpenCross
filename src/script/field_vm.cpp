@@ -400,6 +400,7 @@ u32 FieldVM::load_flags(size_t ent) const {
 void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
   mod_ = std::move(module);
   ents_.assign(mod_.entity_count(), Entity{});
+  ui_.clear();
   std::fill(vars_.begin() + kGlobalVarSlots, vars_.end(), u16{0});
   vars_[0x46 >> 1] = 1;
   gflags_ = gflag::kPauseAllowed;
