@@ -127,6 +127,26 @@ class JpGlyphs {
   std::vector<u16> bitmaps_;                      // kJpGlyphSlots * 11
 };
 
+// ---------------------------------------------------------------------------------------------- PS1 executable strings
+constexpr size_t kExeStringsOffset = 0x508E0;  // in cdrom/prog/slps_023.64
+
+// The string tables of the PS1 main executable, PS1 text bytes each: table 0 items, 1 character names (0x31 Lynx), 2..22 the
+// per-speaker grammar forms of message control 0x12 (indexed by character id), 23 elements and techs, 24 key items, 25 enemies,
+// 26 battle strings, 27 buttons. Layout: u32 table count, u32 offset per table (from the start); a table is u16 offsets (from the
+// table start, the first one = 2 * entry count) to strings of glyphs and message control codes ending in 0x00.
+class ExeStrings {
+ public:
+  // False if the executable is too short or the table header does not fit.
+  bool load(ByteSpan exe);
+  bool loaded() const { return !tables_.empty(); }
+  // The string's bytes up to (not including) its 0x00; empty for an unknown table or entry.
+  ByteSpan get(int table, int index) const;
+
+ private:
+  Bytes exe_;
+  std::vector<std::vector<std::pair<u32, u32>>> tables_;
+};
+
 // ---------------------------------------------------------------------------------------------- PS1 dialogue blocks
 // Message block of a room (subfile 8, already LZSS-decoded) -> one byte span per record, trailing sentinel included.
 struct DialogueBlock {

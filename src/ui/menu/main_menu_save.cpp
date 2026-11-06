@@ -20,7 +20,7 @@ SavePrev preview_of(const save::SaveSlot& data, int slot, int block) {
   preview.used = true;
   preview.slot = slot;
   preview.block = block;
-  preview.party = data.party();
+  preview.party = data.preview_party();
   preview.frames = data.playtime_frames();
   preview.gold = data.gold();
   preview.stars = data.stars_total();
@@ -163,6 +163,7 @@ void MainMenu::Impl::update_save(const Nav& nav) {
     if (nav.ok || frames - card_msg_start > 120) save_phase = 0;
     return;
   }
+  if (save_phase == 4) return;
   if (save_confirm) {
     if (nav.up || nav.down || nav.left || nav.right) confirm_cur = 1 - confirm_cur, sfx(1);
     if (nav.cancel) save_confirm = false, sfx(6);
@@ -251,6 +252,28 @@ void MainMenu::Impl::do_load() {
   sfx(8);
 }
 
+// A written file shows the saving screen (the grid, the progress frame and `line`) for kSaveChimeDelay frames after the confirm; then
+// effect 0x19 (mask 0x20) and effect 0x76 (mask 0x40) play together, as every load does (the music plays on), and the screen goes
+// back to the Save / Load choice with its cursor kept (save_only: the save choice). No result message follows.
+void MainMenu::Impl::begin_saving(const std::string& line) {
+  save_phase = 4;
+  msg = line;
+  msg_frames = 0;
+  chime_frames = kSaveChimeDelay;
+}
+
+void MainMenu::Impl::end_saving() {
+  if (sfx_layer_fn) {
+    sfx_layer_fn(0x19, 0x20);
+    sfx_layer_fn(0x76, 0x40);
+  }
+  saving_file = -1;
+  if (save_phase != 4) return;
+  save_phase = save_only ? 2 : 0;
+  msg.clear();
+  if (save_card != 0) load_previews();
+}
+
 // Page: the cursor row's file (never the auto-save). Card: a used box overwrites its own file; an empty box makes a new file with the
 // lowest unused number, 0 being card 1's auto-save. The language, battle counter and custom names go with it (ext_save.dat for the
 // cards, the file itself for the page); a no-op without a host.
@@ -264,8 +287,7 @@ void MainMenu::Impl::do_save() {
       page->write(page_cur, gs->slot);
       saved = true;
       load_previews();
-      sfx(5);
-      say("Saved to OpenCross file " + save_layout::page_number(page_cur) + ".", 240);
+      begin_saving("Saving to OpenCross file " + save_layout::page_number(page_cur) + "...");
     } catch (const std::exception& error) {
       log::warn("menu: OpenCross save {}: {}", page_cur, error.what());
       sfx(0x18);
@@ -276,15 +298,12 @@ void MainMenu::Impl::do_save() {
   const SavePrev& box = prev[static_cast<size_t>(std::clamp(save_cur + 1, 0, 14))];
   const bool auto_card = save_card == 1;
   const u32 failed = auto_card ? 0x801F3115 : 0x801F3116;
-  int slot_no = box.used ? box.slot : -1;
-  if (slot_no < 0) {
-    std::array<bool, 15> taken{};
-    taken[0] = auto_card;
-    for (const SavePrev& other : prev)
-      if (other.used && other.slot >= 0 && other.slot < 15) taken[static_cast<size_t>(other.slot)] = true;
-    for (int number = 0; number < 15 && slot_no < 0; ++number)
-      if (!taken[static_cast<size_t>(number)]) slot_no = number;
-  }
+  std::array<bool, 15> taken{};
+  taken[0] = auto_card;
+  for (const SavePrev& other : prev)
+    if (other.used && other.slot >= 0 && other.slot < 15) taken[static_cast<size_t>(other.slot)] = true;
+  const int free_no = save_layout::saving_number(taken);
+  const int slot_no = box.used ? box.slot : free_no;
   if (slot_no < 0 || (slot_no == 0 && auto_card)) {
     sfx(0x18);
     return;
@@ -305,9 +324,8 @@ void MainMenu::Impl::do_save() {
     save_dat->write_ext(save_card, slot_no);
     if (!save_out.empty()) save_dat->save(save_out);
     saved = true;
-    load_previews();
-    sfx(5);
-    say(menu_str(auto_card ? 0x801F2ECD : 0x801F2ECE, ""), 240);
+    saving_file = free_no;
+    begin_saving(menu_str(auto_card ? 0x801F2ECD : 0x801F2ECE, auto_card ? "Saving to Slot 1..." : "Saving to Slot 2..."));
   } catch (const std::exception&) {
     sfx(0x18);
     say(menu_str(failed, ""));
@@ -315,16 +333,19 @@ void MainMenu::Impl::do_save() {
 }
 
 // Save / Load list of the save screen: "Save" / "Load" (cmnmes セーブ / ロード) at the top right with leader lines, the dial and the
-// needle at the 640-wide display's spots (save_layout). Save is dimmed while saving is blocked. Both art modes.
+// needle at the 640-wide display's spots (save_layout). Save is dimmed while saving is blocked. Away from the Save / Load choice
+// (target choice, grid, messages, saving) the whole list and dial draw at half brightness. Both art modes.
 void MainMenu::Impl::save_dial() {
   namespace sl = save_layout;
-  if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) Img(deco, PX(sl::kDialX), PY(sl::kDialY), PX(sl::kDialW), PY(sl::kDialH), 0, 0, 1, 1, rgb(172, 172, 182));
-  Hand(sl::kPivotX, sl::kPivotY, hand_angle);
-  const u32 line_colour = rgb(200, 190, 190);
+  const float brightness = save_phase == 0 ? 1.0f : 0.5f;
+  if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png"))
+    Img(deco, PX(sl::kDialX), PY(sl::kDialY), PX(sl::kDialW), PY(sl::kDialH), 0, 0, 1, 1, shade(rgb(172, 172, 182), brightness));
+  Hand(sl::kPivotX, sl::kPivotY, hand_angle, brightness);
+  const u32 line_colour = shade(rgb(200, 190, 190), brightness);
   const render::FaceId list_face = slot_face(mt_style(7, lang_index()).slot);
   for (int entry = 0; entry < 2; ++entry) {
     const std::u32string label = capt(entry == 0 ? "\xE3\x82\xBB\xE3\x83\xBC\xE3\x83\x96" : "\xE3\x83\xAD\xE3\x83\xBC\xE3\x83\x89", entry == 0 ? "Save" : "Load");
-    const u32 colour = (entry == 0 && !can_save) ? ps1_colour(0x404040) : entry == top_cur ? kSel : kText;
+    const u32 colour = shade((entry == 0 && !can_save) ? ps1_colour(0x404040) : entry == top_cur ? kSel : kText, brightness);
     HT(list_face, sl::kListX[entry], sl::kListY[entry], label, colour, sl::kListScale);
     const float y = sl::kListY[entry] + sl::kLeadDy, start_x = sl::kListX[entry] - 2.8f, bend_x = sl::kLeadBend[entry];
     rect(PX(start_x), PY(y) - 1.1f, PX(bend_x - start_x), 2.2f, line_colour);
@@ -388,10 +409,12 @@ const Tex* MainMenu::Impl::slot_icon(int file) {
 void MainMenu::Impl::build_save() {
   namespace sl = save_layout;
   const bool on_page = save_card == 0;
+  // The grid / list shows in phase 1 and while saving (phase 4).
+  const bool listed = save_phase == 1 || save_phase == 4;
   // Box index; box 0 is the auto-save entry. Page: the row = the file number.
   const int cursor = save_phase == 0 ? -1 : on_page ? page_cur : load_mode ? load_cur : save_cur + 1;
   // Widescreen: list + dial right, slot grid left; the wide detail / message frames stay centred. The page's list takes the dial's place.
-  if (!(on_page && save_phase == 1) && !save_only) {
+  if (!(on_page && listed) && !save_only) {
     group(Right);
     save_dial();
   }
@@ -399,7 +422,7 @@ void MainMenu::Impl::build_save() {
   // State 0: only the list + dial and frame 0x55 with the description of the highlighted choice. The save choice and its "No save
   // data" message keep them and add frame 0x56: "Please choose a slot." and the lines OpenCross / Slot 1 / Slot 2 (save_layout
   // choice_y) with the pointer beside the current one. The save-list-only mode draws neither the list nor frame 0x55.
-  if (save_phase != 1) {
+  if (!listed) {
     if (!save_only) {
       Frame(85, sl::kTopMsgX, sl::kTopMsgY);
       const std::u32string description = utf32(menu_str(top_cur == 0 ? 0x801F2BE0 : 0x801F2C18, top_cur == 0 ? "Save a File" : "Load a File"));
@@ -476,8 +499,8 @@ void MainMenu::Impl::build_save() {
     }
     if (page_top > 0) scroll_arrow(sl::kRowMarkX - 4.5f, sl::kRowY0 - 3.0f, true);
     if (page_top + sl::kPageRows <= save::kOcFiles) scroll_arrow(sl::kRowMarkX - 4.5f, sl::row_y(sl::kPageRows - 1) + 10.0f, false);
-    Frame(84, sl::kDetailX, sl::kDetailY);
-    {
+    if (save_phase != 4) {
+      Frame(84, sl::kDetailX, sl::kDetailY);
       // One size for every number: the widest caption's.
       const std::u32string caption = capt("File#", "File#") + utf32(sl::page_caption(page_cur));
       float scale = sl::kFileCapScale;
@@ -495,32 +518,44 @@ void MainMenu::Impl::build_save() {
     // Caption tab: cmnmes "slot" in bn.
     HT(face_gn, sl::kSlotCapX, sl::kSlotCapY, capt("slot", "Slot") + (save_card == 1 ? U" 1" : U" 2"), kText, sl::kSlotCapScale);
     group(Centre);
-    Frame(84, sl::kDetailX, sl::kDetailY);
+    if (save_phase != 4) Frame(84, sl::kDetailX, sl::kDetailY);
     // Caption tab (bn): "File#" + the number + 1 of the cursor box's FILE, parsed from the CHRONOnn name; an
     // empty box shows no number; "File#  1" = CHRONO00, the auto-save.
-    if (cursor >= 0)
+    if (cursor >= 0 && save_phase != 4)
       HT(face_gn, sl::kFileCapX, sl::kFileCapY, capt("File#", "File#") + (cp.used ? utf32(sl::file_number(cp.slot)) : std::u32string()), kText,
          sl::kFileCapScale);
     group(Left);
     // Boxes: no fill (the parchment shows); icon only when the box holds a file.
+    int max_n = 0;
+    for (const SavePrev& other : prev)
+      if (other.used) max_n = std::max(max_n, other.slot + 1);
+    // Classic art + Ps1ResMenus: the PS1 box picture menutim.prd p<box>ic, texels 0..15 on the 32 x 32 box; else the face icon of
+    // save_layout.h's box rule. The PS1 draws the file number + 1.
+    auto box_picture = [&](float x, float y, int file_no, int icon) {
+      Tex* p1 = ps1_screen() ? texs.ps1("ps1:icon" + std::to_string(file_no), [&] { return ps1::slot_icon(*vfs, file_no); }) : nullptr;
+      if (p1) Img(p1, PX(x), PY(y), PX(sl::kBox), PY(sl::kBox), 0, 0, ps1::kSlotIconUv, ps1::kSlotIconUv);
+      else if (const Tex* ic = slot_icon(icon)) Img(ic, PX(x), PY(y), PX(sl::kBox), PY(sl::kBox));
+    };
     for (int box = 0; box < 15; ++box) {
       const float x = sl::box_x(box), y = sl::box_y(box);
       if (prev[static_cast<size_t>(box)].used) {
-        // Classic art + Ps1ResMenus: the PS1 box picture menutim.prd p<box>ic, texels 0..15 on the 32 x 32 box.
-        int max_n = 0;
-        for (const SavePrev& other : prev)
-          if (other.used) max_n = std::max(max_n, other.slot + 1);
-        // The PS1 draws this number + 1.
         const int file_no = prev[static_cast<size_t>(box)].slot;
-        // Face icon choice: see save_layout.h.
-        const int fn = sl::box_icon(box, file_no, cursor, max_n);
-        Tex* p1 = ps1_screen() ? texs.ps1("ps1:icon" + std::to_string(file_no), [&] { return ps1::slot_icon(*vfs, file_no); }) : nullptr;
-        if (p1) Img(p1, PX(x), PY(y), PX(sl::kBox), PY(sl::kBox), 0, 0, ps1::kSlotIconUv, ps1::kSlotIconUv);
-        else if (const Tex* ic = slot_icon(fn)) Img(ic, PX(x), PY(y), PX(sl::kBox), PY(sl::kBox));
+        box_picture(x, y, file_no, sl::box_icon(box, file_no, cursor, max_n));
       }
+      if (save_phase == 4 && box == cursor && saving_file >= 0) box_picture(x, y, saving_file, sl::saving_icon(cursor, saving_file, max_n));
       if (box == cursor) box_outline(PX(x - 1), PY(y - 1), PX(sl::kBox + 1), PY(sl::kBox + 1), 2, kWhite);
     }
     group(Centre);
+  }
+  // Saving: no detail panel; the progress frame (its bar stays empty: the write holds the screen until it is done), the saving line in
+  // frame 0x55 and an empty frame 0x56.
+  if (save_phase == 4) {
+    Frame(81, sl::kProgressX, sl::kProgressY);
+    HT(face_gn, sl::kProgressX + sl::kProgressCapDx, sl::caption_y(sl::kProgressY, sl::kSlotCapScale), capt("process", "Progress"), kText, sl::kSlotCapScale);
+    Frame(85, sl::kTopMsgX, sl::kTopMsgY);
+    HLfit(sl::kTopMsgInkX, sl::kTopMsgInkY, utf32(msg), sl::kMsgWidth, sl::kMsgScale);
+    Frame(86, sl::kMsgX, sl::kMsgY);
+    return;
   }
   // message box (frame 0x56): "Please select a file." / the overwrite question / the result
   Frame(86, sl::kMsgX, sl::kMsgY);
@@ -543,7 +578,7 @@ void MainMenu::Impl::build_save() {
     return;
   }
   for (int i = 0; i < 3; ++i)
-    if (cp.party[static_cast<size_t>(i)] < save::kNumChars)
+    if (cp.party[static_cast<size_t>(i)] <= save::kLastFace)
       avatar(cp.party[static_cast<size_t>(i)], PX(sl::kFaceX + sl::kFaceStep * static_cast<float>(i)), PY(sl::kFaceY), PX(sl::kFace), PY(sl::kFace));
   const std::u32string leader = cp.leader;
   // The auto-save FILES (card 1's CHRONO00, the page's file 0) show their caption wherever their box is.

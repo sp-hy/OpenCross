@@ -130,6 +130,7 @@ void App::finish_field_battle(bool after_results) {
   achievements.battle_ended(battle_scene, code, ext_host.battles);
   // A monster-party fight (the Grand Slam) writes nothing back: no rewards, records, HP or Dopplegang pool.
   const bool written_back = battle.battle() && !battle.battle()->monster_party();
+  const int pip_form_before = world.game_state().slot.chars[static_cast<size_t>(battle::kPipCharId)].model_id;
   if (written_back) {
     int progress = static_cast<int>(world.game_state().slot.growth_progress());
     game::apply_battle_result(world.game_state(), tables, *battle.battle(), &progress);
@@ -149,6 +150,7 @@ void App::finish_field_battle(bool after_results) {
         save_char.cur_hp = static_cast<u16>(std::clamp(hp[i], 1, static_cast<int>(save_char.max_hp)));
       }
   }
+  game::settle_pip_form(world.game_state(), tables, pip_form_before);
   world.end_battle(code, after_results ? game::BattleResults::kFieldFadeDelay : 0);
   if (code == 1 && !(battle_flags & 2)) {
     // Party wiped in a fight that is not losable (BATTLE flag 2 clear): the next map becomes 9 (the game-over room, map digit 009 = the

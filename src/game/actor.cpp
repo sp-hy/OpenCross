@@ -94,6 +94,7 @@ void Actor::set_model(std::shared_ptr<ModelHandle> model) {
   model_ = std::move(model);
   ex_override_.clear();
   ex_seq_override_.clear();
+  ex_pack_ = false;
   reset_playback();
 }
 
@@ -591,26 +592,61 @@ const assets::AnimationClip& Actor::clip_at(int idx) const {
 }
 
 void Actor::set_ex_clips(std::vector<assets::AnimationClip> clips, assets::AnimSeqTable seq) {
+  // A second LOAD_ANIMATION puts the stand clip back whatever the entity is playing, then the old pack goes.
+  if (ex_pack_) stand_reset();
   clear_ex_clips();
   ex_override_ = std::move(clips);
   ex_seq_override_ = std::move(seq);
+  ex_pack_ = true;
 }
 
 void Actor::clear_ex_clips() {
+  ex_pack_ = false;
   if (ex_override_.empty()) return;
   const int clip_count = model_ ? static_cast<int>(model_->asset.clips.size()) : 0;
   const bool in_use = clip_ >= clip_count || from_clip_ >= clip_count || (seq_.pc >= 0 && seq_.id >= kExtraAnimBase);
   ex_override_.clear();
   ex_seq_override_.clear();
-  if (in_use && model_) {
-    // Put the stand clip back before the pack goes.
-    clip_ = from_clip_ = -1;
-    requested_ = -1;
-    busy_ = false;
-    seq_.pc = -1;
-    submit(slot_anim_[kSlotStand]);
-    run_seq();
-  }
+  // Put the stand clip back before the pack goes.
+  if (in_use) stand_reset();
+}
+
+void Actor::hold_default_pack() {
+  clear_ex_clips();
+  ex_pack_ = true;
+}
+
+void Actor::stand_reset() {
+  if (!model_) return;
+  clip_ = from_clip_ = -1;
+  requested_ = -1;
+  busy_ = false;
+  seq_.pc = -1;
+  submit(slot_anim_[kSlotStand]);
+  run_seq();
+}
+
+void Actor::drop_ex_pack() {
+  if (!ex_pack_) return;
+  if (slot_anim_[kSlotStand] >= kExtraAnimBase) slot_anim_[kSlotStand] = 1;
+  ex_override_.clear();
+  ex_seq_override_.clear();
+  ex_pack_ = false;
+  stand_reset();
+}
+
+void Actor::restart_anim() {
+  if (!model_ || submitted_ < 0) return;
+  int current = submitted_;
+  if (current >= kExtraAnimBase) current = slot_anim_[kSlotStand] >= kExtraAnimBase ? 1 : slot_anim_[kSlotStand];
+  if (requested_ >= kExtraAnimBase) requested_ = current;
+  clip_ = from_clip_ = -1;
+  fade_curve_ = 0;
+  seq_ = Seq{};
+  seq_mode_ = false;
+  busy_ = false;
+  submit(current);
+  run_seq();
 }
 
 float Actor::clip_length(int clip) const {
@@ -703,26 +739,6 @@ void unscaled_rotation(const render::Mat4& matrix, float out[9]) {
     for (int r = 0; r < 3; ++r) out[r * 3 + col] = length > 0.0f ? matrix.at(r, col) / length : 0.0f;
   }
 }
-// Normalises vec (a zero vector stays zero).
-void normalise3(float vec[3]) {
-  const float length = std::sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
-  if (length > 0.0f)
-    for (int i = 0; i < 3; ++i) vec[i] /= length;
-}
-// The angles {ax, 0, az} of RotMatrix that turn +y into the unit vector dir: ax = ratan2(dir.z, dir.y), then with
-// w = RotMatrix({-ax, 0, 0}) dir = (dir.x, |(dir.y, dir.z)|, 0): az = -ratan2(w.x, w.y). 4096 per turn.
-void head_angles(const float dir[3], float& ax, float& az) {
-  constexpr float k = 4096.0f / (2.0f * kPi);
-  ax = std::atan2(dir[2], dir[1]) * k;
-  az = -std::atan2(dir[0], std::sqrt(dir[1] * dir[1] + dir[2] * dir[2])) * k;
-}
-// RotMatrix({ax, 0, az}) = Rx(ax) * Rz(az) (PsyQ: z applied first), row-major.
-void head_matrix(float ax, float az, float out[9]) {
-  const float cx = std::cos(ax * kUnitsToRad), sx = std::sin(ax * kUnitsToRad);
-  const float cz = std::cos(az * kUnitsToRad), sz = std::sin(az * kUnitsToRad);
-  const float matrix[9] = {cz, -sz, 0, cx * sz, cx * cz, -sx, sx * sz, sx * cz, cx};
-  std::copy(matrix, matrix + 9, out);
-}
 }  // namespace
 
 bool Actor::attach_frame(int point, float rot[9], float pos[3]) const {
@@ -801,14 +817,9 @@ void Actor::head_look_at(const float target_world[3], int rate) {
   unscaled_rotation(eng, wr);
   // World forward = column z.
   const float fwd[3] = {wr[2], wr[5], wr[8]};
-  for (int i = 0; i < 3; ++i) head_.cur[i] = gr[0 * 3 + i] * fwd[0] + gr[1 * 3 + i] * fwd[1] + gr[2 * 3 + i] * fwd[2];
-  normalise3(head_.cur);
-  head_angles(head_.cur, head_.ax, head_.az);
-  head_.pax = head_.ax;
-  head_.paz = head_.az;
-  head_.active = true;
-  head_.returning = false;
-  head_.moving = true;
+  float start[3];
+  for (int i = 0; i < 3; ++i) start[i] = gr[0 * 3 + i] * fwd[0] + gr[1 * 3 + i] * fwd[1] + gr[2 * 3 + i] * fwd[2];
+  head_.start(start);
 }
 
 void Actor::head_reset() {
@@ -831,15 +842,9 @@ void Actor::head_reset() {
 
 void Actor::head_step() {
   // The head joint's callback, run while the local matrices are built, once per tick here (the engine loops once per
-  // elapsed tick of the frame):
-  //   d = normalise(attach point 1 - target), taken into the head joint's frame M = parent composite x animated local (scale removed);
-  //   (tx, tz) = angles(d), (cx, cz) = angles(cur); z range = [max(min(tz, cz), -0x180), min(max(tz, cz), 0x200)];
-  //   cur = normalise((cur * rate + d * (0x1000 - rate)) >> 12); (ax, az) = angles(cur), ax clamped to +-0x200, az to the z range;
-  //   cur = RotMatrix({ax, 0, az}) (0, 0x1000, 0); the joint's local matrix = RotMatrix({ax, 0, az}) x animated local rotation, the
-  //   animated translation kept. A change below 0x40 / 0x1000 on x and z clears the moving bit; with the returning bit set the
-  //   callback is then removed (the head follows the animation again).
-  head_.pax = head_.ax;
-  head_.paz = head_.az;
+  // elapsed tick of the frame): d = normalise(attach point 1 - target), taken into the head joint's frame M = parent composite x
+  // rest local (scale removed), then HeadTurn::step.
+  head_.begin_tick();
   if (!head_.active || !model_) return;
   const int j = head_joint();
   if (j < 0) {
@@ -860,43 +865,15 @@ void Actor::head_step() {
   float to_target[3];
   for (int r = 0; r < 3; ++r)
     to_target[r] = hm.at(r, 0) * ap.pos[0] + hm.at(r, 1) * ap.pos[1] + hm.at(r, 2) * ap.pos[2] + hm.at(r, 3) - head_.target[r];
-  normalise3(to_target);
+  HeadTurn::normalise(to_target);
   const render::Mat4 local = render::mat4_from_rt(assets::rotation_zyx(loc[static_cast<size_t>(j)].rot), loc[static_cast<size_t>(j)].trans);
   const render::Mat4 g = engine * (jt.parent >= 0 ? pal[static_cast<size_t>(jt.parent)] * local : local);
   float gr[9], head_dir[3];
   unscaled_rotation(g, gr);
   for (int i = 0; i < 3; ++i)
     head_dir[i] = gr[0 * 3 + i] * to_target[0] + gr[1 * 3 + i] * to_target[1] + gr[2 * 3 + i] * to_target[2];
-  normalise3(head_dir);
-  float tx, tz, cx, cz;
-  head_angles(head_dir, tx, tz);
-  head_angles(head_.cur, cx, cz);
-  const float zlo = std::max(std::min(tz, cz), -384.0f), zhi = std::min(std::max(tz, cz), 512.0f);
-  const float old[3] = {head_.cur[0], head_.cur[1], head_.cur[2]};
-  const float kc = static_cast<float>(head_.rate) / 4096.0f;
-  float blended[3];
-  for (int i = 0; i < 3; ++i) blended[i] = head_.cur[i] * kc + head_dir[i] * (1.0f - kc);
-  normalise3(blended);
-  float ax, az;
-  head_angles(blended, ax, az);
-  ax = std::clamp(ax, -512.0f, 512.0f);
-  // The engine tests the upper bound first.
-  if (az > zhi) az = zhi;
-  else if (az < zlo) az = zlo;
-  float rm[9];
-  head_matrix(ax, az, rm);
-  head_.cur[0] = rm[1];
-  head_.cur[1] = rm[4];
-  head_.cur[2] = rm[7];
-  head_.ax = ax;
-  head_.az = az;
-  constexpr float kSettle = 64.0f / 4096.0f;
-  if (std::fabs(head_.cur[0] - old[0]) < kSettle && std::fabs(head_.cur[2] - old[2]) < kSettle) {
-    head_.moving = false;
-    if (head_.returning) head_ = Head{.rate = head_.rate};
-  } else {
-    head_.moving = true;
-  }
+  HeadTurn::normalise(head_dir);
+  head_.step(head_dir);
 }
 
 void Actor::step_visual(bool moving, bool run) {
@@ -1152,7 +1129,7 @@ void Actor::compose(const std::vector<Local>& local, float alpha, bool head, std
     if (static_cast<int>(j) == hj) {
       joint_local = render::mat4_from_rt(assets::rotation_zyx(joints[j].rest_rot_deg), joints[j].rest_trans);
       float head_rot[9];
-      head_matrix(head_.pax + wrap_units(head_.ax - head_.pax) * alpha, head_.paz + wrap_units(head_.az - head_.paz) * alpha, head_rot);
+      head_.rotation_at(alpha, head_rot);
       render::Mat4 hr;
       for (int row = 0; row < 3; ++row)
         for (int col = 0; col < 3; ++col) hr.at(row, col) = head_rot[row * 3 + col];

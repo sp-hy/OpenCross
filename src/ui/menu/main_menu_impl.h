@@ -173,7 +173,8 @@ struct MainMenu::Impl {
   bool pad_l2 = false, pad_r2 = false;
   // save_cur: save grid cursor, slot - 1 (slots 1..14); top_cur: Save / Load choice (0 save, 1 load);
   // save_phase: 0 = Save / Load choice, 1 = slot grid / page list, 2 = save choice, 3 = "No save data" message, or with
-  // card_msg_corrupt the "Save data in Slot n is corrupted." message (since frame card_msg_start); save_card: the choice (0 = the OpenCross page, 1 = Slot 1, 2 = Slot 2); load_mode: the grid is the Load tab;
+  // card_msg_corrupt the "Save data in Slot n is corrupted." message (since frame card_msg_start), 4 = saving (the file is written;
+  // the progress screen holds input until the chimes, then the Save / Load choice, or the save choice in save_only mode); save_card: the choice (0 = the OpenCross page, 1 = Slot 1, 2 = Slot 2); load_mode: the grid is the Load tab;
   // load_cur: load grid cursor, slot 0..14 (0 = the auto-save); page_cur / page_top: the page's cursor row (= file number, 0 = its
   // auto-save) and first visible row.
   int save_cur = 0;
@@ -206,6 +207,12 @@ struct MainMenu::Impl {
   // transient message
   std::string msg;
   int msg_frames = 0;
+  // Frames from a save's confirm until its chimes play and the saving screen ends (0 = none pending).
+  static constexpr int kSaveChimeDelay = 22;
+  int chime_frames = 0;
+  // Card saves: the file number the saving screen draws on the cursor box (-1 = none); the grid keeps the boxes read before the write
+  // until the saving screen ends.
+  int saving_file = -1;
   DirectionRepeat<4> repeat;
 
   // ---- drawing
@@ -273,6 +280,8 @@ struct MainMenu::Impl {
   int cur_char() const;
   void cycle_member(int step);
   void sfx(int id);
+  void begin_saving(const std::string& line);
+  void end_saving();
   void say(const std::string& message_text, int duration_frames = 150);
   Nav poll(const platform::Input& in);
   void open(GameState& state, bool allow_save);
@@ -433,7 +442,7 @@ struct MainMenu::Impl {
   NeedleTexture needle_tex;
 
   // Defined in main_menu_draw.cpp.
-  void Hand(float pivot_x, float pivot_y, int angle);
+  void Hand(float pivot_x, float pivot_y, int angle, float brightness = 1.0f);
 
   // Defined in main_menu_main.cpp.
   void clock_dial();

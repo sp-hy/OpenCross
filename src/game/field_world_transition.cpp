@@ -119,6 +119,7 @@ void FieldWorld::fade(int mode, int arg) {
   const bool to_black = mode != 0;
   if (to_black == fade_black_) return;
   fade_black_ = to_black;
+  if (to_black && room_card_ && arg == room_card_->dismiss_fade) room_card_ = nullptr;
   fade_target_ = to_black ? 1.0f : 0.0f;
   fade_add_ = false;
   fade_hold_ = 0;
@@ -174,6 +175,7 @@ void FieldWorld::request_battle(int battle_id, int field, int flags) {
     handoff_.resume_seconds = static_cast<double>(mixer_->bgm_position()) / audio::Mixer::kRate;
     mixer_->push_music();
     mixer_->stop();
+    song_change_ = {};
     handoff_.battle_music_stopped = true;
     // The battle song starts DURING the encounter effect, not at the battle load; BattleAudio::start_battle_theme then finds it playing.
     // Flag 0x40 picks the boss theme; the battle adopts the same song so there is no restart at the load.
@@ -213,6 +215,8 @@ FieldWorld::BattleRequest FieldWorld::take_battle() {
     for (const auto& emitter : fenc_fx_.emitters) emitters_->kill(emitter.name);
   seq_dim_ = {};
   seq_post_ = {};
+  // The field snapshot drops every extra animation pack; an entity that held one goes back to its stand slot, whatever it was playing.
+  for (Ent& ent_state : ents_) ent_state.actor.drop_ex_pack();
   return handoff_.battle_req;
 }
 
@@ -228,6 +232,9 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
     apply_battle_disguise();
     rebind_party();
   }
+  // The rebuilt field submits the current animation of every entity with a 3D object again, from its first frame.
+  for (size_t i = 0; i < ents_.size(); ++i)
+    if (!(vm_.entity(static_cast<int>(i)).flags38 & script::flag38::kNo3dObject)) ents_[i].actor.restart_anim();
   // Field re-entry: a subtractive fade from black over 0x30 ticks, and the field restarts with the room-entry window open.
   begin_entry_fade(0);
   fade_hold_ = fade_delay;

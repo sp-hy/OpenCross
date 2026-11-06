@@ -17,7 +17,8 @@
 - tap confirm
 - wait 90
 - wait 20
-- tap start                             # Start: accept "Serge"
+- tap down
+- tap confirm                         # Confirm: accept "Serge"
 - wait movie start 300                # the title script's D4 #2: a02koryu plays first (skippable)
 - wait 60
 - tap confirm
@@ -36,7 +37,8 @@
 - tap e
 - tap e                             # R1 x2: the position moves onto the 'd'
 - tap cancel                          # backspace blanks it: "Kid" -> "Ki"
-- tap start                             # Start: accept
+- tap down
+- tap confirm                         # Confirm: accept
 - wait menu closed 120
 - assert name 1 Ki
 # ---- FE 5B: party screen: Serge's slot is locked (new game), Kid <-> the third member

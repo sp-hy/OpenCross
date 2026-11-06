@@ -19,20 +19,21 @@ EquipCand row_at(const std::vector<EquipCand>& candidates, int row, bool fill_ok
 }
 }  // namespace
 
-// The list cursor is kept between slots and list visits; it resets only when the screen opens. While the slot column has the focus a
-// cursor past the end of the slot's list moves to the row just past the last entry.
+// The list cursor is kept between slots and list visits; it resets when the screen opens and when L1 / R1 switch the member, which
+// also puts the slot column on the weapon (not while a roster pick stands in). While the slot column has the focus a cursor past
+// the end of the slot's list moves to the row just past the last entry.
 void MainMenu::Impl::update_equip(const Nav& nav) {
+  if ((nav.l1 || nav.r1) && stand_in < 0) {
+    cycle_member(nav.l1 ? -1 : 1);
+    eq_list = false;
+    eslot = eq_cur = eq_scroll = 0;
+  }
   const int character = cur_char();
-  if (nav.l1) cycle_member(-1), eq_list = false;
-  if (nav.r1) cycle_member(1), eq_list = false;
   if (!eq_list) {
     if (nav.up) eslot = wrap(eslot - 1, 5), sfx(1);
     if (nav.down) eslot = wrap(eslot + 1, 5), sfx(1);
     if (nav.cancel) back_to_main(2, true), sfx(6);
-    else if (nav.tri) {
-      gs->unequip_accessories(character);
-      sfx(0x48);
-    } else if (nav.ok) {
+    else if (nav.ok) {
       eq_list = true;
       sfx(8);
     }

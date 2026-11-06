@@ -182,6 +182,10 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   gs_ = ui::GameState(entry.data, &rules_);
   // Every load grants the Time Shifter key item.
   newgame::ensure_time_shifter(gs_.slot);
+  // A slot without a valid ext_save.dat pair: Pip in an evolved form (0x2C..0x30) gets the stat sync.
+  if (const int form = gs_.slot.chars[static_cast<size_t>(newgame::kPip)].model_id; ext_form_sync_ && form >= 0x2C && form <= 0x30)
+    newgame::pip_form_stats(tables_, gs_.slot);
+  ext_form_sync_ = false;
   custom_names_.clear();
   for (int char_id = 0; char_id < save::kNumChars; ++char_id)
     if (std::u32string name = saved_custom_name(entry.data, ext_names_, char_id); !name.empty()) custom_names_[char_id] = std::move(name);
@@ -416,12 +420,18 @@ namespace {
 constexpr float kLoadFade = 0.5f;
 // Opening the field menu: the field fades to black over 10 frames, the screen stays black for 40 more, then the menu cuts in.
 constexpr float kMenuOutFade = 10.0f / 60.0f, kMenuBlackHold = 40.0f / 60.0f;
+// The load chimes: effect 0x19 on mask 0x20 and 0x76 on mask 0x40, once the screen is black. The load then waits for the 0x40 chime
+// (about 1 s); the cap only guards against a sound that never ends.
+constexpr int kLoadChimeA = 0x19, kLoadChimeB = 0x76;
+constexpr u32 kLoadChimeMaskA = 0x20, kLoadChimeMaskB = 0x40;
+constexpr float kLoadChimeWaitMax = 3.0f;
 }
 
 void GameFlow::begin_load_fade(const ui::SlotEntry& entry, bool from_slot_list) {
   load_entry_ = entry;
   load_from_slots_ = from_slot_list;
   load_pending_ = true;
+  load_chime_wait_ = -1.0f;
   veil_ = std::max(veil_, 0.0f);
 }
 
@@ -448,6 +458,17 @@ FlowAction GameFlow::tick_fade(float dt) {
   } else if (load_pending_) {
     veil_ = std::min(1.0f, veil_ + dt / kLoadFade);
     if (veil_ >= 1.0f) {
+      // Black: the two load chimes start and the music stops; the room loads once the mask 0x40 chime has run out (only measurable
+      // with a live device, so a scripted run loads at once).
+      if (load_chime_wait_ < 0.0f) {
+        load_chime_wait_ = 0.0f;
+        if (load_sfx_) load_sfx_(kLoadChimeA, kLoadChimeMaskA), load_sfx_(kLoadChimeB, kLoadChimeMaskB);
+        if (mixer_) mixer_->stop();
+        return action;
+      }
+      load_chime_wait_ += dt;
+      if (mixer_ && mixer_->device_open() && mixer_->sfx_active(kLoadChimeMaskB) && load_chime_wait_ < kLoadChimeWaitMax) return action;
+      load_chime_wait_ = -1.0f;
       load_pending_ = false;
       // Continue+: the slot plus the cleared game.
       if (ngp_load_) {
@@ -459,7 +480,11 @@ FlowAction GameFlow::tick_fade(float dt) {
       }
       // ext_save.dat: custom names (same language only) + the battle counter.
       if (load_entry_.card == 0 && page_) machine_.set_ext_names(page_->read_ext(load_entry_.slot, static_cast<u32>(lang_)).names);
-      else if (dat_) machine_.set_ext_names(dat_->read_ext(load_entry_.card, load_entry_.slot, static_cast<u32>(lang_)).names);
+      else if (dat_) {
+        const save::ExtSlot ext = dat_->read_ext(load_entry_.card, load_entry_.slot, static_cast<u32>(lang_));
+        machine_.set_ext_names(ext.names);
+        machine_.set_ext_form_sync(ext.valid == 0);
+      }
       action = load_from_slots_ ? machine_.on_slot(load_entry_) : machine_.on_load(load_entry_);
       load_entry_ = {};
     }

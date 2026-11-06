@@ -316,6 +316,8 @@ class FieldHost {
   virtual void set_dialog_face(int face) = 0;
   // E2 wait: the running entity's own window is open
   virtual bool dialogue_open() = 0;
+  // E2 of an entity culled off screen: closes its own window and returns true, unless op 62 flag 0x400 opened it as kept (false)
+  virtual bool drop_culled_dialogue() = 0;
   // E0 / E3 gate: own window open or all 4 windows in use
   virtual bool dialogue_blocked() = 0;
   // E0 (speaker -1) E3 E4
@@ -354,6 +356,10 @@ class FieldHost {
   virtual bool play_song_ex(int song, int volume) = 0;
   // 8A wait
   virtual bool song_changing() = 0;
+  // 2D WAIT of `ticks`: -1 = the plain counter, 0 = hold this tick, 1 = the wait is over (a cue timed to the playing music).
+  virtual int music_wait(int /*ticks*/) { return -1; }
+  // True: op `op`, whose code word 4 bytes on is `word`, does not run this tick (a music cue holds it).
+  virtual bool music_hold(int /*op*/, u32 /*word*/) { return false; }
   // C6
   virtual void play_sfx(int mode, int id, int volume, int pan, int extra) = 0;
   // FE 22: slot, frames, volume (the sounds C6 started on the slot slide to it)
@@ -526,6 +532,7 @@ class NullHost : public FieldHost {
   void setup_dialog_window(int ent, std::span<const s32> v5) override;
   void set_dialog_face(int face) override;
   bool dialogue_open() override;
+  bool drop_culled_dialogue() override;
   bool dialogue_blocked() override;
   void open_dialogue(int speaker, int message, int flags) override;
   void dialogue_choice(int first, int last) override;

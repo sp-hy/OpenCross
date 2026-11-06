@@ -27,6 +27,37 @@ bool sheet_atlas_image(const assets::SpriteSheet& sheet, u32& w, u32& h, std::ve
   return true;
 }
 
+namespace {
+
+constexpr u32 kHdScale = 4;
+
+bool has_hd_sprite(const assets::SpriteSheet& sheet) {
+  for (const auto& frame : sheet.frames)
+    for (const auto& sprite : frame)
+      if (!sprite.hd_rgba.empty()) return true;
+  return false;
+}
+
+// The sheet_atlas_image layout at 4x: each sprite's HD image, or its 1x texels repeated 4 x 4.
+void hd_atlas_image(const assets::SpriteSheet& sheet, u32 w, u32 h, std::vector<u8>& img) {
+  const u32 atlas_w = w * kHdScale;
+  img.assign(static_cast<size_t>(atlas_w) * h * kHdScale * 4, 0);
+  u32 y = 0;
+  for (const auto& frame : sheet.frames)
+    for (const auto& sprite : frame) {
+      const u32 sprite_w = sprite.w * kHdScale;
+      for (u32 j = 0; j < sprite.h * kHdScale; ++j)
+        for (u32 i = 0; i < sprite_w; ++i) {
+          const u8* src = sprite.hd_rgba.empty() ? &sprite.rgba[(static_cast<size_t>(j / kHdScale) * sprite.w + i / kHdScale) * 4]
+                                                 : &sprite.hd_rgba[(static_cast<size_t>(j) * sprite_w + i) * 4];
+          std::copy_n(src, 4, &img[(static_cast<size_t>(y * kHdScale + j) * atlas_w + i) * 4]);
+        }
+      y += sprite.h;
+    }
+}
+
+}  // namespace
+
 render::TextureKey effect_sheet_key(const assets::SpriteSheet& sheet, u32 w, u32 h, const u8* rgba) {
   return {"effects", sheet.name.empty() ? "sheet" : sheet.name, -1, render::texture_content_tag(w, h, rgba)};
 }
@@ -97,10 +128,15 @@ bool GpuEffects::load_more(const EffectBank& bank, Which which, double budget_ms
           y += sprite.h;
         }
       u32 upload_w = w, upload_h = h;
+      bool replaced = false;
       if (render::texture_registry::active()) {
         const render::TextureKey key = effect_sheet_key(sheet, w, h, img.data());
         render::texture_registry::dump(key, w, h, img.data());
-        render::texture_registry::replace(key, upload_w, upload_h, img);
+        replaced = render::texture_registry::replace(key, upload_w, upload_h, img);
+      }
+      if (hd_ && !replaced && has_hd_sprite(sheet)) {
+        hd_atlas_image(sheet, w, h, img);
+        upload_w = w * kHdScale, upload_h = h * kHdScale;
       }
       if (!atlas->tex.create(*ctx_, upload_w, upload_h, render::TextureFormat::Rgba8, img.data(), &batch)) {
         log::warn("effects: sheet atlas {}x{} not created", w, h);

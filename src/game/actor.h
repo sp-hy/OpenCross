@@ -15,6 +15,7 @@
 #include <span>
 
 #include "assets/model.h"
+#include "game/head_turn.h"
 #include "game/walk_mesh.h"
 #include "render/camera.h"
 #include "render/mat4.h"
@@ -180,7 +181,7 @@ class Actor {
     axes_prev_ok_ = axes_ticked_;
     axes_ticked_ = true;
   }
-  // The off-screen cull: the animation sequence, the clip playback and the head callback do not run.
+  // The off-screen cull, or a hidden entity: the animation sequence, the clip playback and the head callback do not run.
   void set_culled(bool culled) { culled_ = culled; }
   bool culled() const { return culled_; }
   // An inactive entity (SET_VISIBLE 0): no turn and no new clip; the clip it already plays keeps running.
@@ -262,8 +263,19 @@ class Actor {
   bool has_script_clip(int script_anim) const;
   // LOAD_ANIMATION (C1) / FREE_EXTRA_ANIMATION (C0): replaces / restores this actor's ex clips (SET_ANIMATION 0x80 + k) and the ex
   // animation-sequence table.
+  // set_ex_clips marks the entity as holding an extra pack (the field's extra-pack flag); clear_ex_clips releases it.
   void set_ex_clips(std::vector<assets::AnimationClip> clips, assets::AnimSeqTable seq = {});
   void clear_ex_clips();
+  // ANIM_PACK_RESTORE_START (BF): the character's default pack is held again (the model's own ex clips).
+  void hold_default_pack();
+  bool holds_ex_pack() const { return ex_pack_; }
+  // The field snapshot before a battle: an entity holding an extra pack drops it, and its current animation becomes the stand slot
+  // (a stand slot naming a pack clip, 0x80 and up, becomes 1), whatever it was playing.
+  void drop_ex_pack();
+  // The field's return from a battle: the model's playback starts over (no clip, no blend, no sequence) and the current id is
+  // submitted again, so its sequence runs from the top, else its clip cuts in at frame 0; the anim-done bit is set. No pack is held
+  // then, so a pack id plays the stand slot (1 when the slot itself names a pack clip).
+  void restart_anim();
   void clear_play() { requested_ = -1; busy_ = false; }
   // True while the anim-done bit is clear.
   bool anim_busy() const { return busy_; }
@@ -399,6 +411,8 @@ class Actor {
   void start_clip(int clip_index, int fade);
   // Model init + room start: no sequence, vars 0, the stand id submitted.
   void reset_playback();
+  // Back to the stand clip, cut in (current animation = stand slot, anim-done set).
+  void stand_reset();
   // Submission: the sequence of the id, or the clip itself.
   void submit(int script_anim);
   // One tick of the animation-sequence interpreter.
@@ -434,6 +448,7 @@ class Actor {
   std::shared_ptr<ModelHandle> model_;
   std::vector<assets::AnimationClip> ex_override_;
   assets::AnimSeqTable ex_seq_override_;
+  bool ex_pack_ = false;
   std::string empty_;
 
   ActorPose prev_, cur_;
@@ -524,21 +539,9 @@ class Actor {
   int idle_pick_ = kSlotIdle2;
 
   // Head-turn state of the model.
-  struct Head {
-    // The head-turn callback is installed.
-    bool active = false;
-    // The direction still changed by >= 0x40 / 4096 on an axis this tick.
-    bool moving = false;
-    // Set by head_reset; the callback is removed once the head settles.
-    bool returning = false;
-    // Weight of the current direction per tick (average of cur and target with weights rate and 0x1000 - rate).
-    int rate = 0;
+  struct Head : HeadTurn {
     // World point the head turns away from (d = head - target).
     float target[3]{};
-    // Unit direction in the frame of (parent composite x animated local) of the head joint.
-    float cur[3]{0, 1, 0};
-    // RotMatrix({ax, 0, az}) this tick / last tick (render interpolation), 4096 per turn.
-    float ax = 0, az = 0, pax = 0, paz = 0;
   } head_;
   std::vector<BoneEmitterRequest> bone_emitters_;
   bool attached_ = false;

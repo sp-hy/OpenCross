@@ -38,6 +38,9 @@ class GpuEffects {
   bool load_begin();
   bool load_more(const EffectBank& bank, Which which, double budget_ms, bool& done);
   void set_shared(std::shared_ptr<const GpuEffects> shared) { shared_ = std::move(shared); }
+  // HD art: a sheet with sprites that carry an HD image (EffectSprite::hd_rgba) is uploaded as a 4x atlas, those sprites from their HD
+  // image and the others scaled up (nearest). Set before load.
+  void set_hd(bool on) { hd_ = on; }
   void clear();
 
   // `quads` must be in draw order (sort_draw_order). Coordinates are layer space (320x240) mapped through `letterbox`.
@@ -64,6 +67,7 @@ class GpuEffects {
     render::TexRef set_lin;
   };
   static inline bool linear_ = false;
+  bool hd_ = false;
   render::GpuContext* ctx_ = nullptr;
   render::SpriteBatch* sprites_ = nullptr;
   render::Sampler sampler_;

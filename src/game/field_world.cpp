@@ -14,7 +14,6 @@
 #include "game/field_world_internal.h"
 #include "game/model_files.h"
 #include "game/new_game.h"
-#include "game/new_game_plus.h"
 #include "game/room_models.h"
 #include "import/battle_stage.h"
 #include "import/room_effects.h"
@@ -35,6 +34,7 @@ bool FieldWorld::init(const vfs::Vfs& files, render::GpuContext& ctx, render::Sp
   if (const char* env = std::getenv("OC_STUCK_TICKS"); env && std::atoi(env) > 0) watchdog_.stuck_limit = static_cast<u32>(std::atoi(env));
   install_name_hooks();
   discs_.load(files);
+  if (auto exe = files.read("cdrom/prog/slps_023.64"); !exe || !exe_strings_.load(*exe)) log::warn("field: executable strings unavailable");
   ctx_ = &ctx;
   sprites_ = &sprites;
   meshes_ = &meshes;
@@ -81,6 +81,7 @@ void FieldWorld::shutdown() {
   char_models_.clear();
   drop_character_prefetches();
   free_status_icons();
+  free_group_sprites();
   white_set_ = {};
   capture_.set = {};
   capture_.tex.destroy();
@@ -267,6 +268,7 @@ void FieldWorld::clear_room() {
   watchdog_.reset();
   sfx_vol_.fill(SfxSlide{});
   sfx_pan_.fill(SfxSlide{64, 64, 0, 0});
+  song_cue_ = {};
   ents_.clear();
   room_models_.clear();
   room_model_tried_.clear();
@@ -352,6 +354,7 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   }
   room_id_ = import::room_id_from_name(name);
   map_id_ = map_id_for(name);
+  load_group_sprites(name);
   // The defeated-monster record is set up before INIT runs its D1 spawns.
   defeated_enter_room();
   entrance_param_ = param;
@@ -376,6 +379,7 @@ bool FieldWorld::load_room(std::string_view name, int param) {
 
   vm_.set_var(script::var::kRoomParam, param);
   vm_.set_var(script::var::kMapId, map_id_ < 0 ? 0 : map_id_);
+  room_card_ = import::room_card(map_id_, param);
   // Var 0x3C is cleared at room load; scripts that allow saving here set it to 1. Var 0x3A = ROOM_PARAM (the entrance a later Load
   // re-enters with); var 0x50 = 0; var 0x34 (debug mode) = 1.
   vm_.set_var(0x3C, 0);
@@ -548,6 +552,7 @@ void FieldWorld::sync_flag_table() {
 
 void FieldWorld::end_of_tick(script::FieldVM& vm) {
   sync_flag_table();
+  step_song_change();
   if (pending_song_ >= 0 && (!mixer_ || mixer_->current_song() == pending_song_ || ++pending_ticks_ > 30)) pending_song_ = -1;
   const int player = player_entity();
   if (player >= 0) {
@@ -658,8 +663,18 @@ void FieldWorld::prefetch_room(int room_id, int disc) {
   view_.prefetch(stem, prd_path_for(stem));
 }
 
+void FieldWorld::select_disc_for_room(std::string_view stem) {
+  if (!discs_.loaded() || discs_.has_room(disc_, stem)) return;
+  const int other = disc_ == 1 ? 2 : 1;
+  if (!discs_.has_room(other, stem)) return;
+  set_disc(other);
+  vm_.set_var(0x42, other - 1);
+}
+
 std::string FieldWorld::room_stem_for_id(int room_id) const {
   if (std::string stem = discs_.room_stem(disc_, room_id); !stem.empty()) return stem;
+  // The disc's record is a placeholder (disc-1-only rooms are dummy.dat on disc 2): no room, as on the PS1, which cannot load one.
+  if (!discs_.record(disc_, DiscIndex::kMapBase + 3 * room_id).empty()) return {};
   const char* name = import::room_name_for_id(room_id);
   return name ? name : std::string();
 }

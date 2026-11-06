@@ -60,6 +60,8 @@ class KeyItemPopup {
   void finish_intro();
   // True until the list is closed.
   bool active() const;
+  // Drops the list without a sound (a room load clears the field windows).
+  void close();
   // dt seconds (the list closes through list_input).
   void update(float dt);
   void draw(const render::Frame& frame, float vw, float vh, bool resume = false);

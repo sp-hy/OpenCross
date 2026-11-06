@@ -166,6 +166,23 @@ void App::frame_hotkeys() {
     config.save(config_file);
     ui.toast(config.widescreen ? "Widescreen: On" : "Widescreen: Off");
   }
+  toggle_fullscreen_key();
+}
+
+// Alt+Enter flips the window between windowed and fullscreen, live and saved, as RDE's window procedure does (its fullscreen goes to
+// the window, the window to fullscreen). The Enter press is the system key's, so the game never sees it as a confirm.
+void App::toggle_fullscreen_key() {
+  if (config.window_mode != platform::WindowMode::Windowed) last_fullscreen = config.window_mode;
+  const bool alt = input.key_down[SDL_SCANCODE_LALT] || input.key_down[SDL_SCANCODE_RALT];
+  if (!alt) return;
+  const bool enter = input.key_pressed[SDL_SCANCODE_RETURN] || input.key_pressed[SDL_SCANCODE_KP_ENTER];
+  input.key_pressed[SDL_SCANCODE_RETURN] = input.key_down[SDL_SCANCODE_RETURN] = false;
+  input.key_pressed[SDL_SCANCODE_KP_ENTER] = input.key_down[SDL_SCANCODE_KP_ENTER] = false;
+  if (!enter || routing || replaying) return;
+  config.window_mode = config.window_mode == platform::WindowMode::Windowed ? last_fullscreen : platform::WindowMode::Windowed;
+  window.apply_video(static_cast<int>(config.window_mode), config.width, config.height, config.display);
+  ctx.request_resize();
+  config.save(config_file);
 }
 
 // The settings window takes the pad (ImGui reads it from SDL directly): while it is open the game sees no pad input, and a button or

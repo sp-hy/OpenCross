@@ -114,6 +114,8 @@ struct Material {
 struct SubMesh {
   u32 material = 0;
   u32 first_index = 0, index_count = 0;
+  // Rigid meshes: faces of a group other than GT3 / GT4 (the weapon specular routine skips them).
+  bool not_gouraud_textured = false;
 };
 
 // indices are triangles (quads split as v0,v1,v2 / v2,v1,v3), wound like the source; skinned is false for rigid meshes (weapons),
@@ -231,6 +233,8 @@ struct ModelAsset {
   // Status-screen TIM (import::apply_battle_hd_tim).
   std::vector<import::Image> hd_textures;
   u32 hd_scale = 4;
+  // The 256-entry palette of a battle player's HD TIM (packed RGBA, STP kept): it colours 8 bpp effect texels pasted into hd_textures[0].
+  std::vector<u32> hd_palette;
   // A replacement image for textures[i] (empty vector / width 0 = none), any size, STP kept: a texture mod's (render::resolve_model_textures)
   // or, on an effect pack's copy of a battle unit, the unit's drawn art cut into the page. Drawn in place of textures[i] AND hd_textures[i].
   std::vector<import::Image> mod_textures;

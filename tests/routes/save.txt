@@ -18,7 +18,8 @@
 - tap confirm
 - wait 90
 - wait 20
-- tap start                             # Start: accept "Serge"
+- tap down
+- tap confirm                         # Confirm: accept "Serge"
 - wait movie start 300                # the title script's D4 #2: a02koryu plays first (skippable)
 - wait 60
 - tap confirm
@@ -52,11 +53,11 @@
 - tap right                           # box 2: an empty box, the new file takes the lowest free number (1)
 - wait 10
 - tap confirm                         # empty file: saved at once
-- wait 60
-- screenshot sv_03_saved.png
-- tap cancel
-- wait 40
-- tap cancel
+- wait 8
+- screenshot sv_03_saving.png         # the saving screen: grid, Progress frame, "Saving to Slot 1..."
+- wait 52
+- screenshot sv_03_saved.png          # back on the Save / Load list, cursor on Save, no result message
+- tap cancel                          # the main list
 - wait 40
 - tap cancel
 - wait menu closed 300

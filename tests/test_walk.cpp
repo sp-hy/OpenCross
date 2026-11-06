@@ -1,5 +1,6 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
-// by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, and the screen ripple grid.
+// by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, the screen ripple grid and the
+// frame echo's projection.
 #include <cmath>
 #include <cstdio>
 
@@ -231,6 +232,125 @@ void test_anim_seq() {
   actor.step_visual(false, false);
   CHECK(actor.clip_name() == "s4_06" && !actor.anim_busy());
 }
+// Field battle hand-over: the snapshot drops every held extra pack and puts its holder on the stand slot whatever it plays (a pack id
+// in the stand slot becomes 1); the return submits every current id again from frame 0 (a sequence from its top) with anim-done set.
+void test_battle_pack_handover() {
+  auto handle = std::make_shared<game::ModelHandle>();
+  handle->asset.skeleton.joints.push_back(assets::Joint{});
+  auto clip = [](const char* source, u32 index) {
+    assets::AnimationClip anim_clip;
+    anim_clip.source = source;
+    anim_clip.index = index;
+    anim_clip.frame_count = 8;
+    anim_clip.name = std::string(source) + "_0" + std::to_string(index);
+    anim_clip.tracks.resize(1);
+    return anim_clip;
+  };
+  for (u32 i = 0; i < 6; ++i) handle->asset.clips.push_back(clip("s4", i));
+  const std::vector<assets::AnimationClip> pack = {clip("pk", 0), clip("pk", 1)};
+
+  // Pack held, a base clip playing: still back to the stand slot.
+  game::Actor base_clip;
+  base_clip.set_model(handle);
+  base_clip.set_ex_clips(pack);
+  base_clip.play(4);
+  for (int i = 0; i < 6; ++i) base_clip.step_visual(false, false);
+  CHECK(base_clip.holds_ex_pack() && base_clip.clip_name() == "s4_04");
+  base_clip.drop_ex_pack();
+  CHECK(!base_clip.holds_ex_pack() && base_clip.submitted_anim() == 1 && base_clip.clip_name() == "s4_01" && !base_clip.anim_busy());
+
+  // Pack clip playing, stand slot naming a pack clip: the slot becomes 1.
+  game::Actor pack_clip;
+  pack_clip.set_model(handle);
+  pack_clip.set_ex_clips(pack);
+  pack_clip.set_anim_slot(game::kSlotStand, 0x81);
+  pack_clip.play(0x80);
+  pack_clip.step_visual(false, false);
+  CHECK(pack_clip.clip_name() == "pk_00");
+  pack_clip.drop_ex_pack();
+  CHECK(pack_clip.anim_slot(game::kSlotStand) == 1 && pack_clip.clip_name() == "s4_01");
+
+  // No pack: the snapshot leaves it alone; the return restarts its clip at frame 0.
+  game::Actor plain;
+  plain.set_model(handle);
+  plain.set_ex_clips(pack);
+  plain.clear_ex_clips();
+  plain.play(4);
+  for (int i = 0; i < 6; ++i) plain.step_visual(false, false);
+  const float before = plain.anim_time();
+  plain.drop_ex_pack();
+  CHECK(plain.submitted_anim() == 4 && near(plain.anim_time(), before) && before > 0.5f);
+  plain.restart_anim();
+  CHECK(plain.clip_name() == "s4_04" && near(plain.anim_time(), 0) && !plain.anim_busy());
+
+  // A second LOAD_ANIMATION on a holder also puts the stand clip back first.
+  game::Actor reload;
+  reload.set_model(handle);
+  reload.set_ex_clips(pack);
+  reload.play(4);
+  reload.step_visual(false, false);
+  reload.set_ex_clips(pack);
+  CHECK(reload.submitted_anim() == 1 && reload.holds_ex_pack());
+
+  // ANIM_PACK_RESTORE_START (BF) holds the default pack: a base clip played after it goes back to the stand slot at the snapshot.
+  game::Actor restored;
+  restored.set_model(handle);
+  restored.hold_default_pack();
+  restored.play(4);
+  for (int i = 0; i < 6; ++i) restored.step_visual(false, false);
+  CHECK(restored.holds_ex_pack() && restored.clip_name() == "s4_04");
+  restored.drop_ex_pack();
+  CHECK(!restored.holds_ex_pack() && restored.submitted_anim() == 1 && restored.clip_name() == "s4_01" && near(restored.anim_time(), 0));
+
+  // A model with sequences (the same handle, given a table): the return starts the sequence from its top, which cuts its clip in at frame 0.
+  auto& seq_handle = handle;
+  auto entry = [](std::vector<s16> script) {
+    std::vector<s16> words = {0x10, 0, 0, 0, 0, 0, 0, 0};
+    words.insert(words.end(), script.begin(), script.end());
+    return words;
+  };
+  seq_handle->asset.anim_seq.resize(4);
+  seq_handle->asset.anim_seq[1] = entry({0x17, 0x15, 1, 8, 0x40, 0, 1, 9, 0});
+  seq_handle->asset.anim_seq[3] = entry({0x17, 0x15, 3, 8, 0x40, 0, 1, 9, 0});
+  game::Actor seq_actor;
+  seq_actor.set_model(seq_handle);
+  seq_actor.play(3);
+  for (int i = 0; i < 12; ++i) seq_actor.step_visual(false, false);
+  CHECK(seq_actor.clip_name() == "s4_03" && seq_actor.anim_time() > 0.5f);
+  seq_actor.restart_anim();
+  CHECK(seq_actor.clip_name() == "s4_03" && near(seq_actor.anim_time(), 0) && !seq_actor.anim_busy());
+}
+
+// A frozen actor (culled off screen, or hidden): the clip time stands still, a clip asked for meanwhile is started but held at its
+// first frame, and a one-shot stays busy until the actor runs again, then goes on from where it stood.
+void test_frozen_actor() {
+  auto handle = std::make_shared<game::ModelHandle>();
+  handle->asset.skeleton.joints.push_back(assets::Joint{});
+  for (u32 i = 0; i < 6; ++i) {
+    assets::AnimationClip anim_clip;
+    anim_clip.source = "s4";
+    anim_clip.index = i;
+    anim_clip.frame_count = 8;
+    anim_clip.name = "s4_0" + std::to_string(i);
+    anim_clip.tracks.resize(1);
+    handle->asset.clips.push_back(anim_clip);
+  }
+  game::Actor actor;
+  actor.set_model(handle);
+  actor.play(4);
+  for (int i = 0; i < 4; ++i) actor.step_visual(false, false);
+  const float before = actor.anim_time();
+  actor.set_culled(true);
+  for (int i = 0; i < 10; ++i) actor.step_visual(false, false);
+  CHECK(actor.clip_name() == "s4_04" && near(actor.anim_time(), before) && before > 0.5f);
+  actor.play(5);
+  for (int i = 0; i < 10; ++i) actor.step_visual(false, false);
+  CHECK(actor.clip_name() == "s4_05" && near(actor.anim_time(), 0) && actor.anim_busy());
+  actor.set_culled(false);
+  actor.step_visual(false, false);
+  CHECK(actor.clip_name() == "s4_05" && actor.anim_time() > 0.1f && actor.anim_time() < 0.5f);
+}
+
 // D6 attachment: the attached model is drawn from the parent's joint at the drawn render fraction, so it sits on the parent's attach
 // point in every frame, also while the parent moves and its display is smoothed over ticks (a move every 2nd tick).
 void test_attached_rigid() {
@@ -310,6 +430,32 @@ void test_screen_warp() {
   CHECK((mid - lo) * (hi - mid) > 0.0f);
 }
 
+// The FE 14 frame echo's projection: 4196 scales a point by 4196 / 4096 about the centre, half a pass by its square root; a turn
+// about z by 1024 (a quarter) maps x onto y; a tilt about y moves the near side outward.
+void test_frame_echo() {
+  game::FieldWorld::JoltView view;
+  view.echo_scale = {4196, 4196, 4096};
+  float x = 100, y = -50;
+  game::FieldWorld::frame_echo_point(view, 1.0f, x, y);
+  CHECK(near(x, 100.0f * 4196 / 4096, 1e-3f) && near(y, -50.0f * 4196 / 4096, 1e-3f));
+  x = 100;
+  y = 0;
+  game::FieldWorld::frame_echo_point(view, 0.5f, x, y);
+  CHECK(near(x, 100.0f * std::sqrt(4196.0f / 4096.0f), 1e-3f));
+  view.echo_scale = {4096, 4096, 4096};
+  view.echo_rot = {0, 0, 1024};
+  x = 100;
+  y = 0;
+  game::FieldWorld::frame_echo_point(view, 1.0f, x, y);
+  CHECK(near(x, 0.0f, 1e-3f) && near(y, 100.0f, 1e-3f));
+  view.echo_rot = {0, 32, 0};
+  float left = -160, right = 160, zero = 0;
+  game::FieldWorld::frame_echo_point(view, 1.0f, left, zero);
+  zero = 0;
+  game::FieldWorld::frame_echo_point(view, 1.0f, right, zero);
+  CHECK(right > -left && -left < 160.0f);
+}
+
 void test_give_item_element_count() {
   ui::GameState state;
   game::FieldWorld world;
@@ -334,7 +480,10 @@ int main() {
   test_attached_rigid();
   test_axes_blend();
   test_screen_warp();
+  test_frame_echo();
   test_anim_seq();
+  test_battle_pack_handover();
+  test_frozen_actor();
   game::WalkMesh wm;
   wm.init(build(), {0, game::kFlagBlockAll});
 

@@ -75,6 +75,9 @@ struct ModelCache {
   static std::string monster_model(const data::GameTables* tables, int monster_id);
   // The unit's model folder: the character's, or the creature's after a Dopplegang form change.
   static std::string unit_model_stem(const vfs::Vfs& vfs, const data::GameTables* tables, const battle::Unit& unit);
+  // The model number the animation scripts read (GetModelNum): a PC's kind byte (the record's model byte: Glenn with the Einlanzer pair
+  // is 0x32), else the monster record's model (the creature's after a Dopplegang form change).
+  static int model_number(const data::GameTables& tables, const battle::Unit& unit);
   // The hit-sound / hit-emitter group digit of a unit: the equipped weapon's material tier & 0xF (the same byte as the weapon model part;
   // NOT the crit class), -1 for monsters (their "_s00" entries are not renamed).
   static int weapon_digit(const data::GameTables* tables, const battle::Unit& unit);

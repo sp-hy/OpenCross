@@ -380,11 +380,8 @@ struct SequencePlayer::Impl {
             return false;
           }
           break;
+        // Wait for a pending song change: the engine starts a song at once, so nothing is ever pending here.
         case 0x7A:
-          if (hooks.wait_cond && hooks.wait_cond()) {
-            task.wait = 1;
-            return false;
-          }
           break;
         // Yield: the next command runs next tick, whatever this one's wait and any overshoot.
         case 0x67:

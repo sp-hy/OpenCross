@@ -240,19 +240,32 @@ int equipped_copies(const GameState& gs, int item) {
   return copies;
 }
 
-std::vector<int> breakdown_list(const GameState& gs, int category) {
+namespace {
+
+// The smith's break-down and sell lists: the bag's pieces of the category in stock order without the item-info bit `bag_refused`,
+// then every available character's worn pieces of the category without bit 0x20 that are not listed yet (the worn pass ignores
+// `bag_refused`).
+std::vector<int> smith_list(const GameState& gs, int category, int bag_refused, bool need_recipe) {
   std::vector<int> out;
-  auto push = [&](int id) {
+  auto push = [&](int id, int refused) {
     const data::ItemInfo* item_info = info(gs, id);
-    if (id <= 0 || !item_info || item_info->kind() != category || (item_info->extra & 0x20) || recipe(gs, id).empty()) return;
+    if (id <= 0 || !item_info || item_info->kind() != category || (item_info->extra & refused)) return;
+    if (need_recipe && recipe(gs, id).empty()) return;
     if (std::find(out.begin(), out.end(), id) == out.end()) out.push_back(id);
   };
   for (const auto& stack : gs.slot.items)
-    if (stack.qty > 0) push(stack.id);
-  for (int character : gs.roster())
-    for (int k = 0; k < GameState::kEquipSlots; ++k) push(gs.equipped(character, k));
+    if (stack.qty > 0) push(stack.id, bag_refused);
+  const int first_slot = category == 0 ? 0 : category == 1 ? 1 : 2;
+  const int last_slot = category < 2 ? first_slot : GameState::kEquipSlots - 1;
+  for (int character = 0; character < save::kNumChars; ++character)
+    if (gs.available(character))
+      for (int k = first_slot; k <= last_slot; ++k) push(gs.equipped(character, k), 0x20);
   return out;
 }
+
+}  // namespace
+
+std::vector<int> breakdown_list(const GameState& gs, int category) { return smith_list(gs, category, 0x20, true); }
 
 Res breakdown(GameState& gs, int item, int* gold_gain) {
   if (gold_gain) *gold_gain = 0;
@@ -275,28 +288,19 @@ Res breakdown(GameState& gs, int item, int* gold_gain) {
   return Res::Ok;
 }
 
-int gear_sell_unit(const GameState& gs, int item) {
+long long gear_sell_price(const GameState& gs, int item, int qty) {
   const data::ItemInfo* item_info = info(gs, item);
-  return item_info ? item_info->price() / 4 : 0;
+  return item_info ? (static_cast<long long>(item_info->price()) * qty) >> 2 : 0;
 }
 
-std::vector<int> gear_sell_list(const GameState& gs, int category) {
-  std::vector<int> out;
-  for (const auto& stack : gs.slot.items) {
-    const data::ItemInfo* item_info = stack.qty > 0 ? info(gs, stack.id) : nullptr;
-    if (item_info && item_info->kind() == category && !(item_info->extra & 0x80) &&
-        std::find(out.begin(), out.end(), static_cast<int>(stack.id)) == out.end())
-      out.push_back(stack.id);
-  }
-  return out;
-}
+std::vector<int> gear_sell_list(const GameState& gs, int category) { return smith_list(gs, category, 0x80, false); }
 
 Res sell_gear(GameState& gs, int item, int qty) {
   const data::ItemInfo* item_info = info(gs, item);
   if (!item_info || (item_info->extra & 0x80) || item_info->kind() == 4) return Res::NotSellable;
   if (qty < 1 || qty > gs.item_count(item)) return Res::NoStock;
   for (int k = 0; k < qty; ++k) gs.take_item(item);
-  add_gold(gs, static_cast<long long>(gear_sell_unit(gs, item)) * qty);
+  add_gold(gs, gear_sell_price(gs, item, qty));
   return Res::Ok;
 }
 

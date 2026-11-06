@@ -382,9 +382,9 @@ void MainMenu::Impl::leader(int entry, float x_ink, float cap_y, u32 colour) {
   leader_raw(x_ink - 2.8f, cap_y + 12.0f, bend_x, end_x, colour);
 }
 
-void MainMenu::Impl::Hand(float pivot_x, float pivot_y, int angle) {
+void MainMenu::Impl::Hand(float pivot_x, float pivot_y, int angle, float brightness) {
   const NeedleTexture::Quad needle = needle_tex.get(texs, *vfs, angle, 2.5f, 960.0f / 448.0f);
-  if (needle.tex) Img(needle.tex, PX(pivot_x) - needle.half_w, PY(pivot_y) - needle.half_h, 2 * needle.half_w, 2 * needle.half_h, 0, 0, 1, 1, rgb(175, 172, 172));
+  if (needle.tex) Img(needle.tex, PX(pivot_x) - needle.half_w, PY(pivot_y) - needle.half_h, 2 * needle.half_w, 2 * needle.half_h, 0, 0, 1, 1, shade(rgb(175, 172, 172), brightness));
 }
 
 // Screen title `title_index` (right-aligned bn, with its underline) and the bottom bar: the star glyph with the star counter / star

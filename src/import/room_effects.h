@@ -18,6 +18,12 @@ assets::RoomEffects load_room_effects(ByteSpan prd, const Vram& base, ByteSpan l
 // sequences accept the ~100 battle ops (lenient framing), camera/AKAO/curve entries are kept as blobs.
 assets::RoomEffects load_battle_effects(ByteSpan prd, ByteSpan ctd, const Vram& base, ByteSpan lib = {});
 
+// RDE's 4x page of one sheet: `hd` is a TIM four times the size of the sheet's texture rect (its header position is not used), placed at
+// the sheet's texture position, its CLUT (when it has one) at the sheet's CLUT position. Fills EffectSprite::hd_rgba of every sprite whose
+// texels lie inside that rect (same depth as the TIM): the 4x texels through the CLUT the sprite names, read from `vram` with the page's
+// CLUT written in. Returns the number of sprites filled.
+size_t cut_hd_sheet(assets::SpriteSheet& sheet, const Vram& vram, const Tim& hd);
+
 // Payload of the nested type-0x01 pack `name` of a drp (a drp itself whose entries the engine links into the same name
 // registry as the outer file's), empty when absent. effect/particle.prd > 'fenc' holds the field encounter effect 'enct';
 // load it with load_battle_effects (its sequences use battle ops) and its meshes with load_stage.

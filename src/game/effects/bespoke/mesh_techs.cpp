@@ -402,9 +402,9 @@ class Ghost2 : public MeshTech {
 // and runs the cutter (mode 0): every polygon the plane cuts spawns a shard task with the first two intersections, drift
 // ((rand % 3 - 1) * 3, -1, (rand % 3 - 1) * 3), counter 0 -> 10. Shard: c += 1 (mode 0; the task is freed at c >= 10 after that
 // frame's draw), A = I0, B = I1, C = I0 + (5, 5, 5) turned about their midpoint in the XY plane by c * 256, + drift * c; FT3 (I0's UV, I1's UV
-// twice) on the part's texture, grey (144 - 14 c) & 0xFF, additive, both sides, OT AVSZ3. 0x183: the caster shown again, state 0.
-// Not reproduced: 0x181 (the new form revealed from the feet up at y >= 100 - s, shards at -s) and 0x182 / 0x183's battle unit replacement:
-// OpenCross has no unit swap; the type-0x13 ground objects' skip flag is cleared.
+// twice) on the part's texture, grey (144 - 14 c) & 0xFF, additive, both sides, OT AVSZ3. 0x181: the new form revealed from the feet up
+// (clipped at 100 - s, the cutter at -s, shards counting down). 0x182 / 0x183: the battle unit swap; 0x183: the caster shown again,
+// state 0. Not reproduced: init clears the skip flag of the type-0x13 ground objects.
 class Hensin : public MeshTech {
  protected:
   bool command(int op, const int* args, int count) override {

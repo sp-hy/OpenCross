@@ -102,7 +102,13 @@ class Player {
   void pump_audio();
   // Where the movie picture goes: the 4:3 fit, or the staff roll's panel.
   Rect picture_rect(float view_w, float view_h) const;
-  void draw_strip(float view_w, float view_h);
+  // The staff strip's quad on screen, clipped to the strip's rows; false when no row is in the area.
+  struct StripQuad {
+    float x0, y0, x1, y1, v0, v1;
+  };
+  bool strip_quad(float view_w, float view_h, StripQuad& quad) const;
+  // `colour` tints the strip (the held frame's fade passes its alpha).
+  void draw_strip(float view_w, float view_h, u32 colour = 0xFFFFFFFFu);
   void release_strip();
 
   audio::Mixer* mixer_ = nullptr;

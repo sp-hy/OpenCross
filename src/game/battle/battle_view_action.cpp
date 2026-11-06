@@ -99,7 +99,7 @@ void BattleView::update(float dt, const platform::Input& in) {
     if (const char* form_env = std::getenv("OC_DEV_FORM"); form_env && el == 238) pending_form_ = std::atoi(form_env), pending_form_unit_ = std::max(0, dbg_.cast_actor);
     int first = -1;
     for (int i = battle::kPcSlots; i < battle::kUnits && first < 0; ++i)
-      if (battle_->unit(i).present && battle_->unit(i).alive()) first = i;
+      if (battle_->unit(i).present && battle_->unit(i).standing()) first = i;
     // Dev: OC_DEV_WTGT=<unit> aims the --weapon attack at that unit, OC_DEV_HP1=1 leaves it with 1 HP first (a scripted death / form-2 kill:
     // `OC_GHOST=3:1,4:0 OC_DEV_WTGT=4 OC_DEV_HP1=1 ocbattleview 431 --weapon 2`).
     if (weapon >= 0) {
@@ -173,7 +173,7 @@ void BattleView::update(float dt, const platform::Input& in) {
       const int lo = ally ? 0 : first, hi = ally || !ts.enemies ? battle::kPcSlots : battle::kUnits;
       const bool caught = battle_->catch_in_trap(dbg_.lead, el, 0, lo);
       for (int i = lo; i < hi && !caught; ++i) {
-        if (!battle_->unit(i).present || (ts.ko_only ? battle_->unit(i).alive() : !battle_->unit(i).alive()) || (!ts.all && i != lo)) continue;
+        if (!battle_->unit(i).present || (ts.ko_only ? battle_->unit(i).standing() : !battle_->unit(i).standing()) || (!ts.all && i != lo)) continue;
         battle_->do_element(dbg_.lead, el, 0, i, i == lo);
       }
       battle_->finish_external_action();
@@ -196,7 +196,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         // approach act still owns the PC (handled by tick_action)
       } else if (ui_ == Ui::Wait && engaged_ && active_pc_ >= 0) {
         sync_shown();
-        const bool more = battle_->can_act(active_pc_) && battle_->unit(engaged_target_).alive() && !engaged_after_cast_;
+        const bool more = battle_->can_act(active_pc_) && battle_->unit(engaged_target_).standing() && !engaged_after_cast_;
         if (more) {
           ui_ = Ui::Chain;
           chain_auto_cursor();

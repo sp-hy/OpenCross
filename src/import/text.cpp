@@ -575,6 +575,45 @@ const u16* JpGlyphs::rows(int index) const {
   return &bitmaps_[static_cast<size_t>(index) * kJpGlyphSize];
 }
 
+// ---------------------------------------------------------------------------------------------- PS1 executable strings
+bool ExeStrings::load(ByteSpan exe) {
+  tables_.clear();
+  const size_t base = kExeStringsOffset;
+  auto u16_at = [&](size_t at) { return static_cast<u32>(exe[at] | (exe[at + 1] << 8)); };
+  auto u32_at = [&](size_t at) { return u16_at(at) | (u16_at(at + 2) << 16); };
+  if (exe.size() < base + 4) return false;
+  const u32 count = u32_at(base);
+  if (count == 0 || count > 64 || exe.size() < base + 4 + 4 * static_cast<size_t>(count)) return false;
+  exe_.assign(exe.begin(), exe.end());
+  for (u32 table = 0; table < count; ++table) {
+    const size_t start = base + u32_at(base + 4 + 4 * table);
+    std::vector<std::pair<u32, u32>> entries;
+    if (start + 2 <= exe.size()) {
+      const u32 n = u16_at(start) / 2;
+      for (u32 i = 0; i < n && start + 2 * i + 2 <= exe.size(); ++i) {
+        const size_t at = start + u16_at(start + 2 * i);
+        size_t end = at;
+        while (end < exe.size() && exe[end] != 0) {
+          const u8 code = exe[end];
+          const bool two = code >= 0xF8 || code == 4 || code == 5 || code == 8 || code == 0xE || code == 0xF || code == 0x16 || code == 0x17;
+          end += two ? 2 : 1;
+        }
+        entries.emplace_back(static_cast<u32>(at), static_cast<u32>(std::min(end, exe.size()) - at));
+      }
+    }
+    tables_.push_back(std::move(entries));
+  }
+  return true;
+}
+
+ByteSpan ExeStrings::get(int table, int index) const {
+  if (table < 0 || index < 0 || static_cast<size_t>(table) >= tables_.size()) return {};
+  const auto& entries = tables_[static_cast<size_t>(table)];
+  if (static_cast<size_t>(index) >= entries.size()) return {};
+  const auto [at, size] = entries[static_cast<size_t>(index)];
+  return ByteSpan(exe_.data() + at, size);
+}
+
 // ---------------------------------------------------------------------------------------------- PS1 stream
 std::optional<DialogueBlock> parse_dialogue_block(ByteSpan block) {
   if (block.size() < 8) return std::nullopt;

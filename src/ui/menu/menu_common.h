@@ -35,6 +35,12 @@ inline u32 rgb(int r, int g, int b, int a = 255) {
   return render::pack_rgba(static_cast<u8>(r), static_cast<u8>(g), static_cast<u8>(b), static_cast<u8>(a));
 }
 
+// `colour` with r, g and b scaled by `k` (0..1); alpha kept.
+inline u32 shade(u32 colour, float k) {
+  auto channel = [&](int shift) { return static_cast<int>(static_cast<float>((colour >> shift) & 0xFF) * k); };
+  return rgb(channel(0), channel(8), channel(16), static_cast<int>(colour >> 24));
+}
+
 // Flat colour of an innate / element colour bit (0x04 green .. 0x80 blue) for dots and chips.
 inline u32 element_colour(int bit, int a = 255) {
   switch (bit) {

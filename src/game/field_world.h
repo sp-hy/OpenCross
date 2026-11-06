@@ -41,6 +41,8 @@
 #include "game/room_view.h"
 #include "render/render_target.h"
 #include "render/shadow_pipeline.h"
+#include "import/room_cards.h"
+#include "import/room_fixes.h"
 #include "import/text.h"
 #include "platform/window.h"
 #include "script/field_host.h"
@@ -235,12 +237,15 @@ class FieldWorld final : public script::FieldHost {
       mixer_->stop();
     }
     pending_song_ = -1;
+    song_change_ = {};
     last_song_ = -1;
   }
   // The room's current song from its start, after the mixer was stopped outside the scripts (the title prompt's music fade).
   void restart_song() {
     if (last_song_ >= 0) start_song(last_song_, bgm_volume_);
   }
+  // The field's sounds around a menu screen that replaces the field (fade out as it opens, the C6 slots back as it closes).
+  void fade_screen_sounds(bool opening);
   void set_bgm_remastered(bool on, bool restart = true);
   bool bgm_remastered() const { return bgm_remastered_; }
   // set: "2021" / "1999"
@@ -283,8 +288,11 @@ class FieldWorld final : public script::FieldHost {
   // map transition set it from variable 0x42 (= disc - 1); a loaded save takes it from its variable 0x42 too.
   int disc() const { return disc_; }
   void set_disc(int disc);
-  // Room file stem of a script room id on the current disc; falls back to the lang.dat table.
+  // Room file stem of a script room id on the current disc; "" when that disc's record is not a map file; the lang.dat table
+  // only when the index has no record for the id.
   std::string room_stem_for_id(int room_id) const;
+  // A debug start or warp into a room only the other disc's index names switches to that disc (and variable 0x42 with it).
+  void select_disc_for_room(std::string_view stem);
   const DiscIndex& disc_index() const { return discs_; }
   // The save gate of the main menu (FE 72 save points and the menu key): variable 0x3C == 1.
   bool can_save() const { return vm_.var(0x3C) == 1; }
@@ -385,7 +393,8 @@ class FieldWorld final : public script::FieldHost {
   void draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_transition(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh);
-  bool overlay_needed() const { return any_window_open() || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold() || status_icons_shown(); }
+  bool overlay_needed() const { return any_window_open() || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold() || status_icons_shown() ||
+                                       (view_.layer_mask() & sprite_groups()) != 0; }
 
   // ---- 8F / 90 screen ripple (render/render_target.h build_screen_warp) ---------------------------------------------
   // On while the ripple is set; `ot` = the grid's ordering-table index (>= 7): content filed deeper (slot > ot) is warped, the rest is
@@ -409,8 +418,17 @@ class FieldWorld final : public script::FieldHost {
     // post: ABR 0 average, 1 add, 2 subtract, 3 add / 4
     int mode = 0;
     std::array<int, 3> rgb{0x80, 0x80, 0x80};
+    // FE 14 frame echo (post, ABR 0): the previous output scaled per axis by FE 12 (4096 = 1.0), turned by the FE 13 angles and
+    // projected about the field's projection centre (frame_echo_point); `scale` / `tx` / `ty` are unused then.
+    bool echo = false;
+    std::array<int, 3> echo_scale{0x1000, 0x1000, 0x1000};
+    std::array<int, 3> echo_rot{0, 0, 0};
   };
   JoltView jolt_view() const;
+  // Where the frame echo puts the previous output's point (x, y), in buffer pixels from the projection centre: the point at depth 512
+  // under the field's projection distance 512, scaled by echo_scale and turned by RotMatrix(echo_rot) (Rx * Ry * Rz). `share` (0..1]
+  // is the part of one pass drawn (the half tick of a 30 Hz field: scale^share, angles * share).
+  static void frame_echo_point(const JoltView& view, float share, float& x, float& y);
   // The ordering-table slab every field drawer honours (layers, shadows, actor faces, effect quads): only content with lo < slot <= hi is
   // drawn. The host draws the deep part (ot, inf], warps it, then the near part (-inf, ot]. Reset to everything after use.
   void set_draw_slab(float lo, float hi);
@@ -423,6 +441,9 @@ class FieldWorld final : public script::FieldHost {
   // ---- FE 02 captured-frame transitions (kinds 1 / 3 / 4 additive fade of the old frame, 5 / 6 slide) ------
   // The host hands the next presented frame to FieldWorld when capture_wanted() (GpuContext::request_capture), and draws the overlay as usual.
   bool capture_wanted() const { return capture_.want; }
+  // Tile groups the room shows as screen-fixed sprites instead of tiles in HD art (import::room_group_sprites; 0 in classic art): the
+  // host hides them in the room view (RoomView::set_hidden_groups); the window pass draws the sprites of the visible ones.
+  u32 sprite_groups() const;
   void set_captured_frame(std::vector<u8>&& rgba, u32 w, u32 h);
   // FE 70 as the A3 / C9 battle handlers copy it: the entity whose attach point 9 (waist) the
   // encounter effect 'enct' (effect/particle.prd > nested pack 'fenc') is placed on (emitter op 0x39 selector 12, effects_actor_basis);
@@ -448,7 +469,14 @@ class FieldWorld final : public script::FieldHost {
   const RoomView& view() const { return view_; }
   RoomView& view() { return view_; }
   bool dialogue_is_open() const { return any_window_open(); }
+  // Side of the face panel of the last window opened in slot 0: "left", "right", or "none" (no face, or a label).
+  const char* dialogue_portrait_side() const { return dialogue_face_ < 0 || label_ ? "none" : portrait_left_ ? "left" : "right"; }
+  // Message index of the last window opened (-1: none yet).
+  int last_dialogue_message() const { return last_dialogue_msg_; }
   float fade_level() const { return fade_; }
+  // RDE's HD card of this room entrance (import::room_cards, drawn by ui::WorldName): up from the room's load until a fade to black
+  // over its dismiss length starts; nullptr when there is none or it was taken down.
+  const import::RoomCard* room_card() const { return room_card_; }
   // Field menu closed: the field comes back from black over `ticks`.
   void fade_in_from_black(int ticks) {
     fade_ = 1.0f;
@@ -465,6 +493,11 @@ class FieldWorld final : public script::FieldHost {
   int auto_target_entity() const { return auto_target_; }
   // controls are free (no dialogue, fade, transition or running action)
   bool idle() const { return controls_free(); }
+  // The pad may ask for the main menu: as idle(), but the input lock does not refuse it while GF.19 is set (FE 81).
+  bool menu_idle() const { return controls_free(true); }
+  // GF.13 (FE 80) holds the key-item list: it opens hidden, the field keeps running, the menu stays refused, and it shows once
+  // the bit clears.
+  bool key_list_held() const { return (vm_.global_flags() & script::gflag::kKeyListHold) != 0; }
   // the pause screen may open over the field (message windows, choices and locked controls do not prevent it)
   bool pause_allowed() const;
   // RDE's fast / slow modes may change the field loop's speed: not on the title / ending maps 8 and 9, while variable 0x36 is set,
@@ -614,6 +647,7 @@ class FieldWorld final : public script::FieldHost {
   void setup_dialog_window(int ent, std::span<const s32> v5) override;
   void set_dialog_face(int face) override;
   bool dialogue_open() override;
+  bool drop_culled_dialogue() override;
   bool dialogue_blocked() override;
   void open_dialogue(int speaker, int message, int flags) override;
   void dialogue_choice(int first, int last) override;
@@ -630,9 +664,11 @@ class FieldWorld final : public script::FieldHost {
   void set_entity_rgb(int ent, int r, int g, int b) override;
   bool play_song(int song) override;
   bool play_song_ex(int song, int volume) override;
-  // PLAY_SONG = 127, FE 78 = its own volume
-  bool play_song_at(int song, int volume);
+  // PLAY_SONG = 127, FE 78 = its own volume and the short fade-out
+  bool play_song_at(int song, int volume, bool short_fade = false);
   bool song_changing() override;
+  int music_wait(int ticks) override;
+  bool music_hold(int op, u32 word) override;
   void play_sfx(int mode, int id, int volume, int pan, int extra) override;
   void sfx_volume(int slot, int frames, int volume) override;
   void sfx_pan(int slot, int frames, int pan) override;
@@ -752,7 +788,7 @@ class FieldWorld final : public script::FieldHost {
   bool camera_override() const;
   // the 5F entity while camera_override(), else the controlled entity
   int camera_entity() const;
-  bool controls_free() const;
+  bool controls_free(bool menu_request = false) const;
   int pad_heading(bool& run) const;
   bool blocked_by_solids(int player, float x, float z, float old_x, float old_z);
   bool push_target_inside_box(int crate, float vx, float vz) const;
@@ -811,6 +847,10 @@ class FieldWorld final : public script::FieldHost {
     std::unique_ptr<ui::DialogueDemo> box;
     int owner = -1;
     bool label = false;
+    // op 62 flag 0x400 at open: a culled owner's E2 leaves it open
+    bool kept = false;
+    // placed under the speaker (auto placement below, or mode 1)
+    bool below = false;
   };
   std::array<ExtraWindow, 3> extra_win_;
   // entity -> the window slot (0 = dialogue_, 1.. = extra_win_) of its last message
@@ -947,6 +987,7 @@ class FieldWorld final : public script::FieldHost {
   bool fade_add_ = false;
   // The last slot-0 fade went to black (a room exit, A8 mode 1); a fade-in clears it. A8 only acts when it flips this.
   bool fade_black_ = false;
+  const import::RoomCard* room_card_ = nullptr;
   // Effect-sequence screen colour (sequence ops 2B / 2C):
   // a full-screen flat quad of colour `cur`, mode m (0 opaque, else ABR m - 1), linear from the start
   // colour to the target over the given ticks. Only drawn while the colour is not black. 'enct' dims the field with it (mode 3 = B - F).
@@ -1031,6 +1072,23 @@ class FieldWorld final : public script::FieldHost {
   // song whose start the mixer has not confirmed yet (WAIT_SONG)
   int pending_song_ = -1;
   int pending_ticks_ = 0;
+  // A song request while another song is registered: the old one fades out and is cut, then the new one starts (step_song_change).
+  struct SongChange {
+    int song = -1;
+    int volume = 127;
+    int ticks = 0;
+  };
+  SongChange song_change_;
+  void step_song_change();
+  // The remastered music cue holding an op (music_hold): step 1 = faded out, counting the hold.
+  struct SongCueState {
+    int step = 0;
+    int ticks = 0;
+  };
+  SongCueState song_cue_;
+  // The song a cue started over the script's own (-1 = none).
+  int cue_song_ = -1;
+  bool play_stream(int song, int volume, double start_seconds);
   // FE 29: C6 slots kept across the next room change
   u32 sfx_keep_slots_ = 0;
 
@@ -1095,9 +1153,18 @@ class FieldWorld final : public script::FieldHost {
   bool choice_pending_ = false;
   bool portrait_left_ = false;
   int flags_hi_for(int flag_byte) const;
-  void place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int message, int flag_byte, bool portrait);
+  int ps1_message_width(std::span<const u8> bytes, int speaker) const;
+  int ps1_string_width(int table, int id) const;
+  // Returns true when the window went under the speaker.
+  bool place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int message, int flag_byte, bool portrait);
+  // -1: no other message window is open; 1: another open window sits under its speaker; 0: the others sit elsewhere.
+  int other_window_below(const ui::DialogueDemo& self) const;
   // the open window is a label (non-modal: the player keeps control)
   bool label_ = false;
+  // window 0's ExtraWindow::kept / below
+  bool dialogue_kept_ = false, dialogue_below_ = false;
+  // The executable's name / item / grammar-form strings (window widths).
+  import::ExeStrings exe_strings_;
   // entity whose script opened it
   int dialogue_owner_ = -1;
   int dialogue_face_ = -1;
@@ -1309,6 +1376,18 @@ class FieldWorld final : public script::FieldHost {
   void free_status_icons();
   bool status_icons_shown() const;
   void draw_status_icons(render::SpriteBatch& sprites, float vw, float vh, bool ps1 = false);
+  // the room's group sprite rows and their images (one texture per image file)
+  struct GroupSpriteImage {
+    std::string path;
+    render::Texture tex;
+    render::TexRef set;
+  };
+  std::vector<import::RoomGroupSprite> group_sprites_;
+  std::vector<std::unique_ptr<GroupSpriteImage>> group_sprite_images_;
+  render::Sampler group_sprite_sampler_;
+  void load_group_sprites(std::string_view room);
+  void free_group_sprites();
+  void draw_group_sprites(render::SpriteBatch& sprites, float vw, float vh, bool ps1);
 };
 
 }  // namespace oc::game

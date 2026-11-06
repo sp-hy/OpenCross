@@ -32,7 +32,8 @@
 - wait 40
 - tap confirm                         # guide closes
 - wait 40
-- tap start                             # accept
+- tap down
+- tap confirm                         # Confirm: accept
 - wait menu closed 300
 - assert var 0x7E 2
 - wait movie start 900                # MAP_JUMP_DC 22 + PLAY_MOVIE_SKIPPABLE 2

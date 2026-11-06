@@ -36,7 +36,7 @@ struct BattleSummary {
 };
 
 // What the battle core needs besides the party: NG+ flag (head 0x42 bit 1), the growth state (star, progress, counter) and the bench
-// (every recruited character outside the party, for the star-up).
+// (every filled character record outside the party, recruited or not, for the star-up).
 struct BattleSetup {
   bool ng_plus = false;
   battle::GrowthState growth;
@@ -51,6 +51,11 @@ BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs
 // Rewards only on Outcome::Victory; HP / status / growth state are written for every outcome.
 // `progress` (optional) receives the growth progress counter after the battle.
 BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tables, const battle::Battle& finished_battle, int* progress = nullptr);
+
+// The last step of a fight, after the results screen has written its HP: when Pip's record form differs from `form_before` (his form
+// when the fight began) and both are forms 0x2B..0x30, a 99-star game gives him the new form's Lv 99 stats and its full grid
+// (newgame::pip_form_stats / pip_form_unlocks).
+void settle_pip_form(ui::GameState& gs, const data::GameTables& tables, int form_before);
 
 std::string utf8_from_u32(std::u32string_view text);
 

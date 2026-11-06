@@ -57,7 +57,8 @@ bool EmitterSystem::set_object_hook(std::string_view name, std::function<void(Ob
   return any;
 }
 void EmitterSystem::for_each_object(std::string_view name, const std::function<void(ObjectRef&)>& visit) {
-  for (auto& obj : impl_->objs) {
+  for (const size_t index : impl_->heap_order()) {
+    Object& obj = impl_->objs[index];
     if (!obj.alive || obj.owner < 0 || static_cast<size_t>(obj.owner) >= impl_->headers.size()) continue;
     if (impl_->headers[static_cast<size_t>(obj.owner)].nm() != name) continue;
     ObjectRef object_ref = impl_->ref(obj);

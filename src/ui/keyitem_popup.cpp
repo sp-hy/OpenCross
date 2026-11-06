@@ -323,6 +323,7 @@ void KeyItemPopup::finish_intro() {
   if (impl.open) impl.ticks = std::max(impl.ticks, 30.0f);
 }
 bool KeyItemPopup::active() const { return impl_->open; }
+void KeyItemPopup::close() { impl_->open = false; }
 
 void KeyItemPopup::update(float dt) {
   Impl& impl = *impl_;

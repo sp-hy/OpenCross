@@ -1,6 +1,7 @@
 // Checks for oc_audio: SAB header parse on a synthetic blob, loop-wrap maths, the BGM table, the mixer gain formula, and the AKAO side
 // (ADPCM decode, ADSR envelopes, the sequencer, SFX channel allocation, pitch vs output rate, live BGM switching, battle sound rendering,
-// the music gate mask, DA portamento, FE 0B sound requests and music push / pop).
+// the music gate mask, DA portamento, FE 0B sound requests, music push / pop, note lengths, held-note fine tune, LFO rate words across
+// channel starts, keymap / patch-zone envelopes, drum notes under legato, fixed voices and the note-on fine tune).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -346,6 +347,44 @@ void test_akao_mixer() {
   mixer.evict_sfx(0x10000);
   mixer.render(out.data(), 2048);
   CHECK(!mixer.sfx_active(0x10000));
+}
+
+// Monaural output: an SPU voice takes the pan table's centre gain on both sides whatever its pan, so a hard-panned effect (AA 00:
+// 24576 / 276) sounds on both sides at 17418 / 24576 of its loud side, not at the average of the two.
+void test_mono_voice() {
+  auto bank = audio::parse_bank(tiny_bank());
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(bank);
+  auto code = std::make_shared<audio::AkaoCode>();
+  code->data = {0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xAA, 0x00, 0x03, 0xA0};
+  audio::SfxProgram program;
+  program.code = code;
+  program.count = 1;
+  program.table = table;
+  auto side_energy = [&](bool mono, double& left, double& right, bool& equal) {
+    audio::Mixer mixer;
+    mixer.set_mono(mono);
+    mixer.play_sfx(program);
+    left = right = 0;
+    equal = true;
+    std::vector<float> out(2048 * 2);
+    for (int block = 0; block < 4; ++block) {
+      mixer.render(out.data(), 2048);
+      for (size_t i = 0; i < out.size(); i += 2) {
+        left += double(out[i]) * out[i];
+        right += double(out[i + 1]) * out[i + 1];
+        equal = equal && out[i] == out[i + 1];
+      }
+    }
+  };
+  double stereo_left, stereo_right, mono_left, mono_right;
+  bool stereo_equal, mono_equal;
+  side_energy(false, stereo_left, stereo_right, stereo_equal);
+  side_energy(true, mono_left, mono_right, mono_equal);
+  CHECK(!stereo_equal && mono_equal);
+  const double loud = std::max(stereo_left, stereo_right);
+  CHECK(loud > 0.0 && std::min(stereo_left, stereo_right) < loud * 0.01);
+  CHECK(std::fabs(std::sqrt(mono_left / loud) - 17418.0 / 24576.0) < 0.01);
 }
 
 // SFX channel allocation and stealing: 12 channels, a single program takes the highest free channel, a pair the highest free adjacent pair,
@@ -772,10 +811,10 @@ void test_battle_render() {
 
 // Per-note restarts and voice updates, read from the pitch register of the voice every 147 samples (60 samples per 0.2 s note at
 // 120 ticks/s). An A4 armed before a tie bends the held note (+12 then -12 from the moved note: back to the root, 0x1000); a music
-// vibrato with a 10-tick delay holds the root for the first 10 ticks of every key-on note and then runs the same wave from its first
-// sample in each; a +12 bend over 64 ticks (64 register units per tick) on a 24-tick note stops reaching the voice at the SFX gate
-// key-off (21 steps: 0x1540) and on a music channel at the rest, not at the gate 2 ticks before it (23 steps: 0x15C0), instead of
-// running to 0x2000 in the release tail.
+// vibrato with a 10-tick delay (counted from the key-on's own tick, so 9 more ticks) holds the root and then runs the same wave from
+// its first sample in each note; a +12 bend over 64 ticks (64 register units per tick, the first step in the note's own tick) on a
+// 24-tick note stops reaching the voice at the SFX gate key-off (22 steps: 0x1580) and on a music channel at the rest, not at the gate
+// 2 ticks before it (24 steps: 0x1600), instead of running to 0x2000 in the release tail.
 void test_note_restarts() {
   auto bank = audio::parse_bank(tiny_bank());
   auto table = std::make_shared<audio::InstrumentTable>();
@@ -824,7 +863,7 @@ void test_note_restarts() {
   while (first < vib.size() && vib[first] < 0) ++first;
   bool delayed = true, same_wave = true, moves = false;
   for (size_t note = 0; note < 3; ++note)
-    for (size_t i = 1; i < 23; ++i) delayed = delayed && get(vib, first + note * 60 + i) == 0x1000;
+    for (size_t i = 1; i < 21; ++i) delayed = delayed && get(vib, first + note * 60 + i) == 0x1000;
   for (size_t i = 23; i < 52; ++i) {
     same_wave = same_wave && get(vib, first + i) == get(vib, first + 60 + i) && get(vib, first + i) == get(vib, first + 120 + i);
     moves = moves || get(vib, first + i) != 0x1000;
@@ -833,11 +872,11 @@ void test_note_restarts() {
 
   auto sfx_tail = sfx({0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xB2, 0x1F, 0xA4, 0x40, 0x0C, 0x03, 0x92, 0x92, 0x92, 0xA0});
   const std::vector<int> sfx_regs = trace(*sfx_tail, 0.8);
-  CHECK(at(sfx_regs, 0.4) == 0x1540 && at(sfx_regs, 0.7) == 0x1540);
+  CHECK(at(sfx_regs, 0.4) == 0x1580 && at(sfx_regs, 0.7) == 0x1580);
 
   auto music_tail = music({0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xB2, 0x1F, 0xA4, 0x40, 0x0C, 0x03, 0x92, 0x92, 0xA0});
   const std::vector<int> music_regs = trace(*music_tail, 0.6);
-  CHECK(at(music_regs, 0.3) == 0x15C0 && at(music_regs, 0.55) == 0x15C0);
+  CHECK(at(music_regs, 0.3) == 0x1600 && at(music_regs, 0.55) == 0x1600);
   std::printf("note restarts: tie bend %04X %04X %04X; vibrato delayed %d same wave %d; released bend sfx %04X music %04X\n", at(bent, 0.15),
               at(bent, 0.42), at(bent, 0.68), delayed, same_wave, at(sfx_regs, 0.7), at(music_regs, 0.55));
 }
@@ -1088,6 +1127,322 @@ void test_protected_loop_end() {
   CHECK(end - first == 30);
 }
 
+// Runs an SFX program one sequencer tick at a time from its first key-on and records the key events in ticks from that key-on (a key-off
+// in the tick of a key-on is the re-key of the channel's voice and is left out), and calls `at_tick` after every tick.
+struct SfxKeys {
+  std::vector<int> on, off;
+};
+SfxKeys sfx_keys(const std::vector<u8>& program, int ticks, const std::function<void(audio::AkaoPlayer&, int)>& at_tick = {}) {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto code = std::make_shared<audio::AkaoCode>();
+  code->data = program;
+  audio::AkaoPlayer player(44100, true);
+  std::vector<int> on, off;
+  player.key_trace = [&](u32, int, int, bool key_on) { (key_on ? on : off).push_back(int(player.ticks())); };
+  player.start_program(code, 0, table);
+  std::vector<float> out(16 * 2);
+  for (u32 last = player.ticks(); on.empty() || int(player.ticks()) - on.front() < ticks;) {
+    player.render(out.data(), 16);
+    if (player.ticks() == last) continue;
+    last = player.ticks();
+    if (at_tick && !on.empty()) at_tick(player, int(player.ticks()) - on.front());
+  }
+  SfxKeys keys;
+  for (int tick : on) keys.on.push_back(tick - on.front());
+  for (int tick : off)
+    if (std::find(on.begin(), on.end(), tick) == on.end()) keys.off.push_back(tick - on.front());
+  return keys;
+}
+
+// Note, tie and rest lengths: the key events of this program match the PS1 driver running the same bytes. An F0 note (length 12) has no
+// gate key-off; a rest keys the voice off only by its own gate (length - 2); A2 2 gives a gate of 0 (no key-off), A2 5 a gate of 3;
+// DC +2 lengthens the following rest and note to 14; A2 7 sets the length of a rest; an F0 note of length 0 lasts 192 ticks; the
+// program's own end leaves the last F0 note sounding.
+void test_note_lengths() {
+  bool sounding = false;
+  const auto keys = sfx_keys({0xA1, 0x00, 0xA5, 0x04, 0xA8, 0x40, 0xF0, 0x0C, 0x04, 0x93, 0xF0, 0x0C, 0x93, 0xA2, 0x02, 0x04, 0x93,
+                              0xA2, 0x05, 0x04, 0x93, 0x04, 0xDC, 0x02, 0x93, 0x04, 0xDC, 0x00, 0x93, 0xA2, 0x07, 0x93, 0xF0, 0x00,
+                              0x93, 0x04, 0x93, 0xF0, 0x0C, 0xA0},
+                             420, [&](audio::AkaoPlayer& player, int) {
+                               sounding = player.active_channels() == 0 && player.active_voices() == 1;
+                             });
+  CHECK((keys.on == std::vector<int>{0, 12, 36, 60, 74, 91, 117, 150, 354, 378}));
+  CHECK((keys.off == std::vector<int>{22, 58, 72, 77, 101, 129, 340, 364}));
+  CHECK(sounding);
+}
+
+// D8 / D9 re-tune a held note at once (register 0x1000 -> 0x1400 -> 0x1600 on the following ties), and an FE 12 balance slide does
+// not move on an SFX channel.
+void test_fine_tune_held() {
+  std::vector<int> regs;
+  std::vector<float> gains;
+  sfx_keys({0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0x03, 0xD8, 0x20, 0x87, 0xD9, 0x10, 0x87, 0xFE, 0x12, 0x0C, 0x20, 0x87, 0xA0}, 95,
+           [&](audio::AkaoPlayer& player, int) {
+             for (int v = 0; v < audio::AkaoPlayer::kVoices; ++v)
+               if (player.probe_voice(v).active) regs.push_back(player.probe_voice(v).reg), gains.push_back(player.probe_voice(v).gl);
+           });
+  CHECK(regs.size() > 90);
+  if (regs.size() <= 90) return;
+  CHECK(regs[10] == 0x1000 && regs[34] == 0x1400 && regs[58] == 0x1600);
+  CHECK(gains[74] > 0 && gains[90] == gains[74]);
+}
+
+// The LFO rate words survive a channel start: a second program on the same slot runs E4 before its B4 from the 0x800 the first one
+// left (step 0x156: 0x956 after one tick, 0x1808 at the end); its B4 then sets 0x400. Values: the PS1 driver running the same programs.
+void test_lfo_rate_carry() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto program = [](std::vector<u8> bytes) {
+    auto code = std::make_shared<audio::AkaoCode>();
+    code->data = std::move(bytes);
+    return code;
+  };
+  audio::AkaoPlayer player(44100, true);
+  player.start_program(program({0xA1, 0x00, 0xA5, 0x04, 0xA8, 0x40, 0xB4, 0x00, 0x02, 0x00, 0x03, 0xA0}), 0, table);
+  std::vector<float> out(16 * 2);
+  for (int i = 0; i < 4000 && player.active_channels() > 0; ++i) player.render(out.data(), 16);
+  const int slot = audio::AkaoPlayer::kSfxChannels - 1;
+  CHECK(player.probe_channel(slot).rate[0] == 0x800);
+  player.start_program(program({0xA1, 0x00, 0xA5, 0x04, 0xA8, 0x40, 0xE4, 0x0C, 0x06, 0x03, 0xB4, 0x00, 0x01, 0x00, 0x03, 0xA0}), 0, table);
+  std::set<u32> rates;
+  for (int i = 0; i < 8000 && player.active_channels() > 0; ++i) {
+    player.render(out.data(), 16);
+    rates.insert(player.probe_channel(slot).rate[0]);
+  }
+  CHECK(rates.count(0x956) && rates.count(0x1808) && rates.count(0x400));
+}
+
+// Keymap (drum) and patch-zone notes write their envelope into the channel's ADSR words (attack byte << 8 with the instrument's attack
+// mode, decay and sustain level; sustain rate byte << 6; sustain mode 7 = bits 15:14 set; release byte; the instrument's release mode),
+// keep the channel's field where AD / B1 / B2 set an override (B3 clears them), and a keymap note's pan and reverb bit become the
+// channel's: a plain note after FE 05 keeps them.
+void test_zone_envelopes() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto probes = [&](std::vector<u8> bytes, u32 keymap, u32 patch, int notes) {
+    auto seq = std::make_shared<audio::AkaoSeq>();
+    seq->code = std::make_shared<audio::AkaoCode>();
+    seq->code->data = std::move(bytes);
+    seq->code->keymap_abs = keymap;
+    seq->code->patch_abs = patch;
+    seq->channels = {{0, 0}};
+    audio::AkaoPlayer player(44100);
+    player.load_music(seq, table);
+    std::vector<audio::AkaoPlayer::ChannelProbe> rows;
+    std::vector<float> out(16 * 2);
+    for (u32 last = player.ticks(); int(rows.size()) < notes;) {
+      player.render(out.data(), 16);
+      if (player.ticks() == last) continue;
+      last = player.ticks();
+      if (last % 24 == 2) rows.push_back(player.probe_channel(0));
+    }
+    return rows;
+  };
+  std::vector<u8> drum = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x00, 0xFE, 0x04, 0x03, 0xAD, 0x7F, 0x03,
+                          0xB3, 0x03, 0xFE, 0x05, 0x03, 0xA0};
+  drum.resize(0x40);
+  drum.insert(drum.end(), {0x00, 60, 0x05, 0x40, 0x07, 0x0C, 0x60, 0x90});
+  const auto rows = probes(drum, 0x40, 0, 4);
+  CHECK(rows[0].adsr[0] == 0x050F && rows[0].adsr[1] == 0xD00C && rows[0].pan == 0x5000 && rows[0].reverb);
+  CHECK(rows[1].adsr[0] == 0x7F0F && rows[1].adsr[1] == 0xD00C);
+  CHECK(rows[2].adsr[0] == 0x050F && rows[2].adsr[1] == 0xD00C);
+  CHECK(rows[3].adsr[0] == 0x050F && rows[3].adsr[1] == 0xD00C && rows[3].pan == 0x5000 && rows[3].reverb);
+
+  std::vector<u8> zones = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xFE, 0x14, 0x00, 0xB1, 0x20, 0x03, 0xA0};
+  zones.resize(0x40);
+  for (int i = 0; i < 16; ++i) zones.insert(zones.end(), {u8(i ? 0xFF : 0x00), u8(i ? 0xFF : 0x00)});
+  zones.insert(zones.end(), {0x00, 0, 127, 0x05, 0x40, 0x07, 0x0C, 0x60, 0, 0, 0, 0, 0, 0, 0, 0});
+  const auto zone_rows = probes(zones, 0, 0x40, 1);
+  CHECK(zone_rows[0].adsr[0] == 0x050F && zone_rows[0].adsr[1] == 0xC80C);
+}
+
+// A slide armed in a tick takes its first step in that tick (the slides run after the opcodes): in `note; A8 vol; A4 01 semis; tie` the
+// one-tick bend reaches the pitch register in the same voice update as the A8 volume, as effect 12's A9 / A4 pair does on the PS1.
+void test_slide_same_tick() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto code = std::make_shared<audio::AkaoCode>();
+  code->data = {0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x10, 0x03, 0xA8, 0x60, 0xA4, 0x01, 0xF4, 0x87, 0xA0};
+  audio::AkaoPlayer player(44100, true);
+  player.start_program(code, 0, table);
+  const int voice = audio::AkaoPlayer::kSfxVoiceBase + audio::AkaoPlayer::kSfxChannels - 1;
+  std::vector<float> out(size_t(184) * 2);
+  int first_reg = -1, first_gl = -1, reg_step = -1, gl_step = -1;
+  float gl = 0;
+  for (int i = 0; i < 200 && (reg_step < 0 || gl_step < 0); ++i) {
+    player.render(out.data(), 184);
+    const audio::AkaoPlayer::VoiceProbe probe = player.probe_voice(voice);
+    if (!probe.active) continue;
+    if (first_reg < 0) first_reg = probe.reg, first_gl = i, gl = probe.gl;
+    if (reg_step < 0 && probe.reg != first_reg) reg_step = i;
+    if (gl_step < 0 && probe.gl != gl) gl_step = i;
+  }
+  CHECK(first_gl >= 0 && reg_step > first_gl && reg_step == gl_step);
+  std::printf("slide same tick: volume step %d, pitch step %d\n", gl_step, reg_step);
+}
+
+// Music voice search: 25 channels key on in one update; the 24 voices keyed in that update count as full level, so the 25th note is
+// dropped. A channel keying on one tick later takes the voice with the lowest envelope level (here all equal: the first).
+void test_music_voice_search() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto seq = std::make_shared<audio::AkaoSeq>();
+  seq->code = std::make_shared<audio::AkaoCode>();
+  seq->code->data = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0x00, 0xA0, 0xA1, 0x00, 0xA5, 0x05, 0xFD, 0x01, 0x00, 0xA0};
+  for (int i = 0; i < 25; ++i) seq->channels.push_back({i, 0});
+  seq->channels.push_back({25, 12});
+  audio::AkaoPlayer player(44100);
+  std::vector<std::pair<int, int>> key_ons;
+  player.key_trace = [&](u32, int channel, int voice, bool key_on) {
+    if (key_on) key_ons.push_back({channel, voice});
+  };
+  player.load_music(seq, table);
+  std::vector<float> out(size_t(4410) * 2);
+  player.render(out.data(), 4410);
+  CHECK(key_ons.size() == 25);
+  if (key_ons.size() != 25) return;
+  bool first_24 = true;
+  for (int i = 0; i < 24; ++i) first_24 = first_24 && key_ons[size_t(i)].first == i && key_ons[size_t(i)].second == i;
+  CHECK(first_24);
+  CHECK(key_ons[24].first == 25 && key_ons[24].second == 0);
+  std::printf("music voice search: %zu key-ons for 26 notes, late channel took voice %d\n", key_ons.size(), key_ons[24].second);
+}
+
+// Patch zones with a gap (60..60 scale 0x40, 62..64 scale 0x7F): note 61 after a lower note takes the zone above the gap, after a higher
+// note the zone below it.
+void test_patch_zone() {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto gain = [&](u8 before) {
+    auto seq = std::make_shared<audio::AkaoSeq>();
+    seq->code = std::make_shared<audio::AkaoCode>();
+    seq->code->data = {0xFE, 0x00, 0x00, 0x80, 0xFE, 0x14, 0x00, 0xA5, 0x05, 0xA8, 0x7F, before, 0x0E, 0xA0};
+    seq->code->patch_abs = 0x10;
+    seq->code->data.resize(0x10 + 0x20 + 24, 0);
+    const u8 zones[16] = {0x00, 60, 60, 0x00, 0x00, 0x03, 0x00, 0x40, 0x00, 62, 64, 0x00, 0x00, 0x03, 0x00, 0x7F};
+    std::memcpy(&seq->code->data[0x30], zones, sizeof(zones));
+    seq->channels = {{0, 0}};
+    audio::AkaoPlayer player(44100);
+    player.load_music(seq, table);
+    std::vector<float> out(size_t(184) * 2);
+    float last = 0;
+    for (int i = 0; i < 70; ++i) {
+      player.render(out.data(), 184);
+      for (int v = 0; v < audio::AkaoPlayer::kVoices; ++v)
+        if (player.probe_voice(v).active) last = std::fabs(player.probe_voice(v).gl);
+    }
+    return last;
+  };
+  const float rising = gain(0x03), falling = gain(0x2F);
+  CHECK(rising > 0 && falling > 0 && std::fabs(rising / falling - 127.0f / 64.0f) < 0.05f);
+  std::printf("patch zone: note 61 after 60 gain %.4f, after 64 gain %.4f\n", rising, falling);
+}
+
+// One music channel of `bytes` (keymap / patch table at 0x40 when set) run for `ticks`: its key-on voices and its channel probe two
+// ticks into each 24-tick step.
+struct MusicRun {
+  std::vector<int> voices;
+  std::vector<audio::AkaoPlayer::ChannelProbe> rows;
+};
+MusicRun run_music(std::vector<u8> bytes, u32 keymap, u32 patch, int ticks, int number = 0, u32 gate_mask = 0) {
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(tiny_bank()));
+  auto seq = std::make_shared<audio::AkaoSeq>();
+  seq->code = std::make_shared<audio::AkaoCode>();
+  seq->code->data = std::move(bytes);
+  seq->code->keymap_abs = keymap;
+  seq->code->patch_abs = patch;
+  seq->channels = {{number, 0}};
+  seq->gate_mask = gate_mask;
+  audio::AkaoPlayer player(44100);
+  MusicRun run;
+  player.key_trace = [&](u32, int, int voice, bool key_on) {
+    if (key_on) run.voices.push_back(voice);
+  };
+  player.load_music(seq, table);
+  std::vector<float> out(16 * 2);
+  for (u32 last = player.ticks(); int(last) < ticks;) {
+    player.render(out.data(), 16);
+    if (player.ticks() == last) continue;
+    last = player.ticks();
+    if (last % 24 == 2) run.rows.push_back(player.probe_channel(0));
+  }
+  return run;
+}
+
+// Under CC legato a keymap (drum) note still keys on (PS1 trace of music004 channel 21 with its first A8 replaced by CC: every drum note
+// keys a voice while the mode word reads 3); a plain note under legato only re-pitches.
+void test_drum_legato() {
+  std::vector<u8> drum = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x00, 0xFE, 0x04, 0xCC, 0x03, 0x03, 0x03, 0xA0};
+  drum.resize(0x40);
+  drum.insert(drum.end(), {0x00, 60, 0x05, 0x40, 0x07, 0x0C, 0x60, 0x90});
+  const MusicRun drums = run_music(drum, 0x40, 0, 80);
+  const MusicRun plain = run_music({0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xCC, 0x03, 0x03, 0x03, 0xA0}, 0, 0, 80);
+  CHECK(drums.voices.size() == 3 && plain.voices.size() == 1);
+  std::printf("drum legato: %zu key-ons for 3 drum notes, %zu for 3 plain notes\n", drums.voices.size(), plain.voices.size());
+}
+
+// A patch key-on of the note the channel already holds keeps the zone and loads nothing: after B3 the channel's ADSR words stay the
+// instrument's (0x000F / 0x1F00) instead of the zone envelope (0x050F / 0xD00C) the first key-on wrote. PS1: music062 channel 0, B3
+// then the same D as before.
+void test_patch_same_note() {
+  std::vector<u8> zones = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xFE, 0x14, 0x00, 0x03, 0xB3, 0x03, 0x2F, 0xA0};
+  zones.resize(0x40);
+  for (int i = 0; i < 16; ++i) zones.insert(zones.end(), {u8(i ? 0xFF : 0x00), u8(i ? 0xFF : 0x00)});
+  zones.insert(zones.end(), {0x00, 0, 127, 0x05, 0x40, 0x07, 0x0C, 0x60, 0, 0, 0, 0, 0, 0, 0, 0});
+  const MusicRun run = run_music(zones, 0, 0x40, 80);
+  CHECK(run.rows.size() >= 3);
+  if (run.rows.size() < 3) return;
+  CHECK(run.rows[0].adsr[0] == 0x050F && run.rows[0].adsr[1] == 0xD00C);
+  CHECK(run.rows[1].adsr[0] == 0x000F && run.rows[1].adsr[1] == 0x1F00);
+  CHECK(run.rows[2].adsr[0] == 0x050F && run.rows[2].adsr[1] == 0xD00C);
+}
+
+// The header word at +0x28 also pins a channel to the hardware voice of its own number: channel 5 keys voice 5 with its bit set and the
+// first free voice (0) without it (PS1 traces of music069: channels 0..9 stay on their voices, channels 12 and 13 search).
+void test_fixed_voice() {
+  const std::vector<u8> code = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0x03, 0xA0};
+  const MusicRun fixed = run_music(code, 0, 0, 30, 5, 1u << 5), free = run_music(code, 0, 0, 30, 5, 0);
+  CHECK(fixed.voices == std::vector<int>{5} && free.voices == std::vector<int>{0});
+}
+
+// Note-on fine tune and the ADSR operand bytes, against the PS1 driver running the same program (instrument with fine tune 15835, base
+// note 60, ADSR 0x00FF / 0x5FC7): the note-on delta is taken before the octave shift, so `D8 C1` on G2 gives -281 (register 0x0358)
+// and `D8 35` on B8, whose 16-bit pitch has wrapped, 37989 (0x3AC8). AD 85 sets the exponential attack bit and AD 05 leaves it; B1 FF
+// and B2 FF OR the whole byte in.
+void test_note_fine_tune() {
+  Bytes bank = tiny_bank();
+  bank[0x40 + 8] = u8(15835 & 0xFF);
+  bank[0x40 + 9] = u8(15835 >> 8);
+  bank[0x40 + 12] = 0xFF;
+  bank[0x40 + 13] = 0x00;
+  bank[0x40 + 14] = 0xC7;
+  bank[0x40 + 15] = 0x5F;
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(audio::parse_bank(bank));
+  auto code = std::make_shared<audio::AkaoCode>();
+  code->data = {0xA1, 0x00, 0xA8, 0x40, 0xD8, 0x7F, 0xA5, 0x06, 0x04, 0xD8, 0xC1, 0x30, 0xA5, 0x02, 0x51, 0xD8, 0x35, 0xA5, 0x08,
+                0x7D, 0xAD, 0x85, 0x04, 0xAD, 0x05, 0x04, 0xAE, 0x1F, 0x04, 0xAF, 0x1F, 0x04, 0xB1, 0xFF, 0x04, 0xB2, 0xFF, 0x04, 0xA0};
+  audio::AkaoPlayer player(44100, true);
+  player.start_program(code, 0, table);
+  const int slot = audio::AkaoPlayer::kSfxChannels - 1;
+  std::vector<int> regs;
+  std::vector<std::pair<int, int>> adsr;
+  std::vector<float> out(16 * 2);
+  for (int i = 0; i < 40000 && player.active_channels() > 0; ++i) {
+    player.render(out.data(), 16);
+    const audio::AkaoPlayer::VoiceProbe voice = player.probe_voice(audio::AkaoPlayer::kSfxVoiceBase + slot);
+    if (voice.active && (regs.empty() || regs.back() != voice.reg)) regs.push_back(voice.reg);
+    const audio::AkaoPlayer::ChannelProbe channel = player.probe_channel(slot);
+    const std::pair<int, int> words{channel.adsr[0], channel.adsr[1]};
+    if (channel.active && (adsr.empty() || adsr.back() != words)) adsr.push_back(words);
+  }
+  if (!adsr.empty() && adsr.front() != std::pair<int, int>{0x00FF, 0x5FC7}) adsr.erase(adsr.begin());
+  CHECK((regs == std::vector<int>{0x1E8D, 0x2D14, 0x0358, 0x3AC8, 0x0C77}));
+  CHECK((adsr == std::vector<std::pair<int, int>>{{0x00FF, 0x5FC7}, {0x85FF, 0x5FC7}, {0x85FF, 0x7FC7}, {0x85FF, 0x7FFF}}));
+}
+
 }  // namespace
 
 int main() {
@@ -1095,6 +1450,7 @@ int main() {
   test_adsr();
   test_sequence();
   test_akao_mixer();
+  test_mono_voice();
   test_sfx_channels();
   test_sfx_room_banks();
   test_sfx_room_leave_after_battle();
@@ -1115,6 +1471,17 @@ int main() {
   test_music_push();
   test_lfo_rate_slide();
   test_protected_loop_end();
+  test_note_lengths();
+  test_fine_tune_held();
+  test_lfo_rate_carry();
+  test_zone_envelopes();
+  test_slide_same_tick();
+  test_music_voice_search();
+  test_patch_zone();
+  test_drum_legato();
+  test_patch_same_note();
+  test_fixed_voice();
+  test_note_fine_tune();
   if (failures == 0) std::printf("test_audio: all passed\n");
   return failures ? 1 : 0;
 }

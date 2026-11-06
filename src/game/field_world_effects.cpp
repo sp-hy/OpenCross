@@ -118,7 +118,8 @@ void FieldWorld::step_bone_emitters() {
 }
 
 // ------------------------------------------------------------------------------------------------ sound emitters (C5 / C8 / FE 43)
-// Every tick: the volume ramps advance; each record's distance from the leader is taken (an inactive source stops its voice); the
+// Every tick: the volume ramps advance; each record's distance from the leader is taken (an inactive source stops its voice and
+// frees the record for good: sound id 0xFF, volume 0, silent until C5 / C8 reuses it, even when the source is shown again); the
 // nearest four records own a voice. Volume = 0x7F within 0x100 units, (0x900 - d) >> 4 up to 0x900, 0 beyond, times the record
 // volume >> 7; pan from the sound's screen x. A record whose sound runs gets the new pan and volume; an idle one starts (not started
 // yet), restarts (not one-shot) or is freed (one-shot). Records beyond the nearest four are keyed off.
@@ -146,6 +147,8 @@ void FieldWorld::step_sound_emitters() {
       if (vm_.entity(record.src).flags38 & script::flag38::kInactive) {
         if (record.started && mixer_) mixer_->evict_sfx(1u << record.voice);
         record.started = false;
+        record.id = 0xFF;
+        record.volume = 0;
         continue;
       }
       const ActorPose& source = ents_[static_cast<size_t>(record.src)].actor.current();
@@ -330,6 +333,8 @@ void FieldWorld::build_effects() {
   if (lib_loaded_) bank_.add(&fenc_fx_);
   effects::EmitterSystem::Config cfg;
   cfg.seed = seed_ ? seed_ * 0x9E3779B1u + static_cast<u32>(room_id_ < 0 ? 0 : room_id_) * 7919u + 1u : 1u;
+  // The field sizes its object arena by the room it loads: 0xC000 bytes in room 8, 0x4000 elsewhere.
+  cfg.heap_bytes = room_id_ == 8 ? 0xC000u : 0x4000u;
   emitters_ = std::make_unique<effects::EmitterSystem>(bank_, cfg);
   // The field draws every second refresh; its effects advance once per drawn frame with that frame's 2 ticks.
   emitters_->set_frame_ticks(2);

@@ -82,6 +82,28 @@ int main() {
     std::printf("FAIL tables: %s\n", err.c_str());
     return 1;
   }
+  {
+    // Every character set takes its Lv 99 targets from lv99para.bin (Serge 850 / 88 / 78 / 95 / 25 / 52 / 43), char_w1..5 included.
+    const data::Lv99& serge = tables.chars("char").lv99[0];
+    if (serge.hp != 850 || serge.atk != 88 || serge.def != 78 || serge.hit != 95 || serge.evd != 25 || serge.mag != 52 || serge.mdef != 43) {
+      std::printf("FAIL lv99: Serge's char row is not lv99para.bin\n");
+      return 1;
+    }
+    for (const auto& [set_name, set] : tables.char_sets)
+      for (size_t i = 0; i < set.lv99.size(); ++i) {
+        const data::Lv99& row = set.lv99[i];
+        const data::Lv99& want = tables.chars("char").lv99[i];
+        if (row.hp != want.hp || row.atk != want.atk || row.def != want.def || row.hit != want.hit || row.evd != want.evd || row.mag != want.mag ||
+            row.mdef != want.mdef) {
+          std::printf("FAIL lv99: set %s character %zu differs from lv99para.bin\n", set_name.c_str(), i);
+          return 1;
+        }
+      }
+    if (tables.char_sets.count("char_w1") == 0) {
+      std::printf("FAIL lv99: char_w1 not loaded\n");
+      return 1;
+    }
+  }
   if (check_lenz(files)) return 1;
   {
     // A party member's model follows its kind byte: Serge in Lynx's body is the sel_yam2 model.
@@ -97,6 +119,39 @@ int main() {
     if (ModelCache::unit_model_stem(files, &tables, body).find("selju") == std::string::npos) {
       std::printf("FAIL kind byte: Serge's own body has the wrong model\n");
       return 1;
+    }
+    // Glenn with the Einlanzer pair (kind 0x32): the gren2 model, and the scripts read model number 0x32, not his character id.
+    body.src_id = 0x13;
+    body.kind = 0x32;
+    if (ModelCache::unit_model_stem(files, &tables, body).find("gren2") == std::string::npos || ModelCache::model_number(tables, body) != 0x32) {
+      std::printf("FAIL kind byte: Glenn with two swords has the wrong model or model number\n");
+      return 1;
+    }
+    // Dash & Gash's caster script plays the pack's two-sword clip 0x81 for model number 0x32 and the one-sword clip 0x80 for Glenn's own.
+    const auto hardhit = files.read("cdrom/battle/effects/tech/hardhit.prd");
+    const auto drp = hardhit ? import::parse_drp(*hardhit) : std::nullopt;
+    bseq::Table main_table;
+    if (drp)
+      for (const auto& entry : drp->entries)
+        if (entry.type == 0x1A && entry.name == "main") main_table.parse(entry.data);
+    for (const int model : {0x13, 0x32}) {
+      bseq::Ctx ctx;
+      ctx.model_num = model;
+      ctx.clip_frames = [](int) { return 8; };
+      bseq::Vm vm;
+      int pack_clip = -1;
+      std::vector<bseq::Event> out;
+      if (vm.start(&main_table, 0, 0))
+        for (int k = 0; k < 400 && vm.running() && pack_clip < 0; ++k) {
+          out.clear();
+          vm.tick(ctx, out);
+          for (const auto& event : out)
+            if (event.kind == bseq::Event::SetAnim && event.a >= 0x80 && pack_clip < 0) pack_clip = event.a;
+        }
+      if (pack_clip != (model == 0x32 ? 0x81 : 0x80)) {
+        std::printf("FAIL Dash & Gash: model %#x plays pack clip %#x\n", model, pack_clip);
+        return 1;
+      }
     }
   }
   BattleFxLibrary lib;
@@ -258,6 +313,34 @@ int main() {
     }
     if (vram == 0) {
       std::printf("FAIL: 155slot drew no Vram reel primitives\n");
+      return 1;
+    }
+  }
+  // Luminaire (eid 223): every sprite of its 'renz' sheet takes its 4x image from RDE's page, no other sheet does.
+  if (auto pack = lib.get(223)) {
+    size_t renz = 0, filled = 0, others = 0;
+    for (const auto& sheet : pack->fx.sheets)
+      for (const auto& frame : sheet.frames)
+        for (const auto& sprite : frame) {
+          const bool hd = sprite.hd_rgba.size() == static_cast<size_t>(sprite.w) * sprite.h * 16 * 4;
+          if (sheet.name == "renz") ++renz, filled += hd;
+          else others += !sprite.hd_rgba.empty();
+        }
+    if (renz == 0 || filled != renz || others != 0 || pack->hd_sprites != renz) {
+      std::printf("FAIL: shine renz HD page: %zu sprites, %zu with HD, %zu others, hd_sprites %zu\n", renz, filled, others, pack->hd_sprites);
+      return 1;
+    }
+    if (pack->hd_texels) {
+      std::printf("FAIL: Luminaire has HD texels\n");
+      return 1;
+    }
+  }
+  // Canon Cannon (eid 462): RDE's 4x face expressions over the 48 x 96 halfword rect at (0x2C0, 0x100) the anim ops 0xA2 - 0xA5 copy from.
+  if (auto pack = lib.get(462)) {
+    const auto& texels = pack->hd_texels;
+    if (!texels || texels->x != 0x2C0 || texels->y != 0x100 || !texels->indices.indexed || texels->indices.width != 48 * 2 * 4 ||
+        texels->indices.height != 96 * 4) {
+      std::printf("FAIL: Canon Cannon HD face texels missing or misplaced\n");
       return 1;
     }
   }

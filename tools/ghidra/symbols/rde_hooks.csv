@@ -119,9 +119,9 @@ pc,guard,mode,category,purpose,assets,handler,installer,handler_symbol
 0x8001851c,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e2ac0,0x574744,hook_native_port_8001851c_rep
 0x800185d4,-,return-early,gpu-wait/timing,Root-counter-1 helper returns immediately; skips 1F801120 read and store (low confidence),-,0x578510,0x44ad10,hook_gpu_wait_timing_800185d4_early
 0x800185f4,-,return-early,gpu-wait/timing,Return 1 immediately instead of polling root counter 1F801120,-,0x578560,0x44b3c6,hook_gpu_wait_timing_800185f4_early
-0x800192e8,insn@0x800192E8==0x27BDFFD8,observer,other,Snapshots character form ID (0x80077B81) before change for later stat sync,,0x449310,0x448bd0,hook_other_800192e8_obs
+0x800192e8,insn@0x800192E8==0x27BDFFD8,observer,other,Snapshots character form ID (0x80077B81) before change for later stat sync,,0x449310,0x448bd0,hook_pip_form_snapshot_at_battle
 0x800193b8,-,observer,memory-expansion,Enlarge allocation size (+0x8000; +0xC000 on maps 0x1AB/0x1DD),-,0x44c000,0x44bb7a,hook_memory_expansion_800193b8_obs
-0x800194dc,insn@0x800194DC==0x03E00008,observer,other,On form ID change (0x2B-0x30) reloads stats from table; ORs tech bits at Lv99,,0x449340,0x448bd0,hook_other_800194dc_obs
+0x800194dc,insn@0x800194DC==0x03E00008,observer,other,On form ID change (0x2B-0x30) reloads stats from table; ORs tech bits at Lv99,,0x449340,0x448bd0,hook_pip_form_settle_after_battle
 0x80019664,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e2c50,0x574744,hook_native_port_80019664_rep
 0x80019768,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e2ea0,0x574744,hook_native_port_80019768_rep
 0x80019ca8,-,replace,native-port,"native x86 reimplementation of main exe function (behaviour-preserving, speed)",,0x4e2f40,0x574744,hook_native_port_80019ca8_rep

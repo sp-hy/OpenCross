@@ -2,3 +2,4 @@
 # Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
 # Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
 fx_dorublue_init = 0x801C6314;  # function: init: sets target 0's idle-pose word to 8
+fx_dorublue_dispatch_op = 0x801C5E04;  # function: Overlay dispatcher; replaces op 0x59 (loop flag, animation speed word + 0x40, SetAnim) and runs the dissolve ops 0x100 / 0x101

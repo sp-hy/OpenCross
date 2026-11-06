@@ -35,6 +35,15 @@ struct CamPose {
   float h = 512, roll_deg = 0;
 };
 
+// The view axes of a pose in the y-up stage world. The up vector is world up turned by the roll about the view's horizontal heading
+// (rotation (0, yaw, roll) with yaw = atan2(-dx, -dz)), then made orthogonal to the forward axis: the roll is not a turn about the
+// view axis, so a view looking steeply up or down tilts the picture by more than the roll angle. A positive roll turns the picture
+// clockwise.
+struct CamAxes {
+  std::array<float, 3> right{1, 0, 0}, down{0, -1, 0}, forward{0, 0, 1};
+};
+CamAxes cam_axes(const std::array<float, 3>& eye, const std::array<float, 3>& target, float roll_deg);
+
 // One command of a type 0x10 timeline.
 struct CamCmd {
   u16 op = 0;
@@ -138,6 +147,11 @@ class BattleCamera {
   void start_fade(float to, int frames, std::array<u8, 3> rgb = {0, 0, 0});
   // A camera task is alive: a multi-key head before its end or any queued task (a single-key shot never creates one).
   bool task_running() const { return (shot_ != nullptr && progress_ < 4096.0f) || !bg_.empty(); }
+  // A camera task of the shot `name` is alive (the head before its end or a queued task).
+  bool shot_running(const std::string& name) const {
+    if (shot_ != nullptr && progress_ < 4096.0f && shot_->name == name) return true;
+    return std::any_of(bg_.begin(), bg_.end(), [&](const Task& task) { return task.shot != nullptr && task.shot->name == name; });
+  }
   float progress() const { return progress_; }
   // Ends the running shot at its last key (a later mode-2 select is no longer dropped): the confirm cut apr0 / apr1 gives way to the charge shot.
   void finish_shot() { bg_.clear(); if (shot_) progress_ = 4096.0f; }

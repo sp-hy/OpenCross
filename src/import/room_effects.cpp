@@ -488,6 +488,36 @@ assets::RoomEffects load_battle_effects(ByteSpan prd, ByteSpan ctd, const Vram& 
   return load_pack(prd, base, lib, ctd, true);
 }
 
+size_t cut_hd_sheet(assets::SpriteSheet& sheet, const Vram& vram, const Tim& hd) {
+  constexpr int kScale = 4;
+  const TimBlock& image = hd.image;
+  if ((hd.bpp != 4 && hd.bpp != 8) || image.w % kScale || image.h % kScale || image.data.size() < static_cast<size_t>(image.w) * image.h) return 0;
+  Vram with_clut = vram;
+  if (hd.has_clut) with_clut.blit(sheet.clut_x, sheet.clut_y, hd.clut.w, hd.clut.h, hd.clut.data);
+  const int per_halfword = hd.bpp == 4 ? 4 : 2, rect_w = image.w / kScale * per_halfword, rect_h = image.h / kScale;
+  size_t filled = 0;
+  for (auto& frame : sheet.frames)
+    for (assets::EffectSprite& sprite : frame) {
+      if ((sprite.depth() == 0) != (hd.bpp == 4)) continue;
+      const int col0 = (sprite.page_x() - sheet.tex_x) * per_halfword + sprite.u, row0 = sprite.page_y() + sprite.v - sheet.tex_y;
+      if (col0 < 0 || row0 < 0 || col0 + sprite.w > rect_w || row0 + sprite.h > rect_h) continue;
+      const int colours = hd.bpp == 4 ? 16 : 256;
+      std::vector<u32> palette(static_cast<size_t>(colours));
+      for (int i = 0; i < colours; ++i) palette[static_cast<size_t>(i)] = bgr555_to_rgba(with_clut.at(sprite.clut_x() + i, sprite.clut_y()));
+      const int w = sprite.w * kScale, h = sprite.h * kScale;
+      sprite.hd_rgba.assign(static_cast<size_t>(w) * h * 4, 0);
+      for (int j = 0; j < h; ++j)
+        for (int i = 0; i < w; ++i) {
+          const int col = col0 * kScale + i;
+          const u16 halfword = image.data[static_cast<size_t>(row0 * kScale + j) * image.w + static_cast<size_t>(col / per_halfword)];
+          const unsigned index = hd.bpp == 4 ? (halfword >> ((col & 3) * 4)) & 15u : (halfword >> ((col & 1) * 8)) & 255u;
+          store_rgba(&sprite.hd_rgba[(static_cast<size_t>(j) * w + static_cast<size_t>(i)) * 4], palette[index]);
+        }
+      ++filled;
+    }
+  return filled;
+}
+
 Bytes nested_pack(ByteSpan prd, std::string_view name) {
   if (auto drp = parse_drp(prd))
     for (const auto& entry : drp->entries)

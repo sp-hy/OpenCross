@@ -21,13 +21,16 @@ constexpr u32 kPoison = 0x1, kSprain = 0x10, kFlu = 0x20, kKO = 0x80, kAfraid = 
 constexpr u32 kHiAlwaysHit = 0x1000, kHiWeaponAbsorb = 0x2000, kHiAbsorb = 0x4000, kHiWeaponImmune = 0x8000, kHiImmune = 0x10000, kHiRegen = 0x80000;
 // The unit's actions cost no stamina; the unit's damage heals it by the same amount.
 constexpr u32 kHiNoStaminaCost = 0x20000, kHiDrain = 0x40000;
+// Permanent lo bits of the target info window: kInfoShown draws the HP / sex / colour block, kHpShown the HP digits. Every unit has
+// kInfoShown from the start; a party unit (a Dopplegang or monster-party form too) also has kHpShown.
+constexpr u32 kInfoShown = 0x400, kHpShown = 0x400000, kPartyShown = kInfoShown | kHpShown;
 // Lo bits kept after a battle.
 constexpr u32 kPersist = 0x39;
 // Inflicted bits a PC keeps when a hit knocks it out; a poison KO keeps the inflicted lo bits 1..15 and the whole hi word.
 constexpr u32 kKoKeepLo = 0x400480u, kKoKeepHi = 0x1FE00000u, kPoisonKoKeepLo = 0xFFFEu;
-// Bits whose infliction starts a timer.
+// Bits whose infliction starts a timer. The countdown walks only hi bits 0..17, so the special hi bits 29..31 last the battle.
 constexpr u32 kTimedLo = 0xBBBFFB00u;
-constexpr u32 kTimedHi = 0xE003FFFFu;
+constexpr u32 kTimedHi = 0x0003FFFFu;
 // Element hi-status bits (element record byte 0x1C) that may be applied.
 constexpr u32 kHiApplyMask = 0xE007FFFFu;
 // Lo bits that keep a PC's command menu closed.

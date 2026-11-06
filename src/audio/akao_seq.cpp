@@ -53,6 +53,7 @@ std::shared_ptr<const AkaoSeq> parse_seq(Bytes data) {
   seq->bank_id = read_u32(header + 0x14);
   seq->reverb_mode = read_u16(header + 8);
   seq->channel_mask = read_u32(header + 0x20);
+  seq->reserve_mask = read_u32(header + 0x24);
   seq->gate_mask = read_u32(header + 0x28);
   const s32 patch_rel = s32(read_u32(header + 0x30)), keymap_rel = s32(read_u32(header + 0x34));
   u32 table = 0x40;

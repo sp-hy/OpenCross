@@ -14,6 +14,16 @@ namespace {
 
 const std::string kEmpty;
 
+// RDE's corrections to single element records, kept as data: a byte is replaced when it still holds the retail value.
+struct ElementFix {
+  u16 element;
+  u8 offset, retail, rde;
+};
+constexpr ElementFix kElementFixes[] = {
+    // Flower (mode 7, M. DEF. +): the end-of-action message row 47 "M. DEF. temporarily increased!" instead of 52, the M. ATT. row.
+    {201, 0x13, 0x34, 0x2F},
+};
+
 std::optional<Bytes> read_battle(const vfs::Vfs& game_fs, const std::string& name) {
   return game_fs.read("cdrom/battle/data/" + name);
 }
@@ -113,7 +123,8 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   enemies.resize(mon->size() / kStatRecSize);
   for (size_t i = 0; i < enemies.size(); ++i) copy_rec(enemies[i].raw, *mon, i * kStatRecSize);
 
-  // --- characters (+ presets). Presets 1..5 carry lv99para at the tail; the others use lv99para.bin.
+  // --- characters (+ presets). Every set takes its Lv 99 targets from lv99para.bin; the bytes after the 51 records of char_w1..5 are
+  // leftover record copies, not Lv 99 rows.
   Bytes lv99_file;
   if (auto lv99_bytes = read_battle(game_fs, "lv99para.bin")) lv99_file = *lv99_bytes;
   for (const char* set_name : {"char", "char20", "char_w0", "char_w1", "char_w2", "char_w3", "char_w4", "char_w5"}) {
@@ -124,16 +135,10 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
     }
     CharSet char_set;
     for (size_t i = 0; i < kNumChars; ++i) copy_rec(char_set.rec[i].raw, *set_bytes, i * kStatRecSize);
-    const Bytes* lv99_src = &lv99_file;
-    Bytes tail;
-    if (set_bytes->size() > kNumChars * kStatRecSize) {
-      tail.assign(set_bytes->begin() + static_cast<std::ptrdiff_t>(kNumChars * kStatRecSize), set_bytes->end());
-      lv99_src = &tail;
-    }
-    for (size_t i = 0; i < kNumChars && i * 8 + 8 <= lv99_src->size(); ++i) {
+    for (size_t i = 0; i < kNumChars && i * 8 + 8 <= lv99_file.size(); ++i) {
       const size_t offset = i * 8;
-      char_set.lv99[i] = {rd16(*lv99_src, offset), (*lv99_src)[offset + 2], (*lv99_src)[offset + 3], (*lv99_src)[offset + 4],
-                          (*lv99_src)[offset + 5], (*lv99_src)[offset + 6], (*lv99_src)[offset + 7]};
+      char_set.lv99[i] = {rd16(lv99_file, offset), lv99_file[offset + 2], lv99_file[offset + 3], lv99_file[offset + 4],
+                          lv99_file[offset + 5], lv99_file[offset + 6], lv99_file[offset + 7]};
     }
     char_sets.emplace(set_name, std::move(char_set));
   }
@@ -143,6 +148,8 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   if (!pg) return fail("battle/data/pgdat.bin missing");
   elements.resize(pg->size() / kElemRecSize);
   for (size_t i = 0; i < elements.size(); ++i) copy_rec(elements[i].raw, *pg, i * kElemRecSize);
+  for (const ElementFix& fix : kElementFixes)
+    if (fix.element < elements.size() && elements[fix.element].raw[fix.offset] == fix.retail) elements[fix.element].raw[fix.offset] = fix.rde;
 
   // --- growth
   auto gr = read_battle(game_fs, "el_mask.bin");

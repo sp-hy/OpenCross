@@ -241,18 +241,38 @@ void test_breakdown_and_sell() {
   CHECK(gain == 30 && game_state.gold() == 30);
   CHECK(game_state.item_count(8) == 99);
 
-  // gear sale: floor(price10 * 10 / 4)
+  // gear sale: (price10 * 10 * qty) >> 2 on the total
   fixture.give(22, 1);
-  // Two of 21; its unit price is 90 / 4.
+  // Two of 21 (price 90): 180 >> 2 = 45, not 2 * (90 / 4) = 44.
   fixture.give(21, 1);
-  CHECK(shop::gear_sell_unit(game_state, 21) == 22);
+  CHECK(shop::gear_sell_price(game_state, 21, 1) == 22 && shop::gear_sell_price(game_state, 21, 2) == 45);
   CHECK(shop::gear_sell_list(game_state, 1) == (std::vector<int>{21}));
   CHECK(shop::gear_sell_list(game_state, 0).empty() || shop::gear_sell_list(game_state, 0)[0] != 22);
   const u32 before = game_state.gold();
   CHECK(shop::sell_gear(game_state, 21, 2) == shop::Res::Ok);
-  CHECK(game_state.gold() == before + 44 && game_state.item_count(21) == 0);
+  CHECK(game_state.gold() == before + 45 && game_state.item_count(21) == 0);
   CHECK(shop::sell_gear(game_state, 21, 1) == shop::Res::NoStock);
   CHECK(shop::sell_gear(game_state, 22, 1) == shop::Res::NotSellable);
+  // Price 10 x 3: 30 >> 2 = 7 (per piece it would be 3 * 2 = 6).
+  fixture.item(24, 0, 1);
+  fixture.give(24, 3);
+  const u32 before_three = game_state.gold();
+  CHECK(shop::gear_sell_price(game_state, 24, 3) == 7);
+  CHECK(shop::sell_gear(game_state, 24, 3) == shop::Res::Ok && game_state.gold() == before_three + 7);
+  // Worn pieces follow the bag in the sell list (unless flag 0x20) and cannot be sold; an unavailable character's are not listed. The
+  // bag's 23 (flag 0x20, not 0x80) is sellable.
+  game_state.slot.chars[0].weapon = 20;
+  game_state.slot.chars[0].armour = 21;
+  game_state.slot.set_recruited(5, true);
+  game_state.slot.chars[5].weapon = 23;
+  game_state.slot.chars[5].accessory[0] = 24;
+  CHECK(shop::gear_sell_list(game_state, 0) == (std::vector<int>{23, 20}));
+  CHECK(shop::gear_sell_list(game_state, 1) == (std::vector<int>{21}));
+  CHECK(shop::sell_gear(game_state, 20, 1) == shop::Res::NoStock);
+  game_state.slot.set_recruited(0, false);
+  CHECK(shop::gear_sell_list(game_state, 0) == (std::vector<int>{23}) && shop::breakdown_list(game_state, 0).empty());
+  game_state.slot.set_recruited(0, true);
+  game_state.slot.chars[0].weapon = game_state.slot.chars[0].armour = 0;
   // Materials are not gear.
   CHECK(shop::sell_gear(game_state, 8, 1) == shop::Res::NotSellable);
 }

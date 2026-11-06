@@ -1,0 +1,15 @@
+# Staff roll skipped mid-roll (an OpenCross-only skip: RDE plays a 7E row to its end): the held last frame keeps the credits strip
+# beside the panel and both go together, the strip's quad without a second veil over the scene behind.
+0 wait 30
+- set var 42 1
+- load ending 1
+- wait movie start 600
+- wait 2400
+- screenshot staff_skip_01_roll.png
+- tap confirm 1
+- wait 1
+- screenshot staff_skip_02_held.png
+- wait 40
+- screenshot staff_skip_03_after.png
+- assert movie idle
+- quit

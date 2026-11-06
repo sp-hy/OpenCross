@@ -9,6 +9,7 @@
 
 #include "game/effects/emitter_system.h"
 #include "game/effects/fx_math.h"
+#include "game/effects/object_heap.h"
 #include "game/effects/sequence_player.h"
 #include "game/effects/soft_raster.h"
 #include "game/effects/strip_smooth.h"
@@ -1005,6 +1006,29 @@ void test_object_screen_test() {
   CHECK(!mi.off_screen(view));
 }
 
+// The object arena: blocks cut from the top downwards, an exact refit takes the freed block and restarts the search at the bottom
+// block, freed neighbours merge, flag-10 spawns land at the top, and a full arena refuses.
+void test_object_heap() {
+  effects::ObjectHeap heap(0x4000);
+  CHECK(heap.alloc(0x94) == 0x3F54);
+  CHECK(heap.alloc(0x94) == 0x3EB4);
+  CHECK(heap.alloc(0x91) == 0x3E14);
+  heap.free(0x3F54);
+  CHECK(heap.alloc(0x94) == 0x3F54);
+  CHECK(heap.alloc(0x94) == 0x3D74);
+  heap.free(0x3EB4);
+  heap.free(0x3E14);
+  CHECK(heap.alloc(0xFC) == 0x3E4C);
+  CHECK(heap.alloc(0x94) == 0x3CD4);
+  heap.free(0x3D74);
+  heap.search_from_top();
+  CHECK(heap.alloc(0x10) == 0x3E30);
+  heap.reset();
+  int count = 0;
+  while (heap.alloc(0x94) >= 0) ++count;
+  CHECK(count == 102);
+}
+
 int main() {
   test_lens_flash();
   test_good();
@@ -1027,6 +1051,7 @@ int main() {
   test_mark_mesh_objects();
   test_death_child_position();
   test_frame_stepping();
+  test_object_heap();
   std::printf(failures ? "%d failure(s)\n" : "ok\n", failures);
   return failures ? 1 : 0;
 }

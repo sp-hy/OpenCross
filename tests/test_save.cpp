@@ -209,6 +209,15 @@ void test_slot() {
   const auto slots = list_slots(card);
   CHECK(slots.size() == 2 && slots[0].slot == 0 && slots[1].slot == 4);
   CHECK(read_slot(card, slots[1].block).chars[5].weapon == slot.chars[5].weapon);
+  // The summary's faces follow the model byte up to 0x31: Serge as Lynx (0x31) shows Lynx, Glenn with two swords (0x32) his own face.
+  SaveSlot forms = slot;
+  forms.set_party({0, 0x13, 0xFF});
+  forms.chars[0].model_id = 0x31;
+  forms.chars[0x13].model_id = 0x32;
+  CHECK(write_slot(card, 5, forms) == 3);
+  const SaveSlot written = read_slot(card, 3);
+  CHECK(written.preview_party() == (std::array<u8, 3>{0x31, 0x13, 0xFF}));
+  CHECK(written.party() == (std::array<u8, 3>{0, 0x13, 0xFF}));
 
   // whole save.dat container
   std::vector<ZipMember> members;

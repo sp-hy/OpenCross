@@ -21,17 +21,8 @@ namespace oc::game {
 
 namespace {
 
-constexpr float kPi = 3.14159265358979f;
 using V3 = std::array<float, 3>;
-V3 cross3(const V3& lhs, const V3& rhs) {
-  return {lhs[1] * rhs[2] - lhs[2] * rhs[1], lhs[2] * rhs[0] - lhs[0] * rhs[2], lhs[0] * rhs[1] - lhs[1] * rhs[0]};
-}
 float dot3(const V3& lhs, const V3& rhs) { return lhs[0] * rhs[0] + lhs[1] * rhs[1] + lhs[2] * rhs[2]; }
-V3 norm3(V3 vec, const V3& fb) {
-  const float len = std::sqrt(dot3(vec, vec));
-  if (len < 1e-6f) return fb;
-  return {vec[0] / len, vec[1] / len, vec[2] / len};
-}
 
 void put16(Bytes& bytes, size_t offset, u32 value) {
   bytes[offset] = static_cast<u8>(value);
@@ -286,6 +277,7 @@ bool TitleBackdrop::build_run(std::string_view first) {
   bank_.add(&lib_);
   effects::EmitterSystem::Config cfg;
   cfg.seed = 0x7171u + static_cast<u32>(first.back());
+  cfg.heap_bytes = 0x10000;
   // The whole sea at all times, not per-shot scenery sets.
   cfg.keep_on_stop_expire = true;
   seq_.reset();
@@ -353,20 +345,13 @@ CamPose free_or_shot_pose(const BattleCamera& camera, float alpha) {
 }
 }  // namespace
 
-// CamPose -> view (the battle camera's basis: y down, roll about the view axis).
+// CamPose -> view (the battle camera's basis, cam_axes).
 effects::ViewParams TitleBackdrop::view(float alpha) const {
   const CamPose pose = free_or_shot_pose(camera_, alpha);
-  const V3 forward = norm3({pose.target[0] - pose.eye[0], pose.target[1] - pose.eye[1], pose.target[2] - pose.eye[2]}, {0, 0, 1});
-  V3 right = norm3(cross3({0, 1, 0}, forward), {1, 0, 0});
-  V3 down = cross3(forward, right);
-  for (float& comp : down) comp = -comp;
-  // A positive roll turns the picture clockwise.
-  const float cr = std::cos(pose.roll_deg * kPi / 180.0f), sr = std::sin(pose.roll_deg * kPi / 180.0f);
-  for (size_t i = 0; i < 3; ++i) {
-    const float ri = right[i] * cr - down[i] * sr, di = right[i] * sr + down[i] * cr;
-    right[i] = ri;
-    down[i] = di;
-  }
+  const CamAxes axes = cam_axes(pose.eye, pose.target, pose.roll_deg);
+  const V3& right = axes.right;
+  const V3& down = axes.down;
+  const V3& forward = axes.forward;
   effects::ViewParams params;
   const V3* rows[3] = {&right, &down, &forward};
   for (size_t k = 0; k < 3; ++k) {
@@ -481,16 +466,10 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
     std::vector<effects::EmitterSystem::MeshInstance> live;
     em_->collect_meshes(vp, alpha, live);
     const CamPose pose = free_or_shot_pose(camera_, alpha);
-    const V3 forward = norm3({pose.target[0] - pose.eye[0], pose.target[1] - pose.eye[1], pose.target[2] - pose.eye[2]}, {0, 0, 1});
-    V3 right = norm3(cross3({0, 1, 0}, forward), {1, 0, 0});
-    V3 down = cross3(forward, right);
-    for (float& comp : down) comp = -comp;
-    const float cr = std::cos(pose.roll_deg * kPi / 180.0f), sr = std::sin(pose.roll_deg * kPi / 180.0f);
-    for (size_t i = 0; i < 3; ++i) {
-      const float ri = right[i] * cr + down[i] * sr, di = -right[i] * sr + down[i] * cr;
-      right[i] = ri;
-      down[i] = di;
-    }
+    const CamAxes axes = cam_axes(pose.eye, pose.target, pose.roll_deg);
+    const V3& right = axes.right;
+    const V3& down = axes.down;
+    const V3& forward = axes.forward;
     render::Mat4 view;
     for (int col = 0; col < 3; ++col) {
       view.at(0, col) = right[static_cast<size_t>(col)];

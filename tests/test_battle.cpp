@@ -903,6 +903,42 @@ void test_revive_resets_stamina_and_countdown() {
   CHECK_EQ(battle.unit(1).countdown, battle.unit(1).ap + 2);
 }
 
+// A consumable stack at 0 copies stays in its cell and is greyed (used) whenever the element menu opens, a recharged one too; the PS1 sets
+// the used bit of a Tablet cell whose save count is 0 and lists it.
+void test_empty_stack_greyed() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  Unit& pc = battle.unit_mut(0);
+  pc.cells[2] = 1, pc.usable[2] = true, pc.stack[2] = true, pc.qty[2] = 0;
+  pc.cells[3] = 1, pc.usable[3] = true, pc.stack[3] = true, pc.qty[3] = 2;
+  battle.open_element_menu(0);
+  CHECK(battle.unit(0).used[2] && battle.unit(0).usable[2]);
+  CHECK(!battle.unit(0).used[3]);
+  battle.unit_mut(0).used[2] = false;
+  battle.open_element_menu(0);
+  CHECK(battle.unit(0).used[2]);
+}
+
+void test_revive_to_zero_hp() {
+  // A revive whose max HP x pct / 100 rounds to 0 leaves the unit up at 0 HP with the KO bit cleared, still a revive target.
+  Fixture fixture;
+  fixture.tables.elements.resize(5);
+  data::ElemRec& revive = fixture.tables.elements[4];
+  revive.raw[4] = 0x41, revive.raw[6] = 1, revive.raw[7] = 4;
+  Battle& battle = fixture.battle;
+  battle.unit_mut(1).max_hp = 6;
+  battle.unit_mut(1).hp = 0;
+  battle.unit_mut(1).lo |= st::kKO;
+  fixture.rng.push(0);
+  battle.do_element(3, 4, 0, 1);
+  CHECK(battle.unit(1).alive());
+  CHECK_EQ(battle.unit(1).hp, 0);
+  battle.unit_mut(1).max_hp = 100;
+  fixture.rng.push(0);
+  battle.do_element(3, 4, 0, 1);
+  CHECK_EQ(battle.unit(1).hp, 15);
+}
+
 void test_heal_ignores_ring_colour() {
   // A heal takes neither the colour multiplier nor the field state: Cure (blue) heals the same on a blue, a red and an empty ring.
   const auto heal = [](const std::array<int, 3>& ring) {
@@ -955,7 +991,7 @@ void test_purify_cures() {
   battle.do_element(0, 5, 0, 1);
   CHECK((battle.unit(1).lo & st::kAfraid) == 0 && battle.unit(1).timers.count(8) == 0);
   CHECK((battle.unit(1).lo & st::kPoison) != 0);
-  CHECK((battle.unit(1).lo & 0xFFFFFF3Fu & ~st::kPoison) == 0);
+  CHECK((battle.unit(1).lo & 0xFFFFFF3Fu & ~st::kPoison & ~st::kPartyShown) == 0);
   // On a clean target nothing is inflicted.
   const u32 clean = battle.unit(2).lo;
   battle.do_element(0, 5, 0, 2);
@@ -1069,6 +1105,43 @@ void test_big_catch() {
   }
 }
 
+// The HIT% box figure leaves out the sleeping-target, dizzy and hero terms the roll uses, and a miss keeps the chain counter.
+void test_hit_box_figure() {
+  Fixture fixture;
+  Unit& enemy = fixture.battle.unit_mut(3);
+  enemy.evd = 20;
+  enemy.lo |= st::kAsleep;
+  const int fresh = fixture.battle.hit_chance_shown_for(0, 3, 0);
+  CHECK_EQ(fixture.battle.hit_chance_for(0, 3, 0), 100);
+  CHECK(fresh < 100);
+  enemy.lo = (enemy.lo & ~st::kAsleep) | st::kDizzy;
+  CHECK(fixture.battle.hit_chance_for(0, 3, 0) > fresh);
+  CHECK_EQ(fixture.battle.hit_chance_shown_for(0, 3, 0), fresh);
+  enemy.lo &= ~st::kDizzy;
+  fixture.battle.do_weapon_attack(0, 3, 0);
+  const int chained = fixture.battle.hit_chance_shown_for(0, 3, 0);
+  CHECK(chained > fresh);
+  fixture.rng.push(1000);
+  fixture.battle.do_weapon_attack(0, 3, 0);
+  CHECK_EQ(fixture.battle.events().back().code, 2);
+  CHECK_EQ(fixture.battle.hit_chance_shown_for(0, 3, 0), chained);
+  // The PS1 (Serge in the room-53 battle, hit bases 101 / 75 / 65, target raw EVD 30, total EVD 40): box 69 / 45 / 35; the heavy roll
+  // 25, 45 against a dizzy target, 100 against a sleeping one.
+  const int bases[3] = {101, 75, 65}, box[3] = {69, 45, 35};
+  for (int k = 0; k < 3; ++k) {
+    ChanceIn shown;
+    shown.base = bases[k], shown.evd = 30, shown.strength = k;
+    CHECK_EQ(hit_chance_shown(shown), box[k]);
+  }
+  ChanceIn heavy;
+  heavy.base = 65, heavy.evd = 40, heavy.strength = 2;
+  CHECK_EQ(hit_chance(heavy), 25);
+  heavy.target_dizzy = true;
+  CHECK_EQ(hit_chance(heavy), 45);
+  heavy.target_dizzy = false, heavy.target_asleep = true;
+  CHECK_EQ(hit_chance(heavy), 100);
+}
+
 void test_status_message() {
   // pgdat +0x13 = the btmes row of the action-end system window, queued when the mode's status flag is set on a target;
   // Frozen newly landed on a target left alive = row 6 instead. Diminish (83) = mode 6 +0xE 1, row 54.
@@ -1079,11 +1152,27 @@ void test_status_message() {
     return &fixture.tables.elements[4];
   };
   {
-    // mode 6: never clears the status flag -> the row always shows
+    // mode 6: the first cast starts the field state and shows the row; a second one while the state runs clears the status flag
     Fixture fixture;
     elem(fixture, 6, 54)->raw[0xE] = 1;
     fixture.battle.do_element(3, 4, 0, 0);
     CHECK(!fixture.battle.events().empty());
+    if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, 54);
+    fixture.battle.do_element(3, 4, 0, 0);
+    if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, -1);
+  }
+  {
+    // mode 5 on a trap the side already holds and mode 12 below row 2 clear the status flag as well
+    Fixture fixture;
+    elem(fixture, 5, 54)->raw[0xE] = 9;
+    fixture.battle.do_element(3, 4, 0, 0);
+    if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, 54);
+    fixture.battle.do_element(3, 4, 0, 0);
+    if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, -1);
+    elem(fixture, 12, 54);
+    fixture.battle.do_element(3, 4, 1, 0);
+    if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, -1);
+    fixture.battle.do_element(3, 4, 2, 0);
     if (!fixture.battle.events().empty()) CHECK_EQ(fixture.battle.events().back().sys_msg, 54);
   }
   {
@@ -1165,7 +1254,7 @@ struct AttackBrain final : EnemyBrain {
 
 void test_frozen_turns() {
   // Frozen landing adds 3 to the countdown; the frozen unit stays out of alive() but its countdown runs, and at 0 an enemy takes its turn:
-  // its first action ends the freeze. A frozen PC at 0 gets its script turn instead of the countdown reset.
+  // its first action ends the freeze. A frozen PC at 0 gets its script turn instead of the countdown reset; it passes.
   data::GameTables tables = make_tables();
   tables.elements.resize(5);
   data::ElemRec& ice = tables.elements[4];
@@ -1190,6 +1279,10 @@ void test_frozen_turns() {
   CHECK(enemy.freeze_pending);
   CHECK_EQ(enemy.countdown, 4);
   CHECK(!enemy.alive() && enemy.in_turn_order());
+  // The frozen unit's timers step with the party's actions like any unit's.
+  const int frozen_timer = enemy.timers.at(29);
+  battle.post_action(0, 1, 1);
+  CHECK_EQ(enemy.timers.at(29), frozen_timer - 1);
   battle.step_after_pc_action(0, 1, false);
   CHECK_EQ(enemy.countdown, 3);
   battle.step_after_pc_action(0, 1, true);
@@ -1212,9 +1305,12 @@ void test_frozen_turns() {
   battle.unit_mut(1).countdown = 0;
   battle.unit_mut(3).countdown = 50;
   battle.unit_mut(4).countdown = 50;
+  const int timer = battle.unit(1).timers.at(29);
   battle.settle();
   CHECK_EQ(battle.unit(1).countdown, battle.unit(1).ap);
   CHECK((battle.unit(1).lo & st::kDefeated) != 0);
+  // The PS1: the frozen PC's turn passes (its script queues nothing), which steps none of its timers.
+  CHECK_EQ(battle.unit(1).timers.at(29), timer);
 }
 
 void test_field_ring_writes() {
@@ -2619,7 +2715,7 @@ void test_pac_resolved_ops() {
     void set_menu_cursor(int value) override { cursor = value; }
   };
   CHECK_EQ(pac::op_info(0xAB).conf, 'C');
-  CHECK_EQ(pac::op_info(0xC5).conf, 'I');
+  CHECK_EQ(pac::op_info(0xC5).conf, 'C');
   std::vector<pac::QueuedAttack> queued;
 
   {
@@ -2683,6 +2779,132 @@ void test_pac_resolved_ops() {
     host.busy = false;
     vm.tick();
     CHECK_EQ(vm.var(0x406), 1);
+    // Passing, the op records the wait for the presentation (pool 1, the tag).
+    bool waited = false;
+    for (const pac::Event& event : vm.drain_events()) waited = waited || (event.kind == pac::Event::Kind::EffectWait && event.a == 1 && event.b == 0x65636166);
+    CHECK(waited);
+  }
+  {
+    // 2F on the ring [empty, empty, green]: green 1, the largest group 2 (the empty slots), the empty slots 2; ring vars keep their old
+    // value for an empty slot. 83 always writes the pending result: 0 forces a victory, 0x80 clears it.
+    struct RingHost final : pac::Host {
+      std::array<int, 3> ring{-1, -1, 0};
+      u32 alive_mask() const override { return 0xF; }
+      int read_field(int, u16) override { return 0; }
+      void write_field(int, u16, int) override {}
+      int rnd(int lo, int) override { return lo; }
+      int ring_colour(int slot) const override { return ring[static_cast<size_t>(slot)]; }
+    };
+    const Bytes body = {0x2F, 0x06, 0x04, 0x00, 0x80, 0x2F, 0x08, 0x04, 0x06, 0x80, 0x2F, 0x0A, 0x04, 0x08, 0x80, 0x83, 0x00, 0x80};
+    pac::Module module;
+    CHECK(module.parse(assemble_slot2(body)));
+    RingHost host;
+    pac::Vm vm(module, host);
+    vm.set_var(0x38, 4);
+    vm.tick(), vm.tick();
+    CHECK(vm.run_slot(3, 2, queued));
+    CHECK_EQ(vm.var(0x406), 1);
+    CHECK_EQ(vm.var(0x408), 2);
+    CHECK_EQ(vm.var(0x40A), 2);
+    CHECK_EQ(vm.forced_result(), 0);
+    CHECK_EQ(vm.var(0x38), 4);
+    CHECK_EQ(vm.var(0x3C), 0);
+    host.ring = {-1, kRingAllColours, kRingAllColours};
+    const Bytes clear = {0x2F, 0x08, 0x04, 0x06, 0x80, 0x83, 0x00, 0x80, 0x83, 0x80, 0x80};
+    pac::Module clear_module;
+    CHECK(clear_module.parse(assemble_slot2(clear)));
+    pac::Vm clear_vm(clear_module, host);
+    clear_vm.tick(), clear_vm.tick();
+    CHECK(clear_vm.run_slot(3, 2, queued));
+    CHECK_EQ(clear_vm.var(0x408), 2);
+    CHECK_EQ(clear_vm.var(0x3A), kRingAllColours);
+    CHECK_EQ(clear_vm.forced_result(), -1);
+  }
+  {
+    // B0 -200 lifts by the step -20 and blocks 20 ticks; B1 lands with the step B0 left; 84 forces the low-HP bit of the unit.
+    pac::Module module;
+    const Bytes body = {0xB0, 0x38, 0xFF, 0x80, 0x17, 0x06, 0x04, 0xB1, 0x00, 0xB1, 0x01, 0x17, 0x08, 0x04, 0x84, 0xE9, 0x80};
+    CHECK(module.parse(assemble_slot2(body)));
+    ResolvedHost host;
+    host.busy = false;
+    pac::Vm vm(module, host);
+    vm.tick(), vm.tick();
+    vm.drain_events();
+    CHECK(vm.launch(3, 2));
+    for (int i = 0; i < pac::kLiftTicks; ++i) vm.tick();
+    CHECK_EQ(vm.var(0x406), 0);
+    vm.tick();
+    CHECK_EQ(vm.var(0x406), 1);
+    for (int i = 0; i < pac::kLiftTicks; ++i) vm.tick();
+    CHECK_EQ(vm.var(0x408), 1);
+    std::vector<pac::Event> lifts;
+    bool low_hp = false;
+    for (const pac::Event& event : vm.drain_events()) {
+      if (event.kind == pac::Event::Kind::Lift) lifts.push_back(event);
+      low_hp = low_hp || (event.kind == pac::Event::Kind::QuarterHp && event.unit == 3);
+    }
+    CHECK_EQ(lifts.size(), 2u);
+    CHECK(lifts.size() == 2 && lifts[0].unit == 3 && lifts[0].a == -20 && lifts[0].b == 1 && lifts[1].a == -20 && lifts[1].b == -1);
+    CHECK(lifts.size() == 2 && lifts[1].vt - lifts[0].vt == static_cast<u32>(pac::kLiftTicks));
+    CHECK(low_hp);
+  }
+  {
+    // A B1 with no B0 before it moves by step 0 (it only waits).
+    pac::Module module;
+    const Bytes body = {0xB1, 0x00, 0xB1, 0x01};
+    CHECK(module.parse(assemble_slot2(body)));
+    ResolvedHost host;
+    pac::Vm vm(module, host);
+    vm.tick(), vm.tick();
+    vm.drain_events();
+    CHECK(vm.launch(3, 2));
+    vm.tick();
+    bool still = false;
+    for (const pac::Event& event : vm.drain_events()) still = still || (event.kind == pac::Event::Kind::Lift && event.a == 0 && event.b == -1);
+    CHECK(still);
+  }
+}
+
+// Op 67 type 6 casts its element into the trap whatever the trap holds: the element lands nothing, the enemy side's trap empties and the
+// trap block hides.
+void test_scripted_trap_fizzle() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  pac::ScriptedBrain brain;
+  brain.set_module(0, assemble_pac(6, 1));
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  battle.set_trap(true, 2);
+  const int hp0 = battle.unit(0).hp;
+  battle.drain_log();
+  battle.unit_mut(3).countdown = 0;
+  battle.settle();
+  bool fired = false;
+  for (const auto& line : battle.drain_log()) fired = fired || line.find("the element trap fires") != std::string::npos;
+  CHECK(fired);
+  CHECK_EQ(battle.unit(0).hp, hp0);
+  CHECK_EQ(battle.trap_hud().enemy, 0);
+  CHECK(!battle.trap_hud().shown);
+}
+
+// The Radius tutorial (battle 386): a lethal hit on its first enemy slot leaves it 1 HP and no KO; any other battle kills.
+void test_tutorial_enemy_undying() {
+  for (const int scene : {0, Battle::kUndyingScene}) {
+    data::GameTables tables = make_tables();
+    tables.scenes.resize(static_cast<size_t>(Battle::kUndyingScene) + 1, tables.scenes[0]);
+    ScriptedRng rng{Lo::Fallback::Lo};
+    NullBrain brain;
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    CHECK(battle.start({make_member(0, "A")}, scene));
+    battle.unit_mut(3).hp = 1;
+    battle.do_weapon_attack(0, 3, 2);
+    const bool undying = scene == Battle::kUndyingScene;
+    CHECK_EQ(battle.unit(3).hp, undying ? 1 : 0);
+    CHECK_EQ(battle.unit(3).alive(), undying);
   }
 }
 
@@ -3367,6 +3589,48 @@ void test_auto_hit_level() {
   CHECK_EQ(fixture.battle.auto_hit_level(0, 3, true), -1);
 }
 
+// A frozen enemy stays on the target ring: an Attack aimed at it lands, and the scripts' unit mask keeps it.
+void test_frozen_enemy_targetable() {
+  Fixture fixture;
+  Unit& enemy = fixture.battle.unit_mut(3);
+  enemy.lo |= st::kDefeated;
+  const int hp0 = enemy.hp;
+  CHECK(enemy.standing() && !enemy.alive());
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.target = 3;
+  attack.chain = {0};
+  CHECK(fixture.battle.validate(attack));
+  CHECK(fixture.battle.apply(attack));
+  CHECK(fixture.battle.unit(3).hp < hp0);
+  fixture.battle.unit_mut(3).hp = 0;
+  CHECK(!fixture.battle.unit(3).standing());
+}
+
+// The auto pick reads the raw HIT stat minus EVD for a fresh PC / target pair, then (after a confirmed hit there) the HIT% box figure.
+void test_auto_hit_level_fresh_pair() {
+  Fixture fixture;
+  Unit& pc = fixture.battle.unit_mut(0);
+  pc.lo &= ~st::kFatigued;
+  pc.stamina = 70;
+  pc.hit = pc.hit_med = pc.hit_heavy = 50;
+  pc.hit_ovr = {120, 120, 120};
+  fixture.battle.unit_mut(3).evd = 0;
+  CHECK_EQ(fixture.battle.hit_figure_fresh(0, 3, 2), 50);
+  CHECK_EQ(fixture.battle.auto_hit_level(0, 3, true), 0);
+  pc.hit_heavy = 90;
+  CHECK_EQ(fixture.battle.auto_hit_level(0, 3, true), 2);
+  pc.hit_heavy = 50;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.target = 3;
+  attack.chain = {0};
+  CHECK(fixture.battle.apply(attack));
+  CHECK_EQ(fixture.battle.auto_hit_level(0, 3, true), 2);
+}
+
 // The Dopplegang pool (the kill credit; the mask is the save's) and the unit swap.
 void test_dopple_pool_and_form() {
   Fixture fixture;
@@ -3418,6 +3682,127 @@ void test_dopple_pool_and_form() {
   CHECK_EQ(battle.unit(2).atk, atk0);
   CHECK_EQ(battle.unit(2).hp, 20);
   CHECK(!battle.transform(2, -1));
+}
+
+// A PC still in a creature form when the fight ends leaves it as itself. Captured on the PS1 and RDE (room 53, Serge + Sprigg at 300 HP,
+// form 0x43, form HP set to 123): the record keeps 123 HP and Sprigg's own stats. With Pip in the party and his form change after
+// hers, RDE gives the record the unit from before the form, HP 300 included (the PS1 kept the creature's stats and kind there).
+void test_dopple_exit_unit() {
+  const auto run = [](bool pip_changes) {
+    Fixture fixture;
+    Battle battle{fixture.tables, fixture.rng, fixture.brain};
+    fixture.rng.push(0);
+    fixture.rng.push(100);
+    CHECK(battle.start({make_member(0, "Serge"), make_member(26, "Sprigg", 300), make_member(43, "Pip")}, 0));
+    battle.unit_mut(1).lo |= 0x01;
+    const int atk0 = battle.unit(1).atk;
+    CHECK(battle.transform(1, 0));
+    CHECK(battle.unit(1).atk != atk0);
+    battle.unit_mut(1).hp = 123;
+    if (pip_changes) battle.evolve(2, 0x2C);
+    const Unit own = battle.exit_unit(1);
+    CHECK_EQ(own.form, -1);
+    CHECK_EQ(own.atk, atk0);
+    CHECK_EQ(own.lo & 0x01, 0x01u);
+    battle.unit_mut(3).hp = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK(battle.outcome() == Outcome::Victory);
+    CHECK_EQ(battle.party()[1].lo_persist & 0x01, 0x01u);
+    return battle.party()[1].hp;
+  };
+  CHECK_EQ(run(false), 123);
+  CHECK_EQ(run(true), 300);
+}
+
+// The way back brings the saved unit back, its stamina too, with the HP of now, countdown 8 and the max HP of the last unit that changed
+// form from a character body, which the record keeps. Captured on the PS1 (room 53, Sprigg at 300 HP + Pip at 85 + Serge; form 0x43, her
+// HP held at 123, the saved unit's stamina set to 30 and hers to 50, then the way back): 123 / 300 and stamina 30; with Pip's form change
+// before the way back 123 / 85 and stamina 30 (RDE 123 / 85 too), the record 135 / 135 after the growth.
+void test_dopple_way_back_after_pip_form() {
+  for (const bool pip_changes : {true, false}) {
+    Fixture fixture;
+    Battle battle{fixture.tables, fixture.rng, fixture.brain};
+    fixture.rng.push(0);
+    fixture.rng.push(100);
+    CHECK(battle.start({make_member(26, "Sprigg", 300), make_member(43, "Pip", 85), make_member(0, "Serge")}, 0));
+    battle.unit_mut(0).lo |= 0x01;
+    battle.unit_mut(0).stamina = 30;
+    battle.unit_mut(0).used[0] = true;
+    const Unit saved = battle.unit(0);
+    CHECK(battle.transform(0, 0));
+    if (pip_changes) battle.evolve(1, 0x2C);
+    battle.unit_mut(0).hp = 123;
+    battle.unit_mut(0).stamina = 50;
+    CHECK(battle.transform(0, -1));
+    const Unit& unit = battle.unit(0);
+    CHECK_EQ(unit.form, -1);
+    CHECK_EQ(unit.hp, 123);
+    CHECK_EQ(unit.stamina, 30);
+    CHECK(unit.countdown == 8 && unit.gauge == -1 && unit.ap == 8);
+    CHECK(unit.atk == saved.atk && unit.def == saved.def && unit.mag == saved.mag && unit.mdef == saved.mdef);
+    CHECK_EQ(unit.lo, saved.lo);
+    CHECK(unit.cells == saved.cells && unit.used[0]);
+    CHECK_EQ(unit.max_hp, pip_changes ? 85 : 300);
+    CHECK_EQ(battle.party()[0].stat[0], pip_changes ? 85 : 300);
+  }
+}
+
+// Gear HP% raises the battle-start HP, not the max HP. Captured on the PS1 and RDE (room 53, Pip at 85 / 85 wearing Earring of Hope, 15%):
+// his unit starts at 97 / 85; his form change then hands max HP 85 to Sprigg's way back (PS1 123 / 85). A creature form taken after Pip's
+// form change gets that max HP as well (PS1 and RDE 123 / 85), and the fight's end gives Sprigg her whole saved unit back (RDE 300 / 300).
+void test_gear_hp_pct_and_forms() {
+  data::GameTables tables = make_tables();
+  tables.gear.resize(256);
+  tables.gear[0xE1].raw[4] = 15, tables.gear[0xE1].raw[8] = 0x01;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  PartyMember pip = make_member(43, "Pip", 85);
+  pip.eq = make_equip(tables, 0, 0, {0xE1, 0, 0});
+  PartyMember hurt = make_member(1, "B", 50);
+  hurt.hp = 40;
+  hurt.eq = make_equip(tables, 0, 0, {0xE1, 0xE1, 0});
+  CHECK(battle.start({make_member(26, "Sprigg", 300), pip, hurt}, 0));
+  CHECK(battle.unit(1).hp == 97 && battle.unit(1).max_hp == 85);
+  // Sequential per accessory: 40 -> 46 -> 52.
+  CHECK(battle.unit(2).hp == 52 && battle.unit(2).max_hp == 50);
+  CHECK(battle.transform(0, 0));
+  battle.evolve(1, 0x2C);
+  battle.unit_mut(0).hp = 123;
+  CHECK(battle.transform(0, 0));
+  CHECK(battle.unit(0).form == 0 && battle.unit(0).hp == 123 && battle.unit(0).max_hp == 85);
+  const Unit own = battle.exit_unit(0);
+  CHECK(own.form == -1 && own.hp == 300 && own.max_hp == 300);
+  CHECK(battle.transform(0, -1));
+  CHECK(battle.unit(0).hp == 123 && battle.unit(0).max_hp == 85 && battle.party()[0].stat[0] == 85);
+}
+
+// A creature form grows with the stars left above its threshold (record +0xA6 & 0x7F) by the +0xA7 selectors: the PS1 turns
+// Scorpiod's ATK DEF MAG MDEF 30 5 10 0 (threshold 13, selectors 0x7A) into 34 9 19 2 with 50 stars left; at the threshold nothing grows.
+void test_dopple_form_star_growth() {
+  const auto form_stats = [](int stars_left) {
+    Fixture fixture;
+    data::StatRec& rec = fixture.tables.enemies[0];
+    rec.raw[0x18] = 30, rec.raw[0x19] = 5, rec.raw[0x1A] = 100, rec.raw[0x1B] = 0, rec.raw[0x1C] = 10, rec.raw[0x1D] = 0;
+    rec.raw[0xA6] = 0x0D, rec.raw[0xA7] = 0x7A;
+    Battle battle{fixture.tables, fixture.rng, fixture.brain};
+    fixture.rng.push(0);
+    fixture.rng.push(100);
+    BattleOptions options;
+    options.growth.counter = stars_left;
+    CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(26, "Sprigg")}, 0, options));
+    CHECK(battle.transform(0, 0));
+    const Unit& unit = battle.unit(0);
+    return std::array<int, 5>{unit.atk, unit.def, unit.hit, unit.mag, unit.mdef};
+  };
+  CHECK((form_stats(50) == std::array<int, 5>{34, 9, 100, 19, 2}));
+  CHECK((form_stats(13) == std::array<int, 5>{30, 5, 100, 10, 0}));
 }
 
 // Every Anti-X record (mode 1, pgdat +4 0x80, +5 the element's own colour, +0x18 the seal word) lands its seal word on the target's lo (Anti-Blue
@@ -3478,7 +3863,7 @@ void test_element_modes_revenge_heal_piggy_hero() {
     caster.timers[0] = 9;
     fixture.battle.do_element(3, 4, 0, 0);
     CHECK_EQ(fixture.battle.unit(0).lo & (st::kPoison | st::kAfraid), st::kPoison | st::kAfraid);
-    CHECK_EQ(fixture.battle.unit(0).lo & 0x400u, 0);
+    CHECK_EQ(fixture.battle.unit(0).lo & ~fixture.battle.unit(0).perm_lo & 0x400u, 0);
     CHECK_EQ(fixture.battle.unit(3).lo, 0x400);
     CHECK(fixture.battle.unit(3).timers.count(0) == 0);
     CHECK_EQ(fixture.battle.events().back().code, 0);
@@ -3742,6 +4127,45 @@ void test_pc_countdowns_run_with_actions() {
   CHECK(battle.unit(2).countdown > 0);
 }
 
+// An enemy turn that interrupts a PC's open weapon turn keeps the PC's chain when it hits another PC (the PS1 keeps the counter at 1 after
+// a weak hit and two enemy hits on Kid); a hit on the chain's PC, or an enemy turn after the PC's turn has ended, resets it.
+struct TargetBrain final : EnemyBrain {
+  int target = 1;
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.target = target;
+    return action;
+  }
+};
+
+void test_chain_across_interrupting_enemy_turn() {
+  const auto chance_after = [](int enemy_target, int pc_stamina) {
+    data::GameTables tables = make_tables();
+    ScriptedRng rng{Lo::Fallback::Lo};
+    TargetBrain brain;
+    brain.target = enemy_target;
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+    battle.unit_mut(0).stamina = pc_stamina;
+    battle.unit_mut(3).countdown = 1;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.target = 3;
+    attack.chain = {0};
+    CHECK(battle.apply(attack));
+    CHECK_EQ(battle.unit(3).countdown != 0, true);
+    return battle.hit_chance_for(0, 3, 0);
+  };
+  Fixture fixture;
+  const int fresh = fixture.battle.hit_chance_for(0, 3, 0);
+  CHECK(chance_after(1, 70) > fresh);
+  CHECK_EQ(chance_after(0, 70), fresh);
+  CHECK_EQ(chance_after(1, 10), fresh);
+}
+
 // A landed weapon hit wakes the target and ends its confusion, timers included.
 void test_weapon_hit_ends_confusion() {
   Fixture fixture;
@@ -3808,6 +4232,52 @@ struct ConfusedScriptBrain final : EnemyBrain {
     return action;
   }
 };
+
+// A confused PC's script queues one entry (`kind`, a heavy weapon hit or element 1) on the enemy; the enemies wait.
+struct ScriptedPcBrain final : EnemyBrain {
+  EnemyAction::Kind kind = EnemyAction::Kind::Weapon;
+  bool plan_turn(Battle&, int unit, Rng&, std::vector<EnemyAction>& out) override {
+    out.clear();
+    if (unit >= kPcSlots) return false;
+    EnemyAction action;
+    action.kind = kind;
+    action.strength = 2;
+    action.element = 1;
+    action.target = 3;
+    out.push_back(action);
+    return true;
+  }
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.kind = EnemyAction::Kind::None;
+    return action;
+  }
+};
+
+// A PC's scripted weapon entry is upkept as one weak hit whatever its strength (stamina 10, poison 1); a scripted element entry as the
+// menu's element command (stamina 70, poison 7).
+void test_scripted_pc_entry_upkeep() {
+  for (const EnemyAction::Kind kind : {EnemyAction::Kind::Weapon, EnemyAction::Kind::Element}) {
+    data::GameTables tables = make_tables();
+    ScriptedRng rng{Lo::Fallback::Lo};
+    ScriptedPcBrain brain;
+    brain.kind = kind;
+    Battle battle{tables, rng, brain};
+    rng.push(0);
+    rng.push(100);
+    CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+    for (int i = 0; i < 3; ++i) battle.unit_mut(i).lo |= 1u;
+    battle.unit_mut(0).lo |= st::kConfused;
+    battle.unit_mut(0).stamina = 70;
+    battle.unit_mut(0).countdown = 0;
+    battle.unit_mut(3).countdown = 200;
+    const int hp1 = battle.unit(1).hp;
+    battle.settle();
+    const bool weapon = kind == EnemyAction::Kind::Weapon;
+    CHECK_EQ(battle.unit(1).hp, hp1 - (weapon ? 1 : 7));
+    CHECK_EQ(battle.unit(0).stamina, weapon ? 60 : 0);
+  }
+}
 
 // Serge alone and confused (permanently) with enemies at 17 and 1: no PC can act, so time runs once as the menu finds nobody and again in
 // the scheduler pass, which takes every countdown to 0 before anyone acts; his empty script turn makes no attack and ends with the A4
@@ -4552,6 +5022,169 @@ void test_summon_gate() {
   CHECK_EQ(state.slot.head[save::head::kStarsTotal], 12);
 }
 
+// Every record has the 48-cell shape 03FC x3, 03F8, 01F0, 01E0 x3 (row 0 = columns 2..9, row 4 = columns 4..8) and growth column 0.
+void give_every_record_a_grid(data::GameTables& tables) {
+  auto& char_set = tables.char_sets["char"];
+  const u16 masks[8] = {0x3FC, 0x3FC, 0x3FC, 0x3F8, 0x1F0, 0x1E0, 0x1E0, 0x1E0};
+  for (auto& rec : char_set.rec)
+    for (int row = 0; row < 8; ++row) {
+      rec.raw[static_cast<size_t>(0x30 + 2 * row)] = static_cast<u8>(masks[row]);
+      rec.raw[static_cast<size_t>(0x31 + 2 * row)] = static_cast<u8>(masks[row] >> 8);
+    }
+}
+
+// A boss win at star 2 opens the el_mask cells of stars 0..3 in all 44 records' unlock masks: in an empty cell, in a character who
+// is neither in the party nor recruited, never in a cell the grid does not have, never a later star's cell.
+void test_star_up_grid_unlocks() {
+  data::GameTables tables = make_tables();
+  give_every_record_a_grid(tables);
+  tables.scenes[0].raw[0x1A] = 0x80;
+  tables.growth[1][0] = 0x07;
+  tables.growth[2][0] = 0x11;
+  tables.growth[3][0] = 0x2A;
+  tables.growth[4][0] = 0x08;
+  ui::MenuRules rules;
+  rules.tables = &tables;
+  ui::GameState state;
+  state.rules = &rules;
+  state.slot.head[save::head::kStarsTotal] = state.slot.head[save::head::kStarsCurrent] = 2;
+  for (auto& rec : state.slot.chars) rec.unlocked = {0x40, 0x40, 0x40, 0, 0, 0, 0, 0};
+  ScriptedRng rng{Lo::Fallback::Lo};
+  rng.push(0);
+  rng.push(100);
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  BattleOptions options;
+  options.growth.star = 2;
+  CHECK(battle.start({make_member(0, "A")}, 0, options));
+  battle.unit_mut(3).hp = 1;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {2};
+  CHECK(battle.apply(attack));
+  CHECK(battle.outcome() == Outcome::Victory);
+  CHECK(game::apply_battle_result(state, tables, battle).star_up);
+  CHECK_EQ(state.slot.head[save::head::kStarsTotal], 3);
+  for (const int char_id : {0, 5, 43}) {
+    const auto& unlocked = state.slot.chars[static_cast<size_t>(char_id)].unlocked;
+    CHECK_EQ(unlocked[0], 0xC0);
+    CHECK_EQ(unlocked[1], 0xC0);
+    CHECK_EQ(unlocked[2], 0x40);
+    CHECK_EQ(unlocked[4], 0);
+    CHECK(state.cell_available(char_id, 0, 7) && state.cell_element(char_id, 0, 7) == 0);
+  }
+}
+
+// Pip in a form grows toward the form's Lv 99 record (RDE): a boss win with Pip as Divine Beast (0x30), his stats at record 43's
+// Lv 99 values, gives him his whole pending (30 HP, 3 / 5 / 5 / 5 / 9 / 6) up to the form's targets and rolls the next HP pending
+// against the form's 800 HP. RDE: 750 -> 780 HP, ATK / DEF / HIT / EVD / MAG / MDEF 83 / 75 / 95 / 30 / 49 / 41, next HP pending 2.
+void test_pip_form_growth() {
+  data::GameTables tables = make_tables();
+  give_every_record_a_grid(tables);
+  tables.scenes[0].raw[0x1A] = 0x80;
+  auto& char_set = tables.char_sets["char"];
+  char_set.lv99[43] = {750, 80, 70, 90, 25, 40, 35};
+  char_set.lv99[0x30] = {800, 84, 80, 99, 35, 58, 46};
+  ui::MenuRules rules;
+  rules.tables = &tables;
+  ui::GameState state;
+  state.rules = &rules;
+  state.slot.head[save::head::kStarsTotal] = 50;
+  save::SaveChar& pip = state.slot.chars[43];
+  pip.model_id = 0x30;
+  pip.max_hp = pip.cur_hp = pip.hp_extra = 750;
+  pip.atk = 80, pip.def = 70, pip.hit = 90, pip.evd = 25, pip.mag = 40, pip.mdef = 35;
+  pip.unk_be = 30;
+  pip.bonus = {80, 3, 90, 5, 70, 5, 25, 5, 40, 9, 35, 6};
+  const PartyMember member = game::party_member_from_state(tables, state, 43);
+  CHECK(member.lv99 == (std::array<int, 7>{800, 84, 80, 99, 35, 58, 46}));
+  pip.model_id = 0x2B;
+  CHECK(game::party_member_from_state(tables, state, 43).lv99 == (std::array<int, 7>{750, 80, 70, 90, 25, 40, 35}));
+  ScriptedRng rng{Lo::Fallback::Lo};
+  rng.push(0);
+  rng.push(100);
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  BattleOptions options;
+  options.growth.star = 50;
+  CHECK(battle.start({member}, 0, options));
+  battle.unit_mut(3).hp = 1;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {2};
+  CHECK(battle.apply(attack));
+  CHECK(battle.outcome() == Outcome::Victory);
+  CHECK(battle.rewards().star_up);
+  const PartyMember& grown = battle.party()[0];
+  CHECK(grown.stat == (std::array<int, 7>{780, 83, 75, 95, 30, 49, 41}));
+  CHECK(grown.snap == grown.stat);
+  CHECK(grown.pending[0] >= 2 && grown.pending[0] <= 20);
+  // A form change in the fight moves the targets to the new form at once.
+  char_set.lv99[0x2E] = {950, 92, 90, 95, 25, 48, 38};
+  battle.evolve(0, 0x2E);
+  CHECK(battle.party()[0].lv99 == (std::array<int, 7>{950, 92, 90, 95, 25, 48, 38}));
+}
+
+// A fight that changes Pip's form at 99 stars ends with the new form's Lv 99 stats and its full grid (RDE: Pip 0x2B -> 0x2C at 500 HP,
+// 7 / 7 / 85 / 20 / 8 / 7, masks 0x40 x3: after the results 780 HP, 84 / 80 / 90 / 25 / 44 / 36, masks f8 f8 f8 f0 e0 c0 0 0, pending kept).
+void test_pip_form_settles_at_99() {
+  data::GameTables tables = make_tables();
+  give_every_record_a_grid(tables);
+  auto& char_set = tables.char_sets["char"];
+  char_set.lv99[0x2C] = {780, 84, 80, 90, 25, 44, 36};
+  tables.growth[5][0] = 0x13;
+  ui::GameState state;
+  auto reset = [&](int stars) {
+    state.slot.head[save::head::kStarsTotal] = static_cast<u8>(stars);
+    save::SaveChar& pip = state.slot.chars[43];
+    pip.model_id = 0x2C;
+    pip.max_hp = pip.hp_extra = 500, pip.cur_hp = 450;
+    pip.atk = 7, pip.def = 7, pip.hit = 85, pip.evd = 20, pip.mag = 8, pip.mdef = 7;
+    pip.unk_be = 8;
+    pip.bonus = {7, 0, 85, 0, 7, 0, 20, 0, 8, 1, 7, 0};
+    pip.unlocked = {};
+  };
+  reset(98);
+  game::settle_pip_form(state, tables, 0x2B);
+  CHECK_EQ(state.slot.chars[43].max_hp, 500);
+  reset(99);
+  game::settle_pip_form(state, tables, 0x2C);
+  CHECK_EQ(state.slot.chars[43].max_hp, 500);
+  game::settle_pip_form(state, tables, 0x2B);
+  const save::SaveChar& pip = state.slot.chars[43];
+  CHECK(pip.max_hp == 780 && pip.cur_hp == 730 && pip.hp_extra == 780 && pip.unk_be == 8);
+  CHECK(pip.atk == 84 && pip.def == 80 && pip.hit == 90 && pip.evd == 25 && pip.mag == 44 && pip.mdef == 36);
+  CHECK(pip.bonus == (std::array<u8, 12>{84, 0, 90, 0, 80, 0, 25, 0, 44, 1, 36, 0}));
+  CHECK(pip.unlocked == (std::array<u16, 8>{0x40, 0x240, 0x40, 0, 0, 0, 0, 0}));
+}
+
+// The battle opens a saved cell exactly when its unlock mask bit is set, as the menu does: a filled cell of an earlier star whose bit is
+// clear stays shut, a filled cell in rows 0..1 is not opened by default.
+void test_battle_grid_follows_the_masks() {
+  data::GameTables tables = make_tables();
+  give_every_record_a_grid(tables);
+  tables.growth[1][0] = 0x07;
+  ui::MenuRules rules;
+  rules.tables = &tables;
+  ui::GameState state;
+  state.rules = &rules;
+  state.slot.head[save::head::kStarsTotal] = 3;
+  save::SaveChar& serge = state.slot.chars[0];
+  serge.max_hp = serge.cur_hp = 100;
+  serge.unlocked = {0x40, 0x40, 0x40, 0, 0, 0, 0, 0};
+  serge.grid[3] = 1;
+  serge.grid[4] = 1;
+  serge.grid[5] = 1;
+  const PartyMember member = game::party_member_from_state(tables, state, 0);
+  CHECK(member.unlocked[6]);
+  CHECK(!member.unlocked[5]);
+  CHECK(!member.unlocked[7]);
+  serge.unlocked[0] |= 0x80;
+  CHECK(game::party_member_from_state(tables, state, 0).unlocked[7]);
+}
+
 int main() {
   test_stack_restock();
   test_gear();
@@ -4577,10 +5210,13 @@ int main() {
   test_ko_drops_pc_statuses();
   test_poison_ko();
   test_revive_resets_stamina_and_countdown();
+  test_revive_to_zero_hp();
+  test_empty_stack_greyed();
   test_heal_ignores_ring_colour();
   test_saints_by_target_slot();
   test_purify_cures();
   test_turn_colour_status();
+  test_hit_box_figure();
   test_status_message();
   test_status_mode_codes();
   test_frozen_turns();
@@ -4606,6 +5242,8 @@ int main() {
   test_blue_seal_is_not_death();
   test_anti_colour_seals();
   test_pac_resolved_ops();
+  test_scripted_trap_fizzle();
+  test_tutorial_enemy_undying();
   test_end_rules();
   test_scripted_hp_write_runs_kill_script();
   test_hidden_units();
@@ -4615,7 +5253,13 @@ int main() {
   test_debug_flags();
   test_god_mode();
   test_dopple_pool_and_form();
+  test_dopple_exit_unit();
+  test_dopple_way_back_after_pip_form();
+  test_gear_hp_pct_and_forms();
+  test_dopple_form_star_growth();
   test_auto_hit_level();
+  test_auto_hit_level_fresh_pair();
+  test_frozen_enemy_targetable();
   test_element_modes_revenge_heal_piggy_hero();
   test_ps1_cast_colours();
   test_hero_set();
@@ -4625,10 +5269,12 @@ int main() {
   test_weapon_tech_participants();
   test_sealed_caster_fizzles();
   test_pc_countdowns_run_with_actions();
+  test_chain_across_interrupting_enemy_turn();
   test_weapon_hit_ends_confusion();
   test_weapon_tech_wake_crit_drain();
   test_no_stamina_cost_status();
   test_time_runs_while_nobody_can_act();
+  test_scripted_pc_entry_upkeep();
   test_weapon_tech_immune_absorb();
   test_combo_techs();
   test_combo_real_tables();
@@ -4636,6 +5282,10 @@ int main() {
   test_stat_mode_hero_gate_and_heal();
   test_dopple_form_gauge_cap();
   test_stolen_loot_needs_victory();
+  test_star_up_grid_unlocks();
+  test_pip_form_growth();
+  test_pip_form_settles_at_99();
+  test_battle_grid_follows_the_masks();
   test_monster_party();
   test_lynx_duel_bodies();
   test_unnamed_kid_label();

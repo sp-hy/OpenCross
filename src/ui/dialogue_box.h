@@ -61,7 +61,7 @@ class DialogueBox {
   // The {bpage} page being shown (0-based).
   int page_index() const { return static_cast<int>(tw_.page_index()); }
 
-  // Stubs for the field-window features that need game state.
+  // Field-window features that need game state.
   // Portrait: RDE face id 0..91 (-1 none), hd/face/<set>/<name>.png at the right end of the box; original art draws the PS1
   // face cdrom/face/<stem>.tim (64 x 64) in the same place, or hd/face/1999 (RDE's original-graphics folder) when the disc has
   // none. `set` = "2021" or "1999" (HD only).
@@ -82,8 +82,6 @@ class DialogueBox {
     key_caps_ = keyboard;
     key_cap_lang_ = lang_index;
   }
-  // Shown when the last page waits for confirm.
-  void set_choices(std::vector<std::u32string> choices);
   // In-window choice (field MULTI_CHOICE): lines first..last of the message are the options; a cursor is drawn at the
   // selected line once the message is fully shown, and confirm() stores the pick in chosen(). Reset by open().
   void set_line_choice(int first, int last);
@@ -215,7 +213,6 @@ class DialogueBox {
   int key_cap_lang_ = 0;
   const render::TexRef* button_sheet(const std::string& member);
   void draw_button(int key, float x, float y, float zoom, float alpha);
-  std::vector<std::u32string> choices_;
   int choice_ = 0;
   int chosen_ = -1;
   // In-window choice lines.

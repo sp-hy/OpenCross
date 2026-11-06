@@ -4,6 +4,7 @@
 // and emitter_collect.cpp.
 
 #include "game/effects/emitter_system.h"
+#include "game/effects/object_heap.h"
 
 #include <array>
 #include <functional>
@@ -111,6 +112,9 @@ struct Object {
   u16 path_l0 = 0;
   // 0 = A, 1 = B.
   int slot_reg = -1;
+  // Node offset in the object arena: objects are stepped and drawn in ascending order of it. `heap_held` until the block is freed.
+  u32 heap_node = 0;
+  bool heap_held = false;
   bool alive = true;
   // EmitterSystem::mark_mesh_objects().
   bool marked = false;
@@ -149,6 +153,7 @@ struct EmitterSystem::Impl {
   LightTable* lights = nullptr;
   std::vector<Header> headers;
   std::vector<Object> objs;
+  ObjectHeap heap;
   EmitterStats st;
   u64 tick_count = 0;
   // set_frame_ticks: 60 Hz ticks per frame step, and the ticks counted since the last step.
@@ -178,6 +183,8 @@ struct EmitterSystem::Impl {
   void register_all();
   bool start_index(size_t i);
   void kill_objects(int owner);
+  // Ends the object and frees its arena block at once.
+  void release(Object& obj);
 
   // -- basis helpers
   Basis actor_basis(int sel_a, int sel_b, int sel_c, int sel_d, int& scale, bool& found) const;
@@ -202,6 +209,8 @@ struct EmitterSystem::Impl {
   void periodic_spawn(size_t idx, int ticks);
   bool anchor_at(int id, float alpha, Basis& basis) const;
   void tick();
+  // Indices of objs in ascending arena order: the order objects are stepped and drawn.
+  std::vector<size_t> heap_order() const;
   void step_frame(int ticks);
   float frame_blend(float alpha) const;
   EmitterSystem::ObjectRef ref(Object& obj);

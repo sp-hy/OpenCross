@@ -6,6 +6,7 @@
 #include <cstring>
 #include <format>
 #include <functional>
+#include <limits>
 
 #include "audio/voice.h"
 #include "core/log.h"
@@ -66,6 +67,32 @@ void FieldWorld::close_windows() {
 
 bool FieldWorld::dialogue_open() { return window_owned_by(vm_.current_entity()) != nullptr; }
 
+bool FieldWorld::drop_culled_dialogue() {
+  const int runner = vm_.current_entity();
+  ui::DialogueDemo* box = window_owned_by(runner);
+  if (!box) return false;
+  bool kept = box == &dialogue_ && dialogue_kept_;
+  for (const auto& window : extra_win_)
+    if (window.box.get() == box) kept = window.kept;
+  if (kept) return false;
+  log::debug("field: tick {} ent {} is off screen at E2: its window closes and the script ends", tick_count_, runner);
+  box->close();
+  return true;
+}
+
+int FieldWorld::other_window_below(const ui::DialogueDemo& self) const {
+  int result = -1;
+  auto look = [&](const ui::DialogueDemo& box, bool below) {
+    if (&box == &self || !box.is_open()) return;
+    if (below) result = 1;
+    else if (result < 0) result = 0;
+  };
+  look(dialogue_, dialogue_below_);
+  for (const auto& window : extra_win_)
+    if (window.box) look(*window.box, window.below);
+  return result;
+}
+
 bool FieldWorld::dialogue_blocked() {
   if (window_owned_by(vm_.current_entity())) return true;
   if (!dialogue_.is_open()) return false;
@@ -124,23 +151,28 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     dialogue_face_ = face;
     portrait_left_ = false;
     if (face >= 0) {
-      // bit 12 of the window flags: ((facing + camera yaw + entity yaw offset) & 0xFFF) - 0x401 < 0x800 (unsigned); clear = portrait left.
-      const u32 yaw_delta = static_cast<u32>((ents_[static_cast<size_t>(target)].actor.facing() + control_yaw_) & 0xFFF) - 0x401u;
+      // Bit 12 of the window flags: ((script heading + control yaw + own model yaw) & 0xFFF) - 0x401 < 0x800 (unsigned); clear =
+      // portrait left. The heading is the one scripts set and read (SET_ROTATION / GET_ROTATION), the model yaw is axis 1 (op 28 / AA).
+      const int model_yaw = static_cast<s16>(vm_.entity(target).axis[1]);
+      const u32 yaw_delta = static_cast<u32>((get_facing(target) + control_yaw_ + model_yaw) & 0xFFF) - 0x401u;
       const u32 fl = static_cast<u32>(flags_hi_for(flag_byte));
       portrait_left_ = !((fl & 0x800u) != 0 || ((fl & 0x1000u) == 0 && yaw_delta < 0x800u));
     }
   }
-  bool lbl = false;
+  bool lbl = false, kept = false;
   {
     const int runner = vm_.current_entity();
     const int wf = runner >= 0 && runner < static_cast<int>(ents_.size()) ? ents_[static_cast<size_t>(runner)].win[4] : 0;
     lbl = (wf & 0x10) != 0;
+    kept = (wf & 0x400) != 0;
   }
   if (win_slot == 0) {
     label_ = lbl;
+    dialogue_kept_ = kept;
     dialogue_owner_ = vm_.current_entity();
   } else {
     extra_win_[static_cast<size_t>(win_slot - 1)].label = lbl;
+    extra_win_[static_cast<size_t>(win_slot - 1)].kept = kept;
     extra_win_[static_cast<size_t>(win_slot - 1)].owner = vm_.current_entity();
   }
   owner_window_[vm_.current_entity()] = win_slot;
@@ -148,8 +180,8 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   dlg.set_portrait(lbl ? -1 : dialogue_face_);
   last_dialogue_msg_ = message;
   choice_pending_ = false;
-  log::debug("field: tick {} dialogue room {} message {} (running ent {}, speaker ent {}, face {}, window {})", tick_count_, room_id_, message,
-             vm_.current_entity(), speaker, dialogue_face_, win_slot);
+  log::debug("field: tick {} dialogue room {} message {} (running ent {}, speaker ent {}, face {}, window {}, portrait {})", tick_count_, room_id_,
+             message, vm_.current_entity(), speaker, dialogue_face_, win_slot, dialogue_face_ < 0 || lbl ? "none" : portrait_left_ ? "left" : "right");
   dlg.set_skin_byte(gs_->option(ui::opt::kCustomWindow) ? gs_->skin : 0);
   // The art mode changed while the previous window was open (set_art_mode).
   if (dialogue_mode_pending_) {
@@ -168,7 +200,9 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   dlg.set_portrait_flags(true, portrait_left_);
   dlg.set_portrait(lbl ? -1 : dialogue_face_);
   // E0 passes no entity: it speaks as the running entity, which also places the window (labels too).
-  place_dialogue_window(dlg, speaker >= 0 ? speaker : target, message, flag_byte, !lbl && dialogue_face_ >= 0);
+  const bool below = place_dialogue_window(dlg, speaker >= 0 ? speaker : target, message, flag_byte, !lbl && dialogue_face_ >= 0);
+  if (win_slot == 0) dialogue_below_ = below;
+  else extra_win_[static_cast<size_t>(win_slot - 1)].below = below;
 }
 
 // Upper byte of the window flags of the running entity (op 62); the dialog op's own flag byte only replaces the low byte.
@@ -178,10 +212,13 @@ int FieldWorld::flags_hi_for(int) const {
   return wf & 0xFF00;
 }
 
-namespace {
-// PS1 text width of a dialogue message in pixels: glyphs below 0x75 are 8 wide, the rest 12; the widest line wins.
-// Names / items substituted at run time (controls 7, 8, 0x12, 0x15, 0x18, 0x19, 0x1B) are estimated at 6 narrow glyphs.
-int ps1_message_width(std::span<const u8> bytes) {
+// PS1 text width of a dialogue message in pixels: glyphs below 0x75 are 8 wide, the rest 12; the widest line wins. Names, items,
+// the speaker's grammar forms (0x12) and button names are measured as the strings the PS1 substitutes (its executable tables and
+// the save's names); a numeric field (0x0A / 0x0B) counts as 0x48 / 0x30, a digit entry (0x10) as -0x50.
+int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const {
+  const u32 global_flags = vm_.global_flags();
+  auto reads_as_lynx = [&](int char_id) { return model_byte(char_id) == data::kLynxBody && !(global_flags & script::gflag::kKeepCustomName); };
+  auto var = [&](int arg) { return static_cast<int>(vm_.var(static_cast<u16>(arg * 2 + 0x1A))); };
   int widest = 0, width = 0;
   size_t i = 0;
   while (i < bytes.size()) {
@@ -191,6 +228,7 @@ int ps1_message_width(std::span<const u8> bytes) {
       i += code > 0xF7 ? 2 : 1;
       continue;
     }
+    const int arg = i + 1 < bytes.size() ? bytes[i + 1] : 0;
     switch (code) {
       case 0:
       case 2:
@@ -202,26 +240,100 @@ int ps1_message_width(std::span<const u8> bytes) {
         i += 1;
         break;
       case 3: case 0x1F: i += 1; break;
-      case 6: widest = std::max(widest, width); width = 0; i += 2; break;
       case 4: case 5: case 0xE: case 0xF: case 0x16: case 0x17: i += 2; break;
-      case 7: width += 0x30; i += 3; break;
-      case 8: case 0x12: case 0x15: case 0x18: case 0x19: case 0x1B: width += 0x30; i += 2; break;
+      case 6: widest = std::max(widest, width); width = 0; i += 2; break;
+      case 7:
+        width += ps1_string_width(0, arg | (i + 2 < bytes.size() ? bytes[i + 2] << 8 : 0));
+        i += 3;
+        break;
+      case 8: width += ps1_string_width(1, arg); i += 2; break;
       case 9: i += 3; break;
       case 0xA: width += 0x48; i += 2; break;
       case 0xB: width += 0x30; i += 2; break;
       case 0x10: width -= 0x50; i += 2; break;
+      case 0x12: {
+        const int speaker_char = speaker >= 0 && speaker < static_cast<int>(ents_.size()) ? std::max(0, ents_[static_cast<size_t>(speaker)].char_id) : 0;
+        width += ps1_string_width(arg + 1, speaker_char);
+        i += 2;
+        break;
+      }
+      case 0x15: {
+        int char_id = var(arg);
+        char_id = char_id >= 0x2C ? 0 : reads_as_lynx(char_id) ? data::kLynxBody : char_id;
+        width += ps1_string_width(1, char_id) + (char_id == 5 ? 0x18 : 0);
+        i += 2;
+        break;
+      }
+      case 0x18: {
+        const int member = arg < static_cast<int>(party_chars_.size()) ? party_chars_[static_cast<size_t>(arg)] : -1;
+        const int char_id = member < 0 ? 0 : member;
+        if (reads_as_lynx(char_id)) width += ps1_string_width(1, data::kLynxBody);
+        else width += ps1_string_width(1, char_id) + (char_id == 5 ? 0x18 : 0);
+        i += 2;
+        break;
+      }
+      case 0x19: width += ps1_string_width(0, var(arg)); i += 2; break;
+      case 0x1B: {
+        // The button the field configuration puts on that function; with Controller: Default (option 0x100 clear) the function itself.
+        const bool custom = gs_ && gs_->option(ui::opt::kControllerEdit);
+        const int button = custom ? static_cast<int>(gs_->slot.button_cfg[0] >> ((arg & 7) * 4) & 0xF) : arg & 7;
+        width += ps1_string_width(27, button);
+        i += 2;
+        break;
+      }
       default: i += 1; break;
     }
   }
   return std::max(widest, width);
 }
-}  // namespace
+
+// Width of a substituted string: table 0 ids 0x200.. are elements / techs (table 23), 0x400.. key items (24); character names
+// (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name (Lynx's while his body is Lynx's and
+// GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's. Inside, glyphs count as in a message, a nested name
+// (code 8) adds its width, and the first other control code ends it.
+int FieldWorld::ps1_string_width(int table, int id) const {
+  if (table == 0 && id >= 0x200) {
+    table = id < 0x400 ? 23 : 24;
+    id -= id < 0x400 ? 0x200 : 0x400;
+  }
+  std::span<const u8> text;
+  size_t glyph_limit = std::numeric_limits<size_t>::max();
+  if (table == 1 && (id & 0x80)) {
+    const bool lynx = model_byte(0) == data::kLynxBody && !(vm_.global_flags() & script::gflag::kKeepCustomName);
+    glyph_limit = id == 0x83 ? 2 : static_cast<size_t>(id - 0x80);
+    id = id == 0x83 ? 0xD : lynx ? data::kLynxBody : 0;
+  }
+  if (table == 1 && id < 0x2C && gs_) {
+    const auto& name = gs_->slot.chars[static_cast<size_t>(id)].name;
+    text = std::span<const u8>(name.data(), static_cast<size_t>(std::find(name.begin(), name.end(), u8{0}) - name.begin()));
+  } else {
+    text = exe_strings_.get(table, table == 1 && id >= 0x2C ? data::kLynxBody : id);
+  }
+  int width = 0;
+  size_t glyphs = 0;
+  for (size_t i = 0; i < text.size() && glyphs < glyph_limit;) {
+    const u8 code = text[i];
+    if (code >= 0x20) {
+      width += code < 0x75 ? 8 : 12;
+      i += code > 0xF7 ? 2 : 1;
+      ++glyphs;
+    } else if (code == 4 || code == 5 || code == 0xE || code == 0xF || code == 0x16 || code == 0x17) {
+      i += 2;
+    } else if (code == 8 && i + 1 < text.size()) {
+      width += ps1_string_width(1, text[i + 1]);
+      i += 2;
+    } else {
+      break;
+    }
+  }
+  return width;
+}
 
 // Where the window goes: PS1 pixels, top-left (x, y) of the text area; the box maps it to the canvas
 // (PSX2 = 2 * PS1, canvas x = 2 * PSX2, canvas y = PSX2 * 960 / 432).
-void FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int message, int flag_byte, bool portrait) {
+bool FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int message, int flag_byte, bool portrait) {
   const int runner = vm_.current_entity();
-  if (runner < 0 || runner >= static_cast<int>(ents_.size())) return;
+  if (runner < 0 || runner >= static_cast<int>(ents_.size())) return false;
   const std::array<int, 5>& win = ents_[static_cast<size_t>(runner)].win;
   const int base = win[4];
   const int lo = flag_byte ? flag_byte : (base & 0xFF);
@@ -232,7 +344,7 @@ void FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int m
         blk && message >= 0 && message < static_cast<int>(blk->records.size())) {
       const auto& record = blk->records[static_cast<size_t>(message)];
       lines = record.lines;
-      width = ps1_message_width(std::span<const u8>(record.bytes.data(), record.bytes.size()));
+      width = ps1_message_width(std::span<const u8>(record.bytes.data(), record.bytes.size()), speaker);
     }
   }
   if (lo & 2) {
@@ -267,8 +379,11 @@ void FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int m
   const int mode = (fl >> 2) & 3;
   bool above = false;
   if (mode == 0) {
-    // Auto: above the speaker when its engine heading is below 0x800, else below (no other window is open).
-    above = have_actor && (((ents_[static_cast<size_t>(speaker)].actor.facing() - 0x800) & 0xFFF) < 0x800);
+    // Auto, by the speaker's engine heading and the other open windows. Heading below 0x800: above when no other window is open or
+    // one sits under its speaker, below when the others sit elsewhere. Heading 0x800 and up: above only when one sits under its speaker.
+    const bool low_heading = have_actor && (((ents_[static_cast<size_t>(speaker)].actor.facing() - 0x800) & 0xFFF) < 0x800);
+    const int others = other_window_below(dlg);
+    above = low_heading ? others != 0 : others == 1;
   } else if (mode == 2) {
     above = true;
   }
@@ -297,6 +412,7 @@ void FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int m
   if (fl & 0x20) dlg.skip_grow();
   log::debug("field: dialogue window ps1 ({}, {}) {}x{} px mode {} above {} flags {:#x} op62 {},{},{},{}", x, y, width, box_height, mode, above, fl,
              win[0], win[1], win[2], win[3]);
+  return (mode == 0 || mode == 1) && !above;
 }
 
 void FieldWorld::dialogue_choice(int first, int last) {

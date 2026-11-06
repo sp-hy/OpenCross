@@ -55,6 +55,8 @@ class TitleScreen {
   float fade_alpha() const { return fade_; }
   // The fade after a press subtracts from the picture; every other fade is a black veil.
   bool fade_subtracts() const { return to_menu_; }
+  // The prompt was pressed and the title is fading to the menu.
+  bool leaving_prompt() const { return to_menu_; }
   // Test / screenshot hooks.
   void skip_to_menu() {
     phase_ = Phase::Menu;

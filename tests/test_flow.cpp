@@ -95,19 +95,19 @@ void test_name_entry() {
   ui::NameEntry entry;
   entry.begin(latin_setup());
   CHECK(entry.max_len() == 12 && entry.buffer().size() == 12 && entry.buffer().substr(0, 5) == U"Serge" && entry.buffer()[5] == U' ');
-  CHECK(!entry.in_buttons() && entry.rows() == 10 && entry.cols() == 14 && entry.cell(0, 0) == U'A' && entry.cell(1, 12) == 0);
+  CHECK(entry.rows() == 10 && entry.cols() == 14 && entry.cell(0, 0) == U'A' && entry.cell(1, 12) == 0);
+  // It opens on the button column, on Change Name; Left / Right do nothing there.
+  CHECK(entry.in_buttons() && entry.buttons().size() == 3 && entry.button() == ui::NameEntry::Button::Alnum);
+  entry.press(ui::NameKey::Left);
+  entry.press(ui::NameKey::Right);
+  CHECK(entry.in_buttons() && entry.button() == ui::NameEntry::Button::Alnum);
+  // "Change Name" goes into the grid, on cell (0, 0) the first time.
+  entry.press(ui::NameKey::Confirm);
+  CHECK(!entry.in_buttons() && entry.col() == 0);
   // Insert: A at slot 0, cursor advances.
   entry.press(ui::NameKey::Confirm);
   CHECK(entry.buffer()[0] == U'A' && entry.cursor_pos() == 1);
-  // Walk off the grid edges into the button column and back.
-  entry.press(ui::NameKey::Left);
-  CHECK(entry.in_buttons());
-  // Change Name / Confirm / Default: all reachable.
-  CHECK(entry.buttons().size() == 3);
-  CHECK(entry.button() == ui::NameEntry::Button::Alnum);
-  // "Change Name" goes back into the grid.
-  entry.press(ui::NameKey::Confirm);
-  CHECK(!entry.in_buttons());
+  // Left at column 0 leaves the grid for the button column, on the button it left.
   entry.press(ui::NameKey::Left);
   CHECK(entry.in_buttons() && entry.button() == ui::NameEntry::Button::Alnum);
   // Up wraps to Default; Down wraps back to Change Name.
@@ -122,11 +122,24 @@ void test_name_entry() {
   // Default restores the name and the cursor.
   entry.press(ui::NameKey::Confirm);
   CHECK(entry.buffer().substr(0, 5) == U"Serge" && entry.cursor_pos() == 0);
-  // Start accepts from the grid.
-  { ui::NameEntry start_entry; start_entry.begin(latin_setup()); start_entry.press(ui::NameKey::Start); CHECK(start_entry.done() && start_entry.result() == U"Serge"); }
-  // Fill every slot: the cursor stays on the last slot and overwrites it. Left from the buttons goes to the grid's right edge (col 13).
-  entry.press(ui::NameKey::Left);
+  // Backspace on Change Name blanks the cell; only OK on Confirm accepts the name.
+  { ui::NameEntry back_entry; back_entry.begin(latin_setup()); back_entry.press(ui::NameKey::Backspace); CHECK(back_entry.buffer()[0] == U' '); }
+  {
+    ui::NameEntry ok_entry;
+    ok_entry.begin(latin_setup());
+    ok_entry.press(ui::NameKey::Down);
+    CHECK(!ok_entry.done() && ok_entry.button() == ui::NameEntry::Button::Confirm);
+    ok_entry.press(ui::NameKey::Confirm);
+    CHECK(ok_entry.done() && ok_entry.result() == U"Serge");
+  }
+  // Right at the last column leaves the grid; Change Name returns to the cell it left.
+  entry.press(ui::NameKey::Down);
+  entry.press(ui::NameKey::Confirm);
+  for (int i = 0; i < 14; ++i) entry.press(ui::NameKey::Right);
+  CHECK(entry.in_buttons());
+  entry.press(ui::NameKey::Confirm);
   CHECK(!entry.in_buttons() && entry.col() == 13);
+  // Fill every slot: the cursor stays on the last slot and overwrites it.
   entry.press(ui::NameKey::PosRight);
   for (int i = 0; i < 20; ++i) entry.press(ui::NameKey::Confirm);
   CHECK(entry.cursor_pos() == 11 && entry.buffer()[11] == U'N');
@@ -144,16 +157,17 @@ void test_name_entry() {
   auto reserved_setup = latin_setup();
   reserved_setup.default_name = U"Chrono";
   reserved_entry.begin(reserved_setup);
-  // Grid col 0 -> the button column (Change Name), then down to Confirm.
-  reserved_entry.press(ui::NameKey::Left);
+  // From Change Name down to Confirm.
   reserved_entry.press(ui::NameKey::Down);
   reserved_entry.press(ui::NameKey::Confirm);
   CHECK(!reserved_entry.done() && reserved_entry.reject_flash() > 0);
   // Accepting a normal name returns it trimmed.
   ui::NameEntry ok;
   ok.begin(latin_setup());
-  ok.press(ui::NameKey::Left);
   ok.press(ui::NameKey::Down);
+  // Backspace does nothing on Confirm or Default, and works on Change Name.
+  ok.press(ui::NameKey::Backspace);
+  CHECK(ok.buffer().substr(0, 5) == U"Serge");
   ok.press(ui::NameKey::Confirm);
   CHECK(ok.done() && ok.result() == U"Serge");
   // A rename opens on the custom name, and Default restores it rather than the language's name.
@@ -175,7 +189,7 @@ void test_name_entry() {
   original_setup.mode = ui::ArtMode::Original;
   ui::NameEntry original_entry;
   original_entry.begin(original_setup);
-  CHECK(original_entry.max_len() == 12 && !original_entry.in_buttons() && original_entry.buttons().size() == 3 && original_entry.cols() == 14);
+  CHECK(original_entry.max_len() == 12 && original_entry.in_buttons() && original_entry.buttons().size() == 3 && original_entry.cols() == 14);
   // JP: the kana pages (katakana / hiragana / alphanumeric), 6 characters, Viper 4.
   auto pj = latin_setup();
   pj.lang = import::Lang::Jp;
@@ -318,12 +332,35 @@ void test_flow() {
     CHECK(game::party_member_from_state(tb, pg, 43).growth_col == 5);
     pg.slot.chars[43].model_id = 0x2B;
     CHECK(game::party_member_from_state(tb, pg, 43).growth_col == 3);
+    // A card slot without a valid ext_save.dat pair: at 99 stars an evolved Pip takes his form's Lv 99 record on load (RDE: 0x2C at 500 HP,
+    // ATK 7 -> 780 HP, ATK 84); a valid pair, a base Pip or fewer stars load as saved.
+    tb.char_sets.at("char").lv99[0x2C] = {780, 84, 80, 90, 25, 44, 36};
+    game::FlowMachine syncing;
+    syncing.set_tables(&tb, &codec);
+    ui::SlotEntry pip_slot = slot_entry;
+    pip_slot.data.head[save::head::kStarsTotal] = 99;
+    save::SaveChar& saved_pip = pip_slot.data.chars[43];
+    saved_pip.model_id = 0x2C, saved_pip.max_hp = saved_pip.cur_hp = saved_pip.hp_extra = 500, saved_pip.atk = 7;
+    syncing.on_load(pip_slot);
+    CHECK(syncing.game_state().slot.chars[43].max_hp == 500);
+    syncing.set_ext_form_sync(true);
+    syncing.on_load(pip_slot);
+    CHECK(syncing.game_state().slot.chars[43].max_hp == 780 && syncing.game_state().slot.chars[43].cur_hp == 780 && syncing.game_state().slot.chars[43].atk == 84);
+    saved_pip.model_id = 0x2B;
+    syncing.set_ext_form_sync(true);
+    syncing.on_load(pip_slot);
+    CHECK(syncing.game_state().slot.chars[43].max_hp == 500);
+    saved_pip.model_id = 0x2C;
+    pip_slot.data.head[save::head::kStarsTotal] = 98;
+    syncing.set_ext_form_sync(true);
+    syncing.on_load(pip_slot);
+    CHECK(syncing.game_state().slot.chars[43].max_hp == 500);
     // Serge in Lynx's body: the battle name is Lynx's in the game's language, the Dopple list keeps the typed name; another character in the
     // same body keeps its own name.
     import::LangTables lang_tables;
     lang_tables.set_table("sysmes", "key\ten\tfr\n0x010000\tSerge\tSerge-fr\n0x010001\tKid\tKid-fr\n0x010031\tLynx\tLynx-fr\n");
-    const std::map<int, std::u32string> typed{{0, U"Hero"}};
-    const data::CharNames names{&typed, &lang_tables, import::Lang::Fr};
+    const std::map<int, std::u32string> hero_name{{0, U"Hero"}};
+    const data::CharNames names{&hero_name, &lang_tables, import::Lang::Fr};
     pg.slot.chars[0].max_hp = pg.slot.chars[1].max_hp = 100;
     pg.slot.chars[0].model_id = pg.slot.chars[1].model_id = 0x31;
     const battle::PartyMember lynx = game::party_member_from_state(tb, pg, 0, &names);

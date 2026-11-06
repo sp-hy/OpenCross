@@ -140,7 +140,7 @@ std::optional<Insn> decode_insn(ByteSpan code, u32 off, std::string* error) {
     } else if (token == "J") {
       const u16 value = rd16(code, operand_pos);
       operand = {OperandKind::Jump, value, {}};
-      ins.targets.emplace_back(value, key == 0x05);
+      ins.targets.emplace_back(value, key == 0x05 || key == 0x57 || key == 0x58);
     } else if (token == "A4") {
       operand = {OperandKind::Str, 0, std::string(reinterpret_cast<const char*>(&code[operand_pos]), 4)};
     } else if (token == "M") {

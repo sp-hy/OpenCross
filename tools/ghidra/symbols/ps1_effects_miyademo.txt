@@ -6,3 +6,5 @@ fx_miyademo_kill_pack_objects = 0x801C6554;  # function: Destroys the objects wh
 fx_miyademo_init = 0x801C65BC;  # function: Init: picks a random background number
 fx_miyademo_op_100_queue_bg = 0x801C6728;  # function: Op 0x100: queues the chosen background
 fx_miyademo_release = 0x801C6784;  # function: Release: frees the backdrop pack, restores the globals init saved, among them the battle speed gate
+fx_miyademo_swap_count = 0x801C69B0;  # data: number of backdrop swaps; the stage sound, a random i sequence of the new stage and the miya restart only while below 5
+fx_miyademo_bg_table = 0x801C69B4;  # data: nine s16 backdrop numbers 13 14 15 22 23 31 39 63 64 (file index = number + 0x12)

@@ -43,7 +43,8 @@ namespace flag270 {
 constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000;
 }
 namespace gflag {
-constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kPauseAllowed = 0x4000, kForceRun = 0x8000, kKeepCustomName = 0x10000;
+constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kKeyListHold = 0x2000, kPauseAllowed = 0x4000, kForceRun = 0x8000,
+              kKeepCustomName = 0x10000, kMenuUnderLock = 0x80000;
 }
 
 // One script slot record of an entity. `state` is the priority class (the lowest runs): 0xF idle, 7 the default UPDATE
@@ -112,7 +113,9 @@ struct VmStats {
 class FieldVM {
  public:
   using RandFn = std::function<u32()>;
-  // `rng` replaces the default deterministic generator (xorshift32, fixed seed).
+  // The script ops use the low 15 bits of each draw (the game's rand() range).
+  static constexpr u32 kRandMask = 0x7FFF;
+  // `rng` replaces the default deterministic generator (the game's rand() step, fixed seed).
   explicit FieldVM(FieldHost& host, RandFn rng = {});
 
   // Loads a room: replaces the module, resets entity state, zeroes the room-local variables (globals persist),

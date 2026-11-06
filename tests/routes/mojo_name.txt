@@ -16,7 +16,8 @@
 - wait 90
 - tap confirm
 - wait 110
-- tap start                           # accept "Serge": the language's name, so no custom name
+- tap down
+- tap confirm                         # Confirm: accept "Serge", the language's name, so no custom name
 - wait movie start 300
 - wait 60
 - tap confirm
@@ -34,7 +35,8 @@
 # ---- rename with the stock name: nothing stored
 - request rename 27
 - wait menu open 120
-- tap start                           # accept "Mojo"
+- tap down
+- tap confirm                         # Confirm: accept "Mojo"
 - wait menu closed 120
 - assert name 27 -
 # ---- the doll scene: FE 7E gives the language's "Happy Dan"
@@ -50,19 +52,24 @@
 - request rename 27
 - wait menu open 120
 - tap e                               # R1: the text cursor onto the second letter
+- tap confirm                         # Change Name (the screen opens on it): into the grid
 - tap confirm                         # 'A' there: "MAjoy"
 - tap left                            # grid column 0 -> the button column (Change Name)
 - tap down
 - tap down                            # Default
 - tap confirm                         # back to "Mojoy"
-- tap start
+- tap up                              # Confirm
+- tap confirm
 - wait menu closed 120
 - assert name 27 Mojoy
 # ---- a typed name is stored
 - request rename 27
 - wait menu open 120
+- tap confirm                         # Change Name (the screen opens on it): into the grid
 - tap confirm                         # 'A' over the first letter: "Aojoy"
-- tap start
+- tap left                            # grid column 0 -> the button column (Change Name)
+- tap down
+- tap confirm
 - wait menu closed 120
 - assert name 27 Aojoy
 - quit

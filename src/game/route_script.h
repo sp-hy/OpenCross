@@ -55,12 +55,13 @@
 //                                 10 sprain, 20 flu)
 //   assert hp <char> <min> <max>  current HP of a character in [min, max]     assert status <char> <hexmask> set|clear
 //   request <kind> [arg]          debug: ask the host for what a field opcode would (money <n> = set the gold, battle <encounter> = A3 (battlefield 0), rename <char> = FE 4A, party = FE 5B,
-//                                 save = FE 85 (cleared-save prompt), ngplus = FE 84 (New Game+ list), menu = FE 72 (save-point main menu), disc <n> = FE 65 (n = disc - 1), movie <n> = 7E / D4 (on the disc in use), trading <row> = FE 67,
+//                                 save = FE 85 (cleared-save prompt), ngplus = FE 84 (New Game+ list), menu = FE 72 (save-point main menu), disc <n> = FE 65 (n = disc - 1), movie <n> = 7E / D4 (on the disc in use), trading <row> = FE 67, weaponshop <row> = FE 68,
 //                                 party_add <char> = add a character to the party, party_remove <ref> = 7D, keyitem <n> = give key item n, slotdump <n> = write the game as one save
 //                                 block to $OC_SLOT_DUMP<n>.bin, battle_disguise <encounter> = the disguised-fight variant of `battle`);
 //                                 issued once, finishes 4 ticks later (wait for the screen with `wait menu|shop`)
 //   assert name <char> <text>     the typed name of a character (UTF-8)       assert party <id,id,id>   the party ids in slot order (- = empty)
 //   assert disc <n>               the disc in use                             assert location <id>      the saved location word of the state
+//   assert gold <n>               the gold held
 //   assert option <hexmask> set|clear   all mask bits of the settings options word are set / not all set
 //   mark / assert screen right|left|up|down   player screen movement since the mark
 //   mark ent <n> / assert moved <n> <min>   entity <n> is at least <min> world units from where `mark ent` saw it
@@ -131,6 +132,10 @@ struct RouteState {
   int choice_line = -1;
   // Plain text of the open dialogue message ("" = none).
   std::function<std::string()> dialogue_text;
+  // Face panel side of the last field window opened: "left", "right" or "none".
+  std::string portrait = "none";
+  // Message index of the last field window opened (-1: none).
+  int message = -1;
   bool battle = false;
   // Result panel confirmed (the driver hands back to the field next step).
   bool battle_finished = false;
@@ -166,6 +171,7 @@ struct RouteState {
   std::function<std::string()> party;
   std::function<int()> disc;
   std::function<int()> location;
+  std::function<long long()> gold;
   std::function<int()> options;
   std::function<std::vector<std::array<float, 2>>(float, float, float, float, bool)> path;
   // Counters since start: FieldWorld::load_room calls, in-place art swaps of the field room, field battles, title sequences (tit0..3).
@@ -200,6 +206,9 @@ struct RouteOut {
   int option_mask = 0, option_on = 0;
   bool set_buttons = false;
   int buttons_index = 0, buttons_value = 0;
+  // `set group <n> <0|1>`: show / hide a background tile group as BG_GROUP_ON / OFF do.
+  bool set_group = false;
+  int group = 0, group_on = 0;
   int var_id = 0, var_value = 0;
   // `fight`: let the battle view play itself.
   bool battle_auto = false;

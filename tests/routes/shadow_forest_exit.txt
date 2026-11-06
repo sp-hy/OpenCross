@@ -1,0 +1,38 @@
+# Shadow Forest, the big tree room. Its west exit box (man_b06f ent 19, man_b03f ent 20) is placed past the walk-mesh border, so
+# it stands at height 0; it must fire for a player walking west once the Quadfidd has gone (var 0x100 bit 15).
+# 1. The red-slime path: the Quadfidd has eaten the red slime (var 0x102 bit 10, var 0x104 bit 15); talking to it makes it shrink
+#    and flee west, then the path through its walls is open.
+0 wait 5
+- request party_add 1
+- set var 0x00 50
+- set var 0x100 0
+- set var 0x102 0x420
+- set var 0x104 0x8000
+- load man_b06f 0
+- wait room man_b06f 600
+- wait idle 600
+- approach 12 40 1800
+- key down down
+- wait 6
+- key up down
+- tap confirm
+- wait dialogue open 900
+- mash until idle 0 3000
+- wait idle 1800
+- assert var 100 0x8000
+- walk -1600 -740 24 1800
+- walk -1756 -703 24 900
+- wait room man_b05f 600
+# 2. Re-entering the room from the west with the Quadfidd gone: the exit fires again.
+- load man_b06f 2
+- wait room man_b06f 600
+- wait idle 600
+- walk -1756 -703 24 900
+- wait room man_b05f 600
+# 3. The same exit of man_b03f, the room the east side leads to once the Quadfidd is gone.
+- load man_b03f 2
+- wait room man_b03f 600
+- wait idle 600
+- walk -1756 -703 24 900
+- wait room man_b05f 600
+- quit

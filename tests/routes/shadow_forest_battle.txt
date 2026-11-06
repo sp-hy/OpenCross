@@ -1,0 +1,29 @@
+# Shadow Forest, the big tree room (man_b06f): the Quadfidd has eaten a slime that is not the red one (var 0x102 bit 10, var 0x104
+# bit 15 clear), so talking to it starts its battle (C9 #395). After the win (var 0x100 bit 15) its walls open and the west exit box,
+# placed past the walk-mesh border at height 0, takes the party to man_b05f. GodMode / AlwaysHit keep the starting party alive.
+0 wait 5
+- request party_add 1
+- set var 0x00 50
+- set var 0x100 0
+- set var 0x102 0x420
+- set var 0x104 0
+- load man_b06f 0
+- wait room man_b06f 600
+- wait idle 600
+- approach 12 40 1800
+- key down down
+- wait 6
+- key up down
+- tap confirm
+- wait dialogue open 900
+- skip 900
+- wait battle start 900
+- fight 6000
+- wait 600
+- wait idle 1800
+- assert var 32 0
+- assert var 100 0x8000
+- walk -1600 -740 24 1800
+- walk -1756 -703 24 900
+- wait room man_b05f 600
+- quit

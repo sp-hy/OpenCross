@@ -37,10 +37,11 @@ void FieldWorld::set_position_xz(int ent, s32 x, s32 z, int level) {
   const bool jump = !ent_state.placed || std::hypot(static_cast<float>(x) - c0.x, static_cast<float>(z) - c0.z) > kGlideMax;
   // Op 25's last operand is the floor level: the entity lands on the level-th walk-mesh floor under (x, z), as an entrance record's
   // 4th word does - not on the floor nearest its old height (gal_b14f's Kid, `25 .. #-396, #-563, #1`, stands on the beach far
-  // below the jetty).
+  // below the jetty). With no floor under (x, z) the height becomes 0, not the height the entity had: exit boxes placed past the
+  // walk-mesh border must stay in the vertical range of the player walking into them.
   if (const WalkMesh& walk = view_.walk(); !walk.empty()) {
     const int tri = walk.find_triangle_level(static_cast<float>(x), static_cast<float>(z), level);
-    if (tri >= 0) ent_state.actor.set_height(walk.height(tri, static_cast<float>(x), static_cast<float>(z)), jump);
+    ent_state.actor.set_height(tri >= 0 ? walk.height(tri, static_cast<float>(x), static_cast<float>(z)) : 0.0f, jump);
   }
   ent_state.actor.set_position(view_.walk(), static_cast<float>(x), static_cast<float>(z), jump, false);
   ent_state.placed = true;
@@ -638,7 +639,11 @@ static const char* const kEventPackNames[] = {
 void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   if (ent < 0 || ent >= static_cast<int>(ents_.size())) return;
   Ent& ent_state = ents_[static_cast<size_t>(ent)];
-  if (key == 0xC0 || key == 0xBF) {
+  if (key == 0xBF) {
+    ent_state.actor.hold_default_pack();
+    return;
+  }
+  if (key == 0xC0) {
     ent_state.actor.clear_ex_clips();
     return;
   }
@@ -659,8 +664,9 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   } else if ((arg & 0xFF) < static_cast<int>(std::size(kEventPackNames))) {
     name = kEventPackNames[arg & 0xFF];
   }
+  // A dummy record loads nothing, but the entity holds a pack all the same.
   if (name.empty()) {
-    ent_state.actor.clear_ex_clips();
+    ent_state.actor.set_ex_clips({});
     return;
   }
   // The pack attaches to the entity's display model whatever the entity is: a party member's character model or
@@ -701,10 +707,7 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   }
   log::debug("field: tick {} ent {} LOAD_ANIMATION {} ({} clips, {} sequences)", tick_count_, ent, name, it->second.clips.size(),
              it->second.seq.size());
-  if (it->second.clips.empty())
-    ent_state.actor.clear_ex_clips();
-  else
-    ent_state.actor.set_ex_clips(it->second.clips, it->second.seq);
+  ent_state.actor.set_ex_clips(it->second.clips, it->second.seq);
 }
 bool FieldWorld::extra_animation_busy() { return false; }
 

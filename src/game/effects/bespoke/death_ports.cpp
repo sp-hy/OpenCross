@@ -38,8 +38,12 @@ class GaraDeth : public MeshTech {
   explicit GaraDeth(bool mushi) : mushi_(mushi) {}
 
  protected:
+  // mushi also sets M's idle-pose word to 8.
   void init() override {
-    if (const FxModel* model = caster(0)) cz_ = static_cast<int>(model->pos[2]);
+    const FxModel* model = caster(0);
+    if (!model) return;
+    cz_ = static_cast<int>(model->pos[2]);
+    if (mushi_ && ctx_.hooks.set_pose) ctx_.hooks.set_pose(model->unit, 8);
   }
   bool command(int op, const int* args, int count) override {
     if (op == 0x180) {
@@ -513,7 +517,8 @@ class Daimou : public MeshTech {
 // carrying the face (corners relative to its centroid) drawn by the replaced callback: FT3 / FT4 with the particle's colour, both sides,
 // ABR 1 own CLUT + ABR 2 white CLUT, OT + the particle's bias; 'kie1' fires there with probability 1 / (p6 + 1); lasdes3 gives the particle the
 // velocity ((Mx - cx) << 13) / D, ((Mz - cz) << 13) / D (D from op 0x106). Op 0x101 = the screen negative for w@4 ticks; op 0x59 (all but
-// sfin bossde skadeth) is replaced: target w@10 gets SetAnim(w@8, 0x20) (+0x22 / +0x2A loop and speed not reproduced).
+// sfin bossde skadeth) is replaced: target w@10 gets the loop flag w@0xC, the animation speed w@0xE + 0x40 (0x40 = normal) and SetAnim(w@8, 0x20).
+// Init (all but skadeth): target 0's idle-pose word := 8.
 enum class Fade { Out, In, Ska };
 enum class Centre { HalfHeight, AbsY, Attach9, CasterAttach9, RelY, RelYOff };
 enum class Emit { None, E1, E1Cnt, E2 };
@@ -542,6 +547,11 @@ class Dissolve : public MeshTech {
   explicit Dissolve(const FbParams& params) : params_(params) {}
 
  protected:
+  // Every dissolve but skadeth's sets target 0's idle-pose word to 8 at init.
+  void init() override {
+    const FxModel* model = target(0);
+    if (params_.fade != Fade::Ska && model && ctx_.hooks.set_pose) ctx_.hooks.set_pose(model->unit, 8);
+  }
   bool command(int op, const int* args, int count) override {
     bool acted = true;
     if (op == 0x100) {
@@ -582,7 +592,11 @@ class Dissolve : public MeshTech {
   }
   bool stock_op(int op, const int* args, int count) override {
     if (op != 0x59 || !params_.op59) return false;
-    if (FxModel* model = target(arg(args, count, 10))) set_anim(model, arg(args, count, 8), 0x20);
+    if (FxModel* model = target(arg(args, count, 10))) {
+      model->clip_loop = arg(args, count, 0xC) != 0;
+      model->anim_speed = arg(args, count, 0xE) + 0x40;
+      set_anim(model, arg(args, count, 8), 0x20);
+    }
     return true;
   }
   void frame() override {
@@ -888,11 +902,6 @@ class Lasdes2 : public Dissolve {
   bool holds_game_speed() const override { return true; }
 
  protected:
-  // The idle-pose word only: the idle ran out on the pose element 341 left, which the target holds through the fall.
-  void init() override {
-    const FxModel* model = target(0);
-    if (model && ctx_.hooks.set_pose) ctx_.hooks.set_pose(model->unit, 8);
-  }
   bool command(int op, const int* args, int count) override {
     const int duration = arg(args, count, 4);
     switch (op) {

@@ -80,14 +80,15 @@ int forge_cost(const GameState& gs, int item);
 Res can_forge(const GameState& gs, int item, bool free = false);
 Res forge(GameState& gs, int item, bool free = false);
 
-// equipped_copies: characters wearing it. Breakdown list: owned (bag or worn) gear without flag 0x20, with a recipe.
-// breakdown is refused when only worn copies exist.
+// equipped_copies: characters wearing it. Breakdown list: bag gear without flag 0x20, then the available characters' worn gear
+// without flag 0x20; both with a recipe. breakdown is refused when only worn copies exist.
 int equipped_copies(const GameState& gs, int item);
 std::vector<int> breakdown_list(const GameState& gs, int category);
 Res breakdown(GameState& gs, int item, int* gold_gain = nullptr);
 
-// Gear sell unit = floor(price10 * 10 / 4); sell list: bag gear of that category without flag 0x80.
-int gear_sell_unit(const GameState& gs, int item);
+// Gear sale proceeds = (price10 * 10 * qty) >> 2, on the total. Sell list: bag gear of that category without flag 0x80, then the
+// available characters' worn gear without flag 0x20; sell_gear sells bag copies only (NoStock for a worn-only piece).
+long long gear_sell_price(const GameState& gs, int item, int qty);
 std::vector<int> gear_sell_list(const GameState& gs, int category);
 Res sell_gear(GameState& gs, int item, int qty);
 

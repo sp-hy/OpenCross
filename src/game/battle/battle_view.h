@@ -278,8 +278,8 @@ class BattleView {
     bool script_done = true;
     // Ring position and the previous tick's.
     float x = 0, z = 0, px = 0, pz = 0;
-    // Where the model stood when its joint pass was last skipped (hidden): the frozen joint matrices carry that position.
-    float hold_x = 0, hold_y = 0, hold_z = 0;
+    // Where the model stood and faced at its last visible pass: while it is hidden its frozen joint matrices carry that placement.
+    float hold_x = 0, hold_y = 0, hold_z = 0, hold_fx = 1, hold_fz = 0;
     // Height above the floor: the jump / PosMoveT arcs of the anmseq scripts.
     float y = 0, py = 0;
     float face_x = 1, face_z = 0, pface_x = 1, pface_z = 0;
@@ -339,6 +339,13 @@ class BattleView {
     bool ko_reacted = false;
     // Actions presented since a script wrote the HP to 0.
     int zero_hp_actions = 0;
+    // Battle-script op 84 set the low-HP bit (flag 31); the next hit on the unit recomputes it from the HP.
+    bool low_hp_forced = false;
+    // Battle-script ops B0 / B1: the height tween (pass k = 1..10 moves y by dir * k * step, PS1 y down), `tick` ticks into its
+    // kLiftTicks; dir 0 = none running.
+    struct Lift {
+      int step = 0, dir = 0, tick = 0;
+    } lift;
     // Hit flash 1 -> 0, and the enemy fade-out after the KO.
     float flash = 0, flash_prev = 0;
     float fade = 1, fade_prev = 1;
@@ -347,6 +354,8 @@ class BattleView {
     bool has_react = false;
     // The idle script's pose word, set by the battle script's pose op: 1 = stand-by, 8 = dead.
     int script_pose = 1;
+    // Anmseq op 0x88: the head follows attach point `head_point` of unit `head_unit`, refreshed every tick (-1 = no target to follow).
+    int head_unit = -1, head_point = 0;
   };
   enum Script { kNone = 0, kIdle, kApproach, kAttack, kReturn, kReact, kCast, kRelease, kRun, kVictory };
   // One CallDamage number (battle_numbers.h): its digits are view-space particles, fixed on the screen from the spawn on. kind 0 = damage
@@ -516,6 +525,25 @@ class BattleView {
   };
   std::vector<Link> links_;
   void tick_links();
+  // Anmseq op 0x88's target: attach point head_point of head_unit, in the unit's model space (y down). False when it has none.
+  bool head_target_model(int unit, float target[3]);
+  // Anmseq ops 0xA2 - 0xA5 (texture rect flip). 0xA2 / 0xA3 set rect A / B (x, w in halfwords, y, h in rows) of the running pack's
+  // VRAM, 0xA4 the destination (a unit's texture, dx halfwords and dy rows from its origin); 0xA5 starts a task that copies A at once, then B
+  // and A in turn, each held t0 / t1 ticks, until `total` ticks have passed. One setup for the whole battle; a copy stays in the texture.
+  struct TexFlipSetup {
+    std::array<std::array<int, 4>, 2> rect{};
+    int unit = -1, dx = 0, dy = 0;
+  } tex_flip_setup_;
+  struct TexFlip {
+    TexFlipSetup setup;
+    std::array<int, 2> hold{};
+    int counter = 0, sel = 1, left = 0;
+  };
+  std::vector<TexFlip> tex_flips_;
+  void tick_tex_flips();
+  // Rect `rect` of the pack's VRAM (8 bpp, the texels coloured with the unit's own CLUT) into the unit's texture at (dx, dy).
+  void tex_flip_paste(int unit, int dx, int dy, const std::array<int, 4>& rect);
+  void tex_flip_paste_hd(ModelHandle& model, int dx, int dy, const std::array<int, 4>& rect);
   // The unit's position as the effects / cameras / shadows see it: the view's own placement, or where a bespoke overlay put the model
   // (FxModel::steer). `alpha` interpolates between the last two ticks (draw), 1 = the current tick.
   std::array<float, 3> unit_world(int unit, float alpha) const;
@@ -922,8 +950,9 @@ class BattleView {
   // The attack-hand toggle starts at 1 with the battle overlay: the first attack plays hand 0 ("_s00").
   int hand_toggle_ = 1;
   int intro_ticks_ = 0;
-  // Ticks the intro timelines / stage emitters run while the battle loads behind the field transition (the `bti*` pan is cut ~88 ticks in).
-  static constexpr int kBtlinitLoadTicks = 88;
+  // Ticks the intro timelines / stage emitters run while the battle loads behind the field transition (a field battle's `bti*` is cut when the
+  // first PC's load ends, about 98 ticks in).
+  static constexpr int kBtlinitLoadTicks = 98;
   // The party intro timeline waiting for the load to end (pli_after_load_, a field battle) or for the bti* intro to end (scripted / held).
   std::string pli_pending_;
   bool pli_after_load_ = false;
@@ -1234,6 +1263,9 @@ class BattleView {
   bool fx_fog_on_ = false;
   // Ticks until the stage lens flare returns after a pack's end hook.
   int fx_lens_wait_ = 0;
+  // The stage fx_swap_stage loaded: its first sound entry (type 0x16) and its camera shot names (type 0x0C), in pack order.
+  std::string fx_stage_sound_;
+  std::vector<std::string> fx_stage_shots_;
   std::array<bool, battle::kUnits> fx_unit_fog_{};
   // Screen colour layers (sequence ops 0x2B / 0x2C): a full-screen quad (0,0)-(0x160,0x110) in effect-OT slot 5 (layer 0) / 6 (layer 1) while
   // its colour is not black; mode 0 opaque, 1..4 = ABR mode - 1.

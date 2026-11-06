@@ -183,6 +183,8 @@ class App {
   void frame_hotkeys();
   void frame_pad_remap();
   void settings_pad_filter();
+  // Alt+Enter: windowed <-> fullscreen.
+  void toggle_fullscreen_key();
   // RDE's speed toggles do nothing in the Radius tutorial (its field map or its battle).
   bool speed_locked() const;
   // This frame's LoopSpeed (a frame of `dt` seconds) from the toggles and the field's state.
@@ -349,6 +351,8 @@ class App {
   ui::ShopScreen shop;
   ui::StatusModelView status_model{meshes, files};
   ui::KeyItemPopup key_popup;
+  // FieldWorld::room_loads() when the key-item list opened.
+  u64 key_popup_room = 0;
   ui::PauseScreen pause_screen;
   bool pause_ok = false;
   // RDE's feature icons and the hotkeys / pad buttons of its play-time toggles.
@@ -366,6 +370,8 @@ class App {
   // The left stick's d-pad directions of the previous advance() (platform::stick_to_dpad).
   std::array<bool, 4> stick_dpad{};
   u64 start_down_ms = 0;
+  // The fullscreen mode Alt+Enter returns to from the window: the last one this session used (the ini's at start), else borderless.
+  platform::WindowMode last_fullscreen = platform::WindowMode::Borderless;
   game::SlowFieldCycle slow_field_cycle;
   // RDE's HD "Home / Another World" name over the world maps.
   ui::WorldName world_name;
@@ -424,6 +430,9 @@ class App {
   bool exit_when_idle = false;
   int exit_countdown = 0;
   u64 frame_count = 0;
+  // 60 Hz frames advanced so far (advance's dt x 60: real time, one per route step), the clock of RDE's per-frame screen fades
+  // (world name, room cards); fast and slow mode do not change it.
+  double screen_clock = 0.0;
   bool quit_requested = false;
   bool restart_requested = false;
   // [Video] Widescreen: the extra layer columns of this frame's picture, and the columns the HUD / menus spread out by.

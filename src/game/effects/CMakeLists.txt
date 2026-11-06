@@ -14,6 +14,8 @@ add_library(oc_effects STATIC
   emitter_tick.cpp
   emitter_collect.cpp
   emitter_api.cpp
+  object_heap.h
+  object_heap.cpp
   sequence_player.h
   sequence_player.cpp
   soft_raster.h
@@ -22,14 +24,10 @@ add_library(oc_effects STATIC
   effect_slots.cpp
   bespoke/bespoke.h
   bespoke/bespoke_util.h
-  bespoke/mesh_base.h
   bespoke/bespoke.cpp
   bespoke/band_wipe.cpp
   bespoke/line_ring.cpp
-  bespoke/mesh_sweep.cpp
-  bespoke/mesh_flight.cpp
   bespoke/mesh_water.cpp
-  bespoke/motion_tasks.cpp
   bespoke/actor_script.h
   bespoke/actor_script.cpp
   bespoke/mesh_warp.cpp

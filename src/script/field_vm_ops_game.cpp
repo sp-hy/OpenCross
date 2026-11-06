@@ -422,6 +422,10 @@ bool FieldVM::exec_game(u8 op) {
         advance(2);
       }
       break;
+    case 0xDE:  // ATTACH_NAMED_OBJ_POINT: not used by the shipped data, logged and stepped over
+      opaque(0xDE, 1, 7);
+      advance(8);
+      break;
     case 0xE0:
       // Blocked ("-1"): retried by the dispatcher.
       if (host_.dialogue_blocked()) break;
@@ -435,6 +439,12 @@ bool FieldVM::exec_game(u8 op) {
       break;
     case 0xE2:
       if (host_.dialogue_open()) {
+        // An entity culled off screen drops its window and ends this record (op 62 flag 0x400 keeps both).
+        if ((self_->flags38 & flag38::kOffScreen) && host_.drop_culled_dialogue()) {
+          rec_->state = kRecIdle;
+          rec_->id = 0xFF;
+          ended_ = true;
+        }
         yield_ = true;
         break;
       }

@@ -111,12 +111,13 @@ void OcSaves::write(int number, const SaveSlot& state) {
   if (number < 0 || number > kOcFiles || dir_.empty()) throw std::runtime_error("OpenCross save: bad file number");
   File file;
   file.data = state;
+  file.data.stamp_preview_party();
   if (ext_host_) {
     file.ext.language = ext_host_->language;
     file.ext.battles = ext_host_->battles;
     if (ext_host_->names) file.ext.names = *ext_host_->names;
   }
-  const Bytes bytes = serialize(state, file.ext);
+  const Bytes bytes = serialize(file.data, file.ext);
   std::filesystem::create_directories(dir_);
   const std::filesystem::path path = dir_ / file_name(number);
   std::filesystem::path tmp = path;

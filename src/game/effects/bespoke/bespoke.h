@@ -86,6 +86,10 @@ struct FxHooks {
   // Replace the battle backdrop (-1 free it, 0..99 bg_NN, 100 battle/bg/kamei,
   // kStageSlot + e = the .prd / .ctd of effect slot e: lasbos 0x101 / 0x102).
   std::function<void(int stage)> set_stage;
+  // The stage set_stage loaded last: plays its first sound entry (type 0x16); selects one of its camera shots whose name begins with `tag`,
+  // `roll` modulo their count.
+  std::function<void()> stage_sound;
+  std::function<void(char tag, u32 roll)> stage_shot;
   // hensin 0x182 / 0x183: the host's Dopplegang form change (1 = starts, 2 = the new form takes over).
   std::function<void(int phase)> form_swap;
   // hinsi / lasdes4 / kamedes: sets a unit's idle-pose word (the one the battle script's pose op writes; 1 = stand-by, 8 = dead).
@@ -140,6 +144,8 @@ struct FxModel {
   // Requests the host consumes (and clears) after every tick.
   // SetAnim(model, clip, flags): clip < 0x80 = the model's own S4 clip, >= 0x80 = table clip.
   int clip = -1, clip_flags = 0;
+  // The model's loop flag set with the SetAnim (-1 = untouched, 0 = clamp on the last keyframe, 1 = loop).
+  int clip_loop = -1;
   // The keyframe count of the clip the host last started for this model (what an overlay's wait reads); the host sets it
   // when it consumes `clip`, so an overlay reads it from the next tick on.
   int clip_frames = 1;
@@ -174,7 +180,9 @@ struct FxModel {
   bool unhide_at_end = false;
   // An overlay draws this model itself through FxModels::skin (trace only).
   bool custom_draw = false;
-  int anim_speed = -1;                   // -1 = untouched, 0 = the pose is frozen (the host skips its step)
+  // The model's animation speed word, 1/256 keyframe per tick (0x40 = normal): -1 = untouched, 0 = the pose is frozen (the host skips its
+  // step), else the host plays the clip at that speed from this tick on.
+  int anim_speed = -1;
   // The model's own CLUT rows faded toward grey (ki_deth / octdeth op 0x180, per 5-bit entry: g = (R + G + B) / 3 * k, R' = (g + R (0x1000 - k))
   // >> 12 ...): k 0..0x1000, -1 = the original colours. grey_stp: ki_deth ORs STP (0x8000) into every non-zero entry (zero stays transparent);
   // octdeth writes no STP, so an entry that ends 0 (0x8000 STP-only black) turns transparent. The host re-uploads the textures on a change
@@ -578,11 +586,11 @@ void flatten_prims(const std::vector<FxPrim>& sorted, std::vector<FlatQuad>& out
 // ---- registration of the builtin modules (called by the registry) ------------------------------------------------------------------
 void register_band_wipes(BespokeRegistry& registry);
 void register_line_rings(BespokeRegistry& registry);
-void register_mesh_deforms(BespokeRegistry& registry);
-void register_motion_tasks(BespokeRegistry& registry);
-// actor_script.cpp: 19helf golem shine opthedo kamedes 41grav 43acce 22torune kamei + state-only
+// mesh_water.cpp: ripple
+void register_mesh_water(BespokeRegistry& registry);
+// actor_script.cpp: 3voice
 void register_actor_scripts(BespokeRegistry& registry);
-// mesh_warp.cpp: daimou_d godhand 14bar 38super
+// mesh_warp.cpp: 14bar (wrapped by its ground part)
 void register_mesh_warps(BespokeRegistry& registry);
 // scene_remap.cpp: seint unico bgchng miyademo + shell-only hinsi lasdes4 etrap
 void register_scene_remaps(BespokeRegistry& registry);

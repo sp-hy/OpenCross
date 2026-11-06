@@ -40,7 +40,8 @@
 - wait 30
 - screenshot mojo_name.png
 - wait 60
-- tap start
+- tap down
+- tap confirm                         # Confirm
 - wait 60
 - assert menu open
 - screenshot mojo_party.png

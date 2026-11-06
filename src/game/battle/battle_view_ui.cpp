@@ -576,7 +576,7 @@ BattleView::Tgt BattleView::target_mode(int cell) const {
 
 std::vector<int> BattleView::target_candidates() const {
   std::vector<int> out;
-  // The ring: the units of the element's sides (Attack: the enemies), living ones, or only the knocked-out ones for bit 0x01; bit 0x04 pins the
+  // The ring: the units of the element's sides (Attack: the enemies), standing ones (frozen ones included), or only the knocked-out ones for bit 0x01; bit 0x04 pins the
   // cursor to the caster. Kept left to right on screen; the cursor walks it by bhud::target_step.
   battle::TargetSpec ts;
   if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
@@ -589,7 +589,7 @@ std::vector<int> BattleView::target_candidates() const {
     // Off-stage units (ops 34 / 35 / 5B) are never on the ring.
     if (battle_->untargetable(i)) continue;
     if (ts.self_only && i != pending_cmd_.actor) continue;
-    if (ts.ko_only ? unit.alive() : !unit.alive()) continue;
+    if (ts.ko_only ? unit.standing() : !unit.standing()) continue;
     out.push_back(i);
   }
   {
@@ -689,12 +689,12 @@ void BattleView::auto_pick_heuristic() {
     auto_step_ = 0;
   }
   const battle::Unit& unit = battle_->unit(active_pc_);
-  if (auto_target_ < battle::kPcSlots || !battle_->unit(auto_target_).alive() || battle_->untargetable(auto_target_)) {
+  if (auto_target_ < battle::kPcSlots || !battle_->unit(auto_target_).standing() || battle_->untargetable(auto_target_)) {
     auto_target_ = -1;
     // Finish the weakest enemy first.
     int lowest = 1 << 30;
     for (int i = battle::kPcSlots; i < battle::kUnits; ++i)
-      if (battle_->unit(i).alive() && !battle_->untargetable(i) && battle_->unit(i).hp < lowest) lowest = battle_->unit(i).hp, auto_target_ = i;
+      if (battle_->unit(i).standing() && !battle_->untargetable(i) && battle_->unit(i).hp < lowest) lowest = battle_->unit(i).hp, auto_target_ = i;
   }
   int hp = 0, mx = 0;
   for (int i = 0; i < battle::kPcSlots; ++i)
@@ -1310,16 +1310,19 @@ void BattleView::build_command_ui() {
     // A pickable level exists (used cells count).
     const bool any_element = elem_open_level(unit, tables_->elements.size()) >= 0;
     // Row colours (PS1 colour words 0x808080 white / 0x8080 yellow / 0x404040 dim, remapped for the HD text):
-    //  top menu: Element dim when the gauge is below 0 or no cell is usable; the cursor row is not recoloured.
+    //  top menu: Attack dim at stamina 0; Element dim when the gauge is below 0, at stamina 0 or when no cell is usable; the cursor row is
+    //  not recoloured.
     //  chain menu: by stamina / 10 and row -> dim when the row's cost exceeds the whole stamina points, YELLOW for the row whose
     //  cost equals them (the last affordable hit), white below; fatigued (status 0x2000): thresholds 1.2 / 2.5 / 3.7 (dim below, yellow within
-    //  +1.2, white above). Element: dim when gauge < 0 / stamina 0 / no usable cell.
+    //  +1.2, white above), and without their red part while the PC has hi status 0x20000 (no stamina cost). Element: dim when gauge < 0 /
+    //  stamina 0 / no usable cell.
     constexpr u32 kDim = 0x404040, kYellowWord = 0x008080, kWhiteWord = 0x808080;
     const float bx = 28 * kPs1Px, by = ref_y(177), bw = 68 * kPs1Px;
     // Interior 52 x 36 + the 8 px skin frame; 0.8 row shorter than the nominal 52 so the top and bottom padding round the text are equal (0.67 row pitch).
     add_skin_box(bx, by, bw, 51.2f * kRowScale);
     const int cur = ui_ == Ui::Top ? top_cursor_ : chain_cursor_;
     const bool fatigued = (unit.lo & battle::st::kFatigued) != 0;
+    const u32 hit_row_mask = (unit.hi & battle::st::kHiNoStaminaCost) ? 0xFFFF00u : 0xFFFFFFu;
     // The translated text clears bit 16; JP keeps the JP font.
     const int cmd_flags = jp ? 0x10002 : 2;
     for (int k = 0; k < 4; ++k) {
@@ -1330,9 +1333,10 @@ void BattleView::build_command_ui() {
       std::u32string label;
       if (ui_ == Ui::Top) {
         label = kCommand[li][k];
-        if (k == 1 && (!any_element || unit.gauge < 0)) row_colour = kDim;
+        if (k == 0 && unit.stamina == 0) row_colour = kDim;
+        if (k == 1 && (!any_element || unit.gauge < 0 || unit.stamina == 0)) row_colour = kDim;
       } else if (k < 3) {
-        const int pct = battle_state.hit_chance_for(active_pc_, engaged_target_, k);
+        const int pct = battle_state.hit_chance_shown_for(active_pc_, engaged_target_, k);
         label = import::utf8_to_u32(std::format("{}-({}%)", k + 1, pct));
         if (fatigued) {
           static const int kThr[3] = {12, 25, 37};
@@ -1343,10 +1347,11 @@ void BattleView::build_command_ui() {
         }
       } else {
         label = kCommand[li][1];
-        if (!any_element || unit.gauge < 0 || unit.stamina <= 0) row_colour = kDim;
+        if (!any_element || unit.gauge < 0 || unit.stamina == 0) row_colour = kDim;
       }
       if (sel) add_menu_cursor(32.5f * kPs1Px, yl * kRowScale + ref_y(5) - 4 * kRowScale);
-      btext(cmd_flags, label, 44, yl, remap_text_colour(row_colour));
+      const u32 mask = ui_ != Ui::Top && k < 3 ? hit_row_mask : 0xFFFFFFu;
+      btext(cmd_flags, label, 44, yl, remap_text_colour(row_colour) & mask);
     }
     if (ui_ == Ui::Chain) {
       // "HIT%" caption: battle-osak-010 (50 x 9 PS1 px leader line, drawn at (x, y - 8)) with the caption

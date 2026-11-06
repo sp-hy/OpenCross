@@ -1,0 +1,29 @@
+# Portrait side of field dialogue windows, chosen by the speaker's heading, control yaw and model yaw (window flags bit 12).
+# Sides as the PS1 shows the same events: you_b10e scenario 164 (Kid's dream: Kid on the left; Harle at the rail: right) and
+# gal_b06i scenario 54 (the clinic: the doctor on the right, then on the left once turned; Korcha on the left, later on the right).
+0 wait 20
+- set var 0x00 164
+- load you_b10e 0
+- wait room you_b10e 300
+- mash until message 51 1200
+- assert portrait left
+- mash until message 12 3000
+- assert portrait right
+- mash until message 14 1200
+- assert portrait right
+- request party_add 0
+- request party_add 1
+- request party_add 2
+- set var 0x00 54
+- set var 0x188 0x10
+- load gal_b06i 1
+- wait room gal_b06i 600
+- mash until message 25 1200
+- assert portrait right
+- mash until message 26 1200
+- assert portrait left
+- mash until message 34 2000
+- assert portrait left
+- mash until message 37 2000
+- assert portrait right
+- quit

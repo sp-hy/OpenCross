@@ -1,0 +1,11 @@
+# End card: the ending room's THE END entrance (2) on disc 2 fades RDE's Fin card in (HD art); the key press's FADE 1,#64 fades it out
+# and the save prompt's fade back does not bring it again.
+0 wait 30
+- set var 42 1
+- load ending 2
+- wait 1500
+- screenshot end_card_01_shown.png
+- tap confirm
+- wait 400
+- screenshot end_card_02_gone.png
+- quit

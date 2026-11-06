@@ -96,7 +96,7 @@ bool EmitterSystem::Impl::pace_blocks(std::string_view name) {
   return !pace_sites.emplace(std::string(name), ord).second;
 }
 
-EmitterSystem::Impl::Impl(const EffectBank& effect_bank, Config config) : bank(effect_bank), cfg(config) {
+EmitterSystem::Impl::Impl(const EffectBank& effect_bank, Config config) : bank(effect_bank), cfg(config), heap(config.heap_bytes) {
   rng.state = config.seed ? config.seed : 1;
   if (const char* names = config.dev_only_filter ? std::getenv("OC_FX_ONLY") : nullptr) dev_only = std::string(",") + names + ",";
 }
@@ -175,7 +175,14 @@ bool EmitterSystem::Impl::start_index(size_t i) {
 
 void EmitterSystem::Impl::kill_objects(int owner) {
   for (auto& obj : objs)
-    if (obj.alive && (owner < 0 || obj.owner == owner)) obj.alive = false;
+    if (obj.alive && (owner < 0 || obj.owner == owner)) release(obj);
+}
+
+void EmitterSystem::Impl::release(Object& obj) {
+  obj.alive = false;
+  if (!obj.heap_held) return;
+  heap.free(obj.heap_node);
+  obj.heap_held = false;
 }
 
 // -- basis helpers ---------------------------------------------------------------------------------------------------

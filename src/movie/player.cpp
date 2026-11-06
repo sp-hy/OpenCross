@@ -181,20 +181,25 @@ Player::Rect Player::picture_rect(float vw, float vh) const {
   return {(vw - w) * 0.5f, (vh - h) * 0.5f, w, h};
 }
 
-void Player::draw_strip(float vw, float vh) {
-  if (!strip_set_ || !have_frame_) return;
+bool Player::strip_quad(float vw, float vh, StripQuad& quad) const {
+  if (!strip_set_ || !have_frame_) return false;
   // The strip area: the left kStripWidth of RDE's 1280 x 960 canvas, its full height (render::overlay_fit's band and display squash).
   const render::OverlayFit fit = render::overlay_fit(vw, vh);
-  const float x0 = fit.ox, x1 = fit.ox + 1280.0f * kStripWidth * fit.sx;
-  float y0 = fit.oy, y1 = fit.oy + 960.0f * fit.sy;
+  quad.x0 = fit.ox, quad.x1 = fit.ox + 1280.0f * kStripWidth * fit.sx;
+  quad.y0 = fit.oy, quad.y1 = fit.oy + 960.0f * fit.sy;
   const float span = staff_strip_span(strip_w_, strip_h_);
   // The decoder has moved on to the next frame by the time the shown one is drawn: frame number = 0-based index + 2.
-  float v0 = staff_strip_top(shown_ + 2, last_, strip_w_, strip_h_), v1 = v0 + span;
-  if (span <= 0.0f || v1 <= 0.0f || v0 >= 1.0f) return;
-  const float per_v = (y1 - y0) / span;
-  if (v0 < 0.0f) y0 -= v0 * per_v, v0 = 0.0f;
-  if (v1 > 1.0f) y1 -= (v1 - 1.0f) * per_v, v1 = 1.0f;
-  sprites_->draw(strip_set_, x0, y0, x1 - x0, y1 - y0, 0.0f, v0, 1.0f, v1);
+  quad.v0 = staff_strip_top(shown_ + 2, last_, strip_w_, strip_h_), quad.v1 = quad.v0 + span;
+  if (span <= 0.0f || quad.v1 <= 0.0f || quad.v0 >= 1.0f) return false;
+  const float per_v = (quad.y1 - quad.y0) / span;
+  if (quad.v0 < 0.0f) quad.y0 -= quad.v0 * per_v, quad.v0 = 0.0f;
+  if (quad.v1 > 1.0f) quad.y1 -= (quad.v1 - 1.0f) * per_v, quad.v1 = 1.0f;
+  return true;
+}
+
+void Player::draw_strip(float vw, float vh, u32 colour) {
+  StripQuad quad{};
+  if (strip_quad(vw, vh, quad)) sprites_->draw(strip_set_, quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0, 0.0f, quad.v0, 1.0f, quad.v1, colour);
 }
 
 // Worker: decode ahead, then feed the mixer's ring as it frees up.
@@ -322,7 +327,8 @@ void Player::update(double dt) {
 
 void Player::draw_held(const render::Frame& frame, float vw, float vh) {
   if (!held_ || !ctx_ || !set_) return;
-  // A staff roll ends with its strip scrolled out (staff_strip_top at the last frame), so only the panel is held.
+  // A staff roll keeps its strip where the held frame left it, fading with the panel: at a natural end it has scrolled out (nothing is
+  // drawn), after a skip it is still on screen.
   const Rect picture = picture_rect(vw, vh);
   const float w = picture.w, h = picture.h, x0 = picture.x, y0 = picture.y;
   const u32 a = static_cast<u32>(std::clamp(held_alpha_, 0.0, 1.0) * 255.0 + 0.5);
@@ -333,11 +339,25 @@ void Player::draw_held(const render::Frame& frame, float vw, float vh) {
   const render::Letterbox::Rect veil = render::Letterbox::veil_rect(vw, vh);
   const u32 black = a << 24;
   const float rx1 = veil.x + veil.w, ry1 = veil.y + veil.h, x1 = x0 + w, y1 = y0 + h;
-  if (x0 > veil.x) sprites_->draw(set_, veil.x, veil.y, x0 - veil.x, veil.h, 0.0f, 0.0f, 1.0f, 1.0f, black);
+  auto veil_piece = [&](float px0, float py0, float px1, float py1) {
+    px1 = std::min(px1, x0);
+    if (px1 > px0 && py1 > py0) sprites_->draw(set_, px0, py0, px1 - px0, py1 - py0, 0.0f, 0.0f, 1.0f, 1.0f, black);
+  };
+  // The left piece leaves the strip's quad out: the strip's opaque texels (black behind the names) take the veil's place there.
+  StripQuad strip{};
+  if (x0 > veil.x && strip_quad(vw, vh, strip)) {
+    veil_piece(veil.x, veil.y, x0, strip.y0);
+    veil_piece(veil.x, strip.y1, x0, ry1);
+    veil_piece(veil.x, strip.y0, strip.x0, strip.y1);
+    veil_piece(strip.x1, strip.y0, x0, strip.y1);
+  } else if (x0 > veil.x) {
+    veil_piece(veil.x, veil.y, x0, ry1);
+  }
   if (rx1 > x1) sprites_->draw(set_, x1, veil.y, rx1 - x1, veil.h, 0.0f, 0.0f, 1.0f, 1.0f, black);
   const float cx0 = std::max(x0, veil.x), cx1 = std::min(x1, rx1);
   if (cx1 > cx0 && y0 > veil.y) sprites_->draw(set_, cx0, veil.y, cx1 - cx0, y0 - veil.y, 0.0f, 0.0f, 1.0f, 1.0f, black);
   if (cx1 > cx0 && ry1 > y1) sprites_->draw(set_, cx0, y1, cx1 - cx0, ry1 - y1, 0.0f, 0.0f, 1.0f, 1.0f, black);
+  draw_strip(vw, vh, 0x00FFFFFFu | (a << 24));
   sprites_->end();
 }
 

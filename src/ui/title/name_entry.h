@@ -15,7 +15,7 @@
 
 namespace oc::ui {
 
-enum class NameKey { Up, Down, Left, Right, Confirm, Backspace, PosLeft, PosRight, Start };
+enum class NameKey { Up, Down, Left, Right, Confirm, Backspace, PosLeft, PosRight };
 
 class NameEntry {
  public:

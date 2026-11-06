@@ -21,6 +21,8 @@ field-state memory (field script variables) before the battle id is poked, e.g. 
 Output per element id: tmp/r34/<id>/ref/{states/state_NNNNNN.sav (every 5 run frames), frames/frame_NNNNNN.png (every 4), manifest.txt}.
 Run frame 0 = the state the capture stage starts from (the cast's target select up; the confirming Circle is the first input).
 --keys Button:frame = extra presses at that run frame (e.g. a creature list opened by the cast).
+--hold-enemies (batch / summon / tech): no enemy turn follows the cast, so the capture ends on the command orbit as an ocbattleview cast does;
+without it an enemy whose countdown runs out acts right after the cast and its attack camera holds the picture.
 
 Down-count rule: the character's grid row 0 is padded to its length N (cc_save_forge.py rowlen); the list cursor (RAM) reads the grid
 column of the entry (the row's level-mask bits, which do not start at the same column for every character) and Down walks with wrap
@@ -97,6 +99,12 @@ def parse_pokes(spec):
             v, w = v.split(":")
         out.append((int(a, 0), int(v, 0), int(w)))
     return out
+
+
+# Turn countdown word and HP of a battle unit (units 3..8 are the enemy slots).
+UNIT_COUNTDOWN = 0x800E080C
+UNIT_HP = 0x800E0758
+UNIT_STRIDE = 0x410
 
 
 def apply_pokes(g, pokes):
@@ -345,6 +353,9 @@ def capture_id(a, mode, cid, base, row, work):
             keys.press(b, int(f))
         if a.pre_poke:
             apply_pokes(g, parse_pokes(a.pre_poke))
+        if a.hold_enemies:
+            apply_pokes(g, [(UNIT_COUNTDOWN + UNIT_STRIDE * unit, 900, 2) for unit in range(3, 9)
+                            if int.from_bytes(g.read(UNIT_HP + UNIT_STRIDE * unit, 2), "little", signed=True) > 0])
         bh = g.watch(["u3_hp", "u4_hp", "u5_hp"])
         start_frame = g.frame
         seen = capture_run(g, ref, frames, keys=keys)
@@ -624,7 +635,7 @@ def run_force(a):
                     break
             g.step(keys.held(k))
         else:
-            raise RuntimeError("no battle menu reached in scene %d: %s" % (scene, g.watch()))
+            raise RuntimeError("no battle menu reached in scene %s: %s" % (scene, g.watch()))
         units = read_units(g)
         for elem, unit, group in specs:
             check_units(units, [("caster of element %d" % elem, unit)] + [("group member of element %d" % elem, m) for m in group or []] +
@@ -683,6 +694,7 @@ def main(argv):
     ap.add_argument("--start-limit", type=int, default=400, help="force: run frames the forced cast may take to start before the capture is given up")
     ap.add_argument("--menu-poke", default="")
     ap.add_argument("--pre-poke", default="")
+    ap.add_argument("--hold-enemies", action="store_true", help="menu casts: set every enemy's turn countdown to 900 before the confirm, so no enemy turn follows the cast")
     ap.add_argument("--menu-frames", type=int, default=320)
     ap.add_argument("--menu-mash", action="store_true")
     ap.add_argument("--menu-any", action="store_true")

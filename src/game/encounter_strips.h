@@ -83,10 +83,11 @@ inline float hold_scene_gain(float update_index) {
 // The hand-over's own picture (the smear) darkens to nothing while the strips keep zooming out, and the battle fades in UNDER it:
 // a cross-fade in which the brightness never dips. `tick` = ticks since the take-over (game frame 95, ~96 frames after the white). RDE keeps
 // loading long after the take-over while the battle already runs its stage intro: the smear alone until tick 30, then the stage intro pan fades
-// in under it until tick 78 (retail: 126..174 frames after the white); the party intro starts when the load ends, kLoadHold (retail: ~230).
+// in under it until tick 78 (retail: 126..174 frames after the white); the party intro starts when the first PC's load ends, kLoadHold (retail:
+// 210 frames after the white), which cuts the stage intro after about 98 of its ticks.
 // The stage intro ('bti*', 'fade') starts kIntroStart ticks after the take-over (retail: ~109 frames after the white; the 'fade' flat then lifts
 // the intro pan out of the dark: retail luma 65 / 104 / 132 at 178 / 205 / 229 frames after the white).
-constexpr int kIntroStart = 13, kLoadHold = 127;
+constexpr int kIntroStart = 13, kLoadHold = 112;
 constexpr int kDarkFrom = 30, kBlackAt = 78, kBattleFrom = 30, kFadeInTicks = 48;
 inline float hand_smear(int tick) {
   if (tick <= kDarkFrom) return 1.0f;

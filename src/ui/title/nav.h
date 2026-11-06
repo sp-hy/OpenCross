@@ -10,8 +10,6 @@ namespace oc::ui {
 struct Nav {
   bool up = false, down = false, left = false, right = false;
   bool confirm = false, cancel = false, l1 = false, r1 = false, any = false;
-  // start: Space (RDE's keyboard Start) / pad Start.
-  bool start = false;
 };
 
 class NavPoller {
@@ -36,7 +34,6 @@ class NavPoller {
     nav.cancel = edge(Action::Cancel) || pad_edge(SDL_GAMEPAD_BUTTON_EAST);
     nav.l1 = edge(Action::SelectLeft) || pad_edge(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
     nav.r1 = edge(Action::SelectRight) || pad_edge(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
-    nav.start = in.key_pressed[platform::kStartKey] || pad_edge(SDL_GAMEPAD_BUTTON_START);
     nav.any = nav.confirm || nav.cancel || nav.l1 || nav.r1;
     for (int i = 0; i < platform::Input::kKeys && !nav.any; ++i)
       if (in.key_pressed[static_cast<size_t>(i)] && i != SDL_SCANCODE_ESCAPE && (i < SDL_SCANCODE_F1 || i > SDL_SCANCODE_F12))

@@ -425,6 +425,8 @@ int ocbattleseq_main(int argc, char** argv) {
   ctx.clip_frames = [](int) { return 8; };
   // OC_SEQ_MONSTER: the script runs on an enemy (ops 0x63 / 0x67).
   if (std::getenv("OC_SEQ_MONSTER")) ctx.monster = true, ctx.model_num = 64;
+  // OC_SEQ_MODEL: the model number op 0x67 reads (a PC's model byte, e.g. 50 = Glenn with two swords).
+  if (const char* model = std::getenv("OC_SEQ_MODEL")) ctx.model_num = std::atoi(model);
   const bool use_atk = entry < 0 || (entry == 0 && variant == 7) || (entry == 0 && variant == 0 && !has_s5);
   const game::bseq::Table& table = use_atk ? atk : s5;
   game::bseq::Vm vm;
@@ -450,7 +452,7 @@ int ocbattleseq_main(int argc, char** argv) {
     vm.tick(ctx, ev);
     for (const auto& event : ev) {
       using EventType = game::bseq::Event;
-      const char* nm[] = {"SetAnim", "Speed", "Loop", "Sfx", "Sequence", "Camera", "Damage", "React", "MoveSpeed", "MoveTime", "MoveHome", "MovePos", "Face", "Rotate", "Effect", "TrailColors", "TrailMode", "TrailFade", "TrailOn", "TrailOff", "ColorRamp", "LightPos", "LightSet", "ModelShow", "PartShow", "ModelColor", "ModelAbr", "Jump", "WeaponShow", "LightAbs", "Blink", "Eye", "Link", "SetPos", "SetRot", "Shadow", "SlowK", "ModelScale", "ScreenFade", "ModelFade", "PartScale", "PartScaleStop", "PartBlink", "PartBlinkStop", "ElemMotion", "ElemRot", "PartColor", "ElemRotRate", "ElemTilt", "ElemTiltBack", "Done"};
+      const char* nm[] = {"SetAnim", "Speed", "Loop", "Sfx", "Sequence", "Camera", "Damage", "React", "MoveSpeed", "MoveTime", "MoveHome", "MovePos", "Face", "Rotate", "Effect", "TrailColors", "TrailMode", "TrailFade", "TrailOn", "TrailOff", "ColorRamp", "LightPos", "LightSet", "ModelShow", "PartShow", "ModelColor", "ModelAbr", "Jump", "WeaponShow", "LightAbs", "Blink", "Eye", "Link", "SetPos", "SetRot", "Shadow", "SlowK", "ModelScale", "ScreenFade", "ModelFade", "PartScale", "PartScaleStop", "PartBlink", "PartBlinkStop", "ElemMotion", "ElemRot", "PartColor", "ElemRotRate", "ElemTilt", "ElemTiltBack", "PoseWord", "HeadLook", "HeadRelease", "TexRect", "TexDest", "TexFlip", "Done"};
       std::printf("%4d %-11s a=%d b=%d c=%d d=%d %s\n", tick, nm[event.kind], event.a, event.b, event.c, event.d, event.tag ? game::bseq::tag_str(event.tag).c_str() : "");
       (void)sizeof(EventType);
     }

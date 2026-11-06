@@ -54,9 +54,9 @@ void NameEntry::begin(const Setup& setup) {
   buttons_.push_back(Button::Default);
   page_ = lang_ == import::Lang::Jp ? Ps1Page::Katakana : Ps1Page::Alnum;
   row_ = col_ = 0;
-  // The PS1 screen starts on the button column; the RDE keyboard starts in the grid.
-  in_buttons_ = ps1_pages();
-  button_ = in_buttons_ ? static_cast<int>(page_) : 0;
+  // Both layouts open on the button column: the PS1 pages on the active page's tab, the RDE keyboard on Change Name.
+  in_buttons_ = true;
+  button_ = ps1_pages() ? static_cast<int>(page_) : 0;
   set_name(default_);
 }
 
@@ -103,8 +103,8 @@ void NameEntry::press(NameKey key) {
       else in_buttons_ = true, play(1);
       break;
     case NameKey::Left:
-      if (in_buttons_) in_buttons_ = false, col_ = cols() - 1, play(1);
-      else if (col_ > 0) --col_, play(1);
+      if (in_buttons_) break;
+      if (col_ > 0) --col_, play(1);
       else in_buttons_ = true, play(1);
       break;
     case NameKey::Right:
@@ -136,17 +136,12 @@ void NameEntry::press(NameKey key) {
         default: in_buttons_ = false; play(8); break;
       }
       break;
+    // Backspace works in the grid and on a page tab / Change Name, not on Confirm or Default.
     case NameKey::Backspace:
+      if (in_buttons_ && (buttons_[static_cast<size_t>(button_)] == Button::Confirm || buttons_[static_cast<size_t>(button_)] == Button::Default)) break;
       buf_[static_cast<size_t>(pos_)] = lang_ == import::Lang::Jp ? U'　' : U' ';
       if (pos_ > 0) --pos_;
       play(1);
-      break;
-    // Pad Start accepts the name from anywhere (same as the Confirm button).
-    case NameKey::Start:
-      in_buttons_ = true;
-      for (size_t i = 0; i < buttons_.size(); ++i)
-        if (buttons_[i] == Button::Confirm) button_ = static_cast<int>(i);
-      press(NameKey::Confirm);
       break;
     case NameKey::PosLeft: pos_ = std::max(0, pos_ - 1); break;
     case NameKey::PosRight: pos_ = std::min(max_ - 1, pos_ + 1); break;
@@ -174,7 +169,6 @@ void NameEntry::update(const Nav& nav, float dt) {
   if (nav.r1) press(NameKey::PosRight);
   if (nav.cancel) press(NameKey::Backspace);
   if (nav.confirm) press(NameKey::Confirm);
-  if (nav.start) press(NameKey::Start);
 }
 
 void NameEntry::draw(DrawList& dl, UiKit& kit) const {

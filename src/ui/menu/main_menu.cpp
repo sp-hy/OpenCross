@@ -250,6 +250,10 @@ void MainMenu::Impl::update(const platform::Input& in, int ticks) {
     if (any_key) kb_mode = true;
   }
   if (msg_frames > 0 && --msg_frames == 0) msg.clear();
+  if (chime_frames > 0 && (chime_frames -= std::max(ticks, 0)) <= 0) {
+    chime_frames = 0;
+    end_saving();
+  }
   roster_anim = std::max(0, roster_anim - std::max(ticks, 0));
   if (transition != Transition::None) {
     transition_t += std::max(ticks, 0);

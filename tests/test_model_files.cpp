@@ -54,7 +54,7 @@ int main() {
     const auto asset = game::read_model_files(files, stem, &err, true);
     const auto full = import::load_hd_tim(*tim);
     ++hd_checked;
-    if (!asset || !full || !asset->has_hd(0) || asset->hd_scale != 4) {
+    if (!asset || !full || !asset->has_hd(0) || asset->hd_scale != 4 || asset->hd_palette.size() != 256) {
       std::printf("FAIL %s: no 4x HD battle texture %s\n", stem.c_str(), err.c_str());
       ++failures;
       continue;

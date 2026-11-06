@@ -22,9 +22,11 @@ struct AkaoSeq {
   u32 bank_id = 0;
   u16 reverb_mode = 4;  // header u16 at +8: the libspu reverb mode type set when the song starts (4 in all files)
   u32 channel_mask = 0;
-  // Header u32 at +0x28: the music channels whose bit is set gate their notes at length - 2; every other channel starts with
-  // full-length notes (the flag FE 1A sets and FE 1B clears).
+  // Header u32 at +0x28: the music channels whose bit is set gate their notes at length - 2 and always play on the hardware voice of
+  // their own number; every other channel starts with full-length notes (the flag FE 1A sets and FE 1B clears) and searches a voice.
   u32 gate_mask = 0;
+  // Header u32 at +0x24: the channels whose voice searches start at voice 0 from the song start (as after FE 1D).
+  u32 reserve_mask = 0;
   std::vector<std::pair<int, u32>> channels;  // (channel number, absolute pc)
 };
 

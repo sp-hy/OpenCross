@@ -9,6 +9,7 @@
 #include <cstring>
 
 #include "core/log.h"
+#include "game/effects/fx_math.h"
 #include "game/field_world_internal.h"
 #include "game/mirror_copy.h"
 #include "import/tim.h"
@@ -482,6 +483,7 @@ void FieldWorld::draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh
 }
 
 void FieldWorld::draw_windows(render::SpriteBatch& sprites, float vw, float vh, bool ps1) {
+  draw_group_sprites(sprites, vw, vh, ps1);
   draw_status_icons(sprites, vw, vh, ps1);
   const render::CanvasFit ps1_fit{0.25f, 0.0f, 0.0f};
   const render::CanvasFit* fit = ps1 ? &ps1_fit : nullptr;
@@ -576,13 +578,34 @@ FieldWorld::JoltView FieldWorld::jolt_view() const {
       return jolt;
     }
   }
-  if (jolt_n_ < 0) return jolt;
+  // FE 14: while GF.10 is set and no menu wait runs, the previous output goes over the picture again at 50 %.
+  if (jolt_n_ < 0) {
+    if (!(vm_.global_flags() & (1u << 10)) || input_.menu_wait != 0) return jolt;
+    jolt.on = jolt.post = jolt.echo = true;
+    jolt.n = static_cast<int>(tick_count_ & 0x3FFFFFFF);
+    jolt.echo_scale = {vm_.global(script::Global::OverlayGridA0), vm_.global(script::Global::OverlayGridA1), vm_.global(script::Global::OverlayGridA2)};
+    jolt.echo_rot = {static_cast<s16>(vm_.global(script::Global::OverlayGridB0)), static_cast<s16>(vm_.global(script::Global::OverlayGridB1)),
+                     static_cast<s16>(vm_.global(script::Global::OverlayGridB2))};
+    return jolt;
+  }
   jolt.on = true;
   jolt.n = jolt_n_;
   jolt.tx = static_cast<float>(ps1_sin(jolt_n_ * 64) >> 10);
   jolt.ty = static_cast<float>(ps1_cos(jolt_n_ * 0x39) >> 10);
   jolt.scale = static_cast<float>(((ps1_sin(jolt_n_ * 128) << 4) >> 12) + 0x1010) / 4096.0f;
   return jolt;
+}
+
+void FieldWorld::frame_echo_point(const JoltView& view, float share, float& x, float& y) {
+  constexpr float kDistance = 512.0f;
+  float scale[3];
+  for (size_t i = 0; i < 3; ++i) scale[i] = std::pow(static_cast<float>(view.echo_scale[i]) / 4096.0f, share);
+  auto angle = [&](size_t i) { return static_cast<int>(std::lround(static_cast<float>(view.echo_rot[i]) * share)); };
+  const effects::Mat3 turn = effects::Mat3::from_angles(angle(0), angle(1), angle(2)).scaled_columns(scale[0], scale[1], scale[2]);
+  const effects::Vec3 point = turn.apply({x, y, 0.0f});
+  const float depth = std::max(1.0f, point[2] + kDistance);
+  x = point[0] * kDistance / depth;
+  y = point[1] * kDistance / depth;
 }
 
 // ------------------------------------------------------------------------------------------------ status icons
@@ -673,6 +696,66 @@ void FieldWorld::draw_status_icons(render::SpriteBatch& sprites, float vw, float
     acc += icon.w;
     const float x = 304.0f - acc, y = 8.0f;
     sprites.draw(icon.set, lb.ox + x * lb.scale, lb.oy + y * lb.scale_y, icon.w * lb.scale, icon.h * lb.scale_y);
+  }
+}
+
+// ------------------------------------------------------------------------------------------------ group sprites
+// The images are the 4x art of cells cell_w x cell_h screen pixels wide, side by side; one texture per file, loaded with the room (in
+// both art modes, so a live switch to HD finds them). Classic art draws the PS1 tiles instead.
+void FieldWorld::load_group_sprites(std::string_view room) {
+  free_group_sprites();
+  group_sprites_ = import::room_group_sprites(room);
+  if (group_sprites_.empty() || !files_ || !ctx_) return;
+  group_sprite_sampler_.create(*ctx_, true);
+  for (const import::RoomGroupSprite& row : group_sprites_) {
+    const std::string path(row.image);
+    if (std::any_of(group_sprite_images_.begin(), group_sprite_images_.end(), [&](const auto& image) { return image->path == path; })) continue;
+    auto image = std::make_unique<GroupSpriteImage>();
+    image->path = path;
+    const auto raw = files_->read(path);
+    render::DecodedImage decoded;
+    if (raw && render::decode_image(ByteSpan(raw->data(), raw->size()), decoded) && decoded.width > 0 &&
+        image->tex.create(*ctx_, decoded.width, decoded.height, render::TextureFormat::Rgba8, decoded.rgba.data()))
+      image->set = render::TexRef(image->tex, group_sprite_sampler_);
+    else
+      log::warn("room {}: group sprite image {} not loaded", room, path);
+    group_sprite_images_.push_back(std::move(image));
+  }
+}
+
+void FieldWorld::free_group_sprites() {
+  group_sprites_.clear();
+  group_sprite_images_.clear();
+  group_sprite_sampler_.destroy();
+}
+
+u32 FieldWorld::sprite_groups() const {
+  if (!view_.art_mode_hd()) return 0;
+  u32 mask = 0;
+  for (const import::RoomGroupSprite& row : group_sprites_)
+    for (u32 i = 0; i < row.groups; ++i)
+      if (row.first_group + i < 32) mask |= 1u << (row.first_group + i);
+  return mask;
+}
+
+void FieldWorld::draw_group_sprites(render::SpriteBatch& sprites, float vw, float vh, bool ps1) {
+  if (group_sprites_.empty() || !view_.loaded() || !view_.art_mode_hd()) return;
+  const render::Letterbox lb = ps1 ? render::Letterbox::identity(vw, vh) : view_.letterbox(vw, vh);
+  const u32 visible = view_.layer_mask();
+  for (const import::RoomGroupSprite& row : group_sprites_) {
+    const auto image = std::find_if(group_sprite_images_.begin(), group_sprite_images_.end(), [&](const auto& item) { return item->path == row.image; });
+    if (image == group_sprite_images_.end() || !(*image)->set) continue;
+    const render::TexRef set = (*image)->set;
+    const float tw = static_cast<float>(set.width), th = static_cast<float>(set.height);
+    for (u32 i = 0; i < row.groups; ++i) {
+      const u32 group = row.first_group + i;
+      if (group >= 32 || !((visible >> group) & 1)) continue;
+      const float cell = static_cast<float>(row.first_cell + i * row.cell_step);
+      const float cw = static_cast<float>(row.cell_w), ch = static_cast<float>(row.cell_h);
+      const float x = static_cast<float>(row.x + static_cast<int>(i) * row.x_step), y = static_cast<float>(row.y);
+      sprites.draw(set, lb.ox + x * lb.scale, lb.oy + y * lb.scale_y, cw * lb.scale, ch * lb.scale_y, cell * cw * 4.0f / tw, 0.0f,
+                   (cell + 1.0f) * cw * 4.0f / tw, std::min(1.0f, ch * 4.0f / th));
+    }
   }
 }
 

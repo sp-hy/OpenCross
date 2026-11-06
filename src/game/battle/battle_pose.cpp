@@ -45,7 +45,66 @@ void UnitPose::set_model(const assets::ModelAsset* asset) {
   id_ = clip_ = from_ = -1;
   t_prev_ = t_cur_ = f_prev_ = f_cur_ = 0;
   w_prev_ = w_cur_ = 1;
+  head_ = {};
 }
+
+int UnitPose::head_joint() const {
+  if (!asset_ || !asset_->attach.points[1].used) return -1;
+  const int joint = static_cast<int>(asset_->attach.points[1].joint);
+  return joint < static_cast<int>(asset_->skeleton.joints.size()) ? joint : -1;
+}
+
+bool UnitPose::head_frame(float rot[9], float face[3]) const {
+  const int joint = head_joint();
+  if (joint < 0) return false;
+  std::vector<render::Mat4> pal;
+  palette(1.0f, pal);
+  const auto& rest = asset_->skeleton.joints[static_cast<size_t>(joint)];
+  const render::Mat4 local = render::mat4_from_rt(assets::rotation_zyx(rest.rest_rot_deg), rest.rest_trans);
+  const render::Mat4 frame = rest.parent >= 0 ? pal[static_cast<size_t>(rest.parent)] * local : local;
+  for (int col = 0; col < 3; ++col) {
+    const float length = std::sqrt(frame.at(0, col) * frame.at(0, col) + frame.at(1, col) * frame.at(1, col) + frame.at(2, col) * frame.at(2, col));
+    for (int row = 0; row < 3; ++row) rot[row * 3 + col] = length > 0.0f ? frame.at(row, col) / length : 0.0f;
+  }
+  const auto& ap = asset_->attach.points[1];
+  const render::Mat4& head = pal[static_cast<size_t>(joint)];
+  for (int row = 0; row < 3; ++row) face[row] = head.at(row, 0) * ap.pos[0] + head.at(row, 1) * ap.pos[1] + head.at(row, 2) * ap.pos[2] + head.at(row, 3);
+  return true;
+}
+
+void UnitPose::head_look(const float target[3], int rate) {
+  if (rate >= 1 && rate <= 0xFFF) head_.rate = rate;
+  head_target(target);
+  if (head_.active) return;
+  float rot[9], face[3];
+  if (!head_frame(rot, face)) return;
+  // The model's forward axis (0, 0, 1) in the head frame: row 2 of the frame's rotation.
+  const float forward[3] = {rot[6], rot[7], rot[8]};
+  head_.start(forward);
+}
+
+void UnitPose::head_release() {
+  float rot[9], face[3];
+  if (!head_.active || !head_frame(rot, face)) return;
+  const float ahead[3] = {face[0], face[1], face[2] - 4096.0f};
+  head_target(ahead);
+  head_.returning = true;
+}
+
+void UnitPose::head_step() {
+  head_.begin_tick();
+  float rot[9], face[3];
+  if (!head_.active) return;
+  if (!head_frame(rot, face)) {
+    head_ = {};
+    return;
+  }
+  float away[3] = {face[0] - head_target_[0], face[1] - head_target_[1], face[2] - head_target_[2]};
+  HeadTurn::normalise(away);
+  float dir[3];
+  for (int i = 0; i < 3; ++i) dir[i] = rot[0 * 3 + i] * away[0] + rot[1 * 3 + i] * away[1] + rot[2 * 3 + i] * away[2];
+  HeadTurn::normalise(dir);
+  head_.step(dir);}
 
 const assets::AnimationClip* UnitPose::clip_at(int clip) const {
   if (clip < 0) return nullptr;
@@ -143,6 +202,8 @@ void UnitPose::tick() {
   }
   if (w_cur_ >= 1.0f) from_ = -1;
   tick_elements();
+  // The head callback runs in the joint-matrix pass, which a hidden model skips.
+  head_step();
 }
 
 void UnitPose::tick_elements() {
@@ -315,9 +376,19 @@ void UnitPose::palette(float alpha, std::vector<render::Mat4>& out) const {
       }
   }
   out.resize(joints.size());
+  const int head = head_.active ? head_joint() : -1;
   for (size_t j = 0; j < joints.size(); ++j) {
     render::Mat4 joint_mat;
-    if (j < ov_.size()) {
+    // The head joint under a head turn: RotMatrix({ax, 0, az}) x the rest rotation, the rest translation (the clip does not drive it).
+    if (static_cast<int>(j) == head) {
+      float head_rot[9];
+      head_.rotation_at(alpha, head_rot);
+      render::Mat4 turn;
+      for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col) turn.at(row, col) = head_rot[row * 3 + col];
+      joint_mat = turn * render::mat4_from_rt(assets::rotation_zyx(joints[j].rest_rot_deg), {0, 0, 0});
+      for (int k = 0; k < 3; ++k) joint_mat.at(k, 3) = joints[j].rest_trans[static_cast<size_t>(k)];
+    } else if (j < ov_.size()) {
       const JointOv& joint_ov = ov_[j];
       // A frozen joint: R = RotMatrixZYX(rest) * RotMatrixZYX(element); the element holds its own value, not rest + delta.
       if (joint_ov.frozen) {

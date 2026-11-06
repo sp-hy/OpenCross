@@ -1,7 +1,9 @@
-// Checks for the TIM decoder, the VRAM model and the room tile -> VRAM coordinate maths (hand-built data).
+// Checks for the TIM decoder, the VRAM model, the room tile -> VRAM coordinate maths (hand-built data) and the room data tables.
 #include <cstdio>
 
 #include "import/room.h"
+#include "import/room_cards.h"
+#include "import/room_fixes.h"
 #include "import/tim.h"
 #include "game/draw_offset.h"
 #include "game/mirror_copy.h"
@@ -193,6 +195,46 @@ void test_draw_offset() {
   CHECK(offset::group_at({}, 100) == offset::kGlobal);
 }
 
+// Background corrections: a depth remap leaves other depths, other rooms and the room's last tile alone.
+void test_room_bg_fixes() {
+  std::vector<assets::RoomLayer> layers(2);
+  for (u32 i = 0; i < 3; ++i) {
+    assets::RoomTile tile;
+    tile.index = i;
+    tile.z = i == 1 ? 7 : 5;
+    layers[i == 2 ? 1 : 0].tiles.push_back(tile);
+  }
+  const import::RoomBgFix rows[] = {{"a", 5, 9}, {"b", 7, 1}};
+  CHECK(import::apply_room_bg_fixes("a", layers, rows) == 1);
+  CHECK(layers[0].tiles[0].z == 9 && layers[0].tiles[1].z == 7 && layers[1].tiles[0].z == 5);
+  CHECK(import::apply_room_bg_fixes("c", layers, rows) == 0);
+}
+
+// Room cards: a card belongs to one room entrance only; the shipped table holds the ending room's THE END card.
+void test_room_cards() {
+  const import::RoomCard rows[] = {
+      {3, 1, "a.png", 0, 0, 10, 10, 0x1u, 0.5, 0.25, 8},
+      {3, 2, "b.png", 0, 0, 10, 10, 0x2u, 0.5, 0.25, 8},
+  };
+  const import::RoomCard* card = import::room_card(3, 2, rows);
+  CHECK(card && card->image == "b.png" && card->hidden_groups == 0x2u);
+  CHECK(!import::room_card(3, 0, rows) && !import::room_card(4, 1, rows));
+  const import::RoomCard* fin = import::room_card(9, 2);
+  CHECK(fin && fin->image == "hd/map/Fin/fin.png" && fin->hidden_groups == 0x3u && fin->dismiss_fade == 64);
+  CHECK(fin && fin->fade_in == 0.0125 && fin->fade_out == 0.015625 && fin->x0 == 975.0f && fin->y1 == 930.0f);
+  CHECK(!import::room_card(9, 1) && !import::room_card(9, 3));
+}
+
+// The dragon-feeding counter groups: 23 groups of jac_b07i (food 4..6, ones 7..16, tens 17..26) and none in another room.
+void test_room_group_sprites() {
+  const auto rows = import::room_group_sprites("jac_b07i");
+  u32 groups = 0;
+  for (const auto& row : rows) groups += row.groups;
+  CHECK(rows.size() == 3 && groups == 23);
+  if (rows.size() == 3) CHECK(rows[0].first_group == 4 && rows[1].first_group == 7 && rows[2].first_group == 17 && rows[2].x == 0x1C);
+  CHECK(import::room_group_sprites("jac_b06i").empty());
+}
+
 int main() {
   test_colour();
   test_tim4();
@@ -202,6 +244,9 @@ int main() {
   test_tile_maths();
   test_mirror_copy();
   test_draw_offset();
+  test_room_bg_fixes();
+  test_room_cards();
+  test_room_group_sprites();
   std::printf(failures ? "%d failure(s)\n" : "ok\n", failures);
   return failures ? 1 : 0;
 }

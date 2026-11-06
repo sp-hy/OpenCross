@@ -39,8 +39,6 @@ struct SequenceHooks {
   // True when the action has a k-th target. Drives the per-task target loop of sequences with header flag bit0 (op 4D and the
   // end of the sequence restart the task for the next target).
   std::function<bool(int target)> has_target;
-  // wait_cond (op 7A): stall while true.
-  std::function<bool()> wait_cond;
 };
 
 struct SequenceStats {

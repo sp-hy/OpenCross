@@ -733,8 +733,12 @@ void DebugTools::apply(const Ctx& ctx) {
     if (!world || !ctx.tables) continue;
     switch (action.kind) {
       case Action::Kind::Room:
-        if (!ctx.field_free) status_ = "Teleport refused: the field is busy.";
-        else if (world->load_room(action.room, action.arg0)) status_ = std::format("Teleported to {} (entrance {}).", action.room, action.arg0);
+        if (!ctx.field_free) {
+          status_ = "Teleport refused: the field is busy.";
+          break;
+        }
+        world->select_disc_for_room(action.room);
+        if (world->load_room(action.room, action.arg0)) status_ = std::format("Teleported to {} (entrance {}).", action.room, action.arg0);
         else status_ = std::format("Could not load {}.", action.room);
         break;
       case Action::Kind::Party:

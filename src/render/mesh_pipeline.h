@@ -77,6 +77,8 @@ struct MeshModel {
     u16 mesh = 0;
     // PS1 back-face culled: Mdl constructs and rigid weapon meshes.
     bool one_sided = true;
+    // assets::SubMesh::not_gouraud_textured.
+    bool not_gouraud_textured = false;
     float color[3] = {1, 1, 1};
   };
   Buffer vertices, indices;
@@ -165,6 +167,8 @@ class MeshPipeline {
     float ot_bias = 0, water_bias = 0;
     // bit k: mesh k not drawn (shading entry k flag bit 0).
     u32 hidden_meshes = 0;
+    // Only the GT3 / GT4 faces are drawn (the weapon specular routine).
+    bool gouraud_textured_only = false;
     // bit k: mesh k sorts by its nearest corner (shading entry k flag 0x10); ot_faces only.
     u32 near_meshes = 0;
     // bit k: mesh k is env-mapped with its own texture (shading entry flag 0x80 with 0x20 / 0x40):

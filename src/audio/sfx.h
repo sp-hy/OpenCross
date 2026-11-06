@@ -40,6 +40,8 @@ class Sfx {
   virtual void set_field_mods(u32 /*mask*/, int /*volume*/, int /*pan*/) {}
   // A sound started with this mask is still running.
   virtual bool field_active(u32 /*mask*/) const { return false; }
+  // The running sounds started with an overlapping mask slide their volume to `volume` (0..127) over `frames` 60 Hz steps.
+  virtual void fade_field(u32 /*mask*/, int /*frames*/, int /*volume*/) {}
   // C7: the sounds started with an overlapping channel mask end (no new sound).
   virtual void evict_field(u32 /*mask*/) {}
   // Field teardown (every room change): every sound ends except the C6 slots `keep_slots` (bits 8..15, FE 29 of the room being
@@ -118,7 +120,7 @@ std::shared_ptr<const SfxTriggers> make_sfx_triggers(const SfxBank& bank, const 
 class AkaoSfx final : public Sfx {
  public:
   AkaoSfx(Mixer* mixer, SfxBank* bank) : mixer_(mixer), bank_(bank) {}
-  // C6 PLAY_SOUNDFX: volume 0..127 (clamped), pan 0..127 (-1/absent keeps the programme's pan).
+  // C6 PLAY_SOUNDFX: volume (low 7 bits kept), pan 0..127 (-1/absent keeps the programme's pan).
   void play(int mode, int id, int volume, int pan, int extra) override;
   void play(int id) { play(0, id, 127, -1, 0); }
   // Overlay menu sound: the menus use mask 0x40 (the field and battle exit 1, the battle 0x800000); the running sounds of the same
@@ -130,6 +132,7 @@ class AkaoSfx final : public Sfx {
   void play_field(int id, int volume, int pan, u32 mask) override;
   void set_field_mods(u32 mask, int volume, int pan) override;
   bool field_active(u32 mask) const override;
+  void fade_field(u32 mask, int frames, int volume) override;
   void evict_field(u32 mask) override;
   void leave_room(u32 keep_slots) override;
 
