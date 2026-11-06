@@ -25,6 +25,7 @@ namespace oc::ui {
 
 enum class ArtMode { Hd, Original };
 
+constexpr float kCanvasWidth = 1280.0f;
 constexpr float kCanvasHeight = 960.0f;
 
 class DialogueBox {

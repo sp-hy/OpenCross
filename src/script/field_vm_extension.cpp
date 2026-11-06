@@ -41,7 +41,7 @@ void FieldVM::exec_extension(u8 sub) {
   const auto colour = [&](u32 offset) { return static_cast<u8>(static_cast<u32>(operand_u(offset)) % ModUi::kPalette); };
   const auto byte = [&](u32 offset) { return static_cast<u8>(operand_u(offset)); };
   const auto put = [&](int id, ModUi::Element element) {
-    element.revision = static_cast<u16>(ui_.elements[static_cast<size_t>(id)].revision + 1);
+    element.revision = ++ui_.serial;
     ui_.elements[static_cast<size_t>(id)] = element;
   };
   switch (sub) {
@@ -68,9 +68,9 @@ void FieldVM::exec_extension(u8 sub) {
       // Blocks until a new press (a key held when it starts counts only once released, so the press that opened the screen is not
       // taken): a D-pad press moves the cursor to the nearest selectable item that way (var = 0x40 | item; a direction with none is
       // ignored), and a held direction steps again as a menu cursor does (ModUi::kRepeatDelay / kRepeatEvery); Circle picks the
-      // cursor's item, Cross cancels (0x80), Triangle / Square give 0x81 / 0x82. Then the record's turn ends: the next instruction runs
+      // cursor's item, Cross cancels (0x80). Then the record's turn ends: the next instruction runs
       // next tick. From the first pick on, the shown UI holds the field's controls (ModUi::holds_controls).
-      constexpr u16 kTriangle = 0x10, kCircle = 0x20, kCross = 0x40, kSquare = 0x80, kDirMask = 0xF000;
+      constexpr u16 kCircle = 0x20, kCross = 0x40, kDirMask = 0xF000;
       constexpr std::array<u16, 4> kDirs = {0x1000, 0x2000, 0x4000, 0x8000};
       const u16 held = host_.keys_held();
       if (rec_->phase == 0) {
@@ -101,10 +101,6 @@ void FieldVM::exec_extension(u8 sub) {
         result = ui_.cursor;
       } else if (keys & kCross) {
         result = ModUi::kPickCancel;
-      } else if (keys & kTriangle) {
-        result = ModUi::kPickTriangle;
-      } else if (keys & kSquare) {
-        result = ModUi::kPickSquare;
       } else {
         for (int dir = 0; dir < 4 && result < 0; ++dir) {
           if (!(keys & kDirs[static_cast<size_t>(dir)])) continue;

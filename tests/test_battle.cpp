@@ -5241,6 +5241,13 @@ void test_party_swap() {
     CHECK(game::keep_swapped_lineup(relief, battle, 2));
     CHECK(relief.slot.party() == (std::array<u8, 3>{9, 1, 0}));
   }
+  // A stand-in (character 3) that swapped out: Serge takes back his saved slot.
+  {
+    ui::GameState relief = state;
+    relief.slot.set_party({1, 0, 0xFF});
+    CHECK(game::keep_swapped_lineup(relief, battle, 3));
+    CHECK(relief.slot.party() == (std::array<u8, 3>{9, 0, 2}));
+  }
   // Nothing swapped: nothing to keep. A monster-party scene has no swap.
   {
     ScriptedRng idle_rng{Lo::Fallback::Lo};

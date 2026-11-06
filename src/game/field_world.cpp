@@ -111,6 +111,8 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
     dialogue_.set_art_mode(mode);
     for (auto& window : extra_win_)
       if (window.box) window.box->set_art_mode(mode);
+    for (auto& window : mod_ui_win_)
+      if (window.box) window.box->set_art_mode(mode);
   }
 }
 
@@ -155,6 +157,11 @@ void FieldWorld::set_language(import::Lang lang) {
   dialogue_.set_language(lang);
   for (auto& window : extra_win_)
     if (window.box) window.box->set_language(lang);
+  // The mod UI's text windows show their messages again in the new language.
+  for (auto& window : mod_ui_win_) {
+    if (window.box) window.box->set_language(lang);
+    window.element = -1;
+  }
   close_windows();
 }
 
@@ -360,8 +367,8 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   room_id_ = import::room_id_from_name(name);
   map_id_ = map_id_for(name);
   load_group_sprites(name);
-  // A room a mod adds is not in the lang.dat room table: its text rows are under its own room id, the one RDE reads.
-  if (room_id_ < 0) room_id_ = map_id_;
+  // A room a mod adds (not shipped, so not in the lang.dat room table) reads its text rows under its map id.
+  if (room_id_ < 0 && std::find(view_.rooms().begin(), view_.rooms().end(), std::string(name)) == view_.rooms().end()) room_id_ = map_id_;
   // The defeated-monster record is set up before INIT runs its D1 spawns.
   defeated_enter_room();
   entrance_param_ = param;

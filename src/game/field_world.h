@@ -256,6 +256,8 @@ class FieldWorld final : public script::FieldHost {
     dialogue_.set_portrait_set(set);
     for (auto& window : extra_win_)
       if (window.box) window.box->set_portrait_set(set);
+    for (auto& window : mod_ui_win_)
+      if (window.box) window.box->set_portrait_set(set);
   }
   void set_debug(const FieldDebug& debug) { debug_ = debug; }
   // Seeds every field RNG (NPC idling, the room's effect emitters / sequences). 0 keeps the built-in constants.
@@ -399,9 +401,9 @@ class FieldWorld final : public script::FieldHost {
                    render::MeshPipeline::DrawParams::WetFaces wet = render::MeshPipeline::DrawParams::WetFaces::DryOnly);
   // `windows` = false leaves the status icons and the dialogue / extra windows to draw_windows() (the PS1-resolution pass, [Video] Ps1Res).
   void draw_overlay(render::SpriteBatch& sprites, float vw, float vh, bool windows = true);
-  // The mod UI of the room's scripts (script::ModUi): its rects, lines and cursor, drawn by draw_overlay under the dialogue windows (its
+  // The mod UI of the room's scripts (script::ModUi): its rects, lines and cursor, drawn by draw_windows under the dialogue windows (its
   // text elements are message windows, sync_mod_ui_windows).
-  void draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh);
+  void draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, const render::CanvasFit* fit);
   // Party status icons + the dialogue and extra windows. `ps1` = into the PS1-resolution target (vw x vh = (320 + 2e) x 240 pixels, 1 layer
   // column = 1 pixel, canvas unit = 1/4 pixel); otherwise the window's letterbox / render::canvas_fit.
   void draw_windows(render::SpriteBatch& sprites, float vw, float vh, bool ps1 = false);
@@ -889,7 +891,7 @@ class FieldWorld final : public script::FieldHost {
   struct ModUiWindow {
     std::unique_ptr<ui::DialogueDemo> box;
     int element = -1;
-    u16 revision = 0;
+    u32 revision = 0;
   };
   std::array<ModUiWindow, 8> mod_ui_win_;
   bool mod_ui_full_logged_ = false;

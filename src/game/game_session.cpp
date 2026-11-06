@@ -323,9 +323,16 @@ bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battl
   const auto& party = finished_battle.party();
   for (size_t i = 0; i < party.size() && i < ids.size(); ++i) ids[i] = static_cast<u8>(party[i].char_id);
   const auto holds = [&](u8 char_id) { return std::find(ids.begin(), ids.end(), char_id) != ids.end(); };
-  if (stand_in >= 0 && !holds(0))
-    for (u8& id : ids)
-      if (id == stand_in) id = 0;
+  if (stand_in >= 0 && !holds(0)) {
+    // The stand-in fought in Serge's place: its slot is Serge's; when it swapped out, Serge takes back his saved slot.
+    if (holds(static_cast<u8>(stand_in))) {
+      for (u8& id : ids)
+        if (id == stand_in) id = 0;
+    } else {
+      for (size_t i = 0; i < saved.size(); ++i)
+        if (saved[i] == 0) ids[i] = 0;
+    }
+  }
   // The party lock bitmap: words 0-1 of the slot's FE 5D / FE 60 table (FieldWorld::table_op).
   const auto locked = [&](u8 char_id) { return char_id < 0x40 && (gs.slot.unk_e1b8[static_cast<size_t>(char_id >> 5)] >> (char_id & 31) & 1u) != 0; };
   for (size_t i = 0; i < saved.size(); ++i)

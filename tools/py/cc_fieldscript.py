@@ -373,7 +373,7 @@ FEC4 | U U U U U U | UI_LINE | C | Mod UI element id: line (x0, y0)-(x1, y1), pa
 FEC5 | U U U U U | UI_TEXT | C | Mod UI element id: room message msg in a window whose text starts at (x, y); flags 1 = framed (the window skin), else frameless; sized by its message; does not block.
 FEC6 | U U U U U U | UI_ITEM | C | Mod UI element id: a selectable item x y w h (the cursor's stops), flags 1 = disabled.
 FEC7 | U U | UI_CURSOR | C | Mod UI cursor on item id, style (0 outline, 1 highlight, 2 none).
-FEC8 | V | UI_PICK | C | Mod UI pick: blocks for a press made while it waits; D-pad -> nearest selectable item that way (var = 0x40 | item), Circle var = item, Cross 0x80, Triangle 0x81, Square 0x82; then ends the turn.
+FEC8 | V | UI_PICK | C | Mod UI pick: blocks for a press made while it waits; D-pad -> nearest selectable item that way (var = 0x40 | item), Circle var = item, Cross 0x80; then ends the turn.
 FEC9 | U V V | UI_GETPOS | C | Mod UI element id's centre (a text window: its text origin) into two vars.
 FECA | U U U | UI_SET | C | Mod UI element id: field (0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg, 6 flags, 7 w, 8 h) = value (a text window is shown again).
 FECB | U U U U | UI_PALETTE | C | Mod UI palette entry i (0..31) = (r, g, b).
