@@ -20,6 +20,7 @@
 #include "core/types.h"
 #include "script/field_host.h"
 #include "script/field_script.h"
+#include "script/mod_ui.h"
 
 namespace oc::script {
 
@@ -180,6 +181,8 @@ class FieldVM {
   // The entity whose script is executing (valid inside host calls).
   int current_entity() const { return ent_; }
   const VmStats& stats() const { return stats_; }
+  // The mod UI the room's scripts built (ops FE C1-FE CB); cleared by load().
+  const ModUi& mod_ui() const { return ui_; }
   VmStats& stats() { return stats_; }
 
   // ---- softlock watchdog ---------------------------------------------------------------------------------------------------
@@ -229,6 +232,7 @@ class FieldVM {
   std::array<u8, 8> slot_ent_{};
   std::array<u8, 256> ent_ref_tables_[3]{};
   VmStats stats_;
+  ModUi ui_;
   std::set<u16> logged_;
 
   // Execution context of the record currently running. `base_` is the offset of the opcode (main page) or sub-opcode
