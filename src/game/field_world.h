@@ -301,6 +301,9 @@ class FieldWorld final : public script::FieldHost {
   std::string room_stem_for_id(int room_id) const;
   // A debug start or warp into a room only the other disc's index names switches to that disc (and variable 0x42 with it).
   void select_disc_for_room(std::string_view stem);
+  // The room id and entrance of the loaded room's MAP_JUMP_DC with literal operands, in code reachable from its scripts: the title
+  // room's New Game jump (#22 #0 as shipped; a mod's opening.bin can name another room). False when there is none, or several disagree.
+  bool script_map_jump(int& room_id, int& param) const;
   const DiscIndex& disc_index() const { return discs_; }
   // The save gate of the main menu (FE 72 save points and the menu key): variable 0x3C == 1.
   bool can_save() const { return vm_.var(0x3C) == 1; }
