@@ -73,8 +73,10 @@ void App::draw_frame(const render::Frame& frame) {
         (platform::art_is_hd(config.art_mode) && world.room_card() ? world.room_card()->hidden_groups : 0u) |
         world.sprite_groups());
   // A disabled flow ([Debug] Battle / sweep / replay) is never started and would still "own the screen" in its initial Title state (black
-  // frame over the battle): only an enabled flow draws.
-  const bool flow_screen = flow_ready && flow_enabled && flow.owns_screen() && !movie_open && !title_scene;
+  // frame over the battle): only an enabled flow draws, and the screens a field script opens (name entry, party, New Game+ list), which
+  // run in a disabled flow too (a [Debug] Room start: an invisible name entry took the input).
+  const bool script_screen = flow_ready && (flow.rename_active() || flow.party_active() || flow.ng_plus_active());
+  const bool flow_screen = flow_ready && (flow_enabled || script_screen) && flow.owns_screen() && !movie_open && !title_scene;
   const bool field_shown = field_visible() && !battle_shown && !flow_screen && !movie_open;
   const bool title_held = title_hold();
   if (movie_open) {
