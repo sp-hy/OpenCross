@@ -54,8 +54,8 @@ void FieldWorld::bind_party_entity(int slot) {
   if (auto model = character_model(ent_state.char_model)) ent_state.actor.set_model(model);
   // In another body: the character's own model is made ready for the switch back.
   if (ent_state.char_model != ent_state.char_id) prefetch_character_model(ent_state.char_id);
-  // A 3D object; solid; bit 22 marks the player class that attr 4 / 5 walls block.
-  ve.flags38 = (ve.flags38 & ~script::flag38::kNo3dObject) | 0x400100;
+  // A 3D object, not solid; bit 22 marks the player class that attr 4 / 5 walls block.
+  ve.flags38 = (ve.flags38 & ~script::flag38::kNo3dObject) | 0x400000;
 }
 
 void FieldWorld::rebind_party() {

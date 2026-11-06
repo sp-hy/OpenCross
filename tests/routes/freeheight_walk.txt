@@ -1,0 +1,24 @@
+# jac_b22i, variable 0x108 = 0x100: entity 4 is placed with SET_POSITION_XYZ at the door (-1500, 250), walks out with WALK_TO and
+# then WALK_TO_XZ to (-3000, 200) with the free-height flag still set. That walk adds its velocity to the position as it is: moved off
+# the walk mesh in the middle of it, the walker goes on in a straight line at height 0, through no wall. A second run puts the leader
+# in its way: the solid walker stops where its next step would touch him and waits there.
+0 wait idle 600
+- set var 108 256
+- load jac_b22i 0
+- wait room jac_b22i 300
+- wait 100
+- put ent 4 -2200 500
+- wait 16
+- assert near 4 -2284 468 3
+- assert height 4 -1 1
+- wait 134
+- assert near 4 -2927 228 3
+- assert height 4 -1 1
+- set var 108 256
+- load jac_b22i 0
+- wait room jac_b22i 300
+- put ent 1 -2300 177
+- wait 400
+- assert near 4 -2221 174 3
+- assert height 4 -20 -18
+- quit

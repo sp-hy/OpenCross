@@ -262,6 +262,23 @@ bool FieldWorld::blocked_by_solids(int player, float x, float z, float old_x, fl
   return blocked;
 }
 
+// The movement phase moves every actor but the controlled one by its velocity, except a solid one whose new spot touches the
+// controlled entity: that actor stays where it was for the tick, so a walk waits there until the leader steps away. The reach and
+// the height overlap are those of blocked_by_solids; party members and pushable actors (moved by the push) are not held.
+bool FieldWorld::touches_leader(int i) const {
+  const int player = player_entity();
+  if (player < 0 || i == player) return false;
+  const u32 flags = vm_.entity(i).flags38;
+  const Ent& ent_state = ents_[static_cast<size_t>(i)];
+  if (!(flags & 0x100u) || (flags & (script::flag38::kInactive | 0x2000u)) || ent_state.pc_slot >= 0) return false;
+  const ActorPose& lead = ents_[static_cast<size_t>(player)].actor.current();
+  const ActorPose& pose = ent_state.actor.current();
+  if (!(lead.y - ent_height(player) <= pose.y && pose.y - ent_height(i) <= lead.y)) return false;
+  if (ent_box(i)) return in_box(i, lead.x, lead.z, 0);
+  const float reach = ent_radius(i) + ent_radius(player);
+  return (lead.x - pose.x) * (lead.x - pose.x) + (lead.z - pose.z) * (lead.z - pose.z) < reach * reach;
+}
+
 // The pushed actor's next centre (position + velocity) inside the rect of another box actor refuses the push.
 bool FieldWorld::push_target_inside_box(int crate, float vx, float vz) const {
   const ActorPose& pose = ents_[static_cast<size_t>(crate)].actor.current();

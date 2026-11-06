@@ -169,7 +169,8 @@ void FieldWorld::step_turn_rates() {
 
 // The A0 step of the tick, taken after every script has run: the entity walks one step at its own speed along the heading A0
 // recorded, through the wall probe and the slide, and faces that heading (a slide re-aims the facing along the wall). A tile with
-// flag 0x1000 halves the step. An inactive or free-height entity takes no step. The request is used up either way.
+// flag 0x1000 halves the step. An inactive or free-height entity takes no step, and a step that ends touching the leader is taken
+// back (touches_leader). The request is used up either way.
 void FieldWorld::step_wander() {
   const WalkMesh& walk = view_.walk();
   for (int i = 0; i < static_cast<int>(ents_.size()); ++i) {
@@ -183,7 +184,9 @@ void FieldWorld::step_wander() {
     if (tri >= 0 && !walk.empty() && (walk.flags(tri) & 0x1000u)) step *= 0.5f;
     const float heading_rad = static_cast<float>(heading) * kUnitsToRad;
     ent_state.actor.set_facing(heading);
+    const Actor::Spot before = ent_state.actor.spot();
     ent_state.actor.move_on_mesh(walk, -std::cos(heading_rad) * step, std::sin(heading_rad) * step);
+    if (touches_leader(i)) ent_state.actor.restore(before);
   }
 }
 
@@ -232,14 +235,26 @@ void FieldWorld::step_motions() {
       ent_state.actor.set_facing(reaim && turn_to_walk ? bearing(dx, dz) : motion.facing);
       return false;
     };
+    // The movement phase adds a velocity walk's step to a free-height entity's position as it is (no wall probe, no slide, the
+    // height unchanged); any other entity moves through the wall probe and the slide. A step that ends touching the leader is
+    // taken back (touches_leader); that wait is not a stuck walk.
+    auto move_by = [&](float vx, float vz, int heading) {
+      const Actor::Spot before = ent_state.actor.spot();
+      bool moved = true;
+      if (y_valid) move_xz(cur.x + vx, cur.z + vz);
+      else moved = ent_state.actor.move_on_mesh(walk, vx, vz, heading);
+      if (!touches_leader(i)) return moved;
+      ent_state.actor.restore(before);
+      return true;
+    };
     switch (motion.kind) {
       case K::WalkXZ:
       case K::WalkXZ2:
-        if (!motion.direct && !y_valid) {
+        if (!motion.direct) {
           // WALK_TO_XZ (42 / 43) and MOVE (46) do not write the position: they set the velocity and
-          // the actor moves with the wall probe and slide, like the pad. An NPC therefore stops at fences / walls (and
-          // keeps pushing until the slot timer of 43 runs out) instead of walking through them; the arrival test is dist > S / 8,
-          // then the position snaps to the target. 3F / 44 / 45 (direct position writes) stay unconstrained.
+          // the actor moves with the wall probe and slide, like the pad (a free-height entity without them). An NPC therefore stops
+          // at fences / walls (and keeps pushing until the slot timer of 43 runs out) instead of walking through them; the arrival
+          // test is dist > S / 8, then the position snaps to the target. 3F / B8 / B9 / BA (direct position writes) stay unconstrained.
           // The engine aims from the whole-unit position: the offset to the target is an integer vector, its length goes through
           // mover_sqrt and its direction through mover_normalise (4.12), times S (16.16 velocity).
           const int ix = static_cast<int>(motion.tx) - static_cast<int>(std::floor(cur.x));
@@ -267,7 +282,7 @@ void FieldWorld::step_motions() {
             vx = -std::cos(heading_rad) * speed;
             vz = std::sin(heading_rad) * speed;
           }
-          if (ent_state.actor.move_on_mesh(walk, vx, vz, motion.facing)) motion.stuck = 0;
+          if (move_by(vx, vz, motion.facing)) motion.stuck = 0;
           else ++motion.stuck;
           // The slot timer of 43 ends the walk; so does being stuck too long (never leave a script waiting on a wall for ever).
           if (motion.frames > 0 && --motion.frames == 0) motion.active = false;
@@ -363,7 +378,7 @@ void FieldWorld::step_motions() {
           }
           // A slide re-aims the facing along the wall.
           ent_state.actor.set_facing(turn_to_walk ? bearing(dx, dz) : motion.facing);
-          ent_state.actor.move_on_mesh(walk, vx, vz);
+          move_by(vx, vz, -1);
         }
         bool timeout = false;
         if (motion.frames > 0 && --motion.frames == 0) timeout = true;
@@ -388,33 +403,27 @@ void FieldWorld::step_motions() {
           if (--motion.frames <= 0) motion.active = false;
           break;
         }
-        const float heading_rad = static_cast<float>(motion.heading) * kUnitsToRad;
-        // Op 46: velocity through the wall probe (see WalkXZ).
-        if (motion.kind == K::Move && !motion.direct && !y_valid) {
-          ent_state.actor.set_facing(motion.facing);
-          // Wait form: within S/8 of the stored target (twice the walk's length away, see start_motion) the walk ends without a snap.
-          const float dx = motion.tx - cur.x, dz = motion.tz - cur.z;
-          if (!(std::hypot(dx, dz) > 2.0f * speed)) {
-            motion.active = false;
-            break;
-          }
-          float vx = -std::cos(heading_rad) * speed, vz = std::sin(heading_rad) * speed;
-          if (script_ent.flags270 & 0x2000000u) {
-            // Curved 46: as 42 / 43 but from the slot's last heading, and the model yaw is the heading + 0x400:
-            // the model is shown facing back along the heading, then turns toward the facing.
-            int& ch = ent_state.curve_h[static_cast<size_t>(motion.slot)];
-            ch = turn_toward(ch, bearing(dx, dz), script_ent.v114);
-            ent_state.actor.set_shown_facing(ch + 0x800);
-            const float hc = static_cast<float>(ch) * kUnitsToRad;
-            vx = -std::cos(hc) * speed;
-            vz = std::sin(hc) * speed;
-          }
-          ent_state.actor.move_on_mesh(walk, vx, vz, motion.facing);
-          if (--motion.frames <= 0) motion.active = false;
+        // Op 46: a velocity walk (see WalkXZ).
+        ent_state.actor.set_facing(motion.facing);
+        // Wait form: within S/8 of the stored target (twice the walk's length away, see start_motion) the walk ends without a snap.
+        const float dx = motion.tx - cur.x, dz = motion.tz - cur.z;
+        if (!(std::hypot(dx, dz) > 2.0f * speed)) {
+          motion.active = false;
           break;
         }
-        move_xz(cur.x - std::cos(heading_rad) * speed, cur.z + std::sin(heading_rad) * speed);
-        ent_state.actor.set_facing(motion.facing);
+        const float heading_rad = static_cast<float>(motion.heading) * kUnitsToRad;
+        float vx = -std::cos(heading_rad) * speed, vz = std::sin(heading_rad) * speed;
+        if (script_ent.flags270 & 0x2000000u) {
+          // Curved 46: as 42 / 43 but from the slot's last heading, and the model yaw is the heading + 0x400:
+          // the model is shown facing back along the heading, then turns toward the facing.
+          int& ch = ent_state.curve_h[static_cast<size_t>(motion.slot)];
+          ch = turn_toward(ch, bearing(dx, dz), script_ent.v114);
+          ent_state.actor.set_shown_facing(ch + 0x800);
+          const float hc = static_cast<float>(ch) * kUnitsToRad;
+          vx = -std::cos(hc) * speed;
+          vz = std::sin(hc) * speed;
+        }
+        move_by(vx, vz, motion.facing);
         if (--motion.frames <= 0) motion.active = false;
         break;
       }

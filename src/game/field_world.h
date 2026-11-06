@@ -813,6 +813,8 @@ class FieldWorld final : public script::FieldHost {
   bool controls_free(bool menu_request = false) const;
   int pad_heading(bool& run) const;
   bool blocked_by_solids(int player, float x, float z, float old_x, float old_z);
+  // a solid non-party actor whose current spot touches the controlled entity: a velocity step ending there is taken back
+  bool touches_leader(int i) const;
   bool push_target_inside_box(int crate, float vx, float vz) const;
   // the wall-collision step as a probe
   bool push_step_ok(Ent& ent_state, float dx, float dz);

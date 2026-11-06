@@ -416,8 +416,9 @@ bool FieldVM::exec_core(u8 op) {
     case 0x3E:  // SKIP_FWD: skips U 3-byte instructions
       advance(3 + 3 * operand_u(1));
       break;
-    case 0x3F:  // WALK_TO (b == 0 start form, else wait form)
+    case 0x3F:  // WALK_TO (b == 0 start form, else wait form); frees the height on every form, as B8 / B9 / BA do
     case 0x40:  // WALK_TO_2: as WALK_TO plus a speed / time operand
+      self.flags38 |= 0x40;
       if (byte_at(1) == 0) {
         MotionRequest request;
         request.kind = op == 0x3F ? MotionKind::Walk : MotionKind::Walk2;
@@ -426,7 +427,7 @@ bool FieldVM::exec_core(u8 op) {
         request.z = operand_s(4, 8, 0x40);
         request.y = operand_s(6, 8, 0x20);
         if (op == 0x40) request.params[0] = operand_u(9);
-        begin_motion(request, true);
+        begin_motion(request);
         advance(op == 0x3F ? 9 : 11);
       } else {
         wait_or_advance(host_.motion_wait(ent_), 2);
@@ -448,13 +449,14 @@ bool FieldVM::exec_core(u8 op) {
         request.z = operand_s(4, 6, 0x40);
         request.params[0] = operand_u(7);
         if (op == 0x43) request.params[1] = operand_u(9);
-        begin_motion(request, false);
+        begin_motion(request);
         advance(op == 0x42 ? 9 : 11);
       }
       break;
     case 0x44:  // WALK_FOLLOW_ENT (b == 1 wait form); a missing target skips the companion wait form too
     case 0xB8: {  // WALK_FOLLOW_ENT_3D
       const int target = op == 0x44 ? entity_operand(2) : resolve_character(byte_at(2));
+      if (op == 0xB8) self.flags38 |= 0x40;
       if (byte_at(1) == 1) {
         wait_or_advance(target >= 0 && host_.motion_busy(ent_), 3);
       } else if (target < 0) {
@@ -464,7 +466,7 @@ bool FieldVM::exec_core(u8 op) {
         request.kind = op == 0x44 ? MotionKind::FollowEnt : MotionKind::FollowEnt3D;
         request.mode = byte_at(1);
         request.target = target;
-        begin_motion(request, op == 0xB8);
+        begin_motion(request);
         advance(3);
       }
       break;
@@ -472,6 +474,7 @@ bool FieldVM::exec_core(u8 op) {
     case 0x45:  // WALK_TO_ENT_TIMED (b != 0 wait form); a missing target skips the companion wait form too
     case 0xB9: {  // WALK_TO_ENT_3D_TIMED
       const int target = entity_operand(2);
+      if (op == 0xB9) self.flags38 |= 0x40;
       if (byte_at(1) != 0) {
         wait_or_advance(target >= 0 && host_.motion_busy(ent_), 3);
       } else if (target < 0) {
@@ -481,13 +484,14 @@ bool FieldVM::exec_core(u8 op) {
         request.kind = op == 0x45 ? MotionKind::FollowEntTimed : MotionKind::FollowEnt3DTimed;
         request.target = target;
         request.params[0] = operand_u(3);
-        begin_motion(request, op == 0xB9);
+        begin_motion(request);
         advance(5);
       }
       break;
     }
     case 0x46:  // MOVE: direction and frames (b == 1 wait form)
     case 0xBA: {  // MOVE_3D: heading, pitch and frames (b != 0 wait form); frees the height like WALK_TO
+      if (op == 0xBA) self.flags38 |= 0x40;
       if (op == 0x46 ? byte_at(1) == 1 : byte_at(1) != 0) {
         wait_or_advance(host_.motion_busy(ent_), 2);
         break;
@@ -498,7 +502,7 @@ bool FieldVM::exec_core(u8 op) {
       request.params[0] = operand_u(2);
       request.params[1] = operand_u(4);
       if (op == 0xBA) request.params[2] = operand_u(6);
-      begin_motion(request, op == 0xBA);
+      begin_motion(request);
       advance(op == 0x46 ? 6 : 8);
       break;
     }
@@ -609,7 +613,7 @@ bool FieldVM::exec_core(u8 op) {
       request.z = operand_s(4, mode_off, 0x40);
       request.y = operand_s(6, mode_off, 0x20);
       request.params[0] = op == 0x5B ? operand_s(8, 10, 0x10) : operand_u(9);
-      begin_motion(request, false);
+      begin_motion(request);
       advance(11);
       yield_ = true;
       break;
