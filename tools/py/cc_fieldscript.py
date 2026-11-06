@@ -365,6 +365,7 @@ FE82 | V | GET_STARS_TOTAL | I | PS1 handler reads a u16 var id (4 bytes total).
 FE83 | | OPFE83 | ? | Seen once (sui_a05f) directly before RECEIVE_ITEM; length taken as 2 (fits the surrounding code).
 FE84 | | NEW_GAME_PLUS_LIST | C | Keeps the cleared game, selects launcher mode 0x30 (ending room only).
 FE85 | | CLEARED_SAVE | C | Strips gear / grids, var 0x7E = 3, selects the save list (mode 4).
+FEC0 | V U | GET_FEATURE_LEVEL | C | Extension range. var[V] = the level of feature U this build implements (0 = none; feature 0 = the extension range, level 1).
 """
 
 # ---------------------------------------------------------------------------
@@ -491,6 +492,16 @@ def _parse_table():
 
 OPS = _parse_table()
 
+# Extension range FE C0..FE FF: every instruction is FE sub size payload[size]; a row's spec lists the payload's operands.
+EXTENSION_FIRST = 0xFEC0
+UNKNOWN_EXTENSION = OpDef()
+UNKNOWN_EXTENSION.key, UNKNOWN_EXTENSION.name, UNKNOWN_EXTENSION.spec = 0, "EXTENSION", ""
+UNKNOWN_EXTENSION.conf, UNKNOWN_EXTENSION.sem = "?", "Extension op this table does not know (skipped by its size byte)."
+
+
+def is_extension_op(key):
+    return EXTENSION_FIRST <= key <= 0xFEFF
+
 
 def _resolve_spec(spec, buf, pos, nprefix):
     """Return the flat token list for the spec at buf[pos] (pos = opcode byte)."""
@@ -547,7 +558,17 @@ def decode_insn(code, off):
         nprefix = 2
     else:
         key = op
+    extension = is_extension_op(key)
+    if extension:
+        if off + 2 >= n:
+            raise DecodeError("truncated extension op FE %02X @%04X" % (key & 0xFF, off))
+        payload_end = off + 3 + code[off + 2]
+        if payload_end > n:
+            raise DecodeError("extension payload runs past end @%04X" % off)
+        nprefix = 3
     od = OPS.get(key)
+    if od is None and extension:
+        od = UNKNOWN_EXTENSION
     if od is None:
         raise DecodeError("unknown opcode %s @%04X" % (("FE %02X" % (key & 0xFF)) if op == 0xFE else "%02X" % op, off))
     toks = _resolve_spec(od.spec, code, off, nprefix)
@@ -559,6 +580,10 @@ def decode_insn(code, off):
         if t == "M":
             moff = pos
         pos += _width(t)
+    if extension:
+        if pos > payload_end:
+            raise DecodeError("operands run past the extension payload @%04X" % off)
+        pos = payload_end
     if pos > n:
         raise DecodeError("operands run past end @%04X" % off)
     ins = Insn()
@@ -978,7 +1003,7 @@ def cmd_list(args):
 
 def spec_lengths(od):
     """Total instruction lengths (bytes incl. opcode/sub-opcode) a spec can produce."""
-    pre = 2 if od.key > 0xFF else 1
+    pre = 3 if is_extension_op(od.key) else 2 if od.key > 0xFF else 1
     spec = od.spec
     if spec == "C1":
         arms = ["b c U", "b"]

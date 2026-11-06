@@ -157,7 +157,7 @@ Path-keyed texture caches use `Vfs::cache_key(path)` (path plus overlay generati
 
 ### 3.3 Mods
 
-`src/vfs/mods.h`, `docs/formats/mods.md`. `ModManager::scan` walks `<GameDir>\mods\<name>\**`, plus the bare `.dat` files there and the members of `.zip` / `.7z` / `.rar` files, read live (`mod_archive.*`), and resolves each loose file to a shipped member by matching trailing path components, or adds it as a new member when it matches none and sits below a folder named after an archive. `apply` builds an `Overlay`: `files` (member replacements: loose files, or `OverlayFile` members read in place from a packed mod or a mod's `<archive>.dat`) and `textures` (replacement PNGs, see `render/texture_registry.*`). Each mod has a `ModLoadOn` (Modded, Sd, Hd, All) and a priority from list order. Game data (`vfs::is_game_data`) ignores `ModLoadOn` and is fixed by the first `apply` until the next launch. Voice packs are read by `audio::VoicePlayer` from the enabled mod roots, not through the overlay (`ModManager::packed_voice` finds a packed mod's lines).
+`src/vfs/mods.h`, `docs/formats/mods.md`. `ModManager::scan` walks `<GameDir>\mods\<name>\**`, plus the bare `.dat` files there and the members of `.zip` / `.7z` / `.rar` files, read live (`mod_archive.*`), and resolves each loose file to a shipped member by matching trailing path components, or adds it as a new member when it matches none and sits below a folder named after an archive. `apply` builds an `Overlay`: `files` (member replacements: loose files, or `OverlayFile` members read in place from a packed mod or a mod's `<archive>.dat`) and `textures` (replacement PNGs, see `render/texture_registry.*`). Each mod has a `ModLoadOn` (Modded, Sd, Hd, All) and a priority from list order. Game data (`vfs::is_game_data`) ignores `ModLoadOn` and is fixed by the first `apply` until the next launch. Voice packs are read by `audio::VoicePlayer` from the enabled mod roots, not through the overlay (`ModManager::packed_voice` finds a packed mod's lines). A `mod.ini` at a mod's root is its manifest (`Mod::manifest`, `core/features.h`); `feature_inputs` hands the enabled ones to `features::resolve`, whose result `App::features` holds for the run.
 
 ### 3.4 Importers and assets
 
@@ -208,8 +208,8 @@ World maps are ordinary field rooms whose scripts do the work: they load through
 
 `src/script/`:
 
-- `field_script.*`: `FieldScriptModule` parses the room's script bytes into a code area and per-entity script pointers (`kScriptSlots = 32`). The opcode table is `field_opcodes.inc`, one `FS_OP(key, lengths, spec, name, confidence)` row per opcode; `find_op`, `op_table` and `decode_insn` (disassembler) read it. The extended page is keyed `0xFE00 | sub`. Format: `docs/formats/fieldscript.md`.
-- `field_vm.*`: `FieldVM`. Handlers are split across `field_vm_ops_core.cpp`, `_scene.cpp`, `_game.cpp` and `field_vm_ext.cpp` (extended page). `exec(op)` tries `exec_core`, `exec_scene`, `exec_game`; an opcode in the table with no handler is counted in `VmStats::unimplemented` and skipped by its table length.
+- `field_script.*`: `FieldScriptModule` parses the room's script bytes into a code area and per-entity script pointers (`kScriptSlots = 32`). The opcode table is `field_opcodes.inc`, one `FS_OP(key, lengths, spec, name, confidence)` row per opcode; `find_op`, `op_table` and `decode_insn` (disassembler) read it. The extended page is keyed `0xFE00 | sub`; `is_extension_op` marks its extension range `FE C0`-`FE FF`, where a size byte frames every instruction. Format: `docs/formats/fieldscript.md`.
+- `field_vm.*`: `FieldVM`. Handlers are split across `field_vm_ops_core.cpp`, `_scene.cpp`, `_game.cpp` and `field_vm_ext.cpp` (extended page), `field_vm_extension.cpp` (the extension range: engine features for mods, always stepped over by the size byte). `exec(op)` tries `exec_core`, `exec_scene`, `exec_game`; an opcode in the table with no handler is counted in `VmStats::unimplemented` and skipped by its table length.
 
 **Entity threads.** Each entity has `kRecordsPerEntity = 8` `ScriptRecord`s (pc, priority class `state`, script id, wait counter, handshake `phase`) and a 4-entry call stack. The `state` is the priority class: 0xF idle, 7 the default UPDATE loop (script slot 1), 4 ON_COLLISION, 3 ON_ACTION, 2 touch trigger. The lowest class runs; the others stay suspended. Script slot 0 is INIT.
 
@@ -432,7 +432,7 @@ All in `src/audio/`; output is 48 kHz stereo float.
 | `<exe>.new`, `<exe>.old`, `XINPUT9_1_0.dll.new`, `XINPUT9_1_0.dll.old` | transient files of the updater |
 | `XINPUT9_1_0.dll` next to the exe | the launcher proxy, installed by the updater when `CHRONOCROSS_LAUNCHER.exe` is there (`docs/formats/launcher.md`) |
 
-- `src/core/`: `log` (stderr plus optional file), `ScopedTimer`, `span_reader.h`, `parallel.h`, `types.h`, `version.h.in`.
+- `src/core/`: `log` (stderr plus optional file), `ScopedTimer`, `span_reader.h`, `parallel.h`, `types.h`, `version.h.in`, `features` (the engine features mods turn on: the build's table, the `mod.ini` parser and `resolve`, `docs/formats/mods.md` section 8).
 
 ## 11. Testing and tooling
 

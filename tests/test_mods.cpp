@@ -266,6 +266,26 @@ int main() {
   mods.scan(files, dir, mods.prefs());
   CHECK(find_mod(mods, "Nested.zip") && find_mod(mods, "Nested.zip")->unmatched.size() == 1 && find_mod(mods, "Nested.zip")->archives.empty());
 
+  // mod.ini at a mod's root is its manifest (core/features.h), not an unmatched file; in a packed mod, after the wrapper folder. One deeper
+  // down is an ordinary file. feature_inputs lists the enabled mods that have one, in priority order.
+  {
+    fs::create_directories(dir / "Manifest Mod" / "docs");
+    std::ofstream(dir / "Manifest Mod" / "mod.ini") << "[Mod]\nName=Party Swap\nVersion=1.0\n[PartySwap]\nEnabled=1\n";
+    std::ofstream(dir / "Manifest Mod" / "docs" / "mod.ini") << "[Mod]\nName=not the manifest\n";
+    write_archive(dir / "Packed Manifest.zip", false, {{"Packed/MOD.INI", "[Mod]\nName=Packed\nRequires=PartySwap\n"}, {"Packed/x.bin", "x"}});
+    mods.scan(files, dir, mods.prefs());
+    const vfs::Mod* folder = find_mod(mods, "Manifest Mod");
+    CHECK(folder && folder->has_manifest && folder->manifest.name == "Party Swap" && folder->manifest.sections.size() == 1);
+    CHECK(folder && folder->unmatched.size() == 1 && folder->unmatched[0] == "docs/mod.ini");
+    const vfs::Mod* packed = find_mod(mods, "Packed Manifest.zip");
+    CHECK(packed && packed->has_manifest && packed->manifest.name == "Packed" && packed->manifest.requires_features.size() == 1);
+    CHECK(packed && packed->unmatched.size() == 1);
+    for (vfs::Mod& mod : mods.mods())
+      if (mod.name == "Packed Manifest.zip") mod.enabled = false;
+    const std::vector<features::ModInput> inputs = mods.feature_inputs();
+    CHECK(inputs.size() == 1 && inputs[0].name == "Manifest Mod" && inputs[0].manifest == &find_mod(mods, "Manifest Mod")->manifest);
+  }
+
   // A mod's <archive>.dat overlays the shipped archive member by member.
   {
     const fs::path game = tmp / "game";

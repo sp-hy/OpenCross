@@ -1,4 +1,6 @@
 add_library(oc_core STATIC
+  features.cpp
+  features.h
   log.cpp
   log.h
   types.h

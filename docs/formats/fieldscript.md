@@ -45,7 +45,7 @@ Character references (the `c` operand, one byte): `0x00-0x7F` entity index in th
 
 ## 4. Operand and variable encoding
 
-Instruction = 1 opcode byte (`0xFE` = extended page: a second byte selects the sub-opcode) + operands. All multi-byte values are little endian. Operand kinds (table column "Operands"):
+Instruction = 1 opcode byte (`0xFE` = extended page: a second byte selects the sub-opcode) + operands (`FE C0`-`FE FF` put a size byte before them, section 6.12). All multi-byte values are little endian. Operand kinds (table column "Operands"):
 
 | tok | size | meaning |
 |---|---|---|
@@ -510,7 +510,7 @@ Instruction = `FE`, sub-opcode, operands; **Len** includes both bytes. Waits at 
 | FE 84 | 2 | `-` | NEW_GAME_PLUS_LIST | 1 | The New Game+ title list: the cleared game's RAM is copied to a buffer for the new game, a menu cue is queued, launcher mode 0x30 (menutest variant 2) is opened; the FE 61 after it waits for it. Only in `ending` ROOM_PARAM 3 (a Continued cleared save). |
 | FE 85 | 2 | `-` | CLEARED_SAVE | 1 | Gate; every character recruited or in the carry-over bitmap gives its grid elements and its 5 gear slots back to the stock; variable 0x7E = 3; launcher mode 4 (save list only) is opened; the FE 61 after it waits for it. Only in `ending` ROOM_PARAM 2 (the ending's save prompt; it saves with variable 0x3A = 3 in map 9). Not a save point (those are FE 72 + FE 61). |
 
-Opcodes `52 53 57 58 DE` have handlers on the PS1 but never occur in reachable or unreferenced code; they are in the table with their lengths (logged no-ops in OpenCross). Opcodes `EA-FD FF` share a handler that only steps pc += 1 (OpenCross steps an opcode outside the table the same way). Table coverage: 234 main opcodes + the FE prefix = 235 of 256 first bytes; 134 FE sub-opcodes (00-85). 329 distinct opcodes occur in the data (213 main, 116 FE) and all are in the table (368 rows).
+Opcodes `52 53 57 58 DE` have handlers on the PS1 but never occur in reachable or unreferenced code; they are in the table with their lengths (logged no-ops in OpenCross). Opcodes `EA-FD FF` share a handler that only steps pc += 1 (OpenCross steps an opcode outside the table the same way). Table coverage: 234 main opcodes + the FE prefix = 235 of 256 first bytes; 134 FE sub-opcodes (00-85). 329 distinct opcodes occur in the data (213 main, 116 FE) and all are in the table (368 rows, plus the extension ops of 6.12). `FE 86`-`FE BF` are unassigned; `FE C0`-`FE FF` are the extension range (6.12).
 
 ### 6.11 Long-form notes for individual ops
 
@@ -523,6 +523,32 @@ Opcodes `52 53 57 58 DE` have handlers on the PS1 but never occur in reachable o
 **FE 45 MODEL_FLASH draw.** Entities with `ES.27` are drawn with two semi-transparent primitives per polygon (colour = model x construct >> 7): first the white palette with blend mode 2 (B - F), then the model's own palette with blend mode 1 (B + F) (the white one is linked last = drawn first). Texels without STP are opaque in both, so they keep the normal colour; STP texels give `B - light + texel x light` (a colour-driven fade of the model, not a white silhouette). The routine is skipped on water triangles (the water routine wins) and overridden by `ES.30`. OpenCross: `Ent::flash` -> `MeshPipeline::DrawParams::flash` (passes white Solid / white Semi blend 2 / Solid / Semi blend 1). Unknown: whether the white primitive carries the second palette row's select bit on 2-row models.
 
 **A3 / C9 battle flags** (operand 3): `1` keep the field music (no change-music: neither the encounter-time stop + song 2 nor the 0x14 theme; a room whose own song is 2, e.g. opn_a02i, keeps it too), `2` losable (a wipe is not game over), `4` every PC except Poshul / Mojo gets model byte 0x3B (`adk_sp`, the Dragoon disguise) written into its character record by the battle loader and again on the field's battle return: the field party stays disguised after the fight (OpenCross: `FieldWorld::apply_battle_disguise`; jac_b25i restores the normal models just before its flag 4 battle), `0x10` no victory song, `0x20` the field does not restart its song after the battle, `0x40` the encounter song is the boss theme 0x31 (BGM050) instead of the battle theme (both sources; ignored with flag 1). 26 C9 calls carry it, e.g. des_b06f's Fire Dragon (#453), hes_a04f, ryu_b29i (with 0x10); a boss fight without it keeps the field's own song (flag 1, the script having played it) or gets the battle theme. OpenCross: `audio::battle_song`. `field` (the battlefield index) picks the stage: `App::make_field_battle_args` passes it as `bopt.battlefield`, and the scene's own `bg` applies only when the operand is out of range. After a win (not scenes 0x1D7 / 0x1D8 / 0x1DD) the victory song 0x17 (boss) / 0x16 (BGM024 / BGM023) plays. Result variable `$BATTLE_RESULT` (0x32): 0 victory, 1 wiped, 2 fled; D2 treats a result < 2 as won. After a battle the field replays its saved song (every battle unless flag 0x20) at the position it was cut off (remastered); when no song was registered at the request (a room whose music was stopped with `PLAY_SONG #255`), that replay is a stop, so the battle's song ends at the field return (ryu_b29i's boss fights: the Dragon Tear scene, the duel's aftermath and its movies play without music). With flag 0x20 the battle's song plays on until the script changes it. Flow in OpenCross: the op yields while `battle_active()`; the field plays `enct`; the host runs `BattleView` for the field party (starting from white) and calls `FieldWorld::end_battle(code)`; the field fades in from black over 0x30 ticks (subtractive) and the script continues (`FE 10` then releases the input lock). A wipe in a battle that is not losable loads map 9, the game-over room (`app_battle.cpp`). RDE's "encounters off" option patches A3 / C9 for the battles of a fixed table (keyed by map, entity and battle id, gated on story flags) into an auto-win: the battle is not fought, the last battle result and variable 0x32 (`$BATTLE_RESULT`) both become 2, fled (so D2 does not mark the monster defeated and a script testing `$32` takes its fled branch), and the op instead runs script 2 of entity 0 (`09 00 02`) and waits for it. This happens every time the op runs: a field monster whose ON_COLLISION holds the A3 is not removed, so while the player still touches it the collision fires again after its script ends and the op is skipped again (opa_b02f entrance 1: once per pass of the monster's `A3 / FE 10 / D2 / WAIT 128`, every 129-135 ticks in RDE (vsync counter) and 133 in OpenCross; the monster's UPDATE is suspended while the collision script runs, so it stands still and the player stays in its touch radius. RDE's wall-clock spacing of these repeats varies from about 2.2 to 4 s only because its guest frame pacing does); the same option skips a D9 model swap (pc += 4). OpenCross: the Cheats tab "No encounters" (`FieldHost::skip_battle` / `skip_model_swap`; off by default).
+
+### 6.12 Extension range: `FE C0`-`FE FF` (OpenCross)
+
+The original game has no `FE` sub-opcode above 85. OpenCross reserves `FE C0`-`FE FF` for engine features that a mod's scripts turn on. No room of the game uses them, so a feature changes nothing until a mod's script runs its op.
+
+Every instruction in the range carries a size byte:
+
+```
+FE sub size payload[size]          instruction length = 3 + size
+```
+
+* The payload starts with the op's operands (the tokens of section 4, plain layouts only; in the table below `V@k` / `U@k` count from the first payload byte). Payload bytes after them are ignored, so a later version of an op can append operands and a build that knows only the first ones still runs it.
+* An op the build does not know is stepped over whole (3 + size bytes), and so is an op whose payload is shorter than its operands (logged once, counted with the unknown opcodes). The disassemblers show an unknown op as `EXTENSION`.
+* A mod asks for a feature with `GET_FEATURE_LEVEL` before it relies on it. A build without the range reads `FE C0`-`FE FF` as 2-byte no-ops and runs the payload as code, so a mod that uses the range needs a build that has it (feature 0).
+* Adding an op: a row in `field_opcodes.inc` (lengths = 3 + the operand bytes) and in `tools/py/cc_fieldscript.py`, its case in `FieldVM::exec_extension`, a row below and a unit test. Op numbers and feature ids are never reused for something else.
+* Features: the build's table is `src/core/features.cpp` (id, level, the `mod.ini` section and settings). A mod turns a feature on for the whole game with its `mod.ini` (`mods.md` section 8); the ops here query it and change it from the mod's own scripts.
+
+| Op | Len | Operands | Name | Effect |
+|---|---|---|---|---|
+| FE C0 | 7 | `V@0 U@2` | GET_FEATURE_LEVEL | var[V] = the level of feature U in this build; 0 when the build does not have it. Never yields. |
+
+Features (the U of `GET_FEATURE_LEVEL`):
+
+| Id | Feature | Levels |
+|---|---|---|
+| 0 | The extension range itself | 1: the framing and the ops of this section |
 
 
 ## 8. Entity and global flag bits

@@ -16,10 +16,15 @@ namespace oc::script {
 constexpr int kScriptSlots = 32;
 // Key of an extended-page opcode = kExtPage | sub-opcode.
 constexpr u16 kExtPage = 0xFE00;
+// Extension range FE C0..FE FF: engine features that mods turn on. Every instruction in it is framed as
+// FE sub size payload[size], so a reader that does not know the sub-opcode still knows its length (3 + size).
+constexpr u8 kExtensionFirst = 0xC0;
+constexpr bool is_extension_op(u16 key) { return key >= (kExtPage | kExtensionFirst) && key <= (kExtPage | 0xFF); }
 
 // One opcode table row: key (0xNN, or 0xFExx for the extended page); lengths = total instruction lengths, "/"-separated when the
 // layout depends on the first operand byte; spec = operand tokens (b c d w U V J Shh Thh M A4, "sel:MASK{v:tokens;...;default}",
-// "C1"); name; conf = 'C' confirmed, 'I' inferred, '?' semantics unknown.
+// "C1"); name; conf = 'C' confirmed, 'I' inferred, '?' semantics unknown. Extension rows: spec = the payload tokens (plain tokens
+// only), lengths = the instruction length without extra payload bytes.
 struct OpInfo {
   u16 key;
   const char* lengths;
@@ -50,7 +55,7 @@ struct Insn {
   u32 length = 0;
   u16 key = 0;
   const OpInfo* info = nullptr;
-  std::array<u8, 24> raw{};
+  Bytes raw;
   std::vector<Operand> ops;
   std::vector<std::pair<u32, bool>> targets;
   Flow flow = Flow::Next;
@@ -60,7 +65,9 @@ struct Insn {
 // Operand tokens chosen by the spec for the instruction at code[off] (after resolving "sel:" / "C1" layouts).
 std::vector<std::string_view> resolve_layout(const OpInfo& info, ByteSpan code, u32 off);
 
-// Decodes one instruction. nullopt (and *error) on an unknown opcode or an operand that runs past the end.
+// Decodes one instruction. nullopt (and *error) on an unknown opcode or an operand that runs past the end. An extension op
+// without a table row decodes as EXTENSION (conf '?', no operands); a row's operands must fit the payload, and payload bytes
+// after them are skipped.
 std::optional<Insn> decode_insn(ByteSpan code, u32 off, std::string* error = nullptr);
 
 // Pre-script table record: (x, y, z, 0), probably entrance points selected by ROOM_PARAM. `level` is the 4th s16: the

@@ -8,6 +8,7 @@ add_library(oc_script STATIC
   field_vm.h
   field_vm.cpp
   field_vm_ext.cpp
+  field_vm_extension.cpp
   field_vm_ops_core.cpp
   field_vm_ops_game.cpp
   field_vm_ops_scene.cpp
