@@ -45,7 +45,7 @@ A ZIP, 7z or RAR (4 or 5, solid included; the extension selects the file, the fo
    * a member of a mod's `<archive>.dat` (rule 1): `<archive>/<member>`; an `.mp4` / `.mkv` there stays unmatched (rule 3);
    * any file of a mod **folder** named after an archive, the loose-file layout of `mods\cdrom\...`: `mods\cdrom\flux\ui.bin` -> `cdrom/flux/ui.bin`.
 
-   Anything else is **unmatched**, not loaded (for example alternates such as `02_gill alt1.png`, readme files). A file that matches a shipped member by name (rule 2) is never added, so a new file needs a name the game does not use. `Vfs::list` still lists only the shipped archive. The game finds most files by number through `cdrom/cdrom.fnd` (`docs/architecture.md` 3.6): a new room or file is reached through a mod's own `cdrom.fnd` naming it (a map jump to a room id whose record names a `.bin` + `.ctd` pair the overlay can read loads it, though `RoomView::rooms` lists only the shipped rooms).
+   Anything else is **unmatched**, not loaded (for example alternates such as `02_gill alt1.png`, readme files). A file that matches a shipped member by name (rule 2) is never added, so a new file needs a name the game does not use. `Vfs::list` still lists only the shipped archive. The game finds most files by number through `cdrom/cdrom.fnd` (`docs/architecture.md` 3.6): a new room or file is reached through a mod's own `cdrom.fnd` naming it (and `cdrom2.fnd` for disc 2: a room id is looked up in the current disc's index; a map jump to a room id whose record names a `.bin` + `.ctd` pair the overlay can read loads it, though `RoomView::rooms` lists only the shipped rooms).
 
 The startup log lists per mod `mods: '<name>' (enabled, load on modded): N matched, D game data, A archive(s), T texture(s), V voice(s), W added, U unmatched, B ambiguous` (matched and game data include the added files), followed by up to 12 added / unmatched / ambiguous paths each (a `.dat` member as `<rel>/<member>`); `mods: K active mod(s), F file(s), T texture(s)` is logged each time the overlay is built.
 
@@ -90,7 +90,7 @@ Voice lines are MP3 files in a mod folder's `voices` folder, played when a dialo
 
 | field | meaning | OpenCross value |
 |---|---|---|
-| `scene` | the **lang.dat room id** (row index of `tools/py/data/text_room_ids.csv`, 0..565; the field map id, +1000 in the `fin_` variants) | `FieldWorld::room_id_` |
+| `scene` | the **lang.dat room id** (row index of `tools/py/data/text_room_ids.csv`, 0..565; the field map id, +1000 in the `fin_` variants; a room a mod adds uses its map id) | `FieldWorld::room_id_` |
 | `dialog` | the **message index inside the room** (the E0 / E3 / E4 word operand = message block record index) | the `message` argument of `FieldWorld::open_dialogue` |
 | `page` | 0-based `{bpage}` page; a line is requested when a page is shown (page 0 when the window opens) | `DialogueBox::page_index()` |
 | `character` | lowercase name of the **speaker character id** (the id the script gives the window; E3 / E4 = the speaking entity's character). Names come from a 83-entry table: 0 `serge`, 1 `kid`, 2 `guile` ... 19 `glenn` ... 43-48 `pip`, 49 `lynx` ... 82 `orcha`; speaker 0 / none is named `npc` | `ents_[speaker].char_id` of the E3 / E4 entity (`voice_char_name`) |

@@ -958,8 +958,7 @@ void BattleView::handle_input(const platform::Input& in) {
       pending_cmd_ = {};
       pending_cmd_.actor = active_pc_;
       // Every command confirm turns the PC to the unit an enemy target cursor would start on (Defend and Run too; Defend keeps the yaw).
-      // Swap does not: its list keeps the orbit, whose angle follows the PC's yaw, so a turn (a newcomer that has not faced an enemy yet)
-      // jolted the camera.
+      // Swap does not: its list keeps the orbit, whose angle follows the PC's yaw.
       if (const std::vector<int> enemies = target_candidates(); command != kSwapCommand && !enemies.empty()) {
         vis_[static_cast<size_t>(active_pc_)].turn.on = false;
         face_toward(active_pc_, enemies[static_cast<size_t>(target_start(enemies))]);

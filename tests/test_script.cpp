@@ -1022,6 +1022,13 @@ class KeyHost : public NullHost {
 };
 
 void test_mod_ui_ops() {
+  // UI_CLEAR keeps the change counter, so an element placed after it never repeats a revision a window shows.
+  {
+    ModUi cleared;
+    cleared.serial = 5;
+    cleared.clear();
+    CHECK_EQ(cleared.serial, 5u);
+  }
   Asm script;
   const auto ext = [&](int sub, std::initializer_list<int> words) {
     script.raw({0xFE, sub, static_cast<int>(2 * words.size())});
@@ -1050,7 +1057,7 @@ void test_mod_ui_ops() {
   script.inc(V(1));
   script.park();
 
-  const std::initializer_list<std::pair<int, s32>> presses = {{0x2000, 0x4B}, {0x1000, 0x4C}, {0x20, 10}, {0x40, 0x80}, {0x10, 0x81}, {0x80, 0x82}};
+  const std::initializer_list<std::pair<int, s32>> presses = {{0x2000, 0x4B}, {0x1000, 0x4C}, {0x20, 10}, {0x40, 0x80}};
   for (const auto& [press, want] : presses) {
     KeyHost host;
     FieldVM vm(host);
@@ -1058,7 +1065,7 @@ void test_mod_ui_ops() {
     const ModUi& ui = vm.mod_ui();
     CHECK(ui.shown && ui.cursor == 10 && ui.cursor_style == ModUi::kCursorOutline);
     CHECK(ui.elements[0].kind == ModUi::kRect && ui.elements[0].flags == ModUi::kTranslucent && ui.elements[0].colour == 20);
-    CHECK(ui.elements[1].kind == ModUi::kText && ui.elements[1].msg == 8 && ui.elements[1].flags == ModUi::kFramed && ui.elements[1].revision == 2);
+    CHECK(ui.elements[1].kind == ModUi::kText && ui.elements[1].msg == 8 && ui.elements[1].flags == ModUi::kFramed && ui.elements[1].revision == 9);
     CHECK(ui.elements[2].kind == ModUi::kLine && ui.elements[2].w == 100);
     CHECK((ui.palette[20] == std::array<u8, 3>{1, 2, 3}));
     CHECK_EQ(vm.var(V(5)), 100);

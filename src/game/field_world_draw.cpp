@@ -445,7 +445,6 @@ void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, 
                  render::pack_rgba(to_u8(dim.cur[0]), to_u8(dim.cur[1]), to_u8(dim.cur[2]), alpha));
     sprites.set_blend(render::BlendMode::Alpha);
   }
-  draw_mod_ui(sprites, vw, vh);
   if (windows) {
     draw_veil_transition(sprites, vw, vh);
     draw_windows(sprites, vw, vh);
@@ -456,20 +455,23 @@ void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, 
 
 // Rects (filled, or a one-pixel outline; translucent ones at 5 / 8 alpha) and lines in their palette colours, in element order; items are not
 // drawn; the cursor on its item: an outline 2 pixels out pulsing 1 pixel every 8 ticks (style 0), a translucent white fill (1) or nothing (2).
-// Coordinates are field screen pixels, as the dialogue windows'.
-void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh) {
+// Coordinates are the message windows' screen (320 x 216 over the dialogue canvas, as ui::DialogueBox places a window), so a text element
+// and a rect at the same (x, y) line up; `fit` = the PS1-resolution pass's canvas, as the windows get it.
+void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, const render::CanvasFit* fit) {
   using script::ModUi;
   const ModUi& ui = vm_.mod_ui();
   if (!ui.shown || !white_set_) return;
-  const render::Letterbox lb = view_.letterbox(vw, vh);
-  const auto sx = [&](float x) { return lb.ox + x * lb.scale; };
-  const auto sy = [&](float y) { return lb.oy + y * lb.scale_y; };
+  const render::OverlayFit of = fit ? render::OverlayFit{fit->s, fit->s, fit->ox, fit->oy} : render::overlay_fit(vw, vh);
+  const float scale_x = of.sx * ui::kCanvasWidth / ModUi::kScreenW, scale_y = of.sy * ui::kCanvasHeight / ModUi::kScreenH;
+  const float left = (vw - ui::kCanvasWidth * of.sx) * 0.5f;
+  const auto sx = [&](float x) { return left + x * scale_x; };
+  const auto sy = [&](float y) { return of.oy + y * scale_y; };
   const auto colour = [&](u8 index, u8 alpha) {
     const std::array<u8, 3>& rgb = ui.palette[index % ModUi::kPalette];
     return render::pack_rgba(rgb[0], rgb[1], rgb[2], alpha);
   };
   const auto fill = [&](float x0, float y0, float x1, float y1, u32 rgba) {
-    sprites.draw(white_set_, sx(x0), sy(y0), (x1 - x0) * lb.scale, (y1 - y0) * lb.scale_y, 0, 0, 1, 1, rgba);
+    sprites.draw(white_set_, sx(x0), sy(y0), (x1 - x0) * scale_x, (y1 - y0) * scale_y, 0, 0, 1, 1, rgba);
   };
   // One field pixel wide.
   const auto line = [&](float x0, float y0, float x1, float y1, u32 rgba) {
@@ -534,9 +536,9 @@ void FieldWorld::sync_mod_ui_windows() {
       if (!window) {
         if (!mod_ui_full_logged_) log::warn("field: mod UI: more than {} text elements (the rest are not shown)", mod_ui_win_.size());
         mod_ui_full_logged_ = true;
-        return;
+        continue;
       }
-      window->revision = static_cast<u16>(element.revision - 1);
+      window->revision = 0;
     }
     if (window->element == id && window->revision == element.revision) continue;
     if (!window->box) {
@@ -593,7 +595,8 @@ void FieldWorld::draw_windows(render::SpriteBatch& sprites, float vw, float vh, 
   draw_status_icons(sprites, vw, vh, ps1);
   const render::CanvasFit ps1_fit{0.25f, 0.0f, 0.0f};
   const render::CanvasFit* fit = ps1 ? &ps1_fit : nullptr;
-  // The mod UI's text windows under the scripts' own message windows.
+  // The mod UI (its rects, then its text windows) under the scripts' own message windows.
+  draw_mod_ui(sprites, vw, vh, fit);
   for (auto& window : mod_ui_win_)
     if (window.box && window.element >= 0) window.box->draw(vw, vh, fit);
   dialogue_.draw(vw, vh, fit);

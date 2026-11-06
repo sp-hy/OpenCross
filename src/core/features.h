@@ -8,8 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "core/types.h"
-
 namespace oc::features {
 
 // One setting of a feature: an integer (an on / off setting is 0 / 1) with its default and its range.

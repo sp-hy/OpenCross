@@ -355,7 +355,7 @@ void FieldWorld::step_visuals() {
 
 void FieldWorld::step_watchdog() {
   const bool user_busy = menu_state_ != MenuState::None || handoff_.battle_state != BattleState::None || movie_state_ != MovieState::None ||
-                         modal_window_open() || trans_ != Trans::None;
+                         modal_window_open() || trans_ != Trans::None || (vm_.mod_ui().shown && vm_.mod_ui().holds_controls);
   const bool locked = (vm_.global_flags() & script::gflag::kInputLock) != 0;
   watchdog_.step(user_busy, locked, tick_count_, view_.room_name(), vm_, [this](const script::FieldVM::StuckInfo& stuck) { return describe_stuck(stuck); });
 }
@@ -660,8 +660,11 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   }
   sync_mod_ui_windows();
-  for (auto& window : mod_ui_win_)
-    if (window.box) window.box->update(static_cast<float>(ticks) / 60.0f);
+  for (auto& window : mod_ui_win_) {
+    if (!window.box) continue;
+    window.box->set_key_caps(key_caps_);
+    window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
+  }
 
   for (int i = 0; i < ticks && !room_lost_; ++i) {
     sim_tick();

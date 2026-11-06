@@ -59,6 +59,8 @@ struct FlowAction {
   bool quit = false;
   bool stop_music = false;
   int movie_row = -1;
+  // New Game: the room id the opening's jump names (the room register and PREVIOUS_MAP_ID are set for it).
+  int opening_room_id = kNewGameRoomId;
 };
 
 class FlowMachine {

@@ -2667,6 +2667,8 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       unit.countdown = before.countdown;
       unit.home_facing = before.home_facing;
       refresh_seal_flags(cmd.actor);
+      confirm_target_[slot] = -1;
+      if (confirm_actor_ == cmd.actor) confirm_actor_ = -1;
       colour_row_ = holds_chrono_cross(party_);
       ++swaps_;
       say(std::format("{} swaps out for {}", before.name, unit.name));

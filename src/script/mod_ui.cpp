@@ -23,7 +23,11 @@ std::array<std::array<u8, 3>, ModUi::kPalette> ModUi::default_palette() {
   return out;
 }
 
-void ModUi::clear() { *this = ModUi{}; }
+void ModUi::clear() {
+  const u32 kept = serial;
+  *this = ModUi{};
+  serial = kept;
+}
 
 bool ModUi::selectable(int id) const {
   if (id < 0 || id >= kElements) return false;
@@ -73,7 +77,7 @@ bool ModUi::set(int id, int field, int value) {
     case kFieldH: element.h = v; break;
     default: return false;
   }
-  ++element.revision;
+  element.revision = ++serial;
   return true;
 }
 
