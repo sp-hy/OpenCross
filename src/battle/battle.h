@@ -507,6 +507,8 @@ class Battle {
   // (with the HP they left with when they fought earlier in this battle). Empty when the PC cannot act or is in a Dopplegang form. Any character may leave: the party lock
   // (FE 5D) is a rule of the field party, which the battle does not change (game::keep_swapped_lineup).
   std::vector<int> swap_candidates(int pc) const;
+  // The battle state of a character that swapped out earlier in this battle and waits on the bench; null when it has not fought.
+  const Unit* benched_unit(int char_id) const;
   // The characters that fought and are on the bench now: their records in bench() hold the HP, statuses and consumables to write back.
   const std::vector<int>& swapped_out() const { return swapped_out_; }
   // Swap commands applied in this battle.

@@ -1,0 +1,46 @@
+# Party swap's reserve past 3 slots (Reserve=5): Continue, the Party screen, down into the reserve row, left (wraps to the last slot,
+# the row scrolls), the grid pick for it, out. Shots: prl_01 opened, prl_02 the cursor on the last slot, prl_03 after the pick.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # memory card 1 (the encounter route's file)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # the encounter route's file
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- request party
+- wait 60
+- screenshot prl_01_open.png
+- tap down
+- wait 8
+- tap left
+- wait 8
+- screenshot prl_02_last_row.png
+- tap confirm
+- wait 10
+- tap down
+- wait 10
+- tap confirm
+- wait 10
+- tap cancel
+- wait 10
+- screenshot prl_03_picked.png
+- tap cancel
+- wait 90
+- wait idle 900
+- quit

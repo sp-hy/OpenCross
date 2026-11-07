@@ -128,6 +128,13 @@ void FieldVM::exec_extension(u8 sub) {
     }
     case 0xCA: ui_.set(id_at(2), operand_u(4), operand_u(6)); break;
     case 0xCB: ui_.palette[colour(2)] = {byte(4), byte(6), byte(8)}; break;
+    // Party swap's reserve slots (feature 1, level 2).
+    case 0xCC: host_.set_reserve_member(operand_u(2), operand_u(4)); break;
+    case 0xCD: {
+      const int member = host_.reserve_member(operand_u(4));
+      write_var(word_at(2), member < 0 ? 0xFF : static_cast<u16>(member));
+      break;
+    }
     default:
       ++stats_.unimplemented;
       if (logged_.insert(key).second) log::warn("field script: extension op FE {:02X} ({}) has no handler", sub, info->name);

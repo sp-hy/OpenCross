@@ -10,17 +10,25 @@ namespace oc::features {
 namespace {
 
 // Party swap: a battle command that trades the acting PC with a reserve member; the formation is restored after the battle unless
-// KeepLineup.
-constexpr std::array<Setting, 2> kPartySwapSettings = {{
+// KeepLineup. Reserve = the reserve slots set on the Party screen (FE 5B) and by SET_RESERVE; 0 = everyone recruited outside the party.
+constexpr std::array<Setting, 3> kPartySwapSettings = {{
     {"Enabled", 0, 0, 1, "Party swap in battle"},
     {"KeepLineup", 0, 0, 1, "Keep the swapped party after the battle"},
+    {"Reserve", 3, 0, 41, "Reserve slots (0 = everyone outside the party)"},
+}};
+
+// Party screen behaviour that differs from the game: ReturnToSlot = a pick returns the cursor to the slot it filled.
+constexpr std::array<Setting, 2> kPartyScreenSettings = {{
+    {"Enabled", 0, 0, 1, "Party screen tweaks"},
+    {"ReturnToSlot", 1, 0, 1, "A pick returns the cursor to the slot it filled"},
 }};
 
 // The mod UI ops have no setting: a mod's own scripts use them (and check the level first).
-constexpr std::array<Feature, 3> kFeatures = {{
+constexpr std::array<Feature, 4> kFeatures = {{
     {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
-    {kPartySwap, 1, "PartySwap", "Party swap", kPartySwapSettings},
+    {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings},
     {kModUi, 1, "", "Mod UI (building blocks)", {}},
+    {kPartyScreen, 1, "PartyScreen", "Party screen tweaks", kPartyScreenSettings},
 }};
 
 std::string_view trim(std::string_view text) {

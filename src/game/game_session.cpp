@@ -316,7 +316,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   return sum;
 }
 
-bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in) {
+bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in, int reserve_size) {
   if (finished_battle.swaps() == 0) return false;
   const std::array<u8, 3> saved = gs.slot.party();
   std::array<u8, 3> ids{0xFF, 0xFF, 0xFF};
@@ -338,6 +338,19 @@ bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battl
   for (size_t i = 0; i < saved.size(); ++i)
     if (saved[i] != 0xFF && locked(saved[i]) && !holds(saved[i])) ids[i] = saved[i];
   if (ids == saved) return false;
+  if (reserve_size > 0) {
+    // Read before the party changes (GameState::reserve leaves party members out).
+    std::vector<int> reserve = gs.reserve(reserve_size);
+    std::vector<int> left;
+    for (u8 id : saved)
+      if (id != 0xFF && !holds(id)) left.push_back(id);
+    size_t next = 0;
+    for (int& slot : reserve)
+      if (next < left.size() && slot >= 0 && holds(static_cast<u8>(slot))) slot = left[next++];
+    for (int& slot : reserve)
+      if (next < left.size() && slot < 0) slot = left[next++];
+    gs.slot.set_reserve(reserve);
+  }
   gs.slot.set_party(ids);
   log::info("session: party swap keeps the lineup {} {} {}", ids[0], ids[1], ids[2]);
   return true;
