@@ -35,6 +35,7 @@
 #include "game/effects/sequence_player.h"
 #include "game/field_battle_handoff.h"
 #include "game/field_camera.h"
+#include "game/field_model_source.h"
 #include "game/field_input.h"
 #include "game/field_watchdog.h"
 #include "game/room_lighting.h"
@@ -629,6 +630,7 @@ class FieldWorld final : public script::FieldHost {
   void place_followers() override;
   void setup_npc(int ent, int model) override;
   int load_model(int ent, int model) override;
+  void set_model_source(int model, int kind, int id, int sub) override;
   bool monster_defeated(int ordinal) override;
   void set_monster_defeated(int ordinal) override;
   void update_entity(int ent) override;
@@ -770,7 +772,13 @@ class FieldWorld final : public script::FieldHost {
 
   // ---- room / model plumbing
   void clear_room();
+  // Room model `index` as 0F / D1 name it: the source FE D0 gave the number, else the room's own model.
   std::shared_ptr<ModelHandle> room_model(int index);
+  std::shared_ptr<ModelHandle> own_room_model(int index);
+  // FE D0's other rooms' models and battle models, by source_key (empty: no such model): kept across rooms like the characters'.
+  std::string source_key(const ModelSource& source) const;
+  std::shared_ptr<ModelHandle> sourced_model(const std::string& key);
+  void prefetch_sourced_model(const std::string& key);
   // set_art_mode on a loaded room: art from the other file set, simulation state untouched
   void swap_art();
   std::shared_ptr<ModelHandle> character_model(int char_id);
@@ -914,6 +922,8 @@ class FieldWorld final : public script::FieldHost {
   std::vector<bool> room_model_tried_;
   // The room's models built by its prefetch (RoomView::take_prepared_models), taken by room_model on first use.
   std::vector<std::optional<PreparedRoomModel>> room_prepared_;
+  // FE D0: room model index -> where its model comes from in this room
+  std::map<int, ModelSource> model_sources_;
   // by character id, kept across rooms
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
   struct PrefetchedCharacter {
@@ -924,6 +934,9 @@ class FieldWorld final : public script::FieldHost {
   };
   // by model byte: prefetch_character_model's workers, taken by character_model
   std::map<int, std::future<std::optional<PrefetchedCharacter>>> char_prefetch_;
+  // by source_key: FE D0's models from other rooms and battle models, and their workers (prefetch_sourced_model)
+  std::map<std::string, std::shared_ptr<ModelHandle>> sourced_models_;
+  std::map<std::string, std::future<std::optional<PrefetchedCharacter>>> sourced_prefetch_;
   std::array<int, 3> party_ent_{-1, -1, -1};
   // character id per party slot (cache of gs_->party())
   std::vector<int> party_chars_{0};
