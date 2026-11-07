@@ -1,9 +1,11 @@
 // The left stick as the d-pad (platform::stick_to_dpad): half-way tilt holds the direction and presses it once. The idle mouse pointer rule
 // (platform::pointer_hidden). The Controller: Custom assignment (platform::PadRemap, map_source, map_swap, glyph_action). The field's pad lock after a menu screen or the key-item list (game::FieldInput::apply_lock).
+// The scripts' key word (game::FieldInput::pad_word).
 #include <SDL3/SDL_gamepad.h>
 
 #include <array>
 #include <cstdio>
+#include <utility>
 
 #include "game/field_input.h"
 #include "platform/pad_remap.h"
@@ -184,6 +186,20 @@ void test_field_lock() {
   }
   CHECK(first_walk == 48);
 }
+// The scripts' key word carries the face and shoulder buttons in the PS1 bit positions: triangle 0x10, square 0x80, L1 0x04, R1 0x08.
+void test_field_key_word() {
+  constexpr std::pair<SDL_GamepadButton, u16> kButtons[] = {{SDL_GAMEPAD_BUTTON_NORTH, 0x10},
+                                                            {SDL_GAMEPAD_BUTTON_WEST, 0x80},
+                                                            {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 0x04},
+                                                            {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 0x08}};
+  for (const auto& [button, bit] : kButtons) {
+    game::FieldInput field;
+    platform::Input input = stick(0.0f, 0.0f);
+    input.pad_pressed[button] = input.pad_down[button] = true;
+    field.sample(input, 1);
+    CHECK(field.pad_word == bit);
+  }
+}
 }  // namespace
 
 int main() {
@@ -191,6 +207,7 @@ int main() {
   test_pad_remap();
   test_pointer_hidden();
   test_field_lock();
+  test_field_key_word();
   std::printf("input: %d failure(s)\n", failures);
   return failures ? 1 : 0;
 }
