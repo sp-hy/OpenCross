@@ -188,7 +188,7 @@ Start forms of 3F / 40 / 42 / 43 / 44 / 45 / 46 / B8 / B9 set the facing target 
 | 4D | 16 | `V S40 S20 S10 S08 S04 S02 M` | GET_DISTANCE_3D | 2 | var = 3-axis magnitude of (S08 - S40, S02 - S10, S04 - S20) (axis labels assumed). |
 | 4E | 5 | `V c c` | ENTITY_DISTANCE | 175 | var = distance between the two entities. |
 | 4F | 5 | `V c c` | GET_DISTANCE_3D_ENTITIES | 19 | var = 3-axis magnitude of the position deltas (x, y, z) between the two entities. |
-| 50 | 5 | `w J` | JUMP_IF_NOT_KEY | 1209 | If `(mask & held-buttons) == 0`, pc = J, else pc += 5. Held-button word = the field pad word (after the pad mask of FE 77). No yield. |
+| 50 | 5 | `w J` | JUMP_IF_NOT_KEY | 1209 | If `(mask & held-buttons) == 0`, pc = J, else pc += 5. Held-button word = the field pad word (after the pad mask of FE 77), PS1 pad bits: 0x04 L1, 0x08 R1, 0x10 triangle, 0x20 circle, 0x40 cross, 0x80 square, 0x100 select, 0x800 start, 0x1000 up, 0x2000 right, 0x4000 down, 0x8000 left (L2 / R2 are not mapped). No yield. |
 | 51 | 5 | `w J` | JUMP_IF_NOT_KEY_LATCH | 14 | As 50 against the button latch cleared by 54. |
 | 52 | 5 | `w J` | JUMP_IF_NOT_KEY_EQUAL | 0 | If the held-button word == w (compared as signed 16-bit), pc += 5, else pc = J. Never used; OpenCross: logged no-op, pc += 5. |
 | 53 | 5 | `w J` | JUMP_IF_NOT_KEY_LATCH_EQUAL | 0 | As 52 against the button latch of 51. Never used; OpenCross: logged no-op, pc += 5. |

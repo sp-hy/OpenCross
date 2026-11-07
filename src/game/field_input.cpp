@@ -13,9 +13,10 @@ namespace oc::game {
 
 namespace {
 
-// PS1-style key word (op 50 / 51 masks): bit 5 circle (confirm), 6 cross, 8 select, 11 start, 12 up, 13 right, 14 down, 15 left.
-constexpr u16 kKeyCircle = 0x20, kKeyCross = 0x40, kKeySelect = 0x100, kKeyStart = 0x800, kKeyUp = 0x1000, kKeyRight = 0x2000, kKeyDown = 0x4000,
-              kKeyLeft = 0x8000;
+// PS1-style key word (op 50 / 51 masks): bit 2 L1, 3 R1, 4 triangle, 5 circle (confirm), 6 cross, 7 square, 8 select, 11 start, 12 up,
+// 13 right, 14 down, 15 left.
+constexpr u16 kKeyL1 = 0x04, kKeyR1 = 0x08, kKeyTriangle = 0x10, kKeyCircle = 0x20, kKeyCross = 0x40, kKeySquare = 0x80, kKeySelect = 0x100,
+              kKeyStart = 0x800, kKeyUp = 0x1000, kKeyRight = 0x2000, kKeyDown = 0x4000, kKeyLeft = 0x8000;
 // A held direction repeats once it has been down for more than this many ticks, then every tick.
 constexpr int kRepeatDelay = 21;
 // After a room load the pad reads as released for 24 field frames (2 ticks each).
@@ -97,6 +98,12 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
   if (platform::action_down(in, Action::Cancel) || pad_b) pad_word |= kKeyCross;
   if (in.key_down[kStartKey] || (in.pad_connected && in.pad_down[SDL_GAMEPAD_BUTTON_START])) pad_word |= kKeyStart;
   if (in.key_down[kSelectKey] || (in.pad_connected && in.pad_down[SDL_GAMEPAD_BUTTON_BACK])) pad_word |= kKeySelect;
+  // The other face and shoulder buttons, as on the PS1 (the mod UI pick reads them; the menus keep their own actions).
+  const auto pad = [&](SDL_GamepadButton button) { return in.pad_connected && in.pad_down[button]; };
+  if (platform::action_down(in, Action::Menu) || pad(SDL_GAMEPAD_BUTTON_NORTH)) pad_word |= kKeyTriangle;
+  if (platform::action_down(in, Action::Item) || pad(SDL_GAMEPAD_BUTTON_WEST)) pad_word |= kKeySquare;
+  if (platform::action_down(in, Action::SelectLeft) || pad(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER)) pad_word |= kKeyL1;
+  if (platform::action_down(in, Action::SelectRight) || pad(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) pad_word |= kKeyR1;
   key_latch |= static_cast<u16>(pad_word & ~0u);
   const bool select = (in.key_pressed[kSelectKey] || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_BACK])) && (input_mask & kKeySelect);
   return {confirm, up, down, left, right, repeat, select};
