@@ -172,7 +172,9 @@ void test_formulas() {
   CHECK_EQ(weapon_stamina_cost(2, false), 30);
   CHECK_EQ(weapon_stamina_cost(2, true), 37);
   CHECK_EQ(recovery_step(10, 0, 2, false), 20);
-  CHECK_EQ(recovery_step(10, 0, 2, true), 15);
+  CHECK_EQ(recovery_step(10, 0, 2, true), 14);
+  CHECK_EQ(recovery_step(10, 0, 3, true), 21);
+  CHECK_EQ(recovery_step(12, 0, 3, true), 27);
   CHECK_EQ(cap_stamina(95), 70);
 
   // Victory
@@ -251,6 +253,17 @@ void test_hit_chance() {
   CHECK(roll_hit(hit, 0));
   Lo edge({600});
   CHECK(roll_hit(edge, 60));
+  // Only the chain pull stops at 99: the PS1's weak hit of Serge (hit base 101) on a target without evade rolls against 101 and never
+  // misses; with one chain point it is 99.
+  ChanceIn high;
+  high.base = 101;
+  CHECK_EQ(hit_chance(high), 101);
+  Lo top({1000});
+  CHECK(roll_hit(top, 101));
+  high.hits = 1;
+  CHECK_EQ(hit_chance(high), 99);
+  high.hits = 0, high.dark = true;
+  CHECK_EQ(hit_chance(high), 50);
 }
 
 void test_colour_and_ring() {
@@ -897,6 +910,52 @@ void test_ko_drops_pc_statuses() {
   CHECK((battle.unit(3).lo & st::kPoison) != 0);
 }
 
+void test_stamina_statuses_on_heavy_hit() {
+  // A fatigued PC's heavy hit on a cursed enemy, the other PCs at rate 10: the fatigued cost is 37, a PC with flu recovers 3 x (10 x 3/4)
+  // = 21 (the factor truncates per step), the cursed target loses 10 stamina, poison takes 3 HP from every poisoned unit and the timed
+  // statuses step by 3. With timers of 3 both statuses run out after the hit, which still pays and drains as before.
+  for (const int timer : {20, 3}) {
+    Fixture fixture;
+    Battle& battle = fixture.battle;
+    Unit& actor = battle.unit_mut(0);
+    actor.lo |= st::kFatigued | st::kPoison;
+    actor.timers[13] = timer;
+    Unit& flu = battle.unit_mut(1);
+    flu.lo |= st::kFlu;
+    flu.rate = 10;
+    flu.stamina = 0;
+    Unit& plain = battle.unit_mut(2);
+    plain.lo |= st::kPoison;
+    plain.rate = 10;
+    plain.stamina = 0;
+    Unit& enemy = battle.unit_mut(3);
+    enemy.lo |= st::kCursed;
+    enemy.timers[18] = timer;
+    enemy.stamina = 0;
+    const int actor_hp = actor.hp, plain_hp = plain.hp, enemy_hp = enemy.hp;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.target = 3;
+    attack.chain = {2};
+    CHECK(battle.apply(attack));
+    CHECK_EQ(battle.unit(0).stamina, 33);
+    CHECK_EQ(battle.unit(1).stamina, 21);
+    CHECK_EQ(battle.unit(2).stamina, 30);
+    CHECK_EQ(battle.unit(3).stamina, -10);
+    CHECK_EQ(battle.unit(0).hp, actor_hp - 3);
+    CHECK_EQ(battle.unit(2).hp, plain_hp - 3);
+    CHECK(battle.unit(3).hp < enemy_hp);
+    if (timer == 20) {
+      CHECK_EQ(battle.unit(0).timers.at(13), 17);
+      CHECK_EQ(battle.unit(3).timers.at(18), 17);
+    } else {
+      CHECK((battle.unit(0).lo & st::kFatigued) == 0 && !battle.unit(0).timers.contains(13));
+      CHECK((battle.unit(3).lo & st::kCursed) == 0 && !battle.unit(3).timers.contains(18));
+    }
+  }
+}
+
 void test_poison_ko() {
   // Poison taking a PC to 0 keeps the inflicted lo bits 1..15 (poison and bits 16..31 go) and the hi word, and empties the stamina.
   Fixture fixture;
@@ -1169,6 +1228,42 @@ void test_hit_box_figure() {
   CHECK_EQ(hit_chance(heavy), 45);
   heavy.target_dizzy = false, heavy.target_asleep = true;
   CHECK_EQ(hit_chance(heavy), 100);
+}
+
+// Darkness halves a weapon hit's chance when the active PC has it, whoever attacks: the PS1 (scene 6, Serge alone against two Komodo
+// Pups, total EVD 40 poked on every unit) rolls a pup's weak hit on Serge at 59, at 39 = (99 - 40 / 2) / 2 once Serge is dark and dizzy,
+// and at 99 against an EVD 0 Serge while both pups are dark.
+void test_darkness_active_pc() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  Unit& pc = battle.unit_mut(0);
+  Unit& enemy = battle.unit_mut(3);
+  const int plain = battle.hit_chance_for(3, 0, 0), other = battle.hit_chance_for(3, 1, 0), own = battle.hit_chance_for(0, 3, 0);
+  CHECK(plain > 1 && other > 1 && own > 1);
+  CHECK_EQ(battle.active_pc(), 0);
+  enemy.lo |= st::kDark;
+  CHECK_EQ(battle.hit_chance_for(3, 0, 0), plain);
+  enemy.lo &= ~st::kDark;
+  pc.lo |= st::kDark;
+  CHECK_EQ(battle.hit_chance_for(3, 0, 0), plain / 2);
+  CHECK_EQ(battle.hit_chance_for(3, 1, 0), other / 2);
+  CHECK_EQ(battle.hit_chance_for(0, 3, 0), own / 2);
+  // Another PC's menu makes it the active PC: unit 0's darkness then counts for no hit, its own included.
+  battle.open_menu(1);
+  CHECK_EQ(battle.active_pc(), 1);
+  CHECK_EQ(battle.hit_chance_for(3, 0, 0), plain);
+  CHECK_EQ(battle.hit_chance_for(0, 3, 0), own);
+  // A PC's command makes it the active PC too; op 2C leaves none.
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.target = 3;
+  attack.chain = {0};
+  fixture.rng.push(0);
+  CHECK(battle.apply(attack));
+  CHECK_EQ(battle.active_pc(), 0);
+  battle.set_active_pc(-1);
+  CHECK_EQ(battle.hit_chance_for(3, 0, 0), plain);
 }
 
 void test_status_message() {
@@ -3927,6 +4022,25 @@ void test_dopple_exit_unit() {
   CHECK_EQ(run(true), 300);
 }
 
+// A PC starts from the whole status byte of its record (PS1, room 53: record bits 0x39, 0x02, 0x04 and 0x40 each showed in the
+// unit's lo word at the first command menu); the record keeps only lo & 0x39 after the fight.
+void test_record_status_carry() {
+  Fixture fixture;
+  Battle battle{fixture.tables, fixture.rng, fixture.brain};
+  PartyMember serge = make_member(0, "Serge");
+  serge.lo_persist = 0x7F;
+  CHECK(battle.start({serge}, 0));
+  CHECK_EQ(battle.unit(0).lo & 0xFF, 0x7Fu);
+  battle.unit_mut(3).hp = 1;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {2};
+  CHECK(battle.apply(attack));
+  CHECK(battle.outcome() == Outcome::Victory);
+  CHECK_EQ(battle.party()[0].lo_persist, 0x39u);
+}
+
 // The way back brings the saved unit back, its stamina too, with the HP of now, countdown 8 and the max HP of the last unit that changed
 // form from a character body, which the record keeps. Captured on the PS1 (room 53, Sprigg at 300 HP + Pip at 85 + Serge; form 0x43, her
 // HP held at 123, the saved unit's stamina set to 30 and hers to 50, then the way back): 123 / 300 and stamina 30; with Pip's form change
@@ -5622,6 +5736,7 @@ int main() {
   test_enemy_element_value_shift();
   test_element_mode40_half_hp();
   test_ko_drops_pc_statuses();
+  test_stamina_statuses_on_heavy_hit();
   test_poison_ko();
   test_revive_resets_stamina_and_countdown();
   test_revive_to_zero_hp();
@@ -5631,6 +5746,7 @@ int main() {
   test_purify_cures();
   test_turn_colour_status();
   test_hit_box_figure();
+  test_darkness_active_pc();
   test_status_message();
   test_status_mode_codes();
   test_frozen_turns();
@@ -5670,6 +5786,7 @@ int main() {
   test_battle_boost();
   test_dopple_pool_and_form();
   test_dopple_exit_unit();
+  test_record_status_carry();
   test_dopple_way_back_after_pip_form();
   test_gear_hp_pct_and_forms();
   test_dopple_form_star_growth();

@@ -1,11 +1,14 @@
-# Build OpenCross from PowerShell:  .build.ps1 [debug|release] [-Configure] [-Test] [-Target a,b]  (builds are serialised by a mutex)
-# Loads the MSVC x64 environment, points CMake at vcpkg, configures (once, or with -Configure) and builds.
+# Build OpenCross from PowerShell:  .build.ps1 [debug|release] [-Configure] [-Test] [-Target a,b] [-WholeProgram]  (builds are serialised by a mutex)
+# Loads the MSVC x64 environment, points CMake at vcpkg, configures (once, with -Configure, or when -WholeProgram changes) and builds.
+# -WholeProgram turns on whole-program optimisation for Release (OC_WHOLE_PROGRAM; the published build). Without it the build is configured
+# with it off, so a local build never keeps the slow links by accident.
 # -Launcher builds only the 32-bit launcher proxy instead (build\launcher-x86\bin\XINPUT9_1_0.dll).
 param(
     [ValidateSet('debug', 'release')] [string] $Config = 'debug',
     [switch] $Configure,
     [switch] $Test,
     [switch] $Launcher,
+    [switch] $WholeProgram,
     [string[]] $Target = @(),
     [string] $VcpkgRoot = 'C:\Users\User\Documents\Workspace\vcpkg'
 )
@@ -37,8 +40,11 @@ $mutex = New-Object System.Threading.Mutex($false, 'Global\OpenCrossBuild')
 [void] $mutex.WaitOne()
 Push-Location $root
 try {
-    if ($Configure -or -not (Test-Path (Join-Path $root 'build\win-x64\CMakeCache.txt'))) {
-        cmake --preset win-x64
+    $cache = Join-Path $root 'build\win-x64\CMakeCache.txt'
+    $wholeProgramFlag = if ($WholeProgram) { 'ON' } else { 'OFF' }
+    $cachedWholeProgram = if ((Test-Path $cache) -and (Select-String -Path $cache -Pattern '^OC_WHOLE_PROGRAM:BOOL=ON' -Quiet)) { 'ON' } else { 'OFF' }
+    if ($Configure -or -not (Test-Path $cache) -or $cachedWholeProgram -ne $wholeProgramFlag) {
+        cmake --preset win-x64 "-DOC_WHOLE_PROGRAM=$wholeProgramFlag"
         if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }
     }
     $targetArgs = @(); if ($Target.Count -gt 0) { $targetArgs = @('--target') + $Target }

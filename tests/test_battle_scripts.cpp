@@ -1,5 +1,6 @@
 // Battle rules run against the shipped battle scripts and tables, one scenario per check. Needs the game install (OPENCROSS_GAMEDIR or a
 // parent of the exe); without it the test reports SKIP and passes.
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -147,6 +148,58 @@ void check_dopple_growth_after_way_back(const data::GameTables& tables, const vf
   check(battle.party()[0].stat[0] == 135 && battle.rewards().gains[0][0] == 50, "dopple growth: max HP 85 + 50");
 }
 
+// Battle 6 (two Komodo Pups), Serge / Kid / Sprigg, Kid kept confused while the others defend and the pups wait (HP held up): Kid's script (slot 2)
+// tosses between a weapon hit and an element drawn from its grid rows 0..gauge (op 55). A character's grid word keeps the lock bit in
+// every cell, so the draw must read the lock from the star unlocks: Kid casts both of the elements in its open rows, each once (a cast
+// uses the cell), as the PS1's confused PCs cast their grid elements.
+void check_confused_pc_casts_grid_elements(const data::GameTables& tables, const vfs::Vfs& files) {
+  GameRng rng(12, tables.rng_table);
+  pac::ScriptedBrain brain(loader(files));
+  Battle battle(tables, rng, brain);
+  std::vector<PartyMember> party;
+  for (const int id : {0, 1, 26}) party.push_back(make_party_member(tables, id));
+  if (!battle.start(party, 6)) {
+    check(false, "confused: start");
+    return;
+  }
+  constexpr int kid = 1;
+  std::vector<int> cast;
+  int weapon = 0;
+  for (int loop = 0; loop < 2000 && battle.outcome() == Outcome::Ongoing && weapon + static_cast<int>(cast.size()) < 40; ++loop) {
+    for (int i = 0; i < kUnits; ++i) {
+      Unit& unit = battle.unit_mut(i);
+      if (!unit.present) continue;
+      if (i >= kPcSlots) unit.max_hp = 9999, unit.countdown = 900;
+      unit.hp = unit.max_hp;
+    }
+    battle.unit_mut(kid).lo |= st::kConfused;
+    battle.unit_mut(kid).gauge = battle.unit(kid).gauge_max;
+    battle.drain_events();
+    const int pc = first_pc_ready(battle);
+    if (pc < 0) {
+      battle.settle();
+      continue;
+    }
+    Command defend;
+    defend.kind = Command::Kind::Defend;
+    defend.actor = pc;
+    battle.apply(defend);
+    int last_action = -1;
+    for (const ActionEvent& event : battle.drain_events()) {
+      if (event.actor != kid || event.action == last_action) continue;
+      last_action = event.action;
+      if (event.kind == ActionEvent::Kind::Weapon) ++weapon;
+      if (event.kind == ActionEvent::Kind::Element) cast.push_back(event.element);
+    }
+  }
+  std::sort(cast.begin(), cast.end());
+  std::printf("confused Kid: %d weapon turns, elements cast:", weapon);
+  for (const int id : cast) std::printf(" %d", id);
+  std::printf("\n");
+  check(cast == std::vector<int>{7, 10}, "confused: Kid casts the two elements of its open grid rows, once each");
+  check(weapon > 20, "confused: the other turns are weapon hits");
+}
+
 }  // namespace
 
 int main() {
@@ -166,6 +219,7 @@ int main() {
   check_reaction_cutscene_keeps_the_claimed_turn(tables, files);
   check_dopple_way_back_after_pip_form(tables, files);
   check_dopple_growth_after_way_back(tables, files);
+  check_confused_pc_casts_grid_elements(tables, files);
   if (failures == 0) std::printf("battle_scripts: all passed\n");
   return failures == 0 ? 0 : 1;
 }

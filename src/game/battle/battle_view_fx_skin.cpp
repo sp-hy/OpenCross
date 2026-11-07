@@ -154,7 +154,7 @@ void BattleView::fx_model_requests(bool at_init) {
     if (fx_model.rebuilt) {
       fx_model.rebuilt = false;
       fx_hide({fx_model.unit}, 1, false);
-      if (battle_->unit(fx_model.unit).alive()) start_spawn(fx_model.unit);
+      if (battle_->unit(fx_model.unit).in_turn_order()) start_spawn(fx_model.unit);
     }
     // Hang the pack's anim pack: the external clip set SetAnim 0x80 + k reads.
     if (!fx_model.clip_pack.empty()) {

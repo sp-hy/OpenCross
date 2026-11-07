@@ -649,7 +649,8 @@ void BattleView::sync_shown() {
     Visual& visual = vis_[static_cast<size_t>(i)];
     if (!unit.present) continue;
     visual.hp_shown = unit.hp;
-    const bool ko = !unit.alive();
+    // Only the KO bit is a death on screen: a frozen unit stands, visible, in its held pose.
+    const bool ko = !unit.in_turn_order();
     if (ko != visual.ko_shown) {
       visual.ko_shown = ko;
       if (!ko) visual.ko_hit = visual.ko_reacted = false, visual.zero_hp_actions = 0;

@@ -268,15 +268,16 @@ void ImGuiLayer::new_frame() {
   ImGui::NewFrame();
 }
 
-void ImGuiLayer::add_tab(std::string name, std::function<void()> draw, int order) {
+void ImGuiLayer::add_tab(std::string name, std::function<void()> draw, int order, std::function<bool()> highlight) {
   for (SettingsTab& tab : tabs_) {
     if (tab.name == name) {
       tab.draw = std::move(draw);
       tab.order = order;
+      tab.highlight = std::move(highlight);
       return;
     }
   }
-  tabs_.push_back({std::move(name), std::move(draw), order});
+  tabs_.push_back({std::move(name), std::move(draw), order, std::move(highlight)});
 }
 
 void ImGuiLayer::open(std::string_view tab) {
@@ -829,7 +830,19 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
     if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_NoTooltip)) {
       for (const Entry& entry : list) {
         const ImGuiTabItemFlags flags = select_tab_ == entry.name ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
-        if (!ImGui::BeginTabItem(entry.name, nullptr, flags)) continue;
+        const bool highlight = entry.builtin == 0 && tabs_[entry.index].highlight && tabs_[entry.index].highlight();
+        // A highlighted label is drawn in the tabs' "good news" green with a small red dot at the text's top-right corner.
+        if (highlight) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.85f, 0.55f, 1.0f));
+        const bool open = ImGui::BeginTabItem(entry.name, nullptr, flags);
+        if (highlight) {
+          ImGui::PopStyleColor();
+          const ImVec2 pad = ImGui::GetStyle().FramePadding;
+          const float radius = ImGui::GetFontSize() * 0.16f;
+          const ImVec2 text_min(ImGui::GetItemRectMin().x + pad.x, ImGui::GetItemRectMin().y + pad.y);
+          const ImVec2 centre(text_min.x + ImGui::CalcTextSize(entry.name).x + radius * 1.2f, text_min.y + radius * 0.6f);
+          ImGui::GetWindowDrawList()->AddCircleFilled(centre, radius, IM_COL32(230, 70, 60, 255));
+        }
+        if (!open) continue;
         current_tab_ = entry.name;
         if (ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar)) {
           ImGui::PushID(entry.name);
@@ -868,7 +881,7 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
   return change;
 }
 
-void ImGuiLayer::toast(std::string text) {
+void ImGuiLayer::toast(std::string text, double seconds) {
   if (!initialised_) return;
   const std::string key = text.substr(0, text.find(':'));
   const double now = ImGui::GetTime();
@@ -876,17 +889,18 @@ void ImGuiLayer::toast(std::string text) {
     if (item.text.substr(0, item.text.find(':')) == key) {
       item.text = std::move(text);
       item.born = now;
+      item.life = seconds;
       return;
     }
   }
-  toasts_.push_back({std::move(text), now});
+  toasts_.push_back({std::move(text), now, seconds});
   if (toasts_.size() > 4) toasts_.erase(toasts_.begin());
 }
 
 void ImGuiLayer::draw_toasts() {
-  constexpr double kLife = 1.8, kIn = 0.15, kOut = 0.45;
+  constexpr double kIn = 0.15, kOut = 0.45;
   const double now = ImGui::GetTime();
-  std::erase_if(toasts_, [&](const Toast& item) { return now - item.born >= kLife; });
+  std::erase_if(toasts_, [&](const Toast& item) { return now - item.born >= item.life; });
   if (toasts_.empty()) return;
   ImDrawList* dl = ImGui::GetForegroundDrawList();
   const ImVec2 disp = ImGui::GetIO().DisplaySize;
@@ -894,7 +908,7 @@ void ImGuiLayer::draw_toasts() {
   float y = pad;
   for (const Toast& item : toasts_) {
     const double age = now - item.born;
-    const float a = static_cast<float>(std::clamp(std::min(age / kIn, (kLife - age) / kOut), 0.0, 1.0));
+    const float a = static_cast<float>(std::clamp(std::min(age / kIn, (item.life - age) / kOut), 0.0, 1.0));
     const ImVec2 ts = ImGui::CalcTextSize(item.text.c_str());
     const ImVec2 p1(disp.x - pad, y + ts.y + pad), p0(p1.x - ts.x - pad * 1.6f, y);
     dl->AddRectFilled(p0, p1, IM_COL32(16, 18, 28, static_cast<int>(210 * a)), pad * 0.5f);

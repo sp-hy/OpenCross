@@ -33,7 +33,7 @@ The player is the controlled entity (the party leader unless FE 4C or B2 chose a
 
 - Run = (dash held) XOR (option "[button] Pressed" = Walk). Dash is the Cancel action or the pad's east button.
 - Gamepad, left stick analog (2.3), option "Left Stick Sensitivity: Analog" on and `hypot(x, y) * 127 > 124`: run = NOT (dash held AND "[button] Pressed" = Walk). A smaller tilt keeps the rule above.
-- A sprained party member (status bit 0x10 on any member) forces walk.
+- A sprained party member (status bit 0x10 on any member) forces walk: the dash button, the walk / run option and the analog run are all ignored (only `GF.15`, FE 4E, still forces the run).
 
 ### 2.3 Heading
 
@@ -226,9 +226,11 @@ SETUP_NPC and D1 on a model without an animation-sequence table set the stand sl
 
 Every tick, even with the controls locked: `flu_phase += 0x20 + (rand & 0x1F)`. While the global input lock is set nothing else counts. The counters survive room loads; only the jolt is cleared.
 
-### 8.2 Poison
+### 8.2 Poison and burn
 
-`poison_ticks` rises each tick; past 0xF0 (every 241 ticks) it resets and every poisoned member loses 4 HP, never below 1. Burn alone does not drain.
+`poison_ticks` rises each tick; past 0xF0 (every 241 ticks, about 4 s) it resets and every poisoned member loses 4 HP, never below 1. Burn alone does not drain, and a burnt member's poison drain stays 4. The drain plays no sound and shows nothing; only the HP changes (the field status icons, 8.7, stay as they are).
+
+Burn has no effect of its own on the field: it doubles the HP a member loses to the damage floor (8.4: 4 instead of 2) and to the script op FE 3A (`fieldscript.md`). Poison, walking and running are unchanged.
 
 ### 8.3 Flu
 

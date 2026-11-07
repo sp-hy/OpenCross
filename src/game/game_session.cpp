@@ -141,7 +141,7 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
           member.stack[cell] = true;
         }
       }
-    member.lo_persist = save_char.status & battle::st::kPersist;
+    member.lo_persist = save_char.status;
     read_growth(save_char, member);
     const bool fresh = save_char.hp_extra == 0 && save_char.unk_be == 0 && std::all_of(save_char.bonus.begin(), save_char.bonus.end(), [](u8 bonus) { return bonus == 0; });
     if (fresh) {

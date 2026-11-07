@@ -9,6 +9,13 @@
 
 namespace oc::render {
 
+bool update_pending(const platform::Updater& updater) {
+  using platform::Updater;
+  const Updater::Status st = updater.status();
+  const bool waiting = st.state == Updater::State::Available || st.state == Updater::State::Downloading || st.state == Updater::State::Installed;
+  return waiting && !st.launcher_only;
+}
+
 void draw_update_tab(platform::Updater& updater, bool* restart) {
   using platform::Updater;
   ImGuiLayer::section("Nexus Mods");

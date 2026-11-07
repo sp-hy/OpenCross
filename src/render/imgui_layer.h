@@ -45,11 +45,13 @@ struct OptionsChange {
 };
 
 // A tab of the settings window registered by the code that owns its content. `draw` runs inside the tab's scrolling child each frame the tab is shown;
-// it may call ImGuiLayer::mark_changed() to have the config saved.
+// it may call ImGuiLayer::mark_changed() to have the config saved. `highlight`, when set and true, draws the tab's label in green
+// with a small red dot at its top-right (the Update tab while a new release waits).
 struct SettingsTab {
   std::string name;
   std::function<void()> draw;
   int order = 50;
+  std::function<bool()> highlight;
 };
 
 class ImGuiLayer {
@@ -71,7 +73,7 @@ class ImGuiLayer {
 
   // Registers (or replaces, by name) a settings tab. One line for a new tab:
   //   ui.add_tab("Mods", [&] { draw_mods_tab(config); }, 30);
-  void add_tab(std::string name, std::function<void()> draw, int order = 50);
+  void add_tab(std::string name, std::function<void()> draw, int order = 50, std::function<bool()> highlight = {});
   // Inside a registered tab's draw: the config changed and must be saved (reported as OptionsChange::other).
   void mark_changed() { tab_changed_ = true; }
 
@@ -89,9 +91,9 @@ class ImGuiLayer {
   // Called by the Graphics tab's "Restart now" button (after a graphics backend change).
   std::function<void()> on_restart;
 
-  // A small fading notification in the top-right corner ("Art: HD"), drawn over everything in render(). A toast with the same text up to
-  // the first ':' replaces the earlier one. No-op while [Video] Toasts is off (the caller checks the config).
-  void toast(std::string text);
+  // A small fading notification in the top-right corner ("Art: HD"), drawn over everything in render() for `seconds`. A toast with the
+  // same text up to the first ':' replaces the earlier one.
+  void toast(std::string text, double seconds = 1.8);
 
   // Shared widgets for tab bodies (consistent look across tabs).
   // section: a header line with a rule. begin_panes: side-by-side panes (TableNextColumn per pane; one column when narrow), EndTable()
@@ -116,6 +118,7 @@ class ImGuiLayer {
   struct Toast {
     std::string text;
     double born = 0.0;
+    double life = 1.8;
   };
   std::vector<Toast> toasts_;
   void draw_toasts();

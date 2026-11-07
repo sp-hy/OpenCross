@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.28)
-project(OpenCross VERSION 0.4.9 LANGUAGES C CXX)
+project(OpenCross VERSION 0.5.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,6 +13,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Objects are cached by content when ccache is on PATH. A shared compile PDB (/Zi) makes every compile uncacheable, so debug info
 # stays in the objects (/Z7); the linker still writes the exe's PDB.
 option(OC_CCACHE "Compile through ccache when it is installed" ON)
+option(OC_WHOLE_PROGRAM "Release: whole-program optimisation (/GL + /LTCG); slow links, used for published builds" OFF)
 find_program(OC_CCACHE_PROGRAM ccache)
 if(OC_CCACHE AND OC_CCACHE_PROGRAM)
   set(CMAKE_C_COMPILER_LAUNCHER ${OC_CCACHE_PROGRAM})
@@ -22,10 +23,15 @@ endif()
 
 if(MSVC)
   add_compile_options(/W4 /permissive- /utf-8 /Zc:preprocessor /MP)
-  # Release: function / data sections + whole-program optimisation, unreferenced code folded away (smaller exe).
-  add_compile_options($<$<CONFIG:Release>:/Gy> $<$<CONFIG:Release>:/Gw> $<$<CONFIG:Release>:/GL>)
-  add_link_options($<$<CONFIG:Release>:/LTCG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
-  set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /LTCG")
+  # Release: function / data sections, unreferenced code folded away (smaller exe). OC_WHOLE_PROGRAM adds whole-program optimisation
+  # (cross-file inlining; every Release link then redoes code generation, so links are slow): on for the published build, off locally.
+  add_compile_options($<$<CONFIG:Release>:/Gy> $<$<CONFIG:Release>:/Gw>)
+  add_link_options($<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF>)
+  if(OC_WHOLE_PROGRAM)
+    add_compile_options($<$<CONFIG:Release>:/GL>)
+    add_link_options($<$<CONFIG:Release>:/LTCG>)
+    set(CMAKE_STATIC_LINKER_FLAGS_RELEASE "${CMAKE_STATIC_LINKER_FLAGS_RELEASE} /LTCG")
+  endif()
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
   # No incremental linking: the .ilk databases took ~3.5 GB across the Debug / RelWithDebInfo exes and tests on a nearly full disk.
   add_link_options(/INCREMENTAL:NO)

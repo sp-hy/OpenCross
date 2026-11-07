@@ -179,7 +179,7 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   // already wrote (hp 0 since the cast): that is where the "dead" voices of a multi-kill spell come from (Volcano: two "dead" voices after the
   // chant; with the presented state they never played).
   const bool pack_table = visual.script_kind == kReact && !visual.has_react;
-  ctx.dead = reacting ? (visual.react_ev.ko || visual.ko_shown) : (pack_table ? (!unit_rec.alive() || visual.ko_shown) : visual.ko_shown);
+  ctx.dead = reacting ? (visual.react_ev.ko || visual.ko_shown) : (pack_table ? (!unit_rec.in_turn_order() || visual.ko_shown) : visual.ko_shown);
   // A unit that owes a scripted death (op 5C, death cast parked by Battle::kill) has no death bit set: its idle / reaction scripts keep it
   // standing until the death cast has run.
   if (visual.death_owed) ctx.dead = false;
