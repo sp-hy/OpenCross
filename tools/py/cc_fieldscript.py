@@ -377,6 +377,8 @@ FEC8 | V | UI_PICK | C | Mod UI pick: blocks for a press made while it waits; D-
 FEC9 | U V V | UI_GETPOS | C | Mod UI element id's centre (a text window: its text origin) into two vars.
 FECA | U U U | UI_SET | C | Mod UI element id: field (0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg, 6 flags, 7 w, 8 h) = value (a text window is shown again).
 FECB | U U U U | UI_PALETTE | C | Mod UI palette entry i (0..31) = (r, g, b).
+FECC | U U | SET_RESERVE | C | Party swap (feature 1, level 2): reserve slot U (0..40) = character U (>= 0x2C empties it); the character leaves any other reserve slot.
+FECD | V U | GET_RESERVE | C | Party swap: var[V] = the character in reserve slot U, 0xFF when empty (or the character is not available / in the party).
 """
 
 # ---------------------------------------------------------------------------

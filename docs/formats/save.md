@@ -66,6 +66,8 @@ All Chrono Cross saves are single-block files (`size` 0x2000, `next` 0xFFFF). Fi
 
 The 0xD7 tail bytes before the version are uninitialised pack-buffer leftovers in manual saves (identical across slots of one session, not read by the loader). RDE's auto-save zeroes the block first, so zeros are right.
 
+**OpenCross tail record.** Because no loader reads them, OpenCross keeps its own per-save values there (`SaveSlot::tail_entry` / `set_tail_entry`): `"OCX"`, a version byte 1, then entries `{u8 tag, u8 size, size bytes}` up to a tag 0, zeros after it. A tail without the magic (every RDE or PS1 save) has no entries; writing an entry rewrites the record (the other entries kept) and stamps the magic. RDE and the PS1 game load such a block as before. Tags: 1 = party swap's reserve slots (character ids in slot order, 0xFF = empty; `rules/menus.md`, party editor).
+
 ## 4. Raw state (0x0000-0x05AB)
 
 The first table is the **summary/preview** that the load menu shows without decoding the rest (it lives inside the title area's zero padding).

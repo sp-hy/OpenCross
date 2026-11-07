@@ -1,0 +1,52 @@
+# Party swap's reserve on the Party screen (Reserve=3): Continue, the Party screen (never set: the first three available characters),
+# down to reserve slot 0, its pick: the grid's second row, then out; the reopened screen shows the kept reserve.
+# Shots: pr_01 opened, pr_02 cursor on the reserve slot, pr_03 the grid for it, pr_04 filled, pr_05 reopened.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # memory card 1 (the encounter route's file)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # the encounter route's file
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- request party
+- wait 60
+- screenshot pr_01_open.png
+- tap down
+- wait 8
+- screenshot pr_02_reserve_slot.png
+- tap confirm
+- wait 10
+- tap down
+- wait 10
+- screenshot pr_03_grid.png
+- tap confirm
+- wait 10
+- tap cancel
+- wait 10
+- screenshot pr_04_filled.png
+- tap cancel
+- wait 90
+- wait idle 900
+- request party
+- wait 60
+- screenshot pr_05_reopened.png
+- tap cancel
+- wait 90
+- wait idle 900
+- quit
