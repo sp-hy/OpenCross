@@ -866,6 +866,8 @@ class BattleView {
   void build_party_panels();
   // The status plate column of one unit (status_plates.h): the right column for the active PC, the left one for the target cursor unit.
   void build_status_plates(int unit_index, bool right);
+  // The same column for a status word (party swap's list: a benched character's).
+  void build_status_plate_column(u32 lo, bool right);
   void build_field_ring();
   // The element-trap block under the field ring, for the presented action (like the ring).
   battle::TrapHud presented_trap() const;
@@ -1019,6 +1021,8 @@ class BattleView {
   // The party swap list: the character ids that can come in (battle::Battle::swap_candidates) and the cursor row.
   std::vector<int> swap_list_;
   int swap_cur_ = 0;
+  // The swap list's first shown row: it moves only when the cursor would leave the window.
+  int swap_top_ = 0;
   int dop_max_ = 0;
   int dop_named_ = 0;
   int dop_typing_ = 0, dop_left_ = 0;

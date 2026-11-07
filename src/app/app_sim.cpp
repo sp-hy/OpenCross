@@ -194,6 +194,9 @@ void App::handle_script_menu(const game::FieldWorld::MenuRequest& rq) {
         world.capture_state();
         world.fade_screen_sounds(true);
         party_screen.set_hd(platform::art_is_hd(config.art_mode));
+        // Party swap's reserve slots (a mod's mod.ini; 0 = the vanilla screen).
+        party_screen.set_reserve_size(features.enabled(features::kPartySwap) ? features.value(features::kPartySwap, "Reserve") : 0);
+        party_screen.set_return_to_slot(features.enabled(features::kPartyScreen) && features.value(features::kPartyScreen, "ReturnToSlot") != 0);
         // Argument 1 opens the Relief Charm variant.
         if (rq.arg == 1) party_screen.open_relief(world.game_state());
         else party_screen.open(world.game_state());
@@ -623,6 +626,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
         world.game_state().slot.head[ui::kReliefHead] = party_screen.relief_result();
       } else {
         world.game_state().slot.set_party(party_screen.result());
+        if (const std::vector<int> reserve = party_screen.reserve_result(); !reserve.empty()) world.game_state().slot.set_reserve(reserve);
         // The party changed: rebind the party entities and models.
         world.state_edited();
       }

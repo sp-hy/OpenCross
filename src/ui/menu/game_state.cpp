@@ -101,6 +101,21 @@ bool GameState::available(int character) const {
   return slot.recruited(character) && !excluded;
 }
 
+std::vector<int> GameState::reserve(int size) const {
+  std::vector<int> out = slot.reserve();
+  const std::vector<int> members = party();
+  if (out.empty())
+    for (int character = 0; character < save::kNumChars && static_cast<int>(out.size()) < size; ++character)
+      if (available(character) && std::find(members.begin(), members.end(), character) == members.end()) out.push_back(character);
+  out.resize(static_cast<size_t>(std::max(0, size)), -1);
+  for (size_t i = 0; i < out.size(); ++i) {
+    const int character = out[i];
+    const bool repeated = std::find(out.begin(), out.begin() + static_cast<std::ptrdiff_t>(i), character) != out.begin() + static_cast<std::ptrdiff_t>(i);
+    if (!available(character) || std::find(members.begin(), members.end(), character) != members.end() || repeated) out[i] = -1;
+  }
+  return out;
+}
+
 void GameState::set_option(u16 mask, bool on) {
   u16 bits = options();
   bits = on ? static_cast<u16>(bits | mask) : static_cast<u16>(bits & ~mask);

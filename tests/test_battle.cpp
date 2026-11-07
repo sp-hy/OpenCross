@@ -5233,6 +5233,14 @@ void test_party_swap() {
     locked.slot.unk_e1b8 = {1u, 0u, 0u, 0u};
     CHECK(!game::keep_swapped_lineup(locked, battle, -1));
     CHECK(locked.slot.party() == (std::array<u8, 3>{0, 1, 2}));
+    // With reserve slots, Serge takes the slot Guile (9) came from.
+    ui::GameState reserved = state;
+    for (const int char_id : {0, 1, 2, 5, 9}) reserved.slot.set_recruited(char_id, true);
+    // Never set: the first available characters outside the party.
+    CHECK(reserved.reserve(3) == (std::vector<int>{5, 9, -1}));
+    reserved.slot.set_reserve({5, 9, -1});
+    CHECK(game::keep_swapped_lineup(reserved, battle, -1, 3));
+    CHECK(reserved.slot.party() == (std::array<u8, 3>{9, 1, 2}) && reserved.slot.reserve() == (std::vector<int>{5, 0, -1}));
   }
   // The Relief Charm: character 2 stood in for Serge (saved party 0 1 x) and stayed on the field, so the kept lineup holds Serge.
   {

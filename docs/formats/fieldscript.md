@@ -555,14 +555,17 @@ FE sub size payload[size]          instruction length = 3 + size
 | FE C9 | 9 | `U@0 V@2 V@4` | UI_GETPOS | Element id's centre (a line's midpoint, a text window's text origin) into two vars. |
 | FE CA | 9 | `U@0 U@2 U@4` | UI_SET | Element id's field = value: 0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg, 6 flags, 7 w, 8 h (a line's end point is (w, h)). A text window is shown again (refreshing `{num(n)}` values). |
 | FE CB | 11 | `U@0 U@2 U@4 U@6` | UI_PALETTE | Palette entry i (0..31) = (r, g, b). |
+| FE CC | 7 | `U@0 U@2` | SET_RESERVE | Party swap (feature 1, level 2): reserve slot U (0..40) = character U (0x2C or above empties it); the character leaves any other reserve slot. The reserve is saved (`save.md` section 3); the `Reserve` setting decides how many slots the Party screen and the battle use. |
+| FE CD | 7 | `V@0 U@2` | GET_RESERVE | var[V] = the character in reserve slot U, 0xFF when it is empty or holds a character that is not available (`GameState::available`) or is in the party. |
 
 Features (the U of `GET_FEATURE_LEVEL`):
 
 | Id | Feature | Levels |
 |---|---|---|
 | 0 | The extension range itself | 1: the framing and the ops of this section |
-| 1 | Party swap (`rules/battle.md` section 11) | 1: the Swap command, the formation restored or kept after the battle |
+| 1 | Party swap (`rules/battle.md` section 11) | 1: the Swap command, the formation restored or kept after the battle; 2: the reserve slots (the `Reserve` setting, the Party screen's Reserve window, ops FE CC-FE CD) |
 | 2 | Mod UI (ops FE C1-FE CB) | 1: rects, lines, text windows, items, the cursor and the pick |
+| 3 | Party screen tweaks (`mods.md` section 8) | 1: ReturnToSlot |
 
 
 ## 8. Entity and global flag bits

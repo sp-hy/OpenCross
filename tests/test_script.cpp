@@ -1021,6 +1021,32 @@ class KeyHost : public NullHost {
   u16 keys_held() override { return held; }
 };
 
+// Party swap's reserve ops: FE CC writes a slot, FE CD reads one (0xFF = empty).
+class ReserveHost : public NullHost {
+ public:
+  std::vector<int> reserve;
+  int reserve_member(int slot) override { return slot < static_cast<int>(reserve.size()) ? reserve[static_cast<size_t>(slot)] : -1; }
+  void set_reserve_member(int slot, int char_id) override {
+    if (static_cast<int>(reserve.size()) <= slot) reserve.resize(static_cast<size_t>(slot) + 1, -1);
+    reserve[static_cast<size_t>(slot)] = char_id >= 0x2C ? -1 : char_id;
+  }
+};
+
+void test_reserve_ops() {
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xFE, 0xCC, 4}).word(I(2)).word(I(7));
+  script.raw({0xFE, 0xCD, 4}).word(V(0)).word(I(2));
+  script.raw({0xFE, 0xCD, 4}).word(V(1)).word(I(0));
+  script.stop();
+  ReserveHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK(host.reserve == (std::vector<int>{-1, -1, 7}));
+  CHECK_EQ(vm.var(V(0)), 7);
+  CHECK_EQ(vm.var(V(1)), 0xFF);
+}
+
 void test_mod_ui_ops() {
   // UI_CLEAR keeps the change counter, so an element placed after it never repeats a revision a window shows.
   {
@@ -1734,6 +1760,7 @@ int main() {
   test_opcode_table();
   test_extension_ops();
   test_mod_ui_ops();
+  test_reserve_ops();
   test_get_position_order();
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();
