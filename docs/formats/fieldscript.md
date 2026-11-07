@@ -122,7 +122,7 @@ All take the destination variable `V` first; the signedness mask (section 4) dec
 | 1B | 6 | `V S40 M` | XOR | 0 | var ^= S. |
 | 1C | 5 | `V U` | SHL | 0 | var <<= (U & 0x1F). |
 | 1D | 5 | `V U` | SHR | 1 | var >>= (U & 0x1F); arithmetic when the variable is read as signed. |
-| 1E | 3 | `V` | RAND | 1 | var = rand(), the game's 15-bit generator (0..0x7FFF): state = state * 0x41C64E6D + 0x3039, result = (state >> 16) & 0x7FFF. The generator is shared with the rest of the game. |
+| 1E | 3 | `V` | RAND | 1 | var = rand(), the game's 15-bit generator (0..0x7FFF): state = state * 0x41C64E6D + 0x3039, result = (state >> 16) & 0x7FFF. The generator is shared with the rest of the game. OpenCross seeds the state at boot from the clock, or from `[Debug] Seed` when it is set. |
 | 1F | 5 | `V U` | RAND_MOD | 538 | var = (rand() * (U + 1)) >> 15 (a scaled draw, not a remainder): U is the inclusive maximum (`RAND_MOD r,#1` is a coin flip; wander loops `while r < 18: RAND_MOD r,#18` only end on 18). |
 | 20 | 6 | `V S40 M` | MUL | 1099 | var *= value. |
 | 21 | 6 | `V S40 M` | DIV | 550 | var /= value (signed, truncating). A zero divisor counts as 1: the variable keeps its value. |

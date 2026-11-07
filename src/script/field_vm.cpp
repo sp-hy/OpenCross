@@ -6,7 +6,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
-#include <memory>
 #include <string>
 
 #include "core/log.h"
@@ -30,12 +29,9 @@ u32 default_rng_step(u32& state) {
 
 }  // namespace
 
-FieldVM::FieldVM(FieldHost& host, RandFn rng) : host_(host), rng_(std::move(rng)) {
-  if (!rng_) {
-    auto state = std::make_shared<u32>(0x2545F491u);
-    rng_ = [state] { return default_rng_step(*state); };
-  }
-}
+FieldVM::FieldVM(FieldHost& host, RandFn rng) : host_(host), rng_(std::move(rng)) {}
+
+u32 FieldVM::draw_rand() { return (rng_ ? rng_() : default_rng_step(rand_state_)) & kRandMask; }
 
 // ------------------------------------------------------------------------------------------------ variables
 bool FieldVM::var_unsigned(u32 id) const { return (mod_.sign_mask[(id >> 6) & 31] >> ((id >> 1) & 31)) & 1; }

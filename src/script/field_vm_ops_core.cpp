@@ -224,11 +224,11 @@ bool FieldVM::exec_core(u8 op) {
       advance(5);
       break;
     case 0x1E:  // RAND: 0..0x7FFF
-      write_var(word_at(1), static_cast<s32>(rng_() & kRandMask));
+      write_var(word_at(1), static_cast<s32>(draw_rand()));
       advance(3);
       break;
     case 0x1F: {  // RAND_MOD: rand * (U + 1) >> 15, so U is the inclusive maximum (RAND_MOD r,#1 is a coin flip)
-      const s32 draw = static_cast<s32>(rng_() & kRandMask);
+      const s32 draw = static_cast<s32>(draw_rand());
       write_var(word_at(1), draw * (operand_u(3) + 1) >> 15);
       advance(5);
       break;
