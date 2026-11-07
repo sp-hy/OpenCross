@@ -193,8 +193,14 @@ bool App::init_render() {
   ui.add_tab("Cheats", [this] {
     if (game::draw_cheats_tab(config)) ui.mark_changed();
   }, 40);
-  // The Update tab: GitHub release check / install. "Restart now" leaves the loop, then starts the new exe.
-  ui.add_tab("Update", [this] { render::draw_update_tab(updater, &restart_for_update); }, 80);
+  // The Update tab: GitHub release check / install. "Restart now" leaves the loop, then starts the new exe. The label is highlighted while
+  // a newer release waits.
+  ui.add_tab("Update", [this] { render::draw_update_tab(updater, &restart_for_update); }, 80, [this] { return render::update_pending(updater); });
+  // The launch update check runs on the updater's worker; run() toasts its answer. Scripted runs stay offline.
+  if (steam_allowed && config.debug_script.empty()) {
+    updater.check();
+    update_notice_pending = true;
+  }
 
   if (load_test_image(files, ctx, background)) background_set = render::TexRef(background, linear);
   if (nearest.create(ctx, false) && field_rt.create(ctx, static_cast<u32>(render::kLayerW), static_cast<u32>(render::kFieldRows)))

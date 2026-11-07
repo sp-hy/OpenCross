@@ -72,7 +72,7 @@ struct PartyMember {
   // The cell is a consumable stack the save counts (qty holds its copies, also 0).
   std::array<bool, data::kGridCells> stack{};
   Equip eq;
-  // Poison / burn / sprain / flu carried between battles.
+  // The record's status byte at battle start; after the battle its poison / burn / sprain / flu bits (lo & kPersist).
   u32 lo_persist = 0;
   // The record's model / kind byte: the battle model loaded at battle start and Pip's form 0x2B..0x30. -1 = the character id.
   int kind = -1;
@@ -188,6 +188,9 @@ struct Unit {
   // stands).
   bool standing() const { return in_turn_order() && hp != 0; }
   bool can_open_menu() const { return pc && alive() && stamina >= 10 && !(lo & st::kCannotMenuLo); }
+  // The cell's lock (the original's grid word bit 14): a character's grid keeps the bit in every cell word and holds its lock in the star
+  // unlocks (`usable`); a monster grid (an enemy, a creature form, a monster-party slot) holds it in the word.
+  bool cell_locked(size_t cell) const { return pc && form < 0 ? !usable[cell] : (cells[cell] & 0x4000) != 0; }
 };
 
 struct Rewards {
@@ -617,8 +620,13 @@ class Battle {
   int alive_count(bool pcs) const;
 
   // ---- commands
-  // The host opened the PC's command menu (the menu passed to it, an L1 / R1 switch, a re-entry): its guard ends.
+  // The host opened the PC's command menu (the menu passed to it, an L1 / R1 switch, a re-entry): its guard ends and it becomes the active PC.
   void open_menu(int pc);
+  // The active PC: the PC whose command menu ran last, or whose command or script action (op 67 of a PC's script) was queued last; op 2C
+  // clears it (-1) and a battle starts with slot 0. Its darkness halves the chance of every weapon hit, an enemy's included, whatever the
+  // attacker's own status.
+  void set_active_pc(int pc) { active_pc_ = pc; }
+  int active_pc() const { return active_pc_; }
   // False if invalid (nothing happens).
   bool apply(const Command& cmd, std::string* why = nullptr);
 
@@ -857,6 +865,8 @@ class Battle {
   int chain_actor_ = -1, chain_target_ = -1, chain_hits_ = 0;
   // The PC whose weapon turn is open (end_chain_after), -1 = none.
   int chain_owner_ = -1;
+  // See set_active_pc().
+  int active_pc_ = 0;
   // The PC of the last confirmed Attack or Element command, and each PC's target of its last one (-1 = none yet): auto_hit_level's
   // fresh pair test.
   int confirm_actor_ = -1;

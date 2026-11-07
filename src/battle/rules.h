@@ -15,7 +15,7 @@ namespace oc::battle {
 // ---- status words (merged lo / hi words of a unit)
 namespace st {
 constexpr u32 kPoison = 0x1, kSprain = 0x10, kFlu = 0x20, kKO = 0x80, kAfraid = 0x100, kFatigued = 0x2000, kAsleep = 0x4000,
-              kDark = 0x20000, kStaminaDrain = 0x40000, kConfused = 0x100000, kDizzy = 0x2000000,
+              kDark = 0x20000, kCursed = 0x40000, kConfused = 0x100000, kDizzy = 0x2000000,
               kDefeated = 0x20000000, kInstantDeath = 0x80000000;
 // Absorb / immune come in a weapon pair (0x2000 / 0x8000: Negate Physical) and an element pair (0x4000 / 0x10000: Negate Magic).
 constexpr u32 kHiAlwaysHit = 0x1000, kHiWeaponAbsorb = 0x2000, kHiAbsorb = 0x4000, kHiWeaponImmune = 0x8000, kHiImmune = 0x10000, kHiRegen = 0x80000;
@@ -86,12 +86,12 @@ struct ChanceIn {
   // Chain counter.
   int hits = 0;
   int strength = 0;
-  // Attacker has st::kHiAlwaysHit / st::kDark.
+  // Attacker has st::kHiAlwaysHit; the active PC (Battle::set_active_pc) has st::kDark, whoever attacks.
   bool always_hit = false;
   bool dark = false;
   bool target_asleep = false;
 };
-// Percent, 0..100.
+// Percent; above 99 only when no chain pull caps it (a weapon hit that never misses).
 int hit_chance(const ChanceIn& in);
 // The HIT% box figure: min(99, base * Hit%) minus evd * Evd% (evd is the target's raw EVD: no gear, hero or dizzy terms), floor 0, the
 // chain pull, then the always-hit 99 and dark halving (no sleeping-target override).
@@ -194,7 +194,7 @@ inline bool status_is_timed(int set, int bit) {
 inline int cap_stamina(int stamina) { return stamina > 70 ? 70 : stamina; }
 // (strength + 1) * 10, x500/400 when fatigued.
 int weapon_stamina_cost(int strength, bool fatigued);
-// (rate + mod) * steps, x300/400 with flu.
+// (rate + mod) per step, x300/400 (truncated) with flu, times the steps.
 int recovery_step(int rate, int mod, int steps, bool flu);
 constexpr int kElementCost = 70;
 

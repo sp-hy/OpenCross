@@ -273,6 +273,8 @@ class App {
   // API names earned this run; routes read them.
   std::vector<std::string> earned_achievements;
   bool restart_for_update = false;
+  // The launch update check is running; run() shows a toast when it finds a newer release.
+  bool update_notice_pending = false;
   render::TexRef background_set;
   // Classic art, [Video] Ps1Res: the field picture is drawn into the PS1 field buffer size (320 x 224) and scaled up with nearest
   // sampling into RDE's field frame, so models / effects have the pixel size of the 1x backdrops.

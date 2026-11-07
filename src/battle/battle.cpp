@@ -233,7 +233,7 @@ void Battle::init_pc(int slot, const PartyMember& member) {
   unit.innate = member.innate;
   unit.dur = member.dur, unit.rate = member.rate;
   unit.ap = 8, unit.countdown = 8, unit.stamina = 70, unit.gauge = -1;
-  unit.lo = member.lo_persist & st::kPersist;
+  unit.lo = member.lo_persist;
   unit.cells = member.cells;
   unit.qty = member.qty;
   unit.stack = member.stack;
@@ -409,6 +409,7 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   turn_claimed_ = {};
   reset_chain();
   chain_owner_ = -1;
+  active_pc_ = 0;
   confirm_actor_ = -1;
   confirm_target_.fill(-1);
   units_ = {};
@@ -657,7 +658,7 @@ int Battle::hit_chance_for(int actor, int target, int strength) const {
   in.hits = (attacker.pc && chain_actor_ == actor && chain_target_ == target) ? chain_hits_ : 0;
   in.strength = strength;
   in.always_hit = (attacker.hi & st::kHiAlwaysHit) != 0;
-  in.dark = (attacker.lo & st::kDark) != 0;
+  in.dark = is_pc_slot(active_pc_) && (unit(active_pc_).lo & st::kDark) != 0;
   in.target_asleep = (target_unit.lo & st::kAsleep) != 0;
   return battle::hit_chance(in);
 }
@@ -1051,7 +1052,7 @@ void Battle::damage_unit(int actor, int target, int value, int code) {
     return;
   }
   target_unit.hp -= value;
-  if (target_unit.lo & st::kStaminaDrain) target_unit.stamina -= 10;
+  if (target_unit.lo & st::kCursed) target_unit.stamina -= 10;
   if (target_unit.hp <= 0 && invincible(target)) target_unit.hp = 1;
   if (target_unit.hp <= 0) {
     if (target == actor) target_unit.hp = 1;
@@ -2488,7 +2489,9 @@ void Battle::end_chain_after(size_t first_event) {
 
 // ------------------------------------------------------------------------------------------------ command application
 void Battle::open_menu(int pc) {
-  if (is_pc_slot(pc)) units_[static_cast<size_t>(pc)].guard = false;
+  if (!is_pc_slot(pc)) return;
+  units_[static_cast<size_t>(pc)].guard = false;
+  active_pc_ = pc;
 }
 
 bool Battle::apply(const Command& cmd, std::string* why) {
@@ -2497,8 +2500,9 @@ bool Battle::apply(const Command& cmd, std::string* why) {
   attacked_.clear();
   begin_action();
   Unit& unit = units_[static_cast<size_t>(cmd.actor)];
-  // A command comes from the actor's own menu, whose opening ended its guard.
+  // A command comes from the actor's own menu, whose opening ended its guard and made it the active PC.
   unit.guard = false;
+  if (is_pc_slot(cmd.actor)) active_pc_ = cmd.actor;
   // The automatic target: the weakest unit the cursor ring could reach (hidden units are never on it).
   auto pick_enemy = [&]() {
     if (cmd.target >= kPcSlots && units_[static_cast<size_t>(cmd.target)].standing() && !brain_.untargetable(cmd.target)) return cmd.target;

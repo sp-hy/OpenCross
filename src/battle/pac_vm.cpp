@@ -606,6 +606,7 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
       if (!host_.action_ready()) return Step::Block;
       emit(Event::Kind::Barrier, self, op, host_.action_serial());
       emit(Event::Kind::Cutscene, self, 1);
+      host_.set_active_pc(-1);
       break;
     case 0x2D: {
       if (skip_delays_) break;
@@ -717,6 +718,7 @@ Vm::Step Vm::exec(int entity, Frame& frame, u8 op, int& adv) {
         if (!mask) mask = 1u << self;
       }
       qa.mask = mask;
+      if (self < kPcSlots) host_.set_active_pc(self);
       // Type 2: group[k] = low byte of var 0x10 + 2k (the 8D list); the executor's group setup reads it.
       if (qa.type == 2)
         for (int k = 0; k < 6; ++k) grp_[static_cast<size_t>(k)] = static_cast<u8>(var(0x10 + 2 * k));
@@ -952,6 +954,7 @@ class ScriptedBrain::BattleHost final : public Host {
     return colour < 0 || colour > kRingAllColours ? -1 : colour;
   }
   int timer_frames() const override { return battle->actions() * 180; }
+  void set_active_pc(int pc) override { battle->set_active_pc(pc); }
   void set_menu_cursor(int value) override {
     for (int i = 0; i < kPcSlots; ++i) battle->unit_mut(i).menu_cursor = {static_cast<u8>(value), static_cast<u8>(value)};
   }
@@ -1121,7 +1124,7 @@ class ScriptedBrain::BattleHost final : public Host {
     if (unit < 0 || unit >= kUnits) return result;
     Unit& state = battle->unit_mut(unit);
     // Ops 0x55 / 0x8F draw a cell of rows 0..gauge (0x8F: rows 0..limit) with rnd(0, cells - 1) until one is free (usable, unused, its
-    // colour-seal flag clear, no tech flag) and holds an element id < 0x7E whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
+    // colour-seal flag clear, not locked, no tech flag) and holds an element id < 0x7E whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
     // target is found for it; a free cell that fails is closed and the draw goes on. Techs from id 126 up (Big Catch 192, Dopplegang 238,
     // the enemy-only techs ...) are only ever cast by an explicit queue_attack.
     const int rows = std::clamp((limit < 0 ? state.gauge : limit) + 1, 0, data::kGridRows);
@@ -1130,7 +1133,7 @@ class ScriptedBrain::BattleHost final : public Host {
     int left = 0;
     for (int cell = 0; cell < cells; ++cell) {
       const auto index = static_cast<size_t>(cell);
-      open[index] = state.usable[index] && !state.used[index] && !state.seal_flag[index] && !(state.cells[index] & 0xC000);
+      open[index] = state.usable[index] && !state.used[index] && !state.seal_flag[index] && !(state.cells[index] & 0x8000) && !state.cell_locked(index);
       left += open[index];
     }
     const auto& elements = battle->tables().elements;

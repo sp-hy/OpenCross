@@ -80,7 +80,7 @@ jobs:
 
       - name: Build
         shell: pwsh
-        run: .\build.ps1 release -Target opencross -VcpkgRoot $env:VCPKG_ROOT
+        run: .\build.ps1 release -Target opencross -WholeProgram -VcpkgRoot $env:VCPKG_ROOT
 
       - name: Build the launcher proxy
         shell: pwsh

@@ -65,7 +65,7 @@ int ring_count(const std::array<int, 3>& ring, int colour) {
 
 // ------------------------------------------------------------------------------------------------ hit chance
 // base * Hit% - evade (halved vs a dizzy target), floor 0; a PC's chain counter pulls the chance toward kChainTarget by
-// kChainPct per hit; cap 99, then the always-hit / dark / sleeping-target overrides.
+// kChainPct per hit, stopping at 99 (without a pull a base above 99 stays as it is); then the always-hit / dark / sleeping-target overrides.
 int hit_chance(const ChanceIn& in) {
   int evade = ceil100(in.evd, in.evd_mod);
   if (in.attacker_hero_set) evade = evade * 125 / 100;
@@ -82,7 +82,6 @@ int hit_chance(const ChanceIn& in) {
       }
     }
   }
-  if (chance > 99) chance = 99;
   if (in.always_hit) chance = 99;
   if (in.dark) chance /= 2;
   if (in.target_asleep) chance = 100;
@@ -216,8 +215,8 @@ int weapon_stamina_cost(int strength, bool fatigued) {
 }
 
 int recovery_step(int rate, int mod, int steps, bool flu) {
-  const int recovered = (rate + mod) * steps;
-  return flu ? recovered * 300 / 400 : recovered;
+  const int per_step = rate + mod;
+  return (flu ? per_step * 300 / 400 : per_step) * steps;
 }
 
 // ------------------------------------------------------------------------------------------------ growth

@@ -37,7 +37,7 @@ void fx_play_sound(BattleAudio& audio, std::string_view name, int volume, int pa
 // The hide bit survives a pack end: the idle restart shows a living unit again; a dead one has no idle and stays hidden through the next pack.
 void BattleView::fx_show_living() {
   for (int i = 0; i < battle::kUnits; ++i) {
-    if (battle_->unit(i).present && !battle_->unit(i).alive()) continue;
+    if (battle_->unit(i).present && !battle_->unit(i).in_turn_order()) continue;
     fx_hidden_[static_cast<size_t>(i)] = false;
     fx_hide_bits_[static_cast<size_t>(i)] = 0;
   }

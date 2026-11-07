@@ -1,0 +1,78 @@
+# Field statuses with Serge and Kid (formats/routes.md; rules/field_actors.md section 8).
+0 wait idle 600
+- request party_add 1
+- wait idle 120
+- set status 0 0
+- set status 1 0
+# poison: -4 HP per poisoned member every 241 ticks, so exactly 4 drains in 964 ticks; burn does not double it
+- set hp 0 300
+- set hp 1 70
+- set status 0 1
+- set status 1 9
+- wait 964
+- assert hp 0 284 284
+- assert hp 1 54 54
+- set status 0 0
+- set status 1 0
+# the run key runs (about 170 units in 12 ticks), a sprained member makes it a walk (about 70)
+- put -165 -154
+- wait 10
+- key down run
+- key down right
+- wait 12
+- key up right
+- key up run
+- assert near player 6 -154 6
+- put -165 -154
+- set status 1 10
+- wait 10
+- key down run
+- key down right
+- wait 12
+- key up right
+- key up run
+- assert near player -96 -154 6
+# the auto-run option runs without the key, and a sprain makes that a walk too
+- set option 200 1
+- set status 1 0
+- put -165 -154
+- wait 10
+- key down right
+- wait 12
+- key up right
+- assert near player 6 -154 6
+- put -165 -154
+- set status 1 10
+- wait 10
+- key down right
+- wait 12
+- key up right
+- assert near player -96 -154 6
+- set option 200 0
+# flu: the heading wobbles (up to 45 degrees) while the pad moves the player; without it the walk stays on z = -154
+- set status 1 0
+- put -165 -154
+- wait 10
+- key down right
+- wait 10
+- key up right
+- assert near player -106 -154 6
+- set status 1 20
+- put -165 -154
+- wait 10
+- key down right
+- wait 10
+- key up right
+- assert near player -117 -121 6
+- set status 1 0
+# burn on the poison water: five hits; each costs the burnt member 4 HP and the others 2
+- set hp 0 500
+- set hp 1 500
+- set status 1 8
+- walk 401 285 40 900
+- walk 417 650 40 900
+- walk 401 285 40 900
+- assert hp 0 490 490
+- assert hp 1 480 480
+- set status 1 0
+- quit

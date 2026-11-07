@@ -9,7 +9,7 @@ plain stored ZIP with the same members, which OpenCross and ps1 read like RDE's 
   --party a[,b[,c]]    party character ids (raw head 0x59C.. and the 0x34 preview; 0xFF pads); recruits them too
   --recruit a,b,...    extra recruited-character bits (raw head 0x590, 44 bits)
   --char ID:k=v,...    stat edits of one character record: hp (current + max, 10 bits), curhp (current only; 0 = KO'd), atk def hit evd mag mdef
-                       (7 bits), weapon armor (item ids)
+                       (7 bits), weapon armor (item ids), status (the status byte: 1 poison, 8 burn, 0x10 sprain, 0x20 flu)
   --grid ID:ROW:e,e,.. element ids written left to right into the character's ROW (0 = level 1) cells; the whole grid
                        is unlocked for that character (0xDAD8 masks = the char.bin level masks) and the equipped
                        quantity nibble of every filled cell is set to 5
@@ -219,6 +219,8 @@ def main(argv):
             elif k in ("atk", "def", "hit", "evd", "mag", "mdef"):
                 off = {"atk": 0x18, "def": 0x19, "hit": 0x1A, "evd": 0x1B, "mag": 0x1C, "mdef": 0x1D}[k]
                 img[b + off] = min(v, 127)
+            elif k == "status":
+                img[b + 0xB0] = v & 0xFF
             elif k == "weapon":
                 struct.pack_into("<H", img, b + 0x20, v)
             elif k == "armor":

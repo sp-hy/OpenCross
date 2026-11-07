@@ -45,6 +45,12 @@ int App::run() {
       apply_art_mode();
       ui.toast(config.art_mode == platform::ArtMode::Modded ? "Art: Modded" : config.art_mode == platform::ArtMode::Hd ? "Art: HD" : "Art: Original");
     }
+    if (update_notice_pending && !updater.busy()) {
+      update_notice_pending = false;
+      const platform::Updater::Status st = updater.status();
+      if (st.state == platform::Updater::State::Available && !st.launcher_only)
+        ui.toast("Update: OpenCross " + st.latest + " is available (Esc > Update)", 4.0);
+    }
     loop_speed.ran = false;
     if (!simulate()) break;
     // Menus, shops, the results and the other screens play their sounds at the normal rate (RDE resets the SFX tick rate there).

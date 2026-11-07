@@ -184,6 +184,8 @@ class Host {
   virtual void reveal(int /*unit*/) {}
   // 5B with arg != 0: the unit leaves the all-target cast masks.
   virtual void conceal(int /*unit*/) {}
+  // 67 queued by a PC's script: that PC becomes the active PC (Battle::set_active_pc); 2C clears it (-1).
+  virtual void set_active_pc(int /*pc*/) {}
 };
 
 class Vm {
