@@ -41,7 +41,7 @@ OpenCross is a from-scratch C++20 engine that plays Chrono Cross from the Steam 
 - Test windows take no focus and play no sound: set `OC_QUIET=1` (the route runner and `ocbattleview --frames` do).
 - Never touch a real save folder (`Documents\My Games\...\Steam\<id>`); use forged saves under `tmp\` or `[Paths] SaveDir`.
 - Unique techs are cast by their owner character in tests, not by Serge (`docs/tools.md`, section 6.1, finds the owner).
-- Every test and comparison runs with mods off. A `[Debug] Script` run does not apply mods and `ocbattleview` applies them only with `--mods`; give any other plain run a config with mods disabled.
+- Every test and comparison runs with mods off. A `[Debug] Script` or `--config` run does not apply mods (unless `[Debug] ScriptMods`) and `ocbattleview` applies them only with `--mods`.
 - Special and scripted battles run on the room's real battlefield with the story's party at that point, and the report says which conditions were used.
 - Use the smallest window that answers the question. Prefer stats, logs and table diffs to viewing images, and crop or downscale any image you do read. Performance runs are the exception.
 - Do not run the real launcher helper: it plays music and writes to the real save folder, so use a silent stand-in that exports the same names. Never store a real Steam unlock unasked; `opencross ocsteam` is read-only and safe.
