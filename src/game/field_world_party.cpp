@@ -561,6 +561,7 @@ void FieldWorld::refresh_party_models() {
 void FieldWorld::set_seed(u32 seed) {
   seed_ = seed;
   rng_ = seed ? (seed * 2654435761u) | 1u : 0x2545F491u;
+  vm_.seed_rand(seed ? seed : 0x2545F491u);
 }
 
 void FieldWorld::set_game_state(ui::GameState* gs) {

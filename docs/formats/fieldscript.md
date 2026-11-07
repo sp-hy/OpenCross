@@ -122,7 +122,7 @@ All take the destination variable `V` first; the signedness mask (section 4) dec
 | 1B | 6 | `V S40 M` | XOR | 0 | var ^= S. |
 | 1C | 5 | `V U` | SHL | 0 | var <<= (U & 0x1F). |
 | 1D | 5 | `V U` | SHR | 1 | var >>= (U & 0x1F); arithmetic when the variable is read as signed. |
-| 1E | 3 | `V` | RAND | 1 | var = rand(), the game's 15-bit generator (0..0x7FFF): state = state * 0x41C64E6D + 0x3039, result = (state >> 16) & 0x7FFF. The generator is shared with the rest of the game. |
+| 1E | 3 | `V` | RAND | 1 | var = rand(), the game's 15-bit generator (0..0x7FFF): state = state * 0x41C64E6D + 0x3039, result = (state >> 16) & 0x7FFF. The generator is shared with the rest of the game. OpenCross seeds the state at boot from the clock, or from `[Debug] Seed` when it is set. |
 | 1F | 5 | `V U` | RAND_MOD | 538 | var = (rand() * (U + 1)) >> 15 (a scaled draw, not a remainder): U is the inclusive maximum (`RAND_MOD r,#1` is a coin flip; wander loops `while r < 18: RAND_MOD r,#18` only end on 18). |
 | 20 | 6 | `V S40 M` | MUL | 1099 | var *= value. |
 | 21 | 6 | `V S40 M` | DIV | 550 | var /= value (signed, truncating). A zero divisor counts as 1: the variable keeps its value. |
@@ -188,7 +188,7 @@ Start forms of 3F / 40 / 42 / 43 / 44 / 45 / 46 / B8 / B9 set the facing target 
 | 4D | 16 | `V S40 S20 S10 S08 S04 S02 M` | GET_DISTANCE_3D | 2 | var = 3-axis magnitude of (S08 - S40, S02 - S10, S04 - S20) (axis labels assumed). |
 | 4E | 5 | `V c c` | ENTITY_DISTANCE | 175 | var = distance between the two entities. |
 | 4F | 5 | `V c c` | GET_DISTANCE_3D_ENTITIES | 19 | var = 3-axis magnitude of the position deltas (x, y, z) between the two entities. |
-| 50 | 5 | `w J` | JUMP_IF_NOT_KEY | 1209 | If `(mask & held-buttons) == 0`, pc = J, else pc += 5. Held-button word = the field pad word (after the pad mask of FE 77). No yield. |
+| 50 | 5 | `w J` | JUMP_IF_NOT_KEY | 1209 | If `(mask & held-buttons) == 0`, pc = J, else pc += 5. Held-button word = the field pad word (after the pad mask of FE 77), PS1 pad bits: 0x04 L1, 0x08 R1, 0x10 triangle, 0x20 circle, 0x40 cross, 0x80 square, 0x100 select, 0x800 start, 0x1000 up, 0x2000 right, 0x4000 down, 0x8000 left (L2 / R2 are not mapped). No yield. |
 | 51 | 5 | `w J` | JUMP_IF_NOT_KEY_LATCH | 14 | As 50 against the button latch cleared by 54. |
 | 52 | 5 | `w J` | JUMP_IF_NOT_KEY_EQUAL | 0 | If the held-button word == w (compared as signed 16-bit), pc += 5, else pc = J. Never used; OpenCross: logged no-op, pc += 5. |
 | 53 | 5 | `w J` | JUMP_IF_NOT_KEY_LATCH_EQUAL | 0 | As 52 against the button latch of 51. Never used; OpenCross: logged no-op, pc += 5. |

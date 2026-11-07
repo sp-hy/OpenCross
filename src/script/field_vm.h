@@ -119,8 +119,10 @@ class FieldVM {
   using RandFn = std::function<u32()>;
   // The script ops use the low 15 bits of each draw (the game's rand() range).
   static constexpr u32 kRandMask = 0x7FFF;
-  // `rng` replaces the default deterministic generator (the game's rand() step, fixed seed).
+  // `rng` replaces the default generator (the game's rand() step from the state seed_rand sets).
   explicit FieldVM(FieldHost& host, RandFn rng = {});
+  // Sets the default generator's state.
+  void seed_rand(u32 state) { rand_state_ = state; }
 
   // Loads a room: replaces the module, resets entity state, zeroes the room-local variables (globals persist),
   // sets the engine variable 0x46 = 1, flags entities without ON_ACTION / ON_COLLISION scripts, then runs INIT
@@ -214,6 +216,8 @@ class FieldVM {
  private:
   FieldHost& host_;
   RandFn rng_;
+  u32 rand_state_ = 0x2545F491u;
+  u32 draw_rand();
   FieldScriptModule mod_;
   std::vector<Entity> ents_;
   std::array<u16, kVarSlots> vars_{};

@@ -877,7 +877,7 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
     // Same save path as every other setting.
     change.other = true;
   }
-  if (change.any() && !cfg.save(file)) log::warn("could not write {}", file.string());
+  if (change.any() && !file.empty() && !cfg.save(file)) log::warn("could not write {}", file.string());
   return change;
 }
 
