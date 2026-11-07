@@ -1245,6 +1245,8 @@ class FieldWorld final : public script::FieldHost {
     s32 volume = 0x7F, dry_type = 0, water_type = 0, listener_x = 0, listener_y = 0, listener_z = 0, nearest = 0x7FFF, farthest = 0x7FFF;
   } footstep_;
   u32 rng_ = 0x2545F491u;
+  // The field script's RAND / RAND_MOD (the VM's generator), seeded by set_seed apart from rng_ so NPC idling keeps its sequence.
+  u32 script_rng_ = 0x2545F491u;
 
   // ---- engine state behind script ops (B5 D0 D1 D2 D9 DA DB B2 FE 52 FE 02 FE 1A FE 1B FE 77 C5 C8
   // FE 43 8F 90 AC FE 03 FE 45 92 and anim-sequence op 1D)
