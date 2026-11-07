@@ -145,6 +145,30 @@ int FieldWorld::load_model(int ent, int model) {
   return d1_counter_++;
 }
 
+// FE D0: room model `model` comes from elsewhere until the room changes; a source that names no model gives it back to the room. A
+// character's model byte decides the body when an entity puts the model on (a D9 disguise shows). The files are read ahead now.
+void FieldWorld::set_model_source(int model, int kind, int id, int sub) {
+  if (model < 0 || model > 0xFF) return;
+  const ModelSource source{kind, id, sub};
+  bool known = false;
+  switch (kind) {
+    case ModelSource::kCharacter: known = id >= 0 && id <= 0x2B && id < save::kNumChars; break;
+    case ModelSource::kFieldModel: known = id >= 0 && id <= 0xFF && !model_folder(id).empty(); break;
+    case ModelSource::kRoomModel:
+    case ModelSource::kBattleModel:
+    case ModelSource::kCharacterBattle: known = !source_key(source).empty(); break;
+    default: break;
+  }
+  if (!known) {
+    model_sources_.erase(model);
+    return;
+  }
+  model_sources_[model] = source;
+  if (kind == ModelSource::kCharacter) prefetch_character_model(model_byte(id));
+  else if (kind == ModelSource::kFieldModel) prefetch_character_model(id);
+  else if (kind != ModelSource::kRoomModel || room_stem_for_id(id) != view_.room_name()) prefetch_sourced_model(source_key(source));
+}
+
 
 void FieldWorld::formation(u16 key, std::span<const s32> args) {
   // 84: one (x, z) per slot (+ facings); DF: the leader's (x, z) and engine heading, slots 1 and 2 in the party V around it. The members

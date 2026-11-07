@@ -38,6 +38,9 @@ constexpr TileSource tile_source(u16 u, u8 v, u8 clut) {
 // `prd` may be empty. On failure returns nullopt and, if `error` is non-null, a message.
 std::optional<assets::RoomScene> load_room(std::string_view name, ByteSpan bin, ByteSpan ctd, ByteSpan prd = {},
                                            std::string* error = nullptr);
+// Only the room's models (RoomScene::models, their texture pages cut from the room's VRAM): the .bin / .ctd read without the layers,
+// script or effects, for a model shown in another room.
+std::optional<std::vector<assets::RoomModelHeader>> load_room_models(ByteSpan bin, ByteSpan ctd, std::string* error = nullptr);
 
 struct RoomValidation {
   std::vector<std::string> errors;    // format violations: a room with errors counts as a failure

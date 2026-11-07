@@ -377,6 +377,7 @@ FEC8 | V | UI_PICK | C | Mod UI pick: blocks for a press made while it waits; D-
 FEC9 | U V V | UI_GETPOS | C | Mod UI element id's centre (a text window: its text origin) into two vars.
 FECA | U U U | UI_SET | C | Mod UI element id: field (0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg, 6 flags, 7 w, 8 h) = value (a text window is shown again).
 FECB | U U U U | UI_PALETTE | C | Mod UI palette entry i (0..31) = (r, g, b).
+FED0 | U U U U | MODEL_SOURCE | C | Extension range. Room model n comes from elsewhere until the room changes: kind 0 character id's field model, 1 field model byte id, 2 room id's model k, 3 battle model id, 4 character id's battle model (n kind id k; a source naming no model: the room's own again).
 """
 
 # ---------------------------------------------------------------------------

@@ -11,6 +11,7 @@
 #include "audio/voice.h"
 #include "core/log.h"
 #include "core/timer.h"
+#include "game/battle/model_table.h"
 #include "game/field_world_internal.h"
 #include "game/model_files.h"
 #include "game/new_game.h"
@@ -79,6 +80,7 @@ void FieldWorld::shutdown() {
   ents_.clear();
   room_models_.clear();
   char_models_.clear();
+  sourced_models_.clear();
   drop_character_prefetches();
   free_status_icons();
   free_group_sprites();
@@ -100,8 +102,12 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
   if (changed && initialised_) {
     // A worker reads the file set of the mode it started in.
     drop_character_prefetches();
-    if (view_.loaded()) swap_art();
-    else char_models_.clear();
+    if (view_.loaded()) {
+      swap_art();
+    } else {
+      char_models_.clear();
+      sourced_models_.clear();
+    }
   }
   if (!changed || !initialised_ || !view_.loaded()) view_.set_art_mode(hd);
   const ui::ArtMode mode = hd ? ui::ArtMode::Hd : ui::ArtMode::Original;
@@ -125,6 +131,8 @@ void FieldWorld::swap_art() {
   const auto old_room = std::move(room_models_);
   const auto old_chars = std::move(char_models_);
   char_models_.clear();
+  const auto old_sourced = std::move(sourced_models_);
+  sourced_models_.clear();
   const size_t n_room = view_.scene() ? view_.scene()->models.size() : 0;
   room_models_.assign(n_room, nullptr);
   room_model_tried_.assign(n_room, false);
@@ -134,9 +142,11 @@ void FieldWorld::swap_art() {
     if (!cur) continue;
     std::shared_ptr<ModelHandle> fresh;
     for (size_t i = 0; i < old_room.size() && !fresh; ++i)
-      if (old_room[i] == cur) fresh = room_model(static_cast<int>(i));
+      if (old_room[i] == cur) fresh = own_room_model(static_cast<int>(i));
     for (const auto& [id, handle] : old_chars)
       if (!fresh && handle == cur) fresh = character_model(id);
+    for (const auto& [key, handle] : old_sourced)
+      if (!fresh && handle == cur) fresh = sourced_model(key);
     if (!fresh) continue;
     if (ent_state.actor.swap_model_art(fresh)) ++swapped;
     else ++kept;
@@ -180,6 +190,18 @@ int FieldWorld::player_entity() const {
 
 // ------------------------------------------------------------------------------------------------ models
 std::shared_ptr<ModelHandle> FieldWorld::room_model(int index) {
+  // FE D0: a model from elsewhere under this number (also past the room's own models). Characters share the party's cache.
+  if (auto it = model_sources_.find(index); it != model_sources_.end()) {
+    const ModelSource& source = it->second;
+    if (source.kind == ModelSource::kCharacter) return character_model(model_byte(source.id));
+    if (source.kind == ModelSource::kFieldModel) return character_model(source.id);
+    if (source.kind == ModelSource::kRoomModel && room_stem_for_id(source.id) == view_.room_name()) return own_room_model(source.sub);
+    return sourced_model(source_key(source));
+  }
+  return own_room_model(index);
+}
+
+std::shared_ptr<ModelHandle> FieldWorld::own_room_model(int index) {
   const assets::RoomScene* scene = view_.scene();
   if (!scene || index < 0 || index >= static_cast<int>(scene->models.size())) return nullptr;
   const size_t i = static_cast<size_t>(index);
@@ -266,6 +288,83 @@ void FieldWorld::drop_character_prefetches() {
   for (auto& [model_byte, job] : char_prefetch_)
     if (job.valid()) job.wait();
   char_prefetch_.clear();
+  for (auto& [key, job] : sourced_prefetch_)
+    if (job.valid()) job.wait();
+  sourced_prefetch_.clear();
+}
+
+namespace {
+
+// The CPU half of a sourced model ("room:<stem>:<k>" or "battle:<stem>"), its texture mods resolved. Any thread.
+std::optional<assets::ModelAsset> read_sourced_model(const vfs::Vfs& files, const std::string& key, bool hd) {
+  std::string err;
+  std::optional<assets::ModelAsset> asset;
+  if (key.starts_with("room:")) {
+    const size_t colon = key.rfind(':');
+    asset = read_room_model(files, key.substr(5, colon - 5), std::atoi(key.c_str() + colon + 1), &err);
+  } else if (key.starts_with("battle:")) {
+    asset = read_battle_model_for_field(files, key.substr(7), hd, &err);
+  }
+  if (!asset) {
+    log::warn("field: model {}: {}", key, err);
+    return std::nullopt;
+  }
+  render::resolve_model_textures(*asset);
+  return asset;
+}
+
+}  // namespace
+
+std::string FieldWorld::source_key(const ModelSource& source) const {
+  switch (source.kind) {
+    case ModelSource::kRoomModel: {
+      const std::string room = room_stem_for_id(source.id);
+      return room.empty() || source.sub < 0 ? std::string() : std::format("room:{}:{}", room, source.sub);
+    }
+    case ModelSource::kBattleModel:
+      if (source.id < 0 || source.id >= static_cast<int>(kBattleModels.size()) || kBattleModels[static_cast<size_t>(source.id)].empty()) return {};
+      return "battle:" + std::string(kBattleModels[static_cast<size_t>(source.id)]);
+    case ModelSource::kCharacterBattle: {
+      const std::string stem = files_ ? character_battle_stem(*files_, source.id) : std::string();
+      return stem.empty() ? std::string() : "battle:" + stem;
+    }
+    default: return {};
+  }
+}
+
+std::shared_ptr<ModelHandle> FieldWorld::sourced_model(const std::string& key) {
+  if (key.empty() || !files_) return nullptr;
+  if (auto it = sourced_models_.find(key); it != sourced_models_.end()) return it->second;
+  std::shared_ptr<ModelHandle> handle;
+  if (auto it = sourced_prefetch_.find(key); it != sourced_prefetch_.end()) {
+    ScopedTimer model_timer("field: sourced model load (prefetched)");
+    std::optional<PrefetchedCharacter> prefetched = it->second.get();
+    sourced_prefetch_.erase(it);
+    if (prefetched && prefetched->generation == render::texture_registry::generation())
+      handle = Actor::make_resolved_model(*meshes_, std::move(prefetched->asset), &prefetched->uploads, &prefetched->textures);
+  }
+  if (!handle) {
+    ScopedTimer model_timer("field: sourced model load (first use)");
+    if (std::optional<assets::ModelAsset> asset = read_sourced_model(*files_, key, hd_)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
+  }
+  if (handle && key.starts_with("battle:")) handle->field_scale = kBattleModelFieldScale;
+  if (handle)
+    log::debug("field: model {} ({} clips, extent {} {} {})", key, handle->asset.clips.size(), handle->asset.extent[0], handle->asset.extent[1],
+               handle->asset.extent[2]);
+  sourced_models_[key] = handle;
+  return handle;
+}
+
+void FieldWorld::prefetch_sourced_model(const std::string& key) {
+  if (key.empty() || !files_ || sourced_models_.contains(key) || sourced_prefetch_.contains(key)) return;
+  sourced_prefetch_[key] = std::async(std::launch::async, [files = files_, ctx = ctx_, key, hd = hd_]() -> std::optional<PrefetchedCharacter> {
+    const unsigned generation = render::texture_registry::generation();
+    std::optional<assets::ModelAsset> asset = read_sourced_model(*files, key, hd);
+    if (!asset) return std::nullopt;
+    render::ModelUploads uploads = render::prepare_model_uploads(*asset);
+    render::ModelTextures textures = ctx ? render::prepare_model_textures(*ctx, *asset, uploads) : render::ModelTextures{};
+    return PrefetchedCharacter{std::move(*asset), std::move(uploads), std::move(textures), generation};
+  });
 }
 
 // ------------------------------------------------------------------------------------------------ room loading
@@ -280,6 +379,7 @@ void FieldWorld::clear_room() {
   room_models_.clear();
   room_model_tried_.clear();
   room_prepared_.clear();
+  model_sources_.clear();
   // Room entries are decoded against this room's models.
   std::erase_if(ex_pack_cache_, [](const auto& kv) { return kv.first.starts_with("room:"); });
   party_ent_ = {-1, -1, -1};
