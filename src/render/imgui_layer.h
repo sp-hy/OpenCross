@@ -83,7 +83,7 @@ class ImGuiLayer {
   // The tab shown last ("General", "Graphics", ...).
   const std::string& current_tab() const { return current_tab_; }
 
-  // The settings window. Edits `config` in place and writes it to `config_file` on any change.
+  // The settings window. Edits `config` in place and writes it to `config_file` on any change (none when the path is empty).
   OptionsChange options_window(platform::Config& config, const std::filesystem::path& config_file);
   void render(const Frame& frame);
 

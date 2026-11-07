@@ -41,7 +41,7 @@ int App::run() {
       config.art_mode = config.art_mode == platform::ArtMode::Original ? platform::ArtMode::Hd
                         : config.art_mode == platform::ArtMode::Hd     ? platform::ArtMode::Modded
                                                                        : platform::ArtMode::Original;
-      config.save(config_file);
+      save_config();
       apply_art_mode();
       ui.toast(config.art_mode == platform::ArtMode::Modded ? "Art: Modded" : config.art_mode == platform::ArtMode::Hd ? "Art: HD" : "Art: Original");
     }
@@ -80,7 +80,7 @@ int App::run() {
     ui.new_frame();
     // The room's entity / script tables stay while a battle, menu, movie or flow screen covers the field.
     debug_field = field_visible();
-    apply_options_change(ui.options_window(config, config_file));
+    apply_options_change(ui.options_window(config, own_ini ? config_file : std::filesystem::path()));
     ui.render(frame);
     ctx.end_frame();
     if (!routing && !replaying && !sweeping) limiter.wait(config.frame_cap);
@@ -169,7 +169,7 @@ void App::frame_hotkeys() {
   // [Video] Widescreen on / off, live and saved (Graphics tab too).
   if (input.key_pressed[SDL_SCANCODE_F7] && !routing && !replaying) {
     config.widescreen = !config.widescreen;
-    config.save(config_file);
+    save_config();
     ui.toast(config.widescreen ? "Widescreen: On" : "Widescreen: Off");
   }
   toggle_fullscreen_key();
@@ -188,7 +188,7 @@ void App::toggle_fullscreen_key() {
   config.window_mode = config.window_mode == platform::WindowMode::Windowed ? last_fullscreen : platform::WindowMode::Windowed;
   window.apply_video(static_cast<int>(config.window_mode), config.width, config.height, config.display);
   ctx.request_resize();
-  config.save(config_file);
+  save_config();
 }
 
 // The settings window takes the pad (ImGui reads it from SDL directly): while it is open the game sees no pad input, and a button or

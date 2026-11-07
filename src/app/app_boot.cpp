@@ -81,7 +81,7 @@ void App::init_config(int argc, char** argv) {
     config.height = 720;
     config.widescreen = true;
     log::info("no opencross.ini, writing defaults");
-    config.save(config_file);
+    save_config();
   }
   // The rule code reads the live [Cheats] set.
   platform::bind_cheats(&config.cheats);
@@ -104,7 +104,7 @@ bool App::init_window() {
   if (first_launch) {
     config.language = platform::detect_os_language();
     log::info("first launch: [Game] Language = {} (from the OS locale)", config.language);
-    config.save(config_file);
+    save_config();
   }
   return true;
 }
@@ -126,16 +126,15 @@ void App::init_vfs() {
     mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config));
     // New folders get their defaults (written with the next save).
     render::store_mod_prefs(config, mods);
-    // Scripted runs test the game as shipped: no mod reaches them, also through a later art change, unless [Debug] ScriptMods keeps them
-    // (a route testing a mod). The ini's choices stay as they are.
-    if (config.debug_script.empty() || config.debug_script_mods) mods.apply(files, render::mod_art(config.art_mode));
+    // Scripted and --config runs test the game as shipped: no mod reaches them, also through a later art change, unless [Debug] ScriptMods
+    // keeps them (a route testing a mod). The ini's choices stay as they are.
+    if (with_mods()) mods.apply(files, render::mod_art(config.art_mode));
     else for (vfs::Mod& mod : mods.mods()) mod.enabled = false;
   }
-  // Engine features follow the mods enabled at launch (like game data, a later Mods tab change waits for the next launch). A scripted run has
-  // no mods (unless ScriptMods): its features are the [Features] lines of its own ini (a route that tests a feature turns it on there).
+  // Engine features follow the mods enabled at launch (like game data, a later Mods tab change waits for the next launch). A run without
+  // mods has the [Features] lines of its own ini only (a route that tests a feature turns it on there).
   {
-    const bool with_mods = config.debug_script.empty() || config.debug_script_mods;
-    const std::vector<features::ModInput> inputs = with_mods ? mods.feature_inputs() : std::vector<features::ModInput>{};
+    const std::vector<features::ModInput> inputs = with_mods() ? mods.feature_inputs() : std::vector<features::ModInput>{};
     features = features::resolve(inputs, config.features);
     for (const features::Resolved::Issue& issue : features.issues) log::warn("features: '{}': {}", issue.mod, issue.text);
     for (const features::Resolved::Conflict& conflict : features.conflicts)

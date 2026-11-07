@@ -188,6 +188,12 @@ class App {
   void settings_pad_filter();
   // Alt+Enter: windowed <-> fullscreen.
   void toggle_fullscreen_key();
+  // Writes the settings to opencross.ini; a --config ini (a route or test) is never rewritten.
+  void save_config() const {
+    if (own_ini) config.save(config_file);
+  }
+  // Mods reach a run started with the player's own ini and no [Debug] Script, or one that sets [Debug] ScriptMods.
+  bool with_mods() const { return (own_ini && config.debug_script.empty()) || config.debug_script_mods; }
   // RDE's speed toggles do nothing in room 386 and in the battles launched from it (the room decides, not the battle id); a standalone
   // battle is never locked.
   bool speed_locked() const;
