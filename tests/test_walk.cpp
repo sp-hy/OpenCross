@@ -1,7 +1,7 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
 // by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, the screen ripple grid and the
 // frame echo's projection, the dialogue portrait side; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
-// the key-item range) and the FE 2F reset.
+// the key-item range), the FE 2F reset and the seeded script RAND.
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -597,6 +597,24 @@ void test_field_reset() {
   CHECK(!world.take_game_reset());
 }
 
+// RAND draws from the field's script generator, which set_seed seeds: the same seed rolls the same, another seed rolls otherwise.
+std::pair<s32, s32> script_rand(u32 seed) {
+  game::FieldWorld world;
+  world.set_seed(seed);
+  script::FieldScriptModule module;
+  module.code = {0x00, 0x1E, 0x00, 0x01, 0x1E, 0x02, 0x01, 0x00};
+  module.entities.push_back({});
+  module.entities[0][0] = 1;
+  world.vm().load(module);
+  return {world.vm().var(0x100), world.vm().var(0x102)};
+}
+
+void test_script_rand_seeded() {
+  CHECK(script_rand(1) == script_rand(1));
+  CHECK(script_rand(1) != script_rand(2));
+  CHECK(script_rand(2) != script_rand(3));
+}
+
 // FE 65 form 0 is not a screen: it writes variable 0x42 and switches the disc even while a menu request is pending.
 void test_change_disc_with_pending_menu() {
   game::FieldWorld world;
@@ -611,6 +629,7 @@ void test_change_disc_with_pending_menu() {
 
 int main() {
   test_field_reset();
+  test_script_rand_seeded();
   test_change_disc_with_pending_menu();
   test_kid_grid_save_restore();
   test_character_strip_locked_cells();
