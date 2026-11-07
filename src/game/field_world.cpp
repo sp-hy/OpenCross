@@ -25,7 +25,14 @@ namespace oc::game {
 
 using namespace field_internal;
 
-FieldWorld::FieldWorld() : vm_(*this) {}
+// The VM's RAND / RAND_MOD draw from script_rng_, which set_seed seeds (the clock, or [Debug] Seed).
+FieldWorld::FieldWorld()
+    : vm_(*this, [this] {
+        script_rng_ ^= script_rng_ << 13;
+        script_rng_ ^= script_rng_ >> 17;
+        script_rng_ ^= script_rng_ << 5;
+        return script_rng_;
+      }) {}
 FieldWorld::~FieldWorld() { shutdown(); }
 
 bool FieldWorld::init(const vfs::Vfs& files, render::GpuContext& ctx, render::SpriteBatch& sprites, render::MeshPipeline& meshes,
