@@ -67,12 +67,21 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
     bopt.monster_party = world.monster_party();
     // The Lynx duel's room keeps the party member the third enemy becomes in this variable.
     bopt.duel_third = world.vm().var(0x1C8);
-    // Party swap (a mod's mod.ini): the reserve is every recruited character outside the party that the party screen may show (not
-    // excluded by FE 60).
+    // Party swap (a mod's mod.ini): with Reserve slots, the characters in them (slot order); with Reserve=0 every recruited character
+    // outside the party that the party screen may show (not excluded by FE 60).
     bopt.party_swap = features.enabled(features::kPartySwap);
-    if (bopt.party_swap)
-      for (const battle::PartyMember& member : bopt.bench)
-        if (gstate.available(member.char_id)) bopt.swap_reserve.push_back(member.char_id);
+    if (bopt.party_swap) {
+      const auto benched = [&](int char_id) {
+        return std::any_of(bopt.bench.begin(), bopt.bench.end(), [&](const battle::PartyMember& member) { return member.char_id == char_id; });
+      };
+      if (const int reserve_size = features.value(features::kPartySwap, "Reserve"); reserve_size > 0) {
+        for (int char_id : gstate.reserve(reserve_size))
+          if (char_id >= 0 && benched(char_id)) bopt.swap_reserve.push_back(char_id);
+      } else {
+        for (const battle::PartyMember& member : bopt.bench)
+          if (gstate.available(member.char_id)) bopt.swap_reserve.push_back(member.char_id);
+      }
+    }
     if (battle_args.scene == 0x1DD) {
       bopt.duel_names = game::duel_names(gstate, names);
       if (const int relief = gstate.slot.head[ui::kReliefHead]; relief != 0xFF) bopt.duel_relief = relief;
@@ -151,7 +160,8 @@ void App::finish_field_battle(bool after_results) {
     const std::vector<int> saved = world.game_state().party();
     const int relief = world.game_state().slot.head[ui::kReliefHead];
     const bool stood_in = relief != 0xFF && std::find(saved.begin(), saved.end(), 0) != saved.end() && std::find(saved.begin(), saved.end(), relief) == saved.end();
-    if (game::keep_swapped_lineup(world.game_state(), *battle.battle(), stood_in ? relief : -1)) world.state_edited();
+    if (game::keep_swapped_lineup(world.game_state(), *battle.battle(), stood_in ? relief : -1, features.value(features::kPartySwap, "Reserve")))
+      world.state_edited();
   }
   // The Dopplegang pool and script vars 0x00..0x0E go back to the globals.
   if (written_back) {

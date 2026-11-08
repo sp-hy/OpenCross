@@ -106,7 +106,8 @@ void draw_dump_block(platform::Config& cfg, bool* settings_dirty) {
 }
 
 // Engine features (core/features.h): per setting the value of this run's mods and defaults, and the player's own value ([Features] in
-// opencross.ini), which wins. Features are read at launch, so a change takes effect the next time the game starts.
+// opencross.ini), which wins. Features are read at launch, so a change takes effect the next time the game starts. Each feature is one
+// line, its Enabled setting as a checkbox named after the feature; its other settings show under it only while it is on.
 void draw_features_block(platform::Config& cfg, const vfs::ModManager& mods, bool* settings_dirty) {
   ImGui::Separator();
   ImGui::AlignTextToFramePadding();
@@ -124,23 +125,25 @@ void draw_features_block(platform::Config& cfg, const vfs::ModManager& mods, boo
   for (const features::Feature& feature : features::table()) {
     if (!*feature.section) continue;
     ImGui::PushID(feature.id);
-    ImGui::TextDisabled("%s", feature.label);
-    for (size_t k = 0; k < feature.settings.size(); ++k) {
+    // Setting 0 is Enabled (features.h): the feature's own line; the rest only while it is on.
+    const bool feature_on = now.values.at(feature.id)[0] != 0;
+    for (size_t k = 0; k < feature.settings.size() && (k == 0 || feature_on); ++k) {
       const features::Setting& setting = feature.settings[k];
+      const char* label = k == 0 ? feature.label : setting.label;
       ImGui::PushID(static_cast<int>(k));
       const std::string key = std::string(feature.section) + "." + setting.key;
       const auto own = std::find_if(cfg.features.begin(), cfg.features.end(), [&](const auto& entry) { return same_key(entry.first, key); });
       const std::string& source = now.sources.at(feature.id)[k];
       int value = now.values.at(feature.id)[k];
       bool edited = false;
-      ImGui::Indent();
+      if (k > 0) ImGui::Indent();
       if (setting.min == 0 && setting.max == 1) {
         bool on = value != 0;
-        edited = ImGui::Checkbox(setting.label, &on);
+        edited = ImGui::Checkbox(label, &on);
         value = on ? 1 : 0;
       } else {
         ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
-        edited = ImGui::SliderInt(setting.label, &value, setting.min, setting.max);
+        edited = ImGui::SliderInt(label, &value, setting.min, setting.max);
       }
       ImGui::SameLine();
       ImGui::TextDisabled("%s", source.empty() ? "(default)" : source == "opencross.ini" ? "(your setting)" : ("(" + source + ")").c_str());
@@ -159,7 +162,7 @@ void draw_features_block(platform::Config& cfg, const vfs::ModManager& mods, boo
         else cfg.features.emplace_back(key, std::to_string(value));
         settings = true;
       }
-      ImGui::Unindent();
+      if (k > 0) ImGui::Unindent();
       ImGui::PopID();
     }
     ImGui::PopID();

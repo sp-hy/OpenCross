@@ -120,6 +120,8 @@ struct ActorPose {
 struct ModelHandle {
   assets::ModelAsset asset;
   std::unique_ptr<render::MeshModel> gpu;
+  // The field draws the model this much larger than the entity's scale says (a battle model on a field entity: field_model_source.h).
+  float field_scale = 1.0f;
 };
 
 // Script animation ids (SET_ANIMATION): 0..0x7F = s4 slot, 0x80 + k = extra ("ex") clip k of the model.

@@ -244,6 +244,24 @@ void test_slot() {
   CHECK(sd2.members().size() == 3 && sd2.member("ext_save.dat") && sd2.member("ext_save.dat")->data.size() == 4);
 }
 
+// The OpenCross record in the block tail: leftovers without the magic hold no entries; entries survive an encode / decode.
+void test_tail_record() {
+  SaveSlot slot = synthetic_slot();
+  std::fill(slot.tail.begin(), slot.tail.end(), u8{0x5A});
+  CHECK(slot.reserve().empty() && slot.tail_entry(tail_tag::kReserve).empty());
+  slot.set_reserve({7, -1, 9});
+  CHECK(slot.reserve() == (std::vector<int>{7, -1, 9}));
+  CHECK(slot.tail[0] == 'O' && slot.tail[3] == 1 && slot.tail[4] == tail_tag::kReserve && slot.tail[5] == 3 && slot.tail[7] == 0xFF);
+  // The bytes after the record (the save version's place) are not touched.
+  CHECK(slot.tail[kTailExtSize] == 0x5A);
+  CHECK(slot.set_tail_entry(9, {1, 2}));
+  slot.set_reserve({3});
+  CHECK(slot.tail_entry(9) == (std::vector<u8>{1, 2}) && slot.reserve() == (std::vector<int>{3}));
+  CHECK(decode_block(encode_block(slot)).reserve() == (std::vector<int>{3}));
+  CHECK(!slot.set_tail_entry(10, std::vector<u8>(0xD0, 1)) && slot.tail_entry(10).empty());
+  CHECK(slot.set_tail_entry(9, {}) && slot.tail_entry(9).empty() && slot.reserve() == (std::vector<int>{3}));
+}
+
 // ext_save.dat: format, RDE's loader rules, SaveDat write / read.
 // The loader's checksum and version gates: an older block (0x102) is summed without the header frame and lacks the last steps, which
 // take their defaults; a block with one byte changed in the summed range is refused (corrupted) but still decodes for its preview.
@@ -507,6 +525,7 @@ int main() try {
   test_memcard();
   test_slot();
   test_version_gates();
+  test_tail_record();
   test_ext();
   if (failures) {
     std::printf("%d failure(s)\n", failures);

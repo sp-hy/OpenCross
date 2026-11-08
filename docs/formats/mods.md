@@ -214,6 +214,7 @@ Requires=PartySwap
 [PartySwap]
 Enabled=1
 KeepLineup=1
+Reserve=3
 ```
 
 * **`[Mod]`**: `Name`, `Version`, `Author` (shown in the log and the Mods tab) and `Requires`, a comma-separated list of feature sections. Any other `[Mod]` key is a problem.
@@ -228,5 +229,6 @@ The features this build has:
 | Section | Id | Settings | What it does |
 |---|---|---|---|
 | (none) | 0 | | The field-script extension range itself (`fieldscript.md` 6.12): not set by mods. |
-| `PartySwap` | 1 | `Enabled` (0), `KeepLineup` (0) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). |
+| `PartySwap` | 1 | `Enabled` (0), `KeepLineup` (0), `Reserve` (0, 0..41) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). `Reserve` slots are set on the Party screen (`rules/menus.md`, party editor) and by the ops FE CC / FE CD; 0 (the default) = no slots, everyone recruited outside the party can come in, as at level 1. |
 | (none) | 2 | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12): not set by mods. |
+| `PartyScreen` | 3 | `Enabled` (0), `ReturnToSlot` (1) | Party screen (Tele-Porter) behaviour that differs from the game: `ReturnToSlot` = a pick returns the cursor to the slot it filled instead of keeping the member grid open (`rules/menus.md`, party editor). |

@@ -277,7 +277,10 @@ void FieldWorld::step_visuals() {
     // Op 82 is per axis (model space). The VM entity starts at the engine default 0x200 per
     // axis, so a 0 is always an explicit 0 (an entity can rise from y = 0 with AXIS_SCALE).
     ent_state.actor.scale = 1.0f;
-    for (int k = 0; k < 3; ++k) ent_state.actor.axis_scale[k] = static_cast<float>(static_cast<s16>(script_ent.scale[k])) / 4096.0f;
+    // A battle model worn by FE D0 is drawn at field size (ModelHandle::field_scale).
+    const float model_scale = ent_state.actor.model_handle() ? ent_state.actor.model_handle()->field_scale : 1.0f;
+    for (int k = 0; k < 3; ++k)
+      ent_state.actor.axis_scale[k] = static_cast<float>(static_cast<s16>(script_ent.scale[k])) / 4096.0f * model_scale;
     ent_state.actor.radius = ent_radius(i);
     ent_state.actor.height = ent_height(i);
     // Op AD: the flag selects the single RotMatrix({pitch, yaw, roll}) path. Op B0 / B1: a model y offset. Ops 27 / 28 / 29 / AA: pitch / model yaw / roll.

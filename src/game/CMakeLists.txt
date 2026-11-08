@@ -10,6 +10,8 @@ add_library(oc_game STATIC
   walk_mesh.cpp
   model_files.h
   model_files.cpp
+  field_model_source.h
+  field_model_source.cpp
   actor.h
   actor.cpp
   disc_index.h
@@ -48,7 +50,7 @@ add_library(oc_game STATIC
   new_game.h
   new_game.cpp
 )
-target_link_libraries(oc_game PUBLIC oc_core oc_platform oc_vfs oc_import oc_assets oc_render oc_script oc_ui oc_text oc_audio oc_effects oc_effects_gpu oc_battle SDL3::SDL3)
+target_link_libraries(oc_game PUBLIC oc_core oc_platform oc_vfs oc_import oc_assets oc_render oc_script oc_ui oc_text oc_audio oc_effects oc_effects_gpu oc_battle oc_battle_anim SDL3::SDL3)
 
 add_subdirectory(battle)
 add_subdirectory(effects)

@@ -1,18 +1,112 @@
 // Texture choice of battle player models: in both art modes every player folder's mesh is drawn on its .ltc (the HD .ltd copies
 // and a disc .ltd under an HD mesh sample another atlas); in HD art with the HD battle textures on, the left half of the Status-screen TIM
-// is the 4x image of that page and the eye strip's shut frame comes from its right half. Needs the game install (SKIP without one).
+// is the 4x image of that page and the eye strip's shut frame comes from its right half. The field's models from elsewhere (FE D0):
+// battle models made field models, their field scale, another room's model. Needs the game install (SKIP without one).
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <vector>
 
+#include "game/battle/battle_seq.h"
+#include "game/battle/model_table.h"
+#include "game/field_model_source.h"
 #include "game/model_files.h"
 #include "import/model.h"
 #include "platform/paths.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
+
+namespace {
+
+// FE D0's sources (field_model_source.h): every battle model reads and is renumbered for the field (stand / run / stance in the field
+// slots, its own clips as ex clips, no animation scripts left); the party models' own scripts name stand 1 and run 3 (the stance is
+// 2, but Lynx's approach ends on 1); another room's model reads with its own pages.
+int check_model_sources(const vfs::Vfs& files) {
+  int failures = 0, read = 0, from_scripts = 0;
+  // Reading the clips runs the models' scripts; the state the battle's VMs share is left as it was.
+  game::bseq::Vm::Shared before;
+  before.globals[3] = 77;
+  before.prev_action = 2;
+  before.seq_last = 0x616263;
+  game::bseq::Vm::restore(before);
+  for (size_t id = 0; id < game::kBattleModels.size(); ++id) {
+    const std::string stem(game::kBattleModels[id]);
+    if (stem.empty()) continue;
+    const auto obj = files.read("cdrom/" + stem + ".obj");
+    if (!obj) continue;
+    const game::BattleFieldClips clips = game::battle_field_clips(ByteSpan(*obj));
+    if (clips.stand >= 0 && clips.run >= 0) ++from_scripts;
+    if (stem.starts_with("battle/player/") && (clips.stand != 1 || clips.run != 3 || clips.stance < 1)) {
+      std::printf("FAIL %s: party model clips stand %d run %d stance %d (want 1 3 and a stance)\n", stem.c_str(), clips.stand, clips.run,
+                  clips.stance);
+      ++failures;
+    }
+    std::string err;
+    const auto asset = game::read_battle_model_for_field(files, stem, false, &err);
+    if (!asset) {
+      std::printf("FAIL %s: %s\n", stem.c_str(), err.c_str());
+      ++failures;
+      continue;
+    }
+    ++read;
+    bool slots = true;
+    for (const u32 slot : {0u, 1u, 2u, 3u, 8u}) {
+      bool found = false;
+      for (const assets::AnimationClip& clip : asset->clips) found = found || (clip.source == "s4" && clip.index == slot);
+      slots = slots && found;
+    }
+    if (!slots || !asset->anim_seq.empty() || !asset->ex_anim_seq.empty()) {
+      std::printf("FAIL %s: field slots 0 1 2 3 8 %s, scripts left %zu / %zu\n", stem.c_str(), slots ? "present" : "missing", asset->anim_seq.size(),
+                  asset->ex_anim_seq.size());
+      ++failures;
+    }
+  }
+  const game::bseq::Vm::Shared after = game::bseq::Vm::shared();
+  if (after.globals != before.globals || after.prev_action != before.prev_action || after.seq_last != before.seq_last) {
+    std::printf("FAIL reading battle models changed the battle VMs' shared state\n");
+    ++failures;
+  }
+  if (read < 200) {
+    std::printf("FAIL only %d battle models read for the field\n", read);
+    ++failures;
+  }
+  // The field scale of a battle model: field height / battle height of the same character (extent y), the median over the cast.
+  std::vector<double> ratios;
+  for (const char* folder : {"selju", "kid", "guill", "ishito", "slash", "jakotu", "riddle", "carshu", "zoah", "malchera", "colcha",
+                             "lutianna", "poshul", "lazzuly", "zappa", "ocha", "radius", "farga", "mamacha", "gren", "lena", "miki"}) {
+    std::string unused;
+    const auto field = game::read_model_files(files, std::string("fieldobj/player/") + folder + "/" + folder, &unused);
+    std::string battle_stem;
+    for (const std::string& stem : {std::string("battle/player/") + folder + "/" + folder, std::string("battle/player/") + folder + "1/" + folder + "1",
+                                    std::string("battle/player/") + folder + "2/" + folder})
+      if (battle_stem.empty() && files.exists("cdrom/" + stem + ".obj")) battle_stem = stem;
+    const auto battle = battle_stem.empty() ? std::nullopt : game::read_model_files(files, battle_stem, &unused);
+    if (!field || !battle || field->extent[1] == 0 || battle->extent[1] == 0) continue;
+    ratios.push_back(std::abs(static_cast<double>(field->extent[1])) / std::abs(static_cast<double>(battle->extent[1])));
+  }
+  std::sort(ratios.begin(), ratios.end());
+  const double median = ratios.empty() ? 0.0 : ratios[ratios.size() / 2];
+  std::printf("field / battle model height: median %.3f over %zu characters (%.3f .. %.3f)\n", median, ratios.size(),
+              ratios.empty() ? 0.0 : ratios.front(), ratios.empty() ? 0.0 : ratios.back());
+  if (ratios.size() < 15 || std::abs(median - game::kBattleModelFieldScale) > 0.1) {
+    std::printf("FAIL kBattleModelFieldScale %.2f is not the measured median %.3f\n", game::kBattleModelFieldScale, median);
+    ++failures;
+  }
+  std::string err;
+  const auto room = game::read_room_model(files, "alu_a01f", 1, &err);
+  if (!room || room->textures.empty() || room->meshes.empty()) {
+    std::printf("FAIL alu_a01f model 1 from another room: %s\n", err.c_str());
+    ++failures;
+  }
+  std::printf("%d battle models read for the field (%d with stand / run from their scripts)\n", read, from_scripts);
+  return failures;
+}
+
+}  // namespace
 
 int main() {
   const char* configured = std::getenv("OPENCROSS_GAMEDIR");
@@ -99,6 +193,8 @@ int main() {
     std::printf("FAIL no battle player with an .ltc\n");
     ++failures;
   }
+  files.set_hd_mode(false);
+  failures += check_model_sources(files);
   std::printf("%d player models checked, %d failures\n", checked, failures);
   return failures == 0 ? 0 : 1;
 }
