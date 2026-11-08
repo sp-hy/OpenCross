@@ -526,9 +526,13 @@ void BattleView::build_party_panels() {
 // (12 x 24 texels from texel row 40), the name the status's cmnmes text in style 2 (the JP font in Japanese), colour 0x757575.
 void BattleView::build_status_plates(int unit_index, bool right) {
   if (unit_index < 0 || unit_index >= battle::kUnits) return;
+  build_status_plate_column(battle_->unit(unit_index).lo, right);
+}
+
+void BattleView::build_status_plate_column(u32 lo, bool right) {
   const bool jp = lang_ == import::Lang::Jp;
   const size_t first = op_count();
-  for (const bstat::Placed& placed : bstat::place(battle_->unit(unit_index).lo, right)) {
+  for (const bstat::Placed& placed : bstat::place(lo, right)) {
     const bstat::Plate& plate = bstat::kPlates[static_cast<size_t>(placed.plate)];
     const float u0 = (12.0f * static_cast<float>(plate.colour) + 0.5f) / 80.0f, u1 = u0 + 11.0f / 80.0f;
     add_img(hud_[kHStatus], static_cast<float>(placed.x) * kPs1Px, static_cast<float>(placed.y + 1) * kRowScale, 3 * kPs1Px, 6 * kRowScale, u0,
@@ -1757,14 +1761,15 @@ void BattleView::build_dopple_ui() {
   if (!targets_.empty()) build_target_ui(false);
 }
 
-// Party swap's list: a window of the Dopplegang list's geometry, one column, six rows of 16 px (scrolling with the cursor): each character
-// that can come in, its name and HP / max HP (white words, the cursor entry not recoloured, as the Dopplegang list); the command box stays
-// hidden while it is open.
+// Party swap's list: a window at the Dopplegang list's place, one column, six rows of 16 px (scrolling with the cursor): each character
+// that can come in, its innate colour dot (the target window's), name, HP / max HP and a colour triangle per status (white words, the
+// cursor entry not recoloured, as the Dopplegang list); red triangles at the right edge when rows are hidden above / below, and the cursor
+// character's status plates in the right column. The command box stays hidden while it is open.
 // Opening the list reads the listed characters' models and weapons on the model cache's worker while the player picks: the swap's bind takes
 // them from there.
 void BattleView::open_swap() {
   swap_list_ = battle_->swap_candidates(active_pc_);
-  swap_cur_ = 0;
+  swap_cur_ = swap_top_ = 0;
   ui_ = Ui::Swap;
   std::vector<std::string> stems;
   std::vector<std::pair<std::string, int>> weapon_parts;
@@ -1781,21 +1786,60 @@ void BattleView::open_swap() {
 }
 
 void BattleView::build_swap_ui() {
-  constexpr float wx = 0x38, wy = 0x34, ww = 0xd0;
+  // Interior x 0x38..0xB0: dot at 0x40, name at 0x4A, HP at 0x80, status triangles from 0xA2.
+  constexpr float wx = 0x38, wy = 0x34, ww = 0x78;
   constexpr int kRows = 6;
   const int count = static_cast<int>(swap_list_.size());
-  const int shown = std::min(count, kRows), top = std::clamp(swap_cur_ - (kRows - 1), 0, std::max(0, count - kRows));
+  const int shown = std::min(count, kRows);
+  if (swap_cur_ < swap_top_) swap_top_ = swap_cur_;
+  else if (swap_cur_ >= swap_top_ + kRows) swap_top_ = swap_cur_ - kRows + 1;
+  swap_top_ = std::clamp(swap_top_, 0, std::max(0, count - kRows));
+  const int top = swap_top_;
   const float wh = 16.0f * static_cast<float>(std::max(1, shown));
   add_skin_box((wx - 8.0f) * kPs1Px, (wy - 8.0f) * kRowScale, (ww + 16.0f) * kPs1Px, (wh + 16.0f) * kRowScale);
   add_menu_cursor(0x36 * kPs1Px, (0x3A + 16 * static_cast<float>(swap_cur_ - top)) * kRowScale);
   const std::vector<battle::PartyMember>& bench = battle_->bench();
+  // A benched character's statuses: its battle state when it fought earlier in this battle, else its record's.
+  auto statuses = [&](const battle::PartyMember& member) {
+    const battle::Unit* benched = battle_->benched_unit(member.char_id);
+    return benched ? benched->lo : member.lo_persist;
+  };
   for (int row = 0; row < shown; ++row) {
     const int char_id = swap_list_[static_cast<size_t>(top + row)];
     const auto member = std::find_if(bench.begin(), bench.end(), [&](const battle::PartyMember& entry) { return entry.char_id == char_id; });
     if (member == bench.end()) continue;
     const float y = static_cast<float>(0x38 + row * 16);
-    btext(0xB8, import::utf8_to_u32(member->name), 0x40, y, 0x808080);
-    btext(2, import::utf8_to_u32(std::format("{}/{}", member->hp, member->stat[0])), 0xC0, y, 0x808080);
+    // Style 0xB with the target window's +7 / +2 nudge; the innate byte's colour mask is bits 2..7.
+    const int ci = data::colour_index_of_bit(static_cast<u8>(member->innate & 0xFC));
+    if (ci >= 0 && ci < 6) btext(0xB, U"●", 0x3A + 7, y + 2, kInnateDot[ci]);
+    btext(0xB8, import::utf8_to_u32(member->name), 0x4A, y, 0x808080);
+    btext(2, import::utf8_to_u32(std::format("{}/{}", member->hp, member->stat[0])), 0x80, y, 0x808080);
+    float tx = 0xA2;
+    for (const bstat::Placed& placed : bstat::place(statuses(*member), false)) {
+      const bstat::Plate& plate = bstat::kPlates[static_cast<size_t>(placed.plate)];
+      const float u0 = (12.0f * static_cast<float>(plate.colour) + 0.5f) / 80.0f, u1 = u0 + 11.0f / 80.0f;
+      add_img(hud_[kHStatus], tx * kPs1Px, (y + 5) * kRowScale, 3 * kPs1Px, 6 * kRowScale, u0, 40.5f / 64.0f, u1, 63.5f / 64.0f);
+      tx += 4;
+    }
+  }
+  // The scroll triangles as one-canvas-row spans (the Dopplegang list's shape at this window's right edge).
+  auto tri = [&](float y0, float y1, bool down) {
+    const float ty = std::floor(y0 * kRowScale), by = std::ceil(y1 * kRowScale);
+    const float centre = wx + ww + 7;
+    for (float cy = ty; cy < by; cy += 1.0f) {
+      const float frac = (cy + 0.5f - y0 * kRowScale) / ((y1 - y0) * kRowScale);
+      const float width = down ? 1.0f - frac : frac;
+      const float left = centre - 6 * width, right = centre + 5 * width;
+      if (right > left) add_rect(left * kPs1Px, cy, (right - left) * kPs1Px, 1.0f, col(255, 0, 0));
+    }
+  };
+  if (top > 0) tri(0x38, 0x3E, false);
+  if (top + shown < count) tri(0x38 + 16.0f * static_cast<float>(shown) - 8, 0x38 + 16.0f * static_cast<float>(shown) - 2, true);
+  // The cursor character's status plates.
+  if (swap_cur_ >= 0 && swap_cur_ < count) {
+    const int char_id = swap_list_[static_cast<size_t>(swap_cur_)];
+    const auto member = std::find_if(bench.begin(), bench.end(), [&](const battle::PartyMember& entry) { return entry.char_id == char_id; });
+    if (member != bench.end()) build_status_plate_column(statuses(*member), true);
   }
 }
 

@@ -123,6 +123,8 @@ void NullHost::party_override(bool, int) { NOTE("party_override"); }
 void NullHost::swap_leader(int) { NOTE("swap_leader"); }
 void NullHost::roster_add(int) { NOTE("roster_add"); }
 void NullHost::roster_remove(int) { NOTE("roster_remove"); }
+int NullHost::reserve_member(int) { NOTE("reserve_member"); return -1; }
+void NullHost::set_reserve_member(int, int) { NOTE("set_reserve_member"); }
 int NullHost::item_count(int) { NOTE("item_count"); return 0; }
 void NullHost::give_item(int) { NOTE("give_item"); }
 void NullHost::take_item(int) { NOTE("take_item"); }

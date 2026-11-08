@@ -727,6 +727,8 @@ class FieldWorld final : public script::FieldHost {
   void swap_leader(int char_id) override;
   void roster_add(int char_id) override;
   void roster_remove(int char_id) override;
+  int reserve_member(int slot) override;
+  void set_reserve_member(int slot, int char_id) override;
   int item_count(int id) override;
   void give_item(int id) override;
   void var_bit_set(u32 bit_ref) override {

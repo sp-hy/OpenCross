@@ -375,6 +375,23 @@ void FieldWorld::roster_remove(int char_id) {
   if (char_id >= 0 && char_id < save::kNumChars) gs_->slot.set_recruited(char_id, false);
 }
 
+// The reserve lives in the save's tail record (SaveSlot::reserve); GameState::reserve applies the rules.
+int FieldWorld::reserve_member(int slot) {
+  if (slot < 0 || slot >= save::kNumChars) return -1;
+  const std::vector<int> reserve = gs_->reserve(std::max(slot + 1, static_cast<int>(gs_->slot.reserve().size())));
+  return reserve[static_cast<size_t>(slot)];
+}
+void FieldWorld::set_reserve_member(int slot, int char_id) {
+  if (slot < 0 || slot >= save::kNumChars - 3) return;
+  std::vector<int> reserve = gs_->slot.reserve();
+  if (static_cast<int>(reserve.size()) <= slot) reserve.resize(static_cast<size_t>(slot) + 1, -1);
+  if (char_id < 0 || char_id >= save::kNumChars) char_id = -1;
+  for (int& other : reserve)
+    if (char_id >= 0 && other == char_id) other = -1;
+  reserve[static_cast<size_t>(slot)] = char_id;
+  gs_->slot.set_reserve(reserve);
+}
+
 // Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x401..0x43F key items (id - 0x400 =
 // key item number, 1-based as in GameState::has_key_item); the scripts reach only the first 63 of the 64 bits, higher ids are refused.
 namespace {

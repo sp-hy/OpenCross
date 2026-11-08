@@ -34,6 +34,7 @@ struct Feature {
 constexpr int kExtensionRange = 0;
 constexpr int kPartySwap = 1;
 constexpr int kModUi = 2;
+constexpr int kPartyScreen = 3;
 constexpr int kModelSources = 5;
 
 std::span<const Feature> table();

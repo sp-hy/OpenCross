@@ -49,6 +49,14 @@ u32 sub(u32 colour, int amount) {
   return channel(0) | channel(8) | channel(16);
 }
 
+// Party swap's reserve (OpenCross): the Current Party window becomes a panel of two rows in the space of the help text. Its top
+// (backdrop rows kPartyTop..kPartyTopEnd, outer line at 153, label gap up to x kPartyGapEnd) is raised by kPanelShift, its side lines run
+// to kPanelBottom, and its top drawn upside down there is the bottom edge, whose label gap holds "Reserve" (kReserveLabelDrop below
+// Current Party's label position, as far as the flipped outer line). The party row moves up with the top; the reserve row is at kReserveY.
+constexpr float kStatusBottom = 110, kPartyTop = 150, kPartyTopEnd = 163, kPartyBottom = 200, kPartyGapEnd = 203;
+constexpr float kPanelShift = -37, kReserveY = 164, kPanelBottom = 197, kReserveLabelDrop = 51;
+const char32_t* const kReserveLabel[6] = {U"Reserve", U"Réserve", U"Riserva", U"Reserve", U"Reserva", U"控え"};
+
 struct Rec {
   int hp = 0, max_hp = 0;
   // The six stats in the screen's order.
@@ -107,8 +115,21 @@ struct PartyScreen::Impl {
   bool finished_flag = false;
   std::array<u8, 3> out{0xFF, 0xFF, 0xFF};
   u8 relief_out = 0xFF;
+  // Party swap's reserve slots (0 = none) and the slots to write back.
+  int reserve_size = 0;
+  std::vector<int> reserve_out;
 
   const game::PartyGrid& grid() const { return kind == Kind::Relief ? static_cast<const game::PartyGrid&>(rel) : ed; }
+  bool reserve_shown() const { return kind == Kind::Party && !ed.reserve().empty(); }
+  // " reserve a b c" (-1 = empty) when the screen has a reserve.
+  std::string reserve_text() const {
+    std::string listed;
+    if (!ed.reserve().empty()) {
+      listed = " reserve";
+      for (int id : ed.reserve()) listed += " " + std::to_string(id);
+    }
+    return listed;
+  }
 
   // ---------------------------------------------------------------- resources
   Tex* store(const std::string& key, u32 w, u32 h, const void* rgba, bool lin) {
@@ -327,7 +348,8 @@ void PartyScreen::open(const GameState& gs) {
   const std::array<u8, 3> party = sl.party();
   impl.kind = Kind::Party;
   impl.ed.begin(grid, {party[0] == 0xFF ? -1 : party[0], party[1] == 0xFF ? -1 : party[1], party[2] == 0xFF ? -1 : party[2]},
-                {sl.unk_e1b8[0], sl.unk_e1b8[1]});
+                {sl.unk_e1b8[0], sl.unk_e1b8[1]}, impl.reserve_size > 0 ? gs.reserve(impl.reserve_size) : std::vector<int>{});
+  impl.reserve_out = impl.ed.reserve();
   for (int character = 0; character < 44; ++character) {
     const save::SaveChar& ch = sl.chars[static_cast<size_t>(character)];
     Rec& rec = impl.recs[static_cast<size_t>(character)];
@@ -403,7 +425,8 @@ int PartyScreen::update(const platform::Input& in, float dt) {
         const std::vector<int> result = impl.ed.result();
         impl.out = {0xFF, 0xFF, 0xFF};
         for (size_t i = 0; i < result.size() && i < 3; ++i) impl.out[i] = static_cast<u8>(result[i]);
-        log::info("party screen: closed, party {} {} {}", impl.out[0], impl.out[1], impl.out[2]);
+        impl.reserve_out = impl.ed.reserve();
+        log::info("party screen: closed, party {} {} {}{}", impl.out[0], impl.out[1], impl.out[2], impl.reserve_text());
       }
     }
   } else if (impl.phase == Impl::Phase::Close) {
@@ -426,6 +449,9 @@ bool PartyScreen::take_finished() {
 }
 std::array<u8, 3> PartyScreen::result() const { return impl_->out; }
 u8 PartyScreen::relief_result() const { return impl_->relief_out; }
+std::vector<int> PartyScreen::reserve_result() const { return impl_->reserve_out; }
+void PartyScreen::set_reserve_size(int size) { impl_->reserve_size = std::clamp(size, 0, 41); }
+void PartyScreen::set_return_to_slot(bool on) { impl_->ed.set_return_to_slot(on); }
 
 std::string PartyScreen::describe() const {
   const Impl& impl = *impl_;
@@ -439,7 +465,7 @@ std::string PartyScreen::describe() const {
   std::snprintf(buffer, sizeof buffer, "%s slot %d col %d row %d scroll %d party %d %d %d",
                 impl.ed.mode() == game::PartyEditor::Mode::Slots ? "slots" : "grid", impl.ed.slot(), impl.ed.column(), impl.ed.row(), impl.ed.scroll(),
                 party_slots[0], party_slots[1], party_slots[2]);
-  return buffer;
+  return buffer + impl.reserve_text();
 }
 
 // ---------------------------------------------------------------------------------------------------------------- the screen
@@ -451,8 +477,14 @@ void PartyScreen::Impl::draw_screen() {
   // twice); closing: -8 per frame on the last published lists.
   const int fade = phase == Phase::Close ? 8 * close_frame : (frame <= 7 ? 0xE0 - 0x20 * std::max(0, frame - 1) : 0);
   auto col = [&](u32 colour) { return c80(sub(colour, fade)); };
+  const bool reserve_on = reserve_shown();
   const Clip grid_clip{0, 26, 640, 26 + 172};
   const int ys = party_grid.yscroll();
+  // The party row's y (raised into the shared panel while there is a reserve) and the reserve row's.
+  const float party_y = reserve_on ? 0xA5 + kPanelShift : 0xA5;
+  const int lang_index = static_cast<int>(lang);
+  const std::u32string reserve_label = kReserveLabel[std::clamp(lang_index, 0, 5)];
+  const int reserve_font = jp() ? font::kKb : font::kBn;
 
   // The PS1 picture under the lists: the background sprite 640 x 220 at (0, 0), bg.tim through the texture window (0, 0, 64, 32).
   // The windows (w17.tim) are cdrom2's blank sheet in both art modes: nothing. PS1 fades:
@@ -481,7 +513,28 @@ void PartyScreen::Impl::draw_screen() {
 
   // Main layer: backdrop, grid cells (visible rows), then the party slots (Party) or the fixed slot 0 + silhouette and icon (Relief).
   grouped = true;
-  if (Tex* bg = png(localized_path(*vfs, relief ? "hd/menu/shapes/memmenu2.png" : "hd/menu/shapes/memmenu.png", lang))) draw_quad(bg->set, 0, 0, 640, 216, 0, 0, 1, 1, col(0x808080));
+  if (Tex* bg = png(localized_path(*vfs, relief ? "hd/menu/shapes/memmenu2.png" : "hd/menu/shapes/memmenu.png", lang))) {
+    if (!reserve_on) {
+      draw_quad(bg->set, 0, 0, 640, 216, 0, 0, 1, 1, col(0x808080));
+    } else {
+      // Backdrop rows src_y0..src_y1 of the x range x0..x1 drawn over dst_y0..dst_y1 (src_y0 > src_y1 flips them).
+      auto rows = [&](float x0, float x1, float src_y0, float src_y1, float dst_y0, float dst_y1) {
+        draw_quad(bg->set, x0, dst_y0, x1 - x0, dst_y1 - dst_y0, x0 / 640, src_y0 / 216, x1 / 640, src_y1 / 216, col(0x808080));
+      };
+      rows(kGroupSplit, 640, 0, 216, 0, 216);
+      rows(0, kGroupSplit, 0, kStatusBottom, 0, kStatusBottom);
+      // The shared panel: the Current Party window's top raised, its side lines over both rows, its top flipped as the bottom edge.
+      rows(0, kGroupSplit, kPartyTop, kPartyTopEnd, kPartyTop + kPanelShift, kPartyTopEnd + kPanelShift);
+      rows(0, kGroupSplit, kPartyTopEnd + 2, kPartyBottom, kPartyTopEnd + kPanelShift, kPanelBottom);
+      rows(0, kGroupSplit, kPartyTopEnd, kPartyTop, kPanelBottom, kPanelBottom + (kPartyTopEnd - kPartyTop));
+      // The flipped edge's label gap is Current Party's: the part "Reserve" does not cover takes line from right of the gap.
+      if (prep) fonts.prepare(reserve_font, reserve_label);
+      const float label_end = static_cast<float>(spr[1].x) + fonts.measure(reserve_font, reserve_label, font::slot(reserve_font).scale) / kSx + 4;
+      if (label_end < kPartyGapEnd)
+        draw_quad(bg->set, label_end, kPanelBottom, kPartyGapEnd - label_end, kPartyTopEnd - kPartyTop, kPartyGapEnd / 640, kPartyTopEnd / 216,
+                  (2 * kPartyGapEnd - label_end) / 640, kPartyTop / 216, col(0x808080));
+    }
+  }
   const int roster_size = static_cast<int>(party_grid.roster().size());
   for (int i = 0; i < roster_size; ++i) {
     const int grid_row = i >> 2;
@@ -491,6 +544,9 @@ void PartyScreen::Impl::draw_screen() {
              col(cur ? 0x000040 : 0x404040), grid_clip);
   }
   constexpr int kReliefSlot = 2;
+  // The reserve slots shown: kReserveShown from the row's scroll, under the party slots' columns.
+  const int reserve_first = ed.reserve_scroll();
+  const int reserve_last = std::min(static_cast<int>(ed.reserve().size()), reserve_first + game::PartyEditor::kReserveShown);
   if (relief) {
     // Record 0 at (0x40, 0xA5), then the relief member as a black silhouette.
     portrait(0, 0x40, 0xA5, col(0x808080));
@@ -505,35 +561,48 @@ void PartyScreen::Impl::draw_screen() {
     for (int member_slot = 0; member_slot < 3; ++member_slot) {
       const int character = ed.slots()[static_cast<size_t>(member_slot)];
       if (character < 0) continue;
-      portrait(character, static_cast<float>(member_slot * 0x44 + 0x40), 0xA5, col(ed.slot() == member_slot ? 0x000000 : 0x404040));
+      portrait(character, static_cast<float>(member_slot * 0x44 + 0x40), party_y, col(ed.slot() == member_slot ? 0x000000 : 0x404040));
     }
+    if (reserve_on)
+      for (int index = reserve_first; index < reserve_last; ++index)
+        if (const int character = ed.reserve()[static_cast<size_t>(index)]; character >= 0)
+          portrait(character, static_cast<float>((index - reserve_first) * 0x44 + 0x40), kReserveY, col(ed.slot() == 3 + index ? 0x000000 : 0x404040));
   }
   // Top layer: lifted grid portrait + grid cursor (grid mode), lifted slot portrait + slot cursor.
   Tex* cur = png("hd/menu/memmenu_cur.png");
-  auto cursor = [&](float x, float y) {
-    if (cur) draw_quad(cur->set, x - 3, y - 2, 69, 35, 0, 0, 1, 1, col(0x808080), grid_clip);
+  auto cursor = [&](float x, float y, const Clip& cl) {
+    if (cur) draw_quad(cur->set, x - 3, y - 2, 69, 35, 0, 0, 1, 1, col(0x808080), cl);
   };
   if (grid_mode) {
     const int i = party_grid.cursor(), character = party_grid.cell(i);
-    const bool lift = relief ? character >= 0 : character >= 0 && (!ed.in_party(character) || ed.slots()[static_cast<size_t>(ed.slot())] == character);
+    const bool lift = relief ? character >= 0
+                             : character >= 0 && ((!ed.in_party(character) && !ed.in_reserve(character)) || ed.at(ed.slot()) == character);
     if (lift)
       portrait(character, static_cast<float>((i & 3) * 0x44 + 0x14A), static_cast<float>(ys + (i >> 2) * 0x22 + 0x1B), col(0x808080), grid_clip);
-    cursor(static_cast<float>((i & 3) * 0x44 + 0x14C), static_cast<float>(ys + (i >> 2) * 0x22 + 0x1C));
+    cursor(static_cast<float>((i & 3) * 0x44 + 0x14C), static_cast<float>(ys + (i >> 2) * 0x22 + 0x1C), grid_clip);
   }
   if (relief) {
     if (rel.relief() >= 0) portrait(rel.relief(), kReliefSlot * 0x44 + 0x3E, 0xA4, col(0x808080));
-    cursor(kReliefSlot * 0x44 + 0x40, 0xA5);
+    cursor(kReliefSlot * 0x44 + 0x40, 0xA5, grid_clip);
   } else {
-    if (const int character = ed.slots()[static_cast<size_t>(ed.slot())]; character >= 0)
-      portrait(character, static_cast<float>(ed.slot() * 0x44 + 0x3E), 0xA4, col(0x808080));
-    cursor(static_cast<float>(ed.slot() * 0x44 + 0x40), 0xA5);
+    const bool in_reserve = ed.slot() >= 3;
+    const float x = static_cast<float>((in_reserve ? ed.slot() - 3 - reserve_first : ed.slot()) * 0x44 + 0x40);
+    const float y = in_reserve ? kReserveY : party_y;
+    if (const int character = ed.at(ed.slot()); character >= 0) portrait(character, x - 2, y - 1, col(0x808080));
+    cursor(x, y, {});
+    // Arrows (the Relief screen's, cell 0; mirrored on the left) when the reserve row scrolls past slots on either side.
+    if (Tex* arrow = reserve_on ? png("hd/menu/memmenu2_cur.png") : nullptr) {
+      constexpr float kArrow = 10;
+      if (reserve_first > 0) draw_quad(arrow->set, 0x34, kReserveY + 11, kArrow, kArrow, 1.0f / 8.0f, 0, 0, 1, col(0x808080));
+      if (reserve_last < static_cast<int>(ed.reserve().size()))
+        draw_quad(arrow->set, 0x108, kReserveY + 11, kArrow, kArrow, 0, 0, 1.0f / 8.0f, 1, col(0x808080));
+    }
   }
 
   // Text in queue order: help, labels, stat labels, "●", numbers, name header.
-  const int lang_index = static_cast<int>(lang);
   // Help text: key 6, or 5 in grid mode (Relief is always in grid mode). One line per row, def slot, mul 1.2,
-  // H4(col, 0x6319, 4), pitch 12 * sy; first line at y 111 (FR / IT) or 120.
-  const std::u32string help = mm(6 - (grid_mode ? 1 : 0));
+  // H4(col, 0x6319, 4), pitch 12 * sy; first line at y 111 (FR / IT) or 120. The shared reserve panel takes its place.
+  const std::u32string help = reserve_on ? std::u32string() : mm(6 - (grid_mode ? 1 : 0));
   if (!help.empty()) {
     float y = (lang_index == 1 || lang_index == 3) ? 111.0f : 120.0f;
     size_t line_start = 0;
@@ -553,8 +622,14 @@ void PartyScreen::Impl::draw_screen() {
     draw_text(font::kBn, 1.0f, 0x14A, 0x0B, mm(2), sub(0x808080, fade), 0x6319, 6, false);
   } else {
     for (int id = 0; id < 3; ++id)
-      draw_text(font::kBn, 1.0f, static_cast<float>(spr[static_cast<size_t>(id)].x), static_cast<float>(spr[static_cast<size_t>(id)].y), mm(id),
-                sub(0x808080, fade), 0x6319, 6, false);
+      draw_text(font::kBn, 1.0f, static_cast<float>(spr[static_cast<size_t>(id)].x),
+                static_cast<float>(spr[static_cast<size_t>(id)].y) + (id == 1 && reserve_on ? kPanelShift : 0.0f), mm(id), sub(0x808080, fade), 0x6319, 6,
+                false);
+    // "Reserve" in the flipped bottom edge's gap: Current Party's label moved as far as the edge's outer line.
+    if (reserve_on) {
+      draw_text(reserve_font, 1.0f, static_cast<float>(spr[1].x), static_cast<float>(spr[1].y) + kReserveLabelDrop, reserve_label, sub(0x808080, fade),
+                0x6319, 6, false);
+    }
   }
   // Label 3: the stat labels, translated through cmnmes; all H3.
   auto stat = [&](float x, float y, int style, const std::string& key) {
@@ -606,7 +681,7 @@ void PartyScreen::Impl::draw_screen() {
   }
   // Name header for the slot's member (Party slot mode) or the cursor cell (grid mode, not while scrolling).
   // Style 0x80: def slot, mul 1.2, baseline shrink M 210 (k 56, JP 64), H4(0x696969, 0x6318, 7).
-  const int named = grid_mode ? (party_grid.scrolling() ? -1 : party_grid.cell(party_grid.cursor())) : ed.slots()[static_cast<size_t>(ed.slot())];
+  const int named = grid_mode ? (party_grid.scrolling() ? -1 : party_grid.cell(party_grid.cursor())) : ed.at(ed.slot());
   if (named >= 0) {
     const int slot = def_slot();
     const std::u32string header = name(named);
