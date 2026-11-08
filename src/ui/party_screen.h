@@ -52,8 +52,8 @@ class PartyScreen {
   // [Video] Widescreen: `canvas_columns` = layer columns per side the backdrop extends by; [Video] WideHud: `layout_columns` = the
   // columns the left half (status, current party) and the right half (member grid) move out by.
   void set_wide_columns(float canvas_columns, float layout_columns);
-  // Party swap's reserve (OpenCross): `size` reserve slots on the Party screen (0 = the vanilla screen). Up to 3 are portraits in a
-  // Reserve window under a shorter member grid, more a scrolling list of names and HP (game::PartyEditor). Applies from the next open().
+  // Party swap's reserve (OpenCross): `size` reserve slots on the Party screen (0 = the vanilla screen): a row of portraits under the
+  // party slots, 3 at a time, scrolling sideways past more (game::PartyEditor). Applies from the next open().
   void set_reserve_size(int size);
   // The PartyScreen feature's ReturnToSlot: a pick returns to the slot it filled (game::PartyEditor::set_return_to_slot). Applies from the next open().
   void set_return_to_slot(bool on);

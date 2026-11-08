@@ -25,7 +25,8 @@ BattleFieldClips battle_field_clips(ByteSpan obj) {
   BattleFieldClips out;
   bseq::Table table;
   if (!bseq::load_model_table(obj, table)) return out;
-  // The VMs share a few battle-wide words: one reader at a time, and the words are put back after.
+  // The VMs share a few battle-wide words: one reader at a time, the words are put back after, and no battle runs meanwhile
+  // (FieldWorld::take_battle waits for the readers).
   static std::mutex vm_lock;
   const std::lock_guard<std::mutex> guard(vm_lock);
   const bseq::Vm::Shared shared = bseq::Vm::shared();
