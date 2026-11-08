@@ -7,7 +7,10 @@ namespace oc::game {
 
 std::optional<assets::ModelAsset> build_room_model(const assets::RoomScene& scene, size_t index, std::string* err) {
   if (index >= scene.models.size()) return std::nullopt;
-  const auto& model = scene.models[index];
+  return build_room_model(scene.models[index], err);
+}
+
+std::optional<assets::ModelAsset> build_room_model(const assets::RoomModelHeader& model, std::string* err) {
   // Page window + CLUT rows clut_y / clut_y + 1 (faces with the CLUT / page bits); the bare TIM if a scene lacks them.
   auto asset = model.page_textures.empty() ? import::load_room_model(model.mdl, model.texture, err) : import::load_room_model(model.mdl, model.page_textures, err);
   if (!asset) return std::nullopt;

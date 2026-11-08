@@ -1,4 +1,5 @@
 // Field script VM tests: hand-assembled snippets run through FieldVM with a NullHost / scripted host.
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -1011,6 +1012,46 @@ void test_extension_ops() {
   CHECK_EQ(vm.stats().unknown_ops.size(), 2);
 }
 
+// FE D0 MODEL_SOURCE hands the host (room model, kind, id, sub), each operand an immediate or a variable; feature 5 is level 1.
+class ModelSourceHost : public NullHost {
+ public:
+  std::vector<std::array<int, 4>> calls;
+  void set_model_source(int model, int kind, int id, int sub) override { calls.push_back({model, kind, id, sub}); }
+};
+
+void test_model_source_op() {
+  Asm script;
+  const u16 init = script.here();
+  script.set(V(1), 0x13);
+  script.set(V(3), 4);
+  const u16 op_at = script.here();
+  // The character in var 1, room 0x10's model (var 3), battle model 70, then no source: the room's own model again.
+  script.raw({0xFE, 0xD0, 8}).word(I(5)).word(I(0)).word(V(1)).word(I(0));
+  script.raw({0xFE, 0xD0, 8}).word(I(6)).word(I(2)).word(I(0x10)).word(V(3));
+  script.raw({0xFE, 0xD0, 8}).word(I(7)).word(I(3)).word(I(70)).word(I(0));
+  script.raw({0xFE, 0xD0, 8}).word(I(5)).word(I(0xFF)).word(I(0)).word(I(0));
+  script.raw({0xFE, 0xC0, 4}).word(V(2)).word(I(5));
+  script.stop();
+  const auto op = decode_insn(script.code, op_at);
+  CHECK(op.has_value());
+  if (op) {
+    CHECK_EQ(op->length, 11);
+    CHECK(std::string(op->info->name) == "MODEL_SOURCE");
+  }
+  ModelSourceHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.calls.size(), 4);
+  if (host.calls.size() == 4) {
+    CHECK((host.calls[0] == std::array<int, 4>{5, 0, 0x13, 0}));
+    CHECK((host.calls[1] == std::array<int, 4>{6, 2, 0x10, 4}));
+    CHECK((host.calls[2] == std::array<int, 4>{7, 3, 70, 0}));
+    CHECK((host.calls[3] == std::array<int, 4>{5, 0xFF, 0, 0}));
+  }
+  CHECK_EQ(vm.var(V(2)), 1);
+  CHECK(vm.stats().unknown_ops.empty());
+}
+
 
 // The mod UI ops (FE C1-FE CB, feature 2): the elements a room's scripts build, GETPOS, SET, the item step and the blocking pick.
 class KeyHost : public NullHost {
@@ -1020,6 +1061,32 @@ class KeyHost : public NullHost {
   void clear_key_latch() override { latch = 0; }
   u16 keys_held() override { return held; }
 };
+
+// Party swap's reserve ops: FE CC writes a slot, FE CD reads one (0xFF = empty).
+class ReserveHost : public NullHost {
+ public:
+  std::vector<int> reserve;
+  int reserve_member(int slot) override { return slot < static_cast<int>(reserve.size()) ? reserve[static_cast<size_t>(slot)] : -1; }
+  void set_reserve_member(int slot, int char_id) override {
+    if (static_cast<int>(reserve.size()) <= slot) reserve.resize(static_cast<size_t>(slot) + 1, -1);
+    reserve[static_cast<size_t>(slot)] = char_id >= 0x2C ? -1 : char_id;
+  }
+};
+
+void test_reserve_ops() {
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xFE, 0xCC, 4}).word(I(2)).word(I(7));
+  script.raw({0xFE, 0xCD, 4}).word(V(0)).word(I(2));
+  script.raw({0xFE, 0xCD, 4}).word(V(1)).word(I(0));
+  script.stop();
+  ReserveHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK(host.reserve == (std::vector<int>{-1, -1, 7}));
+  CHECK_EQ(vm.var(V(0)), 7);
+  CHECK_EQ(vm.var(V(1)), 0xFF);
+}
 
 void test_mod_ui_ops() {
   // UI_CLEAR keeps the change counter, so an element placed after it never repeats a revision a window shows.
@@ -1734,6 +1801,8 @@ int main() {
   test_opcode_table();
   test_extension_ops();
   test_mod_ui_ops();
+  test_reserve_ops();
+  test_model_source_op();
   test_get_position_order();
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();

@@ -22,6 +22,8 @@ struct PreparedRoomModel {
 
 // Model `index` of the scene with its transparency modes applied; texture mods not yet resolved.
 std::optional<assets::ModelAsset> build_room_model(const assets::RoomScene& scene, size_t index, std::string* err);
+// The same from one model record (another room's: import::load_room_models).
+std::optional<assets::ModelAsset> build_room_model(const assets::RoomModelHeader& model, std::string* err);
 // build_room_model + render::resolve_model_textures + render::prepare_model_uploads, and with `ctx` render::prepare_model_textures.
 std::optional<PreparedRoomModel> prepare_room_model(const assets::RoomScene& scene, size_t index, render::GpuContext* ctx);
 

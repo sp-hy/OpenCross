@@ -60,8 +60,9 @@ void settle_pip_form(ui::GameState& gs, const data::GameTables& tables, int form
 
 // Party swap's "keep lineup" setting: the saved party becomes the lineup the battle ended with, then every locked character (party lock
 // bitmap, FE 5D) that ended on the bench goes back to the slot it held in the saved party, and `stand_in` (the Relief Charm's member that
-// took Serge's slots, -1 = none) is written as Serge unless Serge himself came in (Serge takes back his saved slot when the stand-in swapped out). True when the saved party changed.
-bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in);
+// took Serge's slots, -1 = none) is written as Serge unless Serge himself came in (Serge takes back his saved slot when the stand-in swapped out). With `reserve_size` slots (the Reserve setting), each
+// member who left the party takes the reserve slot of one who came in (slot order, then empty slots). True when the saved party changed.
+bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in, int reserve_size = 0);
 
 std::string utf8_from_u32(std::u32string_view text);
 

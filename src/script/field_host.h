@@ -221,6 +221,11 @@ class FieldHost {
   // D1: room model `model` for the entity (the room's model list, as 0F) placed on floor level 0; returns
   // the room's D1 ordinal = the entity's bit in the room's defeated-monster mask.
   virtual int load_model(int ent, int model) = 0;
+  // FE D0 (extension): room model `model` (as 0F / D1 name it) comes from elsewhere until the room changes: kind 0 character `id`'s
+  // field model, 1 field model byte `id`, 2 room `id`'s model `sub`, 3 battle model `id`, 4 character `id`'s battle model
+  // (game::ModelSource). A source that names no model gives the number back to the room. Entities already wearing it keep what they
+  // show until their next 0F / D1.
+  virtual void set_model_source(int model, int kind, int id, int sub) = 0;
   // Bit of the defeated-monster mask (D1 spawns such an entity disabled).
   virtual bool monster_defeated(int ordinal) = 0;
   // Set the defeated bit (D2 after a won battle).
@@ -415,6 +420,10 @@ class FieldHost {
   virtual void roster_add(int char_id) = 0;
   // 97
   virtual void roster_remove(int char_id) = 0;
+  // FE CD (party swap): the character in reserve slot `slot`, -1 when it is empty or holds someone not available / in the party.
+  virtual int reserve_member(int slot) = 0;
+  // FE CC: reserve slot `slot` = `char_id` (-1 / >= 0x2C empties it); the character leaves any other reserve slot.
+  virtual void set_reserve_member(int slot, int char_id) = 0;
   // B4 D5 (id: <0x200 items, <0x400 elements, 0x400.. key items)
   virtual int item_count(int id) = 0;
   // BB b == 0
@@ -494,6 +503,7 @@ class NullHost : public FieldHost {
   void place_followers() override;
   void setup_npc(int ent, int model) override;
   int load_model(int ent, int model) override;
+  void set_model_source(int model, int kind, int id, int sub) override;
   bool monster_defeated(int ordinal) override;
   void set_monster_defeated(int ordinal) override;
   void update_entity(int ent) override;
@@ -577,6 +587,8 @@ class NullHost : public FieldHost {
   void swap_leader(int char_id) override;
   void roster_add(int char_id) override;
   void roster_remove(int char_id) override;
+  int reserve_member(int slot) override;
+  void set_reserve_member(int slot, int char_id) override;
   int item_count(int id) override;
   void give_item(int id) override;
   void take_item(int id) override;

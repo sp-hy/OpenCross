@@ -59,6 +59,14 @@ inline constexpr size_t kStarsTotal = 0x5A4;
 inline constexpr size_t kStarsCurrent = 0x5A5;
 }  // namespace head
 
+// The OpenCross record in the raw tail (block 0x1F21..0x1FF7, bytes no loader reads): "OCX", version 1, then entries {u8 tag, u8 size,
+// size bytes} up to a tag 0. A tail without the magic (any RDE / PS1 save) has no entries; writing an entry stamps the magic.
+inline constexpr size_t kTailExtSize = 0xD7;
+namespace tail_tag {
+// The party reserve (party swap): character ids in slot order, 0xFF = an empty slot.
+inline constexpr u8 kReserve = 1;
+}  // namespace tail_tag
+
 // Item stack: id stored in 9 bits, qty in 7 bits.
 struct ItemStack {
   u16 id = 0;
@@ -131,6 +139,12 @@ struct SaveSlot {
     head[head::kProgression + 1] = static_cast<u8>(value >> 8);
   }
   u16 location() const;
+  // The tail record's entry `tag` (empty when absent). Setting an empty entry removes it; false when the record has no room.
+  std::vector<u8> tail_entry(u8 tag) const;
+  bool set_tail_entry(u8 tag, const std::vector<u8>& bytes);
+  // The party reserve slots (tail_tag::kReserve): character ids, -1 = empty; empty when no reserve was ever written.
+  std::vector<int> reserve() const;
+  void set_reserve(const std::vector<int>& slots);
   u8 stars_total() const { return head[head::kStarsTotal]; }
   u8 stars_current() const { return head[head::kStarsCurrent]; }
   // Script variable `id` (0..0x3FE, even): the global variable block is the head at 0x188 + id.

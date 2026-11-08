@@ -39,6 +39,7 @@ void NullHost::place_on_controlled(int) { NOTE("place_on_controlled"); }
 void NullHost::place_followers() { NOTE("place_followers"); }
 void NullHost::setup_npc(int, int) { NOTE("setup_npc"); }
 int NullHost::load_model(int, int) { NOTE("load_model"); return 0; }
+void NullHost::set_model_source(int, int, int, int) { NOTE("set_model_source"); }
 bool NullHost::monster_defeated(int) { NOTE("monster_defeated"); return false; }
 void NullHost::set_monster_defeated(int) { NOTE("set_monster_defeated"); }
 void NullHost::update_entity(int) { NOTE("update_entity"); }
@@ -122,6 +123,8 @@ void NullHost::party_override(bool, int) { NOTE("party_override"); }
 void NullHost::swap_leader(int) { NOTE("swap_leader"); }
 void NullHost::roster_add(int) { NOTE("roster_add"); }
 void NullHost::roster_remove(int) { NOTE("roster_remove"); }
+int NullHost::reserve_member(int) { NOTE("reserve_member"); return -1; }
+void NullHost::set_reserve_member(int, int) { NOTE("set_reserve_member"); }
 int NullHost::item_count(int) { NOTE("item_count"); return 0; }
 void NullHost::give_item(int) { NOTE("give_item"); }
 void NullHost::take_item(int) { NOTE("take_item"); }

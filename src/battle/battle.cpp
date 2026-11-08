@@ -748,6 +748,11 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
 }
 
 // ------------------------------------------------------------------------------------------------ party swap
+const Unit* Battle::benched_unit(int char_id) const {
+  const auto kept = benched_units_.find(char_id);
+  return kept != benched_units_.end() ? &kept->second : nullptr;
+}
+
 std::vector<int> Battle::swap_candidates(int pc) const {
   std::vector<int> out;
   if (!swap_enabled() || !is_pc_slot(pc) || static_cast<size_t>(pc) >= party_.size() || !can_act(pc)) return out;

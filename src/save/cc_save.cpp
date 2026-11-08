@@ -139,6 +139,61 @@ void SaveSlot::set_recruited(int character, bool on) {
 }
 u16 SaveSlot::location() const { return rd16(&head[head::kLocation]); }
 
+namespace {
+constexpr std::array<u8, 4> kTailMagic = {'O', 'C', 'X', 1};
+bool tail_has_record(const std::array<u8, kTailSize>& tail) { return std::equal(kTailMagic.begin(), kTailMagic.end(), tail.begin()); }
+// The entries of a tail record in order, each as {tag, bytes}; stops at tag 0 or a size that runs past the record.
+std::vector<std::pair<u8, std::vector<u8>>> tail_entries(const std::array<u8, kTailSize>& tail) {
+  std::vector<std::pair<u8, std::vector<u8>>> entries;
+  if (!tail_has_record(tail)) return entries;
+  for (size_t pos = kTailMagic.size(); pos + 2 <= kTailExtSize && tail[pos] != 0;) {
+    const size_t size = tail[pos + 1];
+    if (pos + 2 + size > kTailExtSize) break;
+    const auto first = tail.begin() + static_cast<std::ptrdiff_t>(pos + 2);
+    entries.emplace_back(tail[pos], std::vector<u8>(first, first + static_cast<std::ptrdiff_t>(size)));
+    pos += 2 + size;
+  }
+  return entries;
+}
+}  // namespace
+
+std::vector<u8> SaveSlot::tail_entry(u8 tag) const {
+  for (auto& [entry_tag, bytes] : tail_entries(tail))
+    if (entry_tag == tag) return bytes;
+  return {};
+}
+// The record is rewritten whole: the magic, the other entries in their order, this one last, zeros after the end tag.
+bool SaveSlot::set_tail_entry(u8 tag, const std::vector<u8>& bytes) {
+  if (tag == 0 || bytes.size() > 0xFF) return false;
+  auto entries = tail_entries(tail);
+  std::erase_if(entries, [&](const auto& entry) { return entry.first == tag; });
+  if (!bytes.empty()) entries.emplace_back(tag, bytes);
+  size_t total = kTailMagic.size() + 1;
+  for (const auto& entry : entries) total += 2 + entry.second.size();
+  if (total > kTailExtSize) return false;
+  std::fill(tail.begin(), tail.begin() + static_cast<std::ptrdiff_t>(kTailExtSize), u8{0});
+  std::copy(kTailMagic.begin(), kTailMagic.end(), tail.begin());
+  size_t pos = kTailMagic.size();
+  for (const auto& [entry_tag, entry_bytes] : entries) {
+    tail[pos] = entry_tag;
+    tail[pos + 1] = static_cast<u8>(entry_bytes.size());
+    std::copy(entry_bytes.begin(), entry_bytes.end(), tail.begin() + static_cast<std::ptrdiff_t>(pos + 2));
+    pos += 2 + entry_bytes.size();
+  }
+  return true;
+}
+
+std::vector<int> SaveSlot::reserve() const {
+  std::vector<int> slots;
+  for (u8 id : tail_entry(tail_tag::kReserve)) slots.push_back(id < kNumChars ? id : -1);
+  return slots;
+}
+void SaveSlot::set_reserve(const std::vector<int>& slots) {
+  std::vector<u8> bytes;
+  for (int id : slots) bytes.push_back(id >= 0 && id < kNumChars ? static_cast<u8>(id) : u8{0xFF});
+  set_tail_entry(tail_tag::kReserve, bytes);
+}
+
 // ----------------------------------------------------------------- checksum
 u32 block_sum(ByteSpan block) {
   u32 sum = 0;
