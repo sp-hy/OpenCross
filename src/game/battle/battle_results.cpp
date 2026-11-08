@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <map>
 #include <vector>
 
@@ -338,11 +339,12 @@ struct BattleResults::Impl {
       txt(label_slot(), stat_label(k + 1), x0 + static_cast<float>(col.label_x) - (lang != import::Lang::Jp && k == 0 ? 5.0f : 0.0f), y0 + static_cast<float>(col.y) + 1.0f, kColText, kLabelPx);
       num(std::clamp(value, 0, 99), x0 + static_cast<float>(col.digits_right), y0 + static_cast<float>(col.y));
     }
-    // "UP" marker (levu frame 1 = btend/up.png 16 x 16) on every stat that grew, once the member's page was shown:
+    // "UP" marker (levu frame 1 = btend/up.png 16 x 16) on every stat with a non-zero gain (a stat pulled back to its Lv 99 value too),
+    // once the member's page was shown:
     // sprite at X0 + kUpX[i] - 8, y0 + kUpY[i] + kUpDy with i = HP, ATK, DEF, HIT, EVD, MAG, MDEF
     if (after)
       for (int i = 0; i < 7; ++i)
-        if (row.gain[static_cast<size_t>(i)] > 0) draw_up(x0 + static_cast<float>(kUpX[i] - 8), y0 + static_cast<float>(kUpY[i] + kUpDy));
+        if (row.gain[static_cast<size_t>(i)] != 0) draw_up(x0 + static_cast<float>(kUpX[i] - 8), y0 + static_cast<float>(kUpY[i] + kUpDy));
     // element-grid thumbnail: gg dots at X0 + 0x66 + 4 grid_row, y0 + 6 + 2 grid_col for every occupied cell; bright up to the gauge level
     for (int grid_row = 0; grid_row < data::kGridRows; ++grid_row)
       for (int grid_col = 0; grid_col < data::kGridCols; ++grid_col) {
@@ -384,8 +386,9 @@ struct BattleResults::Impl {
     else draw_powerup(px, py);
   }
   void draw_powerup(float px, float py) {
-    // Member name at (0xB4, 0x42); one line per grown stat: label (key 11 + k) at (0xC0, 0x52 + 0xE n), the gain (3 digit
-    // slots at 0xF0 + 0xC j, no sign) right-aligned at 0x108 + 0xC.
+    // Member name at (0xB4, 0x42); one line per stat with a non-zero gain: label (key 11 + k) at (0xC0, 0x52 + 0xE n), the gain (3 digit
+    // slots at 0xF0 + 0xC j, no sign) right-aligned at 0x108 + 0xC. The digits are those of the gain as an unsigned 32-bit number, so a
+    // negative gain shows the last three digits of 2^32 + gain, leading zeros included.
     // Nobody grew: only the slots with a gain are drawn, so the blank page keeps its headline and shows no name and no lines.
     if (cur >= static_cast<int>(gain_list.size())) return;
     const int slot = gain_list[static_cast<size_t>(cur)];
@@ -393,11 +396,13 @@ struct BattleResults::Impl {
     txt(label_slot(), row.name, px + 4, py + 16, kColName, kPanelPx);
     int line = 0;
     for (int k = 0; k < 7; ++k) {
-      if (row.gain[static_cast<size_t>(k)] <= 0) continue;
+      if (row.gain[static_cast<size_t>(k)] == 0) continue;
       const float y = py + 32 + 14.0f * static_cast<float>(line++);
       txt(label_slot(), label(11 + static_cast<u64>(k)), px + 16, y, kColText, kPanelPx);
       // the gain digits are 7.3 lines tall = the kb font at 0.5, not the 0.35 of the row digits
-      txt(kDigits, import::utf8_to_u32(std::to_string(row.gain[static_cast<size_t>(k)])), px + 100, y - 1, kColDigit, kPanelPx, 2);
+      const int gain = row.gain[static_cast<size_t>(k)];
+      const std::string digits = gain > 0 ? std::to_string(gain) : std::format("{:03}", static_cast<u32>(gain) % 1000u);
+      txt(kDigits, import::utf8_to_u32(digits), px + 100, y - 1, kColDigit, kPanelPx, 2);
     }
   }
   void draw_star_page(float px, float py) {
@@ -798,7 +803,7 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     row.ko = !unit.conscious();
     row.unit_cells = unit.cells;
     for (size_t cell = 0; cell < row.open.size(); ++cell) row.open[cell] = unit.usable[cell] && !unit.used[cell];
-    for (int gain : row.gain) row.has_gain = row.has_gain || gain > 0;
+    for (int gain : row.gain) row.has_gain = row.has_gain || gain != 0;
     if (row.has_gain) impl.gain_list.push_back(static_cast<int>(i));
   }
   // Debug: start the screen with every living member at this HP (heal menu tests).

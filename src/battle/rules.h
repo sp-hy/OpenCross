@@ -212,6 +212,9 @@ int next_pending_stat(Rng& rng, int cur, int lv99, int star);
 int minor_growth(int snap, int pending, int cur, int pending_tenths, int progress, int progress_cap);
 // The whole way to the minor-growth target in one step: (snap + K) - cur with the same aim K, floor 0 (the instant-growth cheat).
 int full_minor_growth(int snap, int pending, int cur, int pending_tenths);
+// A party member's gain (minor growth or star-up) limited by the Lv 99 value: a non-zero gain that would pass it becomes lv99 - cur,
+// which is negative when the stat already stands above it, so the stat is pulled back to its Lv 99 value. A zero gain stays zero.
+int limit_gain(int gain, int cur, int lv99);
 // One star-up history of a character: the stats (maxHP, ATK, DEF, HIT, EVD, MAG, MDEF) the `star` star-ups give from the record's
 // starting stats, each pending delta rolled from `rng` against the stat it is rolled from, as the star-up rolls it for every record
 // (recruited or not, fighting or not). Each stat stops at lv99, max HP also at 999.
