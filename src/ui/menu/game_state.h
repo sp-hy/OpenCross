@@ -98,6 +98,10 @@ class GameState {
   std::vector<int> roster() const;
   // Recruited and not excluded: the characters the menus may show and act on outside the party.
   bool available(int character) const;
+  // The party reserve (party swap) as `size` slots: the saved slots, cut or padded with empties (-1); a character that is not available,
+  // is in the party or appears twice leaves its slot empty. A save that never had a reserve starts with the first available characters
+  // outside the party (ascending ids).
+  std::vector<int> reserve(int size) const;
   u32 gold() const { return slot.gold(); }
   void set_gold(u32 amount) { slot.set_gold(amount); }
   u32 play_seconds() const { return slot.playtime_frames() / 60; }

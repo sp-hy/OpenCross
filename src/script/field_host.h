@@ -420,6 +420,10 @@ class FieldHost {
   virtual void roster_add(int char_id) = 0;
   // 97
   virtual void roster_remove(int char_id) = 0;
+  // FE CD (party swap): the character in reserve slot `slot`, -1 when it is empty or holds someone not available / in the party.
+  virtual int reserve_member(int slot) = 0;
+  // FE CC: reserve slot `slot` = `char_id` (-1 / >= 0x2C empties it); the character leaves any other reserve slot.
+  virtual void set_reserve_member(int slot, int char_id) = 0;
   // B4 D5 (id: <0x200 items, <0x400 elements, 0x400.. key items)
   virtual int item_count(int id) = 0;
   // BB b == 0
@@ -583,6 +587,8 @@ class NullHost : public FieldHost {
   void swap_leader(int char_id) override;
   void roster_add(int char_id) override;
   void roster_remove(int char_id) override;
+  int reserve_member(int slot) override;
+  void set_reserve_member(int slot, int char_id) override;
   int item_count(int id) override;
   void give_item(int id) override;
   void take_item(int id) override;

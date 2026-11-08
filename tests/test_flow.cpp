@@ -500,6 +500,61 @@ void test_party_editor() {
   CHECK(gap.slots()[0] == 2 && gap.slots()[1] == 0);
 }
 
+// Party screen with party swap's reserve: a row of reserve slots under the party slots.
+void test_party_reserve() {
+  using Key = game::PartyEditor::Key;
+  using Mode = game::PartyEditor::Mode;
+  game::PartyEditor editor;
+  // Serge locked; the saved reserve names Kid, a party member: that slot starts empty. Grid 0 1 2 5 / 7 9.
+  editor.begin({0, 1, 2, 5, 7, 9}, {0, 1, 2}, {1u, 0u}, {7, -1, 1});
+  CHECK(editor.reserve() == (std::vector<int>{7, -1, -1}));
+  CHECK(editor.slot_count() == 6);
+  // Left / right wrap within the row; down / up switch rows, keeping the column.
+  CHECK(editor.press(Key::Left) == 1 && editor.slot() == 2);
+  CHECK(editor.press(Key::Right) == 1 && editor.slot() == 0);
+  CHECK(editor.press(Key::Down) == 1 && editor.slot() == 3 && editor.shown() == 7);
+  CHECK(editor.press(Key::Left) == 1 && editor.slot() == 5);
+  CHECK(editor.press(Key::Up) == 1 && editor.slot() == 2);
+  CHECK(editor.press(Key::Right) == 1 && editor.press(Key::Down) == 1 && editor.slot() == 3);
+  // A free character fills the reserve slot, its own character empties it.
+  CHECK(editor.press(Key::Confirm) == 8 && editor.mode() == Mode::Pick);
+  for (int i = 0; i < 3; ++i) editor.press(Key::Right);
+  CHECK(editor.cell(editor.cursor()) == 5);
+  CHECK(editor.press(Key::Confirm) == 8 && editor.reserve()[0] == 5);
+  CHECK(editor.press(Key::Confirm) == 8 && editor.reserve()[0] == -1);
+  // Kid (party slot 1) swaps with the empty reserve slot; the cursor follows to party slot 1, whose pick of Kid swaps back.
+  editor.press(Key::Left);
+  editor.press(Key::Left);
+  CHECK(editor.cell(editor.cursor()) == 1);
+  CHECK(editor.press(Key::Confirm) == 8 && editor.reserve()[0] == 1 && editor.slots()[1] == -1 && editor.slot() == 1);
+  CHECK(editor.press(Key::Confirm) == 8 && editor.slots()[1] == 1 && editor.reserve()[0] == -1 && editor.slot() == 3);
+  // Locked Serge cannot go to the reserve.
+  editor.press(Key::Left);
+  CHECK(editor.cell(editor.cursor()) == 0 && editor.press(Key::Confirm) == 0x18 && editor.slots()[0] == 0);
+  // Karsh (row 1) into the slot, then leave.
+  CHECK(editor.press(Key::Down) == 1 && editor.cell(editor.cursor()) == 7 && editor.press(Key::Confirm) == 8);
+  CHECK(editor.press(Key::Cancel) == 6 && editor.press(Key::Cancel) == 6 && editor.done());
+  CHECK(editor.result() == (std::vector<int>{0, 1, 2}) && editor.reserve() == (std::vector<int>{7, -1, -1}));
+  // More than 3 slots: the row shows 3 and scrolls sideways with the cursor (wrapping); up / down use the shown column.
+  game::PartyEditor wide;
+  wide.begin({0, 1, 2, 3, 4, 5, 6, 7, 8}, {0, 1, 2}, {0u, 0u}, {3, 4, 5, 6, 7});
+  CHECK(wide.press(Key::Down) == 1 && wide.slot() == 3 && wide.reserve_scroll() == 0);
+  CHECK(wide.press(Key::Left) == 1 && wide.slot() == 7 && wide.reserve_scroll() == 2 && wide.shown() == 7);
+  CHECK(wide.press(Key::Up) == 1 && wide.slot() == 2);
+  CHECK(wide.press(Key::Down) == 1 && wide.slot() == 7);
+  CHECK(wide.press(Key::Right) == 1 && wide.slot() == 3 && wide.reserve_scroll() == 0);
+  for (int i = 0; i < 3; ++i) wide.press(Key::Right);
+  CHECK(wide.slot() == 6 && wide.reserve_scroll() == 1);
+  CHECK(wide.press(Key::Up) == 1 && wide.slot() == 2);
+  // Return to the slot (an OpenCross option): the pick ends mode B on the slot it filled, also after a swap.
+  game::PartyEditor back;
+  back.set_return_to_slot(true);
+  back.begin({0, 1, 2, 3}, {0, 1, 2}, {0u, 0u}, {3, -1});
+  CHECK(back.press(Key::Down) == 1 && back.press(Key::Confirm) == 8);
+  CHECK(back.cell(back.cursor()) == 0 && back.press(Key::Confirm) == 8);
+  CHECK(back.mode() == Mode::Slots && back.slot() == 3 && back.reserve()[0] == 0 && back.slots()[0] == 3);
+}
+
 // The disc indexes: movie number -> file and room id -> map stem per disc.
 void test_disc_index() {
   auto rec = [](std::vector<std::string> names, size_t total) {
@@ -626,6 +681,7 @@ int main() {
   test_name_entry();
   test_flow();
   test_party_editor();
+  test_party_reserve();
   test_disc_index();
   test_location_key();
   if (failures) {
