@@ -71,7 +71,7 @@ Source: `tools/ocaudio.cpp`. `<song>` is a song id or `BGMnnn`.
 
 | Subcommand | Arguments | Meaning |
 |---|---|---|
-| `decode` | `<song> <out.wav> [seconds]` | Remastered track to WAV; no seconds = whole track, no looping. |
+| `decode` | `<song \| file.sab> <out.wav> [seconds]` | Remastered track to WAV; no seconds = whole track, no looping. A path ending in `.sab` decodes that file from disk (a replacement track, HCA or 16-bit PCM) instead of the game's. |
 | `play` | `<song> [seconds]` | Plays the remastered track (default 10 s). |
 | `render-seq` | `<music NNN> <out.wav> [seconds] [rate] [keys.txt]` | Original AKAO music through the engine's sequencer (default 20 s, 44100 Hz), with the sound effects its FE 0B ops request mixed in; prints the header gate mask. `keys.txt` lists every voice key-on / key-off (`update KON|KOFF channel voice`, update = 240 Hz sequencer update). |
 | `play-seq` | `<music NNN> [seconds]` | Plays the same live (default 20 s). |

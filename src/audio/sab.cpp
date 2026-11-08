@@ -7,7 +7,8 @@
 namespace oc::audio {
 
 // Section table at 0x20: 4 x { tag[4], u16 0, u16 0x10, u32 offset, u32 0 }; the "mtrl" section holds u32 count at +4 and
-// the material offsets (relative to the section) from +16. A material is 0x20 bytes of header followed by its extradata and the HCA.
+// the material offsets (relative to the section) from +16. A material is 0x20 bytes of header followed by its extradata and the stream: an
+// HCA material has at least 0x10 bytes of extradata (the HCA header inside), a 16-bit PCM material may have none.
 std::optional<Sab> parse_sab(ByteSpan data) {
   if (data.size() < 0x60 || std::memcmp(data.data(), "sabf", 4) != 0) return std::nullopt;
   u32 mtrl = 0;
@@ -31,11 +32,15 @@ std::optional<Sab> parse_sab(ByteSpan data) {
     material.loop_start = read_u32(data, entry + 0x0C);
     material.loop_end = read_u32(data, entry + 0x10);
     material.extradata_size = read_u32(data, entry + 0x14);
+    material.stream_size = read_u32(data, entry + 0x18);
     material.sound_id = read_u32(data, entry + 0x1C);
-    material.encryption = data[entry + 0x20 + 0x0D];
-    size_t data_off = entry + 0x20 + material.extradata_size;
-    if (material.extradata_size < 0x10 || data_off > data.size()) return std::nullopt;
-    material.hca_offset = u32(entry + 0x30);
+    size_t data_off = entry + 0x20 + size_t(material.extradata_size);
+    if (data_off > data.size()) return std::nullopt;
+    if (material.codec == kSabCodecHca) {
+      if (material.extradata_size < 0x10) return std::nullopt;
+      material.encryption = data[entry + 0x20 + 0x0D];
+      material.hca_offset = u32(entry + 0x30);
+    }
     material.data_offset = u32(data_off);
     sab.materials.push_back(material);
   }

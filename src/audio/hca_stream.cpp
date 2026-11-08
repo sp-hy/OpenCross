@@ -39,9 +39,12 @@ bool HcaStream::open(ByteSpan sab_bytes) {
   auto sab = parse_sab(sab_bytes);
   if (!sab || sab->materials.empty()) return false;
   const SabMaterial& material = sab->materials[0];
-  if (material.codec != 7 || material.channels != 2) return false;
-
   data_.assign(sab_bytes.begin(), sab_bytes.end());
+  pcm_channels_ = 0;
+  pos_ = 0;
+  if (material.codec == kSabCodecPcm16) return open_pcm(material);
+  if (material.codec != kSabCodecHca || material.channels != 2) return false;
+
   hca_.reset(clHCA_new());
   if (!hca_) return false;
   if (clHCA_isOurFile(data_.data() + material.hca_offset, u32(data_.size() - material.hca_offset)) < 0) return false;
@@ -65,8 +68,22 @@ bool HcaStream::open(ByteSpan sab_bytes) {
   block_pcm_.assign(1024 * 2, 0);
   cur_block_ = 0xFFFFFFFFu;
   next_block_ = 0;
-  pos_ = 0;
   return true;
+}
+
+// The samples start right after the material header and its extradata; the stream size bounds them, the file end too.
+bool HcaStream::open_pcm(const SabMaterial& material) {
+  if ((material.channels != 1 && material.channels != 2) || material.sample_rate != 48000) return false;
+  const u32 frame_bytes = 2u * material.channels;
+  const size_t available = std::min<size_t>(material.stream_size, data_.size() - material.data_offset);
+  pcm_channels_ = material.channels;
+  rate_ = material.sample_rate;
+  data_off_ = material.data_offset;
+  total_ = u32(available / frame_bytes);
+  loop_start_ = material.loop_start;
+  loop_end_ = std::min(material.loop_end, total_ ? total_ - 1 : 0);
+  if (!(loop_end_ > loop_start_)) loop_start_ = loop_end_ = 0;
+  return total_ > 0;
 }
 
 // SEAD frame obfuscation (material extradata byte 0x0d = 1): XOR with a fixed 256-byte table, indexed from (sound_id & 0xff) at
@@ -110,7 +127,28 @@ void HcaStream::seek(u32 sample) {
   pos_ = std::min(sample, total_);
 }
 
+u32 HcaStream::read_pcm(s16* out, u32 frames) {
+  u32 done = 0;
+  while (done < frames) {
+    if (looping_ && has_loop() && pos_ > loop_end_) pos_ = loop_start_;
+    if (pos_ >= total_) break;
+    const u32 limit = (looping_ && has_loop()) ? frames_until_wrap(pos_, loop_end_) : total_ - pos_;
+    const u32 want = std::min(frames - done, limit);
+    const u8* src = data_.data() + data_off_ + size_t(pos_) * 2 * pcm_channels_;
+    for (u32 i = 0; i < want; ++i) {
+      const u8* frame = src + size_t(i) * 2 * pcm_channels_;
+      const s16 left = s16(frame[0] | (frame[1] << 8));
+      out[size_t(done + i) * 2] = left;
+      out[size_t(done + i) * 2 + 1] = pcm_channels_ == 2 ? s16(frame[2] | (frame[3] << 8)) : left;
+    }
+    done += want;
+    pos_ += want;
+  }
+  return done;
+}
+
 u32 HcaStream::read(s16* out, u32 frames) {
+  if (pcm_channels_) return read_pcm(out, frames);
   if (!hca_) return 0;
   u32 done = 0;
   while (done < frames) {

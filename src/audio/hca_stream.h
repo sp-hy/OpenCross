@@ -1,7 +1,8 @@
 #pragma once
-// Pull decoder for the HCA stream inside a .sab. Output is interleaved s16 stereo at the stream rate (48 kHz).
+// Pull decoder for the stream inside a .sab: HCA, or the 16-bit PCM some replacement tracks carry (mono or stereo, 48 kHz).
+// Output is interleaved s16 stereo at the stream rate (48 kHz), a mono PCM sample on both sides.
 // Sample positions are in output samples (after the HCA mute_header is skipped), the same coordinates as the SEAD
-// material loop points: sample s lives in HCA block (s + mute_header) / 1024.
+// material loop points: sample s lives in HCA block (s + mute_header) / 1024, or at PCM frame s.
 #include <memory>
 #include <vector>
 
@@ -53,6 +54,8 @@ class HcaStream {
   Bytes block_bytes(u32 block) const;
   // Decodes `block` into block_pcm_; false on error (block_pcm_ zeroed).
   bool decode_block(u32 block);
+  bool open_pcm(const SabMaterial& material);
+  u32 read_pcm(s16* out, u32 frames);
 
   Bytes data_;
   struct HcaDeleter { void operator()(clHCA* hca) const; };
@@ -60,6 +63,8 @@ class HcaStream {
   u32 rate_ = 0, total_ = 0, loop_start_ = 0, loop_end_ = 0;
   u32 delay_ = 0, block_count_ = 0, block_size_ = 0, data_off_ = 0;
   bool encrypted_ = false;
+  // Channels of a PCM material; 0 = HCA.
+  u32 pcm_channels_ = 0;
   u32 key_start_ = 0;
   u32 pos_ = 0;
   bool looping_ = true;

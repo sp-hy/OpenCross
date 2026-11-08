@@ -1,5 +1,5 @@
 // ocaudio: remastered BGM tool.
-//   ocaudio [-g <game dir>] decode <song id | BGMnnn> <out.wav> [seconds]   (no seconds = whole track, no looping)
+//   ocaudio [-g <game dir>] decode <song id | BGMnnn | file.sab> <out.wav> [seconds]   (no seconds = whole track, no looping)
 //   ocaudio [-g <game dir>] play <song id | BGMnnn> [seconds]
 //   ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate] [keys.txt]   original AKAO music through our sequencer
 //     (with the sound effects its FE 0B ops request; keys.txt lists every voice key-on / key-off: update, KON / KOFF, channel, voice)
@@ -42,7 +42,7 @@ namespace {
 
 int usage() {
   std::fprintf(stderr,
-               "usage: ocaudio [-g <game dir>] decode <song id|BGMnnn> <out.wav> [seconds]\n"
+               "usage: ocaudio [-g <game dir>] decode <song id|BGMnnn|file.sab> <out.wav> [seconds]\n"
                "       ocaudio [-g <game dir>] play <song id|BGMnnn> [seconds]\n"
                "       ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate] [keys.txt]\n"
                "       ocaudio [-g <game dir>] play-seq <music NNN> [seconds]\n"
@@ -96,32 +96,48 @@ double rms(const std::vector<s16>& pcm, size_t frame0, size_t frames) {
   return count ? std::sqrt(acc / double(count)) : 0;
 }
 
-std::shared_ptr<audio::HcaStream> load(const vfs::Vfs& fs, int file_no) {
-  auto bytes = fs.read(audio::bgm_path(file_no));
+std::shared_ptr<audio::HcaStream> open_stream(const std::optional<Bytes>& bytes, const std::string& name) {
   if (!bytes) {
-    std::fprintf(stderr, "not found: %s\n", audio::bgm_path(file_no).c_str());
+    std::fprintf(stderr, "not found: %s\n", name.c_str());
     return nullptr;
   }
   auto stream = std::make_shared<audio::HcaStream>();
   if (!stream->open(*bytes)) {
-    std::fprintf(stderr, "BGM%03d: cannot open as SAB/HCA\n", file_no);
+    std::fprintf(stderr, "%s: cannot open as SAB (HCA or 16-bit PCM)\n", name.c_str());
     return nullptr;
   }
   return stream;
 }
 
+std::shared_ptr<audio::HcaStream> load(const vfs::Vfs& fs, int file_no) { return open_stream(fs.read(audio::bgm_path(file_no)), audio::bgm_path(file_no)); }
+
+// A .sab file on disk, such as a replacement track.
+std::optional<Bytes> read_disk_file(const std::string& path) {
+  FILE* file = std::fopen(path.c_str(), "rb");
+  if (!file) return std::nullopt;
+  Bytes bytes;
+  std::vector<u8> chunk(65536);
+  for (size_t got; (got = std::fread(chunk.data(), 1, chunk.size(), file)) > 0;) bytes.insert(bytes.end(), chunk.begin(), chunk.begin() + std::ptrdiff_t(got));
+  std::fclose(file);
+  return bytes;
+}
+
 int cmd_decode(const vfs::Vfs& fs, const std::string& which, const std::string& out, double seconds) {
-  int song = -1, file = resolve(which, song);
-  if (file < 0) return usage();
-  auto stream = load(fs, file);
+  const bool disk = which.size() > 4 && which.ends_with(".sab");
+  int song = -1, file = disk ? -1 : resolve(which, song);
+  if (!disk && file < 0) return usage();
+  auto stream = disk ? open_stream(read_disk_file(which), which) : load(fs, file);
   if (!stream) return 1;
+  char label[16];
+  std::snprintf(label, sizeof label, "BGM%03d", file);
+  const std::string name = disk ? which : label;
   const u32 rate = stream->sample_rate();
   const bool whole = seconds <= 0;
   stream->set_looping(!whole);
   u32 want = whole ? stream->total_samples() + 1 : u32(seconds * rate);
   std::vector<s16> pcm = stream->read(want);
   size_t frames = pcm.size() / 2;
-  std::printf("BGM%03d: %u Hz, total_samples %u, loop %u..%u, decoded %zu frames (%.3f s)\n", file, rate, stream->total_samples(),
+  std::printf("%s: %u Hz, total_samples %u, loop %u..%u, decoded %zu frames (%.3f s)\n", name.c_str(), rate, stream->total_samples(),
               stream->loop_start(), stream->loop_end(), frames, double(frames) / rate);
   std::printf("RMS first 2 s: %.1f   overall: %.1f", rms(pcm, 0, size_t(2) * rate), rms(pcm, 0, frames));
   if (frames > size_t(32) * rate) std::printf("   2 s at 30 s: %.1f", rms(pcm, size_t(30) * rate, size_t(2) * rate));
