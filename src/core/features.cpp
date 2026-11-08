@@ -14,7 +14,7 @@ namespace {
 constexpr std::array<Setting, 3> kPartySwapSettings = {{
     {"Enabled", 0, 0, 1, "Party swap in battle"},
     {"KeepLineup", 0, 0, 1, "Keep the swapped party after the battle"},
-    {"Reserve", 3, 0, 41, "Reserve slots (0 = everyone outside the party)"},
+    {"Reserve", 0, 0, 41, "Reserve slots (0 = everyone outside the party)"},
 }};
 
 // Party screen behaviour that differs from the game: ReturnToSlot = a pick returns the cursor to the slot it filled.

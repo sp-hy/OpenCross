@@ -217,6 +217,10 @@ FieldWorld::BattleRequest FieldWorld::take_battle() {
   seq_post_ = {};
   // The field snapshot drops every extra animation pack; an entity that held one goes back to its stand slot, whatever it was playing.
   for (Ent& ent_state : ents_) ent_state.actor.drop_ex_pack();
+  // A battle model read ahead for FE D0 runs its scripts in the battle sequence VMs, whose shared words the battle is about to use:
+  // those readers finish first (their models stay to be taken).
+  for (auto& [key, job] : sourced_prefetch_)
+    if (job.valid()) job.wait();
   return handoff_.battle_req;
 }
 

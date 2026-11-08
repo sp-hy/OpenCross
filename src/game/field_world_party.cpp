@@ -384,6 +384,11 @@ int FieldWorld::reserve_member(int slot) {
 void FieldWorld::set_reserve_member(int slot, int char_id) {
   if (slot < 0 || slot >= save::kNumChars - 3) return;
   std::vector<int> reserve = gs_->slot.reserve();
+  // A save that never set a reserve starts from the one FE CD reports (the first available characters outside the party).
+  if (reserve.empty()) {
+    reserve = gs_->reserve(save::kNumChars - 3);
+    while (!reserve.empty() && reserve.back() < 0) reserve.pop_back();
+  }
   if (static_cast<int>(reserve.size()) <= slot) reserve.resize(static_cast<size_t>(slot) + 1, -1);
   if (char_id < 0 || char_id >= save::kNumChars) char_id = -1;
   for (int& other : reserve)
