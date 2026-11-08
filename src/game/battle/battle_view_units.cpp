@@ -516,10 +516,12 @@ void BattleView::on_script_event(int unit, const bseq::Event& event) {
         fx_react(event.a, unit);
         break;
       }
-      const battle::ActionEvent& he = act_.ev[std::min(act_.hit, act_.ev.size() - 1)];
       if (act_.phase == Act::Phase::Hit) {
-        // Targets of this hit (one event = one target).
-        if (he.target >= 0) {
+        // Targets of this hit, one event each (a sweep has one per enemy): op 0x5A reaches all of them, op 0x59 the target-list entry it names.
+        const size_t first = std::min(act_.hit, act_.ev.size() - 1), end = hit_end(first);
+        for (size_t k = first; k < end; ++k) {
+          const battle::ActionEvent& he = act_.ev[k];
+          if (he.target < 0 || (end - first > 1 && event.a >= 0 && k - first != static_cast<size_t>(event.a))) continue;
           if (he.target == unit) {
             vis_[static_cast<size_t>(unit)].react_ev = he;
             on_damage(unit);

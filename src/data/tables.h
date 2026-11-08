@@ -108,7 +108,8 @@ struct TradeEntry {
 };
 
 // Equipment stat record (player.dat part 4 "waa.bin": 256 x 0x1C, index = item id). Field notes: tier() is the material tier 0..9;
-// klass() the weapon class (CRIT table index), bit 7 = multi/ranged; mode() the weapon attack mode 0x10..0x1B (animation group);
+// klass() the weapon class (CRIT table index); sweeps() its bit 7 (rods and boomerangs: a PC's heavy hit strikes every enemy); mode() the
+// weapon attack mode 0x10..0x1B (animation group);
 // colour() the colour bits of materials / plates; power() is weapon wp | armour DEF term | accessory value; mag() weapon MAG bonus |
 // armour MDEF term; acc() weapon accuracy | armour EVD bonus; var() the weapon / armour damage variance.
 constexpr size_t kGearRecSize = 0x1C;
@@ -120,6 +121,7 @@ struct GearRec {
   std::array<u8, kGearRecSize> raw{};
   u8 tier() const { return raw[0]; }
   u8 klass() const { return raw[1] & 0x1F; }
+  bool sweeps() const { return (raw[1] & 0x80) != 0; }
   u8 mode() const { return raw[2]; }
   u8 colour() const { return raw[3]; }
   u8 power() const { return raw[4]; }

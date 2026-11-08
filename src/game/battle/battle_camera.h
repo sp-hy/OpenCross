@@ -112,8 +112,9 @@ class BattleCamera {
   void set_bank(const CamBank* bank) { bank_ = bank; }
   const CamBank* bank() const { return bank_; }
   void set_anchor(AnchorFn fn) { anchor_ = std::move(fn); }
-  // Timeline op 0x22 (start the stage emitter named by the command's tag): the stage objects live elsewhere (StageScene), so the view hooks it.
-  void set_emitter_hook(std::function<void(const std::string&)> fn) { emitter_hook_ = std::move(fn); }
+  // Timeline op 0x22 (start the emitter named by the command's tag, for the target index the timeline serves, 0 = the first): the stage objects
+  // and the units' effect resources live elsewhere (StageScene, the view's unit emitters), so the view hooks it.
+  void set_emitter_hook(std::function<void(const std::string&, int target)> fn) { emitter_hook_ = std::move(fn); }
   // Timeline ops 0x3E / 0x3F / 0x40 (the screen copy warp, one global state shared with the effect packs': the view draws it).
   void set_warp_hook(std::function<void(const CamCmd&)> fn) { warp_hook_ = std::move(fn); }
   // Timeline ops 0x2B / 0x2C (the screen colour layers 0 / 1, shared with the effect packs; the view draws them).
@@ -196,11 +197,14 @@ class BattleCamera {
     // Per-target repeat: the command after the last 0x4E (else the first) and the target being served.
     size_t loop_pos = 0;
     int target = 0;
+    // The target its parent served when its op 0x2F started this one (0 = none); it wins over the own repeat's target.
+    int inherited = 0;
+    int served() const { return inherited ? inherited : target; }
     // The end was reached; the next step restarts it for the next target or drops it.
     bool ended = false;
   };
   bool next_target(Runner& runner) const;
-  void exec(const CamCmd& cmd, CamEvents& events);
+  void exec(const CamCmd& cmd, CamEvents& events, int target);
   void run(Runner& runner, CamEvents& events);
   void goal_pose(CamPose& out) const;
   // The shot at `progress` in `frame`; flag bit 0 re-anchors it now. False when it has no usable frame (the pose is the shot's own).
@@ -209,7 +213,7 @@ class BattleCamera {
 
   const CamBank* bank_ = nullptr;
   AnchorFn anchor_;
-  std::function<void(const std::string&)> emitter_hook_;
+  std::function<void(const std::string&, int)> emitter_hook_;
   std::function<void(const CamCmd&)> warp_hook_;
   std::function<void(const CamCmd&)> screen_hook_;
   std::function<bool()> actor_busy_hook_;

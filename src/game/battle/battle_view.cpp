@@ -388,9 +388,14 @@ void BattleView::run_load_step(LoadJob& job) {
   camera_ = BattleCamera{};
   camera_.set_bank(&bank_);
   camera_.set_anchor([this](int unit, int point) { return anchor_frame(unit, point); });
-  // Timeline op 0x22: the emitter of that name in the loaded resources: the stage's, else the acting unit's own (a fierce attack's at0.prd timelines).
-  camera_.set_emitter_hook([this](const std::string& name) {
+  // Timeline op 0x22: the emitter of that name in the loaded resources: the stage's, else the acting unit's own (a fierce attack's at0.prd timelines);
+  // a per-target repeat serving a later target starts a clone that follows that target (a sweep's projectiles, one per enemy).
+  camera_.set_emitter_hook([this](const std::string& name, int target) {
     if (stage_scene_.start_emitter(name) || act_.actor < 0) return;
+    if (target > 0) {
+      anm_effect_for_target(act_.actor, name, target);
+      return;
+    }
     bseq::Event effect;
     effect.kind = bseq::Event::Effect;
     for (size_t i = 0; i < name.size() && i < 4; ++i) effect.tag |= static_cast<u32>(static_cast<u8>(name[i])) << (8 * i);

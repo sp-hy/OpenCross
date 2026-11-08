@@ -120,6 +120,7 @@ Equip make_equip(const data::GameTables& tables, int weapon, int armour, const s
   if (weapon_rec) {
     equip.wp = weapon_rec->power(), equip.wp_acc = weapon_rec->acc(), equip.wp_var = weapon_rec->var(), equip.wp_class = weapon_rec->klass(),
     equip.mag_gear = weapon_rec->mag();
+    equip.wp_sweeps = weapon_rec->sweeps();
     equip.slayer = weapon_rec->mask_hi();
     equip.status_lo |= weapon_rec->status_lo(), equip.status_hi |= weapon_rec->status_hi();
     add_flags(*weapon_rec);
@@ -641,7 +642,7 @@ int Battle::auto_hit_level(int actor, int target, bool fallback_weak) const {
   return fallback_weak && chain_cost(0, attacker) <= attacker.stamina ? 0 : -1;
 }
 
-int Battle::hit_chance_for(int actor, int target, int strength) const {
+int Battle::hit_chance_for(int actor, int target, int strength, bool any_target) const {
   const Unit& attacker = unit(actor);
   const Unit& target_unit = unit(target);
   if (cheats_.always_hit && attacker.pc) return 100;
@@ -655,7 +656,7 @@ int Battle::hit_chance_for(int actor, int target, int strength) const {
   in.attacker_hero_set = attacker.hero_set;
   in.target_dizzy = (target_unit.lo & st::kDizzy) != 0;
   in.pc_attacker = attacker.pc;
-  in.hits = (attacker.pc && chain_actor_ == actor && chain_target_ == target) ? chain_hits_ : 0;
+  in.hits = (attacker.pc && chain_actor_ == actor && (any_target || chain_target_ == target)) ? chain_hits_ : 0;
   in.strength = strength;
   in.always_hit = (attacker.hi & st::kHiAlwaysHit) != 0;
   in.dark = is_pc_slot(active_pc_) && (unit(active_pc_).lo & st::kDark) != 0;
@@ -1220,25 +1221,28 @@ bool Battle::force_status_bits(int target, u32 lo) {
 }
 
 // ------------------------------------------------------------------------------------------------ weapon attack
-void Battle::do_weapon_attack(int actor, int target, int strength) {
-  const SealRefreshOnExit refresh{*this, target};
+void Battle::weapon_begin(int actor, int aim, int strength, u32 target_mask) {
   summon_colour_ = -1;
   thaw_on_action(actor);
   Unit& attacker = units_[static_cast<size_t>(actor)];
   attacker.result_code = 0xFF;
-  Unit& target_unit = units_[static_cast<size_t>(target)];
   // Script var 0x22 / 0x28 + 6 * pc = the hit strength (0 weak / 1 strong / 2 fierce), not the weapon class.
-  brain_.on_attack(*this, actor, 0, strength, target);
-  if (attacker.pc && (chain_actor_ != actor || chain_target_ != target)) {
+  brain_.on_attack(*this, actor, 0, strength, target_mask);
+  if (attacker.pc && (chain_actor_ != actor || chain_target_ != aim)) {
     chain_actor_ = actor;
-    chain_target_ = target;
+    chain_target_ = aim;
     chain_hits_ = 0;
   }
-  const int chance = hit_chance_for(actor, target, strength);
+}
+
+bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool missed) {
+  Unit& attacker = units_[static_cast<size_t>(actor)];
+  Unit& target_unit = units_[static_cast<size_t>(target)];
+  const int chance = hit_chance_for(actor, target, strength, aim >= 0);
   // Dev: every PC weapon attack misses.
   static const bool force_miss = std::getenv("OC_BATTLE_MISS") != nullptr;
   const bool rolled = roll_hit(rng_, chance);
-  const bool hit = rolled && !(force_miss && attacker.pc);
+  const bool hit = rolled && !missed && !(force_miss && attacker.pc);
   static const char* kStrName[] = {"weak", "medium", "heavy"};
   ActionEvent ev;
   ev.kind = ActionEvent::Kind::Weapon;
@@ -1246,6 +1250,7 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
   ev.death_cast = in_death_cast_;
   ev.target = target;
   ev.strength = strength;
+  ev.aim = aim;
   ev.hp_before = ev.hp_after = target_unit.hp;
   boost_cancelled_ = 0;
   if (!hit) {
@@ -1254,7 +1259,7 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
     ev.code = 2;
     boost_cure();
     note_event(ev);
-    return;
+    return false;
   }
   const int ci = colour_of(attacker) < 0 ? kNoColour : colour_of(attacker);
   // The hit takes the colour of the attacker's colour status (hi bits 0..5, set by the Turn elements) when it has one, else its innate
@@ -1315,11 +1320,52 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
   ev.ko_owed = ev.ko && death_pending_[static_cast<size_t>(target)];
   ev.hp_after = target_unit.hp;
   note_event(ev);
+  return true;
+}
+
+void Battle::weapon_landed(int actor, int strength) {
+  Unit& attacker = units_[static_cast<size_t>(actor)];
   // The chain counter: a landed hit of a PC that is not confused adds its strength's step; a miss leaves it.
   if (attacker.pc && !(attacker.lo & st::kConfused)) chain_hits_ += kChainAdd[static_cast<size_t>(strength)];
   // Any attacker's gauge fills (battle boost: to the top).
   attacker.gauge = cheats_.boost ? attacker.gauge_max : std::clamp(attacker.gauge + strength + 1, -1, attacker.gauge_max);
+}
+
+void Battle::do_weapon_attack(int actor, int target, int strength) {
+  const SealRefreshOnExit refresh{*this, target};
+  weapon_begin(actor, target, strength, 1u << target);
+  if (!weapon_strike(actor, target, strength, -1, false)) return;
+  weapon_landed(actor, strength);
   pay_drain();
+}
+
+// The sweep is one hit: the stamina, the chain step and the gauge are paid once. Its targets are every enemy an all-targets element would
+// reach when it starts (cast_element), in ascending unit order, each with its own hit roll (the chain counter applies to all of them) and
+// damage. A miss is not cleared between the targets: every target after one that missed misses too, its roll still drawn. Only a sweep
+// that missed nobody adds the chain step and fills the gauge. The scripts see the whole target set as the attack's target mask.
+void Battle::do_weapon_sweep(int actor, int aim, int strength) {
+  u32 targets = 0;
+  for (int i = kPcSlots; i < kUnits; ++i)
+    if (units_[static_cast<size_t>(i)].present && units_[static_cast<size_t>(i)].standing() && (cast_mask_ >> i & 1u)) targets |= 1u << i;
+  if (targets == 0) targets = 1u << aim;
+  weapon_begin(actor, aim, strength, targets);
+  const size_t first = events_.size();
+  bool missed = false;
+  for (int i = 0; i < kUnits; ++i) {
+    if (!(targets >> i & 1u)) continue;
+    const SealRefreshOnExit refresh{*this, i};
+    if (!weapon_strike(actor, i, strength, aim, missed)) missed = true;
+  }
+  for (size_t k = first + 1; k < events_.size(); ++k)
+    if (events_[k].kind == ActionEvent::Kind::Weapon && events_[k].actor == actor && events_[k].aim == aim) events_[k].hit_index = events_[first].hit_index;
+  if (!missed) weapon_landed(actor, strength);
+  pay_drain();
+}
+
+void Battle::do_pc_weapon_hit(int actor, int target, int strength) {
+  const Unit& attacker = units_[static_cast<size_t>(actor)];
+  if (attacker.pc && strength == 2 && attacker.eq.wp_sweeps) do_weapon_sweep(actor, target, strength);
+  else do_weapon_attack(actor, target, strength);
 }
 
 // ------------------------------------------------------------------------------------------------ element / tech
@@ -1350,7 +1396,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   const bool alive0 = target_unit.in_turn_order();
   const size_t log0 = log_.size();
   boost_cancelled_ = 0;
-  brain_.on_attack(*this, actor, 1, element_id, target);
+  brain_.on_attack(*this, actor, 1, element_id, 1u << target);
   const int ci = colour_of(caster) < 0 ? kNoColour : colour_of(caster);
   int ce = data::colour_index_of_bit(element_colour(element_id));
   const int ce_pool = ce < 0 ? kNoColour : ce;
@@ -2526,7 +2572,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         confirm_actor_ = cmd.actor;
         confirm_target_[static_cast<size_t>(cmd.actor)] = tgt;
         unit.stamina -= stamina_cost(unit, chain_cost(strength, unit));
-        do_weapon_attack(cmd.actor, tgt, strength);
+        do_pc_weapon_hit(cmd.actor, tgt, strength);
         step_after_pc_action(cmd.actor, strength + 1, true);
         post_action(cmd.actor, strength + 1, strength + 1);
         check_end();

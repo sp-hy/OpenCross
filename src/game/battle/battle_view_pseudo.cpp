@@ -398,6 +398,7 @@ void BattleView::pa_draw(const render::Frame& frame, const render::Letterbox& lb
   dp.model = model;
   dp.palette = palette_;
   dp.linear = linear_filter_ < 0 ? hd_ : linear_filter_ != 0;
+  dp.shading = character_shading_;
   dp.hd = actor.fm ? false : hd_;
   for (size_t channel = 0; channel < 3; ++channel) dp.tint[channel] = static_cast<float>(actor.rgb[channel]) / 128.0f;
   // A soft fade draws B - F (white CLUT) then B + F, both with the model colour.

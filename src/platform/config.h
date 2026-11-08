@@ -60,6 +60,18 @@ struct ModSetting {
 enum class WindowMode { Windowed, Borderless, Exclusive };
 // [Video] Filter*: texture sampling of the 3D content (field actors, title scene) per art mode.
 enum class TexFilter { Nearest, Bilinear };
+// [Shaders] Characters: the shading style of the characters (render/mesh_pipeline.h CharacterShading); the ini words in that order.
+enum class CharacterShader { Off, Realistic, Toon, Cel, Matcap };
+inline constexpr const char* kCharacterShaderNames[] = {"off", "realistic", "toon", "cel", "matcap"};
+// [Shaders] Fullscreen: the main filter over the whole finished picture (render/screen_pass.h); the ini words in that order.
+enum class FullscreenShader { Off, Crt, Composite };
+inline constexpr const char* kFullscreenShaderNames[] = {"off", "crt", "composite"};
+// [Shaders] CrtMask: the CRT's phosphor layout; the ini words in that order.
+enum class CrtMask { Classic, ApertureGrille, ShadowMask };
+inline constexpr const char* kCrtMaskNames[] = {"classic", "aperture", "shadow"};
+// [Shaders] Matcap / Grade: the built-in looks (a mod's own matcaps and LUTs go by their file names).
+inline constexpr const char* kBuiltinMatcaps[] = {"clay", "metal", "ink"};
+inline constexpr const char* kBuiltinGrades[] = {"off", "film", "warm", "cold", "faded"};
 
 // [Cheats] (Esc overlay "Cheats" tab): every toggle off by default, never locks saving. platform::cheats() is the
 // live set (bound to Config::cheats by main) so the rule code in the lower layers can read it. The three RDE toggles are session-only
@@ -124,7 +136,7 @@ void bind_cheats(const Cheats* set);
 //            multiple of the output resolution (above 1 = supersampled, area-filtered down; below 1 = bilinear up) and composited under
 //            the 2D / UI drawn at output resolution; with Ps1Res the multiple of the PS1 320 x 224 target instead (2 = 640 x 448); one of
 //            kRenderScales (snapped on load). Ps1Jitter: GTE integer vertex snapping + affine texture mapping in the 3D pipelines
-//            (render/ps1_jitter.h). Crt: final full-frame CRT post pass (scanlines, mask, vignette), ImGui excluded (render/crt_pass.h).
+//            (render/ps1_jitter.h).
 //            Msaa: multisample antialiasing samples of the window-resolution pictures (1 = off, 2, 4, 8; lowered to what the GPU
 //            supports); the PS1-resolution passes stay aliased. Anisotropy: anisotropic filtering level of the bilinear textures of the
 //            3D models and stages (1 = off, 2, 4, 8, 16).
@@ -148,6 +160,13 @@ void bind_cheats(const Cheats* set);
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
+//   [Shaders] (opt-in, off by default, any art mode) Characters: kCharacterShaderNames, the shading of the field actors, the battle units
+//            and their weapons and the status screen's model (render/mesh_pipeline.h CharacterShading); Matcap: the matcap style's look (a
+//            built-in or a mod's shaders/matcaps/<name>.png); Outlines: a dark outline; Rim: a rim light; SpellRim: in battle the rim takes
+//            the running spell's light colour; CastGlow: a caster glows in its element's colour.
+//            Fullscreen: kFullscreenShaderNames, the main filter of the final full-frame pass, ImGui excluded (render/screen_pass.h; the
+//            old [Video] Crt=1 reads as crt); CrtMask (kCrtMaskNames), CrtCurvature, CrtGlow: the crt filter's options. Grade: a colour
+//            grade (kBuiltinGrades or a mod's shaders/luts/<name>.png).
 //   [Audio]  Master / Music / Sfx: bus gains 0..1. Voices: play the voice lines of the mods' voices folders.
 //            VoiceVolume 0..100 (the voice bus gain, times Master). BgmSource: remastered (RDE HCA files) or original (PS1 AKAO sequences).
 //   [Debug]  Room: jump straight to this field room; empty = start at the title. Flow: title | name | slots | opening | field (field = no
@@ -214,7 +233,17 @@ struct Config {
   bool autohide_cast_hud = false;
   bool retain_battle_scenery = false;
   bool full_precision_effects = false;
-  bool crt = false;
+  CharacterShader character_shader = CharacterShader::Off;
+  std::string matcap = "clay";
+  bool outlines = false;
+  bool rim = false;
+  bool spell_rim = false;
+  bool cast_glow = false;
+  FullscreenShader fullscreen_shader = FullscreenShader::Off;
+  CrtMask crt_mask = CrtMask::Classic;
+  bool crt_curvature = false;
+  bool crt_glow = false;
+  std::string grade = "off";
   int msaa = 1;
   static constexpr int kMsaaLevels[] = {1, 2, 4, 8};
   int anisotropy = 1;

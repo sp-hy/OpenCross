@@ -119,7 +119,7 @@ void BattleView::showcase_draw(const render::Mat4& view_proj, const render::Mat4
     dp.palette = palette_;
     dp.linear = linear_filter_ < 0 ? hd_ : linear_filter_ != 0;
     dp.hd = hd_;
-    if (spell_.set.active()) dp.lights = &spell_.set;
+    if (spell_lights_shown_ && spell_.set.active()) dp.lights = &spell_.set;
     unit_ot_faces(model.model->asset, dp);
     shading_params(model.model->asset, dp);
     dp.hidden_meshes = (dp.hidden_meshes | model.part_hide) & ~model.part_show;

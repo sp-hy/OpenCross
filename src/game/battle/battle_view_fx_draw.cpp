@@ -153,8 +153,12 @@ void BattleView::fx_end() {
     const bool ran_out = !visual.vm.running();
     // A script that ran out keeps its model colour.
     anm_unit_reset(i, ran_out, ran_out || visual.script_kind == kIdle);
-    // No KO on the unit, so the idle restart runs: HP a script wrote to 0 shows as the low-HP pose from here on.
-    if (visual.zero_hp_actions == 2 && visual.script_kind == kIdle) start_idle(i);
+    // Every unit on screen without the dead flag restarts its idle, so it re-picks its pose from the HP it now has: a PC healed above a
+    // quarter stands up (also a target whose own table ended before its number landed), one brought to a quarter or less hunches, and
+    // HP a script wrote to 0 shows as the low-HP pose from here on. A unit whose script was cut is restarted by the action's end.
+    const battle::Unit& unit_rec = battle_->unit(i);
+    const bool dead_flag = visual.ko_shown && !visual.death_owed && !(unit_rec.hp_written_zero && unit_rec.hp <= 0);
+    if (unit_rec.present && visual.script_kind == kIdle && !dead_flag) start_idle(i);
   }
   // The tech clips are dropped; nothing plays an external clip afterwards.
   fx_drop_clip_packs();

@@ -24,7 +24,9 @@ struct FrameSlot {
 };
 layout(std430, set = 0, binding = 0) readonly buffer Frames { FrameSlot slots[]; };
 #define u slots[int(pc.slot.x + 0.5)]
-layout(set = 1, binding = 0) uniform Push { vec4 color; vec4 misc; vec4 tint; vec4 water; vec4 fog; vec4 fog_rng; vec4 ot; vec4 ot2; vec4 slot; } pc;
+// [Shaders] (render/mesh_pipeline.h CharacterShading): shade.x = style (0 off, 1 realistic, 2 toon, 3 cel, 4 matcap), shade.y = 1 on the
+// outline pass, shade.zw = the outline width in clip units per axis; rim.w = 1 rim on; glow.w = cast glow strength.
+layout(set = 1, binding = 0) uniform Push { vec4 color; vec4 misc; vec4 tint; vec4 water; vec4 fog; vec4 fog_rng; vec4 ot; vec4 ot2; vec4 slot; vec4 shade; vec4 rim; vec4 glow; } pc;
 layout(location = 0) out vec3 uv;           // (uv * k, k): k = clip w with the PS1 jitter (affine texturing), else 1; the fragment divides
 layout(location = 1) out float cam_z;
 layout(location = 2) out float local_y;
@@ -37,12 +39,33 @@ layout(location = 5) out vec4 v_light;      // lit path: the corner's colour mul
 layout(location = 9) out vec3 v_extra;      // [Enhancements] additive colour multiplier (key light shading + spell lights), 0 = off
 layout(location = 10) flat out vec3 v_amb;  // [Enhancements] scene ambient multiplier (1 = off; not on the PS1 lit path, which carries the back colour itself)
 layout(location = 11) out vec3 v_corner;    // the corner's packet colour multiplier (Gouraud), applied on the flat path
+layout(location = 12) flat out vec3 v_key;  // [Shaders] the key light direction (world, unit)
+layout(location = 13) out vec3 v_normal;    // [Shaders] the corner's world normal (0 = none: the PS1 colour is kept)
+layout(location = 14) out vec3 v_eye;       // [Shaders] from the corner to the eye (world); the matcap style: matcap_normal
 vec4 skin(vec3 p0, vec3 p1, uvec2 j, vec2 w) {
   return u.palette[j.x] * vec4(p0, 1.0) * w.x + u.palette[j.y] * vec4(p1, 1.0) * w.y;
 }
 // GTE NCLIP on screen coordinates (y down): SX0*SY1 + SX1*SY2 + SX2*SY0 - SX0*SY2 - SX1*SY0 - SX2*SY1.
 float nclip(vec2 a, vec2 b, vec2 c) {
   return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+}
+// The camera-relative key light of [Enhancements] Lighting and [Shaders]: from above ('up' = the model's own up in this world, so it holds
+// in the y-down field world too), toward the camera, a little from the left.
+vec3 key_light() {
+  vec3 up = normalize(mat3(u.model) * vec3(0.0, -1.0, 0.0));
+  vec3 right = vec3(u.view[0][0], u.view[1][0], u.view[2][0]);
+  vec3 fwd = vec3(u.view[0][2], u.view[1][2], u.view[2][2]);
+  return normalize(up * 0.70 - fwd * 0.55 - right * 0.35);
+}
+// [Shaders] matcap: the normal in the key light's frame, (along the camera's right, along the model's up, toward the camera), each axis
+// made square to the camera's line of sight, so the matcap's light falls where key_light's does.
+vec3 matcap_normal(vec3 n) {
+  vec3 fwd = vec3(u.view[0][2], u.view[1][2], u.view[2][2]);
+  vec3 up = normalize(mat3(u.model) * vec3(0.0, -1.0, 0.0));
+  up = normalize(up - fwd * dot(up, fwd));
+  vec3 right = vec3(u.view[0][0], u.view[1][0], u.view[2][0]);
+  right = normalize(right - fwd * dot(right, fwd) - up * dot(right, up));
+  return vec3(dot(n, right), dot(n, up), -dot(n, fwd));
 }
 void main() {
   vec4 sk0 = skin(in_pos[0], in_pos[1], in_joint01.xy, in_weight01.xy);
@@ -53,6 +76,21 @@ void main() {
   wl[3] = u.model * vec4(skin(in_pos[6], in_pos[7], in_joint23.zw, in_weight23.zw).xyz, 1.0);
   gl_Position = u.view_proj * wl[0];
   cam_z = (u.view * wl[0]).z;
+  v_key = vec3(0.0);
+  v_normal = vec3(0.0);
+  v_eye = vec3(0.0);
+  if (pc.shade.x > 0.5 || pc.shade.y > 0.5 || pc.rim.w > 0.5 || pc.glow.w > 0.0) {
+    // [Shaders] the skinned VDDM normal, else a rigid mesh's smoothed normal.
+    if (dot(in_normal.xyz, in_normal.xyz) > 1e-6) v_normal = normalize(mat3(u.model) * mat3(u.palette[uint(in_normal.w + 0.5)]) * in_normal.xyz);
+    else if (in_smooth.w > 0.5) v_normal = normalize(transpose(inverse(mat3(u.model) * mat3(u.palette[in_joint01.x]))) * in_smooth.xyz);
+    v_key = key_light();
+    v_eye = pc.shade.x > 3.5 ? matcap_normal(v_normal) : inverse(u.view)[3].xyz - wl[0].xyz;
+    if (pc.shade.y > 0.5 && v_normal != vec3(0.0)) {
+      // Outline pass: the corner pushed out along its normal by a fixed width on screen (the direction measured in screen pixels).
+      vec2 dir = (u.view_proj * vec4(v_normal, 0.0)).xy / pc.shade.zw;
+      if (dot(dir, dir) > 1e-12) gl_Position.xy += normalize(dir) * pc.shade.zw * gl_Position.w;
+    }
+  }
   float aff = 1.0;
   if (u.slab.z > 0.0 && gl_Position.w > 0.0) {  // [Video] Ps1Jitter: GTE integer screen coordinates, GPU affine texture mapping
     vec2 g = vec2(u.slab.z, u.slab.w);
@@ -95,20 +133,14 @@ void main() {
   v_extra = vec3(0.0);
   v_amb = (u.el[17].w > 0.5 && u.lit[0].w < 0.5) ? u.el[17].xyz : vec3(1.0);
   if (u.el[0].x > 0.5 || u.el[0].z > 0.5) {
-    // [Enhancements] EnhancedLighting: the vertex normal against a camera-relative key light (from above, toward the camera, a little from the left;
-    // 'up' = the model's own up in this world, so it holds in the y-down field world too): +-0.35 of the colour multiplier (el[0].y * dot * 0.5);
+    // [Enhancements] EnhancedLighting: the vertex normal against the key light (key_light; not on [Shaders] shaded draws, which shade
+    // from it themselves): +-0.35 of the colour multiplier (el[0].y * dot * 0.5);
     // the fragment never lets the result fall below 65 % of the PS1 colour. Not on the PS1-lit path (it has its own normals shading).
     // SpellLights: per light (1 - d / radius)^2 x colour, facing mix 0.4 (turned away) .. 1 (towards), 0.7 without a normal.
     vec3 nraw = in_normal.xyz;
     bool hasn = dot(nraw, nraw) > 1e-6;
     vec3 nw = hasn ? normalize(mat3(u.model) * mat3(u.palette[uint(in_normal.w + 0.5)]) * nraw) : vec3(0.0);
-    if (u.el[0].x > 0.5 && u.lit[0].w < 0.5 && hasn) {
-      vec3 up = normalize(mat3(u.model) * vec3(0.0, -1.0, 0.0));
-      vec3 right = vec3(u.view[0][0], u.view[1][0], u.view[2][0]);
-      vec3 fwd = vec3(u.view[0][2], u.view[1][2], u.view[2][2]);
-      vec3 key = normalize(up * 0.70 - fwd * 0.55 - right * 0.35);
-      v_extra += pc.tint.rgb * (u.el[0].y * (dot(nw, key) * 0.5));
-    }
+    if (u.el[0].x > 0.5 && u.lit[0].w < 0.5 && hasn && pc.shade.x < 0.5) v_extra += pc.tint.rgb * (u.el[0].y * (dot(nw, key_light()) * 0.5));
     float vis = clamp(max(pc.tint.r, max(pc.tint.g, pc.tint.b)), 0.0, 1.0);
     int nl = int(u.el[0].z + 0.5);
     vec3 spell = vec3(0.0);

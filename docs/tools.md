@@ -193,6 +193,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--stats` | `hp=..,atk=..,def=..,hit=..,evd=..,mag=..,mdef=..` | unchanged | Base stats of every party member. |
 | `--enemyhp` | `u3,u4,u5` | unchanged | HP (and max HP) of enemy units 3 / 4 / 5; empty or -1 keeps. |
 | `--ko` | `<unit>` | none | That party unit starts KO'd. |
+| `--hp` | `a[,b[,c]]` | unchanged | Current HP of party slots 0..2 (after `--stats`, at most the max HP; empty or -1 keeps). |
 | `--gauge` | `<n>` | the character's | Party slot 0 starts with that element level (-1 none, 0 = row 1 usable): an element cast from the top menu as the first action, the way a PS1 capture pokes the gauge. |
 | `--stars` | `<current>,<total>` | `0,0` | The stars the battle starts with (the save's stars current / total): a summon needs one left, and the field ring shows them while it is one colour. |
 | `--status` | `<unit>:<lo>[,...]` | none | OR these status bits into the units' merged `lo` words at the start (e.g. `0:0x19,3:0x100020`); for checking the status plates and icons. |
@@ -202,7 +203,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--castat` | `<frame>` | immediately | Issue the cast at that frame. |
 | `--cast2`, `--cast2at`, `--cast2tgt` | `<element>`, `<frame>`, `<unit>` | none | A second cast (consecutive casts). |
 | `--ecast` | `<element id>` | none | First enemy casts it on the first PC. |
-| `--weapon` | `<0\|1\|2>` | none | The acting PC attacks the first enemy (weak / medium / heavy). |
+| `--weapon` | `<0\|1\|2>` | none | The acting PC attacks the first enemy (weak / medium / heavy); a heavy hit with a rod or boomerang sweeps every enemy (`rules/battle.md` 3.3). |
 | `--nofx` | none | off | Element casts take the generic path (no effect pack). |
 | `--auto` | none | off | Feeds a confirm every 12 frames (smoke test). |
 | `--autoframes` | `<n>` | unlimited | `--auto` stops pressing after n frames. |

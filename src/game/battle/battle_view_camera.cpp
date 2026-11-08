@@ -262,6 +262,7 @@ void BattleView::tick() {
   // Effect slow motion skips the game tick.
   if (fx_slow_skip()) return;
   ++tick_count_;
+  cast_glow_tick();
   // The RDE hand-over's clock includes the load before the party intro, so its `fade` cut comes that much later.
   if (white_ticks_ >= 0 && ++white_ticks_ > (rde_hand_ ? encstrips::kLoadHold + kStartFadeEnd : kStartFadeEnd)) {
     white_ticks_ = -1;

@@ -46,7 +46,7 @@
 #include "platform/pad_remap.h"
 #include "platform/updater.h"
 #include "platform/window.h"
-#include "render/crt_pass.h"
+#include "render/screen_pass.h"
 #include "render/gpu_context.h"
 #include "render/imgui_layer.h"
 #include "render/mesh_pipeline.h"
@@ -211,6 +211,10 @@ class App {
   // ---- app_draw.cpp -----------------------------------------------------------------------------------------------------------
   void draw_frame(const render::Frame& frame);
   void apply_frame_options();
+  // [Shaders] the full-screen look of this frame from the settings.
+  render::ScreenSettings screen_look() const;
+  // [Shaders] the matcaps and LUTs of the enabled mods: added to the mesh pipeline and the screen pass, named in the settings window.
+  void load_shader_looks();
   void draw_scene(SceneFrame& sf);
   void begin_scene_target(SceneFrame& sf);
   void draw_battle_picture(const SceneFrame& sf);
@@ -267,8 +271,10 @@ class App {
   render::Sampler linear;
   render::Texture background;
   render::ImGuiLayer ui;
-  render::CrtPass crt_pass;
-  bool crt_ok = false;
+  render::ScreenPass screen_pass;
+  bool screen_ok = false;
+  // Frames drawn: the screen pass's animation clock (the composite dot crawl).
+  u32 screen_tick = 0;
   // Set when the Mods tab changed the mod list: re-apply the art mode after the overlay window.
   bool mods_dirty = false;
   platform::Updater updater;

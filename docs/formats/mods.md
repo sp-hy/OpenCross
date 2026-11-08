@@ -28,7 +28,7 @@ A ZIP, 7z or RAR (4 or 5, solid included; the extension selects the file, the fo
 * **ZIP** (stored or deflated members). Each member is read on its own through miniz.
 * **Everything else** (7z, RAR, a ZIP with another method) can only be walked from the start. An archive of up to 256 MiB unpacked is decoded into memory at its first read and served from there. A larger one is walked for each read: fast when its members are stored separately, slow when it is solid, because every read decodes from the start of the data. Such an archive shows *May run slowly: extract it to a folder* under its name in the Mods tab (`Mod::may_be_slow`; whether it is really solid cannot be told in advance), and a read that takes over 0.5 s logs a warning once. The memory goes when the overlay stops using the archive.
 * **Scan cost.** Listing a ZIP or 7z reads its directory only. A solid RAR has no directory: listing it decodes the whole archive, at every scan.
-* **Wrapper folder.** When every member sits in one folder, as from zipping a mod folder, the mod starts inside it (repeatedly), unless the folder is called `voices` or `textures`. This puts `Pack\voices\...` at the top of the mod, where the voice lookup expects it. An archive whose stem is `voices` reads like a folder called `voices`, with no wrapper removed.
+* **Wrapper folder.** When every member sits in one folder, as from zipping a mod folder, the mod starts inside it (repeatedly), unless the folder is called `voices`, `textures` or `shaders`. This puts `Pack\voices\...` at the top of the mod, where the voice lookup expects it. An archive whose stem is `voices` reads like a folder called `voices`, with no wrapper removed.
 * **Limits.** A password-protected, damaged or multi-part archive shows *cannot read* in the *Issues* column. An `<archive>.dat` inside a packed mod is unmatched: unpack the mod, or put the `.dat` directly in `mods`. A movie inside an archive is read whole into memory when it starts, not streamed.
 * A file held open by the game cannot be replaced or deleted until *Rescan* or a mod switch stops using it. A replaced archive (new size or time) is picked up at the next *Rescan*.
 
@@ -232,3 +232,17 @@ The features this build has:
 | `PartySwap` | 1 | `Enabled` (0), `KeepLineup` (0), `Reserve` (0, 0..41) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). `Reserve` slots are set on the Party screen (`rules/menus.md`, party editor) and by the ops FE CC / FE CD; 0 (the default) = no slots, everyone recruited outside the party can come in, as at level 1. |
 | (none) | 2 | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12): not set by mods. |
 | `PartyScreen` | 3 | `Enabled` (0), `ReturnToSlot` (1) | Party screen (Tele-Porter) behaviour that differs from the game: `ReturnToSlot` = a pick returns the cursor to the slot it filled instead of keeping the member grid open (`rules/menus.md`, party editor). |
+
+## 9. Shader looks (matcaps and colour grades)
+
+A mod can add looks to the Graphics tab's shader settings (`config.md` section 2.5.1):
+
+```
+<GameDir>\mods\<pack>\shaders\matcaps\<name>.png    a matcap for the Matcap character style
+<GameDir>\mods\<pack>\shaders\luts\<name>.png       a colour-grade LUT for Grade
+```
+
+* **Matcap.** The shading of a sphere seen from the front: the pixel at (x, y) is the colour a surface whose normal is (2x / width - 1, 2y / height - 1) gets, x along the screen's right, y down (along the character's down), z toward the viewer. The other styles are lit from the upper left and in front, at (-0.35, -0.70, 0.55) in those axes; a matcap lit from there shades like them. Any size; it is sampled bilinearly. The character's colour is multiplied by 1.6 times the matcap's, so a matcap averaging about 0.6 keeps the PS1 brightness.
+* **LUT.** N squares of N x N pixels side by side (width N x N, height N; 256 x 16 and 1024 x 32 are common): within a square red grows to the right and green downwards, and blue grows square by square. Any other shape is not used and logs a warning.
+* `<name>` is the file name without `.png`, in lower case; it is what the settings show and what `[Shaders] Matcap` and `Grade` store. The built-in names (`clay metal ink`, `off film warm cold faded`) cannot be replaced, and between mods the first one in the list wins a name.
+* Like a mod's engine features they do not follow "load on": an enabled mod's looks are offered in every art mode. They are loaded at launch and after every change of the mod list; scripted and `--config` runs load none.

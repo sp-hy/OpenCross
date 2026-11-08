@@ -39,6 +39,7 @@ btl_effect_start_hook = 0x800B0F48;  # function: effect start hook: saves unit m
 btl_charge_start = 0x800B110C;  # function: starts the charge sequence for the caster, then queues the load of the effect pack named by acting entry 0's control block word +0xE (effect id - 1)
 btl_action_state2_hook = 0x800B1260;  # function: action state-2 hook that starts the effect and charge
 btl_effect_end_hook = 0x800B1384;  # function: effect end hook: restores unit shadow bit and model copy, restarts the idle of every unit without the dead flag
+btl_effect_end_hook_nested = 0x800B1514;  # function: runs the effect end hook inside a nesting counter (saves the stack mark on the outermost call)
 btl_shadow_light_project = 0x800B15A4;  # function: casts the model top along the light onto the floor for shadows
 btl_shadow_near_hull_draw = 0x800B1760;  # function: draws shadow fan for hulls under radius 0x400
 btl_shadow_far_hull_draw = 0x800B1BF8;  # function: draws shadow polygons for hulls at or above radius 0x400
@@ -268,12 +269,14 @@ btl_stamina_bar_draw = 0x800C65E0;  # function: Draws one stamina bar rectangle 
 btl_window_type_set = 0x800C6818;  # function: Records the window type used as sheet for window sprites.
 btl_window_text_draw = 0x800C6850;  # function: Draws window item text for a given type and index.
 btl_unit_thaw_on_action = 0x800C6AC4;  # function: run before the action of a unit whose freeze mark is set: clears lo 0x60000000 from its status words and the mark, restarts its idle clip
-btl_command_confirm = 0x800C6B70;  # function: Starts the oldest HIT% pick waiting in the pick queue (a hit, or the element command) and records it in the action record; a hit whose (strength + 1) x 10 exceeds the stamina is dequeued without running.
+btl_command_confirm = 0x800C6B70;  # function: Starts the oldest HIT% pick waiting in the pick queue (a hit, or the element command) and records it in the action record; a hit whose (strength + 1) x 10 exceeds the stamina is dequeued without running; a heavy hit (strength 2) with a weapon whose class byte has bit 7 (rods, boomerangs) opens the target cursor in whole-side mode and takes every enemy of its mask as the target list.
 btl_action_start = 0x800C704C;  # function: Starts a unit action, setting up facing, cast header flags and camera.
 btl_time_step_advance = 0x800C781C;  # function: Advances enemy countdowns and recovers party stamina when nobody can act.
 btl_time_step_when_stuck = 0x800C7998;  # function: run every frame: when no party unit can open its menu (status 0x20304000 or stamina below 10), advances time by the smallest non-zero enemy countdown, whether or not a unit already waits at 0
 btl_element_menu_rebuild = 0x800C7A78;  # function: Rebuilds a unit element menu cells and level gauge cap from its record.
 btl_unit_gear_totals_build = 0x800C7DA8;  # function: Builds a unit's gear totals: power, MAG, accuracy, masks, damage flags, status-duration and stamina modifiers
+btl_unit_weapon_class = 0x800E09CD;  # data: the unit's copy of its weapon record byte +1, stride 0x410: low 5 bits the crit class, bit 7 = a heavy hit strikes every enemy
+btl_unit_weapon_mode = 0x800E09CE;  # data: the unit's copy of its weapon record byte +2, stride 0x410: the attack mode 0x10..0x1B, written as the action word of its weapon hits (element mode handlers 16..27)
 btl_unit_gear_records_copy = 0x800C8148;  # function: Copies the five gear records during a unit swap.
 btl_unit_control_block_build = 0x800C8248;  # function: Builds a unit control block and sets its innate and status bits.
 btl_swap_unit_save = 0x800C84E8;  # function: Saves a unit HP and record before a form swap.
@@ -588,6 +591,7 @@ btl_command_box_shown = 0x800E0632;  # data: Nonzero while the menu draw dispatc
 btl_elem_slide_dir = 0x800E0633;  # data: Level change direction, 1 after Right
 btl_actor_list = 0x800E0634;  # data: first of three acting units of the running action (the units of the actor mask, ascending, 0xFF unused; every player command passes the menu PC alone); read well beyond the camera
 btl_target_list = 0x800E0637;  # data: Target unit list, in ascending unit order, 0xFF terminated, the actor when the mask is empty
+btl_clear_action_lists = 0x800C9FE0;  # function: fills the acting list and the target list with 0xFF (the command confirm of a one-target hit, before the lists are built)
 btl_cursor_unit_mask = 0x800E0640;  # data: Unit mask of the target cursor
 btl_cursor_unit = 0x800E0642;  # data: Current target cursor unit
 btl_target_count_mask = 0x800E0643;  # data: Target mask whose bit count gates the info block
@@ -645,7 +649,7 @@ btl_unit_gear_flags = 0x800E304C;  # data: Per unit gear flag word
 btl_resolve_element_record = 0x800E30A0;  # data: element record of the action being resolved
 btl_dmg_slot_term = 0x800E3108;  # data: general slot term of the damage formula; only mode 39 overwrites it
 btl_dmg_colour_mult = 0x800E310A;  # data: colour / field multiplier in per-mille: 1000 at each target setup, changed only by the colour-gate routine; used by the damage and heal finalisers
-btl_weapon_miss_flag = 0x800E310C;  # data: set by a missed weapon roll or a forced miss; the hit-figure update then leaves the chain counter alone
+btl_weapon_miss_flag = 0x800E310C;  # data: set by a missed weapon roll or a forced miss; cleared once per action, not per target, so every target after a missed one misses too (its roll still drawn); the hit-figure update then leaves the chain counter alone and the post-action update adds no gauge
 btl_dmg_attacker = 0x800E310E;  # data: unit number of the attacker of the hit being resolved
 btl_dmg_target = 0x800E310F;  # data: unit number of the target of the hit being resolved
 btl_dmg_raw = 0x800E3118;  # data: raw weapon damage of the hit being resolved
@@ -718,7 +722,7 @@ btl_steal_pending = 0x800E0076;  # data: set by a successful pilfer; a Run clear
 btl_stolen_count = 0x800E0077;  # data: number of pilfered words in the stolen list
 btl_stolen_list = 0x800E0240;  # data: pilfered words (bit 15 = element) added to the stocks after a victory
 btl_escape_hold = 0x800E0075;  # data: frames the battle loop keeps running after Run with dropped loot (80); the message opens at 40
-btl_unit_ctrl_flags = 0x800E31C4;  # data: per-unit control flags word (stride 0x30); bit 0 = dead flag set by a resolved KO, bit 9 = guard pose (set by Defend, cleared with the defended flag), bit 15 = hero set fixed at battle start, bit 31 = HP at or below a quarter, recomputed when a hit lands on the unit (op 84 sets it)
+btl_unit_ctrl_flags = 0x800E31C4;  # data: per-unit control flags word (stride 0x30); bit 0 = dead flag set by a resolved KO, bit 9 = guard pose (set by Defend, cleared with the defended flag), bit 15 = hero set fixed at battle start, bit 31 = HP at or below a quarter, recomputed for the party slots by the panel draw whenever the panel refresh flag is set (op 84 sets it); the idle script reads it once when it starts
 btl_script_op_colour_seq_match = 0x800D3454;  # function: battle script op 0xAE: var := the colour history equals the true-ending sequence; a match mutes the menu sounds
 btl_script_op_set_ui = 0x800D1D3C;  # function: battle script op 0x39: writes btl_ui_enabled
 btl_colour_history = 0x800E0064;  # data: the last seven cast colours (colour + 1), oldest first
@@ -811,4 +815,4 @@ btl_window_frames_draw = 0x800C1668;  # function: Draws the frames of the open p
 btl_no_enemy_due = 0x800D0C38;  # function: Returns 1 when no living enemy unit has its turn countdown at 0.
 btl_ctrl_status_copy = 0x800E31D0;  # data: per-unit (stride 0x30) copy of the merged lo / hi status words that the animation scripts read (anmseq ops 0x54..0x57); refreshed from the unit blocks at the end of each action
 btl_hud_status_icon_words = 0x800E33F8;  # data: u32 per party slot: the merged lo status & 0xBBBFFB39 the panel's ailment icons are drawn from; recopied only while btl_hud_status_icons_dirty is set
-btl_hud_status_icons_dirty = 0x800E0207;  # data: u8 flag: the panel draw recopies every party slot's ailment icon word and clears it
+btl_hud_status_icons_dirty = 0x800E0207;  # data: u8 flag: the panel draw recopies every party slot's ailment icon word, shown HP / max HP and HP colour, recomputes its low-HP control bit 31 and clears it; set at battle start, action end, Defend, swap and command menu start

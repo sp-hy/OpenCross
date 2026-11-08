@@ -6,7 +6,8 @@
 // on the target with the attacker's table), weapon trails, breath, projectiles. flags & 0x7F = rotation mode (0: RotMatrix(angles), 1: angles + the
 // model's yaw, 2: angles x the joint matrix), flags & 0x80 = the follower is rebuilt every tick; it lives for the first emitter header's duration.
 // Each model resource (at0.prd, with the weapon class for PCs: the type-0x0A entries "<class><s|m|l>.." are renamed to "_<s|m|l>..")
-// gets its own EmitterSystem so equal tags of different models never mix. Only sprite quads are drawn (no mesh / model particles).
+// gets its own EmitterSystem so equal tags of different models never mix. The timelines of a unit's at0.prd (a heavy hit's) start the same
+// emitters, a per-target repeat a clone per target. Sprite quads and the resident mesh sprites are drawn (no model particles).
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -16,6 +17,7 @@
 #include "core/log.h"
 #include "game/battle/battle_view.h"
 #include "game/battle/battle_view_util.h"
+#include "game/effects/fx_math.h"
 #include "import/container.h"
 #include "import/room_effects.h"
 
@@ -67,12 +69,7 @@ static bool anm_basis(const Follower& follower, effects::Basis& out, const std::
   return true;
 }
 
-void BattleView::anm_effect(int unit, const bseq::Event& event) {
-  if (unit < 0 || unit >= battle::kUnits || event.tag == 0) return;
-  const std::string name = bseq::tag_str(event.tag);
-  // The resources: a reaction runs the ATTACKER's table on the target, so its emitters are the attacker's; every other script is the unit's own.
-  int src = unit;
-  if (vis_[static_cast<size_t>(unit)].script_kind == kReact && act_.actor >= 0) src = act_.actor;
+BattleView::AnmFx& BattleView::anm_bank(int src) {
   const Visual& sv = vis_[static_cast<size_t>(src)];
   const battle::Unit& su = battle_->unit(src);
   const int cls = su.pc ? weapon_digit(su) : -1;
@@ -150,7 +147,24 @@ void BattleView::anm_effect(int unit, const bseq::Event& event) {
     anm_start_system(*anm);
     slot = std::move(anm);
   }
-  AnmFx& anm = *slot;
+  return *slot;
+}
+
+void BattleView::anm_effect_for_target(int unit, const std::string& name, int target) {
+  if (unit < 0 || unit >= battle::kUnits || name.empty()) return;
+  AnmFx& anm = anm_bank(unit);
+  const bool started = anm.em->start_for_target(name, target);
+  if (anm_trace()) log::info("anm: tick {} unit {} timeline emitter '{}' for target {} -> {}", tick_count_, unit, name, target, started);
+}
+
+void BattleView::anm_effect(int unit, const bseq::Event& event) {
+  if (unit < 0 || unit >= battle::kUnits || event.tag == 0) return;
+  const std::string name = bseq::tag_str(event.tag);
+  // The resources: a reaction runs the ATTACKER's table on the target, so its emitters are the attacker's; every other script is the unit's own.
+  int src = unit;
+  if (vis_[static_cast<size_t>(unit)].script_kind == kReact && act_.actor >= 0) src = act_.actor;
+  const battle::Unit& su = battle_->unit(src);
+  AnmFx& anm = anm_bank(src);
   // While an element pack runs, a MONSTER attacker's own at0 headers are not in the registry the pack's reaction script walks
   // (the attacker's at0 carries "0s00 / 0m00 / 0l00" but none of them is drawn; the sparks come from the pack).
   const bool pack_react = fx_pack_ && vis_[static_cast<size_t>(unit)].script_kind == kReact && !su.pc;
@@ -205,28 +219,56 @@ void BattleView::anm_start_system(AnmFx& anm) {
       out = it->second.basis;
       return true;
     };
-    // Selectors: 1 / 9 caster, 2 / 0xD first target.
-    ah.actor_basis = [this](int sel, int joint, int, int, effects::Basis& out, int& scale) {
+    // One point: the unit's yaw at the point. A second point (c != 0, a projectile flying from the actor to a target): the look-at basis of
+    // the effect packs, local +X from the first point to the second, pitched toward it, the X / Z columns scaled by the distance / 2048,
+    // the origin at the midpoint.
+    ah.actor_basis = [this](int sel, int joint, int second_sel, int second_joint, effects::Basis& out, int& scale) {
       scale = 4096;
       out = effects::Basis{};
-      int unit = -1;
-      // The caster selectors are acting-list entry 0, which the scripted camera / actor ops rewrite
-      // (script_actor_), so a scripted cutscene's play_anim after camera_target puts the unit (not the last action's actor) on the selector (Bomber's hiba).
-      if (sel == 1 || sel == 9) unit = script_actor_ >= 0 ? script_actor_ : act_.actor;
-      else if (sel == 2 || sel == 0xD) unit = act_.targets.empty() ? -1 : act_.targets[0];
-      if (anm_trace()) log::info("anm: op 0x39 selector {} joint {} -> unit {} (act actor {}, targets {})", sel, joint, unit, act_.actor, act_.targets.size());
-      if (unit < 0 || unit >= battle::kUnits) return true;
-      effects::Vec3 attach_pos{};
-      if (!fx_attach_unit(unit, std::max(0, joint - 2), attach_pos)) return true;
-      const Visual& visual = vis_[static_cast<size_t>(unit)];
-      const float yaw = std::atan2(-visual.face_x, -visual.face_z), cs = std::cos(yaw), sn = std::sin(yaw);
+      effects::Vec3 point{};
+      float yaw = 0;
+      if (!anm_point(sel, joint, point, yaw)) return true;
+      effects::Vec3 point2{};
+      float yaw2 = 0;
+      if (second_sel != 0 && anm_point(second_sel, second_joint, point2, yaw2)) {
+        const float dx = point2[0] - point[0], dy = point2[1] - point[1], dz = point2[2] - point[2];
+        const float hd = std::hypot(dx, dz);
+        const int yaw_a = -effects::ratan2(static_cast<int>(dz), static_cast<int>(dx));
+        const int pitch_a = effects::ratan2(static_cast<int>(dy), static_cast<int>(hd));
+        const float cp = std::max(0.05f, static_cast<float>(effects::rcos(pitch_a)) / 4096.0f);
+        const float stretch = std::max(0.05f, hd * 2.0f / cp / 4096.0f);
+        out.m = effects::Mat3::from_angles(0, yaw_a, pitch_a).scaled_columns(stretch, 1.0f, stretch);
+        out.t = {(point[0] + point2[0]) * 0.5f, (point[1] + point2[1]) * 0.5f, (point[2] + point2[2]) * 0.5f};
+        return true;
+      }
+      const float cs = std::cos(yaw), sn = std::sin(yaw);
       out.m.m = {cs, 0, sn, 0, 1, 0, -sn, 0, cs};
-      out.t = attach_pos;
+      out.t = point;
       return true;
     };
     anm.em->set_hooks(std::move(ah));
     anm.em->register_all();
   }
+}
+
+bool BattleView::anm_point(int sel, int joint, effects::Vec3& pos, float& yaw) {
+  std::vector<int> targets = act_.targets;
+  std::sort(targets.begin(), targets.end());
+  targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+  int unit = -1;
+  // The caster selectors are acting-list entry 0, which the scripted camera / actor ops rewrite
+  // (script_actor_), so a scripted cutscene's play_anim after camera_target puts the unit (not the last action's actor) on the selector (Bomber's hiba).
+  if (sel == 1 || sel == 9) unit = script_actor_ >= 0 ? script_actor_ : act_.actor;
+  else if (sel == 2 || (sel >= 0xD && sel <= 0x15)) {
+    const size_t index = sel == 2 ? 0 : static_cast<size_t>(sel - 0xD);
+    unit = index < targets.size() ? targets[index] : -1;
+  }
+  if (anm_trace()) log::info("anm: op 0x39 selector {} joint {} -> unit {} (act actor {}, targets {})", sel, joint, unit, act_.actor, targets.size());
+  if (unit < 0 || unit >= battle::kUnits) return false;
+  if (!fx_attach_unit(unit, std::max(0, joint - 2), pos)) return false;
+  const Visual& visual = vis_[static_cast<size_t>(unit)];
+  yaw = std::atan2(-visual.face_x, -visual.face_z);
+  return true;
 }
 
 bool BattleView::anm_attach(AnmFx& anm, int unit, const bseq::Event& event, const std::string& name, int src) {
@@ -290,10 +332,66 @@ void BattleView::anm_tick() {
   }
 }
 
+// Mesh sprites (type 14) of the unit emitters name the resident battle.prd meshes (the `maru` orbs a rod's heavy hit fires at every target):
+// they go through the stage pipeline as the effect packs' resident meshes do (object colour, blend, OT bias, ext cull sides, depth cue),
+// before the sprite quads.
+void BattleView::anm_draw_meshes(const render::Frame& frame, const render::Letterbox& lb, const effects::ViewParams& view) {
+  std::vector<render::StageInstance> instances;
+  FxGpu* resident = nullptr;
+  const assets::StageAsset* asset = nullptr;
+  for (auto& [key, ap] : anm_) {
+    AnmFx& anm = *ap;
+    std::vector<effects::EmitterSystem::MeshInstance> meshes;
+    anm.em->collect_meshes(view, alpha_, meshes);
+    if (meshes.empty()) continue;
+    FxGpu* gpu = fx_gpu_resident(anm.pack);
+    if (!gpu || !gpu->stage) continue;
+    resident = gpu;
+    asset = anm.pack->resident->meshes.get();
+    for (const auto& mi : meshes) {
+      if (!mi.name || mi.sprite_type != 14) continue;
+      const auto part = gpu->parts.find(*mi.name);
+      if (part == gpu->parts.end()) continue;
+      if (static_cast<size_t>(part->second) < asset->parts.size() && mi.off_screen(asset->parts[static_cast<size_t>(part->second)].cull_points, view)) continue;
+      render::StageInstance in;
+      in.part = part->second;
+      for (size_t k = 0; k < 9; ++k) in.cam[k] = mi.mat.m[k];
+      for (size_t k = 0; k < 3; ++k) in.cam[9 + k] = mi.centre[k];
+      for (size_t k = 0; k < 3; ++k) in.rgb[k] = mi.rgb[k];
+      in.blend = mi.blend;
+      in.ext = mi.ext_path;
+      in.bias = mi.bias;
+      in.fixed_slot = mi.fixed_slot;
+      in.depth_cue = (mi.flags >> 17) & 1;
+      // Ext bit 5: both sides, bit 4: the reverse side.
+      if (mi.ext & 0x20) in.cull = 2;
+      else if (mi.ext & 0x10) in.cull = 1;
+      instances.push_back(in);
+    }
+  }
+  if (instances.empty()) return;
+  // Opaque instances first, the semi-transparent ones over them.
+  std::stable_partition(instances.begin(), instances.end(), [](const render::StageInstance& in) { return in.blend == 0; });
+  const float fw = static_cast<float>(frame.extent.width), fh = static_cast<float>(frame.extent.height);
+  const float sx0 = std::clamp(std::round(lb.left()), 0.0f, fw), sy0 = std::clamp(std::round(lb.oy), 0.0f, fh);
+  const render::Rect scissor{static_cast<int32_t>(sx0), static_cast<int32_t>(sy0),
+                             static_cast<u32>(std::min(fw - sx0, std::round(lb.width()))), static_cast<u32>(std::min(fh - sy0, std::round(kBufferRows * lb.scale_y)))};
+  render::StagePipeline::DepthCue cue;
+  cue.active = fx_fog_on_;
+  cue.r = fog_cur_.r, cue.g = fog_cur_.g, cue.b = fog_cur_.b, cue.near = fog_cur_.near, cue.far = fog_cur_.far;
+  stage_pipe_.begin(frame, scissor);
+  stage_pipe_.set_gte(view.h, view.ox, view.oy);
+  stage_pipe_.set_depth_cue(cue);
+  stage_pipe_.draw(*resident->stage, render::StagePipeline::projection(lb, view.h, view.ox, view.oy), instances, linear_filter_ < 0 ? hd_ : linear_filter_ != 0, asset);
+  stage_pipe_.end();
+  frame.set_scissor(scissor);
+}
+
 void BattleView::anm_draw(const render::Frame& frame, const render::Letterbox& lb) {
   trail_draw(frame, lb);
   if (anm_.empty()) return;
   const effects::ViewParams view = fx_view();
+  anm_draw_meshes(frame, lb, view);
   bool any = false;
   for (auto& [key, ap] : anm_) {
     AnmFx& anm = *ap;

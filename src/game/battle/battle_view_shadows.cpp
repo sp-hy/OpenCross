@@ -134,7 +134,7 @@ void BattleView::collect_shadow_casters() {
 
 void BattleView::cast_shadow_pass(const render::Frame& frame) {
   stage_scene_.set_floor_shadow(nullptr, {});
-  if (!spell_.lights_on || shadow_pipe_failed_ || !stage_scene_.ready() || shadow_casters_.empty()) return;
+  if (!spell_lights_shown_ || shadow_pipe_failed_ || !stage_scene_.ready() || shadow_casters_.empty()) return;
   if (!shadow_pipe_.ready() && !shadow_pipe_.init(*ctx_)) {
     log::warn("battle: shadow pipeline failed, cast shadows off");
     shadow_pipe_failed_ = true;

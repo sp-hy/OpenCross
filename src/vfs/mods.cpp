@@ -152,7 +152,7 @@ bool is_packed(const std::string& lowered_name) {
 }
 
 // Length of the leading folders every member shares: an archive made from a folder starts inside it, where a mod folder would.
-// "voices" and "textures" are mod layout, not wrappers.
+// "voices", "textures" and "shaders" are mod layout, not wrappers.
 size_t wrapper_length(const std::vector<std::string>& names) {
   if (names.empty()) return 0;
   size_t length = 0;
@@ -160,7 +160,7 @@ size_t wrapper_length(const std::vector<std::string>& names) {
     const size_t slash = names[0].find('/', length);
     if (slash == std::string::npos) return length;
     const std::string_view folder = std::string_view(names[0]).substr(length, slash - length);
-    if (folder == "voices" || folder == "textures") return length;
+    if (folder == "voices" || folder == "textures" || folder == "shaders") return length;
     const std::string_view prefix = std::string_view(names[0]).substr(0, slash + 1);
     if (!std::all_of(names.begin(), names.end(), [&](const std::string& name) { return name.starts_with(prefix); })) return length;
     length = slash + 1;
@@ -216,6 +216,11 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
     mod.has_manifest = text.has_value();
     if (text) mod.manifest = features::parse_manifest(std::string_view(reinterpret_cast<const char*>(text->data()), text->size()));
     else mod.manifest.problems.push_back("mod.ini cannot be read");
+    return;
+  }
+  if (fname.size() > 4 && fname.ends_with(".png") && rel.size() == 3 && rel[0] == "shaders" && (rel[1] == "matcaps" || rel[1] == "luts")) {
+    mod_file.target = rel[1] + "/" + fname.substr(0, fname.size() - 4);
+    mod.shaders.push_back(std::move(mod_file));
     return;
   }
   if (fname.size() > 4 && fname.ends_with(".png")) {

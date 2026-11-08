@@ -35,7 +35,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 - `import` PS1 / RDE decoders: containers, LZSS, TIM, chip2, rooms, models, battle stages, room effects, text, sprite fonts.
 - `assets` engine-side asset types the importers produce.
 - `data` static tables, battlefield-to-room map, area names. `core` logging, types, timers, parallel helpers, version header.
-- `render` GPU layer: pipelines, CRT pass, lights, ImGui settings window (Mods / Update tabs), GLSL shaders (SPIR-V at build time).
+- `render` GPU layer: pipelines, full-screen shader pass, lights, ImGui settings window (Mods / Update tabs), GLSL shaders (SPIR-V at build time).
 - `audio` mixer, HCA (SAB) decoding, AKAO sequencer and SPU-style sampler, banks, SFX, voices, BGM table, reverb.
 - `script` field script VM. `battle` battle rules, RNG, Dopplegang table, `.pac` battle-script VM.
 - `game` field world (actors, camera, collision, dialogue, transitions, party), game flow, new game / New Game+, autosave, cheats, debug tools, route scripting; `game/battle` battle view (units, camera, HUD, results, transition, audio); `game/effects` effect engine (emitters, sequence player, lights, room meshes, bespoke overlays).

@@ -1,6 +1,6 @@
 // The frame composition. The 3D pictures (title sea, field, battle) go into the window or the [Video] RenderScale scene target;
 // classic art + [Video] Ps1Res draws them into a 320 (+ widescreen columns) x 224 target scaled up nearest; the 8F screen ripple
-// re-draws the deep part warped; then the HUD, dialogue windows, menus, pillarboxing, the screen veils, the CRT pass and the pause
+// re-draws the deep part warped; then the HUD, dialogue windows, menus, pillarboxing, the screen veils, the full-screen shader pass and the pause
 // screen at window resolution.
 #include "app/app.h"
 
@@ -37,20 +37,37 @@ void pillarbox(render::SpriteBatch& sprites, const render::Frame& frame, const r
   sprites.end();
 }
 
+// [Shaders] Characters: the ini choice as the mesh pipeline's style (the two enums list the styles in the same order).
+static_assert(static_cast<int>(render::CharacterShading::Style::Realistic) == static_cast<int>(platform::CharacterShader::Realistic) &&
+              static_cast<int>(render::CharacterShading::Style::Toon) == static_cast<int>(platform::CharacterShader::Toon) &&
+              static_cast<int>(render::CharacterShading::Style::Cel) == static_cast<int>(platform::CharacterShader::Cel) &&
+              static_cast<int>(render::CharacterShading::Style::Matcap) == static_cast<int>(platform::CharacterShader::Matcap));
+// An unknown matcap name falls back to the first built-in one.
+render::CharacterShading character_shading(const render::MeshPipeline& meshes, const platform::Config& config) {
+  render::CharacterShading shading;
+  shading.style = static_cast<render::CharacterShading::Style>(config.character_shader);
+  shading.outline = config.outlines;
+  shading.rim = config.rim;
+  shading.matcap = std::max(0, meshes.matcap_index(config.matcap));
+  return shading;
+}
+
 }  // namespace
 
 void App::draw_frame(const render::Frame& frame) {
   const float vw = static_cast<float>(frame.extent.width);
   const float vh = static_cast<float>(frame.extent.height);
-  // The pause screen filters the finished picture through the CRT pass target (ramp mode).
+  // The pause screen filters the finished picture through the full-screen pass (ramp mode).
   const bool pause_on = pause_ok && pause_screen.active();
   // The pause screen holds everything under it: the battle view stops (alpha 1), the movie player stops (frame held), and the mixer
   // freezes the music / voice / movie PCM (RDE pauses the sound thread and the movie).
   battle.set_paused(pause_on && (battle_ok || battle_in_field));
   movie_player.set_paused(pause_on && movie_open);
   mixer.hold(pause_on);
-  // The whole frame goes through the CRT pass (ended before the overlay).
-  const bool crt_on = (config.crt || pause_on) && crt_ok && crt_pass.begin(ctx, frame);
+  // [Shaders] the full-screen shaders: the whole frame goes through the screen pass (ended before the overlay).
+  const render::ScreenSettings screen_settings = screen_look();
+  ++screen_tick;
+  const bool screen_on = (screen_settings.active() || pause_on) && screen_ok && screen_pass.begin(ctx, frame);
   apply_frame_options();
   const bool boot_logo = flow_ready && flow.boot_logo_active();
   const bool battle_shown = battle_ok || battle_in_field;
@@ -105,12 +122,13 @@ void App::draw_frame(const render::Frame& frame) {
   // The title's 4:3 override ends with the composition (the ticks use the real value).
   render::set_wide_extra(wide_extra);
 
-  if (crt_on) {
+  if (screen_on) {
     float tint[3] = {1.0f, 1.0f, 1.0f};
     // The pause screen's colour cycles over 480 frames.
     if (pause_on) pause_screen.tint(tint);
-    crt_pass.set_ramp(pause_on, tint);
-    crt_pass.end(ctx, frame);
+    screen_pass.set_ramp(pause_on, tint);
+    screen_pass.set_settings(screen_settings, vh / 240.0f, screen_tick);
+    screen_pass.end(ctx, frame);
   }
   // RDE's feature icons over the picture, under the pause screen's bars. They belong to play: the boot logo, the movies, the title
   // scene and its slot list / name entry do not show them.
@@ -127,6 +145,24 @@ void App::draw_frame(const render::Frame& frame) {
   // The pause screen's bars + text go over the filtered picture.
   if (pause_on && !(config.ps1_res && ps1_pass_43(frame, vw, vh, &menu_text, [&](const render::Frame& lf) { pause_screen.draw(lf, 1280.0f, 960.0f, true); })))
     pause_screen.draw(frame, vw, vh, true);
+}
+
+// [Shaders] the full-screen look from the settings (static asserts: the config and render enums list their choices in the same order).
+static_assert(static_cast<int>(render::ScreenSettings::Filter::Composite) == static_cast<int>(platform::FullscreenShader::Composite) &&
+              static_cast<int>(render::ScreenSettings::Mask::ShadowMask) == static_cast<int>(platform::CrtMask::ShadowMask));
+render::ScreenSettings App::screen_look() const {
+  render::ScreenSettings look;
+  look.filter = static_cast<render::ScreenSettings::Filter>(config.fullscreen_shader);
+  look.mask = static_cast<render::ScreenSettings::Mask>(config.crt_mask);
+  look.curvature = config.crt_curvature;
+  look.glow = config.crt_glow;
+  for (size_t i = 1; i < std::size(platform::kBuiltinGrades); ++i)
+    if (config.grade == platform::kBuiltinGrades[i]) look.grade = static_cast<render::ScreenSettings::Grade>(i);
+  if (look.grade == render::ScreenSettings::Grade::Off && config.grade != platform::kBuiltinGrades[0]) {
+    look.lut = screen_pass.lut_index(config.grade);
+    if (look.lut >= 0) look.grade = render::ScreenSettings::Grade::Lut;
+  }
+  return look;
 }
 
 // The [Video] / [Enhancements] settings and the game options the drawers read, applied every frame.
@@ -155,6 +191,13 @@ void App::apply_frame_options() {
     if (world_ok) world.set_cast_shadows(config.lighting);
     status_model.set_cast_shadows(config.lighting);
     if (battle_ready) battle.set_smooth_rings(rings);
+  }
+  // [Shaders] the character shaders: field actors, battle units, the status screen's model.
+  {
+    const render::CharacterShading shading = character_shading(meshes, config);
+    if (world_ok) world.set_character_shading(shading);
+    if (battle_ready) battle.set_character_shading(shading, config.spell_rim, config.cast_glow);
+    status_model.set_character_shading(shading);
   }
   // [Enhancements] Lighting (any art mode / filter): the smooth floor darkening.
   if (battle_ready) battle.set_smooth_fog(config.lighting);

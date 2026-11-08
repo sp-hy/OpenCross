@@ -169,14 +169,15 @@ bool App::init_render() {
   ctx.set_anisotropy(static_cast<u32>(config.anisotropy));
   ctx.set_clear_color(0.08f, 0.09f, 0.14f);
 
-  // The [Video] Crt pass.
-  crt_ok = crt_pass.init(ctx);
-  if (!crt_ok) log::warn("CRT pass unavailable");
+  // The [Shaders] full-screen pass.
+  screen_ok = screen_pass.init(ctx);
+  if (!screen_ok) log::warn("full-screen shader pass unavailable");
   if (!sprites.init(ctx)) return false;
   if (!meshes.init(ctx)) return false;
   if (!linear.create(ctx, true)) return false;
   if (!ui.init(ctx, window.handle())) return false;
   if (ctx.driver_fallback()) ui.toast("Graphics backend: " + config.gpu_driver + " unavailable, using " + ctx.driver());
+  load_shader_looks();
   ui.on_restart = [this] { restart_for_update = true; };
   window.set_event_hook(&render::ImGuiLayer::event_hook, &ui);
   ui.add_tab("Mods", [this] {
@@ -205,6 +206,36 @@ bool App::init_render() {
   if (nearest.create(ctx, false) && field_rt.create(ctx, static_cast<u32>(render::kLayerW), static_cast<u32>(render::kFieldRows)))
     field_rt_set = field_rt.ref(nearest);
   return true;
+}
+
+// A mod's shaders/matcaps/<name>.png and shaders/luts/<name>.png, in mod priority order (the first mod with a name wins; the built-in names
+// cannot be replaced). Like a mod's features they do not follow "load on"; a run without mods adds none.
+void App::load_shader_looks() {
+  meshes.clear_added_matcaps();
+  if (screen_ok) screen_pass.clear_luts();
+  std::vector<std::string> matcaps(std::begin(platform::kBuiltinMatcaps), std::end(platform::kBuiltinMatcaps));
+  std::vector<std::string> grades(std::begin(platform::kBuiltinGrades), std::end(platform::kBuiltinGrades));
+  if (with_mods())
+    for (const vfs::Mod& mod : mods.mods()) {
+      if (!mod.enabled) continue;
+      for (const vfs::ModFile& file : mod.shaders) {
+        const bool is_lut = file.target.starts_with("luts/");
+        const std::string name = file.target.substr(file.target.find('/') + 1);
+        std::vector<std::string>& names = is_lut ? grades : matcaps;
+        if (std::find(names.begin(), names.end(), name) != names.end()) continue;
+        const auto bytes = files.read_mod_file({file.file, file.member});
+        render::DecodedImage image;
+        const bool decoded = bytes && render::decode_image(*bytes, image);
+        const bool added = decoded && (is_lut ? screen_ok && screen_pass.add_lut(name, image.width, image.height, image.rgba.data())
+                                              : meshes.add_matcap(name, image.width, image.height, image.rgba.data()));
+        if (!added) {
+          log::warn("mods: '{}' {}: not a usable {} (a LUT is N*N x N pixels)", mod.name, file.rel, is_lut ? "LUT" : "matcap");
+          continue;
+        }
+        names.push_back(name);
+      }
+    }
+  ui.set_shader_looks(std::move(matcaps), std::move(grades));
 }
 
 void App::init_audio() {

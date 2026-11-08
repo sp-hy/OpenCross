@@ -483,6 +483,7 @@ void BattleView::fx_draw_weapon_meshes(const render::Frame& frame, const render:
     dp.palette = std::span<const render::Mat4>(&identity, 1);
     dp.linear = linear_filter_ < 0 ? hd_ : linear_filter_ != 0;
     dp.hd = false;
+    dp.shading = unit_shading(unit);
     for (size_t channel = 0; channel < 3; ++channel) dp.tint[channel] = static_cast<float>(mi->rgb[channel]) / 128.0f;
     const int blend = mi->blend;
     if (blend >= 5) {

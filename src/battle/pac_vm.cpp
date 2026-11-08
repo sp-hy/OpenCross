@@ -1324,7 +1324,7 @@ std::array<u8, 7> ScriptedBrain::colour_sequence() const {
   return sequence;
 }
 
-void ScriptedBrain::on_attack(Battle& battle, int actor, int kind, int id, int target) {
+void ScriptedBrain::on_attack(Battle& battle, int actor, int kind, int id, u32 target_mask) {
   if (!vm_) return;
   if (kind == 1 && id > 0) {
     // One history entry per cast (the core calls this once per target).
@@ -1344,7 +1344,7 @@ void ScriptedBrain::on_attack(Battle& battle, int actor, int kind, int id, int t
     if (off != 0x20 && actor >= kPcSlots) break;
     vm_->set_var(off, kind);
     vm_->set_var(off + 2, id);
-    vm_->set_var(off + 4, 1 << target);
+    vm_->set_var(off + 4, static_cast<int>(target_mask));
   }
   // Var 0x58 (set at the PC command confirm): 0 for a weapon attack, else the element's byte 4 & 0x10 (hits its whole range);
   // the Boxer Boys scripts read it as the "cheater" test.

@@ -11,6 +11,7 @@
 //   --shotfrom <f> --shotto <f>  with --shotevery: only frames f1..f2 (inclusive; default 0..unbounded) write a shot
 //   --stats hp=1023,atk=1,def=127,hit=127,evd=0,mag=1,mdef=127  base stats of every party member (default party {0,1,22} when no --party); --enemyhp u3,u4,u5  HP (and max HP) of the enemy units 3 / 4 / 5 (-1 or empty = unchanged)
 //   --ko <unit>  that party unit starts KO'd (hp 0 + status KO: Revive / Full Revival targets)
+//   --hp a[,b[,c]]  current HP of the party slots (after --stats; max HP unchanged; -1 or empty = unchanged)
 //   --gauge <n>  party slot 0 starts with that element level (-1 = none, 0 = row 1 open: an element as the first action)
 //   --stars <current>,<total>  the stars the battle starts with (default 0,0: no summon can be cast)
 //   --equip <item id>  party slot 0 holds that weapon (e.g. 0x26 = Mastermune); armour / accessories stay the character table's
@@ -71,6 +72,7 @@ int ocbattleview_main(int argc, char** argv) {
   std::vector<std::pair<int, u32>> status_lo;
   int equip_weapon = -1, grid_element = 0;
   std::array<int, 3> enemy_hp{-1, -1, -1};
+  std::array<int, 3> party_hp{-1, -1, -1};
   // --ring: the field ring set after the start (unset = the stage's own).
   std::array<int, 3> start_ring{-1, -1, -1};
   bool have_ring = false;
@@ -130,6 +132,14 @@ int ocbattleview_main(int argc, char** argv) {
       const char* cursor = argv[++i];
       for (size_t k = 0; k < 3 && *cursor; ++k) {
         if (*cursor != ',') enemy_hp[k] = std::atoi(cursor);
+        while (*cursor && *cursor != ',') ++cursor;
+        if (*cursor == ',') ++cursor;
+      }
+    }
+    else if (!std::strcmp(argv[i], "--hp") && i + 1 < argc) {
+      const char* cursor = argv[++i];
+      for (size_t k = 0; k < 3 && *cursor; ++k) {
+        if (*cursor != ',') party_hp[k] = std::atoi(cursor);
         while (*cursor && *cursor != ',') ++cursor;
         if (*cursor == ',') ++cursor;
       }
@@ -259,6 +269,9 @@ int ocbattleview_main(int argc, char** argv) {
       member.hp = member.stat[0];
     }
   }
+  // --hp: the current HP alone, at most the member's max HP.
+  for (size_t k = 0; k < party.size() && k < party_hp.size(); ++k)
+    if (party_hp[k] >= 0) party[k].hp = std::min(party_hp[k], party[k].stat[0]);
   if (equip_weapon >= 0) {
     if (party.empty())
       for (int id : {0, 1, 22}) party.push_back(battle::make_party_member(tables, id, 0, "char"));
@@ -349,6 +362,13 @@ int ocbattleview_main(int argc, char** argv) {
       view.set_spell_lights(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_smooth_fog(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_autohide_cast(config.autohide_cast_hud);
+      // [Shaders] the character shaders (the two enums list the styles in the same order).
+      render::CharacterShading shading;
+      shading.style = static_cast<render::CharacterShading::Style>(config.character_shader);
+      shading.outline = config.outlines;
+      shading.rim = config.rim;
+      shading.matcap = std::max(0, meshes.matcap_index(config.matcap));
+      view.set_character_shading(shading, config.spell_rim, config.cast_glow);
       view.set_auto(bauto);
       view.debug_ui(ui_mode);
       game::BattleView::Debug dbg;
