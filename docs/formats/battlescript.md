@@ -187,7 +187,7 @@ Operands: `d` raw destination var; `A B C` S-mode values (spec byte last); `W` W
 | A4 | 1 | | end_turn | section 4 (2589) | C |
 | A6 | 1 | | end_killed | PC unit: clears slot-4 flag and releases the lock (blocks while scripted); enemy: death finalisation, clears the slot-3 flag and takes the entity out of the run list (section 4). Blocks while the move-wait word is set: an approach script start (S5 entry 2 on the acting list) sets it to 1, the engaged return hop (S5 entry 3) to 2, and any anim script that ends on op 0x3E clears it. OpenCross: the view holds the `Killed` event while `BattleView::move_wait_` is set (section 7) | C |
 | 2A | 1 | | end_attacked | if no action is in progress: clears the slot-4 flag and releases the lock; else blocks (2481) | C |
-| 2C | 1 | | begin_cutscene | when allowed: UI hidden and no active PC (`battle_data.md` section 10, hit %), then as 66 | I |
+| 2C | 1 | | begin_cutscene | waits until no action runs and the menu state is at most 4, then: UI hidden and no active PC (`battle_data.md` section 10, hit %), then as 66 | I |
 | 38 | 1 | | end_cutscene | UI shown, action state cleared, lock released | I |
 | 97 | 1 | | begin_sequence2 | as 66 gated by another flag (unused) | U |
 | 34 | 2 | b | ghost_self | self off-stage and untargetable = (b != 0); the model's hidden bit follows. b == 0 also sets the unit's bit in the all-target cast mask (seeded at battle start from scene byte +0x1B, `battle_data.md` 6); b != 0 leaves it alone | C |

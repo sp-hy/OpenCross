@@ -2838,8 +2838,7 @@ void Battle::compute_rewards() {
       for (size_t k = 0; k < 7; ++k) {
         int gain = cheats_.instant_growth && cap > 0 ? full_minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths)
                                                      : minor_growth(member.snap[k], member.pending[k], member.stat[k], sr.pending_tenths, growth_.progress, cap);
-        const int room = std::max(0, member.lv99[k] - member.stat[k]);
-        gain = std::min(gain, room);
+        gain = limit_gain(gain, member.stat[k], member.lv99[k]);
         member.stat[k] += gain;
         gains[k] += gain;
       }
@@ -2858,7 +2857,7 @@ void Battle::compute_rewards() {
       if (!units_[i].conscious() && !cheats_.shared_growth) continue;
       PartyMember& member = party_[i];
       for (size_t k = 0; k < 7; ++k) {
-        const int gain = std::min(member.pending[k], std::max(0, member.lv99[k] - member.stat[k]));
+        const int gain = limit_gain(member.pending[k], member.stat[k], member.lv99[k]);
         member.stat[k] += gain;
         rewards_.gains[i][k] = gain;
       }

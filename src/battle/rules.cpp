@@ -307,6 +307,8 @@ int full_minor_growth(int snap, int pending, int cur, int pending_tenths) {
   return std::max(0, snap + growth_aim(pending, pending_tenths) - cur);
 }
 
+int limit_gain(int gain, int cur, int lv99) { return gain != 0 && cur + gain > lv99 ? lv99 - cur : gain; }
+
 std::array<int, 7> star_growth(const std::array<int, 7>& base, const std::array<int, 7>& lv99, int star, Rng& rng) {
   constexpr int kHpCap = 999;
   std::array<int, 7> stat = base;

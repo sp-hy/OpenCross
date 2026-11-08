@@ -22,6 +22,8 @@ plain stored ZIP with the same members, which OpenCross and ps1 read like RDE's 
   --gold N             gold (0x58C and the 0x3B preview)
   --item ID:QTY        gear / material stock (ids 0xD13C, counts 0xD43C, 384 slots): the stack of ID gets QTY (0 empties it),
                        else the first free slot takes it
+  --element ID:QTY     element stock (ids 0xD5BC, counts 0xD73C, 192 slots): the stack of element ID gets QTY (0 empties it),
+                       else the first free slot takes it
   --cleared            a New Game+ "cleared" save as the ending's FE 85 writes it: variable 0x7E = 3, summary flags (raw head 0x42
                        bits 0-1) = 3, location = map 9 (the ending room) with entrance 3 (Continue opens the New Game+ title list)
   --flags N            only the 2 summary flag bits (raw head 0x42; 2 = a New Game+ game, 3 = cleared)
@@ -90,7 +92,7 @@ def main(argv):
     src, dst = argv[0], argv[1]
     args = argv[2:]
     opts = {"slot": None, "room": None, "entrance": None, "party": None, "recruit": [], "char": [], "grid": [],
-            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "item": [], "flags": None, "mcd": None, "mcd_only": False}
+            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "item": [], "element": [], "flags": None, "mcd": None, "mcd_only": False}
     i = 0
     while i < len(args):
         a = args[i]
@@ -127,6 +129,8 @@ def main(argv):
             opts["gold"] = int(v, 0)
         elif a == "--item":
             opts["item"].append(v)
+        elif a == "--element":
+            opts["element"].append(v)
         elif a == "--cleared":
             opts["flags"] = 3
             opts["var"].append("0x7E=3")
@@ -279,6 +283,14 @@ def main(argv):
         struct.pack_into("<H", img, 0xD13C + 2 * k, iid if qty else 0)
         img[0xD43C + k] = qty & 0xFF
         log.append("item 0x%X x%d (stock slot %d)" % (iid, qty, k))
+
+    for spec in opts["element"]:
+        eid, qty = (int(x, 0) for x in spec.split(":"))
+        ids = [struct.unpack_from("<H", img, 0xD5BC + 2 * k)[0] for k in range(0xC0)]
+        k = ids.index(eid) if eid in ids else ids.index(0)
+        struct.pack_into("<H", img, 0xD5BC + 2 * k, eid if qty else 0)
+        img[0xD73C + k] = qty & 0xFF
+        log.append("element %d x%d (stock slot %d)" % (eid, qty, k))
 
     new_blk = c.pack_block(bytes(blk), bytes(img))
     data = bytearray(card_member.data)

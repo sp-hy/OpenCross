@@ -345,6 +345,13 @@ void test_growth() {
   CHECK_EQ(full_minor_growth(50, 20, 50, 7), 13);
   CHECK_EQ(full_minor_growth(50, 20, 53, 5), 6);
   CHECK_EQ(full_minor_growth(50, 20, 70, 7), 0);
+  // The Lv 99 limit of a party gain (PS1, Serge at 1023 max HP and DEF / MDEF 127 against Lv 99 850 / 78 / 43: his non-zero HP gain
+  // became -173, the zero gains left DEF and MDEF above their Lv 99 values).
+  CHECK_EQ(limit_gain(3, 1023, 850), -173);
+  CHECK_EQ(limit_gain(0, 127, 78), 0);
+  CHECK_EQ(limit_gain(4, 1, 88), 4);
+  CHECK_EQ(limit_gain(5, 86, 88), 2);
+  CHECK_EQ(limit_gain(2, 88, 88), 0);
   CHECK_EQ(progress_cap({8, 7, 1}), 8);
   CHECK_EQ(progress_cap({10, 9, 64}), 640);
   // A star-up history with every roll 999: ATK 10 toward 810 has the star-0 pending 16, so one star-up gives 26; no star-up, the record.
