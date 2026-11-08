@@ -93,6 +93,40 @@ void test_sab() {
   CHECK(!stream.open(bytes));
 }
 
+// A 16-bit PCM material (codec 1, no extradata): the samples follow the header, the stream size bounds them, the loop wraps at the
+// inclusive loop end, and a mono stream plays on both sides.
+void test_sab_pcm() {
+  for (const u8 channels : {u8(2), u8(1)}) {
+    Bytes bytes = synthetic_sab();
+    const size_t entry = 0x100 + 3 * 0x20 + 0x20;
+    bytes[entry + 4] = channels;
+    bytes[entry + 5] = audio::kSabCodecPcm16;
+    put32(bytes, entry + 0x0C, 2);
+    put32(bytes, entry + 0x10, 5);
+    put32(bytes, entry + 0x14, 0);
+    put32(bytes, entry + 0x18, 8 * 2u * channels);
+    bytes.resize(entry + 0x20 + 8 * 2u * channels + 6);
+    for (u32 i = 0; i < 8u * channels; ++i) {
+      bytes[entry + 0x20 + 2 * i] = u8(i + 1);
+      bytes[entry + 0x20 + 2 * i + 1] = 0;
+    }
+    auto sab = audio::parse_sab(bytes);
+    CHECK(sab && sab->materials[0].codec == audio::kSabCodecPcm16 && sab->materials[0].data_offset == entry + 0x20);
+    audio::HcaStream stream;
+    CHECK(stream.open(bytes));
+    CHECK(stream.total_samples() == 8 && stream.loop_start() == 2 && stream.loop_end() == 5);
+    const std::vector<s16> pcm = stream.read(6);
+    CHECK(pcm.size() == 12);
+    if (pcm.size() != 12) continue;
+    for (int k = 0; k < 6; ++k) {
+      CHECK(pcm[size_t(k) * 2] == s16(k * channels + 1));
+      CHECK(pcm[size_t(k) * 2 + 1] == s16(channels == 2 ? k * 2 + 2 : k + 1));
+    }
+    const std::vector<s16> wrapped = stream.read(1);
+    CHECK(wrapped.size() == 2 && wrapped[0] == s16(2 * channels + 1));
+  }
+}
+
 // loop_end is inclusive: from pos 10 with loop_end 19 there are 10 frames before the wrap, at 20 the caller wraps to loop_start.
 void test_loop_math() {
   CHECK(audio::frames_until_wrap(10, 19) == 10);
@@ -1464,6 +1498,7 @@ int main() {
   test_battle_render();
   test_pitch_rate();
   test_sab();
+  test_sab_pcm();
   test_loop_math();
   test_table();
   test_mixer_gain();
