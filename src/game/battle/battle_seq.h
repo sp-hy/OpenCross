@@ -222,6 +222,19 @@ class Vm {
   // Forgets the last camera timeline name op 0x68 started (compared on its first three bytes): op 0x7E clears it, an action start and the
   // battle start too.
   static void reset_sequence() { seq_last_ = 0; }
+  // The state every VM shares (the global words, the previous action, the last timeline name), taken before a script runs outside a
+  // battle and put back after, so the next battle starts from what it would have.
+  struct Shared {
+    std::array<s16, 128> globals{};
+    int prev_action = -1;
+    u32 seq_last = 0;
+  };
+  static Shared shared() { return {globals_, prev_action_, seq_last_}; }
+  static void restore(const Shared& state) {
+    globals_ = state.globals;
+    prev_action_ = state.prev_action;
+    seq_last_ = state.seq_last;
+  }
   // The global anmseq words (operand index byte with bit 0x80): spark's impact helper 7314 reads / clears word 0.
   static int global(int index) { return globals_[static_cast<size_t>(index & 0x7F)]; }
   static void set_global(int index, int value) { globals_[static_cast<size_t>(index & 0x7F)] = static_cast<s16>(value); }

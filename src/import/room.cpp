@@ -292,6 +292,19 @@ std::optional<assets::RoomScene> load_room(std::string_view name, ByteSpan bin, 
   return std::nullopt;
 }
 
+std::optional<std::vector<assets::RoomModelHeader>> load_room_models(ByteSpan bin, ByteSpan ctd, std::string* error) {
+  try {
+    Parsed parsed;
+    parse_files(bin, ctd, parsed);
+    return parse_models(parsed.bin, parsed.tims, parsed.vram);
+  } catch (const Fail& failure) {
+    if (error) *error = failure.msg;
+  } catch (const std::exception& exception) {
+    if (error) *error = std::string("malformed data: ") + exception.what();
+  }
+  return std::nullopt;
+}
+
 RoomValidation validate_room(ByteSpan bin, ByteSpan ctd) {
   RoomValidation validation;
   try {

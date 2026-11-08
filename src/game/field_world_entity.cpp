@@ -590,7 +590,9 @@ void FieldWorld::step_attached() {
     render::Mat4 local = rx * ry * rz;
     for (int row = 0; row < 3; ++row) local.at(row, 3) = joint_offset[row] + static_cast<float>(ent_state.attach_off[static_cast<size_t>(row)]);
     render::Mat4 scale;
-    for (int axis = 0; axis < 3; ++axis) scale.at(axis, axis) = static_cast<float>(static_cast<s16>(script_ent.scale[static_cast<size_t>(axis)])) * 8.0f / 4096.0f;
+    const float model_scale = ent_state.actor.model_handle() ? ent_state.actor.model_handle()->field_scale : 1.0f;
+    for (int axis = 0; axis < 3; ++axis)
+      scale.at(axis, axis) = static_cast<float>(static_cast<s16>(script_ent.scale[static_cast<size_t>(axis)])) * 8.0f / 4096.0f * model_scale;
     ent_state.actor.set_attached(&ents_[static_cast<size_t>(ent_state.attach_to)].actor, ent_state.attach_point, local * scale);
   }
 }
@@ -669,26 +671,44 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   // The pack attaches to the entity's display model whatever the entity is: a party member's character model or
   // an NPC's room model (dem_02's Zoah, a room model, loads zoah00 / zoah and plays its jump clips 0x86..0x89). The clips are decoded
   // against that model's own skeleton.
-  const bool pc_model = ent_state.char_id >= 0 && ent_state.char_id < 44 && !model_folder(ent_state.char_model).empty();
+  // An NPC wearing a model from elsewhere (FE D0) decodes against that model: a field player model by its byte, another room's model by
+  // its own Mdl; a battle model takes no field packs (its own clips are 0x80 + k).
+  int field_byte = ent_state.char_id >= 0 && ent_state.char_id < 44 ? ent_state.char_model : -1;
+  std::string room = view_.room_name();
+  int room_k = ent_state.model;
+  if (const auto source = model_sources_.find(ent_state.model); field_byte < 0 && source != model_sources_.end()) {
+    const ModelSource& from = source->second;
+    if (from.kind == ModelSource::kCharacter) field_byte = model_byte(from.id);
+    else if (from.kind == ModelSource::kFieldModel) field_byte = from.id;
+    else if (from.kind == ModelSource::kRoomModel) room = room_stem_for_id(from.id), room_k = from.sub;
+    else {
+      log::debug("field: tick {} ent {} LOAD_ANIMATION {}: a battle model takes no field event pack", tick_count_, ent, name);
+      return;
+    }
+  }
+  const bool pc_model = field_byte >= 0 && !model_folder(field_byte).empty();
   const assets::RoomScene* scene = view_.scene();
-  const bool room_mdl = !pc_model && scene && ent_state.model >= 0 && ent_state.model < static_cast<int>(scene->models.size());
+  const bool own_room = room == view_.room_name();
+  const bool room_mdl = !pc_model && room_k >= 0 && (own_room ? scene && room_k < static_cast<int>(scene->models.size()) : !room.empty());
   if (!pc_model && !room_mdl) {
     log::debug("field: tick {} ent {} LOAD_ANIMATION {}: entity has no model", tick_count_, ent, name);
     return;
   }
-  const std::string cache_key =
-      pc_model ? std::format("{}/{}", ent_state.char_model, name) : std::format("room:{}:{}/{}", view_.room_name(), ent_state.model, name);
+  const std::string cache_key = pc_model ? std::format("{}/{}", field_byte, name) : std::format("room:{}:{}/{}", room, room_k, name);
   auto it = ex_pack_cache_.find(cache_key);
   if (it == ex_pack_cache_.end()) {
     ExPack pack;
     std::optional<std::vector<u8>> obj;
     std::string owner;
     if (pc_model) {
-      owner = model_folder(ent_state.char_model);
+      owner = model_folder(field_byte);
       obj = files_->read("cdrom/fieldobj/player/" + owner + "/" + owner + ".obj");
+    } else if (own_room) {
+      owner = std::format("room model {}", room_k);
+      obj = scene->models[static_cast<size_t>(room_k)].mdl;
     } else {
-      owner = std::format("room model {}", ent_state.model);
-      obj = scene->models[static_cast<size_t>(ent_state.model)].mdl;
+      owner = std::format("{} model {}", room, room_k);
+      obj = read_room_model_mdl(*files_, room, room_k);
     }
     auto ex = files_->read("cdrom/fieldobj/ex/" + name + ".bin");
     if (obj && ex) {
