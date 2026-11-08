@@ -383,7 +383,7 @@ class ScriptedBrain final : public EnemyBrain {
   bool plan_turn(Battle& battle, int unit, Rng& rng, std::vector<EnemyAction>& out) override;
   void on_killed(Battle& battle, int unit, Rng& rng, std::vector<EnemyAction>& out) override;
   void on_attacked(Battle& battle, int unit, Rng& rng, std::vector<EnemyAction>& out) override;
-  void on_attack(Battle& battle, int actor, int kind, int id, int target) override;
+  void on_attack(Battle& battle, int actor, int kind, int id, u32 target_mask) override;
   void take_idle_plans(Battle& battle, std::vector<std::pair<int, std::vector<EnemyAction>>>& out) override;
   std::array<u8, 7> colour_sequence() const override;
   bool end_check_enabled() const override { return !vm_ || vm_->end_check_enabled(); }

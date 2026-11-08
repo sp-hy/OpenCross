@@ -90,6 +90,33 @@ int main() {
   { std::ifstream in(f4); ss4 << in.rdbuf(); }
   std::filesystem::remove(f4);
   CHECK(ss4.str().find("FullPrecisionEffects=1") != std::string::npos);
+  // [Shaders]: all off by default; the styles, switches and full-screen options parse and are written back; the old [Video] Crt reads as crt.
+  {
+    CHECK(defaults.character_shader == CharacterShader::Off && defaults.matcap == "clay" && !defaults.outlines && !defaults.rim);
+    CHECK(!defaults.spell_rim && !defaults.cast_glow && defaults.fullscreen_shader == FullscreenShader::Off && defaults.grade == "off");
+    Config shaders = load_text("[Shaders]\nCharacters=matcap\nMatcap=chrome\nOutlines=1\nRim=1\nSpellRim=1\nCastGlow=1\n"
+                               "Fullscreen=composite\nCrtMask=shadow\nCrtCurvature=1\nCrtGlow=1\nGrade=dusk\n");
+    CHECK(shaders.character_shader == CharacterShader::Matcap && shaders.matcap == "chrome" && shaders.outlines && shaders.rim);
+    CHECK(shaders.spell_rim && shaders.cast_glow);
+    CHECK(shaders.fullscreen_shader == FullscreenShader::Composite && shaders.crt_mask == CrtMask::ShadowMask && shaders.crt_curvature && shaders.crt_glow);
+    CHECK(shaders.grade == "dusk");
+    CHECK(load_text("[Shaders]\nCharacters=cel\n").character_shader == CharacterShader::Cel);
+    CHECK(load_text("[Shaders]\nCharacters=shiny\n").character_shader == CharacterShader::Off);
+    CHECK(load_text("[Shaders]\nFullscreen=watercolour\n").fullscreen_shader == FullscreenShader::Off);
+    CHECK(load_text("[Video]\nCrt=1\n").fullscreen_shader == FullscreenShader::Crt);
+    CHECK(load_text("[Video]\nCrt=1\n[Shaders]\nFullscreen=off\n").fullscreen_shader == FullscreenShader::Off);
+    const std::filesystem::path out = std::filesystem::temp_directory_path() / "oc_test_config_shaders.ini";
+    CHECK(shaders.save(out));
+    std::stringstream text;
+    { std::ifstream in(out); text << in.rdbuf(); }
+    Config reloaded;
+    CHECK(reloaded.load(out));
+    std::filesystem::remove(out);
+    CHECK(text.str().find("Characters=matcap") != std::string::npos && text.str().find("Fullscreen=composite") != std::string::npos);
+    CHECK(text.str().find("Crt=") == std::string::npos);
+    CHECK(reloaded.character_shader == CharacterShader::Matcap && reloaded.matcap == "chrome" && reloaded.cast_glow && reloaded.grade == "dusk");
+    CHECK(reloaded.fullscreen_shader == FullscreenShader::Composite && reloaded.crt_mask == CrtMask::ShadowMask);
+  }
   // [Mods] dump categories: defaults, parse, save, reload (the Mods tab's "Dump all textures" checkboxes).
   {
     Config mods_defaults;

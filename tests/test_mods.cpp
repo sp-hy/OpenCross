@@ -286,6 +286,29 @@ int main() {
     CHECK(inputs.size() == 1 && inputs[0].name == "Manifest Mod" && inputs[0].manifest == &find_mod(mods, "Manifest Mod")->manifest);
   }
 
+  // shaders/matcaps/*.png and shaders/luts/*.png are shader looks (target "matcaps/<name>" / "luts/<name>", lower case), also inside a
+  // wrapped archive; a png elsewhere under shaders is not one.
+  {
+    fs::create_directories(dir / "Looks" / "shaders" / "matcaps");
+    fs::create_directories(dir / "Looks" / "shaders" / "luts");
+    fs::create_directories(dir / "Looks" / "shaders" / "other");
+    std::ofstream(dir / "Looks" / "shaders" / "matcaps" / "Chrome.png") << "png";
+    std::ofstream(dir / "Looks" / "shaders" / "luts" / "dusk.png") << "png";
+    std::ofstream(dir / "Looks" / "shaders" / "other" / "x.png") << "png";
+    write_archive(dir / "Packed Looks.zip", false, {{"Pack/shaders/luts/Teal.png", "png"}});
+    mods.scan(files, dir, mods.prefs());
+    const vfs::Mod* looks = find_mod(mods, "Looks");
+    CHECK(looks && looks->shaders.size() == 2);
+    bool chrome = false, dusk = false;
+    for (const vfs::ModFile& file : looks ? looks->shaders : std::vector<vfs::ModFile>{}) {
+      chrome |= file.target == "matcaps/chrome";
+      dusk |= file.target == "luts/dusk";
+    }
+    CHECK(chrome && dusk);
+    const vfs::Mod* packed = find_mod(mods, "Packed Looks.zip");
+    CHECK(packed && packed->shaders.size() == 1 && packed->shaders[0].target == "luts/teal");
+  }
+
   // A mod's <archive>.dat overlays the shipped archive member by member.
   {
     const fs::path game = tmp / "game";

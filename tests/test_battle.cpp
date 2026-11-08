@@ -3592,6 +3592,82 @@ void test_reveal_during_all_target_cast() {
   CHECK(battle.unit(5).hp < 9999);
 }
 
+// A weapon with class bit 7 (rods, boomerangs): the PC's heavy hit is one hit on every enemy (one stamina cost, chain step and gauge step),
+// each target with its own roll; a miss sticks, so every later target misses too and the hit adds nothing. Weak and medium hits, and a
+// heavy hit with another weapon, strike the aimed unit alone.
+void test_weapon_sweep() {
+  data::GameTables tables = make_tables();
+  tables.scenes[0].raw[3] = 3;
+  tables.gear.resize(256);
+  tables.gear[0x30].raw[1] = 0x83, tables.gear[0x30].raw[2] = 0x10, tables.gear[0x30].raw[4] = 8, tables.gear[0x30].raw[6] = 95;
+  tables.gear[0x2D].raw[1] = 0x03, tables.gear[0x2D].raw[2] = 0x12, tables.gear[0x2D].raw[4] = 16, tables.gear[0x2D].raw[6] = 95;
+  CHECK(make_equip(tables, 0x30, 0, {}).wp_sweeps);
+  CHECK_EQ(make_equip(tables, 0x30, 0, {}).wp_class, 3);
+  CHECK(!make_equip(tables, 0x2D, 0, {}).wp_sweeps);
+  struct Run {
+    std::vector<ActionEvent> hits;
+    std::array<int, 3> hp{};
+    int stamina = 0, gauge = 0;
+  };
+  // Every roll comes out at its top, so a hit roll lands only on a sleeping target (chance 100); `asleep` = those enemies (bit = unit).
+  const auto run = [&](int strength, bool sweeps, u32 asleep) {
+    ScriptedRng rng(ScriptedRng::Fallback::Hi);
+    rng.push(0);
+    rng.push(100);
+    NullBrain brain;
+    Battle battle(tables, rng, brain);
+    CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+    for (int unit = 3; unit < 6; ++unit) {
+      battle.unit_mut(unit).hp = battle.unit_mut(unit).max_hp = 9999;
+      if (asleep >> unit & 1u) battle.unit_mut(unit).lo |= st::kAsleep;
+    }
+    battle.unit_mut(0).eq.wp_sweeps = sweeps;
+    Command attack;
+    attack.kind = Command::Kind::Attack;
+    attack.actor = 0;
+    attack.target = 4;
+    attack.chain = {strength};
+    CHECK(battle.apply(attack));
+    Run out;
+    for (const ActionEvent& event : battle.events())
+      if (event.kind == ActionEvent::Kind::Weapon && event.actor == 0) out.hits.push_back(event);
+    for (int unit = 3; unit < 6; ++unit) out.hp[static_cast<size_t>(unit - 3)] = battle.unit(unit).hp;
+    out.stamina = battle.unit(0).stamina;
+    out.gauge = battle.unit(0).gauge;
+    return out;
+  };
+  // Every target hit: one event per enemy in ascending unit order, one hit (shared hit_index, the aim recorded), one cost, gauge -1 + 3.
+  const Run all = run(2, true, 0x38);
+  CHECK_EQ(all.hits.size(), 3u);
+  for (size_t k = 0; k < all.hits.size(); ++k) {
+    CHECK_EQ(all.hits[k].target, static_cast<int>(3 + k));
+    CHECK_EQ(all.hits[k].aim, 4);
+    CHECK_EQ(all.hits[k].hit_index, all.hits[0].hit_index);
+    CHECK_EQ(all.hits[k].code, 0);
+    CHECK(all.hp[k] < 9999);
+  }
+  CHECK_EQ(all.stamina, 40);
+  CHECK_EQ(all.gauge, 2);
+  // Unit 3 is missed: units 4 and 5 miss after it although their own rolls land, and the gauge does not move.
+  const Run sticky = run(2, true, 0x30);
+  CHECK_EQ(sticky.hits.size(), 3u);
+  for (const ActionEvent& event : sticky.hits) CHECK_EQ(event.code, 2);
+  CHECK(sticky.hp == (std::array<int, 3>{9999, 9999, 9999}));
+  CHECK_EQ(sticky.stamina, 40);
+  CHECK_EQ(sticky.gauge, -1);
+  // The last target missed: the earlier hits stay, the gauge does not move.
+  const Run last = run(2, true, 0x18);
+  CHECK(last.hits.size() == 3u && last.hits[0].code == 0 && last.hits[1].code == 0 && last.hits[2].code == 2);
+  CHECK(last.hp[0] < 9999 && last.hp[1] < 9999 && last.hp[2] == 9999);
+  CHECK_EQ(last.gauge, -1);
+  // Weak and medium hits, and a heavy hit with a weapon without the bit: the aimed unit alone.
+  for (const Run& single : {run(0, true, 0x38), run(1, true, 0x38), run(2, false, 0x38)}) {
+    CHECK_EQ(single.hits.size(), 1u);
+    CHECK(!single.hits.empty() && single.hits[0].target == 4 && single.hits[0].aim == -1);
+    CHECK(single.hp[0] == 9999 && single.hp[1] < 9999 && single.hp[2] == 9999);
+  }
+}
+
 // An attack queued by an idle loop is not lost: the unit casts it as an action of its own after the action that woke the loop, and the script
 // goes on past its A4 to the reveal.
 void test_idle_loop_cast() {
@@ -5788,6 +5864,7 @@ int main() {
   test_hidden_units();
   test_hidden_pair_reveal_one();
   test_reveal_during_all_target_cast();
+  test_weapon_sweep();
   test_idle_loop_cast();
   test_debug_flags();
   test_god_mode();

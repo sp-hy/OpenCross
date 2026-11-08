@@ -63,6 +63,7 @@ void App::apply_art_mode() {
   const std::uint32_t mod_gen = files.generation();
   mods.apply(files, render::mod_art(config.art_mode));
   const bool mods_changed = files.generation() != mod_gen;
+  if (mods_changed) load_shader_looks();
   files.set_hd_mode(hd);
   if (world_ok) world.set_art_mode(hd, mods_changed);
   const bool battle_textures_changed = battle_ready && battle.set_hd_textures(config.hd_battle_textures);

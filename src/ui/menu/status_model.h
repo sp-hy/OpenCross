@@ -32,6 +32,8 @@ class StatusModelView : public MenuModelView {
   int min_distance(int model) override;
   // [Enhancements] Lighting.
   void set_cast_shadows(bool on) { cast_shadows_ = on; }
+  // [Shaders] the character shaders, on the model and its weapon.
+  void set_character_shading(const render::CharacterShading& shading) { shading_ = shading; }
   // Drops the GPU models and effect textures before the pipeline is destroyed.
   void release();
 
@@ -67,6 +69,7 @@ class StatusModelView : public MenuModelView {
   render::MeshPipeline& meshes_;
   render::ShadowPipeline shadow_pipe_;
   bool cast_shadows_ = false, shadow_pipe_failed_ = false;
+  render::CharacterShading shading_;
   const vfs::Vfs& vfs_;
   std::map<int, std::unique_ptr<Entry>> cache_;  // key = model * 2 + hd_art
   std::map<std::string, std::shared_ptr<game::ModelHandle>> weapons_;  // "<pack>#<part>"

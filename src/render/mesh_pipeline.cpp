@@ -89,8 +89,55 @@ static_assert(offsetof(FrameUniforms, palette) == 3 * sizeof(Mat4) + 16 + 9 * 16
 // Lighting key light: colour multiplier swing = +-0.35 (key strength * dot(n, key) * 0.5).
 constexpr float kKeyStrength = 0.70f;
 
-// 8 x vec4 of draw state followed by the slot number in x of a ninth vec4.
-constexpr u32 kPushFloats = 36;
+// 8 x vec4 of draw state, the slot number in x of a ninth vec4, then the [Shaders] vec4s: (style, outline pass, outline width x / y),
+// (rim colour, rim on), (glow colour, glow strength).
+constexpr u32 kPushFloats = 48;
+
+// Side of the built-in matcap images.
+constexpr u32 kMatcapSize = 64;
+
+// A built-in matcap (MeshPipeline::kBuiltinMatcaps order): the shading of a unit sphere seen from the front, x right, y down, as RGBA8.
+// All three are lit by the key light of the other styles (from the upper left, toward the viewer: (-0.35, -0.70, 0.55) in image axes), so
+// the light and the shade fall on the same side whichever is chosen; each averages about 0.6 so that the shader's x 1.6 keeps the PS1
+// brightness.
+//   clay: warm diffuse with a soft highlight and darker edges; metal: a bright lit side cut off at a dark band along the shadow line, a sharp
+//   glint; ink: two flat tones, lit and shaded, and a hard dark rim.
+std::vector<u8> builtin_matcap(int which) {
+  std::vector<u8> out(size_t(kMatcapSize) * kMatcapSize * 4);
+  const float lx = -0.35f, ly = -0.70f, lz = 0.55f;
+  const float ll = std::sqrt(lx * lx + ly * ly + lz * lz);
+  const float hx = lx / ll, hy = ly / ll, hz = lz / ll + 1.0f;
+  const float hl = std::sqrt(hx * hx + hy * hy + hz * hz);
+  for (u32 y = 0; y < kMatcapSize; ++y)
+    for (u32 x = 0; x < kMatcapSize; ++x) {
+      float nx = (static_cast<float>(x) + 0.5f) / kMatcapSize * 2.0f - 1.0f, ny = (static_cast<float>(y) + 0.5f) / kMatcapSize * 2.0f - 1.0f;
+      const float radius = std::sqrt(nx * nx + ny * ny);
+      if (radius > 1.0f) nx /= radius, ny /= radius;
+      const float nz = std::sqrt(std::max(0.0f, 1.0f - nx * nx - ny * ny));
+      const float lit = (nx * lx + ny * ly + nz * lz) / ll;
+      const float diffuse = std::max(0.0f, lit);
+      const float glint = std::max(0.0f, (nx * hx + ny * hy + nz * hz) / hl);
+      float rgb[3];
+      if (which == 0) {
+        const float value = (0.3f + 0.55f * diffuse + 0.15f * std::pow(glint, 12.0f)) * (0.82f + 0.18f * nz);
+        rgb[0] = value, rgb[1] = value * 0.93f, rgb[2] = value * 0.84f;
+      } else if (which == 1) {
+        const float side = std::clamp((lit - 0.05f) / 0.3f, 0.0f, 1.0f);
+        const float band = std::exp(-std::pow((lit - 0.08f) / 0.06f, 2.0f));
+        const float value = 0.2f + 0.62f * side * (0.75f + 0.25f * diffuse) - 0.12f * band + 0.8f * std::pow(glint, 60.0f);
+        rgb[0] = value * 0.92f, rgb[1] = value * 0.96f, rgb[2] = value;
+      } else {
+        const float tone = 0.4f + 0.34f * std::clamp((lit - 0.25f) / 0.06f, 0.0f, 1.0f);
+        const float edge = std::clamp((nz - 0.38f) / 0.08f, 0.0f, 1.0f);
+        const float value = 0.12f + (tone - 0.12f) * edge;
+        rgb[0] = rgb[1] = rgb[2] = value;
+      }
+      u8* pixel = &out[(size_t(y) * kMatcapSize + x) * 4];
+      for (size_t channel = 0; channel < 3; ++channel) pixel[channel] = static_cast<u8>(std::clamp(rgb[channel], 0.0f, 1.0f) * 255.0f + 0.5f);
+      pixel[3] = 255;
+    }
+  return out;
+}
 
 // Faces meeting at a corner at a larger angle than this keep their own normal there (a hard edge).
 constexpr float kHardEdgeDegrees = 60.0f;
@@ -145,11 +192,15 @@ bool MeshPipeline::init(GpuContext& ctx) {
   ctx_ = &ctx;
 
   vs_ = create_shader(ctx, SDL_GPU_SHADERSTAGE_VERTEX, mesh_vert, ShaderDesc{0, 1, 1}, "mesh.vert");
-  fs_ = create_shader(ctx, SDL_GPU_SHADERSTAGE_FRAGMENT, mesh_frag, ShaderDesc{1, 0, 1}, "mesh.frag");
+  fs_ = create_shader(ctx, SDL_GPU_SHADERSTAGE_FRAGMENT, mesh_frag, ShaderDesc{2, 0, 1}, "mesh.frag");
   if (!vs_ || !fs_) return false;
   // Debug override OC_MESH_CULL: 0 off, -1 inverted.
   if (const char* cull_env = std::getenv("OC_MESH_CULL")) cull_ = cull_env[0] == '0' ? 0.0f : cull_env[0] == '-' ? -1.0f : 1.0f;
   if (!nearest_.create(ctx, false) || !linear_.create(ctx, true)) return false;
+  for (int i = 0; i < static_cast<int>(std::size(kBuiltinMatcaps)); ++i) {
+    const std::vector<u8> image = builtin_matcap(i);
+    if (!add_matcap(kBuiltinMatcaps[i], kMatcapSize, kMatcapSize, image.data())) return false;
+  }
 
   // 16 attributes: 8 joint-local positions, the joints and weights of the 4 corners packed by two, uv + quad info,
   // the VDDM normal + its joint (lit path), the corner colour, the smoothed normal.
@@ -179,6 +230,7 @@ bool MeshPipeline::init(GpuContext& ctx) {
   pd.depth_write = true;
   if (!pipeline_.create(ctx, pd)) return false;
   pd.depth_write = false;
+  if (!pipeline_outline_.create(ctx, pd)) return false;
   pd.blend = Blend::Additive;
   if (!pipeline_add_.create(ctx, pd)) return false;
   pd.blend = Blend::Subtract;
@@ -201,8 +253,10 @@ void MeshPipeline::destroy() {
   pipeline_sub_.destroy();
   pipeline_avg_.destroy();
   pipeline_depth_only_.destroy();
+  pipeline_outline_.destroy();
   nearest_.destroy();
   linear_.destroy();
+  matcaps_.clear();
   if (ctx_) {
     if (vs_) SDL_ReleaseGPUShader(ctx_->device(), vs_);
     if (fs_) SDL_ReleaseGPUShader(ctx_->device(), fs_);
@@ -562,7 +616,9 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   // semi-transparent meshes' STP texels with the construct's ABR), and in field ordering-table mode with water (WetFaces::Mixed) DepthOnly +
   // WetAdd for the submerged faces: their pushed-back depth first, then added to the frame where they are the nearest thing (PS1: drawn far
   // back first, the semi-transparent water layer over them). DryOnly / WetOnly draw one side of that split with Solid + Semi.
-  enum class Kind { Solid, Semi, DepthOnly, WetAdd };
+  // Outline: the [Shaders] inverted hull of the opaque one-sided parts, before their Solid pass and without writing depth, so the model
+  // covers it everywhere inside its silhouette whatever order the coarse face slots give its faces.
+  enum class Kind { Solid, Semi, DepthOnly, WetAdd, Outline };
   struct Pass {
     Kind kind;
     // ot2.x face filter: 0 all, 1 dry only, 2 submerged only.
@@ -584,7 +640,8 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   const bool flash = params.flash && !split_wet;
   const bool all_semi = flash || (params.model_abr >= 0 && params.model_abr <= 3);
   const int model_abr = flash ? 1 : all_semi ? params.model_abr : -1;
-  Pass passes[8];
+  const bool outline = params.shading.outline && !params.solid && !flash && !all_semi && params.wet_faces != WF::WetOnly;
+  Pass passes[9];
   int npass = 0;
   if (params.solid) {
     passes[npass++] = {Kind::Solid, 0.0f};
@@ -597,6 +654,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       passes[npass++] = {Kind::Solid, 0.0f, true};
       passes[npass++] = {Kind::Semi, 0.0f, true, 2};
     }
+    if (outline) passes[npass++] = {Kind::Outline, 0.0f};
     passes[npass++] = {Kind::Solid, 0.0f};
     passes[npass++] = {Kind::Semi, 0.0f, false, model_abr};
     // Drawn after the model primitive (the PS1 files it one OT slot nearer).
@@ -605,15 +663,26 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       passes[npass++] = {Kind::Semi, 0.0f, false, -1, true};
     }
   } else if (params.wet_faces == WF::Mixed) {
+    if (outline) passes[npass++] = {Kind::Outline, 1.0f};
     passes[npass++] = {Kind::Solid, 1.0f};
     passes[npass++] = {Kind::Semi, 0.0f, false, model_abr};
     passes[npass++] = {Kind::DepthOnly, 2.0f};
     passes[npass++] = {Kind::WetAdd, 2.0f};
   } else {
     const float faces = params.wet_faces == WF::DryOnly ? 1.0f : 2.0f;
+    if (outline) passes[npass++] = {Kind::Outline, faces};
     passes[npass++] = {Kind::Solid, faces};
     passes[npass++] = {Kind::Semi, faces, false, model_abr};
   }
+  // The outline width in clip units: kOutlinePx PS1 pixels of the picture being drawn (the PS1 pixels per clip unit of the jitter grid).
+  const float grid_x = ps1_jitter().px > 0.0f ? ps1_jitter().px : 160.0f, grid_y = ps1_jitter().py > 0.0f ? ps1_jitter().py : 112.0f;
+  const CharacterShading& shading = params.shading;
+  const float style = params.solid ? 0.0f : static_cast<float>(shading.style);
+  const bool rim = shading.rim && !params.solid;
+  const float glow = params.solid ? 0.0f : shading.glow;
+  const int matcap_slot = std::clamp(shading.matcap, 0, static_cast<int>(matcaps_.size()) - 1);
+  const SDL_GPUTextureSamplerBinding matcap_binding{matcaps_.empty() ? nullptr : matcaps_[static_cast<size_t>(matcap_slot)].texture->handle(),
+                                                    linear_.handle()};
   SDL_GPUGraphicsPipeline* bound = pipeline_.handle();
   for (int pi = 0; pi < npass; ++pi) {
     const Pass& pass = passes[pi];
@@ -627,9 +696,11 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       if (pass.env && !env_over) continue;
       const bool semi_mesh = !params.solid && (pass.env || all_semi || part_semi || (model_draw.trans >= 1 && model_draw.trans <= 4));
       if (pass.kind == Kind::Semi && !semi_mesh) continue;
+      if (pass.kind == Kind::Outline && (semi_mesh || !model_draw.one_sided)) continue;
       const Pipeline* pipe = &pipeline_;
       float blend_scale = 1.0f, out_alpha = 1.0f;
       if (pass.kind == Kind::DepthOnly) pipe = &pipeline_depth_only_;
+      else if (pass.kind == Kind::Outline) pipe = &pipeline_outline_;
       else if (pass.kind == Kind::WetAdd) pipe = &pipeline_add_;
       else if (pass.kind == Kind::Semi) {
         // PS1 ABR: 0 = (B + F) / 2, 1 = B + F, 2 = B - F, 3 = B + F / 4.
@@ -663,14 +734,15 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
         env_w2 = -256.0f;
       }
       if (!tex) continue;
-      const SDL_GPUTextureSamplerBinding texture_binding{tex.texture, ctx_->filtered(tex.sampler)};
-      SDL_BindGPUFragmentSamplers(render_pass, 0, &texture_binding, 1);
+      const SDL_GPUTextureSamplerBinding bindings[2] = {{tex.texture, ctx_->filtered(tex.sampler)}, matcap_binding};
+      SDL_BindGPUFragmentSamplers(render_pass, 0, bindings, 2);
       const bool near_sort = model_draw.mesh < 32 && ((params.near_meshes >> model_draw.mesh) & 1u);
       float tr = params.tint[0], tg = params.tint[1], tb = params.tint[2];
       if (model_draw.mesh < 32 && ((params.part_mask >> model_draw.mesh) & 1u)) tr *= params.part_tint[model_draw.mesh][0], tg *= params.part_tint[model_draw.mesh][1], tb *= params.part_tint[model_draw.mesh][2];
       if (params.solid) tr = tg = tb = 1.0f;
       const float* flat_rgb = params.solid ? params.solid_rgb : model_draw.color;
-      const float cull = model_draw.one_sided ? (params.mirror ? -cull_ : cull_) : 0.0f;
+      float cull = model_draw.one_sided ? (params.mirror ? -cull_ : cull_) : 0.0f;
+      if (pass.kind == Kind::Outline) cull = -cull;
       const float push[kPushFloats] = {flat_rgb[0], flat_rgb[1], flat_rgb[2], cull, params.solid || model_draw.texture < 0 ? 1.0f : 0.0f,
                                        1.0f / (kActorDepthDivisor * kDepthRange), wet ? 1.0f : 0.0f, wet ? params.water_level : 0.0f,
                                        tr * blend_scale, tg * blend_scale, tb * blend_scale, blend_scale,
@@ -679,13 +751,35 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
                                        params.fog_near, params.fog_far, stp_filter, pass.white ? 1.0f : 0.0f,
                                        params.ot_faces ? (smooth_water_line_ ? 2.0f : 1.0f) : 0.0f, near_sort ? 1.0f : 0.0f, params.ot_bias, params.water_bias,
                                        pass.faces, pass.kind == Kind::DepthOnly ? 1.0f : 0.0f, 1.0f / kDepthRange, out_alpha,
-                                       static_cast<float>(slot), 0.0f, 0.0f, 0.0f};
+                                       static_cast<float>(slot), 0.0f, 0.0f, 0.0f,
+                                       style, pass.kind == Kind::Outline ? 1.0f : 0.0f, kOutlinePx / grid_x, kOutlinePx / grid_y,
+                                       shading.rim_rgb[0], shading.rim_rgb[1], shading.rim_rgb[2], rim ? 1.0f : 0.0f,
+                                       shading.glow_rgb[0], shading.glow_rgb[1], shading.glow_rgb[2], glow};
       SDL_PushGPUVertexUniformData(command_buffer, 0, push, sizeof push);
       SDL_PushGPUFragmentUniformData(command_buffer, 0, push, sizeof push);
       SDL_DrawGPUIndexedPrimitives(render_pass, model_draw.index_count, 1, model_draw.first_index, 0, 0);
     }
   }
   SDL_BindGPUGraphicsPipeline(render_pass, pipeline_.handle());
+}
+
+int MeshPipeline::matcap_index(std::string_view name) const {
+  for (size_t i = 0; i < matcaps_.size(); ++i)
+    if (matcaps_[i].name == name) return static_cast<int>(i);
+  return -1;
+}
+
+bool MeshPipeline::add_matcap(const std::string& name, u32 width, u32 height, const u8* rgba) {
+  auto texture = std::make_unique<Texture>();
+  if (!ctx_ || !texture->create(*ctx_, width, height, TextureFormat::Rgba8, rgba)) return false;
+  const int existing = matcap_index(name);
+  if (existing >= 0) matcaps_[static_cast<size_t>(existing)].texture = std::move(texture);
+  else matcaps_.push_back({name, std::move(texture)});
+  return true;
+}
+
+void MeshPipeline::clear_added_matcaps() {
+  if (matcaps_.size() > std::size(kBuiltinMatcaps)) matcaps_.resize(std::size(kBuiltinMatcaps));
 }
 
 void MeshPipeline::end() {

@@ -354,6 +354,7 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
     dp.palette = palette;
     dp.linear = view_.linear_filter;
     dp.hd = entity.actor.use_hd;
+    dp.shading = character_shading_;
     dp.ot_faces = true;
     dp.ot_bias = static_cast<float>(vm_ent.word_b8);
     dp.water_bias = water_bias;

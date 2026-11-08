@@ -458,10 +458,10 @@ bool BattleCamera::place(const assets::StageCamera& shot, float progress, CamFra
 }
 
 // One timeline command other than the shot picks (0x23) and the end (0x21), which run() handles itself.
-void BattleCamera::exec(const CamCmd& cmd, CamEvents& events) {
+void BattleCamera::exec(const CamCmd& cmd, CamEvents& events, int target) {
   switch (cmd.op) {
-    case 0x22:  // start a stage emitter by name
-      if (!cmd.name.empty() && emitter_hook_) emitter_hook_(cmd.name);
+    case 0x22:  // start an emitter by name, for the target the timeline serves
+      if (!cmd.name.empty() && emitter_hook_) emitter_hook_(cmd.name, target);
       break;
     case 0x2B:  // screen colour layer: fade in (from the colour to the scene)
     case 0x2C: {  // screen colour layer: fade out
@@ -481,10 +481,11 @@ void BattleCamera::exec(const CamCmd& cmd, CamEvents& events) {
       fade_left_ = events.fade_frames;
       break;
     }
-    case 0x2F:  // start another timeline of the bank; it steps from the next tick on
+    case 0x2F:  // start another timeline of the bank, serving this one's target; it steps from the next tick on
       if (const CamSeq* child = bank_ && !cmd.name.empty() ? bank_->sequence(cmd.name) : nullptr) {
         Runner runner;
         runner.seq = child;
+        runner.inherited = target;
         spawned_.push_back(runner);
       }
       break;
@@ -564,7 +565,7 @@ void BattleCamera::run(Runner& runner, CamEvents& events) {
       for (; end < runner.seq->cmds.size(); ++end) {
         const CamCmd& member = runner.seq->cmds[end];
         if (member.op == 0x23) picks.push_back(&member);
-        else if (member.op != 0x21) exec(member, events);
+        else if (member.op != 0x21) exec(member, events, runner.served());
         if (member.delay != 0 || member.op == 0x21) break;
       }
       if (end >= runner.seq->cmds.size()) end = runner.seq->cmds.size() - 1;
@@ -578,7 +579,7 @@ void BattleCamera::run(Runner& runner, CamEvents& events) {
       }
       runner.pos = end + 1;
     } else {
-      exec(cmd, events);
+      exec(cmd, events, runner.served());
       ++runner.pos;
     }
   }

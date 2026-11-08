@@ -497,6 +497,7 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
   dp.palette = palette_;
   dp.linear = slot.hd;
   dp.hd = slot.hd;
+  dp.shading = shading_;
   // The menu is drawn over the field / world map in the same render pass, and those leave their depth values behind (room layers, actors):
   // the model would be depth-tested against them and show holes. It is the topmost 3D element of the menu: start from a clean depth buffer.
   frame.clear_depth();

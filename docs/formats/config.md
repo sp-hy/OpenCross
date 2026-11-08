@@ -55,7 +55,6 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `Ps1Res` | 0 | bool | "Retro look": draw the 3D and the menus at PS1 resolution and scale up with sharp pixels. |
 | `RenderScale` | 1.00 | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1Res`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
 | `Ps1Jitter` | 0 | bool | Integer vertex snapping and affine texture mapping in the 3D passes. |
-| `Crt` | 0 | bool | Final full-frame CRT pass (scanlines, mask, vignette); the settings window and toasts are excluded. The pause screen also uses the pass. |
 | `Msaa` | 1 | 1, 2, 4, 8 | Multisample antialiasing of the window-resolution pictures. The stored value is rounded down to a listed level; the GPU layer lowers it to what the hardware supports. |
 | `Anisotropy` | 1 | 1, 2, 4, 8, 16 | Anisotropic filtering of the bilinear 3D textures. Rounded down to a listed level. |
 
@@ -104,6 +103,26 @@ Opt-in improvements, independent of `Ps1Res`; each is also a checkbox in the Gra
 | `SmoothReflections` | 1 | bool | Environment-mapped model parts slide their reflection sub-texel instead of in whole texels. |
 | `Lighting` | 0 | bool | Key light on field and battle characters, bright spell effects light the battle units and stage, and units cast shadows of their real shape on the floor: in battle from the stage's sun and spells (`battle_stage.md` 8.3.2), in the field straight below them (`docs/rules/field_actors.md` section 7), on the status screen along the PS1 flat shadow's own ray. The battle floor also darkens smoothly per vertex with distance; off = the stepped PS1 look. |
 | `EdgeBlend` | 0 | bool | Cross-fade the faces along texture seams of the battle stage and title meshes. |
+
+### 2.5.1 `[Shaders]`
+
+Opt-in shaders, off by default, in every art mode; the Graphics tab's *Character shaders* and *Full-screen shaders* sections.
+
+| Key | Default | Values / clamp | Meaning |
+|---|---|---|---|
+| `Characters` | `off` | `off realistic toon cel matcap` | Shading of the characters: the field actors, the battle units and their weapons, and the status screen's model. From the camera-relative key light (above, toward the camera, a little from the left): `realistic`: soft diffuse shading with a glossy highlight; `toon`: two tones with a smooth narrow step; `cel`: four soft bands; `matcap`: the shading of a painted sphere, `Matcap`. Parts without vertex normals keep their PS1 colours. On a styled character it replaces the `[Enhancements] Lighting` key light; the spell lights still apply. The formulas are in `docs/architecture.md` (Shaders). An unknown value keeps the default. |
+| `Matcap` | `clay` | `clay metal ink`, or a mod's matcap name | The look of the `matcap` style: a built-in one or a mod's `shaders/matcaps/<name>.png` (`mods.md` section 9). A name no enabled mod provides draws `clay`. |
+| `Outlines` | 0 | bool | A dark outline around the characters (an inverted hull of their opaque one-sided parts, 0.6 PS1 pixels wide on screen). |
+| `Rim` | 0 | bool | A rim light along the characters' edges, with any style. |
+| `SpellRim` | 0 | bool | With `Rim`, in battle: the rim takes the colour of the running spell's light. The spell lights are then worked out even with `[Enhancements] Lighting` off, but they light nothing else. |
+| `CastGlow` | 0 | bool | In battle, a unit casting an element glows in the element's colour while the cast is charged and released (in over 15 ticks, out over 30); an element without a colour gives none, the all-colour element glows white. |
+| `Fullscreen` | `off` | `off crt composite` | The main filter of the final full-frame pass. `crt`: scanlines, a phosphor mask and a vignette; `composite`: composite-video colour bleeding, dot crawl and a faint ghost. The settings window and toasts are excluded. The pause screen uses the same pass for its colour ramp whatever this key says. |
+| `CrtMask` | `classic` | `classic aperture shadow` | With `crt`: the phosphor layout. `classic` is the faint triad of the original CRT filter; `aperture` strong vertical colour stripes; `shadow` triads shifted every other pair of rows. |
+| `CrtCurvature` | 0 | bool | With `crt`: a barrel warp, black outside the tube. |
+| `CrtGlow` | 0 | bool | With `crt`: bright parts glow into the scanline gaps. |
+| `Grade` | `off` | `off film warm cold faded`, or a mod's LUT name | A colour grade after the filter. `film`: a gentle S-curve, warm highlights, cool shadows; `warm` / `cold`: a white-balance shift; `faded`: lifted blacks, lower contrast and saturation; a mod's `shaders/luts/<name>.png` (`mods.md` section 9). A LUT name no enabled mod provides draws no grade. |
+
+The settings window shows an option's rows only while the choice it belongs to is selected: `Matcap` under the `matcap` style, `SpellRim` under `Rim`, the `Crt*` rows under `crt`.
 
 ### 2.6 `[Audio]`
 
@@ -215,7 +234,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Language` | Dialogue, flow, menus, shop and results switch at once. A movie already playing keeps its language. |
 | `Portraits` | Field, menu and results portraits switch at once. |
 | `Driver` | Needs a restart; the Backend row offers a *Restart now* button once it differs from the one the run started with. |
-| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1Res`, `RenderScale`, `Ps1Jitter`, `Crt`, `FrameCap`, all of `[Enhancements]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
+| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1Res`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
 | `Log` | The Debug tab starts or stops the log at once. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
 | `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
@@ -230,6 +249,7 @@ Editing the file by hand while the game runs has no effect: the file is read onc
 | `[Video] FilterHD` | `Filter`; read first, so an explicit `Filter` wins over it. |
 | `[Video] WideHudEdges` | Nonzero = `WideHud=full`, used only when `WideHud` is empty. |
 | `[Video] Ps1Res3D` | Default for `Ps1Res`. It is forced off when the ini has `FilterHD` but no `Filter` and `ArtMode` is not `original`. |
+| `[Video] Crt` | `1` = `[Shaders] Fullscreen=crt`, used only when `Fullscreen` is missing or not one of its names. |
 | `[Enhancements] EnhancedLighting`, `SpellLights` | Either on = `Lighting` default on; an explicit `Lighting` wins. |
 | `[Enhancements] SeamBlend` | `0` = `EdgeBlend` off, `1` or `2` = on; an explicit `EdgeBlend` wins. |
 | `[Mods] DumpTextures`, `ReplaceTextures` | Skipped (never taken as mod names) and not written back. |

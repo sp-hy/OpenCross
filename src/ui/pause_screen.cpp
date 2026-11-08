@@ -105,7 +105,7 @@ std::u32string PauseScreen::ui_text(int id, const char32_t* fallback) {
 }
 
 // The title bar is the art at its natural size; the option bar is sized to its text plus the two arrows tucked inside its right end
-// (only the middle slice of the art stretches). The purple ramp over the frozen picture is the CRT pass's ramp mode, applied by the
+// (only the middle slice of the art stretches). The purple ramp over the frozen picture is the full-screen shader pass's ramp mode, applied by the
 // host before this draw.
 void PauseScreen::draw(const render::Frame& frame, float vw, float vh, bool resume) {
   if (!open_ || !ctx_) return;

@@ -62,7 +62,8 @@ struct ModFile {
 // read, `may_be_slow` = a packed mod better extracted (ModArchive::may_be_slow). `files` are the matched
 // member replacements that follow "load on", `data` the matched game data, `archives` the <archive>.dat files (their members are in
 // `files` / `data`), `textures` the texture replacements (target = canonical texture
-// path), `voices` the voice lines (<mod>\voices\**\*.mp3, or any .mp3 when the folder itself is called "voices"; played by
+// path), `shaders` the [Shaders] looks (<mod>\shaders\matcaps\<name>.png, <mod>\shaders\luts\<name>.png; target = "matcaps/<name>" /
+// "luts/<name>", lower case, no extension), `voices` the voice lines (<mod>\voices\**\*.mp3, or any .mp3 when the folder itself is called "voices"; played by
 // audio::VoicePlayer, not VFS targets). `added` lists the rel paths of the new members (rule 3; they are in `files` / `data` too).
 // `unmatched` / `ambiguous` list the rel paths that match no shipped member and name no archive / whose best match is not unique.
 struct Mod {
@@ -77,6 +78,7 @@ struct Mod {
   std::vector<ModFile> data;
   std::vector<ModFile> archives;
   std::vector<ModFile> textures;
+  std::vector<ModFile> shaders;
   std::vector<ModFile> voices;
   std::vector<std::string> added;
   std::vector<std::string> unmatched;

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <span>
 #include <sstream>
 
 #include "core/log.h"
@@ -229,7 +230,6 @@ bool Config::load(const std::filesystem::path& file) {
     render_scale = best;
   }
   ps1_jitter = parse_bool(ini.get("Video", "Ps1Jitter"), ps1_jitter);
-  crt = parse_bool(ini.get("Video", "Crt"), crt);
   {
     const int stored_msaa = parse_int(ini.get("Video", "Msaa"), msaa);
     msaa = 1;
@@ -253,6 +253,27 @@ bool Config::load(const std::filesystem::path& file) {
   {
     const int legacy = parse_int(ini.get("Enhancements", "SeamBlend"), -1);
     edge_blend = parse_bool(ini.get("Enhancements", "EdgeBlend"), legacy < 0 ? edge_blend : legacy > 0);
+  }
+  {
+    // The index of the key's word in `names`, or `fallback` when the key is missing or not one of them.
+    auto read_word = [&](const char* key, std::span<const char* const> names, int fallback) {
+      const std::string word = ini.get("Shaders", key);
+      for (size_t i = 0; i < names.size(); ++i)
+        if (word == names[i]) return static_cast<int>(i);
+      return fallback;
+    };
+    character_shader = static_cast<CharacterShader>(read_word("Characters", kCharacterShaderNames, static_cast<int>(character_shader)));
+    matcap = ini.get("Shaders", "Matcap", matcap);
+    outlines = parse_bool(ini.get("Shaders", "Outlines"), outlines);
+    rim = parse_bool(ini.get("Shaders", "Rim"), rim);
+    spell_rim = parse_bool(ini.get("Shaders", "SpellRim"), spell_rim);
+    cast_glow = parse_bool(ini.get("Shaders", "CastGlow"), cast_glow);
+    const int legacy_crt = parse_bool(ini.get("Video", "Crt"), false) ? static_cast<int>(FullscreenShader::Crt) : static_cast<int>(fullscreen_shader);
+    fullscreen_shader = static_cast<FullscreenShader>(read_word("Fullscreen", kFullscreenShaderNames, legacy_crt));
+    crt_mask = static_cast<CrtMask>(read_word("CrtMask", kCrtMaskNames, static_cast<int>(crt_mask)));
+    crt_curvature = parse_bool(ini.get("Shaders", "CrtCurvature"), crt_curvature);
+    crt_glow = parse_bool(ini.get("Shaders", "CrtGlow"), crt_glow);
+    grade = ini.get("Shaders", "Grade", grade);
   }
   master = clamp01(parse_float(ini.get("Audio", "Master"), master));
   music = clamp01(parse_float(ini.get("Audio", "Music"), music));
@@ -354,7 +375,6 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "Ps1Res", on_off(ps1_res));
   ini.set("Video", "RenderScale", fmt_float(render_scale));
   ini.set("Video", "Ps1Jitter", on_off(ps1_jitter));
-  ini.set("Video", "Crt", on_off(crt));
   ini.set("Video", "Msaa", std::to_string(msaa));
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
   ini.set("Enhancements", "SmoothWaterLine", on_off(smooth_water_line));
@@ -365,6 +385,17 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Enhancements", "SmoothReflections", on_off(smooth_reflections));
   ini.set("Enhancements", "Lighting", on_off(lighting));
   ini.set("Enhancements", "EdgeBlend", on_off(edge_blend));
+  ini.set("Shaders", "Characters", kCharacterShaderNames[static_cast<size_t>(character_shader)]);
+  ini.set("Shaders", "Matcap", matcap);
+  ini.set("Shaders", "Outlines", on_off(outlines));
+  ini.set("Shaders", "Rim", on_off(rim));
+  ini.set("Shaders", "SpellRim", on_off(spell_rim));
+  ini.set("Shaders", "CastGlow", on_off(cast_glow));
+  ini.set("Shaders", "Fullscreen", kFullscreenShaderNames[static_cast<size_t>(fullscreen_shader)]);
+  ini.set("Shaders", "CrtMask", kCrtMaskNames[static_cast<size_t>(crt_mask)]);
+  ini.set("Shaders", "CrtCurvature", on_off(crt_curvature));
+  ini.set("Shaders", "CrtGlow", on_off(crt_glow));
+  ini.set("Shaders", "Grade", grade);
   ini.set("Audio", "Master", fmt_float(master));
   ini.set("Audio", "Music", fmt_float(music));
   ini.set("Audio", "Sfx", fmt_float(sfx));

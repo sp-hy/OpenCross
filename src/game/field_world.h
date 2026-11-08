@@ -459,6 +459,8 @@ class FieldWorld final : public script::FieldHost {
   void set_smooth_rings(bool on) { smooth_rings_ = on; }
   // [Enhancements] Lighting: actors cast their silhouette, as if lit from straight above.
   void set_cast_shadows(bool on) { cast_shadows_ = on; }
+  // [Shaders] the character shaders: the shading of the field actors.
+  void set_character_shading(render::CharacterShading shading) { character_shading_ = shading; }
   // Draws the frame's shadow tiles: before anything of the frame needs depth (ShadowPipeline::begin_tiles).
   void prepare_shadows(const render::Frame& frame, float alpha);
   // ---- FE 02 captured-frame transitions (kinds 1 / 3 / 4 additive fade of the old frame, 5 / 6 slide) ------
@@ -1098,6 +1100,7 @@ class FieldWorld final : public script::FieldHost {
   // [Enhancements] Lighting; created when first used.
   render::ShadowPipeline shadow_tiles_;
   bool cast_shadows_ = false, shadow_tiles_failed_ = false;
+  render::CharacterShading character_shading_;
   // art mode: party actors use their 4x texture
   bool hd_ = true;
 

@@ -34,6 +34,9 @@ This file lists (A) the third-party libraries and build tools OpenCross uses, (B
 | Chrono Compendium — Battlescript, Enemy Stats, Game Mechanics | F-man, saiferoth, Magil, glennxserge, utunnels | https://www.chronocompendium.com/Term/Chrono_Cross_Enemy_Stats.html | battle script ops, enemy records, damage / hit / growth formulas |
 | vgmstream (sqex_sead) | bnnm et al. | https://github.com/vgmstream/vgmstream | SEAD `.sab` container, HCA key table |
 | FF7 / FF9 AKAO wiki pages | ff7-mods, ffrtt | https://ff7-mods.github.io/ff7-flat-wiki/FF7/PSX/Sound/AKAO_sequence.html , https://wiki.ffrtt.ru/index.php/FF9/Sound/AKAO_sequence | AKAO sequence opcode families |
+| Memoria (FF9 engine mod): toon, realism and outline character shaders | EricHu33 and the Memoria contributors (Albeoris, Tirlititi, SamsamTS, snouz) | https://github.com/Albeoris/Memoria | the idea and the look of the `[Shaders]` character styles: two-tone toon shading, wrapped diffuse with a highlight, inverted-hull outlines |
+| The Lit Sphere: a model for capturing NPR shading from art | P.-P. Sloan, W. Martin, A. Gooch, B. Gooch | https://www.cs.utah.edu/~bgooch/LitSphere/ | the matcap ("lit sphere") character style |
+| Runtime normals recalculation in Unity | fra3point | https://medium.com/@fra3point/runtime-normals-recalculation-in-unity-a-complete-approach-db42490a5644 | smoothing normals across faces within an angle threshold (the rigid meshes' smoothed normals) |
 | psx-spx | nocash, N. Noble (ed.) | https://psx-spx.consoledev.net | PS1 GPU / GTE / SPU behaviour (packets, CLUTs, ADPCM, Gaussian interpolation, noise) |
 
 ## C. Playtesters

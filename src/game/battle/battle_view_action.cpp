@@ -119,7 +119,7 @@ void BattleView::update(float dt, const platform::Input& in) {
           if (i != first && battle_->unit(i).present) battle_->unit_mut(i).hp = 0, battle_->unit_mut(i).lo |= battle::st::kKO;
     }
     if (weapon >= 0 && first >= 0) {
-      battle_->do_weapon_attack(dbg_.lead, first, weapon);
+      battle_->do_pc_weapon_hit(dbg_.lead, first, weapon);
       // Reactions + the end test, as Battle::apply does after a command.
       battle_->finish_external_action();
       collect_events();

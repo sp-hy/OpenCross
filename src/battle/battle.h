@@ -22,6 +22,8 @@ inline bool is_pc_slot(int unit) { return unit >= 0 && unit < kPcSlots; }
 // Derived equipment totals. The flat defaults below are used only when the gear table is not loaded (synthetic test tables).
 struct Equip {
   int wp = 16, wp_acc = 60, wp_var = 20, wp_class = 0;
+  // The weapon's class bit 7 (rods, boomerangs): a PC's heavy hit with it strikes every enemy (Battle::do_weapon_sweep).
+  bool wp_sweeps = false;
   // Equipped weapon item id (presentation: weapon pack part = gear tier & 0xF).
   int weapon_id = 0;
   int arm = 4, arm_var = 20;
@@ -228,6 +230,9 @@ struct ActionEvent {
   int swap_out = -1, swap_in = -1;
   // Weapon: 0 weak, 1 medium, 2 heavy.
   int strength = 0;
+  // Weapon: the unit a sweep was aimed at (the heavy hit of a rod or boomerang, which strikes every enemy); -1 = a one-target hit. The
+  // events of one sweep follow each other in ascending unit order and share hit_index.
+  int aim = -1;
   // Element: pgdat id; grid row in `row`.
   int element = 0;
   int row = 0;
@@ -397,8 +402,9 @@ class EnemyBrain {
   // The attacks that scripts queued from their idle loops (a hidden unit's arrival cast) since the last call: executed like any queued action by
   // the unit that queued them. Appended to `out` as (unit, actions).
   virtual void take_idle_plans(Battle&, std::vector<std::pair<int, std::vector<EnemyAction>>>& /*out*/) {}
-  // Any attack about to resolve (kind 0 weapon / 1 element; id = weapon class or element id): scripts read it as vars 0x20..0x36.
-  virtual void on_attack(Battle&, int /*actor*/, int /*kind*/, int /*id*/, int /*target*/) {}
+  // Any attack about to resolve (kind 0 weapon / 1 element; id = hit strength or element id; the units it aims at as a mask): scripts read
+  // it as vars 0x20..0x36.
+  virtual void on_attack(Battle&, int /*actor*/, int /*kind*/, int /*id*/, u32 /*target_mask*/) {}
   // The first seven entries of the cast colour history (colour + 1, 0 = empty).
   virtual std::array<u8, 7> colour_sequence() const { return {}; }
   // Script control of the end of battle.
@@ -607,8 +613,8 @@ class Battle {
   // kHiNoStaminaCost while the unit has it (the stamina it will have once the status runs out).
   int hit_budget(int actor) const;
   bool validate(const Command& cmd, std::string* why = nullptr) const;
-  // Percent, using the current chain counter.
-  int hit_chance_for(int actor, int target, int strength) const;
+  // Percent, using the current chain counter (`any_target`: for every target of a sweep, not only the chain's own).
+  int hit_chance_for(int actor, int target, int strength, bool any_target = false) const;
   // The HIT% box figure for the same attack (hit_chance_shown: the target's raw EVD, no hero, dizzy or sleeping-target terms).
   int hit_chance_shown_for(int actor, int target, int strength) const;
   // Auto accuracy rule (Accuracy Selection = Auto, and the auto battle): the strongest hit k = 2, 1, 0 whose HIT% figure is above 79 and
@@ -634,6 +640,10 @@ class Battle {
 
   // ---- primitives (public so tests and tools can drive single actions; they do not run the scheduler)
   void do_weapon_attack(int actor, int target, int strength);
+  // A PC's heavy hit with a sweeping weapon (Equip::wp_sweeps), aimed at `aim`: one hit pass per enemy the cursor ring reaches.
+  void do_weapon_sweep(int actor, int aim, int strength);
+  // The hit a PC's command makes: the sweep for a heavy hit with a sweeping weapon, else the one-target attack.
+  void do_pc_weapon_hit(int actor, int target, int strength);
   void note_summon_kill(int unit_index);
   // `push_ring` = false for the 2nd..nth target of an all-targets cast (the colour enters the field ring once per cast).
   void do_element(int actor, int element_id, int row, int target, bool push_ring = true);
@@ -682,6 +692,13 @@ class Battle {
     trap_before_ = trap_hud();
   }
   void reset_chain() { chain_actor_ = chain_target_ = -1; chain_hits_ = 0; }
+  // The start of a weapon attack aimed at `aim` (thaw, the script's attack vars with `target_mask`, a new chain for a new target).
+  void weapon_begin(int actor, int aim, int strength, u32 target_mask);
+  // One target's pass of a weapon attack: the hit roll, then the damage and its event. `aim` >= 0: a pass of a sweep aimed there;
+  // `missed`: an earlier target of the same sweep missed, so this one misses after its roll. Returns whether the hit landed.
+  bool weapon_strike(int actor, int target, int strength, int aim, bool missed);
+  // A landed attack (every target hit): the chain step and the level gauge.
+  void weapon_landed(int actor, int strength);
   // A PC-led weapon / element hit adds its target to the attacked list, kept in ascending unit order; enemy-led actions add nothing.
   void note_event(ActionEvent event) {
     if ((event.kind == ActionEvent::Kind::Weapon || event.kind == ActionEvent::Kind::Element) && is_pc_slot(event.actor) && event.target >= 0) {

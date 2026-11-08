@@ -24,6 +24,8 @@
 // is below the level (y > level, +y down) takes the water colour and its slot is pushed back by `water_bias`.
 #include <memory>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "assets/model.h"
@@ -116,8 +118,40 @@ struct ModelTextures {
 };
 ModelTextures prepare_model_textures(GpuContext& ctx, const assets::ModelAsset& asset, const ModelUploads& uploads);
 
+// [Shaders] character shading, opt-in (default off = the PS1 look). The vertex normal (the skinned VDDM normal, or a rigid mesh's
+// smoothed normal) is lit by the camera-relative key light of [Enhancements] Lighting (from above, toward the camera, a little from the
+// left), and the result scales the PS1 colour C (texel x light multiplier L) per pixel; parts without normals keep the PS1 colour, and the
+// Lighting key-light term is replaced on styled draws (the spell lights stay). A normal pointing away from the eye is turned toward it
+// first (meshes wound the other way); d = n . key, t = d / 2 + 1/2, f = the facing n . v with v the unit vector to the eye.
+//   Realistic: C (0.6 + 0.5 t) + L 0.22 max(n . h, 0)^16, h halfway between the key light and v.
+//   Toon:      C mix(0.55, 1, smoothstep(-0.05, 0.2, d)).
+//   Cel:       four bands, C (0.5 + 0.6 b), b = (floor(4 t) + smoothstep(0.42, 0.58, fract(4 t))) / 4.
+//   Matcap:    C 1.6 M, M the matcap's texel at (m.x / 2 + 1/2, 1/2 - m.y / 2), m = the normal in the key light's frame (along the camera's
+//              right, along the model's up, toward the camera), so a matcap lit from the upper left shades like the other styles.
+//   Rim:       any style: + L rim_rgb 0.4 (1 - f)^3 (matcap: f = |n.z| of the view-space normal).
+//   Glow:      mix(C, 1.5 C glow_rgb, 0.35 glow) + glow_rgb glow (0.12 + 0.5 (1 - f)^2), after the rim (f = 1 without a normal).
+//   Outline:   an inverted hull: the model is drawn again with the back-face test inverted and every corner pushed out along its normal
+//              by kOutlinePx PS1 pixels on screen, in the texel colour times 0.15 (opaque one-sided parts only). It is drawn first and writes no
+//              depth, so the model then covers it inside its silhouette.
+struct CharacterShading {
+  enum class Style : u8 { Off, Realistic, Toon, Cel, Matcap };
+  Style style = Style::Off;
+  bool outline = false;
+  bool rim = false;
+  // MeshPipeline matcap index (Matcap style).
+  int matcap = 0;
+  float rim_rgb[3] = {1, 1, 1};
+  // Cast glow colour and strength (0 = none).
+  float glow_rgb[3] = {0, 0, 0};
+  float glow = 0;
+};
+
 class MeshPipeline {
  public:
+  // Outline width in PS1 screen pixels (1 = one pixel of the 320 x 224 picture, scaled with the window).
+  static constexpr float kOutlinePx = 0.6f;
+  // The built-in matcaps, made at init in this order (indices 0..2).
+  static constexpr const char* kBuiltinMatcaps[] = {"clay", "metal", "ink"};
   static constexpr u32 kMaxJoints = 128;
   // Distinct model draws (actors) per frame.
   static constexpr u32 kMaxDrawsPerFrame = 96;
@@ -228,6 +262,8 @@ class MeshPipeline {
     // Every visible face as an opaque, untextured, unlit polygon of `solid_rgb` (a flat shadow of the model).
     bool solid = false;
     float solid_rgb[3] = {0, 0, 0};
+    // [Shaders] the character shaders (CharacterShading); ignored for solid draws.
+    CharacterShading shading;
   };
   void draw(const MeshModel& model, const DrawParams& params);
   void end();
@@ -238,6 +274,11 @@ class MeshPipeline {
   // [Enhancements] EnhancedLighting: a soft key-light shading from the vertex normals, added to the PS1 colour multiplier (field and battle models).
   // Default off = the PS1 look.
   void set_enhanced_lighting(bool on) { enhanced_ = on; }
+  // [Shaders] matcaps: the index of a matcap by name (-1 = none); add_matcap adds or replaces a named RGBA image (a mod's own; false = the
+  // texture could not be made), clear_added_matcaps drops every matcap but the built-in ones.
+  int matcap_index(std::string_view name) const;
+  bool add_matcap(const std::string& name, u32 width, u32 height, const u8* rgba);
+  void clear_added_matcaps();
   // [Enhancements] SmoothReflections: the env-mapped parts' corner UVs (mesh.vert) keep the sub-texel fraction of the normal
   // instead of the PS1's whole texel, so the reflection slides with the pose. Default off = the PS1's one-texel steps.
   void set_smooth_reflections(bool on) { smooth_reflections_ = on; }
@@ -252,7 +293,14 @@ class MeshPipeline {
   Pipeline pipeline_avg_;
   // Depth written, colour kept (alpha-0 output): the submerged faces' first pass.
   Pipeline pipeline_depth_only_;
+  // Opaque, depth tested, not written: the [Shaders] outline pass.
+  Pipeline pipeline_outline_;
   Sampler nearest_, linear_;
+  struct Matcap {
+    std::string name;
+    std::unique_ptr<Texture> texture;
+  };
+  std::vector<Matcap> matcaps_;
   bool smooth_water_line_ = false;
   bool enhanced_ = false;
   bool smooth_reflections_ = false;

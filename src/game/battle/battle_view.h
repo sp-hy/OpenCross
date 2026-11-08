@@ -132,7 +132,19 @@ class BattleView {
   // [Enhancements] SmoothEffectRings (off under Ps1Res), Lighting (smooth floor darkening, spell lights).
   void set_smooth_rings(bool on) { smooth_rings_ = on; }
   void set_smooth_fog(bool on) { stage_pipe_.set_smooth_fog(on); }
-  void set_spell_lights(bool on) { spell_.lights_on = on; }
+  void set_spell_lights(bool on) {
+    spell_lights_shown_ = on;
+    spell_.lights_on = spell_lights_shown_ || spell_rim_;
+  }
+  // [Shaders] Characters / Outlines / Rim: the shading of the units and their weapons. spell_rim: the rim takes the running spell's
+  // light colour (the spell lights are then worked out even without [Enhancements] Lighting, but light nothing); cast_tint: a caster glows
+  // in its element's colour while the cast runs.
+  void set_character_shading(render::CharacterShading shading, bool spell_rim, bool cast_tint) {
+    character_shading_ = shading;
+    spell_rim_ = spell_rim;
+    cast_tint_ = cast_tint;
+    spell_.lights_on = spell_lights_shown_ || spell_rim_;
+  }
   // force: rebuild even if `hd` is unchanged (HD <-> Modded). HD: large_font_*; original: small_font_* (the HUD art is RDE's in both modes).
   void set_art_mode(bool hd, bool force = false);
   // [Video] HdBattleTextures for the models loaded from now on; true when it changed (the caller then forces set_art_mode in HD art).
@@ -498,6 +510,7 @@ class BattleView {
   // Leaving the HIT% menu, also while the PC still runs up to the target: Cross (pass 0) or a switch key (+1 next / -1 previous PC).
   void leave_hit_menu(int pass);
   void chain_pick(int strength);
+  size_t hit_end(size_t first) const;
   void start_hit();
   void start_return();
   void start_release();
@@ -576,6 +589,13 @@ class BattleView {
   // unit-attached emitters of the anmseq scripts (op 0x1D; battle_view_anm.cpp)
   struct AnmFx;
   void anm_effect(int unit, const bseq::Event& event);
+  // The bank of unit `src`'s own effect resources (at0.prd with its weapon class), made on first use.
+  AnmFx& anm_bank(int src);
+  // Timeline op 0x22 of a per-target repeat serving target index `target` > 0: a clone of the acting unit's emitter that follows that target.
+  void anm_effect_for_target(int unit, const std::string& name, int target);
+  // Op 0x39 point of the unit emitters: selector `sel` (1 / 9 the actor, 2 / 0xD target 0, 0xE..0x15 target 1..8 of the action's target
+  // list in ascending unit order) at attach point `joint` - 2, and that unit's yaw. False when the selector names no unit.
+  bool anm_point(int sel, int joint, effects::Vec3& pos, float& yaw);
   // Every unit model's S6 DRP headers (resident registry file).
   void anm_add_s6(effects::EffectBank& bank) const;
   // The EmitterSystem + hooks of one anm bank.
@@ -586,6 +606,7 @@ class BattleView {
   // Dev object log: every anm bank.
   void anm_each_system(const std::function<void(const effects::EmitterSystem&)>& fn) const;
   void anm_draw(const render::Frame& frame, const render::Letterbox& lb);
+  void anm_draw_meshes(const render::Frame& frame, const render::Letterbox& lb, const effects::ViewParams& view);
   void anm_reset();
   std::map<std::string, std::shared_ptr<AnmFx>> anm_;
   int anm_pack_seq_ = 0;
@@ -884,6 +905,14 @@ class BattleView {
   const vfs::Vfs* vfs_ = nullptr;
   render::SpriteBatch* sprites_ = nullptr;
   render::MeshPipeline* meshes_ = nullptr;
+  render::CharacterShading character_shading_;
+  bool spell_lights_shown_ = false, spell_rim_ = false, cast_tint_ = false;
+  // [Shaders] CastGlow: each unit's glow (0..1, eased per tick) and its element colour.
+  std::array<float, battle::kUnits> cast_glow_{};
+  std::array<std::array<float, 3>, battle::kUnits> cast_glow_rgb_{};
+  void cast_glow_tick();
+  // The character shading of unit `unit`'s draws this frame: the base, the spell colour on the rim, the unit's cast glow.
+  render::CharacterShading unit_shading(int unit) const;
   const data::GameTables* tables_ = nullptr;
   audio::Mixer* mixer_ = nullptr;
   bool hd_ = true;

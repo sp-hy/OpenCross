@@ -89,14 +89,16 @@ void BattleView::begin_group() {
   // still faces it while the PC hops home). Every unit goes home only in the menu's step after a PC's element command (tick_action).
   switch (e0.kind) {
     case battle::ActionEvent::Kind::Weapon: {
-      act_.targets = {e0.target};
-      face_toward(act_.actor, e0.target);
+      // A sweep is aimed at one unit (the cursor's): the PC approaches and faces that one, the hit then reaches every target (start_hit).
+      const int aim = e0.aim >= 0 ? e0.aim : e0.target;
+      act_.targets = {aim};
+      face_toward(act_.actor, aim);
       // Weapon pick: both face each other (unless a unit's pose word is 8 = dead), and the target KEEPS that facing afterwards (the Sand Squirt
       // stays turned from the approach through the hit and the HIT% box).
-      if (e0.target != act_.actor) face_toward(e0.target, act_.actor);
+      if (aim != act_.actor) face_toward(aim, act_.actor);
       // Already standing at the target: hit at once (the approach shot again only when an enemy action interrupted the turn). An approach
       // shot first ends every camera task, so no earlier shot resumes behind it.
-      if (engaged_ && act_.actor == active_pc_ && e0.target == engaged_target_) {
+      if (engaged_ && act_.actor == active_pc_ && aim == engaged_target_) {
         if (engage_interrupted_) {
           end_camera_tasks();
           select_approach();
@@ -292,10 +294,22 @@ void BattleView::face_group_cast() {
   for (int caster : casters) face(caster, mid_x, mid_z);
 }
 
+// One past the last event of the hit that starts at event `first`: a sweep's events (same aim and hit_index) are one hit.
+size_t BattleView::hit_end(size_t first) const {
+  const battle::ActionEvent& head = act_.ev[first];
+  size_t end = first + 1;
+  if (head.kind != battle::ActionEvent::Kind::Weapon || head.aim < 0) return end;
+  while (end < act_.ev.size() && act_.ev[end].kind == battle::ActionEvent::Kind::Weapon && act_.ev[end].aim == head.aim &&
+         act_.ev[end].hit_index == head.hit_index && act_.ev[end].actor == head.actor)
+    ++end;
+  return end;
+}
+
 void BattleView::start_hit() {
   Visual& actor_visual = vis_[static_cast<size_t>(act_.actor)];
-  const battle::ActionEvent& hit_event = act_.ev[act_.hit];
-  act_.targets = {hit_event.target};
+  // The hit's targets (every target of a sweep, in ascending unit order): the per-target timelines and the effect selectors walk them.
+  act_.targets.clear();
+  for (size_t k = act_.hit; k < hit_end(act_.hit); ++k) act_.targets.push_back(act_.ev[k].target);
   act_.ticks = 0;
   // The hand toggle flips when an attack starts; the script reads the flipped value.
   hand_toggle_ ^= 1;
@@ -409,7 +423,7 @@ void BattleView::tick_action() {
         if (battle_audit() && !actor_visual.script_done)
           battle_audit_note(std::format("hit {} of action {} (unit {} -> {}) left by the 900-tick timeout: the attack script never finished", act_.hit, act_.ev.front().action, act_.actor, act_.ev[act_.hit].target));
         cut_script(act_.actor);
-        ++act_.hit;
+        act_.hit = hit_end(act_.hit);
         if (act_.hit < act_.ev.size()) {
           if (script_gated(act_.ev[act_.hit])) act_.hit_wait = true;
           else start_hit();

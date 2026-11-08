@@ -3,6 +3,7 @@
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -679,7 +680,7 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
   }
 
   };
-  // Retro look / Enhancements: labelled check boxes in a 2 x 2 grid, the description on hover only.
+  // Retro look / Enhancements: labelled check boxes in a two-column grid, the description on hover only.
   auto check_cell = [&](const char* label, const char* help, bool& value) {
     ImGui::TableNextColumn();
     const bool clicked = ImGui::Checkbox(label, &value);
@@ -703,12 +704,91 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "window's resolution.",
                      cfg.ps1_res))
         change.ps1_res = true;
-      if (check_cell("CRT filter",
-                     "A final pass over the whole picture before the settings window and notifications: scanlines, a faint colour mask and a "
-                     "soft vignette.",
-                     cfg.crt))
-        change.other = true;
       ImGui::EndTable();
+    }
+  };
+  // Opt-in shaders: a pass over the whole finished picture, and how the characters are shaded.
+  // The rows of an option appear only while the choice they belong to is selected (the matcap look under Matcap, the CRT options under CRT,
+  // the spell rim under Rim light).
+  auto sec_shaders = [&] {
+    static const std::vector<std::string> kStyles = {"Off", "Realistic", "Toon", "Cel", "Matcap"};
+    // A list of look names (built-in ones shown capitalised, a mod's as its file name). A stored name the list lacks shows as missing until
+    // another is picked.
+    auto look_combo = [&](const char* id, std::string& value, const std::vector<std::string>& names, size_t builtin) {
+      std::vector<std::string> labels;
+      int selected = -1;
+      for (size_t i = 0; i < names.size(); ++i) {
+        std::string label = names[i];
+        if (i < builtin && !label.empty()) label[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(label[0])));
+        labels.push_back(std::move(label));
+        if (names[i] == value) selected = static_cast<int>(i);
+      }
+      const int missing = selected < 0 ? 1 : 0;
+      if (missing) labels.insert(labels.begin(), value + " (missing)");
+      int index = selected + missing;
+      if (!combo(id, index, labels) || index < missing) return false;
+      value = names[static_cast<size_t>(index - missing)];
+      return true;
+    };
+    auto checkbox_row = [&](const char* label, const char* id, const char* help, bool& value) {
+      row(label, help);
+      if (ImGui::Checkbox(id, &value)) change.other = true;
+    };
+    section("Full-screen shaders");
+    if (begin_rows("screenshaders")) {
+      row("Filter", "A final pass over the whole picture, before the settings window and notifications. CRT: scanlines, a phosphor mask and "
+                    "a soft vignette. Composite video: colour bleeding and dot crawl, like a PS1 on a TV's video input.");
+      static const std::vector<std::string> kFilters = {"Off", "CRT", "Composite video"};
+      int filter_index = static_cast<int>(cfg.fullscreen_shader);
+      if (combo("##screenshader", filter_index, kFilters)) {
+        cfg.fullscreen_shader = static_cast<platform::FullscreenShader>(filter_index);
+        change.other = true;
+      }
+      if (cfg.fullscreen_shader == platform::FullscreenShader::Crt) {
+        row("CRT mask", "The CRT's phosphor layout. Classic: a faint colour triad. Aperture grille: strong vertical colour stripes (Trinitron). "
+                        "Shadow mask: colour dots in staggered rows.");
+        static const std::vector<std::string> kMasks = {"Classic", "Aperture grille", "Shadow mask"};
+        int mask = static_cast<int>(cfg.crt_mask);
+        if (combo("##crtmask", mask, kMasks)) {
+          cfg.crt_mask = static_cast<platform::CrtMask>(mask);
+          change.other = true;
+        }
+        checkbox_row("CRT curvature", "##crtcurve", "Bends the picture like the curved glass of a tube, with black corners.", cfg.crt_curvature);
+        checkbox_row("CRT glow", "##crtglow", "Bright parts glow softly into the dark scanline gaps.", cfg.crt_glow);
+      }
+      row("Colour grade", "A colour look over the whole picture. Film: gentle contrast, warm highlights and cool shadows. Warm / Cold: a "
+                          "white-balance shift. Faded: lifted blacks and softer colours. A mod can add its own as a LUT image "
+                          "(shaders/luts/<name>.png: N x N squares side by side, e.g. 256 x 16).");
+      if (look_combo("##grade", cfg.grade, grade_names_, std::size(platform::kBuiltinGrades))) change.other = true;
+      end_rows();
+    }
+    section("Character shaders");
+    if (begin_rows("charshaders")) {
+      row("Style", "How the characters are shaded in the field, in battle and on the status screen. Off: the PS1's flat colours. Realistic: "
+                   "soft shading from a light above and in front of the camera, with a glossy highlight. Toon: two flat tones, lit and shaded, "
+                   "with a crisp step between them. Cel: four soft tone bands. Matcap: the shading "
+                   "of a painted sphere. Parts without surface normals keep their PS1 colours. Replaces the key light of Enhanced lighting on "
+                   "the characters; the spell lights still apply.");
+      int style = static_cast<int>(cfg.character_shader);
+      if (combo("##charstyle", style, kStyles)) {
+        cfg.character_shader = static_cast<platform::CharacterShader>(style);
+        change.other = true;
+      }
+      if (cfg.character_shader == platform::CharacterShader::Matcap) {
+        row("Matcap", "The look of the Matcap style: Clay, Metal or Ink, or a mod's own (shaders/matcaps/<name>.png in a mod folder: a sphere "
+                      "seen from the front, lit as the characters should be).");
+        if (look_combo("##matcap", cfg.matcap, matcap_names_, std::size(platform::kBuiltinMatcaps))) change.other = true;
+      }
+      checkbox_row("Outlines", "##outlines", "A thin dark outline around the characters, in a darkened shade of their own colours.", cfg.outlines);
+      checkbox_row("Rim light", "##rim", "A soft light along the characters' edges, so they stand out from the background. Works with every style.",
+                   cfg.rim);
+      if (cfg.rim)
+        checkbox_row("Spell-coloured rim", "##spellrim", "In battle, while a spell plays, the rim takes the colour of its light (fire orange, ice "
+                                                         "blue ...).",
+                     cfg.spell_rim);
+      checkbox_row("Cast glow", "##castglow", "In battle, a character casting an element glows in the element's colour while the cast runs.",
+                   cfg.cast_glow);
+      end_rows();
     }
   };
   // Optional improvements over the PS1 look, independent of the art mode.
@@ -767,10 +847,10 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       ImGui::EndTable();
     }
   };
-  // Left: the window and how the picture is framed; right: how it is drawn (texture filtering, retro look, enhancements).
+  // Left: the window and how the picture is framed; right: how it is drawn (texture filtering, retro look, shaders, enhancements).
   two_columns(
       scale, [&] { sec_display(); sec_wide(); sec_art(); },
-      [&] { sec_filters(); sec_retro(); sec_enh(); });
+      [&] { sec_filters(); sec_retro(); sec_shaders(); sec_enh(); });
   return change;
 }
 

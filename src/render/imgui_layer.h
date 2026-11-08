@@ -76,6 +76,11 @@ class ImGuiLayer {
   void add_tab(std::string name, std::function<void()> draw, int order = 50, std::function<bool()> highlight = {});
   // Inside a registered tab's draw: the config changed and must be saved (reported as OptionsChange::other).
   void mark_changed() { tab_changed_ = true; }
+  // [Shaders] the matcap and colour-grade names the settings window offers: the built-in ones, then the enabled mods' own.
+  void set_shader_looks(std::vector<std::string> matcaps, std::vector<std::string> grades) {
+    matcap_names_ = std::move(matcaps);
+    grade_names_ = std::move(grades);
+  }
 
   // Opens the overlay; a non-empty `tab` selects that tab (F8 opens "Debug").
   void open(std::string_view tab = {});
@@ -115,6 +120,7 @@ class ImGuiLayer {
   // The GPU driver in use, and the [Video] Driver value when the Graphics tab was first drawn (a different one now needs a restart).
   std::string active_driver_;
   std::optional<std::string> startup_driver_;
+  std::vector<std::string> matcap_names_, grade_names_;
   struct Toast {
     std::string text;
     double born = 0.0;
