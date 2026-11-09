@@ -253,7 +253,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     if (b1.set) dl.image(b1.set, 0, 256 * ps1_scale, kCanvasW, 192 * ps1_scale);
   }
   // Face avatar: hd/face/<2021 | 1999>/NN_name.png by art mode; cdrom/face/<name>.tim only when the PNG is missing.
-  // Classic art + [Video] Ps1ResMenus: the list at 640 x 448 with the PS1 disc art where the PS1 has it: faces
+  // Classic art + [Video] Ps1ResUi: the list at 640 x 448 with the PS1 disc art where the PS1 has it: faces
   // cdrom/face/<stem>.tim, box icons menutim.prd p0ic..pfic.
   const bool ps1_art = classic && ps1_menus();
   kit.request_lowres(dl, kMenuWide);
@@ -280,7 +280,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     char path[80];
     std::snprintf(path, sizeof path, "hd/menu/shapes/menu-main-%03d%s.png", shape,
                   std::array<const char*, 6>{"_en", "_fr", "_it", "_de", "_es", "_jp"}[static_cast<size_t>(li)]);
-    // Classic + Ps1Res uses the disc's "wind" pieces instead.
+    // Classic + Ps1ResUi uses the disc's "wind" pieces instead.
     NamePic shape_pic = ps1_art ? NamePic{} : kit.vfs().exists(path) ? pic(path) : NamePic{};
     if (!shape_pic.set && !ps1_art) {
       std::snprintf(path, sizeof path, "hd/menu/shapes/menu-main-%03d.png", shape);

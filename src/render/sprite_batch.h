@@ -3,6 +3,7 @@
 // (y grows downwards); begin() takes the size of that space. Consecutive quads with the same texture share a draw.
 #include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "render/buffer.h"
 #include "render/pipeline.h"
@@ -29,6 +30,23 @@ enum class BlendMode { Alpha, Multiply, Add, Subtract, Average, Premultiplied, A
 
 // Linear = bilinear whatever the texture's sampler is (four point taps, for the per-category texture filter options).
 enum class SpriteFilter { Sampler = 0, Point = 1, Box = 2, Linear = 3 };
+
+// The Subtract and Multiply quads drawn while a layer capture is set (SpriteBatch::set_layer_capture), in draw order: what an off-screen
+// UI target cannot hold (it would turn them into opaque black) and the host applies to the picture underneath instead.
+struct SpriteLayerCapture {
+  struct Run {
+    BlendMode mode;
+    TexRef texture;
+    SpriteFilter filter;
+    // The virtual space size the quads were drawn in.
+    float view_width, view_height;
+    u32 first_vertex, quad_count;
+  };
+  std::vector<SpriteVertex> vertices;
+  std::vector<Run> runs;
+  void clear() { vertices.clear(), runs.clear(); }
+  bool has(BlendMode mode) const;
+};
 
 // Index buffer of `quad_count` quads of four vertices each, two triangles (0, 1, 2) (2, 1, 3) per quad, 16-bit indices.
 bool create_quad_index_buffer(GpuContext& ctx, Buffer& buffer, u32 quad_count);
@@ -69,6 +87,11 @@ class SpriteBatch {
   // Box = the average of 4 x 4 point taps over the pixel's footprint (an area filter; the pixel-font glyphs in such a target).
   void set_filter(SpriteFilter filter);
   SpriteFilter filter() const { return filter_; }
+  // Drawing into a transparent off-screen target: while `capture` is set, Add / Subtract / Multiply change the target's colour only (its
+  // alpha, the coverage the composite uses, is kept) and the Subtract / Multiply quads are also recorded into `capture`. Null ends it.
+  void set_layer_capture(SpriteLayerCapture* capture);
+  // Draws the recorded quads of `mode` again with the blend `as` (in their own virtual space and filter; the current ones are restored).
+  void replay(const SpriteLayerCapture& capture, BlendMode mode, BlendMode as);
   // Debug (env OC_LOWRES_LOG=1): while a tag is set, the first draw of every texture logs "<tag>: texture W x H" once per tag.
   void set_log_tag(const char* tag);
   void end();
@@ -87,6 +110,9 @@ class SpriteBatch {
   Pipeline pipeline_depth_;
   Pipeline pipeline_mul_, pipeline_add_, pipeline_sub_, pipeline_mul_depth_, pipeline_add_depth_, pipeline_sub_depth_, pipeline_avg_depth_;
   Pipeline pipeline_pre_, pipeline_add_alpha_;
+  // The layer-capture variants of Add / Subtract / Multiply (destination alpha kept).
+  Pipeline pipeline_add_keep_, pipeline_sub_keep_, pipeline_mul_keep_;
+  SpriteLayerCapture* capture_ = nullptr;
   BlendMode mode_ = BlendMode::Alpha;
   SpriteFilter filter_ = SpriteFilter::Sampler;
   void push_filter();

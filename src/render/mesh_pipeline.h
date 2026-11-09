@@ -59,7 +59,8 @@ struct SkinnedVertex {
   // PS1 lit path: the VDDM normal of corner 0 as n / 128 (the skinner uses n << 5 in 4.12 = the same value) and,
   // in w, the index of the joint whose matrix rotates it (the vertex's own joint, or J2 = joint[1] for a 16-byte vertex). Zero for rigid meshes.
   float normal[4] = {0, 0, 0, 0};
-  // The corner's packet colour / 128 (assets::MeshVertex::rgb; 1 = neutral), w unused.
+  // The corner's packet colour / 128 (assets::MeshVertex::rgb; 1 = neutral); w = 1: the face has a twin on the same points (a two-sided sheet,
+  // MeshPipeline::create_model).
   float rgb[4] = {1, 1, 1, 0};
   // Rigid meshes ([Enhancements] Lighting's per-pixel weapon glint): this corner's smoothed model-space normal = the area-weighted face normals
   // at its position whose faces lie within kHardEdgeDegrees of this face (sharp rims stay sharp); w = 1 when present.
@@ -271,6 +272,11 @@ class MeshPipeline {
   // [Enhancements] SmoothWaterLine: in field ordering-table mode a face straddling the water level is split per fragment at the exact
   // plane (default off = the PS1's whole-face test).
   void set_smooth_water_line(bool on) { smooth_water_line_ = on; }
+  // [Enhancements] ModelPixelDepth: in ordering-table mode every fragment takes its own camera z in the slot depth space instead of its face's
+  // slot, so the faces of a model that cut into each other meet per pixel (no whole-face flips as the animation moves them). The nearest-corner
+  // constructs (hair, capes) are pulled one slot toward the camera, never past their face slot, so they stay over the body they cut into but not
+  // over parts well in front of them. Off = the PS1's per-face order.
+  void set_model_pixel_depth(bool on) { model_pixel_depth_ = on; }
   // [Enhancements] EnhancedLighting: a soft key-light shading from the vertex normals, added to the PS1 colour multiplier (field and battle models).
   // Default off = the PS1 look.
   void set_enhanced_lighting(bool on) { enhanced_ = on; }
@@ -302,6 +308,7 @@ class MeshPipeline {
   };
   std::vector<Matcap> matcaps_;
   bool smooth_water_line_ = false;
+  bool model_pixel_depth_ = false;
   bool enhanced_ = false;
   bool smooth_reflections_ = false;
   // 1 PS1 back-face test, 0 off, -1 inverted (debug: env OC_MESH_CULL=0 / -1).

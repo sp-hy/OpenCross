@@ -82,6 +82,12 @@ bool SpriteBatch::init(GpuContext& ctx) {
   if (!pipeline_pre_.create(ctx, pd)) return false;
   pd.blend = Blend::AdditiveAlpha;
   if (!pipeline_add_alpha_.create(ctx, pd)) return false;
+  pd.blend = Blend::AdditiveKeepAlpha;
+  if (!pipeline_add_keep_.create(ctx, pd)) return false;
+  pd.blend = Blend::SubtractKeepAlpha;
+  if (!pipeline_sub_keep_.create(ctx, pd)) return false;
+  pd.blend = Blend::MultiplyKeepAlpha;
+  if (!pipeline_mul_keep_.create(ctx, pd)) return false;
 
   if (!create_quad_index_buffer(ctx, index_buffer_, kMaxQuads)) return false;
   return vertices_.create(ctx, sizeof(SpriteVertex) * 4 * kMaxQuads, SDL_GPU_BUFFERUSAGE_VERTEX);
@@ -101,6 +107,10 @@ void SpriteBatch::destroy() {
   pipeline_avg_depth_.destroy();
   pipeline_pre_.destroy();
   pipeline_add_alpha_.destroy();
+  pipeline_add_keep_.destroy();
+  pipeline_sub_keep_.destroy();
+  pipeline_mul_keep_.destroy();
+  capture_ = nullptr;
   if (ctx_) {
     if (vs_) SDL_ReleaseGPUShader(ctx_->device(), vs_);
     if (fs_) SDL_ReleaseGPUShader(ctx_->device(), fs_);
@@ -138,8 +148,21 @@ void SpriteBatch::set_view(float view_width, float view_height) {
   if (vertex_data_) SDL_PushGPUVertexUniformData(ctx_->cmd(), 0, view_transform_, sizeof view_transform_);
 }
 
+bool SpriteLayerCapture::has(BlendMode mode) const {
+  for (const Run& run : runs)
+    if (run.mode == mode) return true;
+  return false;
+}
+
 void SpriteBatch::flush() {
   if (quad_count_ == flushed_quads_ || !current_) return;
+  if (capture_ && !depth_mode_ && (mode_ == BlendMode::Subtract || mode_ == BlendMode::Multiply)) {
+    const u32 count = quad_count_ - flushed_quads_;
+    capture_->runs.push_back({mode_, current_, filter_, 2.0f / view_transform_[0], 2.0f / view_transform_[1],
+                              static_cast<u32>(capture_->vertices.size()), count});
+    const SpriteVertex* first = vertex_data_ + static_cast<size_t>(flushed_quads_) * 4;
+    capture_->vertices.insert(capture_->vertices.end(), first, first + static_cast<size_t>(count) * 4);
+  }
   vertices_.mark_used(quad_count_ * 4 * sizeof(SpriteVertex));
   const SDL_GPUTextureSamplerBinding binding{current_.texture, current_.sampler};
   SDL_BindGPUFragmentSamplers(ctx_->pass(), 0, &binding, 1);
@@ -208,9 +231,10 @@ void SpriteBatch::end() {
 }
 
 void SpriteBatch::bind_pipeline() {
-  const Pipeline& pipeline = mode_ == BlendMode::Multiply   ? (depth_mode_ ? pipeline_mul_depth_ : pipeline_mul_)
-                             : mode_ == BlendMode::Add      ? (depth_mode_ ? pipeline_add_depth_ : pipeline_add_)
-                             : mode_ == BlendMode::Subtract ? (depth_mode_ ? pipeline_sub_depth_ : pipeline_sub_)
+  const bool keep = capture_ && !depth_mode_;
+  const Pipeline& pipeline = mode_ == BlendMode::Multiply   ? (depth_mode_ ? pipeline_mul_depth_ : keep ? pipeline_mul_keep_ : pipeline_mul_)
+                             : mode_ == BlendMode::Add      ? (depth_mode_ ? pipeline_add_depth_ : keep ? pipeline_add_keep_ : pipeline_add_)
+                             : mode_ == BlendMode::Subtract ? (depth_mode_ ? pipeline_sub_depth_ : keep ? pipeline_sub_keep_ : pipeline_sub_)
                              : mode_ == BlendMode::Average  ? (depth_mode_ ? pipeline_avg_depth_ : pipeline_)
                              : mode_ == BlendMode::Premultiplied ? pipeline_pre_
                              : mode_ == BlendMode::AddAlpha ? pipeline_add_alpha_
@@ -242,6 +266,37 @@ void SpriteBatch::set_blend(BlendMode mode) {
   flush();
   mode_ = mode;
   bind_pipeline();
+}
+
+void SpriteBatch::set_layer_capture(SpriteLayerCapture* capture) {
+  if (capture == capture_) return;
+  if (vertex_data_) flush();
+  capture_ = capture;
+  if (vertex_data_) bind_pipeline();
+}
+
+void SpriteBatch::replay(const SpriteLayerCapture& capture, BlendMode mode, BlendMode as) {
+  const SpriteFilter old_filter = filter_;
+  const BlendMode old_mode = mode_;
+  const float old_width = 2.0f / view_transform_[0], old_height = 2.0f / view_transform_[1];
+  set_blend(as);
+  for (const SpriteLayerCapture::Run& run : capture.runs) {
+    if (run.mode != mode) continue;
+    set_view(run.view_width, run.view_height);
+    set_filter(run.filter);
+    for (u32 quad_index = 0; quad_index < run.quad_count; ++quad_index) {
+      const SpriteVertex* corners = &capture.vertices[run.first_vertex + static_cast<size_t>(quad_index) * 4];
+      float xy[8], uv[8];
+      for (size_t i = 0; i < 4; ++i) {
+        xy[i * 2] = corners[i].x, xy[i * 2 + 1] = corners[i].y;
+        uv[i * 2] = corners[i].u, uv[i * 2 + 1] = corners[i].v;
+      }
+      draw_quad(run.texture, xy, uv, corners[0].color);
+    }
+  }
+  set_view(old_width, old_height);
+  set_filter(old_filter);
+  set_blend(old_mode);
 }
 
 }  // namespace oc::render

@@ -52,7 +52,7 @@ class DrawList {
   void text(render::FaceId face, std::u32string str, float x, float y, const font::Ink& ink, float scale, int align = 0);
   float measure(render::FaceId face, std::u32string_view str, float scale) const { return text_->measure(face, str, scale); }
   void clear() { ops_.clear(); }
-  // [Video] Ps1Res, any art mode: the next flush() replays the list into `lowres`'s target of the PS1 display `display` and
+  // [Video] Ps1ResUi, any art mode: the next flush() replays the list into `lowres`'s target of the PS1 display `display` and
   // scales it up into the canvas rectangle (one request per flush; screens set it while they record).
   void set_lowres(LowRes* lowres, const Ps1Display* display) { lowres_ = lowres, display_ = display; }
   void flush(render::SpriteBatch& sprites, const render::Frame& frame, const Canvas& canvas, bool resume);
@@ -84,7 +84,7 @@ class UiKit {
 
   render::TextBatch& text() { return text_; }
   render::TexRef white() const { return white_set_; }
-  // PS1-resolution pass of the title / name entry / Continue screens ([Video] Ps1Res, any art mode).
+  // PS1-resolution pass of the title / name entry / Continue screens ([Video] Ps1ResUi, any art mode).
   LowRes& lowres() { return lowres_; }
   // The screen's DrawList request for that pass: on when the switch is on (any art mode; the PS1 textures are the screen's own classic-only choice).
   void request_lowres(DrawList& dl, const Ps1Display& display);

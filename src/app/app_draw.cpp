@@ -1,5 +1,5 @@
 // The frame composition. The 3D pictures (title sea, field, battle) go into the window or the [Video] RenderScale scene target;
-// classic art + [Video] Ps1Res draws them into a 320 (+ widescreen columns) x 224 target scaled up nearest; the 8F screen ripple
+// classic art + [Video] Ps1ResGraphics draws them into a 320 (+ widescreen columns) x 224 target scaled up nearest; the 8F screen ripple
 // re-draws the deep part warped; then the HUD, dialogue windows, menus, pillarboxing, the screen veils, the full-screen shader pass and the pause
 // screen at window resolution.
 #include "app/app.h"
@@ -18,7 +18,7 @@ namespace oc::app {
 
 namespace {
 
-// [Video] Ps1Res: the PS1 buffer size exactly - the render scale does not apply to the PS1-resolution pictures.
+// [Video] Ps1ResGraphics: the PS1 buffer size exactly - the render scale does not apply to the PS1-resolution pictures.
 void native_extent(float w, float h, u32& tw, u32& th) {
   tw = static_cast<u32>(std::max(1.0f, std::round(w)));
   th = static_cast<u32>(std::max(1.0f, std::round(h)));
@@ -143,7 +143,7 @@ void App::draw_frame(const render::Frame& frame) {
     feature_icons.draw(frame, vw, vh, active, icon_lang);
   }
   // The pause screen's bars + text go over the filtered picture.
-  if (pause_on && !(config.ps1_res && ps1_pass_43(frame, vw, vh, &menu_text, [&](const render::Frame& lf) { pause_screen.draw(lf, 1280.0f, 960.0f, true); })))
+  if (pause_on && !(config.ps1_res_ui && ps1_pass_43(frame, vw, vh, &menu_text, [&](const render::Frame& lf) { pause_screen.draw(lf, 1280.0f, 960.0f, true); })))
     pause_screen.draw(frame, vw, vh, true);
 }
 
@@ -167,19 +167,20 @@ render::ScreenSettings App::screen_look() const {
 
 // The [Video] / [Enhancements] settings and the game options the drawers read, applied every frame.
 void App::apply_frame_options() {
-  // [Video] Ps1Res (Esc options; the UI screens read it in original art).
-  ui::set_ps1_menus(config.ps1_res);
+  // [Video] Ps1ResUi (Esc options): the UI screens' PS1-resolution pass.
+  ui::set_ps1_menus(config.ps1_res_ui);
   // [Video] Filter: the field actors' texture sampling, one global setting (Graphics tab).
   if (world_ok) world.view().linear_filter = config.filter == platform::TexFilter::Bilinear;
   if (results_ok) results.set_filter(config.filter == platform::TexFilter::Bilinear);
   // The filter covers the stage, units and weapons of the battle.
   if (battle_ready) battle.set_texture_filter(config.filter == platform::TexFilter::Bilinear);
-  // The [Enhancements] are independent of Ps1Res: SmoothEffectRings, SmoothWaterLine, SmoothReflections (env-mapped parts), Lighting
+  // The [Enhancements] are independent of the Ps1Res settings: SmoothEffectRings, SmoothWaterLine, ModelPixelDepth, SmoothReflections (env-mapped parts), Lighting
   // (the key light for field + battle models, and the spell glow), EdgeBlend (the stage pipelines draw the modded tiles' seam strips),
   // FullPrecisionEffects (every particle batch).
   {
     const bool rings = config.smooth_effect_rings;
     meshes.set_smooth_water_line(config.smooth_water_line);
+    meshes.set_model_pixel_depth(config.model_pixel_depth);
     meshes.set_smooth_reflections(config.smooth_reflections);
     meshes.set_enhanced_lighting(config.lighting);
     render::set_edge_blend(config.edge_blend);
@@ -219,13 +220,13 @@ void App::draw_scene(SceneFrame& sf) {
   // The title room's 3D sea scene is the backdrop: drawn first, the room layers (PS1 logo / glow, white fade) blend over it.
   // Widescreen: the sea fills the widened frame like the battle 3D (same H and centre (160, 112), more columns; no clamp).
   sf.title_sea = field_shown && title_bd.running() && world.room_name() == game::kTitleRoom;
-  sf.title_lowres = sf.title_sea && config.ps1_res;
-  // [Video] Ps1Res (any art mode): the whole field picture (layers, shadows, models, effects: one depth space) is drawn into the
+  sf.title_lowres = sf.title_sea && config.ps1_res_graphics;
+  // [Video] Ps1ResGraphics (any art mode): the whole field picture (layers, shadows, models, effects: one depth space) is drawn into the
   // 320x224 target, then scaled up into the field frame. Not under the title's 3D sea (the layers blend over that backdrop).
-  sf.field_lowres = field_shown && !sf.title_sea && field_rt_set && config.ps1_res;
+  sf.field_lowres = field_shown && !sf.title_sea && field_rt_set && config.ps1_res_graphics;
   sf.results_up = battle_shown && results_ok && results.active();
   sf.battle_3d = battle_shown && !sf.results_up && battle.scene_visible();
-  sf.battle_lowres = sf.battle_3d && field_rt_set && config.ps1_res;
+  sf.battle_lowres = sf.battle_3d && field_rt_set && config.ps1_res_graphics;
   {  // [Video] Ps1Jitter: GTE vertex snapping + affine textures in the 3D pipelines; the grid = the PS1 pixels of the picture being drawn
     render::Ps1Jitter& jit = render::g_ps1_jitter;
     jit.on = config.ps1_jitter && (field_shown || sf.battle_3d || sf.title_sea);
@@ -286,7 +287,7 @@ void App::draw_scene(SceneFrame& sf) {
 // so they go in too), the battle 3D - are drawn into `scene_rt` at the scale x the window size with the same mapping (every drawer
 // takes its letterbox from the frame size it is given), then composited into the frame: area-filtered down (SpriteFilter::Box) above
 // 1x, bilinear up below. The HUD, menus, dialogue and veils follow at window resolution. The PS1-resolution passes (classic art +
-// Ps1Res) scale their own 320 x 224 target instead. The damage-floor blur routes the picture through a target in any case, so the
+// Ps1ResGraphics) scale their own 320 x 224 target instead. The damage-floor blur routes the picture through a target in any case, so the
 // previous picture can be pasted over it.
 void App::begin_scene_target(SceneFrame& sf) {
   const render::Frame& frame = sf.frame;
@@ -297,7 +298,7 @@ void App::begin_scene_target(SceneFrame& sf) {
   sf.pf = frame;
   sf.pw = vw;
   sf.ph = vh;
-  // The jolt / encounter feed-back passes work on the finished picture: with Ps1Res the PS1-resolution field is scaled up into the target.
+  // The jolt / encounter feed-back passes work on the finished picture: with Ps1ResGraphics the PS1-resolution field is scaled up into the target.
   const game::FieldWorld::JoltView jolt = sf.field_shown && !sf.title_sea ? world.jolt_view() : game::FieldWorld::JoltView{};
   sf.jolt = jolt;
   // Made ahead once per window size (a failed creation is not retried every frame; the passes try again when they run).
@@ -355,11 +356,11 @@ void App::draw_battle_picture(const SceneFrame& sf) {
   const render::Frame& frame = sf.frame;
   const float vw = sf.vw, vh = sf.vh;
   if (sf.results_up) {
-    if (!(config.ps1_res && ps1_pass_wide(frame, vw, vh, results.text_batch(),
+    if (!(config.ps1_res_ui && ps1_pass_wide(frame, vw, vh, results.text_batch(),
                                           [&](const render::Frame& lf, float, float, const render::Letterbox& lb) { results.draw(lf, lb.vw, lb.vh, true); })))
       results.draw(frame, vw, vh, true);
   } else if (sf.battle_lowres) {
-    // Original art + [Video] Ps1Res: the battle 3D (stage, shadows, units, effects) into the 320 x 224 battle buffer size
+    // Original art + [Video] Ps1ResGraphics: the battle 3D (stage, shadows, units, effects) into the 320 x 224 battle buffer size
     // (the same size as the field's, so the field target is reused) x the render scale, scaled into the picture frame;
     // the HUD, menus and text are drawn afterwards at window resolution.
     // Widescreen: the target is 320 + 2 * wide_extra() columns wide (16:9: 426), the extra columns centred around the 320.
@@ -381,7 +382,7 @@ void App::draw_battle_picture(const SceneFrame& sf) {
   }
 }
 
-// [Video] Ps1Res: the title's 3D sea into the (320 + 2 * screen_extra()) x 240 target, scaled up nearest into the widened frame (the
+// [Video] Ps1ResGraphics: the title's 3D sea into the (320 + 2 * screen_extra()) x 240 target, scaled up nearest into the widened frame (the
 // room layers over it stay at window resolution).
 void App::draw_title_lowres(const SceneFrame& sf) {
   const bool linear_tex = config.filter == platform::TexFilter::Bilinear;
@@ -406,7 +407,7 @@ void App::draw_title_lowres(const SceneFrame& sf) {
   sprites.end();
 }
 
-// Classic art + Ps1Res: the field picture into the 320 (+ 2 * wide_extra()) x 224 target (16:9: 426 x 224), layer columns 0..320
+// Classic art + Ps1ResGraphics: the field picture into the 320 (+ 2 * wide_extra()) x 224 target (16:9: 426 x 224), layer columns 0..320
 // centred (Letterbox::identity); x the render scale (2x: 640 x 448 / 852 x 448).
 void App::draw_field_lowres(const SceneFrame& sf) {
   const render::Frame& frame = sf.frame;
@@ -477,9 +478,9 @@ void App::draw_field_full(const SceneFrame& sf) {
   }
 }
 
-// [Video] Ps1Res: the HUD, menus, digits and text in the 320 (+ 2e) x 240 PS1 picture (any art mode), else at window resolution.
+// [Video] Ps1ResUi: the HUD, menus, digits and text in the 320 (+ 2e) x 240 PS1 picture (any art mode), else at window resolution.
 void App::draw_battle_ui(const SceneFrame& sf) {
-  if (!(config.ps1_res && ps1_pass_wide(sf.frame, sf.vw, sf.vh, battle.text_batch(),
+  if (!(config.ps1_res_ui && ps1_pass_wide(sf.frame, sf.vw, sf.vh, battle.text_batch(),
                                         [&](const render::Frame& lf, float, float, const render::Letterbox& lb) { battle.draw_ui(lf, true, &lb); })))
     battle.draw_ui(sf.frame, true);
 }
@@ -499,8 +500,8 @@ void App::draw_field_ui(const SceneFrame& sf) {
   }
   if (world.overlay_needed()) {
     sprites.begin(frame, vw, vh, true);
-    // With Ps1Res the status icons and dialogue windows go into the PS1-resolution target below.
-    const bool ps1_windows = config.ps1_res;
+    // With Ps1ResUi the status icons and dialogue windows go into the PS1-resolution target below.
+    const bool ps1_windows = config.ps1_res_ui;
     world.draw_overlay(sprites, vw, vh, !ps1_windows);
     sprites.end();
     if (ps1_windows &&
@@ -609,7 +610,7 @@ void App::draw_warp(const SceneFrame& sf, render::TexRef set, const render::Lett
   }
 }
 
-// A PS1-resolution target (classic art + Ps1Res, field or battle) shown in the picture frame `lb` of the scene frame (sf.pf): nearest up (the 1/64-texel bias
+// A PS1-resolution target (classic art + Ps1ResGraphics, field or battle) shown in the picture frame `lb` of the scene frame (sf.pf): nearest up (the 1/64-texel bias
 // keeps pixel centres off exact texel boundaries: 944 / 224 = 59 / 14 puts some rows on a tie, which the quad's two triangles resolved
 // differently: one-pixel seams); area-filtered when the render scale makes the target denser than the window. Over the black clear:
 // additive = a plain copy that ignores the target's alpha channel.

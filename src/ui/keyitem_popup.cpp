@@ -75,7 +75,7 @@ struct KeyItemPopup::Impl {
   render::TexRef white_set = {};
   // Fonts of the current art mode: gn_70 for the list rows, kt_70 for Japanese rows.
   font::FontSet fonts;
-  // Classic art + [Video] Ps1ResMenus.
+  // Classic art + [Video] Ps1ResUi.
   LowRes lowres;
   render::FaceId face() { return fonts.face(font::kGn); }
   render::FaceId row_face() {
@@ -351,7 +351,7 @@ void KeyItemPopup::update(float dt) {
 void KeyItemPopup::draw(const render::Frame& frame, float vw, float vh, bool resume) {
   Impl& impl = *impl_;
   if (!impl.open || !impl.ctx) return;
-  // Classic art with [Video] Ps1ResMenus (any art mode): the list is the field's window 4, drawn into the field buffer
+  // Classic art with [Video] Ps1ResUi (any art mode): the list is the field's window 4, drawn into the field buffer
   // (320 x 224, 216 rows shown; field windows map as y * 960 / 216): a 320 x 216 target over the field picture.
   render::Frame lf;
   if (ps1_menus()) {

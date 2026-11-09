@@ -696,13 +696,17 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "without perspective correction, so they swim on large polygons.",
                      cfg.ps1_jitter))
         change.other = true;
-      if (check_cell("PS1 resolution",
-                     "Everything is drawn at the PS1's resolution and scaled up with sharp pixels, in every art mode: the field and battle 3D "
-                     "at 320 x 224 (times the render scale); the menus, shops, title menu, name entry, Continue and party screens at their PS1 "
-                     "display size; the battle HUD, battle menus, results, pause screen and the dialogue windows in the 320 x 224 picture. "
-                     "Original art uses the PS1's own disc textures, HD / modded art point-sample RDE's art (small text gets rough). Off: the "
-                     "window's resolution.",
-                     cfg.ps1_res))
+      if (check_cell("PS1 resolution graphics",
+                     "The field picture, the battle 3D and the title's sea (backgrounds, models, effects) are drawn at the PS1's 320 x 224 "
+                     "(times the render scale) and scaled up with sharp pixels, in every art mode. Off: the window's resolution.",
+                     cfg.ps1_res_graphics))
+        change.ps1_res = true;
+      if (check_cell("PS1 resolution UI",
+                     "The menus, shops, title menu, name entry, Continue and party screens are drawn at their PS1 display size, and the battle "
+                     "HUD, battle menus, results, pause screen and the dialogue windows in the 320 x 224 picture, scaled up with sharp pixels, "
+                     "in every art mode. Original art uses the PS1's own disc textures, HD / modded art point-sample RDE's art (small text gets "
+                     "rough). Off: the window's resolution.",
+                     cfg.ps1_res_ui))
         change.ps1_res = true;
       ImGui::EndTable();
     }
@@ -804,6 +808,12 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "Characters wading in water are tinted per triangle on the PS1, so the waterline is a staircase. This cuts the tint at "
                      "the exact water plane instead.",
                      cfg.smooth_water_line))
+        change.enhancements = true;
+      if (check_cell("Per-pixel model depth",
+                     "The PS1 paints each face of a character model whole, sorted by its average depth, so where an arm, a weapon or a "
+                     "sleeve cuts into the body, whole faces jump in front of each other as the animation moves. This sorts the models per "
+                     "pixel instead (hair and capes are pulled slightly toward the camera so they stay over the body). Off: the PS1's look.",
+                     cfg.model_pixel_depth))
         change.enhancements = true;
       if (check_cell("Smooth reflections",
                      "Mirror-like model parts (FATE, Lavos, Zoah's armour ...) take their reflection from the vertex normals in whole "

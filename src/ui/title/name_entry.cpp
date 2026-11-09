@@ -209,7 +209,7 @@ void NameEntry::draw(DrawList& dl, UiKit& kit) const {
     pics_[key] = loaded;
     return loaded;
   };
-  // Classic art + [Video] Ps1ResMenus: the screen at the PS1 display (512 x 448 buffer, the 432-row list space -> a 512 x 432
+  // Classic art + [Video] Ps1ResUi: the screen at the PS1 display (512 x 448 buffer, the 432-row list space -> a 512 x 432
   // target) with the disc tile and the disc portrait strip.
   const bool ps1_art = classic && ps1_menus();
   kit.request_lowres(dl, kNameMenu);
@@ -251,7 +251,7 @@ void NameEntry::draw(DrawList& dl, UiKit& kit) const {
     const NameEntry::Pic shape = pic(kit, path);
     const float cx = canvas_x(x), cy = canvas_y(y), cw = canvas_x(pw), ch = canvas_y(ph);
     // The panel interior is transparent (the parchment shows through the frame sprites). HD uses the frame sprite; classic +
-    // Ps1Res and a missing PNG use the disc's pieces.
+    // Ps1ResUi and a missing PNG use the disc's pieces.
     if (shape.set && !ps1_art) {
       dl.image(shape.set, cx, cy, cw, ch);
     } else {

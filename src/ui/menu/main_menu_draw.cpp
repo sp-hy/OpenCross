@@ -463,7 +463,7 @@ void MainMenu::Impl::notch_caption(float frame_x, float frame_y, int kind) {
 // ---- shared PS1 drawing pieces
 // Red triangle (x,y)-(x,y+12)-(x+23,y+6); `active` pulses (R = c, G = B = c - 0x80, c ping-pongs 0x90..0xF1).
 void MainMenu::Impl::tri(float x, float y, bool active) {
-  // HD art (and classic without Ps1ResMenus): the triangle is replaced by the sprite menutest_cur.png (23 x 11 PS1 px) at (x, y),
+  // HD art (and classic without Ps1ResUi): the triangle is replaced by the sprite menutest_cur.png (23 x 11 PS1 px) at (x, y),
   // colour = the triangle colour >> 1 & 0x7F7F7F (flat (0x80,0,0) -> (0x40,0,0); pulse as below).
   if (!ps1_screen() && cursor_tex && cursor_tex->set) {
     u32 sc = rgb(127, 0, 0);
@@ -490,7 +490,7 @@ void MainMenu::Impl::tri(float x, float y, bool active) {
 }
 
 // Scroll arrow (menutim_31.png), 9x5 PS1 px. menutim_31.png = 4x menutim.prd "roll" (24 x 10 texels, the "roll" sheet frames 5..8):
-// same UVs in classic + Ps1ResMenus.
+// same UVs in classic + Ps1ResUi.
 void MainMenu::Impl::scroll_arrow(float x, float y, bool up) {
   Tex* p1 = ps1_screen() ? texs.ps1("ps1:roll", [&] { return ps1::menutim(*vfs, "roll"); }) : nullptr;
   if (Tex* tex = p1 ? p1 : texs.load("hd/menu/menutim/menutim_31.png"))
@@ -519,7 +519,7 @@ void MainMenu::Impl::btn(float x, float y, int slot_index, u32 colour) {
 // i = pad_glyph_cell(button) (13 x 4 atlas: column i % 13, row (i / 13) * 2 + 1); keyboard mode swaps it for the key
 // cap of the action's first key (platform/keymap.h; ui/keyboard_<e f i g s j>.png, 16 x 7 cells, moved up 1; the pad glyph at
 // (0x10, 0x182 / 0x19A) is moved up 5). The buttons are 0 OK, 1 Cancel, 2 Square, 3 Triangle, 4 L1, 5 R1, 6 L2, 7 R2.
-// Classic art + Ps1ResMenus draws the disc's glyph, frame 0x7C + button of the menu sheet (the assignment page: 0x44..0x47 and 0x4A..0x4D; Start / Select 0x48 / 0x49). Glyphs go to `key_caps`, drawn last.
+// Classic art + Ps1ResUi draws the disc's glyph, frame 0x7C + button of the menu sheet (the assignment page: 0x44..0x47 and 0x4A..0x4D; Start / Select 0x48 / 0x49). Glyphs go to `key_caps`, drawn last.
 void MainMenu::Impl::glyph_button(float x, float y, int button, u32 colour, bool page_frames) {
   const size_t first = cmds.size();
   static const char* const atlas[6] = {"e", "f", "i", "g", "s", "j"};

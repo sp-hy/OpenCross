@@ -101,7 +101,7 @@ struct MainMenu::Impl {
   int fonts_mode = -1;
   TexCache texs;
   Tex* cursor_tex = nullptr;
-  // [Video] Ps1ResMenus: the screen drawn at the PS1 display size and scaled up.
+  // [Video] Ps1ResUi: the screen drawn at the PS1 display size and scaled up.
   LowRes lowres;
   bool ready = false;
   std::function<void(int)> sfx_fn;
@@ -538,7 +538,7 @@ struct MainMenu::Impl {
   bool pad_present = false;
 
   // ===================================================== draw
-  // [Video] Ps1Res (any art mode): the whole screen into a target of menutest's display size
+  // [Video] Ps1ResUi (any art mode): the whole screen into a target of menutest's display size
   // (512 x 448; Save / Load and Settings on the 640 x 448 mode), scaled up nearest.
   // lowres_on() = that pass; ps1_screen() = the PS1 disc textures, classic art only (HD keeps its own art, point-sampled).
   // Widescreen: the canvas grows by canvas_s = 4 * screen_extra() canvas units per side; the target grows with it

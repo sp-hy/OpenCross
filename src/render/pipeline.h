@@ -11,7 +11,9 @@ namespace oc::render {
 // target that was drawn with Alpha over a transparent clear: its colour is already multiplied by its coverage); Invert: out = src *
 // (1 - dst) (a white source turns the backdrop into its negative); AdditiveAlpha: dst = dst + src * src alpha (straight-alpha add),
 // destination alpha kept (a premultiplied composite of the target then adds it over the picture); Max / Min: dst = the larger / smaller of src and dst per channel, alpha too.
-enum class Blend { None, Alpha, Additive, Multiply, Subtract, Premultiplied, Invert, AdditiveAlpha, Max, Min };
+// AdditiveKeepAlpha / SubtractKeepAlpha / MultiplyKeepAlpha: the colour of Additive / Subtract / Multiply, destination alpha kept (drawn into
+// a transparent off-screen target, they change what the target adds without making it cover the picture).
+enum class Blend { None, Alpha, Additive, Multiply, Subtract, Premultiplied, Invert, AdditiveAlpha, Max, Min, AdditiveKeepAlpha, SubtractKeepAlpha, MultiplyKeepAlpha };
 
 struct VertexAttribute {
   u32 location = 0;

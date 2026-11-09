@@ -238,6 +238,9 @@ void main() {
       // Both halves evaluate the same two expressions with the same operand order: the quad is kept or dropped as a whole.
       if (role > 1.5) front = nclip(s3, s1, s0) > 0.0 || a >= 0.0;  // second half (v2,v1,v3): (v0,v1,v2) = (s3,s1,s0)
       else if (role > 0.5) front = a > 0.0 || nclip(s2, s1, s3) >= 0.0;  // first half (v0,v1,v2): (v2,v1,v3) = (s2,s1,s3)
+      // [Enhancements] ModelPixelDepth: a two-sided sheet's face is tested per triangle, so a quad bent by the animation never lets both sides
+      // through at the same place (the PS1 paints one over the other whole; per-pixel depth would let them cut through each other).
+      if (pc.slot.y > 0.5 && in_rgb.w > 0.5) front = a > 0.0;
       if (pc.color.w < 0.0) front = !front;  // debug: inverted test
       if (!front) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);  // all three corners: a degenerate point beyond the far plane
     }

@@ -139,6 +139,39 @@ std::vector<u8> builtin_matcap(int which) {
   return out;
 }
 
+// Two-sided sheets (a cape's outside and its lining): primitives whose corners are the same skinned points as another primitive's (same joints,
+// weights and joint-local positions, in any order) get SkinnedVertex::rgb[3] = 1 on all their corners. A primitive is a plain triangle or a
+// quad's two halves (quad 1 then 2).
+void mark_twin_faces(std::vector<SkinnedVertex>& flat) {
+  using CornerKey = std::array<int, 10>;
+  auto corner_key = [](const SkinnedVertex& vertex, size_t corner) {
+    CornerKey key{};
+    for (size_t influence = 0; influence < 2; ++influence) {
+      for (size_t axis = 0; axis < 3; ++axis) key[influence * 3 + axis] = static_cast<int>(std::lround(vertex.pos[corner][influence][axis] * 16.0f));
+      key[6 + influence] = vertex.joint[corner][influence];
+      key[8 + influence] = static_cast<int>(std::lround(vertex.weight[corner][influence] * 4096.0f));
+    }
+    return key;
+  };
+  std::map<std::vector<CornerKey>, std::vector<size_t>> faces;
+  const size_t tris = flat.size() / 3;
+  for (size_t tri = 0; tri < tris; ++tri) {
+    const SkinnedVertex& first = flat[tri * 3];
+    if (first.quad > 1.5f) continue;
+    std::vector<CornerKey> corners{corner_key(first, 0), corner_key(first, 1), corner_key(first, 2)};
+    if (first.quad > 0.5f) corners.push_back(corner_key(first, 3));
+    std::sort(corners.begin(), corners.end());
+    faces[corners].push_back(tri);
+  }
+  for (const auto& [corners, members] : faces) {
+    if (members.size() < 2) continue;
+    for (size_t tri : members) {
+      const size_t count = corners.size() == 4 ? 6 : 3;
+      for (size_t i = tri * 3; i < tri * 3 + count && i < flat.size(); ++i) flat[i].rgb[3] = 1.0f;
+    }
+  }
+}
+
 // Faces meeting at a corner at a larger angle than this keep their own normal there (a hard edge).
 constexpr float kHardEdgeDegrees = 60.0f;
 
@@ -509,6 +542,7 @@ std::unique_ptr<MeshModel> MeshPipeline::create_model(const assets::ModelAsset& 
       flat[i] = vertex;
     }
     smooth_rigid_normals(flat, rigid_vertex, idx);
+    mark_twin_faces(flat);
     verts.swap(flat);
     idx.resize(flat_count);
     for (size_t i = 0; i < flat_count; ++i) idx[i] = static_cast<u32>(i);
@@ -751,7 +785,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
                                        params.fog_near, params.fog_far, stp_filter, pass.white ? 1.0f : 0.0f,
                                        params.ot_faces ? (smooth_water_line_ ? 2.0f : 1.0f) : 0.0f, near_sort ? 1.0f : 0.0f, params.ot_bias, params.water_bias,
                                        pass.faces, pass.kind == Kind::DepthOnly ? 1.0f : 0.0f, 1.0f / kDepthRange, out_alpha,
-                                       static_cast<float>(slot), 0.0f, 0.0f, 0.0f,
+                                       static_cast<float>(slot), model_pixel_depth_ ? 1.0f : 0.0f, 0.0f, 0.0f,
                                        style, pass.kind == Kind::Outline ? 1.0f : 0.0f, kOutlinePx / grid_x, kOutlinePx / grid_y,
                                        shading.rim_rgb[0], shading.rim_rgb[1], shading.rim_rgb[2], rim ? 1.0f : 0.0f,
                                        shading.glow_rgb[0], shading.glow_rgb[1], shading.glow_rgb[2], glow};

@@ -8,7 +8,11 @@ namespace oc::render {
 
 namespace {
 
-SDL_GPUColorTargetBlendState blend_state(Blend blend) {
+SDL_GPUColorTargetBlendState blend_state(Blend requested) {
+  const Blend blend = requested == Blend::AdditiveKeepAlpha   ? Blend::Additive
+                      : requested == Blend::SubtractKeepAlpha ? Blend::Subtract
+                      : requested == Blend::MultiplyKeepAlpha ? Blend::Multiply
+                                                              : requested;
   SDL_GPUColorTargetBlendState state{};
   state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
   if (blend == Blend::None) return state;
@@ -42,6 +46,11 @@ SDL_GPUColorTargetBlendState blend_state(Blend blend) {
     state.src_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
     state.dst_color_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
     state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+  }
+  if (blend != requested) {
+    state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
   }
   return state;
 }

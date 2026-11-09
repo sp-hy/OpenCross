@@ -34,11 +34,11 @@ int main() {
   Config legacy_hd = load_text("[Video]\nFilterHD=nearest\nFilterSD=bilinear\nFilterModded=bilinear\nArtMode=hd\nPs1Res3D=1\n");
   CHECK(legacy_hd.filter == TexFilter::Nearest);
   // Ps1Res3D never acted outside classic art: an old non-classic ini means off.
-  CHECK(!legacy_hd.ps1_res);
-  // Old ini in classic art keeps Ps1Res3D (migrated into Ps1Res).
+  CHECK(!legacy_hd.ps1_res_graphics && !legacy_hd.ps1_res_ui);
+  // Old ini in classic art keeps Ps1Res3D (migrated through Ps1Res into both halves).
   Config legacy_classic = load_text("[Video]\nFilterHD=bilinear\nArtMode=original\nPs1Res3D=1\n");
   CHECK(legacy_classic.filter == TexFilter::Bilinear);
-  CHECK(legacy_classic.ps1_res);
+  CHECK(legacy_classic.ps1_res_graphics && legacy_classic.ps1_res_ui);
   // `classic` is an alias of `original`; unknown values read as hd.
   CHECK(load_text("[Video]\nArtMode=classic\n").art_mode == ArtMode::Original);
   CHECK(load_text("[Video]\nArtMode=original\n").art_mode == ArtMode::Original);
@@ -46,9 +46,14 @@ int main() {
   // New key wins and is written; old keys are dropped on save.
   Config new_key = load_text("[Video]\nFilter=nearest\nFilterHD=bilinear\nPs1Res3D=1\nArtMode=modded\n");
   CHECK(new_key.filter == TexFilter::Nearest);
-  CHECK(new_key.ps1_res);
-  // The new key wins.
-  CHECK(load_text("[Video]\nPs1Res=0\nPs1Res3D=1\n").ps1_res == false);
+  CHECK(new_key.ps1_res_graphics && new_key.ps1_res_ui);
+  // The newer key wins.
+  CHECK(!load_text("[Video]\nPs1Res=0\nPs1Res3D=1\n").ps1_res_graphics);
+  // Ps1Res is the default of both halves; each split key wins on its own.
+  const Config split = load_text("[Video]\nPs1Res=1\nPs1ResUi=0\n");
+  CHECK(split.ps1_res_graphics && !split.ps1_res_ui);
+  const Config ui_only = load_text("[Video]\nPs1ResGraphics=0\nPs1ResUi=1\n");
+  CHECK(!ui_only.ps1_res_graphics && ui_only.ps1_res_ui);
   const std::filesystem::path path = std::filesystem::temp_directory_path() / "oc_test_config_out.ini";
   CHECK(new_key.save(path));
   std::stringstream ss;
@@ -56,12 +61,15 @@ int main() {
   std::filesystem::remove(path);
   const std::string saved = ss.str();
   CHECK(saved.find("Filter=nearest") != std::string::npos);
+  CHECK(saved.find("Ps1ResGraphics=1") != std::string::npos && saved.find("Ps1ResUi=1") != std::string::npos && saved.find("Ps1Res=") == std::string::npos);
   CHECK(saved.find("FilterHD") == std::string::npos && saved.find("FilterSD") == std::string::npos && saved.find("FilterModded") == std::string::npos);
   Config defaults;
   CHECK(defaults.filter == TexFilter::Bilinear);
   CHECK(defaults.hd_battle_textures && !load_text("[Video]\nHdBattleTextures=0\n").hd_battle_textures);
   CHECK(defaults.smooth_water_line);
   CHECK(load_text("[Enhancements]\nSmoothWaterLine=1\n").smooth_water_line);
+  // ModelPixelDepth defaults on; 0 = the PS1's per-face order.
+  CHECK(defaults.model_pixel_depth && !load_text("[Enhancements]\nModelPixelDepth=0\n").model_pixel_depth);
   // EdgeBlend defaults off.
   CHECK(!load_text("").edge_blend && load_text("[Enhancements]\nEdgeBlend=1\n").edge_blend);
   // The old SeamBlend level key maps to EdgeBlend off / on / on.
@@ -69,7 +77,7 @@ int main() {
   CHECK(defaults.smooth_effect_rings && !defaults.lighting);
   // SmoothReflections defaults on; 0 = the PS1 texel steps.
   CHECK(defaults.smooth_reflections && !load_text("[Enhancements]\nSmoothReflections=0\n").smooth_reflections);
-  CHECK(defaults.filter_effects == TexFilter::Bilinear && defaults.wide_edge_fade == 4 && !defaults.ps1_res);
+  CHECK(defaults.filter_effects == TexFilter::Bilinear && defaults.wide_edge_fade == 4 && !defaults.ps1_res_graphics && !defaults.ps1_res_ui);
   // The retired Toasts key is ignored.
   CHECK(load_text("[Video]\nToasts=0\n").wide_edge_fade == 4);
   Config rings = load_text("[Enhancements]\nSmoothEffectRings=1\n");

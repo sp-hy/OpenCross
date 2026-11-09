@@ -461,7 +461,7 @@ void MainMenu::Impl::element_row_tint(int id, float x, float y) {
   if (Tex* tex = plate_tex(kTile[colour])) Img(tex, PX(x), PY(y), PX(184), PY(24), 0, 0, 1, 1, grey(0x70));
 }
 
-// menutim_14_<tile>_01.png (184 x 24), or in classic art + Ps1ResMenus the PS1 colour-sheet frame 1 composed from menutim.prd.
+// menutim_14_<tile>_01.png (184 x 24), or in classic art + Ps1ResUi the PS1 colour-sheet frame 1 composed from menutim.prd.
 Tex* MainMenu::Impl::plate_tex(int tile) {
   if (ps1_screen())
     if (Tex* ps1_tex = texs.ps1("ps1:plate" + std::to_string(tile), [&] { return ps1::plate(*vfs, tile, 1); })) return ps1_tex;

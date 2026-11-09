@@ -298,7 +298,7 @@ void MainMenu::Impl::build_keyitems() {
       // Picture: hd/menu/keyitem/NN.png in both art modes.
       char path[48];
       std::snprintf(path, sizeof path, "hd/menu/keyitem/%02d.png", id);
-      // Classic art + Ps1ResMenus: cdrom/menu/keyitem/<name>.tim (255 x 255 texels at (0xEA, 0x24)).
+      // Classic art + Ps1ResUi: cdrom/menu/keyitem/<name>.tim (255 x 255 texels at (0xEA, 0x24)).
       if (Tex* p1 = ps1_screen() ? texs.ps1("ps1:keyitem" + std::to_string(id), [&] { return ps1::keyitem(*vfs, id); }) : nullptr)
         Img(p1, PX(234), PY(36), PX(255), PY(255), 0, 0, ps1::kKeyItemUv, ps1::kKeyItemUv);
       else if (const Tex* tex = texs.load(path)) Img(tex, PX(234), PY(36), PX(255), PY(255));
