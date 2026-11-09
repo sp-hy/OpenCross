@@ -2,7 +2,7 @@
 
 # OpenCross
 
-OpenCross is a native PC engine for Chrono Cross, built in C++20 on SDL3 and its GPU API (Vulkan or Direct3D 12). Drop a single executable into your **Chrono Cross: The Radical Dreamers Edition** folder on Steam and it plays the game from your own files and saves.
+OpenCross is a native PC engine for Chrono Cross, built in C++20 on SDL3 and its GPU API (Vulkan or Direct3D 12). Drop it into your **Chrono Cross: The Radical Dreamers Edition** folder on Steam and it plays the game from your own files and saves, started from the game's own launcher or on its own.
 
 OpenCross is a fan project, not affiliated with Square Enix, and ships no game data. A legitimately owned copy of the Radical Dreamers Edition is required.
 
@@ -34,13 +34,13 @@ OpenCross is **in development**. Exploring the world, talking to characters, the
 
 ## Installing
 
-1. Download `opencross.exe` from the [releases page](https://github.com/sp-hy/OpenCross/releases).
-2. Put it in your Radical Dreamers Edition folder, for example `C:\Program Files (x86)\Steam\steamapps\common\CHRONO CROSS  THE RADICAL DREAMERS EDITION`.
-3. Run it.
+1. Download `opencross.exe` and `XINPUT9_1_0.dll` from the [releases page](https://github.com/sp-hy/OpenCross/releases).
+2. Put both in your Radical Dreamers Edition folder, for example `C:\Program Files (x86)\Steam\steamapps\common\CHRONO CROSS  THE RADICAL DREAMERS EDITION`.
+3. Start the game from Steam and press the **OpenCross** button in its launcher, or run `opencross.exe` directly.
 
-To start OpenCross from the game's own launcher, also put `XINPUT9_1_0.dll` from the same release page in that folder, or use **Update** in the settings, which installs it for you. To remove the button, delete the file.
+`XINPUT9_1_0.dll` only adds the launcher button and changes no game file. It is optional: without it, run `opencross.exe` yourself. Delete it to remove the button. **Update** in the settings installs new releases of both files.
 
-On Steam Deck or Linux, Proton ignores that file unless you add this to the game's **Launch Options** in Steam:
+On Steam Deck or Linux, Proton ignores the DLL unless you add this to the game's **Launch Options** in Steam:
 
 ```
 WINEDLLOVERRIDES="xinput9_1_0=n,b" %command%
@@ -77,13 +77,13 @@ Manage mods in the **Mods** tab of the settings window (Esc): turn them on or of
 
 ## Building from source
 
-OpenCross builds on Windows with Visual Studio 2026 (C++ tools), CMake, Ninja and vcpkg. From PowerShell:
+OpenCross builds on Windows with Visual Studio 2026 (C++ tools), CMake, Ninja and [vcpkg](https://learn.microsoft.com/vcpkg/get_started/get-started), set up as its guide describes (`VCPKG_ROOT` set, or `vcpkg` on `PATH`; `-VcpkgRoot C:\path\to\vcpkg` also works). From PowerShell:
 
 ```
 .\build.ps1 release
 ```
 
-The executable is written to `build\win-x64\bin\Release\opencross.exe`. Use `.\build.ps1 debug` for a debug build and add `-Test` to run the unit tests.
+The executable is written to `build\win-x64\bin\Release\opencross.exe`. Use `.\build.ps1 debug` for a debug build and add `-Test` to run the unit tests. `.\build.ps1 -Launcher` builds the launcher button, `build\launcher-x86\bin\XINPUT9_1_0.dll`.
 
 ## Credits and licence
 

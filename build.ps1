@@ -1,4 +1,5 @@
 # Build OpenCross from PowerShell:  .build.ps1 [debug|release] [-Configure] [-Test] [-Target a,b] [-WholeProgram]  (builds are serialised by a mutex)
+# vcpkg is -VcpkgRoot, else $env:VCPKG_ROOT, else the folder of vcpkg.exe on PATH; a root other than the cached one reconfigures.
 # Loads the MSVC x64 environment, points CMake at vcpkg, configures (once, with -Configure, or when -WholeProgram changes) and builds.
 # -WholeProgram turns on whole-program optimisation for Release (OC_WHOLE_PROGRAM; the published build). Without it the build is configured
 # with it off, so a local build never keeps the slow links by accident.
@@ -10,7 +11,7 @@ param(
     [switch] $Launcher,
     [switch] $WholeProgram,
     [string[]] $Target = @(),
-    [string] $VcpkgRoot = 'C:\Users\User\Documents\Workspace\vcpkg'
+    [string] $VcpkgRoot = $env:VCPKG_ROOT
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -26,6 +27,14 @@ if ($Launcher) {
     if ($LASTEXITCODE -ne 0) { throw "launcher proxy build failed ($LASTEXITCODE)" }
     return
 }
+
+if (-not $VcpkgRoot) {
+    $vcpkgExe = Get-Command vcpkg.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $vcpkgExe) { throw 'vcpkg not found: set VCPKG_ROOT to your vcpkg folder, put vcpkg on PATH or pass -VcpkgRoot' }
+    $VcpkgRoot = Split-Path -Parent $vcpkgExe.Source
+}
+$toolchain = [IO.Path]::GetFullPath((Join-Path $VcpkgRoot 'scripts\buildsystems\vcpkg.cmake'))
+if (-not (Test-Path $toolchain)) { throw "vcpkg not found at ${VcpkgRoot}: set VCPKG_ROOT to your vcpkg folder, put vcpkg on PATH or pass -VcpkgRoot" }
 
 $vcvars = Join-Path $vs 'VC\Auxiliary\Build\vcvars64.bat'
 
@@ -43,8 +52,10 @@ try {
     $cache = Join-Path $root 'build\win-x64\CMakeCache.txt'
     $wholeProgramFlag = if ($WholeProgram) { 'ON' } else { 'OFF' }
     $cachedWholeProgram = if ((Test-Path $cache) -and (Select-String -Path $cache -Pattern '^OC_WHOLE_PROGRAM:BOOL=ON' -Quiet)) { 'ON' } else { 'OFF' }
-    if ($Configure -or -not (Test-Path $cache) -or $cachedWholeProgram -ne $wholeProgramFlag) {
-        cmake --preset win-x64 "-DOC_WHOLE_PROGRAM=$wholeProgramFlag"
+    $cachedToolchain = if (Test-Path $cache) { Select-String -Path $cache -Pattern '^CMAKE_TOOLCHAIN_FILE:\w+=(.*)$' | ForEach-Object { [IO.Path]::GetFullPath($_.Matches[0].Groups[1].Value) } }
+    $fresh = @(); if ($cachedToolchain -and $cachedToolchain -ne $toolchain) { $fresh = @('--fresh') }
+    if ($Configure -or $fresh -or -not (Test-Path $cache) -or $cachedWholeProgram -ne $wholeProgramFlag) {
+        cmake --preset win-x64 @fresh "-DOC_WHOLE_PROGRAM=$wholeProgramFlag"
         if ($LASTEXITCODE -ne 0) { throw "configure failed ($LASTEXITCODE)" }
     }
     $targetArgs = @(); if ($Target.Count -gt 0) { $targetArgs = @('--target') + $Target }
