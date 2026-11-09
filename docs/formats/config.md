@@ -52,8 +52,9 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `Widescreen` | 0 | bool | The field, world map, battle and title sea fill the window's width; menus, dialogue, logo and movies stay 4:3. Off = 4:3 with black bars. F7 toggles it. |
 | `ArtMode` | `hd` | `hd original modded` | Art set: RDE's HD assets / the PS1 disc assets / HD plus the mods and OpenCross's own improvements. `classic` is accepted as an alias of `original`. Any other value reads as `hd` and logs a warning. F6 cycles it. |
 | `HdBattleTextures` | 1 | bool | HD and Modded art: the battle players are drawn on RDE's 4x textures, the left half of `hd/menu/player/<name>.tim` with the shut-eye frame from its right half (`docs/formats/model.md` section 12). 0 = the cdrom2 `.ltc` at 1x. No effect in the original art mode. |
-| `Ps1Res` | 0 | bool | "Retro look": draw the 3D and the menus at PS1 resolution and scale up with sharp pixels. |
-| `RenderScale` | 1.00 | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1Res`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
+| `Ps1ResGraphics` | 0 | bool | "Retro look": draw the field picture, battle 3D and title sea (backgrounds, models, effects) at the PS1's 320 x 224 and scale up with sharp pixels. |
+| `Ps1ResUi` | 0 | bool | "Retro look": draw the menus, shops, title menu, name entry, Continue and party screens at their PS1 display size, and the battle HUD, results, pause screen and dialogue windows in the 320 x 224 picture, scaled up with sharp pixels. In original art the menus use the PS1 disc textures. |
+| `RenderScale` | 1.00 | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1ResGraphics`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
 | `Ps1Jitter` | 0 | bool | Integer vertex snapping and affine texture mapping in the 3D passes. |
 | `Msaa` | 1 | 1, 2, 4, 8 | Multisample antialiasing of the window-resolution pictures. The stored value is rounded down to a listed level; the GPU layer lowers it to what the hardware supports. |
 | `Anisotropy` | 1 | 1, 2, 4, 8, 16 | Anisotropic filtering of the bilinear 3D textures. Rounded down to a listed level. |
@@ -91,11 +92,12 @@ Movies stay at normal speed in both speed modes, and both are off in room 386 (z
 
 ### 2.5 `[Enhancements]`
 
-Opt-in improvements, independent of `Ps1Res`; each is also a checkbox in the Graphics tab.
+Opt-in improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is also a checkbox in the Graphics tab.
 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `SmoothWaterLine` | 1 | bool | Submerged actor parts are cut at the exact water plane, not per whole triangle. |
+| `ModelPixelDepth` | 1 | bool | Character and room models are depth-sorted per pixel instead of painted whole per face in their ordering-table slot (`model.md` 3.5), so faces that cut into each other no longer flip in front of one another as the animation moves; hair and capes (the nearest-corner constructs) are pulled one slot toward the camera so they stay over the body they cut into. |
 | `AutoHideCastHud` | 0 | bool | Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). The cast header naming the spell stays for the first 2 seconds, then fades over half a second. |
 | `RetainBattleScenery` | 0 | bool | Keep the battle stage's intro-only scenery layer for the whole battle. |
 | `FullPrecisionEffects` | 0 | bool | Effect sprites keep the half 5-bit colour level the PS1 loses to rounding, as RDE draws them (`room_effects.md` 4.3): brighter faint glows that pulse about twice as hard when one object ends and the next grows in. Off: the PS1's average loss, without its steps. |
@@ -234,7 +236,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Language` | Dialogue, flow, menus, shop and results switch at once. A movie already playing keeps its language. |
 | `Portraits` | Field, menu and results portraits switch at once. |
 | `Driver` | Needs a restart; the Backend row offers a *Restart now* button once it differs from the one the run started with. |
-| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1Res`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
+| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1ResGraphics`, `Ps1ResUi`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
 | `Log` | The Debug tab starts or stops the log at once. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
 | `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
@@ -248,6 +250,7 @@ Editing the file by hand while the game runs has no effect: the file is read onc
 | `[Video] Fullscreen` | `1` = `WindowMode=borderless`, used only when `WindowMode` is missing or not one of its three names. |
 | `[Video] FilterHD` | `Filter`; read first, so an explicit `Filter` wins over it. |
 | `[Video] WideHudEdges` | Nonzero = `WideHud=full`, used only when `WideHud` is empty. |
+| `[Video] Ps1Res` | Default for both `Ps1ResGraphics` and `Ps1ResUi`; an explicit new key wins. |
 | `[Video] Ps1Res3D` | Default for `Ps1Res`. It is forced off when the ini has `FilterHD` but no `Filter` and `ArtMode` is not `original`. |
 | `[Video] Crt` | `1` = `[Shaders] Fullscreen=crt`, used only when `Fullscreen` is missing or not one of its names. |
 | `[Enhancements] EnhancedLighting`, `SpellLights` | Either on = `Lighting` default on; an explicit `Lighting` wins. |

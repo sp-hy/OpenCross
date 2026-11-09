@@ -290,7 +290,7 @@ class StagePipeline {
   SDL_GPUShader* fs_affine_ = nullptr;
   // [cull 0..2][blend 0 opaque, 1 average, 2 add, 3 subtract]
   Pipeline pipes_[3][4];
-  // The battle ground cells: affine texture / colour interpolation like the PS1 GPU.
+  // [Video] Ps1Jitter: affine texture / colour interpolation like the PS1 GPU.
   Pipeline pipes_affine_[3][4];
   Sampler nearest_, linear_;
   bool active_ = false;

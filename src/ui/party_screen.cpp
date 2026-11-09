@@ -81,7 +81,7 @@ struct PartyScreen::Impl {
   const std::map<int, std::u32string>* custom = nullptr;
   // Font slots: 0 kb_70, 4 bn_70, 9 ik_70 (large_ / small_ by art mode).
   font::FontSet fonts;
-  // Classic art + [Video] Ps1ResMenus.
+  // Classic art + [Video] Ps1ResUi.
   LowRes lowres;
 
   struct Tex {
@@ -172,7 +172,7 @@ struct PartyScreen::Impl {
     int pb = recs[static_cast<size_t>(character)].portrait;
     if (pb < 0 || pb >= 92) return nullptr;
     if (pb == 0x0E) pb = 0x5A;
-    // Classic art + [Video] Ps1ResMenus: the PS1 face TIM of the same picture (cdrom/face/<stem>.tim,
+    // Classic art + [Video] Ps1ResUi: the PS1 face TIM of the same picture (cdrom/face/<stem>.tim,
     // 64 x 64, from cdrom.dat; hd/face/1999/NN_<stem>.png is its 4x redraw). The disc has one such TIM for every
     // portrait byte 0..91 (0x0E -> 0x5A l_zappa).
     if (!hd && ps1_menus()) {
@@ -700,7 +700,7 @@ void PartyScreen::Impl::draw_screen() {
 void PartyScreen::draw(const render::Frame& frame, float vw, float vh, bool resume) {
   Impl& impl = *impl_;
   if (impl.phase == Impl::Phase::Idle || !impl.ctx) return;
-  // Classic art with [Video] Ps1ResMenus (any art mode; the PS1 face TIMs stay classic-only, Impl::face): the screen into a
+  // Classic art with [Video] Ps1ResUi (any art mode; the PS1 face TIMs stay classic-only, Impl::face): the screen into a
   // 640 x 224 target (216 rows shown = y * 960 / 216), scaled up nearest.
   // Widescreen: the target grows with the canvas (640 + 4 e texels) and is shown in the window rectangle of the widened 240-row frame.
   render::Frame lf;

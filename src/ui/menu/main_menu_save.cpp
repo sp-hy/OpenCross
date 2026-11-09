@@ -358,7 +358,7 @@ void MainMenu::Impl::save_dial() {
 
 const Tex* MainMenu::Impl::face_tex(int character) {
   if (character < 0 || character > 49) return nullptr;
-  // Classic art + Ps1ResMenus: cdrom/face/<stem>.tim (64 x 64; hd/face/1999 is its 4x redraw).
+  // Classic art + Ps1ResUi: cdrom/face/<stem>.tim (64 x 64; hd/face/1999 is its 4x redraw).
   if (ps1_screen())
     if (Tex* disc_face = texs.ps1("ps1:face" + std::to_string(character), [&] { return ps1::face(*vfs, character); })) return disc_face;
   const std::string set = face_set();
@@ -530,7 +530,7 @@ void MainMenu::Impl::build_save() {
     int max_n = 0;
     for (const SavePrev& other : prev)
       if (other.used) max_n = std::max(max_n, other.slot + 1);
-    // Classic art + Ps1ResMenus: the PS1 box picture menutim.prd p<box>ic, texels 0..15 on the 32 x 32 box; else the face icon of
+    // Classic art + Ps1ResUi: the PS1 box picture menutim.prd p<box>ic, texels 0..15 on the 32 x 32 box; else the face icon of
     // save_layout.h's box rule. The PS1 draws the file number + 1.
     auto box_picture = [&](float x, float y, int file_no, int icon) {
       Tex* p1 = ps1_screen() ? texs.ps1("ps1:icon" + std::to_string(file_no), [&] { return ps1::slot_icon(*vfs, file_no); }) : nullptr;

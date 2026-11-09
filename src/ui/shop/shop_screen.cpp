@@ -73,7 +73,7 @@ struct ShopScreen::Impl {
   TexCache texs;
   Tex* skin = nullptr;
   Tex* cursor_tex = nullptr;
-  // Classic art + [Video] Ps1ResMenus: the shop rendered at the original menu's display size.
+  // Classic art + [Video] Ps1ResUi: the shop rendered at the original menu's display size.
   LowRes lowres;
   bool ready = false;
   std::function<void(int)> sfx_fn;
@@ -1192,7 +1192,7 @@ struct ShopScreen::Impl {
   int faces_listed = 0;
   const Tex* face_tex(int character) {
     const bool classic = mode == ArtMode::Original;
-    // Classic + Ps1ResMenus: cdrom/face/<stem>.tim.
+    // Classic + Ps1ResUi: cdrom/face/<stem>.tim.
     if (ps1_on() && character >= 0 && character < 50)
       if (Tex* disc_face = texs.ps1("ps1:face" + std::to_string(character), [&] { return ps1::face(*vfs, character); })) return disc_face;
     if (faces_listed != (classic ? 2 : 1)) {
@@ -1638,7 +1638,7 @@ struct ShopScreen::Impl {
     footer();
   }
 
-  // Classic art with [Video] Ps1ResMenus: the whole shop is drawn into a target of the original menu's display size
+  // Classic art with [Video] Ps1ResUi: the whole shop is drawn into a target of the original menu's display size
   // (512 x 448 buffer; 432 of its rows map onto the canvas, so one PS1 pixel = one target pixel), scaled up nearest.
   void draw(const render::Frame& frame, float vw, float vh, bool resume) {
     if (closed || !gs || !ready) return;

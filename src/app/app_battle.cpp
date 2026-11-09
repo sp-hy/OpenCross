@@ -101,7 +101,7 @@ void App::field_battle_load_step() {
   const bool loaded = fb_args->scene >= 0 && battle.load_step(3.0);
   // The battle 3D is drawn at the scene target's size: its effect targets are made one per frame once the load is done or the swirl's
   // first second has passed (they do not depend on the load, which can end only a few frames before the battle starts).
-  if (fb_args->scene < 0 || config.ps1_res || !(loaded || fb_req_frames >= 60)) return;
+  if (fb_args->scene < 0 || config.ps1_res_graphics || !(loaded || fb_req_frames >= 60)) return;
   u32 tw = 0, th = 0;
   scene_extent(static_cast<float>(ctx.extent().width), static_cast<float>(ctx.extent().height), tw, th);
   battle.prepare_fx_targets(tw, th);

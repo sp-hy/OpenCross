@@ -822,12 +822,16 @@ void StagePipeline::draw_cpu(const StageMesh& mesh, const assets::StageAsset& as
   }
   std::vector<u32> ix;
   std::vector<std::pair<u32, u32>> runs(mp.sub_count, {0u, 0u});
+  // fills: the split cells' edge triangles, per sub-mesh (fill_runs index into fills).
+  std::vector<u32> fills;
+  std::vector<std::pair<u32, u32>> fill_runs(mp.sub_count, {0u, 0u});
   const u32 part_q0 = mesh.subs[mp.first_sub].first_packet;
   // kept: per packet, for the seam strips.
   std::vector<u8> kept(mesh.subs[mp.first_sub + mp.sub_count - 1].first_packet + mesh.subs[mp.first_sub + mp.sub_count - 1].packet_count - part_q0, 0);
   for (u32 sub_index = 0; sub_index < mp.sub_count; ++sub_index) {
     const StageMesh::Sub& sub = mesh.subs[mp.first_sub + sub_index];
     runs[sub_index].first = static_cast<u32>(ix.size());
+    fill_runs[sub_index].first = static_cast<u32>(fills.size());
     for (u32 packet_index = sub.first_packet; packet_index < sub.first_packet + sub.packet_count; ++packet_index) {
       const StageMesh::Packet& pk = mesh.packets[packet_index];
       if (in.ground && pk.ground_drop) continue;
@@ -841,8 +845,7 @@ void StagePipeline::draw_cpu(const StageMesh& mesh, const assets::StageAsset& as
       }
       if (in.ground && pk.cell >= 0) {
         if (in.hide.test(static_cast<size_t>(pk.cell))) continue;
-        // Ground cells: NCLIP is the only test besides the slot range ((max z >> 2) >> 2 must stay 0..4095); no GTE flag test (the near cells
-        // are cut into four sub-quads instead, which only changes the PS1's affine texturing).
+        // Ground cells: NCLIP is the only test besides the slot range ((max z >> 2) >> 2 must stay 0..4095); no GTE flag test.
         int far = 0;
         float zmax = -1e30f;
         for (int k = 0; k < pk.corners; ++k) {
@@ -855,10 +858,13 @@ void StagePipeline::draw_cpu(const StageMesh& mesh, const assets::StageAsset& as
         }
         const std::array<float, 3> centre = vv[pk.corner[far] - base].pos;
         for (int k = 0; k < pk.corners; ++k) vv[pk.corner[k] - base].centre = centre;
-        // Near cells (ordering-table slot (max SZ >> 2) >> 2 below 0x200, i.e. the farthest corner nearer than 8192 units) are drawn as four
-        // GT4 sub-quads whose new corners average the parent's positions, texel coordinates and colours (the midpoint bytes `(a + b) >> 1`, the same clut / tpage, all four at the parent's slot). With the PS1's affine texturing this
-        // halves the texture warp of the big near quads; the sub-quads keep the parent's far corner as their depth.
-        if (pk.corners == 4 && zmax / 16.0f < 512.0f) {
+        // [Video] Ps1Jitter (affine texturing): near cells (ordering-table slot (max SZ >> 2) >> 2 below 0x200, i.e. the farthest corner nearer
+        // than 8192 units) are drawn as four GT4 sub-quads whose new corners average the parent's positions, texel coordinates and colours (the
+        // midpoint bytes `(a + b) >> 1`, the same clut / tpage, all four at the parent's slot). This halves the affine warp of the big near quads
+        // and only changes that warp, so perspective-correct drawing keeps the whole cell. The sub-quads keep the parent's far corner as their depth.
+        // Each snapped edge midpoint can leave the straight edge of an unsplit neighbour, so four GT3 triangles (corner, edge midpoint, corner)
+        // along the outer edges fill that gap: no NCLIP test, the parent's slot, drawn under the sub-quads.
+        if (ps1_jitter().on && pk.corners == 4 && zmax / 16.0f < 512.0f) {
           const u32 c0 = pk.corner[0] - base, c1 = pk.corner[1] - base, c2 = pk.corner[2] - base, c3 = pk.corner[3] - base;
           auto mid = [&](u32 index_a, u32 index_b) {
             assets::StageVertex middle = vv[index_a];
@@ -873,6 +879,7 @@ void StagePipeline::draw_cpu(const StageMesh& mesh, const assets::StageAsset& as
           for (const u32* sq : quads) {
             ix.insert(ix.end(), {sq[0], sq[1], sq[2], sq[2], sq[1], sq[3]});
           }
+          fills.insert(fills.end(), {c0, m02, c2, c1, c3, m13, c0, c1, m01, c2, c3, m23});
           kept[packet_index - part_q0] = 1;
           continue;
         }
@@ -890,8 +897,11 @@ void StagePipeline::draw_cpu(const StageMesh& mesh, const assets::StageAsset& as
       kept[packet_index - part_q0] = tri_ok[0] || tri_ok[1] ? 1 : 0;
     }
     runs[sub_index].second = static_cast<u32>(ix.size()) - runs[sub_index].first;
+    fill_runs[sub_index].second = static_cast<u32>(fills.size()) - fill_runs[sub_index].first;
   }
   if (ix.empty()) return;
+  const u32 fill_base = static_cast<u32>(ix.size());
+  ix.insert(ix.end(), fills.begin(), fills.end());
   // nvv: nv plus the near-cell sub-quad corners.
   const u32 nvv = static_cast<u32>(vv.size());
   if (dyn_vused_ + nvv > kDynVertices || dyn_iused_ + ix.size() > kDynIndices) {
@@ -919,20 +929,25 @@ void StagePipeline::draw_cpu(const StageMesh& mesh, const assets::StageAsset& as
     } else {
       blend = draw_blend(in, sub, factor, alpha);
     }
-    const Pipeline& pl = (in.ground || ps1_jitter().on ? pipes_affine_ : pipes_)[std::clamp(in.cull, 0, 2)][blend];
-    SDL_BindGPUGraphicsPipeline(render_pass, pl.handle());
+    const Pipeline (&pipes)[3][4] = ps1_jitter().on ? pipes_affine_ : pipes_;
     bind_texture(*ctx_, render_pass, sets[static_cast<size_t>(sub.texture)]);
     PushData pd;
     pd.clip = proj * cam;
     fill_push(pd, in, cue_, factor, alpha, smooth_fog_, linear_draw_);
     fill_lights(pd, proj, blend, lights_);
+    if (fill_runs[sub_index].second > 0) {
+      SDL_BindGPUGraphicsPipeline(render_pass, pipes[2][blend].handle());
+      push_uniforms(command_buffer, pd);
+      SDL_DrawGPUIndexedPrimitives(render_pass, fill_runs[sub_index].second, 1, dyn_iused_ + fill_base + fill_runs[sub_index].first, static_cast<int32_t>(dyn_vused_), 0);
+    }
+    SDL_BindGPUGraphicsPipeline(render_pass, pipes[std::clamp(in.cull, 0, 2)][blend].handle());
     push_uniforms(command_buffer, pd);
     SDL_DrawGPUIndexedPrimitives(render_pass, runs[sub_index].second, 1, dyn_iused_ + runs[sub_index].first, static_cast<int32_t>(dyn_vused_), 0);
   }
   dyn_vused_ += nvv;
   dyn_iused_ += static_cast<u32>(ix.size());
   // [Enhancements] EdgeBlend: the kept cells' seam strips at the cells' own depth (vv carries the far-corner centres and the warp)
-  if (edge_blend() && !ap.seams.empty() && (!in.ground || in.blend == 0)) draw_seams(mesh, ap, mp, proj, cam, in, sets, vv, &kept, in.ground || ps1_jitter().on);
+  if (edge_blend() && !ap.seams.empty() && (!in.ground || in.blend == 0)) draw_seams(mesh, ap, mp, proj, cam, in, sets, vv, &kept, ps1_jitter().on);
   bind_vertex_buffer(render_pass, mesh.vertices.handle());
   bind_index_buffer(render_pass, mesh.indices.handle());
 }

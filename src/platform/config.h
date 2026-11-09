@@ -128,13 +128,13 @@ void bind_cheats(const Cheats* set);
 //            16:9 frame's width, full = spread to the window's edges (stored as the kWideHudNames word; old `WideHudEdges=1` reads as full).
 //            Widescreen (F7 toggles): the field, world map, battle and the title's 3D sea fill the window's own width (any shape wider
 //            than 4:3; render::wide_extra_for); menus, dialogue, the title logo / menu and movies stay 4:3. Off = 4:3 with black bars.
-//            ArtMode (see the enum). Ps1Res (Retro look, every art mode): everything is drawn at the PS1's resolution and scaled up with
-//            sharp pixels - the field and battle 3D at 320 x 224, the menus / shops / title menu / name entry / Continue / party screens at
-//            their PS1 overlay's display size (512x448, 640x448, ...), the battle HUD / menus / results, the pause screen and the field
-//            dialogue windows in a 320(+2e) x 240 picture; the PS1 disc textures are used only in classic art.
+//            ArtMode (see the enum). Retro look, every art mode, drawn at the PS1's resolution and scaled up with sharp pixels:
+//            Ps1ResGraphics = the field picture, battle 3D and title sea at 320 x 224; Ps1ResUi = the menus / shops / title menu / name entry /
+//            Continue / party screens at their PS1 overlay's display size (512x448, 640x448, ...), the battle HUD / menus / results, the pause
+//            screen and the field dialogue windows in a 320(+2e) x 240 picture; the PS1 disc textures of the menus are used only in classic art.
 //            RenderScale: the 3D pictures (field picture, battle 3D, title sea, world map) are drawn into an off-screen target at this
 //            multiple of the output resolution (above 1 = supersampled, area-filtered down; below 1 = bilinear up) and composited under
-//            the 2D / UI drawn at output resolution; with Ps1Res the multiple of the PS1 320 x 224 target instead (2 = 640 x 448); one of
+//            the 2D / UI drawn at output resolution; with Ps1ResGraphics the multiple of the PS1 320 x 224 target instead (2 = 640 x 448); one of
 //            kRenderScales (snapped on load). Ps1Jitter: GTE integer vertex snapping + affine texture mapping in the 3D pipelines
 //            (render/ps1_jitter.h).
 //            Msaa: multisample antialiasing samples of the window-resolution pictures (1 = off, 2, 4, 8; lowered to what the GPU
@@ -151,8 +151,9 @@ void bind_cheats(const Cheats* set);
 //            scenes; room 3D meshes + models; battle / field unit models; effect sprite sheets + effect meshes - large, off by default).
 //   [Features] the player's settings of the engine features mods turn on: <Feature>.<Setting>=<value> (core/features.h), winning over
 //            every mod's mod.ini; kept as written, read at launch.
-//   [Enhancements] (all independent of Ps1Res) SmoothEffectRings: ring / tube effect meshes get extra segments.
-//            SmoothWaterLine: submerged actor parts are cut at the exact water plane, not per whole triangle. Lighting: key light on the
+//   [Enhancements] (all independent of the Ps1Res settings) SmoothEffectRings: ring / tube effect meshes get extra segments.
+//            SmoothWaterLine: submerged actor parts are cut at the exact water plane, not per whole triangle. ModelPixelDepth: model faces
+//            meet per pixel instead of being painted whole in their ordering-table slot (hair / capes pulled one slot nearer). Lighting: key light on the
 //            models, bright spell effects light the battle units and stage, units cast real shadows (field and battle) and the battle floor darkens
 //            smoothly per vertex. EdgeBlend: cross-fades the faces along the texture seams of
 //            the stage / title meshes, any art mode. SmoothReflections: env-mapped model parts (FATE, Lavos, ...) slide their reflection
@@ -221,12 +222,14 @@ struct Config {
   std::vector<ModSetting> mods;
   std::vector<std::pair<std::string, std::string>> features;
   bool dump_stages = true, dump_title = true, dump_rooms = true, dump_models = true, dump_weapons = true, dump_effects = false;
-  bool ps1_res = false;
+  bool ps1_res_graphics = false;
+  bool ps1_res_ui = false;
   float render_scale = 1.0f;
   static constexpr float kRenderScales[] = {0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
   bool ps1_jitter = false;
   bool smooth_effect_rings = true;
   bool smooth_water_line = true;
+  bool model_pixel_depth = true;
   bool lighting = false;
   bool edge_blend = false;
   bool smooth_reflections = true;

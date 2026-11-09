@@ -7,6 +7,8 @@ layout(set = 2, binding = 1) uniform sampler2D matcap;
 // 1 texels without STP only, 2 STP texels only; flat faces count as STP), fog_rng.w: 1 = white texels (FE 45 flash CLUT). ot.x: 1 = field ordering-table faces (2 = with the smooth water line), ot.y: nearest-corner sort,
 // ot.z: layer bias (slots), ot.w: submerged-face bias (slots); ot2.x: face filter (0 all, 1 dry only, 2 submerged only), ot2.y: 1 = depth
 // only (alpha-0 output into a colour-keeping blend), ot2.z: 1 / kDepthRange (slot -> depth-buffer value), ot2.w: output alpha (0.5 = ABR 0).
+// slot.y: 1 = [Enhancements] ModelPixelDepth (ot mode: the fragment's own z in the slot space; a nearest-corner face is pulled toward the
+// camera by kNearPull slots, never past its own slot, so it stays over the body it cuts into but not over parts well in front of it).
 // [Shaders] (render/mesh_pipeline.h CharacterShading): shade.x = style (0 off, 1 realistic, 2 toon, 3 cel, 4 matcap), shade.y = 1 on the
 // outline pass; rim = colour + on; glow = colour + strength.
 layout(set = 3, binding = 0) uniform Push { vec4 color; vec4 misc; vec4 tint; vec4 water; vec4 fog; vec4 fog_rng; vec4 ot; vec4 ot2; vec4 slot; vec4 shade; vec4 rim; vec4 glow; } pc;
@@ -89,9 +91,16 @@ void main() {
   out_color = vec4(clamp(rgb, 0.0, 1.0), pc.ot2.y > 0.5 ? 0.0 : pc.ot2.w);
   if (ot) {
     // One slot per face (+ layer bias, + the submerged push); the fraction orders fragments of faces sharing a slot without leaving it.
-    float slot = face_slot + pc.ot.z + (wet ? pc.ot.w : 0.0);
-    float fine = clamp(cam_z / 16.0 - face_slot, 0.0, 1.0);
-    gl_FragDepth = clamp((slot + 0.001 + 0.998 * fine) * pc.ot2.z, 0.0, 1.0);
+    float bias = pc.ot.z + (wet ? pc.ot.w : 0.0);
+    if (pc.slot.y > 0.5) {
+      const float kNearPull = 1.0;
+      float z = max(cam_z, 0.0) / 16.0;
+      if (pc.ot.y > 0.5) z = max(z - kNearPull, face_slot);
+      gl_FragDepth = clamp((z + bias + 0.001) * pc.ot2.z, 0.0, 1.0);
+    } else {
+      float fine = clamp(cam_z / 16.0 - face_slot, 0.0, 1.0);
+      gl_FragDepth = clamp((face_slot + bias + 0.001 + 0.998 * fine) * pc.ot2.z, 0.0, 1.0);
+    }
   } else {
     gl_FragDepth = clamp(cam_z * pc.misc.y, 0.0, 1.0);
   }

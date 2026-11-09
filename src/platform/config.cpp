@@ -124,7 +124,7 @@ std::vector<std::pair<std::string, std::string>> Ini::entries(std::string_view s
 // Reads every key with its current default as the fallback. Legacy keys of earlier inis still migrate:
 //   [Video] Fullscreen=1 -> WindowMode borderless; FilterHD -> Filter (Filter wins); WideHudEdges=1 -> WideHud
 //   full; Ps1Res3D -> Ps1Res (Ps1ResMenus is dropped; an ini with FilterHD but no Filter that is not in classic art reads it as off, since
-//   Ps1Res3D acted in classic art only); the old percentage Fov, Toasts and Aspect-as-widescreen keys are ignored.
+//   Ps1Res3D acted in classic art only); Ps1Res -> Ps1ResGraphics and Ps1ResUi (each new key wins); the old percentage Fov, Toasts and Aspect-as-widescreen keys are ignored.
 //   [Enhancements] EnhancedLighting / SpellLights (either on) -> Lighting; SeamBlend 0 / 1 / 2 -> EdgeBlend off / on / on.
 // Without a valid Aspect key the aspect is the shape of the stored size, so an existing ini keeps its resolution list.
 bool Config::load(const std::filesystem::path& file) {
@@ -220,7 +220,9 @@ bool Config::load(const std::filesystem::path& file) {
     const std::string legacy_3d = ini.get("Video", "Ps1Res3D");
     bool legacy_on = parse_bool(legacy_3d, false);
     if (ini.get("Video", "Filter").empty() && !ini.get("Video", "FilterHD").empty() && art_mode != ArtMode::Original) legacy_on = false;
-    ps1_res = parse_bool(ini.get("Video", "Ps1Res"), legacy_on);
+    const bool legacy_both = parse_bool(ini.get("Video", "Ps1Res"), legacy_on);
+    ps1_res_graphics = parse_bool(ini.get("Video", "Ps1ResGraphics"), legacy_both);
+    ps1_res_ui = parse_bool(ini.get("Video", "Ps1ResUi"), legacy_both);
   }
   {
     const float stored = parse_float(ini.get("Video", "RenderScale"), render_scale);
@@ -241,6 +243,7 @@ bool Config::load(const std::filesystem::path& file) {
       if (level <= stored_anisotropy) anisotropy = level;
   }
   smooth_water_line = parse_bool(ini.get("Enhancements", "SmoothWaterLine"), smooth_water_line);
+  model_pixel_depth = parse_bool(ini.get("Enhancements", "ModelPixelDepth"), model_pixel_depth);
   autohide_cast_hud = parse_bool(ini.get("Enhancements", "AutoHideCastHud"), autohide_cast_hud);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   full_precision_effects = parse_bool(ini.get("Enhancements", "FullPrecisionEffects"), full_precision_effects);
@@ -372,12 +375,14 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Mods", "DumpEffects", on_off(dump_effects));
   for (const ModSetting& mod : mods) ini.set("Mods", mod.name, std::string(mod.enabled ? "1," : "0,") + mod.load_on);
   for (const auto& [key, value] : features) ini.set("Features", key, value);
-  ini.set("Video", "Ps1Res", on_off(ps1_res));
+  ini.set("Video", "Ps1ResGraphics", on_off(ps1_res_graphics));
+  ini.set("Video", "Ps1ResUi", on_off(ps1_res_ui));
   ini.set("Video", "RenderScale", fmt_float(render_scale));
   ini.set("Video", "Ps1Jitter", on_off(ps1_jitter));
   ini.set("Video", "Msaa", std::to_string(msaa));
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
   ini.set("Enhancements", "SmoothWaterLine", on_off(smooth_water_line));
+  ini.set("Enhancements", "ModelPixelDepth", on_off(model_pixel_depth));
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "FullPrecisionEffects", on_off(full_precision_effects));

@@ -129,7 +129,7 @@ class BattleView {
   void set_texture_filter(bool linear) { linear_filter_ = linear ? 1 : 0; }
   // [Video] WideHud: layer columns per side the HUD edge groups move out by.
   void set_wide_hud_columns(float columns) { wide_hud_cols_ = std::max(0.0f, columns); }
-  // [Enhancements] SmoothEffectRings (off under Ps1Res), Lighting (smooth floor darkening, spell lights).
+  // [Enhancements] SmoothEffectRings (off under Ps1ResGraphics), Lighting (smooth floor darkening, spell lights).
   void set_smooth_rings(bool on) { smooth_rings_ = on; }
   void set_smooth_fog(bool on) { stage_pipe_.set_smooth_fog(on); }
   void set_spell_lights(bool on) {
@@ -220,10 +220,10 @@ class BattleView {
   // brings the `bti0` layer back, and not while an overlay that holds the speed runs (the Time Devourer's end, miyademo).
   bool speed_allowed() const { return speed_gate_ && !(fx_ && fx_->bespoke() && fx_->bespoke()->holds_game_speed()); }
   // The 3D pass: depth cue, stage, unit shadows, units, effects, mapped by `lb` = picture() of the window or Letterbox::identity(320, 224)
-  // for a PS1-resolution target ([Video] Ps1Res; the host scales it up into picture()). Clipped to the 320 x 224 buffer.
+  // for a PS1-resolution target ([Video] Ps1ResGraphics; the host scales it up into picture()). Clipped to the 320 x 224 buffer.
   void draw_scene(const render::Frame& frame, const render::Letterbox& lb, bool sprites_resume = false);
   // The 2D pass at window resolution over the scene: screen fade, HUD / menus / text, damage digits, the start white-out.
-  // `lb` (optional) = the PS1-resolution pass ([Video] Ps1Res): a Letterbox::identity(1280 + 8 e, 960, 4) over a (320 + 2 e) x 240 target (view = canvas
+  // `lb` (optional) = the PS1-resolution pass ([Video] Ps1ResUi): a Letterbox::identity(1280 + 8 e, 960, 4) over a (320 + 2 e) x 240 target (view = canvas
   // units, canvas x from -4 e), replacing the window's 4:3 fit; `text_batch()` is the batch its pixel grid is set on.
   void draw_ui(const render::Frame& frame, bool sprites_resume = false, const render::Letterbox* lb = nullptr);
   render::TextBatch* text_batch() { return &text_; }

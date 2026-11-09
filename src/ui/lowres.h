@@ -1,10 +1,12 @@
 #pragma once
-// PS1-resolution UI pass ([Video] Ps1Res, any art mode). A screen that is drawn on the 1280 x 960 canvas is drawn instead into an
+// PS1-resolution UI pass ([Video] Ps1ResUi, any art mode). A screen that is drawn on the 1280 x 960 canvas is drawn instead into an
 // off-screen target of its PS1 overlay's display size (menutest 512 x 448, the title / save list 640 x 448, ...): the SpriteBatch
 // view space is the canvas itself (so the screen's layout code runs unchanged with vw = 1280, vh = 960), every texture is
 // point-sampled, the pixel-font text is drawn on the target's pixel grid (TextBatch set_pixel_grid), and the target is then scaled
 // up nearest into the 4:3 canvas rectangle of the window, composited over whatever the frame already holds (premultiplied alpha:
-// the target is cleared transparent).
+// the target is cleared transparent). Subtract and Multiply quads (window bases, B - F and B x F) cannot be held by a transparent target:
+// they change only its colour, and are drawn again into two more targets of the same size (subtracted amounts, cleared black; multiplied
+// factors, cleared white) that are applied to the frame first, so the picture under a window is darkened as at window resolution.
 //
 //   LowRes lr;  lr.init(ctx, sprites);                                   (shutdown() before the device goes)
 //   per frame:  render::Frame lf;
@@ -34,7 +36,7 @@ inline constexpr Ps1Display kNameMenu{512, 432, "lowres namemenu 512x432"};
 inline constexpr Ps1Display kMemmenu{640, 216, "lowres memmenu 640x216"};
 inline constexpr Ps1Display kFieldWin{320, 216, "lowres field 320x216"};
 
-// Global switch, set by the host from [Video] Ps1Res (one setting for the 3D and the UI). Screens run the pass in EVERY art mode
+// Global switch, set by the host from [Video] Ps1ResUi. Screens run the pass in EVERY art mode
 // when it is on; only the PS1 disc textures stay classic-only (mode == Original && ps1_menus()).
 void set_ps1_menus(bool on);
 bool ps1_menus();
@@ -63,9 +65,15 @@ class LowRes {
   render::GpuContext* ctx_ = nullptr;
   render::SpriteBatch* sprites_ = nullptr;
   render::TextBatch* text_ = nullptr;
+  // Draws the recorded quads of `mode` into `layer` (cleared to `clear`) with the blend `as`.
+  void draw_layer(const render::Frame& frame, render::RenderTarget& layer, render::TexRef& set, render::BlendMode mode, render::BlendMode as,
+                  const float (&clear)[4]);
   render::RenderTarget rt_;
+  render::RenderTarget sub_rt_, mul_rt_;
   render::Sampler nearest_;
   render::TexRef set_ = {};
+  render::TexRef sub_set_ = {}, mul_set_ = {};
+  render::SpriteLayerCapture capture_;
   render::SpriteFilter old_filter_ = render::SpriteFilter::Sampler;
   bool active_ = false;
 };

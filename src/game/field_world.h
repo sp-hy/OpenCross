@@ -400,7 +400,7 @@ class FieldWorld final : public script::FieldHost {
   // (after it); MeshPipeline::DrawParams::WetFaces.
   void draw_actors(render::MeshPipeline& meshes, const render::Frame& frame, float alpha,
                    render::MeshPipeline::DrawParams::WetFaces wet = render::MeshPipeline::DrawParams::WetFaces::DryOnly);
-  // `windows` = false leaves the status icons and the dialogue / extra windows to draw_windows() (the PS1-resolution pass, [Video] Ps1Res).
+  // `windows` = false leaves the status icons and the dialogue / extra windows to draw_windows() (the PS1-resolution pass, [Video] Ps1ResUi).
   void draw_overlay(render::SpriteBatch& sprites, float vw, float vh, bool windows = true);
   // The mod UI of the room's scripts (script::ModUi): its rects, lines and cursor, drawn by draw_windows under the dialogue windows (its
   // text elements are message windows, sync_mod_ui_windows).
@@ -408,7 +408,7 @@ class FieldWorld final : public script::FieldHost {
   // Party status icons + the dialogue and extra windows. `ps1` = into the PS1-resolution target (vw x vh = (320 + 2e) x 240 pixels, 1 layer
   // column = 1 pixel, canvas unit = 1/4 pixel); otherwise the window's letterbox / render::canvas_fit.
   void draw_windows(render::SpriteBatch& sprites, float vw, float vh, bool ps1 = false);
-  // Ps1Res: after the window pass - transition veil, room fade, captured frame (draw_overlay(windows = false) leaves them out).
+  // Ps1ResUi: after the window pass - transition veil, room fade, captured frame (draw_overlay(windows = false) leaves them out).
   void draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_transition(render::SpriteBatch& sprites, float vw, float vh);
   void draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh);

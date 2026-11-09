@@ -1,5 +1,5 @@
 #pragma once
-// PS1 menu art decoded from the disc (classic art with [Video] Ps1ResMenus: the PS1 textures of the menus, shops, name entry, save/load).
+// PS1 menu art decoded from the disc (classic art with [Video] Ps1ResUi: the PS1 textures of the menus, shops, name entry, save/load).
 // Sources: cdrom/map/etc/systim.bin (parchment tile), cdrom/menu/menutim.prd drp entry "wind"
 // (frame pieces, captions, dial lines), cdrom/face/<name>.tim (64x64 avatars). Everything is nearest-sampled by the callers.
 #include <string_view>
@@ -40,7 +40,7 @@ Rgba portrait(const vfs::Vfs& fs, int char_id);
 const char* face_name(int char_id);
 // (All loaders read the disc image itself, Vfs::read_disc, never the HD override copies.)
 
-// ---- PS1 counterparts of the HD menu widgets (classic art + [Video] Ps1ResMenus) ----
+// ---- PS1 counterparts of the HD menu widgets (classic art + [Video] Ps1ResUi) ----
 // Save-box icon of box `icon` 0..14 (CHRONO k), sheet index icon + 1: menutim.prd "p1ic" .. "pfic" (16 x 16, own CLUT); "p0ic" (index 0) is the white
 // square with the red X. The HD art uses the menufaceicon sprites instead.
 Rgba slot_icon(const vfs::Vfs& fs, int icon);

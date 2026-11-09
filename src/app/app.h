@@ -7,7 +7,7 @@
 //   app_route.cpp     scripted routes, input replay, the room sweep
 //   app_debug.cpp     the Esc overlay's Debug tab
 //   app_run.cpp       run(): the main loop (hotkeys, per-frame settings, mode dispatch, the options window's changes)
-//   app_draw.cpp      draw_frame(): the frame composition (scene target, Ps1Res passes, 8F warp, overlays, pillarboxing)
+//   app_draw.cpp      draw_frame(): the frame composition (scene target, PS1-resolution passes, 8F warp, overlays, pillarboxing)
 //   app_feedback.cpp  the encounter feed-back / damage-jolt pass over the scene target
 // The members stand in the order the objects are created; destruction runs in reverse, so every GPU resource goes before ctx and
 // the voice player before the mixer.
@@ -288,7 +288,7 @@ class App {
   // The launch update check is running; run() shows a toast when it finds a newer release.
   bool update_notice_pending = false;
   render::TexRef background_set;
-  // Classic art, [Video] Ps1Res: the field picture is drawn into the PS1 field buffer size (320 x 224) and scaled up with nearest
+  // Classic art, [Video] Ps1ResGraphics: the field picture is drawn into the PS1 field buffer size (320 x 224) and scaled up with nearest
   // sampling into RDE's field frame, so models / effects have the pixel size of the 1x backdrops.
   render::RenderTarget field_rt;
   render::Sampler nearest;
@@ -365,7 +365,7 @@ class App {
 
   // ---- menus and screens ------------------------------------------------------------------------------------------------------
   render::TextBatch menu_text;
-  // [Video] Ps1Res: the PS1-resolution target of the battle HUD / results / pause screen / field windows (any art mode).
+  // [Video] Ps1ResUi: the PS1-resolution target of the battle HUD / results / pause screen / field windows (any art mode).
   ui::LowRes ps1_ui;
   ui::MainMenu menu;
   ui::ShopScreen shop;

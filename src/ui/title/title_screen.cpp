@@ -265,7 +265,7 @@ void TitleScreen::draw(DrawList& dl) const {
   // and only the menu text via small_font_*.
   kit_->set_classic(mode_ == ArtMode::Original);
   const bool menu_phase = phase_ == Phase::Menu || phase_ == Phase::FadeOut;
-  // Classic art + [Video] Ps1ResMenus: the menu (bg0 / bg1 = one 640 x 448 screen) is drawn at 640 x 448. The splash / prompt
+  // Classic art + [Video] Ps1ResUi: the menu (bg0 / bg1 = one 640 x 448 screen) is drawn at 640 x 448. The splash / prompt
   // over the 3D title scene stay at window resolution.
   if (menu_phase) kit_->request_lowres(dl, kMenuWide);
   if (menu_phase || !backdrop_) {

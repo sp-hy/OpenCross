@@ -359,6 +359,7 @@ int ocbattleview_main(int argc, char** argv) {
       // [Enhancements] SmoothReflections; OC_SMOOTH_REFL=1 / 0 overrides it (side-by-side runs without touching the ini)
       const char* smooth_env = std::getenv("OC_SMOOTH_REFL");
       meshes.set_smooth_reflections(smooth_env ? smooth_env[0] == '1' : config.smooth_reflections);
+      meshes.set_model_pixel_depth(config.model_pixel_depth);
       view.set_spell_lights(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_smooth_fog(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_autohide_cast(config.autohide_cast_hud);

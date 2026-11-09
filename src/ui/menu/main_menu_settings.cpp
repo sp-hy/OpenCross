@@ -134,7 +134,7 @@ void MainMenu::Impl::skin_preview() {
   const int nn = kNn[idx];
   char fn[48];
   std::snprintf(fn, sizeof fn, "hd/window/w%02d.png", nn);
-  // Classic art + Ps1ResMenus: the PS1 sheet cdrom/map/window/wN.tim (128 x 96; wNN.png is its 4x redraw with the same layout).
+  // Classic art + Ps1ResUi: the PS1 sheet cdrom/map/window/wN.tim (128 x 96; wNN.png is its 4x redraw with the same layout).
   Tex* p1 = ps1_screen() ? texs.ps1("ps1:w" + std::to_string(nn), [&] { return ps1win::skin(*vfs, nn); }) : nullptr;
   const SkinWindow window = build_skin_window(idx, (frames / 6) % 5);
   float x0 = 1e9f, x1 = -1e9f;
