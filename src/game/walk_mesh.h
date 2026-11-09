@@ -71,7 +71,7 @@ class WalkMesh {
 
   // Actor step: the move (dx, dz) is accepted if the point `standoff` units ahead of its end can be reached through the
   // mesh; otherwise it is projected onto the blocking edge at FULL speed (cancelled when nearly head-on, within `head_on`
-  // radians of the edge normal) and the slid move is tried once more. The head-on test and the slide's side are taken from the
+  // radians of the edge normal) and the slid move is tried once more, at its end point alone. The head-on test and the slide's side are taken from the
   // actor's heading (hx, hz), a unit vector; (0, 0) = the direction of the move.
   Move move_actor(int tri, float x, float z, float dx, float dz, u32 class_mask, float standoff = 8.0f,
                   float head_on = 0.1963f, float hx = 0.0f, float hz = 0.0f) const;

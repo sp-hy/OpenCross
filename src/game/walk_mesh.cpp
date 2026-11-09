@@ -242,9 +242,11 @@ WalkMesh::Move WalkMesh::move(int tri, float x, float z, float dx, float dz, u32
 }
 
 // The engine's mover probes the destination with three feelers of `standoff` units: at heading -45 deg, +45 deg and straight
-// ahead (in that order); the first blocked one gives the edge the slide projects onto. A diagonal feeler catches a convex wall
-// corner beside the path that the single probe along the move passes. Only the first attempt has them; the chained slides keep
-// the single probe along the slid move.
+// ahead (in that order); the first blocked one gives the edge the slide projects onto. A probe point is tested at its whole-unit
+// position (each axis rounded down) and a point on an edge counts as inside, so an actor can stand up to a unit closer to a wall
+// than the feeler length. A diagonal feeler catches a convex wall corner beside the path that the single probe along the move
+// passes. A slid move is tested at its end point alone, with no feeler: sliding along one wall into a corner where a second wall
+// faces the push carries the actor right up to the corner.
 // A slid move that meets the next wall of a bend (an obtuse corner between two wall edges) is slid once more along that edge,
 // up to 3 times, so the actor follows the wall round the corner instead of wedging in it. A chained slide that runs back
 // against the push is a concave corner (two walls facing the move): the move is rejected and the actor stands, instead of
@@ -262,13 +264,14 @@ WalkMesh::Move WalkMesh::move_actor(int tri, float x, float z, float dx, float d
   if (tri < 0 || static_cast<size_t>(tri) >= tris_.size() || len < 1e-6f) return result;
 
   int fail_tri = -1, fail_edge = -1;
-  auto try_move = [&](float mx, float mz, bool record, float stand) {
+  auto try_move = [&](float mx, float mz, bool record, float stand, bool whole) {
     const float move_len = std::hypot(mx, mz);
     int probe_tri = tri;
     float px = x, pz = z;
     int edge = -1;
     const float extra = stand / move_len;
-    if (walk(probe_tri, px, pz, x + mx * (1 + extra), z + mz * (1 + extra), class_mask, &edge)) return true;
+    const float tx = x + mx * (1 + extra), tz = z + mz * (1 + extra);
+    if (walk(probe_tri, px, pz, whole ? std::floor(tx) : tx, whole ? std::floor(tz) : tz, class_mask, &edge)) return true;
     if (record) {
       fail_tri = probe_tri;
       fail_edge = edge;
@@ -292,13 +295,13 @@ WalkMesh::Move WalkMesh::move_actor(int tri, float x, float z, float dx, float d
   for (int feeler = 0; feeler < 2 && clear; ++feeler) {
     int probe_tri = tri, edge = -1;
     float px = x, pz = z;
-    if (!walk(probe_tri, px, pz, x + dx + fx[feeler] * standoff, z + dz + fz[feeler] * standoff, class_mask, &edge)) {
+    if (!walk(probe_tri, px, pz, std::floor(x + dx + fx[feeler] * standoff), std::floor(z + dz + fz[feeler] * standoff), class_mask, &edge)) {
       clear = false;
       fail_tri = probe_tri;
       fail_edge = edge;
     }
   }
-  if (clear && try_move(dx, dz, true, standoff)) {
+  if (clear && try_move(dx, dz, true, standoff, true)) {
     commit(dx, dz);
     return result;
   }
@@ -320,7 +323,7 @@ WalkMesh::Move WalkMesh::move_actor(int tri, float x, float z, float dx, float d
     if (pass > 0 && (ex * sgn * dx + ez * sgn * dz) <= 0) return result;
     const float sx = ex * sgn * len, sz = ez * sgn * len;
     fail_tri = fail_edge = -1;
-    if (try_move(sx, sz, true, standoff)) {
+    if (try_move(sx, sz, true, 0.0f, false)) {
       commit(sx, sz);
       result.slid = true;
       result.slide_dx = sx;
