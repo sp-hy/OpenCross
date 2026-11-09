@@ -323,4 +323,4 @@ Serge (id 0) whose record model byte is 0x31 reads as Lynx, `sysmes[0x10031]` in
 
 The save lists (title Continue, Save / Load grid and page) show the saved leader's own name as loading that file would give it: the file's `ext_save.dat` or page name in the game's language, else its record when usable, else the default. The Lynx rule does not apply.
 
-The art follows the body the same way (`data::menu_form`): the portrait strip of the main list, the Elements and Equip screens, the weapon pack and the profile text show the body when it is at most 0x31, else the character. So Serge in body 0x31 shows Lynx's portrait, Pip his form's, and body 0x33 Serge's own. This holds for any character, unlike the name rule.
+The art follows the body the same way (`data::menu_form`): the portrait strip of the main list, the Elements and Equip screens and the battle results screen, the weapon pack and the profile text show the body when it is at most 0x31, else the character. So Serge in body 0x31 shows Lynx's portrait, Pip his form's, and body 0x33 Serge's own. This holds for any character, unlike the name rule.
