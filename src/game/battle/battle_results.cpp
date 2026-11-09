@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "core/log.h"
+#include "data/char_name.h"
 #include "import/tim.h"
 #include "platform/keymap.h"
 #include "render/text_batch.h"
@@ -97,7 +98,8 @@ struct BattleResults::Impl {
   };
   struct Row {
     bool present = false;
-    int char_id = 0;
+    // The portrait strip's number: the body up to Lynx's, else the character (data::menu_form).
+    int portrait = 0;
     std::u32string name;
     int hp = 0, max_hp = 0;
     std::array<int, 7> stat{}, gain{};
@@ -238,9 +240,9 @@ struct BattleResults::Impl {
     if (auto raw = vfs->read("hd/battle/battle/battle_37.tim")) load_tim(hd_wall, *raw, kRep);
     if (!hd_row.ok() || !hd_panel.ok()) log::warn("battle results: HD btlexit panels missing");
   }
-  Tex* face(int char_id) {
+  Tex* face(int portrait_id) {
     char key[80];
-    std::snprintf(key, sizeof key, "%s/p%02d", hd ? portrait_set.c_str() : "1999", char_id);
+    std::snprintf(key, sizeof key, "%s/p%02d", hd ? portrait_set.c_str() : "1999", portrait_id);
     if (auto it = hd_face.find(key); it != hd_face.end()) return it->second->ok() ? it->second.get() : nullptr;
     auto tex = std::make_unique<Tex>();
     load_png(*tex, std::string("hd/battle/face/") + key + ".png");
@@ -316,7 +318,7 @@ struct BattleResults::Impl {
     for (int slot = 0; slot < battle::kPcSlots; ++slot) {
       const Row& row = rows[static_cast<size_t>(slot)];
       if (!row.present) continue;
-      if (Tex* portrait = face(row.char_id)) quad(*portrait, static_cast<float>(kFaceX0 + kFaceDX * slot), 0, kFaceW, kFaceH, rgba(128, 128, 128));
+      if (Tex* portrait = face(row.portrait)) quad(*portrait, static_cast<float>(kFaceX0 + kFaceDX * slot), 0, kFaceW, kFaceH, rgba(128, 128, 128));
     }
   }
   void draw_row(int slot) {
@@ -792,7 +794,7 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     Impl::Row& row = impl.rows[i];
     row.present = unit.present;
     if (!row.present) continue;
-    row.char_id = member.char_id;
+    row.portrait = data::menu_form(member.char_id, member.kind >= 0 ? member.kind : member.char_id);
     row.name = import::utf8_to_u32(member.name);
     row.hp = unit.hp;
     row.max_hp = member.stat[0];
