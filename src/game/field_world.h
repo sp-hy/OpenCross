@@ -924,7 +924,7 @@ class FieldWorld final : public script::FieldHost {
   // by room model index (null = not loaded / failed)
   std::vector<std::shared_ptr<ModelHandle>> room_models_;
   std::vector<bool> room_model_tried_;
-  // The room's models built by its prefetch (RoomView::take_prepared_models), taken by room_model on first use.
+  // The room's models built with the room (RoomView::take_prepared_models), taken by room_model on first use.
   std::vector<std::optional<PreparedRoomModel>> room_prepared_;
   // FE D0: room model index -> where its model comes from in this room
   std::map<int, ModelSource> model_sources_;

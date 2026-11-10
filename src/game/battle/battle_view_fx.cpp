@@ -557,12 +557,12 @@ void BattleView::fx_drop_clip_packs() {
 }
 
 // The resident battle.prd meshes (maru, wa0, sank ...), uploaded once per scene.
-BattleView::FxGpu* BattleView::fx_gpu_resident(const std::shared_ptr<const FxPack>& pack) {
-  if (!pack || !pack->resident || !pack->resident->meshes) return nullptr;
+BattleView::FxGpu* BattleView::fx_gpu_resident(const FxResident* resident) {
+  if (!resident || !resident->meshes) return nullptr;
   constexpr int kResidentKey = -1000;
   if (auto it = fx_gpu_.find(kResidentKey); it != fx_gpu_.end()) return it->second.get();
   auto gpu = std::make_unique<FxGpu>();
-  const assets::StageAsset& st = *pack->resident->meshes;
+  const assets::StageAsset& st = *resident->meshes;
   for (size_t i = 0; i < st.parts.size(); ++i) gpu->parts.emplace(st.parts[i].name, static_cast<int>(i));
   gpu->stage = stage_pipe_.create(st);
   FxGpu* raw = gpu.get();

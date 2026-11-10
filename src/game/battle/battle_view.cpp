@@ -259,8 +259,8 @@ void BattleView::warm_up() {
   if (!fxlib_ready_ && !fxlib_job_.valid()) fxlib_job_ = std::async(std::launch::async, [this] { return fxlib_.init(*vfs_); });
 }
 
-// The battle load in slices. Each step is one piece of the load: rules, stage files,
-// stage scene, the shared battle.prd, one unit model each, the HUD fonts. Steps run until `budget_ms` of wall time is used (at least one per
+// The battle load in slices. Each step is one piece of the load: rules, stage files, stage scene, the shared battle.prd, the shared
+// effect sheets and meshes, one unit model each, the HUD fonts. Steps run until `budget_ms` of wall time is used (at least one per
 // call). Returns true when the load is complete (or failed).
 bool BattleView::load_step(double budget_ms) {
   if (!ready_ || !load_ || load_->done) return true;
@@ -311,7 +311,7 @@ void BattleView::run_load_step(LoadJob& job) {
     job.failed = true;
     job.done = true;
   };
-  enum { kRules, kStageRead, kStageScene, kCommon, kUnits0, kFonts = kUnits0 + battle::kUnits };
+  enum { kRules, kStageRead, kStageScene, kCommon, kFxLibrary, kFxMeshes, kUnits0, kFonts = kUnits0 + battle::kUnits };
   // (kFonts is followed by two more steps: the JP face and the headline face)
   if (job.step == kRules) {
   unload_scene();
@@ -503,6 +503,37 @@ void BattleView::run_load_step(LoadJob& job) {
   log::info("battle: camera bank {} shots / {} timelines", bank_.cameras(), bank_.sequences());
   if (!camera_.select("zen0")) log::warn("battle: no zen0 camera");
 
+    return;
+  }
+  // The effect sheets and meshes every attack draws from (battle.prd's resident set, the particle library), uploaded here in slices
+  // rather than at the battle's first hit; a failed upload is left to the first hit.
+  if (job.step == kFxLibrary) {
+    if (!fxlib_ready_) return;
+    if (!job.fx_lib) {
+      if (const auto resident = fxlib_.resident())
+        for (const auto& resident_pack : resident->packs) job.fx_bank.add_library(resident_pack.get());
+      job.fx_bank.add_library(&fxlib_.particle_lib());
+      job.fx_lib = std::make_shared<effects::GpuEffects>();
+      if (!job.fx_lib->init(*ctx_, *sprites_) || !job.fx_lib->load_begin()) {
+        job.fx_lib.reset();
+        return;
+      }
+    }
+    bool loaded = false;
+    if (!job.fx_lib->load_more(job.fx_bank, effects::GpuEffects::Which::LibrariesOnly, job.block ? 1e9 : kStageBudgetMs, loaded)) {
+      job.fx_lib.reset();
+      return;
+    }
+    if (!loaded) {
+      job.again = true;
+      return;
+    }
+    fx_lib_gpu_ = std::move(job.fx_lib);
+    fx_lib_key_ = fxlib_.resident().get();
+    return;
+  }
+  if (job.step == kFxMeshes) {
+    if (fxlib_ready_) fx_gpu_resident(fxlib_.resident().get());
     return;
   }
   if (job.step >= kUnits0 && job.step < kFonts) {

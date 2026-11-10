@@ -56,7 +56,7 @@ struct RoomView::Prepared {
   std::vector<std::vector<u8>> px, px_hd;
   // With a GPU context: the 4x textures made from px_hd on the worker (Texture::create_blocking); a null entry is uploaded from px_hd.
   std::vector<std::unique_ptr<render::Texture>> tex_hd;
-  // Prepared ahead only: the room's own models, built and resolved (an empty entry: build failed, loaded at first use instead).
+  // The room's own models, built and resolved in parallel (an empty entry: build failed, loaded at first use instead).
   std::vector<std::optional<PreparedRoomModel>> models;
   // HD art: the chip2 read still running, or (chip2_done) its result.
   std::future<Chip2Result> chip2_future;
@@ -203,8 +203,8 @@ std::unique_ptr<RoomView::Prepared> RoomView::prepare(const vfs::Vfs& files, ren
     prep->items = plan_items(*prep->scene);
     prep->px = compose_1x(*prep->scene, prep->items);
   }
-  if (ahead) {
-    ScopedTimer timer("room: room models (ahead)");
+  {
+    ScopedTimer timer("room: room models (parallel)");
     prep->models.resize(prep->scene->models.size());
     parallel_for(prep->models.size(), [&](size_t i) { prep->models[i] = prepare_room_model(*prep->scene, i, ctx); });
   }

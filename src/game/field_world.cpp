@@ -450,6 +450,8 @@ bool FieldWorld::load_room(std::string_view name, int param) {
     ScopedTimer timer("field: clear_room (incl. GPU idle wait)");
     clear_room();
   }
+  // The party's models build on workers while the room loads; INIT's party binds take them.
+  prefetch_party_models(gs_->slot);
   bool view_ok;
   {
     ScopedTimer timer("field: view_.load");
