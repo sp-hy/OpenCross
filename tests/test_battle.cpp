@@ -2807,6 +2807,52 @@ void test_pac_countdown_restore() {
   }
 }
 
+// Op 76 writes the byte stats 0x18..0x1D (ATK, DEF, HIT, EVD, MAG, MDEF) as the PS1 stores them: one byte, or two with field bit 0x4000.
+// Entity 4's init (unit 3): ATK = 50; DEF / HIT = 0x0807 as one u16 store; MDEF = 0x1FF as a byte store (the high byte is dropped).
+Bytes assemble_stat_write_pac() {
+  Bytes code;
+  auto emit = [&](std::initializer_list<int> bytes) {
+    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
+  };
+  emit({0x00});
+  const int init4 = static_cast<int>(code.size());
+  emit({0x0E, 0xE3, 0x80});
+  emit({0x76, 50, 0x00, 0xE9, 0x00, 0x18, 0x00, 0xE0});
+  emit({0x76, 0x07, 0x08, 0xE9, 0x00, 0x19, 0x40, 0xE0});
+  emit({0x76, 0xFF, 0x01, 0xE9, 0x00, 0x1D, 0x00, 0xE0});
+  emit({0x00});
+  const size_t ec = 5, base = 0x94 + ec * 0x40;
+  Bytes image(base, 0);
+  auto put32 = [&](size_t offset, u32 value) {
+    for (int i = 0; i < 4; ++i) image[offset + static_cast<size_t>(i)] = static_cast<u8>(value >> (8 * i));
+  };
+  auto put16 = [&](size_t offset, int value) {
+    image[offset] = static_cast<u8>(value);
+    image[offset + 1] = static_cast<u8>(value >> 8);
+  };
+  put32(0, 2), put32(4, 0x10), put32(8, static_cast<u32>(base + code.size())), put32(0xC, static_cast<u32>(base + code.size() + 8));
+  put32(0x90, static_cast<u32>(ec));
+  for (size_t entity = 0; entity < ec; ++entity) put16(0x94 + entity * 0x40 + 2, 0);
+  put16(0x94 + 4 * 0x40 + 0, init4);
+  image.insert(image.end(), code.begin(), code.end());
+  return image;
+}
+
+void test_pac_stat_write() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  pac::ScriptedBrain brain;
+  brain.set_module(0, assemble_stat_write_pac());
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  CHECK(brain.active());
+  const Unit& unit = battle.unit(3);
+  CHECK_EQ(unit.atk, 50);
+  CHECK_EQ(unit.def, 7);
+  CHECK_EQ(unit.hit, 8);
+  CHECK_EQ(unit.mdef, 0xFF);
+}
+
 // A scripted battle left by running away starts from a clean script state when it is entered again. evt409 (Boxer Boys) in
 // miniature: entity 0 slot 0 = `v84 = 0; AF 1 (menu lock); halt`; slot 1 = `if v84 == 0 { 2C; 2D 60; E0 0; E2; inc v84; AF 0; 38 }` (the window
 // "Which of us do you choose?"). The first entry shows the window, the PC runs, the same ScriptedBrain starts the scene again: the VM, its
@@ -5858,6 +5904,7 @@ int main() {
   test_pac_script_stream();
   test_pac_init_order();
   test_pac_countdown_restore();
+  test_pac_stat_write();
   test_scripted_battle_reentry();
   test_hp_known_status_applies();
   test_blue_seal_is_not_death();
