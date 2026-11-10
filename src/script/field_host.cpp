@@ -12,7 +12,7 @@ const char* global_name(Global which) {
       "ExitTransition", "FrameVsyncs", "OverlayGridA0", "OverlayGridA1", "OverlayGridA2", "OverlayGridB0",
       "OverlayGridB1", "OverlayGridB2", "OverlayOt", "KeepSfxSlots", "FootstepVolume", "FootstepDryType",
       "FootstepWaterType", "FootstepListenerX", "FootstepListenerY", "FootstepListenerZ", "FootstepNear", "FootstepFar",
-      "Byte4D", "MenuPreamble3", "MusicSwapArmed", "TradingPostRow", "TradingPostCue", "PortraitYaw",
+      "Vibration", "MenuPreamble3", "MusicSwapArmed", "TradingPostRow", "TradingPostCue", "PortraitYaw",
       "BattleIntroAnchor", "SavePointPreamble", "Selection", "SelectionFlag", "PadMask",
   };
   const auto index = static_cast<size_t>(which);
