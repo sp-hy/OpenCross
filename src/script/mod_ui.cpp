@@ -1,5 +1,6 @@
 #include "script/mod_ui.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <limits>
 
@@ -30,7 +31,7 @@ void ModUi::clear() {
 }
 
 bool ModUi::selectable(int id) const {
-  if (id < 0 || id >= kElements) return false;
+  if (id < 0 || id >= kItems) return false;
   const Element& element = elements[static_cast<size_t>(id)];
   return element.kind == kItem && element.visible && !(element.flags & kDisabled);
 }
@@ -39,12 +40,15 @@ std::pair<int, int> ModUi::centre(int id) const {
   if (id < 0 || id >= kElements) return {0, 0};
   const Element& element = elements[static_cast<size_t>(id)];
   if (element.kind == kLine) return {(element.x + element.w) / 2, (element.y + element.h) / 2};
-  if (element.kind == kText) return {element.x, element.y};
+  if (element.kind == kText || element.kind == kOval) return {element.x, element.y};
   return {element.x + element.w / 2, element.y + element.h / 2};
 }
 
 int ModUi::step(int dir) const {
   if (cursor < 0 || cursor >= kElements) return -1;
+  const int to = elements[static_cast<size_t>(cursor)].nav[static_cast<size_t>(dir & 3)];
+  if (to == cursor) return -1;
+  if (to >= 0 && selectable(to)) return to;
   const auto [fx, fy] = centre(cursor);
   int best = -1, best_score = std::numeric_limits<int>::max();
   for (int i = 0; i < kElements; ++i) {
@@ -75,6 +79,15 @@ bool ModUi::set(int id, int field, int value) {
     case kFieldFlags: element.flags = static_cast<u8>(value); break;
     case kFieldW: element.w = v; break;
     case kFieldH: element.h = v; break;
+    case kFieldWidth: element.width = static_cast<u8>(std::max(1, value)); break;
+    case kFieldAngle: element.angle = static_cast<s16>(value & 0xFFF); break;
+    case kFieldAlpha: element.alpha = static_cast<u8>(std::clamp(value, 0, 255)); break;
+    case kFieldUp:
+    case kFieldRight:
+    case kFieldDown:
+    case kFieldLeft:
+      element.nav[static_cast<size_t>(field - kFieldUp)] = static_cast<s16>(value >= 0 && value < kItems ? value : -1);
+      break;
     default: return false;
   }
   element.revision = ++serial;

@@ -84,6 +84,12 @@ void FieldWorld::shutdown() {
   drop_character_prefetches();
   free_status_icons();
   free_group_sprites();
+  for (auto& [number, image] : mod_ui_images_) {
+    image.set = {};
+    image.tex.destroy();
+  }
+  mod_ui_images_.clear();
+  mod_ui_sampler_.destroy();
   white_set_ = {};
   capture_.set = {};
   capture_.tex.destroy();
