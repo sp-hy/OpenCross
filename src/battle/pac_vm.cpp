@@ -1127,6 +1127,7 @@ class ScriptedBrain::BattleHost final : public Host {
     // colour-seal flag clear, not locked, no tech flag) and holds an element id < 0x7E whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
     // target is found for it; a free cell that fails is closed and the draw goes on. Techs from id 126 up (Big Catch 192, Dopplegang 238,
     // the enemy-only techs ...) are only ever cast by an explicit queue_attack.
+    // Op 55 spends row + 1 of a party member's gauge (the game does it in the party's end-of-action step); a monster's gauge never moves.
     const int rows = std::clamp((limit < 0 ? state.gauge : limit) + 1, 0, data::kGridRows);
     const int cells = rows * data::kGridCols;
     std::array<bool, data::kGridCells> open{};
@@ -1147,7 +1148,7 @@ class ScriptedBrain::BattleHost final : public Host {
           const u32 mask = element_target(rec.raw[4], limit >= 0, unit);
           if (mask != 0xFFFF) {
             state.used[cell] = true;
-            if (limit < 0) state.gauge = std::max(-1, state.gauge - (static_cast<int>(cell) / data::kGridCols + 1));
+            if (limit < 0 && is_pc_slot(unit)) state.gauge = std::max(-1, state.gauge - (static_cast<int>(cell) / data::kGridCols + 1));
             result.element = id;
             result.mask = mask;
             return result;
