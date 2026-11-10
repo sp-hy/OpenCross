@@ -88,7 +88,8 @@ bool FieldVM::exec_game(u8 op) {
     case 0xA4: set_global(Global::SubmergedOtPush, operand_u(1)); advance(3); break;
     case 0xA5: self.v24e = static_cast<u16>(operand_u(1)); advance(3); break;
     case 0xA6: set_global(Global::RegisterInvA6, byte_at(1) == 0); advance(2); break;
-    case 0xA7: opaque(0xA7, 1, 8); advance(9); break;
+    // A7 / AB call the developers' debug monitor; with the monitor off, as in the retail game, they only step over their operands.
+    case 0xA7: advance(9); break;
     case 0xA8: host_.fade(byte_at(1), operand_u(2)); advance(4); break;
     case 0xA9: {
       if (!run_mode_ && host_.entry_window()) {
@@ -109,7 +110,8 @@ bool FieldVM::exec_game(u8 op) {
       advance(5);
       break;
     }
-    case 0xAB: opaque(0xAB, 1, 4); advance(5); break;
+    // AB: see A7.
+    case 0xAB: advance(5); break;
     case 0xAC: {
       const int target = entity_operand(1);
       if (target >= 0 && !(ents_[static_cast<size_t>(target)].flags38 & flag38::kNo3dObject)) {

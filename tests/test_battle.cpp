@@ -502,8 +502,8 @@ void test_gauge_cap() {
   CHECK_EQ(battle.unit(0).gauge, 1);
 }
 
-// An enemy's gauge tops out at the deepest row with an element cell that lacks the lock bit 0x4000 (none: -1, so landed hits leave
-// it at -1).
+// An enemy's gauge tops out at the deepest row with an element cell that lacks the lock bit 0x4000 (none: -1). Its landed hits never
+// charge it, whatever the cap: only the party's end-of-action step moves a gauge.
 void test_enemy_gauge_cap() {
   for (const bool locked : {false, true}) {
     data::GameTables tables = make_tables();
@@ -521,7 +521,7 @@ void test_enemy_gauge_cap() {
     CHECK_EQ(battle.unit(3).gauge_max, locked ? -1 : 2);
     CHECK_EQ(battle.unit(3).gauge, -1);
     battle.do_weapon_attack(3, 0, 2);
-    CHECK_EQ(battle.unit(3).gauge, locked ? -1 : 2);
+    CHECK_EQ(battle.unit(3).gauge, -1);
   }
 }
 
@@ -2319,8 +2319,8 @@ void test_gear_duration_modifier() {
 // ------------------------------------------------------------------------------------------------ battle script VM
 // A hand-assembled .pac: 5 entities (0 global, 1-3 PCs, 4 = monster unit 3). Entity 4: slot 0 binds unit 3, slot 2 =
 //   set v406=3+value; sub v406,3; [2B v408 = target code `select`]; dialogue 7; 66; 87; 67 type (0 = weapon) strength / element v406 target
-//   mask 1 (PC1); A4; halt.
-Bytes assemble_pac(int type = 0, int value = 0, int select = -1) {
+//   mask 1 (PC1); A4; halt. With `pick` the 67 is replaced by 55 (element v408, target mask v40A).
+Bytes assemble_pac(int type = 0, int value = 0, int select = -1, bool pick = false) {
   Bytes code;
   auto emit = [&](std::initializer_list<int> bytes) {
     for (int byte : bytes) code.push_back(static_cast<u8>(byte));
@@ -2338,7 +2338,8 @@ Bytes assemble_pac(int type = 0, int value = 0, int select = -1) {
   if (select >= 0) emit({0x2B, 0x08, 0x04, select, 0x00, 0x40});
   emit({0xE0, 0x07, 0x00, 0x00});
   emit({0x66, 0x87});
-  emit({0x67, type, 0x00, 0x06, 0x04, 0x01, 0x00, 0xA0});
+  if (pick) emit({0x55, 0x08, 0x04, 0x0A, 0x04});
+  else emit({0x67, type, 0x00, 0x06, 0x04, 0x01, 0x00, 0xA0});
   emit({0xA4, 0x00});
   const size_t ec = 5, base = 0x94 + ec * 0x40;
   Bytes image(base, 0);
@@ -2550,6 +2551,30 @@ void test_scripted_brain() {
   bool dlg = false;
   for (const auto& event : brain.drain_events()) dlg = dlg || (event.kind == pac::Event::Kind::Dialogue && event.a == 7);
   CHECK(dlg);
+}
+
+// A monster's op 55 draws a cell of its opened grid and marks it used, but leaves its gauge as it is (PS1: a monster with unlocked
+// cells and its gauge set to 2 cast from row 0 and kept 2).
+void test_enemy_pick_keeps_gauge() {
+  data::GameTables tables = make_tables();
+  tables.elements[1].raw[0x14] = 0xFF;
+  auto& enemy = tables.enemies[0];
+  enemy.raw[0x30] = 1, enemy.raw[0x34] = 1;
+  enemy.raw[0x40] = 0x01, enemy.raw[0x41] = 0x00;
+  enemy.raw[0x42] = 0x01, enemy.raw[0x43] = 0x00;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  pac::ScriptedBrain brain;
+  brain.set_module(0, assemble_pac(0, 0, -1, true));
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  CHECK_EQ(battle.unit(3).gauge_max, 2);
+  battle.unit_mut(3).gauge = 2;
+  battle.unit_mut(3).countdown = 0;
+  battle.settle();
+  CHECK(battle.unit(3).used[0]);
+  CHECK_EQ(battle.unit(3).gauge, 2);
 }
 
 // A scripted heal queued on a KO'd PC still aims at that PC (the roster mask keeps it) and has no effect: HP stays 0, the KO stays.
@@ -2805,6 +2830,56 @@ void test_pac_countdown_restore() {
     CHECK_EQ(battle.unit(3).countdown, last_draw == 0 ? 100 : 9);
     for (int unit = 4; unit < 7; ++unit) CHECK_EQ(battle.unit(unit).countdown, 100);
   }
+}
+
+// Op 76 writes the byte stats 0x18..0x1D (ATK, DEF, HIT, EVD, MAG, MDEF) as the PS1 stores them: one byte, or two with field bit 0x4000.
+// Entity 4's init (unit 3): ATK = 50; DEF / HIT = 0x0807 as one u16 store; EVD = 0x1FF as a byte store (the high byte is dropped);
+// MDEF = 0x0C2A as a u16 store (the high byte lands in the status-duration stat).
+Bytes assemble_stat_write_pac() {
+  Bytes code;
+  auto emit = [&](std::initializer_list<int> bytes) {
+    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
+  };
+  emit({0x00});
+  const int init4 = static_cast<int>(code.size());
+  emit({0x0E, 0xE3, 0x80});
+  emit({0x76, 50, 0x00, 0xE9, 0x00, 0x18, 0x00, 0xE0});
+  emit({0x76, 0x07, 0x08, 0xE9, 0x00, 0x19, 0x40, 0xE0});
+  emit({0x76, 0xFF, 0x01, 0xE9, 0x00, 0x1B, 0x00, 0xE0});
+  emit({0x76, 0x2A, 0x0C, 0xE9, 0x00, 0x1D, 0x40, 0xE0});
+  emit({0x00});
+  const size_t ec = 5, base = 0x94 + ec * 0x40;
+  Bytes image(base, 0);
+  auto put32 = [&](size_t offset, u32 value) {
+    for (int i = 0; i < 4; ++i) image[offset + static_cast<size_t>(i)] = static_cast<u8>(value >> (8 * i));
+  };
+  auto put16 = [&](size_t offset, int value) {
+    image[offset] = static_cast<u8>(value);
+    image[offset + 1] = static_cast<u8>(value >> 8);
+  };
+  put32(0, 2), put32(4, 0x10), put32(8, static_cast<u32>(base + code.size())), put32(0xC, static_cast<u32>(base + code.size() + 8));
+  put32(0x90, static_cast<u32>(ec));
+  for (size_t entity = 0; entity < ec; ++entity) put16(0x94 + entity * 0x40 + 2, 0);
+  put16(0x94 + 4 * 0x40 + 0, init4);
+  image.insert(image.end(), code.begin(), code.end());
+  return image;
+}
+
+void test_pac_stat_write() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  pac::ScriptedBrain brain;
+  brain.set_module(0, assemble_stat_write_pac());
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  CHECK(brain.active());
+  const Unit& unit = battle.unit(3);
+  CHECK_EQ(unit.atk, 50);
+  CHECK_EQ(unit.def, 7);
+  CHECK_EQ(unit.hit, 8);
+  CHECK_EQ(unit.evd, 0xFF);
+  CHECK_EQ(unit.mdef, 0x2A);
+  CHECK_EQ(unit.dur, 0x0C);
 }
 
 // A scripted battle left by running away starts from a clean script state when it is entered again. evt409 (Boxer Boys) in
@@ -5854,10 +5929,12 @@ int main() {
   test_pac_kill_and_revive();
   test_colour_gate();
   test_scripted_brain();
+  test_enemy_pick_keeps_gauge();
   test_scripted_heal_on_ko_pc();
   test_pac_script_stream();
   test_pac_init_order();
   test_pac_countdown_restore();
+  test_pac_stat_write();
   test_scripted_battle_reentry();
   test_hp_known_status_applies();
   test_blue_seal_is_not_death();
