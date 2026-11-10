@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <future>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -17,6 +18,7 @@
 #include "render/imgui_update_tab.h"
 #include "render/texture_registry.h"
 #include "script/field_host.h"
+#include "ui/ps1_font.h"
 
 namespace oc::app {
 
@@ -41,6 +43,10 @@ int App::init(int argc, char** argv) {
   init_config(argc, argv);
   if (!init_window()) return 1;
   init_vfs();
+  // The menu's kb_70 face (~190 MB) is read on a worker while the renderer and the other screens start; init_menus finds it parsed.
+  std::future<std::shared_ptr<const import::SpriteFont>> menu_font;
+  if (!files.game_dir().empty())
+    menu_font = std::async(std::launch::async, [this] { return ui::font::load(files, ui::font::member(ui::font::kKb, !platform::art_is_hd(config.art_mode))); });
   if (!init_render()) return 1;
   init_audio();
   if (!init_routes()) return 2;
