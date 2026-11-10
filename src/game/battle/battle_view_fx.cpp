@@ -53,7 +53,7 @@ void paste_unit_art(assets::ModelAsset& copy, const assets::ModelAsset& unit) {
 FxScene BattleView::fx_scene() const {
   FxScene scene;
   for (int i = 0; i < battle::kUnits; ++i) {
-    const battle::Unit& unit = battle_->unit(i);
+    const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
     FxUnit& fx_unit = scene.unit[static_cast<size_t>(i)];
     fx_unit.present = unit.present;
@@ -100,7 +100,7 @@ FxScene BattleView::fx_scene() const {
   // The result code of this action on the unit (the overlays filter the lists by it).
   for (const battle::ActionEvent& event : act_.ev)
     if (event.target >= 0 && event.target < battle::kUnits) scene.unit[static_cast<size_t>(event.target)].hit = event.code;
-  for (int i = 0; i < battle::kUnits; ++i) scene.unit[static_cast<size_t>(i)].dead = battle_->unit(i).present && !battle_->unit(i).conscious();
+  for (int i = 0; i < battle::kUnits; ++i) scene.unit[static_cast<size_t>(i)].dead = bunit(i).present && !bunit(i).conscious();
   // The pack's pseudo-actor = slot A: effect selector 8 is its model, attach points through ITS pose, SetRot x / z
   // and scale (the pseudo-actor's draw matrix, pa_matrix), yaw = its facing.
   if (pa_.on && pa_.pose && pa_.asset) {
@@ -442,14 +442,17 @@ void BattleView::fx_draw_models(const render::Frame& frame, const render::Letter
 
 // The weapon techs' mesh sprites name the caster's weapon mesh by the PC's two-digit character number (guill_1-3 "02" = Guile, stick / stick2
 // "19" = Glenn, bigcard "37" = Sneff, high "39" = Doc; the weapon .bin is a cpt, so the battle registers the equipped part under that name).
-// Returns the present PC it denotes, with a weapon mesh loaded.
+// Returns the present PC it denotes, with a weapon mesh loaded; in a versus battle the acting one first (both parties may hold the character).
 int BattleView::fx_weapon_mesh_unit(std::string_view name) const {
   if (name.size() != 2 || !battle_) return -1;
-  for (int i = 0; i < battle::kUnits; ++i) {
-    const battle::Unit& unit = battle_->unit(i);
+  const auto denotes = [&](int i) {
+    const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    if (unit.present && unit.pc && visual.weapon && visual.weapon->gpu && std::format("{:02d}", unit.src_id) == name) return i;
-  }
+    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu && std::format("{:02d}", unit.src_id) == name;
+  };
+  if (versus_ && act_.actor >= 0 && act_.actor < battle::kUnits && denotes(act_.actor)) return act_.actor;
+  for (int i = 0; i < battle::kUnits; ++i)
+    if (denotes(i)) return i;
   return -1;
 }
 
@@ -528,7 +531,7 @@ void BattleView::fx_hang_clip_packs(const FxPack& pack) {
 bool BattleView::fx_hang_clip(int eid, const std::string& name, const Bytes& data, int unit) {
   if (!vfs_ || !battle_ || unit < 0 || unit >= battle::kUnits) return false;
   Visual& visual = vis_[static_cast<size_t>(unit)];
-  const battle::Unit& unit_rec = battle_->unit(unit);
+  const battle::Unit& unit_rec = bunit(unit);
   if (!visual.has_model || !unit_rec.present) return false;
   const std::string stem = unit_model_stem(unit_rec);
   const std::optional<Bytes> obj = stem.empty() ? std::nullopt : vfs_->read("cdrom/" + stem + ".obj");

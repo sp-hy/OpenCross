@@ -627,6 +627,9 @@ class FieldWorld final : public script::FieldHost {
   BattleRequest take_battle();
   // `fade_delay` ticks pass after the song is restored before the fade-in from black starts (the results screen's exit).
   void end_battle(int result_code, int fade_delay = 0);
+  // The way back from a battle that leaves no trace (a versus battle): end_battle's music and fade-in, with BATTLE_RESULT and the last
+  // result code as they were before it.
+  void end_sandbox_battle();
   // BATTLE flag 4: model byte 0x3B on every party member but Poshul / Mojo
   void apply_battle_disguise();
   int battle_result() const { return vm_.var(script::var::kBattleResult); }
@@ -1480,8 +1483,10 @@ class FieldWorld final : public script::FieldHost {
   // [3D pass, inside draw_actors] the remote members, and their name labels.
   void draw_remote_actors(render::MeshPipeline& meshes, const render::Frame& frame, float alpha, const render::Rect& scissor,
                           const render::Mat4& view_proj, const render::Mat4& view, float water_bias, bool& begun);
-  // The remote members' floor shadows (draw_background).
+  // The remote members' floor shadows (draw_background): the blob, or with [Enhancements] Lighting the tile prepare_shadows cast.
   void remote_shadows(std::vector<ShadowParams>& shadows, float alpha) const;
+  // A member's shadow strength, halved with [Multiplayer] Translucent.
+  int remote_shadow_grey(const RemoteParties::Member& member) const;
   RemoteParties remote_;
   std::vector<net::RemoteParty> net_remote_, route_remote_;
   net::RemoteDrawOptions remote_options_;

@@ -152,7 +152,7 @@ std::string tag_name(int word) {
 const CamBank* BattleView::resident_cam_bank(const std::string& name, bool sequence) const {
   for (int unit = 0; unit < battle::kUnits; ++unit) {
     const Visual& visual = vis_[static_cast<size_t>(unit)];
-    if (!battle_->unit(unit).present || !visual.scripts) continue;
+    if (!bunit(unit).present || !visual.scripts) continue;
     if (sequence ? visual.scripts->cam.sequence(name) != nullptr : visual.scripts->cam.camera(name) != nullptr) return &visual.scripts->cam;
   }
   return nullptr;
@@ -160,7 +160,7 @@ const CamBank* BattleView::resident_cam_bank(const std::string& name, bool seque
 
 void BattleView::script_event(const battle::pac::Event& event) {
   using EK = battle::pac::Event::Kind;
-  const bool unit_ok = event.unit >= 0 && event.unit < battle::kUnits && battle_->unit(event.unit).present;
+  const bool unit_ok = event.unit >= 0 && event.unit < battle::kUnits && bunit(event.unit).present;
   switch (event.kind) {
     // E0: only reached while no window is open (script_pump); opens the window and goes on.
     case EK::Dialogue: {
@@ -282,7 +282,7 @@ void BattleView::smsg_open(const ScriptMsgReq& req) {
   }
   // {playwork(0)} = the current actor's name; the script op carries no unit, so the first PC.
   msg.unit = req.unit >= 0 && req.unit < battle::kUnits ? req.unit : 0;
-  const std::string actor = battle_->unit(msg.unit).name;
+  const std::string actor = bunit(msg.unit).name;
   const bool jp = lang_ == import::Lang::Jp;
   const int slot = jp ? ui::font::kKb : ui::font::kBn;
   const float sc = ui::font::slot(slot).scale;
@@ -492,7 +492,7 @@ void BattleView::build_window(const ScriptMsg& msg) {
   }
   add_skin_box((msg.x - 8.0f) * kPs1Px, (msg.y - 8.0f) * kSmsgPY, (w + 16.0f) * kPs1Px, (h + 16.0f) * kSmsgPY);
   if (msg.open <= grow_frames || msg.page >= msg.pages.size()) return;
-  const std::string actor = battle_->unit(msg.unit).name;
+  const std::string actor = bunit(msg.unit).name;
   const std::string& pg = msg.pages[msg.page];
   const auto lines = smsg_segments(smsg_expand(pg, msg.waits, actor, msg.item));
   const bool jp = lang_ == import::Lang::Jp;

@@ -299,10 +299,12 @@ bool Config::load(const std::filesystem::path& file) {
     mp.translucent = parse_bool(ini.get("Multiplayer", "Translucent"), mp.translucent);
     mp.show_labels = parse_bool(ini.get("Multiplayer", "ShowLabels"), mp.show_labels);
     mp.chat_bubbles = parse_bool(ini.get("Multiplayer", "ChatBubbles"), mp.chat_bubbles);
+    mp.hide_global_chat = parse_bool(ini.get("Multiplayer", "HideGlobalChat"), mp.hide_global_chat);
     const std::string chat = ini.get("Multiplayer", "Chat");
     for (size_t i = 0; i < std::size(kChatDisplayNames); ++i)
       if (chat == kChatDisplayNames[i]) mp.chat = static_cast<ChatDisplay>(i);
     mp.mute_hides_party = parse_bool(ini.get("Multiplayer", "MuteHidesParty"), mp.mute_hides_party);
+    mp.challenges = parse_bool(ini.get("Multiplayer", "Challenges"), mp.challenges);
     const std::string muted = ini.get("Multiplayer", "Muted");
     if (!muted.empty()) mp.muted.clear();
     for (std::string_view rest = muted; !rest.empty();) {
@@ -448,8 +450,10 @@ bool Config::save(const std::filesystem::path& file) const {
     ini.set("Multiplayer", "Translucent", on_off(mp.translucent));
     ini.set("Multiplayer", "ShowLabels", on_off(mp.show_labels));
     ini.set("Multiplayer", "ChatBubbles", on_off(mp.chat_bubbles));
+    ini.set("Multiplayer", "HideGlobalChat", on_off(mp.hide_global_chat));
     ini.set("Multiplayer", "Chat", kChatDisplayNames[static_cast<size_t>(mp.chat)]);
     ini.set("Multiplayer", "MuteHidesParty", on_off(mp.mute_hides_party));
+    ini.set("Multiplayer", "Challenges", on_off(mp.challenges));
     std::string muted;
     for (const std::string& pid : mp.muted) muted += (muted.empty() ? "" : ",") + pid;
     ini.set("Multiplayer", "Muted", muted);

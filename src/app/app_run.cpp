@@ -208,6 +208,8 @@ void App::settings_pad_filter() {
 }
 
 bool App::speed_locked() const {
+  // A versus battle runs at the speed both games share.
+  if (versus_running) return true;
   if (battle_ok) return false;
   return world_ok && world.map_id() == game::kSpeedLockedMap;
 }

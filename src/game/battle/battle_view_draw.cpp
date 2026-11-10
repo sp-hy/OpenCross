@@ -283,7 +283,7 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
 
   meshes_->begin(frame, scissor);
   for (int i = 0; i < battle::kUnits; ++i) {
-    const battle::Unit& unit = battle_->unit(i);
+    const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
     if (showcase_on_ || !unit.present || !visual.has_model || !visual.model->gpu) continue;
     const float fade = lerp(visual.fade_prev, visual.fade, alpha_), flash = lerp(visual.flash_prev, visual.flash, alpha_);

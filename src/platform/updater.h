@@ -54,6 +54,9 @@ struct ReleaseInfo {
 bool parse_release_json(std::string_view json, ReleaseInfo& out);
 // The asset to install: "opencross.exe", else a .zip whose name starts with "opencross" (case-insensitive), else any single .exe / .zip.
 const ReleaseAsset* pick_asset(const ReleaseInfo& release);
+// The running exe's build identity: the first 16 hex digits of the SHA-256 of opencross.exe, read once; empty when it cannot be read.
+// Two games with the same identity run the same code (multiplayer battles require it).
+std::string exe_build_id();
 // The launcher proxy asset (case-insensitive name); null when the release has none.
 const ReleaseAsset* pick_launcher_proxy(const ReleaseInfo& release);
 

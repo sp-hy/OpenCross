@@ -813,6 +813,12 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       for (size_t i = 0; i < got.size(); ++i) have += (i ? " " : "") + got[i];
       if (args.size() < 4 || have.compare(0, want.size(), want) != 0 || (have.size() > want.size() && have[want.size()] != ' '))
         return bad("battle events are [" + have + "], expected to start with [" + want + "]");
+    } else if (args[1] == "battle" && args[2] == "plate") {
+      // assert battle plate [word]: the last versus battle ended on its outcome plate (with that word)
+      std::string want;
+      for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
+      const std::string got = st.battle_plate ? st.battle_plate() : std::string();
+      if (got.empty() || (!want.empty() && got != want)) return bad("versus plate is '" + got + "', expected '" + (want.empty() ? "any" : want) + "'");
     } else if (args[1] == "battle" && args[2] == "camera") {
       std::string want;
       for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];

@@ -1,6 +1,9 @@
 # Starts the multiplayer Worker with `wrangler dev` on a free port using a throwaway
 # admin token and state directory, runs server/cloudflare/test/protocol.mjs against it,
 # then stops only the processes it started. Skips with exit 0 when Node is missing.
+# -Battles N instead plays N versus battles end to end with `opencross ocbattle versus-net`
+# (the server at its own time limits; -Cut K drops one game's connection after K commands).
+param([int] $Battles = 0, [int] $Cut = 0, [string] $Config = 'debug')
 $ErrorActionPreference = 'Stop'
 $root = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $server = Join-Path $root 'server\cloudflare'
@@ -24,6 +27,9 @@ $listener.Stop()
 
 $token = [guid]::NewGuid().ToString('N')
 $idleMs = 4000
+$challengeMs = 3000
+$openingStamina = 42
+$awayMs = 3000
 $state = Join-Path ([System.IO.Path]::GetTempPath()) ("oc_mp_" + [guid]::NewGuid().ToString('N'))
 $log = Join-Path $state 'wrangler.log'
 New-Item -ItemType Directory -Force $state | Out-Null
@@ -31,7 +37,8 @@ New-Item -ItemType Directory -Force $state | Out-Null
 $proc = $null
 $code = 1
 try {
-    $argList = "/c npx.cmd wrangler dev --ip 127.0.0.1 --port $port --persist-to `"$state\data`" --var ADMIN_TOKEN:$token IDLE_MS:$idleMs > `"$log`" 2>&1"
+    $vars = if ($Battles -gt 0) { "ADMIN_TOKEN:$token" } else { "ADMIN_TOKEN:$token IDLE_MS:$idleMs CHALLENGE_MS:$challengeMs PVP_OPENING_STAMINA:$openingStamina AWAY_MS:$awayMs" }
+    $argList = "/c npx.cmd wrangler dev --ip 127.0.0.1 --port $port --persist-to `"$state\data`" --var $vars > `"$log`" 2>&1"
     $proc = Start-Process cmd.exe -ArgumentList $argList -WorkingDirectory $server -WindowStyle Hidden -PassThru
 
     $ready = $false
@@ -49,7 +56,12 @@ try {
         throw 'wrangler dev did not become ready'
     }
 
-    & node (Join-Path $server 'test\protocol.mjs') "ws://127.0.0.1:$port/ws" $token $idleMs
+    if ($Battles -gt 0) {
+        $exe = Join-Path $root "build\win-x64\bin\$((Get-Culture).TextInfo.ToTitleCase($Config))\opencross.exe"
+        & $exe ocbattle versus-net "ws://127.0.0.1:$port/ws" --fuzz $Battles --cut $Cut | Out-Host
+    } else {
+        & node (Join-Path $server 'test\protocol.mjs') "ws://127.0.0.1:$port/ws" $token $idleMs $challengeMs $openingStamina $awayMs
+    }
     $code = $LASTEXITCODE
 } catch {
     Write-Host $_

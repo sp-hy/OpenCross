@@ -13,6 +13,8 @@ add_library(oc_tools STATIC
   ocbattle.cpp
   ocbattle_fx.cpp
   ocbattle_reg.cpp
+  ocbattle_versus.cpp
+  ocbattle_versus_net.cpp
   ocmovie.cpp
   ocmodelview.cpp
   ocsteam.cpp
@@ -26,4 +28,4 @@ add_library(oc_tools STATIC
 )
 target_include_directories(oc_tools PRIVATE ${Stb_INCLUDE_DIR} ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(oc_tools PRIVATE oc_core oc_platform oc_vfs oc_import oc_assets oc_save oc_script oc_text oc_audio oc_effects
-  oc_stage oc_data oc_battle oc_flow oc_ui oc_battle_fx oc_battle_view oc_battle_anim oc_render oc_movie oc_game oc_menu_model SDL3::SDL3)
+  oc_stage oc_data oc_battle oc_flow oc_ui oc_battle_fx oc_battle_view oc_battle_anim oc_render oc_movie oc_game oc_menu_model oc_net oc_versus_link SDL3::SDL3)

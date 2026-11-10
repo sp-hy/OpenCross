@@ -85,6 +85,7 @@ void App::init_route_state() {
   rstate.battle_camera = [this] { return battle_ready ? battle.route_camera() : std::string(); };
   rstate.battle_menu = [this] { return battle_ready ? battle.route_menu() : std::string(); };
   rstate.battle_facing = [this] { return battle_ready ? battle.route_facing() : std::string(); };
+  rstate.battle_plate = [this] { return battle_ready ? battle.route_plate() : std::string(); };
   // For route `snap` / `assert same`: what an art switch must not change in a battle.
   rstate.battle_sig = [this] {
     const battle::Battle* active_battle = battle_ready ? battle.battle() : nullptr;
@@ -113,8 +114,8 @@ void App::fill_route_state() {
   rstate.message = field_visible() ? world.last_dialogue_message() : -1;
   rstate.choice_line = field_visible() ? world.dialogue_choice_line() : -1;
   rstate.battle = battle_in_field || battle_ok;
-  // The results screen is up (route: wait battle results).
-  rstate.battle_finished = results_ok && results.active();
+  // The results screen is up, or a versus battle's outcome plate (route: wait battle results).
+  rstate.battle_finished = (results_ok && results.active()) || (battle_ready && battle_in_field && battle.versus_plate());
   rstate.settling = (world_ok && world.input_settling()) || (flow_ready && flow.veiled());
   rstate.field_idle = field_visible() && world.idle() && world.fade_level() < 0.05f && !movie_open && !(menu_ok && !menu.closed()) && !shop_open && !(key_popup_ok && key_popup.active()) && !(pause_ok && pause_screen.active()) && !(party_ok && party_screen.active()) && !(monster_picker_ok && monster_picker.active());
   rstate.fade = world_ok ? world.fade_level() : 0.0f;
@@ -139,8 +140,10 @@ void App::fill_route_state() {
 // Route `request`: rename selects the character, then name entry; party_add adds a character and rebinds the party; party_remove
 // empties the slot of a character reference (REMOVE_FROM_PARTY); money sets the
 // gold; save is the ending's cleared-save prompt (strips the roster, variable 0x7E = 3, save list); ngplus is the New Game+ title list
-// over the current game; slotdump writes the game as one 0x2000 save block to $OC_SLOT_DUMP<N>.bin; battle starts an encounter id on
-// battlefield 0 with the session party; battle_disguise is the Dragoon disguise fight (jac_b25i).
+// over the current game; slotdump writes the game as one 0x2000 save block to $OC_SLOT_DUMP<N>.bin; savemark remembers that block (play
+// time left out) and savecheck fails the run when the game's block differs from it; battle starts an encounter id on
+// battlefield 0 with the session party; battle_disguise is the Dragoon disguise fight (jac_b25i); versus starts a versus battle (seed, side)
+// against the local opponent.
 void App::route_request(const game::RouteOut& out) {
   using MK = script::MenuKind;
   const std::string& rk = out.request;
@@ -166,6 +169,25 @@ void App::route_request(const game::RouteOut& out) {
       log::error("route: slotdump needs OC_SLOT_DUMP");
     }
   }
+  else if (rk == "savemark") route_save_mark = route_save_block();
+  else if (rk == "savecheck") {
+    const Bytes now = route_save_block();
+    const auto differ = std::mismatch(now.begin(), now.end(), route_save_mark.begin(), route_save_mark.end());
+    if (route_save_mark.empty() || differ.first != now.end() || differ.second != route_save_mark.end()) {
+      log::error("route: savecheck: the save differs from the mark at byte {:#x}", static_cast<size_t>(differ.first - now.begin()));
+      exit_code = 1;
+      route_finished = true;
+    } else {
+      log::info("route: savecheck: the save is unchanged ({} bytes)", now.size());
+    }
+  }
+  else if (rk == "versus") {
+    if (!start_local_versus(static_cast<u32>(out.request_arg), out.request_arg2)) {
+      log::error("route: the versus battle could not start");
+      exit_code = 1;
+      route_finished = true;
+    }
+  }
   else if (rk == "menu") world.request_menu(MK::MainMenu, 0);
   else if (rk == "disc") world.request_menu(MK::ChangeDisc, out.request_arg);
   else if (rk == "movie") world.play_movie(out.request_arg, out.request_arg2);
@@ -179,6 +201,15 @@ void App::route_request(const game::RouteOut& out) {
     exit_code = 1;
     route_finished = true;
   }
+}
+
+// The play time and the variables that show it (0x2C hours, 0x2E minutes, 0x30 seconds) are left out.
+Bytes App::route_save_block() {
+  world.capture_state();
+  save::SaveSlot slot = world.game_state().slot;
+  slot.set_playtime_frames(0);
+  for (const int id : {0x2C, 0x2E, 0x30}) slot.set_var(id, 0);
+  return save::encode_block(slot);
 }
 
 // Scripted input: fixed ticks per frame, one route step per tick.

@@ -1,6 +1,7 @@
 // net/multiplayer_client.h over a scripted transport and a hand-driven clock: the hello and what follows the welcome, the pres send
 // rules (occupancy, 10 a second, only on change, the stop), the keep-alive ping, the reconnect back-off, the remote party table, chat
-// history, mutes, and the banned / version answers that end the reconnecting.
+// lines, mutes, the banned / version answers that end the reconnecting, private messages, the pvp flag and the battle challenges up
+// to the pvp_start.
 #include <cstdint>
 #include <cstdio>
 #include <deque>
@@ -367,23 +368,22 @@ void test_remote_table() {
 
 void test_chat() {
   Session session;
-  session.wire.receive(R"({"t":"history","scope":"global","lines":[
-    {"t":"chat","scope":"global","pid":"p1","name":"Kid","text":"one","ts":1000},
-    {"t":"chat","scope":"global","pid":"p2","name":"Leena","text":"two","ts":2000,"admin":true}]})");
+  session.wire.receive(R"({"t":"chat","scope":"global","pid":"p1","name":"Kid","text":"one","ts":1000})");
+  session.wire.receive(R"({"t":"chat","scope":"global","pid":"p2","name":"Leena","text":"two","ts":2000,"admin":true})");
   session.wire.receive(R"({"t":"chat","scope":"room","pid":"p1","name":"Kid","text":"hi é","ts":3000})");
   session.wire.receive(R"({"t":"chat","scope":"nowhere","pid":"p1","name":"Kid","text":"lost","ts":3500})");
   session.step(1.0);
   const auto& global = session.client.chat(net::ChatScope::Global);
   const auto& room = session.client.chat(net::ChatScope::Room);
-  CHECK(global.size() == 2 && !global[0].fresh && global[1].text == "two" && global[1].ts == 2000);
+  CHECK(global.size() == 2 && global[1].text == "two" && global[1].ts == 2000);
   CHECK(!global[0].admin && global[1].admin && !room[0].admin);
-  CHECK(room.size() == 1 && room[0].fresh && room[0].text == "hi \xC3\xA9" && room[0].received == 1.0);
+  CHECK(room.size() == 1 && room[0].text == "hi \xC3\xA9" && room[0].received == 1.0);
   const std::uint64_t serial = session.client.chat_serial();
   CHECK(serial == 3);
-  // A second history replaces the first.
+  // The server keeps no history: a history message is an unknown type and adds nothing.
   session.wire.receive(R"({"t":"history","scope":"global","lines":[{"pid":"p3","name":"Harle","text":"three","ts":4000}]})");
   session.step(0.1);
-  CHECK(global.size() == 1 && global[0].text == "three");
+  CHECK(global.size() == 2);
   // Sending: trimmed, cut to chat_len (10 here), empty refused.
   CHECK(session.client.send_chat(net::ChatScope::Global, "  hello there everyone  "));
   std::vector<Json> sent = session.sent_of("chat");
@@ -393,7 +393,7 @@ void test_chat() {
   // A rate-limited line leaves a notice in the scope it was sent to.
   session.wire.receive(R"({"t":"error","code":"rate","msg":"slow down"})");
   session.step(0.1);
-  CHECK(global.size() == 2 && global[1].pid.empty() && global[1].ts == 4000);
+  CHECK(global.size() == 3 && global[2].pid.empty() && global[2].ts == 3000);
   // A room change clears the room's chat; mutes are the client's own.
   session.client.set_local(in_room("alu_a02f"));
   session.step(0.1);
@@ -466,6 +466,301 @@ void test_refusals() {
   }
 }
 
+// Private lines: sent with `pm`, kept in their own scope with the recipient, and a reply goes to the newest line
+// from someone else.
+void test_pm() {
+  Session session;
+  CHECK(session.client.send_pm("p1", "  psst  "));
+  std::vector<Json> sent = session.sent_of("pm");
+  CHECK(sent.size() == 1 && sent[0].string_of("to") == "p1" && sent[0].string_of("text") == "psst");
+  CHECK(!session.client.send_pm("me00000000000000", "hi"));
+  CHECK(!session.client.send_pm("a,b", "hi"));
+  CHECK(!session.client.send_pm("p1", "   "));
+  CHECK(!session.client.send_chat(net::ChatScope::Pm, "hi"));
+  CHECK(session.wire.take().empty());
+  session.wire.receive(R"({"t":"chat","scope":"pm","pid":"p1","name":"Kid","text":"hello","ts":10,"to":"me00000000000000","to_name":"Serge"})");
+  session.wire.receive(R"({"t":"chat","scope":"pm","pid":"me00000000000000","name":"Serge","text":"psst","ts":11,"to":"p1","to_name":"Kid"})");
+  session.wire.receive(R"({"t":"chat","scope":"pm","pid":"p1","name":"Kid","text":"not for me","ts":12,"to":"p2","to_name":"Leena"})");
+  session.wire.receive(R"({"t":"chat","scope":"pm","pid":"p1","name":"Kid","text":"bad","ts":13,"to":"a,b","to_name":"x"})");
+  session.step(0.1);
+  const auto& pm = session.client.chat(net::ChatScope::Pm);
+  CHECK(pm.size() == 2);
+  if (pm.size() != 2) return;
+  CHECK(pm[0].scope == net::ChatScope::Pm && pm[0].pid == "p1" && pm[0].to == "me00000000000000" && pm[0].to_name == "Serge");
+  CHECK(pm[1].pid == "me00000000000000" && pm[1].to == "p1" && pm[1].to_name == "Kid");
+  CHECK(session.client.chat(net::ChatScope::Room).empty() && session.client.chat(net::ChatScope::Global).empty());
+  const net::ChatLine* newest = session.client.newest_pm();
+  CHECK(newest && newest->pid == "p1" && newest->text == "hello");
+  // A player who is not online: a notice in the private scope.
+  session.wire.receive(R"({"t":"error","code":"offline","msg":"player not online","pid":"0123456789abcdef"})");
+  session.step(0.1);
+  CHECK(pm.size() == 3 && pm[2].pid.empty());
+  // A rate-limited private line leaves its notice there too.
+  session.client.send_pm("p1", "again");
+  session.wire.receive(R"({"t":"error","code":"rate","msg":"slow down"})");
+  session.step(0.1);
+  CHECK(pm.size() == 4 && pm[3].pid.empty());
+}
+
+// The pvp flag goes in hello and, on a change, in profile; remote parties carry theirs.
+void test_pvp_flag() {
+  Wire wire;
+  MultiplayerClient client(std::make_unique<FakeTransport>(wire));
+  client.set_local(in_room("alu_a01f"));
+  net::ClientIdentity identity{kId, "Serge", 3, "0.5.4"};
+  identity.pvp = false;
+  client.start(kUrl, identity);
+  client.update(0.0);
+  wire.opened();
+  client.update(0.1);
+  std::vector<Json> sent = wire.take();
+  CHECK(sent.size() == 1 && sent[0].string_of("t") == "hello" && sent[0].get("pvp").type() == Json::Type::Bool && !sent[0]["pvp"].as_bool(true));
+  CHECK(!client.challenges_on());
+  wire.receive(R"({"t":"welcome","pid":"me"})");
+  client.update(0.2);
+  wire.take();
+  client.set_challenges(true);
+  client.update(0.3);
+  sent = wire.take();
+  CHECK(sent.size() == 1 && sent[0].string_of("t") == "profile" && sent[0]["pvp"].as_bool());
+  client.update(0.4);
+  CHECK(wire.sent.empty());
+  wire.receive(R"({"t":"peers","room":"alu_a01f","list":[{"pid":"p1","name":"Kid","star":5,"pvp":true,"models":[3],"pres":null},
+    {"pid":"p2","name":"Leena","star":2,"models":[7],"pres":null}]})");
+  client.update(0.5);
+  CHECK(client.parties().size() == 2 && client.parties()[0].pvp && !client.parties()[1].pvp);
+  wire.receive(R"({"t":"profile","pid":"p1","name":"Kid","star":5,"pvp":false})");
+  wire.receive(R"({"t":"profile","pid":"p2","name":"Leena","star":2,"pvp":true})");
+  wire.receive(R"({"t":"profile","pid":"p2","name":"Leena","star":3})");
+  client.update(0.6);
+  CHECK(!client.parties()[0].pvp && client.parties()[1].pvp && client.parties()[1].star == 3);
+}
+
+net::PartyCard test_card(const std::string& name) {
+  net::PartyCard card;
+  card.star = 3;
+  card.members.push_back({0, name, 320, 35, 18, 12, 10, 4});
+  return card;
+}
+
+// The local player's challenge: what it sends, when it may, the server's end, the client's own give-up, and the pvp_start.
+void test_challenge_out() {
+  Session session;
+  MultiplayerClient& client = session.client;
+  CHECK(client.can_challenge());
+  CHECK(!client.challenge("me00000000000000", "Me", test_card("Serge")));
+  CHECK(!client.challenge("a,b", "Bad", test_card("Serge")));
+  client.set_battle_data("abc123");
+  CHECK(client.challenge("p1", "Kid", test_card("Serge")));
+  std::vector<Json> sent = session.sent_of("challenge");
+  CHECK(sent.size() == 1);
+  if (sent.size() != 1) return;
+  CHECK(sent[0].string_of("to") == "p1" && sent[0].string_of("ver") == "0.5.4" && sent[0].string_of("data") == "abc123");
+  const Json& card = sent[0]["card"];
+  CHECK(card.int_of("star") == 3 && card["members"].items().size() == 1);
+  const Json& member = card["members"].items()[0];
+  CHECK(member.int_of("char") == 0 && member.string_of("name") == "Serge" && member.int_of("hp") == 320 && member.int_of("atk") == 35);
+  CHECK(member.int_of("def") == 18 && member.int_of("mag") == 12 && member.int_of("mdef") == 10 && member.int_of("elements") == 4);
+  CHECK(client.outgoing() && client.outgoing()->to == "p1" && client.outgoing()->name == "Kid" && !client.can_challenge());
+  CHECK(!client.challenge("p2", "Leena", test_card("Serge")));
+  // An end for another player is not this challenge's.
+  session.wire.receive(R"({"t":"challenge_end","pid":"p2","reason":"declined"})");
+  session.wire.receive(R"({"t":"challenge_end","pid":"p1","reason":"nonsense"})");
+  session.step(0.1);
+  CHECK(client.outgoing().has_value());
+  session.wire.receive(R"({"t":"challenge_end","pid":"p1","reason":"declined"})");
+  session.step(0.1);
+  CHECK(!client.outgoing() && client.can_challenge());
+  CHECK(client.last_challenge_end() && client.last_challenge_end()->reason == net::ChallengeEnd::Declined && client.last_challenge_end()->outgoing);
+  const auto& global = client.chat(net::ChatScope::Global);
+  CHECK(!global.empty() && global.back().pid.empty() && global.back().text == "Kid declined your challenge");
+  // Every server reason reads back.
+  const std::pair<const char*, net::ChallengeEnd> reasons[] = {{"busy", net::ChallengeEnd::Busy},       {"timeout", net::ChallengeEnd::Timeout},
+                                                               {"off", net::ChallengeEnd::Off},         {"left", net::ChallengeEnd::Left},
+                                                               {"version", net::ChallengeEnd::Version}, {"data", net::ChallengeEnd::Data},
+                                                               {"cooldown", net::ChallengeEnd::Cooldown}, {"pending", net::ChallengeEnd::Pending}};
+  for (const auto& [text, reason] : reasons) {
+    CHECK(client.challenge("p1", "Kid", test_card("Serge")));
+    session.wire.receive(std::format(R"({{"t":"challenge_end","pid":"p1","reason":"{}"}})", text));
+    session.step(0.1);
+    CHECK(!client.outgoing() && client.last_challenge_end()->reason == reason);
+  }
+  CHECK(global.back().text == "You already have a challenge pending");
+  // Cancel: sent, cleared, no notice.
+  session.wire.take();
+  const size_t lines = global.size();
+  CHECK(client.challenge("p1", "Kid", test_card("Serge")));
+  client.cancel_challenge();
+  CHECK(session.sent_of("challenge_cancel").size() == 1 && !client.outgoing() && global.size() == lines);
+  // No answer: given up after the server's limit and the grace.
+  CHECK(client.challenge("p1", "Kid", test_card("Serge")));
+  session.step(MultiplayerClient::kChallengeTime + MultiplayerClient::kChallengeGrace - 0.5);
+  CHECK(client.outgoing().has_value());
+  session.step(1.0);
+  CHECK(!client.outgoing() && client.last_challenge_end()->reason == net::ChallengeEnd::Timeout && global.back().text == "Kid didn't respond");
+  // With challenges off nothing goes out.
+  client.set_challenges(false);
+  CHECK(!client.can_challenge() && !client.challenge("p1", "Kid", test_card("Serge")));
+  client.set_challenges(true);
+  // An unasked pvp_start is ignored.
+  session.wire.receive(R"({"t":"pvp_start","battle":"00ff00ff00ff00ff","seed":5,"first":"p1","opponent":"p1","name":"Kid","star":5,"card":{},"opening_stamina":35})");
+  session.step(0.1);
+  CHECK(!client.take_pvp_start() && client.pvp_battle().empty());
+  // A pvp_start with a bad seed, first side or battle id is dropped; a good one starts the battle.
+  CHECK(client.challenge("p1", "Kid", test_card("Serge")));
+  session.wire.receive(R"({"t":"pvp_start","battle":"00ff00ff00ff00ff","seed":4294967296,"first":"p1","opponent":"p1","name":"Kid","star":5,"card":{},"opening_stamina":35})");
+  session.wire.receive(R"({"t":"pvp_start","battle":"00ff00ff00ff00ff","seed":-1,"first":"p1","opponent":"p1","name":"Kid","star":5,"card":{},"opening_stamina":35})");
+  session.wire.receive(R"({"t":"pvp_start","battle":"00ff00ff00ff00ff","seed":5,"first":"p2","opponent":"p1","name":"Kid","star":5,"card":{},"opening_stamina":35})");
+  session.wire.receive(R"({"t":"pvp_start","battle":"a b","seed":5,"first":"p1","opponent":"p1","name":"Kid","star":5,"card":{},"opening_stamina":35})");
+  session.step(0.1);
+  CHECK(client.outgoing() && client.pvp_battle().empty());
+  session.wire.receive(R"({"t":"pvp_start","battle":"00ff00ff00ff00ff","seed":4294967295,"first":"me00000000000000","opponent":"p1","name":"Kid","star":5,
+    "card":{"star":5,"members":[{"char":1,"name":"Kid","hp":250,"atk":20,"def":15,"mag":11,"mdef":9,"elements":7}]},"opening_stamina":99})");
+  session.step(0.1);
+  CHECK(!client.outgoing() && client.pvp_battle() == "00ff00ff00ff00ff" && !client.can_challenge());
+  const std::optional<net::PvpStart> start = client.take_pvp_start();
+  CHECK(start.has_value() && !client.take_pvp_start());
+  if (!start) return;
+  CHECK(start->seed == 4294967295u && start->first == "me00000000000000" && start->opponent == "p1" && start->name == "Kid" && start->star == 5);
+  CHECK(start->opening_stamina == 70 && start->card.members.size() == 1 && start->card.members[0].hp == 250 && start->card.members[0].char_id == 1);
+  CHECK(start->own == test_card("Serge"));
+  session.wire.take();
+  client.end_pvp(net::PvpResult::Aborted);
+  sent = session.sent_of("pvp_end");
+  CHECK(sent.size() == 1 && sent[0].string_of("battle") == "00ff00ff00ff00ff" && sent[0].string_of("result") == "aborted");
+  CHECK(client.pvp_battle().empty() && client.can_challenge());
+  client.end_pvp(net::PvpResult::Won);
+  CHECK(session.sent_of("pvp_end").empty());
+}
+
+// Typing in the chat still counts as free; a battle starting withdraws the own challenge and answers an incoming one busy.
+void test_challenge_battle_start() {
+  Session session;
+  MultiplayerClient& client = session.client;
+  net::LocalPresence typing = in_room("alu_a01f");
+  typing.pose.state = net::PresenceState::Typing;
+  client.set_local(typing);
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,"card":{}})");
+  session.step(0.1);
+  CHECK(client.incoming().has_value() && session.sent_of("challenge_reply").empty());
+  net::LocalPresence battle = in_room("alu_a01f");
+  battle.pose.state = net::PresenceState::Battle;
+  client.set_local(battle);
+  std::vector<Json> sent = session.sent_of("challenge_reply");
+  CHECK(!client.incoming() && sent.size() == 1 && sent[0].string_of("reason") == "busy");
+  client.set_local(in_room("alu_a01f"));
+  CHECK(client.challenge("p2", "Leena", test_card("Serge")));
+  session.wire.take();
+  client.set_local(battle);
+  CHECK(!client.outgoing() && session.sent_of("challenge_cancel").size() == 1);
+}
+
+// A challenge to the local player: kept for the popup when free, answered busy / off by the client itself otherwise, the replies, the
+// server's ends, the client's own time limits and a drop.
+void test_challenge_in() {
+  Session session;
+  MultiplayerClient& client = session.client;
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,
+    "card":{"star":5,"members":[{"char":1,"name":"Kid","hp":99999,"atk":-3,"def":15,"mag":11,"mdef":9,"elements":7},{},{},{},{}]}})");
+  session.step(1.0);
+  CHECK(client.incoming().has_value());
+  if (!client.incoming()) return;
+  const net::IncomingChallenge& incoming = *client.incoming();
+  CHECK(incoming.from == "p1" && incoming.name == "Kid" && incoming.star == 5 && incoming.deadline == 31.0);
+  CHECK(incoming.card.members.size() == 3 && incoming.card.members[0].hp == 9999 && incoming.card.members[0].atk == 0);
+  CHECK(session.wire.take().empty() && !client.can_challenge());
+  // A second challenge meanwhile is busy.
+  session.wire.receive(R"({"t":"challenge","from":"p2","name":"Leena","star":2,"expires":30000,"card":{}})");
+  session.step(0.1);
+  std::vector<Json> sent = session.sent_of("challenge_reply");
+  CHECK(sent.size() == 1 && sent[0].string_of("from") == "p2" && !sent[0]["accept"].as_bool(true) && sent[0].string_of("reason") == "busy");
+  CHECK(client.incoming()->from == "p1");
+  client.decline_challenge();
+  sent = session.sent_of("challenge_reply");
+  CHECK(sent.size() == 1 && sent[0].string_of("from") == "p1" && sent[0].string_of("reason") == "declined" && !client.incoming());
+  // Not free in the field: busy; challenges off: off; a bad pid: nothing.
+  net::LocalPresence menu = in_room("alu_a01f");
+  menu.pose.state = net::PresenceState::Menu;
+  client.set_local(menu);
+  session.wire.receive(R"({"t":"challenge","from":"p3","name":"Harle","star":9,"expires":30000,"card":{}})");
+  session.step(0.1);
+  CHECK(session.sent_of("challenge_reply").size() == 1 && !client.incoming());
+  client.set_local(in_room(""));
+  session.step(0.1);
+  session.wire.take();
+  session.wire.receive(R"({"t":"challenge","from":"p3","name":"Harle","star":9,"expires":30000,"card":{}})");
+  session.step(0.1);
+  sent = session.sent_of("challenge_reply");
+  CHECK(sent.size() == 1 && sent[0].string_of("reason") == "busy");
+  client.set_local(in_room("alu_a01f"));
+  client.set_challenges(false);
+  session.step(0.1);
+  session.wire.take();
+  session.wire.receive(R"({"t":"challenge","from":"p3","name":"Harle","star":9,"expires":30000,"card":{}})");
+  session.wire.receive(R"({"t":"challenge","from":"x\ny","name":"Bad","star":9,"expires":30000,"card":{}})");
+  session.step(0.1);
+  sent = session.sent_of("challenge_reply");
+  CHECK(sent.size() == 1 && sent[0].string_of("reason") == "off" && !client.incoming());
+  client.set_challenges(true);
+  session.step(0.1);
+  session.wire.take();
+  // Accept: the card, version and data go back; a version refusal ends it with a notice.
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,"card":{}})");
+  session.step(0.1);
+  client.set_battle_data("ff");
+  CHECK(client.accept_challenge(test_card("Serge")));
+  sent = session.sent_of("challenge_reply");
+  CHECK(sent.size() == 1 && sent[0]["accept"].as_bool() && sent[0].string_of("ver") == "0.5.4" && sent[0].string_of("data") == "ff");
+  CHECK(sent.size() == 1 && sent[0]["card"]["members"].items().size() == 1 && client.accepted() && !client.incoming());
+  session.wire.receive(R"({"t":"challenge_end","pid":"p1","reason":"version"})");
+  session.step(0.1);
+  CHECK(!client.accepted() && client.last_challenge_end()->reason == net::ChallengeEnd::Version && !client.last_challenge_end()->outgoing);
+  CHECK(client.chat(net::ChatScope::Global).back().text == "Your OpenCross build differs from Kid's (battles need the same opencross.exe)");
+  // Accept, then the pvp_start.
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,"card":{}})");
+  session.step(0.1);
+  CHECK(client.accept_challenge(test_card("Serge")));
+  session.wire.receive(R"({"t":"pvp_start","battle":"1234567890abcdef","seed":7,"first":"p1","opponent":"p1","name":"Kid","star":5,"card":{},"opening_stamina":35})");
+  session.step(0.1);
+  std::optional<net::PvpStart> start = client.take_pvp_start();
+  CHECK(start && start->first == "p1" && start->opening_stamina == 35 && start->own == test_card("Serge") && !client.accepted());
+  // In a battle every challenge is busy.
+  session.wire.take();
+  session.wire.receive(R"({"t":"challenge","from":"p2","name":"Leena","star":2,"expires":30000,"card":{}})");
+  session.step(0.1);
+  CHECK(session.sent_of("challenge_reply").size() == 1 && !client.incoming());
+  client.end_pvp(net::PvpResult::Lost);
+  session.wire.take();
+  // The challenger withdrew.
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,"card":{}})");
+  session.step(0.1);
+  session.wire.receive(R"({"t":"challenge_end","pid":"p1","reason":"cancelled"})");
+  session.step(0.1);
+  CHECK(!client.incoming() && client.chat(net::ChatScope::Global).back().text == "Kid withdrew the challenge");
+  // Unanswered: the client answers timeout at the deadline; the limit is at most 60 s.
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":999999999,"card":{}})");
+  session.step(0.1);
+  CHECK(client.incoming() && client.incoming()->deadline == session.now + MultiplayerClient::kMaxChallengeTime);
+  session.wire.take();
+  session.step(MultiplayerClient::kMaxChallengeTime);
+  sent = session.sent_of("challenge_reply");
+  CHECK(sent.size() == 1 && sent[0].string_of("reason") == "timeout" && !client.incoming());
+  CHECK(client.chat(net::ChatScope::Global).back().text == "The challenge from Kid timed out");
+  // An accept whose pvp_start never comes is given up.
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,"card":{}})");
+  session.step(0.1);
+  client.accept_challenge(test_card("Serge"));
+  session.step(MultiplayerClient::kStartWait);
+  CHECK(!client.accepted() && client.can_challenge());
+  // A drop forgets every challenge.
+  session.wire.receive(R"({"t":"challenge","from":"p1","name":"Kid","star":5,"expires":30000,"card":{}})");
+  session.step(0.1);
+  CHECK(client.incoming().has_value());
+  session.wire.closed("Connection lost");
+  session.step(0.1);
+  CHECK(!client.incoming() && !client.outgoing() && !client.accepted() && client.pvp_battle().empty());
+}
+
 void test_player_id() {
   const std::string first = net::new_player_id(), second = net::new_player_id();
   CHECK(net::valid_player_id(first) && net::valid_player_id(second) && first != second);
@@ -486,6 +781,11 @@ int main() {
   test_remote_table();
   test_chat();
   test_refusals();
+  test_pm();
+  test_pvp_flag();
+  test_challenge_out();
+  test_challenge_battle_start();
+  test_challenge_in();
   test_player_id();
   if (failures) std::printf("%d failure(s)\n", failures);
   else std::printf("multiplayer client: all passed\n");

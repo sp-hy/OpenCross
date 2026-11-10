@@ -101,8 +101,12 @@ struct MultiplayerSettings {
   bool translucent = false;
   bool show_labels = true;
   bool chat_bubbles = true;
+  // Global chat is neither shown nor sent: only room chat and private lines.
+  bool hide_global_chat = false;
   ChatDisplay chat = ChatDisplay::New;
   bool mute_hides_party = true;
+  // Other players may challenge this one to a battle (sent to the server as the `pvp` flag).
+  bool challenges = true;
   // Player ids (pid) whose chat, and with mute_hides_party whose parties, are hidden.
   std::vector<std::string> muted;
   std::string url() const { return server == MultiplayerServer::Other ? server_url : std::string(kMasterUrl); }
@@ -209,8 +213,9 @@ void bind_cheats(const Cheats* set);
 //            master | other: kMasterUrl, or the address in ServerUrl. Name: the name others see (empty = the Steam
 //            persona name, else Player). PlayerId: the install's random id (made on first enable). ShowPlayers / MaxParties (1..32) /
 //            Translucent / ShowLabels: how remote parties are drawn. ChatBubbles: room chat lines also show over the speaker's party.
+//            HideGlobalChat: the chat shows only room and private lines and sends only to the room.
 //            Chat: kChatDisplayNames. MuteHidesParty: a muted player's party is
-//            hidden too. Muted: comma list of the muted players' pids. AdminToken:
+//            hidden too. Challenges: other players may challenge this one to a battle. Muted: comma list of the muted players' pids. AdminToken:
 //            the server's admin token (ini only, no setting); the server marks this player's chat as an admin's.
 //   [Debug]  Room: jump straight to this field room; empty = start at the title. Flow: title | name | slots | opening | field (field = no
 //            flow, uses Room or alu_a01f); empty = title unless Room is set. Seed: seeds every RNG (field, battle, effects) for

@@ -226,6 +226,10 @@ void FieldWorld::place_local_label(float alpha) {
   if (label_point(ents_[static_cast<size_t>(lead)].actor, alpha, scroll_x, scroll_y, x, y)) local_label_ = net::RemoteLabel{{}, {}, x, y, net::PresenceState::Field};
 }
 
+int FieldWorld::remote_shadow_grey(const RemoteParties::Member& member) const {
+  return remote_options_.translucent ? static_cast<int>(std::lround(static_cast<float>(member.shadow_grey) * kTranslucentOpacity)) : member.shadow_grey;
+}
+
 void FieldWorld::remote_shadows(std::vector<ShadowParams>& shadows, float alpha) const {
   if (!remote_current()) return;
   for (const RemoteParties::Party& party : remote_.parties()) {
@@ -238,10 +242,16 @@ void FieldWorld::remote_shadows(std::vector<ShadowParams>& shadows, float alpha)
       shadow.y = pose.y;
       shadow.z = pose.z;
       ActorShadows::floor_normal(view_.walk(), member.actor.triangle(), shadow.normal);
-      shadow.grey = remote_options_.translucent ? static_cast<int>(std::lround(static_cast<float>(member.shadow_grey) * kTranslucentOpacity)) : member.shadow_grey;
+      shadow.grey = remote_shadow_grey(member);
       if (render::FieldCamera::Projected projected;
           view_.camera().project({shadow.x, shadow.y, shadow.z}, projected) && !in_slab(std::floor(std::max(projected.z, 0.0f) / 16.0f)))
         continue;
+      if (member.shadow_tile >= 0) {
+        shadow.tile_half = member.shadow_half;
+        shadow.tile_uv = render::ShadowPipeline::tile_uv(member.shadow_tile);
+        shadow.tile_slope_x = member.shadow_slope_x;
+        shadow.tile_slope_z = member.shadow_slope_z;
+      }
       shadows.push_back(shadow);
     }
   }
