@@ -1327,8 +1327,10 @@ void Battle::weapon_landed(int actor, int strength) {
   Unit& attacker = units_[static_cast<size_t>(actor)];
   // The chain counter: a landed hit of a PC that is not confused adds its strength's step; a miss leaves it.
   if (attacker.pc && !(attacker.lo & st::kConfused)) chain_hits_ += kChainAdd[static_cast<size_t>(strength)];
-  // Any attacker's gauge fills (battle boost: to the top).
-  attacker.gauge = cheats_.boost ? attacker.gauge_max : std::clamp(attacker.gauge + strength + 1, -1, attacker.gauge_max);
+  // A party member's gauge fills (battle boost: to the top). The game moves the gauge only in the party's end-of-action step, so a
+  // monster's hits never charge it.
+  if (is_pc_slot(actor))
+    attacker.gauge = cheats_.boost ? attacker.gauge_max : std::clamp(attacker.gauge + strength + 1, -1, attacker.gauge_max);
 }
 
 void Battle::do_weapon_attack(int actor, int target, int strength) {
