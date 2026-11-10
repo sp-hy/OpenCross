@@ -3,6 +3,7 @@
 // may also carry operands that a later version of the op adds.
 #include "script/field_vm.h"
 
+#include <algorithm>
 #include <cstdlib>
 
 #include "core/features.h"
@@ -68,9 +69,9 @@ void FieldVM::exec_extension(u8 sub) {
       // Blocks until a new press (a key held when it starts counts only once released, so the press that opened the screen is not
       // taken): a D-pad press moves the cursor to the nearest selectable item that way (var = 0x40 | item; a direction with none is
       // ignored), and a held direction steps again as a menu cursor does (ModUi::kRepeatDelay / kRepeatEvery); Circle picks the
-      // cursor's item, Cross cancels (0x80). Then the record's turn ends: the next instruction runs
-      // next tick. From the first pick on, the shown UI holds the field's controls (ModUi::holds_controls).
-      constexpr u16 kCircle = 0x20, kCross = 0x40, kDirMask = 0xF000;
+      // cursor's item, Cross cancels (0x80), Triangle / Square / L1 / R1 give 0x81 / 0x82 / 0x83 / 0x84. Then the record's turn ends: the
+      // next instruction runs next tick. From the first pick on, the shown UI holds the field's controls (ModUi::holds_controls).
+      constexpr u16 kL1 = 0x04, kR1 = 0x08, kTriangle = 0x10, kCircle = 0x20, kCross = 0x40, kSquare = 0x80, kDirMask = 0xF000;
       constexpr std::array<u16, 4> kDirs = {0x1000, 0x2000, 0x4000, 0x8000};
       const u16 held = host_.keys_held();
       if (rec_->phase == 0) {
@@ -89,9 +90,12 @@ void FieldVM::exec_extension(u8 sub) {
         keys |= pressed & kDirMask;
         ui_.pick_repeat = 0;
       } else if (held & kDirMask) {
+        // Optional operands (level 2): U@2 the delay before a held direction repeats, U@4 the ticks between repeats (0 = none).
+        const int delay = size >= 4 ? std::max(1, static_cast<int>(operand_u(4))) : ModUi::kRepeatDelay;
+        const int every = size >= 6 ? static_cast<int>(operand_u(6)) : ModUi::kRepeatEvery;
         ++ui_.pick_repeat;
-        const int over = ui_.pick_repeat - ModUi::kRepeatDelay;
-        if (over >= 0 && over % ModUi::kRepeatEvery == 0) keys |= held & kDirMask;
+        const int over = ui_.pick_repeat - delay;
+        if (over >= 0 && every > 0 && over % every == 0) keys |= held & kDirMask;
       } else {
         ui_.pick_repeat = 0;
       }
@@ -101,6 +105,14 @@ void FieldVM::exec_extension(u8 sub) {
         result = ui_.cursor;
       } else if (keys & kCross) {
         result = ModUi::kPickCancel;
+      } else if (keys & kTriangle) {
+        result = ModUi::kPickTriangle;
+      } else if (keys & kSquare) {
+        result = ModUi::kPickSquare;
+      } else if (keys & kL1) {
+        result = ModUi::kPickL1;
+      } else if (keys & kR1) {
+        result = ModUi::kPickR1;
       } else {
         for (int dir = 0; dir < 4 && result < 0; ++dir) {
           if (!(keys & kDirs[static_cast<size_t>(dir)])) continue;
@@ -133,6 +145,18 @@ void FieldVM::exec_extension(u8 sub) {
     case 0xCD: {
       const int member = host_.reserve_member(operand_u(4));
       write_var(word_at(2), member < 0 ? 0xFF : static_cast<u16>(member));
+      break;
+    }
+    case 0xCE: {
+      ModUi::Element oval{ModUi::kOval, coord(4), coord(6), coord(8), coord(10), colour(12), byte(14)};
+      oval.width = static_cast<u8>(std::max(1, static_cast<int>(byte(16))));
+      put(id_at(2), oval);
+      break;
+    }
+    case 0xCF: {
+      ModUi::Element image{ModUi::kImage, coord(4), coord(6), coord(8), coord(10), colour(12), byte(14)};
+      image.msg = static_cast<s16>(operand_u(16));
+      put(id_at(2), image);
       break;
     }
     case 0xD0: host_.set_model_source(operand_u(2), operand_u(4), operand_u(6), operand_u(8)); break;

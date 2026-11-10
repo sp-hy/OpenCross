@@ -1124,7 +1124,8 @@ void test_mod_ui_ops() {
   script.inc(V(1));
   script.park();
 
-  const std::initializer_list<std::pair<int, s32>> presses = {{0x2000, 0x4B}, {0x1000, 0x4C}, {0x20, 10}, {0x40, 0x80}};
+  const std::initializer_list<std::pair<int, s32>> presses = {{0x2000, 0x4B}, {0x1000, 0x4C}, {0x20, 10}, {0x40, 0x80}, {0x10, 0x81}, {0x80, 0x82},
+                                                              {0x04, 0x83}, {0x08, 0x84}};
   for (const auto& [press, want] : presses) {
     KeyHost host;
     FieldVM vm(host);
@@ -1202,6 +1203,33 @@ void test_mod_ui_ops() {
     for (int tick = 0; tick < 3; ++tick) vm.tick();
     CHECK(!vm.mod_ui().shown && !vm.mod_ui().holds_controls);
   }
+  {
+    // UI_PICK's repeat operands: delay 30, no repeat - a held Right moves once however long it is held.
+    Asm looped;
+    const auto lext = [&](int sub, std::initializer_list<int> words) {
+      looped.raw({0xFE, sub, static_cast<int>(2 * words.size())});
+      for (int value : words) looped.word(value);
+    };
+    const u16 init2 = looped.here();
+    for (int id = 0; id < 4; ++id) lext(0xC6, {I(id), I(40 * id), I(0), I(10), I(10), I(0)});
+    lext(0xC7, {I(0), I(0)});
+    lext(0xC2, {I(1)});
+    looped.stop();
+    const u16 loop = looped.here();
+    lext(0xC8, {V(0), I(30), I(0)});
+    looped.inc(V(1));
+    looped.jump(loop);
+    KeyHost host;
+    FieldVM vm(host);
+    vm.load(make_module(looped, {{{{0, init2}, {1, loop}}}}));
+    for (int tick = 0; tick < 4; ++tick) vm.tick();
+    host.held = host.latch = 0x2000;
+    for (int tick = 0; tick < 3; ++tick) vm.tick();
+    CHECK_EQ(vm.var(V(1)), 1);
+    for (int tick = 0; tick < 90; ++tick) vm.tick();
+    CHECK_EQ(vm.var(V(1)), 1);
+    CHECK_EQ(vm.mod_ui().cursor, 1);
+  }
   // SET enabled / visible change what the cursor can reach; a new room's VM starts with nothing shown.
   ModUi ui;
   ui.elements[1] = {ModUi::kItem, 0, 0, 10, 10, 0, 0};
@@ -1213,11 +1241,64 @@ void test_mod_ui_ops() {
   CHECK(ui.set(2, ModUi::kFieldVisible, 0));
   CHECK_EQ(ui.step(1), -1);
   CHECK(!ui.set(2, 99, 0));
+  // Level 2: an image's angle wraps at a full turn; alpha is kept 0..255.
+  CHECK(ui.set(2, ModUi::kFieldAngle, 4096 + 1024));
+  CHECK_EQ(ui.elements[2].angle, 1024);
+  CHECK(ui.set(2, ModUi::kFieldAlpha, 300));
+  CHECK_EQ(ui.elements[2].alpha, 255);
+  // Level 2: an item's own neighbours: one that way, its own id (no move), any other value = the nearest item that way.
+  CHECK(ui.set(2, ModUi::kFieldVisible, 1));
+  ui.elements[3] = {ModUi::kItem, 0, 40, 10, 10, 0, 0};
+  CHECK_EQ(ui.step(2), 3);
+  CHECK(ui.set(1, ModUi::kFieldDown, 2));
+  CHECK_EQ(ui.step(2), 2);
+  CHECK(ui.set(1, ModUi::kFieldDown, 1));
+  CHECK_EQ(ui.step(2), -1);
+  CHECK(ui.set(1, ModUi::kFieldDown, 255));
+  CHECK_EQ(ui.step(2), 3);
+  CHECK(ui.set(1, ModUi::kFieldRight, 3));
+  CHECK(ui.set(3, ModUi::kFieldVisible, 0));
+  CHECK_EQ(ui.step(1), 2);
   KeyHost host;
   FieldVM vm(host);
   vm.load(make_module(script, {{{{0, init}}}}));
   vm.load(make_module(script, {{{{0, update}}}}));
   CHECK(!vm.mod_ui().shown && vm.mod_ui().elements[0].kind == ModUi::kNone);
+  {
+    // Ovals (level 2): ids up to 255; a band's width (0 reads as 1); UI_SET width; GETPOS gives the centre. Items past 63 are not
+    // selectable (a pick result has 6 bits for the item). An image (level 2): its rect, tint, flags and number; UI_SET 5 renumbers it.
+    Asm ovals;
+    const auto oext = [&](int sub, std::initializer_list<int> words) {
+      ovals.raw({0xFE, sub, static_cast<int>(2 * words.size())});
+      for (int value : words) ovals.word(value);
+    };
+    const u16 start = ovals.here();
+    oext(0xCE, {I(100), I(282), I(124), I(26), I(26), I(6), I(0), I(0)});
+    oext(0xCE, {I(101), I(250), I(124), I(58), I(44), I(5), I(ModUi::kOutline | ModUi::kTranslucent), I(4)});
+    oext(0xCA, {I(101), I(ModUi::kFieldWidth), I(0)});
+    oext(0xC9, {I(101), V(0), V(1)});
+    oext(0xC6, {I(70), I(0), I(0), I(10), I(10), I(0)});
+    oext(0xC0, {V(2), I(2)});
+    oext(0xCF, {I(102), I(10), I(20), I(24), I(24), I(8), I(ModUi::kTranslucent), I(7)});
+    oext(0xCA, {I(102), I(ModUi::kFieldMsg), I(12)});
+    oext(0xCE, {I(255), I(1), I(2), I(3), I(4), I(5), I(0), I(1)});
+    ovals.stop();
+    FieldVM ovm(host);
+    ovm.load(make_module(ovals, {{{{0, start}}}}));
+    const ModUi& oui = ovm.mod_ui();
+    CHECK(oui.elements[100].kind == ModUi::kOval && oui.elements[100].w == 26 && oui.elements[100].width == 1 && oui.elements[100].colour == 6);
+    CHECK(oui.elements[101].kind == ModUi::kOval && oui.elements[101].h == 44 && oui.elements[101].flags == (ModUi::kOutline | ModUi::kTranslucent));
+    CHECK_EQ(oui.elements[101].width, 1);
+    CHECK_EQ(ovm.var(V(0)), 250);
+    CHECK_EQ(ovm.var(V(1)), 124);
+    CHECK(oui.elements[70].kind == ModUi::kItem && !oui.selectable(70));
+    CHECK_EQ(ovm.var(V(2)), 2);
+    const ModUi::Element& image = oui.elements[102];
+    CHECK(image.kind == ModUi::kImage && image.x == 10 && image.w == 24 && image.colour == 8 && image.flags == ModUi::kTranslucent);
+    CHECK_EQ(image.msg, 12);
+    CHECK_EQ(oui.centre(102).first, 22);
+    CHECK(oui.elements[255].kind == ModUi::kOval && oui.elements[255].x == 1);
+  }
 }
 
 // GET_POSITION (48) writes X, Z, Y in operand order, like the published player variables 0x12 / 0x14 / 0x16.

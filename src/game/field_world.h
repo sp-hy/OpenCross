@@ -907,6 +907,15 @@ class FieldWorld final : public script::FieldHost {
   };
   std::array<ModUiWindow, 8> mod_ui_win_;
   bool mod_ui_full_logged_ = false;
+  // The mod UI's images (script::ModUi::kImage), by image number: hd/modui/<n>.png, loaded on first draw and kept until shutdown;
+  // a missing or unreadable file is tried once (an empty `set`).
+  struct ModUiImage {
+    render::Texture tex;
+    render::TexRef set;
+  };
+  std::map<int, ModUiImage> mod_ui_images_;
+  render::Sampler mod_ui_sampler_;
+  const ModUiImage& mod_ui_image(int number);
   void sync_mod_ui_windows();
   std::string portrait_set_ = "2021";
   // Button glyphs in the message windows: key caps after a key press, pad glyphs after a pad press.

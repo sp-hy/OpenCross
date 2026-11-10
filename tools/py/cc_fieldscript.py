@@ -368,17 +368,19 @@ FE85 | | CLEARED_SAVE | C | Strips gear / grids, var 0x7E = 3, selects the save 
 FEC0 | V U | GET_FEATURE_LEVEL | C | Extension range. var[V] = the level of feature U this build implements (0 = none; feature 0 = the extension range, level 1).
 FEC1 | | UI_CLEAR | C | Mod UI (feature 2): every element off, hidden, the default palette.
 FEC2 | U | UI_SHOW | C | Mod UI shown (U != 0) or hidden; the room's VM owns it, a room change clears it.
-FEC3 | U U U U U U U | UI_RECT | C | Mod UI element id (0..63): rectangle x y w h (field screen pixels), palette colour, flags (1 outline, 2 translucent).
+FEC3 | U U U U U U U | UI_RECT | C | Mod UI element id (0..255): rectangle x y w h (field screen pixels), palette colour, flags (1 outline, 2 translucent, 4 pulse, 8 beat).
 FEC4 | U U U U U U | UI_LINE | C | Mod UI element id: line (x0, y0)-(x1, y1), palette colour.
 FEC5 | U U U U U | UI_TEXT | C | Mod UI element id: room message msg in a window whose text starts at (x, y); flags 1 = framed (the window skin), else frameless; sized by its message; does not block.
 FEC6 | U U U U U U | UI_ITEM | C | Mod UI element id: a selectable item x y w h (the cursor's stops), flags 1 = disabled.
 FEC7 | U U | UI_CURSOR | C | Mod UI cursor on item id, style (0 outline, 1 highlight, 2 none).
-FEC8 | V | UI_PICK | C | Mod UI pick: blocks for a press made while it waits; D-pad -> nearest selectable item that way (var = 0x40 | item), Circle var = item, Cross 0x80; then ends the turn.
+FEC8 | V | UI_PICK | C | Mod UI pick: blocks for a press made while it waits; D-pad -> nearest selectable item that way (var = 0x40 | item), Circle var = item, Cross 0x80, Triangle 0x81, Square 0x82, L1 0x83, R1 0x84; then ends the turn. Optional (level 2): U ticks before a held direction repeats, U ticks between repeats (0 = none).
 FEC9 | U V V | UI_GETPOS | C | Mod UI element id's centre (a text window: its text origin) into two vars.
-FECA | U U U | UI_SET | C | Mod UI element id: field (0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg, 6 flags, 7 w, 8 h) = value (a text window is shown again).
+FECA | U U U | UI_SET | C | Mod UI element id: field (0 visible, 1 enabled, 2 colour, 3 x, 4 y, 5 msg / image number, 6 flags, 7 w, 8 h, 9 width, 10 angle, 11 alpha, 12..15 up / right / down / left neighbour) = value (a text window is shown again).
 FECB | U U U U | UI_PALETTE | C | Mod UI palette entry i (0..31) = (r, g, b).
 FECC | U U | SET_RESERVE | C | Party swap (feature 1, level 2): reserve slot U (0..40) = character U (>= 0x2C empties it); the character leaves any other reserve slot.
 FECD | V U | GET_RESERVE | C | Party swap: var[V] = the character in reserve slot U, 0xFF when empty (or the character is not available / in the party).
+FECE | U U U U U U U U | UI_OVAL | C | Mod UI element id: oval centred (x, y), radii (rx, ry), palette colour, flags (1 outline: a band `width` pixels wide inside the edge, 2 translucent, 4 pulse, 8 beat), width.
+FECF | U U U U U U U U | UI_IMAGE | C | Mod UI element id: image hd/modui/<n>.png stretched over x y w h, times palette colour, flags (2 translucent, 4 pulse, 8 beat), n.
 FED0 | U U U U | MODEL_SOURCE | C | Extension range. Room model n comes from elsewhere until the room changes: kind 0 character id's field model, 1 field model byte id, 2 room id's model k, 3 battle model id, 4 character id's battle model (n kind id k; a source naming no model: the room's own again).
 """
 
