@@ -1,5 +1,6 @@
 // Auto-save (RDE): trigger rule + slot 0 round trip through a save.dat built in memory (no real save is touched); the OpenCross
 // save page (a temp folder) and where an auto-save goes.
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -139,6 +140,8 @@ static void test_page() {
   page.write(100, st);
   Autosave::write(page, st);
   CHECK(std::filesystem::exists(dir / "007.ocsav") && std::filesystem::exists(dir / "100.ocsav") && std::filesystem::exists(dir / "auto.ocsav"));
+  // Two writes in a row can share a file time (the clock's resolution), so the later write is dated one second after the first.
+  std::filesystem::last_write_time(dir / "100.ocsav", std::filesystem::last_write_time(dir / "007.ocsav") + std::chrono::seconds(1));
   // A fresh scan reads them back: block, names, counter; the auto-save carries the caption, the newest is the last manual write.
   save::OcSaves again;
   again.set_dir(dir);
