@@ -117,8 +117,8 @@ void BattleView::fx_end() {
   // and then falling with the KO fade.
   if (const effects::FxModels* ms = fx_->bespoke_models())
     for (const effects::FxModel& fx_model : ms->units)
-      if (fx_model.unit >= 0 && fx_model.unit < battle::kUnits && fx_model.hidden && !fx_model.unhide_at_end && !battle_->unit(fx_model.unit).pc &&
-          ((fx_model.tinted && fx_model.rgb[0] == 0 && fx_model.rgb[1] == 0 && fx_model.rgb[2] == 0) || battle_->unit(fx_model.unit).hp <= 0)) {
+      if (fx_model.unit >= 0 && fx_model.unit < battle::kUnits && fx_model.hidden && !fx_model.unhide_at_end && !bunit(fx_model.unit).pc &&
+          ((fx_model.tinted && fx_model.rgb[0] == 0 && fx_model.rgb[1] == 0 && fx_model.rgb[2] == 0) || bunit(fx_model.unit).hp <= 0)) {
         Visual& visual = vis_[static_cast<size_t>(fx_model.unit)];
         visual.fade = visual.fade_prev = 0.0f;
       }
@@ -156,7 +156,7 @@ void BattleView::fx_end() {
     // Every unit on screen without the dead flag restarts its idle, so it re-picks its pose from the HP it now has: a PC healed above a
     // quarter stands up (also a target whose own table ended before its number landed), one brought to a quarter or less hunches, and
     // HP a script wrote to 0 shows as the low-HP pose from here on. A unit whose script was cut is restarted by the action's end.
-    const battle::Unit& unit_rec = battle_->unit(i);
+    const battle::Unit& unit_rec = bunit(i);
     const bool dead_flag = visual.ko_shown && !visual.death_owed && !(unit_rec.hp_written_zero && unit_rec.hp <= 0);
     if (unit_rec.present && visual.script_kind == kIdle && !dead_flag) start_idle(i);
   }
@@ -258,7 +258,7 @@ void BattleView::fx_dev_logs() {
   if (units_every && dev_new_frame && frame_count_ % units_every == 0) {
     log::debug("fx units tick {} fxtick {}", frame_count_, fx_ ? fx_->ticks() : 0);
     for (int unit = 0; unit < battle::kUnits; ++unit) {
-      if (!battle_->unit(unit).present) continue;
+      if (!bunit(unit).present) continue;
       const Visual& visual = vis_[static_cast<size_t>(unit)];
       const size_t ui = static_cast<size_t>(unit);
       // Model flags: 0x1 / 0x100 hide bits (fx_hide_bits_), 0x100 lit, 0x200 = shadow ON (set on every unit at rest; ops 0x74 clears it, 0x75 sets it); ghost is the separate column.
@@ -271,7 +271,7 @@ void BattleView::fx_dev_logs() {
       anm_unit_probe(unit, semi, arg, blink);
       unsigned fl = fx_hide_bits_[ui] | (fx_lit_[ui] ? 0x100u : 0u) | (shadow_off_[ui] ? 0u : 0x200u);
       if (om) fl = (fl & ~0x200u) | (om->flags & ~0x200u) | ((om->flags & 0x200u) && !shadow_off_[ui] ? 0x200u : 0u);
-      const float kofade = battle_->unit(unit).pc ? 1.0f : visual.fade;
+      const float kofade = bunit(unit).pc ? 1.0f : visual.fade;
       if (fx_hidden_[ui] || (om && om->hidden) || anm_hidden(unit) || kofade <= 0.0f) fl |= 0x1;
       if (semi || (kofade < 1.0f && kofade > 0.0f)) fl |= 0x2;
       // Eye blink armed (ops 0x72 / 0x4F).

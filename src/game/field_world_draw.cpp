@@ -170,18 +170,9 @@ bool FieldWorld::tint_active() const { return fog_.cur[0] > 0.5f || fog_.cur[1] 
 // Per actor, once per tick: the shadow strength eases by 2 toward (R + G + B) / 6 of the entity colour (128 each -> 64),
 // toward 0 on a triangle with any of the flags 0x6E000 (stairs, water); an actor that is not drawn has none.
 void FieldWorld::step_shadows() {
-  static constexpr float kSlopeEase = 0.2f, kMaxSlope = 1.0f;
   for (size_t index = 0; index < ents_.size(); ++index) {
     Ent& entity = ents_[index];
-    // Off the mesh (a ladder) the last slope stays.
-    if (entity.actor.loaded() && entity.actor.triangle() >= 0) {
-      float normal[3];
-      ActorShadows::floor_normal(view_.walk(), entity.actor.triangle(), normal);
-      if (normal[1] != 0.0f) {
-        entity.shadow_slope_x += (std::clamp(-normal[0] / normal[1], -kMaxSlope, kMaxSlope) - entity.shadow_slope_x) * kSlopeEase;
-        entity.shadow_slope_z += (std::clamp(-normal[2] / normal[1], -kMaxSlope, kMaxSlope) - entity.shadow_slope_z) * kSlopeEase;
-      }
-    }
+    if (entity.actor.loaded()) ActorShadows::ease_slope(view_.walk(), entity.actor.triangle(), entity.shadow_slope_x, entity.shadow_slope_z);
     if (vm_.entity(static_cast<int>(index)).flags38 & 0x10C420) {
       entity.shadow_grey = 0;
       continue;
@@ -267,8 +258,11 @@ bool FieldWorld::casts_shadow(size_t index) const {
 
 // [Enhancements] Lighting: each actor flattened straight down onto its own floor height, one tile per actor. The tile is sized to the pose, so a raised arm
 // stays inside it; an actor past the mask's tiles keeps the blob. The strength is the PS1 shadow's (water and stairs fade it out the same way).
+// The remote members drawn take the tiles left after the room's actors, at the strength of their blob.
 void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
   for (Ent& entity : ents_) entity.shadow_tile = -1;
+  for (RemoteParties::Party& party : remote_.parties())
+    for (RemoteParties::Member& member : party.members) member.shadow_tile = -1;
   if (!cast_shadows_ || shadow_tiles_failed_ || !shadows_ok_ || !view_.loaded()) return;
   if (!shadow_tiles_.ready() && !shadow_tiles_.init(*ctx_)) {
     log::warn("field: shadow pipeline failed, blob shadows only");
@@ -277,30 +271,45 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
   }
   alpha = interp_alpha(alpha);
   static constexpr float kPoseMargin = 72.0f, kMinHalf = 96.0f, kMaxHalf = 640.0f;
+  static constexpr int kMaxTiles = static_cast<int>(render::ShadowPipeline::kMaxCasters);
   std::vector<render::Mat4> palette;
   std::vector<float> halves;
   int tile = 0;
-  for (size_t index = 0; index < ents_.size() && tile < static_cast<int>(render::ShadowPipeline::kMaxCasters); ++index) {
-    Ent& entity = ents_[index];
-    if (!casts_shadow(index) || !entity.actor.gpu()) continue;
+  // The next tile: sized to the pose, placed at `floor_y`, the silhouette cast at strength `grey`; returns the tile's half span.
+  auto cast_tile = [&](Actor& actor, float floor_y, int grey) {
     if (tile == 0) shadow_tiles_.begin_tiles(frame);
-    const ActorPose pose = entity.actor.pose(alpha);
-    const bool jumping = entity.motion.active && (entity.motion.kind == script::MotionKind::Jump || entity.motion.kind == script::MotionKind::Tween);
-    const render::Mat4 model = entity.actor.model_matrix(alpha);
-    entity.actor.palette(alpha, palette);
+    const ActorPose pose = actor.pose(alpha);
+    const render::Mat4 model = actor.model_matrix(alpha);
+    actor.palette(alpha, palette);
     float reach = 0.0f;
     for (const render::Mat4& joint : palette) {
       const render::Mat4 world = model * joint;
       reach = std::max({reach, std::fabs(world.at(0, 3) - pose.x), std::fabs(world.at(2, 3) - pose.z)});
     }
-    entity.shadow_half = std::clamp(reach + kPoseMargin, kMinHalf, kMaxHalf);
-    entity.shadow_tile = tile;
-    halves.push_back(entity.shadow_half);
-    shadow_tiles_.place_tile(tile++, pose.x, pose.z, jumping ? ground_y(entity) : pose.y, entity.shadow_half);
+    const float half = std::clamp(reach + kPoseMargin, kMinHalf, kMaxHalf);
+    halves.push_back(half);
+    shadow_tiles_.place_tile(tile++, pose.x, pose.z, floor_y, half);
     std::array<render::ShadowPipeline::Cast, render::ShadowPipeline::kChannels> casts;
-    casts[0] = {{0.0f, 1.0f, 0.0f}, std::clamp(static_cast<float>(entity.shadow_grey) / 90.0f, 0.0f, 1.0f)};
-    shadow_tiles_.cast(*entity.actor.gpu(), model, palette, entity.actor.hidden_parts(), 0, casts);
+    casts[0] = {{0.0f, 1.0f, 0.0f}, std::clamp(static_cast<float>(grey) / 90.0f, 0.0f, 1.0f)};
+    shadow_tiles_.cast(*actor.gpu(), model, palette, actor.hidden_parts(), 0, casts);
+    return half;
+  };
+  for (size_t index = 0; index < ents_.size() && tile < kMaxTiles; ++index) {
+    Ent& entity = ents_[index];
+    if (!casts_shadow(index) || !entity.actor.gpu()) continue;
+    const bool jumping = entity.motion.active && (entity.motion.kind == script::MotionKind::Jump || entity.motion.kind == script::MotionKind::Tween);
+    entity.shadow_tile = tile;
+    entity.shadow_half = cast_tile(entity.actor, jumping ? ground_y(entity) : entity.actor.pose(alpha).y, entity.shadow_grey);
   }
+  if (remote_current())
+    for (RemoteParties::Party& party : remote_.parties()) {
+      if (!party.visible) continue;
+      for (RemoteParties::Member& member : party.members) {
+        if (tile >= kMaxTiles || !member.placed || !member.actor.loaded() || !member.actor.gpu() || member.shadow_grey <= 0) continue;
+        member.shadow_tile = tile;
+        member.shadow_half = cast_tile(member.actor, member.actor.pose(alpha).y, remote_shadow_grey(member));
+      }
+    }
   if (tile > 0) {
     shadow_tiles_.end_mask();
     shadow_tiles_.soften_tiles(frame, halves);

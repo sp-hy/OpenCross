@@ -224,7 +224,7 @@ void BattleView::apply_camera(float alpha) {
     std::string yaws;
     for (int i = 0; i < battle::kUnits; ++i) {
       const Visual& visual = vis_[static_cast<size_t>(i)];
-      if (!battle_->unit(i).present) {
+      if (!bunit(i).present) {
         yaws += " -";
         continue;
       }
@@ -363,7 +363,7 @@ void BattleView::tick_camera() {
       pli_after_load_ = false;
       int first = -1;
       for (int i = 0; i < battle::kPcSlots; ++i)
-        if (unplaced_[static_cast<size_t>(i)] && (first < 0 || battle_->unit(i).src_id < battle_->unit(first).src_id)) first = i;
+        if (unplaced_[static_cast<size_t>(i)] && (first < 0 || bunit(i).src_id < bunit(first).src_id)) first = i;
       if (first >= 0) {
         unplaced_[static_cast<size_t>(first)] = false;
         vis_[static_cast<size_t>(first)].pose.play(1, 0);

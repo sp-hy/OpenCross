@@ -1,5 +1,6 @@
 // The field -> battle hand-off (field A3 / C9): the field has faded to black; the BattleView runs on the field's party, then the
-// result is handed back (rewards, HP, the game-over room).
+// result is handed back (rewards, HP, the game-over room). A versus battle takes the same path in and out with nothing of the save in it:
+// no Relief Charm write, seed variable or party swap on the way in, no result, rewards, HP or BATTLE_RESULT on the way back.
 #include "app/app.h"
 
 #include <algorithm>
@@ -9,6 +10,7 @@
 
 #include "battle/rng.h"
 #include "battle/rules.h"
+#include "battle/versus.h"
 #include "core/log.h"
 #include "game/game_session.h"
 
@@ -19,6 +21,15 @@ data::CharNames App::char_names() { return {flow_ready ? &flow.machine().custom_
 FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleRequest& rq) {
   FieldBattleArgs battle_args;
   battle_args.rq = rq;
+  // A versus battle: its carrier scene and stage, the sides it was given; the party argument is not used.
+  if (versus_next) {
+    battle_args.scene = tables_ok ? battle::versus_carrier_scene(tables, versus_next->battlefield) : -1;
+    battle_args.bopt.flags = rq.flags;
+    battle_args.bopt.battle_id = rq.battle_id;
+    battle_args.bopt.battlefield = versus_next->battlefield;
+    battle_args.bopt.versus = versus_next;
+    return battle_args;
+  }
   // Reproducible fights: the view reads its seed from this variable.
   if (config.debug_seed) {
     const std::string seed = std::to_string(config.debug_seed * 2654435761u + ++battle_counter * 40503u);
@@ -126,11 +137,91 @@ void App::start_field_battle() {
     battle_in_field = true;
     battle_scene = scene;
     ++battle_starts;
-    log::info("battle: field encounter id {:#x} -> scene {}", rq.battle_id, scene);
+    versus_running = bopt.versus.has_value();
+    versus_next.reset();
+    log::info("battle: field encounter id {:#x} -> scene {}{}", rq.battle_id, scene, versus_running ? " (versus)" : "");
+  } else if (bopt.versus) {
+    log::warn("battle: could not start the versus battle (carrier scene {})", scene);
+    versus_next.reset();
+    finish_versus_battle();
   } else {
     log::warn("battle: could not start encounter id {:#x} (scene {}); skipped as fled", rq.battle_id, scene);
     world.end_battle(2);
   }
+}
+
+namespace {
+
+// The battle's dev switches: a versus battle does not start while one is set (both games must run the same rules).
+constexpr const char* kVersusRefusedEnv[] = {"OC_BATTLE_MISS", "OC_BATTLE_FIELD", "OC_DOPPLE_SLOTS", "OC_GHOST",     "OC_ROUTE_ELEM",
+                                             "OC_ROUTE_GAUGE", "OC_DEV_CHIST",    "OC_DEV_FORM",     "OC_DEV_HP1",   "OC_DEV_ONLY",
+                                             "OC_DEV_TGTMEM",  "OC_DEV_VAR",      "OC_DEV_WTGT"};
+// The local opponent of a route battle: the built-in party at this star.
+constexpr int kTestStar = 20;
+const std::vector<int> kTestParty = {3, 4, 26};
+
+}  // namespace
+
+bool App::start_versus_battle(game::BattleView::VersusSetup setup, std::unique_ptr<game::VersusLink> link, bool net) {
+  for (const char* name : kVersusRefusedEnv)
+    if (const char* value = std::getenv(name); value && *value) {
+      log::warn("battle: no versus battle while {} is set", name);
+      return false;
+    }
+  if (!battle_ready || !tables_ok || !world_ok || battle_in_field || battle_ok || world.battle_active() || world.battle_requested() || versus_next ||
+      battle::versus_carrier_scene(tables, setup.battlefield) < 0)
+    return false;
+  versus_link = std::move(link);
+  battle.set_versus_link(versus_link.get());
+  versus_net = net;
+  const int battlefield = setup.battlefield;
+  versus_next = std::move(setup);
+  // The regular battle music (flags 0) through the field's own request: the encounter effect, the load, the swirl.
+  world.request_battle(0, battlefield, 0);
+  return true;
+}
+
+std::optional<battle::VersusSide> App::local_versus_side() {
+  if (!world_ok || !tables_ok) return std::nullopt;
+  const data::CharNames names = char_names();
+  battle::VersusSide side = game::versus_side(tables, flow_ready ? flow.game_state() : world.game_state(), world.party_chars(), world.dopple_mask(), &names);
+  if (side.party.empty()) return std::nullopt;
+  return side;
+}
+
+bool App::start_local_versus(u32 seed, int side) {
+  std::optional<battle::VersusSide> own = local_versus_side();
+  if (!own) return false;
+  game::BattleView::VersusSetup setup;
+  setup.seed = seed;
+  setup.local_side = side & 1;
+  battle::VersusSide other = battle::versus_test_side(tables, kTestParty, kTestStar);
+  setup.side_a = setup.local_side == 0 ? std::move(*own) : std::move(other);
+  setup.side_b = setup.local_side == 0 ? std::move(other) : std::move(*own);
+  setup.battlefield = battle::versus_battlefield(tables, seed);
+  setup.opponent = "Opponent";
+  auto opponent = std::make_unique<game::LocalVersusOpponent>(1 - setup.local_side, seed ^ game::kLocalOpponentSalt);
+  return start_versus_battle(std::move(setup), std::move(opponent), false);
+}
+
+void App::finish_versus_battle() {
+  const game::BattleView::VersusResult result = versus_running ? battle.versus_result() : game::BattleView::VersusResult::Void;
+  const bool desync = versus_link && versus_link->status() == game::VersusLink::Status::Desync;
+  log::info("battle: versus battle over ({}{})", static_cast<int>(result), desync ? ", out of step" : "");
+  battle_in_field = false;
+  versus_running = false;
+  battle.set_versus_link(nullptr);
+  versus_link.reset();
+  world.end_sandbox_battle();
+  if (versus_net && mp_client) {
+    using game::BattleView;
+    mp_client->end_pvp(result == BattleView::VersusResult::Won    ? net::PvpResult::Won
+                       : result == BattleView::VersusResult::Lost ? net::PvpResult::Lost
+                       : result == BattleView::VersusResult::Draw ? net::PvpResult::Draw
+                       : desync                                   ? net::PvpResult::Desync
+                                                                  : net::PvpResult::Aborted);
+  }
+  versus_net = false;
 }
 
 void App::finish_field_battle(bool after_results) {

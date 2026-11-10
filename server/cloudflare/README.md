@@ -1,6 +1,6 @@
 # OpenCross multiplayer server
 
-A Cloudflare Worker with one Durable Object. It implements the protocol in `docs/formats/multiplayer.md`: rooms, presence relay, room and global chat, rate limits and bans.
+A Cloudflare Worker with one Durable Object. It implements the protocol in `docs/formats/multiplayer.md`: rooms, presence relay, room, global and private chat, battle challenges up to the battle's start, rate limits and bans.
 
 ## Run locally
 
@@ -43,7 +43,9 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -d '{"pid":"0123456789abcdef"}' h
 
 - Everything goes through a single Durable Object named `world`.
 - Connections use the WebSocket hibernation API, so an idle object is not billed for duration while sockets stay open. Per-connection state is kept in the socket attachment and rebuilt after a wake-up.
-- Chat history is held in memory only. When the object hibernates or restarts, the history is lost; this is accepted.
-- A 30 second alarm sweeps connections that have been silent for 60 s. The alarm stops once no socket is left.
+- No chat is stored: lines are relayed to whoever is connected at the time, and nothing is replayed to newcomers.
+- A pending challenge (with its party card) and a player's battle live in the socket attachments and survive hibernation. The 10 s cooldown between two challenges of the same pair is memory only; a hibernation forgets it.
+- A 30 second alarm sweeps connections that have been silent for 60 s, and fires early when a challenge expires. The alarm stops once no socket is left.
 - Cloudflare bills incoming WebSocket messages at a fixed ratio to requests, and limits requests and Durable Object usage per day. Check Cloudflare's current pricing and limits before opening the server to many players.
-- `IDLE_MS` (a Worker variable) overrides the 60 s idle limit; the tests use it to keep the idle check short.
+- `IDLE_MS` (a Worker variable) overrides the 60 s idle limit, `CHALLENGE_MS` the 30 s a challenge waits and `AWAY_MS` the 30 s a battle member who disconnected has to come back; the tests use them to keep the checks short. `PVP_OPENING_STAMINA` sets `opening_stamina` in `pvp_start` (tenths, default 35, 0..70).
+- The versus battle link (`docs/formats/multiplayer.md` section 8.4) relays each game's side, commands and state checks to the other in order; a member who disconnects is kept in the object's storage (`away:<pid>`) until it resumes, forfeits or the battle ends. `tests/multiplayer/run.ps1 -Battles N` plays whole battles over a local server with `opencross ocbattle versus-net`.

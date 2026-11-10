@@ -101,6 +101,10 @@ class RemoteParties {
     ActorLight light;
     bool light_init = false;
     int shadow_grey = 0x40;
+    // [Enhancements] Lighting: this frame's tile of the shadow mask (-1 = the blob), its half span, and the eased floor slope, as a party actor's.
+    int shadow_tile = -1;
+    float shadow_half = 0;
+    float shadow_slope_x = 0, shadow_slope_z = 0;
   };
   struct Party {
     net::RemoteParty info;

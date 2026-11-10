@@ -4,7 +4,7 @@ OpenCross keeps every user setting, the developer/automation switches and the Es
 
 ## 1. Location, lifecycle, syntax
 
-* **Location.** `opencross.ini` next to the exe. `--config <file>` (anywhere on the command line, followed by a path) uses that file instead; the path is made absolute. A `--config` ini (a route or test) is read only: settings changed during the run, the settings window's geometry and new mod lines are never written back to it.
+* **Location.** `opencross.ini` next to the exe. `--config <file>` (anywhere on the command line, followed by a path) uses that file instead; the path is made absolute. A `--config` ini (a route or test) is read only: settings changed during the run, the settings window's geometry and new mod lines are never written back to it. `--profile <dir>` (followed by a folder, made when missing) uses `opencross.ini` in that folder as the player's own ini: it is written like the default one, the log goes to `opencross.log` there and a relative `SaveDir` is taken from that folder (a second copy of the game with its own multiplayer `PlayerId`, `tools.md` section 6.4).
 * **Log file.** With the default ini the log is `opencross.log` next to the exe and is written only when `[Debug] Log=1` (Debug builds always log). With `--config` the log is the ini's path with the extension replaced by `.log`, and is always written.
 * **First launch.** If the file is missing or cannot be opened, the engine starts with the first-launch values of section 3 and writes the file at once. After the window exists it sets `[Game] Language` from the OS locale and writes the file again.
 * **When it is saved.** Every change made in the Esc settings window (all tabs, including the window's own position, size and tab), F6 (art mode cycle), F7 (widescreen toggle), Alt+Enter (`WindowMode`, see section 2) and the Debug tab's *Write log file* box. There is no save on exit. A write that fails is logged as a warning.
@@ -28,7 +28,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `GameDir` | empty | folder containing `data\cdrom.dat` | Game install. Used only if it holds `data\cdrom.dat`; otherwise (and when empty) the exe folder and up to 12 parent folders are searched. |
-| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe`, except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. |
+| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe` (of the `--profile` folder in such a run), except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. |
 | `SaveFile` | `save.dat` | file name | Save file name inside `SaveDir`. Written only when it differs from `save.dat`. Automated runs point it at a scratch copy. |
 
 ### 2.2 `[Video]`
@@ -152,9 +152,11 @@ Presence and chat with other players (`multiplayer.md`), the settings window's M
 | `MaxParties` | 8 | 1..32 | At most this many remote parties are drawn, the nearest to the camera's target. |
 | `Translucent` | 0 | bool | Draw the remote parties see-through. |
 | `ShowLabels` | 1 | bool | Each remote leader's name and Star Level above it. |
+| `HideGlobalChat` | 0 | bool | The chat panel shows only room chat and private lines, and the input line has no Global option (Tab does not switch to it). |
 | `ChatBubbles` | 1 | bool | A room chat line also shows in a bubble over the speaker's party, the player's own included (`multiplayer.md` section 7). |
 | `Chat` | `new` | `always new hidden` | When the chat panel shows while not typing: `always` the last 8 lines; `new` a line for 10 s after it arrives, fading over its last 2 s; `hidden` never. Any other value keeps the default. |
 | `MuteHidesParty` | 1 | bool | A muted player's party is hidden as well as their chat. |
+| `Challenges` | 1 | bool | "Receive battle challenges": other players may challenge this one to a battle (`multiplayer.md` section 8). Off: the server refuses challenges to this player and the client answers any that arrive with `off`. |
 | `AdminToken` | empty (not written) | text | The server's `ADMIN_TOKEN` (`multiplayer.md` section 6). Set by hand; the tab has no field for it. Sent only in `hello`, and only to the Master server (never to a "Local / other" address, whose operator would see it); when it matches, the server marks this player's chat lines and every client shows the name in red. |
 | `Muted` | empty | comma list of `pid`s | The muted players (the tab's Mute buttons). Spaces around an entry and empty entries are dropped. |
 

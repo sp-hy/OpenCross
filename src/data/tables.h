@@ -198,6 +198,13 @@ struct GameTables {
   bool load(const vfs::Vfs& game_fs,std::string* err = nullptr);
 };
 
+// The versus battle protocol: raised whenever the battle rules change in a way that would put two games of different builds out of step.
+inline constexpr u32 kVersusRulesVersion = 1;
+// The battle data fingerprint two versus players compare: 16 lower-case hex digits over kVersusRulesVersion and the parsed tables a
+// battle reads (monster, character and element records, scenes, battlefield colours, gear, drops, the generator's table); names and
+// the tables of the field and menus are left out.
+std::string battle_data_fingerprint(const GameTables& tables);
+
 // Colour bit (0x04..0x80) -> index 0..5 green white black red yellow blue; -1 if none.
 int colour_index_of_bit(u8 bit);
 const char* colour_name(int idx);

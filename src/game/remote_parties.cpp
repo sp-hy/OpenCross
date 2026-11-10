@@ -213,7 +213,7 @@ void RemoteParties::tick(u64 now, const WalkMesh& walk, const RoomLighting& ligh
 // in the party V (the half V, else the leader's spot, when the V spot has no floor near the leader's height) on its first tick with a
 // model and after a snap, then moves by follow_step: slot 1 after the leader over ring 0, slot 2 after slot 1 over ring 1. Placing shows
 // the member at once, facing the leader's way. Every member's light eases toward the zone colour of its triangle and its shadow strength
-// toward the party actors' 64 (0 on water and stairs), as a party actor's do.
+// toward the party actors' 64 (0 on water and stairs), and its shadow's floor slope, as a party actor's do.
 void RemoteParties::step_party(Party& party, u64 now, const WalkMesh& walk, const RoomLighting& lighting, const ModelLoader& loader) {
   if (!party.seen) return;
   for (Member& member : party.members) {
@@ -263,6 +263,7 @@ void RemoteParties::step_party(Party& party, u64 now, const WalkMesh& walk, cons
     member.light_init = true;
     const int target = (flags & 0x6E000) ? 0 : 0x40;
     member.shadow_grey = member.shadow_grey < target ? std::min(target, member.shadow_grey + 2) : std::max(target, member.shadow_grey - 2);
+    ActorShadows::ease_slope(walk, actor.triangle(), member.shadow_slope_x, member.shadow_slope_z);
   };
   const bool lead_place = regroup || !lead.placed;
   const float lead_shift = xz_distance(lead.actor.current().x, lead.actor.current().z, shown.x, shown.z);

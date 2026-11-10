@@ -6,10 +6,10 @@
 #include <cstdio>
 #include <format>
 #include <map>
+#include <utility>
 
 #include <imgui.h>
 
-#include "net/multiplayer_client.h"
 #include "render/imgui_layer.h"
 
 namespace oc::render {
@@ -29,11 +29,12 @@ constexpr float kOpenRows = 10.0f;
 constexpr double kBubbleBase = 4.0, kBubblePerByte = 0.05, kBubbleMax = 9.0, kBubbleFade = 0.6;
 constexpr float kBubbleWidth = 14.0f;
 constexpr size_t kBubbleBytes = 120;
+const ImVec4 kPmColour(1.0f, 0.62f, 0.92f, 1.0f);
 
 // The Star Level after a star sign (U+2605), or after '*' when the font lacks the star.
 std::string star_text(ImFont* font, int star) {
   const bool has_star = font && font->FindGlyphNoFallback(0x2605) != nullptr;
-  return std::format("{}{}", has_star ? "\u2605" : "*", star);
+  return std::format("{}{}", has_star ? "★" : "*", star);
 }
 
 const net::RemoteParty* party_of(const MultiplayerClient& client, const std::string& pid) {
@@ -86,6 +87,47 @@ void draw_state_icon(ImDrawList* dl, ImVec2 at, float size, net::PresenceState s
     dl->AddCircleFilled(ImVec2(at.x + w * static_cast<float>(i) / 4.0f, y + body * 0.5f), size * 0.07f, IM_COL32(20, 22, 30, 255));
 }
 
+// A name drawn as a link: the hand pointer over it; true when it was clicked.
+bool name_link(const std::string& name, const ImVec4& colour, bool bold) {
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  ImGui::PushStyleColor(ImGuiCol_Text, colour);
+  ImGui::TextUnformatted(name.c_str());
+  ImGui::PopStyleColor();
+  if (bold) ImGui::GetWindowDrawList()->AddText(ImVec2(at.x + 1.0f, at.y), ImGui::ColorConvertFloat4ToU32(colour), name.c_str());
+  if (!ImGui::IsItemHovered()) return false;
+  ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+  const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+  ImGui::GetWindowDrawList()->AddLine(ImVec2(min.x, max.y), max, ImGui::ColorConvertFloat4ToU32(colour));
+  return ImGui::IsMouseClicked(ImGuiMouseButton_Left);
+}
+
+// A party card as a table: one row per member with the name, max HP, ATK / DEF / MAG / MDEF and the element count.
+void draw_card(const char* id, const net::PartyCard& card) {
+  if (card.members.empty()) {
+    ImGui::TextDisabled("(no party)");
+    return;
+  }
+  if (!ImGui::BeginTable(id, 7, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_RowBg)) return;
+  for (const char* heading : {"", "HP", "ATK", "DEF", "MAG", "MDEF", "Elem."}) ImGui::TableSetupColumn(heading);
+  ImGui::TableHeadersRow();
+  for (const net::CardMember& member : card.members) {
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::TextUnformatted(member.name.empty() ? "?" : member.name.c_str());
+    for (const int value : {member.hp, member.atk, member.def, member.mag, member.mdef, member.elements}) {
+      ImGui::TableNextColumn();
+      ImGui::Text("%d", value);
+    }
+  }
+  ImGui::EndTable();
+}
+
+// Seconds left until `deadline`, rounded up.
+int seconds_left(double deadline, double now) { return static_cast<int>(std::ceil(std::max(0.0, deadline - now))); }
+
+constexpr ImGuiWindowFlags kPopupFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                                         ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+
 }  // namespace
 
 bool MultiplayerUi::typing() { return ImGui::GetIO().WantTextInput; }
@@ -94,6 +136,14 @@ void MultiplayerUi::open_chat() {
   chat_open_ = true;
   focus_input_ = true;
 }
+
+void MultiplayerUi::open_pm(const std::string& pid, const std::string& name) {
+  pm_to_ = pid;
+  pm_name_ = name;
+  open_chat();
+}
+
+bool MultiplayerUi::take_close_options() { return std::exchange(close_options_, false); }
 
 bool MultiplayerUi::edit_text(const char* id, const char* hint, std::string& value, TextField& field) {
   if (!field.active) std::snprintf(field.buffer, sizeof field.buffer, "%s", value.c_str());
@@ -105,13 +155,32 @@ bool MultiplayerUi::edit_text(const char* id, const char* hint, std::string& val
   return true;
 }
 
-bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, const MultiplayerClient* client, const std::string& default_name,
-                             bool allowed, ImFont* font) {
+std::string MultiplayerUi::challenge_block(const MultiplayerClient& client, const platform::MultiplayerSettings& settings, const std::string& pid,
+                                           bool free) const {
+  if (!settings.challenges) return "You don't take challenges (Receive battle challenges is off)";
+  if (client.state() != MultiplayerClient::State::Connected) return "Not connected";
+  if (!client.can_challenge()) return "A challenge or a battle is already under way";
+  if (!free) return "You are busy";
+  if (!card_source_ || !card_source_()) return "No game is loaded";
+  if (const net::RemoteParty* party = party_of(client, pid)) {
+    if (!party->pvp) return "This player doesn't take challenges";
+    if (party->has_pose && party->pose.state != net::PresenceState::Field) return "This player is busy";
+  }
+  return {};
+}
+
+bool MultiplayerUi::send_challenge(MultiplayerClient& client, const std::string& pid, const std::string& name) {
+  const std::optional<net::PartyCard> card = card_source_ ? card_source_() : std::nullopt;
+  return card && client.challenge(pid, name, *card);
+}
+
+bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, MultiplayerClient* client, const std::string& default_name,
+                             bool allowed, bool free, ImFont* font) {
   bool changed = false;
   ImGuiLayer::section("Multiplayer");
   ImGui::PushTextWrapPos(0.0f);
   ImGui::TextDisabled("See other players' parties walk in your room and chat with them. Nothing of your game is shared but your name, "
-                      "Star Level, room and the party leader's position.");
+                      "Star Level, room and the party leader's position, and your party's card when you challenge or accept a battle.");
   ImGui::PopTextWrapPos();
   if (ImGuiLayer::begin_rows("mp_rows")) {
     ImGuiLayer::row("Enabled", "Connect to the multiplayer server while the game runs.");
@@ -154,12 +223,14 @@ bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, const Mult
     changed |= ImGui::SliderInt("##max", &settings.max_parties, 1, 32, "%d", ImGuiSliderFlags_AlwaysClamp);
     ImGuiLayer::row("Translucent", "Draw the other parties see-through.");
     changed |= ImGui::Checkbox("##translucent", &settings.translucent);
-    ImGuiLayer::row("Name labels", "Show each player's name and Star Level above their party.");
+    ImGuiLayer::row("Name labels", "Show each player's name and Star Level above their party. Click a name for Message, Challenge and Mute.");
     changed |= ImGui::Checkbox("##labels", &settings.show_labels);
     ImGuiLayer::row("Chat bubbles", "A line said to the room also shows in a bubble over the speaker's party, yours included.");
     changed |= ImGui::Checkbox("##bubbles", &settings.chat_bubbles);
     ImGuiLayer::row("Mute hides party", "A muted player's party is hidden as well as their chat.");
     changed |= ImGui::Checkbox("##mutehides", &settings.mute_hides_party);
+    ImGuiLayer::row("Receive battle challenges", "Other players may challenge you to a battle. Off: nobody can, and you cannot challenge anyone.");
+    changed |= ImGui::Checkbox("##challenges", &settings.challenges);
     ImGuiLayer::end_rows();
   }
 
@@ -172,8 +243,10 @@ bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, const Mult
       settings.chat = static_cast<platform::ChatDisplay>(chat);
       changed = true;
     }
+    ImGuiLayer::row("Hide global chat", "Show only room chat and private messages; you can no longer send to everyone.");
+    changed |= ImGui::Checkbox("##hideglobal", &settings.hide_global_chat);
     ImGuiLayer::row("Keys");
-    ImGui::TextDisabled("T opens the chat, Tab switches Room / Global, Enter sends, Esc closes");
+    ImGui::TextDisabled("T opens the chat, Tab switches Room / Global, Enter sends, Esc closes; Y / N answer a challenge");
     ImGuiLayer::end_rows();
   }
 
@@ -191,6 +264,17 @@ bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, const Mult
       ImGui::PopFont();
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGuiLayer::tooltip(("Player " + party.pid).c_str());
       ImGui::TableNextColumn();
+      if (ImGui::SmallButton("Message")) {
+        open_pm(party.pid, party.name);
+        close_options_ = true;
+      }
+      ImGui::SameLine();
+      const std::string block = challenge_block(*client, settings, party.pid, free);
+      ImGui::BeginDisabled(!block.empty());
+      if (ImGui::SmallButton("Challenge") && send_challenge(*client, party.pid, party.name)) close_options_ = true;
+      ImGui::EndDisabled();
+      if (!block.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGuiLayer::tooltip(block.c_str());
+      ImGui::SameLine();
       const auto muted = std::find(settings.muted.begin(), settings.muted.end(), party.pid);
       const bool is_muted = muted != settings.muted.end();
       if (ImGui::SmallButton(is_muted ? "Unmute" : "Mute")) {
@@ -214,11 +298,14 @@ bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, const Mult
 }
 
 void MultiplayerUi::draw_chat(MultiplayerClient& client, const platform::MultiplayerSettings& settings, double now, ImFont* font) {
+  hide_global_ = settings.hide_global_chat;
+  if (hide_global_) global_ = false;
   if (!chat_open_ && settings.chat == platform::ChatDisplay::Hidden) return;
   std::vector<const net::ChatLine*> lines;
-  for (const net::ChatScope scope : {net::ChatScope::Room, net::ChatScope::Global})
-    for (const net::ChatLine& line : client.chat(scope))
-      if (line.pid.empty() || !client.muted(line.pid)) lines.push_back(&line);
+  for (const net::ChatScope scope : {net::ChatScope::Room, net::ChatScope::Global, net::ChatScope::Pm})
+    if (scope != net::ChatScope::Global || !hide_global_)
+      for (const net::ChatLine& line : client.chat(scope))
+        if (line.pid.empty() || !client.muted(line.pid)) lines.push_back(&line);
   std::stable_sort(lines.begin(), lines.end(), [](const net::ChatLine* lhs, const net::ChatLine* rhs) { return lhs->ts < rhs->ts; });
 
   // Closed: the recent lines with their fade (always: the last lines, fully shown).
@@ -228,7 +315,7 @@ void MultiplayerUi::draw_chat(MultiplayerClient& client, const platform::Multipl
       float alpha = 1.0f;
       if (settings.chat == platform::ChatDisplay::New) {
         const double age = now - lines[i]->received;
-        if (!lines[i]->fresh || age >= kLineShow) continue;
+        if (age >= kLineShow) continue;
         alpha = static_cast<float>(std::clamp((kLineShow - age) / kLineFade, 0.0, 1.0));
       }
       shown.emplace_back(lines[i], alpha);
@@ -251,25 +338,33 @@ void MultiplayerUi::draw_chat(MultiplayerClient& client, const platform::Multipl
   if (!chat_open_) flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBringToFrontOnFocus;
   const auto line_colour = [](const net::ChatLine& line, float alpha) {
     if (line.pid.empty()) return ImVec4(0.65f, 0.65f, 0.70f, alpha);
+    if (line.scope == net::ChatScope::Pm) return ImVec4(kPmColour.x, kPmColour.y, kPmColour.z, alpha);
     return line.scope == net::ChatScope::Global ? ImVec4(0.70f, 0.85f, 1.0f, alpha) : ImVec4(0.96f, 0.96f, 0.98f, alpha);
   };
+  // "[R] name: text": the name is a link (the player menu; on a private line, a reply) while the panel is open.
   const auto draw_line = [&](const net::ChatLine& line, float alpha) {
-    ImGui::PushStyleColor(ImGuiCol_Text, line_colour(line, alpha));
-    const char* scope = line.scope == net::ChatScope::Global ? "G" : "R";
+    const ImVec4 colour = line_colour(line, alpha);
+    ImGui::PushStyleColor(ImGuiCol_Text, colour);
     if (line.pid.empty()) {
       ImGui::TextWrapped("%s", line.text.c_str());
-    } else if (!line.admin) {
-      ImGui::TextWrapped("[%s] %s: %s", scope, line.name.c_str(), line.text.c_str());
-    } else {
-      ImGui::Text("[%s] ", scope);
-      ImGui::SameLine(0.0f, 0.0f);
-      const ImVec2 name_at = ImGui::GetCursorScreenPos();
-      const ImVec4 red(1.0f, 0.32f, 0.30f, alpha);
-      ImGui::TextColored(red, "%s", line.name.c_str());
-      ImGui::GetWindowDrawList()->AddText(ImVec2(name_at.x + 1.0f, name_at.y), ImGui::ColorConvertFloat4ToU32(red), line.name.c_str());
-      ImGui::SameLine(0.0f, 0.0f);
-      ImGui::TextWrapped(": %s", line.text.c_str());
+      ImGui::PopStyleColor();
+      return;
     }
+    const bool pm = line.scope == net::ChatScope::Pm;
+    const bool own = line.pid == client.pid();
+    ImGui::TextUnformatted(pm ? (own ? "[PM] to " : "[PM] ") : line.scope == net::ChatScope::Global ? "[G] " : "[R] ");
+    ImGui::SameLine(0.0f, 0.0f);
+    const std::string& pid = pm && own ? line.to : line.pid;
+    const std::string& name = pm && own ? line.to_name : line.name;
+    const bool admin = line.admin && !(pm && own);
+    const ImVec4 name_colour = admin ? ImVec4(1.0f, 0.32f, 0.30f, alpha) : colour;
+    if (name_link(name, name_colour, admin) && chat_open_ && pid != client.pid()) {
+      if (pm) open_pm(pid, name);
+      else if (const net::RemoteParty* party = party_of(client, pid)) open_player_menu(pid, name, party->star);
+      else open_player_menu(pid, name, -1);
+    }
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::TextWrapped(": %s", line.text.c_str());
     ImGui::PopStyleColor();
   };
   if (ImGui::Begin("##mp_chat", nullptr, flags)) {
@@ -285,45 +380,58 @@ void MultiplayerUi::draw_chat(MultiplayerClient& client, const platform::Multipl
         }
       }
       ImGui::EndChild();
-      const float box = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Global").x;
-      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - box - ImGui::GetStyle().ItemSpacing.x);
+      const bool pm = !pm_to_.empty();
+      if (pm) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextColored(kPmColour, "To %s", pm_name_.c_str());
+        ImGui::SameLine();
+      }
+      const float box = pm || hide_global_ ? 0.0f : ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize("Global").x + ImGui::GetStyle().ItemSpacing.x;
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - box);
       if (focus_input_) {
         ImGui::GetIO().InputQueueCharacters.resize(0);
         ImGui::SetKeyboardFocusHere();
         focus_input_ = false;
       }
       const bool connected = client.state() == MultiplayerClient::State::Connected;
-      const char* hint = !connected ? "Not connected" : global_ ? "Say to everyone" : "Say to this room";
+      const char* hint = !connected ? "Not connected" : pm ? "Say to this player only" : global_ ? "Say to everyone" : "Say to this room";
       const ImGuiInputTextFlags say_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion;
+      // Tab: Room <-> Global (not with global chat hidden); from a private target, back to Room / Global.
       const auto on_tab = [](ImGuiInputTextCallbackData* data) {
-        bool& global = *static_cast<bool*>(data->UserData);
-        global = !global;
+        MultiplayerUi& ui = *static_cast<MultiplayerUi*>(data->UserData);
+        if (!ui.pm_to_.empty()) ui.pm_to_.clear();
+        else if (!ui.hide_global_) ui.global_ = !ui.global_;
         return 0;
       };
-      if (ImGui::InputTextWithHint("##say", hint, input_, sizeof input_, say_flags, on_tab, &global_)) {
-        if (client.send_chat(global_ ? net::ChatScope::Global : net::ChatScope::Room, input_) || input_[0] == '\0') {
+      if (ImGui::InputTextWithHint("##say", hint, input_, sizeof input_, say_flags, on_tab, this)) {
+        const bool sent = pm ? client.send_pm(pm_to_, input_) : client.send_chat(global_ ? net::ChatScope::Global : net::ChatScope::Room, input_);
+        if (sent || input_[0] == '\0') {
           input_[0] = '\0';
           chat_open_ = false;
         } else {
           focus_input_ = true;
         }
       }
-      ImGui::SameLine();
-      if (ImGui::Checkbox("Global", &global_)) focus_input_ = true;
-      if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGuiLayer::tooltip("On: everyone online reads the line. Off: only the players in this room. Tab switches it while typing.");
+      if (!pm && !hide_global_) {
+        ImGui::SameLine();
+        if (ImGui::Checkbox("Global", &global_)) focus_input_ = true;
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) ImGuiLayer::tooltip("On: everyone online reads the line. Off: only the players in this room. Tab switches it while typing.");
+      }
     }
   }
   ImGui::End();
   ImGui::PopFont();
 }
 
-void MultiplayerUi::draw_labels(const std::vector<net::RemoteLabel>& labels, const MultiplayerClient& client, ImFont* font) const {
+void MultiplayerUi::draw_labels(const std::vector<net::RemoteLabel>& labels, const MultiplayerClient& client, ImFont* font) {
   if (labels.empty()) return;
   ImDrawList* dl = ImGui::GetBackgroundDrawList();
   ImGui::PushFont(font);
   const float size = ImGui::GetFontSize();
   ImFont* current = ImGui::GetFont();
   const float pad = size * 0.3f;
+  const ImGuiIO& io = ImGui::GetIO();
+  const bool clicked = ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !io.WantCaptureMouse;
   for (const net::RemoteLabel& label : labels) {
     const net::RemoteParty* party = party_of(client, label.pid);
     const std::string text = party ? party->name + "  " + star_text(current, party->star) : label.text;
@@ -332,11 +440,14 @@ void MultiplayerUi::draw_labels(const std::vector<net::RemoteLabel>& labels, con
     const float icon_w = icon ? size * 1.1f + pad : 0.0f;
     const float total = text_size.x + icon_w;
     const ImVec2 top_left(label.x - total * 0.5f, label.y);
-    dl->AddRectFilled(ImVec2(top_left.x - pad, top_left.y - pad * 0.5f), ImVec2(top_left.x + total + pad, top_left.y + text_size.y + pad * 0.5f),
-                      IM_COL32(10, 12, 20, 120), pad);
+    const ImVec2 box_min(top_left.x - pad, top_left.y - pad * 0.5f), box_max(top_left.x + total + pad, top_left.y + text_size.y + pad * 0.5f);
+    const bool hovered = !io.WantCaptureMouse && ImGui::IsMouseHoveringRect(box_min, box_max, false);
+    dl->AddRectFilled(box_min, box_max, hovered ? IM_COL32(40, 46, 70, 170) : IM_COL32(10, 12, 20, 120), pad);
     dl->AddText(current, size, ImVec2(top_left.x + 1.0f, top_left.y + 1.0f), IM_COL32(0, 0, 0, 200), text.c_str());
     dl->AddText(current, size, top_left, IM_COL32(240, 242, 250, 255), text.c_str());
     if (icon) draw_state_icon(dl, ImVec2(top_left.x + text_size.x + pad, top_left.y), text_size.y, label.state, IM_COL32(240, 242, 250, 230));
+    if (hovered) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    if (hovered && clicked && party) open_player_menu(party->pid, party->name, party->star);
   }
   ImGui::PopFont();
 }
@@ -349,7 +460,7 @@ void MultiplayerUi::draw_bubbles(const std::vector<net::RemoteLabel>& labels, co
   };
   std::map<std::string, Bubble> newest;
   for (const net::ChatLine& line : client.chat(net::ChatScope::Room)) {
-    if (line.pid.empty() || !line.fresh || client.muted(line.pid)) continue;
+    if (line.pid.empty() || client.muted(line.pid)) continue;
     const double life = std::min(kBubbleBase + kBubblePerByte * static_cast<double>(line.text.size()), kBubbleMax);
     const double age = now - line.received;
     if (age < 0.0 || age >= life) continue;
@@ -388,6 +499,148 @@ void MultiplayerUi::draw_bubbles(const std::vector<net::RemoteLabel>& labels, co
   if (own && !client.pid().empty())
     if (const auto found = newest.find(client.pid()); found != newest.end()) draw_one(found->second, own->x, own->y + size);
   ImGui::PopFont();
+}
+
+void MultiplayerUi::open_player_menu(const std::string& pid, const std::string& name, int star) {
+  const ImVec2 mouse = ImGui::GetIO().MousePos;
+  menu_ = PlayerMenu{pid, name, star, mouse.x, mouse.y, true};
+}
+
+bool MultiplayerUi::draw_player_menu(MultiplayerClient& client, platform::MultiplayerSettings& settings, bool free, ImFont* font) {
+  if (!menu_) return false;
+  if (client.state() != MultiplayerClient::State::Connected) {
+    menu_.reset();
+    return false;
+  }
+  const PlayerMenu menu = *menu_;
+  bool changed = false, close = false;
+  const ImGuiIO& io = ImGui::GetIO();
+  const ImVec2 pivot(menu.x > io.DisplaySize.x * 0.6f ? 1.0f : 0.0f, menu.y > io.DisplaySize.y * 0.6f ? 1.0f : 0.0f);
+  ImGui::SetNextWindowPos(ImVec2(menu.x, menu.y), ImGuiCond_Always, pivot);
+  if (ImGui::Begin("##mp_player", nullptr, kPopupFlags & ~ImGuiWindowFlags_NoFocusOnAppearing)) {
+    ImGui::PushFont(font);
+    const net::RemoteParty* party = party_of(client, menu.pid);
+    const int star = party ? party->star : menu.star;
+    if (star >= 0) ImGui::Text("%s  %s", menu.name.c_str(), star_text(font, star).c_str());
+    else ImGui::TextUnformatted(menu.name.c_str());
+    ImGui::PopFont();
+    ImGui::Separator();
+    if (ImGui::Selectable("Message")) {
+      open_pm(menu.pid, menu.name);
+      close = true;
+    }
+    const std::string block = challenge_block(client, settings, menu.pid, free);
+    ImGui::BeginDisabled(!block.empty());
+    if (ImGui::Selectable("Challenge to battle")) {
+      send_challenge(client, menu.pid, menu.name);
+      close = true;
+    }
+    ImGui::EndDisabled();
+    if (!block.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_DelayShort)) ImGuiLayer::tooltip(block.c_str());
+    const auto muted = std::find(settings.muted.begin(), settings.muted.end(), menu.pid);
+    const bool is_muted = muted != settings.muted.end();
+    if (ImGui::Selectable(is_muted ? "Unmute" : "Mute")) {
+      if (is_muted) settings.muted.erase(muted);
+      else settings.muted.push_back(menu.pid);
+      changed = close = true;
+    }
+    if (!menu.fresh && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows)) close = true;
+  }
+  ImGui::End();
+  if (close) {
+    menu_.reset();
+    if (chat_open_) focus_input_ = true;
+  } else {
+    menu_->fresh = false;
+  }
+  return changed;
+}
+
+void MultiplayerUi::accept(MultiplayerClient& client) {
+  const std::optional<net::PartyCard> card = card_source_ ? card_source_() : std::nullopt;
+  if (card) client.accept_challenge(*card);
+  else client.decline_challenge();
+}
+
+void MultiplayerUi::draw_challenges(MultiplayerClient& client, double now, ImFont* font) {
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::PushFont(font);
+  const float em = ImGui::GetFontSize();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, em * 2.0f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.85f);
+  if (!client.incoming()) accept_chosen_ = false;
+  if (const std::optional<net::IncomingChallenge>& incoming = client.incoming()) {
+    if (ImGui::Begin("##mp_incoming", nullptr, kPopupFlags)) {
+      ImGui::Text("%s  %s wants to battle you", incoming->name.c_str(), star_text(font, incoming->star).c_str());
+      draw_card("##incoming_card", incoming->card);
+      ImGui::TextDisabled("%d s", seconds_left(incoming->deadline, now));
+      const auto choice = [&](const char* label, bool chosen) {
+        if (chosen) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        const bool pressed = ImGui::Button(label);
+        if (chosen) ImGui::PopStyleColor();
+        return pressed;
+      };
+      if (choice("Accept (Y)", accept_chosen_)) accept(client);
+      ImGui::SameLine();
+      if (choice("Decline (N)", !accept_chosen_)) decline(client);
+      ImGui::TextDisabled("Pad: d-pad to choose, confirm to select, cancel to decline");
+    }
+    ImGui::End();
+  } else if (const std::optional<net::OutgoingChallenge>& outgoing = client.outgoing()) {
+    if (ImGui::Begin("##mp_outgoing", nullptr, kPopupFlags)) {
+      ImGui::AlignTextToFramePadding();
+      ImGui::Text("Waiting for %s…  %d s", outgoing->name.c_str(), seconds_left(outgoing->expires, now));
+      ImGui::SameLine();
+      if (ImGui::Button("Cancel")) client.cancel_challenge();
+    }
+    ImGui::End();
+  } else if (client.accepted()) {
+    if (ImGui::Begin("##mp_accepted", nullptr, kPopupFlags)) ImGui::TextUnformatted("Starting the battle…");
+    ImGui::End();
+  }
+  ImGui::PopFont();
+}
+
+void MultiplayerUi::start_versus(net::PvpStart start, double now) {
+  versus_ = std::move(start);
+  versus_end_ = now + kVersusSeconds;
+}
+
+std::optional<net::PvpStart> MultiplayerUi::draw_versus(const MultiplayerClient& client, double now, ImFont* font) {
+  if (!versus_) return std::nullopt;
+  const bool waiting = now >= versus_end_;
+  const bool over = client.pvp_battle() != versus_->battle || client.pvp_gone() != net::PvpGone::None;
+  if (over || (waiting && (client.pvp_opponent_side() || now >= versus_end_ + kSideWait))) {
+    std::optional<net::PvpStart> done = std::move(versus_);
+    versus_.reset();
+    return done;
+  }
+  const net::PvpStart& start = *versus_;
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 150));
+  ImGui::PushFont(font);
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+  ImGui::SetNextWindowBgAlpha(0.9f);
+  if (ImGui::Begin("##mp_versus", nullptr, kPopupFlags | ImGuiWindowFlags_NoInputs)) {
+    if (ImGui::BeginTable("##versus", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::Text("You  %s", star_text(font, start.own.star).c_str());
+      draw_card("##own_card", start.own);
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted("VS");
+      ImGui::TableNextColumn();
+      ImGui::Text("%s  %s", start.name.c_str(), star_text(font, start.star).c_str());
+      draw_card("##their_card", start.card);
+      ImGui::EndTable();
+    }
+    if (start.first == client.pid()) ImGui::TextUnformatted("You go first");
+    else ImGui::Text("%s goes first", start.name.c_str());
+    if (waiting) ImGui::Text("Waiting for %s...", start.name.c_str());
+  }
+  ImGui::End();
+  ImGui::PopFont();
+  return std::nullopt;
 }
 
 }  // namespace oc::render

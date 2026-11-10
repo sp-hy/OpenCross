@@ -57,7 +57,7 @@ void BattleView::collect_shadow_casters() {
   shadow_casters_.clear();
   if (!stage_scene_.ready()) return;
   for (int i = 0; i < battle::kUnits; ++i) {
-    const battle::Unit& unit = battle_->unit(i);
+    const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
     if (showcase_on_ || !unit.present || !visual.has_model || !visual.model->gpu || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)] || (ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) || anm_hidden(i)) continue;
     if (!unit.pc && lerp(visual.fade_prev, visual.fade, alpha_) <= 0.0f) continue;
@@ -185,7 +185,7 @@ void BattleView::cast_shadow_pass(const render::Frame& frame) {
       if (om) parts.hidden_meshes = (parts.hidden_meshes | om->part_hide) & ~om->part_show;
       if (!anm_unit_apply(unit, parts)) continue;
       const render::Mat4 model_mat = unit_model_matrix(unit, om);
-      if (!battle_->unit(unit).pc)
+      if (!bunit(unit).pc)
         for (render::ShadowPipeline::Cast& cast : casts) cast.strength *= std::clamp(lerp(visual.fade_prev, visual.fade, alpha_), 0.0f, 1.0f);
       visual.pose.palette(alpha_, palette_);
       shadow_pipe_.cast(*visual.model->gpu, model_mat, palette_, parts.hidden_meshes, parts.env_meshes, casts);

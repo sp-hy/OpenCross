@@ -7,6 +7,7 @@
 #include <tuple>
 #include <utility>
 
+#include "core/hash.h"
 #include "data/char_name.h"
 
 namespace oc::battle {
@@ -14,6 +15,8 @@ namespace oc::battle {
 namespace {
 
 constexpr int kMaxChain = 4;
+// The scheduler's pass limit: a battle that uses them all up is stalled.
+constexpr int kSchedulerPasses = 20000;
 constexpr int kVaryInnateElement = 336;
 // The scene whose enemy element casts are not reduced (Battle::do_element).
 constexpr int kFullValueScene = 0x1D9;
@@ -246,7 +249,7 @@ void Battle::init_pc(int slot, const PartyMember& member) {
       if (id == 0x11F || id == 0x121 || id == 0x123) cell = static_cast<u16>((cell & 0xC000) | kPipTechs[tech_base]);
       else if (id == 0x120 || id == 0x122 || id == 0x124) cell = static_cast<u16>((cell & 0xC000) | kPipTechs[tech_base + 1]);
     }
-    pip_tech_colour_ = member.innate;
+    pip_tech_colour_[static_cast<size_t>(side_of(slot))] = member.innate;
   }
   // The gauge tops out at the deepest grid row with an unlocked cell holding an element; -1 (no gauge) when there is none.
   unit.gauge_max = -1;
@@ -385,12 +388,7 @@ void Battle::init_party_monster(int slot, int monster_id, const BattleOptions& o
   unit.kind = rec.model();
 }
 
-bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOptions& opt) {
-  if (scene < 0 || scene >= static_cast<int>(tables_.scenes.size())) return false;
-  if (party.empty() || party.size() > kPcSlots) return false;
-  scene_ = scene;
-  opt_ = opt;
-  growth_ = opt.growth;
+void Battle::reset_battle_state() {
   outcome_ = Outcome::Ongoing;
   result_code_ = -1;
   attacked_.clear();
@@ -414,14 +412,33 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   confirm_actor_ = -1;
   confirm_target_.fill(-1);
   units_ = {};
-  form_restore_ = false;
-  form_max_hp_ = 0;
-  form_body_unit_ = -1;
-  party_ = std::move(party);
+  form_restore_ = {};
+  form_max_hp_ = {};
+  form_body_unit_ = {-1, -1};
   benched_units_.clear();
   swapped_out_.clear();
   swaps_ = 0;
   duel_roster_.clear();
+  versus_ = false;
+  party_b_.clear();
+  stars_b_ = 0;
+  dopple_b_ = {};
+  turn_side_ = 0;
+  turn_fresh_ = true;
+  done_ = {};
+  timeouts_ = {};
+  versus_end_ = VersusEnd::None;
+  form_owed_ = -1;
+}
+
+bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOptions& opt) {
+  if (scene < 0 || scene >= static_cast<int>(tables_.scenes.size())) return false;
+  if (party.empty() || party.size() > kPcSlots) return false;
+  scene_ = scene;
+  opt_ = opt;
+  growth_ = opt.growth;
+  reset_battle_state();
+  party_ = std::move(party);
   if (scene_ == 0x1DD) {
     duel_roster_ = party_;
     // The list the bodies search comes from the fight before, where the relief member stood in for Serge.
@@ -490,6 +507,284 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
   return true;
 }
 
+// ------------------------------------------------------------------------------------------------ versus
+// Both parties are built as the field builds a party member, then healed and cleared: a versus battle is a sandbox. No scene record takes
+// part (no enemies, no boss flag, no off-stage units, every unit in reach of an all-target cast), and the cheats are off.
+bool Battle::start_versus(const VersusSide& side_a, const VersusSide& side_b, int battlefield, int opening_stamina) {
+  for (const VersusSide* side : {&side_a, &side_b})
+    if (side->party.empty() || side->party.size() > kPcSlots) return false;
+  scene_ = -1;
+  opt_ = {};
+  opt_.battlefield = battlefield;
+  growth_ = {};
+  growth_.counter = side_a.stars;
+  reset_battle_state();
+  versus_ = true;
+  cheats_ = {};
+  inv_party_ = inv_enemies_ = false;
+  boss_ = monster_party_ = false;
+  cast_mask_ = 0x1FF;
+  evo_pending_ = 0;
+  saved_vars_ = {};
+  pip_tech_colour_ = {};
+  colour_row_ = false;
+  bench_.clear();
+  party_ = side_a.party;
+  party_b_ = side_b.party;
+  stars_b_ = side_b.stars;
+  dopple_mask_ = side_a.dopple;
+  dopple_b_ = side_b.dopple;
+  for (std::vector<PartyMember>* party : {&party_, &party_b_})
+    for (PartyMember& member : *party) {
+      member.hp = member.stat[0];
+      member.lo_persist = 0;
+    }
+  ring_ = {-1, -1, -1};
+  if (battlefield >= 0 && static_cast<size_t>(battlefield) < tables_.btbgdat.size())
+    for (size_t k = 0; k < 3; ++k) {
+      const int colour = tables_.btbgdat[static_cast<size_t>(battlefield)][k];
+      ring_[k] = colour < 6 ? colour : -1;
+    }
+  ring_summon_colour_ = -1;
+  judge_ring_summon_colour();
+  for (size_t i = 0; i < party_.size(); ++i) {
+    init_pc(static_cast<int>(i), party_[i]);
+    units_[i].stamina = opening_stamina;
+  }
+  for (size_t i = 0; i < party_b_.size(); ++i) init_pc(kPcSlots + static_cast<int>(i), party_b_[i]);
+  for (int unit = 0; unit < kPlayerUnits; ++unit) refresh_seal_flags(unit);
+  say(std::format("versus start: field {}  ring [{} {} {}]", battlefield, data::colour_name(ring_[0]), data::colour_name(ring_[1]),
+                  data::colour_name(ring_[2])));
+  settle();
+  return true;
+}
+
+PartyMember* Battle::record_of(int unit) {
+  if (versus_ && unit >= kPcSlots && unit < kPlayerUnits)
+    return static_cast<size_t>(unit - kPcSlots) < party_b_.size() ? &party_b_[static_cast<size_t>(unit - kPcSlots)] : nullptr;
+  return unit >= 0 && static_cast<size_t>(unit) < party_.size() ? &party_[static_cast<size_t>(unit)] : nullptr;
+}
+
+bool Battle::side_ready(int side) const {
+  for (int i = side_first(side); i < side_first(side) + kPcSlots; ++i)
+    if (unit(i).can_open_menu() && !(side == turn_side_ && done(i))) return true;
+  return false;
+}
+
+bool Battle::time_helps(int side) const {
+  for (int i = side_first(side); i < side_first(side) + kPcSlots; ++i) {
+    const Unit& member = unit(i);
+    if (member.pc && member.alive() && !(member.lo & st::kCannotMenuLo) && member.stamina < 10 && member.rate > 0) return true;
+  }
+  return false;
+}
+
+void Battle::versus_time_advance(int side) {
+  int step = 255;
+  for (int i = 0; i < kUnits; ++i) {
+    const Unit& unit = units_[static_cast<size_t>(i)];
+    if (side >= 0 && side_of(i) == side) continue;
+    if (unit.in_turn_order() && unit.countdown > 0 && unit.countdown != 0xFFFF) step = std::min(step, unit.countdown);
+  }
+  for (int i = 0; i < kUnits; ++i) {
+    Unit& unit = units_[static_cast<size_t>(i)];
+    if (!unit.in_turn_order()) continue;
+    if (unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - step);
+    if (unit.pc && (side < 0 || side_of(i) == side)) unit.stamina = cap_stamina(unit.stamina + step * unit.rate);
+  }
+}
+
+void Battle::pass_turn(bool timeout) {
+  int& run = timeouts_[static_cast<size_t>(turn_side_)];
+  run = timeout ? run + 1 : 0;
+  say(std::format("side {} ends its turn{}", turn_side_ == 0 ? 'A' : 'B', timeout ? " (timeout)" : ""));
+  if (run >= kVersusTimeoutLimit) {
+    finish_versus(turn_side_ == 0 ? Outcome::Wiped : Outcome::Victory, VersusEnd::Timeouts);
+    return;
+  }
+  turn_side_ ^= 1;
+  turn_fresh_ = true;
+  for (int i = side_first(turn_side_); i < side_first(turn_side_) + kPcSlots; ++i) done_[static_cast<size_t>(i)] = false;
+}
+
+// The ready scheduled turns (a confused or frozen character at countdown 0, either side) run first. Then the turn side keeps the turn while
+// one of its characters can act. A side that ran out during its turn passes it. A side whose turn starts with nobody able to act advances
+// time while that can help it; otherwise it passes when the other side can act or be helped by time, and when neither can, time runs for
+// every unit so that the scheduled turns come. A battle in which that never ends is a draw.
+void Battle::settle_versus() {
+  for (int guard = 0; guard < kSchedulerPasses && outcome_ == Outcome::Ongoing; ++guard) {
+    check_end();
+    if (outcome_ != Outcome::Ongoing) return;
+    if (const int actor = next_ready_unit(); actor >= 0) {
+      run_scheduled_turn(actor);
+      continue;
+    }
+    if (side_ready(turn_side_)) return;
+    const int other = 1 - turn_side_;
+    if (turn_fresh_ && time_helps(turn_side_)) versus_time_advance(turn_side_);
+    else if (!turn_fresh_ || side_ready(other) || time_helps(other)) pass_turn(false);
+    else versus_time_advance(-1);
+  }
+  if (outcome_ == Outcome::Ongoing) finish_versus(Outcome::Draw, VersusEnd::Stalled);
+}
+
+void Battle::finish_versus(Outcome outcome, VersusEnd end) {
+  if (outcome_ != Outcome::Ongoing) return;
+  versus_end_ = end;
+  finish(outcome);
+}
+
+void Battle::concede(int side) {
+  if (versus_) finish_versus(side == 0 ? Outcome::Wiped : Outcome::Victory, VersusEnd::Conceded);
+}
+
+void Battle::apply_state_command(const Command& cmd) {
+  switch (cmd.kind) {
+    case Command::Kind::EndTurn:
+      pass_turn(cmd.timeout);
+      form_owed_ = -1;
+      settle();
+      break;
+    case Command::Kind::Focus: open_menu(cmd.actor); break;
+    case Command::Kind::ElementMenu: open_element_menu(cmd.actor); break;
+    case Command::Kind::Form:
+      transform(cmd.actor, cmd.form);
+      form_owed_ = -1;
+      break;
+    default: break;
+  }
+}
+
+namespace {
+
+void hash_equip(Fnv64& hash, const Equip& eq) {
+  for (const int value : {eq.wp, eq.wp_acc, eq.wp_var, eq.wp_class, static_cast<int>(eq.wp_sweeps), eq.weapon_id, eq.arm, eq.arm_var, eq.mag_gear,
+                          eq.mdef_gear, eq.evd_gear, static_cast<int>(eq.gear_flags), static_cast<int>(eq.armour_colour), eq.stamina_mod, eq.start_gauge,
+                          eq.dur_mod})
+    hash.add(static_cast<u64>(value));
+  for (const u32 mask : {eq.slayer, eq.resist_lo, eq.resist_hi, eq.status_lo, eq.status_hi, eq.guard_hi}) hash.add(mask);
+  for (const u16 acc : eq.acc) hash.add(acc);
+  hash.add(eq.hp_pct.size());
+  for (const int pct : eq.hp_pct) hash.add(static_cast<u64>(pct));
+}
+
+template <class T, size_t N>
+void hash_array(Fnv64& hash, const std::array<T, N>& values) {
+  for (const T& value : values) hash.add(static_cast<u64>(value));
+}
+
+void hash_unit(Fnv64& hash, const Unit& unit) {
+  for (const int value : {static_cast<int>(unit.present), static_cast<int>(unit.pc), unit.src_id, unit.max_hp, unit.hp, unit.atk, unit.def, unit.hit, unit.evd,
+                          unit.mag, unit.mdef, unit.hit_med, unit.hit_heavy, static_cast<int>(unit.innate), unit.dur, unit.rate, unit.ap, unit.stamina,
+                          unit.countdown, unit.gauge, unit.gauge_max, static_cast<int>(unit.gender), static_cast<int>(unit.hero_set), static_cast<int>(unit.guard),
+                          static_cast<int>(unit.home_facing), unit.gold, unit.drop_row, unit.drop_base, unit.ctrl12, static_cast<int>(unit.stolen),
+                          static_cast<int>(unit.letter), unit.form, unit.body, unit.kind, static_cast<int>(unit.hp_written_zero),
+                          static_cast<int>(unit.freeze_pending), unit.result_code})
+    hash.add(static_cast<u64>(value));
+  for (const u32 word : {unit.lo, unit.hi, unit.perm_lo, unit.perm_hi, unit.weak_lo, unit.weak_hi, unit.skip_lo, unit.skip_hi}) hash.add(word);
+  hash_array(hash, unit.hit_ovr);
+  hash.add(unit.timers.size());
+  for (const auto& [index, left] : unit.timers) hash.add(static_cast<u64>(index) << 32 | static_cast<u32>(left));
+  hash_array(hash, unit.mod);
+  hash_array(hash, unit.cells);
+  hash_array(hash, unit.usable);
+  hash_array(hash, unit.used);
+  hash_array(hash, unit.combo_word);
+  hash_array(hash, unit.seal_flag);
+  hash_array(hash, unit.qty);
+  hash_array(hash, unit.stack);
+  hash_array(hash, unit.menu_cursor);
+  hash_equip(hash, unit.eq);
+}
+
+void hash_member(Fnv64& hash, const PartyMember& member) {
+  for (const int value : {member.char_id, member.hp, static_cast<int>(member.innate), member.growth_col, member.dur, member.rate, member.hit_med, member.hit_heavy,
+                          static_cast<int>(member.lo_persist), member.kind, static_cast<int>(member.evolved)})
+    hash.add(static_cast<u64>(value));
+  for (const auto* stats : {&member.stat, &member.snap, &member.pending, &member.lv99, &member.base}) hash_array(hash, *stats);
+  hash_array(hash, member.cells);
+  hash_array(hash, member.unlocked);
+  hash_array(hash, member.qty);
+  hash_array(hash, member.stack);
+  hash_equip(hash, member.eq);
+}
+
+void hash_plans(Fnv64& hash, const std::vector<std::pair<int, std::vector<EnemyAction>>>& plans) {
+  hash.add(plans.size());
+  for (const auto& [unit, plan] : plans) {
+    hash.add(static_cast<u64>(unit));
+    hash.add(plan.size());
+    for (const EnemyAction& action : plan) {
+      for (const int value : {static_cast<int>(action.kind), action.strength, action.element, action.target, action.seq, static_cast<int>(action.trap_fizzle)})
+        hash.add(static_cast<u64>(value));
+      hash.add(action.targets);
+      hash_array(hash, action.group);
+    }
+  }
+}
+
+}  // namespace
+
+u64 Battle::state_hash() const {
+  Fnv64 hash;
+  hash.add(rng_.fingerprint());
+  for (const Unit& unit : units_) hash_unit(hash, unit);
+  for (const Unit& unit : form_backup_) hash_unit(hash, unit);
+  hash.add(benched_units_.size());
+  for (const auto& [char_id, unit] : benched_units_) {
+    hash.add(static_cast<u64>(char_id));
+    hash_unit(hash, unit);
+  }
+  for (const std::vector<PartyMember>* records : {&party_, &party_b_, &bench_, &duel_roster_}) {
+    hash.add(records->size());
+    for (const PartyMember& member : *records) hash_member(hash, member);
+  }
+  hash_plans(hash, death_plans_);
+  hash_plans(hash, idle_plans_);
+  hash.add(attacked_.size());
+  for (const int unit : attacked_) hash.add(static_cast<u64>(unit));
+  hash.add(swapped_out_.size());
+  for (const int char_id : swapped_out_) hash.add(static_cast<u64>(char_id));
+  hash_array(hash, ring_);
+  hash_array(hash, ring_repaint_);
+  hash_array(hash, trap_);
+  hash_array(hash, death_pending_);
+  hash_array(hash, turn_claimed_);
+  hash_array(hash, kill_script_run_);
+  hash_array(hash, summon_kills_);
+  hash_array(hash, cur_group_);
+  hash_array(hash, dopple_mask_);
+  hash_array(hash, dopple_b_);
+  hash_array(hash, form_restore_);
+  hash_array(hash, form_max_hp_);
+  hash_array(hash, form_body_unit_);
+  hash_array(hash, saved_vars_);
+  hash_array(hash, pip_tech_colour_);
+  hash_array(hash, confirm_target_);
+  hash_array(hash, timeouts_);
+  hash_array(hash, done_);
+  for (const int value :
+       {static_cast<int>(outcome_), result_code_, growth_.star, growth_.progress, growth_.counter, scene_, actions_, cursor_, action_id_, hit_counter_,
+        summon_colour_, ring_summon_colour_, cur_script_seq_, gated_target_, creature_state_, creature_model_, creature_slot_, evo_pending_, seal_swap_,
+        drain_.first, drain_.second, chain_actor_, chain_target_, chain_hits_, chain_owner_, active_pc_, confirm_actor_, field_state_, trap_state_,
+        trap_before_.pc, trap_before_.enemy, static_cast<int>(trap_before_.shown), static_cast<int>(vary_innate_colour_), swaps_, stars_b_, turn_side_,
+        static_cast<int>(versus_end_), form_owed_, opt_.battlefield, static_cast<int>(versus_), static_cast<int>(turn_fresh_), static_cast<int>(boss_),
+        static_cast<int>(monster_party_), static_cast<int>(in_death_cast_), static_cast<int>(cast_all_), static_cast<int>(ring_repainted_),
+        static_cast<int>(colour_row_), static_cast<int>(fizzled_), static_cast<int>(trap_fizzle_), static_cast<int>(inv_party_), static_cast<int>(inv_enemies_)})
+    hash.add(static_cast<u64>(value));
+  hash.add(cast_mask_);
+  hash.add(boost_cancelled_);
+  for (const bool cheat : {cheats_.god_mode, cheats_.boost, cheats_.max_stamina, cheats_.free_elements, cheats_.always_hit, cheats_.always_loot,
+                           cheats_.instant_growth, cheats_.shared_growth})
+    hash.add(cheat);
+  hash.add(static_cast<u64>(rewards_.gold));
+  for (const std::vector<u16>* words : {&rewards_.items, &rewards_.elements, &rewards_.stolen, &rewards_.trapped}) {
+    hash.add(words->size());
+    for (const u16 word : *words) hash.add(word);
+  }
+  return hash.value();
+}
+
 // ------------------------------------------------------------------------------------------------ queries
 int Battle::alive_count(bool pcs) const {
   int count = 0;
@@ -501,22 +796,22 @@ int Battle::alive_count(bool pcs) const {
 // Rainbow (0xFC) and colourless cells are never sealed.
 // A sealed cell is judged by the element it casts now (a tech that became a double / triple tech takes that tech's colour).
 bool Battle::element_sealed(int pc, int cell) const {
-  if (!is_pc_slot(pc) || cell < 0 || cell >= data::kGridCells) return false;
+  if (!player_unit(pc) || cell < 0 || cell >= data::kGridCells) return false;
   return colour_sealed(pc, cell_element(pc, cell));
 }
 
 bool Battle::summon_blocked(int pc, int cell) const {
-  if (!is_pc_slot(pc) || cell < 0 || cell >= data::kGridCells) return false;
+  if (!player_unit(pc) || cell < 0 || cell >= data::kGridCells) return false;
   const int id = cell_element(pc, cell);
   if (id <= 0 || static_cast<size_t>(id) >= tables_.elements.size()) return false;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(id)];
   if (!(element.b(0) & 0x40)) return false;
-  return ring_summon_colour_ < 0 || ring_summon_colour_ != ring_colour_of(element.colour_bit()) || growth_.counter <= 0;
+  return ring_summon_colour_ < 0 || ring_summon_colour_ != ring_colour_of(element.colour_bit()) || star_counter(side_of(pc)) <= 0;
 }
 
 bool Battle::colour_sealed(int pc, int id) const {
   if (id <= 0 || static_cast<size_t>(id) >= tables_.elements.size()) return false;
-  const int colour = data::colour_index_of_bit(element_colour(id) & 0xFC);
+  const int colour = data::colour_index_of_bit(element_colour(id, side_of(pc)) & 0xFC);
   return colour >= 0 && (unit(pc).lo & (0x800u << (4 * colour))) != 0;
 }
 
@@ -537,22 +832,23 @@ int Battle::combo_partner_cell(int pc, int tech) const {
 // A tech record names its double-tech partner tech at +0x20 (the result at +0x26), or its two triple-tech partner techs at +0x22 / +0x24
 // (the result at +0x28). The other two party slots are searched in slot order: a double tech takes the first of them that holds the partner
 // tech; a triple tech needs each of them to hold one of its two partner techs. The casting PCs are the record's character bytes +0x14..+0x16
-// matched against the party; each gives up the cell that offered the tech.
+// matched against the party; each gives up the cell that offered the tech. A versus side's techs are judged within that side.
 ComboTech Battle::combo_at(int pc, int cell) const {
   ComboTech combo;
-  if (!is_pc_slot(pc) || cell < 0 || cell >= data::kGridCells) return combo;
+  if (!player_unit(pc) || cell < 0 || cell >= data::kGridCells) return combo;
   const Unit& caster = unit(pc);
   const int id = caster.cells[static_cast<size_t>(cell)] & 0x3FFF;
   if (!caster.usable[static_cast<size_t>(cell)] || id <= 0 || static_cast<size_t>(id) >= tables_.elements.size()) return combo;
   const data::ElemRec& tech = tables_.elements[static_cast<size_t>(id)];
-  const std::array<int, 2> others{pc == 0 ? 1 : 0, pc == 2 ? 1 : 2};
+  const int base = side_first(side_of(pc)), slot_of_pc = pc - base;
+  const std::array<int, 2> others{slot_of_pc == 0 ? 1 : 0, slot_of_pc == 2 ? 1 : 2};
   std::array<int, kPcSlots> given{-1, -1, -1};
-  given[static_cast<size_t>(pc)] = cell;
+  given[static_cast<size_t>(slot_of_pc)] = cell;
   if (tech.rd16(0x22) == 0) {
     const int partner_tech = tech.rd16(0x20);
     if (partner_tech == 0) return combo;
     for (int other : others) {
-      const int partner_cell = combo_partner_cell(other, partner_tech);
+      const int partner_cell = combo_partner_cell(base + other, partner_tech);
       if (partner_cell < 0) continue;
       given[static_cast<size_t>(other)] = partner_cell;
       combo.element = tech.rd16(0x26);
@@ -562,7 +858,7 @@ ComboTech Battle::combo_at(int pc, int cell) const {
     for (int other : others) {
       int partner_cell = -1;
       for (const size_t offset : {size_t{0x22}, size_t{0x24}}) {
-        const int found = combo_partner_cell(other, tech.rd16(offset));
+        const int found = combo_partner_cell(base + other, tech.rd16(offset));
         if (found >= 0) partner_cell = found;
       }
       if (partner_cell < 0) return combo;
@@ -577,8 +873,8 @@ ComboTech Battle::combo_at(int pc, int cell) const {
     const int char_id = result.b(0x14 + k);
     if (char_id == 0xFF) continue;
     for (int slot = 0; slot < kPcSlots; ++slot)
-      if (given[static_cast<size_t>(slot)] >= 0 && unit(slot).src_id == char_id) {
-        combo.units[k] = slot;
+      if (given[static_cast<size_t>(slot)] >= 0 && unit(base + slot).src_id == char_id) {
+        combo.units[k] = base + slot;
         combo.cells[k] = given[static_cast<size_t>(slot)];
       }
   }
@@ -587,16 +883,17 @@ ComboTech Battle::combo_at(int pc, int cell) const {
 
 // The element menu of a PC. Every PC's table starts again from its own cells; each cell of `pc` that offers a double / triple tech puts
 // it into its own cell and into the cell each partner gives up, and `pc`'s seal flags are judged anew by what its cells show. The
-// partners' flags stay as they were.
+// partners' flags stay as they were. A versus side's menus touch that side only.
 void Battle::open_element_menu(int pc) {
-  if (!is_pc_slot(pc)) return;
-  for (int slot = 0; slot < kPcSlots; ++slot) units_[static_cast<size_t>(slot)].combo_word.fill(0);
+  if (!player_unit(pc)) return;
+  const int base = side_first(side_of(pc));
+  for (int slot = 0; slot < kPcSlots; ++slot) units_[static_cast<size_t>(base + slot)].combo_word.fill(0);
   for (int cell = 0; cell < data::kGridCells; ++cell) {
     const ComboTech combo = combo_at(pc, cell);
     if (!combo.element) continue;
     for (int slot = 0; slot < kPcSlots; ++slot)
       if (combo.slot_cells[static_cast<size_t>(slot)] >= 0)
-        units_[static_cast<size_t>(slot)].combo_word[static_cast<size_t>(combo.slot_cells[static_cast<size_t>(slot)])] = static_cast<u16>(combo.element);
+        units_[static_cast<size_t>(base + slot)].combo_word[static_cast<size_t>(combo.slot_cells[static_cast<size_t>(slot)])] = static_cast<u16>(combo.element);
   }
   Unit& unit = units_[static_cast<size_t>(pc)];
   for (size_t cell = 0; cell < data::kGridCells; ++cell)
@@ -610,19 +907,19 @@ void Battle::refresh_seal_flags(int pc) {
   Unit& unit = units_[static_cast<size_t>(pc)];
   for (size_t cell = 0; cell < data::kGridCells; ++cell) {
     const int id = unit.combo_word[cell] ? unit.combo_word[cell] : unit.cells[cell] & 0x3FFF;
-    if (!unit.usable[cell] || id <= 0 || static_cast<size_t>(id) >= tables_.elements.size() || (element_colour(id) & 0xFC) == 0xFC) continue;
+    if (!unit.usable[cell] || id <= 0 || static_cast<size_t>(id) >= tables_.elements.size() || (element_colour(id, side_of(pc)) & 0xFC) == 0xFC) continue;
     unit.seal_flag[cell] = colour_sealed(pc, id);
   }
 }
 
 int Battle::cell_element(int pc, int cell) const {
-  if (!is_pc_slot(pc) || cell < 0 || cell >= data::kGridCells) return 0;
+  if (!player_unit(pc) || cell < 0 || cell >= data::kGridCells) return 0;
   const ComboTech combo = combo_at(pc, cell);
   return combo.element ? combo.element : unit(pc).cells[static_cast<size_t>(cell)] & 0x3FFF;
 }
 
 bool Battle::element_usable(int pc, int cell) const {
-  if (!is_pc_slot(pc) || cell < 0 || cell >= data::kGridCells) return false;
+  if (!player_unit(pc) || cell < 0 || cell >= data::kGridCells) return false;
   const Unit& caster = unit(pc);
   if (element_sealed(pc, cell) || summon_blocked(pc, cell)) return false;
   if (!caster.can_open_menu() || caster.stamina <= 0) return false;
@@ -634,7 +931,7 @@ int Battle::auto_hit_level(int actor, int target, bool fallback_weak) const {
   const Unit& attacker = unit(actor);
   const bool fatigued = (attacker.lo & st::kFatigued) != 0;
   static const int kNeedNormal[3] = {10, 20, 30}, kNeedFatigued[3] = {10, 22, 35};
-  const bool fresh = is_pc_slot(actor) && (confirm_actor_ != actor || confirm_target_[static_cast<size_t>(actor)] != target);
+  const bool fresh = player_unit(actor) && (confirm_actor_ != actor || confirm_target_[static_cast<size_t>(actor)] != target);
   for (int k = 2; k >= 0; --k) {
     const int figure = fresh ? hit_figure_fresh(actor, target, k) : hit_chance_shown_for(actor, target, k);
     if (figure > 79 && attacker.stamina >= (fatigued ? kNeedFatigued[k] : kNeedNormal[k])) return k;
@@ -659,7 +956,7 @@ int Battle::hit_chance_for(int actor, int target, int strength, bool any_target)
   in.hits = (attacker.pc && chain_actor_ == actor && (any_target || chain_target_ == target)) ? chain_hits_ : 0;
   in.strength = strength;
   in.always_hit = (attacker.hi & st::kHiAlwaysHit) != 0;
-  in.dark = is_pc_slot(active_pc_) && (unit(active_pc_).lo & st::kDark) != 0;
+  in.dark = player_unit(active_pc_) && (unit(active_pc_).lo & st::kDark) != 0;
   in.target_asleep = (target_unit.lo & st::kAsleep) != 0;
   return battle::hit_chance(in);
 }
@@ -691,7 +988,7 @@ int Battle::hit_chance_shown_for(int actor, int target, int strength) const {
 
 int Battle::hit_budget(int actor) const {
   const Unit& actor_unit = unit(actor);
-  if (!(actor_unit.hi & st::kHiNoStaminaCost)) return actor_unit.stamina;
+  if (!costs_waived(actor_unit)) return actor_unit.stamina;
   const auto timer = actor_unit.timers.find(32 + std::countr_zero(st::kHiNoStaminaCost));
   return actor_unit.stamina + 10 * (timer == actor_unit.timers.end() ? 0 : timer->second);
 }
@@ -703,13 +1000,32 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
     return false;
   };
   if (outcome_ != Outcome::Ongoing) return no("battle is over");
-  if (!is_pc_slot(cmd.actor) || !can_act(cmd.actor)) return no("actor cannot act");
+  if (!player_unit(cmd.actor)) return no("actor cannot act");
   const Unit& actor_unit = unit(cmd.actor);
+  // The state commands. In a versus battle the menu ones belong to the side whose turn it is, and a Dopplegang pick to the cast that
+  // opened it (whichever side holds the turn once the cast is over).
+  switch (cmd.kind) {
+    case Command::Kind::EndTurn:
+      if (!versus_) return no("only a versus battle has turns");
+      return side_of(cmd.actor) == turn_side_ ? true : no("not this side's turn");
+    case Command::Kind::Focus:
+    case Command::Kind::ElementMenu: return !versus_ || can_act(cmd.actor) ? true : no("actor cannot act");
+    case Command::Kind::Form:
+      if (versus_ && form_owed_ != cmd.actor) return no("no Dopplegang pick is open");
+      if (!actor_unit.present || !actor_unit.pc) return no("actor cannot act");
+      // A versus pick may keep the character's own form: it still closes the pick, which the other game waits for.
+      if (cmd.form < 0) return actor_unit.form >= 0 || versus_ ? true : no("already in the character's own form");
+      if (static_cast<size_t>(cmd.form) >= tables_.enemies.size() || (versus_ && !dopple_has(cmd.form, side_of(cmd.actor)))) return no("not in the pool");
+      return true;
+    default: break;
+  }
+  if (!can_act(cmd.actor)) return no("actor cannot act");
   switch (cmd.kind) {
     case Command::Kind::Attack: {
       if (cmd.chain.empty() || cmd.chain.size() > kMaxChain) return no("chain length must be 1..4");
-      // A hit starts only while the stamina covers its unfatigued cost; under kHiNoStaminaCost nothing is paid, so no fatigue term either.
-      const bool free = (actor_unit.hi & st::kHiNoStaminaCost) != 0;
+      // A hit starts only while the stamina covers its unfatigued cost; while the costs are waived nothing is paid, so no fatigue term
+      // either.
+      const bool free = costs_waived(actor_unit);
       int budget = actor_unit.stamina;
       for (int strength : cmd.chain) {
         if (strength < 0 || strength > 2) return no("bad strength");
@@ -730,6 +1046,7 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
       if (std::find(candidates.begin(), candidates.end(), cmd.swap_in) == candidates.end()) return no("that character cannot swap in");
       break;
     }
+    default: break;
   }
   if (cmd.target >= kUnits) return no("bad target");
   if (cmd.target >= 0 && cmd.kind != Command::Kind::Defend && cmd.kind != Command::Kind::Run && !is_pc_slot(cmd.target) && brain_.untargetable(cmd.target))
@@ -740,7 +1057,7 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
       const TargetSpec spec = target_spec(tables_.elements[static_cast<size_t>(id)]);
       const Unit& target_unit = units_[static_cast<size_t>(cmd.target)];
       if (!target_unit.present) return no("no such target");
-      if (is_pc_slot(cmd.target) ? !spec.party : !spec.enemies) return no("this element cannot be aimed at that side");
+      if (side_of(cmd.target) == side_of(cmd.actor) ? !spec.party : !spec.enemies) return no("this element cannot be aimed at that side");
       if (spec.self_only && cmd.target != cmd.actor) return no("this element only affects its caster");
       if (spec.ko_only ? !(target_unit.lo & st::kKO) : !target_unit.standing()) return no(spec.ko_only ? "this element needs a knocked-out target" : "the target is knocked out");
     }
@@ -770,10 +1087,10 @@ std::vector<int> Battle::swap_candidates(int pc) const {
 }
 
 // ------------------------------------------------------------------------------------------------ Dopplegang / Pip
-std::vector<int> Battle::dopple_pool() const {
+std::vector<int> Battle::dopple_pool(int side) const {
   std::vector<int> out;
   for (int i = 0; i < 256; ++i)
-    if (dopple_has(i)) out.push_back(i);
+    if (dopple_has(i, side)) out.push_back(i);
   return out;
 }
 
@@ -796,8 +1113,8 @@ bool Battle::dopple_credit(int enemy_unit, int last_pc) {
 
 // A creature form grows with the stars left: extra = stars left - (record +0xA6 & 0x7F); when positive, ATK / DEF / MAG / MDEF each add
 // extra >> 4, >> 3 or >> 2 by their 2-bit selector in record +0xA7 (bits 0-1, 2-3, 4-5, 6-7; 0 = no growth), capped at 255.
-void Battle::scale_creature_form(Unit& unit, const data::StatRec& rec) const {
-  const int extra = growth_.counter - rec.star_threshold();
+void Battle::scale_creature_form(Unit& unit, const data::StatRec& rec, int side) const {
+  const int extra = star_counter(side) - rec.star_threshold();
   if (extra <= 0) return;
   const u8 selectors = rec.star_growth();
   int* stats[4] = {&unit.atk, &unit.def, &unit.mag, &unit.mdef};
@@ -808,21 +1125,22 @@ void Battle::scale_creature_form(Unit& unit, const data::StatRec& rec) const {
 }
 
 bool Battle::transform(int unit_index, int form) {
-  if (unit_index < 0 || unit_index >= kPcSlots || !units_[static_cast<size_t>(unit_index)].present || !units_[static_cast<size_t>(unit_index)].pc) return false;
+  if (!player_unit(unit_index) || !units_[static_cast<size_t>(unit_index)].present || !units_[static_cast<size_t>(unit_index)].pc) return false;
   Unit& unit = units_[static_cast<size_t>(unit_index)];
+  const size_t side = static_cast<size_t>(side_of(unit_index));
   if (form < 0) {
     if (unit.form < 0) return false;
     const int hp = unit.hp;
     unit = form_backup_[static_cast<size_t>(unit_index)];
-    unit.hp = hp, unit.max_hp = form_max_hp_;
+    unit.hp = hp, unit.max_hp = form_max_hp_[side];
     unit.countdown = 8;
-    if (static_cast<size_t>(unit_index) < party_.size()) party_[static_cast<size_t>(unit_index)].stat[0] = form_max_hp_;
-    form_restore_ = false;
+    if (PartyMember* member = record_of(unit_index)) member->stat[0] = form_max_hp_[side];
+    form_restore_[side] = false;
     return true;
   }
   if (static_cast<size_t>(form) >= tables_.enemies.size()) return false;
-  if (unit.form < 0) form_backup_[static_cast<size_t>(unit_index)] = unit, form_max_hp_ = unit.max_hp, form_body_unit_ = unit_index;
-  form_restore_ = true;
+  if (unit.form < 0) form_backup_[static_cast<size_t>(unit_index)] = unit, form_max_hp_[side] = unit.max_hp, form_body_unit_[side] = unit_index;
+  form_restore_[side] = true;
   const auto& rec = tables_.enemies[static_cast<size_t>(form)];
   const Unit old = unit;
   Unit fresh{};
@@ -831,13 +1149,13 @@ bool Battle::transform(int unit_index, int form) {
   fresh.form = form;
   fresh.name = enemy_label(form);
   if (fresh.name.empty()) fresh.name = std::format("monster{}", form);
-  fresh.max_hp = form_max_hp_, fresh.hp = old.hp;
+  fresh.max_hp = form_max_hp_[side], fresh.hp = old.hp;
   fresh.ap = 8, fresh.countdown = 8, fresh.stamina = old.stamina, fresh.gauge = -1;
   fresh.gender = old.gender;
   fresh.hero_set = old.hero_set;
   fresh.home_facing = old.home_facing;
   load_monster_record(fresh, rec, st::kPartyShown);
-  scale_creature_form(fresh, rec);
+  scale_creature_form(fresh, rec, static_cast<int>(side));
   // The form's grid loses its lock bits, so the gauge tops out at the deepest row holding an element.
   fresh.gauge_max = -1;
   for (size_t cell = 0; cell < data::kGridCells; ++cell) {
@@ -850,9 +1168,10 @@ bool Battle::transform(int unit_index, int form) {
 
 Unit Battle::exit_unit(int unit_index) const {
   const Unit& unit = units_.at(static_cast<size_t>(unit_index));
-  if (unit_index >= kPcSlots || !unit.pc || unit.form < 0) return unit;
+  if (!player_unit(unit_index) || !unit.pc || unit.form < 0) return unit;
   Unit own = form_backup_[static_cast<size_t>(unit_index)];
-  if (form_restore_ && form_body_unit_ == unit_index) own.hp = unit.hp;
+  const size_t side = static_cast<size_t>(side_of(unit_index));
+  if (form_restore_[side] && form_body_unit_[side] == unit_index) own.hp = unit.hp;
   return own;
 }
 
@@ -861,8 +1180,9 @@ Unit Battle::exit_unit(int unit_index) const {
 // (bits 14-15 kept; the third only for a second form) and the growth column are written to the unit and the party record. A non-empty
 // unit cell that takes a new tech loses its used bit; an empty one stays empty (the party record cell is written either way).
 void Battle::evolve(int unit_index, int form) {
-  if (unit_index < 0 || unit_index >= kPcSlots || !pip_form(form)) return;
+  if (!player_unit(unit_index) || !pip_form(form)) return;
   Unit& unit = units_[static_cast<size_t>(unit_index)];
+  const size_t side = static_cast<size_t>(side_of(unit_index));
   int best_points = 0, best_colour = 0;
   for (int k = 0; k < 6; ++k) {
     const int points = saved_var(2 + k);
@@ -871,9 +1191,9 @@ void Battle::evolve(int unit_index, int form) {
   unit.innate = static_cast<u8>((unit.innate & 3) | (4 << best_colour));
   for (int k = 0; k < 6; ++k) set_saved_var(2 + k, 0);
   evo_pending_ = 0;
-  form_restore_ = false;
-  form_max_hp_ = unit.max_hp;
-  form_body_unit_ = unit_index;
+  form_restore_[side] = false;
+  form_max_hp_[side] = unit.max_hp;
+  form_body_unit_[side] = unit_index;
   unit.kind = form;
   unit.ap = 8, unit.countdown = 21;
   const size_t tech_base = static_cast<size_t>(form - 0x2B) * 3;
@@ -884,14 +1204,14 @@ void Battle::evolve(int unit_index, int form) {
       cell = static_cast<u16>((cell & 0xC000) | kPipTechs[tech_base + k]);
       unit.used[static_cast<size_t>(kPipTechCells[k])] = false;
     }
-    if (static_cast<size_t>(unit_index) < party_.size()) {
-      u16& record_cell = party_[static_cast<size_t>(unit_index)].cells[static_cast<size_t>(kPipTechCells[k])];
+    if (PartyMember* member = record_of(unit_index)) {
+      u16& record_cell = member->cells[static_cast<size_t>(kPipTechCells[k])];
       record_cell = static_cast<u16>((record_cell & 0xC000) | kPipTechs[tech_base + k]);
     }
   }
-  pip_tech_colour_ = unit.innate;
-  if (static_cast<size_t>(unit_index) < party_.size()) {
-    PartyMember& member = party_[static_cast<size_t>(unit_index)];
+  pip_tech_colour_[side] = unit.innate;
+  if (PartyMember* record = record_of(unit_index)) {
+    PartyMember& member = *record;
     member.kind = form;
     member.evolved = true;
     member.growth_col = kPipGrowthCol[static_cast<size_t>(form - 0x2B)];
@@ -920,21 +1240,23 @@ void Battle::count_colour_point(int actor, const data::ElemRec& element) {
   if (std::none_of(party_.begin(), party_.end(), is_pip)) return;
   const int colour = data::colour_index_of_bit(static_cast<u8>(element.colour_bit() & 0xFC));
   if (colour < 0) return;
-  const bool pip_casts = is_pc_slot(actor) && static_cast<size_t>(actor) < party_.size() && pip_form(party_[static_cast<size_t>(actor)].char_id);
+  const PartyMember* caster = record_of(actor);
+  const bool pip_casts = caster && pip_form(caster->char_id);
   set_saved_var(2 + colour, saved_var(2 + colour) + (pip_casts ? 2 : 1));
 }
 
-u8 Battle::element_colour(int id) const {
+u8 Battle::element_colour(int id, int side) const {
   if (id < 0 || id >= static_cast<int>(tables_.elements.size())) return 0;
   const u8 colour_bit = tables_.elements[static_cast<size_t>(id)].colour_bit();
   if (id == kVaryInnateElement && vary_innate_colour_) return static_cast<u8>((colour_bit & 3) | vary_innate_colour_);
-  return pip_tech_colour_ && pip_tech(id) ? static_cast<u8>((colour_bit & 3) | (pip_tech_colour_ & 0xFC)) : colour_bit;
+  const u8 pip_colour = pip_tech_colour_[versus_ && side == 1 ? 1 : 0];
+  return pip_colour && pip_tech(id) ? static_cast<u8>((colour_bit & 3) | (pip_colour & 0xFC)) : colour_bit;
 }
 
-int Battle::seq_colour(int element_id) const {
+int Battle::seq_colour(int element_id, int side) const {
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return -1;
   if (tables_.elements[static_cast<size_t>(element_id)].b(0) & 0x80) return -1;
-  const u8 colour_mask = element_colour(element_id) & 0xFC;
+  const u8 colour_mask = element_colour(element_id, side) & 0xFC;
   if (colour_mask == 0) return 0;
   if (colour_mask == 0xFC) return 6;
   return data::colour_index_of_bit(colour_mask);
@@ -1018,7 +1340,7 @@ void Battle::run_kill_script(int unit_index) {
 void Battle::scan_kills() {
   for (int i = kPcSlots; i < kUnits && outcome_ == Outcome::Ongoing; ++i) {
     const Unit& unit = units_[static_cast<size_t>(i)];
-    if (!unit.present) continue;
+    if (!unit.present || unit.pc) continue;
     if (unit.hp > 0 && !(unit.lo & st::kKO)) {
       kill_script_run_[static_cast<size_t>(i)] = false;
       continue;
@@ -1070,7 +1392,7 @@ void Battle::damage_unit(int actor, int target, int value, int code) {
 bool Battle::colour_gated(int actor, int target, int element_id) const {
   const int gate = brain_.colour_gate();
   if (gate == 0 || !is_pc_slot(actor) || is_pc_slot(target)) return false;
-  return element_id < 0 || data::colour_index_of_bit(static_cast<u8>(element_colour(element_id) & 0xFC)) + 1 != gate;
+  return element_id < 0 || data::colour_index_of_bit(static_cast<u8>(element_colour(element_id, side_of(actor)) & 0xFC)) + 1 != gate;
 }
 
 // The queued death casts of the units killed during the last action (kill script, slot 3). The dying unit is still in the alive mask until
@@ -1204,9 +1526,9 @@ bool Battle::apply_status_bits(int target, u32 lo, u32 hi, int chance, u8 colour
   return any;
 }
 
-bool Battle::apply_status(int target, const data::ElemRec& rec) {
+bool Battle::apply_status(int target, const data::ElemRec& rec, int side) {
   return apply_status_bits(target, rec.status_lo(), rec.status_hi() & st::kHiApplyMask, rec.status_pct(),
-                           element_colour(static_cast<int>(&rec - tables_.elements.data())));
+                           element_colour(static_cast<int>(&rec - tables_.elements.data()), side));
 }
 
 bool Battle::force_status_bits(int target, u32 lo) {
@@ -1329,7 +1651,7 @@ void Battle::weapon_landed(int actor, int strength) {
   if (attacker.pc && !(attacker.lo & st::kConfused)) chain_hits_ += kChainAdd[static_cast<size_t>(strength)];
   // A party member's gauge fills (battle boost: to the top). The game moves the gauge only in the party's end-of-action step, so a
   // monster's hits never charge it.
-  if (is_pc_slot(actor))
+  if (player_unit(actor))
     attacker.gauge = cheats_.boost ? attacker.gauge_max : std::clamp(attacker.gauge + strength + 1, -1, attacker.gauge_max);
 }
 
@@ -1344,10 +1666,12 @@ void Battle::do_weapon_attack(int actor, int target, int strength) {
 // The sweep is one hit: the stamina, the chain step and the gauge are paid once. Its targets are every enemy an all-targets element would
 // reach when it starts (cast_element), in ascending unit order, each with its own hit roll (the chain counter applies to all of them) and
 // damage. A miss is not cleared between the targets: every target after one that missed misses too, its roll still drawn. Only a sweep
-// that missed nobody adds the chain step and fills the gauge. The scripts see the whole target set as the attack's target mask.
+// that missed nobody adds the chain step and fills the gauge. The scripts see the whole target set as the attack's target mask. A versus
+// sweep strikes the other side.
 void Battle::do_weapon_sweep(int actor, int aim, int strength) {
   u32 targets = 0;
-  for (int i = kPcSlots; i < kUnits; ++i)
+  const int foes = versus_ ? 1 - side_of(actor) : 1;
+  for (int i = side_first(foes); i < side_end(foes); ++i)
     if (units_[static_cast<size_t>(i)].present && units_[static_cast<size_t>(i)].standing() && (cast_mask_ >> i & 1u)) targets |= 1u << i;
   if (targets == 0) targets = 1u << aim;
   weapon_begin(actor, aim, strength, targets);
@@ -1373,10 +1697,11 @@ void Battle::do_pc_weapon_hit(int actor, int target, int strength) {
 // ------------------------------------------------------------------------------------------------ element / tech
 std::array<int, 6> Battle::tech_participants(int actor, const data::ElemRec& element) const {
   std::array<int, 6> list{-1, -1, -1, -1, -1, -1};
-  if (actor < kPcSlots) {
+  if (player_unit(actor)) {
     if (element.b(0x14) == 0xFF) return list;
+    const int base = side_first(side_of(actor));
     for (size_t k = 0; k < 3; ++k)
-      for (int slot = 0; slot < kPcSlots; ++slot)
+      for (int slot = base; slot < base + kPcSlots; ++slot)
         if (element.b(0x14 + k) != 0xFF && units_[static_cast<size_t>(slot)].present && units_[static_cast<size_t>(slot)].src_id == element.b(0x14 + k)) list[k] = slot;
     return list;
   }
@@ -1399,8 +1724,9 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   const size_t log0 = log_.size();
   boost_cancelled_ = 0;
   brain_.on_attack(*this, actor, 1, element_id, 1u << target);
+  const int caster_side = side_of(actor);
   const int ci = colour_of(caster) < 0 ? kNoColour : colour_of(caster);
-  int ce = data::colour_index_of_bit(element_colour(element_id));
+  int ce = data::colour_index_of_bit(element_colour(element_id, caster_side));
   const int ce_pool = ce < 0 ? kNoColour : ce;
   const int ct = colour_of(target_unit);
   int cmul = colour_multiplier(ci, ce_pool, ring_, ct);
@@ -1413,8 +1739,9 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   const int seal_swap = seal_swap_ >= 0 ? seal_swap_ : seal_swap_colour(actor, element_id);
   const int mode = seal_swap ? 50 : element.mode();
   // An enemy's element action quarters every result value of a summon (record byte 0 bit 0x40) and halves those of ids 150..301, the
-  // caster's own entry included; the reduced value is shown and applied. Scene 0x1D9 keeps the full values.
-  const int value_shift = is_pc_slot(actor) || scene_ == kFullValueScene ? 0
+  // caster's own entry included; the reduced value is shown and applied. Scene 0x1D9 keeps the full values; a versus character's casts
+  // are party casts.
+  const int value_shift = player_unit(actor) || scene_ == kFullValueScene ? 0
                           : (element.b(0) & 0x40)                        ? 2
                           : (element_id >= 150 && element_id <= 301)     ? 1
                                                                          : 0;
@@ -1453,7 +1780,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     // Absorbed: the element absorb status, or bit 1 of the innate byte / the armour colour byte with the element's colour in its mask.
     u8 absorb_mask = (target_unit.innate & 2) ? static_cast<u8>(target_unit.innate & 0xFC) : 0;
     if (target_unit.eq.armour_colour & 2) absorb_mask |= static_cast<u8>(target_unit.eq.armour_colour & 0xFC);
-    in.target_absorb = (target_unit.hi & st::kHiAbsorb) != 0 || (absorb_mask & element_colour(element_id)) != 0;
+    in.target_absorb = (target_unit.hi & st::kHiAbsorb) != 0 || (absorb_mask & element_colour(element_id, caster_side)) != 0;
     in.target_immune = (target_unit.hi & st::kHiImmune) != 0;
     // Exploit: the element hi status mask meets the target hi word.
     in.exploit = (element.status_hi() & target_unit.hi & 0xE007FFFFu) != 0;
@@ -1510,7 +1837,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   // Mode 0's hit pass: the status roll first; element record +0xE bit 15 = a landed status cancels the damage, bit 14 = a target with hi
   // 0x2000000 is knocked out outright; else MAG damage (replace: see deal). Returns the result code.
   auto hit_pass = [&](int replace = -1) {
-    const bool status_landed = apply_status(target, element);
+    const bool status_landed = apply_status(target, element, caster_side);
     const u16 flags = element.rd16(0xE);
     if ((flags & 0x4000) && (target_unit.hi & 0x2000000u)) {
       if (target_unit.in_turn_order() && !(target_unit.skip_lo & st::kKO)) {
@@ -1543,7 +1870,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     }
     case 32: {  // ATK / DEF damage, then the status roll (does not cancel the damage), wakes the target
       deal(elem_in(32));
-      apply_status(target, element);
+      apply_status(target, element, caster_side);
       wake();
       break;
     }
@@ -1552,7 +1879,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       ElementIn in = elem_in(33);
       in.fixed = src.hp * element.power() / 100;
       deal(in);
-      apply_status(target, element);
+      apply_status(target, element, caster_side);
       break;
     }
     case 37: {  // mode 0 damage (no status), then the ring is repainted with element record +0xA / +0xC / +0xE, colour masks in the ring's
@@ -1576,10 +1903,10 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
           bool any = false;
           // The creature table has one row per creature; a pool bit past it is never set.
           const int pool_n = static_cast<int>(kDoppleTable.size());
-          for (int i = 0; i < pool_n && !any; ++i) any = dopple_has(i);
+          for (int i = 0; i < pool_n && !any; ++i) any = dopple_has(i, caster_side);
           for (int tries = 0; any && tries < 4096; ++tries) {
             const int pool_slot = rng_.rnd(0, 255);
-            if (pool_slot >= pool_n || !dopple_has(pool_slot)) continue;
+            if (pool_slot >= pool_n || !dopple_has(pool_slot, caster_side)) continue;
             creature_slot_ = pool_slot;
             creature_model_ = kDoppleTable[static_cast<size_t>(pool_slot)].model;
             creature_state_ = 2;
@@ -1599,7 +1926,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       break;
     }
     case 15: {  // the status roll first; when nothing lands, mode 0 damage
-      if (apply_status(target, element)) {
+      if (apply_status(target, element, caster_side)) {
         say(std::format("{} casts {} on {}: status", caster.name, nm, target_unit.name));
         code_override = 0;
       } else {
@@ -1608,7 +1935,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       break;
     }
     case 2: {  // the element's statuses, else lo 0x20000 or 0x40000 (rnd(0,1)) at the same chance; nothing -> code 2
-      bool ok = apply_status(target, element);
+      bool ok = apply_status(target, element, caster_side);
       if (!ok) ok = apply_status_bits(target, 1u << (17 + rng_.rnd(0, 1)), 0, element.status_pct());
       say(std::format("{} casts {} on {}: {}", caster.name, nm, target_unit.name, ok ? "status" : "no effect"));
       code_override = ok ? 0 : 2;
@@ -1689,7 +2016,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       break;
     }
     case 5: {  // element trap; the caster's side waits for element record +0xE cast by the other side
-      int& trap = trap_[caster.pc ? 0 : 1];
+      int& trap = trap_[(versus_ ? caster_side == 0 : caster.pc) ? 0 : 1];
       if (trap != element.rd16(0xE)) {
         trap = element.rd16(0xE);
         trap_state_ = 2;
@@ -1737,12 +2064,14 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       wake();
       break;
     }
-    case 47: {  // rnd(0,5) colours until one that some PC (units 0..2, innate colour mask >> 2) lacks; the whole field ring takes it; no damage
+    case 47: {  // rnd(0,5) colours until one that some PC (units 0..2, a versus caster's own side; innate colour mask >> 2) lacks; the whole
+                // field ring takes it; no damage
       int colour = 0;
+      const int party_base = versus_ ? side_first(caster_side) : 0;
       for (int tries = 0; tries < 1024; ++tries) {
         colour = rng_.rnd(0, 5);
         bool lacking = false;
-        for (int pc = 0; pc < kPcSlots; ++pc)
+        for (int pc = party_base; pc < party_base + kPcSlots; ++pc)
           if (!((units_[static_cast<size_t>(pc)].innate >> 2) & (1u << colour))) lacking = true;
         if (lacking) break;
       }
@@ -1815,6 +2144,11 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         say(std::format("{} uses {} on {}: nothing left to steal", caster.name, nm, target_unit.name));
         break;
       }
+      // A versus character carries nothing to steal.
+      if (versus_ && target_unit.pc) {
+        say(std::format("{} uses {} on {}: nothing to steal", caster.name, nm, target_unit.name));
+        break;
+      }
       const bool chained = chain_actor_ == actor && chain_target_ == target && chain_hits_ > 0;
       u8 chance = static_cast<u8>(caster.hit_heavy);
       if (chained) chance = static_cast<u8>(hit_chance_shown_for(actor, target, 2));
@@ -1854,8 +2188,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       code_override = 0;
       break;
     case 14:  // by the target's slot: an enemy slot takes mode 0's hit pass, a party slot the mode 3 heal (Saints hurts the enemies and
-              // heals the party, whoever casts it)
-      if (!is_pc_slot(target)) {
+              // heals the party, whoever casts it); in a versus battle by the caster's side: the other side is hurt, its own healed
+      if (versus_ ? side_of(target) != caster_side : !is_pc_slot(target)) {
         hit_pass();
         break;
       }
@@ -1886,7 +2220,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
              // `landed` stays true. Code 0, or 2 (a miss) when nothing landed.
       say(std::format("{} casts {} on {} (status only)", caster.name, nm, target_unit.name));
       if (element.rd16(0xE) & 1) cure();
-      else landed = apply_status(target, element);
+      else landed = apply_status(target, element, caster_side);
       code_override = landed ? 0 : 2;
       break;
     case 4: {
@@ -1917,7 +2251,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
                // landed -> each stat of (+0x1C & 0xFC0) >> 6 takes power %. With +0xE != 0 that part needs a target wearing the hero set.
                // Then +0xC != 0 heals by the mode-3 formula with +0xC as its power, landed or not.
       if (element.rd16(0xE) == 0 || target_unit.hero_set) {
-        landed = apply_status(target, element);
+        landed = apply_status(target, element, caster_side);
         if (!landed) {
           say(std::format("{} casts {} on {}: no effect", caster.name, nm, target_unit.name));
           code_override = 2;
@@ -2055,7 +2389,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   ev.steal_msg = steal_msg;
   ev.steal_word = steal_word;
   ev.ring_repaint = ring_done;
-  ev.seq_colour = seq_colour(element_id);
+  ev.seq_colour = seq_colour(element_id, caster_side);
   ev.colour_seq = brain_.colour_sequence();
   // After the target loop: Frozen (lo 0x20000000, `kDefeated` here: Ice Blast's status) newly set and the
   // target's HP != 0 -> row 6 'Frozen -- can't move!'; else element record +0x13 != 0 and
@@ -2068,13 +2402,15 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   if (ring_done) ring_repainted_ = true;
   if (push_ring) {
     pay_drain();
-    finish_ring(element, ring_colour_of(element_colour(element_id)));
+    finish_ring(element, ring_colour_of(element_colour(element_id, caster_side)));
   }
 }
 
 bool Battle::catch_in_trap(int actor, int element_id, int row, int target) {
   Unit& caster = units_[static_cast<size_t>(actor)];
-  int& trap = trap_[caster.pc ? 1 : 0];
+  // The caster's side: a versus side by its units, else the party by the PC flag.
+  const bool party_side = versus_ ? side_of(actor) == 0 : caster.pc;
+  int& trap = trap_[party_side ? 1 : 0];
   // A forced fizzle (op 67 type 6) springs the trap whatever it holds: the cast still meets the other side's trap first, then the enemy
   // side's trap is emptied and the trap block hidden.
   const bool forced = std::exchange(trap_fizzle_, false);
@@ -2084,10 +2420,10 @@ bool Battle::catch_in_trap(int actor, int element_id, int row, int target) {
   const bool matched = trap != 0 && trap == element_id;
   if (!matched && !forced) return false;
   fizzled_ = true;
-  trap_state_ = forced ? 0 : caster.pc ? 4 : 3;
+  trap_state_ = forced ? 0 : party_side ? 4 : 3;
   if (forced) trap_[1] = 0;
   if (!matched) say(std::format("{} casts {}: the element trap fires, the element is lost", caster.name, tables_.element_name(element_id)));
-  else if (caster.pc) say(std::format("{} casts {}: caught in the element trap, the element is lost", caster.name, tables_.element_name(element_id)));
+  else if (party_side || versus_) say(std::format("{} casts {}: caught in the element trap, the element is lost", caster.name, tables_.element_name(element_id)));
   else {
     // The PC side's trap takes the element into the stock.
     rewards_.trapped.push_back(static_cast<u16>(element_id));
@@ -2110,7 +2446,7 @@ bool Battle::catch_in_trap(int actor, int element_id, int row, int target) {
   if (matched) trap = 0;
   // The caught cast still enters the field ring with its colour.
   ring_repainted_ = false;
-  finish_ring(tables_.elements[static_cast<size_t>(element_id)], ring_colour_of(element_colour(element_id)));
+  finish_ring(tables_.elements[static_cast<size_t>(element_id)], ring_colour_of(element_colour(element_id, side_of(actor))));
   return true;
 }
 
@@ -2148,7 +2484,7 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
       }
       if (hits > 0) {
         pay_drain();
-        finish_ring(element, ring_colour_of(element_colour(element_id)));
+        finish_ring(element, ring_colour_of(element_colour(element_id, side_of(actor))));
         return;
       }
     }
@@ -2177,13 +2513,13 @@ void Battle::cast_element(int actor, int element_id, int row, int target, u32 ta
     return;
   }
   pay_drain();
-  finish_ring(element, ring_colour_of(element_colour(element_id)));
+  finish_ring(element, ring_colour_of(element_colour(element_id, side_of(actor))));
 }
 
 int Battle::seal_swap_colour(int actor, int element_id) const {
   if (element_id <= 0 || element_id > 0x12D || static_cast<size_t>(element_id) >= tables_.elements.size()) return 0;
   if (!(tables_.elements[static_cast<size_t>(element_id)].b(1) & 1) || !colour_sealed(actor, element_id)) return 0;
-  return data::colour_index_of_bit(element_colour(element_id) & 0xFC) + 1;
+  return data::colour_index_of_bit(element_colour(element_id, side_of(actor)) & 0xFC) + 1;
 }
 
 void Battle::pay_drain() {
@@ -2195,11 +2531,14 @@ void Battle::pay_drain() {
 }
 
 // ------------------------------------------------------------------------------------------------ per-action upkeep
+// In a versus battle the other side's characters recover too: an action of one side counts for them as a teammate's. The side whose turn it
+// is gets nothing from its own actions.
 void Battle::step_after_pc_action(int actor, int steps, bool weapon, u32 excluded) {
   const int recovery_steps = weapon ? steps : 1;
-  for (int i = 0; i < kPcSlots; ++i) {
+  const bool own_turn = versus_ && side_of(actor) == turn_side_;
+  for (int i = 0; i < (versus_ ? kPlayerUnits : kPcSlots); ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
-    if (i == actor || (excluded >> i & 1u) || !unit.in_turn_order()) continue;
+    if (i == actor || (excluded >> i & 1u) || !unit.in_turn_order() || (own_turn && side_of(i) == side_of(actor))) continue;
     unit.stamina = cap_stamina(unit.stamina + recovery_step(unit.rate, 0, recovery_steps, (unit.lo & st::kFlu) != 0));
   }
   for (int i = kPcSlots; i < kUnits; ++i) {
@@ -2218,7 +2557,7 @@ void Battle::lower_pc_countdowns(int steps) {
 
 void Battle::post_action(int actor, int poison_step, int timer_steps) {
   ++actions_;
-  if (!is_pc_slot(actor)) return;
+  if (!player_unit(actor)) return;
   // Every unit in the turn order steps, a frozen one included (its Frozen timer thaws it).
   for (int i = 0; i < kUnits; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
@@ -2281,7 +2620,7 @@ int Battle::next_ready_unit() {
     if (!unit.in_turn_order()) claimed = false;
     if (!unit.in_turn_order() || (unit.countdown != 0 && !claimed)) continue;
     claimed = false;
-    if (is_pc_slot(slot) && !(unit.lo & (st::kConfused | st::kDefeated)) && !evo_pending_) {
+    if (player_unit(slot) && !(unit.lo & (st::kConfused | st::kDefeated)) && !evo_pending_) {
       unit.countdown = unit.ap;
       continue;
     }
@@ -2307,11 +2646,11 @@ std::pair<int, int> Battle::exec_action(int ui, const EnemyAction& act) {
       }
       do_weapon_attack(ui, tgt, std::clamp(act.strength, 0, 2));
       // A PC's scripted weapon entry steps the upkeep as one weak hit whatever its strength; an enemy's steps nothing (post_action).
-      poison_step = timer_steps = is_pc_slot(ui) ? 1 : std::clamp(act.strength, 0, 2) + 1;
+      poison_step = timer_steps = player_unit(ui) ? 1 : std::clamp(act.strength, 0, 2) + 1;
       break;
     // A PC's scripted element entry steps the upkeep as the menu's element command (7 / 1).
     case EnemyAction::Kind::Element:
-      if (is_pc_slot(ui)) poison_step = 7;
+      if (player_unit(ui)) poison_step = 7;
       trap_fizzle_ = act.trap_fizzle;
       if (act.element > 0 && act.element < static_cast<int>(tables_.elements.size()))
         cast_element(ui, act.element, std::max(0, tables_.elements[static_cast<size_t>(act.element)].level() - 1), tgt, act.targets);
@@ -2337,7 +2676,7 @@ void Battle::run_enemy_action(int ui, const EnemyAction& act) {
 // with 1 step.
 void Battle::end_scripted_action(int ui, const EnemyAction& action) {
   if (action.kind == EnemyAction::Kind::None) return;
-  if (!is_pc_slot(ui)) {
+  if (!player_unit(ui)) {
     lower_pc_countdowns(3);
     return;
   }
@@ -2371,7 +2710,7 @@ bool Battle::run_plan(int ui, const std::vector<EnemyAction>& plan, bool set_cou
   if (set_countdown) unit.countdown = unit.ap + rng_.rnd(0, unit.ap >> 2);
   // A PC turn that queues nothing (a frozen PC, a permanently confused one, a PC passing while a form change is pending) is no action:
   // poison, regen and the status timers do not step.
-  if (plan.empty() && is_pc_slot(ui)) ++actions_;
+  if (plan.empty() && player_unit(ui)) ++actions_;
   else post_action(ui, poison_step, timer_steps);
   return true;
 }
@@ -2458,6 +2797,18 @@ void Battle::boost_cure() {
 void Battle::check_end() {
   apply_cheat_state();
   if (outcome_ != Outcome::Ongoing) return;
+  // A versus side is out when none of its characters stands (knocked out or frozen, as the party test reads it).
+  if (versus_) {
+    const auto out = [&](int side) {
+      for (int i = side_first(side); i < side_first(side) + kPcSlots; ++i)
+        if (units_[static_cast<size_t>(i)].alive()) return false;
+      return true;
+    };
+    const bool a_out = out(0), b_out = out(1);
+    if (a_out && b_out) finish_versus(Outcome::Draw, VersusEnd::Draw);
+    else if (a_out || b_out) finish_versus(a_out ? Outcome::Wiped : Outcome::Victory, VersusEnd::Knockout);
+    return;
+  }
   if (!brain_.end_check_enabled()) return;
   if (const int forced = brain_.forced_result(); forced >= 0 && !in_death_cast_ && death_plans_.empty()) {
     finish(forced == 0 ? Outcome::Victory : forced == 1 ? Outcome::Wiped : forced == 2 ? Outcome::Fled : Outcome::Scripted, forced);
@@ -2488,7 +2839,29 @@ void Battle::finish_external_action() {
   check_end();
 }
 
+void Battle::run_scheduled_turn(int actor) {
+  const size_t first_event = events_.size();
+  if (!player_unit(actor)) {
+    enemy_turn(actor);
+  } else if (units_[static_cast<size_t>(actor)].lo & st::kConfused) {
+    confused_turn(actor);
+  } else {
+    // With a pending form element the PC's turn is its script slot 2: Pip (kind 0x2B..0x2D) casts the pending form
+    // element on himself (`66 87 67 01 v[A0] self`), any other PC ends its turn (A4).
+    begin_action();
+    std::vector<EnemyAction> plan;
+    brain_.plan_turn(*this, actor, rng_, plan);
+    run_plan(actor, plan, true);
+  }
+  run_reactions();
+  end_chain_after(first_event);
+}
+
 void Battle::settle() {
+  if (versus_) {
+    settle_versus();
+    return;
+  }
   // No menu opens while a form change is pending either, so time runs on until the PCs' countdowns give them their scripted turns.
   const auto nobody_can_act = [&]() {
     for (int i = 0; i < kPcSlots; ++i)
@@ -2497,7 +2870,7 @@ void Battle::settle() {
   };
   // The menu finds no PC to pass to: time runs once, and once more in the first pass below.
   if (outcome_ == Outcome::Ongoing && nobody_can_act()) time_advance();
-  for (int guard = 0; guard < 20000 && outcome_ == Outcome::Ongoing; ++guard) {
+  for (int guard = 0; guard < kSchedulerPasses && outcome_ == Outcome::Ongoing; ++guard) {
     check_end();
     if (outcome_ != Outcome::Ongoing) return;
     const bool stuck = nobody_can_act();
@@ -2508,21 +2881,7 @@ void Battle::settle() {
       if (!stuck) return;
       continue;
     }
-    const size_t first_event = events_.size();
-    if (!is_pc_slot(actor)) {
-      enemy_turn(actor);
-    } else if (units_[static_cast<size_t>(actor)].lo & st::kConfused) {
-      confused_turn(actor);
-    } else {
-      // With a pending form element the PC's turn is its script slot 2: Pip (kind 0x2B..0x2D) casts the pending form
-      // element on himself (`66 87 67 01 v[A0] self`), any other PC ends its turn (A4).
-      begin_action();
-      std::vector<EnemyAction> plan;
-      brain_.plan_turn(*this, actor, rng_, plan);
-      run_plan(actor, plan, true);
-    }
-    run_reactions();
-    end_chain_after(first_event);
+    run_scheduled_turn(actor);
   }
   if (outcome_ == Outcome::Ongoing) finish(Outcome::Stalled);
 }
@@ -2542,25 +2901,32 @@ void Battle::end_chain_after(size_t first_event) {
 
 // ------------------------------------------------------------------------------------------------ command application
 void Battle::open_menu(int pc) {
-  if (!is_pc_slot(pc)) return;
+  if (!player_unit(pc)) return;
   units_[static_cast<size_t>(pc)].guard = false;
   active_pc_ = pc;
 }
 
 bool Battle::apply(const Command& cmd, std::string* why) {
-  if (cmd.kind == Command::Kind::Element) open_element_menu(cmd.actor);
+  if (cmd.kind == Command::Kind::Element && (!versus_ || can_act(cmd.actor))) open_element_menu(cmd.actor);
   if (!validate(cmd, why)) return false;
+  if (cmd.kind >= Command::Kind::EndTurn) {
+    apply_state_command(cmd);
+    return true;
+  }
+  if (versus_) turn_fresh_ = false, form_owed_ = -1;
   attacked_.clear();
   begin_action();
   Unit& unit = units_[static_cast<size_t>(cmd.actor)];
   // A command comes from the actor's own menu, whose opening ended its guard and made it the active PC.
   unit.guard = false;
-  if (is_pc_slot(cmd.actor)) active_pc_ = cmd.actor;
-  // The automatic target: the weakest unit the cursor ring could reach (hidden units are never on it).
+  if (player_unit(cmd.actor)) active_pc_ = cmd.actor;
+  // The automatic target: the weakest unit the cursor ring could reach (hidden units are never on it). A versus side's enemies are the
+  // other side's characters, its party its own.
+  const int own_side = versus_ ? side_of(cmd.actor) : 0, foes = 1 - own_side;
   auto pick_enemy = [&]() {
-    if (cmd.target >= kPcSlots && units_[static_cast<size_t>(cmd.target)].standing() && !brain_.untargetable(cmd.target)) return cmd.target;
+    if (cmd.target >= 0 && side_of(cmd.target) == foes && units_[static_cast<size_t>(cmd.target)].standing() && !brain_.untargetable(cmd.target)) return cmd.target;
     int best = -1;
-    for (int i = kPcSlots; i < kUnits; ++i)
+    for (int i = side_first(foes); i < side_end(foes); ++i)
       if (units_[static_cast<size_t>(i)].standing() && !brain_.untargetable(i) && (best < 0 || units_[static_cast<size_t>(i)].hp < units_[static_cast<size_t>(best)].hp)) best = i;
     return best;
   };
@@ -2594,7 +2960,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
           tgt = cmd.actor;
         } else if (ts.party && !ts.enemies) {
           tgt = cmd.actor;
-          for (int i = 0; i < kPcSlots; ++i)
+          for (int i = side_first(own_side); i < side_first(own_side) + kPcSlots; ++i)
             if (units_[static_cast<size_t>(i)].standing() &&
                 units_[static_cast<size_t>(i)].hp * units_[static_cast<size_t>(tgt)].max_hp <
                     units_[static_cast<size_t>(tgt)].hp * units_[static_cast<size_t>(i)].max_hp)
@@ -2609,7 +2975,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       // Cheats: free elements stay usable.
       unit.used[static_cast<size_t>(cmd.cell)] = !cheats_.free_elements;
       // A summon spends one of the stars left.
-      if ((element.b(0) & 0x40) && !cheats_.free_elements) growth_.counter = std::max(0, growth_.counter - 1);
+      if ((element.b(0) & 0x40) && !cheats_.free_elements) stars_left(own_side) = std::max(0, stars_left(own_side) - 1);
       // Consumable: the stack counts down and the cell is marked used only when the last copy goes.
       if ((element.flags0() & 0x10) && !cheats_.free_elements) {
         u8& quantity = unit.qty[static_cast<size_t>(cmd.cell)];
@@ -2619,7 +2985,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         } else {
           quantity = 0;
         }
-        if (unit.form < 0 && static_cast<size_t>(cmd.actor) < party_.size()) party_[static_cast<size_t>(cmd.actor)].qty[static_cast<size_t>(cmd.cell)] = quantity;
+        if (PartyMember* record = record_of(cmd.actor); record && unit.form < 0) record->qty[static_cast<size_t>(cmd.cell)] = quantity;
       }
       // A double / triple tech: every casting PC gives up its cell, and the casters are the action's caster group (the effect's 'tech' /
       // 'tec1' / 'tec2' clips go to entries 0 / 1 / 2).
@@ -2636,14 +3002,18 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       }
       cast_element(cmd.actor, id, row, tgt);
       cur_group_.fill(0xFF);
-      // The enemy's trap destroys the cell (battle copy and the save record: cell &= 0xC000).
+      // The enemy's trap destroys the cell (battle copy and the save record: cell &= 0xC000; nothing reaches the save after a versus battle).
       if (fizzled_) {
         unit.cells[static_cast<size_t>(cmd.cell)] &= 0xC000;
         unit.usable[static_cast<size_t>(cmd.cell)] = false;
-        if (unit.form < 0 && static_cast<size_t>(cmd.actor) < party_.size()) party_[static_cast<size_t>(cmd.actor)].cells[static_cast<size_t>(cmd.cell)] &= 0xC000;
         // A creature form's grid is not a save cell.
-        if (unit.form < 0 && static_cast<size_t>(cmd.actor) < party_.size()) rewards_.lost_cells.emplace_back(party_[static_cast<size_t>(cmd.actor)].char_id, cmd.cell);
+        if (PartyMember* record = record_of(cmd.actor); record && unit.form < 0) {
+          record->cells[static_cast<size_t>(cmd.cell)] &= 0xC000;
+          if (!versus_) rewards_.lost_cells.emplace_back(record->char_id, cmd.cell);
+        }
       }
+      // The Dopplegang cast opens the creature pick (Command::Kind::Form).
+      if (versus_ && id == kDopplegangElement && !fizzled_) form_owed_ = cmd.actor;
       if (!combo.element) {
         unit.stamina = cap_stamina(unit.stamina - stamina_cost(unit, kElementCost));
         if (!cheats_.free_elements) unit.gauge = std::max(-1, unit.gauge - (row + 1));
@@ -2656,17 +3026,19 @@ bool Battle::apply(const Command& cmd, std::string* why) {
           Unit& caster = units_[static_cast<size_t>(combo.units[k])];
           caster.stamina = cap_stamina(caster.stamina - stamina_cost(caster, kElementCost));
           if (cheats_.free_elements) continue;
-          const Unit& slot_unit = units_[k];
+          const Unit& slot_unit = units_[static_cast<size_t>(side_first(own_side)) + k];
           caster.gauge = std::max(-1, std::min(slot_unit.gauge - (combo.cells[k] / data::kGridCols + 1), slot_unit.gauge_max));
         }
       }
-      step_after_pc_action(cmd.actor, 1, false, casters | (is_pc_slot(tgt) ? 1u << tgt : 0u));
+      step_after_pc_action(cmd.actor, 1, false, casters | (player_unit(tgt) ? 1u << tgt : 0u));
       post_action(cmd.actor, 7, 1);
       break;
     }
     case Command::Kind::Defend:
       unit.stamina = std::min(70, unit.stamina + 10);
       unit.guard = true;
+      // A versus Defend ends the character's actions for this turn.
+      if (versus_) done_[static_cast<size_t>(cmd.actor)] = true;
       say(std::format("{} defends", unit.name));
       {
         ActionEvent ev;
@@ -2677,10 +3049,11 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       }
       step_after_pc_action(cmd.actor, 1, false);
       post_action(cmd.actor, 1, 1);
-      // When no PC could take the menu now, a guarding one counted as unable, time runs one step before the menu passes on.
+      // When no PC could take the menu now, a guarding one counted as unable, time runs one step before the menu passes on. A versus turn
+      // is passed by its side, not by the menu, so no time runs there.
       {
         const auto free_menu = [](const Unit& pc_unit) { return pc_unit.can_open_menu() && !pc_unit.guard; };
-        if (outcome_ == Outcome::Ongoing && std::none_of(units_.begin(), units_.begin() + kPcSlots, free_menu)) time_advance();
+        if (!versus_ && outcome_ == Outcome::Ongoing && std::none_of(units_.begin(), units_.begin() + kPcSlots, free_menu)) time_advance();
       }
       break;
     case Command::Kind::Run:
@@ -2697,7 +3070,9 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         }
         note_event(ev);
       }
-      finish(Outcome::Fled);
+      // A versus Run is the commanding side's surrender.
+      if (versus_) finish_versus(own_side == 0 ? Outcome::Wiped : Outcome::Victory, VersusEnd::Surrender);
+      else finish(Outcome::Fled);
       break;
     case Command::Kind::Swap: {
       // The leaving character's record takes its HP, persistent statuses and consumables (qty is kept in step with every use) and its battle
@@ -2740,6 +3115,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       post_action(cmd.actor, 1, 1);
       break;
     }
+    default: break;
   }
   // The chain bonus survives between single-strength commands of the same PC / target (the menu applies each attack at
   // once); anything else the PC does ends the chain. While the attacking PC can go on, its turn stays open, so the counter-attacks
@@ -2759,9 +3135,9 @@ void Battle::finish(Outcome outcome, int code) {
   if (outcome_ != Outcome::Ongoing) return;
   outcome_ = outcome;
   result_code_ = code >= 0 ? code : static_cast<int>(outcome);
-  // A monster-party fight pays nothing and leaves the party records as they were.
-  if (outcome == Outcome::Victory && !monster_party_) compute_rewards();
-  for (size_t i = 0; i < party_.size() && !monster_party_; ++i) {
+  // A monster-party fight pays nothing and leaves the party records as they were; so does a versus battle.
+  if (outcome == Outcome::Victory && !monster_party_ && !versus_) compute_rewards();
+  for (size_t i = 0; i < party_.size() && !monster_party_ && !versus_; ++i) {
     const Unit unit = exit_unit(static_cast<int>(i));
     PartyMember& member = party_[i];
     member.hp = std::min(unit.hp, member.stat[0]);
@@ -2769,7 +3145,7 @@ void Battle::finish(Outcome outcome, int code) {
     member.lo_persist = unit.lo & st::kPersist;
   }
   say(std::format("battle over: {} (code {})",
-                  outcome == Outcome::Victory ? "victory" : outcome == Outcome::Wiped ? "party wiped" : outcome == Outcome::Fled ? "fled" : outcome == Outcome::Scripted ? "scripted" : "stalled",
+                  outcome == Outcome::Victory ? "victory" : outcome == Outcome::Wiped ? "party wiped" : outcome == Outcome::Fled ? "fled" : outcome == Outcome::Scripted ? "scripted" : outcome == Outcome::Draw ? "draw" : "stalled",
                   result_code_));
 }
 

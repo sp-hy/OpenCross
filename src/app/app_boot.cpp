@@ -66,11 +66,21 @@ int App::init(int argc, char** argv) {
 void App::init_config(int argc, char** argv) {
   exe = platform::exe_dir();
   // --config <file>: use another ini (automated runs: tests/routes/*.ini); the log then sits next to it as <name>.log.
+  // --profile <dir>: a player ini of its own in that folder (created when missing), with its log, shots and a relative [Paths] SaveDir
+  // there; unlike --config it is a normal run (it connects, applies mods, is saved), so a second copy gets its own multiplayer identity.
   config_file = exe / "opencross.ini";
-  for (int i = 1; i + 1 < argc; ++i)
+  std::filesystem::path profile_dir = exe;
+  for (int i = 1; i + 1 < argc; ++i) {
     if (std::string_view(argv[i]) == "--config") config_file = std::filesystem::absolute(argv[i + 1]), own_ini = false;
+    if (std::string_view(argv[i]) == "--profile") {
+      profile_dir = std::filesystem::absolute(argv[i + 1]);
+      std::error_code error;
+      std::filesystem::create_directories(profile_dir, error);
+      config_file = profile_dir / "opencross.ini";
+    }
+  }
   // The log file: [Debug] Log (Debug tab checkbox, default off) for the player's ini; --config runs (routes) and Debug builds always log.
-  log_path = own_ini ? (exe / "opencross.log").string() : std::filesystem::path(config_file).replace_extension(".log").string();
+  log_path = own_ini ? (profile_dir / "opencross.log").string() : std::filesystem::path(config_file).replace_extension(".log").string();
 #ifdef NDEBUG
   log_forced = !own_ini;
 #else
@@ -99,7 +109,7 @@ void App::init_config(int argc, char** argv) {
   steam_allowed = own_ini && !std::getenv("OC_QUIET");
 
   game_dir = platform::find_game_dir(config.game_dir);
-  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir, own_ini ? platform::exe_dir() : std::filesystem::path());
+  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir, own_ini ? profile_dir : std::filesystem::path());
   save_dir = save_pick.dir;
   log::info("game dir: {}", game_dir.empty() ? "(not found)" : game_dir.string());
   log::info("save dir: {} ({})", save_dir.empty() ? "(not found)" : save_dir.string(), save_pick.how);

@@ -224,6 +224,13 @@ FieldWorld::BattleRequest FieldWorld::take_battle() {
   return handoff_.battle_req;
 }
 
+void FieldWorld::end_sandbox_battle() {
+  const int result = vm_.var(script::var::kBattleResult), last = handoff_.last_battle_code;
+  end_battle(0);
+  vm_.set_var(script::var::kBattleResult, result);
+  handoff_.last_battle_code = last;
+}
+
 void FieldWorld::end_battle(int result_code, int fade_delay) {
   vm_.set_var(script::var::kBattleResult, result_code);
   handoff_.last_battle_code = result_code;

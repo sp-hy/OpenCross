@@ -329,16 +329,22 @@ void BattleView::run_load_step(LoadJob& job) {
     for (int id : {0, 1, 22}) job.party.push_back(battle::make_party_member(*tables_, id, 0, "char"));
 
   u32 seed = static_cast<u32>(std::chrono::steady_clock::now().time_since_epoch().count());
-  // Dev: OC_BATTLE_SEED makes fights repeatable.
+  // Dev: OC_BATTLE_SEED makes fights repeatable. A versus battle takes the seed both games share, whatever the environment says.
   if (const char* env = std::getenv("OC_BATTLE_SEED")) seed = static_cast<u32>(std::strtoul(env, nullptr, 10));
+  if (opt.versus) seed = opt.versus->seed;
+  versus_ = opt.versus.has_value();
+  versus_flip_ = versus_ && opt.versus->local_side == 1;
+  versus_side_ = versus_ ? opt.versus->local_side & 1 : 0;
+  versus_result_ = VersusResult::None;
+  versus_plate_shown_ = false;
   // The random camera picks (intro / party intro timelines, their shot groups, the approach shots) differ from battle to battle.
   std::srand(seed);
   rng_ = std::make_unique<battle::GameRng>(seed, tables_->rng_table);
   spawn_rng_.seed(seed);
-  battle_ = std::make_unique<battle::Battle>(*tables_, *rng_, brain_);
+  battle_ = std::make_unique<battle::Battle>(*tables_, *rng_, versus_ ? static_cast<battle::EnemyBrain&>(versus_brain_) : brain_);
   battle_->set_invincible(dbg_.inv_party, dbg_.inv_enemies);
   battle_->set_cheats(battle_cheats());
-  brain_.set_enabled(!dbg_.no_script);
+  brain_.set_enabled(!dbg_.no_script && !versus_);
   battle::BattleOptions bopt;
   bopt.ng_plus = opt.ng_plus;
   bopt.gold_bonus = opt.gold_bonus;
@@ -374,7 +380,7 @@ void BattleView::run_load_step(LoadJob& job) {
       pos = comma == std::string::npos ? list.size() : comma + 1;
     }
   }
-  if (!battle_->start(std::move(job.party), scene_id, bopt)) {
+  if (versus_ ? !start_versus_rules(*opt.versus) : !battle_->start(std::move(job.party), scene_id, bopt)) {
     log::error("battle: Battle::start failed for scene {}", scene_id);
     battle_.reset();
     return fail();
@@ -426,7 +432,7 @@ void BattleView::run_load_step(LoadJob& job) {
   const int scene_bg = tables_->scenes[static_cast<size_t>(scene_id)].bg();
   int bg = (opt.battlefield >= 0 && opt.battlefield < 100) ? opt.battlefield : scene_bg;
   // Dev: OC_BATTLE_FIELD forces the stage.
-  if (const char* env = std::getenv("OC_BATTLE_FIELD"); env && *env) bg = std::atoi(env);
+  if (const char* env = std::getenv("OC_BATTLE_FIELD"); env && *env && !versus_) bg = std::atoi(env);
   const std::string base = std::format("battle/bg/bg_{:02d}", bg);
   log::info("battle: scene {} stage bg_{:02d} (operand {}, scene default bg_{:02d})", scene_id, bg, opt.battlefield, scene_bg);
     prefetch_unit_models();
@@ -542,10 +548,11 @@ void BattleView::run_load_step(LoadJob& job) {
       return;
     }
     const int unit_id = job.step - kUnits0;
-    const battle::Unit& unit = battle_->unit(unit_id);
+    const battle::Unit& unit = bunit(unit_id);
     Visual& visual = vis_[static_cast<size_t>(unit_id)];
     visual.hp_disp = static_cast<float>(unit.hp);
     visual.hp_shown = unit.hp;
+    visual.status_shown = unit.lo;
     if (!unit.present) return;
     bind_unit_model(unit_id);
     if (((unit.pc && unit.form < 0) || unit.body >= 0) && visual.weapon)
@@ -572,7 +579,7 @@ void BattleView::prefetch_unit_models() {
   std::vector<std::string> stems;
   std::vector<std::pair<std::string, int>> weapon_parts;
   for (int unit_id = 0; unit_id < battle::kUnits; ++unit_id) {
-    const battle::Unit& unit = battle_->unit(unit_id);
+    const battle::Unit& unit = bunit(unit_id);
     if (!unit.present) continue;
     stems.push_back(unit_model_stem(unit));
     if ((unit.pc && unit.form < 0) || unit.body >= 0) {
@@ -590,7 +597,7 @@ void BattleView::prefetch_unit_models() {
 
 // One unit's model, scripts, sound group, weapon mesh and extents from its Unit record: the load step, and a Dopplegang form change.
 void BattleView::bind_unit_model(int unit_id) {
-  const battle::Unit& unit = battle_->unit(unit_id);
+  const battle::Unit& unit = bunit(unit_id);
   Visual& visual = vis_[static_cast<size_t>(unit_id)];
   // A PC in a creature form uses the creature's model, scripts and weapon.
   const bool pcm = (unit.pc && unit.form < 0) || unit.body >= 0;
@@ -668,7 +675,7 @@ bool BattleView::finish_start() {
   const int scene_id = scene_id_;
   place_units();
   for (int i = 0; i < battle::kUnits; ++i)
-    if (battle_->unit(i).present && vis_[static_cast<size_t>(i)].has_model) {
+    if (bunit(i).present && vis_[static_cast<size_t>(i)].has_model) {
       vis_[static_cast<size_t>(i)].pose.play(1, 0);
       // The spawn script, not the idle (an off-stage seeded enemy: the idle; it plays entry 8 when brought on).
       start_spawn(i);
@@ -743,7 +750,7 @@ bool BattleView::finish_start() {
   if (!party_intros.empty()) {
     pli_pending_ = party_intros[static_cast<size_t>(std::rand()) % party_intros.size()];
     pli_after_load_ = true;
-    for (int i = 0; i < battle::kPcSlots; ++i) unplaced_[static_cast<size_t>(i)] = battle_->unit(i).present;
+    for (int i = 0; i < battle::kPcSlots; ++i) unplaced_[static_cast<size_t>(i)] = bunit(i).present;
   }
   audio_.start_battle_theme(start_flags_, field_battle_ && (start_flags_ & 1));
 
@@ -760,15 +767,18 @@ bool BattleView::finish_start() {
 // Formation: the scene record's bytes 6..14 give one position byte per unit slot (3 PCs, then up to 6
 // enemy instances) and bytes 0x11..0x19 one facing byte per slot. The position is
 // x = (2 * (b & 15) - 15) * 256, z = (15 - 2 * (b >> 4)) * 256 in world units, and the yaw word is byte << 9 (4096 = 360 deg).
-// World x/z are the stage's x/z.
+// World x/z are the stage's x/z. A versus battle stands the other party (units 3..5) on the party's spots mirrored in x (x nibble 15 - n),
+// turned half a turn, so the two parties face each other.
 void BattleView::place_units() {
   const auto& raw = tables_->scenes[static_cast<size_t>(scene_id_)].raw;
   for (int i = 0; i < battle::kUnits; ++i) {
     Visual& visual = vis_[static_cast<size_t>(i)];
-    const u8 pos = raw[static_cast<size_t>(6 + i)];
+    const bool mirror = versus_ && i >= battle::kPcSlots && i < battle::kPlayerUnits;
+    const size_t spot = static_cast<size_t>(mirror ? i - battle::kPcSlots : i);
+    const u8 pos = mirror ? static_cast<u8>((raw[6 + spot] & 0xF0) | (15 - (raw[6 + spot] & 15))) : raw[6 + spot];
     visual.x = static_cast<float>((2 * (pos & 15) - 15) * 256);
     visual.z = static_cast<float>((15 - 2 * (pos >> 4)) * 256);
-    const float yaw = static_cast<float>(raw[static_cast<size_t>(0x11 + i)]) * (3.14159265f / 4.0f);
+    const float yaw = static_cast<float>(raw[0x11 + spot] + (mirror ? 4 : 0)) * (3.14159265f / 4.0f);
     // Yaw 90 deg (PCs) looks toward -x, 270 deg (enemies) toward +x (world frame, forward = (-sin yaw, -cos yaw) like the model matrix; the view
     // mirrors x, see Cam::view_proj).
     visual.face_x = -std::sin(yaw);

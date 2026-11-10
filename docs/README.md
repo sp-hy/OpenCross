@@ -31,7 +31,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 `src/` modules:
 
 - `platform` window, input, key maps, `opencross.ini`, paths, rumble, updater, Steam.
-- `net` multiplayer presence and chat: the protocol client, its JSON, the WebSocket transport (WinHTTP).
+- `net` multiplayer presence, chat and the versus battle link: the protocol client, its JSON, the WebSocket transport (WinHTTP).
 - `vfs` RDE ZIP archives (AES), cdrom2 / HD override layering, mods overlay.
 - `import` PS1 / RDE decoders: containers, LZSS, TIM, chip2, rooms, models, battle stages, room effects, text, sprite fonts.
 - `assets` engine-side asset types the importers produce.
@@ -78,7 +78,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 - Proving a refactor is pure: build the baseline exe before the change, then run both exes on the three baselines from a scratch copy of each ini, launched from the repo root with `--config` (logs and shots land next to the ini, and the ini's `Script=` path is relative to the working folder). Only `battle_hud` takes screenshots, which must be byte-identical; `alu_chair` and `art_swap` compare by log alone. Compare logs with the timing lines dropped and the scratch path masked, and `battle_hud`'s as a sorted set, because its battle-load lines reorder between runs. Pin the backend with `Driver=` under `[Video]` in both inis, and set `SDL_ASSERT=abort` so an SDL assertion fails the run instead of waiting on a dialog.
 - A pure move between files gets a line-set audit before the route run: normalise the old file and the union of the new files (strip indentation and carriage returns; drop blank, `#include`, namespace and comment lines), sort both and `comm` them. Only the declared mechanism may differ, such as `inline` keywords or added class qualifications.
 - The route language, the `.env` convention, input records and replays, and the room sweep are specified in [`formats/routes.md`](formats/routes.md).
-- Others include `mojo_full_party`, `mojo_swap_in`, `save`, `continue_save`, `ngplus_title`, `ngplus_continue`, `ngplus_ending`, `pause`, `pause_dialog`, `party_rotate`, `mp_remote` (multiplayer remote parties placed and walked by route verbs, no server), `entry_fade` (room-entry fade-in after Continue / `Room=` / `load`), `script_walk_slide` (a scripted walk in `fin_05` slides along a wall to its end and reaches its target), `party_reserve` / `party_reserve_list` (party swap's reserve slots on the Party screen: 3, and 5 scrolling sideways, `rules/menus.md` party editor), `grand_slam` (the FE 75 monster picker and its monster-party battle), `party_swap` / `party_swap_keep` (party swap from a field battle, `[Features]` in the route ini; the formation restored / the lineup kept, `rules/battle.md` section 11), `true_ending` (Opassa Beach through the Time Devourer, the planet scene, `b28end` under song 7, the staff roll and `final` to the ending's last screen; forges a disc 2 save from `tmp\save.dat` with `true_ending.prep.ps1`) and `shop_ending` (the New Game+ shop ending: the Time Egg on Another World's Opassa Beach at scenario 58, the Time Devourer, Lisa's element shop and the scenes after it to the ending room; `shop_ending.prep.ps1`), and `staff_roll` (straight into the staff roll: disc 2, `load ending 1`, a shot of row 11 in the staff-roll layout).
+- Others include `mojo_full_party`, `mojo_swap_in`, `save`, `continue_save`, `ngplus_title`, `ngplus_continue`, `ngplus_ending`, `pause`, `pause_dialog`, `party_rotate`, `mp_remote` (multiplayer remote parties placed and walked by route verbs, no server), `versus_local` (a versus battle from the field against the local opponent as side B, both sides played by the random legal player: the mirrored opponent, the hidden HP, the outcome plate, and the save and BATTLE_RESULT unchanged afterwards), `entry_fade` (room-entry fade-in after Continue / `Room=` / `load`), `script_walk_slide` (a scripted walk in `fin_05` slides along a wall to its end and reaches its target), `party_reserve` / `party_reserve_list` (party swap's reserve slots on the Party screen: 3, and 5 scrolling sideways, `rules/menus.md` party editor), `grand_slam` (the FE 75 monster picker and its monster-party battle), `party_swap` / `party_swap_keep` (party swap from a field battle, `[Features]` in the route ini; the formation restored / the lineup kept, `rules/battle.md` section 11), `true_ending` (Opassa Beach through the Time Devourer, the planet scene, `b28end` under song 7, the staff roll and `final` to the ending's last screen; forges a disc 2 save from `tmp\save.dat` with `true_ending.prep.ps1`) and `shop_ending` (the New Game+ shop ending: the Time Egg on Another World's Opassa Beach at scenario 58, the Time Devourer, Lisa's element shop and the scenes after it to the ending room; `shop_ending.prep.ps1`), and `staff_roll` (straight into the staff roll: disc 2, `load ending 1`, a shot of row 11 in the staff-roll layout).
 
 ## 4. Validating behaviour
 
@@ -100,7 +100,7 @@ Formats (`docs/formats/`):
 - `battle_stage.md` battlefield (stage) mesh and texture format.
 - `battlescript.md` the `.pac` battle-script VM: opcodes, scheduler, variables.
 - `config.md` `opencross.ini`: every section and key, defaults, clamps, legacy keys, live versus restart.
-- `multiplayer.md` the multiplayer presence and chat protocol, the server, and what the client does.
+- `multiplayer.md` the multiplayer presence, chat and versus battle protocol, the server, and what the client does.
 - `fieldscript.md` room event bytecode: opcodes and semantics.
 - `launcher.md` RDE's launcher (`ui.csv`, its art) and the proxy DLL that adds the OpenCross button.
 - `launcher.md` RDE's launcher (`ui.csv`, its art) and the proxy DLL that adds the OpenCross button.
@@ -120,6 +120,7 @@ Behaviour rules (`docs/rules/`), the game rules the engine implements, every num
 - `achievements.md` when each Steam achievement is earned.
 - `field_actors.md` the field tick, player movement, camera follow, followers, collision and triggers, animation, shadows, field status effects, footsteps, message windows, spawns.
 - `battle.md` battle start, the turn system, targeting, grid and gauge, the field ring, status application, battle end, rewards and growth, Pip and Dopplegang, cheats.
+- `versus.md` multiplayer versus battles: two players' parties, alternating turns, the opening handicap, the sandbox.
 - `menus.md` main menu, settings and the options word, status and equip formulas, the element grid editor, key items, shops, name entry, save and load screens, party editors, pause, title flow.
 
 ## 6. Open issues

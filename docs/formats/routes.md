@@ -123,7 +123,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `wait room <name>` | The field room is `<name>`, no battle is active and the screen has faded back in. |
 | `wait dialogue open\|closed` | A dialogue is open (anything other than `open` means closed). |
 | `wait text <words...>` | An open dialogue's message (plain text, newlines as spaces) contains the words joined by single spaces. |
-| `wait battle start\|end\|results` | A battle is active / not active / the post-battle results screen is up. |
+| `wait battle start\|end\|results` | A battle is active / not active / the post-battle results screen (or a versus battle's outcome plate) is up. |
 | `wait idle` | The controls are free: no dialogue, fade, transition, menu, shop, key-item list, pause, party screen or movie, and no battle; and the input has settled: the pad lock after a room load or a closed screen and the menu-button wait after a menu screen have run out, and no load or menu-open fade (or its black veil) is running. A menu key tapped right after it opens the menu. `mash until idle` uses the same test. |
 | `wait flow <title\|name\|slots\|opening\|field>` | The game flow is in that state and no movie is playing. |
 | `wait movie start\|end` | A movie is playing / has finished (`start` or `open` = wanted playing). |
@@ -173,6 +173,9 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `elementshop <row>` | Open the element shop at `row`. |
 | `weaponshop <row>` | Open the blacksmith at `row`. |
 | `slotdump` | Write the current game as one 0x2000-byte save block (section 7). |
+| `savemark` | Remember the current game as one save block, with the play time and the variables that show it (0x2C, 0x2E, 0x30) left out. |
+| `savecheck` | The current game, taken the same way, must equal the `savemark` copy; otherwise log `route: savecheck: the save differs from the mark at byte <n>` and exit 1. |
+| `versus <seed> [side]` | Start a versus battle (`rules/versus.md`) from the field against the local opponent: the session party as side `side` (0 = A, the default; 1 = B), the built-in test party (characters 3 4 26, star 20) as the other side, played by the random legal player; `fight` lets the same player command the session party. Exit 1 when it cannot start (not a free field, a battle under way, or a battle dev variable such as `OC_DEV_*` set). |
 
 An unknown kind logs `route: unknown request <kind>` and exits with code 1.
 
@@ -216,6 +219,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `battle events <tokens...>` | The battle view's route events (`w<msg>` = script window opened, `a` = action began) start with exactly those tokens. |
 | `battle menu <slot\|-> <guards>` | The party slot whose top command menu is up and has taken over from the menu entry (`-` = none, or the window still opening), then one digit per party slot: 1 = the unit holds Defend's guard. Example: `battle menu 1 100`. |
 | `battle facing <yaw> <yaw> <yaw>` | The yaw each party slot's model shows (12 bit, 4096 = 360 deg), `-` for an empty slot. Example: `battle facing 1258 1024 1024`. |
+| `battle plate [word]` | The last versus battle ended on its outcome plate; with a word, that plate (`Victory`, `Defeat`, `Draw`, `No result`). |
 | `battle camera orbit <slot>\|shot\|target\|hold` | What drove the battle camera on the last tick: the menu orbit round that party slot, a camera shot or timeline, a target-selection glide, or nothing (the pose stays). |
 | `result <n>` | The battle-result variable equals `n`. |
 | `flow <state>` | The flow state name equals `state`. |

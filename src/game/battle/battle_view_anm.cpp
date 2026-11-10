@@ -71,7 +71,7 @@ static bool anm_basis(const Follower& follower, effects::Basis& out, const std::
 
 BattleView::AnmFx& BattleView::anm_bank(int src) {
   const Visual& sv = vis_[static_cast<size_t>(src)];
-  const battle::Unit& su = battle_->unit(src);
+  const battle::Unit& su = bunit(src);
   const int cls = su.pc ? weapon_digit(su) : -1;
   const void* key_ptr = sv.scripts ? static_cast<const void*>(sv.scripts.get()) : nullptr;
   const std::string key = std::to_string(reinterpret_cast<std::uintptr_t>(key_ptr)) + "#" + std::to_string(cls);
@@ -163,7 +163,7 @@ void BattleView::anm_effect(int unit, const bseq::Event& event) {
   // The resources: a reaction runs the ATTACKER's table on the target, so its emitters are the attacker's; every other script is the unit's own.
   int src = unit;
   if (vis_[static_cast<size_t>(unit)].script_kind == kReact && act_.actor >= 0) src = act_.actor;
-  const battle::Unit& su = battle_->unit(src);
+  const battle::Unit& su = bunit(src);
   AnmFx& anm = anm_bank(src);
   // While an element pack runs, a MONSTER attacker's own at0 headers are not in the registry the pack's reaction script walks
   // (the attacker's at0 carries "0s00 / 0m00 / 0l00" but none of them is drawn; the sparks come from the pack).
@@ -197,7 +197,7 @@ void BattleView::anm_add_s6(effects::EffectBank& bank) const {
   std::vector<const assets::RoomEffects*> seen;
   for (int unit = 0; unit < battle::kUnits; ++unit) {
     const Visual& visual = vis_[static_cast<size_t>(unit)];
-    if (!visual.scripts || !visual.scripts->s6fx || !battle_->unit(unit).present) continue;
+    if (!visual.scripts || !visual.scripts->s6fx || !bunit(unit).present) continue;
     const assets::RoomEffects* fx = visual.scripts->s6fx.get();
     if (std::find(seen.begin(), seen.end(), fx) != seen.end()) continue;
     seen.push_back(fx);
@@ -296,7 +296,7 @@ bool BattleView::anm_attach(AnmFx& anm, int unit, const bseq::Event& event, cons
   if (header_count == 0 && anm_trace()) {
     for (int other = 0; other < battle::kUnits; ++other) {
       const Visual& uv = vis_[static_cast<size_t>(other)];
-      if (!uv.scripts || uv.scripts->at0.empty() || !battle_->unit(other).present) continue;
+      if (!uv.scripts || uv.scripts->at0.empty() || !bunit(other).present) continue;
       static const import::Vram kE;
       const assets::RoomEffects fxu = import::load_battle_effects(uv.scripts->at0, {}, kE, {});
       for (const assets::Emitter& em : fxu.emitters)

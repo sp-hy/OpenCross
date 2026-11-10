@@ -6,6 +6,8 @@ add_library(oc_battle STATIC
   rules.cpp
   battle.h
   battle.cpp
+  versus.h
+  versus.cpp
   pac_vm.h
   pac_vm.cpp
   pac_opcodes.inc

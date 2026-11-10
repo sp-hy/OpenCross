@@ -1,9 +1,11 @@
 #pragma once
 // The presence records passed between the multiplayer client (net) and the field (game): what the local player sends about their
-// party, and what is known about each remote party in the same room. Plain data, no dependencies.
+// party, what is known about each remote party in the same room, and the party card a battle challenge carries. Plain data, no
+// dependencies.
 #include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace oc::net {
 
@@ -36,6 +38,8 @@ struct RemoteParty {
   std::string pid;
   std::string name;
   int star = 0;
+  // The player takes battle challenges ([Multiplayer] Challenges).
+  bool pvp = false;
   PartyModels models{-1, -1, -1};
   LeaderPose pose;
   bool has_pose = false;
@@ -57,6 +61,23 @@ struct RemoteLabel {
   std::string text;
   float x = 0, y = 0;
   PresenceState state = PresenceState::Field;
+};
+
+// One member of a party card: the character id, the name the menus show, and the Status screen's max HP, ATK, DEF, MAG and MDEF, and
+// how many grid cells hold an element.
+struct CardMember {
+  int char_id = 0;
+  std::string name;
+  int hp = 0, atk = 0, def = 0, mag = 0, mdef = 0;
+  int elements = 0;
+  bool operator==(const CardMember&) const = default;
+};
+
+// What a challenge shows of a party: the Star Level and up to 3 members, leader first.
+struct PartyCard {
+  int star = 0;
+  std::vector<CardMember> members;
+  bool operator==(const PartyCard&) const = default;
 };
 
 }  // namespace oc::net

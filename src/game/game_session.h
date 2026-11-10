@@ -7,12 +7,14 @@
 // fields rec+BC/BE (HP) and rec+C0..CB (ATK, HIT, DEF, EVD, MAG, MDEF: snapshot, pending). Stars: head 0x5A4 (star) / 0x5A5
 // (counter). The growth progress counter is head 0x598 (SaveSlot::growth_progress): battle_setup takes it,
 // apply_battle_result returns the new value, and the host stores it back; a new game starts at 0.
+#include <array>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "battle/battle.h"
 #include "data/char_name.h"
+#include "net/presence.h"
 #include "ui/menu/game_state.h"
 
 namespace oc::game {
@@ -25,6 +27,16 @@ int session_star(const ui::GameState& gs);
 // A record whose growth snapshot was never written (new game) gets snapshot = stats and a deterministic first pending roll.
 battle::PartyMember party_member_from_state(const data::GameTables& tables, const ui::GameState& gs, int char_id,
                                             const data::CharNames* names = nullptr);
+
+// The party card a multiplayer challenge carries, for the party `party_ids` (leader first, at most 3): per member the name the menus show
+// and the Status screen's max HP, ATK, DEF, MAG and MDEF (record plus gear, GameState::stats, at most 999), and how many open grid cells
+// hold an element (ids 1..0x7F; techs do not count). Members are left out when the state has no menu rules.
+net::PartyCard party_card(const ui::GameState& gs, const std::vector<int>& party_ids, const data::CharNames& names);
+
+// One side of a versus battle from the saved state: the party `party_ids` (leader first, at most 3) as party_member_from_state builds them,
+// the summon stars left as a battle would start them, and the Dopplegang pool `dopple`.
+battle::VersusSide versus_side(const data::GameTables& tables, const ui::GameState& gs, const std::vector<int>& party_ids,
+                               const std::array<u16, 16>& dopple, const data::CharNames* names = nullptr);
 
 // The Lynx duel's names (battle::BattleOptions::duel_names).
 std::vector<std::string> duel_names(const ui::GameState& gs, const data::CharNames& names);

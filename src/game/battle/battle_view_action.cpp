@@ -49,8 +49,11 @@ void BattleView::update(float dt, const platform::Input& in) {
         rest = comma == std::string::npos ? std::string() : rest.substr(comma + 1);
       }
   }
-  battle_->set_invincible(dbg_.inv_party, dbg_.inv_enemies);
-  battle_->set_cheats(battle_cheats());
+  // No cheat or debug invincibility reaches a versus battle.
+  if (!versus_) {
+    battle_->set_invincible(dbg_.inv_party, dbg_.inv_enemies);
+    battle_->set_cheats(battle_cheats());
+  }
   const auto st = stepper_.advance(static_cast<double>(dt));
   // The ticks see the stepper's remainder as before (fx attach / skin reads of alpha_).
   alpha_ = tick_alpha_;
@@ -63,18 +66,22 @@ void BattleView::update(float dt, const platform::Input& in) {
 
   // The menu's hand-over steps after a PC's element command hold the next menu (not the end of a finished battle).
   const bool handing_over = cast_handover_ > 0 && battle_->outcome() == battle::Outcome::Ongoing;
-  const bool busy = !queue_.empty() || act_.phase != Act::Phase::None || !pending_.empty() || script_busy() || handing_over;
+  auto presenting = [&] { return !queue_.empty() || act_.phase != Act::Phase::None || !pending_.empty() || script_busy() || handing_over; };
+  versus_pump(st.ticks, !presenting());
+  const bool busy = presenting();
   // Dev (route battle_dash): every grid cell of PC 0 = element <id>, the other enemies down, the last one at 1 HP when an element is confirmed.
-  if (const char* re = std::getenv("OC_ROUTE_ELEM"); re && !route_elem_done_) {
+  if (const char* re = std::getenv("OC_ROUTE_ELEM"); re && !route_elem_done_ && !versus_) {
     route_elem_done_ = true;
-    if (std::getenv("OC_ROUTE_GAUGE")) battle_->unit_mut(0).gauge = battle_->unit(0).gauge_max;
-    for (int cell = 0; cell < data::kGridCells; ++cell) if (battle_->unit(0).cells[static_cast<size_t>(cell)] & 0x3FFF) battle_->unit_mut(0).cells[static_cast<size_t>(cell)] = static_cast<u16>(std::atoi(re));
-    for (int i = battle::kPcSlots + 1; i < battle::kUnits; ++i) if (battle_->unit(i).present) { battle_->unit_mut(i).hp = 0; battle_->unit_mut(i).lo |= battle::st::kKO; }
+    if (std::getenv("OC_ROUTE_GAUGE")) bunit_mut(0).gauge = bunit(0).gauge_max;
+    for (int cell = 0; cell < data::kGridCells; ++cell) if (bunit(0).cells[static_cast<size_t>(cell)] & 0x3FFF) bunit_mut(0).cells[static_cast<size_t>(cell)] = static_cast<u16>(std::atoi(re));
+    for (int i = battle::kPcSlots + 1; i < battle::kUnits; ++i) if (bunit(i).present) { bunit_mut(i).hp = 0; bunit_mut(i).lo |= battle::st::kKO; }
   }
   // Dev: the harness action waits for the spawn scripts (S5 entry 8, start_spawn) - the first command of a real battle comes after them; an
   // action at tick 2 would cut Serge's entry 8 while the model is still hidden, leaving him invisible for the whole fight.
   bool spawning = false;
-  for (int i = 0; i < battle::kUnits; ++i) spawning = spawning || (battle_->unit(i).present && vis_[static_cast<size_t>(i)].spawn && vis_[static_cast<size_t>(i)].vm.running());
+  for (int i = 0; i < battle::kUnits; ++i) spawning = spawning || (bunit(i).present && vis_[static_cast<size_t>(i)].spawn && vis_[static_cast<size_t>(i)].vm.running());
+  // A Debug tab cast is dropped in a versus battle.
+  if (versus_) dbg_.cast_element = 0, dbg_.weapon = -1;
   // Dev: a pending harness cast does not wait for a button on the scene's script windows.
   if (dbg_.cast_element > 0 && ui_ != Ui::Intro) smsg_input(true);
   // Dev: ocbattleview --cast / --ecast / --weapon.
@@ -99,7 +106,7 @@ void BattleView::update(float dt, const platform::Input& in) {
     if (const char* form_env = std::getenv("OC_DEV_FORM"); form_env && el == 238) pending_form_ = std::atoi(form_env), pending_form_unit_ = std::max(0, dbg_.cast_actor);
     int first = -1;
     for (int i = battle::kPcSlots; i < battle::kUnits && first < 0; ++i)
-      if (battle_->unit(i).present && battle_->unit(i).standing()) first = i;
+      if (bunit(i).present && bunit(i).standing()) first = i;
     // Dev: OC_DEV_WTGT=<unit> aims the --weapon attack at that unit, OC_DEV_HP1=1 leaves it with 1 HP first (a scripted death / form-2 kill:
     // `OC_GHOST=3:1,4:0 OC_DEV_WTGT=4 OC_DEV_HP1=1 ocbattleview 431 --weapon 2`).
     if (weapon >= 0) {
@@ -109,14 +116,14 @@ void BattleView::update(float dt, const platform::Input& in) {
         int owed_index = std::atoi(wt + 4);
         first = -1;
         for (int i = battle::kPcSlots; i < battle::kUnits; ++i)
-          if (battle_->unit(i).present && brain_.death_owed(i) && owed_index-- == 0) first = i;
+          if (bunit(i).present && brain_.death_owed(i) && owed_index-- == 0) first = i;
         log::info("deathtrace: owed unit {}", first);
       }
-      if (first >= 0 && first < battle::kUnits && std::getenv("OC_DEV_HP1") != nullptr) battle_->unit_mut(first).hp = 1;
+      if (first >= 0 && first < battle::kUnits && std::getenv("OC_DEV_HP1") != nullptr) bunit_mut(first).hp = 1;
       // Dev: OC_DEV_ONLY=1 also downs every other enemy unit (hp 0 + KO, no kill script), so the one kill ends the fight (victory check of a scripted death)
       if (first >= 0 && std::getenv("OC_DEV_ONLY") != nullptr)
         for (int i = battle::kPcSlots; i < battle::kUnits; ++i)
-          if (i != first && battle_->unit(i).present) battle_->unit_mut(i).hp = 0, battle_->unit_mut(i).lo |= battle::st::kKO;
+          if (i != first && bunit(i).present) bunit_mut(i).hp = 0, bunit_mut(i).lo |= battle::st::kKO;
     }
     if (weapon >= 0 && first >= 0) {
       battle_->do_pc_weapon_hit(dbg_.lead, first, weapon);
@@ -129,7 +136,7 @@ void BattleView::update(float dt, const platform::Input& in) {
       // the all-target cast mask allows.
       const int ca = dbg_.cast_actor, ct = dbg_.cast_target;
       dbg_.cast_actor = dbg_.cast_target = -1;
-      if (ca < battle::kUnits && ct < battle::kUnits && battle_->unit(ca).present && battle_->unit(ct).present) {
+      if (ca < battle::kUnits && ct < battle::kUnits && bunit(ca).present && bunit(ct).present) {
         const battle::TargetSpec ts = battle::target_spec(tables_->elements[static_cast<size_t>(el)]);
         const bool pc_side = ct < battle::kPcSlots;
         // Party + enemies + all (elements 46 53 65 71 77 83 84 ...) is every unit of both sides (Serge faces the bounding-box midpoint
@@ -145,7 +152,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         // A cast the other side's trap holds is caught instead (ocbattleview --etrap / --ptrap).
         const bool caught = battle_->catch_in_trap(ca, el, 0, ct);
         for (int i = lo; i < hi && !caught; ++i) {
-          if (!battle_->unit(i).present) continue;
+          if (!bunit(i).present) continue;
           if (i < battle::kPcSlots && i >= party_cap) continue;
           if (ts.all && i >= battle::kPcSlots && !(reach >> i & 1u)) continue;
           battle_->do_element(ca, el, 0, i, ring);
@@ -173,7 +180,7 @@ void BattleView::update(float dt, const platform::Input& in) {
       const int lo = ally ? 0 : first, hi = ally || !ts.enemies ? battle::kPcSlots : battle::kUnits;
       const bool caught = battle_->catch_in_trap(dbg_.lead, el, 0, lo);
       for (int i = lo; i < hi && !caught; ++i) {
-        if (!battle_->unit(i).present || (ts.ko_only ? battle_->unit(i).standing() : !battle_->unit(i).standing()) || (!ts.all && i != lo)) continue;
+        if (!bunit(i).present || (ts.ko_only ? bunit(i).standing() : !bunit(i).standing()) || (!ts.all && i != lo)) continue;
         battle_->do_element(dbg_.lead, el, 0, i, i == lo);
       }
       battle_->finish_external_action();
@@ -200,7 +207,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         // approach act still owns the PC (handled by tick_action)
       } else if (ui_ == Ui::Wait && engaged_ && active_pc_ >= 0) {
         sync_shown();
-        const bool more = battle_->can_act(active_pc_) && battle_->unit(engaged_target_).standing() && !engaged_after_cast_;
+        const bool more = can_act(active_pc_) && bunit(engaged_target_).standing() && !engaged_after_cast_;
         if (more) {
           ui_ = Ui::Chain;
           chain_auto_cursor();
@@ -221,7 +228,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         const bool switched = pass_switch_;
         pass_pc_ = -1;
         pass_switch_ = false;
-        active_pc_ = passed >= 0 && battle_->can_act(passed) ? passed : menu_pc_after();
+        active_pc_ = passed >= 0 && can_act(passed) ? passed : menu_pc_after();
         if (cursor_memory_ && active_pc_ >= 0 && active_pc_ < battle::kPcSlots) top_cursor_ = top_mem_[active_pc_];
         if (switched && active_pc_ >= 0) {
           // A switch key in the HIT% menu: once the PC is home the menu passes on with SFX 0x16, the new PC's idle restarts and its
@@ -237,15 +244,15 @@ void BattleView::update(float dt, const platform::Input& in) {
         }
       }
       bool any = false;
-      for (int i = 0; i < battle::kPcSlots; ++i) any = any || battle_->can_act(i);
-      // Nobody can open a menu: let the rules run on.
-      if (!any) {
+      for (int i = 0; i < battle::kPcSlots; ++i) any = any || can_act(i);
+      // Nobody can open a menu: let the rules run on (a versus battle's turns run on by themselves).
+      if (!any && !versus_) {
         battle_->settle();
         collect_events();
       }
     } else if (wipe_hold_ > 0) {
       // The frozen-wipe hold counts down in tick().
-    } else if (froze_ && battle_->outcome() == battle::Outcome::Wiped) {
+    } else if (froze_ && presented_outcome() == battle::Outcome::Wiped) {
       froze_ = false;
       wipe_hold_ = kFrozenWipeHold;
     } else {
@@ -254,7 +261,7 @@ void BattleView::update(float dt, const platform::Input& in) {
   }
   handle_input(in);
   // The PC whose top menu has taken over gives up its guard, however the menu came to it; the idle script then drops the block pose.
-  if (menu_live() && battle::is_pc_slot(active_pc_) && !battle_->menu_locked()) battle_->open_menu(active_pc_);
+  if (menu_live() && battle::is_pc_slot(active_pc_) && !battle_->menu_locked()) open_menu_now();
   sync_menu_facing();
   // HUD projections use the current camera.
   apply_camera(alpha_);
@@ -265,6 +272,7 @@ void BattleView::update(float dt, const platform::Input& in) {
 void BattleView::collect_events() {
   std::vector<battle::ActionEvent> ev = battle_->drain_events();
   for (battle::ActionEvent& event : ev) {
+    map_event(event);
     if (queue_.empty() || queue_.back().front().action != event.action) queue_.emplace_back();
     queue_.back().push_back(event);
   }
@@ -317,7 +325,7 @@ void BattleView::begin_disengage(bool approach_shot) {
     if (approach_shot) select_approach();
   }
   Visual& visual = vis_[static_cast<size_t>(pc)];
-  if (!battle_->unit(pc).alive()) {
+  if (!bunit(pc).alive()) {
     begin_move(pc, visual.home_x, visual.home_z, 0, true);
     return;
   }
@@ -351,18 +359,27 @@ void BattleView::chain_pick(int strength) {
   cmd.actor = active_pc_;
   cmd.target = engaged_target_;
   cmd.chain = {strength};
-  if (!battle_->validate(cmd)) return;
+  if (!validate_command(cmd)) return;
   execute(cmd);
 }
 
 void BattleView::execute(const battle::Command& cmd) {
   std::string why;
-  if (std::getenv("OC_ROUTE_ELEM") && cmd.kind == battle::Command::Kind::Element) battle_->unit_mut(cmd.target).hp = 1;
-  if (!battle_->apply(cmd, &why)) {
+  if (std::getenv("OC_ROUTE_ELEM") && cmd.kind == battle::Command::Kind::Element) bunit_mut(cmd.target).hp = 1;
+  if (!apply_command(cmd, &why)) {
     log_.push_back({import::utf8_to_u32("Cannot: " + why), 4.0f});
     battle_audit_note(std::format("apply refused: actor {} kind {} cell {} target {}: {}", cmd.actor, static_cast<int>(cmd.kind), cmd.cell, cmd.target, why));
     ui_ = Ui::Top;
     return;
+  }
+  // A versus battle's Dopplegang pick is the rules' command right after the cast; a cast that opened the pick without one keeps the form.
+  const bool picked = pending_form_ != -2 && pending_form_unit_ == cmd.actor;
+  if (versus_ && cmd.kind == battle::Command::Kind::Element && (picked || battle_->form_owed() == rules_unit(cmd.actor))) {
+    battle::Command form;
+    form.kind = battle::Command::Kind::Form;
+    form.actor = rules_unit(cmd.actor);
+    form.form = picked ? pending_form_ : -1;
+    if (!versus_apply(form, true, &why)) log::warn("battle: Dopplegang pick refused: {}", why);
   }
   collect_events();
   // A confirmed command closes the system plate.
@@ -381,7 +398,7 @@ void BattleView::execute(const battle::Command& cmd) {
 // lists the table's non-zero `val` rows instead (`OC_DOPPLE_SLOTS=debug`).
 void BattleView::open_dopple() {
   dop_list_.assign(1, -1);
-  for (const int slot : battle_->dopple_pool()) dop_list_.push_back(slot);
+  for (const int slot : battle_->dopple_pool(versus_side_)) dop_list_.push_back(slot);
   dop_cur_ = dop_top_ = 0;
   // The scroll limit = 1 + (n8 - 11) - (n8 - 11) / 2 (C division), negative -> 0; n8 = the creature count in a BYTE, so all 256
   // pool bits wrap to 0 and the list cannot scroll (0 with 256 bits, 12 with 32).
@@ -398,9 +415,10 @@ void BattleView::open_dopple() {
   ui_ = Ui::Dopple;
 }
 
-// A form change: the Unit record is swapped by Battle::transform; the model, scripts, sounds and weapon follow, the idle clip restarts.
+// A form change: the Unit record is swapped by Battle::transform (in a versus battle the Form command did it); the model, scripts, sounds
+// and weapon follow, the idle clip restarts.
 void BattleView::apply_form(int unit, int form) {
-  if (unit < 0 || unit >= battle::kPcSlots || !battle_->transform(unit, form)) return;
+  if (unit < 0 || unit >= player_slots() || (!versus_ && !battle_->transform(unit, form))) return;
   bind_unit_model(unit);
   form_show_unit_ = unit;
   Visual& visual = vis_[static_cast<size_t>(unit)];
@@ -413,7 +431,7 @@ void BattleView::apply_form(int unit, int form) {
     if (visual.pose.attach_now(14, 1.0f, hx, hy, hz) && -hy > 50.0f) visual.height = -hy;
   }
   trail_eye_reset(unit);
-  log::info("battle: unit {} form -> {} ({})", unit, form, battle_->unit(unit).name);
+  log::info("battle: unit {} form -> {} ({})", unit, form, bunit(unit).name);
 }
 
 void BattleView::apply_pip_form(int unit) {
@@ -434,12 +452,12 @@ void BattleView::apply_pip_form(int unit) {
     if (visual.pose.attach_now(14, 1.0f, hx, hy, hz) && -hy > 50.0f) visual.height = -hy;
   }
   trail_eye_reset(unit);
-  log::info("battle: tick {} unit {} form -> kind {:#x} ({})", tick_count_, unit, battle_->unit(unit).kind, unit_model_stem(battle_->unit(unit)));
+  log::info("battle: tick {} unit {} form -> kind {:#x} ({})", tick_count_, unit, bunit(unit).kind, unit_model_stem(bunit(unit)));
 }
 
 void BattleView::bind_swapped_unit(int unit) {
   if (unit < 0 || unit >= battle::kPcSlots) return;
-  const battle::Unit& unit_rec = battle_->unit(unit);
+  const battle::Unit& unit_rec = bunit(unit);
   Visual& visual = vis_[static_cast<size_t>(unit)];
   visual.vm.stop();
   bind_unit_model(unit);
@@ -448,6 +466,7 @@ void BattleView::bind_swapped_unit(int unit) {
   // The leaver's display state goes with it: the HUD counts from the newcomer's own HP.
   visual.hp_disp = static_cast<float>(unit_rec.hp);
   visual.hp_shown = unit_rec.hp;
+  visual.status_shown = unit_rec.lo;
   visual.ko_shown = visual.ko_hit = visual.ko_reacted = visual.death_owed = false;
   visual.zero_hp_actions = 0;
   visual.flash = visual.flash_prev = 0.0f;
@@ -484,7 +503,7 @@ void BattleView::fx_form_phase(int phase) {
 }
 
 void BattleView::fx_set_pose(int unit, int pose) {
-  if (unit < 0 || unit >= battle::kUnits || !battle_->unit(unit).present) return;
+  if (unit < 0 || unit >= battle::kUnits || !bunit(unit).present) return;
   Visual& visual = vis_[static_cast<size_t>(unit)];
   visual.script_pose = pose;
   // A running idle picks the word up; one that ran out stays on its last pose.
@@ -495,20 +514,20 @@ int BattleView::next_pc_after(int pc) const {
   if (pc < 0) pc = battle::kPcSlots - 1;
   for (int k = 1; k <= battle::kPcSlots; ++k) {
     const int slot = (pc + k) % battle::kPcSlots;
-    if (battle_->can_act(slot)) return slot;
+    if (can_act(slot)) return slot;
   }
   return -1;
 }
 
 int BattleView::menu_pc_after() const {
-  if (last_actor_ >= 0 && last_kind_ == battle::Command::Kind::Attack && battle_->can_act(last_actor_)) return last_actor_;
+  if (last_actor_ >= 0 && last_kind_ == battle::Command::Kind::Attack && can_act(last_actor_)) return last_actor_;
   return next_pc_after(last_actor_ >= 0 ? last_actor_ : active_pc_);
 }
 
 std::string BattleView::route_menu() const {
   std::string out = menu_live() && battle::is_pc_slot(active_pc_) ? std::to_string(active_pc_) : std::string("-");
   out += ' ';
-  for (int i = 0; i < battle::kPcSlots; ++i) out += battle_ && battle_->unit(i).guard ? '1' : '0';
+  for (int i = 0; i < battle::kPcSlots; ++i) out += battle_ && bunit(i).guard ? '1' : '0';
   return out;
 }
 
@@ -517,7 +536,7 @@ std::string BattleView::route_facing() const {
   for (int i = 0; i < battle::kPcSlots; ++i) {
     const Visual& visual = vis_[static_cast<size_t>(i)];
     const int yaw = static_cast<int>(std::lround(std::atan2(-visual.face_x, -visual.face_z) * (4096.0f / (2.0f * kPi)))) & 0xFFF;
-    out += (i ? " " : "") + (battle_ && battle_->unit(i).present ? std::to_string(yaw) : std::string("-"));
+    out += (i ? " " : "") + (battle_ && bunit(i).present ? std::to_string(yaw) : std::string("-"));
   }
   return out;
 }
@@ -530,7 +549,7 @@ std::string BattleView::route_facing() const {
 int BattleView::switch_target(int dir) const {
   for (int k = 1; k < battle::kPcSlots; ++k) {
     const int next = ((active_pc_ + (dir > 0 ? k : -k)) % battle::kPcSlots + battle::kPcSlots) % battle::kPcSlots;
-    if (battle_->can_act(next)) return next;
+    if (can_act(next)) return next;
   }
   return active_pc_;
 }
@@ -568,7 +587,7 @@ void BattleView::tick_menu_entry() {
     entry_chime_ = true;
     return;
   }
-  if (entry_chime_ && battle_->can_act(entry_pc_) && battle_->outcome() == battle::Outcome::Ongoing && finish_ == Finish::None) {
+  if (entry_chime_ && can_act(entry_pc_) && battle_->outcome() == battle::Outcome::Ongoing && finish_ == Finish::None) {
     entry_chime_ = menu_chime_ = false;
     if (!auto_) audio_.play_menu(0x16);
   }
@@ -645,10 +664,11 @@ bool BattleView::dynamic_translucent(int unit) const {
 
 void BattleView::sync_shown() {
   for (int i = 0; i < battle::kUnits; ++i) {
-    const battle::Unit& unit = battle_->unit(i);
+    const battle::Unit& unit = bunit(i);
     Visual& visual = vis_[static_cast<size_t>(i)];
     if (!unit.present) continue;
     visual.hp_shown = unit.hp;
+    visual.status_shown = unit.lo;
     // Only the KO bit is a death on screen: a frozen unit stands, visible, in its held pose.
     const bool ko = !unit.in_turn_order();
     if (ko != visual.ko_shown) {

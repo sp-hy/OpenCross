@@ -565,7 +565,7 @@ void BattleView::build_field_ring() {
 battle::TrapHud BattleView::presented_trap() const {
   if (act_.phase != Act::Phase::None && !act_.ev.empty()) return act_.ev[std::min(act_.hit, act_.ev.size() - 1)].trap;
   if (!queue_.empty() && !queue_.front().empty()) return queue_.front().front().trap_before;
-  return battle_->trap_hud();
+  return view_trap(battle_->trap_hud());
 }
 
 // Element-trap block under the field ring, drawn from PS1 (8, 24) like the ring: "ELEMENT TRAP" at (16, 43); "PLAYER-" at (62, 39) with the
@@ -604,7 +604,9 @@ void BattleView::build_star_count() {
   }
   constexpr u32 kColour = 0x8A8A8A;
   const float digit_y = lang_ == import::Lang::Jp ? 28.0f : 27.0f;
-  const int current = std::clamp(battle_->growth().counter, 0, 99), total = std::clamp(battle_->growth().star, 0, 99);
+  // A versus battle shows this game's side: the stars left of those it brought.
+  const int current = std::clamp(versus_ ? battle_->star_counter(versus_side_) : battle_->growth().counter, 0, 99);
+  const int total = std::clamp(versus_ ? versus_stars_ : battle_->growth().star, 0, 99);
   auto digit = [](int value) { return std::u32string(1, static_cast<char32_t>(U'0' + value)); };
   btext(0x10005, U"★", 62, 28, kColour);
   if (current >= 10) btext(5, digit(current / 10), 69, digit_y, kColour);
@@ -710,6 +712,7 @@ void BattleView::build_hud() {
 
   // The battle-script event window (E0).
   build_script_msg();
+  if (!hud_off) build_versus_hud();
   if (ui_ == Ui::Result) build_result_ui();
   // Debug free camera, "Hide overlays", or Select held / [Enhancements] AutoHideCastHud while an element / tech / summon is charged or
   // released: no HUD / menus / windows / results (the F9 text below stays; the damage digits are drawn elsewhere).
@@ -736,7 +739,7 @@ void BattleView::build_camera_overlay() {
     }
   };
   for (int i = 0; i < battle::kUnits; ++i) {
-    if (!battle_->unit(i).present) continue;
+    if (!bunit(i).present) continue;
     const Visual& visual = vis_[static_cast<size_t>(i)];
     const float axis_len = 500;
     line(visual.x, 0, visual.z, visual.x + axis_len, 0, visual.z, col(255, 60, 60));

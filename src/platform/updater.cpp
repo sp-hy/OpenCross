@@ -336,6 +336,20 @@ bool exe_from_zip(const std::string& zip, std::string& out) {
 
 }  // namespace
 
+std::string exe_build_id() {
+  static const std::string id = [] {
+#ifdef _WIN32
+    std::ifstream file(exe_path(), std::ios::binary);
+    if (!file) return std::string();
+    const std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return sha256_hex(bytes).substr(0, 16);
+#else
+    return std::string();
+#endif
+  }();
+  return id;
+}
+
 std::optional<std::vector<int>> parse_version(std::string_view text) {
   if (!text.empty() && (text[0] == 'v' || text[0] == 'V')) text.remove_prefix(1);
   std::vector<int> parts;

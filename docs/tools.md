@@ -4,7 +4,7 @@ Reference for everything a developer runs besides the game itself: the tools lin
 
 ## 1. Dev tools linked into `opencross.exe`
 
-`opencross <tool> [args]` runs a tool instead of the game; `opencross tools` lists them. The name is matched exactly or without its `oc` prefix (`opencross ocbattle ...` and `opencross battle ...` are the same; `occ` is also reachable as `c`). The game starts only with no argument or with `--config <file>`; any other first argument that names no tool prints the usage and exits 2. A tool that gets an unknown or incomplete option prints its usage and exits non-zero (2), and a tool never ends with a negative code that would fall through to the game.
+`opencross <tool> [args]` runs a tool instead of the game; `opencross tools` lists them. The name is matched exactly or without its `oc` prefix (`opencross ocbattle ...` and `opencross battle ...` are the same; `occ` is also reachable as `c`). The game starts only with no argument or with `--config <file>` and / or `--profile <dir>` (section 6.4); any other first argument that names no tool prints the usage and exits 2. A tool that gets an unknown or incomplete option prints its usage and exits non-zero (2), and a tool never ends with a negative code that would fall through to the game.
 
 The exe is a GUI-subsystem program. A tool attaches to the calling console only when its stdout is not already redirected, so from PowerShell pipe the output to make the shell wait: `opencross occ rooms-check | Out-Host`.
 
@@ -15,11 +15,11 @@ Common conventions:
 | `-g <dir>` | Game folder. Must come first for `occ`, `ocaudio`, `ocprd`, `ocbattleseq`; anywhere for `octext`, `ochd`, `ocstage`, `ocbattle`; before the subcommand for `ocmovie`. |
 | `OPENCROSS_GAMEDIR` | Game folder when `-g` is absent. Most tools then fall back to the usual discovery (`platform::find_game_dir`); `occ`, `ocaudio`, `ocprd` fail without either. |
 | `-l <lang>` | `ocmovie` only: language of the movie (default `en`). |
-| `-v` | Verbose: `ochd`, `ocstage validate`, `ocbattle soak`, `pac-soak`, `fx-audit`, `occ dialogue-*`. |
+| `-v` | Verbose: `ochd`, `ocstage validate`, `ocbattle soak`, `pac-soak`, `fx-audit`, `versus`, `occ dialogue-*`. |
 | `ocbattleview`, `ocflow`, `ocmenudemo`, `ocshopdemo` | Take no `-g`; they read `opencross.ini` next to the exe (`[Paths] GameDir`, else discovery). |
 | `ocmodelview` | `-g`, else `OPENCROSS_GAMEDIR`, else `[Paths] GameDir` of `opencross.ini` next to the exe, else discovery. |
 
-`ocbattle soak` exits 1 on anomalies or exceptions, `pac-soak` on exceptions, `ochd` on decode or size failures, `ocstage validate` when a stage fails; `ocbattle fx-audit` exits 0 after a completed run.
+`ocbattle soak` exits 1 on anomalies or exceptions, `pac-soak` on exceptions, `versus` on a divergence, `ochd` on decode or size failures, `ocstage validate` when a stage fails; `ocbattle fx-audit` exits 0 after a completed run.
 
 ### 1.1 `occ` (assets: rooms, models, scripts, saves)
 
@@ -130,7 +130,7 @@ Environment: `OCSTAGE_COLORS`, `OCSTAGE_UV` (`info`).
 
 ### 1.7 `ocbattle` (battle rules, simulator, soaks)
 
-Source: `tools/ocbattle.cpp`, `tools/ocbattle_fx.cpp`, `tools/ocbattle_reg.cpp`. Global flags: `-g <dir>`, `--rng lo|mid|hi|seed:N` (roll source for formulas with random terms, default `mid`; consumed before the subcommand).
+Source: `tools/ocbattle.cpp`, `tools/ocbattle_fx.cpp`, `tools/ocbattle_reg.cpp`, `tools/ocbattle_versus.cpp`, `tools/ocbattle_versus_net.cpp`. Global flags: `-g <dir>`, `--rng lo|mid|hi|seed:N` (roll source for formulas with random terms, default `mid`; consumed before the subcommand).
 
 | Subcommand | Arguments and flags | Meaning |
 |---|---|---|
@@ -147,6 +147,8 @@ Source: `tools/ocbattle.cpp`, `tools/ocbattle_fx.cpp`, `tools/ocbattle_reg.cpp`.
 | `formula` | `<name> <args...>` | Evaluates one formula; no name lists them: `ceil100 colour hit slot weapon element heal status_timer growth minor recovery stamina_cost sum`. |
 | `fx-audit` | `[--csv F] [--md F] [--eid N] [--ticks N] [-v] [--find NAME]` | Plays every battle effect pack headless and reports per-pack status. `--csv` default `battle_effects_audit.csv` in the working folder (`--csv ""` disables); `--md` writes a status table; `--eid` one effect slot; `--ticks` caps the run; `--find NAME` lists packs with an emitter header of that name (`*` = every `at0.prd` emitter name), no audit and no CSV. |
 | `fx-reg` | see below | Effect-registry model of a battle start and registry searches. |
+| `versus` | `<seed> [--a file[:slot]] [--b file[:slot]] [--cmds F \| --auto N] [--fuzz SEEDS] [--cap N] [-v]` | A versus battle (`docs/rules/versus.md`) played headless twice in lockstep, as two players' games would: one `Battle` started from the sides as given, the other from the sides after the exchange format (`encode_versus_side` / `decode_versus_side`), both on the battlefield `versus_battlefield` picks from the seed and fed the same commands; `state_hash` is compared after every command. A side without `--a` / `--b` is the built-in test party (A: characters 0 1 2, B: 3 4 26, star 20, 5 summon stars, the whole creature pool); `--a` / `--b` read the party, summon stars and creature pool of a save slot (read-only; point them at a copy, never at the real save folder). `--cmds` plays a command file, one per line (`attack U s[,s...] [target]`, `element U cell [target]`, `defend U`, `run U`, `end U [timeout]`, `focus U`, `menu U`, `form U F`; `#` comments); otherwise `--auto N` (default: the seed) plays random legal commands from generator seed N: a Focus before a new actor's command, the element menu before a cast and the creature pick after a Dopplegang cast, End Turn about one decision in eight (one in ten of them a timeout), Run one in 2000. `--cap` stops after N commands (default 4000); `-v` prints every command with its result, the turn side and the hash. Prints the sides (with the size of each one's exchange format in bytes), the seed, battlefield and data fingerprint, then `outcome: ...` and `in step: no divergence` or `DIVERGED after command N` with both games' units. `--fuzz SEEDS` plays battle seeds 1..SEEDS (auto seed = seed x 7919 + 1) and prints `versus fuzz: N battles, C commands (R rejected), D divergences`, the average commands per battle and the longest turn, the outcome and end counts, and `digest` (FNV-1a of every final hash: the same on every build while the rules are deterministic). Exit 1 on a divergence. The random player is `battle::VersusAutoPlayer` (`versus.h`), which the game's local opponent also plays (without the early End Turns, the timeouts and Run). |
+| `versus-net` | `<ws-url> [--fuzz N] [--cut K] [--timeout S] [-v]` | Versus battles end to end over a running multiplayer server (`formats/multiplayer.md` section 8.4; a local `wrangler dev`, never the Master server): two `MultiplayerClient` connections in this process with new player ids, the first challenges, the second accepts, each sends its side (the built-in parties 0 1 2 and 3 4 26 at star 20) and runs its own `Battle` from the exchanged sides, its own side played by `LocalVersusOpponent` and the other through `NetworkVersusLink`, so every command, state check, turn and pacing limit goes through the server. Per battle it prints the battle id, seed, battlefield, who plays side A and the side sizes, then each game's command count, outcome, link status and final hash, `in step`, `DIVERGED` or `TIMED OUT`; at the end `versus-net: N battles, C commands, F not in step`. `--fuzz N` plays N battles (default 1); `--cut K` drops the second game's connection after it applied K commands (it reconnects and resumes); `--timeout` caps a battle (default 300 s); `-v` prints every command. Exit 1 when a battle was not in step. `tests/multiplayer/run.ps1 -Battles N [-Cut K]` starts the server and runs it (section 5.8). |
 
 `fx-reg` forms:
 
@@ -348,6 +350,8 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 
 ### 3.3 Battle view and effects
 
+A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_MISS`, `OC_BATTLE_FIELD`, `OC_DOPPLE_SLOTS`, `OC_GHOST`, `OC_ROUTE_ELEM`, `OC_ROUTE_GAUGE` or `OC_DEV_*` (the battle's ones below) is set, and it reads no `OC_BATTLE_SEED`: both games must run the same rules from the shared seed.
+
 | Variable | Read by | Values | Meaning |
 |---|---|---|---|
 | `OC_BATTLE_AUDIT` | `battle_camera.cpp`, `battle_view_anchor.cpp` | set; `2` | Per-tick battle flow checks, one `AUDIT` warning per anomaly (section 2); `2` adds the element-table pair list. |
@@ -495,7 +499,8 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | Pad LT + L3 | `app_run.cpp`, `cheats.cpp` | Opens or closes the settings window one frame after the chord closes (RDE's "ESC Menu"); as on RDE the LT press also toggles slow speed and the L3 release No Encounters. |
 | Space | `keymap.h`, `app_sim.cpp` | Start (the pause screen), on the press. |
 | K, pad Back | `keymap.h`, `app_run.cpp` | Select (change the lead character); held in battle, hides the overlays during a cast. |
-| T | `keymap.h`, `app_multiplayer.cpp` | Opens the multiplayer chat's input line (only while connected or connecting, not with the settings window open or during a route or replay). While it is open the game gets no keys: Tab switches Room / Global, Enter sends and closes, Esc closes. |
+| T | `keymap.h`, `app_multiplayer.cpp` | Opens the multiplayer chat's input line (only while connected or connecting, not with the settings window open or during a route or replay). While it is open the game gets no keys: Tab switches Room / Global (from a private target, back to them), Enter sends and closes, Esc clears a private target, else closes. |
+| Y / N (pad: d-pad + confirm, cancel declines) | `app_multiplayer.cpp` | Accept / Decline the incoming battle challenge (the pad's d-pad picks the button, Decline at first, so a stray confirm press declines), only while its popup shows (not while the chat is typed in or the settings window is open); the game does not get them then. Esc first closes an open player menu. |
 | F1 / F2 | `app_run.cpp`, `cheats.cpp` | Toggle slow / fast speed on the press (the two exclude each other; pad LT / RT, also while the settings window is open); not during a route or replay, and ignored on the speed-locked map. Saved to the config. |
 | F3 | `app_run.cpp`, `cheats.cpp` | Toggles No Encounters on the press (pad L3 tap); saved. |
 | F4 | `app_run.cpp`, `cheats.cpp` | Toggles Battle Boost on the press (pad R3 tap); saved. |
@@ -663,7 +668,7 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 
 | Script | Inputs | Outputs | Purpose |
 |---|---|---|---|
-| `tests/multiplayer/run.ps1` | none; needs Node (`npm install` in `server/cloudflare` once) | exit code; prints `skipped` and exits 0 without Node | Starts the Worker locally with `wrangler dev` on a free port and a throwaway admin token, runs `server/cloudflare/test/protocol.mjs` against it, stops only the server it started. |
+| `tests/multiplayer/run.ps1` | `[-Battles N] [-Cut K] [-Config debug\|release]`; needs Node (`npm install` in `server/cloudflare` once) | exit code; prints `skipped` and exits 0 without Node | Starts the Worker locally with `wrangler dev` on a free port with a throwaway admin token, `IDLE_MS` 4000, `CHALLENGE_MS` 3000, `PVP_OPENING_STAMINA` 42 and `AWAY_MS` 3000, runs `server/cloudflare/test/protocol.mjs` against it, stops only the server it started. With `-Battles N` the server keeps its own time limits and `opencross ocbattle versus-net` plays N battles over it instead (`-Cut K`: one connection dropped and resumed per battle). |
 
 ### 5.9 Helpers
 
@@ -705,3 +710,13 @@ This restores the committed bytes and re-applies only the real changes.
 ### 6.3 Timing a GPU feature
 
 Time render-scale cost in the real app, because `ocbattleview --size` stops at the display's size. Copy `tests/routes/battle_hud.ini` to a scratch folder and set `VSync=0`, `Width=2560`, `Height=1440`, `RenderScale=4.00` and `Msaa=2`, then run it with `OC_FRAMETIME=2` and read the `frametime:` log lines (`tools/py/u_ft.py`). Shots and logs land next to the ini. The app paces itself near 120 Hz, so read p50 and p99, not just the mean, and confirm the real size from a shot or the log before trusting a result. Compare against the feature off.
+
+### 6.4 Two games on one machine
+
+Two copies of `opencross.exe` started from the same folder share `opencross.ini` and so the multiplayer `PlayerId`: the server sees one player twice. `--profile <dir>` gives a run its own `opencross.ini` in that folder (made with the first-launch defaults when missing; a relative `[Paths] SaveDir`, the log and the shots go there too). Unlike `--config` it is a normal run: it connects, applies mods and saves its settings. For a local two-player test:
+
+1. `cd server/cloudflare; npx wrangler dev` (serves `ws://127.0.0.1:8787/ws`).
+2. Start the game normally, and a second one with `opencross.exe --profile <scratch>\p2` (a folder outside the repo or under `tmp\`; give that ini `[Paths] SaveDir` pointing at a copy of a save, so the two games never write the same `save.dat`).
+3. In both: Esc > Multiplayer > Enabled, Server "Local / other" with the address above; each gets its own `PlayerId`. Walk both into the same room, challenge from one, accept on the other.
+
+Test windows normally run with `OC_QUIET`, which never connects; a two-window battle therefore takes the focus and plays sound. `ocbattle versus-net` covers the same protocol headless.

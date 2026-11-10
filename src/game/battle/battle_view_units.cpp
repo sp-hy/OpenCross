@@ -81,7 +81,7 @@ void BattleView::start_idle(int unit) {
     return;
   }
   visual.has_react = false;
-  visual.guard_shown = battle_->unit(unit).guard;
+  visual.guard_shown = bunit(unit).guard;
   const bseq::Table* table = visual.scripts && visual.scripts->has_s5 ? &visual.scripts->s5 : nullptr;
   if (!start_script(unit, table, 1, 0, kIdle)) {
     visual.script_kind = kIdle;
@@ -106,11 +106,11 @@ void BattleView::start_spawn(int unit) {
   // Hidden until the script's op 0x19 shows it.
   anm_set_hidden(unit, true);
   // The party also gets the eye blink armed before the script's own setup has run.
-  if (unit < battle::kPcSlots) anm_eye_arm(unit);
+  if (unit < player_slots()) anm_eye_arm(unit);
   visual.spawn = true;
   visual.idle_owed = false;
   visual.has_react = false;
-  visual.guard_shown = battle_->unit(unit).guard;
+  visual.guard_shown = bunit(unit).guard;
 }
 
 void BattleView::set_rot_now(int unit, int yaw4096) {
@@ -135,7 +135,7 @@ void BattleView::dev_group_hint(int actor, int element) {
     std::array<u8, 6> group{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
     for (int k = 0; k < 3; ++k)
       for (int pc = 0; pc < battle::kPcSlots; ++pc)
-        if (battle_->unit(pc).present && battle_->unit(pc).src_id == record.b(0x14 + k)) group[static_cast<size_t>(k)] = static_cast<u8>(pc);
+        if (bunit(pc).present && bunit(pc).src_id == record.b(0x14 + k)) group[static_cast<size_t>(k)] = static_cast<u8>(pc);
     battle_->set_group_hint(group);
     return;
   }
@@ -160,7 +160,7 @@ int BattleView::script_list_unit(int list, int idx) const {
 
 void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   const Visual& visual = vis_[static_cast<size_t>(unit)];
-  const battle::Unit& unit_rec = battle_->unit(unit);
+  const battle::Unit& unit_rec = bunit(unit);
   if (act_.phase != Act::Phase::None && unit == act_.actor && !act_.ev.empty()) {
     const battle::ActionEvent& hit_event = act_.ev[std::min(act_.hit, act_.ev.size() - 1)];
     ctx.action_a = hit_event.strength;
@@ -669,7 +669,7 @@ void BattleView::spawn_pop(int unit, int value, int kind, int code) {
 // Op 0x41 CallDamage: the hit lands on this unit.
 void BattleView::on_damage(int unit, bool number) {
   Visual& visual = vis_[static_cast<size_t>(unit)];
-  const battle::Unit& unit_rec = battle_->unit(unit);
+  const battle::Unit& unit_rec = bunit(unit);
   const battle::ActionEvent& event = visual.react_ev;
   // Mode 50: no number, no HP change, no flash (kamei 411 / the death casts).
   if (event.silent) return;
@@ -850,7 +850,7 @@ void BattleView::tex_flip_paste_hd(ModelHandle& model, int dx, int dy, const std
 void BattleView::tick_units() {
   for (int i = 0; i < battle::kUnits; ++i) {
     Visual& visual = vis_[static_cast<size_t>(i)];
-    const battle::Unit& unit_rec = battle_->unit(i);
+    const battle::Unit& unit_rec = bunit(i);
     if (!unit_rec.present) continue;
     // Vary Innate (element mode 42) writes the caster's control-block colour together with its innate byte.
     if (act_.phase != Act::Phase::None && act_.actor == i && !act_.ev.empty()) {
@@ -869,7 +869,7 @@ void BattleView::tick_units() {
     // This fallback only covers a kill no reaction script took: it starts after the action and runs on its own. HP a script wrote to 0 never fades.
     const bool action_over = act_.phase == Act::Phase::None && !fx_active();
     // A boss with a scripted death (op 5C) owns its death presentation: no fade while its death cast is still owed / queued (the pack hides it).
-    const bool death_cast = visual.death_owed || battle_->death_pending(i) || (!queue_.empty() && visual.fade >= 1.0f && !unit_rec.conscious() && !unit_rec.pc);
+    const bool death_cast = visual.death_owed || death_pending(i) || (!queue_.empty() && visual.fade >= 1.0f && !unit_rec.conscious() && !unit_rec.pc);
     if (!unit_rec.pc && !death_cast && !visual.ko_reacted && !unit_rec.hp_written_zero && visual.ko_shown && visual.script_done && visual.script_kind == kIdle && (visual.fade < 1.0f || (action_over && (visual.ko_hit || battle_->outcome() == battle::Outcome::Ongoing)))) visual.fade = std::max(0.0f, visual.fade - 1.0f / 40.0f);
     // Dev: OC_DEATH_TRACE logs the KO / fade state of a dying monster per tick.
     if (static const bool dt = std::getenv("OC_DEATH_TRACE") != nullptr; dt && !unit_rec.pc && (unit_rec.hp <= 0 || visual.death_owed)) {
@@ -879,7 +879,7 @@ void BattleView::tick_units() {
       const std::string state = std::format("hp {} owed {} ko_shown {} fade {:.2f} script {} done {} ghosted {} shown {} fxhid {} fx {} ovl {} fin {} act {} q {} out {} brainowed {} pend {} ui {} anmhid {} model {}", unit_rec.hp, visual.death_owed, visual.ko_shown,
                                             visual.fade, static_cast<int>(visual.script_kind), visual.script_done, ghosted(i), entry_shown_[static_cast<size_t>(i)], fx_hidden_[static_cast<size_t>(i)],
                                             fx_ != nullptr, om ? std::format("t{} h{} rgb{},{},{}", om->tinted, om->hidden, om->rgb[0], om->rgb[1], om->rgb[2]) : std::string("-"),
-                                            static_cast<int>(finish_), static_cast<int>(act_.phase), queue_.size(), static_cast<int>(battle_->outcome()), brain_.death_owed(i), battle_->death_pending(i), static_cast<int>(ui_), anm_hidden(i), visual.has_model);
+                                            static_cast<int>(finish_), static_cast<int>(act_.phase), queue_.size(), static_cast<int>(battle_->outcome()), brain_.death_owed(i), death_pending(i), static_cast<int>(ui_), anm_hidden(i), visual.has_model);
       if (state != last[static_cast<size_t>(i)]) log::info("deathtrace: tick {} unit {} {}", tick_count_, i, state), last[static_cast<size_t>(i)] = state;
     }
     const float target = static_cast<float>(visual.hp_shown);

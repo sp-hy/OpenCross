@@ -51,6 +51,7 @@ add_library(oc_battle_view STATIC
   battle_view_pseudo.cpp
   battle_view_showcase.cpp
   battle_view_ui.cpp
+  battle_view_versus.cpp
   texture_dump.h
   texture_dump.cpp
   battle_pose.h
@@ -62,5 +63,14 @@ add_library(oc_battle_view STATIC
   battle_results.h
   battle_results.cpp
 )
-target_link_libraries(oc_battle_view PUBLIC oc_battle_fx oc_effects_gpu oc_battle_anim oc_stage oc_text oc_ui oc_game oc_battle oc_data oc_render oc_audio oc_import oc_vfs oc_platform oc_core SDL3::SDL3)
+target_link_libraries(oc_battle_view PUBLIC oc_battle_fx oc_effects_gpu oc_battle_anim oc_stage oc_text oc_ui oc_game oc_battle oc_versus_link oc_data oc_render oc_audio oc_import oc_vfs oc_platform oc_core SDL3::SDL3)
 
+
+# The versus links: the local opponent and the other game over the multiplayer client
+add_library(oc_versus_link STATIC
+  versus_link.h
+  versus_link.cpp
+  versus_net_link.h
+  versus_net_link.cpp
+)
+target_link_libraries(oc_versus_link PUBLIC oc_battle oc_data oc_net oc_core)

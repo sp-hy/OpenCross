@@ -28,7 +28,7 @@ void BattleView::cast_glow_tick() {
                        act_.ev[act_.hit].kind == battle::ActionEvent::Kind::Element;
   const float* colour = nullptr;
   if (casting) {
-    const u8 mask = battle_->element_colour(act_.ev[act_.hit].element) & 0xFC;
+    const u8 mask = element_colour(act_.ev[act_.hit].element, act_.actor) & 0xFC;
     static constexpr float kWhite[3] = {1.0f, 1.0f, 1.0f};
     const int index = data::colour_index_of_bit(mask);
     colour = mask == 0xFC ? kWhite : index >= 0 ? kColours[index] : nullptr;
