@@ -133,13 +133,14 @@ enum class HeadOp : u8 {
   Reset,
 };
 
-// Reads of engine values written to a script variable: FE 28, FE 6E (current song), FE 76, FE 82 (total stars), 65. FE 28 and 65 have no engine source yet.
+// Reads of engine values written to a script variable: FE 28 (frames left in the playing movie), FE 6E (current song), FE 76,
+// FE 82 (total stars), 65 (the leader's screen depth). FE 28 and 65 have no engine source yet.
 enum class Query : u8 {
-  GlobalDiff,
+  MovieFramesLeft,
   CurrentSong,
   Field56,
   StarsTotal,
-  ScriptGlobal,
+  LeaderDepth,
 };
 
 // Engine globals that script ops write and the VM does not model itself (63 64 A4 A6 B5, FE 02 05 12 13 15 29 2B 34 4D 59 63 67
@@ -170,7 +171,7 @@ enum class Global : u8 {
   FootstepListenerZ,   // FE 34
   FootstepNear,        // FE 34
   FootstepFar,         // FE 34
-  Byte4D,              // FE 4D (purpose unknown)
+  Vibration,           // FE 4D: the Vibration option (0 = off)
   MenuPreamble3,       // FE 59
   MusicSwapArmed,      // FE 63
   TradingPostRow,      // FE 67

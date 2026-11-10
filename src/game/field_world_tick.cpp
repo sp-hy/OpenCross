@@ -187,6 +187,9 @@ void FieldWorld::set_global(script::Global which, s32 value) {
     case Global::ExitTransition: exit_kind_ = static_cast<s16>(value); break;
     case Global::KeepSfxSlots: sfx_keep_slots_ = static_cast<u32>(value); break;
     case Global::BattleIntroAnchor: handoff_.battle_anchor = value; break;
+    case Global::Vibration:
+      if (gs_) gs_->set_option(ui::opt::kVibration, value != 0);
+      break;
     // FE 75: the round, then the flag that opens the monster picker (the FE 61 after it waits for it).
     case Global::Selection: picker_round_ = value; break;
     case Global::SelectionFlag: request_menu(script::MenuKind::MonsterPicker, picker_round_); break;
