@@ -140,6 +140,9 @@ CamPose BattleView::dynamic_pose(int target) const {
 // all-targets selection: one glide from the pose on screen to `zen0`'s first key at 0x40 / 256 per tick. DYNAMIC mode with a cursor: a glide
 // at 0x14 / 256 per tick to the DYNAMIC shot whenever the cursor unit changes. Other menus (element list, waiting) keep what is on screen.
 void BattleView::menu_camera() {
+  // Out of target selection the glide is forgotten before anything else: the element list's shot returns below, and a ring opened
+  // again from it (back out, pick again) must glide again (it held the list's close-up of the caster before).
+  if (ui_ != Ui::Target) menu_glide_ = false, dyn_target_ = -1;
   if (ui_ == Ui::Intro || ui_ == Ui::Result || camera_.task_running() || camera_.sequence_running()) {
     orbit_pc_ = -1;
     return;
