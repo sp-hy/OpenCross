@@ -146,6 +146,10 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `put [ent <n>] <x> <z>` | Place every party entity, or entity `n` only, at a world point (integer coordinates). |
 | `art hd\|original\|modded\|toggle` | Switch the art mode as F6 does, without saving the ini; `toggle` flips between the HD family and original. |
 | `request <kind> [arg]` | Ask the host for what a field opcode would, then wait 4 ticks. The screen it opens is handled by following `wait` / `tap` lines. Kinds in the table below. |
+| `remote add <pid> <name> <m0> <m1> <m2> <x> <y> <z> <facing>` | A remote party (`multiplayer.md` section 5) as if the network had sent it, without a server: the field model byte of each party slot (`-1` empty), and its leader standing at the world point with the facing (4096 per turn), in the field state. Adding a `pid` again replaces it. The route's parties are shown with the network's (the network's entry wins a shared `pid`) and stay across room loads until `remote clear`. |
+| `remote move <pid> <x> <y> <z> <facing> <clip> <moving>` | A new leader pose of the party, as one `pres` message: `clip` a field clip id (2 run, 3 walk), `moving` 0 or 1. The state is kept. A `pid` the route never added fails the run (exit 1). |
+| `remote state <pid> <0..3>` | The party's state: 0 field, 1 battle, 2 menu, 3 event. |
+| `remote clear` | No route party any more. |
 
 `request` kinds (`arg` is a decimal integer, default 0):
 
@@ -243,6 +247,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `same [tol]` | Nothing from the `snap` changed: room, flow, room-load / battle-start / title-sequence counters, battle summary, every entity's position (within `tol` units, default 0), facing and yaw, listed variables. |
 | `frozen` | No field tick ran and no message window's typewriter moved since `snap`. |
 | `swaps <n>` | Exactly `n` in-place art swaps of the field room since `snap`. |
+| `remote <n>` | Exactly `n` remote parties were picked to be drawn on the last field tick (shown, not in a battle, leader model loaded, among the nearest). |
 | `traceclip <max_src_moves> <max_clip_changes>` | The last `trace` saw at most that many cross-fade source keyframe moves and clip changes. |
 | `traceheadturn <ticks> <span>` | The last `trace` saw the head turn on at least `ticks` ticks over an angle range of at least `span` (4096 per turn). |
 | `traceyaw <ticks> <octants>` | The last `trace` saw the model yaw change on at least `ticks` ticks and visit at least `octants` of the 8 sectors of 45 degrees. |

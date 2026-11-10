@@ -262,7 +262,7 @@ It writes nothing: no save, no ini, no mod settings.
 
 ### 1.13 `ocsteam` (Steam connection check)
 
-Source: `tools/ocsteam.cpp`. Connects to the running Steam client as the game, waits for the stats, and lists every achievement of the app with its API name, display name and state (`*` = unlocked). Exits 1 when Steam is closed, logged out, the game is not owned, or the stats do not arrive. Read-only: nothing is set or stored, though Steam shows the game as playing while it runs.
+Source: `tools/ocsteam.cpp`. Connects to the running Steam client as the game, prints the user's persona name (`persona name: ...`, `(unavailable)` when the friends interface is missing), waits for the stats, and lists every achievement of the app with its API name, display name and state (`*` = unlocked). Exits 1 when Steam is closed, logged out, the game is not owned, or the stats do not arrive. Read-only: nothing is set or stored, though Steam shows the game as playing while it runs.
 
 ### 1.14 Files written by the tools
 
@@ -495,6 +495,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | Pad LT + L3 | `app_run.cpp`, `cheats.cpp` | Opens or closes the settings window one frame after the chord closes (RDE's "ESC Menu"); as on RDE the LT press also toggles slow speed and the L3 release No Encounters. |
 | Space | `keymap.h`, `app_sim.cpp` | Start (the pause screen), on the press. |
 | K, pad Back | `keymap.h`, `app_run.cpp` | Select (change the lead character); held in battle, hides the overlays during a cast. |
+| T | `keymap.h`, `app_multiplayer.cpp` | Opens the multiplayer chat's input line (only while connected or connecting, not with the settings window open or during a route or replay). While it is open the game gets no keys: Tab switches Room / Global, Enter sends and closes, Esc closes. |
 | F1 / F2 | `app_run.cpp`, `cheats.cpp` | Toggle slow / fast speed on the press (the two exclude each other; pad LT / RT, also while the settings window is open); not during a route or replay, and ignored on the speed-locked map. Saved to the config. |
 | F3 | `app_run.cpp`, `cheats.cpp` | Toggles No Encounters on the press (pad L3 tap); saved. |
 | F4 | `app_run.cpp`, `cheats.cpp` | Toggles Battle Boost on the press (pad R3 tap); saved. |
@@ -538,6 +539,7 @@ The camera takes W A S D Q E and the pad sticks, triggers and left stick click a
 | FastSpeed | F2 | unbound | R2 |
 | Start (fixed) | Space | | Start |
 | Select (fixed) | K | | Back |
+| Chat (fixed, multiplayer) | T | | |
 
 Screens show the key caps of set 0.
 
@@ -657,7 +659,13 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 | `tests/routes/run_save.ps1` | none; `OC_BUILD_DIR`; needs a save copy `tmp\save.dat` | exit code | Save round trip: blank scratch card, route `save`, `cc_save.py` checks, route `continue_save`. |
 | `tests/routes/run_save_fresh.ps1` | none | exit code | Boot with an empty save folder, route `save_fresh`, `cc_save.py` and `save_check.py`, route `continue_fresh`. |
 
-### 5.8 Helpers
+### 5.8 Multiplayer server
+
+| Script | Inputs | Outputs | Purpose |
+|---|---|---|---|
+| `tests/multiplayer/run.ps1` | none; needs Node (`npm install` in `server/cloudflare` once) | exit code; prints `skipped` and exits 0 without Node | Starts the Worker locally with `wrangler dev` on a free port and a throwaway admin token, runs `server/cloudflare/test/protocol.mjs` against it, stops only the server it started. |
+
+### 5.9 Helpers
 
 | Script | Inputs | Outputs | Purpose |
 |---|---|---|---|

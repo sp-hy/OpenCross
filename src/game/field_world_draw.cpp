@@ -253,6 +253,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
     }
     shadows.push_back(shadow);
   }
+  if (!remote_.empty()) remote_shadows(shadows, alpha);
   const render::Letterbox lb = view_.letterbox(vw, vh);
   float scroll_x, scroll_y;
   view_.scroll_at(alpha, scroll_x, scroll_y);
@@ -401,6 +402,8 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
       meshes.draw(*entity.actor.gpu(), copy);
     }
   }
+  if (wet != Wet::WetOnly && remote_options_.labels) place_local_label(alpha);
+  if (wet != Wet::WetOnly && !remote_.empty()) draw_remote_actors(meshes, frame, alpha, scissor, view_proj, view, water_bias, begun);
   if (begun) meshes.end();
 }
 

@@ -4,6 +4,7 @@
 
 add_subdirectory(core)
 add_subdirectory(platform)
+add_subdirectory(net)
 add_subdirectory(vfs)
 add_subdirectory(assets)
 add_subdirectory(import)
@@ -28,9 +29,10 @@ add_executable(opencross WIN32
   app/app_debug.cpp
   app/app_draw.cpp
   app/app_feedback.cpp
+  app/app_multiplayer.cpp
   app/app_route.cpp
   app/app_run.cpp
   app/app_sim.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/opencross.rc)
-target_link_libraries(opencross PRIVATE oc_core oc_platform oc_vfs oc_import oc_render oc_ui oc_audio oc_game oc_data oc_battle_view oc_flow oc_movie oc_save oc_menu_model oc_tools SDL3::SDL3)
+target_link_libraries(opencross PRIVATE oc_core oc_platform oc_net oc_vfs oc_import oc_render oc_ui oc_audio oc_game oc_data oc_battle_view oc_flow oc_movie oc_save oc_menu_model oc_tools SDL3::SDL3)
 set_target_properties(opencross PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>)

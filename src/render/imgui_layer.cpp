@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <initializer_list>
 #include <iterator>
+#include <string>
 #include <system_error>
 
 #if defined(_MSC_VER)
@@ -30,6 +32,8 @@ namespace {
 // The UI font is rasterised once at this size and drawn at kFontPx * scale (FontGlobalScale), so it stays sharp when scaled down.
 constexpr float kFontRaster = 32.0f;
 constexpr float kFontPx = 17.0f;
+// The chat font's raster size: smaller than the UI font's, since it carries a few thousand Japanese glyphs; drawn at the UI font's size.
+constexpr float kChatRaster = 24.0f;
 // Settings window size at scale 1 (the window is resizable by the user; this is the first-open size).
 constexpr float kWindowW = 640.0f, kWindowH = 560.0f;
 // Width of the label column of the label / control tables, at scale 1.
@@ -262,7 +266,47 @@ void ImGuiLayer::set_pointer_hidden(bool hidden) {
   }
 }
 
+// Adds the chat font to the atlas, rebuilds it and drops the GPU texture. A missing font file leaves that part out.
+void ImGuiLayer::build_chat_font() {
+  chat_font_built_ = true;
+  const char* windir = std::getenv("WINDIR");
+  if (!windir) return;
+  const std::filesystem::path folder = std::filesystem::path(windir) / "Fonts";
+  auto first_present = [&](std::initializer_list<const char*> names) {
+    std::error_code ec;
+    for (const char* name : names)
+      if (std::filesystem::exists(folder / name, ec)) return (folder / name).string();
+    return std::string();
+  };
+  const std::string base = first_present({"segoeui.ttf"});
+  if (base.empty()) return;
+  static const ImWchar kBaseRanges[] = {0x0020, 0x024F, 0x0370, 0x03FF, 0x0400, 0x052F, 0x1E00, 0x1EFF, 0x2000, 0x206F, 0x20A0, 0x20CF, 0x2100, 0x214F, 0};
+  static const ImWchar kSymbolRanges[] = {0x2190, 0x21FF, 0x2300, 0x23FF, 0x2460, 0x27BF, 0};
+  ImGuiIO& io = ImGui::GetIO();
+  ImFont* font = io.Fonts->AddFontFromFileTTF(base.c_str(), kChatRaster, nullptr, kBaseRanges);
+  if (!font) return;
+  ImFontConfig merge;
+  merge.MergeMode = true;
+  merge.OversampleH = 1;
+  const std::string japanese = first_present({"meiryo.ttc", "YuGothM.ttc", "msgothic.ttc"});
+  if (!japanese.empty()) io.Fonts->AddFontFromFileTTF(japanese.c_str(), kChatRaster, &merge, io.Fonts->GetGlyphRangesJapanese());
+  const std::string symbols = first_present({"seguisym.ttf"});
+  if (!symbols.empty()) io.Fonts->AddFontFromFileTTF(symbols.c_str(), kChatRaster, &merge, kSymbolRanges);
+  if (!io.Fonts->Build()) {
+    log::warn("imgui: the chat font could not be built");
+    return;
+  }
+  font->Scale = kFontRaster / kChatRaster;
+  // The backend's new frame uploads the rebuilt atlas when it has no texture.
+  ImGui_ImplSDLGPU3_DestroyFontsTexture();
+  chat_font_ = font;
+  log::info("imgui: chat font built ({} x {} atlas)", io.Fonts->TexWidth, io.Fonts->TexHeight);
+}
+
+ImFont* ImGuiLayer::chat_font() const { return chat_font_ ? chat_font_ : ImGui::GetIO().Fonts->Fonts[0]; }
+
 void ImGuiLayer::new_frame() {
+  if (chat_font_wanted_ && !chat_font_built_ && initialised_) build_chat_font();
   ImGui_ImplSDLGPU3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   apply_style();

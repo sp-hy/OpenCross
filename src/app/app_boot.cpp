@@ -59,6 +59,7 @@ int App::init(int argc, char** argv) {
   init_start_state();
   init_route_state();
   init_debug_tab();
+  init_multiplayer();
   return 0;
 }
 
@@ -98,7 +99,7 @@ void App::init_config(int argc, char** argv) {
   steam_allowed = own_ini && !std::getenv("OC_QUIET");
 
   game_dir = platform::find_game_dir(config.game_dir);
-  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir);
+  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir, own_ini ? platform::exe_dir() : std::filesystem::path());
   save_dir = save_pick.dir;
   log::info("game dir: {}", game_dir.empty() ? "(not found)" : game_dir.string());
   log::info("save dir: {} ({})", save_dir.empty() ? "(not found)" : save_dir.string(), save_pick.how);

@@ -24,6 +24,7 @@ namespace {
 
 constexpr const char* kClientInterface = "SteamClient017";
 constexpr const char* kStatsInterface = "STEAMUSERSTATS_INTERFACE_VERSION012";
+constexpr const char* kFriendsInterface = "SteamFriends017";
 
 // Slots in the client object's table of functions.
 enum ClientSlot { kCreatePipe = 0, kReleasePipe = 1, kConnectGlobalUser = 2, kReleaseUser = 4, kGenericInterface = 12 };
@@ -37,6 +38,8 @@ enum StatsSlot {
   kGetNumAchievements = 14,
   kGetAchievementName = 15,
 };
+// Slots in the friends object's table of functions.
+enum FriendsSlot { kGetPersonaName = 0 };
 
 constexpr std::int32_t kStatsReceived = 1101, kStatsStored = 1102;
 constexpr std::int32_t kResultOk = 1;
@@ -107,6 +110,8 @@ public:
       log::warn("steam: {} unavailable", kStatsInterface);
       return false;
     }
+    friends_ = call_slot<void*>(client_, kGenericInterface, user_, pipe_, kFriendsInterface);
+    if (!friends_) log::warn("steam: {} unavailable", kFriendsInterface);
     return true;
   }
 
@@ -145,11 +150,17 @@ public:
     return title ? title : "";
   }
 
+  std::string persona_name() override {
+    const char* name = friends_ ? call_slot<const char*>(friends_, kGetPersonaName) : nullptr;
+    return name ? name : "";
+  }
+
 private:
   GetCallbackFn get_callback_ = nullptr;
   FreeCallbackFn free_callback_ = nullptr;
   void* client_ = nullptr;
   void* stats_ = nullptr;
+  void* friends_ = nullptr;
   std::int32_t pipe_ = 0;
   std::int32_t user_ = 0;
 };
@@ -267,6 +278,8 @@ std::optional<std::string> SteamClient::next_unlocked() {
   unlocked_.erase(unlocked_.begin());
   return title;
 }
+
+std::string SteamClient::persona_name() { return backend_ ? backend_->persona_name() : std::string(); }
 
 int SteamClient::achievement_count() { return ready_ ? backend_->achievement_count() : 0; }
 
