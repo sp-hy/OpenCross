@@ -5,6 +5,7 @@
 #include "game/battle/battle_view_util.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 
 #include "core/log.h"
@@ -20,7 +21,7 @@ constexpr float kRowScale = kCanvasH / 216.0f;
 // Seeds the random player of this game's own side apart from the battle's generator.
 constexpr u32 kAutoSalt = 0x5A17C0DEu;
 // OpenCross text (no game text exists for it), per language: English, French, Italian, German, Spanish, Japanese.
-const char32_t* kYourTurn[6] = {U"Your turn", U"Votre tour", U"Il tuo turno", U"Dein Zug", U"Tu turno", U"あなたのターン"};
+const char* kYourTurn[6] = {"Your turn", "Votre tour", "Il tuo turno", "Dein Zug", "Tu turno", "あなたのターン"};
 const char* kTheirTurn[6] = {"{}'s turn", "Tour de {}", "Turno di {}", "{} ist am Zug", "Turno de {}", "{}のターン"};
 const char32_t* kSurrender[6] = {U"Surrender?", U"Abandonner ?", U"Arrendersi?", U"Aufgeben?", U"¿Rendirse?", U"降参しますか？"};
 const char32_t* kYes[6] = {U"Yes", U"Oui", U"Sì", U"Ja", U"Sí", U"はい"};
@@ -29,6 +30,11 @@ const char* kWaitingFor[6] = {"Waiting for {}... {}", "En attente de {}... {}", 
                               "{}を待っています... {}"};
 const char* kReconnecting[6] = {"Reconnecting... {}", "Reconnexion... {}", "Riconnessione... {}", "Verbinde neu... {}", "Reconectando... {}",
                                 "再接続中... {}"};
+
+// The windows: a line of the window text (style 0x83) is 10 px high with the text at its top; a window's interior is as wide as its text
+// in whole 12 px cells. The Run confirm's cursor stands this far left of its words.
+constexpr float kWindowLineH = 10, kAskCursorGap = 12;
+float window_cells(float width) { return static_cast<float>((static_cast<int>(width) + 11) / 12 * 12); }
 
 }  // namespace
 
@@ -75,9 +81,63 @@ bool BattleView::versus_apply(const battle::Command& cmd, bool local, std::strin
     if (local) versus_link_->send(cmd);
     versus_link_->send_hash(versus_seq_, battle_->state_hash());
   }
-  // The next menu names its PC again after an action or a turn change.
-  if (cmd.kind < battle::Command::Kind::EndTurn || battle_->turn_side() != turn) versus_focus_ = -1;
+  // The next menu names its PC again after an action, an engage (a HIT% menu left sends its attacker home on the other game) or a turn
+  // change.
+  if (cmd.kind < battle::Command::Kind::EndTurn || cmd.kind == battle::Command::Kind::Engage || battle_->turn_side() != turn) versus_focus_ = -1;
+  // A menu opened again (its HIT% menu left, or another character's) or the turn ended: no hit of the standing chain follows.
+  if (stay_unit_ >= 0 && (cmd.kind == battle::Command::Kind::Focus || cmd.kind == battle::Command::Kind::EndTurn)) stay_left_ = true;
   return true;
+}
+
+bool BattleView::stay_holds() const {
+  if (battle_->outcome() != battle::Outcome::Ongoing) return true;
+  return !stay_left_ && battle_->can_act(rules_unit(stay_unit_)) && bunit(stay_target_).standing();
+}
+
+bool BattleView::stay_continues(const battle::ActionEvent& event) const {
+  return !stay_left_ && event.kind == battle::ActionEvent::Kind::Weapon && event.actor == stay_unit_ && (event.aim >= 0 ? event.aim : event.target) == stay_target_;
+}
+
+void BattleView::end_stay() {
+  const int unit = stay_unit_;
+  stay_unit_ = stay_target_ = -1;
+  stay_left_ = false;
+  end_camera_tasks();
+  Visual& visual = vis_[static_cast<size_t>(unit)];
+  if (!bunit(unit).alive()) {
+    begin_move(unit, visual.home_x, visual.home_z, 0, true);
+    return;
+  }
+  act_ = Act{};
+  act_.actor = unit;
+  start_return();
+}
+
+// The other side's (or this side's random player's) confirmed attack target: its attacker runs up to it as a HIT% menu's PC does and
+// stands there as a chain's attacker, until its hits come or a Focus or End Turn sends it home.
+void BattleView::stage_engage(int unit, int target) {
+  if (stay_unit_ == unit && stay_target_ == target) return;
+  stay_unit_ = unit;
+  stay_target_ = target;
+  stay_left_ = false;
+  act_ = Act{};
+  act_.actor = unit;
+  act_.targets = {target};
+  act_.stage_only = true;
+  Visual& visual = vis_[static_cast<size_t>(unit)];
+  audio_.activate(visual.sound_key);
+  end_camera_tasks();
+  camera_.set_bank(visual.scripts ? &visual.scripts->cam : &bank_);
+  face_toward(unit, target);
+  select_approach();
+  act_.phase = Act::Phase::Approach;
+  if (!(visual.scripts && visual.scripts->has_s5 && start_script(unit, &visual.scripts->s5, 2, 0, kApproach))) {
+    visual.script_done = true;
+    const float dist = approach_distance(unit, target);
+    const Visual& target_visual = vis_[static_cast<size_t>(target)];
+    const float dx = target_visual.x - visual.x, dz = target_visual.z - visual.z, length = std::max(1.0f, std::hypot(dx, dz));
+    begin_move(unit, visual.x + dx / length * dist, visual.z + dz / length * dist, 30, false);
+  }
 }
 
 void BattleView::map_event(battle::ActionEvent& event) const {
@@ -181,8 +241,13 @@ void BattleView::versus_pump(int ticks, bool idle) {
     battle::Command cmd;
     if (held) cmd = *held, held.reset();
     else if (!source->poll(*battle_, cmd)) break;
-    const bool action = cmd.kind < battle::Command::Kind::EndTurn;
-    if (action && acted) {
+    // An engage is shown as an action is: its run-up plays before the next command.
+    const bool action = cmd.kind < battle::Command::Kind::EndTurn || cmd.kind == battle::Command::Kind::Engage;
+    // An engage of another attacker or target first sends the standing attacker home and waits until it has set off.
+    const bool engage_waits = cmd.kind == battle::Command::Kind::Engage && stay_unit_ >= 0 &&
+                              (stay_unit_ != rules_unit(cmd.actor) || stay_target_ != rules_unit(cmd.target));
+    if (engage_waits) stay_left_ = true;
+    if ((action && acted) || engage_waits) {
       held = cmd;
       break;
     }
@@ -199,40 +264,64 @@ void BattleView::versus_pump(int ticks, bool idle) {
     }
     // The other side's Dopplegang pick is shown by its cast, as this game's own is.
     if (cmd.kind == battle::Command::Kind::Form) pending_form_ = cmd.form, pending_form_unit_ = rules_unit(cmd.actor);
+    if (cmd.kind == battle::Command::Kind::Engage) stage_engage(rules_unit(cmd.actor), rules_unit(cmd.target));
     acted = acted || action || cmd.kind == battle::Command::Kind::EndTurn;
   }
   if (acted) versus_idle_ = 0;
   collect_events();
 }
 
-// The banner at the top of the screen: "Your turn" with the seconds left, or "<name>'s turn", or while a player is out of reach "Waiting for
-// <name>... N" / "Reconnecting... N" with the seconds left to come back; the Run confirm over the command box.
-void BattleView::build_versus_hud() {
-  if (!versus_ || ui_ == Ui::Intro || ui_ == Ui::Result || finish_ != Finish::None || battle_->outcome() != battle::Outcome::Ongoing) return;
+// "Your turn" with the seconds left, or "<name>'s turn", or while a player is out of reach "Waiting for <name>... N" / "Reconnecting... N"
+// with the seconds left to come back.
+std::optional<BattleView::VersusBanner> BattleView::versus_banner() const {
+  if (!versus_ || ui_ == Ui::Intro || ui_ == Ui::Result || finish_ != Finish::None || battle_->outcome() != battle::Outcome::Ongoing) return std::nullopt;
   const int li = std::clamp(static_cast<int>(lang_), 0, 5);
-  const bool jp = li == 5;
-  const bool local = battle_->turn_side() == versus_side_;
-  const size_t first = op_count();
-  std::u32string label = local ? kYourTurn[li] : import::utf8_to_u32(std::vformat(kTheirTurn[li], std::make_format_args(versus_opponent_)));
-  if (local) label += import::utf8_to_u32(std::format("  {}", std::max(0, (kVersusTurnTicks - versus_turn_ticks_ + 59) / 60)));
+  VersusBanner banner;
+  banner.own = battle_->turn_side() == versus_side_;
+  banner.text = banner.own ? std::format("{}  {}", kYourTurn[li], std::max(0, (kVersusTurnTicks - versus_turn_ticks_ + 59) / 60))
+                           : std::vformat(kTheirTurn[li], std::make_format_args(versus_opponent_));
   if (const std::optional<VersusLink::Away> away = versus_link_ ? versus_link_->away() : std::nullopt) {
     const int seconds = away->seconds;
-    label = import::utf8_to_u32(away->self ? std::vformat(kReconnecting[li], std::make_format_args(seconds))
-                                           : std::vformat(kWaitingFor[li], std::make_format_args(versus_opponent_, seconds)));
+    banner.text = away->self ? std::vformat(kReconnecting[li], std::make_format_args(seconds))
+                             : std::vformat(kWaitingFor[li], std::make_format_args(versus_opponent_, seconds));
   }
-  add_skin_box(110 * kPs1Px, 4 * kRowScale, 100 * kPs1Px, 13 * kRowScale);
-  btext(jp ? 0x10081 : 0x81, label, 160, 7, local ? 0x8A8A8A : 0x757575);
-  set_group(first, 2);
-  if (!versus_run_ask_) return;
+  return banner;
+}
+
+// The Run confirm over the command box.
+void BattleView::build_versus_hud() {
+  if (!versus_ || !versus_run_ask_ || ui_ == Ui::Intro || ui_ == Ui::Result || finish_ != Finish::None || battle_->outcome() != battle::Outcome::Ongoing)
+    return;
+  const int li = std::clamp(static_cast<int>(lang_), 0, 5);
   const size_t ask = op_count();
-  add_skin_box(110 * kPs1Px, 92 * kRowScale, 100 * kPs1Px, 40 * kRowScale);
-  btext(jp ? 0x10081 : 0x81, kSurrender[li], 160, 96, 0x8A8A8A);
+  // The question in the window text and the Yes / No rows in the menu text (11 px apart, the cursor 12 px left of the words) in a window
+  // as wide as the widest of them, centred where the command box would be.
+  const float title_w = window_text_width(kSurrender[li]);
+  const float row_w = kAskCursorGap + std::max(menu_text_width(kYes[li]), menu_text_width(kNo[li]));
+  const float ask_w = window_cells(std::max(title_w, row_w));
+  const float ask_x = std::trunc(160.0f - ask_w * 0.5f);
+  constexpr float kAskY = 96, kRowsY = kAskY + kWindowLineH + 2, kAskH = kRowsY + 11 + kWindowLineH - kAskY;
+  add_skin_box((ask_x - 8) * kPs1Px, (kAskY - 8) * kRowScale, (ask_w + 16) * kPs1Px, (kAskH + 16) * kRowScale);
+  btext(0x83, kSurrender[li], ask_x + std::trunc((ask_w - title_w) * 0.5f), kAskY, 0x8A8A8A);
+  const float rows_x = ask_x + std::trunc((ask_w - row_w) * 0.5f);
   for (int row = 0; row < 2; ++row) {
-    const float y = 108.0f + 11.0f * static_cast<float>(row);
-    if (row == versus_run_cursor_) add_menu_cursor(136 * kPs1Px, (y + 1) * kRowScale);
-    btext(jp ? 0x10002 : 2, row == 0 ? kYes[li] : kNo[li], 148, y, 0x8A8A8A);
+    const float y = kRowsY + 11.0f * static_cast<float>(row);
+    if (row == versus_run_cursor_) add_menu_cursor(rows_x * kPs1Px, (y + 1) * kRowScale);
+    btext(2, row == 0 ? kYes[li] : kNo[li], rows_x + kAskCursorGap, y, 0x8A8A8A);
   }
   set_group(ask, 2);
+}
+
+float BattleView::window_text_width(const std::u32string& text) {
+  const int slot = lang_ == import::Lang::Jp ? ui::font::kKb : ui::font::kBn;
+  fonts_.prepare(slot, text);
+  return std::ceil(fonts_.measure(slot, text, ui::font::slot(slot).scale) / kPs1Px);
+}
+
+float BattleView::menu_text_width(const std::u32string& text) {
+  const int slot = lang_ == import::Lang::Jp ? ui::font::kBattleJp : ui::font::kBattle;
+  fonts_.prepare(slot, text);
+  return std::ceil(fonts_.measure(slot, text, ui::font::slot(slot).scale) / kPs1Px);
 }
 
 std::string BattleView::route_plate() const {
@@ -240,15 +329,19 @@ std::string BattleView::route_plate() const {
   return versus_result_ == VersusResult::Won ? "Victory" : versus_result_ == VersusResult::Lost ? "Defeat" : versus_result_ == VersusResult::Draw ? "Draw" : "No result";
 }
 
-// The outcome plate: the word in the command headline face, centred, over a window at the middle of the screen.
+// The outcome plate: the word in the command headline face, centred in a window as wide as the word at the middle of the screen.
 void BattleView::build_versus_plate() {
   const std::string text = route_plate();
   const std::u32string word(text.begin(), text.end());
   const size_t first = op_count();
-  add_skin_box(100 * kPs1Px, 96 * kRowScale, 120 * kPs1Px, 28 * kRowScale);
+  // The headline face's em, in PS1 rows, is the window's height.
+  const ui::font::SlotInfo& face = ui::font::slot(ui::font::kCh);
   fonts_.prepare(ui::font::kCh, word);
-  const float width = fonts_.measure(ui::font::kCh, word, ui::font::slot(ui::font::kCh).scale) / kPs1Px;
-  btext(0xA, word, 160 + width * 0.5f, 101, 0);
+  const float width = std::ceil(fonts_.measure(ui::font::kCh, word, face.scale) / kPs1Px);
+  const float inner_w = window_cells(width), inner_h = std::ceil(static_cast<float>(face.size) * 96.0f / 72.0f * face.scale / kRowScale);
+  const float inner_x = std::trunc(160.0f - inner_w * 0.5f), inner_y = std::trunc(110.0f - inner_h * 0.5f);
+  add_skin_box((inner_x - 8) * kPs1Px, (inner_y - 8) * kRowScale, (inner_w + 16) * kPs1Px, (inner_h + 16) * kRowScale);
+  btext(0xA, word, inner_x + std::trunc((inner_w + width) * 0.5f), inner_y, 0);
   set_group(first, 2);
 }
 

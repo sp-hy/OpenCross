@@ -32,7 +32,18 @@ bool LocalVersusOpponent::poll(const battle::Battle& battle, battle::Command& cm
     while (!queued_.empty()) {
       cmd = queued_.front();
       queued_.pop_front();
-      if (battle.validate(cmd)) return true;
+      if (!battle.validate(cmd)) continue;
+      // An attack on a new target is engaged first, as a player's target confirm is: the attacker runs up before its hits.
+      if (cmd.kind == battle::Command::Kind::Attack && cmd.target >= 0 && (cmd.actor != engaged_actor_ || cmd.target != engaged_target_)) {
+        queued_.push_front(cmd);
+        engaged_actor_ = cmd.actor;
+        engaged_target_ = cmd.target;
+        cmd.kind = battle::Command::Kind::Engage;
+        cmd.chain.clear();
+        return true;
+      }
+      if (cmd.kind != battle::Command::Kind::Attack) engaged_actor_ = engaged_target_ = -1;
+      return true;
     }
   }
   cmd = {};

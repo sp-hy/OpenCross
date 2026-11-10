@@ -2,9 +2,12 @@
 // The multiplayer screens, all ImGui: the Esc overlay tab "Multiplayer" (the [Multiplayer] settings, the connection's status and the
 // players in the room with their Message / Challenge / Mute buttons), the chat panel at the bottom left (T opens its input line, Enter
 // sends, Esc closes; room, global and private lines), the name labels over the remote party leaders, the player menu a click on a name
-// opens, the challenge popups (incoming with Accept / Decline, outgoing with Cancel) and the versus screen before a battle.
+// opens, the challenge popups (incoming with Accept / Decline, outgoing with Cancel) and the versus screen before a battle. The incoming
+// popup and the versus screen show the parties' face portraits, made into textures on first use.
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -12,7 +15,9 @@
 #include "net/multiplayer_client.h"
 #include "net/presence.h"
 #include "platform/config.h"
+#include "render/texture.h"
 
+struct ImDrawList;
 struct ImFont;
 
 namespace oc::render {
@@ -22,6 +27,22 @@ class MultiplayerUi {
   // The local party's card for a challenge or an accept; nullopt when no game is loaded.
   using CardSource = std::function<std::optional<net::PartyCard>()>;
   void set_card_source(CardSource source) { card_source_ = std::move(source); }
+
+  // A character's face portrait as ImGui draws it: the texture and the texture / sampler pair ImGui's renderer binds.
+  struct Face {
+    Texture texture;
+    SDL_GPUTextureSamplerBinding binding{};
+  };
+  // Decodes a character id's face image; false when there is none (the screens then draw a letter in its place).
+  using FaceSource = std::function<bool(int char_id, DecodedImage& image)>;
+  // The portraits are made on `ctx` when first drawn and kept until drop_faces(), so the MultiplayerUi must not outlive `ctx`.
+  void set_face_source(GpuContext& ctx, FaceSource source) {
+    gpu_ = &ctx;
+    face_source_ = std::move(source);
+    faces_.clear();
+  }
+  // Forgets the made portraits: the next frame that shows one decodes it again (the art mode or the portrait set changed).
+  void drop_faces() { faces_.clear(); }
 
   // The tab body. `client` is null until multiplayer was first enabled; `default_name` is the name sent while Name is empty; `allowed` is
   // false in runs that never connect; `free`: the player could take a battle once the settings window closes. `font` draws the players'
@@ -74,6 +95,9 @@ class MultiplayerUi {
   static constexpr double kSideWait = 15.0;
   void start_versus(net::PvpStart start, double now);
   std::optional<net::PvpStart> draw_versus(const net::MultiplayerClient& client, double now, ImFont* font);
+  // A versus battle's turn banner at the top right corner of the window: `own` = this player's turn (bright, a blue edge), else dimmer
+  // with a red edge.
+  static void draw_turn_banner(const std::string& text, bool own, ImFont* font);
 
   // An ImGui text field has the keyboard: game keys must not act on what is typed.
   static bool typing();
@@ -96,8 +120,24 @@ class MultiplayerUi {
   std::string challenge_block(const net::MultiplayerClient& client, const platform::MultiplayerSettings& settings, const std::string& pid,
                               bool free) const;
   bool send_challenge(net::MultiplayerClient& client, const std::string& pid, const std::string& name);
+  // The portrait of `char_id`, made on first use; null when it has none.
+  const Face* face(int char_id);
+  // A member's portrait in the square at (`x`, `y`) of `size` pixels, framed in the side's colour (`own`: the local player's).
+  void draw_portrait(ImDrawList* dl, const net::CardMember& member, float x, float y, float size, bool own);
+  // The incoming popup's body: the challenger's portraits, name and card, the time left, Accept / Decline and the pad hint. Returns 1
+  // for Accept, 2 for Decline, 0 while unanswered.
+  int draw_incoming(const net::IncomingChallenge& incoming, double now, ImFont* font);
+  // The versus screen of `start`; `seconds` since it opened, `waiting` for the other side.
+  void draw_versus_screen(const net::PvpStart& start, bool own_first, bool waiting, double seconds, ImFont* font);
 
   CardSource card_source_;
+  GpuContext* gpu_ = nullptr;
+  FaceSource face_source_;
+  Sampler face_sampler_;
+  // Per character id; null when it has no portrait.
+  std::map<int, std::unique_ptr<Face>> faces_;
+  // The incoming challenge the time bar measures (its deadline) and the seconds it had when it arrived.
+  double incoming_deadline_ = 0.0, incoming_span_ = 0.0;
   bool chat_open_ = false;
   // [Multiplayer] HideGlobalChat as of the last chat panel: no Global target, Tab does not switch to it.
   bool hide_global_ = false;

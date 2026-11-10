@@ -67,7 +67,7 @@ void BattleView::cut_script(int unit) {
 // restarts nothing. S5 entry 2 and the atk entry 0 variant 0 of all 51 PC models with scripts end on SetAnim 2 (yamaneko 1), and that clip loops
 // until the return (S5 entry 3): clip 2 from the approach end to the pick, the at0 swing clip 0, clip 2 again, and clip 1 only after the return hop.
 bool BattleView::engaged_stance(int unit) const {
-  if (!engaged_ || unit != active_pc_ || unit < 0) return false;
+  if (unit < 0 || !((engaged_ && unit == active_pc_) || unit == stay_unit_)) return false;
   const int kind = vis_[static_cast<size_t>(unit)].script_kind;
   return kind == kApproach || kind == kAttack;
 }

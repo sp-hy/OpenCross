@@ -53,6 +53,8 @@ class LocalVersusOpponent final : public VersusLink {
   int side_ = 0;
   battle::VersusAutoPlayer player_;
   std::deque<battle::Command> queued_;
+  // The attacker and target of the last engage it gave, -1 = none since its last other command.
+  int engaged_actor_ = -1, engaged_target_ = -1;
 };
 
 }  // namespace oc::game

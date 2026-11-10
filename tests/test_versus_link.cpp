@@ -212,7 +212,7 @@ void test_command_text() {
   end.kind = battle::Command::Kind::EndTurn;
   end.timeout = true;
   CHECK(game::parse_versus_command(game::versus_command_text(end))->timeout);
-  for (const char* bad : {"", "0", "9 0 -1 -1 -1 0 -1", "0 6 -1 -1 -1 0 -1", "0 0 9 -1 -1 0 -1", "0 0 -1 80 -1 0 -1", "0 0 -1 -1 -1 2 -1",
+  for (const char* bad : {"", "0", "10 0 -1 -1 -1 0 -1", "0 6 -1 -1 -1 0 -1", "0 0 9 -1 -1 0 -1", "0 0 -1 80 -1 0 -1", "0 0 -1 -1 -1 2 -1",
                           "0 0 -1 -1 -1 0 -1 3", "0 0 -1 -1 -1 0 -1 0 0 0 0 0", "0  0 -1 -1 -1 0 -1", "0 0 -1 -1 -1 0 -1 ", "a 0 -1 -1 -1 0 -1"})
     CHECK(!game::parse_versus_command(bad));
 }

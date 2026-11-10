@@ -108,6 +108,13 @@ void BattleView::begin_group() {
         start_hit();
         break;
       }
+      // A versus chain's next hit: from where the attacker stands.
+      if (act_.actor == stay_unit_ && aim == stay_target_) {
+        stay_unit_ = stay_target_ = -1;
+        act_.phase = Act::Phase::Hit;
+        start_hit();
+        break;
+      }
       end_camera_tasks();
       select_approach();
       if (actor_visual.scripts && actor_visual.scripts->has_s5 && start_script(act_.actor, &actor_visual.scripts->s5, 2, 0, kApproach)) {
@@ -377,6 +384,11 @@ void BattleView::tick_action() {
           visual.face_z = visual.pface_z = visual.home_fz;
         }
     }
+    // A versus chain's attacker goes home once the chain cannot go on, or before an action that does not continue it.
+    if (stay_unit_ >= 0 && finish_ == Finish::None && (queue_.empty() ? !stay_holds() : !stay_continues(queue_.front().front()))) {
+      end_stay();
+      return;
+    }
     if (queue_.empty() || ui_ == Ui::Intro) return;
     // The executor serialises actions: a PC standing at its target (the chain menu's `engaged_`) ends its turn - the return walk
     // (S5 entry 3) - before another actor's queued action starts.
@@ -398,6 +410,11 @@ void BattleView::tick_action() {
       if ((actor_visual.script_done && !actor_visual.move.on) || act_.ticks > 600) {
         if (battle_audit() && !(actor_visual.script_done && !actor_visual.move.on)) battle_audit_note(std::format("approach of unit {} left by the 600-tick timeout (script_done {} moving {})", act_.actor, actor_visual.script_done, actor_visual.move.on));
         cut_script(act_.actor);
+        // A versus engage of a unit no menu of this game holds: it stands at its target (stay_unit_).
+        if (act_.stage_only) {
+          act_ = Act{};
+          break;
+        }
         // Engage: arrived, the percentage menu opens.
         if (act_.ev.empty()) {
           act_ = Act{};
@@ -429,8 +446,15 @@ void BattleView::tick_action() {
         if (act_.hit < act_.ev.size()) {
           if (script_gated(act_.ev[act_.hit])) act_.hit_wait = true;
           else start_hit();
-        // Stay at the enemy until the PC's turn ends; any other attacker goes home with the camera holding its pose.
+        // Stay at the enemy until the PC's turn ends, as a versus chain's attacker does until its chain ends; any other attacker goes home
+        // with the camera holding its pose.
         } else if (engaged_ && act_.actor == active_pc_) {
+          act_.phase = Act::Phase::Settle;
+          act_.ticks = 0;
+        } else if (versus_ && act_.actor < player_slots()) {
+          stay_unit_ = act_.actor;
+          stay_target_ = act_.targets.front();
+          stay_left_ = false;
           act_.phase = Act::Phase::Settle;
           act_.ticks = 0;
         } else {
@@ -573,7 +597,7 @@ void BattleView::end_group() {
   // unit home instead (tick_action), so the caster keeps its cast facing until then. A PC that chose Run turns and runs with the rest of the
   // party: its run script keeps the facing. Defend keeps the yaw the command confirm gave.
   const bool defended = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Defend;
-  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && cast_handover_ == 0 && !defended) {
+  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && act_.actor != stay_unit_ && cast_handover_ == 0 && !defended) {
     const int i = act_.actor;
     Visual& visual = vis_[static_cast<size_t>(i)];
     if (bunit(i).present && !visual.ko_shown && !visual.move.on && visual.script_kind != kRun) {
@@ -612,7 +636,7 @@ void BattleView::end_group() {
     sys_pending_ = false;
     smsg_open(sys_req_);
   }
-  if (finish_ == Finish::None && !engaged_ && !cast_end) camera_.stop_sequences();
+  if (finish_ == Finish::None && !engaged_ && stay_unit_ < 0 && !cast_end) camera_.stop_sequences();
   if (queue_.empty()) sync_shown();
   // A unit whose script was cut still has to settle on its idle / KO pose.
   for (int i = 0; i < battle::kUnits; ++i)
@@ -702,9 +726,13 @@ void BattleView::tick_finish() {
           finished_ = true;
           break;
         }
-        ui_ = Ui::Result;
-        result_age_ = 0;
-        log::info("battle: result panel at view tick {}", tick_count_);
+        if (versus_) {
+          finish_or_plate();
+        } else {
+          ui_ = Ui::Result;
+          result_age_ = 0;
+          log::info("battle: result panel at view tick {}", tick_count_);
+        }
         // Global sound 0x14 when the panel opens.
         audio_.play_global(0x14);
       }
@@ -735,8 +763,8 @@ void BattleView::tick_finish() {
       }
       const bool outro_done = fled_outro_ ? !camera_.sequence_running() || finish_ticks_ > kOutroDelay + kOutroCap : finish_ticks_ > kOutroDelay + kFledFade;
       if (!finished_ && ui_ != Ui::Result && finish_ticks_ > kOutroDelay && outro_done) {
-        // In the field the battle music plays on until the field song replaces it.
-        if (!external_results_) audio_.stop_music();
+        // In the field the battle music plays on until the field song replaces it; a versus battle without a result ends in silence.
+        if (!external_results_ || versus_) audio_.stop_music();
         audio_.stop_sounds();
         finish_or_plate();
       }

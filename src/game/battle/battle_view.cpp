@@ -127,6 +127,8 @@ void BattleView::unload_scene() {
   engaged_ = engage_arrive_ = engaged_after_cast_ = false;
   engaged_target_ = -1;
   engage_interrupted_ = false;
+  stay_unit_ = stay_target_ = -1;
+  stay_left_ = false;
   pass_pc_ = -1;
   pass_switch_ = false;
   hit_budget_ = 0;

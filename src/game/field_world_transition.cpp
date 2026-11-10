@@ -167,20 +167,8 @@ void FieldWorld::request_battle(int battle_id, int field, int flags) {
   // 'enct' task starts.
   // The field keeps running; the battle starts once the 'enct' task is gone (sim_tick).
   // There is no screen fade on the field side: the battle's opening clears the screen to white (BattleView::begin_transition).
-  if (!(flags & 1) && mixer_) {
-    // The song id and its position are saved here and restored when the same song is started again (the post-battle restore),
-    // so the field music resumes where the encounter cut it: the remastered stream by its position, the original music by the
-    // sound driver's music push (its next start of the same song resumes the saved sequencer state).
-    handoff_.resume_song = bgm_remastered_ ? mixer_->current_song() : -1;
-    handoff_.resume_seconds = static_cast<double>(mixer_->bgm_position()) / audio::Mixer::kRate;
-    mixer_->push_music();
-    mixer_->stop();
-    song_change_ = {};
-    handoff_.battle_music_stopped = true;
-    // The battle song starts DURING the encounter effect, not at the battle load; BattleAudio::start_battle_theme then finds it playing.
-    // Flag 0x40 picks the boss theme; the battle adopts the same song so there is no restart at the load.
-    start_song(audio::battle_song(flags, bgm_remastered_), 127);
-  }
+  // A battle whose song already started (start_battle_music) keeps it.
+  if (!(flags & 1) && !handoff_.battle_music_stopped) start_battle_music(flags);
   handoff_.battle_state = BattleState::Intro;
   handoff_.intro_tick = tick_count_;
   const bool enct = sequences_ && sequences_->start("enct");
@@ -188,6 +176,29 @@ void FieldWorld::request_battle(int battle_id, int field, int flags) {
   if (!enct) handoff_.battle_state = BattleState::Ready;
   log::info("field: battle requested id {} field {} flags {:#x} in {}; encounter effect 'enct' {} (anchor ent {})", battle_id, field, flags,
             view_.room_name(), enct ? "started" : "unavailable", battle_intro_anchor());
+}
+
+void FieldWorld::start_battle_music(int flags) {
+  if (!mixer_ || handoff_.battle_music_stopped || handoff_.battle_state != BattleState::None) return;
+  // The song id and its position are saved here and restored when the same song is started again (the post-battle restore),
+  // so the field music resumes where the encounter cut it: the remastered stream by its position, the original music by the
+  // sound driver's music push (its next start of the same song resumes the saved sequencer state).
+  handoff_.resume_song = bgm_remastered_ ? mixer_->current_song() : -1;
+  handoff_.resume_seconds = static_cast<double>(mixer_->bgm_position()) / audio::Mixer::kRate;
+  mixer_->push_music();
+  mixer_->stop();
+  song_change_ = {};
+  handoff_.battle_music_stopped = true;
+  // The battle song starts DURING the encounter effect, not at the battle load; BattleAudio::start_battle_theme then finds it playing.
+  // Flag 0x40 picks the boss theme; the battle adopts the same song so there is no restart at the load.
+  start_song(audio::battle_song(flags, bgm_remastered_), 127);
+}
+
+void FieldWorld::cancel_battle_music() {
+  if (!handoff_.battle_music_stopped || handoff_.battle_state != BattleState::None) return;
+  restore_field_song();
+  handoff_.resume_song = -1;
+  handoff_.battle_music_stopped = false;
 }
 
 bool FieldWorld::transition_white() const { return handoff_.transition_white(tick_count_); }
@@ -255,22 +266,25 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
   // song itself). A song that is still playing is left alone by start_song. The original music's restart fades in linearly from
   // silence to the song volume in 32 steps of the sound driver's 120 Hz volume clock, the first step taken at once. With no field song
   // the restore is a stop: the battle's song ends with the return instead of playing on under the field.
-  const bool restore = !(handoff_.battle_req.flags & 0x20);
-  if (restore && last_song_ < 0) {
-    play_song_at(0xFF, bgm_volume_);
-  } else if (restore) {
-    const bool restart = mixer_ && mixer_->current_song() != last_song_ && pending_song_ != last_song_;
-    start_song(last_song_, bgm_volume_, last_song_ == handoff_.resume_song ? handoff_.resume_seconds : 0.0);
-    if (restart && !bgm_remastered_) {
-      mixer_->fade(bgm_volume_ / 32, 0.0);
-      mixer_->fade(bgm_volume_, 31.0 / 120.0);
-    }
-  }
+  if (!(handoff_.battle_req.flags & 0x20)) restore_field_song();
   handoff_.resume_song = -1;
   handoff_.battle_music_stopped = false;
   log::info("field: battle ended, result {}", result_code);
 }
 
+
+void FieldWorld::restore_field_song() {
+  if (last_song_ < 0) {
+    play_song_at(0xFF, bgm_volume_);
+    return;
+  }
+  const bool restart = mixer_ && mixer_->current_song() != last_song_ && pending_song_ != last_song_;
+  start_song(last_song_, bgm_volume_, last_song_ == handoff_.resume_song ? handoff_.resume_seconds : 0.0);
+  if (restart && !bgm_remastered_) {
+    mixer_->fade(bgm_volume_ / 32, 0.0);
+    mixer_->fade(bgm_volume_, 31.0 / 120.0);
+  }
+}
 
 void FieldWorld::request_map_jump(int room, int param) {
   if (jump_.active) return;

@@ -101,6 +101,9 @@ std::optional<Command> parse_command(const std::string& line) {
   } else if (verb == "form") {
     if (!(words >> cmd.form)) return std::nullopt;
     cmd.kind = Command::Kind::Form;
+  } else if (verb == "engage") {
+    if (!(words >> cmd.target)) return std::nullopt;
+    cmd.kind = Command::Kind::Engage;
   } else {
     return std::nullopt;
   }
@@ -122,6 +125,7 @@ std::string describe(const Command& cmd) {
     case Command::Kind::Focus: return std::format("focus {}", cmd.actor);
     case Command::Kind::ElementMenu: return std::format("menu {}", cmd.actor);
     case Command::Kind::Form: return std::format("form {} {}", cmd.actor, cmd.form);
+    case Command::Kind::Engage: return std::format("engage {} {}", cmd.actor, cmd.target);
   }
   return "?";
 }

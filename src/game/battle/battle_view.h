@@ -190,6 +190,13 @@ class BattleView {
   bool versus_plate() const { return versus_ && ui_ == Ui::Result; }
   // Route vocabulary (`assert battle plate`): the word of the plate the last versus battle showed, "" = none.
   std::string route_plate() const;
+  // The versus turn banner the host draws over the battle (in the game's language); own = this game's side holds the turn. None outside a
+  // running versus battle.
+  struct VersusBanner {
+    std::string text;
+    bool own = false;
+  };
+  std::optional<VersusBanner> versus_banner() const;
   // Settings rows "Cursor Position" and "Accuracy Selection", pushed by the host every frame.
   void set_menu_options(bool cursor_memory, bool auto_accuracy) { cursor_memory_ = cursor_memory, auto_accuracy_ = auto_accuracy; }
   // Dev: skip the intro and open a menu as soon as a PC can act (1 element grid, 2 attack chain, 3 element grid -> target selection, 4 cast an element, 5 run, 6 wipe the party).
@@ -447,6 +454,8 @@ class BattleView {
     float swap_home_x = 0, swap_home_z = 0;
     // The cast's targets turn to the caster when its charge starts (a PC that hopped home from the enemy).
     bool turn_targets_at_charge = false;
+    // A versus engage's run-up (stage_engage): no action follows it.
+    bool stage_only = false;
   };
   // A reaction scheduled for a later tick (element casts hit one target after the other).
   struct Pending {
@@ -549,7 +558,8 @@ class BattleView {
   void end_group();
   bool start_script(int unit, const bseq::Table* table, int entry, int variant, Script kind);
   void start_idle(int unit);
-  // The PC standing at its target between HIT% picks keeps the clip its approach / atk script left (clip 2).
+  // The PC standing at its target between HIT% picks (or a versus chain's attacker, stay_unit_) keeps the clip its approach / atk script
+  // left (clip 2).
   bool engaged_stance(int unit) const;
   // Model hidden, S5 entry 8 (the spawn script: part words, fade-in) instead of the idle.
   void start_spawn(int unit);
@@ -1658,11 +1668,29 @@ class BattleView {
   void versus_pump(int ticks, bool idle);
   // Battle::start_versus from the setup, and the versus state of the view; false when a side cannot fight.
   bool start_versus_rules(const VersusSetup& setup);
-  // The turn banner, the timer and the Run confirm.
+  // The Run confirm.
   void build_versus_hud();
   void build_versus_plate();
+  // Widths in PS1 px of a line in the window text (style 0x83) and in the menu text (style 2), in this game's language.
+  float window_text_width(const std::u32string& text);
+  float menu_text_width(const std::u32string& text);
   // The finish ends the view at once, or shows the plate first in a versus battle.
   void finish_or_plate();
+  // An attack chain of a versus battle that no menu of this game engaged (the other side's, or this side's random player's) keeps its
+  // attacker at the target after its hits, as the HIT% menu keeps the engaged PC: stay_holds = the chain can still go on, stay_continues =
+  // `event` is its next hit; end_stay sends the attacker home.
+  bool stay_holds() const;
+  bool stay_continues(const battle::ActionEvent& event) const;
+  void end_stay();
+  // The run-up of an engage this game's menus did not give (view units).
+  void stage_engage(int unit, int target);
+  // The camera while the other side acts (menu_camera's versus part); true = it owns the camera this tick.
+  bool versus_wide_shot();
+  // The wide pose has been taken in this wait.
+  bool versus_wide_ = false;
+  // The attacker standing at its target (view units, -1 = none) and whether a Focus or End Turn has ended its chain since.
+  int stay_unit_ = -1, stay_target_ = -1;
+  bool stay_left_ = false;
   bool versus_ = false, versus_flip_ = false;
   int versus_side_ = 0;
   VersusLink* versus_link_ = nullptr;
@@ -1684,7 +1712,8 @@ class BattleView {
   std::string versus_opponent_;
   int versus_stars_ = 0;
   // A turn lasts 60 s; the other side's actions start this many idle ticks apart.
-  static constexpr int kVersusTurnTicks = 60 * 60, kVersusActionGap = 20;
+  // The wide shot while the other side acts waits this many idle ticks (longer than the gap between its actions).
+  static constexpr int kVersusTurnTicks = 60 * 60, kVersusActionGap = 20, kVersusWideIdle = 45;
   std::vector<Op> ops_;
   std::vector<render::Mat4> palette_;
 };

@@ -356,8 +356,9 @@ inline std::array<int, 9> target_cursor_order(const TargetSpec& spec, int caster
 struct Command {
   // EndTurn: a versus side gives the turn to the other side (`actor` = any unit of that side). Focus: the actor's top command menu came up
   // (Battle::open_menu). ElementMenu: its element grid opened (Battle::open_element_menu). Form: the Dopplegang pick of the actor's
-  // Dopplegang cast (Battle::transform with `form`).
-  enum class Kind { Attack, Element, Defend, Run, Swap, EndTurn, Focus, ElementMenu, Form } kind = Kind::Defend;
+  // Dopplegang cast (Battle::transform with `form`). Engage: in a versus battle the actor's attack target was confirmed (it stands at
+  // `target` with its HIT% menu open); it changes no state.
+  enum class Kind { Attack, Element, Defend, Run, Swap, EndTurn, Focus, ElementMenu, Form, Engage } kind = Kind::Defend;
   // PC slot 0..2 (versus: 0..5).
   int actor = 0;
   // Swap: the character id that takes the actor's slot (Battle::swap_candidates).
@@ -777,7 +778,7 @@ class Battle {
   // The party record a PC unit came from (versus: side B's for units 3..5); null for an enemy or an empty slot.
   PartyMember* record_of(int unit);
   int& stars_left(int side) { return versus_ && side == 1 ? stars_b_ : growth_.counter; }
-  // A state command (EndTurn, Focus, ElementMenu, Form): no time passes, no action is counted.
+  // A state command (EndTurn, Focus, ElementMenu, Form, Engage): no time passes, no action is counted.
   void apply_state_command(const Command& cmd);
   void finish_versus(Outcome outcome, VersusEnd end);
   // The turn goes to the other side; a turn ended any way but a timeout clears its side's timeout run.

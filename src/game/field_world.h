@@ -630,6 +630,10 @@ class FieldWorld final : public script::FieldHost {
   // The way back from a battle that leaves no trace (a versus battle): end_battle's music and fade-in, with BATTLE_RESULT and the last
   // result code as they were before it.
   void end_sandbox_battle();
+  // The battle song of request flags `flags` ahead of the battle request (a versus battle's, once both players agreed), saving the field
+  // song as request_battle does; the request then keeps it. cancel_battle_music restores the field song when no battle came.
+  void start_battle_music(int flags);
+  void cancel_battle_music();
   // BATTLE flag 4: model byte 0x3B on every party member but Poshul / Mojo
   void apply_battle_disguise();
   int battle_result() const { return vm_.var(script::var::kBattleResult); }
@@ -881,6 +885,8 @@ class FieldWorld final : public script::FieldHost {
   // at intensity 0 that is black, which no shipped scene intends, so until a light exists the actor keeps its flat zone colour.
   bool lights_active() const { return lights_.slot[0].intensity > 0 || lights_.slot[1].intensity > 0 || lights_.slot[2].intensity > 0; }
   void start_song(int song, int volume, double start_seconds = 0.0);
+  // The field song after a battle (or a battle song that led to none): the room's last song where the battle cut it, or silence.
+  void restore_field_song();
   u32 rand_u32() {
     rng_ ^= rng_ << 13;
     rng_ ^= rng_ >> 17;
