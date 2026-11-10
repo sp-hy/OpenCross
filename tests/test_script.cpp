@@ -130,6 +130,29 @@ void test_movie_end_jump() {
   CHECK_EQ(vm.var(var::kPrevMapId), 472);
 }
 
+// A7 and AB only step over their operands (the debug monitor is off in the retail game); FE 4D sets the Vibration option.
+void test_debug_calls_and_vibration() {
+  class OptionHost : public NullHost {
+   public:
+    int opaque = 0, vibration = -1;
+    void opaque_op(u16, std::span<const u8>) override { ++opaque; }
+    void set_global(Global which, s32 value) override {
+      if (which == Global::Vibration) vibration = value;
+    }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xA7}).word(I(1)).word(I(2)).word(I(3)).word(I(4));
+  script.raw({0xAB}).word(I(5)).word(I(6));
+  script.raw({0xFE, 0x4D, 0x01});
+  script.stop();
+  OptionHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.opaque, 0);
+  CHECK_EQ(host.vibration, 1);
+}
+
 // 7E and D4 take the table row from the low byte of their first operand; D4's movie flags are its whole second operand, 7E's are 0.
 void test_movie_operands() {
   class MovieHost : public NullHost {
@@ -1220,6 +1243,35 @@ void test_mod_ui_ops() {
   CHECK(!vm.mod_ui().shown && vm.mod_ui().elements[0].kind == ModUi::kNone);
 }
 
+// The entrance table (0xFF, then 8-byte records up to the first script) keeps its records when the first script does not start on a
+// record boundary: two records, three spare bytes, then the code.
+void test_entrance_table_unaligned() {
+  Bytes blob(0x84 + 0x40, 0);
+  blob[0x80] = 1;
+  const u16 first = 1 + 2 * 8 + 3;
+  blob[0x84] = first & 0xFF;
+  blob[0x85] = first >> 8;
+  const s16 records[2][4] = {{1125, 2754, 1024, 1}, {-50, 300, 0, 0}};
+  blob.push_back(0xFF);
+  for (const auto& record : records)
+    for (s16 word : record) {
+      blob.push_back(static_cast<u8>(word & 0xFF));
+      blob.push_back(static_cast<u8>((word >> 8) & 0xFF));
+    }
+  blob.insert(blob.end(), {0x00, 0x00, 0x00, 0x00});
+  const auto module = FieldScriptModule::parse(blob);
+  CHECK(module.has_value());
+  if (!module) return;
+  CHECK_EQ(module->positions.size(), 2);
+  if (module->positions.size() != 2) return;
+  CHECK_EQ(module->positions[0].a, 1125);
+  CHECK_EQ(module->positions[0].b, 2754);
+  CHECK_EQ(module->positions[0].c, 1024);
+  CHECK_EQ(module->positions[0].level, 1);
+  CHECK_EQ(module->positions[1].a, -50);
+  CHECK_EQ(module->positions[1].b, 300);
+}
+
 // GET_POSITION (48) writes X, Z, Y in operand order, like the published player variables 0x12 / 0x14 / 0x16.
 class PosHost : public NullHost {
  public:
@@ -1766,6 +1818,7 @@ int main() {
   test_arithmetic();
   test_movie_end_jump();
   test_movie_operands();
+  test_debug_calls_and_vibration();
   test_skipped_battle();
   test_budget_bonus_and_entry_window();
   test_second_battle_waits();
@@ -1803,6 +1856,7 @@ int main() {
   test_mod_ui_ops();
   test_reserve_ops();
   test_model_source_op();
+  test_entrance_table_unaligned();
   test_get_position_order();
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();

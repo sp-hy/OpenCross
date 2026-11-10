@@ -401,7 +401,9 @@ void MainMenu::Impl::build_use() {
   const auto members = party();
   // Widescreen: portraits, member panels and their cursors left; the element list and description right.
   group(Left);
-  for (size_t i = 0; i < members.size() && i < 3; ++i) portrait_strip(members[i], 16.0f + 72.0f * static_cast<float>(i), grey(0x40));
+  // The portraits stay the party's while a roster character stands in: only the status panel follows the roster cursor.
+  const auto portraits = gs->party();
+  for (size_t i = 0; i < portraits.size() && i < 3; ++i) portrait_strip(portraits[i], 16.0f + 72.0f * static_cast<float>(i), grey(0x40));
   const float bounce = static_cast<float>(((frames % 23) * 0x3000) >> 16);
   if (use.roster) {
     if (!members.empty() && gs->available(members[0])) status_panel(members[0], 47.0f, 27.0f);
