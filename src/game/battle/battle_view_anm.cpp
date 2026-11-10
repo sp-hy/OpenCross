@@ -344,7 +344,7 @@ void BattleView::anm_draw_meshes(const render::Frame& frame, const render::Lette
     std::vector<effects::EmitterSystem::MeshInstance> meshes;
     anm.em->collect_meshes(view, alpha_, meshes);
     if (meshes.empty()) continue;
-    FxGpu* gpu = fx_gpu_resident(anm.pack);
+    FxGpu* gpu = fx_gpu_resident(anm.pack->resident.get());
     if (!gpu || !gpu->stage) continue;
     resident = gpu;
     asset = anm.pack->resident->meshes.get();

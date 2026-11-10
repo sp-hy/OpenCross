@@ -46,7 +46,7 @@ class RoomView {
   void prefetch(std::string_view name, std::string prd_path);
   // Waits for a running prefetch and throws it away (the file set is about to change).
   void drop_prefetch();
-  // The loaded room's models built by its prefetch (empty when it was loaded without one); index = RoomScene::models. The caller takes them.
+  // The loaded room's models built with it (by its prefetch or the load itself); index = RoomScene::models. The caller takes them.
   std::vector<std::optional<PreparedRoomModel>> take_prepared_models() { return std::exchange(prepared_models_, {}); }
   // The .prd of the next load() (VFS path): the room's effect file is the disc index record after its .bin, which names another
   // room's .prd in 195 rooms. Empty = "<room>.prd". Consumed by load().
@@ -169,8 +169,8 @@ class RoomView {
   struct Prepared;
   using Chip2Result = std::pair<std::optional<import::Chip2>, std::string>;
 
-  // CPU only, thread-safe. `ahead` (a prefetch) also builds the room's models and composes the 4x images (within a memory budget);
-  // without it the chip2 read is left running in the result for ensure_hd.
+  // CPU only, thread-safe. Builds the room's models in parallel; `ahead` (a prefetch) also composes the 4x images (within a memory
+  // budget); without it the chip2 read is left running in the result for ensure_hd.
   static std::unique_ptr<Prepared> prepare(const vfs::Vfs& files, render::GpuContext* ctx, const std::string& name, const std::string& prd_request,
                                            bool ahead, bool hd);
   // The scene's (layer, group) images merged into items, back to front, without textures.

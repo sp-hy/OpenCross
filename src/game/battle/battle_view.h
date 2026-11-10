@@ -769,7 +769,7 @@ class BattleView {
   };
   FxGpu* fx_gpu_for(const std::shared_ptr<const FxPack>& pack);
   // battle.prd's meshes (once per scene).
-  FxGpu* fx_gpu_resident(const std::shared_ptr<const FxPack>& pack);
+  FxGpu* fx_gpu_resident(const FxResident* resident);
   // Sprite type 20: the pack's type-0x0B models.
   void fx_load_models(FxGpu& gpu, const FxPack& pack);
   // The two pages of a pack model cut from `vram` (fx_load_models; again after an overlay's VRAM copy into them: fx_vram_apply).
@@ -974,6 +974,9 @@ class BattleView {
     // battle/bg/bg_NN.
     std::string base;
     Bytes prd, ctd;
+    // The shared effect sheets being uploaded in slices (the library step).
+    effects::EffectBank fx_bank;
+    std::shared_ptr<effects::GpuEffects> fx_lib;
     double ms = 0;
     std::chrono::steady_clock::time_point t0;
   };

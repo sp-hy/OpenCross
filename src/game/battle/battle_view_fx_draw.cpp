@@ -363,7 +363,7 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
   };
   std::vector<SemiMesh> semi_meshes;
   std::vector<effects::FxPrim> env_prims;
-  FxGpu* rg = fx_gpu_resident(fx_pack_);
+  FxGpu* rg = fx_gpu_resident(fx_pack_->resident.get());
   const assets::StageAsset* own_asset = fx_pack_->meshes.get();
   const assets::StageAsset* res_asset = fx_pack_->resident ? fx_pack_->resident->meshes.get() : nullptr;
   const float fw = static_cast<float>(frame.extent.width), fh = static_cast<float>(frame.extent.height);
