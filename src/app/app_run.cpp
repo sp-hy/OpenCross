@@ -81,6 +81,7 @@ int App::run() {
     ui.set_pointer_hidden(platform::pointer_hidden(window.fullscreen(), ui.options_open, window.mouse_idle_ms()));
     ui.new_frame();
     multiplayer_overlay();
+    versus_banner_overlay();
     // The room's entity / script tables stay while a battle, menu, movie or flow screen covers the field.
     debug_field = field_visible();
     apply_options_change(ui.options_window(config, own_ini ? config_file : std::filesystem::path()));
@@ -370,6 +371,7 @@ void App::apply_options_change(const render::OptionsChange& change) {
     window.apply_video(static_cast<int>(config.window_mode), config.width, config.height, config.display);
     ctx.request_resize();
   }
+  if (change.art_mode || change.portraits || mods_dirty) mp_ui.drop_faces();
   if (change.art_mode || mods_dirty) apply_art_mode();
   mods_dirty = false;
   if (change.audio) apply_audio_config();

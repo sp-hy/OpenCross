@@ -168,6 +168,8 @@ class App {
   // scene; nothing of the save goes in or comes back), the other side plays through `link`, `net` = a server's battle (pvp_end at the
   // end). False when it cannot start now (not a free field, a battle under way, a dev switch of the battle set, no stage).
   bool start_versus_battle(game::BattleView::VersusSetup setup, std::unique_ptr<game::VersusLink> link, bool net);
+  // A versus battle's request flags: 0x40 = the boss theme.
+  static constexpr int kVersusBattleFlags = 0x40;
   // This game's player's side: the field party (at most 3), the summon stars and the Dopplegang pool.
   std::optional<battle::VersusSide> local_versus_side();
   // A versus battle against the local opponent (route `request versus`): this game's party as side `side`, the built-in test party as the
@@ -274,6 +276,8 @@ class App {
   void multiplayer_frame();
   // The chat panel and the name labels, inside the ImGui frame.
   void multiplayer_overlay();
+  // The turn banner of a versus battle, over the battle (also a local one without a server).
+  void versus_banner_overlay();
   net::LocalPresence multiplayer_local() const;
   // A menu, shop or other screen of the game covers the field (the settings window not counted).
   bool game_screen_up() const;

@@ -101,14 +101,48 @@ bool name_link(const std::string& name, const ImVec4& colour, bool bold) {
   return ImGui::IsMouseClicked(ImGuiMouseButton_Left);
 }
 
-// A party card as a table: one row per member with the name, max HP, ATK / DEF / MAG / MDEF and the element count.
-void draw_card(const char* id, const net::PartyCard& card) {
+constexpr const char* kCardHeadings[] = {"", "HP", "ATK", "DEF", "MAG", "MDEF", "Elem."};
+// The name column of a card is at most this many font heights wide (longer names are clipped).
+constexpr float kCardNameMax = 8.0f;
+
+// A card's name column at the current font: the longest name, at least a short one's and at most kCardNameMax font heights.
+float card_name_width(const net::PartyCard& card) {
+  float name = ImGui::CalcTextSize("Korcha").x;
+  for (const net::CardMember& member : card.members) name = std::max(name, ImGui::CalcTextSize(member.name.c_str()).x);
+  return std::min(name, ImGui::GetFontSize() * kCardNameMax);
+}
+
+// A card's stat column: the widest heading or four-digit number.
+float card_stat_width() {
+  float stat = ImGui::CalcTextSize("9999").x;
+  for (const char* heading : kCardHeadings) stat = std::max(stat, ImGui::CalcTextSize(heading).x);
+  return stat;
+}
+
+// The width of a card's table at the current font, the cell padding included.
+float card_width(const net::PartyCard& card) {
+  return card_name_width(card) + 6.0f * card_stat_width() + 7.0f * (2.0f * ImGui::GetStyle().CellPadding.x + 1.0f);
+}
+
+// The height of a card's table: the heading row and one row per member (the "(no party)" line when it has none).
+float card_height(const net::PartyCard& card) {
+  if (card.members.empty()) return ImGui::GetTextLineHeightWithSpacing();
+  const float row = ImGui::GetTextLineHeight() + 2.0f * ImGui::GetStyle().CellPadding.y;
+  return row * static_cast<float>(card.members.size() + 1);
+}
+
+// A party card as a table `width` pixels wide (0: as wide as its content): one row per member with the name, max HP, ATK / DEF / MAG /
+// MDEF and the element count, the numbers right-aligned.
+void draw_card(const char* id, const net::PartyCard& card, float width) {
   if (card.members.empty()) {
     ImGui::TextDisabled("(no party)");
     return;
   }
-  if (!ImGui::BeginTable(id, 7, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_RowBg)) return;
-  for (const char* heading : {"", "HP", "ATK", "DEF", "MAG", "MDEF", "Elem."}) ImGui::TableSetupColumn(heading);
+  const ImGuiTableFlags flags = (width > 0.0f ? ImGuiTableFlags_SizingStretchProp : ImGuiTableFlags_SizingFixedFit) |
+                                ImGuiTableFlags_NoSavedSettings | ImGuiTableFlags_RowBg;
+  if (!ImGui::BeginTable(id, 7, flags, ImVec2(width, 0.0f))) return;
+  const float name = card_name_width(card), stat = card_stat_width();
+  for (int i = 0; i < 7; ++i) ImGui::TableSetupColumn(kCardHeadings[i], 0, i == 0 ? name : stat);
   ImGui::TableHeadersRow();
   for (const net::CardMember& member : card.members) {
     ImGui::TableNextRow();
@@ -116,10 +150,84 @@ void draw_card(const char* id, const net::PartyCard& card) {
     ImGui::TextUnformatted(member.name.empty() ? "?" : member.name.c_str());
     for (const int value : {member.hp, member.atk, member.def, member.mag, member.mdef, member.elements}) {
       ImGui::TableNextColumn();
-      ImGui::Text("%d", value);
+      char text[16];
+      std::snprintf(text, sizeof text, "%d", value);
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(text).x));
+      ImGui::TextUnformatted(text);
     }
   }
   ImGui::EndTable();
+}
+
+// The two sides' colours: the local player's blue, the other player's red.
+const ImVec4 kOwnColour(0.32f, 0.62f, 0.98f, 1.0f);
+const ImVec4 kTheirColour(0.96f, 0.36f, 0.30f, 1.0f);
+const ImVec4 kGold(1.0f, 0.84f, 0.38f, 1.0f);
+
+ImU32 with_alpha(const ImVec4& colour, float alpha) {
+  return ImGui::ColorConvertFloat4ToU32(ImVec4(colour.x, colour.y, colour.z, colour.w * std::clamp(alpha, 0.0f, 1.0f)));
+}
+
+// `colour` moved `amount` (0..1) towards white.
+ImVec4 lighter(const ImVec4& colour, float amount) {
+  return ImVec4(colour.x + (1.0f - colour.x) * amount, colour.y + (1.0f - colour.y) * amount, colour.z + (1.0f - colour.z) * amount, colour.w);
+}
+
+// `text` in `font` at `size` pixels, its top-left at `at`, with a dark outline; `bold` draws it twice, one pixel apart.
+void outlined_text(ImDrawList* dl, ImFont* font, float size, ImVec2 at, ImU32 colour, const char* text, bool bold = false) {
+  const float edge = std::max(1.0f, size * 0.05f);
+  const ImU32 shade = IM_COL32(0, 0, 0, ((colour >> IM_COL32_A_SHIFT) & 0xFF) * 3 / 4);
+  for (const ImVec2 offset : {ImVec2(-edge, 0.0f), ImVec2(edge, 0.0f), ImVec2(0.0f, -edge), ImVec2(0.0f, edge), ImVec2(-edge, -edge),
+                              ImVec2(edge, edge), ImVec2(-edge, edge), ImVec2(edge, -edge)})
+    dl->AddText(font, size, ImVec2(at.x + offset.x, at.y + offset.y), shade, text);
+  dl->AddText(font, size, at, colour, text);
+  if (bold) dl->AddText(font, size, ImVec2(at.x + edge, at.y), colour, text);
+}
+
+// `text` `size` pixels high at the cursor as an item of its size, outlined.
+void big_text(const char* text, float size, ImU32 colour) {
+  ImFont* font = ImGui::GetFont();
+  const ImVec2 at = ImGui::GetCursorScreenPos();
+  outlined_text(ImGui::GetWindowDrawList(), font, size, at, colour, text, true);
+  ImGui::Dummy(font->CalcTextSizeA(size, FLT_MAX, 0.0f, text));
+}
+
+// The first character (UTF-8 code point) of `name`; "?" for an empty one.
+std::string first_letter(const std::string& name) {
+  if (name.empty()) return "?";
+  size_t length = 1;
+  while (length < name.size() && (static_cast<unsigned char>(name[length]) & 0xC0) == 0x80) ++length;
+  return name.substr(0, length);
+}
+
+ImTextureID texture_id(const MultiplayerUi::Face& face) {
+  return static_cast<ImTextureID>(reinterpret_cast<std::uintptr_t>(&face.binding));
+}
+
+// The middle square of the face image, in texture coordinates.
+void square_uv(const MultiplayerUi::Face& face, ImVec2& uv0, ImVec2& uv1) {
+  const float w = static_cast<float>(face.texture.width()), h = static_cast<float>(face.texture.height());
+  const float cut_x = w > h ? (1.0f - h / w) * 0.5f : 0.0f;
+  const float cut_y = h > w ? (1.0f - w / h) * 0.5f : 0.0f;
+  uv0 = ImVec2(cut_x, cut_y);
+  uv1 = ImVec2(1.0f - cut_x, 1.0f - cut_y);
+}
+
+// A face as a large faded backdrop over `min`..`max` (a square): its opacity runs from `alpha_left` at the left edge to `alpha_right` at
+// the right, so it fades out towards the middle of the screen.
+void backdrop_face(ImDrawList* dl, const MultiplayerUi::Face& face, ImVec2 min, ImVec2 max, float alpha_left, float alpha_right) {
+  ImVec2 uv0, uv1;
+  square_uv(face, uv0, uv1);
+  const ImU32 left = with_alpha(ImVec4(1, 1, 1, 1), alpha_left), right = with_alpha(ImVec4(1, 1, 1, 1), alpha_right);
+  dl->PushTextureID(texture_id(face));
+  dl->PrimReserve(6, 4);
+  const ImDrawIdx base = static_cast<ImDrawIdx>(dl->_VtxCurrentIdx);
+  for (const int index : {0, 1, 2, 0, 2, 3}) dl->PrimWriteIdx(static_cast<ImDrawIdx>(base + index));
+  dl->PrimWriteVtx(min, uv0, left);
+  dl->PrimWriteVtx(ImVec2(max.x, min.y), ImVec2(uv1.x, uv0.y), right);
+  dl->PrimWriteVtx(max, uv1, right);
+  dl->PrimWriteVtx(ImVec2(min.x, max.y), ImVec2(uv0.x, uv1.y), left);
+  dl->PopTextureID();
 }
 
 // Seconds left until `deadline`, rounded up.
@@ -544,7 +652,10 @@ bool MultiplayerUi::draw_player_menu(MultiplayerClient& client, platform::Multip
       else settings.muted.push_back(menu.pid);
       changed = close = true;
     }
-    if (!menu.fresh && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows)) close = true;
+    // A click outside the menu closes it; a click on one of its entries makes that entry active this frame, which must still count as
+    // inside.
+    const ImGuiHoveredFlags inside = ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem;
+    if (!menu.fresh && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsWindowHovered(inside)) close = true;
   }
   ImGui::End();
   if (close) {
@@ -562,41 +673,165 @@ void MultiplayerUi::accept(MultiplayerClient& client) {
   else client.decline_challenge();
 }
 
+const MultiplayerUi::Face* MultiplayerUi::face(int char_id) {
+  if (const auto found = faces_.find(char_id); found != faces_.end()) return found->second.get();
+  std::unique_ptr<Face>& slot = faces_[char_id];
+  DecodedImage image;
+  if (!gpu_ || !face_source_ || !face_source_(char_id, image) || image.width == 0 || image.height == 0) return nullptr;
+  if (!face_sampler_.handle() && !face_sampler_.create(*gpu_, true)) return nullptr;
+  auto made = std::make_unique<Face>();
+  if (!made->texture.create(*gpu_, image.width, image.height, TextureFormat::Rgba8, image.rgba.data(), nullptr, true)) return nullptr;
+  made->binding.texture = made->texture.handle();
+  made->binding.sampler = face_sampler_.handle();
+  slot = std::move(made);
+  return slot.get();
+}
+
+void MultiplayerUi::draw_portrait(ImDrawList* dl, const net::CardMember& member, float x, float y, float size, bool own) {
+  const ImVec4& colour = own ? kOwnColour : kTheirColour;
+  const ImVec2 min(x, y), max(x + size, y + size);
+  const float rounding = size * 0.08f;
+  dl->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(ImVec4(colour.x * 0.22f, colour.y * 0.22f, colour.z * 0.22f, 0.92f)), rounding);
+  if (const Face* portrait = face(member.char_id)) {
+    ImVec2 uv0, uv1;
+    square_uv(*portrait, uv0, uv1);
+    dl->AddImageRounded(texture_id(*portrait), min, max, uv0, uv1, IM_COL32_WHITE, rounding);
+  } else {
+    ImFont* font = ImGui::GetFont();
+    const std::string letter = first_letter(member.name);
+    const float letter_size = size * 0.55f;
+    const ImVec2 extent = font->CalcTextSizeA(letter_size, FLT_MAX, 0.0f, letter.c_str());
+    outlined_text(dl, font, letter_size, ImVec2(x + (size - extent.x) * 0.5f, y + (size - extent.y) * 0.5f), with_alpha(lighter(colour, 0.5f), 1.0f),
+                  letter.c_str(), true);
+  }
+  dl->AddRect(min, max, with_alpha(lighter(colour, 0.25f), 1.0f), rounding, 0, std::max(1.0f, size * 0.035f));
+}
+
+int MultiplayerUi::draw_incoming(const net::IncomingChallenge& incoming, double now, ImFont* font) {
+  if (incoming.deadline != incoming_deadline_) {
+    incoming_deadline_ = incoming.deadline;
+    incoming_span_ = std::max(1.0, incoming.deadline - now);
+  }
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, ImGui::GetFontSize() * 1.2f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.94f);
+  int answer = 0;
+  if (ImGui::Begin("##mp_incoming", nullptr, kPopupFlags)) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const std::vector<net::CardMember>& members = incoming.card.members;
+    // Shrunk to fit small windows: the natural size in font heights, measured at the full font (the window keeps last frame's scale).
+    ImGui::SetWindowFontScale(1.0f);
+    const float base = ImGui::GetFontSize();
+    const float natural_w = std::max(card_width(incoming.card), base * 22.0f) + 2.0f * style.WindowPadding.x;
+    const float natural_h = base * 14.0f + card_height(incoming.card) + 2.0f * style.WindowPadding.y;
+    const float scale = std::clamp(std::min((io.DisplaySize.x - base) / natural_w, (io.DisplaySize.y - base * 1.5f) / natural_h), 0.5f, 1.0f);
+    ImGui::SetWindowFontScale(scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x * scale, style.ItemSpacing.y * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(style.CellPadding.x * scale, style.CellPadding.y * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(style.FramePadding.x * scale, style.FramePadding.y * scale));
+    const float em = ImGui::GetFontSize();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    // The challenger's side: a red wash from the left and the leader's face fading in at the right, under a red rim.
+    const ImVec2 win = ImGui::GetWindowPos(), win_size = ImGui::GetWindowSize();
+    const ImVec2 win_max(win.x + win_size.x, win.y + win_size.y);
+    dl->PushClipRect(win, win_max, false);
+    dl->AddRectFilledMultiColor(win, win_max, with_alpha(kTheirColour, 0.26f), with_alpha(kTheirColour, 0.0f), with_alpha(kTheirColour, 0.0f),
+                                with_alpha(kTheirColour, 0.26f));
+    if (!members.empty())
+      if (const Face* leader = face(members.front().char_id))
+        backdrop_face(dl, *leader, ImVec2(win_max.x - win_size.y, win.y), win_max, 0.0f, 0.15f);
+    dl->AddRectFilled(win, ImVec2(win_max.x, win.y + std::max(2.0f, em * 0.16f)), with_alpha(kTheirColour, 0.95f), style.WindowRounding,
+                      ImDrawFlags_RoundCornersTop);
+    dl->PopClipRect();
+
+    // The portraits, then the name with the Star Level and the line under it.
+    const float portrait = em * 3.6f, gap = em * 0.35f;
+    const float row_w = members.empty() ? 0.0f : static_cast<float>(members.size()) * (portrait + gap) - gap;
+    const std::string title = std::format("{}  {}", incoming.name, star_text(font, incoming.star));
+    const float title_size = em * 1.5f;
+    const ImVec2 title_extent = ImGui::GetFont()->CalcTextSizeA(title_size, FLT_MAX, 0.0f, title.c_str());
+    const char* subtitle = "wants to battle you";
+    if (!members.empty()) {
+      const ImVec2 at = ImGui::GetCursorScreenPos();
+      for (size_t i = 0; i < members.size(); ++i)
+        draw_portrait(dl, members[i], at.x + static_cast<float>(i) * (portrait + gap), at.y, portrait, false);
+      ImGui::Dummy(ImVec2(row_w, portrait));
+      ImGui::SameLine(0.0f, em * 0.8f);
+      const float text_h = title_extent.y + ImGui::GetStyle().ItemSpacing.y +ImGui::GetTextLineHeight();
+      ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(0.0f, (portrait - text_h) * 0.5f));
+    }
+    ImGui::BeginGroup();
+    big_text(title.c_str(), title_size, with_alpha(lighter(kTheirColour, 0.55f), 1.0f));
+    ImGui::TextUnformatted(subtitle);
+    ImGui::EndGroup();
+    const float header_w = (members.empty() ? 0.0f : row_w + em * 0.8f) + std::max(title_extent.x, ImGui::CalcTextSize(subtitle).x);
+    const float content_w = std::max(card_width(incoming.card), header_w);
+
+    ImGui::Dummy(ImVec2(0.0f, em * 0.2f));
+    draw_card("##incoming_card", incoming.card, 0.0f);
+
+    // The time left as a bar that empties, red for the last third, and the seconds after it.
+    const float fraction = static_cast<float>(std::clamp((incoming.deadline - now) / incoming_span_, 0.0, 1.0));
+    const std::string seconds = std::format("{} s", seconds_left(incoming.deadline, now));
+    const float bar_w = std::max(em * 4.0f, content_w - ImGui::CalcTextSize(seconds.c_str()).x - ImGui::GetStyle().ItemSpacing.x);
+    const ImVec2 bar_at = ImGui::GetCursorScreenPos();
+    const float line = ImGui::GetTextLineHeight(), bar_h = line * 0.4f, bar_y = bar_at.y + (line - bar_h) * 0.5f;
+    dl->AddRectFilled(ImVec2(bar_at.x, bar_y), ImVec2(bar_at.x + bar_w, bar_y + bar_h), IM_COL32(255, 255, 255, 30), bar_h * 0.5f);
+    if (fraction > 0.0f)
+      dl->AddRectFilled(ImVec2(bar_at.x, bar_y), ImVec2(bar_at.x + bar_w * fraction, bar_y + bar_h), with_alpha(fraction > 1.0f / 3.0f ? kGold : kTheirColour, 1.0f),
+                        bar_h * 0.5f);
+    ImGui::Dummy(ImVec2(bar_w, line));
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", seconds.c_str());
+
+    // Accept / Decline: the chosen one filled in its colour (green / red), the other plain.
+    const float button_w = (content_w - ImGui::GetStyle().ItemSpacing.x) * 0.5f, button_h = ImGui::GetFrameHeight() * 1.25f;
+    const auto choice = [&](const char* label, bool chosen, const ImVec4& colour) {
+      if (chosen) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(colour.x * 0.75f, colour.y * 0.75f, colour.z * 0.75f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, colour);
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, lighter(colour, 0.2f));
+      }
+      const bool pressed = ImGui::Button(label, ImVec2(button_w, button_h));
+      if (chosen) ImGui::PopStyleColor(3);
+      return pressed;
+    };
+    if (choice("Accept (Y)", accept_chosen_, ImVec4(0.30f, 0.68f, 0.42f, 1.0f))) answer = 1;
+    ImGui::SameLine();
+    if (choice("Decline (N)", !accept_chosen_, kTheirColour)) answer = 2;
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + content_w);
+    ImGui::TextDisabled("Pad: d-pad to choose, confirm to select, cancel to decline");
+    ImGui::PopTextWrapPos();
+    ImGui::PopStyleVar(3);
+  }
+  ImGui::End();
+  return answer;
+}
+
 void MultiplayerUi::draw_challenges(MultiplayerClient& client, double now, ImFont* font) {
   const ImGuiIO& io = ImGui::GetIO();
   ImGui::PushFont(font);
-  const float em = ImGui::GetFontSize();
-  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, em * 2.0f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
-  ImGui::SetNextWindowBgAlpha(0.85f);
   if (!client.incoming()) accept_chosen_ = false;
   if (const std::optional<net::IncomingChallenge>& incoming = client.incoming()) {
-    if (ImGui::Begin("##mp_incoming", nullptr, kPopupFlags)) {
-      ImGui::Text("%s  %s wants to battle you", incoming->name.c_str(), star_text(font, incoming->star).c_str());
-      draw_card("##incoming_card", incoming->card);
-      ImGui::TextDisabled("%d s", seconds_left(incoming->deadline, now));
-      const auto choice = [&](const char* label, bool chosen) {
-        if (chosen) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        const bool pressed = ImGui::Button(label);
-        if (chosen) ImGui::PopStyleColor();
-        return pressed;
-      };
-      if (choice("Accept (Y)", accept_chosen_)) accept(client);
-      ImGui::SameLine();
-      if (choice("Decline (N)", !accept_chosen_)) decline(client);
-      ImGui::TextDisabled("Pad: d-pad to choose, confirm to select, cancel to decline");
+    const int answer = draw_incoming(*incoming, now, font);
+    if (answer == 1) accept(client);
+    else if (answer == 2) decline(client);
+  } else {
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, ImGui::GetFontSize() * 2.0f), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.85f);
+    if (const std::optional<net::OutgoingChallenge>& outgoing = client.outgoing()) {
+      if (ImGui::Begin("##mp_outgoing", nullptr, kPopupFlags)) {
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("Waiting for %s…  %d s", outgoing->name.c_str(), seconds_left(outgoing->expires, now));
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) client.cancel_challenge();
+      }
+      ImGui::End();
+    } else if (client.accepted()) {
+      if (ImGui::Begin("##mp_accepted", nullptr, kPopupFlags)) ImGui::TextUnformatted("Starting the battle…");
+      ImGui::End();
     }
-    ImGui::End();
-  } else if (const std::optional<net::OutgoingChallenge>& outgoing = client.outgoing()) {
-    if (ImGui::Begin("##mp_outgoing", nullptr, kPopupFlags)) {
-      ImGui::AlignTextToFramePadding();
-      ImGui::Text("Waiting for %s…  %d s", outgoing->name.c_str(), seconds_left(outgoing->expires, now));
-      ImGui::SameLine();
-      if (ImGui::Button("Cancel")) client.cancel_challenge();
-    }
-    ImGui::End();
-  } else if (client.accepted()) {
-    if (ImGui::Begin("##mp_accepted", nullptr, kPopupFlags)) ImGui::TextUnformatted("Starting the battle…");
-    ImGui::End();
   }
   ImGui::PopFont();
 }
@@ -604,6 +839,29 @@ void MultiplayerUi::draw_challenges(MultiplayerClient& client, double now, ImFon
 void MultiplayerUi::start_versus(net::PvpStart start, double now) {
   versus_ = std::move(start);
   versus_end_ = now + kVersusSeconds;
+}
+
+void MultiplayerUi::draw_turn_banner(const std::string& text, bool own, ImFont* font) {
+  if (text.empty()) return;
+  const ImGuiIO& io = ImGui::GetIO();
+  ImGui::PushFont(font);
+  ImFont* current = ImGui::GetFont();
+  // Sized by the window's height (the battle HUD scales with it), never below the chat text; close to the corner, clear of the battle's own
+  // top-right captions.
+  const float size = std::max(ImGui::GetFontSize(), io.DisplaySize.y * 0.035f);
+  const float pad = size * 0.4f, margin = size * 0.2f, edge = size * 0.18f;
+  const ImVec2 text_size = current->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str());
+  const ImVec2 box_max(io.DisplaySize.x - margin, margin + text_size.y + pad);
+  const ImVec2 box_min(box_max.x - text_size.x - pad * 2.0f - edge, margin);
+  ImDrawList* dl = ImGui::GetForegroundDrawList();
+  dl->AddRectFilled(box_min, box_max, IM_COL32(8, 10, 18, 200), pad * 0.6f);
+  dl->AddRectFilled(box_min, ImVec2(box_min.x + edge, box_max.y), own ? IM_COL32(90, 150, 255, 235) : IM_COL32(230, 80, 70, 235), pad * 0.6f,
+                    ImDrawFlags_RoundCornersLeft);
+  dl->AddRect(box_min, box_max, IM_COL32(255, 255, 255, 60), pad * 0.6f);
+  const ImVec2 at(box_min.x + edge + pad, box_min.y + pad * 0.5f);
+  dl->AddText(current, size, ImVec2(at.x + 1.0f, at.y + 1.0f), IM_COL32(0, 0, 0, 200), text.c_str());
+  dl->AddText(current, size, at, own ? IM_COL32(245, 247, 255, 255) : IM_COL32(200, 204, 214, 255), text.c_str());
+  ImGui::PopFont();
 }
 
 std::optional<net::PvpStart> MultiplayerUi::draw_versus(const MultiplayerClient& client, double now, ImFont* font) {
@@ -615,32 +873,136 @@ std::optional<net::PvpStart> MultiplayerUi::draw_versus(const MultiplayerClient&
     versus_.reset();
     return done;
   }
-  const net::PvpStart& start = *versus_;
+  draw_versus_screen(*versus_, versus_->first == client.pid(), waiting, now - (versus_end_ - kVersusSeconds), font);
+  return std::nullopt;
+}
+
+// The whole window: dimmed, each half washed in its side's colour with its leader's face fading towards the middle, a slanted rule
+// through the middle. Over it, per side (the player's left, the other's right, mirrored): the name with the Star Level, the members'
+// portraits (leaders on the outside) and the card; a large "VS" between the portraits; who moves first under it all. The sides slide in
+// from the edges as it opens; everything shrinks to fit a small window and grows a little in a large one.
+void MultiplayerUi::draw_versus_screen(const net::PvpStart& start, bool own_first, bool waiting, double seconds, ImFont* font) {
+  constexpr float kTitleSize = 1.4f, kVsSize = 2.8f, kSlideSeconds = 0.35f;
+  // A large window grows the layout to fill up to kFill of its width, the font at most kMaxScale times its size.
+  constexpr float kFill = 0.75f, kMaxScale = 1.35f;
   const ImGuiIO& io = ImGui::GetIO();
-  ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0, 0), io.DisplaySize, IM_COL32(0, 0, 0, 150));
+  const float width = io.DisplaySize.x, height = io.DisplaySize.y;
+  const float opened = std::clamp(static_cast<float>(seconds) / kSlideSeconds, 0.0f, 1.0f);
+  const float ease = 1.0f - (1.0f - opened) * (1.0f - opened) * (1.0f - opened);
+
   ImGui::PushFont(font);
-  ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-  ImGui::SetNextWindowBgAlpha(0.9f);
-  if (ImGui::Begin("##mp_versus", nullptr, kPopupFlags | ImGuiWindowFlags_NoInputs)) {
-    if (ImGui::BeginTable("##versus", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoSavedSettings)) {
-      ImGui::TableNextRow();
-      ImGui::TableNextColumn();
-      ImGui::Text("You  %s", star_text(font, start.own.star).c_str());
-      draw_card("##own_card", start.own);
-      ImGui::TableNextColumn();
-      ImGui::TextUnformatted("VS");
-      ImGui::TableNextColumn();
-      ImGui::Text("%s  %s", start.name.c_str(), star_text(font, start.star).c_str());
-      draw_card("##their_card", start.card);
-      ImGui::EndTable();
+  ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+  ImGui::SetNextWindowSize(io.DisplaySize);
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+  const ImGuiWindowFlags flags = (kPopupFlags & ~ImGuiWindowFlags_AlwaysAutoResize) | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBackground;
+  if (ImGui::Begin("##mp_versus", nullptr, flags)) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    ImFont* current = ImGui::GetFont();
+    const net::PartyCard* cards[2] = {&start.own, &start.card};
+
+    // The natural layout at the full font, then one scale that fits it into the window (which keeps last frame's scale).
+    ImGui::SetWindowFontScale(1.0f);
+    const float base = ImGui::GetFontSize();
+    const float natural_card = std::max(card_width(start.own), card_width(start.card));
+    const float natural_gap = current->CalcTextSizeA(base * kVsSize, FLT_MAX, 0.0f, "VS").x + base * 2.0f;
+    const float natural_table = std::max(card_height(start.own), card_height(start.card));
+    const float natural_fixed = base * kTitleSize * 1.2f + natural_table + ImGui::GetTextLineHeightWithSpacing() * 2.0f + base * 2.4f;
+    const float natural_w = 2.0f * natural_card + natural_gap;
+    const float fit = std::min(width * 0.94f / natural_w, height * 0.94f / (natural_fixed + base * 3.0f));
+    const float grow = std::clamp(width * kFill / natural_w, 1.0f, kMaxScale);
+    const float scale = std::clamp(std::min(fit, grow), 0.4f, kMaxScale);
+    ImGui::SetWindowFontScale(scale);
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(style.CellPadding.x * scale, style.CellPadding.y * scale));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x * scale, style.ItemSpacing.y * scale));
+    const float em = ImGui::GetFontSize();
+    const float column = std::max(card_width(start.own), card_width(start.card));
+    const float gap = current->CalcTextSizeA(em * kVsSize, FLT_MAX, 0.0f, "VS").x + em * 2.0f;
+    const float table_h = std::max(card_height(start.own), card_height(start.card));
+    const float title_h = em * kTitleSize * 1.2f, spacing = em * 0.8f, line = ImGui::GetTextLineHeightWithSpacing();
+    const float portrait_gap = em * 0.4f;
+    const float fixed_h = title_h + table_h + 2.0f * line + 3.0f * spacing;
+    const float portrait = std::clamp(std::min((column - 2.0f * portrait_gap) / 3.0f, height * 0.94f - fixed_h), em * 2.0f, em * 7.0f);
+    const float total_h = fixed_h + portrait;
+    const float x0 = (width - (2.0f * column + gap)) * 0.5f, y0 = std::max(0.0f, (height - total_h) * 0.5f);
+    const float slide = (1.0f - ease) * width * 0.3f;
+    const float column_x[2] = {x0 - slide, x0 + column + gap + slide};
+    const float portrait_y = y0 + title_h + spacing, table_y = portrait_y + portrait + spacing;
+
+    // The backdrop: dimmed, the halves washed in the sides' colours, the leaders' faces, the slanted rule.
+    ImDrawList* back = ImGui::GetBackgroundDrawList();
+    back->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(4, 6, 12, static_cast<int>(200.0f * ease)));
+    const float face_side = std::min(height, width * 0.5f);
+    for (int side = 0; side < 2; ++side) {
+      const bool own = side == 0;
+      const net::PartyCard& card = *cards[side];
+      const float edge = own ? 0.0f : width, middle = width * 0.5f;
+      const ImU32 strong = with_alpha(own ? kOwnColour : kTheirColour, 0.32f * ease), clear = with_alpha(own ? kOwnColour : kTheirColour, 0.0f);
+      back->AddRectFilledMultiColor(ImVec2(std::min(edge, middle), 0.0f), ImVec2(std::max(edge, middle), height), own ? strong : clear,
+                                    own ? clear : strong, own ? clear : strong, own ? strong : clear);
+      if (card.members.empty()) continue;
+      if (const Face* leader = face(card.members.front().char_id)) {
+        const float face_x = own ? -slide : width - face_side + slide;
+        backdrop_face(back, *leader, ImVec2(face_x, height - face_side), ImVec2(face_x + face_side, height), own ? 0.22f * ease : 0.0f,
+                      own ? 0.0f : 0.22f * ease);
+      }
     }
-    if (start.first == client.pid()) ImGui::TextUnformatted("You go first");
-    else ImGui::Text("%s goes first", start.name.c_str());
-    if (waiting) ImGui::Text("Waiting for %s...", start.name.c_str());
+    const float lean = height * 0.06f;
+    back->AddLine(ImVec2(width * 0.5f + lean, 0.0f), ImVec2(width * 0.5f - lean, height), with_alpha(ImVec4(1, 1, 1, 1), 0.14f * ease),
+                  std::max(1.0f, em * 0.12f));
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    for (int side = 0; side < 2; ++side) {
+      const bool own = side == 0;
+      const net::PartyCard& card = *cards[side];
+      const float left = column_x[side], right = left + column;
+      const ImVec4& colour = own ? kOwnColour : kTheirColour;
+      // The name: the player's at the left edge of their column, the other's at the right edge of theirs.
+      const std::string title = own ? std::format("You  {}", star_text(font, start.own.star)) : std::format("{}  {}", start.name, star_text(font, start.star));
+      const float title_size = em * kTitleSize;
+      const ImVec2 extent = current->CalcTextSizeA(title_size, FLT_MAX, 0.0f, title.c_str());
+      dl->PushClipRect(ImVec2(left, y0), ImVec2(right, y0 + title_h), true);
+      outlined_text(dl, current, title_size, ImVec2(own ? left : right - extent.x, y0), with_alpha(lighter(colour, 0.5f), 1.0f), title.c_str(), true);
+      dl->PopClipRect();
+      // The portraits, leaders on the outside.
+      const size_t count = card.members.size();
+      const float row_w = count == 0 ? 0.0f : static_cast<float>(count) * (portrait + portrait_gap) - portrait_gap;
+      const float row_x = left + (column - row_w) * 0.5f;
+      for (size_t i = 0; i < count; ++i) {
+        const size_t place = own ? i : count - 1 - i;
+        draw_portrait(dl, card.members[i], row_x + static_cast<float>(place) * (portrait + portrait_gap), portrait_y, portrait, own);
+      }
+      // The card on a dark panel.
+      const float pad = em * 0.3f;
+      dl->AddRectFilled(ImVec2(left - pad, table_y - pad), ImVec2(right + pad, table_y + table_h + pad), IM_COL32(8, 10, 18, 190), pad * 1.5f);
+      dl->AddRect(ImVec2(left - pad, table_y - pad), ImVec2(right + pad, table_y + table_h + pad), with_alpha(colour, 0.55f), pad * 1.5f);
+      ImGui::SetCursorScreenPos(ImVec2(left, table_y));
+      draw_card(own ? "##own_card" : "##their_card", card, column);
+    }
+
+    // "VS" between the portraits, popping in as the sides arrive, on a soft glow.
+    const float vs_size = em * kVsSize * (1.0f + 0.5f * (1.0f - ease));
+    const ImVec2 vs_extent = current->CalcTextSizeA(vs_size, FLT_MAX, 0.0f, "VS");
+    const ImVec2 vs_centre(width * 0.5f, portrait_y + portrait * 0.5f);
+    dl->AddCircleFilled(vs_centre, vs_extent.y * 0.75f, with_alpha(kGold, 0.12f * ease), 32);
+    outlined_text(dl, current, vs_size, ImVec2(vs_centre.x - vs_extent.x * 0.5f, vs_centre.y - vs_extent.y * 0.5f), with_alpha(kGold, ease), "VS", true);
+
+    // Who moves first, and the wait for the other side.
+    const std::string first = own_first ? std::string("You go first") : std::format("{} goes first", start.name);
+    const float footer_y = table_y + table_h + spacing;
+    const ImVec2 first_extent = ImGui::CalcTextSize(first.c_str());
+    outlined_text(dl, current, em, ImVec2((width - first_extent.x) * 0.5f, footer_y), with_alpha(own_first ? lighter(kOwnColour, 0.4f) : lighter(kTheirColour, 0.4f), ease),
+                  first.c_str());
+    if (waiting) {
+      const std::string wait = std::format("Waiting for {}...", start.name);
+      const ImVec2 wait_extent = ImGui::CalcTextSize(wait.c_str());
+      dl->AddText(current, em, ImVec2((width - wait_extent.x) * 0.5f, footer_y + line), ImGui::GetColorU32(ImGuiCol_TextDisabled), wait.c_str());
+    }
+    ImGui::PopStyleVar(2);
   }
   ImGui::End();
+  ImGui::PopStyleVar(2);
   ImGui::PopFont();
-  return std::nullopt;
 }
 
 }  // namespace oc::render

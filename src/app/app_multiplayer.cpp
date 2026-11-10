@@ -6,6 +6,7 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <map>
 #include <set>
 
 #include "battle/versus.h"
@@ -17,12 +18,23 @@
 #include "platform/keymap.h"
 #include "platform/paths.h"
 #include "platform/updater.h"
+#include "render/texture.h"
+#include "ui/menu/menu_common.h"
 
 namespace oc::app {
 
 void App::init_multiplayer() {
   mp_allowed = steam_allowed && config.debug_script.empty();
   mp_ui.set_card_source([this] { return multiplayer_card(); });
+  // The challenge popup's and the versus screen's portraits: the face set the menus show (HD art: [Game] Portraits; original art: 1999).
+  mp_ui.set_face_source(ctx, [this](int char_id, render::DecodedImage& image) {
+    const std::string set = platform::art_is_hd(config.art_mode) ? config.portraits : std::string("1999");
+    const std::map<int, std::string> faces = ui::menudraw::list_face_files(files, set);
+    const auto found = faces.find(char_id);
+    if (found == faces.end()) return false;
+    const std::optional<Bytes> bytes = files.read(found->second);
+    return bytes && render::decode_image(*bytes, image);
+  });
   ui.add_tab("Multiplayer", [this] {
     if (mp_ui.draw_tab(config.multiplayer, mp_client.get(), multiplayer_default_name(), mp_allowed, multiplayer_free(), ui.chat_font()))
       ui.mark_changed();
@@ -119,6 +131,8 @@ void App::begin_pvp(net::PvpStart start) {
   if (!mp_own_side.empty() && mp_client->send_pvp_side(mp_own_side)) {
     log::info("multiplayer: side sent for battle {} ({} bytes)", start.battle, mp_own_side.size());
     mp_ui.start_versus(std::move(start), multiplayer_clock());
+    // The battle's theme starts with the versus screen and plays on into the battle.
+    world.start_battle_music(kVersusBattleFlags);
     return;
   }
   ui.toast("The battle could not start", 3.0);
@@ -132,10 +146,12 @@ void App::start_pvp_battle(const net::PvpStart& start) {
   log::info("multiplayer: pvp battle {} against {} (seed {}, {} first, opening stamina {})", start.battle, start.opponent, start.seed, start.first,
             start.opening_stamina);
   if (!mp_client || mp_client->pvp_battle() != start.battle) {
+    world.cancel_battle_music();
     ui.toast("The battle could not start", 3.0);
     return;
   }
   if (mp_client->pvp_gone() != net::PvpGone::None) {
+    world.cancel_battle_music();
     ui.toast("The battle could not start", 3.0);
     mp_client->end_pvp(net::PvpResult::Aborted);
     return;
@@ -158,6 +174,7 @@ void App::start_pvp_battle(const net::PvpStart& start) {
     started = start_versus_battle(std::move(setup), std::make_unique<game::NetworkVersusLink>(*mp_client, local_side), true);
   }
   if (started) return;
+  world.cancel_battle_music();
   ui.toast("The battle could not start", 3.0);
   mp_client->end_pvp(net::PvpResult::Aborted);
 }
@@ -218,6 +235,14 @@ void App::multiplayer_overlay() {
     mp_ui.draw_challenges(*mp_client, now, ui.chat_font());
   }
   if (std::optional<net::PvpStart> start = mp_ui.draw_versus(*mp_client, now, ui.chat_font())) start_pvp_battle(*start);
+}
+
+void App::versus_banner_overlay() {
+  if (!battle_ready || !(battle_ok || battle_in_field)) return;
+  const std::optional<game::BattleView::VersusBanner> banner = battle.versus_banner();
+  if (!banner) return;
+  ui.request_chat_font();
+  render::MultiplayerUi::draw_turn_banner(banner->text, banner->own, ui.chat_font());
 }
 
 }  // namespace oc::app

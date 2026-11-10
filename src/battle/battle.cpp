@@ -1017,6 +1017,12 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
       if (cmd.form < 0) return actor_unit.form >= 0 || versus_ ? true : no("already in the character's own form");
       if (static_cast<size_t>(cmd.form) >= tables_.enemies.size() || (versus_ && !dopple_has(cmd.form, side_of(cmd.actor)))) return no("not in the pool");
       return true;
+    case Command::Kind::Engage:
+      if (!versus_) return no("only a versus battle stages an engage");
+      if (side_of(cmd.actor) != turn_side_ || !can_act(cmd.actor)) return no("actor cannot act");
+      if (cmd.target < 0 || cmd.target >= kPlayerUnits || side_of(cmd.target) == side_of(cmd.actor) || !unit(cmd.target).standing())
+        return no("bad engage target");
+      return true;
     default: break;
   }
   if (!can_act(cmd.actor)) return no("actor cannot act");

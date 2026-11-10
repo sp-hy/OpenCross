@@ -803,7 +803,8 @@ void BattleView::handle_input(const platform::Input& in) {
   if (ui_ == Ui::Result) {
     const float hold = versus_ ? kVersusPlateHold : 0.4f;
     if (((ok || auto_confirm_) && result_age_ > hold) || (versus_ && result_age_ > kVersusPlateSeconds)) {
-      audio_.stop_music();
+      // A versus win's victory song plays on until the field's own song replaces it.
+      if (!(versus_ && versus_result_ == VersusResult::Won)) audio_.stop_music();
     audio_.stop_sounds();
       finished_ = true;
     }
@@ -1265,8 +1266,14 @@ void BattleView::handle_input(const platform::Input& in) {
 // (status 0x2000) 35 / 22 / 10 (1000 / 40 + 10, 500 / 40 + 10, 10). No such strength: the cursor stays where it is.
 // With the option on Manual nothing happens. The rule lives in Battle::auto_hit_level.
 void BattleView::chain_auto_cursor() {
-  if (!auto_accuracy_) return;
   const battle::Unit& unit = bunit(active_pc_);
+  // A versus battle never reopens the menu on a dim Element row (a cursor left there on an earlier turn): it goes to the hits.
+  if (versus_ && chain_cursor_ == 3 && (elem_open_level(unit, tables_->elements.size()) < 0 || unit.gauge < 0 || unit.stamina == 0)) chain_cursor_ = 2;
+  if (!auto_accuracy_) {
+    if (versus_)
+      while (chain_cursor_ > 0 && battle_->chain_cost(chain_cursor_, unit) > unit.stamina) --chain_cursor_;
+    return;
+  }
   const int hit_level = auto_hit_level(active_pc_, engaged_target_, false);
   if (hit_level >= 0) {
     chain_cursor_ = hit_level;

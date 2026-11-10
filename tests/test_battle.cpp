@@ -5960,6 +5960,19 @@ void test_versus_start_and_turns() {
   CHECK(!battle.apply(versus_command(Command::Kind::Defend, 3)));
   CHECK(!battle.apply(versus_command(Command::Kind::Focus, 4)));
   CHECK(!battle.apply(versus_command(Command::Kind::EndTurn, 3)));
+  // An engage names a standing unit of the other side and changes nothing.
+  {
+    Command engage = versus_command(Command::Kind::Engage, 0);
+    engage.target = 1;
+    CHECK(!battle.apply(engage));
+    engage.target = 4;
+    const u64 before = battle.state_hash();
+    CHECK(battle.apply(engage));
+    CHECK_EQ(battle.state_hash(), before);
+    engage.actor = 3;
+    engage.target = 0;
+    CHECK(!battle.apply(engage));
+  }
   const int actions = battle.actions();
   CHECK(battle.apply(versus_command(Command::Kind::Focus, 1)));
   CHECK_EQ(battle.active_pc(), 1);

@@ -176,8 +176,9 @@ bool App::start_versus_battle(game::BattleView::VersusSetup setup, std::unique_p
   versus_net = net;
   const int battlefield = setup.battlefield;
   versus_next = std::move(setup);
-  // The regular battle music (flags 0) through the field's own request: the encounter effect, the load, the swirl.
-  world.request_battle(0, battlefield, 0);
+  // The boss theme (flag 0x40) through the field's own request: the encounter effect, the load, the swirl. A network battle's theme
+  // already plays from the versus screen on.
+  world.request_battle(0, battlefield, kVersusBattleFlags);
   return true;
 }
 

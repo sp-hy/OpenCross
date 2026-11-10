@@ -14,7 +14,7 @@ namespace oc::game {
 
 namespace {
 
-constexpr int kLastKind = static_cast<int>(battle::Command::Kind::Form);
+constexpr int kLastKind = static_cast<int>(battle::Command::Kind::Engage);
 // An attack chain holds at most this many hits.
 constexpr size_t kChainHits = 4;
 

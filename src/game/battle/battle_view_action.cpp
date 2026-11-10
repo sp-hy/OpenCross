@@ -302,6 +302,14 @@ void BattleView::begin_engage(int pc, int target) {
   face_toward(pc, target);
   select_approach();
   act_.phase = Act::Phase::Approach;
+  // The other game shows the run-up as well.
+  if (versus_) {
+    battle::Command engage;
+    engage.kind = battle::Command::Kind::Engage;
+    engage.actor = rules_unit(pc);
+    engage.target = rules_unit(target);
+    versus_apply(engage, true);
+  }
   if (!(visual.scripts && visual.scripts->has_s5 && start_script(pc, &visual.scripts->s5, 2, 0, kApproach))) {
     visual.script_done = true;
     const float dist = approach_distance(pc, target);
