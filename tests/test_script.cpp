@@ -1220,6 +1220,35 @@ void test_mod_ui_ops() {
   CHECK(!vm.mod_ui().shown && vm.mod_ui().elements[0].kind == ModUi::kNone);
 }
 
+// The entrance table (0xFF, then 8-byte records up to the first script) keeps its records when the first script does not start on a
+// record boundary: two records, three spare bytes, then the code.
+void test_entrance_table_unaligned() {
+  Bytes blob(0x84 + 0x40, 0);
+  blob[0x80] = 1;
+  const u16 first = 1 + 2 * 8 + 3;
+  blob[0x84] = first & 0xFF;
+  blob[0x85] = first >> 8;
+  const s16 records[2][4] = {{1125, 2754, 1024, 1}, {-50, 300, 0, 0}};
+  blob.push_back(0xFF);
+  for (const auto& record : records)
+    for (s16 word : record) {
+      blob.push_back(static_cast<u8>(word & 0xFF));
+      blob.push_back(static_cast<u8>((word >> 8) & 0xFF));
+    }
+  blob.insert(blob.end(), {0x00, 0x00, 0x00, 0x00});
+  const auto module = FieldScriptModule::parse(blob);
+  CHECK(module.has_value());
+  if (!module) return;
+  CHECK_EQ(module->positions.size(), 2);
+  if (module->positions.size() != 2) return;
+  CHECK_EQ(module->positions[0].a, 1125);
+  CHECK_EQ(module->positions[0].b, 2754);
+  CHECK_EQ(module->positions[0].c, 1024);
+  CHECK_EQ(module->positions[0].level, 1);
+  CHECK_EQ(module->positions[1].a, -50);
+  CHECK_EQ(module->positions[1].b, 300);
+}
+
 // GET_POSITION (48) writes X, Z, Y in operand order, like the published player variables 0x12 / 0x14 / 0x16.
 class PosHost : public NullHost {
  public:
@@ -1803,6 +1832,7 @@ int main() {
   test_mod_ui_ops();
   test_reserve_ops();
   test_model_source_op();
+  test_entrance_table_unaligned();
   test_get_position_order();
   test_ca_faces_the_next_walk();
   test_run_script_inactive_target();

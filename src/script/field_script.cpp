@@ -196,13 +196,13 @@ std::optional<FieldScriptModule> FieldScriptModule::parse(ByteSpan blob, std::st
     for (auto& ptr : entity) ptr = reader.u16_();
   module.code_base = static_cast<u32>(kHeader + 4 + count * 0x40);
   module.code.assign(blob.begin() + module.code_base, blob.end());
-  // Pre-script table: 0xFF then n * 8-byte records, ending where the first real script starts.
+  // Pre-script table: 0xFF then 8-byte records, the ones that fit before the first real script. Record n is read at 1 + 8n
+  // wherever the first script starts, so code that does not start on a record boundary keeps the records before it.
   u32 first = 0xFFFFFFFF;
   for (const auto& entity : module.entities)
     for (u16 ptr : entity)
       if (ptr) first = std::min<u32>(first, ptr);
-  if (!module.code.empty() && module.code[0] == 0xFF && first != 0xFFFFFFFF && first > 1 && (first - 1) % 8 == 0 &&
-      first <= module.code.size()) {
+  if (!module.code.empty() && module.code[0] == 0xFF && first != 0xFFFFFFFF && first <= module.code.size()) {
     for (u32 offset = 1; offset + 8 <= first; offset += 8)
       module.positions.push_back({static_cast<s16>(rd16(module.code, offset)), static_cast<s16>(rd16(module.code, offset + 2)),
                                   static_cast<s16>(rd16(module.code, offset + 4)), static_cast<s16>(rd16(module.code, offset + 6))});
