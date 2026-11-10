@@ -13,6 +13,40 @@
 
 namespace oc::app {
 
+namespace {
+
+// Route `remote`: the test remote parties of the field (FieldWorld::route_remote_parties). Every change is a new pose_seq, as a network
+// message would be; a move keeps the party's state. False when the named party does not exist.
+bool apply_route_remote(game::FieldWorld& world, const game::RouteOut& out) {
+  std::vector<net::RemoteParty>& parties = world.route_remote_parties();
+  const net::RemoteParty& given = out.remote_party;
+  if (out.remote == "clear") {
+    parties.clear();
+    return true;
+  }
+  const auto it = std::find_if(parties.begin(), parties.end(), [&](const net::RemoteParty& party) { return party.pid == given.pid; });
+  if (out.remote == "add") {
+    net::RemoteParty party = given;
+    party.has_pose = true;
+    party.pose_seq = it != parties.end() ? it->pose_seq + 1 : 1;
+    if (it != parties.end()) *it = party;
+    else parties.push_back(party);
+    return true;
+  }
+  if (it == parties.end()) return false;
+  if (out.remote == "move") {
+    const net::PresenceState state = it->pose.state;
+    it->pose = given.pose;
+    it->pose.state = state;
+  } else {
+    it->pose.state = given.pose.state;
+  }
+  ++it->pose_seq;
+  return true;
+}
+
+}  // namespace
+
 void App::init_route_state() {
   rstate.ent_xz = [this](int ent, float& x, float& z) { return world.entity_xz(ent, x, z); };
   rstate.ent_facing = [this](int ent) { return world.entity_facing(ent); };
@@ -24,6 +58,7 @@ void App::init_route_state() {
   rstate.var = [this](int id) { return world.vm().var(static_cast<u16>(id)); };
   rstate.char_stat = [this](int id, int what) { return world.debug_char_stat(id, what); };
   rstate.set_char_stat = [this](int id, int what, int value) { world.debug_set_char_stat(id, what, value); };
+  rstate.remote_drawn = [this] { return world.remote_drawn(); };
   rstate.dialogue_text = [this] { return world.dialogue_text(); };
   rstate.dialogue_progress = [this] { return world.dialogue_progress(); };
   rstate.char_name = [this](int id) {
@@ -164,6 +199,11 @@ void App::route_frame() {
       apply_art_mode();
     }
     if (!out.request.empty()) route_request(out);
+    if (!out.remote.empty() && !apply_route_remote(world, out)) {
+      log::error("route: no remote party {}", out.remote_party.pid);
+      exit_code = 1;
+      route_finished = true;
+    }
     if (out.put && out.put_ent >= 0)
       world.set_position_xz(out.put_ent, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
     else if (out.put)

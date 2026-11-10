@@ -231,6 +231,10 @@ class MeshPipeline {
     // construct is drawn with the semi-transparency bit and THIS ABR (it replaces the constructs' own); as always on the PS1 only the texels
     // with STP set blend, the others stay opaque. -1 = off (each construct keeps its own shading-entry blend).
     int model_abr = -1;
+    // Below 1: the whole model is see-through, its nearest surface alpha-blended at this opacity over what is behind it (a depth pass
+    // first, so its own hidden faces do not show). Not a PS1 blend: the multiplayer option for other players' parties. Off for solid,
+    // flash and split water draws.
+    float opacity = 1.0f;
     // Flash draw: every polygon twice,
     // both semi-transparent with the usual light colour: first with the white CLUT (0x7FFF ORed into every non-zero entry, STP
     // kept) and ABR 2 (B - F), then with the model's own CLUT and ABR 1 (B + F). Texels without STP are opaque in both, so they show the

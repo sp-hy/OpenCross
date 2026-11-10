@@ -9,6 +9,7 @@
 //   app_run.cpp       run(): the main loop (hotkeys, per-frame settings, mode dispatch, the options window's changes)
 //   app_draw.cpp      draw_frame(): the frame composition (scene target, PS1-resolution passes, 8F warp, overlays, pillarboxing)
 //   app_feedback.cpp  the encounter feed-back / damage-jolt pass over the scene target
+//   app_multiplayer.cpp  multiplayer presence and chat: the connection, the local player's state, remote parties, chat and labels
 // The members stand in the order the objects are created; destruction runs in reverse, so every GPU resource goes before ctx and
 // the voice player before the mixer.
 #include <array>
@@ -42,6 +43,7 @@
 #include "game/title_backdrop.h"
 #include "import/text.h"
 #include "movie/player.h"
+#include "net/multiplayer_client.h"
 #include "platform/config.h"
 #include "platform/pad_remap.h"
 #include "platform/updater.h"
@@ -49,6 +51,7 @@
 #include "render/screen_pass.h"
 #include "render/gpu_context.h"
 #include "render/imgui_layer.h"
+#include "render/imgui_multiplayer.h"
 #include "render/mesh_pipeline.h"
 #include "render/render_target.h"
 #include "render/sprite_batch.h"
@@ -245,6 +248,20 @@ class App {
   void scene_extent(float w, float h, u32& tw, u32& th) const;
   void draw_scene_copy(const SceneFrame& sf, const render::Frame& target, const render::TexRef& scene);
 
+  // ---- app_multiplayer.cpp ----------------------------------------------------------------------------------------------------
+  void init_multiplayer();
+  // The chat key; while the chat (or a settings text field) is typed in, the keys are taken from the game.
+  void multiplayer_input();
+  // Connects or disconnects as [Multiplayer] says, gives the client the local player and the field the remote parties. After simulate().
+  void multiplayer_frame();
+  // The chat panel and the name labels, inside the ImGui frame.
+  void multiplayer_overlay();
+  net::LocalPresence multiplayer_local() const;
+  // The name sent while [Multiplayer] Name is empty: the Steam persona name when Steam is connected, else "Player".
+  std::string multiplayer_default_name();
+  // The client's clock: seconds since the App was made.
+  double multiplayer_clock() const;
+
   // ---- the session ------------------------------------------------------------------------------------------------------------
   std::filesystem::path exe;
   std::filesystem::path config_file;
@@ -282,6 +299,17 @@ class App {
   bool steam_allowed = false;
   bool steam_wanted = false;
   game::Achievements achievements;
+  // Multiplayer: mp_allowed is false in runs that never connect (--config, OC_QUIET, [Debug] Script); the client is made at the first
+  // enable. mp_parties_given: the field holds remote parties (cleared once when multiplayer goes off). mp_labels_shown: this frame's
+  // field shows the remote parties' labels (not under a battle, a menu or a movie). mp_stored_persona: the Steam display name stored on
+  // this machine, read once.
+  bool mp_allowed = false;
+  std::unique_ptr<net::MultiplayerClient> mp_client;
+  render::MultiplayerUi mp_ui;
+  bool mp_parties_given = false;
+  bool mp_labels_shown = false;
+  std::optional<std::string> mp_stored_persona;
+  std::chrono::steady_clock::time_point mp_epoch = std::chrono::steady_clock::now();
   // API names earned this run; routes read them.
   std::vector<std::string> earned_achievements;
   bool restart_for_update = false;

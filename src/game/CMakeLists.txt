@@ -37,6 +37,9 @@ add_library(oc_game STATIC
   field_world_audio.cpp
   field_world_draw.cpp
   field_world_effects.cpp
+  field_world_remote.cpp
+  remote_parties.h
+  remote_parties.cpp
   route_script.h
   route_script.cpp
   achievements.h

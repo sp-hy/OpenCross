@@ -28,7 +28,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `GameDir` | empty | folder containing `data\cdrom.dat` | Game install. Used only if it holds `data\cdrom.dat`; otherwise (and when empty) the exe folder and up to 12 parent folders are searched. |
-| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = used as given. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. |
+| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe`, except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. |
 | `SaveFile` | `save.dat` | file name | Save file name inside `SaveDir`. Written only when it differs from `save.dat`. Automated runs point it at a scratch copy. |
 
 ### 2.2 `[Video]`
@@ -137,6 +137,27 @@ The settings window shows an option's rows only while the choice it belongs to i
 | `VoiceVolume` | 100 | 0..100 | Voice bus gain in percent, on top of `Master`. |
 | `BgmSource` | `remastered` | `remastered original` | RDE's HCA soundtrack / the PS1 AKAO sequences through the built-in synthesiser. Any other value reads as `remastered`. |
 
+### 2.6.1 `[Multiplayer]`
+
+Presence and chat with other players (`multiplayer.md`), the settings window's Multiplayer tab. Off by default. Runs with `--config`, `OC_QUIET` or `[Debug] Script` never connect, make no `PlayerId` and draw nothing of it.
+
+| Key | Default | Values / clamp | Meaning |
+|---|---|---|---|
+| `Enabled` | 0 | bool | Connect to the server of `Server` while the game runs. The first enable writes a new `PlayerId`. |
+| `Server` | `master` | `master other` | `master`: the public OpenCross server, `wss://opencross-multiplayer.sphy.workers.dev/ws` (fixed). `other` (the tab's "Local / other"): the address in `ServerUrl`. Any other value keeps the default. |
+| `ServerUrl` | `ws://127.0.0.1:8787/ws` | `ws://` or `wss://` address | The server used with `Server=other`: one run on this machine (`multiplayer.md` section 6) or anyone's own. Empty: the tab shows "No server address" and nothing connects. |
+| `Name` | empty | text | The name other players see (the server cuts it to 24 code points). Empty = the Steam display name: from the Steam connection while `[Game] Steam` is on, else as Steam last stored it for the current user in `<SteamPath>\config\loginusers.vdf` (`PersonaName`), else `Player`. |
+| `PlayerId` | empty | 32 lower-case hex digits | The install's random identity (128 bits from the system's random generator), made when multiplayer is enabled and the value is not of this form. Sent only in `hello`. |
+| `ShowPlayers` | 1 | bool | Draw the other players' parties in the room. |
+| `MaxParties` | 8 | 1..32 | At most this many remote parties are drawn, the nearest to the camera's target. |
+| `Translucent` | 0 | bool | Draw the remote parties see-through. |
+| `ShowLabels` | 1 | bool | Each remote leader's name and Star Level above it. |
+| `ChatBubbles` | 1 | bool | A room chat line also shows in a bubble over the speaker's party, the player's own included (`multiplayer.md` section 7). |
+| `Chat` | `new` | `always new hidden` | When the chat panel shows while not typing: `always` the last 8 lines; `new` a line for 10 s after it arrives, fading over its last 2 s; `hidden` never. Any other value keeps the default. |
+| `MuteHidesParty` | 1 | bool | A muted player's party is hidden as well as their chat. |
+| `AdminToken` | empty (not written) | text | The server's `ADMIN_TOKEN` (`multiplayer.md` section 6). Set by hand; the tab has no field for it. Sent only in `hello`, and only to the Master server (never to a "Local / other" address, whose operator would see it); when it matches, the server marks this player's chat lines and every client shows the name in red. |
+| `Muted` | empty | comma list of `pid`s | The muted players (the tab's Mute buttons). Spaces around an entry and empty entries are dropped. |
+
 ### 2.7 `[Debug]`
 
 Developer and automation switches, read once at boot (except `Log` and `Panels`, see section 4). Keys marked "conditional" are written only when set (non-empty / non-zero).
@@ -238,6 +259,8 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Driver` | Needs a restart; the Backend row offers a *Restart now* button once it differs from the one the run started with. |
 | `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1ResGraphics`, `Ps1ResUi`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
 | `Log` | The Debug tab starts or stops the log at once. |
+| `[Multiplayer] Enabled`, `Server`, `ServerUrl` | Connect, reconnect or disconnect at once; an address field applies when it is left. |
+| other `[Multiplayer]` keys | Read every frame; `Name` goes to the server as a `profile` message. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
 | `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
 

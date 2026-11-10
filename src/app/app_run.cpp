@@ -27,6 +27,7 @@ int App::run() {
   while (window.pump(input) && !quit_requested && !restart_for_update) {
     log_frametime();
     frame_pad_remap();
+    multiplayer_input();
     frame_hotkeys();
     frame_settings();
     debug_tools_frame();
@@ -53,6 +54,7 @@ int App::run() {
     }
     loop_speed.ran = false;
     if (!simulate()) break;
+    multiplayer_frame();
     // Menus, shops, the results and the other screens play their sounds at the normal rate (RDE resets the SFX tick rate there).
     if (!loop_speed.ran) mixer.set_sfx_tempo(1.0f);
 
@@ -78,6 +80,7 @@ int App::run() {
 
     ui.set_pointer_hidden(platform::pointer_hidden(window.fullscreen(), ui.options_open, window.mouse_idle_ms()));
     ui.new_frame();
+    multiplayer_overlay();
     // The room's entity / script tables stay while a battle, menu, movie or flow screen covers the field.
     debug_field = field_visible();
     apply_options_change(ui.options_window(config, own_ini ? config_file : std::filesystem::path()));

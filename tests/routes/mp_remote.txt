@@ -1,0 +1,51 @@
+# alu_a03i: a three-member remote party (Kid, Guile, Poshul) placed as the network would place it, walked north then east, drawn in each
+# state (standing in a battle or a menu). It is cosmetic: nothing of the room changes while it is there (`assert same`), and the player walks through the
+# spots its leader and first follower stand on. Shots: mp_remote_01 standing, mp_remote_02 after the walk.
+0 wait 5
+- request party_add 1
+- set var 0x00 8
+- load alu_a03i 0
+- wait 90
+- walk -84 210 24 900
+- wait 120
+- snap 0x00 0x04
+- remote add p1 Remote 1 2 12 60 0 300 0x400
+- wait 45
+- assert remote 1
+- screenshot mp_remote_01.png
+- remote move p1 60 0 330 0x400 3 1
+- wait 6
+- remote move p1 60 0 360 0x400 3 1
+- wait 6
+- remote move p1 60 0 390 0x400 3 1
+- wait 6
+- remote move p1 60 0 420 0x400 3 1
+- wait 6
+- remote move p1 60 0 450 0x400 3 1
+- wait 6
+- remote move p1 90 0 450 0x800 3 1
+- wait 6
+- remote move p1 120 0 450 0x800 3 1
+- wait 6
+- remote move p1 120 0 450 0x800 1 0
+- wait 40
+- assert remote 1
+- screenshot mp_remote_02.png
+- assert same
+# battle hides the party, a menu shows it standing
+- remote state p1 1
+- wait 2
+- assert remote 1
+- remote state p1 2
+- wait 2
+- assert remote 1
+- assert same
+# through the first follower's spot (200 path units behind the leader) and the leader's
+- walk 60 310 12 600
+- assert near player 60 310 16
+- walk 120 450 12 600
+- assert near player 120 450 16
+- remote clear
+- wait 2
+- assert remote 0
+- quit

@@ -14,6 +14,7 @@
 #include "render/gpu_context.h"
 
 union SDL_Event;
+struct ImFont;
 
 namespace oc::render {
 
@@ -100,6 +101,12 @@ class ImGuiLayer {
   // same text up to the first ':' replaces the earlier one.
   void toast(std::string text, double seconds = 1.8);
 
+  // The font for text players write (chat, names): Segoe UI with Latin, Greek and Cyrillic, plus the Japanese glyphs of Meiryo or Yu
+  // Gothic and the symbols of Segoe UI Symbol. Built at the next new_frame after the first request (it is large, so only multiplayer
+  // asks for it); until then, or when Segoe UI is missing, chat_font() is the UI font.
+  void request_chat_font() { chat_font_wanted_ = true; }
+  ImFont* chat_font() const;
+
   // Shared widgets for tab bodies (consistent look across tabs).
   // section: a header line with a rule. begin_panes: side-by-side panes (TableNextColumn per pane; one column when narrow), EndTable()
   // if it returned true. begin_rows: a two-column label / control table, end_rows() if it returned true. row: next row, label cell then
@@ -113,6 +120,7 @@ class ImGuiLayer {
 
  private:
   void apply_style();
+  void build_chat_font();
   OptionsChange general_tab(platform::Config& cfg);
   OptionsChange graphics_tab(platform::Config& cfg);
 
@@ -142,6 +150,8 @@ class ImGuiLayer {
   // Style scale currently applied (0 = not yet).
   float ui_scale_ = 0.0f;
   bool custom_font_ = false;
+  bool chat_font_wanted_ = false, chat_font_built_ = false;
+  ImFont* chat_font_ = nullptr;
 };
 
 }  // namespace oc::render

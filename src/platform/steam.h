@@ -23,7 +23,7 @@ struct StatsEvent {
   bool ok;
 };
 
-// The user stats calls SteamClient needs. The real one talks to the running client; tests supply their own.
+// The user stats and friends calls SteamClient needs. The real one talks to the running client; tests supply their own.
 class SteamBackend {
 public:
   virtual ~SteamBackend() = default;
@@ -36,6 +36,8 @@ public:
   virtual int achievement_count() = 0;
   virtual std::string achievement_name(int index) = 0;
   virtual std::string achievement_title(const std::string& api_name) = 0;
+  // The signed-in user's Steam display name; empty when unavailable.
+  virtual std::string persona_name() = 0;
 };
 
 class SteamClient {
@@ -63,6 +65,9 @@ public:
   void set_meta(std::string meta, std::vector<std::string> required);
   // The display name of the next achievement that has just been unlocked, for the on-screen notice.
   std::optional<std::string> next_unlocked();
+
+  // The user's Steam display name (multiplayer's default name); empty when not connected.
+  std::string persona_name();
 
   // Read-only views, valid once ready().
   int achievement_count();
