@@ -149,7 +149,7 @@ RDE's fast and slow modes (F2 / F1, pad RT / LT, the Cheats tab; `App::update_lo
 
 1. `mods.apply(files, render::mod_art(mode))` rebuilds the overlay and bumps `Vfs::generation()` if it changed.
 2. `files.set_hd_mode(platform::art_is_hd(mode))`. In HD mode `cdrom2_first` is true for every member. In Original mode only a fixed list goes to `cdrom2`: `map/etc/openfont.tim`, `menu/title/cmptitle.tim`, `map/mapbin/ending.ctd`, and anything under `map/window/`.
-3. Each consumer rebuilds its art in place, without touching the simulation: `FieldWorld::set_art_mode(hd, force)` runs `swap_art()` (`RoomView::reload_art`, `Actor::swap_model_art`, effect atlases), then `BattleView`, `BattleResults`, `PartyScreen`, `GameFlow`, `MainMenu` and `ShopScreen` follow.
+3. Each consumer rebuilds its art in place, without touching the simulation: `FieldWorld::set_art_mode(hd, force)` runs `swap_art()` (`RoomView::reload_art`; every model an entity shows rebuilt on its own worker thread at once, then handed over through `Actor::swap_model_art`; effect atlases), then `BattleView`, `BattleResults`, `PartyScreen`, `GameFlow`, `MainMenu` and `ShopScreen` follow.
 
 `Overlay::enhance`, read through `Vfs::enhanced()`, is true only for `Modded` (`ModManager::apply`). In the source its one reader is `render/model_tiles.cpp`; other improvements are separate `[Enhancements]` config keys (section 6.4). The code comments state the rule: HD art is exactly what RDE draws, and upgrades exist only in Modded.
 

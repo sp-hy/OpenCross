@@ -244,13 +244,12 @@ bool dump_text(const std::string& rel_path, const std::string& text, bool forced
 namespace {
 
 // Decoded replacement images, most recently used first, so a texture that appears in room after room (content-named tiles, the field
-// characters' art) is decoded once. Keyed by the mod file, its archive member and the file's write time; emptied when the mod overlay
-// changes; the oldest entries go beyond the byte budget.
+// characters' art) is decoded once. Keyed by the mod file, its archive member and the file's write time, so an entry stays valid across
+// overlay changes (an art-mode switch back to Modded finds its images decoded); the oldest entries go beyond the byte budget.
 constexpr size_t kDecodedCacheBytes = size_t{2} << 30;
 
 struct DecodedCache {
   std::mutex mutex;
-  std::uint32_t generation = 0;
   size_t bytes = 0;
   std::list<std::pair<std::string, std::shared_ptr<const DecodedImage>>> order;
   std::unordered_map<std::string, decltype(order)::iterator> index;
@@ -267,26 +266,19 @@ std::string decoded_cache_key(const vfs::OverlayFile& file) {
   return file.label() + "|" + std::to_string(ec ? 0 : stamp.time_since_epoch().count());
 }
 
-std::shared_ptr<const DecodedImage> cached_decode(const std::string& key, std::uint32_t generation) {
+std::shared_ptr<const DecodedImage> cached_decode(const std::string& key) {
   DecodedCache& cache = decoded_cache();
   std::lock_guard lock(cache.mutex);
-  if (cache.generation != generation) {
-    cache.order.clear();
-    cache.index.clear();
-    cache.bytes = 0;
-    cache.generation = generation;
-    return nullptr;
-  }
   const auto it = cache.index.find(key);
   if (it == cache.index.end()) return nullptr;
   cache.order.splice(cache.order.begin(), cache.order, it->second);
   return it->second->second;
 }
 
-void cache_decoded(const std::string& key, std::uint32_t generation, std::shared_ptr<const DecodedImage> image) {
+void cache_decoded(const std::string& key, std::shared_ptr<const DecodedImage> image) {
   DecodedCache& cache = decoded_cache();
   std::lock_guard lock(cache.mutex);
-  if (cache.generation != generation || cache.index.contains(key) || image->rgba.size() > kDecodedCacheBytes) return;
+  if (cache.index.contains(key) || image->rgba.size() > kDecodedCacheBytes) return;
   cache.bytes += image->rgba.size();
   cache.order.emplace_front(key, std::move(image));
   cache.index[key] = cache.order.begin();
@@ -301,8 +293,7 @@ void cache_decoded(const std::string& key, std::uint32_t generation, std::shared
 
 static bool load_replacement(const vfs::Vfs& vfs, const vfs::OverlayFile& file, const std::string& path, u32& w, u32& h, std::vector<u8>& rgba) {
   const std::string cache_key = decoded_cache_key(file);
-  const std::uint32_t generation = vfs.generation();
-  std::shared_ptr<const DecodedImage> img = cached_decode(cache_key, generation);
+  std::shared_ptr<const DecodedImage> img = cached_decode(cache_key);
   if (!img) {
     const auto bytes = vfs.read_mod_file(file);
     if (!bytes) return false;
@@ -312,7 +303,7 @@ static bool load_replacement(const vfs::Vfs& vfs, const vfs::OverlayFile& file, 
       return false;
     }
     img = decoded;
-    cache_decoded(cache_key, generation, std::move(decoded));
+    cache_decoded(cache_key, std::move(decoded));
   }
   w = img->width;
   h = img->height;

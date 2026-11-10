@@ -136,6 +136,23 @@ void FieldWorld::swap_art() {
   const size_t n_room = view_.scene() ? view_.scene()->models.size() : 0;
   room_models_.assign(n_room, nullptr);
   room_model_tried_.assign(n_room, false);
+  // Every model an entity shows is rebuilt on its own worker at once (reading, decoding and composing replacement art is the slow
+  // part), then handed over below in entity order.
+  std::vector<std::future<std::optional<PreparedRoomModel>>> room_jobs(n_room);
+  for (const Ent& ent_state : ents_) {
+    const auto& cur = ent_state.actor.model_handle();
+    if (!cur) continue;
+    for (size_t i = 0; i < old_room.size() && i < n_room; ++i)
+      if (old_room[i] == cur && !room_jobs[i].valid())
+        room_jobs[i] = std::async(std::launch::async, [scene = view_.scene(), i, ctx = ctx_] { return prepare_room_model(*scene, i, ctx); });
+    for (const auto& [id, handle] : old_chars)
+      if (handle == cur) prefetch_character_model(id);
+    for (const auto& [key, handle] : old_sourced)
+      if (handle == cur) prefetch_sourced_model(key);
+  }
+  room_prepared_.resize(n_room);
+  for (size_t i = 0; i < n_room; ++i)
+    if (room_jobs[i].valid()) room_prepared_[i] = room_jobs[i].get();
   int swapped = 0, kept = 0;
   for (Ent& ent_state : ents_) {
     const auto& cur = ent_state.actor.model_handle();
