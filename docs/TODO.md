@@ -16,6 +16,8 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 2. Fidelity gaps (not modelled)
 
+* **P3 Model flag bit 0 (anim-sequence ops 19 / 1A) is not modelled.** `src/game/actor.cpp` skips ops 19 / 1A, and `Actor::compose` / `UnitPose` always build a joint's local rotation as one ZYX matrix of rest + clip angles. On the PS1 the joint matrix builder (`sys_model_build_joint_matrices`, 0x8009AD38) does that only with the model flag bit 0 clear; with it set and no head-turn callback it builds `RotMatrixZYX(rest) x RotMatrixZYX(clip)` (`docs/formats/model.md` 6.4). The two differ only when both rest and clip rotate a joint about more than one axis. To do: count the anim sequences that run op 1A (field `.seq` and battle anmseq), and if any shipped model is posed with the flag set, keep the flag per model and compose the product there; compare one such pose against a PS1 capture. Done when the flag is modelled (or the count shows no shipped use and the doc says so).
+
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
 
 
