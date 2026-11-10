@@ -123,7 +123,7 @@ void FieldVM::exec_ext(u8 sub) {
     case 0x25: set_flag(self.flags270, 21, byte_at(1) & 1); advance(2); break;
     case 0x26: opaque(0xFE26, 1, 1); advance(2); break;
     case 0x27: opaque(0xFE27, 0, 0); advance(1); break;
-    case 0x28: write_var(word_at(1), host_.query(Query::GlobalDiff)); advance(3); break;
+    case 0x28: write_var(word_at(1), host_.query(Query::MovieFramesLeft)); advance(3); break;
     case 0x29: {
       const u32 bit = static_cast<u32>(((operand_u(1) & 7) + 8));
       set_global(Global::KeepSfxSlots, global(Global::KeepSfxSlots) | (1 << bit));
@@ -275,7 +275,7 @@ void FieldVM::exec_ext(u8 sub) {
       advance(2);
       break;
     }
-    case 0x4D: set_global(Global::Byte4D, byte_at(1)); advance(2); break;
+    case 0x4D: set_global(Global::Vibration, byte_at(1)); advance(2); break;
     case 0x4E: set_global_bit(15, byte_at(1) & 1); advance(2); break;
     case 0x4F: {
       const int target = entity_operand(1);

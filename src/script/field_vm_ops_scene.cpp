@@ -24,8 +24,8 @@ bool FieldVM::exec_scene(u8 op) {
       set_global(Global::CameraYOffset, operand_s(1, 3, 0x80));
       advance(4);
       break;
-    case 0x65:  // STORE_GLOBAL_TO_VAR
-      write_var(word_at(1), host_.query(Query::ScriptGlobal));
+    case 0x65:  // GET_LEADER_DEPTH
+      write_var(word_at(1), host_.query(Query::LeaderDepth));
       advance(3);
       break;
     case 0x66:  // SET_WATER_LEVEL: water level of slot b

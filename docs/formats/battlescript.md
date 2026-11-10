@@ -236,7 +236,7 @@ Other opcodes below 0xE5 with a nonzero table length never occur. `python -I too
 * RNG: `1F` uses libc `rand()` (`Host::libc_rand`); 2B / 55 picks use `rnd(lo, hi)`.
 * Engine flags set by ops 81, 39, AF are exposed as `end_check_enabled()`, `ui_enabled()`, `menu_locked()`; `Battle::check_end` honours the first, the battle view the others (39 through its `EngineFlag` event).
 * A forced result (op 83) waits for the death casts. A kill script that queues casts (op 67), waits with A4 and then forces its code runs synchronously in OpenCross, so the code is set before its casts have been executed; on the PS1 the A4 holds the script until the action executor has played them. `Battle::check_end` therefore ignores `forced_result()` while a death plan is queued or running and applies it at the end test after the last one, whether the killing blow was an element or a weapon hit (a weapon command's end test runs right after each hit, before the reactions). The case in the data is the Time Devourer (scene 472): PS1 capture (battlefield 29, its HP set to 1 at the first command menu, one weak weapon hit): HP 0 on the hit, element 511 cast by unit 3 26 frames later, the battle overlay gone about 1230 frames after that. OpenCross before the rule: `battle over: scripted (code 3)` right after the hit and no cast; with it, 511 is cast and then the battle ends with code 3.
-* Unknown: the exact identity of the two effect pools behind C0-C5 (a resource lookup by tag; they hold face/portrait and 3D effect objects).
+* The two pools behind C0-C5: pool A holds the effect timelines (type 0x10 resources, C0 / C1 / C4), pool B the camera shots (type 0x0C, C2 / C3 / C5); the table above has the details.
 
 ## 7. OpenCross: script stream on virtual time
 
