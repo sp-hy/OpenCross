@@ -473,6 +473,17 @@ void test_portrait_side() {
   CHECK(FieldWorld::portrait_on_left(0x800, 0, 0, 0x1000));
 }
 
+// FE 4D writes the Vibration option the title screen and the pause screen set.
+void test_vibration_global() {
+  ui::GameState state;
+  game::FieldWorld world;
+  world.set_game_state(&state);
+  world.set_global(script::Global::Vibration, 1);
+  CHECK(state.option(ui::opt::kVibration));
+  world.set_global(script::Global::Vibration, 0);
+  CHECK(!state.option(ui::opt::kVibration));
+}
+
 void test_give_item_element_count() {
   ui::GameState state;
   game::FieldWorld world;
@@ -635,6 +646,7 @@ int main() {
   test_character_strip_locked_cells();
   test_script_key_item_range();
   test_give_item_element_count();
+  test_vibration_global();
   test_actor_anim();
   test_stair_clip();
   test_attached_rigid();

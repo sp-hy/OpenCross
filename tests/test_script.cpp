@@ -130,6 +130,29 @@ void test_movie_end_jump() {
   CHECK_EQ(vm.var(var::kPrevMapId), 472);
 }
 
+// A7 and AB only step over their operands (the debug monitor is off in the retail game); FE 4D sets the Vibration option.
+void test_debug_calls_and_vibration() {
+  class OptionHost : public NullHost {
+   public:
+    int opaque = 0, vibration = -1;
+    void opaque_op(u16, std::span<const u8>) override { ++opaque; }
+    void set_global(Global which, s32 value) override {
+      if (which == Global::Vibration) vibration = value;
+    }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xA7}).word(I(1)).word(I(2)).word(I(3)).word(I(4));
+  script.raw({0xAB}).word(I(5)).word(I(6));
+  script.raw({0xFE, 0x4D, 0x01});
+  script.stop();
+  OptionHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.opaque, 0);
+  CHECK_EQ(host.vibration, 1);
+}
+
 // 7E and D4 take the table row from the low byte of their first operand; D4's movie flags are its whole second operand, 7E's are 0.
 void test_movie_operands() {
   class MovieHost : public NullHost {
@@ -1795,6 +1818,7 @@ int main() {
   test_arithmetic();
   test_movie_end_jump();
   test_movie_operands();
+  test_debug_calls_and_vibration();
   test_skipped_battle();
   test_budget_bonus_and_entry_window();
   test_second_battle_waits();
