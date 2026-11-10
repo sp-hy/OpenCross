@@ -784,6 +784,11 @@ fld_extra_anim_buffer = 0x800EC2A8;  # data: buffer of the DD extra animation fi
 fld_trigger_talk_hit = 0x800E7840;  # data: trigger pass: index of the last circle actor whose talk range holds the leader
 fld_trigger_touch_hit = 0x800E7844;  # data: trigger pass: index of the last circle actor whose touch range holds the leader
 fld_trigger_box_hit = 0x800E783C;  # data: trigger pass: index of the last box actor whose rectangle holds the leader
+fld_op_get_leader_depth = 0x800C8FF8;  # function: script op 65: variable = the leader's ordering-table depth from the last camera scroll update
+fld_leader_ot_depth = 0x800EAC10;  # data: leader's projected ordering-table depth, refreshed by the camera scroll only while it follows the leader
+fld_op_debug_call_4 = 0x800C1C50;  # function: script op A7: with the debug flag set stores four operands and calls the debug monitor; otherwise skips 9 bytes
+fld_debug_call_args = 0x800E9D00;  # data: four words holding op A7's operands for the debug monitor
+fld_op_debug_call_u32 = 0x800BC828;  # function: script op AB: passes a 32-bit operand to the debug monitor routine and skips 5 bytes
 fld_op_call = 0x800CD470;  # function: script op 05: pushes the return pc on the entity's 4-entry stack and jumps; with the stack full it yields in place
 fld_move_hold_box_hit = 0x800E7838;  # data: movement phase: index of the last box actor held because the leader's next position lies in it (-1 none)
 fld_move_hold_circle_hit = 0x800E7848;  # data: movement phase: index of the last circle actor held because it would touch the leader (-1 none)

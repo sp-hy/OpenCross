@@ -2833,7 +2833,8 @@ void test_pac_countdown_restore() {
 }
 
 // Op 76 writes the byte stats 0x18..0x1D (ATK, DEF, HIT, EVD, MAG, MDEF) as the PS1 stores them: one byte, or two with field bit 0x4000.
-// Entity 4's init (unit 3): ATK = 50; DEF / HIT = 0x0807 as one u16 store; MDEF = 0x1FF as a byte store (the high byte is dropped).
+// Entity 4's init (unit 3): ATK = 50; DEF / HIT = 0x0807 as one u16 store; EVD = 0x1FF as a byte store (the high byte is dropped);
+// MDEF = 0x0C2A as a u16 store (the high byte lands in the status-duration stat).
 Bytes assemble_stat_write_pac() {
   Bytes code;
   auto emit = [&](std::initializer_list<int> bytes) {
@@ -2844,7 +2845,8 @@ Bytes assemble_stat_write_pac() {
   emit({0x0E, 0xE3, 0x80});
   emit({0x76, 50, 0x00, 0xE9, 0x00, 0x18, 0x00, 0xE0});
   emit({0x76, 0x07, 0x08, 0xE9, 0x00, 0x19, 0x40, 0xE0});
-  emit({0x76, 0xFF, 0x01, 0xE9, 0x00, 0x1D, 0x00, 0xE0});
+  emit({0x76, 0xFF, 0x01, 0xE9, 0x00, 0x1B, 0x00, 0xE0});
+  emit({0x76, 0x2A, 0x0C, 0xE9, 0x00, 0x1D, 0x40, 0xE0});
   emit({0x00});
   const size_t ec = 5, base = 0x94 + ec * 0x40;
   Bytes image(base, 0);
@@ -2875,7 +2877,9 @@ void test_pac_stat_write() {
   CHECK_EQ(unit.atk, 50);
   CHECK_EQ(unit.def, 7);
   CHECK_EQ(unit.hit, 8);
-  CHECK_EQ(unit.mdef, 0xFF);
+  CHECK_EQ(unit.evd, 0xFF);
+  CHECK_EQ(unit.mdef, 0x2A);
+  CHECK_EQ(unit.dur, 0x0C);
 }
 
 // A scripted battle left by running away starts from a clean script state when it is entered again. evt409 (Boxer Boys) in

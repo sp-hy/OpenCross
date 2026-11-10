@@ -224,6 +224,7 @@ sys_host_file_close = 0x80028580;  # function: Closes a host-side file handle
 sys_host_file_seek = 0x80028590;  # function: Seeks within a host-side file handle
 sys_host_file_init = 0x800285B4;  # function: Host file access init (returns success)
 sys_host_file_read = 0x800285C0;  # function: Reads bytes from a host-side file handle
+sys_debug_stub_u32 = 0x80029B7C;  # function: debug-monitor hook taking a 32-bit value; inert in the retail build
 sys_debug_stub_a = 0x80029BA8;  # function: Debug-menu hook that is an empty stub in the retail build
 sys_debug_stub_b = 0x80029BD4;  # function: Debug-menu name hook that is an empty stub in the retail build
 sys_debug_stub_c = 0x80029C00;  # function: Debug-menu name hook that is an empty stub in the retail build

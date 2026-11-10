@@ -1100,9 +1100,10 @@ class ScriptedBrain::BattleHost final : public Host {
         case 0xAC: set_perm(true, false, value); return;
         case 0xAE: set_perm(true, true, value); return;
         case 0x2E: state.ap = std::max(0, value); return;
-        // ATK, DEF, HIT, EVD, MAG, MDEF are bytes: a byte store, or two with code bit 0x4000 (the next stat takes the high byte).
+        // ATK, DEF, HIT, EVD, MAG, MDEF are bytes: a byte store, or two with code bit 0x4000 (the next byte takes the high byte; after
+        // MDEF that is the status-duration stat).
         case 0x18: case 0x19: case 0x1A: case 0x1B: case 0x1C: case 0x1D: {
-          const std::array<int*, 6> stats{&state.atk, &state.def, &state.hit, &state.evd, &state.mag, &state.mdef};
+          const std::array<int*, 7> stats{&state.atk, &state.def, &state.hit, &state.evd, &state.mag, &state.mdef, &state.dur};
           const size_t index = static_cast<size_t>(off - 0x18);
           *stats[index] = value & 0xFF;
           if ((code & 0x4000) && index + 1 < stats.size()) *stats[index + 1] = (value >> 8) & 0xFF;
