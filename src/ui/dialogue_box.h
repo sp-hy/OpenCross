@@ -44,6 +44,11 @@ class DialogueBox {
             render::FaceId italic = render::kNoFace);
   // A window opened without the grow (field window flag 0x20): full size at once. Call right after open().
   void skip_grow() { opening_.start(false); }
+  // The shown message whole and opaque now: no grow, no fade, no typing (a label window whose text changes).
+  void show_at_once() {
+    opening_.finish();
+    tw_.reveal_now();
+  }
   // Art swap of an open window: lays the same message out again with other faces (the small_ / large_ metrics differ) and keeps
   // the page, the revealed glyph count, pending waits, the choice cursor and the window position. Call outside begin()/end().
   void swap_faces(render::FaceId face, render::FaceId italic = render::kNoFace);
@@ -288,6 +293,8 @@ class DialogueDemo {
   void set_ps1_window(int x, int y);
   // The shown window opens at full size without the grow (field window flag 0x20; call after show()).
   void skip_grow();
+  // The shown message whole and opaque at once: no grow, fade or typing (call after show()).
+  void show_at_once();
   void close();
   // The demo status line at the top left (default on).
   void show_status(bool on);

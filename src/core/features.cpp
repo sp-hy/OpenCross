@@ -27,7 +27,7 @@ constexpr std::array<Setting, 2> kPartyScreenSettings = {{
 constexpr std::array<Feature, 5> kFeatures = {{
     {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
     {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings},
-    {kModUi, 1, "", "Mod UI (building blocks)", {}},
+    {kModUi, 2, "", "Mod UI (building blocks)", {}},
     {kPartyScreen, 1, "PartyScreen", "Party screen tweaks", kPartyScreenSettings},
     {kModelSources, 1, "", "Models from elsewhere on NPCs (FE D0)", {}},
 }};

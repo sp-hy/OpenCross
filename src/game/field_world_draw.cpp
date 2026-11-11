@@ -466,8 +466,10 @@ void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, 
   }
 }
 
-// Rects (filled, or a one-pixel outline; translucent ones at 5 / 8 alpha) and lines in their palette colours, in element order; items are not
-// drawn; the cursor on its item: an outline 2 pixels out pulsing 1 pixel every 8 ticks (style 0), a translucent white fill (1) or nothing (2).
+// Rects (filled, or a one-pixel outline; translucent ones at 5 / 8 alpha), lines and ovals (filled, or a band) in their palette colours, and
+// images (hd/modui/<n>.png stretched over their rect and turned by their angle about its centre, times their palette colour, translucent ones
+// at 5 / 8 alpha; an element's own alpha wins) in element order; items are not drawn; the cursor on its item: an outline 2 pixels out
+// pulsing 1 pixel every 8 ticks (style 0), a translucent white fill (1) or nothing (2).
 // Coordinates are the message windows' screen (320 x 216 over the dialogue canvas, as ui::DialogueBox places a window), so a text element
 // and a rect at the same (x, y) line up; `fit` = the PS1-resolution pass's canvas, as the windows get it.
 void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, const render::CanvasFit* fit) {
@@ -501,15 +503,70 @@ void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, c
     fill(x0, y0, x0 + 1, y1, rgba);
     fill(x1 - 1, y0, x1, y1, rgba);
   };
-  for (const ModUi::Element& element : ui.elements) {
-    if (!element.visible) continue;
+  // Filled: a fan of wedges from the centre; outlined: a band between the edge and the edge pulled in by `width` pixels.
+  const auto oval = [&](const ModUi::Element& element, u32 rgba) {
+    constexpr int kSegments = 64;
+    const float cx = element.x, cy = element.y, rx = std::abs(element.w), ry = std::abs(element.h);
+    if (rx <= 0.0f || ry <= 0.0f) return;
+    const bool band = (element.flags & ModUi::kOutline) != 0;
+    const float in_rx = band ? std::max(0.0f, rx - element.width) : 0.0f, in_ry = band ? std::max(0.0f, ry - element.width) : 0.0f;
+    const float uv[8] = {0, 0, 1, 0, 0, 1, 1, 1};
+    for (int i = 0; i < kSegments; ++i) {
+      const float a0 = 6.2831853f * static_cast<float>(i) / kSegments, a1 = 6.2831853f * static_cast<float>(i + 1) / kSegments;
+      const float c0 = std::cos(a0), s0 = std::sin(a0), c1 = std::cos(a1), s1 = std::sin(a1);
+      const float xy[8] = {sx(cx + rx * c0), sy(cy + ry * s0), sx(cx + rx * c1), sy(cy + ry * s1),
+                           sx(cx + in_rx * c0), sy(cy + in_ry * s0), sx(cx + in_rx * c1), sy(cy + in_ry * s1)};
+      sprites.draw_quad(white_set_, xy, uv, rgba);
+    }
+  };
+  const float phase = std::cos(static_cast<float>(tick_count_ % 60) * (6.2831853f / 60.0f));
+  const float pulse = 0.775f + 0.225f * phase;
+  const s16 beat = static_cast<s16>(std::lround(phase));
+  const auto alpha = [&](const ModUi::Element& element) -> u8 {
+    const u8 a = element.alpha ? element.alpha : element.flags & ModUi::kTranslucent ? u8{0xA0} : u8{0xFF};
+    return element.flags & ModUi::kPulse ? static_cast<u8>(static_cast<float>(a) * pulse) : a;
+  };
+  for (const ModUi::Element& stored : ui.elements) {
+    if (!stored.visible) continue;
+    ModUi::Element element = stored;
+    if (element.flags & ModUi::kBeat) {
+      if (element.kind == ModUi::kOval) {
+        element.w = static_cast<s16>(element.w + beat);
+        element.h = static_cast<s16>(element.h + beat);
+      } else if (element.kind == ModUi::kRect || element.kind == ModUi::kImage) {
+        element.x = static_cast<s16>(element.x - beat);
+        element.y = static_cast<s16>(element.y - beat);
+        element.w = static_cast<s16>(element.w + 2 * beat);
+        element.h = static_cast<s16>(element.h + 2 * beat);
+      }
+    }
     if (element.kind == ModUi::kRect) {
-      const u32 rgba = colour(element.colour, element.flags & ModUi::kTranslucent ? 0xA0 : 0xFF);
+      const u32 rgba = colour(element.colour, alpha(element));
       const float x1 = static_cast<float>(element.x + element.w), y1 = static_cast<float>(element.y + element.h);
       if (element.flags & ModUi::kOutline) outline(element.x, element.y, x1, y1, rgba);
       else fill(element.x, element.y, x1, y1, rgba);
     } else if (element.kind == ModUi::kLine) {
-      line(element.x, element.y, element.w, element.h, colour(element.colour, 0xFF));
+      line(element.x, element.y, element.w, element.h, colour(element.colour, element.alpha ? element.alpha : u8{0xFF}));
+    } else if (element.kind == ModUi::kOval) {
+      oval(element, colour(element.colour, alpha(element)));
+    } else if (element.kind == ModUi::kImage) {
+      const ModUiImage& image = mod_ui_image(element.msg);
+      if (image.set && element.angle == 0) {
+        sprites.draw(image.set, sx(element.x), sy(element.y), element.w * scale_x, element.h * scale_y, 0, 0, 1, 1,
+                     colour(element.colour, alpha(element)));
+      } else if (image.set) {
+        // Corners turned about the centre in field pixels (y down: a positive angle turns clockwise), then to the screen.
+        const float turn = static_cast<float>(element.angle) * (6.2831853f / 4096.0f), cos_a = std::cos(turn), sin_a = std::sin(turn);
+        const float cx = element.x + element.w * 0.5f, cy = element.y + element.h * 0.5f, hw = element.w * 0.5f, hh = element.h * 0.5f;
+        float xy[8];
+        const float corner[8] = {-hw, -hh, hw, -hh, -hw, hh, hw, hh};
+        for (int k = 0; k < 4; ++k) {
+          xy[2 * k] = sx(cx + corner[2 * k] * cos_a - corner[2 * k + 1] * sin_a);
+          xy[2 * k + 1] = sy(cy + corner[2 * k] * sin_a + corner[2 * k + 1] * cos_a);
+        }
+        const float uv[8] = {0, 0, 1, 0, 0, 1, 1, 1};
+        sprites.draw_quad(image.set, xy, uv, colour(element.colour, alpha(element)));
+      }
     }
   }
   if (ui.selectable(ui.cursor) && ui.cursor_style != ModUi::kCursorNone) {
@@ -521,6 +578,23 @@ void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, c
       outline(item.x - pad, item.y - pad, item.x + item.w + pad, item.y + item.h + pad, render::pack_rgba(255, 255, 0, 255));
     }
   }
+}
+
+const FieldWorld::ModUiImage& FieldWorld::mod_ui_image(int number) {
+  auto [it, added] = mod_ui_images_.try_emplace(number);
+  ModUiImage& image = it->second;
+  if (!added || !files_ || !ctx_ || number < 0) return image;
+  const std::string path = "hd/modui/" + std::to_string(number) + ".png";
+  render::DecodedImage decoded;
+  const std::optional<Bytes> raw = files_->read(path);
+  if (!raw || !render::decode_image(ByteSpan(raw->data(), raw->size()), decoded) || decoded.width == 0) {
+    log::warn("field: mod UI image {} not found or unreadable", path);
+    return image;
+  }
+  if (!mod_ui_sampler_.handle()) mod_ui_sampler_.create(*ctx_, true);
+  if (image.tex.create(*ctx_, decoded.width, decoded.height, render::TextureFormat::Rgba8, decoded.rgba.data()))
+    image.set = render::TexRef(image.tex, mod_ui_sampler_);
+  return image;
 }
 
 // One message window per text element; a hidden or cleared element (and a room change, which clears the UI) closes its window.
@@ -570,7 +644,8 @@ void FieldWorld::sync_mod_ui_windows() {
     box.set_portrait(-1);
     box.show(room_id_, element.msg);
     box.set_ps1_window(element.x, element.y);
-    box.skip_grow();
+    // A label, not a dialogue: whole and opaque on the tick it changes (no fade-in, no typing), so a refresh never blinks.
+    box.show_at_once();
   }
 }
 
