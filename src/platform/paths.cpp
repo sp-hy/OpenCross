@@ -87,51 +87,93 @@ fs::path find_game_dir(std::string_view configured) {
   return {};
 }
 
-// The file is "users" { "<id64>" { "AccountName" "..." ... "MostRecent" "1" } ... }: only the quoted tokens matter, a 17-digit token
-// opens a user block and the MostRecent "1" pair inside it picks the user.
-u64 parse_loginusers_most_recent(std::string_view vdf) {
-  std::vector<std::string_view> tokens;
+namespace {
+// The quoted strings of a VDF text in order, with \" and \\ unescaped.
+std::vector<std::string> vdf_tokens(std::string_view vdf) {
+  std::vector<std::string> tokens;
   for (size_t i = 0; i < vdf.size(); ++i) {
     if (vdf[i] != '"') continue;
-    const size_t end = vdf.find('"', i + 1);
-    if (end == std::string_view::npos) break;
-    tokens.push_back(vdf.substr(i + 1, end - i - 1));
-    i = end;
+    std::string token;
+    size_t at = i + 1;
+    for (; at < vdf.size() && vdf[at] != '"'; ++at) {
+      if (vdf[at] == '\\' && at + 1 < vdf.size() && (vdf[at + 1] == '"' || vdf[at + 1] == '\\')) ++at;
+      token += vdf[at];
+    }
+    if (at >= vdf.size()) break;
+    tokens.push_back(std::move(token));
+    i = at;
   }
+  return tokens;
+}
+
+// A 17-digit token opens a user block: its id64, else 0.
+u64 user_block_id(const std::string& token) {
+  if (token.size() != 17) return 0;
+  for (char ch : token)
+    if (ch < '0' || ch > '9') return 0;
+  return std::strtoull(token.c_str(), nullptr, 10);
+}
+
+#ifdef _WIN32
+std::string read_loginusers() {
+  const fs::path steam = registry_steam_path();
+  if (steam.empty()) return {};
+  std::ifstream file(steam / "config" / "loginusers.vdf", std::ios::binary);
+  return file ? std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>()) : std::string();
+}
+#endif
+}  // namespace
+
+// The file is "users" { "<id64>" { "AccountName" "..." "PersonaName" "..." ... "MostRecent" "1" } ... }: only the quoted tokens matter,
+// a 17-digit token opens a user block and the pairs after it belong to that user.
+u64 parse_loginusers_most_recent(std::string_view vdf) {
+  const std::vector<std::string> tokens = vdf_tokens(vdf);
   u64 current = 0;
   for (size_t i = 0; i < tokens.size(); ++i) {
-    const std::string_view token = tokens[i];
-    if (token.size() == 17) {
-      bool digits = true;
-      for (char ch : token) digits = digits && ch >= '0' && ch <= '9';
-      if (digits) {
-        current = std::strtoull(std::string(token).c_str(), nullptr, 10);
-        continue;
-      }
+    if (const u64 id = user_block_id(tokens[i])) {
+      current = id;
+      continue;
     }
-    if (current && iequals(token, "MostRecent") && i + 1 < tokens.size() && tokens[i + 1] == "1") return current;
+    if (current && iequals(tokens[i], "MostRecent") && i + 1 < tokens.size() && tokens[i + 1] == "1") return current;
   }
   return 0;
+}
+
+std::string parse_loginusers_persona(std::string_view vdf, u64 id64) {
+  const std::vector<std::string> tokens = vdf_tokens(vdf);
+  u64 current = 0;
+  for (size_t i = 0; i < tokens.size(); ++i) {
+    if (const u64 id = user_block_id(tokens[i])) {
+      current = id;
+      continue;
+    }
+    if (current == id64 && iequals(tokens[i], "PersonaName") && i + 1 < tokens.size()) return tokens[i + 1];
+  }
+  return {};
 }
 
 u64 current_steam_id64() {
 #ifdef _WIN32
   if (const u32 account = registry_active_user()) return kSteamId64Base + account;
-  const fs::path steam = registry_steam_path();
-  if (!steam.empty()) {
-    std::ifstream file(steam / "config" / "loginusers.vdf", std::ios::binary);
-    if (file) {
-      const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-      return parse_loginusers_most_recent(text);
-    }
-  }
+  if (const std::string text = read_loginusers(); !text.empty()) return parse_loginusers_most_recent(text);
 #endif
   return 0;
 }
 
-SaveDirPick find_save_dir(std::string_view configured) {
+std::string current_steam_persona() {
+#ifdef _WIN32
+  const u64 id = current_steam_id64();
+  if (const std::string text = read_loginusers(); id && !text.empty()) return parse_loginusers_persona(text, id);
+#endif
+  return {};
+}
+
+SaveDirPick find_save_dir(std::string_view configured, const fs::path& base) {
   std::error_code ec;
-  if (!configured.empty()) return {fs::path(configured), "[Paths] SaveDir"};
+  if (!configured.empty()) {
+    const fs::path dir(configured);
+    return {dir.is_relative() && !base.empty() ? base / dir : dir, "[Paths] SaveDir"};
+  }
 
   fs::path docs;
   if (const char* documents = SDL_GetUserFolder(SDL_FOLDER_DOCUMENTS)) docs = documents;

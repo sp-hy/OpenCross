@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
+#include <future>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -17,6 +18,7 @@
 #include "render/imgui_update_tab.h"
 #include "render/texture_registry.h"
 #include "script/field_host.h"
+#include "ui/ps1_font.h"
 
 namespace oc::app {
 
@@ -41,6 +43,10 @@ int App::init(int argc, char** argv) {
   init_config(argc, argv);
   if (!init_window()) return 1;
   init_vfs();
+  // The menu's kb_70 face (~190 MB) is read on a worker while the renderer and the other screens start; init_menus finds it parsed.
+  std::future<std::shared_ptr<const import::SpriteFont>> menu_font;
+  if (!files.game_dir().empty())
+    menu_font = std::async(std::launch::async, [this] { return ui::font::load(files, ui::font::member(ui::font::kKb, !platform::art_is_hd(config.art_mode))); });
   if (!init_render()) return 1;
   init_audio();
   if (!init_routes()) return 2;
@@ -53,17 +59,28 @@ int App::init(int argc, char** argv) {
   init_start_state();
   init_route_state();
   init_debug_tab();
+  init_multiplayer();
   return 0;
 }
 
 void App::init_config(int argc, char** argv) {
   exe = platform::exe_dir();
   // --config <file>: use another ini (automated runs: tests/routes/*.ini); the log then sits next to it as <name>.log.
+  // --profile <dir>: a player ini of its own in that folder (created when missing), with its log, shots and a relative [Paths] SaveDir
+  // there; unlike --config it is a normal run (it connects, applies mods, is saved), so a second copy gets its own multiplayer identity.
   config_file = exe / "opencross.ini";
-  for (int i = 1; i + 1 < argc; ++i)
+  std::filesystem::path profile_dir = exe;
+  for (int i = 1; i + 1 < argc; ++i) {
     if (std::string_view(argv[i]) == "--config") config_file = std::filesystem::absolute(argv[i + 1]), own_ini = false;
+    if (std::string_view(argv[i]) == "--profile") {
+      profile_dir = std::filesystem::absolute(argv[i + 1]);
+      std::error_code error;
+      std::filesystem::create_directories(profile_dir, error);
+      config_file = profile_dir / "opencross.ini";
+    }
+  }
   // The log file: [Debug] Log (Debug tab checkbox, default off) for the player's ini; --config runs (routes) and Debug builds always log.
-  log_path = own_ini ? (exe / "opencross.log").string() : std::filesystem::path(config_file).replace_extension(".log").string();
+  log_path = own_ini ? (profile_dir / "opencross.log").string() : std::filesystem::path(config_file).replace_extension(".log").string();
 #ifdef NDEBUG
   log_forced = !own_ini;
 #else
@@ -92,7 +109,7 @@ void App::init_config(int argc, char** argv) {
   steam_allowed = own_ini && !std::getenv("OC_QUIET");
 
   game_dir = platform::find_game_dir(config.game_dir);
-  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir);
+  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir, own_ini ? profile_dir : std::filesystem::path());
   save_dir = save_pick.dir;
   log::info("game dir: {}", game_dir.empty() ? "(not found)" : game_dir.string());
   log::info("save dir: {} ({})", save_dir.empty() ? "(not found)" : save_dir.string(), save_pick.how);

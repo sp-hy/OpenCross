@@ -4,6 +4,7 @@ add_library(oc_core STATIC
   log.cpp
   log.h
   types.h
+  hash.h
   span_reader.h
   parallel.h
 )

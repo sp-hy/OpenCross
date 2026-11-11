@@ -9,6 +9,7 @@
 //   app_run.cpp       run(): the main loop (hotkeys, per-frame settings, mode dispatch, the options window's changes)
 //   app_draw.cpp      draw_frame(): the frame composition (scene target, PS1-resolution passes, 8F warp, overlays, pillarboxing)
 //   app_feedback.cpp  the encounter feed-back / damage-jolt pass over the scene target
+//   app_multiplayer.cpp  multiplayer presence and chat: the connection, the local player's state, remote parties, chat and labels
 // The members stand in the order the objects are created; destruction runs in reverse, so every GPU resource goes before ctx and
 // the voice player before the mixer.
 #include <array>
@@ -42,6 +43,7 @@
 #include "game/title_backdrop.h"
 #include "import/text.h"
 #include "movie/player.h"
+#include "net/multiplayer_client.h"
 #include "platform/config.h"
 #include "platform/pad_remap.h"
 #include "platform/updater.h"
@@ -49,6 +51,7 @@
 #include "render/screen_pass.h"
 #include "render/gpu_context.h"
 #include "render/imgui_layer.h"
+#include "render/imgui_multiplayer.h"
 #include "render/mesh_pipeline.h"
 #include "render/render_target.h"
 #include "render/sprite_batch.h"
@@ -161,8 +164,28 @@ class App {
   void start_field_battle();
   void finish_field_battle(bool after_results = false);
   void scene_battle();
+  // A versus battle (rules/versus.md) from the field: the next battle request is `setup` (the field's battle request path with a carrier
+  // scene; nothing of the save goes in or comes back), the other side plays through `link`, `net` = a server's battle (pvp_end at the
+  // end). False when it cannot start now (not a free field, a battle under way, a dev switch of the battle set, no stage).
+  bool start_versus_battle(game::BattleView::VersusSetup setup, std::unique_ptr<game::VersusLink> link, bool net);
+  // A versus battle's request flags: 0x40 = the boss theme.
+  static constexpr int kVersusBattleFlags = 0x40;
+  // This game's player's side: the field party (at most 3), the summon stars and the Dopplegang pool.
+  std::optional<battle::VersusSide> local_versus_side();
+  // A versus battle against the local opponent (route `request versus`): this game's party as side `side`, the built-in test party as the
+  // other.
+  bool start_local_versus(u32 seed, int side);
+  // The battle is over (or never started): the field comes back as it was, with no result written; a server's battle gets its pvp_end.
+  void finish_versus_battle();
+  // The versus battle the next field battle request starts, its link, and whether a versus battle runs / came from the server.
+  std::optional<game::BattleView::VersusSetup> versus_next;
+  std::unique_ptr<game::VersusLink> versus_link;
+  bool versus_running = false, versus_net = false;
 
   // ---- app_route.cpp ----------------------------------------------------------------------------------------------------------
+  // Route `request savemark` / `savecheck`: the save as the game would write it now, play time left out.
+  Bytes route_save_block();
+  Bytes route_save_mark;
   void init_route_state();
   void fill_route_state();
   void route_request(const game::RouteOut& out);
@@ -245,6 +268,32 @@ class App {
   void scene_extent(float w, float h, u32& tw, u32& th) const;
   void draw_scene_copy(const SceneFrame& sf, const render::Frame& target, const render::TexRef& scene);
 
+  // ---- app_multiplayer.cpp ----------------------------------------------------------------------------------------------------
+  void init_multiplayer();
+  // The chat key; while the chat (or a settings text field) is typed in, the keys are taken from the game.
+  void multiplayer_input();
+  // Connects or disconnects as [Multiplayer] says, gives the client the local player and the field the remote parties. After simulate().
+  void multiplayer_frame();
+  // The chat panel and the name labels, inside the ImGui frame.
+  void multiplayer_overlay();
+  // The turn banner of a versus battle, over the battle (also a local one without a server).
+  void versus_banner_overlay();
+  net::LocalPresence multiplayer_local() const;
+  // A menu, shop or other screen of the game covers the field (the settings window not counted).
+  bool game_screen_up() const;
+  // The player is free in a field room (state 0 under the settings window): they may challenge and be challenged.
+  bool multiplayer_free() const;
+  // The local party's card for a battle challenge; nullopt without a field game.
+  std::optional<net::PartyCard> multiplayer_card();
+  // A challenge was accepted: this game's side goes to the other game (begin_pvp), and once the versus screen is over and the other side
+  // has come the battle starts here.
+  void begin_pvp(net::PvpStart start);
+  void start_pvp_battle(const net::PvpStart& start);
+  // The name sent while [Multiplayer] Name is empty: the Steam persona name when Steam is connected, else "Player".
+  std::string multiplayer_default_name();
+  // The client's clock: seconds since the App was made.
+  double multiplayer_clock() const;
+
   // ---- the session ------------------------------------------------------------------------------------------------------------
   std::filesystem::path exe;
   std::filesystem::path config_file;
@@ -282,6 +331,22 @@ class App {
   bool steam_allowed = false;
   bool steam_wanted = false;
   game::Achievements achievements;
+  // Multiplayer: mp_allowed is false in runs that never connect (--config, OC_QUIET, [Debug] Script); the client is made at the first
+  // enable. mp_parties_given: the field holds remote parties (cleared once when multiplayer goes off). mp_labels_shown: this frame's
+  // field shows the remote parties' labels (not under a battle, a menu or a movie). mp_stored_persona: the Steam display name stored on
+  // this machine, read once. mp_own_side: the side this game sent for the coming versus battle (encode_versus_side).
+  bool mp_allowed = false;
+  std::string mp_own_side;
+  std::unique_ptr<net::MultiplayerClient> mp_client;
+  render::MultiplayerUi mp_ui;
+  bool mp_parties_given = false;
+  bool mp_labels_shown = false;
+  std::optional<std::string> mp_stored_persona;
+  // The version sent to the server: OpenCross's version and the exe's build identity (battles need both games on the same build), and
+  // the battle data fingerprint (gameplay mods or another game version refuse a battle); made at the first connection.
+  std::string mp_version;
+  std::optional<std::string> mp_battle_data;
+  std::chrono::steady_clock::time_point mp_epoch = std::chrono::steady_clock::now();
   // API names earned this run; routes read them.
   std::vector<std::string> earned_achievements;
   bool restart_for_update = false;

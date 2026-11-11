@@ -813,6 +813,12 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       for (size_t i = 0; i < got.size(); ++i) have += (i ? " " : "") + got[i];
       if (args.size() < 4 || have.compare(0, want.size(), want) != 0 || (have.size() > want.size() && have[want.size()] != ' '))
         return bad("battle events are [" + have + "], expected to start with [" + want + "]");
+    } else if (args[1] == "battle" && args[2] == "plate") {
+      // assert battle plate [word]: the last versus battle ended on its outcome plate (with that word)
+      std::string want;
+      for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
+      const std::string got = st.battle_plate ? st.battle_plate() : std::string();
+      if (got.empty() || (!want.empty() && got != want)) return bad("versus plate is '" + got + "', expected '" + (want.empty() ? "any" : want) + "'");
     } else if (args[1] == "battle" && args[2] == "camera") {
       std::string want;
       for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
@@ -886,6 +892,12 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       const bool want_set = args[4] == "set";
       log::info("route: char {} status {:#x}", id, got);
       if (got < 0 || ((got & mask) == mask) != want_set) return bad(std::format("char {} status is {:#x}, expected {:#x} {}", id, got, mask, args[4]));
+    } else if (args[1] == "remote") {
+      int want = 0;
+      if (!to_int(args[2], want) || !st.remote_drawn) return bad("assert remote <n>");
+      const int got = st.remote_drawn();
+      log::info("route: {} remote parties drawn (want {})", got, want);
+      if (got != want) return bad(std::format("{} remote parties drawn, expected {}", got, want));
     } else {
       return bad("unknown assert " + args[1]);
     }
@@ -1110,6 +1122,34 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     }
     // Let the host take the request.
     return st.tick - aux_ >= 4;
+  }
+  // remote add|move|state|clear: a test remote party, handed to the host
+  if (op == "remote") {
+    const std::string kind = args.size() > 1 ? args[1] : std::string();
+    net::RemoteParty& party = out.remote_party;
+    net::LeaderPose& pose = party.pose;
+    int state = 0;
+    if (kind == "add") {
+      if (args.size() < 11 ||!to_int(args[4], party.models[0]) || !to_int(args[5], party.models[1]) || !to_int(args[6], party.models[2]) ||
+          !to_int(args[7], pose.x) || !to_int(args[8], pose.y) || !to_int(args[9], pose.z) || !to_int(args[10], pose.facing))
+        return bad("remote add <pid> <name> <m0> <m1> <m2> <x> <y> <z> <facing>");
+      party.name = args[3];
+      pose.clip = 1;
+    } else if (kind == "move") {
+      int moving = 0;
+      if (args.size() < 9 || !to_int(args[3], pose.x) || !to_int(args[4], pose.y) || !to_int(args[5], pose.z) || !to_int(args[6], pose.facing) ||
+          !to_int(args[7], pose.clip) || !to_int(args[8], moving))
+        return bad("remote move <pid> <x> <y> <z> <facing> <clip> <moving>");
+      pose.moving = moving != 0;
+    } else if (kind == "state") {
+      if (args.size() < 4 || !to_int(args[3], state) || state < 0 || state > 3) return bad("remote state <pid> <0..3>");
+      pose.state = static_cast<net::PresenceState>(state);
+    } else if (kind != "clear") {
+      return bad("remote add|move|state|clear");
+    }
+    if (kind != "clear") party.pid = args[2];
+    out.remote = kind;
+    return true;
   }
   if (op == "log") {
     std::string message;

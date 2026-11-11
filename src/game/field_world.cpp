@@ -78,6 +78,7 @@ void FieldWorld::shutdown() {
   gpu_fx_.clear();
   particles_.destroy();
   ents_.clear();
+  remote_.clear();
   room_models_.clear();
   char_models_.clear();
   sourced_models_.clear();

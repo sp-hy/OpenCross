@@ -310,7 +310,8 @@ bool App::pause_modal(const platform::Input& in) {
   if (!pause_screen.active()) {
     // Not over the title scene (its logo / attract movies) or the title's own screens (menu, slot list, name entry).
     if (flow_ready && (flow.scene_mode() || flow.owns_screen())) return false;
-    const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active();
+    // Not over a versus battle: the other player's game does not pause.
+    const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active() && !versus_running;
     if (start_edge && (over_battle || movie_open)) {
       open_pause();
       log::info("pause: opened over {} (vibration {})", movie_open ? "a movie" : "a battle", pause_screen.vibration());
@@ -583,7 +584,9 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     }
     apply_loop_speed(loop_speed.battle_factor, false);
     battle.update(static_cast<float>(dt) * loop_speed.battle_factor, in);
-    if (battle.finished() && !(results_ok && battle.battle() && results.open(*battle.battle(), battle_scene))) finish_field_battle();
+    // A versus battle has no results screen and writes nothing back.
+    if (battle.finished() && versus_running) finish_versus_battle();
+    else if (battle.finished() && !(results_ok && battle.battle() && results.open(*battle.battle(), battle_scene))) finish_field_battle();
     return;
   }
   // Some room exits want the frame shown at the exit captured.

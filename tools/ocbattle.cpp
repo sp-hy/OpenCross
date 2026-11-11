@@ -16,6 +16,10 @@
 //   ocbattle formula <name> <args...>     evaluate one formula; `ocbattle formula` lists them
 //   ocbattle fx-audit [--csv F] [--md F]  play every battle effect pack headless, per-pack status (tools/ocbattle_fx.cpp)
 //        [--rng lo|mid|hi|seed:N]         roll source for formulas with random terms (default mid)
+//   ocbattle versus <seed> [--a S:N] [--b S:N] [--cmds F | --auto N] [--fuzz SEEDS] [--cap N] [-v]
+//                                         a versus battle run twice in lockstep, state hashes compared after every command (tools/ocbattle_versus.cpp)
+//   ocbattle versus-net <ws-url> [--fuzz N] [--cut K] [--timeout S] [-v]
+//                                         versus battles between two clients over a running multiplayer server (tools/ocbattle_versus_net.cpp)
 // GameDir comes from -g <dir>, OPENCROSS_GAMEDIR, or platform::find_game_dir.
 #include <algorithm>
 #include <array>
@@ -55,6 +59,12 @@ int cmd_fx_audit(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
 // Defined in tools/ocbattle_reg.cpp.
 int cmd_fx_reg(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vector<std::string>& args);
 
+// Defined in tools/ocbattle_versus.cpp.
+int cmd_versus(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vector<std::string>& args);
+
+// Defined in tools/ocbattle_versus_net.cpp.
+int cmd_versus_net(const data::GameTables& tables, const std::vector<std::string>& args);
+
 namespace {
 
 int usage() {
@@ -71,6 +81,8 @@ int usage() {
                "       ocbattle [-g <gamedir>] debug-kill [enemy_id [count]] [--scene S] [--keep-script]\n"
                "       ocbattle [-g <gamedir>] fx-reg (SCENE [--bg N] | --index [--all] | --file PATH | --refs NAME | --s6 | --grep NAME)\n"
                "       ocbattle [-g <gamedir>] fx-audit [--csv FILE] [--md FILE] [--eid N] [--ticks N] [-v] [--find NAME] [--rng lo|mid|hi|seed:N]\n"
+               "       ocbattle [-g <gamedir>] versus <seed> [--a save.dat:slot] [--b save.dat:slot] [--cmds FILE | --auto N] [--fuzz SEEDS] [--cap N] [-v]\n"
+               "       ocbattle [-g <gamedir>] versus-net <ws-url> [--fuzz N] [--cut K] [--timeout S] [-v]\n"
                "       ocbattle formula <name> <args...> [--rng lo|mid|hi|seed:N]\n");
   return 2;
 }
@@ -1232,6 +1244,8 @@ int ocbattle_main(int argc, char** argv) {
   if (args[0] == "cast") return cmd_cast(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "debug-kill") return cmd_debug_kill(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "fx-reg") return cmd_fx_reg(tables, vfs, {args.begin() + 1, args.end()});
+  if (args[0] == "versus") return cmd_versus(tables, vfs, {args.begin() + 1, args.end()});
+  if (args[0] == "versus-net") return cmd_versus_net(tables, {args.begin() + 1, args.end()});
   if (args[0] == "fx-audit") return cmd_fx_audit(tables, vfs, {args.begin() + 1, args.end()}, enemy_element_refs(tables, vfs));
   return usage();
 }

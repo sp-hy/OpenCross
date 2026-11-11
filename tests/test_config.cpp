@@ -4,6 +4,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "platform/config.h"
 
@@ -143,6 +144,35 @@ int main() {
     // The opposite way round: unlisted keys keep their defaults.
     Config mods_partial = load_text("[Mods]\nDumpStages=1\nDumpEffects=0\n");
     CHECK(mods_partial.dump_stages && mods_partial.dump_title && mods_partial.dump_rooms && mods_partial.dump_models && !mods_partial.dump_effects);
+  }
+  // [Multiplayer]: defaults (off, the master server), parse with clamps and unknown words, save, reload.
+  {
+    const MultiplayerSettings mp_defaults;
+    CHECK(!mp_defaults.enabled && mp_defaults.server == MultiplayerServer::Master && mp_defaults.url() == kMasterUrl);
+    CHECK(mp_defaults.server_url == "ws://127.0.0.1:8787/ws" && mp_defaults.max_parties == 8 && mp_defaults.show_players && mp_defaults.show_labels && mp_defaults.chat_bubbles && !mp_defaults.hide_global_chat);
+    CHECK(!mp_defaults.translucent && mp_defaults.chat == ChatDisplay::New && mp_defaults.muted.empty() && mp_defaults.admin_token.empty());
+    CHECK(mp_defaults.challenges && !load_text("[Multiplayer]\nChallenges=0\n").multiplayer.challenges);
+    CHECK(load_text("[Multiplayer]\nAdminToken=s3cret\n").multiplayer.admin_token == "s3cret");
+    Config mp = load_text("[Multiplayer]\nEnabled=1\nServer=other\nServerUrl=wss://example.invalid/ws\nName=Kid\n"
+                          "PlayerId=0123456789abcdef0123456789abcdef\nShowPlayers=0\nMaxParties=99\nTranslucent=1\nShowLabels=0\nChatBubbles=0\nHideGlobalChat=1\n"
+                          "Chat=always\nMuteHidesParty=0\nChallenges=0\nMuted= aa11 ,bb22,,cc33\n");
+    const MultiplayerSettings& parsed = mp.multiplayer;
+    CHECK(parsed.enabled && parsed.server == MultiplayerServer::Other && parsed.url() == "wss://example.invalid/ws");
+    CHECK(parsed.name == "Kid" && parsed.player_id == "0123456789abcdef0123456789abcdef" && !parsed.show_players && parsed.max_parties == 32);
+    CHECK(parsed.translucent && !parsed.show_labels && !parsed.chat_bubbles && parsed.hide_global_chat && parsed.chat == ChatDisplay::Always && !parsed.mute_hides_party);
+    CHECK(parsed.muted == std::vector<std::string>({"aa11", "bb22", "cc33"}));
+    CHECK(load_text("[Multiplayer]\nServer=moon\nChat=loud\nMaxParties=0\n").multiplayer.server == MultiplayerServer::Master);
+    CHECK(load_text("[Multiplayer]\nChat=loud\n").multiplayer.chat == ChatDisplay::New);
+    CHECK(load_text("[Multiplayer]\nMaxParties=0\n").multiplayer.max_parties == 1);
+    const std::filesystem::path out = std::filesystem::temp_directory_path() / "oc_test_config_mp.ini";
+    CHECK(mp.save(out));
+    Config reloaded;
+    CHECK(reloaded.load(out));
+    std::filesystem::remove(out);
+    const MultiplayerSettings& again = reloaded.multiplayer;
+    CHECK(again.enabled && again.server == MultiplayerServer::Other && again.server_url == parsed.server_url && again.name == "Kid");
+    CHECK(again.player_id == parsed.player_id && !again.show_players && again.max_parties == 32 && again.translucent && !again.show_labels && !again.chat_bubbles && again.hide_global_chat);
+    CHECK(again.chat == ChatDisplay::Always && !again.mute_hides_party && again.muted == parsed.muted && !parsed.challenges && !again.challenges);
   }
   if (failures) return 1;
   std::printf("test_config: ok\n");

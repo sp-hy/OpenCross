@@ -25,7 +25,7 @@
 //   wait dialogue open|closed [timeout]
 //   wait text <words...>          an open dialogue shows a message containing the words (plain text, newlines as spaces); no timeout
 //                                 argument, the default timeout applies (every other wait form takes an optional [timeout])
-//   wait battle start|end|results [timeout]   (results = the post-battle results screen is up)
+//   wait battle start|end|results [timeout]   (results = the post-battle results screen or a versus battle's outcome plate is up)
 //   wait idle [timeout]           controls free again (no dialogue, no fade, no transition)
 //   wait flow <title|name|slots|opening|field> [timeout]   the game flow reached that state
 //   wait movie start|end [timeout]   an FMV is playing / has finished
@@ -41,6 +41,7 @@
 //   screenshot <file.png>         capture the next rendered frame (relative names go to shots/ next to the route's ini file)
 //   assert room <name> | assert var <hexid> <value> | assert dialogue open|closed | assert battle active|inactive | assert battle events <w1|a|w2 ...> (the window / action order starts with these tokens) |
 //   assert battle camera orbit <slot>|shot|target|hold   (what drove the battle camera on the last tick)
+//   assert battle plate [word]    the last versus battle showed its outcome plate (that word: Victory, Defeat, Draw, No result)
 //   assert result <n>             (BATTLE_RESULT)       assert flow <state> | assert menu open|closed | assert shop open|closed |
 //   assert movie playing|idle      assert guide <0|1|2>     assert pause open|closed (the RDE pause screen)
 //   assert text <words...>        the open dialogue's message contains the words
@@ -57,7 +58,8 @@
 //   request <kind> [arg]          debug: ask the host for what a field opcode would (money <n> = set the gold, battle <encounter> = A3 (battlefield 0), rename <char> = FE 4A, party = FE 5B,
 //                                 save = FE 85 (cleared-save prompt), ngplus = FE 84 (New Game+ list), menu = FE 72 (save-point main menu), disc <n> = FE 65 (n = disc - 1), movie <n> = 7E / D4 (on the disc in use), trading <row> = FE 67, weaponshop <row> = FE 68,
 //                                 party_add <char> = add a character to the party, party_remove <ref> = 7D, keyitem <n> = give key item n, slotdump <n> = write the game as one save
-//                                 block to $OC_SLOT_DUMP<n>.bin, battle_disguise <encounter> = the disguised-fight variant of `battle`);
+//                                 block to $OC_SLOT_DUMP<n>.bin, battle_disguise <encounter> = the disguised-fight variant of `battle`, versus <seed> [side] =
+//                                 a versus battle against the local opponent, savemark / savecheck = remember the save / fail unless it is unchanged);
 //                                 issued once, finishes 4 ticks later (wait for the screen with `wait menu|shop`)
 //   assert name <char> <text>     the typed name of a character (UTF-8)       assert party <id,id,id>   the party ids in slot order (- = empty)
 //   assert disc <n>               the disc in use                             assert location <id>      the saved location word of the state
@@ -87,6 +89,11 @@
 //   assert same [tol]             nothing of the `snap` state changed (positions within tol world units, default 0)
 //   assert frozen                 no field tick ran and no message window's typewriter moved since `snap`
 //   assert swaps <n>              exactly n in-place art swaps of the field room since `snap`
+//   remote add <pid> <name> <m0> <m1> <m2> <x> <y> <z> <facing>   a remote party (multiplayer presence) as if the network had sent it:
+//                                 the model byte of each slot (-1 empty) and the leader standing at the world point
+//   remote move <pid> <x> <y> <z> <facing> <clip> <moving>   a new leader pose of that party (clip a field clip id, moving 0 / 1)
+//   remote state <pid> <0..3>     its state (0 field, 1 battle, 2 menu, 3 event)      remote clear   no remote party any more
+//   assert remote <n>             exactly n remote parties were picked to be drawn on the last tick
 //   log <text...>                 message in the log
 //   quit                          end the run
 #include <array>
@@ -97,6 +104,7 @@
 #include <vector>
 
 #include "core/types.h"
+#include "net/presence.h"
 #include "platform/window.h"
 
 namespace oc::game {
@@ -189,9 +197,13 @@ struct RouteState {
   std::function<std::string()> battle_camera;
   std::function<std::string()> battle_menu;
   std::function<std::string()> battle_facing;
+  // The word of the outcome plate the last versus battle showed ("" = none).
+  std::function<std::string()> battle_plate;
   std::function<std::string()> battle_sig;
   std::function<int(int, int)> char_stat;
   std::function<void(int, int, int)> set_char_stat;
+  // Remote parties picked to be drawn on the last field tick.
+  std::function<int()> remote_drawn;
 };
 
 // What the route driver asks the host to do this tick.
@@ -226,6 +238,9 @@ struct RouteOut {
   int request_arg = 0;
   int request_arg2 = 0;
   int request_arg3 = 0;
+  // `remote`: add / move / state / clear, and the party it names (add: every member; move: the pose; state: the pose's state).
+  std::string remote;
+  net::RemoteParty remote_party;
   bool done = false;
   bool failed = false;
   std::string message;

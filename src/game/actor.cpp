@@ -1270,6 +1270,16 @@ void ActorShadows::floor_normal(const WalkMesh& walk, int tri, float out[3]) {
   out[2] = (edge_a[0] * edge_b[1] - edge_a[1] * edge_b[0]) / 4096.0f;
 }
 
+void ActorShadows::ease_slope(const WalkMesh& walk, int tri, float& slope_x, float& slope_z) {
+  static constexpr float kSlopeEase = 0.2f, kMaxSlope = 1.0f;
+  if (tri < 0) return;
+  float normal[3];
+  floor_normal(walk, tri, normal);
+  if (normal[1] == 0.0f) return;
+  slope_x += (std::clamp(-normal[0] / normal[1], -kMaxSlope, kMaxSlope) - slope_x) * kSlopeEase;
+  slope_z += (std::clamp(-normal[2] / normal[1], -kMaxSlope, kMaxSlope) - slope_z) * kSlopeEase;
+}
+
 void ActorShadows::draw(render::SpriteBatch& sprites, const render::FieldCamera& camera, const render::Letterbox& lb, float scroll_x,
                         float scroll_y, std::span<const ShadowParams> shadows, bool linear, render::TexRef mask) const {
   const render::TexRef set = linear ? set_linear_ : set_nearest_;

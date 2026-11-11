@@ -37,7 +37,7 @@ void fx_play_sound(BattleAudio& audio, std::string_view name, int volume, int pa
 // The hide bit survives a pack end: the idle restart shows a living unit again; a dead one has no idle and stays hidden through the next pack.
 void BattleView::fx_show_living() {
   for (int i = 0; i < battle::kUnits; ++i) {
-    if (battle_->unit(i).present && !battle_->unit(i).in_turn_order()) continue;
+    if (bunit(i).present && !bunit(i).in_turn_order()) continue;
     fx_hidden_[static_cast<size_t>(i)] = false;
     fx_hide_bits_[static_cast<size_t>(i)] = 0;
   }
@@ -45,7 +45,7 @@ void BattleView::fx_show_living() {
 
 // A unit's .obj and .ltc read back to back.
 int BattleView::fx_model_read_ticks(int unit) const {
-  const std::string stem = unit_model_stem(battle_->unit(unit));
+  const std::string stem = unit_model_stem(bunit(unit));
   size_t bytes = 0;
   for (const char* extension : {".obj", ".ltc"})
     if (const auto file = vfs_->read("cdrom/" + stem + extension)) bytes += (file->size() + 2047) / 2048 * 2048;
@@ -133,7 +133,7 @@ void BattleView::fx_charge_begin() {
     if (cv.has_model && cv.scripts && cv.scripts->has_s5) start_script(cu, &cv.scripts->s5, 5, 0, kCast);
   }
   // Chant: mask 0x100, pan 0x80, volume 0x7F; the mask makes the next chant end this one.
-  if (const std::string chant = battle_->unit(act_.actor).pc ? "sing" : "msin"; charged && !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
+  if (const std::string chant = bunit(act_.actor).pc ? "sing" : "msin"; charged && !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
   // The theme fades to 0x66 over 0x6D frames while the spell runs.
   audio_.duck_cast();
   if (!dbg_.effects || fx_) return;
@@ -329,7 +329,7 @@ bool BattleView::fx_begin() {
   // A MONSTER that casts a trap element runs montrap.prd (eid 397: `main` = camera
   // `cam` + ENEMY_B_FN + per-target `tgef`, emitters cr1 / clr1 / iz32 ...), not the party's etrap (396) / sumtrap (395) pack (`camr`, `atk5`, pt / pt1).
   // The eid is chosen by the monster's battle script, not the element table; the three trap eids are the whole set.
-  if ((eid == 395 || eid == 396) && !battle_->unit(std::max(0, act_.actor)).pc) eid = 397;
+  if ((eid == 395 || eid == 396) && !bunit(std::max(0, act_.actor)).pc) eid = 397;
   if (eid <= 1) return false;
   std::shared_ptr<const FxPack> pack = fxlib_.get(eid);
   if (!pack || !fx_gpu_for(pack)) return false;
@@ -641,10 +641,12 @@ bool BattleView::fx_actor_busy() const {
 // bit 0 set is not drawn. The same ops' bit 0x100 (0x61 / 0x62 targets, 0x63 / 0x64 casters, 0x68 / 0x69 everyone) is the LIT flag
 // (fx_lit_), not a second hide bit.
 void BattleView::fx_set_hidden(bool caster_side, bool hidden) {
-  const bool cpc = battle_->unit(std::max(0, act_.actor)).pc;
+  // The side is the party / the enemies; a versus battle's other party (units 3..5) is the enemies' side.
+  const auto near_side = [&](int unit) { return versus_ ? unit < battle::kPcSlots : bunit(unit).pc; };
+  const bool cpc = near_side(std::max(0, act_.actor));
   std::vector<int> us;
   for (int i = 0; i < battle::kUnits; ++i)
-    if (battle_->unit(i).present && ((battle_->unit(i).pc == cpc) == caster_side)) us.push_back(i);
+    if (bunit(i).present && ((near_side(i) == cpc) == caster_side)) us.push_back(i);
   fx_hide(us, 1, hidden);
 }
 
@@ -671,7 +673,7 @@ std::vector<int> BattleView::fx_units(int which) const {
     return us;
   }
   for (int i = 0; i < battle::kUnits; ++i)
-    if (battle_->unit(i).present) us.push_back(i);
+    if (bunit(i).present) us.push_back(i);
   return us;
 }
 }  // namespace oc::game

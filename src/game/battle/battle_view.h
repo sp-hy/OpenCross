@@ -18,7 +18,8 @@
 // battle_view_units.cpp (unit scripts, movement, hits), battle_view_sequence.cpp (action playback and the finish), battle_view_anchor.cpp
 // (camera reference points, audit), battle_view_anm.cpp (anmseq emitters), battle_view_pseudo.cpp (the effect pack's pseudo-actor),
 // battle_view_fx*.cpp (element effect packs: scene, cast, state, lights, skin, draw), battle_view_ui.cpp (menus / HUD),
-// battle_view_trail.cpp (weapon trails and per-unit model state), battle_transition.cpp (the field -> battle swirl).
+// battle_view_trail.cpp (weapon trails and per-unit model state), battle_transition.cpp (the field -> battle swirl), battle_view_versus.cpp
+// (a versus battle: the perspective, the turn, the other side's commands).
 #include <array>
 #include <chrono>
 #include <deque>
@@ -26,6 +27,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <unordered_map>
@@ -59,6 +61,7 @@
 #include "render/render_target.h"
 #include "render/stage_pipeline.h"
 #include "game/battle/stage_scene.h"
+#include "game/battle/versus_link.h"
 #include "import/text.h"
 #include "render/text_batch.h"
 #include "ui/ps1_font.h"
@@ -82,6 +85,17 @@ class BattleView {
 
   // Loads the scene's stage (battle/bg/bg_NN) and models and starts the rules. `party` empty = Serge, Kid, Harle.
   bool start(int scene_id, std::vector<battle::PartyMember> party = {});
+  // A versus battle (rules/versus.md): both sides as exchanged, the shared seed, the side this game plays (0 = A), side A's opening stamina
+  // and the battlefield.
+  struct VersusSetup {
+    u32 seed = 0;
+    battle::VersusSide side_a, side_b;
+    int local_side = 0;
+    int opening_stamina = battle::kVersusOpeningStamina;
+    int battlefield = -1;
+    // The other player's name ("<name>'s turn").
+    std::string opponent;
+  };
   // What the field hands over with a battle: NG+, the party's growth state and the bench (for a star-up), and the BATTLE opcode flags.
   struct StartOptions {
     bool ng_plus = false;
@@ -110,6 +124,9 @@ class BattleView {
     // 1 keep the field music, 2 losable (a wipe is not game over), 4 dragoon disguise (every PC except Poshul / Mojo uses model 0x3B),
     // 0x10 no victory music, 0x20 the field restarts no music after the battle (host side).
     int flags = 0;
+    // A versus battle (VersusSetup): the scene given to start() only lends its stage spots; its enemies and script take no part, and the
+    // party argument is not used.
+    std::optional<VersusSetup> versus;
   };
   bool start(int scene_id, std::vector<battle::PartyMember> party, const StartOptions& opt);
   // start() in slices. The host calls begin_load() once the field hands over (the swirl / the frozen hold), then load_step() every frame
@@ -160,7 +177,26 @@ class BattleView {
   // battle-script message windows confirm themselves (headless runs).
   void set_auto(bool on) { auto_ = auto_confirm_ = on; }
   // Cheats "Auto battle" (RDE F5): the command picks only; the results page and message windows stay manual. Call after set_auto each frame.
-  void set_auto_commands(bool on) { auto_ = auto_ || on; }
+  // Off in a versus battle, where set_auto lets the random legal player command this game's side.
+  void set_auto_commands(bool on) { auto_ = auto_ || (on && !versus_); }
+  // A versus battle: the other side's commands come from `link` and this game's go to it (versus_link.h); it must outlive the battle.
+  // Set before start(). Without a link the other side never acts.
+  void set_versus_link(VersusLink* link) { versus_link_ = link; }
+  bool versus() const { return versus_; }
+  // How a finished versus battle ended for this game's player: Void = no result (the games fell out of step, or the other game is gone).
+  enum class VersusResult { None, Won, Lost, Draw, Void };
+  VersusResult versus_result() const { return versus_result_; }
+  // The Victory / Defeat / Draw plate is up (it replaces the results screen).
+  bool versus_plate() const { return versus_ && ui_ == Ui::Result; }
+  // Route vocabulary (`assert battle plate`): the word of the plate the last versus battle showed, "" = none.
+  std::string route_plate() const;
+  // The versus turn banner the host draws over the battle (in the game's language); own = this game's side holds the turn. None outside a
+  // running versus battle.
+  struct VersusBanner {
+    std::string text;
+    bool own = false;
+  };
+  std::optional<VersusBanner> versus_banner() const;
   // Settings rows "Cursor Position" and "Accuracy Selection", pushed by the host every frame.
   void set_menu_options(bool cursor_memory, bool auto_accuracy) { cursor_memory_ = cursor_memory, auto_accuracy_ = auto_accuracy; }
   // Dev: skip the intro and open a menu as soon as a PC can act (1 element grid, 2 attack chain, 3 element grid -> target selection, 4 cast an element, 5 run, 6 wipe the party).
@@ -343,6 +379,9 @@ class BattleView {
     // Animated HP shown by the bars, and the HP they chase: set when a hit lands (CallDamage), synced when an action ends.
     float hp_disp = 0;
     int hp_shown = 0;
+    // The status word the party panel's ailment icons are drawn from: copied at battle start, a swap, and with hp_shown at an action end
+    // or a command menu start, so a status an action inflicts shows once the action is over.
+    u32 status_shown = 0;
     // Scripted death: the KO hit landed but the death cast has not ended; scripts see the unit alive.
     bool death_owed = false;
     // The KO is on screen (set by the hit that causes it).
@@ -415,6 +454,8 @@ class BattleView {
     float swap_home_x = 0, swap_home_z = 0;
     // The cast's targets turn to the caster when its charge starts (a PC that hopped home from the enemy).
     bool turn_targets_at_charge = false;
+    // A versus engage's run-up (stage_engage): no action follows it.
+    bool stage_only = false;
   };
   // A reaction scheduled for a later tick (element casts hit one target after the other).
   struct Pending {
@@ -517,7 +558,8 @@ class BattleView {
   void end_group();
   bool start_script(int unit, const bseq::Table* table, int entry, int variant, Script kind);
   void start_idle(int unit);
-  // The PC standing at its target between HIT% picks keeps the clip its approach / atk script left (clip 2).
+  // The PC standing at its target between HIT% picks (or a versus chain's attacker, stay_unit_) keeps the clip its approach / atk script
+  // left (clip 2).
   bool engaged_stance(int unit) const;
   // Model hidden, S5 entry 8 (the spawn script: part words, fade-in) instead of the idle.
   void start_spawn(int unit);
@@ -1586,6 +1628,92 @@ class BattleView {
   bool script_gated(const battle::ActionEvent& event) const { return event.script_seq >= 0 && event.script_seq >= script_passed_; }
   bool script_busy() const { return !script_stream_.empty() || smsg_.open != 0; }
   void build_script_msg();
+
+  // ---- versus (battle_view_versus.cpp)
+  // Each game shows its own player's party in units 0..2: the game that plays side B swaps units 0..2 with 3..5 between the rules and
+  // everything the view keeps (models, menus, targets, events, commands). rules_unit maps either way (identity outside such a battle).
+  int rules_unit(int unit) const { return versus_flip_ && unit >= 0 && unit < battle::kPlayerUnits ? (unit + battle::kPcSlots) % battle::kPlayerUnits : unit; }
+  const battle::Unit& bunit(int unit) const { return battle_->unit(rules_unit(unit)); }
+  battle::Unit& bunit_mut(int unit) { return battle_->unit_mut(rules_unit(unit)); }
+  // In a versus battle no menu opens while the other side owes its Dopplegang pick: its command comes first.
+  bool can_act(int unit) const { return battle_->can_act(rules_unit(unit)) && (!versus_ || battle_->acting_side() == versus_side_); }
+  bool untargetable(int unit) const { return battle_->untargetable(rules_unit(unit)); }
+  bool element_usable(int unit, int cell) const { return battle_->element_usable(rules_unit(unit), cell); }
+  bool element_greyed(int unit, int cell) const { return battle_->element_greyed(rules_unit(unit), cell); }
+  int cell_element(int unit, int cell) const { return battle_->cell_element(rules_unit(unit), cell); }
+  bool death_pending(int unit) const { return battle_->death_pending(rules_unit(unit)); }
+  int hit_budget(int unit) const { return battle_->hit_budget(rules_unit(unit)); }
+  int hit_chance_shown_for(int unit, int target, int strength) const { return battle_->hit_chance_shown_for(rules_unit(unit), rules_unit(target), strength); }
+  int auto_hit_level(int unit, int target, bool fallback_weak) const { return battle_->auto_hit_level(rules_unit(unit), rules_unit(target), fallback_weak); }
+  // The element colour as cast by `actor`'s side.
+  u8 element_colour(int id, int actor) const { return battle_->element_colour(id, versus_ ? battle::side_of(rules_unit(actor)) : 0); }
+  // The units that can be character models of the near side's menus and blinks: the party, in a versus battle both parties.
+  int player_slots() const { return versus_ ? battle::kPlayerUnits : battle::kPcSlots; }
+  // A command in view units, as the rules take it.
+  battle::Command rules_command(battle::Command cmd) const;
+  bool validate_command(const battle::Command& cmd) const { return battle_->validate(rules_command(cmd)); }
+  // Applies a command of this game's player (view units): in a versus battle it also goes to the link, with the state hash.
+  bool apply_command(const battle::Command& cmd, std::string* why);
+  // Battle::open_menu / open_element_menu for the active PC; in a versus battle the Focus / ElementMenu commands.
+  void open_menu_now();
+  void open_element_menu_now();
+  // A command in rules units (`local`: this game's player gave it) applied to a versus battle.
+  bool versus_apply(const battle::Command& cmd, bool local, std::string* why = nullptr);
+  // The rules' events in view units.
+  void map_event(battle::ActionEvent& event) const;
+  battle::TrapHud view_trap(battle::TrapHud trap) const;
+  // The battle's outcome as this game's player sees it (Victory = this side won, Wiped = it lost or drew; Stalled = no result).
+  battle::Outcome presented_outcome() const;
+  // Once per update while the view is idle: the link's state, the turn timer, the other side's commands and the auto player's.
+  void versus_pump(int ticks, bool idle);
+  // Battle::start_versus from the setup, and the versus state of the view; false when a side cannot fight.
+  bool start_versus_rules(const VersusSetup& setup);
+  // The Run confirm.
+  void build_versus_hud();
+  void build_versus_plate();
+  // Widths in PS1 px of a line in the window text (style 0x83) and in the menu text (style 2), in this game's language.
+  float window_text_width(const std::u32string& text);
+  float menu_text_width(const std::u32string& text);
+  // The finish ends the view at once, or shows the plate first in a versus battle.
+  void finish_or_plate();
+  // An attack chain of a versus battle that no menu of this game engaged (the other side's, or this side's random player's) keeps its
+  // attacker at the target after its hits, as the HIT% menu keeps the engaged PC: stay_holds = the chain can still go on, stay_continues =
+  // `event` is its next hit; end_stay sends the attacker home.
+  bool stay_holds() const;
+  bool stay_continues(const battle::ActionEvent& event) const;
+  void end_stay();
+  // The run-up of an engage this game's menus did not give (view units).
+  void stage_engage(int unit, int target);
+  // The camera while the other side acts (menu_camera's versus part); true = it owns the camera this tick.
+  bool versus_wide_shot();
+  // The wide pose has been taken in this wait.
+  bool versus_wide_ = false;
+  // The attacker standing at its target (view units, -1 = none) and whether a Focus or End Turn has ended its chain since.
+  int stay_unit_ = -1, stay_target_ = -1;
+  bool stay_left_ = false;
+  bool versus_ = false, versus_flip_ = false;
+  int versus_side_ = 0;
+  VersusLink* versus_link_ = nullptr;
+  // The random legal player of this game's side (set_auto in a versus battle), made on first use.
+  std::unique_ptr<LocalVersusOpponent> versus_auto_;
+  battle::VersusBrain versus_brain_;
+  u32 versus_seed_ = 0;
+  // Commands applied (both sides), the PC the last Focus named (-1 = none since the last action), the turn side last seen, ticks of the
+  // local turn's clock, ticks the view has been idle, and a command of the other side held until the running one is shown.
+  u32 versus_seq_ = 0;
+  int versus_focus_ = -1, versus_turn_seen_ = -1, versus_turn_ticks_ = 0, versus_idle_ = 0;
+  std::optional<battle::Command> versus_held_, versus_auto_held_;
+  // The plate has been shown in this battle.
+  bool versus_plate_shown_ = false;
+  // Run asks first: the prompt is open, and its cursor (0 = yes).
+  bool versus_run_ask_ = false;
+  int versus_run_cursor_ = 1;
+  VersusResult versus_result_ = VersusResult::None;
+  std::string versus_opponent_;
+  int versus_stars_ = 0;
+  // A turn lasts 60 s; the other side's actions start this many idle ticks apart.
+  // The wide shot while the other side acts waits this many idle ticks (longer than the gap between its actions).
+  static constexpr int kVersusTurnTicks = 60 * 60, kVersusActionGap = 20, kVersusWideIdle = 45;
   std::vector<Op> ops_;
   std::vector<render::Mat4> palette_;
 };

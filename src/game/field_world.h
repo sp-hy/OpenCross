@@ -38,6 +38,7 @@
 #include "game/field_model_source.h"
 #include "game/field_input.h"
 #include "game/field_watchdog.h"
+#include "game/remote_parties.h"
 #include "game/room_lighting.h"
 #include "game/room_view.h"
 #include "render/render_target.h"
@@ -45,6 +46,7 @@
 #include "import/room_cards.h"
 #include "import/room_fixes.h"
 #include "import/text.h"
+#include "net/presence.h"
 #include "platform/window.h"
 #include "script/field_host.h"
 #include "script/field_vm.h"
@@ -224,6 +226,13 @@ class FieldWorld final : public script::FieldHost {
   // Starts loading the field models of a save's party on worker threads (the load fade-out), so the first room after a load has them.
   void prefetch_party_models(const save::SaveSlot& slot);
   const std::string& room_name() const { return view_.room_name(); }
+  // Multiplayer: the local party for the presence messages, and the remote parties drawn in this room (never entities: no scripts, no
+  // collision, no game state). remote_labels() is valid after the last draw.
+  net::LocalPresence local_presence() const;
+  void set_remote_parties(std::vector<net::RemoteParty> parties, const net::RemoteDrawOptions& options);
+  std::vector<net::RemoteLabel> remote_labels() const;
+  // The local leader's label point (pid and text empty), valid after the last draw; none while labels are off or the leader is not on show.
+  std::optional<net::RemoteLabel> local_label() const { return local_label_; }
   const std::vector<std::string>& room_list() const { return view_.rooms(); }
 
   // force: re-read the art even if `hd` is unchanged (HD <-> Modded, mod list edits)
@@ -590,6 +599,10 @@ class FieldWorld final : public script::FieldHost {
   std::string layer_report(std::string* notes = nullptr) const;
   // one line per entity: position, model, flags, trigger size (route "dump")
   std::string dump_entities() const;
+  // Route `remote`: parties placed as if the network had sent them, shown with set_remote_parties' list (the network's entry wins a
+  // shared pid); remote_drawn() = how many remote parties the last tick picked to draw.
+  std::vector<net::RemoteParty>& route_remote_parties() { return route_remote_; }
+  int remote_drawn() const;
 
   // ---- battle handoff (A3 / C9) ---------------------------------------------------------------------------------------
   // The script op calls request_battle(); the field plays the encounter sequence 'enct' (105 ticks, the field keeps running with the
@@ -614,6 +627,13 @@ class FieldWorld final : public script::FieldHost {
   BattleRequest take_battle();
   // `fade_delay` ticks pass after the song is restored before the fade-in from black starts (the results screen's exit).
   void end_battle(int result_code, int fade_delay = 0);
+  // The way back from a battle that leaves no trace (a versus battle): end_battle's music and fade-in, with BATTLE_RESULT and the last
+  // result code as they were before it.
+  void end_sandbox_battle();
+  // The battle song of request flags `flags` ahead of the battle request (a versus battle's, once both players agreed), saving the field
+  // song as request_battle does; the request then keeps it. cancel_battle_music restores the field song when no battle came.
+  void start_battle_music(int flags);
+  void cancel_battle_music();
   // BATTLE flag 4: model byte 0x3B on every party member but Poshul / Mojo
   void apply_battle_disguise();
   int battle_result() const { return vm_.var(script::var::kBattleResult); }
@@ -865,6 +885,8 @@ class FieldWorld final : public script::FieldHost {
   // at intensity 0 that is black, which no shipped scene intends, so until a light exists the actor keeps its flat zone colour.
   bool lights_active() const { return lights_.slot[0].intensity > 0 || lights_.slot[1].intensity > 0 || lights_.slot[2].intensity > 0; }
   void start_song(int song, int volume, double start_seconds = 0.0);
+  // The field song after a battle (or a battle song that led to none): the room's last song where the battle cut it, or silence.
+  void restore_field_song();
   u32 rand_u32() {
     rng_ ^= rng_ << 13;
     rng_ ^= rng_ >> 17;
@@ -1450,6 +1472,36 @@ class FieldWorld final : public script::FieldHost {
   void load_group_sprites(std::string_view room);
   void free_group_sprites();
   void draw_group_sprites(render::SpriteBatch& sprites, float vw, float vh, bool ps1);
+
+  // ---- multiplayer: remote parties (field_world_remote.cpp); they read the room and write nothing of it
+  // One tick of the remote parties, after the field's own.
+  void step_remote();
+  void drop_remote_models();
+  void match_party_scale();
+  // The remote parties are placed for the room and art on show (a draw before their first tick in a new room shows none).
+  bool remote_current() const { return remote_room_ == room_loads_ && remote_art_ == art_swaps_; }
+  // A character model for a remote member without blocking: the cached one, a finished worker's, else a worker is started (null meanwhile).
+  std::shared_ptr<ModelHandle> remote_model(int model_byte, bool& failed);
+  // The label point over `actor`, in window pixels; false when it falls outside the visible field picture.
+  bool label_point(const Actor& actor, float alpha, float scroll_x, float scroll_y, float& x, float& y) const;
+  // [inside draw_actors] the local leader's label point.
+  void place_local_label(float alpha);
+  // [3D pass, inside draw_actors] the remote members, and their name labels.
+  void draw_remote_actors(render::MeshPipeline& meshes, const render::Frame& frame, float alpha, const render::Rect& scissor,
+                          const render::Mat4& view_proj, const render::Mat4& view, float water_bias, bool& begun);
+  // The remote members' floor shadows (draw_background): the blob, or with [Enhancements] Lighting the tile prepare_shadows cast.
+  void remote_shadows(std::vector<ShadowParams>& shadows, float alpha) const;
+  // A member's shadow strength, halved with [Multiplayer] Translucent.
+  int remote_shadow_grey(const RemoteParties::Member& member) const;
+  RemoteParties remote_;
+  std::vector<net::RemoteParty> net_remote_, route_remote_;
+  net::RemoteDrawOptions remote_options_;
+  std::vector<net::RemoteLabel> remote_labels_;
+  std::optional<net::RemoteLabel> local_label_;
+  // room_loads_ / art_swaps_ the remote parties were placed for.
+  u64 remote_room_ = 0, remote_art_ = 0;
+  // Model bytes first loaded for a remote member: a room change drops them from the cache when nothing shows them.
+  std::set<int> remote_loaded_;
 };
 
 }  // namespace oc::game

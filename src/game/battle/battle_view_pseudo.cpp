@@ -39,7 +39,7 @@ void BattleView::pa_begin(const std::shared_ptr<const FxPack>& pack) {
         // The acting list's first unit picks the model: act1 (texture page 0x200, CLUT row 0xE3, the fat figure) when its equipped weapon item id is 0x26
         // = the Mastermune (EN "Mastermune", JP "Grandream"); everyone else keeps act0. Dev knob `battleview ... --equip 0x26`.
         const int first = !act_.casters.empty() ? act_.casters.front() : act_.actor;
-        const bool mastermune = first >= 0 && first < battle::kUnits && battle_->unit(first).pc && battle_->unit(first).eq.weapon_id == 0x26;
+        const bool mastermune = first >= 0 && first < battle::kUnits && bunit(first).pc && bunit(first).eq.weapon_id == 0x26;
         if (mastermune) an = "act1";
         if (gpu->models.find(an) == gpu->models.end()) an = an == "act0" ? "act1" : "act0";
       }

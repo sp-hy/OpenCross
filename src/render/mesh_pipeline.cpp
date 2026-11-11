@@ -652,6 +652,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   // back first, the semi-transparent water layer over them). DryOnly / WetOnly draw one side of that split with Solid + Semi.
   // Outline: the [Shaders] inverted hull of the opaque one-sided parts, before their Solid pass and without writing depth, so the model
   // covers it everywhere inside its silhouette whatever order the coarse face slots give its faces.
+  // DrawParams::opacity below 1: a DepthOnly pass of the whole model, then its Solid pass alpha-blended, so only the nearest surface shows.
   enum class Kind { Solid, Semi, DepthOnly, WetAdd, Outline };
   struct Pass {
     Kind kind;
@@ -674,7 +675,8 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   const bool flash = params.flash && !split_wet;
   const bool all_semi = flash || (params.model_abr >= 0 && params.model_abr <= 3);
   const int model_abr = flash ? 1 : all_semi ? params.model_abr : -1;
-  const bool outline = params.shading.outline && !params.solid && !flash && !all_semi && params.wet_faces != WF::WetOnly;
+  const bool faded = params.opacity < 1.0f && !params.solid && !flash && !split_wet;
+  const bool outline = params.shading.outline && !params.solid && !flash && !all_semi && !faded && params.wet_faces != WF::WetOnly;
   Pass passes[9];
   int npass = 0;
   if (params.solid) {
@@ -689,6 +691,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       passes[npass++] = {Kind::Semi, 0.0f, true, 2};
     }
     if (outline) passes[npass++] = {Kind::Outline, 0.0f};
+    if (faded) passes[npass++] = {Kind::DepthOnly, 0.0f};
     passes[npass++] = {Kind::Solid, 0.0f};
     passes[npass++] = {Kind::Semi, 0.0f, false, model_abr};
     // Drawn after the model primitive (the PS1 files it one OT slot nearer).
@@ -734,7 +737,10 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       const Pipeline* pipe = &pipeline_;
       float blend_scale = 1.0f, out_alpha = 1.0f;
       if (pass.kind == Kind::DepthOnly) pipe = &pipeline_depth_only_;
-      else if (pass.kind == Kind::Outline) pipe = &pipeline_outline_;
+      else if (pass.kind == Kind::Solid && faded) {
+        pipe = &pipeline_avg_;
+        out_alpha = params.opacity;
+      } else if (pass.kind == Kind::Outline) pipe = &pipeline_outline_;
       else if (pass.kind == Kind::WetAdd) pipe = &pipeline_add_;
       else if (pass.kind == Kind::Semi) {
         // PS1 ABR: 0 = (B + F) / 2, 1 = B + F, 2 = B - F, 3 = B + F / 4.

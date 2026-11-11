@@ -134,7 +134,7 @@ void BattleView::trail_event(int unit, const bseq::Event& event) {
   const size_t unit_index = static_cast<size_t>(unit);
   TrailState::UnitCfg& cfg = state.cfg[unit_index];
   TrailState::UnitModel& model = state.model[unit_index];
-  const auto party_eyes = [&] { return battle_->unit(unit).pc && battle_->unit(unit).form < 0 && !vis_[unit_index].ko_shown; };
+  const auto party_eyes = [&] { return bunit(unit).pc && bunit(unit).form < 0 && !vis_[unit_index].ko_shown; };
   switch (event.kind) {
     case K::TrailColors:
       for (size_t k = 0; k < 3; ++k) cfg.colour_a[k] = event.off[k], cfg.colour_b[k] = event.ang[k];
@@ -338,9 +338,9 @@ static bool fade_colour(std::array<int, 3>& colour, const std::array<int, 3>& ra
 void BattleView::trail_tick() {
   if (!trail_) return;
   TrailState& state = *trail_;
-  for (int unit = 0; unit < battle::kPcSlots; ++unit) {
+  for (int unit = 0; unit < player_slots(); ++unit) {
     TrailState::Eye& eye = state.eye[static_cast<size_t>(unit)];
-    const bool ko = battle_->unit(unit).pc && battle_->unit(unit).form < 0 && vis_[static_cast<size_t>(unit)].ko_shown;
+    const bool ko = bunit(unit).pc && bunit(unit).form < 0 && vis_[static_cast<size_t>(unit)].ko_shown;
     if (ko != eye.ko) {
       eye.ko = ko;
       if (ko) eye.on = false, eye.frame = 2;
@@ -438,7 +438,7 @@ void BattleView::trail_tick() {
     // Nodes at the clip positions of this tick, one per quarter frame.
     if (ribbon.active) {
       const Visual& visual = vis_[static_cast<size_t>(ribbon.unit)];
-      if (!visual.has_model || !battle_->unit(ribbon.unit).present) {
+      if (!visual.has_model || !bunit(ribbon.unit).present) {
         ribbon.active = false;
       } else {
         const float cur = visual.pose.frame_cur(), prev = visual.pose.frame_prev();
@@ -590,7 +590,7 @@ void BattleView::anm_unit_reset(int unit, bool keep_colour, bool keep_parts) {
     for (int k = 0; k < 3; ++k) model.rgb[k] = keep.rgb[k];
   }
   if (keep_colour) model.hidden = keep.hidden;
-  if (keep_colour && model.tinted && model.hidden && model.rgb[0] == 0 && model.rgb[1] == 0 && model.rgb[2] == 0 && !battle_->unit(unit).pc)
+  if (keep_colour && model.tinted && model.hidden && model.rgb[0] == 0 && model.rgb[1] == 0 && model.rgb[2] == 0 && !bunit(unit).pc)
     vis_[static_cast<size_t>(unit)].fade = vis_[static_cast<size_t>(unit)].fade_prev = 0.0f;
   for (int slot = 0; slot < 2; ++slot) model.weapon_hidden[slot] = keep.weapon_hidden[slot], model.weapon_set[slot] = keep.weapon_set[slot];
   if (keep_parts) model.part_hide = keep.part_hide, model.part_show = keep.part_show, model.blinks = keep.blinks, model.pcol = keep.pcol;
@@ -641,9 +641,9 @@ void BattleView::anm_fade_in(int unit, int ticks) {
 }
 
 void BattleView::anm_eye_arm(int unit) {
-  if (unit < 0 || unit >= battle::kPcSlots) return;
+  if (unit < 0 || unit >= player_slots()) return;
   if (!trail_) trail_ = std::make_shared<TrailState>();
-  if (battle_->unit(unit).pc && battle_->unit(unit).form < 0 && !vis_[static_cast<size_t>(unit)].ko_shown) trail_->eye[static_cast<size_t>(unit)].on = true;
+  if (bunit(unit).pc && bunit(unit).form < 0 && !vis_[static_cast<size_t>(unit)].ko_shown) trail_->eye[static_cast<size_t>(unit)].on = true;
 }
 
 // The spawn script's part words. The battle start plays S5 entry 8 at once; its first tick (the ops before its first wait) hides / shows
@@ -707,7 +707,7 @@ void BattleView::anm_scale_point(int unit, float& x, float& y, float& z) const {
 }
 
 void BattleView::trail_eye_reset(int unit) {
-  if (trail_ && unit >= 0 && unit < battle::kPcSlots) trail_->eye[static_cast<size_t>(unit)] = {};
+  if (trail_ && unit >= 0 && unit < player_slots()) trail_->eye[static_cast<size_t>(unit)] = {};
 }
 
 }  // namespace oc::game

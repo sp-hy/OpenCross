@@ -17,7 +17,15 @@
 namespace oc::battle {
 
 constexpr int kPcSlots = 3, kEnemySlots = 6, kUnits = 9;
+// The units players command at most: the party slots, and in a versus battle the second side's units 3..5 too.
+constexpr int kPlayerUnits = 2 * kPcSlots;
 inline bool is_pc_slot(int unit) { return unit >= 0 && unit < kPcSlots; }
+// The side a unit fights on: 0 = units 0..2 (the party, versus side A), 1 = units 3..8 (the enemies; versus side B in 3..5).
+inline int side_of(int unit) { return unit < kPcSlots ? 0 : 1; }
+inline int side_first(int side) { return side == 0 ? 0 : kPcSlots; }
+inline int side_end(int side) { return side == 0 ? kPcSlots : kUnits; }
+// Dopplegang: the element whose cast opens the creature pick (Command::Kind::Form).
+inline constexpr int kDopplegangElement = 0xEE;
 
 // Derived equipment totals. The flat defaults below are used only when the gear table is not loaded (synthetic test tables).
 struct Equip {
@@ -292,8 +300,17 @@ struct ActionEvent {
   std::array<u8, 6> group{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 };
 
-// Result code: 0 victory, 1 wiped, 2 fled, 3+ forced by a battle script (op 83; Battle::result_code()).
-enum class Outcome { Ongoing = -1, Victory = 0, Wiped = 1, Fled = 2, Scripted = 3, Stalled = 9 };
+// Result code: 0 victory, 1 wiped, 2 fled, 3+ forced by a battle script (op 83; Battle::result_code()). A versus battle reads from side
+// A: Victory = side A won, Wiped = side B won, Draw = both sides went down on the same action.
+enum class Outcome { Ongoing = -1, Victory = 0, Wiped = 1, Fled = 2, Scripted = 3, Stalled = 9, Draw = 10 };
+
+// How a versus battle ended: the last characters of a side knocked out, of both sides at once, a Run (surrender), the third timeout in a
+// row of one side, a side conceded by the host (a player who stayed away), or nobody could ever act again (a draw).
+enum class VersusEnd { None, Knockout, Draw, Surrender, Timeouts, Conceded, Stalled };
+// Three turns in a row ended by a timeout forfeit the battle.
+inline constexpr int kVersusTimeoutLimit = 3;
+// Side A's stamina on its opening turn.
+inline constexpr int kVersusOpeningStamina = 35;
 
 // Who an element can be aimed at: the pgdat byte +4. Bit 0x40 = the cursor ring covers the party (units 0..2), bit 0x80 = the enemies
 // (3..8), 0xC0 = all nine; 0x10 = the whole range at once; 0x04 = the cursor cannot leave the caster; 0x01 = only knocked-out units
@@ -334,9 +351,15 @@ inline std::array<int, 9> target_cursor_order(const TargetSpec& spec, int caster
   return order;
 }
 
+// The commands after Swap change no HP and take no time; they carry the menu state the rules read (the guard, the active PC, the element
+// menu's tech and seal state, the Dopplegang pick) so that two games in step apply it at the same point of the command stream.
 struct Command {
-  enum class Kind { Attack, Element, Defend, Run, Swap } kind = Kind::Defend;
-  // PC slot 0..2.
+  // EndTurn: a versus side gives the turn to the other side (`actor` = any unit of that side). Focus: the actor's top command menu came up
+  // (Battle::open_menu). ElementMenu: its element grid opened (Battle::open_element_menu). Form: the Dopplegang pick of the actor's
+  // Dopplegang cast (Battle::transform with `form`). Engage: in a versus battle the actor's attack target was confirmed (it stands at
+  // `target` with its HIT% menu open); it changes no state.
+  enum class Kind { Attack, Element, Defend, Run, Swap, EndTurn, Focus, ElementMenu, Form, Engage } kind = Kind::Defend;
+  // PC slot 0..2 (versus: 0..5).
   int actor = 0;
   // Swap: the character id that takes the actor's slot (Battle::swap_candidates).
   int swap_in = -1;
@@ -346,6 +369,10 @@ struct Command {
   int cell = -1;
   // Unit index; -1 = automatic.
   int target = -1;
+  // Form: the pool slot (monster record) to become, -1 = back to the character.
+  int form = -1;
+  // EndTurn: the turn ran out of time.
+  bool timeout = false;
 };
 
 // A double / triple tech a PC's tech cell turns into (Battle::combo_at): the casting PCs in the order of the tech record's
@@ -354,7 +381,7 @@ struct ComboTech {
   int element = 0;
   std::array<int, 3> units{-1, -1, -1};
   std::array<int, 3> cells{-1, -1, -1};
-  // The cell each party slot gives up, -1 = the slot does not take part.
+  // The cell each party slot of the caster's side gives up (index = unit - side_first), -1 = the slot does not take part.
   std::array<int, 3> slot_cells{-1, -1, -1};
 };
 
@@ -437,6 +464,19 @@ class RandomBrain final : public EnemyBrain {
   EnemyAction choose(const Battle& battle, int unit, Rng& rng) override;
 };
 
+// The brain of a versus battle: no battle script runs, so every hook keeps its default and no unit is ever handed to it.
+class VersusBrain final : public EnemyBrain {
+ public:
+  EnemyAction choose(const Battle&, int, Rng&) override { return {EnemyAction::Kind::None}; }
+};
+
+// One side of a versus battle as both games build it: the party (at most 3, leader first), the summon stars left and the Dopplegang pool.
+struct VersusSide {
+  std::vector<PartyMember> party;
+  int stars = 0;
+  std::array<u16, 16> dopple{};
+};
+
 struct BattleOptions {
   bool ng_plus = false;
   // Gear gold bonus (x125/100).
@@ -484,6 +524,37 @@ class Battle {
   // act. Returns false if the scene id is invalid.
   bool start(std::vector<PartyMember> party, int scene, const BattleOptions& opt = {});
 
+  // ---- versus battles
+  // Starts a versus battle: side A's party in units 0..2, side B's in units 3..5 (every member at full HP without statuses), no scene and
+  // no battle script (the brain must be a VersusBrain), the field ring of btbgdat row `battlefield` (none when the row does not exist),
+  // side A's characters at `opening_stamina`, side B's at 70, and side A's turn. False when a side has no member or more than three.
+  // Then the caller feeds every player's commands, in one order both games share, to apply(); Focus / ElementMenu / Form carry the menu
+  // state, EndTurn (also on a timeout) passes the turn, and a side that cannot act any more passes it by itself.
+  bool start_versus(const VersusSide& side_a, const VersusSide& side_b, int battlefield, int opening_stamina = kVersusOpeningStamina);
+  bool versus() const { return versus_; }
+  // The side whose turn it is (0 = A, 1 = B).
+  int turn_side() const { return turn_side_; }
+  // The side whose command comes next: the side that owes a Dopplegang pick (its cast may have ended its turn), else the turn side.
+  int acting_side() const { return form_owed_ >= 0 ? side_of(form_owed_) : turn_side_; }
+  // The unit whose Dopplegang cast waits for its pick, -1 = none.
+  int form_owed() const { return form_owed_; }
+  // Turns of that side ended by a timeout in a row.
+  int timeouts(int side) const { return timeouts_[static_cast<size_t>(side & 1)]; }
+  VersusEnd versus_end() const { return versus_end_; }
+  // The side that won, -1 = a draw or still on.
+  int winner() const { return versus_ && outcome_ == Outcome::Victory ? 0 : versus_ && outcome_ == Outcome::Wiped ? 1 : -1; }
+  // A unit a player commands: a party slot, in a versus battle also side B's units 3..5.
+  bool player_unit(int unit) const { return versus_ ? unit >= 0 && unit < kPlayerUnits : is_pc_slot(unit); }
+  // Some character of the side could open its command menu, whoever has the turn (a done character of the turn side cannot).
+  bool side_ready(int side) const;
+  // The host ends the battle against that side (a player who stayed away); not a command, since only one game decides it.
+  void concede(int side);
+  // The summon stars a side has left (the normal battle's party: side 0, growth().counter).
+  int star_counter(int side) const { return versus_ && side == 1 ? stars_b_ : growth_.counter; }
+  // Everything the rules decide by (units, ring, traps, turn, counters, the generator's position ...), names and log text left out: two
+  // games in step hold the same value after every command.
+  u64 state_hash() const;
+
   // ---- views
   const Unit& unit(int index) const { return units_[static_cast<size_t>(index)]; }
   Unit& unit_mut(int index) { return units_[static_cast<size_t>(index)]; }
@@ -502,7 +573,8 @@ class Battle {
   // The Outcome value, or the script's code for Outcome::Scripted.
   int result_code() const { return result_code_; }
   const Rewards& rewards() const { return rewards_; }
-  const std::vector<PartyMember>& party() const { return party_; }
+  // The party records; versus side B's with side 1.
+  const std::vector<PartyMember>& party(int side = 0) const { return versus_ && side == 1 ? party_b_ : party_; }
   const GrowthState& growth() const { return growth_; }
   // After a star-up: stats / snap / pending updated.
   const std::vector<PartyMember>& bench() const { return bench_; }
@@ -529,11 +601,13 @@ class Battle {
   // The units an all-target cast (pgdat +4 bit 0x10) may reach: seeded from the scene record (the enemies the scene keeps off-stage until a
   // script reveals them), ops 34 / 35 / 5B with arg 0 set a unit's bit; it is ANDed into the enemy-side masks (the party side is never masked).
   u32 cast_mask() const { return cast_mask_; }
-  // ---- Dopplegang pool (the live mask is the save's)
-  const std::array<u16, 16>& dopple_mask() const { return dopple_mask_; }
-  bool dopple_has(int slot) const { return slot >= 0 && slot < 256 && (dopple_mask_[static_cast<size_t>(slot >> 4)] >> (slot & 15) & 1); }
+  // ---- Dopplegang pool (the live mask is the save's; a versus battle keeps one per side)
+  const std::array<u16, 16>& dopple_mask(int side = 0) const { return versus_ && side == 1 ? dopple_b_ : dopple_mask_; }
+  bool dopple_has(int slot, int side = 0) const {
+    return slot >= 0 && slot < 256 && (dopple_mask(side)[static_cast<size_t>(slot >> 4)] >> (slot & 15) & 1);
+  }
   // The slots in the pick menu's order (ascending slot).
-  std::vector<int> dopple_pool() const;
+  std::vector<int> dopple_pool(int side = 0) const;
   // Script op 65 on an enemy unit (the start of its kill script): when the PC whose command came last (script var 0x50) is character 26
   // (Sprigg) or wears accessory 0xFC, and the enemy's monster record allows it, the pool gets the enemy's slot bit. True when a bit was set.
   bool dopple_credit(int enemy_unit, int last_pc);
@@ -555,11 +629,12 @@ class Battle {
   // 0x3D0..0x3DE after the fight. Each element action (PC or enemy, a technique, item or summon alike) adds 1 to the colour point of its
   // record colour while Pip is in the party, and 1 more when Pip casts it; an action without a single colour adds nothing.
   std::array<u16, 8> saved_vars() const;
-  // Element colour (pgdat +5) as the battle sees it: Pip's 18 techs take Pip's innate colour, Vary Innate its last caster's.
-  u8 element_colour(int id) const;
+  // Element colour (pgdat +5) as the battle sees it: Pip's 18 techs take Pip's innate colour, Vary Innate its last caster's. A versus
+  // battle keeps Pip's colour per side: `side` is the caster's.
+  u8 element_colour(int id, int side = 0) const;
   // The colour an element cast enters in the colour history: 0..5 (an element without a colour byte enters as 0), 6 for the all-colour
   // element, -1 for none (record byte 0 bit 0x80: death casts, form changes). PC and enemy casts alike.
-  int seq_colour(int element_id) const;
+  int seq_colour(int element_id, int side = 0) const;
   // A party member's grid holds the Chrono Cross element: the HUD shows the colour history as a row of seven dots.
   bool colour_row_shown() const { return colour_row_; }
   void set_cast_bit(int unit, bool on) {
@@ -583,8 +658,14 @@ class Battle {
   void note_stub(const std::string& key) { ++stubs_[key]; }
 
   // ---- queries
-  // No PC gets its command menu while Pip's form element is pending: every PC turn is its script slot 2 then.
-  bool can_act(int pc) const { return outcome_ == Outcome::Ongoing && unit(pc).can_open_menu() && evo_pending_ == 0; }
+  // No PC gets its command menu while Pip's form element is pending: every PC turn is its script slot 2 then. In a versus battle only the
+  // side whose turn it is acts, and a character that defended in this turn is done until its side's next turn.
+  bool can_act(int pc) const {
+    return outcome_ == Outcome::Ongoing && player_unit(pc) && unit(pc).can_open_menu() && evo_pending_ == 0 &&
+           (!versus_ || (side_of(pc) == turn_side_ && !done_[static_cast<size_t>(pc)]));
+  }
+  // Versus: the character defended in its side's current turn.
+  bool done(int unit) const { return versus_ && player_unit(unit) && done_[static_cast<size_t>(unit)]; }
   // Element cell usable now (gauge, flags, stamina, status).
   bool element_usable(int pc, int cell) const;
   // Colour-sealed cell: the PC's merged lo has the seal bit of the cell's colour (green 0x800, white 0x8000, black 0x80000, red 0x800000,
@@ -610,8 +691,10 @@ class Battle {
   int cell_element(int pc, int cell) const;
   int chain_cost(int strength, const Unit& unit) const { return weapon_stamina_cost(strength, (unit.lo & st::kFatigued) != 0); }
   // The stamina one HIT% menu visit may spend, taken while the top menu runs: the stamina, plus 10 per step left on the timer of hi status
-  // kHiNoStaminaCost while the unit has it (the stamina it will have once the status runs out).
+  // kHiNoStaminaCost while it waives the unit's costs (the stamina it will have once the status runs out).
   int hit_budget(int actor) const;
+  // Hi status kHiNoStaminaCost waives the unit's weapon and element costs, except in a versus battle, where every action costs stamina.
+  bool costs_waived(const Unit& unit) const { return !versus_ && (unit.hi & st::kHiNoStaminaCost) != 0; }
   bool validate(const Command& cmd, std::string* why = nullptr) const;
   // Percent, using the current chain counter (`any_target`: for every target of a sweep, not only the chain's own).
   int hit_chance_for(int actor, int target, int strength, bool any_target = false) const;
@@ -660,7 +743,10 @@ class Battle {
   // Debug tools: after a primitive above was called from outside the scheduler (Debug tab cast): slot-4 reactions, then the end test.
   void finish_external_action();
   // Debug tools (Debug tab): damage never takes a unit of that side below 1 HP and no instant KO lands on it. Rules stay untouched when off.
-  void set_invincible(bool party, bool enemies) { inv_party_ = party, inv_enemies_ = enemies; }
+  // Ignored in a versus battle, as the cheats are.
+  void set_invincible(bool party, bool enemies) {
+    if (!versus_) inv_party_ = party, inv_enemies_ = enemies;
+  }
   bool invincible(int unit) const { return unit < kPcSlots ? (inv_party_ || cheats_.god_mode || cheats_.boost) : inv_enemies_; }
   // RDE's rule for the Radius tutorial (battle 386): its first enemy slot never dies. A hit's damage is cut to HP - 1 and a KO does not
   // stay (the tutorial's own idle script rewrites that unit's HP every tick).
@@ -670,7 +756,9 @@ class Battle {
   struct Cheats {
     bool god_mode = false, boost = false, max_stamina = false, free_elements = false, always_hit = false, always_loot = false, instant_growth = false, shared_growth = false;
   };
-  void set_cheats(const Cheats& cheats) { cheats_ = cheats; }
+  void set_cheats(const Cheats& cheats) {
+    if (!versus_) cheats_ = cheats;
+  }
   const Cheats& cheats() const { return cheats_; }
 
   // Dev casts (no script queued them): the caster group the next events carry.
@@ -685,6 +773,25 @@ class Battle {
 
  private:
   void say(std::string line) { log_.push_back(std::move(line)); }
+  // The state start() and start_versus() both begin from.
+  void reset_battle_state();
+  // The party record a PC unit came from (versus: side B's for units 3..5); null for an enemy or an empty slot.
+  PartyMember* record_of(int unit);
+  int& stars_left(int side) { return versus_ && side == 1 ? stars_b_ : growth_.counter; }
+  // A state command (EndTurn, Focus, ElementMenu, Form, Engage): no time passes, no action is counted.
+  void apply_state_command(const Command& cmd);
+  void finish_versus(Outcome outcome, VersusEnd end);
+  // The turn goes to the other side; a turn ended any way but a timeout clears its side's timeout run.
+  void pass_turn(bool timeout);
+  // A side character waits for nothing but stamina (alive, no status that keeps its menu shut, a recovery rate): time can give it the menu.
+  bool time_helps(int side) const;
+  // Versus time: the step is the smallest countdown above 0 among the units of the other side (of every side for -1), 255 when there is
+  // none; every unit in the turn order counts it down and the characters of `side` (every character for -1) recover step x rate.
+  void versus_time_advance(int side);
+  // The scheduler of a versus battle (settle).
+  void settle_versus();
+  // The turn of a unit the scheduler found ready (an enemy, a confused PC, a PC's script slot 2), then the reactions.
+  void run_scheduled_turn(int actor);
   void begin_action() {
     ++action_id_;
     hit_counter_ = 0;
@@ -723,7 +830,8 @@ class Battle {
   // The cell of `pc` that can join a double / triple tech with partner tech `tech`, -1 = none. A PC's seal flag, not its live status, decides.
   int combo_partner_cell(int pc, int tech) const;
   void load_monster_record(Unit& unit, const data::StatRec& rec, u32 perm_lo_bits) const;
-  void scale_creature_form(Unit& unit, const data::StatRec& rec) const;
+  // `side`: whose stars left count.
+  void scale_creature_form(Unit& unit, const data::StatRec& rec, int side) const;
   void end_chain_after(size_t first_event);
   // Single target, the whole side (element record byte 4 bit 0x10), or the units of `targets` (EnemyAction::targets) when it names more
   // than one: one cast in every case, so the field ring takes its colour once.
@@ -741,8 +849,8 @@ class Battle {
   void run_kill_script(int unit);
   // Every enemy whose HP is 0 or that is KO'd without its kill script having run (a script wrote its HP to 0) gets that script now.
   void scan_kills();
-  // True when any roll landed.
-  bool apply_status(int target, const data::ElemRec& rec);
+  // True when any roll landed. `side`: the caster's (the colour the element takes).
+  bool apply_status(int target, const data::ElemRec& rec, int side);
   bool apply_status_bits(int target, u32 lo, u32 hi, int chance, u8 colour_bit = 0);
   bool apply_status_bits(int target, u32 mask, int set, int chance) { return apply_status_bits(target, set == 0 ? mask : 0, set == 0 ? 0 : mask, chance); }
   // Per bit, no roll.
@@ -763,8 +871,8 @@ class Battle {
   int seal_swap_colour(int actor, int element_id) const;
   // The three party countdowns run `steps` (PCs in the turn order, floor 0).
   void lower_pc_countdowns(int steps);
-  // The stamina an action costs the unit (none while hi kHiNoStaminaCost is set).
-  int stamina_cost(const Unit& unit, int cost) const { return (unit.hi & st::kHiNoStaminaCost) ? 0 : cost; }
+  // The stamina an action costs the unit (none while its costs are waived).
+  int stamina_cost(const Unit& unit, int cost) const { return costs_waived(unit) ? 0 : cost; }
   // Heals the unit the running action owes a drain heal (drain_).
   void pay_drain();
   // Returns {poison step, timer steps}.
@@ -854,13 +962,13 @@ class Battle {
   bool boss_ = false, monster_party_ = false;
   std::array<u16, 16> dopple_mask_{};
   // The PC's record before its first Dopplegang form.
-  std::array<Unit, kPcSlots> form_backup_{};
-  // A Dopplegang form change into a creature sets it; the way back and Pip's form change clear it.
-  bool form_restore_ = false;
-  // The max HP and the slot of the last unit that changed form from a character body (a Dopplegang form from the own form, Pip's form
-  // change); the way back and a creature form give that max HP to the unit.
-  int form_max_hp_ = 0;
-  int form_body_unit_ = -1;
+  std::array<Unit, kPlayerUnits> form_backup_{};
+  // Per side (a normal battle uses side 0). A Dopplegang form change into a creature sets form_restore_; the way back and Pip's form change
+  // clear it. The max HP and the slot of the last unit that changed form from a character body (a Dopplegang form from the own form, Pip's
+  // form change); the way back and a creature form give that max HP to the unit.
+  std::array<bool, 2> form_restore_{};
+  std::array<int, 2> form_max_hp_{};
+  std::array<int, 2> form_body_unit_{-1, -1};
   // Party swap: the battle state of each character that left the field (statuses and timers included), by character id, restored when it
   // comes back; swapped_out_ = those of them still on the bench.
   std::map<int, Unit> benched_units_;
@@ -877,8 +985,8 @@ class Battle {
   std::pair<int, int> drain_{-1, 0};
   // Script vars 0x00..0x0E while no scene script holds them (saved_vars).
   std::array<u16, 8> saved_vars_{};
-  // The colour kPipTechs take (0 = no Pip in the party).
-  u8 pip_tech_colour_ = 0;
+  // The colour kPipTechs take (0 = no Pip in the party); per side in a versus battle, else entry 0.
+  std::array<u8, 2> pip_tech_colour_{};
   // See cast_mask().
   u32 cast_mask_ = 0x1FF;
   int chain_actor_ = -1, chain_target_ = -1, chain_hits_ = 0;
@@ -889,7 +997,7 @@ class Battle {
   // The PC of the last confirmed Attack or Element command, and each PC's target of its last one (-1 = none yet): auto_hit_level's
   // fresh pair test.
   int confirm_actor_ = -1;
-  std::array<int, kPcSlots> confirm_target_{-1, -1, -1};
+  std::array<int, kPlayerUnits> confirm_target_{-1, -1, -1, -1, -1, -1};
   // Timed field state (mode 6): 1 = elements x1/2, 2 = x3/2.
   int field_state_ = 0;
   // Mode 5: element id the PC side / the enemy side has trapped (0 none).
@@ -909,6 +1017,21 @@ class Battle {
   bool fizzled_ = false;
   // The next cast is a script's forced trap fizzle (EnemyAction::trap_fizzle).
   bool trap_fizzle_ = false;
+  // ---- versus
+  bool versus_ = false;
+  // Side B's party records, summon stars and Dopplegang pool (side A's are party_, growth_.counter and dopple_mask_).
+  std::vector<PartyMember> party_b_;
+  int stars_b_ = 0;
+  std::array<u16, 16> dopple_b_{};
+  int turn_side_ = 0;
+  // The turn side has not acted yet in this turn.
+  bool turn_fresh_ = true;
+  // The turn side's characters that defended in this turn; cleared when their side's turn starts.
+  std::array<bool, kPlayerUnits> done_{};
+  std::array<int, 2> timeouts_{};
+  VersusEnd versus_end_ = VersusEnd::None;
+  // The unit whose Dopplegang cast waits for its pick (Command::Kind::Form), -1 = none.
+  int form_owed_ = -1;
 };
 
 // Simple deterministic player policy for `ocbattle sim`: heal when someone is below 40%, else the strongest

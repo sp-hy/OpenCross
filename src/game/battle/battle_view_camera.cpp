@@ -140,6 +140,7 @@ CamPose BattleView::dynamic_pose(int target) const {
 // all-targets selection: one glide from the pose on screen to `zen0`'s first key at 0x40 / 256 per tick. DYNAMIC mode with a cursor: a glide
 // at 0x14 / 256 per tick to the DYNAMIC shot whenever the cursor unit changes. Other menus (element list, waiting) keep what is on screen.
 void BattleView::menu_camera() {
+  if (versus_wide_shot()) return;
   if (ui_ == Ui::Intro || ui_ == Ui::Result || camera_.task_running() || camera_.sequence_running()) {
     orbit_pc_ = -1;
     return;
@@ -179,6 +180,30 @@ void BattleView::menu_camera() {
       dyn_target_ = tgt;
     }
   }
+}
+
+// A versus battle while the other side acts: no menu of this game opens, so once its actions have been shown and the view has stayed idle a
+// moment (the other player choosing), the last shot ends and the camera glides to the stage's wide pose (`zen0`'s first key), once per wait.
+bool BattleView::versus_wide_shot() {
+  const bool waiting = versus_ && ui_ != Ui::Intro && ui_ != Ui::Result && finish_ == Finish::None && battle_->outcome() == battle::Outcome::Ongoing &&
+                       battle_->acting_side() != versus_side_;
+  if (!waiting) {
+    versus_wide_ = false;
+    return false;
+  }
+  const bool idle = act_.phase == Act::Phase::None && queue_.empty() && pending_.empty() && versus_idle_ >= kVersusWideIdle;
+  if (idle && !versus_wide_) {
+    end_camera_tasks();
+    CamPose goal;
+    if (camera_.key_pose("zen0", goal)) camera_.glide_to(goal, 0x40);
+    versus_wide_ = true;
+    log::debug("battle: versus wide shot at view tick {}", tick_count_);
+    orbit_pc_ = dyn_target_ = -1;
+    menu_glide_ = false;
+  }
+  // An action of the other side takes its own shots; the next wait glides again.
+  if (!idle && act_.phase != Act::Phase::None) versus_wide_ = false;
+  return true;
 }
 
 void BattleView::select_approach() {
@@ -224,7 +249,7 @@ void BattleView::apply_camera(float alpha) {
     std::string yaws;
     for (int i = 0; i < battle::kUnits; ++i) {
       const Visual& visual = vis_[static_cast<size_t>(i)];
-      if (!battle_->unit(i).present) {
+      if (!bunit(i).present) {
         yaws += " -";
         continue;
       }
@@ -363,7 +388,7 @@ void BattleView::tick_camera() {
       pli_after_load_ = false;
       int first = -1;
       for (int i = 0; i < battle::kPcSlots; ++i)
-        if (unplaced_[static_cast<size_t>(i)] && (first < 0 || battle_->unit(i).src_id < battle_->unit(first).src_id)) first = i;
+        if (unplaced_[static_cast<size_t>(i)] && (first < 0 || bunit(i).src_id < bunit(first).src_id)) first = i;
       if (first >= 0) {
         unplaced_[static_cast<size_t>(first)] = false;
         vis_[static_cast<size_t>(first)].pose.play(1, 0);

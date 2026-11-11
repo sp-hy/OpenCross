@@ -42,7 +42,7 @@ bool BattleView::pa_ref_point(int attach, std::array<float, 3>& point, float& ya
 // The frame rotation is only the unit yaw. An all-zero attach record is joint 0's origin = the model position (the Bomber's point 9 = joint 0 =
 // its position; a 55 % height fallback would put an anchor 284 units too high). Only a pose without that joint keeps the fallback.
 bool BattleView::unit_ref_point(int unit, int attach, std::array<float, 3>& point, float& yaw) const {
-  if (unit < 0 || unit >= battle::kUnits || !battle_->unit(unit).present) return false;
+  if (unit < 0 || unit >= battle::kUnits || !bunit(unit).present) return false;
   const Visual& visual = vis_[static_cast<size_t>(unit)];
   // The model's own yaw (forward = local -Z), as the model matrix in draw(); a model an overlay steers has the yaw the overlay gave it.
   yaw = std::atan2(-visual.face_x, -visual.face_z);

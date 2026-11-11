@@ -54,9 +54,16 @@ const char32_t* kCommandCaptionJp[4] = {U"Attack", U"Element", U"Defend", U"RunA
 // Party swap's command row per language (an OpenCross command: no game text).
 const char32_t* kSwapLabel[6] = {U"Swap", U"Échanger", U"Cambio", U"Wechseln", U"Cambiar", U"交代"};
 constexpr int kSwapCommand = 4;
-// The command on top menu row `row`: 0 Attack, 1 Element, 2 Defend, 3 Run Away, kSwapCommand Swap. With party swap Swap is row 3, so Run Away
-// stays the last row.
-int top_row_command(int row, bool swap) { return swap && row >= 3 ? (row == 3 ? kSwapCommand : 3) : row; }
+// A versus battle's End Turn row (an OpenCross command: no game text).
+const char32_t* kEndTurnLabel[6] = {U"End Turn", U"Fin du tour", U"Fine turno", U"Zug beenden", U"Fin del turno", U"ターン終了"};
+constexpr int kEndTurnCommand = 5;
+// The command on top menu row `row`: 0 Attack, 1 Element, 2 Defend, 3 Run Away, kSwapCommand Swap, kEndTurnCommand End Turn. With party swap
+// Swap is row 3, in a versus battle End Turn, so Run Away stays the last row.
+int top_row_command(int row, bool swap, bool versus = false) {
+  return (swap || versus) && row >= 3 ? (row == 3 ? (versus ? kEndTurnCommand : kSwapCommand) : 3) : row;
+}
+// A versus battle's outcome plate takes a confirm only after kVersusPlateHold seconds and closes by itself after kVersusPlateSeconds.
+constexpr float kVersusPlateHold = 1.0f, kVersusPlateSeconds = 5.0f;
 const char32_t* kHitCaption[6] = {U"HIT%", U"%RÉUS.", U"PREC.", U"TRF%", U"%ACIERTO", U"命中率"};
 const char32_t* kCamNormal[6] = {U"NORMAL", U"NORMALE", U"NORMALE", U"NORMAL", U"NORMAL", U"NORMAL"};
 const char32_t* kCamDynamic[6] = {U"DYNAMIC", U"DYNAMIQUE", U"DINAMICA", U"DYNAMISCH", U"DINÁMICO", U"DYNAMIC"};
@@ -449,9 +456,8 @@ void battle_waku_prepare(render::DecodedImage& img, bool frame) {
 //    cell sprites, levels below it take the first, above it the second;
 //  * status icons: one 6 x 5 icon per status group the unit's status word meets, packed left to right from (x + 6, y - 8).
 void BattleView::build_party_panels() {
-  const battle::Battle& battle = *battle_;
   int count = 0;
-  for (int i = 0; i < battle::kPcSlots; ++i) count += battle.unit(i).present ? 1 : 0;
+  for (int i = 0; i < battle::kPcSlots; ++i) count += bunit(i).present ? 1 : 0;
   if (count == 0) return;
   static const float kPanelX[3][3] = {{172, 0, 0}, {140, 205, 0}, {108, 172, 236}};
   const float py = 164;
@@ -460,7 +466,7 @@ void BattleView::build_party_panels() {
   const bool jp = lang == 5;
   int placed = 0;
   for (int i = 0; i < battle::kPcSlots; ++i) {
-    const battle::Unit& unit = battle.unit(i);
+    const battle::Unit& unit = bunit(i);
     if (!unit.present) continue;
     const float px = kPanelX[std::min(count, 3) - 1][std::min(placed++, 2)];
     const Visual& visual = vis_[static_cast<size_t>(i)];
@@ -512,7 +518,7 @@ void BattleView::build_party_panels() {
         add_img(first ? hud_[kHGg1] : hud_[kHGg2], cell_x, cell_y, 5 * kPs1Px, 3 * kRowScale);
       }
     static constexpr u32 kIconMask[6] = {0x00B00008u, 0x00000B01u, 0xB0000020u, 0x0B000010u, 0x0000F000u, 0x000F0000u};
-    const u32 status = unit.lo & 0xBBBFFB39u;
+    const u32 status = visual.status_shown & 0xBBBFFB39u;
     int icon_count = 0;
     for (int k = 0; k < 6 && status; ++k) {
       if (!(status & kIconMask[k])) continue;
@@ -526,7 +532,7 @@ void BattleView::build_party_panels() {
 // (12 x 24 texels from texel row 40), the name the status's cmnmes text in style 2 (the JP font in Japanese), colour 0x757575.
 void BattleView::build_status_plates(int unit_index, bool right) {
   if (unit_index < 0 || unit_index >= battle::kUnits) return;
-  build_status_plate_column(battle_->unit(unit_index).lo, right);
+  build_status_plate_column(bunit(unit_index).lo, right);
 }
 
 void BattleView::build_status_plate_column(u32 lo, bool right) {
@@ -575,7 +581,7 @@ bool BattleView::elem_slide_step(int level) {
 // 0x04 = the caster only, 0x01 = knocked-out units only.
 // Tgt::Ally means a party-only ring, Tgt::Enemy anything else; target_candidates reads the element itself.
 BattleView::Tgt BattleView::target_mode(int cell) const {
-  const int id = battle_->cell_element(active_pc_, cell);
+  const int id = cell_element(active_pc_, cell);
   if (id <= 0 || static_cast<size_t>(id) >= tables_->elements.size()) return Tgt::Enemy;
   const data::ElemRec& elem = tables_->elements[static_cast<size_t>(id)];
   const battle::TargetSpec ts = battle::target_spec(elem);
@@ -590,14 +596,14 @@ std::vector<int> BattleView::target_candidates() const {
   // cursor to the caster. Kept left to right on screen; the cursor walks it by bhud::target_step.
   battle::TargetSpec ts;
   if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
-    const int id = battle_->cell_element(pending_cmd_.actor, pending_cmd_.cell);
+    const int id = cell_element(pending_cmd_.actor, pending_cmd_.cell);
     if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) ts = battle::target_spec(tables_->elements[static_cast<size_t>(id)]);
   }
   for (int i = ts.party ? 0 : battle::kPcSlots; i < (ts.enemies ? battle::kUnits : battle::kPcSlots); ++i) {
-    const battle::Unit& unit = battle_->unit(i);
+    const battle::Unit& unit = bunit(i);
     if (!unit.present) continue;
     // Off-stage units (ops 34 / 35 / 5B) are never on the ring.
-    if (battle_->untargetable(i)) continue;
+    if (untargetable(i)) continue;
     if (ts.self_only && i != pending_cmd_.actor) continue;
     if (ts.ko_only ? unit.standing() : !unit.standing()) continue;
     out.push_back(i);
@@ -632,7 +638,7 @@ int BattleView::target_step(int dir) const {
 int BattleView::target_start(const std::vector<int>& targets) const {
   battle::TargetSpec ts;
   if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0) {
-    const int id = battle_->cell_element(active_pc_, pending_cmd_.cell);
+    const int id = cell_element(active_pc_, pending_cmd_.cell);
     if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) ts = battle::target_spec(tables_->elements[static_cast<size_t>(id)]);
   }
   const int last = active_pc_ >= 0 && active_pc_ < battle::kPcSlots ? tgt_mem_[active_pc_] : battle::kPcSlots;
@@ -693,22 +699,22 @@ void BattleView::auto_pick_heuristic() {
   if (!keep) {
     int best = active_pc_;
     for (int i = 0; i < battle::kPcSlots; ++i)
-      if (battle_->can_act(i) && battle_->unit(i).stamina > battle_->unit(best).stamina) best = i;
+      if (can_act(i) && bunit(i).stamina > bunit(best).stamina) best = i;
     active_pc_ = best;
     auto_pc_ = best;
     auto_step_ = 0;
   }
-  const battle::Unit& unit = battle_->unit(active_pc_);
-  if (auto_target_ < battle::kPcSlots || !battle_->unit(auto_target_).standing() || battle_->untargetable(auto_target_)) {
+  const battle::Unit& unit = bunit(active_pc_);
+  if (auto_target_ < battle::kPcSlots || !bunit(auto_target_).standing() || untargetable(auto_target_)) {
     auto_target_ = -1;
     // Finish the weakest enemy first.
     int lowest = 1 << 30;
     for (int i = battle::kPcSlots; i < battle::kUnits; ++i)
-      if (battle_->unit(i).standing() && !battle_->untargetable(i) && battle_->unit(i).hp < lowest) lowest = battle_->unit(i).hp, auto_target_ = i;
+      if (bunit(i).standing() && !untargetable(i) && bunit(i).hp < lowest) lowest = bunit(i).hp, auto_target_ = i;
   }
   int hp = 0, mx = 0;
   for (int i = 0; i < battle::kPcSlots; ++i)
-    if (battle_->unit(i).present) hp += std::max(0, battle_->unit(i).hp), mx += battle_->unit(i).max_hp;
+    if (bunit(i).present) hp += std::max(0, bunit(i).hp), mx += bunit(i).max_hp;
   battle::Command cmd;
   cmd.actor = active_pc_;
   cmd.target = auto_target_;
@@ -742,7 +748,7 @@ void BattleView::auto_chain() {
     --auto_delay_;
     return;
   }
-  const int hit_level = battle_->auto_hit_level(active_pc_, engaged_target_, true);
+  const int hit_level = auto_hit_level(active_pc_, engaged_target_, true);
   auto_delay_ = 12;
   if (hit_level < 0) {
     auto_pc_ = -1;
@@ -750,7 +756,7 @@ void BattleView::auto_chain() {
     ui_ = Ui::Wait;
     return;
   }
-  const int cost = battle_->chain_cost(hit_level, battle_->unit(active_pc_));
+  const int cost = battle_->chain_cost(hit_level, bunit(active_pc_));
   if (cost > hit_budget_) return;
   hit_budget_ -= cost;
   chain_pick(hit_level);
@@ -795,8 +801,10 @@ void BattleView::handle_input(const platform::Input& in) {
   // A battle-script message window takes the buttons.
   if (smsg_input(ok || cancel || auto_confirm_)) return;
   if (ui_ == Ui::Result) {
-    if ((ok || auto_confirm_) && result_age_ > 0.4f) {
-      audio_.stop_music();
+    const float hold = versus_ ? kVersusPlateHold : 0.4f;
+    if (((ok || auto_confirm_) && result_age_ > hold) || (versus_ && result_age_ > kVersusPlateSeconds)) {
+      // A versus win's victory song plays on until the field's own song replaces it.
+      if (!(versus_ && versus_result_ == VersusResult::Won)) audio_.stop_music();
     audio_.stop_sounds();
       finished_ = true;
     }
@@ -812,11 +820,13 @@ void BattleView::handle_input(const platform::Input& in) {
     return;
   }
   if (ui_ == Ui::Wait) return;
+  // A versus battle's random player commands this game's side by itself (BattleView::versus_pump).
+  if (versus_ && auto_) return;
   // Op AF: no command input until the script unlocks the menu.
   if (ui_ == Ui::Top && battle_->menu_locked()) return;
 
   // The acting PC: first one with an open menu; Q / E (or the shoulders) switch between ready PCs in the top menu.
-  auto ready = [&](int pc_slot) { return battle_->can_act(pc_slot); };
+  auto ready = [&](int pc_slot) { return can_act(pc_slot); };
   if (active_pc_ < 0 || !ready(active_pc_)) {
     // The slot after the last actor first, the actor itself last.
     active_pc_ = next_pc_after(last_actor_);
@@ -837,7 +847,7 @@ void BattleView::handle_input(const platform::Input& in) {
   }
   // The top menu takes no input until its entry is over; what is pressed before is dropped.
   if (ui_ == Ui::Top && !menu_live()) return;
-  if (ui_ == Ui::Top) hit_budget_ = battle_->hit_budget(active_pc_);
+  if (ui_ == Ui::Top) hit_budget_ = hit_budget(active_pc_);
   if (auto_ && ui_ == Ui::Top) {
     auto_pick();
     return;
@@ -848,7 +858,7 @@ void BattleView::handle_input(const platform::Input& in) {
   }
   if (debug_ui_ != 0 && debug_ui_ != 7 && ui_ == Ui::Top) {
     // Open every grid row.
-    if (debug_ui_ != 2) battle_->unit_mut(active_pc_).gauge = battle_->unit(active_pc_).gauge_max;
+    if (debug_ui_ != 2) bunit_mut(active_pc_).gauge = bunit(active_pc_).gauge_max;
     pending_cmd_ = {};
     pending_cmd_.actor = active_pc_;
     // Run away.
@@ -862,7 +872,7 @@ void BattleView::handle_input(const platform::Input& in) {
     if (debug_ui_ == 6) {
       debug_ui_ = 0;
       for (int i = 0; i < battle::kPcSlots; ++i) {
-        battle::Unit& pu = battle_->unit_mut(i);
+        battle::Unit& pu = bunit_mut(i);
         pu.hp = 0;
         pu.lo |= battle::st::kKO;
       }
@@ -874,11 +884,11 @@ void BattleView::handle_input(const platform::Input& in) {
     if (debug_ui_ == 4) {
       int pick = -1, pc = active_pc_;
       for (int slot = 0; slot < battle::kPcSlots && pick < 0; ++slot) {
-        if (!battle_->can_act(slot)) continue;
-        battle_->unit_mut(slot).gauge = battle_->unit(slot).gauge_max;
+        if (!can_act(slot)) continue;
+        bunit_mut(slot).gauge = bunit(slot).gauge_max;
         for (int cell = 0; cell < data::kGridCells && pick < 0; ++cell)
-          if (battle_->element_usable(slot, cell)) {
-            const int id = battle_->unit(slot).cells[static_cast<size_t>(cell)] & 0x3FFF;
+          if (element_usable(slot, cell)) {
+            const int id = bunit(slot).cells[static_cast<size_t>(cell)] & 0x3FFF;
             if (id > 0 && static_cast<size_t>(id) < tables_->elements.size() && tables_->elements[static_cast<size_t>(id)].mode() == 0) {
               pick = cell;
               pc = slot;
@@ -888,7 +898,7 @@ void BattleView::handle_input(const platform::Input& in) {
       active_pc_ = pc;
       pending_cmd_.actor = pc;
       for (int cell = 0; cell < data::kGridCells && pick < 0; ++cell)
-        if (battle_->element_usable(pc, cell)) pick = cell;
+        if (element_usable(pc, cell)) pick = cell;
       debug_ui_ = 0;
       if (pick >= 0) {
         pending_cmd_.kind = battle::Command::Kind::Element;
@@ -906,7 +916,7 @@ void BattleView::handle_input(const platform::Input& in) {
     if (debug_ui_ == 8) {
       pending_cmd_.kind = battle::Command::Kind::Element;
       for (int cell = 0; cell < data::kGridCells; ++cell)
-        if ((battle_->unit(active_pc_).cells[static_cast<size_t>(cell)] & 0x3FFF) == 0xEE) {
+        if ((bunit(active_pc_).cells[static_cast<size_t>(cell)] & 0x3FFF) == 0xEE) {
           cell_ = pending_cmd_.cell = cell;
           break;
         }
@@ -923,7 +933,7 @@ void BattleView::handle_input(const platform::Input& in) {
       enter_target(Tgt::Enemy);
     } else {
       pending_cmd_.kind = battle::Command::Kind::Element;
-      cell_ = std::max(0, elem_open_cell(battle_->unit(active_pc_), tables_->elements.size()));
+      cell_ = std::max(0, elem_open_cell(bunit(active_pc_), tables_->elements.size()));
       ui_ = Ui::Element;
       if (debug_ui_ == 3) {
         pending_cmd_.cell = cell_;
@@ -935,20 +945,40 @@ void BattleView::handle_input(const platform::Input& in) {
     return;
   }
   // Switching PC plays SFX 0x16, restarts the idle script and restores the cursor memory; L1 / R1 count from the second tick of the top menu.
-  if (ui_ == Ui::Top && swap != 0 && entry_live_ >= 1) {
+  if (ui_ == Ui::Top && swap != 0 && entry_live_ >= 1 && !versus_run_ask_) {
     switch_active_pc(swap);
     return;
   }
   // The next opening slides in again.
   if (ui_ != Ui::Element) elem_shown_ = -1, elem_state_ = 0;
-  const battle::Unit& unit = battle_->unit(active_pc_);
+  const battle::Unit& unit = bunit(active_pc_);
   auto step = [](int& cursor, int count, int dir) { cursor = count > 0 ? ((cursor + dir) % count + count) % count : 0; };
   const int vdir = (down ? 1 : 0) - (up ? 1 : 0);
   const int hdir = (right ? 1 : 0) - (left ? 1 : 0);
 
   switch (ui_) {
     case Ui::Top: {
-      const int rows = battle_->swap_enabled() ? 5 : 4;
+      // A versus Run asks first: Yes surrenders the battle.
+      if (versus_run_ask_) {
+        if (vdir != 0 || hdir != 0) {
+          versus_run_cursor_ ^= 1;
+          audio_.play_menu(1);
+        }
+        if (cancel || (ok && versus_run_cursor_ == 1)) {
+          versus_run_ask_ = false;
+          audio_.play_menu(6);
+        } else if (ok) {
+          versus_run_ask_ = false;
+          audio_.play_menu(8);
+          top_command_camera();
+          pending_cmd_ = {};
+          pending_cmd_.actor = active_pc_;
+          pending_cmd_.kind = battle::Command::Kind::Run;
+          execute(pending_cmd_);
+        }
+        break;
+      }
+      const int rows = battle_->swap_enabled() || versus_ ? 5 : 4;
       // A cursor remembered on the Swap row of a fight that has none.
       if (top_cursor_ >= rows) top_cursor_ = 0;
       step(top_cursor_, rows, vdir);
@@ -958,12 +988,12 @@ void BattleView::handle_input(const platform::Input& in) {
       if (cursor_memory_ && active_pc_ >= 0 && active_pc_ < battle::kPcSlots) top_mem_[active_pc_] = top_cursor_;
       // Attack / Element confirmed (the element row may still be refused with 0x18 below).
       if (top_cursor_ <= 1) audio_.play_menu(8);
-      const int command = top_row_command(top_cursor_, rows == 5);
+      const int command = top_row_command(top_cursor_, rows == 5, versus_);
       pending_cmd_ = {};
       pending_cmd_.actor = active_pc_;
       // Every command confirm turns the PC to the unit an enemy target cursor would start on (Defend and Run too; Defend keeps the yaw).
       // Swap does not: its list keeps the orbit, whose angle follows the PC's yaw.
-      if (const std::vector<int> enemies = target_candidates(); command != kSwapCommand && !enemies.empty()) {
+      if (const std::vector<int> enemies = target_candidates(); command != kSwapCommand && command != kEndTurnCommand && !enemies.empty()) {
         vis_[static_cast<size_t>(active_pc_)].turn.on = false;
         face_toward(active_pc_, enemies[static_cast<size_t>(target_start(enemies))]);
       }
@@ -975,7 +1005,7 @@ void BattleView::handle_input(const platform::Input& in) {
         if (ui_ == Ui::Target) top_command_camera();
       } else if (command == 1) {
         pending_cmd_.kind = battle::Command::Kind::Element;
-        battle_->open_element_menu(active_pc_);
+        open_element_menu_now();
         cell_ = elem_open_cell(unit, tables_->elements.size());
         // The row is dim (gauge below level 1 / nothing selectable): the menu does not open.
         if (cell_ < 0 || unit.stamina <= 0) {
@@ -989,9 +1019,18 @@ void BattleView::handle_input(const platform::Input& in) {
         top_command_camera();
         pending_cmd_.kind = battle::Command::Kind::Defend;
         execute(pending_cmd_);
+      } else if (command == 3 && versus_) {
+        audio_.play_menu(8);
+        versus_run_ask_ = true;
+        versus_run_cursor_ = 1;
       } else if (command == 3) {
         top_command_camera();
         pending_cmd_.kind = battle::Command::Kind::Run;
+        execute(pending_cmd_);
+      } else if (command == kEndTurnCommand) {
+        audio_.play_menu(8);
+        top_command_camera();
+        pending_cmd_.kind = battle::Command::Kind::EndTurn;
         execute(pending_cmd_);
       } else if (battle_->swap_candidates(active_pc_).empty()) {
         // Nobody can come in: refused.
@@ -1014,7 +1053,7 @@ void BattleView::handle_input(const platform::Input& in) {
       }
       if (!ok) break;
       if (chain_cursor_ == 3) {
-        battle_->open_element_menu(active_pc_);
+        open_element_menu_now();
         const int first = elem_open_cell(unit, tables_->elements.size());
         // Dim row: nothing selectable.
         if (first < 0 || unit.stamina <= 0) {
@@ -1066,7 +1105,7 @@ void BattleView::handle_input(const platform::Input& in) {
         break;
       }
       if (ok) {
-        if (elem_valid(unit, nel, level, slot) && battle_->element_usable(active_pc_, cell_)) {
+        if (elem_valid(unit, nel, level, slot) && element_usable(active_pc_, cell_)) {
           pending_cmd_.cell = cell_;
           const bool creature_list = (unit.cells[static_cast<size_t>(cell_)] & 0x3FFF) == 0xEE;
           // Nobody on the ring (Revive with no one knocked out): refused, the list stays open.
@@ -1227,9 +1266,15 @@ void BattleView::handle_input(const platform::Input& in) {
 // (status 0x2000) 35 / 22 / 10 (1000 / 40 + 10, 500 / 40 + 10, 10). No such strength: the cursor stays where it is.
 // With the option on Manual nothing happens. The rule lives in Battle::auto_hit_level.
 void BattleView::chain_auto_cursor() {
-  if (!auto_accuracy_) return;
-  const battle::Unit& unit = battle_->unit(active_pc_);
-  const int hit_level = battle_->auto_hit_level(active_pc_, engaged_target_, false);
+  const battle::Unit& unit = bunit(active_pc_);
+  // A versus battle never reopens the menu on a dim Element row (a cursor left there on an earlier turn): it goes to the hits.
+  if (versus_ && chain_cursor_ == 3 && (elem_open_level(unit, tables_->elements.size()) < 0 || unit.gauge < 0 || unit.stamina == 0)) chain_cursor_ = 2;
+  if (!auto_accuracy_) {
+    if (versus_)
+      while (chain_cursor_ > 0 && battle_->chain_cost(chain_cursor_, unit) > unit.stamina) --chain_cursor_;
+    return;
+  }
+  const int hit_level = auto_hit_level(active_pc_, engaged_target_, false);
   if (hit_level >= 0) {
     chain_cursor_ = hit_level;
     return;
@@ -1321,7 +1366,7 @@ void BattleView::build_command_ui() {
     if (id > 0 && static_cast<size_t>(id) < tables_->elements.size() && !(tables_->elements[static_cast<size_t>(id)].b(0) & 0x80)) {
       header_plate(tables_->elements[static_cast<size_t>(id)], 22);
       // Header: title text x 0x44, y = plate + 3: name + "%+d".
-      if (battle_state.element_colour(id) & 0xFC)
+      if (element_colour(id, act_.actor) & 0xFC)
         btext(0x81, import::utf8_to_u32(elem_label(tables_->element_name(id), tables_->elements[static_cast<size_t>(id)], act_.ev.front().row)),
               0x44, 22 + 3, 0x757575);
     }
@@ -1329,18 +1374,18 @@ void BattleView::build_command_ui() {
   } else if (hdr_on_ && hdr_cell_ >= 0 && hdr_cell_ < data::kGridCells && active_pc_ >= 0) {
     // Cast header float: from the confirm in the list the chosen plate floats to (8, 22) and stays through the
     // target ring; in state 0 the other plates of the level fold away.
-    const battle::Unit& cu = battle_state.unit(active_pc_);
-    const int id = battle_state.cell_element(active_pc_, hdr_cell_);
+    const battle::Unit& cu = bunit(active_pc_);
+    const int id = cell_element(active_pc_, hdr_cell_);
     if (id > 0 && static_cast<size_t>(id) < tables_->elements.size()) {
       const int row_y = 60 + 15 * (hdr_cell_ % data::kGridCols);
       const float y = static_cast<float>(hdr_.plate_y(row_y));
       if (hdr_.state == 0 && hdr_.fold_frame() > 0) {
         for (const int idx : level_slots(hdr_cell_ / data::kGridCols)) {
           if (idx == hdr_cell_) continue;
-          const data::ElemRec& oe = tables_->elements[static_cast<size_t>(battle_state.cell_element(active_pc_, idx))];
+          const data::ElemRec& oe = tables_->elements[static_cast<size_t>(cell_element(active_pc_, idx))];
           const int oci = data::colour_index_of_bit(oe.colour_bit());
           const int opc = oci >= 0 && oci < 6 ? oci : (oe.colour_bit() & 0xFC) == 0xFC ? 6 : -1;
-          const bool used = cu.used[static_cast<size_t>(idx)] || battle_state.element_greyed(active_pc_, idx);
+          const bool used = cu.used[static_cast<size_t>(idx)] || element_greyed(active_pc_, idx);
           if (opc >= 0)
             add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + opc * 10 + hdr_.fold_frame() - 1)], 8 * kPs1Px, (60.0f + 15.0f * static_cast<float>(idx % data::kGridCols)) * kRowScale, 120 * kPs1Px, 16 * kRowScale);
         }
@@ -1353,7 +1398,7 @@ void BattleView::build_command_ui() {
   if (active_pc_ >= 0 && ui_ == Ui::Swap) build_swap_ui();
   build_entry_outline();
   if (active_pc_ < 0 || !(ui_ == Ui::Top || ui_ == Ui::Chain || ui_ == Ui::Element || ui_ == Ui::Target)) return;
-  const battle::Unit& unit = battle_state.unit(active_pc_);
+  const battle::Unit& unit = bunit(active_pc_);
   // Command window (white-bordered black box at PS1 (28, 177), 68 x 54; rows 11 px apart, the animated red diamond cursor left of the row).
   // The box is the PS1's own line box in both art modes. Top: Attack / Element / Defend / Run Away (sheet 0x04 g1..4,
   // XLAT 0x10002 -> style 2, gn_70 x 0.425). Engaged (the PC stands at its target): "1-(92%)" "2-(79%)" "3-(69%)" + Element, with the "HIT%"
@@ -1370,15 +1415,15 @@ void BattleView::build_command_ui() {
     //  +1.2, white above), and without their red part while the PC has hi status 0x20000 (no stamina cost). Element: dim when gauge < 0 /
     //  stamina 0 / no usable cell.
     constexpr u32 kDim = 0x404040, kYellowWord = 0x008080, kWhiteWord = 0x808080;
-    // Party swap adds a fifth top row: the box grows upward by one row pitch.
-    const int rows = ui_ == Ui::Top && battle_state.swap_enabled() ? 5 : 4;
+    // Party swap, or a versus battle's End Turn, adds a fifth top row: the box grows upward by one row pitch.
+    const int rows = ui_ == Ui::Top && (battle_state.swap_enabled() || versus_) ? 5 : 4;
     const float lift = 11.0f * static_cast<float>(rows - 4);
     const float bx = 28 * kPs1Px, by = ref_y(177 - lift), bw = 68 * kPs1Px;
     // Interior 52 x 36 + the 8 px skin frame; 0.8 row shorter than the nominal 52 so the top and bottom padding round the text are equal (0.67 row pitch).
     add_skin_box(bx, by, bw, 51.2f * kRowScale + ref_y(lift));
     const int cur = ui_ == Ui::Top ? top_cursor_ : chain_cursor_;
     const bool fatigued = (unit.lo & battle::st::kFatigued) != 0;
-    const u32 hit_row_mask = (unit.hi & battle::st::kHiNoStaminaCost) ? 0xFFFF00u : 0xFFFFFFu;
+    const u32 hit_row_mask = battle_->costs_waived(unit) ? 0xFFFF00u : 0xFFFFFFu;
     // The translated text clears bit 16; JP keeps the JP font.
     const int cmd_flags = jp ? 0x10002 : 2;
     for (int k = 0; k < rows; ++k) {
@@ -1387,8 +1432,10 @@ void BattleView::build_command_ui() {
       const bool sel = k == cur;
       u32 row_colour = kWhiteWord;
       std::u32string label;
-      const int command = top_row_command(k, rows == 5);
-      if (ui_ == Ui::Top && command == kSwapCommand) {
+      const int command = top_row_command(k, rows == 5, versus_);
+      if (ui_ == Ui::Top && command == kEndTurnCommand) {
+        label = kEndTurnLabel[li];
+      } else if (ui_ == Ui::Top && command == kSwapCommand) {
         label = kSwapLabel[li];
         if (battle_state.swap_candidates(active_pc_).empty()) row_colour = kDim;
       } else if (ui_ == Ui::Top) {
@@ -1396,7 +1443,7 @@ void BattleView::build_command_ui() {
         if (command == 0 && unit.stamina == 0) row_colour = kDim;
         if (command == 1 && (!any_element || unit.gauge < 0 || unit.stamina == 0)) row_colour = kDim;
       } else if (k < 3) {
-        const int pct = battle_state.hit_chance_shown_for(active_pc_, engaged_target_, k);
+        const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
         label = import::utf8_to_u32(std::format("{}-({}%)", k + 1, pct));
         if (fatigued) {
           static const int kThr[3] = {12, 25, 37};
@@ -1427,8 +1474,11 @@ void BattleView::build_command_ui() {
   if (ui_ == Ui::Top) {
     if (menu_live()) {
       const size_t caption0 = op_count();
-      const int command = top_row_command(top_cursor_, battle_state.swap_enabled());
-      const char32_t* caption = command == kSwapCommand ? kSwapLabel[jp ? 0 : li] : jp ? kCommandCaptionJp[command & 3] : kCommand[li][command & 3];
+      const int command = top_row_command(top_cursor_, battle_state.swap_enabled(), versus_);
+      const char32_t* caption = command == kEndTurnCommand ? kEndTurnLabel[jp ? 0 : li]
+                                : command == kSwapCommand  ? kSwapLabel[jp ? 0 : li]
+                                : jp                       ? kCommandCaptionJp[command & 3]
+                                                           : kCommand[li][command & 3];
       btext(0xA, caption, 300, 22, 0);
       set_group(caption0, 1);
     }
@@ -1452,14 +1502,13 @@ void BattleView::build_command_ui() {
 //    plus the button glyph of the camera key (12 x 12 at (0xF6, 0xE)): the pad icon, or in keyboard mode the key cap of the bound key from
 //    ui/keyboard_<l>.png.
 void BattleView::build_target_ui(bool cam_hint) {
-  const battle::Battle& battle_state = *battle_;
   if (targets_.empty()) return;
   // The name + HP block shows when the ring holds ONE living unit,
   // so a whole-range element on the last enemy shows that enemy; otherwise the side label picked by the element's target byte & 0xC0.
   const bool all = (tgt_mode_ == Tgt::EnemyAll || tgt_mode_ == Tgt::AllyAll) && targets_.size() > 1;
   bool both_sides = false;
   if (pending_cmd_.kind == battle::Command::Kind::Element && pending_cmd_.cell >= 0 && pending_cmd_.actor >= 0) {
-    const int eid = battle_state.cell_element(pending_cmd_.actor, pending_cmd_.cell);
+    const int eid = cell_element(pending_cmd_.actor, pending_cmd_.cell);
     if (eid > 0 && static_cast<size_t>(eid) < tables_->elements.size()) {
       const battle::TargetSpec sp = battle::target_spec(tables_->elements[static_cast<size_t>(eid)]);
       both_sides = sp.party && sp.enemies;
@@ -1505,7 +1554,7 @@ void BattleView::build_target_ui(bool cam_hint) {
   // info window
   add_img(hud_[kHWaku03], 6 * kPs1Px, 163 * kRowScale, 96 * kPs1Px, 48 * kRowScale, 0, 0, 1, 1, 0xFFFFFFFFu, 1);
   const int tu_i = targets_[static_cast<size_t>(std::clamp(target_cursor_, 0, static_cast<int>(targets_.size()) - 1))];
-  const battle::Unit& tu = battle_state.unit(tu_i);
+  const battle::Unit& tu = bunit(tu_i);
   // Side labels: 0xC0 = 敵・味方全体, 0x80 = 敵全体, 0x40 = 味方全体; translated: All Enemies/Allies | All Enemies | All Allies.
   if (all)
     btext(jp ? 0x10085 : 0x85,
@@ -1528,8 +1577,8 @@ void BattleView::build_target_ui(bool cam_hint) {
   // & 0x3F, U+1B4).
   if (!all && (tu.pc || (tu.lo & 0x400u))) {
     btext(jp ? 0x10004 : 4, xlat("ＨＰ", U"HP"), 10, 0xB3, 0x8A8A8A);
-    // HP known: every PC, an enemy only once an Infoscope landed on it.
-    if (tu.pc || (tu.lo & 0x400000u)) {
+    // HP known: every PC, an enemy only once an Infoscope landed on it. A versus battle never shows the other party's.
+    if (versus_ ? tu_i < battle::kPcSlots : (tu.pc || (tu.lo & 0x400000u))) {
       const int hp = std::clamp(tu.hp, 0, 99999), mhp = std::clamp(tu.max_hp, 0, 99999);
       const u32 hpc = hp_colour(hp, mhp);
       btext(4, U"/", 0x37, 0xBB, hpc);
@@ -1584,7 +1633,7 @@ void BattleView::build_target_ui(bool cam_hint) {
 std::vector<int> BattleView::level_slots(int level) const {
   std::vector<int> out;
   if (active_pc_ < 0 || level < 0 || level >= data::kGridRows) return out;
-  const battle::Unit& unit = battle_->unit(active_pc_);
+  const battle::Unit& unit = bunit(active_pc_);
   for (int slot = 0; slot < data::kGridCols; ++slot) {
     const int idx = level * data::kGridCols + slot;
     const int id = unit.cells[static_cast<size_t>(idx)] & 0x3FFF;
@@ -1603,8 +1652,7 @@ std::vector<int> BattleView::level_slots(int level) const {
 //    x 0xAB (JP 0xBB), y = row * 13 + 0x10, colour 0x757575).
 //  No message window and no command box while it is open.
 void BattleView::build_element_ui() {
-  const battle::Battle& battle_state = *battle_;
-  const battle::Unit& unit = battle_state.unit(active_pc_);
+  const battle::Unit& unit = bunit(active_pc_);
   const int sel_lvl = cell_ / data::kGridCols;
   // The plates on screen belong to the level the slide machine shows (elem_shown_: the old level while it slides out); the text, stock counts and the
   // selected highlight appear only once they rest (the slide machine is in state 0 and the shown level is the selected one).
@@ -1621,7 +1669,7 @@ void BattleView::build_element_ui() {
       const int idx = level * data::kGridCols + slot;
       const int id = unit.cells[static_cast<size_t>(idx)] & 0x3FFF;
       if (id == 0 || static_cast<size_t>(id) >= tables_->elements.size() || !unit.usable[static_cast<size_t>(idx)]) continue;
-      const data::ElemRec& elem = tables_->elements[static_cast<size_t>(battle_state.cell_element(active_pc_, idx))];
+      const data::ElemRec& elem = tables_->elements[static_cast<size_t>(cell_element(active_pc_, idx))];
       const int ci = blink && level == sel_lvl ? 4 : data::colour_index_of_bit(elem.colour_bit());
       const u8 a = level > unit.gauge ? 128 : 255;
       const float x = (160 + 15.0f * static_cast<float>(level)) * kPs1Px, y = ref_y(118 + 7.5f * static_cast<float>(slot));
@@ -1633,11 +1681,11 @@ void BattleView::build_element_ui() {
   for (const int idx : slots) {
     const int slot = idx % data::kGridCols;
     // A tech that a party member's tech completes shows (and casts) the double / triple tech instead.
-    const int id = battle_state.cell_element(active_pc_, idx);
+    const int id = cell_element(active_pc_, idx);
     const data::ElemRec& elem = tables_->elements[static_cast<size_t>(id)];
     const int ci = data::colour_index_of_bit(elem.colour_bit());
     // Used or colour-sealed = the greyed plate set + 0x404040 text.
-    const bool used = unit.used[static_cast<size_t>(idx)] || battle_state.element_greyed(active_pc_, idx);
+    const bool used = unit.used[static_cast<size_t>(idx)] || element_greyed(active_pc_, idx);
     const bool sel = idx == cell_ && rest;
     // PS1 line of the plate.
     const float row_y = 60.0f + 15.0f * static_cast<float>(slot);
@@ -1664,7 +1712,7 @@ void BattleView::build_element_ui() {
   // description window
   const size_t desc0 = op_count();
   if (!slots.empty()) {
-    const int id = battle_state.cell_element(active_pc_, cell_);
+    const int id = cell_element(active_pc_, cell_);
     {
       // Window at (0x136, 10): X = x - 0x98 + 4 (JP: 16 px further right, the sprite keeps its 152 x 56 size), Y = y - 4 -> subtractive
       // base + frame; the JP rows sit at x 0xBB, 16 right of the others.
@@ -1696,11 +1744,11 @@ void BattleView::build_element_ui() {
 //  * the target info window + target cursor of the caster; the camera hint is skipped. Example: the caster's name, HP 999 / 999,
 //    the female sign and INNATE green under the list.
 std::u32string BattleView::dop_name(int index) {
-  const battle::Battle& battle_state = *battle_;
   const int entry = dop_list_.at(static_cast<size_t>(index));
   std::string nm;
   if (entry < 0) {
-    nm = static_cast<size_t>(active_pc_) < battle_state.party().size() ? battle_state.party()[static_cast<size_t>(active_pc_)].own_name : battle_state.unit(active_pc_).name;
+    const std::vector<battle::PartyMember>& party = battle_->party(versus_side_);
+    nm = static_cast<size_t>(active_pc_) < party.size() ? party[static_cast<size_t>(active_pc_)].own_name : bunit(active_pc_).name;
   } else {
     // sysmes[0x190000 + low byte].
     const std::string* text = lang_tables_.sysmes((0x19u << 16) | static_cast<u32>(entry & 0xFF), lang_);
@@ -1845,6 +1893,10 @@ void BattleView::build_swap_ui() {
 
 // ------------------------------------------------------------------------------------------------------------- results
 void BattleView::build_result_ui() {
+  if (versus_) {
+    build_versus_plate();
+    return;
+  }
   const battle::Battle& battle_state = *battle_;
   const battle::Rewards& rewards = battle_state.rewards();
   const battle::Outcome outcome = battle_state.outcome();
@@ -1875,7 +1927,7 @@ void BattleView::build_result_ui() {
     float py = ty;
     for (size_t i = 0; i < battle_state.party().size() && i < battle::kPcSlots; ++i) {
       const battle::PartyMember& member = battle_state.party()[i];
-      const bool alive = battle_state.unit(static_cast<int>(i)).alive();
+      const bool alive = bunit(static_cast<int>(i)).alive();
       add_text(member.name, tx, py, alive ? kWhite : kGrey, 0, 0.85f);
       for (int k = 0; k < 7; ++k) {
         const int gain = rewards.gains[i][static_cast<size_t>(k)];
