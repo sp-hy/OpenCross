@@ -601,15 +601,17 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       log::info("route: entity {} moved {:.1f} since the mark", ent_id, static_cast<double>(dist));
       if (dist < static_cast<float>(want)) return bad(std::format("entity {} moved only {:.1f}, expected at least {}", ent_id, static_cast<double>(dist), want));
     } else if (args[1] == "ent") {
-      // assert ent <n> model|shown|moving|paused|wet|pitch <value>: entity state
+      // assert ent <n> model|body|char|shown|moving|paused|wet|pitch <value>: entity state
       int ent_id = 0, want = 0;
-      float model = 0, bits_f = 0, pitch = 0, drawn = 0;
+      float model = 0, bits_f = 0, pitch = 0, drawn = 0, body = 0, char_id = 0;
       if (args.size() < 5 || !to_int(args[2], ent_id) || !to_int(args[4], want) || !st.ent_xz || !st.ent_xz(-2000 - ent_id, model, bits_f) ||
-          !st.ent_xz(-4000 - ent_id, pitch, drawn))
-        return bad("assert ent <n> model|shown|moving|paused|wet|pitch <value>");
+          !st.ent_xz(-4000 - ent_id, pitch, drawn) || !st.ent_xz(-5000 - ent_id, body, char_id))
+        return bad("assert ent <n> model|body|char|shown|moving|paused|wet|pitch <value>");
       const int bits = static_cast<int>(bits_f);
       int got = 0;
       if (args[3] == "model") got = static_cast<int>(model);
+      else if (args[3] == "body") got = static_cast<int>(body);
+      else if (args[3] == "char") got = static_cast<int>(char_id);
       else if (args[3] == "pitch") got = static_cast<int>(pitch);
       else if (args[3] == "shown") got = (bits & 2) ? 1 : 0;
       else if (args[3] == "moving") got = (bits & 4) ? 1 : 0;

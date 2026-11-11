@@ -119,6 +119,20 @@ void test_vm_unit_queries() {
   CHECK(!result.ev.empty() && result.ev.back().second.kind == bseq::Event::Done && result.ev.back().second.a == 0x3E);
 }
 
+// The static sweep visits every op once, also where variant 0's sweep runs on into variant 7's code.
+void test_static_sweep() {
+  bseq::Table table;
+  CHECK(table.parse(make_block({0x1A, 0x15, 5, 4, 0x19, 0x00}, {0x6A, 3, 0x00})));
+  std::vector<int> ops, pcs;
+  table.each_op([&](int entry, int pc) {
+    CHECK(entry == 0);
+    pcs.push_back(pc);
+    ops.push_back(table.words()[static_cast<size_t>(pc)]);
+  });
+  CHECK((ops == std::vector<int>{0x1A, 0x15, 0x19, 0x00, 0x6A, 0x00}));
+  CHECK((pcs == std::vector<int>{14, 15, 18, 19, 20, 22}));
+}
+
 void test_vm_branch() {
   // GetAction(var1, var2); if var1 == 2 jump to the heavy branch (SetAnim 130) else SetAnim 128; end
   //  0: 43 1 2        GetAction
@@ -928,6 +942,7 @@ int main() {
   test_head_turn();
   test_vm_branch();
   test_vm_unit_queries();
+  test_static_sweep();
   test_vm_waits();
   test_vm_run_away();
   test_vm_jump();

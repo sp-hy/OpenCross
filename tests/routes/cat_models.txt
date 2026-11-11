@@ -1,0 +1,31 @@
+# zel_a10i: Serge in the Lynx body (model byte 0x31), Harle and Glenn. Sneff's show (entity 4's trigger, scenario >= 125, variable
+# 0x152 >= 6, bit 5446 set, bit 5442 clear), second answer: D9 / DA turn slot 0, 1, 2 into model bytes 0x3C, 0x3D, 0x3E. The three
+# bodies are fieldobj/player/neko/neko, neko2/neko and neko3/neko: the disc's file records name the file, which is not named after
+# its folder. All three party entities wear their cat and stay drawn.
+0 wait flow field 600
+- request party_add 22
+- request party_add 19
+- set model 0 49
+- load zel_a10i
+- wait flow field 600
+- set var 0 125
+- set var 154 64
+- set var 152 6
+- skip 3000
+- wait idle 3000
+- approach 4 20 1500
+- choose 0 3000
+- skip 3000
+- wait 300
+- skip 3000
+- wait 300
+- skip 3000
+- wait 400
+- assert ent 1 body 60
+- assert ent 2 body 61
+- assert ent 3 body 62
+- assert ent 1 shown 1
+- assert ent 2 shown 1
+- assert ent 3 shown 1
+- screenshot cat_models.png
+- quit

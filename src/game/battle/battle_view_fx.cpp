@@ -3,7 +3,6 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
-#include <format>
 #include <optional>
 #include <string_view>
 
@@ -441,14 +440,16 @@ void BattleView::fx_draw_models(const render::Frame& frame, const render::Letter
 }
 
 // The weapon techs' mesh sprites name the caster's weapon mesh by the PC's two-digit character number (guill_1-3 "02" = Guile, stick / stick2
-// "19" = Glenn, bigcard "37" = Sneff, high "39" = Doc; the weapon .bin is a cpt, so the battle registers the equipped part under that name).
+// "19" = Glenn, bigcard "37" = Sneff, high "39" = Doc; the weapon .bin is a cpt, so the battle registers the equipped part under that name),
+// and so do the units' own at0.prd emitters that throw the weapon (weapon_mesh_character).
 // Returns the present PC it denotes, with a weapon mesh loaded; in a versus battle the acting one first (both parties may hold the character).
 int BattleView::fx_weapon_mesh_unit(std::string_view name) const {
-  if (name.size() != 2 || !battle_) return -1;
+  const int character = weapon_mesh_character(name);
+  if (character < 0 || !battle_) return -1;
   const auto denotes = [&](int i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu && std::format("{:02d}", unit.src_id) == name;
+    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu && unit.src_id == character;
   };
   if (versus_ && act_.actor >= 0 && act_.actor < battle::kUnits && denotes(act_.actor)) return act_.actor;
   for (int i = 0; i < battle::kUnits; ++i)

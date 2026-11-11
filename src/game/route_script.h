@@ -68,8 +68,9 @@
 //   assert option <hexmask> set|clear   all mask bits of the settings options word are set / not all set
 //   mark / assert screen right|left|up|down   player screen movement since the mark
 //   mark ent <n> / assert moved <n> <min>   entity <n> is at least <min> world units from where `mark ent` saw it
-//   assert ent <n> model|shown|moving|paused|wet <value>   room model index / drawn / script motion active / motion preempted /
-//                                 walk flags carry water (0x60000), each 0 or 1 except model
+//   assert ent <n> model|body|char|shown|moving|paused|wet <value>   room model index / character model byte worn (-1 none) /
+//                                 character id / drawn / script motion active / motion preempted / walk flags carry water
+//                                 (0x60000), each 0 or 1 except model, body and char
 //   assert near <ent|player> <x> <z> <tol>   world position within tol
 //   assert facing <who> <angle> [tol]   facing (4096/turn) of <who> = player | p0 | p1 | p2 | <ent>, within tol (default 64)
 //   assert gap <a> <b> <min> <max>      xz distance between two entities (same names) is in [min, max]

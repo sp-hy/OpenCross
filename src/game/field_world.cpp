@@ -251,17 +251,17 @@ std::shared_ptr<ModelHandle> FieldWorld::own_room_model(int index) {
 
 namespace {
 
-// The field model of a player folder (fieldobj/player/<folder>), its texture mods resolved. Any thread.
-std::optional<assets::ModelAsset> read_character_model(const vfs::Vfs& files, const std::string& folder) {
+// The field model of a player file (fieldobj/player/<folder>/<file>), its texture mods resolved. Any thread.
+std::optional<assets::ModelAsset> read_character_model(const vfs::Vfs& files, const std::string& stem) {
   std::string err;
-  auto asset = read_model_files(files, "fieldobj/player/" + folder + "/" + folder, &err);
+  auto asset = read_model_files(files, "fieldobj/player/" + stem, &err);
   if (!asset) {
-    log::warn("player model {}: {}", folder, err);
+    log::warn("player model {}: {}", stem, err);
     return std::nullopt;
   }
   std::string list;
   for (const auto& clip : asset->clips) list += std::format(" {}:{}", clip.name, clip.frame_count);
-  log::debug("field: character model {} texture {}x{} hd x{} clips{}", folder, asset->textures.empty() ? 0 : asset->textures[0].width,
+  log::debug("field: character model {} texture {}x{} hd x{} clips{}", stem, asset->textures.empty() ? 0 : asset->textures[0].width,
              asset->textures.empty() ? 0 : asset->textures[0].height, asset->hd_textures.empty() ? 0 : asset->hd_scale, list);
   render::resolve_model_textures(*asset);
   return asset;
@@ -283,12 +283,12 @@ std::shared_ptr<ModelHandle> FieldWorld::character_model(int char_id) {
   }
   if (!handle) {
     ScopedTimer model_timer("field: character model load (first use)");
-    const std::string folder = model_folder(char_id);
-    if (folder.empty()) {
+    const std::string stem = model_stem(char_id);
+    if (stem.empty()) {
       char_models_[char_id] = nullptr;
       return nullptr;
     }
-    if (std::optional<assets::ModelAsset> asset = read_character_model(*files_, folder)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
+    if (std::optional<assets::ModelAsset> asset = read_character_model(*files_, stem)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
   }
   char_models_[char_id] = handle;
   return handle;
@@ -296,11 +296,11 @@ std::shared_ptr<ModelHandle> FieldWorld::character_model(int char_id) {
 
 void FieldWorld::prefetch_character_model(int model_byte) {
   if (model_byte < 0 || model_byte >= 0x100 || !files_ || char_models_.contains(model_byte) || char_prefetch_.contains(model_byte)) return;
-  std::string folder = model_folder(model_byte);
-  if (folder.empty()) return;
-  char_prefetch_[model_byte] = std::async(std::launch::async, [files = files_, ctx = ctx_, folder = std::move(folder)]() -> std::optional<PrefetchedCharacter> {
+  std::string stem = model_stem(model_byte);
+  if (stem.empty()) return;
+  char_prefetch_[model_byte] = std::async(std::launch::async, [files = files_, ctx = ctx_, stem = std::move(stem)]() -> std::optional<PrefetchedCharacter> {
     const unsigned generation = render::texture_registry::generation();
-    std::optional<assets::ModelAsset> asset = read_character_model(*files, folder);
+    std::optional<assets::ModelAsset> asset = read_character_model(*files, stem);
     if (!asset) return std::nullopt;
     render::ModelUploads uploads = render::prepare_model_uploads(*asset);
     render::ModelTextures textures = ctx ? render::prepare_model_textures(*ctx, *asset, uploads) : render::ModelTextures{};

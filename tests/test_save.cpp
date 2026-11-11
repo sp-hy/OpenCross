@@ -232,6 +232,14 @@ void test_slot() {
   const SaveSlot written = read_slot(card, 3);
   CHECK(written.preview_party() == (std::array<u8, 3>{0x31, 0x13, 0xFF}));
   CHECK(written.party() == (std::array<u8, 3>{0, 0x13, 0xFF}));
+  // Sneff's cats (0x3C..0x3E) have no face: each member saves his own id, so Serge in the Lynx body shows Serge's face.
+  SaveSlot cats = forms;
+  cats.set_party({0, 0x16, 0x13});
+  cats.chars[0].model_id = 0x3C;
+  cats.chars[0x16].model_id = 0x3D;
+  cats.chars[0x13].model_id = 0x3E;
+  CHECK(write_slot(card, 5, cats) == 3);
+  CHECK(read_slot(card, 3).preview_party() == (std::array<u8, 3>{0, 0x16, 0x13}));
 
   // whole save.dat container
   std::vector<ZipMember> members;

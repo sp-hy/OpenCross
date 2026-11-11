@@ -105,6 +105,11 @@ struct FxPack {
 // type-0x1A tables of their at0.prd, their S6 drps and battle.prd. Reads all of them (tools and tests).
 std::set<u32> actor_script_tags(const vfs::Vfs& vfs);
 
+// The battle registers each PC's equipped weapon mesh under the PC's two-digit character number, so a type-14 mesh sprite of that name draws
+// it: the weapon techs' packs ("02" Guile's wand) and the units' own at0.prd emitters (a thrown boomerang: Mel's "34", Van's "36"). The
+// character id a sprite name denotes, -1 for any other name.
+int weapon_mesh_character(std::string_view name);
+
 class BattleFxLibrary {
  public:
   // slot table, particle library, bespoke bindings. False if the slot table is missing. `bind_globals` false (the texture dump worker thread, a second

@@ -15,6 +15,7 @@
 #include "game/effects/bespoke/bespoke.h"
 #include "import/battle_stage.h"
 #include "import/container.h"
+#include "import/room_effects.h"
 #include "platform/paths.h"
 #include "vfs/vfs.h"
 
@@ -44,6 +45,47 @@ static int check_lenz(vfs::Vfs& files) {
     }
   }
   if (lens_count != 1) { std::printf("FAIL lenz: %d type-21 emitters in bg_00\n", lens_count); ++bad; }
+  return bad;
+}
+
+// The weapon-throw emitters of the units' own at0.prd (a boomerang's flight, the thrown weapons of Harle, Luccia, Sneff and Doc) draw a
+// type-14 mesh sprite named after the thrower's character number, which resolves to that PC's weapon mesh.
+static int check_thrown_weapon_meshes(vfs::Vfs& files) {
+  int bad = 0;
+  if (weapon_mesh_character("34") != 34 || weapon_mesh_character("02") != 2 || weapon_mesh_character("maru") != -1 || weapon_mesh_character("3") != -1 ||
+      weapon_mesh_character("3a") != -1) {
+    std::printf("FAIL thrown weapon: weapon_mesh_character\n");
+    ++bad;
+  }
+  struct Thrower {
+    const char* folder;
+    int character, emitters;
+  };
+  const Thrower throwers[] = {{"lutianna", 11, 2}, {"harley", 22, 2}, {"mell", 34, 8}, {"banc", 36, 8}, {"sunef", 37, 2}, {"doc", 39, 2}};
+  static const import::Vram kEmpty;
+  for (const Thrower& thrower : throwers) {
+    auto prd = files.read(std::string("cdrom/battle/player/") + thrower.folder + "/at0.prd");
+    if (!prd) {
+      std::printf("FAIL thrown weapon: no at0.prd for %s\n", thrower.folder);
+      ++bad;
+      continue;
+    }
+    const assets::RoomEffects fx = import::load_battle_effects(*prd, {}, kEmpty, {});
+    int found = 0;
+    for (const assets::Emitter& emitter : fx.emitters)
+      for (const assets::EffectOp& op : emitter.ops)
+        if (const auto* sprite = std::get_if<assets::FxSprite>(&op.arg); sprite && op.op == 0x05 && sprite->type == 14 && weapon_mesh_character(sprite->name) >= 0) {
+          if (weapon_mesh_character(sprite->name) != thrower.character) {
+            std::printf("FAIL thrown weapon: %s emitter %s draws '%s'\n", thrower.folder, emitter.name.c_str(), sprite->name.c_str());
+            ++bad;
+          }
+          ++found;
+        }
+    if (found != thrower.emitters) {
+      std::printf("FAIL thrown weapon: %s has %d weapon-mesh emitters, expected %d\n", thrower.folder, found, thrower.emitters);
+      ++bad;
+    }
+  }
   return bad;
 }
 
@@ -105,6 +147,7 @@ int main() {
     }
   }
   if (check_lenz(files)) return 1;
+  if (check_thrown_weapon_meshes(files)) return 1;
   {
     // A party member's model follows its kind byte: Serge in Lynx's body is the sel_yam2 model.
     battle::Unit body;

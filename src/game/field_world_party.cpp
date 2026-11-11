@@ -153,7 +153,7 @@ void FieldWorld::set_model_source(int model, int kind, int id, int sub) {
   bool known = false;
   switch (kind) {
     case ModelSource::kCharacter: known = id >= 0 && id <= 0x2B && id < save::kNumChars; break;
-    case ModelSource::kFieldModel: known = id >= 0 && id <= 0xFF && !model_folder(id).empty(); break;
+    case ModelSource::kFieldModel: known = id >= 0 && id <= 0xFF && !model_stem(id).empty(); break;
     case ModelSource::kRoomModel:
     case ModelSource::kBattleModel:
     case ModelSource::kCharacterBattle: known = !source_key(source).empty(); break;
@@ -549,16 +549,17 @@ void FieldWorld::prefetch_party_models(const save::SaveSlot& slot) {
     if (char_id < save::kNumChars) prefetch_character_model(model_byte_in(slot, char_id));
 }
 
-std::string FieldWorld::model_folder(int model_byte) const {
-  // Files 2b + 2 of the character ids are these folders.
-  if (model_byte >= 0 && model_byte < 44) return kCharFolders[model_byte];
+std::string FieldWorld::model_stem(int model_byte) const {
+  // Files 2b + 2 of the character ids are <folder>/<folder>.obj.
+  if (model_byte >= 0 && model_byte < 44) return std::string(kCharFolders[model_byte]) + "/" + kCharFolders[model_byte];
   if (model_byte < 0 || model_byte >= 0x100 || !discs_.loaded()) return {};
+  // Other bytes name the file by its index record; the file need not be named after its folder (0x3D = neko2/neko.obj).
   constexpr int kFidToRecord = DiscIndex::kMapBase - 0x83;
   const std::string& rec = discs_.record(disc_, 2 * model_byte + 2 + kFidToRecord);
-  const size_t folder_at = rec.find("fieldobj/player/");
-  if (folder_at == std::string::npos || !rec.ends_with(".obj")) return {};
-  const size_t folder_end = rec.find('/', folder_at + 16);
-  return folder_end == std::string::npos ? std::string() : rec.substr(folder_at + 16, folder_end - folder_at - 16);
+  const size_t stem_at = rec.find("fieldobj/player/");
+  if (stem_at == std::string::npos || !rec.ends_with(".obj")) return {};
+  const std::string stem = rec.substr(stem_at + 16, rec.size() - stem_at - 20);
+  return stem.find('/') == std::string::npos ? std::string() : stem;
 }
 
 // D9: char = U@1 (FD / FE / FF = slot 0 / 1 / 2, <= 0x2B an id, else none). Nothing to do (none, or the

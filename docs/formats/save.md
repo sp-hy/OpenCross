@@ -75,7 +75,7 @@ The first table is the **summary/preview** that the load menu shows without deco
 | off | type | field |
 |---|---|---|
 | 0x28 | char[12], Shift-JIS | leader name (preview): "セルジュ"; the auto-save has "オートセーブ" |
-| 0x34..0x36 | u8 x3 | party faces (preview), written by the save from 0x59C: 0xFF for an empty seat, else the member's record model byte (+0x2D) when it is at most 0x31, else the character id. So Serge in the Lynx body saves 0x31 and Pip in a form his form's face (0x2C..0x30), while Glenn with two swords (model 0x32) saves his id 0x13. The Save / Load and Continue lists draw the faces from these bytes (an id above 0x31 shows no face); every other preview field uses 0x59C |
+| 0x34..0x36 | u8 x3 | party faces (preview), written by the save from 0x59C: 0xFF for an empty seat, else the member's record model byte (+0x2D) when it is at most 0x31, else the character id. So Serge in the Lynx body saves 0x31 and Pip in a form his form's face (0x2C..0x30), while Glenn with two swords (model 0x32) saves his id 0x13 and a member Sneff turned into a cat (0x3C..0x3E, zel_a10i) saves his own id: Serge in the Lynx body shows Serge's face then. The Save / Load and Continue lists draw the faces from these bytes (an id above 0x31 shows no face); every other preview field uses 0x59C |
 | 0x37 | u32 | play time in 1/60 s frames, preview copy (unaligned; may be 1 frame ahead of 0x588) |
 | 0x3B | u32 | gold (preview) |
 | 0x3F | u8 | stars (preview) |

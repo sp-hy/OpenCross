@@ -103,6 +103,15 @@ int Table::initial_shadow() const {
 }
 
 void Table::sequence_tags(std::set<u32>& out) const {
+  each_op([&](int, int pc) {
+    const int op = words_[static_cast<size_t>(pc)];
+    if ((op == 0x68 || op == 0x7D) && static_cast<size_t>(pc) + 2 < words_.size())
+      out.insert(tag_of(words_[static_cast<size_t>(pc) + 1], words_[static_cast<size_t>(pc) + 2]));
+  });
+}
+
+void Table::each_op(const std::function<void(int entry, int pc)>& visit) const {
+  std::set<int> seen;
   for (int entry = 0; entry < entries(); ++entry) {
     const u32 base = entry_off_[static_cast<size_t>(entry)];
     u32 end = static_cast<u32>(words_.size() * 2);
@@ -112,8 +121,7 @@ void Table::sequence_tags(std::set<u32>& out) const {
       for (int pc = start(entry, variant); pc >= 0 && static_cast<u32>(pc) * 2 < end;) {
         const int op = words_[static_cast<size_t>(pc)];
         if (op < 0 || op >= 0xAD) break;
-        if ((op == 0x68 || op == 0x7D) && static_cast<size_t>(pc) + 2 < words_.size())
-          out.insert(tag_of(words_[static_cast<size_t>(pc) + 1], words_[static_cast<size_t>(pc) + 2]));
+        if (seen.insert(pc).second) visit(entry, pc);
         pc += kLen[op];
       }
   }

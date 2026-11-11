@@ -346,8 +346,9 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     if (fx_lit_[static_cast<size_t>(i)]) fx_light_params(i, model_mat, dp);
     meshes_->draw(*visual.model->gpu, dp);
     // The model's two attached-object slots (both draw the same weapon mesh at mount record 0 and 1; the hide words are set by anmseq
-    // ops 0x79 / 0x7A n and by the battle-start script, S5 entry 8: most PCs hide slot 1 there, Nikki / Mell swap hands with them, Glenn's second
-    // form shows two). Slot 1 needs a record (all-zero = no second mount).
+    // ops 0x79 / 0x7A n and by the battle-start script, S5 entry 8: most PCs hide slot 1 there, Van / Mel swap hands with them, Glenn's second
+    // form shows two). Slot 1 needs a record (all-zero = no second mount). A thrown weapon is hidden here and drawn by its unit emitter
+    // (anm_draw_meshes).
     for (int slot = 0; slot < 2; ++slot) {
       render::Mat4 wm;
       if (weapon_matrix(i, slot, wm)) {

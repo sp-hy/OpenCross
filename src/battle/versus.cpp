@@ -178,7 +178,8 @@ constexpr size_t kMaxStackCopies = 5;
 constexpr int kItemWeapon = 0, kItemArmour = 1, kItemAccessory = 2;
 
 // What the records allow one character, in every record set (some techs are only in the later sets): its member, the grid of the body it
-// wears (Serge in Lynx's body holds Lynx's techs), and for Pip every form's base stats, Lv 99 targets and growth column.
+// wears when that body is another character's record, and for Pip every form's base stats, Lv 99 targets and growth column. Serge in
+// Lynx's body (no character record) keeps his own grid; the techs the story gives him there sit in the rows of their levels.
 struct RecordValues {
   std::vector<PartyMember> members;
   // The members and the body's own records: the grids whose cells and techs the member may hold.
