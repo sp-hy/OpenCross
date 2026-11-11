@@ -506,7 +506,7 @@ void test_create_empty() {
   CHECK(!repaired.ensure_cards());
 }
 
-// The Steam user for a missing save folder (platform/paths.h): loginusers.vdf's MostRecent entry.
+// The Steam user for a missing save folder and the multiplayer name (platform/paths.h): loginusers.vdf's MostRecent entry and PersonaName.
 void test_loginusers() {
   const char* vdf =
       "\"users\"\n{\n\t\"76561198000000001\"\n\t{\n\t\t\"AccountName\"\t\t\"a\"\n\t\t\"MostRecent\"\t\t\"0\"\n\t}\n"
@@ -514,6 +514,10 @@ void test_loginusers() {
   CHECK(platform::parse_loginusers_most_recent(vdf) == 76561198037572628ull);
   CHECK(platform::parse_loginusers_most_recent("\"users\" { }") == 0);
   CHECK(platform::kSteamId64Base + 77306900u == 76561198037572628ull);
+  const char* named = R"("users" { "76561198000000001" { "PersonaName" "Kid" } "76561198037572628" { "AccountName" "b" "PersonaName" "Serge \"the\" Hero" } })";
+  CHECK(platform::parse_loginusers_persona(named, 76561198037572628ull) == "Serge \"the\" Hero");
+  CHECK(platform::parse_loginusers_persona(named, 76561198000000001ull) == "Kid");
+  CHECK(platform::parse_loginusers_persona(named, 76561198000000002ull).empty());
 }
 }  // namespace
 

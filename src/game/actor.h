@@ -59,6 +59,8 @@ class ActorShadows {
             std::span<const ShadowParams> shadows, bool linear, render::TexRef mask = {}) const;
   // The floor-plane normal of walk-mesh triangle `tri` as the engine computes it (+y down; (0, 4096, 0) off the mesh).
   static void floor_normal(const WalkMesh& walk, int tri, float out[3]);
+  // One tick of an actor's eased floor slope (ShadowParams::tile_slope_x / _z) toward triangle `tri`'s; off the mesh (a ladder) it stays.
+  static void ease_slope(const WalkMesh& walk, int tri, float& slope_x, float& slope_z);
 
  private:
   render::Texture tex_;

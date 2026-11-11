@@ -35,7 +35,7 @@ void BattleView::fx_model_copies(const effects::ViewParams& view, const render::
   for (const effects::FxModel& om : ms->units) {
     if (om.copies.empty() || om.unit < 0 || om.unit >= battle::kUnits) continue;
     const Visual& visual = vis_[static_cast<size_t>(om.unit)];
-    if (!battle_->unit(om.unit).present || !visual.has_model || !visual.model->gpu) continue;
+    if (!bunit(om.unit).present || !visual.has_model || !visual.model->gpu) continue;
     const float x = lerp(visual.px, visual.x, alpha_), z = lerp(visual.pz, visual.z, alpha_), yl = lerp(visual.py, visual.y, alpha_);
     const float fx = lerp(visual.pface_x, visual.face_x, alpha_), fz = lerp(visual.pface_z, visual.face_z, alpha_);
     render::Mat4 flip;
@@ -154,7 +154,7 @@ void BattleView::fx_model_requests(bool at_init) {
     if (fx_model.rebuilt) {
       fx_model.rebuilt = false;
       fx_hide({fx_model.unit}, 1, false);
-      if (battle_->unit(fx_model.unit).in_turn_order()) start_spawn(fx_model.unit);
+      if (bunit(fx_model.unit).in_turn_order()) start_spawn(fx_model.unit);
     }
     // Hang the pack's anim pack: the external clip set SetAnim 0x80 + k reads.
     if (!fx_model.clip_pack.empty()) {
@@ -324,7 +324,7 @@ render::Mat4 BattleView::fx_unit_matrix(int unit) const {
 
 // FxModels::attach: the attach point of the S3 table in its joint's space, through the posed joint, in the PS1 world.
 bool BattleView::fx_attach_unit(int unit, int point, effects::Vec3& out, bool raw) {
-  if (unit < 0 || unit >= battle::kUnits || !battle_->unit(unit).present) return false;
+  if (unit < 0 || unit >= battle::kUnits || !bunit(unit).present) return false;
   const Visual& visual = vis_[static_cast<size_t>(unit)];
   float mx = 0, my = 0, mz = 0;
   if (!visual.has_model || !visual.pose.attach_or_root(point, alpha_, mx, my, mz)) return false;
@@ -352,7 +352,7 @@ bool BattleView::fx_skin_unit(int unit, effects::FxSkinnedModel& out) {
     for (int k = 0; k < 3; ++k) out.rgb[k] = pa_.rgb[k];
     return true;
   }
-  if (unit < 0 || unit >= battle::kUnits || !battle_->unit(unit).present) return false;
+  if (unit < 0 || unit >= battle::kUnits || !bunit(unit).present) return false;
   const Visual& visual = vis_[static_cast<size_t>(unit)];
   if (!visual.has_model || !visual.model) return false;
   const effects::FxModels* ms = fx_ ? fx_->bespoke_models() : nullptr;

@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <span>
 #include <sstream>
 
@@ -283,6 +284,36 @@ bool Config::load(const std::filesystem::path& file) {
   sfx = clamp01(parse_float(ini.get("Audio", "Sfx"), sfx));
   voices = parse_bool(ini.get("Audio", "Voices"), voices);
   voice_volume = std::clamp(parse_int(ini.get("Audio", "VoiceVolume"), voice_volume), 0, 100);
+  {
+    MultiplayerSettings& mp = multiplayer;
+    mp.enabled = parse_bool(ini.get("Multiplayer", "Enabled"), mp.enabled);
+    const std::string server = ini.get("Multiplayer", "Server");
+    for (size_t i = 0; i < std::size(kMultiplayerServerNames); ++i)
+      if (server == kMultiplayerServerNames[i]) mp.server = static_cast<MultiplayerServer>(i);
+    mp.server_url = ini.get("Multiplayer", "ServerUrl", mp.server_url);
+    mp.name = ini.get("Multiplayer", "Name", mp.name);
+    mp.player_id = ini.get("Multiplayer", "PlayerId", mp.player_id);
+    mp.admin_token = ini.get("Multiplayer", "AdminToken", mp.admin_token);
+    mp.show_players = parse_bool(ini.get("Multiplayer", "ShowPlayers"), mp.show_players);
+    mp.max_parties = std::clamp(parse_int(ini.get("Multiplayer", "MaxParties"), mp.max_parties), 1, 32);
+    mp.translucent = parse_bool(ini.get("Multiplayer", "Translucent"), mp.translucent);
+    mp.show_labels = parse_bool(ini.get("Multiplayer", "ShowLabels"), mp.show_labels);
+    mp.chat_bubbles = parse_bool(ini.get("Multiplayer", "ChatBubbles"), mp.chat_bubbles);
+    mp.hide_global_chat = parse_bool(ini.get("Multiplayer", "HideGlobalChat"), mp.hide_global_chat);
+    const std::string chat = ini.get("Multiplayer", "Chat");
+    for (size_t i = 0; i < std::size(kChatDisplayNames); ++i)
+      if (chat == kChatDisplayNames[i]) mp.chat = static_cast<ChatDisplay>(i);
+    mp.mute_hides_party = parse_bool(ini.get("Multiplayer", "MuteHidesParty"), mp.mute_hides_party);
+    mp.challenges = parse_bool(ini.get("Multiplayer", "Challenges"), mp.challenges);
+    const std::string muted = ini.get("Multiplayer", "Muted");
+    if (!muted.empty()) mp.muted.clear();
+    for (std::string_view rest = muted; !rest.empty();) {
+      const size_t comma = rest.find(',');
+      const std::string_view pid = trim(rest.substr(0, comma));
+      if (!pid.empty()) mp.muted.emplace_back(pid);
+      rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+    }
+  }
   debug_room = ini.get("Debug", "Room", debug_room);
   debug_flow = ini.get("Debug", "Flow", debug_flow);
   debug_seed = static_cast<std::uint32_t>(std::max(0, parse_int(ini.get("Debug", "Seed"), static_cast<int>(debug_seed))));
@@ -406,6 +437,27 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Audio", "Sfx", fmt_float(sfx));
   ini.set("Audio", "Voices", on_off(voices));
   ini.set("Audio", "VoiceVolume", std::to_string(voice_volume));
+  {
+    const MultiplayerSettings& mp = multiplayer;
+    ini.set("Multiplayer", "Enabled", on_off(mp.enabled));
+    ini.set("Multiplayer", "Server", kMultiplayerServerNames[static_cast<size_t>(mp.server)]);
+    ini.set("Multiplayer", "ServerUrl", mp.server_url);
+    ini.set("Multiplayer", "Name", mp.name);
+    ini.set("Multiplayer", "PlayerId", mp.player_id);
+    if (!mp.admin_token.empty()) ini.set("Multiplayer", "AdminToken", mp.admin_token);
+    ini.set("Multiplayer", "ShowPlayers", on_off(mp.show_players));
+    ini.set("Multiplayer", "MaxParties", std::to_string(mp.max_parties));
+    ini.set("Multiplayer", "Translucent", on_off(mp.translucent));
+    ini.set("Multiplayer", "ShowLabels", on_off(mp.show_labels));
+    ini.set("Multiplayer", "ChatBubbles", on_off(mp.chat_bubbles));
+    ini.set("Multiplayer", "HideGlobalChat", on_off(mp.hide_global_chat));
+    ini.set("Multiplayer", "Chat", kChatDisplayNames[static_cast<size_t>(mp.chat)]);
+    ini.set("Multiplayer", "MuteHidesParty", on_off(mp.mute_hides_party));
+    ini.set("Multiplayer", "Challenges", on_off(mp.challenges));
+    std::string muted;
+    for (const std::string& pid : mp.muted) muted += (muted.empty() ? "" : ",") + pid;
+    ini.set("Multiplayer", "Muted", muted);
+  }
   if (!debug_room.empty()) ini.set("Debug", "Room", debug_room);
   if (!debug_flow.empty()) ini.set("Debug", "Flow", debug_flow);
   if (debug_seed) ini.set("Debug", "Seed", std::to_string(debug_seed));

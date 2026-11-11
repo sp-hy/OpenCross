@@ -672,10 +672,13 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   }
 
+  remote_labels_.clear();
+  local_label_.reset();
   for (int i = 0; i < ticks && !room_lost_; ++i) {
     sim_tick();
     // A key edge lasts one tick.
     input_.action_pending = false;
+    step_remote();
   }
 }
 

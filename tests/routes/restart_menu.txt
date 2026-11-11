@@ -5,8 +5,8 @@
 - request restart
 - wait menu closed 120
 - wait flow title 120
-# Nothing of the title room shows until its logo movie takes over.
-- wait 30
+# Nothing of the title room shows until its logo movie takes over, about 20 ticks into the scene: checked inside that window.
+- wait 5
 - assert title_hold on
 - screenshot rs_hold.png
 - wait movie start 600

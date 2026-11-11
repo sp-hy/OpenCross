@@ -55,6 +55,7 @@ public:
   int achievement_count() override { return static_cast<int>(account_.schema.size()); }
   std::string achievement_name(int index) override { return *std::next(account_.schema.begin(), index); }
   std::string achievement_title(const std::string& api_name) override { return "title of " + api_name; }
+  std::string persona_name() override { return "Serge"; }
 
 private:
   Account& account_;
@@ -82,6 +83,12 @@ struct Session {
 
 int main() {
   CHECK(game::Achievements::api_names().size() == 37);
+  {
+    SteamClient offline;
+    CHECK(offline.persona_name().empty());
+    Session session(0);
+    CHECK(session.client.persona_name() == "Serge");
+  }
 
   {
     Session session(36);

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <optional>
 
+#include "core/hash.h"
 #include "import/container.h"
 #include "import/lzss.h"
 #include "import/text.h"
@@ -79,6 +80,35 @@ std::array<u16, kGridCells> StatRec::grid() const {
         ++listed;
       }
   return cells;
+}
+
+std::string battle_data_fingerprint(const GameTables& tables) {
+  Fnv64 hash;
+  hash.add(kVersusRulesVersion);
+  const auto add_records = [&](const auto& records) {
+    hash.add(records.size());
+    for (const auto& record : records) hash.add_bytes(record.raw.data(), record.raw.size());
+  };
+  add_records(tables.enemies);
+  hash.add(tables.char_sets.size());
+  for (const auto& [name, set] : tables.char_sets) {
+    hash.add_text(name);
+    add_records(set.rec);
+    for (const Lv99& lv99 : set.lv99)
+      for (const int value : {static_cast<int>(lv99.hp), static_cast<int>(lv99.atk), static_cast<int>(lv99.def), static_cast<int>(lv99.hit),
+                              static_cast<int>(lv99.evd), static_cast<int>(lv99.mag), static_cast<int>(lv99.mdef)})
+        hash.add(static_cast<u64>(value));
+  }
+  add_records(tables.elements);
+  add_records(tables.scenes);
+  add_records(tables.gear);
+  hash.add(tables.btbgdat.size());
+  for (const auto& row : tables.btbgdat) hash.add_bytes(row.data(), row.size());
+  hash.add(tables.drops.size());
+  for (const DropRow& row : tables.drops)
+    for (const u16 word : row.slot) hash.add(word);
+  hash.add_bytes(tables.rng_table.data(), tables.rng_table.size());
+  return hash.hex();
 }
 
 int colour_index_of_bit(u8 bit) {

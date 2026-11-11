@@ -9,6 +9,7 @@
 #include "data/char_name.h"
 #include "battle/battle.h"
 #include "battle/pac_vm.h"
+#include "battle/versus.h"
 #include "game/game_session.h"
 #include "ui/menu/game_state.h"
 
@@ -5879,6 +5880,520 @@ void test_battle_grid_follows_the_masks() {
   CHECK(game::party_member_from_state(tables, state, 0).unlocked[7]);
 }
 
+// A challenge's party card: the Status screen's numbers (record plus gear, capped at 999) per member, at most 3 members, and the
+// elements in open cells (a tech or a shut cell does not count).
+void test_party_card() {
+  data::GameTables tables = make_tables();
+  give_every_record_a_grid(tables);
+  tables.gear.resize(0x60);
+  tables.gear[0x50].raw[4] = 20;
+  tables.gear[0x50].raw[5] = 3;
+  tables.gear[0x51].raw[4] = 6;
+  tables.gear[0x51].raw[5] = 2;
+  ui::MenuRules rules;
+  rules.tables = &tables;
+  ui::GameState state;
+  state.rules = &rules;
+  state.slot.head[save::head::kStarsTotal] = 7;
+  save::SaveChar& serge = state.slot.chars[0];
+  serge.max_hp = 320, serge.atk = 15, serge.def = 12, serge.mag = 9, serge.mdef = 8;
+  serge.weapon = 0x50;
+  serge.armour = 0x51;
+  serge.unlocked = {0xFC, 0, 0, 0, 0, 0, 0, 0};
+  serge.grid[0] = 1;
+  serge.grid[1] = 2;
+  serge.grid[2] = 0x80;
+  serge.grid[10] = 3;
+  save::SaveChar& kid = state.slot.chars[1];
+  kid.max_hp = 1200, kid.atk = 127;
+  const data::CharNames names;
+  const net::PartyCard card = game::party_card(state, {0, 1, 2, 3}, names);
+  CHECK_EQ(card.star, 7);
+  CHECK_EQ(card.members.size(), 3);
+  if (card.members.size() != 3) return;
+  const net::CardMember& lead = card.members[0];
+  CHECK(lead.char_id == 0 && lead.hp == 320 && lead.atk == 35 && lead.mag == 12 && lead.def == 18 && lead.mdef == 10);
+  CHECK_EQ(lead.elements, 2);
+  CHECK(card.members[1].char_id == 1 && card.members[1].hp == 999 && card.members[1].atk == 127 && card.members[1].elements == 0);
+  CHECK_EQ(card.members[2].char_id, 2);
+  ui::GameState bare;
+  CHECK(game::party_card(bare, {0}, names).members.empty());
+}
+
+// ------------------------------------------------------------------------------------------------ versus
+VersusSide versus_side(std::vector<PartyMember> party) {
+  VersusSide side;
+  side.party = std::move(party);
+  return side;
+}
+
+Command versus_command(Command::Kind kind, int actor) {
+  Command cmd;
+  cmd.kind = kind;
+  cmd.actor = actor;
+  return cmd;
+}
+
+Command versus_attack(int actor, std::vector<int> chain, int target) {
+  Command cmd = versus_command(Command::Kind::Attack, actor);
+  cmd.chain = std::move(chain);
+  cmd.target = target;
+  return cmd;
+}
+
+// Side A in units 0..2 at the opening stamina, side B in 3..5 at 70, 6..8 empty; only the turn side acts; End Turn passes the turn.
+void test_versus_start_and_turns() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(!battle.start_versus(versus_side({}), versus_side({make_member(3, "D")}), -1));
+  CHECK(battle.start_versus(versus_side({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}),
+                            versus_side({make_member(3, "D"), make_member(4, "E"), make_member(5, "F")}), -1));
+  CHECK(battle.versus());
+  for (int unit = 0; unit < kUnits; ++unit) CHECK_EQ(battle.unit(unit).present && battle.unit(unit).pc, unit < kPlayerUnits);
+  CHECK_EQ(battle.unit(0).stamina, kVersusOpeningStamina);
+  CHECK_EQ(battle.unit(2).stamina, 35);
+  CHECK_EQ(battle.unit(3).stamina, 70);
+  CHECK_EQ(battle.turn_side(), 0);
+  CHECK(battle.can_act(0) && !battle.can_act(3));
+  CHECK(!battle.apply(versus_command(Command::Kind::Defend, 3)));
+  CHECK(!battle.apply(versus_command(Command::Kind::Focus, 4)));
+  CHECK(!battle.apply(versus_command(Command::Kind::EndTurn, 3)));
+  // An engage names a standing unit of the other side and changes nothing.
+  {
+    Command engage = versus_command(Command::Kind::Engage, 0);
+    engage.target = 1;
+    CHECK(!battle.apply(engage));
+    engage.target = 4;
+    const u64 before = battle.state_hash();
+    CHECK(battle.apply(engage));
+    CHECK_EQ(battle.state_hash(), before);
+    engage.actor = 3;
+    engage.target = 0;
+    CHECK(!battle.apply(engage));
+  }
+  const int actions = battle.actions();
+  CHECK(battle.apply(versus_command(Command::Kind::Focus, 1)));
+  CHECK_EQ(battle.active_pc(), 1);
+  CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+  CHECK_EQ(battle.actions(), actions);
+  CHECK_EQ(battle.turn_side(), 1);
+  CHECK(!battle.can_act(0) && battle.can_act(3));
+  CHECK(battle.apply(versus_command(Command::Kind::Defend, 4)));
+  CHECK_EQ(battle.turn_side(), 1);
+  // Normal battles have no turns.
+  Fixture fixture;
+  CHECK(!fixture.battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+}
+
+// Each action of one side counts for every character of the other side as a teammate's: weak / medium / heavy 1 / 2 / 3 steps, a cast
+// 1 (its target excluded), each step the rate, x3/4 with flu, capped at 70. The side whose turn it is recovers nothing from its own actions.
+void test_versus_recovery() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start_versus(versus_side({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}),
+                            versus_side({make_member(3, "D"), make_member(4, "E"), make_member(5, "F")}), -1));
+  for (int unit = 3; unit < 6; ++unit) battle.unit_mut(unit).stamina = 0;
+  battle.unit_mut(5).lo |= st::kFlu;
+  CHECK(battle.apply(versus_attack(0, {2}, 3)));
+  CHECK_EQ(battle.unit(0).stamina, 5);
+  CHECK_EQ(battle.unit(1).stamina, 35);
+  CHECK_EQ(battle.unit(2).stamina, 35);
+  CHECK_EQ(battle.unit(3).stamina, 30);
+  CHECK_EQ(battle.unit(4).stamina, 30);
+  CHECK_EQ(battle.unit(5).stamina, 21);
+  battle.unit_mut(1).gauge = 0;
+  Command cast = versus_command(Command::Kind::Element, 1);
+  cast.cell = 0;
+  cast.target = 4;
+  CHECK(battle.apply(cast));
+  CHECK_EQ(battle.unit(1).stamina, -35);
+  CHECK_EQ(battle.unit(2).stamina, 35);
+  CHECK_EQ(battle.unit(0).stamina, 5);
+  CHECK_EQ(battle.unit(3).stamina, 40);
+  CHECK_EQ(battle.unit(4).stamina, 30);
+  CHECK_EQ(battle.unit(5).stamina, 28);
+  // Side B's actions in its turn recover side A, not side B.
+  CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 2)));
+  CHECK(battle.apply(versus_attack(3, {0}, 0)));
+  CHECK_EQ(battle.unit(3).stamina, 30);
+  CHECK_EQ(battle.unit(4).stamina, 30);
+  CHECK_EQ(battle.unit(2).stamina, 45);
+}
+
+// A versus Defend gives its +10 and the guard, then the character is done until its side's next turn; a turn in which every character is
+// done or exhausted ends by itself.
+void test_versus_defend_ends_turn() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start_versus(versus_side({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}),
+                            versus_side({make_member(3, "D"), make_member(4, "E")}), -1));
+  const u64 before = battle.state_hash();
+  CHECK(battle.apply(versus_command(Command::Kind::Defend, 0)));
+  CHECK(battle.state_hash() != before);
+  CHECK_EQ(battle.unit(0).stamina, 45);
+  CHECK(battle.unit(0).guard && battle.done(0) && !battle.can_act(0));
+  CHECK(!battle.apply(versus_command(Command::Kind::Defend, 0)));
+  CHECK(!battle.apply(versus_command(Command::Kind::Focus, 0)));
+  CHECK(!battle.apply(versus_attack(0, {0}, 3)));
+  CHECK_EQ(battle.turn_side(), 0);
+  // Unit 1 defends, unit 2 runs out of stamina: the turn passes by itself.
+  CHECK(battle.apply(versus_command(Command::Kind::Defend, 1)));
+  battle.unit_mut(2).stamina = 10;
+  CHECK(battle.apply(versus_attack(2, {0}, 3)));
+  CHECK_EQ(battle.turn_side(), 1);
+  CHECK(battle.done(0) && !battle.can_act(0));
+  CHECK(battle.apply(versus_command(Command::Kind::Defend, 3)));
+  CHECK(battle.apply(versus_command(Command::Kind::Defend, 4)));
+  CHECK_EQ(battle.turn_side(), 0);
+  CHECK(!battle.done(0) && battle.can_act(0) && battle.done(3) && !battle.can_act(3));
+  // The guard lasts until the character's menu comes up again.
+  CHECK(battle.unit(0).guard);
+  CHECK(battle.apply(versus_command(Command::Kind::Focus, 0)));
+  CHECK(!battle.unit(0).guard);
+}
+
+// In a versus battle hi status 0x20000 waives nothing: weapon hits and elements cost stamina, and the HIT% budget is the stamina alone.
+void test_versus_no_stamina_waiver() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start_versus(versus_side({make_member(0, "A"), make_member(1, "B")}), versus_side({make_member(3, "D"), make_member(4, "E")}), -1,
+                            70));
+  for (int unit : {0, 1}) {
+    battle.unit_mut(unit).hi |= st::kHiNoStaminaCost;
+    battle.unit_mut(unit).timers[32 + 17] = 9;
+  }
+  CHECK(!battle.costs_waived(battle.unit(0)));
+  CHECK_EQ(battle.hit_budget(0), 70);
+  CHECK(battle.apply(versus_attack(0, {0, 1}, 3)));
+  CHECK_EQ(battle.unit(0).stamina, 70 - battle.chain_cost(0, battle.unit(0)) - battle.chain_cost(1, battle.unit(0)));
+  battle.unit_mut(1).gauge = 0;
+  Command cast = versus_command(Command::Kind::Element, 1);
+  cast.cell = 0;
+  cast.target = 3;
+  CHECK(battle.apply(cast));
+  CHECK_EQ(battle.unit(1).stamina, 0);
+  battle.unit_mut(0).stamina = 10;
+  std::string why;
+  CHECK(!battle.validate(versus_attack(0, {2}, 3), &why) && why == "not enough stamina for the chain");
+  // A normal battle still waives the costs.
+  Fixture fixture;
+  fixture.battle.unit_mut(0).hi |= st::kHiNoStaminaCost;
+  CHECK(fixture.battle.costs_waived(fixture.battle.unit(0)));
+}
+
+// A side whose turn starts with nobody able to act advances time with the step of the other side's countdowns; one that time cannot help
+// passes the turn back; a side that runs out during its turn passes it.
+void test_versus_stuck_side() {
+  data::GameTables tables = make_tables();
+  const auto make_battle = [&](Battle& battle) {
+    return battle.start_versus(versus_side({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}),
+                               versus_side({make_member(3, "D"), make_member(4, "E"), make_member(5, "F")}), -1);
+  };
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    VersusBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(make_battle(battle));
+    for (int unit = 3; unit < 6; ++unit) battle.unit_mut(unit).stamina = 0, battle.unit_mut(unit).countdown = 8;
+    battle.unit_mut(0).countdown = 5, battle.unit_mut(1).countdown = 7, battle.unit_mut(2).countdown = 6;
+    CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+    CHECK_EQ(battle.turn_side(), 1);
+    CHECK_EQ(battle.unit(3).stamina, 50);
+    CHECK_EQ(battle.unit(5).stamina, 50);
+    CHECK_EQ(battle.unit(0).stamina, 35);
+    // Unit 0 reached 0 and took its AP again; the others ran the step down.
+    CHECK_EQ(battle.unit(0).countdown, 8);
+    CHECK_EQ(battle.unit(1).countdown, 2);
+    CHECK_EQ(battle.unit(4).countdown, 3);
+  }
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    VersusBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(make_battle(battle));
+    for (int unit = 3; unit < 6; ++unit) battle.unit_mut(unit).lo |= st::kAsleep;
+    CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+    CHECK_EQ(battle.turn_side(), 0);
+    CHECK_EQ(battle.unit(3).stamina, 70);
+  }
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    VersusBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(make_battle(battle));
+    battle.unit_mut(0).stamina = 10;
+    battle.unit_mut(1).stamina = battle.unit_mut(2).stamina = -50;
+    CHECK(battle.apply(versus_attack(0, {0}, 3)));
+    CHECK_EQ(battle.turn_side(), 1);
+  }
+}
+
+// Three turns in a row ended by a timeout forfeit the battle; a turn ended otherwise clears the run.
+void test_versus_timeouts() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  CHECK(battle.start_versus(versus_side({make_member(0, "A")}), versus_side({make_member(3, "D")}), -1));
+  Command timeout_a = versus_command(Command::Kind::EndTurn, 0), end_b = versus_command(Command::Kind::EndTurn, 3);
+  timeout_a.timeout = true;
+  CHECK(battle.apply(timeout_a) && battle.apply(end_b));
+  CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)) && battle.apply(end_b));
+  CHECK_EQ(battle.timeouts(0), 0);
+  for (int turn = 0; turn < kVersusTimeoutLimit - 1; ++turn) CHECK(battle.apply(timeout_a) && battle.apply(end_b));
+  CHECK_EQ(battle.timeouts(0), 2);
+  CHECK(battle.apply(timeout_a));
+  CHECK(battle.outcome() == Outcome::Wiped && battle.versus_end() == VersusEnd::Timeouts);
+  CHECK_EQ(battle.winner(), 1);
+}
+
+// The last characters of both sides going down on the same action is a draw; a Run is the commanding side's surrender.
+void test_versus_draw_and_surrender() {
+  data::GameTables tables = make_tables();
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    VersusBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start_versus(versus_side({make_member(0, "A")}), versus_side({make_member(3, "D", 1)}), -1));
+    battle.unit_mut(0).hp = 1;
+    battle.unit_mut(0).lo |= st::kPoison;
+    CHECK(battle.apply(versus_attack(0, {0}, 3)));
+    CHECK(battle.outcome() == Outcome::Draw && battle.versus_end() == VersusEnd::Draw);
+    CHECK_EQ(battle.winner(), -1);
+  }
+  {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    VersusBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start_versus(versus_side({make_member(0, "A")}), versus_side({make_member(3, "D", 1)}), -1));
+    CHECK(battle.apply(versus_attack(0, {0}, 3)));
+    CHECK(battle.outcome() == Outcome::Victory && battle.versus_end() == VersusEnd::Knockout);
+    CHECK_EQ(battle.winner(), 0);
+    CHECK(battle.rewards().gold == 0 && battle.rewards().items.empty() && !battle.rewards().star_up);
+  }
+  for (const int side : {0, 1}) {
+    ScriptedRng rng{Lo::Fallback::Lo};
+    VersusBrain brain;
+    Battle battle{tables, rng, brain};
+    CHECK(battle.start_versus(versus_side({make_member(0, "A")}), versus_side({make_member(3, "D")}), -1));
+    if (side == 1) CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+    CHECK(battle.apply(versus_command(Command::Kind::Run, side_first(side))));
+    CHECK(battle.outcome() == (side == 0 ? Outcome::Wiped : Outcome::Victory) && battle.versus_end() == VersusEnd::Surrender);
+    CHECK_EQ(battle.winner(), 1 - side);
+  }
+}
+
+// The same party on both sides and mirrored commands give mirrored results (no opening handicap, every roll the lowest).
+void test_versus_mirror() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  const std::vector<PartyMember> party{make_member(0, "A"), make_member(1, "B"), make_member(2, "C")};
+  CHECK(battle.start_versus(versus_side(party), versus_side(party), -1, 70));
+  CHECK(battle.apply(versus_command(Command::Kind::Focus, 0)));
+  CHECK(battle.apply(versus_attack(0, {0, 1}, 3)));
+  const Unit after_a = battle.unit(0), hit_b = battle.unit(3);
+  CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+  CHECK(battle.apply(versus_command(Command::Kind::Focus, 3)));
+  CHECK(battle.apply(versus_attack(3, {0, 1}, 0)));
+  CHECK_EQ(battle.unit(3).stamina, after_a.stamina);
+  CHECK_EQ(battle.unit(3).gauge, after_a.gauge);
+  CHECK_EQ(battle.unit(0).hp, hit_b.hp);
+  CHECK(battle.unit(0).hp < 50);
+  for (int unit = 0; unit < kPcSlots; ++unit) {
+    const Unit& own = battle.unit(unit);
+    const Unit& mirror = battle.unit(unit + kPcSlots);
+    CHECK(own.hp == mirror.hp && own.gauge == mirror.gauge && own.lo == mirror.lo && own.hi == mirror.hi && own.used == mirror.used);
+  }
+}
+
+// A side's element trap waits for the other side's casts only, and a caught cast loses the caster's cell.
+void test_versus_traps() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  auto& trap = tables.elements[4];
+  trap.raw[4] = 0x44, trap.raw[5] = 0x04, trap.raw[6] = 1, trap.raw[7] = 5, trap.raw[0xE] = 1;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  PartyMember trapper = make_member(0, "A");
+  trapper.cells[1] = 0x4004;
+  trapper.unlocked[1] = true;
+  CHECK(battle.start_versus(versus_side({trapper, make_member(1, "B")}), versus_side({make_member(3, "D")}), -1));
+  battle.unit_mut(0).gauge = battle.unit_mut(1).gauge = 0;
+  Command set_trap = versus_command(Command::Kind::Element, 0);
+  set_trap.cell = 1;
+  CHECK(battle.apply(set_trap));
+  CHECK_EQ(battle.trap_hud().pc, 1);
+  // The side's own cast of that element is not caught.
+  Command own_cast = versus_command(Command::Kind::Element, 1);
+  own_cast.cell = 0;
+  own_cast.target = 3;
+  CHECK(battle.apply(own_cast));
+  CHECK(battle.unit(3).hp < 50);
+  CHECK_EQ(battle.trap_hud().pc, 1);
+  CHECK_EQ(battle.turn_side(), 1);
+  battle.unit_mut(3).gauge = 0;
+  Command cast = versus_command(Command::Kind::Element, 3);
+  cast.cell = 0;
+  cast.target = 0;
+  CHECK(battle.apply(cast));
+  CHECK_EQ(battle.unit(0).hp, 50);
+  CHECK_EQ(battle.trap_hud().pc, 0);
+  CHECK_EQ(battle.unit(3).cells[0] & 0x3FFF, 0);
+  CHECK_EQ(battle.party(1)[0].cells[0] & 0x3FFF, 0);
+  CHECK(battle.rewards().trapped.empty());
+}
+
+// A versus side's double techs take partners from that side only, and the gauge rule reads that side's party slots.
+void test_versus_combo_techs() {
+  constexpr int kDash = 0xA0, kGash = 0xD9, kXStrike = 0x9F;
+  data::GameTables tables = make_tables();
+  tables.elements.resize(0x100);
+  const auto tech = [&](int id, int colour, int partner, int result) {
+    auto& record = tables.elements[static_cast<size_t>(id)];
+    record.raw[1] = 2, record.raw[4] = 0x80, record.raw[5] = static_cast<u8>(colour), record.raw[6] = 3, record.raw[8] = 20, record.raw[0xC] = 20;
+    record.raw[0x14] = record.raw[0x15] = record.raw[0x16] = record.raw[0x17] = 0xFF;
+    record.raw[0x20] = static_cast<u8>(partner), record.raw[0x26] = static_cast<u8>(result);
+  };
+  tech(kDash, 0x08, kGash, kXStrike);
+  tech(kGash, 0x04, kDash, kXStrike);
+  tech(kXStrike, 0x20, 0, 0);
+  tables.elements[kXStrike].raw[0x14] = 0, tables.elements[kXStrike].raw[0x15] = 2;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  const std::vector<PartyMember> party{make_member(0, "A"), make_member(1, "B"), make_member(2, "C")};
+  CHECK(battle.start_versus(versus_side(party), versus_side(party), -1));
+  const auto place = [&](int unit, int cell, int id) {
+    battle.unit_mut(unit).cells[static_cast<size_t>(cell)] = static_cast<u16>(id);
+    battle.unit_mut(unit).usable[static_cast<size_t>(cell)] = true;
+  };
+  place(2, 27, kGash);
+  place(3, 27, kDash);
+  for (int unit = 0; unit < kPlayerUnits; ++unit) battle.unit_mut(unit).gauge_max = 7, battle.unit_mut(unit).gauge = 7;
+  CHECK_EQ(battle.cell_element(3, 27), kDash);
+  place(5, 27, kGash);
+  const ComboTech combo = battle.combo_at(3, 27);
+  CHECK_EQ(combo.element, kXStrike);
+  CHECK(combo.units[0] == 3 && combo.units[1] == 5 && combo.slot_cells[0] == 27 && combo.slot_cells[2] == 27 && combo.slot_cells[1] == -1);
+  CHECK(battle.apply(versus_command(Command::Kind::EndTurn, 0)));
+  battle.unit_mut(3).gauge = 4, battle.unit_mut(4).gauge = 3;
+  Command cast = versus_command(Command::Kind::Element, 3);
+  cast.cell = 27;
+  cast.target = 0;
+  CHECK(battle.apply(cast));
+  CHECK_EQ(battle.unit(3).gauge, 1);
+  CHECK_EQ(battle.unit(5).gauge, 0);
+  CHECK(battle.unit(3).used[27] && battle.unit(5).used[27] && !battle.unit(2).used[27]);
+  CHECK(battle.unit(0).hp < 50);
+}
+
+// The exchange format carries every field; a damaged or foreign string decodes to nothing; the battle built from a decoded side is the
+// same battle.
+void test_versus_side_codec() {
+  data::GameTables tables = make_tables();
+  VersusSide side = versus_side({make_member(0, "Serge"), make_member(1, "Kid")});
+  side.stars = 7;
+  side.dopple[3] = 0x8001;
+  PartyMember& member = side.party[1];
+  member.own_name = "Kidd";
+  member.hp = 12;
+  member.kind = 0x2C;
+  member.evolved = true;
+  member.lo_persist = 0x21;
+  member.qty[10] = 4;
+  member.stack[10] = true;
+  member.pending = {-3, 1, 2, 3, 4, 5, 6};
+  member.eq.hp_pct = {10, 25};
+  member.eq.status_hi = 0xE0000001u;
+  member.eq.acc = {0xF9, 0, 0xFC};
+  member.eq.dur_mod = -4;
+  const std::string bytes = encode_versus_side(side);
+  const std::optional<VersusSide> decoded = decode_versus_side(bytes);
+  CHECK(decoded.has_value());
+  if (!decoded) return;
+  CHECK(encode_versus_side(*decoded) == bytes);
+  CHECK(decoded->stars == 7 && decoded->dopple[3] == 0x8001 && decoded->party.size() == 2);
+  const PartyMember& back = decoded->party[1];
+  CHECK(back.name == "Kid" && back.own_name == "Kidd" && back.hp == 12 && back.kind == 0x2C && back.evolved && back.lo_persist == 0x21);
+  CHECK(back.qty[10] == 4 && back.stack[10] && back.unlocked == member.unlocked && back.cells == member.cells && back.pending == member.pending);
+  CHECK(back.eq.hp_pct == member.eq.hp_pct && back.eq.status_hi == member.eq.status_hi && back.eq.acc == member.eq.acc && back.eq.dur_mod == -4);
+  CHECK(!decode_versus_side(bytes.substr(0, bytes.size() - 1)));
+  CHECK(!decode_versus_side(bytes + '\0'));
+  CHECK(!decode_versus_side(std::string(1, static_cast<char>(kVersusSideFormat + 1)) + bytes.substr(1)));
+  CHECK(!decode_versus_side(encode_versus_side(versus_side({member, member, member, member}))));
+  CHECK(!decode_versus_side(""));
+  ScriptedRng rng_one{Lo::Fallback::Lo}, rng_two{Lo::Fallback::Lo};
+  VersusBrain brain_one, brain_two;
+  Battle one{tables, rng_one, brain_one}, two{tables, rng_two, brain_two};
+  CHECK(one.start_versus(side, side, -1) && two.start_versus(*decoded, *decoded, -1));
+  CHECK_EQ(one.state_hash(), two.state_hash());
+}
+
+// The state hash follows the rules state and the generator, not the names; the cheats stay off in a versus battle.
+void test_versus_state_hash() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng_one{Lo::Fallback::Lo}, rng_two{Lo::Fallback::Lo};
+  VersusBrain brain_one, brain_two;
+  Battle one{tables, rng_one, brain_one}, two{tables, rng_two, brain_two};
+  CHECK(one.start_versus(versus_side({make_member(0, "A")}), versus_side({make_member(3, "D")}), -1));
+  CHECK(two.start_versus(versus_side({make_member(0, "Other")}), versus_side({make_member(3, "Names")}), -1));
+  CHECK_EQ(one.state_hash(), two.state_hash());
+  Battle::Cheats cheats;
+  cheats.god_mode = cheats.max_stamina = true;
+  one.set_cheats(cheats);
+  one.set_invincible(true, true);
+  CHECK_EQ(one.state_hash(), two.state_hash());
+  CHECK(one.apply(versus_attack(0, {0}, 3)));
+  CHECK(one.state_hash() != two.state_hash());
+  CHECK(two.apply(versus_attack(0, {0}, 3)));
+  CHECK_EQ(one.state_hash(), two.state_hash());
+  rng_two.rnd(0, 5);
+  CHECK(one.state_hash() != two.state_hash());
+}
+
+// The battlefield comes from the ordinary scenes' backgrounds, the same one for the same seed.
+void test_versus_battlefield() {
+  data::GameTables tables = make_tables();
+  CHECK_EQ(versus_battlefield(tables, 1), 0);
+  const auto scene = [](int bg, bool boss, bool enemies) {
+    data::SceneRec rec;
+    rec.raw.fill(0);
+    rec.raw[0] = enemies ? 0 : 0xFF, rec.raw[1] = rec.raw[2] = 0xFF, rec.raw[3] = enemies ? 1 : 0;
+    rec.raw[0x1A] = static_cast<u8>(bg | (boss ? 0x80 : 0));
+    return rec;
+  };
+  tables.scenes = {scene(5, false, true), scene(9, true, true), scene(5, false, true), scene(110, false, true), scene(7, false, false), scene(2, false, true)};
+  bool seen_2 = false, seen_5 = false;
+  for (u32 seed = 0; seed < 64; ++seed) {
+    const int field = versus_battlefield(tables, seed);
+    CHECK(field == 2 || field == 5);
+    CHECK_EQ(versus_battlefield(tables, seed), field);
+    seen_2 = seen_2 || field == 2, seen_5 = seen_5 || field == 5;
+  }
+  CHECK(seen_2 && seen_5);
+  tables.scenes = {scene(9, true, true)};
+  CHECK_EQ(versus_battlefield(tables, 3), -1);
+  const std::string fingerprint = data::battle_data_fingerprint(tables);
+  CHECK(fingerprint.size() == 16 && fingerprint.find_first_not_of("0123456789abcdef") == std::string::npos);
+  CHECK(data::battle_data_fingerprint(tables) == fingerprint);
+  tables.elements[1].raw[8] = 13;
+  CHECK(data::battle_data_fingerprint(tables) != fingerprint);
+  tables.enemy_names = {"renamed"};
+  tables.elements[1].raw[8] = 12;
+  CHECK(data::battle_data_fingerprint(tables) == fingerprint);
+}
+
 int main() {
   test_stack_restock();
   test_gear();
@@ -5990,11 +6505,25 @@ int main() {
   test_pip_form_growth();
   test_pip_form_settles_at_99();
   test_battle_grid_follows_the_masks();
+  test_party_card();
   test_monster_party();
   test_lynx_duel_bodies();
   test_unnamed_kid_label();
   test_enemy_names_follow_the_language();
   test_party_swap();
+  test_versus_start_and_turns();
+  test_versus_recovery();
+  test_versus_defend_ends_turn();
+  test_versus_no_stamina_waiver();
+  test_versus_stuck_side();
+  test_versus_timeouts();
+  test_versus_draw_and_surrender();
+  test_versus_mirror();
+  test_versus_traps();
+  test_versus_combo_techs();
+  test_versus_side_codec();
+  test_versus_state_hash();
+  test_versus_battlefield();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

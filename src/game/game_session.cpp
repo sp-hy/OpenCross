@@ -161,6 +161,48 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
   return member;
 }
 
+battle::VersusSide versus_side(const data::GameTables& tables, const ui::GameState& gs, const std::vector<int>& party_ids,
+                               const std::array<u16, 16>& dopple, const data::CharNames* names) {
+  battle::VersusSide side;
+  std::vector<int> ids;
+  for (const int char_id : party_ids) {
+    if (ids.size() >= battle::kPcSlots) break;
+    if (char_id < 0 || char_id >= save::kNumChars) continue;
+    ids.push_back(char_id);
+    side.party.push_back(party_member_from_state(tables, gs, char_id, names));
+  }
+  side.stars = battle_setup(tables, gs, ids, static_cast<int>(gs.slot.growth_progress()), names).growth.counter;
+  side.dopple = dopple;
+  return side;
+}
+
+net::PartyCard party_card(const ui::GameState& gs, const std::vector<int>& party_ids, const data::CharNames& names) {
+  constexpr int kStatCap = 999, kFirstTech = 0x80;
+  net::PartyCard card;
+  card.star = session_star(gs);
+  if (!gs.rules) return card;
+  for (const int char_id : party_ids) {
+    if (card.members.size() >= 3) break;
+    if (char_id < 0 || char_id >= save::kNumChars) continue;
+    const ui::Stats stats = gs.stats(char_id);
+    net::CardMember member;
+    member.char_id = char_id;
+    if (names.tables) member.name = utf8_from_u32(data::character_name(char_id, record_body(gs, char_id), data::NameContext::Menu, false, names));
+    member.hp = std::min(stats.hp, kStatCap);
+    member.atk = std::min(stats.atk, kStatCap);
+    member.def = std::min(stats.def, kStatCap);
+    member.mag = std::min(stats.mag, kStatCap);
+    member.mdef = std::min(stats.mdef, kStatCap);
+    for (int row = 0; row < ui::GameState::kRows; ++row)
+      for (int col = 0; col < ui::GameState::kCols; ++col) {
+        const int id = gs.cell_element(char_id, row, col);
+        if (id > 0 && id < kFirstTech && gs.cell_available(char_id, row, col)) ++member.elements;
+      }
+    card.members.push_back(std::move(member));
+  }
+  return card;
+}
+
 std::vector<std::string> duel_names(const ui::GameState& gs, const data::CharNames& names) {
   std::vector<std::string> out(data::kLynxBody + 1);
   for (int id = 0; id <= data::kLastNamedChar; ++id)

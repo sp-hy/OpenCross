@@ -123,7 +123,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `wait room <name>` | The field room is `<name>`, no battle is active and the screen has faded back in. |
 | `wait dialogue open\|closed` | A dialogue is open (anything other than `open` means closed). |
 | `wait text <words...>` | An open dialogue's message (plain text, newlines as spaces) contains the words joined by single spaces. |
-| `wait battle start\|end\|results` | A battle is active / not active / the post-battle results screen is up. |
+| `wait battle start\|end\|results` | A battle is active / not active / the post-battle results screen (or a versus battle's outcome plate) is up. |
 | `wait idle` | The controls are free: no dialogue, fade, transition, menu, shop, key-item list, pause, party screen or movie, and no battle; and the input has settled: the pad lock after a room load or a closed screen and the menu-button wait after a menu screen have run out, and no load or menu-open fade (or its black veil) is running. A menu key tapped right after it opens the menu. `mash until idle` uses the same test. |
 | `wait flow <title\|name\|slots\|opening\|field>` | The game flow is in that state and no movie is playing. |
 | `wait movie start\|end` | A movie is playing / has finished (`start` or `open` = wanted playing). |
@@ -146,6 +146,10 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `put [ent <n>] <x> <z>` | Place every party entity, or entity `n` only, at a world point (integer coordinates). |
 | `art hd\|original\|modded\|toggle` | Switch the art mode as F6 does, without saving the ini; `toggle` flips between the HD family and original. |
 | `request <kind> [arg]` | Ask the host for what a field opcode would, then wait 4 ticks. The screen it opens is handled by following `wait` / `tap` lines. Kinds in the table below. |
+| `remote add <pid> <name> <m0> <m1> <m2> <x> <y> <z> <facing>` | A remote party (`multiplayer.md` section 5) as if the network had sent it, without a server: the field model byte of each party slot (`-1` empty), and its leader standing at the world point with the facing (4096 per turn), in the field state. Adding a `pid` again replaces it. The route's parties are shown with the network's (the network's entry wins a shared `pid`) and stay across room loads until `remote clear`. |
+| `remote move <pid> <x> <y> <z> <facing> <clip> <moving>` | A new leader pose of the party, as one `pres` message: `clip` a field clip id (2 run, 3 walk), `moving` 0 or 1. The state is kept. A `pid` the route never added fails the run (exit 1). |
+| `remote state <pid> <0..3>` | The party's state: 0 field, 1 battle, 2 menu, 3 event. |
+| `remote clear` | No route party any more. |
 
 `request` kinds (`arg` is a decimal integer, default 0):
 
@@ -169,6 +173,9 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `elementshop <row>` | Open the element shop at `row`. |
 | `weaponshop <row>` | Open the blacksmith at `row`. |
 | `slotdump` | Write the current game as one 0x2000-byte save block (section 7). |
+| `savemark` | Remember the current game as one save block, with the play time and the variables that show it (0x2C, 0x2E, 0x30) left out. |
+| `savecheck` | The current game, taken the same way, must equal the `savemark` copy; otherwise log `route: savecheck: the save differs from the mark at byte <n>` and exit 1. |
+| `versus <seed> [side]` | Start a versus battle (`rules/versus.md`) from the field against the local opponent: the session party as side `side` (0 = A, the default; 1 = B), the built-in test party (characters 3 4 26, star 20) as the other side, played by the random legal player; `fight` lets the same player command the session party. Exit 1 when it cannot start (not a free field, a battle under way, or a battle dev variable such as `OC_DEV_*` set). |
 
 An unknown kind logs `route: unknown request <kind>` and exits with code 1.
 
@@ -212,6 +219,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `battle events <tokens...>` | The battle view's route events (`w<msg>` = script window opened, `a` = action began) start with exactly those tokens. |
 | `battle menu <slot\|-> <guards>` | The party slot whose top command menu is up and has taken over from the menu entry (`-` = none, or the window still opening), then one digit per party slot: 1 = the unit holds Defend's guard. Example: `battle menu 1 100`. |
 | `battle facing <yaw> <yaw> <yaw>` | The yaw each party slot's model shows (12 bit, 4096 = 360 deg), `-` for an empty slot. Example: `battle facing 1258 1024 1024`. |
+| `battle plate [word]` | The last versus battle ended on its outcome plate; with a word, that plate (`Victory`, `Defeat`, `Draw`, `No result`). |
 | `battle camera orbit <slot>\|shot\|target\|hold` | What drove the battle camera on the last tick: the menu orbit round that party slot, a camera shot or timeline, a target-selection glide, or nothing (the pose stays). |
 | `result <n>` | The battle-result variable equals `n`. |
 | `flow <state>` | The flow state name equals `state`. |
@@ -243,6 +251,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `same [tol]` | Nothing from the `snap` changed: room, flow, room-load / battle-start / title-sequence counters, battle summary, every entity's position (within `tol` units, default 0), facing and yaw, listed variables. |
 | `frozen` | No field tick ran and no message window's typewriter moved since `snap`. |
 | `swaps <n>` | Exactly `n` in-place art swaps of the field room since `snap`. |
+| `remote <n>` | Exactly `n` remote parties were picked to be drawn on the last field tick (shown, not in a battle, leader model loaded, among the nearest). |
 | `traceclip <max_src_moves> <max_clip_changes>` | The last `trace` saw at most that many cross-fade source keyframe moves and clip changes. |
 | `traceheadturn <ticks> <span>` | The last `trace` saw the head turn on at least `ticks` ticks over an angle range of at least `span` (4096 per turn). |
 | `traceyaw <ticks> <octants>` | The last `trace` saw the model yaw change on at least `ticks` ticks and visit at least `octants` of the 8 sectors of 45 degrees. |

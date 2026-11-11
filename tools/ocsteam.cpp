@@ -1,7 +1,8 @@
 // `opencross ocsteam`: connects to the running Steam client as the game (Steam shows "Playing" for as long as this runs) and prints the
-// app's achievements with their state. Read-only: it never sets or stores anything.
+// user's display name and the app's achievements with their state. Read-only: it never sets or stores anything.
 #include <chrono>
 #include <cstdio>
+#include <string>
 #include <thread>
 
 #include "platform/steam.h"
@@ -17,6 +18,8 @@ int ocsteam_main(int argc, char** argv) {
     return 1;
   }
   std::printf("connected as app %llu\n", static_cast<unsigned long long>(oc::platform::kRdeAppId));
+  const std::string persona = steam.persona_name();
+  std::printf("persona name: %s\n", persona.empty() ? "(unavailable)" : persona.c_str());
   for (int i = 0; i < 500 && !steam.ready(); ++i) {
     steam.pump();
     std::this_thread::sleep_for(std::chrono::milliseconds(10));

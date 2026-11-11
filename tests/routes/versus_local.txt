@@ -1,0 +1,48 @@
+# Versus battle route: Continue from the save copy (slot 5, a party of three), then a versus battle against the local opponent from the
+# field (request versus <seed> <side>), this game playing side B: the other party moves first, mirrored on the enemy side and facing the
+# party; on this game's turn the Attack target ring shows the other party's names with HP ????. Then the random legal player takes this
+# side too (fight) until the battle ends on its outcome plate, and the field comes back with the save (play time aside) and BATTLE_RESULT
+# as they were. Shots: vs_01 the start, vs_02 the target window, vs_auto_ the fight.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (memory-card choice)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # slot 5
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- set var 32 5                        # BATTLE_RESULT holds a value no battle writes
+- request savemark
+- request versus 7 1
+- wait battle start 600
+- wait 360                            # the swirl, the white fade and the intro shots
+- screenshot vs_01_start.png
+- wait 3000                           # the other side's opening turn
+- assert battle menu 0 000
+- tap confirm                         # Attack -> target selection on the other party
+- wait 60
+- screenshot vs_02_target.png
+- tap cancel
+- wait 20
+- autoshot 600 6 vs_auto_
+- fight 20000
+- assert battle plate
+- wait idle 600
+- request savecheck
+- assert var 32 5
+- quit

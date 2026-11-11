@@ -27,7 +27,7 @@ void BattleView::begin_group() {
   queue_.pop_front();
   // The low-HP bit is refreshed when the next action resolves, one action after the one a script wrote the HP in.
   for (int i = 0; i < battle::kUnits; ++i)
-    if (const battle::Unit& unit = battle_->unit(i); unit.hp_written_zero && unit.hp <= 0) ++vis_[static_cast<size_t>(i)].zero_hp_actions;
+    if (const battle::Unit& unit = bunit(i); unit.hp_written_zero && unit.hp <= 0) ++vis_[static_cast<size_t>(i)].zero_hp_actions;
   const battle::ActionEvent& e0 = act_.ev.front();
   // Dev: OC_DEATH_TRACE.
   if (std::getenv("OC_DEATH_TRACE")) {
@@ -73,12 +73,12 @@ void BattleView::begin_group() {
     }
   }
   // A PC's double / triple tech (element byte 0x14 != 0xFF): the list is the casting PCs in the order of the record's character bytes, entry k
-  // with variant k, which need not start with the PC that chose it.
-  if (e0.kind == battle::ActionEvent::Kind::Element && act_.actor < battle::kPcSlots && e0.element > 0 &&
+  // with variant k, which need not start with the PC that chose it. In a versus battle the other party's techs too, from its own side.
+  if (e0.kind == battle::ActionEvent::Kind::Element && act_.actor >= 0 && act_.actor < player_slots() && e0.element > 0 &&
       static_cast<size_t>(e0.element) < tables_->elements.size() && tables_->elements[static_cast<size_t>(e0.element)].b(0x14) != 0xFF) {
     act_.casters.clear();
     for (const u8 caster : e0.group) {
-      if (caster >= battle::kPcSlots) break;
+      if (caster >= player_slots() || battle::side_of(caster) != battle::side_of(act_.actor)) break;
       act_.casters.push_back(caster);
     }
     if (act_.casters.empty()) act_.casters = {act_.actor};
@@ -104,6 +104,13 @@ void BattleView::begin_group() {
           select_approach();
         }
         engage_interrupted_ = false;
+        act_.phase = Act::Phase::Hit;
+        start_hit();
+        break;
+      }
+      // A versus chain's next hit: from where the attacker stands.
+      if (act_.actor == stay_unit_ && aim == stay_target_) {
+        stay_unit_ = stay_target_ = -1;
         act_.phase = Act::Phase::Hit;
         start_hit();
         break;
@@ -160,8 +167,9 @@ void BattleView::begin_group() {
       act_.phase = Act::Phase::Settle;
       break;
     case battle::ActionEvent::Kind::Run:
-      for (int i = 0; i < battle::kPcSlots; ++i) {
-        const battle::Unit& unit = battle_->unit(i);
+      // The runner's party: the party, or the other one when it surrenders a versus battle.
+      for (int i = battle::side_first(battle::side_of(act_.actor)); i < battle::side_first(battle::side_of(act_.actor)) + battle::kPcSlots; ++i) {
+        const battle::Unit& unit = bunit(i);
         if (!unit.present || !unit.alive()) continue;
         Visual& pv = vis_[static_cast<size_t>(i)];
         // S5 entry 7: turn away (RotateT) + run clip + PosMoveT.
@@ -174,8 +182,9 @@ void BattleView::begin_group() {
     case battle::ActionEvent::Kind::Swap:
       // The battle already holds the newcomer in the slot (the HUD shows it at once, its HP counted from its own); the leaving model fades
       // out, then the newcomer's is bound there (Phase::Swap).
-      actor_visual.hp_disp = static_cast<float>(battle_->unit(act_.actor).hp);
-      actor_visual.hp_shown = battle_->unit(act_.actor).hp;
+      actor_visual.hp_disp = static_cast<float>(bunit(act_.actor).hp);
+      actor_visual.hp_shown = bunit(act_.actor).hp;
+      actor_visual.status_shown = bunit(act_.actor).lo;
       // The hop back: the return script jumps to the stand point, moved behind the spot until the newcomer is bound.
       act_.swap_home_x = actor_visual.home_x, act_.swap_home_z = actor_visual.home_z;
       actor_visual.home_x -= actor_visual.home_fx * kSwapBack;
@@ -209,7 +218,7 @@ void BattleView::face_cast_targets(bool turn_targets) {
     const bool pc_side = e0->target < battle::kPcSlots;
     facing.clear();
     for (int i = pc_side ? 0 : battle::kPcSlots; i < (pc_side ? battle::kPcSlots : battle::kUnits); ++i)
-      if (battle_->unit(i).present && battle_->unit(i).alive() && (pc_side || (battle_->cast_mask() >> i & 1u))) facing.push_back(i);
+      if (bunit(i).present && bunit(i).alive() && (pc_side || (battle_->cast_mask() >> i & 1u))) facing.push_back(i);
   }
   for (int target : facing) {
     if (target < 0 || target >= battle::kUnits) continue;
@@ -369,11 +378,16 @@ void BattleView::tick_action() {
       if (cast_handover_ == kCastHandoverTail && finish_ == Finish::None)
         for (int i = 0; i < battle::kUnits; ++i) {
           Visual& visual = vis_[static_cast<size_t>(i)];
-          if (!battle_->unit(i).alive()) continue;
+          if (!bunit(i).alive()) continue;
           visual.turn.on = false;
           visual.face_x = visual.pface_x = visual.home_fx;
           visual.face_z = visual.pface_z = visual.home_fz;
         }
+    }
+    // A versus chain's attacker goes home once the chain cannot go on, or before an action that does not continue it.
+    if (stay_unit_ >= 0 && finish_ == Finish::None && (queue_.empty() ? !stay_holds() : !stay_continues(queue_.front().front()))) {
+      end_stay();
+      return;
     }
     if (queue_.empty() || ui_ == Ui::Intro) return;
     // The executor serialises actions: a PC standing at its target (the chain menu's `engaged_`) ends its turn - the return walk
@@ -396,6 +410,11 @@ void BattleView::tick_action() {
       if ((actor_visual.script_done && !actor_visual.move.on) || act_.ticks > 600) {
         if (battle_audit() && !(actor_visual.script_done && !actor_visual.move.on)) battle_audit_note(std::format("approach of unit {} left by the 600-tick timeout (script_done {} moving {})", act_.actor, actor_visual.script_done, actor_visual.move.on));
         cut_script(act_.actor);
+        // A versus engage of a unit no menu of this game holds: it stands at its target (stay_unit_).
+        if (act_.stage_only) {
+          act_ = Act{};
+          break;
+        }
         // Engage: arrived, the percentage menu opens.
         if (act_.ev.empty()) {
           act_ = Act{};
@@ -427,8 +446,15 @@ void BattleView::tick_action() {
         if (act_.hit < act_.ev.size()) {
           if (script_gated(act_.ev[act_.hit])) act_.hit_wait = true;
           else start_hit();
-        // Stay at the enemy until the PC's turn ends; any other attacker goes home with the camera holding its pose.
+        // Stay at the enemy until the PC's turn ends, as a versus chain's attacker does until its chain ends; any other attacker goes home
+        // with the camera holding its pose.
         } else if (engaged_ && act_.actor == active_pc_) {
+          act_.phase = Act::Phase::Settle;
+          act_.ticks = 0;
+        } else if (versus_ && act_.actor < player_slots()) {
+          stay_unit_ = act_.actor;
+          stay_target_ = act_.targets.front();
+          stay_left_ = false;
           act_.phase = Act::Phase::Settle;
           act_.ticks = 0;
         } else {
@@ -518,7 +544,7 @@ void BattleView::tick_action() {
       for (int i = 0; i < battle::kUnits; ++i) {
         const Visual& visual = vis_[static_cast<size_t>(i)];
         // The fleeing party keeps running into the outro.
-        if (!battle_->unit(i).present || visual.script_kind == kRun) continue;
+        if (!bunit(i).present || visual.script_kind == kRun) continue;
         if (visual.vm.running() && visual.script_kind != kIdle) calm = false;
         if (visual.move.on) calm = false;
       }
@@ -571,10 +597,10 @@ void BattleView::end_group() {
   // unit home instead (tick_action), so the caster keeps its cast facing until then. A PC that chose Run turns and runs with the rest of the
   // party: its run script keeps the facing. Defend keeps the yaw the command confirm gave.
   const bool defended = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Defend;
-  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && cast_handover_ == 0 && !defended) {
+  if (queue_.empty() && finish_ == Finish::None && !engaged_ && act_.actor >= 0 && act_.actor != stay_unit_ && cast_handover_ == 0 && !defended) {
     const int i = act_.actor;
     Visual& visual = vis_[static_cast<size_t>(i)];
-    if (battle_->unit(i).present && !visual.ko_shown && !visual.move.on && visual.script_kind != kRun) {
+    if (bunit(i).present && !visual.ko_shown && !visual.move.on && visual.script_kind != kRun) {
       visual.turn.on = false;
       visual.face_x = visual.pface_x = visual.home_fx;
       visual.face_z = visual.pface_z = visual.home_fz;
@@ -610,18 +636,20 @@ void BattleView::end_group() {
     sys_pending_ = false;
     smsg_open(sys_req_);
   }
-  if (finish_ == Finish::None && !engaged_ && !cast_end) camera_.stop_sequences();
+  if (finish_ == Finish::None && !engaged_ && stay_unit_ < 0 && !cast_end) camera_.stop_sequences();
   if (queue_.empty()) sync_shown();
   // A unit whose script was cut still has to settle on its idle / KO pose.
   for (int i = 0; i < battle::kUnits; ++i)
-    if (battle_->unit(i).present && vis_[static_cast<size_t>(i)].script_kind != kIdle && vis_[static_cast<size_t>(i)].script_kind != kVictory &&
+    if (bunit(i).present && vis_[static_cast<size_t>(i)].script_kind != kIdle && vis_[static_cast<size_t>(i)].script_kind != kVictory &&
         vis_[static_cast<size_t>(i)].script_kind != kRun && !engaged_stance(i) && !(vis_[static_cast<size_t>(i)].ko_reacted && vis_[static_cast<size_t>(i)].vm.running()))
       start_idle(i);
 }
 
 // ------------------------------------------------------------------------------------------------------------ outcome
 void BattleView::begin_finish() {
-  const battle::Outcome outcome = battle_->outcome();
+  const battle::Outcome outcome = presented_outcome();
+  if (versus_ && versus_result_ != VersusResult::Void)
+    versus_result_ = battle_->winner() == versus_side_ ? VersusResult::Won : battle_->winner() >= 0 ? VersusResult::Lost : VersusResult::Draw;
   log::info("battle: outcome {} at view tick {}", static_cast<int>(outcome), tick_count_);
   // ocbattle soak lists the same keys.
   for (const auto& [key, count] : battle_->stub_hits()) log::warn("battle: stub hit {} x{}", key, count);
@@ -642,7 +670,7 @@ void BattleView::begin_finish() {
     if (!(start_flags_ & 0x10) && scene_id_ != 0x1D7 && scene_id_ != 0x1D8 && scene_id_ != 0x1DD) victory_song_ = boss_scene_ ? 0x17 : 0x16;
     // No victory voice is requested.
     for (int i = 0; i < battle::kPcSlots; ++i) {
-      const battle::Unit& unit = battle_->unit(i);
+      const battle::Unit& unit = bunit(i);
       Visual& visual = vis_[static_cast<size_t>(i)];
       if (!unit.present || !unit.alive() || !visual.scripts || !visual.scripts->has_s5) continue;
       // A unit a summon's reload brought back finishes its fade-in first.
@@ -691,14 +719,20 @@ void BattleView::tick_finish() {
       }
       if (ui_ != Ui::Result && finish_ticks_ > 120 && (!camera_.sequence_running() || finish_ticks_ > 360)) {
         camera_.stop_sequences();
-        // The host's BattleResults screen follows; no in-battle panel.
-        if (external_results_) {
+        // The host's BattleResults screen follows; no in-battle panel. The battle's sounds end here (a looping chant would otherwise
+        // run on into the field); the victory music plays on. A versus battle shows its plate instead.
+        if (external_results_ && !versus_) {
+          audio_.stop_sounds();
           finished_ = true;
           break;
         }
-        ui_ = Ui::Result;
-        result_age_ = 0;
-        log::info("battle: result panel at view tick {}", tick_count_);
+        if (versus_) {
+          finish_or_plate();
+        } else {
+          ui_ = Ui::Result;
+          result_age_ = 0;
+          log::info("battle: result panel at view tick {}", tick_count_);
+        }
         // Global sound 0x14 when the panel opens.
         audio_.play_global(0x14);
       }
@@ -712,10 +746,10 @@ void BattleView::tick_finish() {
         camera_.play_sequence("bto0");
         camera_.start_fade(1.0f, kWipeFade);
       }
-      if (!finished_ && finish_ticks_ > kWipeIdle + kWipeFade) {
+      if (!finished_ && ui_ != Ui::Result && finish_ticks_ > kWipeIdle + kWipeFade) {
         audio_.stop_music();
         audio_.stop_sounds();
-        finished_ = true;
+        finish_or_plate();
       }
       break;
     case Finish::Fled: {
@@ -728,11 +762,11 @@ void BattleView::tick_finish() {
         if (!fled_outro_) camera_.start_fade(1.0f, kFledFade);
       }
       const bool outro_done = fled_outro_ ? !camera_.sequence_running() || finish_ticks_ > kOutroDelay + kOutroCap : finish_ticks_ > kOutroDelay + kFledFade;
-      if (!finished_ && finish_ticks_ > kOutroDelay && outro_done) {
-        // In the field the battle music plays on until the field song replaces it.
-        if (!external_results_) audio_.stop_music();
+      if (!finished_ && ui_ != Ui::Result && finish_ticks_ > kOutroDelay && outro_done) {
+        // In the field the battle music plays on until the field song replaces it; a versus battle without a result ends in silence.
+        if (!external_results_ || versus_) audio_.stop_music();
         audio_.stop_sounds();
-        finished_ = true;
+        finish_or_plate();
       }
       break;
     }
