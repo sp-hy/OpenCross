@@ -91,6 +91,10 @@ int main() {
   CHECK(net::to_json(Json("\xED\xA0\x80")) == "\"\xEF\xBF\xBD\xEF\xBF\xBD\xEF\xBF\xBD\"");
   CHECK(net::utf8_truncate("a\xC3\xA9\xE3\x81\x82\xF0\x9F\x98\x80", 3) == "a\xC3\xA9\xE3\x81\x82");
   CHECK(net::utf8_truncate("abc", 10) == "abc");
+  CHECK(net::display_text("  a\x01" "b\xE2\x80\xAE" "c\xE2\x80\x8B" "d\xE2\x81\xA6" "e\xE2\x80\xA8" "f\xEF\xBB\xBF  ", 24) == "abcdef");
+  CHECK(net::display_text("\xC2\x9B" "ok\xFF", 24) == "ok\xEF\xBF\xBD");
+  CHECK(net::display_text("\xE2\x80\x8B\xE2\x80\x8B", 24).empty());
+  CHECK(net::display_text("Serge \xE2\x98\x85" "5", 7) == "Serge \xE2\x98\x85");
 
   if (failures) std::printf("%d failure(s)\n", failures);
   else std::printf("net json: all passed\n");

@@ -145,9 +145,9 @@ Presence and chat with other players (`multiplayer.md`), the settings window's M
 |---|---|---|---|
 | `Enabled` | 0 | bool | Connect to the server of `Server` while the game runs. The first enable writes a new `PlayerId`. |
 | `Server` | `master` | `master other` | `master`: the public OpenCross server, `wss://opencross-multiplayer.sphy.workers.dev/ws` (fixed). `other` (the tab's "Local / other"): the address in `ServerUrl`. Any other value keeps the default. |
-| `ServerUrl` | `ws://127.0.0.1:8787/ws` | `ws://` or `wss://` address | The server used with `Server=other`: one run on this machine (`multiplayer.md` section 6) or anyone's own. Empty: the tab shows "No server address" and nothing connects. |
+| `ServerUrl` | `ws://127.0.0.1:8787/ws` | `ws://` or `wss://` address | The server used with `Server=other`: one run on this machine (`multiplayer.md` section 6) or anyone's own. A `ws://` address must name this machine (`localhost`, `127.x.x.x`, `[::1]`); use `wss://` for any other. Empty: the tab shows "No server address" and nothing connects. |
 | `Name` | empty | text | The name other players see (the server cuts it to 24 code points). Empty = the Steam display name: from the Steam connection while `[Game] Steam` is on, else as Steam last stored it for the current user in `<SteamPath>\config\loginusers.vdf` (`PersonaName`), else `Player`. |
-| `PlayerId` | empty | 32 lower-case hex digits | The install's random identity (128 bits from the system's random generator), made when multiplayer is enabled and the value is not of this form. Sent only in `hello`. |
+| `PlayerId` | empty | 32 lower-case hex digits | The install's random identity (128 bits from the system's random generator), made when multiplayer is enabled and the value is not of this form. Sent only in `hello` to the Master; another server gets an id derived from it and its address (`multiplayer.md` section 2). |
 | `ShowPlayers` | 1 | bool | Draw the other players' parties in the room. |
 | `MaxParties` | 8 | 1..32 | At most this many remote parties are drawn, the nearest to the camera's target. |
 | `Translucent` | 0 | bool | Draw the remote parties see-through. |

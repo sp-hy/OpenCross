@@ -464,6 +464,25 @@ void test_refusals() {
     session.step(0.0);
     CHECK(session.wire.connects.size() == 2 && session.wire.connects[1] == "wss://example.invalid/ws");
   }
+  {
+    // A ws:// address elsewhere is never connected to.
+    Session session;
+    session.client.start("ws://example.invalid/ws", {kId, "Serge", 3, "0.5.4"});
+    session.step(0.0);
+    session.step(60.0);
+    CHECK(session.client.state() == MultiplayerClient::State::BadAddress && session.wire.connects.size() == 1);
+  }
+  CHECK(net::server_url_allowed("ws://127.0.0.1:8787/ws") && net::server_url_allowed("ws://localhost/ws") && net::server_url_allowed("ws://[::1]:8787/ws"));
+  CHECK(net::server_url_allowed("wss://example.invalid/ws") && !net::server_url_allowed("wss:///ws"));
+  CHECK(!net::server_url_allowed("ws://example.invalid/ws") && !net::server_url_allowed("ws://127.0.0.1.example.invalid/ws"));
+  CHECK(!net::server_url_allowed("ws://user@example.invalid/ws") && !net::server_url_allowed("http://127.0.0.1/ws"));
+  {
+    const std::string other = net::server_player_id(kId, "wss://Example.invalid/ws");
+    CHECK(net::valid_player_id(other) && other != kId);
+    CHECK(other == net::server_player_id(kId, "wss://example.invalid/other"));
+    CHECK(other != net::server_player_id(kId, "wss://example.invalid:444/ws"));
+    CHECK(net::server_player_id("short", "wss://example.invalid/ws").empty());
+  }
 }
 
 // Private lines: sent with `pm`, kept in their own scope with the recipient, and a reply goes to the newest line

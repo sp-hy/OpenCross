@@ -1702,6 +1702,8 @@ class BattleView {
   // local turn's clock, ticks the view has been idle, and a command of the other side held until the running one is shown.
   u32 versus_seq_ = 0;
   int versus_focus_ = -1, versus_turn_seen_ = -1, versus_turn_ticks_ = 0, versus_idle_ = 0;
+  // The other side's time while it acts: the turn and acting side it was counted for, its idle ticks and all its ticks.
+  int versus_other_turn_seen_ = -1, versus_acting_seen_ = -1, versus_other_ticks_ = 0, versus_other_wall_ = 0;
   std::optional<battle::Command> versus_held_, versus_auto_held_;
   // The plate has been shown in this battle.
   bool versus_plate_shown_ = false;
@@ -1714,6 +1716,9 @@ class BattleView {
   // A turn lasts 60 s; the other side's actions start this many idle ticks apart.
   // The wide shot while the other side acts waits this many idle ticks (longer than the gap between its actions).
   static constexpr int kVersusTurnTicks = 60 * 60, kVersusActionGap = 20, kVersusWideIdle = 45;
+  // The other side may take its 60 s plus 15 s for the network before it counts as conceding, and no turn of it may take more than 5
+  // minutes with its actions shown.
+  static constexpr int kVersusOtherGraceTicks = 15 * 60, kVersusOtherTurnCapTicks = 5 * 60 * 60;
   std::vector<Op> ops_;
   std::vector<render::Mat4> palette_;
 };

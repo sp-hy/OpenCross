@@ -20,6 +20,8 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
 
+* **P3 Versus side check: Serge in Lynx's body with Dopplegang (element 0xEE) in grid cell 2.** `battle::legal_versus_side` (`src/battle/versus.cpp`) takes a tech outside the cells the records give it only in the grid row of its level; a save written by OpenCross with Serge in Lynx's body (kind 0x31, 900 HP) holding 0xEE in cell 2 (row 0) is refused (`opencross ocbattle versus 1 --a <save copy>:<slot> --cap 1` prints `NOT LEGAL: ... a tech no player holds there (cell 2, element 0xEE)`). Every other party of 257 scratch saves passes, apart from forged 1023-HP records. No character record holds 0xEE outside Sprigg's grid. To do: find out whether the original game can put Dopplegang in Lynx-Serge's grid (an RDE save at that point of the story, or the field script that swaps his body and grid); if it can, widen the rule by what that script writes, and if not, find how the save got it. Done when the rule matches what the game writes and the doc (`docs/rules/versus.md` section 1.1) says so.
+
 
 ## 4. Code hygiene
 

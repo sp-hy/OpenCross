@@ -232,10 +232,12 @@ const char* outcome_name(Outcome outcome) {
   return outcome == Outcome::Victory ? "side A wins" : outcome == Outcome::Wiped ? "side B wins" : outcome == Outcome::Draw ? "draw" : "still on";
 }
 
-void print_side(const char* label, const VersusSide& side) {
+void print_side(const data::GameTables& tables, const char* label, const VersusSide& side) {
   std::printf("side %s (stars %d, %zu bytes exchanged):", label, side.stars, encode_versus_side(side).size());
   for (const PartyMember& member : side.party) std::printf(" %d %s %d HP;", member.char_id, member.name.c_str(), member.stat[0]);
-  std::printf("\n");
+  std::string why;
+  if (legal_versus_side(tables, side, &why)) std::printf(" legal\n");
+  else std::printf(" NOT LEGAL: %s\n", why.c_str());
 }
 
 }  // namespace
@@ -271,8 +273,8 @@ int cmd_versus(const data::GameTables& tables, const vfs::Vfs& vfs, const std::v
       verbose = true;
     }
   }
-  print_side("A", side_a);
-  print_side("B", side_b);
+  print_side(tables, "A", side_a);
+  print_side(tables, "B", side_b);
   if (fuzz > 0) {
     int wins_a = 0, wins_b = 0, draws = 0, open = 0, divergences = 0, longest_turn = 0;
     long long commands = 0, rejected = 0;

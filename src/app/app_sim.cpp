@@ -406,8 +406,10 @@ void App::update_achievements(int ticks) {
   }
   if (shop_ok)
     if (const int forged = shop.take_first_forged()) achievements.forged(forged);
+  // A versus battle earns nothing: its casts include the other player's.
   if (battle_ready)
-    for (const int element : battle.take_cast_elements()) achievements.element_cast(element);
+    for (const int element : battle.take_cast_elements())
+      if (!battle.versus()) achievements.element_cast(element);
   // A session changed by the debug tools earns nothing.
   for (const char* name : achievements.take_earned()) {
     if (debug_tools.saving_disabled()) continue;

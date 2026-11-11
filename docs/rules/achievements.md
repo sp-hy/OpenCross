@@ -54,7 +54,7 @@ A fight started by a script counts as won with result 0 (victory) or 3 (scripted
 
 ## 5. Element casts
 
-Keyed on the element id, whoever casts it, 60 main-loop passes after the cast starts (element 526: 300). A pass is one tick in a battle and two in the field, so a delay still running when the battle ends takes longer there. Element 152 shares Forever Zero's name and does not count. A cast caught in an element trap does not count: its effect is replaced by the trap's. One award waits at a time: a cast or a flight replaces the one still waiting and restarts the delay.
+Keyed on the element id, whoever casts it, 60 main-loop passes after the cast starts (element 526: 300). A pass is one tick in a battle and two in the field, so a delay still running when the battle ends takes longer there. Element 152 shares Forever Zero's name and does not count. A cast caught in an element trap does not count: its effect is replaced by the trap's. One award waits at a time: a cast or a flight replaces the one still waiting and restarts the delay. A versus battle (`versus.md`) counts no cast, either side's.
 
 | Achievement | Element |
 |---|---|

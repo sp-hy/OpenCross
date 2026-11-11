@@ -4,6 +4,7 @@
 #include <bit>
 #include <cstdlib>
 #include <format>
+#include <limits>
 #include <tuple>
 #include <utility>
 
@@ -223,19 +224,21 @@ std::optional<Battle::DuelBody> Battle::duel_body(int slot, int monster_id, int 
   return DuelBody{kind, static_cast<u16>(member->eq.weapon_id), gender_of(third), member->innate};
 }
 
+// Every number a member brings is held to a range far past any record's, so no value can overflow the rules' arithmetic.
 void Battle::init_pc(int slot, const PartyMember& member) {
+  constexpr int kHpLimit = 30000, kStatLimit = 9999, kByteLimit = 255;
+  const auto stat = [&](size_t k) { return std::clamp(member.stat[k], 0, k == 0 ? kHpLimit : kStatLimit); };
   Unit& unit = units_[static_cast<size_t>(slot)];
   unit = Unit{};
   unit.present = unit.pc = true;
   unit.src_id = member.char_id;
   unit.name = member.name;
-  unit.max_hp = member.stat[0];
-  unit.hp = std::min(member.hp, member.stat[0]);
-  unit.atk = member.stat[1], unit.def = member.stat[2], unit.hit = member.stat[3], unit.evd = member.stat[4], unit.mag = member.stat[5],
-  unit.mdef = member.stat[6];
-  unit.hit_med = member.hit_med, unit.hit_heavy = member.hit_heavy;
+  unit.max_hp = stat(0);
+  unit.hp = std::min(member.hp, unit.max_hp);
+  unit.atk = stat(1), unit.def = stat(2), unit.hit = stat(3), unit.evd = stat(4), unit.mag = stat(5), unit.mdef = stat(6);
+  unit.hit_med = std::clamp(member.hit_med, 0, kByteLimit), unit.hit_heavy = std::clamp(member.hit_heavy, 0, kByteLimit);
   unit.innate = member.innate;
-  unit.dur = member.dur, unit.rate = member.rate;
+  unit.dur = std::clamp(member.dur, 0, kByteLimit), unit.rate = std::clamp(member.rate, 0, kByteLimit);
   unit.ap = 8, unit.countdown = 8, unit.stamina = 70, unit.gauge = -1;
   unit.lo = member.lo_persist;
   unit.cells = member.cells;
@@ -265,12 +268,12 @@ void Battle::init_pc(int slot, const PartyMember& member) {
   unit.hero_set = wears_hero_set(unit.eq);
   if (const auto chars = tables_.char_sets.find("char"); chars != tables_.char_sets.end() && member.char_id >= 0 && member.char_id < data::kNumChars)
     unit.gender = static_cast<u16>(chars->second.rec[static_cast<size_t>(member.char_id)].rd16(0x14));
-  unit.rate = std::max(0, unit.rate + unit.eq.stamina_mod);
-  unit.gauge = std::clamp(-1 + unit.eq.start_gauge, -1, unit.gauge_max);
+  unit.rate = static_cast<int>(std::clamp<s64>(static_cast<s64>(unit.rate) + unit.eq.stamina_mod, 0, kStatLimit));
+  unit.gauge = std::clamp(std::clamp(unit.eq.start_gauge, 0, data::kGridRows) - 1, -1, unit.gauge_max);
   // Gear HP% raises the current HP only, so it may start above max HP.
   for (int pct : unit.eq.hp_pct) {
     if (unit.hp <= 0) break;
-    const int scaled = unit.hp * (pct + 100) / 100;
+    const int scaled = static_cast<int>(std::clamp<s64>(static_cast<s64>(unit.hp) * (static_cast<s64>(pct) + 100) / 100, 0, kHpLimit));
     unit.hp = std::min(999, scaled == unit.hp ? scaled + 1 : scaled);
   }
   if (unit.hp <= 0) {
@@ -590,7 +593,8 @@ void Battle::versus_time_advance(int side) {
     Unit& unit = units_[static_cast<size_t>(i)];
     if (!unit.in_turn_order()) continue;
     if (unit.countdown != 0xFFFF) unit.countdown = std::max(0, unit.countdown - step);
-    if (unit.pc && (side < 0 || side_of(i) == side)) unit.stamina = cap_stamina(unit.stamina + step * unit.rate);
+    if (unit.pc && (side < 0 || side_of(i) == side))
+      unit.stamina = cap_stamina(static_cast<int>(std::min<s64>(static_cast<s64>(unit.stamina) + static_cast<s64>(step) * unit.rate, std::numeric_limits<int>::max())));
   }
 }
 
@@ -1002,6 +1006,9 @@ bool Battle::validate(const Command& cmd, std::string* why) const {
   if (outcome_ != Outcome::Ongoing) return no("battle is over");
   if (!player_unit(cmd.actor)) return no("actor cannot act");
   const Unit& actor_unit = unit(cmd.actor);
+  // A versus command belongs to the acting side; while a Dopplegang pick is open, only that pick may come.
+  if (versus_ && form_owed_ >= 0 && (cmd.kind != Command::Kind::Form || cmd.actor != form_owed_)) return no("a Dopplegang pick is open");
+  if (versus_ && side_of(cmd.actor) != acting_side()) return no("not this side's turn");
   // The state commands. In a versus battle the menu ones belong to the side whose turn it is, and a Dopplegang pick to the cast that
   // opened it (whichever side holds the turn once the cast is over).
   switch (cmd.kind) {
@@ -1120,7 +1127,7 @@ bool Battle::dopple_credit(int enemy_unit, int last_pc) {
 // A creature form grows with the stars left: extra = stars left - (record +0xA6 & 0x7F); when positive, ATK / DEF / MAG / MDEF each add
 // extra >> 4, >> 3 or >> 2 by their 2-bit selector in record +0xA7 (bits 0-1, 2-3, 4-5, 6-7; 0 = no growth), capped at 255.
 void Battle::scale_creature_form(Unit& unit, const data::StatRec& rec, int side) const {
-  const int extra = star_counter(side) - rec.star_threshold();
+  const int extra = static_cast<int>(std::clamp<s64>(static_cast<s64>(star_counter(side)) - rec.star_threshold(), 0, 0xFFFF));
   if (extra <= 0) return;
   const u8 selectors = rec.star_growth();
   int* stats[4] = {&unit.atk, &unit.def, &unit.mag, &unit.mdef};
@@ -2912,9 +2919,18 @@ void Battle::open_menu(int pc) {
   active_pc_ = pc;
 }
 
+// An Element command opens its element menu before it is judged; a versus battle puts the units back when the command is refused, so a
+// refused command leaves no trace for the other game to miss.
 bool Battle::apply(const Command& cmd, std::string* why) {
-  if (cmd.kind == Command::Kind::Element && (!versus_ || can_act(cmd.actor))) open_element_menu(cmd.actor);
-  if (!validate(cmd, why)) return false;
+  std::optional<std::array<Unit, kUnits>> menu_before;
+  if (cmd.kind == Command::Kind::Element && (!versus_ || can_act(cmd.actor))) {
+    if (versus_) menu_before = units_;
+    open_element_menu(cmd.actor);
+  }
+  if (!validate(cmd, why)) {
+    if (menu_before) units_ = *menu_before;
+    return false;
+  }
   if (cmd.kind >= Command::Kind::EndTurn) {
     apply_state_command(cmd);
     return true;
@@ -2968,8 +2984,8 @@ bool Battle::apply(const Command& cmd, std::string* why) {
           tgt = cmd.actor;
           for (int i = side_first(own_side); i < side_first(own_side) + kPcSlots; ++i)
             if (units_[static_cast<size_t>(i)].standing() &&
-                units_[static_cast<size_t>(i)].hp * units_[static_cast<size_t>(tgt)].max_hp <
-                    units_[static_cast<size_t>(tgt)].hp * units_[static_cast<size_t>(i)].max_hp)
+                static_cast<s64>(units_[static_cast<size_t>(i)].hp) * units_[static_cast<size_t>(tgt)].max_hp <
+                    static_cast<s64>(units_[static_cast<size_t>(tgt)].hp) * units_[static_cast<size_t>(i)].max_hp)
               tgt = i;
         } else {
           tgt = pick_enemy();

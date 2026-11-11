@@ -3,6 +3,9 @@
 #include <memory>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <limits>
+#include <string>
 #include <utility>
 
 #include "data/char_name.h"
@@ -6394,6 +6397,158 @@ void test_versus_battlefield() {
   CHECK(data::battle_data_fingerprint(tables) == fingerprint);
 }
 
+// A versus command belongs to the acting side: while a Dopplegang pick is open only the pick comes, even when the cast spent its side's
+// turn, and then the turn side's commands.
+void test_versus_pick_owner() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(kDopplegangElement + 1);
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  PartyMember caster = make_member(0, "A");
+  caster.cells[0] = static_cast<u16>(0x4000 | kDopplegangElement);
+  CHECK(battle.start_versus(versus_side({caster}), versus_side({make_member(3, "D"), make_member(4, "E")}), -1, 70));
+  battle.unit_mut(0).gauge = 0;
+  std::string why;
+  CHECK(!battle.apply(versus_command(Command::Kind::Defend, 3), &why) && why == "not this side's turn");
+  Command cast = versus_command(Command::Kind::Element, 0);
+  cast.cell = 0;
+  CHECK(battle.apply(cast, &why));
+  CHECK_EQ(battle.form_owed(), 0);
+  CHECK_EQ(battle.turn_side(), 1);
+  CHECK_EQ(battle.acting_side(), 0);
+  for (const Command::Kind kind : {Command::Kind::Run, Command::Kind::EndTurn, Command::Kind::Defend, Command::Kind::Focus}) {
+    CHECK(!battle.apply(versus_command(kind, 3), &why));
+    CHECK(why == "a Dopplegang pick is open");
+  }
+  Command other_pick = versus_command(Command::Kind::Form, 3);
+  other_pick.form = -1;
+  CHECK(!battle.apply(other_pick));
+  Command pick = versus_command(Command::Kind::Form, 0);
+  pick.form = -1;
+  CHECK(battle.apply(pick));
+  CHECK_EQ(battle.form_owed(), -1);
+  CHECK(!battle.apply(versus_command(Command::Kind::Run, 0), &why) && why == "not this side's turn");
+  CHECK(battle.apply(versus_command(Command::Kind::Defend, 3)));
+}
+
+// A refused Element command of a versus battle leaves the units as they were (its element menu opening included), so both games stay in
+// step whichever of them refused it.
+void test_versus_refused_element() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  PartyMember member = make_member(0, "A");
+  member.cells[5] = 0x4001;
+  member.unlocked[5] = member.stack[5] = true;
+  CHECK(battle.start_versus(versus_side({member}), versus_side({make_member(3, "D")}), -1));
+  Command cast = versus_command(Command::Kind::Element, 0);
+  cast.cell = 0;
+  CHECK(!battle.apply(cast));
+  CHECK(!battle.unit(0).used[5]);
+  CHECK(battle.apply(versus_command(Command::Kind::ElementMenu, 0)));
+  CHECK(battle.unit(0).used[5]);
+}
+
+// Numbers no record holds neither hang nor overflow the rules: a unit's numbers are held to their ranges and the roll sums are cut.
+void test_versus_huge_numbers() {
+  constexpr int kHuge = std::numeric_limits<int>::max();
+  ScriptedRng sums{Lo::Fallback::Lo};
+  CHECK_EQ(sum_rolls(sums, kHuge, 1, 0), 0x10000 * 100);
+  CHECK_EQ(heal_amount(sums, kHuge, 255, 1000), 999);
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  VersusBrain brain;
+  Battle battle{tables, rng, brain};
+  PartyMember giant = make_member(0, "A");
+  giant.stat.fill(kHuge);
+  giant.hp = kHuge;
+  giant.rate = giant.dur = giant.hit_med = giant.hit_heavy = kHuge;
+  giant.eq.stamina_mod = giant.eq.start_gauge = kHuge;
+  giant.eq.hp_pct = {kHuge};
+  PartyMember wall = giant;
+  wall.char_id = 3;
+  CHECK(battle.start_versus(versus_side({giant}), versus_side({wall}), -1, 70));
+  CHECK_EQ(battle.unit(0).max_hp, 30000);
+  CHECK_EQ(battle.unit(0).hp, 999);
+  CHECK_EQ(battle.unit(0).def, 9999);
+  CHECK(battle.apply(versus_attack(0, {2}, 3)));
+}
+
+// The record set of the legality tests: characters 0 to 5 with a starting kit (Aqua Beam in cell 0, an empty cell 1, the level 2 tech 0x80 in
+// cell 10 and an empty cell 11), weapon-less.
+data::GameTables make_versus_tables() {
+  data::GameTables tables = make_tables();
+  tables.elements[1].raw[0x12] = 0x00;
+  tables.elements.resize(0x81);
+  tables.elements[0x80].raw[1] = 0x02, tables.elements[0x80].raw[6] = 2;
+  data::CharSet set;
+  for (int id = 0; id < 6; ++id) {
+    data::StatRec& rec = set.rec[static_cast<size_t>(id)];
+    rec.raw[0x01] = 0x08, rec.raw[0x16] = 50, rec.raw[0x18] = 9, rec.raw[0x19] = 5, rec.raw[0x1A] = 85, rec.raw[0x1B] = 8, rec.raw[0x1C] = 7,
+    rec.raw[0x1D] = 7, rec.raw[0x1E] = 13, rec.raw[0x1F] = 10, rec.raw[0xA4] = 50, rec.raw[0xA5] = 20;
+    rec.raw[0x30] = 0x03, rec.raw[0x32] = 0x03;
+    rec.raw[0x40] = 0x01, rec.raw[0x41] = 0x40, rec.raw[0x43] = 0x40, rec.raw[0x44] = 0x80, rec.raw[0x45] = 0xC0, rec.raw[0x47] = 0x40;
+    set.lv99[static_cast<size_t>(id)] = {850, 88, 78, 95, 25, 52, 43};
+  }
+  tables.char_sets["char"] = set;
+  return tables;
+}
+
+// A received side is refused for anything a real game cannot send; a side built from the records passes.
+void test_versus_side_legality() {
+  const data::GameTables tables = make_versus_tables();
+  VersusSide legal;
+  legal.party = {make_party_member(tables, 0, 0), make_party_member(tables, 1, 0)};
+  legal.stars = 5;
+  legal.dopple[0] = 1;
+  std::string why;
+  CHECK(legal_versus_side(tables, legal, &why));
+  CHECK_EQ(legal.party[0].cells[10], 0xC080);
+  const auto refused = [&](const std::function<void(VersusSide&)>& change, const char* reason) {
+    VersusSide side = legal;
+    change(side);
+    std::string got;
+    const bool ok = legal_versus_side(tables, side, &got);
+    if (ok || got.find(reason) == std::string::npos) std::printf("legality: expected '%s', got '%s'\n", reason, ok ? "legal" : got.c_str());
+    return !ok && got.find(reason) != std::string::npos;
+  };
+  VersusSide moved = legal;
+  moved.party[0].cells[1] = 0x4002;
+  moved.party[0].cells[10] = 0x4000;
+  moved.party[0].cells[11] = 0xC080;
+  moved.party[0].innate = 0x20;
+  CHECK(legal_versus_side(tables, moved, &why));
+  CHECK(refused([](VersusSide& side) { side.party.clear(); }, "not 1 to 3"));
+  CHECK(refused([](VersusSide& side) { side.party[1].char_id = 0; }, "a character twice"));
+  CHECK(refused([](VersusSide& side) { side.party[0].char_id = 44; }, "not a playable character"));
+  CHECK(refused([](VersusSide& side) { side.party[0].name = "A\nB"; }, "control characters"));
+  CHECK(refused([](VersusSide& side) { side.party[0].own_name = "\xC0\x80"; }, "control characters"));
+  CHECK(refused([](VersusSide& side) { side.party[0].kind = 0x2C; }, "a body"));
+  CHECK(refused([](VersusSide& side) { side.party[0].evolved = true; }, "a form change"));
+  CHECK(refused([](VersusSide& side) { side.party[0].dur = 99; }, "record constants"));
+  CHECK(refused([](VersusSide& side) { side.party[0].innate = 0x03; }, "no colour"));
+  CHECK(refused([](VersusSide& side) { side.party[0].base[1] = 99; }, "growth record"));
+  CHECK(refused([](VersusSide& side) { side.party[0].stat[1] = 128; }, "a stat past"));
+  CHECK(refused([](VersusSide& side) { side.party[0].stat[0] = 0; }, "a stat past"));
+  CHECK(refused([](VersusSide& side) { side.party[0].pending[2] = 500; }, "growth words"));
+  CHECK(refused([](VersusSide& side) { side.party[0].hp = 51; }, "HP past"));
+  CHECK(refused([](VersusSide& side) { side.party[0].lo_persist = 0x2; }, "a status"));
+  CHECK(refused([](VersusSide& side) { side.party[0].eq.wp = 999; }, "gear"));
+  CHECK(refused([](VersusSide& side) { side.party[0].eq.status_hi = st::kHiImmune; }, "gear"));
+  CHECK(refused([](VersusSide& side) { side.party[0].eq.weapon_id = 0x3D; }, "gear"));
+  CHECK(refused([](VersusSide& side) { side.party[0].cells[1] = 0x4005; }, "placement window"));
+  CHECK(refused([](VersusSide& side) { side.party[0].cells[1] = 0xC080; }, "a tech no player holds there"));
+  CHECK(refused([](VersusSide& side) { side.party[0].cells[10] = 0x4001; }, "placement window"));
+  CHECK(refused([](VersusSide& side) { side.party[0].cells[2] = 0x4001; }, "does not have"));
+  CHECK(refused([](VersusSide& side) { side.party[0].cells[11] = 0x4001; }, "placement window"));
+  CHECK(refused([](VersusSide& side) { side.party[0].qty[0] = 3; }, "no stack"));
+  CHECK(refused([](VersusSide& side) { side.party[0].stack[0] = true; }, "does not stack"));
+  CHECK(refused([](VersusSide& side) { side.stars = 100; }, "stars"));
+  CHECK(refused([](VersusSide& side) { side.dopple[14] = 1 << 6; }, "pool"));
+}
+
 int main() {
   test_stack_restock();
   test_gear();
@@ -6524,6 +6679,10 @@ int main() {
   test_versus_side_codec();
   test_versus_state_hash();
   test_versus_battlefield();
+  test_versus_pick_owner();
+  test_versus_refused_element();
+  test_versus_huge_numbers();
+  test_versus_side_legality();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

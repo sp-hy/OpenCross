@@ -66,12 +66,18 @@ void NetworkVersusLink::pull() {
   net::PvpStep step;
   while (client_.take_pvp_step(step)) {
     if (!step.cmd.empty()) {
+      if (commands_.size() >= kCommandKeep) {
+        log::warn("battle: versus: the other game sent more than {} commands ahead", kCommandKeep);
+        broken_ = true;
+        return;
+      }
       commands_.push_back(std::move(step));
       continue;
     }
     const auto own = own_hashes_.find(step.seq);
     if (own == own_hashes_.end()) continue;
     if (own->second != step.hash) mismatch(step.seq, own->second, step.hash);
+    else progress_at_ = client_.now();
     own_hashes_.erase(own);
   }
 }
@@ -84,7 +90,8 @@ void NetworkVersusLink::mismatch(u32 seq, u64 ours, u64 theirs) {
 
 void NetworkVersusLink::send(const battle::Command& cmd) { pending_ = cmd; }
 
-// The other side's next command while it acts. While none has come the other game's silence is timed, except while either player is
+// The other side's next command while it acts. While none has come the other game's silence is timed from the last message that moved the
+// battle on (its next command, or its check of one of this game's) or from its return after an away time, except while either player is
 // known to be out of reach (the server's away time rules then).
 bool NetworkVersusLink::poll(const battle::Battle& battle, battle::Command& cmd) {
   pull();
@@ -98,7 +105,7 @@ bool NetworkVersusLink::poll(const battle::Battle& battle, battle::Command& cmd)
     } else {
       const double now = client_.now();
       if (waiting_since_ < 0) waiting_since_ = now;
-      if (now - std::max(waiting_since_, client_.pvp_last_heard()) >= kSilenceLimit && !silent_) {
+      if (now - std::max({waiting_since_, progress_at_, client_.pvp_opponent_back()}) >= kSilenceLimit && !silent_) {
         silent_ = true;
         log::warn("battle: versus: the other game sent nothing for {:.0f} s while its side acts", kSilenceLimit);
       }
@@ -121,6 +128,7 @@ bool NetworkVersusLink::poll(const battle::Battle& battle, battle::Command& cmd)
   }
   cmd = *parsed;
   expected_ = std::move(step);
+  progress_at_ = client_.now();
   return true;
 }
 

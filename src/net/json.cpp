@@ -379,4 +379,27 @@ std::string utf8_truncate(std::string_view text, size_t max_points) {
   return std::string(text.substr(0, pos));
 }
 
+namespace {
+
+bool hidden_code_point(char32_t cp) {
+  return cp < 0x20 || (cp >= 0x7F && cp <= 0x9F) || cp == 0xAD || (cp >= 0x200B && cp <= 0x200F) || (cp >= 0x2028 && cp <= 0x202E) ||
+         (cp >= 0x2060 && cp <= 0x206F) || cp == 0xFEFF || (cp >= 0xFFF9 && cp <= 0xFFFB) || (cp >= 0xFDD0 && cp <= 0xFDEF) ||
+         (cp & 0xFFFE) == 0xFFFE;
+}
+
+}  // namespace
+
+std::string display_text(std::string_view text, size_t max_points) {
+  std::string out;
+  size_t count = 0, pos = 0;
+  while (pos < text.size() && count < max_points) {
+    const char32_t cp = next_code_point(text, pos);
+    if (hidden_code_point(cp) || (count == 0 && cp == ' ')) continue;
+    append_utf8(out, cp);
+    ++count;
+  }
+  while (!out.empty() && out.back() == ' ') out.pop_back();
+  return out;
+}
+
 }  // namespace oc::net

@@ -110,6 +110,16 @@ async function testHandshake() {
   first.send({ t: "chat", scope: "global", text: "too early" });
   check("hello first closes", await first.waitClosed());
 
+  const garbage = await Client.open();
+  garbage.ws.send("{not json");
+  check("bad json before hello closes", (await garbage.take("error"))?.code === "bad" && (await garbage.waitClosed()));
+
+  const flood = await Client.open();
+  flood.send({ t: "hello", v: 1, id: randomId(), name: "Flood", star: 1, ver: "x" });
+  await flood.take("welcome");
+  for (let i = 0; i < 120; ++i) flood.ws.send("{");
+  check("frame flood closes", (await flood.take("error", 2000, (m) => m.code === "rate")) !== null && (await flood.waitClosed()));
+
   const id = randomId();
   const a = await Client.open();
   a.send({ t: "hello", v: 1, id, name: "  Al\u0001ice  ", star: 5, ver: "x" });
@@ -209,6 +219,10 @@ async function testChat() {
   check("room chat reaches room", line?.scope === "room" && line.text === "hi there" && line.name === "A" && line.pid === a.welcome.pid && line.ts > 1e12);
   check("room chat echoes sender", (await a.take("chat"))?.text === "hi there");
   check("room chat not outside room", await c.quiet(300, "chat"));
+
+  a.send({ t: "chat", scope: "room", text: "\u202eab\u200bc\u2066d\u2028e\ufeff\ud800f" });
+  check("hidden characters removed", (await b.take("chat"))?.text === "abcdef");
+  await a.take("chat");
 
   a.send({ t: "chat", scope: "global", text: "everyone" });
   check("global reaches all", (await c.take("chat"))?.text === "everyone" && (await b.take("chat"))?.text === "everyone");

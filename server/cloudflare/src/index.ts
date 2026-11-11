@@ -68,6 +68,8 @@ interface Conn {
   pvpN: number;
   ip: string;
   last: number;
+  frameWin: number;
+  frameN: number;
   presWin: number;
   presN: number;
   otherWin: number;
@@ -139,6 +141,10 @@ const RESULTS = ["won", "lost", "aborted", "draw", "desync"] as const;
 // command text, how long a disconnected member may take to come back (AWAY_MS overrides it), how long a forfeit is remembered for a late
 // resume, and how many unacknowledged messages (and characters) one member's outbox keeps.
 const BATTLE_PER_SEC = 30;
+// Frames of any kind one connection may send in a second, counted before a frame is parsed; more close the connection.
+const FRAMES_PER_SEC = 100;
+// Admin failure records kept at most; past it every admin attempt is refused until old ones expire.
+const MAX_AUTH_RECORDS = 10000;
 const SIDE_LEN = 12288;
 const CMD_LEN = 64;
 const AWAY_MS = 30000;
@@ -148,10 +154,24 @@ const OUTBOX_CHARS = 96 * 1024;
 
 const encoder = new TextEncoder();
 
+// Control characters, soft hyphens, zero-width and joiner characters, bidirectional overrides and isolates, line and paragraph
+// separators, invisible operators, the BOM, interlinear annotation marks, noncharacters and lone surrogates are removed.
+const HIDDEN = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff\ufff9-\ufffb\ufdd0-\ufdef\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g;
+
 function clean(text: unknown, max: number): string {
   if (typeof text !== "string") return "";
-  const stripped = text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
-  return Array.from(stripped).slice(0, max).join("");
+  const stripped = text.replace(HIDDEN, "").trim();
+  return Array.from(stripped).slice(0, max).join("").trim();
+}
+
+// The address a limit or a ban applies to: an IPv6 address by its /64 (one subscriber's block), any other as it is.
+function netOf(ip: string): string {
+  if (!ip.includes(":")) return ip;
+  const [head, tail = ""] = ip.toLowerCase().split("::");
+  const left = head ? head.split(":") : [];
+  const right = tail ? tail.split(":") : [];
+  const groups = ip.includes("::") ? [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right] : left;
+  return groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/, "")).join(":") + "::/64";
 }
 
 function int(value: unknown): number | null {
@@ -283,14 +303,19 @@ export class World extends DurableObject<Env> {
   // True when `ip` may try an admin token now (fewer than MAX_AUTH_FAILURES wrong ones in the last AUTH_WINDOW_MS).
   private authAllowed(ip: string): boolean {
     const now = Date.now();
-    const recent = (this.authFailures.get(ip) ?? []).filter((at) => now - at < AUTH_WINDOW_MS);
-    if (recent.length) this.authFailures.set(ip, recent);
-    else this.authFailures.delete(ip);
+    const key = netOf(ip);
+    const recent = (this.authFailures.get(key) ?? []).filter((at) => now - at < AUTH_WINDOW_MS);
+    if (recent.length) this.authFailures.set(key, recent);
+    else this.authFailures.delete(key);
+    if (this.authFailures.size >= MAX_AUTH_RECORDS) {
+      for (const [other, list] of this.authFailures) if (list.every((at) => now - at >= AUTH_WINDOW_MS)) this.authFailures.delete(other);
+      if (this.authFailures.size >= MAX_AUTH_RECORDS) return false;
+    }
     return recent.length < MAX_AUTH_FAILURES;
   }
 
   private authFailed(ip: string): void {
-    if (this.authFailures.size > 10000) this.authFailures.clear();
+    ip = netOf(ip);
     const list = this.authFailures.get(ip) ?? [];
     list.push(Date.now());
     this.authFailures.set(ip, list);
@@ -440,7 +465,8 @@ export class World extends DurableObject<Env> {
     if (req.headers.get("Upgrade") !== "websocket") return new Response("expected websocket", { status: 426 });
 
     const ip = req.headers.get("CF-Connecting-IP") ?? "local";
-    if (ip !== "local" && this.ctx.getWebSockets().filter((ws) => this.conn(ws).ip === ip).length >= MAX_SOCKETS_PER_IP) {
+    const net = netOf(ip);
+    if (ip !== "local" && this.ctx.getWebSockets().filter((ws) => netOf(this.conn(ws).ip) === net).length >= MAX_SOCKETS_PER_IP) {
       return new Response("too many connections", { status: 429 });
     }
     const pair = new WebSocketPair();
@@ -449,9 +475,9 @@ export class World extends DurableObject<Env> {
     const conn: Conn = {
       banned: false, hello: false, admin: false, pid: "", name: "", star: 0, room: "", models: [], pres: null, pvp: false, out: null, battle: "",
       opponent: "", pvpSeq: 0, pvpSide: false, pvpN: 0, ip,
-      last: Date.now(), presWin: 0, presN: 0, otherWin: 0, otherN: 0, battleWin: 0, battleN: 0, chats: [],
+      last: Date.now(), frameWin: 0, frameN: 0, presWin: 0, presN: 0, otherWin: 0, otherN: 0, battleWin: 0, battleN: 0, chats: [],
     };
-    conn.banned = (await this.ctx.storage.get("ip:" + ip)) !== undefined;
+    conn.banned = (await this.ctx.storage.get("ip:" + net)) !== undefined || (await this.ctx.storage.get("ip:" + ip)) !== undefined;
     this.save(server, conn);
     await this.scheduleAlarm(Date.now() + this.idleMs / 2);
     return new Response(null, { status: 101, webSocket: pair[0] });
@@ -483,15 +509,16 @@ export class World extends DurableObject<Env> {
       const pid = typeof body.pid === "string" ? body.pid : "";
       const ip = typeof body.ip === "string" ? body.ip : "";
       if (!pid === !ip) return json({ error: "give exactly one of pid or ip" }, 400);
-      const key = pid ? "pid:" + pid : "ip:" + ip;
+      const key = pid ? "pid:" + pid : "ip:" + netOf(ip);
       if (path === "/admin/ban") {
         await this.ctx.storage.put(key, true);
         for (const ws of this.ctx.getWebSockets()) {
           const conn = this.conn(ws);
-          if ((pid && conn.pid === pid) || (ip && conn.ip === ip)) this.fail(ws, "banned", "banned", true);
+          if ((pid && conn.pid === pid) || (ip && netOf(conn.ip) === netOf(ip))) this.fail(ws, "banned", "banned", true);
         }
       } else {
         await this.ctx.storage.delete(key);
+        if (ip) await this.ctx.storage.delete("ip:" + ip);
       }
       return json({ ok: true });
     }
@@ -502,18 +529,29 @@ export class World extends DurableObject<Env> {
     const conn = this.conn(ws);
     conn.last = Date.now();
     if (conn.banned) return this.fail(ws, "banned", "banned", true);
-    if (typeof data !== "string" || data.length > MAX_SIDE_FRAME) return this.fail(ws, "bad", "bad frame");
+    if (conn.last - (conn.frameWin ?? 0) >= 1000) {
+      conn.frameWin = conn.last;
+      conn.frameN = 0;
+    }
+    conn.frameN = (conn.frameN ?? 0) + 1;
+    if (conn.frameN > FRAMES_PER_SEC) {
+      this.save(ws, conn);
+      return this.fail(ws, "rate", "too many frames", true);
+    }
+    // Before its hello a connection that sends anything malformed is closed.
+    const bad = (msg: string) => this.fail(ws, "bad", msg, !conn.hello);
+    if (typeof data !== "string" || data.length > (conn.hello ? MAX_SIDE_FRAME : MAX_FRAME)) return bad("bad frame");
     let msg: Msg;
     try {
       const parsed: unknown = JSON.parse(data);
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) throw new Error("not an object");
       msg = parsed as Msg;
     } catch {
-      return this.fail(ws, "bad", "bad json");
+      return bad("bad json");
     }
     const type = msg.t;
-    if (typeof type !== "string") return this.fail(ws, "bad", "missing t");
-    if (data.length > MAX_FRAME && type !== "pvp_side") return this.fail(ws, "bad", "bad frame");
+    if (typeof type !== "string") return bad("missing t");
+    if (data.length > MAX_FRAME && type !== "pvp_side") return bad("bad frame");
 
     if (!conn.hello) {
       if (type !== "hello") return this.drop(ws, 1008, "hello first");
