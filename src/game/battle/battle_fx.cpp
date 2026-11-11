@@ -304,6 +304,11 @@ void BattleFxLibrary::load_resident() {
   resident_ = std::move(resident);
 }
 
+int weapon_mesh_character(std::string_view name) {
+  if (name.size() != 2 || name[0] < '0' || name[0] > '9' || name[1] < '0' || name[1] > '9') return -1;
+  return (name[0] - '0') * 10 + (name[1] - '0');
+}
+
 std::set<u32> actor_script_tags(const vfs::Vfs& vfs) {
   std::set<u32> tags;
   const std::function<void(ByteSpan)> walk = [&](ByteSpan bytes) {

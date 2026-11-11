@@ -242,7 +242,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `moved <ent> <min>` | The entity is at least `min` units from where `mark ent` saw it. |
 | `screen right\|left\|up\|down` | Player screen movement since `mark`: right/left need more than 8 px and mostly horizontal; up/down need more than 1 px. |
 | `rel <who> <ref> <dx> <dy> <tol>` | Screen offset of `who` from `ref` equals `(dx, dy)` within `tol` on each axis. |
-| `ent <n> model\|shown\|moving\|paused\|wet\|pitch <value>` | Room model index / drawn / script motion active / motion pre-empted / walk flags carry water / script pitch (op 27, 4096 per turn); each 0 or 1 except `model` and `pitch`. |
+| `ent <n> model\|body\|char\|shown\|moving\|paused\|wet\|pitch <value>` | Room model index / the character model byte the entity wears (its record's model byte once that model is on the entity, -1 for an entity without a character model, or while its model could not be loaded) / its character id (-1 none) / drawn / script motion active / motion pre-empted / walk flags carry water / script pitch (op 27, 4096 per turn); each 0 or 1 except `model`, `body`, `char` and `pitch`. |
 | `height <who> <min> <max>` | World y (down is positive) in range. |
 | `anim <who> <id\|stair>` | Submitted clip id equals `id`, or the entity stands on a stair tile. |
 | `offmesh <p1\|p2\|ent N\|npcs> <max>` | Ticks the member stood off the walkable mesh is at most `max`; `npcs` takes the worst placed non-party model entity. |

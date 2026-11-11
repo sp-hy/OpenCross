@@ -31,6 +31,8 @@ class Table {
   // Adds the tag of every op 0x68 / 0x7D (start an effect sequence) in the table: each variant's code is swept op by op up to the
   // next entry, so branches the VM would skip count too.
   void sequence_tags(std::set<u32>& out) const;
+  // Calls `visit(entry, pc)` once for every op the same sweep reaches (each word index once, even where variants share code).
+  void each_op(const std::function<void(int entry, int pc)>& visit) const;
   // The unit's own S5 table seen from its atk table: op 0x44 reads the
   // blend table in S5 entry 0. Set by the loader for atk tables.
   void set_model_table(const Table* table) { model_ = table; atk_ = true; }

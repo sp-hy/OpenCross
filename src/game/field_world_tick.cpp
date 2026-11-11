@@ -727,7 +727,7 @@ std::string FieldWorld::dump_entities() const {
 std::string FieldWorld::describe_ent(int i) const {
   const Ent& ent_state = ents_[static_cast<size_t>(i)];
   std::string text;
-  if (ent_state.pc_slot >= 0) text += std::format("PC slot {} char {} ", ent_state.pc_slot, ent_state.char_id);
+  if (ent_state.pc_slot >= 0) text += std::format("PC slot {} char {} body {:#x} ", ent_state.pc_slot, ent_state.char_id, ent_state.char_model);
   else if (ent_state.model >= 0) text += std::format("NPC model {} ", ent_state.model);
   if (ent_state.motion.active) text += "moving ";
   if (ent_state.actor.loaded()) {

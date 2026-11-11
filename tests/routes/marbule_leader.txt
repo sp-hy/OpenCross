@@ -1,0 +1,36 @@
+# fin_05 (Marbule ending, room 504): entity 1 is 0E FD (the party leader) and runs D9 #0 #49 (Serge's record -> the Lynx body);
+# entities 2 and 3 (0E FE / 0E FF) are hidden by entity 0. Nothing in the ending puts Serge in front, so a party led by someone
+# else (Select, or the Tele-Porter screen) walks the scene with that leader, as the PS1 shows with Harle leading: two Harles. The D9
+# still writes Serge's byte. With Serge leading, entity 1 wears the Lynx body.
+0 wait flow field 600
+- request party_add 22
+- request party_add 1
+- request party_remove 0
+- request party_add 0
+- set var 0 100
+- load fin_05
+- wait flow field 600
+- wait 30
+- assert party 22,1,0
+- assert ent 1 char 22
+- assert ent 1 body 22
+- assert ent 1 shown 1
+- assert ent 2 shown 0
+- assert ent 3 shown 0
+- assert ent 3 char 0
+- request party_remove 22
+- request party_add 22
+- assert party 1,0,22
+- request party_remove 1
+- request party_add 1
+- assert party 0,22,1
+- set model 0 0
+- load fin_05
+- wait flow field 600
+- wait 30
+- assert ent 1 char 0
+- assert ent 1 body 49
+- assert ent 1 shown 1
+- assert ent 2 shown 0
+- assert ent 3 shown 0
+- quit

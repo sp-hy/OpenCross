@@ -32,9 +32,20 @@ bool FieldWorld::player_xz(float& x, float& z) const {
 }
 
 bool FieldWorld::entity_xz(int ent, float& x, float& z) const {
-  // Route-test queries use negative ids: -4000 - n = entity n's script pitch (x) and whether it is drawn (z = 1); -3000 - n = entity
+  // Route-test queries use negative ids: -5000 - n = the character model byte entity n wears (x, -1 when it wears no character model)
+  // and its character id (z, -1 none); -4000 - n = entity n's script pitch (x) and whether it is drawn (z = 1); -3000 - n = entity
   // n's height (x, world y, down = +) and clip state (z = submitted anim id, + 0x10000 on a stair tile); -2000 - n = entity n's state (x = room model, -1 none; z = bits); -1000 - n = entity n's off-mesh tick
   // count (x); -100 - n = entity n's layer-space screen position; -1 = the controlled entity's layer-space screen position (scroll included).
+  if (ent <= -5000) {
+    const int target = -5000 - ent;
+    if (target >= static_cast<int>(ents_.size())) return false;
+    const Ent& ent_state = ents_[static_cast<size_t>(target)];
+    const auto worn = char_models_.find(ent_state.char_model);
+    const bool wears = ent_state.char_id >= 0 && worn != char_models_.end() && worn->second && worn->second == ent_state.actor.model_handle();
+    x = wears ? static_cast<float>(ent_state.char_model) : -1.0f;
+    z = static_cast<float>(ent_state.char_id);
+    return true;
+  }
   if (ent <= -4000) {
     const int target = -4000 - ent;
     if (target >= static_cast<int>(ents_.size())) return false;

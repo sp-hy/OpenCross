@@ -2,12 +2,13 @@
 //   ocbattleseq [-g <gamedir>] <folder e.g. player/selju2 | monster/chouchin> [entry variant [a b hit dead]]
 //   ocbattleseq [-g <gamedir>] sfx <folder> <tag> [weapon class [seconds]]    renders a battle sound offline and prints its level
 //   ocbattleseq [-g <gamedir>] emitters <cdrom path> | audit | sfxscan [weapon class] | sfxslots <stage.prd> <unit> <weapon class> [pack ...]
-//                              | sfxbanks <.prd> | sfxfind <hex>    dev audits of effect emitters, sequence ops and battle sounds
+//                              | sfxbanks <.prd> | sfxfind <hex> | opscan <ops>    dev audits of effect emitters, sequence ops and battle sounds
 #include <algorithm>
 #include <bitset>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <cstdint>
 #include <map>
@@ -45,7 +46,8 @@ int ocbattleseq_main(int argc, char** argv) {
         "       ocbattleseq [-g gamedir] sfxscan [weapon class]\n"
         "       ocbattleseq [-g gamedir] sfxslots <stage.prd> <unit folder|.prd> <weapon class> [pack .prd ...]\n"
         "       ocbattleseq [-g gamedir] sfxbanks <.prd under cdrom/battle/>\n"
-        "       ocbattleseq [-g gamedir] sfxfind <hex byte pattern>\n");
+        "       ocbattleseq [-g gamedir] sfxfind <hex byte pattern>\n"
+        "       ocbattleseq [-g gamedir] opscan <hex op,hex op,...>\n");
     return 2;
   }
   vfs::Vfs fs;
@@ -171,6 +173,66 @@ int ocbattleseq_main(int argc, char** argv) {
     dump("atk", atk_ops, atk_who);
     dump("S5", s5_ops, s5_who);
     for (auto& [tag, count] : fx_tags) std::printf("fx %s x%d\n", tag.c_str(), count);
+    return 0;
+  }
+  // opscan <hex,hex,...>: a static sweep of every animation-sequence table on the disc (model S5 of every .obj, entry 1 of every
+  // fieldobj/ex pack, every type-0x1A table of a battle .prd, nested drps included): each use of the listed ops with its operands,
+  // then the totals per table kind.
+  if (std::string(argv[i]) == "opscan" && i + 1 < argc) {
+    std::set<int> want;
+    const std::string list = argv[i + 1];
+    for (size_t pos = 0; pos < list.size();) {
+      const size_t comma = std::min(list.find(',', pos), list.size());
+      want.insert(static_cast<int>(std::strtol(list.substr(pos, comma - pos).c_str(), nullptr, 16)));
+      pos = comma + 1;
+    }
+    std::map<std::string, int> tables;
+    std::map<std::string, std::map<int, int>> hits;
+    auto scan = [&](const game::bseq::Table& table, const std::string& kind, const std::string& name) {
+      ++tables[kind];
+      const auto& words = table.words();
+      table.each_op([&](int entry, int pc) {
+        const int op = words[static_cast<size_t>(pc)];
+        if (!want.count(op)) return;
+        ++hits[kind][op];
+        std::string line = kind + " " + name + " entry " + std::to_string(entry) + " pc " + std::to_string(pc);
+        char hex[8];
+        std::snprintf(hex, sizeof hex, " op %02X", op);
+        line += hex;
+        for (size_t k = 1; k < 4 && static_cast<size_t>(pc) + k < words.size(); ++k) line += " " + std::to_string(words[static_cast<size_t>(pc) + k]);
+        std::printf("%s\n", line.c_str());
+      });
+    };
+    std::function<void(ByteSpan, const std::string&)> scan_drp = [&](ByteSpan data, const std::string& name) {
+      auto drp = import::parse_drp(data);
+      if (!drp) return;
+      for (const auto& entry : drp->entries) {
+        game::bseq::Table table;
+        if (entry.type == 0x1A && table.parse(entry.data)) scan(table, "prd", name + ":" + entry.name);
+        if (entry.type == 1 && import::is_drp(entry.data)) scan_drp(entry.data, name + "/" + entry.name);
+      }
+    };
+    for (const std::string& path : fs.list("cdrom")) {
+      auto ends = [&](const char* tail) { return path.size() >= std::strlen(tail) && path.compare(path.size() - std::strlen(tail), std::strlen(tail), tail) == 0; };
+      const std::string kind = path.compare(0, 7, "battle/") == 0 ? "battle" : "field";
+      if (ends(".obj")) {
+        auto obj = fs.read("cdrom/" + path);
+        game::bseq::Table table;
+        if (obj && game::bseq::load_model_table(*obj, table)) scan(table, kind + "-S5", path);
+      } else if (ends(".bin") && path.compare(0, 12, "fieldobj/ex/") == 0) {
+        auto bin = fs.read("cdrom/" + path);
+        auto cpt = bin ? import::parse_cpt(*bin) : std::nullopt;
+        game::bseq::Table table;
+        if (cpt && cpt->entries.size() == 2 && table.parse(cpt->entries[1].data)) scan(table, "field-ex", path);
+      } else if (ends(".prd") && kind == "battle") {
+        if (auto prd = fs.read("cdrom/" + path)) scan_drp(*prd, path);
+      }
+    }
+    for (const auto& [kind, count] : tables) {
+      std::printf("%s: %d tables", kind.c_str(), count);
+      for (const int op : want) std::printf(", %02X x%d", op, hits[kind][op]);
+      std::printf("\n");
+    }
     return 0;
   }
   // sfxscan: every battle sound of every unit: stuck voices / parked channels / long sounds.

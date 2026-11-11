@@ -86,7 +86,7 @@ std::shared_ptr<ModelHandle> FieldWorld::remote_model(int model_byte, bool& fail
     failed = !handle;
     return handle;
   }
-  if (model_byte < 0 || model_byte >= 0x100 || !files_ || model_folder(model_byte).empty()) {
+  if (model_byte < 0 || model_byte >= 0x100 || !files_ || model_stem(model_byte).empty()) {
     failed = true;
     return nullptr;
   }

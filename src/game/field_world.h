@@ -1310,8 +1310,8 @@ class FieldWorld final : public script::FieldHost {
   // C5 / C8 / FE 43 records
   void step_sound_emitters();
   void defeated_enter_room();
-  // fieldobj/player folder of a character model byte (file id 2b + 2)
-  std::string model_folder(int model_byte) const;
+  // Path stem under fieldobj/player of a character model byte (file id 2b + 2): "<folder>/<file>", e.g. "neko2/neko"
+  std::string model_stem(int model_byte) const;
   // character record model byte (D9 / DB)
   int model_byte(int char_id) const;
   static int model_byte_in(const save::SaveSlot& slot, int char_id);

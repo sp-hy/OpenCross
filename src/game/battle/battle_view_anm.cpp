@@ -332,29 +332,43 @@ void BattleView::anm_tick() {
   }
 }
 
-// Mesh sprites (type 14) of the unit emitters name the resident battle.prd meshes (the `maru` orbs a rod's heavy hit fires at every target):
-// they go through the stage pipeline as the effect packs' resident meshes do (object colour, blend, OT bias, ext cull sides, depth cue),
-// before the sprite quads.
+// Mesh sprites (type 14) of the unit emitters name the resident battle.prd meshes (the `maru` orbs a rod's heavy hit fires at every target)
+// or a PC's weapon mesh by its two-digit character number (a boomerang's flight: Mel's `ryok` / `lyok` emitters draw "34" along a path
+// while op 0x7A hides the mounted one). The resident meshes go through the stage pipeline as the effect packs' resident meshes do (object
+// colour, blend, OT bias, ext cull sides, depth cue), the weapon meshes through the weapon renderer, before the sprite quads.
 void BattleView::anm_draw_meshes(const render::Frame& frame, const render::Letterbox& lb, const effects::ViewParams& view) {
   std::vector<render::StageInstance> instances;
   FxGpu* resident = nullptr;
   const assets::StageAsset* asset = nullptr;
+  std::vector<effects::EmitterSystem::MeshInstance> weapon_meshes;
+  std::vector<int> weapon_units;
   for (auto& [key, ap] : anm_) {
     AnmFx& anm = *ap;
     std::vector<effects::EmitterSystem::MeshInstance> meshes;
     anm.em->collect_meshes(view, alpha_, meshes);
     if (meshes.empty()) continue;
     FxGpu* gpu = fx_gpu_resident(anm.pack->resident.get());
-    if (!gpu || !gpu->stage) continue;
-    resident = gpu;
-    asset = anm.pack->resident->meshes.get();
+    const bool has_resident = gpu && gpu->stage;
+    if (has_resident) {
+      resident = gpu;
+      asset = anm.pack->resident->meshes.get();
+    }
     for (const auto& mi : meshes) {
       if (!mi.name || mi.sprite_type != 14) continue;
-      const auto part = gpu->parts.find(*mi.name);
-      if (part == gpu->parts.end()) continue;
-      if (static_cast<size_t>(part->second) < asset->parts.size() && mi.off_screen(asset->parts[static_cast<size_t>(part->second)].cull_points, view)) continue;
+      if (!has_resident || !gpu->parts.contains(*mi.name)) {
+        if (const int weapon_unit = fx_weapon_mesh_unit(*mi.name); weapon_unit >= 0) {
+          if (anm_trace())
+            log::info("anm: frame {} weapon mesh '{}' of unit {} at ({:.0f}, {:.0f}, {:.0f})", frame_count_, *mi.name, weapon_unit, mi.world_pos[0], mi.world_pos[1],
+                      mi.world_pos[2]);
+          weapon_meshes.push_back(mi);
+          weapon_units.push_back(weapon_unit);
+        }
+        continue;
+      }
+      const int part = gpu->parts.at(*mi.name);
+      if (static_cast<size_t>(part) < asset->parts.size() && mi.off_screen(asset->parts[static_cast<size_t>(part)].cull_points, view)) continue;
       render::StageInstance in;
-      in.part = part->second;
+      in.part = part;
       for (size_t k = 0; k < 9; ++k) in.cam[k] = mi.mat.m[k];
       for (size_t k = 0; k < 3; ++k) in.cam[9 + k] = mi.centre[k];
       for (size_t k = 0; k < 3; ++k) in.rgb[k] = mi.rgb[k];
@@ -368,6 +382,11 @@ void BattleView::anm_draw_meshes(const render::Frame& frame, const render::Lette
       else if (mi.ext & 0x10) in.cull = 1;
       instances.push_back(in);
     }
+  }
+  if (!weapon_meshes.empty()) {
+    std::vector<std::pair<int, const effects::EmitterSystem::MeshInstance*>> weapon_inst;
+    for (size_t k = 0; k < weapon_meshes.size(); ++k) weapon_inst.emplace_back(weapon_units[k], &weapon_meshes[k]);
+    fx_draw_weapon_meshes(frame, lb, weapon_inst);
   }
   if (instances.empty()) return;
   // Opaque instances first, the semi-transparent ones over them.

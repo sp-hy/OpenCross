@@ -686,7 +686,7 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
       return;
     }
   }
-  const bool pc_model = field_byte >= 0 && !model_folder(field_byte).empty();
+  const bool pc_model = field_byte >= 0 && !model_stem(field_byte).empty();
   const assets::RoomScene* scene = view_.scene();
   const bool own_room = room == view_.room_name();
   const bool room_mdl = !pc_model && room_k >= 0 && (own_room ? scene && room_k < static_cast<int>(scene->models.size()) : !room.empty());
@@ -701,8 +701,8 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
     std::optional<std::vector<u8>> obj;
     std::string owner;
     if (pc_model) {
-      owner = model_folder(field_byte);
-      obj = files_->read("cdrom/fieldobj/player/" + owner + "/" + owner + ".obj");
+      owner = model_stem(field_byte);
+      obj = files_->read("cdrom/fieldobj/player/" + owner + ".obj");
     } else if (own_room) {
       owner = std::format("room model {}", room_k);
       obj = scene->models[static_cast<size_t>(room_k)].mdl;

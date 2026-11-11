@@ -6549,6 +6549,27 @@ void test_versus_side_legality() {
   CHECK(refused([](VersusSide& side) { side.dopple[14] = 1 << 6; }, "pool"));
 }
 
+// Serge in Lynx's body keeps his own grid: the story puts techs only in the row of their level, so a level-2 tech in row 1 passes, while
+// a fixed level-0 tech that only another character's record holds (Sprigg's Dopplegang) is refused in any of his cells.
+void test_versus_lynx_body_techs() {
+  data::GameTables tables = make_versus_tables();
+  tables.elements.resize(0x82);
+  tables.elements[0x81].raw[1] = 0x02;
+  VersusSide side;
+  side.party = {make_party_member(tables, 0, 0)};
+  side.party[0].kind = 0x31;
+  side.party[0].cells[10] = 0x4000;
+  side.party[0].cells[11] = 0xC080;
+  std::string why;
+  CHECK(legal_versus_side(tables, side, &why));
+  for (const size_t cell : {size_t{1}, size_t{11}}) {
+    VersusSide other = side;
+    other.party[0].cells[cell] = 0xC081;
+    CHECK(!legal_versus_side(tables, other, &why));
+    CHECK(why.find("a tech no player holds there") != std::string::npos);
+  }
+}
+
 int main() {
   test_stack_restock();
   test_gear();
@@ -6683,6 +6704,7 @@ int main() {
   test_versus_refused_element();
   test_versus_huge_numbers();
   test_versus_side_legality();
+  test_versus_lynx_body_techs();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

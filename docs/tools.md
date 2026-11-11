@@ -237,8 +237,9 @@ Source: `src/game/battle/seq_tool.cpp`. Without a subcommand the first argument 
 | `sfxslots <stage.prd> <unit folder\|.prd> <weapon class> [pack .prd ...]` | Instrument slots each sound reads and which bank the single table gives them, against a per-file table; paths under `cdrom/battle/`. |
 | `sfxbanks <prd>` | Instrument banks of a battle `.prd` (path under `cdrom/battle/`): first index, count, sample bytes. |
 | `sfxfind <hexbytes>` | Which battle sound contains a hex byte pattern. |
+| `opscan <op,op,...>` | Static sweep of every animation-sequence table on the disc (the S5 of every battle and field `.obj`, entry 1 of every `fieldobj/ex` pack, every type-0x1A table of a battle `.prd`, nested drps included) for the listed ops (hex): one line per use with its operands, then the counts per table kind. |
 
-Environment: `OC_SEQ_*`, `OC_AUDIT_*`, `OC_PACK_*`, `OC_SFX_VOL/PAN/WAV` (sections 3.4 and 3.5). The `usage()` text omits `emitters audit sfx sfxscan sfxslots sfxbanks sfxfind`.
+Environment: `OC_SEQ_*`, `OC_AUDIT_*`, `OC_PACK_*`, `OC_SFX_VOL/PAN/WAV` (sections 3.4 and 3.5).
 
 ### 1.11 `ocflow`, `ocmenudemo`, `ocshopdemo` (UI screens in a window)
 
@@ -410,7 +411,7 @@ A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_
 | `OC_FLARE_LOG` | `src/game/effects/emitter_collect.cpp` | set | Writes lens-flare values to stderr. |
 | `OC_LINE_DBG` | `src/game/effects/bespoke/line_ring.cpp` | set | Writes line-ring op arguments and rope end points to stderr. |
 | `OC_LIGHT_TRACE` | `battle_spell_lights.cpp` | set | Every 5 ticks logs the spell lights, their summed colour and the multiplier at the strongest light. |
-| `OC_ANM_TRACE` | `battle_view_anm.cpp`, `battle_view_fx_cast.cpp`, `battle_view_trail.cpp` | set | Logs the animation-sequence trail events, eye toggles and the running pack's emitter names. |
+| `OC_ANM_TRACE` | `battle_view_anm.cpp`, `battle_view_fx_cast.cpp`, `battle_view_trail.cpp` | set | Logs the animation-sequence trail events, eye toggles and the running pack's emitter names; per drawn frame, the world position (PS1 axes, y down) of each unit-emitter mesh sprite drawn as a PC's weapon (`anm: frame <f> weapon mesh '<nn>' of unit <u> at (x, y, z)`: a thrown boomerang). |
 | `OC_APPROACH_TRACE` | `battle_view_units.cpp` | set | Logs the reach terms of every approach movement. |
 | `OC_APPROACH_CLIPS` | `battle_view_units.cpp` | set | Logs the reach of the source model's attach point per clip and frame, and the target's per clip. |
 | `OC_REACH_TRACE` | `battle_view_units.cpp` | set | Logs every set-animation event and, per tick, the acting unit's posed reach. |

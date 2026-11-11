@@ -16,11 +16,7 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 2. Fidelity gaps (not modelled)
 
-* **P3 Model flag bit 0 (anim-sequence ops 19 / 1A) is not modelled.** `src/game/actor.cpp` skips ops 19 / 1A, and `Actor::compose` / `UnitPose` always build a joint's local rotation as one ZYX matrix of rest + clip angles. On the PS1 the joint matrix builder (`sys_model_build_joint_matrices`, 0x8009AD38) does that only with the model flag bit 0 clear; with it set and no head-turn callback it builds `RotMatrixZYX(rest) x RotMatrixZYX(clip)` (`docs/formats/model.md` 6.4). The two differ only when both rest and clip rotate a joint about more than one axis. To do: count the anim sequences that run op 1A (field `.seq` and battle anmseq), and if any shipped model is posed with the flag set, keep the flag per model and compose the product there; compare one such pose against a PS1 capture. Done when the flag is modelled (or the count shows no shipped use and the doc says so).
-
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
-
-* **P3 Versus side check: Serge in Lynx's body with Dopplegang (element 0xEE) in grid cell 2.** `battle::legal_versus_side` (`src/battle/versus.cpp`) takes a tech outside the cells the records give it only in the grid row of its level; a save written by OpenCross with Serge in Lynx's body (kind 0x31, 900 HP) holding 0xEE in cell 2 (row 0) is refused (`opencross ocbattle versus 1 --a <save copy>:<slot> --cap 1` prints `NOT LEGAL: ... a tech no player holds there (cell 2, element 0xEE)`). Every other party of 257 scratch saves passes, apart from forged 1023-HP records. No character record holds 0xEE outside Sprigg's grid. To do: find out whether the original game can put Dopplegang in Lynx-Serge's grid (an RDE save at that point of the story, or the field script that swaps his body and grid); if it can, widen the rule by what that script writes, and if not, find how the save got it. Done when the rule matches what the game writes and the doc (`docs/rules/versus.md` section 1.1) says so.
 
 
 ## 4. Code hygiene
