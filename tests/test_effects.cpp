@@ -958,6 +958,10 @@ void test_lens_flash() {
   CHECK(effects::lens_wash_channel(0x80, 160, 112) == 0x80);
   CHECK(effects::lens_wash_channel(0x80, 0x141, 112) == 0 && effects::lens_wash_channel(0x80, 160, -1) == 0);
   CHECK(effects::lens_ghosts_visible(0x140 + 100, 224, 100) && !effects::lens_ghosts_visible(0x140 + 101, 112, 100) && !effects::lens_ghosts_visible(160, 225, 100));
+  // A screen-locked (camera-relative) overlay is widened only when it spans the whole 320 px picture, and only in widescreen.
+  CHECK(effects::screen_lock_widen(-40, 360, 80) == (320.0f + 160.0f) / 320.0f);
+  CHECK(effects::screen_lock_widen(-40, 360, 0) == 1.0f);
+  CHECK(effects::screen_lock_widen(10, 360, 80) == 1.0f && effects::screen_lock_widen(-40, 300, 80) == 1.0f);
 }
 }  // namespace
 

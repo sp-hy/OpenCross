@@ -38,6 +38,16 @@ inline int lens_wash_channel(int colour, int sx, int sy) {
   return lens_flash_channel(colour, sx, sy);
 }
 
+// Widescreen: a camera-relative object (flag bit 24: placed on the projection plane, a screen-locked overlay such as jibaku.prd's gas
+// sheets) whose projected x span covers the PS1's whole 0..320 picture grows to cover the widescreen columns: it scales about the
+// projection centre by (320 + 2 extra) / 320 in x and y alike (the texture keeps its proportions; the extra height falls off screen), as
+// a full-width flat quad is widened (Letterbox::widen_full_width). 1 = leave it (4:3, or an overlay narrower than the picture keeps its
+// size and place).
+inline float screen_lock_widen(float x_lo, float x_hi, float extra) {
+  if (extra <= 0.0f || x_lo > 0.0f || x_hi < 320.0f) return 1.0f;
+  return (320.0f + 2.0f * extra) / 320.0f;
+}
+
 // The ghost sprites follow the light in OUR frame (user focal length): visible while it is inside the drawn picture, i.e. the 320 x 224 buffer
 // plus `extra` widescreen columns on each side (0 in 4:3).
 inline bool lens_ghosts_visible(int sx, int sy, int extra) { return sy >= 0 && sy <= 0xE0 && sx >= -extra && sx <= 0x140 + extra; }
