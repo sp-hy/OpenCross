@@ -43,7 +43,7 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
   if (platform::action_down(in, Action::Left)) mask |= 8;
   // Cancel (Cross) held = run.
   run_held = platform::action_down(in, Action::Cancel);
-  bool confirm = platform::action_pressed(in, Action::Ok);
+  bool confirm = platform::action_pressed(in, Action::Ok), cancel = platform::action_pressed(in, Action::Cancel);
   bool up = platform::action_pressed(in, Action::Up), down = platform::action_pressed(in, Action::Down);
   bool left = platform::action_pressed(in, Action::Left), right = platform::action_pressed(in, Action::Right);
   pad_analog = false;
@@ -56,6 +56,7 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
     // Pad: B (PS1 cross) = dash, X = key items, Y = menu, Start = pause.
     run_held = run_held || in.pad_down[SDL_GAMEPAD_BUTTON_EAST];
     confirm = confirm || in.pad_pressed[SDL_GAMEPAD_BUTTON_SOUTH];
+    cancel = cancel || in.pad_pressed[SDL_GAMEPAD_BUTTON_EAST] || in.pad_pressed[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
     // In the field the stick clicks act as the two functions: L3 confirms, R3 runs and cancels (after the Controller assignment).
     run_held = run_held || in.pad_down[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
     confirm = confirm || in.pad_pressed[SDL_GAMEPAD_BUTTON_LEFT_STICK];
@@ -106,7 +107,7 @@ FieldInput::Edges FieldInput::sample(const platform::Input& in, int ticks) {
   if (platform::action_down(in, Action::SelectRight) || pad(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER)) pad_word |= kKeyR1;
   key_latch |= static_cast<u16>(pad_word & ~0u);
   const bool select = (in.key_pressed[kSelectKey] || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_BACK])) && (input_mask & kKeySelect);
-  return {confirm, up, down, left, right, repeat, select};
+  return {confirm, up, down, left, right, repeat, select, cancel};
 }
 
 void FieldInput::apply_lock(Edges& edges, int ticks) {

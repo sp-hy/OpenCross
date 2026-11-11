@@ -127,10 +127,17 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
 }
 
 // ------------------------------------------------------------------------------------------------ host: input / catch-alls
-// Held keys filtered by the script's pad mask (FE 77).
-u16 FieldWorld::keys_held() { return input_.keys_held(); }
-u16 FieldWorld::key_latch() { return input_.latched_keys(); }
-void FieldWorld::clear_key_latch() { input_.clear_key_latch(); }
+// Held keys filtered by the script's pad mask (FE 77); none while the button panel is open.
+u16 FieldWorld::keys_held() { return panel_.is_open() ? u16{0} : input_.keys_held(); }
+u16 FieldWorld::key_latch() { return panel_.latch(input_.latched_keys()); }
+void FieldWorld::clear_key_latch() {
+  input_.clear_key_latch();
+  panel_.clear_latch();
+}
+void FieldWorld::button_panel() {
+  panel_.set_japanese(lang_ == import::Lang::Jp);
+  panel_.watch(input_.latched_keys());
+}
 
 // Jump predicates (true = jump for 95 / E5 / E6 / E8). The character bitmaps are 44-bit words: the recruited roster
 // (SaveSlot::recruited) and two saved bitmaps (unk_e1e0/e4 and unk_e1ec/f0; a New Game+ start ORs the
@@ -361,7 +368,7 @@ void FieldWorld::step_visuals() {
 
 void FieldWorld::step_watchdog() {
   const bool user_busy = menu_state_ != MenuState::None || handoff_.battle_state != BattleState::None || movie_state_ != MovieState::None ||
-                         modal_window_open() || trans_ != Trans::None || (vm_.mod_ui().shown && vm_.mod_ui().holds_controls);
+                         modal_window_open() || trans_ != Trans::None || (vm_.mod_ui().shown && vm_.mod_ui().holds_controls) || panel_.is_open();
   const bool locked = (vm_.global_flags() & script::gflag::kInputLock) != 0;
   watchdog_.step(user_busy, locked, tick_count_, view_.room_name(), vm_, [this](const script::FieldVM::StuckInfo& stuck) { return describe_stuck(stuck); });
 }
@@ -621,7 +628,7 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
   // ---- input snapshot
   FieldInput::Edges edges = input_.sample(in, ticks);
   input_.apply_lock(edges, ticks);
-  auto [confirm, up, down, left, right, repeat, select] = edges;
+  auto [confirm, up, down, left, right, repeat, select, cancel] = edges;
   // Select rotates the party order, once per frame before the ticks (not while the pad lock runs, e.g. after a room load).
   if (select) rotate_party();
   // Number entry: up / down step the cursor digit, left / right move the cursor; a held direction auto-repeats.
@@ -629,6 +636,12 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
   const int digit_step = stepping(up, 1) - stepping(down, 4), digit_shift = stepping(right, 2) - stepping(left, 8);
 
   if (debug_.auto_walk && debug_.auto_confirm > 0 && any_window_open() && tick_count_ % static_cast<u64>(debug_.auto_confirm) < static_cast<u64>(std::max(ticks, 1))) confirm = true;
+  // The open button panel takes the cursor keys, confirm and cancel; the script reads its picks (FE D1).
+  ButtonPanel::Keys panel_keys{up, down, left, right, confirm, cancel};
+  if (panel_.is_open()) {
+    confirm = false;
+    input_.clear_key_latch();
+  }
   if (modal_window_open()) {
     // The modal windows (all of them: a choice and the page-turn of a plain message share the confirm key).
     if (dialogue_.is_open() && !label_) {
@@ -671,10 +684,13 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     window.box->set_key_caps(key_caps_);
     window.box->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
   }
+  sync_panel_window();
+  if (panel_win_) panel_win_->update(static_cast<float>(ticks) * text_seconds_per_tick_, text_pace_);
 
   remote_labels_.clear();
   local_label_.reset();
   for (int i = 0; i < ticks && !room_lost_; ++i) {
+    panel_.tick(i == 0 ? panel_keys : ButtonPanel::Keys{}, input_.pad_word);
     sim_tick();
     // A key edge lasts one tick.
     input_.action_pending = false;

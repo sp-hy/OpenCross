@@ -33,11 +33,12 @@ struct FieldInput {
 
   // The menu-style presses of this frame (keyboard or pad). `repeat`: the held directions whose auto-repeat fires this frame (held_mask
   // bits): after a direction has been held past the repeat delay it steps again every tick.
-  // `select`: the PS1 Select press (pad Back / View, keyboard K), already masked by `input_mask`.
+  // `select`: the PS1 Select press (pad Back / View, keyboard K), already masked by `input_mask`. `cancel`: the Cross press.
   struct Edges {
     bool confirm = false, up = false, down = false, left = false, right = false;
     u32 repeat = 0;
     bool select = false;
+    bool cancel = false;
   };
 
   // Room change: no held direction, no pending action, the key mask open again, the pad locked for 24 field frames.

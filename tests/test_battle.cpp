@@ -2113,6 +2113,8 @@ void test_victory_and_growth() {
       state.slot.set_recruited(9, recruited);
       game::apply_battle_result(state, fixture.tables, battle);
       CHECK_EQ(state.slot.chars[9].atk, shared && recruited ? 22 : 9);
+      // The growth start moves with the stats, so the next fight does not raise the bench again.
+      if (shared && recruited) CHECK(state.slot.chars[9].hp_extra == battle.bench()[0].snap[0] && state.slot.chars[9].bonus[0] == battle.bench()[0].snap[1]);
     }
   }
   // star-up: KO'd member gets no gain and 1 HP but does receive next pending; bench (non-party) member gets its old pending

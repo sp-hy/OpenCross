@@ -22,6 +22,8 @@ add_library(oc_game STATIC
   field_watchdog.cpp
   field_battle_handoff.h
   field_battle_handoff.cpp
+  button_panel.h
+  button_panel.cpp
   field_input.h
   field_input.cpp
   field_world.h

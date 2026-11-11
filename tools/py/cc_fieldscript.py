@@ -382,6 +382,7 @@ FECD | V U | GET_RESERVE | C | Party swap: var[V] = the character in reserve slo
 FECE | U U U U U U U U | UI_OVAL | C | Mod UI element id: oval centred (x, y), radii (rx, ry), palette colour, flags (1 outline: a band `width` pixels wide inside the edge, 2 translucent, 4 pulse, 8 beat), width.
 FECF | U U U U U U U U | UI_IMAGE | C | Mod UI element id: image hd/modui/<n>.png stretched over x y w h, times palette colour, flags (2 translucent, 4 pulse, 8 beat), n.
 FED0 | U U U U | MODEL_SOURCE | C | Extension range. Room model n comes from elsewhere until the room changes: kind 0 character id's field model, 1 field model byte id, 2 room id's model k, 3 battle model id, 4 character id's battle model (n kind id k; a source naming no model: the room's own again).
+FED1 |  | BUTTON_PANEL | C | Extension range. RDE's button panel: Circle, Cross or Triangle opens it (read as Circle); while it is open the key latch holds only the button picked on its grid.
 """
 
 # ---------------------------------------------------------------------------

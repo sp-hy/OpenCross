@@ -126,6 +126,7 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
       if (window.box) window.box->set_art_mode(mode);
     for (auto& window : mod_ui_win_)
       if (window.box) window.box->set_art_mode(mode);
+    if (panel_win_) panel_win_->set_art_mode(mode);
   }
 }
 
@@ -196,6 +197,8 @@ void FieldWorld::set_language(import::Lang lang) {
     if (window.box) window.box->set_language(lang);
     window.element = -1;
   }
+  if (panel_win_) panel_win_->set_language(lang);
+  panel_shown_ = -1;
   close_windows();
 }
 
@@ -428,6 +431,7 @@ void FieldWorld::clear_room() {
   auto_teleported_ = false;
   follow_hold_ = false;
   input_.reset();
+  panel_ = ButtonPanel{};
   fog_ = {};
   // Default underwater tint; water_bias_ is layer 0's z at room load until op A4 sets it; sound registers get the footstep
   // volume / distance band defaults.

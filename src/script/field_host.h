@@ -473,6 +473,8 @@ class FieldHost {
   virtual u16 key_latch() = 0;
   // 54
   virtual void clear_key_latch() = 0;
+  // FE D1: the button panel (game::ButtonPanel) filters the key latch that the following 51 tests read.
+  virtual void button_panel() = 0;
 
   // ---- catch-alls (ops whose effect the VM does not model) ---------------------------------------------------------------
   virtual bool predicate(Predicate which, int arg) = 0;
@@ -612,6 +614,7 @@ class NullHost : public FieldHost {
   u16 keys_held() override;
   u16 key_latch() override;
   void clear_key_latch() override;
+  void button_panel() override;
   bool predicate(Predicate which, int arg) override;
   s32 query(Query which) override;
   void set_global(Global which, s32 value) override;

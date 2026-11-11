@@ -649,6 +649,48 @@ void FieldWorld::sync_mod_ui_windows() {
   }
 }
 
+// RDE's button panel: a framed window of four lines of two cells at a fixed place, the cursor's cell orange (the picked cell cyan while it
+// is held) and the choice hand before the cursor's cell. Shown whole at once, laid out again when the cursor or the lit cell changes.
+void FieldWorld::sync_panel_window() {
+  constexpr int kPanelX = 62, kPanelY = 40;
+  if (!panel_.is_open()) {
+    if (panel_win_ && panel_shown_ >= 0) panel_win_->close();
+    panel_shown_ = -1;
+    return;
+  }
+  if (!ctx_ || !files_ || !sprites_) return;
+  const auto [lit, colour] = panel_.lit_glyph();
+  const int state = (lang_ == import::Lang::Jp ? 1 << 24 : 0) | panel_.cursor_glyph() << 12 | lit << 4 | colour;
+  if (state == panel_shown_) return;
+  if (!panel_win_) {
+    auto box = std::make_unique<ui::DialogueDemo>();
+    if (!box->init(*ctx_, *files_, *sprites_, lang_)) return;
+    box->show_status(false);
+    box->set_mode(hd_ ? ui::ArtMode::Hd : ui::ArtMode::Original);
+    panel_win_ = std::move(box);
+  }
+  import::Message message;
+  int glyph = 0;
+  for (const char32_t ch : panel_.text()) {
+    if (ch == U'\n') {
+      message.tokens.push_back({import::TokKind::Newline});
+      continue;
+    }
+    if (glyph == lit) message.tokens.push_back({import::TokKind::Color, colour});
+    if (message.tokens.empty() || message.tokens.back().kind != import::TokKind::Text) message.tokens.push_back({import::TokKind::Text});
+    message.tokens.back().text += ch;
+    if (glyph == lit) message.tokens.push_back({import::TokKind::Color, 0});
+    ++glyph;
+  }
+  message.tokens.push_back({import::TokKind::End});
+  panel_win_->set_portrait(-1);
+  panel_win_->show_text(message);
+  panel_win_->set_ps1_window(kPanelX, kPanelY);
+  panel_win_->show_at_once();
+  panel_win_->set_glyph_cursor(panel_.cursor_glyph());
+  panel_shown_ = state;
+}
+
 // The veils and the captured frame after the PS1-resolution window pass, so that the windows sit under the fade as in the other order.
 void FieldWorld::draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh) {
   draw_veil_transition(sprites, vw, vh);
@@ -687,6 +729,7 @@ void FieldWorld::draw_windows(render::SpriteBatch& sprites, float vw, float vh, 
   draw_mod_ui(sprites, vw, vh, fit);
   for (auto& window : mod_ui_win_)
     if (window.box && window.element >= 0) window.box->draw(vw, vh, fit);
+  if (panel_win_ && panel_.is_open()) panel_win_->draw(vw, vh, fit);
   dialogue_.draw(vw, vh, fit);
   for (auto& window : extra_win_)
     if (window.box) window.box->draw(vw, vh, fit);

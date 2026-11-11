@@ -270,7 +270,7 @@ Why GameState::can_place(int character, int row, int col, int id) const {
   if (!cell_available(character, row, col)) return Why::Locked;
   const int occ = cell_element(character, row, col);
   if (occ && rules->el_fixed(occ)) return Why::Fixed;
-  if (!rules->is_element(id) || !eligible(character, id)) return Why::NotEligible;
+  if (!rules->elem(id) || !eligible(character, id)) return Why::NotEligible;
   if (!rules->window_ok(id, row)) return Why::Window;
   if (element_count(id) < 1) return Why::NoStock;
   if (occ && !element_fits(occ)) return Why::Full;

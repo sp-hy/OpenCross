@@ -36,6 +36,7 @@ constexpr int kPartySwap = 1;
 constexpr int kModUi = 2;
 constexpr int kPartyScreen = 3;
 constexpr int kModelSources = 5;
+constexpr int kButtonPanel = 6;
 
 std::span<const Feature> table();
 // nullptr when the build has no such feature. Sections compare case-insensitively.

@@ -156,6 +156,17 @@ void test_grid() {
   CHECK(game_state.can_remove(0, 0, 4) == Why::Fixed);
   game_state.slot.chars[0].grid[2] = 0;
 
+  // A tech held in the stock goes to its owner's grid like an element, then stays fixed.
+  fixture.el(0x85, 1, 0x08, 0x00, 0x01, 0x02);
+  fixture.rules.pg[0x85].raw.fill(0);
+  fixture.rules.pg[0x85].raw[0] = 0x01;
+  fixture.stock(0x85, 1);
+  CHECK(game_state.can_place(1, 0, 2, 0x85) == Why::NotEligible);
+  CHECK(game_state.place(0, 0, 4, 0x85) == Why::Ok);
+  CHECK(game_state.cell_element(0, 0, 4) == 0x85 && game_state.element_count(0x85) == 0);
+  CHECK(game_state.can_remove(0, 0, 4) == Why::Fixed);
+  game_state.slot.chars[0].grid[2] = 0;
+
   // Swap: the window of both elements is checked at the new rows.
   CHECK(game_state.place(0, 0, 2, 1) == Why::Ok);
   CHECK(game_state.place(0, 1, 2, 2) == Why::Ok);

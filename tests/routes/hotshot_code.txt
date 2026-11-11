@@ -1,0 +1,32 @@
+# kji_b01i: the code machine by the door (entity 11) reads the pad while the player stands on it. A Circle opens RDE's button panel
+# (read as a wrong Circle); the code is picked on the panel: L, Triangle, R (L1 from the second pick on), Triangle. It gives Hot Shot.
+0 wait 5
+- load kji_b01i 0
+- wait idle 1200
+- put 263 300
+- wait 10
+- tap confirm
+- wait 90
+- tap right
+- tap confirm
+- wait 90
+- screenshot hs_panel.png
+- art original
+- wait 2
+- screenshot hs_panel_classic.png
+- art hd
+- tap down
+- tap down
+- tap confirm
+- wait 90
+- tap right
+- tap down
+- tap confirm
+- wait 90
+- tap down
+- tap down
+- tap confirm
+- wait 90
+- skip 600
+- assert var e2 32768
+- quit
