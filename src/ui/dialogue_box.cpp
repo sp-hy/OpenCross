@@ -997,6 +997,7 @@ void DialogueDemo::close() {
 void DialogueDemo::set_label(bool on) { impl_->box.set_label(on); }
 void DialogueDemo::set_ps1_window(int x, int y) { impl_->box.set_ps1_window(x, y); }
 void DialogueDemo::skip_grow() { impl_->box.skip_grow(); }
+void DialogueDemo::show_at_once() { impl_->box.show_at_once(); }
 void DialogueDemo::show_status(bool on) { impl_->status_on = on; }
 import::Lang DialogueDemo::language() const { return impl_->lang; }
 
