@@ -141,7 +141,7 @@ void test_greeting() {
   client.update(1.5);
   CHECK(client.state() == MultiplayerClient::State::Connected);
   CHECK(client.pid() == "abcd");
-  CHECK(client.status_text() == "Connected as abcd");
+  CHECK(client.status_text() == "Connected");
   CHECK(!client.admin() && sent[0].get("admin").is_null());
   sent = wire.take();
   CHECK(sent.size() == 2);
@@ -188,7 +188,7 @@ void test_admin() {
   wire.receive(R"({"t":"welcome","pid":"abcd","admin":true})");
   wire.receive(R"({"t":"chat","scope":"global","pid":"abcd","name":"Serge","text":"hi","ts":1,"admin":true})");
   client.update(1.0);
-  CHECK(client.admin() && client.status_text() == "Connected as abcd (admin)");
+  CHECK(client.admin() && client.status_text() == "Connected");
   CHECK(client.chat(net::ChatScope::Global).size() == 1 && client.chat(net::ChatScope::Global)[0].admin);
 }
 

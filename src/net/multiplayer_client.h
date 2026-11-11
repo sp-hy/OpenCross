@@ -246,7 +246,7 @@ class MultiplayerClient {
   double now() const { return now_; }
 
   State state() const { return state_; }
-  // The status line: "Connected as <pid>", "Connecting...", "Could not reach the server; retrying in 8 s", the server's version message...
+  // The status line: "Connected", "Connecting...", "Could not reach the server; retrying in 8 s", the server's version message...
   std::string status_text() const;
   const std::string& pid() const { return pid_; }
   // The server accepted the admin token.
