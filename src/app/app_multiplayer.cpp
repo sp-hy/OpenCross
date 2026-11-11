@@ -160,6 +160,10 @@ void App::start_pvp_battle(const net::PvpStart& start) {
   const std::optional<std::string>& sent = mp_client->pvp_opponent_side();
   std::optional<battle::VersusSide> other = sent ? battle::decode_versus_side(*sent) : std::nullopt;
   if (sent && !other) log::warn("multiplayer: the other side of battle {} cannot be read ({} bytes)", start.battle, sent->size());
+  if (std::string why; other && !(tables_ok && battle::legal_versus_side(tables, *other, &why))) {
+    log::warn("multiplayer: the other side of battle {} is refused: {}", start.battle, why);
+    other.reset();
+  }
   game::BattleView::VersusSetup setup;
   setup.seed = start.seed;
   setup.local_side = start.first == mp_client->pid() ? 0 : 1;
@@ -202,7 +206,8 @@ void App::multiplayer_frame() {
   if (mp_version.empty()) mp_version = std::string(OC_VERSION_STRING) + "+" + platform::exe_build_id();
   if (!mp_battle_data && tables_ok) mp_battle_data = data::battle_data_fingerprint(tables);
   if (mp_battle_data) mp_client->set_battle_data(*mp_battle_data);
-  mp_client->start(settings.url(), {settings.player_id, name, local.star, mp_version, master ? settings.admin_token : std::string(), settings.challenges});
+  const std::string player_id = master ? settings.player_id : net::server_player_id(settings.player_id, settings.url());
+  mp_client->start(settings.url(), {player_id, name, local.star, mp_version, master ? settings.admin_token : std::string(), settings.challenges});
   mp_client->set_profile(name, local.star);
   mp_client->set_challenges(settings.challenges);
   mp_client->set_muted(std::set<std::string>(settings.muted.begin(), settings.muted.end()));

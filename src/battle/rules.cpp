@@ -3,13 +3,28 @@
 #include "data/tables.h"
 
 #include <algorithm>
+#include <limits>
 
 namespace oc::battle {
 
+namespace {
+
+// More terms than any unit's stats give: a larger count is cut to it, so no stat makes a sum run on.
+constexpr int kMaxRollTerms = 0xFFFF;
+
+int roll_terms(int count) { return std::clamp(count, -1, kMaxRollTerms); }
+
+int to_int(long long value) {
+  return static_cast<int>(std::clamp<long long>(value, std::numeric_limits<int>::min(), std::numeric_limits<int>::max()));
+}
+
+}  // namespace
+
 int sum_rolls(Rng& rng, int count, int power, int variance) {
-  int total = 0;
-  for (int i = 0; i <= count; ++i) total += power * 100 - power * rng.rnd(0, variance);
-  return total;
+  long long total = 0;
+  const long long full = static_cast<long long>(power) * 100;
+  for (int i = 0; i <= roll_terms(count); ++i) total += full - static_cast<long long>(power) * rng.rnd(0, variance);
+  return to_int(total);
 }
 
 // ------------------------------------------------------------------------------------------------ colours
@@ -186,8 +201,9 @@ DamageOut element_damage(Rng& rng, const ElementIn& in) {
 
 int heal_amount(Rng& rng, int mag, int power, int slot_mille) {
   long long sum = 0;
-  for (int i = 0; i <= mag + 1; ++i) sum += power * 100 - rng.rnd(0, power);
-  const int base = std::max(1, static_cast<int>(sum / 400));
+  const int terms = roll_terms(mag >= kMaxRollTerms ? kMaxRollTerms : mag + 1);
+  for (int i = 0; i <= terms; ++i) sum += static_cast<long long>(power) * 100 - rng.rnd(0, power);
+  const int base = std::max(1, to_int(sum / 400));
   const long long heal = static_cast<long long>(base) * slot_mille / 1000;
   return static_cast<int>(std::min<long long>(heal, 999));
 }

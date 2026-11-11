@@ -1,6 +1,7 @@
 // The versus battle link over scripted transports and a hand-driven clock: the client's side exchange, paced steps, relay numbers,
 // absence and resume, and game::NetworkVersusLink between two games through a relay that numbers messages as the server does: a whole
-// battle in step, the order check, a state check that differs, a resume after a dropped connection, the forfeits and the silence limit.
+// battle in step, the order check, a state check that differs, a resume after a dropped connection, the forfeits, the silence limit and a
+// flood of commands.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -445,6 +446,32 @@ void test_forfeits() {
     player.client.stop();
     CHECK(game.link.status() == game::VersusLink::Status::Closed);
   }
+  // A message that moves nothing on (a check of a command this game never sent) does not stop the silence count.
+  {
+    Player player("pa00000000000000", "pb00000000000000", false);
+    Game game(player, 1);
+    battle::Command cmd;
+    player.step(1.0);
+    CHECK(!game.link.poll(game.battle, cmd));
+    player.idle(game::NetworkVersusLink::kSilenceLimit - 10.0);
+    player.wire.receive(std::format(R"({{"t":"pvp_hash","battle":"{}","seq":999,"hash":"0000000000000000","n":1}})", kBattle));
+    player.step(0.0);
+    CHECK(!game.link.poll(game.battle, cmd) && game.link.status() == game::VersusLink::Status::Open);
+    player.idle(10.0);
+    CHECK(!game.link.poll(game.battle, cmd) && game.link.status() == game::VersusLink::Status::Conceded);
+  }
+}
+
+// More of the other game's commands waiting than the link keeps ends it with no result.
+void test_command_flood() {
+  Player player("pa00000000000000", "pb00000000000000", true);
+  Game game(player, 0);
+  for (size_t i = 1; i <= game::NetworkVersusLink::kCommandKeep + 1; ++i)
+    player.wire.receive(std::format(R"({{"t":"pvp_cmd","battle":"{}","seq":{},"cmd":"5 3 -1 -1 -1 0 -1","hash":"0000000000000000","n":{}}})", kBattle, i, i));
+  player.step(0.0);
+  battle::Command cmd;
+  CHECK(!game.link.poll(game.battle, cmd));
+  CHECK(game.link.status() == game::VersusLink::Status::Closed);
 }
 
 }  // namespace
@@ -457,6 +484,7 @@ int main() {
   test_desync_and_order();
   test_resume_in_battle();
   test_forfeits();
+  test_command_flood();
   if (failures) std::printf("%d failure(s)\n", failures);
   else std::printf("versus link: all passed\n");
   return failures ? 1 : 0;

@@ -1,8 +1,9 @@
-// The versus side exchange format (one format byte, then the stars, the pool and each member's fields in a fixed order), the
-// battlefield and carrier scene picks, and the random legal player.
+// The versus side exchange format (one format byte, then the stars, the pool and each member's fields in a fixed order), the check that
+// a received side is one a real game could send, the battlefield and carrier scene picks, and the random legal player.
 #include "battle/versus.h"
 
 #include <algorithm>
+#include <format>
 #include <limits>
 
 namespace oc::battle {
@@ -166,7 +167,196 @@ void read_member(Reader& in, PartyMember& member) {
   read_equip(in, member.eq);
 }
 
+// The save's characters are ids 0 to Pip's.
+constexpr int kLastPlayable = kPipCharId;
+// What a record holds after any fight: max HP 1 to 999, the other stats 0 to 127, the growth words likewise.
+constexpr int kMaxHp = 999, kMaxStat = 127;
+// A record's kind byte: the playable bodies and the party override slots end here.
+constexpr int kLastBody = 0x3E;
+constexpr int kFirstTech = 0x80;
+constexpr size_t kMaxStackCopies = 5;
+constexpr int kItemWeapon = 0, kItemArmour = 1, kItemAccessory = 2;
+
+// What the records allow one character, in every record set (some techs are only in the later sets): its member, the grid of the body it
+// wears (Serge in Lynx's body holds Lynx's techs), and for Pip every form's base stats, Lv 99 targets and growth column.
+struct RecordValues {
+  std::vector<PartyMember> members;
+  // The members and the body's own records: the grids whose cells and techs the member may hold.
+  std::vector<PartyMember> grids;
+  std::vector<std::array<int, 7>> bases, lv99s;
+  std::vector<int> growth_cols;
+};
+
+template <class T>
+bool one_of(const std::vector<T>& values, const T& value) {
+  return std::find(values.begin(), values.end(), value) != values.end();
+}
+
+RecordValues record_values(const data::GameTables& tables, int char_id, int kind) {
+  RecordValues out;
+  for (const auto& [set, records] : tables.char_sets) {
+    const PartyMember member = make_party_member(tables, char_id, 0, set);
+    if (kind >= 0 && kind < data::kNumChars && kind != char_id) out.grids.push_back(make_party_member(tables, kind, 0, set));
+    out.bases.push_back(member.base);
+    out.lv99s.push_back(member.lv99);
+    out.growth_cols.push_back(member.growth_col);
+    out.grids.push_back(member);
+    out.members.push_back(member);
+    if (char_id != kPipCharId) continue;
+    for (int form = 0x2B; form <= 0x30; ++form) {
+      const data::StatRec& rec = records.rec[static_cast<size_t>(form)];
+      out.bases.push_back({rec.max_hp(), rec.atk(), rec.def(), rec.hit(), rec.evd(), rec.mag(), rec.mdef()});
+      out.lv99s.push_back(lv99_targets(tables, form, set));
+      out.growth_cols.push_back(kPipGrowthCol[static_cast<size_t>(form - 0x2B)]);
+    }
+  }
+  return out;
+}
+
+// Well-formed UTF-8 without control characters (C0, DEL, C1).
+bool clean_text(std::string_view text) {
+  size_t pos = 0;
+  while (pos < text.size()) {
+    const u8 lead = static_cast<u8>(text[pos]);
+    int extra = 0;
+    u32 point = lead;
+    if (lead >= 0xF0 && lead <= 0xF4) extra = 3, point = lead & 0x07;
+    else if (lead >= 0xE0) extra = lead <= 0xEF ? 2 : -1, point = lead & 0x0F;
+    else if (lead >= 0xC2) extra = 1, point = lead & 0x1F;
+    else if (lead >= 0x80) extra = -1;
+    if (extra < 0 || text.size() - pos <= static_cast<size_t>(extra)) return false;
+    for (int k = 1; k <= extra; ++k) {
+      const u8 next = static_cast<u8>(text[pos + static_cast<size_t>(k)]);
+      if ((next & 0xC0) != 0x80) return false;
+      point = point << 6 | (next & 0x3Fu);
+    }
+    const u32 shortest = extra == 3 ? 0x10000 : extra == 2 ? 0x800 : extra == 1 ? 0x80 : 0;
+    if (point < shortest || point > 0x10FFFF || (point >= 0xD800 && point < 0xE000)) return false;
+    if (point < 0x20 || (point >= 0x7F && point < 0xA0)) return false;
+    pos += static_cast<size_t>(extra) + 1;
+  }
+  return true;
+}
+
+// An equipment slot holds nothing (0), an item of that kind the character may equip, or the record's own item.
+bool item_fits(const data::GameTables& tables, int item_id, int kind, int char_id, const std::vector<int>& own) {
+  if (item_id == 0 || one_of(own, item_id)) return true;
+  if (tables.item_info.empty()) return tables.gear_rec(item_id) != nullptr;
+  const data::ItemInfo* info = tables.item(item_id);
+  return info && info->kind() == kind && info->can_equip(char_id);
+}
+
+// The gear totals are those of the equipped items: the weapon and accessories the member names, and some armour it may wear.
+bool equip_fits(const data::GameTables& tables, const PartyMember& member) {
+  std::vector<int> own_weapons, own_armours, own_accessories;
+  for (const auto& [set, records] : tables.char_sets) {
+    const data::StatRec& rec = records.rec[static_cast<size_t>(member.char_id)];
+    own_weapons.push_back(rec.weapon());
+    own_armours.push_back(rec.armour());
+    for (int slot = 0; slot < 3; ++slot) own_accessories.push_back(rec.accessory(slot));
+  }
+  if (!item_fits(tables, member.eq.weapon_id, kItemWeapon, member.char_id, own_weapons)) return false;
+  for (const u16 accessory : member.eq.acc)
+    if (!item_fits(tables, accessory, kItemAccessory, member.char_id, own_accessories)) return false;
+  const int items = std::max(static_cast<int>(tables.gear.size()), static_cast<int>(tables.item_info.size()));
+  for (int armour = 0; armour < std::max(items, 1); ++armour)
+    if (item_fits(tables, armour, kItemArmour, member.char_id, own_armours) && make_equip(tables, member.eq.weapon_id, armour, member.eq.acc) == member.eq)
+      return true;
+  return false;
+}
+
+// A player's tech (an element past the ordinary ones that the element table marks fixed to its cell; the other side's elements are not)
+// in the grid row of its level, where a tech the story teaches or swaps (a weapon, a body) goes.
+bool player_tech_at(const data::GameTables& tables, int row, int id) {
+  if (id < kFirstTech || static_cast<size_t>(id) >= tables.elements.size()) return false;
+  const data::ElemRec& tech = tables.elements[static_cast<size_t>(id)];
+  return (tech.raw[1] & 0x02) && tech.level() == row + 1;
+}
+// A grid cell holds nothing, the element a record puts there (the starting kit, its techs; Pip's tech cells any of his techs), a player's
+// tech in the row of its level, or an element a player may move: an element below the techs, not one fixed to its own cell, in its
+// placement window, of the member's colour when only that colour may hold it. Consumable stacks hold up to 5 copies.
+std::string cell_problem(const data::GameTables& tables, const PartyMember& member, const RecordValues& records, size_t cell) {
+  const int id = member.cells[cell] & 0x3FFF;
+  const auto at = [&](const char* problem) { return std::format("{} (cell {}, element 0x{:X})", problem, cell, id); };
+  if (id == 0) return member.qty[cell] != 0 || member.stack[cell] ? at("an empty cell holds copies") : std::string();
+  bool exists = false, own = false;
+  for (const PartyMember& record : records.grids) {
+    exists = exists || record.cells[cell] != 0;
+    own = own || (record.cells[cell] & 0x3FFF) == id;
+  }
+  if (!exists) return at("an element in a cell the grid does not have");
+  const int row = static_cast<int>(cell) / data::kGridCols;
+  const bool pip_cell = std::find(kPipTechCells.begin(), kPipTechCells.end(), static_cast<int>(cell)) != kPipTechCells.end();
+  const bool record_placed = own || (member.char_id == kPipCharId && pip_cell && pip_tech(id));
+  if (!record_placed && id >= kFirstTech && !player_tech_at(tables, row, id)) return at("a tech no player holds there");
+  if (!record_placed && id < kFirstTech) {
+    if (static_cast<size_t>(id) >= tables.elements.size()) return at("an element no player may place");
+    const data::ElemRec& element = tables.elements[static_cast<size_t>(id)];
+    if (element.raw[1] & 0x02) return at("a fixed element outside its cell");
+    const int level = element.level(), above = element.raw[0x12] >> 4, below = element.raw[0x12] & 15;
+    if (row + 1 < level - above || row + 1 > level + below) return at("an element outside its placement window");
+    if ((element.raw[3] & 0x80) && element.colour_bit() != member.innate) return at("an element of another colour");
+  }
+  if (member.stack[cell]) {
+    const bool stacks = static_cast<size_t>(id) < tables.elements.size() && (tables.elements[static_cast<size_t>(id)].flags0() & 0x10);
+    if (!stacks) return at("a stack of an element that does not stack");
+    if (member.qty[cell] > kMaxStackCopies) return at("a stack of more than 5 copies");
+  } else if (member.qty[cell] != 0) {
+    return at("copies in a cell that is no stack");
+  }
+  return {};
+}
+
+std::string member_problem(const data::GameTables& tables, const PartyMember& member) {
+  if (member.char_id < 0 || member.char_id > kLastPlayable) return "not a playable character";
+  if (!clean_text(member.name) || !clean_text(member.own_name)) return "a name with control characters";
+  const RecordValues records = record_values(tables, member.char_id, member.kind);
+  if (records.members.empty()) return "no character records";
+  const bool pip = member.char_id == kPipCharId;
+  if (member.kind != -1 && (member.kind < 0 || member.kind > kLastBody || pip_form(member.kind) != pip)) return "a body the character cannot have";
+  if (member.evolved) return "a form change before the battle";
+  const auto record_constant = [&](auto field) {
+    return std::any_of(records.members.begin(), records.members.end(), [&](const PartyMember& record) { return field(record) == field(member); });
+  };
+  if (!record_constant([](const PartyMember& entry) { return entry.dur; }) || !record_constant([](const PartyMember& entry) { return entry.rate; }) ||
+      !record_constant([](const PartyMember& entry) { return entry.hit_med; }) ||
+      !record_constant([](const PartyMember& entry) { return entry.hit_heavy; }))
+    return "record constants that are not the character's";
+  if (!one_of(records.growth_cols, member.growth_col)) return "a growth column that is not the character's";
+  if (data::colour_index_of_bit(member.innate) < 0) return "an innate colour that is no colour";
+  if (!one_of(records.bases, member.base) || !one_of(records.lv99s, member.lv99)) return "a growth record that is not the character's";
+  for (size_t k = 0; k < 7; ++k) {
+    const int cap = k == 0 ? kMaxHp : kMaxStat;
+    if (member.stat[k] < (k == 0 ? 1 : 0) || member.stat[k] > cap) return "a stat past the record limits";
+    if (member.snap[k] < 0 || member.snap[k] > cap || member.pending[k] < -cap || member.pending[k] > cap) return "growth words past the record limits";
+  }
+  if (member.hp < 0 || member.hp > member.stat[0]) return "HP past max HP";
+  if (member.lo_persist & ~st::kPersist) return "a status a record does not keep";
+  if (!equip_fits(tables, member)) return "gear that is not the equipped items'";
+  for (size_t cell = 0; cell < data::kGridCells; ++cell)
+    if (std::string problem = cell_problem(tables, member, records, cell); !problem.empty()) return problem;
+  return {};
+}
+
 }  // namespace
+
+bool legal_versus_side(const data::GameTables& tables, const VersusSide& side, std::string* why) {
+  const auto no = [&](const std::string& reason) {
+    if (why) *why = reason;
+    return false;
+  };
+  if (side.party.empty() || side.party.size() > kPcSlots) return no("not 1 to 3 characters");
+  for (size_t i = 0; i < side.party.size(); ++i) {
+    for (size_t k = 0; k < i; ++k)
+      if (side.party[k].char_id == side.party[i].char_id) return no("a character twice");
+    if (const std::string problem = member_problem(tables, side.party[i]); !problem.empty()) return no(std::format("member {}: {}", i, problem));
+  }
+  const int last_star = tables.growth.empty() ? 0 : static_cast<int>(tables.growth.size()) - 1;
+  if (side.stars < 0 || side.stars > last_star) return no("more stars than the game has");
+  for (size_t slot = kDoppleTable.size(); slot < side.dopple.size() * 16; ++slot)
+    if (side.dopple[slot >> 4] >> (slot & 15) & 1u) return no(std::format("a creature the pool cannot hold (slot {})", slot));
+  return true;
+}
 
 std::string encode_versus_side(const VersusSide& side) {
   Writer out;

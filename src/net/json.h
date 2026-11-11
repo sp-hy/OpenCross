@@ -75,5 +75,9 @@ std::string to_json(const Json& value);
 
 // `text` cut to at most `max_points` code points.
 std::string utf8_truncate(std::string_view text, size_t max_points);
+// Text from a server as the chat, labels and popups show it: control characters, bidirectional overrides and isolates, zero-width
+// characters, line / paragraph separators and noncharacters removed, invalid UTF-8 replaced with U+FFFD, white space at the ends
+// trimmed, cut to `max_points` code points.
+std::string display_text(std::string_view text, size_t max_points);
 
 }  // namespace oc::net

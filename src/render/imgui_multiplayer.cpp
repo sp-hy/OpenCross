@@ -47,7 +47,8 @@ ImVec4 status_colour(MultiplayerClient::State state) {
   switch (state) {
     case MultiplayerClient::State::Connected: return ImVec4(0.55f, 0.85f, 0.55f, 1.0f);
     case MultiplayerClient::State::Banned:
-    case MultiplayerClient::State::VersionTooOld: return ImVec4(0.95f, 0.55f, 0.45f, 1.0f);
+    case MultiplayerClient::State::VersionTooOld:
+    case MultiplayerClient::State::BadAddress: return ImVec4(0.95f, 0.55f, 0.45f, 1.0f);
     default: return ImVec4(0.92f, 0.82f, 0.50f, 1.0f);
   }
 }

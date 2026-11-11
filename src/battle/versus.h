@@ -19,6 +19,10 @@ inline constexpr u8 kVersusSideFormat = 1;
 std::string encode_versus_side(const VersusSide& side);
 // Nothing on a wrong format byte, a truncated or overlong string, or a value out of its field's range.
 std::optional<VersusSide> decode_versus_side(std::string_view bytes);
+// A side a real game could have sent: 1 to 3 different playable characters whose record constants, gear totals and grids are their
+// records', items and elements they may hold, stats within the record limits, and stars and a pool the game can give. False with the first
+// reason in `why` otherwise. The other game's side is checked before a battle is built from it.
+bool legal_versus_side(const data::GameTables& tables, const VersusSide& side, std::string* why = nullptr);
 
 // The stage (btbgdat row) of a versus battle: the backgrounds of the ordinary scenes (no boss flag, at least one enemy group, background
 // below 100), sorted and without repeats, one of them picked by a generator seeded from the battle seed. -1 when there is none.

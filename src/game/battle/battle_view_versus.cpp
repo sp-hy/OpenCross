@@ -172,6 +172,8 @@ bool BattleView::start_versus_rules(const VersusSetup& setup) {
   versus_seq_ = 0;
   versus_focus_ = versus_turn_seen_ = -1;
   versus_turn_ticks_ = versus_idle_ = 0;
+  versus_other_turn_seen_ = versus_acting_seen_ = -1;
+  versus_other_ticks_ = versus_other_wall_ = 0;
   versus_held_.reset();
   versus_auto_held_.reset();
   versus_auto_.reset();
@@ -208,23 +210,48 @@ void BattleView::versus_pump(int ticks, bool idle) {
     }
   }
   const int turn = battle_->turn_side();
+  const int acting = battle_->acting_side();
+  const bool local = acting == versus_side_;
   if (turn != versus_turn_seen_) {
     versus_turn_seen_ = turn;
     versus_turn_ticks_ = 0;
     versus_run_ask_ = false;
     versus_focus_ = -1;
   }
+  if (turn != versus_other_turn_seen_ || acting != versus_acting_seen_) {
+    versus_other_turn_seen_ = turn;
+    versus_acting_seen_ = acting;
+    versus_other_ticks_ = versus_other_wall_ = 0;
+  }
+  // The other side's time is kept here too: past its own clock and a network allowance, or past the cap on a whole turn shown, it has
+  // conceded. A player known to be out of reach is timed by the server's away time instead.
+  if (!local && versus_link_ && !versus_link_->away()) {
+    versus_other_wall_ += ticks;
+    if (idle) versus_other_ticks_ += ticks;
+    if (versus_other_ticks_ >= kVersusTurnTicks + kVersusOtherGraceTicks || versus_other_wall_ >= kVersusOtherTurnCapTicks) {
+      log::warn("battle: versus: side {} overran its turn after command {}: it concedes", acting == 0 ? 'A' : 'B', versus_seq_);
+      battle_->concede(acting);
+      collect_events();
+      return;
+    }
+  }
   versus_idle_ = idle ? versus_idle_ + ticks : 0;
   if (!idle) return;
-  const int acting = battle_->acting_side();
-  const bool local = acting == versus_side_;
   if (local && (versus_turn_ticks_ += ticks) >= kVersusTurnTicks) {
+    // A Dopplegang pick still open keeps the caster's own form, which closes it; the turn then ends if it is still this side's.
+    if (battle_->form_owed() >= 0) {
+      battle::Command keep;
+      keep.kind = battle::Command::Kind::Form;
+      keep.actor = battle_->form_owed();
+      keep.form = -1;
+      versus_apply(keep, true);
+    }
     battle::Command end;
     end.kind = battle::Command::Kind::EndTurn;
     end.actor = battle::side_first(versus_side_);
     end.timeout = true;
     log::info("battle: versus turn of side {} timed out", versus_side_ == 0 ? 'A' : 'B');
-    versus_apply(end, true);
+    if (battle_->turn_side() == versus_side_) versus_apply(end, true);
     versus_run_ask_ = false;
     hdr_on_ = false;
     if (engaged_) begin_disengage();
@@ -252,6 +279,13 @@ void BattleView::versus_pump(int ticks, bool idle) {
       break;
     }
     std::string why;
+    // The other game commands only its own characters.
+    if (!local && battle::side_of(cmd.actor) == versus_side_) {
+      log::warn("battle: versus command of side {} names a character of this side after command {}", acting == 0 ? 'A' : 'B', versus_seq_);
+      versus_result_ = VersusResult::Void;
+      begin_finish();
+      return;
+    }
     if (!versus_apply(cmd, local, &why)) {
       log::warn("battle: versus command of side {} refused after command {}: {}", acting == 0 ? 'A' : 'B', versus_seq_, why);
       // Both games apply the same commands: one this game refuses means they are out of step.

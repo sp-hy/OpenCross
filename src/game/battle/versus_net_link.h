@@ -30,6 +30,8 @@ class NetworkVersusLink final : public VersusLink {
   static constexpr double kSelfGrace = 5.0;
   // State hashes of this game's own commands kept for the other game's check.
   static constexpr size_t kHashKeep = 4096;
+  // The other game's commands waiting to be applied; more than this ends the link.
+  static constexpr size_t kCommandKeep = 1024;
 
   // `client` holds the battle (pvp_battle) and must outlive the link; `side` is the side this game plays (0 = A).
   NetworkVersusLink(net::MultiplayerClient& client, int side);
@@ -53,7 +55,8 @@ class NetworkVersusLink final : public VersusLink {
   // The other game's hash sent with the command poll() handed out last.
   std::optional<net::PvpStep> expected_;
   u32 applied_ = 0;
-  double waiting_since_ = -1.0;
+  // When this game began waiting for the other's command, and when the other game last moved the battle on.
+  double waiting_since_ = -1.0, progress_at_ = -1.0;
   bool desync_ = false, broken_ = false, silent_ = false;
 };
 

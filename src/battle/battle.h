@@ -55,6 +55,7 @@ struct Equip {
   // Sum of the signed +4 bytes of the flag-0x80 accessories, added to the wearer's duration stat when a status timer starts.
   int dur_mod = 0;
   std::vector<int> hp_pct;
+  bool operator==(const Equip&) const = default;
 };
 // Builds the totals from item ids (weapon, armour, 3 accessories).
 Equip make_equip(const data::GameTables& tables, int weapon, int armour, const std::array<u16, 3>& acc);

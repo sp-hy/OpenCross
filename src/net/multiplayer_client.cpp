@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <format>
 #include <iterator>
+#include <limits>
 #include <random>
 
 #include "core/log.h"
@@ -60,7 +61,7 @@ PartyCard read_card(const Json& value, size_t name_len) {
     if (!entry.is_object()) continue;
     CardMember member;
     member.char_id = clamped(entry, "char", 0, 255);
-    member.name = utf8_truncate(entry.string_of("name"), name_len);
+    member.name = display_text(entry.string_of("name"), name_len);
     member.hp = clamped(entry, "hp", 0, 9999);
     member.atk = clamped(entry, "atk", 0, 999);
     member.def = clamped(entry, "def", 0, 999);
@@ -103,7 +104,7 @@ std::string end_notice(ChallengeEnd reason, const std::string& name, bool outgoi
 // A `models` array: up to 3 model bytes, leader first; missing slots are -1.
 PartyModels read_models(const Json& list) {
   PartyModels models{-1, -1, -1};
-  for (size_t i = 0; i < list.items().size() && i < models.size(); ++i) models[i] = static_cast<int>(list.items()[i].as_int(-1));
+  for (size_t i = 0; i < list.items().size() && i < models.size(); ++i) models[i] = static_cast<int>(std::clamp<std::int64_t>(list.items()[i].as_int(-1), -1, 255));
   return models;
 }
 
@@ -211,6 +212,10 @@ void MultiplayerClient::start(const std::string& url, const ClientIdentity& iden
   attempts_ = 0;
   last_error_.clear();
   server_message_.clear();
+  if (server_url_allowed(url_)) return;
+  state_ = State::BadAddress;
+  connect_pending_ = false;
+  log::warn("multiplayer: {} is not used: a ws:// address must be this machine", url_);
 }
 
 void MultiplayerClient::stop() {
@@ -283,7 +288,7 @@ void MultiplayerClient::send(const Json& message) {
 
 void MultiplayerClient::update(double now) {
   now_ = now;
-  if (state_ == State::Off || state_ == State::Banned || state_ == State::VersionTooOld) return;
+  if (state_ == State::Off || state_ == State::Banned || state_ == State::VersionTooOld || state_ == State::BadAddress) return;
   if (connect_pending_ || (state_ == State::Waiting && now_ >= retry_at_)) connect_now();
   TransportEvent event;
   while (transport_->poll(event)) {
@@ -491,7 +496,11 @@ bool MultiplayerClient::take_pvp_step(PvpStep& step) {
   return true;
 }
 
-double MultiplayerClient::pvp_opponent_away() const { return pvp_.away_until < 0 ? -1.0 : std::max(0.0, pvp_.away_until - now_); }
+double MultiplayerClient::pvp_opponent_away() const { return pvp_.away_until < 0 || now_ >= pvp_.away_until ? -1.0 : pvp_.away_until - now_; }
+
+double MultiplayerClient::pvp_opponent_back() const {
+  return std::max(pvp_.back_at, pvp_.away_until >= 0 && now_ >= pvp_.away_until ? pvp_.away_until : -1.0);
+}
 
 double MultiplayerClient::pvp_self_away() const { return pvp_.dropped_at < 0 ? -1.0 : now_ - pvp_.dropped_at; }
 
@@ -544,7 +553,6 @@ bool MultiplayerClient::take_relay_number(const Json& message) {
     return false;
   }
   pvp_.relay = number;
-  pvp_.last_heard = now_;
   return true;
 }
 
@@ -574,10 +582,9 @@ void MultiplayerClient::handle_pvp(const std::string& type, const Json& message)
     pvp_.inbox.push_back(std::move(step));
   } else if (type == "pvp_away") {
     pvp_.away_until = now_ + std::clamp(static_cast<double>(message.int_of("ms")) / 1000.0, 0.0, kAwayTime);
-    pvp_.last_heard = now_;
   } else if (type == "pvp_back") {
     pvp_.away_until = -1.0;
-    pvp_.last_heard = now_;
+    pvp_.back_at = now_;
   } else if (type == "pvp_gone") {
     const std::string& reason = message.string_of("reason");
     pvp_.gone = reason == "left" ? PvpGone::Left : reason == "aborted" ? PvpGone::Aborted : reason == "forfeit" ? PvpGone::Forfeit : PvpGone::Closed;
@@ -587,7 +594,6 @@ void MultiplayerClient::handle_pvp(const std::string& type, const Json& message)
     if (!pvp_.resuming || seq < 0 || seq > 0x7FFFFFFF) return;
     pvp_.resuming = false;
     pvp_.dropped_at = -1.0;
-    pvp_.last_heard = now_;
     resend_after_resume(static_cast<std::uint32_t>(seq), message["side"].as_bool());
     log::info("multiplayer: battle {} resumed at seq {}", pvp_battle_, seq);
   }
@@ -649,11 +655,12 @@ void MultiplayerClient::apply_pres(RemoteParty& party, const Json& pres) {
     }
   }
   LeaderPose& pose = party.pose;
-  pose.x = static_cast<int>(pres.int_of("x"));
-  pose.y = static_cast<int>(pres.int_of("y"));
-  pose.z = static_cast<int>(pres.int_of("z"));
-  pose.facing = static_cast<int>(pres.int_of("f"));
-  pose.clip = static_cast<int>(pres.int_of("c"));
+  constexpr int kLow = std::numeric_limits<int>::min(), kHigh = std::numeric_limits<int>::max();
+  pose.x = clamped(pres, "x", kLow, kHigh);
+  pose.y = clamped(pres, "y", kLow, kHigh);
+  pose.z = clamped(pres, "z", kLow, kHigh);
+  pose.facing = clamped(pres, "f", kLow, kHigh);
+  pose.clip = clamped(pres, "c", kLow, kHigh);
   pose.moving = pres.int_of("m") != 0;
   pose.state = static_cast<PresenceState>(std::clamp<std::int64_t>(pres.int_of("s"), 0, static_cast<int>(PresenceState::Typing)));
   party.has_pose = true;
@@ -670,8 +677,8 @@ void MultiplayerClient::handle_party_entry(const Json& entry) {
     party = &parties_.back();
     party->pid = pid;
   }
-  party->name = entry.string_of("name");
-  party->star = static_cast<int>(entry.int_of("star"));
+  party->name = display_text(entry.string_of("name"), static_cast<size_t>(limits_.name_len));
+  party->star = clamped(entry, "star", 0, 999);
   party->pvp = entry["pvp"].as_bool();
   party->models = read_models(entry["models"]);
   party_seq_.erase(pid);
@@ -704,10 +711,11 @@ void MultiplayerClient::handle_chat(const Json& message) {
   if (line.scope == ChatScope::Pm) {
     line.to = message.string_of("to");
     if (!valid_pid(line.to) || (line.pid != pid_ && line.to != pid_)) return;
-    line.to_name = message.string_of("to_name");
+    line.to_name = display_text(message.string_of("to_name"), static_cast<size_t>(limits_.name_len));
   }
-  line.name = message.string_of("name");
-  line.text = message.string_of("text");
+  line.name = display_text(message.string_of("name"), static_cast<size_t>(limits_.name_len));
+  line.text = display_text(message.string_of("text"), static_cast<size_t>(limits_.chat_len));
+  if (line.text.empty()) return;
   line.admin = message["admin"].as_bool();
   line.ts = message.int_of("ts");
   line.received = now_;
@@ -724,9 +732,9 @@ void MultiplayerClient::handle_challenge(const Json& message) {
   if (!free || incoming_ || outgoing_ || accepted_ || !pvp_battle_.empty() || pvp_start_) return reply(from, "busy");
   IncomingChallenge challenge;
   challenge.from = from;
-  challenge.name = utf8_truncate(message.string_of("name"), static_cast<size_t>(std::max(1, limits_.name_len)));
+  challenge.name = display_text(message.string_of("name"), static_cast<size_t>(limits_.name_len));
   challenge.star = clamped(message, "star", 0, 999);
-  challenge.card = read_card(message["card"], static_cast<size_t>(std::max(1, limits_.name_len)));
+  challenge.card = read_card(message["card"], static_cast<size_t>(limits_.name_len));
   const double seconds = static_cast<double>(std::clamp<std::int64_t>(message.int_of("expires"), 0, 60000)) / 1000.0;
   challenge.deadline = now_ + std::min(seconds, kMaxChallengeTime);
   log::info("multiplayer: challenge from {}", from);
@@ -766,9 +774,9 @@ void MultiplayerClient::handle_pvp_start(const Json& message) {
   start.seed = static_cast<std::uint32_t>(seed);
   start.first = first;
   start.opponent = opponent;
-  start.name = utf8_truncate(message.string_of("name"), static_cast<size_t>(std::max(1, limits_.name_len)));
+  start.name = display_text(message.string_of("name"), static_cast<size_t>(limits_.name_len));
   start.star = clamped(message, "star", 0, 999);
-  start.card = read_card(message["card"], static_cast<size_t>(std::max(1, limits_.name_len)));
+  start.card = read_card(message["card"], static_cast<size_t>(limits_.name_len));
   start.opening_stamina = clamped(message, "opening_stamina", 0, 70);
   start.own = sent_card_;
   outgoing_.reset();
@@ -781,7 +789,6 @@ void MultiplayerClient::handle_pvp_start(const Json& message) {
   }
   log::info("multiplayer: battle {} with {} starts, {} first", battle, opponent, first);
   pvp_ = {};
-  pvp_.last_heard = now_;
   pvp_start_ = std::move(start);
 }
 
@@ -792,9 +799,9 @@ void MultiplayerClient::handle(const Json& message) {
     pid_ = message.string_of("pid");
     admin_ = message["admin"].as_bool();
     const Json& limits = message["limits"];
-    limits_.chat_len = static_cast<int>(limits.int_of("chat_len", limits_.chat_len));
-    limits_.name_len = static_cast<int>(limits.int_of("name_len", limits_.name_len));
-    limits_.pres_hz = static_cast<int>(limits.int_of("pres_hz", limits_.pres_hz));
+    limits_.chat_len = static_cast<int>(std::clamp<std::int64_t>(limits.int_of("chat_len", limits_.chat_len), 1, kMaxChatLen));
+    limits_.name_len = static_cast<int>(std::clamp<std::int64_t>(limits.int_of("name_len", limits_.name_len), 1, kMaxNameLen));
+    limits_.pres_hz = static_cast<int>(std::clamp<std::int64_t>(limits.int_of("pres_hz", limits_.pres_hz), 1, kMaxPresHz));
     state_ = State::Connected;
     attempts_ = 0;
     last_error_.clear();
@@ -814,8 +821,8 @@ void MultiplayerClient::handle(const Json& message) {
     party_seq_.erase(pid);
   } else if (type == "profile") {
     if (RemoteParty* party = find_party(message.string_of("pid"))) {
-      party->name = message.string_of("name");
-      party->star = static_cast<int>(message.int_of("star"));
+      party->name = display_text(message.string_of("name"), static_cast<size_t>(limits_.name_len));
+      party->star = clamped(message, "star", 0, 999);
       party->pvp = message["pvp"].as_bool(party->pvp);
     }
   } else if (type == "party") {
@@ -823,7 +830,7 @@ void MultiplayerClient::handle(const Json& message) {
   } else if (type == "pres") {
     if (RemoteParty* party = find_party(message.string_of("pid"))) apply_pres(*party, message);
   } else if (type == "occupancy") {
-    occupancy_ = static_cast<int>(std::max<std::int64_t>(0, message.int_of("others")));
+    occupancy_ = clamped(message, "others", 0, 1 << 20);
   } else if (type == "chat") {
     handle_chat(message);
   } else if (type == "challenge") {
@@ -843,7 +850,7 @@ void MultiplayerClient::handle(const Json& message) {
     } else if (code == "version" || code == "banned") {
       const bool banned = code == "banned";
       state_ = banned ? State::Banned : State::VersionTooOld;
-      server_message_ = message.string_of("msg");
+      server_message_ = display_text(message.string_of("msg"), static_cast<size_t>(kMaxChatLen));
       log::warn("multiplayer: {} ({})", banned ? "banned by the server" : "the server needs a newer version", server_message_);
       transport_->close();
       parties_.clear();
@@ -866,6 +873,7 @@ std::string MultiplayerClient::status_text() const {
     case State::Waiting: return std::format("{}; retrying in {:.0f} s", last_error_, std::max(0.0, retry_at_ - now_));
     case State::Banned: return server_message_.empty() ? "Banned from this server" : "Banned from this server: " + server_message_;
     case State::VersionTooOld: return server_message_.empty() ? "This OpenCross version is too old for the server" : server_message_;
+    case State::BadAddress: return "A ws:// address must be this machine (localhost); use wss:// for a server elsewhere";
   }
   return {};
 }
@@ -896,6 +904,59 @@ bool valid_pid(std::string_view pid) {
 
 bool valid_player_id(std::string_view id) {
   return id.size() == 32 && std::all_of(id.begin(), id.end(), [](char letter) { return (letter >= '0' && letter <= '9') || (letter >= 'a' && letter <= 'f'); });
+}
+
+namespace {
+
+// The host and port of a ws:// or wss:// address, lower case; empty for any other address.
+std::string server_host(std::string_view url) {
+  if (url.starts_with("wss://")) url.remove_prefix(6);
+  else if (url.starts_with("ws://")) url.remove_prefix(5);
+  else return {};
+  url = url.substr(0, url.find_first_of("/?#"));
+  if (const size_t at = url.rfind('@'); at != std::string_view::npos) url.remove_prefix(at + 1);
+  std::string host(url);
+  std::transform(host.begin(), host.end(), host.begin(), [](char letter) { return letter >= 'A' && letter <= 'Z' ? static_cast<char>(letter - 'A' + 'a') : letter; });
+  return host;
+}
+
+}  // namespace
+
+std::string server_player_id(std::string_view id, std::string_view url) {
+  const std::string host = server_host(url);
+  if (!valid_player_id(id) || host.empty()) return {};
+  std::string text = "opencross-server-id\n";
+  text += id;
+  text += '\n';
+  text += host;
+  unsigned char digest[32] = {};
+  bool hashed = false;
+#ifdef _WIN32
+  BCRYPT_ALG_HANDLE algorithm = nullptr;
+  if (BCRYPT_SUCCESS(BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0))) {
+    hashed = BCRYPT_SUCCESS(BCryptHash(algorithm, nullptr, 0, reinterpret_cast<PUCHAR>(text.data()), static_cast<ULONG>(text.size()), digest, sizeof(digest)));
+    BCryptCloseAlgorithmProvider(algorithm, 0);
+  }
+#endif
+  if (!hashed) return {};
+  static constexpr char kHex[] = "0123456789abcdef";
+  std::string out;
+  for (size_t i = 0; i < 16; ++i) {
+    out += kHex[digest[i] >> 4];
+    out += kHex[digest[i] & 0xF];
+  }
+  return out;
+}
+
+bool server_url_allowed(std::string_view url) {
+  if (url.starts_with("wss://")) return !server_host(url).empty();
+  if (!url.starts_with("ws://")) return false;
+  std::string host = server_host(url);
+  if (host.starts_with('[')) host = host.substr(1, host.find(']') == std::string::npos ? std::string::npos : host.find(']') - 1);
+  else host = host.substr(0, host.find(':'));
+  if (host == "localhost" || host == "::1") return true;
+  if (!host.starts_with("127.")) return false;
+  return std::all_of(host.begin(), host.end(), [](char letter) { return (letter >= '0' && letter <= '9') || letter == '.'; });
 }
 
 }  // namespace oc::net

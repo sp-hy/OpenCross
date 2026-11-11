@@ -129,6 +129,8 @@ class MultiplayerClient {
     // The server refused for good (banned, or the protocol is too old); no further attempts until start() again.
     Banned,
     VersionTooOld,
+    // The address may not be used (server_url_allowed); nothing is attempted until start() with another one.
+    BadAddress,
   };
 
   // Server limits from the welcome (defaults until then): chat and name lengths in code points, pres messages a second.
@@ -137,6 +139,11 @@ class MultiplayerClient {
     int name_len = 24;
     int pres_hz = 10;
   };
+
+  // The largest limits a server's welcome may set.
+  static constexpr int kMaxChatLen = 1000;
+  static constexpr int kMaxNameLen = 64;
+  static constexpr int kMaxPresHz = 30;
 
   // How many lines each scope keeps.
   static constexpr size_t kChatKeep = 200;
@@ -232,8 +239,8 @@ class MultiplayerClient {
   // during the battle (-1 while connected and resumed).
   double pvp_opponent_away() const;
   double pvp_self_away() const;
-  // When the last battle message of the opponent arrived (the client clock).
-  double pvp_last_heard() const { return pvp_.last_heard; }
+  // When the opponent was last reachable again (its pvp_back, or the end of its away time); -1 = never away.
+  double pvp_opponent_back() const;
   PvpGone pvp_gone() const { return pvp_.gone; }
   // The clock of the last update().
   double now() const { return now_; }
@@ -361,7 +368,7 @@ class MultiplayerClient {
     int window_sent = 0;
     // After a reconnect: nothing goes out until pvp_resumed.
     bool resuming = false;
-    double away_until = -1.0, dropped_at = -1.0, last_heard = 0.0;
+    double away_until = -1.0, dropped_at = -1.0, back_at = -1.0;
     PvpGone gone = PvpGone::None;
   };
   PvpLink pvp_;
@@ -371,6 +378,11 @@ class MultiplayerClient {
 std::string new_player_id();
 // `id` has the player id's form.
 bool valid_player_id(std::string_view id);
+// The id a server other than the Master is given: the SHA-256 of the player id and the server's host (and port), cut to the player id's
+// form, so a server learns nothing it could use to claim the player on another server. Empty when it cannot be made.
+std::string server_player_id(std::string_view id, std::string_view url);
+// A ws:// address must name this machine (localhost, 127.x.x.x or ::1); wss:// may name any host.
+bool server_url_allowed(std::string_view url);
 // A usable public player id from a server: 1 to 32 letters and digits (the protocol's are 16 hex digits). A pid with anything else, which
 // could break the ini line that stores the mutes, is dropped with its message.
 bool valid_pid(std::string_view pid);
