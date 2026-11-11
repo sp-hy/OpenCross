@@ -3,7 +3,8 @@
 // players in the room with their Message / Challenge / Mute buttons), the chat panel at the bottom left (T opens its input line, Enter
 // sends, Esc closes; room, global and private lines), the name labels over the remote party leaders, the player menu a click on a name
 // opens, the challenge popups (incoming with Accept / Decline, outgoing with Cancel) and the versus screen before a battle. The incoming
-// popup and the versus screen show the parties' face portraits, made into textures on first use.
+// popup and the versus screen show the parties' face portraits, the versus screen's backdrop their tall menu portraits; all made into
+// textures on first use.
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -11,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "net/multiplayer_client.h"
@@ -29,13 +31,15 @@ class MultiplayerUi {
   using CardSource = std::function<std::optional<net::PartyCard>()>;
   void set_card_source(CardSource source) { card_source_ = std::move(source); }
 
-  // A character's face portrait as ImGui draws it: the texture and the texture / sampler pair ImGui's renderer binds.
+  // A character's portrait as ImGui draws it: the texture and the texture / sampler pair ImGui's renderer binds.
   struct Face {
     Texture texture;
     SDL_GPUTextureSamplerBinding binding{};
   };
-  // Decodes a character id's face image; false when there is none (the screens then draw a letter in its place).
-  using FaceSource = std::function<bool(int char_id, DecodedImage& image)>;
+  // The square face (hd/face/<set>/NN_*.png), or the menu's tall strip (hd/menu/playtim/<set>/pNN.png) as one upright image.
+  enum class Art { Face, Strip };
+  // Decodes portrait `number`'s `art`; false when there is none (the screens then draw a letter in place of a face, nothing for a strip).
+  using FaceSource = std::function<bool(int number, Art art, DecodedImage& image)>;
   // The portraits are made on `ctx` when first drawn and kept until drop_faces(), so the MultiplayerUi must not outlive `ctx`.
   void set_face_source(GpuContext& ctx, FaceSource source) {
     gpu_ = &ctx;
@@ -125,8 +129,8 @@ class MultiplayerUi {
   std::string challenge_block(const net::MultiplayerClient& client, const platform::MultiplayerSettings& settings, const std::string& pid,
                               bool free) const;
   bool send_challenge(net::MultiplayerClient& client, const std::string& pid, const std::string& name);
-  // The portrait of `char_id`, made on first use; null when it has none.
-  const Face* face(int char_id);
+  // Portrait `number` (a CardMember::face) as `art`, made on first use; null when it has none.
+  const Face* face(int number, Art art = Art::Face);
   // A member's portrait in the square at (`x`, `y`) of `size` pixels, framed in the side's colour (`own`: the local player's).
   void draw_portrait(ImDrawList* dl, const net::CardMember& member, float x, float y, float size, bool own);
   // The incoming popup's body: the challenger's portraits, name and card, the time left, Accept / Decline and the pad hint. Returns 1
@@ -139,8 +143,8 @@ class MultiplayerUi {
   GpuContext* gpu_ = nullptr;
   FaceSource face_source_;
   Sampler face_sampler_;
-  // Per character id; null when it has no portrait.
-  std::map<int, std::unique_ptr<Face>> faces_;
+  // Per portrait number and art; null when it has none.
+  std::map<std::pair<int, Art>, std::unique_ptr<Face>> faces_;
   // The incoming challenge the time bar measures (its deadline) and the seconds it had when it arrived.
   double incoming_deadline_ = 0.0, incoming_span_ = 0.0;
   bool chat_open_ = false;

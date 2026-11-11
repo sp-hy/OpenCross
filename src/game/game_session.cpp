@@ -186,8 +186,9 @@ net::PartyCard party_card(const ui::GameState& gs, const std::vector<int>& party
     if (char_id < 0 || char_id >= save::kNumChars) continue;
     const ui::Stats stats = gs.stats(char_id);
     net::CardMember member;
-    member.char_id = char_id;
-    if (names.tables) member.name = utf8_from_u32(data::character_name(char_id, record_body(gs, char_id), data::NameContext::Menu, false, names));
+    const int body = record_body(gs, char_id);
+    member.face = data::menu_form(char_id, body);
+    if (names.tables) member.name = utf8_from_u32(data::character_name(char_id, body, data::NameContext::Menu, false, names));
     member.hp = std::min(stats.hp, kStatCap);
     member.atk = std::min(stats.atk, kStatCap);
     member.def = std::min(stats.def, kStatCap);
