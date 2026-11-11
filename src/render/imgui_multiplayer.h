@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "net/multiplayer_client.h"
@@ -58,6 +59,10 @@ class MultiplayerUi {
   // Opens the input line with a private target; clear_pm goes back to Room / Global.
   void open_pm(const std::string& pid, const std::string& name);
   bool pm_target() const { return !pm_to_.empty(); }
+  // "/r" or "/r text" (any case of r): the text after it, else none.
+  static std::optional<std::string_view> reply_text(std::string_view line);
+  // The newest private line another player sent this one, null = none.
+  static const net::ChatLine* last_pm_from(const net::MultiplayerClient& client);
   void clear_pm() { pm_to_.clear(); }
   // The chat panel of this frame (the input line while open, else the recent lines as [Multiplayer] Chat says). `now` is the client's clock.
   // A click on a name in the open panel opens the player menu, on a private line's name a reply.
