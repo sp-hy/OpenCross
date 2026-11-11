@@ -39,11 +39,9 @@ struct NegativeStrip {
   }
   void draw(std::vector<FxPrim>& out) const {
     if (remaining < 0) return;
-    for (int k = columns - 1; k >= 0; --k) {
-      FxPrim prim = rect_prim(static_cast<float>(k * col_w), 0, static_cast<float>((k + 1) * col_w), static_cast<float>(height), 255, 255, 255,
-                              kBlendInvert, 0);
-      out.push_back(prim);
-    }
+    // One quad over the columns' whole width (the same picture: the invert never overlaps itself), so the battle's draw widens it over
+    // the widescreen columns like the other full-width washes (Letterbox::widen_full_width only widens a quad spanning 0..320).
+    out.push_back(rect_prim(0, 0, static_cast<float>(columns * col_w), static_cast<float>(height), 255, 255, 255, kBlendInvert, 0));
   }
 };
 
