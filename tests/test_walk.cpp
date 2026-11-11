@@ -1,7 +1,7 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
 // by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, the screen ripple grid and the
 // frame echo's projection, the dialogue portrait side; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
-// the key-item range), the FE 2F reset and the seeded script RAND.
+// the key-item range), the FE 2F reset and the seeded script RAND; the button panel's rules (FE D1).
 #include <array>
 #include <cmath>
 #include <cstdio>
@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "game/actor.h"
+#include "game/button_panel.h"
 #include "game/field_world.h"
 #include "game/walk_mesh.h"
 #include "render/render_target.h"
@@ -638,7 +639,93 @@ void test_change_disc_with_pending_menu() {
 }
 }  // namespace
 
+// RDE's button panel: opened by Circle / Cross / Triangle (read as Circle), the picks it delivers until the script clears its latch (the
+// code L, Triangle, R, Triangle gives L1 Triangle L1 Triangle outside Japanese), the hold, Cross closing it without a key, the release
+// needed before those keys count again.
+void test_button_panel() {
+  using game::ButtonPanel;
+  constexpr u16 kL1 = ButtonPanel::kL1, kR1 = ButtonPanel::kR1, kTri = ButtonPanel::kTriangle, kCircle = ButtonPanel::kCircle,
+                kCross = ButtonPanel::kCross;
+  const auto hold = [](ButtonPanel& panel) {
+    for (int i = 0; i < ButtonPanel::kHoldTicks; ++i) panel.tick({}, 0);
+  };
+  const auto pick = [&](ButtonPanel& panel, ButtonPanel::Keys keys) {
+    panel.tick(keys, 0);
+    const u16 got = panel.latch(0);
+    panel.clear_latch();
+    hold(panel);
+    return got;
+  };
+  ButtonPanel panel;
+  panel.watch(kL1);
+  CHECK(!panel.is_open() && panel.latch(kL1) == kL1);
+  panel.watch(kTri);
+  CHECK(panel.is_open() && panel.latch(kTri) == kCircle);
+  panel.clear_latch();
+  CHECK(panel.latch(kTri | kL1) == 0);
+  panel.tick({.right = true}, 0);
+  CHECK(panel.cell_button(0, 1) == kL1 && panel.cell_button(1, 1) == kR1);
+  panel.tick({.confirm = true}, 0);
+  CHECK(panel.holding() && panel.lit_glyph().second == 2);
+  panel.tick({.down = true}, 0);
+  CHECK(panel.row() == 0 && panel.col() == 1);
+  CHECK(panel.latch(0) == kL1 && panel.latch(0) == kL1);
+  panel.clear_latch();
+  CHECK(panel.latch(0) == 0);
+  hold(panel);
+  CHECK(!panel.holding() && panel.row() == 0 && panel.col() == 0 && panel.lit_glyph().second == 6);
+  CHECK(panel.cell_button(0, 1) == kCircle && panel.cell_button(1, 1) == kL1);
+  panel.tick({.down = true}, 0);
+  panel.tick({.down = true}, 0);
+  CHECK(pick(panel, {.confirm = true}) == kTri);
+  panel.tick({.right = true}, 0);
+  panel.tick({.down = true}, 0);
+  CHECK(pick(panel, {.confirm = true}) == kL1);
+  panel.tick({.down = true}, 0);
+  panel.tick({.down = true}, 0);
+  panel.tick({.confirm = true}, 0);
+  CHECK(panel.is_open());
+  hold(panel);
+  // The fourth pick closes the panel after its hold; its button still waits for the script.
+  CHECK(!panel.is_open() && panel.latch(0) == kTri);
+  panel.clear_latch();
+  CHECK(panel.latch(kL1) == kL1);
+  // A pick waits for the script: a second confirm before the latch is cleared is not taken.
+  ButtonPanel waiting;
+  waiting.watch(kCircle);
+  waiting.clear_latch();
+  waiting.tick({.confirm = true}, 0);
+  hold(waiting);
+  waiting.tick({.down = true}, 0);
+  waiting.tick({.confirm = true}, 0);
+  CHECK(!waiting.holding() && waiting.latch(0) == kCircle);
+  // Japanese keeps L and R.
+  ButtonPanel jp;
+  jp.set_japanese(true);
+  jp.watch(kCircle);
+  jp.clear_latch();
+  pick(jp, {.confirm = true});
+  CHECK(jp.cell_button(0, 1) == kL1 && jp.cell_button(1, 1) == kR1);
+  CHECK(jp.text().size() == 4 * 10 + 3);
+  // Cross closes without a key; the held Cross neither reopens the panel nor reaches the script until it is released.
+  ButtonPanel cancel;
+  cancel.watch(kCircle);
+  cancel.clear_latch();
+  cancel.tick({.cancel = true}, kCross);
+  CHECK(!cancel.is_open());
+  cancel.watch(kCross);
+  CHECK(!cancel.is_open() && cancel.latch(kCross | kL1) == kL1);
+  cancel.tick({}, 0);
+  CHECK(cancel.latch(kCross) == kCross);
+  cancel.watch(kCross);
+  CHECK(cancel.is_open());
+  // The text: four lines of nine glyphs; the cursor stands on the first of the three spaces before its cell.
+  CHECK(cancel.text().size() == 4 * 9 + 3);
+  CHECK(cancel.cursor_glyph() == 0 && cancel.lit_glyph().first == 3);
+}
+
 int main() {
+  test_button_panel();
   test_field_reset();
   test_script_rand_seeded();
   test_change_disc_with_pending_menu();

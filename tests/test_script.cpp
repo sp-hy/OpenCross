@@ -1111,6 +1111,36 @@ void test_reserve_ops() {
   CHECK_EQ(vm.var(V(1)), 0xFF);
 }
 
+// FE D1: the host filters the key latch, and the 51 test after it reads what the host left there.
+class PanelHost : public KeyHost {
+ public:
+  int calls = 0;
+  void button_panel() override {
+    ++calls;
+    latch = 0x04;
+  }
+};
+
+void test_button_panel_op() {
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0xFE, 0xD1, 0});
+  const u16 test = script.here();
+  script.raw({0x51}).word(0x0004).word(0);
+  script.set(V(0), 1);
+  script.stop();
+  script.code[test + 3] = static_cast<u8>(script.here() & 0xFF);
+  script.code[test + 4] = static_cast<u8>(script.here() >> 8);
+  script.stop();
+  PanelHost host;
+  host.latch = 0x20;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(host.calls, 1);
+  CHECK_EQ(vm.var(V(0)), 1);
+  CHECK(vm.stats().unknown_ops.empty());
+}
+
 void test_mod_ui_ops() {
   // UI_CLEAR keeps the change counter, so an element placed after it never repeats a revision a window shows.
   {
@@ -1935,6 +1965,7 @@ int main() {
   test_opcode_table();
   test_extension_ops();
   test_mod_ui_ops();
+  test_button_panel_op();
   test_reserve_ops();
   test_model_source_op();
   test_entrance_table_unaligned();

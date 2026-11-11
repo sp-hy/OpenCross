@@ -59,6 +59,8 @@ constexpr float kBottomMargin = 36;
 
 // Script variable of the number entry ({input(n)}): read when the message opens, written while the entry takes input.
 constexpr int kDigitEntryVar = 0x18;
+// Wrap limit of engine-built text (DialogueDemo::show_text): wider than any window, so its lines break only where it says.
+constexpr float kUnwrapped = 4000.0f;
 
 // What a {key(n)} button glyph shows: the ui/gamepad.png cell of the pad button (13 x 4 atlas, the plain rows: column cell % 13, row
 // (cell / 13) * 2 + 1) and the virtual key whose key cap stands for it. n 0..3 are the confirm, cancel, key-item and menu functions, 8 is
@@ -319,6 +321,7 @@ void DialogueBox::open(const import::Message& flat, render::FaceId face, float t
   chosen_ = -1;
   line_count_ = 0;
   choice_ = 0;
+  glyph_cursor_ = -1;
 }
 
 void DialogueBox::start_digits(int value) {
@@ -364,6 +367,17 @@ void DialogueBox::swap_faces(render::FaceId face, render::FaceId italic) {
   tw_.replace_pages(layout(face, italic, scale_));
 }
 
+namespace {
+
+bool button_symbol(char32_t ch) { return ch == U'○' || ch == U'×' || ch == U'△' || ch == U'□'; }
+
+}  // namespace
+
+render::FaceId DialogueBox::glyph_face(char32_t ch, bool italic) const {
+  if (symbol_face_ != render::kNoFace && button_symbol(ch)) return symbol_face_;
+  return italic && italic_ != render::kNoFace ? italic_ : face_;
+}
+
 std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId italic, float text_scale) {
   const import::Message& flat = flat_;
   const bool wrap = wrap_;
@@ -378,7 +392,8 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   metrics.max_width = wrap_width_ * (text_scale / 0.5f);
   // Glyphs advance by the width they count for, on the 2-unit grid of the 640-wide layout.
   if (wrap)
-    metrics.glyph_width = [batch, face, italic, text_scale](char32_t ch, bool slanted) {
+    metrics.glyph_width = [this, batch, face, italic, text_scale](char32_t ch, bool slanted) {
+      if (symbol_face_ != render::kNoFace && button_symbol(ch)) return jp_glyph_width(ch, 0.0f) * (text_scale / 0.5f);
       return wrap_glyph_width(batch->glyph_measure(slanted && italic != render::kNoFace ? italic : face, ch), slanted) * (text_scale / 0.5f);
     };
   else
@@ -402,6 +417,7 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   all += U"  0123456789";
   batch->prepare(face, all);
   if (italic != render::kNoFace) batch->prepare(italic, all);
+  if (symbol_face_ != render::kNoFace) batch->prepare(symbol_face_, all);
 
   auto pages = layout_pages(flat, metrics);
   text_w_ = 0;
@@ -720,8 +736,7 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
           ch = static_cast<char32_t>(U'0' + digits_[static_cast<size_t>(glyph.digit)]);
           hl = hl || glyph.digit == digit_cursor_;
         }
-        const render::FaceId glyph_face = glyph.italic && italic_ != render::kNoFace ? italic_ : face_;
-        text_->draw_glyph(glyph_face, ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_, text_color(hl ? 6 : glyph.color, a), scale_ * zoom,
+        text_->draw_glyph(glyph_face(ch, glyph.italic), ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_, text_color(hl ? 6 : glyph.color, a), scale_ * zoom,
                           pass);
       }
     }
@@ -734,7 +749,7 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
   // Wait cursor (both art modes): the leaf quad of the skin texture (70 x 70, uv (u0, 0.83333) size (0.124, 0.16667),
   // u0 = {.5, .625, .75, .875}[phase], phase 0..4 advancing every 5 frames and wrapping, phase 4 shows the last frame again), at the end of the revealed text
   // of the page, its top 35 above the last line's lower edge.
-  if (tiled && tw_.waiting_for_input() && page && !page->glyphs.empty() && line_count_ == 0) {
+  if (tiled && tw_.waiting_for_input() && page && !page->glyphs.empty() && line_count_ == 0 && glyph_cursor_ < 0) {
     const u32 shown = std::min<u32>(tw_.visible(), static_cast<u32>(page->glyphs.size()));
     if (shown > 0) {
       const LayoutGlyph& glyph = page->glyphs[shown - 1];
@@ -752,14 +767,18 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
   // .375}, v0 0.83333, 70 x 70) at the first glyph of the selected line (x = glyph x), y = glyph y - off with
   // off = non-JP: skins 1-3 0, else 5; JP: skins 1-3 -15, else -10.
   // Also drawn in a frameless label window: the hand only needs the skin sheet.
-  if (choosing && skin_set_ && skin_mode_ == mode_ && page) {
-    const ChoiceCursor cc = choice_cursor(*page, line_h_, hl_line, jp_, skin_idx_);
-    if (cc.valid) {
-      const int phase = std::min(3, static_cast<int>(blink_ / (5.0f / 30.0f)) % 5);
-      const float u0 = 0.125f * static_cast<float>(phase);
-      sprites_->draw(skin_set_, (tx + cc.x) * zoom, (ty + cc.y) * zoom + yo_, cc.w * zoom, cc.h * zoom, u0, 0.83333f, u0 + 0.124f, 1.0f,
-                     pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha)));
-    }
+  ChoiceCursor cc;
+  if (choosing && skin_set_ && skin_mode_ == mode_ && page) cc = choice_cursor(*page, line_h_, hl_line, jp_, skin_idx_);
+  if (glyph_cursor_ >= 0 && skin_set_ && skin_mode_ == mode_ && page && static_cast<size_t>(glyph_cursor_) < page->glyphs.size()) {
+    const LayoutGlyph& glyph = page->glyphs[static_cast<size_t>(glyph_cursor_)];
+    cc = choice_cursor(*page, line_h_, static_cast<int>(std::lround(glyph.y / line_h_)), jp_, skin_idx_);
+    cc.x = glyph.x;
+  }
+  if (cc.valid) {
+    const int phase = std::min(3, static_cast<int>(blink_ / (5.0f / 30.0f)) % 5);
+    const float u0 = 0.125f * static_cast<float>(phase);
+    sprites_->draw(skin_set_, (tx + cc.x) * zoom, (ty + cc.y) * zoom + yo_, cc.w * zoom, cc.h * zoom, u0, 0.83333f, u0 + 0.124f, 1.0f,
+                   pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha)));
   }
 }
 
@@ -853,6 +872,24 @@ void DialogueDemo::show(std::string_view room_name, int msg_index) {
   show(id, msg_index);
 }
 
+void DialogueDemo::show_text(const import::Message& flat) {
+  Impl& impl = *impl_;
+  if (!impl.ready) return;
+  room_ = -1;
+  msg_ = 0;
+  voice_page_ = -1;
+  impl.plain.clear();
+  for (const import::Token& token : flat.tokens)
+    if (token.kind == import::TokKind::Text) impl.plain += import::u32_to_utf8(token.text);
+    else if (token.kind == import::TokKind::Newline) impl.plain += ' ';
+  const bool jp = impl.lang == import::Lang::Jp;
+  impl.box.set_mode(impl.mode);
+  impl.box.set_symbol_face(jp ? render::kNoFace : impl.fonts.face(font::kKtMsg, impl.classic()));
+  impl.box.open(flat, impl.msg_face(), 0.5f, !jp, jp ? 0.0f : kUnwrapped, impl.italic_face());
+}
+
+void DialogueDemo::set_glyph_cursor(int glyph) { impl_->box.set_glyph_cursor(glyph); }
+
 void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speaker) {
   Impl& impl = *impl_;
   if (!impl.ready) return;
@@ -912,6 +949,7 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
   const render::FaceId italic = impl.italic_face();
 
   impl.box.set_mode(impl.mode);
+  impl.box.set_symbol_face(render::kNoFace);
   if (script_var && script_set)
     impl.box.set_field_events([this] { return script_var(0x22); }, [this](int value) { script_set(0x22, value); });
   if (impl.guest_room != room_) {

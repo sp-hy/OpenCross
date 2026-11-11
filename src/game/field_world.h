@@ -28,6 +28,7 @@
 #include "assets/battle_stage.h"
 #include "assets/room_effects.h"
 #include "game/actor.h"
+#include "game/button_panel.h"
 #include "game/disc_index.h"
 #include "game/effects/emitter_system.h"
 #include "game/effects/gpu_effects.h"
@@ -776,6 +777,7 @@ class FieldWorld final : public script::FieldHost {
   u16 keys_held() override;
   u16 key_latch() override;
   void clear_key_latch() override;
+  void button_panel() override;
   bool predicate(script::Predicate op, int arg) override;
   s32 query(script::Query which) override;
   void set_global(script::Global which, s32 value) override;
@@ -939,6 +941,11 @@ class FieldWorld final : public script::FieldHost {
   render::Sampler mod_ui_sampler_;
   const ModUiImage& mod_ui_image(int number);
   void sync_mod_ui_windows();
+  // RDE's button panel (FE D1) and its message window, laid out again when `panel_shown_` (the state it shows) changes.
+  ButtonPanel panel_;
+  std::unique_ptr<ui::DialogueDemo> panel_win_;
+  int panel_shown_ = -1;
+  void sync_panel_window();
   std::string portrait_set_ = "2021";
   // Button glyphs in the message windows: key caps after a key press, pad glyphs after a pad press.
   bool key_caps_ = false;

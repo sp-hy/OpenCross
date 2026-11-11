@@ -352,6 +352,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
       if (member.char_id < 0 || member.char_id >= save::kNumChars || !gs.slot.recruited(member.char_id)) continue;
       save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
       for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
+      write_growth(save_char, member);
     }
   }
   log::info("session: battle result written back (gold +{}, {} items, {} elements{}; star {} progress {})", sum.gold, sum.items, sum.elements,

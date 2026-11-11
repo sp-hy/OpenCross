@@ -147,6 +147,7 @@ void NullHost::table_op(u16, int, int) { NOTE("table_op"); }
 u16 NullHost::keys_held() { NOTE("keys_held"); return 0; }
 u16 NullHost::key_latch() { NOTE("key_latch"); return 0; }
 void NullHost::clear_key_latch() { NOTE("clear_key_latch"); }
+void NullHost::button_panel() { NOTE("button_panel"); }
 bool NullHost::predicate(Predicate, int) { NOTE("predicate"); return false; }
 s32 NullHost::query(Query) { NOTE("query"); return 0; }
 void NullHost::set_global(Global, s32) { NOTE("set_global"); }

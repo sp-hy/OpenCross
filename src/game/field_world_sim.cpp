@@ -54,6 +54,7 @@ bool FieldWorld::controls_free(bool menu_request) const {
   if ((gflags & script::gflag::kInputLock) && !(menu_request && (gflags & script::gflag::kMenuUnderLock))) return false;
   // A mod UI that has taken a pick holds the pad (script::ModUi::holds_controls).
   if (vm_.mod_ui().shown && vm_.mod_ui().holds_controls) return false;
+  if (panel_.is_open()) return false;
   for (size_t i = 0; i < ents_.size(); ++i) {
     const script::Entity& script_ent = vm_.entity(static_cast<int>(i));
     if (script_ent.flags270 & script::flag270::kActionRunning) return false;

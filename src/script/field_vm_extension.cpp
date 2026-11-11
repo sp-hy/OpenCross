@@ -160,6 +160,7 @@ void FieldVM::exec_extension(u8 sub) {
       break;
     }
     case 0xD0: host_.set_model_source(operand_u(2), operand_u(4), operand_u(6), operand_u(8)); break;
+    case 0xD1: host_.button_panel(); break;
     default:
       ++stats_.unimplemented;
       if (logged_.insert(key).second) log::warn("field script: extension op FE {:02X} ({}) has no handler", sub, info->name);

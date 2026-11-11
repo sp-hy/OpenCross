@@ -121,6 +121,12 @@ class DialogueBox {
   void move_digit(int step, int shift);
   int digit_value() const;
   int digit_cursor() const { return digit_cursor_; }
+  // The choice hand at glyph `glyph` of the shown page (-1 none), placed as the in-window choice places it at a line's first glyph: a
+  // cursor for a window whose options are not whole lines. Reset by open().
+  void set_glyph_cursor(int glyph) { glyph_cursor_ = glyph; }
+  // The face that lays out and draws the button symbols (circle, cross, triangle, square), set before open() (kNoFace: the message
+  // face); a message face without them borrows the JP one.
+  void set_symbol_face(render::FaceId face) { symbol_face_ = face; }
   // choice_line() while the list is up and takes the pick, else -1.
   int picking_line() const;
   // The translated line the hand / highlight sits on now (line_first + cursor, mapped).
@@ -185,6 +191,8 @@ class DialogueBox {
   render::FaceId face_ = render::kNoFace;
   // Face for {italic} glyphs (kNoFace: the regular face).
   render::FaceId italic_ = render::kNoFace;
+  render::FaceId symbol_face_ = render::kNoFace;
+  render::FaceId glyph_face(char32_t ch, bool italic) const;
   // The open message (kept for swap_faces).
   import::Message flat_;
   bool wrap_ = true;
@@ -221,6 +229,7 @@ class DialogueBox {
   void draw_button(int key, float x, float y, float zoom, float alpha);
   int choice_ = 0;
   int chosen_ = -1;
+  int glyph_cursor_ = -1;
   // In-window choice lines.
   int line_first_ = 0, line_count_ = 0;
   // PS1 first choice line of each page of the open message (-1 none).
@@ -250,6 +259,11 @@ class DialogueDemo {
   // `line_speaker` (default: `speaker`) picks the line's generated words; `speaker` stays the window's owner for the voice lines.
   void show(int room_id, int msg_index, int speaker = 0, int line_speaker = -1);
   void show(std::string_view room_name, int msg_index);
+  // Shows text that is not a room message (a panel the engine builds): lines break only at its newlines, the button symbols are drawn
+  // with the JP face outside JP, no portrait, no voice.
+  void show_text(const import::Message& flat);
+  // DialogueBox::set_glyph_cursor of the shown text.
+  void set_glyph_cursor(int glyph);
   void set_language(import::Lang lang);
   // Re-shows the demo message.
   void set_mode(ArtMode mode);

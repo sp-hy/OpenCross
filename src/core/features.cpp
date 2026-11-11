@@ -23,13 +23,14 @@ constexpr std::array<Setting, 2> kPartyScreenSettings = {{
     {"ReturnToSlot", 1, 0, 1, "A pick returns the cursor to the slot it filled"},
 }};
 
-// The mod UI and model source ops have no setting: a mod's own scripts use them (and check the level first).
-constexpr std::array<Feature, 5> kFeatures = {{
+// The mod UI, model source and button panel ops have no setting: scripts use them (and check the level first).
+constexpr std::array<Feature, 6> kFeatures = {{
     {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
     {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings},
     {kModUi, 2, "", "Mod UI (building blocks)", {}},
     {kPartyScreen, 1, "PartyScreen", "Party screen tweaks", kPartyScreenSettings},
     {kModelSources, 1, "", "Models from elsewhere on NPCs (FE D0)", {}},
+    {kButtonPanel, 1, "", "Button panel for key-latch code entry (FE D1)", {}},
 }};
 
 std::string_view trim(std::string_view text) {
