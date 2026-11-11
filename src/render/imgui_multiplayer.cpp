@@ -245,6 +245,20 @@ void MultiplayerUi::open_chat() {
   focus_input_ = true;
 }
 
+std::optional<std::string_view> MultiplayerUi::reply_text(std::string_view line) {
+  if (line.size() < 2 || line[0] != '/' || (line[1] != 'r' && line[1] != 'R') || (line.size() > 2 && line[2] != ' ')) return std::nullopt;
+  line.remove_prefix(2);
+  while (!line.empty() && line.front() == ' ') line.remove_prefix(1);
+  return line;
+}
+
+const net::ChatLine* MultiplayerUi::last_pm_from(const MultiplayerClient& client) {
+  const std::deque<net::ChatLine>& lines = client.chat(net::ChatScope::Pm);
+  for (auto line = lines.rbegin(); line != lines.rend(); ++line)
+    if (!line->pid.empty() && line->pid != client.pid()) return &*line;
+  return nullptr;
+}
+
 void MultiplayerUi::open_pm(const std::string& pid, const std::string& name) {
   pm_to_ = pid;
   pm_name_ = name;
@@ -512,8 +526,22 @@ void MultiplayerUi::draw_chat(MultiplayerClient& client, const platform::Multipl
         return 0;
       };
       if (ImGui::InputTextWithHint("##say", hint, input_, sizeof input_, say_flags, on_tab, this)) {
-        const bool sent = pm ? client.send_pm(pm_to_, input_) : client.send_chat(global_ ? net::ChatScope::Global : net::ChatScope::Room, input_);
-        if (sent || input_[0] == '\0') {
+        // "/r text": a private line to the player who sent the last private line here; "/r" alone makes them the target. With nobody to
+        // reply to the line stays as typed.
+        bool sent = false, keep_open = false;
+        if (const std::optional<std::string_view> reply = reply_text(input_)) {
+          const net::ChatLine* last = last_pm_from(client);
+          keep_open = !last || reply->empty();
+          if (last && reply->empty()) {
+            open_pm(last->pid, last->name);
+            input_[0] = '\0';
+          } else if (last) {
+            sent = client.send_pm(last->pid, *reply);
+          }
+        } else {
+          sent = pm ? client.send_pm(pm_to_, input_) : client.send_chat(global_ ? net::ChatScope::Global : net::ChatScope::Room, input_);
+        }
+        if (!keep_open && (sent || input_[0] == '\0')) {
           input_[0] = '\0';
           chat_open_ = false;
         } else {
