@@ -118,7 +118,9 @@ void test_negative_strip() {
   const int a0[1] = {5};
   effect->command(0x100, a0, 1);
   auto prims = frame(*effect);
-  CHECK(prims.size() == 5);
+  // One quad over the whole 320 px (the PS1's five 64 px columns drawn at once), so the battle widens it in widescreen.
+  CHECK(prims.size() == 1);
+  CHECK(prims[0].v[0].x == 0.0f && prims[0].v[3].x == 320.0f);
   float cover = 0;
   for (const auto& prim : prims) {
     CHECK(prim.blend == kBlendInvert);

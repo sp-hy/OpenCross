@@ -656,6 +656,12 @@ void test_window_opening() {
   ui::WindowOpening full_at_once;
   full_at_once.start(false);
   CHECK(!full_at_once.growing() && std::fabs(full_at_once.update(tick) - tick) < 1e-6f);
+
+  // A label window changing its text: opaque at once.
+  ui::WindowOpening changed;
+  changed.start(true);
+  changed.finish();
+  CHECK(!changed.growing() && changed.alpha() == 1.0f);
 }
 
 }  // namespace

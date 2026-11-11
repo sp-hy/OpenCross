@@ -444,6 +444,12 @@ void Typewriter::step() {
   }
 }
 
+void Typewriter::reveal_now() {
+  if (state_ != State::Revealing) return;
+  fast_ = true;
+  step();
+}
+
 void Typewriter::confirm() {
   switch (state_) {
     case State::Revealing: fast_ = true; break;

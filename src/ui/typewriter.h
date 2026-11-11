@@ -106,6 +106,8 @@ class WindowOpening {
   // Advances by dt and returns the part of dt that belongs to the text (0 while the window grows).
   float update(float dt);
   bool growing() const { return grow_left_s_ > kTickEpsilon; }
+  // Fully open now: no grow, no fade (a window that only changes its text).
+  void finish() { grow_left_s_ = 0; since_text_s_ = 1.0f; }
   // Draw opacity of the window and its text, 0..1.
   float alpha() const;
 
@@ -125,6 +127,8 @@ class Typewriter {
   void update(float dt, TextPace pace = {});
   // Confirm key: advances a wait / page / close; while revealing it fast-forwards to the next wait.
   void confirm();
+  // Reveals the page up to its next wait now (no tick needed).
+  void reveal_now();
 
   State state() const { return state_; }
   bool closed() const { return state_ == State::Closed; }

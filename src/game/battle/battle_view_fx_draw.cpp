@@ -419,6 +419,21 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
       for (size_t k = 0; k < 9; ++k) in.cam[k] = mi.mat.m[k];
       for (size_t k = 0; k < 3; ++k) in.cam[9 + k] = mi.centre[k];
       for (size_t k = 0; k < 3; ++k) in.rgb[k] = mi.rgb[k];
+      // Widescreen: a camera-relative mesh (flag bit 24) spanning the whole PS1 picture grows to cover the extra columns
+      // (effects::screen_lock_widen): its camera matrix's x and y rows and centre x / y scale about the projection axis by the same factor,
+      // so the texture keeps its proportions (a stretch in x alone widened the gas noise); the extra height falls off screen.
+      if ((mi.flags & (1u << 24)) && asset && static_cast<size_t>(in.part) < asset->parts.size()) {
+        float lo = 1e9f, hi = -1e9f;
+        for (const auto& p : asset->parts[static_cast<size_t>(in.part)].cull_points) {
+          const effects::Vec3 c = mi.mat.apply({static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2])});
+          const float z = c[2] + mi.centre[2];
+          if (z <= 0.0f) continue;
+          const float sx = view.ox + (c[0] + mi.centre[0]) * view.h / z;
+          lo = std::min(lo, sx), hi = std::max(hi, sx);
+        }
+        if (const float widen = effects::screen_lock_widen(lo, hi, render::wide_extra()); widen != 1.0f)
+          for (const size_t k : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}, size_t{5}, size_t{9}, size_t{10}}) in.cam[k] *= widen;
+      }
       in.blend = mi.blend;
       in.ext = mi.ext_path;
       in.ext_morph = mi.morph_name != nullptr;
