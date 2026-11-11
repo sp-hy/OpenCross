@@ -641,7 +641,7 @@ void test_challenge_out() {
   CHECK(start.has_value() && !client.take_pvp_start());
   if (!start) return;
   CHECK(start->seed == 4294967295u && start->first == "me00000000000000" && start->opponent == "p1" && start->name == "Kid" && start->star == 5);
-  CHECK(start->opening_stamina == 70 && start->card.members.size() == 1 && start->card.members[0].hp == 250 && start->card.members[0].char_id == 1);
+  CHECK(start->opening_stamina == 70 && start->card.members.size() == 1 && start->card.members[0].hp == 250 && start->card.members[0].face == 1);
   CHECK(start->own == test_card("Serge"));
   session.wire.take();
   client.end_pvp(net::PvpResult::Aborted);

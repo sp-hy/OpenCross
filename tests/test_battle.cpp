@@ -9,7 +9,6 @@
 #include <utility>
 
 #include "data/char_name.h"
-#include "data/char_name.h"
 #include "battle/battle.h"
 #include "battle/pac_vm.h"
 #include "battle/versus.h"
@@ -5909,16 +5908,21 @@ void test_party_card() {
   serge.grid[10] = 3;
   save::SaveChar& kid = state.slot.chars[1];
   kid.max_hp = 1200, kid.atk = 127;
+  kid.model_id = 1;
+  state.slot.chars[2].model_id = 0x3D;
+  state.slot.set_var(0x172, 0x40);
   const data::CharNames names;
   const net::PartyCard card = game::party_card(state, {0, 1, 2, 3}, names);
   CHECK_EQ(card.star, 7);
   CHECK_EQ(card.members.size(), 3);
   if (card.members.size() != 3) return;
   const net::CardMember& lead = card.members[0];
-  CHECK(lead.char_id == 0 && lead.hp == 320 && lead.atk == 35 && lead.mag == 12 && lead.def == 18 && lead.mdef == 10);
+  CHECK(lead.face == 0 && lead.hp == 320 && lead.atk == 35 && lead.mag == 12 && lead.def == 18 && lead.mdef == 10);
   CHECK_EQ(lead.elements, 2);
-  CHECK(card.members[1].char_id == 1 && card.members[1].hp == 999 && card.members[1].atk == 127 && card.members[1].elements == 0);
-  CHECK_EQ(card.members[2].char_id, 2);
+  CHECK(card.members[1].face == 1 && card.members[1].hp == 999 && card.members[1].atk == 127 && card.members[1].elements == 0);
+  CHECK_EQ(card.members[2].face, 2);
+  serge.model_id = data::kLynxBody;
+  CHECK_EQ(game::party_card(state, {0}, names).members[0].face, data::kLynxBody);
   ui::GameState bare;
   CHECK(game::party_card(bare, {0}, names).members.empty());
 }

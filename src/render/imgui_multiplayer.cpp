@@ -214,11 +214,10 @@ void square_uv(const MultiplayerUi::Face& face, ImVec2& uv0, ImVec2& uv1) {
   uv1 = ImVec2(1.0f - cut_x, 1.0f - cut_y);
 }
 
-// A face as a large faded backdrop over `min`..`max` (a square): its opacity runs from `alpha_left` at the left edge to `alpha_right` at
-// the right, so it fades out towards the middle of the screen.
-void backdrop_face(ImDrawList* dl, const MultiplayerUi::Face& face, ImVec2 min, ImVec2 max, float alpha_left, float alpha_right) {
-  ImVec2 uv0, uv1;
-  square_uv(face, uv0, uv1);
+// The part `uv0`..`uv1` of a portrait as a faded backdrop over `min`..`max`: its opacity runs from `alpha_left` at the left edge to
+// `alpha_right` at the right, so it fades out towards the middle of the screen.
+void backdrop_image(ImDrawList* dl, const MultiplayerUi::Face& face, ImVec2 min, ImVec2 max, ImVec2 uv0, ImVec2 uv1, float alpha_left,
+                    float alpha_right) {
   const ImU32 left = with_alpha(ImVec4(1, 1, 1, 1), alpha_left), right = with_alpha(ImVec4(1, 1, 1, 1), alpha_right);
   dl->PushTextureID(texture_id(face));
   dl->PrimReserve(6, 4);
@@ -229,6 +228,36 @@ void backdrop_face(ImDrawList* dl, const MultiplayerUi::Face& face, ImVec2 min, 
   dl->PrimWriteVtx(max, uv1, right);
   dl->PrimWriteVtx(ImVec2(min.x, max.y), ImVec2(uv0.x, uv1.y), left);
   dl->PopTextureID();
+}
+
+// A face as a large faded backdrop over the square `min`..`max`.
+void backdrop_face(ImDrawList* dl, const MultiplayerUi::Face& face, ImVec2 min, ImVec2 max, float alpha_left, float alpha_right) {
+  ImVec2 uv0, uv1;
+  square_uv(face, uv0, uv1);
+  backdrop_image(dl, face, min, max, uv0, uv1, alpha_left, alpha_right);
+}
+
+// A party's tall portraits standing side by side over the full height, the leader's at the screen edge (`own`: the left one), fading
+// from `alpha` there to nothing at the middle. Each is drawn 6 times as tall as it is wide, as the menus show it, while the row fits
+// half the screen; past that each is cut to its middle. `shift` moves the row outwards (the slide-in).
+void backdrop_strips(ImDrawList* dl, const std::vector<const MultiplayerUi::Face*>& strips, float width, float height, bool own, float shift,
+                     float alpha) {
+  constexpr float kTallness = 6.0f;
+  if (strips.empty()) return;
+  const float half = width * 0.5f, count = static_cast<float>(strips.size()), natural = height / kTallness;
+  for (size_t i = 0; i < strips.size(); ++i) {
+    const MultiplayerUi::Face& strip = *strips[i];
+    const float strip_w = std::min(natural, half / count);
+    const float cut = (1.0f - strip_w / natural) * 0.5f;
+    const float inner = static_cast<float>(i) * strip_w, outer = inner + strip_w;
+    const float fade_in = alpha * (1.0f - inner / half), fade_out = alpha * (1.0f - outer / half);
+    if (own)
+      backdrop_image(dl, strip, ImVec2(inner - shift, 0.0f), ImVec2(outer - shift, height), ImVec2(cut, 0.0f), ImVec2(1.0f - cut, 1.0f), fade_in,
+                     fade_out);
+    else
+      backdrop_image(dl, strip, ImVec2(width - outer + shift, 0.0f), ImVec2(width - inner + shift, height), ImVec2(cut, 0.0f),
+                     ImVec2(1.0f - cut, 1.0f), fade_out, fade_in);
+  }
 }
 
 // Seconds left until `deadline`, rounded up.
@@ -706,11 +735,12 @@ void MultiplayerUi::accept(MultiplayerClient& client) {
   else client.decline_challenge();
 }
 
-const MultiplayerUi::Face* MultiplayerUi::face(int char_id) {
-  if (const auto found = faces_.find(char_id); found != faces_.end()) return found->second.get();
-  std::unique_ptr<Face>& slot = faces_[char_id];
+const MultiplayerUi::Face* MultiplayerUi::face(int number, Art art) {
+  const std::pair key(number, art);
+  if (const auto found = faces_.find(key); found != faces_.end()) return found->second.get();
+  std::unique_ptr<Face>& slot = faces_[key];
   DecodedImage image;
-  if (!gpu_ || !face_source_ || !face_source_(char_id, image) || image.width == 0 || image.height == 0) return nullptr;
+  if (!gpu_ || !face_source_ || !face_source_(number, art, image) || image.width == 0 || image.height == 0) return nullptr;
   if (!face_sampler_.handle() && !face_sampler_.create(*gpu_, true)) return nullptr;
   auto made = std::make_unique<Face>();
   if (!made->texture.create(*gpu_, image.width, image.height, TextureFormat::Rgba8, image.rgba.data(), nullptr, true)) return nullptr;
@@ -725,7 +755,7 @@ void MultiplayerUi::draw_portrait(ImDrawList* dl, const net::CardMember& member,
   const ImVec2 min(x, y), max(x + size, y + size);
   const float rounding = size * 0.08f;
   dl->AddRectFilled(min, max, ImGui::ColorConvertFloat4ToU32(ImVec4(colour.x * 0.22f, colour.y * 0.22f, colour.z * 0.22f, 0.92f)), rounding);
-  if (const Face* portrait = face(member.char_id)) {
+  if (const Face* portrait = face(member.face)) {
     ImVec2 uv0, uv1;
     square_uv(*portrait, uv0, uv1);
     dl->AddImageRounded(texture_id(*portrait), min, max, uv0, uv1, IM_COL32_WHITE, rounding);
@@ -772,7 +802,7 @@ int MultiplayerUi::draw_incoming(const net::IncomingChallenge& incoming, double 
     dl->AddRectFilledMultiColor(win, win_max, with_alpha(kTheirColour, 0.26f), with_alpha(kTheirColour, 0.0f), with_alpha(kTheirColour, 0.0f),
                                 with_alpha(kTheirColour, 0.26f));
     if (!members.empty())
-      if (const Face* leader = face(members.front().char_id))
+      if (const Face* leader = face(members.front().face))
         backdrop_face(dl, *leader, ImVec2(win_max.x - win_size.y, win.y), win_max, 0.0f, 0.15f);
     dl->AddRectFilled(win, ImVec2(win_max.x, win.y + std::max(2.0f, em * 0.16f)), with_alpha(kTheirColour, 0.95f), style.WindowRounding,
                       ImDrawFlags_RoundCornersTop);
@@ -910,7 +940,7 @@ std::optional<net::PvpStart> MultiplayerUi::draw_versus(const MultiplayerClient&
   return std::nullopt;
 }
 
-// The whole window: dimmed, each half washed in its side's colour with its leader's face fading towards the middle, a slanted rule
+// The whole window: dimmed, each half washed in its side's colour with its party's tall portraits fading towards the middle, a slanted rule
 // through the middle. Over it, per side (the player's left, the other's right, mirrored): the name with the Star Level, the members'
 // portraits (leaders on the outside) and the card; a large "VS" between the portraits; who moves first under it all. The sides slide in
 // from the edges as it opens; everything shrinks to fit a small window and grows a little in a large one.
@@ -962,10 +992,9 @@ void MultiplayerUi::draw_versus_screen(const net::PvpStart& start, bool own_firs
     const float column_x[2] = {x0 - slide, x0 + column + gap + slide};
     const float portrait_y = y0 + title_h + spacing, table_y = portrait_y + portrait + spacing;
 
-    // The backdrop: dimmed, the halves washed in the sides' colours, the leaders' faces, the slanted rule.
+    // The backdrop: dimmed, the halves washed in the sides' colours, the parties' tall portraits, the slanted rule.
     ImDrawList* back = ImGui::GetBackgroundDrawList();
     back->AddRectFilled(ImVec2(0.0f, 0.0f), io.DisplaySize, IM_COL32(4, 6, 12, static_cast<int>(200.0f * ease)));
-    const float face_side = std::min(height, width * 0.5f);
     for (int side = 0; side < 2; ++side) {
       const bool own = side == 0;
       const net::PartyCard& card = *cards[side];
@@ -973,12 +1002,10 @@ void MultiplayerUi::draw_versus_screen(const net::PvpStart& start, bool own_firs
       const ImU32 strong = with_alpha(own ? kOwnColour : kTheirColour, 0.32f * ease), clear = with_alpha(own ? kOwnColour : kTheirColour, 0.0f);
       back->AddRectFilledMultiColor(ImVec2(std::min(edge, middle), 0.0f), ImVec2(std::max(edge, middle), height), own ? strong : clear,
                                     own ? clear : strong, own ? clear : strong, own ? strong : clear);
-      if (card.members.empty()) continue;
-      if (const Face* leader = face(card.members.front().char_id)) {
-        const float face_x = own ? -slide : width - face_side + slide;
-        backdrop_face(back, *leader, ImVec2(face_x, height - face_side), ImVec2(face_x + face_side, height), own ? 0.22f * ease : 0.0f,
-                      own ? 0.0f : 0.22f * ease);
-      }
+      std::vector<const Face*> strips;
+      for (const net::CardMember& member : card.members)
+        if (const Face* strip = face(member.face, Art::Strip)) strips.push_back(strip);
+      backdrop_strips(back, strips, width, height, own, slide, 0.3f * ease);
     }
     const float lean = height * 0.06f;
     back->AddLine(ImVec2(width * 0.5f + lean, 0.0f), ImVec2(width * 0.5f - lean, height), with_alpha(ImVec4(1, 1, 1, 1), 0.14f * ease),

@@ -43,7 +43,7 @@ Json card_json(const PartyCard& card) {
   for (size_t i = 0; i < card.members.size() && i < 3; ++i) {
     const CardMember& member = card.members[i];
     Json entry = Json::object();
-    entry.set("char", member.char_id).set("name", member.name).set("hp", member.hp).set("atk", member.atk).set("def", member.def);
+    entry.set("char", member.face).set("name", member.name).set("hp", member.hp).set("atk", member.atk).set("def", member.def);
     entry.set("mag", member.mag).set("mdef", member.mdef).set("elements", member.elements);
     members.push(std::move(entry));
   }
@@ -60,7 +60,7 @@ PartyCard read_card(const Json& value, size_t name_len) {
     if (card.members.size() >= 3) break;
     if (!entry.is_object()) continue;
     CardMember member;
-    member.char_id = clamped(entry, "char", 0, 255);
+    member.face = clamped(entry, "char", 0, 255);
     member.name = display_text(entry.string_of("name"), name_len);
     member.hp = clamped(entry, "hp", 0, 9999);
     member.atk = clamped(entry, "atk", 0, 999);

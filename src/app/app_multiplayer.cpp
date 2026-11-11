@@ -6,6 +6,7 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <format>
 #include <map>
 #include <set>
 
@@ -26,14 +27,35 @@ namespace oc::app {
 void App::init_multiplayer() {
   mp_allowed = steam_allowed && config.debug_script.empty();
   mp_ui.set_card_source([this] { return multiplayer_card(); });
-  // The challenge popup's and the versus screen's portraits: the face set the menus show (HD art: [Game] Portraits; original art: 1999).
-  mp_ui.set_face_source(ctx, [this](int char_id, render::DecodedImage& image) {
+  // The challenge popup's and the versus screen's portraits: the set the menus show (HD art: [Game] Portraits; original art: 1999). A
+  // menu strip is stored as its top and bottom halves side by side; they are stacked back into one upright image.
+  mp_ui.set_face_source(ctx, [this](int number, render::MultiplayerUi::Art art, render::DecodedImage& image) {
+    constexpr int kLastStrip = 49;
     const std::string set = platform::art_is_hd(config.art_mode) ? config.portraits : std::string("1999");
-    const std::map<int, std::string> faces = ui::menudraw::list_face_files(files, set);
-    const auto found = faces.find(char_id);
-    if (found == faces.end()) return false;
-    const std::optional<Bytes> bytes = files.read(found->second);
-    return bytes && render::decode_image(*bytes, image);
+    std::string path;
+    if (art == render::MultiplayerUi::Art::Face) {
+      const std::map<int, std::string> faces = ui::menudraw::list_face_files(files, set);
+      const auto found = faces.find(number);
+      if (found == faces.end()) return false;
+      path = found->second;
+    } else {
+      if (number < 0 || number > kLastStrip) return false;
+      path = std::format("hd/menu/playtim/{}/p{:02}.png", set, number);
+    }
+    const std::optional<Bytes> bytes = files.read(path);
+    if (!bytes || !render::decode_image(*bytes, image)) return false;
+    if (art == render::MultiplayerUi::Art::Strip) {
+      const size_t half = image.width / 2, height = image.height, row = half * 4;
+      std::vector<u8> upright(row * height * 2);
+      for (size_t y = 0; y < height; ++y)
+        for (size_t part = 0; part < 2; ++part)
+          std::copy_n(image.rgba.begin() + static_cast<std::ptrdiff_t>((y * image.width + part * half) * 4), row,
+                      upright.begin() + static_cast<std::ptrdiff_t>((part * height + y) * row));
+      image.width = static_cast<u32>(half);
+      image.height = static_cast<u32>(height * 2);
+      image.rgba = std::move(upright);
+    }
+    return true;
   });
   ui.add_tab("Multiplayer", [this] {
     if (mp_ui.draw_tab(config.multiplayer, mp_client.get(), multiplayer_default_name(), mp_allowed, multiplayer_free(), ui.chat_font()))

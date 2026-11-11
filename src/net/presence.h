@@ -63,10 +63,10 @@ struct RemoteLabel {
   PresenceState state = PresenceState::Field;
 };
 
-// One member of a party card: the character id, the name the menus show, and the Status screen's max HP, ATK, DEF, MAG and MDEF, and
-// how many grid cells hold an element.
+// One member of a party card: the portrait the menus show (the body up to Lynx's, else the character id; data::menu_form), the name
+// the menus show, the Status screen's max HP, ATK, DEF, MAG and MDEF, and how many grid cells hold an element.
 struct CardMember {
-  int char_id = 0;
+  int face = 0;
   std::string name;
   int hp = 0, atk = 0, def = 0, mag = 0, mdef = 0;
   int elements = 0;
