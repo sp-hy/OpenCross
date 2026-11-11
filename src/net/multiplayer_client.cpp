@@ -869,7 +869,7 @@ std::string MultiplayerClient::status_text() const {
     case State::Off: return "Disconnected";
     case State::Connecting:
     case State::Greeting: return "Connecting...";
-    case State::Connected: return "Connected as " + pid_ + (admin_ ? " (admin)" : "");
+    case State::Connected: return "Connected";
     case State::Waiting: return std::format("{}; retrying in {:.0f} s", last_error_, std::max(0.0, retry_at_ - now_));
     case State::Banned: return server_message_.empty() ? "Banned from this server" : "Banned from this server: " + server_message_;
     case State::VersionTooOld: return server_message_.empty() ? "This OpenCross version is too old for the server" : server_message_;

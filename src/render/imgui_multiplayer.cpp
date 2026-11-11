@@ -302,8 +302,9 @@ bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, Multiplaye
   bool changed = false;
   ImGuiLayer::section("Multiplayer");
   ImGui::PushTextWrapPos(0.0f);
-  ImGui::TextDisabled("See other players' parties walk in your room and chat with them. Nothing of your game is shared but your name, "
-                      "Star Level, room and the party leader's position, and your party's card when you challenge or accept a battle.");
+  ImGui::TextDisabled("Enable multiplayer features. You'll be able to see other players pass through the same areas you are in. These "
+                      "players have no effect on your gamestate/saves etc. You are able to chat locally or globally and challenge each "
+                      "other to battles.");
   ImGui::PopTextWrapPos();
   if (ImGuiLayer::begin_rows("mp_rows")) {
     ImGuiLayer::row("Enabled", "Connect to the multiplayer server while the game runs.");
@@ -369,7 +370,10 @@ bool MultiplayerUi::draw_tab(platform::MultiplayerSettings& settings, Multiplaye
     ImGuiLayer::row("Hide global chat", "Show only room chat and private messages; you can no longer send to everyone.");
     changed |= ImGui::Checkbox("##hideglobal", &settings.hide_global_chat);
     ImGuiLayer::row("Keys");
-    ImGui::TextDisabled("T opens the chat, Tab switches Room / Global, Enter sends, Esc closes; Y / N answer a challenge");
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("T opens the chat, Tab switches Room / Global, Enter sends, Esc closes; /r <message> replies to the last private "
+                        "message, /r alone starts a private chat with that player; Y / N answer a challenge");
+    ImGui::PopTextWrapPos();
     ImGuiLayer::end_rows();
   }
 
@@ -455,7 +459,7 @@ void MultiplayerUi::draw_chat(MultiplayerClient& client, const platform::Multipl
   ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, io.DisplaySize.y * 0.6f));
   float panel_alpha = 0.0f;
   for (const auto& entry : shown) panel_alpha = std::max(panel_alpha, entry.second);
-  ImGui::SetNextWindowBgAlpha(chat_open_ ? 0.6f : 0.35f * panel_alpha);
+  ImGui::SetNextWindowBgAlpha(chat_open_ ? 0.8f : 0.6f * panel_alpha);
   ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
                            ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
   if (!chat_open_) flags |= ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_NoBringToFrontOnFocus;
