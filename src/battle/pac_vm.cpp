@@ -1387,4 +1387,12 @@ void ScriptedBrain::on_attacked(Battle& battle, int unit, Rng& rng, std::vector<
   stats_.reaction_attacks += static_cast<int>(out.size());
 }
 
+void ScriptedBrain::idle_pass(Battle& battle, Rng& rng) {
+  if (!vm_) return;
+  host_->battle = &battle;
+  host_->rng = &rng;
+  vm_->mark();
+  vm_->settle();
+}
+
 }  // namespace oc::battle::pac

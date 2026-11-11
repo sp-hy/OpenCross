@@ -3280,22 +3280,8 @@ Bytes assemble_ghost_pac(bool reveal, bool second = false) {
 }
 
 // An arrival: the idle loop arms itself (var 0x40), queues a self-cast, waits on it with A4, then reveals its unit with `34 0`.
-Bytes assemble_idle_cast_pac() {
-  Bytes code;
-  auto emit = [&](std::initializer_list<int> bytes) {
-    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
-  };
-  // rel 0: a lone halt, every other entity's idle loop.
-  emit({0x00});
-  const int init4 = static_cast<int>(code.size());
-  // Entity 4: bind unit 3, var 0x40 := 1, halt.
-  emit({0x0E, 0xE3, 0x80, 0x10, 0x40, 0x00, 0x01, 0x00, 0x40, 0x00});
-  const int idle4 = static_cast<int>(code.size());
-  // Var 0x40 == 1: begin_action, clear_queue, queue_attack element 1 on self, A4, var 0x40 := 2, ghost_self 0.
-  const int end = idle4 + 8 + 1 + 1 + 8 + 1 + 6 + 2;
-  emit({0x02, 0x40, 0x00, 0x01, 0x00, 0x40, end & 0xFF, end >> 8});
-  emit({0x66, 0x87, 0x67, 0x01, 0x00, 0x01, 0x00, 0x20, 0x00, 0xE0, 0xA4});
-  emit({0x10, 0x40, 0x00, 0x02, 0x00, 0x40, 0x34, 0x00, 0x00});
+// A five-entity battle module whose code is `code`: entity 4 runs slot 0 at `init4` and slot 1 at `idle4`, every other slot is empty.
+Bytes entity4_pac(const Bytes& code, int init4, int idle4) {
   const size_t ec = 5, base = 0x94 + ec * 0x40;
   Bytes image(base, 0);
   auto put32 = [&](size_t offset, u32 value) {
@@ -3311,6 +3297,46 @@ Bytes assemble_idle_cast_pac() {
   put16(0x94 + 4 * 0x40 + 2, idle4);
   image.insert(image.end(), code.begin(), code.end());
   return image;
+}
+
+Bytes assemble_idle_cast_pac() {
+  Bytes code;
+  auto emit = [&](std::initializer_list<int> bytes) {
+    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
+  };
+  // rel 0: a lone halt, every other entity's idle loop.
+  emit({0x00});
+  const int init4 = static_cast<int>(code.size());
+  // Entity 4: bind unit 3, var 0x460 := 1, halt.
+  emit({0x0E, 0xE3, 0x80, 0x10, 0x60, 0x04, 0x01, 0x00, 0x40, 0x00});
+  const int idle4 = static_cast<int>(code.size());
+  // Var 0x460 == 1: begin_action, clear_queue, queue_attack element 1 on self, A4, var 0x460 := 2, ghost_self 0.
+  const int end = idle4 + 8 + 1 + 1 + 8 + 1 + 6 + 2;
+  emit({0x02, 0x60, 0x04, 0x01, 0x00, 0x40, end & 0xFF, end >> 8});
+  emit({0x66, 0x87, 0x67, 0x01, 0x00, 0x01, 0x00, 0x20, 0x00, 0xE0, 0xA4});
+  emit({0x10, 0x60, 0x04, 0x02, 0x00, 0x40, 0x34, 0x00, 0x00});
+  return entity4_pac(code, init4, idle4);
+}
+
+// An idle loop that answers the end of an action: entity 4 (unit 3) writes its own HP to 0 once PC 0's last attack (var 0x26) is a weapon hit.
+Bytes assemble_idle_watch_pac() {
+  Bytes code;
+  auto emit = [&](std::initializer_list<int> bytes) {
+    for (int byte : bytes) code.push_back(static_cast<u8>(byte));
+  };
+  // rel 0: a lone halt, every other entity's idle loop.
+  emit({0x00});
+  const int init4 = static_cast<int>(code.size());
+  // Entity 4: bind unit 3, halt.
+  emit({0x0E, 0xE3, 0x80, 0x00});
+  const int idle4 = static_cast<int>(code.size());
+  // Var 0x26 == 0 (weapon): var 0x460 := 0, unit 3's HP := var 0x460; halt.
+  const int end = idle4 + 8 + 6 + 8;
+  emit({0x02, 0x26, 0x00, 0x00, 0x00, 0x40, end & 0xFF, end >> 8});
+  emit({0x10, 0x60, 0x04, 0x00, 0x00, 0x40});
+  emit({0x76, 0x60, 0x04, 0xE3, 0x00, 0xB8, 0x40, 0x60});
+  emit({0x00});
+  return entity4_pac(code, init4, idle4);
 }
 
 // Pip's form change: the PC entity's slot 1 runs A7 on its own unit,
@@ -3777,6 +3803,26 @@ void test_idle_loop_cast() {
     if (event.kind == ActionEvent::Kind::Element && event.actor == 3 && event.element == 1 && event.target == 3) ++casts;
   CHECK_EQ(casts, 1);
   CHECK(brain.vm() && brain.vm()->quiescent());
+}
+
+// The idle loops get a pass at the end of every action, also one that starts no attacked script: a PC's hit on unit 4 (which has no script)
+// wakes unit 3's loop, which writes its own HP to 0, and unit 3 is down before the next command.
+void test_idle_pass_after_action() {
+  data::GameTables tables = make_tables();
+  tables.scenes[0].raw[3] = 2;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  pac::ScriptedBrain brain;
+  brain.set_module(0, assemble_idle_watch_pac());
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  CHECK(battle.unit(3).alive());
+  battle.unit_mut(4).hp = battle.unit_mut(4).max_hp = 9999;
+  battle.do_weapon_attack(0, 4, 0);
+  battle.finish_external_action();
+  CHECK_EQ(battle.unit(3).hp, 0);
+  CHECK(!battle.unit(3).alive() || (battle.unit(3).lo & st::kKO));
 }
 
 void test_end_rules() {
@@ -6647,6 +6693,7 @@ int main() {
   test_reveal_during_all_target_cast();
   test_weapon_sweep();
   test_idle_loop_cast();
+  test_idle_pass_after_action();
   test_debug_flags();
   test_god_mode();
   test_battle_boost();

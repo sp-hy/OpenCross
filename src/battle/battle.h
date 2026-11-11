@@ -427,6 +427,9 @@ class EnemyBrain {
   // Slot 4: run once per unit of the finished action's target list. Attacks the script queues (op 67) are executed like any queued
   // action (counter-attacks); return them in `out`.
   virtual void on_attacked(Battle&, int /*unit*/, Rng&, std::vector<EnemyAction>& /*out*/) {}
+  // The end of an action: the scripts' idle loops (slot 1) get a pass, as the frames an action takes give them on the original, so a loop
+  // that watches what the action changed (the cast colour history, a unit's HP) answers before the next command.
+  virtual void idle_pass(Battle&, Rng&) {}
   // The attacks that scripts queued from their idle loops (a hidden unit's arrival cast) since the last call: executed like any queued action by
   // the unit that queued them. Appended to `out` as (unit, actions).
   virtual void take_idle_plans(Battle&, std::vector<std::pair<int, std::vector<EnemyAction>>>& /*out*/) {}

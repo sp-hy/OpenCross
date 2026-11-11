@@ -255,19 +255,56 @@ bool BattleView::anm_point(int sel, int joint, effects::Vec3& pos, float& yaw) {
   std::vector<int> targets = act_.targets;
   std::sort(targets.begin(), targets.end());
   targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
-  int unit = -1;
   // The caster selectors are acting-list entry 0, which the scripted camera / actor ops rewrite
   // (script_actor_), so a scripted cutscene's play_anim after camera_target puts the unit (not the last action's actor) on the selector (Bomber's hiba).
-  if (sel == 1 || sel == 9) unit = script_actor_ >= 0 ? script_actor_ : act_.actor;
-  else if (sel == 2 || (sel >= 0xD && sel <= 0x15)) {
-    const size_t index = sel == 2 ? 0 : static_cast<size_t>(sel - 0xD);
-    unit = index < targets.size() ? targets[index] : -1;
+  const int actor = script_actor_ >= 0 ? script_actor_ : act_.actor;
+  auto nth = [](const std::vector<int>& list, size_t index) { return index < list.size() ? list[index] : -1; };
+  std::vector<int> units;
+  const bool ground = sel == 0x16 || sel == 0x17;
+  if (sel == 1 || sel == 9) {
+    units = {actor};
+  } else if (sel == 2 || (sel >= 0xD && sel <= 0x15)) {
+    units = {nth(targets, sel == 2 ? 0 : static_cast<size_t>(sel - 0xD))};
+  } else if (sel == 3) {
+    units = act_.casters.empty() ? std::vector<int>{actor} : act_.casters;
+  } else if (sel == 4 || ground) {
+    // The targets' point: a heavy boomerang's path is laid out toward it.
+    units = targets;
+  } else if (sel == 5) {
+    for (int other = 0; other < battle::kUnits; ++other)
+      if (bunit(other).present) units.push_back(other);
+  } else if (sel == 10 || sel == 11) {
+    units = {nth(act_.casters, static_cast<size_t>(sel - 9))};
   }
-  if (anm_trace()) log::info("anm: op 0x39 selector {} joint {} -> unit {} (act actor {}, targets {})", sel, joint, unit, act_.actor, targets.size());
-  if (unit < 0 || unit >= battle::kUnits) return false;
-  if (!fx_attach_unit(unit, std::max(0, joint - 2), pos)) return false;
-  const Visual& visual = vis_[static_cast<size_t>(unit)];
-  yaw = std::atan2(-visual.face_x, -visual.face_z);
+  units.erase(std::remove_if(units.begin(), units.end(), [](int unit) { return unit < 0 || unit >= battle::kUnits; }), units.end());
+  if (anm_trace()) log::info("anm: op 0x39 selector {} joint {} -> {} unit(s), first {} (act actor {}, targets {})", sel, joint, units.size(), units.empty() ? -1 : units.front(), act_.actor, targets.size());
+  // A list's point is the midpoint of the bounding box of its units' points ((max + min) / 2 per axis, rounded to whole world units), its yaw the mean of
+  // their 12-bit yaws.
+  std::array<int, 3> lo{32767, 32767, 32767}, hi{-32767, -32767, -32767};
+  int yaw_sum = 0, count = 0;
+  for (int unit : units) {
+    effects::Vec3 point{};
+    if (!fx_attach_unit(unit, std::max(0, joint - 2), point)) continue;
+    const Visual& visual = vis_[static_cast<size_t>(unit)];
+    const float unit_yaw = std::atan2(-visual.face_x, -visual.face_z);
+    if (units.size() == 1) {
+      pos = point;
+      if (ground) pos[1] = 0.0f;
+      yaw = unit_yaw;
+      return true;
+    }
+    for (size_t k = 0; k < 3; ++k) {
+      const int coord = static_cast<int>(std::lround(point[k]));
+      lo[k] = std::min(lo[k], coord);
+      hi[k] = std::max(hi[k], coord);
+    }
+    yaw_sum += static_cast<int>(std::lround(unit_yaw / (2.0f * kPi) * 4096.0f)) & 0xFFF;
+    ++count;
+  }
+  if (count == 0) return false;
+  for (size_t k = 0; k < 3; ++k) pos[k] = static_cast<float>((hi[k] + lo[k]) / 2);
+  if (ground) pos[1] = 0.0f;
+  yaw = static_cast<float>(yaw_sum / count) * (2.0f * kPi / 4096.0f);
   return true;
 }
 

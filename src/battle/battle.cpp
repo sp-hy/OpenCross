@@ -1455,7 +1455,8 @@ void Battle::run_idle_plans() {
 
 // After a PC-led action whose lowest target is an enemy (no PC among the targets) the target list is walked in ascending order and every
 // unit still alive gets its "attacked" script (slot 4); the attacks it queues are executed like any queued action (counter-attacks).
-// Those are enemy-led, so they start no further slot 4. Death plans run before and after the counters.
+// Those are enemy-led, so they start no further slot 4. Then the idle loops get their pass; death plans run before the counters and after
+// that pass (a loop may have written a unit's HP to 0).
 void Battle::run_reactions() {
   run_death_plans();
   std::vector<int> list;
@@ -1471,6 +1472,7 @@ void Battle::run_reactions() {
     run_plan(unit, plan, false);
     check_end();
   }
+  if (outcome_ == Outcome::Ongoing) brain_.idle_pass(*this, rng_);
   run_death_plans();
 }
 

@@ -50,6 +50,8 @@ int dpad_heading(int mask) {
 bool FieldWorld::controls_free(bool menu_request) const {
   if (trans_ != Trans::None || fade_ > kLockFade || jump_.active) return false;
   if (modal_window_open()) return false;
+  // The menu button is refused while any message window is open, a frameless label included.
+  if (menu_request && any_window_open()) return false;
   const u32 gflags = vm_.global_flags();
   if ((gflags & script::gflag::kInputLock) && !(menu_request && (gflags & script::gflag::kMenuUnderLock))) return false;
   // A mod UI that has taken a pick holds the pad (script::ModUi::holds_controls).

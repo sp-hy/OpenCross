@@ -1,0 +1,17 @@
+# Belthasar's narration over Terra Tower (end_a04e entered with parameter 1, as sta_a25i enters it): four frameless {mend} windows
+# opened after the room script gave the controls back. Each one waits for confirm, and the menu button stays refused while one is open.
+0 wait idle 600
+- load end_a04e 1
+- wait room end_a04e 600
+- wait text Terra Tower is really a
+- wait 200
+- assert text Terra Tower is really a
+- tap triangle
+- wait 120
+- assert menu closed
+- assert text Terra Tower is really a
+- action
+- wait 60
+- assert notext Terra Tower is really a
+- mash until room end_a02e 3000
+- quit

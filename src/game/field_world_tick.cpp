@@ -661,10 +661,9 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
   } else if (confirm) {
     input_.action_pending = true;
   }
-  // A frameless window (flag 0x10, `label_` here) is an ordinary window to the engine: a `{mend}` message waits for the button. While a
-  // script has the controls locked the button must reach it, or the
-  // scene waits for ever; with the controls free the world-map style labels close by themselves ({wend}) and the key stays an action.
-  if (confirm && (vm_.global_flags() & script::gflag::kInputLock)) {
+  // A frameless window (flag 0x10, `label_` here) takes the button like any window, whether or not the controls are locked: its page
+  // and `{mend}` waits need it. Being non-modal, it leaves the key an action as well.
+  if (confirm) {
     if (dialogue_.is_open() && label_) dialogue_.confirm();
     for (auto& window : extra_win_)
       if (window.box && window.box->is_open() && window.label) window.box->confirm();

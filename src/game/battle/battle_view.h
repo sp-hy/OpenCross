@@ -636,7 +636,9 @@ class BattleView {
   // Timeline op 0x22 of a per-target repeat serving target index `target` > 0: a clone of the acting unit's emitter that follows that target.
   void anm_effect_for_target(int unit, const std::string& name, int target);
   // Op 0x39 point of the unit emitters: selector `sel` (1 / 9 the actor, 2 / 0xD target 0, 0xE..0x15 target 1..8 of the action's target
-  // list in ascending unit order) at attach point `joint` - 2, and that unit's yaw. False when the selector names no unit.
+  // list in ascending unit order, 10 / 11 acting-list entry 1 / 2; 3 / 4 / 5 the acting list / the targets / every unit, 0x16 / 0x17 the
+  // targets on the ground) at attach point `joint` - 2, and the unit's yaw (a list: the bounding-box midpoint and the mean yaw). False when
+  // the selector names no unit.
   bool anm_point(int sel, int joint, effects::Vec3& pos, float& yaw);
   // Every unit model's S6 DRP headers (resident registry file).
   void anm_add_s6(effects::EffectBank& bank) const;
