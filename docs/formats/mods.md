@@ -223,15 +223,18 @@ Reserve=3
 * **Resolution** (`features::resolve`, once at launch, in `App::init_vfs`): every feature starts at its defaults, then the enabled mods with a `mod.ini` apply their values, the first mod in the list winning each key (a key two mods set differently is logged as a conflict with the winner), then the player's `[Features]` overrides in `opencross.ini` (`<Feature>.<Setting>=<value>`, `config.md` 2.4), which win over every mod. *Load on* does not apply: features are not art. Like game data, the result stays as it is until the next launch: the Mods tab shows the mod's features under its name with that notice. A scripted run (`[Debug] Script`) has no mods (unless `[Debug] ScriptMods=1`): its features are then the `[Features]` lines of the route's own ini, so a route that tests a feature turns it on there.
 * **Saves.** A feature never stores anything a save without it cannot load, so a mod that turns one on can be removed at any time.
 * **Field-script ops.** A mod's own scripts can query a feature (`GET_FEATURE_LEVEL`) and, for features that have them, change it at run time with their extension ops; the `mod.ini` gives the starting values.
+* **Two kinds, and the Mods tab.** An **addon** works on the game as shipped (party swap, the party screen tweaks): the Mods tab's *Engine features* page offers its toggle and settings, and the player's choice wins over every mod. Where a mod sets a value the page says so ("Set by <mod>."); where the player's value replaces it, "Overriding <mod>", and a click on that drops the player's value. A **mod kit** does nothing without a mod's own scripts or data (the mod UI ops, model sources): the player cannot switch it, and the page lists it with the enabled mods that use it (set its section or name it in `Requires`); the unused ones are behind *Show unused*. Settings that are plumbing for a mod's data (a variable handle, a rate) are never shown. A feature with no section (the extension range itself) is not listed. Each feature's kind is the `player` flag of its row in the table, each setting's `shown` flag; `about` is the page's description of it.
 
 The features this build has:
 
-| Section | Id | Settings | What it does |
-|---|---|---|---|
-| (none) | 0 | | The field-script extension range itself (`fieldscript.md` 6.12): not set by mods. |
-| `PartySwap` | 1 | `Enabled` (0), `KeepLineup` (0), `Reserve` (0, 0..41) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). `Reserve` slots are set on the Party screen (`rules/menus.md`, party editor) and by the ops FE CC / FE CD; 0 (the default) = no slots, everyone recruited outside the party can come in, as at level 1. |
-| (none) | 2 | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12): not set by mods. |
-| `PartyScreen` | 3 | `Enabled` (0), `ReturnToSlot` (1) | Party screen (Tele-Porter) behaviour that differs from the game: `ReturnToSlot` = a pick returns the cursor to the slot it filled instead of keeping the member grid open (`rules/menus.md`, party editor). |
+| Section | Id | Kind | Settings | What it does |
+|---|---|---|---|---|
+| (none) | 0 | | | The field-script extension range itself (`fieldscript.md` 6.12): not set by mods. |
+| `PartySwap` | 1 | addon | `Enabled` (0), `KeepLineup` (0), `Reserve` (0, 0..41) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). `Reserve` slots are set on the Party screen (`rules/menus.md`, party editor) and by the ops FE CC / FE CD; 0 (the default) = no slots, everyone recruited outside the party can come in, as at level 1. |
+| `ModUi` | 2 | mod kit | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12); a mod names it in `Requires`. |
+| `PartyScreen` | 3 | addon | `Enabled` (0), `ReturnToSlot` (1) | Party screen (Tele-Porter) behaviour that differs from the game: `ReturnToSlot` = a pick returns the cursor to the slot it filled instead of keeping the member grid open (`rules/menus.md`, party editor). |
+| `ModelSources` | 5 | mod kit | | Models from elsewhere on NPCs: field script FE D0 `MODEL_SOURCE` (`fieldscript.md` 6.12); a mod names it in `Requires`. |
+| `ButtonPanel` | 6 | mod kit | | Button panel: field script FE D1 `BUTTON_PANEL` (`fieldscript.md` 6.12, `rules/menus.md` section 15). The engine's own correction of `kji_b01i` uses it for the story's code machine; a mod's script can use it for a code of its own and name it in `Requires`. |
 
 ## 9. Shader looks (matcaps and colour grades)
 
