@@ -53,6 +53,8 @@ std::optional<std::vector<assets::AnimationClip>> load_ex_clips(ByteSpan obj, By
 // 0x80 after the attach). A pack entry for another joint count keeps its index as an empty clip (no keyframes): one pack can serve two
 // skeletons in different index ranges. Fails when no entry fits.
 std::optional<std::vector<assets::AnimationClip>> load_mdl_clips(ByteSpan mdl, ByteSpan pack, const char* source, std::string* err = nullptr);
+// The skeleton (S2) of a 6-section Mdl alone, decoded as load_model does.
+std::optional<assets::Skeleton> load_mdl_skeleton(ByteSpan mdl, std::string* err = nullptr);
 
 // Section `index` (0 = S1 mesh, 1 = S2 skeleton, ... 5 = S6) of a 6-section Mdl, up to the next non-zero section / the EOF word.
 // Empty when the header is not a 6-section Mdl or the section is absent.
@@ -61,6 +63,9 @@ ByteSpan mdl_section(ByteSpan mdl, int index);
 // difference, every other byte stays. nullopt unless both are 6-section Mdls with byte-identical S2 (skeleton). Gives an effect
 // pack's copy of a battle model given the model's cdrom2 (HD art) mesh.
 std::optional<Bytes> mdl_with_mesh_of(ByteSpan mdl, ByteSpan donor);
+// A Status-screen menu model (menu/player/<name>.ome, a cpt: entry 3 = Mdl, entry 5 = Atim, empty in the HD art set): its Mdl's short
+// header (5 sections, or 4 in the HD art set) rebuilt into the 6-section form and decoded with the Atim; `hd_tim` as for load_model.
+std::optional<assets::ModelAsset> load_menu_model(ByteSpan ome, ByteSpan hd_tim, std::string* err = nullptr);
 
 // The main texture of a battle model's .ltd / .ltc (first atim, first image) as raw 8 bpp indices plus CLUT row 0. nullopt if malformed.
 struct AtimMain {

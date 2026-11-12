@@ -1099,6 +1099,34 @@ std::optional<Bytes> mdl_with_mesh_of(ByteSpan mdl, ByteSpan donor) {
   return out;
 }
 
+std::optional<ModelAsset> load_menu_model(ByteSpan ome, ByteSpan hd_tim, std::string* err) {
+  const auto cpt = parse_cpt(ome);
+  if (!cpt || cpt->entries.size() < 6) {
+    if (err) *err = "menu model: not a 6-entry cpt";
+    return std::nullopt;
+  }
+  // The disc file has 5 sections (S1 at 0x1C), the HD art set's 4 (S1 at 0x18, no S5; its "EOF" word equals S4, the anim pack that
+  // follows it, so the word cannot be trusted). The standard header has 6 sections (S1 at 0x20, missing sections 0, EOF = the real size).
+  Bytes mdl(cpt->entries[3].data.begin(), cpt->entries[3].data.end());
+  if (mdl.size() > 0x20 && (mdl[0] == 4 || mdl[0] == 5)) {
+    const size_t sections = mdl[0], old_header = 4 * (sections + 2), shift = 0x20 - old_header;
+    Bytes fixed(mdl.size() + shift, 0);
+    auto word = [&](size_t offset) {
+      u32 value;
+      std::memcpy(&value, mdl.data() + offset, 4);
+      return value;
+    };
+    auto put = [&](size_t offset, u32 value) { std::memcpy(fixed.data() + offset, &value, 4); };
+    put(0, 6);
+    for (size_t k = 0; k < sections; ++k)
+      if (const u32 offset = word(4 + 4 * k)) put(4 + 4 * k, offset + static_cast<u32>(shift));
+    put(28, static_cast<u32>(fixed.size()));
+    std::copy(mdl.begin() + static_cast<std::ptrdiff_t>(old_header), mdl.end(), fixed.begin() + 0x20);
+    mdl = std::move(fixed);
+  }
+  return load_model(mdl, cpt->entries[5].data, ByteSpan{}, err, hd_tim);
+}
+
 std::optional<AtimMain> load_atim_main(ByteSpan tex) {
   return guarded(nullptr, [&] {
     const auto atims = parse_atim_file(tex);
@@ -1281,6 +1309,28 @@ std::optional<std::vector<AnimationClip>> load_ex_clips(ByteSpan obj, ByteSpan e
       out.push_back(make_clip(raws[i], raw, "ex", static_cast<u32>(i)));
     }
     return out;
+  });
+}
+
+std::optional<Skeleton> load_mdl_skeleton(ByteSpan mdl, std::string* err) {
+  return guarded(err, [&] {
+    SpanReader reader(mdl);
+    if (mdl.size() < 32 || reader.at<u32>(0) != 6) fail("not a 6-section Mdl");
+    const u32 s2 = reader.at<u32>(8), s3 = reader.at<u32>(12);
+    if (!(s2 < s3 && s3 <= mdl.size())) fail("skeleton section pointers");
+    const auto raw = parse_skeleton(reader, s2, s3);
+    Skeleton skeleton;
+    skeleton.joints.resize(raw.size());
+    for (size_t i = 0; i < raw.size(); ++i) {
+      Joint& joint = skeleton.joints[i];
+      joint.parent = raw[i].parent;
+      joint.rest_rot_deg = {static_cast<float>(raw[i].rot[0] * kAngleUnit), static_cast<float>(raw[i].rot[1] * kAngleUnit),
+                            static_cast<float>(raw[i].rot[2] * kAngleUnit)};
+      joint.rest_quat = quat_zyx(joint.rest_rot_deg);
+      joint.rest_trans = {static_cast<float>(raw[i].trans[0]), static_cast<float>(raw[i].trans[1]), static_cast<float>(raw[i].trans[2])};
+      joint.bone = raw[i].bone_ref == 0xFFFFFFFFu ? -1 : static_cast<int>(raw[i].bone_ref >> 16);
+    }
+    return skeleton;
   });
 }
 

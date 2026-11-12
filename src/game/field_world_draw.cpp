@@ -12,8 +12,10 @@
 #include "game/effects/fx_math.h"
 #include "game/field_world_internal.h"
 #include "game/mirror_copy.h"
+#include "game/model_files.h"
 #include "import/tim.h"
 #include "render/texture.h"
+#include "render/texture_registry.h"
 
 namespace oc::game {
 
@@ -279,8 +281,9 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
   auto cast_tile = [&](Actor& actor, float floor_y, int grey) {
     if (tile == 0) shadow_tiles_.begin_tiles(frame);
     const ActorPose pose = actor.pose(alpha);
-    const render::Mat4 model = actor.model_matrix(alpha);
+    render::Mat4 model = actor.model_matrix(alpha);
     actor.palette(alpha, palette);
+    const MenuBody* menu = dress(actor, palette, model);
     float reach = 0.0f;
     for (const render::Mat4& joint : palette) {
       const render::Mat4 world = model * joint;
@@ -291,7 +294,13 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
     shadow_tiles_.place_tile(tile++, pose.x, pose.z, floor_y, half);
     std::array<render::ShadowPipeline::Cast, render::ShadowPipeline::kChannels> casts;
     casts[0] = {{0.0f, 1.0f, 0.0f}, std::clamp(static_cast<float>(grey) / 90.0f, 0.0f, 1.0f)};
-    shadow_tiles_.cast(*actor.gpu(), model, palette, actor.hidden_parts(), 0, casts);
+    if (menu) {
+      render::MeshPipeline::DrawParams parts;
+      menu_model_parts(menu->body->asset, parts);
+      shadow_tiles_.cast(*menu->body->gpu, model, palette, parts.hidden_meshes, parts.env_meshes, casts);
+    } else {
+      shadow_tiles_.cast(*actor.gpu(), model, palette, actor.hidden_parts(), 0, casts);
+    }
     return half;
   };
   for (size_t index = 0; index < ents_.size() && tile < kMaxTiles; ++index) {
@@ -317,6 +326,68 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
 }
 
 // ------------------------------------------------------------------------------------------------ actors
+// A character model in the cache up to the last menu model is known by its byte. Any other model (a body past the menu models, an NPC
+// wearing a room's own copy of a character, a model from elsewhere) is that character's when it has the character's field skeleton and
+// mesh exactly (the first byte that matches: Glenn's two field models share both); Lynx's own body (0x33) is a copy of Serge's Lynx body
+// (0x31), the cat and boat bodies copy nobody. Serge and Lynx never meet here: their field skeletons differ. The field mesh is read only
+// for a skeleton that matches.
+int FieldWorld::worn_model_byte(const std::shared_ptr<ModelHandle>& model) {
+  for (const auto& [byte, handle] : char_models_)
+    if (handle == model && byte <= kLastMenuModel) return byte;
+  if (const auto it = worn_models_.find(model.get()); it != worn_models_.end() && it->second.model.lock() == model) return it->second.byte;
+  if (field_skeletons_.empty() || field_skeletons_hd_ != hd_) {
+    field_skeletons_.assign(kLastMenuModel + 1, std::nullopt);
+    field_skeletons_hd_ = hd_;
+    for (int byte = 0; byte <= kLastMenuModel; ++byte)
+      if (const std::string stem = model_stem(byte); !stem.empty()) field_skeletons_[static_cast<size_t>(byte)] = read_field_skeleton(*files_, stem);
+  }
+  int found = -1;
+  for (size_t byte = 0; byte < field_skeletons_.size() && found < 0; ++byte) {
+    if (!field_skeletons_[byte] || !same_skeleton(model->asset.skeleton, *field_skeletons_[byte])) continue;
+    std::string err;
+    const auto field = read_model_files(*files_, "fieldobj/player/" + model_stem(static_cast<int>(byte)), &err);
+    if (field && same_mesh(model->asset, *field)) found = static_cast<int>(byte);
+  }
+  worn_models_[model.get()] = {model, found};
+  return found;
+}
+
+// [Enhancements] MenuModelsInField: an actor wearing a character's field model (character model bytes up to the last menu model, the
+// numbering the Status screen's body uses; worn_model_byte) is drawn with that character's menu model when the two skeletons match
+// (MenuRig::usable). The menu model is read and matched on first use and again after an art or texture change; every model with the same
+// skeleton shares the match.
+const FieldWorld::MenuBody* FieldWorld::dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model) {
+  if (!menu_models_ || !files_ || !meshes_ || !actor.model_handle()) return nullptr;
+  const int model_byte = worn_model_byte(actor.model_handle());
+  if (model_byte < 0) return nullptr;
+  const ModelHandle* field = actor.model_handle().get();
+  const unsigned generation = render::texture_registry::generation();
+  MenuBody& menu = menu_bodies_[model_byte];
+  if (menu.generation != generation || !same_skeleton(menu.skeleton, field->asset.skeleton)) {
+    menu = MenuBody{};
+    menu.skeleton = field->asset.skeleton;
+    menu.generation = generation;
+    std::string err;
+    if (auto asset = read_menu_model(*files_, model_byte, hd_, &err)) {
+      const auto map = menu_rig_map(model_byte);
+      menu.rig = map.empty() ? match_menu_rig(field->asset, *asset) : match_menu_rig(field->asset, *asset, map);
+      if (menu.rig.usable) {
+        menu.body = Actor::make_model(*meshes_, std::move(*asset));
+      } else {
+        log::info("field: menu model {} not used: {} field joints unmatched ({} with children), bone angles {:.0f} / {:.0f} deg", menu_model_stem(model_byte),
+                  menu.rig.unmatched, menu.rig.unmatched_inner, menu.rig.bone_p90, menu.rig.bone_max);
+      }
+    } else {
+      log::warn("field: menu model {}: {}", model_byte, err);
+    }
+  }
+  if (!menu.body || !menu.body->gpu) return nullptr;
+  menu_rig_palette(menu.rig, palette, menu_palette_);
+  palette.swap(menu_palette_);
+  model = model * render::mat4_scale(menu.rig.scale);
+  return &menu;
+}
+
 // Each actor in the field ordering-table mode of the mesh pipeline: one slot per face plus the actor's layer word, the shading flags of
 // the instance, and the water rule: on a water triangle the faces below the class's water level take the underwater colour and are
 // pushed back by the water bias (the room default = layer 0's z), so the semi-transparent water layer blends over them. `wet` selects
@@ -357,10 +428,13 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
     }
     entity.actor.use_hd = hd_;
     entity.actor.palette(alpha, palette);
+    render::Mat4 model = entity.actor.model_matrix(alpha);
+    const MenuBody* menu = dress(entity.actor, palette, model);
+    const render::MeshModel& gpu = menu ? *menu->body->gpu : *entity.actor.gpu();
     render::MeshPipeline::DrawParams dp;
     dp.view_proj = view_proj;
     dp.view = view;
-    dp.model = entity.actor.model_matrix(alpha);
+    dp.model = model;
     dp.palette = palette;
     dp.linear = view_.linear_filter;
     dp.hd = entity.actor.use_hd;
@@ -370,6 +444,7 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
     dp.water_bias = water_bias;
     dp.hidden_meshes = entity.actor.hidden_parts();
     dp.near_meshes = entity.actor.near_parts();
+    if (menu) menu_model_parts(menu->body->asset, dp);
     const auto tint = RoomLighting::tint(entity.light, entity.rgb);
     for (size_t channel = 0; channel < 3; ++channel) dp.tint[channel] = tint[channel];
     if (const int slot = RoomLighting::water_slot(tri_flags); slot >= 0 && !(vm_ent.flags38 & 0x10C020)) {
@@ -394,7 +469,7 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
     dp.flash = !no_model_fx && entity.flash;
     dp.slot_min = slab_min_;
     dp.slot_max = slab_max_;
-    if (wet != Wet::WetOnly || wet_actor) meshes.draw(*entity.actor.gpu(), dp);
+    if (wet != Wet::WetOnly || wet_actor) meshes.draw(gpu, dp);
     if (has_copy && wet != Wet::DryOnly) {
       render::Mat4 reflection;
       reflection.at(copy_axis, copy_axis) = -1.0f;
@@ -408,7 +483,7 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
       copy.light.on = false;
       copy.mirror = true;
       copy.flash = false;
-      meshes.draw(*entity.actor.gpu(), copy);
+      meshes.draw(gpu, copy);
     }
   }
   if (wet != Wet::WetOnly && remote_options_.labels) place_local_label(alpha);

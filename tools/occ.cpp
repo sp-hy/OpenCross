@@ -18,6 +18,8 @@
 //   occ models-validate                      validate every model class (players, monsters, field, at0, weapons, kmd, ex)
 //   occ room-songs [room]                    every PLAY_SONG of the room scripts with the song id and its BGM track
 //   occ room-models [room]                   import every room model (subfiles 11+) of all rooms / one room, report failures
+//   occ menu-rigs [--hd] [byte]              how each menu model's skeleton matches its character's field model ([Enhancements] MenuModelsInField);
+//                                            with a model byte (hex), every joint of that pair
 //   occ battlefields [--inc <file>]          which rooms fight on which stage (every BATTLE op of every room script -> bg_NN); --inc writes
 //                                            src/data/battlefield_rooms.inc (the Debug tab's battlefield labels)
 //   occ world-markers [--inc <file>]         the overworld screens' location markers: label text (EN) -> target room, and the room-prefix ->
@@ -26,11 +28,13 @@
 //   occ save-info | save-slots | save-roundtrip | save-blank <save.dat> ...   save-file tools, no GameDir needed (tools/occ_save.cpp)
 // GameDir comes from -g <dir> or the OPENCROSS_GAMEDIR environment variable.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <cstdlib>
 #include <cstring>
+#include <format>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -38,6 +42,9 @@
 #include "audio/bgm_table.h"
 #include "data/battlefields.h"
 #include "data/tables.h"
+#include "game/disc_index.h"
+#include "game/menu_rig.h"
+#include "game/model_files.h"
 #include "core/log.h"
 #include "import/chip2.h"
 #include "import/container.h"
@@ -122,6 +129,7 @@ int usage() {
                "  | models-validate\n"
                "  | room-songs [room]\n"
                "  | room-models [room]\n"
+               "  | menu-rigs [--hd] [byte]\n"
                "  | save-info <save.dat>\n"
                "  | save-slots <save.dat>\n"
                "  | save-roundtrip <save.dat> <out.dat>\n"
@@ -1280,6 +1288,253 @@ int cmd_world_markers(const vfs::Vfs& fs, const std::vector<std::string>& args) 
   return 0;
 }
 
+// Rest-pose position of every joint of a model, in shares of the joints' vertical extent, the number of mesh vertices bound to it and their
+// centre (the joint's position without vertices): where a joint's piece lies when joints share one point.
+struct RigJointRow {
+  std::array<float, 3> pos{}, centre{};
+  int vertices = 0;
+};
+std::vector<RigJointRow> rig_rows(const assets::ModelAsset& model) {
+  std::vector<RigJointRow> rows(model.skeleton.joints.size());
+  std::vector<assets::Mat3> rot(rows.size());
+  float low = 0.0f, high = 0.0f;
+  for (size_t j = 0; j < rows.size(); ++j) {
+    const assets::Joint& joint = model.skeleton.joints[j];
+    const assets::Mat3 local = assets::rotation_zyx(joint.rest_rot_deg);
+    if (joint.parent < 0) {
+      rot[j] = local;
+      rows[j].pos = joint.rest_trans;
+    } else {
+      const size_t parent = static_cast<size_t>(joint.parent);
+      const assets::Mat3& up = rot[parent];
+      for (size_t row = 0; row < 3; ++row) {
+        rows[j].pos[row] = rows[parent].pos[row] + up[row * 3] * joint.rest_trans[0] + up[row * 3 + 1] * joint.rest_trans[1] + up[row * 3 + 2] * joint.rest_trans[2];
+        for (size_t col = 0; col < 3; ++col) rot[j][row * 3 + col] = up[row * 3] * local[col] + up[row * 3 + 1] * local[3 + col] + up[row * 3 + 2] * local[6 + col];
+      }
+    }
+    low = j == 0 ? rows[j].pos[1] : std::min(low, rows[j].pos[1]);
+    high = j == 0 ? rows[j].pos[1] : std::max(high, rows[j].pos[1]);
+  }
+  const float height = high > low ? high - low : 1.0f;
+  for (RigJointRow& row : rows)
+    for (float& axis : row.pos) axis /= height;
+  for (const assets::Mesh& mesh : model.meshes)
+    for (const assets::SkinVertex& vertex : mesh.pool) {
+      if (vertex.joint[0] >= rows.size()) continue;
+      RigJointRow& row = rows[vertex.joint[0]];
+      ++row.vertices;
+      for (size_t axis = 0; axis < 3; ++axis) row.centre[axis] += vertex.bind_pos[axis] / height;
+    }
+  for (RigJointRow& row : rows)
+    for (size_t axis = 0; axis < 3; ++axis) row.centre[axis] = row.vertices > 0 ? row.centre[axis] / static_cast<float>(row.vertices) : row.pos[axis];
+  return rows;
+}
+
+// The model's joint matrices at the first keyframe of its stand-by clip (clip 1; the rest pose without one).
+std::vector<render::Mat4> stand_palette(const assets::ModelAsset& model) {
+  const assets::AnimationClip* clip = model.clips.size() > 1 ? &model.clips[1] : nullptr;
+  std::vector<render::Mat4> out;
+  for (size_t j = 0; j < model.skeleton.joints.size(); ++j) {
+    const assets::Joint& joint = model.skeleton.joints[j];
+    assets::Vec3 rot = joint.rest_rot_deg, trans = joint.rest_trans;
+    if (clip && j < clip->tracks.size()) {
+      if (!clip->tracks[j].rot.empty()) rot = clip->tracks[j].rot[0].v;
+      if (!clip->tracks[j].trans.empty()) trans = clip->tracks[j].trans[0].v;
+    }
+    const render::Mat4 local = render::mat4_from_rt(assets::rotation_zyx(rot), trans);
+    out.push_back(joint.parent >= 0 ? out[static_cast<size_t>(joint.parent)] * local : local);
+  }
+  return out;
+}
+
+// How the posed menu model follows the field model in its stand pose: per paired bone the angle between the field bone and its menu bone
+// (mean, worst), and the angle between the two models' root-to-head lines (the lean).
+struct PoseAgreement {
+  float mean = 0.0f, worst = 0.0f, lean = 0.0f;
+};
+PoseAgreement pose_agreement(const assets::ModelAsset& field, const game::MenuRig& rig) {
+  const std::vector<render::Mat4> field_palette = stand_palette(field);
+  std::vector<render::Mat4> menu_palette;
+  game::menu_rig_palette(rig, field_palette, menu_palette);
+  std::vector<int> partner(field_palette.size(), -1);
+  for (size_t k = 0; k < rig.field_joint.size(); ++k)
+    if (rig.field_joint[k] >= 0) partner[static_cast<size_t>(rig.field_joint[k])] = static_cast<int>(k);
+  auto angle = [](const render::Mat4& from_a, const render::Mat4& to_a, const render::Mat4& from_b, const render::Mat4& to_b, float& out) {
+    float a[3], b[3], dot = 0.0f, length_a = 0.0f, length_b = 0.0f;
+    for (int axis = 0; axis < 3; ++axis) {
+      a[axis] = to_a.at(axis, 3) - from_a.at(axis, 3), b[axis] = to_b.at(axis, 3) - from_b.at(axis, 3);
+      dot += a[axis] * b[axis], length_a += a[axis] * a[axis], length_b += b[axis] * b[axis];
+    }
+    if (length_a < 400.0f || length_b < 100.0f) return false;
+    out = std::acos(std::clamp(dot / std::sqrt(length_a * length_b), -1.0f, 1.0f)) * 180.0f / 3.14159265f;
+    return true;
+  };
+  PoseAgreement result;
+  int bones = 0;
+  for (size_t i = 0; i < field_palette.size(); ++i) {
+    const int parent = field.skeleton.joints[i].parent;
+    if (parent < 0 || partner[i] < 0 || partner[static_cast<size_t>(parent)] < 0) continue;
+    float degrees = 0.0f;
+    if (!angle(field_palette[static_cast<size_t>(parent)], field_palette[i], menu_palette[static_cast<size_t>(partner[static_cast<size_t>(parent)])],
+               menu_palette[static_cast<size_t>(partner[i])], degrees))
+      continue;
+    result.mean += degrees, result.worst = std::max(result.worst, degrees), ++bones;
+  }
+  if (bones > 0) result.mean /= static_cast<float>(bones);
+  if (field.attach.points.size() > 1) {
+    const size_t head = field.attach.points[1].joint;
+    if (head < partner.size() && partner[head] >= 0)
+      angle(field_palette[0], field_palette[head], menu_palette[0], menu_palette[static_cast<size_t>(partner[head])], result.lean);
+  }
+  return result;
+}
+
+// occ menu-rigs [--hd] [byte]: for every menu model, the field model of the same character model byte and how well their skeletons match
+// (game/menu_rig.h): joint counts, unmatched field joints (with children), mean joint distance (share of the height), bone angles, the
+// pairing strategy kept (under / beside / full = BesideWhenFull), scale, and in the stand pose the mean / worst bone angle between the
+// field and the posed menu model and the lean of the root-to-head line.
+// With a byte: every menu joint of that pair, its parent, its field partner, rest positions (% of the height) and bound vertex counts.
+int cmd_menu_rigs(vfs::Vfs& fs, bool hd, int only) {
+  fs.set_hd_mode(hd);
+  game::DiscIndex discs;
+  if (!discs.load(fs)) {
+    std::fprintf(stderr, "menu-rigs: no disc index\n");
+    return 1;
+  }
+  std::printf("%-4s %-18s %-9s %3s %3s %9s %7s %6s %6s %-6s %6s %6s %6s %6s  %s\n", "byte", "field", "menu", "fJ", "mJ", "unmatched", "offset%", "p90",
+              "max", "plan", "scale", "pose", "worst", "lean", "usable");
+  float lean_sum = 0.0f, pose_sum = 0.0f;
+  constexpr const char* kPlanNames[4] = {"under", "beside", "full", "map"};
+  int usable = 0, total = 0;
+  for (int model = 0; model <= game::kLastMenuModel; ++model) {
+    const std::string field_stem = discs.field_model_stem(1, model);
+    if (field_stem.empty() || (only >= 0 && model != only)) continue;
+    std::string err;
+    const auto field = game::read_model_files(fs, "fieldobj/player/" + field_stem, &err);
+    const auto menu = game::read_menu_model(fs, model, hd, &err);
+    if (!field || !menu) {
+      std::printf("%-4X %-18s %-9s %s\n", model, field_stem.c_str(), game::menu_model_stem(model).c_str(), err.c_str());
+      continue;
+    }
+    const auto map = game::menu_rig_map(model);
+    const game::MenuRig rig = map.empty() ? game::match_menu_rig(*field, *menu) : game::match_menu_rig(*field, *menu, map);
+    ++total;
+    usable += rig.usable ? 1 : 0;
+    const PoseAgreement pose = pose_agreement(*field, rig);
+    if (rig.usable) lean_sum += pose.lean, pose_sum += pose.mean;
+    std::printf("%-4X %-18s %-9s %3zu %3zu %5d (%d) %7.1f %6.1f %6.1f %-6s %6.2f %6.1f %6.1f %6.1f  %s\n", model, field_stem.c_str(),
+                game::menu_model_stem(model).c_str(), field->skeleton.joints.size(), menu->skeleton.joints.size(), rig.unmatched, rig.unmatched_inner,
+                rig.mean_offset * 100.0f, rig.bone_p90, rig.bone_max, kPlanNames[static_cast<int>(rig.plan)], rig.scale, pose.mean, pose.worst, pose.lean,
+                rig.usable ? "yes" : "no");
+    if (only < 0) continue;
+    const std::vector<RigJointRow> menu_rows = rig_rows(*menu), field_rows = rig_rows(*field);
+    std::printf("menu joint  parent  field  menu pos %%            verts  vertex centre %%        field pos %%           verts\n");
+    for (size_t j = 0; j < menu_rows.size(); ++j) {
+      const int partner = rig.field_joint[j];
+      std::printf("%5zu %7d %6d  %6.1f %6.1f %6.1f  %5d  %6.1f %6.1f %6.1f", j, menu->skeleton.joints[j].parent, partner, menu_rows[j].pos[0] * 100.0f,
+                  menu_rows[j].pos[1] * 100.0f, menu_rows[j].pos[2] * 100.0f, menu_rows[j].vertices, menu_rows[j].centre[0] * 100.0f,
+                  menu_rows[j].centre[1] * 100.0f, menu_rows[j].centre[2] * 100.0f);
+      if (partner >= 0) {
+        const RigJointRow& row = field_rows[static_cast<size_t>(partner)];
+        std::printf("   %6.1f %6.1f %6.1f  %5d", row.pos[0] * 100.0f, row.pos[1] * 100.0f, row.pos[2] * 100.0f, row.vertices);
+      }
+      std::printf("\n");
+    }
+    std::printf("field joint  parent  field pos %%            verts  vertex centre %%       menu joints\n");
+    for (size_t i = 0; i < field_rows.size(); ++i) {
+      std::printf("%5zu %7d  %6.1f %6.1f %6.1f  %5d  %6.1f %6.1f %6.1f ", i, field->skeleton.joints[i].parent, field_rows[i].pos[0] * 100.0f,
+                  field_rows[i].pos[1] * 100.0f, field_rows[i].pos[2] * 100.0f, field_rows[i].vertices, field_rows[i].centre[0] * 100.0f,
+                  field_rows[i].centre[1] * 100.0f, field_rows[i].centre[2] * 100.0f);
+      for (size_t j = 0; j < rig.field_joint.size(); ++j)
+        if (rig.field_joint[j] == static_cast<int>(i)) std::printf(" %zu", j);
+      std::printf("\n");
+    }
+  }
+  std::printf("menu-rigs: %d of %d usable; over the usable ones, mean stand-pose bone angle %.1f, mean lean %.1f degrees\n", usable, total,
+              usable > 0 ? pose_sum / static_cast<float>(usable) : 0.0f, usable > 0 ? lean_sum / static_cast<float>(usable) : 0.0f);
+  return 0;
+}
+
+// occ menu-rigs --rooms [--hd]: which room models are a playable character's field model (the same skeleton and mesh, game::same_skeleton /
+// same_mesh), so MenuModelsInField also draws those NPCs with the character's menu model; per character byte the room models with the same
+// skeleton and mesh, with the same skeleton but another mesh (another person on the character's rig: not taken), and with the field
+// model's joint count and parents but other rest values (not taken).
+int cmd_menu_rig_rooms(vfs::Vfs& fs, bool hd) {
+  fs.set_hd_mode(hd);
+  game::DiscIndex discs;
+  if (!discs.load(fs)) {
+    std::fprintf(stderr, "menu-rigs: no disc index\n");
+    return 1;
+  }
+  std::vector<std::optional<assets::Skeleton>> skeletons(game::kLastMenuModel + 1);
+  std::vector<std::optional<assets::ModelAsset>> fields(skeletons.size());
+  for (int model = 0; model <= game::kLastMenuModel; ++model)
+    if (const std::string stem = discs.field_model_stem(1, model); !stem.empty()) {
+      skeletons[static_cast<size_t>(model)] = game::read_field_skeleton(fs, stem);
+      std::string err;
+      fields[static_cast<size_t>(model)] = game::read_model_files(fs, "fieldobj/player/" + stem, &err);
+    }
+  std::vector<int> found(skeletons.size(), 0), other_mesh(skeletons.size(), 0), shaped(skeletons.size(), 0);
+  std::vector<std::string> first(skeletons.size());
+  int rooms = 0, models = 0, characters = 0, ambiguous = 0;
+  for (const auto& room_name : list_rooms(fs)) {
+    auto bin = fs.read(room_path(room_name, ".bin"));
+    auto ctd = fs.read(room_path(room_name, ".ctd"));
+    if (!bin || !ctd) continue;
+    std::string err;
+    auto scene = import::load_room(room_name, *bin, *ctd, {}, &err);
+    if (!scene) continue;
+    ++rooms;
+    for (size_t k = 0; k < scene->models.size(); ++k) {
+      const auto skeleton = import::load_mdl_skeleton(scene->models[k].mdl);
+      if (!skeleton) continue;
+      ++models;
+      int hits = 0;
+      std::optional<assets::ModelAsset> room_asset;
+      for (size_t model = 0; model < skeletons.size(); ++model) {
+        if (!skeletons[model]) continue;
+        if (game::same_skeleton(*skeleton, *skeletons[model])) {
+          if (!room_asset) room_asset = import::load_room_model(scene->models[k].mdl, scene->models[k].page_textures);
+          if (!room_asset || !fields[model] || !game::same_mesh(*room_asset, *fields[model])) {
+            ++other_mesh[model];
+            continue;
+          }
+          ++hits;
+          if (found[model]++ == 0) first[model] = std::format("{} model {}", room_name, k);
+          continue;
+        }
+        bool parents = skeleton->joints.size() == skeletons[model]->joints.size();
+        for (size_t j = 0; parents && j < skeleton->joints.size(); ++j) parents = skeleton->joints[j].parent == skeletons[model]->joints[j].parent;
+        if (parents) ++shaped[model];
+      }
+      characters += hits > 0 ? 1 : 0;
+      ambiguous += hits > 1 ? 1 : 0;
+    }
+  }
+  std::printf("%-4s %-9s %8s %10s %14s  %s\n", "byte", "menu", "same", "other mesh", "parents only", "first");
+  for (size_t model = 0; model < skeletons.size(); ++model)
+    if (skeletons[model])
+      std::printf("%-4zX %-9s %8d %10d %14d  %s\n", model, game::menu_model_stem(static_cast<int>(model)).c_str(), found[model], other_mesh[model],
+                  shaped[model], first[model].c_str());
+  std::printf("menu-rigs --rooms: %d rooms, %d room models, %d that are a character's field model (%d matching more than one)\n", rooms, models,
+              characters, ambiguous);
+  // The field model bytes past the menu models (disguises and other bodies): the character whose field model each one copies, if any.
+  for (int byte = game::kLastMenuModel + 1; byte < 0x100; ++byte) {
+    const std::string stem = discs.field_model_stem(1, byte);
+    if (stem.empty()) continue;
+    std::string err;
+    const auto body = game::read_model_files(fs, "fieldobj/player/" + stem, &err);
+    std::string copies = "none";
+    for (size_t model = 0; body && model < skeletons.size(); ++model)
+      if (skeletons[model] && fields[model] && game::same_skeleton(body->skeleton, *skeletons[model]) && game::same_mesh(*body, *fields[model])) {
+        copies = std::format("{:X} {}", model, game::menu_model_stem(static_cast<int>(model)));
+        break;
+      }
+    std::printf("field model byte %X: %s, copies %s\n", byte, stem.c_str(), copies.c_str());
+  }
+  return 0;
+}
+
 // occ room-models [room]: imports every room model (subfiles 11+) of the room(s) and reports failures.
 int cmd_room_models(const vfs::Vfs& fs, const std::string& only) {
   size_t rooms_n = 0, models = 0, failed = 0, no_tex = 0, clips = 0;
@@ -1568,5 +1823,15 @@ int occ_main(int argc, char** argv) {
   if (cmd == "models-validate" && args.size() == 1) return cmd_models_validate(fs);
   if (cmd == "room-songs" && (args.size() == 1 || args.size() == 2)) return cmd_room_songs(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "room-models" && (args.size() == 1 || args.size() == 2)) return cmd_room_models(fs, args.size() == 2 ? args[1] : std::string());
+  if (cmd == "menu-rigs" && args.size() <= 3) {
+    bool hd = false, rooms = false;
+    int only = -1;
+    for (size_t i = 1; i < args.size(); ++i) {
+      if (args[i] == "--hd") hd = true;
+      else if (args[i] == "--rooms") rooms = true;
+      else only = static_cast<int>(std::strtol(args[i].c_str(), nullptr, 16));
+    }
+    return rooms ? cmd_menu_rig_rooms(fs, hd) : cmd_menu_rigs(fs, hd, only);
+  }
   return usage();
 }

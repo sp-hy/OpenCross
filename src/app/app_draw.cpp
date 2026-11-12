@@ -190,6 +190,7 @@ void App::apply_frame_options() {
     if (battle_ready) battle.set_keep_intro_layer(config.retain_battle_scenery);
     if (world_ok) world.set_smooth_rings(rings);
     if (world_ok) world.set_cast_shadows(config.lighting);
+    if (world_ok) world.set_menu_models(config.menu_models_in_field);
     status_model.set_cast_shadows(config.lighting);
     if (battle_ready) battle.set_smooth_rings(rings);
   }

@@ -105,6 +105,7 @@ void FieldWorld::drop_remote_models() {
     } else if (cached == char_models_.end()) {
       it = remote_loaded_.erase(it);
     } else if (std::find(wanted.begin(), wanted.end(), *it) == wanted.end() && (!cached->second || cached->second.use_count() == 1)) {
+      menu_bodies_.erase(cached->first);
       char_models_.erase(cached);
       it = remote_loaded_.erase(it);
     } else {
@@ -173,10 +174,12 @@ void FieldWorld::draw_remote_actors(render::MeshPipeline& meshes, const render::
       }
       actor.use_hd = hd_;
       actor.palette(alpha, palette);
+      render::Mat4 model = actor.model_matrix(alpha);
+      const MenuBody* menu = dress(actor, palette, model);
       render::MeshPipeline::DrawParams dp;
       dp.view_proj = view_proj;
       dp.view = view;
-      dp.model = actor.model_matrix(alpha);
+      dp.model = model;
       dp.palette = palette;
       dp.linear = view_.linear_filter;
       dp.hd = actor.use_hd;
@@ -185,12 +188,13 @@ void FieldWorld::draw_remote_actors(render::MeshPipeline& meshes, const render::
       dp.water_bias = water_bias;
       dp.hidden_meshes = actor.hidden_parts();
       dp.near_meshes = actor.near_parts();
+      if (menu) menu_model_parts(menu->body->asset, dp);
       const auto tint = RoomLighting::tint(member.light, std::array<int, 3>{128, 128, 128});
       for (size_t channel = 0; channel < 3; ++channel) dp.tint[channel] = tint[channel];
       dp.opacity = remote_options_.translucent ? kTranslucentOpacity : 1.0f;
       dp.slot_min = slab_min_;
       dp.slot_max = slab_max_;
-      meshes.draw(*actor.gpu(), dp);
+      meshes.draw(menu ? *menu->body->gpu : *actor.gpu(), dp);
     }
     const Actor& lead = party.members[0].actor;
     if (!remote_options_.labels || !party.members[0].placed) continue;

@@ -552,14 +552,7 @@ void FieldWorld::prefetch_party_models(const save::SaveSlot& slot) {
 std::string FieldWorld::model_stem(int model_byte) const {
   // Files 2b + 2 of the character ids are <folder>/<folder>.obj.
   if (model_byte >= 0 && model_byte < 44) return std::string(kCharFolders[model_byte]) + "/" + kCharFolders[model_byte];
-  if (model_byte < 0 || model_byte >= 0x100 || !discs_.loaded()) return {};
-  // Other bytes name the file by its index record; the file need not be named after its folder (0x3D = neko2/neko.obj).
-  constexpr int kFidToRecord = DiscIndex::kMapBase - 0x83;
-  const std::string& rec = discs_.record(disc_, 2 * model_byte + 2 + kFidToRecord);
-  const size_t stem_at = rec.find("fieldobj/player/");
-  if (stem_at == std::string::npos || !rec.ends_with(".obj")) return {};
-  const std::string stem = rec.substr(stem_at + 16, rec.size() - stem_at - 20);
-  return stem.find('/') == std::string::npos ? std::string() : stem;
+  return discs_.loaded() ? discs_.field_model_stem(disc_, model_byte) : std::string();
 }
 
 // D9: char = U@1 (FD / FE / FF = slot 0 / 1 / 2, <= 0x2B an id, else none). Nothing to do (none, or the

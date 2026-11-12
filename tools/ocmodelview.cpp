@@ -1,6 +1,7 @@
 // `opencross modelview [-g dir] [--model stem] [--sd]`: a window that shows one character model (field character, battle player
 // or monster) with an orbit camera, raw animation clips and an original / modded comparison. The original copy reads a Vfs
-// without mods and skips texture replacement; the modded copy uses the mods enabled in opencross.ini. Writes nothing: no save,
+// without mods and skips texture replacement; the modded copy uses the mods enabled in opencross.ini. A playable field character can be
+// shown as [Enhancements] MenuModelsInField draws it: its menu model posed by the field clip (game/menu_rig.h). Writes nothing: no save,
 // no config, no mod settings.
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_timer.h>
@@ -17,6 +18,8 @@
 #include <vector>
 
 #include "game/battle/battle_pose.h"
+#include "game/disc_index.h"
+#include "game/menu_rig.h"
 #include "game/model_files.h"
 #include "model_view.h"
 #include "platform/config.h"
@@ -56,27 +59,51 @@ struct TextureRegistryScope {
   }
 };
 
-// One copy of the model: original or modded.
+// One copy of the model: original or modded; for a playable field character also its menu model and the rig that poses it.
 struct Side {
   std::optional<assets::ModelAsset> asset;
   std::unique_ptr<render::MeshModel> gpu;
   game::UnitPose pose;
   std::string error;
+  std::optional<assets::ModelAsset> menu;
+  std::unique_ptr<render::MeshModel> menu_gpu;
+  game::MenuRig rig;
+  std::string menu_error;
 };
 
-void load_side(Side& side, const vfs::Vfs& files, const std::string& stem, bool modded, render::MeshPipeline& meshes) {
+// `menu_byte`: the character model byte of a playable field character (its menu model), -1 for any other model.
+void load_side(Side& side, const vfs::Vfs& files, const std::string& stem, bool modded, bool hd, int menu_byte, render::MeshPipeline& meshes) {
   side.pose.set_model(nullptr);
   side.gpu.reset();
+  side.menu_gpu.reset();
+  side.menu.reset();
+  side.rig = {};
   side.error.clear();
+  side.menu_error.clear();
   side.asset = game::read_model_files(files, stem, &side.error);
   if (!side.asset) return;
+  std::optional<TextureRegistryScope> scope;
   if (modded) {
-    TextureRegistryScope scope(files);
+    scope.emplace(files);
     render::resolve_model_textures(*side.asset);
   }
   side.gpu = meshes.create_model(*side.asset);
   if (!side.gpu) side.error = "GPU upload failed";
   side.pose.set_model(&*side.asset);
+  if (menu_byte < 0) return;
+  side.menu = game::read_menu_model(files, menu_byte, hd, &side.menu_error);
+  if (!side.menu) return;
+  const auto map = game::menu_rig_map(menu_byte);
+  side.rig = map.empty() ? game::match_menu_rig(*side.asset, *side.menu) : game::match_menu_rig(*side.asset, *side.menu, map);
+  side.menu_gpu = meshes.create_model(*side.menu);
+  if (!side.menu_gpu) side.menu_error = "GPU upload failed";
+}
+
+// The character model byte (up to the last menu model) whose field model is `stem`, -1 when it is none.
+int field_model_byte(const game::DiscIndex& discs, const std::string& stem) {
+  for (int byte = 0; byte <= game::kLastMenuModel; ++byte)
+    if (const std::string field = discs.field_model_stem(1, byte); !field.empty() && "fieldobj/player/" + field == stem) return byte;
+  return -1;
 }
 
 void show_stats(const char* label, const Side& side) {
@@ -105,6 +132,8 @@ int run_viewer(const mv::Options& options) {
     return 1;
   }
   const std::vector<mv::Entry> entries = mv::catalog(game::model_stems(original_files));
+  game::DiscIndex discs;
+  discs.load(original_files);
   if (entries.empty()) {
     std::fprintf(stderr, "no character models in the game data\n");
     return 1;
@@ -138,7 +167,8 @@ int run_viewer(const mv::Options& options) {
 
   vfs::ModManager mods;
   bool hd = options.hd, show_modded = true, reload = true, scroll_to_selected = true;
-  bool playing = false, loop = true, lighting = false, linear = true, show_hidden = false;
+  bool playing = false, loop = true, lighting = false, linear = true, show_hidden = false, menu_model = false;
+  int menu_byte = -1;
   int group = 0, clip = -1;
   char search[128] = {};
   double seconds = 0;
@@ -147,7 +177,7 @@ int run_viewer(const mv::Options& options) {
   mv::Bounds bounds;
   platform::Input input;
   platform::FrameTimer timer;
-  std::vector<render::Mat4> palette;
+  std::vector<render::Mat4> palette, menu_palette;
 
   auto reload_models = [&] {
     context.wait_idle();
@@ -155,8 +185,9 @@ int run_viewer(const mv::Options& options) {
     modded_files.set_hd_mode(hd);
     mods.scan(original_files, game_dir / "mods", render::mod_prefs(config));
     mods.apply(modded_files, hd ? vfs::ModArt::Modded : vfs::ModArt::Sd);
-    load_side(original, original_files, entries[selected].stem, false, meshes);
-    load_side(modded, modded_files, entries[selected].stem, true, meshes);
+    menu_byte = entries[selected].kind == mv::Kind::Field ? field_model_byte(discs, entries[selected].stem) : -1;
+    load_side(original, original_files, entries[selected].stem, false, hd, menu_byte, meshes);
+    load_side(modded, modded_files, entries[selected].stem, true, hd, menu_byte, meshes);
     bounds = mv::bounds_union(original.asset ? mv::rest_bounds(*original.asset) : mv::Bounds{},
                               modded.asset ? mv::rest_bounds(*modded.asset) : mv::Bounds{});
     clip = -1;
@@ -218,6 +249,18 @@ int run_viewer(const mv::Options& options) {
     ImGui::Checkbox("Modded", &show_modded);
     if (ImGui::Button("Reload models and mods (R)")) reload = true;
     ImGui::TextWrapped("Original ignores every mod. Modded uses the mods enabled in the Mods tab; change them there and reload.");
+    if (menu_byte >= 0) {
+      ImGui::Checkbox("Override with menu model", &menu_model);
+      ImGui::TextWrapped("As [Enhancements] Menu models in the field draws this character: the Status screen's model (on the battle skeleton), "
+                         "posed by the field clip.");
+      const Side& shown = show_modded ? modded : original;
+      if (menu_model && shown.menu) {
+        constexpr const char* kPlans[4] = {"automatic (under)", "automatic (beside)", "automatic (beside when full)", "hand-made map"};
+        ImGui::Text("Rig: %s, %s", kPlans[static_cast<int>(shown.rig.plan)], shown.rig.usable ? "used in the field" : "NOT used in the field");
+        ImGui::Text("Bones %.0f / %.0f deg, unmatched %d (%d with children)", shown.rig.bone_p90, shown.rig.bone_max, shown.rig.unmatched,
+                    shown.rig.unmatched_inner);
+      }
+    }
 
     ImGui::SeparatorText("Animation");
     const assets::ModelAsset* reference = original.asset ? &*original.asset : modded.asset ? &*modded.asset : nullptr;
@@ -294,6 +337,10 @@ int run_viewer(const mv::Options& options) {
     ImGui::Begin("##viewer_status", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
     ImGui::Text("%s / %s", show_modded ? "MODDED" : "ORIGINAL", hd ? "HD" : "SD");
     if (!side.error.empty()) ImGui::TextWrapped("%s", side.error.c_str());
+    if (menu_model && menu_byte >= 0) {
+      ImGui::Text("MENU MODEL %s", game::menu_model_stem(menu_byte).c_str());
+      if (!side.menu_error.empty()) ImGui::TextWrapped("%s", side.menu_error.c_str());
+    }
     if (mismatch) ImGui::TextWrapped("%s", mismatch);
     ImGui::End();
 
@@ -316,16 +363,26 @@ int run_viewer(const mv::Options& options) {
       double sample_frame = 0;
       if (side_clip >= 0) sample_frame = mv::playback_frame(seconds, side.asset->clips[static_cast<size_t>(side_clip)].frame_count, loop);
       side.pose.palette_at(side_clip, static_cast<float>(sample_frame), palette);
+      const bool dressed = menu_model && side.menu_gpu && side.menu;
+      if (dressed) {
+        game::menu_rig_palette(side.rig, palette, menu_palette);
+        palette.swap(menu_palette);
+      }
       render::MeshPipeline::DrawParams params;
       params.view = camera.view;
       params.view_proj = camera.projection * camera.view;
+      if (dressed) params.model = render::mat4_scale(side.rig.scale);
       params.palette = palette;
       params.hd = hd;
       params.linear = linear;
       // S3 shading bit 0 = the part starts hidden (the game's scripts show it).
-      if (!show_hidden)
+      if (dressed) {
+        game::menu_model_parts(*side.menu, params);
+        if (show_hidden) params.hidden_meshes = 0;
+      } else if (!show_hidden) {
         for (size_t k = 0; k < side.asset->meshes.size() && k < side.asset->shading.size() && k < kMaxHiddenMeshes; ++k)
           if (side.asset->shading[k].flags & 1) params.hidden_meshes |= 1u << k;
+      }
       // A fixed model-space key light plus ambient: orbiting moves the camera, not the light.
       params.light.on = lighting;
       for (size_t channel = 0; channel < 3; ++channel) {
@@ -338,7 +395,7 @@ int run_viewer(const mv::Options& options) {
       const SDL_GPUViewport viewport{static_cast<float>(left), 0, static_cast<float>(width), static_cast<float>(frame.extent.height), 0, 1};
       SDL_SetGPUViewport(context.pass(), &viewport);
       meshes.begin(frame, {static_cast<s32>(left), 0, width, frame.extent.height});
-      meshes.draw(*side.gpu, params);
+      meshes.draw(dressed ? *side.menu_gpu : *side.gpu, params);
       meshes.end();
     }
     const SDL_GPUViewport full{0, 0, static_cast<float>(frame.extent.width), static_cast<float>(frame.extent.height), 0, 1};

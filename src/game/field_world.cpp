@@ -81,6 +81,8 @@ void FieldWorld::shutdown() {
   remote_.clear();
   room_models_.clear();
   char_models_.clear();
+  menu_bodies_.clear();
+  worn_models_.clear();
   sourced_models_.clear();
   drop_character_prefetches();
   free_status_icons();
@@ -115,6 +117,8 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
       char_models_.clear();
       sourced_models_.clear();
     }
+    menu_bodies_.clear();
+    worn_models_.clear();
   }
   if (!changed || !initialised_ || !view_.loaded()) view_.set_art_mode(hd);
   const ui::ArtMode mode = hd ? ui::ArtMode::Hd : ui::ArtMode::Original;

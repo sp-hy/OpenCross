@@ -58,6 +58,17 @@ std::string DiscIndex::room_stem(int disc, int room_id) const {
   return rec.substr(at + 12, rec.size() - at - 12 - 4);
 }
 
+std::string DiscIndex::field_model_stem(int disc, int model_byte) const {
+  // Field file id k is record k + kMapBase - 0x83.
+  constexpr int kFidToRecord = kMapBase - 0x83;
+  if (model_byte < 0 || model_byte >= 0x100) return {};
+  const std::string& rec = record(disc, 2 * model_byte + 2 + kFidToRecord);
+  const size_t at = rec.find("fieldobj/player/");
+  if (at == std::string::npos || !rec.ends_with(".obj")) return {};
+  const std::string stem = rec.substr(at + 16, rec.size() - at - 20);
+  return stem.find('/') == std::string::npos ? std::string() : stem;
+}
+
 bool DiscIndex::has_room(int disc, std::string_view stem) const {
   const size_t count = rec_[disc >= 2 ? 1 : 0].size();
   for (int id = 0; kMapBase + 3 * static_cast<size_t>(id) < count; ++id)

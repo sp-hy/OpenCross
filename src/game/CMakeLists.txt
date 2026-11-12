@@ -12,6 +12,8 @@ add_library(oc_game STATIC
   model_files.cpp
   field_model_source.h
   field_model_source.cpp
+  menu_rig.h
+  menu_rig.cpp
   actor.h
   actor.cpp
   disc_index.h

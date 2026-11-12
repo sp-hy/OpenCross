@@ -22,4 +22,14 @@ std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const 
 // Sorted lower-case stems of every character model in the cdrom archive (field players, battle players, battle monsters).
 std::vector<std::string> model_stems(const vfs::Vfs& files);
 
+// Menu models (the Status screen's) 0..kLastMenuModel follow the battle model order of the player block.
+constexpr int kLastMenuModel = 0x32;
+// The file name of menu model `model` (menu/player/<name>.ome), empty outside the player block.
+std::string menu_model_stem(int model);
+// Menu model `model`, cdrom/menu/player/<name>.ome; in HD art with the 4x hd/menu/player/<name>.tim, which is then also dumped / replaced
+// as the texture model/menu/player/<name> and stands in for the 1x texture.
+std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err);
+// The skeleton alone of field player model `stem` (fieldobj/player/<folder>/<file>, no ".obj"), nullopt when it does not read.
+std::optional<assets::Skeleton> read_field_skeleton(const vfs::Vfs& files, const std::string& stem);
+
 }  // namespace oc::game

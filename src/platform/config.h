@@ -200,6 +200,7 @@ void bind_cheats(const Cheats* set);
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
+//            MenuModelsInField: field characters are drawn with their Status-screen model, posed by their field model (game/menu_rig.h).
 //   [Shaders] (opt-in, off by default, any art mode) Characters: kCharacterShaderNames, the shading of the field actors, the battle units
 //            and their weapons and the status screen's model (render/mesh_pipeline.h CharacterShading); Matcap: the matcap style's look (a
 //            built-in or a mod's shaders/matcaps/<name>.png); Outlines: a dark outline; Rim: a rim light; SpellRim: in battle the rim takes
@@ -283,6 +284,7 @@ struct Config {
   bool autohide_cast_hud = false;
   bool retain_battle_scenery = false;
   bool full_precision_effects = false;
+  bool menu_models_in_field = false;
   CharacterShader character_shader = CharacterShader::Off;
   std::string matcap = "clay";
   bool outlines = false;

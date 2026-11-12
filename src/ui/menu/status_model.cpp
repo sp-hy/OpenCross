@@ -7,17 +7,15 @@
 
 #include "core/log.h"
 #include "game/battle/model_table.h"
+#include "game/model_files.h"
 #include "import/container.h"
 #include "import/model.h"
 #include "import/room_effects.h"
 #include "import/tim.h"
-#include "render/texture_registry.h"
 
 namespace oc::ui {
 
 namespace {
-// Menu models 0..0x32 follow the battle model order (the player block); 0x32 carries a second weapon on mount record 1.
-constexpr int kLastMenuModel = 0x32;
 // The menu model is narrowed along its own x axis (model scale 0xCCC / 4096, y and z 1).
 constexpr float kModelScaleX = 3276.0f / 4096.0f;
 // Projection of the menu screen: screen centre and projection-plane distance in PS1 pixels.
@@ -59,12 +57,6 @@ constexpr float kTickRate = 30.0f;
 constexpr float kMaxAlpha = 0.999f;
 constexpr float kTurnDegrees = 360.0f / 4096.0f;
 constexpr float kPi = 3.14159265358979323846f;
-
-std::string model_stem(int model) {
-  if (model < 0 || model > kLastMenuModel) return {};
-  const std::string_view path = game::kBattleModels[static_cast<size_t>(model)];
-  return std::string(path.substr(path.rfind('/') + 1));
-}
 
 // The camera rotation Rx(-pitch) * Ry(-yaw), row-major.
 assets::Mat3 camera_rotation(const MenuCameraNow& camera) {
@@ -113,23 +105,6 @@ std::optional<assets::ModelAsset> shut_eyes(const assets::ModelAsset& open, Byte
       }
   }
   return shut;
-}
-
-// Texture dump / replace of an HD art menu model (model/menu/player/<stem>/clut0.png): its 4x image, both pages. Done here, not by the mesh
-// pipeline, so the shut-eye copy is cut from the replacement too; the replacement stands in for the 1x texture as well.
-void replace_menu_texture(assets::ModelAsset& asset, const std::string& stem) {
-  namespace tr = render::texture_registry;
-  if (!tr::active() || !asset.has_hd(0) || asset.hd_textures[0].indexed || asset.textures.empty()) return;
-  import::Image& hd = asset.hd_textures[0];
-  const render::TextureKey key = render::model_texture_key("menu/player/" + stem, 0, 1, hd.width, hd.height, hd.pixels.data());
-  if (tr::settings().dump) tr::dump(key, hd.width, hd.height, render::model_file_pixels(hd.width, hd.height, hd.pixels.data()).data());
-  u32 w = hd.width, h = hd.height;
-  std::vector<u8> rgba = hd.pixels;
-  if (!tr::replace(key, w, h, rgba)) return;
-  render::model_restore_stp(hd.width, hd.height, hd.pixels.data(), w, h, rgba);
-  hd.width = w, hd.height = h;
-  hd.pixels = std::move(rgba);
-  asset.textures[0] = hd;
 }
 
 // The menu's stock environment page as a 256 x 256 8 bpp texture: texel (u, v) is byte u & 1 of the frame word at (320 + u / 2, 256 + v),
@@ -203,50 +178,21 @@ void prism_light(const render::Mat4& world, int ticks, render::MeshPipeline::Dra
 }  // namespace
 
 StatusModelView::Entry* StatusModelView::entry(int model, bool hd_art) {
-  const std::string stem = model_stem(model);
+  const std::string stem = game::menu_model_stem(model);
   if (stem.empty()) return nullptr;
   const int key = model * 2 + (hd_art ? 1 : 0);
   if (auto it = cache_.find(key); it != cache_.end()) return it->second.get();
   auto created = std::make_unique<Entry>();
-  auto ome = vfs_.read("cdrom/menu/player/" + stem + ".ome");
-  // The 4x HD texture is used only in HD art mode: original art keeps the disc texture.
-  std::optional<Bytes> hd;
-  if (hd_art) hd = vfs_.read("hd/menu/player/" + stem + ".tim");
-  if (ome) {
-    if (auto cpt = import::parse_cpt(*ome); cpt && cpt->entries.size() >= 6) {
-      std::string err;
-      // The menu Mdl has a short header: the disc file has 5 sections (S1 at 0x1C), the HD art mode's variant 4
-      // sections (S1 at 0x18, no S5; its "EOF" word equals S4, the anim pack that follows it, so the word cannot be trusted). Rebuild the
-      // standard 6-section header (S1 at 0x20, missing sections 0, EOF = the real size).
-      Bytes mdl(cpt->entries[3].data.begin(), cpt->entries[3].data.end());
-      if (mdl.size() > 0x20 && (mdl[0] == 4 || mdl[0] == 5)) {
-        const size_t nsec = mdl[0], old_hdr = 4 * (nsec + 2), shift = 0x20 - old_hdr;
-        Bytes fixed(mdl.size() + shift, 0);
-        auto rd = [&](size_t offset) {
-          return static_cast<u32>(mdl[offset] | mdl[offset + 1] << 8 | mdl[offset + 2] << 16 | static_cast<u32>(mdl[offset + 3]) << 24);
-        };
-        auto wr = [&](size_t offset, u32 value) {
-          for (int k = 0; k < 4; ++k) fixed[offset + static_cast<size_t>(k)] = static_cast<u8>(value >> (8 * k));
-        };
-        wr(0, 6);
-        // A missing section (offset 0, e.g. the S5 of most disc models) stays missing.
-        for (size_t k = 0; k < nsec; ++k)
-          if (const u32 offset = rd(4 + 4 * k)) wr(4 + 4 * k, offset + static_cast<u32>(shift));
-        wr(28, static_cast<u32>(fixed.size()));
-        std::copy(mdl.begin() + static_cast<std::ptrdiff_t>(old_hdr), mdl.end(), fixed.begin() + 0x20);
-        mdl = std::move(fixed);
-      }
-      // Entry 3 = Mdl, entry 5 = Atim cpt (main texture + overlay); entry 4 is the closed-eye TIM. The importer wants the Mdl bytes only.
-      if (auto asset = import::load_model(mdl, cpt->entries[5].data, ByteSpan{}, &err, hd ? ByteSpan(*hd) : ByteSpan{})) {
-        // HD art only: the original art's menu model is another mesh with the disc texture.
-        if (cpt->entries[5].data.empty()) replace_menu_texture(*asset, stem);
+  std::string err;
+  if (auto asset = game::read_menu_model(vfs_, model, hd_art, &err)) {
+    // Entry 1 = the eye-block positions, entry 4 = the closed-eye TIM, entry 5 = the Atim.
+    if (const auto ome = vfs_.read("cdrom/menu/player/" + stem + ".ome"))
+      if (const auto cpt = import::parse_cpt(*ome); cpt && cpt->entries.size() >= 6)
         if (auto shut = shut_eyes(*asset, cpt->entries[1].data, cpt->entries[4].data, cpt->entries[5].data))
           created->body_shut = game::Actor::make_model(meshes_, std::move(*shut));
-        created->body = game::Actor::make_model(meshes_, std::move(*asset));
-      } else {
-        log::warn("status model {}: {}", stem, err);
-      }
-    }
+    created->body = game::Actor::make_model(meshes_, std::move(*asset));
+  } else {
+    log::warn("status model {}: {}", stem, err);
   }
   if (created->body) created->pose.set_model(&created->body->asset);
   Entry* result = created.get();
@@ -257,7 +203,7 @@ StatusModelView::Entry* StatusModelView::entry(int model, bool hd_art) {
 int StatusModelView::min_distance(int model) {
   if (auto it = min_distance_.find(model); it != min_distance_.end()) return it->second;
   int value = 0;
-  if (const std::string stem = model_stem(model); !stem.empty())
+  if (const std::string stem = game::menu_model_stem(model); !stem.empty())
     if (auto ome = vfs_.read("cdrom/menu/player/" + stem + ".ome"))
       if (auto cpt = import::parse_cpt(*ome); cpt && cpt->entries.size() > 2) {
         const auto& text = cpt->entries[2].data;
@@ -273,7 +219,7 @@ void StatusModelView::set_weapon(Entry& shown, int weapon_model, int part) {
   shown.weapon_model = weapon_model;
   shown.weapon_part = part;
   shown.weapon.reset();
-  if (part < 0 || weapon_model < 0 || weapon_model > kLastMenuModel) return;
+  if (part < 0 || weapon_model < 0 || weapon_model > game::kLastMenuModel) return;
   const std::string_view bin = game::kBattleWeaponBins[static_cast<size_t>(weapon_model)];
   if (bin.empty()) return;
   const std::string key = std::string(bin) + "#" + std::to_string(part);
@@ -481,7 +427,7 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
   const assets::AttachPoints& attach = shown->body->asset.attach;
   const bool weapon_hidden = std::find(std::begin(kHiddenWeapon), std::end(kHiddenWeapon), slot.char_id) != std::end(kHiddenWeapon);
   for (int index = 0; index < 2 && shown->weapon && shown->weapon->gpu; ++index) {
-    if (index == 1 && slot.model != kLastMenuModel) continue;
+    if (index == 1 && slot.model != game::kLastMenuModel) continue;
     const assets::MountPoint& mount = attach.mounts[static_cast<size_t>(index)];
     const assets::AttachPoint& point = attach.points[mount.attach];
     if (point.joint >= palette_.size()) continue;

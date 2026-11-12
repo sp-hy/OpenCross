@@ -248,6 +248,7 @@ bool Config::load(const std::filesystem::path& file) {
   autohide_cast_hud = parse_bool(ini.get("Enhancements", "AutoHideCastHud"), autohide_cast_hud);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   full_precision_effects = parse_bool(ini.get("Enhancements", "FullPrecisionEffects"), full_precision_effects);
+  menu_models_in_field = parse_bool(ini.get("Enhancements", "MenuModelsInField"), menu_models_in_field);
   smooth_effect_rings = parse_bool(ini.get("Enhancements", "SmoothEffectRings"), smooth_effect_rings);
   smooth_reflections = parse_bool(ini.get("Enhancements", "SmoothReflections"), smooth_reflections);
   {
@@ -417,6 +418,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "FullPrecisionEffects", on_off(full_precision_effects));
+  ini.set("Enhancements", "MenuModelsInField", on_off(menu_models_in_field));
   ini.set("Enhancements", "SmoothEffectRings", on_off(smooth_effect_rings));
   ini.set("Enhancements", "SmoothReflections", on_off(smooth_reflections));
   ini.set("Enhancements", "Lighting", on_off(lighting));

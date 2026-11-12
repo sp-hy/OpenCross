@@ -34,6 +34,9 @@ class DiscIndex {
   std::string room_stem(int disc, int room_id) const;
   // Some map record of that disc names the room file.
   bool has_room(int disc, std::string_view stem) const;
+  // Field model of a character model byte (file index 2 * byte + 2 of the field's file ids): "<folder>/<file>" under fieldobj/player
+  // (the file need not be named after its folder: 0x3D = neko2/neko), "" when the record names no field player model.
+  std::string field_model_stem(int disc, int model_byte) const;
   // Battle script of a scene as a logical path. Several scenes share a file through their record, so the file's number need not be
   // the scene's; a scene with no script record gets the shared template.
   std::string battle_script(int disc, int scene) const;

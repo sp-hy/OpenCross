@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <cctype>
+#include <string_view>
 
 #include "game/battle/model_table.h"
+#include "import/container.h"
 #include "import/model.h"
+#include "render/texture_registry.h"
 #include "vfs/vfs.h"
 
 namespace oc::game {
@@ -63,6 +66,53 @@ std::vector<std::string> model_stems(const vfs::Vfs& files) {
   std::ranges::sort(stems);
   stems.erase(std::ranges::unique(stems).begin(), stems.end());
   return stems;
+}
+
+std::optional<assets::Skeleton> read_field_skeleton(const vfs::Vfs& files, const std::string& stem) {
+  const auto obj = files.read("cdrom/fieldobj/player/" + stem + ".obj");
+  return obj ? import::load_mdl_skeleton(*obj) : std::nullopt;
+}
+
+std::string menu_model_stem(int model) {
+  if (model < 0 || model > kLastMenuModel) return {};
+  const std::string_view path = kBattleModels[static_cast<size_t>(model)];
+  return std::string(path.substr(path.rfind('/') + 1));
+}
+
+std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err) {
+  const std::string stem = menu_model_stem(model);
+  if (stem.empty()) {
+    if (err) *err = "no menu model " + std::to_string(model);
+    return std::nullopt;
+  }
+  const auto ome = files.read("cdrom/menu/player/" + stem + ".ome");
+  if (!ome) {
+    if (err) *err = "menu/player/" + stem + ".ome not found";
+    return std::nullopt;
+  }
+  // The 4x texture is used only in HD art: the original art keeps the disc texture.
+  const Bytes hd = hd_art ? files.read("hd/menu/player/" + stem + ".tim").value_or(Bytes{}) : Bytes{};
+  auto asset = import::load_menu_model(*ome, hd, err);
+  if (!asset) return std::nullopt;
+  // HD art only (its .ome has no Atim): the original art's menu model is another mesh with the disc texture. The texture mod sees the 4x
+  // image, both pages, and the replacement stands in for the 1x texture too.
+  namespace tr = render::texture_registry;
+  const auto cpt = import::parse_cpt(*ome);
+  const bool hd_only = cpt && cpt->entries.size() > 5 && cpt->entries[5].data.empty();
+  if (hd_only && tr::active() && asset->has_hd(0) && !asset->hd_textures[0].indexed && !asset->textures.empty()) {
+    import::Image& image = asset->hd_textures[0];
+    const render::TextureKey key = render::model_texture_key("menu/player/" + stem, 0, 1, image.width, image.height, image.pixels.data());
+    if (tr::settings().dump) tr::dump(key, image.width, image.height, render::model_file_pixels(image.width, image.height, image.pixels.data()).data());
+    u32 width = image.width, height = image.height;
+    std::vector<u8> rgba = image.pixels;
+    if (tr::replace(key, width, height, rgba)) {
+      render::model_restore_stp(image.width, image.height, image.pixels.data(), width, height, rgba);
+      image.width = width, image.height = height;
+      image.pixels = std::move(rgba);
+      asset->textures[0] = image;
+    }
+  }
+  return asset;
 }
 
 }  // namespace oc::game

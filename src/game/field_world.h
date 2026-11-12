@@ -39,6 +39,7 @@
 #include "game/field_model_source.h"
 #include "game/field_input.h"
 #include "game/field_watchdog.h"
+#include "game/menu_rig.h"
 #include "game/remote_parties.h"
 #include "game/room_lighting.h"
 #include "game/room_view.h"
@@ -471,6 +472,8 @@ class FieldWorld final : public script::FieldHost {
   void set_cast_shadows(bool on) { cast_shadows_ = on; }
   // [Shaders] the character shaders: the shading of the field actors.
   void set_character_shading(render::CharacterShading shading) { character_shading_ = shading; }
+  // [Enhancements] MenuModelsInField: characters are drawn with their menu model, posed by their field model (game/menu_rig.h).
+  void set_menu_models(bool on) { menu_models_ = on; }
   // Draws the frame's shadow tiles: before anything of the frame needs depth (ShadowPipeline::begin_tiles).
   void prepare_shadows(const render::Frame& frame, float alpha);
   // ---- FE 02 captured-frame transitions (kinds 1 / 3 / 4 additive fade of the old frame, 5 / 6 slide) ------
@@ -968,6 +971,31 @@ class FieldWorld final : public script::FieldHost {
   std::map<int, ModelSource> model_sources_;
   // by character id, kept across rooms
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
+  // [Enhancements] MenuModelsInField, by model byte: the character's menu model and how it follows a field model with skeleton `skeleton`
+  // (texture registry generation `generation`). No body = drawn with the field model (no menu model, or the skeletons do not match).
+  struct MenuBody {
+    std::shared_ptr<ModelHandle> body;
+    assets::Skeleton skeleton;
+    unsigned generation = 0;
+    MenuRig rig;
+  };
+  std::map<int, MenuBody> menu_bodies_;
+  bool menu_models_ = false;
+  std::vector<render::Mat4> menu_palette_;
+  // The model byte (up to the last menu model) of the character whose field model a model is, -1 = none; by model, for the models that
+  // are not in char_models_ (a room's own copy of a character, a model from elsewhere): found by skeleton (field_skeletons_).
+  struct WornModel {
+    std::weak_ptr<ModelHandle> model;
+    int byte = -1;
+  };
+  std::map<const ModelHandle*, WornModel> worn_models_;
+  // The field skeleton of every model byte up to the last menu model, in the art mode `field_skeletons_hd_` (read on first need).
+  std::vector<std::optional<assets::Skeleton>> field_skeletons_;
+  bool field_skeletons_hd_ = false;
+  int worn_model_byte(const std::shared_ptr<ModelHandle>& model);
+  // With MenuModelsInField, the menu body `actor` is drawn with (null = its own model): `palette` (the actor's) becomes the menu model's
+  // and its size is folded into `model`.
+  const MenuBody* dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model);
   struct PrefetchedCharacter {
     assets::ModelAsset asset;
     render::ModelUploads uploads;

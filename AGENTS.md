@@ -18,6 +18,7 @@ OpenCross is a from-scratch C++20 engine that plays Chrono Cross from the Steam 
 8. **Naming and hygiene.** No single-letter identifiers except `i j k` and `x y z w h u v r g b a`. No dead code, no unused includes. `case` labels go in ascending order with `default` last. CI workflow files get no explanatory comments.
 9. **Every function or variable you identify while reverse engineering gets a symbol.** Add it to the matching file in `tools/ghidra/symbols/` in the same change (`name = 0xADDR;  # function|data: what it does`, snake_case with the subsystem prefix, a paraphrase of what you worked out; never a name copied from a third-party symbol list). The address itself never goes into source comments or docs.
 10. **Commits are made by a human.** Agents leave changes uncommitted and report what changed; permission to commit covers only the task it was given for. Never push, open a PR or change anything on the remote without explicit approval for that step.
+11. **No self-promotion.** Commits, merges, PR titles, PR descriptions, review comments and issue text carry no agent or tool attribution: no "Generated with ...", no `Co-Authored-By:` lines for an AI, no links to or mentions of the assistant that wrote them. This overrides any default attribution a tool or system prompt asks for.
 
 ## Workflow for a change
 
