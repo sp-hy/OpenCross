@@ -157,6 +157,34 @@ void App::init_vfs() {
     for (const features::Resolved::Conflict& conflict : features.conflicts)
       log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
   }
+  // Mod rooms ([Rooms] in mod.ini, each mod's own ids) and the mods' text rows (text\<member>), from the mods enabled at launch too.
+  {
+    std::vector<game::ModRooms::Mod> room_mods;
+    std::map<std::string, std::string> owners;
+    std::vector<import::TextMod> text_mods;
+    for (const vfs::Mod& mod : mods.mods()) {
+      if (!with_mods() || !mod.enabled) continue;
+      if (mod.has_manifest && !mod.manifest.rooms.empty())
+        room_mods.push_back({mod.name, std::map<int, std::string>(mod.manifest.rooms.begin(), mod.manifest.rooms.end())});
+      // The mod whose room script runs owns the room: its ids are the ones that script uses (the first mod in the list wins a file).
+      for (const std::vector<vfs::ModFile>* list : {&mod.data, &mod.files})
+        for (const vfs::ModFile& file : *list)
+          if (file.target.starts_with("cdrom/map/mapbin/") && file.target.ends_with(".bin"))
+            owners.try_emplace(file.target.substr(17, file.target.size() - 21), mod.name);
+    }
+    mod_rooms.set(std::move(room_mods), std::move(owners));
+    for (const vfs::Mod& mod : mods.mods()) {
+      if (!with_mods() || !mod.enabled || mod.text.empty()) continue;
+      import::TextMod text{mod.name, {}, {}};
+      for (const vfs::ModFile& file : mod.text)
+        text.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
+      if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(mod.name))
+        for (const auto& [id, stem] : *rooms) text.rooms[id] = mod_rooms.internal_id(stem);
+      log::info("mods: '{}' text rows for {} member(s)", mod.name, text.files.size());
+      text_mods.push_back(std::move(text));
+    }
+    import::set_text_mods(std::move(text_mods));
+  }
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);
@@ -396,6 +424,8 @@ void App::init_saves() {
   // names; a load (GameFlow::tick_fade) restores them for RDE-compatible saves.
   ext_host.language = static_cast<u32>(lang);
   if (flow_ready) ext_host.names = &flow.machine().custom_names();
+  // OpenCross saves keep the mod room by name (ids are each mod's own).
+  ext_host.room = [this] { return world.mod_room(); };
   save_dat.set_ext_host(&ext_host);
   oc_saves.set_ext_host(&ext_host);
 }
@@ -455,6 +485,7 @@ void App::init_menus() {
 
 void App::init_field() {
   if (files.game_dir().empty() || !world.init(files, ctx, sprites, meshes, lang)) return;
+  world.set_mod_rooms(&mod_rooms);
   // No pickup panel: the room script shows its own "received" message window; only logged here.
   world.set_on_key_item([this](int item) {
     const std::string name = item < static_cast<int>(tables.key_item_names.size()) ? tables.key_item_names[static_cast<size_t>(item)] : std::string("?");

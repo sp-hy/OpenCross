@@ -3,6 +3,7 @@
 // PS1 byte stream and the RDE markup.
 #include <array>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -184,9 +185,13 @@ class TextTable {
   const std::string* get(u64 key, Lang lang) const;
   size_t rows() const { return rows_.size(); }
   const std::vector<std::string>& header() const { return header_; }
+  // A mod's rows (TextMod) over this table: a row whose key is here has the cells `rows` has a column for replaced (columns matched by
+  // heading, any case; other languages keep theirs), a new key is added. `changed(key, heading, value)` is called for every cell set.
+  void overlay(const TextTable& rows, const std::function<void(const std::string&, const std::string&, const std::string&)>& changed);
 
  private:
   int column(Lang lang) const;
+  void index_row(u32 idx);
   std::vector<std::string> header_;
   std::vector<std::vector<std::string>> rows_;
   std::unordered_map<std::string, u32> by_text_;
@@ -197,6 +202,23 @@ struct LookupInfo {
   int speaker = 0;
   bool variant = false;  // an Ex_<lang> per-speaker variant was used
 };
+
+// ---------------------------------------------------------------------------------------------- mods' text rows
+// Text a mod adds or changes, row by row: a mod's text\<member> (a lang.dat member name: en.csv, Ex_en.csv, btel_en.csv, mesgen_en.csv,
+// mess_wend.csv, sysmes.txt, ...) holds only its own rows, in the member's own format. Every LangTables merges them over the member it
+// reads (the game's, or a mod's whole replacement of it), the enabled mods' rows lowest priority first so the first mod in the list
+// wins a row; a row two mods give different text is logged as a conflict. Field text rows (<lang>.csv, Ex_<lang>.csv, mess_wend.csv) of
+// a room id the mod's [Rooms] lists are stored under that room's internal id (game::ModRooms); any other id is the game's own row.
+struct TextMod {
+  std::string name;
+  // Member name in lower case -> the row file's bytes.
+  std::map<std::string, std::function<std::optional<Bytes>()>> files;
+  // The mod's room id -> internal id, for its field text rows of those rooms (other ids are the game's rows).
+  std::map<int, int> rooms;
+};
+// Set once at launch (priority order, first wins), before text is read; read by every LangTables.
+void set_text_mods(std::vector<TextMod> mods);
+const std::vector<TextMod>& text_mods();
 
 // Field csv: (room, msg) -> text. `load_rows_rule` implements "a row is loaded only if no earlier row has a larger room".
 struct FieldTable {
@@ -270,6 +292,10 @@ class LangTables {
   bool ensure(Lang lang);
   void ensure_wend();
   bool read_member(std::string_view name, std::string& out_utf8) const;
+  // The enabled mods' row files of `member` (TextMod), lowest priority first, decoded.
+  void each_mod_rows(std::string_view member, const std::function<void(const TextMod&, std::string_view)>& apply) const;
+  // Merges the mods' rows of a (room / battle, msg) table; `rooms` = field text (a mod's rooms from 1000 on -> internal ids).
+  void merge_field_rows(FieldTable& table, std::string_view member, bool rooms) const;
 
   const vfs::Vfs* vfs_ = nullptr;
   std::array<PerLang, 6> langs_;

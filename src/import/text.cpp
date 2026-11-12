@@ -4,8 +4,11 @@
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <format>
+#include <mutex>
 #include <set>
 
+#include "core/log.h"
 #include "import/container.h"
 #include "import/lzss.h"
 #include "vfs/vfs.h"
@@ -887,11 +890,48 @@ void TextTable::parse(std::string_view text) {
       replace_all(cell, "{99}", "\xE2\x80\x9D");
       replace_all(cell, "\\n", "\n");
     }
-    u32 idx = static_cast<u32>(rows_.size());
-    long long number;
-    if (parse_int(row[0], number)) by_num_[static_cast<u64>(number)] = idx;
-    by_text_[row[0]] = idx;
     rows_.push_back(std::move(row));
+    index_row(static_cast<u32>(rows_.size() - 1));
+  }
+}
+
+void TextTable::index_row(u32 idx) {
+  const std::string& key = rows_[idx][0];
+  long long number;
+  if (parse_int(key, number)) by_num_[static_cast<u64>(number)] = idx;
+  by_text_[key] = idx;
+}
+
+void TextTable::overlay(const TextTable& rows,
+                        const std::function<void(const std::string&, const std::string&, const std::string&)>& changed) {
+  const auto trimmed_lower = [](std::string text) {
+    while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+    return ascii_lower(text);
+  };
+  // Each column of the mod's rows -> this table's column with the same heading (-1 = none).
+  std::vector<int> target(rows.header_.size(), -1);
+  for (size_t col = 1; col < rows.header_.size(); ++col)
+    for (size_t mine = 1; mine < header_.size(); ++mine)
+      if (trimmed_lower(header_[mine]) == trimmed_lower(rows.header_[col])) target[col] = static_cast<int>(mine);
+  for (const std::vector<std::string>& row : rows.rows_) {
+    if (row.empty() || row[0].empty()) continue;
+    auto found = by_text_.find(row[0]);
+    u32 idx = 0;
+    if (found != by_text_.end()) {
+      idx = found->second;
+    } else {
+      rows_.emplace_back(header_.empty() ? 1 : header_.size());
+      rows_.back()[0] = row[0];
+      idx = static_cast<u32>(rows_.size() - 1);
+      index_row(idx);
+    }
+    std::vector<std::string>& mine = rows_[idx];
+    for (size_t col = 1; col < row.size() && col < target.size(); ++col) {
+      if (target[col] < 0) continue;
+      if (mine.size() <= static_cast<size_t>(target[col])) mine.resize(static_cast<size_t>(target[col]) + 1);
+      mine[static_cast<size_t>(target[col])] = row[col];
+      changed(row[0], header_[static_cast<size_t>(target[col])], row[col]);
+    }
   }
 }
 
@@ -923,7 +963,8 @@ const std::string* TextTable::get(u64 key, Lang lang) const {
 
 // ---------------------------------------------------------------------------------------------- LangTables
 namespace {
-void parse_ex(std::string_view text, std::unordered_map<u64, std::vector<std::string>>& out) {
+// `rule` = the game's loading rule (a row after a larger room is dropped); a mod's row file is read without it.
+void parse_ex(std::string_view text, std::unordered_map<u64, std::vector<std::string>>& out, bool rule = true) {
   text = strip_bom(text);
   long long max_room = -1;
   for_each_line(text, [&](std::string_view line) {
@@ -933,7 +974,7 @@ void parse_ex(std::string_view text, std::unordered_map<u64, std::vector<std::st
     if (t2 == std::string_view::npos) return;
     long long room, msg;
     if (!parse_int(line.substr(0, t1), room) || !parse_int(line.substr(t1 + 1, t2 - t1 - 1), msg)) return;
-    bool ok = room >= max_room;
+    bool ok = !rule || room >= max_room;
     max_room = std::max(max_room, room);
     if (!ok) return;
     std::string_view cells = line.substr(t2 + 1);
@@ -977,7 +1018,53 @@ void parse_mesgen(std::string_view text, std::vector<std::pair<std::string, std:
     out.emplace_back(std::move(key), std::move(vals));
   });
 }
+
+std::vector<TextMod>& text_mod_list() {
+  static std::vector<TextMod> mods;
+  return mods;
+}
+
+// Who set each row while one table merges its mods' rows (lowest priority first): a later mod giving the row different text wins and
+// the pair is logged once per run (every LangTables merges the same rows).
+class RowSetters {
+ public:
+  explicit RowSetters(std::string_view member) : member_(member) {}
+  void set(const std::string& key, const std::string& value, const std::string& mod) {
+    auto [it, added] = seen_.try_emplace(key, mod, value);
+    if (added) return;
+    if (it->second.first != mod && it->second.second != value) {
+      static std::mutex mutex;
+      static std::set<std::string> logged;
+      const std::string line = std::format("text: {} {}: '{}' wins over '{}'", member_, key, mod, it->second.first);
+      std::lock_guard lock(mutex);
+      if (logged.insert(line).second) log::info("{}", line);
+    }
+    it->second = {mod, value};
+  }
+
+ private:
+  std::string member_;
+  std::unordered_map<std::string, std::pair<std::string, std::string>> seen_;
+};
+
+// A mod's field text room -> the key its rows are stored under: a room id its [Rooms] lists is that mod room's internal id; any other
+// id is the game's own row (the game's text has rows from 1000 on too: the fin_ scenes at 1000 + map id).
+long long mod_text_room(const TextMod& mod, long long room) {
+  const auto it = room >= 1000 ? mod.rooms.find(static_cast<int>(room)) : mod.rooms.end();
+  return it == mod.rooms.end() ? room : it->second;
+}
 }  // namespace
+
+void set_text_mods(std::vector<TextMod> mods) {
+  for (TextMod& mod : mods) {
+    std::map<std::string, std::function<std::optional<Bytes>()>> lower;
+    for (auto& [member, read] : mod.files) lower.emplace(ascii_lower(member), std::move(read));
+    mod.files = std::move(lower);
+  }
+  text_mod_list() = std::move(mods);
+}
+
+const std::vector<TextMod>& text_mods() { return text_mod_list(); }
 
 bool LangTables::read_member(std::string_view name, std::string& out) const {
   if (!vfs_) return false;
@@ -985,6 +1072,37 @@ bool LangTables::read_member(std::string_view name, std::string& out) const {
   if (!raw) return false;
   out = decode_text_member(*raw);
   return true;
+}
+
+void LangTables::each_mod_rows(std::string_view member, const std::function<void(const TextMod&, std::string_view)>& apply) const {
+  if (!vfs_) return;
+  const std::string want = ascii_lower(member);
+  const std::vector<TextMod>& mods = text_mod_list();
+  for (auto mod = mods.rbegin(); mod != mods.rend(); ++mod) {
+    const auto file = mod->files.find(want);
+    if (file == mod->files.end()) continue;
+    const std::optional<Bytes> raw = file->second();
+    if (!raw) {
+      log::warn("text: '{}' text/{} cannot be read", mod->name, member);
+      continue;
+    }
+    apply(*mod, decode_text_member(*raw));
+  }
+}
+
+void LangTables::merge_field_rows(FieldTable& table, std::string_view member, bool rooms) const {
+  RowSetters setters(member);
+  each_mod_rows(member, [&](const TextMod& mod, std::string_view text) {
+    FieldTable rows;
+    rows.parse(text, false);
+    for (auto& [key, value] : rows.rows) {
+      long long room = static_cast<long long>(key >> 32);
+      const u32 msg = static_cast<u32>(key & 0xFFFFFFFFu);
+      if (rooms) room = mod_text_room(mod, room);
+      setters.set(std::format("{} {}", room, msg), value, mod.name);
+      table.rows.insert_or_assign(FieldTable::key(static_cast<u32>(room), msg), value);
+    }
+  });
 }
 
 bool LangTables::load_language(Lang lang) {
@@ -995,11 +1113,45 @@ bool LangTables::load_language(Lang lang) {
   if (!read_member(code + ".csv", txt)) return false;
   per_lang.field = FieldTable();
   per_lang.field.parse(txt, true);
+  merge_field_rows(per_lang.field, code + ".csv", true);
   if (lang == Lang::Fr || lang == Lang::It || lang == Lang::De || lang == Lang::Es) {
-    if (read_member("Ex_" + code + ".csv", txt)) parse_ex(txt, per_lang.ex);
+    const std::string ex_member = "Ex_" + code + ".csv";
+    if (read_member(ex_member, txt)) parse_ex(txt, per_lang.ex);
+    // A mod's per-speaker variants: whole rows, by (room, msg) as the field text.
+    RowSetters setters(ex_member);
+    each_mod_rows(ex_member, [&](const TextMod& mod, std::string_view text) {
+      std::unordered_map<u64, std::vector<std::string>> rows;
+      parse_ex(text, rows, false);
+      for (auto& [key, variants] : rows) {
+        const long long room = mod_text_room(mod, static_cast<long long>(key >> 32));
+        const u32 msg = static_cast<u32>(key & 0xFFFFFFFFu);
+        std::string joined;
+        for (const std::string& variant : variants) joined += variant + '\t';
+        setters.set(std::format("{} {}", room, msg), joined, mod.name);
+        per_lang.ex.insert_or_assign(FieldTable::key(static_cast<u32>(room), msg), std::move(variants));
+      }
+    });
   }
-  if (read_member(lang == Lang::En ? "mesgen_en.csv" : "mesgen.csv", txt)) parse_mesgen(txt, per_lang.mesgen);
+  const std::string mesgen_member = lang == Lang::En ? "mesgen_en.csv" : "mesgen.csv";
+  if (read_member(mesgen_member, txt)) parse_mesgen(txt, per_lang.mesgen);
+  {
+    // A mod's mesgen rows replace the row with their key or are added.
+    RowSetters setters(mesgen_member);
+    each_mod_rows(mesgen_member, [&](const TextMod& mod, std::string_view text) {
+      std::vector<std::pair<std::string, std::vector<std::string>>> rows;
+      parse_mesgen(text, rows);
+      for (auto& [key, values] : rows) {
+        std::string joined;
+        for (const std::string& value : values) joined += value + ',';
+        setters.set(key, joined, mod.name);
+        const auto it = std::find_if(per_lang.mesgen.begin(), per_lang.mesgen.end(), [&](const auto& row) { return row.first == key; });
+        if (it != per_lang.mesgen.end()) it->second = std::move(values);
+        else per_lang.mesgen.emplace_back(key, std::move(values));
+      }
+    });
+  }
   if (read_member("btel_" + code + ".csv", txt)) per_lang.battle.parse(txt, false);
+  merge_field_rows(per_lang.battle, "btel_" + code + ".csv", false);
   per_lang.loaded = true;
   return true;
 }
@@ -1011,6 +1163,7 @@ void LangTables::ensure_wend() {
   wend_loaded_ = true;
   std::string txt;
   if (read_member("mess_wend.csv", txt)) wend_.parse(txt, true);
+  merge_field_rows(wend_, "mess_wend.csv", true);
 }
 
 void LangTables::set_field_csv(Lang lang, std::string_view csv) {
@@ -1118,6 +1271,15 @@ const TextTable* LangTables::table(std::string_view name) {
   if (!read_member(key + ".txt", txt)) return nullptr;
   TextTable& loaded = tables_[key];
   loaded.parse(txt);
+  // The mods' rows (a header row naming the columns they set, then their rows).
+  RowSetters setters(key + ".txt");
+  each_mod_rows(key + ".txt", [&](const TextMod& mod, std::string_view text) {
+    TextTable rows;
+    rows.parse(text);
+    loaded.overlay(rows, [&](const std::string& row, const std::string& heading, const std::string& value) {
+      setters.set(row + " " + heading, value, mod.name);
+    });
+  });
   return &loaded;
 }
 

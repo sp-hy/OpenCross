@@ -80,6 +80,9 @@ struct Mod {
   std::vector<ModFile> textures;
   std::vector<ModFile> shaders;
   std::vector<ModFile> voices;
+  // text\<member>: the mod's own rows of a lang.dat text member (target = the member name, lower case), merged over the member
+  // (import::TextMod) instead of replacing it.
+  std::vector<ModFile> text;
   std::vector<std::string> added;
   std::vector<std::string> unmatched;
   std::vector<std::string> ambiguous;

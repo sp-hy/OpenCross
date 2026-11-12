@@ -3,6 +3,7 @@
 // 0xA634 bytes: "EXT\0", u32 version 0x104, 30 slot records of 0x588 B, 30 x {u8 form byte, u8 valid}.
 // A record: u32 language, u32 battle counter, 44 x 32 B UTF-8 custom character names (NUL padded, empty = none).
 // Slot index = 15 * (card - 1) + CHRONOnn number (0 = the auto-save).
+#include <functional>
 #include <map>
 #include <string>
 
@@ -31,6 +32,9 @@ struct ExtSlot {
   // Pair table form byte (3..6) and its valid flag.
   u8 form = 0;
   u8 valid = 0;
+  // OpenCross saves only (not in ext_save.dat): the stem of the mod room the save was made in, "" for a game room. Mod room ids are
+  // each mod's own (game/mod_rooms.h), so Continue finds a mod room by this name, not by the location word.
+  std::string room;
 };
 
 class ExtFile {
@@ -57,6 +61,8 @@ struct ExtHost {
   u32 battles = 0;
   // The player's custom names (null = none).
   const std::map<int, std::u32string>* names = nullptr;
+  // The current mod room's stem for OpenCross saves (ExtSlot::room; null or "" = a game room).
+  std::function<std::string()> room;
 };
 
 std::string utf32_to_utf8(const std::u32string& text);

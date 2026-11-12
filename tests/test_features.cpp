@@ -93,12 +93,26 @@ void test_resolve() {
   CHECK(has_issue(clamped, "Wild", "outside 1..9") && has_issue(clamped, "Wild", "not a number"));
 }
 
+void test_rooms() {
+  // [Rooms] is not a feature: "<id> = <stem>" lines, ids 1000..0x7FFF, a bare stem (lower-cased); bad lines are problems.
+  const features::Manifest top = features::parse_manifest(
+      "[Rooms]\n1001 = Flux1001\n1002=hub\n999=low\n40000=high\nabc=x\n1003=map/x\n1004=x.bin\n1001=again\n");
+  CHECK((top.rooms == std::vector<std::pair<int, std::string>>{{1001, "flux1001"}, {1002, "hub"}}));
+  CHECK(top.sections.empty() && top.problems.size() == 6);
+  // The ids are each mod's own (game/mod_rooms.h): two mods using 1001 for different rooms is no conflict, no issue, no feature user.
+  const features::Manifest bottom = features::parse_manifest("[Rooms]\n1001=other\n");
+  const std::array<features::ModInput, 2> mods = {{{"Top", &top}, {"Bottom", &bottom}}};
+  const features::Resolved both = features::resolve(mods, {});
+  CHECK(both.conflicts.empty() && both.issues.empty() && both.users.empty());
+}
+
 }  // namespace
 
 int main() {
   test_parse();
   test_table();
   test_resolve();
+  test_rooms();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

@@ -9,6 +9,7 @@
 #include <format>
 
 #include "audio/voice.h"
+#include "core/features.h"
 #include "core/log.h"
 #include "core/timer.h"
 #include "game/battle/model_table.h"
@@ -500,9 +501,11 @@ bool FieldWorld::load_room(std::string_view name, int param) {
     sfx_->set_room(scene->yos0_bytes, scene->yos1_bytes);
   }
   room_id_ = import::room_id_from_name(name);
+  const int previous_map = map_id_;
   map_id_ = map_id_for(name);
   load_group_sprites(name);
-  // A room a mod adds (not shipped, so not in the lang.dat room table) reads its text rows under its map id.
+  // A room a mod adds (not shipped, so not in the lang.dat room table) reads its text rows under its map id (a mod room's internal id:
+  // its mod's text rows are keyed by it, import::TextMods).
   if (room_id_ < 0 && std::find(view_.rooms().begin(), view_.rooms().end(), std::string(name)) == view_.rooms().end()) room_id_ = map_id_;
   // The defeated-monster record is set up before INIT runs its D1 spawns.
   defeated_enter_room();
@@ -528,7 +531,10 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   camera_.cam.limits = lim;
 
   vm_.set_var(script::var::kRoomParam, param);
-  vm_.set_var(script::var::kMapId, map_id_ < 0 ? 0 : map_id_);
+  // MAP_ID as this room's script knows it; PREVIOUS_MAP_ID, written by the jump in the old room's terms, is re-read in this room's when the
+  // old room was a mod room (ModRooms: each mod has its own ids).
+  vm_.set_var(script::var::kMapId, map_id_ < 0 ? 0 : (mod_rooms_ ? mod_rooms_->to_script(name, map_id_) : map_id_));
+  if (mod_rooms_ && ModRooms::internal(previous_map)) vm_.set_var(script::var::kPrevMapId, mod_rooms_->to_script(name, previous_map));
   room_card_ = import::room_card(map_id_, param);
   // Var 0x3C is cleared at room load; scripts that allow saving here set it to 1. Var 0x3A = ROOM_PARAM (the entrance a later Load
   // re-enters with); var 0x50 = 0; var 0x34 (debug mode) = 1.
@@ -798,6 +804,25 @@ void FieldWorld::field_reset() {
 
 // ------------------------------------------------------------------------------------------------ host: party and items
 
+void FieldWorld::set_mod_rooms(const ModRooms* rooms) {
+  mod_rooms_ = rooms && !rooms->empty() ? rooms : nullptr;
+  stem_ids_.clear();
+  if (!mod_rooms_) return;
+  for (const std::string& stem : mod_rooms_->stems())
+    if (files_ && !files_->exists("cdrom/map/mapbin/" + stem + ".bin")) log::warn("field: mod room '{}' has no cdrom/map/mapbin/{}.bin", stem, stem);
+  log::info("field: {} mod room(s)", mod_rooms_->stems().size());
+}
+
+int FieldWorld::script_room(int id) const {
+  if (id < features::kModRoomFirst || !mod_rooms_) return id;
+  const int internal = mod_rooms_->from_script(view_.room_name(), id);
+  if (internal < 0) log::warn("field: room id {} is not in the [Rooms] of '{}' (the mod that owns {})", id, mod_rooms_->owner(view_.room_name()),
+                              view_.room_name());
+  return internal < 0 ? id : internal;
+}
+
+int FieldWorld::script_room_id(int id) const { return mod_rooms_ ? mod_rooms_->to_script(view_.room_name(), id) : id; }
+
 void FieldWorld::set_disc(int disc) {
   if (disc < 1 || disc > 2 || disc == disc_) return;
   log::info("field: disc {} -> {} (file index cdrom{}.fnd)", disc_, disc, disc == 2 ? "2" : "");
@@ -807,9 +832,10 @@ void FieldWorld::set_disc(int disc) {
 
 // The room's .prd is disc index record 368 + 3 * id + 1 (bin, prd, ctd), which names another room's .prd in 195 rooms (dem_05 ->
 // hid_a02f, alu_b01f -> alu_a01f, opn_a01i -> ryu_a24i, ...). title.prd (outside map/mapbin, the opening room's record) is the title
-// overlay's scene, run by TitleBackdrop. Empty = the room's own <room>.prd.
+// overlay's scene, run by TitleBackdrop. Empty = the room's own <room>.prd (always for a mod room: it has no record).
 std::string FieldWorld::prd_path_for(std::string_view name) {
   const int prd_id = map_id_for(name);
+  if (ModRooms::internal(prd_id)) return {};
   const std::string& prd_rec = prd_id < 0 ? std::string() : discs_.record(disc_, DiscIndex::kMapBase + 3 * prd_id + 1);
   const size_t prd_at = prd_rec.find("/map/mapbin/");
   return prd_at != std::string::npos && prd_rec.ends_with(".prd") ? "cdrom" + prd_rec.substr(prd_at) : std::string();
@@ -832,6 +858,9 @@ void FieldWorld::select_disc_for_room(std::string_view stem) {
 }
 
 std::string FieldWorld::room_stem_for_id(int room_id) const {
+  // A mod room (its internal id); a script's id from 1000 that names none is no room (record 368 + 3 * id is another kind of file).
+  if (ModRooms::internal(room_id)) return mod_rooms_ ? mod_rooms_->stem(room_id) : std::string();
+  if (room_id >= features::kModRoomFirst) return {};
   if (std::string stem = discs_.room_stem(disc_, room_id); !stem.empty()) return stem;
   // The disc's record is a placeholder (disc-1-only rooms are dummy.dat on disc 2): no room, as on the PS1, which cannot load one.
   if (!discs_.record(disc_, DiscIndex::kMapBase + 3 * room_id).empty()) return {};
@@ -872,10 +901,13 @@ bool FieldWorld::script_map_jump(int& room_id, int& param) const {
 }
 
 int FieldWorld::map_id_for(std::string_view stem) {
-  if (stem_ids_.empty() && discs_.loaded())
-    for (int id = 0; id < 2000; ++id)
-      // The lowest id wins.
+  if (stem_ids_.empty() && discs_.loaded()) {
+    // The lowest id wins, so a mod room never takes the id of a game room with the same stem.
+    for (int id = 0; id < features::kModRoomFirst; ++id)
       if (std::string room_stem = discs_.room_stem(disc_, id); !room_stem.empty()) stem_ids_.emplace(std::move(room_stem), id);
+    if (mod_rooms_)
+      for (const std::string& room_stem : mod_rooms_->stems()) stem_ids_.emplace(room_stem, mod_rooms_->internal_id(room_stem));
+  }
   const auto it = stem_ids_.find(std::string(stem));
   if (it != stem_ids_.end()) return it->second;
   return import::room_id_from_name(stem);

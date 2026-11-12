@@ -9,6 +9,7 @@
 #include "game/game_flow.h"
 #include "game/game_session.h"
 #include "data/tables.h"
+#include "game/mod_rooms.h"
 #include "game/party_editor.h"
 #include "ui/menu/game_state.h"
 #include "ui/title/title_screen.h"
@@ -672,7 +673,30 @@ void test_boot_logo() {
   CHECK(!logo.active());
 }
 
+// Mod rooms (game/mod_rooms.h): two mods built apart both call their room 1001; each mod's scripts reach their own.
+static void test_mod_rooms() {
+  game::ModRooms rooms;
+  // Alpha ships alpha_hub and links Beta's beta_cave as its 1500; Beta ships beta_cave; Gamma edits the game's room bak_a02f.
+  rooms.set({{"Alpha", {{1001, "alpha_hub"}, {1500, "beta_cave"}}}, {"Beta", {{1001, "beta_cave"}}}, {"Gamma", {{1001, "alpha_hub"}}}},
+            {{"alpha_hub", "Alpha"}, {"beta_cave", "Beta"}, {"bak_a02f", "Gamma"}});
+  // One internal id per stem, in stem order.
+  const int hub = rooms.internal_id("alpha_hub"), cave = rooms.internal_id("beta_cave");
+  CHECK(hub == game::ModRooms::kInternalFirst && cave == hub + 1 && rooms.internal_id("nowhere") == -1);
+  CHECK(rooms.stem(hub) == "alpha_hub" && rooms.stem(5).empty() && rooms.stems().size() == 2);
+  // A script's 1001 is its own room's owner's: Alpha's hub from Alpha's room, Beta's cave from Beta's, Alpha's hub from the game room
+  // Gamma edited; an unedited game room has no ids from 1000; ids below 1000 are the game's everywhere.
+  CHECK(rooms.from_script("alpha_hub", 1001) == hub && rooms.from_script("beta_cave", 1001) == cave);
+  CHECK(rooms.from_script("bak_a02f", 1001) == hub && rooms.from_script("alu_a01f", 1001) == -1);
+  CHECK(rooms.from_script("alpha_hub", 1500) == cave && rooms.from_script("beta_cave", 1500) == -1 && rooms.from_script("beta_cave", 459) == 459);
+  // What a script reads (MAP_ID / PREVIOUS_MAP_ID): the cave is 1500 to Alpha's scripts, 1001 to Beta's; unlisted = kUnlisted.
+  CHECK(rooms.to_script("alpha_hub", cave) == 1500 && rooms.to_script("beta_cave", cave) == 1001);
+  CHECK(rooms.to_script("beta_cave", hub) == game::ModRooms::kUnlisted && rooms.to_script("alu_a01f", 27) == 27);
+  CHECK(rooms.owner("beta_cave") == "Beta" && rooms.owner("alu_a01f").empty());
+  CHECK(rooms.from_mod("Beta", 1001) == cave && rooms.from_mod("Delta", 1001) == -1 && rooms.first_listing(1001) == "alpha_hub");
+}
+
 int main() {
+  test_mod_rooms();
   test_codec();
   test_any_button();
   test_boot_logo();

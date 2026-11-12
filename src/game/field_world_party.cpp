@@ -149,6 +149,8 @@ int FieldWorld::load_model(int ent, int model) {
 // character's model byte decides the body when an entity puts the model on (a D9 disguise shows). The files are read ahead now.
 void FieldWorld::set_model_source(int model, int kind, int id, int sub) {
   if (model < 0 || model > 0xFF) return;
+  // A room's model: the script's room id is in its room owner's namespace (a mod room becomes its internal id).
+  if (kind == ModelSource::kRoomModel) id = script_room(id);
   const ModelSource source{kind, id, sub};
   bool known = false;
   switch (kind) {
@@ -669,10 +671,12 @@ std::array<u8, 12> sjis_preview_name(std::u32string_view text) {
 
 void FieldWorld::capture_state() {
   save::SaveSlot& sl = gs_->slot;
-  // The location word (head 0x18E) is the room id Continue loads.
-  if (map_id_ >= 0) {
-    sl.head[save::head::kLocation] = static_cast<u8>(map_id_ & 0xFF);
-    sl.head[save::head::kLocation + 1] = static_cast<u8>((map_id_ >> 8) & 0xFF);
+  // The location word (head 0x18E) is the room id Continue loads: a mod room's as its owner's script knows it (the OpenCross save also
+  // keeps its stem, mod_room(), which Continue prefers: ids are each mod's own).
+  const int location = map_id_ < 0 ? -1 : script_room_id(map_id_);
+  if (location >= 0) {
+    sl.head[save::head::kLocation] = static_cast<u8>(location & 0xFF);
+    sl.head[save::head::kLocation + 1] = static_cast<u8>((location >> 8) & 0xFF);
   }
   sl.head[save::head::kPreviewStars] = sl.head[save::head::kStarsTotal];
   // Head 0x40 mirrors SCENARIO_FLAG.
@@ -698,9 +702,9 @@ void FieldWorld::capture_state() {
   }
   // The location word is variable 6 (head 0x18E): the room id, written into the state only - the VM's MAP_ID is the room load's
   // (FE 2F leaves it 0 in New Game+ until the MAP_JUMP).
-  if (map_id_ >= 0) {
-    sl.head[save::head::kLocation] = static_cast<u8>(map_id_ & 0xFF);
-    sl.head[save::head::kLocation + 1] = static_cast<u8>((map_id_ >> 8) & 0xFF);
+  if (location >= 0) {
+    sl.head[save::head::kLocation] = static_cast<u8>(location & 0xFF);
+    sl.head[save::head::kLocation + 1] = static_cast<u8>((location >> 8) & 0xFF);
   }
   // Summary flag bits (head 0x42 bits 0-1) = variable 0x7E & 3: 2 New Game+, 3 cleared.
   sl.head[save::head::kFlags42] = static_cast<u8>((sl.head[save::head::kFlags42] & ~3u) | (vm_.var(ngplus::kFlagVar) & 3));
