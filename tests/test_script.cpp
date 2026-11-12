@@ -1345,7 +1345,7 @@ void test_mod_ui_ops() {
     CHECK_EQ(ovm.var(V(0)), 250);
     CHECK_EQ(ovm.var(V(1)), 124);
     CHECK(oui.elements[70].kind == ModUi::kItem && !oui.selectable(70));
-    CHECK_EQ(ovm.var(V(2)), 2);
+    CHECK_EQ(ovm.var(V(2)), 3);
     const ModUi::Element& image = oui.elements[102];
     CHECK(image.kind == ModUi::kImage && image.x == 10 && image.w == 24 && image.colour == 8 && image.flags == ModUi::kTranslucent);
     CHECK_EQ(image.msg, 12);

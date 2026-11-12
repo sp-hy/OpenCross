@@ -498,6 +498,56 @@ DialogueBox::FrameSize DialogueBox::frame_size(int skin_idx, float text_width, i
   return size;
 }
 
+// Where draw_tiles cuts the fill of a portrait-less window: past the right corner piece's left edge, and past the bottom corner piece's
+// top edge (skin 5 keeps its last row whole).
+static float fill_right_of(int skin_idx) { return kCorner * 0.5f - (skin_idx == 0 ? 10.0f : 0.0f); }
+static constexpr float kFillBottom = kCorner * 0.5f;
+static constexpr float kCornerDrop = 0.5f * kTH - 0.95f * kTW;
+
+// The inverse of frame_geo_for for a portrait-less window: the fill origin is the box's corner, the row count comes from its height, the
+// corner pieces sit where a message window of that fill has them.
+DialogueBox::Geo DialogueBox::frame_geo_box(int skin_idx, float left, float top, float right, float bottom) {
+  Geo geo;
+  geo.skin = skin_idx;
+  geo.X0 = left;
+  geo.Y0 = top;
+  geo.T0x = left - 1.28f * kTW * (skin_idx == 0 ? 1.013f : 1.0f);
+  geo.T0y = top - 1.35f * kTW - (skin_idx == 0 ? 1.0f : 0.0f);
+  const float rows = skin_idx == 5 ? (bottom - top) / kTW : (bottom - kFillBottom - kCornerDrop - top) / kTW + 1.0f;
+  geo.rows = std::max(2, static_cast<int>(std::lround(rows)));
+  geo.last = geo.Y0 + static_cast<float>(geo.rows - 1) * kTW;
+  geo.B0y = skin_idx == 8 && geo.rows == 2 ? geo.last + 0.15f * kTH - 0.17f * kTW : geo.last + kCornerDrop;
+  geo.R0x = std::max(right - fill_right_of(skin_idx), geo.T0x + kCorner);
+  geo.cols = 0;
+  while (geo.X0 + static_cast<float>(geo.cols) * kTW <= geo.R0x + kCorner && geo.cols < 25) ++geo.cols;
+  return geo;
+}
+
+DialogueBox::FrameBox DialogueBox::frame_box(int skin_idx, float left, float top, float right, float bottom) {
+  const Geo geo = frame_geo_box(skin_idx, left, top, right, bottom);
+  FrameBox box;
+  box.left = geo.X0;
+  box.top = geo.Y0;
+  box.right = geo.R0x + fill_right_of(skin_idx);
+  box.bottom = skin_idx == 5 ? geo.Y0 + static_cast<float>(geo.rows) * kTW : geo.B0y + kFillBottom;
+  box.rows = geo.rows;
+  box.outer_w = geo.R0x + kCorner - geo.T0x;
+  box.outer_h = geo.B0y + kCorner - geo.T0y;
+  return box;
+}
+
+void DialogueBox::draw_frame(float left, float top, float right, float bottom, float alpha, float vw, float vh, const render::CanvasFit* fit) {
+  if (!sprites_ || !skin_set_ || skin_mode_ != mode_ || alpha * 255.0f < 1.0f) return;
+  const render::OverlayFit of = fit ? render::OverlayFit{fit->s, fit->s, fit->ox, fit->oy} : render::overlay_fit(vw, vh);
+  const float zoom = of.sx;
+  const float flat = of.sy / of.sx;
+  yo_ = of.oy / flat;
+  const float canvas_left = (vw / zoom - 1280.0f) * 0.5f;
+  sprites_->set_view(vw, vh / flat);
+  draw_tiles(frame_geo_box(skin_idx_, canvas_left + left, top, canvas_left + right, bottom), zoom, alpha, false, false);
+  sprites_->set_view(vw, vh);
+}
+
 void DialogueBox::draw_tiles(const Geo& geo, float zoom, float alpha, bool has_portrait, bool portrait_left) {
   const SkinUv& uv = kSkins[std::clamp(geo.skin, 0, 15)];
   const bool light = geo.skin <= 5;
@@ -992,6 +1042,10 @@ void DialogueDemo::voice_sync() {
     voice_page_ = -1;
     if (on_close) on_close();
   }
+}
+
+void DialogueDemo::draw_frame(float left, float top, float right, float bottom, float alpha, float vw, float vh, const render::CanvasFit* fit) {
+  if (impl_->ready) impl_->box.draw_frame(left, top, right, bottom, alpha, vw, vh, fit);
 }
 
 void DialogueDemo::draw(float vw, float vh, const render::CanvasFit* fit) {

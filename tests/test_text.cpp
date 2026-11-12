@@ -610,6 +610,24 @@ void test_frame_rows() {
   CHECK(skin8_two_lines.second.rows == 3);
   // The right corner starts 36 past the widest line: the frame is W + 321.29 wide with skin 3.
   CHECK(std::fabs(DialogueBox::frame_size(3, 225.0f, 1).w - (225.0f + 321.29f)) < 0.01f);
+  // A window over a box (the box = its fill): the window it draws is its own fixed point, and a box of n fill rows gets the frame of an
+  // n - 1 line message (every skin); the bottom snaps to whole fill rows; a box too small takes the smallest window.
+  for (int skin = 0; skin < 16; ++skin)
+    for (int lines = 1; lines <= 6; ++lines) {
+      const DialogueBox::FrameSize size = DialogueBox::frame_size(skin, 400.0f, lines);
+      const DialogueBox::FrameBox box = DialogueBox::frame_box(skin, 100.0f, 50.0f, 700.0f, 50.0f + 61.75f * static_cast<float>(lines + 1));
+      CHECK(box.rows == size.rows && std::fabs(box.outer_h - size.h) < 0.01f);
+      CHECK(box.left == 100.0f && box.top == 50.0f && std::fabs(box.right - 700.0f) < 0.01f);
+      const DialogueBox::FrameBox again = DialogueBox::frame_box(skin, box.left, box.top, box.right, box.bottom);
+      CHECK(again.rows == box.rows && std::fabs(again.bottom - box.bottom) < 0.01f && std::fabs(again.outer_w - box.outer_w) < 0.01f);
+    }
+  const DialogueBox::FrameBox four = DialogueBox::frame_box(3, 0.0f, 0.0f, 600.0f, 4 * 61.75f);
+  const DialogueBox::FrameBox taller = DialogueBox::frame_box(3, 0.0f, 0.0f, 600.0f, four.bottom + 20.0f);
+  CHECK(four.rows == 4 && taller.rows == 4 && std::fabs(taller.bottom - four.bottom) < 0.01f);
+  const DialogueBox::FrameBox next_row = DialogueBox::frame_box(3, 0.0f, 0.0f, 600.0f, four.bottom + 45.0f);
+  CHECK(next_row.rows == 5 && std::fabs(next_row.bottom - (four.bottom + 61.75f)) < 0.01f);
+  const DialogueBox::FrameBox tiny = DialogueBox::frame_box(3, 10.0f, 10.0f, 20.0f, 20.0f);
+  CHECK(tiny.rows == 2 && tiny.right > 20.0f && tiny.outer_w > 300.0f);
 }
 
 // Number entry: {input(n)} survives flatten and marks the next n glyphs (the placeholder digits) as digits 0..n-1; the text after them

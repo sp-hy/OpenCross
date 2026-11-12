@@ -31,7 +31,7 @@ constexpr std::array<Feature, 6> kFeatures = {{
     {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings, true,
      "A Swap command in battle: the acting character trades places with a reserve member. The party comes back after the battle unless "
      "you keep it."},
-    {kModUi, 2, "ModUi", "Mod UI", {}, false,
+    {kModUi, 3, "ModUi", "Mod UI", {}, false,
      "Script ops a mod builds its own screens from: panels, text, images, ovals, lists and a cursor the script reads the pick from. Field "
      "script FE C1 to FE CB, FE CE and FE CF."},
     {kPartyScreen, 1, "PartyScreen", "Party screen tweaks", kPartyScreenSettings, true,

@@ -23,6 +23,9 @@ struct ModUi {
   static constexpr u8 kPulse = 4;
   // Level 2, rects / ovals / images: the size breathes with the same clock (1 pixel out and in about the centre).
   static constexpr u8 kBeat = 8;
+  // Level 3, rects: the player's window skin (frame and fill, as a message window draws it) in place of the colour: the rect is the window's inside, the frame goes around it; the height snaps
+  // to whole fill rows.
+  static constexpr u8 kSkin = 0x10;
   // UI_TEXT flags: a framed window in the player's window skin (else frameless).
   static constexpr u8 kFramed = 1;
   // UI_ITEM flags: the cursor skips it.
