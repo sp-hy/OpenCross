@@ -115,7 +115,7 @@ int Vm::emit(Event::Kind kind, int unit, int arg_a, int arg_b) {
   ev.unit = unit;
   ev.a = arg_a;
   ev.b = arg_b;
-  ev.vt = vtime_;
+  ev.vt = vtime_ - hidden_ticks_;
   ev.seq = seq_++;
   events_.push_back(ev);
   return ev.seq;
@@ -274,6 +274,19 @@ bool Vm::settle(int max_ticks) {
   return false;
 }
 
+bool Vm::settle_pass(int max_ticks) {
+  const size_t first = events_.size();
+  const u32 start = vtime_;
+  mark();
+  const bool settled = settle(max_ticks);
+  if (events_.size() == first + 1) {
+    events_.pop_back();
+    --seq_;
+    hidden_ticks_ += vtime_ - start;
+  }
+  return settled;
+}
+
 void Vm::do_halt(int entity) {
   Ctx& ctx = ctx_[static_cast<size_t>(entity)];
   if (ctx.frames.size() > 1) {
@@ -408,7 +421,7 @@ int Vm::target_mask(int entity, int code) {
   }
 }
 
-std::optional<std::array<u8, 6>> Vm::probe_group(int element, int caster) const {
+std::optional<Vm::GroupProbe> Vm::probe_group(int element, int caster) const {
   for (const ScriptExtent& extent : mod_.scripts()) {
     int last8d = -1;
     // The vars as the straight-line assignments of this script (e.g. `set v, self; sub v, 0xE0` before its 8D) leave them.
@@ -432,15 +445,16 @@ std::optional<std::array<u8, 6>> Vm::probe_group(int element, int caster) const 
         auto operand_s = [&](int k) { const u16 raw = r16(1 + 2 * k); return (spec >> (7 - k)) & 1 ? static_cast<int>(static_cast<s16>(raw)) : vr(raw); };
         if ((operand_s(0) & 0xFF) == 2 && operand_s(1) == element) {
           const u32 p8 = static_cast<u32>(last8d);
-          std::array<u8, 6> out{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+          GroupProbe out;
+          out.owner = ctx_[static_cast<size_t>(extent.entity)].unit;
           int count = 0;
           for (int k = 0; k < 6; ++k) {
             const u16 raw = static_cast<u16>(mod_.at(p8 + 1 + 2 * static_cast<u32>(k)) | (mod_.at(p8 + 2 + 2 * static_cast<u32>(k)) << 8));
             const int value = raw & 0x8000 ? raw & 0x7FFF : vr(raw);
-            if ((value & 0xFFFF) != 0xFF) out[static_cast<size_t>(count++)] = static_cast<u8>(value);
+            if ((value & 0xFFFF) != 0xFF) out.group[static_cast<size_t>(count++)] = static_cast<u8>(value);
           }
           // Each enemy's own copy of the script names itself: the caster's copy is the one that lists it.
-          if (std::find(out.begin(), out.end(), static_cast<u8>(caster)) != out.end()) return out;
+          if (std::find(out.group.begin(), out.group.end(), static_cast<u8>(caster)) != out.group.end()) return out;
         }
       }
       pc += static_cast<u32>(len);
@@ -1391,8 +1405,7 @@ void ScriptedBrain::idle_pass(Battle& battle, Rng& rng) {
   if (!vm_) return;
   host_->battle = &battle;
   host_->rng = &rng;
-  vm_->mark();
-  vm_->settle();
+  vm_->settle_pass();
 }
 
 }  // namespace oc::battle::pac

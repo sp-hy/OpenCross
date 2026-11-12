@@ -122,9 +122,10 @@ void FieldWorld::step_bone_emitters() {
 // frees the record for good: sound id 0xFF, volume 0, silent until C5 / C8 reuses it, even when the source is shown again); the
 // nearest four records own a voice. Volume = 0x7F within 0x100 units, (0x900 - d) >> 4 up to 0x900, 0 beyond, times the record
 // volume >> 7; pan from the sound's screen x. A record whose sound runs gets the new pan and volume; an idle one starts (not started
-// yet), restarts (not one-shot) or is freed (one-shot). Records beyond the nearest four are keyed off.
+// yet), restarts (not one-shot) or is freed (one-shot). Records beyond the nearest four are keyed off. From a battle request to the
+// field's return nothing of this runs, so the sounds the request ended stay silent through the encounter effect and the battle.
 void FieldWorld::step_sound_emitters() {
-  if (sound_emitters_.empty()) return;
+  if (sound_emitters_.empty() || handoff_.battle_state != BattleState::None) return;
   const int player = player_entity();
   if (!valid_ent(player)) return;
   const ActorPose& leader = ents_[static_cast<size_t>(player)].actor.current();

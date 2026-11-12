@@ -144,6 +144,11 @@ void BattleView::fx_end() {
   // The shading entries' hide bits (ops 0x1B / 0x1C) are plain model words the pack end never touches, so a unit whose script ran
   // out or that only runs its idle loop (nothing was cut) keeps them: the Bulbs' S5 entry 8 hides parts 0-3 and each sprout stage (entry 13 ...)
   // shows one more; clearing them on every pack end would draw the whole Bulb under the floor after the next cast.
+  // After an element action the hook first starts S5 entry 11 on the first unit of the acting list. The idle restart below supersedes it
+  // at once on a unit without the dead flag, so it plays only on a dead caster: a PC the poison step knocked out at its own cast picks its
+  // knocked-out clip 8 again with blend 16, a monster plays its cast-end clips before the same pick.
+  const bool element_action = !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element;
+  const int first_caster = element_action ? script_list_unit(0, 0) : -1;
   for (int i = 0; i < battle::kUnits; ++i) {
     const Visual& visual = vis_[static_cast<size_t>(i)];
     // A running spawn script is not cut: the idle restart waits for its end (start_idle).
@@ -155,10 +160,14 @@ void BattleView::fx_end() {
     anm_unit_reset(i, ran_out, ran_out || visual.script_kind == kIdle);
     // Every unit on screen without the dead flag restarts its idle, so it re-picks its pose from the HP it now has: a PC healed above a
     // quarter stands up (also a target whose own table ended before its number landed), one brought to a quarter or less hunches, and
-    // HP a script wrote to 0 shows as the low-HP pose from here on. A unit whose script was cut is restarted by the action's end.
+    // HP a script wrote to 0 shows as the low-HP pose from here on. The restart starts the clip again with the idle's blend, also the clip
+    // the unit already plays; so does a caster or target whose pack script has already ended. A unit whose script was cut is restarted by
+    // the action's end.
     const battle::Unit& unit_rec = bunit(i);
-    const bool dead_flag = visual.ko_shown && !visual.death_owed && !(unit_rec.hp_written_zero && unit_rec.hp <= 0);
-    if (unit_rec.present && visual.script_kind == kIdle && !dead_flag) start_idle(i);
+    const bool dead_flag = (visual.ko_shown || visual.ko_resolved) && !visual.death_owed && !(unit_rec.hp_written_zero && unit_rec.hp <= 0);
+    const bool pack_script_over = ran_out && (visual.script_kind == kCast || visual.script_kind == kRelease || visual.script_kind == kReact);
+    if (unit_rec.present && (visual.script_kind == kIdle || pack_script_over) && !dead_flag) start_idle(i, true);
+    else if (unit_rec.present && i == first_caster && dead_flag) start_cast_end(i);
   }
   // The tech clips are dropped; nothing plays an external clip afterwards.
   fx_drop_clip_packs();

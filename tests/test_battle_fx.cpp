@@ -12,6 +12,7 @@
 #include "data/tables.h"
 #include "game/battle/battle_fx.h"
 #include "game/battle/battle_model_cache.h"
+#include "game/battle/battle_seq.h"
 #include "game/effects/bespoke/bespoke.h"
 #include "import/battle_stage.h"
 #include "import/container.h"
@@ -45,6 +46,48 @@ static int check_lenz(vfs::Vfs& files) {
     }
   }
   if (lens_count != 1) { std::printf("FAIL lenz: %d type-21 emitters in bg_00\n", lens_count); ++bad; }
+  return bad;
+}
+
+// The idle (S5 entry 1) and the element end hook's entry 11 of every battle player model, run for a dead PC: with the idle-pose word 1 the
+// pick plays clip 8 with blend 16 and the dead branch shuts the eyes; with the word 8 the poison step writes it plays the same clip through
+// the word, with no eye-shut op.
+static int check_ko_pose_picks(vfs::Vfs& files) {
+  int bad = 0, models = 0;
+  for (const std::string& path : files.list("cdrom")) {
+    if (!path.starts_with("battle/player/") || !path.ends_with(".obj")) continue;
+    const auto obj = files.read("cdrom/" + path);
+    bseq::Table table;
+    if (!obj || !bseq::load_model_table(*obj, table)) continue;
+    ++models;
+    for (const int entry : {1, 11})
+      for (const int pose : {1, 8}) {
+        bseq::Ctx ctx;
+        ctx.dead = true;
+        ctx.pose = pose;
+        bseq::Vm vm;
+        bool clip8 = false, shut = false;
+        if (vm.start(&table, entry, 0)) {
+          std::vector<bseq::Event> out;
+          for (int k = 0; k < 200 && vm.running(); ++k) {
+            out.clear();
+            vm.tick(ctx, out);
+            for (const bseq::Event& event : out) {
+              if (event.kind == bseq::Event::SetAnim && event.a == 8 && (event.b & 0x1FFF) == 16) clip8 = true;
+              if (event.kind == bseq::Event::Eye && event.a == 2) shut = true;
+            }
+          }
+        }
+        if (!clip8 || shut != (pose == 1)) {
+          std::printf("FAIL ko pose: %s entry %d pose word %d: clip 8 %d, eyes shut %d\n", path.c_str(), entry, pose, clip8, shut);
+          ++bad;
+        }
+      }
+  }
+  if (models < 40) {
+    std::printf("FAIL ko pose: only %d player models\n", models);
+    ++bad;
+  }
   return bad;
 }
 
@@ -148,6 +191,7 @@ int main() {
   }
   if (check_lenz(files)) return 1;
   if (check_thrown_weapon_meshes(files)) return 1;
+  if (check_ko_pose_picks(files)) return 1;
   {
     // A party member's model follows its kind byte: Serge in Lynx's body is the sel_yam2 model.
     battle::Unit body;

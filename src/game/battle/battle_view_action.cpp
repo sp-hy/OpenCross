@@ -134,9 +134,10 @@ void BattleView::update(float dt, const platform::Input& in) {
     } else if (dbg_.cast_actor >= 0 && dbg_.cast_target >= 0 && static_cast<size_t>(el) < tables_->elements.size()) {
       // Debug tab: an explicit caster and target. An all-targets element (pgdat +4 bit 0x10) hits every present unit on the target's side that
       // the all-target cast mask allows.
-      const int ca = dbg_.cast_actor, ct = dbg_.cast_target;
+      const int asked = dbg_.cast_actor, ct = dbg_.cast_target;
       dbg_.cast_actor = dbg_.cast_target = -1;
-      if (ca < battle::kUnits && ct < battle::kUnits && bunit(ca).present && bunit(ct).present) {
+      const int ca = asked < battle::kUnits && ct < battle::kUnits && bunit(asked).present && bunit(ct).present ? dev_group_hint(asked, el) : -1;
+      if (ca >= 0) {
         const battle::TargetSpec ts = battle::target_spec(tables_->elements[static_cast<size_t>(el)]);
         const bool pc_side = ct < battle::kPcSlots;
         // Party + enemies + all (elements 46 53 65 71 77 83 84 ...) is every unit of both sides (Serge faces the bounding-box midpoint
@@ -145,10 +146,10 @@ void BattleView::update(float dt, const platform::Input& in) {
         const int lo = both ? 0 : ts.all ? (pc_side ? 0 : battle::kPcSlots) : ct, hi = both ? battle::kUnits : ts.all ? (pc_side ? battle::kPcSlots : battle::kUnits) : ct + 1;
         bool ring = true;
         const u32 reach = battle_->cast_mask();
-        dev_group_hint(ca, el);
         // Dev: OC_CAST_PARTY=n limits a party-side all-targets cast to the first n PCs. With Serge alone (units 0, 3, 4, 5) a per-target
         // sequence loop (op 0x4D) runs once, and three times with the full party.
         static const int party_cap = std::getenv("OC_CAST_PARTY") ? std::atoi(std::getenv("OC_CAST_PARTY")) : 99;
+        battle_->begin_external_action();
         // A cast the other side's trap holds is caught instead (ocbattleview --etrap / --ptrap).
         const bool caught = battle_->catch_in_trap(ca, el, 0, ct);
         for (int i = lo; i < hi && !caught; ++i) {
@@ -167,22 +168,27 @@ void BattleView::update(float dt, const platform::Input& in) {
     } else if (dbg_.enemy_cast && first >= 0 && static_cast<size_t>(el) < tables_->elements.size()) {
       // The enemy's own side for the party-side elements (party-only target spec), else the first PC.
       const battle::TargetSpec ts = battle::target_spec(tables_->elements[static_cast<size_t>(el)]);
-      dev_group_hint(first, el);
-      if (const int target = ts.party && !ts.enemies ? first : 0; !battle_->catch_in_trap(first, el, 0, target)) battle_->do_element(first, el, 0, target, true);
-      battle_->set_group_hint(std::array<u8, 6>{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF});
-      battle_->finish_external_action();
-      collect_events();
-      ui_ = Ui::Wait;
-    } else if (first >= 0 && static_cast<size_t>(el) < tables_->elements.size()) {
+      if (const int caster = dev_group_hint(first, el); caster >= 0) {
+        battle_->begin_external_action();
+        if (const int target = ts.party && !ts.enemies ? caster : 0; !battle_->catch_in_trap(caster, el, 0, target)) battle_->do_element(caster, el, 0, target, true);
+        battle_->set_group_hint(std::array<u8, 6>{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF});
+        battle_->finish_external_action();
+        collect_events();
+        ui_ = Ui::Wait;
+      }
+    } else if (first >= 0 && static_cast<size_t>(el) < tables_->elements.size() && dev_group_hint(dbg_.lead, el) >= 0) {
       const battle::TargetSpec ts = battle::target_spec(tables_->elements[static_cast<size_t>(el)]);
       // ally: the party side.
       const bool ally = ts.party && !ts.enemies;
       const int lo = ally ? 0 : first, hi = ally || !ts.enemies ? battle::kPcSlots : battle::kUnits;
+      // A double or triple tech is cast by every participant in the party, as from the menu (dev_group_hint above).
+      battle_->begin_external_action();
       const bool caught = battle_->catch_in_trap(dbg_.lead, el, 0, lo);
       for (int i = lo; i < hi && !caught; ++i) {
         if (!bunit(i).present || (ts.ko_only ? bunit(i).standing() : !bunit(i).standing()) || (!ts.all && i != lo)) continue;
         battle_->do_element(dbg_.lead, el, 0, i, i == lo);
       }
+      battle_->set_group_hint(std::array<u8, 6>{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF});
       battle_->finish_external_action();
       collect_events();
       ui_ = Ui::Wait;
@@ -192,11 +198,17 @@ void BattleView::update(float dt, const platform::Input& in) {
     build_hud();
     return;
   }
-  // The PC's turn is over: the menu passes on with SFX 0x16 (enemy actions that follow close the window again, tick_menu_entry).
+  // The PC's turn is over: the menu passes on with SFX 0x16 (enemy actions that follow close the window again, tick_menu_entry). The
+  // re-entry restarts the idle of the PC it goes to, or of the PC whose turn ended when nobody can take the menu; an attacker that keeps
+  // its menu is not re-entered.
   if (turn_open_ && turn_over()) {
     turn_open_ = false;
     if (battle_->outcome() == battle::Outcome::Ongoing && finish_ == Finish::None) {
       const int pc = menu_pc_after();
+      const bool kept = last_kind_ == battle::Command::Kind::Attack && pc >= 0 && pc == last_actor_;
+      const bool reenter = !kept && (last_kind_ == battle::Command::Kind::Attack || last_kind_ == battle::Command::Kind::Element ||
+                                     last_kind_ == battle::Command::Kind::Defend);
+      if (const int restart = pc >= 0 ? pc : last_actor_; reenter && battle::is_pc_slot(restart)) start_idle(restart, true);
       begin_menu_entry(pc);
       if (pc >= 0 && !auto_) audio_.play_menu(0x16);
     }
@@ -234,7 +246,7 @@ void BattleView::update(float dt, const platform::Input& in) {
           // A switch key in the HIT% menu: once the PC is home the menu passes on with SFX 0x16, the new PC's idle restarts and its
           // window opens again, also when the menu stays on the same PC.
           audio_.play_menu(0x16);
-          start_idle(active_pc_);
+          start_idle(active_pc_, true);
           begin_menu_entry(active_pc_);
         } else {
           // Cross in the HIT% menu: its sound plays once the PC is home.
@@ -332,11 +344,8 @@ void BattleView::begin_disengage(bool approach_shot) {
     end_camera_tasks();
     if (approach_shot) select_approach();
   }
-  Visual& visual = vis_[static_cast<size_t>(pc)];
-  if (!bunit(pc).alive()) {
-    begin_move(pc, visual.home_x, visual.home_z, 0, true);
-    return;
-  }
+  // A PC knocked out at its target (the poison step of its own hit) hops home all the same; the return script's end picks the
+  // knocked-out pose from the death flag.
   act_.actor = pc;
   start_return();
   ui_ = Ui::Wait;
@@ -474,8 +483,9 @@ void BattleView::bind_swapped_unit(int unit) {
   // The leaver's display state goes with it: the HUD counts from the newcomer's own HP.
   visual.hp_disp = static_cast<float>(unit_rec.hp);
   visual.hp_shown = unit_rec.hp;
+  visual.revive_hp = -1;
   visual.status_shown = unit_rec.lo;
-  visual.ko_shown = visual.ko_hit = visual.ko_reacted = visual.death_owed = false;
+  visual.ko_shown = visual.ko_hit = visual.ko_reacted = visual.ko_resolved = visual.death_owed = false;
   visual.zero_hp_actions = 0;
   visual.flash = visual.flash_prev = 0.0f;
   visual.fade = visual.fade_prev = 1.0f;
@@ -551,9 +561,10 @@ std::string BattleView::route_facing() const {
 
 // In the top command menu Right / Square / R1 pick the NEXT PC and Left / L1 the PREVIOUS one: the three slots are walked from active +- 1
 // (wrapping 0..2) and the first that can act is taken (a character, no KO / blocking status 0x20304080, stamina > 9); the third candidate is the
-// active PC itself = nobody else can act: the menu stays on it, with no sound. Either way the PC's idle clip restarts (a guarding PC's block
-// pose plays again until its top menu takes over) and the menu entry starts again. A change also ends the camera's tasks, plays SFX 0x16 and
-// restores the PC's cursor memory (the facing pass is sync_menu_facing).
+// active PC itself = nobody else can act: the menu stays on it, with no sound. Either way the PC's idle restarts with its blend (a guarding
+// PC's block pose plays again until its top menu takes over) and the menu entry starts again. A change also ends the camera's tasks, plays
+// SFX 0x16 and restores the PC's cursor memory (the facing pass is sync_menu_facing). L1 / R1 in the attack target ring close the ring and
+// do the same with SFX 6 in place of 0x16, played also when the menu stays on the PC; the camera's tasks end either way.
 int BattleView::switch_target(int dir) const {
   for (int k = 1; k < battle::kPcSlots; ++k) {
     const int next = ((active_pc_ + (dir > 0 ? k : -k)) % battle::kPcSlots + battle::kPcSlots) % battle::kPcSlots;
@@ -563,15 +574,22 @@ int BattleView::switch_target(int dir) const {
 }
 
 void BattleView::switch_active_pc(int dir) {
-  if (ui_ != Ui::Top || active_pc_ < 0 || dir == 0 || engaged_) return;
+  const bool ring = ui_ == Ui::Target && pending_cmd_.kind == battle::Command::Kind::Attack;
+  if (!(ui_ == Ui::Top || ring) || active_pc_ < 0 || dir == 0 || engaged_) return;
   const int slot = switch_target(dir);
+  if (ring) {
+    audio_.play_menu(6);
+    hdr_on_ = false;
+    pending_cmd_.chain.clear();
+    ui_ = Ui::Top;
+  }
+  if (ring || slot != active_pc_) end_camera_tasks();
   if (slot != active_pc_) {
-    end_camera_tasks();
     active_pc_ = slot;
     top_cursor_ = cursor_memory_ ? top_mem_[slot] : 0;
-    audio_.play_menu(0x16);
+    if (!ring) audio_.play_menu(0x16);
   }
-  start_idle(slot);
+  start_idle(slot, true);
   begin_menu_entry(slot);
 }
 
@@ -676,15 +694,19 @@ void BattleView::sync_shown() {
     Visual& visual = vis_[static_cast<size_t>(i)];
     if (!unit.present) continue;
     visual.hp_shown = unit.hp;
+    visual.revive_hp = -1;
     visual.status_shown = unit.lo;
-    // Only the KO bit is a death on screen: a frozen unit stands, visible, in its held pose.
-    const bool ko = !unit.in_turn_order();
+    // Only the KO bit is a death on screen: a frozen unit stands, visible, in its held pose. A member knocked out by its save record has no
+    // death flag and stands.
+    const bool ko = !unit.in_turn_order() && !unit.record_ko;
     if (ko != visual.ko_shown) {
       visual.ko_shown = ko;
       if (!ko) visual.ko_hit = visual.ko_reacted = false, visual.zero_hp_actions = 0;
-      // Re-pick the idle / KO pose.
-      if (visual.script_done && visual.script_kind == kIdle) start_idle(i);
+      // Re-pick the idle / KO pose (a KO no action shows: ocbattleview --ko). A KO an action resolved restarts nothing: the unit keeps its
+      // clip (the poison step's KO restarted it at the resolve, begin_group).
+      if (visual.script_done && visual.script_kind == kIdle && !visual.ko_resolved) start_idle(i);
     }
+    visual.ko_resolved = false;
   }
 }
 

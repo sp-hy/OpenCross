@@ -105,8 +105,9 @@ struct BattleView::TrailState {
   // does not clear it (the next idle script re-arms it).
   struct Eye {
     bool on = false;
-    // The unit was KO when last looked at (the blink flag is cleared at the KO and set again on revive).
-    bool ko = false;
+    // The unit's face takes the eye ops: set at the model bind for a PC in its own form, cleared by the poison step's KO, set again by a
+    // revive. Ops 0x72 and 0x4F act only while it is set; op 0x73 always does.
+    bool face = false;
     // 0 open, 1 half, 2 closed.
     int frame = 0;
     int counter = 0;
@@ -134,7 +135,6 @@ void BattleView::trail_event(int unit, const bseq::Event& event) {
   const size_t unit_index = static_cast<size_t>(unit);
   TrailState::UnitCfg& cfg = state.cfg[unit_index];
   TrailState::UnitModel& model = state.model[unit_index];
-  const auto party_eyes = [&] { return bunit(unit).pc && bunit(unit).form < 0 && !vis_[unit_index].ko_shown; };
   switch (event.kind) {
     case K::TrailColors:
       for (size_t k = 0; k < 3; ++k) cfg.colour_a[k] = event.off[k], cfg.colour_b[k] = event.ang[k];
@@ -167,20 +167,24 @@ void BattleView::trail_event(int unit, const bseq::Event& event) {
       for (int slot = 0; slot < 2; ++slot)
         if (event.b < 0 || event.b == slot) model.weapon_hidden[slot] = event.a == 0, model.weapon_set[slot] = true;
       break;
-    // On: only a party member in its own form that is not KO; off: always, with the eyes open again.
+    // On: only a face that takes the eye ops; off: always, with the eyes open again.
     case K::Blink: {
       TrailState::Eye& eye = state.eye[unit_index];
       if (event.a) {
-        if (party_eyes()) eye.on = true;
+        if (eye.face) eye.on = true;
       } else {
         eye.on = false;
         eye.frame = 0;
       }
+      if (trace) log::info("trail: tick {} unit {} eye frame {} blink {}", tick_count_, unit, eye.frame, eye.on);
       break;
     }
-    case K::Eye:
-      if (party_eyes()) state.eye[unit_index].frame = std::clamp(event.a, 0, 2);
+    case K::Eye: {
+      TrailState::Eye& eye = state.eye[unit_index];
+      if (eye.face) eye.frame = std::clamp(event.a, 0, 2);
+      if (trace) log::info("trail: tick {} unit {} eye frame {} blink {}", tick_count_, unit, eye.frame, eye.on);
       break;
+    }
     case K::LightAbs:
       if (event.a >= 0 && event.a <= 2)
         for (size_t k = 0; k < 3; ++k) fx_lights_.slot[static_cast<size_t>(event.a)].pos[k] = static_cast<s32>(event.off[k]);
@@ -340,11 +344,6 @@ void BattleView::trail_tick() {
   TrailState& state = *trail_;
   for (int unit = 0; unit < player_slots(); ++unit) {
     TrailState::Eye& eye = state.eye[static_cast<size_t>(unit)];
-    const bool ko = bunit(unit).pc && bunit(unit).form < 0 && vis_[static_cast<size_t>(unit)].ko_shown;
-    if (ko != eye.ko) {
-      eye.ko = ko;
-      if (ko) eye.on = false, eye.frame = 2;
-    }
     if (!eye.on) continue;
     if ((eye.counter -= 1) > 0) continue;
     static const bool trace = std::getenv("OC_ANM_TRACE") != nullptr;
@@ -643,7 +642,25 @@ void BattleView::anm_fade_in(int unit, int ticks) {
 void BattleView::anm_eye_arm(int unit) {
   if (unit < 0 || unit >= player_slots()) return;
   if (!trail_) trail_ = std::make_shared<TrailState>();
-  if (bunit(unit).pc && bunit(unit).form < 0 && !vis_[static_cast<size_t>(unit)].ko_shown) trail_->eye[static_cast<size_t>(unit)].on = true;
+  TrailState::Eye& eye = trail_->eye[static_cast<size_t>(unit)];
+  eye.face = bunit(unit).pc && bunit(unit).form < 0;
+  if (eye.face) eye.on = true;
+}
+
+void BattleView::anm_face_on(int unit) {
+  if (unit < 0 || unit >= player_slots()) return;
+  if (!trail_) trail_ = std::make_shared<TrailState>();
+  trail_->eye[static_cast<size_t>(unit)].face = bunit(unit).pc && bunit(unit).form < 0;
+}
+
+void BattleView::anm_eye_shut(int unit) {
+  if (unit < 0 || unit >= player_slots()) return;
+  if (!trail_) trail_ = std::make_shared<TrailState>();
+  TrailState::Eye& eye = trail_->eye[static_cast<size_t>(unit)];
+  eye.on = eye.face = false;
+  eye.frame = 2;
+  static const bool trace = std::getenv("OC_ANM_TRACE") != nullptr;
+  if (trace) log::info("trail: tick {} unit {} eye frame {} blink {}", tick_count_, unit, eye.frame, eye.on);
 }
 
 // The spawn script's part words. The battle start plays S5 entry 8 at once; its first tick (the ops before its first wait) hides / shows
@@ -707,7 +724,9 @@ void BattleView::anm_scale_point(int unit, float& x, float& y, float& z) const {
 }
 
 void BattleView::trail_eye_reset(int unit) {
-  if (trail_ && unit >= 0 && unit < player_slots()) trail_->eye[static_cast<size_t>(unit)] = {};
+  if (!trail_ || unit < 0 || unit >= player_slots()) return;
+  trail_->eye[static_cast<size_t>(unit)] = {};
+  anm_face_on(unit);
 }
 
 }  // namespace oc::game

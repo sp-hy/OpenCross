@@ -1,0 +1,24 @@
+# Field sounds across a battle. ryu_a07i with one Fort Dragonia monument lit (variable 0x164 bit 14) starts room frame 2 on C6 slot 7;
+# ryu_a22i's red monument plays frame 5 as a looping positional sound. Each room requests battle 77 on field 21, losable (flag 2), so the
+# lone Serge's wipe returns to the field. The request ends both hums, no field sound plays in the battle, and after it the slot 7 record
+# and the positional record start their sound again. Check in the log: the sfxtrace CEND lines of 'r2' / 'r5' at the request, no REQ of
+# them until "battle ended", then "slot 7 sound 2 started again after the battle" and a REQ 'r5' mask 10000; and
+# python tools\py\wav_rms.py tmp\battle_sfx.wav (music off: the hum about 1900 / 1000 in the field, near 0 between the battle's sounds).
+0 wait 5
+- set var 164 4000
+- load ryu_a07i 1
+- wait room ryu_a07i 900
+- wait 300
+- request battle 77 21 2
+- wait battle start 900
+- wait battle end 6000
+- wait idle 1800
+- wait 300
+- load ryu_a22i 0
+- wait room ryu_a22i 900
+- wait 300
+- request battle 77 21 2
+- wait battle start 900
+- wait battle end 6000
+- wait 300
+- quit

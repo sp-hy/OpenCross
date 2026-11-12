@@ -354,6 +354,8 @@ class BattleView {
     } turn;
     // The idle script was started with the guard flag.
     bool guard_shown = false;
+    // The running idle script starts its clip again even when the model already plays it (a restart the original makes: the pack end).
+    bool idle_reblend = false;
     // The running script is the spawn script (S5 entry 8, start_spawn): its fade-in is not cut by an idle restart or the victory pose;
     // idle_owed / victory_owed = one arrived while it ran, done when it ends.
     bool spawn = false;
@@ -379,6 +381,8 @@ class BattleView {
     // Animated HP shown by the bars, and the HP they chase: set when a hit lands (CallDamage), synced when an action ends.
     float hp_disp = 0;
     int hp_shown = 0;
+    // The HP a revive gave the unit when its action resolved, until the revive's number lands (-1 = none): the low-HP bit reads it.
+    int revive_hp = -1;
     // The status word the party panel's ailment icons are drawn from: copied at battle start, a swap, and with hp_shown at an action end
     // or a command menu start, so a status an action inflicts shows once the action is over.
     u32 status_shown = 0;
@@ -391,6 +395,9 @@ class BattleView {
     // The killing hit ran the target's reaction script: that script owns the death (the dead branch of most reactions fades and hides the model,
     // a reaction without that branch leaves the unit standing on its dead pose).
     bool ko_reacted = false;
+    // The running action knocked the unit out: its death flag is set from the resolve on, and showing it restarts no script, so a unit that
+    // no reaction script takes keeps the clip it plays (standing).
+    bool ko_resolved = false;
     // Actions presented since a script wrote the HP to 0.
     int zero_hp_actions = 0;
     // Battle-script op 84 set the low-HP bit (flag 31); the next hit on the unit recomputes it from the HP.
@@ -557,7 +564,10 @@ class BattleView {
   void start_release();
   void end_group();
   bool start_script(int unit, const bseq::Table* table, int entry, int variant, Script kind);
-  void start_idle(int unit);
+  void start_idle(int unit, bool reblend = false);
+  // S5 entry 11 on a unit the element's end hook leaves without an idle restart (the dead first caster): the idle's pose pick, after a
+  // monster's cast-end clips; it starts its clip again with the blend.
+  void start_cast_end(int unit);
   // The PC standing at its target between HIT% picks (or a versus chain's attacker, stay_unit_) keeps the clip its approach / atk script
   // left (clip 2).
   bool engaged_stance(int unit) const;
@@ -572,7 +582,7 @@ class BattleView {
   // The unit an anmseq actor selector names: list 0 = the acting list (the caster; entry k >= 1 of a monster cast's list = the k-th other
   // unit of its group), list 1 = the targets, list 2 = the unit number itself. -1 = none.
   int script_list_unit(int list, int idx) const;
-  void dev_group_hint(int actor, int element);
+  int dev_group_hint(int actor, int element);
   // SetRot requests (unit, yaw) of this tick, applied after fx_tick().
   std::vector<std::pair<int, int>> pending_rot_;
   void set_rot_now(int unit, int yaw4096);
@@ -687,8 +697,12 @@ class BattleView {
   void anm_fade_out(int unit, int ticks);
   // The spawn script's fade-in (colour 0 -> 128 drawn with the flash routine, opaque at the end) without the rest of the script (party swap).
   void anm_fade_in(int unit, int ticks);
-  // The party eye blink bit as op 0x72 sets it.
+  // The model bind's face flag (a PC in its own form) and the party eye blink bit as op 0x72 sets it.
   void anm_eye_arm(int unit);
+  // A revive gives a PC in its own form the face flag again (the eye ops act on it).
+  void anm_face_on(int unit);
+  // The poison step's KO: the blink ends, the eyes shut and the face flag is cleared, so no eye op opens them again until a revive.
+  void anm_eye_shut(int unit);
   // The part words / blinks of the spawn script's first tick (S5 entry 8), also the state a cut script returns to.
   void anm_spawn_parts(int unit);
   // anmseq op 0x7A hid the attached weapon object `slot` (0 = the drawn weapon).
@@ -1144,8 +1158,8 @@ class BattleView {
   std::vector<int> level_slots(int level) const;
   // Menu-time facing, the L1 / R1 PC switch, the DYNAMIC-camera translucency (battle_view_action.cpp).
   void sync_menu_facing();
-  // Top command menu: +1 next / -1 previous PC that can act (plays SFX 0x16); with nobody else the menu re-enters on the same PC. Always
-  // restarts the menu entry.
+  // Top command menu or attack target ring: +1 next / -1 previous PC that can act (plays SFX 0x16, the ring SFX 6); with nobody else the
+  // menu re-enters on the same PC. Always restarts the menu entry and the PC's idle.
   void switch_active_pc(int dir);
   // The PC a switch key passes the menu to: +1 next / -1 previous that can act, the active PC itself when nobody else can.
   int switch_target(int dir) const;

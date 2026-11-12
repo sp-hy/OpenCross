@@ -1188,6 +1188,18 @@ class FieldWorld final : public script::FieldHost {
   std::array<SfxSlide, 8> sfx_vol_, sfx_pan_ = {SfxSlide{64, 64, 0, 0}, SfxSlide{64, 64, 0, 0}, SfxSlide{64, 64, 0, 0}, SfxSlide{64, 64, 0, 0},
                                                 SfxSlide{64, 64, 0, 0}, SfxSlide{64, 64, 0, 0}, SfxSlide{64, 64, 0, 0}, SfxSlide{64, 64, 0, 0}};
   void step_sfx_slides();
+  // Per C6 slot, the record of its last sound: the id C6 started (0xFF = none), the volume and the pan byte (C6, then the FE 22 / FE 23
+  // targets). C7 and the room load clear it; after a battle the field starts every live record's sound again.
+  struct SfxSlotRecord {
+    int id = 0xFF;
+    int volume = 0;
+    int pan8 = 0x80;
+  };
+  std::array<SfxSlotRecord, 8> sfx_records_;
+  // The records of the slots whose sound has ended are cleared (a menu screen or a battle request).
+  void clear_ended_sfx_records();
+  // After a battle: the running sounds end and every slot with a live record starts its sound again, without slides.
+  void restart_sfx_records();
   bool bgm_remastered_ = true;
   // volume of the next PLAY_SONG (FE 78 sets it)
   int song_volume_ = 127;

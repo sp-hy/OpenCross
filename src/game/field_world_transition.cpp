@@ -169,6 +169,10 @@ void FieldWorld::request_battle(int battle_id, int field, int flags) {
   // There is no screen fade on the field side: the battle's opening clears the screen to white (BattleView::begin_transition).
   // A battle whose song already started (start_battle_music) keeps it.
   if (!(flags & 1) && !handoff_.battle_music_stopped) start_battle_music(flags);
+  // The field's sounds end with the request, as a menu screen opens (the records of the ended C6 slots are cleared, so only the slots
+  // whose sound still runs come back after the battle), then every sound but mask bit 0 is evicted; the encounter effect plays its own.
+  fade_screen_sounds(true);
+  if (mixer_) mixer_->evict_sfx(0xFFFFFE, true);
   handoff_.battle_state = BattleState::Intro;
   handoff_.intro_tick = tick_count_;
   const bool enct = sequences_ && sequences_->start("enct");
@@ -261,6 +265,10 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
   begin_entry_fade(0);
   fade_hold_ = fade_delay;
   entry_window_ = 4;
+  // The C6 slots whose sound still ran at the request start it again; the positional records come back with their started flags
+  // clear, so each starts its sound again on the next field tick, a one-shot one included.
+  restart_sfx_records();
+  for (SoundEmitter& record : sound_emitters_) record.started = false;
   // The saved field song is restored after EVERY battle, flag 1 included
   // (the victory song 0x16 / 0x17 and the battle theme are replaced); only BATTLE flag 0x20 skips it (the script plays the next
   // song itself). A song that is still playing is left alone by start_song. The original music's restart fades in linearly from

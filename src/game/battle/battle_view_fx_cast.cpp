@@ -37,7 +37,7 @@ void fx_play_sound(BattleAudio& audio, std::string_view name, int volume, int pa
 // The hide bit survives a pack end: the idle restart shows a living unit again; a dead one has no idle and stays hidden through the next pack.
 void BattleView::fx_show_living() {
   for (int i = 0; i < battle::kUnits; ++i) {
-    if (bunit(i).present && !bunit(i).in_turn_order()) continue;
+    if (bunit(i).present && !bunit(i).in_turn_order() && !bunit(i).record_ko) continue;
     fx_hidden_[static_cast<size_t>(i)] = false;
     fx_hide_bits_[static_cast<size_t>(i)] = 0;
   }
@@ -125,10 +125,10 @@ void BattleView::fx_charge_begin() {
   model_cam_ = false;
   if (charged && actor_visual.scripts && actor_visual.scripts->has_s5) start_script(act_.actor, &actor_visual.scripts->s5, 5, 0, kCast);
   else actor_visual.script_done = true;
-  // S5 entry 5 on EVERY acting-list entry - a group cast's extra casters take the cast pose too.
-  for (size_t i = 1; charged && i < act_.casters.size(); ++i) {
-    const int cu = act_.casters[i];
-    if (cu < 0 || cu >= battle::kUnits || cu == act_.actor) continue;
+  // S5 entry 5 on EVERY acting-list entry - a group cast's extra casters take the cast pose too. A double or triple tech's list need not
+  // start with the actor (X-Strike chosen by Glenn lists Serge first), so the whole list is walked.
+  for (const int cu : act_.casters) {
+    if (!charged || cu < 0 || cu >= battle::kUnits || cu == act_.actor) continue;
     Visual& cv = vis_[static_cast<size_t>(cu)];
     if (cv.has_model && cv.scripts && cv.scripts->has_s5) start_script(cu, &cv.scripts->s5, 5, 0, kCast);
   }

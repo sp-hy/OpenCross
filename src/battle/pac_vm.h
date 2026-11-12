@@ -131,8 +131,9 @@ struct Event {
     Mark,
   } kind = Kind::Dialogue;
   int unit = -1, a = 0, b = 0;
-  // Virtual script time: Vm::tick() count at emission (a 2D delay of n advances it by 2n). Events are produced by a synchronous run, so
-  // the view replays them paced by the vt gaps and blocks on the real waits (E2 window, Barrier executor) itself.
+  // Virtual script time: Vm::tick() count at emission, less the ticks of the settle passes that emitted nothing (a 2D delay of n advances
+  // it by 2n). Events are produced by a synchronous run, so the view replays them paced by the vt gaps and blocks on the real waits (E2
+  // window, Barrier executor) itself.
   u32 vt = 0;
   // Monotonic over the whole battle (emission order).
   int seq = 0;
@@ -209,8 +210,13 @@ class Vm {
   std::vector<QueuedAttack>& queue(int unit) { return queue_[static_cast<size_t>(unit)]; }
 
   // Dev casts (no script queued them): the group list a type-2 queue_attack of `element` would carry = the operands of the 8D set_slots before it (immediates, or
-  // the vars as they stand now). nullopt = the module has no such queue_attack.
-  std::optional<std::array<u8, 6>> probe_group(int element, int caster) const;
+  // the vars as they stand now), from the script whose list names `caster`, and the unit that script is bound to (the one whose queue the
+  // cast sits in). nullopt = the module has no such queue_attack.
+  struct GroupProbe {
+    int owner = -1;
+    std::array<u8, 6> group{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  };
+  std::optional<GroupProbe> probe_group(int element, int caster) const;
 
   u16 var(int byte_off) const { return vars_[static_cast<size_t>(byte_off & 0xFFFE) >> 1]; }
   void set_var(int byte_off, int value) { vars_[static_cast<size_t>(byte_off & 0xFFFE) >> 1] = static_cast<u16>(value); }
@@ -232,6 +238,9 @@ class Vm {
   u32 vtime() const { return vtime_; }
   bool quiescent() const;
   bool settle(int max_ticks = 1500);
+  // A settle pass that follows no slot run (the end of an action): it starts with a Mark when its loops emit something; a pass that emits
+  // nothing leaves no trace in the event stream, neither the Mark nor its ticks in the vt of the events after it.
+  bool settle_pass(int max_ticks = 1500);
   // The attacks the idle loops queued during settle passes (unit, entry), oldest first: nothing else collects them, the executor plays
   // them like any queued action (a hidden unit's arrival cast).
   std::vector<std::pair<int, QueuedAttack>> take_idle_attacks() { return std::exchange(idle_attacks_, {}); }
@@ -340,6 +349,8 @@ class Vm {
   int lock_ = kNoUnit;
   bool skip_delays_ = false;
   u32 vtime_ = 0;
+  // Ticks of the settle passes that emitted nothing: left out of the events' vt.
+  u32 hidden_ticks_ = 0;
   int seq_ = 0;
   // The entity / slot frame being interpreted (emit's idle-loop dedupe).
   int cur_ent_ = 0, cur_slot_ = 0;

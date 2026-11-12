@@ -405,6 +405,7 @@ void FieldWorld::clear_room() {
   watchdog_.reset();
   sfx_vol_.fill(SfxSlide{});
   sfx_pan_.fill(SfxSlide{64, 64, 0, 0});
+  sfx_records_.fill(SfxSlotRecord{});
   song_cue_ = {};
   ents_.clear();
   room_models_.clear();

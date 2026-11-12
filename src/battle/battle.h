@@ -166,6 +166,9 @@ struct Unit {
   // Set by Defend: weapon damage taken is halved and the idle script holds the block pose. It ends when the PC's command menu opens
   // (Battle::open_menu, also implied by its next command) and on KO.
   bool guard = false;
+  // The block pose (control flag 0x200) Defend gives the idle script along with the guard; a Defend whose poison step knocked out a party
+  // member gives the guard without it. It ends with the guard.
+  bool guard_pose = false;
   // Home facing byte (home yaw = byte << 6, 4096 = 360 deg): the formation facing byte << 3 at battle start, rewritten by script op 85.
   u8 home_facing = 0;
   // Remembered command-menu cursor of a PC, set by script op 7B (reset value 3).
@@ -185,6 +188,9 @@ struct Unit {
   int kind = 0;
   // A battle script wrote the HP to 0: the kill script still runs, but the unit never takes the KO of a resolved hit, so its model is not dead.
   bool hp_written_zero = false;
+  // The KO bit came from the member's save record, not from a kill: the unit has no death flag, so its model stands (the low-HP stance at
+  // 0 HP) until a hit knocks it out again or a revive clears the bit.
+  bool record_ko = false;
   // Frozen (lo 0x20000000) landed with its timer: the unit's next action first clears lo 0x60000000 (Battle::thaw_on_action).
   bool freeze_pending = false;
   // The unit's result code slot (0 hit, 1 no damage, 2 miss, 3 heal; 0xFF = it was the last action's caster). It keeps its value between
@@ -253,6 +259,11 @@ struct ActionEvent {
   bool crit = false, ko = false;
   // The KO is a scripted death (op 5C): the unit stays standing until its parked death cast has run.
   bool ko_owed = false;
+  // The element brought a knocked-out target back (mode 4).
+  bool revived = false;
+  // Units that take the death flag at this resolve without a hit of their own, as a mask of unit slots: the party members the post-action
+  // poison step knocked out, and the members knocked out by their save record that the hit pass knocked out again (Battle::knock_out_rest).
+  u32 poison_ko = 0, ko_again = 0;
   // Pip's form change (element mode 45): the new kind byte 0x2C..0x30; the view swaps the model at the pack's change op.
   int evolve_form = -1;
   // Big Catch (element mode 39): the battle model number of the hooked creature, 0 when the roll failed; -1 = not a mode-39 cast.
@@ -738,13 +749,18 @@ class Battle {
   bool catch_in_trap(int actor, int element_id, int row, int target);
   // The PCs other than `actor` and those in `excluded` (a mask of PC slots) recover stamina; the enemy countdowns run `steps`.
   void step_after_pc_action(int actor, int steps, bool weapon, u32 excluded = 0);
-  // Ends an action. After a PC-led one (its own, confused or scripted turn, Defend) poison, regen and the status timers step.
-  void post_action(int actor, int poison_amount, int timer_steps);
+  // Ends an action. After a PC-led one (its own, confused or scripted turn, Defend) poison, regen and the status timers step. Returns the
+  // party members the poison step knocked out (a mask of unit slots), also noted on the action's last event.
+  u32 post_action(int actor, int poison_amount, int timer_steps);
   void time_advance();
   // Enemy turns + time advance until a PC can act or the battle ends.
   void settle();
   void check_end();
-  // Debug tools: after a primitive above was called from outside the scheduler (Debug tab cast): slot-4 reactions, then the end test.
+  // Debug tools: before do_element is called from outside the scheduler (Debug tab cast), so that finish_external_action ends its hit pass
+  // as a cast's (knock_out_rest).
+  void begin_external_action() { external_ko_ = knocked_out_roster(); }
+  // Debug tools: after a primitive above was called from outside the scheduler (Debug tab cast): the end of the hit pass begun by
+  // begin_external_action, slot-4 reactions, then the end test.
   void finish_external_action();
   // Debug tools (Debug tab): damage never takes a unit of that side below 1 HP and no instant KO lands on it. Rules stay untouched when off.
   // Ignored in a versus battle, as the cheats are.
@@ -848,6 +864,13 @@ class Battle {
   // Op 96's gate holds for this hit (element_id -1 = a weapon hit).
   bool colour_gated(int actor, int target, int element_id) const;
   void kill(int unit);
+  void knock_out_again(int unit);
+  // The units in the roster (the party, an enemy whose scripted death is owed) that have the KO bit, as a mask of unit slots.
+  u32 knocked_out_roster() const;
+  // The end of a hit pass (a weapon hit or an element cast): every unit of `before` that still has the KO bit is knocked out again, a
+  // target or not; a member knocked out by its save record that the action did not hit is noted on its last event.
+  void knock_out_rest(u32 before);
+  void cast_element_targets(int actor, int element_id, int row, int target, u32 targets);
   void poison_kill(int unit);
   // Runs the kill script (slot 3) of a dead enemy once and parks the death cast it queued.
   void run_kill_script(int unit);
@@ -949,6 +972,8 @@ class Battle {
   int summon_colour_ = -1;
   int ring_summon_colour_ = -1;
   int action_id_ = 0, hit_counter_ = 0;
+  // The roster's KO-bit units when a Debug-tab cast began (begin_external_action).
+  u32 external_ko_ = 0;
   // The executing scripted entry's / dev cast's caster group (ActionEvent::group).
   std::array<u8, 6> cur_group_{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   // run_plan: the scripted entry being executed.

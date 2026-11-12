@@ -828,8 +828,14 @@ void BattleView::handle_input(const platform::Input& in) {
   // The acting PC: first one with an open menu; Q / E (or the shoulders) switch between ready PCs in the top menu.
   auto ready = [&](int pc_slot) { return can_act(pc_slot); };
   if (active_pc_ < 0 || !ready(active_pc_)) {
-    // The slot after the last actor first, the actor itself last.
-    active_pc_ = next_pc_after(last_actor_);
+    // The slot after the last actor first, the actor itself last. A top menu whose PC was knocked out or got a blocking status is
+    // re-entered from that PC on instead, with no sound; the re-entry restarts the idle of the PC it goes to, or the PC's own when nobody
+    // can act.
+    const bool blocked = ui_ == Ui::Top && battle::is_pc_slot(active_pc_) &&
+                         (!bunit(active_pc_).alive() || (bunit(active_pc_).lo & battle::st::kCannotMenuLo) != 0);
+    const int from = blocked ? active_pc_ : last_actor_;
+    active_pc_ = next_pc_after(from);
+    if (blocked) start_idle(active_pc_ >= 0 ? active_pc_ : from, true);
     if (active_pc_ < 0) {
       // While the menu is disabled (nobody can act) the chime is armed ...
       menu_chime_ = true;
@@ -1241,6 +1247,13 @@ void BattleView::handle_input(const platform::Input& in) {
         hdr_on_ = false;
         ui_ = pending_cmd_.kind == battle::Command::Kind::Element ? Ui::Element : Ui::Top;
         pending_cmd_.chain.clear();
+        break;
+      }
+      // L1 / R1 in the attack target ring pass the menu to the previous / next PC (switch_active_pc).
+      if (const int shoulder = (act(Action::SelectRight) || pad(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) ? 1 : 0) -
+                               (act(Action::SelectLeft) || pad(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ? 1 : 0);
+          shoulder != 0 && pending_cmd_.kind == battle::Command::Kind::Attack) {
+        switch_active_pc(shoulder);
         break;
       }
       if (ok && !targets_.empty()) {

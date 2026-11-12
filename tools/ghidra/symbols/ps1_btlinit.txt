@@ -7,9 +7,9 @@ btl_init_display_setup = 0x801EE140;  # function: Sets up the battle display and
 btl_init_display_setup_e178 = 0x801EE178;  # function: Sets up the battle display: 320x224 buffer with GTE offset (160,112) and screen distance 512.
 btl_open_battle_prd = 0x801EE364;  # function: Opens the battle.prd archive during battle init.
 btl_load_stage_file = 0x801EE5A8;  # function: Loads the stage background file chosen by the battlefield id and flags the fight as in progress; then starts the stage intro (boss for a direct scene id above 0x1FF, else a random one of the bti0..bti7 present), fade for a field battle, and loop.
-btl_unit_refresh_stat_totals = 0x801EE850;  # function: Rebuilds a unit weapon, armour and skip-mask totals from its equipment; an HP% accessory raises the current HP (not the max HP) by its percent, +1 when unchanged, cap 999.
+btl_unit_refresh_stat_totals = 0x801EE850;  # function: Rebuilds a unit weapon, armour and skip-mask totals from its equipment; an HP% accessory raises the current HP (not the max HP) by its percent, +1 when unchanged (so 0 becomes 1), cap 999.
 btl_unit_copy_equipment = 0x801EED60;  # function: Copies a character weapon, armour and accessory stat records into the battle unit.
-btl_player_spawn = 0x801EEE4C;  # function: Spawns a party member unit in battle and runs its start-of-battle script; in a monster-party scene the slot takes the picked monster record instead of the character.
+btl_player_spawn = 0x801EEE4C;  # function: Spawns a party member unit in battle and runs its start-of-battle script; in a monster-party scene the slot takes the picked monster record instead of the character. Sets control flag bit 31 when HP <= max HP / 4, never the dead flag, so a member whose record holds the KO bit stands (the low-HP stance at 0 HP).
 btl_enemy_size_model = 0x801EF7CC;  # function: Sizes and prepares an enemy model and its weapon at spawn.
 btl_enemy_spawn = 0x801EFB6C;  # function: Spawns one enemy unit: applies spawn script, model and weapon setup.
 btl_spawn_enemies = 0x801F07D8;  # function: Loops over the scene enemies and spawns each one.
@@ -31,3 +31,4 @@ btl_colour_row_flag = 0x801F4B54;  # data: Set when a party member's battle grid
 btl_place_party = 0x801F0BB0;  # function: Places the party in ascending character id: the first PC, then (after the held intro wait; a field battle without the hold flag does not wait, which cuts the stage intro when the first PC has loaded) starts a random party intro and loads / places the others one by one
 btl_init_party_relief = 0x801F27F8;  # function: first battle-init step, run before the scene select: resets the battle work, copies the party ids and applies the Relief Charm swap unless the battle id is 0x3DD
 btlinit_globals_reset = 0x801F2390;  # function: resets the battle globals at battle start, the ring summon colour (0 = none) among them
+btl_party_unit_from_record = 0x801F1670;  # function: copies a character record (0xCC bytes) into a party unit, its status byte with it (KO bit 0x80 included, HP left as saved: HP 0 alone is no KO), adds lo 0x400400, AP and countdown 8, builds the grid

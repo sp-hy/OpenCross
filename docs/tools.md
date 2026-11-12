@@ -188,24 +188,25 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--size` | `<w> <h>` | `1280 960` | Window size; silently clamped to the display and capped by vsync, so it cannot time render-scale cost (section 6.3). |
 | `--sliced` | none | off | Load in 3 ms slices per frame (the field encounter's way); logs the longest slice. |
 | `--cam` | none | off | Camera overlay on (F3 / F9 toggle). |
-| `--party` | `a[,b[,c]]` | `0,1,22` | Character ids; slot 0 = the acting PC (it makes `--cast` / `--weapon`). The battle seats the party in this order, so `--caster`, `--casttgt`, `--cast2tgt` and `--ko` values 0..2 are slots of this list and units alike. |
+| `--party` | `a[,b[,c]]` | `0,1,22` | Character ids; slot 0 = the acting PC (it makes `--cast` / `--weapon`). The battle seats the party in this order, so `--caster`, `--casttgt`, `--cast2tgt`, `--ko` and `--recordko` values 0..2 are slots of this list and units alike. |
 | `--swap` | `a[,b...]` | none | Party swap on (`docs/formats/mods.md` section 8): these character ids sit on the bench as the reserve; the command menu gets its Swap row. |
 | `--kind` | `<model id>` | the character | The lead's body: `--party 0 --kind 49` is Serge in Lynx's body, as the game's model byte does. |
 | `--ring` | `c,c,c` | the stage's ring | Field ring at the start: colour names (`green white black red yellow blue`), indices 0..5, `all` or `none` per slot. Matches a PS1 capture's ring for enemy-cast damage comparisons. |
 | `--etrap`, `--ptrap` | `<element id>` | none | The enemy / party side's element trap holds that element at the start, as a write of the trap word alone does (the trap block stays hidden until the trap springs). A `--cast` (or `--ecast`) of that element is then caught and plays its trap pack. |
 | `--stats` | `hp=..,atk=..,def=..,hit=..,evd=..,mag=..,mdef=..` | unchanged | Base stats of every party member. |
 | `--enemyhp` | `u3,u4,u5` | unchanged | HP (and max HP) of enemy units 3 / 4 / 5; empty or -1 keeps. |
-| `--ko` | `<unit>` | none | That party unit starts KO'd. |
+| `--ko` | `<unit>` | none | That party unit starts KO'd as a battle KO leaves it: HP 0, the KO bit and the death flag, lying in its knocked-out pose from the first command menu. |
+| `--recordko` | `<unit>` | none | That party member's save record holds HP 0 and the KO bit: knocked out from the start without the death flag, so it stands in its low-HP stance (`rules/battle.md` 1.2). |
 | `--hp` | `a[,b[,c]]` | unchanged | Current HP of party slots 0..2 (after `--stats`, at most the max HP; empty or -1 keeps). |
 | `--gauge` | `<n>` | the character's | Party slot 0 starts with that element level (-1 none, 0 = row 1 usable): an element cast from the top menu as the first action, the way a PS1 capture pokes the gauge. |
 | `--stars` | `<current>,<total>` | `0,0` | The stars the battle starts with (the save's stars current / total): a summon needs one left, and the field ring shows them while it is one colour. |
 | `--status` | `<unit>:<lo>[,...]` | none | OR these status bits into the units' merged `lo` words at the start (e.g. `0:0x19,3:0x100020`); for checking the status plates and icons. |
 | `--equip` | `<item id>` | character table | Party slot 0 holds that weapon (e.g. `0x26`). |
-| `--cast` | `<element id>` | none | First PC casts that element on the first enemy once the view ticks. |
-| `--caster`, `--casttgt` | `<unit>` | PC 0 / first enemy | With `--cast`: that unit casts on that unit (PCs 0-2, enemies 3+). A double or triple tech casts with the party members its record names: put all of them in `--party`. |
+| `--cast` | `<element id>` | none | First PC casts that element on the first enemy once the view ticks, as soon as no action, script window or cutscene is running (a scripted opening such as scene 402's comes first). A double or triple tech casts with every participant its record names, as with `--caster`. |
+| `--caster`, `--casttgt` | `<unit>` | PC 0 / first enemy | With `--cast`: that unit casts on that unit (PCs 0-2, enemies 3+). A double or triple tech casts with the party members its record names: put all of them in `--party`. A monster group tech (record byte 0x17, Flame Knock 378, Cross Cut 367) casts with the caster list of the scene script's `8D` before its type-2 `67`, by the unit whose script that is (`--ecast 378` in scene 402: Ketchop, unit 5, with units 4 and 3). A cast whose participant is missing, knocked out or off stage, or a group tech no script of the scene queues for that unit, is dropped with a warning in the log that names the reason. |
 | `--castat` | `<frame>` | immediately | Issue the cast at that frame. |
 | `--cast2`, `--cast2at`, `--cast2tgt` | `<element>`, `<frame>`, `<unit>` | none | A second cast (consecutive casts). |
-| `--ecast` | `<element id>` | none | First enemy casts it on the first PC. |
+| `--ecast` | `<element id>` | none | First enemy casts it on the first PC (a monster group tech as with `--caster`). |
 | `--weapon` | `<0\|1\|2>` | none | The acting PC attacks the first enemy (weak / medium / heavy); a heavy hit with a rod or boomerang sweeps every enemy (`rules/battle.md` 3.3). |
 | `--nofx` | none | off | Element casts take the generic path (no effect pack). |
 | `--auto` | none | off | Feeds a confirm every 12 frames (smoke test). |
@@ -413,7 +414,7 @@ A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_
 | `OC_FLARE_LOG` | `src/game/effects/emitter_collect.cpp` | set | Writes lens-flare values to stderr. |
 | `OC_LINE_DBG` | `src/game/effects/bespoke/line_ring.cpp` | set | Writes line-ring op arguments and rope end points to stderr. |
 | `OC_LIGHT_TRACE` | `battle_spell_lights.cpp` | set | Every 5 ticks logs the spell lights, their summed colour and the multiplier at the strongest light. |
-| `OC_ANM_TRACE` | `battle_view_anm.cpp`, `battle_view_fx_cast.cpp`, `battle_view_trail.cpp` | set | Logs the animation-sequence trail events, eye toggles and the running pack's emitter names; per drawn frame, the world position (PS1 axes, y down) of each unit-emitter mesh sprite drawn as a PC's weapon (`anm: frame <f> weapon mesh '<nn>' of unit <u> at (x, y, z)`: a thrown boomerang). |
+| `OC_ANM_TRACE` | `battle_view_anm.cpp`, `battle_view_fx_cast.cpp`, `battle_view_trail.cpp` | set | Logs the animation-sequence trail events, eye toggles, the eye frame and blink flag after every eye op and the poison step's KO, and the running pack's emitter names; per drawn frame, the world position (PS1 axes, y down) of each unit-emitter mesh sprite drawn as a PC's weapon (`anm: frame <f> weapon mesh '<nn>' of unit <u> at (x, y, z)`: a thrown boomerang). |
 | `OC_APPROACH_TRACE` | `battle_view_units.cpp` | set | Logs the reach terms of every approach movement. |
 | `OC_APPROACH_CLIPS` | `battle_view_units.cpp` | set | Logs the reach of the source model's attach point per clip and frame, and the target's per clip. |
 | `OC_REACH_TRACE` | `battle_view_units.cpp` | set | Logs every set-animation event and, per tick, the acting unit's posed reach. |

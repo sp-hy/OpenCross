@@ -999,6 +999,99 @@ void test_revive_resets_stamina_and_countdown() {
   CHECK_EQ(battle.unit(1).hp, battle.unit(1).max_hp * 15 / 100);
   CHECK_EQ(battle.unit(1).stamina, 70);
   CHECK_EQ(battle.unit(1).countdown, battle.unit(1).ap + 2);
+  // The event marks the revive (the view clears the target's death flag when the action resolves); a revive on a standing unit is none.
+  CHECK(!battle.events().empty() && battle.events().back().revived && !battle.events().back().ko);
+  battle.do_element(3, 4, 0, 1);
+  CHECK(!battle.events().back().revived);
+}
+
+// Only the record's KO bit starts a member knocked out (PS1, scene 6: Kid's record at 0 HP with status 0x80 starts with lo 0x400480, at 0 HP
+// without it lo 0x400400, not KO'd). The record's KO is no death flag: the first hit knocks the unit out again (HP 0, the event's KO) and a
+// revive gets it up. Earring of Hope raises a 0-HP start to 1.
+void test_start_ko_from_record() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  tables.elements[2].raw[4] = 0x41, tables.elements[2].raw[6] = 1, tables.elements[2].raw[7] = 1;
+  tables.elements[4].raw[4] = 0x41, tables.elements[4].raw[6] = 1, tables.elements[4].raw[7] = 4;
+  tables.gear.resize(256);
+  tables.gear[0xE1].raw[4] = 15, tables.gear[0xE1].raw[8] = 0x01;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  PartyMember record_ko = make_member(1, "B"), zero_hp = make_member(2, "C"), earring = make_member(3, "D");
+  record_ko.hp = 0;
+  record_ko.lo_persist = st::kKO;
+  zero_hp.hp = 0;
+  earring.hp = 0;
+  earring.eq = make_equip(tables, 0, 0, {0xE1, 0, 0});
+  CHECK(battle.start({record_ko, zero_hp, earring}, 0));
+  CHECK((battle.unit(0).lo & st::kKO) && battle.unit(0).record_ko && battle.unit(0).hp == 0 && !battle.unit(0).in_turn_order());
+  CHECK(!(battle.unit(1).lo & st::kKO) && !battle.unit(1).record_ko && battle.unit(1).hp == 0 && battle.unit(1).in_turn_order());
+  CHECK(battle.unit(2).hp == 1 && battle.unit(2).in_turn_order());
+  battle.do_element(3, 2, 0, 0);
+  CHECK(battle.events().back().ko && !battle.unit(0).record_ko && battle.unit(0).hp == 0 && (battle.unit(0).lo & st::kKO));
+  // A hit on a unit the fight knocked out shows no new KO.
+  battle.do_element(3, 2, 0, 0);
+  CHECK(!battle.events().back().ko);
+  rng.push(0);
+  battle.do_element(3, 4, 0, 0);
+  CHECK(battle.events().back().revived && battle.unit(0).in_turn_order());
+}
+
+// Every hit pass knocks out again each party member that has the KO bit, a target or not (PS1, scene 6: Kid knocked out by the record takes
+// the death flag at the resolve of an Aqua Beam on a Komodo Pup and of a pup's own cast). A member knocked out by its record that the action
+// did not hit is noted on its last event; a miss on one is its KO all the same.
+void test_knock_out_rest() {
+  data::GameTables tables = make_tables();
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  PartyMember record_ko = make_member(1, "B");
+  record_ko.hp = 0;
+  record_ko.lo_persist = st::kKO;
+  CHECK(battle.start({make_member(0, "A"), record_ko, make_member(2, "C")}, 0));
+  battle.do_weapon_attack(3, 0, 0);
+  CHECK(!battle.unit(1).record_ko && (battle.unit(1).lo & st::kKO) && battle.unit(1).hp == 0);
+  CHECK_EQ(battle.events().back().ko_again, 1u << 1);
+  CHECK(!battle.events().back().ko);
+  // A unit the fight knocked out shows nothing new.
+  battle.do_weapon_attack(3, 0, 0);
+  CHECK_EQ(battle.events().back().ko_again, 0u);
+
+  Battle missed{tables, rng, brain};
+  rng.push(0);
+  rng.push(100);
+  CHECK(missed.start({make_member(0, "A"), record_ko, make_member(2, "C")}, 0));
+  rng.push(1000);
+  missed.do_weapon_attack(3, 1, 0);
+  CHECK(missed.events().back().code == 2 && missed.events().back().ko && missed.events().back().ko_again == 0);
+  CHECK(!missed.unit(1).record_ko);
+}
+
+// The poison step's KO is noted on the action's last event (the view lies the member down at the resolve); a Defend whose poison step
+// knocked out a party member gives the guard without the block pose (PS1, scene 6: Kid poisoned at 1 HP, Serge's Defend: Serge on clip 1,
+// control flags without 0x200).
+void test_poison_ko_event_and_guard_pose() {
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  Command defend;
+  defend.kind = Command::Kind::Defend;
+  defend.actor = 0;
+  CHECK(battle.apply(defend));
+  CHECK(battle.unit(0).guard && battle.unit(0).guard_pose);
+  CHECK_EQ(battle.events().back().poison_ko, 0u);
+  battle.open_menu(0);
+  CHECK(!battle.unit(0).guard && !battle.unit(0).guard_pose);
+  battle.unit_mut(1).lo |= st::kPoison;
+  battle.unit_mut(1).hp = 1;
+  CHECK(battle.apply(defend));
+  CHECK(battle.unit(0).guard && !battle.unit(0).guard_pose);
+  CHECK(battle.events().back().kind == ActionEvent::Kind::Defend && battle.events().back().poison_ko == 1u << 1);
+  CHECK(!battle.unit(1).alive());
 }
 
 // A consumable stack at 0 copies stays in its cell and is greyed (used) whenever the element menu opens, a recharged one too; the PS1 sets
@@ -2091,6 +2184,7 @@ void test_victory_and_growth() {
       member->lv99 = {850, 60, 78, 95, 25, 52, 43};
     }
     ko.hp = 0;
+    ko.lo_persist = st::kKO;
     BattleOptions opt;
     opt.bench = {bench};
     CHECK(battle.start({lead, ko}, 0, opt));
@@ -2131,6 +2225,7 @@ void test_victory_and_growth() {
     lead.pending = {10, 3, 0, 0, 0, 0, 0};
     ko.pending = {10, 3, 0, 0, 0, 0, 0};
     ko.hp = 0;
+    ko.lo_persist = st::kKO;
     bench.pending = {7, 4, 0, 0, 0, 0, 0};
     BattleOptions opt;
     opt.bench = {bench};
@@ -2696,6 +2791,21 @@ void test_pac_script_stream() {
   CHECK_EQ(queued.size(), 1u);
   // The queued entry carries its Queue event's ordinal.
   CHECK_EQ(queued[0].seq, ev[4].seq);
+  // A settle pass whose loops emit nothing leaves no trace: no Mark, and the next event's vt does not count its ticks.
+  vm.mark();
+  const pac::Event rest = vm.drain_events().front();
+  const u32 ticks = vm.vtime();
+  CHECK(vm.settle_pass());
+  CHECK(vm.vtime() > ticks);
+  CHECK(vm.drain_events().empty());
+  vm.mark();
+  const auto next = vm.drain_events();
+  CHECK(next.size() == 1 && next[0].vt == rest.vt && next[0].seq == rest.seq + 1);
+  // A pass whose loop answers keeps its Mark in front of what it shows.
+  vm.set_var(0x84, 1);
+  CHECK(vm.settle_pass());
+  const auto shown = vm.drain_events();
+  CHECK(shown.size() >= 2 && shown[0].kind == Kind::Mark && shown[1].kind == Kind::Dialogue);
 }
 
 // evt241 (the Tragedienne contestants) in miniature: entity 4's init counts v400 to 40 in a loop (with or without a 59 in it), then sets
@@ -3074,6 +3184,25 @@ void test_pac_resolved_ops() {
     CHECK_EQ(host.facing_unit, 3);
     CHECK_EQ(host.facing, 5);
     CHECK_EQ(host.cursor, 2);
+  }
+  {
+    // A dev cast of a group tech takes the caster list of the 8D before the type-2 67 and the unit of the script that queues it
+    pac::Module module;
+    const Bytes body = {0x8D, 0x05, 0x80, 0x04, 0x80, 0x03, 0x80, 0xFF, 0x80, 0xFF, 0x80, 0xFF, 0x80,
+                        0x67, 0x02, 0x00, 0x7A, 0x01, 0x01, 0x00, 0xE0};
+    CHECK(module.parse(assemble_slot2(body)));
+    ResolvedHost host;
+    pac::Vm vm(module, host);
+    vm.tick(), vm.tick();
+    const auto probe = vm.probe_group(378, 4);
+    CHECK(probe.has_value());
+    CHECK_EQ(probe->owner, 3);
+    CHECK_EQ(probe->group[0], 5);
+    CHECK_EQ(probe->group[1], 4);
+    CHECK_EQ(probe->group[2], 3);
+    CHECK_EQ(probe->group[3], 0xFF);
+    CHECK(!vm.probe_group(378, 2).has_value());
+    CHECK(!vm.probe_group(379, 4).has_value());
   }
   {
     // C5 blocks while the host reports a live effect object with that tag
@@ -5471,6 +5600,7 @@ void test_party_swap() {
     rng.push(100);
     auto spare = make_member(9, "D", 40), knocked_out = make_member(10, "E", 40), outside = make_member(11, "F", 40);
     knocked_out.hp = 0;
+    knocked_out.lo_persist = st::kKO;
     opt.bench = {spare, knocked_out, outside};
     return battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0, opt);
   };
@@ -6648,6 +6778,9 @@ int main() {
   test_stamina_statuses_on_heavy_hit();
   test_poison_ko();
   test_revive_resets_stamina_and_countdown();
+  test_start_ko_from_record();
+  test_knock_out_rest();
+  test_poison_ko_event_and_guard_pose();
   test_revive_to_zero_hp();
   test_empty_stack_greyed();
   test_heal_ignores_ring_colour();

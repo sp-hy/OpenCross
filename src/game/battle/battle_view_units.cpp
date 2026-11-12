@@ -43,6 +43,7 @@ bool BattleView::start_script(int unit, const bseq::Table* table, int entry, int
     };
   visual.script_kind = kind;
   visual.script_done = false;
+  visual.idle_reblend = false;
   if (kind == kApproach || kind == kReturn) {
     move_wait_ = kind == kApproach ? 1 : 2;
     move_wait_unit_ = unit;
@@ -72,7 +73,7 @@ bool BattleView::engaged_stance(int unit) const {
   return kind == kApproach || kind == kAttack;
 }
 
-void BattleView::start_idle(int unit) {
+void BattleView::start_idle(int unit, bool reblend) {
   Visual& visual = vis_[static_cast<size_t>(unit)];
   if (!visual.has_model) return;
   // The spawn script runs the idle's own setup after its opening wait, then fades the model in: the restart waits for its end.
@@ -87,7 +88,16 @@ void BattleView::start_idle(int unit) {
     visual.script_kind = kIdle;
     visual.script_done = true;
     if (visual.pose.current_id() < 0) visual.pose.play(1, 0);
+    return;
   }
+  visual.idle_reblend = reblend;
+}
+
+void BattleView::start_cast_end(int unit) {
+  Visual& visual = vis_[static_cast<size_t>(unit)];
+  if (!visual.has_model || !visual.scripts || !visual.scripts->has_s5) return;
+  visual.has_react = false;
+  if (start_script(unit, &visual.scripts->s5, 11, 0, kIdle)) visual.idle_reblend = true;
 }
 
 // The spawn script. Every unit starts hidden on clip 1 and plays S5 entry 8 (an enemy only when the scene does not seed it off-stage: those run it
@@ -125,24 +135,53 @@ void BattleView::set_rot_now(int unit, int yaw4096) {
 }
 
 // Dev casts (ocbattleview --cast / --ecast, the Debug tab) skip the script that would queue the attack; a monster element with a caster group
-// takes the list the script's 8D slots before its type-2 queue_attack give (Vm::probe_group, the vars as they stand). A PC's double / triple tech
-// takes the party members the record's character bytes name, in that order.
-void BattleView::dev_group_hint(int actor, int element) {
-  if (element <= 0 || static_cast<size_t>(element) >= tables_->elements.size()) return;
+// takes the list the script's 8D slots before its type-2 queue_attack give (Vm::probe_group, the vars as they stand), cast by the unit whose
+// script queues it. A PC's double / triple tech takes the party members the record's character bytes name, in that order. Returns the unit
+// that casts, or -1 (with a warning naming the reason) when the element cannot be cast with its real participants.
+int BattleView::dev_group_hint(int actor, int element) {
+  if (element <= 0 || static_cast<size_t>(element) >= tables_->elements.size()) return actor;
+  const auto& record = tables_->elements[static_cast<size_t>(element)];
+  auto unusable = [&](int unit) -> const char* {
+    if (unit < 0 || unit >= battle::kUnits || !bunit(unit).present) return "not in the battle";
+    if (!bunit(unit).standing()) return "knocked out";
+    if (ghosted(unit)) return "off stage";
+    return nullptr;
+  };
   if (actor < battle::kPcSlots) {
-    const auto& record = tables_->elements[static_cast<size_t>(element)];
-    if (record.b(0x14) == 0xFF) return;
+    if (record.b(0x14) == 0xFF) return actor;
     std::array<u8, 6> group{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    for (int k = 0; k < 3; ++k)
+    for (int k = 0; k < 3; ++k) {
+      if (record.b(0x14 + k) == 0xFF) continue;
       for (int pc = 0; pc < battle::kPcSlots; ++pc)
         if (bunit(pc).present && bunit(pc).src_id == record.b(0x14 + k)) group[static_cast<size_t>(k)] = static_cast<u8>(pc);
+      const char* why = group[static_cast<size_t>(k)] == 0xFF ? "not in the party" : unusable(group[static_cast<size_t>(k)]);
+      if (why) {
+        log::warn("battle: dev cast of element {} dropped: participant {} (character {}) is {}", element, k, record.b(0x14 + k), why);
+        return -1;
+      }
+    }
     battle_->set_group_hint(group);
-    return;
+    return actor;
   }
-  if (!brain_.vm()) return;
-  const int caster_count = tables_->elements[static_cast<size_t>(element)].b(0x17);
-  if (caster_count == 0 || caster_count == 0xFF) return;
-  if (const auto group = brain_.vm()->probe_group(element, actor)) battle_->set_group_hint(*group);
+  const int caster_count = record.b(0x17);
+  if (caster_count == 0 || caster_count == 0xFF) return actor;
+  const auto probe = brain_.vm() ? brain_.vm()->probe_group(element, actor) : std::nullopt;
+  if (!probe) {
+    log::warn("battle: dev cast of element {} dropped: a group tech of {} casters, and no script of this scene queues it with unit {} in its caster list",
+              element, caster_count, actor);
+    return -1;
+  }
+  for (int k = 0; k < std::min(caster_count, 6); ++k) {
+    const int member = probe->group[static_cast<size_t>(k)];
+    if (member == 0xFF) break;
+    if (const char* why = unusable(member)) {
+      log::warn("battle: dev cast of element {} dropped: caster {} of its group (unit {}) is {}", element, k, member, why);
+      return -1;
+    }
+  }
+  if (probe->owner != actor) log::info("battle: dev cast of element {}: cast by unit {}, whose script queues it, not unit {}", element, probe->owner, actor);
+  battle_->set_group_hint(probe->group);
+  return probe->owner;
 }
 
 int BattleView::script_list_unit(int list, int idx) const {
@@ -179,16 +218,19 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   // already wrote (hp 0 since the cast): that is where the "dead" voices of a multi-kill spell come from (Volcano: two "dead" voices after the
   // chant; with the presented state they never played).
   const bool pack_table = visual.script_kind == kReact && !visual.has_react;
-  ctx.dead = reacting ? (visual.react_ev.ko || visual.ko_shown) : (pack_table ? (!unit_rec.in_turn_order() || visual.ko_shown) : visual.ko_shown);
+  ctx.dead = reacting ? (visual.react_ev.ko || visual.ko_shown)
+                      : (pack_table ? ((!unit_rec.in_turn_order() && !unit_rec.record_ko) || visual.ko_shown) : visual.ko_shown);
   // A unit that owes a scripted death (op 5C, death cast parked by Battle::kill) has no death bit set: its idle / reaction scripts keep it
   // standing until the death cast has run.
   if (visual.death_owed) ctx.dead = false;
   // HP a battle script wrote to 0 is not a KO: the idle script stays up and reads the low-HP bit.
   if (unit_rec.hp_written_zero && unit_rec.hp <= 0) ctx.dead = false;
-  // Flags: bit 0 dead, bit 9 (0x200) guarding (set by Defend, cleared when the PC's command menu opens: the idle script picks the block pose
-  // from it), bit 31 HP <= max / 4 (or set by battle-script op 84 until the next hit).
-  ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard ? 0x200u : 0u) |
-              (((visual.zero_hp_actions >= 2 || visual.low_hp_forced || visual.hp_shown * 4 <= unit_rec.max_hp) && !ctx.dead) ? 0x80000000u : 0u);
+  // Flags: bit 0 dead, bit 9 (0x200) the block pose (set by Defend unless its poison step knocked out a party member, cleared when the PC's
+  // command menu opens: the idle script picks the block pose from it), bit 31 HP <= max / 4 (or set by battle-script op 84 until the next
+  // hit). The dead bit leaves bit 31 as it is: the tail of a reaction to a hit before the killing one reads it without the dead bit and picks
+  // the low-HP pose.
+  ctx.flags = (ctx.dead ? 1u : 0u) | (unit_rec.guard_pose ? 0x200u : 0u) |
+              ((visual.zero_hp_actions >= 2 || visual.low_hp_forced || std::max(visual.hp_shown, visual.revive_hp) * 4 <= unit_rec.max_hp) ? 0x80000000u : 0u);
   // Equipment bits set once per party unit (read by anmseq ops 0xA6 / 0xA7 / 0xA8 and by the sky pack): 0x2000 weapon
   // item 0x26 (Mastermune), 0x4000 any accessory 0xC1 (Hero's Shield), 0x8000 the hero set (Unit::hero_set).
   if (unit_rec.pc) {
@@ -439,8 +481,9 @@ void BattleView::on_script_event(int unit, const bseq::Event& event) {
   Visual& visual = vis_[static_cast<size_t>(unit)];
   switch (event.kind) {
     case K::SetAnim:
-      // The idle script re-asks for the clip it already plays.
-      if (visual.script_kind == kIdle && event.a == visual.pose.current_id()) break;
+      // The idle script re-asks for the clip it already plays; after a restart the original makes, the clip starts again with its blend.
+      if (visual.script_kind == kIdle && event.a == visual.pose.current_id() && !visual.idle_reblend) break;
+      visual.idle_reblend = false;
       if (static const bool tr = std::getenv("OC_REACH_TRACE") != nullptr; tr)
         log::info("setanim: tick {} unit {} id {} flags {:X} (was id {} clip {}) kind {}", tick_count_, unit, event.a, event.b, visual.pose.current_id(), visual.pose.current_clip(), static_cast<int>(visual.script_kind));
       visual.pose.play(event.a, event.b & 0x1FFF, (event.b & 0x8000) != 0, (event.b & 0x6000) >> 13);
@@ -686,6 +729,7 @@ void BattleView::on_damage(int unit, bool number) {
   }
   if (event.code != 2) {
     visual.hp_shown = event.hp_after;
+    visual.revive_hp = -1;
     visual.low_hp_forced = false;
   }
   // Pilfer or a status / field element (Frozen row 6): the record's btmes row opens the system message plate
@@ -713,8 +757,6 @@ void BattleView::on_damage(int unit, bool number) {
     visual.ko_shown = visual.ko_hit = true;
     visual.ko_reacted = visual.script_kind == kReact && visual.has_react && visual.react_ev.ko;
     if (event.ko_owed) visual.death_owed = true;
-    // No reaction script (element hit): the idle script re-reads the death flag (op 0x48) and plays the death clips; restart it if it had ended.
-    if (!visual.has_react && visual.script_kind == kIdle && visual.script_done) start_idle(unit);
   }
 }
 
@@ -866,11 +908,7 @@ void BattleView::tick_units() {
     visual.fade_prev = visual.fade;
     visual.flash = std::max(0.0f, visual.flash - 1.0f / 20.0f);
     // An enemy's death fade is the tail of the reaction script that took the killing hit (its dead branch: death clips, ColorRamp, ModelShow 0).
-    // This fallback only covers a kill no reaction script took: it starts after the action and runs on its own. HP a script wrote to 0 never fades.
-    const bool action_over = act_.phase == Act::Phase::None && !fx_active();
-    // A boss with a scripted death (op 5C) owns its death presentation: no fade while its death cast is still owed / queued (the pack hides it).
-    const bool death_cast = visual.death_owed || death_pending(i) || (!queue_.empty() && visual.fade >= 1.0f && !unit_rec.conscious() && !unit_rec.pc);
-    if (!unit_rec.pc && !death_cast && !visual.ko_reacted && !unit_rec.hp_written_zero && visual.ko_shown && visual.script_done && visual.script_kind == kIdle && (visual.fade < 1.0f || (action_over && (visual.ko_hit || battle_->outcome() == battle::Outcome::Ongoing)))) visual.fade = std::max(0.0f, visual.fade - 1.0f / 40.0f);
+    // A kill no reaction script takes has no fade: the unit keeps its clip, visible, with the death flag.
     // Dev: OC_DEATH_TRACE logs the KO / fade state of a dying monster per tick.
     if (static const bool dt = std::getenv("OC_DEATH_TRACE") != nullptr; dt && !unit_rec.pc && (unit_rec.hp <= 0 || visual.death_owed)) {
       static std::array<std::string, battle::kUnits> last;
@@ -949,12 +987,23 @@ void BattleView::tick_units() {
     // When the guard flag changes (Defend set it, the PC's command menu opening clears it) the idle script is restarted so it re-picks the pose.
     if (visual.script_kind == kIdle && visual.script_done && visual.guard_shown != unit_rec.guard && unit_rec.pc) start_idle(i);
 
-    // Back to the idle script once an action script is over (the actor is released by the action phases).
-    const bool held = act_.phase != Act::Phase::None && act_.phase != Act::Phase::Settle && i == act_.actor;
+    // Back to the idle script once an action script is over. The actor and every other unit of the acting list (a double or triple tech's
+    // partners, a monster group cast's members) are released by the action phases: a partner whose cast pose script ends holds that pose
+    // through the charge, as the actor does.
+    // A reaction script on any other unit (a hit, a fall, a block, Revive's get-up) restarts nothing when it ends: the clip it set loops on and
+    // the unit counts as idle, so the next idle restart (an element pack's end restarts every living unit) re-picks its pose.
+    const bool acting = i == act_.actor || std::find(act_.casters.begin(), act_.casters.end(), i) != act_.casters.end();
+    const bool held = act_.phase != Act::Phase::None && act_.phase != Act::Phase::Settle && acting;
     const bool waiting = std::any_of(pending_.begin(), pending_.end(), [i](const Pending& pending) { return pending.unit == i; });
     if (visual.script_done && visual.script_kind != kIdle && visual.script_kind != kNone && visual.script_kind != kVictory && visual.script_kind != kRun && !held && !waiting &&
-        !engaged_stance(i))
-      start_idle(i);
+        !engaged_stance(i)) {
+      if (visual.script_kind == kReact && !acting) {
+        visual.script_kind = kIdle;
+        visual.has_react = false;
+      } else {
+        start_idle(i);
+      }
+    }
     // A bespoke overlay that set the model's animation speed to 0 (fnoise 0x180, rakugaki, hensin) freezes its pose.
     const effects::FxModels* fxm = fx_ ? fx_->bespoke_models() : nullptr;
     const bool frozen = fxm && static_cast<size_t>(i) < fxm->units.size() && fxm->units[static_cast<size_t>(i)].anim_speed == 0;

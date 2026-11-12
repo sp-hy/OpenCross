@@ -604,6 +604,7 @@ int cmd_cast(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vec
     int code = -1;
     for (const int cast : casts) {
       if (battle.outcome() != Outcome::Ongoing) break;
+      battle.begin_external_action();
       battle.do_element(actor, cast, 0, target);
       if (!battle.events().empty()) code = battle.events().back().code;
       battle.finish_external_action();

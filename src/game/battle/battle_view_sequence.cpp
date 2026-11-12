@@ -51,6 +51,36 @@ void BattleView::begin_group() {
   log::debug("battle: action {} actor {} kind {} events {} at tick {}", e0.action, e0.actor, static_cast<int>(e0.kind), act_.ev.size(), tick_count_);
   for (const battle::ActionEvent& event : act_.ev)
     if (event.target >= 0 && std::find(act_.targets.begin(), act_.targets.end(), event.target) == act_.targets.end()) act_.targets.push_back(event.target);
+  // A revive clears the target's death flag and refreshes its low-HP bit from the new HP when the action resolves, before its pack plays:
+  // the target holds its knocked-out clip until a script restarts it (Revive's get-up table, or the pack end's idle restart), and those
+  // scripts then pick the standing branch. It also sets the idle-pose word to 1 and gives a PC its face flag back (the eye ops act again).
+  // A KO sets the death flag at the same point (a scripted death owes it to its death cast): the pack's end does not restart that unit.
+  for (const battle::ActionEvent& event : act_.ev)
+    if (event.revived) {
+      Visual& visual = vis_[static_cast<size_t>(event.target)];
+      visual.ko_shown = visual.ko_hit = visual.ko_reacted = visual.ko_resolved = false;
+      visual.zero_hp_actions = 0;
+      visual.revive_hp = event.hp_after;
+      visual.script_pose = 1;
+      anm_face_on(event.target);
+    } else if (event.ko && !event.ko_owed && event.target >= 0) {
+      vis_[static_cast<size_t>(event.target)].ko_resolved = true;
+    }
+  // A unit that already had the KO bit and that the action did not hit takes the death flag as well, and nothing restarts it. The party
+  // members the poison step knocked out take it too, their eyes shut at once (anm_eye_shut) and their idle-pose word becomes 8, so every
+  // later pose pick (the idle, the return hop's and release's ends, S5 entry 11) plays clip 8 through the word, without the dead branch's
+  // eye ops. Their idle restarts and lies them down, except the PC whose command issued the action: its own scripts (the attack and its
+  // return hop, the cast and release, Defend's restart) pick the knocked-out pose.
+  for (const battle::ActionEvent& event : act_.ev)
+    for (int i = 0; i < battle::kUnits; ++i) {
+      Visual& visual = vis_[static_cast<size_t>(i)];
+      if (event.ko_again >> i & 1u) visual.ko_resolved = true;
+      if (!(event.poison_ko >> i & 1u) || visual.ko_shown) continue;
+      visual.ko_shown = true;
+      visual.script_pose = 8;
+      anm_eye_shut(i);
+      if (i != e0.actor) start_idle(i);
+    }
   // An empty target list (no target survived the target mask) is filled with the first ACTING unit, so every reader of the target list
   // (camera refs, the facing pass) sees the caster itself.
   if (act_.targets.empty()) act_.targets.push_back(act_.actor);
@@ -162,8 +192,9 @@ void BattleView::begin_group() {
     case battle::ActionEvent::Kind::Defend:
       // The guard bit is set and the idle script (S5 entry 1) is restarted: it reads the flag (op 0x49) and holds the block pose itself.
       // No separate clip is forced here (a forced clip would never hand back to the idle script). The command itself takes no time: the pose
-      // plays on while the next PC's menu entry runs.
-      start_idle(act_.actor);
+      // plays on while the next PC's menu entry runs. The restart starts the clip again with its blend, also the clip the PC already plays
+      // (a Defend without the block pose).
+      start_idle(act_.actor, true);
       act_.phase = Act::Phase::Settle;
       break;
     case battle::ActionEvent::Kind::Run:

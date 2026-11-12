@@ -315,7 +315,8 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     dp.shading = unit_shading(i);
     // [Enhancements] Lighting.
     if (spell_lights_shown_ && spell_.set.active()) dp.lights = &spell_.set;
-    const float dim = unit.pc ? (visual.ko_shown ? 0.55f : 1.0f) : fade;
+    // A knocked-out PC keeps its full model colour; only a dying enemy fades out.
+    const float dim = unit.pc ? 1.0f : fade;
     dp.tint[0] = dim * (1.0f + 0.8f * flash);
     dp.tint[1] = dim * (1.0f - 0.5f * flash);
     dp.tint[2] = dim * (1.0f - 0.5f * flash);

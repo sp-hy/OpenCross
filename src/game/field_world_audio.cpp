@@ -240,10 +240,33 @@ void FieldWorld::play_sfx(int mode, int id, int op4, int op6, int op8) {
   sfx_out().play_field(id, volume, pan8 >> 1, 1u << (slot + 8));
   sfx_vol_[static_cast<size_t>(slot)] = {static_cast<float>(volume), static_cast<float>(volume), 0, 0};
   sfx_pan_[static_cast<size_t>(slot)] = {static_cast<float>(pan8 >> 1), static_cast<float>(pan8 >> 1), 0, 0};
+  sfx_records_[static_cast<size_t>(slot)] = {id, volume, pan8};
+}
+
+void FieldWorld::clear_ended_sfx_records() {
+  for (size_t slot = 0; slot < sfx_records_.size(); ++slot)
+    if (sfx_records_[slot].id != 0xFF && !sfx_out().field_active(1u << (slot + 8))) sfx_records_[slot] = {0xFF, 0, sfx_records_[slot].pan8};
+}
+
+// Every running field sound ends except those with mask bit 0 (the screen sounds: the results screen's exit sound may still ring); then
+// each live record starts its sound again at the record's volume and pan, as C6 would.
+void FieldWorld::restart_sfx_records() {
+  audio::Sfx& out = sfx_out();
+  out.evict_field(0xFFFFFE);
+  for (size_t slot = 0; slot < sfx_records_.size(); ++slot) {
+    const SfxSlotRecord& record = sfx_records_[slot];
+    if (record.id == 0xFF) continue;
+    const int volume = record.volume & 0x7F, pan = (record.pan8 & 0xFF) >> 1;
+    log::debug("field: tick {} slot {} sound {} started again after the battle (volume {}, pan {:#x})", tick_count_, slot, record.id, volume, record.pan8);
+    out.play_field(record.id, volume, pan, 1u << (slot + 8));
+    sfx_vol_[slot] = {static_cast<float>(volume), static_cast<float>(volume), 0, 0};
+    sfx_pan_[slot] = {static_cast<float>(pan), static_cast<float>(pan), 0, 0};
+  }
 }
 
 // FE 22 slot, frames, volume: a volume slide of every sound started with the slot's channel mask, from the volume the C6 set.
 void FieldWorld::sfx_volume(int slot, int frames, int volume) {
+  sfx_records_[static_cast<size_t>(slot & 7)].volume = volume;
   SfxSlide& slide = sfx_vol_[static_cast<size_t>(slot & 7)];
   slide.target = static_cast<float>(std::clamp(volume, 0, 127));
   slide.left = std::max(0, frames);
@@ -254,6 +277,7 @@ void FieldWorld::sfx_volume(int slot, int frames, int volume) {
 
 // FE 23: the same slide for the pan. The operand is a pan byte on C6's scale (0x80 = centre), halved like C6's.
 void FieldWorld::sfx_pan(int slot, int frames, int pan) {
+  sfx_records_[static_cast<size_t>(slot & 7)].pan8 = pan & 0xFF;
   SfxSlide& slide = sfx_pan_[static_cast<size_t>(slot & 7)];
   slide.target = static_cast<float>((pan & 0xFF) >> 1);
   slide.left = std::max(0, frames);
@@ -279,12 +303,14 @@ void FieldWorld::step_sfx_slides() {
   }
 }
 
-// A menu screen over the field (main menu, save list, shops, name entry, party): when it opens every running field sound slides to
-// volume 0 over 32 frames and keeps running; when it closes the C6 slots' sounds slide back over 30 frames to the volume their
-// slot was set to (the C6 volume, or the FE 22 target, whose slide ends there). The other sounds stay silent.
+// A menu screen over the field (main menu, save list, shops, name entry, party): when it opens the records of the slots whose sound
+// has ended are cleared and every running field sound slides to volume 0 over 32 frames and keeps running; when it closes the C6
+// slots' sounds slide back over 30 frames to the volume their slot was set to (the C6 volume, or the FE 22 target, whose slide ends
+// there). The other sounds stay silent.
 void FieldWorld::fade_screen_sounds(bool opening) {
   audio::Sfx& out = sfx_out();
   if (opening) {
+    clear_ended_sfx_records();
     out.fade_field(0xFFFFFF, 0x20, 0);
     return;
   }

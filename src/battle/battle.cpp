@@ -234,7 +234,7 @@ void Battle::init_pc(int slot, const PartyMember& member) {
   unit.src_id = member.char_id;
   unit.name = member.name;
   unit.max_hp = stat(0);
-  unit.hp = std::min(member.hp, unit.max_hp);
+  unit.hp = std::clamp(member.hp, 0, unit.max_hp);
   unit.atk = stat(1), unit.def = stat(2), unit.hit = stat(3), unit.evd = stat(4), unit.mag = stat(5), unit.mdef = stat(6);
   unit.hit_med = std::clamp(member.hit_med, 0, kByteLimit), unit.hit_heavy = std::clamp(member.hit_heavy, 0, kByteLimit);
   unit.innate = member.innate;
@@ -270,16 +270,13 @@ void Battle::init_pc(int slot, const PartyMember& member) {
     unit.gender = static_cast<u16>(chars->second.rec[static_cast<size_t>(member.char_id)].rd16(0x14));
   unit.rate = static_cast<int>(std::clamp<s64>(static_cast<s64>(unit.rate) + unit.eq.stamina_mod, 0, kStatLimit));
   unit.gauge = std::clamp(std::clamp(unit.eq.start_gauge, 0, data::kGridRows) - 1, -1, unit.gauge_max);
-  // Gear HP% raises the current HP only, so it may start above max HP.
+  // Gear HP% raises the current HP only, so it may start above max HP; an HP of 0 becomes 1.
   for (int pct : unit.eq.hp_pct) {
-    if (unit.hp <= 0) break;
     const int scaled = static_cast<int>(std::clamp<s64>(static_cast<s64>(unit.hp) * (static_cast<s64>(pct) + 100) / 100, 0, kHpLimit));
     unit.hp = std::min(999, scaled == unit.hp ? scaled + 1 : scaled);
   }
-  if (unit.hp <= 0) {
-    unit.hp = 0;
-    unit.lo |= st::kKO;
-  }
+  // Only the record's KO bit knocks the member out; an HP of 0 alone leaves it in the fight.
+  unit.record_ko = (unit.lo & st::kKO) != 0;
 }
 
 // The fields a unit takes from a monster record (enemy spawn and a Dopplegang form): stats, colour, status words (`perm_lo_bits` are OR-ed
@@ -1317,9 +1314,45 @@ void Battle::kill(int unit_index) {
   // A PC loses its inflicted statuses except lo 0x400480 / hi 0x1FE00000; the permanent ones stay. The stat modifiers keep their values.
   if (victim.pc) drop_inflicted(victim, st::kKoKeepLo, st::kKoKeepHi);
   victim.lo |= st::kKO;
-  victim.guard = false;
+  victim.guard = victim.guard_pose = false;
   say(std::format("  {} is knocked out", victim.name));
   if (!victim.pc) run_kill_script(unit_index);
+}
+
+// Any hit on a unit that already has the KO bit (a revive clears it first) knocks it out once more: HP 0, the guard and a PC's inflicted
+// statuses go as in kill, and it takes the death flag, so a member knocked out by its save record falls down at its first hit. No kill
+// script starts again.
+void Battle::knock_out_again(int unit_index) {
+  Unit& victim = units_[static_cast<size_t>(unit_index)];
+  victim.hp = 0;
+  if (victim.pc) drop_inflicted(victim, st::kKoKeepLo, st::kKoKeepHi);
+  victim.guard = victim.guard_pose = false;
+  victim.record_ko = false;
+}
+
+u32 Battle::knocked_out_roster() const {
+  u32 mask = 0;
+  for (int i = 0; i < kUnits; ++i) {
+    const Unit& unit = units_[static_cast<size_t>(i)];
+    if (unit.present && (unit.lo & st::kKO) && (unit.pc || death_pending_[static_cast<size_t>(i)])) mask |= 1u << i;
+  }
+  return mask;
+}
+
+// A member knocked out by its save record falls here when the action did not hit it or missed it: its event of this action shows the
+// KO, or the action's last event notes it.
+void Battle::knock_out_rest(u32 before) {
+  u32 unhit = 0;
+  for (int i = 0; i < kUnits; ++i) {
+    if (!(before >> i & 1u) || !(units_[static_cast<size_t>(i)].lo & st::kKO)) continue;
+    const bool first_fall = units_[static_cast<size_t>(i)].record_ko;
+    knock_out_again(i);
+    if (!first_fall) continue;
+    const auto own = std::find_if(events_.rbegin(), events_.rend(), [&](const ActionEvent& event) { return event.action == action_id_ && event.target == i; });
+    if (own == events_.rend()) unhit |= 1u << i;
+    else own->ko = true;
+  }
+  if (unhit && !events_.empty() && events_.back().action == action_id_) events_.back().ko_again |= unhit;
 }
 
 // The poison step's KO of a PC keeps the inflicted hi word and lo bits 1..15 (poison itself goes) and empties the stamina.
@@ -1334,7 +1367,7 @@ void Battle::poison_kill(int unit_index) {
   drop_inflicted(victim, st::kPoisonKoKeepLo, 0xFFFFFFFFu);
   victim.lo |= st::kKO;
   victim.stamina = 0;
-  victim.guard = false;
+  victim.guard = victim.guard_pose = false;
   say(std::format("  {} is knocked out by poison", victim.name));
 }
 
@@ -1378,9 +1411,9 @@ void Battle::god_filter(int target, DamageOut& dmg) const {
 void Battle::damage_unit(int actor, int target, int value, int code) {
   Unit& target_unit = units_[static_cast<size_t>(target)];
   if (target == gated_target_) value = 0;
-  // A KO'd unit takes neither damage nor healing: its HP stays 0 (only a revive clears the KO).
+  // A KO'd unit takes neither damage nor healing: it is knocked out again (only a revive clears the KO).
   if (target_unit.lo & st::kKO) {
-    target_unit.hp = 0;
+    knock_out_again(target);
     return;
   }
   if (code == 3) {
@@ -1643,6 +1676,7 @@ bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool mi
   if (woken & st::kAsleep) target_unit.timers.erase(14);
   if (woken & st::kConfused) target_unit.timers.erase(20);
   const bool alive0 = target_unit.in_turn_order();
+  const bool record_ko0 = target_unit.record_ko;
   damage_unit(actor, target, damage.value, damage.code);
   if ((attacker.hi & st::kHiDrain) && damage.code != 2 && damage.value != 0) drain_ = {actor, damage.value};
   if (boost_cancelled_ >> target & 1u) {
@@ -1653,7 +1687,7 @@ bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool mi
   ev.value = damage.value;
   ev.code = damage.code == 3 || damage.code == 2 ? damage.code : (damage.value == 0 && !ev.gated ? 1 : 0);
   ev.crit = damage.crit;
-  ev.ko = alive0 && !target_unit.in_turn_order();
+  ev.ko = (alive0 || record_ko0) && !target_unit.in_turn_order() && !target_unit.record_ko;
   ev.ko_owed = ev.ko && death_pending_[static_cast<size_t>(target)];
   ev.hp_after = target_unit.hp;
   note_event(ev);
@@ -1673,7 +1707,10 @@ void Battle::weapon_landed(int actor, int strength) {
 void Battle::do_weapon_attack(int actor, int target, int strength) {
   const SealRefreshOnExit refresh{*this, target};
   weapon_begin(actor, target, strength, 1u << target);
-  if (!weapon_strike(actor, target, strength, -1, false)) return;
+  const u32 knocked_out = knocked_out_roster();
+  const bool landed = weapon_strike(actor, target, strength, -1, false);
+  knock_out_rest(knocked_out);
+  if (!landed) return;
   weapon_landed(actor, strength);
   pay_drain();
 }
@@ -1691,12 +1728,14 @@ void Battle::do_weapon_sweep(int actor, int aim, int strength) {
   if (targets == 0) targets = 1u << aim;
   weapon_begin(actor, aim, strength, targets);
   const size_t first = events_.size();
+  const u32 knocked_out = knocked_out_roster();
   bool missed = false;
   for (int i = 0; i < kUnits; ++i) {
     if (!(targets >> i & 1u)) continue;
     const SealRefreshOnExit refresh{*this, i};
     if (!weapon_strike(actor, i, strength, aim, missed)) missed = true;
   }
+  knock_out_rest(knocked_out);
   for (size_t k = first + 1; k < events_.size(); ++k)
     if (events_[k].kind == ActionEvent::Kind::Weapon && events_[k].actor == actor && events_[k].aim == aim) events_[k].hit_index = events_[first].hit_index;
   if (!missed) weapon_landed(actor, strength);
@@ -1736,6 +1775,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   Unit& target_unit = units_[static_cast<size_t>(target)];
   const int hp0 = target_unit.hp;
   const bool alive0 = target_unit.in_turn_order();
+  const bool record_ko0 = target_unit.record_ko;
   const size_t log0 = log_.size();
   boost_cancelled_ = 0;
   brain_.on_attack(*this, actor, 1, element_id, 1u << target);
@@ -2255,6 +2295,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       // The revived unit restarts with a full stamina bar and a fresh countdown (AP + rnd(0, AP / 4)). A revive that rounds to 0 HP
       // leaves the unit up at 0 HP: the next damage knocks it out again.
       target_unit.lo &= ~st::kKO;
+      target_unit.record_ko = false;
       target_unit.hp = target_unit.max_hp * pct / 100;
       target_unit.countdown = target_unit.ap + rng_.rnd(0, target_unit.ap >> 2);
       target_unit.stamina = 70;
@@ -2372,6 +2413,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       note_stub(std::format("element mode {}", mode));
       break;
   }
+  if (!alive0 && (target_unit.lo & st::kKO)) knock_out_again(target);
   const bool gated = gated_target_ >= 0;
   gated_target_ = -1;
   boost_cure();
@@ -2384,8 +2426,9 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   ev.row = row;
   ev.hp_before = hp0;
   ev.hp_after = target_unit.hp;
-  ev.ko = alive0 && !target_unit.in_turn_order();
+  ev.ko = (alive0 || record_ko0) && !target_unit.in_turn_order() && !target_unit.record_ko;
   ev.ko_owed = ev.ko && death_pending_[static_cast<size_t>(target)];
+  ev.revived = !alive0 && target_unit.in_turn_order();
   ev.value = gated ? 0 : rolled_damage >= 0 ? rolled_damage : std::abs(target_unit.hp - hp0);
   ev.gated = gated;
   ev.caster_word = caster_word;
@@ -2466,6 +2509,12 @@ bool Battle::catch_in_trap(int actor, int element_id, int row, int target) {
 }
 
 void Battle::cast_element(int actor, int element_id, int row, int target, u32 targets) {
+  const u32 knocked_out = knocked_out_roster();
+  cast_element_targets(actor, element_id, row, target, targets);
+  knock_out_rest(knocked_out);
+}
+
+void Battle::cast_element_targets(int actor, int element_id, int row, int target, u32 targets) {
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(element_id)];
   // The seal swap is judged once, as the cast starts: a caster that one of its targets' passes seals goes on casting the element.
@@ -2570,9 +2619,10 @@ void Battle::lower_pc_countdowns(int steps) {
   }
 }
 
-void Battle::post_action(int actor, int poison_step, int timer_steps) {
+u32 Battle::post_action(int actor, int poison_step, int timer_steps) {
   ++actions_;
-  if (!player_unit(actor)) return;
+  if (!player_unit(actor)) return 0;
+  u32 poisoned_out = 0;
   // Every unit in the turn order steps, a frozen one included (its Frozen timer thaws it).
   for (int i = 0; i < kUnits; ++i) {
     Unit& unit = units_[static_cast<size_t>(i)];
@@ -2580,8 +2630,12 @@ void Battle::post_action(int actor, int poison_step, int timer_steps) {
     if (unit.lo & st::kPoison) {
       unit.hp -= poison_step;
       // An enemy that lands on exactly 0 is left at 1; below 0 it stays negative and the next hit that lands kills it.
-      if (unit.pc && unit.hp <= 0) poison_kill(i);
-      else if (!unit.pc && unit.hp == 0) unit.hp = 1;
+      if (unit.pc && unit.hp <= 0) {
+        poison_kill(i);
+        if (unit.lo & st::kKO) poisoned_out |= 1u << i;
+      } else if (!unit.pc && unit.hp == 0) {
+        unit.hp = 1;
+      }
     }
     if (unit.in_turn_order() && (unit.hi & st::kHiRegen)) unit.hp = std::min(unit.max_hp, unit.hp + poison_step);
     for (auto it = unit.timers.begin(); it != unit.timers.end();) {
@@ -2596,6 +2650,8 @@ void Battle::post_action(int actor, int poison_step, int timer_steps) {
       }
     }
   }
+  if (poisoned_out && !events_.empty() && events_.back().action == action_id_) events_.back().poison_ko |= poisoned_out;
+  return poisoned_out;
 }
 
 void Battle::time_advance() {
@@ -2782,6 +2838,7 @@ void Battle::apply_cheat_state() {
     // do no damage (god_filter).
     if (cheats_.god_mode) {
       unit.lo &= ~st::kKO;
+      unit.record_ko = false;
       unit.hp = unit.max_hp;
       unit.lo &= ~st::kNegative;
       for (auto it = unit.timers.begin(); it != unit.timers.end();)
@@ -2848,6 +2905,8 @@ void Battle::check_end() {
 }
 
 void Battle::finish_external_action() {
+  knock_out_rest(external_ko_);
+  external_ko_ = 0;
   run_reactions();
   chain_actor_ = chain_target_ = -1;
   chain_hits_ = 0;
@@ -2917,7 +2976,8 @@ void Battle::end_chain_after(size_t first_event) {
 // ------------------------------------------------------------------------------------------------ command application
 void Battle::open_menu(int pc) {
   if (!player_unit(pc)) return;
-  units_[static_cast<size_t>(pc)].guard = false;
+  Unit& unit = units_[static_cast<size_t>(pc)];
+  unit.guard = unit.guard_pose = false;
   active_pc_ = pc;
 }
 
@@ -2942,7 +3002,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
   begin_action();
   Unit& unit = units_[static_cast<size_t>(cmd.actor)];
   // A command comes from the actor's own menu, whose opening ended its guard and made it the active PC.
-  unit.guard = false;
+  unit.guard = unit.guard_pose = false;
   if (player_unit(cmd.actor)) active_pc_ = cmd.actor;
   // The automatic target: the weakest unit the cursor ring could reach (hidden units are never on it). A versus side's enemies are the
   // other side's characters, its party its own.
@@ -3072,7 +3132,9 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         note_event(ev);
       }
       step_after_pc_action(cmd.actor, 1, false);
-      post_action(cmd.actor, 1, 1);
+      // The block pose goes with the guard unless the poison step knocked out a party member (the defender keeps the guard and its halved
+      // damage, and stands in its idle stance).
+      unit.guard_pose = post_action(cmd.actor, 1, 1) == 0 && unit.guard;
       // When no PC could take the menu now, a guarding one counted as unable, time runs one step before the menu passes on. A versus turn
       // is passed by its side, not by the menu, so no time runs there.
       {
@@ -3119,7 +3181,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         init_pc(cmd.actor, party_[slot]);
       }
       unit.stamina = 0;
-      unit.guard = false;
+      unit.guard = unit.guard_pose = false;
       unit.countdown = before.countdown;
       unit.home_facing = before.home_facing;
       refresh_seal_flags(cmd.actor);

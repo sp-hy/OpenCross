@@ -38,9 +38,10 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
     word = arg == 0 ? (word | bit) : (word & ~bit);
     return;
   }
-  // C7: the sounds C6 started on slot (U & 7) end.
+  // C7: the sounds C6 started on slot (U & 7) end and the slot's record is cleared.
   if (key == 0xC7) {
     if (sfx_) sfx_->evict_field(1u << ((arg & 7) + 8));
+    sfx_records_[static_cast<size_t>(arg & 7)] = {0xFF, 0, sfx_records_[static_cast<size_t>(arg & 7)].pan8};
     return;
   }
   if (key == 0xFE69 && gs_) {
@@ -566,9 +567,9 @@ void FieldWorld::sim_tick() {
   if (handoff_.battle_state == BattleState::Intro && !(sequences_ && sequences_->running("enct"))) {
     handoff_.battle_state = BattleState::Hold;
     handoff_.hold_ticks = 0;
-    // Leaving the field for the battle evicts every sound but mask bit 0: every
-    // field sound (room frames, sound emitters, footsteps, the global ones of kept slots) ends at once; only mask bit 0 survives - the encounter
-    // effect's own `enct` sounds (op 0x51, mask 1) play on through the load. Until here the field's sounds ran over the swirl.
+    // Leaving the field for the battle evicts every sound but mask bit 0 again: the field sounds the scripts started during the
+    // encounter effect end (the request already ended the older ones); the encounter effect's own `enct` sounds (op 0x51, mask 1) play
+    // on through the load.
     if (mixer_) mixer_->evict_sfx(0xFFFFFE, true);
     log::info("field: tick {} encounter effect 'enct' ended after {} ticks", tick_count_, tick_count_ - handoff_.intro_tick);
   }
