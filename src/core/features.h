@@ -20,14 +20,20 @@ struct Setting {
 };
 
 // One feature. `id` = the number GET_FEATURE_LEVEL (field script FE C0) takes, `level` = the version this build implements, `section` =
-// its mod.ini section and its key prefix in opencross.ini [Features] (empty: no mod sets it, as feature 0, the extension range itself).
-// A feature with a section has the setting "Enabled" first.
+// its mod.ini section (a mod sets it, or names it in Requires) and its key prefix in opencross.ini [Features] (empty: no mod names it,
+// as feature 0, the extension range itself). A feature with settings has the setting "Enabled" first.
+// `player`: an addon works on the game as shipped, so the player keeps its toggle and settings in the Mods tab (it has settings). Otherwise
+// it is a mod kit: it does nothing without a mod's own scripts or data, has no settings (its mod.ini section takes no keys), and the Mods
+// tab only names the enabled mods that use it. `about` = one or
+// two sentences for the Mods tab (a mod kit's ends with the ops a modder uses).
 struct Feature {
   int id;
   int level;
   const char* section;
   const char* label;
   std::span<const Setting> settings;
+  bool player = false;
+  const char* about = "";
 };
 
 // Feature ids (GET_FEATURE_LEVEL, the table's `id`).
@@ -78,6 +84,8 @@ struct Resolved {
   };
   std::map<int, std::vector<int>> values;
   std::map<int, std::vector<std::string>> sources;
+  // Per feature id the mods that use it (set its section or name it in Requires), in list order.
+  std::map<int, std::vector<std::string>> users;
   std::vector<Issue> issues;
   std::vector<Conflict> conflicts;
   // False / the default when the feature or the key is unknown.

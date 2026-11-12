@@ -210,6 +210,15 @@ bool ImGuiLayer::init(GpuContext& ctx, SDL_Window* window) {
     const std::filesystem::path font = std::filesystem::path(windir) / "Fonts" / "segoeui.ttf";
     std::error_code ec;
     if (std::filesystem::exists(font, ec)) custom_font_ = io.Fonts->AddFontFromFileTTF(font.string().c_str(), kFontRaster) != nullptr;
+    // The few symbols the UI shows as text (the Mods tab's cog, warning sign, drag grip, reset arrow and info sign), from Segoe UI Symbol as
+    // the chat font does.
+    const std::filesystem::path symbols = std::filesystem::path(windir) / "Fonts" / "seguisym.ttf";
+    if (custom_font_ && std::filesystem::exists(symbols, ec)) {
+      static const ImWchar kUiSymbols[] = {0x21BA, 0x21BA, 0x24D8, 0x24D8, 0x2699, 0x2699, 0x26A0, 0x26A0, 0x283F, 0x283F, 0};
+      ImFontConfig merge;
+      merge.MergeMode = true;
+      io.Fonts->AddFontFromFileTTF(symbols.string().c_str(), kFontRaster, &merge, kUiSymbols);
+    }
   }
   if (!custom_font_) io.Fonts->AddFontDefault();
 
@@ -344,6 +353,8 @@ void ImGuiLayer::section(const char* title) {
   ImGui::SeparatorText(title);
   ImGui::PopStyleColor();
 }
+
+float ImGuiLayer::two_column_width() { return kTwoColumnW * ImGui::GetStyle().FramePadding.y / 5.0f; }
 
 bool ImGuiLayer::begin_panes(const char* id) {
   const float scale = ImGui::GetStyle().FramePadding.y / 5.0f;

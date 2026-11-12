@@ -23,14 +23,25 @@ constexpr std::array<Setting, 2> kPartyScreenSettings = {{
     {"ReturnToSlot", 1, 0, 1, "A pick returns the cursor to the slot it filled"},
 }};
 
-// The mod UI, model source and button panel ops have no setting: scripts use them (and check the level first).
+// Party swap and the party screen tweaks work on the game as shipped (addons). The mod UI and model source ops have no setting: a mod's
+// own scripts use them (and check the level first), and name them in Requires (mod kits). So does the button panel: the engine's own
+// correction of kji_b01i uses it for the story's code machine, and a mod's script can use it for a code of its own.
 constexpr std::array<Feature, 6> kFeatures = {{
     {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
-    {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings},
-    {kModUi, 2, "", "Mod UI (building blocks)", {}},
-    {kPartyScreen, 1, "PartyScreen", "Party screen tweaks", kPartyScreenSettings},
-    {kModelSources, 1, "", "Models from elsewhere on NPCs (FE D0)", {}},
-    {kButtonPanel, 1, "", "Button panel for key-latch code entry (FE D1)", {}},
+    {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings, true,
+     "A Swap command in battle: the acting character trades places with a reserve member. The party comes back after the battle unless "
+     "you keep it."},
+    {kModUi, 2, "ModUi", "Mod UI", {}, false,
+     "Script ops a mod builds its own screens from: panels, text, images, ovals, lists and a cursor the script reads the pick from. Field "
+     "script FE C1 to FE CB, FE CE and FE CF."},
+    {kPartyScreen, 1, "PartyScreen", "Party screen tweaks", kPartyScreenSettings, true,
+     "Party screen (Tele-Porter) behaviour that differs from the game."},
+    {kModelSources, 1, "ModelSources", "Models from elsewhere", {}, false,
+     "Lets an NPC wear a model from somewhere else: a playable character, another room's model or any battle model. Field script FE D0 "
+     "MODEL_SOURCE."},
+    {kButtonPanel, 1, "ButtonPanel", "Button panel", {}, false,
+     "RDE's on-screen button picker for a code a script reads from the pad: a Circle, Cross or Triangle opens it, and the button picked "
+     "on its grid is what the script's key-latch tests read. Field script FE D1 BUTTON_PANEL, just before the tests."},
 }};
 
 std::string_view trim(std::string_view text) {
@@ -186,6 +197,17 @@ Resolved resolve(std::span<const ModInput> mods, std::span<const std::pair<std::
     slot = value;
     source = from;
   };
+  for (const ModInput& mod : mods) {
+    if (!mod.manifest) continue;
+    auto use = [&](std::string_view section) {
+      const Feature* feature = find(features, section);
+      if (!feature) return;
+      std::vector<std::string>& users = out.users[feature->id];
+      if (std::find(users.begin(), users.end(), mod.name) == users.end()) users.push_back(mod.name);
+    };
+    for (const std::string& required : mod.manifest->requires_features) use(required);
+    for (const Manifest::Section& section : mod.manifest->sections) use(section.name);
+  }
   for (auto mod = mods.rbegin(); mod != mods.rend(); ++mod) {
     if (!mod->manifest) continue;
     for (const std::string& required : mod->manifest->requires_features)

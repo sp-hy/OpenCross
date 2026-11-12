@@ -54,8 +54,13 @@ void test_table() {
   CHECK(features::level(0) == 1);
   CHECK(features::level(9999) == 0);
   CHECK(features::find(features::table(), 0) && !features::find(features::table(), ""));
-  for (const features::Feature& feature : features::table())
-    if (*feature.section) CHECK(!feature.settings.empty() && std::string(feature.settings[0].key) == "Enabled");
+  // Settings start with Enabled; an addon (the Mods tab's toggle) has settings, a mod kit none.
+  for (const features::Feature& feature : features::table()) {
+    if (!feature.settings.empty()) CHECK(*feature.section && std::string(feature.settings[0].key) == "Enabled");
+    CHECK(feature.player == !feature.settings.empty());
+  }
+  // The tiers: party swap is the player's, the mod UI a mod's (named in Requires by its section).
+  CHECK(features::find(features::table(), "PartySwap")->player && !features::find(features::table(), "ModUi")->player);
 }
 
 void test_resolve() {
@@ -75,6 +80,8 @@ void test_resolve() {
   CHECK(both.conflicts.size() == 1 && both.conflicts[0].winner == "Top" && both.conflicts[0].loser == "Bottom" && both.conflicts[0].key == "Reserve");
   CHECK(has_issue(both, "Bottom", "feature 'Nope'") && has_issue(both, "Bottom", "feature 'Future'") && has_issue(both, "Bottom", "no setting 'Colour'"));
   CHECK(both.issues.size() == 3);
+  // Who uses a feature: every mod that sets its section or requires it, in list order (a feature nobody names has none).
+  CHECK(both.users.at(7) == std::vector<std::string>({"Top", "Bottom"}) && !both.users.count(0));
   // The player's overrides win over every mod; a value out of range is clamped, a word that is no number is ignored.
   const std::vector<std::pair<std::string, std::string>> overrides = {{"Swap.Enabled", "off"}, {"Swap.Reserve", "4"}, {"Gone.Enabled", "1"}};
   const features::Resolved player = features::resolve(mods, overrides, table);
