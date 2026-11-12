@@ -410,6 +410,9 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     }
     row("Auto-save", "RDE's auto-save (card 1, slot 0) on every location change.");
     if (ImGui::Checkbox("##autosave", &cfg.auto_save)) change.other = true;
+    row("Camera-relative Movement", "In the field, up on the stick or the arrows walks away from the camera, whatever way the room is "
+                                    "drawn. Off: the game's own directions (each room's fixed axes).");
+    if (ImGui::Checkbox("##camrel", &cfg.camera_relative)) change.other = true;
     row("Steam Connection", "Connects to Steam as the Radical Dreamers Edition, so Steam shows you playing it and its achievements unlock. Needs Steam running. "
                  "Turning it off stops achievements at once; Steam keeps showing you playing until OpenCross closes.");
     if (ImGui::Checkbox("##steam", &cfg.steam)) change.other = true;

@@ -184,6 +184,7 @@ bool Config::load(const std::filesystem::path& file) {
   fast_mode = parse_bool(ini.get("Game", "FastMode"), fast_mode);
   slow_mode = parse_bool(ini.get("Game", "SlowMode"), slow_mode) && !fast_mode;
   auto_save = parse_bool(ini.get("Game", "AutoSave"), auto_save);
+  camera_relative = parse_bool(ini.get("Game", "CameraRelative"), camera_relative);
   fast_rate = std::clamp(parse_int(ini.get("Game", "FastRate"), fast_rate), 0, 5);
   if (fast_rate == 1) fast_rate = 0;
   slow_rate = std::clamp(parse_int(ini.get("Game", "SlowRate"), slow_rate), 10, 90);
@@ -394,6 +395,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "WideHud", kWideHudNames[std::clamp(wide_hud, 0, 2)]);
   ini.set("Video", "WideEdgeFade", std::to_string(wide_edge_fade));
   ini.set("Game", "AutoSave", on_off(auto_save));
+  ini.set("Game", "CameraRelative", on_off(camera_relative));
   ini.set("Game", "FastRate", std::to_string(fast_rate));
   ini.set("Game", "SlowRate", std::to_string(slow_rate));
   ini.set("Video", "Widescreen", on_off(widescreen));

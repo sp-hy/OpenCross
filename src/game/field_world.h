@@ -470,6 +470,8 @@ class FieldWorld final : public script::FieldHost {
   void set_smooth_rings(bool on) { smooth_rings_ = on; }
   // [Enhancements] Lighting: actors cast their silhouette, as if lit from straight above.
   void set_cast_shadows(bool on) { cast_shadows_ = on; }
+  // [Game] CameraRelative: the pad / arrow headings turn with the room camera (pad_heading) instead of the control yaw (op 63).
+  void set_camera_relative(bool on) { camera_relative_ = on; }
   // [Shaders] the character shaders: the shading of the field actors.
   void set_character_shading(render::CharacterShading shading) { character_shading_ = shading; }
   // [Enhancements] MenuModelsInField: characters are drawn with their menu model, posed by their field model (game/menu_rig.h).
@@ -1166,6 +1168,7 @@ class FieldWorld final : public script::FieldHost {
   // [Enhancements] Lighting; created when first used.
   render::ShadowPipeline shadow_tiles_;
   bool cast_shadows_ = false, shadow_tiles_failed_ = false;
+  bool camera_relative_ = false;
   render::CharacterShading character_shading_;
   // art mode: party actors use their 4x texture
   bool hd_ = true;
