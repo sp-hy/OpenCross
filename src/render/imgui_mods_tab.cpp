@@ -5,14 +5,18 @@
 #include <algorithm>
 #include <cctype>
 #include <format>
+#include <initializer_list>
+#include <map>
 #include <span>
 #include <string>
 #include <utility>
+#include <vector>
 
 #if defined(_MSC_VER)
 #pragma warning(push, 0)
 #endif
 #include <imgui.h>
+#include <imgui_internal.h>
 #if defined(_MSC_VER)
 #pragma warning(pop)
 #endif
@@ -24,7 +28,7 @@
 #include "render/texture_registry.h"
 #include "vfs/vfs.h"
 
-// The Mods tab: a list | detail split with a draggable divider, then a bottom bar (Rescan, Discover Mods, Model Viewer, the Textures
+// The Mods tab: a list | detail split with a draggable divider (stacked when the tab is narrow), then a bottom bar (Rescan, Discover Mods, Model Viewer, the Textures
 // popover, the restart notice). The list has two tabs in one row style: Mods (drag to reorder, on / off, warnings, Load on) and Engine
 // features (addons the player switches, mod kits the mods use). The detail pane shows the selected row.
 
@@ -32,13 +36,8 @@ namespace oc::render {
 
 namespace {
 
-// Conflicts are recomputed only when the list (order, enabled, load on, file sets) changes, not every frame.
-struct ConflictCache {
-  std::string signature;
-  std::vector<std::vector<vfs::ModManager::Conflict>> per_mod;
-};
-
-std::string signature(const vfs::ModManager& mods) {
+// The list as the tab's cache keys it: order, enabled, load on, file sets.
+std::string list_signature(const vfs::ModManager& mods) {
   std::string text;
   for (const vfs::Mod& mod : mods.mods())
     text += mod.name + (mod.enabled ? "|1|" : "|0|") + vfs::load_on_name(mod.load_on) + "|" + std::to_string(mod.files.size()) + "|" + std::to_string(mod.data.size()) + "|" +
@@ -46,32 +45,45 @@ std::string signature(const vfs::ModManager& mods) {
   return text;
 }
 
-const ConflictCache& conflicts(const vfs::ModManager& mods) {
-  static ConflictCache cache;
-  std::string sig = signature(mods);
-  if (sig != cache.signature || cache.per_mod.size() != mods.mods().size()) {
-    cache.signature = std::move(sig);
-    cache.per_mod.clear();
-    for (size_t i = 0; i < mods.mods().size(); ++i) cache.per_mod.push_back(mods.conflicts(i));
-  }
-  return cache;
+// The enabled mods with game data, in list order: the game reads its data from them at launch.
+std::string data_signature(const vfs::ModManager& mods) {
+  std::string text;
+  for (const vfs::Mod& mod : mods.mods())
+    if (mod.enabled && !mod.data.empty()) text += mod.name + "\n";
+  return text;
 }
 
 TextureDumpHooks g_dump_hooks;
 
-// The tab's state for the session: the open list tab, the selection, the split.
+// The tab's state for the session: the open list tab, the selection, the split, the mod a gamepad carries.
 struct TabState {
   bool features_tab = false;
-  bool open_features_tab = false;  // a feature link in a mod's details asks for the Engine features tab
-  std::string mod;                 // the selected mod (folder name)
-  int feature = -1;                // the selected feature id
-  bool show_unused = false;        // mod kits no enabled mod uses
-  bool show_empty = false;         // folders in mods with nothing in them (dimmed rows)
-  bool restart = false;            // a feature setting or a game-data mod changed: it applies the next time the game starts
-  float split = 0.5f;              // the list's share of the width
-  int art_filter = 0;              // the Mods list shows: 0 every mod, 1..3 the ones that load in Mod / SD / HD
+  // A feature link in a mod's details asks for the Engine features tab.
+  bool open_features_tab = false;
+  // The selected mod (folder name) and feature id.
+  std::string mod;
+  int feature = -1;
+  // Show the mod kits no enabled mod uses, and the folders in mods with nothing in them (dimmed rows).
+  bool show_unused = false;
+  bool show_empty = false;
+  // The list's share of the width, and of the height when the panes stack.
+  float split = 0.5f;
+  float stack_split = 0.5f;
+  // The Mods list shows 0 every mod, 1..3 the ones that load in Mod / SD / HD.
+  int art_filter = 0;
+  // The mod (folder name) the gamepad's A carries while it is held on the mod's row, and whether it moved this frame (scroll to it).
+  std::string carried;
+  bool carried_moved = false;
 };
 TabState g_state;
+
+// What the game started with: the game-data mods and the resolved features. The tab's state differing from it needs a restart.
+struct LaunchState {
+  bool taken = false;
+  std::string data;
+  std::map<int, std::vector<int>> features;
+};
+LaunchState g_launch;
 
 // A list's row backgrounds: each row a band of the frame colour, a gap of the window colour between rows (BordersInnerH drawn in it). The
 // rows' checkboxes and combos get a frame a step lighter than the band, so they stand out from it.
@@ -389,18 +401,16 @@ bool setting_row(platform::Config& cfg, const vfs::ModManager& mods, const featu
   return changed;
 }
 
+// The features as the enabled mods and the player's settings give them (`now`), and as the mods alone give them (`mods_only`: which mod
+// sets a key, and the value a player's setting equal to it drops back to).
 struct FeatureView {
-  std::vector<features::ModInput> inputs;
-  features::Resolved now;        // mods + the player's settings: what this run gets
-  features::Resolved mods_only;  // without the player's: which mod sets a key
+  features::Resolved now;
+  features::Resolved mods_only;
 };
 
 FeatureView feature_view(const platform::Config& cfg, const vfs::ModManager& mods) {
-  FeatureView view;
-  view.inputs = mods.feature_inputs();
-  view.now = features::resolve(view.inputs, cfg.features);
-  view.mods_only = features::resolve(view.inputs, {});
-  return view;
+  const std::vector<features::ModInput> inputs = mods.feature_inputs();
+  return {features::resolve(inputs, cfg.features), features::resolve(inputs, {})};
 }
 
 const std::vector<std::string>& users_of(const FeatureView& view, int id) {
@@ -487,7 +497,7 @@ bool draw_feature_list(platform::Config& cfg, const vfs::ModManager& mods, const
   return settings;
 }
 
-// A feature's details: what it does; an addon's settings (shown ones, the rest while it is on) and the mods that set it; a mod kit's users.
+// A feature's details: what it does; an addon's settings (usable while it is on) and the mods that set it; a mod kit's users.
 bool draw_feature_detail(platform::Config& cfg, const vfs::ModManager& mods, const FeatureView& view) {
   const features::Feature* feature = features::find(features::table(), g_state.feature);
   if (!feature) return false;
@@ -505,22 +515,19 @@ bool draw_feature_detail(platform::Config& cfg, const vfs::ModManager& mods, con
     // Enabled is the list's checkbox (here only where a mod's value comes in); the rest one banded row each (greyed while the addon is off).
     settings |= source_note(cfg, mods, std::string(feature->section) + ".Enabled", view.mods_only.sources.at(feature->id)[0]);
     const bool on = view.now.values.at(feature->id)[0] != 0;
-    const bool any = std::any_of(feature->settings.begin() + 1, feature->settings.end(), [](const features::Setting& s) { return s.shown; });
-    if (any) {
+    if (feature->settings.size() > 1) {
       render::ImGuiLayer::section("Settings");
       if (!on) ImGui::TextDisabled("Switch it on in the list to change these.");
       ImGui::BeginDisabled(!on);
       const RowBands bands;
       float gutter = 0.0f;
-      for (size_t k = 1; k < feature->settings.size(); ++k)
-        if (feature->settings[k].shown) gutter = std::max(gutter, control_width(feature->settings[k]));
+      for (size_t k = 1; k < feature->settings.size(); ++k) gutter = std::max(gutter, control_width(feature->settings[k]));
       if (ImGui::BeginTable("settings", 2, RowBands::kFlags)) {
         ImGui::TableSetupColumn("control", ImGuiTableColumnFlags_WidthFixed, gutter);
         ImGui::TableSetupColumn("setting", ImGuiTableColumnFlags_WidthStretch);
         for (size_t k = 1; k < feature->settings.size(); ++k)
-          if (feature->settings[k].shown)
-            settings |= setting_row(cfg, mods, *feature, k, view.now.values.at(feature->id)[k], view.mods_only.values.at(feature->id)[k],
-                                    view.mods_only.sources.at(feature->id)[k]);
+          settings |= setting_row(cfg, mods, *feature, k, view.now.values.at(feature->id)[k], view.mods_only.values.at(feature->id)[k],
+                                  view.mods_only.sources.at(feature->id)[k]);
         ImGui::EndTable();
       }
       ImGui::EndDisabled();
@@ -531,15 +538,16 @@ bool draw_feature_detail(platform::Config& cfg, const vfs::ModManager& mods, con
     else ImGui::TextColored(kModColour, "%s", joined(mods, users).c_str());
     ImGui::Spacing();
     ImGui::TextDisabled("Nothing to switch: the mods that use it decide.");
-    // A setting of the player's left in opencross.ini (a route's, an older build's): it still applies, so it can be dropped here.
+    // [Features] lines for a mod kit in opencross.ini (written by hand or for an older build) do nothing, a kit having no settings: they
+    // can be removed here.
     const std::string prefix = std::string(feature->section) + ".";
     const bool own = std::any_of(cfg.features.begin(), cfg.features.end(), [&](const auto& entry) {
       return entry.first.size() > prefix.size() && same_key(std::string_view(entry.first).substr(0, prefix.size()), prefix);
     });
     if (own) {
-      ImGui::TextColored(kOverrideColour, "Your opencross.ini sets it ([Features]).");
+      ImGui::TextColored(kWarnColour, "Your opencross.ini has [Features] lines for it. They do nothing: it has no settings.");
       ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x * 0.5f);
-      if (icon_button("##reset", Icon::Reset, "Drop your setting: the mods that use it decide again.")) {
+      if (icon_button("##reset", Icon::Reset, "Remove those lines from opencross.ini.")) {
         std::erase_if(cfg.features, [&](const auto& entry) {
           return entry.first.size() > prefix.size() && same_key(std::string_view(entry.first).substr(0, prefix.size()), prefix);
         });
@@ -563,7 +571,7 @@ std::string first_names(const std::vector<std::string>& names) {
   return out;
 }
 
-std::vector<Issue> mod_issues(const vfs::Mod& mod, size_t index, const ConflictCache& cc) {
+std::vector<Issue> mod_issues(const vfs::Mod& mod, size_t index, const std::vector<vfs::ModManager::Conflict>& conflicts) {
   std::vector<Issue> out;
   if (!mod.error.empty()) out.push_back({"Can't be read", mod.error});
   if (mod.may_be_slow) out.push_back({"May run slowly", "A large 7z or RAR can only be read from the start. Extract it into a folder in mods."});
@@ -572,19 +580,49 @@ std::vector<Issue> mod_issues(const vfs::Mod& mod, size_t index, const ConflictC
   if (!mod.ambiguous.empty())
     out.push_back({std::format("{} file{} match several game files", mod.ambiguous.size(), mod.ambiguous.size() == 1 ? "" : "s"),
                    first_names(mod.ambiguous) + ": the same name in two archives"});
-  if (index < cc.per_mod.size()) {
-    std::vector<std::string> lost;
-    for (const auto& conflict : cc.per_mod[index])
-      if (conflict.winner != index) lost.push_back(conflict.target);
-    if (!lost.empty())
-      out.push_back({std::format("{} file{} replaced by a mod above", lost.size(), lost.size() == 1 ? "" : "s"), first_names(lost)});
-  }
+  std::vector<std::string> lost;
+  for (const auto& conflict : conflicts)
+    if (conflict.winner != index) lost.push_back(conflict.target);
+  if (!lost.empty())
+    out.push_back({std::format("{} file{} replaced by a mod above", lost.size(), lost.size() == 1 ? "" : "s"), first_names(lost)});
   for (const std::string& problem : mod.manifest.problems) out.push_back({"mod.ini", problem});
   if (mod.has_manifest) {
     const features::ModInput input{mod.name, &mod.manifest};
     for (const features::Resolved::Issue& issue : features::resolve({&input, 1}, {}).issues) out.push_back({issue.text, ""});
   }
   return out;
+}
+
+// What the tab draws from, per mod (its conflicts and issues) and for the features. Rebuilt only when the list or the player's [Features]
+// lines change, or by Rescan (`invalidate`), not every frame.
+struct TabCache {
+  std::string signature;
+  std::vector<std::vector<vfs::ModManager::Conflict>> conflicts;
+  std::vector<std::vector<Issue>> issues;
+  FeatureView features;
+};
+TabCache g_cache;
+
+const TabCache& tab_cache(const platform::Config& cfg, const vfs::ModManager& mods) {
+  std::string signature = list_signature(mods);
+  for (const auto& [key, value] : cfg.features) signature += key + "=" + value + "\n";
+  if (signature == g_cache.signature && g_cache.conflicts.size() == mods.mods().size()) return g_cache;
+  g_cache.signature = std::move(signature);
+  g_cache.conflicts.clear();
+  g_cache.issues.clear();
+  for (size_t i = 0; i < mods.mods().size(); ++i) {
+    g_cache.conflicts.push_back(mods.conflicts(i));
+    g_cache.issues.push_back(mod_issues(mods.mods()[i], i, g_cache.conflicts.back()));
+  }
+  g_cache.features = feature_view(cfg, mods);
+  return g_cache;
+}
+
+void invalidate() { g_cache.signature.clear(); }
+
+const std::vector<Issue>& issues_of(const TabCache& cache, size_t index) {
+  static const std::vector<Issue> kNone;
+  return index < cache.issues.size() ? cache.issues[index] : kNone;
 }
 
 // A mod's marks at the end of its row: the cog (it uses engine features) and the warning with the issue count, laid out (draw = false:
@@ -619,10 +657,11 @@ float draw_contents(const vfs::Mod& mod, const std::vector<Issue>& issues, bool 
   return 0.0f;
 }
 
-/// Load on as the Mods list names it, in vfs::ModLoadOn order; the art filter's names (All = no filter, then the art modes).
+// Load on as the Mods list names it, in vfs::ModLoadOn order; the art filter's names (All = no filter, then the art modes) and the art
+// modes of filters 1..3.
 constexpr const char* kLoadOnNames[] = {"Mod", "SD", "HD", "All"};
 constexpr const char* kFilterNames[] = {"All", "Mod", "SD", "HD"};
-constexpr vfs::ModArt kFilterArt[] = {vfs::ModArt::Hd, vfs::ModArt::Modded, vfs::ModArt::Sd, vfs::ModArt::Hd};
+constexpr vfs::ModArt kFilterArt[] = {vfs::ModArt::Modded, vfs::ModArt::Sd, vfs::ModArt::Hd};
 
 // The drag and drop payload of a Mods row: its index in the list.
 constexpr const char* kModPayload = "OC_MOD_ROW";
@@ -637,19 +676,16 @@ void move_mod(std::vector<vfs::Mod>& list, size_t from, size_t to) {
 }
 
 // The Mods list: grip (drag to reorder), on / off, the name with its marks (cog, warnings) at the right end (sliding under a long name),
-// Load on. Alt+Up / Alt+Down moves the selected mod. Above it: the art mode filter, Show empty (folders with nothing in them, dimmed rows)
-// and, at the right end, the load order note (the info sign). While a row is dragged a line shows where it will land. True when the list changed.
-bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt art) {
+// Load on. Alt+Up / Alt+Down moves the selected mod; on a gamepad, A held on a row carries it, the D-pad or the left stick moves it and
+// releasing A places it. Above it: the art mode filter, Show empty (folders with nothing in them, dimmed rows) and, at the right end, the
+// load order note (the info sign). While a row is dragged a line shows where it will land. True when the list changed.
+bool draw_mod_list(vfs::ModManager& mods, const TabCache& cache, vfs::ModArt art) {
   std::vector<vfs::Mod>& list = mods.mods();
   bool changed = false;
-  const auto order_changed = [&] {
-    changed = true;
-    if (std::any_of(list.begin(), list.end(), [](const vfs::Mod& mod) { return !mod.data.empty() || mod.has_manifest; })) g_state.restart = true;
-  };
   const size_t empties = static_cast<size_t>(std::count_if(list.begin(), list.end(), [](const vfs::Mod& mod) { return is_empty(mod); }));
   const auto listed = [](const vfs::Mod& mod) {
     if (is_empty(mod)) return g_state.show_empty;
-    return g_state.art_filter == 0 || data_only(mod) || vfs::loads_on(mod.load_on, kFilterArt[g_state.art_filter]);
+    return g_state.art_filter == 0 || data_only(mod) || vfs::loads_on(mod.load_on, kFilterArt[g_state.art_filter - 1]);
   };
 
   // The bar above the list.
@@ -666,7 +702,8 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
   align_right(ImGui::GetFrameHeight() * 0.8f);
   icon_button("##order", Icon::Info,
               "Load order prioritizes mods higher in the list: where two mods change the same file, the higher one wins.\n"
-              "Drag a row by its grip to move it (or select it and press Alt+Up / Alt+Down).",
+              "Drag a row by its grip to move it (or select it and press Alt+Up / Alt+Down).\n"
+              "On a gamepad: hold A on a mod, move it with the D-pad and release A to place it.",
               true);
 
   // The next listed row from `i` in direction `step`, or -1.
@@ -682,7 +719,28 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
         break;
       }
 
-  int swap_from = -1, swap_to = -1;
+  // A move by key: the carried mod by the D-pad or the left stick, or the selected mod by Alt+Up / Alt+Down. While a mod can move its keys
+  // are claimed, so the list's navigation does not move the focus with them.
+  const ImGuiID mover = ImGui::GetID("##move");
+  if (!ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown)) g_state.carried.clear();
+  const auto claim = [&](std::initializer_list<ImGuiKey> keys) {
+    for (const ImGuiKey key : keys) ImGui::SetKeyOwner(key, mover);
+  };
+  const auto pressed = [&](ImGuiKey key) { return ImGui::IsKeyPressed(key, ImGuiInputFlags_Repeat, mover); };
+  int step = 0;
+  std::string moving;
+  if (!g_state.carried.empty()) {
+    claim({ImGuiKey_GamepadDpadUp, ImGuiKey_GamepadDpadDown, ImGuiKey_GamepadLStickUp, ImGuiKey_GamepadLStickDown});
+    step = pressed(ImGuiKey_GamepadDpadUp) || pressed(ImGuiKey_GamepadLStickUp)       ? -1
+           : pressed(ImGuiKey_GamepadDpadDown) || pressed(ImGuiKey_GamepadLStickDown) ? 1
+                                                                                       : 0;
+    moving = g_state.carried;
+  } else if (ImGui::GetIO().KeyAlt && !ImGui::GetDragDropPayload() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) {
+    claim({ImGuiKey_UpArrow, ImGuiKey_DownArrow});
+    step = pressed(ImGuiKey_UpArrow) ? -1 : pressed(ImGuiKey_DownArrow) ? 1 : 0;
+    moving = g_state.mod;
+  }
+
   // A drop: the dragged row's index and where it lands (before list[drop_to]); the insertion line while dragging (x0, x1, y; y < 0: none).
   size_t drop_from = 0, drop_to = 0;
   bool dropped = false;
@@ -703,7 +761,13 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       const bool selected = g_state.mod == mod.name;
+      const bool carried = g_state.carried == mod.name;
       if (row_selectable(selected)) g_state.mod = mod.name;
+      bool held = ImGui::IsItemActive();
+      if (carried && g_state.carried_moved) {
+        ImGui::ScrollToItem(ImGuiScrollFlags_KeepVisibleEdgeY);
+        g_state.carried_moved = false;
+      }
       // The whole row takes a dragged row: above it from its top half, below it from its bottom half.
       if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* payload =
@@ -720,10 +784,16 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
         ImGui::EndDragDropTarget();
       }
       ImGui::InvisibleButton("##grip", ImVec2(h * 0.8f, h));
+      held |= ImGui::IsItemActive();
       const bool grip_hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
       draw_icon(Icon::Grip, ImVec2(ImGui::GetItemRectMin().x - h * 0.1f, ImGui::GetItemRectMin().y), h,
-                ImGui::GetColorU32(grip_hot ? ImGuiCol_Text : ImGuiCol_TextDisabled));
+                ImGui::GetColorU32(grip_hot || carried ? ImGuiCol_Text : ImGuiCol_TextDisabled));
       if (grip_hot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+      // A held on the row (it, or its grip, active from the gamepad) picks the mod up.
+      if (held && g_state.carried.empty() && ImGui::IsKeyDown(ImGuiKey_GamepadFaceDown) && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        g_state.carried = mod.name;
+        g_state.mod = mod.name;
+      }
       if (ImGui::BeginDragDropSource()) {
         ImGui::SetDragDropPayload(kModPayload, &i, sizeof(i));
         g_state.mod = mod.name;
@@ -734,10 +804,7 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
       }
       ImGui::TableNextColumn();
       ImGui::BeginDisabled(empty);
-      if (ImGui::Checkbox("##on", &mod.enabled)) {
-        changed = true;
-        if (!mod.data.empty() || mod.has_manifest) g_state.restart = true;
-      }
+      changed |= ImGui::Checkbox("##on", &mod.enabled);
       ImGui::EndDisabled();
       tip(empty ? "An empty folder: nothing to switch." : "Switches this mod on or off.");
 
@@ -755,7 +822,7 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
         ImGui::TextDisabled("(empty)");
       }
       const float name_end = ImGui::GetItemRectMax().x + ImGui::GetStyle().ItemSpacing.x;
-      const std::vector<Issue> issues = mod_issues(mod, i, cc);
+      const std::vector<Issue>& issues = issues_of(cache, i);
       const float contents_w = draw_contents(mod, issues, false);
       if (contents_w > 0.0f) {
         const float x = cell_right - contents_w;
@@ -788,18 +855,19 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
           changed = true;
         }
       }
-      if (selected && !ImGui::GetDragDropPayload() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && ImGui::GetIO().KeyAlt) {
-        const int step = ImGui::IsKeyPressed(ImGuiKey_UpArrow) ? -1 : ImGui::IsKeyPressed(ImGuiKey_DownArrow) ? 1 : 0;
-        const int to = step ? neighbour(static_cast<int>(i), step) : -1;
-        if (to >= 0) swap_from = static_cast<int>(i), swap_to = to;
-      }
       ImGui::PopID();
     }
     ImGui::EndTable();
   }
-  if (swap_from >= 0 && swap_to >= 0) {
-    std::swap(list[static_cast<size_t>(swap_from)], list[static_cast<size_t>(swap_to)]);
-    order_changed();
+  if (step) {
+    const auto it = std::find_if(list.begin(), list.end(), [&](const vfs::Mod& mod) { return mod.name == moving && listed(mod); });
+    const int from = it == list.end() ? -1 : static_cast<int>(it - list.begin());
+    const int to = from < 0 ? -1 : neighbour(from, step);
+    if (to >= 0) {
+      std::swap(list[static_cast<size_t>(from)], list[static_cast<size_t>(to)]);
+      g_state.carried_moved = !g_state.carried.empty();
+      changed = true;
+    }
   }
   if (drop_line.z >= 0.0f) {
     const ImU32 accent = ImGui::GetColorU32(kFilesColour);
@@ -808,14 +876,14 @@ bool draw_mod_list(vfs::ModManager& mods, const ConflictCache& cc, vfs::ModArt a
   }
   if (dropped && drop_from < list.size() && drop_to != drop_from && drop_to != drop_from + 1) {
     move_mod(list, drop_from, drop_to);
-    order_changed();
+    changed = true;
   }
   return changed;
 }
 
 // A mod's details: version / author / folder, its contents, the engine features it sets or uses (links to the Engine features tab), its
 // issues.
-void draw_mod_detail(const vfs::ModManager& mods, const ConflictCache& cc) {
+void draw_mod_detail(const vfs::ModManager& mods, const TabCache& cache) {
   const std::vector<vfs::Mod>& list = mods.mods();
   const auto it = std::find_if(list.begin(), list.end(), [](const vfs::Mod& mod) { return mod.name == g_state.mod; });
   if (it == list.end()) {
@@ -834,9 +902,9 @@ void draw_mod_detail(const vfs::ModManager& mods, const ConflictCache& cc) {
   if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) render::ImGuiLayer::tooltip(reinterpret_cast<const char*>(mod.root.u8string().c_str()));
 
   render::ImGuiLayer::section("Contents");
-  const auto line = [](size_t n, const ImVec4& colour, const char* text) {
-    if (!n) return;
-    ImGui::TextColored(colour, "%zu", n);
+  const auto line = [](size_t count, const ImVec4& colour, const char* text) {
+    if (!count) return;
+    ImGui::TextColored(colour, "%zu", count);
     ImGui::SameLine();
     ImGui::TextUnformatted(text);
   };
@@ -847,9 +915,9 @@ void draw_mod_detail(const vfs::ModManager& mods, const ConflictCache& cc) {
   line(mod.archives.size(), kFilesColour, "archives");
   line(mod.data.size(), kDataColour, "game data files, every art mode");
   line(mod.added.size(), kNewColour, "new files");
-  if (index < cc.per_mod.size()) {
+  if (index < cache.conflicts.size()) {
     size_t wins = 0;
-    for (const auto& conflict : cc.per_mod[index]) wins += conflict.winner == index ? 1 : 0;
+    for (const auto& conflict : cache.conflicts[index]) wins += conflict.winner == index ? 1 : 0;
     if (wins) ImGui::TextDisabled("Wins %zu file%s over the mods below it.", wins, wins == 1 ? "" : "s");
   }
   if (!mod.data.empty()) ImGui::TextDisabled("Changes game data: switching it on or off, or moving it, applies the next time the game starts.");
@@ -885,7 +953,7 @@ void draw_mod_detail(const vfs::ModManager& mods, const ConflictCache& cc) {
   }
 
   render::ImGuiLayer::section("Issues");
-  const std::vector<Issue> issues = mod_issues(mod, index, cc);
+  const std::vector<Issue>& issues = issues_of(cache, index);
   if (issues.empty()) ImGui::TextDisabled("None.");
   ImGui::PushTextWrapPos(0.0f);
   for (const Issue& issue : issues) {
@@ -945,16 +1013,24 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   bool changed = false, settings = false;
   const vfs::ModArt art = mod_art(cfg.art_mode);
 
-  // List | detail, split by a draggable divider; the bar of buttons under them.
-  const ConflictCache& cc = conflicts(mods);
-  const FeatureView view = feature_view(cfg, mods);
+  // List | detail, split by a draggable divider; the bar of buttons under them. Narrower than the settings tabs' two columns, the list
+  // stacks above the detail (the divider between them). A list edit rebuilds the cache before the detail pane reads it (its per-mod entries
+  // follow the order).
+  const TabCache& cache = tab_cache(cfg, mods);
+  if (!g_launch.taken) g_launch = {true, data_signature(mods), cache.features.now.values};
+  const FeatureView& view = cache.features;
+  // Game data and features are read once at launch: a restart is needed while either differs from what the game started with.
+  const bool restart = data_signature(mods) != g_launch.data || cache.features.now.values != g_launch.features;
   const ImVec2 avail = ImGui::GetContentRegionAvail();
-  const float height = std::max(avail.y - ImGui::GetFrameHeightWithSpacing() - ImGui::GetStyle().ItemSpacing.y - 1.0f,
-                                ImGui::GetFrameHeightWithSpacing() * 10.0f);
+  const bool wide = avail.x >= ImGuiLayer::two_column_width();
+  const float bar = ImGui::GetFrameHeightWithSpacing() * (restart && !wide ? 2.0f : 1.0f);
+  const float height = std::max(avail.y - bar - ImGui::GetStyle().ItemSpacing.y - 1.0f, ImGui::GetFrameHeightWithSpacing() * 10.0f);
   const float divider = ImGui::GetFontSize() * 0.6f;
-  const float left_w = std::clamp(g_state.split, 0.28f, 0.8f) * std::max(avail.x - divider, 1.0f);
+  const float spacing = ImGui::GetStyle().ItemSpacing.y;
+  const float span = wide ? std::max(avail.x - divider, 1.0f) : std::max(height - divider - spacing * 2.0f, 1.0f);
+  const float list_size = std::clamp(wide ? g_state.split : g_state.stack_split, 0.28f, 0.8f) * span;
 
-  if (ImGui::BeginChild("mods_list", ImVec2(left_w, height))) {
+  if (ImGui::BeginChild("mods_list", wide ? ImVec2(list_size, height) : ImVec2(0, list_size))) {
     if (ImGui::BeginTabBar("mods_left")) {
       size_t shown = 0, on = 0;
       for (const vfs::Mod& mod : mods.mods())
@@ -964,7 +1040,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
         g_state.features_tab = false;
         if (ImGui::BeginChild("rows")) {
           if (shown == 0) ImGui::TextDisabled("No mods found.");
-          changed |= draw_mod_list(mods, cc, art);
+          changed |= draw_mod_list(mods, cache, art);
         }
         ImGui::EndChild();
         ImGui::EndTabItem();
@@ -982,25 +1058,32 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   }
   ImGui::EndChild();
 
-  ImGui::SameLine(0, 0);
-  ImGui::InvisibleButton("##divider", ImVec2(divider, height));
+  if (wide) ImGui::SameLine(0, 0);
+  ImGui::InvisibleButton("##divider", wide ? ImVec2(divider, height) : ImVec2(avail.x, divider));
   const bool divider_hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
-  if (divider_hot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-  if (ImGui::IsItemActive()) g_state.split = std::clamp((left_w + ImGui::GetIO().MouseDelta.x) / std::max(avail.x - divider, 1.0f), 0.28f, 0.8f);
+  if (divider_hot) ImGui::SetMouseCursor(wide ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+  if (ImGui::IsItemActive()) {
+    const ImVec2 delta = ImGui::GetIO().MouseDelta;
+    (wide ? g_state.split : g_state.stack_split) = std::clamp((list_size + (wide ? delta.x : delta.y)) / span, 0.28f, 0.8f);
+  }
   {
     const ImVec2 p = ImGui::GetItemRectMin();
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(p.x + divider * 0.5f, p.y), ImVec2(p.x + divider * 0.5f, p.y + height),
-                                        ImGui::GetColorU32(divider_hot ? ImGuiCol_SeparatorActive : ImGuiCol_Separator), divider_hot ? 2.0f : 1.0f);
+    const ImVec2 from = wide ? ImVec2(p.x + divider * 0.5f, p.y) : ImVec2(p.x, p.y + divider * 0.5f);
+    const ImVec2 to = wide ? ImVec2(from.x, p.y + height) : ImVec2(p.x + avail.x, from.y);
+    ImGui::GetWindowDrawList()->AddLine(from, to, ImGui::GetColorU32(divider_hot ? ImGuiCol_SeparatorActive : ImGuiCol_Separator),
+                                        divider_hot ? 2.0f : 1.0f);
   }
-  ImGui::SameLine(0, 0);
+  if (wide) ImGui::SameLine(0, 0);
+  if (changed || settings) tab_cache(cfg, mods);
 
   // Side padding only: the first header lines up with the list's tab bar.
+  const float detail_h = wide ? height : std::max(span - list_size, ImGui::GetFrameHeightWithSpacing() * 3.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().WindowPadding.x, 0.0f));
-  if (ImGui::BeginChild("mods_detail", ImVec2(0, height), ImGuiChildFlags_AlwaysUseWindowPadding)) {
+  if (ImGui::BeginChild("mods_detail", ImVec2(0, detail_h), ImGuiChildFlags_AlwaysUseWindowPadding)) {
     // Every line wraps at the pane's edge.
     ImGui::PushTextWrapPos(0.0f);
     if (g_state.features_tab) settings |= draw_feature_detail(cfg, mods, view);
-    else draw_mod_detail(mods, cc);
+    else draw_mod_detail(mods, cache);
     ImGui::PopTextWrapPos();
   }
   ImGui::EndChild();
@@ -1010,6 +1093,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   ImGui::Separator();
   if (ImGui::Button("Rescan")) {
     mods.scan(files, mods.dir().empty() ? files.game_dir() / "mods" : mods.dir(), mods.prefs());
+    invalidate();
     changed = true;
   }
   tip("Looks at the mods folder again for new, removed or changed mods.");
@@ -1021,11 +1105,14 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   tip("Opens a separate window that shows the character and monster models, with and without the enabled mods.");
   ImGui::SameLine();
   draw_textures_button(cfg, settings_dirty);
-  if (g_state.restart) {
+  // The restart notice: at the right end of the bar, or on a line of its own under it when the tab is narrow.
+  if (restart) {
     constexpr const char* kRestart = "Restart required before changes take effect.";
     const float h = ImGui::GetFrameHeight();
-    ImGui::SameLine();
-    align_right(h * 0.8f + ImGui::GetStyle().ItemSpacing.x * 0.5f + ImGui::CalcTextSize(kRestart).x);
+    if (wide) {
+      ImGui::SameLine();
+      align_right(h * 0.8f + ImGui::GetStyle().ItemSpacing.x * 0.5f + ImGui::CalcTextSize(kRestart).x);
+    }
     ImGui::BeginGroup();
     icon(Icon::Warn, kOverrideColour);
     ImGui::SameLine(0, ImGui::GetStyle().ItemSpacing.x * 0.5f);
@@ -1036,10 +1123,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
         "Mods with only art and files apply at once.");
   }
 
-  if (settings) {
-    g_state.restart = true;
-    if (settings_dirty) *settings_dirty = true;
-  }
+  if (settings && settings_dirty) *settings_dirty = true;
   if (changed) store_mod_prefs(cfg, mods);
   return changed;
 }

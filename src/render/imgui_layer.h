@@ -110,8 +110,10 @@ class ImGuiLayer {
   // Shared widgets for tab bodies (consistent look across tabs).
   // section: a header line with a rule. begin_panes: side-by-side panes (TableNextColumn per pane; one column when narrow), EndTable()
   // if it returned true. begin_rows: a two-column label / control table, end_rows() if it returned true. row: next row, label cell then
-  // the control cell (full width). tooltip: a hover description, word-wrapped at ~36 em.
+  // the control cell (full width). tooltip: a hover description, word-wrapped at ~36 em. two_column_width: the tab body width from which
+  // the settings tabs lay their sections out in two columns (one column below it).
   static void section(const char* title);
+  static float two_column_width();
   static bool begin_panes(const char* id);
   static bool begin_rows(const char* id);
   static void end_rows();

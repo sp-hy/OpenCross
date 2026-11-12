@@ -10,22 +10,21 @@
 
 namespace oc::features {
 
-// One setting of a feature: an integer (an on / off setting is 0 / 1) with its default and its range. `shown` = false: plumbing a mod
-// fixes for its own data (a variable handle, a rate), never in the Mods tab.
+// One setting of a feature: an integer (an on / off setting is 0 / 1) with its default and its range.
 struct Setting {
   const char* key;
   int def;
   int min;
   int max;
   const char* label;
-  bool shown = true;
 };
 
 // One feature. `id` = the number GET_FEATURE_LEVEL (field script FE C0) takes, `level` = the version this build implements, `section` =
 // its mod.ini section (a mod sets it, or names it in Requires) and its key prefix in opencross.ini [Features] (empty: no mod names it,
 // as feature 0, the extension range itself). A feature with settings has the setting "Enabled" first.
-// `player`: an addon works on the game as shipped, so the player keeps its toggle and settings in the Mods tab. Otherwise it is a mod
-// kit: it does nothing without a mod's own scripts or data, and the Mods tab only names the enabled mods that use it. `about` = one or
+// `player`: an addon works on the game as shipped, so the player keeps its toggle and settings in the Mods tab (it has settings). Otherwise
+// it is a mod kit: it does nothing without a mod's own scripts or data, has no settings (its mod.ini section takes no keys), and the Mods
+// tab only names the enabled mods that use it. `about` = one or
 // two sentences for the Mods tab (a mod kit's ends with the ops a modder uses).
 struct Feature {
   int id;

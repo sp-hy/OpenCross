@@ -354,6 +354,8 @@ void ImGuiLayer::section(const char* title) {
   ImGui::PopStyleColor();
 }
 
+float ImGuiLayer::two_column_width() { return kTwoColumnW * ImGui::GetStyle().FramePadding.y / 5.0f; }
+
 bool ImGuiLayer::begin_panes(const char* id) {
   const float scale = ImGui::GetStyle().FramePadding.y / 5.0f;
   // Narrow: the panes stack into one column.
