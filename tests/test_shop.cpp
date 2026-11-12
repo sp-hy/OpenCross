@@ -320,10 +320,23 @@ void test_trade() {
   green[2] = 1;
   CHECK(!shop::trade_commit(game_state, els, green, row.goods[0]) && game_state.element_count(1) == 1);
 }
+void test_target_word() {
+  const shop::TargetWord one_ally = shop::element_target_word(0x40);
+  CHECK(!one_ally.all && one_ally.side == shop::TargetSide::Ally);
+  const shop::TargetWord one_enemy = shop::element_target_word(0x80);
+  CHECK(!one_enemy.all && one_enemy.side == shop::TargetSide::Enemy);
+  const shop::TargetWord all_enemies = shop::element_target_word(0x90);
+  CHECK(all_enemies.all && all_enemies.side == shop::TargetSide::Enemy);
+  const shop::TargetWord all_allies = shop::element_target_word(0x51);
+  CHECK(all_allies.all && all_allies.side == shop::TargetSide::Ally);
+  CHECK(shop::element_target_word(0xC0).side == shop::TargetSide::Both);
+  CHECK(shop::element_target_word(0x00).side == shop::TargetSide::Ally);
+}
 }  // namespace
 
 int main() {
   test_element_shop();
+  test_target_word();
   test_element_sell_picks();
   test_forge();
   test_breakdown_and_sell();

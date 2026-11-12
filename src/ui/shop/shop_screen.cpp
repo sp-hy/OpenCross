@@ -1063,8 +1063,8 @@ struct ShopScreen::Impl {
     RT(1, 0x15E, 0x4E + 3, full_width(fmt("%1d", rules->el_level(id))));
     RT(0x10001, 0x172 - 2, 0x4C + 5, U"\u00B1");
     RT(1, static_cast<float>(0x17A + (lang_index() != 5 ? 2 : 0) + 1), 0x4E + 3, full_width(fmt("%1d", record->raw[0x12] & 0xF)));
-    const u8 target = record->raw[4];
-    const u32 key = ((target & 0x10) ? 0x801DF589u : 0x801DF581u) + ((target & 0xC0) == 0xC0 ? 2u : (target & 0x80) ? 1u : 0u);
+    const shop::TargetWord word = shop::element_target_word(record->raw[4]);
+    const u32 key = (word.all ? 0x801DF589u : 0x801DF581u) + static_cast<u32>(word.side);
     RT(0x79, 0x18E, 0x4E, ss(key));
   }
   // Quantity window: labels at (0x15E, 0xD4 / 0xE8) style 1; the count:
