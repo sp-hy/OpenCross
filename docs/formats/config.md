@@ -67,7 +67,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Session-only (section 1). Read as off when `FastMode` is on; the two are exclusive. The same loops as `FastMode` run slower; message text reveals at half speed and its waits last twice as long. |
 | `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
 | `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
-| `CameraRelative` | 0 | bool | Field movement follows the room camera: up on the stick or the arrows walks along the camera's up axis on the floor (its forward row projected on XZ), the other directions turn with it. Off: the game's headings plus the room's control yaw (op 63). Read every frame. |
+| `CameraRelative` | 0 | bool | General tab, Quality of life section. Field movement follows the room camera: up on the stick or the arrows walks along the camera's up axis on the floor (its forward row projected on XZ), the other directions turn with it. Off: the game's headings plus the room's control yaw (op 63). Read every frame. |
 | `FastRate` | 0 | 0..5; 1 reads as 0 | Fast mode speed. 0 = RDE's (4x in the field, 2x in battle); 2..5 = that many times in both. |
 | `SlowRate` | 50 | 10..90 | Slow mode speed in percent of normal, in the field and in battle. In the field, one 1/30 s stretch every 10 s (every 300th field frame) runs at normal speed. |
 | `Language` | `en` | `en fr it de es jp` | Dialogue and menu text language. Stored as given; an unknown value is logged at boot and `en` is used. |
@@ -99,7 +99,7 @@ Opt-in improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is als
 |---|---|---|---|
 | `SmoothWaterLine` | 1 | bool | Submerged actor parts are cut at the exact water plane, not per whole triangle. |
 | `ModelPixelDepth` | 1 | bool | Character and room models are depth-sorted per pixel instead of painted whole per face in their ordering-table slot (`model.md` 3.5), so faces that cut into each other no longer flip in front of one another as the animation moves; hair and capes (the nearest-corner constructs) are pulled one slot toward the camera so they stay over the body they cut into. |
-| `AutoHideCastHud` | 0 | bool | Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). The cast header naming the spell stays for the first 2 seconds, then fades over half a second. |
+| `AutoHideCastHud` | 0 | bool | General tab, Quality of life section. Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). The cast header naming the spell stays for the first 2 seconds, then fades over half a second. |
 | `RetainBattleScenery` | 0 | bool | Keep the battle stage's intro-only scenery layer for the whole battle. |
 | `FullPrecisionEffects` | 0 | bool | Effect sprites keep the half 5-bit colour level the PS1 loses to rounding, as RDE draws them (`room_effects.md` 4.3): brighter faint glows that pulse about twice as hard when one object ends and the next grows in. Off: the PS1's average loss, without its steps. |
 | `SmoothEffectRings` | 1 | bool | Ring and tube shaped effect meshes get extra segments. |

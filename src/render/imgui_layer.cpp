@@ -410,9 +410,6 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     }
     row("Auto-save", "RDE's auto-save (card 1, slot 0) on every location change.");
     if (ImGui::Checkbox("##autosave", &cfg.auto_save)) change.other = true;
-    row("Camera-relative Movement", "In the field, up on the stick or the arrows walks away from the camera, whatever way the room is "
-                                    "drawn. Off: the game's own directions (each room's fixed axes).");
-    if (ImGui::Checkbox("##camrel", &cfg.camera_relative)) change.other = true;
     row("Steam Connection", "Connects to Steam as the Radical Dreamers Edition, so Steam shows you playing it and its achievements unlock. Needs Steam running. "
                  "Turning it off stops achievements at once; Steam keeps showing you playing until OpenCross closes.");
     if (ImGui::Checkbox("##steam", &cfg.steam)) change.other = true;
@@ -424,6 +421,19 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     end_rows();
   }
 
+  };
+  auto sec_quality = [&] {
+  section("Quality of life");
+  if (begin_rows("quality")) {
+    row("Camera-relative Movement", "In the field, up on the stick or the arrows walks away from the camera, whatever way the room is "
+                                    "drawn. Off: the game's own directions (each room's fixed axes).");
+    if (ImGui::Checkbox("##camrel", &cfg.camera_relative)) change.other = true;
+    row("Hide menus during casts", "Hides the battle HUD, menus, field effect ring and message windows while an element, tech or summon "
+                                   "plays, as holding the pad's Select does. The damage numbers still show, and the spell's name stays "
+                                   "for 2 seconds before it fades.");
+    if (ImGui::Checkbox("##autohidecast", &cfg.autohide_cast_hud)) change.enhancements = true;
+    end_rows();
+  }
   };
   auto sec_audio = [&] {
   section("Audio");
@@ -482,7 +492,7 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
   }
   };
   two_columns(
-      scale, [&] { sec_game(); sec_audio(); }, [&] { sec_controls(); });
+      scale, [&] { sec_game(); sec_quality(); sec_audio(); }, [&] { sec_controls(); });
   return change;
 }
 
@@ -892,11 +902,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "Blends the edges where textures meet on the battle stages and the title scene. The hard lines between them are barely "
                      "visible at the PS1's resolution but stand out at higher resolutions and with upscaled textures.",
                      cfg.edge_blend))
-        change.enhancements = true;
-      if (check_cell("Hide menus during casts",
-                     "Hides the battle HUD, menus, field effect ring and message windows while an element, tech or summon plays, as holding "
-                     "the pad's Select does. The damage numbers still show, and the spell's name stays for 2 seconds before it fades.",
-                     cfg.autohide_cast_hud))
         change.enhancements = true;
       if (check_cell("Retain battle scenery",
                      "Some battlefields show extra scenery while the camera pans in (the sea, fish and birds on the beach, drifting dust, "
