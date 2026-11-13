@@ -139,6 +139,16 @@ class DialogueBox {
     int rows = 0, cols = 0;
   };
   static FrameSize frame_size(int skin_idx, float text_width, int lines);
+  // The window a box of the canvas gets (draw_frame). The box is the window's inside: the fill covers it and the frame goes around it.
+  // left / top / right / bottom = the fill as drawn: the box's left and top; its right unless the box is narrower than the two corner
+  // pieces allow; the bottom the nearest one a whole number of fill rows gives (at least 2 rows, a one-line message's window).
+  // outer_w / outer_h = the frame's outer size, as frame_size gives it for a message.
+  struct FrameBox {
+    float left = 0, top = 0, right = 0, bottom = 0;
+    int rows = 0;
+    float outer_w = 0, outer_h = 0;
+  };
+  static FrameBox frame_box(int skin_idx, float left, float top, float right, float bottom);
 
   void update(float dt, TextPace pace = {});
   void confirm();
@@ -147,6 +157,9 @@ class DialogueBox {
   // than wide), so the box covers RDE's screen pixels; `fit` overrides it (the PS1-resolution pass: {0.25, 0, 0} into a (320 + 2e) x 240
   // target).
   void draw(float vw, float vh, const render::CanvasFit* fit = nullptr);
+  // The loaded skin's fill over a box of the canvas and its frame around it (frame_box; x 0 = the 1280-wide canvas's left edge), whether
+  // or not a message is open. Same pass and view as draw(). Nothing when no skin is loaded.
+  void draw_frame(float left, float top, float right, float bottom, float alpha, float vw, float vh, const render::CanvasFit* fit = nullptr);
 
   const Typewriter& typewriter() const { return tw_; }
   // {fset(n)} / {fwait(n)}: the field event register (script variable 0x22), see Typewriter::event_get.
@@ -162,6 +175,7 @@ class DialogueBox {
   };
   Geo frame_geo(float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left) const;
   static Geo frame_geo_for(int skin_idx, bool jp, float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left);
+  static Geo frame_geo_box(int skin_idx, float left, float top, float right, float bottom);
   void draw_tiles(const Geo& geo, float zoom, float alpha, bool has_portrait, bool portrait_left);
   // Window y of canvas y 0 for the draw in progress (render::canvas_fit oy).
   float yo_ = 0;
@@ -273,6 +287,8 @@ class DialogueDemo {
   void update(float dt, TextPace pace = {});
   // Inside SpriteBatch::begin()/end().
   void draw(float vw, float vh, const render::CanvasFit* fit = nullptr);
+  // The window skin's frame and fill alone around a box of the canvas (DialogueBox::draw_frame).
+  void draw_frame(float left, float top, float right, float bottom, float alpha, float vw, float vh, const render::CanvasFit* fit = nullptr);
 
   // Field integration (FieldWorld).
   bool is_open() const;

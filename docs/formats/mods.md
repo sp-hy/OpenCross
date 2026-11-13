@@ -248,7 +248,7 @@ The features this build has:
 |---|---|---|---|---|
 | (none) | 0 | | | The field-script extension range itself (`fieldscript.md` 6.12): not set by mods. |
 | `PartySwap` | 1 | addon | `Enabled` (0), `KeepLineup` (0), `Reserve` (0, 0..41) | A Swap command in battle: the acting character trades places with a reserve member. The formation comes back after the battle unless `KeepLineup` (`rules/battle.md` section 11). `Reserve` slots are set on the Party screen (`rules/menus.md`, party editor) and by the ops FE CC / FE CD; 0 (the default) = no slots, everyone recruited outside the party can come in, as at level 1. |
-| `ModUi` | 2 | mod kit | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12); a mod names it in `Requires`. |
+| `ModUi` | 3 | mod kit | | Mod UI: the field-script ops a mod's scripts build their own screens from (`fieldscript.md` 6.12); a mod names it in `Requires`. |
 | `PartyScreen` | 3 | addon | `Enabled` (0), `ReturnToSlot` (1) | Party screen (Tele-Porter) behaviour that differs from the game: `ReturnToSlot` = a pick returns the cursor to the slot it filled instead of keeping the member grid open (`rules/menus.md`, party editor). |
 | `ModelSources` | 5 | mod kit | | Models from elsewhere on NPCs: field script FE D0 `MODEL_SOURCE` (`fieldscript.md` 6.12); a mod names it in `Requires`. |
 | `ButtonPanel` | 6 | mod kit | | Button panel: field script FE D1 `BUTTON_PANEL` (`fieldscript.md` 6.12, `rules/menus.md` section 15). The engine's own correction of `kji_b01i` uses it for the story's code machine; a mod's script can use it for a code of its own and name it in `Requires`. |

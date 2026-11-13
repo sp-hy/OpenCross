@@ -131,6 +131,7 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
       if (window.box) window.box->set_art_mode(mode);
     for (auto& window : mod_ui_win_)
       if (window.box) window.box->set_art_mode(mode);
+    if (mod_ui_skin_) mod_ui_skin_->set_art_mode(mode);
     if (panel_win_) panel_win_->set_art_mode(mode);
   }
 }

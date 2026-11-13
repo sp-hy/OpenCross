@@ -618,8 +618,15 @@ void FieldWorld::draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, c
     if (element.kind == ModUi::kRect) {
       const u32 rgba = colour(element.colour, alpha(element));
       const float x1 = static_cast<float>(element.x + element.w), y1 = static_cast<float>(element.y + element.h);
-      if (element.flags & ModUi::kOutline) outline(element.x, element.y, x1, y1, rgba);
-      else fill(element.x, element.y, x1, y1, rgba);
+      if (element.flags & ModUi::kSkin) {
+        constexpr float kUnitX = ui::kCanvasWidth / ModUi::kScreenW, kUnitY = ui::kCanvasHeight / ModUi::kScreenH;
+        if (ui::DialogueDemo* skin = mod_ui_skin_box())
+          skin->draw_frame(element.x * kUnitX, element.y * kUnitY, x1 * kUnitX, y1 * kUnitY, static_cast<float>(alpha(element)) / 255.0f, vw, vh, fit);
+      } else if (element.flags & ModUi::kOutline) {
+        outline(element.x, element.y, x1, y1, rgba);
+      } else {
+        fill(element.x, element.y, x1, y1, rgba);
+      }
     } else if (element.kind == ModUi::kLine) {
       line(element.x, element.y, element.w, element.h, colour(element.colour, element.alpha ? element.alpha : u8{0xFF}));
     } else if (element.kind == ModUi::kOval) {
@@ -672,6 +679,19 @@ const FieldWorld::ModUiImage& FieldWorld::mod_ui_image(int number) {
   return image;
 }
 
+// The message window whose skin the skinned rects draw: it never shows a message. Follows the player's window skin.
+ui::DialogueDemo* FieldWorld::mod_ui_skin_box() {
+  if (!mod_ui_skin_ && ctx_ && files_ && sprites_) {
+    auto box = std::make_unique<ui::DialogueDemo>();
+    if (!box->init(*ctx_, *files_, *sprites_, lang_)) return nullptr;
+    box->show_status(false);
+    box->set_art_mode(hd_ ? ui::ArtMode::Hd : ui::ArtMode::Original);
+    mod_ui_skin_ = std::move(box);
+  }
+  if (mod_ui_skin_) mod_ui_skin_->set_skin_byte(gs_->option(ui::opt::kCustomWindow) ? gs_->skin : 0);
+  return mod_ui_skin_.get();
+}
+
 // One message window per text element; a hidden or cleared element (and a room change, which clears the UI) closes its window.
 void FieldWorld::sync_mod_ui_windows() {
   using script::ModUi;
@@ -716,6 +736,7 @@ void FieldWorld::sync_mod_ui_windows() {
     window->revision = element.revision;
     ui::DialogueDemo& box = *window->box;
     box.set_label(!(element.flags & ModUi::kFramed));
+    box.set_skin_byte(gs_->option(ui::opt::kCustomWindow) ? gs_->skin : 0);
     box.set_portrait(-1);
     box.show(room_id_, element.msg);
     box.set_ps1_window(element.x, element.y);

@@ -948,6 +948,9 @@ class FieldWorld final : public script::FieldHost {
   };
   std::array<ModUiWindow, 8> mod_ui_win_;
   bool mod_ui_full_logged_ = false;
+  // The window whose skin the mod UI's skinned rects (script::ModUi::kSkin) draw, created on first use.
+  std::unique_ptr<ui::DialogueDemo> mod_ui_skin_;
+  ui::DialogueDemo* mod_ui_skin_box();
   // The mod UI's images (script::ModUi::kImage), by image number: hd/modui/<n>.png, loaded on first draw and kept until shutdown;
   // a missing or unreadable file is tried once (an empty `set`).
   struct ModUiImage {
