@@ -104,6 +104,16 @@ int FieldWorld::pad_heading(bool& run) const {
     if (gs_ && gs_->option(ui::opt::kAnalogStick) && std::hypot(input_.pad_x, input_.pad_y) * 127.0f > 124.0f) run = !(input_.run_held && opt_walk_button);
   }
   if (pad == 0x8000) return kNoHeading;
+  // [Game] CameraRelative: up (heading 0x400, +z with no yaw) goes along the camera's up axis on the floor. A heading h walks
+  // (-cos h, sin h) in XZ, so that axis is heading atan2(up_z, -up_x); the room's control yaw is not used.
+  if (camera_relative_) {
+    float right_x = 0, right_z = 0, up_x = 0, up_z = 0;
+    view_.camera().ground_axes(right_x, right_z, up_x, up_z);
+    if (up_x != 0.0f || up_z != 0.0f) {
+      const int up = static_cast<int>(std::lround(std::atan2(up_z, -up_x) * kUnitsPerRad));
+      return (pad + up - 0x400) & 0xFFF;
+    }
+  }
   return (pad + control_yaw_) & 0xFFF;
 }
 

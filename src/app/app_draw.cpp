@@ -191,6 +191,7 @@ void App::apply_frame_options() {
     if (world_ok) world.set_smooth_rings(rings);
     if (world_ok) world.set_cast_shadows(config.lighting);
     if (world_ok) world.set_menu_models(config.menu_models_in_field);
+    if (world_ok) world.set_camera_relative(config.camera_relative);
     status_model.set_cast_shadows(config.lighting);
     if (battle_ready) battle.set_smooth_rings(rings);
   }

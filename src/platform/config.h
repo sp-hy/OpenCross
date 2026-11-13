@@ -261,6 +261,8 @@ struct Config {
   bool fast_mode = false;
   bool slow_mode = false;
   bool auto_save = true;
+  // [Game] CameraRelative: field movement follows the camera (up = away from it on the floor) instead of the room's control yaw.
+  bool camera_relative = false;
   int fast_rate = 0;
   int slow_rate = 50;
   bool widescreen = false;

@@ -67,6 +67,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Session-only (section 1). Read as off when `FastMode` is on; the two are exclusive. The same loops as `FastMode` run slower; message text reveals at half speed and its waits last twice as long. |
 | `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
 | `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
+| `CameraRelative` | 0 | bool | Field movement follows the room camera: up on the stick or the arrows walks along the camera's up axis on the floor (its forward row projected on XZ), the other directions turn with it. Off: the game's headings plus the room's control yaw (op 63). Read every frame. |
 | `FastRate` | 0 | 0..5; 1 reads as 0 | Fast mode speed. 0 = RDE's (4x in the field, 2x in battle); 2..5 = that many times in both. |
 | `SlowRate` | 50 | 10..90 | Slow mode speed in percent of normal, in the field and in battle. In the field, one 1/30 s stretch every 10 s (every 300th field frame) runs at normal speed. |
 | `Language` | `en` | `en fr it de es jp` | Dialogue and menu text language. Stored as given; an unknown value is logged at boot and `en` is used. |
@@ -260,7 +261,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Language` | Dialogue, flow, menus, shop and results switch at once. A movie already playing keeps its language. |
 | `Portraits` | Field, menu and results portraits switch at once. |
 | `Driver` | Needs a restart; the Backend row offers a *Restart now* button once it differs from the one the run started with. |
-| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1ResGraphics`, `Ps1ResUi`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
+| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1ResGraphics`, `Ps1ResUi`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, `CameraRelative`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
 | `Log` | The Debug tab starts or stops the log at once. |
 | `[Multiplayer] Enabled`, `Server`, `ServerUrl` | Connect, reconnect or disconnect at once; an address field applies when it is left. |
 | other `[Multiplayer]` keys | Read every frame; `Name` goes to the server as a `profile` message. |
