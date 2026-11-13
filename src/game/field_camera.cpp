@@ -16,11 +16,67 @@ constexpr int kEntryEaseIterations = 64;
 // A frame count of 0x7FFF makes the move last as many ticks as the distance in pixels.
 constexpr int kFramesFromDistance = 0x7FFF;
 
+// ScrollSmoother: a critically damped alpha-beta pair (beta = alpha^2 / (2 - alpha)); the gain of the step-rate average; how far
+// behind the scroll the filter aims while moving and the step rate at which that offset is complete; how far the display may trail the
+// integer scroll; the jump that is taken at once.
+constexpr float kSmoothAlpha = 0.15f;
+constexpr float kSmoothBeta = kSmoothAlpha * kSmoothAlpha / (2.0f - kSmoothAlpha);
+constexpr float kRateGain = 0.2f;
+constexpr float kAimBehind = 0.75f;
+constexpr float kFullOffsetRate = 0.25f;
+constexpr float kMaxTrail = 2.0f;
+constexpr float kSmoothCut = 6.0f;
+
 }  // namespace
+
+// While the scroll moves, the filter aims a little behind it, inside its current whole-pixel step, fading to the scroll itself as the
+// step rate falls, so a stopping camera settles forward onto the scroll. The result never passes the scroll in its direction of travel,
+// never trails it by more than kMaxTrail (held there, it takes the step rate as its speed) and never moves against that direction: no
+// overshoot at a pan limit and no creeping back.
+void ScrollSmoother::Axis::step(int to) {
+  const int moved = to - last;
+  if (moved != 0) dir = moved > 0 ? 1 : -1;
+  rate += kRateGain * (static_cast<float>(moved) - rate);
+  last = to;
+  const float target = static_cast<float>(to), before = pos, predicted = pos + vel;
+  if (std::abs(target - predicted) > kSmoothCut) {
+    pos = target;
+    vel = rate = static_cast<float>(moved);
+    return;
+  }
+  const float aim = target - static_cast<float>(dir) * kAimBehind * std::min(1.0f, std::abs(rate) / kFullOffsetRate);
+  const float residual = aim - predicted;
+  vel += kSmoothBeta * residual;
+  pos = predicted + kSmoothAlpha * residual;
+  if (dir == 0) return;
+  const float forward = static_cast<float>(dir);
+  if ((pos - before) * forward < 0) {
+    pos = before;
+    vel = 0;
+  }
+  const float ahead = (pos - target) * forward;
+  if (ahead > 0) {
+    pos = target;
+  } else if (ahead < -kMaxTrail) {
+    pos = target - forward * kMaxTrail;
+    if (vel * forward < rate * forward) vel = rate;
+  }
+}
+
+void ScrollSmoother::reset(int to_x, int to_y) {
+  ax = {static_cast<float>(to_x), 0, 0, to_x, 0};
+  ay = {static_cast<float>(to_y), 0, 0, to_y, 0};
+}
+
+void ScrollSmoother::step(int to_x, int to_y) {
+  ax.step(to_x);
+  ay.step(to_y);
+}
 
 void FieldCamera::reset() {
   cam = Camera{};
   camera_y_offset = 0;
+  smooth.reset(0, 0);
 }
 
 RoomView::Limits FieldCamera::scroll_limits(const RoomView& view) const {

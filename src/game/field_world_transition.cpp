@@ -323,6 +323,7 @@ void FieldWorld::start_movie_jump() {
 
 void FieldWorld::snap_camera_to_player(bool keep_scroll) {
   camera_.snap(view_, vm_.global_flags(), pose_of(player_entity()), keep_scroll);
+  camera_.smooth.reset(camera_.cam.x, camera_.cam.y);
   view_.set_scroll(camera_.cam.x, camera_.cam.y, true);
 }
 
@@ -338,7 +339,9 @@ void FieldWorld::step_camera() {
     shake_.ay = shake_.ty * 65536;
   }
   // One camera: the retail integer scroll above is the only eased value. The display (RoomView::scroll_at) interpolates it between
-  // ticks, sub-pixel in HD art. A second float-eased copy would drift from it (the integer ease stalls).
+  // ticks, sub-pixel. A second float-eased copy would drift from it (the integer ease stalls); ScrollSmoother instead only
+  // filters the integer scroll's whole-pixel steps, trailing it by at most 2 px, and the shakes below are added on top unfiltered.
+  camera_.smooth.step(camera_.cam.x, camera_.cam.y);
   int sx = camera_.cam.x, sy = camera_.cam.y;
   if (shake_.ax != 0) sx = camera_.clamp_x(view_, vm_.global_flags(), camera_.cam.x + shake_offset(shake_.ax));
   if (shake_.ay != 0) sy = camera_.clamp_y(view_, vm_.global_flags(), camera_.cam.y + shake_offset(shake_.ay));
@@ -357,10 +360,11 @@ void FieldWorld::step_camera() {
   } else {
     jolt_n_ = -1;
   }
-  view_.set_scroll(sx, sy, false);
+  view_.set_scroll(sx, sy, false, camera_.smooth.x() - static_cast<float>(camera_.cam.x), camera_.smooth.y() - static_cast<float>(camera_.cam.y));
   if (static const bool trace = std::getenv("OC_FIELD_CAM_TRACE") != nullptr; trace)
-    log::info("field camera: tick {} scroll {},{} scripted {} target {},{} frames {} gflags {:X}", tick_count_, camera_.cam.x, camera_.cam.y, camera_.cam.scripted,
-              camera_.cam.tx >> 16, camera_.cam.ty >> 16, camera_.cam.frames, vm_.global_flags());
+    log::info("field camera: tick {} scroll {},{} display {:.2f},{:.2f} scripted {} target {},{} frames {} gflags {:X}", tick_count_, camera_.cam.x,
+              camera_.cam.y, camera_.smooth.x(), camera_.smooth.y(), camera_.cam.scripted, camera_.cam.tx >> 16, camera_.cam.ty >> 16, camera_.cam.frames,
+              vm_.global_flags());
 }
 
 void FieldWorld::step_fade() {

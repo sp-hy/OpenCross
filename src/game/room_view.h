@@ -77,9 +77,10 @@ class RoomView {
   static Limits widen(Limits limits, int extra);
   // True while the simulation stands still: draws use the latest tick, not a sweeping alpha.
   void set_interp_frozen(bool frozen) { interp_frozen_ = frozen; }
-  // `snap` also resets the interpolation source.
-  void set_scroll(int x, int y, bool snap);
-  // The one display scroll of a rendered frame (previous -> current tick by alpha; sub-pixel in HD art, floored in original mode).
+  // `snap` also resets the interpolation source. `fine_x, fine_y` (at most 2 px) is the display-only sub-pixel offset of
+  // ScrollSmoother; scroll_x / scroll_y stay the integer scroll.
+  void set_scroll(int x, int y, bool snap, float fine_x = 0.0f, float fine_y = 0.0f);
+  // The one display scroll of a rendered frame (previous -> current tick by alpha, sub-pixel in every art mode).
   // Every drawer of room-space content (layers, actors, shadows, effects) must use this value.
   void scroll_at(float alpha, float& sx, float& sy) const;
   int scroll_x() const { return pan_x_; }
@@ -226,6 +227,8 @@ class RoomView {
   // Scroll S (layer pixels, added to tile positions), latest tick; then the previous tick, for render interpolation.
   int pan_x_ = 0, pan_y_ = 0;
   int prev_pan_x_ = 0, prev_pan_y_ = 0;
+  // the display-only offset of each (set_scroll)
+  float fine_x_ = 0, fine_y_ = 0, prev_fine_x_ = 0, prev_fine_y_ = 0;
   u32 layer_mask_ = 0xFFFFFFFFu;
   u32 hidden_groups_ = 0;
   bool fixed_to_edge_ = false;

@@ -167,11 +167,15 @@ RoomView::Limits RoomView::widen(Limits limits, int extra) {
   return limits;
 }
 
-void RoomView::set_scroll(int x, int y, bool snap) {
+void RoomView::set_scroll(int x, int y, bool snap, float fine_x, float fine_y) {
   prev_pan_x_ = snap ? x : pan_x_;
   prev_pan_y_ = snap ? y : pan_y_;
+  prev_fine_x_ = snap ? fine_x : fine_x_;
+  prev_fine_y_ = snap ? fine_y : fine_y_;
   pan_x_ = x;
   pan_y_ = y;
+  fine_x_ = fine_x;
+  fine_y_ = fine_y;
 }
 
 // The CPU half of a load. The chip2 read (inflate of several MB) is independent of the bin / ctd import, so it overlaps it.
@@ -637,16 +641,14 @@ void RoomView::set_art_mode(bool hd) {
 
 void RoomView::scroll_at(float alpha, float& sx, float& sy) const {
   // ONE display scroll per rendered frame for everything (layers, actors, shadows, effects): the retail integer scroll of the previous
-  // and the current tick, interpolated by the render alpha. HD art keeps the sub-pixel value (4x texels, nothing shimmers against
-  // the interpolated actors); original mode floors it like the PS1 tile placement. There is no second, separately eased camera:
+  // and the current tick, interpolated by the render alpha, kept sub-pixel in every art mode. There is no second, separately eased camera:
   // two eases (integer + float) drift apart by up to 11 px and interpolating from one to the other every frame shows as a
-  // constant shake / doubled picture.
+  // constant shake / doubled picture. ScrollSmoother's offset rides on the integer scroll, at most 2 px behind it.
   if (interp_frozen_) alpha = 1.0f;
-  sx = static_cast<float>(prev_pan_x_) + static_cast<float>(pan_x_ - prev_pan_x_) * alpha;
-  sy = static_cast<float>(prev_pan_y_) + static_cast<float>(pan_y_ - prev_pan_y_) * alpha;
-  if (hd_ && hd_ready_) return;
-  sx = std::floor(sx);
-  sy = std::floor(sy);
+  const float from_x = static_cast<float>(prev_pan_x_) + prev_fine_x_, to_x = static_cast<float>(pan_x_) + fine_x_;
+  const float from_y = static_cast<float>(prev_pan_y_) + prev_fine_y_, to_y = static_cast<float>(pan_y_) + fine_y_;
+  sx = from_x + (to_x - from_x) * alpha;
+  sy = from_y + (to_y - from_y) * alpha;
 }
 
 // 4096 = scrolls with the foreground, larger = slower (farther). Scale 0 = fixed to the screen: its offset is always a multiple of 4096,
@@ -672,9 +674,9 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
   const bool bg_lin = bg_linear && sprites.filter() == render::SpriteFilter::Sampler;
   if (bg_lin) sprites.set_filter(render::SpriteFilter::Linear);
   for (const auto& it : items_) {
-    // The HD set once the room's HD art is built (an empty HD kind stays undrawn, never its 1x texels); sub-pixel placement only with it.
-    const bool sub = hd_ && hd_ready_;
-    const render::TexRef set = sub ? it->set_hd : it->set;
+    // The HD set once the room's HD art is built (an empty HD kind stays undrawn, never its 1x texels).
+    const bool hd_art = hd_ && hd_ready_;
+    const render::TexRef set = hd_art ? it->set_hd : it->set;
     if (!set) continue;
     if (only_layers) {
       bool keep = false;
@@ -688,12 +690,8 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     if ((it->blend >= 0 && std::max(8.0f, static_cast<float>(it->z)) < late_z_) != late_pass_) continue;
     // Parallax: off = S * 4096 / scale.
     const float parallax = group_parallax(it->group);
-    float px = static_cast<float>(it->x) + (parallax == 0.0f ? (fixed_to_edge_ ? lb.x0 : 0.0f) : scroll_x * parallax);
-    float py = static_cast<float>(it->y) + scroll_y * parallax;
-    if (!sub) {
-      px = std::floor(px);
-      py = std::floor(py);
-    }
+    const float px = static_cast<float>(it->x) + (parallax == 0.0f ? (fixed_to_edge_ ? lb.x0 : 0.0f) : scroll_x * parallax);
+    const float py = static_cast<float>(it->y) + scroll_y * parallax;
     // Clip to the 320x224 field picture (widescreen: its visible columns lb.x0 .. lb.x0 + lb.w) by adjusting UVs (SpriteBatch has no scissor).
     const float cx0 = std::max(px, lb.x0), cy0 = std::max(py, 0.0f);
     const float cx1 = std::min(px + static_cast<float>(it->w), lb.x0 + lb.w), cy1 = std::min(py + static_cast<float>(it->h), kViewH);
@@ -713,7 +711,7 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     if (it->blend >= 0) {
       switch (it->blend) {
         case 0:
-          if (sub) {
+          if (hd_art) {
             mode = render::BlendMode::Add;
             kb = 0.5f;
           } else {

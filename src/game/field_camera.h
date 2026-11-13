@@ -10,6 +10,30 @@
 
 namespace oc::game {
 
+// A display-only copy of the scroll. The integer ease moves whole pixels per tick, so a camera travelling a fraction of a pixel per
+// tick steps 1 / 0 / 1 / 0 / 0 px and judders at 60 Hz. This tracks it with a position + velocity filter that keeps a steady speed,
+// trails the integer scroll by at most 2 px, never passes it or moves back, and comes to rest on it; a jump of more than a few pixels
+// (a snap, a script setting the scroll) is taken at once.
+struct ScrollSmoother {
+  void reset(int to_x, int to_y);
+  // One tick, after the integer scroll moved to `to_x, to_y`.
+  void step(int to_x, int to_y);
+  float x() const { return ax.pos; }
+  float y() const { return ay.pos; }
+
+ private:
+  struct Axis {
+    float pos = 0, vel = 0;
+    // average integer step per tick
+    float rate = 0;
+    int last = 0;
+    // sign of the last integer step, 0 before any
+    int dir = 0;
+    void step(int to);
+  };
+  Axis ax, ay;
+};
+
 struct FieldCamera {
   // The wait forms of the scripted camera moves (5D, 5E, 61).
   enum class Wait { Position, Actor, Follow };
@@ -29,6 +53,7 @@ struct FieldCamera {
 
   Camera cam;
   float camera_y_offset = 0;
+  ScrollSmoother smooth;
 
   void reset();
   // the active pan limits, widened for widescreen
