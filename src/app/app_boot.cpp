@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/cheats.h"
 #include "game/free_cam.h"
 #include "platform/paths.h"
@@ -188,6 +189,16 @@ void App::init_vfs() {
       log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
   }
   install_mod_rooms_and_text();
+  // The mods' table rows (tables\<table>.txt), read when the tables load.
+  std::vector<data::TableMod> table_mods;
+  for (const vfs::Mod& mod : mods.mods()) {
+    if (!(with_mods() || mod.name == vfs::kDraftMod) || !mod.enabled || mod.tables.empty()) continue;
+    data::TableMod table{mod.name, {}};
+    for (const vfs::ModFile& file : mod.tables)
+      table.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
+    table_mods.push_back(std::move(table));
+  }
+  data::set_table_mods(std::move(table_mods));
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);

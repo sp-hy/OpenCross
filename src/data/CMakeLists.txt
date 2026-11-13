@@ -2,6 +2,8 @@
 add_library(oc_data STATIC
   tables.h
   tables.cpp
+  table_rows.h
+  table_rows.cpp
   char_name.h
   char_name.cpp
   bestiary.h

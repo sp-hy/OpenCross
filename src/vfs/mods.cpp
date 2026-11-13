@@ -244,6 +244,12 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
     mod.text.push_back(std::move(mod_file));
     return;
   }
+  // tables\<table>.txt: the mod's field changes to the records of one battle / menu table (data::TableMod), applied over the table.
+  if (rel.size() == 2 && rel[0] == "tables" && root.empty() && fname.size() > 4 && fname.ends_with(".txt")) {
+    mod_file.target = fname.substr(0, fname.size() - 4);
+    mod.tables.push_back(std::move(mod_file));
+    return;
+  }
   if (rel.size() == 1 && fname == "mod.ini") {
     const std::optional<Bytes> text = vfs.read_mod_file({mod_file.file, mod_file.member});
     mod.has_manifest = text.has_value();
