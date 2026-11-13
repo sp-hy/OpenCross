@@ -1028,9 +1028,8 @@ bool BattleResults::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::S
   const u8 px[4] = {255, 255, 255, 255};
   if (!impl.make_tex(impl.white, 1, 1, px, Impl::kFixed)) return false;
   // The element table of the menus.
-  if (auto raw = vfs.read("cdrom/battle/data/menu_pg.bin")) {
-    impl.pg.resize(raw->size() / 16);
-    for (size_t i = 0; i < impl.pg.size(); ++i) std::copy_n(raw->data() + i * 16, 16, impl.pg[i].begin());
+  if (auto rows = data::read_menu_elements(vfs)) {
+    impl.pg = std::move(*rows);
   } else {
     log::warn("battle results: menu_pg.bin missing; the heal menu is never offered");
   }

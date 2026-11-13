@@ -9,6 +9,7 @@
 #include <map>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -414,6 +415,8 @@ class DialogueDemo {
   std::function<int(int var)> script_var;
   std::function<void(int var, int value)> script_set;
   std::function<std::u32string(int char_id)> char_name;
+  // The element an item value from data::kScriptElementBase names in the running room's scripts (a mod's own ids), or nothing.
+  std::function<std::optional<int>(int item_id)> script_element;
   // Voice events (audio::VoicePlayer): on_page(room, msg, script speaker, {NAME%}-tag speaker, page) when a page is first shown
   // (page 0 right after show()); on_close() once when the window closes. Unset in the demo viewer.
   std::function<void(int room, int msg, int speaker, int tag_speaker, int page)> on_page;

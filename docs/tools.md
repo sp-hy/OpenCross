@@ -190,7 +190,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 |---|---|---|---|
 | `--orig` | none | HD art | Original (PS1) art instead of HD. |
 | `--config` | `<file>` | `opencross.ini` next to the exe | Reads this ini instead. The art mode still comes from `--orig` / `--mods`. |
-| `--mods` | none | off | Apply the ini's enabled mods in Modded art, texture replacements included. |
+| `--mods` | none | off | Apply the ini's enabled mods in Modded art, texture replacements and table rows (`docs/formats/mods.md` 1.3) included. |
 | `--field` | `<n>` | the scene's own | Battlefield operand (stage `bg_NN`). |
 | `--size` | `<w> <h>` | `1280 960` | Window size; silently clamped to the display and capped by vsync, so it cannot time render-scale cost (section 6.3). |
 | `--sliced` | none | off | Load in 3 ms slices per frame (the field encounter's way); logs the longest slice. |

@@ -21,7 +21,7 @@ void ScanService::start(const vfs::Vfs& files) {
     const vfs::Vfs& source = !files.game_dir().empty() && plain.open(files.game_dir()) ? plain : files;
     out.scan = scan_rooms(source);
     data::GameTables tables;
-    if (std::string error; tables.load(source, &error)) out.bestiary = bestiary_order(out.scan, tables, source);
+    if (std::string error; tables.load(source, &error, false)) out.bestiary = bestiary_order(out.scan, tables, source);
     else log::warn("scan: battle tables: {}", error);
     return out;
   });

@@ -45,6 +45,7 @@
 #include "app/data_source.h"
 #include "audio/mixer.h"
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "data/tables.h"
 #include "game/battle/battle_view.h"
 #include "game/effects/gpu_effects.h"
@@ -235,6 +236,7 @@ int ocbattleview_main(int argc, char** argv) {
   if (with_mods) {
     mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config));
     mods.apply(files, vfs::ModArt::Modded);
+    data::set_table_mods(&files, data::table_mods_of(mods, files));
     render::texture_registry::bind(&files);
     render::texture_registry::configure({false, true});
   }

@@ -50,6 +50,7 @@ A mod's `tables\<table>.txt` (directly in the mod's root, after a wrapper folder
 | `monster` | enemies, 0xB0 bytes | `battle/data/monster.bin` |
 | `char`, `char20`, `char_w0` .. `char_w5` | the 51 characters of that set, 0xB0 bytes | `battle/data/<table>.bin` |
 | `pgdat` | elements and techs, 0x2C bytes | `battle/data/pgdat.bin` |
+| `menu_pg` | the menus' element rows: who may place it, price, menu use, auto-fill scores, 16 bytes (same ids as `pgdat`) | `battle/data/menu_pg.bin` |
 | `waa` | equipment stats, 0x1C bytes (256) | `battle/data/player.dat` part 4 |
 | `menu_waa` | item info: who equips, price, category, 12 bytes (256) | `battle/data/exdat.dat` part 5 |
 | `scenedat` | battle scenes, 28 bytes | `battle/data/player.dat` part 0 |
@@ -68,14 +69,17 @@ atk=40
 Field names (`data/table_rows.cpp`):
 * `monster`, `char*`: `innate`, `growth_col`, `gender`, `max_hp` (u16), `atk`, `def`, `hit`, `evd`, `mag`, `mdef`, `status_dur`, `stamina_rate`, `weapon`, `armour`, `accessory_0` .. `accessory_3` (u16), `drop_base`, `model`, `ap`, `weapon_model`, `level_mask_0` .. `level_mask_7` (u16), `cell_0` .. `cell_47` (u16, the listed grid cells), `drop_row`, `gold` (u16), `hit_med`, `hit_heavy`, `star_growth`;
 * `pgdat`: `flags0`, `colour_bit`, `level`, `mode`, `power`, `status_pct`, `variance`, `hits`, `status_lo`, `status_hi` (u32);
+* `menu_pg`: `eligible_lo` (u32), `eligible_hi` (u16; one bit per character id), `price` (u16), `menu_flags`, `use_flags`, `fill_score_0`, `fill_score_1`;
 * `waa`: `tier`, `class` (the whole byte: class and the sweep bit), `mode`, `colour`, `power`, `mag`, `acc`, `var`, `flags`, `slot_mask` (u16), `mask_lo`, `mask_hi`, `status_lo`, `status_hi` (u32);
 * `menu_waa`: `equip_lo`, `equip_hi` (u32), `price10` (u16, the price / 10), `cat`, `extra`;
 * `scenedat`: `enemy_0` .. `enemy_2`, `count_0` .. `count_2`;
 * `ditem`: `slot_0` .. `slot_3` (u16).
 
-* **Merge** (`data::apply_table_rows`, when the tables load at launch): the table as the game ships it, or as a mod's whole file replaces it, then the enabled mods' rows, lowest priority first, so the first mod in the list wins a field both set. Rows change existing records only: a record past the end of the table is skipped. The rows belong to the game's own tables only: the background room scan behind the Bestiary page's numbers reads the unmodified game.
+* **Merge** (`data::TableRows`, when the tables load at launch): the table as the game ships it, or as a mod's whole file replaces it, then the enabled mods' rows, lowest priority first, so the first mod in the list wins a field both set.
+* **Records by name.** A header that is a name (`[my_spark]`: a lower-case letter, then lower-case letters, digits and `_`) adds a record to `monster`, `pgdat` (with `menu_pg`), `scenedat` or `ditem`; the other tables have a fixed size. A name is one record across every mod: a second mod naming it changes that record field by field, as for the game's own records. `base=<index>` starts a new record as a copy of that record (the first mod in the list that gives a base decides; the copy comes before any field). The named records follow the table's own records, mod by mod in priority order, each mod's names listed in the table's own-id section (section 8: `[Elements]` for `pgdat`) first, by its own id, then the rest of its names in name order; `menu_pg` gives a name the same id as `pgdat` and grows with it (a grown row starts with every character eligible and the rest 0, and a record's pgdat `base` is its menu_pg base too unless its menu_pg rows give one). These ids are the engine's: a mod's data names the records, and its scripts use the ids its `[Elements]` gives them. A reference that does not fit its field is a problem.
+* **References:** any value may be `@<table>:<name>` or `@<table>:<name>+<number>`, the id of a named record plus a number (a grid cell's flag bits): `cell_3=@pgdat:my_spark+0x4000`.
 * **Conflicts:** a field two mods set to different values is logged (`tables: <table> [<index>] 0x<offset>: '<mod>' wins over '<mod>'`); a line that cannot be read, or a record or field the table does not have, is logged as a warning and skipped.
-* The startup log lists `tables: '<mod>' <table>: N field(s)` per mod and table.
+* The startup log lists `tables: <table> adds N named record(s) from <id>` and `tables: '<mod>' <table>: N field(s)` per mod and table.
 
 ## 2. Resolution (once per scan, case-insensitive, component-wise)
 
@@ -358,8 +362,13 @@ Reserve=3
 1002=flux1002
 ; another mod's room this mod links to (by its stem)
 1500=bigmod_cave
+
+; the element ids this mod's scripts and text use: id = record name (tables\pgdat.txt)
+[Elements]
+527=my_spark
 ```
 
+* **`[Elements]`**: the element ids this mod's scripts and text use for records mods add by name (section 1.3), `<id>=<name>`: its own and any other mod's it uses. The game's element records end at 526, so ids run from 527 to 16383 (0x3FFF). **The ids are the mod's own**: a field script's element item id (from 0x1000, `docs/formats/fieldscript.md`) means the element the `[Elements]` of the running room's owner gives it (section 8, `[Rooms]`); an id inside the element table itself (the game's, or records a whole-file `pgdat.bin` adds) is that element, and an id past it the owner does not list names none. A mod's `text\sysmes.txt` rows of its element ids (names `0x17<id>`, help lines `0x1A<id x 3 + line>`) are stored under the elements they name. Saves keep the names (`docs/formats/save.md` 16). An id outside the range, a value that is not a record name, an id named twice and a name no mod adds are problems.
 * **`[Mod]`**: `Name`, `Version`, `Author` (shown in the log and the Mods tab) and `Requires`, a comma-separated list of feature sections. Any other `[Mod]` key is a problem.
 * **`[Rooms]`**: the room ids this mod uses, `<id>=<stem>`: its own new rooms, and any other mod's room it links to. Every room id the game uses is below 1000, so ids run from 1000 to 32767 (0x7FFF, the largest literal room id a field script can write). The stem names the room's files under `cdrom/map/mapbin/` (no folder, no extension; matched in lower case); the room's own `.prd` is used. A mod room takes no `cdrom.fnd` record. An id outside the range, a stem with a folder or an extension, and an id named twice are problems. **The ids are the mod's own** (`src/game/mod_rooms.h`): the stem is the room's identity, and an id means the room the `[Rooms]` of the room's **owner** gives it, the owner being the mod whose `.bin` of the running room is loaded (a game room a mod edits included; a game room nobody edits knows only ids below 1000). So a map jump (5A, DC) or a room model source (FE D0) to 1001 reaches the owner's 1001; MAP_ID (variable 6) reads the room's id in its owner's list and PREVIOUS_MAP_ID (variable 8) the previous room's id in the same list (32767 when the list has none). Two mods both using 1001 for different rooms is no conflict. A room patched by another mod (its `.bin` replaced) runs that mod's ids, so a patch lists the rooms its scripts jump to too. Inside the engine each mod room has an internal id from 0x10000 (never saved, never shown to a script). OpenCross saves made in a mod room keep its stem (`.ocsav` version 2) and Continue finds the room by it; a card save keeps only the location word, read as the first mod in the list that uses that id. A listed room whose `.bin` is missing is logged (`field: mod room ...`). The debug teleport lists the mod rooms with their owner.
 * **Feature sections**: every other section names a feature of the build's table (`src/core/features.cpp`; the field script's `GET_FEATURE_LEVEL` ids are the same table, `fieldscript.md` 6.12). Its keys are that feature's settings, whole numbers in the feature's range (`on` / `off`, `true` / `false`, `yes` / `no` read as 1 / 0). A feature with settings has `Enabled` first. Sections and keys compare case-insensitively; a repeated section adds to the first.

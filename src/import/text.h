@@ -224,13 +224,17 @@ struct LookupInfo {
 // mess_wend.csv, sysmes.txt, ...) holds only its own rows, in the member's own format. Every LangTables merges them over the member it
 // reads (the game's, or a mod's whole replacement of it), the enabled mods' rows lowest priority first so the first mod in the list
 // wins a row; a row two mods give different text is logged as a conflict. Field text rows (<lang>.csv, Ex_<lang>.csv, mess_wend.csv) of
-// a room id the mod's [Rooms] lists are stored under that room's internal id (game::ModRooms); any other id is the game's own row.
+// a room id the mod's [Rooms] lists are stored under that room's internal id (game::ModRooms); any other id is the game's own row. The
+// element names and help rows of sysmes.txt (0x17<id>, 0x1A<id * 3 + line>) of an element id the mod's [Elements] lists are stored
+// under the element's id (data/table_rows.h).
 struct TextMod {
   std::string name;
   // Member name in lower case -> the row file's bytes.
   std::map<std::string, std::function<std::optional<Bytes>()>> files;
   // The mod's room id -> internal id, for its field text rows of those rooms (other ids are the game's rows).
   std::map<int, int> rooms;
+  // The mod's element id -> the element, for its sysmes.txt name and help rows (set_text_mod_elements).
+  std::map<int, int> elements;
 };
 // Set at launch (priority order, first wins), before text is read; read by every LangTables. A controlled run sets them again when it
 // reads the mods again (Control `reload`, a plan with another DraftDir: an editor's unsaved dialog in its draft folder): each call bumps
@@ -238,6 +242,8 @@ struct TextMod {
 void set_text_mods(std::vector<TextMod> mods);
 const std::vector<TextMod>& text_mods();
 u32 text_mods_generation();
+// The element ids of mod `mod` (its [Elements] -> the elements): set when the tables load, which gives records added by name their ids.
+void set_text_mod_elements(std::string_view mod, std::map<int, int> elements);
 
 // Field csv: (room, msg) -> text. `load_rows_rule` implements "a row is loaded only if no earlier row has a larger room".
 struct FieldTable {

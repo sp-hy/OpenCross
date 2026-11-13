@@ -239,6 +239,15 @@ void test_slot() {
     const SaveSlot back = decode_block(block);
     CHECK(back.elements[5].id == 600 && back.elements[5].qty == 3 && back.chars[1].grid[4] == 700 && back.chars[1].grid[5] == 12);
     CHECK(decode_block(encode_block(slot)).tail == slot.tail);
+    // A record mods add by name comes back under the id its name has now; a name no mod adds any more leaves its stacks empty.
+    set_element_names({[](u16 id) { return id == 600 ? std::string("zap") : std::string(); },
+                       [](std::string_view name) { return name == "zap" ? std::optional<u16>(650) : std::nullopt; }});
+    const Bytes named = encode_block(mod);
+    const SaveSlot moved = decode_block(named);
+    CHECK(moved.elements[5].id == 650 && moved.elements[5].qty == 3 && moved.chars[1].grid[4] == 700);
+    set_element_names({[](u16) { return std::string(); }, [](std::string_view) { return std::optional<u16>(); }});
+    CHECK(decode_block(named).elements[5].id == 0 && decode_block(named).chars[1].grid[4] == 700);
+    set_element_names({});
     set_wide_store({});
     // The block alone, as RDE reads it.
     CHECK(decode_block(block).elements[5].id == 0);

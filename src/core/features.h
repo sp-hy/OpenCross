@@ -58,10 +58,18 @@ int level(int id);
 constexpr int kModRoomFirst = 1000;
 constexpr int kModRoomLast = 0x7FFF;
 
+// Mod elements: the game's element records stop at 526, so a mod's own element ids (its scripts' and its text's numbers for the records
+// it adds by name, data/table_rows.h) run from kModElementFirst to kModElementLast. Two mods may both use 527; the name is the identity.
+constexpr int kModElementFirst = 527;
+constexpr int kModElementLast = 0x3FFF;
+
+// A record name (a table row header, an [Elements] value): a lower-case letter, then lower-case letters, digits and '_'.
+bool is_record_name(std::string_view name);
+
 // A parsed mod.ini: [Mod] Name / Version / Author / Requires (a comma-separated list of feature sections the mod's own scripts use),
 // [Rooms] (the room ids this mod's scripts and text use, "<id> = <stem>": the files cdrom/map/mapbin/<stem>.bin / .prd / .ctd, its own
-// rooms or another mod's), and every other section as written (a feature section, checked by resolve). `problems` = lines that are not
-// understood.
+// rooms or another mod's), [Elements] (the element ids this mod's scripts and text use, "<id> = <record name>"), and every other section
+// as written (a feature section, checked by resolve). `problems` = lines that are not understood.
 struct Manifest {
   struct Section {
     std::string name;
@@ -71,6 +79,8 @@ struct Manifest {
   std::vector<std::string> requires_features;
   // [Rooms]: ids kModRoomFirst..kModRoomLast, stems in lower case, in file order.
   std::vector<std::pair<int, std::string>> rooms;
+  // [Elements]: ids kModElementFirst..kModElementLast, record names, in file order.
+  std::vector<std::pair<int, std::string>> elements;
   std::vector<Section> sections;
   std::vector<std::string> problems;
 };
