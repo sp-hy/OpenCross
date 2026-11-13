@@ -24,7 +24,7 @@ The player is the controlled entity (the party leader unless FE 4C or B2 chose a
 ### 2.1 Speed
 
 - The raw speed `S` is the entity's 0x10C value (set by the speed ops, `fieldscript.md`). 0 means `kDefaultSpeed` = 0x50.
-- The velocity is 16.16, so a step is `S / 16` units. Walk: `S / 16` (5 at the default, `kWalkUnitsPerTick`). Run: `(2 * S + S / 2) / 16` (12.5, `kRunUnitsPerTick`). No acceleration, no analog speed scaling. The cheat "run speed" doubles `S`.
+- The velocity is 16.16, so a step is `S / 16` units. Walk: `S / 16` (5 at the default, `kWalkUnitsPerTick`). Run: `(2 * S + S / 2) / 16` (12.5, `kRunUnitsPerTick`). No acceleration, no analog speed scaling. The cheat "run speed" doubles `S` for the controlled entity and the party followers (rule 1 and the trail replay), so the party keeps its spacing.
 - Scripted walks step `S / 16`, or 5 when `S` is 0.
 - Every velocity move ends in the mover's 3D re-make (`room.md` 3.4): the step's length is taken in sixteenths of a unit with each axis truncated and a coarse square root, so a step is slightly shorter than `S / 16` off the axes (2 units at a slight angle: 30 / 16), and a step that rises or drops a whole unit of floor height is shortened further (2 units over a 1-unit rise: 1.79). WALK_TO_XZ aims from the whole-unit position (`fieldscript.md`, 42).
 - Tiles with flag 0xC800 (stairs, ladders, forced slide) take the run away. Flag 0x1000 on the tile the actor stands on halves its velocity: the pad step (walk or run, and the step a pushed actor takes from it) as well as the terrain push (5.5).

@@ -466,14 +466,18 @@ void FieldWorld::step_motions() {
   }
 }
 
+int FieldWorld::party_speed(int ent) const {
+  const int base = vm_.entity(ent).v10c ? vm_.entity(ent).v10c : kDefaultSpeed;
+  return platform::cheats().run_speed ? base * 2 : base;
+}
+
 void FieldWorld::step_player() {
   lead_start_valid_ = false;
   const int player = player_entity();
   if (player < 0) return;
   Ent& pe = ents_[static_cast<size_t>(player)];
-  pe.actor.speed = vm_.entity(player).v10c ? vm_.entity(player).v10c : kDefaultSpeed;
-  // Cheats: run speed x2; no clip (Actor::tick moves without the walk mesh).
-  if (platform::cheats().run_speed) pe.actor.speed *= 2;
+  pe.actor.speed = party_speed(player);
+  // Cheat: no clip (Actor::tick moves without the walk mesh).
   pe.actor.noclip = platform::cheats().no_clip;
   // Script-driven (step_visuals animates it).
   if (pe.motion.active || !pe.placed) return;
@@ -612,7 +616,7 @@ void FieldWorld::follower_back_off(int slot, bool other_side, int ent_override) 
   }
   const ActorPose pose = ent_state.actor.current();
   const int ring = slot - 1;
-  const int base = vm_.entity(ent).v10c ? vm_.entity(ent).v10c : kDefaultSpeed;
+  const int base = party_speed(ent);
   const float dx = pose.x - lp.x, dz = pose.z - lp.z;
   const bool same = std::hypot(dx, dz) < 0.01f;
   // angle = engine angle to the leader; lfe = engine heading of the leader; other_side: settle_spawned_followers swings
@@ -761,7 +765,7 @@ void FieldWorld::step_followers() {
     const ActorPose& pp = prev == lead ? lead_pose : ents_[static_cast<size_t>(prev)].actor.current();
     const float d_lead = dist3(pose, lead_pose.x, lead_pose.y, lead_pose.z);
     const float d_prev = dist3(pose, pp.x, pp.y, pp.z);
-    const int base = vm_.entity(ent).v10c ? vm_.entity(ent).v10c : kDefaultSpeed;
+    const int base = party_speed(ent);
     // Too close to the leader: rule 1 (skipped while op BE waits).
     if (d_lead < 80.0f && !follow_hold_) {
       follower_back_off(slot, false, ent);

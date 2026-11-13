@@ -842,6 +842,8 @@ class FieldWorld final : public script::FieldHost {
   void step_motions();
   void step_player();
   void step_followers();
+  // walk speed of a pad-controlled or party-following entity (its script speed or the default), doubled by the run speed cheat
+  int party_speed(int ent) const;
   // follow rule 1 (dL < 80) for party slot 1 / 2: one step toward the point 128 units from the leader (free step while it lands on the
   // mesh, else the probe / slide step, else stand)
   // ent_override: a non-party entity running op 0A

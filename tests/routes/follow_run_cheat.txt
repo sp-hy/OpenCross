@@ -1,0 +1,19 @@
+# Run speed cheat in Termina tel_a01f: the leader runs at 25 units a tick, follower 1 at up to 30 once 351 units behind, so the
+# chain holds about the normal running gap instead of falling behind. Stopped, both stand within 200.
+0 wait idle
+- request party_add 1
+- request party_add 2
+- load tel_a01f 0
+- wait room tel_a01f 300
+- wait idle 300
+- set option 200 1
+- wait 30
+- key down up
+- wait 30
+- assert gap player p1 300 380
+- assert gap p1 p2 230 380
+- key up up
+- wait 150
+- assert gap player p1 185 201
+- assert gap p1 p2 185 201
+- quit

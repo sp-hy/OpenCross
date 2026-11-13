@@ -228,7 +228,7 @@ All off by default; they never lock saving. The first three also toggle from the
 | `MaxMoney` | 0 | G is set to the maximum (9,999,999) on every field tick. |
 | `ShopAllElements` | 0 | An element shop's buy list also gets every other element (ids 1..0x7F) that is sellable and has a price. |
 | `ShopAllWeapons` | 0 | The smith's forge list of the chosen category (weapon, armour, accessory) also gets every item of that category with a price and a recipe. |
-| `RunSpeed` | 0 | Field walk / run speed x2. |
+| `RunSpeed` | 0 | Field walk / run speed x2 for the leader and the party followers. |
 | `AlwaysLoot` | 0 | Every enemy drops its rare drop (the common one when it has no rare drop), and every PC steal succeeds and takes the rare word when the enemy has one. |
 | `InstantGrowth` | 0 | In a non-boss fight, the star's growth progress jumps to its cap, so each living member gets the full stat gain of that star at once. After every won fight (boss fights too) each grown member is also raised to what a typical character holds after the star-ups so far (the average of the random star-up gains), which makes up star-ups a record missed; the raise shows as part of the fight's gain. |
 | `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |
