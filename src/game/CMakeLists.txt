@@ -18,6 +18,8 @@ add_library(oc_game STATIC
   actor.cpp
   disc_index.h
   disc_index.cpp
+  mod_rooms.h
+  mod_rooms.cpp
   field_camera.h
   field_camera.cpp
   field_watchdog.h

@@ -211,6 +211,12 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
       return;
     }
   }
+  // text\<member>: the mod's own rows of a lang.dat text member (import::TextMod), merged over it rather than replacing it.
+  if (rel.size() == 2 && rel[0] == "text" && root.empty()) {
+    mod_file.target = fname;
+    mod.text.push_back(std::move(mod_file));
+    return;
+  }
   if (rel.size() == 1 && fname == "mod.ini") {
     const std::optional<Bytes> text = vfs.read_mod_file({mod_file.file, mod_file.member});
     mod.has_manifest = text.has_value();

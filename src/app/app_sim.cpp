@@ -288,6 +288,10 @@ void App::apply_flow_action(const game::FlowAction& flow_action) {
       const std::string stem = world.room_stem_for_id(action.room_id);
       if (!stem.empty()) room = stem;
     }
+    // A save made in a mod room: by its stem (the location word is its mod's own id). A card save from a mod room has only the word:
+    // the first mod in the list that uses that id.
+    if (!action.mod_room.empty()) room = action.mod_room;
+    else if (room.empty() && action.room_id >= features::kModRoomFirst) room = mod_rooms.first_listing(action.room_id);
     // New Game is the title script's DC jump, taken when its movie ends: PREVIOUS_MAP_ID = the title room's register (8, left by its
     // FE 2F), and the register names the opening room.
     if (flow.state() == game::FlowState::Opening && action.room_id < 0) {
@@ -744,7 +748,10 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   if (flow_ready && config.auto_save && have_save_dat && !save_path.empty() && world.view().loaded() && flow.state() == game::FlowState::Field) {
     // RDE auto-save on a location change: card 1 slot 0 in the save.dat the Save menu uses, and / or the OpenCross page's
     // auto-save (Autosave::targets: each only where saves already exist; with none anywhere, the OpenCross page).
-    if (autosave.update({static_cast<u16>(std::max(world.map_id(), 0)), world.can_save(), world.map_id(), world.entrance_param()})) {
+    // A mod room's internal id is folded into 0x8000.. (no game room's id) so a move between rooms still reads as one.
+    const int map = std::max(world.map_id(), 0);
+    const u16 location = static_cast<u16>(game::ModRooms::internal(map) ? 0x8000 | (map & 0x7FFF) : map);
+    if (autosave.update({location, world.can_save(), world.map_id(), world.entrance_param()})) {
       world.capture_state();
       const game::Autosave::Targets targets = game::Autosave::targets(&save_dat, &oc_saves);
       bool written = false;

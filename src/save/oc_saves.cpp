@@ -13,10 +13,15 @@ namespace oc::save {
 namespace {
 
 constexpr char kMagic[4] = {'O', 'C', 'S', 'V'};
-constexpr u32 kVersion = 1;
+// Version 2 adds the mod room stem after the block (version 1 files, without it, still load).
+constexpr u32 kVersion = 2;
 constexpr size_t kNamesOffset = 16;
 constexpr size_t kBlockOffset = kNamesOffset + kExtNames * kExtNameLen;
-constexpr size_t kFileSize = kBlockOffset + kBlockSize;
+constexpr size_t kFileSizeV1 = kBlockOffset + kBlockSize;
+// The mod room stem (ExtSlot::room): NUL padded, at most 63 bytes.
+constexpr size_t kRoomOffset = kFileSizeV1;
+constexpr size_t kRoomLen = 64;
+constexpr size_t kFileSize = kRoomOffset + kRoomLen;
 
 u32 rd32(ByteSpan bytes, size_t offset) {
   return static_cast<u32>(bytes[offset]) | static_cast<u32>(bytes[offset + 1]) << 8 | static_cast<u32>(bytes[offset + 2]) << 16 |
@@ -55,12 +60,15 @@ Bytes OcSaves::serialize(const SaveSlot& state, const ExtSlot& ext) {
   }
   const Bytes block = encode_block(state);
   std::copy(block.begin(), block.end(), out.begin() + static_cast<std::ptrdiff_t>(kBlockOffset));
+  if (ext.room.size() < kRoomLen) std::memcpy(&out[kRoomOffset], ext.room.data(), ext.room.size());
   return out;
 }
 
 OcSaves::File OcSaves::parse(ByteSpan bytes) {
-  if (bytes.size() != kFileSize || std::memcmp(bytes.data(), kMagic, 4) != 0) throw std::runtime_error("not an OpenCross save");
-  if (rd32(bytes, 4) != kVersion) throw std::runtime_error("unknown OpenCross save version");
+  if (bytes.size() < 8 || std::memcmp(bytes.data(), kMagic, 4) != 0) throw std::runtime_error("not an OpenCross save");
+  const u32 version = rd32(bytes, 4);
+  if ((version == 1 && bytes.size() != kFileSizeV1) || (version == 2 && bytes.size() != kFileSize)) throw std::runtime_error("not an OpenCross save");
+  if (version != 1 && version != 2) throw std::runtime_error("unknown OpenCross save version");
   const ByteSpan block = bytes.subspan(kBlockOffset, kBlockSize);
   if (!block_checksum_ok(block)) throw std::runtime_error("checksum mismatch");
   File file;
@@ -73,6 +81,14 @@ OcSaves::File OcSaves::parse(ByteSpan bytes) {
     if (length) file.ext.names[id] = utf8_to_utf32(std::string(raw, length));
   }
   file.data = decode_block(block);
+  if (version >= 2) {
+    // The block has its checksum; the stem field must at least end in its NUL.
+    if (bytes[kRoomOffset + kRoomLen - 1] != 0) throw std::runtime_error("damaged room name");
+    const char* raw = reinterpret_cast<const char*>(&bytes[kRoomOffset]);
+    size_t length = 0;
+    while (length < kRoomLen && raw[length]) ++length;
+    file.ext.room.assign(raw, length);
+  }
   return file;
 }
 
@@ -116,6 +132,7 @@ void OcSaves::write(int number, const SaveSlot& state) {
     file.ext.language = ext_host_->language;
     file.ext.battles = ext_host_->battles;
     if (ext_host_->names) file.ext.names = *ext_host_->names;
+    if (ext_host_->room) file.ext.room = ext_host_->room();
   }
   const Bytes bytes = serialize(file.data, file.ext);
   std::filesystem::create_directories(dir_);

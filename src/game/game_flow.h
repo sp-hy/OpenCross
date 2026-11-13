@@ -53,6 +53,8 @@ struct FlowAction {
   bool load_room = false;
   std::string room;
   int room_id = -1;
+  // Continue from an OpenCross save made in a mod room: its stem (the location word is that mod's own id); "" = a game room.
+  std::string mod_room;
   int param = 0;
   bool state_changed = false;
   bool open_settings = false;
@@ -104,6 +106,8 @@ class FlowMachine {
   void clear_custom_name(int char_id);
   // ext_save.dat names of the slot about to load (SaveDat::read_ext; already empty when the record's language differs): on_load applies them over the record's.
   void set_ext_names(std::map<int, std::u32string> names) { ext_names_ = std::move(names); }
+  // The mod room of the OpenCross save about to load (ExtSlot::room; "" = a game room or a card save): on_load hands it on.
+  void set_ext_room(std::string room) { ext_room_ = std::move(room); }
   // The slot about to load has no valid ext_save.dat pair (a card slot RDE never saved): on_load runs Pip's stat sync
   // (newgame::pip_form_stats) when his form is 0x2C..0x30.
   void set_ext_form_sync(bool sync) { ext_form_sync_ = sync; }
@@ -144,6 +148,7 @@ class FlowMachine {
   ui::GameState gs_;
   std::map<int, std::u32string> custom_names_;
   std::map<int, std::u32string> ext_names_;
+  std::string ext_room_;
   bool ext_form_sync_ = false;
   NameRecords default_records_{};
 };

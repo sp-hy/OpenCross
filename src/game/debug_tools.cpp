@@ -232,6 +232,14 @@ void DebugTools::build_caches(const Ctx& ctx) {
         by_stem[static_cast<size_t>(it - room_stems_.begin())] = std::format("   (map {})", id);
     }
     for (size_t i = 0; i < room_stems_.size(); ++i) room_labels_.push_back(room_stems_[i] + by_stem[i]);
+    // The rooms mods add ([Rooms]; their ids are each mod's own, so the owner is shown instead).
+    if (const ModRooms* mod_rooms = ctx.world->mod_rooms())
+      for (const std::string& stem : mod_rooms->stems()) {
+        if (std::find(room_stems_.begin(), room_stems_.end(), stem) != room_stems_.end()) continue;
+        room_stems_.push_back(stem);
+        const std::string owner = mod_rooms->owner(stem);
+        room_labels_.push_back(std::format("{}   (mod room, {})", stem, owner.empty() ? "no mod ships it" : owner));
+      }
   }
   // The placeholder entry marks the caches as built.
   if (room_labels_.empty()) room_labels_.push_back("-");

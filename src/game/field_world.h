@@ -30,6 +30,7 @@
 #include "game/actor.h"
 #include "game/button_panel.h"
 #include "game/disc_index.h"
+#include "game/mod_rooms.h"
 #include "game/effects/emitter_system.h"
 #include "game/effects/gpu_effects.h"
 #include "game/effects/room_meshes.h"
@@ -310,6 +311,16 @@ class FieldWorld final : public script::FieldHost {
   // map transition set it from variable 0x42 (= disc - 1); a loaded save takes it from its variable 0x42 too.
   int disc() const { return disc_; }
   void set_disc(int disc);
+  // The rooms mods add and each mod's ids for them (game/mod_rooms.h; owned by the caller, null = none). A listed room with no .bin is
+  // logged. Mod rooms run under their internal ids (map_id(), the dialogue text, jumps); scripts see their owner's ids.
+  void set_mod_rooms(const ModRooms* rooms);
+  // A room id from the running room's script -> the engine's id (a mod room's internal id; unchanged when the owner lists none).
+  int script_room(int id) const;
+  // The engine's id -> the id the running room's script uses for it (ModRooms::to_script).
+  int script_room_id(int id) const;
+  const ModRooms* mod_rooms() const { return mod_rooms_; }
+  // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).
+  std::string mod_room() const { return mod_rooms_ ? mod_rooms_->stem(map_id_) : std::string(); }
   // Room file stem of a script room id on the current disc; "" when that disc's record is not a map file; the lang.dat table
   // only when the index has no record for the id.
   std::string room_stem_for_id(int room_id) const;
@@ -905,8 +916,9 @@ class FieldWorld final : public script::FieldHost {
   int map_id_for(std::string_view stem);
   void sync_flag_table();
   u32 flag_writes_seen_ = 0;
-  // room stem -> script room id on the current disc (lazy)
+  // room stem -> script room id on the current disc, a mod room's internal id (lazy)
   std::map<std::string, int> stem_ids_;
+  const ModRooms* mod_rooms_ = nullptr;
 
   const vfs::Vfs* files_ = nullptr;
   render::GpuContext* ctx_ = nullptr;

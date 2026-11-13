@@ -51,8 +51,15 @@ const Feature* find(std::span<const Feature> features, std::string_view section)
 // The level of feature `id` in this build, 0 when it has none.
 int level(int id);
 
-// A parsed mod.ini: [Mod] Name / Version / Author / Requires (a comma-separated list of feature sections the mod's own scripts use), and
-// every other section as written (a feature section, checked by resolve). `problems` = lines that are not understood.
+// Mod rooms: the game's own room ids stop below 1000, so a mod's new rooms take ids from kModRoomFirst up to a script's literal room id.
+// The ids are the mod's own (game/mod_rooms.h): two mods may both use 1001; the stem is the room's identity.
+constexpr int kModRoomFirst = 1000;
+constexpr int kModRoomLast = 0x7FFF;
+
+// A parsed mod.ini: [Mod] Name / Version / Author / Requires (a comma-separated list of feature sections the mod's own scripts use),
+// [Rooms] (the room ids this mod's scripts and text use, "<id> = <stem>": the files cdrom/map/mapbin/<stem>.bin / .prd / .ctd, its own
+// rooms or another mod's), and every other section as written (a feature section, checked by resolve). `problems` = lines that are not
+// understood.
 struct Manifest {
   struct Section {
     std::string name;
@@ -60,6 +67,8 @@ struct Manifest {
   };
   std::string name, version, author;
   std::vector<std::string> requires_features;
+  // [Rooms]: ids kModRoomFirst..kModRoomLast, stems in lower case, in file order.
+  std::vector<std::pair<int, std::string>> rooms;
   std::vector<Section> sections;
   std::vector<std::string> problems;
 };

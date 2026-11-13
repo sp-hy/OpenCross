@@ -311,6 +311,9 @@ class App {
   vfs::ModManager mods;
   // The engine features of this run (core/features.h): the enabled mods' mod.ini and [Features], resolved once at launch.
   features::Resolved features;
+  // The rooms the enabled mods add and each mod's ids for them ([Rooms] in mod.ini), with the per-mod text rows (text\ in a mod):
+  // built once at launch with the features (App::init_vfs).
+  game::ModRooms mod_rooms;
   game::TextureDumpJob texture_dump_job;
 
   // ---- rendering --------------------------------------------------------------------------------------------------------------

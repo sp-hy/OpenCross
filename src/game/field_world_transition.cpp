@@ -294,14 +294,17 @@ void FieldWorld::restore_field_song() {
   }
 }
 
+// A script's room id is in its room owner's namespace (ModRooms): from 1000 it becomes that mod room's internal id here.
 void FieldWorld::request_map_jump(int room, int param) {
   if (jump_.active) return;
+  room = script_room(room);
   jump_ = {true, room, param};
   log::info("field: map jump requested -> room id {} entrance {}", room, param);
 }
 
 // DC only records the jump; the movie op behind it plays and the jump starts when the movie ends (a room load drops the record).
 void FieldWorld::set_movie_jump(int room, int param) {
+  room = script_room(room);
   movie_jump_ = {true, room, param, true};
   log::info("field: tick {} movie-end jump recorded -> room id {} entrance {}", tick_count_, room, param);
 }

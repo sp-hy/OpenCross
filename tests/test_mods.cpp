@@ -12,6 +12,8 @@
 #include <utility>
 #include <vector>
 
+#include "import/text.h"
+
 #include "vfs/mod_archive.h"
 #include "vfs/mods.h"
 #include "vfs/vfs.h"
@@ -459,6 +461,59 @@ int main() {
     next_mods.apply(next_files, vfs::ModArt::Sd);
     const auto bytes = next_files.read("cdrom/battle/data/monster.bin");
     CHECK(bytes && std::string(bytes->begin(), bytes->end()) == "other monsters");
+  }
+
+  // Text rows (import::TextMod): a mod's text\<member> holds only its own rows, merged over the game's member; the first mod in the
+  // list wins a row both give. Field rows from room 1000 on are in each mod's own room ids and land under that room's internal id.
+  {
+    const fs::path game = tmp / "textgame";
+    fs::create_directories(game / "data");
+    write_archive(game / "data" / "cdrom.dat", false, {{"map/mapbin/room.bin", "game room"}});
+    write_archive(game / "data" / "lang.dat", false,
+                  {{"en.csv", "27\t0\tgame line\n27\t1\tgame second\n"}, {"sysmes.txt", "key\ten\tfr\n0x000001\tPotion\tPotion fr\n"}});
+    fs::create_directories(game / "mods" / "Alpha" / "text");
+    fs::create_directories(game / "mods" / "Beta" / "text");
+    std::ofstream(game / "mods" / "Alpha" / "text" / "en.csv", std::ios::binary) << "27\t1\talpha second\n1001\t0\talpha room\n1002\t0\tunlisted\n";
+    std::ofstream(game / "mods" / "Alpha" / "text" / "SYSMES.txt", std::ios::binary) << "key\ten\n0x000001\tHi-Potion\n0x000099\tNew item\n";
+    std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta second\n1001\t0\tbeta room\n";
+    vfs::Vfs text_files;
+    CHECK(text_files.open(game));
+    vfs::ModManager text_mods_found;
+    text_mods_found.scan(text_files, game / "mods", {{"Alpha", true, vfs::ModLoadOn::All}, {"Beta", true, vfs::ModLoadOn::All}});
+    const vfs::Mod* alpha = find_mod(text_mods_found, "Alpha");
+    CHECK(alpha && alpha->text.size() == 2 && alpha->unmatched.empty() && alpha->files.empty());
+    std::vector<import::TextMod> text_mods;
+    for (const std::string name : {"Alpha", "Beta"}) {
+      const vfs::Mod* mod = find_mod(text_mods_found, name);
+      if (!mod) continue;
+      import::TextMod text{name, {}, {}};
+      for (const vfs::ModFile& file : mod->text)
+        text.files[file.target] = [&text_files, source = vfs::OverlayFile{file.file, file.member}] { return text_files.read_mod_file(source); };
+      // Both call their room 1001; they are different rooms (internal ids 0x10000 / 0x10001).
+      text.rooms[1001] = name == "Alpha" ? 0x10000 : 0x10001;
+      text_mods.push_back(std::move(text));
+    }
+    import::set_text_mods(std::move(text_mods));
+    import::LangTables tables;
+    tables.init(&text_files);
+    const auto row = [&](int room, int msg) {
+      const std::string* found = tables.raw_field(room, msg, import::Lang::En);
+      return found ? *found : std::string("(none)");
+    };
+    CHECK(row(27, 0) == "game line");
+    CHECK(row(27, 1) == "alpha second");
+    CHECK(row(0x10000, 0) == "alpha room" && row(0x10001, 0) == "beta room");
+    // 1001 is a mod room (not the game's row 1001); 1002, which Alpha does not list, is the game's row of that id.
+    CHECK(row(1001, 0) == "(none)" && row(1002, 0) == "unlisted");
+    const import::TextTable* sysmes = tables.table("sysmes");
+    const auto cell = [&](const char* key, import::Lang lang) {
+      const std::string* found = sysmes ? sysmes->get(std::string_view(key), lang) : nullptr;
+      return found ? *found : std::string("(none)");
+    };
+    // Columns by heading: the mod sets English only, French keeps the game's; a new key is added.
+    CHECK(cell("0x000001", import::Lang::En) == "Hi-Potion" && cell("0x000001", import::Lang::Fr) == "Potion fr");
+    CHECK(cell("0x000099", import::Lang::En) == "New item");
+    import::set_text_mods({});
   }
 
   fs::remove_all(tmp, ec);

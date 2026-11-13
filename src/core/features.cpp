@@ -95,7 +95,7 @@ int level(int id) {
 Manifest parse_manifest(std::string_view text) {
   Manifest out;
   Manifest::Section* current = nullptr;
-  bool in_mod = false, any_section = false;
+  bool in_mod = false, in_rooms = false, any_section = false;
   int line_no = 0;
   while (!text.empty()) {
     const size_t nl = text.find('\n');
@@ -108,13 +108,14 @@ Manifest parse_manifest(std::string_view text) {
       const std::string_view name = trim(line.substr(1, close == std::string_view::npos ? std::string_view::npos : close - 1));
       if (close == std::string_view::npos || name.empty()) {
         out.problems.push_back(std::format("line {}: bad section header", line_no));
-        current = nullptr, in_mod = false;
+        current = nullptr, in_mod = in_rooms = false;
         continue;
       }
       any_section = true;
       in_mod = same(name, "Mod");
+      in_rooms = same(name, "Rooms");
       current = nullptr;
-      if (in_mod) continue;
+      if (in_mod || in_rooms) continue;
       const auto it = std::find_if(out.sections.begin(), out.sections.end(), [&](const Manifest::Section& section) { return same(section.name, name); });
       if (it != out.sections.end()) {
         current = &*it;
@@ -144,6 +145,23 @@ Manifest parse_manifest(std::string_view text) {
         }
       } else {
         out.problems.push_back(std::format("line {}: unknown [Mod] key '{}'", line_no, key));
+      }
+      continue;
+    }
+    if (in_rooms) {
+      // "<id> = <stem>": a room id from kModRoomFirst, a bare file stem (no folder, no extension).
+      int id = 0;
+      const auto parsed = std::from_chars(key.data(), key.data() + key.size(), id);
+      if (parsed.ec != std::errc() || parsed.ptr != key.data() + key.size() || id < kModRoomFirst || id > kModRoomLast) {
+        out.problems.push_back(std::format("line {}: [Rooms] '{}' is not a room id {}..{}", line_no, key, kModRoomFirst, kModRoomLast));
+      } else if (value.empty() || value.find_first_of("/\\.: ") != std::string_view::npos) {
+        out.problems.push_back(std::format("line {}: [Rooms] {}: '{}' is not a file stem", line_no, id, value));
+      } else if (std::any_of(out.rooms.begin(), out.rooms.end(), [&](const auto& room) { return room.first == id; })) {
+        out.problems.push_back(std::format("line {}: [Rooms] {} is named twice", line_no, id));
+      } else {
+        std::string stem(value);
+        for (char& letter : stem) letter = (letter >= 'A' && letter <= 'Z') ? static_cast<char>(letter + 32) : letter;
+        out.rooms.emplace_back(id, std::move(stem));
       }
       continue;
     }

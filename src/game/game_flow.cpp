@@ -204,6 +204,8 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   action.load_room = true;
   action.room = room ? room : "";
   action.room_id = entry.data.location();
+  action.mod_room = std::move(ext_room_);
+  ext_room_.clear();
   // ROOM_PARAM of a loaded slot = its variable 0x3A. Room init copies var 2 into 0x3A and save events overwrite it with the
   // entrance they resume at (gal_b09i: `SET $3A, #4` before the save menu, so a Continue re-enters with param 4 and the wake-up
   // event runs on). The entrance alone places the party: the saved position variables are not read.
@@ -493,8 +495,12 @@ FlowAction GameFlow::tick_fade(float dt) {
         return action;
       }
       // ext_save.dat: custom names (same language only) + the battle counter.
-      if (load_entry_.card == 0 && page_) machine_.set_ext_names(page_->read_ext(load_entry_.slot, static_cast<u32>(lang_)).names);
-      else if (dat_) {
+      machine_.set_ext_room({});
+      if (load_entry_.card == 0 && page_) {
+        save::ExtSlot ext = page_->read_ext(load_entry_.slot, static_cast<u32>(lang_));
+        machine_.set_ext_names(std::move(ext.names));
+        machine_.set_ext_room(std::move(ext.room));
+      } else if (dat_) {
         const save::ExtSlot ext = dat_->read_ext(load_entry_.card, load_entry_.slot, static_cast<u32>(lang_));
         machine_.set_ext_names(ext.names);
         machine_.set_ext_form_sync(ext.valid == 0);

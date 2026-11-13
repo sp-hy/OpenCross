@@ -167,6 +167,25 @@ static void test_page() {
     }
     CHECK(threw);
   }
+  // Version 2 keeps the mod room's stem (ids are each mod's own); a version 1 file (no room field) still loads, with no room.
+  {
+    save::ExtSlot ext;
+    ext.room = "flux1005";
+    const Bytes bytes = save::OcSaves::serialize(st, ext);
+    CHECK(save::OcSaves::parse(bytes).ext.room == "flux1005");
+    Bytes v1(bytes.begin(), bytes.end() - 64);
+    v1[4] = 1;
+    const save::OcSaves::File old = save::OcSaves::parse(v1);
+    CHECK(old.ext.room.empty() && old.data.gold() == 4321);
+    host.room = [] { return std::string("flux1007"); };
+    page.write(9, st);
+    save::OcSaves third;
+    third.set_dir(dir);
+    third.set_ext_host(&host);
+    third.load();
+    CHECK(third.file(9) && third.read_ext(9, 1).room == "flux1007");
+    host.room = nullptr;
+  }
   std::filesystem::remove_all(dir);
 }
 
