@@ -57,18 +57,22 @@ std::optional<assets::RoomGroupImage> compose_hd_group(const assets::RoomScene& 
                                                        const Chip2& chip2, u32* tiles_out, u32* miss_out, int blend) {
   if (layer >= room.layers.size()) return std::nullopt;
   const assets::RoomLayer& room_layer = room.layers[layer];
+  const assets::RoomGroupImage* area = nullptr;
   const assets::RoomGroupImage* lowres = nullptr;
-  for (const auto& image : room_layer.groups)
-    if (image.group == group && image.blend == blend) lowres = &image;
-  if (!lowres) return std::nullopt;
+  for (const auto& image : room_layer.groups) {
+    if (image.group != group) continue;
+    area = &image;
+    if (image.blend == blend) lowres = &image;
+  }
+  if (!area) return std::nullopt;
   assets::RoomGroupImage out;
-  out.blend = lowres->blend;
-  out.group = lowres->group;
-  out.x = lowres->x;
-  out.y = lowres->y;
-  out.z = lowres->z;
-  out.width = lowres->width * kChip2Scale;
-  out.height = lowres->height * kChip2Scale;
+  out.blend = blend;
+  out.group = area->group;
+  out.x = area->x;
+  out.y = area->y;
+  out.z = area->z;
+  out.width = area->width * kChip2Scale;
+  out.height = area->height * kChip2Scale;
   out.rgba.assign(static_cast<size_t>(out.width) * out.height * 4, 0);
   u32 count = 0, miss = 0;
   for (const auto& tile : room_layer.tiles) {
@@ -97,6 +101,7 @@ std::optional<assets::RoomGroupImage> compose_hd_group(const assets::RoomScene& 
       }
     } else {
       ++miss;
+      if (!lowres) continue;
       const size_t sx = static_cast<size_t>(tile.x - lowres->x), sy = static_cast<size_t>(tile.y - lowres->y);
       for (int j = 0; j < 16 * kChip2Scale; ++j)
         for (int i = 0; i < 16 * kChip2Scale; ++i) {

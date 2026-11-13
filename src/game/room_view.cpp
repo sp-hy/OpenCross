@@ -27,6 +27,12 @@ constexpr float kViewW = render::kLayerW;
 constexpr float kViewH = render::kFieldRows;
 // The loader subtracts 24 from y_min.
 constexpr int kYMinBias = 24;
+
+bool has_texels(const std::vector<u8>& rgba) {
+  for (size_t i = 3; i < rgba.size(); i += 4)
+    if (rgba[i]) return true;
+  return false;
+}
 }  // namespace
 
 struct RoomView::Item {
@@ -223,6 +229,10 @@ std::unique_ptr<RoomView::Prepared> RoomView::prepare(const vfs::Vfs& files, ren
   prep->tex_hd.resize(prep->items.size());
   for (size_t i = 0; i < prep->items.size(); ++i) {
     const Item& item = *prep->items[i];
+    if (!has_texels(prep->px_hd[i])) {
+      prep->px_hd[i] = {};
+      continue;
+    }
     auto tex = std::make_unique<render::Texture>();
     if (!tex->create_blocking(*ctx, static_cast<u32>(item.w * import::kChip2Scale), static_cast<u32>(item.h * import::kChip2Scale), render::TextureFormat::Rgba8,
                               prep->px_hd[i].data()))
@@ -315,21 +325,27 @@ bool RoomView::load(std::string_view name) {
 
 std::vector<std::unique_ptr<RoomView::Item>> RoomView::plan_items(const assets::RoomScene& scene) {
   // Merge the (layer, group) images that share a group and z (they sort identically) into one texture each, so a
-  // room needs few textures. Within a merge, later layers are drawn over earlier ones.
+  // room needs few textures. Within a merge, later layers are drawn over earlier ones. An image with no 1x texels (a kind only the
+  // HD art may fill) keeps an item of its own, so it never widens the texture of the images it would merge with.
+  constexpr u32 kShared = 0xFFFFFFFFu;
   struct Key {
     u32 group;
     // blend: RoomGroupImage::blend, -1 opaque, 0..3 semi-transparent with that ABR.
     s32 blend;
     u16 z;
+    // kShared, or the layer of an image with no 1x texels.
+    u32 own_layer;
     bool operator<(const Key& other) const {
       if (group != other.group) return group < other.group;
       if (blend != other.blend) return blend < other.blend;
-      return z < other.z;
+      if (z != other.z) return z < other.z;
+      return own_layer < other.own_layer;
     }
   };
   std::map<Key, std::vector<std::pair<u32, const assets::RoomGroupImage*>>> merged;
   for (const auto& layer : scene.layers)
-    for (const auto& image : layer.groups) merged[{image.group, image.blend, image.z}].emplace_back(layer.index, &image);
+    for (const auto& image : layer.groups)
+      merged[{image.group, image.blend, image.z, has_texels(image.rgba) ? kShared : layer.index}].emplace_back(layer.index, &image);
 
   // Draw order: z is depth, larger = farther. Sort by z descending, then first layer, then group.
   struct Ordered {
@@ -500,9 +516,15 @@ bool RoomView::upload_set(Item& item, bool hd, const std::vector<u8>& px) {
   const int scale = hd ? import::kChip2Scale : 1;
   const size_t w = static_cast<size_t>(item.w * scale), h = static_cast<size_t>(item.h * scale);
   ScopedTimer upload_t("upload", hd_upload_ms_, false);
+  render::TexRef& set = hd ? item.set_hd : item.set;
+  // An image kind with no texels in this art set gets no texture; draw() skips the item.
+  if (!has_texels(px)) {
+    set = {};
+    if (hd) item.texture_hd.reset();
+    return true;
+  }
   if (hd) item.texture_hd = std::make_unique<render::Texture>();
   render::Texture& tex = hd ? *item.texture_hd : item.texture;
-  render::TexRef& set = hd ? item.set_hd : item.set;
   if (!tex.create(*ctx_, static_cast<u32>(w), static_cast<u32>(h), render::TextureFormat::Rgba8, px.data())) return false;
   set = render::TexRef(tex, sampler_);
   return true;
@@ -650,7 +672,9 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
   const bool bg_lin = bg_linear && sprites.filter() == render::SpriteFilter::Sampler;
   if (bg_lin) sprites.set_filter(render::SpriteFilter::Linear);
   for (const auto& it : items_) {
-    const render::TexRef set = hd_ && it->set_hd ? it->set_hd : it->set;
+    // The HD set once the room's HD art is built (an empty HD kind stays undrawn, never its 1x texels); sub-pixel placement only with it.
+    const bool sub = hd_ && hd_ready_;
+    const render::TexRef set = sub ? it->set_hd : it->set;
     if (!set) continue;
     if (only_layers) {
       bool keep = false;
@@ -664,8 +688,6 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     if ((it->blend >= 0 && std::max(8.0f, static_cast<float>(it->z)) < late_z_) != late_pass_) continue;
     // Parallax: off = S * 4096 / scale.
     const float parallax = group_parallax(it->group);
-    // Sub-pixel placement only with the HD art.
-    const bool sub = hd_ && it->set_hd;
     float px = static_cast<float>(it->x) + (parallax == 0.0f ? (fixed_to_edge_ ? lb.x0 : 0.0f) : scroll_x * parallax);
     float py = static_cast<float>(it->y) + scroll_y * parallax;
     if (!sub) {

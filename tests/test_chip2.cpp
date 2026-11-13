@@ -1,4 +1,6 @@
-// Synthetic .chip2 (key table + 2 tiles): lookup, validation and the 4x composition of one tile with a 1x fallback.
+// Synthetic .chip2 (key table + 2 tiles): lookup, validation, the 4x composition of one tile with a 1x fallback, and a
+// semi-transparent tile whose HD texels split differently from its 1x texels.
+#include <algorithm>
 #include <cstdio>
 
 #include "import/chip2.h"
@@ -97,6 +99,34 @@ int main() {
   CHECK(px(63, 63)[2] == 255 && px(63, 63)[0] == 0 && px(63, 63)[3] == 255);
   CHECK(px(64 + 8, 4)[1] == 200 && px(64 + 11, 7)[1] == 200 && px(64 + 8, 3)[3] == 0 && px(64 + 12, 4)[3] == 0);
   CHECK(!import::compose_hd_group(room, 0, 5, *chip));
+
+  // A semi-transparent (ABR 1) tile whose 1x texels all carry STP, drawn with HD tile 17 whose texels carry none: the HD texels
+  // belong to the opaque kind, which the 1x art leaves empty, and the ABR 1 kind gets none of them.
+  assets::RoomScene semi_room;
+  assets::RoomLayer semi_layer;
+  assets::RoomTile semi_tile;
+  semi_tile.x = 0;
+  semi_tile.y = 0;
+  semi_tile.u = 56;
+  semi_tile.flags = 0x80 | (1 << 3);
+  semi_layer.tiles = {semi_tile};
+  assets::RoomGroupImage additive;
+  additive.blend = 1;
+  additive.width = 16;
+  additive.height = 16;
+  additive.rgba.assign(16 * 16 * 4, 0);
+  assets::RoomGroupImage opaque = additive;
+  opaque.blend = -1;
+  semi_layer.groups = {opaque, additive};
+  semi_room.layers.push_back(semi_layer);
+  auto semi_opaque = import::compose_hd_group(semi_room, 0, 0, *chip, nullptr, nullptr, -1);
+  auto semi_additive = import::compose_hd_group(semi_room, 0, 0, *chip, nullptr, nullptr, 1);
+  CHECK(semi_opaque && semi_additive);
+  if (!semi_opaque || !semi_additive) return 1;
+  CHECK(semi_opaque->width == 64 && semi_opaque->blend == -1);
+  CHECK(semi_opaque->rgba[1] == 255 && semi_opaque->rgba[3] == 255);
+  CHECK(semi_opaque->rgba[(64 * 63 + 63) * 4 + 3] == 255);
+  CHECK(std::ranges::none_of(semi_additive->rgba, [](u8 value) { return value != 0; }));
   if (!failures) std::printf("test_chip2: ok\n");
   return failures ? 1 : 0;
 }

@@ -1,6 +1,6 @@
 #pragma once
 // The parts of `opencross modelview` that need no window: the catalog of character models, clip matching between the original
-// and the modded copy, playback time, framing bounds, the orbit camera and the command line.
+// and the modded copy, the room list, playback time, framing bounds, the orbit camera and the command line.
 #include <string>
 #include <vector>
 
@@ -9,15 +9,18 @@
 
 namespace oc::tool::model_view {
 
-enum class Kind { Field, BattlePlayer, BattleMonster };
+// Room: the models of one room (map/mapbin/<room>), an NPC's or an object's, picked by index.
+enum class Kind { Field, BattlePlayer, BattleMonster, Room };
 
 struct Entry {
   std::string stem;
   Kind kind = Kind::Field;
 };
 
-// One entry per stem of game::model_stems(), its kind taken from the folder.
+// One entry per stem of game::model_stems() or room_stems(), its kind taken from the folder.
 std::vector<Entry> catalog(const std::vector<std::string>& stems);
+// `map/mapbin/<room>` for every room of the cdrom member list with both a .bin and a .ctd, sorted.
+std::vector<std::string> room_stems(const std::vector<std::string>& members);
 // `group`: 0 = all, else the Kind + 1. `query` matches anywhere in the stem, case-insensitively.
 bool matches(const Entry& entry, int group, const std::string& query);
 
@@ -48,9 +51,11 @@ Camera orbit_camera(const Bounds& bounds, float yaw, float pitch, float zoom, fl
 struct Options {
   // sheet: write contact sheets to <sheet>_pN.png and exit (ocmodelview.cpp, run_sheet).
   std::string game_dir, model, sheet, error;
+  // The room model shown for a room stem.
+  int index = 0;
   bool hd = true, help = false;
 };
-// -g <dir>, --model <stem>, --sheet <png base>, --sd, --help / -h.
+// -g <dir>, --model <stem>, --index <room model>, --sheet <png base>, --sd, --help / -h.
 Options parse_options(const std::vector<std::string>& args);
 
 }  // namespace oc::tool::model_view

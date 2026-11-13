@@ -2,6 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <set>
+#include <string_view>
 
 #include "tool_util.h"
 
@@ -10,6 +13,7 @@ namespace oc::tool::model_view {
 namespace {
 
 constexpr float kHalfFov = 0.35f;
+constexpr std::string_view kRoomFolder = "map/mapbin/";
 
 bool finite(const assets::Vec3& point) { return std::isfinite(point[0]) && std::isfinite(point[1]) && std::isfinite(point[2]); }
 
@@ -39,8 +43,27 @@ std::vector<Entry> catalog(const std::vector<std::string>& stems) {
     if (stem.starts_with("fieldobj/player/")) entries.push_back({stem, Kind::Field});
     else if (stem.starts_with("battle/player/")) entries.push_back({stem, Kind::BattlePlayer});
     else if (stem.starts_with("battle/monster/")) entries.push_back({stem, Kind::BattleMonster});
+    else if (stem.starts_with(kRoomFolder)) entries.push_back({stem, Kind::Room});
   }
   return entries;
+}
+
+std::vector<std::string> room_stems(const std::vector<std::string>& members) {
+  std::set<std::string> bins, ctds;
+  for (const std::string& member : members) {
+    std::string path = lower_ascii(member);
+    std::ranges::replace(path, '\\', '/');
+    const size_t at = path.find(kRoomFolder);
+    if (at == std::string::npos || path.size() < at + kRoomFolder.size() + 5) continue;
+    const std::string room = path.substr(at + kRoomFolder.size(), path.size() - at - kRoomFolder.size() - 4);
+    if (room.empty() || room.find('/') != std::string::npos) continue;
+    if (path.ends_with(".bin")) bins.insert(room);
+    else if (path.ends_with(".ctd")) ctds.insert(room);
+  }
+  std::vector<std::string> stems;
+  for (const std::string& room : bins)
+    if (ctds.contains(room)) stems.push_back(std::string(kRoomFolder) + room);
+  return stems;
 }
 
 bool matches(const Entry& entry, int group, const std::string& query) {
@@ -143,6 +166,12 @@ Options parse_options(const std::vector<std::string>& args) {
       options.help = true;
     } else if (arg == "--sd") {
       options.hd = false;
+    } else if (arg == "--index") {
+      if (i + 1 >= args.size() || args[i + 1].empty() || args[i + 1].find_first_not_of("0123456789") != std::string::npos) {
+        options.error = "--index needs a room model number";
+        return options;
+      }
+      options.index = std::atoi(args[++i].c_str());
     } else if (arg == "-g" || arg == "--model" || arg == "--sheet") {
       if (i + 1 >= args.size() || args[i + 1].starts_with("-")) {
         options.error = "missing value for " + arg;

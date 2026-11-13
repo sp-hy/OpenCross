@@ -115,4 +115,20 @@ std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int mod
   return asset;
 }
 
+std::string body_model_stem(int body) {
+  if (body <= kLastMenuModel) return menu_model_stem(body);
+  if (static_cast<size_t>(body) >= kBattleModels.size()) return {};
+  const std::string_view path = kBattleModels[static_cast<size_t>(body)];
+  return std::string(path.substr(path.rfind('/') + 1));
+}
+
+std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int body, bool hd_art, std::string* err) {
+  if (body <= kLastMenuModel) return read_menu_model(files, body, hd_art, err);
+  if (body_model_stem(body).empty()) {
+    if (err) *err = "no battle model " + std::to_string(body);
+    return std::nullopt;
+  }
+  return read_model_files(files, std::string(kBattleModels[static_cast<size_t>(body)]), err);
+}
+
 }  // namespace oc::game

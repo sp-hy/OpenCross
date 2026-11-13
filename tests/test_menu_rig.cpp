@@ -2,7 +2,8 @@
 // rest angles. Checks the pairing, the scale and pelvis ratio, that the field rest pose gives the menu rest pose, that a field joint's turn
 // and the root's movement carry over, that an object held by the hand on one rig and by the forearm on the other still pairs, that a rig
 // whose limbs point elsewhere is refused, how a room's copy of a character is told from another model, and the hand-made pairings (taken as
-// given when they fit the two skeletons; every table entry has one entry per menu joint).
+// given when they fit the two skeletons; every table entry has one entry per menu joint), a joint a map marks not drawn, and the body
+// fingerprint that tells a story NPC's field model.
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -157,6 +158,54 @@ void test_map() {
   CHECK(game::menu_rig_map(0x24).size() == 34);
 }
 
+void test_hidden() {
+  // The menu hand marked not drawn: its matrix keeps its place but loses its axes (its vertices collapse onto the joint); the rest is as given.
+  const std::vector<s8> map{0, 1, 2, game::kHiddenJoint, 3, 4};
+  const game::MenuRig rig = game::match_menu_rig(field_rig(), menu_rig(), map);
+  CHECK(rig.usable);
+  CHECK((rig.field_joint == std::vector<int>{0, 1, 2, -1, 3, 4}));
+  CHECK(rig.hidden.size() == 6 && rig.hidden[3] && !rig.hidden[2]);
+  std::vector<render::Mat4> out;
+  game::menu_rig_palette(rig, rest_palette(field_rig()), out);
+  const std::vector<render::Mat4> rest = rest_palette(menu_rig());
+  for (int row = 0; row < 3; ++row) {
+    CHECK(near(out[3].at(row, 3), rest[3].at(row, 3)));
+    for (int col = 0; col < 3; ++col) CHECK(out[3].at(row, col) == 0.0f);
+  }
+  CHECK(same(out[2], rest[2]));
+}
+
+void test_npc_bodies() {
+  // The fingerprint: equal for a copy, different once a vertex or a parent changes.
+  assets::ModelAsset body = field_rig();
+  body.meshes.resize(1);
+  body.meshes[0].pool.resize(2);
+  body.meshes[0].pool[1].bind_pos = {0, -900, 0};
+  const assets::ModelAsset copy = body;
+  CHECK(game::body_fingerprint(body) == game::body_fingerprint(copy));
+  assets::ModelAsset moved = body;
+  moved.meshes[0].pool[1].bind_pos[1] = -880;
+  CHECK(game::body_fingerprint(body) != game::body_fingerprint(moved));
+  assets::ModelAsset rewired = body;
+  rewired.skeleton.joints[4].parent = 0;
+  CHECK(game::body_fingerprint(body) != game::body_fingerprint(rewired));
+  // Every table entry names a monster battle model, past the menu models, and is found by its own fingerprint.
+  CHECK(!game::npc_bodies().empty());
+  for (const game::NpcBody& npc : game::npc_bodies()) {
+    CHECK(npc.battle_model > 0x32);
+    CHECK(game::npc_body(npc.fingerprint) == npc.battle_model);
+  }
+  CHECK(game::npc_body(game::body_fingerprint(body)) == -1);
+  // Held props: listed per body, none for a body without one; without one match_body_rig is the plain match.
+  CHECK(game::menu_rig_props(0).empty());
+  for (const game::HeldProp& prop : game::menu_rig_props(140)) CHECK(prop.body == 140 && prop.menu_joints[0] >= 0);
+  CHECK(!game::menu_rig_props(140).empty());
+  assets::ModelAsset menu = menu_rig();
+  const game::MenuRig plain = game::match_menu_rig(field_rig(), menu_rig()), body_rig = game::match_body_rig(field_rig(), menu, 0);
+  CHECK(plain.field_joint == body_rig.field_joint);
+  for (const int from : body_rig.held_from) CHECK(from == -1);
+}
+
 }  // namespace
 
 int main() {
@@ -167,6 +216,8 @@ int main() {
   test_refused();
   test_same_model();
   test_map();
+  test_hidden();
+  test_npc_bodies();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

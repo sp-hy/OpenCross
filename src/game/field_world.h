@@ -988,8 +988,9 @@ class FieldWorld final : public script::FieldHost {
   std::map<int, ModelSource> model_sources_;
   // by character id, kept across rooms
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
-  // [Enhancements] MenuModelsInField, by model byte: the character's menu model and how it follows a field model with skeleton `skeleton`
-  // (texture registry generation `generation`). No body = drawn with the field model (no menu model, or the skeletons do not match).
+  // [Enhancements] MenuModelsInField, by battle model (the model byte for a character): the detailed body (a character's menu model, an
+  // NPC's battle model) and how it follows a field model with skeleton `skeleton` (texture registry generation `generation`). No body =
+  // drawn with the field model (no detailed body, or the skeletons do not match).
   struct MenuBody {
     std::shared_ptr<ModelHandle> body;
     assets::Skeleton skeleton;
@@ -999,17 +1000,17 @@ class FieldWorld final : public script::FieldHost {
   std::map<int, MenuBody> menu_bodies_;
   bool menu_models_ = false;
   std::vector<render::Mat4> menu_palette_;
-  // The model byte (up to the last menu model) of the character whose field model a model is, -1 = none; by model, for the models that
-  // are not in char_models_ (a room's own copy of a character, a model from elsewhere): found by skeleton (field_skeletons_).
+  // The battle model whose detailed body a model is drawn with (worn_body), -1 = none; by model, for the models that are not in
+  // char_models_ (a room's own copy of a character, an NPC's own model, a model from elsewhere).
   struct WornModel {
     std::weak_ptr<ModelHandle> model;
-    int byte = -1;
+    int body = -1;
   };
   std::map<const ModelHandle*, WornModel> worn_models_;
   // The field skeleton of every model byte up to the last menu model, in the art mode `field_skeletons_hd_` (read on first need).
   std::vector<std::optional<assets::Skeleton>> field_skeletons_;
   bool field_skeletons_hd_ = false;
-  int worn_model_byte(const std::shared_ptr<ModelHandle>& model);
+  int worn_body(const std::shared_ptr<ModelHandle>& model);
   // With MenuModelsInField, the menu body `actor` is drawn with (null = its own model): `palette` (the actor's) becomes the menu model's
   // and its size is folded into `model`.
   const MenuBody* dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model);

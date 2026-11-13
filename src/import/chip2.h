@@ -37,7 +37,8 @@ std::optional<Chip2> parse_chip2(ByteSpan file, std::string* error = nullptr);
 // Composes one (layer, group) of `room` at 4x. Same bbox as the 1x group image; the result has x, y in 1x room
 // coordinates (as the 1x image) and width/height multiplied by 4. Tiles with no chip2 entry are filled from the 1x
 // image (nearest, 4x). `tiles`/`miss` (optional) receive the tile count and the number that fell back.
-// `blend` selects the image kind (RoomGroupImage::blend). nullopt when the layer/group/kind does not exist.
+// `blend` selects the image kind (RoomGroupImage::blend); the HD tiles decide which texels belong to it, so the kind may hold
+// texels that its 1x image lacks. nullopt when the layer/group does not exist.
 std::optional<assets::RoomGroupImage> compose_hd_group(const assets::RoomScene& room, u32 layer, u32 group,
                                                        const Chip2& chip2, u32* tiles = nullptr, u32* miss = nullptr,
                                                        int blend = -1);

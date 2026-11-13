@@ -41,7 +41,8 @@ struct RoomTile {
 
 // All tiles of one (layer, group) composed into RGBA8 images, one per blend kind: `blend` -1 = opaque (tiles without bit 7 and the
 // non-STP texels of semi-transparent tiles), 0..3 = the STP texels of the semi-transparent tiles with that ABR (texture A / texture B
-// split). All images of a group share the bounding box of the group's tiles within the layer. x, y: top-left in room (screen)
+// split). A semi-transparent tile gives its group both kinds, so one of them may be empty in the 1x art and filled in the HD art.
+// All images of a group share the bounding box of the group's tiles within the layer. x, y: top-left in room (screen)
 // coordinates; rgba: width*height*4, alpha 0 where the texel colour is 0.
 struct RoomGroupImage {
   s32 blend = -1;

@@ -1,5 +1,5 @@
-// `opencross modelview [-g dir] [--model stem] [--sd]`: a window that shows one character model (field character, battle player
-// or monster) with an orbit camera, raw animation clips and an original / modded comparison. The original copy reads a Vfs
+// `opencross modelview [-g dir] [--model stem] [--sd]`: a window that shows one character model (field character, battle player,
+// monster, or a room's own model such as an NPC's) with an orbit camera, raw animation clips and an original / modded comparison. The original copy reads a Vfs
 // without mods and skips texture replacement; the modded copy uses the mods enabled in opencross.ini. A playable field character can be
 // shown as [Enhancements] MenuModelsInField draws it: its menu model posed by the field clip (game/menu_rig.h). Writes nothing: no save,
 // no config, no mod settings.
@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <exception>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -22,6 +23,8 @@
 #include "game/disc_index.h"
 #include "game/menu_rig.h"
 #include "game/model_files.h"
+#include "game/room_models.h"
+#include "import/room.h"
 #include "model_view.h"
 #include "platform/config.h"
 #include "platform/paths.h"
@@ -60,7 +63,8 @@ struct TextureRegistryScope {
   }
 };
 
-// One copy of the model: original or modded; for a playable field character also its menu model and the rig that poses it.
+// One copy of the model: original or modded; for a playable field character or a story NPC also its detailed body (menu model or battle
+// model, game::read_body_model) and the rig that poses it.
 struct Side {
   std::optional<assets::ModelAsset> asset;
   std::unique_ptr<render::MeshModel> gpu;
@@ -70,10 +74,28 @@ struct Side {
   std::unique_ptr<render::MeshModel> menu_gpu;
   game::MenuRig rig;
   std::string menu_error;
+  // The detailed body's battle model number, -1 = none.
+  int body = -1;
+  // For a room entry: how many models the room has.
+  size_t room_models = 0;
 };
 
-// `menu_byte`: the character model byte of a playable field character (its menu model), -1 for any other model.
-void load_side(Side& side, const vfs::Vfs& files, const std::string& stem, bool modded, bool hd, int menu_byte, render::MeshPipeline& meshes) {
+// The room models of `map/mapbin/<room>`, empty with `err` set when the room does not load.
+std::vector<assets::RoomModelHeader> read_room_models(const vfs::Vfs& files, const std::string& stem, std::string* err) {
+  const auto bin = files.read("cdrom/" + stem + ".bin");
+  const auto ctd = files.read("cdrom/" + stem + ".ctd");
+  if (!bin || !ctd) {
+    *err = "room files missing";
+    return {};
+  }
+  auto models = import::load_room_models(*bin, *ctd, err);
+  return models ? std::move(*models) : std::vector<assets::RoomModelHeader>{};
+}
+
+// `menu_byte`: the character model byte of a playable field character (its menu model), -1 for any other model, which gets a story NPC's
+// battle model when game::npc_body knows it. `room_model`: the model index of a room entry.
+void load_side(Side& side, const vfs::Vfs& files, const mv::Entry& entry, int room_model, bool modded, bool hd, int menu_byte,
+               render::MeshPipeline& meshes) {
   side.pose.set_model(nullptr);
   side.gpu.reset();
   side.menu_gpu.reset();
@@ -81,8 +103,21 @@ void load_side(Side& side, const vfs::Vfs& files, const std::string& stem, bool 
   side.rig = {};
   side.error.clear();
   side.menu_error.clear();
-  side.asset = game::read_model_files(files, stem, &side.error);
+  side.room_models = 0;
+  side.body = -1;
+  if (entry.kind == mv::Kind::Room) {
+    side.asset.reset();
+    const auto models = read_room_models(files, entry.stem, &side.error);
+    side.room_models = models.size();
+    if (room_model >= 0 && static_cast<size_t>(room_model) < models.size())
+      side.asset = game::build_room_model(models[static_cast<size_t>(room_model)], &side.error);
+    else if (side.error.empty())
+      side.error = "the room has no model " + std::to_string(room_model);
+  } else {
+    side.asset = game::read_model_files(files, entry.stem, &side.error);
+  }
   if (!side.asset) return;
+  const int body = menu_byte >= 0 ? menu_byte : game::npc_body(game::body_fingerprint(*side.asset));
   std::optional<TextureRegistryScope> scope;
   if (modded) {
     scope.emplace(files);
@@ -91,11 +126,12 @@ void load_side(Side& side, const vfs::Vfs& files, const std::string& stem, bool 
   side.gpu = meshes.create_model(*side.asset);
   if (!side.gpu) side.error = "GPU upload failed";
   side.pose.set_model(&*side.asset);
-  if (menu_byte < 0) return;
-  side.menu = game::read_menu_model(files, menu_byte, hd, &side.menu_error);
+  if (body < 0) return;
+  side.body = body;
+  side.menu = game::read_body_model(files, body, hd, &side.menu_error);
   if (!side.menu) return;
-  const auto map = game::menu_rig_map(menu_byte);
-  side.rig = map.empty() ? game::match_menu_rig(*side.asset, *side.menu) : game::match_menu_rig(*side.asset, *side.menu, map);
+  if (modded) render::resolve_model_textures(*side.menu);
+  side.rig = game::match_body_rig(*side.asset, *side.menu, body);
   side.menu_gpu = meshes.create_model(*side.menu);
   if (!side.menu_gpu) side.menu_error = "GPU upload failed";
 }
@@ -144,11 +180,9 @@ int run_sheet(const mv::Options& options) {
   game::DiscIndex discs;
   discs.load(files);
   const std::string stem = lower_ascii(options.model);
-  const int menu_byte = field_model_byte(discs, stem);
-  if (menu_byte < 0) {
-    std::fprintf(stderr, "--sheet needs a playable field character (--model fieldobj/player/<folder>/<file>)\n");
-    return 2;
-  }
+  const auto entries = mv::catalog({stem});
+  const mv::Entry entry = entries.empty() ? mv::Entry{stem, mv::Kind::Field} : entries[0];
+  const int menu_byte = entry.kind == mv::Kind::Field ? field_model_byte(discs, stem) : -1;
   constexpr int kCell = 4 * kSheetView, kWidth = kSheetFrames * kCell, kHeight = kSheetRows * kSheetRowHeight;
   platform::Window window;
   if (!window.create("OpenCross model sheet", kWidth, kHeight, false)) return 1;
@@ -164,7 +198,12 @@ int run_sheet(const mv::Options& options) {
     render::GpuContext& gpu;
     ~WaitBeforeRelease() { gpu.wait_idle(); }
   } wait_before_release{context};
-  load_side(side, files, stem, false, options.hd, menu_byte, meshes);
+  load_side(side, files, entry, options.index, false, options.hd, menu_byte, meshes);
+  if (side.asset && side.body < 0) {
+    std::fprintf(stderr, "--sheet needs a playable field character or a story NPC with a detailed body (--model fieldobj/player/<folder>/<file> "
+                         "or map/mapbin/<room> --index <model>)\n");
+    return 2;
+  }
   if (!side.gpu || !side.menu_gpu) {
     std::fprintf(stderr, "sheet: %s %s\n", side.error.c_str(), side.menu_error.c_str());
     return 1;
@@ -234,7 +273,7 @@ int run_sheet(const mv::Options& options) {
     context.end_frame();
     ++pages;
   }
-  std::printf("sheet: %d page(s), %zu clips, rig %s, scale %.2f\n", pages, clips.size(),
+  std::printf("sheet: %s, %d page(s), %zu clips, rig %s, scale %.2f\n", game::body_model_stem(side.body).c_str(), pages, clips.size(),
               side.rig.plan == game::MenuRigPlan::Map ? "hand-made map" : "automatic", side.rig.scale);
   return 0;
 }
@@ -249,7 +288,9 @@ int run_viewer(const mv::Options& options) {
     std::fprintf(stderr, "game data not found; use -g <dir>\n");
     return 1;
   }
-  const std::vector<mv::Entry> entries = mv::catalog(game::model_stems(original_files));
+  std::vector<std::string> stems = game::model_stems(original_files);
+  std::ranges::move(mv::room_stems(original_files.list("cdrom")), std::back_inserter(stems));
+  const std::vector<mv::Entry> entries = mv::catalog(stems);
   game::DiscIndex discs;
   discs.load(original_files);
   if (entries.empty()) {
@@ -287,7 +328,7 @@ int run_viewer(const mv::Options& options) {
   bool hd = options.hd, show_modded = true, reload = true, scroll_to_selected = true;
   bool playing = false, loop = true, lighting = false, linear = true, show_hidden = false, menu_model = false;
   int menu_byte = -1;
-  int group = 0, clip = -1;
+  int group = 0, clip = -1, room_model = options.index;
   char search[128] = {};
   double seconds = 0;
   float speed = 1, yaw = 0, pitch = kRestPitch, zoom = 1;
@@ -304,8 +345,8 @@ int run_viewer(const mv::Options& options) {
     mods.scan(original_files, game_dir / "mods", render::mod_prefs(config));
     mods.apply(modded_files, hd ? vfs::ModArt::Modded : vfs::ModArt::Sd);
     menu_byte = entries[selected].kind == mv::Kind::Field ? field_model_byte(discs, entries[selected].stem) : -1;
-    load_side(original, original_files, entries[selected].stem, false, hd, menu_byte, meshes);
-    load_side(modded, modded_files, entries[selected].stem, true, hd, menu_byte, meshes);
+    load_side(original, original_files, entries[selected], room_model, false, hd, menu_byte, meshes);
+    load_side(modded, modded_files, entries[selected], room_model, true, hd, menu_byte, meshes);
     bounds = mv::bounds_union(original.asset ? mv::rest_bounds(*original.asset) : mv::Bounds{},
                               modded.asset ? mv::rest_bounds(*modded.asset) : mv::Bounds{});
     clip = -1;
@@ -343,7 +384,7 @@ int run_viewer(const mv::Options& options) {
     ImGui::TextWrapped("%s", entries[selected].stem.c_str());
     ImGui::TextDisabled("Drag to orbit, wheel to zoom");
     ImGui::InputTextWithHint("##search", "Search model path", search, sizeof search);
-    ImGui::Combo("Group", &group, "All\0Field characters\0Battle players\0Battle monsters\0");
+    ImGui::Combo("Group", &group, "All\0Field characters\0Battle players\0Battle monsters\0Room models\0");
     if (ImGui::BeginChild("catalog", {0, 190}, ImGuiChildFlags_Borders)) {
       for (size_t i = 0; i < entries.size(); ++i) {
         if (!mv::matches(entries[i], group, search)) continue;
@@ -354,6 +395,7 @@ int run_viewer(const mv::Options& options) {
         }
         if (clicked && i != selected) {
           selected = i;
+          room_model = 0;
           reload = true;
           yaw = 0;
           pitch = kRestPitch;
@@ -362,15 +404,29 @@ int run_viewer(const mv::Options& options) {
       }
     }
     ImGui::EndChild();
+    if (entries[selected].kind == mv::Kind::Room) {
+      const size_t count = std::max(original.room_models, modded.room_models);
+      if (count > 0) {
+        const int last = static_cast<int>(count) - 1;
+        const int before = room_model;
+        ImGui::SliderInt("Room model", &room_model, 0, last);
+        ImGui::SameLine();
+        if (ImGui::ArrowButton("##previous", ImGuiDir_Left)) room_model = std::max(0, room_model - 1);
+        ImGui::SameLine();
+        if (ImGui::ArrowButton("##next", ImGuiDir_Right)) room_model = std::min(last, room_model + 1);
+        if (room_model != before) reload = true;
+      }
+      ImGui::TextWrapped("The room's own models in the order of its model list (the field script's model numbers): NPCs and objects.");
+    }
     if (ImGui::Checkbox("HD art", &hd)) reload = true;
     ImGui::SameLine();
     ImGui::Checkbox("Modded", &show_modded);
     if (ImGui::Button("Reload models and mods (R)")) reload = true;
     ImGui::TextWrapped("Original ignores every mod. Modded uses the mods enabled in the Mods tab; change them there and reload.");
-    if (menu_byte >= 0) {
-      ImGui::Checkbox("Override with menu model", &menu_model);
-      ImGui::TextWrapped("As the HD models in fields enhancement draws this character: the Status screen's model (on the battle skeleton), "
-                         "posed by the field clip.");
+    if (original.body >= 0 || modded.body >= 0) {
+      ImGui::Checkbox("Override with detailed body", &menu_model);
+      ImGui::TextWrapped("As the HD models in fields enhancement draws this character: the Status screen's model (a story NPC: the battle "
+                         "model), on the battle skeleton, posed by the field clip.");
       const Side& shown = show_modded ? modded : original;
       if (menu_model && shown.menu) {
         constexpr const char* kPlans[4] = {"automatic (under)", "automatic (beside)", "automatic (beside when full)", "hand-made map"};
@@ -455,8 +511,8 @@ int run_viewer(const mv::Options& options) {
     ImGui::Begin("##viewer_status", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs);
     ImGui::Text("%s / %s", show_modded ? "MODDED" : "ORIGINAL", hd ? "HD" : "SD");
     if (!side.error.empty()) ImGui::TextWrapped("%s", side.error.c_str());
-    if (menu_model && menu_byte >= 0) {
-      ImGui::Text("MENU MODEL %s", game::menu_model_stem(menu_byte).c_str());
+    if (menu_model && side.body >= 0) {
+      ImGui::Text("DETAILED BODY %s", game::body_model_stem(side.body).c_str());
       if (!side.menu_error.empty()) ImGui::TextWrapped("%s", side.menu_error.c_str());
     }
     if (mismatch) ImGui::TextWrapped("%s", mismatch);
@@ -535,9 +591,10 @@ int ocmodelview_main(int argc, char** argv) {
   if (options.help || !options.error.empty()) {
     if (!options.error.empty()) std::fprintf(stderr, "%s\n", options.error.c_str());
     std::fprintf(options.error.empty() ? stdout : stderr,
-                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--sd] [--sheet <png base>]\n"
-                 "  <stem> as listed in the viewer, e.g. fieldobj/player/selju/selju\n"
-                 "  --sheet: contact sheets of a playable field character, field and menu model per clip, to <base>_pN.png\n");
+                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--index <room model>] [--sd] [--sheet <png base>]\n"
+                 "  <stem> as listed in the viewer, e.g. fieldobj/player/selju/selju, or map/mapbin/obo_b01f with --index\n"
+                 "  --sheet: contact sheets of a playable field character or a story NPC, field model and detailed body per clip,\n"
+                 "  to <base>_pN.png\n");
     return options.error.empty() ? 0 : 2;
   }
   try {

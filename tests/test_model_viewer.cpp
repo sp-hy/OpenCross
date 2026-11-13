@@ -36,6 +36,18 @@ void test_catalog() {
   }
 }
 
+// A room is listed once, only when both its .bin and .ctd exist; it lands in the room group.
+void test_rooms() {
+  const auto stems = mv::room_stems({"map/mapbin/opa_a01f.bin", "MAP\\MAPBIN\\OPA_A01F.CTD", "map/mapbin/mis_b01f.bin", "map/mapbin/sub/x.bin",
+                                     "map/mapbin/sub/x.ctd", "map/mapbin/.bin"});
+  CHECK(stems.size() == 1);
+  if (stems.size() != 1) return;
+  CHECK(stems[0] == "map/mapbin/opa_a01f");
+  const auto entries = mv::catalog(stems);
+  CHECK(entries.size() == 1 && entries[0].kind == mv::Kind::Room);
+  CHECK(!entries.empty() && mv::matches(entries[0], 4, "opa") && !mv::matches(entries[0], 1, "opa"));
+}
+
 // Clips are matched by source and index, and both copies are sampled at the same frame.
 void test_clips_and_playback() {
   assets::AnimationClip internal, external;
@@ -140,6 +152,7 @@ void test_options() {
 
 int main() {
   test_catalog();
+  test_rooms();
   test_clips_and_playback();
   test_bounds();
   test_camera();

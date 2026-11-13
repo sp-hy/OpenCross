@@ -132,8 +132,9 @@ std::vector<assets::RoomLayer> parse_layers(ByteSpan data, bool strict_size) {
   return layers;
 }
 
-// One image per blend kind present in each group (opaque = -1; semi-transparent tiles contribute their STP texels to the
-// image of their ABR and their other texels to the opaque one).
+// One image per blend kind the tiles of each group can hold (opaque = -1; semi-transparent tiles contribute their STP texels to
+// the image of their ABR and their other texels to the opaque one). A semi-transparent tile makes both images even when its 1x
+// texels fill only one: the HD art of the same tile may split differently.
 void compose_groups(const Vram& vram, u32 clut_rows, assets::RoomLayer& layer) {
   std::map<u8, std::vector<const assets::RoomTile*>> by_group;
   for (const auto& tile : layer.tiles) by_group[tile.group].push_back(&tile);
@@ -162,10 +163,12 @@ void compose_groups(const Vram& vram, u32 clut_rows, assets::RoomLayer& layer) {
       return img;
     };
     for (const auto* tile : tiles) {
-      const TileSource src = tile_source(tile->u, tile->v, tile->clut);
-      if ((tile->clut >> 3) >= static_cast<int>(clut_rows)) continue;
       const bool semi = (tile->flags & 0x80) != 0;
       const int abr = (tile->flags >> 3) & 3;
+      image_for(-1);
+      if (semi) image_for(abr);
+      const TileSource src = tile_source(tile->u, tile->v, tile->clut);
+      if ((tile->clut >> 3) >= static_cast<int>(clut_rows)) continue;
       const std::vector<u16> palette = vram.read_clut(src.clut_x, src.clut_y, 256);
       for (int j = 0; j < kRoomTileSize; ++j)
         for (int i = 0; i < kRoomTileSize; ++i) {

@@ -29,6 +29,11 @@ std::string menu_model_stem(int model);
 // Menu model `model`, cdrom/menu/player/<name>.ome; in HD art with the 4x hd/menu/player/<name>.tim, which is then also dumped / replaced
 // as the texture model/menu/player/<name> and stands in for the 1x texture.
 std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err);
+// The detailed body [Enhancements] MenuModelsInField draws for battle model `body` (the game's battle model numbering, which the menu models
+// share): menu model `body` up to kLastMenuModel, else the battle model itself (battle/monster/...: an NPC's).
+std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int body, bool hd_art, std::string* err);
+// Its file name: the menu model's, else the battle model's.
+std::string body_model_stem(int body);
 // The skeleton alone of field player model `stem` (fieldobj/player/<folder>/<file>, no ".obj"), nullopt when it does not read.
 std::optional<assets::Skeleton> read_field_skeleton(const vfs::Vfs& files, const std::string& stem);
 

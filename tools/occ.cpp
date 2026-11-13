@@ -44,9 +44,11 @@
 #include "data/battlefields.h"
 #include "data/tables.h"
 #include "game/battle/battle_pose.h"
+#include "game/battle/model_table.h"
 #include "game/disc_index.h"
 #include "game/menu_rig.h"
 #include "game/model_files.h"
+#include "game/room_models.h"
 #include "core/log.h"
 #include "import/chip2.h"
 #include "import/container.h"
@@ -74,6 +76,7 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <set>
 
 // Defined in tools/occ_save.cpp.
 int occ_save_main(const std::vector<std::string>& args);
@@ -131,7 +134,7 @@ int usage() {
                "  | models-validate\n"
                "  | room-songs [room]\n"
                "  | room-models [room]\n"
-               "  | menu-rigs [--hd] [--audit | --rooms] [byte]\n"
+               "  | menu-rigs [--hd] [--audit | --rooms | --npcs] [byte]\n"
                "  | save-info <save.dat>\n"
                "  | save-slots <save.dat>\n"
                "  | save-roundtrip <save.dat> <out.dat>\n"
@@ -243,8 +246,9 @@ int cmd_room(const vfs::Vfs& fs, const std::string& name, const std::string& out
   for (const auto& layer : room->layers) {
     for (const auto& group : layer.groups) {
       char file[512];
-      std::snprintf(file, sizeof file, "%s/%s_L%02u_G%02u.png", outdir.c_str(), name.c_str(), layer.index, group.group);
-      std::printf("  layer %2u group %2u: %zu tiles-layer, %ux%u at (%d,%d) z=%u -> %s\n", layer.index, group.group,
+      if (group.blend < 0) std::snprintf(file, sizeof file, "%s/%s_L%02u_G%02u.png", outdir.c_str(), name.c_str(), layer.index, group.group);
+      else std::snprintf(file, sizeof file, "%s/%s_L%02u_G%02u_B%d.png", outdir.c_str(), name.c_str(), layer.index, group.group, group.blend);
+      std::printf("  layer %2u group %2u blend %2d: %zu tiles-layer, %ux%u at (%d,%d) z=%u -> %s\n", layer.index, group.group, group.blend,
                   layer.tiles.size(), group.width, group.height, group.x, group.y, group.z, file);
       if (!write_png(file, group.width, group.height, group.rgba)) {
         std::fprintf(stderr, "cannot write %s\n", file);
@@ -1391,6 +1395,52 @@ PoseAgreement pose_agreement(const assets::ModelAsset& field, const game::MenuRi
   return result;
 }
 
+// A field model and the detailed body [Enhancements] MenuModelsInField draws for it: every playable character's (menu model, by model byte)
+// and every story NPC's of game::npc_bodies (battle model, with the first room copy of its field model). `only` >= 0 keeps the one with that
+// battle model number.
+struct RigPair {
+  int body = -1;
+  std::string field_name;
+  std::optional<assets::ModelAsset> field, menu;
+  std::string err;
+};
+
+std::vector<RigPair> rig_pairs(vfs::Vfs& fs, const game::DiscIndex& discs, bool hd, int only) {
+  std::vector<RigPair> pairs;
+  for (int model = 0; model <= game::kLastMenuModel; ++model) {
+    const std::string field_stem = discs.field_model_stem(1, model);
+    if (field_stem.empty() || (only >= 0 && model != only)) continue;
+    RigPair pair{model, field_stem};
+    pair.field = game::read_model_files(fs, "fieldobj/player/" + field_stem, &pair.err);
+    pair.menu = game::read_menu_model(fs, model, hd, &pair.err);
+    pairs.push_back(std::move(pair));
+  }
+  std::vector<game::NpcBody> wanted;
+  for (const game::NpcBody& npc : game::npc_bodies())
+    if (only < 0 || npc.battle_model == only) wanted.push_back(npc);
+  for (const auto& room_name : list_rooms(fs)) {
+    if (wanted.empty()) break;
+    auto bin = fs.read(room_path(room_name, ".bin"));
+    auto ctd = fs.read(room_path(room_name, ".ctd"));
+    if (!bin || !ctd) continue;
+    std::string err;
+    const auto models = import::load_room_models(*bin, *ctd, &err);
+    for (size_t k = 0; models && k < models->size(); ++k) {
+      auto model = game::build_room_model((*models)[k], &err);
+      if (!model) continue;
+      const u64 fingerprint = game::body_fingerprint(*model);
+      const auto found = std::ranges::find(wanted, fingerprint, &game::NpcBody::fingerprint);
+      if (found == wanted.end()) continue;
+      RigPair pair{found->battle_model, std::format("{}:{}", room_name, k)};
+      pair.field = std::move(model);
+      pair.menu = game::read_body_model(fs, found->battle_model, hd, &pair.err);
+      pairs.push_back(std::move(pair));
+      wanted.erase(found);
+    }
+  }
+  return pairs;
+}
+
 // occ menu-rigs [--hd] [byte]: for every menu model, the field model of the same character model byte and how well their skeletons match
 // (game/menu_rig.h): joint counts, unmatched field joints (with children), mean joint distance (share of the height), bone angles, the
 // pairing strategy kept (under / beside / full = BesideWhenFull), scale, and in the stand pose the mean / worst bone angle between the
@@ -1408,24 +1458,22 @@ int cmd_menu_rigs(vfs::Vfs& fs, bool hd, int only) {
   float lean_sum = 0.0f, pose_sum = 0.0f;
   constexpr const char* kPlanNames[4] = {"under", "beside", "full", "map"};
   int usable = 0, total = 0;
-  for (int model = 0; model <= game::kLastMenuModel; ++model) {
-    const std::string field_stem = discs.field_model_stem(1, model);
-    if (field_stem.empty() || (only >= 0 && model != only)) continue;
-    std::string err;
-    const auto field = game::read_model_files(fs, "fieldobj/player/" + field_stem, &err);
-    const auto menu = game::read_menu_model(fs, model, hd, &err);
+  for (const RigPair& pair : rig_pairs(fs, discs, hd, only)) {
+    const int model = pair.body;
+    const std::string& field_stem = pair.field_name;
+    const auto& field = pair.field;
+    auto menu = pair.menu;
     if (!field || !menu) {
-      std::printf("%-4X %-18s %-9s %s\n", model, field_stem.c_str(), game::menu_model_stem(model).c_str(), err.c_str());
+      std::printf("%-4X %-18s %-9s %s\n", model, field_stem.c_str(), game::body_model_stem(model).c_str(), pair.err.c_str());
       continue;
     }
-    const auto map = game::menu_rig_map(model);
-    const game::MenuRig rig = map.empty() ? game::match_menu_rig(*field, *menu) : game::match_menu_rig(*field, *menu, map);
+    const game::MenuRig rig = game::match_body_rig(*field, *menu, model);
     ++total;
     usable += rig.usable ? 1 : 0;
     const PoseAgreement pose = pose_agreement(*field, rig);
     if (rig.usable) lean_sum += pose.lean, pose_sum += pose.mean;
     std::printf("%-4X %-18s %-9s %3zu %3zu %5d (%d) %7.1f %6.1f %6.1f %-6s %6.2f %6.1f %6.1f %6.1f  %s\n", model, field_stem.c_str(),
-                game::menu_model_stem(model).c_str(), field->skeleton.joints.size(), menu->skeleton.joints.size(), rig.unmatched, rig.unmatched_inner,
+                game::body_model_stem(model).c_str(), field->skeleton.joints.size(), menu->skeleton.joints.size(), rig.unmatched, rig.unmatched_inner,
                 rig.mean_offset * 100.0f, rig.bone_p90, rig.bone_max, kPlanNames[static_cast<int>(rig.plan)], rig.scale, pose.mean, pose.worst, pose.lean,
                 rig.usable ? "yes" : "no");
     if (only < 0) continue;
@@ -1471,15 +1519,12 @@ int cmd_menu_rig_audit(vfs::Vfs& fs, bool hd, int only) {
     return 1;
   }
   int flagged = 0;
-  for (int model = 0; model <= game::kLastMenuModel; ++model) {
-    const std::string field_stem = discs.field_model_stem(1, model);
-    if (field_stem.empty() || (only >= 0 && model != only)) continue;
-    std::string err;
-    const auto field = game::read_model_files(fs, "fieldobj/player/" + field_stem, &err);
-    const auto menu = game::read_menu_model(fs, model, hd, &err);
+  for (const RigPair& pair : rig_pairs(fs, discs, hd, only)) {
+    const int model = pair.body;
+    const auto& field = pair.field;
+    auto menu = pair.menu;
     if (!field || !menu) continue;
-    const auto map = game::menu_rig_map(model);
-    const game::MenuRig rig = map.empty() ? game::match_menu_rig(*field, *menu) : game::match_menu_rig(*field, *menu, map);
+    const game::MenuRig rig = game::match_body_rig(*field, *menu, model);
     std::vector<int> partner(field->skeleton.joints.size(), -1);
     for (size_t k = 0; k < rig.field_joint.size(); ++k)
       if (rig.field_joint[k] >= 0 && partner[static_cast<size_t>(rig.field_joint[k])] < 0) partner[static_cast<size_t>(rig.field_joint[k])] = static_cast<int>(k);
@@ -1518,7 +1563,7 @@ int cmd_menu_rig_audit(vfs::Vfs& fs, bool hd, int only) {
         }
       }
     }
-    std::printf("%-4X %-9s plan %-6s drift %5.1f  %s\n", model, game::menu_model_stem(model).c_str(),
+    std::printf("%-4X %-9s plan %-6s drift %5.1f  %s\n", model, game::body_model_stem(model).c_str(),
                 rig.plan == game::MenuRigPlan::Map ? "map" : "auto", worst, worst_where.c_str());
     const std::vector<RigJointRow> menu_rows = rig_rows(*menu), field_rows = rig_rows(*field);
     int total = 0;
@@ -1623,6 +1668,171 @@ int cmd_menu_rig_rooms(vfs::Vfs& fs, bool hd) {
         break;
       }
     std::printf("field model byte %X: %s, copies %s\n", byte, stem.c_str(), copies.c_str());
+  }
+  return 0;
+}
+
+// Height over width of a model's rest-pose vertices (0 without any).
+float body_aspect(const assets::ModelAsset& model) {
+  float low[3] = {1e9f, 1e9f, 1e9f}, high[3] = {-1e9f, -1e9f, -1e9f};
+  for (const auto& mesh : model.meshes)
+    for (const auto& vertex : mesh.pool)
+      for (size_t axis = 0; axis < 3; ++axis) {
+        low[axis] = std::min(low[axis], vertex.bind_pos[axis]);
+        high[axis] = std::max(high[axis], vertex.bind_pos[axis]);
+      }
+  const float width = high[0] - low[0];
+  return width > 0 ? (high[1] - low[1]) / width : 0.0f;
+}
+
+size_t body_triangles(const assets::ModelAsset& model) {
+  size_t triangles = 0;
+  for (const auto& mesh : model.meshes) triangles += mesh.indices.size() / 3;
+  return triangles;
+}
+
+// A model's colours: per textured triangle the texel under the centre of its texture coordinates, binned to four levels a channel, as shares
+// of those triangles.
+constexpr size_t kColourBins = 64;
+std::array<float, kColourBins> body_colours(const assets::ModelAsset& model) {
+  std::array<float, kColourBins> bins{};
+  float total = 0;
+  for (const auto& mesh : model.meshes)
+    for (const auto& part : mesh.submeshes) {
+      if (part.material >= mesh.materials.size()) continue;
+      const int texture = mesh.materials[part.material].texture;
+      if (texture < 0 || static_cast<size_t>(texture) >= model.textures.size()) continue;
+      const import::Image& image = model.textures[static_cast<size_t>(texture)];
+      if (image.indexed || image.width == 0 || image.height == 0 || image.pixels.size() < size_t{image.width} * image.height * 4) continue;
+      for (u32 i = part.first_index; i + 2 < part.first_index + part.index_count && i + 2 < mesh.indices.size(); i += 3) {
+        float u = 0, v = 0;
+        for (u32 corner = 0; corner < 3; ++corner) {
+          const auto& vertex = mesh.vertices[mesh.indices[i + corner]];
+          u += vertex.uv[0] / 3.0f;
+          v += vertex.uv[1] / 3.0f;
+        }
+        const u32 x = std::min(image.width - 1, static_cast<u32>(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(image.width)));
+        const u32 y = std::min(image.height - 1, static_cast<u32>(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(image.height)));
+        const u8* texel = &image.pixels[(size_t{y} * image.width + x) * 4];
+        if (texel[3] == 0) continue;
+        bins[(texel[0] >> 6) * 16 + (texel[1] >> 6) * 4 + (texel[2] >> 6)] += 1;
+        total += 1;
+      }
+    }
+  if (total > 0)
+    for (float& bin : bins) bin /= total;
+  return bins;
+}
+
+float colour_overlap(const std::array<float, kColourBins>& lhs, const std::array<float, kColourBins>& rhs) {
+  float overlap = 0;
+  for (size_t i = 0; i < kColourBins; ++i) overlap += std::min(lhs[i], rhs[i]);
+  return overlap;
+}
+
+// occ menu-rigs --npcs [--hd]: for every monster battle model with at least kMinNpcJoints joints, the room models it may be the battle body
+// of, grouped by game::body_fingerprint (each with its joints, triangles, height over width, colour overlap, the number of rooms it is in
+// and one of them): those in the most rooms where one of the model's enemy names speaks (a message opening with "Name:"), then those whose
+// colours (body_colours) overlap the battle model's most. What the NPC bodies of [Enhancements] MenuModelsInField are chosen from.
+int cmd_menu_rig_npcs(vfs::Vfs& fs, bool hd) {
+  constexpr size_t kMinNpcJoints = 12, kShown = 3;
+  fs.set_hd_mode(hd);
+  data::GameTables tables;
+  std::string err;
+  if (!tables.load(fs, &err)) {
+    std::fprintf(stderr, "menu-rigs: tables: %s\n", err.c_str());
+    return 1;
+  }
+  struct Body {
+    size_t joints = 0, triangles = 0;
+    float aspect = 0;
+    std::array<float, kColourBins> colours{};
+    std::string room;
+    size_t index = 0;
+    int rooms = 0;
+  };
+  std::map<u64, Body> bodies;
+  std::map<std::string, std::vector<u64>> room_bodies;
+  for (const auto& room_name : list_rooms(fs)) {
+    auto bin = fs.read(room_path(room_name, ".bin"));
+    auto ctd = fs.read(room_path(room_name, ".ctd"));
+    if (!bin || !ctd) continue;
+    const auto models = import::load_room_models(*bin, *ctd, &err);
+    if (!models) continue;
+    std::vector<u64>& seen = room_bodies[room_name];
+    for (size_t k = 0; k < models->size(); ++k) {
+      const auto model = game::build_room_model((*models)[k], &err);
+      if (!model || model->skeleton.joints.size() < kMinNpcJoints) continue;
+      const u64 fingerprint = game::body_fingerprint(*model);
+      Body& body = bodies[fingerprint];
+      if (body.rooms == 0)
+        body = {model->skeleton.joints.size(), body_triangles(*model), body_aspect(*model), body_colours(*model), room_name, k, 0};
+      if (std::ranges::find(seen, fingerprint) == seen.end()) {
+        seen.push_back(fingerprint);
+        ++body.rooms;
+      }
+    }
+  }
+  import::LangTables lang;
+  lang.init(&fs);
+  std::map<std::string, std::vector<std::string>> speaking;
+  for (int id = 0; id < 2000; ++id) {
+    const char* room = import::room_name_for_id(id);
+    if (!room) continue;
+    for (int msg = 0; msg < 400; ++msg) {
+      const std::string* row = lang.raw_field(id, msg, import::Lang::En);
+      if (!row) continue;
+      // The rows write a line break as the two characters \n; markup closes with '}'.
+      const size_t colon = row->find(":\\n");
+      if (colon == std::string::npos || colon == 0 || colon > 40) continue;
+      const size_t brace = row->rfind('}', colon);
+      const size_t start = brace == std::string::npos ? 0 : brace + 1;
+      auto& rooms = speaking[row->substr(start, colon - start)];
+      if (std::ranges::find(rooms, room) == rooms.end()) rooms.emplace_back(room);
+    }
+  }
+  std::map<size_t, std::vector<std::string>> names;
+  for (size_t enemy = 0; enemy < tables.enemies.size(); ++enemy) {
+    const size_t model = tables.enemies[enemy].model();
+    if (model >= game::kBattleModels.size() || !std::string_view(game::kBattleModels[model]).starts_with("battle/monster/")) continue;
+    auto& list = names[model];
+    const std::string name = tables.enemy_name(static_cast<int>(enemy));
+    if (!name.empty() && std::ranges::find(list, name) == list.end()) list.push_back(name);
+  }
+  const auto print_body = [&](u64 fingerprint, const std::array<float, kColourBins>& colours, const char* why) {
+    const Body& body = bodies[fingerprint];
+    std::printf("  %-8s %016llX: %zu joints, %zu triangles, height/width %.2f, colours %.2f, in %d rooms (%s model %zu)\n", why,
+                static_cast<unsigned long long>(fingerprint), body.joints, body.triangles, body.aspect, colour_overlap(colours, body.colours),
+                body.rooms, body.room.c_str(), body.index);
+  };
+  for (const auto& [model, list] : names) {
+    const std::string stem(game::kBattleModels[model]);
+    const auto battle = game::read_model_files(fs, stem, &err);
+    if (!battle || battle->skeleton.joints.size() < kMinNpcJoints) continue;
+    const auto colours = body_colours(*battle);
+    std::string label;
+    std::vector<std::string> rooms;
+    for (const std::string& name : list) {
+      label += (label.empty() ? "" : ", ") + name;
+      if (const auto it = speaking.find(name); it != speaking.end())
+        for (const std::string& room : it->second)
+          if (std::ranges::find(rooms, room) == rooms.end()) rooms.push_back(room);
+    }
+    std::printf("%zu %s (%s): %zu joints, %zu triangles, height/width %.2f; speaks in %zu rooms\n", model,
+                stem.substr(stem.rfind('/') + 1).c_str(), label.c_str(), battle->skeleton.joints.size(), body_triangles(*battle),
+                body_aspect(*battle), rooms.size());
+    std::map<u64, int> counts;
+    for (const std::string& room : rooms)
+      for (const u64 fingerprint : room_bodies[room]) ++counts[fingerprint];
+    std::vector<std::pair<int, u64>> by_rooms;
+    for (const auto& [fingerprint, count] : counts) by_rooms.emplace_back(count, fingerprint);
+    std::ranges::sort(by_rooms, std::greater{});
+    for (size_t i = 0; i < by_rooms.size() && i < kShown; ++i)
+      print_body(by_rooms[i].second, colours, std::format("{} rooms", by_rooms[i].first).c_str());
+    std::vector<std::pair<float, u64>> by_colour;
+    for (const auto& [fingerprint, body] : bodies) by_colour.emplace_back(colour_overlap(colours, body.colours), fingerprint);
+    std::ranges::sort(by_colour, std::greater{});
+    for (size_t i = 0; i < by_colour.size() && i < kShown; ++i) print_body(by_colour[i].second, colours, "colour");
   }
   return 0;
 }
@@ -1916,14 +2126,16 @@ int occ_main(int argc, char** argv) {
   if (cmd == "room-songs" && (args.size() == 1 || args.size() == 2)) return cmd_room_songs(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "room-models" && (args.size() == 1 || args.size() == 2)) return cmd_room_models(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "menu-rigs" && args.size() <= 3) {
-    bool hd = false, rooms = false, audit = false;
+    bool hd = false, rooms = false, audit = false, npcs = false;
     int only = -1;
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "--hd") hd = true;
       else if (args[i] == "--rooms") rooms = true;
       else if (args[i] == "--audit") audit = true;
+      else if (args[i] == "--npcs") npcs = true;
       else only = static_cast<int>(std::strtol(args[i].c_str(), nullptr, 16));
     }
+    if (npcs) return cmd_menu_rig_npcs(fs, hd);
     if (rooms) return cmd_menu_rig_rooms(fs, hd);
     return audit ? cmd_menu_rig_audit(fs, hd, only) : cmd_menu_rigs(fs, hd, only);
   }

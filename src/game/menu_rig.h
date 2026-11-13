@@ -1,6 +1,6 @@
 #pragma once
-// [Enhancements] MenuModelsInField: a character's menu model (the Status screen's mesh, on its battle model's skeleton) posed by the
-// character's field model, whose skeleton has other joints, rest angles and proportions.
+// [Enhancements] MenuModelsInField: a character's menu model (the Status screen's mesh, on its battle model's skeleton), or a story NPC's
+// battle model, posed by the field model, whose skeleton has other joints, rest angles and proportions. "Menu model" below stands for both.
 //
 // Matching, once per model pair: both rest poses are built in model space and scaled to the same height (the joints' vertical extent).
 // From the root down, the children of every paired field joint are paired one to one with free menu joints, cheapest pair first, two
@@ -28,6 +28,7 @@
 // nearest menu joint paired along that field chain swings with its field joint's turn. Any other translated field joint: the menu offset
 // plus the field joint's move away from its rest offset (in model space, at the menu model's size). The menu root turns about the field root's place (scaled) and moves with the
 // field root's movement away from its rest position, by the ratio of the two pelvis heights.
+#include <array>
 #include <span>
 #include <vector>
 
@@ -40,6 +41,10 @@ namespace oc::game {
 
 // The 90th-percentile and the worst angle between a paired field bone and its menu bone in the rest poses, in degrees.
 constexpr float kMaxBoneAngleP90 = 40.0f, kMaxBoneAngle = 90.0f;
+
+// In a hand-made pairing: the menu joint and what hangs from it are not drawn (its vertices collapse onto the joint), for a prop the field
+// model does not carry (Dario's sword).
+constexpr s8 kHiddenJoint = -2;
 
 // Map: the hand-made pairing of menu_rig_map.
 enum class MenuRigPlan { Under, Beside, BesideWhenFull, Map };
@@ -58,6 +63,15 @@ struct MenuRig {
   // model space, menu units), turned with the piece.
   std::vector<int> placed_from, anchor, swing_about, field_parent;
   std::vector<bool> moved;
+  // Per menu joint: not drawn (kHiddenJoint in the map, or below such a joint).
+  std::vector<bool> hidden;
+  // Per menu joint of a held prop (menu_rig_props): the field joint of the field prop whose place it takes, -1 = none; held_driver, the
+  // nearest field joint above that one with a menu partner, held_anchor, that partner; held_turn, the turn laying the menu piece onto the
+  // field piece at rest (held_arm: the menu joint's rest place from the menu piece's centre, turned, menu units; held_reach: the field piece's
+  // centre from its joint at rest, field units).
+  std::vector<int> held_from, held_driver, held_anchor;
+  std::vector<assets::Mat3> held_turn;
+  std::vector<assets::Vec3> held_arm, held_reach;
   std::vector<assets::Vec3> field_offset, menu_rest_pos, mesh_shift;
   assets::Vec3 field_root_rest{};
   // Field root movement -> menu units.
@@ -75,17 +89,42 @@ struct MenuRig {
 // The best of the three strategies, with siblings in separate branches; without that rule only when no strategy is usable with it.
 MenuRig match_menu_rig(const assets::ModelAsset& field, const assets::ModelAsset& menu);
 MenuRig match_menu_rig(const assets::ModelAsset& field, const assets::ModelAsset& menu, MenuRigPlan plan);
-// A rig from a hand-made pairing (field joint per menu joint, -1 = none; several menu joints may follow one field joint): usable when the
-// map has an entry for every menu joint and names field joints the field model has.
+// A rig from a hand-made pairing (field joint per menu joint, -1 = none, kHiddenJoint = not drawn; several menu joints may follow one field
+// joint): usable when the map has an entry for every menu joint and names field joints the field model has.
 MenuRig match_menu_rig(const assets::ModelAsset& field, const assets::ModelAsset& menu, std::span<const s8> map);
-// The hand-made pairing for the menu models whose skeleton the matcher cannot pair with their field model's, by character model byte;
-// empty for the others.
-std::span<const s8> menu_rig_map(int model_byte);
+// The hand-made pairing for the detailed bodies whose skeleton the matcher cannot pair with their field model's, by battle model (the
+// character model byte for a menu model); empty for the others.
+std::span<const s8> menu_rig_map(int body);
+// A prop the detailed body holds otherwise than the field model (the Porre soldiers' rifle, aimed in battle, slung in the field): its menu
+// joints (the first is the piece's root, -1 ends the list) take the place of the field prop on `field_joint`. No menu joint (the first -1):
+// the detailed body lacks the prop (Radius's cane), and the field piece itself is grafted onto it.
+struct HeldProp {
+  int body;
+  int field_joint;
+  std::array<s8, 4> menu_joints;
+};
+std::span<const HeldProp> menu_rig_props(int body);
+// The rig the field draws detailed body `body` with: menu_rig_map's pairing when there is one, else the automatic match; then each held
+// prop of menu_rig_props laid onto its field prop (centres and principal axes of the two pieces' rest meshes, each axis pointing to the
+// side its mesh reaches furthest) and from then on carried as the field prop is, from the nearest field joint above it that has a menu
+// partner. A grafted piece is added to `menu` (a construct, its textures, a joint) before the menu model is uploaded.
+MenuRig match_body_rig(const assets::ModelAsset& field, assets::ModelAsset& menu, int body);
 // Same joints, parents, rest angles and offsets: a room's own copy of a character's field model has its field model's skeleton.
 bool same_skeleton(const assets::Skeleton& lhs, const assets::Skeleton& rhs);
 // Same constructs with the same rest-pose vertices (within half a unit): with the same skeleton, the same character's model. Another
 // person may wear a character's skeleton with a mesh of their own.
 bool same_mesh(const assets::ModelAsset& lhs, const assets::ModelAsset& rhs);
+// A hash of the joint parents and the constructs' rest-pose vertices (to the unit): every room's copy of one model gives the same value.
+u64 body_fingerprint(const assets::ModelAsset& model);
+// A story NPC whose battle model (game::kBattleModels index) is drawn for its own field model (a room model, or a field model past the menu
+// models), known by that field model's body_fingerprint.
+struct NpcBody {
+  u64 fingerprint;
+  int battle_model;
+};
+std::span<const NpcBody> npc_bodies();
+// npc_bodies' battle model for a field model's fingerprint, -1 for any other model.
+int npc_body(u64 fingerprint);
 // The menu model's own part flags (S3: hidden, nearest-corner sort, env-mapped with its own page, part colours) in place of the field model's.
 void menu_model_parts(const assets::ModelAsset& menu, render::MeshPipeline::DrawParams& dp);
 // The menu model's joint matrices (menu units) for the field model's joint matrices `field_palette` (field units).

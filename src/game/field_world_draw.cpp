@@ -326,15 +326,16 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
 }
 
 // ------------------------------------------------------------------------------------------------ actors
-// A character model in the cache up to the last menu model is known by its byte. Any other model (a body past the menu models, an NPC
-// wearing a room's own copy of a character, a model from elsewhere) is that character's when it has the character's field skeleton and
-// mesh exactly (the first byte that matches: Glenn's two field models share both); Lynx's own body (0x33) is a copy of Serge's Lynx body
-// (0x31), the cat and boat bodies copy nobody. Serge and Lynx never meet here: their field skeletons differ. The field mesh is read only
-// for a skeleton that matches.
-int FieldWorld::worn_model_byte(const std::shared_ptr<ModelHandle>& model) {
+// The battle model whose detailed body a field model is drawn with. A character model in the cache up to the last menu model is known by its
+// byte (the menu models share the battle model numbering). Any other model (a body past the menu models, an NPC wearing a room's own copy of
+// a character, a model from elsewhere) is that character's when it has the character's field skeleton and mesh exactly (the first byte that
+// matches: Glenn's two field models share both); Lynx's own body (0x33) is a copy of Serge's Lynx body (0x31), the cat and boat bodies copy
+// nobody. Serge and Lynx never meet here: their field skeletons differ. The field mesh is read only for a skeleton that matches. A model
+// that is no character's is a story NPC's when its body fingerprint is one of npc_body's.
+int FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& model) {
   for (const auto& [byte, handle] : char_models_)
     if (handle == model && byte <= kLastMenuModel) return byte;
-  if (const auto it = worn_models_.find(model.get()); it != worn_models_.end() && it->second.model.lock() == model) return it->second.byte;
+  if (const auto it = worn_models_.find(model.get()); it != worn_models_.end() && it->second.model.lock() == model) return it->second.body;
   if (field_skeletons_.empty() || field_skeletons_hd_ != hd_) {
     field_skeletons_.assign(kLastMenuModel + 1, std::nullopt);
     field_skeletons_hd_ = hd_;
@@ -348,37 +349,37 @@ int FieldWorld::worn_model_byte(const std::shared_ptr<ModelHandle>& model) {
     const auto field = read_model_files(*files_, "fieldobj/player/" + model_stem(static_cast<int>(byte)), &err);
     if (field && same_mesh(model->asset, *field)) found = static_cast<int>(byte);
   }
+  if (found < 0) found = npc_body(body_fingerprint(model->asset));
   worn_models_[model.get()] = {model, found};
   return found;
 }
 
 // [Enhancements] MenuModelsInField: an actor wearing a character's field model (character model bytes up to the last menu model, the
-// numbering the Status screen's body uses; worn_model_byte) is drawn with that character's menu model when the two skeletons match
-// (MenuRig::usable). The menu model is read and matched on first use and again after an art or texture change; every model with the same
-// skeleton shares the match.
+// numbering the Status screen's body uses) or a story NPC's (worn_body) is drawn with the detailed body, the character's menu model or the
+// NPC's battle model, when the two skeletons match (MenuRig::usable). The body is read and matched on first use and again after an art or
+// texture change; every model with the same skeleton shares the match.
 const FieldWorld::MenuBody* FieldWorld::dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model) {
   if (!menu_models_ || !files_ || !meshes_ || !actor.model_handle()) return nullptr;
-  const int model_byte = worn_model_byte(actor.model_handle());
-  if (model_byte < 0) return nullptr;
+  const int body = worn_body(actor.model_handle());
+  if (body < 0) return nullptr;
   const ModelHandle* field = actor.model_handle().get();
   const unsigned generation = render::texture_registry::generation();
-  MenuBody& menu = menu_bodies_[model_byte];
+  MenuBody& menu = menu_bodies_[body];
   if (menu.generation != generation || !same_skeleton(menu.skeleton, field->asset.skeleton)) {
     menu = MenuBody{};
     menu.skeleton = field->asset.skeleton;
     menu.generation = generation;
     std::string err;
-    if (auto asset = read_menu_model(*files_, model_byte, hd_, &err)) {
-      const auto map = menu_rig_map(model_byte);
-      menu.rig = map.empty() ? match_menu_rig(field->asset, *asset) : match_menu_rig(field->asset, *asset, map);
+    if (auto asset = read_body_model(*files_, body, hd_, &err)) {
+      menu.rig = match_body_rig(field->asset, *asset, body);
       if (menu.rig.usable) {
         menu.body = Actor::make_model(*meshes_, std::move(*asset));
       } else {
-        log::info("field: menu model {} not used: {} field joints unmatched ({} with children), bone angles {:.0f} / {:.0f} deg", menu_model_stem(model_byte),
+        log::info("field: detailed body {} not used: {} field joints unmatched ({} with children), bone angles {:.0f} / {:.0f} deg", body_model_stem(body),
                   menu.rig.unmatched, menu.rig.unmatched_inner, menu.rig.bone_p90, menu.rig.bone_max);
       }
     } else {
-      log::warn("field: menu model {}: {}", model_byte, err);
+      log::warn("field: detailed body {}: {}", body, err);
     }
   }
   if (!menu.body || !menu.body->gpu) return nullptr;
