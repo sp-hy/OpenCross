@@ -14,6 +14,9 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 1. Bugs (behaviour)
 
+* **P3. Message width of a mod element's name.** A message that names an element by a script item id from 0x1000 (`data::kScriptElementBase`, ItemWork text) sizes its window from the executable's element name table (`FieldWorld::ps1_string_width`, `src/game/field_world_dialogue.cpp`); a mod's records past that table measure 0, so the window can be too narrow for the name. Reproduce: a test mod with a `pgdat.bin` record 527 and its sysmes name, a room script that puts 0x1000 + 527 in a variable and shows `{itemwork(n)}`. Done when the width comes from the name the dialogue draws (the sysmes element name) for these ids.
+* **P3. Element ids past the vanilla records in the sort and the NG+ carry.** A mod's element records (`data::mod_element`) fall into the last group of the element list's sort (`GameState::sort_elements`, `src/ui/menu/game_state.cpp`, the group by id range) and the New Game+ carry-over skips them like the ids from 0x7E up (`src/game/new_game_plus.cpp`). Done when both decide by the record (element / consumable / summon) instead of the id range.
+
 ## 2. Fidelity gaps (not modelled)
 
 ## 3. Open comparisons (need a capture against the PS1 or RDE)

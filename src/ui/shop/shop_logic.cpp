@@ -63,7 +63,8 @@ bool element_sellable(const GameState& gs, int id) {
   return !(gs.rules && gs.rules->el_fixed(id));
 }
 std::vector<int> element_row_all(const GameState& gs, std::vector<int> row) {
-  for (int id = 1; id < 0x80; ++id) {
+  const int records = gs.rules && gs.rules->tables ? static_cast<int>(gs.rules->tables->elements.size()) : 0x80;
+  for (int id = 1; id < records; ++id) {
     if (!gs.rules || !gs.rules->is_element(id) || !element_sellable(gs, id) || element_price(gs, id) <= 0) continue;
     if (std::find(row.begin(), row.end(), id) == row.end()) row.push_back(id);
   }

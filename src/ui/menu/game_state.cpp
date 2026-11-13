@@ -54,7 +54,7 @@ bool MenuRules::load_pg(const vfs::Vfs& vfs) {
 }
 
 bool MenuRules::el_fixed(int id) const {
-  if (id >= 0x80) return true;
+  if (id >= 0x80 && !(tables && data::mod_element(tables->elements, id))) return true;
   const data::ElemRec* record = elem(id);
   return record && (record->raw[1] & 0x02) != 0;
 }
@@ -242,7 +242,7 @@ bool GameState::cell_available(int character, int row, int col) const {
 }
 int GameState::cell_element(int character, int row, int col) const {
   const int cell = cell_index(character, row, col);
-  return cell < 0 ? 0 : slot.chars[static_cast<size_t>(character)].grid[static_cast<size_t>(cell)] & 0x1FF;
+  return cell < 0 ? 0 : slot.chars[static_cast<size_t>(character)].grid[static_cast<size_t>(cell)] & 0x3FFF;
 }
 int GameState::cell_count(int character, int row, int col) const {
   const int cell = cell_index(character, row, col);
@@ -342,7 +342,7 @@ int GameState::clear_all(int character) {
   int cleared = 0;
   for (int row = 0; row < kRows; ++row)
     for (int col = 0; col < kCols; ++col)
-      if (cell_available(character, row, col) && cell_element(character, row, col) > 0 && cell_element(character, row, col) < 0x80 &&
+      if (cell_available(character, row, col) && is_element(cell_element(character, row, col)) &&
           remove(character, row, col) == Why::Ok)
         ++cleared;
   return cleared;
@@ -358,8 +358,8 @@ void GameState::strip_grid(int character) {
   if (character < 0 || character >= save::kNumChars) return;
   save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
   for (size_t k = 0; k < ch.grid.size(); ++k) {
-    const int id = ch.grid[k] & 0x1FF;
-    if (id >= 0x80) continue;
+    const int id = ch.grid[k] & 0x3FFF;
+    if (id != 0 && !is_element(id)) continue;
     if (id != 0) {
       const int copies = counts_copies(id) ? ch.equipped_qty[k] : 1;
       for (int i = 0; i < copies; ++i) add_element(id);
@@ -376,6 +376,8 @@ void GameState::return_gear(u16& word) {
   } else if (word < 0x400) {
     const int copies = word >= 0x261 && word <= 0x26B ? 5 : 1;
     for (int i = 0; i < copies; ++i) add_element(word - 0x200);
+  } else if (word >= data::kScriptElementBase) {
+    add_element(word - data::kScriptElementBase);
   } else if (word > 0x400 && word < 0x440) {
     slot.set_key_items(slot.key_items() | 1ull << (word - 0x401));
   }
@@ -389,8 +391,8 @@ int GameState::learn_tech(int character, int rows, int tech) {
   for (int row = 0; row < rows; ++row) cells += std::popcount(static_cast<unsigned>(record->level_mask(row) & (row == rows - 1 ? 0xFF : 0xFFFF)));
   if (cells < 1 || cells > 48) return -1;
   u16& cell = slot.chars[static_cast<size_t>(character)].grid[static_cast<size_t>(cells - 1)];
-  const int held = cell & 0x1FF;
-  if (held != 0 && held < 0x80) add_element(held);
+  const int held = cell & 0x3FFF;
+  if (is_element(held)) add_element(held);
   cell = static_cast<u16>(tech | (cell & 0xC000));
   return cells - 1;
 }
@@ -406,7 +408,7 @@ GameState::LevelBuckets GameState::level_buckets() const {
     if (stack.id == 0 || stack.qty == 0) continue;
     ++listed;
     const int level = rules->el_level(stack.id);
-    if (stack.id < 0x80 && level >= 1 && level <= kRows) buckets[static_cast<size_t>(level - 1)].push_back(static_cast<int>(stock_slot));
+    if (is_element(stack.id) && level >= 1 && level <= kRows) buckets[static_cast<size_t>(level - 1)].push_back(static_cast<int>(stock_slot));
   }
   return buckets;
 }

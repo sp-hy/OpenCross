@@ -1147,7 +1147,7 @@ class ScriptedBrain::BattleHost final : public Host {
     if (unit < 0 || unit >= kUnits) return result;
     Unit& state = battle->unit_mut(unit);
     // Ops 0x55 / 0x8F draw a cell of rows 0..gauge (0x8F: rows 0..limit) with rnd(0, cells - 1) until one is free (usable, unused, its
-    // colour-seal flag clear, not locked, no tech flag) and holds an element id < 0x7E whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
+    // colour-seal flag clear, not locked, no tech flag) and holds an element id < 0x7E (or a mod's element record) whose record has byte 0x14 == 0xFF, (byte 0 & 0x44) == 0 and (byte 4 & 0x41) == 0, and a
     // target is found for it; a free cell that fails is closed and the draw goes on. Techs from id 126 up (Big Catch 192, Dopplegang 238,
     // the enemy-only techs ...) are only ever cast by an explicit queue_attack.
     // Op 55 spends row + 1 of a party member's gauge (the game does it in the party's end-of-action step); a monster's gauge never moves.
@@ -1165,7 +1165,7 @@ class ScriptedBrain::BattleHost final : public Host {
       const auto cell = static_cast<size_t>(rng->rnd(0, cells - 1));
       if (!open[cell]) continue;
       const int id = state.cells[cell] & 0x3FFF;
-      if (id < 0x7E && id < static_cast<int>(elements.size())) {
+      if ((id < 0x7E || data::mod_element(elements, id)) && id < static_cast<int>(elements.size())) {
         const auto& rec = elements[static_cast<size_t>(id)];
         if (rec.raw[0x14] == 0xFF && (rec.raw[0] & 0x44) == 0 && (rec.raw[4] & 0x41) == 0) {
           const u32 mask = element_target(rec.raw[4], limit >= 0, unit);

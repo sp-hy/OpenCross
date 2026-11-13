@@ -401,7 +401,8 @@ void FieldWorld::set_reserve_member(int slot, int char_id) {
 }
 
 // Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x401..0x43F key items (id - 0x400 =
-// key item number, 1-based as in GameState::has_key_item); the scripts reach only the first 63 of the 64 bits, higher ids are refused.
+// key item number, 1-based as in GameState::has_key_item; the scripts reach only the first 63 of the 64 bits, higher ids are refused),
+// from data::kScriptElementBase any element record, a mod's past 511 included (id - kScriptElementBase, one copy).
 namespace {
 constexpr int kScriptKeyItems = 63;
 }
@@ -409,6 +410,7 @@ int FieldWorld::item_count(int id) {
   if (id < 0) return 0;
   if (id < 0x200) return gs_->item_count(id);
   if (id < 0x400) return gs_->element_count(id - 0x200);
+  if (id >= data::kScriptElementBase) return gs_->element_count(id - data::kScriptElementBase);
   return id - 0x400 <= kScriptKeyItems && gs_->has_key_item(id - 0x400) ? 1 : 0;
 }
 void FieldWorld::give_item(int id) {
@@ -419,6 +421,8 @@ void FieldWorld::give_item(int id) {
   } else if (id < 0x400) {
     const int copies = id >= 0x261 && id <= 0x26B ? 5 : 1;
     for (int i = 0; i < copies; ++i) gs_->add_element(id - 0x200);
+  } else if (id >= data::kScriptElementBase) {
+    gs_->add_element(id - data::kScriptElementBase);
   } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
     const bool had = gs_->has_key_item(key_item);
     gs_->slot.set_key_items(gs_->slot.key_items() | (1ull << (key_item - 1)));
@@ -431,6 +435,8 @@ void FieldWorld::take_item(int id) {
     gs_->take_item(id);
   } else if (id < 0x400) {
     gs_->take_element(id - 0x200);
+  } else if (id >= data::kScriptElementBase) {
+    gs_->take_element(id - data::kScriptElementBase);
   } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
     gs_->slot.set_key_items(gs_->slot.key_items() & ~(1ull << (key_item - 1)));
   }

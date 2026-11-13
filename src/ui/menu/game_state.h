@@ -49,7 +49,8 @@ struct MenuRules {
   const PgRow* pg_row(int id) const {
     return id >= 0 && id < static_cast<int>(pg.size()) ? &pg[static_cast<size_t>(id)] : nullptr;
   }
-  // ids >= 0x80 are techs / special cells, flag 0x200 = fixed innate-colour element: neither can be moved or removed.
+  // Techs / special cells (ids >= 0x80 but a mod's element records, data::mod_element) and the fixed innate-colour elements (kind bit
+  // 0x02): neither can be moved or removed.
   bool el_fixed(int id) const;
   // Consumable stack (placed up to 5 at a time) / innate-colour-only element.
   bool el_stack(int id) const;
@@ -59,7 +60,8 @@ struct MenuRules {
   int el_colour(int id) const;
   // Level window: legal in grid row r (0-based) iff L-hi <= r+1 <= L+lo.
   bool window_ok(int id, int row) const;
-  bool is_element(int id) const { return id >= 1 && id < 0x80 && elem(id) != nullptr; }
+  // Vanilla 1..0x7F (with or without the tables), or a mod record past 527 that isn't a tech (data::mod_element).
+  bool is_element(int id) const { return (id >= 1 && id < 0x80) || (elem(id) != nullptr && data::mod_element(tables->elements, id)); }
 };
 
 enum class Why { Ok, NoCell, Locked, Fixed, NotEligible, Window, NoStock, Full, Same, Empty };
@@ -161,7 +163,7 @@ class GameState {
   bool cell_exists(int character, int row, int col) const { return cell_index(character, row, col) >= 0; }
   // Unlocked mask bit.
   bool cell_available(int character, int row, int col) const;
-  // Stored id (0 empty; >= 0x80 tech / special).
+  // Stored id (0 empty; >= 0x80 tech / special, or a mod's element record).
   int cell_element(int character, int row, int col) const;
   // Copies held by a stack cell.
   int cell_count(int character, int row, int col) const;
@@ -182,11 +184,14 @@ class GameState {
   int clear_all(int character);
   // Copies a grid cell holds count for `id` (the element table's counted flag); other elements are one copy.
   bool counts_copies(int id) const;
-  // Script strip (FE 6F / FE 7D / the cleared-save strip): every cell whose id is below 0x80, locked or fixed alike, returns its
+  // MenuRules::is_element; without rules the vanilla range 1..0x7F.
+  bool is_element(int id) const { return rules ? rules->is_element(id) : id >= 1 && id < 0x80; }
+  // Script strip (FE 6F / FE 7D / the cleared-save strip): every cell holding an element (is_element), locked or fixed alike, returns its
   // element to the stock (its counted copies, else one; none when the stock is full), keeps only its flag bits and its count is cleared.
   void strip_grid(int character);
   // A gear word given back by a script strip: < 0x200 one item, 0x200..0x3FF an element (five copies for 0x261..0x26B, else one),
-  // 0x401..0x43F the key item bit (key items 1..63, as the script item ops); the word is cleared whatever it held.
+  // 0x401..0x43F the key item bit (key items 1..63, as the script item ops), from data::kScriptElementBase one copy of any element;
+  // the word is cleared whatever it held.
   void return_gear(u16& word);
   // Story tech learning: `tech` goes into the cell that closes grid row `rows - 1` (the last cell of its first 8 columns, counted
   // over the level masks); an element the cell held goes back to the stock, the cell keeps its flag bits. Returns the cell, -1 none.

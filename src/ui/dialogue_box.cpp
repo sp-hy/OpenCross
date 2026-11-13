@@ -8,6 +8,7 @@
 #include <optional>
 
 #include "core/log.h"
+#include "data/tables.h"
 #include "platform/keymap.h"
 #include "platform/pad_remap.h"
 #include "ui/ps1_font.h"
@@ -1278,7 +1279,10 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
     };
     tctx.script_item = [this, var](int index) {
       const int value = var(index);
-      const int key = value > 0x400 ? (0x180000 | (value - 0x400)) : value > 0x200 ? (0x170000 | (value - 0x200)) : value;
+      const int key = value >= data::kScriptElementBase ? (0x170000 | (value - data::kScriptElementBase))
+                      : value > 0x400                   ? (0x180000 | (value - 0x400))
+                      : value > 0x200                   ? (0x170000 | (value - 0x200))
+                                                        : value;
       return tables_.item_name(key, language());
     };
   }

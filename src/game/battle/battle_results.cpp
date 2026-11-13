@@ -836,8 +836,8 @@ struct BattleResults::Impl {
     for (const Row& row : rows) count += hurt(row) ? 1 : 0;
     return count;
   }
-  // The healing elements (menu_pg +B & 0x40, no consumable stack) in the open cells (unlocked, unused, element id < 0x80)
-  // of rows 0..gauge of every living member, scanned slot by slot from the highest cell down; merged by id (count = cells); ordered by tier (+A & 3, 2 first) with the
+  // The healing elements (menu_pg +B & 0x40, no consumable stack) in the open cells (unlocked, unused, element id < 0x80 or a mod's
+  // element record) of rows 0..gauge of every living member, scanned slot by slot from the highest cell down; merged by id (count = cells); ordered by tier (+A & 3, 2 first) with the
   // single-target ones before the all-party ones when fewer than two members are hurt, after them otherwise.
   // Rows with both menu_pg +B 0x40 and +A 0x40 (consumable stacks) are skipped: no menu_pg row has both bits.
   std::vector<Healer> collect_healers() const {
@@ -846,7 +846,7 @@ struct BattleResults::Impl {
       if (!row.present || row.ko || row.gauge < 0) continue;
       for (int cell = std::min((row.gauge + 1) * data::kGridCols, data::kGridCells) - 1; cell >= 0; --cell) {
         const size_t i = static_cast<size_t>(cell);
-        if (!row.open[i] || row.unit_cells[i] == 0 || row.unit_cells[i] >= 0x80) continue;
+        if (!row.open[i] || row.unit_cells[i] == 0 || (row.unit_cells[i] >= 0x80 && !data::mod_element(tables->elements, row.unit_cells[i]))) continue;
         const auto* pg_entry = pg_row(row.unit_cells[i]);
         if (!pg_entry || ((*pg_entry)[0xB] & 0x40) == 0 || ((*pg_entry)[0xA] & 0x40) != 0) continue;
         auto it = std::find_if(uniq.begin(), uniq.end(), [&](const Healer& healer) { return healer.id == row.unit_cells[i]; });
@@ -1184,7 +1184,7 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     Impl::Drop drop;
     drop.element = (word & 0x8000) != 0;
     if (drop.element) {
-      drop.id = word & 0x7F;
+      drop.id = word & 0x7FFF;
       drop.name = impl.element_name(drop.id);
       if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
     } else {

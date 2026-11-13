@@ -3,8 +3,9 @@
 // Everything here is plain data (no dependency on asset importers).
 //
 // A slot block = 0x5AC raw head (header frame, icon, preview + raw game state) + 0x1975 bit-packed section stream
-// + 0xDB raw tail + u32 checksum. decode_block() splits it into a SaveSlot; encode_block() is the exact inverse.
-// Head and tail are kept verbatim so unknown fields survive a round trip.
+// + 0xDB raw tail + u32 checksum. decode_block() splits it into a SaveSlot; encode_block() is the exact inverse, except for what the
+// stream has no room for (element ids past 511), which goes into a side file (set_wide_store). Head and tail are kept verbatim so
+// unknown fields survive a round trip.
 #include <array>
 #include <filesystem>
 #include <optional>
@@ -65,7 +66,16 @@ inline constexpr size_t kTailExtSize = 0xD7;
 namespace tail_tag {
 // The party reserve (party swap): character ids in slot order, 0xFF = an empty slot.
 inline constexpr u8 kReserve = 1;
+// The side file of the slot (set_wide_store): its u64 key.
+inline constexpr u8 kSideFile = 2;
 }  // namespace tail_tag
+
+// The stream stores element ids in 9 bits (stock stacks and grid cells), with no spare bit. encode_block writes an id past 511 as an
+// empty stack / cell there (RDE and the PS1 game see nothing) and, when a store folder is set, the full ids into <dir>/<key>.ocx (key =
+// the FNV-1a hash of the file's content, in the tail record as tail_tag::kSideFile); decode_block lays them back over the block. The
+// file is a container of tagged sections, so more state the block can't hold can go there too. Without a store the ids are dropped on
+// save, as the stream would have to. Memory-card slots, the auto-save and the OCSV page all go through here.
+void set_wide_store(std::filesystem::path dir);
 
 // Item stack: id stored in 9 bits, qty in 7 bits.
 struct ItemStack {
@@ -74,7 +84,8 @@ struct ItemStack {
 };
 
 // One of the 44 characters: the saved parts of the 0xCC-byte record plus dynamic state, name and grid.
-// Stored widths: max_hp 10 bits; the six stats 7 bits each; bonus values 7 bits; model_id 9 bits; grid cells (element id) 9 bits;
+// Stored widths: max_hp 10 bits; the six stats 7 bits each; bonus values 7 bits; model_id 9 bits; grid cells (element id) 9 bits (the
+// in-memory word: id & 0x3FFF, flags 0x4000 / 0x8000; ids past 511 go to the side file, the flags are not saved);
 // unlocked-level masks 10 bits; equipped_qty 3-bit nibbles; name = game-font bytes, NUL terminated (6 symbols max).
 // colour_bit is stored only for characters 0 and 43; status holds the condition bits.
 struct SaveChar {
