@@ -3,9 +3,11 @@
 // character's field model, whose skeleton has other joints, rest angles and proportions.
 //
 // Matching, once per model pair: both rest poses are built in model space and scaled to the same height (the joints' vertical extent).
-// From the root down, the children of every paired field joint are paired one to one with free menu joints, cheapest pair first; the cost
-// is the distance of the two joints plus twice the distance of the centres of their subtrees, plus penalties per menu joint skipped, per
-// difference in subtree size, and for a joint carrying mesh vertices paired with one that carries none. Where the menu joint may lie
+// From the root down, the children of every paired field joint are paired one to one with free menu joints, cheapest pair first, two
+// children never in the same branch (a fallback allows it); the cost is the distance of the two joints plus twice the distance of the centres of their subtrees,
+// plus penalties per menu joint skipped (more for one carrying mesh), per difference in subtree size, and for a joint carrying mesh paired
+// with one that carries none. A field joint left on an empty helper below an unpaired mesh joint moves up to it; torso pieces left unpaired
+// (skirt and coat panels, cape tops) follow the field joint whose mesh lies nearest. Where the menu joint may lie
 // depends on the strategy (MenuRigPlan): only under the parent's partner; also beside it, under the grandparent's partner (a held object
 // that hangs off the hand on one rig hangs off the forearm on the other), at a cost; or beside it only once nothing under it is free, with
 // two siblings never placed in the same branch. All three are tried and the usable one whose bones agree best is kept. A match is usable
@@ -16,9 +18,16 @@
 // measured. Pose transfer, every frame: a paired menu joint turns as its field joint turns away from its rest orientation, in model space
 // (R = R_field * R_field_rest^T * R_menu_rest), so the menu model keeps its own rest posture and takes the field model's movement; an
 // unpaired one keeps the angle and offset to its parent that the menu model's first pose clip gives it (its rest values without one: a held
-// object such as Marcy's shield rests at the model origin and only the clips put it in the hand). Every joint sits
-// at the menu skeleton's own rest offset, so the menu model keeps its proportions; the field root's movement away from its rest position
-// moves the menu root by the ratio of the two pelvis heights.
+// object such as Marcy's shield rests at the model origin and only the clips put it in the hand). Every joint sits at the menu skeleton's
+// own rest offset, so the menu model keeps its proportions, with three exceptions for a paired joint, judged against its anchor (its nearest
+// paired ancestor) and the field joint driving that anchor. A field joint the clips carry far (more than kTravelShare of the height and
+// more than its own rest offset is long: a prop carried from the hip to the hand, Pip's feet pulled into the body), that hangs below that
+// driver and that no other menu joint follows: the menu joint sits at the field joint's offset from the driver, scaled to the menu model,
+// from the anchor, shifted so the two pieces' meshes line up. A field joint hanging below that driver through joints of its
+// own (a skirt panel hung from the pelvis on the menu rig and from the thigh on the field rig): the menu joint's own rest offset from the
+// nearest menu joint paired along that field chain swings with its field joint's turn. Any other translated field joint: the menu offset
+// plus the field joint's move away from its rest offset (in model space, at the menu model's size). The menu root turns about the field root's place (scaled) and moves with the
+// field root's movement away from its rest position, by the ratio of the two pelvis heights.
 #include <span>
 #include <vector>
 
@@ -30,7 +39,7 @@
 namespace oc::game {
 
 // The 90th-percentile and the worst angle between a paired field bone and its menu bone in the rest poses, in degrees.
-constexpr float kMaxBoneAngleP90 = 35.0f, kMaxBoneAngle = 90.0f;
+constexpr float kMaxBoneAngleP90 = 40.0f, kMaxBoneAngle = 90.0f;
 
 // Map: the hand-made pairing of menu_rig_map.
 enum class MenuRigPlan { Under, Beside, BesideWhenFull, Map };
@@ -41,6 +50,15 @@ struct MenuRig {
   // Model-space rest rotations (field joints, menu joints), the menu joints' rest rotation and offset relative to their parent.
   std::vector<assets::Mat3> field_rest, menu_rest, menu_local;
   std::vector<assets::Vec3> menu_offset;
+  // Per menu joint, how it is placed (see the top of this file), -1 / false where it sits at its own offset from its parent: placed_from,
+  // the field joint driving its anchor (its nearest paired ancestor), from which its own field joint's offset is taken; swing_about, the menu
+  // joint about which its rest offset (menu_rest_pos, model space) swings; moved, its own offset plus its field joint's move away from its
+  // rest offset (field_offset, from field_parent).
+  // mesh_shift: for a placed joint, how much further its field piece's mesh hangs from its joint than the menu piece's does (rest pose,
+  // model space, menu units), turned with the piece.
+  std::vector<int> placed_from, anchor, swing_about, field_parent;
+  std::vector<bool> moved;
+  std::vector<assets::Vec3> field_offset, menu_rest_pos, mesh_shift;
   assets::Vec3 field_root_rest{};
   // Field root movement -> menu units.
   float root_motion = 1.0f;
@@ -54,7 +72,7 @@ struct MenuRig {
   bool usable = false;
 };
 
-// The best of the three strategies.
+// The best of the three strategies, with siblings in separate branches; without that rule only when no strategy is usable with it.
 MenuRig match_menu_rig(const assets::ModelAsset& field, const assets::ModelAsset& menu);
 MenuRig match_menu_rig(const assets::ModelAsset& field, const assets::ModelAsset& menu, MenuRigPlan plan);
 // A rig from a hand-made pairing (field joint per menu joint, -1 = none; several menu joints may follow one field joint): usable when the

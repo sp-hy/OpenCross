@@ -143,12 +143,12 @@ Options parse_options(const std::vector<std::string>& args) {
       options.help = true;
     } else if (arg == "--sd") {
       options.hd = false;
-    } else if (arg == "-g" || arg == "--model") {
+    } else if (arg == "-g" || arg == "--model" || arg == "--sheet") {
       if (i + 1 >= args.size() || args[i + 1].starts_with("-")) {
         options.error = "missing value for " + arg;
         return options;
       }
-      (arg == "-g" ? options.game_dir : options.model) = args[++i];
+      (arg == "-g" ? options.game_dir : arg == "--model" ? options.model : options.sheet) = args[++i];
     } else {
       options.error = "unknown argument: " + arg;
       return options;

@@ -917,10 +917,9 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "brightness, with smooth gradients.",
                      cfg.full_precision_effects))
         change.enhancements = true;
-      if (check_cell("Menu models in the field",
-                     "Draws the characters in the field with the detailed models of the Status screen instead of their field models, "
-                     "moving as their field models do. Characters whose two skeletons are built too differently to follow each other "
-                     "keep their field models. Off: the field models.",
+      if (check_cell("HD models in fields",
+                     "Draws the playable characters in the field with the detailed models of the Status screen instead of their field "
+                     "models, moving as their field models do. Off: the field models.",
                      cfg.menu_models_in_field))
         change.enhancements = true;
       ImGui::EndTable();

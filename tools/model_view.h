@@ -46,10 +46,11 @@ struct Camera {
 Camera orbit_camera(const Bounds& bounds, float yaw, float pitch, float zoom, float aspect);
 
 struct Options {
-  std::string game_dir, model, error;
+  // sheet: write contact sheets to <sheet>_pN.png and exit (ocmodelview.cpp, run_sheet).
+  std::string game_dir, model, sheet, error;
   bool hd = true, help = false;
 };
-// -g <dir>, --model <stem>, --sd, --help / -h.
+// -g <dir>, --model <stem>, --sheet <png base>, --sd, --help / -h.
 Options parse_options(const std::vector<std::string>& args);
 
 }  // namespace oc::tool::model_view

@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <format>
 #include <memory>
 #include <numbers>
 #include <optional>
@@ -119,6 +120,123 @@ void show_stats(const char* label, const Side& side) {
   ImGui::Text("%zu parts / %zu joints / %zu clips", side.asset->meshes.size(), side.asset->skeleton.joints.size(), side.asset->clips.size());
   if (side.asset->skeleton.joints.size() > render::MeshPipeline::kMaxJoints)
     ImGui::TextWrapped("More joints than the renderer's %u (the game draws it the same way).", render::MeshPipeline::kMaxJoints);
+}
+
+// Contact sheets of a playable field character for reviewing [Enhancements] MenuModelsInField: one row per clip (the field model's own,
+// then its event pack's; a one-keyframe pose repeats across the row), kSheetFrames keyframes across each row, and per keyframe the field
+// model and the menu model posed from it, from the front and from the side. kSheetRows rows a page, written to <sheet>_p<N>.png;
+// unmodded files, the chosen art set.
+constexpr int kSheetRows = 6, kSheetFrames = 3, kSheetView = 110, kSheetRowHeight = 170, kSheetLabel = 18;
+// Closer than the viewer's fitted framing: a cell is narrow and the model stands upright in it.
+constexpr float kSheetZoom = 0.62f;
+
+int run_sheet(const mv::Options& options) {
+  platform::Config config;
+  config.load(platform::exe_dir() / "opencross.ini");
+  const std::string requested = !options.game_dir.empty() ? options.game_dir : !env_game_dir().empty() ? env_game_dir() : config.game_dir;
+  const auto game_dir = platform::find_game_dir(requested);
+  vfs::Vfs files;
+  if (game_dir.empty() || !files.open(game_dir)) {
+    std::fprintf(stderr, "game data not found; use -g <dir>\n");
+    return 1;
+  }
+  files.set_hd_mode(options.hd);
+  game::DiscIndex discs;
+  discs.load(files);
+  const std::string stem = lower_ascii(options.model);
+  const int menu_byte = field_model_byte(discs, stem);
+  if (menu_byte < 0) {
+    std::fprintf(stderr, "--sheet needs a playable field character (--model fieldobj/player/<folder>/<file>)\n");
+    return 2;
+  }
+  constexpr int kCell = 4 * kSheetView, kWidth = kSheetFrames * kCell, kHeight = kSheetRows * kSheetRowHeight;
+  platform::Window window;
+  if (!window.create("OpenCross model sheet", kWidth, kHeight, false)) return 1;
+  render::GpuContext context;
+  if (!context.init(window.handle(), true, config.gpu_driver)) return 1;
+  context.set_clear_color(0.18f, 0.20f, 0.24f);
+  render::MeshPipeline meshes;
+  if (!meshes.init(context)) return 1;
+  render::ImGuiLayer ui;
+  if (!ui.init(context, window.handle())) return 1;
+  Side side;
+  struct WaitBeforeRelease {
+    render::GpuContext& gpu;
+    ~WaitBeforeRelease() { gpu.wait_idle(); }
+  } wait_before_release{context};
+  load_side(side, files, stem, false, options.hd, menu_byte, meshes);
+  if (!side.gpu || !side.menu_gpu) {
+    std::fprintf(stderr, "sheet: %s %s\n", side.error.c_str(), side.menu_error.c_str());
+    return 1;
+  }
+  std::vector<size_t> clips;
+  for (size_t i = 0; i < side.asset->clips.size(); ++i)
+    if (side.asset->clips[i].frame_count > 0) clips.push_back(i);
+  const mv::Bounds bounds = mv::rest_bounds(*side.asset);
+  std::vector<render::Mat4> palette, menu_palette;
+  platform::Input input;
+  int pages = 0;
+  for (size_t first = 0; first < clips.size(); first += kSheetRows) {
+    if (!window.pump(input)) break;
+    ui.new_frame();
+    render::Frame frame;
+    if (!context.begin_frame(frame)) {
+      ImGui::EndFrame();
+      continue;
+    }
+    const float to_pixels = static_cast<float>(frame.extent.width) / static_cast<float>(kWidth);
+    const ImGuiIO& io = ImGui::GetIO();
+    const float to_ui = io.DisplaySize.x / static_cast<float>(kWidth);
+    ImDrawList* labels = ImGui::GetForegroundDrawList();
+    for (int row = 0; row < kSheetRows && first + static_cast<size_t>(row) < clips.size(); ++row) {
+      const assets::AnimationClip& clip = side.asset->clips[clips[first + static_cast<size_t>(row)]];
+      const std::string label = std::format("{} ({} keys)", clip.name, clip.frame_count);
+      labels->AddText({4.0f * to_ui, static_cast<float>(row * kSheetRowHeight + 2) * to_ui}, IM_COL32(255, 255, 200, 255), label.c_str());
+      for (int column = 0; column < kSheetFrames; ++column) {
+        const float key = static_cast<float>(column) * static_cast<float>(clip.frame_count - 1) / static_cast<float>(kSheetFrames);
+        side.pose.palette_at(static_cast<int>(clips[first + static_cast<size_t>(row)]), key, palette);
+        game::menu_rig_palette(side.rig, palette, menu_palette);
+        for (int view = 0; view < 4; ++view) {
+          const bool menu = view % 2 == 1;
+          const float yaw = view < 2 ? 0.0f : kPi * 0.5f;
+          const float x = static_cast<float>(column * kCell + view * kSheetView) * to_pixels;
+          const float y = static_cast<float>(row * kSheetRowHeight + kSheetLabel) * to_pixels;
+          const float w = static_cast<float>(kSheetView) * to_pixels, h = static_cast<float>(kSheetRowHeight - kSheetLabel) * to_pixels;
+          const mv::Camera camera = mv::orbit_camera(bounds, yaw, 0.0f, kSheetZoom, w / h);
+          render::MeshPipeline::DrawParams params;
+          params.view = camera.view;
+          params.view_proj = camera.projection * camera.view;
+          params.palette = menu ? menu_palette : palette;
+          params.hd = options.hd;
+          params.linear = true;
+          if (menu) {
+            params.model = render::mat4_scale(side.rig.scale);
+            game::menu_model_parts(*side.menu, params);
+          } else {
+            for (size_t k = 0; k < side.asset->meshes.size() && k < side.asset->shading.size() && k < kMaxHiddenMeshes; ++k)
+              if (side.asset->shading[k].flags & 1) params.hidden_meshes |= 1u << k;
+          }
+          const SDL_GPUViewport viewport{x, y, w, h, 0, 1};
+          SDL_SetGPUViewport(context.pass(), &viewport);
+          meshes.begin(frame, {static_cast<s32>(x), static_cast<s32>(y), static_cast<u32>(w), static_cast<u32>(h)});
+          meshes.draw(menu ? *side.menu_gpu : *side.gpu, params);
+          meshes.end();
+        }
+      }
+    }
+    const SDL_GPUViewport full{0, 0, static_cast<float>(frame.extent.width), static_cast<float>(frame.extent.height), 0, 1};
+    SDL_SetGPUViewport(context.pass(), &full);
+    ui.render(frame);
+    const std::string path = std::format("{}_p{}.png", options.sheet, pages);
+    context.request_capture([path](std::vector<u8>&& pixels, u32 width, u32 height) {
+      if (!write_png(path, width, height, pixels)) std::fprintf(stderr, "sheet: could not write %s\n", path.c_str());
+    });
+    context.end_frame();
+    ++pages;
+  }
+  std::printf("sheet: %d page(s), %zu clips, rig %s, scale %.2f\n", pages, clips.size(),
+              side.rig.plan == game::MenuRigPlan::Map ? "hand-made map" : "automatic", side.rig.scale);
+  return 0;
 }
 
 int run_viewer(const mv::Options& options) {
@@ -251,7 +369,7 @@ int run_viewer(const mv::Options& options) {
     ImGui::TextWrapped("Original ignores every mod. Modded uses the mods enabled in the Mods tab; change them there and reload.");
     if (menu_byte >= 0) {
       ImGui::Checkbox("Override with menu model", &menu_model);
-      ImGui::TextWrapped("As [Enhancements] Menu models in the field draws this character: the Status screen's model (on the battle skeleton), "
+      ImGui::TextWrapped("As the HD models in fields enhancement draws this character: the Status screen's model (on the battle skeleton), "
                          "posed by the field clip.");
       const Side& shown = show_modded ? modded : original;
       if (menu_model && shown.menu) {
@@ -417,12 +535,13 @@ int ocmodelview_main(int argc, char** argv) {
   if (options.help || !options.error.empty()) {
     if (!options.error.empty()) std::fprintf(stderr, "%s\n", options.error.c_str());
     std::fprintf(options.error.empty() ? stdout : stderr,
-                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--sd]\n"
-                 "  <stem> as listed in the viewer, e.g. fieldobj/player/selju/selju\n");
+                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--sd] [--sheet <png base>]\n"
+                 "  <stem> as listed in the viewer, e.g. fieldobj/player/selju/selju\n"
+                 "  --sheet: contact sheets of a playable field character, field and menu model per clip, to <base>_pN.png\n");
     return options.error.empty() ? 0 : 2;
   }
   try {
-    return oc::tool::run_viewer(options);
+    return options.sheet.empty() ? oc::tool::run_viewer(options) : oc::tool::run_sheet(options);
   } catch (const std::exception& error) {
     std::fprintf(stderr, "modelview: %s\n", error.what());
     return 1;

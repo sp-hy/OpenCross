@@ -19,7 +19,8 @@
 //   occ room-songs [room]                    every PLAY_SONG of the room scripts with the song id and its BGM track
 //   occ room-models [room]                   import every room model (subfiles 11+) of all rooms / one room, report failures
 //   occ menu-rigs [--hd] [byte]              how each menu model's skeleton matches its character's field model ([Enhancements] MenuModelsInField);
-//                                            with a model byte (hex), every joint of that pair
+//                                            with a model byte (hex), every joint of that pair; --audit: drift over every field clip and
+//                                            mesh-region checks; --rooms: room copies of character field models
 //   occ battlefields [--inc <file>]          which rooms fight on which stage (every BATTLE op of every room script -> bg_NN); --inc writes
 //                                            src/data/battlefield_rooms.inc (the Debug tab's battlefield labels)
 //   occ world-markers [--inc <file>]         the overworld screens' location markers: label text (EN) -> target room, and the room-prefix ->
@@ -42,6 +43,7 @@
 #include "audio/bgm_table.h"
 #include "data/battlefields.h"
 #include "data/tables.h"
+#include "game/battle/battle_pose.h"
 #include "game/disc_index.h"
 #include "game/menu_rig.h"
 #include "game/model_files.h"
@@ -129,7 +131,7 @@ int usage() {
                "  | models-validate\n"
                "  | room-songs [room]\n"
                "  | room-models [room]\n"
-               "  | menu-rigs [--hd] [byte]\n"
+               "  | menu-rigs [--hd] [--audit | --rooms] [byte]\n"
                "  | save-info <save.dat>\n"
                "  | save-slots <save.dat>\n"
                "  | save-roundtrip <save.dat> <out.dat>\n"
@@ -1455,6 +1457,96 @@ int cmd_menu_rigs(vfs::Vfs& fs, bool hd, int only) {
   return 0;
 }
 
+// occ menu-rigs --audit [--hd] [byte]: how each menu model follows its field model over every field clip (game/menu_rig.h). Per character:
+// the worst drift of a paired bone (the angle between the field bone and its menu bone at a keyframe, minus that angle in the rest pose), its
+// menu joint and clip; then the region flags: a menu joint carrying mesh whose driver (its field partner, else its nearest paired ancestor's)
+// is not the field joint whose mesh lies nearest to its own (by vertex centre, shares of the height), nor that joint's parent or child, with
+// the distance between the two centres.
+int cmd_menu_rig_audit(vfs::Vfs& fs, bool hd, int only) {
+  constexpr float kMinField = 20.0f, kMinMenu = 10.0f, kDegrees = 180.0f / 3.14159265f;
+  fs.set_hd_mode(hd);
+  game::DiscIndex discs;
+  if (!discs.load(fs)) {
+    std::fprintf(stderr, "menu-rigs: no disc index\n");
+    return 1;
+  }
+  int flagged = 0;
+  for (int model = 0; model <= game::kLastMenuModel; ++model) {
+    const std::string field_stem = discs.field_model_stem(1, model);
+    if (field_stem.empty() || (only >= 0 && model != only)) continue;
+    std::string err;
+    const auto field = game::read_model_files(fs, "fieldobj/player/" + field_stem, &err);
+    const auto menu = game::read_menu_model(fs, model, hd, &err);
+    if (!field || !menu) continue;
+    const auto map = game::menu_rig_map(model);
+    const game::MenuRig rig = map.empty() ? game::match_menu_rig(*field, *menu) : game::match_menu_rig(*field, *menu, map);
+    std::vector<int> partner(field->skeleton.joints.size(), -1);
+    for (size_t k = 0; k < rig.field_joint.size(); ++k)
+      if (rig.field_joint[k] >= 0 && partner[static_cast<size_t>(rig.field_joint[k])] < 0) partner[static_cast<size_t>(rig.field_joint[k])] = static_cast<int>(k);
+    game::UnitPose pose;
+    pose.set_model(&*field);
+    std::vector<render::Mat4> field_palette, menu_palette;
+    auto bone_angle = [&](size_t i) -> float {
+      const int parent = field->skeleton.joints[i].parent;
+      if (parent < 0 || partner[i] < 0 || partner[static_cast<size_t>(parent)] < 0) return -1.0f;
+      const size_t k = static_cast<size_t>(partner[i]), menu_parent = static_cast<size_t>(partner[static_cast<size_t>(parent)]);
+      float a[3], b[3], dot = 0.0f, length_a = 0.0f, length_b = 0.0f;
+      for (int axis = 0; axis < 3; ++axis) {
+        a[axis] = field_palette[i].at(axis, 3) - field_palette[static_cast<size_t>(parent)].at(axis, 3);
+        b[axis] = (menu_palette[k].at(axis, 3) - menu_palette[menu_parent].at(axis, 3)) * rig.scale;
+        dot += a[axis] * b[axis], length_a += a[axis] * a[axis], length_b += b[axis] * b[axis];
+      }
+      if (length_a < kMinField * kMinField || length_b < kMinMenu * kMinMenu) return -1.0f;
+      return std::acos(std::clamp(dot / std::sqrt(length_a * length_b), -1.0f, 1.0f)) * kDegrees;
+    };
+    pose.palette_at(-1, 0.0f, field_palette);
+    game::menu_rig_palette(rig, field_palette, menu_palette);
+    std::vector<float> rest(field_palette.size(), -1.0f);
+    for (size_t i = 0; i < rest.size(); ++i) rest[i] = bone_angle(i);
+    float worst = 0.0f;
+    std::string worst_where = "-";
+    for (size_t index = 0; index < field->clips.size(); ++index) {
+      const assets::AnimationClip& clip = field->clips[index];
+      for (u32 key = 0; key < clip.frame_count; ++key) {
+        pose.palette_at(static_cast<int>(index), static_cast<float>(key), field_palette);
+        game::menu_rig_palette(rig, field_palette, menu_palette);
+        for (size_t i = 0; i < field_palette.size(); ++i) {
+          const float now = bone_angle(i);
+          if (now < 0.0f || rest[i] < 0.0f || std::fabs(now - rest[i]) <= worst) continue;
+          worst = std::fabs(now - rest[i]);
+          worst_where = std::format("menu joint {} (field {}) in {} key {}", partner[i], i, clip.name, key);
+        }
+      }
+    }
+    std::printf("%-4X %-9s plan %-6s drift %5.1f  %s\n", model, game::menu_model_stem(model).c_str(),
+                rig.plan == game::MenuRigPlan::Map ? "map" : "auto", worst, worst_where.c_str());
+    const std::vector<RigJointRow> menu_rows = rig_rows(*menu), field_rows = rig_rows(*field);
+    int total = 0;
+    for (const RigJointRow& row : menu_rows) total += row.vertices;
+    for (size_t j = 0; j < menu_rows.size(); ++j) {
+      if (menu_rows[j].vertices * 50 < total) continue;
+      int driver = -1;
+      for (int at = static_cast<int>(j); at >= 0 && driver < 0; at = menu->skeleton.joints[static_cast<size_t>(at)].parent) driver = rig.field_joint[static_cast<size_t>(at)];
+      size_t nearest = 0;
+      float best = 1e9f;
+      for (size_t i = 0; i < field_rows.size(); ++i) {
+        if (field_rows[i].vertices == 0) continue;
+        float distance = 0.0f;
+        for (size_t axis = 0; axis < 3; ++axis) distance += (field_rows[i].centre[axis] - menu_rows[j].centre[axis]) * (field_rows[i].centre[axis] - menu_rows[j].centre[axis]);
+        if (distance < best) best = distance, nearest = i;
+      }
+      if (driver < 0) continue;
+      const int nearest_parent = field->skeleton.joints[nearest].parent, driver_parent = field->skeleton.joints[static_cast<size_t>(driver)].parent;
+      if (static_cast<int>(nearest) == driver || nearest_parent == driver || driver_parent == static_cast<int>(nearest)) continue;
+      ++flagged;
+      std::printf("     region: menu joint %zu (%d verts, %s) is driven by field %d, nearest field mesh is joint %zu (%.1f%% away)\n", j, menu_rows[j].vertices,
+                  rig.field_joint[j] >= 0 ? "paired" : "rides its parent", driver, nearest, std::sqrt(best) * 100.0f);
+    }
+  }
+  std::printf("menu-rigs --audit: %d region flags\n", flagged);
+  return 0;
+}
+
 // occ menu-rigs --rooms [--hd]: which room models are a playable character's field model (the same skeleton and mesh, game::same_skeleton /
 // same_mesh), so MenuModelsInField also draws those NPCs with the character's menu model; per character byte the room models with the same
 // skeleton and mesh, with the same skeleton but another mesh (another person on the character's rig: not taken), and with the field
@@ -1824,14 +1916,16 @@ int occ_main(int argc, char** argv) {
   if (cmd == "room-songs" && (args.size() == 1 || args.size() == 2)) return cmd_room_songs(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "room-models" && (args.size() == 1 || args.size() == 2)) return cmd_room_models(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "menu-rigs" && args.size() <= 3) {
-    bool hd = false, rooms = false;
+    bool hd = false, rooms = false, audit = false;
     int only = -1;
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "--hd") hd = true;
       else if (args[i] == "--rooms") rooms = true;
+      else if (args[i] == "--audit") audit = true;
       else only = static_cast<int>(std::strtol(args[i].c_str(), nullptr, 16));
     }
-    return rooms ? cmd_menu_rig_rooms(fs, hd) : cmd_menu_rigs(fs, hd, only);
+    if (rooms) return cmd_menu_rig_rooms(fs, hd);
+    return audit ? cmd_menu_rig_audit(fs, hd, only) : cmd_menu_rigs(fs, hd, only);
   }
   return usage();
 }
