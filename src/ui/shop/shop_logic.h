@@ -49,6 +49,14 @@ bool element_sellable(const GameState& gs, int id);
 int element_sell_unit(const GameState& gs, int id);
 int element_sell_total(const GameState& gs, int id, int qty);
 int element_buy_max(const GameState& gs, int id);
+// The info panel's target text from the element's targeting byte: `all` = bit 0x10 (All, else Single); the side is
+// Enemy when only bit 0x80 is set, Ally when bit 0x80 is clear, Ally/Enemy when both 0x80 and 0x40 are set.
+enum class TargetSide { Enemy, Ally, Both };
+struct TargetWord {
+  bool all = false;
+  TargetSide side = TargetSide::Enemy;
+};
+TargetWord element_target_word(u8 targeting);
 Res buy_element(GameState& gs, int id, int qty);
 // Cheats "Every element in shops": the shop's own row first, then every other element that can be sold (price > 0), by id.
 std::vector<int> element_row_all(const GameState& gs, std::vector<int> row);

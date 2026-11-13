@@ -72,6 +72,17 @@ int element_buy_max(const GameState& gs, int id) {
   if (price <= 0) return 0;
   return std::max(0, std::min(kStackCap - gs.element_count(id), static_cast<int>(gs.gold() / static_cast<u32>(price))));
 }
+TargetWord element_target_word(u8 targeting) {
+  TargetWord word;
+  word.all = (targeting & 0x10) != 0;
+  if ((targeting & 0xC0) == 0xC0)
+    word.side = TargetSide::Both;
+  else if (targeting & 0x80)
+    word.side = TargetSide::Enemy;
+  else
+    word.side = TargetSide::Ally;
+  return word;
+}
 Res buy_element(GameState& gs, int id, int qty) {
   const int price = element_price(gs, id);
   if (qty < 1 || price <= 0) return Res::NoStock;
