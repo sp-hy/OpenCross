@@ -414,6 +414,13 @@ std::optional<int> FieldWorld::script_element(int item_id) const {
   if (!element) return std::nullopt;
   return static_cast<int>(*element);
 }
+std::optional<int> FieldWorld::script_shop(script::MenuKind kind, int row) const {
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> mapped =
+      data::table_rows().record_for(owner, kind == script::MenuKind::ElementShop ? "el_shop" : "waa_shop", row);
+  if (!mapped) return std::nullopt;
+  return static_cast<int>(*mapped);
+}
 int FieldWorld::item_count(int id) {
   if (id < 0) return 0;
   if (id < 0x200) return gs_->item_count(id);
@@ -471,7 +478,7 @@ void FieldWorld::use_key_item(int item) {
   if (item == 1) {
     menu_req_ = {script::MenuKind::PartyScreen, 0};
   } else if (item == 63) {
-    menu_req_ = {script::MenuKind::WeaponShop, vm_.var(0x4A)};
+    menu_req_ = {script::MenuKind::WeaponShop, script_shop(script::MenuKind::WeaponShop, vm_.var(0x4A)).value_or(-1)};
   } else {
     menu_req_ = {script::MenuKind::PartyScreen, 1};
   }

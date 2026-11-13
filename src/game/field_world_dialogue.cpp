@@ -491,6 +491,11 @@ void FieldWorld::request_menu(script::MenuKind kind, int arg) {
     return;
   }
   if (menu_state_ != MenuState::None) return;
+  if (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop) {
+    const std::optional<int> row = script_shop(kind, arg);
+    if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
+    arg = row.value_or(-1);
+  }
   if (kind == script::MenuKind::Save && gs_) {
     // FE 85: the roster's grids and gear go back to the stock and variable 0x7E = 3, so the
     // save written by the list that follows is a cleared save (summary flags 3).

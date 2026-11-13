@@ -96,6 +96,8 @@ struct ElemRec {
 // Element records past vanilla's 527 are a mod's own: their kind byte (+0x01, bit 1 = tech) says element or tech. Vanilla ids keep
 // their blocks (1..0x7F elements and consumables, 0x80.. techs, enemy actions and specials), whatever their kind.
 inline constexpr int kVanillaElemRecs = 527;
+// Rows of the element shop and blacksmith tables (el_shop.bin, waa_shop.bin); a mod's shops by name follow them.
+inline constexpr size_t kShopRows = 32;
 // Field-script item ids (BB / B4 / D5, ItemWork text) from here name element `id - kScriptElementBase` (in a mod's room its own id,
 // TableRows::element_for), any record: the vanilla
 // range 0x200 + id ends at 511 where the key items start (0x401..). Operands carry 15 bits, so ids up to 0x6FFF.

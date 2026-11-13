@@ -759,8 +759,8 @@ void App::install_mod_rooms_and_text() {
     if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(mod.name))
       for (const auto& [id, stem] : *rooms) text.rooms[id] = mod_rooms.internal_id(stem);
     // Its element ids ([Elements]) once the tables are loaded (a controlled run's reload); at launch the tables' load sets them.
-    if (mod.has_manifest)
-      for (const auto& [own_id, name] : mod.manifest.elements)
+    if (const auto own = mod.manifest.own_ids.find("pgdat"); mod.has_manifest && own != mod.manifest.own_ids.end())
+      for (const auto& [own_id, name] : own->second)
         if (const std::optional<size_t> element = data::table_rows().element_of(mod.name, own_id))
           text.elements[own_id] = static_cast<int>(*element);
     // The draft folder (a controlled run's DraftDir: an editor's unsaved dialog) has no [Rooms]: its rows name a mod room by the id

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "data/table_rows.h"
+
 #include "vfs/vfs.h"
 
 namespace oc::ui::shop {
@@ -42,6 +44,8 @@ bool ShopData::load_waa_shop(const vfs::Vfs& vfs) {
     while (!row.empty() && row.back() == 0) row.pop_back();
     waa_shop.push_back(std::move(row));
   }
+  // The mods' rows belong to the VFS they were set for only.
+  if (data::table_mods(vfs)) data::table_rows().apply_lists("waa_shop", waa_shop);
   return true;
 }
 

@@ -181,11 +181,14 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   rows.build(mods ? *mods : no_mods, {{"monster", mon->size() / kStatRecSize},
                                       {"pgdat", pg->size() / kElemRecSize},
                                       {"scenedat", player[0].size() / 28},
-                                      {"ditem", dd.size() / 8}});
+                                      {"ditem", dd.size() / 8},
+                                      {"el_shop", kShopRows},
+                                      {"waa_shop", kShopRows}});
   // A mod's element names and help rows are written under its own element ids: the text moves them to the elements those ids name.
   for (const TableMod& mod : mods && publish ? *mods : no_mods) {
     std::map<int, int> elements;
-    for (const auto& [own_id, name] : mod.elements)
+    const auto own = mod.own_ids.find("pgdat");
+    for (const auto& [own_id, name] : own == mod.own_ids.end() ? std::vector<std::pair<int, std::string>>{} : own->second)
       if (const std::optional<size_t> element = rows.element_of(mod.name, own_id)) elements[own_id] = static_cast<int>(*element);
     if (!elements.empty()) import::set_text_mod_elements(mod.name, std::move(elements));
   }
@@ -272,8 +275,9 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   }
 
   // --- shops / trade
-  if (auto shop_bytes = game_fs.read("cdrom/menu/el_shop.bin")) el_shop = rows_u16(*shop_bytes, 32);
-  if (auto shop_bytes = game_fs.read("cdrom/menu/waa_shop.bin")) waa_shop = rows_u16(*shop_bytes, 32);
+  if (auto shop_bytes = game_fs.read("cdrom/menu/el_shop.bin")) el_shop = rows_u16(*shop_bytes, kShopRows);
+  rows.apply_lists("el_shop", el_shop);
+  if (auto shop_bytes = game_fs.read("cdrom/menu/waa_shop.bin")) waa_shop = rows_u16(*shop_bytes, kShopRows);
   if (auto trade_bytes = game_fs.read("cdrom/menu/trade.bin")) {
     for (auto& row : rows_u16(*trade_bytes, 32)) {
       std::vector<TradeEntry> entries;
