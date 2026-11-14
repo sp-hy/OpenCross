@@ -1,5 +1,6 @@
 #pragma once
 // A hidden Edge browser (WebView2) that loads web pages and reads them with a script, for content a plain HTTP client cannot fetch.
+// Without the WebView2 runtime (Proton) the page is opened in the running Steam client's own browser instead (SteamBrowser).
 //
 // One worker thread owns the browser: its own hidden window, the WebView2 environment (profile folder given to start()), muted, and a
 // queue of requests answered in order. A request names a URL and a script expression. After the page has loaded, the expression is
@@ -48,6 +49,8 @@ class WebPageReader {
   // No request queued or running.
   bool idle() const;
 
+  // A browser can start: the WebView2 runtime is installed or Steam is running.
+  static bool available();
   // The installed WebView2 runtime's version; empty when there is none.
   static std::string runtime_version();
 

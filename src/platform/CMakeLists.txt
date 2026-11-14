@@ -15,6 +15,9 @@ add_library(oc_platform STATIC
   updater.cpp
   steam.h
   steam.cpp
+  steam_abi.h
+  steam_browser.h
+  steam_browser.cpp
   web_page.h
   web_page.cpp
 )

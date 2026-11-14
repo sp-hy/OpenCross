@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "core/log.h"
+#include "platform/steam_abi.h"
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -20,14 +21,34 @@
 namespace oc::platform {
 
 #ifdef _WIN32
+namespace steam_abi {
+
+bool client_library(std::wstring& path) {
+  DWORD pid = 0, size = sizeof(pid);
+  constexpr const wchar_t* kKey = L"Software\\Valve\\Steam\\ActiveProcess";
+  if (RegGetValueW(HKEY_CURRENT_USER, kKey, L"pid", RRF_RT_REG_DWORD, nullptr, &pid, &size) != ERROR_SUCCESS || pid == 0) return false;
+  wchar_t buffer[MAX_PATH] = {};
+  size = sizeof(buffer);
+  if (RegGetValueW(HKEY_CURRENT_USER, kKey, L"SteamClientDll64", RRF_RT_REG_SZ, nullptr, buffer, &size) != ERROR_SUCCESS) return false;
+  path = buffer;
+  return true;
+}
+
+void set_app_id() {
+  const std::string app_id = std::to_string(kRdeAppId);
+  _putenv_s("SteamAppId", app_id.c_str());
+  _putenv_s("SteamGameId", app_id.c_str());
+}
+
+}  // namespace steam_abi
+
 namespace {
 
-constexpr const char* kClientInterface = "SteamClient017";
+using namespace steam_abi;
+
 constexpr const char* kStatsInterface = "STEAMUSERSTATS_INTERFACE_VERSION012";
 constexpr const char* kFriendsInterface = "SteamFriends017";
 
-// Slots in the client object's table of functions.
-enum ClientSlot { kCreatePipe = 0, kReleasePipe = 1, kConnectGlobalUser = 2, kReleaseUser = 4, kGenericInterface = 12 };
 // Slots in the user stats object's table of functions.
 enum StatsSlot {
   kRequestCurrentStats = 0,
@@ -44,23 +65,6 @@ enum FriendsSlot { kGetPersonaName = 0 };
 constexpr std::int32_t kStatsReceived = 1101, kStatsStored = 1102;
 constexpr std::int32_t kResultOk = 1;
 constexpr auto kRetryDelay = std::chrono::seconds(10);
-
-struct CallbackMessage {
-  std::int32_t user;
-  std::int32_t id;
-  unsigned char* data;
-  std::int32_t size;
-};
-
-using GetCallbackFn = bool (*)(std::int32_t pipe, CallbackMessage* message, std::int32_t* call);
-using FreeCallbackFn = bool (*)(std::int32_t pipe);
-using CreateInterfaceFn = void* (*)(const char* version, int* status);
-
-template <typename Result, typename... Args>
-Result call_slot(void* object, int slot, Args... args) {
-  const auto table = *static_cast<Result (***)(void*, Args...)>(object);
-  return table[slot](object, args...);
-}
 
 // Stats messages start with the game id, then the result.
 bool message_is_ok(const CallbackMessage& message) {
@@ -165,17 +169,6 @@ private:
   std::int32_t user_ = 0;
 };
 
-bool steam_running(std::wstring& client_dll) {
-  DWORD pid = 0, size = sizeof(pid);
-  constexpr const wchar_t* kKey = L"Software\\Valve\\Steam\\ActiveProcess";
-  if (RegGetValueW(HKEY_CURRENT_USER, kKey, L"pid", RRF_RT_REG_DWORD, nullptr, &pid, &size) != ERROR_SUCCESS || pid == 0) return false;
-  wchar_t path[MAX_PATH] = {};
-  size = sizeof(path);
-  if (RegGetValueW(HKEY_CURRENT_USER, kKey, L"SteamClientDll64", RRF_RT_REG_SZ, nullptr, path, &size) != ERROR_SUCCESS) return false;
-  client_dll = path;
-  return true;
-}
-
 }  // namespace
 #endif
 
@@ -184,12 +177,9 @@ SteamClient::~SteamClient() { disconnect(); }
 bool SteamClient::connect() {
 #ifdef _WIN32
   if (backend_) return true;
-  const std::string app_id = std::to_string(kRdeAppId);
-  _putenv_s("SteamAppId", app_id.c_str());
-  _putenv_s("SteamGameId", app_id.c_str());
-
+  steam_abi::set_app_id();
   std::wstring client_dll;
-  if (!steam_running(client_dll)) {
+  if (!steam_abi::client_library(client_dll)) {
     log::info("steam: not running");
     return false;
   }

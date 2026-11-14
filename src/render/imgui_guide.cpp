@@ -40,7 +40,7 @@ constexpr float kPageRepeat = 0.08f;
 constexpr int kTabWidth = 8;
 constexpr float kMaxWidthPerHeight = 1.3f;
 constexpr const char* kHotkeyHint = "~ on the keyboard or LB + RB on a controller";
-constexpr const char* kRuntimeMissing = "The Microsoft Edge WebView2 runtime is not installed, so guides cannot be loaded.";
+constexpr const char* kNoBrowser = "Guides cannot be loaded: they need Steam running or the Microsoft Edge WebView2 runtime installed.";
 
 std::string read_file(const std::filesystem::path& path) {
   std::ifstream in(path, std::ios::binary);
@@ -110,7 +110,7 @@ std::string_view trim_right(std::string_view text) {
 
 void GuideOverlay::init(std::filesystem::path folder) {
   folder_ = std::move(folder);
-  runtime_missing_ = platform::WebPageReader::runtime_version().empty();
+  no_browser_ = !platform::WebPageReader::available();
 }
 
 void GuideOverlay::shutdown() {
@@ -128,8 +128,9 @@ void GuideOverlay::start_browser() {
 
 void GuideOverlay::request_list() {
   if (list_id_) return;
-  if (runtime_missing_) {
-    list_error_ = kRuntimeMissing;
+  no_browser_ = !platform::WebPageReader::available();
+  if (no_browser_) {
+    list_error_ = kNoBrowser;
     return;
   }
   start_browser();
@@ -140,8 +141,9 @@ void GuideOverlay::request_list() {
 void GuideOverlay::start_fetch(const std::string& url) {
   fetch_ = {};
   failed_url_.clear();
-  if (runtime_missing_) {
-    fetch_error_ = kRuntimeMissing;
+  no_browser_ = !platform::WebPageReader::available();
+  if (no_browser_) {
+    fetch_error_ = kNoBrowser;
     failed_url_ = url;
     return;
   }
@@ -309,12 +311,12 @@ bool GuideOverlay::settings_rows(platform::Config& cfg) {
     ImGui::TextWrapped("%s", text.c_str());
     ImGui::PopStyleColor();
   };
-  if (runtime_missing_) note(kRuntimeMissing);
+  if (no_browser_) note(kNoBrowser);
   if (browser_on_ && reader_.verifying()) note("GameFAQs is checking this computer: finish the check in the window that opened.");
   else if (list_id_) note("Loading the guide list...");
-  else if (!list_error_.empty() && !runtime_missing_) note("Guide list: " + list_error_);
+  else if (!list_error_.empty() && !no_browser_) note("Guide list: " + list_error_);
   if (fetch_.id) note("Loading the guide (page " + std::to_string(fetch_.next + 1) + " of " + std::to_string(fetch_.count) + ")...");
-  else if (!fetch_error_.empty() && failed_url_ == cfg.guide_url && !runtime_missing_) note("The guide could not be loaded: " + fetch_error_);
+  else if (!fetch_error_.empty() && failed_url_ == cfg.guide_url && !no_browser_) note("The guide could not be loaded: " + fetch_error_);
   else if (!guide_.url.empty() && guide_.url == cfg.guide_url) note(std::string("Ready: press ") + kHotkeyHint + " to read it.");
   return changed;
 }
@@ -646,7 +648,7 @@ void GuideOverlay::draw(ImGuiLayer& ui, const platform::Input& in, double dt) {
       if (fetch_.id) ImGui::Text("Loading the guide (page %d of %d)...", fetch_.next + 1, fetch_.count);
       else if (!fetch_error_.empty()) {
         ImGui::TextWrapped("The guide could not be loaded: %s", fetch_error_.c_str());
-        if (!runtime_missing_ && ImGui::Button("Try again")) start_fetch(wanted_url_);
+        if (!no_browser_ && ImGui::Button("Try again")) start_fetch(wanted_url_);
       } else {
         ImGui::TextUnformatted("Loading the guide...");
       }

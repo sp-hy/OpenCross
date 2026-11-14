@@ -79,7 +79,7 @@ class GuideOverlay {
   std::filesystem::path folder_;
   platform::WebPageReader reader_;
   bool browser_on_ = false;
-  bool runtime_missing_ = false;
+  bool no_browser_ = false;
   std::chrono::steady_clock::time_point idle_since_{};
 
   net::GuideList list_;

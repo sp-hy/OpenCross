@@ -1,5 +1,7 @@
-// The WebView2 page reader: a worker thread with a message loop (WebView2 runs on a single-threaded COM apartment), one hidden
-// top-level window that hosts the browser and doubles as the "verify" window, and a poll timer that evaluates the request's script.
+// The page reader: a worker thread with a message loop (WebView2 runs on a single-threaded COM apartment), one hidden top-level window
+// that hosts the browser and doubles as the "verify" window, and a poll timer that evaluates the request's script. Without the
+// WebView2 runtime (or with OC_GUIDE_BROWSER=steam) the page is a SteamBrowser instead, pumped by a second timer; it has no window
+// to show, so a "verify" page there runs into the timeout.
 #include "platform/web_page.h"
 
 #include <windows.h>
@@ -7,6 +9,7 @@
 #include <WebView2.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <condition_variable>
 #include <deque>
 #include <mutex>
@@ -15,6 +18,8 @@
 #include <thread>
 
 #include "core/log.h"
+#include "platform/steam_abi.h"
+#include "platform/steam_browser.h"
 
 namespace oc::platform {
 
@@ -26,8 +31,10 @@ using Clock = std::chrono::steady_clock;
 
 constexpr UINT kWakeMessage = WM_APP + 1;
 constexpr UINT kQuitMessage = WM_APP + 2;
-constexpr UINT_PTR kPollTimer = 1;
-constexpr UINT kPollMs = 250;
+constexpr UINT_PTR kPollTimer = 1, kPumpTimer = 2;
+constexpr UINT kPollMs = 250, kPumpMs = 16;
+// A Steam script run that sends no part back in this time is given up, so the next poll runs it again.
+constexpr auto kScriptLost = std::chrono::seconds(3);
 constexpr auto kPageTimeout = std::chrono::seconds(30);
 constexpr auto kVerifyTimeout = std::chrono::minutes(3);
 // A "verify" answer that lasts this long shows the window (sites that check silently answer sooner).
@@ -80,6 +87,7 @@ struct WebPageReader::Impl {
   ComPtr<ICoreWebView2Environment> environment;
   ComPtr<ICoreWebView2Controller> controller;
   ComPtr<ICoreWebView2> view;
+  std::unique_ptr<SteamBrowser> steam;
   std::optional<Request> current;
   bool page_loaded = false;
   bool script_running = false;
@@ -89,12 +97,17 @@ struct WebPageReader::Impl {
 
   void run();
   void create_browser();
+  void start_steam();
+  void pump_steam();
   void browser_failed(HRESULT result);
+  void unavailable(std::string why);
+  void navigate(const std::string& url);
   void attach(ICoreWebView2Controller* made);
   void page_completed(ICoreWebView2NavigationCompletedEventArgs* args);
   void next_request();
   void poll();
   void script_answered(std::uint64_t id, HRESULT result, const wchar_t* value);
+  void script_value(std::string json);
   void finish(bool ok, std::string json, std::string error);
   void show(bool on);
   void answer(Answer reply);
@@ -171,6 +184,11 @@ bool WebPageReader::idle() const {
   return impl_->queue.empty() && !impl_->busy;
 }
 
+bool WebPageReader::available() {
+  std::wstring library;
+  return !runtime_version().empty() || steam_abi::client_library(library);
+}
+
 std::string WebPageReader::runtime_version() {
   LPWSTR version = nullptr;
   if (FAILED(GetAvailableCoreWebView2BrowserVersionString(nullptr, &version)) || !version) return {};
@@ -209,6 +227,7 @@ void WebPageReader::Impl::run() {
       DispatchMessageW(&message);
     }
     if (controller) controller->Close();
+    steam.reset();
     view.Reset();
     controller.Reset();
     environment.Reset();
@@ -218,6 +237,11 @@ void WebPageReader::Impl::run() {
 }
 
 void WebPageReader::Impl::create_browser() {
+  const char* choice = std::getenv("OC_GUIDE_BROWSER");
+  if ((choice && std::string_view(choice) == "steam") || WebPageReader::runtime_version().empty()) {
+    start_steam();
+    return;
+  }
   const std::wstring folder = profile.wstring();
   const HRESULT started = CreateCoreWebView2EnvironmentWithOptions(
       nullptr, folder.c_str(), nullptr,
@@ -239,14 +263,72 @@ void WebPageReader::Impl::create_browser() {
   if (FAILED(started)) browser_failed(started);
 }
 
+void WebPageReader::Impl::start_steam() {
+  steam = std::make_unique<SteamBrowser>();
+  std::string why;
+  if (!steam->open(why)) {
+    steam.reset();
+    log::warn("web page: Steam's browser did not start ({})", why);
+    unavailable(why + " Guides need Steam or the Microsoft Edge WebView2 runtime.");
+    return;
+  }
+  SetTimer(hwnd, kPumpTimer, kPumpMs, nullptr);
+}
+
+void WebPageReader::Impl::pump_steam() {
+  if (!steam) return;
+  std::vector<SteamBrowser::Event> events;
+  steam->pump(events);
+  for (SteamBrowser::Event& event : events) {
+    switch (event.kind) {
+      case SteamBrowser::Event::Kind::Ready:
+        {
+          std::lock_guard lock(mutex);
+          state = State::Ready;
+        }
+        log::info("web page: browser ready (Steam)");
+        next_request();
+        break;
+      case SteamBrowser::Event::Kind::Loaded:
+        if (current && event.text != "about:blank") {
+          page_loaded = true;
+          poll();
+        }
+        break;
+      case SteamBrowser::Event::Kind::Answer:
+        script_running = false;
+        if (current) script_value(std::move(event.text));
+        break;
+      case SteamBrowser::Event::Kind::Closed:
+        KillTimer(hwnd, kPumpTimer);
+        KillTimer(hwnd, kPollTimer);
+        steam.reset();
+        if (current) answer({current->id, false, {}, "Steam's browser closed."});
+        current.reset();
+        unavailable("Steam's browser closed.");
+        return;
+    }
+  }
+}
+
 void WebPageReader::Impl::browser_failed(HRESULT result) {
   const bool missing = result == HRESULT_FROM_WIN32(ERROR_FILE_NOT_FOUND);
   log::warn("web page: the browser did not start (HRESULT {:#010x})", static_cast<unsigned>(result));
+  unavailable(missing ? "The Microsoft Edge WebView2 runtime is not installed." : "The Microsoft Edge WebView2 browser did not start.");
+}
+
+void WebPageReader::Impl::unavailable(std::string why) {
   std::lock_guard lock(mutex);
   state = State::Unavailable;
-  reason = missing ? "The Microsoft Edge WebView2 runtime is not installed." : "The Microsoft Edge WebView2 browser did not start.";
+  reason = std::move(why);
   for (const Request& request : queue) answers.push_back({request.id, false, {}, reason});
   queue.clear();
+  busy = false;
+}
+
+void WebPageReader::Impl::navigate(const std::string& url) {
+  if (steam) steam->load(url);
+  else if (FAILED(view->Navigate(widen(url).c_str()))) finish(false, {}, "The page address is not valid.");
 }
 
 void WebPageReader::Impl::attach(ICoreWebView2Controller* made) {
@@ -321,7 +403,7 @@ void WebPageReader::Impl::page_completed(ICoreWebView2NavigationCompletedEventAr
 }
 
 void WebPageReader::Impl::next_request() {
-  if (current || !view) return;
+  if (current || !(view || (steam && steam->ready()))) return;
   {
     std::lock_guard lock(mutex);
     if (queue.empty()) {
@@ -336,17 +418,25 @@ void WebPageReader::Impl::next_request() {
   verify_since.reset();
   deadline = Clock::now() + kPageTimeout;
   SetTimer(hwnd, kPollTimer, kPollMs, nullptr);
-  if (FAILED(view->Navigate(widen(current->url).c_str()))) finish(false, {}, "The page address is not valid.");
+  navigate(current->url);
 }
 
 void WebPageReader::Impl::poll() {
   if (!current) return;
-  if (Clock::now() > deadline) {
-    finish(false, {}, shown ? "The site check was not finished in time." : "The page took too long to answer.");
+  const Clock::time_point now = Clock::now();
+  if (now > deadline) {
+    finish(false, {}, shown                   ? "The site check was not finished in time."
+                      : steam && verify_since ? "The site asked for a check that Steam's browser cannot show."
+                                              : "The page took too long to answer.");
     return;
   }
+  if (steam && script_running && steam->stalled(kScriptLost)) script_running = false;
   if (!page_loaded || script_running) return;
   script_running = true;
+  if (steam) {
+    steam->evaluate(current->script);
+    return;
+  }
   const std::uint64_t id = current->id;
   const HRESULT queued = view->ExecuteScript(widen(current->script).c_str(),
                                              Callback<ICoreWebView2ExecuteScriptCompletedHandler>([this, id](HRESULT result, LPCWSTR value) -> HRESULT {
@@ -359,12 +449,15 @@ void WebPageReader::Impl::poll() {
 void WebPageReader::Impl::script_answered(std::uint64_t id, HRESULT result, const wchar_t* value) {
   script_running = false;
   if (!current || current->id != id || FAILED(result)) return;
-  std::string json = narrow(value);
+  script_value(narrow(value));
+}
+
+void WebPageReader::Impl::script_value(std::string json) {
   if (json.empty() || json == "null") return;
   if (json == "\"verify\"") {
     const Clock::time_point now = Clock::now();
     if (!verify_since) verify_since = now;
-    if (!shown && now - *verify_since >= kVerifyGrace) {
+    if (!steam && !shown && now - *verify_since >= kVerifyGrace) {
       show(true);
       deadline = now + kVerifyTimeout;
     }
@@ -390,7 +483,7 @@ void WebPageReader::Impl::finish(bool ok, std::string json, std::string error) {
       std::lock_guard lock(mutex);
       busy = false;
     }
-    view->Navigate(L"about:blank");
+    navigate("about:blank");
   }
 }
 
@@ -437,6 +530,7 @@ LRESULT CALLBACK WebPageReader::Impl::window_proc(HWND window, UINT message, WPA
       return 0;
     case WM_TIMER:
       if (wparam == kPollTimer) impl->poll();
+      else if (wparam == kPumpTimer) impl->pump_steam();
       return 0;
     case kWakeMessage: impl->next_request(); return 0;
     case kQuitMessage: PostQuitMessage(0); return 0;

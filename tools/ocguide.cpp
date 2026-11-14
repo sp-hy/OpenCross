@@ -71,8 +71,8 @@ int ocguide_main(int argc, char** argv) {
   if (argc < 2) return usage();
   const std::string_view mode = argv[1];
   if (!((mode == "html" && argc == 4) || (mode == "list" && argc == 2) || (mode == "guide" && argc == 3) || (mode == "identity" && argc == 2))) return usage();
-  if (WebPageReader::runtime_version().empty()) {
-    std::printf("the Microsoft Edge WebView2 runtime is not installed\n");
+  if (!WebPageReader::available()) {
+    std::printf("neither the Microsoft Edge WebView2 runtime nor Steam is available\n");
     return 1;
   }
   WebPageReader reader;
