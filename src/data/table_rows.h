@@ -142,6 +142,8 @@ class TableRows {
   std::optional<size_t> id_of(std::string_view table, std::string_view name) const;
   // The name of record `id` of `table`'s names ("" for the table's own records).
   const std::string& name_of(std::string_view table, size_t id) const;
+  // The names mods add to `table`, in id order.
+  const std::vector<std::string>& added_names(std::string_view table) const;
   // The record of `table` that `own_id` means in mod `mod`'s scripts and text (its own-id section), or nothing when it lists no such id.
   std::optional<size_t> record_of(std::string_view mod, std::string_view table, int own_id) const;
   // The mod's own id for record `id` of `table`, or nothing.

@@ -187,6 +187,15 @@ bool Vfs::exists(std::string_view path) const {
   return shipped->contains(arc, member, disc);
 }
 
+bool Vfs::added(std::string_view path) const {
+  auto [arc, member] = split_archive_path(path);
+  if (!overlay()->files.contains(arc + "/" + member)) return false;
+  const Backend* shipped = impl_->backend.get();
+  if (!shipped) return true;
+  const int disc = disc_.load();
+  return !shipped->contains(arc, member, disc) && !(arc == "cdrom" && shipped->contains("cdrom2", member, disc));
+}
+
 std::optional<std::filesystem::path> Vfs::loose_file(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
   auto ov = overlay();

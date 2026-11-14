@@ -468,6 +468,12 @@ const std::string& TableRows::name_of(std::string_view table, size_t id) const {
   return names->second.names[id - names->second.first];
 }
 
+const std::vector<std::string>& TableRows::added_names(std::string_view table) const {
+  static const std::vector<std::string> kNone;
+  const auto names = names_.find(table_names_of(table));
+  return names == names_.end() ? kNone : names->second.names;
+}
+
 std::optional<size_t> TableRows::record_of(std::string_view mod, std::string_view table, int own_id) const {
   const auto by_mod = own_ids_.find(mod);
   if (by_mod == own_ids_.end()) return std::nullopt;

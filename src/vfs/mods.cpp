@@ -57,6 +57,8 @@ bool is_zip(const fs::path& file) {
 struct Index {
   std::unordered_map<std::string, std::vector<std::vector<std::string>>> by_name;
   std::set<std::string> archives;
+  // Every folder that holds a shipped member, at any depth ("cdrom/battle", "cdrom/battle/monster/komodo", ...).
+  std::set<std::string> folders;
 };
 
 Index build_index(const Vfs& vfs) {
@@ -71,6 +73,8 @@ Index build_index(const Vfs& vfs) {
       const bool is_directory = logical.back() == '/';
       if (is_directory) continue;
       if (!seen.insert(logical).second) continue;
+      for (size_t slash = logical.find('/'); slash != std::string::npos; slash = logical.find('/', slash + 1))
+        idx.folders.insert(logical.substr(0, slash));
       std::vector<std::string> comps = split(logical);
       idx.by_name[comps.back()].push_back(std::move(comps));
     }
@@ -108,6 +112,12 @@ int resolve(const Index& idx, const std::vector<std::string>& rel, std::string& 
   if (count > 1) return 2;
   target = join(*winner);
   return 1;
+}
+
+// Whether the game ships any member in the folder that holds `path`.
+bool in_shipped_folder(const Index& idx, const std::string& path) {
+  const size_t slash = path.rfind('/');
+  return slash != std::string::npos && idx.folders.contains(path.substr(0, slash));
 }
 
 // A file that matches no shipped member is a new member when its path names an archive: the first folder called after one (cdrom2 as
@@ -287,7 +297,17 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
   }
   switch (resolve(idx, rel, mod_file.target)) {
     case 1: add_matched(mod, std::move(mod_file)); break;
-    case 2: mod.ambiguous.push_back(mod_file.rel); break;
+    case 2:
+      // A name several members carry (at0.prd) under an archive folder, in a folder the game ships nothing in (a new monster's own
+      // folder): a new member. In one of the game's folders it stays ambiguous (a folder left out, most likely).
+      if (std::string target; added_target(idx, rel, root, target) && !in_shipped_folder(idx, target)) {
+        mod_file.target = std::move(target);
+        mod.added.push_back(mod_file.rel);
+        add_matched(mod, std::move(mod_file));
+      } else {
+        mod.ambiguous.push_back(mod_file.rel);
+      }
+      break;
     default:
       if (added_target(idx, rel, root, mod_file.target)) {
         mod.added.push_back(mod_file.rel);
