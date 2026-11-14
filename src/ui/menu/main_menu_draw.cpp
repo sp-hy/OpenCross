@@ -856,6 +856,10 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
       MenuModelSlot slot;
       slot.char_id = character;
       slot.model = model_number(character, kLastMenuModel);
+      if (gs->own_body(character)) {
+        const std::string& name = data::table_rows().name_of("char", static_cast<size_t>(character));
+        if (vfs->added("cdrom/menu/player/" + name + ".ome")) slot.own_model = name;
+      }
       slot.weapon_model = model_number(character);
       slot.origin_x = origin_x, slot.origin_y = origin_y;
       slot.unit_x = unit_x, slot.unit_y = unit_y;

@@ -6,6 +6,7 @@
 #include <array>
 #include <cmath>
 #include <span>
+#include <string>
 
 #include "core/types.h"
 #include "render/gpu_context.h"
@@ -40,6 +41,8 @@ struct MenuModelSlot {
   // Menu model (menu/player .ome, battle model order) = record byte 0x2D up to 0x32, else the character id; the weapon pack follows
   // the same byte up to 0x31.
   int model = 0;
+  // A character mods add in its own body whose mod ships menu/player/<name>.ome: that stem, shown instead of `model`; else empty.
+  std::string own_model;
   int weapon_model = 0;
   // Part of the weapon pack = weapon record tier & 0xF, -1 = no weapon.
   int weapon_part = -1;

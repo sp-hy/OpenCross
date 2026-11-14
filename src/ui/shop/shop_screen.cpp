@@ -15,6 +15,7 @@
 #include "core/element_icon.h"
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/table_rows.h"
 #include "data/tables.h"
 #include "platform/config.h"
 #include "platform/keymap.h"
@@ -41,6 +42,8 @@ struct Nav {
   bool ok_rep = false;
   // page: the item key / pad Square (the gear compare panel's next page).
   bool page = false;
+  // The party strip's scroll: -1 a row up (L2), 1 a row down (R2).
+  int strip_step = 0;
 };
 
 // One drawing command of the frame: a rectangle, an image, or a text drawn through FontSet in a font slot at canvas (x, y).
@@ -267,6 +270,11 @@ struct ShopScreen::Impl {
     for (bool pressed : in.key_pressed) any_key = any_key || pressed;
     if (any_pad) kb_mode = false;
     if (any_key) kb_mode = true;
+    // L2 / R2: the speed keys or the pad's triggers, one row per press.
+    const bool l2 = key_down(Action::SlowSpeed) || (in.pad_connected && in.pad_axis[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] >= 0.5f);
+    const bool r2 = key_down(Action::FastSpeed) || (in.pad_connected && in.pad_axis[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] >= 0.5f);
+    nav.strip_step = (r2 && !strip_r2_held ? 1 : 0) - (l2 && !strip_l2_held ? 1 : 0);
+    strip_l2_held = l2, strip_r2_held = r2;
     return nav;
   }
 
@@ -342,6 +350,11 @@ struct ShopScreen::Impl {
     frames += std::max(ticks, 0);
     if (msg_frames > 0 && --msg_frames == 0) msg.clear();
     const Nav nav = poll(in);
+    if (nav.strip_step != 0 && strip_scrolls()) {
+      const int before = strip_top;
+      strip_top = std::clamp(strip_top + nav.strip_step, 0, std::max(0, strip_rows() - kStripRows));
+      if (strip_top != before) sfx(1);
+    }
     if (refuse_ticks > 0) {
       refuse_ticks -= std::max(ticks, 0);
       return;
@@ -1486,8 +1499,11 @@ struct ShopScreen::Impl {
     const data::ItemInfo* ii = item >= 0 && item < static_cast<int>(tb.item_info.size()) ? &tb.item_info[static_cast<size_t>(item)] : nullptr;
     auto power = [&](int id) { return id >= 0 && id < static_cast<int>(tb.gear.size()) ? tb.gear[static_cast<size_t>(id)].power() : 0; };
     Tex* smithy = disc ? nullptr : texs.load("hd/menu/smithy.png");
-    for (int character = 0; character < 44; ++character) {
-      const float x = 230.0f + 24.0f * static_cast<float>(character % 11), y = 314.0f + 24.0f * static_cast<float>(character / 11);
+    strip_top = std::clamp(strip_top, 0, std::max(0, strip_rows() - kStripRows));
+    for (int place = 0; place < kStripRows * kStripColumns; ++place) {
+      const int character = gs->roster_at(strip_top * kStripColumns + place);
+      if (character < 0) continue;
+      const float x = 230.0f + 24.0f * static_cast<float>(place % kStripColumns), y = 314.0f + 24.0f * static_cast<float>(place / kStripColumns);
       const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
       int brightness = 0x70;
       if (!gs->slot.recruited(character)) brightness = 0;
@@ -1518,10 +1534,31 @@ struct ShopScreen::Impl {
       Img(smithy, SX(x), SY(y), SX(kMw[mark_index] / 4.0f), SY(kMh[mark_index] / 4.0f), kU[mark_index] / smithy->w, 972.0f / smithy->h,
           (kU[mark_index] + kMw[mark_index]) / smithy->w, (972.0f + kMh[mark_index]) / smithy->h);
     }
+    if (strip_top > 0) scroll_arrow(497, 310, true);
+    if (strip_top + kStripRows < strip_rows()) scroll_arrow(497, 408, false);
   }
-  // A face of the party strip, 24 x 24 units at (x, y) and PS1 brightness `brightness`: the smithy sheet's face frame (model id + 1, frames
-  // 1..0x33) played from the discs, else face_tex.
+  // The party strip: rows of 11 characters (GameState::roster_at), 4 shown from strip_top; the game's 44 fill it exactly, the
+  // characters mods add follow in more rows (L2 / R2 scroll a row, arrows at the edge).
+  static constexpr int kStripColumns = 11, kStripRows = 4;
+  int strip_top = 0;
+  // L2 / R2 held on the last poll (a scroll per press).
+  bool strip_l2_held = false, strip_r2_held = false;
+  int strip_rows() const { return gs ? (gs->roster_rows() + kStripColumns - 1) / kStripColumns : 0; }
+  bool strip_scrolls() const { return !closed && operation == Operation::Forge && !compare.on && strip_rows() > kStripRows; }
+  // A character mods add in its own body: its face by name (hd/face/<2021 | 1999>/<name>.png) when its mod adds one.
+  const Tex* own_face(int character) {
+    if (!gs || !gs->own_body(character)) return nullptr;
+    const std::string path = std::string(mode == ArtMode::Original ? "hd/face/1999/" : "hd/face/2021/") +
+                             data::table_rows().name_of("char", static_cast<size_t>(character)) + ".png";
+    return vfs->added(path) ? texs.load(path) : nullptr;
+  }
+  // A face of the party strip, 24 x 24 units at (x, y) and PS1 brightness `brightness`: a character mods add, its own face (own_face);
+  // else the smithy sheet's face frame (model id + 1, frames 1..0x33) played from the discs, else face_tex.
   void strip_face(int character, float x, float y, int brightness) {
+    if (const Tex* own = own_face(character)) {
+      Img(own, SX(x), SY(y), SX(24), SY(24), 0, 0, 1, 1, grey(brightness));
+      return;
+    }
     const int frame_no = (gs->slot.chars[static_cast<size_t>(character)].model_id & 0xFF) + 1;
     if (frame_no < 1 || frame_no > 0x33) return;
     if (!texs.hd()) {
@@ -2333,6 +2370,7 @@ void ShopScreen::set_sfx(std::function<void(int)> fn) { impl_->sfx_fn = std::mov
 void ShopScreen::open(GameState& state, ShopKind kind, int shop_id) { impl_->open(state, kind, shop_id); }
 void ShopScreen::close() { impl_->closed = true; }
 bool ShopScreen::closed() const { return impl_->closed; }
+bool ShopScreen::strip_takes_triggers() const { return impl_->strip_scrolls(); }
 ShopKind ShopScreen::kind() const { return impl_->kind; }
 int ShopScreen::shop_id() const { return impl_->shop_id; }
 std::string ShopScreen::state_name() const {

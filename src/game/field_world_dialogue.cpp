@@ -11,6 +11,7 @@
 #include "audio/voice.h"
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/table_rows.h"
 #include "game/new_game_plus.h"
 #include "import/ps1_font.h"
 
@@ -23,6 +24,12 @@ void FieldWorld::setup_dialog_window(int ent, std::span<const s32> v5) {
 void FieldWorld::set_dialog_face(int face) {
   // The portrait belongs to the entity whose script sets it (entity 9 sets it once in INIT and talks later).
   const int runner = vm_.current_entity();
+  // 0x100..0x17F = 0x100 + a character id (the running room's owner's, script_character): that character's face, as a party member
+  // shows it; other values are face ids as before.
+  if (face >= kScriptCharacterFace && face < kScriptCharacterFace + 0x80) {
+    const int character = character_of_script(face - kScriptCharacterFace);
+    face = character >= 0 ? kCharacterFace + character : -1;
+  }
   if (runner >= 0 && runner < static_cast<int>(ents_.size())) ents_[static_cast<size_t>(runner)].face = face;
   dialogue_face_ = face;
   log::debug("field: ent {} SET_DIALOG_FACE {}", runner, face);
@@ -163,12 +170,22 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   const int target = speaker >= 0 && speaker < static_cast<int>(ents_.size()) ? speaker : vm_.current_entity();
   {
     int face = -1;
+    // A character's face (a party member, or SET_DIALOG_FACE 0x100 + id): the game's characters read as their id; a character mods add
+    // shows its own face by name in its own body, else its model byte's.
+    bool character_face = false;
     if (target >= 0 && target < static_cast<int>(ents_.size())) {
       face = ents_[static_cast<size_t>(target)].face;
+      if (face >= kCharacterFace) face -= kCharacterFace, character_face = true;
       if (face < 0)
         for (int slot = 0; slot < 3 && slot < static_cast<int>(party_chars_.size()); ++slot)
-          if (party_ent_[static_cast<size_t>(slot)] == target) face = party_chars_[static_cast<size_t>(slot)];
+          if (party_ent_[static_cast<size_t>(slot)] == target) face = party_chars_[static_cast<size_t>(slot)], character_face = true;
     }
+    std::string face_name;
+    if (character_face && face >= data::kNumChars && gs_) {
+      if (gs_->own_body(face)) face_name = data::table_rows().name_of("char", static_cast<size_t>(face));
+      face = gs_->slot.is_character(face) ? gs_->slot.chars[static_cast<size_t>(face)].model_id & 0xFF : -1;
+    }
+    dialogue_face_name_ = face_name;
     // Faces that follow the story: Pip's is his current form (his record's model byte 0x2B..0x30), Kid's is her alternate face while
     // global bit 18 (FE 71) is set, Serge's is Lynx's (0x31) while his model byte is Lynx's body unless global bit 17 (FE 6C) is set.
     if (gs_) {
@@ -180,7 +197,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     }
     dialogue_face_ = face;
     portrait_left_ = false;
-    if (face >= 0) {
+    if (face >= 0 || !dialogue_face_name_.empty()) {
       // The heading is the one scripts set and read (SET_ROTATION / GET_ROTATION), the model yaw is axis 1 (op 28 / AA). The control
       // yaw that turns the pad (op 63) does not enter.
       const int model_yaw = static_cast<s16>(vm_.entity(target).axis[1]);
@@ -204,7 +221,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     extra_win_[static_cast<size_t>(win_slot - 1)].owner = vm_.current_entity();
   }
   dlg.set_label(lbl);
-  dlg.set_portrait(lbl ? -1 : dialogue_face_);
+  dlg.set_portrait(lbl ? -1 : dialogue_face_, lbl ? std::string() : dialogue_face_name_);
   last_dialogue_msg_ = message;
   choice_pending_ = false;
   log::debug("field: tick {} dialogue room {} message {} (running ent {}, speaker ent {}, face {}, window {}, portrait {})", tick_count_, room_id_,
@@ -229,7 +246,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   // The portrait panel exists only when the window flags have bit 0; the face is the
   // speaker (name tag of the line / script speaker) unless SET_DIALOG_FACE chose one; (flags & 0x1001) == 1 = left.
   dlg.set_portrait_flags(true, portrait_left_);
-  dlg.set_portrait(lbl ? -1 : dialogue_face_);
+  dlg.set_portrait(lbl ? -1 : dialogue_face_, lbl ? std::string() : dialogue_face_name_);
   if (!lbl && dialogue_face_ >= 0 && on_face_) on_face_(dialogue_face_);
   // E0 passes no entity: it speaks as the running entity, which also places the window (labels too).
   const bool below = place_dialogue_window(dlg, speaker >= 0 ? speaker : target, message, flag_byte, !lbl && dialogue_face_ >= 0);

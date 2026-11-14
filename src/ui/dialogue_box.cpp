@@ -235,8 +235,27 @@ const char* dialogue_face_art(int face_id) { return face_id >= 0 && face_id < kD
 
 void DialogueBox::refresh_face() {
   face_now_ = nullptr;
-  if (portrait_ < 0 || portrait_ >= 92 || !vfs_ || !ctx_ || !sprites_) return;
+  if (!vfs_ || !ctx_ || !sprites_) return;
   const bool hd = mode_ == ArtMode::Hd;
+  if (!portrait_name_.empty()) {
+    const std::string path = "hd/face/" + (hd ? portrait_set_ : std::string("1999")) + "/" + portrait_name_ + ".png";
+    const std::string key = vfs_->cache_key(path);
+    if (auto it = faces_.find(key); it != faces_.end() && it->second) {
+      face_now_ = it->second.get();
+      return;
+    }
+    render::DecodedImage img;
+    if (auto png = vfs_->added(path) ? vfs_->read(path) : std::nullopt; png && render::decode_image(*png, img)) {
+      auto face = std::make_unique<Face>();
+      if (face->tex.create(*ctx_, img.width, img.height, render::TextureFormat::Rgba8, img.rgba.data())) {
+        face->set = render::TexRef(face->tex, linear_);
+        face_now_ = face.get();
+        faces_[key] = std::move(face);
+        return;
+      }
+    }
+  }
+  if (portrait_ < 0 || portrait_ >= 92) return;
   const std::string key = vfs_->cache_key((hd ? portrait_set_ : std::string("ps1")) + "/" + kFaceNames[portrait_]);
   if (auto it = faces_.find(key); it != faces_.end()) {
     face_now_ = it->second.get();
@@ -323,8 +342,9 @@ void DialogueBox::draw_key(int key, float x, float y, float size, float vw, floa
   sprites_->set_view(vw, vh);
 }
 
-void DialogueBox::set_portrait(int face_id) {
+void DialogueBox::set_portrait(int face_id, std::string name) {
   portrait_ = face_id;
+  portrait_name_ = std::move(name);
   refresh_face();
 }
 
@@ -1443,7 +1463,7 @@ void DialogueDemo::move_digit(int step, int shift) {
   impl_->box.move_digit(step, shift);
   if (script_set && impl_->box.digit_entry()) script_set(kDigitEntryVar, impl_->box.digit_value());
 }
-void DialogueDemo::set_portrait(int id) { impl_->box.set_portrait(id); }
+void DialogueDemo::set_portrait(int id, std::string name) { impl_->box.set_portrait(id, std::move(name)); }
 void DialogueDemo::set_portrait_flags(bool on, bool left) { impl_->box.set_portrait_flags(on, left); }
 void DialogueDemo::set_skin_byte(int config_byte) { impl_->box.set_skin_byte(config_byte); }
 void DialogueDemo::set_key_caps(bool keyboard) { impl_->box.set_button_style(keyboard, static_cast<int>(impl_->lang)); }

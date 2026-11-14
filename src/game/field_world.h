@@ -1559,6 +1559,13 @@ class FieldWorld final : public script::FieldHost {
   // entity whose script opened it
   int dialogue_owner_ = -1;
   int dialogue_face_ = -1;
+  // The face by name of a character mods add for the open dialogue (hd/face/<set>/<name>.png), "" none.
+  std::string dialogue_face_name_;
+  // A face of a character rather than a face id (SET_DIALOG_FACE 0x100 + a character id; Ent::face keeps kCharacterFace + the engine's
+  // id, past any face id a script gives).
+  static constexpr int kCharacterFace = 0x10000;
+  // SET_DIALOG_FACE's character form: 0x100 + a 7-bit character id.
+  static constexpr int kScriptCharacterFace = 0x100;
   int last_dialogue_msg_ = -1;
   int pending_choice_first_ = 0, pending_choice_last_ = -1;
 

@@ -43,6 +43,9 @@ enum class MenuModelMods { Status, AllUses };
 // as the character textures <name> (render/character_texture.h) and stands in for the 1x texture.
 std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err,
                                                   MenuModelMods mods = MenuModelMods::Status);
+// The same for a menu model by its stem (menu/player/<stem>.ome: a character mods add ships one by its name).
+std::optional<assets::ModelAsset> read_menu_model_stem(const vfs::Vfs& files, const std::string& stem, bool hd_art, std::string* err,
+                                                       MenuModelMods mods = MenuModelMods::Status);
 // The character textures of status-screen model <stem> as RDE has them (HD file set): its battle model's 4x main texture (the open half
 // of the TIM) and 4x eye strip (empty when the model has no eye rects), with the battle eye rects. `original_size`: the 1x page and strip
 // the 4x images were upscaled from instead.

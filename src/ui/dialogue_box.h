@@ -85,7 +85,8 @@ class DialogueBox {
   // Portrait: RDE face id 0..91 (-1 none), hd/face/<set>/<name>.png at the right end of the box; original art draws the PS1
   // face cdrom/face/<stem>.tim (64 x 64) in the same place, or hd/face/1999 (RDE's original-graphics folder) when the disc has
   // none. `set` = "2021" or "1999" (HD only).
-  void set_portrait(int face_id);
+  // `name`: a face by name (hd/face/<set>/<name>.png, a character mods add) shown instead when the file exists.
+  void set_portrait(int face_id, std::string name = {});
   // The portrait shows only when the window flags have bit 0 set (`on`); `left` = the portrait sits left of the text.
   void set_portrait_flags(bool on, bool left) {
     portrait_on_ = on;
@@ -287,6 +288,7 @@ class DialogueBox {
   WindowOpening opening_;
   float blink_ = 0;
   int portrait_ = -1;
+  std::string portrait_name_;
   bool portrait_on_ = true, portrait_left_ = false;
   // Texture index (config byte 0 -> 3 = w04).
   int skin_idx_ = 3;
@@ -379,7 +381,7 @@ class DialogueDemo {
   // input, update() writes its value back to that variable every frame. See DialogueBox::start_digits.
   bool digit_entry() const;
   void move_digit(int step, int shift);
-  void set_portrait(int id);
+  void set_portrait(int id, std::string name = {});
   void set_portrait_flags(bool on, bool left);
   void set_skin_byte(int config_byte);
   // Button glyphs as key caps (`keyboard`, the device the player used last) or pad glyphs; DialogueBox::set_button_style.
