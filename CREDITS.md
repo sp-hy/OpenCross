@@ -15,6 +15,7 @@ This file lists (A) the third-party libraries and build tools OpenCross uses, (B
 | zlib | Jean-loup Gailly, Mark Adler | https://zlib.net | zlib | inflate for libspng |
 | clHCA (vgmstream) | bnnm, kode54 et al. (original decoder: nyaga; VGAudio: Thealexbarney) | https://github.com/vgmstream/vgmstream (`src/coding/libs/clhca.c`, `clhca.h`, `clhca_data.h`; vendored unmodified in `third_party/clhca/`, licence text `COPYING.vgmstream`) | ISC | HCA decoding of the remastered BGM (`.sab`) |
 | librempeg | Paul B Mahol (Bink 2 decoder: Kostya Shishkov, Paul B Mahol) | https://github.com/librempeg/librempeg | GPL-3.0-or-later | Bink 2 movie playback: commit 25d1ead99068ffb1f11df19cf0707854603d621e, built static by `scripts/build-librempeg.ps1` into `third_party/librempeg` (bink demuxer + bink2 / binkaudio decoders only) |
+| WebView2 SDK | Microsoft | https://www.nuget.org/packages/Microsoft.Web.WebView2 | BSD-3-Clause | the static WebView2 loader and headers: the hidden Edge browser that reads the guide overlay's pages |
 | shaderc (glslc) | Google | https://github.com/google/shaderc | Apache-2.0 | build tool: GLSL to SPIR-V shader compilation |
 | SDL_shadercross | SDL project contributors | https://github.com/libsdl-org/SDL_shadercross | zlib | build tool: SPIR-V to DXIL / MSL shader conversion |
 

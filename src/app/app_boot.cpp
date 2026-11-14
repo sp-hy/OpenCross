@@ -225,6 +225,10 @@ bool App::init_render() {
   load_shader_looks();
   ui.on_restart = [this] { restart_for_update = true; };
   window.set_event_hook(&render::ImGuiLayer::event_hook, &ui);
+  guide.init(platform::local_data_dir() / "guides");
+  ui.quality_rows = [this] {
+    if (guide.settings_rows(config)) ui.mark_changed();
+  };
   ui.add_tab("Mods", [this] {
     bool settings_dirty = false;
     if (render::draw_mods_tab(config, mods, files, &settings_dirty)) {

@@ -75,6 +75,13 @@ fs::path exe_path() {
 #endif
 }
 
+fs::path local_data_dir() {
+#ifdef _WIN32
+  if (const wchar_t* local = _wgetenv(L"LOCALAPPDATA"); local && *local) return fs::path(local) / "OpenCross";
+#endif
+  return exe_dir();
+}
+
 fs::path find_game_dir(std::string_view configured) {
   if (!configured.empty() && is_game_dir(fs::path(configured))) return fs::path(configured);
   fs::path dir = exe_dir();

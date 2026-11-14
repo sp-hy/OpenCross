@@ -347,6 +347,9 @@ struct Config {
 
   Cheats cheats;
   MultiplayerSettings multiplayer;
+  // [Guide] Enabled: the guide overlay (its settings row, the hotkey); Url: the guide it shows (empty = none picked).
+  bool guide_enabled = false;
+  std::string guide_url;
   int settings_x = -1, settings_y = -1, settings_w = -1, settings_h = -1;
   std::string settings_tab;
 

@@ -15,8 +15,11 @@ add_library(oc_platform STATIC
   updater.cpp
   steam.h
   steam.cpp
+  web_page.h
+  web_page.cpp
 )
 target_link_libraries(oc_platform PUBLIC oc_core SDL3::SDL3 PRIVATE miniz::miniz)
 if(WIN32)
-  target_link_libraries(oc_platform PRIVATE winhttp bcrypt version advapi32)
+  find_package(unofficial-webview2 CONFIG REQUIRED)
+  target_link_libraries(oc_platform PRIVATE winhttp bcrypt version advapi32 unofficial::webview2::webview2 ole32 shell32 shlwapi user32)
 endif()

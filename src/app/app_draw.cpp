@@ -59,11 +59,12 @@ void App::draw_frame(const render::Frame& frame) {
   const float vh = static_cast<float>(frame.extent.height);
   // The pause screen filters the finished picture through the full-screen pass (ramp mode).
   const bool pause_on = pause_ok && pause_screen.active();
-  // The pause screen holds everything under it: the battle view stops (alpha 1), the movie player stops (frame held), and the mixer
-  // freezes the music / voice / movie PCM (RDE pauses the sound thread and the movie).
-  battle.set_paused(pause_on && (battle_ok || battle_in_field));
-  movie_player.set_paused(pause_on && movie_open);
-  mixer.hold(pause_on);
+  // The pause screen and the guide overlay hold everything under them: the battle view stops (alpha 1), the movie player stops (frame
+  // held), and the mixer freezes the music / voice / movie PCM (RDE pauses the sound thread and the movie).
+  const bool held = pause_on || guide.open();
+  battle.set_paused(held && (battle_ok || battle_in_field));
+  movie_player.set_paused(held && movie_open);
+  mixer.hold(held);
   // [Shaders] the full-screen shaders: the whole frame goes through the screen pass (ended before the overlay).
   const render::ScreenSettings screen_settings = screen_look();
   ++screen_tick;

@@ -271,7 +271,11 @@ It writes nothing: no save, no ini, no mod settings.
 
 Source: `tools/ocsteam.cpp`. Connects to the running Steam client as the game, prints the user's persona name (`persona name: ...`, `(unavailable)` when the friends interface is missing), waits for the stats, and lists every achievement of the app with its API name, display name and state (`*` = unlocked). Exits 1 when Steam is closed, logged out, the game is not owned, or the stats do not arrive. Read-only: nothing is set or stored, though Steam shows the game as playing while it runs.
 
-### 1.14 Files written by the tools
+### 1.14 `ocguide` (guide overlay pages)
+
+Source: `tools/ocguide.cpp`. Reads GameFAQs pages the way the guide overlay does, through the hidden WebView2 browser (`platform::WebPageReader`, profile in `%LOCALAPPDATA%\OpenCross\guides\browser`), for checking the page scripts when the site changes. `html <url> <file>` saves the page's HTML as the browser sees it; `list` prints the game's guide list (group, category, title, author, version and size, address); `guide <url>` prints the first page of a guide: its title, author, version line, page count and each block (kind, level, the first 90 characters). `identity` prints what any page can read about that browser (user agent, client-hint brands, platform, languages, `navigator.webdriver`, whether the WebView2 host object exists, the page's visibility) from a local `data:` page, without a request. If the site asks for a visitor check, the browser window opens and the tool waits up to four minutes. Exits 1 when the WebView2 runtime is missing or the page cannot be read or parsed. `html`, `list` and `guide` each load a GameFAQs page: run them by hand, rarely, one page at a time, never in a loop, a gate or a route. No unit test, route or CI step contacts the site.
+
+### 1.15 Files written by the tools
 
 | Tool | Output |
 |---|---|
@@ -283,6 +287,7 @@ Source: `tools/ocsteam.cpp`. Connects to the running Steam client as the game, p
 | `ocbattleview` | `ocbattleview.log`, `battle_shot.png`, `shot_NNNNNN.png` next to the exe or in `--shotdir`. |
 | `ocflow`, `ocmenudemo`, `ocshopdemo` | `flow_shots/`, `menu_shots/`, `shop_shots/` next to the exe, or the folder given to `--shots`. |
 | `ocaudio decode`, `render-seq`, `render-sfx` | The WAV path given. |
+| `ocguide` | The browser profile in `%LOCALAPPDATA%\OpenCross\guides\browser`; `html` also the file given. |
 
 ## 2. Gates
 
@@ -515,6 +520,7 @@ A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_
 | F8 | `app_run.cpp` | Toggles the Debug tab. |
 | Alt+Enter | `app_run.cpp` | Windowed <-> fullscreen (the last fullscreen mode of the session, else borderless); saved (not during a route or replay). The Enter is not passed to the game. |
 | F9 | `battle_view_ui.cpp` | Toggles the battle camera debug overlay. |
+| `` ` `` (the key left of 1), pad LB + RB | `app_run.cpp`, `imgui_guide.cpp` | Shows or hides the guide overlay when `[Guide] Enabled` is on (not while a text field has the keyboard, not during a route or replay). The pad chord toggles one frame after both shoulders are down; a shoulder pressed a frame before the other still reaches the game (or turns a page in the overlay) first. While the overlay is shown, Esc and the pad's B close it, the arrows, the d-pad and both sticks scroll, PageUp / PageDown, Space and either shoulder button alone turn a page on the press and, held for a second, one page every 0.08 s; Home / End jump to the ends. |
 | PageDown / PageUp | `app_run.cpp` | Next / previous room; only in the field with the flow disabled and no movie. |
 
 The top of the Debug tab (`app_debug.cpp`) has two panes. **Tools**: *Model viewer* (Open starts `opencross modelview`, section 1.12, as a separate process) and *Write log file*. **Sound test** (when the sound effects loaded) picks a global sound id 0..255 (effect00; `<` / `>` step with wrap, or type the id) and plays it on the menus' channel when Play is pressed; an id with no program is reported as not defined.

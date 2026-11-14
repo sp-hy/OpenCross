@@ -162,6 +162,15 @@ Presence and chat with other players (`multiplayer.md`), the settings window's M
 | `AdminToken` | empty (not written) | text | The server's `ADMIN_TOKEN` (`multiplayer.md` section 6). Set by hand; the tab has no field for it. Sent only in `hello`, and only to the Master server (never to a "Local / other" address, whose operator would see it); when it matches, the server marks this player's chat lines and every client shows the name in red. |
 | `Muted` | empty | comma list of `pid`s | The muted players (the tab's Mute buttons). Spaces around an entry and empty entries are dropped. |
 
+### 2.6.2 `[Guide]`
+
+The guide overlay (General tab, Quality of life section; architecture.md section 7). Off by default.
+
+| Key | Default | Values | Meaning |
+|---|---|---|---|
+| `Enabled` | 0 | bool | Shows the Guide row in the settings and lets `` ` `` (pad LB + RB) show the overlay. Ticking the box in the settings reads the guide list from the site again; otherwise the cached list is used. Turning it off closes the overlay and the browser. |
+| `Url` | empty | address | The guide the overlay shows: the address of a guide in the game's GameFAQs list. Empty: none picked (the overlay says so). Picking one in the Guide row downloads it unless the cache already has it; a cached guide is never downloaded again. |
+
 ### 2.7 `[Debug]`
 
 Developer and automation switches, read once at boot (except `Log` and `Panels`, see section 4). Keys marked "conditional" are written only when set (non-empty / non-zero).
@@ -265,6 +274,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Log` | The Debug tab starts or stops the log at once. |
 | `[Multiplayer] Enabled`, `Server`, `ServerUrl` | Connect, reconnect or disconnect at once; an address field applies when it is left. |
 | other `[Multiplayer]` keys | Read every frame; `Name` goes to the server as a `profile` message. |
+| `[Guide] Enabled`, `Url` | Read every frame: a new `Url` loads that guide from the cache or downloads it at once; off closes the overlay and ends the browser. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
 | `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
 

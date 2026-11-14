@@ -50,6 +50,7 @@
 #include "platform/window.h"
 #include "render/screen_pass.h"
 #include "render/gpu_context.h"
+#include "render/imgui_guide.h"
 #include "render/imgui_layer.h"
 #include "render/imgui_multiplayer.h"
 #include "render/mesh_pipeline.h"
@@ -207,6 +208,7 @@ class App {
   // ---- app_run.cpp ------------------------------------------------------------------------------------------------------------
   void log_frametime();
   void frame_hotkeys();
+  void guide_hotkeys();
   void frame_pad_remap();
   void settings_pad_filter();
   // Alt+Enter: windowed <-> fullscreen.
@@ -323,6 +325,9 @@ class App {
   render::Sampler linear;
   render::Texture background;
   render::ImGuiLayer ui;
+  // The guide overlay ([Guide]); guide_chord is the pad's LB + RB that shows and hides it.
+  render::GuideOverlay guide;
+  game::MenuChord guide_chord;
   render::ScreenPass screen_pass;
   bool screen_ok = false;
   // Frames drawn: the screen pass's animation clock (the composite dot crawl).

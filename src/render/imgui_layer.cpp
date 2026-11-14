@@ -209,7 +209,11 @@ bool ImGuiLayer::init(GpuContext& ctx, SDL_Window* window) {
   if (const char* windir = std::getenv("WINDIR")) {
     const std::filesystem::path font = std::filesystem::path(windir) / "Fonts" / "segoeui.ttf";
     std::error_code ec;
-    if (std::filesystem::exists(font, ec)) custom_font_ = io.Fonts->AddFontFromFileTTF(font.string().c_str(), kFontRaster) != nullptr;
+    // Latin with its extensions, punctuation (dashes, typographic quotes, bullets, ellipsis), currency, letter-like symbols and arrows:
+    // text written by people (guides, mod names) uses them.
+    static const ImWchar kUiRanges[] = {0x0020, 0x024F, 0x2000, 0x206F, 0x20A0, 0x20CF, 0x2100, 0x214F, 0x2190, 0x21FF, 0};
+    if (std::filesystem::exists(font, ec))
+      custom_font_ = io.Fonts->AddFontFromFileTTF(font.string().c_str(), kFontRaster, nullptr, kUiRanges) != nullptr;
     // The few symbols the UI shows as text (the Mods tab's cog, warning sign, drag grip, reset arrow and info sign), from Segoe UI Symbol as
     // the chat font does.
     const std::filesystem::path symbols = std::filesystem::path(windir) / "Fonts" / "seguisym.ttf";
@@ -314,8 +318,34 @@ void ImGuiLayer::build_chat_font() {
 
 ImFont* ImGuiLayer::chat_font() const { return chat_font_ ? chat_font_ : ImGui::GetIO().Fonts->Fonts[0]; }
 
+void ImGuiLayer::build_mono_font() {
+  mono_font_built_ = true;
+  const char* windir = std::getenv("WINDIR");
+  if (!windir) return;
+  const std::filesystem::path file = std::filesystem::path(windir) / "Fonts" / "consola.ttf";
+  std::error_code ec;
+  if (!std::filesystem::exists(file, ec)) return;
+  static const ImWchar kMonoRanges[] = {0x0020, 0x024F, 0x2000, 0x206F, 0x2190, 0x21FF, 0x2500, 0x25FF, 0x2600, 0x266F, 0};
+  ImGuiIO& io = ImGui::GetIO();
+  ImFontConfig config;
+  config.OversampleH = 1;
+  ImFont* font = io.Fonts->AddFontFromFileTTF(file.string().c_str(), kChatRaster, &config, kMonoRanges);
+  if (!font || !io.Fonts->Build()) {
+    log::warn("imgui: the guide font could not be built");
+    return;
+  }
+  font->Scale = kFontRaster / kChatRaster;
+  ImGui_ImplSDLGPU3_DestroyFontsTexture();
+  mono_font_ = font;
+}
+
+bool ImGuiLayer::text_input() { return ImGui::GetCurrentContext() && ImGui::GetIO().WantTextInput; }
+
+ImFont* ImGuiLayer::mono_font() const { return mono_font_ ? mono_font_ : ImGui::GetIO().Fonts->Fonts[0]; }
+
 void ImGuiLayer::new_frame() {
   if (chat_font_wanted_ && !chat_font_built_ && initialised_) build_chat_font();
+  if (mono_font_wanted_ && !mono_font_built_ && initialised_) build_mono_font();
   ImGui_ImplSDLGPU3_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   apply_style();
@@ -432,6 +462,7 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
                                    "plays, as holding the pad's Select does. The damage numbers still show, and the spell's name stays "
                                    "for 2 seconds before it fades.");
     if (ImGui::Checkbox("##autohidecast", &cfg.autohide_cast_hud)) change.enhancements = true;
+    if (quality_rows) quality_rows();
     end_rows();
   }
   };
@@ -482,7 +513,8 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
                              {"F3", "No encounters (pad: L3)"},  {"F4", "Battle boost (pad: R3)"},
                              {"F5", "Auto battle (pad: L3 + R3)"}, {"F6", "Art mode"},
                              {"F7", "Widescreen"},                {"F8", "Debug tab"},
-                             {"F9", "Battle camera overlay"}};
+                             {"F9", "Battle camera overlay"},
+                             {"~", "Guide overlay, when enabled under Quality of life (pad: LB + RB)"}};
     for (const auto& shortcut : keys) {
       row(shortcut[0], "Keyboard shortcut (and pad button).");
       ImGui::AlignTextToFramePadding();

@@ -21,6 +21,7 @@ int ocmenudemo_main(int, char**);
 int ocshopdemo_main(int, char**);
 int ocmodelview_main(int, char**);
 int ocsteam_main(int, char**);
+int ocguide_main(int, char**);
 
 namespace {
 
@@ -46,6 +47,7 @@ constexpr Tool kTools[] = {
     {"ocshopdemo", ocshopdemo_main, "shops in a window (tmp/save.dat slot 4)"},
     {"ocmodelview", ocmodelview_main, "character models in a window: orbit, animation clips, original / modded"},
     {"ocsteam", ocsteam_main, "connect to Steam as the game and list its achievements (read-only)"},
+    {"ocguide", ocguide_main, "guide overlay pages: save the HTML, print the guide list or a guide"},
 };
 
 void attach_console() {

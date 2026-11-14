@@ -286,6 +286,8 @@ bool Config::load(const std::filesystem::path& file) {
   sfx = clamp01(parse_float(ini.get("Audio", "Sfx"), sfx));
   voices = parse_bool(ini.get("Audio", "Voices"), voices);
   voice_volume = std::clamp(parse_int(ini.get("Audio", "VoiceVolume"), voice_volume), 0, 100);
+  guide_enabled = parse_bool(ini.get("Guide", "Enabled"), guide_enabled);
+  guide_url = ini.get("Guide", "Url", guide_url);
   {
     MultiplayerSettings& mp = multiplayer;
     mp.enabled = parse_bool(ini.get("Multiplayer", "Enabled"), mp.enabled);
@@ -441,6 +443,8 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Audio", "Sfx", fmt_float(sfx));
   ini.set("Audio", "Voices", on_off(voices));
   ini.set("Audio", "VoiceVolume", std::to_string(voice_volume));
+  ini.set("Guide", "Enabled", on_off(guide_enabled));
+  ini.set("Guide", "Url", guide_url);
   {
     const MultiplayerSettings& mp = multiplayer;
     ini.set("Multiplayer", "Enabled", on_off(mp.enabled));

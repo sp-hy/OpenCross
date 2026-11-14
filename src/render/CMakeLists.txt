@@ -89,6 +89,8 @@ add_library(oc_render STATIC
   imgui_update_tab.cpp
   imgui_multiplayer.h
   imgui_multiplayer.cpp
+  imgui_guide.h
+  imgui_guide.cpp
 )
 target_include_directories(oc_render PRIVATE ${Stb_INCLUDE_DIR} ${OC_SPV_DIR})
 target_link_libraries(oc_render PUBLIC

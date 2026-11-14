@@ -1,4 +1,4 @@
-# Multiplayer presence and chat: the protocol client, its JSON and the WebSocket transport
+# Multiplayer presence and chat (the protocol client, its JSON and the WebSocket transport) and the guide overlay's content
 add_library(oc_net STATIC
   presence.h
   json.h
@@ -7,6 +7,8 @@ add_library(oc_net STATIC
   websocket_transport.cpp
   multiplayer_client.h
   multiplayer_client.cpp
+  guide.h
+  guide.cpp
 )
 target_link_libraries(oc_net PUBLIC oc_core)
 if(WIN32)

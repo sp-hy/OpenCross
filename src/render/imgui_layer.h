@@ -106,6 +106,15 @@ class ImGuiLayer {
   // asks for it); until then, or when Segoe UI is missing, chat_font() is the UI font.
   void request_chat_font() { chat_font_wanted_ = true; }
   ImFont* chat_font() const;
+  // The font for preformatted guide text: Consolas with Latin, punctuation, arrows, box drawing, blocks and shapes, drawn at the UI
+  // font's size. Built like the chat font at the next new_frame after the first request; until then, or without Consolas, the UI font.
+  void request_mono_font() { mono_font_wanted_ = true; }
+  // A text field has the keyboard (the hotkeys that are printable keys stand aside).
+  static bool text_input();
+  ImFont* mono_font() const;
+  // Extra rows of the General tab's Quality of life table (row() then the control), drawn after the built-in ones; they call
+  // mark_changed() when they edit the config.
+  std::function<void()> quality_rows;
 
   // Shared widgets for tab bodies (consistent look across tabs).
   // section: a header line with a rule. begin_panes: side-by-side panes (TableNextColumn per pane; one column when narrow), EndTable()
@@ -123,6 +132,7 @@ class ImGuiLayer {
  private:
   void apply_style();
   void build_chat_font();
+  void build_mono_font();
   OptionsChange general_tab(platform::Config& cfg);
   OptionsChange graphics_tab(platform::Config& cfg);
 
@@ -154,6 +164,8 @@ class ImGuiLayer {
   bool custom_font_ = false;
   bool chat_font_wanted_ = false, chat_font_built_ = false;
   ImFont* chat_font_ = nullptr;
+  bool mono_font_wanted_ = false, mono_font_built_ = false;
+  ImFont* mono_font_ = nullptr;
 };
 
 }  // namespace oc::render

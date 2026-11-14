@@ -29,6 +29,7 @@ int App::run() {
     frame_pad_remap();
     multiplayer_input();
     frame_hotkeys();
+    guide.update(config);
     frame_settings();
     debug_tools_frame();
     frame_dt = timer.tick();
@@ -78,9 +79,10 @@ int App::run() {
     }
     draw_frame(frame);
 
-    ui.set_pointer_hidden(platform::pointer_hidden(window.fullscreen(), ui.options_open, window.mouse_idle_ms()));
+    ui.set_pointer_hidden(platform::pointer_hidden(window.fullscreen(), ui.options_open || guide.open(), window.mouse_idle_ms()));
     ui.new_frame();
     multiplayer_overlay();
+    guide.draw(ui, input, frame_dt);
     versus_banner_overlay();
     // The room's entity / script tables stay while a battle, menu, movie or flow screen covers the field.
     debug_field = field_visible();
@@ -99,6 +101,7 @@ int App::run() {
     log::info("final state: room {} player {:.0f},{:.0f} field ticks {} BATTLE_RESULT {} scenario {}", world.room_name(), fx, fz, world.tick_count(),
               world.battle_result(), world.vm().var(0));
   }
+  guide.shutdown();
   if (movie_open) movie_player.close();
   mixer.close_device();
   log::info("exiting after {} simulation ticks, {} validation messages", world_ok ? world.tick_count() : 0,
@@ -145,6 +148,7 @@ void App::frame_hotkeys() {
   const bool start_down = input.pad_connected && input.pad_down[SDL_GAMEPAD_BUTTON_START];
   const bool start_pressed = input.pad_connected && input.pad_pressed[SDL_GAMEPAD_BUTTON_START];
   const u64 now_ms = SDL_GetTicks();
+  guide_hotkeys();
   bool settings_key = input.key_pressed[SDL_SCANCODE_ESCAPE];
   start_tap = false;
   if (start_pressed) {
@@ -177,6 +181,19 @@ void App::frame_hotkeys() {
     ui.toast(config.widescreen ? "Widescreen: On" : "Widescreen: Off");
   }
   toggle_fullscreen_key();
+}
+
+// The guide overlay: ` (not while a text field has the keyboard) or the pad's LB + RB show and hide it; while it is shown Esc
+// closes it instead of opening the settings window.
+void App::guide_hotkeys() {
+  const bool chord = guide_chord.poll(input.pad_connected && input.pad_down[SDL_GAMEPAD_BUTTON_LEFT_SHOULDER],
+                                      input.pad_connected && input.pad_down[SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER]);
+  if (routing || replaying) return;
+  if (chord || (input.key_pressed[SDL_SCANCODE_GRAVE] && !render::ImGuiLayer::text_input())) guide.toggle(config);
+  if (guide.open() && input.key_pressed[SDL_SCANCODE_ESCAPE]) {
+    guide.close();
+    input.key_pressed[SDL_SCANCODE_ESCAPE] = false;
+  }
 }
 
 // Alt+Enter flips the window between windowed and fullscreen, live and saved, as RDE's window procedure does (its fullscreen goes to
@@ -308,6 +325,12 @@ void App::frame_settings() {
 
 // Advances the game in its current mode.
 bool App::simulate() {
+  // The guide overlay holds the game as the pause screen does (draw_frame stops the battle view, the movie and the sound).
+  if (guide.open()) {
+    step.alpha = 1.0f;
+    loop_speed.field = {0, 1.0f};
+    return true;
+  }
   if (routing && world_ok) {
     route_frame();
   } else if (replaying) {

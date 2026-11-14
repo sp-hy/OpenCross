@@ -145,6 +145,19 @@ int main() {
     Config mods_partial = load_text("[Mods]\nDumpStages=1\nDumpEffects=0\n");
     CHECK(mods_partial.dump_stages && mods_partial.dump_title && mods_partial.dump_rooms && mods_partial.dump_models && !mods_partial.dump_effects);
   }
+  // [Guide]: off with no guide by default; both keys survive a save and reload.
+  {
+    const Config guide_defaults;
+    CHECK(!guide_defaults.guide_enabled && guide_defaults.guide_url.empty());
+    Config guide = load_text("[Guide]\nEnabled=1\nUrl=https://gamefaqs.gamespot.com/ps/196917-chrono-cross/faqs/48347\n");
+    CHECK(guide.guide_enabled && guide.guide_url == "https://gamefaqs.gamespot.com/ps/196917-chrono-cross/faqs/48347");
+    const std::filesystem::path out = std::filesystem::temp_directory_path() / "oc_test_config_guide.ini";
+    CHECK(guide.save(out));
+    Config reloaded;
+    CHECK(reloaded.load(out));
+    std::filesystem::remove(out);
+    CHECK(reloaded.guide_enabled && reloaded.guide_url == guide.guide_url);
+  }
   // [Multiplayer]: defaults (off, the master server), parse with clamps and unknown words, save, reload.
   {
     const MultiplayerSettings mp_defaults;
