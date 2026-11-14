@@ -415,8 +415,8 @@ class FieldWorld final : public script::FieldHost {
 
   void update(const platform::Input& in, int ticks);
   void draw_background(render::SpriteBatch& sprites, float vw, float vh, float alpha);
-  // [after draw_actors + draw_effects] the semi-transparent layers filed nearer than every actor (the Hydra Marshes water layer): they
-  // blend over the models and effects, as in the PS1's ordering table. Draws nothing in rooms without such a layer.
+  // [after draw_actors + draw_effects] the semi-transparent layers filed nearer than at least one actor (the Hydra Marshes water layer,
+  // a curtain an actor walks behind): they blend over the models and effects behind them, as in the PS1's ordering table. Draws nothing in rooms without such a layer.
   void draw_background_late(render::SpriteBatch& sprites, float vw, float vh, float alpha);
   // `wet`: WetOnly = only the submerged faces of actors standing in water (draw BEFORE draw_background), DryOnly = everything else
   // (after it); MeshPipeline::DrawParams::WetFaces.

@@ -593,7 +593,7 @@ void App::draw_field_slab(const SceneFrame& sf, const render::Frame& slab_frame,
   if (clip) field_clip(sf, true);
   world.draw_effects(slab_frame, fw, fh, step.alpha);
   if (clip) field_clip(sf, false);
-  // The layers nearer than every actor blend over the models and effects (FieldWorld::draw_background_late).
+  // The semi-transparent layers nearer than an actor blend over the models and effects (FieldWorld::draw_background_late).
   if (clip) field_clip(sf, true);
   sprites.begin(slab_frame, fw, fh, true);
   world.draw_background_late(sprites, fw, fh, step.alpha);

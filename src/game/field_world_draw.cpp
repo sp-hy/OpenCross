@@ -186,19 +186,20 @@ void FieldWorld::step_shadows() {
   }
 }
 
-// Ordering-table index below which a semi-transparent layer is nearer than every drawn actor (an actor's faces sit at camera z >> 4 +
-// its layer word; 16 slots of margin for the model's extent): such layers are drawn after the actors.
+// Ordering-table index below which a semi-transparent layer is nearer than at least one drawn actor (an actor's faces sit at camera
+// z >> 4 + its layer word): such layers are drawn after the actors, so they blend over the actors behind them, while the depth test
+// keeps the actors in front of them on top.
 float FieldWorld::late_layer_z() const {
-  float nearest = 1e9f;
+  float farthest = -1e9f;
   for (size_t index = 0; index < ents_.size(); ++index) {
     const Ent& entity = ents_[index];
     if (!entity.actor.loaded() || ent_not_drawn(static_cast<int>(index))) continue;
     const ActorPose& pose = entity.actor.current();
     render::FieldCamera::Projected projected;
     if (!view_.camera().project({pose.x, pose.y, pose.z}, projected)) continue;
-    nearest = std::min(nearest, std::floor(std::max(projected.z, 0.0f) / 16.0f) + static_cast<float>(vm_.entity(static_cast<int>(index)).word_b8));
+    farthest = std::max(farthest, std::floor(std::max(projected.z, 0.0f) / 16.0f) + static_cast<float>(vm_.entity(static_cast<int>(index)).word_b8));
   }
-  return nearest > 1e8f ? -1e9f : nearest - 16.0f;
+  return farthest;
 }
 
 void FieldWorld::draw_background_late(render::SpriteBatch& sprites, float vw, float vh, float alpha) {

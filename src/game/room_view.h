@@ -152,8 +152,8 @@ class RoomView {
     slab_lo_ = lo;
     slab_hi_ = hi;
   }
-  // Late layers (FieldWorld::draw_background_late): semi-transparent items (a blend mode) whose OT index is below `z` - nearer than every
-  // actor - are skipped by the normal draw() and drawn by a second call with late_pass = true after the actors and effects: the PS1 files
+  // Late layers (FieldWorld::draw_background_late): semi-transparent items (a blend mode) whose OT index is below `z` - nearer than at least
+  // one actor - are skipped by the normal draw() and drawn by a second call with late_pass = true after the actors and effects: the PS1 files
   // them nearer than the models, so they blend over the models (the water layer of the Hydra Marshes). z <= 0 = no late layers.
   // How fast what the ordering table draws at `slot` scrolls, as a factor of the global scroll: an effect filed under a layer's draw offset
   // moves with that layer (game/draw_offset.h).
