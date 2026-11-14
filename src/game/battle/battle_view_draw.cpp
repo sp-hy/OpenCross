@@ -266,6 +266,9 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
                              static_cast<u32>(std::min(fw - x0, std::round(lb.width()))), static_cast<u32>(std::min(fh - y0, std::round(kBufferRows * lb.scale_y)))};
   apply_camera(alpha_);
   const render::Mat4 vp = cam_.view_proj(lb), view = cam_.view();
+  // [Shaders] Ssao / DepthOfField: the picture's depth is kept across the passes that follow the units.
+  const bool post_fx = ssao_ || dof_;
+  if (post_fx) ctx_->hold_depth();
 
   fx_draw_fog(frame, lb, true, sprites_resume);
   if (stage_scene_.ready()) {
@@ -282,6 +285,39 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
   if (!stage_scene_.ready()) fx_draw_fog(frame, lb, false, sprites_resume);
 
   meshes_->begin(frame, scissor);
+  draw_units(vp, view);
+  meshes_->end();
+  if (post_fx) draw_post_fx(frame, lb, scissor, vp, view);
+  // The stage's smoke / dust sheets.
+  stage_scene_.draw_sprites(frame, scissor, fx_view(), lb, alpha_);
+  // Effect quads stay inside the draw area too.
+  frame.set_scissor(scissor);
+  fx_draw(frame, lb);
+  anm_draw(frame, lb);
+  frame.set_scissor(frame.full());
+  // The miya `fade` quad lives in the effect OT, UNDER the 3E strip pass (which runs last in the frame), so it is part of the picture the
+  // strips feed back: drawn here, inside the warp target when the bracket is on. SUBTRACTIVE, colour 4090 - 34 t of 4096, t = 27 + 0.65 * battle
+  // tick (the emitter spawns one tick after the battle starts: the first battle frame is unfaded). Under the RDE hand-over the stage intro runs
+  // live and the 'fade' timeline's own emitter draws the flat.
+  float fade_level = 0.0f;
+  if (!rde_hand_ && white_ticks_ >= 2) {
+    const float fade_tick = kStartFadeLead + kStartFadeRate * static_cast<float>(white_ticks_);
+    fade_level = std::clamp((4090.0f - 34.0f * fade_tick) / 4096.0f, 0.0f, 1.0f);
+  }
+  if (fade_level > 0.0f && white_.set) {
+    const float vw = static_cast<float>(frame.extent.width), vh = static_cast<float>(frame.extent.height);
+    sprites_->begin(frame, vw, vh, true);
+    // The screen in use (widescreen: the widened frame).
+    const render::Letterbox::Rect veil = render::Letterbox::veil_rect(vw, vh);
+    const u8 grey = static_cast<u8>(255.0f * fade_level + 0.5f);
+    sprites_->set_blend(render::BlendMode::Subtract);
+    sprites_->draw(white_.set, veil.x, veil.y, veil.w, veil.h, 0, 0, 1, 1, render::pack_rgba(grey, grey, grey, 255));
+    sprites_->set_blend(render::BlendMode::Alpha);
+    sprites_->end();
+  }
+}
+
+void BattleView::draw_units(const render::Mat4& vp, const render::Mat4& view) {
   for (int i = 0; i < battle::kUnits; ++i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
@@ -346,6 +382,10 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     // The GTE-lit packer.
     if (fx_lit_[static_cast<size_t>(i)]) fx_light_params(i, model_mat, dp);
     meshes_->draw(*visual.model->gpu, dp);
+    if (dp.shading.outline && dp.shading.outline_depth) {
+      dp.shading.outline_width *= render::MeshPipeline::outline_depth_scale(dp);
+      dp.shading.outline_depth = false;
+    }
     // The model's two attached-object slots (both draw the same weapon mesh at mount record 0 and 1; the hide words are set by anmseq
     // ops 0x79 / 0x7A n and by the battle-start script, S5 entry 8: most PCs hide slot 1 there, Van / Mel swap hands with them, Glenn's second
     // form shows two). Slot 1 needs a record (all-zero = no second mount). A thrown weapon is hidden here and drawn by its unit emitter
@@ -392,34 +432,70 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     }
   }
   showcase_draw(vp, view);
+}
+
+// The view depth is drawn with the picture's own projection into the smaller target (the same NDC). Focus: the camera z of the unit in the
+// picture nearest the camera's look-at point in depth, eased per tick so a change fades in; with no unit in the picture the blur fades out.
+void BattleView::draw_post_fx(const render::Frame& frame, const render::Letterbox& lb, const render::Rect& scissor, const render::Mat4& vp,
+                              const render::Mat4& view) {
+  render::Frame depth_frame;
+  render::Rect depth_scissor;
+  if (!post_fx_.begin(*ctx_, frame, scissor, depth_frame, depth_scissor)) return;
+  stage_pipe_.set_view_depth(true);
+  meshes_->set_view_depth(true);
+  if (stage_scene_.ready()) stage_scene_.draw(stage_pipe_, depth_frame, depth_scissor, fx_view(), lb, alpha_, linear_filter_ < 0 ? hd_ : linear_filter_ != 0);
+  meshes_->begin(depth_frame, depth_scissor);
+  draw_units(vp, view);
   meshes_->end();
-  // The stage's smoke / dust sheets.
-  stage_scene_.draw_sprites(frame, scissor, fx_view(), lb, alpha_);
-  // Effect quads stay inside the draw area too.
-  frame.set_scissor(scissor);
-  fx_draw(frame, lb);
-  anm_draw(frame, lb);
-  frame.set_scissor(frame.full());
-  // The miya `fade` quad lives in the effect OT, UNDER the 3E strip pass (which runs last in the frame), so it is part of the picture the
-  // strips feed back: drawn here, inside the warp target when the bracket is on. SUBTRACTIVE, colour 4090 - 34 t of 4096, t = 27 + 0.65 * battle
-  // tick (the emitter spawns one tick after the battle starts: the first battle frame is unfaded). Under the RDE hand-over the stage intro runs
-  // live and the 'fade' timeline's own emitter draws the flat.
-  float fade_level = 0.0f;
-  if (!rde_hand_ && white_ticks_ >= 2) {
-    const float fade_tick = kStartFadeLead + kStartFadeRate * static_cast<float>(white_ticks_);
-    fade_level = std::clamp((4090.0f - 34.0f * fade_tick) / 4096.0f, 0.0f, 1.0f);
+  stage_pipe_.set_view_depth(false);
+  meshes_->set_view_depth(false);
+
+  const CamPose pose = camera_.pose(alpha_);
+  auto depth_of = [&](float x, float y, float z) { return dot(cam_.fwd, {x - cam_.eye[0], y - cam_.eye[1], z - cam_.eye[2]}); };
+  const float look = depth_of(pose.target[0], pose.target[1], pose.target[2]);
+  float goal = look, nearest = 1e30f;
+  for (int i = 0; i < battle::kUnits; ++i) {
+    const Visual& visual = vis_[static_cast<size_t>(i)];
+    // The units draw_units shows.
+    if (showcase_on_ || !bunit(i).present || !visual.has_model || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)]) continue;
+    if ((!bunit(i).pc && lerp(visual.fade_prev, visual.fade, alpha_) <= 0.0f) || (ghosted(i) && !entry_shown_[static_cast<size_t>(i)])) continue;
+    const effects::FxModel* om = fx_ && fx_->bespoke_models() && static_cast<size_t>(i) < fx_->bespoke_models()->units.size()
+                                     ? &fx_->bespoke_models()->units[static_cast<size_t>(i)]
+                                     : nullptr;
+    render::MeshPipeline::DrawParams hidden_test;
+    if ((om && om->hidden) || !anm_unit_apply(i, hidden_test)) continue;
+    const float x = lerp(visual.px, visual.x, alpha_), y = lerp(visual.py, visual.y, alpha_) + visual.height * 0.5f, z = lerp(visual.pz, visual.z, alpha_);
+    float sx = 0, sy = 0;
+    if (!cam_.screen(x, y, z, sx, sy) || sx < lb.x0 || sx > lb.x0 + lb.w || sy < 0.0f || sy > kBufferRows) continue;
+    const float unit_z = depth_of(x, y, z);
+    if (std::fabs(unit_z - look) < nearest) {
+      nearest = std::fabs(unit_z - look);
+      goal = unit_z;
+    }
   }
-  if (fade_level > 0.0f && white_.set) {
-    const float vw = static_cast<float>(frame.extent.width), vh = static_cast<float>(frame.extent.height);
-    sprites_->begin(frame, vw, vh, true);
-    // The screen in use (widescreen: the widened frame).
-    const render::Letterbox::Rect veil = render::Letterbox::veil_rect(vw, vh);
-    const u8 grey = static_cast<u8>(255.0f * fade_level + 0.5f);
-    sprites_->set_blend(render::BlendMode::Subtract);
-    sprites_->draw(white_.set, veil.x, veil.y, veil.w, veil.h, 0, 0, 1, 1, render::pack_rgba(grey, grey, grey, 255));
-    sprites_->set_blend(render::BlendMode::Alpha);
-    sprites_->end();
+  // No unit in the picture (an intro sweep, a close-up of the scenery): the blur fades out.
+  const float amount_goal = nearest < 1e30f ? 1.0f : 0.0f;
+  constexpr float kFocusEase = 0.12f;
+  if (post_fx_focus_ < 0.0f || tick_count_ < post_fx_tick_) {
+    post_fx_focus_ = goal;
+    post_fx_amount_ = amount_goal;
+    post_fx_tick_ = tick_count_;
+  } else if (tick_count_ != post_fx_tick_) {
+    const float ease = 1.0f - std::pow(1.0f - kFocusEase, static_cast<float>(std::min(tick_count_ - post_fx_tick_, 60)));
+    post_fx_focus_ += (goal - post_fx_focus_) * ease;
+    post_fx_amount_ += (amount_goal - post_fx_amount_) * ease;
+    post_fx_tick_ = tick_count_;
   }
+  render::PostFxView post;
+  post.ssao = ssao_;
+  post.dof = dof_;
+  post.ax = 2.0f * lb.scale * cam_.h / lb.vw;
+  post.ay = 2.0f * lb.scale_y * cam_.h / lb.vh;
+  post.cx = 2.0f * (lb.scale * cam_.ox + lb.ox) / lb.vw - 1.0f;
+  post.cy = 2.0f * (lb.scale_y * cam_.oy + lb.oy) / lb.vh - 1.0f;
+  post.focus = std::max(post_fx_focus_, 1.0f);
+  post.dof_amount = post_fx_amount_;
+  post_fx_.end(*ctx_, scissor, post);
 }
 
 void BattleView::draw_ui(const render::Frame& frame, bool sprites_resume, const render::Letterbox* pass) {

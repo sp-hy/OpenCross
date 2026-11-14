@@ -45,10 +45,14 @@ void BattleView::cast_glow_tick() {
   }
 }
 
-// The rim colour follows the summed spell light: white without a spell, the light's hue (its largest channel scaled to 1.5) at full
+// The key light is the stage's sun. The rim colour follows the summed spell light: white without a spell, the light's hue (its largest channel scaled to 1.5) at full
 // strength once the light's largest channel reaches 0.67.
 render::CharacterShading BattleView::unit_shading(int unit) const {
   render::CharacterShading shading = character_shading_;
+  // The stage's sun, so the shading stays put as the camera moves and agrees with the cast shadows.
+  shading.world_key = true;
+  const std::array<float, 3> sun = stage_scene_.key_light().dir;
+  for (size_t axis = 0; axis < 3; ++axis) shading.key_dir[axis] = sun[axis];
   if (shading.rim && spell_rim_) {
     float sum[3] = {0, 0, 0};
     for (int i = 0; i < spell_.set.count; ++i)

@@ -375,8 +375,13 @@ int ocbattleview_main(int argc, char** argv) {
       shading.style = static_cast<render::CharacterShading::Style>(config.character_shader);
       shading.outline = config.outlines;
       shading.rim = config.rim;
+      shading.style_strength = config.style_strength;
+      shading.rim_strength = config.rim_strength;
+      shading.outline_width = config.outline_width;
+      shading.outline_depth = config.outline_depth;
       shading.matcap = std::max(0, meshes.matcap_index(config.matcap));
       view.set_character_shading(shading, config.spell_rim, config.cast_glow);
+      view.set_post_fx(config.ssao, config.depth_of_field);
       view.set_auto(bauto);
       view.debug_ui(ui_mode);
       game::BattleView::Debug dbg;

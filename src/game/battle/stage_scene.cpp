@@ -687,7 +687,7 @@ void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, r
   for (size_t k = 0; k < 9; ++k) floor_cam[k] = view.rot.m[k];
   for (size_t k = 0; k < 3; ++k) floor_cam[9 + k] = view.trans[k];
   // [Enhancements] Lighting: the real shadows on the floor; the sun of a light object throws a harder one than the stand-in key light.
-  if (floor_shadow_) {
+  if (floor_shadow_ && !pipe.view_depth()) {
     render::ShadowPipeline::Floor floor;
     floor.clip = proj * render::mat4_from_rows(floor_cam);
     floor.rect = floor_rect_;

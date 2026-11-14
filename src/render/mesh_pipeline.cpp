@@ -83,9 +83,11 @@ struct FrameUniforms {
   float lit[9][4];
   // [Enhancements] EnhancedLighting / SpellLights (see the vertex shader).
   float el[18][4];
+  // CharacterShading::world_key: the direction toward the light, w = 1 on.
+  float key[4];
   Mat4 palette[MeshPipeline::kMaxJoints];
 };
-static_assert(offsetof(FrameUniforms, palette) == 3 * sizeof(Mat4) + 16 + 9 * 16 + 18 * 16);
+static_assert(offsetof(FrameUniforms, palette) == 3 * sizeof(Mat4) + 16 + 9 * 16 + 18 * 16 + 16);
 // Lighting key light: colour multiplier swing = +-0.35 (key strength * dot(n, key) * 0.5).
 constexpr float kKeyStrength = 0.70f;
 
@@ -263,7 +265,6 @@ bool MeshPipeline::init(GpuContext& ctx) {
   pd.depth_write = true;
   if (!pipeline_.create(ctx, pd)) return false;
   pd.depth_write = false;
-  if (!pipeline_outline_.create(ctx, pd)) return false;
   pd.blend = Blend::Additive;
   if (!pipeline_add_.create(ctx, pd)) return false;
   pd.blend = Blend::Subtract;
@@ -275,6 +276,8 @@ bool MeshPipeline::init(GpuContext& ctx) {
   pd.depth_write = true;
   pd.blend = Blend::Alpha;
   if (!pipeline_depth_only_.create(ctx, pd)) return false;
+  pd.blend = Blend::None;
+  if (!pipeline_view_depth_.create(ctx, pd)) return false;
 
   return slots_.create(ctx, sizeof(FrameUniforms) * kMaxDrawsPerFrame, SDL_GPU_BUFFERUSAGE_GRAPHICS_STORAGE_READ);
 }
@@ -286,7 +289,7 @@ void MeshPipeline::destroy() {
   pipeline_sub_.destroy();
   pipeline_avg_.destroy();
   pipeline_depth_only_.destroy();
-  pipeline_outline_.destroy();
+  pipeline_view_depth_.destroy();
   nearest_.destroy();
   linear_.destroy();
   matcaps_.clear();
@@ -585,6 +588,8 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   uniforms->slab[2] = uniforms->slab[3] = 0.0f;
   if (ps1_jitter().on) uniforms->slab[2] = ps1_jitter().px, uniforms->slab[3] = ps1_jitter().py;
   std::memset(uniforms->lit, 0, sizeof uniforms->lit);
+  for (size_t axis = 0; axis < 3; ++axis) uniforms->key[axis] = params.shading.key_dir[axis];
+  uniforms->key[3] = params.shading.world_key ? 1.0f : 0.0f;
   // PS1 lit path (DrawParams::Light): BK, the light matrix rows, the colour matrix columns.
   if (params.light.on) {
     for (size_t channel = 0; channel < 3; ++channel) uniforms->lit[0][channel] = params.light.bk[channel];
@@ -650,8 +655,8 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   // semi-transparent meshes' STP texels with the construct's ABR), and in field ordering-table mode with water (WetFaces::Mixed) DepthOnly +
   // WetAdd for the submerged faces: their pushed-back depth first, then added to the frame where they are the nearest thing (PS1: drawn far
   // back first, the semi-transparent water layer over them). DryOnly / WetOnly draw one side of that split with Solid + Semi.
-  // Outline: the [Shaders] inverted hull of the opaque one-sided parts, before their Solid pass and without writing depth, so the model
-  // covers it everywhere inside its silhouette whatever order the coarse face slots give its faces.
+  // Outline: the [Shaders] inverted hull of the opaque one-sided parts, before their Solid pass, its depth written one slot behind its own
+  // (mesh.frag), so the model covers it inside its silhouette and a model drawn later behind this one does not paint over it.
   // DrawParams::opacity below 1: a DepthOnly pass of the whole model, then its Solid pass alpha-blended, so only the nearest surface shows.
   enum class Kind { Solid, Semi, DepthOnly, WetAdd, Outline };
   struct Pass {
@@ -676,7 +681,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
   const bool all_semi = flash || (params.model_abr >= 0 && params.model_abr <= 3);
   const int model_abr = flash ? 1 : all_semi ? params.model_abr : -1;
   const bool faded = params.opacity < 1.0f && !params.solid && !flash && !split_wet;
-  const bool outline = params.shading.outline && !params.solid && !flash && !all_semi && !faded && params.wet_faces != WF::WetOnly;
+  const bool outline = params.shading.outline && params.shading.outline_width > 0.0f && !params.solid && !flash && !all_semi && !faded && params.wet_faces != WF::WetOnly;
   Pass passes[9];
   int npass = 0;
   if (params.solid) {
@@ -711,11 +716,17 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
     passes[npass++] = {Kind::Solid, faces};
     passes[npass++] = {Kind::Semi, faces, false, model_abr};
   }
+  // View depth: the opaque texels of every visible face, once.
+  if (view_depth_) {
+    passes[0] = {Kind::Solid, 0.0f};
+    npass = params.solid ? 0 : 1;
+  }
   // The outline width in clip units: kOutlinePx PS1 pixels of the picture being drawn (the PS1 pixels per clip unit of the jitter grid).
   const float grid_x = ps1_jitter().px > 0.0f ? ps1_jitter().px : 160.0f, grid_y = ps1_jitter().py > 0.0f ? ps1_jitter().py : 112.0f;
   const CharacterShading& shading = params.shading;
+  const float outline_px = outline ? kOutlinePx * shading.outline_width * (shading.outline_depth ? outline_depth_scale(params) : 1.0f) : 0.0f;
   const float style = params.solid ? 0.0f : static_cast<float>(shading.style);
-  const bool rim = shading.rim && !params.solid;
+  const float rim = shading.rim && !params.solid ? shading.rim_strength : 0.0f;
   const float glow = params.solid ? 0.0f : shading.glow;
   const int matcap_slot = std::clamp(shading.matcap, 0, static_cast<int>(matcaps_.size()) - 1);
   const SDL_GPUTextureSamplerBinding matcap_binding{matcaps_.empty() ? nullptr : matcaps_[static_cast<size_t>(matcap_slot)].texture->handle(),
@@ -740,8 +751,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       else if (pass.kind == Kind::Solid && faded) {
         pipe = &pipeline_avg_;
         out_alpha = params.opacity;
-      } else if (pass.kind == Kind::Outline) pipe = &pipeline_outline_;
-      else if (pass.kind == Kind::WetAdd) pipe = &pipeline_add_;
+      } else if (pass.kind == Kind::WetAdd) pipe = &pipeline_add_;
       else if (pass.kind == Kind::Semi) {
         // PS1 ABR: 0 = (B + F) / 2, 1 = B + F, 2 = B - F, 3 = B + F / 4.
         switch (pass.env ? params.stock_env_abr[model_draw.mesh] : pass.abr >= 0 ? pass.abr : part_semi ? params.part_abr[model_draw.mesh] : model_draw.trans - 1) {
@@ -751,6 +761,7 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
           default: pipe = &pipeline_add_; break;
         }
       }
+      if (view_depth_) pipe = &pipeline_view_depth_;
       if (pipe->handle() != bound) {
         bound = pipe->handle();
         SDL_BindGPUGraphicsPipeline(render_pass, bound);
@@ -791,9 +802,9 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
                                        params.fog_near, params.fog_far, stp_filter, pass.white ? 1.0f : 0.0f,
                                        params.ot_faces ? (smooth_water_line_ ? 2.0f : 1.0f) : 0.0f, near_sort ? 1.0f : 0.0f, params.ot_bias, params.water_bias,
                                        pass.faces, pass.kind == Kind::DepthOnly ? 1.0f : 0.0f, 1.0f / kDepthRange, out_alpha,
-                                       static_cast<float>(slot), model_pixel_depth_ ? 1.0f : 0.0f, 0.0f, 0.0f,
-                                       style, pass.kind == Kind::Outline ? 1.0f : 0.0f, kOutlinePx / grid_x, kOutlinePx / grid_y,
-                                       shading.rim_rgb[0], shading.rim_rgb[1], shading.rim_rgb[2], rim ? 1.0f : 0.0f,
+                                       static_cast<float>(slot), model_pixel_depth_ ? 1.0f : 0.0f, shading.style_strength, view_depth_ ? 1.0f : 0.0f,
+                                       style, pass.kind == Kind::Outline ? 1.0f : 0.0f, outline_px / grid_x, outline_px / grid_y,
+                                       shading.rim_rgb[0], shading.rim_rgb[1], shading.rim_rgb[2], rim,
                                        shading.glow_rgb[0], shading.glow_rgb[1], shading.glow_rgb[2], glow};
       SDL_PushGPUVertexUniformData(command_buffer, 0, push, sizeof push);
       SDL_PushGPUFragmentUniformData(command_buffer, 0, push, sizeof push);
@@ -801,6 +812,26 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
     }
   }
   SDL_BindGPUGraphicsPipeline(render_pass, pipeline_.handle());
+}
+
+float MeshPipeline::outline_depth_scale(const DrawParams& params) {
+  if (params.palette.size() < 2) return 1.0f;
+  const float grid_x = ps1_jitter().px > 0.0f ? ps1_jitter().px : 160.0f, grid_y = ps1_jitter().py > 0.0f ? ps1_jitter().py : 112.0f;
+  const Mat4 to_clip = params.view_proj * params.model;
+  float min_x = 0, max_x = 0, min_y = 0, max_y = 0;
+  int seen = 0;
+  for (const Mat4& joint : params.palette) {
+    float clip[4];
+    for (int row = 0; row < 4; ++row)
+      clip[row] = to_clip.at(row, 0) * joint.at(0, 3) + to_clip.at(row, 1) * joint.at(1, 3) + to_clip.at(row, 2) * joint.at(2, 3) + to_clip.at(row, 3);
+    if (clip[3] <= 0.0f) continue;
+    const float x = clip[0] / clip[3] * grid_x, y = clip[1] / clip[3] * grid_y;
+    min_x = seen ? std::min(min_x, x) : x, max_x = seen ? std::max(max_x, x) : x;
+    min_y = seen ? std::min(min_y, y) : y, max_y = seen ? std::max(max_y, y) : y;
+    ++seen;
+  }
+  if (seen < 2) return 1.0f;
+  return std::clamp(std::max(max_x - min_x, max_y - min_y) / kOutlineFullSize, kOutlineMinScale, 1.0f);
 }
 
 int MeshPipeline::matcap_index(std::string_view name) const {

@@ -38,7 +38,7 @@ function(oc_shader out src)
     VERBATIM)
   set(OC_SHADER_INCS ${OC_SHADER_INCS} ${OC_SPV_DIR}/${out} PARENT_SCOPE)
 endfunction()
-foreach(sh sprite.vert sprite.frag mesh.vert mesh.frag particle.vert particle.frag screen.vert screen.frag stage.vert stage.frag shadow_cast.vert shadow_cast.frag shadow_floor.vert shadow_floor.frag shadow_blur.vert shadow_blur.frag)
+foreach(sh sprite.vert sprite.frag mesh.vert mesh.frag particle.vert particle.frag screen.vert screen.frag stage.vert stage.frag shadow_cast.vert shadow_cast.frag shadow_floor.vert shadow_floor.frag shadow_blur.vert shadow_blur.frag post_fx.frag)
   oc_shader(${sh}.inc ${sh})
 endforeach()
 oc_shader(stage_affine.vert.inc stage.vert -DAFFINE)
@@ -80,6 +80,8 @@ add_library(oc_render STATIC
   particles.cpp
   screen_pass.h
   screen_pass.cpp
+  post_fx.h
+  post_fx.cpp
   ps1_jitter.h
   imgui_layer.h
   imgui_layer.cpp

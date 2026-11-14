@@ -129,19 +129,30 @@ ModelTextures prepare_model_textures(GpuContext& ctx, const assets::ModelAsset& 
 //   Cel:       four bands, C (0.5 + 0.6 b), b = (floor(4 t) + smoothstep(0.42, 0.58, fract(4 t))) / 4.
 //   Matcap:    C 1.6 M, M the matcap's texel at (m.x / 2 + 1/2, 1/2 - m.y / 2), m = the normal in the key light's frame (along the camera's
 //              right, along the model's up, toward the camera), so a matcap lit from the upper left shades like the other styles.
-//   Rim:       any style: + L rim_rgb 0.4 (1 - f)^3 (matcap: f = |n.z| of the view-space normal).
+//   Strength:  a style's result S is blended with the unstyled colour: mix(C, S, style_strength).
+//   Rim:       any style: + L rim_rgb 0.4 rim_strength (1 - f)^3 (matcap: f = |n.z| of the view-space normal).
 //   Glow:      mix(C, 1.5 C glow_rgb, 0.35 glow) + glow_rgb glow (0.12 + 0.5 (1 - f)^2), after the rim (f = 1 without a normal).
 //   Outline:   an inverted hull: the model is drawn again with the back-face test inverted and every corner pushed out along its normal
-//              by kOutlinePx PS1 pixels on screen, in the texel colour times 0.15 (opaque one-sided parts only). It is drawn first and writes no
-//              depth, so the model then covers it inside its silhouette.
+//              by kOutlinePx outline_width PS1 pixels on screen, in the texel colour times 0.15 (opaque one-sided parts only). It is drawn first
+//              and writes its depth one slot (16 camera-z units) behind its own, so the model then covers it inside its silhouette and a
+//              model drawn later behind it does not paint over the line. With outline_depth the width is scaled by the model's
+//              size on screen (MeshPipeline::outline_depth_scale), so a distant character gets a thinner line.
 struct CharacterShading {
   enum class Style : u8 { Off, Realistic, Toon, Cel, Matcap };
   Style style = Style::Off;
   bool outline = false;
   bool rim = false;
+  bool outline_depth = true;
+  float style_strength = 1;
+  float rim_strength = 1;
+  float outline_width = 1;
   // MeshPipeline matcap index (Matcap style).
   int matcap = 0;
   float rim_rgb[3] = {1, 1, 1};
+  // A key light fixed in the world (unit vector toward the light), replacing the camera-relative one for the styles and the Lighting key
+  // light; the matcap style keeps its view-based lookup.
+  bool world_key = false;
+  float key_dir[3] = {0, 1, 0};
   // Cast glow colour and strength (0 = none).
   float glow_rgb[3] = {0, 0, 0};
   float glow = 0;
@@ -151,11 +162,15 @@ class MeshPipeline {
  public:
   // Outline width in PS1 screen pixels (1 = one pixel of the 320 x 224 picture, scaled with the window).
   static constexpr float kOutlinePx = 0.6f;
+  // CharacterShading::outline_depth: a model at least kOutlineFullSize PS1 pixels across on screen (its posed joints' extent) gets the
+  // full width; a smaller one a width in proportion, down to kOutlineMinScale of it.
+  static constexpr float kOutlineFullSize = 36.0f;
+  static constexpr float kOutlineMinScale = 0.25f;
   // The built-in matcaps, made at init in this order (indices 0..2).
   static constexpr const char* kBuiltinMatcaps[] = {"clay", "metal", "ink"};
   static constexpr u32 kMaxJoints = 128;
   // Distinct model draws (actors) per frame.
-  static constexpr u32 kMaxDrawsPerFrame = 96;
+  static constexpr u32 kMaxDrawsPerFrame = 192;
 
   MeshPipeline() = default;
   ~MeshPipeline() { destroy(); }
@@ -271,6 +286,9 @@ class MeshPipeline {
     CharacterShading shading;
   };
   void draw(const MeshModel& model, const DrawParams& params);
+  // The outline width factor of a skinned draw (CharacterShading::outline_depth; 1 for a draw with fewer than two joints). A rigid part
+  // carried by a model (a battle weapon) takes its carrier's factor in outline_width, with outline_depth off.
+  static float outline_depth_scale(const DrawParams& params);
   void end();
 
   // [Enhancements] SmoothWaterLine: in field ordering-table mode a face straddling the water level is split per fragment at the exact
@@ -292,6 +310,8 @@ class MeshPipeline {
   // [Enhancements] SmoothReflections: the env-mapped parts' corner UVs (mesh.vert) keep the sub-texel fraction of the normal
   // instead of the PS1's whole texel, so the reflection slides with the pose. Default off = the PS1's one-texel steps.
   void set_smooth_reflections(bool on) { smooth_reflections_ = on; }
+  // View depth (render/post_fx.h): draw() writes the camera z of the opaque texels instead of the picture.
+  void set_view_depth(bool on) { view_depth_ = on; }
 
  private:
   GpuContext* ctx_ = nullptr;
@@ -303,8 +323,8 @@ class MeshPipeline {
   Pipeline pipeline_avg_;
   // Depth written, colour kept (alpha-0 output): the submerged faces' first pass.
   Pipeline pipeline_depth_only_;
-  // Opaque, depth tested, not written: the [Shaders] outline pass.
-  Pipeline pipeline_outline_;
+  // Opaque, depth written: the view depth (set_view_depth).
+  Pipeline pipeline_view_depth_;
   Sampler nearest_, linear_;
   struct Matcap {
     std::string name;
@@ -315,6 +335,7 @@ class MeshPipeline {
   bool model_pixel_depth_ = false;
   bool enhanced_ = false;
   bool smooth_reflections_ = false;
+  bool view_depth_ = false;
   // 1 PS1 back-face test, 0 off, -1 inverted (debug: env OC_MESH_CULL=0 / -1).
   float cull_ = 1.0f;
   // One FrameUniforms per draw, read by the vertex shader as a storage buffer.

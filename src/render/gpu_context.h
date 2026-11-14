@@ -155,6 +155,13 @@ class GpuContext {
   // Inside a frame: copies the colour of the rendering in progress (resolved when multisampled) into `target`'s colour image, scaled to
   // its size with bilinear filtering, and resumes the rendering: colour kept, depth cleared.
   void copy_color(RenderTarget& target);
+  // Post-processing inside the rendering in progress, its colour and depth kept. hold_depth() restarts it (colour kept, depth cleared) so its
+  // depth is stored from then on. suspend_rendering() ends it and returns its colour image (resolved when multisampled) with `sampler`;
+  // targets drawn after that (begin_target / end_target) leave no rendering open when they end. resume_rendering() continues it with its
+  // colour and, when held, its depth, and ends the hold.
+  void hold_depth();
+  TexRef suspend_rendering(SDL_GPUSampler* sampler);
+  void resume_rendering();
   void clear_depth();
   void set_scissor(const Rect& rect);
   void wait_idle();
@@ -213,8 +220,9 @@ class GpuContext {
   bool create_device(const std::string& driver);
   bool apply_swapchain();
   bool ensure_frame_images(u32 width, u32 height);
-  // Begins a render pass into the given images (colour cleared or loaded, depth always cleared) with viewport / scissor = their extent.
-  void begin_rendering(const PassImages& images, bool clear_color, const float (&rgba)[4]);
+  // Begins a render pass into the given images (colour cleared or loaded, depth cleared unless `load_depth`) with viewport / scissor = their
+  // extent. The held depth image (hold_depth) is stored at the end of the pass.
+  void begin_rendering(const PassImages& images, bool clear_color, const float (&rgba)[4], bool load_depth = false);
   void end_rendering();
   // The images of the innermost begin_target, or the frame's.
   PassImages current_images() const;
@@ -275,6 +283,10 @@ class GpuContext {
   bool in_frame_ = false;
   // begin_target nesting (innermost last); empty = the frame images are being rendered.
   std::vector<RenderTarget*> targets_;
+  // hold_depth / suspend_rendering: the depth image stored across the suspension, and the nesting level of the suspended rendering.
+  SDL_GPUTexture* held_depth_ = nullptr;
+  bool suspended_ = false;
+  size_t suspended_level_ = 0;
   std::vector<StreamBuffer*> streams_;
   std::filesystem::path screenshot_path_;
   std::function<void(std::vector<u8>&&, u32, u32)> capture_cb_;

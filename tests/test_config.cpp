@@ -34,6 +34,8 @@ int main() {
   // Old ini: FilterHD wins, the other per-art keys are ignored.
   Config legacy_hd = load_text("[Video]\nFilterHD=nearest\nFilterSD=bilinear\nFilterModded=bilinear\nArtMode=hd\nPs1Res3D=1\n");
   CHECK(legacy_hd.filter == TexFilter::Nearest);
+  // A UTF-8 byte order mark before the first section does not hide it.
+  CHECK(load_text("\xEF\xBB\xBF[Video]\nFilterHD=nearest\n").filter == TexFilter::Nearest);
   // Ps1Res3D never acted outside classic art: an old non-classic ini means off.
   CHECK(!legacy_hd.ps1_res_graphics && !legacy_hd.ps1_res_ui);
   // Old ini in classic art keeps Ps1Res3D (migrated through Ps1Res into both halves).
@@ -104,7 +106,9 @@ int main() {
     CHECK(defaults.character_shader == CharacterShader::Off && defaults.matcap == "clay" && !defaults.outlines && !defaults.rim);
     CHECK(!defaults.spell_rim && !defaults.cast_glow && defaults.fullscreen_shader == FullscreenShader::Off && defaults.grade == "off");
     Config shaders = load_text("[Shaders]\nCharacters=matcap\nMatcap=chrome\nOutlines=1\nRim=1\nSpellRim=1\nCastGlow=1\n"
-                               "Fullscreen=composite\nCrtMask=shadow\nCrtCurvature=1\nCrtGlow=1\nGrade=dusk\n");
+                               "Fullscreen=composite\nCrtMask=shadow\nCrtCurvature=1\nCrtGlow=1\nGrade=dusk\nSsao=1\nDepthOfField=1\n");
+    CHECK(!defaults.ssao && !defaults.depth_of_field && shaders.ssao && shaders.depth_of_field);
+    CHECK(load_text("[Shaders]\nSsao=1\n").ssao && !load_text("[Shaders]\nSsao=1\n").depth_of_field);
     CHECK(shaders.character_shader == CharacterShader::Matcap && shaders.matcap == "chrome" && shaders.outlines && shaders.rim);
     CHECK(shaders.spell_rim && shaders.cast_glow);
     CHECK(shaders.fullscreen_shader == FullscreenShader::Composite && shaders.crt_mask == CrtMask::ShadowMask && shaders.crt_curvature && shaders.crt_glow);
@@ -114,6 +118,14 @@ int main() {
     CHECK(load_text("[Shaders]\nFullscreen=watercolour\n").fullscreen_shader == FullscreenShader::Off);
     CHECK(load_text("[Video]\nCrt=1\n").fullscreen_shader == FullscreenShader::Crt);
     CHECK(load_text("[Video]\nCrt=1\n[Shaders]\nFullscreen=off\n").fullscreen_shader == FullscreenShader::Off);
+    // The strengths and the outline width: full by default, clamped, written back.
+    CHECK(defaults.style_strength == 1.0f && defaults.rim_strength == 1.0f && defaults.outline_width == 1.0f && defaults.outline_depth);
+    const Config tuned = load_text("[Shaders]\nStyleStrength=0.25\nRimStrength=1.5\nOutlineWidth=9\nOutlineDepth=0\n");
+    CHECK(tuned.style_strength == 0.25f && tuned.rim_strength == 1.0f && tuned.outline_width == 4.0f && !tuned.outline_depth);
+    CHECK(load_text("[Shaders]\nRimStrength=-1\n").rim_strength == 0.0f);
+    CHECK(load_text("[Shaders]\nOutlineWidth=0.5\n").outline_width == 0.5f);
+    shaders.style_strength = 0.5f;
+    shaders.outline_width = 1.75f;
     const std::filesystem::path out = std::filesystem::temp_directory_path() / "oc_test_config_shaders.ini";
     CHECK(shaders.save(out));
     std::stringstream text;
@@ -125,6 +137,8 @@ int main() {
     CHECK(text.str().find("Crt=") == std::string::npos);
     CHECK(reloaded.character_shader == CharacterShader::Matcap && reloaded.matcap == "chrome" && reloaded.cast_glow && reloaded.grade == "dusk");
     CHECK(reloaded.fullscreen_shader == FullscreenShader::Composite && reloaded.crt_mask == CrtMask::ShadowMask);
+    CHECK(reloaded.ssao && reloaded.depth_of_field && text.str().find("DepthOfField=1") != std::string::npos);
+    CHECK(reloaded.style_strength == 0.5f && reloaded.outline_width == 1.75f && reloaded.rim_strength == 1.0f && reloaded.outline_depth);
   }
   // [Mods] dump categories: defaults, parse, save, reload (the Mods tab's "Dump all textures" checkboxes).
   {

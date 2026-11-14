@@ -246,6 +246,10 @@ class StagePipeline {
     float amb[3] = {1, 1, 1};
     bool amb_on = false;
   };
+  // View depth (render/post_fx.h): the draws write the camera z of the opaque faces instead of the picture; semi-transparent faces, seam
+  // strips and the shadow hulls are left out.
+  void set_view_depth(bool on) { view_depth_ = on; }
+  bool view_depth() const { return view_depth_; }
   // Packets dropped by the last draw() (debug / tests).
   size_t rejected_packets() const { return rejected_; }
   // Draws every instance: opaque faces first (depth written), then semi-transparent ones back to front (depth tested).
@@ -269,6 +273,8 @@ class StagePipeline {
 
  private:
   TexRef make_stage_set(const Texture& tex, bool linear);
+  // The pipeline of a draw: cull side 0..2, blend 0..3, the affine variant; in view-depth mode the depth pipeline, null for a blended draw.
+  const Pipeline* pipeline(int cull, int blend, bool affine) const;
   // Appends to the dynamic ring at vertex / index position `first` (the frame's mapped memory) and marks the range for the copy to the GPU.
   void write_vertices(const void* data, u32 count, u32 first);
   void write_indices(const u32* data, u32 count, u32 first);
@@ -292,6 +298,9 @@ class StagePipeline {
   Pipeline pipes_[3][4];
   // [Video] Ps1Jitter: affine texture / colour interpolation like the PS1 GPU.
   Pipeline pipes_affine_[3][4];
+  // View depth, per cull side.
+  Pipeline pipes_view_depth_[3];
+  bool view_depth_ = false;
   Sampler nearest_, linear_;
   bool active_ = false;
   Extent extent_{};

@@ -203,11 +203,14 @@ void bind_cheats(const Cheats* set);
 //            MenuModelsInField: field characters are drawn with their Status-screen model, posed by their field model (game/menu_rig.h).
 //   [Shaders] (opt-in, off by default, any art mode) Characters: kCharacterShaderNames, the shading of the field actors, the battle units
 //            and their weapons and the status screen's model (render/mesh_pipeline.h CharacterShading); Matcap: the matcap style's look (a
-//            built-in or a mod's shaders/matcaps/<name>.png); Outlines: a dark outline; Rim: a rim light; SpellRim: in battle the rim takes
-//            the running spell's light colour; CastGlow: a caster glows in its element's colour.
+//            built-in or a mod's shaders/matcaps/<name>.png); StyleStrength 0..1: how much of the style's shading shows; Outlines: a dark
+//            outline; OutlineWidth 0..4: its width factor; OutlineDepth: thinner outlines on characters small on screen; Rim: a rim light;
+//            RimStrength 0..1: its strength; SpellRim: in battle the rim takes the running spell's light colour; CastGlow: a caster glows in
+//            its element's colour.
 //            Fullscreen: kFullscreenShaderNames, the main filter of the final full-frame pass, ImGui excluded (render/screen_pass.h; the
 //            old [Video] Crt=1 reads as crt); CrtMask (kCrtMaskNames), CrtCurvature, CrtGlow: the crt filter's options. Grade: a colour
-//            grade (kBuiltinGrades or a mod's shaders/luts/<name>.png).
+//            grade (kBuiltinGrades or a mod's shaders/luts/<name>.png). Ssao / DepthOfField: ambient occlusion / depth of field on the battle
+//            3D picture, under the effect sprites, HUD and menus (render/post_fx.h; not with [Video] Ps1ResGraphics).
 //   [Audio]  Master / Music / Sfx: bus gains 0..1. Voices: play the voice lines of the mods' voices folders.
 //            VoiceVolume 0..100 (the voice bus gain, times Master). BgmSource: remastered (RDE HCA files) or original (PS1 AKAO sequences).
 //   [Multiplayer] (MultiplayerSettings) Enabled: connect to the multiplayer server (never in --config or OC_QUIET runs). Server:
@@ -289,8 +292,12 @@ struct Config {
   bool menu_models_in_field = false;
   CharacterShader character_shader = CharacterShader::Off;
   std::string matcap = "clay";
+  float style_strength = 1.0f;
   bool outlines = false;
+  float outline_width = 1.0f;
+  bool outline_depth = true;
   bool rim = false;
+  float rim_strength = 1.0f;
   bool spell_rim = false;
   bool cast_glow = false;
   FullscreenShader fullscreen_shader = FullscreenShader::Off;
@@ -298,6 +305,8 @@ struct Config {
   bool crt_curvature = false;
   bool crt_glow = false;
   std::string grade = "off";
+  bool ssao = false;
+  bool depth_of_field = false;
   int msaa = 1;
   static constexpr int kMsaaLevels[] = {1, 2, 4, 8};
   int anisotropy = 1;

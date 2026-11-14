@@ -324,6 +324,8 @@ bool GpuContext::begin_frame(Frame& out) {
   }
   targets_.clear();
   streams_.clear();
+  held_depth_ = nullptr;
+  suspended_ = false;
   in_frame_ = true;
   overlay_ = false;
   begin_rendering(current_images(), true, clear_);
@@ -335,7 +337,7 @@ bool GpuContext::begin_frame(Frame& out) {
   return true;
 }
 
-void GpuContext::begin_rendering(const PassImages& images, bool clear_color, const float (&rgba)[4]) {
+void GpuContext::begin_rendering(const PassImages& images, bool clear_color, const float (&rgba)[4], bool load_depth) {
   end_rendering();
   const Extent extent = images.extent;
   SDL_GPUColorTargetInfo color_info{};
@@ -346,8 +348,8 @@ void GpuContext::begin_rendering(const PassImages& images, bool clear_color, con
   SDL_GPUDepthStencilTargetInfo depth_info{};
   depth_info.texture = images.depth;
   depth_info.clear_depth = 1.0f;
-  depth_info.load_op = SDL_GPU_LOADOP_CLEAR;
-  depth_info.store_op = SDL_GPU_STOREOP_DONT_CARE;
+  depth_info.load_op = load_depth ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
+  depth_info.store_op = images.depth && images.depth == held_depth_ ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
   depth_info.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
   depth_info.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
   pass_ = SDL_BeginGPURenderPass(cmd_, &color_info, 1, &depth_info);
@@ -403,6 +405,7 @@ void GpuContext::end_target(RenderTarget& target) {
     resolve(current_images());
     targets_.pop_back();
   }
+  if (suspended_ && targets_.size() == suspended_level_) return;
   begin_rendering(current_images(), false, clear_);
 }
 
@@ -418,6 +421,32 @@ void GpuContext::copy_color(RenderTarget& target) {
   blit.filter = SDL_GPU_FILTER_LINEAR;
   SDL_BlitGPUTexture(cmd_, &blit);
   begin_rendering(images, false, clear_);
+}
+
+void GpuContext::hold_depth() {
+  if (!in_frame_ || !pass_ || suspended_) return;
+  const PassImages images = current_images();
+  held_depth_ = images.depth;
+  begin_rendering(images, false, clear_);
+}
+
+TexRef GpuContext::suspend_rendering(SDL_GPUSampler* sampler) {
+  if (!in_frame_ || !pass_ || suspended_) return {};
+  end_rendering();
+  const PassImages images = current_images();
+  resolve(images);
+  suspended_ = true;
+  suspended_level_ = targets_.size();
+  return {images.resolve ? images.resolve : images.color, sampler, images.extent.width, images.extent.height};
+}
+
+void GpuContext::resume_rendering() {
+  if (!in_frame_ || !suspended_) return;
+  suspended_ = false;
+  const PassImages images = current_images();
+  const bool load_depth = images.depth && images.depth == held_depth_;
+  held_depth_ = nullptr;
+  begin_rendering(images, false, clear_, load_depth);
 }
 
 void GpuContext::clear_depth() {

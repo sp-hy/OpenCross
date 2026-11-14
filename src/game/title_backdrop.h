@@ -4,7 +4,9 @@
 // 0x0C camera shots, child sequences) whose textures are the VRAM uploads of `title.ltd`. This class plays them: effect player
 // (emitters + sequences) + battle camera (shots); the mesh objects are drawn like a battle stage (render::StagePipeline: GPU
 // projection with near clipping, per-pixel depth, OT bias as depth bias, bilinear sampling in HD mode) and the sprite
-// objects through the particle batch, depth tested against them, into the field pass.
+// objects through the particle batch, depth tested against them, into the field pass. The model objects take the [Shaders] character shading
+// and, with [Enhancements] Lighting, cast their shadows straight down onto the sea floor under them.
+#include <array>
 #include <map>
 #include <optional>
 #include <memory>
@@ -21,6 +23,7 @@
 #include "game/effects/sequence_player.h"
 #include "render/mesh_pipeline.h"
 #include "render/particles.h"
+#include "render/shadow_pipeline.h"
 #include "render/sprite_batch.h"
 #include "render/stage_pipeline.h"
 #include "render/texture.h"
@@ -66,6 +69,10 @@ class TitleBackdrop {
   // Draws into the open frame (the caller's field pass, before the room layers). `linear` = bilinear texture sampling (HD art
   // mode, like the battle stage). No-op while not running.
   void draw(const render::Frame& frame, float view_w, float view_h, float alpha, bool linear);
+  // [Shaders] the character shading of the model objects.
+  void set_character_shading(const render::CharacterShading& shading) { shading_ = shading; }
+  // [Enhancements] Lighting: the model objects cast their shadows on the sea floor.
+  void set_cast_shadows(bool on) { cast_shadows_ = on; }
 
   // Debug: the number of live emitter objects / the camera shot (log lines, tests).
   u32 live_objects() const;
@@ -74,6 +81,13 @@ class TitleBackdrop {
  private:
   bool build_run(std::string_view first);
   effects::ViewParams view(float alpha) const;
+  // A model object's model -> world matrix (the mesh pipeline's world, y up; see draw()).
+  static render::Mat4 model_matrix(const effects::EmitterSystem::MeshInstance& mi);
+  // [Enhancements] Lighting: finds the floor under every model object of `live` and draws their shadows into the mask (before any 3D of the
+  // frame: the pass suspends it). Fills shadow_floors_.
+  void cast_shadows(const render::Frame& frame, const effects::ViewParams& vp, float alpha, const std::vector<effects::EmitterSystem::MeshInstance>& live);
+  // Inside the scenery pass, after the scenery: lays each shadow of shadow_floors_ on its floor.
+  void draw_shadow_floors(const render::Mat4& proj, const effects::ViewParams& vp);
 
   bool ready_ = false, running_ = false;
   render::GpuContext* ctx_ = nullptr;
@@ -104,6 +118,8 @@ class TitleBackdrop {
     int clip = -1;
   };
   bool load_models(render::MeshPipeline& meshes);
+  // The model object's pose at the tick alpha into palette_.
+  void pose_model(ModelRes& res, const effects::EmitterSystem::MeshInstance& mi, float alpha);
   // The mod overlay changed: the models' texture replacements again, from their own pages.
   void reload_model_textures();
   struct VramBlock {
@@ -115,6 +131,18 @@ class TitleBackdrop {
   std::map<std::string, std::unique_ptr<ModelRes>> models_;
   std::vector<render::Mat4> palette_;
   bool models_logged_ = false;
+  render::CharacterShading shading_;
+  bool cast_shadows_ = false, shadow_pipe_failed_ = false;
+  render::ShadowPipeline shadow_pipe_;
+  // One shadow's floor: the plane y = height + slope_x (x' - x) + slope_z (z' - z) (world, +y down) under the model at (x, z); the shadow covers
+  // x, z within `half` of the model, and its mask is centred on shadow_centre_.
+  struct ShadowFloor {
+    float x = 0, z = 0, height = 0, slope_x = 0, slope_z = 0, half = 0;
+  };
+  std::vector<ShadowFloor> shadow_floors_;
+  std::array<float, 2> shadow_centre_{};
+  // The floor triangles of this frame, three world corners (+y down) each.
+  std::vector<std::array<float, 3>> floor_corners_;
   u64 ticks_ = 0;
 };
 

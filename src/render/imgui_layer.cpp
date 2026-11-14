@@ -868,6 +868,16 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       row(label, help);
       if (ImGui::Checkbox(id, &value)) change.other = true;
     };
+    // A 0..max_pct % slider over a 0..max_pct / 100 factor.
+    auto percent_row = [&](const char* label, const char* id, const char* help, float& value, int max_pct) {
+      row(label, help);
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      int pct = static_cast<int>(std::lround(value * 100.0f));
+      if (ImGui::SliderInt(id, &pct, 0, max_pct, "%d%%")) {
+        value = static_cast<float>(pct) / 100.0f;
+        change.other = true;
+      }
+    };
     section("Full-screen shaders");
     if (begin_rows("screenshaders")) {
       row("Filter", "A final pass over the whole picture, before the settings window and notifications. CRT: scanlines, a phosphor mask and "
@@ -894,6 +904,11 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                           "white-balance shift. Faded: lifted blacks and softer colours. A mod can add its own as a LUT image "
                           "(shaders/luts/<name>.png: N x N squares side by side, e.g. 256 x 16).");
       if (look_combo("##grade", cfg.grade, grade_names_, std::size(platform::kBuiltinGrades))) change.other = true;
+      checkbox_row("Ambient occlusion", "##ssao", "In battle, soft shadows in creases and where the characters stand on the floor. Not over the "
+                                                  "spell effects, the HUD or the menus, and not with PS1-resolution graphics.", cfg.ssao);
+      checkbox_row("Depth of field", "##dof", "In battle, what lies well behind or in front of the action is softly blurred; the characters "
+                                              "in the shot stay sharp. Not over the spell effects, the HUD or the menus, and not with "
+                                              "PS1-resolution graphics.", cfg.depth_of_field);
       end_rows();
     }
     section("Character shaders");
@@ -913,9 +928,19 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                       "seen from the front, lit as the characters should be).");
         if (look_combo("##matcap", cfg.matcap, matcap_names_, std::size(platform::kBuiltinMatcaps))) change.other = true;
       }
+      if (cfg.character_shader != platform::CharacterShader::Off)
+        percent_row("Style strength", "##stylestrength", "How much of the style's shading shows: 0% keeps the PS1's flat colours.",
+                    cfg.style_strength, 100);
       checkbox_row("Outlines", "##outlines", "A thin dark outline around the characters, in a darkened shade of their own colours.", cfg.outlines);
+      if (cfg.outlines) {
+        percent_row("Outline width", "##outlinewidth", "The outline's thickness (100% = the standard width).", cfg.outline_width, 400);
+        checkbox_row("Distance based", "##outlinedepth", "Characters that are small on screen (far from the camera) get a thinner "
+                                                           "outline.",
+                     cfg.outline_depth);
+      }
       checkbox_row("Rim light", "##rim", "A soft light along the characters' edges, so they stand out from the background. Works with every style.",
                    cfg.rim);
+      if (cfg.rim) percent_row("Rim strength", "##rimstrength", "How bright the rim light is.", cfg.rim_strength, 100);
       if (cfg.rim)
         checkbox_row("Spell-coloured rim", "##spellrim", "In battle, while a spell plays, the rim takes the colour of its light (fire orange, ice "
                                                          "blue ...).",

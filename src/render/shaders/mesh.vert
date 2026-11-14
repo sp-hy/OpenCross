@@ -20,12 +20,13 @@ struct FrameSlot {
   // [Enhancements] el[0] = (EnhancedLighting on, key strength, SpellLights count, SmoothReflections on); el[1 + 2i] = light i position (render world) + radius;
   // el[2 + 2i] = light i colour x intensity. All zero = the PS1 look.
   vec4 el[18];  // [17] = scene ambient multiplier (rgb, w = 1 on); el[2 + 2i].w = 1: the light is a PS1 slot light (linear falloff)
+  vec4 key;     // [Shaders] a key light fixed in the world: the direction toward it, w = 1 on (else key_light's camera-relative one)
   mat4 palette[128];
 };
 layout(std430, set = 0, binding = 0) readonly buffer Frames { FrameSlot slots[]; };
 #define u slots[int(pc.slot.x + 0.5)]
 // [Shaders] (render/mesh_pipeline.h CharacterShading): shade.x = style (0 off, 1 realistic, 2 toon, 3 cel, 4 matcap), shade.y = 1 on the
-// outline pass, shade.zw = the outline width in clip units per axis; rim.w = 1 rim on; glow.w = cast glow strength.
+// outline pass, shade.zw = the outline width in clip units per axis; rim.w = rim strength (0 = off); glow.w = cast glow strength.
 layout(set = 1, binding = 0) uniform Push { vec4 color; vec4 misc; vec4 tint; vec4 water; vec4 fog; vec4 fog_rng; vec4 ot; vec4 ot2; vec4 slot; vec4 shade; vec4 rim; vec4 glow; } pc;
 layout(location = 0) out vec3 uv;           // (uv * k, k): k = clip w with the PS1 jitter (affine texturing), else 1; the fragment divides
 layout(location = 1) out float cam_z;
@@ -50,8 +51,10 @@ float nclip(vec2 a, vec2 b, vec2 c) {
   return (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
 }
 // The camera-relative key light of [Enhancements] Lighting and [Shaders]: from above ('up' = the model's own up in this world, so it holds
-// in the y-down field world too), toward the camera, a little from the left.
+// in the y-down field world too), toward the camera, a little from the left; a world-fixed key (the battle stage's sun)
+// replaces it when key.w is set.
 vec3 key_light() {
+  if (u.key.w > 0.5) return normalize(u.key.xyz);
   vec3 up = normalize(mat3(u.model) * vec3(0.0, -1.0, 0.0));
   vec3 right = vec3(u.view[0][0], u.view[1][0], u.view[2][0]);
   vec3 fwd = vec3(u.view[0][2], u.view[1][2], u.view[2][2]);
@@ -79,7 +82,7 @@ void main() {
   v_key = vec3(0.0);
   v_normal = vec3(0.0);
   v_eye = vec3(0.0);
-  if (pc.shade.x > 0.5 || pc.shade.y > 0.5 || pc.rim.w > 0.5 || pc.glow.w > 0.0) {
+  if (pc.shade.x > 0.5 || pc.shade.y > 0.5 || pc.rim.w > 0.0 || pc.glow.w > 0.0) {
     // [Shaders] the skinned VDDM normal, else a rigid mesh's smoothed normal.
     if (dot(in_normal.xyz, in_normal.xyz) > 1e-6) v_normal = normalize(mat3(u.model) * mat3(u.palette[uint(in_normal.w + 0.5)]) * in_normal.xyz);
     else if (in_smooth.w > 0.5) v_normal = normalize(transpose(inverse(mat3(u.model) * mat3(u.palette[in_joint01.x]))) * in_smooth.xyz);
@@ -241,6 +244,9 @@ void main() {
       // [Enhancements] ModelPixelDepth: a two-sided sheet's face is tested per triangle, so a quad bent by the animation never lets both sides
       // through at the same place (the PS1 paints one over the other whole; per-pixel depth would let them cut through each other).
       if (pc.slot.y > 0.5 && in_rgb.w > 0.5) front = a > 0.0;
+      // [Shaders] outline pass: the hull is the back-facing triangles, each tested on its own; the whole-quad test would drop the quads
+      // straddling the silhouette, where the line is drawn.
+      if (pc.shade.y > 0.5) front = a > 0.0;
       if (pc.color.w < 0.0) front = !front;  // debug: inverted test
       if (!front) gl_Position = vec4(0.0, 0.0, 2.0, 1.0);  // all three corners: a degenerate point beyond the far plane
     }

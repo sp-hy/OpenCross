@@ -59,6 +59,7 @@ const char* on_off(bool value) { return value ? "1" : "0"; }
 
 bool Ini::parse(std::string_view text) {
   sections_.clear();
+  if (text.starts_with("\xEF\xBB\xBF")) text.remove_prefix(3);
   std::string current;
   while (!text.empty()) {
     size_t nl = text.find('\n');
@@ -270,8 +271,12 @@ bool Config::load(const std::filesystem::path& file) {
     };
     character_shader = static_cast<CharacterShader>(read_word("Characters", kCharacterShaderNames, static_cast<int>(character_shader)));
     matcap = ini.get("Shaders", "Matcap", matcap);
+    style_strength = clamp01(parse_float(ini.get("Shaders", "StyleStrength"), style_strength));
     outlines = parse_bool(ini.get("Shaders", "Outlines"), outlines);
+    outline_width = std::clamp(parse_float(ini.get("Shaders", "OutlineWidth"), outline_width), 0.0f, 4.0f);
+    outline_depth = parse_bool(ini.get("Shaders", "OutlineDepth"), outline_depth);
     rim = parse_bool(ini.get("Shaders", "Rim"), rim);
+    rim_strength = clamp01(parse_float(ini.get("Shaders", "RimStrength"), rim_strength));
     spell_rim = parse_bool(ini.get("Shaders", "SpellRim"), spell_rim);
     cast_glow = parse_bool(ini.get("Shaders", "CastGlow"), cast_glow);
     const int legacy_crt = parse_bool(ini.get("Video", "Crt"), false) ? static_cast<int>(FullscreenShader::Crt) : static_cast<int>(fullscreen_shader);
@@ -280,6 +285,8 @@ bool Config::load(const std::filesystem::path& file) {
     crt_curvature = parse_bool(ini.get("Shaders", "CrtCurvature"), crt_curvature);
     crt_glow = parse_bool(ini.get("Shaders", "CrtGlow"), crt_glow);
     grade = ini.get("Shaders", "Grade", grade);
+    ssao = parse_bool(ini.get("Shaders", "Ssao"), ssao);
+    depth_of_field = parse_bool(ini.get("Shaders", "DepthOfField"), depth_of_field);
   }
   master = clamp01(parse_float(ini.get("Audio", "Master"), master));
   music = clamp01(parse_float(ini.get("Audio", "Music"), music));
@@ -429,8 +436,12 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Enhancements", "EdgeBlend", on_off(edge_blend));
   ini.set("Shaders", "Characters", kCharacterShaderNames[static_cast<size_t>(character_shader)]);
   ini.set("Shaders", "Matcap", matcap);
+  ini.set("Shaders", "StyleStrength", fmt_float(style_strength));
   ini.set("Shaders", "Outlines", on_off(outlines));
+  ini.set("Shaders", "OutlineWidth", fmt_float(outline_width));
+  ini.set("Shaders", "OutlineDepth", on_off(outline_depth));
   ini.set("Shaders", "Rim", on_off(rim));
+  ini.set("Shaders", "RimStrength", fmt_float(rim_strength));
   ini.set("Shaders", "SpellRim", on_off(spell_rim));
   ini.set("Shaders", "CastGlow", on_off(cast_glow));
   ini.set("Shaders", "Fullscreen", kFullscreenShaderNames[static_cast<size_t>(fullscreen_shader)]);
@@ -438,6 +449,8 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Shaders", "CrtCurvature", on_off(crt_curvature));
   ini.set("Shaders", "CrtGlow", on_off(crt_glow));
   ini.set("Shaders", "Grade", grade);
+  ini.set("Shaders", "Ssao", on_off(ssao));
+  ini.set("Shaders", "DepthOfField", on_off(depth_of_field));
   ini.set("Audio", "Master", fmt_float(master));
   ini.set("Audio", "Music", fmt_float(music));
   ini.set("Audio", "Sfx", fmt_float(sfx));

@@ -57,6 +57,7 @@
 #include "platform/window.h"
 #include "render/camera.h"
 #include "render/mesh_pipeline.h"
+#include "render/post_fx.h"
 #include "render/sprite_batch.h"
 #include "render/render_target.h"
 #include "render/stage_pipeline.h"
@@ -161,6 +162,12 @@ class BattleView {
     spell_rim_ = spell_rim;
     cast_tint_ = cast_tint;
     spell_.lights_on = spell_lights_shown_ || spell_rim_;
+  }
+  // [Shaders] Ssao / DepthOfField: the post-processing of the battle 3D picture (render/post_fx.h); both off releases its images.
+  void set_post_fx(bool ssao, bool dof) {
+    ssao_ = ssao;
+    dof_ = dof;
+    if (!ssao && !dof) post_fx_.destroy();
   }
   // force: rebuild even if `hd` is unchanged (HD <-> Modded). HD: large_font_*; original: small_font_* (the HUD art is RDE's in both modes).
   void set_art_mode(bool hd, bool force = false);
@@ -506,6 +513,8 @@ class BattleView {
   // The unit's weapon `slot` (0, 1) in the joint space of the model, from palette_ (the unit's pose); false = no weapon there.
   bool weapon_matrix(int unit, int slot, render::Mat4& out) const;
   void showcase_draw(const render::Mat4& view_proj, const render::Mat4& view);
+  // The units, their weapons and the showcase models through meshes_ (begun by the caller).
+  void draw_units(const render::Mat4& view_proj, const render::Mat4& view);
   bool showcase_on_ = false;
   std::vector<ShowcaseModel> showcase_;
   void apply_camera(float alpha);
@@ -997,6 +1006,16 @@ class BattleView {
   int debug_ui_ = 0;
 
   render::StagePipeline stage_pipe_;
+  // [Shaders] Ssao / DepthOfField (set_post_fx); created when first used. post_fx_focus_ = the eased camera z in focus (< 0 = none yet),
+  // post_fx_amount_ = the eased share of the blur (0 while no unit is in the picture), post_fx_tick_ = the tick they were eased to.
+  render::PostFx post_fx_;
+  bool ssao_ = false, dof_ = false;
+  float post_fx_focus_ = -1.0f;
+  float post_fx_amount_ = 0.0f;
+  int post_fx_tick_ = 0;
+  // The post-processing of the picture drawn so far (stage, units, weapons): the view depth, the passes and their result over it.
+  void draw_post_fx(const render::Frame& frame, const render::Letterbox& lb, const render::Rect& scissor, const render::Mat4& view_proj,
+                    const render::Mat4& view);
   // [Enhancements] Lighting; created when first used.
   render::ShadowPipeline shadow_pipe_;
   bool shadow_pipe_failed_ = false;

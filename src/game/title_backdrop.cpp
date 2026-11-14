@@ -260,6 +260,9 @@ void TitleBackdrop::shutdown() {
   mesh_pipe_ = nullptr;
   stage_mesh_.reset();
   stage_pipe_.destroy();
+  shadow_pipe_.destroy();
+  shadow_pipe_failed_ = false;
+  shadow_floors_.clear();
   inst_.clear();
   parts_.clear();
   gpu_.clear();
@@ -377,7 +380,165 @@ render::Rect sea_scissor(const render::Letterbox& lb) {
   return {static_cast<int32_t>(x0), static_cast<int32_t>(y0),
           static_cast<u32>(std::max(0.0f, x1 - x0)), static_cast<u32>(std::max(0.0f, y1 - y0))};
 }
+
+// [Enhancements] Lighting. The floor under a model is sampled at its centre and half its reach either way along x and z. The plane takes the
+// slope of the opposite samples, at most 1 on each axis; where the centre sample lies off that plane by more than kBendShare of the sample
+// distance the floor is no plane (a rock edge, a drop) and the shadow fades out from half that bend.
+constexpr float kSampleShare = 0.5f, kBendShare = 0.25f, kMaxSlope = 1.0f;
+// The share of the light a shadow removes (the battle sun's), and the floor area kept around the model's reach for the shadow's soft edge.
+constexpr float kShadowStrength = 0.5f, kShadowMargin = 128.0f;
+
+// The y of the nearest floor triangle straight below (x, y, z) (+y down).
+std::optional<float> floor_below(const std::vector<std::array<float, 3>>& corners, float x, float y, float z) {
+  std::optional<float> best;
+  for (size_t i = 0; i + 2 < corners.size(); i += 3) {
+    const V3& p0 = corners[i];
+    const V3& p1 = corners[i + 1];
+    const V3& p2 = corners[i + 2];
+    const float det = (p1[0] - p0[0]) * (p2[2] - p0[2]) - (p2[0] - p0[0]) * (p1[2] - p0[2]);
+    if (std::fabs(det) < 1e-3f) continue;
+    const float u = ((x - p0[0]) * (p2[2] - p0[2]) - (p2[0] - p0[0]) * (z - p0[2])) / det;
+    const float v = ((p1[0] - p0[0]) * (z - p0[2]) - (x - p0[0]) * (p1[2] - p0[2])) / det;
+    if (u < 0.0f || v < 0.0f || u + v > 1.0f) continue;
+    const float hit = p0[1] + u * (p1[1] - p0[1]) + v * (p2[1] - p0[1]);
+    if (hit > y && (!best || hit < *best)) best = hit;
+  }
+  return best;
+}
+
+// A camera-space point of the view back in the world (+y down).
+V3 view_to_world(const effects::ViewParams& vp, const V3& cam) {
+  V3 world{};
+  for (size_t col = 0; col < 3; ++col)
+    for (size_t row = 0; row < 3; ++row) world[col] += vp.rot.m[row * 3 + col] * (cam[row] - vp.trans[row]);
+  return world;
+}
 }  // namespace
+
+render::Mat4 TitleBackdrop::model_matrix(const effects::EmitterSystem::MeshInstance& mi) {
+  render::Mat4 model = render::mat4_translation(mi.world_pos[0], -mi.world_pos[1], mi.world_pos[2]);
+  render::Mat4 rs;
+  for (int rr = 0; rr < 3; ++rr)
+    // F * (R S)
+    for (int col = 0; col < 3; ++col) rs.at(rr, col) = mi.world_mat.m[static_cast<size_t>(rr * 3 + col)] * (rr == 1 ? -1.0f : 1.0f);
+  return model * rs;
+}
+
+void TitleBackdrop::pose_model(ModelRes& res, const effects::EmitterSystem::MeshInstance& mi, float alpha) {
+  // Debug: rest pose instead of the motion clip.
+  static const bool rest_dbg = std::getenv("OC_TITLE_MODEL_REST") != nullptr;
+  res.pose.palette_at(rest_dbg ? -1 : res.clip, mi.motion_prev + (mi.motion - mi.motion_prev) * alpha, palette_);
+}
+
+// The floor is the scenery a shadow can lie on: the opaque mesh objects that do not morph (the fish do) and are not filed behind the scene
+// (a positive ordering bias: the far backdrop shells). Every live one counts, on screen or not, so a shadow does not lose its floor when the
+// rock under it leaves the picture. A model casts when its centre and its four samples all find a floor and the camera is above that plane.
+void TitleBackdrop::cast_shadows(const render::Frame& frame, const effects::ViewParams& vp, float alpha,
+                                 const std::vector<effects::EmitterSystem::MeshInstance>& live) {
+  struct Caster {
+    ModelRes* res = nullptr;
+    const effects::EmitterSystem::MeshInstance* mi = nullptr;
+    render::Mat4 model;
+    ShadowFloor floor;
+    float strength = 0;
+  };
+  std::vector<Caster> casters;
+  for (const auto& mi : live) {
+    if (mi.sprite_type != 20 || mi.off_screen(vp)) continue;
+    const auto it = models_.find(*mi.name);
+    if (it != models_.end()) casters.push_back({it->second.get(), &mi});
+  }
+  if (casters.empty()) return;
+  floor_corners_.clear();
+  for (const auto& mi : live) {
+    if (mi.sprite_type == 20 || mi.blend != 0 || mi.morph_name || mi.bias > 0) continue;
+    const auto pit = parts_.find(*mi.name);
+    if (pit == parts_.end()) continue;
+    const assets::StagePart& part = meshes_->parts[static_cast<size_t>(pit->second)];
+    for (const u32 index : part.indices) {
+      const auto& pos = part.vertices[index].pos;
+      V3 cam{};
+      for (size_t row = 0; row < 3; ++row) cam[row] = mi.mat.m[row * 3] * pos[0] + mi.mat.m[row * 3 + 1] * pos[1] + mi.mat.m[row * 3 + 2] * pos[2] + mi.centre[row];
+      floor_corners_.push_back(view_to_world(vp, cam));
+    }
+  }
+  const V3 eye = view_to_world(vp, {0, 0, 0});
+  std::vector<Caster> kept;
+  for (Caster& caster : casters) {
+    const effects::EmitterSystem::MeshInstance& mi = *caster.mi;
+    caster.model = model_matrix(mi);
+    pose_model(*caster.res, mi, alpha);
+    const float x = mi.world_pos[0], y = mi.world_pos[1], z = mi.world_pos[2];
+    float reach = 0.0f;
+    for (const render::Mat4& joint : palette_) {
+      const render::Mat4 world = caster.model * joint;
+      reach = std::max({reach, std::fabs(world.at(0, 3) - x), std::fabs(world.at(2, 3) - z)});
+    }
+    const float step = std::max(reach * kSampleShare, 1.0f);
+    const auto centre = floor_below(floor_corners_, x, y, z);
+    const auto east = floor_below(floor_corners_, x + step, y, z), west = floor_below(floor_corners_, x - step, y, z);
+    const auto south = floor_below(floor_corners_, x, y, z + step), north = floor_below(floor_corners_, x, y, z - step);
+    if (!centre || !east || !west || !south || !north) continue;
+    ShadowFloor& floor = caster.floor;
+    floor.x = x;
+    floor.z = z;
+    floor.height = *centre;
+    floor.slope_x = std::clamp((*east - *west) / (2.0f * step), -kMaxSlope, kMaxSlope);
+    floor.slope_z = std::clamp((*south - *north) / (2.0f * step), -kMaxSlope, kMaxSlope);
+    floor.half = reach + kShadowMargin;
+    const float bend = std::max(std::fabs((*east + *west) * 0.5f - *centre), std::fabs((*south + *north) * 0.5f - *centre));
+    caster.strength = std::clamp(2.0f - 2.0f * bend / (kBendShare * step), 0.0f, 1.0f);
+    const float floor_at_eye = floor.height + floor.slope_x * (eye[0] - x) + floor.slope_z * (eye[2] - z);
+    if (caster.strength > 0.0f && eye[1] < floor_at_eye) kept.push_back(caster);
+  }
+  if (kept.empty()) return;
+  if (!shadow_pipe_.ready() && !shadow_pipe_.init(*ctx_)) {
+    log::warn("title backdrop: shadow pipeline failed, no model shadows");
+    shadow_pipe_failed_ = true;
+    return;
+  }
+  // One mask for every shadow, centred between them; a shadow past its reach is dropped.
+  float min_x = kept[0].floor.x, max_x = min_x, min_z = kept[0].floor.z, max_z = min_z;
+  for (const Caster& caster : kept) {
+    min_x = std::min(min_x, caster.floor.x);
+    max_x = std::max(max_x, caster.floor.x);
+    min_z = std::min(min_z, caster.floor.z);
+    max_z = std::max(max_z, caster.floor.z);
+  }
+  shadow_centre_ = {(min_x + max_x) * 0.5f, (min_z + max_z) * 0.5f};
+  shadow_pipe_.begin_mask(frame);
+  for (const Caster& caster : kept) {
+    const ShadowFloor& floor = caster.floor;
+    if (std::max(std::fabs(floor.x - shadow_centre_[0]), std::fabs(floor.z - shadow_centre_[1])) + floor.half > render::ShadowPipeline::kReach) continue;
+    pose_model(*caster.res, *caster.mi, alpha);
+    std::array<render::ShadowPipeline::Cast, render::ShadowPipeline::kChannels> casts;
+    casts[0] = {{0.0f, 1.0f, 0.0f}, caster.strength};
+    // The mask's floor is y = 0 (y up) at the mask's centre: the model is moved down by the floor's height and across by the centre.
+    shadow_pipe_.cast(*caster.res->gpu, render::mat4_translation(-shadow_centre_[0], floor.height, -shadow_centre_[1]) * caster.model, palette_, 0, 0, casts);
+    shadow_floors_.push_back(floor);
+  }
+  shadow_pipe_.end_mask();
+}
+
+// Each floor is the mask's quad (x, z around the mask's centre, y = 0) mapped onto its plane in the world, so the shadow follows the floor's slope.
+void TitleBackdrop::draw_shadow_floors(const render::Mat4& proj, const effects::ViewParams& vp) {
+  if (shadow_floors_.empty()) return;
+  std::array<float, 12> rows;
+  for (size_t k = 0; k < 9; ++k) rows[k] = vp.rot.m[k];
+  for (size_t k = 0; k < 3; ++k) rows[9 + k] = vp.trans[k];
+  const render::Mat4 view_proj = proj * render::mat4_from_rows(rows);
+  for (const ShadowFloor& floor : shadow_floors_) {
+    const float cx = shadow_centre_[0], cz = shadow_centre_[1];
+    render::Mat4 plane = render::mat4_translation(cx, floor.height + floor.slope_x * (cx - floor.x) + floor.slope_z * (cz - floor.z), cz);
+    plane.at(1, 0) = floor.slope_x;
+    plane.at(1, 2) = floor.slope_z;
+    render::ShadowPipeline::Floor quad;
+    quad.clip = view_proj * plane;
+    quad.rect = {floor.x - cx - floor.half, floor.z - cz - floor.half, floor.x - cx + floor.half, floor.z - cz + floor.half};
+    quad.strength = kShadowStrength;
+    shadow_pipe_.draw_floor(quad);
+  }
+}
 
 void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h, float alpha, bool linear) {
   if (!running_ || !em_) return;
@@ -399,9 +560,11 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
     }
     reload_model_textures();
   }
+  std::vector<effects::EmitterSystem::MeshInstance> live;
+  em_->collect_meshes(vp, alpha, live);
+  shadow_floors_.clear();
+  if (cast_shadows_ && !shadow_pipe_failed_ && mesh_pipe_ && stage_mesh_) cast_shadows(frame, vp, alpha, live);
   if (stage_mesh_) {
-    std::vector<effects::EmitterSystem::MeshInstance> live;
-    em_->collect_meshes(vp, alpha, live);
     inst_.clear();
     inst_.reserve(live.size());
     // Debug: comma list of mesh names to draw.
@@ -455,6 +618,7 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
       const render::Mat4 proj = render::StagePipeline::projection(lb, vp.h, vp.ox, vp.oy);
       stage_pipe_.begin(frame, scissor);
       stage_pipe_.draw(*stage_mesh_, proj, inst_, linear, meshes_.get());
+      draw_shadow_floors(proj, vp);
       stage_pipe_.end();
     }
   }
@@ -463,8 +627,6 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
   // scenery and before the sprites. Model space is y down like every Mdl; the world of the mesh pipeline is y up, so the
   // object's PS1 position / matrix are mirrored: model = T(x, -y, z) * F * (R * S), F = diag(1, -1, 1).
   if (mesh_pipe_ && !models_.empty()) {
-    std::vector<effects::EmitterSystem::MeshInstance> live;
-    em_->collect_meshes(vp, alpha, live);
     const CamPose pose = free_or_shot_pose(camera_, alpha);
     const CamAxes axes = cam_axes(pose.eye, pose.target, pose.roll_deg);
     const V3& right = axes.right;
@@ -489,15 +651,8 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
       const auto it = models_.find(*mi.name);
       if (it == models_.end()) continue;
       ModelRes& res = *it->second;
-      render::Mat4 model = render::mat4_translation(mi.world_pos[0], -mi.world_pos[1], mi.world_pos[2]);
-      render::Mat4 rs;
-      for (int rr = 0; rr < 3; ++rr)
-        // F * (R S)
-        for (int col = 0; col < 3; ++col) rs.at(rr, col) = mi.world_mat.m[static_cast<size_t>(rr * 3 + col)] * (rr == 1 ? -1.0f : 1.0f);
-      model = model * rs;
-      // Debug: rest pose instead of the motion clip.
-      static const bool rest_dbg = std::getenv("OC_TITLE_MODEL_REST") != nullptr;
-      res.pose.palette_at(rest_dbg ? -1 : res.clip, mi.motion_prev + (mi.motion - mi.motion_prev) * alpha, palette_);
+      const render::Mat4 model = model_matrix(mi);
+      pose_model(res, mi, alpha);
       if (!open) {
         mesh_pipe_->begin(frame, scissor);
         open = true;
@@ -509,6 +664,7 @@ void TitleBackdrop::draw(const render::Frame& frame, float view_w, float view_h,
       dp.palette = palette_;
       dp.linear = linear;
       dp.hd = false;
+      dp.shading = shading_;
       for (size_t ch = 0; ch < 3; ++ch) dp.tint[ch] = static_cast<float>(mi.rgb[ch]) / 128.0f;
       mesh_pipe_->draw(*res.gpu, dp);
       ++drawn;

@@ -18,6 +18,13 @@ VARY layout(location = 5) in vec2 uv_scale;
 layout(location = 6) flat in float ot_z;
 VARY layout(location = 7) in float fog_p;
 layout(location = 0) out vec4 out_color;
+// View depth (render/post_fx.h): the camera z in 1/256 units as 24 bits in rgb, and as the depth (z / 65536).
+vec4 view_depth_color(float z) {
+  float v = clamp(floor(z * 256.0 + 0.5), 0.0, 16777215.0);
+  float hi = floor(v / 65536.0);
+  float mid = floor((v - hi * 65536.0) / 256.0);
+  return vec4(hi, mid, v - hi * 65536.0 - mid * 256.0, 255.0) / 255.0;
+}
 void main() {
   vec2 t = uv;
   // +16: [Enhancements] EdgeBlend strip (StagePipeline::draw_seams): the face drawn again with its neighbour's texture mirrored across the shared edge;
@@ -72,6 +79,12 @@ void main() {
   }
   if (c.a < 0.5) discard;
   if (copy && !opaque_copy && all(lessThan(c.rgb, vec3(7.5 / 255.0)))) discard;
+  // jit.w = 2: the view depth (StagePipeline::set_view_depth) instead of the picture.
+  if (pc.jit.w > 1.5) {
+    out_color = view_depth_color(cam_z);
+    gl_FragDepth = clamp(cam_z / 65536.0, 0.0, 1.0);
+    return;
+  }
   // The packet builders multiply the corner colour by the object colour (DCPL: saturates at 255), then the depth cue (DPCS / DPCT) moves
   // it toward the far colour by fog_p; textured colours are modulation values (128 = 1.0), untextured ones raw (255 = 1.0).
   bool textured = uv_scale.x > 0.0;
