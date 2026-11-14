@@ -346,7 +346,9 @@ int main() {
     fs::create_directories(game / "data");
     fs::create_directories(game / "mods" / "Top");
     fs::create_directories(game / "mods" / "Bottom");
-    write_archive(game / "data" / "cdrom.dat", false, {{"a.bin", "disc a"}, {"map/b.bin", "disc b"}, {"other/b.bin", "disc other b"}});
+    write_archive(game / "data" / "cdrom.dat", false,
+                  {{"a.bin", "disc a"}, {"map/b.bin", "disc b"}, {"other/b.bin", "disc other b"}, {"monster/dario/dario.obj", "boss"},
+                   {"deep/room/c.bin", "disc c"}, {"deep/room/e.bin", "disc e"}});
     write_archive(game / "data" / "cdrom2.dat", false, {{"a.bin", "hd a"}});
     write_archive(game / "data" / "hd.dat", false, {{"one.txt", "game one"}, {"two.txt", "game two"}, {"three.txt", "game three"}});
 
@@ -363,6 +365,13 @@ int main() {
     std::ofstream(game / "mods" / "Top" / "Wrapper" / "cdrom" / "third" / "b.bin", std::ios::binary) << "third b";
     std::ofstream(game / "mods" / "Top" / "Wrapper" / "cdrom" / "b.bin", std::ios::binary) << "folder left out";
     std::ofstream(game / "mods" / "Top" / "b.bin", std::ios::binary) << "which b";
+    // A name one member carries: below an archive folder, a path whose folders contradict it is a new member (a character's field
+    // model named like a boss's); a path that only leaves folders out still replaces it.
+    fs::create_directories(game / "mods" / "Top" / "Wrapper" / "cdrom" / "player" / "dario");
+    std::ofstream(game / "mods" / "Top" / "Wrapper" / "cdrom" / "player" / "dario" / "dario.obj", std::ios::binary) << "hero";
+    std::ofstream(game / "mods" / "Top" / "Wrapper" / "cdrom" / "c.bin", std::ios::binary) << "mod c";
+    fs::create_directories(game / "mods" / "Top" / "Wrapper" / "cdrom" / "deep");
+    std::ofstream(game / "mods" / "Top" / "Wrapper" / "cdrom" / "deep" / "e.bin", std::ios::binary) << "mod e";
     fs::create_directories(game / "mods" / "cdrom" / "flux");
     std::ofstream(game / "mods" / "cdrom" / "flux" / "ui.bin", std::ios::binary) << "crossfix layout";
     write_archive(game / "mods" / "Bottom" / "hd.dat", false, {{"one.txt", "bottom one"}, {"two.txt", "bottom two"}, {"three.txt", "bottom three"}});
@@ -378,7 +387,7 @@ int main() {
     const std::vector<vfs::ModPref> order = {{"Top", true, vfs::ModLoadOn::All}, {"Bottom", true, vfs::ModLoadOn::All}, {"cdrom.dat", true, vfs::ModLoadOn::All}};
     game_mods.scan(game_files, game / "mods", order);
     const vfs::Mod* top = find_mod(game_mods, "Top");
-    CHECK(top && top->archives.size() == 1 && top->files.size() == 5 && top->added.size() == 3 && top->unmatched.size() == 1);
+    CHECK(top && top->archives.size() == 1 && top->files.size() == 8 && top->added.size() == 4 && top->unmatched.size() == 1);
     CHECK(top && top->ambiguous.size() == 2 && std::find(top->ambiguous.begin(), top->ambiguous.end(), "b.bin") != top->ambiguous.end());
     CHECK(!game_files.exists("cdrom/b.bin"));
     const vfs::Mod* crossfix = find_mod(game_mods, "cdrom");
@@ -398,6 +407,8 @@ int main() {
     CHECK(!game_files.added("hd/one.txt") && !game_files.added("hd/two.txt") && !game_files.added("cdrom/other/b.bin"));
     CHECK(text("cdrom/map/mapbin/newroom.bin") == "new room");
     CHECK(text("cdrom/flux/ui.bin") == "crossfix layout");
+    CHECK(text("cdrom/player/dario/dario.obj") == "hero" && text("cdrom/monster/dario/dario.obj") == "boss");
+    CHECK(text("cdrom/deep/room/c.bin") == "mod c" && text("cdrom/deep/room/e.bin") == "mod e");
     CHECK(!game_files.exists("hd/readme.txt") && !game_files.exists("cdrom/readme.txt"));
     CHECK(game_files.list("hd").size() == 3);
     CHECK(game_files.exists("hd/two.txt"));
