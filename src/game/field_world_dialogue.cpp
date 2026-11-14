@@ -286,7 +286,7 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
         width += ps1_string_width(0, arg | (i + 2 < bytes.size() ? bytes[i + 2] << 8 : 0));
         i += 3;
         break;
-      case 8: width += ps1_string_width(1, arg); i += 2; break;
+      case 8: width += ps1_string_width(1, arg & 0x80 ? arg : text_character(arg)); i += 2; break;
       case 9: i += 3; break;
       case 0xA: width += 0x48; i += 2; break;
       case 0xB: width += 0x30; i += 2; break;
@@ -298,8 +298,8 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
         break;
       }
       case 0x15: {
-        int char_id = var(arg);
-        char_id = char_id >= 0x2C ? 0 : reads_as_lynx(char_id) ? data::kLynxBody : char_id;
+        int char_id = text_character(var(arg));
+        char_id = !gs_ || !gs_->slot.is_character(char_id) ? 0 : reads_as_lynx(char_id) ? data::kLynxBody : char_id;
         width += ps1_string_width(1, char_id) + (char_id == 5 ? 0x18 : 0);
         i += 2;
         break;
@@ -373,11 +373,11 @@ int FieldWorld::ps1_string_width(int table, int id) {
     glyph_limit = id == 0x83 ? 2 : static_cast<size_t>(id - 0x80);
     id = id == 0x83 ? 0xD : lynx ? data::kLynxBody : 0;
   }
-  if (table == 1 && id < 0x2C && gs_) {
+  if (table == 1 && gs_ && gs_->slot.is_character(id)) {
     const auto& name = gs_->slot.chars[static_cast<size_t>(id)].name;
     text = std::span<const u8>(name.data(), static_cast<size_t>(std::find(name.begin(), name.end(), u8{0}) - name.begin()));
   } else {
-    text = exe_strings_.get(exe_table, table == 1 && id >= 0x2C ? data::kLynxBody : row);
+    text = exe_strings_.get(exe_table, table != 1 ? row : id < 0 || id >= save::kNumChars ? data::kLynxBody : id);
   }
   int width = 0;
   size_t glyphs = 0;

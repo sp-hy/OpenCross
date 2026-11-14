@@ -1,10 +1,13 @@
 #pragma once
 // Typed loaders for every battle / menu table. All integers are little-endian in the
 // files; records keep their raw bytes so later code can reach fields that are not decoded yet.
+#include <algorithm>
 #include <array>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -183,22 +186,39 @@ struct GearRec {
   u32 rd32(size_t offset) const { return static_cast<u32>(rd16(offset)) | (static_cast<u32>(rd16(offset + 2)) << 16); }
 };
 
+// Who besides / unlike a record's character bits may equip an item or place an element: the characters mods add (each takes its
+// "equips like" character's answer, GameTables::equips_like) and the rows' equip_add / equip_remove (data/table_rows.h).
+struct Eligibility {
+  std::vector<int> allow, deny;
+  // True / false when the lists decide `char_id`, nothing when the record's bits do.
+  std::optional<bool> rule(int char_id) const {
+    if (std::find(deny.begin(), deny.end(), char_id) != deny.end()) return false;
+    if (std::find(allow.begin(), allow.end(), char_id) != allow.end()) return true;
+    return std::nullopt;
+  }
+};
+
 // Item info (exdat part 5 "menu_waa.bin": 256 x 12, then mods' items by name): who can equip, price, category. equip_lo / equip_hi form a 51-bit mask (bit =
-// character id); price10 is the price / 10; cat's low nibble is 0 weapon 1 armour 2 accessory 4 material, its high nibble the tier.
+// character id; `who` decides the characters mods add and the rows' exceptions); price10 is the price / 10; cat's low nibble is 0
+// weapon 1 armour 2 accessory 4 material, its high nibble the tier.
 struct ItemInfo {
   u32 equip_lo = 0, equip_hi = 0;
   s16 price10 = 0;
   u8 cat = 0, extra = 0;
+  Eligibility who;
   bool can_equip(int char_id) const {
-    return char_id < 32 ? ((equip_lo >> char_id) & 1) != 0 : char_id < 64 && ((equip_hi >> (char_id - 32)) & 1) != 0;
+    if (const std::optional<bool> listed = who.rule(char_id)) return *listed;
+    if (char_id < 0 || char_id >= kNumChars) return false;
+    return char_id < 32 ? ((equip_lo >> char_id) & 1) != 0 : ((equip_hi >> (char_id - 32)) & 1) != 0;
   }
   int price() const { return price10 * 10; }
   int kind() const { return cat & 0xF; }
 };
 
+// One character record set: the game's kNumChars records, then the characters mods add by name (data/table_rows.h).
 struct CharSet {
-  std::array<StatRec, kNumChars> rec;
-  std::array<Lv99, kNumChars> lv99;
+  std::vector<StatRec> rec = std::vector<StatRec>(kNumChars);
+  std::vector<Lv99> lv99 = std::vector<Lv99>(kNumChars);
 };
 
 // The loaded tables. Sources: enemies = monster.bin; char_sets = "char", "char20", "char_w0".."char_w5"; elements = pgdat.bin;
@@ -230,6 +250,13 @@ struct GameTables {
   std::vector<std::array<u16, 2>> variant_bands;
 
   const CharSet& chars(const std::string& set = "char") const { return char_sets.at(set); }
+  // Per character id, the game's character whose equipment and elements it takes: itself for the game's records, for a character mods
+  // add its equips_like (char.txt), else its base, followed to a game character (Serge when there is none).
+  std::vector<int> equips_like;
+  // Fills `rows`' eligibility from the rows' equip_add / equip_remove of `table` (applied in priority order) and gives every character
+  // mods add the answer of its equips_like character (`bits(row, char_id)`: the record's own bits), unless a row names it.
+  void fill_eligibility(const TableRows& table_rows, std::string_view table, std::vector<Eligibility*> rows,
+                        const std::function<bool(size_t, int)>& bits) const;
   const std::string& enemy_name(int i) const;
   const std::string& element_name(int i) const;
   const std::string& char_name(int i) const;

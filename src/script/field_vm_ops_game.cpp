@@ -394,7 +394,7 @@ bool FieldVM::exec_game(u8 op) {
         yield_ = true;
         break;
       }
-      if (const int r = host_.set_character_model(operand_u(1), operand_u(3)); r > 0) {
+      if (const int r = host_.set_character_model(character_ref(operand_u(1)), operand_u(3)); r > 0) {
         advance(5);
         yield_ = true;
       } else if (r == 0) {
@@ -411,7 +411,7 @@ bool FieldVM::exec_game(u8 op) {
         advance(1);
       }
       break;
-    case 0xDB: write_var(word_at(3), host_.character_model_byte(operand_u(1))); advance(5); break;
+    case 0xDB: write_var(word_at(3), host_.character_model_byte(character_ref(operand_u(1)))); advance(5); break;
     case 0xDC:  // MAP_JUMP_DC: records the jump the movie behind it starts when it ends
       host_.set_movie_jump(operand_u(1), operand_u(3));
       advance(5);

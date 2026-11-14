@@ -42,8 +42,12 @@ struct TableField {
   u8 width;
 };
 
-// The fields a row may name for `table` (empty for an unknown table).
+// The fields a row may name for `table` (empty for an unknown table). A field of width 0 names a character and writes no record byte:
+// equip_add / equip_remove of menu_waa and menu_pg (offset kCharacterAdd / kCharacterRemove: who may equip the item or place the
+// element besides / unlike the record's bits), equips_like of the character sets (whose equipment and elements a character mods add
+// takes); TableRows::character_writes keeps them for the loaders.
 std::span<const TableField> table_fields(std::string_view table);
+inline constexpr u16 kCharacterAdd = 0, kCharacterRemove = 1;
 // The table whose record names and ids `table` shares (menu_pg -> pgdat, menu_waa and waa_tbl -> waa; otherwise the table itself).
 std::string_view table_names_of(std::string_view table);
 // Whether named rows may add records to `table` (its loader sizes it from the file).
@@ -130,6 +134,9 @@ class TableRows {
     u32 value;
   };
   const std::vector<WideWrite>& wide_writes(std::string_view table) const;
+  // The character fields (width 0) of `table` after apply(), in the order applied (the first mod's last): offset = the field, value =
+  // the character.
+  const std::vector<WideWrite>& character_writes(std::string_view table) const;
   // Applies the rows of list table `table` to its rows (grown to total()), lowest priority first: each mod's clear, then its adds (an
   // entry already in the row is not added twice) and removes, in file order. Returns the number of entries added or removed.
   size_t apply_lists(std::string_view table, std::vector<std::vector<u16>>& rows) const;
@@ -144,6 +151,8 @@ class TableRows {
   const std::string& name_of(std::string_view table, size_t id) const;
   // The names mods add to `table`, in id order.
   const std::vector<std::string>& added_names(std::string_view table) const;
+  // The record named record `id` of `table` is copied from ("base="; the first mod in the list that gives one), or nothing.
+  std::optional<size_t> base_of(std::string_view table, size_t id) const;
   // The record of `table` that `own_id` means in mod `mod`'s scripts and text (its own-id section), or nothing when it lists no such id.
   std::optional<size_t> record_of(std::string_view mod, std::string_view table, int own_id) const;
   // The mod's own id for record `id` of `table`, or nothing.
@@ -182,6 +191,7 @@ class TableRows {
   std::map<std::string, std::map<std::string, std::map<int, size_t>, std::less<>>, std::less<>> own_ids_;
   mutable std::vector<std::string> log_lines_;
   mutable std::map<std::string, std::vector<WideWrite>, std::less<>> wide_;
+  mutable std::map<std::string, std::vector<WideWrite>, std::less<>> character_;
 };
 
 // The rows the tables of the mods' VFS were built with (GameTables::load through that VFS sets them; a load through another VFS, as the

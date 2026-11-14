@@ -118,7 +118,8 @@ std::span<const OwnIdSection> own_id_sections() {
                                                {"Monsters", "monster", kModMonsterFirst, kModMonsterLast},
                                                {"Formations", "scenedat", kModFormationFirst, kModFormationLast},
                                                {"Items", "waa", kModItemFirst, kModItemLast},
-                                               {"KeyItems", "keyitem", kModKeyItemFirst, kModKeyItemLast}};
+                                               {"KeyItems", "keyitem", kModKeyItemFirst, kModKeyItemLast},
+                                               {"Characters", "char", kModCharacterFirst, kModCharacterLast}};
   return kSections;
 }
 

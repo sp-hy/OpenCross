@@ -104,12 +104,16 @@ struct ShopScreen::Impl {
   int cur = 0, scroll = 0;
   int qty = 1, qty_max = 1;
   int conf_cur = 1;
-  // Element Sell past the bag count: the copies each character still has placed, the copies picked, the cursor over the 44 characters
-  // (two columns of 22) or the Confirm cell, and the frames since the picker opened (the list answers after 30).
+  // Element Sell past the bag count: per position the character (GameState::roster_at), the copies it
+  // still has placed and the copies picked; the cursor over a page of 44 positions (two columns of 22; left / right past a column
+  // turns the page when there is more than one) or the Confirm cell, and the frames since the picker opened (the list answers after 30).
+  static constexpr int kPickColumn = save::kNumChars / 2, kPickPage = save::kNumChars;
   struct Pick {
-    std::array<int, save::kNumChars> placed{}, taken{};
+    std::vector<int> who, placed, taken;
     int cursor = 0, wait = 0;
     bool on_confirm = false;
+    int pages() const { return std::max(1, (static_cast<int>(who.size()) + kPickPage - 1) / kPickPage); }
+    int at(int position) const { return position < static_cast<int>(who.size()) ? who[static_cast<size_t>(position)] : -1; }
     int taken_total() const {
       int total = 0;
       for (int count : taken) total += count;
@@ -516,9 +520,11 @@ struct ShopScreen::Impl {
   }
 
   void start_pick(int id) {
-    for (int character = 0; character < save::kNumChars; ++character)
-      pick.placed[static_cast<size_t>(character)] = gs->available(character) ? shop::placed_copies(*gs, character, id) : 0;
-    pick.taken.fill(0);
+    pick.who.clear();
+    for (int row = 0; row < gs->roster_rows(); ++row) pick.who.push_back(gs->roster_at(row));
+    pick.placed.clear();
+    for (const int character : pick.who) pick.placed.push_back(gs->available(character) ? shop::placed_copies(*gs, character, id) : 0);
+    pick.taken.assign(pick.who.size(), 0);
     pick.cursor = 0;
     pick.wait = 0;
     pick.on_confirm = false;
@@ -536,31 +542,41 @@ struct ShopScreen::Impl {
       return;
     }
     const int id = ids[static_cast<size_t>(cur)];
+    const int page = pick.cursor / kPickPage, place = pick.cursor % kPickPage;
     if (!pick.on_confirm) {
       const size_t member = static_cast<size_t>(pick.cursor);
-      if (nav.ok_rep && gs->available(pick.cursor) && pick.placed[member] > 0) {
+      if (nav.ok_rep && gs->available(pick.at(pick.cursor)) && pick.placed[member] > 0) {
         --pick.placed[member];
         ++pick.taken[member];
         sfx(8);
       }
       if (nav.up) {
-        --pick.cursor;
-        if (pick.cursor < 0 || pick.cursor == save::kNumChars / 2 - 1) pick.on_confirm = true;
+        if (place == 0 || place == kPickColumn) pick.on_confirm = true;
+        else --pick.cursor;
         sfx(1);
       }
       if (nav.down) {
-        ++pick.cursor;
-        if (pick.cursor >= save::kNumChars || pick.cursor == save::kNumChars / 2) pick.on_confirm = true;
+        if (place == kPickColumn - 1 || place == kPickPage - 1) pick.on_confirm = true;
+        else ++pick.cursor;
         sfx(1);
       }
       if (nav.left || nav.right) {
-        pick.cursor += pick.cursor < save::kNumChars / 2 ? save::kNumChars / 2 : -save::kNumChars / 2;
+        const bool right_column = place >= kPickColumn, turn = pick.pages() > 1 && (nav.right == right_column);
+        const int to_page = !turn ? page : (page + (nav.right ? 1 : pick.pages() - 1)) % pick.pages();
+        pick.cursor = to_page * kPickPage + (right_column ? place - kPickColumn : place + kPickColumn);
         sfx(1);
       }
       return;
     }
     if (nav.ok) {
-      const shop::Res result = shop::sell_element(*gs, id, qty, std::vector<int>(pick.taken.begin(), pick.taken.end()));
+      std::vector<int> taken_by_id;
+      for (size_t position = 0; position < pick.who.size(); ++position)
+        if (pick.taken[position] > 0) {
+          const size_t character = static_cast<size_t>(pick.who[position]);
+          taken_by_id.resize(std::max(taken_by_id.size(), character + 1), 0);
+          taken_by_id[character] = pick.taken[position];
+        }
+      const shop::Res result = shop::sell_element(*gs, id, qty, taken_by_id);
       if (result != shop::Res::Ok) {
         stage = Stage::List;
         return deny(result_text(result));
@@ -571,8 +587,8 @@ struct ShopScreen::Impl {
       after_change();
       return;
     }
-    if (nav.up) pick.cursor = save::kNumChars - 1, pick.on_confirm = false, sfx(1);
-    if (nav.down) pick.cursor = 0, pick.on_confirm = false, sfx(1);
+    if (nav.up) pick.cursor = page * kPickPage + kPickPage - 1, pick.on_confirm = false, sfx(1);
+    if (nav.down) pick.cursor = page * kPickPage, pick.on_confirm = false, sfx(1);
   }
 
   // The stock changed: rebuild the list and fall back to the menu above when nothing is left.
@@ -1388,11 +1404,12 @@ struct ShopScreen::Impl {
     const bool listed = pick.wait > kPickWait;
     message(ss(listed ? 0x801DF470 : 0x801DF438));
     group(Left);
-    for (int character = 0; character < save::kNumChars; ++character) {
+    const int first = pick.cursor / kPickPage * kPickPage;
+    for (int place = 0; place < kPickPage; ++place) {
+      const int character = pick.at(first + place);
       if (!gs->available(character)) continue;
-      const int half = save::kNumChars / 2;
-      const float x = character < half ? 40.0f : 168.0f, y = 28.0f + 16.0f * static_cast<float>(character % half);
-      const int count = pick.placed[static_cast<size_t>(character)];
+      const float x = place < kPickColumn ? 40.0f : 168.0f, y = 28.0f + 16.0f * static_cast<float>(place % kPickColumn);
+      const int count = pick.placed[static_cast<size_t>(first + place)];
       RT(1, x, y, char_name(character), count != 0 ? 0x4E77u : 0x808080u);
       if (count == 0) continue;
       // Played from the discs the count is the "suji" sheet's "x" and digits from x + 0x60.
@@ -1407,7 +1424,7 @@ struct ShopScreen::Impl {
     Frame(140, 200, 392);
     RT(1, !texs.hd() && usa_disc() ? 0xE0 : 0xFA, 0x194, ss(0x801DF590));
     if (pick.on_confirm) marker(0xD0, 0x195, true);
-    else marker(pick.cursor < save::kNumChars / 2 ? 16.0f : 144.0f, 16.0f * static_cast<float>(pick.cursor % (save::kNumChars / 2)) + 29.0f, true);
+    else marker(pick.cursor % kPickPage < kPickColumn ? 16.0f : 144.0f, 16.0f * static_cast<float>(pick.cursor % kPickColumn) + 29.0f, true);
   }
   void build_element_list() {
     if (stage == Stage::Pick) return build_pick();

@@ -70,8 +70,8 @@ void App::init_route_state() {
   };
   rstate.party = [this] {
     std::string party_text;
-    for (u8 id : world.game_state().slot.party())
-      party_text += (party_text.empty() ? "" : ",") + (id == 0xFF ? std::string("-") : std::to_string(id));
+    for (const int id : world.game_state().slot.party())
+      party_text += (party_text.empty() ? "" : ",") + (id < 0 ? std::string("-") : std::to_string(id));
     return party_text;
   };
   rstate.disc = [this] { return world.disc(); };
@@ -160,11 +160,16 @@ void App::route_request(const game::RouteOut& out) {
   const std::string& rk = out.request;
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
-  else if (rk == "party_add") { world.party_add(out.request_arg); world.state_edited(); }
+  // The character id as a script of the running room names it (a mod's own id through the room's owner).
+  else if (rk == "party_add") { world.party_add(world.script_character(out.request_arg)); world.state_edited(); }
   // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::request_script; class 3 = a talk's): an
   // editor runs any one script of a room, not only the ones a talk or a touch starts; one live already is the asked-for one
   else if (rk == "script") world.vm().request_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
-  else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
+  else if (rk == "party_remove") {
+    const int ref = out.request_arg;
+    world.party_remove(ref >= 0xFD && ref <= 0xFF ? world.party_member(ref - 0xFD) : world.script_character(ref));
+    world.state_edited();
+  }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
   else if (rk == "item") world.give_item(out.request_arg);

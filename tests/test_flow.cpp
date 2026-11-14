@@ -345,7 +345,7 @@ void test_flow() {
 
   // No name record stays empty: RDE's name entry refuses every name over an empty record. A new game, a rename with nothing the font
   // can show and a load all leave the default record.
-  game::FlowMachine::NameRecords defaults{};
+  game::FlowMachine::NameRecords defaults(save::kNumChars);
   for (auto& record : defaults) record = codec.pack_record(U"Kid");
   game::FlowMachine named;
   named.set_tables(nullptr, &codec);
@@ -513,7 +513,7 @@ void test_party_editor() {
   using Mode = game::PartyEditor::Mode;
   game::PartyEditor editor;
   // Serge is locked (the new-game value).
-  editor.begin({5, 0, 1, 22, 9}, {0, 1, -1}, {1u, 0u});
+  editor.begin({5, 0, 1, 22, 9}, {0, 1, -1}, {0});
   CHECK(editor.roster() == (std::vector<int>{0, 1, 5, 9, 22}));
   // A slot is empty and 2 != 5 grid characters: no leaving.
   CHECK(editor.press(Key::Cancel) == 0x18 && !editor.done());
@@ -575,7 +575,7 @@ void test_party_reserve() {
   using Mode = game::PartyEditor::Mode;
   game::PartyEditor editor;
   // Serge locked; the saved reserve names Kid, a party member: that slot starts empty. Grid 0 1 2 5 / 7 9.
-  editor.begin({0, 1, 2, 5, 7, 9}, {0, 1, 2}, {1u, 0u}, {7, -1, 1});
+  editor.begin({0, 1, 2, 5, 7, 9}, {0, 1, 2}, {0}, {7, -1, 1});
   CHECK(editor.reserve() == (std::vector<int>{7, -1, -1}));
   CHECK(editor.slot_count() == 6);
   // Left / right wrap within the row; down / up switch rows, keeping the column.
@@ -606,7 +606,7 @@ void test_party_reserve() {
   CHECK(editor.result() == (std::vector<int>{0, 1, 2}) && editor.reserve() == (std::vector<int>{7, -1, -1}));
   // More than 3 slots: the row shows 3 and scrolls sideways with the cursor (wrapping); up / down use the shown column.
   game::PartyEditor wide;
-  wide.begin({0, 1, 2, 3, 4, 5, 6, 7, 8}, {0, 1, 2}, {0u, 0u}, {3, 4, 5, 6, 7});
+  wide.begin({0, 1, 2, 3, 4, 5, 6, 7, 8}, {0, 1, 2}, {}, {3, 4, 5, 6, 7});
   CHECK(wide.press(Key::Down) == 1 && wide.slot() == 3 && wide.reserve_scroll() == 0);
   CHECK(wide.press(Key::Left) == 1 && wide.slot() == 7 && wide.reserve_scroll() == 2 && wide.shown() == 7);
   CHECK(wide.press(Key::Up) == 1 && wide.slot() == 2);
@@ -618,7 +618,7 @@ void test_party_reserve() {
   // Return to the slot (an OpenCross option): the pick ends mode B on the slot it filled, also after a swap.
   game::PartyEditor back;
   back.set_return_to_slot(true);
-  back.begin({0, 1, 2, 3}, {0, 1, 2}, {0u, 0u}, {3, -1});
+  back.begin({0, 1, 2, 3}, {0, 1, 2}, {}, {3, -1});
   CHECK(back.press(Key::Down) == 1 && back.press(Key::Confirm) == 8);
   CHECK(back.cell(back.cursor()) == 0 && back.press(Key::Confirm) == 8);
   CHECK(back.mode() == Mode::Slots && back.slot() == 3 && back.reserve()[0] == 0 && back.slots()[0] == 3);

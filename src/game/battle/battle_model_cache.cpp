@@ -153,9 +153,22 @@ std::shared_ptr<ModelHandle> ModelCache::load_model_for(const vfs::Vfs& vfs, ren
   return handle;
 }
 
+std::string ModelCache::named_player_model(const vfs::Vfs& vfs, std::string_view name) {
+  if (name.empty()) return {};
+  std::string stem = std::format("battle/player/{}/{}", name, name);
+  return vfs.added("cdrom/" + stem + ".obj") ? stem : std::string{};
+}
+
 // The model stem of a unit.
 std::string ModelCache::unit_model_stem(const vfs::Vfs& vfs, const data::GameTables* tables, const battle::Unit& unit) {
   if (unit.body >= 0) return battle::pip_form(unit.body) ? std::string(kBattleModels[static_cast<size_t>(unit.body)]) : player_model(vfs, unit.body);
+  // A character mods add wears a battle model of its own (named_player_model) while its kind is its record's model byte (no disguise).
+  if (unit.pc && unit.form < 0 && unit.src_id >= data::kNumChars && tables) {
+    const auto chars = tables->char_sets.find("char");
+    const size_t id = static_cast<size_t>(unit.src_id);
+    if (chars != tables->char_sets.end() && id < chars->second.rec.size() && unit.kind == chars->second.rec[id].model())
+      if (std::string own = named_player_model(vfs, data::table_rows().name_of("char", id)); !own.empty()) return own;
+  }
   // A PC's model is loaded from its kind byte (file group 0xE, kind * 3 + 3): Pip's forms are battle/player/tu_p .. tu_mm, Serge's Lynx body
   // (0x31) is sel_yam2. A kind equal to the character id keeps the character's player folder.
   if (unit.pc && unit.form < 0 && (unit.kind != unit.src_id || unit.src_id >= 44) && static_cast<size_t>(unit.kind) < kBattleModels.size() &&

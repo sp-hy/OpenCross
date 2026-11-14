@@ -1,7 +1,8 @@
 // Checks for table rows (a mod's tables\<table>.txt): parsing named and raw fields, references and bad lines; applying several mods'
 // rows over a table's records with the first mod in the list winning a field; records added by name (ids after the table's own, a
 // mod's [Elements] order first, a base copy, references between tables, menu_pg following pgdat, items past the game's 256 with menu_waa
-// following waa) and the mods' own element and item ids.
+// following waa, characters with every character set following char) and the mods' own element and item ids; who may equip an item
+// (equip_add / equip_remove, an added character's equips_like).
 #include <array>
 #include <cstdio>
 #include <map>
@@ -9,6 +10,7 @@
 #include <vector>
 
 #include "data/table_rows.h"
+#include "data/tables.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
@@ -67,7 +69,10 @@ int main() {
     CHECK(problems.size() == 8);
   }
   CHECK(!data::table_fields("pgdat").empty() && !data::table_fields("char_w3").empty() && data::table_fields("nothing").empty());
-  CHECK(data::table_names_of("menu_pg") == "pgdat" && data::table_grows("menu_pg") && !data::table_grows("char"));
+  CHECK(data::table_names_of("menu_pg") == "pgdat" && data::table_grows("menu_pg") && !data::table_grows("btbgdat"));
+  // The character sets share char's names: a character added by name has one id in every set.
+  CHECK(data::table_names_of("char20") == "char" && data::table_names_of("char_w4") == "char" && data::table_grows("char") &&
+        data::table_grows("char_w0"));
 
   // Edits: rows go over the records; the first mod in the list wins a field both set; a record past the table is skipped.
   {
@@ -226,6 +231,42 @@ int main() {
     CHECK(!rows.key_item_for("First", 66) && rows.key_item_for("", 12) == 12);
     CHECK(rows.own_record_id("Second", "keyitem", 66) == 65);
     CHECK(!logged(rows, "no mod adds that record"));
+  }
+
+  // Characters by name: char's names hold for every set; equips_like and equip_add / equip_remove write no record byte, the loaders
+  // read them (character_writes); an added character equips what its equips_like (else its base) does, unless a row names it.
+  {
+    const std::vector<data::TableMod> mods = {
+        mod_with("Cast", {{"char", "[alice]\nbase=1\n[bob]\nbase=2\nequips_like=5\n"},
+                          {"char20", "[alice]\natk=9\n"},
+                          {"menu_waa", "[3]\nequip_add=@char:alice\n[1]\nequip_remove=@char:alice\n[4]\nequip_add=7\n"}},
+                 {}, {}),
+    };
+    data::TableRows rows;
+    rows.build(mods, {{"char", 51}, {"waa", 6}});
+    CHECK(rows.id_of("char", "alice") == 51 && rows.id_of("char20", "bob") == 52 && rows.total("char_w2", 51) == 53);
+    CHECK(rows.base_of("char", 52) == 2 && rows.base_of("char", 51) == 1 && !rows.base_of("char", 3));
+    std::vector<Stat> chars(53);
+    rows.apply("char", chars.size(), [&](size_t i) { return std::span<u8>(chars[i]); });
+    CHECK((rows.character_writes("char").size() == 1 && rows.character_writes("char")[0].record == 52 &&
+           rows.character_writes("char")[0].value == 5));
+    std::vector<std::array<u8, 12>> info(6);
+    rows.apply("menu_waa", info.size(), [&](size_t i) { return std::span<u8>(info[i]); });
+    CHECK((rows.character_writes("menu_waa").size() == 3 && info[3] == std::array<u8, 12>{}));
+    data::GameTables tables;
+    tables.equips_like.resize(53);
+    for (int i = 0; i < 51; ++i) tables.equips_like[static_cast<size_t>(i)] = i;
+    tables.equips_like[51] = 1;
+    tables.equips_like[52] = 5;
+    // Item r's own bits: character r only.
+    std::vector<data::Eligibility> who(6);
+    std::vector<data::Eligibility*> pointers;
+    for (data::Eligibility& entry : who) pointers.push_back(&entry);
+    tables.fill_eligibility(rows, "menu_waa", pointers, [&](size_t row, int character) {
+      return who[row].rule(character).value_or(static_cast<int>(row) == character);
+    });
+    CHECK(who[3].rule(51) == true && who[1].rule(51) == false && who[4].rule(7) == true);
+    CHECK(who[5].rule(52) == true && !who[5].rule(51) && who[2].rule(52) != true && !who[0].rule(51));
   }
 
   // A table rows cannot grow, and a name no mod adds in [Elements], are reported.

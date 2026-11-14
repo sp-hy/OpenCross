@@ -79,6 +79,12 @@ constexpr int kModItemLast = 0x7FF;
 // 0x400 + n (the game's scripts reach 1..63), which stays below the item ids from 0x800.
 constexpr int kModKeyItemFirst = 65;
 constexpr int kModKeyItemLast = 0x3FF;
+// Mod characters: the game's character records are 0..50 (0..43 the playable characters, then Pip's forms and battle-only bodies), so
+// a mod's own character ids start at 51. They stop at 0x7A because scripts and text name a character in 7 bits (an entity reference
+// 0x80 + id, a text name code) and the entity references 0xFB..0xFF are this entity and the party slots; a mod names that many, any
+// number of mods add more.
+constexpr int kModCharacterFirst = 51;
+constexpr int kModCharacterLast = 0x7A;
 // Mod variables: a field script's variable handles are byte offsets (0x000..0x3FE saved, 0x400..0x7FE the room's own), so a mod's own
 // saved variables take the even handles kModVarFirst..kModVarLast. A bit operand reaches them too (handle << 4 | bit: 0x8000..0xFFEF).
 // Two mods may both use 0x800; the name is the identity (game/mod_vars.h).
@@ -90,7 +96,8 @@ bool is_record_name(std::string_view name);
 
 // The mod.ini sections that give a mod's own ids for records mods add by name ("<id> = <record name>"), the table they name records of
 // (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop, [TradingPosts] trade,
-// [Monsters] monster, [Formations] scenedat, [Items] waa, [KeyItems] keyitem (a key item has no table: its [KeyItems] entry adds it).
+// [Monsters] monster, [Formations] scenedat, [Items] waa, [KeyItems] keyitem (a key item has no table: its [KeyItems] entry adds it),
+// [Characters] char.
 struct OwnIdSection {
   const char* section;
   const char* table;

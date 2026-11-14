@@ -35,7 +35,10 @@ inline constexpr u32 kSaveVersion = 0x106;
 inline constexpr u32 kSummaryBits = 210;
 // Size of the unpacked section image.
 inline constexpr size_t kImageSize = 0xE1F4;
+// The characters the block holds (ids 0..43). The characters mods add by name follow the game's character records (0..50: Pip's forms
+// and battle-only bodies sit between) from kFirstAddedChar, kept in the side file by name (OpenCross only).
 inline constexpr int kNumChars = 44;
+inline constexpr int kFirstAddedChar = 51;
 // Highest face a summary party byte holds: the 44 characters, then the forms 0x2C..0x31.
 inline constexpr u8 kLastFace = 0x31;
 inline constexpr int kNumItems = 384;
@@ -59,6 +62,7 @@ inline constexpr size_t kGold = 0x58C;
 inline constexpr size_t kRecruited = 0x590;
 inline constexpr size_t kGrowthProgress = 0x598;
 inline constexpr size_t kParty = 0x59C;
+inline constexpr size_t kRelief = 0x59F;
 inline constexpr size_t kStarsTotal = 0x5A4;
 inline constexpr size_t kStarsCurrent = 0x5A5;
 }  // namespace head
@@ -92,6 +96,11 @@ struct RecordNames {
 void set_element_names(RecordNames names);
 void set_item_names(RecordNames names);
 void set_key_item_names(RecordNames names);
+// The characters mods add by name: `count` = every character record (the game's 51 and the added ones; a slot holds that many), their
+// names as for the records above. A character whose name no mod adds any more leaves the party, the reserve and the roster.
+void set_character_names(RecordNames names, int count);
+// The character records a slot holds (kNumChars until set_character_names gives more than the game's 51).
+int character_count();
 
 // Item stack: id stored in 9 bits, qty in 7 bits.
 struct ItemStack {
@@ -103,7 +112,20 @@ struct ItemStack {
 // Stored widths: max_hp 10 bits; the six stats 7 bits each; bonus values 7 bits; model_id 9 bits; grid cells (element id) 9 bits (the
 // in-memory word: id & 0x3FFF, flags 0x4000 / 0x8000; ids past 511 go to the side file, the flags are not saved);
 // unlocked-level masks 10 bits; equipped_qty 3-bit nibbles; name = game-font bytes, NUL terminated (6 symbols max).
-// colour_bit is stored only for characters 0 and 43; status holds the condition bits.
+// colour_bit is stored only for characters 0 and 43; status holds the condition bits. `flags` (CharFlag) is the added characters'
+// (the game's 44 keep them in the head's and the image's bitmaps).
+enum CharFlag : u8 {
+  // In the roster.
+  kCharRecruited = 0x01,
+  // Kept in the party: the party screen can't take it out (FE 5D).
+  kCharLocked = 0x02,
+  // Left off the party screen (FE 60).
+  kCharExcluded = 0x04,
+  // In the roster FE 6F saved (and restores).
+  kCharRosterSaved = 0x08,
+  // Carried into a New Game+ (test-and-clear by E8).
+  kCharCarried = 0x10,
+};
 struct SaveChar {
   u8 colour_bit = 0;
   u8 rec02 = 0;
@@ -122,12 +144,15 @@ struct SaveChar {
   std::array<u16, 8> unlocked{};
   std::array<u8, 48> equipped_qty{};
   std::array<u8, 16> name{};
+  u8 flags = 0;
 };
 
 struct SaveSlot {
   std::array<u8, kHeadSize> head{};
   std::array<u8, kTailSize> tail{};
-  std::array<SaveChar, kNumChars> chars{};
+  // Index = character id: the block's 44, then (when mods add characters) the game's records 44..50, which hold nothing, and the added
+  // characters from kFirstAddedChar.
+  std::vector<SaveChar> chars = std::vector<SaveChar>(static_cast<size_t>(character_count()));
   std::array<ItemStack, kNumItems> items{};
   std::array<ItemStack, kNumElements> elements{};
   // Button configuration: field, battle, field analog, battle analog.
@@ -141,15 +166,29 @@ struct SaveSlot {
   // The key items past the head's 64 bits that are owned (key items mods add by name, data/table_rows.h), ascending. Kept in the side
   // file (OpenCross only).
   std::vector<u16> key_items_wide;
+  // The party seats, the relief member and the reserve slots that hold an added character (the head and the tail record show them
+  // empty), else -1. Kept in the side file.
+  std::array<int, 3> party_added{-1, -1, -1};
+  int relief_added = -1;
+  std::vector<int> reserve_added;
   // Not saved (session only): the records come from char20.bin (the dream: boot / FE 2F state until FE 3F reloads char.bin).
   // OpenCross looks the file's record bytes (level masks, growth column) up in this set (game/new_game.h).
   bool dream_records = false;
   // Not saved: the block failed the loader's checksum. Its head still previews; a load is refused with the "corrupted" message.
   bool corrupted = false;
 
+  // Whether `id` is a character the slot holds: one of the block's 44 or an added one.
+  bool is_character(int id) const { return id >= 0 && (id < kNumChars || (id >= kFirstAddedChar && id < static_cast<int>(chars.size()))); }
+  // The characters the slot holds, in id order.
+  std::vector<int> character_ids() const;
   // Raw-head accessors (writes keep the preview copies in sync where one exists).
-  std::array<u8, 3> party() const;
-  void set_party(const std::array<u8, 3>& ids);
+  // The party seats: character ids, -1 = empty. set_party takes anything that is not a character as empty (pass -1: with enough
+  // characters added, 0xFF is one).
+  std::array<int, 3> party() const;
+  void set_party(const std::array<int, 3>& ids);
+  // The Relief Charm's member (head 0x59F): a character id, -1 = none.
+  int relief() const;
+  void set_relief(int id);
   // The summary's party bytes (head 0x34..0x36): 0xFF for an empty seat, else the member's face: its record model byte when that
   // is at most 0x31 (a Pip form, Serge as Lynx), else its id. The save writes them when it stamps the block.
   std::array<u8, 3> preview_party() const { return {head[head::kPreviewParty], head[head::kPreviewParty + 1], head[head::kPreviewParty + 2]}; }
@@ -165,8 +204,12 @@ struct SaveSlot {
   void set_gold(u32 amount);
   u32 growth_progress() const;
   void set_growth_progress(u32 value);
-  bool recruited(int char_id) const;
-  void set_recruited(int char_id, bool on);
+  bool recruited(int char_id) const { return char_flag(char_id, kCharRecruited); }
+  void set_recruited(int char_id, bool on) { set_char_flag(char_id, kCharRecruited, on); }
+  // A CharFlag of a character: the game's 44 in the head's recruited bits and the image's bitmaps (lock and exclusion 0xE1B8, saved
+  // roster 0xE1E0, carry-over 0xE1EC), the added ones in SaveChar::flags. False / ignored for an id that is not a character.
+  bool char_flag(int char_id, CharFlag flag) const;
+  void set_char_flag(int char_id, CharFlag flag, bool on);
   // Summary copy of script variable 0 (SCENARIO), u16: the key of the slot list's location caption.
   u16 progression() const { return static_cast<u16>(head[head::kProgression] | (head[head::kProgression + 1] << 8)); }
   void set_progression(u16 value) {

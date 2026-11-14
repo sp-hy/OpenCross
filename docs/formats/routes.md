@@ -175,9 +175,9 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `battle_disguise <enc>` | Same with the disguise-fight flag (battle flag 4). |
 | `rename <char>` | Open name entry for the character, then the main menu. |
 | `party` | Open the party screen. |
-| `party_add <char>` | Add a character to the party. |
+| `party_add <char>` | Add a character to the party (the id as a script of the running room names it: a mod's own character id goes through the room's owner). |
 | `script <ent> <slot> [class]` | Start entity `ent`'s script slot `slot` as a spawn would (`FieldVM::request_script`; class default 3, a talk's): an editor runs one script of the room that no talk or touch starts. Nothing when the slot is empty; one already running (the room's own scene started it) goes on, and a `trace` counts it as the scene's. |
-| `party_remove <ref>` | Empty a party slot as REMOVE_FROM_PARTY (7D) does; `ref` is a character reference in decimal (253 / 254 / 255 = slot 0 / 1 / 2, else a character id). |
+| `party_remove <ref>` | Empty a party slot as REMOVE_FROM_PARTY (7D) does; `ref` is a character reference in decimal (253 / 254 / 255 = slot 0 / 1 / 2, else a character id, read as `party_add` reads it). |
 | `save` | Open the cleared-save prompt (strips the roster, sets variable 0x7E to 3) and the save list. |
 | `ngplus` | Open the New Game+ list over the current game. |
 | `menu` | Open the main menu. |

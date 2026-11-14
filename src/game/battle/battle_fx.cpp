@@ -399,10 +399,13 @@ std::set<u32> actor_script_tags(const vfs::Vfs& vfs) {
   };
   if (const auto prd = vfs.read("cdrom/battle/battle.prd")) walk(*prd);
   std::set<std::string> seen, packs;
-  // The game's models, then the models of the monsters mods add by name (when `vfs` is the one the mods' rows were set for).
+  // The game's models, then the models of the monsters and characters mods add by name (when `vfs` is the one the mods' rows were set
+  // for).
   std::vector<std::string> stems(kBattleModels.begin(), kBattleModels.end());
-  if (data::table_mods(vfs))
+  if (data::table_mods(vfs)) {
     for (const std::string& name : data::table_rows().added_names("monster")) stems.push_back(ModelCache::named_monster_model(vfs, name));
+    for (const std::string& name : data::table_rows().added_names("char")) stems.push_back(ModelCache::named_player_model(vfs, name));
+  }
   for (const std::string& stem : stems) {
     if (stem.empty() || !seen.insert(stem).second) continue;
     if (const std::string pack = attack_pack_of(stem); packs.insert(pack).second)

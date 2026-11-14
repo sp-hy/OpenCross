@@ -671,7 +671,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     if (party_screen.take_finished()) {
       // The Relief Charm variant stores the relief member.
       if (party_screen.kind() == ui::PartyScreen::Kind::Relief) {
-        world.game_state().slot.head[ui::kReliefHead] = party_screen.relief_result();
+        world.game_state().slot.set_relief(party_screen.relief_result());
       } else {
         world.game_state().slot.set_party(party_screen.result());
         if (const std::vector<int> reserve = party_screen.reserve_result(); !reserve.empty()) world.game_state().slot.set_reserve(reserve);

@@ -237,9 +237,9 @@ struct TextMod {
   std::map<std::string, std::function<std::optional<Bytes>()>> files;
   // The mod's room id -> internal id, for its field text rows of those rooms (other ids are the game's rows).
   std::map<int, int> rooms;
-  // The mod's item / element / key item / monster / formation id -> the record, for its sysmes.txt names and help rows, its item and
-  // key item descriptions and its battle text rows (set_text_mod_ids).
-  std::map<int, int> items, elements, key_items, monsters, battles;
+  // The mod's item / element / key item / monster / formation / character id -> the record, for its sysmes.txt names and help rows,
+  // its item and key item descriptions and its battle text rows (set_text_mod_ids).
+  std::map<int, int> items, elements, key_items, monsters, battles, characters;
 };
 // Set at launch (priority order, first wins), before text is read; read by every LangTables. A controlled run sets them again when it
 // reads the mods again (Control `reload`, a plan with another DraftDir: an editor's unsaved dialog in its draft folder): each call bumps
@@ -247,9 +247,9 @@ struct TextMod {
 void set_text_mods(std::vector<TextMod> mods);
 const std::vector<TextMod>& text_mods();
 u32 text_mods_generation();
-// The ids of mod `mod` for the records of `table` (waa, pgdat, keyitem, monster, scenedat: its [Items] / [Elements] / [KeyItems] /
-// [Monsters] / [Formations] -> the records): set when the tables load, which gives records added by name their ids. Bumps
-// text_mods_generation() as set_text_mods does.
+// The ids of mod `mod` for the records of `table` (waa, pgdat, keyitem, monster, scenedat, char: its [Items] / [Elements] /
+// [KeyItems] / [Monsters] / [Formations] / [Characters] -> the records): set when the tables load, which gives records added by name
+// their ids. Bumps text_mods_generation() as set_text_mods does.
 void set_text_mod_ids(std::string_view mod, std::string_view table, std::map<int, int> ids);
 
 // Field csv: (room, msg) -> text. `load_rows_rule` implements "a row is loaded only if no earlier row has a larger room".

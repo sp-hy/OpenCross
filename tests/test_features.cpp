@@ -133,6 +133,10 @@ void test_elements() {
   const features::Manifest keys = features::parse_manifest("[KeyItems]\n65=sky_key\n1023=last_key\n64=low\n1024=high\n");
   CHECK((keys.own_ids.at("keyitem") == std::vector<std::pair<int, std::string>>{{65, "sky_key"}, {1023, "last_key"}}));
   CHECK(keys.problems.size() == 2);
+  // [Characters] from 51 (the game's character records are 0..50) to 0x7A (an entity reference 0x80 + id stops below 0xFB).
+  const features::Manifest chars = features::parse_manifest("[Characters]\n51=alice\n122=bob\n50=low\n123=high\n");
+  CHECK((chars.own_ids.at("char") == std::vector<std::pair<int, std::string>>{{51, "alice"}, {122, "bob"}}));
+  CHECK(chars.problems.size() == 2);
 }
 
 void test_variables() {

@@ -120,7 +120,7 @@ int placed_copies(const GameState& gs, int character, int id) {
 
 int party_copies(const GameState& gs, int id) {
   int copies = 0;
-  for (int character = 0; character < save::kNumChars; ++character)
+  for (const int character : gs.slot.character_ids())
     if (gs.available(character)) copies += placed_copies(gs, character, id);
   return copies;
 }
@@ -133,7 +133,7 @@ std::vector<int> element_sell_list(const GameState& gs) {
   for (const auto& stack : gs.slot.elements)
     if (stack.qty > 0) push(stack.id);
   if (gs.rules)
-    for (int character = 0; character < save::kNumChars; ++character) {
+    for (const int character : gs.slot.character_ids()) {
       if (!gs.available(character)) continue;
       for (int row = 0; row < GameState::kRows; ++row)
         for (int col = 0; col < GameState::kCols; ++col) {
@@ -173,7 +173,7 @@ Res sell_element(GameState& gs, int id, int bag_qty, const std::vector<int>& pic
   int picked = 0;
   for (size_t character = 0; character < picks.size(); ++character) {
     if (picks[character] == 0) continue;
-    if (picks[character] < 0 || character >= static_cast<size_t>(save::kNumChars) || !gs.available(static_cast<int>(character)) ||
+    if (picks[character] < 0 || !gs.available(static_cast<int>(character)) ||
         picks[character] > placed_copies(gs, static_cast<int>(character), id))
       return Res::NoStock;
     picked += picks[character];
@@ -276,7 +276,7 @@ std::vector<int> smith_list(const GameState& gs, int category, int bag_refused, 
     if (stack.qty > 0) push(stack.id, bag_refused);
   const int first_slot = category == 0 ? 0 : category == 1 ? 1 : 2;
   const int last_slot = category < 2 ? first_slot : GameState::kEquipSlots - 1;
-  for (int character = 0; character < save::kNumChars; ++character)
+  for (const int character : gs.slot.character_ids())
     if (gs.available(character))
       for (int k = first_slot; k <= last_slot; ++k) push(gs.equipped(character, k), 0x20);
   return out;

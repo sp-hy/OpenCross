@@ -1137,14 +1137,16 @@ std::string move_row_keys(std::string_view text, bool hex, const std::function<s
   return out;
 }
 
-// A mod's sysmes.txt rows with the keys of its item names (0x00<id>), element names (0x17<id>), help lines (0x1A<id * 3 + line>),
-// key item names (0x18<id>) and monster names (0x19<id>) moved to the records its [Items] / [Elements] / [KeyItems] / [Monsters] give
-// those ids; other rows as they are.
+// A mod's sysmes.txt rows with the keys of its item names (0x00<id>), character names (0x01<id>), element names (0x17<id>), help
+// lines (0x1A<id * 3 + line>), key item names (0x18<id>) and monster names (0x19<id>) moved to the records its [Items] / [Characters] /
+// [Elements] / [KeyItems] / [Monsters] give those ids; other rows as they are.
 std::string mod_record_rows(const TextMod& mod, std::string_view text) {
-  if (mod.items.empty() && mod.elements.empty() && mod.key_items.empty() && mod.monsters.empty()) return std::string(text);
+  if (mod.items.empty() && mod.elements.empty() && mod.key_items.empty() && mod.monsters.empty() && mod.characters.empty())
+    return std::string(text);
   return move_row_keys(text, true, [&](unsigned key) -> std::optional<std::string> {
     const unsigned category = key >> 16, index = key & 0xFFFF;
     const std::map<int, int>* ids = category == 0x00                     ? &mod.items
+                                    : category == 0x01                     ? &mod.characters
                                     : category == 0x17 || category == 0x1A ? &mod.elements
                                     : category == 0x18                     ? &mod.key_items
                                     : category == 0x19                     ? &mod.monsters
@@ -1191,6 +1193,7 @@ void set_text_mod_ids(std::string_view mod, std::string_view table, std::map<int
     else if (table == "keyitem") entry.key_items = std::move(ids);
     else if (table == "monster") entry.monsters = std::move(ids);
     else if (table == "scenedat") entry.battles = std::move(ids);
+    else if (table == "char") entry.characters = std::move(ids);
     ++mods_generation();
     return;
   }

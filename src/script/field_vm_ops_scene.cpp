@@ -153,7 +153,7 @@ bool FieldVM::exec_scene(u8 op) {
         yield_ = true;
         break;
       }
-      const s32 char_id = operand_u(1);
+      const s32 char_id = host_.script_character(operand_u(1));
       const bool added = host_.party_add(char_id);
       if (added) staged_char_ = char_id;
       advance(added ? 3 : 4);
@@ -174,7 +174,7 @@ bool FieldVM::exec_scene(u8 op) {
         yield_ = true;
         break;
       }
-      host_.party_remove(byte_at(1));
+      host_.party_remove(character_ref(byte_at(1)));
       advance(2);
       break;
     case 0x7E:  // PLAY_MOVIE: table row in the low byte, movie flags 0
@@ -326,22 +326,22 @@ bool FieldVM::exec_scene(u8 op) {
       advance(2);
       break;
     case 0x94:  // JUMP_IF_NOT_IN_PARTY
-      jump_or_advance(!host_.in_party(operand_u(1)), 3, 5);
+      jump_or_advance(!host_.in_party(host_.script_character(operand_u(1))), 3, 5);
       break;
     case 0x95:  // JUMP_IF_NOT_RECRUITED
     case 0xE5:  // JUMP_IF_NOT_IN_CARRYOVER
     case 0xE6:  // JUMP_IF_NOT_RECRUITED_OR_CARRYOVER
     case 0xE8: {  // TEST_CLEAR_CARRYOVER_JUMP
       const Predicate pred = op == 0x95 ? Predicate::Op95 : op == 0xE5 ? Predicate::OpE5 : op == 0xE6 ? Predicate::OpE6 : Predicate::OpE8;
-      jump_or_advance(host_.predicate(pred, operand_u(1)), 3, 5);
+      jump_or_advance(host_.predicate(pred, host_.script_character(operand_u(1))), 3, 5);
       break;
     }
     case 0x96:  // ADD_TO_ROSTER
-      host_.roster_add(operand_u(1));
+      host_.roster_add(host_.script_character(operand_u(1)));
       advance(3);
       break;
     case 0x97:  // REMOVE_FROM_ROSTER
-      host_.roster_remove(operand_u(1));
+      host_.roster_remove(host_.script_character(operand_u(1)));
       advance(3);
       break;
     // 98 / 99 / 9A read the party character table, whose empty slots hold 0xFF; 99 writes that raw word (scripts test

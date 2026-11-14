@@ -57,7 +57,6 @@ bool add_stack(std::span<save::ItemStack> stock, int id, int count) {
 }
 
 namespace {
-bool bit44(u32 lo, u32 hi, int index) { return ((index < 32 ? lo : hi) >> (index & 31)) & 1u; }
 u32 rd32(const save::SaveSlot& slot, size_t offset) {
   return static_cast<u32>(slot.head[offset]) | (static_cast<u32>(slot.head[offset + 1]) << 8) |
          (static_cast<u32>(slot.head[offset + 2]) << 16) | (static_cast<u32>(slot.head[offset + 3]) << 24);
@@ -69,9 +68,12 @@ u32 rd32(const save::SaveSlot& slot, size_t offset) {
 // The carry-over bitmaps are assigned (the new game's value is dropped). The star unlocks ORed in afterwards are a subset of a
 // cleared game's masks; the grid lock bits are derived from the masks (GameState::cell_available).
 void carry_over(const save::SaveSlot& cleared, save::SaveSlot& dst, const data::GameTables* tables) {
-  for (size_t char_id = 0; char_id < save::kNumChars; ++char_id) {
-    const save::SaveChar& src = cleared.chars[char_id];
-    save::SaveChar& rec = dst.chars[char_id];
+  std::vector<int> both;
+  for (const int char_id : dst.character_ids())
+    if (cleared.is_character(char_id)) both.push_back(char_id);
+  for (const int char_id : both) {
+    const save::SaveChar& src = cleared.chars[static_cast<size_t>(char_id)];
+    save::SaveChar& rec = dst.chars[static_cast<size_t>(char_id)];
     rec.rec02 = src.rec02;
     rec.rec_a8 = src.rec_a8;
     rec.status = 0;
@@ -89,12 +91,15 @@ void carry_over(const save::SaveSlot& cleared, save::SaveSlot& dst, const data::
       if (element.qty != 0 && carries_element(tables->elements, element.id)) add_stack(dst.elements, element.id, element.qty);
   dst.unk_e1ec = cleared.unk_e1ec | rd32(cleared, save::head::kRecruited) | cleared.unk_e1e0;
   dst.unk_e1f0 = (cleared.unk_e1f0 | rd32(cleared, save::head::kRecruited + 4) | cleared.unk_e1e4) & 0xFFFu;
+  for (const int char_id : both)
+    if (char_id >= save::kNumChars)
+      dst.set_char_flag(char_id, save::kCharCarried, cleared.char_flag(char_id, save::kCharCarried) || cleared.recruited(char_id) ||
+                                                         cleared.char_flag(char_id, save::kCharRosterSaved));
   dst.set_gold(std::min<u32>(dst.gold() + cleared.gold(), kGoldCap));
-  const u32 rlo = rd32(dst, save::head::kRecruited), rhi = rd32(dst, save::head::kRecruited + 4);
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
-    if (!bit44(rlo | dst.unk_e1e0, rhi | dst.unk_e1e4, char_id))
+  for (const int char_id : both)
+    if (!dst.recruited(char_id) && !dst.char_flag(char_id, save::kCharRosterSaved))
       dst.chars[static_cast<size_t>(char_id)].name = cleared.chars[static_cast<size_t>(char_id)].name;
-  for (size_t char_id = 0; char_id < save::kNumChars; ++char_id) dst.chars[char_id].unlocked = cleared.chars[char_id].unlocked;
+  for (const int char_id : both) dst.chars[static_cast<size_t>(char_id)].unlocked = cleared.chars[static_cast<size_t>(char_id)].unlocked;
   dst.head[save::head::kStarsTotal] = cleared.head[save::head::kStarsTotal];
   dst.head[save::head::kStarsCurrent] = cleared.head[save::head::kStarsCurrent];
   dst.head[save::head::kPreviewStars] = cleared.head[save::head::kStarsTotal];
@@ -118,9 +123,9 @@ void continue_plus(const save::SaveSlot& cleared, save::SaveSlot& loaded, const 
 void fresh_record(const data::GameTables* tables, int id, save::SaveChar& out) {
   out = save::SaveChar{};
   out.unlocked = newgame::kInitialUnlocks;
-  if (!tables || id < 0 || id >= save::kNumChars) return;
+  if (!tables || id < 0) return;
   auto it = tables->char_sets.find("char");
-  if (it == tables->char_sets.end()) return;
+  if (it == tables->char_sets.end() || static_cast<size_t>(id) >= it->second.rec.size()) return;
   const data::StatRec& file_rec = it->second.rec[static_cast<size_t>(id)];
   out.colour_bit = file_rec.innate();
   out.max_hp = file_rec.max_hp();
@@ -146,7 +151,7 @@ save::SaveSlot new_game_plus_slot(const data::GameTables* tables, const save::Sa
   slot.tail = cleared.tail;
   slot.set_var(0x34, cleared.var(0x34));
   slot.set_var(6, 0);
-  slot.set_party({0xFF, 0xFF, 0xFF});
+  slot.set_party({-1, -1, -1});
   newgame::real_records(tables, slot, seed);
   slot.set_recruited(0, false);
   carry_over(cleared, slot, tables);
@@ -159,8 +164,8 @@ save::SaveSlot new_game_plus_slot(const data::GameTables* tables, const save::Sa
 // Every recruited or parked character gives its grid elements (GameState::strip_grid) and its five gear words back to the stock.
 void strip_for_cleared_save(ui::GameState& gs) {
   save::SaveSlot& sl = gs.slot;
-  for (int char_id = 0; char_id < 0x2C && char_id < save::kNumChars; ++char_id) {
-    if (!sl.recruited(char_id) && !bit44(sl.unk_e1e0, sl.unk_e1e4, char_id)) continue;
+  for (const int char_id : sl.character_ids()) {
+    if (!sl.recruited(char_id) && !sl.char_flag(char_id, save::kCharRosterSaved)) continue;
     gs.strip_grid(char_id);
     save::SaveChar& rec = sl.chars[static_cast<size_t>(char_id)];
     for (u16* gear : {&rec.weapon, &rec.armour, &rec.accessory[0], &rec.accessory[1], &rec.accessory[2]}) gs.return_gear(*gear);

@@ -78,6 +78,9 @@ struct ModelCache {
   bool prefetch_ready() const;
 
   static std::string player_model(const vfs::Vfs& vfs, int char_id);
+  // A character mods add by name (tables\char.txt `[name]`) whose mod adds cdrom/battle/player/<name>/<name>.obj (with its at0.prd
+  // beside it); empty when it adds none (the character then wears its model byte's model, unit_model_stem).
+  static std::string named_player_model(const vfs::Vfs& vfs, std::string_view name);
   // A monster's model: one mods add by name (tables\monster.txt `[name]`) whose mod adds cdrom/battle/monster/<name>/<name>.obj uses it
   // (named_monster_model; a model the game ships under that name does not count), any other its model byte (kBattleModels).
   static std::string monster_model(const vfs::Vfs& vfs, const data::GameTables* tables, int monster_id);

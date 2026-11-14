@@ -307,7 +307,7 @@ void test_slot() {
   CHECK(write_slot(card, 5, forms) == 3);
   const SaveSlot written = read_slot(card, 3);
   CHECK(written.preview_party() == (std::array<u8, 3>{0x31, 0x13, 0xFF}));
-  CHECK(written.party() == (std::array<u8, 3>{0, 0x13, 0xFF}));
+  CHECK(written.party() == (std::array<int, 3>{0, 0x13, -1}));
   // Sneff's cats (0x3C..0x3E) have no face: each member saves his own id, so Serge in the Lynx body shows Serge's face.
   SaveSlot cats = forms;
   cats.set_party({0, 0x16, 0x13});
@@ -603,10 +603,86 @@ void test_loginusers() {
   CHECK(platform::parse_loginusers_persona(named, 76561198000000001ull) == "Kid");
   CHECK(platform::parse_loginusers_persona(named, 76561198000000002ull).empty());
 }
+// Characters mods add by name: past the block's 44, their whole state, flags, party seats, relief and reserve slots go into the side file
+// by name; the block shows those seats empty; a load gives each name the id it has now, and a name gone leaves the seats empty.
+void test_added_characters() {
+  set_character_names({[](u16 id) { return id == 51 ? std::string("alice") : id == 52 ? std::string("bob") : std::string(); },
+                       [](std::string_view name) { return name == "alice" ? std::optional<u16>(51) : name == "bob" ? std::optional<u16>(52) : std::nullopt; }},
+                      53);
+  SaveSlot slot;
+  CHECK(slot.chars.size() == 53 && slot.is_character(52) && !slot.is_character(44) && !slot.is_character(50) && !slot.is_character(53));
+  CHECK((slot.character_ids().size() == 46) && slot.character_ids().back() == 52);
+  slot.chars[51].max_hp = 321;
+  slot.chars[51].grid[3] = 0x4000 | 600;
+  slot.chars[51].weapon = 300;
+  slot.chars[51].name = {'A', 'l', 'i'};
+  slot.chars[52].atk = 77;
+  slot.set_recruited(51, true);
+  slot.set_recruited(52, true);
+  slot.set_char_flag(51, kCharLocked, true);
+  slot.set_char_flag(52, kCharExcluded, true);
+  CHECK(slot.recruited(51) && slot.char_flag(51, kCharLocked) && !slot.char_flag(51, kCharExcluded) && slot.char_flag(52, kCharExcluded));
+  slot.set_party({0, 51, -1});
+  slot.set_relief(52);
+  slot.set_reserve({52, 3, -1});
+  CHECK((slot.party() == std::array<int, 3>{0, 51, -1}) && slot.head[head::kParty + 1] == 0xFF && slot.relief() == 52 &&
+        slot.head[head::kRelief] == 0xFF);
+  CHECK((slot.reserve() == std::vector<int>{52, 3, -1}));
+  // The game's 44 keep their bitmaps.
+  slot.set_char_flag(3, kCharExcluded, true);
+  CHECK((slot.unk_e1b8[2] & 8u) != 0 && slot.char_flag(3, kCharExcluded));
+
+  const std::filesystem::path store = std::filesystem::temp_directory_path() / "oc_test_chars";
+  set_wide_store(store);
+  const Bytes block = encode_block(slot);
+  const SaveSlot back = decode_block(block);
+  CHECK(back.chars[51].max_hp == 321 && back.chars[51].grid[3] == (0x4000 | 600) && back.chars[51].weapon == 300 &&
+        back.chars[51].name == slot.chars[51].name && back.chars[52].atk == 77);
+  CHECK(back.recruited(51) && back.char_flag(51, kCharLocked) && back.char_flag(52, kCharExcluded));
+  CHECK((back.party() == std::array<int, 3>{0, 51, -1}) && back.relief() == 52 && (back.reserve() == std::vector<int>{52, 3, -1}));
+  CHECK(block[head::kParty] == 0 && block[head::kParty + 1] == 0xFF && block[0x188 + 0x0E] == 0xFF);
+  // An added character leading: the block's seats hold the game's members moved up (RDE needs a leader), Serge alone when there are
+  // none; the side file keeps the real seats.
+  {
+    SaveSlot leads = slot;
+    leads.set_party({51, -1, 3});
+    const Bytes leads_block = encode_block(leads);
+    CHECK(leads_block[head::kParty] == 3 && leads_block[head::kParty + 1] == 0xFF && leads_block[head::kParty + 2] == 0xFF);
+    CHECK(leads_block[0x188 + 0x0C] == 3 && leads_block[0x188 + 0x0E] == 0xFF && leads_block[head::kPreviewParty + 1] == 0xFF);
+    CHECK((decode_block(leads_block).party() == std::array<int, 3>{51, -1, 3}));
+    leads.set_party({51, -1, -1});
+    const Bytes alone_block = encode_block(leads);
+    CHECK(alone_block[head::kParty] == 0 && alone_block[head::kParty + 1] == 0xFF);
+    CHECK((decode_block(alone_block).party() == std::array<int, 3>{51, -1, -1}));
+  }
+  // The names moved (another mod order): each comes back under its new id.
+  set_character_names({[](u16 id) { return id == 51 ? std::string("bob") : id == 52 ? std::string("alice") : std::string(); },
+                       [](std::string_view name) { return name == "bob" ? std::optional<u16>(51) : name == "alice" ? std::optional<u16>(52) : std::nullopt; }},
+                      53);
+  const SaveSlot swapped = decode_block(block);
+  CHECK(swapped.chars[52].max_hp == 321 && swapped.chars[51].atk == 77 && swapped.char_flag(52, kCharLocked));
+  CHECK((swapped.party() == std::array<int, 3>{0, 52, -1}) && swapped.relief() == 51 && (swapped.reserve() == std::vector<int>{51, 3, -1}));
+  // A name no mod adds any more: its seats are empty.
+  set_character_names({[](u16 id) { return id == 51 ? std::string("bob") : std::string(); },
+                       [](std::string_view name) { return name == "bob" ? std::optional<u16>(51) : std::nullopt; }},
+                      52);
+  const SaveSlot gone = decode_block(block);
+  CHECK((gone.party() == std::array<int, 3>{0, -1, -1}) && gone.relief() == 51 && gone.chars[51].atk == 77);
+  // The block alone (RDE): the game's characters only.
+  set_wide_store({});
+  const SaveSlot plain = decode_block(block);
+  CHECK((plain.party() == std::array<int, 3>{0, -1, -1}) && plain.relief() == -1 && (plain.reserve() == std::vector<int>{-1, 3, -1}));
+  set_character_names({}, kNumChars);
+  CHECK(SaveSlot{}.chars.size() == kNumChars);
+  std::error_code ec;
+  std::filesystem::remove_all(store, ec);
+}
+
 }  // namespace
 
 int main() try {
   test_create_empty();
+  test_added_characters();
   test_loginusers();
   test_crypto();
   test_zip();

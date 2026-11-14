@@ -5952,18 +5952,18 @@ void test_party_swap() {
   state.slot.set_party({0, 1, 2});
   for (const int char_id : {0, 1, 2, 9}) state.slot.chars[static_cast<size_t>(char_id)].max_hp = 50;
   game::apply_battle_result(state, tables, battle);
-  CHECK(state.slot.party() == (std::array<u8, 3>{0, 1, 2}));
+  CHECK(state.slot.party() == (std::array<int, 3>{0, 1, 2}));
   CHECK_EQ(state.slot.chars[0].cur_hp, 30);
   CHECK_EQ(state.slot.chars[0].status, st::kPoison);
   // Keep lineup: the ended lineup, unless a locked character is on the bench (it takes its slot back).
   {
     ui::GameState kept = state;
     CHECK(game::keep_swapped_lineup(kept, battle, -1));
-    CHECK(kept.slot.party() == (std::array<u8, 3>{9, 1, 2}));
+    CHECK(kept.slot.party() == (std::array<int, 3>{9, 1, 2}));
     ui::GameState locked = state;
     locked.slot.unk_e1b8 = {1u, 0u, 0u, 0u};
     CHECK(!game::keep_swapped_lineup(locked, battle, -1));
-    CHECK(locked.slot.party() == (std::array<u8, 3>{0, 1, 2}));
+    CHECK(locked.slot.party() == (std::array<int, 3>{0, 1, 2}));
     // With reserve slots, Serge takes the slot Guile (9) came from.
     ui::GameState reserved = state;
     for (const int char_id : {0, 1, 2, 5, 9}) reserved.slot.set_recruited(char_id, true);
@@ -5971,21 +5971,21 @@ void test_party_swap() {
     CHECK(reserved.reserve(3) == (std::vector<int>{5, 9, -1}));
     reserved.slot.set_reserve({5, 9, -1});
     CHECK(game::keep_swapped_lineup(reserved, battle, -1, 3));
-    CHECK(reserved.slot.party() == (std::array<u8, 3>{9, 1, 2}) && reserved.slot.reserve() == (std::vector<int>{5, 0, -1}));
+    CHECK(reserved.slot.party() == (std::array<int, 3>{9, 1, 2}) && reserved.slot.reserve() == (std::vector<int>{5, 0, -1}));
   }
   // The Relief Charm: character 2 stood in for Serge (saved party 0 1 x) and stayed on the field, so the kept lineup holds Serge.
   {
     ui::GameState relief = state;
     relief.slot.set_party({1, 0, 0xFF});
     CHECK(game::keep_swapped_lineup(relief, battle, 2));
-    CHECK(relief.slot.party() == (std::array<u8, 3>{9, 1, 0}));
+    CHECK(relief.slot.party() == (std::array<int, 3>{9, 1, 0}));
   }
   // A stand-in (character 3) that swapped out: Serge takes back his saved slot.
   {
     ui::GameState relief = state;
     relief.slot.set_party({1, 0, 0xFF});
     CHECK(game::keep_swapped_lineup(relief, battle, 3));
-    CHECK(relief.slot.party() == (std::array<u8, 3>{9, 0, 2}));
+    CHECK(relief.slot.party() == (std::array<int, 3>{9, 0, 2}));
   }
   // Nothing swapped: nothing to keep. A monster-party scene has no swap.
   {

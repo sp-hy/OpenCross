@@ -59,6 +59,13 @@ std::vector<TableField> stat_fields() {
   return out;
 }
 
+// char*.bin records: the stat fields and equips_like (the character whose equipment and elements a new character takes).
+std::vector<TableField> char_fields() {
+  std::vector<TableField> out = stat_fields();
+  out.push_back({"equips_like", 0, 0});
+  return out;
+}
+
 // pgdat.bin records (data::ElemRec).
 std::vector<TableField> elem_fields() {
   return {{"flags0", 0x00, 1}, {"colour_bit", 0x05, 1}, {"level", 0x06, 1},    {"mode", 0x07, 1},
@@ -66,10 +73,11 @@ std::vector<TableField> elem_fields() {
           {"status_lo", 0x18, 4}, {"status_hi", 0x1C, 4}};
 }
 
-// menu_pg.bin rows (who may place the element, price, menu use, auto-fill scores).
+// menu_pg.bin rows (who may place the element, price, menu use, auto-fill scores; equip_add / equip_remove name characters).
 std::vector<TableField> menu_elem_fields() {
   return {{"eligible_lo", 0x00, 4}, {"eligible_hi", 0x04, 2}, {"price", 0x08, 2},       {"menu_flags", 0x0A, 1},
-          {"use_flags", 0x0B, 1},   {"fill_score_0", 0x0C, 1}, {"fill_score_1", 0x0D, 1}};
+          {"use_flags", 0x0B, 1},   {"fill_score_0", 0x0C, 1}, {"fill_score_1", 0x0D, 1}, {"equip_add", kCharacterAdd, 0},
+          {"equip_remove", kCharacterRemove, 0}};
 }
 
 // player.dat part 4 "waa.bin" records (data::GearRec).
@@ -80,9 +88,10 @@ std::vector<TableField> gear_fields() {
           {"status_lo", 0x14, 4}, {"status_hi", 0x18, 4}};
 }
 
-// exdat part 5 "menu_waa.bin" records (data::ItemInfo).
+// exdat part 5 "menu_waa.bin" records (data::ItemInfo; equip_add / equip_remove name characters).
 std::vector<TableField> item_fields() {
-  return {{"equip_lo", 0, 4}, {"equip_hi", 4, 4}, {"price10", 8, 2}, {"cat", 10, 1}, {"extra", 11, 1}};
+  return {{"equip_lo", 0, 4}, {"equip_hi", 4, 4}, {"price10", 8, 2}, {"cat", 10, 1}, {"extra", 11, 1},
+          {"equip_add", kCharacterAdd, 0}, {"equip_remove", kCharacterRemove, 0}};
 }
 
 // scenedat.bin records (data::SceneRec).
@@ -159,9 +168,10 @@ bool parse_reference(std::string_view text, std::string& table, std::string& nam
 }  // namespace
 
 std::span<const TableField> table_fields(std::string_view table) {
-  static const std::vector<TableField> stat = stat_fields(), elem = elem_fields(), menu_elem = menu_elem_fields(), gear = gear_fields(),
+  static const std::vector<TableField> stat = stat_fields(), chars = char_fields(), elem = elem_fields(), menu_elem = menu_elem_fields(), gear = gear_fields(),
                                        item = item_fields(), forge = forge_fields(), scene = scene_fields(), drop = drop_fields();
-  if (table == "monster" || table == "char" || table == "char20" || (table.starts_with("char_w") && table.size() == 7)) return stat;
+  if (table == "monster") return stat;
+  if (table_names_of(table) == "char") return chars;
   if (table == "pgdat") return elem;
   if (table == "menu_pg") return menu_elem;
   if (table == "waa") return gear;
@@ -175,12 +185,13 @@ std::span<const TableField> table_fields(std::string_view table) {
 std::string_view table_names_of(std::string_view table) {
   if (table == "menu_pg") return "pgdat";
   if (table == "menu_waa" || table == "waa_tbl") return "waa";
+  if (table == "char20" || (table.starts_with("char_w") && table.size() == 7)) return "char";
   return table;
 }
 
 bool table_grows(std::string_view table) {
   return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem" || table == "waa" ||
-         table == "menu_waa" || table == "waa_tbl" || table_is_list(table);
+         table == "menu_waa" || table == "waa_tbl" || table_names_of(table) == "char" || table_is_list(table);
 }
 
 bool table_is_list(std::string_view table) { return table == "el_shop" || table == "waa_shop" || table == "trade"; }
@@ -345,8 +356,9 @@ std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableFie
       write.offset = field->offset;
       write.width = field->width;
     }
-    const long long max = write.width == 4 ? 0xFFFFFFFFll : (1ll << (8 * write.width)) - 1;
-    const long long min = -(1ll << (8 * write.width - 1));
+    // A character field (width 0) takes a character id.
+    const long long max = write.width == 0 ? 0xFFFFll : write.width == 4 ? 0xFFFFFFFFll : (1ll << (8 * write.width)) - 1;
+    const long long min = write.width == 0 ? 0 : -(1ll << (8 * write.width - 1));
     long long value = 0;
     if (value_text.starts_with("@")) {
       if (!parse_reference(value_text, write.ref_table, write.ref_name, value) || value > max) {
@@ -474,6 +486,15 @@ const std::vector<std::string>& TableRows::added_names(std::string_view table) c
   return names == names_.end() ? kNone : names->second.names;
 }
 
+std::optional<size_t> TableRows::base_of(std::string_view table, size_t id) const {
+  const auto list = parsed_.find(table);
+  if (list == parsed_.end()) return std::nullopt;
+  for (const Parsed& parsed : list->second)
+    for (const RowBlock& block : parsed.blocks)
+      if (block.base && !block.name.empty() && id_of(table, block.name) == id && *block.base != id) return block.base;
+  return std::nullopt;
+}
+
 std::optional<size_t> TableRows::record_of(std::string_view mod, std::string_view table, int own_id) const {
   const auto by_mod = own_ids_.find(mod);
   if (by_mod == own_ids_.end()) return std::nullopt;
@@ -499,6 +520,12 @@ std::optional<int> TableRows::own_record_id(std::string_view mod, std::string_vi
   for (const auto& [own_id, record] : by_table->second)
     if (record == id) return own_id;
   return std::nullopt;
+}
+
+const std::vector<TableRows::WideWrite>& TableRows::character_writes(std::string_view table) const {
+  static const std::vector<WideWrite> kNone;
+  const auto it = character_.find(table);
+  return it == character_.end() ? kNone : it->second;
 }
 
 const std::vector<TableRows::WideWrite>& TableRows::wide_writes(std::string_view table) const {
@@ -660,6 +687,7 @@ size_t TableRows::apply_trade(std::vector<std::vector<TradeEntry>>& posts) const
   return total_changed;
 }
 size_t TableRows::apply(std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record) const {
+  character_.erase(std::string(table));
   // A new record starts as a copy of its base, before any field is written; the first mod in the list that gives a base decides. A
   // table that shares another's names (menu_pg) takes the base that table's rows give when its own rows give none.
   std::set<size_t> based;
@@ -718,12 +746,17 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
                                            *target + value));
             continue;
           }
-          if (!enemy_slot && write.width < 4 && *target + value >= (size_t{1} << (8 * write.width))) {
+          if (!enemy_slot && write.width != 0 && write.width < 4 && *target + value >= (size_t{1} << (8 * write.width))) {
             problems.push_back(std::format("line {}: {}:{} is record {}, past a {}-byte field", write.line, write.ref_table, write.ref_name,
                                            *target + value, write.width));
             continue;
           }
           value += static_cast<u32>(*target);
+        }
+        if (write.width == 0) {
+          character_[std::string(table)].push_back({*index, write.offset, value});
+          ++applied;
+          continue;
         }
         if (static_cast<size_t>(write.offset) + write.width > rec.size()) {
           problems.push_back(std::format("line {}: no field 0x{:X} in a {}-byte record", write.line, write.offset, rec.size()));

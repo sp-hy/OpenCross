@@ -3,6 +3,7 @@
 // party / roster, inventory stock ops, the element grid editor (legality, place / remove / swap, clear, auto-fill,
 // sorting), equipment compatibility and stat previews, element use (heal / cure) and the options word.
 // Pure data logic; no rendering.
+#include <algorithm>
 #include <array>
 #include <string>
 #include <vector>
@@ -18,10 +19,13 @@ class Vfs;
 
 namespace oc::ui {
 
-// menu_pg.bin (cdrom/battle/data, 16-byte rows, index = element id): eligibility, price, use flags, auto-fill bonuses.
+// menu_pg.bin (cdrom/battle/data, 16-byte rows, index = element id): eligibility (48 character bits; `who` decides the characters mods
+// add and the rows' exceptions), price, use flags, auto-fill bonuses.
 struct PgRow {
   std::array<u8, 16> raw{};
+  data::Eligibility who;
   bool eligible(int character) const {
+    if (const std::optional<bool> listed = who.rule(character)) return *listed;
     return character >= 0 && character < 48 && ((raw[static_cast<size_t>(character >> 3)] >> (character & 7)) & 1) != 0;
   }
   int price() const { return static_cast<s16>(raw[8] | (raw[9] << 8)); }
@@ -113,10 +117,19 @@ class GameState {
   // ---- party / roster / misc
   // Valid member ids in order (0..3).
   std::vector<int> party() const;
-  // Recruited character ids (0..43), ascending.
+  // Recruited character ids (the game's 0..43, then the characters mods add), ascending.
   std::vector<int> roster() const;
   // Recruited and not excluded: the characters the menus may show and act on outside the party.
   bool available(int character) const;
+  // A character mods add whose model byte is its record's (no disguise): it shows its own art by name where its mod ships some.
+  bool own_body(int character) const;
+  // The rows of the roster lists (main menu, Elements use): one per game character by id (blank when not available), then one per
+  // character mods add. roster_at = the character of row `row`, -1 past the end.
+  int roster_rows() const { return save::kNumChars + std::max(0, static_cast<int>(slot.chars.size()) - save::kFirstAddedChar); }
+  int roster_at(int row) const {
+    if (row < 0 || row >= roster_rows()) return -1;
+    return row < save::kNumChars ? row : save::kFirstAddedChar + row - save::kNumChars;
+  }
   // The party reserve (party swap) as `size` slots: the saved slots, cut or padded with empties (-1); a character that is not available,
   // is in the party or appears twice leaves its slot empty. A save that never had a reserve starts with the first available characters
   // outside the party (ascending ids).

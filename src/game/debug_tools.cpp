@@ -756,11 +756,12 @@ void DebugTools::apply(const Ctx& ctx) {
           break;
         }
         if (action.kind == Action::Kind::Party || action.set_party_first) {
-          std::array<u8, 3> ids{0xFF, 0xFF, 0xFF};
+          std::array<int, 3> ids{-1, -1, -1};
           size_t count = 0;
           for (int char_id : action.party)
-            if (char_id >= 0 && char_id < 0x2C && std::find(ids.begin(), ids.begin() + static_cast<long>(count), static_cast<u8>(char_id)) == ids.begin() + static_cast<long>(count))
-              ids[count++] = static_cast<u8>(char_id);
+            if (count < ids.size() && world->game_state().slot.is_character(char_id) &&
+                std::find(ids.begin(), ids.begin() + static_cast<long>(count), char_id) == ids.begin() + static_cast<long>(count))
+              ids[count++] = char_id;
           if (count == 0) {
             status_ = "Party refused: pick at least one member.";
             if (action.kind == Action::Kind::Party) break;

@@ -1,12 +1,14 @@
 #include "save/cc_save.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <stdexcept>
+#include <type_traits>
 
 #include "core/log.h"
 
@@ -101,10 +103,38 @@ constexpr size_t rec(int i) { return 0xAA24 + size_t(i) * kStride; }
 }  // namespace
 
 // ----------------------------------------------------------------- SaveSlot accessors
-std::array<u8, 3> SaveSlot::party() const { return {head[head::kParty], head[head::kParty + 1], head[head::kParty + 2]}; }
-void SaveSlot::set_party(const std::array<u8, 3>& ids) {
-  for (int i = 0; i < 3; ++i) head[head::kParty + i] = head[head::kPreviewParty + i] = ids[i];
+std::vector<int> SaveSlot::character_ids() const {
+  std::vector<int> ids;
+  for (int id = 0; id < static_cast<int>(chars.size()); ++id)
+    if (is_character(id)) ids.push_back(id);
+  return ids;
 }
+std::array<int, 3> SaveSlot::party() const {
+  std::array<int, 3> ids{};
+  for (size_t i = 0; i < 3; ++i) {
+    const u8 byte = head[head::kParty + i];
+    ids[i] = is_character(party_added[i]) ? party_added[i] : byte < kNumChars ? byte : -1;
+  }
+  return ids;
+}
+void SaveSlot::set_party(const std::array<int, 3>& ids) {
+  for (size_t i = 0; i < 3; ++i) {
+    const int id = is_character(ids[i]) ? ids[i] : -1;
+    party_added[i] = id >= kNumChars ? id : -1;
+    head[head::kParty + i] = head[head::kPreviewParty + i] = id >= 0 && id < kNumChars ? static_cast<u8>(id) : u8{0xFF};
+  }
+}
+int SaveSlot::relief() const {
+  if (is_character(relief_added)) return relief_added;
+  const u8 byte = head[head::kRelief];
+  return byte < kNumChars ? byte : -1;
+}
+void SaveSlot::set_relief(int id) {
+  if (!is_character(id)) id = -1;
+  relief_added = id >= kNumChars ? id : -1;
+  head[head::kRelief] = id >= 0 && id < kNumChars ? static_cast<u8>(id) : u8{0xFF};
+}
+// An added character's seat shows as empty: the summary has no face for it.
 void SaveSlot::stamp_preview_party() {
   constexpr u8 kEmpty = 0xFF;
   for (size_t i = 0; i < 3; ++i) {
@@ -150,11 +180,34 @@ void SaveSlot::set_gold(u32 amount) {
 }
 u32 SaveSlot::growth_progress() const { return rd(&head[head::kGrowthProgress], 4); }
 void SaveSlot::set_growth_progress(u32 value) { wr(&head[head::kGrowthProgress], 4, value); }
-bool SaveSlot::recruited(int character) const { return character >= 0 && character < kNumChars && ((head[head::kRecruited + character / 8] >> (character % 8)) & 1); }
-void SaveSlot::set_recruited(int character, bool on) {
-  if (character < 0 || character >= kNumChars) return;
-  u8& flags = head[head::kRecruited + character / 8];
-  flags = static_cast<u8>(on ? (flags | (1 << (character % 8))) : (flags & ~(1 << (character % 8))));
+bool SaveSlot::char_flag(int character, CharFlag flag) const {
+  if (!is_character(character)) return false;
+  if (character >= kNumChars) return (chars[static_cast<size_t>(character)].flags & flag) != 0;
+  const u32 bit = 1u << (character & 31), word = static_cast<u32>(character >> 5);
+  switch (flag) {
+    case kCharRecruited: return ((head[head::kRecruited + character / 8] >> (character % 8)) & 1) != 0;
+    case kCharLocked: return (unk_e1b8[word] & bit) != 0;
+    case kCharExcluded: return (unk_e1b8[2 + word] & bit) != 0;
+    case kCharRosterSaved: return ((word ? unk_e1e4 : unk_e1e0) & bit) != 0;
+    case kCharCarried: return ((word ? unk_e1f0 : unk_e1ec) & bit) != 0;
+  }
+  return false;
+}
+void SaveSlot::set_char_flag(int character, CharFlag flag, bool on) {
+  if (!is_character(character)) return;
+  const auto apply = [on](auto& bits, auto mask) { bits = static_cast<std::remove_reference_t<decltype(bits)>>(on ? (bits | mask) : (bits & ~mask)); };
+  if (character >= kNumChars) {
+    apply(chars[static_cast<size_t>(character)].flags, static_cast<u8>(flag));
+    return;
+  }
+  const u32 bit = 1u << (character & 31), word = static_cast<u32>(character >> 5);
+  switch (flag) {
+    case kCharRecruited: apply(head[head::kRecruited + character / 8], static_cast<u8>(1 << (character % 8))); break;
+    case kCharLocked: apply(unk_e1b8[word], bit); break;
+    case kCharExcluded: apply(unk_e1b8[2 + word], bit); break;
+    case kCharRosterSaved: apply(word ? unk_e1e4 : unk_e1e0, bit); break;
+    case kCharCarried: apply(word ? unk_e1f0 : unk_e1ec, bit); break;
+  }
 }
 u16 SaveSlot::location() const { return rd16(&head[head::kLocation]); }
 
@@ -208,11 +261,21 @@ bool SaveSlot::set_tail_entry(u8 tag, const std::vector<u8>& bytes) {
 std::vector<int> SaveSlot::reserve() const {
   std::vector<int> slots;
   for (u8 id : tail_entry(tail_tag::kReserve)) slots.push_back(id < kNumChars ? id : -1);
+  for (size_t i = 0; i < slots.size() && i < reserve_added.size(); ++i)
+    if (is_character(reserve_added[i])) slots[i] = reserve_added[i];
   return slots;
 }
 void SaveSlot::set_reserve(const std::vector<int>& slots) {
   std::vector<u8> bytes;
-  for (int id : slots) bytes.push_back(id >= 0 && id < kNumChars ? static_cast<u8>(id) : u8{0xFF});
+  reserve_added.clear();
+  for (size_t i = 0; i < slots.size(); ++i) {
+    const int id = is_character(slots[i]) ? slots[i] : -1;
+    bytes.push_back(id >= 0 && id < kNumChars ? static_cast<u8>(id) : u8{0xFF});
+    if (id >= kNumChars) {
+      reserve_added.resize(i + 1, -1);
+      reserve_added[i] = id;
+    }
+  }
   set_tail_entry(tail_tag::kReserve, bytes);
 }
 
@@ -418,6 +481,10 @@ inline constexpr u16 kItemNames = 6;
 inline constexpr u16 kKeyItemIds = 7;
 // The names of those key items.
 inline constexpr u16 kKeyItemNames = 8;
+// The characters mods add by name: name and whole state.
+inline constexpr u16 kCharacters = 9;
+// The party seats and reserve slots that hold them.
+inline constexpr u16 kCharacterSeats = 10;
 }  // namespace side_tag
 // Item ids the stream keeps: the game's own records.
 constexpr u16 kStreamItems = 0x100;
@@ -437,6 +504,14 @@ RecordNames& item_names() {
 RecordNames& key_item_names() {
   static RecordNames names;
   return names;
+}
+RecordNames& character_names() {
+  static RecordNames names;
+  return names;
+}
+int& char_count() {
+  static int count = kNumChars;
+  return count;
 }
 // Equipment slot k of a character: 0 weapon, 1 armour, 2..4 the accessories.
 constexpr size_t kGearSlots = 5;
@@ -462,7 +537,7 @@ Bytes element_id_section(const SaveSlot& slot) {
       stacks.push_back(slot.elements[i].qty);
       ++stack_count;
     }
-  for (size_t character = 0; character < slot.chars.size(); ++character)
+  for (size_t character = 0; character < kNumChars; ++character)
     for (size_t k = 0; k < slot.chars[character].grid.size(); ++k)
       if (const u32 id = slot.chars[character].grid[k] & 0x3FFFu; id >= 0x200) {
         cells.push_back(static_cast<u8>(character));
@@ -490,8 +565,7 @@ void apply_element_ids(SaveSlot& slot, ByteSpan bytes) {
   const u32 cell_count = rd(&bytes[pos], 2);
   pos += 2;
   for (u32 i = 0; i < cell_count && pos + 4 <= bytes.size(); ++i, pos += 4)
-    if (bytes[pos] < slot.chars.size() && bytes[pos + 1] < slot.chars[0].grid.size())
-      slot.chars[bytes[pos]].grid[bytes[pos + 1]] = rd16(&bytes[pos + 2]);
+    if (bytes[pos] < kNumChars && bytes[pos + 1] < slot.chars[0].grid.size()) slot.chars[bytes[pos]].grid[bytes[pos + 1]] = rd16(&bytes[pos + 2]);
 }
 
 // A names section (kElementNames, kItemNames): u16 n + n x {u16 id, u8 length, length bytes of name}, for every one of `ids` that
@@ -567,7 +641,7 @@ Bytes item_id_section(const SaveSlot& slot) {
       stacks.push_back(slot.items[i].qty);
       ++stack_count;
     }
-  for (size_t character = 0; character < slot.chars.size(); ++character)
+  for (size_t character = 0; character < kNumChars; ++character)
     for (size_t k = 0; k < kGearSlots; ++k)
       if (const u16 id = gear_slot(slot.chars[character], k); id >= kStreamItems) {
         gear.push_back(static_cast<u8>(character));
@@ -594,7 +668,7 @@ void apply_item_ids(SaveSlot& slot, ByteSpan bytes) {
   const u32 gear_count = rd(&bytes[pos], 2);
   pos += 2;
   for (u32 i = 0; i < gear_count && pos + 4 <= bytes.size(); ++i, pos += 4)
-    if (bytes[pos] < slot.chars.size() && bytes[pos + 1] < kGearSlots) gear_slot(slot.chars[bytes[pos]], bytes[pos + 1]) = rd16(&bytes[pos + 2]);
+    if (bytes[pos] < kNumChars && bytes[pos + 1] < kGearSlots) gear_slot(slot.chars[bytes[pos]], bytes[pos + 1]) = rd16(&bytes[pos + 2]);
 }
 // Section kItemNames, for the item ids past 255.
 Bytes item_name_section(const SaveSlot& slot) {
@@ -645,6 +719,125 @@ void apply_key_item_names(SaveSlot& slot, ByteSpan bytes) {
   for (const u16 id : owned) slot.set_key_item(id, true);
 }
 
+// An added character's whole state (u16 words little-endian): the bytes colour_bit rec02 rec_a8 status atk def hit evd mag mdef flags,
+// the words max_hp cur_hp hp_extra unk_be weapon armour accessory[3] model_id, bonus, grid, unlocked, equipped_qty, name.
+constexpr size_t kCharStateSize = 11 + 10 * 2 + 12 + 48 * 2 + 8 * 2 + 48 + 16;
+Bytes char_state(const SaveChar& ch) {
+  Bytes out;
+  for (const u8 byte : {ch.colour_bit, ch.rec02, ch.rec_a8, ch.status, ch.atk, ch.def, ch.hit, ch.evd, ch.mag, ch.mdef, ch.flags})
+    out.push_back(byte);
+  for (const u16 word : {ch.max_hp, ch.cur_hp, ch.hp_extra, ch.unk_be, ch.weapon, ch.armour, ch.accessory[0], ch.accessory[1],
+                         ch.accessory[2], ch.model_id})
+    put16(out, word);
+  out.insert(out.end(), ch.bonus.begin(), ch.bonus.end());
+  for (const u16 word : ch.grid) put16(out, word);
+  for (const u16 word : ch.unlocked) put16(out, word);
+  out.insert(out.end(), ch.equipped_qty.begin(), ch.equipped_qty.end());
+  out.insert(out.end(), ch.name.begin(), ch.name.end());
+  return out;
+}
+SaveChar char_from_state(const u8* bytes) {
+  SaveChar ch;
+  size_t pos = 0;
+  for (u8* byte : {&ch.colour_bit, &ch.rec02, &ch.rec_a8, &ch.status, &ch.atk, &ch.def, &ch.hit, &ch.evd, &ch.mag, &ch.mdef, &ch.flags})
+    *byte = bytes[pos++];
+  for (u16* word : {&ch.max_hp, &ch.cur_hp, &ch.hp_extra, &ch.unk_be, &ch.weapon, &ch.armour, &ch.accessory[0], &ch.accessory[1],
+                    &ch.accessory[2], &ch.model_id}) {
+    *word = rd16(bytes + pos);
+    pos += 2;
+  }
+  std::copy_n(bytes + pos, ch.bonus.size(), ch.bonus.begin());
+  pos += ch.bonus.size();
+  for (u16& word : ch.grid) word = rd16(bytes + pos), pos += 2;
+  for (u16& word : ch.unlocked) word = rd16(bytes + pos), pos += 2;
+  std::copy_n(bytes + pos, ch.equipped_qty.size(), ch.equipped_qty.begin());
+  pos += ch.equipped_qty.size();
+  std::copy_n(bytes + pos, ch.name.size(), ch.name.begin());
+  return ch;
+}
+
+// Section kCharacters: u16 n + n x {u16 id, u8 length, length bytes of name, kCharStateSize bytes of state}, every added character
+// with a name.
+Bytes character_section(const SaveSlot& slot) {
+  if (!character_names().name_of) return {};
+  Bytes entries;
+  u32 count = 0;
+  for (int id = kFirstAddedChar; id < static_cast<int>(slot.chars.size()); ++id) {
+    const std::string name = character_names().name_of(static_cast<u16>(id));
+    if (name.empty() || name.size() > 0xFF) continue;
+    put16(entries, static_cast<u32>(id));
+    entries.push_back(static_cast<u8>(name.size()));
+    entries.insert(entries.end(), name.begin(), name.end());
+    const Bytes state = char_state(slot.chars[static_cast<size_t>(id)]);
+    entries.insert(entries.end(), state.begin(), state.end());
+    ++count;
+  }
+  if (count == 0) return {};
+  Bytes out;
+  put16(out, count);
+  out.insert(out.end(), entries.begin(), entries.end());
+  return out;
+}
+// Each saved character goes to the id its name carries now; returns saved id -> that id (0 = no mod adds it any more).
+std::map<u16, u16> apply_characters(SaveSlot& slot, ByteSpan bytes) {
+  std::map<u16, u16> moved;
+  if (bytes.size() < 2) return moved;
+  const u32 count = rd(&bytes[0], 2);
+  size_t pos = 2;
+  for (u32 i = 0; i < count && pos + 3 <= bytes.size(); ++i) {
+    const u16 saved = rd16(&bytes[pos]);
+    const size_t length = bytes[pos + 2];
+    if (pos + 3 + length + kCharStateSize > bytes.size()) break;
+    const std::string name(reinterpret_cast<const char*>(&bytes[pos + 3]), length);
+    const u16 now = character_names().id_of ? character_names().id_of(name).value_or(0) : saved;
+    moved[saved] = now;
+    if (now >= kFirstAddedChar) {
+      if (slot.chars.size() <= now) slot.chars.resize(now + 1u);
+      slot.chars[now] = char_from_state(&bytes[pos + 3 + length]);
+    }
+    pos += 3 + length + kCharStateSize;
+  }
+  return moved;
+}
+
+// Section kCharacterSeats: 3 x u16 (the party seats: an added character by the id kCharacters saved it under, a game character by its
+// id, kEmptySeat empty; kBlockSeat = the block's seat, as older files wrote every seat without an added character), u16 (the relief
+// member's added character, kBlockSeat none), u16 n + n x u16 (the reserve slots' added characters, kBlockSeat none). The block's
+// party seats are rewritten for RDE when an added character sits in one (encode_block), so the party is read from here.
+inline constexpr u16 kBlockSeat = 0xFFFF, kEmptySeat = 0xFFFE;
+Bytes character_seat_section(const SaveSlot& slot) {
+  const bool any = std::any_of(slot.party_added.begin(), slot.party_added.end(), [](int id) { return id >= 0; }) || slot.relief_added >= 0 ||
+                   std::any_of(slot.reserve_added.begin(), slot.reserve_added.end(), [](int id) { return id >= 0; });
+  if (!any) return {};
+  Bytes out;
+  for (const int id : slot.party()) put16(out, id >= 0 ? static_cast<u32>(id) : kEmptySeat);
+  put16(out, slot.relief_added >= 0 ? static_cast<u32>(slot.relief_added) : 0xFFFFu);
+  put16(out, static_cast<u32>(slot.reserve_added.size()));
+  for (const int id : slot.reserve_added) put16(out, id >= 0 ? static_cast<u32>(id) : 0xFFFFu);
+  return out;
+}
+void apply_character_seats(SaveSlot& slot, ByteSpan bytes, const std::map<u16, u16>& moved) {
+  if (bytes.size() < 10) return;
+  const auto seat = [&](size_t at) {
+    const u16 saved = rd16(&bytes[at]);
+    const auto it = moved.find(saved);
+    const int id = it == moved.end() || it->second == 0 ? -1 : it->second;
+    return slot.is_character(id) ? id : -1;
+  };
+  std::array<int, 3> party = slot.party();
+  for (size_t i = 0; i < 3; ++i) {
+    const u16 saved = rd16(&bytes[2 * i]);
+    if (saved == kEmptySeat) party[i] = -1;
+    else if (saved < kNumChars) party[i] = saved;
+    else if (saved != kBlockSeat) party[i] = seat(2 * i);
+  }
+  slot.set_party(party);
+  slot.relief_added = seat(6);
+  const u32 count = rd(&bytes[8], 2);
+  slot.reserve_added.assign(count, -1);
+  for (u32 i = 0; i < count && 10 + 2 * i + 2 <= bytes.size(); ++i) slot.reserve_added[i] = seat(10 + 2 * i);
+}
+
 // Section kModVariables: u16 n + n x {u8 length, length bytes of name, u16 value}, in name order.
 Bytes mod_variable_section(const SaveSlot& slot) {
   Bytes entries;
@@ -682,7 +875,9 @@ Bytes side_file(const SaveSlot& slot) {
                                             {side_tag::kItemIds, item_id_section(slot)},
                                             {side_tag::kItemNames, item_name_section(slot)},
                                             {side_tag::kKeyItemIds, key_item_id_section(slot)},
-                                            {side_tag::kKeyItemNames, key_item_name_section(slot)}};
+                                            {side_tag::kKeyItemNames, key_item_name_section(slot)},
+                                            {side_tag::kCharacters, character_section(slot)},
+                                            {side_tag::kCharacterSeats, character_seat_section(slot)}};
   Bytes out(kSideMagic.begin(), kSideMagic.end());
   put32(out, kSideVersion);
   for (const auto& [tag, bytes] : sections) {
@@ -715,7 +910,7 @@ void apply_side_file(SaveSlot& slot) {
     log::warn("save: OpenCross side file {:016x} missing", key);
     return;
   }
-  ByteSpan names, item_names_bytes, key_item_names_bytes;
+  ByteSpan names, item_names_bytes, key_item_names_bytes, characters, seats;
   for (size_t at = kSideHeader; at + kSectionHeader <= bytes.size();) {
     const u32 tag = rd(&bytes[at], 2);
     const u32 size = rd(&bytes[at + 2], 4);
@@ -728,8 +923,12 @@ void apply_side_file(SaveSlot& slot) {
     if (tag == side_tag::kItemNames) item_names_bytes = section;
     if (tag == side_tag::kKeyItemIds) apply_key_item_ids(slot, section);
     if (tag == side_tag::kKeyItemNames) key_item_names_bytes = section;
+    if (tag == side_tag::kCharacters) characters = section;
+    if (tag == side_tag::kCharacterSeats) seats = section;
     at += kSectionHeader + size;
   }
+  // The added characters first: the element and item names then reach their grids and equipment too.
+  apply_character_seats(slot, seats, apply_characters(slot, characters));
   apply_element_names(slot, names);
   apply_item_names(slot, item_names_bytes);
   apply_key_item_names(slot, key_item_names_bytes);
@@ -741,6 +940,11 @@ void set_wide_store(std::filesystem::path dir) { wide_dir() = std::move(dir); }
 void set_element_names(RecordNames names) { element_names() = std::move(names); }
 void set_item_names(RecordNames names) { item_names() = std::move(names); }
 void set_key_item_names(RecordNames names) { key_item_names() = std::move(names); }
+void set_character_names(RecordNames names, int count) {
+  character_names() = std::move(names);
+  char_count() = count > kFirstAddedChar ? count : kNumChars;
+}
+int character_count() { return char_count(); }
 
 SaveSlot decode_block(ByteSpan block) {
   if (block.size() != kBlockSize) throw std::runtime_error("save: slot block must be 0x2000 bytes");
@@ -766,6 +970,25 @@ Bytes encode_block(const SaveSlot& full) {
     for (u16& word : ch.grid) word = (word & 0x3FFF) >= 0x200 ? u16{0} : static_cast<u16>(word & 0x3FFF);
     for (size_t k = 0; k < kGearSlots; ++k)
       if (gear_slot(ch, k) >= kStreamItems) gear_slot(ch, k) = 0;
+  }
+  // RDE and the PS1 game know only the game's characters: a party seat holding a character mods add is an empty seat in the block (its
+  // seat byte and its copy in variables 0x0C..0x10), and when one leads, the party's game characters move up (Serge alone when it has
+  // none), as RDE does not play a save without a leader (nobody to move in the field, the main menu never opens). The side file keeps
+  // the real seats (kCharacterSeats).
+  if (std::any_of(full.party_added.begin(), full.party_added.end(), [](int id) { return id >= 0; })) {
+    std::array<u8, 3> seats{0xFF, 0xFF, 0xFF};
+    size_t filled = 0;
+    for (size_t i = 0; i < 3; ++i) {
+      const u8 byte = full.head[head::kParty + i];
+      if (full.party_added[0] < 0) seats[i] = byte;
+      else if (byte < kNumChars) seats[filled++] = byte;
+    }
+    if (seats[0] == 0xFF) seats[0] = 0;
+    for (size_t i = 0; i < 3; ++i) {
+      slot.head[head::kParty + i] = seats[i];
+      slot.set_var(0x0C + 2 * static_cast<int>(i), seats[i]);
+    }
+    slot.stamp_preview_party();
   }
   if (side.empty()) {
     slot.set_tail_entry(tail_tag::kSideFile, {});

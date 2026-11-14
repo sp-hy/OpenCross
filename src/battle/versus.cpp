@@ -197,7 +197,7 @@ RecordValues record_values(const data::GameTables& tables, int char_id, int kind
   RecordValues out;
   for (const auto& [set, records] : tables.char_sets) {
     const PartyMember member = make_party_member(tables, char_id, 0, set);
-    if (kind >= 0 && kind < data::kNumChars && kind != char_id) out.grids.push_back(make_party_member(tables, kind, 0, set));
+    if (kind >= 0 && static_cast<size_t>(kind) < records.rec.size() && kind != char_id) out.grids.push_back(make_party_member(tables, kind, 0, set));
     out.bases.push_back(member.base);
     out.lv99s.push_back(member.lv99);
     out.growth_cols.push_back(member.growth_col);
