@@ -102,6 +102,17 @@ inline constexpr size_t kShopRows = 32;
 // TableRows::element_for), any record: the vanilla
 // range 0x200 + id ends at 511 where the key items start (0x401..). Operands carry 15 bits, so ids up to 0x6FFF.
 inline constexpr int kScriptElementBase = 0x1000;
+// The game's item records (equipment and materials: waa.bin, menu_waa.bin, waa_tbl.bin, names sysmes 0x00<id>); a mod's items by name
+// follow them. A save's stream holds only these ids.
+inline constexpr size_t kGameItems = 256;
+// Field-script item ids from here (to kScriptElementBase) name item `id - kScriptItemBase`: a mod's own item ids (features::kModItemFirst..),
+// resolved through the running room's owner as element ids are.
+inline constexpr int kScriptItemBase = 0x800;
+// The game's key items (1..64: the save's 64 bits; names sysmes 0x18<id>, descriptions keyitem.txt <id * 3 + line>); a mod's key items
+// by name ([KeyItems]) follow them. Field-script item ids 0x400 + n name key item n (the game's scripts reach 1..63; past 64 a mod's
+// own key item ids through the running room's owner).
+inline constexpr size_t kGameKeyItems = 64;
+inline constexpr int kScriptKeyItemBase = 0x400;
 inline bool mod_element(const std::vector<ElemRec>& elements, int id) {
   return id >= kVanillaElemRecs && id < static_cast<int>(elements.size()) && (elements[static_cast<size_t>(id)].raw[1] & 0x02) == 0;
 }
@@ -143,7 +154,7 @@ struct TradeEntry {
   u16 id = 0, qty = 0;
 };
 
-// Equipment stat record (player.dat part 4 "waa.bin": 256 x 0x1C, index = item id). Field notes: tier() is the material tier 0..9;
+// Equipment stat record (player.dat part 4 "waa.bin": 256 x 0x1C, index = item id; mods' items by name follow). Field notes: tier() is the material tier 0..9;
 // klass() the weapon class (CRIT table index); sweeps() its bit 7 (rods and boomerangs: a PC's heavy hit strikes every enemy); mode() the
 // weapon attack mode 0x10..0x1B (animation group);
 // colour() the colour bits of materials / plates; power() is weapon wp | armour DEF term | accessory value; mag() weapon MAG bonus |
@@ -174,7 +185,7 @@ struct GearRec {
   u32 rd32(size_t offset) const { return static_cast<u32>(rd16(offset)) | (static_cast<u32>(rd16(offset + 2)) << 16); }
 };
 
-// Item info (exdat part 5 "menu_waa.bin": 256 x 12): who can equip, price, category. equip_lo / equip_hi form a 51-bit mask (bit =
+// Item info (exdat part 5 "menu_waa.bin": 256 x 12, then mods' items by name): who can equip, price, category. equip_lo / equip_hi form a 51-bit mask (bit =
 // character id); price10 is the price / 10; cat's low nibble is 0 weapon 1 armour 2 accessory 4 material, its high nibble the tier.
 struct ItemInfo {
   u32 equip_lo = 0, equip_hi = 0;
@@ -194,8 +205,8 @@ struct CharSet {
 
 // The loaded tables. Sources: enemies = monster.bin; char_sets = "char", "char20", "char_w0".."char_w5"; elements = pgdat.bin;
 // growth = el_mask.bin (100 x 8); scenes = scenedat.bin; symtbl = 384 x 8; btbgdat = 100 x 3; drops = ditem (256); star_rows = exdat
-// part 0 rows {n, b, s lo, s hi} (100); el_shop has trailing zeros trimmed (the smiths' waa_shop.bin is read by ui::shop::ShopData); gear = 256 records (empty if player.dat part 4
-// is missing); item_info = 256; forge = menu/waa_tbl.bin, per item id the units needed of material id 0..31; keyitem_jp_rows = u16
+// part 0 rows {n, b, s lo, s hi} (100); el_shop has trailing zeros trimmed (the smiths' waa_shop.bin is read by ui::shop::ShopData); gear = 256 records and the items mods add by
+// name (empty if player.dat part 4 is missing); item_info and item_names = as many; forge = menu/waa_tbl.bin, per item id the units needed of material id 0..31; keyitem_jp_rows = u16
 // offsets in keyitem.dat; rng_table = the 256-byte permutation read from the executable (empty if absent); variant_bands = the 8
 // encounter-variant roll bands {lo, hi} of the battle loader btlinit.prg (empty if absent).
 struct GameTables {

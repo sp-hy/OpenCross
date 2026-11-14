@@ -93,6 +93,13 @@ std::vector<TableField> scene_fields() {
   return out;
 }
 
+// menu/waa_tbl.bin records (forge recipes: units of material 0..31, per item).
+std::vector<TableField> forge_fields() {
+  std::vector<TableField> out;
+  add_series(out, "mat", 0, 32, 1);
+  return out;
+}
+
 // ditem.dat records (data::DropRow).
 std::vector<TableField> drop_fields() {
   std::vector<TableField> out;
@@ -153,26 +160,39 @@ bool parse_reference(std::string_view text, std::string& table, std::string& nam
 
 std::span<const TableField> table_fields(std::string_view table) {
   static const std::vector<TableField> stat = stat_fields(), elem = elem_fields(), menu_elem = menu_elem_fields(), gear = gear_fields(),
-                                       item = item_fields(), scene = scene_fields(), drop = drop_fields();
+                                       item = item_fields(), forge = forge_fields(), scene = scene_fields(), drop = drop_fields();
   if (table == "monster" || table == "char" || table == "char20" || (table.starts_with("char_w") && table.size() == 7)) return stat;
   if (table == "pgdat") return elem;
   if (table == "menu_pg") return menu_elem;
   if (table == "waa") return gear;
   if (table == "menu_waa") return item;
+  if (table == "waa_tbl") return forge;
   if (table == "scenedat") return scene;
   if (table == "ditem") return drop;
   return {};
 }
 
-std::string_view table_names_of(std::string_view table) { return table == "menu_pg" ? std::string_view("pgdat") : table; }
+std::string_view table_names_of(std::string_view table) {
+  if (table == "menu_pg") return "pgdat";
+  if (table == "menu_waa" || table == "waa_tbl") return "waa";
+  return table;
+}
 
 bool table_grows(std::string_view table) {
-  return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem" || table_is_list(table);
+  return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem" || table == "waa" ||
+         table == "menu_waa" || table == "waa_tbl" || table_is_list(table);
 }
 
 bool table_is_list(std::string_view table) { return table == "el_shop" || table == "waa_shop"; }
 
-size_t table_last_id(std::string_view table) { return table_names_of(table) == "pgdat" ? kLastElementId : std::numeric_limits<size_t>::max(); }
+size_t table_last_id(std::string_view table) {
+  const std::string_view names = table_names_of(table);
+  if (names == "pgdat") return kLastElementId;
+  if (names == "waa") return kLastItemId;
+  return std::numeric_limits<size_t>::max();
+}
+
+bool table_declared_by_ids(std::string_view table) { return table == "keyitem"; }
 
 void set_table_mods(const vfs::Vfs* files, std::vector<TableMod> mods) { mods_storage() = {files, std::move(mods)}; }
 
@@ -360,6 +380,11 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
         added[names_table][parsed.mod].insert(block.name);
       }
   }
+  // A table of names only (key items): a mod's own-id section entry adds the record.
+  for (size_t mod_index = 0; mod_index < mods.size(); ++mod_index)
+    for (const auto& [table, ids] : mods[mod_index].own_ids)
+      if (table_declared_by_ids(table) && counts.contains(table))
+        for (const auto& [own_id, name] : ids) added[table][mod_index].insert(name);
   for (auto& [names_table, by_mod] : added) {
     Names& names = names_[names_table];
     names.first = counts.at(names_table);
@@ -434,6 +459,16 @@ std::optional<size_t> TableRows::record_for(std::string_view mod, std::string_vi
   const auto names = names_.find(table_names_of(table));
   if (names != names_.end() && !names->second.names.empty() && static_cast<size_t>(own_id) >= names->second.first) return std::nullopt;
   return static_cast<size_t>(own_id);
+}
+
+std::optional<int> TableRows::own_record_id(std::string_view mod, std::string_view table, size_t id) const {
+  const auto by_mod = own_ids_.find(mod);
+  if (by_mod == own_ids_.end()) return std::nullopt;
+  const auto by_table = by_mod->second.find(table);
+  if (by_table == by_mod->second.end()) return std::nullopt;
+  for (const auto& [own_id, record] : by_table->second)
+    if (record == id) return own_id;
+  return std::nullopt;
 }
 
 const std::vector<TableRows::WideWrite>& TableRows::wide_writes(std::string_view table) const {

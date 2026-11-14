@@ -1,12 +1,13 @@
 #pragma once
 // Table rows: a mod's tables\<table>.txt changes single fields of the records of one battle / menu table instead of replacing the
 // whole file, and adds records by name, so several mods that each change or add a few records stack. The table is named after the file
-// it changes (monster, char, char20, char_w0..char_w5, pgdat, menu_pg, waa, menu_waa, scenedat, ditem, el_shop, waa_shop). Rows apply over the table as the
-// game files (or a mod's whole-file replacement) give it, lowest priority first, so the first mod in the list wins a field; a field two
-// mods set differently is logged. A record name is one record across all mods; named records follow the table's own records, mod by mod
-// in priority order (each mod's names listed in the table's own-id section first, by its own id: [Elements] for pgdat, [ElementShops]
-// for el_shop, [Smiths] for waa_shop). menu_pg follows pgdat: its records are the same ids and names. The shop tables (el_shop,
-// waa_shop) are lists: a row adds and removes entries instead of setting fields, so two mods' additions to one shop both land.
+// it changes (monster, char, char20, char_w0..char_w5, pgdat, menu_pg, waa, menu_waa, waa_tbl, scenedat, ditem, el_shop, waa_shop).
+// Rows apply over the table as the game files (or a mod's whole-file replacement) give it, lowest priority first, so the first mod in
+// the list wins a field; a field two mods set differently is logged. A record name is one record across all mods; named records
+// follow the table's own records, mod by mod in priority order (each mod's names listed in the table's own-id section first, by its
+// own id: [Elements] for pgdat, [Items] for waa, [ElementShops] for el_shop, [Smiths] for waa_shop). menu_pg follows pgdat, menu_waa
+// and waa_tbl follow waa: their records are the same ids and names. The shop tables (el_shop, waa_shop) are lists: a row adds and
+// removes entries instead of setting fields, so two mods' additions to one shop both land.
 #include <functional>
 #include <map>
 #include <optional>
@@ -31,6 +32,8 @@ inline constexpr u16 kSceneEnemySlots = 3;
 inline constexpr size_t kEmptyEnemySlot = 0xFF;
 // The highest element id: a grid cell keeps its element in the low 14 bits.
 inline constexpr size_t kLastElementId = 0x3FFF;
+// The highest item id: an equipment word below 0x200 is an item (higher words are elements and key items).
+inline constexpr size_t kLastItemId = 0x1FF;
 
 // One named field of a record: byte offset and width (1, 2 or 4 bytes, little-endian).
 struct TableField {
@@ -41,13 +44,16 @@ struct TableField {
 
 // The fields a row may name for `table` (empty for an unknown table).
 std::span<const TableField> table_fields(std::string_view table);
-// The table whose record names and ids `table` shares (menu_pg -> pgdat; otherwise the table itself).
+// The table whose record names and ids `table` shares (menu_pg -> pgdat, menu_waa and waa_tbl -> waa; otherwise the table itself).
 std::string_view table_names_of(std::string_view table);
 // Whether named rows may add records to `table` (its loader sizes it from the file).
 bool table_grows(std::string_view table);
+// Whether `table` is names only (key items: no record bytes), its records added by the mods' own-id sections ([KeyItems]).
+bool table_declared_by_ids(std::string_view table);
 // Whether `table` is a list table (a shop row: entries added and removed, apply_lists).
 bool table_is_list(std::string_view table);
-// The highest id a named record of `table` may take (pgdat and menu_pg: kLastElementId); a name past it gets no record.
+// The highest id a named record of `table` may take (pgdat and menu_pg: kLastElementId; waa, menu_waa and waa_tbl: kLastItemId); a
+// name past it gets no record.
 size_t table_last_id(std::string_view table);
 
 // One mod's row files: table name (lower case) -> the file's bytes; `own_ids` = its mod.ini own-id sections (features::own_id_sections:
@@ -121,6 +127,8 @@ class TableRows {
   const std::string& name_of(std::string_view table, size_t id) const;
   // The record of `table` that `own_id` means in mod `mod`'s scripts and text (its own-id section), or nothing when it lists no such id.
   std::optional<size_t> record_of(std::string_view mod, std::string_view table, int own_id) const;
+  // The mod's own id for record `id` of `table`, or nothing.
+  std::optional<int> own_record_id(std::string_view mod, std::string_view table, size_t id) const;
   // The record a script or text of mod `mod` names with `own_id`: its own-id section's entry; else a record of the table itself (the
   // game's, or one a whole-file replacement adds) keeps its id; an id in the named records' range the mod does not list names nothing.
   // `mod` = "" for the game's own scripts.
@@ -128,6 +136,10 @@ class TableRows {
   // The same for elements (pgdat, [Elements]).
   std::optional<size_t> element_of(std::string_view mod, int own_id) const { return record_of(mod, "pgdat", own_id); }
   std::optional<size_t> element_for(std::string_view mod, int own_id) const { return record_for(mod, "pgdat", own_id); }
+  // The same for items (waa, [Items]).
+  std::optional<size_t> item_for(std::string_view mod, int own_id) const { return record_for(mod, "waa", own_id); }
+  // The same for key items ([KeyItems]): the game's 1..64 keep their number.
+  std::optional<size_t> key_item_for(std::string_view mod, int own_id) const { return record_for(mod, "keyitem", own_id); }
 
   // Log lines of build() and apply() (also written to the log).
   const std::vector<std::string>& log_lines() const { return log_lines_; }

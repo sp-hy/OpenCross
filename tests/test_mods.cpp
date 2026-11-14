@@ -499,14 +499,22 @@ int main() {
     fs::create_directories(game / "data");
     write_archive(game / "data" / "cdrom.dat", false, {{"map/mapbin/room.bin", "game room"}});
     write_archive(game / "data" / "lang.dat", false,
-                  {{"en.csv", "27\t0\tgame line\n27\t1\tgame second\n"}, {"sysmes.txt", "key\ten\tfr\n0x000001\tPotion\tPotion fr\n"}});
+                  {{"en.csv", "27\t0\tgame line\n27\t1\tgame second\n"},
+                   {"sysmes.txt", "key\ten\tfr\n0x000001\tPotion\tPotion fr\n"},
+                   {"waa_spec.txt", "key\ten\n3\tMonster bones.\n"},
+                   {"keyitem.txt", "key\ten\n3\tA map.\n"}});
     fs::create_directories(game / "mods" / "Alpha" / "text");
     fs::create_directories(game / "mods" / "Beta" / "text");
     std::ofstream(game / "mods" / "Alpha" / "text" / "en.csv", std::ios::binary) << "27\t1\talpha second\n1001\t0\talpha room\n1002\t0\tunlisted\n";
     std::ofstream(game / "mods" / "Alpha" / "text" / "SYSMES.txt", std::ios::binary) << "key\ten\n0x000001\tHi-Potion\n0x000099\tNew item\n";
     std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta second\n1001\t0\tbeta room\n";
     // Beta's own element 527 (its [Elements]): the name and first help line, written under its own id.
-    std::ofstream(game / "mods" / "Beta" / "text" / "sysmes.txt", std::ios::binary) << "key\ten\n0x17020F\tDaze\n0x1A062D\tDazes a foe.\n0x1900DE\tGrunt\n";
+    // Beta's own item 300 (its [Items]): the name and second description line.
+    std::ofstream(game / "mods" / "Beta" / "text" / "sysmes.txt", std::ios::binary)
+        << "key\ten\n0x17020F\tDaze\n0x1A062D\tDazes a foe.\n0x1900DE\tGrunt\n0x00012C\tStar Blade\n0x180046\tSky Key\n";
+    std::ofstream(game / "mods" / "Beta" / "text" / "waa_spec.txt", std::ios::binary) << "key\ten\n901\tA blade of stars.\n";
+    // ... and its own key item 70: the name above and the first description line.
+    std::ofstream(game / "mods" / "Beta" / "text" / "keyitem.txt", std::ios::binary) << "key\ten\n210\tOpens the sky.\n";
     // ... and its own formation 513's battle text (btel rows by scene).
     std::ofstream(game / "mods" / "Beta" / "text" / "btel_en.csv", std::ios::binary) << "513\t0\tStand and fight!\n";
     vfs::Vfs text_files;
@@ -531,6 +539,8 @@ int main() {
     import::set_text_mod_ids("Beta", "pgdat", {{527, 600}});
     import::set_text_mod_ids("Beta", "monster", {{222, 300}});
     import::set_text_mod_ids("Beta", "scenedat", {{513, 700}});
+    import::set_text_mod_ids("Beta", "waa", {{300, 260}});
+    import::set_text_mod_ids("Beta", "keyitem", {{70, 66}});
     import::LangTables tables;
     tables.init(&text_files);
     const auto row = [&](int room, int msg) {
@@ -556,6 +566,19 @@ int main() {
     CHECK(tables.sysmes(0x19012C, import::Lang::En) && *tables.sysmes(0x19012C, import::Lang::En) == "Grunt");
     CHECK(tables.battle_event(700, 0, import::Lang::En) && *tables.battle_event(700, 0, import::Lang::En) == "Stand and fight!");
     CHECK(!tables.battle_event(513, 0, import::Lang::En));
+    // Beta's item 300 is record 260: its name (0x000104) and description line (260 * 3 + 1) move there.
+    CHECK(tables.sysmes(0x000104, import::Lang::En) && *tables.sysmes(0x000104, import::Lang::En) == "Star Blade");
+    CHECK(!tables.sysmes(0x00012C, import::Lang::En));
+    const import::TextTable* spec = tables.table("waa_spec");
+    CHECK(spec && spec->get(static_cast<u64>(781), import::Lang::En) && *spec->get(static_cast<u64>(781), import::Lang::En) == "A blade of stars.");
+    CHECK(spec && !spec->get(static_cast<u64>(901), import::Lang::En));
+    CHECK(spec && spec->get(static_cast<u64>(3), import::Lang::En) && *spec->get(static_cast<u64>(3), import::Lang::En) == "Monster bones.");
+    // Beta's key item 70 is key item 66: its name (0x180042) and description line 0 (66 * 3) move there.
+    CHECK(tables.sysmes(0x180042, import::Lang::En) && *tables.sysmes(0x180042, import::Lang::En) == "Sky Key");
+    const import::TextTable* key_rows = tables.table("keyitem");
+    CHECK(key_rows && key_rows->get(static_cast<u64>(198), import::Lang::En) &&
+          *key_rows->get(static_cast<u64>(198), import::Lang::En) == "Opens the sky.");
+    CHECK(key_rows && !key_rows->get(static_cast<u64>(210), import::Lang::En));
     // The mods' rows set again (a controlled run's reload: an editor's draft text): a LangTables that read them reads them again.
     std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta edited\n";
     {

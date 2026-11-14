@@ -19,8 +19,9 @@ namespace {
 constexpr float kCanvasW = 1280.0f, kCanvasH = 960.0f;
 
 // ---- key-item list
-// Scroll runs 0..kMaxScroll row pairs. Input / hand start from the 15th active frame (kInputFrame); a scroll step lasts kScrollFrames.
-constexpr int kSlots = 64, kPairs = kSlots / 2, kRows = 6, kMaxScroll = kPairs - kRows;
+// The game's 64 slots (key items mods add follow, two to a row pair); scroll runs 0..max_scroll() row pairs. Input / hand start from
+// the 15th active frame (kInputFrame); a scroll step lasts kScrollFrames.
+constexpr int kSlots = 64, kRows = 6;
 constexpr int kInputFrame = 15;
 constexpr int kScrollFrames = 7;
 // Panel constants (canvas units).
@@ -103,8 +104,9 @@ struct KeyItemPopup::Impl {
   // Field display order: key item code (id - 1) per position.
   std::array<u8, kSlots> order{};
   bool order_from_disc = false;
-  // id 0 = empty.
-  std::array<ListEntry, kSlots> slots;
+  // id 0 = empty; kSlots, more when key items mods add are owned (an even count).
+  std::vector<ListEntry> slots = std::vector<ListEntry>(kSlots);
+  int max_scroll() const { return static_cast<int>(slots.size()) / 2 - kRows; }
   // Hand column / row and the top visible row pair.
   int col = 0, row = 0, top = 0;
   // Scroll step in progress (1 = down: top++ at the end, 2 = up: top-- done at the start).
@@ -229,11 +231,18 @@ void KeyItemPopup::open_list(std::vector<ListEntry> owned) {
   for (auto& entry : owned)
     if (const std::string* name = impl.lt.sysmes((0x18u << 16) | static_cast<u32>(entry.id), impl.lang); name && !name->empty())
       entry.name = import::utf8_to_u32(*name);
-  impl.slots.fill(ListEntry{});
-  int placed = 0;
+  // The game's key items in the field order, then a mod's (ids past 64) in id order.
+  const size_t wide = static_cast<size_t>(std::count_if(owned.begin(), owned.end(), [](const ListEntry& entry) { return entry.id > kSlots; }));
+  impl.slots.assign(kSlots + (wide + 1) / 2 * 2, ListEntry{});
+  size_t placed = 0;
   for (const u8 code : impl.order)
     for (auto& entry : owned)
-      if (entry.id == code + 1 && placed < kSlots) impl.slots[static_cast<size_t>(placed++)] = std::move(entry);
+      if (entry.id == code + 1 && placed < kSlots) impl.slots[placed++] = std::move(entry);
+  std::vector<ListEntry> added;
+  for (auto& entry : owned)
+    if (entry.id > kSlots) added.push_back(std::move(entry));
+  std::sort(added.begin(), added.end(), [](const ListEntry& a, const ListEntry& b) { return a.id < b.id; });
+  for (auto& entry : added) impl.slots[placed++] = std::move(entry);
   impl.col = impl.row = impl.top = 0;
   impl.scroll_dir = impl.scroll_t = 0;
   impl.text_off = 0;
@@ -267,7 +276,7 @@ int KeyItemPopup::list_input(int dx, int dy, bool confirm, bool cancel) {
   }
   auto down = [&]() -> int {
     if (impl.row == kRows - 1) {
-      if (impl.top >= kMaxScroll) return 0;
+      if (impl.top >= impl.max_scroll()) return 0;
       impl.scroll_dir = 1, impl.scroll_t = 0;
       return 1;
     }
@@ -300,7 +309,7 @@ int KeyItemPopup::list_input(int dx, int dy, bool confirm, bool cancel) {
       impl.col = 1;
       return 1;
     }
-    if (impl.row == kRows - 1 && impl.top >= kMaxScroll) return 0;
+    if (impl.row == kRows - 1 && impl.top >= impl.max_scroll()) return 0;
     impl.col = 0;
     down();
     return 1;

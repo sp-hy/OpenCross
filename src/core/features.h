@@ -71,6 +71,14 @@ constexpr int kModMonsterFirst = 222;
 constexpr int kModMonsterLast = 0x3FFF;
 constexpr int kModFormationFirst = 513;
 constexpr int kModFormationLast = 0x7DFF;
+// Mod items (equipment and materials): the game's item records are 0..255, so a mod's own item ids start at 256. A field script reaches
+// them as item id kScriptItemBase + id (data/tables.h), which keeps them below the element ids from 0x1000.
+constexpr int kModItemFirst = 256;
+constexpr int kModItemLast = 0x7FF;
+// Mod key items: the game's are 1..64, so a mod's own key item ids start at 65; a field script reaches key item n as item id
+// 0x400 + n (the game's scripts reach 1..63), which stays below the item ids from 0x800.
+constexpr int kModKeyItemFirst = 65;
+constexpr int kModKeyItemLast = 0x3FF;
 // Mod variables: a field script's variable handles are byte offsets (0x000..0x3FE saved, 0x400..0x7FE the room's own), so a mod's own
 // saved variables take the even handles kModVarFirst..kModVarLast. A bit operand reaches them too (handle << 4 | bit: 0x8000..0xFFEF).
 // Two mods may both use 0x800; the name is the identity (game/mod_vars.h).
@@ -82,7 +90,7 @@ bool is_record_name(std::string_view name);
 
 // The mod.ini sections that give a mod's own ids for records mods add by name ("<id> = <record name>"), the table they name records of
 // (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop, [Monsters] monster,
-// [Formations] scenedat.
+// [Formations] scenedat, [Items] waa, [KeyItems] keyitem (a key item has no table: its [KeyItems] entry adds it).
 struct OwnIdSection {
   const char* section;
   const char* table;

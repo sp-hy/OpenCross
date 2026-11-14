@@ -1,6 +1,7 @@
 // Checks for table rows (a mod's tables\<table>.txt): parsing named and raw fields, references and bad lines; applying several mods'
 // rows over a table's records with the first mod in the list winning a field; records added by name (ids after the table's own, a
-// mod's [Elements] order first, a base copy, references between tables, menu_pg following pgdat) and the mods' own element ids.
+// mod's [Elements] order first, a base copy, references between tables, menu_pg following pgdat, items past the game's 256 with menu_waa
+// following waa) and the mods' own element and item ids.
 #include <array>
 #include <cstdio>
 #include <map>
@@ -144,6 +145,55 @@ int main() {
     CHECK(rd16(chars[0], 0x40 + 8) == 0 && logged(rows, "no record pgdat:missing"));
   }
 
+  // Items by name: waa grows past the game's 256 records, menu_waa follows waa, a base copy, an item reference from a drop row, a mod's
+  // own item ids ([Items]) and the game's items passing through.
+  {
+    data::TableMod mod = mod_with("Smithy", {{"waa", "[star_blade]\nbase=40\npower=99\n"},
+                                             {"menu_waa", "[star_blade]\nprice10=500\n"},
+                                             {"waa_tbl", "[star_blade]\nmat_3=2\n[40]\nmat_5=7\n"},
+                                             {"ditem", "[3]\nslot_1=@waa:star_blade\n"}});
+    mod.own_ids["waa"] = {{300, "star_blade"}};
+    data::TableRows rows;
+    rows.build({mod}, {{"waa", 256}, {"ditem", 4}});
+    CHECK(data::table_names_of("menu_waa") == "waa" && data::table_grows("waa") && data::table_grows("menu_waa"));
+    CHECK(rows.id_of("waa", "star_blade") == 256 && rows.id_of("menu_waa", "star_blade") == 256);
+    CHECK(rows.total("waa", 256) == 257 && rows.total("menu_waa", 256) == 257);
+    CHECK(rows.item_for("Smithy", 300) == 256 && !rows.item_for("Smithy", 301) && rows.item_for("", 40) == 40);
+    std::vector<std::array<u8, 0x1C>> gear(257);
+    gear[40][0x01] = 3;
+    gear[40][0x04] = 20;
+    rows.apply("waa", gear.size(), [&](size_t i) { return std::span<u8>(gear[i]); });
+    CHECK(gear[256][0x01] == 3 && gear[256][0x04] == 99);
+    std::vector<std::array<u8, 12>> info(257);
+    rows.apply("menu_waa", info.size(), [&](size_t i) { return std::span<u8>(info[i]); });
+    CHECK(rd16(info[256], 0x08) == 500);
+    CHECK(data::table_names_of("waa_tbl") == "waa" && data::table_grows("waa_tbl"));
+    std::vector<std::array<u8, 32>> forge(257);
+    rows.apply("waa_tbl", forge.size(), [&](size_t i) { return std::span<u8>(forge[i]); });
+    CHECK(forge[256][3] == 2 && forge[40][5] == 7);
+    std::vector<std::array<u8, 8>> drops(4);
+    rows.apply("ditem", drops.size(), [&](size_t i) { return std::span<u8>(drops[i]); });
+    CHECK(rd16(drops[3], 2) == 256);
+  }
+
+  // Key items: no table, a mod's [KeyItems] entry adds the name (ids from 65, mod by mod in priority order, own id order); two mods
+  // naming one key item share it; the game's 1..64 pass through.
+  {
+    data::TableMod first = mod_with("First", {});
+    first.own_ids["keyitem"] = {{70, "sky_key"}, {65, "moon_key"}};
+    data::TableMod second = mod_with("Second", {});
+    second.own_ids["keyitem"] = {{65, "sky_key"}, {66, "sun_key"}};
+    data::TableRows rows;
+    rows.build({first, second}, {{"keyitem", 65}});
+    CHECK(data::table_declared_by_ids("keyitem") && !data::table_declared_by_ids("waa"));
+    CHECK(rows.id_of("keyitem", "moon_key") == 65 && rows.id_of("keyitem", "sky_key") == 66 && rows.id_of("keyitem", "sun_key") == 67);
+    CHECK(rows.total("keyitem", 65) == 68);
+    CHECK(rows.key_item_for("First", 70) == 66 && rows.key_item_for("Second", 65) == 66 && rows.key_item_for("Second", 66) == 67);
+    CHECK(!rows.key_item_for("First", 66) && rows.key_item_for("", 12) == 12);
+    CHECK(rows.own_record_id("Second", "keyitem", 66) == 65);
+    CHECK(!logged(rows, "no mod adds that record"));
+  }
+
   // A table rows cannot grow, and a name no mod adds in [Elements], are reported.
   {
     data::TableRows rows;
@@ -223,6 +273,14 @@ int main() {
     CHECK(rows.id_of("menu_pg", "last_one") == data::kLastElementId);
     CHECK(rows.total("pgdat", data::kLastElementId) == data::kLastElementId + 1);
     CHECK(logged(rows, "no id left for one_more") && rows.id_of("monster", "big") == data::kLastElementId + 1);
+  }
+  // Item ids end at kLastItemId (an equipment word past it is an element or a key item).
+  {
+    data::TableRows rows;
+    rows.build({mod_with("Gear", {{"waa", "[last_item]\npower=1\n[one_more]\npower=1\n"}})}, {{"waa", data::kLastItemId}});
+    CHECK(rows.id_of("waa", "last_item") == data::kLastItemId && !rows.id_of("waa", "one_more"));
+    CHECK(rows.id_of("menu_waa", "last_item") == data::kLastItemId);
+    CHECK(logged(rows, "no id left for one_more"));
   }
 
   if (failures == 0) std::printf("table_rows: OK\n");

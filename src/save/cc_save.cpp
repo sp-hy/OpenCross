@@ -122,6 +122,22 @@ void SaveSlot::set_key_items(u64 bits) {
   wr(&head[head::kKeyItems], 4, static_cast<u32>(bits));
   wr(&head[head::kKeyItems + 4], 4, static_cast<u32>(bits >> 32));
 }
+bool SaveSlot::has_key_item(int id) const {
+  if (id >= 1 && id <= 64) return ((key_items() >> (id - 1)) & 1) != 0;
+  return id > 64 && id <= 0xFFFF && std::binary_search(key_items_wide.begin(), key_items_wide.end(), static_cast<u16>(id));
+}
+void SaveSlot::set_key_item(int id, bool owned) {
+  if (id >= 1 && id <= 64) {
+    const u64 bit = 1ull << (id - 1);
+    set_key_items(owned ? key_items() | bit : key_items() & ~bit);
+    return;
+  }
+  if (id <= 64 || id > 0xFFFF) return;
+  const auto at = std::lower_bound(key_items_wide.begin(), key_items_wide.end(), static_cast<u16>(id));
+  const bool held = at != key_items_wide.end() && *at == id;
+  if (owned && !held) key_items_wide.insert(at, static_cast<u16>(id));
+  if (!owned && held) key_items_wide.erase(at);
+}
 u32 SaveSlot::playtime_frames() const { return rd(&head[head::kPlaytime], 4); }
 void SaveSlot::set_playtime_frames(u32 frame_count) {
   wr(&head[head::kPlaytime], 4, frame_count);
@@ -394,16 +410,38 @@ inline constexpr u16 kElementIds = 1;
 inline constexpr u16 kElementNames = 3;
 // The variables mods add, by name.
 inline constexpr u16 kModVariables = 4;
+// Item ids past the game's 255 (stacks and equipment slots).
+inline constexpr u16 kItemIds = 5;
+// The names of those items.
+inline constexpr u16 kItemNames = 6;
+// Key items past 64 that are owned.
+inline constexpr u16 kKeyItemIds = 7;
+// The names of those key items.
+inline constexpr u16 kKeyItemNames = 8;
 }  // namespace side_tag
+// Item ids the stream keeps: the game's own records.
+constexpr u16 kStreamItems = 0x100;
 
 std::filesystem::path& wide_dir() {
   static std::filesystem::path dir;
   return dir;
 }
-ElementNames& element_names() {
-  static ElementNames names;
+RecordNames& element_names() {
+  static RecordNames names;
   return names;
 }
+RecordNames& item_names() {
+  static RecordNames names;
+  return names;
+}
+RecordNames& key_item_names() {
+  static RecordNames names;
+  return names;
+}
+// Equipment slot k of a character: 0 weapon, 1 armour, 2..4 the accessories.
+constexpr size_t kGearSlots = 5;
+u16& gear_slot(SaveChar& ch, size_t k) { return k == 0 ? ch.weapon : k == 1 ? ch.armour : ch.accessory[k - 2]; }
+u16 gear_slot(const SaveChar& ch, size_t k) { return k == 0 ? ch.weapon : k == 1 ? ch.armour : ch.accessory[k - 2]; }
 void put16(Bytes& out, u32 value) {
   out.push_back(static_cast<u8>(value));
   out.push_back(static_cast<u8>(value >> 8));
@@ -456,21 +494,16 @@ void apply_element_ids(SaveSlot& slot, ByteSpan bytes) {
       slot.chars[bytes[pos]].grid[bytes[pos + 1]] = rd16(&bytes[pos + 2]);
 }
 
-// Section kElementNames: u16 n + n x {u16 id, u8 length, length bytes of name}, for every id past 511 of the slot that has a name.
-Bytes element_name_section(const SaveSlot& slot) {
-  if (!element_names().name_of) return {};
-  std::vector<u16> ids;
-  for (const ItemStack& stack : slot.elements)
-    if (stack.id >= 0x200) ids.push_back(stack.id);
-  for (const SaveChar& ch : slot.chars)
-    for (const u16 word : ch.grid)
-      if ((word & 0x3FFF) >= 0x200) ids.push_back(static_cast<u16>(word & 0x3FFF));
+// A names section (kElementNames, kItemNames): u16 n + n x {u16 id, u8 length, length bytes of name}, for every one of `ids` that
+// has a name.
+Bytes record_name_section(std::vector<u16> ids, const RecordNames& names) {
+  if (!names.name_of) return {};
   std::sort(ids.begin(), ids.end());
   ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
   Bytes entries;
   u32 count = 0;
   for (const u16 id : ids) {
-    const std::string name = element_names().name_of(id);
+    const std::string name = names.name_of(id);
     if (name.empty() || name.size() > 0xFF) continue;
     put16(entries, id);
     entries.push_back(static_cast<u8>(name.size()));
@@ -483,10 +516,10 @@ Bytes element_name_section(const SaveSlot& slot) {
   out.insert(out.end(), entries.begin(), entries.end());
   return out;
 }
-// Gives every saved name the id it carries now: stacks and cells of a name no mod adds any more are emptied.
-void apply_element_names(SaveSlot& slot, ByteSpan bytes) {
-  if (!element_names().id_of || bytes.size() < 2) return;
+// A names section read back: saved id -> the id the name carries now (0 = no mod adds it any more).
+std::map<u16, u16> moved_records(ByteSpan bytes, const RecordNames& names) {
   std::map<u16, u16> moved;
+  if (!names.id_of || bytes.size() < 2) return moved;
   const u32 count = rd(&bytes[0], 2);
   size_t pos = 2;
   for (u32 i = 0; i < count && pos + 3 <= bytes.size(); ++i) {
@@ -494,15 +527,122 @@ void apply_element_names(SaveSlot& slot, ByteSpan bytes) {
     const size_t length = bytes[pos + 2];
     if (pos + 3 + length > bytes.size()) break;
     const std::string name(reinterpret_cast<const char*>(&bytes[pos + 3]), length);
-    moved[id] = element_names().id_of(name).value_or(0);
+    moved[id] = names.id_of(name).value_or(0);
     pos += 3 + length;
   }
+  return moved;
+}
+
+// Section kElementNames, for the element ids past 511.
+Bytes element_name_section(const SaveSlot& slot) {
+  std::vector<u16> ids;
+  for (const ItemStack& stack : slot.elements)
+    if (stack.id >= 0x200) ids.push_back(stack.id);
+  for (const SaveChar& ch : slot.chars)
+    for (const u16 word : ch.grid)
+      if ((word & 0x3FFF) >= 0x200) ids.push_back(static_cast<u16>(word & 0x3FFF));
+  return record_name_section(std::move(ids), element_names());
+}
+// Gives every saved name the id it carries now: stacks and cells of a name no mod adds any more are emptied.
+void apply_element_names(SaveSlot& slot, ByteSpan bytes) {
+  const std::map<u16, u16> moved = moved_records(bytes, element_names());
+  if (moved.empty()) return;
   for (ItemStack& stack : slot.elements)
     if (const auto it = moved.find(stack.id); it != moved.end()) stack = it->second ? ItemStack{it->second, stack.qty} : ItemStack{};
   for (SaveChar& ch : slot.chars)
     for (u16& word : ch.grid)
       if (const auto it = moved.find(static_cast<u16>(word & 0x3FFF)); it != moved.end())
         word = it->second ? static_cast<u16>((word & 0xC000) | it->second) : u16{0};
+}
+
+// Section kItemIds: u16 n + n x {u16 item slot, u16 id, u8 qty}, then u16 m + m x {u8 character, u8 equipment slot (0 weapon, 1 armour,
+// 2..4 accessories), u16 id}. Empty when every id is one of the game's.
+Bytes item_id_section(const SaveSlot& slot) {
+  Bytes stacks, gear;
+  u32 stack_count = 0, gear_count = 0;
+  for (size_t i = 0; i < slot.items.size(); ++i)
+    if (slot.items[i].id >= kStreamItems) {
+      put16(stacks, static_cast<u32>(i));
+      put16(stacks, slot.items[i].id);
+      stacks.push_back(slot.items[i].qty);
+      ++stack_count;
+    }
+  for (size_t character = 0; character < slot.chars.size(); ++character)
+    for (size_t k = 0; k < kGearSlots; ++k)
+      if (const u16 id = gear_slot(slot.chars[character], k); id >= kStreamItems) {
+        gear.push_back(static_cast<u8>(character));
+        gear.push_back(static_cast<u8>(k));
+        put16(gear, id);
+        ++gear_count;
+      }
+  if (stack_count == 0 && gear_count == 0) return {};
+  Bytes out;
+  put16(out, stack_count);
+  out.insert(out.end(), stacks.begin(), stacks.end());
+  put16(out, gear_count);
+  out.insert(out.end(), gear.begin(), gear.end());
+  return out;
+}
+void apply_item_ids(SaveSlot& slot, ByteSpan bytes) {
+  size_t pos = 0;
+  if (bytes.size() < 2) return;
+  const u32 stack_count = rd(&bytes[pos], 2);
+  pos += 2;
+  for (u32 i = 0; i < stack_count && pos + 5 <= bytes.size(); ++i, pos += 5)
+    if (const u32 at = rd(&bytes[pos], 2); at < slot.items.size()) slot.items[at] = {rd16(&bytes[pos + 2]), bytes[pos + 4]};
+  if (pos + 2 > bytes.size()) return;
+  const u32 gear_count = rd(&bytes[pos], 2);
+  pos += 2;
+  for (u32 i = 0; i < gear_count && pos + 4 <= bytes.size(); ++i, pos += 4)
+    if (bytes[pos] < slot.chars.size() && bytes[pos + 1] < kGearSlots) gear_slot(slot.chars[bytes[pos]], bytes[pos + 1]) = rd16(&bytes[pos + 2]);
+}
+// Section kItemNames, for the item ids past 255.
+Bytes item_name_section(const SaveSlot& slot) {
+  std::vector<u16> ids;
+  for (const ItemStack& stack : slot.items)
+    if (stack.id >= kStreamItems) ids.push_back(stack.id);
+  for (const SaveChar& ch : slot.chars)
+    for (size_t k = 0; k < kGearSlots; ++k)
+      if (gear_slot(ch, k) >= kStreamItems) ids.push_back(gear_slot(ch, k));
+  return record_name_section(std::move(ids), item_names());
+}
+// Gives every saved item name the id it carries now: stacks and equipment slots of a name no mod adds any more are emptied.
+void apply_item_names(SaveSlot& slot, ByteSpan bytes) {
+  const std::map<u16, u16> moved = moved_records(bytes, item_names());
+  if (moved.empty()) return;
+  for (ItemStack& stack : slot.items)
+    if (const auto it = moved.find(stack.id); it != moved.end()) stack = it->second ? ItemStack{it->second, stack.qty} : ItemStack{};
+  for (SaveChar& ch : slot.chars)
+    for (size_t k = 0; k < kGearSlots; ++k)
+      if (const auto it = moved.find(gear_slot(ch, k)); it != moved.end()) gear_slot(ch, k) = it->second;
+}
+
+// Section kKeyItemIds: u16 n + n x u16 id, the owned key items past 64.
+Bytes key_item_id_section(const SaveSlot& slot) {
+  if (slot.key_items_wide.empty()) return {};
+  Bytes out;
+  put16(out, static_cast<u32>(slot.key_items_wide.size()));
+  for (const u16 id : slot.key_items_wide) put16(out, id);
+  return out;
+}
+void apply_key_item_ids(SaveSlot& slot, ByteSpan bytes) {
+  if (bytes.size() < 2) return;
+  const u32 count = rd(&bytes[0], 2);
+  for (u32 i = 0; i < count && 2 + 2 * i + 2 <= bytes.size(); ++i) slot.set_key_item(rd16(&bytes[2 + 2 * i]), true);
+}
+// Section kKeyItemNames, for those key items; a load gives each saved name the id it carries now (none: the key item is gone).
+Bytes key_item_name_section(const SaveSlot& slot) { return record_name_section(slot.key_items_wide, key_item_names()); }
+void apply_key_item_names(SaveSlot& slot, ByteSpan bytes) {
+  const std::map<u16, u16> moved = moved_records(bytes, key_item_names());
+  if (moved.empty()) return;
+  std::vector<u16> owned;
+  for (const u16 id : slot.key_items_wide) {
+    const auto it = moved.find(id);
+    if (it == moved.end()) owned.push_back(id);
+    else if (it->second) owned.push_back(it->second);
+  }
+  slot.key_items_wide.clear();
+  for (const u16 id : owned) slot.set_key_item(id, true);
 }
 
 // Section kModVariables: u16 n + n x {u8 length, length bytes of name, u16 value}, in name order.
@@ -538,7 +678,11 @@ void apply_mod_variables(SaveSlot& slot, ByteSpan bytes) {
 Bytes side_file(const SaveSlot& slot) {
   const std::pair<u16, Bytes> sections[] = {{side_tag::kElementIds, element_id_section(slot)},
                                             {side_tag::kElementNames, element_name_section(slot)},
-                                            {side_tag::kModVariables, mod_variable_section(slot)}};
+                                            {side_tag::kModVariables, mod_variable_section(slot)},
+                                            {side_tag::kItemIds, item_id_section(slot)},
+                                            {side_tag::kItemNames, item_name_section(slot)},
+                                            {side_tag::kKeyItemIds, key_item_id_section(slot)},
+                                            {side_tag::kKeyItemNames, key_item_name_section(slot)}};
   Bytes out(kSideMagic.begin(), kSideMagic.end());
   put32(out, kSideVersion);
   for (const auto& [tag, bytes] : sections) {
@@ -571,7 +715,7 @@ void apply_side_file(SaveSlot& slot) {
     log::warn("save: OpenCross side file {:016x} missing", key);
     return;
   }
-  ByteSpan names;
+  ByteSpan names, item_names_bytes, key_item_names_bytes;
   for (size_t at = kSideHeader; at + kSectionHeader <= bytes.size();) {
     const u32 tag = rd(&bytes[at], 2);
     const u32 size = rd(&bytes[at + 2], 4);
@@ -580,15 +724,23 @@ void apply_side_file(SaveSlot& slot) {
     if (tag == side_tag::kElementIds) apply_element_ids(slot, section);
     if (tag == side_tag::kElementNames) names = section;
     if (tag == side_tag::kModVariables) apply_mod_variables(slot, section);
+    if (tag == side_tag::kItemIds) apply_item_ids(slot, section);
+    if (tag == side_tag::kItemNames) item_names_bytes = section;
+    if (tag == side_tag::kKeyItemIds) apply_key_item_ids(slot, section);
+    if (tag == side_tag::kKeyItemNames) key_item_names_bytes = section;
     at += kSectionHeader + size;
   }
   apply_element_names(slot, names);
+  apply_item_names(slot, item_names_bytes);
+  apply_key_item_names(slot, key_item_names_bytes);
 }
 
 }  // namespace
 
 void set_wide_store(std::filesystem::path dir) { wide_dir() = std::move(dir); }
-void set_element_names(ElementNames names) { element_names() = std::move(names); }
+void set_element_names(RecordNames names) { element_names() = std::move(names); }
+void set_item_names(RecordNames names) { item_names() = std::move(names); }
+void set_key_item_names(RecordNames names) { key_item_names() = std::move(names); }
 
 SaveSlot decode_block(ByteSpan block) {
   if (block.size() != kBlockSize) throw std::runtime_error("save: slot block must be 0x2000 bytes");
@@ -602,13 +754,19 @@ SaveSlot decode_block(ByteSpan block) {
 }
 
 Bytes encode_block(const SaveSlot& full) {
-  // The stream gets the slot without what the side file carries: ids past 511 as empty, grid words as their id bits only.
+  // The stream gets the slot without what the side file carries: element ids past 511 and item ids past 255 as empty, grid words as
+  // their id bits only.
   SaveSlot slot = full;
   const Bytes side = side_file(full);
   for (auto& stack : slot.elements)
     if (stack.id >= 0x200) stack = {};
-  for (auto& ch : slot.chars)
+  for (auto& stack : slot.items)
+    if (stack.id >= kStreamItems) stack = {};
+  for (auto& ch : slot.chars) {
     for (u16& word : ch.grid) word = (word & 0x3FFF) >= 0x200 ? u16{0} : static_cast<u16>(word & 0x3FFF);
+    for (size_t k = 0; k < kGearSlots; ++k)
+      if (gear_slot(ch, k) >= kStreamItems) gear_slot(ch, k) = 0;
+  }
   if (side.empty()) {
     slot.set_tail_entry(tail_tag::kSideFile, {});
   } else if (wide_dir().empty()) {
