@@ -7,7 +7,9 @@
 #include <cstdlib>
 #include <format>
 #include <string>
+#include <utility>
 
+#include "core/features.h"
 #include "core/log.h"
 
 namespace oc::script {
@@ -36,15 +38,29 @@ u32 FieldVM::draw_rand() { return (rng_ ? rng_() : default_rng_step(rand_state_)
 // ------------------------------------------------------------------------------------------------ variables
 bool FieldVM::var_unsigned(u32 id) const { return (mod_.sign_mask[(id >> 6) & 31] >> ((id >> 1) & 31)) & 1; }
 
+bool FieldVM::mod_handle(u32 id) {
+  const u32 handle = id & 0xFFFE;
+  return handle >= static_cast<u32>(features::kModVarFirst) && handle <= static_cast<u32>(features::kModVarLast);
+}
+
+u16* FieldVM::var_slot(u32 id) { return const_cast<u16*>(std::as_const(*this).var_slot(id)); }
+const u16* FieldVM::var_slot(u32 id) const {
+  if (!mod_handle(id)) return &vars_[(id >> 1) & (kVarSlots - 1)];
+  const int slot = host_.mod_variable(id & 0xFFFE);
+  return slot >= 0 && static_cast<size_t>(slot) < mod_vars_.size() ? &mod_vars_[static_cast<size_t>(slot)] : nullptr;
+}
+
 s32 FieldVM::read_var(u32 id) const {
-  const u16 raw = vars_[(id >> 1) & (kVarSlots - 1)];
-  const s32 value = var_unsigned(id) ? static_cast<s32>(raw) : static_cast<s32>(static_cast<s16>(raw));
+  const u16* slot = var_slot(id);
+  const s32 value = !slot                                   ? 0
+                    : !mod_handle(id) && var_unsigned(id) ? static_cast<s32>(*slot)
+                                                            : static_cast<s32>(static_cast<s16>(*slot));
   if (trace_ && exec_pc_ != kNoPc) note_var(id, value, false);
   return value;
 }
 
 void FieldVM::write_var(u32 id, s32 value) {
-  vars_[(id >> 1) & (kVarSlots - 1)] = static_cast<u16>(value);
+  if (u16* slot = var_slot(id)) *slot = static_cast<u16>(value);
   if (trace_ && exec_pc_ != kNoPc) note_var(id, value, true);
 }
 
@@ -69,7 +85,10 @@ void FieldVM::note_room_change(int room) {
   write_var(var::kPrevMapId, room_register());
   room_reg_ = room;
 }
-bool FieldVM::var_bit(u32 bit_ref) const { return (vars_[(bit_ref >> 5) & (kVarSlots - 1)] >> (bit_ref & 0xF)) & 1; }
+bool FieldVM::var_bit(u32 bit_ref) const {
+  const u16* slot = var_slot((bit_ref >> 4) & 0xFFE);
+  return slot && (*slot >> (bit_ref & 0xF)) & 1;
+}
 void FieldVM::set_global(Global which, s32 value) {
   globals_[static_cast<size_t>(which)] = value;
   host_.set_global(which, value);
@@ -310,7 +329,7 @@ void FieldVM::dispatch(int ent, int rec_index, bool run_mode) {
     const u32 outer_pc = exec_pc_;
     exec_pc_ = trace_ && !run_mode ? pc : kNoPc;
     // JUMP_IF_BIT_CLEAR reads its bit without read_var: the trace notes the word the bit is in, as for a compare
-    if (op == 0x73 && exec_pc_ != kNoPc) read_var((static_cast<u32>(operand_s(1, 3, 0x80)) >> 4) & 0xFFFEu);
+    if (op == 0x73 && exec_pc_ != kNoPc) read_var((static_cast<u16>(operand_s(1, 3, 0x80)) >> 4) & 0xFFE);
     exec(op);
     if (forced_ && !ended_) {
       if (const auto it = forced_->find(pc); it != forced_->end()) rec_->pc = it->second;

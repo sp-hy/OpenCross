@@ -130,7 +130,7 @@ bool is_record_name(std::string_view name) {
 Manifest parse_manifest(std::string_view text) {
   Manifest out;
   Manifest::Section* current = nullptr;
-  bool in_mod = false, in_rooms = false, any_section = false;
+  bool in_mod = false, in_rooms = false, in_vars = false, any_section = false;
   const OwnIdSection* in_ids = nullptr;
   int line_no = 0;
   while (!text.empty()) {
@@ -144,17 +144,18 @@ Manifest parse_manifest(std::string_view text) {
       const std::string_view name = trim(line.substr(1, close == std::string_view::npos ? std::string_view::npos : close - 1));
       if (close == std::string_view::npos || name.empty()) {
         out.problems.push_back(std::format("line {}: bad section header", line_no));
-        current = nullptr, in_mod = in_rooms = false, in_ids = nullptr;
+        current = nullptr, in_mod = in_rooms = in_vars = false, in_ids = nullptr;
         continue;
       }
       any_section = true;
       in_mod = same(name, "Mod");
       in_rooms = same(name, "Rooms");
+      in_vars = same(name, "Variables");
       in_ids = nullptr;
       for (const OwnIdSection& section : own_id_sections())
         if (same(name, section.section)) in_ids = &section;
       current = nullptr;
-      if (in_mod || in_rooms || in_ids) continue;
+      if (in_mod || in_rooms || in_vars || in_ids) continue;
       const auto it = std::find_if(out.sections.begin(), out.sections.end(), [&](const Manifest::Section& section) { return same(section.name, name); });
       if (it != out.sections.end()) {
         current = &*it;
@@ -220,6 +221,28 @@ Manifest parse_manifest(std::string_view text) {
         ids.emplace_back(id, std::string(value));
       }
       if (ids.empty()) out.own_ids.erase(in_ids->table);
+      continue;
+    }
+    if (in_vars) {
+      // "<handle> = <name>": an even handle from kModVarFirst, a variable name; a name or a handle only once.
+      const bool hex = key.size() > 2 && key[0] == '0' && (key[1] == 'x' || key[1] == 'X');
+      const std::string_view digits = hex ? key.substr(2) : key;
+      int handle = 0;
+      const auto parsed = std::from_chars(digits.data(), digits.data() + digits.size(), handle, hex ? 16 : 10);
+      const auto& vars = out.variables;
+      if (parsed.ec != std::errc() || parsed.ptr != digits.data() + digits.size() || handle < kModVarFirst || handle > kModVarLast ||
+          (handle & 1)) {
+        out.problems.push_back(
+            std::format("line {}: [Variables] '{}' is not an even handle 0x{:X}..0x{:X}", line_no, key, kModVarFirst, kModVarLast));
+      } else if (!is_record_name(value)) {
+        out.problems.push_back(std::format("line {}: [Variables] 0x{:X}: '{}' is not a variable name", line_no, handle, value));
+      } else if (std::any_of(vars.begin(), vars.end(), [&](const auto& entry) { return entry.first == handle; })) {
+        out.problems.push_back(std::format("line {}: [Variables] 0x{:X} is named twice", line_no, handle));
+      } else if (std::any_of(vars.begin(), vars.end(), [&](const auto& entry) { return entry.second == value; })) {
+        out.problems.push_back(std::format("line {}: [Variables] '{}' has two handles", line_no, value));
+      } else {
+        out.variables.emplace_back(handle, std::string(value));
+      }
       continue;
     }
     if (current) current->values.emplace_back(std::string(key), std::string(value));

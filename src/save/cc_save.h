@@ -9,6 +9,7 @@
 #include <array>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -130,6 +131,8 @@ struct SaveSlot {
   u32 unk_e1e0 = 0, unk_e1e4 = 0, unk_e1ec = 0, unk_e1f0 = 0;
   // Obtained Frames bitfield (new game 0x203); the picker skips clear bits.
   u16 frames = 0x203;
+  // The variables mods add (game/mod_vars.h), by name; only values other than 0. Kept in the side file (OpenCross only).
+  std::map<std::string, u16> mod_vars;
   // Not saved (session only): the records come from char20.bin (the dream: boot / FE 2F state until FE 3F reloads char.bin).
   // OpenCross looks the file's record bytes (level masks, growth column) up in this set (game/new_game.h).
   bool dream_records = false;

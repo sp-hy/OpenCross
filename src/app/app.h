@@ -560,6 +560,8 @@ class App {
   // The rooms the enabled mods add and each mod's ids for them ([Rooms] in mod.ini), with the per-mod text rows (text\ in a mod):
   // built once at launch with the features (App::init_vfs).
   game::ModRooms mod_rooms;
+  // The variables the enabled mods add and each mod's handles for them ([Variables] in mod.ini), built with mod_rooms.
+  game::ModVars mod_vars;
   game::TextureDumpJob texture_dump_job;
   game::ModelExportJob model_export_job;
 

@@ -737,6 +737,13 @@ void FieldWorld::capture_state() {
     sl.head[0x188 + static_cast<size_t>(id)] = static_cast<u8>(value & 0xFF);
     sl.head[0x188 + static_cast<size_t>(id) + 1] = static_cast<u8>(value >> 8);
   }
+  // The mods' variables by name (0 = not kept); the values of names no enabled mod has stay in the state.
+  if (mod_vars_)
+    for (size_t i = 0; i < mod_vars_->names().size(); ++i) {
+      const u16 value = vm_.mod_variables()[i];
+      if (value) sl.mod_vars[mod_vars_->names()[i]] = value;
+      else sl.mod_vars.erase(mod_vars_->names()[i]);
+    }
   // The location word is variable 6 (head 0x18E): the room id, written into the state only - the VM's MAP_ID is the room load's
   // (FE 2F leaves it 0 in New Game+ until the MAP_JUMP).
   if (location >= 0) {
@@ -791,6 +798,11 @@ void FieldWorld::restore_vars() {
     const u16 value = static_cast<u16>(sl.head[0x188 + static_cast<size_t>(id)] | (sl.head[0x188 + static_cast<size_t>(id) + 1] << 8));
     vm_.set_var(static_cast<u16>(id), value);
   }
+  if (mod_vars_)
+    for (size_t i = 0; i < mod_vars_->names().size(); ++i) {
+      const auto it = sl.mod_vars.find(mod_vars_->names()[i]);
+      vm_.mod_variables()[i] = it == sl.mod_vars.end() ? u16{0} : it->second;
+    }
   // A save made on disc 2 continues on disc 2.
   if (const int need = vm_.var(0x42) + 1; need == 1 || need == 2) set_disc(need);
   sync_party();
@@ -803,6 +815,9 @@ void FieldWorld::reset_for_new_game() {
   // 0x3D2 = 0x3F; game/new_game.h) - zeros only for a state that never had them.
   for (u16 id = 0; id < 0x3D0; id += 2) vm_.set_var(id, 0);
   for (u16 id = 0x3D0; id < 0x400; id += 2) vm_.set_var(id, gs_ ? gs_->slot.var(id) : 0);
+  // The mods' variables start at 0 too.
+  std::fill(vm_.mod_variables().begin(), vm_.mod_variables().end(), u16{0});
+  if (gs_) gs_->slot.mod_vars.clear();
   last_song_ = -1;
   menu_state_ = MenuState::None;
   movie_state_ = MovieState::None;

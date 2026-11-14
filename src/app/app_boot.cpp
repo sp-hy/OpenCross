@@ -189,6 +189,14 @@ void App::init_vfs() {
       log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
   }
   install_mod_rooms_and_text();
+  // Mod variables ([Variables] in mod.ini, each mod's own handles; the name is the variable), from the mods enabled at launch.
+  {
+    std::vector<game::ModVars::Mod> var_mods;
+    for (const vfs::Mod& mod : mods.mods())
+      if (mod.enabled && mod.has_manifest && !mod.manifest.variables.empty())
+        var_mods.push_back({mod.name, std::map<int, std::string>(mod.manifest.variables.begin(), mod.manifest.variables.end())});
+    mod_vars.set(std::move(var_mods));
+  }
   // The mods' table rows (tables\<table>.txt) and their own element ids ([Elements]), read when the tables load. A run without mods
   // has only its draft folder enabled.
   data::set_table_mods(&files, data::table_mods_of(mods, files));
@@ -557,6 +565,7 @@ void App::init_field() {
   world.set_mod_rooms(&mod_rooms);
   // The VFS reads the disc the field puts in the drive (FE 65, the map transitions' disc check, a loaded save, a debug warp).
   world.set_on_disc_change([this](int disc) { disc_changed(disc); });
+  world.set_mod_vars(&mod_vars);
   // No pickup panel: the room script shows its own "received" message window; only logged here.
   world.set_on_key_item([this](int item) {
     const std::string name = item < static_cast<int>(tables.key_item_names.size()) ? tables.key_item_names[static_cast<size_t>(item)] : std::string("?");

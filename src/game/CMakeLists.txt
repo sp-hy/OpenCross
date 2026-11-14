@@ -24,6 +24,8 @@ add_library(oc_game STATIC
   disc_index.cpp
   mod_rooms.h
   mod_rooms.cpp
+  mod_vars.h
+  mod_vars.cpp
   field_camera.h
   field_camera.cpp
   field_watchdog.h

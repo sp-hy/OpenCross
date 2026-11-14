@@ -143,6 +143,11 @@ void draw_debug_tab(game::FieldWorld* world) {
       if (world->vm().var(id) != 0) ImGui::Text("%03X [%u]  %d", id, (id - 0x400u) / 2, world->vm().var(id));
     ImGui::TreePop();
   }
+  if (const game::ModVars* vars = world->mod_vars(); vars && ImGui::TreeNode("mod variables")) {
+    for (size_t i = 0; i < vars->names().size(); ++i)
+      ImGui::Text("%-24s %d", vars->names()[i].c_str(), static_cast<s16>(world->vm().mod_variables()[i]));
+    ImGui::TreePop();
+  }
 }
 
 }  // namespace

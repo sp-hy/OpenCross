@@ -125,6 +125,14 @@ void test_elements() {
   CHECK(battle.problems.size() == 2);
 }
 
+void test_variables() {
+  // [Variables]: "<handle> = <name>", even handles 0x800..0xFFE (hex or decimal), one handle per name and one name per handle.
+  const features::Manifest manifest = features::parse_manifest(
+      "[Variables]\n0x800 = run_depth\n2050=best_depth\n0x7FE=low\n0x1000=high\n0x805=odd\n0x806=Caps\n0x800=again\n0x808=run_depth\n");
+  CHECK((manifest.variables == std::vector<std::pair<int, std::string>>{{0x800, "run_depth"}, {0x802, "best_depth"}}));
+  CHECK(manifest.sections.empty() && manifest.problems.size() == 6);
+}
+
 }  // namespace
 
 int main() {
@@ -133,6 +141,7 @@ int main() {
   test_resolve();
   test_rooms();
   test_elements();
+  test_variables();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;
