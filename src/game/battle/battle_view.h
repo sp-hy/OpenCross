@@ -820,12 +820,17 @@ class BattleView {
   // The effect-pack id of the current action's element (-1 = none) and the colour of its charge pack (-1 = none). fx_prefetch_cast queues
   // the builds of both packs' GPU resources at the element's confirm and fx_prefetch_step advances them in bounded steps, one video frame
   // at a time, so neither the charge start nor the charge -> pack hand-over loads, bakes and uploads a pack (the charge's sheets, a
-  // summon's creature model, a level-6 element's meshes) in one frame; fx_prefetch_open queues one pack.
+  // summon's creature model, a level-6 element's meshes) in one frame; fx_prefetch_open queues one pack (an effect id's, or `pack`, a
+  // named element's own, under its gpu_key).
   int fx_action_eid() const;
   int fx_charge_colour() const;
   void fx_prefetch_cast();
-  void fx_prefetch_open(int eid);
+  void fx_prefetch_open(int eid, std::shared_ptr<const FxPack> pack = nullptr);
   void fx_prefetch_step();
+  // The pack fx_begin plays for effect id `eid` of the current action: a named element's own pack (fx_named_pack, null when it ships
+  // none), else the effect id's.
+  std::shared_ptr<const FxPack> fx_named_pack(int eid);
+  std::shared_ptr<const FxPack> fx_action_pack(int eid);
   std::vector<int> cast_elements_;
   std::vector<std::vector<battle::ActionEvent>> begun_actions_;
   // Cast start: cast pose, chant, the colour's charge pack "ch0N".
@@ -960,6 +965,7 @@ class BattleView {
   // thread: a step only looks whether its job is done, unless `wait` (the pack is needed now) makes it wait for it.
   struct FxGpuBuild {
     enum class Step { Pack, Sprites, SpriteSheets, Meshes, MeshTextures, MeshBuffers, HdIndex, ModelRead, Models, OverlayAtlases, Done };
+    // The pack's fx_gpu_ key (FxPack::gpu_key): an effect id, a charge pack's, or a named element pack's, which comes with `pack` set.
     int eid = -1;
     std::shared_ptr<const FxPack> pack;
     std::unique_ptr<FxGpu> gpu;

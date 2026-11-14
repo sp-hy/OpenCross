@@ -222,7 +222,7 @@ void BattleView::set_art_mode(bool hd, bool force) {
   // Pack models (their tiles follow the texture mods; some took their battle model's cdrom2 mesh + texture) are rebuilt at the pack's next cast; the
   // pack playing now keeps its copy to its end (the pseudo-actor points into it).
   for (auto it = fx_gpu_.begin(); it != fx_gpu_.end();)
-    it = it->second && it->second->art_dependent && !(fx_pack_ && fx_pack_->eid == it->first) ? fx_gpu_.erase(it) : std::next(it);
+    it = it->second && it->second->art_dependent && !(fx_pack_ && fx_pack_->gpu_key() == it->first) ? fx_gpu_.erase(it) : std::next(it);
   // The prefetches under way uploaded the old art's sheets: their packs build again when they are drawn.
   fx_prefetch_.clear();
   std::vector<std::string> stems;
