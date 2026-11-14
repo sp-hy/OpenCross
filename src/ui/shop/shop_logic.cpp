@@ -390,13 +390,13 @@ TradeRow trade_row(const ShopData& shop_data, int shop_id) {
   TradeRow row;
   if (shop_id < 0 || shop_id >= static_cast<int>(shop_data.trade.size())) return row;
   const auto& src = shop_data.trade[static_cast<size_t>(shop_id)];
-  for (size_t i = 0; i < 16 && i < src.size(); ++i) {
+  for (size_t i = 0; i < data::kTradeSlots && i < src.size(); ++i) {
     const data::TradeEntry& entry = src[i];
-    row.slot[i] = {entry.id & 0xFF, (entry.id >> 8) & 0xFF, entry.qty};
-    // The row ends at the first goods byte 0.
-    if ((entry.id & 0xFF) == 0) break;
-    if (entry.qty != 0) {
-      row.goods[i] = entry.id & 0xFF;
+    row.slot[i] = {entry.goods, entry.colour, entry.levels};
+    // The row ends at the first goods 0.
+    if (entry.goods == 0) break;
+    if (entry.levels != 0) {
+      row.goods[i] = entry.goods;
       ++row.count;
     }
   }

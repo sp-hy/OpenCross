@@ -446,8 +446,8 @@ std::optional<int> FieldWorld::script_gear(int item_id) const {
 }
 std::optional<int> FieldWorld::script_shop(script::MenuKind kind, int row) const {
   const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
-  const std::optional<size_t> mapped =
-      data::table_rows().record_for(owner, kind == script::MenuKind::ElementShop ? "el_shop" : "waa_shop", row);
+  const char* table = kind == script::MenuKind::ElementShop ? "el_shop" : kind == script::MenuKind::TradingPost ? "trade" : "waa_shop";
+  const std::optional<size_t> mapped = data::table_rows().record_for(owner, table, row);
   if (!mapped) return std::nullopt;
   return static_cast<int>(*mapped);
 }

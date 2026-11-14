@@ -497,8 +497,9 @@ void FieldWorld::dialogue_choice(int first, int last) {
 // A8: mode 1 = to black, mode 0 = back to the picture; arg = ticks (0 = at once). Drawn as the room change's subtractive fade.
 
 void FieldWorld::request_menu(script::MenuKind kind, int arg) {
-  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] of the running room's owner.
-  if (menu_state_ == MenuState::None && (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop)) {
+  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] / [TradingPosts] of the running room's owner.
+  if (menu_state_ == MenuState::None &&
+      (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop || kind == script::MenuKind::TradingPost)) {
     const std::optional<int> row = script_shop(kind, arg);
     if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
     arg = row.value_or(-1);

@@ -176,6 +176,40 @@ int main() {
     CHECK(rd16(drops[3], 2) == 256);
   }
 
+  // Trading posts: entries keyed by goods; add sets the words it gives on an entry the post has, a new entry needs levels=; remove;
+  // a post by name with base=; goods named by reference past the game's 256; the 16-entry cap; shop entries take no words.
+  {
+    const std::vector<data::TableMod> mods = {
+        mod_with("Top", {{"trade", "[2]\nadd=7 levels=99\nadd=@waa:star_blade colour=0x10 levels=12\nremove=9\nadd=11 colour=4\n"
+                                   "[bazaar]\nbase=2\nadd=12 levels=5\n"},
+                         {"waa", "[star_blade]\nbase=40\n"},
+                         {"el_shop", "[1]\nadd=5 levels=3\n"}}),
+        mod_with("Bottom", {{"trade", "[2]\nadd=7 levels=50 colour=8\n[3]\nclear=1\nadd=1 levels=1\nadd=2 levels=1\nadd=3 levels=1\n"
+                                      "add=4 levels=1\nadd=5 levels=1\nadd=6 levels=1\nadd=7 levels=1\nadd=8 levels=1\nadd=9 levels=1\n"
+                                      "add=10 levels=1\nadd=11 levels=1\nadd=12 levels=1\nadd=13 levels=1\nadd=14 levels=1\nadd=15 levels=1\n"
+                                      "add=16 levels=1\nadd=17 levels=1\n"}}),
+    };
+    data::TradeEntry seven{7, 0x80, 6}, nine{9, 0x80, 16};
+    std::vector<std::vector<data::TradeEntry>> posts(32);
+    posts[2] = {seven, nine};
+    data::TableRows rows;
+    rows.build(mods, {{"trade", 32}, {"waa", 256}, {"el_shop", 32}});
+    rows.apply_trade(posts);
+    CHECK(posts.size() == 33);
+    const auto& post = posts[2];
+    CHECK(post.size() == 2 && post[0].goods == 7 && post[0].levels == 99 && post[0].colour == 8);
+    CHECK(post.size() == 2 && post[1].goods == 256 && post[1].colour == 0x10 && post[1].levels == 12);
+    CHECK(logged(rows, "a new trade entry needs levels="));
+    CHECK(posts[32].size() == 3 && posts[32][2].goods == 12);
+    CHECK(posts[3].size() == 16 && logged(rows, "the post already has 16 entries"));
+    std::vector<std::vector<u16>> shops(32);
+    rows.apply_lists("el_shop", shops);
+    CHECK(shops[1].empty() && logged(rows, "a shop entry takes no words after it"));
+    std::vector<std::string> problems;
+    data::parse_rows("[1]\nadd=5 levels\nremove=5 colour=1\nadd=6 levels=4294967297\n", {}, &problems, true);
+    CHECK(problems.size() == 3);
+  }
+
   // Key items: no table, a mod's [KeyItems] entry adds the name (ids from 65, mod by mod in priority order, own id order); two mods
   // naming one key item share it; the game's 1..64 pass through.
   {

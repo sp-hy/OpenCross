@@ -114,6 +114,7 @@ std::span<const OwnIdSection> own_id_sections() {
   static constexpr OwnIdSection kSections[] = {{"Elements", "pgdat", kModElementFirst, kModElementLast},
                                                {"ElementShops", "el_shop", kModShopFirst, kModShopLast},
                                                {"Smiths", "waa_shop", kModShopFirst, kModShopLast},
+                                               {"TradingPosts", "trade", kModShopFirst, kModShopLast},
                                                {"Monsters", "monster", kModMonsterFirst, kModMonsterLast},
                                                {"Formations", "scenedat", kModFormationFirst, kModFormationLast},
                                                {"Items", "waa", kModItemFirst, kModItemLast},

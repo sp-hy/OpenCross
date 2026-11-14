@@ -362,8 +362,8 @@ class FieldWorld final : public script::FieldHost {
   // running room's owner); nothing for any other id. script_key_item_id is the reverse (the id a script of the room knows; 0 = none).
   std::optional<int> script_key_item(int item_id) const;
   int script_key_item_id(int key_item) const;
-  // A shop row a script names (FE 5E element shop, FE 68 blacksmith; the row in variable 0x4A) -> the row it means: a mod's own shop ids
-  // ([ElementShops] / [Smiths] of the running room's owner); nothing when it names none.
+  // A shop row a script names (FE 5E element shop, FE 68 blacksmith, FE 67 trading post; the row in variable 0x4A) -> the row it means:
+  // a mod's own shop ids ([ElementShops] / [Smiths] / [TradingPosts] of the running room's owner); nothing when it names none.
   std::optional<int> script_shop(script::MenuKind kind, int row) const;
   const ModRooms* mod_rooms() const { return mod_rooms_; }
   // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/types.h"
+#include "data/table_rows.h"
 
 namespace oc::vfs {
 class Vfs;
@@ -149,9 +150,6 @@ struct SceneRec {
 
 struct DropRow {
   std::array<u16, 4> slot{};
-};
-struct TradeEntry {
-  u16 id = 0, qty = 0;
 };
 
 // Equipment stat record (player.dat part 4 "waa.bin": 256 x 0x1C, index = item id; mods' items by name follow). Field notes: tier() is the material tier 0..9;

@@ -114,9 +114,11 @@ void test_elements() {
   CHECK(manifest.sections.empty() && manifest.problems.size() == 5);
   CHECK(features::is_record_name("a_b9") && !features::is_record_name("_a") && !features::is_record_name(""));
   // [ElementShops] / [Smiths]: shop ids from 32 (the game's rows are 0..31).
-  const features::Manifest shops = features::parse_manifest("[ElementShops]\n32=hub_shop\n31=low\n[Smiths]\n40=hub_smith\n");
+  const features::Manifest shops =
+      features::parse_manifest("[ElementShops]\n32=hub_shop\n31=low\n[Smiths]\n40=hub_smith\n[TradingPosts]\n33=bazaar\n");
   CHECK((shops.own_ids.at("el_shop") == std::vector<std::pair<int, std::string>>{{32, "hub_shop"}}));
   CHECK((shops.own_ids.at("waa_shop") == std::vector<std::pair<int, std::string>>{{40, "hub_smith"}}));
+  CHECK((shops.own_ids.at("trade") == std::vector<std::pair<int, std::string>>{{33, "bazaar"}}));
   CHECK(shops.problems.size() == 1 && !shops.own_ids.contains("pgdat"));
   // [Monsters] from 222, [Formations] from 513 (a script starts formation n as battle 0x200 + n).
   const features::Manifest battle = features::parse_manifest("[Monsters]\n222=big_boss\n221=low\n[Formations]\n513=boss_fight\n512=low\n");

@@ -50,11 +50,21 @@ std::string_view table_names_of(std::string_view table);
 bool table_grows(std::string_view table);
 // Whether `table` is names only (key items: no record bytes), its records added by the mods' own-id sections ([KeyItems]).
 bool table_declared_by_ids(std::string_view table);
-// Whether `table` is a list table (a shop row: entries added and removed, apply_lists).
+// Whether `table` is a list table (a shop or trading post row: entries added and removed, apply_lists / apply_trade).
 bool table_is_list(std::string_view table);
 // The highest id a named record of `table` may take (pgdat and menu_pg: kLastElementId; waa, menu_waa and waa_tbl: kLastItemId); a
 // name past it gets no record.
 size_t table_last_id(std::string_view table);
+
+// One trading post entry (menu/trade.bin: {u8 goods, u8 colour mask, u16 level sum}; a mod's goods may be any item id). levels 0 = a
+// hole the post keeps its place for.
+struct TradeEntry {
+  u16 goods = 0;
+  u8 colour = 0;
+  u16 levels = 0;
+};
+// A trading post holds at most this many entries.
+inline constexpr size_t kTradeSlots = 16;
 
 // One mod's row files: table name (lower case) -> the file's bytes; `own_ids` = its mod.ini own-id sections (features::own_id_sections:
 // table -> own id -> record name).
@@ -80,6 +90,8 @@ struct RowWrite {
   u8 width = 0;
   u32 value = 0;
   std::string ref_table, ref_name;
+  // A list entry's words after its value ("add=<value> colour=16 levels=12"): name (lower case) and number.
+  std::vector<std::pair<std::string, u32>> extra;
   int line = 0;
 };
 // One record of a row file: `[<index>]` (index set) or `[<name>]` (name set, `base` = the index a new record copies, if given).
@@ -94,8 +106,9 @@ struct RowBlock {
 };
 // Parses one file. A field line is "<name>=<value>" with a name from `fields`, or "0x<offset>:u8|u16|u32=<value>"; "base=<index>" in a
 // named record. Values are decimal, 0x hex, negative decimal (two's complement in the field's width), or "@<table>:<record name>" with
-// an optional "+<number>". In a list table (`list`) the lines are "add=<value>", "remove=<value>" and "clear=1". Blank lines and lines
-// starting with ';' or '#' are skipped; lines that cannot be read go to `problems`.
+// an optional "+<number>". In a list table (`list`) the lines are "add=<value>" (optionally followed by "<name>=<number>" words),
+// "remove=<value>" and "clear=1". Blank lines and lines starting with ';' or '#' are skipped; lines that cannot be read go to
+// `problems`.
 std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableField> fields, std::vector<std::string>* problems,
                                  bool list = false);
 
@@ -120,6 +133,10 @@ class TableRows {
   // Applies the rows of list table `table` to its rows (grown to total()), lowest priority first: each mod's clear, then its adds (an
   // entry already in the row is not added twice) and removes, in file order. Returns the number of entries added or removed.
   size_t apply_lists(std::string_view table, std::vector<std::vector<u16>>& rows) const;
+  // The same for the trading posts (table trade): an entry is keyed by its goods, "add=<goods> colour=<mask> levels=<sum>" adds it, or
+  // sets the words it gives on the entry the post already has for those goods; a new entry needs levels=; a post keeps at most
+  // kTradeSlots entries (more are logged and dropped). Returns the number of entries added, changed or removed.
+  size_t apply_trade(std::vector<std::vector<TradeEntry>>& posts) const;
 
   // The id of the record `name` of `table`'s names, if a mod adds it.
   std::optional<size_t> id_of(std::string_view table, std::string_view name) const;

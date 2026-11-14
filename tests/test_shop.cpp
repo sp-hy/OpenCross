@@ -73,7 +73,7 @@ struct Fixture {
     sd.el_shop = {{1, 2, 4}};
     // The 0 ends the weapon row.
     sd.waa_shop = {{20, 21, 22, 0, 20}};
-    sd.trade = {{{static_cast<u16>(8 | (0x80 << 8)), 5}, {static_cast<u16>(1), 3}, {0, 9}, {7, 0}}};
+    sd.trade = {{{8, 0x80, 5}, {1, 0, 3}, {0, 0, 9}, {7, 0, 0}}};
     gs.set_gold(1000);
   }
 };

@@ -62,7 +62,7 @@ constexpr int kModRoomLast = 0x7FFF;
 // it adds by name, data/table_rows.h) run from kModElementFirst to kModElementLast. Two mods may both use 527; the name is the identity.
 constexpr int kModElementFirst = 527;
 constexpr int kModElementLast = 0x3FFF;
-// Mod shops: the game's element shops and blacksmiths are rows 0..31, so a mod's own shop ids run from kModShopFirst.
+// Mod shops: the game's element shops, blacksmiths and trading posts are rows 0..31, so a mod's own shop ids run from kModShopFirst.
 constexpr int kModShopFirst = 32;
 constexpr int kModShopLast = 0x7FFF;
 // Mod monsters and formations: the game's monster records stop at 221 and its battle scenes at 512, so a mod's own ids start after
@@ -89,8 +89,8 @@ constexpr int kModVarLast = 0xFFE;
 bool is_record_name(std::string_view name);
 
 // The mod.ini sections that give a mod's own ids for records mods add by name ("<id> = <record name>"), the table they name records of
-// (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop, [Monsters] monster,
-// [Formations] scenedat, [Items] waa, [KeyItems] keyitem (a key item has no table: its [KeyItems] entry adds it).
+// (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop, [TradingPosts] trade,
+// [Monsters] monster, [Formations] scenedat, [Items] waa, [KeyItems] keyitem (a key item has no table: its [KeyItems] entry adds it).
 struct OwnIdSection {
   const char* section;
   const char* table;

@@ -199,6 +199,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
                                           {"ditem", dd.size() / 8},
                                           {"el_shop", kShopRows},
                                           {"waa_shop", kShopRows},
+                                          {"trade", kShopRows},
                                           {"keyitem", kGameKeyItems + 1}};
   if (has_gear) counts["waa"] = kGameItems;
   rows.build(mods ? *mods : no_mods, counts);
@@ -292,13 +293,17 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   // --- shops / trade
   if (auto shop_bytes = game_fs.read("cdrom/menu/el_shop.bin")) el_shop = rows_u16(*shop_bytes, kShopRows);
   rows.apply_lists("el_shop", el_shop);
+  // A post's entries run to the first goods byte 0.
   if (auto trade_bytes = game_fs.read("cdrom/menu/trade.bin")) {
     for (auto& row : rows_u16(*trade_bytes, 32)) {
       std::vector<TradeEntry> entries;
-      for (size_t k = 0; k + 1 < row.size(); k += 2) entries.push_back({row[k], row[k + 1]});
+      for (size_t k = 0; k < row.size() && entries.size() < kTradeSlots && (row[k] & 0xFF) != 0; k += 2)
+        entries.push_back({static_cast<u16>(row[k] & 0xFF), static_cast<u8>(row[k] >> 8), k + 1 < row.size() ? row[k + 1] : u16{0}});
       trade.push_back(std::move(entries));
     }
   }
+  trade.resize(std::max(trade.size(), kShopRows));
+  rows.apply_trade(trade);
   if (auto forge_bytes = game_fs.read("cdrom/menu/waa_tbl.bin"); forge_bytes && forge_bytes->size() >= kGameItems * 32) {
     forge.resize(item_count);
     for (size_t i = 0; i < kGameItems; ++i) copy_rec(forge[i], *forge_bytes, i * 32);
