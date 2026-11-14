@@ -1159,14 +1159,14 @@ std::string mod_record_rows(const TextMod& mod, std::string_view text) {
   });
 }
 
-// A mod's rows of a three-lines-per-record table (waa_spec.txt item descriptions, keyitem.txt key item descriptions: <id * 3 + line>)
-// moved to the records `ids` give those ids.
-std::string mod_triple_rows(const std::map<int, int>& ids, std::string_view text) {
+// A mod's rows of a table keyed by record (<id * lines + line>: waa_spec.txt item and keyitem.txt key item descriptions, 3 lines; ome.txt
+// character profiles, 1) moved to the records `ids` give those ids.
+std::string mod_id_rows(const std::map<int, int>& ids, unsigned lines, std::string_view text) {
   if (ids.empty()) return std::string(text);
   return move_row_keys(text, false, [&](unsigned key) -> std::optional<std::string> {
-    const auto record = ids.find(static_cast<int>(key / 3));
+    const auto record = ids.find(static_cast<int>(key / lines));
     if (record == ids.end()) return std::nullopt;
-    return std::to_string(static_cast<unsigned>(record->second) * 3 + key % 3);
+    return std::to_string(static_cast<unsigned>(record->second) * lines + key % lines);
   });
 }
 }  // namespace
@@ -1463,8 +1463,9 @@ const TextTable* LangTables::table(std::string_view name) {
   each_mod_rows(key + ".txt", [&](const TextMod& mod, std::string_view text) {
     TextTable rows;
     const std::string moved = key == "sysmes"     ? mod_record_rows(mod, text)
-                              : key == "waa_spec" ? mod_triple_rows(mod.items, text)
-                              : key == "keyitem"  ? mod_triple_rows(mod.key_items, text)
+                              : key == "waa_spec" ? mod_id_rows(mod.items, 3, text)
+                              : key == "keyitem"  ? mod_id_rows(mod.key_items, 3, text)
+                              : key == "ome"      ? mod_id_rows(mod.characters, 1, text)
                                                   : std::string(text);
     rows.parse(moved);
     loaded.overlay(rows, [&](const std::string& row, const std::string& heading, const std::string& value) {

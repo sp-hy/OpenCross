@@ -567,11 +567,14 @@ void MainMenu::Impl::status_panel(int character, float panel_x, float panel_y) {
 // ---- status: panel (40, 42), equipment frames below it, title + bottom bar, member-switch glyphs. The PS1 draws a live 3D model on
 // the right standing on the parchment with no panel, casting a flat floor shadow (the host's MenuModelView draws it after the sprite pass);
 // without one the member portrait stands in for it. This screen sits 2 PS1 px left of the other screens' coordinates.
-// Profile of a character (ome.txt): up to 7 lines, keyed by the body the character wears (e.g. Serge's cat form or Pip's forms).
+// Profile of a character (ome.txt): up to 7 lines, keyed by the body the character wears (e.g. Serge's cat form or Pip's forms); a
+// character mods add, in its own body, by its own id when its mod gives it a row.
 std::vector<std::u32string> MainMenu::Impl::profile_lines(int character) {
   std::vector<std::u32string> lines;
   const import::TextTable* table = lt.table("ome");
-  const std::string* cell = table ? table->get(static_cast<u64>(model_number(character)), lang) : nullptr;
+  if (!table) return lines;
+  const std::string* cell = gs && gs->own_body(character) ? table->get(static_cast<u64>(character), lang) : nullptr;
+  if (!cell) cell = table->get(static_cast<u64>(model_number(character)), lang);
   if (!cell) return lines;
   size_t start = 0;
   while (start <= cell->size() && lines.size() < 7) {

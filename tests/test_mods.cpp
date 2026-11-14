@@ -514,7 +514,8 @@ int main() {
                   {{"en.csv", "27\t0\tgame line\n27\t1\tgame second\n"},
                    {"sysmes.txt", "key\ten\tfr\n0x000001\tPotion\tPotion fr\n"},
                    {"waa_spec.txt", "key\ten\n3\tMonster bones.\n"},
-                   {"keyitem.txt", "key\ten\n3\tA map.\n"}});
+                   {"keyitem.txt", "key\ten\n3\tA map.\n"},
+                   {"ome.txt", "key\ten\n1\tMysterious Traveler\n"}});
     fs::create_directories(game / "mods" / "Alpha" / "text");
     fs::create_directories(game / "mods" / "Beta" / "text");
     std::ofstream(game / "mods" / "Alpha" / "text" / "en.csv", std::ios::binary) << "27\t1\talpha second\n1001\t0\talpha room\n1002\t0\tunlisted\n";
@@ -529,6 +530,8 @@ int main() {
     std::ofstream(game / "mods" / "Beta" / "text" / "keyitem.txt", std::ios::binary) << "key\ten\n210\tOpens the sky.\n";
     // ... and its own formation 513's battle text (btel rows by scene).
     std::ofstream(game / "mods" / "Beta" / "text" / "btel_en.csv", std::ios::binary) << "513\t0\tStand and fight!\n";
+    // ... and its own character 51's profile.
+    std::ofstream(game / "mods" / "Beta" / "text" / "ome.txt", std::ios::binary) << "key\ten\n51\tWandering Witch\n";
     vfs::Vfs text_files;
     CHECK(text_files.open(game));
     vfs::ModManager text_mods_found;
@@ -553,6 +556,7 @@ int main() {
     import::set_text_mod_ids("Beta", "scenedat", {{513, 700}});
     import::set_text_mod_ids("Beta", "waa", {{300, 260}});
     import::set_text_mod_ids("Beta", "keyitem", {{70, 66}});
+    import::set_text_mod_ids("Beta", "char", {{51, 53}});
     import::LangTables tables;
     tables.init(&text_files);
     const auto row = [&](int room, int msg) {
@@ -591,6 +595,13 @@ int main() {
     CHECK(key_rows && key_rows->get(static_cast<u64>(198), import::Lang::En) &&
           *key_rows->get(static_cast<u64>(198), import::Lang::En) == "Opens the sky.");
     CHECK(key_rows && !key_rows->get(static_cast<u64>(210), import::Lang::En));
+    // Beta's character 51 is character 53: its profile moves there; the game's rows stay.
+    const import::TextTable* profiles = tables.table("ome");
+    CHECK(profiles && profiles->get(static_cast<u64>(53), import::Lang::En) &&
+          *profiles->get(static_cast<u64>(53), import::Lang::En) == "Wandering Witch");
+    CHECK(profiles && !profiles->get(static_cast<u64>(51), import::Lang::En));
+    CHECK(profiles && profiles->get(static_cast<u64>(1), import::Lang::En) &&
+          *profiles->get(static_cast<u64>(1), import::Lang::En) == "Mysterious Traveler");
     // The mods' rows set again (a controlled run's reload: an editor's draft text): a LangTables that read them reads them again.
     std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta edited\n";
     {
