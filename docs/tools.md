@@ -506,6 +506,7 @@ A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_
 |---|---|---|
 | Esc | `app_run.cpp` | Opens or closes the settings window (not during a route or replay). |
 | Pad Start, held 500 ms | `app_run.cpp` | Opens the settings window (a Start press while it is open closes it); a shorter tap opens the pause screen on release. |
+| Pad LB / RB (settings window open) | `imgui_layer.cpp`, `imgui_nav.cpp` | Previous / next settings tab (wrapping), on the release of a lone bumper; the cursor goes to the tab's first control. Not while a slider is held or a list is open; LB + RB together switch nothing. |
 | Pad LT + L3 | `app_run.cpp`, `cheats.cpp` | Opens or closes the settings window one frame after the chord closes (RDE's "ESC Menu"); as on RDE the LT press also toggles slow speed and the L3 release No Encounters. |
 | Space | `keymap.h`, `app_sim.cpp` | Start (the pause screen), on the press. |
 | K, pad Back | `keymap.h`, `app_run.cpp` | Select (change the lead character); held in battle, hides the overlays during a cast. |

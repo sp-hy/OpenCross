@@ -25,6 +25,7 @@
 #include "core/log.h"
 #include "platform/paths.h"
 #include "render/imgui_layer.h"
+#include "render/imgui_nav.h"
 #include "render/texture_registry.h"
 #include "vfs/vfs.h"
 
@@ -1030,7 +1031,10 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   const float span = wide ? std::max(avail.x - divider, 1.0f) : std::max(height - divider - spacing * 2.0f, 1.0f);
   const float list_size = std::clamp(wide ? g_state.split : g_state.stack_split, 0.28f, 0.8f) * span;
 
-  if (ImGui::BeginChild("mods_list", wide ? ImVec2(list_size, height) : ImVec2(0, list_size))) {
+  // The panes are flattened into the tab's navigation; side by side, Up / Down stay in a pane (nav columns).
+  const ImGuiID panes = ImGui::GetID("mods_panes");
+  if (ImGui::BeginChild("mods_list", wide ? ImVec2(list_size, height) : ImVec2(0, list_size), ImGuiChildFlags_NavFlattened)) {
+    if (wide) begin_nav_column(panes, 0);
     if (ImGui::BeginTabBar("mods_left")) {
       size_t shown = 0, on = 0;
       for (const vfs::Mod& mod : mods.mods())
@@ -1038,7 +1042,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
       const std::string mods_label = std::format("Mods ({}/{})###mods", on, shown);
       if (ImGui::BeginTabItem(mods_label.c_str())) {
         g_state.features_tab = false;
-        if (ImGui::BeginChild("rows")) {
+        if (ImGui::BeginChild("rows", ImVec2(0, 0), ImGuiChildFlags_NavFlattened)) {
           if (shown == 0) ImGui::TextDisabled("No mods found.");
           changed |= draw_mod_list(mods, cache, art);
         }
@@ -1049,17 +1053,21 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
       g_state.open_features_tab = false;
       if (ImGui::BeginTabItem("Engine features###features", nullptr, flags)) {
         g_state.features_tab = true;
-        if (ImGui::BeginChild("rows")) settings |= draw_feature_list(cfg, mods, view);
+        if (ImGui::BeginChild("rows", ImVec2(0, 0), ImGuiChildFlags_NavFlattened)) settings |= draw_feature_list(cfg, mods, view);
         ImGui::EndChild();
         ImGui::EndTabItem();
       }
       ImGui::EndTabBar();
     }
+    if (wide) end_nav_column();
   }
   ImGui::EndChild();
 
   if (wide) ImGui::SameLine(0, 0);
+  // The divider is for the mouse only.
+  ImGui::PushItemFlag(ImGuiItemFlags_NoNav, true);
   ImGui::InvisibleButton("##divider", wide ? ImVec2(divider, height) : ImVec2(avail.x, divider));
+  ImGui::PopItemFlag();
   const bool divider_hot = ImGui::IsItemHovered() || ImGui::IsItemActive();
   if (divider_hot) ImGui::SetMouseCursor(wide ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
   if (ImGui::IsItemActive()) {
@@ -1079,12 +1087,14 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   // Side padding only: the first header lines up with the list's tab bar.
   const float detail_h = wide ? height : std::max(span - list_size, ImGui::GetFrameHeightWithSpacing() * 3.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetStyle().WindowPadding.x, 0.0f));
-  if (ImGui::BeginChild("mods_detail", ImVec2(0, detail_h), ImGuiChildFlags_AlwaysUseWindowPadding)) {
+  if (ImGui::BeginChild("mods_detail", ImVec2(0, detail_h), ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened)) {
+    if (wide) begin_nav_column(panes, 1);
     // Every line wraps at the pane's edge.
     ImGui::PushTextWrapPos(0.0f);
     if (g_state.features_tab) settings |= draw_feature_detail(cfg, mods, view);
     else draw_mod_detail(mods, cache);
     ImGui::PopTextWrapPos();
+    if (wide) end_nav_column();
   }
   ImGui::EndChild();
   ImGui::PopStyleVar();

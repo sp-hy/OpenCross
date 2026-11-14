@@ -247,12 +247,11 @@ bool draw_cheats_tab(platform::Config& cfg) {
     }
   };
   if (ImGuiLayer::begin_panes("cheats_cols")) {
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
+    ImGuiLayer::next_pane();
     left();
-    ImGui::TableNextColumn();
+    ImGuiLayer::next_pane();
     right();
-    ImGui::EndTable();
+    ImGuiLayer::end_panes();
   }
   return changed;
 }

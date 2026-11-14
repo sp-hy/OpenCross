@@ -12,6 +12,7 @@
 
 #include "platform/config.h"
 #include "render/gpu_context.h"
+#include "render/imgui_nav.h"
 
 union SDL_Event;
 struct ImFont;
@@ -117,13 +118,15 @@ class ImGuiLayer {
   std::function<void()> quality_rows;
 
   // Shared widgets for tab bodies (consistent look across tabs).
-  // section: a header line with a rule. begin_panes: side-by-side panes (TableNextColumn per pane; one column when narrow), EndTable()
-  // if it returned true. begin_rows: a two-column label / control table, end_rows() if it returned true. row: next row, label cell then
-  // the control cell (full width). tooltip: a hover description, word-wrapped at ~36 em. two_column_width: the tab body width from which
+  // section: a header line with a rule. begin_panes: side-by-side panes (next_pane() before each pane; one column when narrow),
+  // end_panes() if it returned true; side by side, Up / Down stay in a pane (nav columns). begin_rows: a two-column label / control
+  // table, end_rows() if it returned true. row: next row, label cell then the control cell (full width). tooltip: a hover description, word-wrapped at ~36 em. two_column_width: the tab body width from which
   // the settings tabs lay their sections out in two columns (one column below it).
   static void section(const char* title);
   static float two_column_width();
   static bool begin_panes(const char* id);
+  static void next_pane();
+  static void end_panes();
   static bool begin_rows(const char* id);
   static void end_rows();
   static void row(const char* label, const char* help = nullptr);
@@ -151,8 +154,11 @@ class ImGuiLayer {
   std::vector<SettingsTab> tabs_;
   // select_tab_: tab to select on the next frame. geom_dirty_: window moved / resized, saved once the mouse button is up. opts_scale_ /
   // opts_disp_*: UI scale / display size seen by the last options_window frame (0 = closed); a change re-applies the saved size.
-  // tab_restored_: the saved tab was applied at the first open.
+  // tab_restored_: the saved tab was applied at the first open. focus_tab_: the tab the bumpers selected, whose first item takes the
+  // navigation cursor once it is shown.
   std::string select_tab_;
+  std::string focus_tab_;
+  BumperTap bumpers_;
   std::string current_tab_ = "General";
   bool geom_dirty_ = false;
   float opts_scale_ = 0.0f;

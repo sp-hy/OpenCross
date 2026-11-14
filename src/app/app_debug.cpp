@@ -28,8 +28,7 @@ std::string op_name(u16 key) {
 void draw_debug_status(game::FieldWorld* world) {
   using render::ImGuiLayer;
   if (!ImGuiLayer::begin_panes("dbg_status")) return;
-  ImGui::TableNextRow();
-  ImGui::TableNextColumn();
+  ImGuiLayer::next_pane();
   if (world) {
     ImGuiLayer::section("Field");
     ImGui::TextUnformatted(world->status().c_str());
@@ -40,7 +39,7 @@ void draw_debug_status(game::FieldWorld* world) {
                 world->camera_scripted() ? "scripted" : "follow", world->control_yaw(),
                 static_cast<double>(world->fade_level()));
   }
-  ImGui::TableNextColumn();
+  ImGuiLayer::next_pane();
   if (!world) {
     ImGuiLayer::section("Field");
     ImGui::TextDisabled("No field room is shown.");
@@ -64,7 +63,7 @@ void draw_debug_status(game::FieldWorld* world) {
       ImGui::TreePop();
     }
   }
-  ImGui::EndTable();
+  ImGuiLayer::end_panes();
 }
 
 // Full-width tables below the tool panes: entities, variables, the room-local variables.
@@ -167,8 +166,7 @@ void App::init_debug_tab() {
     using render::ImGuiLayer;
     // Top: the tools (model viewer, log file) and the sound test, side by side.
     if (ImGuiLayer::begin_panes("dbg_top")) {
-      ImGui::TableNextRow();
-      ImGui::TableNextColumn();
+      ImGuiLayer::next_pane();
       ImGuiLayer::section("Tools");
       if (ImGuiLayer::begin_rows("dbg_tools_rows")) {
         ImGuiLayer::row("Model viewer", "Opens a separate window that shows the character and monster models, with and without the enabled mods.");
@@ -184,7 +182,7 @@ void App::init_debug_tab() {
         }
         ImGuiLayer::end_rows();
       }
-      ImGui::TableNextColumn();
+      ImGuiLayer::next_pane();
       // Sound test: picks a global sound id (effect00) and plays it on the menus' channel when Play is pressed.
       ImGuiLayer::section("Sound test");
       if (!sfx_ok) {
@@ -210,7 +208,7 @@ void App::init_debug_tab() {
         ImGui::Text("0x%02X%s", sound_id, undefined_id == sound_id ? "  not defined" : "");
         ImGuiLayer::end_rows();
       }
-      ImGui::EndTable();
+      ImGuiLayer::end_panes();
     }
     draw_debug_status(debug_field ? &world : nullptr);
     debug_tools.draw(debug_tools_ctx());

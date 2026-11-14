@@ -24,6 +24,7 @@
 
 #include "core/log.h"
 #include "platform/window.h"
+#include "render/imgui_nav.h"
 
 namespace oc::render {
 
@@ -174,20 +175,25 @@ bool filter_row(const char* label, platform::TexFilter& filter,
 }
 
 // Two side-by-side columns when the tab body is wide enough, else the two stacked. Each column is a callable that draws sections.
-// kTwoColumnW is in pixels at UI scale 1.
+// Side by side, Up / Down stay in a column (nav columns). kTwoColumnW is in pixels at UI scale 1 (ImGuiLayer::two_column_width).
 constexpr float kTwoColumnW = 820.0f;
 template <class L, class R>
-void two_columns(float scale, L&& left, R&& right) {
-  if (ImGui::GetContentRegionAvail().x >= kTwoColumnW * scale &&
+void two_columns(L&& left, R&& right) {
+  const ImGuiID group = ImGui::GetID("cols");
+  if (ImGui::GetContentRegionAvail().x >= ImGuiLayer::two_column_width() &&
       ImGui::BeginTable("cols", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
     ImGui::TableNextRow();
     ImGui::TableNextColumn();
     ImGui::PushID("L");
+    begin_nav_column(group, 0);
     left();
+    end_nav_column();
     ImGui::PopID();
     ImGui::TableNextColumn();
     ImGui::PushID("R");
+    begin_nav_column(group, 1);
     right();
+    end_nav_column();
     ImGui::PopID();
     ImGui::EndTable();
   } else {
@@ -386,11 +392,37 @@ void ImGuiLayer::section(const char* title) {
 
 float ImGuiLayer::two_column_width() { return kTwoColumnW * ImGui::GetStyle().FramePadding.y / 5.0f; }
 
+namespace {
+// The pane tables being drawn, innermost last: the group id of their nav columns and whether a pane's nav column is open.
+struct PaneTable {
+  ImGuiID group = 0;
+  bool column_open = false;
+};
+std::vector<PaneTable> pane_tables;
+}  // namespace
+
 bool ImGuiLayer::begin_panes(const char* id) {
   const float scale = ImGui::GetStyle().FramePadding.y / 5.0f;
   // Narrow: the panes stack into one column.
   const int cols = ImGui::GetContentRegionAvail().x >= 560.0f * scale ? 2 : 1;
-  return ImGui::BeginTable(id, cols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings);
+  const ImGuiID group = ImGui::GetID(id);
+  if (!ImGui::BeginTable(id, cols, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) return false;
+  pane_tables.push_back({group, false});
+  return true;
+}
+
+void ImGuiLayer::next_pane() {
+  PaneTable& table = pane_tables.back();
+  if (table.column_open) end_nav_column();
+  ImGui::TableNextColumn();
+  table.column_open = ImGui::TableGetColumnCount() > 1;
+  if (table.column_open) begin_nav_column(table.group, ImGui::TableGetColumnIndex());
+}
+
+void ImGuiLayer::end_panes() {
+  if (pane_tables.back().column_open) end_nav_column();
+  pane_tables.pop_back();
+  ImGui::EndTable();
 }
 
 bool ImGuiLayer::begin_rows(const char* id) {
@@ -424,7 +456,6 @@ void ImGuiLayer::tooltip(const char* text) {
 
 OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
   OptionsChange change;
-  const float scale = ui_scale_ > 0 ? ui_scale_ : 1.0f;
   auto sec_game = [&] {
   section("Game");
   if (begin_rows("game")) {
@@ -507,7 +538,8 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
             "this window; the others work in the field and in battle.");
   // One key per row.
   if (begin_rows("controls")) {
-    const char* keys[][2] = {{"Esc", "Settings (pad: hold Start)"},      {"Space", "Start: pause (pad: Start)"},
+    const char* keys[][2] = {{"Esc", "Settings (pad: hold Start; LB / RB switch its tabs)"},
+                             {"Space", "Start: pause (pad: Start)"},
                              {"K", "Select: change the lead character; held in battle, hide the overlays (pad: Back / View)"},
                              {"F1 / F2", "Slow / Fast mode (pad: LT / RT)"},
                              {"F3", "No encounters (pad: L3)"},  {"F4", "Battle boost (pad: R3)"},
@@ -523,8 +555,7 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     end_rows();
   }
   };
-  two_columns(
-      scale, [&] { sec_game(); sec_quality(); sec_audio(); }, [&] { sec_controls(); });
+  two_columns([&] { sec_game(); sec_quality(); sec_audio(); }, [&] { sec_controls(); });
   return change;
 }
 
@@ -546,7 +577,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
     refresh = 120;
   }
 
-  const float scale = ui_scale_ > 0 ? ui_scale_ : 1.0f;
   auto sec_display = [&] {
   section("Display");
   if (begin_rows("display")) {
@@ -958,9 +988,7 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
     }
   };
   // Left: the window and how the picture is framed; right: how it is drawn (texture filtering, retro look, shaders, enhancements).
-  two_columns(
-      scale, [&] { sec_display(); sec_wide(); sec_art(); },
-      [&] { sec_filters(); sec_retro(); sec_shaders(); sec_enh(); });
+  two_columns([&] { sec_display(); sec_wide(); sec_art(); }, [&] { sec_filters(); sec_retro(); sec_shaders(); sec_enh(); });
   return change;
 }
 
@@ -969,6 +997,7 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
   if (!options_open) {
     // Closed: the next open restores at Appearing.
     opts_scale_ = 0.0f;
+    bumpers_ = {};
     return change;
   }
   tab_changed_ = false;
@@ -1017,6 +1046,19 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
     for (size_t i = 0; i < tabs_.size(); ++i) list.push_back({tabs_[i].name.c_str(), tabs_[i].order, 0, i});
     std::stable_sort(list.begin(), list.end(), [](const Entry& lhs, const Entry& rhs) { return lhs.order < rhs.order; });
 
+    // LB / RB: the previous / next tab (wrapping), the cursor on its first item. Not while a slider takes them as its fine / coarse steps
+    // or a list is open.
+    const int step = bumpers_.poll(ImGui::IsKeyDown(ImGuiKey_GamepadL1), ImGui::IsKeyDown(ImGuiKey_GamepadR1));
+    if (ImGui::IsAnyItemActive() || ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId)) {
+      bumpers_.cancel();
+    } else if (step != 0) {
+      const auto at = std::find_if(list.begin(), list.end(), [&](const Entry& entry) { return current_tab_ == entry.name; });
+      const int count = static_cast<int>(list.size());
+      const int from = at == list.end() ? 0 : static_cast<int>(at - list.begin());
+      select_tab_ = list[static_cast<size_t>((from + step + count) % count)].name;
+      focus_tab_ = select_tab_;
+    }
+
     if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_NoTooltip)) {
       for (const Entry& entry : list) {
         const ImGuiTabItemFlags flags = select_tab_ == entry.name ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
@@ -1034,7 +1076,12 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
         }
         if (!open) continue;
         current_tab_ = entry.name;
-        if (ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar)) {
+        // Flattened: the tab bar and the body are one navigation space, so Down from a tab lands on the body's first item.
+        if (ImGui::BeginChild("body", ImVec2(0, 0), ImGuiChildFlags_NavFlattened, ImGuiWindowFlags_HorizontalScrollbar)) {
+          if (focus_tab_ == entry.name) {
+            focus_tab_.clear();
+            nav_to_first_item();
+          }
           ImGui::PushID(entry.name);
           if (entry.builtin == 1) change = general_tab(cfg);
           else if (entry.builtin == 2) change = graphics_tab(cfg);
@@ -1046,6 +1093,8 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
       }
       ImGui::EndTabBar();
     }
+    // A tab selected by the bumpers is shown the frame after; until then the cursor waits for it.
+    if (select_tab_ != focus_tab_) focus_tab_.clear();
     select_tab_.clear();
     // Remember the window (logical = pixels / scale) and the shown tab; written once the mouse is released.
     const ImVec2 wp = ImGui::GetWindowPos(), ws = ImGui::GetWindowSize();
@@ -1061,6 +1110,7 @@ OptionsChange ImGuiLayer::options_window(platform::Config& cfg, const std::files
     }
   }
   ImGui::End();
+  end_nav_frame();
   if (tab_changed_) change.other = true;
   if (geom_dirty_ && !ImGui::IsMouseDown(0)) {
     geom_dirty_ = false;

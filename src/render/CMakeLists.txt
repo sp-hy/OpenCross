@@ -83,6 +83,8 @@ add_library(oc_render STATIC
   ps1_jitter.h
   imgui_layer.h
   imgui_layer.cpp
+  imgui_nav.h
+  imgui_nav.cpp
   imgui_mods_tab.h
   imgui_mods_tab.cpp
   imgui_update_tab.h

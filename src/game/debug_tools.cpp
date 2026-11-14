@@ -60,7 +60,7 @@ bool combo(const char* id, int& sel, char* filter, size_t filter_size, const std
     }
     ImGui::InputTextWithHint("##filter", "type to search", filter, filter_size);
     ImGui::Separator();
-    if (ImGui::BeginChild("##items", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 12), ImGuiChildFlags_None)) {
+    if (ImGui::BeginChild("##items", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 12), ImGuiChildFlags_NavFlattened)) {
       for (size_t i = 0; i < items.size(); ++i) {
         if (!contains_nocase(items[i], filter)) continue;
         const int value = values ? (*values)[i] : static_cast<int>(i);
@@ -267,7 +267,7 @@ bool DebugTools::element_combo() {
       ImGui::EndCombo();
     }
     ImGui::Separator();
-    if (ImGui::BeginChild("##items", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 12), ImGuiChildFlags_None)) {
+    if (ImGui::BeginChild("##items", ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 12), ImGuiChildFlags_NavFlattened)) {
       const float line_height = ImGui::GetTextLineHeight();
       const float space = std::max(1.0f, ImGui::CalcTextSize(" ").x);
       const std::string pad(static_cast<size_t>(std::ceil((line_height + 6.0f) / space)), ' ');
@@ -350,8 +350,7 @@ void DebugTools::draw(const Ctx& ctx) {
   if (!have_tables) {
     ImGui::TextDisabled("No game data / field world is loaded.");
   } else if (ImGuiLayer::begin_panes("dbg_tools")) {
-    ImGui::TableNextRow();
-    ImGui::TableNextColumn();
+    ImGuiLayer::next_pane();
     // ---- teleport
     ImGuiLayer::section("Teleport to a room");
     if (ImGuiLayer::begin_rows("dbg_tp")) {
@@ -466,7 +465,7 @@ void DebugTools::draw(const Ctx& ctx) {
     }
 
     // Second pane: party, cast, script / variable.
-    ImGui::TableNextColumn();
+    ImGuiLayer::next_pane();
     // ---- party
     ImGuiLayer::section("Field party");
     if (!party_init_ && ctx.world) {
@@ -609,7 +608,7 @@ void DebugTools::draw(const Ctx& ctx) {
       ImGui::EndDisabled();
     tip("Writes the value into the story / room variable with that id (see the Variables list below the tools). Takes effect at once.");
     }
-    ImGui::EndTable();
+    ImGuiLayer::end_panes();
   }
 
 }
