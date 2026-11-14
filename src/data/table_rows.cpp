@@ -250,6 +250,9 @@ std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableFie
       long long index = 0;
       if (features::is_record_name(inside)) {
         block.name = std::string(inside);
+      } else if (inside.starts_with('?') && features::is_record_name(inside.substr(1))) {
+        block.name = std::string(inside.substr(1));
+        block.optional = true;
       } else if (parse_number(inside, index) && index >= 0) {
         block.index = static_cast<size_t>(index);
       } else {
@@ -276,6 +279,7 @@ std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableFie
     if (name == "base") {
       long long index = 0;
       if (block.name.empty() || !parse_number(value_text, index) || index < 0) problem(line_no, "base=<index> belongs to a named record");
+      else if (block.optional) problem(line_no, "base= belongs to the mod that adds the record, not to [?<name>]");
       else block.base = static_cast<size_t>(index);
       continue;
     }
@@ -381,6 +385,13 @@ void TableRows::note(bool warning, std::string line) const {
   log_lines_.push_back(std::move(line));
 }
 
+bool TableRows::skip_optional(std::string_view mod, std::string_view table, const RowBlock& block,
+                              const std::optional<size_t>& index) const {
+  if (!block.optional || index) return false;
+  note(false, std::format("tables: '{}' {}.txt line {}: [?{}]: no enabled mod adds it, skipped", mod, table, block.line, block.name));
+  return true;
+}
+
 void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::string, size_t>& counts) {
   *this = TableRows{};
   for (const TableMod& mod : mods) mod_names_.push_back(mod.name);
@@ -403,11 +414,18 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
   // Named records get ids after the table's own records, per set of names (menu_pg shares pgdat's): mod by mod in priority order, a
   // mod's [Elements] (by its own id) first, then its other names in name order. A name another mod already added keeps its id.
   std::map<std::string, std::map<size_t, std::set<std::string>>> added;
+  // Names a mod changes with [?<name>] (another mod's record): its own-id lines for them are fine when no enabled mod adds them.
+  // Per mod, the names its [?<name>] blocks change, as "<names table>:<name>".
+  std::map<size_t, std::set<std::string>> optional;
   for (const auto& [table, list] : parsed_) {
     const std::string names_table(table_names_of(table));
     for (const Parsed& parsed : list)
       for (const RowBlock& block : parsed.blocks) {
         if (block.name.empty()) continue;
+        if (block.optional) {
+          optional[parsed.mod].insert(names_table + ":" + block.name);
+          continue;
+        }
         if (!table_grows(table) || !counts.contains(names_table)) {
           note(true, std::format("tables: '{}' {}.txt line {}: records cannot be added to this table", mod_names_[parsed.mod], table,
                                  block.line));
@@ -449,16 +467,21 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
     if (!names.names.empty())
       note(false, std::format("tables: {} adds {} named record(s) from {}", table, names.names.size(), names.first));
   // The mods' own ids: each listed name that some mod adds.
-  for (const TableMod& mod : mods)
+  for (size_t mod_index = 0; mod_index < mods.size(); ++mod_index) {
+    const TableMod& mod = mods[mod_index];
     for (const auto& [table, ids] : mod.own_ids) {
       std::string_view section = table;
       for (const features::OwnIdSection& own : features::own_id_sections())
         if (table == own.table) section = own.section;
       for (const auto& [own_id, name] : ids) {
         if (const std::optional<size_t> id = id_of(table, name)) own_ids_[mod.name][table][own_id] = *id;
+        else if (optional[mod_index].contains(std::string(table_names_of(table)) + ":" + name))
+          note(false, std::format("tables: '{}' [{}] {}={}: no enabled mod adds it (the mod changes it with [?{}]): the id names nobody",
+                                  mod.name, section, own_id, name, name));
         else note(true, std::format("tables: '{}' [{}] {}={}: no mod adds that record", mod.name, section, own_id, name));
       }
     }
+  }
 }
 
 size_t TableRows::total(std::string_view table, size_t count) const {
@@ -557,6 +580,7 @@ size_t TableRows::apply_lists(std::string_view table, std::vector<std::vector<u1
     std::vector<std::string> problems;
     for (const RowBlock& block : parsed->blocks) {
       const std::optional<size_t> index = block.index ? block.index : id_of(table, block.name);
+      if (skip_optional(mod, table, block, index)) continue;
       if (!index || *index >= rows.size()) {
         problems.push_back(std::format("line {}: no row {} (the table has {})", block.line,
                                        block.index ? std::to_string(*block.index) : block.name, rows.size()));
@@ -626,6 +650,7 @@ size_t TableRows::apply_trade(std::vector<std::vector<TradeEntry>>& posts) const
     std::vector<std::string> problems;
     for (const RowBlock& block : parsed->blocks) {
       const std::optional<size_t> index = block.index ? block.index : id_of(kTable, block.name);
+      if (skip_optional(mod, kTable, block, index)) continue;
       if (!index || *index >= posts.size()) {
         problems.push_back(std::format("line {}: no row {} (the table has {})", block.line,
                                        block.index ? std::to_string(*block.index) : block.name, posts.size()));
@@ -726,6 +751,7 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
     std::vector<std::string> problems;
     for (const RowBlock& block : parsed->blocks) {
       const std::optional<size_t> index = block.index ? block.index : id_of(table, block.name);
+      if (skip_optional(mod, table, block, index)) continue;
       if (!index || *index >= count) {
         problems.push_back(std::format("line {}: no record {} (the table has {})", block.line,
                                        block.index ? std::to_string(*block.index) : block.name, count));

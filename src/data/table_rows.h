@@ -99,10 +99,13 @@ struct RowWrite {
   int line = 0;
 };
 // One record of a row file: `[<index>]` (index set) or `[<name>]` (name set, `base` = the index a new record copies, if given).
+// `[?<name>]` (`optional`): changes the record another mod adds by that name, and is skipped when no enabled mod adds it (a mod's
+// changes to another mod's record that work with or without that mod); it adds nothing and takes no base.
 struct RowBlock {
   std::optional<size_t> index;
   std::string name;
   std::optional<size_t> base;
+  bool optional = false;
   // List tables: "clear=1" empties the row before this mod's adds.
   bool clear = false;
   int line = 0;
@@ -183,6 +186,8 @@ class TableRows {
     std::map<std::string, size_t, std::less<>> ids;
   };
   void note(bool warning, std::string line) const;
+  // A [?<name>] block whose record no enabled mod adds: noted and skipped (true).
+  bool skip_optional(std::string_view mod, std::string_view table, const RowBlock& block, const std::optional<size_t>& index) const;
 
   std::vector<std::string> mod_names_;
   std::map<std::string, std::vector<Parsed>, std::less<>> parsed_;

@@ -150,6 +150,37 @@ int main() {
     CHECK(rd16(chars[0], 0x40 + 8) == 0 && logged(rows, "no record pgdat:missing"));
   }
 
+  // [?<name>]: a mod's changes to a record another mod adds; with that mod enabled they apply field by field, without it they are
+  // skipped (no record added, its own id names nobody, nothing counted as a problem); base= is refused there.
+  {
+    const auto over = mod_with("Over", {{"pgdat", "[?zap]\npower=99\n[?gone]\npower=5\nbase=1\n"}}, {{527, "zap"}, {528, "gone"}});
+    data::TableRows with;
+    with.build({over, mod_with("Adds", {{"pgdat", "[zap]\nbase=1\npower=50\n"}})}, {{"pgdat", 4}});
+    CHECK(with.id_of("pgdat", "zap") == 4 && !with.id_of("pgdat", "gone") && with.total("pgdat", 4) == 5);
+    CHECK(with.element_of("Over", 527) == 4 && !with.element_of("Over", 528));
+    CHECK(logged(with, "base= belongs to the mod that adds the record"));
+    std::vector<Elem> elems(5);
+    elems[1][0x08] = 10;
+    with.apply("pgdat", elems.size(), [&](size_t i) { return std::span<u8>(elems[i]); });
+    CHECK(elems[4][0x08] == 99);
+    CHECK(logged(with, "[?gone]: no enabled mod adds it, skipped"));
+    CHECK(logged(with, "[Elements] 528=gone: no enabled mod adds it"));
+
+    data::TableRows alone;
+    alone.build({over}, {{"pgdat", 4}});
+    CHECK(!alone.id_of("pgdat", "zap") && alone.total("pgdat", 4) == 4 && !alone.element_of("Over", 527));
+    std::vector<Elem> four(4);
+    alone.apply("pgdat", four.size(), [&](size_t i) { return std::span<u8>(four[i]); });
+    CHECK(four[0][0x08] == 0 && four[1][0x08] == 0 && logged(alone, "[?zap]: no enabled mod adds it, skipped"));
+
+    // Per table: a [?zap] in pgdat does not excuse an [Items] line naming an item no mod adds.
+    data::TableMod mixed = mod_with("Mixed", {{"pgdat", "[?zap]\npower=1\n"}}, {{527, "zap"}});
+    mixed.own_ids["waa"] = {{300, "zap"}};
+    data::TableRows rows;
+    rows.build({mixed}, {{"pgdat", 4}, {"waa", 256}});
+    CHECK(logged(rows, "[Elements] 527=zap: no enabled mod adds it") && logged(rows, "[Items] 300=zap: no mod adds that record"));
+  }
+
   // Items by name: waa grows past the game's 256 records, menu_waa follows waa, a base copy, an item reference from a drop row, a mod's
   // own item ids ([Items]) and the game's items passing through.
   {
