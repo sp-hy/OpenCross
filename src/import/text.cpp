@@ -1106,10 +1106,10 @@ std::atomic<u32>& mods_generation() {
   return generation;
 }
 
-// A mod's sysmes.txt rows with the keys of its element names (0x17<id>) and help lines (0x1A<id * 3 + line>) moved to the elements its
-// [Elements] gives those ids; other rows as they are.
-std::string mod_element_rows(const TextMod& mod, std::string_view text) {
-  if (mod.elements.empty()) return std::string(text);
+// A mod's sysmes.txt rows with the keys of its element names (0x17<id>), help lines (0x1A<id * 3 + line>) and monster names (0x19<id>)
+// moved to the records its [Elements] / [Monsters] give those ids; other rows as they are.
+std::string mod_record_rows(const TextMod& mod, std::string_view text) {
+  if (mod.elements.empty() && mod.monsters.empty()) return std::string(text);
   std::string out;
   out.reserve(text.size());
   while (!text.empty()) {
@@ -1123,9 +1123,10 @@ std::string mod_element_rows(const TextMod& mod, std::string_view text) {
     if (hex && std::from_chars(cell.data() + 2, cell.data() + cell.size(), key, 16).ptr == cell.data() + cell.size()) {
       const unsigned category = key >> 16, index = key & 0xFFFF;
       const int own_id = static_cast<int>(category == 0x1A ? index / 3 : index);
-      const auto element = category == 0x17 || category == 0x1A ? mod.elements.find(own_id) : mod.elements.end();
-      if (element != mod.elements.end()) {
-        const unsigned moved = category == 0x1A ? static_cast<unsigned>(element->second) * 3 + index % 3 : static_cast<unsigned>(element->second);
+      const std::map<int, int>* ids = category == 0x17 || category == 0x1A ? &mod.elements : category == 0x19 ? &mod.monsters : nullptr;
+      const auto found = ids ? ids->find(own_id) : std::map<int, int>::const_iterator();
+      if (ids && found != ids->end()) {
+        const unsigned moved = category == 0x1A ? static_cast<unsigned>(found->second) * 3 + index % 3 : static_cast<unsigned>(found->second);
         out += std::format("0x{:02X}{:04X}", category, moved);
         out += line.substr(tab);
         continue;
@@ -1151,9 +1152,15 @@ void set_text_mods(std::vector<TextMod> mods) {
 
 const std::vector<TextMod>& text_mods() { return text_mod_list(); }
 
-void set_text_mod_elements(std::string_view mod, std::map<int, int> elements) {
-  for (TextMod& entry : text_mod_list())
-    if (entry.name == mod) entry.elements = std::move(elements);
+void set_text_mod_ids(std::string_view mod, std::string_view table, std::map<int, int> ids) {
+  for (TextMod& entry : text_mod_list()) {
+    if (entry.name != mod) continue;
+    if (table == "pgdat") entry.elements = std::move(ids);
+    else if (table == "monster") entry.monsters = std::move(ids);
+    else if (table == "scenedat") entry.battles = std::move(ids);
+    ++mods_generation();
+    return;
+  }
 }
 
 bool LangTables::read_member(std::string_view name, std::string& out) const {
@@ -1188,7 +1195,11 @@ void LangTables::merge_field_rows(FieldTable& table, std::string_view member, bo
     for (auto& [key, value] : rows.rows) {
       long long room = static_cast<long long>(key >> 32);
       const u32 msg = static_cast<u32>(key & 0xFFFFFFFFu);
-      if (rooms) room = mod_text_room(mod, room);
+      if (rooms) {
+        room = mod_text_room(mod, room);
+      } else if (const auto scene = mod.battles.find(static_cast<int>(room)); scene != mod.battles.end()) {
+        room = scene->second;
+      }
       setters.set(std::format("{} {}", room, msg), value, mod.name);
       table.rows.insert_or_assign(FieldTable::key(static_cast<u32>(room), msg), value);
     }
@@ -1415,7 +1426,7 @@ const TextTable* LangTables::table(std::string_view name) {
   RowSetters setters(key + ".txt");
   each_mod_rows(key + ".txt", [&](const TextMod& mod, std::string_view text) {
     TextTable rows;
-    rows.parse(key == "sysmes" ? std::string_view(mod_element_rows(mod, text)) : text);
+    rows.parse(key == "sysmes" ? std::string_view(mod_record_rows(mod, text)) : text);
     loaded.overlay(rows, [&](const std::string& row, const std::string& heading, const std::string& value) {
       setters.set(row + " " + heading, value, mod.name);
     });

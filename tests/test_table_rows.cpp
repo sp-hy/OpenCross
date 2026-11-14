@@ -155,12 +155,12 @@ int main() {
   // A reference past its field's width is a problem, not a wrapped id.
   {
     data::TableRows rows;
-    rows.build({mod_with("Big", {{"monster", "[big]\natk=1\n"}, {"scenedat", "[0]\nenemy_0=@monster:big\n"}})},
+    rows.build({mod_with("Big", {{"monster", "[big]\natk=1\n"}, {"scenedat", "[0]\n0x10:u8=@monster:big\n"}})},
                {{"monster", 256}, {"scenedat", 1}});
     std::vector<std::array<u8, 28>> scenes(1);
-    scenes[0][0] = 7;
+    scenes[0][0x10] = 7;
     rows.apply("scenedat", scenes.size(), [&](size_t i) { return std::span<u8>(scenes[i]); });
-    CHECK(scenes[0][0] == 7 && logged(rows, "monster:big is record 256, past a 1-byte field"));
+    CHECK(scenes[0][0x10] == 7 && logged(rows, "monster:big is record 256, past a 1-byte field") && rows.wide_writes("scenedat").empty());
   }
 
   // Shops are lists: every mod's adds and removes land, lowest priority first (so the first mod's remove follows another's add); a
@@ -184,6 +184,23 @@ int main() {
     CHECK(logged(rows, "a list row takes add=, remove= and clear="));
     CHECK(rows.record_for("Top", "el_shop", 32) == 32 && !rows.record_for("Bottom", "el_shop", 32) && rows.record_for("", "el_shop", 5) == 5);
     CHECK(data::table_is_list("waa_shop") && !data::table_is_list("pgdat"));
+  }
+
+  // A reference that doesn't fit its field (a formation slot's byte; 0xFF is empty) is kept as a wide write for the loader; a plain
+  // write from a mod higher in the list takes the slot back.
+  {
+    const std::vector<data::TableMod> mods = {
+        mod_with("Top", {{"scenedat", "[1]\nenemy_1=4\n"}}),
+        mod_with("Bottom", {{"scenedat", "[0]\nenemy_0=@monster:big_boss\n[1]\nenemy_1=@monster:big_boss\n"},
+                            {"monster", "[big_boss]\nmax_hp=9999\n"}}),
+    };
+    data::TableRows rows;
+    rows.build(mods, {{"monster", 300}, {"scenedat", 2}});
+    std::vector<std::array<u8, 28>> scenes(2);
+    rows.apply("scenedat", scenes.size(), [&](size_t i) { return std::span<u8>(scenes[i]); });
+    const auto& wide = rows.wide_writes("scenedat");
+    CHECK(wide.size() == 1 && wide[0].record == 0 && wide[0].offset == 0 && wide[0].value == 300);
+    CHECK(scenes[0][0] == 0 && scenes[1][1] == 4);
   }
 
   if (failures == 0) std::printf("table_rows: OK\n");

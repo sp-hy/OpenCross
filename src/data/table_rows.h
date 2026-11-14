@@ -25,6 +25,9 @@ class Vfs;
 
 namespace oc::data {
 
+// The enemy slots at the start of a scenedat record (one byte each; a mod's monster id past 254 is kept beside the record).
+inline constexpr u16 kSceneEnemySlots = 3;
+
 // One named field of a record: byte offset and width (1, 2 or 4 bytes, little-endian).
 struct TableField {
   const char* name;
@@ -94,6 +97,14 @@ class TableRows {
   // Applies the rows of `table` to records 0..count-1 (count = total()), lowest priority first; `record(i)` gives record i's bytes; a new
   // record is copied from its base first. Returns the number of fields written.
   size_t apply(std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record) const;
+  // A reference whose id doesn't fit its field (a formation slot's one byte, where 0xFF is empty) leaves the field as it is and is kept
+  // here for the loader to hold beside the record (SceneRec::wide): the writes of `table` after apply(), the first mod's last.
+  struct WideWrite {
+    size_t record;
+    u16 offset;
+    u32 value;
+  };
+  const std::vector<WideWrite>& wide_writes(std::string_view table) const;
   // Applies the rows of list table `table` to its rows (grown to total()), lowest priority first: each mod's clear, then its adds (an
   // entry already in the row is not added twice) and removes, in file order. Returns the number of entries added or removed.
   size_t apply_lists(std::string_view table, std::vector<std::vector<u16>>& rows) const;
@@ -133,6 +144,7 @@ class TableRows {
   // mod -> table -> own id -> record.
   std::map<std::string, std::map<std::string, std::map<int, size_t>, std::less<>>, std::less<>> own_ids_;
   mutable std::vector<std::string> log_lines_;
+  mutable std::map<std::string, std::vector<WideWrite>, std::less<>> wide_;
 };
 
 // The rows the tables of the mods' VFS were built with (GameTables::load through that VFS sets them; a load through another VFS, as the

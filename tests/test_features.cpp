@@ -118,6 +118,11 @@ void test_elements() {
   CHECK((shops.own_ids.at("el_shop") == std::vector<std::pair<int, std::string>>{{32, "hub_shop"}}));
   CHECK((shops.own_ids.at("waa_shop") == std::vector<std::pair<int, std::string>>{{40, "hub_smith"}}));
   CHECK(shops.problems.size() == 1 && !shops.own_ids.contains("pgdat"));
+  // [Monsters] from 222, [Formations] from 513 (a script starts formation n as battle 0x200 + n).
+  const features::Manifest battle = features::parse_manifest("[Monsters]\n222=big_boss\n221=low\n[Formations]\n513=boss_fight\n512=low\n");
+  CHECK((battle.own_ids.at("monster") == std::vector<std::pair<int, std::string>>{{222, "big_boss"}}));
+  CHECK((battle.own_ids.at("scenedat") == std::vector<std::pair<int, std::string>>{{513, "boss_fight"}}));
+  CHECK(battle.problems.size() == 2);
 }
 
 }  // namespace

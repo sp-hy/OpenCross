@@ -845,6 +845,8 @@ class FieldWorld final : public script::FieldHost {
   void play_movie(int index, int flags) override;
   bool movie_playing() override;
   void request_battle(int battle_id, int arg, int flags) override;
+  // The same with the engine's scene ids (the debug tools, routes): no mod's [Formations].
+  void request_engine_battle(int battle_id, int arg, int flags);
   bool battle_active() override;
   // Cheats: No encounters
   bool skip_battle(int arg, bool c9, int ent) override;

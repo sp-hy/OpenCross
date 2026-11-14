@@ -65,12 +65,19 @@ constexpr int kModElementLast = 0x3FFF;
 // Mod shops: the game's element shops and blacksmiths are rows 0..31, so a mod's own shop ids run from kModShopFirst.
 constexpr int kModShopFirst = 32;
 constexpr int kModShopLast = 0x7FFF;
+// Mod monsters and formations: the game's monster records stop at 221 and its battle scenes at 512, so a mod's own ids start after
+// them. A formation id is a scene: a field script starts it as battle id 0x200 + id (15-bit operand, so ids up to 0x7DFF).
+constexpr int kModMonsterFirst = 222;
+constexpr int kModMonsterLast = 0x3FFF;
+constexpr int kModFormationFirst = 513;
+constexpr int kModFormationLast = 0x7DFF;
 
 // A record name (a table row header, an [Elements] value): a lower-case letter, then lower-case letters, digits and '_'.
 bool is_record_name(std::string_view name);
 
 // The mod.ini sections that give a mod's own ids for records mods add by name ("<id> = <record name>"), the table they name records of
-// (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop.
+// (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop, [Monsters] monster,
+// [Formations] scenedat.
 struct OwnIdSection {
   const char* section;
   const char* table;
