@@ -470,16 +470,20 @@ void BattleView::fx_draw_models(const render::Frame& frame, const render::Letter
 
 // The weapon techs' mesh sprites name the caster's weapon mesh by the PC's two-digit character number (guill_1-3 "02" = Guile, stick / stick2
 // "19" = Glenn, bigcard "37" = Sneff, high "39" = Doc; the weapon .bin is a cpt, so the battle registers the equipped part under that name),
-// and so do the units' own at0.prd emitters that throw the weapon (weapon_mesh_character).
+// and so do the units' own at0.prd emitters that throw the weapon (weapon_mesh_character). A mod's pack may name "cwpn" instead: the acting
+// unit's own weapon, whoever casts (kCasterWeaponMesh).
 // Returns the present PC it denotes, with a weapon mesh loaded; in a versus battle the acting one first (both parties may hold the character).
 int BattleView::fx_weapon_mesh_unit(std::string_view name) const {
-  const int character = weapon_mesh_character(name);
-  if (character < 0 || !battle_) return -1;
-  const auto denotes = [&](int i) {
+  if (!battle_) return -1;
+  const auto armed = [&](int i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu && unit.src_id == character;
+    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu;
   };
+  if (name == kCasterWeaponMesh) return act_.actor >= 0 && act_.actor < battle::kUnits && armed(act_.actor) ? act_.actor : -1;
+  const int character = weapon_mesh_character(name);
+  if (character < 0) return -1;
+  const auto denotes = [&](int i) { return armed(i) && bunit(i).src_id == character; };
   if (versus_ && act_.actor >= 0 && act_.actor < battle::kUnits && denotes(act_.actor)) return act_.actor;
   for (int i = 0; i < battle::kUnits; ++i)
     if (denotes(i)) return i;

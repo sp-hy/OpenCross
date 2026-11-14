@@ -144,6 +144,9 @@ bool script_calls_damage(const bseq::Table& table, int entry);
 // it: the weapon techs' packs ("02" Guile's wand) and the units' own at0.prd emitters (a thrown boomerang: Mel's "34", Van's "36"). The
 // character id a sprite name denotes, -1 for any other name.
 int weapon_mesh_character(std::string_view name);
+// A mesh sprite named so draws the acting unit's own equipped weapon, whoever casts: a pack a mod ships for an element it adds throws the
+// caster's weapon instead of a mesh of its own (no game pack uses the name).
+inline constexpr std::string_view kCasterWeaponMesh = "cwpn";
 
 class BattleFxLibrary {
  public:
