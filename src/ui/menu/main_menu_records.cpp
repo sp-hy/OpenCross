@@ -213,6 +213,7 @@ void MainMenu::Impl::build_characters() {
   MenuModelSlot gear;
   model_gear(character, gear);
   enemy_slot.weapon_part = gear.weapon_part;
+  enemy_slot.weapon_item = gear.weapon_item;
   enemy_slot.silhouette = !seen_here;
   enemy_slot.box_x = kBoxX + gdx / xscale, enemy_slot.box_y = kBoxY, enemy_slot.box_w = kBoxW, enemy_slot.box_h = kBoxH;
   enemy_wanted = enemy_view != nullptr;

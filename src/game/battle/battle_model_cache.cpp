@@ -192,12 +192,6 @@ std::string ModelCache::weapon_bin(int model) {
   return model < 0 || static_cast<size_t>(model) >= kBattleWeaponBins.size() ? std::string{} : std::string(kBattleWeaponBins[static_cast<size_t>(model)]);
 }
 
-std::shared_ptr<ModelHandle> ModelCache::load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int kind, int part) {
-  const std::string bin = weapon_bin(kind);
-  if (bin.empty() || part < 0) return nullptr;
-  return weapon_part(vfs, meshes, bin, part);
-}
-
 // A monster's weapon, present when its weapon item and weapon model are both non-zero. The texture and the
 // mesh come from the MODEL's own weapon .bin - the third entry of its file-table triple {.ltd, .obj, weapon .bin} (3195 + 3 m, kBattleWeaponBins):
 // pair `item byte 0 & 0x7F` (TIM 4bpp 128x85 -> VRAM (416, 256 + 85 slot), CLUT row; mesh -> the weapon object), exactly like a PC's pack.

@@ -58,7 +58,7 @@ class EnemyModelLibrary : public EnemyModelView {
   // vfs::Vfs::generation() the cache was built for.
   u32 generation_ = 0;
   // The model shown and the turn: model ticks are taken from the time drawn, `accum` is the part of the next one.
-  std::string shown_;
+  std::string shown_, shown_bin_;
   int shown_weapon_ = -1;
   float accum_ = 0, yaw_ = 0;
   std::vector<render::Mat4> palette_;

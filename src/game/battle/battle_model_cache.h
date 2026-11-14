@@ -102,7 +102,6 @@ struct ModelCache {
   static std::optional<assets::ModelAsset> read_weapon(const vfs::Vfs& vfs, const std::string& bin, int part);
 
   std::shared_ptr<ModelHandle> load_model_for(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& dir_stem);
-  std::shared_ptr<ModelHandle> load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int kind, int part);
   std::shared_ptr<ModelHandle> load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const data::GameTables* tables,
                                                  int monster_id, int part);
   // Part `part` of the weapon pack `bin` ("battle/wepon/sword.bin"), cached; build_weapon is the uncached load.

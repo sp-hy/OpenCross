@@ -565,7 +565,8 @@ class BattleView {
   // setup
   std::shared_ptr<ModelHandle> load_model_for(const std::string& dir_stem) { return model_cache_.load_model_for(*vfs_, *meshes_, dir_stem); }
   void prefetch_unit_models();
-  std::shared_ptr<ModelHandle> load_weapon(int kind, int part) { return model_cache_.load_weapon(*vfs_, *meshes_, kind, part); }
+  // A party member's weapon mesh for weapon item `item` on body `body` (game::pc_weapon), nullptr when there is none.
+  std::shared_ptr<ModelHandle> load_pc_weapon(int item, int body);
   std::shared_ptr<ModelHandle> load_enemy_weapon(int monster_id, int part) {
     return model_cache_.load_enemy_weapon(*vfs_, *meshes_, tables_, monster_id, part);
   }

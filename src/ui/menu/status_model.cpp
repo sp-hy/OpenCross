@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <charconv>
 #include <cmath>
-#include <string_view>
 
 #include "core/log.h"
 #include "game/battle/model_table.h"
@@ -218,21 +217,28 @@ int StatusModelView::min_distance(int model) {
   return value;
 }
 
-void StatusModelView::set_weapon(Entry& shown, int weapon_model, int part) {
-  if (shown.weapon_model == weapon_model && shown.weapon_part == part) return;
-  shown.weapon_model = weapon_model;
-  shown.weapon_part = part;
+void StatusModelView::set_weapon(Entry& shown, const MenuModelSlot& slot) {
+  if (shown.weapon_item == slot.weapon_item && shown.weapon_model == slot.weapon_model && shown.weapon_part == slot.weapon_part) return;
+  shown.weapon_item = slot.weapon_item;
+  shown.weapon_model = slot.weapon_model;
+  shown.weapon_part = slot.weapon_part;
   shown.weapon.reset();
-  if (part < 0 || weapon_model < 0 || weapon_model > game::kLastMenuModel) return;
-  const std::string_view bin = game::kBattleWeaponBins[static_cast<size_t>(weapon_model)];
+  if (slot.weapon_part < 0) return;
+  std::string bin = game::own_weapon_bin(vfs_, slot.weapon_item);
+  int part = 0;
+  if (bin.empty()) {
+    if (slot.weapon_model < 0 || slot.weapon_model > game::kLastMenuModel) return;
+    bin = std::string(game::kBattleWeaponBins[static_cast<size_t>(slot.weapon_model)]);
+    part = slot.weapon_part;
+  }
   if (bin.empty()) return;
-  const std::string key = std::string(bin) + "#" + std::to_string(part);
+  const std::string key = bin + "#" + std::to_string(part);
   if (auto it = weapons_.find(key); it != weapons_.end()) {
     shown.weapon = it->second;
     return;
   }
   std::shared_ptr<game::ModelHandle> handle;
-  if (auto raw = vfs_.read("cdrom/" + std::string(bin))) {
+  if (auto raw = vfs_.read("cdrom/" + bin)) {
     std::string err;
     if (auto pack = import::load_weapon_pack(*raw, &err); pack && part < static_cast<int>(pack->parts.size())) {
       assets::ModelAsset weapon_asset;
@@ -399,7 +405,7 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
   shown->pose.palette(shown->pose_half_due ? shown->accum * 2.0f : std::max(shown->accum - 0.5f, 0.0f) * 2.0f, palette_);
   effect_model_ = &shown->body->asset;
   effect_palette_ = palette_;
-  set_weapon(*shown, slot.weapon_model, slot.weapon_part);
+  set_weapon(*shown, slot);
 
   const MenuCameraNow camera = menu_camera_at(slot.camera_prev, slot.camera, shown->accum);
   const assets::Mat3 camera_rot = camera_rotation(camera);

@@ -17,6 +17,9 @@
 namespace oc::vfs {
 class Vfs;
 }
+namespace oc::data {
+struct GameTables;
+}
 
 namespace oc::game {
 
@@ -62,5 +65,18 @@ std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int bod
 std::string body_model_stem(int body);
 // The skeleton alone of field player model `stem` (fieldobj/player/<folder>/<file>, no ".obj"), nullopt when it does not read.
 std::optional<assets::Skeleton> read_field_skeleton(const vfs::Vfs& files, const std::string& stem);
+
+// The weapon mesh a party member shows for weapon item `item`: a weapon pack (its member path, no "cdrom/") and the part in it.
+struct WeaponPick {
+  std::string bin;
+  int part = -1;
+};
+// An item mods add by name (tables\waa.txt `[name]`) whose mod adds cdrom/battle/wepon/<name>.bin shows that pack's first part, whoever
+// equips it; any other item the pack of the wearer's body (kBattleWeaponBins[body], "" when it has none) at the item's tier & 0xF. part -1:
+// `item` is no gear record.
+WeaponPick pc_weapon(const vfs::Vfs& files, const data::GameTables& tables, int item, int body);
+// The pack of item `item` when it is an item mods add by name whose mod adds cdrom/battle/wepon/<name>.bin (its member path; a pack the
+// game ships under that name does not count); else "".
+std::string own_weapon_bin(const vfs::Vfs& files, int item);
 
 }  // namespace oc::game

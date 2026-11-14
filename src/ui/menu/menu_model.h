@@ -46,6 +46,9 @@ struct MenuModelSlot {
   int weapon_model = 0;
   // Part of the weapon pack = weapon record tier & 0xF, -1 = no weapon.
   int weapon_part = -1;
+  // The equipped weapon's item id: an item mods add by name that ships its own pack (game::own_weapon_bin) shows that pack's first part
+  // instead.
+  int weapon_item = 0;
   // Constructs not drawn (bit k = construct k).
   u32 hidden_meshes = 0;
   // The character's status bits (record +0xB0): 0x01, 0x08 and 0x20 show their effect around the model.
@@ -87,6 +90,9 @@ struct EnemyModelSlot {
   // The part of the model's weapon pack it holds (an enemy's weapon item's tier & 0x7F, a character's equipped weapon's tier & 0xF);
   // -1 = no weapon.
   int weapon_part = -1;
+  // A character's equipped weapon (0 = none): an item mods add by name with its own pack shows that pack's first part instead
+  // (game::own_weapon_bin), as on the Status screen.
+  int weapon_item = 0;
   // Drawn with its texture forced fully black (an enemy never met).
   bool silhouette = false;
   // Window pixels of the PS1 screen point (0, 0) and of one PS1 pixel.

@@ -57,8 +57,8 @@ void BattleView::showcase_load() {
     }
 
     const battle::PartyMember member = battle::make_party_member(*tables_, char_id, 0, "char");
-    if (const data::GearRec* gear = tables_->gear_rec(member.eq.weapon_id)) {
-      model.weapon = load_weapon(char_id, gear->tier() & 0xF);
+    if (tables_->gear_rec(member.eq.weapon_id)) {
+      model.weapon = load_pc_weapon(member.eq.weapon_id, char_id);
       const auto& points = handle->asset.attach.points;
       const assets::MountPoint& mount = handle->asset.attach.mounts[0];
       model.weapon_attach = mount.used ? mount.attach : points[0x12].used ? 0x12 : points[7].used ? 7 : 15;

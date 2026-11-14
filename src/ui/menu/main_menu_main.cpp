@@ -151,7 +151,10 @@ int MainMenu::Impl::model_number(int character, int last) const { return data::m
 
 void MainMenu::Impl::model_gear(int character, MenuModelSlot& slot) const {
   if (const int weapon = gs->equipped(character, 0); weapon > 0 && rules && rules->tables)
-    if (const data::GearRec* gear = rules->tables->gear_rec(weapon)) slot.weapon_part = gear->tier() & 0xF;
+    if (const data::GearRec* gear = rules->tables->gear_rec(weapon)) {
+      slot.weapon_part = gear->tier() & 0xF;
+      slot.weapon_item = weapon;
+    }
   // Pierre's construct 3 (the Hero's Shield) shows only while he wears one.
   constexpr int kPierre = 41, kHerosShield = 0xC1, kShieldConstruct = 3;
   if (character == kPierre && gs->equipped(character, 2) != kHerosShield && gs->equipped(character, 3) != kHerosShield &&

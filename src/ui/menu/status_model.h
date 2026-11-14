@@ -44,7 +44,7 @@ class StatusModelView : public MenuModelView {
     std::shared_ptr<game::ModelHandle> body_shut;
     game::UnitPose pose;
     std::shared_ptr<game::ModelHandle> weapon;
-    int weapon_model = -1, weapon_part = -2;
+    int weapon_item = -1, weapon_model = -1, weapon_part = -2;
     // Interpolation between the last two menu ticks (0..1).
     float accum = 0;
     // Menu ticks since the screen (re)started the model.
@@ -56,7 +56,8 @@ class StatusModelView : public MenuModelView {
   };
   // Cached per (menu model, art mode).
   Entry* entry(int model, bool hd_art, const std::string& own_model = {});
-  void set_weapon(Entry& shown, int weapon_model, int part);
+  // The weapon `slot` holds: the pack of its weapon item when an item mods add by name ships one (part 0), else the body's pack.
+  void set_weapon(Entry& shown, const MenuModelSlot& slot);
   // One menu frame of the eye blink.
   void step_blink();
   // The status effects: menu/stef.prd restarted for a new session, the effects of the absent statuses stopped.

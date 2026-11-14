@@ -12,6 +12,7 @@
 #include "game/battle/battle_model_cache.h"
 #include "game/battle/battle_seq.h"
 #include "game/battle/model_table.h"
+#include "game/model_files.h"
 #include "render/mat4.h"
 
 namespace oc::ui {
@@ -166,11 +167,16 @@ void EnemyModelLibrary::draw(const render::Frame& frame, float vw, float vh, con
     stem = game::kBattleModels[static_cast<size_t>(slot.model)];
     weapon_bin = game::ModelCache::weapon_bin(slot.model);
   }
-  Entry* shown = entry(stem, weapon_bin, slot.weapon_part);
+  // A weapon mods add by name with its own pack: that pack's first part.
+  int weapon_part = slot.weapon_part;
+  if (std::string own = slot.weapon_item > 0 ? game::own_weapon_bin(vfs_, slot.weapon_item) : std::string(); !own.empty())
+    weapon_bin = std::move(own), weapon_part = 0;
+  Entry* shown = entry(stem, weapon_bin, weapon_part);
   if (!shown || !shown->body || !shown->body->gpu) return;
-  if (stem != shown_ || slot.weapon_part != shown_weapon_) {
+  if (stem != shown_ || weapon_part != shown_weapon_ || weapon_bin != shown_bin_) {
     shown_ = stem;
-    shown_weapon_ = slot.weapon_part;
+    shown_bin_ = weapon_bin;
+    shown_weapon_ = weapon_part;
     shown->pose.play(kClip, 0);
     accum_ = 0;
   }
