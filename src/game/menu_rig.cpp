@@ -3,7 +3,12 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
 #include <iterator>
+#include <map>
+#include <sstream>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -25,10 +30,109 @@ constexpr int kPieceShare = 50;
 // the field joints' height and further than its own rest offset is long, it travels (a prop carried from the hip to the hand, feet pulled
 // into the body).
 constexpr float kMinTravel = 1.0f, kTravelShare = 0.1f;
+// A leading joint passes between its two field joints' turns over this share of its piece's arm.
+constexpr float kLeadBlend = 0.25f;
+// An outer carried joint passes between its carried place and its parent's place over this share of its rest arm from the carrier.
+constexpr float kOuterBlend = 0.25f;
+// A field joint with fewer vertices than this has no face of its own: no piece a menu piece could be laid onto.
+constexpr int kMinPieceVertices = 3;
 constexpr int kSubtreeCap = 12;
 // Bones shorter than this share of the height have no direction worth comparing.
 constexpr float kMinBone = 0.03f;
 constexpr float kDegrees = 180.0f / 3.14159265358979323846f;
+
+// Props modelled into a body joint's piece (match_body_rig splits them off onto a joint of their own, the body's last, for its map to
+// hide or pair): Orcha's wok, on its shoulder strap's joint; Pierre's shield, on his left forearm's joint.
+struct HiddenShell {
+  int body;
+  int joint;
+};
+constexpr HiddenShell kHiddenShells[] = {
+    {0x0F, 13},
+    {0x29, 16},
+};
+
+// Development: OC_RIG_OVERRIDE names a text file whose lines stand in for the tables' entries of a detailed body (battle model number in
+// hex), so a pairing can be tried without a rebuild. One entry a line:
+//   map <body> <field joint per menu joint: a number, -1 = rides its parent, H = not drawn> | map <body> auto (the automatic match)
+//   tuning <body> <align_limbs> <field_body> <on_field x 4> <hang x 2> <stance> [<keep> up to 8] | tuning <body> none
+//   carry <body> [<menu joint> <carrier>]... (up to 4 pairs) | lay <body> <menu joint>... (up to 6) | posture <body> <0/1>
+//   rest <body> [<menu joint> <turn x y z, degrees> <offset x y z>]... (up to 4) | floor <body> <menu joint>... (up to 4)
+//   lead <body> [<menu joint> <field joint> <field joint>]... (up to 4) | outer <body> <menu joint>... (up to 4)
+//   aim <body> <menu joint>... (up to 4)
+//     (all of these are laid over the body's tuning, the file's or the table's)
+//   props <body> [<field joint> <menu joint x 4>]...   (no numbers: no held prop)
+//   shells <body> [<menu joint>]...                    (no numbers: none)
+struct RigOverrides {
+  std::map<int, std::vector<s8>> maps;
+  std::map<int, std::vector<s8>> carry, lay, floor, lead, outer, aim;
+  std::map<int, std::vector<int>> rest;
+  std::map<int, bool> posture;
+  std::map<int, RigTuning> tunings;
+  std::map<int, bool> untuned;
+  std::map<int, std::vector<HeldProp>> props;
+  std::map<int, std::vector<HiddenShell>> shells;
+};
+
+const RigOverrides& rig_overrides() {
+  static const RigOverrides loaded = [] {
+    RigOverrides out;
+    const char* path = std::getenv("OC_RIG_OVERRIDE");
+    if (!path) return out;
+    std::ifstream file(path);
+    for (std::string line; std::getline(file, line);) {
+      std::istringstream words(line);
+      std::string kind, body_text;
+      if (!(words >> kind >> body_text) || kind[0] == '#') continue;
+      const int body = static_cast<int>(std::strtol(body_text.c_str(), nullptr, 16));
+      std::vector<std::string> rest;
+      for (std::string word; words >> word;) rest.push_back(word);
+      auto number = [&](size_t index) { return index < rest.size() ? static_cast<int>(std::strtol(rest[index].c_str(), nullptr, 10)) : -1; };
+      if (kind == "map") {
+        std::vector<s8>& map = out.maps[body];
+        for (size_t i = 0; i < rest.size() && rest[0] != "auto"; ++i) map.push_back(rest[i] == "H" ? kHiddenJoint : static_cast<s8>(number(i)));
+      } else if (kind == "tuning") {
+        out.untuned[body] = !rest.empty() && rest[0] == "none";
+        if (!out.untuned[body])
+          out.tunings[body] = RigTuning{body, number(0) > 0, number(1) > 0,
+                                        {static_cast<s8>(number(2)), static_cast<s8>(number(3)), static_cast<s8>(number(4)), static_cast<s8>(number(5))},
+                                        {static_cast<s8>(number(6)), static_cast<s8>(number(7))}, number(8) > 0,
+                                        {static_cast<s8>(number(9)), static_cast<s8>(number(10)), static_cast<s8>(number(11)), static_cast<s8>(number(12)),
+                                         static_cast<s8>(number(13)), static_cast<s8>(number(14)), static_cast<s8>(number(15)), static_cast<s8>(number(16))}};
+      } else if (kind == "aim" || kind == "carry" || kind == "lay" || kind == "floor" || kind == "lead" || kind == "outer") {
+        std::vector<s8>& joints = kind == "aim"     ? out.aim[body]
+                                  : kind == "carry" ? out.carry[body]
+                                  : kind == "lay"   ? out.lay[body]
+                                  : kind == "floor" ? out.floor[body]
+                                  : kind == "lead"  ? out.lead[body]
+                                                    : out.outer[body];
+        for (size_t i = 0; i < rest.size(); ++i) joints.push_back(static_cast<s8>(number(i)));
+      } else if (kind == "rest") {
+        for (size_t i = 0; i < rest.size(); ++i) out.rest[body].push_back(number(i));
+      } else if (kind == "posture") {
+        out.posture[body] = number(0) > 0;
+      } else if (kind == "props") {
+        std::vector<HeldProp>& props = out.props[body];
+        for (size_t i = 0; i + 4 < rest.size(); i += 5)
+          props.push_back({body, number(i), {static_cast<s8>(number(i + 1)), static_cast<s8>(number(i + 2)), static_cast<s8>(number(i + 3)), static_cast<s8>(number(i + 4))}});
+      } else if (kind == "shells") {
+        std::vector<HiddenShell>& shells = out.shells[body];
+        for (size_t i = 0; i < rest.size(); ++i) shells.push_back({body, number(i)});
+      }
+    }
+    return out;
+  }();
+  return loaded;
+}
+
+// The joints of detailed body `body` whose free shells are props the field model does not carry.
+std::vector<HiddenShell> hidden_shells(int body) {
+  if (const auto found = rig_overrides().shells.find(body); found != rig_overrides().shells.end()) return found->second;
+  std::vector<HiddenShell> out;
+  for (const HiddenShell& shell : kHiddenShells)
+    if (shell.body == body) out.push_back(shell);
+  return out;
+}
 
 using assets::Mat3;
 using assets::Vec3;
@@ -186,7 +290,7 @@ void lift_to_mesh(std::vector<int>& field_joint, const Shape& menu_shape) {
 // A piece hanging from the torso without a partner (a skirt or coat panel, a cape top, a helmet bubble: an unpaired menu joint with mesh whose
 // nearest paired ancestor is the head or one of the head's ancestors) follows the field joint whose own mesh lies nearest to its own, when
 // that is within kPieceReach: a skirt panel then swings with the thigh beside it instead of standing stiff on the pelvis. Pieces under a
-// limb (a prop held in a hand, such as Korcha's oar) keep riding it.
+// limb (a prop held in a hand, such as Marcy's shield) keep riding it.
 void follow_nearest_mesh(std::vector<int>& field_joint, const Shape& field_shape, const Shape& menu_shape, int menu_head) {
   if (menu_head < 0) return;
   const size_t count = field_joint.size();
@@ -529,6 +633,58 @@ int graft_field_piece(assets::ModelAsset& menu, const assets::ModelAsset& field,
   return joint;
 }
 
+// A prop modelled into a body joint's piece (a shield on the forearm's joint): the shells of `joint`'s mesh that touch no other joint's
+// mesh (every vertex bound to `joint` alone, no face shared with another joint's vertices) are moved onto a new joint under `joint`, so
+// they can be left undrawn while the rest of the piece is drawn. Nothing is moved unless the piece also has mesh joined to its
+// neighbours. Returns the new joint, -1 for none.
+int split_free_shells(assets::ModelAsset& menu, int joint) {
+  const auto count = static_cast<u16>(menu.skeleton.joints.size());
+  const auto own = static_cast<u16>(joint);
+  // Per mesh, per pool vertex: the shell it belongs to (a vertex of it), and per shell whether it reaches another joint's mesh.
+  std::vector<std::vector<u32>> shells(menu.meshes.size());
+  std::vector<std::vector<bool>> reaches(menu.meshes.size());
+  bool held = false, loose = false;
+  for (size_t index = 0; index < menu.meshes.size(); ++index) {
+    const assets::Mesh& mesh = menu.meshes[index];
+    std::vector<u32>& shell = shells[index];
+    shell.resize(mesh.pool.size());
+    for (u32 i = 0; i < shell.size(); ++i) shell[i] = i;
+    auto root = [&](u32 vertex) {
+      while (shell[vertex] != vertex) vertex = shell[vertex] = shell[shell[vertex]];
+      return vertex;
+    };
+    for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+      for (size_t corner = 1; corner < 3; ++corner) shell[root(mesh.vertices[mesh.indices[i + corner]].pool)] = root(mesh.vertices[mesh.indices[i]].pool);
+    for (u32 i = 0; i < shell.size(); ++i) shell[i] = root(i);
+    reaches[index].assign(mesh.pool.size(), false);
+    std::vector<bool> faced(mesh.pool.size(), false);
+    for (const u32 corner : mesh.indices) faced[shell[mesh.vertices[corner].pool]] = true;
+    for (u32 i = 0; i < mesh.pool.size(); ++i) {
+      const assets::SkinVertex& vertex = mesh.pool[i];
+      if (!faced[shell[i]] || vertex.joint[0] != own || (vertex.weight[1] > 0.0f && vertex.joint[1] != own)) reaches[index][shell[i]] = true;
+    }
+    for (u32 i = 0; i < mesh.pool.size(); ++i)
+      if (mesh.pool[i].joint[0] == own && faced[shell[i]]) (reaches[index][shell[i]] ? held : loose) = true;
+  }
+  if (!held || !loose) return -1;
+  for (size_t index = 0; index < menu.meshes.size(); ++index)
+    for (u32 i = 0; i < menu.meshes[index].pool.size(); ++i) {
+      if (reaches[index][shells[index][i]]) continue;
+      assets::SkinVertex& vertex = menu.meshes[index].pool[i];
+      vertex.joint = {count, count};
+      vertex.weight = {1.0f, 0.0f};
+      vertex.local[1] = vertex.local[0];
+      vertex.normal_joint = 0;
+    }
+  // The new joint rests exactly on `joint`, so the moved vertices keep their place in its frame.
+  assets::Joint added;
+  added.parent = joint;
+  menu.skeleton.joints.push_back(added);
+  for (assets::AnimationClip& clip : menu.clips)
+    if (clip.tracks.size() + 1 == menu.skeleton.joints.size()) clip.tracks.emplace_back();
+  return count;
+}
+
 // The turn taking unit direction `from` onto unit direction `to` by the shortest way (none when they point opposite ways).
 Mat3 turn_between(const Vec3& from, const Vec3& to) {
   const Vec3 axis{from[1] * to[2] - from[2] * to[1], from[2] * to[0] - from[0] * to[2], from[0] * to[1] - from[1] * to[0]};
@@ -539,6 +695,62 @@ Mat3 turn_between(const Vec3& from, const Vec3& to) {
   Mat3 out{1, 0, 0, 0, 1, 0, 0, 0, 1};
   for (size_t k = 0; k < 9; ++k) out[k] += cross[k] + square[k] / (1.0f + cosine);
   return out;
+}
+
+// A menu joint without a field partner keeps its rest angle and offset to its parent, unless the menu model's first pose clip (the Status
+// screen's) carries it further than kTravelShare of the menu skeleton's height `height`: a held object rests at the model origin and only
+// the clips put it in the hand, so it takes the clip's angle and offset. A joint the clip turns or shifts a little keeps its rest values
+// (a skirt panel the Status stance flares out). `stance`: the clip's values whatever the distance (RigTuning::stance).
+void ride_on_parent(MenuRig& rig, const assets::ModelAsset& menu_model, size_t j, float height, bool stance = false) {
+  const assets::Joint& joint = menu_model.skeleton.joints[j];
+  rig.menu_local[j] = assets::rotation_zyx(joint.rest_rot_deg);
+  rig.menu_offset[j] = joint.rest_trans;
+  for (const assets::AnimationClip& clip : menu_model.clips) {
+    if (clip.source != "s4" || clip.index != 0 || clip.frame_count == 0 || clip.tracks.size() != menu_model.skeleton.joints.size()) continue;
+    const bool carried = !clip.tracks[j].trans.empty() && distance(clip.tracks[j].trans[0].v, joint.rest_trans) > kTravelShare * height;
+    if (!carried && !stance) return;
+    if (!clip.tracks[j].trans.empty()) rig.menu_offset[j] = clip.tracks[j].trans[0].v;
+    if (!clip.tracks[j].rot.empty()) rig.menu_local[j] = assets::rotation_zyx(clip.tracks[j].rot[0].v);
+    return;
+  }
+}
+
+// Per joint: its piece (the vertices bound first to it or to a joint below it) shares a face or a blended vertex with the mesh of a joint
+// outside it, so the joint's move stretches the mesh between the two rather than carrying a piece of its own.
+std::vector<bool> joined_pieces(const assets::ModelAsset& model) {
+  const size_t count = model.skeleton.joints.size();
+  std::vector<bool> joined(count, false);
+  auto below = [&](size_t joint, size_t top) {
+    int at = static_cast<int>(joint);
+    while (at >= 0 && static_cast<size_t>(at) != top) at = model.skeleton.joints[static_cast<size_t>(at)].parent;
+    return at >= 0;
+  };
+  auto join = [&](size_t lhs, size_t rhs) {
+    if (lhs >= count || rhs >= count || lhs == rhs) return;
+    if (!below(rhs, lhs)) joined[lhs] = true;
+    if (!below(lhs, rhs)) joined[rhs] = true;
+  };
+  for (const assets::Mesh& mesh : model.meshes) {
+    for (const assets::SkinVertex& vertex : mesh.pool)
+      if (vertex.weight[1] > 0.0f) join(vertex.joint[0], vertex.joint[1]);
+    for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+      for (size_t corner = 0; corner < 3; ++corner)
+        join(mesh.pool[mesh.vertices[mesh.indices[i + corner]].pool].joint[0], mesh.pool[mesh.vertices[mesh.indices[i + (corner + 1) % 3]].pool].joint[0]);
+  }
+  return joined;
+}
+
+// The rotation nearest to a blend of two rotations: its first two rows made unit and perpendicular, the third their cross product.
+Mat3 orthonormal(const Mat3& blend) {
+  Vec3 first{blend[0], blend[1], blend[2]}, second{blend[3], blend[4], blend[5]};
+  const float first_length = std::max(1e-6f, std::hypot(first[0], first[1], first[2]));
+  for (float& axis : first) axis /= first_length;
+  const float along = first[0] * second[0] + first[1] * second[1] + first[2] * second[2];
+  for (size_t axis = 0; axis < 3; ++axis) second[axis] -= along * first[axis];
+  const float second_length = std::max(1e-6f, std::hypot(second[0], second[1], second[2]));
+  for (float& axis : second) axis /= second_length;
+  return {first[0],  first[1],  first[2],  second[0], second[1], second[2], first[1] * second[2] - first[2] * second[1],
+          first[2] * second[0] - first[0] * second[2], first[0] * second[1] - first[1] * second[0]};
 }
 
 // Every joint of `joint`'s subtree.
@@ -588,6 +800,45 @@ void tune_menu_rig(MenuRig& rig, const assets::ModelAsset& field_model, const as
       }
     }
   }
+  // Leaf pieces laid along their field pieces: the joint-to-mesh-centre line of each, in the rest poses.
+  for (const s8 joint : tuning.lay) {
+    if (joint <= 0 || static_cast<size_t>(joint) >= menu_count || rig.field_joint[static_cast<size_t>(joint)] < 0) continue;
+    const auto j = static_cast<size_t>(joint);
+    const auto source = static_cast<size_t>(rig.field_joint[j]);
+    const std::vector<bool> menu_piece = subtree(menu_model.skeleton, j), field_piece = subtree(field_model.skeleton, source);
+    auto reach = [](const assets::ModelAsset& model, const std::vector<bool>& piece, const Vec3& from, Vec3& out) {
+      int vertices = 0;
+      out = Vec3{};
+      for (const assets::Mesh& mesh : model.meshes)
+        for (const assets::SkinVertex& vertex : mesh.pool) {
+          if (vertex.joint[0] >= piece.size() || !piece[vertex.joint[0]]) continue;
+          for (size_t axis = 0; axis < 3; ++axis) out[axis] += vertex.bind_pos[axis] - from[axis];
+          ++vertices;
+        }
+      const float length = std::hypot(out[0], out[1], out[2]);
+      if (vertices == 0 || length <= 0.0f) return false;
+      for (float& axis : out) axis /= length;
+      return true;
+    };
+    Vec3 menu_line, field_line;
+    if (!reach(menu_model, menu_piece, menu_pose.pos[j], menu_line) || !reach(field_model, field_piece, field_pose.pos[source], field_line)) continue;
+    rig.menu_rest[j] = multiply(turn_between(menu_line, field_line), rig.menu_rest[j]);
+  }
+  // The body chain measured from the field stand pose: the first keyframe of clip 1, built in model space.
+  if (tuning.posture) {
+    const assets::AnimationClip* stand = nullptr;
+    for (const assets::AnimationClip& clip : field_model.clips)
+      if (!stand && clip.source == "s4" && clip.index == 1 && clip.frame_count > 0 && clip.tracks.size() == field_count) stand = &clip;
+    std::vector<Mat3> standing(field_count);
+    for (size_t i = 0; stand && i < field_count; ++i) {
+      const assets::Joint& joint = field_model.skeleton.joints[i];
+      const Mat3 local = assets::rotation_zyx(stand->tracks[i].rot.empty() ? joint.rest_rot_deg : stand->tracks[i].rot[0].v);
+      standing[i] = joint.parent >= 0 ? multiply(standing[static_cast<size_t>(joint.parent)], local) : local;
+    }
+    const int head = head_joint(field_model, field_shape);
+    for (size_t i = 0; stand && i < field_count; ++i)
+      if (body_chain[i] && static_cast<int>(i) != head) rig.field_rest[i] = standing[i];
+  }
   if (tuning.field_body) {
     rig.pivot_shift.assign(menu_count, Vec3{});
     for (size_t j = 1; j < menu_count; ++j) {
@@ -630,7 +881,104 @@ void tune_menu_rig(MenuRig& rig, const assets::ModelAsset& field_model, const as
       rig.mesh_shift[j][axis] = field_centre[axis] / static_cast<float>(rig.field_sole[j].size()) / rig.scale -
                                 menu_centre[axis] / static_cast<float>(rig.menu_sole[j].size());
   }
+  rig.carried_by.assign(menu_count, -1);
+  for (const auto& pair : tuning.carry)
+    if (pair[0] > 0 && static_cast<size_t>(pair[0]) < menu_count && pair[1] >= 0 && pair[1] < pair[0]) rig.carried_by[static_cast<size_t>(pair[0])] = pair[1];
+  for (const s8 joint : tuning.keep) {
+    if (joint <= 0 || static_cast<size_t>(joint) >= menu_count) continue;
+    const auto j = static_cast<size_t>(joint);
+    if (j < rig.placed_from.size()) rig.placed_from[j] = -1;
+    if (j < rig.swing_about.size()) rig.swing_about[j] = -1;
+    if (j < rig.moved.size()) rig.moved[j] = false;
+  }
+  if (tuning.stance)
+    for (size_t j = 1; j < menu_count; ++j)
+      if (rig.field_joint[j] < 0) ride_on_parent(rig, menu_model, j, menu_pose.height, true);
   // Hanging pieces: placed by their menu parent, none of the paired joints' placement rules; menu_sole and field_sole for the reach limit.
+  // Rest fixes: laid over the angle and offset to the parent of a joint without a partner, over the model-space rest turn of a paired one.
+  for (const RigRest& fix : tuning.rest) {
+    if (fix.joint <= 0 || static_cast<size_t>(fix.joint) >= menu_count) continue;
+    const auto j = static_cast<size_t>(fix.joint);
+    const Mat3 turn = assets::rotation_zyx({static_cast<float>(fix.turn[0]), static_cast<float>(fix.turn[1]), static_cast<float>(fix.turn[2])});
+    if (rig.field_joint[j] >= 0) {
+      rig.menu_rest[j] = multiply(turn, rig.menu_rest[j]);
+      continue;
+    }
+    rig.menu_local[j] = multiply(turn, rig.menu_local[j]);
+    for (size_t axis = 0; axis < 3; ++axis) rig.menu_offset[j][axis] += static_cast<float>(fix.offset[axis]);
+  }
+  // A piece's vertices from its joint, with what hangs under it (rest pose, model space).
+  auto piece_arms = [&](size_t j) {
+    std::vector<Vec3> arms;
+    const std::vector<bool> piece = subtree(menu_model.skeleton, j);
+    for (const assets::Mesh& mesh : menu_model.meshes)
+      for (const assets::SkinVertex& vertex : mesh.pool) {
+        if (vertex.joint[0] >= menu_count || !piece[vertex.joint[0]]) continue;
+        Vec3 arm;
+        for (size_t axis = 0; axis < 3; ++axis) arm[axis] = vertex.bind_pos[axis] - menu_pose.pos[j][axis];
+        arms.push_back(arm);
+      }
+    return arms;
+  };
+  rig.floored.assign(menu_count, false);
+  for (const s8 joint : tuning.floor) {
+    if (joint <= 0 || static_cast<size_t>(joint) >= menu_count) continue;
+    rig.menu_sole[static_cast<size_t>(joint)] = piece_arms(static_cast<size_t>(joint));
+    rig.floored[static_cast<size_t>(joint)] = !rig.menu_sole[static_cast<size_t>(joint)].empty();
+  }
+  rig.lead.assign(menu_count, {-1, -1});
+  rig.lead_arm.assign(menu_count, Vec3{});
+  rig.lead_back.assign(menu_count, false);
+  for (const auto& entry : tuning.lead) {
+    if (entry[0] <= 0 || static_cast<size_t>(entry[0]) >= menu_count || entry[1] < 0 || entry[2] < 0 || static_cast<size_t>(entry[1]) >= field_count ||
+        static_cast<size_t>(entry[2]) >= field_count)
+      continue;
+    const auto j = static_cast<size_t>(entry[0]);
+    const std::vector<Vec3> arms = piece_arms(j);
+    if (arms.empty()) continue;
+    for (const Vec3& arm : arms)
+      for (size_t axis = 0; axis < 3; ++axis) rig.lead_arm[j][axis] += arm[axis] / static_cast<float>(arms.size());
+    rig.lead[j] = {entry[1], entry[2]};
+    rig.lead_back[j] = menu_pose.pos[j][2] + rig.lead_arm[j][2] > menu_pose.pos[0][2];
+  }
+  rig.outer.assign(menu_count, false);
+  for (const s8 joint : tuning.outer)
+    if (joint > 0 && static_cast<size_t>(joint) < menu_count) rig.outer[static_cast<size_t>(joint)] = true;
+  rig.aimed.assign(menu_count, false);
+  rig.aim_point.assign(menu_count, Vec3{});
+  rig.aim_rest.assign(menu_count, Vec3{});
+  rig.aim_arm.assign(menu_count, Vec3{});
+  for (const s8 joint : tuning.aim) {
+    if (joint <= 0 || static_cast<size_t>(joint) >= menu_count || rig.field_joint[static_cast<size_t>(joint)] < 0) continue;
+    const auto j = static_cast<size_t>(joint);
+    const auto source = static_cast<size_t>(rig.field_joint[j]);
+    Vec3 centre{}, local{};
+    int vertices = 0;
+    for (const assets::Mesh& mesh : field_model.meshes)
+      for (const assets::SkinVertex& vertex : mesh.pool) {
+        if (vertex.joint[0] != source) continue;
+        for (size_t axis = 0; axis < 3; ++axis) centre[axis] += vertex.bind_pos[axis], local[axis] += vertex.local[0][axis];
+        ++vertices;
+      }
+    const std::vector<Vec3> arms = piece_arms(j);
+    Vec3 mean{};
+    float reach = 0.0f;
+    for (const Vec3& arm : arms) {
+      for (size_t axis = 0; axis < 3; ++axis) mean[axis] += arm[axis] / static_cast<float>(arms.size());
+      reach = std::max(reach, std::hypot(arm[0], arm[1], arm[2]));
+    }
+    const float length = std::hypot(mean[0], mean[1], mean[2]);
+    if (vertices == 0 || length <= 0.0f) continue;
+    for (size_t axis = 0; axis < 3; ++axis) {
+      rig.aim_point[j][axis] = local[axis] / static_cast<float>(vertices);
+      rig.aim_rest[j][axis] = centre[axis] / static_cast<float>(vertices) / rig.scale - menu_pose.pos[j][axis];
+      rig.aim_arm[j][axis] = mean[axis] * reach / length;
+    }
+    rig.aimed[j] = true;
+    if (j < rig.placed_from.size()) rig.placed_from[j] = -1;
+    if (j < rig.swing_about.size()) rig.swing_about[j] = -1;
+    if (j < rig.moved.size()) rig.moved[j] = false;
+  }
   rig.hang.assign(menu_count, false);
   for (const s8 joint : tuning.hang) {
     if (joint <= 0 || static_cast<size_t>(joint) >= menu_count || rig.field_joint[static_cast<size_t>(joint)] < 0 || rig.menu_parent[static_cast<size_t>(joint)] < 0) continue;
@@ -658,6 +1006,9 @@ void tune_menu_rig(MenuRig& rig, const assets::ModelAsset& field_model, const as
 }
 
 MenuRig match_body_rig(const assets::ModelAsset& field_model, assets::ModelAsset& menu_model, int body) {
+  // A prop modelled into a body joint's piece gets a joint of its own first, so that the map can hide or pair it.
+  for (const HiddenShell& shell : hidden_shells(body))
+    if (shell.joint > 0 && static_cast<size_t>(shell.joint) < menu_model.skeleton.joints.size()) split_free_shells(menu_model, shell.joint);
   const auto map = menu_rig_map(body);
   MenuRig rig = map.empty() ? match_menu_rig(field_model, menu_model) : match_menu_rig(field_model, menu_model, map);
   if (const RigTuning* tuning = menu_rig_tuning(body)) tune_menu_rig(rig, field_model, menu_model, *tuning);
@@ -736,6 +1087,31 @@ MenuRig match_body_rig(const assets::ModelAsset& field_model, assets::ModelAsset
       rig.held_arm[j] = rotate(turn, from_centre);
       rig.held_reach[j] = reach;
     }
+    // The field prop's joint drives the prop only: a finger the matcher paired with it rides its hand.
+    for (size_t j = 1; j < body_count; ++j) {
+      if (piece[j] || rig.field_joint[j] != prop.field_joint) continue;
+      rig.field_joint[j] = -1;
+      rig.placed_from[j] = rig.swing_about[j] = -1;
+      rig.moved[j] = false;
+      ride_on_parent(rig, menu_model, j, menu_pose.height);
+    }
+  }
+  // Shown and hidden with a field construct: the one holding every vertex of the joint's field joint (a held prop's field piece), the
+  // parent's for a joint without a partner.
+  std::vector<int> construct_of(field_count, -1);
+  std::vector<bool> spread(field_count, false);
+  for (size_t construct = 0; construct < field_model.meshes.size(); ++construct)
+    for (const assets::SkinVertex& vertex : field_model.meshes[construct].pool) {
+      if (vertex.joint[0] >= field_count) continue;
+      spread[vertex.joint[0]] = spread[vertex.joint[0]] || (construct_of[vertex.joint[0]] >= 0 && construct_of[vertex.joint[0]] != static_cast<int>(construct));
+      construct_of[vertex.joint[0]] = static_cast<int>(construct);
+    }
+  rig.shown_with.assign(body_count, -1);
+  for (size_t j = 1; j < body_count; ++j) {
+    const int source = rig.held_from[j] >= 0 ? rig.held_from[j] : rig.field_joint[j];
+    const int parent = rig.menu_parent[j];
+    if (source >= 0) rig.shown_with[j] = spread[static_cast<size_t>(source)] ? -1 : construct_of[static_cast<size_t>(source)];
+    else if (parent >= 0) rig.shown_with[j] = rig.shown_with[static_cast<size_t>(parent)];
   }
   return rig;
 }
@@ -831,6 +1207,7 @@ MenuRig build_rig(const assets::ModelAsset& field_model, const assets::ModelAsse
     for (size_t i = 1; i < field_count && i < clip.tracks.size(); ++i)
       for (const assets::Key3& key : clip.tracks[i].trans)
         travel[i] = std::max(travel[i], distance(key.v, field.joints[i].rest_trans));
+  const std::vector<bool> field_joined = joined_pieces(field_model), menu_joined = joined_pieces(menu_model);
   rig.placed_from.assign(menu_count, -1);
   rig.anchor.assign(menu_count, -1);
   rig.swing_about.assign(menu_count, -1);
@@ -860,7 +1237,8 @@ MenuRig build_rig(const assets::ModelAsset& field_model, const assets::ModelAsse
     const bool travels = reach > kTravelShare * field_pose.height && reach > std::hypot(field.joints[static_cast<size_t>(source)].rest_trans[0],
                                                                                          field.joints[static_cast<size_t>(source)].rest_trans[1],
                                                                                          field.joints[static_cast<size_t>(source)].rest_trans[2]);
-    if (below && travels && followers[static_cast<size_t>(source)] == 1 && !body_chain[static_cast<size_t>(source)] && menu_shape.skinned[j]) {
+    if (below && travels && followers[static_cast<size_t>(source)] == 1 && !body_chain[static_cast<size_t>(source)] && menu_shape.skinned[j] &&
+        field_shape.vertices[static_cast<size_t>(source)] >= kMinPieceVertices) {
       rig.placed_from[j] = driver;
       rig.anchor[j] = anchor;
     } else if (below && !travels && field_shape.parent[static_cast<size_t>(source)] != driver) {
@@ -869,7 +1247,9 @@ MenuRig build_rig(const assets::ModelAsset& field_model, const assets::ModelAsse
         if (partner[static_cast<size_t>(at)] >= 0 && partner[static_cast<size_t>(at)] < static_cast<int>(j)) pivot = partner[static_cast<size_t>(at)];
       rig.swing_about[j] = pivot;
     } else if (travel[static_cast<size_t>(source)] > kMinTravel) {
-      rig.moved[j] = true;
+      // A field joint whose mesh is joined to its neighbours stretches that mesh as it moves; a menu piece free of the mesh would come off
+      // the body with it (a tuft of leaves the field model draws taller), so it keeps its own offset.
+      rig.moved[j] = menu_joined[j] || !field_joined[static_cast<size_t>(source)];
     }
   }
   rig.menu_local.resize(menu_count);
@@ -877,15 +1257,10 @@ MenuRig build_rig(const assets::ModelAsset& field_model, const assets::ModelAsse
   rig.menu_parent = menu_shape.parent;
   // A menu joint without a field partner is placed on its parent as the menu model's first pose (clip s4 0, the Status screen's) has it:
   // a held object (Marcy's shield) rests at the model origin and only the clips put it in the hand.
-  const assets::AnimationClip* pose = nullptr;
-  for (const assets::AnimationClip& clip : menu_model.clips)
-    if (!pose && clip.source == "s4" && clip.index == 0 && clip.frame_count > 0 && clip.tracks.size() == menu_count) pose = &clip;
   for (size_t j = 0; j < menu_count; ++j) {
     rig.menu_local[j] = assets::rotation_zyx(menu.joints[j].rest_rot_deg);
     rig.menu_offset[j] = menu.joints[j].rest_trans;
-    if (!pose || rig.field_joint[j] >= 0) continue;
-    if (!pose->tracks[j].rot.empty()) rig.menu_local[j] = assets::rotation_zyx(pose->tracks[j].rot[0].v);
-    if (!pose->tracks[j].trans.empty()) rig.menu_offset[j] = pose->tracks[j].trans[0].v;
+    if (rig.field_joint[j] < 0) ride_on_parent(rig, menu_model, j, menu_pose.height);
   }
   rig.field_root_rest = field_pose.pos[0];
   // As tall as the field model, feet to the top of the body (body_top; the head is head_joint and the menu joint that follows it).
@@ -934,11 +1309,20 @@ void menu_model_parts(const assets::ModelAsset& menu, render::MeshPipeline::Draw
   }
 }
 
-void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_palette, std::vector<render::Mat4>& out) {
+void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_palette, std::vector<render::Mat4>& out, u32 hidden_constructs) {
   const size_t count = rig.field_joint.size();
   out.resize(count);
   std::vector<Mat3> turned(count);
-  std::vector<Vec3> placed(count);
+  std::vector<Vec3> placed(count), collapsed(count);
+  std::vector<bool> gone(count, false);
+  // The joint's matrix: a piece that is not drawn collapses onto its joint, or onto the topmost joint above it that is not drawn.
+  auto finish = [&](size_t j) {
+    const int parent = rig.menu_parent[j];
+    const int construct = j < rig.shown_with.size() ? rig.shown_with[j] : -1;
+    gone[j] = (j < rig.hidden.size() && rig.hidden[j]) || (construct >= 0 && construct < 32 && (hidden_constructs >> construct & 1u) != 0);
+    collapsed[j] = gone[j] && parent >= 0 && gone[static_cast<size_t>(parent)] ? collapsed[static_cast<size_t>(parent)] : placed[j];
+    out[j] = render::mat4_from_rt(gone[j] ? Mat3{} : turned[j], collapsed[j]);
+  };
   auto rotation_of = [](const render::Mat4& matrix) {
     return Mat3{matrix.at(0, 0), matrix.at(0, 1), matrix.at(0, 2), matrix.at(1, 0), matrix.at(1, 1), matrix.at(1, 2), matrix.at(2, 0), matrix.at(2, 1), matrix.at(2, 2)};
   };
@@ -955,12 +1339,30 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
       const Vec3 prop = position_of(field_palette[static_cast<size_t>(held)]), driver = position_of(field_palette[static_cast<size_t>(rig.held_driver[j])]);
       for (size_t axis = 0; axis < 3; ++axis)
         placed[j][axis] = placed[static_cast<size_t>(rig.held_anchor[j])][axis] + arm[axis] + (reach[axis] + prop[axis] - driver[axis]) / rig.scale;
-      out[j] = render::mat4_from_rt(turned[j], placed[j]);
+      finish(j);
       continue;
     }
     if (source >= 0 && static_cast<size_t>(source) < field_palette.size()) {
       const size_t field_index = static_cast<size_t>(source);
-      turned[j] = multiply(multiply(rotation_of(field_palette[field_index]), transpose(rig.field_rest[field_index])), rig.menu_rest[j]);
+      Mat3 turn = multiply(rotation_of(field_palette[field_index]), transpose(rig.field_rest[field_index]));
+      // Of two leading field joints, the one that swings the piece further forward (or back, for a piece behind the root); the turn
+      // passes from one to the other over kLeadBlend of the piece's arm, so the piece does not jump as the two cross.
+      if (j < rig.lead.size() && rig.lead[j][0] >= 0 && static_cast<size_t>(rig.lead[j][0]) < field_palette.size() &&
+          static_cast<size_t>(rig.lead[j][1]) < field_palette.size()) {
+        Mat3 turns[2];
+        float reach[2];
+        for (size_t side = 0; side < 2; ++side) {
+          const auto leader = static_cast<size_t>(rig.lead[j][side]);
+          turns[side] = multiply(rotation_of(field_palette[leader]), transpose(rig.field_rest[leader]));
+          reach[side] = rotate(turns[side], rig.lead_arm[j])[2] * (rig.lead_back[j] ? -1.0f : 1.0f);
+        }
+        const float band = kLeadBlend * std::max(1.0f, std::hypot(rig.lead_arm[j][0], rig.lead_arm[j][1], rig.lead_arm[j][2]));
+        const float share = std::clamp((reach[0] - reach[1]) / band + 0.5f, 0.0f, 1.0f);
+        const float eased = share * share * (3.0f - 2.0f * share);
+        for (size_t k = 0; k < 9; ++k) turn[k] = turns[0][k] + (turns[1][k] - turns[0][k]) * eased;
+        turn = orthonormal(turn);
+      }
+      turned[j] = multiply(turn, rig.menu_rest[j]);
     } else {
       turned[j] = parent >= 0 ? multiply(turned[static_cast<size_t>(parent)], rig.menu_local[j]) : rig.menu_local[j];
     }
@@ -984,6 +1386,36 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
       }
       for (const Vec3& point : rig.menu_sole[j]) menu_low = std::max(menu_low, placed[j][1] + rotate(turn, point)[1]);
       if (field_low > -1e30f && menu_low > field_low) placed[j][1] -= menu_low - field_low;
+    } else if (j < rig.carried_by.size() && rig.carried_by[j] >= 0) {
+      const auto carrier = static_cast<size_t>(rig.carried_by[j]);
+      Vec3 arm;
+      for (size_t axis = 0; axis < 3; ++axis) arm[axis] = rig.menu_rest_pos[j][axis] - rig.menu_rest_pos[carrier][axis];
+      const Vec3 carried = rotate(multiply(turned[carrier], transpose(rig.menu_rest[carrier])), arm);
+      for (size_t axis = 0; axis < 3; ++axis) placed[j][axis] = placed[carrier][axis] + carried[axis];
+      // An outer joint never falls behind its own parent's place: of the two, the one further out from the carrier the way the carried
+      // place lies from it (seen from above), passing from one to the other over kOuterBlend of the rest arm's length so that the piece
+      // does not jump as they cross.
+      if (j < rig.outer.size() && rig.outer[j] && parent >= 0) {
+        const Vec3 hung = rotate(turned[static_cast<size_t>(parent)], rig.menu_offset[j]);
+        Vec3 own;
+        for (size_t axis = 0; axis < 3; ++axis) own[axis] = placed[static_cast<size_t>(parent)][axis] + hung[axis];
+        const float carried_reach = std::hypot(carried[0], carried[2]);
+        const float own_reach = carried_reach > 0.0f
+                                    ? ((own[0] - placed[carrier][0]) * carried[0] + (own[2] - placed[carrier][2]) * carried[2]) / carried_reach
+                                    : std::hypot(own[0] - placed[carrier][0], own[2] - placed[carrier][2]);
+        const float band = kOuterBlend * std::max(1.0f, std::hypot(arm[0], arm[1], arm[2]));
+        const float share = std::clamp((own_reach - carried_reach) / band + 0.5f, 0.0f, 1.0f);
+        const float eased = share * share * (3.0f - 2.0f * share);
+        for (size_t axis = 0; axis < 3; ++axis) placed[j][axis] += (own[axis] - placed[j][axis]) * eased;
+      }
+      // A carried joint whose field joint is translated takes that joint's move away from its rest offset as well.
+      const int above = field_ok && j < rig.moved.size() && rig.moved[j] ? rig.field_parent[static_cast<size_t>(source)] : -1;
+      if (above >= 0 && static_cast<size_t>(above) < field_palette.size()) {
+        const render::Mat4& frame = field_palette[static_cast<size_t>(above)];
+        const Vec3 rest = rotate(rotation_of(frame), rig.field_offset[static_cast<size_t>(source)]);
+        for (size_t axis = 0; axis < 3; ++axis)
+          placed[j][axis] += (field_palette[static_cast<size_t>(source)].at(static_cast<int>(axis), 3) - frame.at(static_cast<int>(axis), 3) - rest[axis]) / rig.scale;
+      }
     } else if (parent >= 0 && from >= 0 && field_ok && static_cast<size_t>(from) < field_palette.size()) {
       const size_t anchor = static_cast<size_t>(rig.anchor[j]);
       const Mat3 turn = multiply(rotation_of(field_palette[static_cast<size_t>(source)]), transpose(rig.field_rest[static_cast<size_t>(source)]));
@@ -1036,6 +1468,31 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
         for (size_t axis = 0; axis < 3; ++axis)
           placed[j][axis] += (field_palette[0].at(static_cast<int>(axis), 3) - rig.field_root_rest[axis]) * rig.root_motion;
     }
+    // An aimed piece: turned from the way its carrier holds it so that its far end moves as its field joint's vertices have moved.
+    if (j < rig.aimed.size() && rig.aimed[j] && field_ok && parent >= 0) {
+      const auto base = static_cast<size_t>(j < rig.carried_by.size() && rig.carried_by[j] >= 0 ? rig.carried_by[j] : parent);
+      const Mat3 carry = multiply(turned[base], transpose(rig.menu_rest[base]));
+      const render::Mat4& frame = field_palette[static_cast<size_t>(source)];
+      const Vec3 expected = rotate(carry, rig.aim_rest[j]);
+      Vec3 arm = rotate(carry, rig.aim_arm[j]), reach;
+      for (size_t axis = 0; axis < 3; ++axis) {
+        const int row = static_cast<int>(axis);
+        const float centre = frame.at(row, 0) * rig.aim_point[j][0] + frame.at(row, 1) * rig.aim_point[j][1] + frame.at(row, 2) * rig.aim_point[j][2] + frame.at(row, 3);
+        reach[axis] = arm[axis] + centre / rig.scale - placed[j][axis] - expected[axis];
+      }
+      const float arm_length = std::hypot(arm[0], arm[1], arm[2]), reach_length = std::hypot(reach[0], reach[1], reach[2]);
+      if (arm_length > 0.0f && reach_length > 0.0f) {
+        for (size_t axis = 0; axis < 3; ++axis) arm[axis] /= arm_length, reach[axis] /= reach_length;
+        turned[j] = multiply(multiply(turn_between(arm, reach), carry), rig.menu_rest[j]);
+      }
+    }
+    // A floored piece is lifted off the floor (model y = 0, y pointing down).
+    if (j < rig.floored.size() && rig.floored[j]) {
+      const Mat3 turn = multiply(turned[j], transpose(rig.menu_rest[j]));
+      float low = -1e30f;
+      for (const Vec3& arm : rig.menu_sole[j]) low = std::max(low, placed[j][1] + rotate(turn, arm)[1]);
+      if (low > 0.0f) placed[j][1] -= low;
+    }
     // A hanging piece reaches no lower than the floor (model y = 0, y pointing down) or, where it reaches lower, its field piece: tipped
     // forward about the root's sideways axis through its joint, by the least angle that lifts its lowest point that high.
     if (hanging && field_ok && !rig.menu_sole[j].empty()) {
@@ -1062,7 +1519,7 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
         turned[j] = multiply(tipped(fits), rig.menu_rest[j]);
       }
     }
-    out[j] = render::mat4_from_rt(j < rig.hidden.size() && rig.hidden[j] ? Mat3{} : turned[j], placed[j]);
+    finish(j);
   }
 }
 
@@ -1073,21 +1530,29 @@ namespace {
 // veil, a coat panel taking a cane, panels paired on one side only). -1: the menu joint rides on its parent (hair and other pieces the field rig has no
 // joint for). Field joints that share one point (Marcy's skirt flaps, Razzly's wings) are told apart by where their vertices lie.
 // Riddel: field joint per menu joint.
-constexpr s8 kRiddelMap[] = {0, 1, 2, 3, -1, -1, -1, -1, -1, -1, -1, -1, 5, 6, 7, 7, 8, 9, 10, 11, -1, 12, 13, 14, 15, -1, 23, 24, 25, 26, 29, 28, 16, 17, 18, 19, 20, 21};
+// The sleeves (one piece with the forearm) turn with the field hand joints, which carry the field's bell sleeves.
+constexpr s8 kRiddelMap[] = {0, 1, 2, 3, -1, -1, -1, -1, -1, -1, -1, -1, 5, 6, 7, 7, 8, 9, 11, 11, -1, 12, 13, 15, 15, -1, 23, 24, 25, 26, 29, 28,
+                             16, 17, 18, 19, 20, 21};
 // Marcy: field joint per menu joint.
 constexpr s8 kMarcyMap[] = {0, 1, 2, 3, -1, -1, 5, 4, 6, 7, 8, 9, -1, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 25, 25, 22, 22, 23, 24, 22, 22};
 // Razzly: field joint per menu joint.
 constexpr s8 kRazzlyMap[] = {0, 1, 2, 3, -1, -1, -1, 11, 12, 13, 14, 7, 8, 9, 10, 4, 5, 6, 6, 15, 16, 17, 18, -1, 19, 20, 21, 22, -1, -1, 26, 24, 25, 23, 23};
 // Harle: field joint per menu joint.
-constexpr s8 kHarleMap[] = {0, 1, 2, 3, -1, -1, 6, 7, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, -1, -1, 16, -1, -1, -1, -1, 17, 18, 19, 20, -1, 21, 22, 23, 24, -1};
+// Every joint of the two bell ribbons follows the field's one ribbon joint.
+constexpr s8 kHarleMap[] = {0, 1, 2, 3, -1, -1, 6, 7, 4, 5, 8, 9, 10, 11, 12, 13, 14, 15, 16, 16, 16, 16, 16, 16, -1, -1, 17, 18, 19, 20, -1, 21,
+                            22, 23, 24, -1};
 // Janice: field joint per menu joint.
-constexpr s8 kJaniceMap[] = {0, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11, 12, -1, 10, 13, 14, 15, 16, 17, -1, 15, 18, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27};
+// The drum on her forearm (in the field she carries none) is not drawn.
+constexpr s8 kJaniceMap[] = {0, 1, 2, 3, 6, 7, 4, 5, 8, 9, 10, 11, 12, kHiddenJoint, 10, 13, 14, 15, 16, 17, -1, 15, 18, 18, 19, 20, 21, 22, 23, 24,
+                             25, 26, 27};
 // NeoFio: field joint per menu joint.
 constexpr s8 kNeoFioMap[] = {0, 1, 2, 3, 6, 5, -1, -1, -1, -1, 4, 7, 8, 9, 10, -1, -1, -1, -1, -1, -1, 11, 12, 13, 14, -1, -1, -1, -1, -1, -1, 15, 16, 17, 18, 19, 20, 21, 22};
 // Irenes: field joint per menu joint.
 constexpr s8 kIrenesMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, -1, -1, -1, 8, 9, 10, 11, -1, -1, -1, -1, 12, 3, -1, -1, -1, -1, 13, 15, 16, 17, 18, 19, 20, 21, 23, 22};
 // Leah: field joint per menu joint.
-constexpr s8 kLeahMap[] = {0, 1, 2, -1, 3, 12, -1, 4, 5, 6, 7, 8, 9, 10, 11, -1, 17, 18, 19, 20, 13, 14, 15, 16, 21, 22, 23, 23, 23, -1, -1, -1, -1, -1};
+// The tail's end rides its root (the field tail's second joint does not turn the way the tail points).
+constexpr s8 kLeahMap[] = {0, 1, 2, -1, 3, 12, -1, 4, 5, 6, 7, 8, 9, 10, 11, -1, 17, 18, 19, 20, 13, 14, 15, 16, 21, 22, -1, -1, -1, -1, -1, -1, -1,
+                           -1};
 // Van: field joint per menu joint.
 constexpr s8 kVanMap[] = {0, 1, 2, 3, 4, 5, 6, 7, -1, 8, 9, 10, 11, -1, 21, -1, 12, 13, 14, 15, -1, 16, 17, 18, 19, -1, 24, 20, 22, 23, -1, -1, 23, 22};
 // Sneff: field joint per menu joint.
@@ -1095,50 +1560,69 @@ constexpr s8 kSneffMap[] = {0, 1, 2, 3, -1, -1, 5, 6, 7, 8, -1, -1, 9, 10, 11, 1
 
 // Poshul: field joint per menu joint; the legs joint for joint (hip, thigh, foot, toe on both rigs: the matcher pairs the field thigh with
 // the battle foot), the collar's tag on the field collar's ring (hung from the chest by her RigTuning).
-constexpr s8 kPoshulMap[] = {0, 1, 2, 3, -1, -1, 6, -1, 5, -1, -1, 7, 8, 9, 10, 11, 12, 13, 14, 4, 17, 18, 19, 20, 21, 22, 23, 24, 16, -1, 15, -1};
+// The ears' bases ride the head and their tips follow the field ears (the field ear joint carries the tip only).
+constexpr s8 kPoshulMap[] = {0, 1, 2, 3, -1, -1, -1, 6, -1, 5, -1, 7, 8, 9, 10, 11, 12, 13, 14, 4, 17, 18, 19, 20, 21, 22, 23, 24, 16, -1, 15, -1};
 
 // Leena: field joint per menu joint.
 constexpr s8 kLeenaMap[] = {0, 1, 2, 3, -1, -1, 5, 6, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 23, 24, 25, 26, 27, 27, 27, 20, 20, 20, 22, 21, -1, 29, 28, -1};
 // Turnip: field joint per menu joint.
-constexpr s8 kTurnipMap[] = {0, 1, 2, 3, 3, 4, -1, -1, -1, -1, 17, 18, 15, 16, 13, 14, 15, 16, 17, 13, 5, 6, 7, 8, 9, 10, 11, 12, -1, 27, 19, 20, 21, 22, -1, 23, 24, 25, 26, -1};
+// The cape's top follows the field cape.
+constexpr s8 kTurnipMap[] = {0, 1, 2, 3, 3, 4, -1, -1, -1, 15, 17, 18, 15, 16, 13, 14, 15, 16, 17, 13, 5, 6, 7, 8, 9, 10, 11, 12, -1, 27, 19, 20,
+                             21, 22, -1, 23, 24, 25, 26, -1};
 // Pierre: field joint per menu joint.
-constexpr s8 kPierreMap[] = {0, 1, 2, 3, -1, -1, -1, 5, -1, -1, 4, -1, 7, 6, 12, 13, 14, 15, 8, 9, 10, 11, -1, -1, 16, 17, 18, 19, 20, 21, 22, 23, 26, 27, 24, 25, -1, -1, -1};
+constexpr s8 kPierreMap[] = {0, 1, 2, 3, -1, -1, -1, 5, -1, -1, 4, -1, 7, 6, 12, 13, 14, 15, 8, 9, 10, 11, -1, -1, 16, 17, 18, 19, 20, 21, 22, 23, 26, 27, 24, 25, -1, -1, -1, kHiddenJoint};
 
 // Glenn (both field models share one skeleton, both menu models too): field joint per menu joint.
 constexpr s8 kGlennMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 12, 13, 14, 15, -1, 8, 9, 10, 11, -1, 23, 24, 25, 26, 19, 20, 21, 22, 16, 17};
 
 // Radius: field joint per menu joint.
-constexpr s8 kRadiusMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 17, -1, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1};
+// The robe's side and lower panels swing with the thighs and the feet's chain; its front panel is on the pelvis, hung plumb by his RigTuning.
+constexpr s8 kRadiusMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 17, 19, 13, 15, 1, -1, 17, 19, 13, 15,
+                             -1, -1};
 // Fargo: field joint per menu joint.
 constexpr s8 kFargoMap[] = {0, 1, 2, 3, -1, -1, 4, -1, 5, 6, 7, 8, 9, 10, 11, 12, -1, -1, -1, -1, -1, 13, 14, 15, 16, 17, 18, 19, 20, -1};
 // Macha: field joint per menu joint.
 constexpr s8 kMachaMap[] = {0, 1, 2, 3, -1, -1, 8, 9, 10, 11, 4, 5, 6, 7, -1, 12, 13, 14, 15, 16, 17, 18, 19, 21, 21, 20, 20, -1, -1, -1, -1, 21, -1, -1, 21, 21};
 // Miki: field joint per menu joint.
-constexpr s8 kMikiMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, -1, -1, 9, 10, 11, 12, 13, 14, -1, 15, 16, 17, 18, 19, 20, -1, 21, 22, 23, 24, 25, 26, 27, 28};
+// Both front hair locks turn with the field's one centre lock.
+constexpr s8 kMikiMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 7, 8, 9, 10, 11, 12, 13, 14, -1, 15, 16, 17, 18, 19, 20, -1, 21, 22, 23, 24, 25, 26,
+                           27, 28};
 // Greco: field joint per menu joint.
-constexpr s8 kGrecoMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 13, 14, 17, 18, 22, 23, 20, 21, -1, -1, -1, -1};
+// Every robe panel follows the thigh or shin its neighbour does (two rode the pelvis and split from the rest in a crouch).
+constexpr s8 kGrecoMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 13, 14, 17, 18, 17, 23, 20, 21, 13, 14, 17, 18};
 // Mel: field joint per menu joint.
 constexpr s8 kMelMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 19, 15, 19, 15};
 // Steena: field joint per menu joint.
-constexpr s8 kSteenaMap[] = {0, 1, 2, -1, -1, -1, 3, -1, -1, -1, 4, 5, 6, 11, 12, 13, 14, 7, 8, 9, 10, 20, 21, 22, 23, 24, 15, 16, 17, 18, 19};
+// The ponytail's arch turns with the field ponytail like the tail below it.
+constexpr s8 kSteenaMap[] = {0, 1, 2, -1, -1, -1, 3, -1, -1, 4, 4, 5, 6, 11, 12, 13, 14, 7, 8, 9, 10, 20, 21, 22, 23, 24, 15, 16, 17, 18, 19};
 // Doc: field joint per menu joint.
 constexpr s8 kDocMap[] = {0, 1, 2, 3, 4, 6, 8, 9, 10, 11, -1, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 25, 25, 24, 24, 21, 17, 26, 24, 24, 24, 24};
 // Pip's flying form (tu_mm): field joint per menu joint.
-constexpr s8 kTuMmMap[] = {0, 1, 2, 3, 4, 5, 18, -1, -1, -1, 16, 17, 6, 7, 8, 11, 12, 13, 14, 15, 10, 9, 20, 20, -1, 19, 19, -1};
+// Bow and bell as in the other forms.
+constexpr s8 kTuMmMap[] = {0, 1, 2, 3, 4, 5, -1, -1, -1, 18, 16, 17, 6, 7, 8, 11, 12, 13, 14, 15, 10, 9, 20, 20, -1, 19, 19, -1};
 // Lynx's body (worn by Serge): field joint per menu joint.
-constexpr s8 kLynxMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1, 13, 14, 13, 14, 15, 16, 17, 18, -1, -1, -1, -1, 19, 20, 21, 22, -1, -1, -1, -1, 24, 25, 23, 26};
+// The lower coat's front side panels (children of the shins on the menu rig) follow the field coat's front hem joint and his RigTuning
+// places them; the back side panels swing with the shins they hang from, which keeps them behind the trailing leg.
+constexpr s8 kLynxMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1, 13, 14, 13, 14, 15, 16, 17, 18, 25, 17, -1, -1, 19, 20, 21, 22, 25, 21, -1, -1,
+                           24, 25, 23, 26};
 
 // Solt's battle model: field joint per battle joint (the matcher pairs the thighs with skirt panels); the side panels of the skirt swing
 // with the thighs.
-constexpr s8 kSoltMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1, 12, 13, 14, 15, 16, 17, 18, 19, 17, -1, 13, -1, -1, -1, -1, -1};
+// The skirt's front and back hem follow the field skirt's corners; the empty joint under the hand shares the front corner so that the hem
+// takes the corner's move rather than its place.
+constexpr s8 kSoltMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 21, 12, 13, 14, 15, 16, 17, 18, 19, 17, -1, 13, -1, -1, 20, -1, 21};
 // Peppor's battle model: field joint per battle joint.
-constexpr s8 kPepporMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1, 12, 13, 14, 15, 16, 17, 18, 19, 22, -1, 23, -1, 21, -1, 20, -1};
+// The skirt's hem joints follow the field hem joints; its waist-level joints ride the pelvis (paired with the hem they swung the whole
+// panel on a long arm).
+constexpr s8 kPepporMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, -1, 12, 13, 14, 15, 16, 17, 18, 19, -1, 22, -1, 23, 21, -1, 20, -1};
 
 // Dario's battle model: the matcher's pairing, with the sword (in the field he carries none) not drawn.
-constexpr s8 kDarioMap[] = {0,  1,  2,  3,  4,  5,  6,  7,  8,  9,  10, 11, kHiddenJoint, 12, -1, 13, -1, 14,
-                            -1, -1, -1, -1, 15, 16, 17, 18, -1, 19, 20, 21, 22, -1, -1,           -1, -1};
+// Both halves of the cape follow the field cape's joints by height; the front hip plates turn with the thighs.
+constexpr s8 kDarioMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, kHiddenJoint, 12, -1, -1, 13, 14, -1, -1, 13, 14, 15, 16, 17, 18, -1, 19, 20, 21,
+                            22, -1, -1, 20, 16};
 
-// Held props: Radius's cane and the Acacia Dragoon rider's lance (their detailed bodies have none: the field piece is grafted on); the
+// Held props: Radius's cane, the Acacia Dragoon rider's lance and the Fossicker's shovel (their detailed bodies have none: the field piece
+// is grafted on); the
 // Porre soldiers' rifle (battle joints 17..19),
 // aimed in the battle stance, held across the body or slung in the field.
 constexpr HeldProp kHeldProps[] = {
@@ -1146,7 +1630,20 @@ constexpr HeldProp kHeldProps[] = {
     {134, 18, {-1, -1, -1, -1}},
     {140, 9, {17, 18, 19, -1}},
     {141, 9, {17, 18, 19, -1}},
+    {166, 28, {-1, -1, -1, -1}},
 };
+
+// Nikki: the matcher's pairing, with the guitar at his hip (in the field he carries none) not drawn.
+constexpr s8 kNikkiMap[] = {0, 1, 2, 3, -1, -1, -1, -1, 4, 5, 6, 7, -1, 8, 9, 10, 11, -1, 12, 13, 14, 15, 16, 17, 18, 19, kHiddenJoint, -1, -1};
+// Orcha: the matcher's pairing. The wok on his back and its shoulder strap are one menu joint (13, at the strap's top); split off
+// (kHiddenShells) onto the last joint, they follow the field wok, and the few vertices left on joint 13 ride the chest.
+constexpr s8 kOrchaMap[] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 5, 6, 7, 8, -1, 18, 19, 20, 21, 14, 15, 16, 17, 25, -1, 24, 23, 22, 13};
+// Korcha: the matcher's pairing, with the oar (in the field he carries none) not drawn.
+constexpr s8 kKorchaMap[] = {0, 1, 2, 3, 4, -1, 5, 6, 7, 8, 9, 10, 11, 12, kHiddenJoint, -1, -1, -1, -1, 13, 14, 15, 16, 17, 18, 19, 20};
+
+// Robo Ducky's battle model: the matcher's pairing. The wheel under the body (the field model walks on its feet) rides the body; its
+// RigTuning tucks it into its well, which would show as a hole in the belly without it.
+constexpr s8 kRoboDuckyMap[] = {0, 1, 2, 3, 4, 5, 6, -1, 7, -1, 8, 9, 10, 11, -1};
 
 // The Spearfisher's battle model: the matcher's pairing, with the trident (the field model carries none) not drawn.
 constexpr s8 kSpearfisherMap[] = {0,  1,  2,  2,  -1, 3,  -1, 4,  5,  6,  7,  -1, kHiddenJoint, -1, 8,
@@ -1157,15 +1654,126 @@ constexpr s8 kSpearfisherMap[] = {0,  1,  2,  2,  -1, 3,  -1, 4,  5,  6,  7,  -1
 constexpr s8 kFossickerMap[] = {0,  1,  2,  -1, -1, -1, 3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, kHiddenJoint, -1, -1,
                                 -1, -1, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, -1, 30,           31, 32, 33, 34};
 
-// Kid, Guile, Janice and Irenes: limbs aligned (their feet meet the field model's floor line better). Poshul: the field rest pose holds her
-// hind legs folded flat at foot level, her body turns about a point behind the menu model's, her hind feet and front paws hang free of the
-// body mesh, and her collar's tag hangs from the collar on her chest while the field collar and its ring ride the head.
+// Viper: the matcher's pairing, with the coat's front panels on the thighs like its side panels (the coat opens with the legs) and their
+// lower halves hung plumb by his RigTuning.
+constexpr s8 kViperMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 17, -1, 17, 17, 13, -1, -1, -1, 13, 13};
+
+// Sprigg: field joint per menu joint. The field cloak is five flaps at waist height, its upper part rigid with the chest: the menu cloak's
+// upper joints ride the chest and its lower joints follow the flaps.
+constexpr s8 kSpriggMap[] = {0, 1, 2, 3, 4, 9, 10, 11, 12, 5, 6, 7, 8, -1, 13, -1, 15, -1, 17, -1, 16, -1, 14, -1, -1, -1, 16, -1, 17, 23, 24, 25,
+                             26, 27, 18, 19, 20, 21, 22};
+
+// Skelly: the matcher's pairing, with the neck ruff riding the chest (paired with the field head it pitched with every nod).
+constexpr s8 kSkellyMap[] = {0, 1, 2, -1, 3, -1, 4, -1, -1, -1, -1, 6, 7, 8, 9, -1, -1, -1, -1, 10, 11, 12, 13, -1, -1, -1, -1, 18, 19, 20, 21, 14,
+                             15, 16, 17};
+
+// Pip's forms (tumaru, tu_p, tu_m, tu_pp, tu_pm; tu_mm below): the matcher's pairing, with the bow riding the chest and the bell on the field
+// bell's joint (the field clips spin that small bell freely; a bow paired with it swung up over the mouth), hung plumb by the RigTuning.
+constexpr s8 kPipMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1, -1, -1, 18, 16, 17};
+
+constexpr s8 kPipPMap[] = {0, 1, 2, 3, 5, 4, 16, 17, -1, -1, -1, 18, 6, 7, 8, 11, 12, 13, 14, 15, 10, -1, 9, -1, -1, -1, -1, -1};
+
+constexpr s8 kPipMMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, 18, 16, 17, 19, 20, -1, -1, -1, -1};
+
+constexpr s8 kPipPpMap[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 15, 16, 17, 11, 12, 9, 10, -1, -1, -1, -1, -1, -1, -1, 22, 20, 21, 18, 19, 23, -1,
+                            -1, -1, 24, -1, -1, -1};
+
+constexpr s8 kPipPmMap[] = {0, 1, 2, 3, 5, 4, 16, 17, -1, -1, -1, 18, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 22, 20, 21, 19};
+
+// The Acacia Dragoon private and sergeant (one rig): the pelvis on the field pelvis, the skirt's upper panels on the thighs and its hem
+// joints on the field skirt pieces (all unpaired, the skirt was a rigid bell the legs came through).
+constexpr s8 kDragoonMap[] = {0, 1, 1, 2, -1, 4, 5, 6, 7, 8, 9, 10, 11, -1, 3, 12, 13, 14, 15, 18, 19, 20, 21, 13, 17, 13, 16, 19, 22, 19, 23};
+
+// The Taurminator's battle model: the head and neck on the field head and neck (the matcher gave them to a mane tuft); jaw, horns and
+// mane ride.
+constexpr s8 kTaurminatorMap[] = {0, 1, 2, 3, 4, -1, -1, -1, -1, -1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, -1, -1, -1, -1, -1, -1, -1,
+                                  19, 20, 21, 22, 23, 24, 25, 26, 27, 28, -1, 29, -1, 30, 31};
+
+// The Polis Police robot's battle model: both arms joint for joint (the matcher paired one arm a joint low).
+constexpr s8 kPolisRobotMap[] = {0, 1, 2, 3, 4, 5, 6, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, 8, 9, 10, 11, -1, -1, -1, -1, -1, -1, -1, -1, 12, 13,
+                                 14, 15, 16, -1, -1, 17, 18, 19, 20, 21, -1, -1};
+
+// Dark Serge's battle model: the matcher's pairing, with the cape's second half on the field cape's joints like the first.
+constexpr s8 kDarkSergeMap[] = {0, 1, 2, 3, -1, -1, 4, 5, 6, 7, 8, 9, 10, 11, -1, 12, 13, 12, 13, 14, 15, 16, 17, -1, -1, -1, -1, 18, 19, 20, 21,
+                                -1, -1, -1, -1, -1, -1, -1, -1};
+
+// Per-body adjustments (RigTuning), by battle model.
+// Limbs aligned: Kid, Guile, Janice, Irenes (their feet meet the field model's floor line better) and the Acacia Dragoons (arms held as the
+// field arms are). Poshul: the field rest pose holds her hind legs folded flat at foot level, her body turns about a point behind the menu
+// model's, her hind feet and front paws hang free of the body mesh, her collar's tag hangs from the collar on her chest while the field
+// collar and its ring ride the head, and her ear tips are laid as the field ears hang. Pink Pip: his root sits higher in the body than
+// the field root, so his body follows the field body.
+// Drawn on the field piece: Orcha's cleavers (also laid as the field cleavers hang) and his wok, Leena's back hem panels, the Dragoons'
+// front and side hems,
+// Turnip's forearms and hands and Pip's feet (the field limbs lengthen by moving their joints), Van's bag (hung from the chest on the menu
+// rig, from the pelvis on the field rig), Sneff's upper arms.
+// Hung plumb: the lower front coat panels of Viper and Lynx, Radius's front robe panel, Steena's bare feet (the field ankle helpers do
+// not flatten in a kneel), the bell of every Pip form.
+// Kept at their own offset, turning only: Riddel's hem and sleeves, Miki's hair locks, Steena's ponytail, Pierre's sash, the hem joints
+// of Solt and the Dragoons, Dario's cape top and hip plates, Lynx's centre front strip and the tips of his cape halves (two vertices
+// each, which the field cape's move drew out and in).
+// Carried from another joint: Lynx's front side coat panels from the pelvis (they are children of the shins), Macha's upper front skirt
+// panels from the thighs and kept (moved with the field hem they flew to chest height in a jump).
+// Laid as the field piece hangs: the ribbons of Harle and Glenn, Orlha's twin tails.
+// Lifted off the floor: the hems of Lynx's coat and Radius's robe in a crouch. Following the leading one of two field joints: the centre
+// skirt panels of the Dragoons (leading thigh in front, trailing behind), Solt's centre hems, the mid ring of Leena's skirt front (whose
+// front hems are carried from it, so each half is one sheet). Kept out with their own parent: Lynx's front panels, in front of the knee.
+// Aimed at the field hem: Lynx's centre back strip (the field hem joints tip far over as he walks; the strip swings out as far as the hem).
+// Rest turns: Viper's arms (modelled held out), Skelly's ruff (modelled level, the field's is tilted), Fargo's scarf tails (laid against
+// chest and back), the mounted Dragoon's lower jaw (closed); a rest offset tucks Robo Ducky's wheel into its well.
+// Status stance for the pieces without a field partner: Miki's veils. Standing posture from the field stand pose: Dark Serge (the field
+// model stands swayed against its own rest pose).
 constexpr RigTuning kRigTunings[] = {
     {0x01, true, false, {-1, -1, -1, -1}, {-1, -1}},
     {0x02, true, false, {-1, -1, -1, -1}, {-1, -1}},
-    {0x0C, true, true, {13, 17, 22, 26}, {19, -1}},
+    {0x05, false, false, {-1, -1, -1, -1}, {25, 31}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{7, {0, 0, 12}, {0, 0, 0}}, {8, {0, 0, 12}, {0, 0, 0}}, {11, {0, 0, -12}, {0, 0, 0}}, {12, {0, 0, -12}, {0, 0, 0}}}}},
+    {0x06, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {18, 23, 30, 31, 36, 37, -1, -1}},
+    {0x0C, true, true, {13, 17, 22, 26}, {19, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}}, {7, 9, -1, -1, -1, -1}},
+    {0x0F, false, false, {24, 25, 27, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {24, 25, -1, -1, -1, -1}},
+    {0x10, false, false, {-1, -1, -1, -1}, {26, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{}, {}, {}, {}}}, {32, 26, 23, 25}},
+    {0x11, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{19, {0, 0, -8}, {0, 0, 0}}, {17, {0, 0, 10}, {0, 0, 0}}, {}, {}}}},
+    {0x12, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {31, 34, -1, -1, -1, -1, -1, -1}, {{{31, 20}, {34, 16}, {-1, -1}, {-1, -1}}}},
+    {0x13, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}}, {6, 7, 8, 9, -1, -1}},
+    {0x14, false, false, {31, 34, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{32, 29}, {35, 26}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{}, {}, {}, {}}}, {-1, -1, -1, -1}, {{{29, 17, 27}, {26, 24, 20}, {-1, -1, -1}, {-1, -1, -1}}}},
+    {0x15, false, false, {-1, -1, -1, -1}, {-1, -1}, true, {9, 10, 11, 12, -1, -1, -1, -1}},
+    {0x16, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}}, {18, 19, 20, 21, 22, 23}},
     {0x17, true, false, {-1, -1, -1, -1}, {-1, -1}},
+    {0x1C, false, false, {22, 23, 26, 27}, {-1, -1}},
+    {0x1F, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{3, {0, 0, -10}, {0, 0, 0}}, {}, {}, {}}}},
     {0x21, true, false, {-1, -1, -1, -1}, {-1, -1}},
+    {0x24, false, false, {14, -1, -1, -1}, {-1, -1}},
+    {0x25, false, false, {7, 13, -1, -1}, {-1, -1}},
+    {0x26, false, false, {-1, -1, -1, -1}, {24, 29}, false, {9, 10, -1, -1, -1, -1, -1, -1}},
+    {0x29, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {32, 33, 34, 35, -1, -1, -1, -1}},
+    {0x2A, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}}, {10, 11, 13, 14, -1, -1}},
+    {0x2B, false, false, {-1, -1, -1, -1}, {19, -1}},
+    {0x2C, false, true, {20, 22, -1, -1}, {11, -1}},
+    {0x2D, false, false, {-1, -1, -1, -1}, {23, -1}},
+    {0x2E, false, false, {14, 15, 16, 17}, {25, -1}},
+    {0x2F, false, false, {-1, -1, -1, -1}, {11, -1}},
+    {0x30, false, false, {-1, -1, -1, -1}, {9, -1}},
+    {0x31, false, false, {-1, -1, -1, -1}, {21, 29}, false, {33, 34, 14, 16, -1, -1, -1, -1}, {{{21, 1}, {29, 1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{}, {}, {}, {}}}, {33, 35, -1, -1}, {{{-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}, {-1, -1, -1}}}, {21, 29, -1, -1},
+      {35, 36, -1, -1}},
+    {0x32, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}}, {6, 7, 8, 9, -1, -1}},
+    {71, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {26, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{}, {}, {}, {}}}, {-1, -1, -1, -1}, {{{28, 21, 22}, {26, 20, 23}, {-1, -1, -1}, {-1, -1, -1}}}},
+    {91, true, false, {24, 30, -1, -1}, {-1, -1}, false, {26, 28, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{}, {}, {}, {}}}, {-1, -1, -1, -1}, {{{23, 13, 19}, {27, 13, 19}, {-1, -1, -1}, {-1, -1, -1}}}},
+    {92, true, false, {24, 30, -1, -1}, {-1, -1}, false, {26, 28, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{}, {}, {}, {}}}, {-1, -1, -1, -1}, {{{23, 13, 19}, {27, 13, 19}, {-1, -1, -1}, {-1, -1, -1}}}},
+    {134, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{6, {-20, 0, 0}, {0, 0, 0}}, {}, {}, {}}}},
+    {147, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}},
+      {-1, -1, -1, -1, -1, -1}, false, {{{14, {0, 0, 0}, {0, -400, 0}}, {}, {}, {}}}},
+    {215, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {13, 33, 34, -1, -1, -1, -1, -1}},
+    {217, false, false, {-1, -1, -1, -1}, {-1, -1}, false, {-1, -1, -1, -1, -1, -1, -1, -1}, {{{-1, -1}, {-1, -1}, {-1, -1}, {-1, -1}}}, {-1, -1, -1, -1, -1, -1}, true},
 };
 
 struct RigMap {
@@ -1173,10 +1781,13 @@ struct RigMap {
   std::span<const s8> map;
 };
 constexpr RigMap kRigMaps[] = {
+    {0x04, kNikkiMap},
     {0x06, kRiddelMap},
     {0x09, kMarcyMap},
+    {0x0A, kKorchaMap},
     {0x0C, kPoshulMap},
     {0x0D, kRazzlyMap},
+    {0x0F, kOrchaMap},
     {0x10, kRadiusMap},
     {0x11, kFargoMap},
     {0x12, kMachaMap},
@@ -1202,8 +1813,22 @@ constexpr RigMap kRigMaps[] = {
     {71, kSoltMap},
     {72, kPepporMap},
     {215, kDarioMap},
+    {147, kRoboDuckyMap},
     {156, kSpearfisherMap},
     {166, kFossickerMap},
+    {0x05, kViperMap},
+    {0x1A, kSpriggMap},
+    {0x1F, kSkellyMap},
+    {0x2B, kPipMap},
+    {0x2C, kPipPMap},
+    {0x2D, kPipMMap},
+    {0x2E, kPipPpMap},
+    {0x2F, kPipPmMap},
+    {91, kDragoonMap},
+    {92, kDragoonMap},
+    {174, kTaurminatorMap},
+    {186, kPolisRobotMap},
+    {217, kDarkSergeMap},
 };
 
 // Story NPCs and field enemies whose battle model is more detailed than the field model every room carries a copy of: field body
@@ -1281,17 +1906,60 @@ int npc_body(u64 fingerprint) {
 }
 
 std::span<const HeldProp> menu_rig_props(int body) {
+  if (const auto found = rig_overrides().props.find(body); found != rig_overrides().props.end()) return found->second;
   const auto first = std::ranges::find(kHeldProps, body, &HeldProp::body);
   const auto last = std::find_if(first, std::end(kHeldProps), [body](const HeldProp& prop) { return prop.body != body; });
   return {first, last};
 }
 
 const RigTuning* menu_rig_tuning(int body) {
-  const auto found = std::ranges::find(kRigTunings, body, &RigTuning::body);
-  return found == std::end(kRigTunings) ? nullptr : &*found;
+  const RigOverrides& overrides = rig_overrides();
+  const RigTuning* base = nullptr;
+  if (const auto found = overrides.untuned.find(body); found != overrides.untuned.end()) {
+    base = found->second ? nullptr : &overrides.tunings.at(body);
+  } else if (const auto entry = std::ranges::find(kRigTunings, body, &RigTuning::body); entry != std::end(kRigTunings)) {
+    base = &*entry;
+  }
+  const auto carry = overrides.carry.find(body), lay = overrides.lay.find(body), floor = overrides.floor.find(body), lead = overrides.lead.find(body);
+  const auto outer = overrides.outer.find(body), aim = overrides.aim.find(body);
+  const auto rest = overrides.rest.find(body);
+  const auto posture = overrides.posture.find(body);
+  if (carry == overrides.carry.end() && lay == overrides.lay.end() && posture == overrides.posture.end() && floor == overrides.floor.end() &&
+      lead == overrides.lead.end() && outer == overrides.outer.end() && aim == overrides.aim.end() && rest == overrides.rest.end())
+    return base;
+  static std::map<int, RigTuning> merged;
+  const auto [entry, added] = merged.try_emplace(body);
+  if (added) {
+    entry->second = base ? *base : RigTuning{body, false, false, {-1, -1, -1, -1}, {-1, -1}};
+    if (carry != overrides.carry.end())
+      for (size_t i = 0; i + 1 < carry->second.size() && i / 2 < entry->second.carry.size(); i += 2) entry->second.carry[i / 2] = {carry->second[i], carry->second[i + 1]};
+    if (lay != overrides.lay.end())
+      for (size_t i = 0; i < lay->second.size() && i < entry->second.lay.size(); ++i) entry->second.lay[i] = lay->second[i];
+    if (posture != overrides.posture.end()) entry->second.posture = posture->second;
+    if (floor != overrides.floor.end())
+      for (size_t i = 0; i < floor->second.size() && i < entry->second.floor.size(); ++i) entry->second.floor[i] = floor->second[i];
+    if (outer != overrides.outer.end())
+      for (size_t i = 0; i < outer->second.size() && i < entry->second.outer.size(); ++i) entry->second.outer[i] = outer->second[i];
+    if (aim != overrides.aim.end())
+      for (size_t i = 0; i < aim->second.size() && i < entry->second.aim.size(); ++i) entry->second.aim[i] = aim->second[i];
+    if (lead != overrides.lead.end())
+      for (size_t i = 0; i + 2 < lead->second.size() && i / 3 < entry->second.lead.size(); i += 3)
+        entry->second.lead[i / 3] = {lead->second[i], lead->second[i + 1], lead->second[i + 2]};
+    if (rest != overrides.rest.end())
+      for (size_t i = 0; i + 6 < rest->second.size() && i / 7 < entry->second.rest.size(); i += 7) {
+        RigRest& fix = entry->second.rest[i / 7];
+        fix.joint = static_cast<s8>(rest->second[i]);
+        for (size_t axis = 0; axis < 3; ++axis) {
+          fix.turn[axis] = static_cast<s16>(rest->second[i + 1 + axis]);
+          fix.offset[axis] = static_cast<s16>(rest->second[i + 4 + axis]);
+        }
+      }
+  }
+  return &entry->second;
 }
 
 std::span<const s8> menu_rig_map(int body) {
+  if (const auto found = rig_overrides().maps.find(body); found != rig_overrides().maps.end()) return found->second;
   for (const RigMap& entry : kRigMaps)
     if (entry.body == body) return entry.map;
   return {};

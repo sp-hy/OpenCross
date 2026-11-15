@@ -20,7 +20,8 @@
 //   occ room-models [room]                   import every room model (subfiles 11+) of all rooms / one room, report failures
 //   occ menu-rigs [--hd] [byte]              how each menu model's skeleton matches its character's field model ([Enhancements] MenuModelsInField);
 //                                            with a model byte (hex), every joint of that pair; --audit: drift over every field clip and
-//                                            mesh-region checks; --rooms: room copies of character field models
+//                                            mesh-region checks; --motion: how the posed mesh follows the field mesh over every
+//                                            field clip; --rooms: room copies of character field models
 //   occ battlefields [--inc <file>]          which rooms fight on which stage (every BATTLE op of every room script -> bg_NN); --inc writes
 //                                            src/data/battlefield_rooms.inc (the Debug tab's battlefield labels)
 //   occ world-markers [--inc <file>]         the overworld screens' location markers: label text (EN) -> target room, and the room-prefix ->
@@ -43,6 +44,7 @@
 #include "audio/bgm_table.h"
 #include "data/battlefields.h"
 #include "data/tables.h"
+#include "game/actor.h"
 #include "game/battle/battle_pose.h"
 #include "game/battle/model_table.h"
 #include "game/disc_index.h"
@@ -77,6 +79,7 @@
 #include <map>
 #include <optional>
 #include <set>
+#include <span>
 
 // Defined in tools/occ_save.cpp.
 int occ_save_main(const std::vector<std::string>& args);
@@ -134,7 +137,7 @@ int usage() {
                "  | models-validate\n"
                "  | room-songs [room]\n"
                "  | room-models [room]\n"
-               "  | menu-rigs [--hd] [--audit | --rooms | --npcs] [byte]\n"
+               "  | menu-rigs [--hd] [--audit | --motion | --rooms | --npcs] [byte]\n"
                "  | save-info <save.dat>\n"
                "  | save-slots <save.dat>\n"
                "  | save-roundtrip <save.dat> <out.dat>\n"
@@ -1445,7 +1448,8 @@ std::vector<RigPair> rig_pairs(vfs::Vfs& fs, const game::DiscIndex& discs, bool 
 // (game/menu_rig.h): joint counts, unmatched field joints (with children), mean joint distance (share of the height), bone angles, the
 // pairing strategy kept (under / beside / full = BesideWhenFull), scale, and in the stand pose the mean / worst bone angle between the
 // field and the posed menu model and the lean of the root-to-head line.
-// With a byte: every menu joint of that pair, its parent, its field partner, rest positions (% of the height) and bound vertex counts.
+// With a byte: every menu joint of that pair, its parent, its field partner, rest positions (% of the height) and bound vertex counts,
+// and how it is placed when not at its own offset from its parent (game/menu_rig.h).
 int cmd_menu_rigs(vfs::Vfs& fs, bool hd, int only) {
   fs.set_hd_mode(hd);
   game::DiscIndex discs;
@@ -1478,7 +1482,7 @@ int cmd_menu_rigs(vfs::Vfs& fs, bool hd, int only) {
                 rig.usable ? "yes" : "no");
     if (only < 0) continue;
     const std::vector<RigJointRow> menu_rows = rig_rows(*menu), field_rows = rig_rows(*field);
-    std::printf("menu joint  parent  field  menu pos %%            verts  vertex centre %%        field pos %%           verts\n");
+    std::printf("menu joint  parent  field  menu pos %%            verts  vertex centre %%        field pos %%           verts  placement\n");
     for (size_t j = 0; j < menu_rows.size(); ++j) {
       const int partner = rig.field_joint[j];
       std::printf("%5zu %7d %6d  %6.1f %6.1f %6.1f  %5d  %6.1f %6.1f %6.1f", j, menu->skeleton.joints[j].parent, partner, menu_rows[j].pos[0] * 100.0f,
@@ -1488,7 +1492,15 @@ int cmd_menu_rigs(vfs::Vfs& fs, bool hd, int only) {
         const RigJointRow& row = field_rows[static_cast<size_t>(partner)];
         std::printf("   %6.1f %6.1f %6.1f  %5d", row.pos[0] * 100.0f, row.pos[1] * 100.0f, row.pos[2] * 100.0f, row.vertices);
       }
-      std::printf("\n");
+      const char* rule = j < rig.hidden.size() && rig.hidden[j]                                      ? "hidden"
+                         : j < rig.held_from.size() && rig.held_from[j] >= 0                         ? "held"
+                         : j < rig.on_field.size() && rig.on_field[j]                                ? "on field"
+                         : j < rig.hang.size() && rig.hang[j]                                        ? "hangs"
+                         : j < rig.placed_from.size() && rig.placed_from[j] >= 0                     ? "placed"
+                         : j < rig.swing_about.size() && rig.swing_about[j] >= 0                     ? "swings"
+                         : j < rig.moved.size() && rig.moved[j]                                      ? "moved"
+                                                                                                     : "";
+      std::printf("  %s\n", rule);
     }
     std::printf("field joint  parent  field pos %%            verts  vertex centre %%       menu joints\n");
     for (size_t i = 0; i < field_rows.size(); ++i) {
@@ -1589,6 +1601,310 @@ int cmd_menu_rig_audit(vfs::Vfs& fs, bool hd, int only) {
     }
   }
   std::printf("menu-rigs --audit: %d region flags\n", flagged);
+  return 0;
+}
+
+// A model's mesh for the motion audit: every pool vertex once, the triangle edges between them, and per joint the vertices bound to it first.
+struct PosedMesh {
+  struct Vertex {
+    const assets::SkinVertex* skin;
+    int construct;
+  };
+  std::vector<Vertex> vertices;
+  std::vector<std::array<u32, 2>> edges;
+  std::vector<std::vector<u32>> pieces;
+  std::vector<assets::Vec3> at;
+};
+
+PosedMesh posed_mesh(const assets::ModelAsset& model, u32 hidden_constructs) {
+  PosedMesh out;
+  out.pieces.resize(model.skeleton.joints.size());
+  for (size_t construct = 0; construct < model.meshes.size(); ++construct) {
+    const assets::Mesh& mesh = model.meshes[construct];
+    if (!mesh.skinned || (hidden_constructs >> construct & 1u) != 0) continue;
+    const u32 base = static_cast<u32>(out.vertices.size());
+    for (const assets::SkinVertex& vertex : mesh.pool) {
+      if (vertex.joint[0] < out.pieces.size()) out.pieces[vertex.joint[0]].push_back(static_cast<u32>(out.vertices.size()));
+      out.vertices.push_back({&vertex, static_cast<int>(construct)});
+    }
+    for (size_t i = 0; i + 2 < mesh.indices.size(); i += 3)
+      for (size_t corner = 0; corner < 3; ++corner) {
+        const u32 from = base + mesh.vertices[mesh.indices[i + corner]].pool, to = base + mesh.vertices[mesh.indices[i + (corner + 1) % 3]].pool;
+        if (from < to) out.edges.push_back({from, to});
+      }
+  }
+  std::ranges::sort(out.edges);
+  out.edges.erase(std::unique(out.edges.begin(), out.edges.end()), out.edges.end());
+  out.at.resize(out.vertices.size());
+  return out;
+}
+
+void pose_mesh(PosedMesh& mesh, std::span<const render::Mat4> palette, float scale) {
+  for (size_t i = 0; i < mesh.vertices.size(); ++i) {
+    const assets::SkinVertex& skin = *mesh.vertices[i].skin;
+    assets::Vec3 sum{};
+    for (size_t k = 0; k < 2; ++k) {
+      if (skin.weight[k] == 0.0f || skin.joint[k] >= palette.size()) continue;
+      const render::Mat4& joint = palette[skin.joint[k]];
+      for (int axis = 0; axis < 3; ++axis)
+        sum[static_cast<size_t>(axis)] += skin.weight[k] * (joint.at(axis, 0) * skin.local[k][0] + joint.at(axis, 1) * skin.local[k][1] +
+                                                         joint.at(axis, 2) * skin.local[k][2] + joint.at(axis, 3));
+    }
+    for (size_t axis = 0; axis < 3; ++axis) mesh.at[i][axis] = sum[axis] * scale;
+  }
+}
+
+float distance(const assets::Vec3& lhs, const assets::Vec3& rhs) {
+  return std::sqrt((lhs[0] - rhs[0]) * (lhs[0] - rhs[0]) + (lhs[1] - rhs[1]) * (lhs[1] - rhs[1]) + (lhs[2] - rhs[2]) * (lhs[2] - rhs[2]));
+}
+
+u32 hidden_constructs(const assets::ModelAsset& model) {
+  u32 mask = 0;
+  for (size_t k = 0; k < model.shading.size(); ++k)
+    if (model.shading[k].flags & 1) mask |= 1u << k;
+  return mask;
+}
+
+// occ menu-rigs --motion [--hd] [byte]: how the posed menu mesh follows the field mesh over every field clip, sampled four times a
+// keyframe, in % of the field model's height. Per pair one line of worst values, each with its menu joint, clip and keyframe:
+//   stretch  the longest a triangle edge grows over its length in the menu model's own pose clip (a piece pulled off the mesh it is
+//            skinned into), with the field mesh's worst growth over its rest pose beside it;
+//   seam     for a piece that touches the piece carrying it (its nearest ancestor with mesh) in the menu model's own pose, the gap that
+//            opens between the two (the nearest of the six vertex pairs that lay closest there): a piece that comes off the body;
+//   sink / lift  the menu mesh's lowest vertex below / above the field mesh's lowest vertex;
+//   pop      the furthest a menu piece's centre moves in one sample beyond twice the furthest any field piece's centre moves in it;
+//   attach   the furthest a used attach point's field joint lies from the menu joint that follows it (what the field hangs on the point
+//            is placed by the field joint), with the distance in the stand pose beside it.
+// Then the size of the menu mesh against the field mesh in the stand pose (the extents of the two, per axis), the pieces only one model has (a piece whose vertices lie kApart % or more from the other model's mesh in the stand pose, by their
+// median), the constructs each model hides (S3 flag 1), the joints of each field construct and the field sequences that show or hide a
+// construct (ops 1B / 1C), which the menu model does not follow. With a byte: the same worst values per clip.
+int cmd_menu_rig_motion(vfs::Vfs& fs, bool hd, int only) {
+  constexpr int kSubsteps = 4, kSeamPairs = 6, kSeqTicks = 900;
+  constexpr float kSeamTouch = 0.03f, kApart = 6.0f;
+  fs.set_hd_mode(hd);
+  game::DiscIndex discs;
+  if (!discs.load(fs)) {
+    std::fprintf(stderr, "menu-rigs: no disc index\n");
+    return 1;
+  }
+  struct Worst {
+    float value = 0.0f;
+    std::string where = "-";
+    void take(float now, int joint, const std::string& clip, float key) {
+      if (now <= value) return;
+      value = now;
+      where = std::format("j{} {} k{:.2f}", joint, clip, key);
+    }
+  };
+  std::printf("%-4s %-9s %-28s %-28s %-28s %-28s %-28s %s\n", "byte", "menu", "stretch (field)", "seam", "sink", "lift", "pop", "attach (stand)");
+  for (const RigPair& pair : rig_pairs(fs, discs, hd, only)) {
+    const auto& field = pair.field;
+    auto menu = pair.menu;
+    if (!field || !menu) continue;
+    const game::MenuRig rig = game::match_body_rig(*field, *menu, pair.body);
+    if (!rig.usable) continue;
+    game::UnitPose pose, menu_pose;
+    pose.set_model(&*field);
+    menu_pose.set_model(&*menu);
+    PosedMesh field_mesh = posed_mesh(*field, hidden_constructs(*field)), menu_mesh = posed_mesh(*menu, hidden_constructs(*menu));
+    std::vector<render::Mat4> field_palette, menu_palette;
+    pose.palette_at(-1, 0.0f, field_palette);
+    pose_mesh(field_mesh, field_palette, 1.0f);
+    float top = 0.0f;
+    for (const assets::Vec3& point : field_mesh.at) top = std::max(top, -point[1]);
+    const float height = top > 0.0f ? top : 1.0f, percent = 100.0f / height;
+    std::vector<float> field_rest_edge(field_mesh.edges.size());
+    for (size_t i = 0; i < field_mesh.edges.size(); ++i) field_rest_edge[i] = distance(field_mesh.at[field_mesh.edges[i][0]], field_mesh.at[field_mesh.edges[i][1]]);
+    // The menu model's own pose: its first pose clip, the rest pose without one.
+    int own_clip = -1;
+    for (size_t index = 0; index < menu->clips.size() && own_clip < 0; ++index)
+      if (menu->clips[index].source == "s4" && menu->clips[index].index == 0 && menu->clips[index].frame_count > 0) own_clip = static_cast<int>(index);
+    menu_pose.palette_at(own_clip, 0.0f, menu_palette);
+    pose_mesh(menu_mesh, menu_palette, rig.scale);
+    std::vector<float> menu_own_edge(menu_mesh.edges.size());
+    for (size_t i = 0; i < menu_mesh.edges.size(); ++i) menu_own_edge[i] = distance(menu_mesh.at[menu_mesh.edges[i][0]], menu_mesh.at[menu_mesh.edges[i][1]]);
+    std::vector<int> piece_of(menu_mesh.vertices.size(), -1);
+    for (size_t j = 0; j < menu_mesh.pieces.size(); ++j)
+      for (const u32 index : menu_mesh.pieces[j]) piece_of[index] = static_cast<int>(j);
+    struct Seam {
+      int joint;
+      std::vector<std::array<u32, 2>> pairs;
+    };
+    std::vector<Seam> seams;
+    for (size_t j = 0; j < menu_mesh.pieces.size(); ++j) {
+      if (menu_mesh.pieces[j].size() < 4 || (j < rig.hidden.size() && rig.hidden[j])) continue;
+      int carrier = rig.menu_parent[j];
+      while (carrier >= 0 && menu_mesh.pieces[static_cast<size_t>(carrier)].empty()) carrier = rig.menu_parent[static_cast<size_t>(carrier)];
+      if (carrier < 0 || (static_cast<size_t>(carrier) < rig.hidden.size() && rig.hidden[static_cast<size_t>(carrier)])) continue;
+      std::vector<std::pair<float, std::array<u32, 2>>> near;
+      for (const u32 own : menu_mesh.pieces[j])
+        for (const u32 other : menu_mesh.pieces[static_cast<size_t>(carrier)]) {
+          const float gap = distance(menu_mesh.at[own], menu_mesh.at[other]);
+          if (gap <= kSeamTouch * height) near.push_back({gap, {own, other}});
+        }
+      if (near.empty()) continue;
+      std::ranges::sort(near, {}, [](const auto& entry) { return entry.first; });
+      Seam seam{static_cast<int>(j), {}};
+      for (size_t k = 0; k < near.size() && k < static_cast<size_t>(kSeamPairs); ++k) seam.pairs.push_back(near[k].second);
+      seams.push_back(std::move(seam));
+    }
+    auto centres = [](const PosedMesh& mesh, std::vector<assets::Vec3>& out) {
+      out.assign(mesh.pieces.size(), assets::Vec3{});
+      for (size_t j = 0; j < mesh.pieces.size(); ++j) {
+        for (const u32 index : mesh.pieces[j])
+          for (size_t axis = 0; axis < 3; ++axis) out[j][axis] += mesh.at[index][axis];
+        if (!mesh.pieces[j].empty())
+          for (float& axis : out[j]) axis /= static_cast<float>(mesh.pieces[j].size());
+      }
+    };
+    auto attach_gap = [&](int& point_out) {
+      float worst = 0.0f;
+      for (size_t point = 0; point < field->attach.points.size(); ++point) {
+        const assets::AttachPoint& attach = field->attach.points[point];
+        if (!attach.used || attach.joint >= field_palette.size()) continue;
+        for (size_t k = 0; k < rig.field_joint.size(); ++k) {
+          if (rig.field_joint[k] != static_cast<int>(attach.joint)) continue;
+          float gap = 0.0f;
+          for (int axis = 0; axis < 3; ++axis) {
+            const float delta = menu_palette[k].at(axis, 3) * rig.scale - field_palette[attach.joint].at(axis, 3);
+            gap += delta * delta;
+          }
+          if (std::sqrt(gap) > worst) worst = std::sqrt(gap), point_out = static_cast<int>(point);
+          break;
+        }
+      }
+      return worst;
+    };
+    int stand_point = -1;
+    field_palette = stand_palette(*field);
+    game::menu_rig_palette(rig, field_palette, menu_palette);
+    const float attach_stand = attach_gap(stand_point);
+    auto cell = [](const Worst& worst) { return std::format("{:5.1f} {}", worst.value, worst.where); };
+    struct Row {
+      Worst stretch, field_stretch, seam_gap, sink, lift, pop, attach;
+    };
+    Row whole;
+    std::vector<assets::Vec3> field_centre, menu_centre, field_before, menu_before;
+    for (size_t index = 0; index < field->clips.size(); ++index) {
+      const assets::AnimationClip& clip = field->clips[index];
+      Row one;
+      Row& row = only >= 0 ? one : whole;
+      Worst &stretch = row.stretch, &field_stretch = row.field_stretch, &seam_gap = row.seam_gap, &sink = row.sink, &lift = row.lift, &pop = row.pop,
+            &attach = row.attach;
+      const int samples = clip.frame_count > 1 ? static_cast<int>(clip.frame_count - 1) * kSubsteps + 1 : 1;
+      for (int sample = 0; sample < samples; ++sample) {
+        const float key = static_cast<float>(sample) / static_cast<float>(kSubsteps);
+        pose.palette_at(static_cast<int>(index), key, field_palette);
+        game::menu_rig_palette(rig, field_palette, menu_palette);
+        pose_mesh(field_mesh, field_palette, 1.0f);
+        pose_mesh(menu_mesh, menu_palette, rig.scale);
+        for (size_t i = 0; i < menu_mesh.edges.size(); ++i) {
+          const float grown = distance(menu_mesh.at[menu_mesh.edges[i][0]], menu_mesh.at[menu_mesh.edges[i][1]]) - menu_own_edge[i];
+          stretch.take(grown * percent, piece_of[menu_mesh.edges[i][0]], clip.name, key);
+        }
+        for (size_t i = 0; i < field_mesh.edges.size(); ++i)
+          field_stretch.take((distance(field_mesh.at[field_mesh.edges[i][0]], field_mesh.at[field_mesh.edges[i][1]]) - field_rest_edge[i]) * percent, 0, clip.name, key);
+        for (const Seam& seam : seams) {
+          float gap = 1e30f;
+          for (const auto& ends : seam.pairs) gap = std::min(gap, distance(menu_mesh.at[ends[0]], menu_mesh.at[ends[1]]));
+          seam_gap.take(gap * percent, seam.joint, clip.name, key);
+        }
+        float field_low = -1e30f, menu_low = -1e30f;
+        int low_joint = -1;
+        for (const assets::Vec3& point : field_mesh.at) field_low = std::max(field_low, point[1]);
+        for (size_t i = 0; i < menu_mesh.at.size(); ++i) {
+          const bool hidden = piece_of[i] >= 0 && static_cast<size_t>(piece_of[i]) < rig.hidden.size() && rig.hidden[static_cast<size_t>(piece_of[i])];
+          if (!hidden && menu_mesh.at[i][1] > menu_low) menu_low = menu_mesh.at[i][1], low_joint = piece_of[i];
+        }
+        sink.take((menu_low - field_low) * percent, low_joint, clip.name, key);
+        lift.take((field_low - menu_low) * percent, low_joint, clip.name, key);
+        centres(field_mesh, field_centre);
+        centres(menu_mesh, menu_centre);
+        if (sample > 0) {
+          float field_step = 0.0f;
+          for (size_t i = 0; i < field_centre.size(); ++i)
+            if (!field_mesh.pieces[i].empty()) field_step = std::max(field_step, distance(field_centre[i], field_before[i]));
+          for (size_t j = 0; j < menu_centre.size(); ++j)
+            if (!menu_mesh.pieces[j].empty() && !(j < rig.hidden.size() && rig.hidden[j]))
+              pop.take((distance(menu_centre[j], menu_before[j]) - 2.0f * field_step) * percent, static_cast<int>(j), clip.name, key);
+        }
+        field_before = field_centre, menu_before = menu_centre;
+        int point = -1;
+        const float gap = attach_gap(point);
+        attach.take(gap * percent, point, clip.name, key);
+      }
+      if (only < 0) continue;
+      std::printf("  %-7s %-28s %-28s %-28s %-28s %-28s %s\n", clip.name.c_str(), std::format("{} ({:.1f})", cell(stretch), field_stretch.value).c_str(),
+                  cell(seam_gap).c_str(), cell(sink).c_str(), cell(lift).c_str(), cell(pop).c_str(), cell(attach).c_str());
+      for (Worst Row::* member : {&Row::stretch, &Row::field_stretch, &Row::seam_gap, &Row::sink, &Row::lift, &Row::pop, &Row::attach})
+        if ((one.*member).value > (whole.*member).value) whole.*member = one.*member;
+    }
+    std::printf("%-4X %-9s %-28s %-28s %-28s %-28s %-28s %s (%.1f p%d)\n", pair.body, game::body_model_stem(pair.body).c_str(),
+                std::format("{} ({:.1f})", cell(whole.stretch), whole.field_stretch.value).c_str(), cell(whole.seam_gap).c_str(), cell(whole.sink).c_str(),
+                cell(whole.lift).c_str(), cell(whole.pop).c_str(), cell(whole.attach).c_str(), attach_stand * percent, stand_point);
+    // Pieces only one of the two models has, in the stand pose: the median distance of a piece's vertices to the other model's mesh.
+    field_palette = stand_palette(*field);
+    game::menu_rig_palette(rig, field_palette, menu_palette);
+    pose_mesh(field_mesh, field_palette, 1.0f);
+    pose_mesh(menu_mesh, menu_palette, rig.scale);
+    auto apart = [&](const PosedMesh& from, const PosedMesh& to, const char* what, const std::vector<bool>* skip) {
+      for (size_t j = 0; j < from.pieces.size(); ++j) {
+        if (from.pieces[j].size() < 4 || (skip && j < skip->size() && (*skip)[j])) continue;
+        std::vector<float> gaps;
+        for (const u32 own : from.pieces[j]) {
+          float gap = 1e30f;
+          for (const assets::Vec3& other : to.at) gap = std::min(gap, distance(from.at[own], other));
+          gaps.push_back(gap);
+        }
+        std::ranges::nth_element(gaps, gaps.begin() + static_cast<std::ptrdiff_t>(gaps.size() / 2));
+        const float median = gaps[gaps.size() / 2] * percent;
+        if (median >= kApart) std::printf("     %s joint %zu (%zu vertices) lies %.1f%% from the other model's mesh in the stand pose\n", what, j, from.pieces[j].size(), median);
+      }
+    };
+    assets::Vec3 field_low{1e30f, 1e30f, 1e30f}, field_high{-1e30f, -1e30f, -1e30f}, menu_low = field_low, menu_high = field_high;
+    for (const assets::Vec3& point : field_mesh.at)
+      for (size_t axis = 0; axis < 3; ++axis) field_low[axis] = std::min(field_low[axis], point[axis]), field_high[axis] = std::max(field_high[axis], point[axis]);
+    for (size_t i = 0; i < menu_mesh.at.size(); ++i) {
+      if (piece_of[i] >= 0 && static_cast<size_t>(piece_of[i]) < rig.hidden.size() && rig.hidden[static_cast<size_t>(piece_of[i])]) continue;
+      for (size_t axis = 0; axis < 3; ++axis)
+        menu_low[axis] = std::min(menu_low[axis], menu_mesh.at[i][axis]), menu_high[axis] = std::max(menu_high[axis], menu_mesh.at[i][axis]);
+    }
+    std::printf("     size: the menu mesh's stand-pose extent is %.2f x %.2f x %.2f of the field mesh's (width, height, depth)\n",
+                (menu_high[0] - menu_low[0]) / std::max(1.0f, field_high[0] - field_low[0]), (menu_high[1] - menu_low[1]) / std::max(1.0f, field_high[1] - field_low[1]),
+                (menu_high[2] - menu_low[2]) / std::max(1.0f, field_high[2] - field_low[2]));
+    apart(menu_mesh, field_mesh, "extra: menu", &rig.hidden);
+    apart(field_mesh, menu_mesh, "missing: field", nullptr);
+    const u32 field_hidden = hidden_constructs(*field), menu_hidden = hidden_constructs(*menu);
+    if (field_hidden || menu_hidden) std::printf("     hidden constructs: field %04X of %zu, menu %04X of %zu\n", field_hidden, field->meshes.size(), menu_hidden, menu->meshes.size());
+    for (size_t construct = 0; construct < field->meshes.size(); ++construct) {
+      std::set<int> joints;
+      for (const assets::SkinVertex& vertex : field->meshes[construct].pool) joints.insert(vertex.joint[0]);
+      std::string list;
+      for (const int joint : joints) list += std::format(" {}", joint);
+      if (field->meshes.size() > 1) std::printf("     field construct %zu: joints%s\n", construct, list.c_str());
+    }
+    auto handle = std::make_shared<game::ModelHandle>();
+    handle->asset = *field;
+    for (int table = 0; table < 2; ++table) {
+      const assets::AnimSeqTable& entries = table == 0 ? field->anim_seq : field->ex_anim_seq;
+      for (size_t entry = 0; entry < entries.size(); ++entry) {
+        if (entries[entry].empty()) continue;
+        game::Actor actor;
+        actor.set_model(handle);
+        const u16 before = actor.hidden_parts();
+        actor.play(static_cast<int>(entry) + (table == 0 ? 0 : game::kExtraAnimBase));
+        std::string states = std::format("{:04X}", before);
+        u16 last = before;
+        for (int tick = 0; tick < kSeqTicks; ++tick) {
+          actor.step_visual(false, false);
+          if (actor.hidden_parts() == last) continue;
+          last = actor.hidden_parts();
+          states += std::format(" -> {:04X} (tick {}, {})", last, tick, actor.clip_name());
+        }
+        if (last != before || states.size() > 4) std::printf("     sequence %02zX%s hides constructs %s\n", entry, table == 0 ? "" : " (ex)", states.c_str());
+      }
+    }
+  }
   return 0;
 }
 
@@ -2125,18 +2441,20 @@ int occ_main(int argc, char** argv) {
   if (cmd == "models-validate" && args.size() == 1) return cmd_models_validate(fs);
   if (cmd == "room-songs" && (args.size() == 1 || args.size() == 2)) return cmd_room_songs(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "room-models" && (args.size() == 1 || args.size() == 2)) return cmd_room_models(fs, args.size() == 2 ? args[1] : std::string());
-  if (cmd == "menu-rigs" && args.size() <= 3) {
-    bool hd = false, rooms = false, audit = false, npcs = false;
+  if (cmd == "menu-rigs" && args.size() <= 4) {
+    bool hd = false, rooms = false, audit = false, npcs = false, motion = false;
     int only = -1;
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "--hd") hd = true;
       else if (args[i] == "--rooms") rooms = true;
       else if (args[i] == "--audit") audit = true;
       else if (args[i] == "--npcs") npcs = true;
+      else if (args[i] == "--motion") motion = true;
       else only = static_cast<int>(std::strtol(args[i].c_str(), nullptr, 16));
     }
     if (npcs) return cmd_menu_rig_npcs(fs, hd);
     if (rooms) return cmd_menu_rig_rooms(fs, hd);
+    if (motion) return cmd_menu_rig_motion(fs, hd, only);
     return audit ? cmd_menu_rig_audit(fs, hd, only) : cmd_menu_rigs(fs, hd, only);
   }
   return usage();

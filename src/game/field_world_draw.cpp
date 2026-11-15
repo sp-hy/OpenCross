@@ -332,11 +332,11 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
 // a character, a model from elsewhere) is that character's when it has the character's field skeleton and mesh exactly (the first byte that
 // matches: Glenn's two field models share both); Lynx's own body (0x33) is a copy of Serge's Lynx body (0x31), the cat and boat bodies copy
 // nobody. Serge and Lynx never meet here: their field skeletons differ. The field mesh is read only for a skeleton that matches. A model
-// that is no character's is a story NPC's when its body fingerprint is one of npc_body's.
-int FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& model) {
+// that is no character's is a story NPC's when its body fingerprint is one of npc_bodies'.
+FieldWorld::WornModel FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& model) {
   for (const auto& [byte, handle] : char_models_)
-    if (handle == model && byte <= kLastMenuModel) return byte;
-  if (const auto it = worn_models_.find(model.get()); it != worn_models_.end() && it->second.model.lock() == model) return it->second.body;
+    if (handle == model && byte <= kLastMenuModel) return {model, byte, -1};
+  if (const auto it = worn_models_.find(model.get()); it != worn_models_.end() && it->second.model.lock() == model) return it->second;
   if (field_skeletons_.empty() || field_skeletons_hd_ != hd_) {
     field_skeletons_.assign(kLastMenuModel + 1, std::nullopt);
     field_skeletons_hd_ = hd_;
@@ -350,9 +350,15 @@ int FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& model) {
     const auto field = read_model_files(*files_, "fieldobj/player/" + model_stem(static_cast<int>(byte)), &err);
     if (field && same_mesh(model->asset, *field)) found = static_cast<int>(byte);
   }
-  if (found < 0) found = npc_body(body_fingerprint(model->asset));
-  worn_models_[model.get()] = {model, found};
-  return found;
+  int field_mesh = -1;
+  if (found < 0) {
+    const auto bodies = npc_bodies();
+    if (const auto entry = std::ranges::find(bodies, body_fingerprint(model->asset), &NpcBody::fingerprint); entry != bodies.end()) {
+      found = entry->battle_model;
+      field_mesh = static_cast<int>(entry - bodies.begin());
+    }
+  }
+  return worn_models_[model.get()] = {model, found, field_mesh};
 }
 
 // [Enhancements] MenuModelsInField: an actor wearing a character's field model (character model bytes up to the last menu model, the
@@ -361,11 +367,12 @@ int FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& model) {
 // texture change; every model with the same skeleton shares the match.
 const FieldWorld::MenuBody* FieldWorld::dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model) {
   if (!menu_models_ || !files_ || !meshes_ || !actor.model_handle()) return nullptr;
-  const int body = worn_body(actor.model_handle());
+  const WornModel worn = worn_body(actor.model_handle());
+  const int body = worn.body;
   if (body < 0) return nullptr;
   const ModelHandle* field = actor.model_handle().get();
   const unsigned generation = render::texture_registry::generation();
-  MenuBody& menu = menu_bodies_[body];
+  MenuBody& menu = menu_bodies_[{body, worn.field_mesh}];
   if (menu.generation != generation || !same_skeleton(menu.skeleton, field->asset.skeleton)) {
     menu = MenuBody{};
     menu.skeleton = field->asset.skeleton;
@@ -384,7 +391,7 @@ const FieldWorld::MenuBody* FieldWorld::dress(const Actor& actor, std::vector<re
     }
   }
   if (!menu.body || !menu.body->gpu) return nullptr;
-  menu_rig_palette(menu.rig, palette, menu_palette_);
+  menu_rig_palette(menu.rig, palette, menu_palette_, actor.hidden_parts());
   palette.swap(menu_palette_);
   model = model * render::mat4_scale(menu.rig.scale);
   return &menu;

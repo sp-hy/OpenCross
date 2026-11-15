@@ -105,7 +105,7 @@ void FieldWorld::drop_remote_models() {
     } else if (cached == char_models_.end()) {
       it = remote_loaded_.erase(it);
     } else if (std::find(wanted.begin(), wanted.end(), *it) == wanted.end() && (!cached->second || cached->second.use_count() == 1)) {
-      menu_bodies_.erase(cached->first);
+      menu_bodies_.erase({cached->first, -1});
       char_models_.erase(cached);
       it = remote_loaded_.erase(it);
     } else {

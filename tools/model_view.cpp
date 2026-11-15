@@ -164,6 +164,8 @@ Options parse_options(const std::vector<std::string>& args) {
     const std::string& arg = args[i];
     if (arg == "--help" || arg == "-h") {
       options.help = true;
+    } else if (arg == "--back") {
+      options.back = true;
     } else if (arg == "--sd") {
       options.hd = false;
     } else if (arg == "--index") {
@@ -172,12 +174,12 @@ Options parse_options(const std::vector<std::string>& args) {
         return options;
       }
       options.index = std::atoi(args[++i].c_str());
-    } else if (arg == "-g" || arg == "--model" || arg == "--sheet") {
+    } else if (arg == "-g" || arg == "--model" || arg == "--sheet" || arg == "--poses") {
       if (i + 1 >= args.size() || args[i + 1].starts_with("-")) {
         options.error = "missing value for " + arg;
         return options;
       }
-      (arg == "-g" ? options.game_dir : arg == "--model" ? options.model : options.sheet) = args[++i];
+      (arg == "-g" ? options.game_dir : arg == "--model" ? options.model : arg == "--sheet" ? options.sheet : options.poses) = args[++i];
     } else {
       options.error = "unknown argument: " + arg;
       return options;

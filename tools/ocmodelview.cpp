@@ -49,6 +49,14 @@ constexpr float kRestPitch = 0.12f;
 constexpr float kOrbitSpeed = 0.008f, kWheelZoom = 0.12f;
 constexpr u32 kMaxHiddenMeshes = 32;
 
+// The constructs a model's file hides (S3 shading bit 0: the part starts hidden, the game's sequences show it).
+u32 hidden_parts(const assets::ModelAsset& model) {
+  u32 mask = 0;
+  for (size_t k = 0; k < model.meshes.size() && k < model.shading.size() && k < kMaxHiddenMeshes; ++k)
+    if (model.shading[k].flags & 1) mask |= 1u << k;
+  return mask;
+}
+
 // The texture registry is global; bind it to the modded Vfs only while the modded copy resolves its replacements.
 struct TextureRegistryScope {
   const vfs::Vfs* previous = render::texture_registry::bound_vfs();
@@ -161,8 +169,10 @@ void show_stats(const char* label, const Side& side) {
 // Contact sheets of a playable field character for reviewing [Enhancements] MenuModelsInField: one row per clip (the field model's own,
 // then its event pack's; a one-keyframe pose repeats across the row), kSheetFrames keyframes across each row, and per keyframe the field
 // model and the menu model posed from it, from the front and from the side. kSheetRows rows a page, written to <sheet>_p<N>.png;
-// unmodded files, the chosen art set.
+// unmodded files, the chosen art set. With --poses, the named poses only, in larger cells: kPoseFrames a row, kPoseRows rows a page; a
+// single pose fills the page. With --back, from behind and from three quarters behind.
 constexpr int kSheetRows = 6, kSheetFrames = 3, kSheetView = 110, kSheetRowHeight = 170, kSheetLabel = 18;
+constexpr int kPoseRows = 3, kPoseFrames = 2;
 // Closer than the viewer's fitted framing: a cell is narrow and the model stands upright in it.
 constexpr float kSheetZoom = 0.62f;
 
@@ -183,7 +193,10 @@ int run_sheet(const mv::Options& options) {
   const auto entries = mv::catalog({stem});
   const mv::Entry entry = entries.empty() ? mv::Entry{stem, mv::Kind::Field} : entries[0];
   const int menu_byte = entry.kind == mv::Kind::Field ? field_model_byte(discs, stem) : -1;
-  constexpr int kCell = 4 * kSheetView, kWidth = kSheetFrames * kCell, kHeight = kSheetRows * kSheetRowHeight;
+  constexpr int kWidth = kSheetFrames * 4 * kSheetView, kHeight = kSheetRows * kSheetRowHeight;
+  const bool one_pose = !options.poses.empty() && options.poses.find(',') == std::string::npos;
+  const int rows = options.poses.empty() ? kSheetRows : one_pose ? 1 : kPoseRows, frames = options.poses.empty() ? kSheetFrames : one_pose ? 1 : kPoseFrames;
+  const int cell_width = kWidth / frames, view_width = cell_width / 4, row_height = kHeight / rows;
   platform::Window window;
   if (!window.create("OpenCross model sheet", kWidth, kHeight, false)) return 1;
   render::GpuContext context;
@@ -208,14 +221,42 @@ int run_sheet(const mv::Options& options) {
     std::fprintf(stderr, "sheet: %s %s\n", side.error.c_str(), side.menu_error.c_str());
     return 1;
   }
-  std::vector<size_t> clips;
-  for (size_t i = 0; i < side.asset->clips.size(); ++i)
-    if (side.asset->clips[i].frame_count > 0) clips.push_back(i);
+  struct Cell {
+    size_t clip;
+    float key;
+    std::string label;
+  };
+  std::vector<Cell> cells;
+  size_t clip_count = 0;
+  for (size_t i = 0; i < side.asset->clips.size() && options.poses.empty(); ++i) {
+    const assets::AnimationClip& clip = side.asset->clips[i];
+    if (clip.frame_count == 0) continue;
+    ++clip_count;
+    for (int column = 0; column < kSheetFrames; ++column)
+      cells.push_back({i, static_cast<float>(column) * static_cast<float>(clip.frame_count - 1) / static_cast<float>(kSheetFrames),
+                       column == 0 ? std::format("{} ({} keys)", clip.name, clip.frame_count) : std::string()});
+  }
+  for (size_t at = 0; at < options.poses.size();) {
+    const size_t end = std::min(options.poses.find(',', at), options.poses.size());
+    const std::string pose = options.poses.substr(at, end - at);
+    at = end + 1;
+    const size_t colon = pose.find(':');
+    const std::string name = pose.substr(0, colon);
+    const float key = colon == std::string::npos ? 0.0f : static_cast<float>(std::atof(pose.c_str() + colon + 1));
+    const auto found = std::ranges::find(side.asset->clips, name, &assets::AnimationClip::name);
+    if (found == side.asset->clips.end() || found->frame_count == 0) {
+      std::fprintf(stderr, "sheet: no clip %s\n", name.c_str());
+      return 2;
+    }
+    cells.push_back({static_cast<size_t>(found - side.asset->clips.begin()), key, std::format("{} key {:.2f}", name, key)});
+    ++clip_count;
+  }
   const mv::Bounds bounds = mv::rest_bounds(*side.asset);
   std::vector<render::Mat4> palette, menu_palette;
   platform::Input input;
   int pages = 0;
-  for (size_t first = 0; first < clips.size(); first += kSheetRows) {
+  const size_t page_cells = static_cast<size_t>(rows * frames);
+  for (size_t first = 0; first < cells.size(); first += page_cells) {
     if (!window.pump(input)) break;
     ui.new_frame();
     render::Frame frame;
@@ -227,20 +268,21 @@ int run_sheet(const mv::Options& options) {
     const ImGuiIO& io = ImGui::GetIO();
     const float to_ui = io.DisplaySize.x / static_cast<float>(kWidth);
     ImDrawList* labels = ImGui::GetForegroundDrawList();
-    for (int row = 0; row < kSheetRows && first + static_cast<size_t>(row) < clips.size(); ++row) {
-      const assets::AnimationClip& clip = side.asset->clips[clips[first + static_cast<size_t>(row)]];
-      const std::string label = std::format("{} ({} keys)", clip.name, clip.frame_count);
-      labels->AddText({4.0f * to_ui, static_cast<float>(row * kSheetRowHeight + 2) * to_ui}, IM_COL32(255, 255, 200, 255), label.c_str());
-      for (int column = 0; column < kSheetFrames; ++column) {
-        const float key = static_cast<float>(column) * static_cast<float>(clip.frame_count - 1) / static_cast<float>(kSheetFrames);
-        side.pose.palette_at(static_cast<int>(clips[first + static_cast<size_t>(row)]), key, palette);
-        game::menu_rig_palette(side.rig, palette, menu_palette);
+    for (int row = 0; row < rows; ++row) {
+      for (int column = 0; column < frames; ++column) {
+        const size_t index = first + static_cast<size_t>(row * frames + column);
+        if (index >= cells.size()) break;
+        const Cell& cell = cells[index];
+        labels->AddText({static_cast<float>(column * cell_width + 4) * to_ui, static_cast<float>(row * row_height + 2) * to_ui}, IM_COL32(255, 255, 200, 255),
+                        cell.label.c_str());
+        side.pose.palette_at(static_cast<int>(cell.clip), cell.key, palette);
+        game::menu_rig_palette(side.rig, palette, menu_palette, hidden_parts(*side.asset));
         for (int view = 0; view < 4; ++view) {
           const bool menu = view % 2 == 1;
-          const float yaw = view < 2 ? 0.0f : kPi * 0.5f;
-          const float x = static_cast<float>(column * kCell + view * kSheetView) * to_pixels;
-          const float y = static_cast<float>(row * kSheetRowHeight + kSheetLabel) * to_pixels;
-          const float w = static_cast<float>(kSheetView) * to_pixels, h = static_cast<float>(kSheetRowHeight - kSheetLabel) * to_pixels;
+          const float yaw = (options.back ? kPi : 0.0f) + (view < 2 ? 0.0f : options.back ? kPi * 0.25f : kPi * 0.5f);
+          const float x = static_cast<float>(column * cell_width + view * view_width) * to_pixels;
+          const float y = static_cast<float>(row * row_height + kSheetLabel) * to_pixels;
+          const float w = static_cast<float>(view_width) * to_pixels, h = static_cast<float>(row_height - kSheetLabel) * to_pixels;
           const mv::Camera camera = mv::orbit_camera(bounds, yaw, 0.0f, kSheetZoom, w / h);
           render::MeshPipeline::DrawParams params;
           params.view = camera.view;
@@ -252,8 +294,7 @@ int run_sheet(const mv::Options& options) {
             params.model = render::mat4_scale(side.rig.scale);
             game::menu_model_parts(*side.menu, params);
           } else {
-            for (size_t k = 0; k < side.asset->meshes.size() && k < side.asset->shading.size() && k < kMaxHiddenMeshes; ++k)
-              if (side.asset->shading[k].flags & 1) params.hidden_meshes |= 1u << k;
+            params.hidden_meshes = hidden_parts(*side.asset);
           }
           const SDL_GPUViewport viewport{x, y, w, h, 0, 1};
           SDL_SetGPUViewport(context.pass(), &viewport);
@@ -273,7 +314,7 @@ int run_sheet(const mv::Options& options) {
     context.end_frame();
     ++pages;
   }
-  std::printf("sheet: %s, %d page(s), %zu clips, rig %s, scale %.2f\n", game::body_model_stem(side.body).c_str(), pages, clips.size(),
+  std::printf("sheet: %s, %d page(s), %zu clips, rig %s, scale %.2f\n", game::body_model_stem(side.body).c_str(), pages, clip_count,
               side.rig.plan == game::MenuRigPlan::Map ? "hand-made map" : "automatic", side.rig.scale);
   return 0;
 }
@@ -539,7 +580,7 @@ int run_viewer(const mv::Options& options) {
       side.pose.palette_at(side_clip, static_cast<float>(sample_frame), palette);
       const bool dressed = menu_model && side.menu_gpu && side.menu;
       if (dressed) {
-        game::menu_rig_palette(side.rig, palette, menu_palette);
+        game::menu_rig_palette(side.rig, palette, menu_palette, show_hidden ? 0 : hidden_parts(*side.asset));
         palette.swap(menu_palette);
       }
       render::MeshPipeline::DrawParams params;
@@ -549,13 +590,11 @@ int run_viewer(const mv::Options& options) {
       params.palette = palette;
       params.hd = hd;
       params.linear = linear;
-      // S3 shading bit 0 = the part starts hidden (the game's scripts show it).
       if (dressed) {
         game::menu_model_parts(*side.menu, params);
         if (show_hidden) params.hidden_meshes = 0;
       } else if (!show_hidden) {
-        for (size_t k = 0; k < side.asset->meshes.size() && k < side.asset->shading.size() && k < kMaxHiddenMeshes; ++k)
-          if (side.asset->shading[k].flags & 1) params.hidden_meshes |= 1u << k;
+        params.hidden_meshes = hidden_parts(*side.asset);
       }
       // A fixed model-space key light plus ambient: orbiting moves the camera, not the light.
       params.light.on = lighting;
@@ -591,10 +630,10 @@ int ocmodelview_main(int argc, char** argv) {
   if (options.help || !options.error.empty()) {
     if (!options.error.empty()) std::fprintf(stderr, "%s\n", options.error.c_str());
     std::fprintf(options.error.empty() ? stdout : stderr,
-                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--index <room model>] [--sd] [--sheet <png base>]\n"
+                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--index <room model>] [--sd] [--sheet <png base> [--poses <clip:key,...>] [--back]]\n"
                  "  <stem> as listed in the viewer, e.g. fieldobj/player/selju/selju, or map/mapbin/obo_b01f with --index\n"
                  "  --sheet: contact sheets of a playable field character or a story NPC, field model and detailed body per clip,\n"
-                 "  to <base>_pN.png\n");
+                 "  to <base>_pN.png; --poses: these poses only, e.g. s4_02:3.5,ex_04:9; --back: seen from behind\n");
     return options.error.empty() ? 0 : 2;
   }
   try {

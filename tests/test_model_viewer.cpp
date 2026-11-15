@@ -146,6 +146,7 @@ void test_options() {
   CHECK(!mv::parse_options({"--model", "--sd"}).error.empty());
   CHECK(!mv::parse_options({"--unknown"}).error.empty());
   CHECK(mv::parse_options({"--help"}).help);
+  CHECK(mv::parse_options({"--back"}).back && !options.back);
 }
 
 }  // namespace

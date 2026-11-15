@@ -49,13 +49,15 @@ struct Camera {
 Camera orbit_camera(const Bounds& bounds, float yaw, float pitch, float zoom, float aspect);
 
 struct Options {
-  // sheet: write contact sheets to <sheet>_pN.png and exit (ocmodelview.cpp, run_sheet).
-  std::string game_dir, model, sheet, error;
+  // sheet: write contact sheets to <sheet>_pN.png and exit (ocmodelview.cpp, run_sheet). poses: the sheet shows these poses only,
+  // "<clip name>:<keyframe>" separated by commas, instead of every clip.
+  std::string game_dir, model, sheet, poses, error;
   // The room model shown for a room stem.
   int index = 0;
-  bool hd = true, help = false;
+  // back: the sheet views the models from behind and from three quarters behind instead of from the front and the side.
+  bool hd = true, help = false, back = false;
 };
-// -g <dir>, --model <stem>, --index <room model>, --sheet <png base>, --sd, --help / -h.
+// -g <dir>, --model <stem>, --index <room model>, --sheet <png base>, --poses <clip:key,...>, --back, --sd, --help / -h.
 Options parse_options(const std::vector<std::string>& args);
 
 }  // namespace oc::tool::model_view

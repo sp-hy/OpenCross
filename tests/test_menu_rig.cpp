@@ -6,7 +6,11 @@
 // given when they fit the two skeletons; every table entry has one entry per menu joint), a joint a map marks not drawn, the body
 // fingerprint that tells a story NPC's field model, and the per-character tunings (limbs taking the field limbs' directions, a body turning
 // about the field joints' places, a foot drawn on the field foot and kept above its lowest point, a piece hanging plumb from its menu
-// parent and tipped forward off the floor).
+// parent and tipped forward off the floor), a menu piece hidden with the field construct of its field joint, and a menu piece free of the
+// mesh that keeps its place where the field joint only stretches its mesh, and a joint without a partner that takes the menu model's pose
+// clip only when the clip carries it far; the cloth tunings: a joint kept at its own offset, one carried from another joint than its
+// parent, a piece lifted off the floor, a rest turn laid over a joint without a partner, a piece following the leading one of two field
+// joints, and a carried joint that stays out with its parent.
 #include <cmath>
 #include <cstdio>
 #include <vector>
@@ -366,6 +370,154 @@ void test_hang() {
   CHECK(near(tip[1], 0.0f, 0.5f) && tip[2] < -100.0f);
 }
 
+// A face over the three vertices `first`.. of mesh 0's pool.
+void add_face(assets::ModelAsset& model, u32 first) {
+  for (u32 corner = 0; corner < 3; ++corner) {
+    model.meshes[0].indices.push_back(static_cast<u32>(model.meshes[0].vertices.size()));
+    model.meshes[0].vertices.push_back({first + corner, {}, {128, 128, 128}});
+  }
+}
+
+void test_shown_with() {
+  // The field arm's mesh is a construct of its own: the menu arm paired with it and the hand riding on the arm are shown with it. Once the
+  // actor hides that construct both collapse onto the arm's joint; the spine, in the construct that stays, is drawn as before.
+  assets::ModelAsset field = field_rig();
+  field.meshes.resize(2);
+  field.meshes[0].pool = {vertex_on(1, {0, -700, 0}, {0, 0, 0})};
+  field.meshes[1].pool = {vertex_on(2, {100, -700, 0}, {0, 0, 0})};
+  assets::ModelAsset menu = menu_rig();
+  const game::MenuRig rig = game::match_body_rig(field, menu, 0x7FFF);
+  CHECK(rig.usable);
+  CHECK((rig.shown_with == std::vector<int>{-1, 0, 1, 1, -1, -1}));
+  std::vector<render::Mat4> shown, out;
+  game::menu_rig_palette(rig, rest_palette(field), shown);
+  game::menu_rig_palette(rig, rest_palette(field), out, 1u << 1);
+  for (int row = 0; row < 3; ++row) {
+    CHECK(near(out[2].at(row, 3), shown[2].at(row, 3)));
+    CHECK(near(out[3].at(row, 3), shown[2].at(row, 3)));
+    for (int col = 0; col < 3; ++col) CHECK(out[2].at(row, col) == 0.0f && out[3].at(row, col) == 0.0f);
+  }
+  CHECK(same(out[1], shown[1]));
+  game::menu_rig_palette(rig, rest_palette(field), out, 1u << 0);
+  CHECK(same(out[2], shown[2]) && same(out[3], shown[3]));
+  for (int col = 0; col < 3; ++col) CHECK(out[1].at(0, col) == 0.0f);
+}
+
+void test_joined() {
+  // The clips move the field arm, whose mesh shares a face with the spine's: the move stretches that face. A menu arm whose mesh is its
+  // own (with the hand's) keeps its offset; one that shares a face with the menu spine takes the move.
+  assets::ModelAsset field = field_rig();
+  assets::AnimationClip clip;
+  clip.frame_count = 1;
+  clip.tracks.resize(field.skeleton.joints.size());
+  clip.tracks[2].trans.push_back({0.0f, {100, -40, 0}});
+  field.clips.push_back(clip);
+  field.meshes.resize(1);
+  field.meshes[0].pool = {vertex_on(1, {0, -700, 0}, {0, 0, 0}), vertex_on(2, {100, -700, 0}, {0, 0, 0}), vertex_on(2, {120, -700, 0}, {20, 0, 0})};
+  add_face(field, 0);
+  assets::ModelAsset menu = menu_rig();
+  menu.meshes.resize(1);
+  menu.meshes[0].pool = {vertex_on(2, {50, -350, 0}, {0, 0, 0}), vertex_on(2, {60, -350, 0}, {10, 0, 0}), vertex_on(3, {70, -350, 0}, {0, 0, 0}),
+                         vertex_on(1, {0, -350, 0}, {0, 0, 0})};
+  add_face(menu, 0);
+  const game::MenuRig free_arm = game::match_menu_rig(field, menu);
+  CHECK(free_arm.usable && free_arm.field_joint[2] == 2 && !free_arm.moved[2]);
+  add_face(menu, 1);
+  const game::MenuRig joined_arm = game::match_menu_rig(field, menu);
+  CHECK(joined_arm.usable && joined_arm.field_joint[2] == 2 && joined_arm.moved[2]);
+}
+
+void test_ride() {
+  // The menu hand has no field partner. A pose clip that only turns it leaves it at its rest angle; one that carries it far from its rest
+  // offset (a held object the clips put in the hand) gives it the clip's angle and offset.
+  assets::ModelAsset menu = menu_rig();
+  assets::AnimationClip clip;
+  clip.source = "s4";
+  clip.frame_count = 1;
+  clip.tracks.resize(menu.skeleton.joints.size());
+  clip.tracks[3].rot.push_back({0.0f, {0, 0, 90}});
+  clip.tracks[3].trans.push_back({0.0f, {20, 0, 0}});
+  menu.clips.push_back(clip);
+  const game::MenuRig turned = game::match_menu_rig(field_rig(), menu);
+  CHECK(turned.usable && near(turned.menu_local[3][0], 1.0f) && near(turned.menu_offset[3][0], 20.0f));
+  menu.clips[0].tracks[3].trans[0].v = {20, 300, 0};
+  const game::MenuRig carried = game::match_menu_rig(field_rig(), menu);
+  CHECK(carried.usable && near(carried.menu_local[3][0], 0.0f, 1e-3f) && near(carried.menu_offset[3][1], 300.0f));
+}
+
+void test_cloth_tunings() {
+  // carry: the menu hand (under the arm) carried from the spine stays at its rest place from the spine when the field arm swings.
+  // rest: a rest turn of 90 degrees about z laid over the unpaired hand's angle to its parent.
+  game::RigTuning tuning{-1, false, false, {-1, -1, -1, -1}, {-1, -1}};
+  tuning.carry[0] = {3, 1};
+  tuning.rest[0] = {3, {0, 0, 90}, {0, 0, 0}};
+  game::MenuRig rig = game::match_menu_rig(field_rig(), menu_rig());
+  game::tune_menu_rig(rig, field_rig(), menu_rig(), tuning);
+  CHECK(rig.carried_by.size() == 6 && rig.carried_by[3] == 1 && rig.carried_by[2] < 0);
+  CHECK(near(rig.menu_local[3][0], 0.0f, 1e-3f));
+  std::vector<render::Mat4> rest_out, out;
+  game::menu_rig_palette(rig, rest_palette(field_rig()), rest_out);
+  assets::ModelAsset swung = field_rig();
+  swung.skeleton.joints[2].rest_rot_deg = {0, 0, 90};
+  game::menu_rig_palette(rig, rest_palette(swung), out);
+  for (int row = 0; row < 3; ++row) CHECK(near(out[3].at(row, 3), rest_out[3].at(row, 3)));
+  CHECK(!same(out[2], rest_out[2]));
+  // outer: the same hand takes its parent's place once that lies further out from the carrier: the spine's arm joint is 50 units out,
+  // the hand's rest place 68.7; an arm swung in the plane keeps the parent's place at the same reach, so the carried place stands.
+  tuning.outer[0] = 3;
+  game::tune_menu_rig(rig, field_rig(), menu_rig(), tuning);
+  CHECK(rig.outer[3]);
+  // floor: a shin piece reaching 150 units below the floor at rest is lifted by as much; keep: the shin sits at its own offset.
+  assets::ModelAsset menu = menu_rig();
+  menu.meshes.resize(1);
+  menu.meshes[0].pool = {vertex_on(5, {30, 150, 0}, {0, 150, 0})};
+  game::RigTuning floor{-1, false, false, {-1, -1, -1, -1}, {-1, -1}};
+  floor.floor[0] = 5;
+  floor.keep[0] = 5;
+  rig = game::match_menu_rig(field_rig(), menu);
+  game::tune_menu_rig(rig, field_rig(), menu, floor);
+  CHECK(rig.floored[5] && !rig.floored[4]);
+  game::menu_rig_palette(rig, rest_palette(field_rig()), out);
+  CHECK(near(placed_at(out, 5, {0, 150, 0})[1], 0.0f, 0.5f));
+  // lead: the menu shin follows whichever of the field shin and the field arm swings its piece (here hanging in front of the root)
+  // further forward.
+  menu.meshes[0].pool = {vertex_on(5, {30, 0, -100}, {0, 0, -100})};
+  game::RigTuning lead{-1, false, false, {-1, -1, -1, -1}, {-1, -1}};
+  lead.lead[0] = {5, 4, 2};
+  rig = game::match_menu_rig(field_rig(), menu);
+  game::tune_menu_rig(rig, field_rig(), menu, lead);
+  CHECK(rig.lead[5][0] == 4 && rig.lead[5][1] == 2 && !rig.lead_back[5]);
+  assets::ModelAsset reach = field_rig();
+  reach.skeleton.joints[2].rest_rot_deg = {0, 180, 0};
+  game::menu_rig_palette(rig, rest_palette(field_rig()), rest_out);
+  game::menu_rig_palette(rig, rest_palette(reach), out);
+  for (int row = 0; row < 3; ++row)
+    for (int col = 0; col < 3; ++col) CHECK(near(out[5].at(row, col), rest_out[5].at(row, col), 1e-3f));
+  reach.skeleton.joints[4].rest_rot_deg = {0, 180, 0};
+  reach.skeleton.joints[2].rest_rot_deg = {0, 0, 0};
+  game::menu_rig_palette(rig, rest_palette(reach), out);
+  for (int row = 0; row < 3; ++row)
+    for (int col = 0; col < 3; ++col) CHECK(near(out[5].at(row, col), rest_out[5].at(row, col), 1e-3f));
+  // aim: the field shin holds one vertex 50 units under its joint and tips 90 degrees; the menu shin piece, 100 menu units long, swings
+  // its end as far as that vertex moved (25 menu units up and 25 back or forth), not through 90 degrees.
+  assets::ModelAsset hem = field_rig();
+  hem.meshes.resize(1);
+  hem.meshes[0].pool = {vertex_on(4, {60, 50, 0}, {0, 50, 0})};
+  menu.meshes[0].pool = {vertex_on(5, {30, 100, 0}, {0, 100, 0})};
+  game::RigTuning aim{-1, false, false, {-1, -1, -1, -1}, {-1, -1}};
+  aim.aim[0] = 5;
+  rig = game::match_menu_rig(hem, menu);
+  game::tune_menu_rig(rig, hem, menu, aim);
+  CHECK(rig.aimed[5] && !rig.aimed[4]);
+  game::menu_rig_palette(rig, rest_palette(hem), rest_out);
+  CHECK(near(placed_at(rest_out, 5, {0, 100, 0})[1], 100.0f, 0.5f));
+  assets::ModelAsset tipped = hem;
+  tipped.skeleton.joints[4].rest_rot_deg = {90, 0, 0};
+  game::menu_rig_palette(rig, rest_palette(tipped), out);
+  const assets::Vec3 end = placed_at(out, 5, {0, 100, 0});
+  CHECK(near(end[0], 30.0f, 0.5f) && near(end[1], 94.87f, 1.0f) && near(std::abs(end[2]), 31.62f, 1.0f));
+}
+
 }  // namespace
 
 int main() {
@@ -382,6 +534,10 @@ int main() {
   test_npc_bodies();
   test_tuning();
   test_hang();
+  test_shown_with();
+  test_joined();
+  test_ride();
+  test_cloth_tunings();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;
