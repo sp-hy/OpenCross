@@ -1,4 +1,4 @@
-// Enhancement ([Enhancements] SmoothEffectRings): ring / tube shaped untextured effect meshes (a loop of quads sharing edges, like the field
+// Ring / tube shaped untextured effect meshes (a loop of quads sharing edges, like the field
 // contact ring `enc1`) are drawn with extra segments along the loop at high resolution. The PS1 data is unchanged; the original vertices stay.
 #pragma once
 #include <functional>

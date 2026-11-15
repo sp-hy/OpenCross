@@ -9,11 +9,12 @@
 // (StagePipeline / MeshPipeline::set_view_depth: camera z per pixel), then calls end(), which runs at half the output resolution:
 //   SSAO: per pixel, 12 samples of a disc of kAoRadius world units around the view position rebuilt from the view depth (spun per pixel by a
 //         fixed noise); a sample occludes by the cosine between the surface normal (from the neighbouring depths) and the direction to it,
-//         fading to nothing at the radius, so the floor under a unit's feet and creases darken and the sky (far depth) never does. Blurred by
+//         fading to nothing at the radius, so the floor under a unit's feet and creases darken and the sky (far depth) never does. Past
+//         PostFxView::ao_range times the focus distance it fades out over kAoFade of that distance (distant scenery, sky domes). Blurred by
 //         a separable 9-tap depth-aware blur.
 //   DoF:  the picture is filtered down to half resolution with each pixel's blur amount (circle of confusion) from its view depth and the
-//         focus (PostFxView::focus): sharp within kFocusNear / kFocusFar of the focus distance, fully blurred kFocusRamp beyond; the blur
-//         radius and its mix scale with PostFxView::dof_amount. A 32-tap disc gather takes a sample only where both the pixel's and the
+//         focus (PostFxView::focus): sharp within kFocusNear / kFocusFar of the focus distance, fully blurred kFocusRamp beyond, all four
+//         scaled by PostFxView::focus_range; the blur radius and its mix scale with PostFxView::dof_amount, the radius also with blur_strength. A 32-tap disc gather takes a sample only where both the pixel's and the
 //         sample's blur reach it, so a sharp unit does not smear into the blurred background behind it.
 // Then both are upsampled with depth-aware weights (output resolution) and the picture's rendering is resumed, colour and depth, and the result
 // is drawn over it inside the scissor: colour = ao (a blur + (1 - a) colour), a = the pixel's blur amount. Everything drawn after end() (the
@@ -32,11 +33,18 @@ struct PostFxView {
   // The camera z in focus and the share of the blur, 0..1 (depth of field).
   float focus = 4096;
   float dof_amount = 1;
+  // [Shaders] SsaoRange, DofFocusRange, DofStrength: the AO's reach (times the focus distance; 0 = no limit), the sharp band's and the
+  // blur radius's factors.
+  float ao_range = 0;
+  float focus_range = 1;
+  float blur_strength = 1;
 };
 
 class PostFx {
  public:
   static constexpr float kAoRadius = 220.0f;
+  // The AO's fade-out past PostFxView::ao_range, a fraction of the range's distance.
+  static constexpr float kAoFade = 0.25f;
   // Fractions of the focus distance: the sharp band in front of / behind the focus, and the ramps to the full blur behind / in front.
   static constexpr float kFocusNear = 0.3f, kFocusFar = 0.25f, kFocusRamp = 0.9f, kFocusNearRamp = 0.45f;
   // The largest blur radius, a fraction of the output height.
@@ -58,7 +66,7 @@ class PostFx {
  private:
   bool init(GpuContext& ctx);
   bool ensure(RenderTarget& target, u32 width, u32 height);
-  void pass(GpuContext& ctx, int mode, const TexRef (&textures)[3], const float (&push)[16], bool over);
+  void pass(GpuContext& ctx, int mode, const TexRef (&textures)[3], const float (&push)[20], bool over);
 
   GpuContext* ctx_ = nullptr;
   SDL_GPUShader* vs_ = nullptr;

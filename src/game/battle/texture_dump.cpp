@@ -7,6 +7,7 @@
 #include <format>
 #include <iterator>
 #include <set>
+#include <utility>
 
 #include "assets/battle_stage.h"
 #include "assets/model.h"
@@ -20,6 +21,7 @@
 #include "import/battle_stage.h"
 #include "import/model.h"
 #include "import/room.h"
+#include "render/character_texture.h"
 #include "render/model_tiles.h"
 #include "render/stage_tiles.h"
 #include "render/texture_registry.h"
@@ -82,9 +84,12 @@ void dump_model_texture(const import::Image& img, const import::Image& best, con
                   render::model_file_pixels(best.width, best.height, best.pixels.data()).data());
 }
 
-void dump_model_asset(const assets::ModelAsset& asset, const std::string& source) {
+// A battle player with a character texture (its own or, in the Modded art mode, a borrowed one) skips its main texture and eye strip: the
+// status-screen phase dumps them as that texture. `original_size`: the 1x texture even where a 4x image exists.
+void dump_model_asset(const assets::ModelAsset& asset, const std::string& source, bool character, bool original_size) {
   for (size_t i = 0; i < asset.textures.size(); ++i)
-    dump_model_texture(asset.textures[i], asset.has_hd(i) ? asset.hd_textures[i] : asset.textures[i], source, i, asset.main_texture_count);
+    if (!character || (i != 0 && i != asset.main_texture_count))
+      dump_model_texture(asset.textures[i], asset.has_hd(i) && !original_size ? asset.hd_textures[i] : asset.textures[i], source, i, asset.main_texture_count);
 }
 
 Bytes read_or_empty(const vfs::Vfs& archive, const std::string& path) {
@@ -256,7 +261,7 @@ u32 phase_rooms(vfs::Vfs& archive, TextureDumpProgress& progress, unsigned what)
   return failed;
 }
 
-u32 phase_models(vfs::Vfs& archive, TextureDumpProgress& progress) {
+u32 phase_models(vfs::Vfs& archive, TextureDumpProgress& progress, bool original_size) {
   // HD models (cdrom2 override first) with their hd.dat 4x images; the path-named keys hold the art the game shows by default.
   archive.set_hd_mode(true);
   const std::vector<std::string> stems = model_stems(archive);
@@ -272,18 +277,27 @@ u32 phase_models(vfs::Vfs& archive, TextureDumpProgress& progress) {
     if (progress.cancel) break;
     try {
       std::string err;
-      if (auto asset = read_model_files(archive, stem, &err, true)) dump_model_asset(*asset, stem);
+      if (auto asset = read_model_files(archive, stem, &err)) dump_model_asset(*asset, stem, !battle_character(archive, stem).empty(), original_size);
       else ++failed;
     } catch (...) {
       ++failed;
     }
     ++progress.done;
   }
-  // Status screen models in HD art: the hd.dat 4x image is their only texture (ui::StatusModelView, model/menu/player/<stem>/clut0.png).
+  // Status screen models in HD art, with their battle models' main texture and eye strip: the character textures
+  // (render/character_texture.h, model/character/<stem>/texture.png and eyes.png).
   for (const std::string& stem : menu_stems) {
     if (progress.cancel) break;
-    const Bytes hd_tim = read_or_empty(archive, "hd/menu/player/" + stem + ".tim");
-    if (auto hd = hd_tim.empty() ? std::nullopt : import::load_hd_tim(hd_tim)) dump_model_texture(*hd, *hd, "menu/player/" + stem, 0, 1);
+    try {
+      if (const auto character = read_character_textures(archive, stem, original_size)) {
+        const std::pair<render::TextureKey, const import::Image*> textures[] = {{render::character_texture_key(stem), &character->texture},
+                                                                              {render::character_eyes_key(stem), &character->eyes}};
+        for (const auto& [key, image] : textures)
+          if (rgba_ok(*image)) tr::dump_forced(key, image->width, image->height, render::model_file_pixels(image->width, image->height, image->pixels.data()).data());
+      }
+    } catch (...) {
+      ++failed;
+    }
     ++progress.done;
   }
   archive.set_hd_mode(false);
@@ -366,7 +380,7 @@ int run_texture_dump(const std::filesystem::path& game_dir, unsigned what, Textu
     if ((what & kDumpEffects) && !progress.cancel) failed += phase_effects(archive, progress);
     g_raw = (what & kDumpRaw) != 0;
     if ((what & (kDumpRooms | kDumpEffects)) && !progress.cancel) failed += phase_rooms(archive, progress, what);
-    if ((what & kDumpModels) && !progress.cancel) failed += phase_models(archive, progress);
+    if ((what & kDumpModels) && !progress.cancel) failed += phase_models(archive, progress, (what & kDumpModelSource) != 0);
     if ((what & kDumpWeapons) && !progress.cancel) failed += phase_weapons(archive, progress);
   }
   const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - start_time).count();

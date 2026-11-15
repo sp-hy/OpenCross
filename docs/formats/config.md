@@ -51,7 +51,6 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `WideEdgeFade` | 4 | 0..96 | Widescreen only: fade the room picture's cut edge to black over this many layer pixels; 0 = hard cut. |
 | `Widescreen` | 0 | bool | The field, world map, battle and title sea fill the window's width; menus, dialogue, logo and movies stay 4:3. Off = 4:3 with black bars. F7 toggles it. |
 | `ArtMode` | `hd` | `hd original modded` | Art set: RDE's HD assets / the PS1 disc assets / HD plus the mods and OpenCross's own improvements. `classic` is accepted as an alias of `original`. Any other value reads as `hd` and logs a warning. F6 cycles it. |
-| `HdBattleTextures` | 1 | bool | HD and Modded art: the battle players are drawn on RDE's 4x textures, the left half of `hd/menu/player/<name>.tim` with the shut-eye frame from its right half (`docs/formats/model.md` section 12). 0 = the cdrom2 `.ltc` at 1x. No effect in the original art mode. |
 | `Ps1ResGraphics` | 0 | bool | "Retro look": draw the field picture, battle 3D and title sea (backgrounds, models, effects) at the PS1's 320 x 224 and scale up with sharp pixels. |
 | `Ps1ResUi` | 0 | bool | "Retro look": draw the menus, shops, title menu, name entry, Continue and party screens at their PS1 display size, and the battle HUD, results, pause screen and dialogue windows in the 320 x 224 picture, scaled up with sharp pixels. In original art the menus use the PS1 disc textures. |
 | `RenderScale` | 1.00 | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1ResGraphics`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
@@ -85,6 +84,7 @@ Movies stay at normal speed in both speed modes, and both are off in room 386 (z
 | `DumpModels` | 1 | bool | ... the character and monster models. |
 | `DumpWeapons` | 1 | bool | ... the battle weapons. |
 | `DumpEffects` | 0 | bool | ... the effect sprite sheets and meshes (large). |
+| `DumpModelSource` | 0 | bool | With `DumpModels`: the models at their 1x size, the art RDE's 4x images were upscaled from, under the same file names (`mods.md` section 7). |
 | `<mod name>` | `1,modded` | `<enabled>,<loadon>` | One line per mod of `<GameDir>\mods` (a folder, or a `.zip` `.7z` `.rar` `.dat` file, by its full name), in priority order (top wins). |
 
 * **Mod line.** `<mod name>=<enabled>,<loadon>`: `enabled` is read with `parse_bool` (a value without a comma is `enabled` alone, `loadon` then `modded`); `loadon` is `modded`, `sd`, `hd` or `all` (a mod's game data loads in every art mode), kept as text here and interpreted by the mod manager (`docs/formats/mods.md`). Mods absent from the list are appended in name order with `1,modded`; lines whose mod no longer exists are dropped on the next save.
@@ -97,13 +97,9 @@ Opt-in improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is als
 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
-| `SmoothWaterLine` | 1 | bool | Submerged actor parts are cut at the exact water plane, not per whole triangle. |
-| `ModelPixelDepth` | 1 | bool | Character and room models are depth-sorted per pixel instead of painted whole per face in their ordering-table slot (`model.md` 3.5), so faces that cut into each other no longer flip in front of one another as the animation moves; hair and capes (the nearest-corner constructs) are pulled one slot toward the camera so they stay over the body they cut into. |
 | `AutoHideCastHud` | 0 | bool | General tab, Quality of life section. Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). The cast header naming the spell stays for the first 2 seconds, then fades over half a second. |
 | `RetainBattleScenery` | 0 | bool | Keep the battle stage's intro-only scenery layer for the whole battle. |
 | `FullPrecisionEffects` | 0 | bool | Effect sprites keep the half 5-bit colour level the PS1 loses to rounding, as RDE draws them (`room_effects.md` 4.3): brighter faint glows that pulse about twice as hard when one object ends and the next grows in. Off: the PS1's average loss, without its steps. |
-| `SmoothEffectRings` | 1 | bool | Ring and tube shaped effect meshes get extra segments. |
-| `SmoothReflections` | 1 | bool | Environment-mapped model parts slide their reflection sub-texel instead of in whole texels. |
 | `Lighting` | 0 | bool | Key light on field and battle characters, bright spell effects light the battle units and stage, and units cast shadows of their real shape on the floor: in battle from the stage's sun and spells (`battle_stage.md` 8.3.2), in the field straight below them (`docs/rules/field_actors.md` section 7), on the status screen along the PS1 flat shadow's own ray; the title's manta rays and turtle cast theirs straight down onto the sea floor (`title_scene.md` 2.1.1). The battle floor also darkens smoothly per vertex with distance; off = the stepped PS1 look. |
 | `EdgeBlend` | 0 | bool | Cross-fade the faces along texture seams of the battle stage and title meshes. |
 | `MenuModelsInField` | 0 | bool | Field actors wearing a character's field model (model bytes 0..0x32: the party, an NPC wearing a room's own copy of a character's field model, and the remote parties' members) are drawn with that character's menu model (the Status screen's, `model.md` section 12) as tall as the field model (feet to the top of the head and hair, held props not counted), posed every frame by the field model's animation (`docs/architecture.md`, HD models in fields). The menu model's own part flags apply, and props built into its mesh show (Korcha's oar); its stock-environment parts draw with their own texture, as there is no environment page in the field. All 51 menu models are used: 26 matched automatically, the other 25 by a hand-made joint pairing (`occ menu-rigs` lists which; `occ menu-rigs --audit` and `opencross modelview --sheet` check them over every field clip). Pieces only the menu model has ride on their parent joint (NeoFio's vines hang from her forearms). Story NPCs and field enemies whose battle model is more detailed than their field model (Solt, Peppor, the Acacia and Porre privates and sergeants, the Polis Police robot, Dario, Dark Serge and 19 enemies, `docs/architecture.md`) are drawn with that battle model the same way, known by their field mesh in every room; the Porre soldiers' battle rifle takes the field rifle's place, and a prop only the field model has (Radius's cane, the mounted Dragoon's lance) is carried over onto the detailed body. Simulation, attach points, collision and scripts still use the field model. |
@@ -130,9 +126,12 @@ Opt-in shaders, off by default, in every art mode; the Graphics tab's *Character
 | `CrtGlow` | 0 | bool | With `crt`: bright parts glow into the scanline gaps. |
 | `Grade` | `off` | `off film warm cold faded`, or a mod's LUT name | A colour grade after the filter. `film`: a gentle S-curve, warm highlights, cool shadows; `warm` / `cold`: a white-balance shift; `faded`: lifted blacks, lower contrast and saturation; a mod's `shaders/luts/<name>.png` (`mods.md` section 9). A LUT name no enabled mod provides draws no grade. |
 | `Ssao` | 0 | bool | Ambient occlusion on the battle 3D picture (stage, units, weapons): creases and the floor around a unit's feet darken softly; the sky never does. Applied before the effect sprites, the HUD, menus and windows, which it leaves untouched. Off under `[Video] Ps1ResGraphics` (the PS1-resolution picture is drawn as without it). The method is in `docs/architecture.md` (Shaders). |
+| `SsaoRange` | 2.00 | 0..10 | How far the ambient occlusion reaches, in multiples of the focus distance (the depth of field's focus, computed whether or not `DepthOfField` is on): past it the occlusion fades out over a further quarter, so distant scenery and sky geometry stay clean. 0 = no limit. |
 | `DepthOfField` | 0 | bool | Depth of field on the battle 3D picture: what lies well behind or in front of the focus is blurred. The focus is the depth of the unit in the picture nearest the camera's look-at point in depth, eased as it changes, and a band around it stays sharp; with no unit in the picture the blur fades out. Effect sprites, the HUD, menus and windows stay sharp; same `Ps1ResGraphics` rule as `Ssao`. |
+| `DofFocusRange` | 1.00 | 0.25..4 | The width of the sharp band around the focus and of the ramps to the full blur, a factor. |
+| `DofStrength` | 1.00 | 0..2 | The blur radius, a factor; 0 draws no blur. |
 
-The settings window shows an option's rows only while the choice it belongs to is selected: `Matcap` under the `matcap` style, `SpellRim` under `Rim`, the `Crt*` rows under `crt`. `StyleStrength` shows under a style other than `off`, `OutlineWidth` and `OutlineDepth` under `Outlines`, `RimStrength` under `Rim` (sliders in percent).
+The settings window shows an option's rows only while the choice it belongs to is selected: `Matcap` under the `matcap` style, `SpellRim` under `Rim`, the `Crt*` rows under `crt`. `StyleStrength` shows under a style other than `off`, `OutlineWidth` and `OutlineDepth` under `Outlines`, `RimStrength` under `Rim`, `SsaoRange` under `Ssao`, `DofFocusRange` and `DofStrength` under `DepthOfField` (sliders in percent).
 
 ### 2.6 `[Audio]`
 
@@ -270,7 +269,7 @@ The settings window applies a change as soon as it is made and saves the file in
 |---|---|
 | `VSync`, `Msaa`, `Anisotropy` | Applied to the GPU context at once. |
 | `WindowMode`, `Width`, `Height`, `Display` | Applied at once: the window is reconfigured and the swapchain rebuilt. |
-| `ArtMode`, `HdBattleTextures`, mod lines | Art swap at once (rooms, models and caches reload); also on F6 (`ArtMode`). `HdBattleTextures` rebuilds the battle unit models in place, like an art switch. |
+| `ArtMode`, mod lines | Art swap at once (rooms, models and caches reload); also on F6 (`ArtMode`). |
 | `Master`, `Music`, `Sfx`, `Voices`, `VoiceVolume` | Mixer gains re-applied at once. |
 | `BgmSource` | Field and battle music switch at once. |
 | `Language` | Dialogue, flow, menus, shop and results switch at once. A movie already playing keeps its language. |

@@ -260,6 +260,7 @@ void draw_textures_button(platform::Config& cfg, bool* settings_dirty) {
   if (g_dump_hooks.start) {
     const unsigned mask = (cfg.dump_stages ? 1u : 0u) | (cfg.dump_title ? 2u : 0u) | (cfg.dump_effects ? 4u : 0u) | (cfg.dump_rooms ? 8u : 0u) |
                           (cfg.dump_models ? 16u : 0u) | (cfg.dump_weapons ? 64u : 0u);
+    const unsigned modifiers = cfg.dump_models && cfg.dump_model_source ? 128u : 0u;
     bool settings = false;
     ImGui::BeginDisabled(running);
     if (ImGui::BeginTable("dump_kinds", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
@@ -281,12 +282,18 @@ void draw_textures_button(platform::Config& cfg, bool* settings_dirty) {
       ImGui::TableNextColumn();
       settings |= ImGui::Checkbox("Effects", &cfg.dump_effects);
       tip("The effect sprite sheets and effect meshes.");
+      ImGui::TableNextColumn();
+      ImGui::BeginDisabled(!cfg.dump_models);
+      settings |= ImGui::Checkbox("Models at 1x", &cfg.dump_model_source);
+      tip("Write the models at their original size, the art RDE's HD textures were upscaled from, instead of RDE's HD textures: a "
+          "cleaner start for an upscale of your own. Same file names, so the upscaled files go into a mod as they are.");
+      ImGui::EndDisabled();
       ImGui::EndTable();
     }
     ImGui::EndDisabled();
     if (settings && settings_dirty) *settings_dirty = true;
     ImGui::BeginDisabled(running || mask == 0);
-    if (ImGui::Button("Dump all textures")) g_dump_hooks.start(mask);
+    if (ImGui::Button("Dump all textures")) g_dump_hooks.start(mask | modifiers);
     ImGui::EndDisabled();
     tip("Loads the ticked kinds in the background and writes their textures (the ones that are not files) as PNGs to <GameDir>/dump/textures.\n"
         "Battle stages, the title and room meshes come as ONE image per object. The game stays playable meanwhile.\n"

@@ -95,7 +95,8 @@ void FieldWorld::place_on_controlled(int ent) {
 }
 
 // The V spot of each follower (party_v_spot with the controlled entity's heading), at the controlled entity's height, without a
-// walk-mesh test; then both follower trails restart where the party now stands, as FE 66 does.
+// walk-mesh test: the member keeps the walk triangle it had, with that tile's flags (terrain push, light zone), until it next
+// moves; then both follower trails restart where the party now stands, as FE 66 does.
 void FieldWorld::place_followers() {
   const int lead = player_entity();
   if (lead < 0 || !ents_[static_cast<size_t>(lead)].placed) return;
@@ -108,7 +109,8 @@ void FieldWorld::place_followers() {
     float x = 0, z = 0;
     party_v_spot(slot, lp.x, lp.z, (facing - 0x800) & 0xFFF, x, z);
     Ent& ent_state = ents_[static_cast<size_t>(ent)];
-    ent_state.actor.place(view_.walk(), view_.walk().find_triangle(x, z, lp.y), x, z, facing);
+    const int own_tri = ent_state.actor.triangle();
+    ent_state.actor.place(view_.walk(), own_tri >= 0 ? own_tri : view_.walk().find_triangle(x, z, lp.y), x, z, facing);
     ent_state.actor.set_height(lp.y, true);
     ent_state.placed = true;
     ent_state.spawned_on_leader = false;
@@ -200,7 +202,7 @@ void FieldWorld::formation(u16 key, std::span<const s32> args) {
   }
 }
 
-void FieldWorld::walk_party_member(int slot, float x, float z, int final_facing, int gate_slot) {
+void FieldWorld::walk_party_member(int slot, float x, float z, int final_facing, int gate_slot, bool to_floor) {
   const int ent = party_ent_[static_cast<size_t>(slot)];
   if (ent < 0 || slot >= static_cast<int>(party_chars_.size())) return;
   script::MotionRequest request;
@@ -208,13 +210,15 @@ void FieldWorld::walk_party_member(int slot, float x, float z, int final_facing,
   request.x = static_cast<s32>(std::lround(x));
   request.z = static_cast<s32>(std::lround(z));
   start_motion(ent, request);
-  // The formation walk steps the position itself, to the floor at the target on the leader's level.
+  // The formation walk steps the position itself, to the floor at the target on the leader's level; the 86 regroup heads for
+  // the leader's own height and takes no floor at all.
   Motion& motion = ents_[static_cast<size_t>(ent)].motion;
   motion.direct = true;
+  motion.seat = to_floor;
   motion.final_facing = final_facing;
   motion.gate_slot = gate_slot;
   const float leader_y = ents_[static_cast<size_t>(party_ent_[0] >= 0 ? party_ent_[0] : ent)].actor.current().y;
-  const int tri = view_.walk().find_triangle(x, z, leader_y);
+  const int tri = to_floor ? view_.walk().find_triangle(x, z, leader_y) : -1;
   motion.ty = tri >= 0 ? view_.walk().height(tri, x, z) : leader_y;
   motion.target_y = true;
 }

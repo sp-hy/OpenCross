@@ -532,7 +532,6 @@ void App::init_battle() {
     if (!tables_ok) tables_ok = tables.load(files);
     battle_ready = tables_ok && battle.init(ctx, files, sprites, meshes, tables, &mixer);
     if (battle_ready) {
-      battle.set_hd_textures(config.hd_battle_textures);
       battle.set_art_mode(platform::art_is_hd(config.art_mode));
       battle.set_bgm_remastered(config.bgm_source != "original");
       battle.set_auto(config.debug_battle_auto);

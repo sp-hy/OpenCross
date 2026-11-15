@@ -68,29 +68,14 @@ int main() {
   CHECK(saved.find("FilterHD") == std::string::npos && saved.find("FilterSD") == std::string::npos && saved.find("FilterModded") == std::string::npos);
   Config defaults;
   CHECK(defaults.filter == TexFilter::Bilinear);
-  CHECK(defaults.hd_battle_textures && !load_text("[Video]\nHdBattleTextures=0\n").hd_battle_textures);
-  CHECK(defaults.smooth_water_line);
-  CHECK(load_text("[Enhancements]\nSmoothWaterLine=1\n").smooth_water_line);
-  // ModelPixelDepth defaults on; 0 = the PS1's per-face order.
-  CHECK(defaults.model_pixel_depth && !load_text("[Enhancements]\nModelPixelDepth=0\n").model_pixel_depth);
   // EdgeBlend defaults off.
   CHECK(!load_text("").edge_blend && load_text("[Enhancements]\nEdgeBlend=1\n").edge_blend);
   // The old SeamBlend level key maps to EdgeBlend off / on / on.
   CHECK(!load_text("[Enhancements]\nSeamBlend=0\n").edge_blend && load_text("[Enhancements]\nSeamBlend=1\n").edge_blend && load_text("[Enhancements]\nSeamBlend=2\n").edge_blend);
-  CHECK(defaults.smooth_effect_rings && !defaults.lighting);
-  // SmoothReflections defaults on; 0 = the PS1 texel steps.
-  CHECK(defaults.smooth_reflections && !load_text("[Enhancements]\nSmoothReflections=0\n").smooth_reflections);
+  CHECK(!defaults.lighting);
   CHECK(defaults.filter_effects == TexFilter::Bilinear && defaults.wide_edge_fade == 4 && !defaults.ps1_res_graphics && !defaults.ps1_res_ui);
   // The retired Toasts key is ignored.
   CHECK(load_text("[Video]\nToasts=0\n").wide_edge_fade == 4);
-  Config rings = load_text("[Enhancements]\nSmoothEffectRings=1\n");
-  CHECK(rings.smooth_effect_rings);
-  const std::filesystem::path f2 = std::filesystem::temp_directory_path() / "oc_test_config_out2.ini";
-  CHECK(rings.save(f2));
-  std::stringstream ss2;
-  { std::ifstream in(f2); ss2 << in.rdbuf(); }
-  std::filesystem::remove(f2);
-  CHECK(ss2.str().find("SmoothEffectRings=1") != std::string::npos);
   // FullPrecisionEffects defaults off and is written back.
   CHECK(!defaults.full_precision_effects);
   Config full_precision = load_text("[Enhancements]\nFullPrecisionEffects=1\n");
@@ -124,6 +109,12 @@ int main() {
     CHECK(tuned.style_strength == 0.25f && tuned.rim_strength == 1.0f && tuned.outline_width == 4.0f && !tuned.outline_depth);
     CHECK(load_text("[Shaders]\nRimStrength=-1\n").rim_strength == 0.0f);
     CHECK(load_text("[Shaders]\nOutlineWidth=0.5\n").outline_width == 0.5f);
+    CHECK(defaults.ssao_range == 2.0f && defaults.dof_focus_range == 1.0f && defaults.dof_strength == 1.0f);
+    const Config post = load_text("[Shaders]\nSsaoRange=40\nDofFocusRange=0.1\nDofStrength=1.5\n");
+    CHECK(post.ssao_range == 10.0f && post.dof_focus_range == 0.25f && post.dof_strength == 1.5f);
+    CHECK(load_text("[Shaders]\nSsaoRange=0\n").ssao_range == 0.0f);
+    shaders.ssao_range = 3.5f;
+    shaders.dof_strength = 0.5f;
     shaders.style_strength = 0.5f;
     shaders.outline_width = 1.75f;
     const std::filesystem::path out = std::filesystem::temp_directory_path() / "oc_test_config_shaders.ini";
@@ -139,10 +130,13 @@ int main() {
     CHECK(reloaded.fullscreen_shader == FullscreenShader::Composite && reloaded.crt_mask == CrtMask::ShadowMask);
     CHECK(reloaded.ssao && reloaded.depth_of_field && text.str().find("DepthOfField=1") != std::string::npos);
     CHECK(reloaded.style_strength == 0.5f && reloaded.outline_width == 1.75f && reloaded.rim_strength == 1.0f && reloaded.outline_depth);
+    CHECK(reloaded.ssao_range == 3.5f && reloaded.dof_strength == 0.5f && reloaded.dof_focus_range == 1.0f);
   }
   // [Mods] dump categories: defaults, parse, save, reload (the Mods tab's "Dump all textures" checkboxes).
   {
     Config mods_defaults;
+    CHECK(!mods_defaults.dump_model_source && load_text("[Mods]\nDumpModelSource=1\n").dump_model_source);
+    CHECK(load_text("[Mods]\nDumpModelSource=1\n").mods.empty());
     CHECK(mods_defaults.dump_stages && mods_defaults.dump_title && mods_defaults.dump_rooms && mods_defaults.dump_models && !mods_defaults.dump_effects);
     Config mods_flipped = load_text("[Mods]\nDumpStages=0\nDumpTitle=0\nDumpRooms=0\nDumpModels=0\nDumpEffects=1\n");
     CHECK(!mods_flipped.dump_stages && !mods_flipped.dump_title && !mods_flipped.dump_rooms && !mods_flipped.dump_models && mods_flipped.dump_effects);

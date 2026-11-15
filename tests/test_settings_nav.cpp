@@ -186,7 +186,7 @@ void check_wide(ImVec2 display, int width = -1, int height = -1, bool widescreen
     if (GImGui->NavId == before || GImGui->NavId == start) break;
   }
   std::printf("graphics, wide: %zu two-control rows known, %d checked on the way down\n", right_hand.size(), checked);
-  CHECK(right_hand.size() >= 8);
+  CHECK(right_hand.size() >= 6);
   CHECK(checked >= 1);
   CHECK(stayed);
 

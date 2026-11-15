@@ -58,6 +58,52 @@ void hd_atlas_image(const assets::SpriteSheet& sheet, u32 w, u32 h, std::vector<
 
 }  // namespace
 
+std::vector<SpriteWindow> pad_sheet_atlas(const assets::SpriteSheet& sheet, u32 w, u32 h, u32& img_w, u32& img_h, std::vector<u8>& img) {
+  auto scaled = [](u32 value, u32 to, u32 from) { return static_cast<u32>((static_cast<u64>(value) * to + from / 2) / from); };
+  struct Cell {
+    u32 src_row = 0, cols = 0, rows = 0;
+  };
+  std::vector<Cell> cells;
+  u32 out_h = 0, y = 0;
+  for (const auto& frame : sheet.frames)
+    for (const auto& sprite : frame) {
+      Cell cell;
+      cell.src_row = scaled(y, img_h, h);
+      cell.cols = std::min(scaled(sprite.w, img_w, w), img_w);
+      cell.rows = std::min(scaled(y + sprite.h, img_h, h), img_h) - std::min(cell.src_row, img_h);
+      if (cell.cols == 0 || cell.rows == 0) cell.cols = cell.rows = 0;
+      else out_h += cell.rows + 2;
+      cells.push_back(cell);
+      y += sprite.h;
+    }
+  const u32 out_w = img_w + 2;
+  std::vector<u8> out(static_cast<size_t>(out_w) * std::max(out_h, 1u) * 4, 0);
+  std::vector<SpriteWindow> windows;
+  u32 top = 0;
+  for (const Cell& cell : cells) {
+    SpriteWindow window;
+    if (cell.rows > 0) {
+      for (u32 j = 0; j < cell.rows + 2; ++j) {
+        const u32 src_y = cell.src_row + std::clamp(j, 1u, cell.rows) - 1;
+        for (u32 i = 0; i < cell.cols + 2; ++i) {
+          const u32 src_x = std::clamp(i, 1u, cell.cols) - 1;
+          std::copy_n(&img[(static_cast<size_t>(src_y) * img_w + src_x) * 4], 4, &out[(static_cast<size_t>(top + j) * out_w + i) * 4]);
+        }
+      }
+      window.u0 = 1.0f / static_cast<float>(out_w);
+      window.u1 = static_cast<float>(cell.cols + 1) / static_cast<float>(out_w);
+      window.v0 = static_cast<float>(top + 1) / static_cast<float>(out_h);
+      window.v1 = static_cast<float>(top + 1 + cell.rows) / static_cast<float>(out_h);
+      top += cell.rows + 2;
+    }
+    windows.push_back(window);
+  }
+  img_w = out_w;
+  img_h = std::max(out_h, 1u);
+  img = std::move(out);
+  return windows;
+}
+
 render::TextureKey effect_sheet_key(const assets::SpriteSheet& sheet, u32 w, u32 h, const u8* rgba) {
   return {"effects", sheet.name.empty() ? "sheet" : sheet.name, -1, render::texture_content_tag(w, h, rgba)};
 }
@@ -93,9 +139,9 @@ bool GpuEffects::load_begin() {
   return true;
 }
 
-// All the atlases of one call share one upload batch (one queue wait). The sprite UVs are fractions of the original atlas, so a
-// texture-registry replacement of any size (the same frame layout scaled uniformly) lines up; the registry is only consulted when a
-// dump or a replacement can happen, since its content tag hashes the pixels.
+// All the atlases of one call share one upload batch (one queue wait). The registry dumps and replaces the stacked layout of
+// sheet_atlas_image; a replacement of any size (the same frame layout scaled uniformly) is cut back into sprites by pad_sheet_atlas like
+// the original or HD image. The registry is only consulted when a dump or a replacement can happen, since its content tag hashes the pixels.
 bool GpuEffects::load_more(const EffectBank& bank, Which which, double budget_ms, bool& done) {
   const auto started = std::chrono::steady_clock::now();
   done = false;
@@ -115,18 +161,6 @@ bool GpuEffects::load_more(const EffectBank& bank, Which which, double budget_ms
       std::vector<u8> img;
       if (!sheet_atlas_image(sheet, w, h, img)) continue;
       auto atlas = std::make_unique<Atlas>();
-      std::vector<std::pair<const assets::EffectSprite*, Entry>> pending;
-      u32 y = 0;
-      for (const auto& frame : sheet.frames)
-        for (const auto& sprite : frame) {
-          Entry entry;
-          entry.u0 = 0.0f;
-          entry.u1 = static_cast<float>(sprite.w) / static_cast<float>(w);
-          entry.v0 = static_cast<float>(y) / static_cast<float>(h);
-          entry.v1 = static_cast<float>(y + sprite.h) / static_cast<float>(h);
-          pending.emplace_back(&sprite, entry);
-          y += sprite.h;
-        }
       u32 upload_w = w, upload_h = h;
       bool replaced = false;
       if (render::texture_registry::active()) {
@@ -138,6 +172,7 @@ bool GpuEffects::load_more(const EffectBank& bank, Which which, double budget_ms
         hd_atlas_image(sheet, w, h, img);
         upload_w = w * kHdScale, upload_h = h * kHdScale;
       }
+      const std::vector<SpriteWindow> windows = pad_sheet_atlas(sheet, w, h, upload_w, upload_h, img);
       if (!atlas->tex.create(*ctx_, upload_w, upload_h, render::TextureFormat::Rgba8, img.data(), &batch)) {
         log::warn("effects: sheet atlas {}x{} not created", w, h);
         return false;
@@ -148,11 +183,16 @@ bool GpuEffects::load_more(const EffectBank& bank, Which which, double budget_ms
         return false;
       }
       atlas->set_lin = render::TexRef(atlas->tex, sampler_lin_);
-      for (auto& [sprite, entry] : pending) {
-        entry.set = atlas->set;
-        entry.set_lin = atlas->set_lin;
-        entries_[sprite] = entry;
-      }
+      size_t index = 0;
+      for (const auto& frame : sheet.frames)
+        for (const auto& sprite : frame) {
+          const SpriteWindow& window = windows[index++];
+          Entry entry;
+          entry.set = atlas->set;
+          entry.set_lin = atlas->set_lin;
+          entry.u0 = window.u0, entry.v0 = window.v0, entry.u1 = window.u1, entry.v1 = window.v1;
+          entries_[&sprite] = entry;
+        }
       atlases_.push_back(std::move(atlas));
     }
   }

@@ -114,7 +114,7 @@ Broken-chain guard: if the chosen entry is not the newest and is already within 
 
 - A rule 3 step is a direct position write copying the entry's triangle. Rule 1 is bounded by the mesh (12): a step to a point with no triangle, or whose mesh height differs from the step's height by more than 64 units, is replaced by the probe-and-slide step, and a refused step is standing.
 - The walk and run flags are cleared at the start of every follower step, so a member a script froze does not walk on the spot; a member under a scripted motion keeps its flags and plays the walk clip.
-- The whole follower pass is skipped while the party hold (global flag 0x10, section 2) is on. The hold is the cutscene rule: a scene starts with BE (wait until the followers stand, then hold) or a formation (84 / DF), so a member stays where it stood or where the scene's own walks put it, even when a script makes another entity the controlled one (5F); the scene ends with the 86 regroup, which walks slots 1 and 2 to the V behind the controlled entity, puts them there exactly, restarts both trails and releases the hold. Controls locked by 2C alone do not stop the followers.
+- The whole follower pass is skipped while the party hold (global flag 0x10, section 2) is on. The hold is the cutscene rule: a scene starts with BE (wait until the followers stand, then hold) or a formation (84 / DF), so a member stays where it stood or where the scene's own walks put it, even when a script makes another entity the controlled one (5F); the scene ends with the 86 regroup, which walks slots 1 and 2 to the V behind the controlled entity (at its height, without the walk mesh), puts them there exactly, restarts both trails and releases the hold. Controls locked by 2C alone do not stop the followers.
 
 ### 4.4 Exit fade
 
@@ -155,7 +155,7 @@ A party member gets flag 0x400000 and loses 0x4000 (no 3D object, set on every e
 
 ### 5.5 Terrain push
 
-A placed actor standing on a tile with flag 0x800 is moved every tick by `(cos d, -sin d) * P * 12 * 4096 / 65536`, with `d = (flags & 0x700) << 1` and `P` the push strength (op B5, default 5: 3.75 units per tick); flag 0x1000 halves it. Not pushed: actors with flags 0x50 or with 0x40000 in the 0x270 word, and the controlled entity while the input lock is set. The push goes through the mover, after the walks of the tick. A push strength of 0 disables it.
+A placed actor standing on a tile with flag 0x800 is moved every tick by `(cos d, -sin d) * P * 12 * 4096 / 65536`, with `d = (flags & 0x700) << 1` and `P` the push strength (op B5, default 5: 3.75 units per tick); flag 0x1000 halves it. Not pushed: actors with flags 0x50 or with 0x40000 in the 0x270 word, and the controlled entity while the input lock is set. The push goes through the mover, after the walks of the tick. A push strength of 0 disables it. The tile is the actor's own triangle, which only the mover and the writes that name a triangle change: the formation (85) and regroup (86) walks write the position without it, so a party member stood on a V spot over a push slope keeps the tile it came from and stays put.
 
 ## 6. Animation playback
 

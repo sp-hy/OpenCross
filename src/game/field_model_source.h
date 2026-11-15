@@ -55,8 +55,7 @@ void adapt_battle_model(assets::ModelAsset& asset, const BattleFieldClips& clips
 // The battle model stem of a playable character (battle/player/<folder>, the "1" / "2" folder variants), empty when none.
 std::string character_battle_stem(const vfs::Vfs& files, int char_id);
 // A battle model (stem under cdrom/, no ".obj") ready for the field: read_model_files + battle_field_clips + adapt_battle_model.
-std::optional<assets::ModelAsset> read_battle_model_for_field(const vfs::Vfs& files, const std::string& stem, bool hd_battle_texture,
-                                                              std::string* err);
+std::optional<assets::ModelAsset> read_battle_model_for_field(const vfs::Vfs& files, const std::string& stem, std::string* err);
 // Model k of room `room` (its stem), with its own texture pages and transparency modes.
 std::optional<assets::ModelAsset> read_room_model(const vfs::Vfs& files, const std::string& room, int k, std::string* err);
 // Its Mdl bytes alone (what LOAD_ANIMATION decodes a pack against).

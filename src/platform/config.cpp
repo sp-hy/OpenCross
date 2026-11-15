@@ -199,7 +199,6 @@ bool Config::load(const std::filesystem::path& file) {
       art_mode = ArtMode::Hd;
     }
   }
-  hd_battle_textures = parse_bool(ini.get("Video", "HdBattleTextures"), hd_battle_textures);
   mods.clear();
   dump_stages = parse_bool(ini.get("Mods", "DumpStages"), dump_stages);
   dump_title = parse_bool(ini.get("Mods", "DumpTitle"), dump_title);
@@ -207,9 +206,11 @@ bool Config::load(const std::filesystem::path& file) {
   dump_models = parse_bool(ini.get("Mods", "DumpModels"), dump_models);
   dump_weapons = parse_bool(ini.get("Mods", "DumpWeapons"), dump_weapons);
   dump_effects = parse_bool(ini.get("Mods", "DumpEffects"), dump_effects);
+  dump_model_source = parse_bool(ini.get("Mods", "DumpModelSource"), dump_model_source);
   for (const auto& [name, value] : ini.entries("Mods")) {
     const bool is_setting = name == "DumpTextures" || name == "ReplaceTextures" || name == "DumpStages" || name == "DumpTitle" ||
-                            name == "DumpRooms" || name == "DumpModels" || name == "DumpWeapons" || name == "DumpEffects";
+                            name == "DumpRooms" || name == "DumpModels" || name == "DumpWeapons" || name == "DumpEffects" ||
+                            name == "DumpModelSource";
     if (is_setting) continue;
     ModSetting mod;
     mod.name = name;
@@ -245,14 +246,10 @@ bool Config::load(const std::filesystem::path& file) {
     for (const int level : kAnisotropyLevels)
       if (level <= stored_anisotropy) anisotropy = level;
   }
-  smooth_water_line = parse_bool(ini.get("Enhancements", "SmoothWaterLine"), smooth_water_line);
-  model_pixel_depth = parse_bool(ini.get("Enhancements", "ModelPixelDepth"), model_pixel_depth);
   autohide_cast_hud = parse_bool(ini.get("Enhancements", "AutoHideCastHud"), autohide_cast_hud);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   full_precision_effects = parse_bool(ini.get("Enhancements", "FullPrecisionEffects"), full_precision_effects);
   menu_models_in_field = parse_bool(ini.get("Enhancements", "MenuModelsInField"), menu_models_in_field);
-  smooth_effect_rings = parse_bool(ini.get("Enhancements", "SmoothEffectRings"), smooth_effect_rings);
-  smooth_reflections = parse_bool(ini.get("Enhancements", "SmoothReflections"), smooth_reflections);
   {
     const bool legacy = parse_bool(ini.get("Enhancements", "EnhancedLighting"), false) || parse_bool(ini.get("Enhancements", "SpellLights"), false);
     lighting = parse_bool(ini.get("Enhancements", "Lighting"), legacy);
@@ -286,7 +283,10 @@ bool Config::load(const std::filesystem::path& file) {
     crt_glow = parse_bool(ini.get("Shaders", "CrtGlow"), crt_glow);
     grade = ini.get("Shaders", "Grade", grade);
     ssao = parse_bool(ini.get("Shaders", "Ssao"), ssao);
+    ssao_range = std::clamp(parse_float(ini.get("Shaders", "SsaoRange"), ssao_range), 0.0f, 10.0f);
     depth_of_field = parse_bool(ini.get("Shaders", "DepthOfField"), depth_of_field);
+    dof_focus_range = std::clamp(parse_float(ini.get("Shaders", "DofFocusRange"), dof_focus_range), 0.25f, 4.0f);
+    dof_strength = std::clamp(parse_float(ini.get("Shaders", "DofStrength"), dof_strength), 0.0f, 2.0f);
   }
   master = clamp01(parse_float(ini.get("Audio", "Master"), master));
   music = clamp01(parse_float(ini.get("Audio", "Music"), music));
@@ -409,12 +409,12 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Game", "SlowRate", std::to_string(slow_rate));
   ini.set("Video", "Widescreen", on_off(widescreen));
   ini.set("Video", "ArtMode", art_mode == ArtMode::Modded ? "modded" : art_mode == ArtMode::Hd ? "hd" : "original");
-  ini.set("Video", "HdBattleTextures", on_off(hd_battle_textures));
   ini.set("Mods", "DumpStages", on_off(dump_stages));
   ini.set("Mods", "DumpTitle", on_off(dump_title));
   ini.set("Mods", "DumpRooms", on_off(dump_rooms));
   ini.set("Mods", "DumpModels", on_off(dump_models));
   ini.set("Mods", "DumpWeapons", on_off(dump_weapons));
+  ini.set("Mods", "DumpModelSource", on_off(dump_model_source));
   ini.set("Mods", "DumpEffects", on_off(dump_effects));
   for (const ModSetting& mod : mods) ini.set("Mods", mod.name, std::string(mod.enabled ? "1," : "0,") + mod.load_on);
   for (const auto& [key, value] : features) ini.set("Features", key, value);
@@ -424,14 +424,10 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "Ps1Jitter", on_off(ps1_jitter));
   ini.set("Video", "Msaa", std::to_string(msaa));
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
-  ini.set("Enhancements", "SmoothWaterLine", on_off(smooth_water_line));
-  ini.set("Enhancements", "ModelPixelDepth", on_off(model_pixel_depth));
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "FullPrecisionEffects", on_off(full_precision_effects));
   ini.set("Enhancements", "MenuModelsInField", on_off(menu_models_in_field));
-  ini.set("Enhancements", "SmoothEffectRings", on_off(smooth_effect_rings));
-  ini.set("Enhancements", "SmoothReflections", on_off(smooth_reflections));
   ini.set("Enhancements", "Lighting", on_off(lighting));
   ini.set("Enhancements", "EdgeBlend", on_off(edge_blend));
   ini.set("Shaders", "Characters", kCharacterShaderNames[static_cast<size_t>(character_shader)]);
@@ -450,7 +446,10 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Shaders", "CrtGlow", on_off(crt_glow));
   ini.set("Shaders", "Grade", grade);
   ini.set("Shaders", "Ssao", on_off(ssao));
+  ini.set("Shaders", "SsaoRange", fmt_float(ssao_range));
   ini.set("Shaders", "DepthOfField", on_off(depth_of_field));
+  ini.set("Shaders", "DofFocusRange", fmt_float(dof_focus_range));
+  ini.set("Shaders", "DofStrength", fmt_float(dof_strength));
   ini.set("Audio", "Master", fmt_float(master));
   ini.set("Audio", "Music", fmt_float(music));
   ini.set("Audio", "Sfx", fmt_float(sfx));

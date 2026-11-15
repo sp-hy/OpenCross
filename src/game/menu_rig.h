@@ -22,12 +22,15 @@
 // own rest offset, so the menu model keeps its proportions, with three exceptions for a paired joint, judged against its anchor (its nearest
 // paired ancestor) and the field joint driving that anchor. A field joint the clips carry far (more than kTravelShare of the height and
 // more than its own rest offset is long: a prop carried from the hip to the hand, Pip's feet pulled into the body), that hangs below that
-// driver and that no other menu joint follows: the menu joint sits at the field joint's offset from the driver, scaled to the menu model,
-// from the anchor, shifted so the two pieces' meshes line up. A field joint hanging below that driver through joints of its
-// own (a skirt panel hung from the pelvis on the menu rig and from the thigh on the field rig): the menu joint's own rest offset from the
-// nearest menu joint paired along that field chain swings with its field joint's turn. Any other translated field joint: the menu offset
+// driver, that no other menu joint follows and whose menu joint carries mesh: the menu joint sits at the field joint's offset from the
+// driver, scaled to the menu model, from the anchor, shifted so the two pieces' meshes line up. A field joint hanging below that driver
+// through joints of its own (a skirt panel hung from the pelvis on the menu rig and from the thigh on the field rig): the menu joint's own
+// rest offset from the nearest menu joint paired along that field chain swings as the field joint's parent turns (the joint that carries
+// the offset; the field joint's own turn only spins the piece). Any other translated field joint: the menu offset
 // plus the field joint's move away from its rest offset (in model space, at the menu model's size). The menu root turns about the field root's place (scaled) and moves with the
-// field root's movement away from its rest position, by the ratio of the two pelvis heights.
+// field root's movement away from its rest position, by the ratio of the two pelvis heights. A few characters have a RigTuning that
+// changes this: limbs that take the field limbs' directions, a body that turns about the field joints' places, pieces drawn on their
+// field pieces.
 #include <array>
 #include <span>
 #include <vector>
@@ -48,6 +51,12 @@ constexpr s8 kHiddenJoint = -2;
 
 // Map: the hand-made pairing of menu_rig_map.
 enum class MenuRigPlan { Under, Beside, BesideWhenFull, Map };
+
+// A field model vertex: its joint and its place in that joint's frame.
+struct MenuRigPoint {
+  int joint;
+  assets::Vec3 local;
+};
 
 struct MenuRig {
   // Per menu joint: its field joint, -1 = none, and its parent.
@@ -73,6 +82,15 @@ struct MenuRig {
   std::vector<assets::Mat3> held_turn;
   std::vector<assets::Vec3> held_arm, held_reach;
   std::vector<assets::Vec3> field_offset, menu_rest_pos, mesh_shift;
+  // Per menu joint, only with a menu_rig_tuning: pivot_shift, for a joint on the body chain of a character whose body follows the field
+  // body, its field joint's rest place (menu units) less its own, the place it turns about; on_field, drawn on its field piece (mesh_shift
+  // then lines up the two pieces' mesh centres), with menu_sole the menu piece's vertices from its joint (rest pose, model space, menu
+  // units) and field_sole the field piece's vertices (field joint, place in that joint's frame), which keep it from reaching lower than the
+  // field piece; hang, hangs plumb from where its parent carries it (RigTuning::hang; menu_sole without the alignment, field_sole as above).
+  std::vector<assets::Vec3> pivot_shift;
+  std::vector<bool> on_field, hang;
+  std::vector<std::vector<assets::Vec3>> menu_sole;
+  std::vector<std::vector<MenuRigPoint>> field_sole;
   assets::Vec3 field_root_rest{};
   // Field root movement -> menu units.
   float root_motion = 1.0f;
@@ -104,6 +122,26 @@ struct HeldProp {
   std::array<s8, 4> menu_joints;
 };
 std::span<const HeldProp> menu_rig_props(int body);
+// Adjustments of the pose transfer for a detailed body whose field rig the general rules follow badly (match_body_rig applies them).
+// align_limbs: each paired joint off the body chain first turns its rest bone (to the first menu joint below it paired with a child of
+// its field joint) onto that field bone, so the limb takes the field limb's directions rather than its turns (a field rest pose holding the
+// legs far from where the clips hold them). field_body: the body chain (the head down to the root) turns about the field joints' places
+// and the root moves as far as the field root does, at the field model's size (a body whose field joints sit elsewhere in the body than the
+// menu joints). on_field (-1 = unused): menu pieces that hang free of the body mesh, drawn on their field piece: placed so the two pieces' mesh
+// centres meet, turned as the field piece is, and lifted when they would reach lower than the field piece does (a longer foot). hang (-1
+// or 0 = unused): paired menu pieces that hang plumb from where their menu parent carries them (their own offset from it), keeping their
+// rest orientation to the root, and tipped forward about their joint when they would reach lower than their field piece (a collar tag on
+// the chest's collar, where the field collar and its ring ride the head and the clips turn the round ring about itself).
+struct RigTuning {
+  int body;
+  bool align_limbs, field_body;
+  std::array<s8, 4> on_field;
+  std::array<s8, 2> hang;
+};
+// The entry for detailed body `body`, nullptr for none.
+const RigTuning* menu_rig_tuning(int body);
+// Applies `tuning` to a matched rig (match_body_rig does for menu_rig_tuning's entry).
+void tune_menu_rig(MenuRig& rig, const assets::ModelAsset& field, const assets::ModelAsset& menu, const RigTuning& tuning);
 // The rig the field draws detailed body `body` with: menu_rig_map's pairing when there is one, else the automatic match; then each held
 // prop of menu_rig_props laid onto its field prop (centres and principal axes of the two pieces' rest meshes, each axis pointing to the
 // side its mesh reaches furthest) and from then on carried as the field prop is, from the nearest field joint above it that has a menu

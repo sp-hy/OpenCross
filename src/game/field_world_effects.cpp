@@ -537,8 +537,7 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
         if (z_out) *z_out = cz;
         return true;
       };
-      if (smooth_rings_)
-        effects::smooth_triangle_rings(verts, 6.0f, [&](const float point[3], float xy[2]) { return project(point, xy, nullptr); });
+      effects::smooth_triangle_rings(verts, 6.0f, [&](const float point[3], float xy[2]) { return project(point, xy, nullptr); });
       for (size_t k = 0; k + 2 < verts.size(); k += 3) {
         Tri tri{};
         float z_sum = 0;

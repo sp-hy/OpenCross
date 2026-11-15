@@ -10,6 +10,7 @@
 #include "core/log.h"
 #include "core/parallel.h"
 #include "render/camera.h"
+#include "render/character_texture.h"
 #include "render/model_tiles.h"
 #include "render/ps1_jitter.h"
 #include "render/shaders.h"
@@ -303,18 +304,51 @@ void MeshPipeline::destroy() {
   ctx_ = nullptr;
 }
 
+namespace {
+
+// The image a replacement of texture i is matched against (STP): its 4x image when it has one.
+const import::Image& original_image(const assets::ModelAsset& asset, size_t i) {
+  return asset.has_hd(i) && !asset.hd_textures[i].indexed ? asset.hd_textures[i] : asset.textures[i];
+}
+
+bool rgba_image(const import::Image& image) {
+  return !image.indexed && image.width && image.height && image.pixels.size() >= size_t(image.width) * image.height * 4;
+}
+
+// A battle player's character textures: texture.png replaces textures[0], eyes.png the eye strip. True for texture i when a mod
+// replaced it.
+bool resolve_character_texture(assets::ModelAsset& asset, size_t i) {
+  if (i >= asset.textures.size() || !rgba_image(asset.textures[i])) return false;
+  const TextureKey key = i == 0 ? character_texture_key(asset.character) : character_eyes_key(asset.character);
+  import::Image image;
+  if (!texture_registry::replace(key, image.width, image.height, image.pixels)) return false;
+  const import::Image& original = original_image(asset, i);
+  model_restore_stp(original.width, original.height, original.pixels.data(), image.width, image.height, image.pixels);
+  asset.mod_textures.resize(asset.textures.size());
+  asset.mod_textures[i] = std::move(image);
+  return true;
+}
+
+}  // namespace
+
 void resolve_model_textures(assets::ModelAsset& asset) {
   if (asset.source == "@room_model") {
     if (const vfs::Vfs* vfs = texture_registry::bound_vfs()) resolve_room_model_textures(asset, *vfs);
     return;
   }
   if (asset.source.empty() || !texture_registry::active()) return;
+  const bool character = !asset.character.empty();
   for (size_t i = 0; i < asset.textures.size(); ++i) {
     const import::Image& img = asset.textures[i];
-    if (img.indexed || !img.width || !img.height || img.pixels.size() < size_t(img.width) * img.height * 4) continue;
-    const import::Image& best = asset.has_hd(i) && !asset.hd_textures[i].indexed ? asset.hd_textures[i] : img;
+    if (!rgba_image(img)) continue;
+    // The character textures cover the main texture and the eye strip; they are dumped with the status-screen model.
+    const bool covered = character && (i == 0 || i == asset.main_texture_count);
+    if (covered && resolve_character_texture(asset, i)) continue;
+    const import::Image& best = original_image(asset, i);
     const TextureKey key = model_texture_key(asset.source, i, asset.main_texture_count, img.width, img.height, img.pixels.data());
-    if (texture_registry::settings().dump) texture_registry::dump(key, best.width, best.height, model_file_pixels(best.width, best.height, best.pixels.data()).data());
+    if (texture_registry::settings().dump && !covered)
+      texture_registry::dump(key, best.width, best.height, model_file_pixels(best.width, best.height, best.pixels.data()).data());
+    // Legacy layout for a covered texture: model/battle/player/... clut0 / overlay1 files of mods made before the character texture.
     import::Image mod;
     mod.width = img.width, mod.height = img.height;
     mod.pixels.assign(img.pixels.begin(), img.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(img.width) * img.height * 4));
@@ -601,8 +635,6 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
       }
   }
   std::memset(uniforms->el, 0, sizeof uniforms->el);
-  // [Enhancements] SmoothReflections (mesh.vert env UVs).
-  uniforms->el[0][3] = smooth_reflections_ ? 1.0f : 0.0f;
   const LightSet* light_set = params.lights && params.lights->active() ? params.lights : nullptr;
   // [Enhancements] Lighting.
   if (enhanced_ || light_set) {
@@ -800,9 +832,9 @@ void MeshPipeline::draw(const MeshModel& model, const DrawParams& params) {
                                        params.water_tint[0], params.water_tint[1], params.water_tint[2], 1.0f,
                                        params.fog_color[0], params.fog_color[1], params.fog_color[2], env_w2,
                                        params.fog_near, params.fog_far, stp_filter, pass.white ? 1.0f : 0.0f,
-                                       params.ot_faces ? (smooth_water_line_ ? 2.0f : 1.0f) : 0.0f, near_sort ? 1.0f : 0.0f, params.ot_bias, params.water_bias,
+                                       params.ot_faces ? 1.0f : 0.0f, near_sort ? 1.0f : 0.0f, params.ot_bias, params.water_bias,
                                        pass.faces, pass.kind == Kind::DepthOnly ? 1.0f : 0.0f, 1.0f / kDepthRange, out_alpha,
-                                       static_cast<float>(slot), model_pixel_depth_ ? 1.0f : 0.0f, shading.style_strength, view_depth_ ? 1.0f : 0.0f,
+                                       static_cast<float>(slot), 0.0f, shading.style_strength, view_depth_ ? 1.0f : 0.0f,
                                        style, pass.kind == Kind::Outline ? 1.0f : 0.0f, outline_px / grid_x, outline_px / grid_y,
                                        shading.rim_rgb[0], shading.rim_rgb[1], shading.rim_rgb[2], rim,
                                        shading.glow_rgb[0], shading.glow_rgb[1], shading.glow_rgb[2], glow};

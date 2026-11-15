@@ -1,7 +1,9 @@
 // Texture choice of battle player models: in both art modes every player folder's mesh is drawn on its .ltc (the HD .ltd copies
-// and a disc .ltd under an HD mesh sample another atlas); in HD art with the HD battle textures on, the left half of the Status-screen TIM
+// and a disc .ltd under an HD mesh sample another atlas); in HD art the left half of the Status-screen TIM
 // is the 4x image of that page and the eye strip's shut frame comes from its right half. The field's models from elsewhere (FE D0):
-// battle models made field models, their field scale, another room's model. Needs the game install (SKIP without one).
+// battle models made field models, their field scale, another room's model. The character textures: the texture is the Status-screen
+// TIM's open half and, with the eye strip, rebuilds the TIM. A battle player without a Status-screen TIM, and a monster, keeps its 1x
+// texture in HD art and borrows the TIM of the player with the same main page in the Modded art mode. Needs the game install (SKIP without one).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -16,11 +18,94 @@
 #include "game/model_files.h"
 #include "import/model.h"
 #include "platform/paths.h"
+#include "render/character_texture.h"
+#include "vfs/mods.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
 
 namespace {
+
+bool same_rect(const import::Image& a, u32 ax, const import::Image& b, u32 bx, u32 y, u32 w, u32 h) {
+  for (u32 row = y; row < y + h; ++row)
+    if (std::memcmp(&a.pixels[(static_cast<size_t>(row) * a.width + ax) * 4], &b.pixels[(static_cast<size_t>(row) * b.width + bx) * 4], static_cast<size_t>(w) * 4) != 0)
+      return false;
+  return true;
+}
+
+// HD file set: every status-screen model with a 4x TIM. The texture is the TIM's open half; the Status-screen image rebuilt from the
+// texture and the eye strip is the TIM, inside the eye rects too.
+int check_character_textures(const vfs::Vfs& files) {
+  int failures = 0, checked = 0;
+  for (int model = 0; model <= game::kLastMenuModel; ++model) {
+    const std::string stem = game::menu_model_stem(model);
+    const auto tim = files.read("hd/menu/player/" + stem + ".tim");
+    if (!tim) continue;
+    std::optional<import::Image> status = import::load_hd_tim(*tim);
+    const auto character = game::read_character_textures(files, stem);
+    if (!status || !character || !character->eye.valid || !character->eyes.width) {
+      std::printf("FAIL %s: no character textures\n", stem.c_str());
+      ++failures;
+      continue;
+    }
+    ++checked;
+    if (status->indexed) *status = import::to_rgba(*status);
+    const u32 half = status->width / 2, scale = half / render::kCharacterPageWidth;
+    if (character->texture.width != half || character->texture.height != status->height || !same_rect(character->texture, 0, *status, 0, 0, half, status->height)) {
+      std::printf("FAIL %s: the texture is not the TIM's open half\n", stem.c_str());
+      ++failures;
+    }
+    const render::CharacterEyes rects{true, character->eye.x, character->eye.y};
+    const import::Image rebuilt = render::character_status_image(character->texture, &character->eyes, rects);
+    bool status_ok = rebuilt.width == status->width && rebuilt.height == status->height && same_rect(rebuilt, 0, *status, 0, 0, half, status->height);
+    for (size_t k = 0; status_ok && k < 2; ++k)
+      status_ok = same_rect(rebuilt, half + rects.x[k] * scale, *status, half + rects.x[k] * scale, rects.y[k] * scale, render::kCharacterEyeCell * scale,
+                            render::kCharacterEyeCell * scale);
+    if (!status_ok) {
+      std::printf("FAIL %s: the Status-screen image rebuilt from the character textures differs from the TIM\n", stem.c_str());
+      ++failures;
+    }
+  }
+  if (checked < 50) {
+    std::printf("FAIL only %d characters with character textures\n", checked);
+    ++failures;
+  }
+  return failures;
+}
+
+// Leaves the file set in HD art.
+int check_borrowed_tims(vfs::Vfs& files) {
+  files.set_hd_mode(true);
+  std::vector<std::string> without;
+  for (const std::string& stem : game::model_stems(files))
+    if (stem.starts_with("battle/monster/") ||
+        (stem.starts_with("battle/player/") && !files.exists("hd/menu/player/" + stem.substr(stem.find_last_of('/') + 1) + ".tim")))
+      without.push_back(stem);
+  int failures = 0, borrowed = 0;
+  std::string err;
+  for (const std::string& stem : without)
+    if (const auto asset = game::read_model_files(files, stem, &err); asset && (asset->has_hd(0) || !asset->character.empty())) {
+      std::printf("FAIL %s: a 4x texture in HD art\n", stem.c_str());
+      ++failures;
+    }
+  vfs::ModManager mods;
+  mods.scan(files, {}, {});
+  mods.apply(files, vfs::ModArt::Modded);
+  files.set_hd_mode(true);
+  for (const std::string& stem : without) {
+    const auto asset = game::read_model_files(files, stem, &err);
+    if (!asset || !asset->has_hd(0) || asset->character.empty()) continue;
+    ++borrowed;
+    std::printf("%s borrows the TIM of %s in the Modded art mode\n", stem.c_str(), asset->character.c_str());
+  }
+  mods.apply(files, vfs::ModArt::Hd);
+  files.set_hd_mode(true);
+  if (without.empty() || borrowed == 0) {
+    std::printf("FAIL %zu battle players without a TIM, %d borrow one in the Modded art mode\n", without.size(), borrowed);
+    ++failures;
+  }
+  return failures;
+}
 
 // FE D0's sources (field_model_source.h): every battle model reads and is renumbered for the field (stand / run / stance in the field
 // slots, its own clips as ex clips, no animation scripts left); the party models' own scripts name stand 1 and run 3 (the stance is
@@ -46,7 +131,7 @@ int check_model_sources(const vfs::Vfs& files) {
       ++failures;
     }
     std::string err;
-    const auto asset = game::read_battle_model_for_field(files, stem, false, &err);
+    const auto asset = game::read_battle_model_for_field(files, stem, &err);
     if (!asset) {
       std::printf("FAIL %s: %s\n", stem.c_str(), err.c_str());
       ++failures;
@@ -137,7 +222,7 @@ int main() {
       }
     }
   }
-  // HD art, HD battle textures: 4x image of the .ltc page (mean colour error of the box-filtered image), the shut cells of the right half.
+  // HD art: 4x image of the .ltc page (mean colour error of the box-filtered image), the shut cells of the right half.
   files.set_hd_mode(true);
   int hd_checked = 0;
   for (const std::string& stem : game::model_stems(files)) {
@@ -145,7 +230,7 @@ int main() {
     const auto tim = files.read("hd/menu/player/" + stem.substr(stem.find_last_of('/') + 1) + ".tim");
     if (!tim) continue;
     std::string err;
-    const auto asset = game::read_model_files(files, stem, &err, true);
+    const auto asset = game::read_model_files(files, stem, &err);
     const auto full = import::load_hd_tim(*tim);
     ++hd_checked;
     if (!asset || !full || !asset->has_hd(0) || asset->hd_scale != 4 || asset->hd_palette.size() != 256) {
@@ -185,6 +270,8 @@ int main() {
       }
     }
   }
+  failures += check_character_textures(files);
+  failures += check_borrowed_tims(files);
   if (hd_checked < 50) {
     std::printf("FAIL only %d battle players with a Status-screen TIM\n", hd_checked);
     ++failures;

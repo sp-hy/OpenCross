@@ -202,6 +202,9 @@ struct ModelAsset {
   // "fieldobj/player/cl_bort/cl_bort"), a weapon pack part ("battle/wepon/sword/part3") or "@room_model" for models whose texture is cut
   // from a VRAM page. Empty = not dumped.
   std::string source;
+  // A battle player drawn on its Status-screen TIM: the stem of its character texture (render/character_texture.h), which then stands in
+  // for textures[0] and the eye strip. Empty = none.
+  std::string character;
   // One mesh per construct.
   std::vector<Mesh> meshes;
   Skeleton skeleton;

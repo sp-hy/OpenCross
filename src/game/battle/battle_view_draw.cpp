@@ -495,6 +495,9 @@ void BattleView::draw_post_fx(const render::Frame& frame, const render::Letterbo
   post.cy = 2.0f * (lb.scale_y * cam_.oy + lb.oy) / lb.vh - 1.0f;
   post.focus = std::max(post_fx_focus_, 1.0f);
   post.dof_amount = post_fx_amount_;
+  post.ao_range = post_fx_ao_range_;
+  post.focus_range = post_fx_focus_range_;
+  post.blur_strength = post_fx_blur_strength_;
   post_fx_.end(*ctx_, scissor, post);
 }
 

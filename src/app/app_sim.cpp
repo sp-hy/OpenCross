@@ -66,8 +66,7 @@ void App::apply_art_mode() {
   if (mods_changed) load_shader_looks();
   files.set_hd_mode(hd);
   if (world_ok) world.set_art_mode(hd, mods_changed);
-  const bool battle_textures_changed = battle_ready && battle.set_hd_textures(config.hd_battle_textures);
-  if (battle_ready) battle.set_art_mode(hd, mods_changed || (battle_textures_changed && hd));
+  if (battle_ready) battle.set_art_mode(hd, mods_changed);
   if (results_ok) results.set_art_mode(hd, mods_changed);
   if (party_ok) party_screen.set_hd(hd);
   if (flow_ready) flow.set_art_mode(am);

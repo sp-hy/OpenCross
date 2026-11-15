@@ -15,9 +15,10 @@
 
 namespace oc::game {
 
-// kDumpRaw (debug): also the raw (mode, CLUT) atlases of stages / title / room meshes under raw/.
+// kDumpRaw (debug): also the raw (mode, CLUT) atlases of stages / title / room meshes under raw/. kDumpModelSource: the models are written
+// at their 1x size (the art RDE's 4x images were upscaled from) instead of as RDE's 4x images, under the same names.
 enum DumpSet : unsigned {
-  kDumpStages = 1, kDumpTitle = 2, kDumpEffects = 4, kDumpRooms = 8, kDumpModels = 16, kDumpRaw = 32, kDumpWeapons = 64,
+  kDumpStages = 1, kDumpTitle = 2, kDumpEffects = 4, kDumpRooms = 8, kDumpModels = 16, kDumpRaw = 32, kDumpWeapons = 64, kDumpModelSource = 128,
   kDumpAll = kDumpStages | kDumpTitle | kDumpEffects | kDumpRooms | kDumpModels | kDumpWeapons
 };
 

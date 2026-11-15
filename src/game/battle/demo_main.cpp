@@ -46,6 +46,7 @@
 #include "core/log.h"
 #include "data/tables.h"
 #include "game/battle/battle_view.h"
+#include "game/effects/gpu_effects.h"
 #include "platform/config.h"
 #include "platform/paths.h"
 #include "platform/window.h"
@@ -313,7 +314,7 @@ int ocbattleview_main(int argc, char** argv) {
     }
     options.party_swap = !swap_ids.empty();
     bool view_ok = view.init(ctx, files, sprites, meshes, tables, mixer);
-    view.set_hd_textures(config.hd_battle_textures);
+    effects::GpuEffects::set_linear(config.filter_effects == platform::TexFilter::Bilinear);
     // --sliced: the load in 3 ms slices, one per 60 Hz frame, as the field encounter runs it behind the transition.
     if (view_ok && sliced && view.begin_load(scene, party, options)) {
       double longest = 0.0;
@@ -363,10 +364,6 @@ int ocbattleview_main(int argc, char** argv) {
           if (unit_index >= 0 && unit_index < battle::kUnits && current->unit(unit_index).present) current->unit_mut(unit_index).lo |= bits;
       // [Enhancements] from opencross.ini; OC_LIGHTING=1 forces [Enhancements] Lighting on (verification runs without touching the ini)
       meshes.set_enhanced_lighting(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
-      // [Enhancements] SmoothReflections; OC_SMOOTH_REFL=1 / 0 overrides it (side-by-side runs without touching the ini)
-      const char* smooth_env = std::getenv("OC_SMOOTH_REFL");
-      meshes.set_smooth_reflections(smooth_env ? smooth_env[0] == '1' : config.smooth_reflections);
-      meshes.set_model_pixel_depth(config.model_pixel_depth);
       view.set_spell_lights(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_smooth_fog(config.lighting || std::getenv("OC_LIGHTING") != nullptr);
       view.set_autohide_cast(config.autohide_cast_hud);
@@ -381,7 +378,7 @@ int ocbattleview_main(int argc, char** argv) {
       shading.outline_depth = config.outline_depth;
       shading.matcap = std::max(0, meshes.matcap_index(config.matcap));
       view.set_character_shading(shading, config.spell_rim, config.cast_glow);
-      view.set_post_fx(config.ssao, config.depth_of_field);
+      view.set_post_fx(config.ssao, config.depth_of_field, config.ssao_range, config.dof_focus_range, config.dof_strength);
       view.set_auto(bauto);
       view.debug_ui(ui_mode);
       game::BattleView::Debug dbg;

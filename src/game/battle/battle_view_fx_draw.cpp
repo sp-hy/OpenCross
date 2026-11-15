@@ -599,10 +599,10 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
     tri.order = order;
     tris.push_back(tri);
   });
-  // SmoothEffectRings: closed strips of untextured Gouraud quads (spell rings / tubes) get extra segments (strip_smooth.h).
+  // Closed strips of untextured Gouraud quads (spell rings / tubes) get extra segments (strip_smooth.h).
   std::vector<effects::FlatQuad> smooth_flats;
   const std::vector<effects::FlatQuad>* flats = &fx_frame_.flats;
-  if (smooth_rings_ && fx_frame_.flats.size() >= 3) {
+  if (fx_frame_.flats.size() >= 3) {
     std::vector<effects::SmoothQuad> sq;
     // Flats that are not ring candidates (degenerate corners).
     std::vector<size_t> keep;

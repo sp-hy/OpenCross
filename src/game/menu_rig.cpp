@@ -529,11 +529,138 @@ int graft_field_piece(assets::ModelAsset& menu, const assets::ModelAsset& field,
   return joint;
 }
 
+// The turn taking unit direction `from` onto unit direction `to` by the shortest way (none when they point opposite ways).
+Mat3 turn_between(const Vec3& from, const Vec3& to) {
+  const Vec3 axis{from[1] * to[2] - from[2] * to[1], from[2] * to[0] - from[0] * to[2], from[0] * to[1] - from[1] * to[0]};
+  const float cosine = from[0] * to[0] + from[1] * to[1] + from[2] * to[2];
+  if (cosine < -0.999f) return Mat3{1, 0, 0, 0, 1, 0, 0, 0, 1};
+  const Mat3 cross{0, -axis[2], axis[1], axis[2], 0, -axis[0], -axis[1], axis[0], 0};
+  const Mat3 square = multiply(cross, cross);
+  Mat3 out{1, 0, 0, 0, 1, 0, 0, 0, 1};
+  for (size_t k = 0; k < 9; ++k) out[k] += cross[k] + square[k] / (1.0f + cosine);
+  return out;
+}
+
+// Every joint of `joint`'s subtree.
+std::vector<bool> subtree(const assets::Skeleton& skeleton, size_t joint) {
+  std::vector<bool> under(skeleton.joints.size(), false);
+  under[joint] = true;
+  for (size_t k = joint + 1; k < under.size(); ++k) {
+    const int parent = skeleton.joints[k].parent;
+    under[k] = parent >= 0 && under[static_cast<size_t>(parent)];
+  }
+  return under;
+}
+
 }  // namespace
+
+void tune_menu_rig(MenuRig& rig, const assets::ModelAsset& field_model, const assets::ModelAsset& menu_model, const RigTuning& tuning) {
+  const RestPose field_pose = rest_pose(field_model.skeleton), menu_pose = rest_pose(menu_model.skeleton);
+  const Shape field_shape = shape_of(field_model, field_pose);
+  const size_t field_count = field_pose.pos.size(), menu_count = rig.field_joint.size();
+  if (menu_pose.pos.size() != menu_count || rig.menu_rest.size() != menu_count || rig.field_rest.size() != field_count) return;
+  std::vector<bool> body_chain(field_count, false);
+  for (int at = head_joint(field_model, field_shape); at >= 0; at = field_shape.parent[static_cast<size_t>(at)]) body_chain[static_cast<size_t>(at)] = true;
+  auto nearest_paired = [&](size_t joint) {
+    int above = menu_model.skeleton.joints[joint].parent;
+    while (above >= 0 && rig.field_joint[static_cast<size_t>(above)] < 0) above = menu_model.skeleton.joints[static_cast<size_t>(above)].parent;
+    return above;
+  };
+  if (tuning.align_limbs) {
+    // The bone of a paired joint off the body chain: to the first menu joint below it paired with a child of its field joint.
+    for (size_t j = 1; j < menu_count; ++j) {
+      const int source = rig.field_joint[j];
+      if (source <= 0 || body_chain[static_cast<size_t>(source)]) continue;
+      for (size_t k = j + 1; k < menu_count; ++k) {
+        const int child = rig.field_joint[k];
+        if (child < 0 || field_shape.parent[static_cast<size_t>(child)] != source || nearest_paired(k) != static_cast<int>(j)) continue;
+        Vec3 field_bone, menu_bone;
+        for (size_t axis = 0; axis < 3; ++axis) {
+          field_bone[axis] = (field_pose.pos[static_cast<size_t>(child)][axis] - field_pose.pos[static_cast<size_t>(source)][axis]) / field_pose.height;
+          menu_bone[axis] = (menu_pose.pos[k][axis] - menu_pose.pos[j][axis]) / menu_pose.height;
+        }
+        const float field_length = std::hypot(field_bone[0], field_bone[1], field_bone[2]);
+        const float menu_length = std::hypot(menu_bone[0], menu_bone[1], menu_bone[2]);
+        if (field_length < kMinBone || menu_length < kMinBone) continue;
+        for (size_t axis = 0; axis < 3; ++axis) field_bone[axis] /= field_length, menu_bone[axis] /= menu_length;
+        rig.menu_rest[j] = multiply(turn_between(menu_bone, field_bone), rig.menu_rest[j]);
+        break;
+      }
+    }
+  }
+  if (tuning.field_body) {
+    rig.pivot_shift.assign(menu_count, Vec3{});
+    for (size_t j = 1; j < menu_count; ++j) {
+      const int source = rig.field_joint[j];
+      const int parent = menu_model.skeleton.joints[j].parent;
+      if (source <= 0 || !body_chain[static_cast<size_t>(source)] || parent < 0 || rig.field_joint[static_cast<size_t>(parent)] < 0) continue;
+      for (size_t axis = 0; axis < 3; ++axis) rig.pivot_shift[j][axis] = field_pose.pos[static_cast<size_t>(source)][axis] / rig.scale - menu_pose.pos[j][axis];
+    }
+    rig.root_motion = 1.0f / rig.scale;
+  }
+  rig.on_field.assign(menu_count, false);
+  rig.menu_sole.assign(menu_count, {});
+  rig.field_sole.assign(menu_count, {});
+  if (rig.mesh_shift.size() != menu_count) rig.mesh_shift.assign(menu_count, Vec3{});
+  for (const s8 joint : tuning.on_field) {
+    if (joint <= 0 || static_cast<size_t>(joint) >= menu_count || rig.field_joint[static_cast<size_t>(joint)] < 0) continue;
+    const auto j = static_cast<size_t>(joint);
+    const auto source = static_cast<size_t>(rig.field_joint[j]);
+    // The menu piece in the field rest pose (its rest turn and the alignment above), from its joint.
+    const Mat3 lay = multiply(rig.menu_rest[j], transpose(menu_pose.rot[j]));
+    const std::vector<bool> menu_piece = subtree(menu_model.skeleton, j), field_piece = subtree(field_model.skeleton, source);
+    Vec3 menu_centre{}, field_centre{};
+    for (const assets::Mesh& mesh : menu_model.meshes)
+      for (const assets::SkinVertex& vertex : mesh.pool) {
+        if (vertex.joint[0] >= menu_count || !menu_piece[vertex.joint[0]]) continue;
+        Vec3 arm;
+        for (size_t axis = 0; axis < 3; ++axis) arm[axis] = vertex.bind_pos[axis] - menu_pose.pos[j][axis];
+        rig.menu_sole[j].push_back(rotate(lay, arm));
+        for (size_t axis = 0; axis < 3; ++axis) menu_centre[axis] += rig.menu_sole[j].back()[axis];
+      }
+    for (const assets::Mesh& mesh : field_model.meshes)
+      for (const assets::SkinVertex& vertex : mesh.pool) {
+        if (vertex.joint[0] >= field_count || !field_piece[vertex.joint[0]]) continue;
+        rig.field_sole[j].push_back({vertex.joint[0], vertex.local[0]});
+        for (size_t axis = 0; axis < 3; ++axis) field_centre[axis] += vertex.bind_pos[axis] - field_pose.pos[source][axis];
+      }
+    if (rig.menu_sole[j].empty() || rig.field_sole[j].empty()) continue;
+    rig.on_field[j] = true;
+    for (size_t axis = 0; axis < 3; ++axis)
+      rig.mesh_shift[j][axis] = field_centre[axis] / static_cast<float>(rig.field_sole[j].size()) / rig.scale -
+                                menu_centre[axis] / static_cast<float>(rig.menu_sole[j].size());
+  }
+  // Hanging pieces: placed by their menu parent, none of the paired joints' placement rules; menu_sole and field_sole for the reach limit.
+  rig.hang.assign(menu_count, false);
+  for (const s8 joint : tuning.hang) {
+    if (joint <= 0 || static_cast<size_t>(joint) >= menu_count || rig.field_joint[static_cast<size_t>(joint)] < 0 || rig.menu_parent[static_cast<size_t>(joint)] < 0) continue;
+    const auto j = static_cast<size_t>(joint);
+    const std::vector<bool> menu_piece = subtree(menu_model.skeleton, j);
+    const std::vector<bool> field_piece = subtree(field_model.skeleton, static_cast<size_t>(rig.field_joint[j]));
+    rig.menu_sole[j].clear();
+    rig.field_sole[j].clear();
+    for (const assets::Mesh& mesh : menu_model.meshes)
+      for (const assets::SkinVertex& vertex : mesh.pool) {
+        if (vertex.joint[0] >= menu_count || !menu_piece[vertex.joint[0]]) continue;
+        Vec3 arm;
+        for (size_t axis = 0; axis < 3; ++axis) arm[axis] = vertex.bind_pos[axis] - menu_pose.pos[j][axis];
+        rig.menu_sole[j].push_back(arm);
+      }
+    for (const assets::Mesh& mesh : field_model.meshes)
+      for (const assets::SkinVertex& vertex : mesh.pool)
+        if (vertex.joint[0] < field_count && field_piece[vertex.joint[0]]) rig.field_sole[j].push_back({vertex.joint[0], vertex.local[0]});
+    rig.hang[j] = true;
+    if (j < rig.placed_from.size()) rig.placed_from[j] = -1;
+    if (j < rig.swing_about.size()) rig.swing_about[j] = -1;
+    if (j < rig.moved.size()) rig.moved[j] = false;
+    if (j < rig.pivot_shift.size()) rig.pivot_shift[j] = Vec3{};
+  }
+}
 
 MenuRig match_body_rig(const assets::ModelAsset& field_model, assets::ModelAsset& menu_model, int body) {
   const auto map = menu_rig_map(body);
   MenuRig rig = map.empty() ? match_menu_rig(field_model, menu_model) : match_menu_rig(field_model, menu_model, map);
+  if (const RigTuning* tuning = menu_rig_tuning(body)) tune_menu_rig(rig, field_model, menu_model, *tuning);
   const size_t menu_count = rig.field_joint.size(), field_count = field_model.skeleton.joints.size();
   if (rig.field_rest.size() != field_count || rig.menu_rest.size() != menu_count) return rig;
   rig.held_from.assign(menu_count, -1);
@@ -733,7 +860,7 @@ MenuRig build_rig(const assets::ModelAsset& field_model, const assets::ModelAsse
     const bool travels = reach > kTravelShare * field_pose.height && reach > std::hypot(field.joints[static_cast<size_t>(source)].rest_trans[0],
                                                                                          field.joints[static_cast<size_t>(source)].rest_trans[1],
                                                                                          field.joints[static_cast<size_t>(source)].rest_trans[2]);
-    if (below && travels && followers[static_cast<size_t>(source)] == 1 && !body_chain[static_cast<size_t>(source)]) {
+    if (below && travels && followers[static_cast<size_t>(source)] == 1 && !body_chain[static_cast<size_t>(source)] && menu_shape.skinned[j]) {
       rig.placed_from[j] = driver;
       rig.anchor[j] = anchor;
     } else if (below && !travels && field_shape.parent[static_cast<size_t>(source)] != driver) {
@@ -837,10 +964,27 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
     } else {
       turned[j] = parent >= 0 ? multiply(turned[static_cast<size_t>(parent)], rig.menu_local[j]) : rig.menu_local[j];
     }
+    // A hanging piece keeps its rest orientation to the root: it hangs plumb from the place its parent carries it to.
+    const bool hanging = j > 0 && j < rig.hang.size() && rig.hang[j];
+    if (hanging) turned[j] = multiply(multiply(turned[0], transpose(rig.menu_rest[0])), rig.menu_rest[j]);
     const int from = j < rig.placed_from.size() ? rig.placed_from[j] : -1;
     const int swing = j < rig.swing_about.size() ? rig.swing_about[j] : -1;
     const bool field_ok = source >= 0 && static_cast<size_t>(source) < field_palette.size();
-    if (parent >= 0 && from >= 0 && field_ok && static_cast<size_t>(from) < field_palette.size()) {
+    if (j < rig.on_field.size() && rig.on_field[j] && field_ok) {
+      const Mat3 turn = multiply(rotation_of(field_palette[static_cast<size_t>(source)]), transpose(rig.field_rest[static_cast<size_t>(source)]));
+      const Vec3 shift = rotate(turn, rig.mesh_shift[j]);
+      for (size_t axis = 0; axis < 3; ++axis)
+        placed[j][axis] = field_palette[static_cast<size_t>(source)].at(static_cast<int>(axis), 3) / rig.scale + shift[axis];
+      // Never lower than the field piece (model y points down): a longer menu foot tipped down would reach through the floor.
+      float field_low = -1e30f, menu_low = -1e30f;
+      for (const MenuRigPoint& point : rig.field_sole[j]) {
+        if (static_cast<size_t>(point.joint) >= field_palette.size()) continue;
+        const render::Mat4& frame = field_palette[static_cast<size_t>(point.joint)];
+        field_low = std::max(field_low, (frame.at(1, 0) * point.local[0] + frame.at(1, 1) * point.local[1] + frame.at(1, 2) * point.local[2] + frame.at(1, 3)) / rig.scale);
+      }
+      for (const Vec3& point : rig.menu_sole[j]) menu_low = std::max(menu_low, placed[j][1] + rotate(turn, point)[1]);
+      if (field_low > -1e30f && menu_low > field_low) placed[j][1] -= menu_low - field_low;
+    } else if (parent >= 0 && from >= 0 && field_ok && static_cast<size_t>(from) < field_palette.size()) {
       const size_t anchor = static_cast<size_t>(rig.anchor[j]);
       const Mat3 turn = multiply(rotation_of(field_palette[static_cast<size_t>(source)]), transpose(rig.field_rest[static_cast<size_t>(source)]));
       const Vec3 shift = rotate(turn, rig.mesh_shift[j]);
@@ -851,7 +995,9 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
       }
     } else if (parent >= 0 && swing >= 0 && field_ok) {
       const size_t pivot = static_cast<size_t>(swing);
-      const Mat3 turn = multiply(rotation_of(field_palette[static_cast<size_t>(source)]), transpose(rig.field_rest[static_cast<size_t>(source)]));
+      const int carrier = rig.field_parent[static_cast<size_t>(source)];
+      const size_t frame = carrier >= 0 && static_cast<size_t>(carrier) < field_palette.size() ? static_cast<size_t>(carrier) : static_cast<size_t>(source);
+      const Mat3 turn = multiply(rotation_of(field_palette[frame]), transpose(rig.field_rest[frame]));
       Vec3 arm;
       for (size_t axis = 0; axis < 3; ++axis) arm[axis] = rig.menu_rest_pos[j][axis] - rig.menu_rest_pos[pivot][axis];
       const Vec3 swung = rotate(turn, arm);
@@ -859,6 +1005,13 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
     } else if (parent >= 0) {
       const Vec3 offset = rotate(turned[static_cast<size_t>(parent)], rig.menu_offset[j]);
       for (size_t axis = 0; axis < 3; ++axis) placed[j][axis] = placed[static_cast<size_t>(parent)][axis] + offset[axis];
+      // Turned about its field joint's place rather than its own: the parent carries that place, the joint's own turn swings the rest.
+      if (j < rig.pivot_shift.size() && field_ok) {
+        const Mat3 own = multiply(turned[j], transpose(rig.menu_rest[j]));
+        const Mat3 above = multiply(turned[static_cast<size_t>(parent)], transpose(rig.menu_rest[static_cast<size_t>(parent)]));
+        const Vec3 from_above = rotate(above, rig.pivot_shift[j]), from_own = rotate(own, rig.pivot_shift[j]);
+        for (size_t axis = 0; axis < 3; ++axis) placed[j][axis] += from_above[axis] - from_own[axis];
+      }
       const int field_parent = j < rig.moved.size() && rig.moved[j] ? rig.field_parent[static_cast<size_t>(source)] : -1;
       if (field_parent >= 0 && static_cast<size_t>(field_parent) < field_palette.size() && static_cast<size_t>(source) < field_palette.size()) {
         const render::Mat4& above = field_palette[static_cast<size_t>(field_parent)];
@@ -882,6 +1035,32 @@ void menu_rig_palette(const MenuRig& rig, std::span<const render::Mat4> field_pa
       if (!field_palette.empty())
         for (size_t axis = 0; axis < 3; ++axis)
           placed[j][axis] += (field_palette[0].at(static_cast<int>(axis), 3) - rig.field_root_rest[axis]) * rig.root_motion;
+    }
+    // A hanging piece reaches no lower than the floor (model y = 0, y pointing down) or, where it reaches lower, its field piece: tipped
+    // forward about the root's sideways axis through its joint, by the least angle that lifts its lowest point that high.
+    if (hanging && field_ok && !rig.menu_sole[j].empty()) {
+      float field_low = 0.0f;
+      for (const MenuRigPoint& point : rig.field_sole[j]) {
+        if (static_cast<size_t>(point.joint) >= field_palette.size()) continue;
+        const render::Mat4& frame = field_palette[static_cast<size_t>(point.joint)];
+        field_low = std::max(field_low, (frame.at(1, 0) * point.local[0] + frame.at(1, 1) * point.local[1] + frame.at(1, 2) * point.local[2] + frame.at(1, 3)) / rig.scale);
+      }
+      const Mat3 carry = multiply(turned[j], transpose(rig.menu_rest[j]));
+      auto tipped = [&](float angle) { return multiply(carry, Mat3{1, 0, 0, 0, std::cos(angle), std::sin(angle), 0, -std::sin(angle), std::cos(angle)}); };
+      auto lowest = [&](float angle) {
+        const Mat3 tip = tipped(angle);
+        float low = -1e30f;
+        for (const Vec3& arm : rig.menu_sole[j]) low = std::max(low, placed[j][1] + rotate(tip, arm)[1]);
+        return low;
+      };
+      if (lowest(0.0f) > field_low) {
+        float fits = 1.5707963f, misses = 0.0f;
+        for (int step = 0; step < 16; ++step) {
+          const float mid = 0.5f * (fits + misses);
+          (lowest(mid) > field_low ? misses : fits) = mid;
+        }
+        turned[j] = multiply(tipped(fits), rig.menu_rest[j]);
+      }
     }
     out[j] = render::mat4_from_rt(j < rig.hidden.size() && rig.hidden[j] ? Mat3{} : turned[j], placed[j]);
   }
@@ -913,6 +1092,10 @@ constexpr s8 kLeahMap[] = {0, 1, 2, -1, 3, 12, -1, 4, 5, 6, 7, 8, 9, 10, 11, -1,
 constexpr s8 kVanMap[] = {0, 1, 2, 3, 4, 5, 6, 7, -1, 8, 9, 10, 11, -1, 21, -1, 12, 13, 14, 15, -1, 16, 17, 18, 19, -1, 24, 20, 22, 23, -1, -1, 23, 22};
 // Sneff: field joint per menu joint.
 constexpr s8 kSneffMap[] = {0, 1, 2, 3, -1, -1, 5, 6, 7, 8, -1, -1, 9, 10, 11, 12, -1, -1, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22};
+
+// Poshul: field joint per menu joint; the legs joint for joint (hip, thigh, foot, toe on both rigs: the matcher pairs the field thigh with
+// the battle foot), the collar's tag on the field collar's ring (hung from the chest by her RigTuning).
+constexpr s8 kPoshulMap[] = {0, 1, 2, 3, -1, -1, 6, -1, 5, -1, -1, 7, 8, 9, 10, 11, 12, 13, 14, 4, 17, 18, 19, 20, 21, 22, 23, 24, 16, -1, 15, -1};
 
 // Leena: field joint per menu joint.
 constexpr s8 kLeenaMap[] = {0, 1, 2, 3, -1, -1, 5, 6, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 23, 24, 25, 26, 27, 27, 27, 20, 20, 20, 22, 21, -1, 29, 28, -1};
@@ -974,6 +1157,17 @@ constexpr s8 kSpearfisherMap[] = {0,  1,  2,  2,  -1, 3,  -1, 4,  5,  6,  7,  -1
 constexpr s8 kFossickerMap[] = {0,  1,  2,  -1, -1, -1, 3,  4,  5,  6,  7,  8,  9,  10, 11, 12, 13, 14, 15, kHiddenJoint, -1, -1,
                                 -1, -1, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, -1, 30,           31, 32, 33, 34};
 
+// Kid, Guile, Janice and Irenes: limbs aligned (their feet meet the field model's floor line better). Poshul: the field rest pose holds her
+// hind legs folded flat at foot level, her body turns about a point behind the menu model's, her hind feet and front paws hang free of the
+// body mesh, and her collar's tag hangs from the collar on her chest while the field collar and its ring ride the head.
+constexpr RigTuning kRigTunings[] = {
+    {0x01, true, false, {-1, -1, -1, -1}, {-1, -1}},
+    {0x02, true, false, {-1, -1, -1, -1}, {-1, -1}},
+    {0x0C, true, true, {13, 17, 22, 26}, {19, -1}},
+    {0x17, true, false, {-1, -1, -1, -1}, {-1, -1}},
+    {0x21, true, false, {-1, -1, -1, -1}, {-1, -1}},
+};
+
 struct RigMap {
   int body;
   std::span<const s8> map;
@@ -981,6 +1175,7 @@ struct RigMap {
 constexpr RigMap kRigMaps[] = {
     {0x06, kRiddelMap},
     {0x09, kMarcyMap},
+    {0x0C, kPoshulMap},
     {0x0D, kRazzlyMap},
     {0x10, kRadiusMap},
     {0x11, kFargoMap},
@@ -1089,6 +1284,11 @@ std::span<const HeldProp> menu_rig_props(int body) {
   const auto first = std::ranges::find(kHeldProps, body, &HeldProp::body);
   const auto last = std::find_if(first, std::end(kHeldProps), [body](const HeldProp& prop) { return prop.body != body; });
   return {first, last};
+}
+
+const RigTuning* menu_rig_tuning(int body) {
+  const auto found = std::ranges::find(kRigTunings, body, &RigTuning::body);
+  return found == std::end(kRigTunings) ? nullptr : &*found;
 }
 
 std::span<const s8> menu_rig_map(int body) {

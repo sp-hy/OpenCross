@@ -75,8 +75,8 @@ bool PostFx::begin(GpuContext& ctx, const Frame& frame, const Rect& scissor, Fra
   return true;
 }
 
-void PostFx::pass(GpuContext& ctx, int mode, const TexRef (&textures)[3], const float (&push)[16], bool over) {
-  float data[16];
+void PostFx::pass(GpuContext& ctx, int mode, const TexRef (&textures)[3], const float (&push)[20], bool over) {
+  float data[20];
   std::copy(std::begin(push), std::end(push), data);
   data[0] = static_cast<float>(mode);
   SDL_BindGPUGraphicsPipeline(ctx.pass(), (over ? pipeline_over_ : pipeline_).handle());
@@ -91,9 +91,13 @@ void PostFx::end(GpuContext& ctx, const Rect& scissor, const PostFxView& view) {
   ctx.end_target(depth_);
   const u32 half_w = std::max(1u, (depth_.width() + 1) / 2), half_h = std::max(1u, (depth_.height() + 1) / 2);
   const TexRef depth = depth_.ref(nearest_);
-  const float max_blur = kMaxBlur * static_cast<float>(depth_.height()) * 0.5f * std::clamp(view.dof_amount, 0.0f, 1.0f);
-  float push[16] = {0, view.ssao ? 1.0f : 0.0f, view.dof ? 1.0f : 0.0f, max_blur, view.ax, view.cx, view.ay, view.cy,
-                    std::max(view.focus, 1.0f), kAoRadius, 0, 0, kFocusNear, kFocusFar, kFocusRamp, kFocusNearRamp};
+  const float max_blur = kMaxBlur * static_cast<float>(depth_.height()) * 0.5f * std::clamp(view.dof_amount, 0.0f, 1.0f) * std::max(view.blur_strength, 0.0f);
+  const float band = std::max(view.focus_range, 0.01f);
+  const float focus = std::max(view.focus, 1.0f);
+  const float ao_end = view.ao_range > 0 ? focus * view.ao_range * (1.0f + kAoFade) : 0.0f;
+  float push[20] = {0, view.ssao ? 1.0f : 0.0f, view.dof ? 1.0f : 0.0f, max_blur, view.ax, view.cx, view.ay, view.cy,
+                    focus, kAoRadius, 0, 0, kFocusNear * band, kFocusFar * band, kFocusRamp * band, kFocusNearRamp * band,
+                    view.ao_range > 0 ? focus * view.ao_range : 0.0f, ao_end, 0, 0};
   auto run = [&](RenderTarget& target, int mode, const TexRef (&textures)[3]) {
     Frame out;
     ctx.begin_target(target, frame_, out);

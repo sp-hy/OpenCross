@@ -3,8 +3,9 @@
 // replacement. Field models (fieldobj/player/<dir>/<name>) pair <stem>.tim, the 4x hd/<stem>.tim and the animation pack
 // fieldobj/ex/<name>.bin; battle models (battle/player/.., battle/monster/..) pair <stem>.ltc (else .ltd) and the at0.prd of
 // their folder. The asset's source is the stem (it names the texture dump / replacement folder). In HD art (Vfs::hd_mode) a battle player
-// model also gets RDE's HD-art weapon mount correction and, with `hd_battle_texture`, its 4x HD image from hd/menu/player/<name>.tim
-// (import::apply_battle_hd_tim); without it the model keeps its 1x .ltc only.
+// model also gets RDE's HD-art weapon mount correction and its 4x HD image from hd/menu/player/<name>.tim (import::apply_battle_hd_tim);
+// it then names <name> as its character textures (render/character_texture.h). In the Modded art mode a battle player without a TIM of
+// its own, and a battle monster, borrows the TIM (and the character textures) of the battle player whose main page is the same image.
 #include <optional>
 #include <string>
 #include <vector>
@@ -17,18 +18,30 @@ class Vfs;
 
 namespace oc::game {
 
-std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err, bool hd_battle_texture = false);
+std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err);
 
 // Sorted lower-case stems of every character model in the cdrom archive (field players, battle players, battle monsters).
 std::vector<std::string> model_stems(const vfs::Vfs& files);
+
+// The character textures (render/character_texture.h) battle model `stem` draws from in the Modded art mode: its own Status-screen TIM's
+// file name, else the one it borrows (players and monsters); empty for models with neither (HD file set).
+std::string battle_character(const vfs::Vfs& files, const std::string& stem);
 
 // Menu models (the Status screen's) 0..kLastMenuModel follow the battle model order of the player block.
 constexpr int kLastMenuModel = 0x32;
 // The file name of menu model `model` (menu/player/<name>.ome), empty outside the player block.
 std::string menu_model_stem(int model);
 // Menu model `model`, cdrom/menu/player/<name>.ome; in HD art with the 4x hd/menu/player/<name>.tim, which is then also dumped / replaced
-// as the texture model/menu/player/<name> and stands in for the 1x texture.
+// as the character textures <name> (render/character_texture.h) and stands in for the 1x texture.
 std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err);
+// The character textures of status-screen model <stem> as RDE has them (HD file set): its battle model's 4x main texture (the open half
+// of the TIM) and 4x eye strip (empty when the model has no eye rects), with the battle eye rects. `original_size`: the 1x page and strip
+// the 4x images were upscaled from instead.
+struct CharacterTextures {
+  import::Image texture, eyes;
+  assets::ModelAsset::EyeSwap eye;
+};
+std::optional<CharacterTextures> read_character_textures(const vfs::Vfs& files, const std::string& stem, bool original_size = false);
 // The detailed body [Enhancements] MenuModelsInField draws for battle model `body` (the game's battle model numbering, which the menu models
 // share): menu model `body` up to kLastMenuModel, else the battle model itself (battle/monster/...: an NPC's).
 std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int body, bool hd_art, std::string* err);

@@ -17,7 +17,7 @@ struct FrameSlot {
   // PS1 lit path (DrawParams::Light): [0] = back colour / 256, w = 1 when lit; [1..3] = light matrix rows (direction * k / 4096);
   // [4..6] = light colours / 256.
   vec4 lit[9];  // [7] = weapon specular light direction (w = 1 on), [8] = eye position (DrawParams::Light::spec)
-  // [Enhancements] el[0] = (EnhancedLighting on, key strength, SpellLights count, SmoothReflections on); el[1 + 2i] = light i position (render world) + radius;
+  // [Enhancements] el[0] = (EnhancedLighting on, key strength, SpellLights count, unused); el[1 + 2i] = light i position (render world) + radius;
   // el[2 + 2i] = light i colour x intensity. All zero = the PS1 look.
   vec4 el[18];  // [17] = scene ambient multiplier (rgb, w = 1 on); el[2 + 2i].w = 1: the light is a PS1 slot light (linear falloff)
   vec4 key;     // [Shaders] a key light fixed in the world: the direction toward it, w = 1 on (else key_light's camera-relative one)
@@ -112,9 +112,9 @@ void main() {
     float tw = abs(pc.fog.w);
     float base = pc.fog.w < 0.0 ? 0.0 : floor(in_uvq.x * tw / 128.0) * 128.0;  // the page bit adds 128 texels (64 halfwords at 8 bpp), so the window follows the face's half
     // The PS1 corner UV is a whole texel (s8 normal >> 1): a slowly turning part steps its reflection one texel at a time (FATE's idle: a corner
-    // moves ~0.07-0.1 texel per 60 Hz frame, so it jumps every ~10-14 frames; retail and ours alike). [Enhancements] SmoothReflections
-    // (el[0].w = 1) keeps the fraction, so the reflection slides with the (interpolated) pose instead.
-    vec2 h = u.el[0].w > 0.5 ? nb.xy * 0.5 : floor(nb.xy * 0.5);
+    // moves ~0.07-0.1 texel per 60 Hz frame, so it jumps every ~10-14 frames). The fraction is kept, so the reflection slides with the
+    // (interpolated) pose instead.
+    vec2 h = nb.xy * 0.5;
     vec2 e = vec2(h.x + 64.0 + base, h.y + 192.0) / vec2(tw, 256.0);
     uv = vec3(e * aff, aff);
   }
@@ -212,19 +212,13 @@ void main() {
     face_slot = floor(max(sz, 0.0) / 16.0);
     // A face is under water when any corner's world y is below the level (level - VY < 0).
     face_wet = (pc.misc.z > 0.5 && max(g0.y, max(g1.y, g2.y)) > pc.misc.w) ? 1.0 : 0.0;
-    // The face's ordering-table index as the fragment shader files it; outside the slab: collapsed (not drawn in this pass).
-    float full = face_slot + pc.ot.z + (face_wet > 0.5 ? pc.ot.w : 0.0);
-    bool out_of_slab = full <= u.slab.x || full > u.slab.y;
-    if (pc.ot.x > 1.5) {
-      // Smooth water line: a face straddling the level keeps both slots (dry fragments the normal one, submerged ones the pushed-back
-      // one; the fragment shader files each); it is collapsed only when neither slot is in this pass's slab.
-      face_all = (pc.misc.z > 0.5 && min(g0.y, min(g1.y, g2.y)) > pc.misc.w) ? 1.0 : 0.0;
-      float fd = face_slot + pc.ot.z, fw = fd + pc.ot.w;
-      bool dry_in = face_all < 0.5 && fd > u.slab.x && fd <= u.slab.y;
-      bool wet_in = face_wet > 0.5 && fw > u.slab.x && fw <= u.slab.y;
-      out_of_slab = !(dry_in || wet_in);
-    }
-    if (out_of_slab) {
+    // A face straddling the level keeps both slots (dry fragments the normal one, submerged ones the pushed-back one; the fragment shader
+    // files each); it is collapsed (not drawn in this pass) only when neither slot is in this pass's slab.
+    face_all = (pc.misc.z > 0.5 && min(g0.y, min(g1.y, g2.y)) > pc.misc.w) ? 1.0 : 0.0;
+    float fd = face_slot + pc.ot.z, fw = fd + pc.ot.w;
+    bool dry_in = face_all < 0.5 && fd > u.slab.x && fd <= u.slab.y;
+    bool wet_in = face_wet > 0.5 && fw > u.slab.x && fw <= u.slab.y;
+    if (!(dry_in || wet_in)) {
       gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
       return;
     }
@@ -241,9 +235,9 @@ void main() {
       // Both halves evaluate the same two expressions with the same operand order: the quad is kept or dropped as a whole.
       if (role > 1.5) front = nclip(s3, s1, s0) > 0.0 || a >= 0.0;  // second half (v2,v1,v3): (v0,v1,v2) = (s3,s1,s0)
       else if (role > 0.5) front = a > 0.0 || nclip(s2, s1, s3) >= 0.0;  // first half (v0,v1,v2): (v2,v1,v3) = (s2,s1,s3)
-      // [Enhancements] ModelPixelDepth: a two-sided sheet's face is tested per triangle, so a quad bent by the animation never lets both sides
-      // through at the same place (the PS1 paints one over the other whole; per-pixel depth would let them cut through each other).
-      if (pc.slot.y > 0.5 && in_rgb.w > 0.5) front = a > 0.0;
+      // A two-sided sheet's face is tested per triangle, so a quad bent by the animation never lets both sides through at the same place
+      // (the PS1 paints one over the other whole; per-pixel depth would let them cut through each other).
+      if (in_rgb.w > 0.5) front = a > 0.0;
       // [Shaders] outline pass: the hull is the back-facing triangles, each tested on its own; the whole-quad test would drop the quads
       // straddling the silhouette, where the line is drawn.
       if (pc.shade.y > 0.5) front = a > 0.0;

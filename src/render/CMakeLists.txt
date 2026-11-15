@@ -58,6 +58,8 @@ add_library(oc_render STATIC
   texture.cpp
   texture_registry.h
   texture_registry.cpp
+  character_texture.h
+  character_texture.cpp
   stage_tiles.h
   stage_tiles.cpp
   model_tiles.h

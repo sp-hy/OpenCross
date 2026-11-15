@@ -6,8 +6,9 @@ layout(set = 2, binding = 1) uniform sampler2D t1;
 layout(set = 2, binding = 2) uniform sampler2D t2;
 // opts: mode (0 SSAO, 1 AO blur, 2 DoF filter, 3 DoF blur, 4 combine, 5 composite), SSAO on, DoF on, largest blur radius (half-resolution
 // pixels); proj: ax, cx, ay, cy (NDC x = ax x / z + cx, y down likewise); focus: focus z, AO radius (world units), blur direction;
-// band: sharp band in front of / behind the focus, ramp to the full blur behind / in front (fractions of the focus distance).
-layout(set = 3, binding = 0) uniform Push { vec4 opts; vec4 proj; vec4 focus; vec4 band; } pc;
+// band: sharp band in front of / behind the focus, ramp to the full blur behind / in front (fractions of the focus distance); extra: the
+// camera z where the AO starts to fade and where it is gone (0 = no limit).
+layout(set = 3, binding = 0) uniform Push { vec4 opts; vec4 proj; vec4 focus; vec4 band; vec4 extra; } pc;
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 out_color;
 
@@ -34,7 +35,7 @@ float coc(float z) {
 float ssao() {
   ivec2 full = ivec2(gl_FragCoord.xy) * 2;
   float z = view_z(t0, full);
-  if (z >= kSky) return 1.0;
+  if (z >= kSky || (pc.extra.y > 0.0 && z >= pc.extra.y)) return 1.0;
   vec3 pos = view_pos(t0, full, z);
   vec3 right = view_pos(t0, full + ivec2(1, 0), view_z(t0, full + ivec2(1, 0))), left = view_pos(t0, full - ivec2(1, 0), view_z(t0, full - ivec2(1, 0)));
   vec3 below = view_pos(t0, full + ivec2(0, 1), view_z(t0, full + ivec2(0, 1))), above = view_pos(t0, full - ivec2(0, 1), view_z(t0, full - ivec2(0, 1)));
@@ -57,7 +58,8 @@ float ssao() {
     float cosine = dot(v, normal) * inversesqrt(d2 + 1e-3);
     occlusion += max(cosine - 0.2, 0.0) * clamp(1.0 - d2 / (radius * radius), 0.0, 1.0);
   }
-  return clamp(1.0 - 3.0 * occlusion / float(kSamples), 0.0, 1.0);
+  float ao = clamp(1.0 - 3.0 * occlusion / float(kSamples), 0.0, 1.0);
+  return pc.extra.y > 0.0 ? mix(ao, 1.0, smoothstep(pc.extra.x, pc.extra.y, z)) : ao;
 }
 
 float ao_blur() {
@@ -76,13 +78,37 @@ float ao_blur() {
   return total > 0.0 ? sum / total : texelFetch(t0, h, 0).r;
 }
 
+// The 2 x 2 view-depth texels' colours weighted by their blur amounts, so a texel on a silhouette holds only the blurred side's colour and a
+// sharp unit does not bleed into the blur around it; the amount is the largest of the four.
 vec4 dof_filter() {
-  vec2 offset = 0.25 / (vec2(textureSize(t1, 0)) * 0.5);
-  vec3 rgb = 0.25 * (texture(t0, uv + vec2(-offset.x, -offset.y)).rgb + texture(t0, uv + vec2(offset.x, -offset.y)).rgb +
-                     texture(t0, uv + vec2(-offset.x, offset.y)).rgb + texture(t0, uv + vec2(offset.x, offset.y)).rgb);
+  vec2 full_size = vec2(textureSize(t1, 0));
   ivec2 full = ivec2(gl_FragCoord.xy) * 2;
-  float amount = min(min(coc(view_z(t1, full)), coc(view_z(t1, full + ivec2(1, 0)))), min(coc(view_z(t1, full + ivec2(0, 1))), coc(view_z(t1, full + ivec2(1, 1)))));
-  return vec4(rgb, amount);
+  vec3 rgb = vec3(0.0), sharp_rgb = vec3(0.0);
+  float total = 0.0, amount = 0.0;
+  for (int k = 0; k < 4; ++k) {
+    ivec2 texel = full + ivec2(k & 1, k >> 1);
+    float c = coc(view_z(t1, texel));
+    vec3 colour = texture(t0, (vec2(texel) + 0.5) / full_size).rgb;
+    rgb += colour * c;
+    sharp_rgb += colour;
+    total += c;
+    amount = max(amount, c);
+  }
+  return vec4(total > 1e-3 ? rgb / total : 0.25 * sharp_rgb, amount);
+}
+
+// The blur amount at a view-depth texel, eased in beside a nearer, sharper surface: scaled by the share of the 5 x 5 texels around it that
+// are not one, so the blur fades in over two pixels from a unit's silhouette instead of switching per pixel along its stair-stepped edge.
+float edge_amount(ivec2 texel, float z) {
+  float c = coc(z);
+  if (c <= 0.0) return 0.0;
+  float occluders = 0.0;
+  for (int j = -2; j <= 2; ++j)
+    for (int i = -2; i <= 2; ++i) {
+      float zs = view_z(t2, texel + ivec2(i, j));
+      if (zs < z - (0.05 * z + 8.0) && coc(zs) < c) occluders += 1.0;
+    }
+  return c * (1.0 - occluders / 25.0);
 }
 
 vec4 dof_blur() {
@@ -111,20 +137,25 @@ vec4 combine() {
   vec2 hp = (vec2(texel) + 0.5) * 0.5 - 0.5;
   ivec2 h0 = ivec2(floor(hp));
   vec2 frac_part = hp - vec2(h0);
-  float ao = 0.0, total = 0.0;
+  float ao = 0.0, total = 0.0, blurred_total = 0.0;
   vec3 blurred = vec3(0.0);
   for (int j = 0; j < 2; ++j)
     for (int i = 0; i < 2; ++i) {
       ivec2 h = clamp(h0 + ivec2(i, j), ivec2(0), half_size - 1);
+      float bilinear = (i == 0 ? 1.0 - frac_part.x : frac_part.x) * (j == 0 ? 1.0 - frac_part.y : frac_part.y);
       float zh = view_z(t2, h * 2);
-      float w = (i == 0 ? 1.0 - frac_part.x : frac_part.x) * (j == 0 ? 1.0 - frac_part.y : frac_part.y) * (abs(zh - z) < 0.05 * z + 8.0 ? 1.0 : 1e-3) + 1e-6;
+      float w = bilinear * (abs(zh - z) < 0.05 * z + 8.0 ? 1.0 : 1e-3) + 1e-6;
       ao += texelFetch(t0, h, 0).r * w;
-      blurred += texelFetch(t1, h, 0).rgb * w;
       total += w;
+      // The blurred texel holds its block's farthest, most blurred colour: matched against the block's farthest depth.
+      float zb = max(max(zh, view_z(t2, h * 2 + ivec2(1, 0))), max(view_z(t2, h * 2 + ivec2(0, 1)), view_z(t2, h * 2 + ivec2(1, 1))));
+      float wb = bilinear * (abs(zb - z) < 0.05 * z + 8.0 ? 1.0 : 1e-3) + 1e-6;
+      blurred += texelFetch(t1, h, 0).rgb * wb;
+      blurred_total += wb;
     }
   ao = pc.opts.y > 0.5 ? ao / total : 1.0;
-  float amount = pc.opts.z > 0.5 ? clamp(coc(z) * pc.opts.w, 0.0, 1.0) : 0.0;
-  return vec4(ao * amount * blurred / total, 1.0 - ao * (1.0 - amount));
+  float amount = pc.opts.z > 0.5 ? clamp(edge_amount(texel, z) * pc.opts.w, 0.0, 1.0) : 0.0;
+  return vec4(ao * amount * blurred / blurred_total, 1.0 - ao * (1.0 - amount));
 }
 
 void main() {

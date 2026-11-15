@@ -107,14 +107,13 @@ std::string character_battle_stem(const vfs::Vfs& files, int char_id) {
   return {};
 }
 
-std::optional<assets::ModelAsset> read_battle_model_for_field(const vfs::Vfs& files, const std::string& stem, bool hd_battle_texture,
-                                                              std::string* err) {
+std::optional<assets::ModelAsset> read_battle_model_for_field(const vfs::Vfs& files, const std::string& stem, std::string* err) {
   const std::optional<Bytes> obj = files.read("cdrom/" + stem + ".obj");
   if (!obj) {
     if (err) *err = "cdrom/" + stem + ".obj not found";
     return std::nullopt;
   }
-  std::optional<assets::ModelAsset> asset = read_model_files(files, stem, err, hd_battle_texture);
+  std::optional<assets::ModelAsset> asset = read_model_files(files, stem, err);
   if (!asset) return std::nullopt;
   adapt_battle_model(*asset, battle_field_clips(ByteSpan(*obj)));
   return asset;

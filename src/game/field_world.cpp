@@ -329,14 +329,14 @@ void FieldWorld::drop_character_prefetches() {
 namespace {
 
 // The CPU half of a sourced model ("room:<stem>:<k>" or "battle:<stem>"), its texture mods resolved. Any thread.
-std::optional<assets::ModelAsset> read_sourced_model(const vfs::Vfs& files, const std::string& key, bool hd) {
+std::optional<assets::ModelAsset> read_sourced_model(const vfs::Vfs& files, const std::string& key) {
   std::string err;
   std::optional<assets::ModelAsset> asset;
   if (key.starts_with("room:")) {
     const size_t colon = key.rfind(':');
     asset = read_room_model(files, key.substr(5, colon - 5), std::atoi(key.c_str() + colon + 1), &err);
   } else if (key.starts_with("battle:")) {
-    asset = read_battle_model_for_field(files, key.substr(7), hd, &err);
+    asset = read_battle_model_for_field(files, key.substr(7), &err);
   }
   if (!asset) {
     log::warn("field: model {}: {}", key, err);
@@ -378,7 +378,7 @@ std::shared_ptr<ModelHandle> FieldWorld::sourced_model(const std::string& key) {
   }
   if (!handle) {
     ScopedTimer model_timer("field: sourced model load (first use)");
-    if (std::optional<assets::ModelAsset> asset = read_sourced_model(*files_, key, hd_)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
+    if (std::optional<assets::ModelAsset> asset = read_sourced_model(*files_, key)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
   }
   if (handle && key.starts_with("battle:")) handle->field_scale = kBattleModelFieldScale;
   if (handle)
@@ -390,9 +390,9 @@ std::shared_ptr<ModelHandle> FieldWorld::sourced_model(const std::string& key) {
 
 void FieldWorld::prefetch_sourced_model(const std::string& key) {
   if (key.empty() || !files_ || sourced_models_.contains(key) || sourced_prefetch_.contains(key)) return;
-  sourced_prefetch_[key] = std::async(std::launch::async, [files = files_, ctx = ctx_, key, hd = hd_]() -> std::optional<PrefetchedCharacter> {
+  sourced_prefetch_[key] = std::async(std::launch::async, [files = files_, ctx = ctx_, key]() -> std::optional<PrefetchedCharacter> {
     const unsigned generation = render::texture_registry::generation();
-    std::optional<assets::ModelAsset> asset = read_sourced_model(*files, key, hd);
+    std::optional<assets::ModelAsset> asset = read_sourced_model(*files, key);
     if (!asset) return std::nullopt;
     render::ModelUploads uploads = render::prepare_model_uploads(*asset);
     render::ModelTextures textures = ctx ? render::prepare_model_textures(*ctx, *asset, uploads) : render::ModelTextures{};

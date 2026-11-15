@@ -190,13 +190,10 @@ void bind_cheats(const Cheats* set);
 //            scenes; room 3D meshes + models; battle / field unit models; effect sprite sheets + effect meshes - large, off by default).
 //   [Features] the player's settings of the engine features mods turn on: <Feature>.<Setting>=<value> (core/features.h), winning over
 //            every mod's mod.ini; kept as written, read at launch.
-//   [Enhancements] (all independent of the Ps1Res settings) SmoothEffectRings: ring / tube effect meshes get extra segments.
-//            SmoothWaterLine: submerged actor parts are cut at the exact water plane, not per whole triangle. ModelPixelDepth: model faces
-//            meet per pixel instead of being painted whole in their ordering-table slot (hair / capes pulled one slot nearer). Lighting: key light on the
+//   [Enhancements] (all independent of the Ps1Res settings) Lighting: key light on the
 //            models, bright spell effects light the battle units and stage, units cast real shadows (field and battle) and the battle floor darkens
 //            smoothly per vertex. EdgeBlend: cross-fades the faces along the texture seams of
-//            the stage / title meshes, any art mode. SmoothReflections: env-mapped model parts (FATE, Lavos, ...) slide their reflection
-//            sub-texel (off = the PS1's one-texel steps).
+//            the stage / title meshes, any art mode.
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
@@ -270,22 +267,18 @@ struct Config {
   int slow_rate = 50;
   bool widescreen = false;
   ArtMode art_mode = ArtMode::Hd;
-  // HD art: battle players on RDE's 4x Status-screen TIM (false = their 1x .ltc).
-  bool hd_battle_textures = true;
   std::vector<ModSetting> mods;
   std::vector<std::pair<std::string, std::string>> features;
   bool dump_stages = true, dump_title = true, dump_rooms = true, dump_models = true, dump_weapons = true, dump_effects = false;
+  // [Mods] DumpModelSource: the models at their 1x size instead of RDE's 4x images.
+  bool dump_model_source = false;
   bool ps1_res_graphics = false;
   bool ps1_res_ui = false;
   float render_scale = 1.0f;
   static constexpr float kRenderScales[] = {0.5f, 0.75f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f};
   bool ps1_jitter = false;
-  bool smooth_effect_rings = true;
-  bool smooth_water_line = true;
-  bool model_pixel_depth = true;
   bool lighting = false;
   bool edge_blend = false;
-  bool smooth_reflections = true;
   bool autohide_cast_hud = false;
   bool retain_battle_scenery = false;
   bool full_precision_effects = false;
@@ -306,7 +299,12 @@ struct Config {
   bool crt_glow = false;
   std::string grade = "off";
   bool ssao = false;
+  // Past this many times the focus distance the AO fades out; 0 = no limit.
+  float ssao_range = 2.0f;
   bool depth_of_field = false;
+  // The sharp band's width and the blur radius, factors.
+  float dof_focus_range = 1.0f;
+  float dof_strength = 1.0f;
   int msaa = 1;
   static constexpr int kMsaaLevels[] = {1, 2, 4, 8};
   int anisotropy = 1;

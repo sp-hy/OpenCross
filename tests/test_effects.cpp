@@ -1,6 +1,6 @@
 // Tests for the room .prd effects importer on a hand-built drp (TIM + timinfo + emitter + sequence) and for the effect player: stepper /
 // header / overlay pacing, ramps and oscillators, easing and curves, blend arithmetic, OT slots, the sequence player, nested packs, the
-// rotation order, quad-strip smoothing and the lens flare flash.
+// rotation order, quad-strip smoothing, the lens flare flash and the sprite borders of the GPU sheet atlas.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -9,6 +9,7 @@
 
 #include "game/effects/emitter_system.h"
 #include "game/effects/fx_math.h"
+#include "game/effects/gpu_effects.h"
 #include "game/effects/object_heap.h"
 #include "game/effects/sequence_player.h"
 #include "game/effects/soft_raster.h"
@@ -934,6 +935,50 @@ void test_rot_order() {
   CHECK(std::fabs(wave.m[3]) < 1e-3f && std::fabs(wave.m[4]) < 1e-3f && std::fabs(wave.m[6] + 1.0f) < 1e-3f);
 }
 // Lens flare flash: channel = d / (0x25400 / c), d = 0x25400 - (dx^2 + dy^2), dx = 320 - 2 sx, dy = 224 - 2 sy.
+// Every sprite of the uploaded atlas sits in a border of its own edge texels: the texel just outside each UV window repeats the sprite's
+// edge, so bilinear sampling never reads the sprite stacked beside it (the lens flare's mirrored cells showed lines where it did).
+void test_sheet_atlas_padding() {
+  assets::SpriteSheet sheet;
+  auto sprite_of = [](u8 w, u8 h, u8 base) {
+    assets::EffectSprite sprite;
+    sprite.w = w, sprite.h = h;
+    for (int i = 0; i < w * h; ++i) sprite.rgba.insert(sprite.rgba.end(), {static_cast<u8>(base + i), 0, 0, 255});
+    return sprite;
+  };
+  sheet.frames.push_back({sprite_of(2, 2, 10), sprite_of(0, 0, 0)});
+  sheet.frames.push_back({sprite_of(3, 1, 50)});
+  for (const u32 scale : {1u, 2u}) {
+    u32 w = 0, h = 0;
+    std::vector<u8> stacked;
+    CHECK(effects::sheet_atlas_image(sheet, w, h, stacked) && w == 3 && h == 3);
+    std::vector<u8> img(static_cast<size_t>(w) * scale * h * scale * 4);
+    for (u32 j = 0; j < h * scale; ++j)
+      for (u32 i = 0; i < w * scale; ++i)
+        std::copy_n(&stacked[(static_cast<size_t>(j / scale) * w + i / scale) * 4], 4, &img[(static_cast<size_t>(j) * w * scale + i) * 4]);
+    u32 img_w = w * scale, img_h = h * scale;
+    const std::vector<effects::SpriteWindow> windows = effects::pad_sheet_atlas(sheet, w, h, img_w, img_h, img);
+    CHECK(windows.size() == 3);
+    CHECK(img_w == 3 * scale + 2 && img_h == 3 * scale + 4 && img.size() == static_cast<size_t>(img_w) * img_h * 4);
+    if (windows.size() != 3 || img.size() != static_cast<size_t>(img_w) * img_h * 4) continue;
+    CHECK(windows[1].u0 == 0 && windows[1].v1 == 0);
+    auto red = [&](u32 x, u32 y) { return img[(static_cast<size_t>(y) * img_w + x) * 4]; };
+    for (const size_t k : {size_t{0}, size_t{2}}) {
+      const effects::SpriteWindow& window = windows[k];
+      const u32 x0 = static_cast<u32>(std::lround(window.u0 * static_cast<float>(img_w)));
+      const u32 x1 = static_cast<u32>(std::lround(window.u1 * static_cast<float>(img_w)));
+      const u32 y0 = static_cast<u32>(std::lround(window.v0 * static_cast<float>(img_h)));
+      const u32 y1 = static_cast<u32>(std::lround(window.v1 * static_cast<float>(img_h)));
+      const assets::EffectSprite& sprite = k == 0 ? sheet.frames[0][0] : sheet.frames[1][0];
+      CHECK(x0 == 1 && x1 - x0 == sprite.w * scale && y1 - y0 == sprite.h * scale);
+      for (u32 y = y0 - 1; y <= y1; ++y)
+        for (u32 x = x0 - 1; x <= x1; ++x) {
+          const u32 src_x = (std::clamp(x, x0, x1 - 1) - x0) / scale, src_y = (std::clamp(y, y0, y1 - 1) - y0) / scale;
+          CHECK(red(x, y) == sprite.rgba[(static_cast<size_t>(src_y) * sprite.w + src_x) * 4]);
+        }
+    }
+  }
+}
+
 void test_lens_flash() {
   // The light at the centre gives the colour byte itself (the default colour 0x800 >> 4).
   CHECK(effects::lens_flash_channel(0x80, 160, 112) == 0x80);
@@ -1035,6 +1080,7 @@ void test_object_heap() {
 
 int main() {
   test_lens_flash();
+  test_sheet_atlas_padding();
   test_good();
   test_bad();
   test_stepper_ops();

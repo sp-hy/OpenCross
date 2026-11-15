@@ -449,6 +449,7 @@ fld_scroll_clamp = 0x800E9FE4;  # data: Scroll limits of the room camera (x max,
 fld_trail_ring0_head = 0x800E9FEC;  # data: Head index of the leader trail ring
 fld_trail_ring1_head = 0x800E9FEE;  # data: Head index of follower 1's trail ring (second element of the ring head pair)
 fld_underwater_rgb = 0x800E9FF4;  # data: Colour applied to submerged model faces (three bytes)
+fld_regroup_targets = 0x800EA01C;  # data: op 86 slot target records (0x14 bytes each, x / y / z in 16.16): the V behind the controlled entity, all at its height
 fld_layer0_depth = 0x800EA058;  # data: Depth value of layer 0 used to push water and mirror copies back in the ordering table
 fld_screen_black_flag = 0x800EA05C;  # data: direction of the last slot-0 fade (1 = to black); set at room load, the fade helpers act only when they flip it
 fld_push_strength = 0x800EA05E;  # data: Strength of the forced slide push on walk mesh slide faces

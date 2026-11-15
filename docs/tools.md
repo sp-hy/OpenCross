@@ -31,7 +31,7 @@ Source: `tools/occ.cpp`, `tools/occ_save.cpp`, `tools/occ_dump_textures.cpp`. `s
 | `cat` | `<path> <out>` | Extracts one member, e.g. `cdrom/map/mapbin/alu_a01f.bin`. |
 | `info` | `<path>` | Identifies the container type and prints its subfile table. |
 | `lzss` | `<path> <out>` | Decodes an LZSS member. |
-| `dump-textures` | `[stages\|title\|effects\|rooms\|models\|weapons\|all] [--raw] <outdir>` | Headless texture dump (the Mods tab's "Dump all textures") into `<outdir>`; no category = all; `--raw` adds raw atlases under `raw/`; prints per-phase counts. |
+| `dump-textures` | `[stages\|title\|effects\|rooms\|models\|weapons\|all] [--raw] [--source] <outdir>` | Headless texture dump (the Mods tab's "Dump all textures") into `<outdir>`; no category = all; `--raw` adds raw atlases under `raw/`; `--source` writes the models at 1x instead of RDE's 4x images ("Models at 1x"); prints per-phase counts. |
 | `room` | `<name> <outdir>` | Decodes a room, writes one PNG per layer and group, prints camera and walk-mesh statistics. |
 | `rooms-validate` | none | Validates every room that has a `.bin` and a `.ctd`. |
 | `rooms-check` | none | Initial-frame viewport coverage of every room; flags rooms under 90 %. |
@@ -177,7 +177,7 @@ Source: `tools/ocmovie.cpp`. `<name>` is a `movie.dat` member without extension 
 
 ### 1.9 `ocbattleview` (one battle in a window)
 
-Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scenedat index, default 0). Reads `opencross.ini` next to the exe, logs to `ocbattleview.log` there; `[Video] Widescreen`, `WideHud` and `FovDeg` act as in the game, from the window's shape every frame. With `--frames` it runs deterministically (one tick per frame), takes no focus and plays no sound. `--shot` writes `battle_shot.png` next to the exe; `--shotdir` shots go to that folder (default the exe folder) as `shot_NNNNNN.png`.
+Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scenedat index, default 0). Reads `opencross.ini` next to the exe, logs to `ocbattleview.log` there; `[Video] Widescreen`, `WideHud` and `FovDeg` act as in the game, from the window's shape every frame; `FilterEffects` samples the effect sprites as in the game (bilinear by default). With `--frames` it runs deterministically (one tick per frame), takes no focus and plays no sound. `--shot` writes `battle_shot.png` next to the exe; `--shotdir` shots go to that folder (default the exe folder) as `shot_NNNNNN.png`.
 
 | Flag | Argument | Default | Meaning |
 |---|---|---|---|
@@ -222,7 +222,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--shotdir` | `<dir>` | exe folder | Shot folder. |
 | `--frames` | `<n>` | unlimited | Deterministic run; exit after n frames. |
 
-Environment: `OC_LIST_ELEMENTS_EID`, `OC_LIGHTING`, `OC_SMOOTH_REFL` and the battle variables of section 3.3.
+Environment: `OC_LIST_ELEMENTS_EID`, `OC_LIGHTING` and the battle variables of section 3.3.
 
 ### 1.10 `ocbattleseq` (animation sequences, battle sounds)
 
@@ -357,7 +357,6 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_SHOP_LOG` | `src/ui/shop/shop_screen.cpp` | set | Logs the shop compass selection and angle. |
 | `OC_FREECAM_TRACE` | `src/game/debug_tools.cpp` | set | Logs the raw and smoothed frame time of the free camera. |
 | `OC_LIGHTING` | `src/game/battle/demo_main.cpp` | set | `ocbattleview`: forces `[Enhancements] Lighting` on (mesh lighting, spell lights, cast shadows, smooth floor darkening). |
-| `OC_SMOOTH_REFL` | `src/game/battle/demo_main.cpp` | `1`, other | `ocbattleview`: overrides `[Enhancements] SmoothReflections`; `1` on, any other value off. |
 
 ### 3.3 Battle view and effects
 

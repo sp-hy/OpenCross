@@ -95,8 +95,10 @@ struct Motion {
   // follower AI: run clip
   bool running = false;
   int stuck = 0;
-  // position written directly (no wall collision): formation walks of the party
+  // position written directly (no wall collision, the walk triangle left as it is): formation walks of the party
   bool direct = false;
+  // a direct walk that ends seated on the walk-mesh floor (84 / DF); the 86 regroup ends at its target height instead
+  bool seat = true;
   // formation walks (84 / DF): facing written on arrival, -1 = none
   int final_facing = -1;
   // script slot of the formation op's caller: its flag gates that facing
@@ -477,8 +479,6 @@ class FieldWorld final : public script::FieldHost {
   // The ordering-table slab every field drawer honours (layers, shadows, actor faces, effect quads): only content with lo < slot <= hi is
   // drawn. The host draws the deep part (ot, inf], warps it, then the near part (-inf, ot]. Reset to everything after use.
   void set_draw_slab(float lo, float hi);
-  // [Enhancements] SmoothEffectRings
-  void set_smooth_rings(bool on) { smooth_rings_ = on; }
   // [Enhancements] Lighting: actors cast their silhouette, as if lit from straight above.
   void set_cast_shadows(bool on) { cast_shadows_ = on; }
   // [Game] CameraRelative: the pad / arrow headings turn with the room camera (pad_heading) instead of the control yaw (op 63).
@@ -711,7 +711,7 @@ class FieldWorld final : public script::FieldHost {
   void set_controlled_entity(int ent) override;
   void shake(int x, int y, int ticks) override;
   void formation(u16 key, std::span<const s32> args) override;
-  void walk_party_member(int slot, float x, float z, int final_facing = -1, int gate_slot = 0);
+  void walk_party_member(int slot, float x, float z, int final_facing = -1, int gate_slot = 0, bool to_floor = true);
   void party_v_spot(int slot, float lx, float lz, int heading, float& x, float& z) const;
   bool formation_done() override;
   bool follow_wait() override;
@@ -1419,7 +1419,6 @@ class FieldWorld final : public script::FieldHost {
   } wave_;
   // op 92: background group key -> its tiles' semi-transparency bit
   std::map<u32, bool> bg_group_abe_;
-  bool smooth_rings_ = false;
   // set_draw_slab: ordering-table slab of the current draw pass
   float slab_min_ = -1e9f, slab_max_ = 1e9f;
   bool in_slab(float slot) const { return slot > slab_min_ && slot <= slab_max_; }

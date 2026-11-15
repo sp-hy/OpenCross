@@ -147,8 +147,7 @@ class BattleView {
   void set_texture_filter(bool linear) { linear_filter_ = linear ? 1 : 0; }
   // [Video] WideHud: layer columns per side the HUD edge groups move out by.
   void set_wide_hud_columns(float columns) { wide_hud_cols_ = std::max(0.0f, columns); }
-  // [Enhancements] SmoothEffectRings (off under Ps1ResGraphics), Lighting (smooth floor darkening, spell lights).
-  void set_smooth_rings(bool on) { smooth_rings_ = on; }
+  // [Enhancements] Lighting (smooth floor darkening, spell lights).
   void set_smooth_fog(bool on) { stage_pipe_.set_smooth_fog(on); }
   void set_spell_lights(bool on) {
     spell_lights_shown_ = on;
@@ -164,19 +163,17 @@ class BattleView {
     spell_.lights_on = spell_lights_shown_ || spell_rim_;
   }
   // [Shaders] Ssao / DepthOfField: the post-processing of the battle 3D picture (render/post_fx.h); both off releases its images.
-  void set_post_fx(bool ssao, bool dof) {
+  // ao_range, focus_range, blur_strength: SsaoRange, DofFocusRange, DofStrength (PostFxView).
+  void set_post_fx(bool ssao, bool dof, float ao_range, float focus_range, float blur_strength) {
     ssao_ = ssao;
     dof_ = dof;
+    post_fx_ao_range_ = ao_range;
+    post_fx_focus_range_ = focus_range;
+    post_fx_blur_strength_ = blur_strength;
     if (!ssao && !dof) post_fx_.destroy();
   }
   // force: rebuild even if `hd` is unchanged (HD <-> Modded). HD: large_font_*; original: small_font_* (the HUD art is RDE's in both modes).
   void set_art_mode(bool hd, bool force = false);
-  // [Video] HdBattleTextures for the models loaded from now on; true when it changed (the caller then forces set_art_mode in HD art).
-  bool set_hd_textures(bool on) {
-    if (model_cache_.hd_textures == on) return false;
-    model_cache_.hd_textures = on;
-    return true;
-  }
   // Element descriptions (sysmes 0x1A rows) of the element menu.
   void set_language(import::Lang lang) { lang_ = lang; }
   bool set_bgm_remastered(bool on) { return audio_.set_remastered(on); }
@@ -1013,6 +1010,7 @@ class BattleView {
   float post_fx_focus_ = -1.0f;
   float post_fx_amount_ = 0.0f;
   int post_fx_tick_ = 0;
+  float post_fx_ao_range_ = 0.0f, post_fx_focus_range_ = 1.0f, post_fx_blur_strength_ = 1.0f;
   // The post-processing of the picture drawn so far (stage, units, weapons): the view depth, the passes and their result over it.
   void draw_post_fx(const render::Frame& frame, const render::Letterbox& lb, const render::Rect& scissor, const render::Mat4& view_proj,
                     const render::Mat4& view);
@@ -1407,7 +1405,6 @@ class BattleView {
   bool fog_pass_ = false;
   // Depth-cue switch: op 0x24 on (and every actor gets the depth-cued renderer), op 0x6C off; off by default (battle start / effect start /
   // reset). Ops 0x49 / 0x4A / 0x4B give all / targets / casters back the plain renderer. Fog ramps (0x2D) show only while it is on.
-  bool smooth_rings_ = false;
   bool fx_fog_on_ = false;
   // Ticks until the stage lens flare returns after a pack's end hook.
   int fx_lens_wait_ = 0;

@@ -1,7 +1,7 @@
 #pragma once
 // GPU glue for the effect player: uploads every sprite sheet of an EffectBank as an atlas texture and draws the sorted
 // DrawQuads of EmitterSystem::collect_quads() through render::ParticleBatch (call between the room pass and the HUD, after the
-// layers / actors wrote their depth). Not exercised by the headless tests; the CPU twin is SoftCanvas.
+// layers / actors wrote their depth). The headless tests cover only the atlas layout (pad_sheet_atlas); the CPU twin is SoftCanvas.
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -20,6 +20,16 @@ namespace oc::effects {
 bool sheet_atlas_image(const assets::SpriteSheet& sheet, u32& w, u32& h, std::vector<u8>& rgba);
 render::TextureKey effect_sheet_key(const assets::SpriteSheet& sheet, u32 w, u32 h, const u8* rgba);
 
+// One sprite's UV window in the uploaded atlas (fractions of its size); all 0 for a sprite without texels.
+struct SpriteWindow {
+  float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
+};
+// The atlas the GPU samples: `img` (img_w x img_h, the sheet_atlas_image layout of `sheet` (w x h texels) at any uniform scale) is rebuilt
+// with every sprite in its own cell inside a one-texel border that repeats the sprite's edge texels, so the bilinear filter at a sprite's
+// edge reads the sprite itself and never the sprite stacked beside it (mirrored cells of one picture then meet without a seam).
+// Returns the window of each sprite in sheet order; img, img_w and img_h become the new atlas.
+std::vector<SpriteWindow> pad_sheet_atlas(const assets::SpriteSheet& sheet, u32 w, u32 h, u32& img_w, u32& img_h, std::vector<u8>& img);
+
 class GpuEffects {
  public:
   GpuEffects() = default;
@@ -28,7 +38,7 @@ class GpuEffects {
   GpuEffects& operator=(const GpuEffects&) = delete;
 
   bool init(render::GpuContext& ctx, render::SpriteBatch& sprites);
-  // Builds one atlas per sheet of the bank (sprites stacked vertically, unmirrored RGBA).
+  // Builds one atlas per sheet of the bank (sprites stacked vertically, unmirrored RGBA, each in a repeated-edge border: pad_sheet_atlas).
   // `which` splits a bank's atlases between instances: a battle uploads the resident library sheets (battle.prd, the particle library;
   // hundreds of atlases) once into a LibrariesOnly instance that every effect pack's SkipLibraries instance reaches through set_shared().
   enum class Which { All, LibrariesOnly, SkipLibraries };

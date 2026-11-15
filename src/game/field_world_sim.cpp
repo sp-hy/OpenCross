@@ -234,9 +234,13 @@ void FieldWorld::step_motions() {
     const bool y_valid = (script_ent.flags38 & 0x40) != 0;
     const float speed = script_ent.v10c ? static_cast<float>(script_ent.v10c) / 16.0f : kWalkUnitsPerTick;
     const ActorPose cur = ent_state.actor.current();
-    // A formation walk steps in 3D toward its target height and takes no height from the mesh on the way: a straight line may cross a gap.
+    // A formation walk steps in 3D toward its target height and takes neither height nor triangle from the mesh on the way: a
+    // straight line may cross a gap, and a member crossing a slope keeps the tile (and terrain push) it started on.
     const bool free_y = y_valid || motion.direct;
-    auto move_xz = [&](float x, float z) { ent_state.actor.set_position(walk, x, z, false, free_y); };
+    auto move_xz = [&](float x, float z) {
+      if (motion.direct) ent_state.actor.move_free(x, ent_state.actor.current().y, z, -1);
+      else ent_state.actor.set_position(walk, x, z, false, free_y);
+    };
     // Facing while walking: the start form sets the facing (bearing to the target, gated by the slot flag SET_SLOT_FLAG_126 and by
     // a non-zero turn rate; a script can set the flag so an entity slides sideways without rotating) and the wait form
     // re-asserts that saved value every tick. Only the entity follows (44 / 45) re-aim at the moving target each tick, with the same gate.
@@ -315,7 +319,7 @@ void FieldWorld::step_motions() {
           if (distance <= 0.01f) {
             motion.active = false;
             if (motion.direct) {
-              ent_state.actor.set_position(walk, motion.tx, motion.tz, false, false);
+              if (motion.seat) ent_state.actor.set_position(walk, motion.tx, motion.tz, false, false);
               if (motion.final_facing >= 0 && script_ent.rec[static_cast<size_t>(motion.gate_slot & 7)].flag47 == 0 && script_ent.v24e != 0) ent_state.actor.set_facing(to_internal(motion.final_facing));
             }
             break;

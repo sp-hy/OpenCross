@@ -54,8 +54,8 @@ void FieldWorld::camera_auto_follow(bool on) {
     return;
   }
   if (lead >= 0) {
-    // Mode 0 records where each follower has to stand: the party V around the controlled entity's current spot (opn_a01i: the row of
-    // the opening after the run-out).
+    // Mode 0 records where each follower has to stand: the party V around the controlled entity's current spot, at its height, with
+    // no floor test (opn_a01i: the row of the opening after the run-out). Mode 1 then steps each member there in 3D at its own speed.
     const Ent& le = ents_[static_cast<size_t>(lead)];
     const ActorPose& lp = le.actor.current();
     for (int slot = 1; slot < 3; ++slot) {
@@ -64,7 +64,7 @@ void FieldWorld::camera_auto_follow(bool on) {
       // The slot records also carry the leader's facing, written on arrival like the 84 / DF records: the
       // followers walk a step back to their spots (opn_a01i lift: about 20 units behind them) and must turn back to the leader's way,
       // not keep facing the walk (they ended up facing backwards as the lift arrived).
-      if (view_.walk().empty() || view_.walk().find_triangle(x, z, lp.y) >= 0) walk_party_member(slot, x, z, to_script(le.actor.facing()));
+      walk_party_member(slot, x, z, to_script(le.actor.facing()), 0, false);
     }
   }
 }

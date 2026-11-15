@@ -291,14 +291,6 @@ class MeshPipeline {
   static float outline_depth_scale(const DrawParams& params);
   void end();
 
-  // [Enhancements] SmoothWaterLine: in field ordering-table mode a face straddling the water level is split per fragment at the exact
-  // plane (default off = the PS1's whole-face test).
-  void set_smooth_water_line(bool on) { smooth_water_line_ = on; }
-  // [Enhancements] ModelPixelDepth: in ordering-table mode every fragment takes its own camera z in the slot depth space instead of its face's
-  // slot, so the faces of a model that cut into each other meet per pixel (no whole-face flips as the animation moves them). The nearest-corner
-  // constructs (hair, capes) are pulled one slot toward the camera, never past their face slot, so they stay over the body they cut into but not
-  // over parts well in front of them. Off = the PS1's per-face order.
-  void set_model_pixel_depth(bool on) { model_pixel_depth_ = on; }
   // [Enhancements] EnhancedLighting: a soft key-light shading from the vertex normals, added to the PS1 colour multiplier (field and battle models).
   // Default off = the PS1 look.
   void set_enhanced_lighting(bool on) { enhanced_ = on; }
@@ -307,9 +299,6 @@ class MeshPipeline {
   int matcap_index(std::string_view name) const;
   bool add_matcap(const std::string& name, u32 width, u32 height, const u8* rgba);
   void clear_added_matcaps();
-  // [Enhancements] SmoothReflections: the env-mapped parts' corner UVs (mesh.vert) keep the sub-texel fraction of the normal
-  // instead of the PS1's whole texel, so the reflection slides with the pose. Default off = the PS1's one-texel steps.
-  void set_smooth_reflections(bool on) { smooth_reflections_ = on; }
   // View depth (render/post_fx.h): draw() writes the camera z of the opaque texels instead of the picture.
   void set_view_depth(bool on) { view_depth_ = on; }
 
@@ -331,10 +320,7 @@ class MeshPipeline {
     std::unique_ptr<Texture> texture;
   };
   std::vector<Matcap> matcaps_;
-  bool smooth_water_line_ = false;
-  bool model_pixel_depth_ = false;
   bool enhanced_ = false;
-  bool smooth_reflections_ = false;
   bool view_depth_ = false;
   // 1 PS1 back-face test, 0 off, -1 inverted (debug: env OC_MESH_CULL=0 / -1).
   float cull_ = 1.0f;

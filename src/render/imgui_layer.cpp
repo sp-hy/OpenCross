@@ -796,9 +796,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       cfg.art_mode = kArtModes[ai].mode;
       change.art_mode = true;
     }
-    row("HD battle textures", "HD and modded art: the party in battle wears RDE's 4x textures. "
-                              "Off: the PS1-size battle textures of the HD file set.");
-    if (ImGui::Checkbox("##hdbattletex", &cfg.hd_battle_textures)) change.art_mode = true;
     row("Portraits", "RDE face art set.");
     static const std::vector<std::string> kPortraits = {"2021 (Radical Dreamers Edition)", "1999 (original)"};
     int pt = cfg.portraits == "1999" ? 1 : 0;
@@ -869,11 +866,13 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       if (ImGui::Checkbox(id, &value)) change.other = true;
     };
     // A 0..max_pct % slider over a 0..max_pct / 100 factor.
-    auto percent_row = [&](const char* label, const char* id, const char* help, float& value, int max_pct) {
+    // zero: the slider's text at 0%.
+    auto percent_row = [&](const char* label, const char* id, const char* help, float& value, int max_pct, int min_pct = 0,
+                           const char* zero = nullptr) {
       row(label, help);
       ImGui::SetNextItemWidth(-FLT_MIN);
       int pct = static_cast<int>(std::lround(value * 100.0f));
-      if (ImGui::SliderInt(id, &pct, 0, max_pct, "%d%%")) {
+      if (ImGui::SliderInt(id, &pct, min_pct, max_pct, pct == 0 && zero ? zero : "%d%%")) {
         value = static_cast<float>(pct) / 100.0f;
         change.other = true;
       }
@@ -906,9 +905,17 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       if (look_combo("##grade", cfg.grade, grade_names_, std::size(platform::kBuiltinGrades))) change.other = true;
       checkbox_row("Ambient occlusion", "##ssao", "In battle, soft shadows in creases and where the characters stand on the floor. Not over the "
                                                   "spell effects, the HUD or the menus, and not with PS1-resolution graphics.", cfg.ssao);
+      if (cfg.ssao)
+        percent_row("AO distance", "##ssaorange", "How far from the camera the shadows reach, in multiples of the characters' distance; "
+                    "beyond it they fade out, so distant scenery and the sky stay clean. 0% = no limit.", cfg.ssao_range, 1000, 0, "No limit");
       checkbox_row("Depth of field", "##dof", "In battle, what lies well behind or in front of the action is softly blurred; the characters "
                                               "in the shot stay sharp. Not over the spell effects, the HUD or the menus, and not with "
                                               "PS1-resolution graphics.", cfg.depth_of_field);
+      if (cfg.depth_of_field) {
+        percent_row("Focus range", "##dofrange", "How far in front of and behind the characters in focus the picture stays sharp before "
+                    "the blur starts (100% = the standard band).", cfg.dof_focus_range, 400, 25);
+        percent_row("Blur strength", "##dofstrength", "How strongly the out-of-focus parts are blurred.", cfg.dof_strength, 200);
+      }
       end_rows();
     }
     section("Character shaders");
@@ -954,28 +961,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
   auto sec_enh = [&] {
     section("Enhancements");
     if (ImGui::BeginTable("enh", 2, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
-      if (check_cell("Smooth effect rings",
-                     "The blue contact rings of an encounter and the ring / tube shaped spell effects are 32-sided polygons on the PS1 "
-                     "(invisible at 320x224). Each segment is split along a smooth curve through the original corners.",
-                     cfg.smooth_effect_rings))
-        change.enhancements = true;
-      if (check_cell("Smooth water line",
-                     "Characters wading in water are tinted per triangle on the PS1, so the waterline is a staircase. This cuts the tint at "
-                     "the exact water plane instead.",
-                     cfg.smooth_water_line))
-        change.enhancements = true;
-      if (check_cell("Per-pixel model depth",
-                     "The PS1 paints each face of a character model whole, sorted by its average depth, so where an arm, a weapon or a "
-                     "sleeve cuts into the body, whole faces jump in front of each other as the animation moves. This sorts the models per "
-                     "pixel instead (hair and capes are pulled slightly toward the camera so they stay over the body). Off: the PS1's look.",
-                     cfg.model_pixel_depth))
-        change.enhancements = true;
-      if (check_cell("Smooth reflections",
-                     "Mirror-like model parts (FATE, Lavos, Zoah's armour ...) take their reflection from the vertex normals in whole "
-                     "texture texels on the PS1, so a slowly turning body moves its reflection in visible steps. This keeps the fraction, "
-                     "so the reflection slides smoothly with the movement. Off: the PS1's stepped look.",
-                     cfg.smooth_reflections))
-        change.enhancements = true;
       if (check_cell("Enhanced lighting / shadows",
                      "Real lighting on top of the PS1's flat colours. Characters (field and battle) get a key light from above and in front "
                      "of the camera, so faces turning away are clearly darker and faces turning toward it brighter. In battle, bright spells "

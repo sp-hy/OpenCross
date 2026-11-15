@@ -4,11 +4,12 @@ layout(set = 2, binding = 1) uniform sampler2D matcap;
 // color.rgb: flat colour, color.w: back-face test (vertex shader). misc.x: 1 = flat colour, misc.y: depth scale, misc.z: 1 = water on,
 // misc.w: water level (+y down; model y, or world y in ot mode), tint.rgb: colour multiplier, water.rgb: colour below the level (replaces
 // tint), fog.rgb: far colour / 128, fog_rng.xy: fog near / far (GTE depth cue; far <= near = off), fog_rng.z: STP texel filter (0 all,
-// 1 texels without STP only, 2 STP texels only; flat faces count as STP), fog_rng.w: 1 = white texels (FE 45 flash CLUT). ot.x: 1 = field ordering-table faces (2 = with the smooth water line), ot.y: nearest-corner sort,
+// 1 texels without STP only, 2 STP texels only; flat faces count as STP), fog_rng.w: 1 = white texels (FE 45 flash CLUT). ot.x: 1 = field ordering-table faces, ot.y: nearest-corner sort,
 // ot.z: layer bias (slots), ot.w: submerged-face bias (slots); ot2.x: face filter (0 all, 1 dry only, 2 submerged only), ot2.y: 1 = depth
 // only (alpha-0 output into a colour-keeping blend), ot2.z: 1 / kDepthRange (slot -> depth-buffer value), ot2.w: output alpha (0.5 = ABR 0).
-// slot.y: 1 = [Enhancements] ModelPixelDepth (ot mode: the fragment's own z in the slot space; a nearest-corner face is pulled toward the
-// camera by kNearPull slots, never past its own slot, so it stays over the body it cuts into but not over parts well in front of it);
+// Ot mode: a face straddling the water level is split per fragment at the exact plane, and every fragment takes its own z in the slot
+// space, so the faces of a model that cut into each other meet per pixel; a nearest-corner face is pulled toward the camera by kNearPull
+// slots, never past its own slot, so it stays over the body it cuts into but not over parts well in front of it. slot.y: unused (0);
 // slot.w: 1 = view depth (MeshPipeline::set_view_depth: the camera z instead of the picture).
 // [Shaders] (render/mesh_pipeline.h CharacterShading): shade.x = style (0 off, 1 realistic, 2 toon, 3 cel, 4 matcap), shade.y = 1 on the
 // outline pass, slot.z = the style's strength; rim = colour + strength (0 = off); glow = colour + strength.
@@ -39,7 +40,7 @@ vec4 view_depth_color(float z) {
 void main() {
   bool ot = pc.ot.x > 0.5;
   bool wet = ot ? face_wet > 0.5 : (pc.misc.z > 0.5 && local_y > pc.misc.w);
-  if (ot && pc.ot.x > 1.5) {  // smooth water line: the exact plane inside a straddling face
+  if (ot) {  // the exact water plane inside a straddling face
     wet = face_all > 0.5 || (face_wet > 0.5 && world_y > pc.misc.w);
     float fs = face_slot + pc.ot.z + (wet ? pc.ot.w : 0.0);
     if (fs <= slab_v.x || fs > slab_v.y) discard;
@@ -110,15 +111,10 @@ void main() {
   if (ot) {
     // One slot per face (+ layer bias, + the submerged push); the fraction orders fragments of faces sharing a slot without leaving it.
     float bias = pc.ot.z + (wet ? pc.ot.w : 0.0) + outline_back;
-    if (pc.slot.y > 0.5) {
-      const float kNearPull = 1.0;
-      float z = max(cam_z, 0.0) / 16.0;
-      if (pc.ot.y > 0.5) z = max(z - kNearPull, face_slot);
-      gl_FragDepth = clamp((z + bias + 0.001) * pc.ot2.z, 0.0, 1.0);
-    } else {
-      float fine = clamp(cam_z / 16.0 - face_slot, 0.0, 1.0);
-      gl_FragDepth = clamp((face_slot + bias + 0.001 + 0.998 * fine) * pc.ot2.z, 0.0, 1.0);
-    }
+    const float kNearPull = 1.0;
+    float z = max(cam_z, 0.0) / 16.0;
+    if (pc.ot.y > 0.5) z = max(z - kNearPull, face_slot);
+    gl_FragDepth = clamp((z + bias + 0.001) * pc.ot2.z, 0.0, 1.0);
   } else {
     gl_FragDepth = clamp((cam_z + 16.0 * outline_back) * pc.misc.y, 0.0, 1.0);
   }

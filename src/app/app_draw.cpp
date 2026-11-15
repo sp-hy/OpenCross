@@ -177,27 +177,21 @@ void App::apply_frame_options() {
   if (results_ok) results.set_filter(config.filter == platform::TexFilter::Bilinear);
   // The filter covers the stage, units and weapons of the battle.
   if (battle_ready) battle.set_texture_filter(config.filter == platform::TexFilter::Bilinear);
-  // The [Enhancements] are independent of the Ps1Res settings: SmoothEffectRings, SmoothWaterLine, ModelPixelDepth, SmoothReflections (env-mapped parts), Lighting
+  // The [Enhancements] are independent of the Ps1Res settings: Lighting
   // (the key light for field + battle models, the cast shadows, and the spell glow), EdgeBlend (the stage pipelines draw the modded tiles' seam strips),
   // FullPrecisionEffects (every particle batch).
   {
-    const bool rings = config.smooth_effect_rings;
-    meshes.set_smooth_water_line(config.smooth_water_line);
-    meshes.set_model_pixel_depth(config.model_pixel_depth);
-    meshes.set_smooth_reflections(config.smooth_reflections);
     meshes.set_enhanced_lighting(config.lighting);
     render::set_edge_blend(config.edge_blend);
     render::ParticleBatch::set_full_precision(config.full_precision_effects);
     if (battle_ready) battle.set_spell_lights(config.lighting);
     if (battle_ready) battle.set_autohide_cast(config.autohide_cast_hud);
     if (battle_ready) battle.set_keep_intro_layer(config.retain_battle_scenery);
-    if (world_ok) world.set_smooth_rings(rings);
     if (world_ok) world.set_cast_shadows(config.lighting);
     if (world_ok) world.set_menu_models(config.menu_models_in_field);
     if (world_ok) world.set_camera_relative(config.camera_relative);
     status_model.set_cast_shadows(config.lighting);
     title_bd.set_cast_shadows(config.lighting);
-    if (battle_ready) battle.set_smooth_rings(rings);
   }
   // [Shaders] the character shaders: field actors, battle units, the status screen's model, the title's models.
   {
@@ -205,7 +199,8 @@ void App::apply_frame_options() {
     if (world_ok) world.set_character_shading(shading);
     if (battle_ready) battle.set_character_shading(shading, config.spell_rim, config.cast_glow);
     // [Shaders] Ssao / DepthOfField: the battle 3D at window or render-scale resolution only (not the PS1-resolution picture).
-    if (battle_ready) battle.set_post_fx(config.ssao && !config.ps1_res_graphics, config.depth_of_field && !config.ps1_res_graphics);
+    if (battle_ready) battle.set_post_fx(config.ssao && !config.ps1_res_graphics, config.depth_of_field && !config.ps1_res_graphics, config.ssao_range,
+                                         config.dof_focus_range, config.dof_strength);
     status_model.set_character_shading(shading);
     title_bd.set_character_shading(shading);
   }
