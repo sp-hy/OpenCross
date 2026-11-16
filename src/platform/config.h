@@ -19,6 +19,8 @@ class Ini {
   void set(std::string_view section, std::string_view key, std::string_view value);
   // All key=value pairs of one section, in file order.
   std::vector<std::pair<std::string, std::string>> entries(std::string_view section) const;
+  // The section names, in file order.
+  std::vector<std::string> section_names() const;
 
  private:
   struct Entry {
@@ -335,6 +337,10 @@ struct Config {
   bool debug_exit_after_screenshot = false;
   bool debug_log = false;
   bool steam = false;
+  // [Game] Achievements: OpenCross's own achievement set.
+  bool achievements = false;
+  // [Game] HideAchievementNotices: no unlock popup or toast, for OpenCross's achievements and Steam's alike.
+  bool hide_achievement_notices = false;
   bool debug_panels = false;
   int debug_entrance = 0;
   int debug_auto_confirm = 0;
@@ -374,7 +380,7 @@ struct Config {
   // Switches those five off: RDE starts every launch with them off. load() still reads them (a --config ini for tests).
   void clear_session_toggles();
   // The player's own ini (not a --config one) reads a missing key with the player's defaults: the Graphics tab's enhancements on
-  // the HD models in fields and RenderScale 2. Called before load(); a --config ini keeps the faithful member defaults.
+  // the HD models in fields, RenderScale 2, OpenCross's achievements on and achievement notices hidden. Called before load(); a --config ini keeps the faithful member defaults.
   void use_player_defaults();
 };
 

@@ -50,6 +50,11 @@ add_library(oc_game STATIC
   route_script.cpp
   achievements.h
   achievements.cpp
+  oc_achievements.h
+  oc_achievements.cpp
+  oc_achievement_table.inc
+  oc_achievements_ui.h
+  oc_achievements_ui.cpp
   autosave.h
   autosave.cpp
   cheats.h

@@ -10,6 +10,7 @@
 //   app_draw.cpp      draw_frame(): the frame composition (scene target, PS1-resolution passes, 8F warp, overlays, pillarboxing)
 //   app_feedback.cpp  the encounter feed-back / damage-jolt pass over the scene target
 //   app_multiplayer.cpp  multiplayer presence and chat: the connection, the local player's state, remote parties, chat and labels
+//   app_achievements.cpp OpenCross's own achievements: the profile file, the tab, the per-frame feed and the unlock popup
 // The members stand in the order the objects are created; destruction runs in reverse, so every GPU resource goes before ctx and
 // the voice player before the mixer.
 #include <array>
@@ -36,6 +37,7 @@
 #include "game/cheats.h"
 #include "game/achievements.h"
 #include "game/debug_tools.h"
+#include "game/oc_achievements_ui.h"
 #include "platform/steam.h"
 #include "game/field_world.h"
 #include "game/game_flow.h"
@@ -183,6 +185,15 @@ class App {
   std::unique_ptr<game::VersusLink> versus_link;
   bool versus_running = false, versus_net = false;
 
+  // ---- app_achievements.cpp ---------------------------------------------------------------------------------------------------
+  // Adds the tab, gives the rules the element table and reads achievements.txt next to the player's ini.
+  void init_oc_achievements();
+  void save_oc_achievements();
+  // The set's state for `ticks` ticks of play: the battle's begun actions, forges, the room samples; unlocks go to the file and the popup.
+  void update_oc_achievements(int ticks);
+  // The unlock popup, inside the ImGui frame.
+  void oc_achievements_overlay();
+
   // ---- app_route.cpp ----------------------------------------------------------------------------------------------------------
   // Route `request savemark` / `savecheck`: the save as the game would write it now, play time left out.
   Bytes route_save_block();
@@ -300,6 +311,8 @@ class App {
   std::filesystem::path exe;
   std::filesystem::path config_file;
   bool own_ini = true;
+  // The folder of the player's ini (the exe's, or --profile's).
+  std::filesystem::path profile_dir;
   std::string log_path;
   bool log_forced = false;
   platform::Config config;
@@ -357,6 +370,11 @@ class App {
   std::chrono::steady_clock::time_point mp_epoch = std::chrono::steady_clock::now();
   // API names earned this run; routes read them.
   std::vector<std::string> earned_achievements;
+  // OpenCross's own achievements: the rules, the tab's session state, the popup, and the profile file (empty: nothing is written).
+  game::OcAchievements oc_achievements;
+  game::OcAchievementsTab oc_achievements_tab;
+  game::OcAchievementPopup oc_popup;
+  std::filesystem::path oc_achievements_file;
   bool restart_for_update = false;
   // The launch update check is running; run() shows a toast when it finds a newer release.
   bool update_notice_pending = false;

@@ -84,6 +84,7 @@ int App::run() {
     multiplayer_overlay();
     guide.draw(ui, input, frame_dt);
     versus_banner_overlay();
+    oc_achievements_overlay();
     // The room's entity / script tables stay while a battle, menu, movie or flow screen covers the field.
     debug_field = field_visible();
     apply_options_change(ui.options_window(config, own_ini ? config_file : std::filesystem::path()));

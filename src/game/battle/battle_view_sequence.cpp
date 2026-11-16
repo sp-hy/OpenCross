@@ -25,6 +25,7 @@ void BattleView::begin_group() {
   script_actor_ = -1;
   act_.ev = std::move(queue_.front());
   queue_.pop_front();
+  begun_actions_.push_back(act_.ev);
   // The low-HP bit is refreshed when the next action resolves, one action after the one a script wrote the HP in.
   for (int i = 0; i < battle::kUnits; ++i)
     if (const battle::Unit& unit = bunit(i); unit.hp_written_zero && unit.hp <= 0) ++vis_[static_cast<size_t>(i)].zero_hp_actions;

@@ -55,6 +55,7 @@ int App::init(int argc, char** argv) {
   init_menus();
   init_field();
   init_battle();
+  init_oc_achievements();
   init_title();
   init_start_state();
   init_route_state();
@@ -69,7 +70,7 @@ void App::init_config(int argc, char** argv) {
   // --profile <dir>: a player ini of its own in that folder (created when missing), with its log, shots and a relative [Paths] SaveDir
   // there; unlike --config it is a normal run (it connects, applies mods, is saved), so a second copy gets its own multiplayer identity.
   config_file = exe / "opencross.ini";
-  std::filesystem::path profile_dir = exe;
+  profile_dir = exe;
   for (int i = 1; i + 1 < argc; ++i) {
     if (std::string_view(argv[i]) == "--config") config_file = std::filesystem::absolute(argv[i + 1]), own_ini = false;
     if (std::string_view(argv[i]) == "--profile") {
@@ -496,7 +497,10 @@ void App::init_field() {
     const std::string name = item < static_cast<int>(tables.key_item_names.size()) ? tables.key_item_names[static_cast<size_t>(item)] : std::string("?");
     log::info("key item {} obtained: {}", item, name);
   });
-  world.set_on_item_given([this](int id) { achievements.item_given(id, world.vm().var(script::var::kMapId)); });
+  world.set_on_item_given([this](int id) {
+    achievements.item_given(id, world.vm().var(script::var::kMapId));
+    oc_achievements.item_given(id);
+  });
   world.set_on_var_bit_set([this](u32 bit_ref) { achievements.var_bit_set(bit_ref, world.vm().var(script::var::kMapId)); });
   world.set_art_mode(platform::art_is_hd(config.art_mode));
   world.set_portrait_set(config.portraits);

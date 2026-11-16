@@ -391,7 +391,8 @@ void App::update_achievements(int ticks) {
     else if (steam.connect()) steam.set_meta(game::Achievements::meta_api_name(), game::Achievements::api_names());
   }
   steam.pump();
-  while (const std::optional<std::string> title = steam.next_unlocked()) ui.toast("Achievement unlocked - " + *title);
+  while (const std::optional<std::string> title = steam.next_unlocked())
+    if (!config.hide_achievement_notices) ui.toast("Achievement unlocked - " + *title);
   // Off, nothing is earned, so what happens meanwhile can still count once it is on. Scripted runs evaluate without Steam.
   if (steam_allowed && !wanted) return;
   if (!world_ok || (flow_ready && flow.scene_mode())) return;
@@ -431,6 +432,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     return_to_title();
   screen_clock += dt * 60.0;
   update_achievements(ticks);
+  update_oc_achievements(ticks);
   // Every screen below reads the left stick as the d-pad.
   platform::Input in = raw;
   platform::stick_to_dpad(in, stick_dpad);

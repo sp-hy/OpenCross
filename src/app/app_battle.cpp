@@ -139,6 +139,7 @@ void App::start_field_battle() {
     ++battle_starts;
     versus_running = bopt.versus.has_value();
     versus_next.reset();
+    oc_achievements.battle_started();
     log::info("battle: field encounter id {:#x} -> scene {}{}", rq.battle_id, scene, versus_running ? " (versus)" : "");
   } else if (bopt.versus) {
     log::warn("battle: could not start the versus battle (carrier scene {})", scene);
@@ -238,6 +239,12 @@ void App::finish_field_battle(bool after_results) {
   // RDE's battle counter: +1 when a fight ends in result 0 or 3, capped.
   if (code == 0 || code == 3) ext_host.battles = std::min<u32>(ext_host.battles + 1, 0xFFFF);
   achievements.battle_ended(battle_scene, code, ext_host.battles);
+  if (const battle::Battle* fight = battle.battle()) {
+    int standing = 0;
+    for (int i = 0; i < battle::kPcSlots; ++i) standing += fight->unit(i).present && fight->unit(i).hp > 0 ? 1 : 0;
+    const bool boss = tables_ok && battle_scene >= 0 && static_cast<size_t>(battle_scene) < tables.scenes.size() && tables.scenes[static_cast<size_t>(battle_scene)].boss();
+    oc_achievements.battle_ended(battle_scene, code, boss, standing, fight->ring());
+  }
   // A monster-party fight (the Grand Slam) writes nothing back: no rewards, records, HP or Dopplegang pool.
   const bool written_back = battle.battle() && !battle.battle()->monster_party();
   const int pip_form_before = world.game_state().slot.chars[static_cast<size_t>(battle::kPipCharId)].model_id;

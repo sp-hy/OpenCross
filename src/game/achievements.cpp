@@ -150,6 +150,7 @@ constexpr int kRainbowArmor[] = {0x9B, 0xA1, 0xC7};
 constexpr std::uint32_t kBattlesForVeteran = 500;
 constexpr std::uint32_t kEveryWindowFrame = 0x7FFF;
 constexpr int kMaxStars = 99;
+static_assert(kDragonGodEnding - kGoodEnding + 1 == EndingTracker::kEndings);
 
 constexpr int kNoEnding = -1;
 constexpr int kBeachA = 0x38, kBeachB = 0x39;
@@ -214,7 +215,7 @@ void Achievements::sample(const Progress& progress) {
     if (progress.prev_room != pair.prev_room || progress.room != pair.room) pair_left_[i] = pair.samples;
     else if (--pair_left_[i] == 0) earn(pair.index);
   }
-  update_ending(progress.room, progress.prev_room);
+  if (const int ending = endings_.sample(progress.room, progress.prev_room); ending >= 0) earn(kGoodEnding + ending);
   if (progress.all_recruited) earn(kAllRecruited);
   if (frames_seen_ < progress.window_frames && progress.window_frames == kEveryWindowFrame) earn(kAllFrames);
   frames_seen_ = progress.window_frames;
@@ -223,15 +224,16 @@ void Achievements::sample(const Progress& progress) {
 // The good ending's room jumps to room 9 and room 9 then jumps to itself; only that second jump awards it, so it is told from the others
 // by the previous room changing with the room standing still. Reaching room 9 straight from the beach with nothing armed is the bad
 // ending.
-void Achievements::update_ending(int room, int prev_room) {
+int EndingTracker::sample(int room, int prev_room) {
+  int awarded = kNoEnding;
   if (prev_room != last_prev_room_) {
     if (room == kEndingRoom && prev_room == kEndingRoom && ending_ == kGoodEnding) {
-      earn(kGoodEnding);
+      awarded = kGoodEnding;
       ending_ = kNoEnding;
     }
     last_prev_room_ = prev_room;
   }
-  if (room == last_room_) return;
+  if (room == last_room_) return awarded == kNoEnding ? kNoEnding : awarded - kGoodEnding;
   const bool from_beach = prev_room == kBeachA || prev_room == kBeachB;
   if (prev_room == kBeachA && room == kEndingRoom) ending_ = kBadEnding;
   if (from_beach)
@@ -247,11 +249,12 @@ void Achievements::update_ending(int room, int prev_room) {
     const bool straight_from_beach = prev_room == kBeachB && last_room_ == kBeachB;
     if (ending_ == kNoEnding && straight_from_beach) ending_ = kBadEnding;
     if (ending_ != kNoEnding && ending_ != kGoodEnding) {
-      earn(ending_);
+      awarded = ending_;
       ending_ = kNoEnding;
     }
   }
   last_room_ = room;
+  return awarded == kNoEnding ? kNoEnding : awarded - kGoodEnding;
 }
 
 void Achievements::battle_ended(int scene, int result, std::uint32_t battles_won) {

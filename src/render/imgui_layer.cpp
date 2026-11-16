@@ -474,6 +474,9 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     row("Steam Connection", "Connects to Steam as the Radical Dreamers Edition, so Steam shows you playing it and its achievements unlock. Needs Steam running. "
                  "Turning it off stops achievements at once; Steam keeps showing you playing until OpenCross closes.");
     if (ImGui::Checkbox("##steam", &cfg.steam)) change.other = true;
+    row("Achievements", "OpenCross's own achievements, kept for you in achievements.txt next to opencross.ini and listed in the Achievements tab. "
+                        "They never change the game. Off: nothing is earned and no notice shows; the tab still lists what you have.");
+    if (ImGui::Checkbox("##ocachievements", &cfg.achievements)) change.other = true;
     row("Session", "Restart goes back to the start of the game without closing OpenCross. Quit closes OpenCross. Either way, progress since your "
                    "last save is lost.");
     if (ImGui::Button("Restart##session")) change.restart_game = true;

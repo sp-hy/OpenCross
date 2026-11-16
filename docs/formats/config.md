@@ -66,6 +66,8 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `FastMode` | 0 | bool | RDE fast mode (F2, pad RT). Session-only (section 1). Only the field and battle loops run faster; menus, shops, name entry, the title, the results, FMVs and play time keep normal speed; message text reveals 2.25 times as fast and its waits last 1/8; sound effects tick as fast as the loop (`docs/architecture.md` 2.4). |
 | `SlowMode` | 0 | bool | RDE slow mode (F1, pad LT). Session-only (section 1). Read as off when `FastMode` is on; the two are exclusive. The same loops as `FastMode` run slower; message text reveals at half speed and its waits last twice as long. |
 | `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
+| `Achievements` | 0 | bool | OpenCross's own achievement set (`rules/oc_achievements.md`; General tab). Off: nothing is evaluated and no popup shows; the Achievements tab still lists the stored unlocks. The player's ini reads a missing key as 1 (section 3). |
+| `HideAchievementNotices` | 0 | bool | No unlock notice (the Achievements tab's *Hide notifications* box): neither OpenCross's popup nor the Steam achievement toast shows. Achievements are still earned and listed. The player's ini reads a missing key as 1 (section 3). |
 | `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
 | `CameraRelative` | 0 | bool | General tab, Quality of life section. Field movement follows the room camera: up on the stick or the arrows walks along the camera's up axis on the floor (its forward row projected on XZ), the other directions turn with it. Off: the game's headings plus the room's control yaw (op 63). Read every frame. |
 | `FastRate` | 0 | 0..5; 1 reads as 0 | Fast mode speed. 0 = RDE's (4x in the field, 2x in battle); 2..5 = that many times in both. |
@@ -260,6 +262,7 @@ All off by default; they never lock saving. The first three also toggle from the
 | `[Video] RenderScale` | 2.00 | 1.00 |
 | `[Video] LegacyFieldModels` | 0 (HD models in fields) | 1 |
 | `[Enhancements] RetainBattleScenery`, `FullPrecisionEffects`, `Lighting`, `EdgeBlend` | 1 | 0 |
+| `[Game] Achievements`, `HideAchievementNotices` | 1 | 0 |
 
 A player's ini written by an older build already holds the four `[Enhancements]` keys and keeps their stored values; it has no `LegacyFieldModels`, so it gets the HD models in fields.
 
@@ -293,6 +296,8 @@ The settings window applies a change as soon as it is made and saves the file in
 | `[Multiplayer] Enabled`, `Server`, `ServerUrl` | Connect, reconnect or disconnect at once; an address field applies when it is left. |
 | other `[Multiplayer]` keys | Read every frame; `Name` goes to the server as a `profile` message. |
 | `[Guide] Enabled`, `Url` | Read every frame: a new `Url` loads that guide from the cache or downloads it at once; off closes the overlay and ends the browser. |
+| `Achievements` | Read every frame: off stops the set at once and drops the waiting popups. |
+| `HideAchievementNotices` | Read every frame: on drops the waiting popups at once. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
 | `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
 

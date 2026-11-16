@@ -118,6 +118,7 @@ Formats (`docs/formats/`):
 Behaviour rules (`docs/rules/`), the game rules the engine implements, every number from the source:
 
 - `achievements.md` when each Steam achievement is earned.
+- `oc_achievements.md` OpenCross's own achievement set: the rules, the profile file, the Achievements tab and the popup.
 - `field_actors.md` the field tick, player movement, camera follow, followers, collision and triggers, animation, shadows, field status effects, footsteps, message windows, spawns.
 - `battle.md` battle start, the turn system, targeting, grid and gauge, the field ring, status application, battle end, rewards and growth, Pip and Dopplegang, cheats.
 - `versus.md` multiplayer versus battles: two players' parties, alternating turns, the opening handicap, the sandbox.

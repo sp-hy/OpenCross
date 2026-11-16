@@ -64,6 +64,8 @@ class ShopScreen {
   void update(const platform::Input& in, int ticks = 1);
   // The item last forged with none in the bag before, then 0 until the next.
   int take_first_forged();
+  // Items forged since the last call.
+  int take_forged_count();
   void draw(const render::Frame& frame, float vw, float vh, bool resume = false);
 
  private:

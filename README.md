@@ -17,13 +17,19 @@ OpenCross is **in development**. Exploring the world, talking to characters, the
 - **High frame rates**: supports rendering at any frame rate.
 - **HD models in fields**: the characters walk the field with their detailed Status-screen and battle models.
 - **Retro look**: optionally draw the game at the PlayStation's resolution, with its wobbly vertices, or keep the original field models.
-- **Shaders**: optional character styles (realistic, toon, cel, matcap), outlines, rim light and a cast glow; full-screen CRT and composite-video filters and colour grades. Mods can add matcaps and colour-grade LUTs.
+- **Shaders**: optional character styles (realistic, toon, cel, matcap), outlines, rim light and a cast glow; full-screen CRT and composite-video filters and colour grades; ambient occlusion and depth of field in battles. Mods can add matcaps and colour-grade LUTs.
 - **Higher-quality options**: render scaling, smoother effects and reflections, lighting and shadow improvements.
 - **Remastered or original music**: play the Radical Dreamers Edition soundtrack or the original PlayStation one.
-- **Mods**: replace any of the game's original files, plus textures and voice lines, from the game's `mods` folder, with a priority order and conflict view.
+- **Speed modes**: the Radical Dreamers Edition's fast and slow modes (F2 / F1, or the triggers), with an adjustable speed.
+- **Quality of life**: movement that follows the camera, the 2021 or 1999 character portraits, all six languages, and settings you can navigate fully with a controller.
+- **Mods**: replace any of the game's original files, plus textures and voice lines, from the game's `mods` folder, with a priority order and conflict view. Mods can also add new rooms and scripts and turn on engine features.
+- **Optional extras**: a Swap command in battle that trades the acting character with a reserve member, and party screen tweaks, from the Mods tab's **Engine features** page. Off by default.
 - **Cheats**: the Radical Dreamers Edition boosts plus extras such as no random encounters or free element use; all off by default.
 - **Updates**: check for and install new releases from the in-game settings.
 - **Steam**: Steam play and achievements.
+- **OpenCross achievements**: 173 achievements of its own for story, places, bosses, recruits, elements and battles, listed in the **Achievements** tab. They only watch the game and never change it.
+- **Multiplayer** (optional, off by default): see other players' parties in your room, chat with them, and challenge them to battles between your parties, on the public server or your own.
+- **Game guide** (optional): read a GameFAQs guide in an overlay over the game (`` ` `` or LB + RB), kept on your PC after the first download.
 - **Launcher button**: launch OpenCross from the official game launcher.
 
 ## Requirements
@@ -47,7 +53,7 @@ On Steam Deck or Linux, Proton ignores the DLL unless you add this to the game's
 WINEDLLOVERRIDES="xinput9_1_0=n,b" %command%
 ```
 
-OpenCross finds your Steam saves on its own and writes its settings to `opencross.ini` next to the executable.
+OpenCross finds your Steam saves on its own and writes its settings to `opencross.ini` next to the executable. Its own achievements are kept in `achievements.txt` beside it.
 
 ## Mods
 
@@ -76,6 +82,8 @@ Mods that change game data, such as stats, text or scripts, show **Won't change 
 
 Manage mods in the **Mods** tab of the settings window (Esc): turn them on or off, change the order, and press **Rescan** after adding one. When two mods replace the same file, the higher one wins. **Load on** picks which art style a mod applies to: Modded (default), SD, HD or All. Game data always applies.
 
+A `mod.ini` at a mod's root names the mod and can turn on engine features such as Party Swap, or give new rooms their ids. The Mods tab's **Engine features** page shows what each mod turns on, and lets you turn on the extras that work without a mod.
+
 ## Building from source
 
 OpenCross builds on Windows with Visual Studio 2026 (C++ tools), CMake, Ninja and [vcpkg](https://learn.microsoft.com/vcpkg/get_started/get-started), set up as its guide describes (`VCPKG_ROOT` set, or `vcpkg` on `PATH`; `-VcpkgRoot C:\path\to\vcpkg` also works). From PowerShell:
@@ -85,6 +93,8 @@ OpenCross builds on Windows with Visual Studio 2026 (C++ tools), CMake, Ninja an
 ```
 
 The executable is written to `build\win-x64\bin\Release\opencross.exe`. Use `.\build.ps1 debug` for a debug build and add `-Test` to run the unit tests. `.\build.ps1 -Launcher` builds the launcher button, `build\launcher-x86\bin\XINPUT9_1_0.dll`.
+
+The multiplayer server is a Cloudflare Worker in `server/cloudflare` (see its README). To run your own locally: `cd server/cloudflare; npm install; npx wrangler dev`, then pick **Local / other** in the Multiplayer tab.
 
 ## Credits and licence
 

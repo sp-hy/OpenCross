@@ -14,6 +14,20 @@
 
 namespace oc::game {
 
+// The endings of the room samples: arriving from the beach at an ending's room arms it, the ending room 9 awards it. Steam's evaluator and
+// OpenCross's own set each run one.
+class EndingTracker {
+public:
+  static constexpr int kEndings = 11;
+  // One room sample: the ending it awards (0 = the good ending .. 10, in the order of the Steam names), else -1.
+  int sample(int room, int prev_room);
+
+private:
+  int ending_ = -1;
+  int last_room_ = 0;
+  int last_prev_room_ = 0;
+};
+
 class Achievements {
 public:
   // What the room rules read.
@@ -56,7 +70,6 @@ private:
   void earn(int index);
   void earn_after(int index, int passes);
   void sample(const Progress& progress);
-  void update_ending(int room, int prev_room);
 
   std::bitset<38> done_;
   std::vector<const char*> earned_;
@@ -65,9 +78,7 @@ private:
   int field_ticks_ = 0;
   std::array<int, 4> pair_left_;
   int sample_ticks_ = 0;
-  int ending_ = -1;
-  int last_room_ = 0;
-  int last_prev_room_ = 0;
+  EndingTracker endings_;
   std::uint32_t frames_seen_ = 0;
   int stars_seen_ = -1;
   bool fled_seen_ = false;

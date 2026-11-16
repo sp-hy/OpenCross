@@ -299,6 +299,8 @@ class BattleView {
   battle::Outcome outcome() const { return battle_ ? battle_->outcome() : battle::Outcome::Ongoing; }
   // Element ids whose casts have started since the last call.
   std::vector<int> take_cast_elements() { return std::exchange(cast_elements_, {}); }
+  // The actions the view has begun to present since the last call, each as the events the rules made for it.
+  std::vector<std::vector<battle::ActionEvent>> take_begun_actions() { return std::exchange(begun_actions_, {}); }
   const battle::Battle* battle() const { return battle_.get(); }
   // Dev tools (ocbattleview --enemyhp).
   battle::Battle* battle_mut() { return battle_.get(); }
@@ -723,6 +725,7 @@ class BattleView {
   // start_release: starts the pack of the current element; false = generic path.
   bool fx_begin();
   std::vector<int> cast_elements_;
+  std::vector<std::vector<battle::ActionEvent>> begun_actions_;
   // Cast start: cast pose, chant, the colour's charge pack "ch0N".
   void fx_charge_begin();
   static bool fx_dt_emulation();

@@ -114,6 +114,12 @@ void Ini::set(std::string_view section, std::string_view key, std::string_view v
   sec->entries.push_back({std::string(key), std::string(value)});
 }
 
+std::vector<std::string> Ini::section_names() const {
+  std::vector<std::string> names;
+  for (const Section& section : sections_) names.push_back(section.name);
+  return names;
+}
+
 std::vector<std::pair<std::string, std::string>> Ini::entries(std::string_view section) const {
   std::vector<std::pair<std::string, std::string>> out;
   for (const Section& sec : sections_) {
@@ -363,6 +369,8 @@ bool Config::load(const std::filesystem::path& file) {
   debug_exit_after_screenshot = parse_bool(ini.get("Debug", "ExitAfterScreenshot"), debug_exit_after_screenshot);
   debug_log = parse_bool(ini.get("Debug", "Log"), debug_log);
   steam = parse_bool(ini.get("Game", "Steam"), steam);
+  achievements = parse_bool(ini.get("Game", "Achievements"), achievements);
+  hide_achievement_notices = parse_bool(ini.get("Game", "HideAchievementNotices"), hide_achievement_notices);
   debug_panels = parse_bool(ini.get("Debug", "Panels"), debug_panels);
   debug_entrance = parse_int(ini.get("Debug", "Entrance"), debug_entrance);
   debug_battle = parse_int(ini.get("Debug", "Battle"), debug_battle);
@@ -516,6 +524,8 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Debug", "ExitAfterScreenshot", on_off(debug_exit_after_screenshot));
   ini.set("Debug", "Log", on_off(debug_log));
   ini.set("Game", "Steam", on_off(steam));
+  ini.set("Game", "Achievements", on_off(achievements));
+  ini.set("Game", "HideAchievementNotices", on_off(hide_achievement_notices));
   ini.set("Debug", "Panels", on_off(debug_panels));
   ini.set("Debug", "Entrance", std::to_string(debug_entrance));
   ini.set("Debug", "AutoConfirm", std::to_string(debug_auto_confirm));
@@ -549,6 +559,7 @@ void Config::clear_session_toggles() {
 
 void Config::use_player_defaults() {
   lighting = edge_blend = retain_battle_scenery = full_precision_effects = true;
+  achievements = hide_achievement_notices = true;
   legacy_field_models = false;
   render_scale = 2.0f;
 }

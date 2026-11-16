@@ -58,6 +58,7 @@ enum class Stage { Top, Category, List, Quantity, Confirm, Pick };
 // ================================================================================================================
 struct ShopScreen::Impl {
   int first_forged = 0;
+  int forged_count = 0;
   // ---- services
   render::GpuContext* ctx = nullptr;
   const vfs::Vfs* vfs = nullptr;
@@ -562,6 +563,7 @@ struct ShopScreen::Impl {
       return deny(result_text(result));
     }
     if (operation == Operation::Forge && first_copy) first_forged = id;
+    if (operation == Operation::Forge) ++forged_count;
     sfx(0xBF);
     say(operation == Operation::Forge ? ss(0x801DF92D) : gain > 0 ? ss(0x801DF92E) + "\n" + ss(0x801DF99C) : ss(0x801DF92E), kText);
     after_change();
@@ -1731,6 +1733,7 @@ struct ShopScreen::Impl {
 // ================================================================================================================
 ShopScreen::ShopScreen() : impl_(std::make_unique<Impl>()) {}
 int ShopScreen::take_first_forged() { return std::exchange(impl_->first_forged, 0); }
+int ShopScreen::take_forged_count() { return std::exchange(impl_->forged_count, 0); }
 ShopScreen::~ShopScreen() { shutdown(); }
 
 bool ShopScreen::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites, render::TextBatch& text,

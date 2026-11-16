@@ -93,6 +93,8 @@ int main() {
     const Config player = load_text("", true);
     CHECK(!player.legacy_field_models && player.lighting && player.edge_blend && player.retain_battle_scenery && player.full_precision_effects);
     CHECK(!player.autohide_cast_hud && !player.hide_feature_icons);
+    CHECK(player.achievements && player.hide_achievement_notices && !defaults.achievements && !defaults.hide_achievement_notices);
+    CHECK(!load_text("[Game]\nHideAchievementNotices=0\n", true).hide_achievement_notices);
     CHECK(player.render_scale == 2.0f && defaults.render_scale == 1.0f && load_text("[Video]\nRenderScale=1\n", true).render_scale == 1.0f);
     const Config stored = load_text("[Video]\nLegacyFieldModels=1\n[Enhancements]\nLighting=0\nEdgeBlend=0\n", true);
     CHECK(stored.legacy_field_models && !stored.lighting && !stored.edge_blend && stored.full_precision_effects);
