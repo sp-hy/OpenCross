@@ -1,10 +1,13 @@
-# Party followers in Opassa (the starting area): spawn on the leader, replay the trail with the engine's free step, never
-# left behind; off-mesh ticks are only corner cuts between two ring entries (bounded loosely).
+# Party followers in Opassa (the starting area): both V spots of this entrance lie off the walk mesh, at (-2502.5, 707.5) and
+# (-2502.5, 526.5), and the followers stand there until the trail replay takes them (slot 2 leaves last, after slot 1 is 200 units
+# away); then they replay the trail with the engine's free step and are never left behind, with only corner cuts off the mesh.
 0 wait idle
 - request party_add 1
 - request party_add 22
 - load opa_a03f 0
 - wait room opa_a03f 300
+- assert near 2 -2502.5 707.5 1
+- assert near 3 -2502.5 526.5 1
 - wait idle 300
 - wait 60
 - key down run
@@ -28,5 +31,5 @@
 - assert gap player p1 0 230
 - assert gap p1 p2 0 230
 - assert offmesh p1 120
-- assert offmesh p2 120
+- assert offmesh p2 300
 - quit

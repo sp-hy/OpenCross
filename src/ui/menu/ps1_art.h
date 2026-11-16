@@ -2,11 +2,15 @@
 // PS1 menu art decoded from the disc (classic art with [Video] Ps1ResUi: the PS1 textures of the menus, shops, name entry, save/load).
 // Sources: cdrom/map/etc/systim.bin (parchment tile), cdrom/menu/menutim.prd drp entry "wind"
 // (frame pieces, captions, dial lines), cdrom/face/<name>.tim (64x64 avatars). Everything is nearest-sampled by the callers.
+#include <algorithm>
+#include <cmath>
 #include <string_view>
 #include <vector>
 
 #include "core/types.h"
 #include "import/text.h"
+#include "render/camera.h"
+#include "render/gpu_context.h"
 #include "vfs/vfs.h"
 
 namespace oc::ui::ps1 {
@@ -93,6 +97,35 @@ void frame_pieces(PieceFn&& piece, float x, float y, float w, float h, float ux,
   emit(x + w - cw, y, cw, ch, 37, 1, 8, 8);
   emit(x, y + h - ch, cw, ch, 19, 10, 8, 8);
   emit(x + w - cw, y + h - ch, cw, ch, 37, 10, 8, 8);
+}
+
+// The parchment backdrop of the menus, shops and name entry: 8 x 7 tiles over a canvas_w x canvas_h canvas, every tile one canvas unit
+// larger than its cell so no seam shows. The columns continue by whole tiles over canvas x `left` .. `right` (widescreen: the widened
+// frame) and are cut there together with their texture span; a tile that would only repeat its neighbour's overlap is left out.
+// `tile(x, y, w, h, u0, u1)` draws one (v spans the whole tile).
+template <class TileFn>
+void parchment_grid(TileFn&& tile, float canvas_w, float canvas_h, float left, float right) {
+  const float tile_w = canvas_w / 8.0f, tile_h = canvas_h / 7.0f;
+  const int first = static_cast<int>(std::floor(left / tile_w));
+  for (int ty = 0; ty < 7; ++ty)
+    for (int tx = first; tile_w * static_cast<float>(tx) < right - 1.0f; ++tx) {
+      const float x0 = tile_w * static_cast<float>(tx), x1 = x0 + tile_w + 1.0f;
+      const float cut_x0 = std::max(x0, left), cut_x1 = std::min(x1, right);
+      if (cut_x1 <= cut_x0) continue;
+      tile(cut_x0, tile_h * static_cast<float>(ty), cut_x1 - cut_x0, tile_h + 1.0f, (cut_x0 - x0) / (x1 - x0), (cut_x1 - x0) / (x1 - x0));
+    }
+}
+
+// The 4:3 picture of a canvas_w x canvas_h canvas fitted into a vw x vh view, as a scissor of `frame` over its full height. A parchment
+// screen without widened columns cuts every draw at the picture's left and right edges, so art that overhangs the canvas (the lower-left
+// swirl) stays out of the black bars; the pixels are those whose centre the canvas covers.
+inline render::Rect picture_clip(const render::Frame& frame, float vw, float vh, float canvas_w, float canvas_h) {
+  const render::CanvasFit fit = render::canvas_fit(vw, vh, canvas_w, canvas_h);
+  const float pixels = static_cast<float>(frame.extent.width) / vw;
+  const s32 width = static_cast<s32>(frame.extent.width);
+  const s32 x0 = std::clamp(static_cast<s32>(std::ceil(fit.ox * pixels - 0.5f)), 0, width);
+  const s32 x1 = std::clamp(static_cast<s32>(std::ceil((fit.ox + canvas_w * fit.s) * pixels - 0.5f)), x0, width);
+  return {x0, 0, static_cast<u32>(x1 - x0), frame.extent.height};
 }
 
 // Gap in the bottom edge of a menu frame (HD shape id), PS1 px from the frame's left: the element list frame 53 leaves 130..228 open for

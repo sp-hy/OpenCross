@@ -14,7 +14,7 @@
 
 namespace oc::assets {
 
-// uv_raw is the packet u, v (texels inside the 256 x 256 texture page), for the op-36 texture-window scroll; uv_scale the size of one
+// uv_raw is the packet u, v (texels inside the 256 x 256 texture page), for the op-36 texture-window scroll and the nearest texel pick; uv_scale the size of one
 // texel in `uv` units (1 / atlas width, 1 / 256), 0 for untextured corners; centre the centroid of the packet this corner belongs to
 // (same space as pos): the PS1 sorts whole packets by their average camera z (ordering table), so the renderer takes the depth of a
 // face from here.
@@ -116,7 +116,10 @@ struct StageTile {
 // [_<drp entry name>]); part = StageAsset::parts index; scrolls = an op-36 (UV scroll) emitter uses the part, so whole texture pages
 // are in its tiles; scale = image scale against the original texels (> 1 after a tile replacement); image = RGBA8, current (original,
 // or composed at `scale` after tile replacements); slots = the current layout; base_uv = per vertex of the part: uv.x, uv.y,
-// uv_scale.x, uv_scale.y; composed = the current image / UVs differ from the base (a tile is replaced).
+// uv_scale.x, uv_scale.y; composed = the current image / UVs differ from the base (a tile is replaced). windows = the op-36 texture
+// windows (off_u, off_v, win_w, win_h) whose art the tiles of a scrolling part hold; atlas_uv = per vertex of the part, the uv and
+// uv_scale it had on the raw atlases (only for a bake with render::TileUses: an object drawn through a window that is not in `windows`
+// is drawn from the atlases).
 struct StageObjectTexture {
   struct Slot {
     int tile = 0;
@@ -134,6 +137,8 @@ struct StageObjectTexture {
   int base_w = 0, base_h = 0;
   std::vector<std::array<float, 4>> base_uv;
   bool composed = false;
+  std::vector<std::array<int, 4>> windows;
+  std::vector<std::array<float, 4>> atlas_uv;
 };
 
 // Where the atlas texels went (render::tile_lookup): lets code that still addresses the raw (mode, CLUT) atlases - the overlays' ground cells / effect polygons
@@ -235,7 +240,7 @@ struct StageEmitter {
 
 struct StageAsset {
   std::string name;
-  // Texture dump / replace group "category/name" ("battle_stage/bg_07", "title", "effect_mesh/eid_12"): names the atlases for
+  // Texture dump / replace group "category/name" ("battle_stage/bg_07", "title", "effect_mesh"): names the atlases for
   // render/texture_registry.h. Empty = the caller's pipeline default (the battle stage) or no dump / replace.
   std::string tex_group;
   std::vector<StagePart> parts;
@@ -245,6 +250,10 @@ struct StageAsset {
   std::vector<StageTile> tiles;
   StageTileMap tile_map;
   std::vector<StageObjectTexture> object_textures;
+  // Set by a bake with render::TileUses (an effect pack's meshes): nothing but the sub-meshes left on their atlas and the objects drawn from
+  // the atlases (render::StageInstance::atlas) samples the atlases, so the renderer makes only the former's at creation and the rest when one
+  // is first asked for; the opaque runs keep the draw order they had on the atlases.
+  bool atlases_on_demand = false;
   // VRAM x (halfwords) of atlas column 0 (a multiple of 64), the atlas width in halfwords (8bpp pixels = 2x, 4bpp = 4x), and the
   // VRAM row of atlas row 0.
   int atlas_x0_hw = 0;

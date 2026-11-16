@@ -66,4 +66,10 @@ u32 dump_room_model_tiles(const assets::ModelAsset& asset, const FieldCharacterA
 // the tile replacements and the field character art. `vfs` = the game's (its hd.dat, the Modded flag, the mods).
 void resolve_room_model_textures(assets::ModelAsset& asset, const vfs::Vfs& vfs);
 
+// The models of the battle effect packs (summon creatures, tech figures) draw from two cuts of their pack's VRAM and are tiled the same
+// way, with no field character rule: <category>/tile_<hash8>.png, category "effect_model". dump_model_tiles writes every tile and returns
+// the files written; resolve_model_tiles is the live hook (render::resolve_model_textures), as resolve_room_model_textures.
+u32 dump_model_tiles(const assets::ModelAsset& asset, const std::string& category, bool forced);
+void resolve_model_tiles(assets::ModelAsset& asset, const std::string& category);
+
 }  // namespace oc::render

@@ -47,9 +47,9 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `FilterRooms` | `nearest` | `nearest bilinear` | Sampling of the room background tiles. |
 | `FilterEffects` | `bilinear` | `nearest bilinear` | Sampling of the field and battle effect sprites. |
 | `FovDeg` | 35 | 30..110 | Horizontal field of view, in degrees of the 4:3 picture, of the battle and the title sea. 35 is the PS1 view; field rooms always keep the PS1 view. |
-| `WideHud` | `full` | `default 16:9 full` | Widescreen only. `default` = battle HUD and main menu stay on the 4:3 canvas (shown as "4:3" in the window); `16:9` = spread to at most a 16:9 frame's width; `full` = to the window's edges. An unknown value keeps the default. |
+| `WideHud` | `full` | `default 16:9 full` | Widescreen only. `default` = the layout of the battle HUD, main menu, party screen, battle results and shops stays on the 4:3 canvas (shown as "4:3" in the window); `16:9` = spread to at most a 16:9 frame's width; `full` = to the window's edges. The backdrop of those screens covers the window's width in every setting (`rules/menus.md` section 16). An unknown value keeps the default. |
 | `WideEdgeFade` | 4 | 0..96 | Widescreen only: fade the room picture's cut edge to black over this many layer pixels; 0 = hard cut. |
-| `Widescreen` | 0 | bool | The field, world map, battle and title sea fill the window's width; menus, dialogue, logo and movies stay 4:3. Off = 4:3 with black bars. F7 toggles it. |
+| `Widescreen` | 0 | bool | The field, world map, battle and title sea fill the window's width, and so does the backdrop of the main menu, party screen, shops, name entry, battle results and monster picker; the title menu, slot lists, user guide, dialogue, logo and movies stay 4:3. Off = 4:3 with black bars. F7 toggles it. |
 | `ArtMode` | `hd` | `hd original modded` | Art set: RDE's HD assets / the PS1 disc assets / HD plus the mods and OpenCross's own improvements. `classic` is accepted as an alias of `original`. Any other value reads as `hd` and logs a warning. F6 cycles it. |
 | `Ps1ResGraphics` | 0 | bool | "Retro look": draw the field picture, battle 3D and title sea (backgrounds, models, effects) at the PS1's 320 x 224 and scale up with sharp pixels. |
 | `Ps1ResUi` | 0 | bool | "Retro look": draw the menus, shops, title menu, name entry, Continue and party screens at their PS1 display size, and the battle HUD, results, pause screen and dialogue windows in the 320 x 224 picture, scaled up with sharp pixels. In original art the menus use the PS1 disc textures. |
@@ -98,6 +98,7 @@ Opt-in improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is als
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `AutoHideCastHud` | 0 | bool | General tab, Quality of life section. Hide the battle HUD, menus and windows during element, tech and summon casts (as pad Select held). The cast header naming the spell stays for the first 2 seconds, then fades over half a second. |
+| `HideFeatureIcons` | 0 | bool | General tab, Quality of life section. The play-time feature icons (auto battle, battle boost, encounters off, slow, fast; `text.md` 10.2) are not drawn; the toggles, their hotkeys and the AUTO SAVE strip work as before. |
 | `RetainBattleScenery` | 0 | bool | Keep the battle stage's intro-only scenery layer for the whole battle. |
 | `FullPrecisionEffects` | 0 | bool | Effect sprites keep the half 5-bit colour level the PS1 loses to rounding, as RDE draws them (`room_effects.md` 4.3): brighter faint glows that pulse about twice as hard when one object ends and the next grows in. Off: the PS1's average loss, without its steps. |
 | `Lighting` | 0 | bool | Key light on field and battle characters, bright spell effects light the battle units and stage, and units cast shadows of their real shape on the floor: in battle from the stage's sun and spells (`battle_stage.md` 8.3.2), in the field straight below them (`docs/rules/field_actors.md` section 7), on the status screen along the PS1 flat shadow's own ray; the title's manta rays and turtle cast theirs straight down onto the sea floor (`title_scene.md` 2.1.1). The battle floor also darkens smoothly per vertex with distance; off = the stepped PS1 look. |
@@ -238,11 +239,13 @@ All off by default; they never lock saving. The first three also toggle from the
 | `NoClip` | 0 | The leader ignores the walk mesh and solid entities. |
 | `MaxStamina` | 0 | Living PCs' stamina is set to 70 every update. |
 | `FreeElements` | 0 | Element casts cost no gauge, mark no grid cell as used and use no stack copy. |
+| `SummonAnyTime` | 0 | A party summon can be cast whatever colours the field ring holds. It still needs a star left and spends one (`FreeElements` waives the spending). |
+| `MoreSummons` | 0 | Placing a summon in the element grid editor leaves its copy in the stock, so a summon the party owns one copy of can be placed in several cells and on every character that may hold it; in battle a summon cast does not use up its cell, so it can be cast again while stars are left. |
 | `AlwaysHit` | 0 | The hit chance of every PC weapon attack is 100 %. |
 | `MaxMoney` | 0 | G is set to the maximum (9,999,999) on every field tick. |
 | `ShopAllElements` | 0 | An element shop's buy list also gets every other element (ids 1..0x7F) that is sellable and has a price. |
 | `ShopAllWeapons` | 0 | The smith's forge list of the chosen category (weapon, armour, accessory) also gets every item of that category with a price and a recipe. |
-| `RunSpeed` | 0 | Field walk / run speed x2 for the leader and the party followers. |
+| `RunSpeed` | 0 | Field walk / run speed x2 for the leader and the party followers: the party's movement of a tick is done twice with the normal step, so the followers keep the formation of normal speed and ladders, pushed blocks and the walk clips behave as they do per step walked; scenes are not sped up (`docs/rules/field_actors.md` 2.8). |
 | `AlwaysLoot` | 0 | Every enemy drops its rare drop (the common one when it has no rare drop), and every PC steal succeeds and takes the rare word when the enemy has one. |
 | `InstantGrowth` | 0 | In a non-boss fight, the star's growth progress jumps to its cap, so each living member gets the full stat gain of that star at once. After every won fight (boss fights too) each grown member is also raised to what a typical character holds after the star-ups so far (the average of the random star-up gains), which makes up star-ups a record missed; the raise shows as part of the fight's gain. |
 | `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |

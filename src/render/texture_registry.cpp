@@ -77,7 +77,7 @@ TextureKey stage_texture_key(const std::string& category, const std::string& nam
 }
 
 bool is_content_named(const std::string& category) {
-  return category == "effect_mesh" || category == "room_mesh" || category == "room_model";
+  return category == "effect_mesh" || category == "room_mesh" || category == "room_model" || category == "effect_model";
 }
 
 TextureKey stage_group_key(const std::string& group, int index, int mode, int clut_x, int clut_y, u32 w, u32 h, const u8* rgba) {
@@ -329,6 +329,12 @@ bool replace_tile(const std::string& dir, const std::string& hash, u32& w, u32& 
   const std::string global = "tiles/" + hash + ".png";
   if (auto file = vfs->texture_file(global)) return load_replacement(*vfs, *file, global, w, h, rgba);
   return false;
+}
+
+bool has_whole_images(const std::string& dir) {
+  State& st = state();
+  std::lock_guard lock(st.mutex);
+  return st.settings.replace && st.vfs && st.vfs->has_texture_under(sanitise(dir) + "/", "tile_");
 }
 
 bool replace(const TextureKey& key, u32& w, u32& h, std::vector<u8>& rgba) {

@@ -1,0 +1,19 @@
+# Run speed cheat on jac_b32d's drop (see waterfall_regroup): the terrain push carries the leader once a tick and the followers' walk
+# to the push-tile entries and their replay keep that pace, so the party lands, regroups and stands on the spots of normal speed.
+0 wait 5
+- request party_add 1
+- request party_add 2
+- set var 0x00 52
+- load jac_b32d 3
+- wait dialogue open 600
+- assert near player -2288.6 -1284 1
+- assert near 2 -2379.1 -1193.5 1
+- assert near 3 -2380 -1194 1
+- skip 600
+- wait idle 300
+- key down right
+- wait 30
+- key up right
+# the controls are back: the leader walks off along the pool
+- assert near player -1913 -1284 40
+- quit

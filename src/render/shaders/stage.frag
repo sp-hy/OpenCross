@@ -46,9 +46,15 @@ void main() {
   bool scroll = py >= 3.5;
   float mode = scroll ? py - 4.0 : py;
   vec4 c;
-  if (scroll && uv_scale.x > 0.0) {
+  bool textured = uv_scale.x > 0.0;
+  float sflags = floor(pc.uvw.z / 65536.0);
+  // Scroll flag 4 (nearest sampling): the texel is chosen from the packet texel coordinate, which a face has alike on the raw atlas and on a composed
+  // object image, and is then read from the bound image through the face's page origin and texel size, so the picture does not depend on the image's layout.
+  bool exact = sflags >= 3.5 && textured && !seam && !copy;
+  // The packet texel coordinate (texel k is centred on k); a scrolled one is wrapped below.
+  vec2 coord = uv_tex;
+  if (scroll && textured) {
     // op-36 texture window: the GPU wraps each texel inside (off, off + win); a window of 0 wraps in the 256-texel page
-    float sflags = floor(pc.uvw.z / 65536.0);
     float offs = pc.uvw.z - sflags * 65536.0;
     vec2 off = vec2(mod(offs, 256.0), floor(offs / 256.0));
     vec2 win = vec2(mod(pc.uvw.w, 256.0), floor(pc.uvw.w / 256.0));
@@ -69,13 +75,23 @@ void main() {
       vec4 c01 = texture(tex, uv_page + (lo + (vec2(a.x, b.y) + 0.5) / px) * uv_scale);
       vec4 c11 = texture(tex, uv_page + (lo + (b + 0.5) / px) * uv_scale);
       c = mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+    } else if (exact) {
+      coord = lo + mod(uv_tex - lo, span);
     } else {
       // The gradients of the unwrapped coordinate: the wrap's jump would widen an anisotropic footprint across the atlas.
       vec2 unwrapped = uv_tex * uv_scale;
       c = textureGrad(tex, uv_page + (lo + mod(uv_tex - lo, span)) * uv_scale, dFdx(unwrapped), dFdy(unwrapped));
     }
-  } else {
+  } else if (!exact) {
     c = texture(tex, t);
+  }
+  if (exact) {
+    // px: image pixels per texel (above 1 for a replaced image). The sample point is the texel's centre, or with a larger image the fragment's place
+    // inside the texel kept half a pixel away from its edges, so rounding never reaches the neighbouring texel.
+    vec2 px = max(abs(uv_scale) * vec2(textureSize(tex, 0)), vec2(1.0));
+    vec2 texel = floor(coord + 0.5);
+    vec2 inside = clamp(coord + 0.5 - texel, 0.5 / px, 1.0 - 0.5 / px);
+    c = textureLod(tex, uv_page + (texel - 0.5 + inside) * uv_scale, 0.0);
   }
   if (c.a < 0.5) discard;
   if (copy && !opaque_copy && all(lessThan(c.rgb, vec3(7.5 / 255.0)))) discard;
@@ -87,7 +103,6 @@ void main() {
   }
   // The packet builders multiply the corner colour by the object colour (DCPL: saturates at 255), then the depth cue (DPCS / DPCT) moves
   // it toward the far colour by fog_p; textured colours are modulation values (128 = 1.0), untextured ones raw (255 = 1.0).
-  bool textured = uv_scale.x > 0.0;
   vec3 cm = min(color * pc.color.rgb, vec3(textured ? 255.0 / 128.0 : 1.0));
   if (fog_p > 0.0) cm = mix(cm, pc.fogc.rgb / (textured ? 128.0 : 255.0), fog_p);
   vec3 add = vec3(0.0);

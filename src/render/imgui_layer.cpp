@@ -493,6 +493,9 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
                                    "plays, as holding the pad's Select does. The damage numbers still show, and the spell's name stays "
                                    "for 2 seconds before it fades.");
     if (ImGui::Checkbox("##autohidecast", &cfg.autohide_cast_hud)) change.enhancements = true;
+    row("Hide cheat and speed icons", "Hides the icons at the bottom left that show which of Slow mode, Fast mode, No encounters, Battle boost "
+                                      "and Auto battle are on. They keep working, and their keys and buttons still switch them.");
+    if (ImGui::Checkbox("##hidefeatureicons", &cfg.hide_feature_icons)) change.other = true;
     if (quality_rows) quality_rows();
     end_rows();
   }

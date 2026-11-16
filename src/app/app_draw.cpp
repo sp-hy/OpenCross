@@ -139,8 +139,11 @@ void App::draw_frame(const render::Frame& frame) {
   // list and name entry included).
   if (feature_icons_ok && !game::free_cam().hide_overlays()) {
     const bool locked = speed_locked();
-    const ui::FeatureIcons::Active active{config.cheats.auto_battle, config.cheats.battle_boost, config.cheats.no_encounters,
-                                          config.slow_mode && !locked, config.fast_mode && !locked};
+    // [Enhancements] HideFeatureIcons draws none of the toggle icons; the AUTO SAVE strip stays.
+    const ui::FeatureIcons::Active active =
+        config.hide_feature_icons ? ui::FeatureIcons::Active{}
+                                  : ui::FeatureIcons::Active{config.cheats.auto_battle, config.cheats.battle_boost, config.cheats.no_encounters,
+                                                             config.slow_mode && !locked, config.fast_mode && !locked};
     import::Lang icon_lang = import::Lang::En;
     import::parse_lang(config.language, icon_lang);
     feature_icons.draw(frame, vw, vh, active, icon_lang);
@@ -531,9 +534,7 @@ void App::draw_field_ui(const SceneFrame& sf) {
                               platform::art_is_hd(config.art_mode) && !game::free_cam().hide_overlays() ? world.room_card() : nullptr,
                               screen_clock);
   if (menu_ok && !menu.closed()) menu.draw(frame, vw, vh, true);
-  // Widescreen: the shop is 4:3 (its canvas is Letterbox::fit): the wide field beside it is blacked out, i.e. pillarboxed like the title
-  // and the flow screens. The main menu and the party screen cover the widened frame themselves.
-  if (wide_extra > 0.0f && shop_open) pillarbox(sprites, frame, render::Letterbox::fit(vw, vh), vw);
+  // Widescreen: the main menu, the shops and the party screen cover the widened frame themselves.
   if (shop_open) shop.draw(frame, vw, vh, true);
   if (key_popup_ok && key_popup.active() && !world.key_list_held()) key_popup.draw(frame, vw, vh, true);
   if (party_ok && party_screen.active()) {

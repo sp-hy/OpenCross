@@ -173,6 +173,9 @@ class Actor {
   bool noclip = false;
   bool force_run = false;
   void tick(const WalkMesh& walk, int heading, bool run);
+  // The move of tick() alone: one pad step from where the actor stands, without the turn and the animation. Returns `run` as the
+  // tile it started on left it. The run speed cheat takes two of them and then calls step_visual().
+  bool pad_step(const WalkMesh& walk, int heading, bool run);
   // The pad velocity of the last tick() before the walk-mesh probe, wall slide and slope rebuild (0 when standing): what a pushed
   // actor takes over.
   float pad_step_x() const { return pad_step_[0]; }
@@ -391,6 +394,11 @@ class Actor {
 
   // Animation rate (SET_SELF_10E / 74); negative plays the clip backwards.
   float anim_rate = 1.0f;
+  // How many steps the animation sequence and the clip take in the next step_visual, which puts it back to 1: an actor that
+  // moved twice in the tick (the run speed cheat) plays its clip twice as far. The cross-fade, the turn and the head keep one step.
+  int anim_steps = 1;
+  // The clip pick reads the stair bits of the tile once per frame of two ticks: set_tile takes them only on a tick with this set.
+  bool stair_latch = true;
   // Yaw step toward the facing per tick (A5 / CF); 0 = no turning.
   int turn_rate = kTurnPerTick;
   // Per-actor override of the model scale.
@@ -453,7 +461,8 @@ class Actor {
   void turn_step();
   // The turn and the clip choice of step_visual: moving / requested / stand (idle) / stair slot, submitted when it changes.
   void pick_clip(bool moving, bool run);
-  void advance_anim(bool loop_current);
+  // `repeat`: a further step of the same tick; it keeps the tick's start times, stair direction and cross-fade weight.
+  void advance_anim(bool loop_current, bool repeat);
   // Logs joints whose rotation turns > 60 deg between two ticks.
   void pose_trace();
   std::vector<Local> trace_prev_;
@@ -569,8 +578,12 @@ class Actor {
   bool gt_on_ = false;
   // Walk flags of the current triangle, as last set by tick() / set_tile().
   u32 tile_flags_ = 0;
+  // The stair bits of the tile as the clip pick last read them (set_tile with stair_latch).
+  u32 stair_flags_ = 0;
   // Whole-unit height at the last clip step taken on a stair tile; only a stair tile refreshes it.
   int stair_prev_y_ = 0;
+  // The clip direction the tick's first step took on a stair tile (+1, 0, -1).
+  float stair_dir_ = 0.0f;
   // The clip plays backwards for this tick (follower back-off); begin_tick clears it.
   bool clip_reverse_ = false;
   // Script animation id in force, -1 = automatic.

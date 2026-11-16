@@ -20,6 +20,8 @@ battle::Battle::Cheats battle_cheats() {
   out.always_loot = cheats.always_loot;
   out.instant_growth = cheats.instant_growth;
   out.shared_growth = cheats.shared_growth;
+  out.summon_any_ring = cheats.summon_any_time;
+  out.summon_repeat = cheats.more_summons;
   return out;
 }
 
@@ -187,6 +189,13 @@ bool draw_cheats_tab(platform::Config& cfg) {
              "The Debug tab's Invincible party box still works.");
       toggle("Max stamina", "##c_stam", cheats.max_stamina, "The party's stamina never runs down in battle.");
       toggle("Free elements", "##c_free", cheats.free_elements, "Casting an element costs no gauge level, a cell can be cast again and consumables (stacks) are not used up.");
+      toggle("Summon any time", "##c_sumring", cheats.summon_any_time,
+             "A summon can be cast whatever colours the field effect shows; it no longer has to be all the summon's colour. A star is still needed and "
+             "used up (Free elements keeps the star).");
+      toggle("More than one summon", "##c_summore", cheats.more_summons,
+             "A summon can be placed once per copy you own, and a cast uses it up for the battle. With this on, placing a summon in the element grid keeps its "
+             "copy in the stock, so it can be placed again (other cells, other characters who can hold it), and in battle a summon can be cast again "
+             "while stars are left.");
       toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");
       toggle("Always loot", "##c_loot", cheats.always_loot, "Every enemy drops its rare drop (else the common one) and every steal lands on the rare item.");
       toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every won battle grants each member the full stat gain of the star, and raises any stat below what a typical character has from the star-ups so far up to it.");

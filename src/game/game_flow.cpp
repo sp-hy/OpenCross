@@ -697,10 +697,12 @@ void GameFlow::draw(const render::Frame& frame, float vw, float vh, bool resume)
     list_->flush(kit_.sprites(), frame, ui::Canvas::fit(vw, vh), resume);
     return;
   }
+  // The name entry's parchment covers the widened frame; every other screen here is a 4:3 picture.
+  const ui::Canvas name_canvas = ui::Canvas::wide(vw, vh, wide_cols_);
   if (rename_active_) {
     if (rename_guide_) keymap_.draw(*list_, kit_);
-    else name_.draw(*list_, kit_);
-    list_->flush(kit_.sprites(), frame, ui::Canvas::fit(vw, vh), resume);
+    else name_.draw(*list_, kit_, name_canvas.reach);
+    list_->flush(kit_.sprites(), frame, rename_guide_ ? ui::Canvas::fit(vw, vh) : name_canvas, resume);
     return;
   }
   if (ngp_active_) {
@@ -710,16 +712,18 @@ void GameFlow::draw(const render::Frame& frame, float vw, float vh, bool resume)
     if (!ngp_slots_ && title_.fade_alpha() > 0.001f) draw_veil(frame, vw, vh, title_.fade_alpha(), title_.fade_subtracts());
     return;
   }
+  bool name_shown = false;
   switch (machine_.state()) {
     case FlowState::Title: title_.draw(*list_); break;
     case FlowState::SlotSelect: slots_.draw(*list_, kit_); break;
     case FlowState::NameEntry:
+      name_shown = !keymap_active_;
       if (keymap_active_) keymap_.draw(*list_, kit_);
-      else name_.draw(*list_, kit_);
+      else name_.draw(*list_, kit_, name_canvas.reach);
       break;
     default: break;
   }
-  list_->flush(kit_.sprites(), frame, ui::Canvas::fit(vw, vh), resume);
+  list_->flush(kit_.sprites(), frame, name_shown ? name_canvas : ui::Canvas::fit(vw, vh), resume);
   if (machine_.state() == FlowState::Title && title_.fade_alpha() > 0.001f) draw_veil(frame, vw, vh, title_.fade_alpha(), title_.fade_subtracts());
 }
 

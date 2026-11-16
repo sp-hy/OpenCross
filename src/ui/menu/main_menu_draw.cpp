@@ -247,7 +247,7 @@ void MainMenu::Impl::build() {
   if (transition != Transition::None) {
     const int span = transition == Transition::Open ? kOpenFade : kBackFade;
     group(Centre);
-    rect(-canvas_s, 0, kCanvasW + 2.0f * canvas_s, kCanvasH, rgb(0, 0, 0, 255 * std::min(transition_t, span) / span));
+    rect(-reach, 0, kCanvasW + 2.0f * reach, kCanvasH, rgb(0, 0, 0, 255 * std::min(transition_t, span) / span));
   }
 }
 
@@ -278,17 +278,10 @@ std::string MainMenu::Impl::cm(std::string_view key) {
 // compass swirls (menutim_02).
 void MainMenu::Impl::background() {
   if (Tex* tile = texs.ps1_or_hd(ps1_screen(), "ps1:tile", [&] { return ps1::parchment(*vfs); }, "hd/map/etc/tile.tim")) {
-    const float tile_w = kCanvasW / 8.0f, tile_h = kCanvasH / 7.0f;
-    const int extra = static_cast<int>(std::ceil(canvas_s / tile_w));
-    for (int ty = 0; ty < 7; ++ty)
-      for (int tx = -extra; tx < 8 + extra; ++tx) {
-        const float x0 = tile_w * static_cast<float>(tx), x1 = x0 + tile_w + 1.0f;
-        const float clip_x0 = std::max(x0, -canvas_s), clip_x1 = std::min(x1, kCanvasW + canvas_s);
-        if (clip_x1 <= clip_x0) continue;
-        Img(tile, clip_x0, tile_h * static_cast<float>(ty), clip_x1 - clip_x0, tile_h + 1.0f, (clip_x0 - x0) / (x1 - x0), 0.0f, (clip_x1 - x0) / (x1 - x0), 1.0f);
-      }
+    ps1::parchment_grid([&](float x, float y, float w, float h, float u0, float u1) { Img(tile, x, y, w, h, u0, 0.0f, u1, 1.0f); }, kCanvasW, kCanvasH,
+                        -reach, kCanvasW + reach);
   } else {
-    rect(-canvas_s, 0, kCanvasW + 2.0f * canvas_s, kCanvasH, rgb(60, 38, 18));
+    rect(-reach, 0, kCanvasW + 2.0f * reach, kCanvasH, rgb(60, 38, 18));
   }
   model_layer = cmds.size();
   if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
@@ -569,6 +562,11 @@ void MainMenu::Impl::draw(const render::Frame& frame, float vw, float vh, bool r
   if (lowres_on()) {
     Ps1Display display = screen == MenuScreen::Save || screen == MenuScreen::Settings ? kMenuWide : kMenutest;
     display.w = static_cast<u32>(std::lround(static_cast<float>(display.w) * (kCanvasW + 2.0f * canvas_s) / kCanvasW));
+    // The window is cleared first: the target covers the picture only, and the field's own edge columns can lie just outside it.
+    sprites->begin(frame, vw, vh, resume);
+    sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
+    sprites->end();
+    resume = true;
     if (lowres.begin(frame, display, text, lf, kCanvasW + 2.0f * canvas_s, kCanvasH)) {
       draw_view(lf, kCanvasW + 2.0f * canvas_s, kCanvasH, resume, true);
       if (canvas_s > 0.0f) {
@@ -585,16 +583,20 @@ void MainMenu::Impl::draw(const render::Frame& frame, float vw, float vh, bool r
 }
 
 // `in_pass`: vw x vh is the widened canvas itself (zoom 1; canvas x = 0 sits canvas_s in). Otherwise the window: the 4:3 canvas fit, or
-// with widescreen the widened frame's zoom (a quarter of the layer-column scale) and origin.
+// with widescreen the widened frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts everything after the
+// clear at the picture's sides (ps1::picture_clip).
 void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass) {
+  const bool clipped = !in_pass && canvas_s <= 0.0f;
   if (in_pass) {
-    zoom = 1.0f, ox = canvas_s, oy = 0.0f;
+    zoom = 1.0f, ox = reach = canvas_s, oy = 0.0f;
   } else if (canvas_s > 0.0f) {
     const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, canvas_cols);
     zoom = letterbox.scale * 0.25f, ox = letterbox.ox, oy = letterbox.oy;
+    reach = -4.0f * letterbox.x0;
   } else {
     const render::CanvasFit cf = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
     zoom = cf.s, ox = cf.ox, oy = cf.oy;
+    reach = 0.0f;
   }
   build();
   auto draw_cmds = [&](size_t first, size_t last) {
@@ -611,6 +613,11 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
   const size_t split = with_model ? std::min(model_layer, cmds.size()) : cmds.size();
   sprites->begin(frame, vw, vh, resume);
   sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
+  if (clipped) {
+    sprites->end();
+    frame.set_scissor(ps1::picture_clip(frame, vw, vh, kCanvasW, kCanvasH));
+    sprites->begin(frame, vw, vh, true);
+  }
   draw_cmds(0, split);
   sprites->end();
   if (with_model) {
@@ -644,12 +651,14 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
       slot.hidden_meshes = 1u << kShieldConstruct;
     slot.dt = dt;
     model_view->draw(frame, vw, vh, slot);
+    if (clipped) frame.set_scissor(ps1::picture_clip(frame, vw, vh, kCanvasW, kCanvasH));
     sprites->begin(frame, vw, vh, true);
     draw_cmds(split, cmds.size());
     sprites->end();
   } else {
     model_clock = {};
   }
+  if (clipped) frame.set_scissor(frame.full());
   if (text->audit_enabled()) {
     text->audit_view(vw, vh);
     for (const AuditBox& box : audit_boxes) text->audit_obstacle(ox + box.x * zoom, oy + box.y * zoom, box.w * zoom, box.h * zoom, box.label);

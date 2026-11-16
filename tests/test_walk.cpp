@@ -823,6 +823,10 @@ int main() {
   int unit[3];
   game::mover_normalise(axis, unit);
   CHECK(unit[0] == 4098 && unit[1] == 0 && unit[2] == 0);
+  // The squares are those of 16-bit components: 48384 counts as -17152 in the sum, so the vector comes out about 2.6 units long.
+  const int steep[3] = {6912, 48384, 0};
+  game::mover_normalise(steep, unit);
+  CHECK(unit[0] > 1500 && unit[0] < 1560 && unit[1] > 10500 && unit[1] < 10920 && unit[2] == 0);
 
   // On the slope (y = 0.2 per unit of x) a 5-unit step from x = 180 rises a whole unit of floor height (16 -> 17), so the 3D
   // re-make shortens it to 5 * 5 / |(5, 1)|.

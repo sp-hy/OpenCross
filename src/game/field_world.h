@@ -115,14 +115,16 @@ struct Ent {
   int pc_slot = -1;
   // a script (or the spawn) positioned it
   bool placed = false;
-  // place_party_spawn put it on the leader's spot (settle_spawned_followers)
-  bool spawned_on_leader = false;
   // bind_party_entity set kInactive because its party slot is empty (cleared when the slot is filled again)
   bool slot_inactive = false;
   // SETUP_DIALOG_WINDOW (62) x, y, cols, lines, flags: kept per entity
   std::array<int, 5> win{};
   // ran UPDATE_CHARACTER (0A / 0B) this tick: only then does the party-follow logic move a follower
   bool updating = false;
+  // the follow rules took this member this tick: the terrain push leaves it alone
+  bool followed = false;
+  // the trail entry a walk to a push tile aims at, then the entry its replay writes next
+  int trail_index = 0;
   // SET_POSITION_XYZ: the height is script-controlled, not snapped to the walk mesh
   bool y_free = false;
   Motion motion;
@@ -842,14 +844,12 @@ class FieldWorld final : public script::FieldHost {
   void step_motions();
   void step_player();
   void step_followers();
-  // walk speed of a pad-controlled or party-following entity (its script speed or the default), doubled by the run speed cheat
+  // walk speed of a pad-controlled or party-following entity: its script speed or the default
   int party_speed(int ent) const;
   // follow rule 1 (dL < 80) for party slot 1 / 2: one step toward the point 128 units from the leader (free step while it lands on the
   // mesh, else the probe / slide step, else stand)
   // ent_override: a non-party entity running op 0A
-  void follower_back_off(int slot, bool other_side = false, int ent_override = -1);
-  // load: followers stacked on the leader's spawn spot walk out by rule 1 before the first frame
-  void settle_spawned_followers();
+  void follower_back_off(int slot, int ent_override = -1);
   void step_triggers();
   void step_visuals();
   // the off-screen test of every model entity
@@ -1092,11 +1092,13 @@ class FieldWorld final : public script::FieldHost {
   int follow_hold_ticks_ = 0;
   // Follower trails (2 rings x 0x80 entries). Ring 0 = leader, ring 1 = first follower; one entry is
   // appended per tick in which that member actually moves.
-  // An entry keeps the position, the tile and its flags.
+  // An entry keeps the position, the tile and its flags, and the facing and the walk / run clip of the member it records.
   struct TrailEntry {
     float x = 0, y = 0, z = 0;
     int tri = -1;
     u32 flags = 0;
+    int facing = 0;
+    bool walking = false, running = false;
   };
   struct Trail {
     std::array<TrailEntry, 0x80> entries{};
@@ -1110,9 +1112,14 @@ class FieldWorld final : public script::FieldHost {
   int lead_start_facing_ = 0;
   bool lead_start_valid_ = false;
   bool lead_start_pushed_ = false;
+  // the leader stood on a push tile when the follow rules last ran: the terrain push moved him on from there
+  bool lead_carried_ = false;
+  // The run speed cheat: the leader between its two pad steps of the tick.
+  TrailEntry lead_middle_;
+  int lead_middle_facing_ = 0;
   // where the last pad step left the leader (not a scripted move)
   TrailEntry lead_pad_end_;
-  TrailEntry trail_entry_of(const Actor& actor) const;
+  TrailEntry trail_entry_of(const Actor& actor, bool walking = false, bool running = false) const;
   void trail_fill(int ring, const TrailEntry& entry);
   void trail_push(int ring, const TrailEntry& entry);
   void reset_trails();

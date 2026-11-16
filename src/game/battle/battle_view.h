@@ -472,6 +472,8 @@ class BattleView {
   struct Pending {
     int unit = 0, delay = 0;
     battle::ActionEvent ev;
+    // The result shows its number (false: a pack that cannot call CallDamage, FxPack::lands_no_number).
+    bool number = true;
   };
 
   // setup
@@ -821,12 +823,15 @@ class BattleView {
       int clip = -1;
       // effects::FxModels::PackDrive: asset clip index of streamed motion file n once decoded (-1 = not loaded, -2 = failed).
       std::array<int, 4> motion_clip{{-1, -1, -1, -1}};
-      // Where its two texture pages are cut from the pack's VRAM (page x in halfwords, -1 = the textures are not the VRAM's: HD art).
-      int page_x = -1, page_y = 0, clut_x = 0, clut_y = 0;
+      // Where its two texture pages are cut from the pack's VRAM (none = the textures are not the VRAM's: HD art).
+      std::optional<FxModelPage> page;
     };
     std::map<std::string, std::unique_ptr<Model>> models;
-    // A model was given its battle model's cdrom2 mesh + texture (fx_hd_counterpart): rebuilt on an art switch.
+    // A model was given its battle model's cdrom2 mesh + texture (fx_hd_counterpart), or a texture mod can replace its models' tiles
+    // or the atlases of its overlay's packets: rebuilt on an art switch.
     bool art_dependent = false;
+    // render::texture_registry::generation() the mesh tiles were composed for.
+    unsigned tile_gen = 0;
     FxGpu() = default;
     FxGpu(const FxGpu&) = delete;
     FxGpu& operator=(const FxGpu&) = delete;
@@ -834,10 +839,11 @@ class BattleView {
   FxGpu* fx_gpu_for(const std::shared_ptr<const FxPack>& pack);
   // battle.prd's meshes (once per scene).
   FxGpu* fx_gpu_resident(const FxResident* resident);
+  // The mods' tile replacements of a mesh asset (render/stage_tiles.h): applied before its GPU copy is made (`fresh`), and again, with the object
+  // textures re-uploaded, when the mod overlay changed since.
+  void fx_apply_mesh_tiles(FxGpu& gpu, assets::StageAsset& asset, bool fresh);
   // Sprite type 20: the pack's type-0x0B models.
   void fx_load_models(FxGpu& gpu, const FxPack& pack);
-  // The two pages of a pack model cut from `vram` (fx_load_models; again after an overlay's VRAM copy into them: fx_vram_apply).
-  static std::vector<import::Image> fx_model_pages(const import::Vram& vram, int page_x, int page_y, int clut_x, int clut_y);
   // HD art: when the pack Mdl `mdl` is a byte copy of a battle model's disc mesh (S1) + skeleton (S2) and its texture page (8 bpp at halfword
   // (img_x, img_y), CLUT row (clut_x, clut_y)) holds that model's disc .ltd / .ltc main image + CLUT row 0, and the model has a cdrom2 (HD)
   // variant: `out_mdl` = mdl with the cdrom2 S1, `out_vram` = vram with the cdrom2 image + CLUT written at the same place. Returns the stem.
@@ -1348,7 +1354,7 @@ class BattleView {
     int ticks = 0;
   } pa_;
   void pa_begin(const std::shared_ptr<const FxPack>& pack);
-  void fx_queue_hits();
+  void fx_queue_hits(bool number);
   void pa_tick();
   void pa_event(const bseq::Event& event);
   void pa_draw(const render::Frame& frame, const render::Letterbox& lb);

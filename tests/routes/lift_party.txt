@@ -1,0 +1,43 @@
+# Fort Dragonia's central lift, "Go down" (ryu_a23i entity 10): the party walks to its formation on the platform (entity 4), rides it
+# down out of the room, and enters ryu_a30i still in mid-ride: each member's INIT lifts it 500 units above the floor and its UPDATE
+# rides down beside the platform. The followers take the party V behind the lifted leader at his height, so all three stay level
+# with the platform until it lands, 127 units from the leader and 181 from each other. Each follower reads its V spot (90.5, 790.5) /
+# (-90.5, 790.5) in whole units, fraction dropped, and lands on (90, 790) / (-91, 790).
+0 wait flow field 600
+- request party_add 1
+- request party_add 2
+- set var 164 32768
+- load ryu_a23i 0
+- wait room ryu_a23i
+- wait idle
+- walk 0 860 24 900
+- wait 20
+- action
+- choose 1
+- wait 150
+- assert room ryu_a23i
+- assert height p0 20 600
+- assert level p0 4 2
+- assert level p1 4 2
+- assert level p2 4 2
+- wait room ryu_a30i
+- assert height p0 -480 -20
+- assert level p0 4 2
+- assert level p1 4 2
+- assert level p2 4 2
+- assert gap p0 p1 124 131
+- assert gap p0 p2 124 131
+- assert gap p1 p2 178 184
+- wait 20
+- assert height p0 -480 -20
+- assert level p1 4 2
+- assert level p2 4 2
+- wait idle
+- assert height p0 -2 2
+- assert level p1 4 2
+- assert level p2 4 2
+- assert gap p0 p1 124 131
+- assert gap p0 p2 124 131
+- assert near 2 90 790 0
+- assert near 3 -91 790 0
+- quit

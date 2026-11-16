@@ -74,7 +74,7 @@ A battle started from the field with `[Debug] Seed` set is seeded (`OC_BATTLE_SE
 
 ## 3. Verbs
 
-The parser accepts 27 top-level verbs. `ent` is an entity index of the room, `char` a character id, `who` is `player`, `p0`, `p1`, `p2` (party slot) or an entity index. `[timeout]` is in ticks, default 1800. A verb with a bad or missing argument fails the run with a usage message.
+The parser accepts 29 top-level verbs. `ent` is an entity index of the room, `char` a character id, `who` is `player`, `p0`, `p1`, `p2` (party slot) or an entity index. `[timeout]` is in ticks, default 1800. A verb with a bad or missing argument fails the run with a usage message.
 
 ### 3.1 Input
 
@@ -185,6 +185,7 @@ An unknown kind logs `route: unknown request <kind>` and exits with code 1.
 |---|---|
 | `screenshot <file.png>` | Capture the next rendered frame. Relative names go to `shots\` next to the ini; absolute paths are used as given. The log gets `route: tick N screenshot <path> (room R)`, with `, movie frame F` (the 0-based frame on screen) while a movie plays. |
 | `autoshot <every> <count> <prefix>` | In the background, request a screenshot every `every` ticks, `count` times, named `<prefix>00.png`, `<prefix>01.png`, ... while later lines run. Returns at once. A screenshot from `screenshot` on the same tick takes priority. |
+| `sides <min%> <max%>` | Measure the next rendered frame's columns beside the centred 4:3 picture (the frame is rendered before the next line runs, like a screenshot): the share of lit pixels (a colour channel above 8 of 255) of the left side and of the right side must each be within the range, in whole percent. `sides 99 100` = a backdrop covers both sides, `sides 0 0` = black bars. Logs `route: sides <min> <max>: left L % right R % lit`; fails when a side is outside the range, when the window is no wider than the 4:3 picture, or when no frame was measured within 60 ticks. |
 
 ### 3.5 Marks, snapshots and traces
 
@@ -193,8 +194,10 @@ An unknown kind logs `route: unknown request <kind>` and exits with code 1.
 | `mark` | Remember the player's screen position (for `assert screen`). |
 | `mark ent <n>` | Remember entity `n`'s world position (for `assert moved`). |
 | `mark time` | Remember the driver tick (for `assert elapsed`). |
+| `mark anim` | From now on count, tick by tick, how often each party member's submitted clip changes (for `assert changes`). |
 | `snap [hexvar...]` | Remember the simulation state: room, flow, room-load / battle-start / title-sequence / field-tick counters, the battle summary, every entity's position, facing and model yaw, the message windows' typewriter positions and the listed variables. |
 | `trace <ent> <ticks>` | For `ticks` ticks log the entity's position, height, submitted animation id, step, facing, facing change, model yaw, animation clip and keyframe, the script pitch, whether it is drawn, the screen fade level (0 = the picture, 1 = black or white) (and the head-turn angles while a head callback is on), then a summary of speed, turns and clip behaviour. The statistics feed the `assert trace*` lines. |
+| `track <ticks> [keys] [ent...]` | In the background, while later lines run, log one row per tick for `ticks` ticks: `route: track <room> t <n>` and, for each placed party slot, `p<slot> <x> <z> <y> <submitted clip id> <facing hex>`, then the same group as `e<ent>` for each listed entity (a pushed block, a follower that is not a party member). With `keys` every group ends in `<clip>:<key4>`, the playing clip's index and its keyframe in quarter keyframes (`-` without a clip). Returns at once. Two runs' rows compare the party's formation tick by tick; the run speed cheat's row k is compared with row 2k of the normal-speed run (`rules/field_actors.md` 2.8; routes `runspeed_ladder`, `runspeed_push`, `runspeed_scene`, `runspeed_waterfall`). |
 | `dump` | Log the room's entity table. |
 | `pos` | Log tick, room, player position and control yaw. |
 | `log <text...>` | Log `route: <text>`. |
@@ -227,6 +230,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `movie playing\|idle` | A movie is / is not playing. |
 | `guide <0\|1\|2>` | The user guide page equals the value. |
 | `pause open\|closed` | The pause screen is up / not up. |
+| `icons <n>` | The last frame drew n play-time feature icons (slow, fast, encounters off, battle boost, auto battle; `text.md` 10.2). |
 | `name <char> <text>` | The typed name of the character (UTF-8; one word, since arguments split on spaces); `-` = no typed name. |
 | `party <id,id,id>` | The party ids in slot order (`-` = empty slot), e.g. `0,1,22`. |
 | `disc <n>` | The disc in use. |
@@ -239,12 +243,15 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `near <ent\|player> <x> <z> <tol>` | World position within `tol` of the point. |
 | `facing <who> <angle> [tol]` | Facing (4096 per turn) within `tol` (default 64). |
 | `gap <who> <who> <min> <max>` | Horizontal distance between two entities within the range. |
+| `level <who> <who> <tol>` | The world y of two entities (`p0`, `p1`, `p2` or an entity index) differs by at most `tol`: a rider stays on its platform. |
 | `moved <ent> <min>` | The entity is at least `min` units from where `mark ent` saw it. |
 | `screen right\|left\|up\|down` | Player screen movement since `mark`: right/left need more than 8 px and mostly horizontal; up/down need more than 1 px. |
 | `rel <who> <ref> <dx> <dy> <tol>` | Screen offset of `who` from `ref` equals `(dx, dy)` within `tol` on each axis. |
 | `ent <n> model\|body\|char\|shown\|moving\|paused\|wet\|pitch <value>` | Room model index / the character model byte the entity wears (its record's model byte once that model is on the entity, -1 for an entity without a character model, or while its model could not be loaded) / its character id (-1 none) / drawn / script motion active / motion pre-empted / walk flags carry water / script pitch (op 27, 4096 per turn); each 0 or 1 except `model`, `body`, `char` and `pitch`. |
 | `height <who> <min> <max>` | World y (down is positive) in range. |
 | `anim <who> <id\|stair>` | Submitted clip id equals `id`, or the entity stands on a stair tile. |
+| `key <p0..p2\|ent> <clip> <key4>` | The entity plays the clip with that index at that keyframe, counted in quarter keyframes (the values of `track ... keys`). |
+| `changes <p0..p2> <max>` | The member's submitted clip changed at most `max` times since `mark anim` (a clip that flips every tick fails). |
 | `offmesh <p1\|p2\|ent N\|npcs> <max>` | Ticks the member stood off the walkable mesh is at most `max`; `npcs` takes the worst placed non-party model entity. |
 | `elapsed <min> <max>` | Driver ticks since `mark time` within the range. |
 | `scroll <x> <y> [tol]` | The field scroll (layer pixels, before the shake offset) is within `tol` (default 0) of `(x, y)` on each axis. |

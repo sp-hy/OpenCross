@@ -151,6 +151,12 @@ struct ShopScreen::Impl {
   // ---- drawing
   float zoom = 1, ox = 0, oy = 0;
   std::vector<Cmd> cmds;
+  // [Video] Widescreen: the backdrop covers `reach` canvas units beyond each side of the 4:3 canvas (the window's widened frame, from
+  // canvas_cols layer columns). [Video] WideHud: every primitive adds the current group's shift, the lists and the footer `spread`
+  // canvas units to the left (Left), the info panels, prompts and the dial as far to the right (Right), the backdrop none (Centre).
+  enum Group { Left = -1, Right = 1, Centre = 2 };
+  float canvas_cols = 0, layout_cols = 0, reach = 0, spread = 0, group_dx = 0;
+  void group(Group which) { group_dx = which == Left ? -spread : which == Right ? spread : 0.0f; }
 
   // ===================================================== setup
   // The PS1-resolution pass runs in every art mode (ps1_menus()); the PS1 disc textures replace the HD files in classic art only.
@@ -572,7 +578,7 @@ struct ShopScreen::Impl {
     Cmd cmd;
     cmd.kind = Cmd::Rect;
     cmd.set = texs.white_set();
-    cmd.x = x, cmd.y = y, cmd.w = w, cmd.h = h, cmd.color = colour;
+    cmd.x = x + group_dx, cmd.y = y, cmd.w = w, cmd.h = h, cmd.color = colour;
     cmds.push_back(std::move(cmd));
   }
   void Img(const Tex* tex, float x, float y, float w, float h, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, u32 colour = kWhite) {
@@ -580,7 +586,7 @@ struct ShopScreen::Impl {
     Cmd cmd;
     cmd.kind = Cmd::Img;
     cmd.set = tex->set;
-    cmd.x = x, cmd.y = y, cmd.w = w, cmd.h = h, cmd.u0 = u0, cmd.v0 = v0, cmd.u1 = u1, cmd.v1 = v1, cmd.color = colour;
+    cmd.x = x + group_dx, cmd.y = y, cmd.w = w, cmd.h = h, cmd.u0 = u0, cmd.v0 = v0, cmd.u1 = u1, cmd.v1 = v1, cmd.color = colour;
     cmds.push_back(std::move(cmd));
   }
   // Fallback frame when a menu-main shape is missing: a 3 x 3 grid of the w01 window skin around a dark fill.
@@ -774,7 +780,7 @@ struct ShopScreen::Impl {
       cmd.ink = ink;
       cmd.align = align;
       cmd.scale = scale;
-      cmd.x = canvas_x, cmd.y = line_y;
+      cmd.x = canvas_x + group_dx, cmd.y = line_y;
       cmds.push_back(std::move(cmd));
     };
     if (colour_mode != Mode::Lines) {
@@ -889,16 +895,15 @@ struct ShopScreen::Impl {
   }
 
   // Parchment: 8 x 7 tiles of hd/map/etc/tile.tim (the whole 256 x 256 image is one tile) in both art modes, the disc tile with the
-  // PS1 textures or when the HD file is missing; then the two faint compass swirls.
+  // PS1 textures or when the HD file is missing; widescreen continues the grid over the widened frame. Then the two faint compass swirls.
   void backdrop() {
     Tex* tile = ps1_on() ? ps1_tile() : texs.load("hd/map/etc/tile.tim");
     if (!tile) tile = ps1_tile();
     if (tile) {
-      const float tile_w = kCanvasW / 8.0f, tile_h = kCanvasH / 7.0f;
-      for (int ty = 0; ty < 7; ++ty)
-        for (int tx = 0; tx < 8; ++tx) Img(tile, tile_w * static_cast<float>(tx), tile_h * static_cast<float>(ty), tile_w + 1.0f, tile_h + 1.0f, 0, 0, 1, 1);
+      ps1::parchment_grid([&](float x, float y, float w, float h, float u0, float u1) { Img(tile, x, y, w, h, u0, 0, u1, 1); }, kCanvasW, kCanvasH, -reach,
+                          kCanvasW + 1.0f + reach);
     } else {
-      rect(0, 0, kCanvasW, kCanvasH, rgb(60, 38, 18));
+      rect(-reach, 0, kCanvasW + 2.0f * reach, kCanvasH, rgb(60, 38, 18));
     }
     if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
       Img(deco, SX(-56), SY(242), SX(256), SY(298), 0, 0, 1, 1, rgb(150, 150, 170));
@@ -936,6 +941,7 @@ struct ShopScreen::Impl {
   }
   // Footer: star count (star glyph at x, y + 2), "%2d" counts, PLAY label + time, gold + unit.
   void footer() {
+    group(Left);
     const bool jp = lang_index() == 5;
     RT(0x10004, 0x1E, 0x186 + 2, U"\u2605");    RT(jp ? 4 : 0x91, 0x2C, 0x188, padded_number(std::min<int>(gs->slot.stars_current(), 99), 2));
     RT(jp ? 5 : 0xB0, 0x42, 0x188, U"/");    RT(jp ? 4 : 0x91, 0x4E, 0x188, padded_number(std::min<int>(gs->slot.stars_total(), 99), 2));
@@ -988,11 +994,13 @@ struct ShopScreen::Impl {
 
   void build() {
     cmds.clear();
+    group(Centre);
     ov = msg;
     fonts.set_classic(mode == ArtMode::Original);
     backdrop();
     if (kind == ShopKind::Trading) return build_trading();
     if (stage == Stage::Top || stage == Stage::Category) {
+      group(Right);
       banner(title_text());
       if (kind == ShopKind::Element) {
         message(stage == Stage::Top ? ss(0x801DF424) : std::string());
@@ -1045,7 +1053,7 @@ struct ShopScreen::Impl {
       cmd.slot = font::kBn;
       cmd.ink = font::h1(0x808080, 20, 6);
       cmd.scale = kS[lang_idx];
-      cmd.x = 791, cmd.y = kY[lang_idx];
+      cmd.x = 791 + group_dx, cmd.y = kY[lang_idx];
       cmds.push_back(std::move(cmd));
     }
     const data::ElemRec* record = rules ? rules->elem(id) : nullptr;
@@ -1087,11 +1095,14 @@ struct ShopScreen::Impl {
   void build_pick() {
     const int id = ids[static_cast<size_t>(cur)];
     const int shown = qty + pick.taken_total();
+    group(Left);
     Frame(135, 20, 16);
+    group(Right);
     info_panel_element(id, pick.placed_total(), gs->element_count(id) - qty);
     qty_window(0x801DF558, 0x801DF560, true, shop::element_sell_total(*gs, id, shown), shown);
     const bool listed = pick.wait > kPickWait;
     message(ss(listed ? 0x801DF470 : 0x801DF438));
+    group(Left);
     for (int character = 0; character < save::kNumChars; ++character) {
       if (!gs->available(character)) continue;
       const int half = save::kNumChars / 2;
@@ -1111,13 +1122,16 @@ struct ShopScreen::Impl {
   void build_element_list() {
     if (stage == Stage::Pick) return build_pick();
     const bool buying = operation == Operation::Buy;
+    group(Left);
     Frame(132, 20, 32);
     panel_caption(0x84, 20, 32);
     const int count = static_cast<int>(ids.size());
     int sel_id = (count > 0 && cur < count) ? ids[static_cast<size_t>(cur)] : 0;
     const bool selling_qty = !buying && stage == Stage::Quantity && sel_id > 0;
+    group(Right);
     info_panel_element(sel_id, sel_id > 0 ? shop::party_copies(*gs, sel_id) : 0,
                        sel_id > 0 ? gs->element_count(sel_id) - (selling_qty ? qty : 0) : 0);
+    group(Left);
     if (scroll > 0) scroll_arrow(306, 50, true);
     if (scroll + kVisibleRows < std::max(count, kVisibleRows)) scroll_arrow(306, 307, false);
     for (int row = 0; row < kVisibleRows; ++row) {
@@ -1134,6 +1148,7 @@ struct ShopScreen::Impl {
       RT(lang_index() == 5 ? 4 : 0x91, static_cast<float>(0xE4 + 0xF - 4 * digit_count(price)), y0 + 20, fmt("%5d", price));
     }
     marker(20, 52.0f + 24.0f * static_cast<float>(cur - scroll), stage == Stage::List);
+    group(Right);
     if (stage == Stage::Quantity && count > 0) {
       const int id = ids[static_cast<size_t>(cur)];
       long long total = buying ? static_cast<long long>(shop::element_price(*gs, id)) * qty : shop::element_sell_total(*gs, id, qty);
@@ -1213,6 +1228,7 @@ struct ShopScreen::Impl {
     const int row_count = static_cast<int>(ids.size());
     const int item = (row_count > 0 && cur < row_count) ? ids[static_cast<size_t>(cur)] : 0;
     const bool forge_like = operation == Operation::Forge || operation == Operation::Break;
+    group(Left);
     if (forge_like) {
       Frame(154 + std::clamp(category, 0, 2), 20, 32);
       panel_caption(0x9A + std::clamp(category, 0, 2), 20, 32);
@@ -1252,6 +1268,7 @@ struct ShopScreen::Impl {
       }
     }
     marker(30, 48.0f + 24.0f * static_cast<float>(cur - scroll), stage == Stage::List);
+    group(Right);
     if (forge_like) {
       // material panel: forge (266x210) / disassemble (266x168) at (220,32)
       Frame(operation == Operation::Forge ? 157 : 159, 220, 32);
@@ -1593,19 +1610,26 @@ struct ShopScreen::Impl {
   void build_trading() {
     const int lang_idx = std::clamp(lang_index(), 0, 5);
     if (trade.stage == 0) {
+      group(Right);
       banner(title_text());
       RT(1, 0x150, 0x10E, ss(0x801DF6DC));
       RT(1, 0x150, 0x11E, ss(0x801DF6B4));
       RT(1, 0x150, 0x12E, ss(0x801DF6C8));
     } else if (trade.stage == 1) {
+      group(Left);
       trade_goods_list();
+      group(Right);
       trade_info();
       RT(1, 0x150, 0x10E, ss(0x801DF6EC));
       RT(1, 0x150, 0x11E, ss(0x801DF6F9));
+      group(Left);
       marker(0x1E, 0x46 + 18.0f * static_cast<float>(trade.goods_cur), true);
     } else {
+      group(Left);
       trade_offer_list();
+      group(Right);
       trade_info();
+      group(Left);
       const int sum = shop::offer_levels(*gs, trade.elements, trade.offered), need = trade_slot().need;
       // Status line at (0x26, 0x14E): dx by language, no style remap.
       static const int kDx[6] = {0x41, 0x41, 0x24, 0x41, 0x24, 0};
@@ -1624,10 +1648,12 @@ struct ShopScreen::Impl {
       }
       if (!trade.confirm) {
         marker(0x14, 0x38 + 24.0f * static_cast<float>(trade.offer_cur), true);
+        group(Right);
         RT(1, 0x150, 0x10E, ss(0x801DF6A0));
         RT(1, 0x150, 0x11E, ss(0x801DF708));
         RT(1, 0x150, 0x12E, ss(0x801DF718));
       } else {
+        group(Right);
         marker(0x150, 0x11E + 16.0f * static_cast<float>(trade.yes_no), true);
         // "Make the exchange?", then Yes / No
         RT(1, 0x150, 0x10E, ss(0x801DF6F8));
@@ -1640,29 +1666,65 @@ struct ShopScreen::Impl {
 
   // Classic art with [Video] Ps1ResUi: the whole shop is drawn into a target of the original menu's display size
   // (512 x 448 buffer; 432 of its rows map onto the canvas, so one PS1 pixel = one target pixel), scaled up nearest.
+  // Widescreen: the target grows with the canvas (512 + 3.2 e texels for e columns per side) and is shown in the window rectangle of
+  // the widened 240-row frame.
   void draw(const render::Frame& frame, float vw, float vh, bool resume) {
     if (closed || !gs || !ready) return;
+    spread = 4.0f * layout_cols;
     render::Frame lf;
-    if (ps1_menus() && lowres.begin(frame, kShop, text, lf)) {
-      draw_view(lf, kCanvasW, kCanvasH, resume);
-      lowres.end(frame, vw, vh);
-      return;
+    if (ps1_menus()) {
+      const float canvas_w = kCanvasW + 8.0f * canvas_cols;
+      Ps1Display display = kShop;
+      display.w = static_cast<u32>(std::lround(static_cast<float>(display.w) * canvas_w / kCanvasW));
+      // The window is cleared first: the target covers the picture only, and the field's own edge columns can lie just outside it.
+      sprites->begin(frame, vw, vh, resume);
+      sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
+      sprites->end();
+      resume = true;
+      if (lowres.begin(frame, display, text, lf, canvas_w, kCanvasH)) {
+        draw_view(lf, canvas_w, kCanvasH, resume, true);
+        if (canvas_cols > 0.0f) {
+          const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, canvas_cols);
+          const render::Letterbox::Rect target_rect{letterbox.left(), letterbox.oy, letterbox.width(), render::kLayerH * letterbox.scale};
+          lowres.end(frame, vw, vh, &target_rect);
+        } else {
+          lowres.end(frame, vw, vh);
+        }
+        return;
+      }
     }
-    draw_view(frame, vw, vh, resume);
+    draw_view(frame, vw, vh, resume, false);
   }
-  void draw_view(const render::Frame& frame, float vw, float vh, bool resume) {
-    const render::CanvasFit cf = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
-    zoom = cf.s;
-    ox = cf.ox;
-    oy = cf.oy;
+  // `in_pass`: vw x vh is the widened canvas itself (zoom 1; canvas x = 0 sits 4 units per widescreen column in). Otherwise the window:
+  // the 4:3 canvas fit, or with widescreen the widened frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts
+  // everything after the clear at the picture's sides (ps1::picture_clip).
+  void draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass) {
+    const bool clipped = !in_pass && canvas_cols <= 0.0f;
+    if (in_pass) {
+      zoom = 1.0f, ox = reach = 4.0f * canvas_cols, oy = 0.0f;
+    } else if (canvas_cols > 0.0f) {
+      const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, canvas_cols);
+      zoom = letterbox.scale * 0.25f, ox = letterbox.ox, oy = letterbox.oy;
+      reach = -4.0f * letterbox.x0;
+    } else {
+      const render::CanvasFit cf = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
+      zoom = cf.s, ox = cf.ox, oy = cf.oy;
+      reach = 0.0f;
+    }
     build();
     sprites->begin(frame, vw, vh, resume);
     sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
+    if (clipped) {
+      sprites->end();
+      frame.set_scissor(ps1::picture_clip(frame, vw, vh, kCanvasW, kCanvasH));
+      sprites->begin(frame, vw, vh, true);
+    }
     for (const Cmd& cmd : cmds) {
       if (cmd.kind == Cmd::Text) fonts.draw(cmd.slot, cmd.text, cmd.x + ox / zoom, cmd.y + oy / zoom, cmd.ink, cmd.scale, cmd.align, zoom);
       else sprites->draw(cmd.set, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.h * zoom, cmd.u0, cmd.v0, cmd.u1, cmd.v1, cmd.color);
     }
     sprites->end();
+    if (clipped) frame.set_scissor(frame.full());
   }
 };
 
@@ -1682,6 +1744,10 @@ void ShopScreen::set_rules(const MenuRules* rules) { impl_->rules = rules; }
 void ShopScreen::set_mode(ArtMode mode) { impl_->mode = mode; }
 ArtMode ShopScreen::mode() const { return impl_->mode; }
 void ShopScreen::set_language(import::Lang lang) { impl_->lang = lang; }
+void ShopScreen::set_wide_columns(float canvas_columns, float layout_columns) {
+  impl_->canvas_cols = std::max(0.0f, canvas_columns);
+  impl_->layout_cols = std::clamp(layout_columns, 0.0f, impl_->canvas_cols);
+}
 void ShopScreen::set_custom_names(const std::map<int, std::u32string>* names) { impl_->custom_names = names; }
 void ShopScreen::set_sfx(std::function<void(int)> fn) { impl_->sfx_fn = std::move(fn); }
 void ShopScreen::open(GameState& state, ShopKind kind, int shop_id) { impl_->open(state, kind, shop_id); }

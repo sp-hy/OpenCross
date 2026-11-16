@@ -28,6 +28,8 @@ add_library(oc_battle_view STATIC
   stage_key_light.cpp
   battle_fx_textures.h
   battle_fx_textures.cpp
+  fx_mesh_tiles.h
+  fx_mesh_tiles.cpp
   battle_audit.h
   battle_view_fx.cpp
   battle_view_fx_cast.cpp

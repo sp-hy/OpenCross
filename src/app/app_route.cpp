@@ -127,6 +127,7 @@ void App::fill_route_state() {
   rstate.shop = shop_open;
   rstate.guide_page = flow_ready ? flow.guide_page() : 0;
   rstate.pause = pause_ok && pause_screen.active();
+  rstate.feature_icons = feature_icons_ok ? feature_icons.shown() : 0;
   rstate.field_ticks = world_ok ? world.tick_count() : 0;
   rstate.room_loads = world.room_loads();
   rstate.art_swaps = world.art_swaps();
@@ -263,6 +264,11 @@ void App::route_frame() {
       else
         log::info("route: tick {} screenshot {} (room {})", route_tick, shot.string(), rstate.room);
     }
+    if (out.measure_sides)
+      ctx.request_capture([this](std::vector<u8>&& pixels, u32 width, u32 height) {
+        if (!game::side_columns_lit(pixels.data(), width, height, rstate.side_lit[0], rstate.side_lit[1])) rstate.side_lit[0] = rstate.side_lit[1] = -1.0f;
+        ++rstate.side_frames;
+      });
     if (out.failed) {
       log::error("route FAILED at tick {}: {}\nentities:\n{}", route_tick, out.message, field_visible() ? world.dump_entities() : std::string("(no room)"));
       ctx.request_screenshot(shots_dir / "route_failed.png");
@@ -276,7 +282,7 @@ void App::route_frame() {
     if (recorder.active()) recorder.write(1.0 / 60.0, 1, in);
     ++route_tick;
     // Render this tick before the next command.
-    if (!out.screenshot.empty() || route_finished) break;
+    if (!out.screenshot.empty() || out.measure_sides || route_finished) break;
   }
   step = {0, 0.0f};
 }

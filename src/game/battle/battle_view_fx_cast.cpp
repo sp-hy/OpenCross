@@ -474,7 +474,17 @@ bool BattleView::fx_begin() {
   // The same holds for a caster script a SEQUENCE starts (op 0x43 / 0x45, pack table): Bomber's Suicide Bomb (348, bombom.prd, stdmag0)
   // has no damage / reaction op in its sequences; `main` t0 op 0x45 runs the Bomber's entry 0, whose t290 `React(-1)` starts Serge's
   // variant 7 = Damage next to `Sequence bomb`, so the number spawns about 290 ticks into the pack, not at its start.
-  if (!pack->has_damage_op && !pack->has_react_op && !host_main && !script_hits && !pack->caster_script_reacts) fx_queue_hits();
+  // A pack that cannot call CallDamage at all lands the results without a number: nothing in the pack calls it, and neither does an
+  // own-script entry the pack runs on one of this cast's models.
+  bool own_script_number = false;
+  for (const std::vector<int>* units : {&act_.casters, &act_.targets})
+    for (const int unit : *units) {
+      if (unit < 0 || static_cast<size_t>(unit) >= vis_.size()) continue;
+      const Visual& visual = vis_[static_cast<size_t>(unit)];
+      if (!visual.scripts || !visual.scripts->has_s5) continue;
+      for (const int entry : pack->own_script_entries) own_script_number = own_script_number || script_calls_damage(visual.scripts->s5, entry);
+    }
+  if (!pack->has_damage_op && !pack->has_react_op && !host_main && !script_hits && !pack->caster_script_reacts) fx_queue_hits(!pack->lands_no_number || own_script_number);
   // Dev: log every emitter name the running pack registers.
   if (std::getenv("OC_ANM_TRACE")) {
     std::string names;
@@ -486,13 +496,14 @@ bool BattleView::fx_begin() {
   return true;
 }
 
-// The generic element hit: CallDamage on each target, one after the other (4 + 6 k ticks from now).
-void BattleView::fx_queue_hits() {
+// The generic element hit: CallDamage on each target, one after the other (4 + 6 k ticks from now); `number` false lands the result
+// (HP, message plate) without the number.
+void BattleView::fx_queue_hits(bool number) {
   int target_index = 0;
   for (size_t i = 0; i < act_.ev.size(); ++i) {
     if (act_.ev[i].target < 0 || fx_fired_[i]) continue;
     fx_fired_[i] = true;
-    pending_.push_back({act_.ev[i].target, 4 + 6 * target_index, act_.ev[i]});
+    pending_.push_back({act_.ev[i].target, 4 + 6 * target_index, act_.ev[i], number});
     ++target_index;
   }
 }

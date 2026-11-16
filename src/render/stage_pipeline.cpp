@@ -28,7 +28,8 @@ namespace {
 //           strip, + 32 the texture is a picture copy: 15-bit black texels are transparent), z = output alpha (0.5 for
 //           the average blend), w = fog offset B
 // The camera z of a point is the w of its clip position (the projection's last row is (0, 0, 1, 0)).
-//   uvw     x/y = uv phase (texels), z = off_u + 256 * off_v + 65536 * (1 bilinear wrap + 2 EdgeBlend tiling), w = win_w + 256 * win_h
+//   uvw     x/y = uv phase (texels, 0 without a scroll), z = off_u + 256 * off_v + 65536 * (1 bilinear wrap + 2 EdgeBlend tiling + 4 nearest texel pick),
+//           w = win_w + 256 * win_h
 #include "stage.vert.inc"
 #include "stage_affine.vert.inc"
 #include "stage.frag.inc"
@@ -90,11 +91,12 @@ void fill_push(PushData& pd, const StageInstance& in, const StagePipeline::Depth
   pd.params[0] = static_cast<float>(in.bias);
   pd.params[1] = (in.fixed_slot ? 1.0f : 0.0f) + (in.uv_scroll ? 4.0f : 0.0f) + (smooth_fog ? 8.0f : 0.0f);
   pd.params[2] = alpha;
-  pd.uvw[0] = in.uv_phase[0];
-  pd.uvw[1] = in.uv_phase[1];
+  pd.uvw[0] = in.uv_scroll ? in.uv_phase[0] : 0.0f;
+  pd.uvw[1] = in.uv_scroll ? in.uv_phase[1] : 0.0f;
   // Scroll flags: 1 = the bilinear footprint wraps inside the window, 2 = [Enhancements] EdgeBlend: a packet corner on the window's last texel
-  // reaches the window end, so the next packet's first texel continues the tiling.
-  const int scroll_flags = (linear ? 1 : 0) + (edge_blend() ? 2 : 0);
+  // reaches the window end, so the next packet's first texel continues the tiling, 4 = nearest sampling: the fragment shader picks the texel from
+  // the packet texel coordinate, so a face shows the same texels from the raw atlas and from a composed object image.
+  const int scroll_flags = (linear ? 1 : 4) + (edge_blend() ? 2 : 0);
   pd.uvw[2] = static_cast<float>((in.uv_window[0] & 255) + 256 * (in.uv_window[1] & 255) + 65536 * scroll_flags);
   pd.uvw[3] = static_cast<float>(std::clamp(in.uv_window[2], 0, 255) + 256 * std::clamp(in.uv_window[3], 0, 255));
 }
@@ -176,6 +178,16 @@ bool corners_pass(const std::array<float, 12>& cam, const std::array<float, 3>* 
 bool rebuilt_morph(const StageInstance& in, const assets::StageAsset* asset) {
   if (in.morph_part < 0 || !asset || static_cast<size_t>(in.morph_part) >= asset->parts.size() || static_cast<size_t>(in.part) >= asset->parts.size()) return false;
   return asset->parts[static_cast<size_t>(in.part)].vertices.size() == asset->parts[static_cast<size_t>(in.morph_part)].vertices.size();
+}
+
+// A baked part drawn from the raw atlases: one of its sub-meshes has the UVs it had there.
+bool rebuilt_atlas(const StageInstance& in, const assets::StageAsset* asset) {
+  if (!in.atlas || !asset || static_cast<size_t>(in.part) >= asset->parts.size()) return false;
+  const assets::StagePart& part = asset->parts[static_cast<size_t>(in.part)];
+  return std::any_of(part.submeshes.begin(), part.submeshes.end(), [&](const assets::StageSubMesh& sub) {
+    return sub.object_texture >= 0 && static_cast<size_t>(sub.object_texture) < asset->object_textures.size() &&
+           asset->object_textures[static_cast<size_t>(sub.object_texture)].atlas_uv.size() == part.vertices.size();
+  });
 }
 
 // A screen copy that one of the part's sub-meshes samples.
@@ -334,6 +346,14 @@ bool StagePipeline::create_textures(StageCreateJob& job, const assets::StageAsse
   // The atlases first (effect polygons, the ground cells' dynamic draws and the effect meshes sample them), then the baked per-object textures
   // (assets::StageObjectTexture), which are what the dump / replace names: StageMesh::sets = [atlases..., objects..., white].
   const size_t atlases = stage.textures.size();
+  // Atlases on demand: only those of the sub-meshes left on them are made now (load_atlases makes the others).
+  std::vector<u8> wanted(atlases, 1);
+  if (stage.atlases_on_demand) {
+    wanted.assign(atlases, 0);
+    for (const assets::StagePart& part : stage.parts)
+      for (const assets::StageSubMesh& sm : part.submeshes)
+        if (sm.object_texture < 0 && sm.texture >= 0 && static_cast<size_t>(sm.texture) < atlases) wanted[static_cast<size_t>(sm.texture)] = 1;
+  }
   for (; job.next < atlases + stage.object_textures.size(); ++job.next) {
     // Made and uploaded by the worker.
     if (job.next < job.prepared.size() && job.prepared[job.next]) {
@@ -346,37 +366,8 @@ bool StagePipeline::create_textures(StageCreateJob& job, const assets::StageAsse
       batch.flush(*ctx_);
       return false;
     }
-    const bool is_object = job.next >= atlases;
-    const assets::StageObjectTexture* obj = is_object ? &stage.object_textures[job.next - atlases] : nullptr;
-    const assets::StageTexture* atlas = is_object ? nullptr : &stage.textures[job.next];
-    auto tex = std::make_unique<Texture>();
-    const import::Image& img = is_object ? obj->image : atlas->image;
-    if (img.width == 0 || img.height == 0 || img.indexed || img.pixels.size() < size_t(img.width) * img.height * 4) {
-      log::warn("stage: texture skipped (not RGBA)");
-      mesh->textures.push_back(nullptr);
-      mesh->sets.push_back(TexRef());
-      mesh->sets_linear.push_back(TexRef());
-      continue;
-    }
-    // Transparent texels (colour 0) take their opaque neighbours' colour so the bilinear filter of HD mode does not draw dark
-    // fringes around cut-outs (palm fronds, coral); nearest sampling discards them anyway.
-    // Dump / replace through the texture registry (named by the asset's group, or the pipeline's scene group): a replacement PNG of any
-    // size is fine - the stage UVs are normalised (uv_scale = 1 / atlas size is applied to the packet texels, so a bigger atlas keeps them).
-    u32 tw = img.width, th = img.height;
-    std::vector<u8> rgba_src;
-    const std::string& group = stage.tex_group.empty() ? job.group : stage.tex_group;
-    // Baked assets (battle stage, title, room meshes) dump / replace TILES at load (render/stage_tiles.h: apply_tile_textures), their object images arrive
-    // here already composed. Assets that are not baked (effect meshes) keep the atlas keys (content-named).
-    const bool named = stage.object_textures.empty() && !is_object && !group.empty() && is_content_named(group.substr(0, group.find('/')));
-    if (named && texture_registry::active()) {
-      const TextureKey key = stage_group_key(group, static_cast<int>(job.next), atlas->mode, atlas->clut_x, atlas->clut_y, tw, th, img.pixels.data());
-      texture_registry::dump(key, tw, th, img.pixels.data());
-      rgba_src.assign(img.pixels.begin(), img.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(tw) * th * 4));
-      if (!texture_registry::replace(key, tw, th, rgba_src)) rgba_src.clear();
-    }
-    const std::vector<u8> bled = rgba_src.empty() ? bleed_transparent(img.pixels, img.width, img.height) : bleed_transparent(rgba_src, tw, th);
-    if (!tex->create(*ctx_, tw, th, TextureFormat::Rgba8, bled.data(), &batch)) {
-      log::warn("stage: texture upload failed");
+    std::unique_ptr<Texture> tex = job.next < atlases && !wanted[job.next] ? nullptr : make_stage_texture(stage, job.next, job.group, batch);
+    if (!tex) {
       mesh->textures.push_back(nullptr);
       mesh->sets.push_back(TexRef());
       mesh->sets_linear.push_back(TexRef());
@@ -388,6 +379,56 @@ bool StagePipeline::create_textures(StageCreateJob& job, const assets::StageAsse
   }
   batch.flush(*ctx_);
   return true;
+}
+
+std::unique_ptr<Texture> StagePipeline::make_stage_texture(const assets::StageAsset& stage, size_t index, const std::string& scene_group, UploadBatch& batch) {
+  const size_t atlases = stage.textures.size();
+  const bool is_object = index >= atlases;
+  const assets::StageTexture* atlas = is_object ? nullptr : &stage.textures[index];
+  const import::Image& img = is_object ? stage.object_textures[index - atlases].image : atlas->image;
+  if (img.width == 0 || img.height == 0 || img.indexed || img.pixels.size() < size_t(img.width) * img.height * 4) {
+    log::warn("stage: texture skipped (not RGBA)");
+    return nullptr;
+  }
+  // Transparent texels (colour 0) take their opaque neighbours' colour so the bilinear filter of HD mode does not draw dark
+  // fringes around cut-outs (palm fronds, coral); nearest sampling discards them anyway.
+  // Dump / replace through the texture registry (named by the asset's group, or the pipeline's scene group): a replacement PNG of any
+  // size is fine - the stage UVs are normalised (uv_scale = 1 / atlas size is applied to the packet texels, so a bigger atlas keeps them).
+  u32 tw = img.width, th = img.height;
+  std::vector<u8> rgba_src;
+  const std::string& group = stage.tex_group.empty() ? scene_group : stage.tex_group;
+  // Baked assets (battle stage, title, room meshes, effect meshes) dump / replace TILES at load (render/stage_tiles.h: apply_tile_textures), their object
+  // images arrive here already composed. The atlases of the content-named groups keep their whole-image keys for replacement: the effect meshes draw the
+  // objects whose texture window their tiles do not hold from them.
+  const bool named = !is_object && !group.empty() && is_content_named(group.substr(0, group.find('/')));
+  if (named && texture_registry::active()) {
+    const TextureKey key = stage_group_key(group, static_cast<int>(index), atlas->mode, atlas->clut_x, atlas->clut_y, tw, th, img.pixels.data());
+    if (stage.object_textures.empty()) texture_registry::dump(key, tw, th, img.pixels.data());
+    rgba_src.assign(img.pixels.begin(), img.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(tw) * th * 4));
+    if (!texture_registry::replace(key, tw, th, rgba_src)) rgba_src.clear();
+  }
+  const std::vector<u8> bled = rgba_src.empty() ? bleed_transparent(img.pixels, img.width, img.height) : bleed_transparent(rgba_src, tw, th);
+  auto tex = std::make_unique<Texture>();
+  if (!tex->create(*ctx_, tw, th, TextureFormat::Rgba8, bled.data(), &batch)) {
+    log::warn("stage: texture upload failed");
+    return nullptr;
+  }
+  return tex;
+}
+
+void StagePipeline::load_atlases(StageMesh& mesh, const assets::StageAsset& stage) {
+  if (mesh.atlases_loaded || !ctx_) return;
+  mesh.atlases_loaded = true;
+  UploadBatch batch;
+  for (size_t i = 0; i < stage.textures.size() && i + 1 < mesh.sets.size() && i < mesh.textures.size(); ++i) {
+    if (mesh.sets[i]) continue;
+    std::unique_ptr<Texture> tex = make_stage_texture(stage, i, stage.tex_group, batch);
+    if (!tex) continue;
+    mesh.sets[i] = make_stage_set(*tex, false);
+    mesh.sets_linear[i] = make_stage_set(*tex, true);
+    mesh.textures[i] = std::move(tex);
+  }
+  batch.flush(*ctx_);
 }
 
 StageTextures prepare_stage_textures(GpuContext& ctx, const assets::StageAsset& stage) {
@@ -491,6 +532,7 @@ std::unique_ptr<StageMesh> StagePipeline::create_finish(StageCreateJob& job, con
       sub.packet_count = static_cast<u32>(mesh->packets.size()) - sub.first_packet;
       const int tex = sm.object_texture >= 0 ? static_cast<int>(stage.textures.size()) + sm.object_texture : sm.texture;
       sub.texture = tex >= 0 && tex < white_index && mesh->sets[static_cast<size_t>(tex)] ? tex : white_index;
+      sub.order = sm.object_texture >= 0 && sub.texture != white_index ? sm.texture : sub.texture;
       mesh->subs.push_back(sub);
     }
     mesh_part.sub_count = static_cast<u32>(mesh->subs.size()) - mesh_part.first_sub;
@@ -584,7 +626,7 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
   SDL_GPUCommandBuffer* command_buffer = ctx_->cmd();
   linear_draw_ = linear && mesh.sets_linear.size() == mesh.sets.size();
   const std::vector<TexRef>& sets = linear_draw_ ? mesh.sets_linear : mesh.sets;
-  // Morphing instances (op 37) and the ones sampling a screen copy are drawn last from per-frame copies of their vertices (see below); the
+  // Morphing instances (op 37), the ones sampling a screen copy and the ones drawn from the raw atlases are drawn last from per-frame copies of their vertices (see below); the
   // static pass skips them.
   std::vector<const StageInstance*> morphing, grounds;
   struct Item {
@@ -596,7 +638,7 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
   std::vector<Item> opaque, semi;
   for (const StageInstance& in : instances) {
     if (in.part < 0 || static_cast<size_t>(in.part) >= mesh.parts.size()) continue;
-    if (rebuilt_morph(in, asset) || rebuilt_screen(in, asset)) {
+    if (rebuilt_morph(in, asset) || rebuilt_screen(in, asset) || rebuilt_atlas(in, asset)) {
       morphing.push_back(&in);
       continue;
     }
@@ -613,7 +655,7 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
     }
   }
   // Opaque faces grouped by texture (fewer binds); semi-transparent ones back to front like the ordering table.
-  std::stable_sort(opaque.begin(), opaque.end(), [](const Item& lhs, const Item& rhs) { return lhs.sub->texture < rhs.sub->texture; });
+  std::stable_sort(opaque.begin(), opaque.end(), [](const Item& lhs, const Item& rhs) { return lhs.sub->order < rhs.sub->order; });
   std::stable_sort(semi.begin(), semi.end(), [](const Item& lhs, const Item& rhs) { return lhs.depth > rhs.depth; });
 
   bind_vertex_buffer(render_pass, mesh.vertices.handle());
@@ -752,6 +794,17 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
         }
       }
     }
+    const bool from_atlas = rebuilt_atlas(in, asset);
+    if (from_atlas)
+      for (const assets::StageSubMesh& asub : from_part.submeshes) {
+        if (asub.object_texture < 0) continue;
+        const std::vector<std::array<float, 4>>& atlas_uv = asset->object_textures[static_cast<size_t>(asub.object_texture)].atlas_uv;
+        for (u32 i = 0; i < nv && i < atlas_uv.size(); ++i) {
+          blended[i].uv = {atlas_uv[i][0], atlas_uv[i][1]};
+          blended[i].uv_scale = {atlas_uv[i][2], atlas_uv[i][3]};
+        }
+        break;
+      }
     // The packet texel u, v of a page at (dx, dy) in the copy addresses copy pixel (dx + u, dy + v); the texel centre is half a pixel in.
     const bool screen = rebuilt_screen(in, asset);
     if (screen)
@@ -787,7 +840,8 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
       const bool on_screen = screen && in.screen_offset(asub.direct_page, dx, dy);
       StageInstance plain = in;
       plain.uv_scroll = plain.uv_scroll && !on_screen;
-      bind_texture(*ctx_, render_pass, on_screen ? in.screen : sets[static_cast<size_t>(sub.texture)]);
+      const bool atlas_set = from_atlas && asub.object_texture >= 0 && static_cast<size_t>(asub.texture) + 1 < sets.size() && sets[static_cast<size_t>(asub.texture)];
+      bind_texture(*ctx_, render_pass, on_screen ? in.screen : sets[static_cast<size_t>(atlas_set ? asub.texture : sub.texture)]);
       PushData pd;
       pd.clip = proj * cam;
       fill_push(pd, plain, cue_, factor, alpha, smooth_fog_, linear_draw_);
@@ -798,7 +852,7 @@ void StagePipeline::draw(const StageMesh& mesh, const Mat4& proj, std::span<cons
     }
     dyn_vused_ += nv;
     dyn_iused_ += ni;
-    if (edge_blend() && !from_part.seams.empty() && !screen) draw_seams(mesh, from_part, mp, proj, cam, in, sets, blended, nullptr, ps1_jitter().on);
+    if (edge_blend() && !from_part.seams.empty() && !screen && !from_atlas) draw_seams(mesh, from_part, mp, proj, cam, in, sets, blended, nullptr, ps1_jitter().on);
     // restore the static buffers for any later static draw in this pass
     bind_vertex_buffer(render_pass, mesh.vertices.handle());
     bind_index_buffer(render_pass, mesh.indices.handle());
@@ -1046,7 +1100,8 @@ void StagePipeline::draw_prims(const StageMesh& mesh, const assets::StageAsset& 
   if (!active_ || prims.empty()) return;
   SDL_GPURenderPass* render_pass = ctx_->pass();
   SDL_GPUCommandBuffer* command_buffer = ctx_->cmd();
-  const std::vector<TexRef>& sets = linear && mesh.sets_linear.size() == mesh.sets.size() ? mesh.sets_linear : mesh.sets;
+  const bool linear_sets = linear && mesh.sets_linear.size() == mesh.sets.size();
+  const std::vector<TexRef>& sets = linear_sets ? mesh.sets_linear : mesh.sets;
   const int white_index = static_cast<int>(mesh.sets.size()) - 1;
   struct Item {
     u32 first_vertex;
@@ -1195,7 +1250,7 @@ void StagePipeline::draw_prims(const StageMesh& mesh, const assets::StageAsset& 
     bind_texture(*ctx_, render_pass, sets[static_cast<size_t>(it.texture)]);
     PushData pd;
     pd.clip = proj * cam_matrix;
-    fill_push(pd, neutral, cue_, factor, alpha, it.depth_cue);
+    fill_push(pd, neutral, cue_, factor, alpha, it.depth_cue, linear_sets);
     push_uniforms(command_buffer, pd, view_depth_);
     SDL_DrawGPUIndexedPrimitives(render_pass, static_cast<u32>((j - i) * 6), 1, dyn_iused_ + static_cast<u32>(i * 6), static_cast<int32_t>(dyn_vused_), 0);
     i = j;

@@ -398,7 +398,7 @@ void BattleView::tick_action() {
     pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
     // Element hits (generic path / leftovers of a cut effect): CallDamage only, no reaction script (see fx_fire).
     vis_[static_cast<size_t>(due.unit)].react_ev = due.ev;
-    on_damage(due.unit);
+    on_damage(due.unit, due.number);
   }
 
   if (act_.phase == Act::Phase::None) {

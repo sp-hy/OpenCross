@@ -58,7 +58,9 @@ class NameEntry {
 
   // ---- io
   void update(const Nav& nav, float dt);
-  void draw(DrawList& dl, UiKit& kit) const;
+  // `reach`: canvas units the parchment continues beyond each side of the 4:3 canvas (Canvas::reach; widescreen). The layout stays on
+  // the 4:3 canvas.
+  void draw(DrawList& dl, UiKit& kit, float reach = 0.0f) const;
 
  private:
   struct Pic {

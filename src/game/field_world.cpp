@@ -562,15 +562,16 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   // Continue / Load, debug and route loads come in like a room change of kind 0 (step_transition picks the kind of a room change).
   begin_entry_fade(0);
 
-  // The leader goes first: the followers' V spots are relative to it.
-  for (int pass = 0; pass < 2; ++pass)
-    for (size_t i = 0; i < ents_.size(); ++i) {
-      Ent& ent_state = ents_[i];
-      if (pass == 0) ent_state.actor.snap_facing();
-      if (ent_state.pc_slot >= 0 && !ent_state.placed && (ent_state.pc_slot == 0) == (pass == 0)) place_party_spawn(ent_state.pc_slot);
-    }
+  for (Ent& ent_state : ents_) {
+    ent_state.actor.snap_facing();
+    if (ent_state.pc_slot >= 0 && !ent_state.placed) place_party_spawn(ent_state.pc_slot);
+  }
+  // Once every INIT has run, slots 1 and 2 go to the party V behind the controlled entity, over whatever their own INIT wrote. A
+  // world-map Continue keeps the positions its INIT restored.
+  if (!vm_.world_continue()) place_followers();
+  lead_start_valid_ = false;
+  lead_carried_ = false;
   reset_trails();
-  settle_spawned_followers();
   update_input_lock();
   // A world-map Continue eases on from the scroll FE 50 restored; every other entry starts from 0.
   snap_camera_to_player(vm_.world_continue());
@@ -599,9 +600,7 @@ void FieldWorld::place_party_spawn(int slot) {
   float x = 0, z = 0;
   int facing = 0;
   bool have = false;
-  // `level`: start-triangle index of the entrance record (-1 = none); `v_tri`: for a follower, the triangle of its V spot (or the leader's).
-  int level = -1;
-  int v_tri = -1;
+  int tri = -1;
   const auto& pos = vm_.module().positions;
   // A room without an entrance table (the cutscene rooms) places nobody: every party member stays where the room load put each
   // entity, on the centroid of walk triangle 0, until a script moves it.
@@ -610,62 +609,18 @@ void FieldWorld::place_party_spawn(int slot) {
     if (slot == 0) log::debug("field: {} has no entrance table, the party stays on walk triangle 0", view_.room_name());
     return;
   }
-  if (slot > 0 && party_ent_[0] >= 0 && ents_[static_cast<size_t>(party_ent_[0])].placed) {
-    const ActorPose& lp = ents_[static_cast<size_t>(party_ent_[0])].actor.current();
-    // Followers spawn in the party V behind the leader (the geometry of the formation op DF): with heading h the
-    // leader faces, slot 1 stands 128 units away at heading h + 0x200 from straight behind on one side, slot 2 on the other
-    // (x - cos(h +- 0x200) * 128, z + sin(h +- 0x200) * 128). In the lift of opn_a01i this is what puts the third member left and Kid right.
-    facing = ents_[static_cast<size_t>(party_ent_[0])].actor.facing();
-    // The followers appear in this V at once, facing the leader's way, and the spot is set without any walk test (the opening
-    // lift: Serge (0, 1934), followers (+-90, 2024) = the full V, across the lift's blocked edge); only a spot with no floor of its
-    // own, or one on another floor (a ledge below), falls back to the half-size V, else the leader's own spot (settled out by
-    // settle_spawned_followers). A half V (64 units) would put the follower under follow rule 1's 0x50 and back it off / turn it.
-    const int ltri = ents_[static_cast<size_t>(party_ent_[0])].actor.triangle();
-    x = lp.x;
-    z = lp.z;
-    v_tri = ltri;
-    for (const float scale : {1.0f, 0.5f}) {
-      float vx = 0, vz = 0;
-      party_v_spot(slot, lp.x, lp.z, (facing - 0x800) & 0xFFF, vx, vz);
-      vx = lp.x + (vx - lp.x) * scale;
-      vz = lp.z + (vz - lp.z) * scale;
-      const int st = walk.find_triangle(vx, vz, lp.y);
-      log::debug("field: follower {} V spot k {:.1f} ({:.0f}, {:.0f}) leader tri {} -> tri {} dy {:.0f}", slot, static_cast<double>(scale),static_cast<double>(vx), static_cast<double>(vz), ltri, st,
-                 st >= 0 ? static_cast<double>(walk.height(st, vx, vz) - lp.y) : 0.0);
-      if (ltri < 0 || st < 0 || std::fabs(walk.height(st, vx, vz) - lp.y) > 64.0f) continue;
-      x = vx;
-      z = vz;
-      v_tri = st;
-      break;
-    }
-    have = true;
-  } else if (entrance_param_ >= 0 && static_cast<size_t>(entrance_param_) < pos.size()) {
-    // Pre-script table record = entrance (x, z, facing) selected by ROOM_PARAM (4096/turn).
+  // Every member, the leader and the followers alike, takes the entrance record picked by ROOM_PARAM: x, z, facing (4096 a turn) and
+  // the floor level that selects the triangle. The followers leave it for the party V once every INIT has run (place_followers).
+  if (entrance_param_ >= 0 && static_cast<size_t>(entrance_param_) < pos.size()) {
     const auto& entrance = pos[static_cast<size_t>(entrance_param_)];
     x = entrance.a;
     z = entrance.b;
     facing = to_internal(entrance.c);
-    level = entrance.level;
+    tri = entrance.level >= 0 ? walk.find_triangle_level(x, z, entrance.level) : walk.find_triangle(x, z, ent_state.actor.current().y);
     have = true;
-  }
-  int tri = -1;
-  if (have) {
-    // Followers stand on the leader's floor; the leader on floor `level` of the entrance record.
-    if (level >= 0) tri = walk.find_triangle_level(x, z, level);
-    else if (party_ent_[0] >= 0) {
-      const Actor& la = ents_[static_cast<size_t>(party_ent_[0])].actor;
-      // The triangle reached from the leader.
-      tri = slot > 0 && v_tri >= 0 ? v_tri : walk.find_triangle(x, z, la.current().y);
-    }
-    else tri = walk.find_triangle(x, z, 0.0f);
-  }
-  if (have && slot == 0) log::debug("field: spawn ({:.0f}, {:.0f}) level {} -> tri {} y {:.0f}", static_cast<double>(x), static_cast<double>(z), level, tri, tri >= 0 ? static_cast<double>(walk.height(tri, x, z)) : 0.0);
-  // The V spot is off the mesh: stand on the leader instead.
-  if (tri < 0 && have && slot > 0 && party_ent_[0] >= 0) {
-    const ActorPose& lp = ents_[static_cast<size_t>(party_ent_[0])].actor.current();
-    x = lp.x;
-    z = lp.z;
-    tri = walk.find_triangle(x, z, 0.0f);
+    if (slot == 0)
+      log::debug("field: spawn ({:.0f}, {:.0f}) level {} -> tri {} y {:.0f}", static_cast<double>(x), static_cast<double>(z), entrance.level, tri,
+                 tri >= 0 ? static_cast<double>(walk.height(tri, x, z)) : 0.0);
   }
   // An entrance record is written as it stands, even where the walk mesh has no floor (a party that walks in from outside the mesh).
   if (tri < 0 && !have && !walk.empty()) {
@@ -688,8 +643,6 @@ void FieldWorld::place_party_spawn(int slot) {
   }
   ent_state.actor.place(walk, tri, x, z, facing);
   ent_state.placed = true;
-  ent_state.spawned_on_leader = slot > 0 && have && party_ent_[0] >= 0 &&
-                        std::hypot(x - ents_[static_cast<size_t>(party_ent_[0])].actor.current().x, z - ents_[static_cast<size_t>(party_ent_[0])].actor.current().z) <= 1.0f;
 }
 
 // ------------------------------------------------------------------------------------------------ host: entities

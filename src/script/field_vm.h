@@ -43,7 +43,7 @@ namespace flag38 {
 constexpr u32 kSelected = 0x1, kNoAction = 0x8, kNoCollision = 0x4, kInactive = 0x10, kNo3dObject = 0x4000, kOffScreen = 0x8000;
 }
 namespace flag270 {
-constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000;
+constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000, kTrailReplay = 0x20000, kTrailWalk = 0x40000;
 }
 namespace gflag {
 constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationHold = 0x10, kPartyOverride = 0x40, kKeyListHold = 0x2000, kPauseAllowed = 0x4000, kForceRun = 0x8000,

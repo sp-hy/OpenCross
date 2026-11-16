@@ -504,8 +504,12 @@ void FieldWorld::sim_tick() {
   vm_.tick();
   step_watchdog();
   // An entity the scripts left inactive (SET_VISIBLE 0) neither turns nor picks a clip this tick.
-  for (size_t i = 0; i < ents_.size(); ++i)
+  // The stair clip follows the tile an actor stands on when a frame of two ticks ends; the run speed cheat fits such a frame into one tick.
+  const bool frame_end = (tick_count_ & 1) == 0 || (platform::cheats().run_speed && controls_free());
+  for (size_t i = 0; i < ents_.size(); ++i) {
     ents_[i].actor.set_inactive((vm_.entity(static_cast<int>(i)).flags38 & script::flag38::kInactive) != 0);
+    ents_[i].actor.stair_latch = frame_end;
+  }
   step_motions();
   step_player();
   // step_status: poison / flu / damage-floor block (after the pad move of the tick).

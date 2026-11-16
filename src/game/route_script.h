@@ -39,11 +39,14 @@
 //   fight [timeout]               mash the battle menu (attack chain) until the battle view has finished
 //   autoshot <every> <count> <prefix>   background screenshots every <every> ticks (<prefix>NN.png) while later commands run
 //   screenshot <file.png>         capture the next rendered frame (relative names go to shots/ next to the route's ini file)
+//   sides <min%> <max%>           the next rendered frame's columns beside the 4:3 picture: the lit share of the left side and of the
+//                                 right side is within the range (99 100 = a widescreen backdrop, 0 0 = black bars)
 //   assert room <name> | assert var <hexid> <value> | assert dialogue open|closed | assert battle active|inactive | assert battle events <w1|a|w2 ...> (the window / action order starts with these tokens) |
 //   assert battle camera orbit <slot>|shot|target|hold   (what drove the battle camera on the last tick)
 //   assert battle plate [word]    the last versus battle showed its outcome plate (that word: Victory, Defeat, Draw, No result)
 //   assert result <n>             (BATTLE_RESULT)       assert flow <state> | assert menu open|closed | assert shop open|closed |
 //   assert movie playing|idle      assert guide <0|1|2>     assert pause open|closed (the RDE pause screen)
+//   assert icons <n>              the last frame drew n play-time feature icons (slow, fast, encounters off, battle boost, auto battle)
 //   assert text <words...>        the open dialogue's message contains the words
 //   assert choiceline <n>         the choice hand / highlight is on message line n of the open list (translated numbering, DialogueBox::choice_line)
 //   assert notext <words...>      a dialogue is open and its message does not contain the words
@@ -74,12 +77,16 @@
 //   assert near <ent|player> <x> <z> <tol>   world position within tol
 //   assert facing <who> <angle> [tol]   facing (4096/turn) of <who> = player | p0 | p1 | p2 | <ent>, within tol (default 64)
 //   assert gap <a> <b> <min> <max>      xz distance between two entities (same names) is in [min, max]
+//   assert level <a> <b> <tol>          world y of two entities (p0 | p1 | p2 | <ent>) differs by at most tol
 //   mark time / assert elapsed <min> <max>   driver ticks since `mark time` are within [min, max]
 //   assert height <p0..p2|ent> <min> <max>   world y (down = +) of the entity; assert anim <who> <id|stair>   submitted clip id / on a stair tile
 //   trace <ent> <ticks>           log an entity's position / facing / model yaw / screen fade every tick for N ticks and a speed / turn summary
 //   (trace also logs clip / keyframe*4 per tick) assert traceclip <max_src_moves> <max_clip_changes>   cross-fade source keyframe moves / clip changes of the last trace
 //   (trace also logs the head-turn angles while the head callback is on) assert traceheadturn <ticks> <span>   the last trace saw the head turn on >= ticks ticks over an ax range >= span (4096/turn)
 //   assert traceyaw <ticks> <octants>   the last trace saw the model yaw change on >= ticks ticks and visit >= octants of the 8 45-deg sectors
+//   track <ticks> [keys] [ent...] background table: every party member's position, height, submitted clip and facing, one log row per tick;
+//                                 the listed entities after the party; `keys` adds the playing clip and keyframe*4 to every group
+//   assert key <p0..p2|ent> <clip> <key4>   the entity plays that clip at that keyframe*4
 //   dump                          log the room's entity table
 //   art hd|original|modded|toggle   switch the art mode like F6 / the options overlay (returns at once; toggle = HD-family <-> original)
 //   pos                           log the tick, room, player position and control yaw
@@ -159,6 +166,8 @@ struct RouteState {
   int guide_page = 0;
   // The pause screen is up.
   bool pause = false;
+  // Play-time feature icons (slow, fast, encounters off, battle boost, auto battle) drawn on the last frame.
+  int feature_icons = 0;
   // Field simulation ticks so far.
   u64 field_ticks = 0;
   // Typewriter position of every field message window (FieldWorld::dialogue_progress).
@@ -205,12 +214,22 @@ struct RouteState {
   std::function<void(int, int, int)> set_char_stat;
   // Remote parties picked to be drawn on the last field tick.
   std::function<int()> remote_drawn;
+  // `sides`: frames measured so far, and the lit share (0..1) of the columns left / right of the 4:3 picture in the last one
+  // (side_columns_lit; -1 = the window has no such columns).
+  u64 side_frames = 0;
+  float side_lit[2] = {-1.0f, -1.0f};
 };
+
+// Share (0..1) of lit pixels (a colour channel above 8 of 255) in the columns left and right of the centred 4:3 picture of a
+// width x height RGBA8 frame. False when the frame is no wider than that picture.
+bool side_columns_lit(const u8* rgba, u32 width, u32 height, float& left, float& right);
 
 // What the route driver asks the host to do this tick.
 struct RouteOut {
   // Request a screenshot of the next frame.
   std::string screenshot;
+  // `sides`: measure the side columns of the next frame (RouteState::side_lit).
+  bool measure_sides = false;
   // Debug warp.
   std::string load_room;
   int load_param = 0;
@@ -311,6 +330,15 @@ class Route {
   int as_every_ = 0, as_left_ = 0, as_n_ = 0;
   u64 as_next_ = 0;
   std::string as_prefix_;
+  // `track`: ticks left to log, the row number, the entities logged after the party and whether the rows carry the keyframes.
+  int track_left_ = 0;
+  u64 track_n_ = 0;
+  std::vector<int> track_ents_;
+  bool track_keys_ = false;
+  // `mark anim`: counting is on, each party member's last submitted clip and how often it changed.
+  bool anim_mark_ = false;
+  std::array<int, 3> anim_last_{};
+  std::array<int, 3> anim_changes_{};
   // `snap` / `assert same`.
   struct Snap {
     std::string room, flow, title_seq, battle_sig;

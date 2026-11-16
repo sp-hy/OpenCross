@@ -1,5 +1,7 @@
 #include "render/particles.h"
 
+#include <cmath>
+
 #include "core/log.h"
 #include "render/shaders.h"
 
@@ -67,6 +69,7 @@ void ParticleBatch::begin(const Frame& frame, float view_width, float view_heigh
   flushed_quads_ = quad_count_;
   current_ = {};
   mode_ = -1;
+  texels_ = {};
   overflow_logged_ = false;
   SDL_GPUBufferBinding vertex_binding{vertices_.handle(), 0};
   SDL_BindGPUVertexBuffers(ctx_->pass(), 0, &vertex_binding, 1);
@@ -87,6 +90,20 @@ void ParticleBatch::flush() {
   flushed_quads_ = quad_count_;
 }
 
+void ParticleBatch::push_fragment() {
+  const float data[8] = {full_precision_ ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f, texels_[0], texels_[1], texels_[2], texels_[3]};
+  SDL_PushGPUFragmentUniformData(ctx_->cmd(), 0, data, sizeof data);
+}
+
+// Faces of one texture page of one image differ by rounding only: they stay one draw.
+void ParticleBatch::set_texels(const std::array<float, 4>& texels) {
+  constexpr float kSame = 1e-6f;
+  if (texels[2] == texels_[2] && texels[3] == texels_[3] && std::fabs(texels[0] - texels_[0]) <= kSame && std::fabs(texels[1] - texels_[1]) <= kSame) return;
+  flush();
+  texels_ = texels;
+  if (mode_ >= 0) push_fragment();
+}
+
 void ParticleBatch::quad(TexRef texture, int blend, const float x[4], const float y[4], const float u[4],
                          const float v[4], u8 mod_r, u8 mod_g, u8 mod_b, float depth) {
   if (blend < 0 || blend >= kParticleBlendModes) blend = 0;
@@ -101,8 +118,7 @@ void ParticleBatch::quad(TexRef texture, int blend, const float x[4], const floa
     const Pipeline& pipeline = pipelines_[static_cast<size_t>(blend)];
     SDL_BindGPUGraphicsPipeline(ctx_->pass(), pipeline.handle());
     SDL_PushGPUVertexUniformData(ctx_->cmd(), 0, push_, sizeof push_);
-    const float mode[4] = {full_precision_ ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f};
-    SDL_PushGPUFragmentUniformData(ctx_->cmd(), 0, mode, sizeof mode);
+    push_fragment();
   }
   if (texture != current_) {
     flush();

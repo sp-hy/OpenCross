@@ -336,6 +336,10 @@ void resolve_model_textures(assets::ModelAsset& asset) {
     if (const vfs::Vfs* vfs = texture_registry::bound_vfs()) resolve_room_model_textures(asset, *vfs);
     return;
   }
+  if (asset.source == "@effect_model") {
+    resolve_model_tiles(asset, "effect_model");
+    return;
+  }
   if (asset.source.empty() || !texture_registry::active()) return;
   const bool character = !asset.character.empty();
   for (size_t i = 0; i < asset.textures.size(); ++i) {

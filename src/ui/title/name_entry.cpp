@@ -171,7 +171,7 @@ void NameEntry::update(const Nav& nav, float dt) {
   if (nav.confirm) press(NameKey::Confirm);
 }
 
-void NameEntry::draw(DrawList& dl, UiKit& kit) const {
+void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   // Layout: the overlay uses a 512x432 list space, canvas X = 2.5 x, Y = 2.2222 y. Sizes below are canvas units.
   // Both art modes draw this screen; original art swaps the font files (small_font_*, kit.set_classic) and the playtim folder.
   const bool classic = mode_ == ArtMode::Original;
@@ -200,7 +200,8 @@ void NameEntry::draw(DrawList& dl, UiKit& kit) const {
   // The screen tiles the brown parchment (map/etc/tile.tim): 8 x 7 sprites of 64 x 64 texels at u 0, v 128 of the 256 x 256 4bpp
   // image; one 512 x 448 screen. Same art in both modes.
   // hd/map/etc/tile.tim is the 4x PS1 tile; the WHOLE 256 x 256 image is the tile. It is used in both art modes; the disc tile of
-  // cdrom/map/etc/systim.bin (64 x 64, nearest) only when the HD file is missing. Drawn 8 x 7 times, no alpha.
+  // cdrom/map/etc/systim.bin (64 x 64, nearest) only when the HD file is missing. Drawn 8 x 7 times, no alpha; widescreen continues
+  // the columns over the widened frame.
   auto ps1_pic = [&](const std::string& key, auto&& make) -> NameEntry::Pic {
     if (auto it = pics_.find(key); it != pics_.end()) return it->second;
     NameEntry::Pic loaded;
@@ -216,11 +217,10 @@ void NameEntry::draw(DrawList& dl, UiKit& kit) const {
   NameEntry::Pic tile = ps1_art ? NameEntry::Pic{} : pic(kit, "hd/map/etc/tile.tim");
   if (!tile.set) tile = ps1_pic("ps1:tile", [&] { return ps1::parchment(kit.vfs()); });
   if (tile.set) {
-    const float tw = kCanvasW / 8.0f, th = kCanvasHeight / 7.0f;
-    for (int ty = 0; ty < 7; ++ty)
-      for (int tx = 0; tx < 8; ++tx) dl.image(tile.set, tw * static_cast<float>(tx), th * static_cast<float>(ty), tw + 1.0f, th + 1.0f, 0xFFFFFFFFu, 0.0f, 0.0f, 1.0f, 1.0f);
+    ps1::parchment_grid([&](float x, float y, float w, float h, float u0, float u1) { dl.image(tile.set, x, y, w, h, 0xFFFFFFFFu, u0, 0.0f, u1, 1.0f); },
+                        kCanvasW, kCanvasHeight, -reach, kCanvasW + 1.0f + reach);
   } else {
-    dl.rect(white_set, 0, 0, kCanvasW, kCanvasHeight, render::pack_rgba(60, 38, 18));
+    dl.rect(white_set, -reach, 0, kCanvasW + 2.0f * reach, kCanvasHeight, render::pack_rgba(60, 38, 18));
   }
   const NameEntry::Pic dial = pic(kit, "hd/menu/menutim/menutim_02.png");
   if (dial.set) {

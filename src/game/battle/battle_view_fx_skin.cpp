@@ -544,20 +544,34 @@ void BattleView::fx_vram_apply() {
   FxGpu* gpu = ready ? fx_gpu_for(fx_pack_) : nullptr;
   if (!gpu || !ctx_) return;
   for (auto& [name, model] : gpu->models) {
-    if (model->page_x < 0 || !model->gpu) continue;
+    if (!model->page || !model->gpu) continue;
     // The page and its neighbour column (the faces' page bit): 192 halfwords x 256 rows.
     const bool hit = std::any_of(moves.begin(), moves.end(), [&](const effects::FxModels::VramMove& move) {
       const int x = move.scroll ? move.x : move.dx, y = move.scroll ? move.y : move.dy;
-      return x < model->page_x + 192 && x + move.w > model->page_x && y < model->page_y + 256 && y + move.h > model->page_y;
+      return x < model->page->x + 192 && x + move.w > model->page->x && y < model->page->y + 256 && y + move.h > model->page->y;
     });
     if (!hit) continue;
-    std::vector<import::Image> pages = fx_model_pages(fx_textures_.vram, model->page_x, model->page_y, model->clut_x, model->clut_y);
+    std::vector<import::Image> pages = fx_model_pages(fx_textures_.vram, *model->page);
+    // A texture mod's tiles: the GPU pages are composed images of another size, and the copy changes which tiles the page holds.
+    const bool tiled = model->asset.source == kFxModelSource && (!model->asset.mod_textures.empty() || render::texture_registry::active());
+    const bool composed = !model->asset.mod_textures.empty();
+    bool changed = false;
     for (size_t row = 0; row < pages.size() && row < model->gpu->textures.size(); ++row)
       if (model->gpu->textures[row] && row < model->asset.textures.size() && model->asset.textures[row].width == pages[row].width &&
           model->asset.textures[row].height == pages[row].height) {
-        model->gpu->textures[row]->update(*ctx_, pages[row].pixels.data());
+        changed = changed || (tiled && model->asset.textures[row].pixels != pages[row].pixels);
+        if (!composed) model->gpu->textures[row]->update(*ctx_, pages[row].pixels.data());
         model->asset.textures[row].pixels = std::move(pages[row].pixels);
       }
+    if (!changed) continue;
+    model->asset.mod_textures.clear();
+    render::resolve_model_textures(model->asset);
+    if (!composed && model->asset.mod_textures.empty()) continue;
+    if (std::unique_ptr<render::MeshModel> fresh = meshes_->create_model(model->asset)) {
+      model->gpu = std::move(fresh);
+      if (pa_.fm == model.get()) pa_.gpu = model->gpu.get();
+      log::debug("battle fx: model {}: pages composed again after a VRAM copy", name);
+    }
   }
 }
 

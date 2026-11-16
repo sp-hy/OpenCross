@@ -529,6 +529,12 @@ struct BattleOptions {
   std::vector<int> swap_reserve;
 };
 
+// The knocked-out units when a hit pass starts, as masks of unit slots: `again` = the roster's ones (the party, an enemy whose scripted
+// death is owed), `down` = every unit with the KO bit.
+struct KoRoster {
+  u32 again = 0, down = 0;
+};
+
 class Battle {
  public:
   // Script op AF.
@@ -686,7 +692,8 @@ class Battle {
   // Colour-sealed cell: the PC's merged lo has the seal bit of the cell's colour (green 0x800, white 0x8000, black 0x80000, red 0x800000,
   // yellow 0x8000000, blue 0x80000000). Sealed cells stay on the menu, greyed, and refuse the confirm.
   bool element_sealed(int pc, int cell) const;
-  // A PC summon (element record byte 0 bit 0x40) the ring forbids: its colour is not the ring's summon colour, or no star is left.
+  // A PC summon (element record byte 0 bit 0x40) the ring forbids: its colour is not the ring's summon colour (not tested
+  // with the summon_any_ring cheat), or no star is left.
   bool summon_blocked(int pc, int cell) const;
   // The menu greys the cell: colour-sealed or a forbidden summon.
   bool element_greyed(int pc, int cell) const { return element_sealed(pc, cell) || summon_blocked(pc, cell); }
@@ -775,6 +782,8 @@ class Battle {
   // Cheats tab: the rules' bypasses, all off by default; the host pushes the live set every update.
   struct Cheats {
     bool god_mode = false, boost = false, max_stamina = false, free_elements = false, always_hit = false, always_loot = false, instant_growth = false, shared_growth = false;
+    // summon_any_ring: a PC summon does not need the ring's colour (a star still does). summon_repeat: a PC summon cast leaves its cell unused.
+    bool summon_any_ring = false, summon_repeat = false;
   };
   void set_cheats(const Cheats& cheats) {
     if (!versus_) cheats_ = cheats;
@@ -865,11 +874,11 @@ class Battle {
   bool colour_gated(int actor, int target, int element_id) const;
   void kill(int unit);
   void knock_out_again(int unit);
-  // The units in the roster (the party, an enemy whose scripted death is owed) that have the KO bit, as a mask of unit slots.
-  u32 knocked_out_roster() const;
-  // The end of a hit pass (a weapon hit or an element cast): every unit of `before` that still has the KO bit is knocked out again, a
-  // target or not; a member knocked out by its save record that the action did not hit is noted on its last event.
-  void knock_out_rest(u32 before);
+  KoRoster knocked_out_roster() const;
+  // The end of a hit pass (a weapon hit or an element cast): every unit of `before.again` that still has the KO bit is knocked out again,
+  // a target or not; a member knocked out by its save record that the action did not hit is noted on its last event. A unit the pass
+  // gave the KO bit as a status (an instant death: it was not in `before.down` and still has HP) is killed as by damage.
+  void knock_out_rest(const KoRoster& before);
   void cast_element_targets(int actor, int element_id, int row, int target, u32 targets);
   void poison_kill(int unit);
   // Runs the kill script (slot 3) of a dead enemy once and parks the death cast it queued.
@@ -972,8 +981,8 @@ class Battle {
   int summon_colour_ = -1;
   int ring_summon_colour_ = -1;
   int action_id_ = 0, hit_counter_ = 0;
-  // The roster's KO-bit units when a Debug-tab cast began (begin_external_action).
-  u32 external_ko_ = 0;
+  // The KO-bit units when a Debug-tab cast began (begin_external_action).
+  KoRoster external_ko_;
   // The executing scripted entry's / dev cast's caster group (ActionEvent::group).
   std::array<u8, 6> cur_group_{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   // run_plan: the scripted entry being executed.

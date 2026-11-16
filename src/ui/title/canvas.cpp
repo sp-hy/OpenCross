@@ -1,7 +1,10 @@
 #include "ui/title/canvas.h"
 
+#include <cmath>
+
 #include "core/log.h"
 #include "render/texture.h"
+#include "ui/menu/ps1_art.h"
 
 namespace oc::ui {
 
@@ -36,7 +39,20 @@ void DrawList::flush(render::SpriteBatch& sprites, const render::Frame& frame, c
   const Ps1Display* display = display_;
   lowres_ = nullptr, display_ = nullptr;
   render::Frame target_frame;
-  if (lowres && display && lowres->begin(frame, *display, text_, target_frame)) {
+  if (lowres && display && canvas.cols > 0.0f) {
+    Canvas target;
+    target.ox = 4.0f * canvas.cols;
+    target.vw = kCanvasW + 2.0f * target.ox;
+    Ps1Display widened = *display;
+    widened.w = static_cast<u32>(std::lround(static_cast<float>(widened.w) * target.vw / kCanvasW));
+    if (lowres->begin(frame, widened, text_, target_frame, target.vw, kCanvasHeight)) {
+      replay(sprites, target_frame, target, resume);
+      const render::Letterbox letterbox = render::Letterbox::wide(canvas.vw, canvas.vh, canvas.cols);
+      const render::Letterbox::Rect target_rect{letterbox.left(), letterbox.oy, letterbox.width(), render::kLayerH * letterbox.scale};
+      lowres->end(frame, canvas.vw, canvas.vh, &target_rect);
+      return;
+    }
+  } else if (lowres && display && lowres->begin(frame, *display, text_, target_frame)) {
     replay(sprites, target_frame, Canvas{}, resume);
     lowres->end(frame, canvas.vw, canvas.vh);
     return;
@@ -49,6 +65,7 @@ void UiKit::request_lowres(DrawList& dl, const Ps1Display& display) {
 }
 
 void DrawList::replay(render::SpriteBatch& sprites, const render::Frame& frame, const Canvas& canvas, bool resume) {
+  if (canvas.clip) frame.set_scissor(ps1::picture_clip(frame, canvas.vw, canvas.vh, kCanvasW, kCanvasHeight));
   sprites.begin(frame, canvas.vw, canvas.vh, resume);
   for (const Op& op : ops_) {
     switch (op.kind) {
@@ -63,6 +80,7 @@ void DrawList::replay(render::SpriteBatch& sprites, const render::Frame& frame, 
     }
   }
   sprites.end();
+  if (canvas.clip) frame.set_scissor(frame.full());
   ops_.clear();
 }
 

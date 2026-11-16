@@ -1,0 +1,12 @@
+# The same toggles as feature_icons with the icons hidden: none is drawn, and encounters off still wins the field battle
+# (opa_b02f entrance 1: the monster touches the player at once; variable 0x32 becomes 2, the fled result).
+0 wait idle 600
+- wait 30
+- assert icons 0
+- set var 32 5
+- load opa_b02f 1
+- wait 120
+- assert icons 0
+- assert battle inactive
+- assert var 32 2
+- quit

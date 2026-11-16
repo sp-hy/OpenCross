@@ -31,6 +31,8 @@ class FeatureIcons {
   void show_autosave() { autosave_ = 120.0; }
   // Draws over the finished frame (inside no begin / end). The atlas of `lang` is loaded on first use.
   void draw(const render::Frame& frame, float vw, float vh, const Active& active, import::Lang lang);
+  // Toggle icons the last draw put on screen (the AUTO SAVE strip is not counted).
+  int shown() const { return shown_; }
 
  private:
   void load(import::Lang lang);
@@ -42,6 +44,7 @@ class FeatureIcons {
   render::Texture atlas_;
   render::TexRef atlas_set_ = {};
   int loaded_lang_ = -1;
+  int shown_ = 0;
   // The AUTO SAVE strip's remaining 60 Hz frames, run down by the real time between draws.
   double autosave_ = 0.0;
   std::chrono::steady_clock::time_point last_{};

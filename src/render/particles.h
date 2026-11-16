@@ -36,6 +36,11 @@ class ParticleBatch {
   // The same with one modulation colour per corner (Gouraud: the bespoke overlays' GT3 / GT4 packets).
   void quad(TexRef texture, int blend, const float x[4], const float y[4], const float u[4], const float v[4], const u8 rgb[4][3],
             float depth);
+  // Nearest texel pick for the quads that follow (the room meshes' faces): their u / v are packet texel coordinates (texel k is centred on k) and
+  // `texels` places them in the texture: the normalised position of the texture page origin (0, 1) and the size of one texel (2, 3). The fragment
+  // shader reads texel floor(u + 1/2), so a face shows the same texels from a raw atlas and from a composed object image. All 0 (the state after
+  // begin()) = normalised u / v.
+  void set_texels(const std::array<float, 4>& texels);
   void end();
 
   // [Enhancements] FullPrecisionEffects: modulate without the half 5-bit level the PS1 loses to rounding; set once per frame by the host.
@@ -43,6 +48,8 @@ class ParticleBatch {
 
  private:
   void flush();
+  // The fragment uniforms: the modulation mode and set_texels().
+  void push_fragment();
 
   GpuContext* ctx_ = nullptr;
   SDL_GPUShader* vs_ = nullptr;
@@ -58,6 +65,7 @@ class ParticleBatch {
   // Frame::serial of the last begin() (a change = a new frame).
   u64 last_serial_ = ~0ull;
   float push_[4]{};
+  std::array<float, 4> texels_{};
   bool overflow_logged_ = false;
   static inline bool full_precision_ = false;
 };

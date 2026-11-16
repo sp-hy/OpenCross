@@ -14,12 +14,17 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 1. Bugs (behaviour)
 
+
 ## 2. Fidelity gaps (not modelled)
 
+
+
 ## 3. Open comparisons (need a capture against the PS1 or RDE)
+
 
 
 ## 4. Code hygiene
 
 ## 5. Tests and tooling
+
 

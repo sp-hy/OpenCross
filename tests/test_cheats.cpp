@@ -32,6 +32,9 @@ int main() {
   const platform::Cheats& cheats = config.cheats;
   CHECK(!cheats.no_encounters && !cheats.battle_boost && !cheats.auto_battle && !cheats.god_mode && !cheats.no_clip && !cheats.max_stamina && !cheats.free_elements &&
         !cheats.always_hit && !cheats.max_money && !cheats.shop_all_elements && !cheats.shop_all_weapons && !cheats.run_speed && !cheats.always_loot && !cheats.instant_growth && !cheats.no_craft_cost && !cheats.shared_growth);
+  CHECK(!cheats.summon_any_time && !cheats.more_summons && !config.hide_feature_icons);
+  CHECK(!game::battle_cheats().summon_any_ring && !game::battle_cheats().summon_repeat);
+  config.cheats.more_summons = config.hide_feature_icons = true;
   config.cheats.no_encounters = config.cheats.no_clip = config.cheats.always_loot = config.cheats.no_craft_cost = config.cheats.shop_all_weapons = config.cheats.shared_growth = true;
   const std::filesystem::path path = std::filesystem::temp_directory_path() / "oc_test_cheats.ini";
   CHECK(config.save(path));
@@ -40,6 +43,11 @@ int main() {
   std::filesystem::remove(path);
   CHECK(reloaded.cheats.no_clip && reloaded.cheats.always_loot && reloaded.cheats.no_craft_cost && reloaded.cheats.shop_all_weapons && reloaded.cheats.shared_growth);
   CHECK(!reloaded.cheats.god_mode && !reloaded.cheats.max_money && !reloaded.cheats.instant_growth);
+  CHECK(reloaded.cheats.more_summons && !reloaded.cheats.summon_any_time && reloaded.hide_feature_icons);
+  // The summon toggles reach the battle rules through the bound set.
+  platform::bind_cheats(&reloaded.cheats);
+  CHECK(game::battle_cheats().summon_repeat && !game::battle_cheats().summon_any_ring);
+  platform::bind_cheats(nullptr);
   // RDE's five play-time toggles are never written; a hand-written (or --config) ini still sets them, and clear_session_toggles
   // switches them off as every launch with the player's ini does.
   CHECK(!reloaded.cheats.no_encounters);

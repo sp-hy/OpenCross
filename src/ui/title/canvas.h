@@ -21,6 +21,11 @@ constexpr float kCanvasW = 1280.0f;
 
 struct Canvas {
   float scale = 1, ox = 0, oy = 0, vw = kCanvasW, vh = kCanvasHeight;
+  // Widescreen (wide()): the layer columns per side the view shows beyond the 4:3 canvas, and the canvas units that is (the window's
+  // widened frame: canvas x from -reach to kCanvasW + reach). Both 0 for the 4:3 fit.
+  float cols = 0, reach = 0;
+  // The draws are cut at the 4:3 picture's sides (ps1::picture_clip): wide() without columns.
+  bool clip = false;
   // The shared 4:3 fit of the canvas into a vw x vh view (render::canvas_fit).
   static Canvas fit(float vw, float vh) {
     Canvas canvas;
@@ -30,6 +35,25 @@ struct Canvas {
     canvas.oy = fit.oy;
     canvas.vw = vw;
     canvas.vh = vh;
+    return canvas;
+  }
+  // [Video] Widescreen: the canvas at the zoom and origin of the frame widened by `columns` layer columns per side (a quarter of the
+  // layer-column scale per canvas unit); when 0, fit() cut at the picture's sides.
+  static Canvas wide(float vw, float vh, float columns) {
+    if (columns <= 0.0f) {
+      Canvas canvas = fit(vw, vh);
+      canvas.clip = true;
+      return canvas;
+    }
+    Canvas canvas;
+    const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, columns);
+    canvas.scale = letterbox.scale * 0.25f;
+    canvas.ox = letterbox.ox;
+    canvas.oy = letterbox.oy;
+    canvas.vw = vw;
+    canvas.vh = vh;
+    canvas.cols = columns;
+    canvas.reach = -4.0f * letterbox.x0;
     return canvas;
   }
 };
@@ -53,7 +77,8 @@ class DrawList {
   float measure(render::FaceId face, std::u32string_view str, float scale) const { return text_->measure(face, str, scale); }
   void clear() { ops_.clear(); }
   // [Video] Ps1ResUi, any art mode: the next flush() replays the list into `lowres`'s target of the PS1 display `display` and
-  // scales it up into the canvas rectangle (one request per flush; screens set it while they record).
+  // scales it up into the canvas rectangle (one request per flush; screens set it while they record). On a widened canvas
+  // (Canvas::wide) the target grows by the same share and is shown in the window rectangle of the widened frame.
   void set_lowres(LowRes* lowres, const Ps1Display* display) { lowres_ = lowres, display_ = display; }
   void flush(render::SpriteBatch& sprites, const render::Frame& frame, const Canvas& canvas, bool resume);
 

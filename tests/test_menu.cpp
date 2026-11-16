@@ -209,6 +209,34 @@ void test_grid() {
   CHECK(game_state.remove(0, 0, 4) == Why::Ok && game_state.cell_element(0, 0, 4) == 0 && game_state.element_count(3) == stock_before);
 }
 
+// A summon (record byte 0 bit 0x40) is placed like any element: the one copy leaves the stock and a second placement is refused.
+// With the "More than one summon" cheat a placement keeps the stock copy, so the summon goes into further cells; an ordinary
+// element and the automatic fill still take their copy, and every other check stays.
+void test_grid_summon_copies() {
+  Fixture fixture;
+  GameState& game_state = fixture.gs;
+  fixture.el(8, 1, 0x08, 0x77, 0x41, 0, 0x80);
+  fixture.stock(8, 1);
+  fixture.stock(1, 1);
+  CHECK(fixture.rules.el_summon(8) && !fixture.rules.el_summon(1));
+  CHECK(game_state.place(0, 0, 2, 8) == Why::Ok && game_state.element_count(8) == 0);
+  CHECK(game_state.place(0, 0, 3, 8) == Why::NoStock);
+  CHECK(game_state.remove(0, 0, 2) == Why::Ok && game_state.element_count(8) == 1);
+
+  CHECK(game_state.place(0, 0, 2, 8, true) == Why::Ok && game_state.element_count(8) == 1);
+  CHECK(game_state.place(0, 0, 3, 8, true) == Why::Ok && game_state.element_count(8) == 1);
+  CHECK(game_state.copies_placed(0, 8) == 2);
+  CHECK(game_state.place(0, 0, 4, 1, true) == Why::Ok && game_state.element_count(1) == 0);
+  // The innate colour, the lock and the stock test are not lifted.
+  game_state.slot.chars[1].unlocked[0] = 0x3C;
+  CHECK(game_state.place(1, 0, 2, 8, true) == Why::NotEligible);
+  CHECK(game_state.place(0, 0, 6, 8, true) == Why::Locked);
+  CHECK(game_state.remove(0, 0, 2) == Why::Ok && game_state.remove(0, 0, 3) == Why::Ok && game_state.element_count(8) == 3);
+  for (auto& stack : game_state.slot.elements)
+    if (stack.id == 8) stack.id = 0, stack.qty = 0;
+  CHECK(game_state.place(0, 0, 2, 8, true) == Why::NoStock);
+}
+
 void test_autofill() {
   Fixture fixture;
   GameState& game_state = fixture.gs;
@@ -639,6 +667,7 @@ int main() {
   test_ps1_art();
   test_menu_camera_blend();
   test_grid();
+  test_grid_summon_copies();
   test_autofill();
   test_autofill_order();
   test_sort();

@@ -4071,6 +4071,92 @@ void test_scripted_hp_write_runs_kill_script() {
   CHECK_EQ(brain.kills, 1);
 }
 
+// An instant death: the element's status roll lands the KO bit and leaves the HP alone; the end of the hit pass then kills the unit as
+// damage does (HP 0, a PC's inflicted statuses and guard, an enemy's kill script) and its event shows HP 0. A target the roll missed
+// takes the damage; an invincible unit takes no KO bit.
+struct KillCountBrain final : EnemyBrain {
+  int kills = 0;
+  EnemyAction choose(const Battle&, int, Rng&) override {
+    EnemyAction action;
+    action.kind = EnemyAction::Kind::None;
+    return action;
+  }
+  void on_killed(Battle&, int, Rng&, std::vector<EnemyAction>&) override { ++kills; }
+};
+
+void test_instant_death_zeroes_hp() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  data::ElemRec& hole = tables.elements[4];
+  hole = data::ElemRec{};
+  hole.raw[6] = 1, hole.raw[7] = 15, hole.raw[8] = 12, hole.raw[0xA] = 20, hole.raw[0x18] = 0x80;
+  tables.scenes[0].raw[3] = 2;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  KillCountBrain brain;
+  Battle battle{tables, rng, brain};
+  for (int k = 0; k < 2; ++k) {
+    rng.push(0);
+    rng.push(100);
+  }
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  battle.unit_mut(1).lo |= st::kPoison;
+  battle.unit_mut(1).guard = true;
+  battle.begin_external_action();
+  rng.push(1);
+  battle.do_element(3, 4, 0, 1);
+  rng.push(99);
+  battle.do_element(3, 4, 0, 2);
+  CHECK((battle.unit(1).lo & st::kKO) != 0);
+  CHECK_EQ(battle.unit(1).hp, 50);
+  battle.finish_external_action();
+  const Unit& killed = battle.unit(1);
+  CHECK((killed.lo & st::kKO) != 0);
+  CHECK_EQ(killed.hp, 0);
+  CHECK((killed.lo & st::kPoison) == 0);
+  CHECK(!killed.guard);
+  CHECK(!killed.alive());
+  CHECK((battle.unit(2).lo & st::kKO) == 0);
+  CHECK(battle.unit(2).hp > 0);
+  bool shown = false;
+  for (const ActionEvent& event : battle.events()) {
+    if (event.target != 1) continue;
+    shown = true;
+    CHECK(event.ko);
+    CHECK_EQ(event.hp_before, 50);
+    CHECK_EQ(event.hp_after, 0);
+  }
+  CHECK(shown);
+  CHECK(battle.outcome() == Outcome::Ongoing);
+
+  battle.begin_external_action();
+  rng.push(1);
+  battle.do_element(0, 4, 0, 3);
+  battle.finish_external_action();
+  CHECK((battle.unit(3).lo & st::kKO) != 0);
+  CHECK_EQ(battle.unit(3).hp, 0);
+  CHECK_EQ(brain.kills, 1);
+  CHECK(battle.outcome() == Outcome::Ongoing);
+
+  battle.set_invincible(true, false);
+  battle.begin_external_action();
+  rng.push(1);
+  battle.do_element(4, 4, 0, 0);
+  battle.finish_external_action();
+  CHECK((battle.unit(0).lo & st::kKO) == 0);
+  CHECK(battle.unit(0).hp > 0);
+  battle.set_invincible(false, false);
+
+  battle.begin_external_action();
+  rng.push(1);
+  battle.do_element(4, 4, 0, 0);
+  rng.push(1);
+  battle.do_element(4, 4, 0, 2);
+  battle.finish_external_action();
+  CHECK_EQ(battle.unit(0).hp, 0);
+  CHECK_EQ(battle.unit(2).hp, 0);
+  CHECK(battle.outcome() == Outcome::Wiped);
+}
+
 // A kill script that queues a death cast and then forces a result (the Time Devourer's slot 3: 67, A4, 83): the code waits for the cast,
 // also when the killing blow is a weapon command, whose end test runs right after the hit.
 struct DeathCastBrain final : EnemyBrain {
@@ -5867,6 +5953,69 @@ void test_summon_gate() {
   CHECK_EQ(state.slot.head[save::head::kStarsTotal], 12);
 }
 
+// The summon cheats. summon_any_ring: the ring is not tested, so the summon is ungreyed and castable under a mixed ring; the cast
+// still spends a star and uses its cell, and no star left still forbids it. summon_repeat: the cast leaves its cell unused, so it
+// casts again for the next star. Pushing the all-off set changes nothing, the state hash included.
+void test_summon_cheats() {
+  data::GameTables tables = make_tables();
+  tables.elements.resize(5);
+  data::ElemRec& summon = tables.elements[4];
+  summon.raw[0] = 0x41, summon.raw[1] = 1, summon.raw[5] = 0x80, summon.raw[6] = 1, summon.raw[8] = 1, summon.raw[0xC] = 20;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  PartyMember caller = make_member(0, "A");
+  caller.cells[0] = 0x4004;
+  caller.cells[1] = 0x4001;
+  caller.unlocked[1] = true;
+  BattleOptions options;
+  options.growth.star = 12;
+  options.growth.counter = 2;
+  CHECK(battle.start({caller, make_member(1, "B"), make_member(2, "C")}, 0, options));
+  const auto ready = [&] {
+    battle.unit_mut(0).gauge = 2;
+    battle.unit_mut(0).stamina = 70;
+    battle.unit_mut(3).hp = battle.unit(3).max_hp;
+  };
+  ready();
+  battle.set_ring({5, 3, 5});
+  const u64 plain = battle.state_hash();
+  battle.set_cheats({});
+  CHECK_EQ(battle.state_hash(), plain);
+  CHECK(battle.summon_blocked(0, 0) && battle.element_greyed(0, 0) && !battle.element_usable(0, 0));
+  Command cast;
+  cast.kind = Command::Kind::Element;
+  cast.actor = 0;
+  cast.cell = 0;
+  CHECK(!battle.validate(cast));
+
+  battle.set_cheats({.summon_any_ring = true});
+  CHECK(battle.state_hash() != plain);
+  CHECK(!battle.summon_blocked(0, 0) && !battle.element_greyed(0, 0) && battle.element_usable(0, 0));
+  std::string why;
+  CHECK(battle.apply(cast, &why));
+  CHECK_EQ(battle.growth().counter, 1);
+  CHECK(battle.unit(0).used[0]);
+  ready();
+  CHECK(!battle.summon_blocked(0, 0) && !battle.element_usable(0, 0));
+
+  battle.unit_mut(0).used[0] = false;
+  battle.set_cheats({.summon_any_ring = true, .summon_repeat = true});
+  CHECK(battle.apply(cast, &why));
+  CHECK_EQ(battle.growth().counter, 0);
+  CHECK(!battle.unit(0).used[0]);
+  ready();
+  CHECK(battle.summon_blocked(0, 0) && battle.element_greyed(0, 0) && !battle.element_usable(0, 0));
+
+  // summon_repeat alone keeps the ring test, and an ordinary element still uses its cell.
+  battle.set_cheats({.summon_repeat = true});
+  battle.set_ring({5, 3, 5});
+  CHECK(battle.summon_blocked(0, 0));
+  cast.cell = 1;
+  CHECK(battle.apply(cast, &why));
+  CHECK(battle.unit(0).used[1]);
+}
+
 // Every record has the 48-cell shape 03FC x3, 03F8, 01F0, 01E0 x3 (row 0 = columns 2..9, row 4 = columns 4..8) and growth column 0.
 void give_every_record_a_grid(data::GameTables& tables) {
   auto& char_set = tables.char_sets["char"];
@@ -6535,7 +6684,7 @@ void test_versus_state_hash() {
   CHECK(two.start_versus(versus_side({make_member(0, "Other")}), versus_side({make_member(3, "Names")}), -1));
   CHECK_EQ(one.state_hash(), two.state_hash());
   Battle::Cheats cheats;
-  cheats.god_mode = cheats.max_stamina = true;
+  cheats.god_mode = cheats.max_stamina = cheats.summon_any_ring = cheats.summon_repeat = true;
   one.set_cheats(cheats);
   one.set_invincible(true, true);
   CHECK_EQ(one.state_hash(), two.state_hash());
@@ -6796,6 +6945,7 @@ int main() {
   test_queued_cast_targets();
   test_trap_hud();
   test_summon_gate();
+  test_summon_cheats();
   test_trap_needs_colour();
   test_pilfer();
   test_forced_victory_pays_defeated_only();
@@ -6820,6 +6970,7 @@ int main() {
   test_tutorial_enemy_undying();
   test_end_rules();
   test_scripted_hp_write_runs_kill_script();
+  test_instant_death_zeroes_hp();
   test_forced_result_waits_for_death_cast();
   test_hidden_units();
   test_hidden_pair_reveal_one();

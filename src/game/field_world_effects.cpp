@@ -485,6 +485,8 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
     u32 order;
     float u[4] = {0, 1, 0, 1}, v[4] = {0, 0, 1, 1};
     render::TexRef set;
+    // A room mesh face: its texture page origin and texel size in `set`, u / v are then packet texel coordinates; all 0 = normalised u / v.
+    std::array<float, 4> texels{};
   };
   std::vector<Tri> tris;
   const render::Letterbox lb = view_.letterbox(vw, vh);
@@ -502,8 +504,10 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
           Tri tri{};
           std::copy(std::begin(room_tri.x), std::end(room_tri.x), tri.x);
           std::copy(std::begin(room_tri.y), std::end(room_tri.y), tri.y);
-          std::copy(std::begin(room_tri.u), std::end(room_tri.u), tri.u);
-          std::copy(std::begin(room_tri.v), std::end(room_tri.v), tri.v);
+          const bool by_texel = room_tri.set && room_tri.texels[2] > 0.0f;
+          std::copy(std::begin(by_texel ? room_tri.texel_u : room_tri.u), std::end(by_texel ? room_tri.texel_u : room_tri.u), tri.u);
+          std::copy(std::begin(by_texel ? room_tri.texel_v : room_tri.v), std::end(by_texel ? room_tri.texel_v : room_tri.v), tri.v);
+          if (by_texel) std::copy(std::begin(room_tri.texels), std::end(room_tri.texels), tri.texels.begin());
           for (int corner = 0; corner < 4; ++corner)
             for (int channel = 0; channel < 3; ++channel) tri.rgb[corner][channel] = room_tri.rgb[corner][channel];
           tri.blend = room_tri.blend;
@@ -632,10 +636,12 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
                      [](const Item& lhs, const Item& rhs) { return lhs.slot != rhs.slot ? lhs.slot > rhs.slot : lhs.order > rhs.order; });
     for (const Item& item : items) {
       if (!item.tri) {
+        particles_.set_texels({});
         gpu_fx_.draw_quad(particles_, quads[item.idx], lb);
         continue;
       }
       const Tri& tri = tris[item.idx];
+      particles_.set_texels(tri.texels);
       particles_.quad(tri.set ? tri.set : white_set_, tri.blend, tri.x, tri.y, tri.u, tri.v, tri.rgb,
                       static_cast<float>(tri.slot) / render::kDepthRange);
     }

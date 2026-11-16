@@ -1,0 +1,24 @@
+# hid_a08f entrance 0 is the head of a ladder (walk-mesh flags 0x204000). The party walks down it. When the leader has stepped off
+# the foot, the trail entry a follower aims at lies off the ladder on one tick and on it on the next, and the follower takes the
+# entry's tile each time. The stair clip is chosen from the tile once per frame of two ticks, so follower 1 does not change clip
+# with every tick: from the leader's last steps on the ladder until all three walk on the floor it changes once or twice, and
+# follower 2, whose entries come less evenly, a few times.
+0 wait idle
+- request party_add 1
+- request party_add 2
+- load hid_a08f 0
+- wait room hid_a08f 300
+- wait idle 300
+- wait 60
+- key down down
+- wait 250
+- assert anim p1 5
+- assert anim p2 5
+- mark anim
+- wait 150
+- key up down
+- assert anim p1 3
+- assert anim p2 3
+- assert changes p1 2
+- assert changes p2 8
+- quit

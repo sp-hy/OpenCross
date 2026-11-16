@@ -1,0 +1,13 @@
+# Run speed cheat with the controls taken: the cheat only doubles the party's own pad movement, so a scene is not touched. fin_05
+# script-walks the leader's entity and Harle (entity 6); message 6 opens 1594 ticks after the load and both stand on the spots of
+# the normal-speed run, tick for tick.
+0 wait flow field 600
+- load fin_05
+- mark time
+- wait flow field 600
+- mash until message 6 4000
+- assert elapsed 1594 1594
+- wait 60
+- assert near 6 1767 2533 1
+- assert near player 1763 2860 1
+- quit

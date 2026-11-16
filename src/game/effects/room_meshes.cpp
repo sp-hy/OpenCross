@@ -199,6 +199,19 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
       tri.blend = blend;
       tri.set = set;
       const bool textured = sm.texture >= 0 && part->vertices[idx[0]].uv_scale[0] > 0.0f;
+      if (textured) {
+        const assets::StageVertex& first = part->vertices[idx[0]];
+        tri.texels[2] = first.uv_scale[0];
+        tri.texels[3] = first.uv_scale[1];
+        tri.texels[0] = first.uv[0] - first.uv_raw[0] * tri.texels[2];
+        tri.texels[1] = (1.0f - first.uv[1]) - first.uv_raw[1] * tri.texels[3];
+        for (int corner = 0; corner < 3; ++corner) {
+          tri.texel_u[corner] = part->vertices[idx[corner]].uv_raw[0];
+          tri.texel_v[corner] = part->vertices[idx[corner]].uv_raw[1];
+        }
+        tri.texel_u[3] = tri.texel_u[2];
+        tri.texel_v[3] = tri.texel_v[2];
+      }
       if (!scroll || !textured) {
         tri.x[3] = tri.x[2];
         tri.y[3] = tri.y[2];
@@ -260,11 +273,15 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
               if (bound[1]) texel[1] = std::clamp(texel[1], off[1] + 0.5f, off[1] + win[1] - 0.5f);
               piece.u[corner] = page[0][0] + texel[0] * scale_u;
               piece.v[corner] = page[0][1] + texel[1] * scale_v;
+              piece.texel_u[corner] = texel[0];
+              piece.texel_v[corner] = texel[1];
             }
             piece.x[3] = piece.x[2];
             piece.y[3] = piece.y[2];
             piece.u[3] = piece.u[2];
             piece.v[3] = piece.v[2];
+            piece.texel_u[3] = piece.texel_u[2];
+            piece.texel_v[3] = piece.texel_v[2];
             for (int ch = 0; ch < 3; ++ch) piece.rgb[3][ch] = piece.rgb[2][ch];
             out.push_back(piece);
             ++added;

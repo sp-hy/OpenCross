@@ -15,7 +15,7 @@
 
 namespace oc::game {
 
-// kDumpRaw (debug): also the raw (mode, CLUT) atlases of stages / title / room meshes under raw/. kDumpModelSource: the models are written
+// kDumpRaw (debug): also the raw (mode, CLUT) atlases of stages / title / room meshes / effect meshes under raw/. kDumpModelSource: the models are written
 // at their 1x size (the art RDE's 4x images were upscaled from) instead of as RDE's 4x images, under the same names.
 enum DumpSet : unsigned {
   kDumpStages = 1, kDumpTitle = 2, kDumpEffects = 4, kDumpRooms = 8, kDumpModels = 16, kDumpRaw = 32, kDumpWeapons = 64, kDumpModelSource = 128,
@@ -43,11 +43,12 @@ struct TextureDumpProgress {
   mutable std::mutex mutex_;
   std::string phase_, summary_;
   std::vector<std::pair<std::string, u32>> report_;
-  friend int run_texture_dump(const std::filesystem::path&, unsigned, TextureDumpProgress&);
+  friend int run_texture_dump(const std::filesystem::path&, unsigned, TextureDumpProgress&, const std::string&);
 };
 
-// Blocking. Returns 0 when every phase finished (items that fail to load are skipped and counted in the summary).
-int run_texture_dump(const std::filesystem::path& game_dir, unsigned what, TextureDumpProgress& progress);
+// Blocking. Returns 0 when every phase finished (items that fail to load are skipped and counted in the summary). `effect_packs` not
+// empty: only the battle effect packs whose file path contains it (their sprite sheets, mesh tiles and models), nothing else.
+int run_texture_dump(const std::filesystem::path& game_dir, unsigned what, TextureDumpProgress& progress, const std::string& effect_packs = {});
 
 class TextureDumpJob {
  public:

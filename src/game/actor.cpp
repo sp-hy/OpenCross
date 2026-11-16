@@ -468,6 +468,7 @@ void Actor::copy_pose(const Actor& from) {
   cur_.yaw = from.cur_.yaw;
   tri_ = from.tri_;
   tile_flags_ = from.tile_flags_;
+  stair_flags_ = from.stair_flags_;
   facing_ = from.facing_;
   prev_ = cur_;
   reset_smooth();
@@ -580,6 +581,7 @@ void Actor::update_ground_tilt(const WalkMesh& walk, bool enabled, bool snap) {
 
 void Actor::set_tile(const WalkMesh& walk, u32 tile_flags) {
   tile_flags_ = tile_flags;
+  if (stair_latch) stair_flags_ = tile_flags & 0xC000u;
   if (!(tile_flags & 0xC000u)) return;
   float nx, nz;
   if (!walk.normal_xz(tri_, nx, nz) || std::hypot(nx, nz) < 1e-3f) return;
@@ -699,18 +701,21 @@ void Actor::turn_step() {
   cur_.yaw = y < 0 ? y + 4096.0f : y;
 }
 
-void Actor::advance_anim(bool loop_current) {
+void Actor::advance_anim(bool loop_current, bool repeat) {
   // Animation: 0.25 keyframe per tick. The cross-fade source keeps playing (looping) only for a blend word with bit 0x8000; otherwise
   // it holds its time. On a stair tile the step follows the whole-unit height instead: forwards while it falls (climbing), backwards
   // while it rises, none while it stays.
   float rate = clip_reverse_ ? -anim_rate : anim_rate;
-  if (tile_flags_ & 0xC000u) {
-    const int whole_y = static_cast<int>(std::floor(cur_.y));
-    rate = whole_y == stair_prev_y_ ? 0.0f : whole_y < stair_prev_y_ ? anim_rate : -anim_rate;
-    stair_prev_y_ = whole_y;
+  if (stair_flags_) {
+    if (!repeat) {
+      const int whole_y = static_cast<int>(std::floor(cur_.y));
+      stair_dir_ = whole_y == stair_prev_y_ ? 0.0f : whole_y < stair_prev_y_ ? 1.0f : -1.0f;
+      stair_prev_y_ = whole_y;
+    }
+    rate = stair_dir_ * anim_rate;
   }
   auto advance = [&](int clip, float& tp, float& tc, bool loop) {
-    tp = tc;
+    if (!repeat) tp = tc;
     if (clip < 0) return;
     const float len = clip_length(clip);
     tc += kKeyframesPerTick * rate;
@@ -738,6 +743,7 @@ void Actor::advance_anim(bool loop_current) {
   };
   advance(clip_, t_prev_, t_cur_, loop_current);
   if (from_runs_) advance(from_clip_, from_prev_, from_cur_, true);
+  if (repeat) return;
   fade_prev_ = fade_cur_;
   if (fade_cur_ < fade_len_) ++fade_cur_;
 }
@@ -904,13 +910,17 @@ void Actor::head_step() {
 
 void Actor::step_visual(bool moving, bool run) {
   moving_ = moving;
+  const int steps = anim_steps;
+  anim_steps = 1;
   if (!inactive_) pick_clip(moving, run);
   // An off-screen entity neither runs its sequence, nor advances its clip, nor builds the head turn (see set_culled).
   if (culled_) return;
   // The sequence runs once per frame, before the playback step; its var 0 bit 0 ORs into the anim-done bit.
-  run_seq();
-  if (seq_mode_ && (vars_[kVarAnimDone] & 1)) busy_ = false;
-  advance_anim(seq_mode_ ? clip_loop_ : clip_loops_);
+  for (int step = 0; step < steps; ++step) {
+    run_seq();
+    if (seq_mode_ && (vars_[kVarAnimDone] & 1)) busy_ = false;
+    advance_anim(seq_mode_ ? clip_loop_ : clip_loops_, step > 0);
+  }
   // The head joint's callback runs inside the pose build, after the clip time moved.
   head_step();
 }
@@ -945,13 +955,13 @@ void Actor::pick_clip(bool moving, bool run) {
     want = slot_anim_[slot];
     // The stand id becomes the current id: a later SET_WALK_ANIMATION of the stand slot does not change the clip of a standing entity
     // until it walks, is shown again or a script asks for a clip.
-    if (!auto_idle && !(tile_flags_ & 0xC000u)) {
+    if (!auto_idle && !stair_flags_) {
       requested_ = want;
       requested_loops_ = true;
     }
   }
   // A stair / ladder tile (0xC000) forces the stairs-down slot (flag 0x8000 set) or the stairs-up slot, moving or standing.
-  if ((tile_flags_ & 0xC000u) && requested_ < 0) want = slot_anim_[(tile_flags_ & 0x8000u) ? kSlotStairsDown : kSlotStairsUp];
+  if (stair_flags_ && requested_ < 0) want = slot_anim_[(stair_flags_ & 0x8000u) ? kSlotStairsDown : kSlotStairsUp];
   // A new id is submitted only when it differs from the last one and, if it is the stand id, only once
   // the running cross-fade is over. That is how short
   // scripted hops (a walk that arrives after a tick or two, then waits) keep the walk clip instead of flicking between walk and stand.
@@ -962,11 +972,15 @@ void Actor::pick_clip(bool moving, bool run) {
 
 void Actor::tick(const WalkMesh& walk, int heading, bool run) {
   prev_ = cur_;
+  run = pad_step(walk, heading, run);
+  step_visual(heading != kNoHeading, run);
+}
+
+bool Actor::pad_step(const WalkMesh& walk, int heading, bool run) {
   pad_step_[0] = pad_step_[1] = 0.0f;
-  const bool moving = heading != kNoHeading;
   // No running on stairs / ladders / slide tiles.
   if ((tile_flags_ & 0xC800u) && !force_run) run = false;
-  if (moving && (tri_ >= 0 || noclip)) {
+  if (heading != kNoHeading && (tri_ >= 0 || noclip)) {
     const float heading_rad = static_cast<float>(heading & 0xFFF) * kUnitsToRad;
     // 16.16 velocity -> units; a tile with flag 0x1000 halves the velocity.
     float step = static_cast<float>(run ? speed * 2 + (speed >> 1) : speed) / 16.0f;
@@ -984,7 +998,7 @@ void Actor::tick(const WalkMesh& walk, int heading, bool run) {
     }
   }
   if (tri_ >= 0) set_tile(walk, walk.flags(tri_));
-  step_visual(moving, run);
+  return run;
 }
 
 void Actor::end_tick() {

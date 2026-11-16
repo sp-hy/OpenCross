@@ -100,6 +100,8 @@ class Vfs {
   std::optional<OverlayFile> texture_file(std::string_view canonical_path) const;
   // The first (by path) active mod texture whose canonical path starts with `prefix` and ends with `suffix` (tile replacements are matched by their hash only).
   std::optional<OverlayFile> texture_file_matching(std::string_view prefix, std::string_view suffix) const;
+  // True when an active mod has a texture whose canonical path starts with `prefix` and does not go on with `except`.
+  bool has_texture_under(std::string_view prefix, std::string_view except) const;
   bool has_textures() const;
   // Overlay::enhance of the installed overlay.
   bool enhanced() const;

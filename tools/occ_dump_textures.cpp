@@ -1,9 +1,10 @@
-// occ dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] <outdir>
+// occ dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] [--packs TEXT] <outdir>
 //   The same headless dump as the Mods tab's "Dump all textures" button, into <outdir> instead of <GameDir>\dump\textures, in the
 //   texture registry's layout (a folder tree copied below a mod as `textures\...` replaces the textures). The category names are the
 //   Mods tab's checkboxes; no category (or only --raw / --source) means everything, --raw adds the raw atlases under raw/ and --source
 //   writes the models at their 1x size instead of RDE's 4x images (the "Models at 1x" checkbox). Prints per-phase
-//   file counts and the time taken; progress goes to stderr every 5 s while the dump runs.
+//   file counts and the time taken; progress goes to stderr every 5 s while the dump runs. --packs TEXT dumps only the battle effect packs
+//   whose file path contains TEXT ("syoukan" = the summons, "golem.prd" = one pack): sprite sheets, mesh tiles and models.
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -20,7 +21,7 @@ using namespace oc;
 
 int occ_dump_textures(vfs::Vfs& game_fs, const std::vector<std::string>& args) {
   unsigned categories = 0;
-  std::string outdir;
+  std::string outdir, packs;
   for (size_t i = 1; i < args.size(); ++i) {
     if (args[i] == "stages") categories |= game::kDumpStages;
     else if (args[i] == "title") categories |= game::kDumpTitle;
@@ -31,11 +32,12 @@ int occ_dump_textures(vfs::Vfs& game_fs, const std::vector<std::string>& args) {
     else if (args[i] == "all") categories |= game::kDumpAll;
     else if (args[i] == "--raw") categories |= game::kDumpRaw;
     else if (args[i] == "--source") categories |= game::kDumpModelSource;
+    else if (args[i] == "--packs" && i + 1 < args.size()) packs = args[++i];
     else outdir = args[i];
   }
   if (!(categories & game::kDumpAll)) categories |= game::kDumpAll;
   if (outdir.empty()) {
-    std::fprintf(stderr, "usage: occ [-g <gamedir>] dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] <outdir>\n");
+    std::fprintf(stderr, "usage: occ [-g <gamedir>] dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] [--packs TEXT] <outdir>\n");
     return 2;
   }
   std::filesystem::create_directories(outdir);
@@ -49,7 +51,7 @@ int occ_dump_textures(vfs::Vfs& game_fs, const std::vector<std::string>& args) {
       if (!stop && progress.running) std::fprintf(stderr, "  %s %u / %u (%u files)\n", phase.c_str(), progress.done.load(), progress.total.load(), progress.files.load());
     }
   });
-  const int rc = game::run_texture_dump(game_fs.game_dir(), categories, progress);
+  const int rc = game::run_texture_dump(game_fs.game_dir(), categories, progress, packs);
   stop = true;
   watcher.join();
   std::printf("%s\n", progress.summary().c_str());

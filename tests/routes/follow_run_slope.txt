@@ -1,0 +1,55 @@
+# The walk of follow_run_cheat_slope at normal speed, each key held for twice the moving ticks (a key line costs 2 driver ticks, a
+# `pos` 1, so 2 M + 2 ticks here against M there move the leader twice as many ticks). The asserted spots are the same in both.
+0 wait idle
+- request party_add 1
+- request party_add 2
+- load tel_a01f 0
+- wait room tel_a01f 300
+- wait idle 300
+- wait 60
+- key down run
+- key down left
+- wait 92
+- key up left
+- pos
+- key down up
+- wait room tel_a02f 900
+- key up up
+- wait idle 300
+- wait 20
+- track 240
+- key down down
+- wait 26
+- key up down
+- pos
+- key down left
+- wait 62
+- key up left
+- pos
+- key down up
+- wait 92
+- key up up
+- pos
+- assert gap player p1 290 330
+- wait 300
+- assert near player 1363.2 -200 1
+- assert near 2 1363.2 -396.8 1
+- assert near 3 1364.0 -562.9 1
+- key down down
+- wait 42
+- key up down
+- pos
+- key down right
+- wait 42
+- key up right
+- pos
+- key down up
+- wait 62
+- key up up
+- pos
+- key up run
+- wait 300
+- assert near player 1649.1 -147.6 1
+- assert near 2 1649.1 -345.0 1
+- assert near 3 1648.3 -528.8 1
+- quit

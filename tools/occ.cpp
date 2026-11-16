@@ -26,7 +26,7 @@
 //                                            src/data/battlefield_rooms.inc (the Debug tab's battlefield labels)
 //   occ world-markers [--inc <file>]         the overworld screens' location markers: label text (EN) -> target room, and the room-prefix ->
 //                                            place-name table it gives; --inc writes src/data/area_names.inc
-//   occ dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] <outdir>   headless texture dump (tools/occ_dump_textures.cpp)
+//   occ dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] [--packs TEXT] <outdir>   headless texture dump (tools/occ_dump_textures.cpp)
 //   occ save-info | save-slots | save-roundtrip | save-blank <save.dat> ...   save-file tools, no GameDir needed (tools/occ_save.cpp)
 // GameDir comes from -g <dir> or the OPENCROSS_GAMEDIR environment variable.
 #include <algorithm>
@@ -120,7 +120,7 @@ int usage() {
                "  | cat <path> <out>\n"
                "  | info <path>\n"
                "  | lzss <path> <out>\n"
-               "  | dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] <outdir>\n"
+               "  | dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] [--packs TEXT] <outdir>\n"
                "  | room <name> <outdir>\n"
                "  | rooms-validate\n"
                "  | rooms-check\n"

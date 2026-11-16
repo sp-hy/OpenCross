@@ -38,7 +38,7 @@ inline float present_scale(float vw, float vh, float cols = kLayerW) { return st
 // Widescreen ([Video] Widescreen, F7): whole layer columns the field / world-map / battle picture shows beyond each side of its 320
 // columns (0 = RDE's 4:3 framing). Layer space is unchanged (scripts, scroll, the projection centre 160 keep their 320-wide meaning);
 // the extra columns are centred around it. The host sets it once per frame (wide_extra_for) and forces 0 while the title room's 4:3
-// layers are composed (the title's 3D sea uses the real value: Letterbox::wide). Menus, dialogue, movies and the HUD canvas use
+// layers are composed (the title's 3D sea and the menus' backdrops use the real value: Letterbox::wide). Dialogue, movies and the HUD canvas use
 // Letterbox::fit: always 4:3.
 inline float g_wide_extra = 0.0f;
 inline float wide_extra() { return g_wide_extra; }

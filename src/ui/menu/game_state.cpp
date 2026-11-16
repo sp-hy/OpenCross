@@ -65,6 +65,10 @@ bool MenuRules::el_innate_only(int id) const {
   const data::ElemRec* record = elem(id);
   return record && (record->raw[3] & 0x80) != 0;
 }
+bool MenuRules::el_summon(int id) const {
+  const data::ElemRec* record = elem(id);
+  return record && (record->raw[0] & 0x40) != 0;
+}
 int MenuRules::el_level(int id) const {
   const data::ElemRec* record = elem(id);
   return record ? record->level() : 0;
@@ -289,14 +293,14 @@ Why GameState::can_remove(int character, int row, int col) const {
 
 // The new copies are taken before the occupant goes back to the stock, so a refill of the same element counts only what the stock
 // held, and a return to a stack at 99 is accepted without raising the count.
-Why GameState::place(int character, int row, int col, int id) {
+Why GameState::place(int character, int row, int col, int id, bool keep_summon_copy) {
   const Why why = can_place(character, row, col, id);
   if (why != Why::Ok) return why;
   const int cell = cell_index(character, row, col);
   save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
   const int occ = cell_element(character, row, col);
   const int occ_copies = !occ ? 0 : rules->el_stack(occ) ? static_cast<int>(ch.equipped_qty[static_cast<size_t>(cell)]) : 1;
-  const int want = rules->el_stack(id) ? kStackMax : 1;
+  const int want = keep_summon_copy && rules->el_summon(id) ? 0 : rules->el_stack(id) ? kStackMax : 1;
   int taken = 0;
   while (taken < want && take_element(id)) ++taken;
   for (int i = 0; i < occ_copies; ++i) add_element(occ);

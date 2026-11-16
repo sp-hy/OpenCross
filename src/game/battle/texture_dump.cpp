@@ -14,6 +14,7 @@
 #include "assets/room_scene.h"
 #include "core/log.h"
 #include "game/battle/battle_fx.h"
+#include "game/battle/fx_mesh_tiles.h"
 #include "game/battle/model_table.h"
 #include "game/effects/gpu_effects.h"
 #include "game/model_files.h"
@@ -47,23 +48,19 @@ bool rgba_ok(const import::Image& img) { return !img.indexed && img.width && img
 // `occ dump-textures --raw`: the raw (mode, CLUT) atlases of baked stages too, under raw/.
 bool g_raw = false;
 
-// Baked assets (battle stages, the title, room meshes): one PNG per object (assets::StageObjectTexture). Un-baked ones (effect meshes): the atlases.
+// A baked asset (battle stages, the title, room meshes, effect meshes): one PNG per tile; with --raw its atlases too, the content-named groups'
+// by content (one group holds the atlases of many scenes).
 void dump_stage_asset(const assets::StageAsset& st, const std::string& group) {
-  if (!st.object_textures.empty()) {
-    render::dump_tiles(st, group, true);
-    if (!g_raw) return;
-    for (size_t i = 0; i < st.textures.size(); ++i) {
-      const assets::StageTexture& texture = st.textures[i];
-      if (rgba_ok(texture.image)) tr::dump_forced(render::raw_atlas_key(group, static_cast<int>(i), texture.mode, texture.clut_x, texture.clut_y), texture.image.width, texture.image.height, texture.image.pixels.data());
-    }
-    return;
-  }
+  render::dump_tiles(st, group, true);
+  if (!g_raw) return;
+  const bool by_content = render::is_content_named(group.substr(0, group.find('/')));
   for (size_t i = 0; i < st.textures.size(); ++i) {
     const assets::StageTexture& texture = st.textures[i];
-    const import::Image img = texture.image.indexed ? import::to_rgba(texture.image) : texture.image;
-    if (!rgba_ok(img)) continue;
-    tr::dump_forced(render::stage_group_key(group, static_cast<int>(i), texture.mode, texture.clut_x, texture.clut_y, img.width, img.height, img.pixels.data()), img.width,
-                    img.height, img.pixels.data());
+    if (!rgba_ok(texture.image)) continue;
+    const import::Image& img = texture.image;
+    const render::TextureKey key = by_content ? render::TextureKey{"raw/" + group, "", -1, render::texture_content_tag(img.width, img.height, img.pixels.data())}
+                                              : render::raw_atlas_key(group, static_cast<int>(i), texture.mode, texture.clut_x, texture.clut_y);
+    tr::dump_forced(key, img.width, img.height, img.pixels.data());
   }
 }
 
@@ -158,21 +155,43 @@ u32 phase_title(const vfs::Vfs& archive, TextureDumpProgress& progress) {
   return 0;
 }
 
-u32 phase_effects(const vfs::Vfs& archive, TextureDumpProgress& progress) {
+// `packs` not empty: only the effect packs whose file path contains it, without the shared particle library and resident packs.
+u32 phase_effects(const vfs::Vfs& archive, TextureDumpProgress& progress, const std::string& packs) {
   BattleFxLibrary lib;
   if (!lib.init(archive, /*bind_globals=*/false)) return 1;
   Phase ph(progress, "effect packs", static_cast<u32>(lib.slots().size()) + 1);
-  dump_sheets(lib.particle_lib());
-  if (auto res = lib.resident()) {
-    for (const auto& pk : res->packs) dump_sheets(*pk);
-    if (res->meshes) dump_stage_asset(*res->meshes, "effect_mesh");
+  if (packs.empty()) {
+    dump_sheets(lib.particle_lib());
+    if (auto res = lib.resident()) {
+      for (const auto& pk : res->packs) dump_sheets(*pk);
+      if (res->meshes) {
+        bake_fx_resident_meshes(*res, lib.particle_lib());
+        log::debug("texture dump: resident effect meshes: {} tile(s){}", res->meshes->tiles.size(), fx_mesh_tile_names(*res->meshes));
+        dump_stage_asset(*res->meshes, res->meshes->tex_group);
+      }
+    }
   }
   ++progress.done;
   for (const auto& slot : lib.slots()) {
     if (progress.cancel) break;
+    if (!packs.empty() && slot.prd.find(packs) == std::string::npos) {
+      ++progress.done;
+      continue;
+    }
     if (const auto pack = lib.get(slot.eid)) {
       dump_sheets(pack->fx);
-      if (pack->meshes) dump_stage_asset(*pack->meshes, "effect_mesh");
+      if (pack->meshes) {
+        bake_fx_pack_meshes(*pack, lib.particle_lib());
+        log::debug("texture dump: effect pack {} ({}) meshes: {} tile(s){}", slot.eid, slot.prd, pack->meshes->tiles.size(), fx_mesh_tile_names(*pack->meshes));
+        dump_stage_asset(*pack->meshes, pack->meshes->tex_group);
+      }
+      for (const auto& [name, asset] : fx_pack_models(*pack)) {
+        const std::vector<render::ModelTile> tiles = render::model_tiles(asset);
+        std::string names;
+        for (const render::ModelTile& tile : tiles) names += " tile_" + tile.hash;
+        log::debug("texture dump: effect pack {} ({}) model {}: {} tile(s){}", slot.eid, slot.prd, name, tiles.size(), names);
+        render::dump_model_tiles(asset, "effect_model", true);
+      }
     }
     ++progress.done;
   }
@@ -359,7 +378,7 @@ void TextureDumpProgress::end_phase(u32 files_in_phase) {
   report_.emplace_back(phase_, files_in_phase);
 }
 
-int run_texture_dump(const std::filesystem::path& game_dir, unsigned what, TextureDumpProgress& progress) {
+int run_texture_dump(const std::filesystem::path& game_dir, unsigned what, TextureDumpProgress& progress, const std::string& effect_packs) {
   const auto start_time = std::chrono::steady_clock::now();
   progress.running = true;
   progress.finished = false;
@@ -375,11 +394,12 @@ int run_texture_dump(const std::filesystem::path& game_dir, unsigned what, Textu
   if (!archive.open(game_dir)) {
     rc = 1;
   } else {
+    if (!effect_packs.empty()) what = kDumpEffects | (what & kDumpRaw);
+    g_raw = (what & kDumpRaw) != 0;
     if (what & kDumpStages) failed += phase_stages(archive, progress);
     if ((what & kDumpTitle) && !progress.cancel) failed += phase_title(archive, progress);
-    if ((what & kDumpEffects) && !progress.cancel) failed += phase_effects(archive, progress);
-    g_raw = (what & kDumpRaw) != 0;
-    if ((what & (kDumpRooms | kDumpEffects)) && !progress.cancel) failed += phase_rooms(archive, progress, what);
+    if ((what & kDumpEffects) && !progress.cancel) failed += phase_effects(archive, progress, effect_packs);
+    if (effect_packs.empty() && (what & (kDumpRooms | kDumpEffects)) && !progress.cancel) failed += phase_rooms(archive, progress, what);
     if ((what & kDumpModels) && !progress.cancel) failed += phase_models(archive, progress, (what & kDumpModelSource) != 0);
     if ((what & kDumpWeapons) && !progress.cancel) failed += phase_weapons(archive, progress);
   }

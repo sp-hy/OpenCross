@@ -369,6 +369,9 @@ struct MainMenu::Impl {
   // none); wide_s ([Video] WideHud) is at most canvas_s, both are 0 at 4:3.
   enum Group { Left = -1, Right = 1, Centre = 2 };
   float wide_s = 0.0f, canvas_s = 0.0f, gdx = 0.0f;
+  // Canvas units the backdrop and the fades cover beyond each side: canvas_s in the PS1-resolution pass, otherwise the window's whole
+  // widened frame (the fractional rest of its edge column included).
+  float reach = 0.0f;
   // Horizontal clip of sprites and rectangles (canvas x, before the group shift); text is not clipped.
   float sprite_clip_left = -1e9f, sprite_clip_right = 1e9f;
   // Set by set_wide_columns.

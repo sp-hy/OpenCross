@@ -9,6 +9,7 @@
 #include "import/tim.h"
 #include "game/battle/battle_view.h"
 #include "game/effects/strip_smooth.h"
+#include "render/stage_tiles.h"
 
 namespace oc::game {
 
@@ -468,6 +469,9 @@ void BattleView::fx_draw(const render::Frame& frame, const render::Letterbox& lb
           for (const auto& op : fx_->emitters().header_def(static_cast<size_t>(mi.owner)).ops)
             if (op.op == 0x36)
               if (auto* scroll = std::get_if<assets::FxUvScroll>(&op.arg)) in.uv_window = {scroll->off_u, scroll->off_v, scroll->win_w, scroll->win_h};
+        // A window the part's tiles were not cut for (another pack's emitter on a resident mesh): the raw atlases.
+        in.atlas = asset && !render::tiles_hold_window(*asset, in.part, in.uv_window);
+        if (in.atlas) stage_pipe_.load_atlases(*gg->stage, *asset);
       }
       if (copy_on && asset && static_cast<size_t>(in.part) < asset->parts.size()) {
         const auto& subs = asset->parts[static_cast<size_t>(in.part)].submeshes;

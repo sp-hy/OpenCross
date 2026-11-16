@@ -79,8 +79,7 @@ void FieldWorld::setup_pc(int ent, int char_ref, int) {
   }
   party_ent_[static_cast<size_t>(slot)] = ent;
   bind_party_entity(slot);
-  const bool lead_ready = slot == 0 || (party_ent_[0] >= 0 && ents_[static_cast<size_t>(party_ent_[0])].placed);
-  if (slot < static_cast<int>(party_chars_.size()) && !ent_state.placed && lead_ready) place_party_spawn(slot);
+  if (slot < static_cast<int>(party_chars_.size()) && !ent_state.placed) place_party_spawn(slot);
 }
 
 void FieldWorld::place_on_controlled(int ent) {
@@ -91,7 +90,6 @@ void FieldWorld::place_on_controlled(int ent) {
   ent_state.actor.place(view_.walk(), lead_actor.triangle(), lead_actor.current().x, lead_actor.current().z, lead_actor.facing());
   ent_state.actor.set_height(lead_actor.current().y, true);
   ent_state.placed = true;
-  ent_state.spawned_on_leader = false;
 }
 
 // The V spot of each follower (party_v_spot with the controlled entity's heading), at the controlled entity's height, without a
@@ -113,7 +111,6 @@ void FieldWorld::place_followers() {
     ent_state.actor.place(view_.walk(), own_tri >= 0 ? own_tri : view_.walk().find_triangle(x, z, lp.y), x, z, facing);
     ent_state.actor.set_height(lp.y, true);
     ent_state.placed = true;
-    ent_state.spawned_on_leader = false;
   }
   trail_fill(0, trail_entry_of(lead_actor));
   if (party_ent_[1] >= 0) trail_fill(1, trail_entry_of(ents_[static_cast<size_t>(party_ent_[1])].actor));
@@ -597,10 +594,15 @@ int FieldWorld::character_model_byte(int char_ref) {
 void FieldWorld::refresh_party_models() {
   // 7C / DA: the party table changed; rebind the party entities (the original re-runs the entities' scripts).
   rebind_party();
+  bool follower_joined = false;
   for (int slot = 0; slot < 3; ++slot)
     if (party_ent_[static_cast<size_t>(slot)] >= 0 && slot < static_cast<int>(party_chars_.size()) &&
-        !ents_[static_cast<size_t>(party_ent_[static_cast<size_t>(slot)])].placed)
+        !ents_[static_cast<size_t>(party_ent_[static_cast<size_t>(slot)])].placed) {
       place_party_spawn(slot);
+      follower_joined |= slot > 0;
+    }
+  // A follower that had no place yet joins in the party V, as after a room load.
+  if (follower_joined) place_followers();
 }
 
 

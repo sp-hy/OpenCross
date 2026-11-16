@@ -12,6 +12,7 @@
 #include "game/effects/room_meshes.h"
 #include "import/battle_stage.h"
 #include "platform/paths.h"
+#include "render/stage_tiles.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
@@ -209,6 +210,66 @@ int main() {
     if (ns <= projected || umin < 64.0f || umax > 128.01f) {
       std::printf("FAIL: UV scroll windowing\n");
       ++failures;
+    }
+  }
+
+  // Texel pick: a baked copy of the asset keeps every corner's packet texel coordinate, the coordinate places the corner's normalised u / v through the
+  // face's page origin and texel size, and the texel it names holds the same pixel in the baked object image as in the raw atlas.
+  {
+    auto raw = import::load_stage(*prd, {}, &err);
+    auto baked = import::load_stage(*prd, {}, &err);
+    if (raw && baked) {
+      render::bake_object_textures(*baked);
+      const import::Image* raw_image = nullptr;
+      const import::Image* baked_image = nullptr;
+      size_t textured_subs = 0;
+      for (size_t pi = 0; pi < baked->parts.size(); ++pi) {
+        if (baked->parts[pi].name != "elem") continue;
+        for (const assets::StageSubMesh& sub : baked->parts[pi].submeshes) {
+          if (sub.texture < 0 || sub.object_texture < 0) continue;
+          ++textured_subs;
+          raw_image = &raw->textures[static_cast<size_t>(sub.texture)].image;
+          baked_image = &baked->object_textures[static_cast<size_t>(sub.object_texture)].image;
+        }
+      }
+      const import::Image raw_copy = raw_image ? *raw_image : import::Image{};
+      const import::Image baked_copy = baked_image ? *baked_image : import::Image{};
+      effects::RoomMeshes raw_meshes, baked_meshes;
+      raw_meshes.set(std::move(*raw), nullptr, nullptr);
+      baked_meshes.set(std::move(*baked), nullptr, nullptr);
+      std::vector<effects::RoomMeshTri> raw_tris, baked_tris;
+      raw_meshes.project(mi, vp, lb, 0.0f, raw_tris);
+      baked_meshes.project(mi, vp, lb, 0.0f, baked_tris);
+      auto pixel = [](const import::Image& image, const effects::RoomMeshTri& tri, int corner) {
+        const float texel_x = std::round(tri.texel_u[corner]), texel_y = std::round(tri.texel_v[corner]);
+        const long x = std::lround(std::floor((tri.texels[0] + texel_x * tri.texels[2]) * static_cast<float>(image.width)));
+        const long y = std::lround(std::floor((tri.texels[1] + texel_y * tri.texels[3]) * static_cast<float>(image.height)));
+        std::array<u8, 4> rgba{};
+        if (x >= 0 && y >= 0 && x < static_cast<long>(image.width) && y < static_cast<long>(image.height))
+          for (size_t ch = 0; ch < 4; ++ch) rgba[ch] = image.pixels[(static_cast<size_t>(y) * image.width + static_cast<size_t>(x)) * 4 + ch];
+        return rgba;
+      };
+      size_t corners = 0, moved = 0, misplaced = 0, other_pixel = 0;
+      if (textured_subs == 1 && raw_tris.size() == baked_tris.size() && !raw_copy.indexed && !baked_copy.indexed) {
+        for (size_t i = 0; i < raw_tris.size(); ++i) {
+          const effects::RoomMeshTri& raw_tri = raw_tris[i];
+          const effects::RoomMeshTri& baked_tri = baked_tris[i];
+          if (raw_tri.texels[2] <= 0.0f || baked_tri.texels[2] <= 0.0f) continue;
+          for (int corner = 0; corner < 3; ++corner) {
+            ++corners;
+            moved += raw_tri.texel_u[corner] != baked_tri.texel_u[corner] || raw_tri.texel_v[corner] != baked_tri.texel_v[corner];
+            for (const effects::RoomMeshTri* tri : {&raw_tri, &baked_tri})
+              misplaced += std::fabs(tri->texels[0] + tri->texel_u[corner] * tri->texels[2] - tri->u[corner]) > 1e-4f ||
+                           std::fabs(tri->texels[1] + tri->texel_v[corner] * tri->texels[3] - tri->v[corner]) > 1e-4f;
+            other_pixel += pixel(raw_copy, raw_tri, corner) != pixel(baked_copy, baked_tri, corner);
+          }
+        }
+      }
+      std::printf("texel pick: %zu corners of %zu triangles, %zu moved, %zu misplaced, %zu with another pixel\n", corners, raw_tris.size(), moved, misplaced, other_pixel);
+      if (corners == 0 || moved || misplaced || other_pixel) {
+        std::printf("FAIL: the baked elem does not name the raw atlas's texels\n");
+        ++failures;
+      }
     }
   }
 

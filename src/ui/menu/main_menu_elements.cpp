@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 
+#include "platform/config.h"
 #include "ui/menu/menu_common.h"
 #include "ui/menu/ps1_art.h"
 
@@ -195,7 +196,7 @@ void MainMenu::Impl::apply_to_cell() {
   } else {
     const int id = list_element(list_cur);
     if (id == 0) return;
-    if (!rules->window_ok(id, cell_row) || !gs->eligible(character, id) || gs->place(character, cell_row, cell_col, id) != Why::Ok) {
+    if (!rules->window_ok(id, cell_row) || !gs->eligible(character, id) || gs->place(character, cell_row, cell_col, id, platform::cheats().more_summons) != Why::Ok) {
       sfx(0x18);
       return;
     }

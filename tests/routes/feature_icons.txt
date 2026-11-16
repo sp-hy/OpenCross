@@ -1,0 +1,8 @@
+# Fast mode, encounters off and battle boost are on in the ini: their three icons are drawn, in the field and after a room change.
+0 wait idle 600
+- wait 30
+- assert icons 3
+- load opa_b02f 1
+- wait 120
+- assert icons 3
+- quit

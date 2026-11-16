@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iterator>
 #include <optional>
 #include <set>
@@ -12,6 +13,7 @@
 #include "import/battle_stage.h"
 #include "import/container.h"
 #include "import/lzss.h"
+#include "import/model.h"
 #include "import/room_effects.h"
 #include "import/tim.h"
 
@@ -65,6 +67,20 @@ bool script_ends_without(const bseq::Table& table, int entry, int variant, bseq:
   }
   return true;
 }
+
+}  // namespace
+
+bool script_calls_damage(const bseq::Table& table, int entry) {
+  bool found = false;
+  const auto& words = table.words();
+  table.each_op([&](int op_entry, int pc) {
+    const int op = words[static_cast<size_t>(pc)];
+    if ((entry < 0 || op_entry == entry) && (op == 0x41 || op == 0x59 || op == 0x5A || op == 0x96)) found = true;
+  });
+  return found;
+}
+
+namespace {
 
 // One egfx (.ctd) section: a VRAM rectangle. type 0x1200 = pixels, 0x1201 = CLUT rows. x, w in halfwords; y, h in rows.
 struct VramSection {
@@ -255,6 +271,60 @@ import::Vram FxPack::build_vram() const {
   return vram;
 }
 
+std::optional<FxModelPage> fx_model_page(std::string_view name, std::string_view overlay) {
+  const auto hex = [](char digit) {
+    if (digit >= '0' && digit <= '9') return digit - '0';
+    if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
+    if (digit >= 'A' && digit <= 'F') return digit - 'A' + 10;
+    return -1;
+  };
+  if (name.size() < 4) return std::nullopt;
+  if (hex(name[0]) < 0 || hex(name[1]) < 0 || hex(name[2]) < 0 || hex(name[3]) < 0) {
+    const char* alias = effects::fx_pack_model_binding(name, overlay);
+    if (!alias) return std::nullopt;
+    name = alias;
+  }
+  const int flags = hex(name[2]);
+  return FxModelPage{hex(name[3]) * 64, (flags & 1) ? 256 : 0, (flags & 8) ? 256 : 0, hex(name[0]) * 16 + hex(name[1])};
+}
+
+std::vector<import::Image> fx_model_pages(const import::Vram& vram, const FxModelPage& page) {
+  constexpr int kPageW = 384;
+  std::vector<import::Image> pages;
+  for (int row = 0; row < 2; ++row) {
+    const std::vector<u16> clut = vram.read_clut(page.clut_x, std::min(page.clut_y + row, 255), 256);
+    import::Image image;
+    image.width = kPageW;
+    image.height = 256;
+    image.pixels.assign(static_cast<size_t>(kPageW) * 256 * 4, 0);
+    for (int y = 0; y < 256; ++y)
+      for (int x = 0; x < kPageW; ++x) {
+        const u32 texel = import::bgr555_to_rgba_stp(vram.texel(page.x * 2 + x, page.y + y, 8, clut));
+        std::memcpy(&image.pixels[(static_cast<size_t>(y) * kPageW + static_cast<size_t>(x)) * 4], &texel, 4);
+      }
+    pages.push_back(std::move(image));
+  }
+  return pages;
+}
+
+std::vector<std::pair<std::string, assets::ModelAsset>> fx_pack_models(const FxPack& pack) {
+  std::vector<std::pair<std::string, assets::ModelAsset>> models;
+  const auto drp = import::parse_drp(pack.prd);
+  if (!drp || std::none_of(drp->entries.begin(), drp->entries.end(), [](const import::DrpEntry& entry) { return entry.type == 0x0B; })) return models;
+  const import::Vram vram = pack.build_vram();
+  for (const import::DrpEntry& entry : drp->entries) {
+    if (entry.type != 0x0B) continue;
+    if (std::any_of(models.begin(), models.end(), [&](const auto& model) { return model.first == entry.name; })) continue;
+    const auto page = fx_model_page(entry.name, pack.overlay);
+    if (!page) continue;
+    auto asset = import::load_room_model(entry.data, fx_model_pages(vram, *page));
+    if (!asset) continue;
+    asset->source = kFxModelSource;
+    models.emplace_back(entry.name, std::move(*asset));
+  }
+  return models;
+}
+
 const assets::StageAsset* FxPack::mesh_asset(std::string_view name, size_t& part) const {
   for (const assets::StageAsset* asset : {meshes.get(), resident ? resident->meshes.get() : nullptr}) {
     if (!asset) continue;
@@ -296,7 +366,7 @@ void BattleFxLibrary::load_resident() {
         std::string serr;
         if (auto st = import::load_stage(sato_, resident->vram_ctd, &serr)) {
           resident->meshes = std::make_shared<assets::StageAsset>(std::move(*st));
-          resident->meshes->tex_group = "effect_mesh/resident";
+          resident->meshes->tex_group = "effect_mesh";
         }
         else log::debug("battle fx: resident meshes: {}", serr);
       }
@@ -437,7 +507,7 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
         std::string serr;
         if (auto st = import::load_stage(*prd, egfx, &serr)) {
           pack->meshes = std::make_shared<assets::StageAsset>(std::move(*st));
-          pack->meshes->tex_group = "effect_mesh/eid_" + std::to_string(eid);
+          pack->meshes->tex_group = "effect_mesh";
         }
         else log::debug("battle fx: eid {} meshes: {}", eid, serr);
       }
@@ -462,17 +532,25 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
       pack->has_main = pack->fx.find_sequence("main") != nullptr;
       // Pack-table entries the sequences start on the casters (ops 0x43 / 0x45, entry s16 at data +4).
       std::set<int> caster_entries;
-      // Ops 0x4F / 0x57 run a model's OWN S5 entry (its Damage ops are outside the pack).
+      // Ops 0x4F / 0x57 run a model's OWN S5 entry (its ops are outside the pack).
       bool own_s5 = false;
+      std::set<int> own_entries;
+      // Op 0x6B spawns the caster's own number.
+      bool caster_number_op = false;
       for (const auto& sq : pack->fx.sequences)
         for (const auto& cmd : sq.cmds)
           if (cmd.op == 0x47 || cmd.op == 0x48) pack->has_damage_op = true;
+          else if (cmd.op == 0x6B) caster_number_op = true;
           else if (cmd.op == 0x44 || cmd.op == 0x46) pack->has_react_op = true;
           else if ((cmd.op == 0x43 || cmd.op == 0x45) && cmd.data.size() >= 6) caster_entries.insert(static_cast<s16>(cmd.data[4] | (cmd.data[5] << 8)));
-          else if (cmd.op == 0x4F || cmd.op == 0x57) own_s5 = true;
+          else if (cmd.op == 0x4F || cmd.op == 0x57) {
+            own_s5 = true;
+            if (cmd.data.size() >= 6) own_entries.insert(static_cast<s16>(cmd.data[4] | (cmd.data[5] << 8)));
+          }
+      pack->own_script_entries.assign(own_entries.begin(), own_entries.end());
       pack->overlay = effects::overlay_stem(slot_entry->prg);
-      pack->bespoke = effects::BespokeRegistry::instance().find_element(eid);
-      // Entries register from nested archives (type 1) as well: the Element Shot packs keep `main` and `tech` inside `elda`.
+      pack->bespoke = effects::BespokeRegistry::instance().find_element(eid);      // Entries register from nested archives (type 1) as well: the Element Shot packs keep `main` and `tech` inside `elda`.
+      bool table_calls_damage = false;
       const std::function<void(ByteSpan)> register_scripts = [&](ByteSpan bytes) {
         const auto drp = import::parse_drp(bytes);
         if (!drp) return;
@@ -481,7 +559,10 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
             // The last one registered wins.
             pack->has_anim = pack->anim.parse(entry.data) || pack->has_anim;
             bseq::Table table;
-            if (table.parse(entry.data)) pack->tables[entry.name] = std::move(table);
+            if (table.parse(entry.data)) {
+              table_calls_damage = table_calls_damage || script_calls_damage(table, -1);
+              pack->tables[entry.name] = std::move(table);
+            }
           } else if (entry.type == 0x19) {
             // The caster's tech clips.
             pack->clip_packs.emplace_back(entry.name, Bytes(entry.data.begin(), entry.data.end()));
@@ -490,6 +571,7 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
           }
       };
       register_scripts(pack->prd);
+      pack->lands_no_number = !pack->has_damage_op && !pack->has_react_op && !caster_number_op && !table_calls_damage;
       // The caster variant = its acting-list index ; up to three casters (a group cast).
       if (pack->has_anim)
         for (const int entry : caster_entries)

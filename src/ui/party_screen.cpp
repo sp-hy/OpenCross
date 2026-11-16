@@ -709,6 +709,11 @@ void PartyScreen::draw(const render::Frame& frame, float vw, float vh, bool resu
     const float canvas_w = kCanvasW + 8.0f * impl.canvas_cols;
     Ps1Display display = kMemmenu;
     display.w = static_cast<u32>(std::lround(static_cast<float>(display.w) * canvas_w / kCanvasW));
+    // The window is cleared first: the target covers the picture only, and the field's own edge columns can lie just outside it.
+    impl.sprites->begin(frame, vw, vh, resume);
+    impl.sprites->draw(impl.white, 0, 0, vw, vh, 0, 0, 1, 1, render::pack_rgba(0, 0, 0));
+    impl.sprites->end();
+    resume = true;
     if (impl.lowres.begin(frame, display, impl.text, lf, canvas_w, kCanvasH)) {
       draw_view(lf, canvas_w, kCanvasH, resume);
       if (impl.canvas_cols > 0.0f) {

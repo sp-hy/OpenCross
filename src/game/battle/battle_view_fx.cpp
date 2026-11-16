@@ -1,5 +1,6 @@
 // BattleView: effect scene, view, model loading, weapon meshes, clip packs and GPU residency.
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -12,12 +13,21 @@
 #include "import/tim.h"
 #include "game/battle/battle_view.h"
 #include "game/battle/battle_view_util.h"
+#include "game/battle/fx_mesh_tiles.h"
+#include "render/stage_tiles.h"
+#include "render/texture_registry.h"
 
 namespace oc::game {
 
 using namespace bv;
 
 namespace {
+
+// Debug: OC_NO_BAKE skips the tile bake of the effect meshes too (they draw the raw atlases; for before / after comparisons).
+bool mesh_bake_off() {
+  static const bool off = std::getenv("OC_NO_BAKE") != nullptr;
+  return off;
+}
 
 // An effect pack's copy of a battle unit (its pages hold the unit's 1x texture at the top left, the copy samples it with the unit's own UVs)
 // gets the art the unit itself is drawn with when that is something else (a texture mod's image, the Modded art's 4x texture): every page
@@ -180,9 +190,8 @@ effects::ViewParams BattleView::fx_view() const {
   return view;
 }
 
-// Sprite type 20 = a type-0x0B record = an Mdl model used as the particle body. The
-// record has no texture words: its *name* is decoded as hex - chars 0-1 = CLUT row, char 2 bit 0 = tpage y 256, bit 3
-// = CLUT x 256, char 3 = tpage x / 64 - an 8 bpp page (tpage 0x80 | ...). The page is cut from the VRAM the pack plays in.
+// Sprite type 20 = a type-0x0B record = an Mdl model used as the particle body, on the page its name binds (fx_model_page), cut from the
+// VRAM the pack plays in.
 void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
   auto drp = import::parse_drp(pack.prd);
   if (!drp || !meshes_) return;
@@ -201,27 +210,16 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
       std::fclose(file);
     }
   }
-  auto hexval = [](char digit) -> int {
-    if (digit >= '0' && digit <= '9') return digit - '0';
-    if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
-    if (digit >= 'A' && digit <= 'F') return digit - 'A' + 10;
-    return -1;
-  };
   for (const auto& entry : drp->entries) {
     if (entry.type != 0x0B || entry.name.size() < 4 || gpu.models.count(entry.name)) continue;
-    std::string bind = entry.name;
-    if (hexval(bind[0]) < 0 || hexval(bind[1]) < 0 || hexval(bind[2]) < 0 || hexval(bind[3]) < 0) {
-      // No code in the name: the overlay binds the texture itself at init (saraman's 'sara': effects::fx_pack_model_binding).
-      const char* alias = effects::fx_pack_model_binding(entry.name, pack.overlay);
-      if (!alias) {
-        log::debug("battle fx: model {}: the name is no texture binding", entry.name);
-        continue;
-      }
-      bind = alias;
+    // No code in the name and none from the overlay (saraman binds its 'sara' itself at init): no texture.
+    const std::optional<FxModelPage> page = fx_model_page(entry.name, pack.overlay);
+    if (!page) {
+      log::debug("battle fx: model {}: the name is no texture binding", entry.name);
+      continue;
     }
-    const int clut_y = hexval(bind[0]) * 16 + hexval(bind[1]), nib = hexval(bind[2]);
-    const int tpage_y = (nib & 1) ? 256 : 0, clut_x = (nib & 8) ? 256 : 0, tpx = hexval(bind[3]) * 64;
-    std::vector<import::Image> pages = fx_model_pages(vram, tpx, tpage_y, clut_x, clut_y);
+    const int clut_y = page->clut_y, tpage_y = page->y, clut_x = page->clut_x, tpx = page->x;
+    std::vector<import::Image> pages = fx_model_pages(vram, *page);
     constexpr int kPageW = 384;
     // HD art: sky's act0 is a byte copy of battle/player/selju2/selju.obj (S1 mesh + S2 skeleton; S3 shading and the clips are the
     // pack's own) on a page that holds selju.ltc's image + CLUT, so in HD it gets the mesh + texture the HD Serge unit is drawn with (cdrom2).
@@ -251,12 +249,18 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
     }
     auto model = std::make_unique<FxGpu::Model>();
     model->asset = std::move(*asset);
-    if (!stem.empty())
+    if (!stem.empty()) {
       if (const std::shared_ptr<ModelHandle> unit = load_model_for(stem)) paste_unit_art(model->asset, unit->asset);
+    } else {
+      // On its own pages the model is tiled for the texture mods; a mod switched on or off reaches it at the pack's next cast.
+      model->asset.source = kFxModelSource;
+      render::resolve_model_textures(model->asset);
+      gpu.art_dependent = true;
+    }
     model->gpu = meshes_->create_model(model->asset);
     if (!model->gpu) continue;
     model->pose.set_model(&model->asset);
-    if (stem.empty()) model->page_x = tpx, model->page_y = tpage_y, model->clut_x = clut_x, model->clut_y = clut_y;
+    if (stem.empty()) model->page = *page;
     // Motion of a model object no op 49 started: the clip with the most keyframes; op 49's own choice is the object's
     // clip byte (fx_draw_models).
     for (size_t i = 0; i < model->asset.clips.size(); ++i)
@@ -265,29 +269,6 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
                tpage_y, clut_x, clut_y);
     gpu.models.emplace(entry.name, std::move(model));
   }
-}
-
-// The faces' CLUT bit selects the next palette row (textures[1] = row clut_y + 1; Sonja's wings 'ee97' use row 239 for the lime), so two pages
-// are baked, one per row. A GPU texture page is 256 x 256 TEXELS whatever the depth (an 8 bpp page = 128 halfwords from tpage x * 64): the faces'
-// u bytes run 0..255 over it, and a face's page bit (+1 tpage column = 64 halfwords = +128 texels at 8 bpp) reaches 383, so the page is cut 384
-// texels wide.
-std::vector<import::Image> BattleView::fx_model_pages(const import::Vram& vram, int page_x, int page_y, int clut_x, int clut_y) {
-  constexpr int kPageW = 384;
-  std::vector<import::Image> pages;
-  for (int row = 0; row < 2; ++row) {
-    const std::vector<u16> clut = vram.read_clut(clut_x, std::min(clut_y + row, 255), 256);
-    import::Image page;
-    page.width = kPageW;
-    page.height = 256;
-    page.pixels.assign(static_cast<size_t>(kPageW) * 256 * 4, 0);
-    for (int y = 0; y < 256; ++y)
-      for (int x = 0; x < kPageW; ++x) {
-        const u32 texel = import::bgr555_to_rgba_stp(vram.texel(page_x * 2 + x, page_y + y, 8, clut));
-        std::memcpy(&page.pixels[(static_cast<size_t>(y) * kPageW + static_cast<size_t>(x)) * 4], &texel, 4);
-      }
-    pages.push_back(std::move(page));
-  }
-  return pages;
 }
 
 std::string BattleView::fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
@@ -564,9 +545,15 @@ void BattleView::fx_drop_clip_packs() {
 BattleView::FxGpu* BattleView::fx_gpu_resident(const FxResident* resident) {
   if (!resident || !resident->meshes) return nullptr;
   constexpr int kResidentKey = -1000;
-  if (auto it = fx_gpu_.find(kResidentKey); it != fx_gpu_.end()) return it->second.get();
+  assets::StageAsset& st = *resident->meshes;
+  if (auto it = fx_gpu_.find(kResidentKey); it != fx_gpu_.end()) {
+    fx_apply_mesh_tiles(*it->second, st, false);
+    return it->second.get();
+  }
   auto gpu = std::make_unique<FxGpu>();
-  const assets::StageAsset& st = *resident->meshes;
+  if (const double bake_ms = mesh_bake_off() ? 0.0 : bake_fx_resident_meshes(*resident, fxlib_.particle_lib()); bake_ms > 0.0)
+    log::debug("battle fx: resident meshes: {} tile(s) in {} object(s) baked in {:.1f} ms", st.tiles.size(), st.object_textures.size(), bake_ms);
+  fx_apply_mesh_tiles(*gpu, st, true);
   for (size_t i = 0; i < st.parts.size(); ++i) gpu->parts.emplace(st.parts[i].name, static_cast<int>(i));
   gpu->stage = stage_pipe_.create(st);
   FxGpu* raw = gpu.get();
@@ -574,8 +561,19 @@ BattleView::FxGpu* BattleView::fx_gpu_resident(const FxResident* resident) {
   return raw;
 }
 
+void BattleView::fx_apply_mesh_tiles(FxGpu& gpu, assets::StageAsset& asset, bool fresh) {
+  const unsigned generation = render::texture_registry::generation();
+  if (!fresh && (!gpu.stage || gpu.tile_gen == generation)) return;
+  gpu.tile_gen = generation;
+  render::apply_tile_textures(asset, asset.tex_group, true);
+  if (!fresh) stage_pipe_.reload_textures(*gpu.stage, asset);
+}
+
 BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& pack) {
-  if (auto it = fx_gpu_.find(pack->eid); it != fx_gpu_.end()) return it->second.get();
+  if (auto it = fx_gpu_.find(pack->eid); it != fx_gpu_.end()) {
+    if (pack->meshes) fx_apply_mesh_tiles(*it->second, *pack->meshes, false);
+    return it->second.get();
+  }
   auto gpu = std::make_unique<FxGpu>();
   gpu->sprites = std::make_unique<effects::GpuEffects>();
   effects::EffectBank bank;
@@ -605,20 +603,39 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
     return nullptr;
   }
   if (pack->meshes) {
-    const assets::StageAsset& st = *pack->meshes;
+    assets::StageAsset& st = *pack->meshes;
+    const auto meshes_start = std::chrono::steady_clock::now();
+    const double bake_ms = mesh_bake_off() ? 0.0 : bake_fx_pack_meshes(*pack, fxlib_.particle_lib());
+    fx_apply_mesh_tiles(*gpu, st, true);
     for (size_t i = 0; i < st.parts.size(); ++i) gpu->parts.emplace(st.parts[i].name, static_cast<int>(i));
     // Effect meshes draw through the stage pipeline.
     gpu->stage = stage_pipe_.create(st);
+    log::debug("battle fx: eid {}: meshes: {} tile(s) in {} object(s), bake {:.1f} ms, tiles + upload {:.1f} ms", pack->eid, st.tiles.size(), st.object_textures.size(), bake_ms,
+               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - meshes_start).count() - bake_ms);
   }
+  const auto models_start = std::chrono::steady_clock::now();
   fx_load_models(*gpu, *pack);
-  // Bespoke overlays' own textured packets sample the pack's mesh atlases through the particle batch.
+  if (!gpu->models.empty())
+    log::debug("battle fx: eid {}: {} model(s) loaded in {:.1f} ms", pack->eid, gpu->models.size(),
+               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - models_start).count());
+  // Bespoke overlays' own textured packets sample the pack's mesh atlases through the particle batch, with normalised UVs: a texture mod's
+  // effect_mesh image of any size stands in, as it does for the mesh sprites the stage pipeline draws.
   if (pack->meshes && pack->bespoke) {
     const assets::StageAsset& st = *pack->meshes;
-    for (const assets::StageTexture& stage_tex : st.textures) {
+    gpu->art_dependent = true;
+    for (size_t i = 0; i < st.textures.size(); ++i) {
+      const assets::StageTexture& stage_tex = st.textures[i];
       auto tex = std::make_unique<render::Texture>();
       render::TexRef set;
-      if (stage_tex.image.width && stage_tex.image.height && !stage_tex.image.indexed &&
-          tex->create(*ctx_, stage_tex.image.width, stage_tex.image.height, render::TextureFormat::Rgba8, stage_tex.image.pixels.data()))
+      const bool usable = stage_tex.image.width && stage_tex.image.height && !stage_tex.image.indexed;
+      u32 width = stage_tex.image.width, height = stage_tex.image.height;
+      std::vector<u8> replaced;
+      if (usable && render::texture_registry::active()) {
+        replaced.assign(stage_tex.image.pixels.begin(), stage_tex.image.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(width) * height * 4));
+        const render::TextureKey key = render::stage_group_key("effect_mesh", static_cast<int>(i), stage_tex.mode, stage_tex.clut_x, stage_tex.clut_y, width, height, replaced.data());
+        if (!render::texture_registry::replace(key, width, height, replaced)) replaced.clear();
+      }
+      if (usable && tex->create(*ctx_, width, height, render::TextureFormat::Rgba8, replaced.empty() ? stage_tex.image.pixels.data() : replaced.data()))
         set = render::TexRef(*tex, nearest_);
       gpu->textures.push_back(std::move(tex));
       gpu->sets.push_back(set);

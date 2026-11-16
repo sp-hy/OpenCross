@@ -247,6 +247,7 @@ bool Config::load(const std::filesystem::path& file) {
       if (level <= stored_anisotropy) anisotropy = level;
   }
   autohide_cast_hud = parse_bool(ini.get("Enhancements", "AutoHideCastHud"), autohide_cast_hud);
+  hide_feature_icons = parse_bool(ini.get("Enhancements", "HideFeatureIcons"), hide_feature_icons);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   full_precision_effects = parse_bool(ini.get("Enhancements", "FullPrecisionEffects"), full_precision_effects);
   menu_models_in_field = parse_bool(ini.get("Enhancements", "MenuModelsInField"), menu_models_in_field);
@@ -355,6 +356,8 @@ bool Config::load(const std::filesystem::path& file) {
   cheats.instant_growth = parse_bool(ini.get("Cheats", "InstantGrowth"), cheats.instant_growth);
   cheats.shared_growth = parse_bool(ini.get("Cheats", "SharedGrowth"), cheats.shared_growth);
   cheats.no_craft_cost = parse_bool(ini.get("Cheats", "NoCraftCost"), cheats.no_craft_cost);
+  cheats.summon_any_time = parse_bool(ini.get("Cheats", "SummonAnyTime"), cheats.summon_any_time);
+  cheats.more_summons = parse_bool(ini.get("Cheats", "MoreSummons"), cheats.more_summons);
   portraits = ini.get("Game", "Portraits", portraits) == "1999" ? "1999" : "2021";
   bgm_source = ini.get("Audio", "BgmSource", bgm_source) == "original" ? "original" : "remastered";
   debug_exit_after_screenshot = parse_bool(ini.get("Debug", "ExitAfterScreenshot"), debug_exit_after_screenshot);
@@ -425,6 +428,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "Msaa", std::to_string(msaa));
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
+  ini.set("Enhancements", "HideFeatureIcons", on_off(hide_feature_icons));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "FullPrecisionEffects", on_off(full_precision_effects));
   ini.set("Enhancements", "MenuModelsInField", on_off(menu_models_in_field));
@@ -505,6 +509,8 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Cheats", "InstantGrowth", on_off(cheats.instant_growth));
   ini.set("Cheats", "SharedGrowth", on_off(cheats.shared_growth));
   ini.set("Cheats", "NoCraftCost", on_off(cheats.no_craft_cost));
+  ini.set("Cheats", "SummonAnyTime", on_off(cheats.summon_any_time));
+  ini.set("Cheats", "MoreSummons", on_off(cheats.more_summons));
   ini.set("Game", "Portraits", portraits);
   ini.set("Audio", "BgmSource", bgm_source);
   ini.set("Debug", "ExitAfterScreenshot", on_off(debug_exit_after_screenshot));

@@ -778,6 +778,8 @@ u64 Battle::state_hash() const {
   for (const bool cheat : {cheats_.god_mode, cheats_.boost, cheats_.max_stamina, cheats_.free_elements, cheats_.always_hit, cheats_.always_loot,
                            cheats_.instant_growth, cheats_.shared_growth})
     hash.add(cheat);
+  // The summon bypasses enter the hash only while one is set.
+  if (cheats_.summon_any_ring || cheats_.summon_repeat) hash.add(static_cast<u64>(cheats_.summon_any_ring ? 1 : 0) | (cheats_.summon_repeat ? 2 : 0));
   hash.add(static_cast<u64>(rewards_.gold));
   for (const std::vector<u16>* words : {&rewards_.items, &rewards_.elements, &rewards_.stolen, &rewards_.trapped}) {
     hash.add(words->size());
@@ -807,7 +809,8 @@ bool Battle::summon_blocked(int pc, int cell) const {
   if (id <= 0 || static_cast<size_t>(id) >= tables_.elements.size()) return false;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(id)];
   if (!(element.b(0) & 0x40)) return false;
-  return ring_summon_colour_ < 0 || ring_summon_colour_ != ring_colour_of(element.colour_bit()) || star_counter(side_of(pc)) <= 0;
+  const bool ring_allows = cheats_.summon_any_ring || (ring_summon_colour_ >= 0 && ring_summon_colour_ == ring_colour_of(element.colour_bit()));
+  return !ring_allows || star_counter(side_of(pc)) <= 0;
 }
 
 bool Battle::colour_sealed(int pc, int id) const {
@@ -1330,25 +1333,38 @@ void Battle::knock_out_again(int unit_index) {
   victim.record_ko = false;
 }
 
-u32 Battle::knocked_out_roster() const {
-  u32 mask = 0;
+KoRoster Battle::knocked_out_roster() const {
+  KoRoster roster;
   for (int i = 0; i < kUnits; ++i) {
     const Unit& unit = units_[static_cast<size_t>(i)];
-    if (unit.present && (unit.lo & st::kKO) && (unit.pc || death_pending_[static_cast<size_t>(i)])) mask |= 1u << i;
+    if (!unit.present || !(unit.lo & st::kKO)) continue;
+    roster.down |= 1u << i;
+    if (unit.pc || death_pending_[static_cast<size_t>(i)]) roster.again |= 1u << i;
   }
-  return mask;
+  return roster;
 }
 
 // A member knocked out by its save record falls here when the action did not hit it or missed it: its event of this action shows the
-// KO, or the action's last event notes it.
-void Battle::knock_out_rest(u32 before) {
+// KO, or the action's last event notes it. A status roll that landed the KO bit left the HP alone: that unit is killed here (HP 0, a
+// PC's inflicted statuses, an enemy's kill script), and its event of this action carries the HP 0 and the owed scripted death.
+void Battle::knock_out_rest(const KoRoster& before) {
   u32 unhit = 0;
   for (int i = 0; i < kUnits; ++i) {
-    if (!(before >> i & 1u) || !(units_[static_cast<size_t>(i)].lo & st::kKO)) continue;
-    const bool first_fall = units_[static_cast<size_t>(i)].record_ko;
+    const Unit& unit = units_[static_cast<size_t>(i)];
+    if (!unit.present || !(unit.lo & st::kKO)) continue;
+    const auto own = std::find_if(events_.rbegin(), events_.rend(), [&](const ActionEvent& event) { return event.action == action_id_ && event.target == i; });
+    if (!(before.down >> i & 1u)) {
+      if (unit.hp == 0) continue;
+      kill(i);
+      if (own == events_.rend()) continue;
+      own->hp_after = unit.hp;
+      own->ko_owed = own->ko && death_pending_[static_cast<size_t>(i)];
+      continue;
+    }
+    if (!(before.again >> i & 1u)) continue;
+    const bool first_fall = unit.record_ko;
     knock_out_again(i);
     if (!first_fall) continue;
-    const auto own = std::find_if(events_.rbegin(), events_.rend(), [&](const ActionEvent& event) { return event.action == action_id_ && event.target == i; });
     if (own == events_.rend()) unhit |= 1u << i;
     else own->ko = true;
   }
@@ -1562,6 +1578,7 @@ bool Battle::apply_status_bits(int target, u32 lo, u32 hi, int chance, u8 colour
     for (int bit = 0; bit < 32; ++bit) {
       if (!(mask >> bit & 1u) || !target_unit.in_turn_order()) continue;
       if ((set == 0 ? target_unit.skip_lo : target_unit.skip_hi) >> bit & 1u) continue;
+      if (set == 0 && (1u << bit) == st::kKO && (invincible(target) || undying(target))) continue;
       const bool weak = ((set == 0 ? target_unit.weak_lo : target_unit.weak_hi) >> bit & 1u) != 0;
       const bool direct = special && set == 1 && (bit < 6 || bit > 28);
       if (!direct && !status_roll(rng_, chance, weak)) continue;
@@ -1707,7 +1724,7 @@ void Battle::weapon_landed(int actor, int strength) {
 void Battle::do_weapon_attack(int actor, int target, int strength) {
   const SealRefreshOnExit refresh{*this, target};
   weapon_begin(actor, target, strength, 1u << target);
-  const u32 knocked_out = knocked_out_roster();
+  const KoRoster knocked_out = knocked_out_roster();
   const bool landed = weapon_strike(actor, target, strength, -1, false);
   knock_out_rest(knocked_out);
   if (!landed) return;
@@ -1728,7 +1745,7 @@ void Battle::do_weapon_sweep(int actor, int aim, int strength) {
   if (targets == 0) targets = 1u << aim;
   weapon_begin(actor, aim, strength, targets);
   const size_t first = events_.size();
-  const u32 knocked_out = knocked_out_roster();
+  const KoRoster knocked_out = knocked_out_roster();
   bool missed = false;
   for (int i = 0; i < kUnits; ++i) {
     if (!(targets >> i & 1u)) continue;
@@ -2012,7 +2029,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       break;
     }
     case 36: {  // rnd(0,99) < element record +0xA sets the lo bits of the target's innate colour, no further roll; a failed gate clears
-                // `landed`. The mode writes no result code: the target keeps the one its last action left (a miss pop only after a miss).
+                // `landed`. The mode writes no result code: the target keeps the one its last action left.
       // Per colour: green white black red yellow blue.
       static constexpr u32 kCurse[6] = {0x901u, 0xE000u, 0xE0000u, 0x900008u, 0xE000010u, 0xA0000020u};
       landed = rng_.rnd(0, 99) < element.status_pct();
@@ -2047,7 +2064,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       code_override = 0;
       break;
     }
-    case 42: {  // the caster's innate colour := the ring colour present 3 times, else twice, else a random colour on the ring
+    case 42: {  // the caster's innate colour := the ring colour present 3 times, else twice, else a random colour on the ring; like
+                // mode 36 it writes no result code
       int pick = -1;
       for (int need : {3, 2}) {
         for (int colour = 0; colour < 6; ++colour)
@@ -2067,7 +2085,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       }
       if (pick >= 0) caster.innate = static_cast<u8>((caster.innate & 3u) | (4u << pick));
       say(std::format("{} uses {}: colour {}", caster.name, nm, pick));
-      code_override = 0;
+      code_override = target_unit.result_code;
       break;
     }
     case 5: {  // element trap; the caster's side waits for element record +0xE cast by the other side
@@ -2180,10 +2198,11 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       say(std::format("{} uses {} on {}: {} (half HP, code {})", caster.name, nm, target_unit.name, immune ? -1 : half_hp, code_override));
       break;
     }
-    case 41:  // the caster's control word := script var 45 (nothing else); the Mode Change packs read it back with script op 0x9F
+    case 41:  // the caster's control word := script var 45 (nothing else); the Mode Change packs read it back with script op 0x9F. Like
+              // mode 36 it writes no result code.
       caster.ctrl12 = brain_.script_var(0xDE) & 0xFFFF;
       say(std::format("{} uses {}: no effect (mode 41)", caster.name, nm));
-      code_override = 0;
+      code_override = target_unit.result_code;
       break;
     case 30: {  // pilfer: one steal per enemy; a row of the drop table, slot +4 (common) / +6 (rare)
       // Already stolen -> result 3 (nothing); the chance is the caster's raw heavy-hit byte on a fresh target, the heavy HIT% box figure
@@ -2509,7 +2528,7 @@ bool Battle::catch_in_trap(int actor, int element_id, int row, int target) {
 }
 
 void Battle::cast_element(int actor, int element_id, int row, int target, u32 targets) {
-  const u32 knocked_out = knocked_out_roster();
+  const KoRoster knocked_out = knocked_out_roster();
   cast_element_targets(actor, element_id, row, target, targets);
   knock_out_rest(knocked_out);
 }
@@ -2906,7 +2925,7 @@ void Battle::check_end() {
 
 void Battle::finish_external_action() {
   knock_out_rest(external_ko_);
-  external_ko_ = 0;
+  external_ko_ = {};
   run_reactions();
   chain_actor_ = chain_target_ = -1;
   chain_hits_ = 0;
@@ -3056,8 +3075,8 @@ bool Battle::apply(const Command& cmd, std::string* why) {
       if (tgt < 0) break;
       confirm_actor_ = cmd.actor;
       confirm_target_[static_cast<size_t>(cmd.actor)] = tgt;
-      // Cheats: free elements stay usable.
-      unit.used[static_cast<size_t>(cmd.cell)] = !cheats_.free_elements;
+      // Cheats: free elements stay usable, and so does a summon with the repeat cheat.
+      unit.used[static_cast<size_t>(cmd.cell)] = !cheats_.free_elements && !(cheats_.summon_repeat && (element.b(0) & 0x40));
       // A summon spends one of the stars left.
       if ((element.b(0) & 0x40) && !cheats_.free_elements) stars_left(own_side) = std::max(0, stars_left(own_side) - 1);
       // Consumable: the stack counts down and the cell is marked used only when the last copy goes.

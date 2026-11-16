@@ -1,0 +1,50 @@
+# Run speed cheat on a path that doubles back (Termina: tel_a01f, the exit to tel_a02f, down the ramp to the wall, along it, up the
+# ramp again). The party moves twice per tick with the normal step, so every member stands where follow_run_slope (the same
+# walk at normal speed, each key held for twice the moving ticks) finds it: the asserted spots are the same in both routes.
+# With one long step instead, follower 1 swings between two points at the turn and is more than 800 units behind here.
+0 wait idle
+- request party_add 1
+- request party_add 2
+- load tel_a01f 0
+- wait room tel_a01f 300
+- wait idle 300
+- wait 60
+- key down run
+- key down left
+- wait 45
+- key up left
+- key down up
+- wait room tel_a02f 900
+- key up up
+- wait idle 300
+- wait 20
+- track 120
+- key down down
+- wait 12
+- key up down
+- key down left
+- wait 30
+- key up left
+- key down up
+- wait 45
+- key up up
+- assert gap player p1 290 330
+- wait 150
+- assert near player 1363.2 -200 1
+- assert near 2 1363.2 -396.8 1
+- assert near 3 1364.0 -562.9 1
+- key down down
+- wait 20
+- key up down
+- key down right
+- wait 20
+- key up right
+- key down up
+- wait 30
+- key up up
+- key up run
+- wait 300
+- assert near player 1649.1 -147.6 1
+- assert near 2 1649.1 -345.0 1
+- assert near 3 1648.3 -528.8 1
+- quit

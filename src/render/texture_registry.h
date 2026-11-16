@@ -17,7 +17,7 @@ class Vfs;
 namespace oc::render {
 
 struct TextureKey {
-  // battle_stage | title | effects | effect_mesh (vfs::kTextureCategories).
+  // battle_stage | title | effects | effect_mesh | room_mesh | room_model | effect_model | model (vfs::kTextureCategories).
   std::string category;
   // bg_07, title, the sheet name, ... ('/' allowed: sub-folders).
   std::string name;
@@ -31,8 +31,8 @@ struct TextureKey {
 std::string texture_path(const TextureKey& key);
 // Key of one stage-asset atlas (colour mode 0 = 4bpp / 1 = 8bpp, CLUT position in VRAM halfwords / row).
 TextureKey stage_texture_key(const std::string& category, const std::string& name, int index, int mode, int clut_x, int clut_y);
-// Categories whose textures are cut from per-scene VRAM pages and repeat across scenes are named by content (effects/<sheet>/<tag>, effect_mesh/<tag>,
-// room_mesh/<tag>, room_model/<tag>): identical images are ONE file, so a replacement applies everywhere and bulk dumps stay small.
+// Categories whose textures are cut from per-scene VRAM pages and repeat across scenes are named by content (effects/<sheet>/<tag>, effect_mesh/tile_<tag>,
+// room_mesh/tile_<tag>, room_model/tile_<tag>, effect_model/tile_<tag>): identical images are ONE file, so a replacement applies everywhere and bulk dumps stay small.
 bool is_content_named(const std::string& category);
 // Key of one stage-asset atlas of `group` ("category/name", name may be empty): path-named (<idx>_m<mode>_c<x>x<y>) or content-named per category.
 // Content-named keys hash the pixels: call only when texture_registry::active().
@@ -78,8 +78,10 @@ unsigned generation();
 // Writes a small text file (the tiles.json manifests) under the dump root at the canonical relative path; once per path per session; not counted in stats().
 bool dump_text(const std::string& rel_path, const std::string& text, bool forced);
 // Tile replacement: the active mods' PNG for the tile with content hash `hash` (8 hex): <dir>/tile_*<hash>.png (any NN, the first
-// by path), else the global tiles/<hash>.png. `dir` = "battle_stage/bg_05" | "title" | "room_mesh". Fills w / h / rgba (any size) and returns true when found.
+// by path), else the global tiles/<hash>.png. `dir` = "battle_stage/bg_05" | "title" | "room_mesh" | "effect_mesh". Fills w / h / rgba (any size) and returns true when found.
 bool replace_tile(const std::string& dir, const std::string& hash, u32& w, u32& h, std::vector<u8>& rgba);
+// True when an active mod holds an image of `dir` that is not a tile (<dir>/<anything but tile_...>): the whole atlases of a content-named group.
+bool has_whole_images(const std::string& dir);
 // As dump(), but regardless of the dump flag (the "Dump all textures" job and the dev tool); still once per path per session.
 bool dump_forced(const TextureKey& key, u32 w, u32 h, const u8* rgba);
 // Writes the image under the dump root when dumping is on. Returns true when a file was written (once per path per session).

@@ -1,0 +1,38 @@
+# Run speed cheat on the ladder of gal_b03f (walk-mesh flags 0x204000, 1270 units of height). The party is placed at the foot and Up
+# is held for 62 ticks, then for 242: two pad steps a tick, each of the 5 units a ladder allows. Every asserted spot is the one the
+# same walk reaches at normal speed with Up held for 124 and 484 ticks: half way up the three stand on the ladder in a queue, and
+# after the second leg all have climbed off at the top and regrouped. The stair clip takes two steps a tick as well, so the leader's
+# pose half way is keyframe 1.5 of the clip, a quarter keyframe ahead of normal speed's 1.25 (the clip started on a doubled tick).
+0 wait idle
+- request party_add 1
+- request party_add 2
+- load gal_b03f 0
+- wait room gal_b03f 300
+- wait idle 300
+- put ent 1 735 -565
+- put ent 2 650 -600
+- put ent 3 600 -640
+- wait 240
+- key down up
+- wait 60
+- key up up
+- wait 100
+- assert anim p0 stair
+- assert anim p0 5
+- assert key p0 5 6
+- assert near player 735 -474.3 1
+- assert height p0 -575 -572
+- assert near 2 734 -491.9 1
+- assert height p1 -377 -374
+- assert near 3 717.6 -525.3 1
+- assert height p2 -182 -179
+- key down up
+- wait 240
+- key up up
+- wait 100
+- assert near player 153.1 837 1
+- assert near 2 205.4 647 1
+- assert near 3 309.3 477.3 1
+- assert height p0 -1265 -1262
+- assert height p2 -1265 -1262
+- quit

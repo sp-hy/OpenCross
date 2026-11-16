@@ -101,7 +101,7 @@ struct MeshModel {
 };
 
 // Texture dump / replace of a model with a source (texture_registry.h: model/<member stem>/clut<row>.png | overlay<k>.png; room models
-// "@room_model": render/model_tiles.h): dumps each texture's best image (the 4x one when there is one) and fills assets::ModelAsset::mod_textures
+// "@room_model" and effect pack models "@effect_model": render/model_tiles.h): dumps each texture's best image (the 4x one when there is one) and fills assets::ModelAsset::mod_textures
 // from the active texture mods, so every user of the asset's pixels (the GPU copy, eye blinks, effect fades) draws the replacement. Call before create_model.
 void resolve_model_textures(assets::ModelAsset& asset);
 

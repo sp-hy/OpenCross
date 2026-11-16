@@ -8,6 +8,7 @@
 // The new game start was found in the title room's script (opening.bin = room 8, tmp/dis/opening.txt): after "New Game"
 // the script runs  OPEN_MENU (title list), RENAME_CHARACTER #0 (name entry, character 0 = Serge), ADD_TO_PARTY #0, then
 // MAP_JUMP_DC #22, #0  = room 22 `opn_a01i`, ROOM_PARAM 0.
+#include <algorithm>
 #include <array>
 #include <functional>
 #include <map>
@@ -278,6 +279,9 @@ class GameFlow {
 
   // True while the flow draws the whole screen (Title, SlotSelect, NameEntry, a rename); draw() then replaces the field.
   bool owns_screen() const;
+  // [Video] Widescreen: the layer columns per side the name entry's parchment extends by (0 = 4:3). The title menu, the slot list and
+  // the user guide are 4:3 pictures and stay centred.
+  void set_wide_columns(float canvas_columns) { wide_cols_ = std::max(0.0f, canvas_columns); }
   void draw(const render::Frame& frame, float view_w, float view_h, bool resume = false);
   void draw_party(ui::DrawList& dl);
   void draw_veil(const render::Frame& frame, float vw, float vh, float alpha, bool subtract = false);
@@ -321,6 +325,7 @@ class GameFlow {
   const vfs::Vfs* vfs_ = nullptr;
   int title_song_ = -1;
   bool ready_ = false;
+  float wide_cols_ = 0.0f;
   bool scene_enabled_ = false, scene_request_ = false, logo_ready_ = true;
   bool rename_active_ = false, rename_finished_ = false;
   // begin_rename(.., guide): the user guide pages are up before the name entry.

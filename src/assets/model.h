@@ -199,8 +199,8 @@ struct ModelAsset {
   // "battle" or "field".
   std::string kind;
   // Texture dump / replace name (render/texture_registry.h model_texture_key): the member stem ("battle/player/selju/selju",
-  // "fieldobj/player/cl_bort/cl_bort"), a weapon pack part ("battle/wepon/sword/part3") or "@room_model" for models whose texture is cut
-  // from a VRAM page. Empty = not dumped.
+  // "fieldobj/player/cl_bort/cl_bort"), a weapon pack part ("battle/wepon/sword/part3") or "@room_model" / "@effect_model" for models whose texture is cut
+  // from a VRAM page (a room's, an effect pack's). Empty = not dumped.
   std::string source;
   // A battle player drawn on its Status-screen TIM: the stem of its character texture (render/character_texture.h), which then stands in
   // for textures[0] and the eye strip. Empty = none.

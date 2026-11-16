@@ -187,6 +187,45 @@ int main() {
     CHECK(fr.in.pad_connected && fr.in.pad_down[3] && std::fabs(fr.in.pad_axis[0] + 0.5f) < 1e-3f);
     CHECK(!rep.next(fr));
   }
+  // ---- sides: the columns beside the 4:3 picture of a measured frame
+  {
+    // A 16:9 frame of 64 x 36: the 4:3 picture is 320 / 236 of the height wide, so about 7 columns are left on each side.
+    const u32 width = 64, height = 36;
+    std::vector<u8> frame(static_cast<size_t>(width) * height * 4, 0);
+    float left = -1.0f, right = -1.0f;
+    CHECK(game::side_columns_lit(frame.data(), width, height, left, right));
+    CHECK(left == 0.0f && right == 0.0f);
+    for (u32 y = 0; y < height; ++y)
+      for (u32 x = 0; x < 4; ++x) frame[(static_cast<size_t>(y) * width + x) * 4 + 1] = 60;
+    CHECK(game::side_columns_lit(frame.data(), width, height, left, right));
+    CHECK(left > 0.5f && left < 0.6f && right == 0.0f);
+    std::vector<u8> square(static_cast<size_t>(48) * 36 * 4, 200);
+    CHECK(!game::side_columns_lit(square.data(), 48, 36, left, right));
+
+    // The verb asks for one measured frame, then judges it.
+    auto run_sides = [&](const char* range, float lit_left, float lit_right) {
+      Sim sim;
+      std::string err;
+      const auto route_file = write_tmp("oc_route_sides.txt", (std::string("0 sides ") + range + "\n- quit\n").c_str());
+      CHECK(sim.route.load(route_file, &err));
+      sim.step();
+      CHECK(sim.last.measure_sides);
+      sim.step();
+      CHECK(!sim.last.measure_sides && !sim.last.failed);
+      sim.st.side_lit[0] = lit_left;
+      sim.st.side_lit[1] = lit_right;
+      ++sim.st.side_frames;
+      int guard = 0;
+      while (sim.step() && !sim.last.failed && ++guard < 20) {}
+      return !sim.last.failed;
+    };
+    CHECK(run_sides("99 100", 1.0f, 0.995f));
+    CHECK(!run_sides("99 100", 1.0f, 0.5f));
+    CHECK(run_sides("0 0", 0.0f, 0.0f));
+    CHECK(!run_sides("0 0", 0.0f, 0.01f));
+    CHECK(run_sides("0 20", 0.12f, 0.0f));
+    CHECK(!run_sides("99 100", -1.0f, -1.0f));
+  }
   if (failures == 0) std::printf("route tests passed\n");
   return failures == 0 ? 0 : 1;
 }

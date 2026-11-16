@@ -44,6 +44,9 @@ class ShopScreen {
   void set_mode(ArtMode mode);
   ArtMode mode() const;
   void set_language(import::Lang lang);
+  // [Video] Widescreen: `canvas_columns` = layer columns per side the parchment extends by; [Video] WideHud: `layout_columns` = the
+  // columns per side the lists (left) and the info panels, prompts and dial (right) spread out by (0 = the 4:3 layout).
+  void set_wide_columns(float canvas_columns, float layout_columns);
   // Typed character names by id (the picker of the element Sell shows them); must outlive the screen.
   void set_custom_names(const std::map<int, std::u32string>* names);
   // Sound hook: 1 cursor, 8 confirm, 6 cancel, 0x18 denied, 5 bought/sold, 0xBF forged/broken down, 0x1B traded.

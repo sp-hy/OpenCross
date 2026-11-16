@@ -1,0 +1,56 @@
+# Widescreen menus in a 16:9 window: the parchment of the shops, the name entry and the main menu covers the columns beside the 4:3
+# picture (sides 99 100). wide_menus_off runs the same screens with widescreen off.
+0 wait idle 600
+- request party_add 1
+# ---- element shop: the top list, then the Buy list
+- request elementshop 0
+- wait shop open 300
+- wait 80
+- sides 99 100
+- screenshot wm_01_element_shop.png
+- tap confirm
+- wait 40
+- sides 99 100
+- screenshot wm_02_element_buy.png
+- tap cancel
+- wait 20
+- tap cancel
+- wait shop closed 300
+- wait idle 300
+# ---- blacksmith: the top list, then Forge > Weapons
+- request weaponshop 0
+- wait shop open 300
+- wait 80
+- sides 99 100
+- tap confirm
+- wait 30
+- tap confirm
+- wait 40
+- sides 75 100                        # the party strip's faces of characters not yet met are black
+- screenshot wm_03_smith_forge.png
+- tap cancel
+- wait 20
+- tap cancel
+- wait 20
+- tap cancel
+- wait shop closed 300
+- wait idle 300
+# ---- name entry for Kid
+- request rename 1
+- wait menu open 120
+- wait 30
+- sides 99 100
+- screenshot wm_04_name_entry.png
+- tap down
+- tap confirm
+- wait menu closed 120
+- wait idle 300
+# ---- the main menu (the dimmed portraits at its left edge have dark pixels)
+- request menu
+- wait menu open 300
+- wait 30
+- sides 90 100
+- tap cancel
+- wait menu closed 300
+- wait idle 300
+- quit

@@ -45,7 +45,7 @@ bool is_game_data(std::string_view target);
 
 // First components of a texture replacement path (render/texture_registry.h): a mod file <mod>\[wrapper\]textures\<category>\... is a
 // texture replacement, not an archive member.
-inline constexpr const char* kTextureCategories[] = {"battle_stage", "title", "effects", "effect_mesh", "room_mesh", "room_model", "model", "tiles"};
+inline constexpr const char* kTextureCategories[] = {"battle_stage", "title", "effects", "effect_mesh", "room_mesh", "room_model", "effect_model", "model", "tiles"};
 
 // One mod file: `target` = the logical VFS path ("hd/face/2021/00_seljyu.png") or, in Mod::archives, the archive name ("movie"); `file` =
 // the file on disk; `member` = the normalised member of that file for a packed mod or a mod's <archive>.dat; `rel` = its path inside

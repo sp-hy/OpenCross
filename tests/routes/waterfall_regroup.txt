@@ -1,14 +1,16 @@
 # jac_b32d entrance 3 (the drop from jac_b30d's current): the push of the waterfall tiles carries the party down into the pool, where
-# the splash trigger runs op 86. Both followers' V spots lie over the waterfall slope; the regroup walks them there at the leader's
-# height on the tile they came from, so the slope's push does not take them, op 86 ends and the remark opens.
+# the splash trigger runs op 86. Once the entry's pad lock is over the followers follow: each walks to a trail entry on the push tiles
+# and is then written onto the entries one per tick. Follower 1 has finished when the regroup starts; follower 2 has not, so on the
+# first tick after the regroup it is written onto the refilled trail, follower 1's spot in whole units, and both stand there.
 0 wait 5
 - request party_add 1
 - request party_add 2
 - set var 0x00 52
 - load jac_b32d 3
 - wait dialogue open 600
-- assert near 2 -2375 -1193 12
-- assert near 3 -2375 -1375 12
+- assert near player -2288.6 -1284 1
+- assert near 2 -2379.1 -1193.5 1
+- assert near 3 -2380 -1194 1
 - skip 600
 - wait idle 300
 - key down right

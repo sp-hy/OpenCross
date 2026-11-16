@@ -131,6 +131,8 @@ struct MultiplayerSettings {
 //   no_craft_cost      the forge (Zappa) builds without using materials or gold
 //   instant_growth     a won fight grants the stat growth of a full star and raises each grown member to a typical record for the star count
 //   shared_growth      a won fight's growth also reaches the bench and the knocked-out members
+//   summon_any_time    a party summon can be cast whatever colours the field ring holds
+//   more_summons       a summon placed in the grid editor keeps its stock copy, and a summon cast does not use up its cell
 struct Cheats {
   bool no_encounters = false;
   bool battle_boost = false;
@@ -148,6 +150,8 @@ struct Cheats {
   bool no_craft_cost = false;
   bool instant_growth = false;
   bool shared_growth = false;
+  bool summon_any_time = false;
+  bool more_summons = false;
 };
 // The live cheat set (a default all-off one until bind_cheats is called).
 const Cheats& cheats();
@@ -163,7 +167,7 @@ void bind_cheats(const Cheats* set);
 //            WideEdgeFade: widescreen only, fade the room picture's cut edge into black over this many layer pixels (0 = off).
 //            FovDeg: horizontal field of view in degrees of the 4:3 picture (battle, title sea); 35 = the PS1's own (H 512:
 //            2 atan(160 / 512) = 34.7); 30..110, larger = wider.
-//            WideHud ("Wide Menus/HUD", widescreen only, default full): default = the battle HUD and the main menu on the 4:3 canvas, 16:9 = spread to a
+//            WideHud ("Wide Menus/HUD", widescreen only, default full): default = the battle HUD, the main menu and the shops on the 4:3 canvas, 16:9 = spread to a
 //            16:9 frame's width, full = spread to the window's edges (stored as the kWideHudNames word; old `WideHudEdges=1` reads as full).
 //            Widescreen (F7 toggles): the field, world map, battle and the title's 3D sea fill the window's own width (any shape wider
 //            than 4:3; render::wide_extra_for); menus, dialogue, the title logo / menu and movies stay 4:3. Off = 4:3 with black bars.
@@ -195,6 +199,7 @@ void bind_cheats(const Cheats* set);
 //            smoothly per vertex. EdgeBlend: cross-fades the faces along the texture seams of
 //            the stage / title meshes, any art mode.
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
+//            HideFeatureIcons: the play-time feature icons (auto battle, battle boost, encounters off, slow, fast) are not drawn; the toggles work as before.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
 //            MenuModelsInField: field characters are drawn with their Status-screen model, posed by their field model (game/menu_rig.h).
@@ -280,6 +285,7 @@ struct Config {
   bool lighting = false;
   bool edge_blend = false;
   bool autohide_cast_hud = false;
+  bool hide_feature_icons = false;
   bool retain_battle_scenery = false;
   bool full_precision_effects = false;
   bool menu_models_in_field = false;

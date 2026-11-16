@@ -525,6 +525,7 @@ int main() {
   if (charge_ok != 6) ++failures;
   std::vector<int> blank, nopack_list;
   std::vector<std::string> caster_react, react_no_number;
+  std::set<int> no_number, own_entries;
   std::set<int> seen_eids;
   const int element_count = static_cast<int>(tables.elements.size());
   for (int id = 1; id < element_count; ++id) {
@@ -583,6 +584,9 @@ int main() {
         caster_react.push_back(std::to_string(id) + "/" + pack->overlay);
       // The reaction ends without CallDamage and nothing else calls it -> the React lands the hit without a number (Toxic Burst 387).
       if (pack->reaction_lands_no_number && seen_eids.count(eid) == 0) react_no_number.push_back(std::to_string(id) + "/" + pack->overlay);
+      // Nothing in the pack can call CallDamage: its results land without a number.
+      if (pack->lands_no_number) no_number.insert(id);
+      own_entries.insert(pack->own_script_entries.begin(), pack->own_script_entries.end());
       if (seen_eids.insert(eid).second && drawn == 0) blank.push_back(id);
     } catch (const std::exception& ex) {
       std::printf("FAIL element %d eid %d (%s): %s\n", id, eid, pack->slot.prd.c_str(), ex.what());
@@ -604,6 +608,46 @@ int main() {
   // Potpourri's Toxic Burst (387, jibaku.prd): variant 7 = Done only; the retail fight shows no number.
   if (std::none_of(react_no_number.begin(), react_no_number.end(), [](const std::string& entry) { return entry.rfind("387/", 0) == 0; })) {
     std::printf("FAIL: element 387's reaction should land no number\n");
+    ++failures;
+  }
+  std::printf("no route to CallDamage = results land without a number (elements):");
+  for (int id : no_number) std::printf(" %d", id);
+  std::printf("\n");
+  // Dopplegang (238, hensin.prd), Unicorn (45) and Rage (486) have no damage, reaction or caster-number op and no script table; Hypnosis
+  // (355), Max. Defense (149) and Vary Innate (336) only run a model's own release entry; the tables of Hell-Bound (35), Panacea (103),
+  // Mode Change (404) and Heart Color (469) hold no Damage or reaction op: a status roll that lands nothing shows no "miss!". Aqua Beam
+  // (1) has a sequence damage op, the tables of Toxic Burst (387) and Suicide Bomb (348) a reaction op, Big Catch's (192) a Damage op.
+  for (const int id : {238, 45, 486, 355, 149, 336, 35, 103, 404, 469})
+    if (!no_number.count(id)) {
+      std::printf("FAIL: element %d should land without a number\n", id);
+      ++failures;
+    }
+  for (const int id : {1, 387, 348, 192})
+    if (no_number.count(id)) {
+      std::printf("FAIL: element %d can call CallDamage\n", id);
+      ++failures;
+    }
+  // The own-script entries the packs run (ops 0x4F / 0x57) call no CallDamage and start no reaction in any battle model, so an
+  // own-script run never brings a number back.
+  int own_tables = 0;
+  std::printf("own-script entries the packs run:");
+  for (const int entry : own_entries) std::printf(" %d", entry);
+  std::printf("\n");
+  for (const std::string& path : files.list("cdrom")) {
+    if (path.compare(0, 7, "battle/") != 0 || path.size() < 4 || path.compare(path.size() - 4, 4, ".obj") != 0) continue;
+    const auto obj = files.read("cdrom/" + path);
+    bseq::Table table;
+    if (!obj || !bseq::load_model_table(*obj, table)) continue;
+    ++own_tables;
+    for (const int entry : own_entries)
+      if (script_calls_damage(table, entry)) {
+        std::printf("FAIL: %s entry %d calls CallDamage or a reaction\n", path.c_str(), entry);
+        ++failures;
+      }
+  }
+  std::printf("battle model script tables checked: %d\n", own_tables);
+  if (own_tables < 100 || own_entries.empty()) {
+    std::printf("FAIL: own-script check did not run\n");
     ++failures;
   }
   // Bomber's Suicide Bomb (348, bombom.prd): `main` op 0x45 -> entry 0, t290 React(-1).

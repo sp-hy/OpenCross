@@ -49,6 +49,7 @@ void FeatureIcons::draw(const render::Frame& frame, float vw, float vh, const Ac
   const auto now = std::chrono::steady_clock::now();
   const double frames = last_ == std::chrono::steady_clock::time_point{} ? 1.0 : std::chrono::duration<double>(now - last_).count() * 60.0;
   last_ = now;
+  shown_ = 0;
   if (!ctx_) return;
   const bool any = active.auto_battle || active.boost || active.encounters || active.slow || active.fast;
   if (!any && (autosave_ <= 0.0 || (autosave_ -= frames) <= 0.0)) return;
@@ -69,6 +70,7 @@ void FeatureIcons::draw(const render::Frame& frame, float vw, float vh, const Ac
     sprites_->draw(atlas_set_, fit.ox + left * fit.s, fit.oy + top * fit.s, kSize * fit.s, kSize * fit.s, u + kInset, v + kInset,
                    u + kCell - kInset, v + kCell - kInset);
     top -= kStep;
+    ++shown_;
   }
   if (autosave_ > 0.0 && (autosave_ -= frames) > 0.0)
     sprites_->draw(atlas_set_, fit.ox + (kStripX + shift) * fit.s, fit.oy + (kBottom - kSize) * fit.s, kStripW * fit.s, kSize * fit.s, 0.002f,

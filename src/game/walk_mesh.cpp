@@ -29,7 +29,12 @@ int mover_sqrt(int value) {
 }
 
 void mover_normalise(const int in[3], int out[3]) {
-  const u32 sum = static_cast<u32>(in[0] * in[0] + in[1] * in[1] + in[2] * in[2]);
+  // The squares are taken of 16-bit components: one beyond that range wraps, the sum comes out too small and the vector too long.
+  u32 sum = 0;
+  for (int i = 0; i < 3; ++i) {
+    const int low = static_cast<s16>(in[i]);
+    sum += static_cast<u32>(low * low);
+  }
   if (sum == 0) {
     out[0] = out[1] = out[2] = 0;
     return;

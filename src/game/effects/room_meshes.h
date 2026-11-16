@@ -18,6 +18,10 @@ namespace oc::effects {
 // One projected, ready-to-submit triangle (corner 3 repeats corner 2). `set` empty: untextured (the caller's white texture).
 struct RoomMeshTri {
   float x[4]{}, y[4]{}, u[4]{}, v[4]{};
+  // A textured face: each corner's packet texel coordinate (texel k is centred on k) and the face's place in `set`: the normalised position
+  // of the texture page origin (0, 1) and the size of one texel (2, 3), so u = texels[0] + texel_u * texels[2]. A texel size of 0 = none.
+  float texel_u[4]{}, texel_v[4]{};
+  float texels[4]{};
   u8 rgb[4][3]{};
   // GPU blend of ParticleBatch: 0 opaque, 1 B/2+F/2, 2 B+F, 3 B-F, 4 B+F/4.
   int blend = 0;

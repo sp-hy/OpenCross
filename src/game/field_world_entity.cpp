@@ -22,6 +22,12 @@ namespace {
 // SET_POSITION steps up to this many units per call are interpolated, larger ones are warps.
 constexpr float kGlideMax = 150.0f;
 
+// The whole-unit part of a coordinate as a script reads it: the coordinate in 1 / 65536 units with the fraction dropped, so 90.5
+// reads 90 and -90.5 reads -91.
+s32 whole_units(float coordinate) {
+  return static_cast<s32>(std::llround(static_cast<double>(coordinate) * 65536.0) >> 16);
+}
+
 }  // namespace
 
 void FieldWorld::update_entity(int ent) {
@@ -62,7 +68,7 @@ void FieldWorld::set_position_xyz(int ent, s32 x, s32 y, s32 z) {
 script::Vec3 FieldWorld::get_position(int ent) {
   if (ent < 0 || ent >= static_cast<int>(ents_.size())) return {};
   const ActorPose& pose = ents_[static_cast<size_t>(ent)].actor.current();
-  return {static_cast<s32>(std::lround(pose.x)), static_cast<s32>(std::lround(pose.y)), static_cast<s32>(std::lround(pose.z))};
+  return {whole_units(pose.x), whole_units(pose.y), whole_units(pose.z)};
 }
 
 void FieldWorld::set_facing(int ent, int angle) {
@@ -524,7 +530,7 @@ void FieldWorld::attach_entity(int ent, int target, int point) {
 
 // An entity whose walk-mesh attribute word has bit 0x800 is pushed every tick by (rcos(d), -rsin(d)) * A * 12 in
 // 16.16 (A = push strength, set by B5, room default 5: 3.75 units per tick), d = (attr & 0x700) << 1 (8 directions), on top of its
-// own walk; bit 0x1000 halves the move. Not pushed: inactive / free-height entities, entities with the no-push flag, and the
+// own walk; bit 0x1000 halves the move. Not pushed: inactive / free-height entities, followers the follow rules took this tick, and the
 // controlled entity while the input lock is set. The move goes through the walk-mesh collision like any other.
 void FieldWorld::step_push() {
   const WalkMesh& walk = view_.walk();
@@ -537,7 +543,7 @@ void FieldWorld::step_push() {
     const u32 attr = walk.flags(tri);
     if (!(attr & 0x800u)) continue;
     const script::Entity& script_ent = vm_.entity(i);
-    if ((script_ent.flags38 & 0x50u) || (script_ent.flags270 & 0x40000u)) continue;
+    if ((script_ent.flags38 & 0x50u) || (script_ent.flags270 & script::flag270::kTrailWalk) || ent_state.followed) continue;
     if (i == player && (vm_.global_flags() & script::gflag::kInputLock)) continue;
     const float direction = static_cast<float>((attr & 0x700u) << 1) * (2.0f * 3.14159265358979323846f / 4096.0f);
     float strength = static_cast<float>(push_strength_) * 12.0f * 4096.0f / 65536.0f;

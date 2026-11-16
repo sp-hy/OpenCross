@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <map>
 #include <set>
@@ -82,27 +83,56 @@ ShelfPacking shelf_pack(const std::vector<std::array<int, 2>>& sizes, int pad) {
   return out;
 }
 
-void bake_object_textures(assets::StageAsset& stage) {
+bool tiles_hold_window(const assets::StageAsset& stage, int part, const std::array<int, 4>& window) {
+  if (part < 0 || static_cast<size_t>(part) >= stage.parts.size()) return true;
+  for (const assets::StageSubMesh& sm : stage.parts[static_cast<size_t>(part)].submeshes) {
+    if (sm.object_texture < 0 || static_cast<size_t>(sm.object_texture) >= stage.object_textures.size()) continue;
+    const std::vector<std::array<int, 4>>& windows = stage.object_textures[static_cast<size_t>(sm.object_texture)].windows;
+    return std::find(windows.begin(), windows.end(), window) != windows.end();
+  }
+  return true;
+}
+
+void bake_object_textures(assets::StageAsset& stage, const TileUses* uses) {
   stage.tiles.clear();
   stage.tile_map = {};
   stage.object_textures.clear();
+  // Debug: OC_NO_BAKE leaves every asset on its raw atlases (the reference picture of a before / after pixel comparison).
+  static const bool no_bake = std::getenv("OC_NO_BAKE") != nullptr;
+  if (no_bake) {
+    for (assets::StagePart& part : stage.parts)
+      for (assets::StageSubMesh& sm : part.submeshes) sm.object_texture = -1;
+    stage.atlases_on_demand = false;
+    return;
+  }
+  stage.atlases_on_demand = uses != nullptr;
   constexpr int kPad = 1;
   // scroll_meshes: meshes drawn by an op-36 UV-scroll emitter. scroll_windows: mesh -> its op-36 texture window (off_u, off_v, win_w,
-  // win_h; win 0 = the 256 page).
+  // win_h; win 0 = the 256 page). all_windows: with `uses`, every window of the mesh.
   std::set<std::string> scroll_meshes;
   std::map<std::string, std::array<int, 4>> scroll_windows;
-  for (const assets::StageEmitter& em : stage.emitters)
-    if ((em.ext & 1) && !em.mesh.empty()) {
-      scroll_meshes.insert(em.mesh);
-      scroll_windows[em.mesh] = em.uv_window;
-    }
-  // The window rect of a scrolling mesh in atlas texels, from the page origin (ox, oy): the GPU wraps every texel of such a mesh inside it
+  std::map<std::string, std::vector<std::array<int, 4>>> all_windows;
+  if (uses) {
+    all_windows = uses->scroll;
+    for (const auto& [mesh, windows] : all_windows)
+      if (!windows.empty()) scroll_meshes.insert(mesh);
+  } else {
+    for (const assets::StageEmitter& em : stage.emitters)
+      if ((em.ext & 1) && !em.mesh.empty()) {
+        scroll_meshes.insert(em.mesh);
+        scroll_windows[em.mesh] = em.uv_window;
+        all_windows[em.mesh] = {em.uv_window};
+      }
+  }
+  // The rect of a texture window in atlas texels, from the page origin (ox, oy): the GPU wraps every texel of a scrolling mesh inside it
   // (stage_pipeline.cpp: w = off + mod(u - off, win)), so it is the only art the mesh can ever show (not the whole page).
-  auto window_rect = [&](const std::string& mesh, int ox, int oy, const import::Image& im) {
-    const std::array<int, 4> window = scroll_windows.count(mesh) ? scroll_windows[mesh] : std::array<int, 4>{0, 0, 0, 0};
+  auto rect_of_window = [](const std::array<int, 4>& window, int ox, int oy, const import::Image& im) {
     const int ww = window[2] > 0 ? window[2] : 256, wh = window[3] > 0 ? window[3] : 256;
     const int wx = ox + (window[2] > 0 ? window[0] : 0), wy = oy + (window[3] > 0 ? window[1] : 0);
     return IRect{std::max(wx, 0), std::max(wy, 0), std::min(wx + ww - 1, static_cast<int>(im.width) - 1), std::min(wy + wh - 1, static_cast<int>(im.height) - 1)};
+  };
+  auto window_rect = [&](const std::string& mesh, int ox, int oy, const import::Image& im) {
+    return rect_of_window(scroll_windows.count(mesh) ? scroll_windows[mesh] : std::array<int, 4>{0, 0, 0, 0}, ox, oy, im);
   };
   // The GPU's wrap of a packet texel into the window (win 0: the 256 page).
   auto wrap_into = [&](const std::string& mesh, int raw, int axis) {
@@ -110,24 +140,31 @@ void bake_object_textures(assets::StageAsset& stage) {
     const int off = window[axis], win = window[2 + axis];
     return win > 0 ? off + (((raw - off) % win) + win) % win : raw & 255;
   };
-  // Atlas texel of a textured vertex.
+  // Atlas texel of a textured vertex. With `uses` a corner off the atlas (a page that reaches past the asset's VRAM area) keeps its place: the rect then
+  // reaches off the atlas too and its tile holds what the sampler shows there, the edge texels repeated, so the face keeps its picture.
   auto texel = [&](const assets::StageVertex& vertex, int tex, int& x, int& y) {
     const import::Image& im = stage.textures[static_cast<size_t>(tex)].image;
-    x = std::clamp(static_cast<int>(std::lround(vertex.uv[0] * static_cast<float>(im.width) - 0.5f)), 0, static_cast<int>(im.width) - 1);
-    y = std::clamp(static_cast<int>(std::lround((1.0f - vertex.uv[1]) * static_cast<float>(im.height) - 0.5f)), 0, static_cast<int>(im.height) - 1);
+    x = static_cast<int>(std::lround(vertex.uv[0] * static_cast<float>(im.width) - 0.5f));
+    y = static_cast<int>(std::lround((1.0f - vertex.uv[1]) * static_cast<float>(im.height) - 0.5f));
+    if (uses) return;
+    x = std::clamp(x, 0, static_cast<int>(im.width) - 1);
+    y = std::clamp(y, 0, static_cast<int>(im.height) - 1);
   };
   auto usable = [&](const assets::StageSubMesh& sm) {
-    return sm.texture >= 0 && static_cast<size_t>(sm.texture) < stage.textures.size() && rgba_ok(stage.textures[static_cast<size_t>(sm.texture)].image);
+    return sm.texture >= 0 && static_cast<size_t>(sm.texture) < stage.textures.size() && rgba_ok(stage.textures[static_cast<size_t>(sm.texture)].image) &&
+           !(uses && sm.direct_page >= 0);
   };
   // 1. every texel rect the faces sample, stage-wide per atlas (scrolling parts: the whole page of each corner)
   std::vector<std::vector<IRect>> want(stage.textures.size());
   // A mesh no stage emitter names is never spawned (StageScene maps emitter mesh names to parts), so its tiles are not "used by the level":
   // skipped here and below (its submeshes keep object_texture = -1 = the raw atlas, should anything ever draw it).
-  auto unused_part = [](const assets::StagePart& part) { return !part.ground && part.emitters.empty(); };
+  auto unused_part = [&](const assets::StagePart& part) { return !uses && !part.ground && part.emitters.empty(); };
   for (auto& part : stage.parts) {
     for (auto& sm : part.submeshes) sm.object_texture = -1;
     if (unused_part(part)) continue;
     const bool scrolls = scroll_meshes.count(part.name) != 0;
+    // With `uses`, a scrolling part's one rect per (atlas, page origin): its faces' texels and its windows.
+    std::map<std::tuple<int, int, int>, IRect> spans;
     for (const assets::StageSubMesh& sm : part.submeshes) {
       if (!usable(sm)) continue;
       const import::Image& im = stage.textures[static_cast<size_t>(sm.texture)].image;
@@ -145,7 +182,17 @@ void bake_object_textures(assets::StageAsset& stage) {
           texel(vertex, sm.texture, x, y);
           rect = {std::min(rect.x0, x), std::min(rect.y0, y), std::max(rect.x1, x), std::max(rect.y1, y)};
           // Page origin = texel - packet texel; the mesh samples only its texture window of that page.
-          if (scrolls) {
+          if (scrolls && uses) {
+            const int ox = x - static_cast<int>(std::lround(vertex.uv_raw[0])), oy = y - static_cast<int>(std::lround(vertex.uv_raw[1]));
+            const auto [it, fresh] = spans.try_emplace({sm.texture, ox, oy}, IRect{x, y, x, y});
+            IRect& span = it->second;
+            span = {std::min(span.x0, x), std::min(span.y0, y), std::max(span.x1, x), std::max(span.y1, y)};
+            if (fresh)
+              for (const std::array<int, 4>& window : all_windows[part.name]) {
+                const IRect page = rect_of_window(window, ox, oy, im);
+                if (page.x1 >= page.x0 && page.y1 >= page.y0) span = {std::min(span.x0, page.x0), std::min(span.y0, page.y0), std::max(span.x1, page.x1), std::max(span.y1, page.y1)};
+              }
+          } else if (scrolls) {
             const int ox = x - static_cast<int>(std::lround(vertex.uv_raw[0])), oy = y - static_cast<int>(std::lround(vertex.uv_raw[1]));
             pages.push_back(window_rect(part.name, ox, oy, im));
           }
@@ -157,6 +204,7 @@ void bake_object_textures(assets::StageAsset& stage) {
           if (page.x1 >= page.x0 && page.y1 >= page.y0) want[static_cast<size_t>(sm.texture)].push_back(page);
       }
     }
+    for (const auto& [key, span] : spans) want[static_cast<size_t>(std::get<0>(key))].push_back(span);
   }
   // 2. merge, cut the tiles, de-duplicate by content
   struct TRect {
@@ -176,9 +224,16 @@ void bake_object_textures(assets::StageAsset& stage) {
       tile.image.width = static_cast<u32>(tile.w);
       tile.image.height = static_cast<u32>(tile.h);
       tile.image.pixels.resize(static_cast<size_t>(tile.w) * static_cast<size_t>(tile.h) * 4);
-      for (int y = 0; y < tile.h; ++y)
-        std::memcpy(&tile.image.pixels[static_cast<size_t>(y) * static_cast<size_t>(tile.w) * 4], &src.pixels[(static_cast<size_t>(rect.y0 + y) * src.width + static_cast<size_t>(rect.x0)) * 4],
-                    static_cast<size_t>(tile.w) * 4);
+      const bool inside = rect.x0 >= 0 && rect.y0 >= 0 && rect.x1 < static_cast<int>(src.width) && rect.y1 < static_cast<int>(src.height);
+      for (int y = 0; y < tile.h; ++y) {
+        const size_t row = static_cast<size_t>(std::clamp(rect.y0 + y, 0, static_cast<int>(src.height) - 1)) * src.width;
+        if (inside) {
+          std::memcpy(&tile.image.pixels[static_cast<size_t>(y) * static_cast<size_t>(tile.w) * 4], &src.pixels[(row + static_cast<size_t>(rect.x0)) * 4], static_cast<size_t>(tile.w) * 4);
+          continue;
+        }
+        for (int x = 0; x < tile.w; ++x)
+          copy_px(tile.image.pixels, tile.image.width, x, y, &src.pixels[(row + static_cast<size_t>(std::clamp(rect.x0 + x, 0, static_cast<int>(src.width) - 1))) * 4]);
+      }
       tile.hash = texture_content_tag(tile.image.width, tile.image.height, tile.image.pixels.data());
       const assets::StageTile::Source srcpos{static_cast<int>(atlas_index), rect.x0, rect.y0};
       auto it = by_hash.find(tile.hash);
@@ -202,12 +257,19 @@ void bake_object_textures(assets::StageAsset& stage) {
   for (size_t i = 0; i < rects.size(); ++i) {
     const size_t atlas_index = static_cast<size_t>(rects[i].atlas);
     if (id_map[atlas_index].empty()) id_map[atlas_index].assign(static_cast<size_t>(stage.textures[atlas_index].image.width) * stage.textures[atlas_index].image.height, -1);
-    for (int y = rects[i].bounds.y0; y <= rects[i].bounds.y1; ++y)
-      for (int x = rects[i].bounds.x0; x <= rects[i].bounds.x1; ++x) id_map[atlas_index][static_cast<size_t>(y) * stage.textures[atlas_index].image.width + static_cast<size_t>(x)] = static_cast<int>(i);
+    const int atlas_w = static_cast<int>(stage.textures[atlas_index].image.width), atlas_h = static_cast<int>(stage.textures[atlas_index].image.height);
+    for (int y = std::max(rects[i].bounds.y0, 0); y <= std::min(rects[i].bounds.y1, atlas_h - 1); ++y)
+      for (int x = std::max(rects[i].bounds.x0, 0); x <= std::min(rects[i].bounds.x1, atlas_w - 1); ++x) id_map[atlas_index][static_cast<size_t>(y) * static_cast<size_t>(atlas_w) + static_cast<size_t>(x)] = static_cast<int>(i);
   }
   auto find_rect = [&](int atlas, int x, int y) -> int {
     const auto& atlas_map = id_map[static_cast<size_t>(atlas)];
-    return atlas_map.empty() ? -1 : atlas_map[static_cast<size_t>(y) * stage.textures[static_cast<size_t>(atlas)].image.width + static_cast<size_t>(x)];
+    if (atlas_map.empty()) return -1;
+    const import::Image& im = stage.textures[static_cast<size_t>(atlas)].image;
+    if (x >= 0 && y >= 0 && x < static_cast<int>(im.width) && y < static_cast<int>(im.height)) return atlas_map[static_cast<size_t>(y) * im.width + static_cast<size_t>(x)];
+    // A texel off the atlas: the rect that reaches it.
+    for (size_t i = 0; i < rects.size(); ++i)
+      if (rects[i].atlas == atlas && x >= rects[i].bounds.x0 && x <= rects[i].bounds.x1 && y >= rects[i].bounds.y0 && y <= rects[i].bounds.y1) return static_cast<int>(i);
+    return -1;
   };
   // 3. one image per part
   // faces_per_object: tile -> triangles.
@@ -230,8 +292,8 @@ void bake_object_textures(assets::StageAsset& stage) {
           const assets::StageVertex& vertex = part.vertices[part.indices[sm.first_index + k + static_cast<u32>(corner)]];
           int x, y;
           texel(vertex, sm.texture, x, y);
-          // A scrolling corner outside its window wraps into it (the window is the rect).
-          if (scroll_meshes.count(part.name)) {
+          // A scrolling corner outside its window wraps into it (the window is the rect). With `uses` the rect holds the corner itself.
+          if (!uses && scroll_meshes.count(part.name)) {
             const int ru = static_cast<int>(std::lround(vertex.uv_raw[0])), rv = static_cast<int>(std::lround(vertex.uv_raw[1]));
             const import::Image& im = stage.textures[static_cast<size_t>(sm.texture)].image;
             x = std::clamp(x - ru + wrap_into(part.name, ru, 0), 0, static_cast<int>(im.width) - 1);
@@ -248,6 +310,7 @@ void bake_object_textures(assets::StageAsset& stage) {
     assets::StageObjectTexture obj;
     obj.part = static_cast<int>(pi);
     obj.scrolls = scroll_meshes.count(part.name) != 0;
+    if (obj.scrolls) obj.windows = all_windows[part.name];
     {
       char nm[32];
       std::snprintf(nm, sizeof nm, "obj_%02d_%s", static_cast<int>(pi), part.ground ? "ground" : "scenery");
@@ -291,7 +354,7 @@ void bake_object_textures(assets::StageAsset& stage) {
       // A scrolling mesh's packet texel may lie outside its window (the GPU wraps it in): look the rect up at the wrapped position, but keep
       // the vertex at its unwrapped place relative to the window (the shader derives the page origin as uv - uv_raw and wraps from there).
       int lx = x, ly = y;
-      if (obj.scrolls) {
+      if (obj.scrolls && !uses) {
         const int ru = static_cast<int>(std::lround(vertex.uv_raw[0])), rv = static_cast<int>(std::lround(vertex.uv_raw[1]));
         const import::Image& im = stage.textures[static_cast<size_t>(tex)].image;
         lx = std::clamp(x - ru + wrap_into(part.name, ru, 0), 0, static_cast<int>(im.width) - 1);
@@ -328,6 +391,13 @@ void bake_object_textures(assets::StageAsset& stage) {
     obj.base_w = pk.w;
     obj.base_h = pk.h;
     for (const assets::StageVertex& vertex : part.vertices) obj.base_uv.push_back({vertex.uv[0], vertex.uv[1], vertex.uv_scale[0], vertex.uv_scale[1]});
+    if (uses) {
+      for (const assets::StageVertex& vertex : orig) obj.atlas_uv.push_back({vertex.uv[0], vertex.uv[1], vertex.uv_scale[0], vertex.uv_scale[1]});
+      // The duplicates, in the order they were appended.
+      std::vector<u32> source(part.vertices.size() - orig.size());
+      for (const auto& [key, index] : dups) source[index - orig.size()] = key.first;
+      for (const u32 old : source) obj.atlas_uv.push_back({orig[old].uv[0], orig[old].uv[1], orig[old].uv_scale[0], orig[old].uv_scale[1]});
+    }
     stage.object_textures.push_back(std::move(obj));
     faces_per_object.push_back(std::move(faces));
   }
@@ -666,11 +736,49 @@ u32 dump_tiles(const assets::StageAsset& stage, const std::string& group, bool f
   return written;
 }
 
-void apply_tile_textures(assets::StageAsset& stage, const std::string& group) {
+void apply_tile_textures(assets::StageAsset& stage, const std::string& group, bool atlas_files) {
   if (group.empty() || stage.tiles.empty()) return;
   // Re-runnable: with no active replacement (a mod switched off) the objects go back to their original images.
   const bool active = texture_registry::active();
-  recompose_object_textures(stage, [&](const assets::StageTile& tile, u32& w, u32& h, std::vector<u8>& rgba) { return active && texture_registry::replace_tile(group, tile.hash, w, h, rgba); });
+  // Replacements of the whole atlases, read once (the tile replacer runs on worker threads).
+  struct Atlas {
+    u32 w = 0, h = 0;
+    std::vector<u8> rgba;
+  };
+  std::vector<Atlas> atlases(stage.textures.size());
+  if (active && atlas_files && texture_registry::has_whole_images(group))
+    for (size_t i = 0; i < stage.textures.size(); ++i) {
+      const assets::StageTexture& texture = stage.textures[i];
+      if (!rgba_ok(texture.image) || stage.tile_map.id_map.size() <= i || stage.tile_map.id_map[i].empty()) continue;
+      Atlas& atlas = atlases[i];
+      atlas.w = texture.image.width, atlas.h = texture.image.height;
+      atlas.rgba.assign(texture.image.pixels.begin(), texture.image.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(atlas.w) * atlas.h * 4));
+      if (!texture_registry::replace(stage_group_key(group, static_cast<int>(i), texture.mode, texture.clut_x, texture.clut_y, atlas.w, atlas.h, atlas.rgba.data()), atlas.w, atlas.h, atlas.rgba) ||
+          atlas.rgba.size() < size_t(atlas.w) * atlas.h * 4)
+        atlas = {};
+    }
+  // A tile's part of its atlas's replacement, at the replacement's scale.
+  auto from_atlas = [&](const assets::StageTile& tile, u32& w, u32& h, std::vector<u8>& rgba) {
+    for (const assets::StageTile::Source& source : tile.sources) {
+      const Atlas& atlas = atlases[static_cast<size_t>(source.atlas)];
+      if (atlas.rgba.empty()) continue;
+      const import::Image& original = stage.textures[static_cast<size_t>(source.atlas)].image;
+      // A tile that reaches off the atlas repeats the replacement's edge texels there, as it repeats the original's.
+      const long long x0 = static_cast<long long>(source.sx) * atlas.w / original.width, y0 = static_cast<long long>(source.sy) * atlas.h / original.height;
+      w = static_cast<u32>(std::max(1LL, static_cast<long long>(tile.w) * atlas.w / original.width));
+      h = static_cast<u32>(std::max(1LL, static_cast<long long>(tile.h) * atlas.h / original.height));
+      rgba.resize(size_t(w) * h * 4);
+      for (u32 y = 0; y < h; ++y) {
+        const size_t row = static_cast<size_t>(std::clamp(y0 + y, 0LL, static_cast<long long>(atlas.h) - 1)) * atlas.w;
+        for (u32 x = 0; x < w; ++x) std::memcpy(&rgba[(size_t(y) * w + x) * 4], &atlas.rgba[(row + static_cast<size_t>(std::clamp(x0 + x, 0LL, static_cast<long long>(atlas.w) - 1))) * 4], 4);
+      }
+      return true;
+    }
+    return false;
+  };
+  recompose_object_textures(stage, [&](const assets::StageTile& tile, u32& w, u32& h, std::vector<u8>& rgba) {
+    return active && (texture_registry::replace_tile(group, tile.hash, w, h, rgba) || (atlas_files && from_atlas(tile, w, h, rgba)));
+  });
   // [Enhancements] EdgeBlend strips of every object (drawn by StagePipeline when render::edge_blend()).
   build_tile_seams(stage);
 }

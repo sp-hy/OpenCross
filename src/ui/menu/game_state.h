@@ -53,6 +53,7 @@ struct MenuRules {
   // Consumable stack (placed up to 5 at a time) / innate-colour-only element.
   bool el_stack(int id) const;
   bool el_innate_only(int id) const;
+  bool el_summon(int id) const;
   int el_level(int id) const;
   int el_colour(int id) const;
   // Level window: legal in grid row r (0-based) iff L-hi <= r+1 <= L+lo.
@@ -159,7 +160,8 @@ class GameState {
 
   Why can_place(int character, int row, int col, int id) const;
   Why can_remove(int character, int row, int col) const;
-  Why place(int character, int row, int col, int id);
+  // `keep_summon_copy` = the Cheats tab's "More than one summon": a summon is placed without taking its copy from the stock.
+  Why place(int character, int row, int col, int id, bool keep_summon_copy = false);
   Why remove(int character, int row, int col);
   Why swap(int character, int row_a, int col_a, int row_b, int col_b);
   // The menu's Remove All: unlocked cells only, each through remove(). Returns the number of cells emptied.

@@ -13,6 +13,8 @@
 #include <vector>
 
 #include "assets/battle_stage.h"
+#include "game/battle/battle_fx.h"
+#include "game/battle/fx_mesh_tiles.h"
 #include "game/battle/model_table.h"
 #include "game/title_backdrop.h"
 #include "import/battle_stage.h"
@@ -148,6 +150,242 @@ static void scan_morph_bake(vfs::Vfs& files) {
   std::printf("morph bake scan: %d stage(s) + title, %d op-37 emitter(s) (%d in the title), %zu resolved pair(s), %zu with duplicated vertices, %zu broken (control: %zu part(s) of all stages get duplicates, %zu morph-base sub-mesh(es) baked)\n", stages, morph_ops + title_morphs,
               title_morphs, rows.size(), with_dups, broken, dup_parts, baked_bases);
   CHECK(broken == 0);
+}
+
+// ---- the battle effect packs' meshes: the tile bake over every pack and the resident meshes (needs the game install; SKIP without one)
+// Triangles of a baked asset that do not show the texels they showed before the bake. A baked triangle must be the atlas triangle moved by a whole
+// number of texels (the same offset at its three corners), and the object image must hold the atlas texels under it: checked on a grid over the
+// triangle's texel bounds, the atlas read as the sampler reads it (clamped at its edges).
+static size_t moved_triangles(const assets::StageAsset& raw, const assets::StageAsset& baked) {
+  size_t moved = 0;
+  for (size_t pi = 0; pi < raw.parts.size() && pi < baked.parts.size(); ++pi) {
+    const assets::StagePart& raw_part = raw.parts[pi];
+    const assets::StagePart& part = baked.parts[pi];
+    for (const assets::StageSubMesh& sm : part.submeshes) {
+      if (sm.object_texture < 0) continue;
+      const import::Image& atlas = raw.textures[static_cast<size_t>(sm.texture)].image;
+      const import::Image& image = baked.object_textures[static_cast<size_t>(sm.object_texture)].image;
+      const int atlas_w = static_cast<int>(atlas.width), atlas_h = static_cast<int>(atlas.height), image_w = static_cast<int>(image.width), image_h = static_cast<int>(image.height);
+      for (u32 k = sm.first_index; k + 2 < sm.first_index + sm.index_count; k += 3) {
+        int x0 = 1 << 20, y0 = 1 << 20, x1 = -(1 << 20), y1 = -(1 << 20), dx = 0, dy = 0;
+        bool same = true;
+        for (u32 corner = 0; corner < 3; ++corner) {
+          const assets::StageVertex& before = raw_part.vertices[raw_part.indices[k + corner]];
+          const assets::StageVertex& after = part.vertices[part.indices[k + corner]];
+          const int ax = static_cast<int>(std::lround(before.uv[0] * static_cast<float>(atlas_w) - 0.5f)), ay = static_cast<int>(std::lround((1.0f - before.uv[1]) * static_cast<float>(atlas_h) - 0.5f));
+          const int ox = static_cast<int>(std::lround(after.uv[0] * static_cast<float>(image_w) - 0.5f)), oy = static_cast<int>(std::lround((1.0f - after.uv[1]) * static_cast<float>(image_h) - 0.5f));
+          if (corner == 0) dx = ox - ax, dy = oy - ay;
+          same = same && ox - ax == dx && oy - ay == dy;
+          x0 = std::min(x0, ax), y0 = std::min(y0, ay), x1 = std::max(x1, ax), y1 = std::max(y1, ay);
+        }
+        constexpr int kGrid = 4;
+        for (int row = 0; same && row <= kGrid; ++row)
+          for (int col = 0; same && col <= kGrid; ++col) {
+            const int x = x0 + (x1 - x0) * col / kGrid, y = y0 + (y1 - y0) * row / kGrid;
+            const int ox = x + dx, oy = y + dy;
+            same = ox >= 0 && oy >= 0 && ox < image_w && oy < image_h &&
+                   std::memcmp(&atlas.pixels[(static_cast<size_t>(std::clamp(y, 0, atlas_h - 1)) * atlas.width + static_cast<size_t>(std::clamp(x, 0, atlas_w - 1))) * 4],
+                               &image.pixels[(static_cast<size_t>(oy) * image.width + static_cast<size_t>(ox)) * 4], 4) == 0;
+          }
+        moved += same ? 0 : 1;
+      }
+    }
+  }
+  return moved;
+}
+
+struct FxMeshScan {
+  int mesh_packs = 0;
+  size_t tiles = 0, objects = 0, scroll_objects = 0, dup_parts = 0, direct_subs = 0, moved = 0, unstable = 0;
+  size_t morph_pairs = 0, morph_broken = 0, atlas_windows = 0;
+  std::set<std::string> names;
+};
+
+// One asset: `raw` as loaded, `baked` after the bake, `again` a second bake of a copy. `emitters` = the packs whose emitters draw it.
+static void scan_fx_asset(const std::string& label, const assets::StageAsset& raw, const assets::StageAsset& baked, const assets::StageAsset& again,
+                          const std::vector<const assets::RoomEffects*>& emitters, FxMeshScan& scan) {
+  ++scan.mesh_packs;
+  scan.tiles += baked.tiles.size();
+  scan.objects += baked.object_textures.size();
+  for (const assets::StageTile& tile : baked.tiles) scan.names.insert(tile.hash);
+  for (const assets::StageObjectTexture& object : baked.object_textures) scan.scroll_objects += object.scrolls ? 1 : 0;
+  for (size_t i = 0; i < raw.parts.size(); ++i) {
+    scan.dup_parts += baked.parts[i].vertices.size() != raw.parts[i].vertices.size() ? 1 : 0;
+    for (const assets::StageSubMesh& sm : baked.parts[i].submeshes) {
+      scan.direct_subs += sm.direct_page >= 0 ? 1 : 0;
+      // Every textured indexed sub-mesh is baked, the direct-colour ones are not.
+      const bool textured = sm.texture >= 0 && !raw.textures[static_cast<size_t>(sm.texture)].image.indexed;
+      CHECK((sm.object_texture >= 0) == (textured && sm.direct_page < 0));
+    }
+  }
+  const size_t moved = moved_triangles(raw, baked);
+  if (moved) std::printf("  effect meshes %s: %zu triangle(s) show other texels after the bake\n", label.c_str(), moved);
+  scan.moved += moved;
+  bool stable = again.tiles.size() == baked.tiles.size() && again.object_textures.size() == baked.object_textures.size();
+  for (size_t i = 0; stable && i < baked.tiles.size(); ++i) stable = again.tiles[i].hash == baked.tiles[i].hash && again.tiles[i].name == baked.tiles[i].name;
+  for (size_t i = 0; stable && i < baked.object_textures.size(); ++i) stable = again.object_textures[i].image.pixels == baked.object_textures[i].image.pixels;
+  scan.unstable += stable ? 0 : 1;
+  // Op-37 pairs: base and target keep the same vertex count, and the appended duplicates copy the same source vertices in the same order.
+  const auto part_of = [](const assets::StageAsset& asset, const std::string& name) -> const assets::StagePart* {
+    for (const assets::StagePart& part : asset.parts)
+      if (part.name == name) return &part;
+    return nullptr;
+  };
+  std::set<std::pair<std::string, std::string>> pairs;
+  for (const assets::RoomEffects* pack : emitters)
+    for (const assets::Emitter& emitter : pack->emitters) {
+      std::string base, target;
+      for (const assets::EffectOp& op : emitter.ops) {
+        if (const auto* sprite = std::get_if<assets::FxSprite>(&op.arg); sprite && op.op == 0x05) base = sprite->name;
+        if (const auto* morph = std::get_if<assets::FxMorph>(&op.arg); morph && op.op == 0x37) target = morph->name;
+      }
+      if (!base.empty() && !target.empty()) pairs.insert({base, target});
+    }
+  for (const auto& [base, target] : pairs) {
+    const assets::StagePart* raw_base = part_of(raw, base);
+    const assets::StagePart* raw_target = part_of(raw, target);
+    const assets::StagePart* baked_base = part_of(baked, base);
+    const assets::StagePart* baked_target = part_of(baked, target);
+    if (!raw_base || !raw_target || raw_base->vertices.size() != raw_target->vertices.size()) continue;
+    ++scan.morph_pairs;
+    bool same = baked_base->vertices.size() == baked_target->vertices.size();
+    for (size_t k = raw_base->vertices.size(); same && k < baked_base->vertices.size(); ++k)
+      same = source_of(raw_base->vertices, baked_base->vertices[k]) == source_of(raw_target->vertices, baked_target->vertices[k]);
+    if (!same) {
+      ++scan.morph_broken;
+      std::printf("  effect meshes %s: morph %s -> %s broken by the bake (%zu / %zu vertices, raw %zu)\n", label.c_str(), base.c_str(), target.c_str(), baked_base->vertices.size(),
+                  baked_target->vertices.size(), raw_base->vertices.size());
+    }
+  }
+}
+
+static void scan_fx_mesh_bake(vfs::Vfs& files, const fs::path& tmp) {
+  game::BattleFxLibrary lib;
+  if (!lib.init(files, false)) {
+    std::printf("effect mesh bake scan: SKIP (no effect slot table)\n");
+    return;
+  }
+  FxMeshScan scan;
+  const auto resident = lib.resident();
+  std::vector<const assets::RoomEffects*> resident_emitters{&lib.particle_lib()};
+  if (resident)
+    for (const auto& pack : resident->packs) resident_emitters.push_back(pack.get());
+  if (resident && resident->meshes) {
+    const assets::StageAsset raw = *resident->meshes;
+    assets::StageAsset again = raw;
+    CHECK(game::bake_fx_resident_meshes(*resident, lib.particle_lib()) > 0.0);
+    CHECK(game::bake_fx_resident_meshes(*resident, lib.particle_lib()) == 0.0);
+    const render::TileUses uses = game::fx_mesh_uses(resident_emitters);
+    render::bake_object_textures(again, &uses);
+    scan_fx_asset("resident", raw, *resident->meshes, again, resident_emitters, scan);
+  }
+  std::shared_ptr<const game::FxPack> golem;
+  for (const auto& slot : lib.slots()) {
+    const auto pack = lib.get(slot.eid);
+    if (!pack) continue;
+    if (slot.prd.ends_with("/golem.prd")) golem = pack;
+    std::vector<const assets::RoomEffects*> emitters{&pack->fx};
+    emitters.insert(emitters.end(), resident_emitters.begin(), resident_emitters.end());
+    // A window the pack's emitters scroll a resident mesh through that the resident tiles do not hold: that object is drawn from the atlases.
+    if (resident && resident->meshes)
+      for (const auto& [mesh, windows] : game::fx_mesh_uses({&pack->fx}).scroll) {
+        size_t part = 0;
+        if (pack->mesh_asset(mesh, part) != resident->meshes.get()) continue;
+        for (const std::array<int, 4>& window : windows)
+          if (!render::tiles_hold_window(*resident->meshes, static_cast<int>(part), window)) {
+            ++scan.atlas_windows;
+            std::printf("  effect pack %d (%s): resident mesh %s scrolled through window %d %d %d %d: drawn from the atlases\n", slot.eid, slot.prd.c_str(), mesh.c_str(), window[0], window[1],
+                        window[2], window[3]);
+          }
+      }
+    if (!pack->meshes) continue;
+    const assets::StageAsset raw = *pack->meshes;
+    assets::StageAsset again = raw;
+    game::bake_fx_pack_meshes(*pack, lib.particle_lib());
+    const render::TileUses uses = game::fx_mesh_uses(emitters);
+    render::bake_object_textures(again, &uses);
+    scan_fx_asset(std::to_string(slot.eid) + " (" + slot.prd + ")", raw, *pack->meshes, again, emitters, scan);
+  }
+  std::printf("effect mesh bake scan: %d asset(s), %zu tile(s) in %zu object(s) (%zu distinct, %zu scrolling object(s)), %zu part(s) with duplicated vertices, %zu direct-colour "
+              "sub-mesh(es) left on the atlas, %zu morph pair(s), %zu broken, %zu moved triangle(s), %zu unstable, %zu window(s) drawn from the atlases\n",
+              scan.mesh_packs, scan.tiles, scan.objects, scan.names.size(), scan.scroll_objects, scan.dup_parts, scan.direct_subs, scan.morph_pairs, scan.morph_broken, scan.moved, scan.unstable,
+              scan.atlas_windows);
+  CHECK(scan.mesh_packs > 0 && scan.morph_broken == 0 && scan.moved == 0 && scan.unstable == 0);
+
+  // Dump -> mod -> replace with a real pack: one tile file at twice the size, then the whole atlas (the files the meshes had before the tiles).
+  if (!golem || !golem->meshes || golem->meshes->tiles.empty()) {
+    std::printf("effect mesh round trip: SKIP (no golem.prd meshes)\n");
+    return;
+  }
+  assets::StageAsset& asset = *golem->meshes;
+  const assets::StageAsset pristine = asset;
+  render::texture_registry::set_dump_root(tmp / "fxdump");
+  render::texture_registry::begin_dump();
+  CHECK(render::dump_tiles(asset, asset.tex_group, true) == asset.tiles.size());
+  size_t largest = 0;
+  for (size_t i = 0; i < asset.tiles.size(); ++i) {
+    CHECK(fs::is_regular_file(tmp / "fxdump" / "effect_mesh" / ("tile_" + asset.tiles[i].hash + ".png")));
+    if (asset.tiles[i].w * asset.tiles[i].h > asset.tiles[largest].w * asset.tiles[largest].h) largest = i;
+  }
+  const assets::StageTile& tile = asset.tiles[largest];
+  const auto solid = [&](const char* name, u32 w, u32 h, u8 r, u8 g, u8 b) {
+    std::vector<u8> art(size_t(w) * h * 4);
+    for (size_t i = 0; i < art.size(); i += 4) art[i] = r, art[i + 1] = g, art[i + 2] = b, art[i + 3] = 255;
+    CHECK(render::texture_registry::dump_forced({"scratch", "", -1, name}, w, h, art.data()));
+    return tmp / "fxdump" / "scratch" / (std::string(name) + ".png");
+  };
+  const assets::StageTexture& atlas = asset.textures[static_cast<size_t>(tile.sources[0].atlas)];
+  const fs::path tile_art = solid("tile", static_cast<u32>(tile.w) * 2, static_cast<u32>(tile.h) * 2, 10, 20, 30);
+  const fs::path atlas_art = solid("atlas", atlas.image.width * 2, atlas.image.height * 2, 40, 50, 60);
+  fs::create_directories(tmp / "fxmods" / "one_tile" / "textures" / "effect_mesh");
+  fs::create_directories(tmp / "fxmods" / "whole_atlas" / "textures" / "effect_mesh");
+  fs::copy_file(tile_art, tmp / "fxmods" / "one_tile" / "textures" / "effect_mesh" / ("tile_" + tile.hash + ".png"));
+  fs::copy_file(atlas_art, tmp / "fxmods" / "whole_atlas" / "textures" / "effect_mesh" / (render::texture_content_tag(atlas.image.width, atlas.image.height, atlas.image.pixels.data()) + ".png"));
+  vfs::Vfs mod_files;
+  vfs::ModManager mods;
+  mods.scan(mod_files, tmp / "fxmods", {});
+  CHECK(mods.mods().size() == 2 && mods.mods()[0].unmatched.empty() && mods.mods()[1].unmatched.empty());
+  render::texture_registry::bind(&mod_files);
+  render::texture_registry::configure({false, true});
+  // The colour of the composed texel that shows atlas texel (x, y), and the scale of the object holding it.
+  const auto shown = [&](int atlas_index, int x, int y, float& scale) {
+    render::TileTexel texel;
+    if (!render::tile_lookup(asset, atlas_index, x, y, texel)) return std::array<u8, 3>{0, 0, 0};
+    const assets::StageObjectTexture& object = asset.object_textures[static_cast<size_t>(texel.object)];
+    scale = object.scale;
+    const u8* px = &object.image.pixels[(static_cast<size_t>(texel.py) * object.image.width + static_cast<size_t>(texel.px)) * 4];
+    return std::array<u8, 3>{px[0], px[1], px[2]};
+  };
+  const int tx = tile.sources[0].sx + tile.w / 2, ty = tile.sources[0].sy + tile.h / 2;
+  float scale = 0;
+  for (vfs::Mod& mod : mods.mods()) mod.enabled = mod.name == "one_tile";
+  mods.apply(mod_files, vfs::ModArt::Modded);
+  render::apply_tile_textures(asset, asset.tex_group, true);
+  CHECK(shown(tile.sources[0].atlas, tx, ty, scale) == (std::array<u8, 3>{10, 20, 30}) && scale == 2.0f);
+  size_t composed = 0;
+  for (const assets::StageObjectTexture& object : asset.object_textures) composed += object.composed ? 1 : 0;
+  CHECK(composed >= 1 && composed <= tile.users.size());
+  // The whole-atlas file feeds every tile cut from that atlas; a tile's own file wins over it.
+  for (vfs::Mod& mod : mods.mods()) mod.enabled = true;
+  mods.apply(mod_files, vfs::ModArt::Modded);
+  render::apply_tile_textures(asset, asset.tex_group, true);
+  CHECK(shown(tile.sources[0].atlas, tx, ty, scale) == (std::array<u8, 3>{10, 20, 30}));
+  for (vfs::Mod& mod : mods.mods()) mod.enabled = mod.name == "whole_atlas";
+  mods.apply(mod_files, vfs::ModArt::Modded);
+  render::apply_tile_textures(asset, asset.tex_group, true);
+  CHECK(shown(tile.sources[0].atlas, tx, ty, scale) == (std::array<u8, 3>{40, 50, 60}) && scale == 2.0f);
+  for (const assets::StageTile& other : asset.tiles)
+    if (other.sources[0].atlas == tile.sources[0].atlas) CHECK(shown(other.sources[0].atlas, other.sources[0].sx, other.sources[0].sy, scale) == (std::array<u8, 3>{40, 50, 60}));
+  // Mods off: the pristine images and UVs, bit for bit.
+  for (vfs::Mod& mod : mods.mods()) mod.enabled = false;
+  mods.apply(mod_files, vfs::ModArt::Modded);
+  render::apply_tile_textures(asset, asset.tex_group, true);
+  bool restored = true;
+  for (size_t i = 0; i < asset.object_textures.size(); ++i) restored = restored && asset.object_textures[i].image.pixels == pristine.object_textures[i].image.pixels && !asset.object_textures[i].composed;
+  for (size_t i = 0; i < asset.parts.size(); ++i)
+    for (size_t k = 0; k < asset.parts[i].vertices.size(); ++k) restored = restored && asset.parts[i].vertices[k].uv == pristine.parts[i].vertices[k].uv;
+  CHECK(restored);
+  std::printf("effect mesh round trip: golem.prd, %zu tile(s), tile_%s %dx%d replaced at 2x, then through its atlas\n", asset.tiles.size(), tile.hash.c_str(), tile.w, tile.h);
 }
 
 // The transparent-texel fill as one serial loop over the transparent texels per pass: bleed_transparent must give the same bytes.
@@ -714,14 +952,135 @@ int main() {
     CHECK(sh.parts[1].indices[6] >= before.parts[1].vertices.size() && sh.parts[1].indices[0] == 0);
     // The second atlas holds the same pixels: identical tiles are shared across atlases too.
     CHECK(sh.tiles.size() == 3);
+
+    // An effect pack's meshes (TileUses): every part is baked whether or not an emitter of the asset names it; a part scrolled through texture windows gets
+    // ONE tile holding its faces and every window; a direct-colour sub-mesh stays on its atlas; the atlas UVs are kept for an object drawn through a window
+    // the bake was not told of.
+    assets::StageAsset fx = before;
+    for (assets::StagePart& part : fx.parts) {
+      part.emitters.clear();
+      part.ground = false;
+    }
+    {
+      // The far quad of the scenery part becomes a direct-colour sub-mesh.
+      assets::StagePart& scenery = fx.parts[0];
+      assets::StageSubMesh direct = scenery.submeshes[0];
+      scenery.submeshes[0].index_count = 12;
+      direct.first_index = 12;
+      direct.index_count = 6;
+      direct.direct_page = 448 | 256 << 16;
+      scenery.submeshes.push_back(direct);
+    }
+    TileUses uses;
+    uses.scroll["ring"] = {{64, 64, 16, 16}, {80, 96, 8, 8}};
+    bake_object_textures(fx, &uses);
+    CHECK(fx.object_textures.size() == 2 && fx.tiles.size() == 3);
+    CHECK(fx.parts[0].submeshes[0].object_texture == 0 && fx.parts[0].submeshes[1].object_texture == -1 && fx.parts[0].vertices[8].uv == before.parts[0].vertices[8].uv);
+    if (fx.object_textures.size() == 2) {
+      // The ring's quad samples texels 72..87; with the windows 64..79 x 64..79 and 80..87 x 96..103 its tile is 64..87 x 64..103.
+      const assets::StageObjectTexture& ring = fx.object_textures[1];
+      CHECK(ring.scrolls && ring.slots.size() == 1 && ring.windows.size() == 2 && !fx.object_textures[0].scrolls);
+      const assets::StageTile& window_tile = fx.tiles[static_cast<size_t>(ring.slots[0].tile)];
+      CHECK(window_tile.w == 24 && window_tile.h == 40 && window_tile.sources[0].sx == 64 && window_tile.sources[0].sy == 64);
+      // The page origin the shader derives (uv - packet texel * texel size) is the tile's place minus the tile's offset in the page.
+      const assets::StageVertex& vertex = fx.parts[1].vertices[0];
+      const float page_u = vertex.uv[0] - vertex.uv_raw[0] * vertex.uv_scale[0], page_v = (1.0f - vertex.uv[1]) - vertex.uv_raw[1] * vertex.uv_scale[1];
+      CHECK(std::fabs(page_u * static_cast<float>(ring.image.width) - (static_cast<float>(ring.slots[0].dx + 1 - 64) + 0.5f)) < 1e-3f);
+      CHECK(std::fabs(page_v * static_cast<float>(ring.image.height) - (static_cast<float>(ring.slots[0].dy + 1 - 64) + 0.5f)) < 1e-3f);
+      CHECK(tiles_hold_window(fx, 1, {64, 64, 16, 16}) && tiles_hold_window(fx, 1, {80, 96, 8, 8}) && !tiles_hold_window(fx, 1, {0, 0, 0, 0}));
+      // The part that no emitter scrolls holds no window; a part index outside the asset asks for nothing.
+      CHECK(!tiles_hold_window(fx, 0, {64, 64, 16, 16}) && tiles_hold_window(fx, 7, {64, 64, 16, 16}));
+      CHECK(ring.atlas_uv.size() == fx.parts[1].vertices.size());
+      const assets::StageVertex& original = before.parts[1].vertices[0];
+      CHECK(!ring.atlas_uv.empty() && ring.atlas_uv[0] == (std::array<float, 4>{original.uv[0], original.uv[1], original.uv_scale[0], original.uv_scale[1]}));
+    }
+    // Without TileUses the same asset bakes nothing: no emitter names its parts.
+    assets::StageAsset unnamed = before;
+    for (assets::StagePart& part : unnamed.parts) {
+      part.emitters.clear();
+      part.ground = false;
+    }
+    bake_object_textures(unnamed);
+    CHECK(unnamed.object_textures.empty() && unnamed.tiles.empty());
+  }
+
+  {
+    // Effect pack models: the record name binds the page (an overlay binds a name that is no code); the tiles are
+    // effect_model/tile_<hash8>.png, and a mod's tile of any size is composed into its page with the original texels' STP.
+    const auto page = game::fx_model_page("ee97", "");
+    CHECK(page && page->x == 0x1C0 && page->y == 256 && page->clut_x == 256 && page->clut_y == 0xEE);
+    const auto plain = game::fx_model_page("3f02", "");
+    CHECK(plain && plain->x == 0x80 && plain->y == 0 && plain->clut_x == 0 && plain->clut_y == 0x3F);
+    const auto bound = game::fx_model_page("sara", "saraman");
+    CHECK(bound && bound->x == page->x && bound->y == page->y && bound->clut_y == page->clut_y);
+    CHECK(!game::fx_model_page("zzzz", "") && !game::fx_model_page("ee9", ""));
+    CHECK(is_content_named("effect_model"));
+
+    assets::ModelAsset model;
+    import::Image sheet;
+    sheet.width = sheet.height = 64;
+    sheet.pixels.resize(64 * 64 * 4);
+    for (u32 i = 0; i < 64 * 64; ++i) {
+      u8* texel = &sheet.pixels[i * 4];
+      texel[0] = static_cast<u8>(i % 64), texel[1] = static_cast<u8>(i / 64), texel[2] = 90, texel[3] = import::kStpAlpha;
+    }
+    model.textures = {sheet};
+    model.source = game::kFxModelSource;
+    assets::Mesh mesh;
+    mesh.materials.push_back({0});
+    for (const auto& corner : {std::array<u32, 2>{8, 8}, std::array<u32, 2>{23, 8}, std::array<u32, 2>{8, 23}}) {
+      mesh.indices.push_back(static_cast<u32>(mesh.vertices.size()));
+      mesh.vertices.push_back({0, std::array<float, 2>{(corner[0] + 0.5f) / 64, (corner[1] + 0.5f) / 64}});
+    }
+    mesh.submeshes.push_back({0, 0, 3});
+    model.meshes.push_back(mesh);
+    const auto tiles = model_tiles(model);
+    CHECK(tiles.size() == 1 && tiles[0].x == 8 && tiles[0].y == 8 && tiles[0].w == 16 && tiles[0].h == 16);
+    const std::string leaf = tiles.empty() ? std::string("tile_none.png") : "tile_" + tiles[0].hash + ".png";
+    CHECK(dump_model_tiles(model, "effect_model", true) == 1);
+    CHECK(fs::is_regular_file(tmp / "dump" / "effect_model" / leaf));
+
+    // The mod's tile at twice the size, one colour, with a transparent top-left texel.
+    std::vector<u8> art(32 * 32 * 4);
+    for (size_t i = 0; i < art.size(); i += 4) art[i] = 10, art[i + 1] = 20, art[i + 2] = 30, art[i + 3] = 255;
+    art[3] = 0;
+    CHECK(texture_registry::dump_forced({"scratch", "", -1, "art"}, 32, 32, art.data()));
+    const fs::path folder = tmp / "mods2" / "m2" / "textures" / "effect_model";
+    fs::create_directories(folder);
+    fs::copy_file(tmp / "dump" / "scratch" / "art.png", folder / leaf);
+    vfs::Vfs pack_files;
+    vfs::ModManager pack_mods;
+    pack_mods.scan(pack_files, tmp / "mods2", {});
+    CHECK(pack_mods.mods().size() == 1 && pack_mods.mods()[0].textures.size() == 1 && pack_mods.mods()[0].unmatched.empty());
+    texture_registry::bind(&pack_files);
+    texture_registry::configure({false, true});
+    assets::ModelAsset untouched = model;
+    resolve_model_textures(untouched);
+    CHECK(untouched.mod_textures.empty());
+    pack_mods.apply(pack_files, vfs::ModArt::Modded);
+    resolve_model_textures(model);
+    CHECK(model.has_mod(0) && model.mod_textures[0].width == 128 && model.mod_textures[0].height == 128);
+    if (model.has_mod(0) && model.mod_textures[0].width == 128) {
+      const auto texel = [&](u32 x, u32 y) { return &model.mod_textures[0].pixels[(size_t(y) * 128 + x) * 4]; };
+      // Outside the tile: the page enlarged; inside: the art, STP as the original; its transparent texel stays transparent.
+      CHECK(texel(15, 15)[0] == 7 && texel(15, 15)[1] == 7 && texel(15, 15)[3] == import::kStpAlpha);
+      CHECK(texel(17, 16)[0] == 10 && texel(17, 16)[1] == 20 && texel(17, 16)[2] == 30 && texel(17, 16)[3] == import::kStpAlpha);
+      CHECK(texel(47, 47)[0] == 10 && texel(48, 48)[0] == 24 && texel(16, 16)[3] == 0);
+    }
+    texture_registry::bind(&files);
   }
 
   {  // the real stages + the title (SKIP without the game install)
     const std::string gd = std::getenv("OPENCROSS_GAMEDIR") ? std::getenv("OPENCROSS_GAMEDIR") : "";
     const auto dir = platform::find_game_dir(gd);
     vfs::Vfs game_files;
-    if (!dir.empty() && game_files.open(dir)) scan_morph_bake(game_files);
-    else std::printf("morph bake scan: SKIP (no game install)\n");
+    if (!dir.empty() && game_files.open(dir)) {
+      scan_morph_bake(game_files);
+      scan_fx_mesh_bake(game_files, tmp);
+      texture_registry::bind(&files);
+    } else {
+      std::printf("morph bake scan: SKIP (no game install)\n");
+    }
   }
 
   fs::remove_all(tmp);

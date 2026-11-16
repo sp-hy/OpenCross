@@ -218,6 +218,13 @@ std::optional<OverlayFile> Vfs::texture_file_matching(std::string_view prefix, s
   return *file;
 }
 
+bool Vfs::has_texture_under(std::string_view prefix, std::string_view except) const {
+  auto ov = overlay();
+  for (const auto& [target, path] : ov->textures)
+    if (target.starts_with(prefix) && !std::string_view(target).substr(prefix.size()).starts_with(except)) return true;
+  return false;
+}
+
 std::vector<std::string> Vfs::list(std::string_view name) const {
   Archive* arc = archive(name);
   return arc ? arc->names() : std::vector<std::string>{};

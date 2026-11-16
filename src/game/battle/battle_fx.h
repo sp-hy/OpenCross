@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "assets/battle_stage.h"
+#include "assets/model.h"
 #include "assets/room_effects.h"
 #include "battle/battle.h"
 #include "data/tables.h"
@@ -76,6 +77,12 @@ struct FxPack {
   // The targets' reaction (variant 7) is the only place the hit could land and it ends without CallDamage (the only source
   // of the number): the React lands it without a number (e.g. a `Done`-only variant 7).
   bool reaction_lands_no_number = false;
+  // Nothing in the pack can call CallDamage: no sequence damage, reaction or caster-number op (0x47 / 0x48, 0x44 / 0x46, 0x6B) and no
+  // script table that holds a Damage or reaction op (script_calls_damage). Its results land without a number (Dopplegang 238: no
+  // "miss!") unless a model's own script the pack runs holds one (own_script_entries).
+  bool lands_no_number = false;
+  // Entries of a model's own script table the sequences run (ops 0x4F on a caster, 0x57 on a target), ascending.
+  std::vector<int> own_script_entries;
   // Stem of the .prg.
   std::string overlay;
   const effects::BespokeInfo* bespoke = nullptr;
@@ -101,9 +108,32 @@ struct FxPack {
   import::Vram build_vram() const;
 };
 
+// A pack's type-0x0B record is an Mdl model, the body of its sprite-type-20 objects (summon creatures, tech figures). The record has no
+// texture words: its *name* is decoded as hex - chars 0-1 = CLUT row, char 2 bit 0 = tpage y 256, bit 3 = CLUT x 256, char 3 = tpage
+// x / 64 - an 8 bpp page (tpage 0x80 | ...) of the VRAM the pack plays in. A name that is no such code is bound by the pack's overlay
+// (effects::fx_pack_model_binding); nullopt when neither binds it.
+struct FxModelPage {
+  // Page origin in halfwords / rows, and the CLUT row.
+  int x = 0, y = 0, clut_x = 0, clut_y = 0;
+};
+std::optional<FxModelPage> fx_model_page(std::string_view name, std::string_view overlay);
+// The two textures of a pack model cut from `vram`. The faces' CLUT bit selects the next palette row (textures[1] = row clut_y + 1; Sonja's
+// wings 'ee97' use row 239 for the lime), so two pages are baked, one per row. A GPU texture page is 256 x 256 TEXELS whatever the depth
+// (an 8 bpp page = 128 halfwords from tpage x * 64): the faces' u bytes run 0..255 over it, and a face's page bit (+1 tpage column = 64
+// halfwords = +128 texels at 8 bpp) reaches 383, so the page is cut 384 texels wide.
+std::vector<import::Image> fx_model_pages(const import::Vram& vram, const FxModelPage& page);
+// assets::ModelAsset::source of a pack model on its own pages: its tiles are effect_model/tile_<hash8>.png (render/model_tiles.h).
+inline constexpr const char* kFxModelSource = "@effect_model";
+// Every model of `pack` by record name, on the pages of the pack's own VRAM, with that source (no GPU: the texture dump and tests).
+std::vector<std::pair<std::string, assets::ModelAsset>> fx_pack_models(const FxPack& pack);
+
 // Tags of every effect sequence the units' anmseq scripts can start (ops 0x68 / 0x7D): the S5 tables of the battle models' .obj and the
 // type-0x1A tables of their at0.prd, their S6 drps and battle.prd. Reads all of them (tools and tests).
 std::set<u32> actor_script_tags(const vfs::Vfs& vfs);
+
+// Does the code of `entry` (every variant, branches included; entry < 0 = the whole table) hold an op that calls CallDamage (0x41, 0x96)
+// or starts the targets' reaction (0x59 / 0x5A)? The number of a result is born in CallDamage alone.
+bool script_calls_damage(const bseq::Table& table, int entry);
 
 // The battle registers each PC's equipped weapon mesh under the PC's two-digit character number, so a type-14 mesh sprite of that name draws
 // it: the weapon techs' packs ("02" Guile's wand) and the units' own at0.prd emitters (a thrown boomerang: Mel's "34", Van's "36"). The

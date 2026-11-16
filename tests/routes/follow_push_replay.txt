@@ -1,0 +1,17 @@
+# dry_a02f entrance 0: the party drops onto a slope of push tiles and the current carries the leader down it. No key is held. A
+# follower is not pushed while it follows: when the leader is more than 200 units ahead it walks to a trail entry on the push tiles
+# and is then written onto the entries one per tick, in whole units, so it rides the leader's path a fixed number of entries behind.
+# Follower 2 does the same on follower 1's trail. The asserted spots are 60 and 150 ticks after the current first moves the leader.
+0 wait idle
+- request party_add 1
+- request party_add 2
+- load dry_a02f 0
+- wait 225
+- assert near player -270.6 1298.6 8
+- assert near 2 -74 1327 8
+- assert near 3 45.6 1509.4 8
+- wait 87
+- assert near player -556.6 1210.7 8
+- assert near 2 -373 1267 8
+- assert near 3 -151 1327 8
+- quit

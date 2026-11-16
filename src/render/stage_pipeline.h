@@ -46,6 +46,9 @@ struct StageMesh {
     u32 first_index = 0, index_count = 0;
     // Index into sets (always valid: untextured faces use the white texture).
     int texture = -1;
+    // Draw order of the opaque runs: `texture`, or for a baked run the atlas it was cut from, so runs filed at one depth keep the order they
+    // had on the atlases.
+    int order = -1;
     // Packet code bit 1.
     bool semi = false;
     // Tpage blend of the faces.
@@ -88,6 +91,8 @@ struct StageMesh {
   // The same textures with the bilinear sampler (HD art mode).
   std::vector<TexRef> sets_linear;
   std::unique_ptr<Texture> white;
+  // StageAsset::atlases_on_demand: StagePipeline::load_atlases has made the atlases left out at creation.
+  bool atlases_loaded = false;
   StageMesh() = default;
   StageMesh(const StageMesh&) = delete;
   StageMesh& operator=(const StageMesh&) = delete;
@@ -118,6 +123,9 @@ struct StageInstance {
   std::array<float, 2> uv_phase{0, 0};
   // off_u, off_v, win_w, win_h (texels); 0 width / height = whole page.
   std::array<int, 4> uv_window{0, 0, 0, 0};
+  // Draw a baked part from the raw atlases with the UVs it had on them (StageObjectTexture::atlas_uv; needs the asset passed to draw()):
+  // an object scrolled through a texture window its tiles do not hold.
+  bool atlas = false;
   // Op 37 mesh morph: draw with the vertices lerped toward `asset.parts[morph_part]` by morph_t (the two parts have the same
   // packets; only positions differ). Needs the asset passed to draw(); -1 = none.
   int morph_part = -1;
@@ -209,6 +217,8 @@ class StagePipeline {
   // Live tile replacement (render/stage_tiles.h): after the asset's object images / UVs were re-composed (apply_tile_textures), re-creates the object textures
   // (+ both sampling references) and re-uploads the vertex buffer of an existing mesh. The atlases are untouched. False when the mesh does not match the asset.
   bool reload_textures(StageMesh& mesh, const assets::StageAsset& stage);
+  // StageAsset::atlases_on_demand: makes the atlases that were left out at creation, once (before a draw with a StageInstance::atlas object).
+  void load_atlases(StageMesh& mesh, const assets::StageAsset& stage);
 
   // Camera space -> clip, the PS1 projection H * x / z about (ox, oy) in the 320 x 240 layer mapped onto the letterbox
   // (the same mapping as BattleView::Cam::view_proj; depth comes from the fragment shader).
@@ -273,6 +283,9 @@ class StagePipeline {
 
  private:
   TexRef make_stage_set(const Texture& tex, bool linear);
+  // The GPU texture of atlas `index` (below StageAsset::textures.size()) or of object image `index` - that count: the registry's replacement of a
+  // content-named group's atlas, the transparent-texel bleed, the upload queued in `batch`. Null when the image is not RGBA or the upload failed.
+  std::unique_ptr<Texture> make_stage_texture(const assets::StageAsset& stage, size_t index, const std::string& scene_group, UploadBatch& batch);
   // The pipeline of a draw: cull side 0..2, blend 0..3, the affine variant; in view-depth mode the depth pipeline, null for a blended draw.
   const Pipeline* pipeline(int cull, int blend, bool affine) const;
   // Appends to the dynamic ring at vertex / index position `first` (the frame's mapped memory) and marks the range for the copy to the GPU.

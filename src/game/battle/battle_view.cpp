@@ -206,7 +206,7 @@ void BattleView::set_art_mode(bool hd, bool force) {
   // and their mesh + GPU copy replace the old ones *inside* the shared ModelHandle, so UnitPose (which points at
   // ModelHandle::asset), the scripts, the battle state and every unit's pose / position stay. Stages (battle/bg) and the effect packs have no
   // cdrom2 variant; the weapons have none either but are rebuilt the same way for the texture mods (a mod switched on / off).
-  // Pack models that took their battle model's cdrom2 mesh + texture (fx_hd_counterpart) are rebuilt at the pack's next cast; the
+  // Pack models (their tiles follow the texture mods; some took their battle model's cdrom2 mesh + texture) are rebuilt at the pack's next cast; the
   // pack playing now keeps its copy to its end (the pseudo-actor points into it).
   for (auto it = fx_gpu_.begin(); it != fx_gpu_.end();)
     it = it->second && it->second->art_dependent && !(fx_pack_ && fx_pack_->eid == it->first) ? fx_gpu_.erase(it) : std::next(it);

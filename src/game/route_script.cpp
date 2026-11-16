@@ -12,6 +12,7 @@
 
 #include "core/log.h"
 #include "platform/keymap.h"
+#include "render/camera.h"
 
 namespace oc::game {
 
@@ -77,6 +78,25 @@ u64 timeout_arg(const std::vector<std::string>& args, size_t idx) {
 }
 
 }  // namespace
+
+bool side_columns_lit(const u8* rgba, u32 width, u32 height, float& left, float& right) {
+  const render::Letterbox picture = render::Letterbox::fit(static_cast<float>(width), static_cast<float>(height));
+  const u32 left_end = static_cast<u32>(std::max(0.0f, std::floor(picture.ox)));
+  const u32 right_begin = std::min(width, static_cast<u32>(std::ceil(picture.ox + render::kLayerW * picture.scale)));
+  if (left_end == 0 || right_begin >= width || height == 0) return false;
+  auto lit_share = [&](u32 x_begin, u32 x_end) {
+    u64 lit = 0;
+    for (u32 y = 0; y < height; ++y)
+      for (u32 x = x_begin; x < x_end; ++x) {
+        const u8* pixel = rgba + (static_cast<size_t>(y) * width + x) * 4;
+        if (std::max({pixel[0], pixel[1], pixel[2]}) > 8) ++lit;
+      }
+    return static_cast<float>(lit) / static_cast<float>(static_cast<u64>(x_end - x_begin) * height);
+  };
+  left = lit_share(0, left_end);
+  right = lit_share(right_begin, width);
+  return true;
+}
 
 bool Route::load(const std::filesystem::path& file, std::string* err) {
   std::ifstream in(file);
@@ -163,6 +183,33 @@ void Route::step(const RouteState& st, platform::Input& in, RouteOut& out) {
     out.screenshot = std::format("{}{:02}.png", as_prefix_, as_n_++);
     as_next_ = st.tick + static_cast<u64>(std::max(1, as_every_));
     --as_left_;
+  }
+  if (anim_mark_ && st.ent_xz && st.party_ent) {
+    for (size_t slot = 0; slot < anim_last_.size(); ++slot) {
+      float y = 0, anim_bits = 0;
+      const int ent_id = st.party_ent(static_cast<int>(slot));
+      if (ent_id < 0 || !st.ent_xz(-3000 - ent_id, y, anim_bits)) continue;
+      const int anim = static_cast<int>(anim_bits) & 0xFFFF;
+      if (anim_last_[slot] >= 0 && anim != anim_last_[slot]) ++anim_changes_[slot];
+      anim_last_[slot] = anim;
+    }
+  }
+  if (track_left_ > 0 && st.ent_xz && st.party_ent) {
+    std::string row;
+    auto add = [&](char kind, int label, int ent_id) {
+      float x = 0, z = 0, y = 0, anim_bits = 0;
+      if (ent_id < 0 || !st.ent_xz(ent_id, x, z)) return;
+      st.ent_xz(-3000 - ent_id, y, anim_bits);
+      row += std::format(" {}{} {:.2f} {:.2f} {:.2f} {} {:03X}", kind, label, static_cast<double>(x), static_cast<double>(z), static_cast<double>(y),
+                         static_cast<int>(anim_bits) & 0xFFFF, st.ent_facing ? st.ent_facing(ent_id) : 0);
+      if (!track_keys_) return;
+      const int clip_key = st.ent_clip ? st.ent_clip(ent_id, false) : -1;
+      row += clip_key < 0 ? std::string(" -") : std::format(" {}:{}", clip_key >> 12, clip_key & 0xFFF);
+    };
+    for (int slot = 0; slot < 3; ++slot) add('p', slot, st.party_ent(slot));
+    for (const int ent_id : track_ents_) add('e', ent_id, ent_id);
+    log::info("route: track {} t {}{}", st.room, track_n_++, row);
+    --track_left_;
   }
   for (size_t i = 0; i < held_.size(); ++i) {
     in.key_down[i] = held_[i];
@@ -531,6 +578,24 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.screenshot = args[1];
     return true;
   }
+  if (op == "sides") {
+    int low = 0, high = 0;
+    if (args.size() < 3 || !to_int(args[1], low) || !to_int(args[2], high)) return bad("sides <min%> <max%>");
+    if (phase_ == 0) {
+      out.measure_sides = true;
+      aux_ = st.side_frames;
+      phase_ = 1;
+      return false;
+    }
+    if (st.side_frames == aux_) return elapsed > 60 ? bad("no frame was measured") : false;
+    const float left = st.side_lit[0], right = st.side_lit[1];
+    if (left < 0.0f) return bad("the window has no columns beside the 4:3 picture");
+    const std::string seen = std::format("left {:.1f} % right {:.1f} % lit", left * 100.0f, right * 100.0f);
+    auto within = [&](float share) { return share * 100.0f >= static_cast<float>(low) && share * 100.0f <= static_cast<float>(high); };
+    if (!within(left) || !within(right)) return bad(std::format("sides {} {}: {}", low, high, seen));
+    log::info("route: sides {} {}: {}", low, high, seen);
+    return true;
+  }
   // assert same [tol]: the `snap` state is unchanged
   if (op == "assert" && args.size() >= 2 && args[1] == "same") {
     int tol = 0;
@@ -655,6 +720,25 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
         log::info("route: {} anim {} on args {} tile", args[2], anim, stair ? "stair" : "plain");
         if (is_stair ? !stair : anim != want) return bad(std::format("{} anim {} ({} tile), expected {}", args[2], anim, stair ? "stair" : "plain", args[3]));
       }
+    } else if (args[1] == "changes") {
+      // assert changes <p0..p2> <max>: how often the member's submitted clip changed since `mark anim`
+      int most = 0;
+      if (args.size() < 4 || args[2].size() != 2 || args[2][0] != 'p' || args[2][1] < '0' || args[2][1] > '2' || !to_int(args[3], most) || !anim_mark_)
+        return bad("assert changes <p0..p2> <max> (after mark anim)");
+      const int changes = anim_changes_[static_cast<size_t>(args[2][1] - '0')];
+      log::info("route: {} changed its clip {} times", args[2], changes);
+      if (changes > most) return bad(std::format("{} changed its clip {} times, at most {} expected", args[2], changes, most));
+    } else if (args[1] == "key") {
+      // assert key <p0..p2|ent> <clip> <key4>: the playing clip and its keyframe in quarter keyframes
+      int ent_id = -2, clip = 0, key4 = 0;
+      if (args.size() >= 3 && args[2].size() == 2 && args[2][0] == 'p' && args[2][1] >= '0' && args[2][1] <= '2' && st.party_ent) ent_id = st.party_ent(args[2][1] - '0');
+      else if (args.size() >= 3) to_int(args[2], ent_id);
+      if (args.size() < 5 || !to_int(args[3], clip) || !to_int(args[4], key4)) return bad("assert key <p0..p2|ent> <clip> <key4>");
+      const int clip_key = ent_id >= 0 && st.ent_clip ? st.ent_clip(ent_id, false) : -1;
+      if (clip_key < 0) return bad("assert key: no such entity or no clip");
+      log::info("route: {} plays clip {} at key4 {}", args[2], clip_key >> 12, clip_key & 0xFFF);
+      if ((clip_key >> 12) != clip || (clip_key & 0xFFF) != key4)
+        return bad(std::format("{} plays clip {} at key4 {}, expected {} at {}", args[2], clip_key >> 12, clip_key & 0xFFF, clip, key4));
     } else if (args[1] == "near") {
       // assert near <ent|player> <x> <z> <tol>: world position within tol
       int ent_id = -1, tol = 0;
@@ -711,7 +795,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
                     : args[2] == "left"  ? dx < -8 && std::fabs(dx) > std::fabs(dy)
                     : args[2] == "up"    ? dy < -1 : args[2] == "down" ? dy > 1 : false;
       if (!ok) return bad(std::format("player moved {:.1f},{:.1f} on screen, expected {}", dx, dy, args[2]));
-    } else if (args[1] == "facing" || args[1] == "gap") {
+    } else if (args[1] == "facing" || args[1] == "gap" || args[1] == "level") {
       auto who = [&](const std::string& token) {
         if (token == "player") return -1;
         if (token.size() == 2 && token[0] == 'p' && token[1] >= '0' && token[1] <= '2' && st.party_ent) {
@@ -731,6 +815,14 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
         const int diff = ((got - want) & 0xFFF) > 0x800 ? 0x1000 - ((got - want) & 0xFFF) : ((got - want) & 0xFFF);
         log::info("route: facing of {} is {:03X} (want {:03X})", args[2], got, want & 0xFFF);
         if (diff > tol) return bad(std::format("facing of {} is {:03X}, expected {:03X} +-{}", args[2], got, want & 0xFFF, tol));
+      } else if (args[1] == "level") {
+        int tol = 0;
+        float y0 = 0, y1 = 0, bits0 = 0, bits1 = 0;
+        if (args.size() < 5 || !to_int(args[4], tol) || !st.ent_xz) return bad("assert level <a> <b> <tol>");
+        const int ea = who(args[2]), eb = who(args[3]);
+        if (ea < 0 || eb < 0 || !st.ent_xz(-3000 - ea, y0, bits0) || !st.ent_xz(-3000 - eb, y1, bits1)) return bad("assert level: no such entity");
+        log::info("route: level {} - {} = {:.1f}", args[2], args[3], static_cast<double>(y1 - y0));
+        if (std::fabs(y1 - y0) > static_cast<float>(tol)) return bad(std::format("heights {:.1f} and {:.1f} differ by more than {}", static_cast<double>(y0), static_cast<double>(y1), tol));
       } else {
         int lo = 0, hi = 0;
         float x0 = 0, z0 = 0, x1 = 0, z1 = 0;
@@ -844,6 +936,10 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       int page;
       if (!to_int(args[2], page)) return bad("assert guide <0|1|2>");
       if (st.guide_page != page) return bad("guide page is " + std::to_string(st.guide_page) + ", expected " + args[2]);
+    } else if (args[1] == "icons") {
+      int count;
+      if (!to_int(args[2], count)) return bad("assert icons <n>");
+      if (st.feature_icons != count) return bad("feature icons drawn: " + std::to_string(st.feature_icons) + ", expected " + args[2]);
     } else if (args[1] == "pause") {
       if (st.pause != (args[2] == "open")) return bad(std::string("the pause screen is ") + (st.pause ? "up" : "not up"));
     } else if (args[1] == "flow") {
@@ -976,6 +1072,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     if (!to_int(args[2], ent_id) || !st.ent_xz || !st.ent_xz(ent_id, ent_mark_x_, ent_mark_z_)) return bad("mark ent <n>: no such entity");
     return true;
   }
+  // mark anim: from now on count, per tick, the changes of each party member's submitted clip for `assert changes`
+  if (op == "mark" && args.size() >= 2 && args[1] == "anim") {
+    anim_mark_ = true;
+    anim_last_.fill(-1);
+    anim_changes_.fill(0);
+    return true;
+  }
   if (op == "mark" && args.size() >= 2 && args[1] == "time") {
     time_mark_ = st.tick;
     return true;
@@ -1064,6 +1167,21 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       return true;
     }
     return false;
+  }
+  // track <ticks> [keys] [ent...]: in the background, log every party member's position, height, submitted clip and facing each tick,
+  // then the same for the listed entities; `keys` adds the playing clip and its keyframe to every group
+  if (op == "track") {
+    if (args.size() < 2 || !to_int(args[1], track_left_) || !st.ent_xz || !st.party_ent) return bad("track <ticks> [keys] [ent...]");
+    track_n_ = 0;
+    track_ents_.clear();
+    track_keys_ = false;
+    for (size_t i = 2; i < args.size(); ++i) {
+      int ent_id = 0;
+      if (args[i] == "keys") track_keys_ = true;
+      else if (to_int(args[i], ent_id) && ent_id >= 0) track_ents_.push_back(ent_id);
+      else return bad("track <ticks> [keys] [ent...]");
+    }
+    return true;
   }
   if (op == "dump") {
     out.dump = true;

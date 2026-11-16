@@ -1,0 +1,20 @@
+# Fort Dragonia's lift shaft from above (ryu_a25i entrance 6): each member's INIT reads its own spot, the entrance record, and lifts
+# itself 5000 units; once every INIT has run the followers are put in the party V behind the leader at his height, over what their
+# INIT wrote. They hang there until their UPDATE reads the spot in whole units (fraction dropped: 90.5 reads 90, -90.5 reads -91,
+# -84.5 reads -85), drops and lands on it.
+0 wait flow field 600
+- request party_add 1
+- request party_add 2
+- load ryu_a25i 6
+- wait room ryu_a25i
+- wait 10
+- assert near 1 0 -175 0
+- assert near 2 90.5 -84.5 1
+- assert near 3 -90.5 -84.5 1
+- assert height p1 -5001 -4999
+- assert height p2 -5001 -4999
+- wait idle 900
+- assert near 1 0 -175 0
+- assert near 2 90 -85 0
+- assert near 3 -91 -85 0
+- quit

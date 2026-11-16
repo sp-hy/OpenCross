@@ -31,7 +31,9 @@ import::Image cut(const import::Image& page, u32 x, u32 y, u32 w, u32 h) {
   return out;
 }
 
-TextureKey tile_key(const ModelTile& tile) { return {"room_model", "", -1, "tile_" + tile.hash}; }
+const std::string kRoomModel = "room_model";
+
+TextureKey tile_key(const std::string& category, const ModelTile& tile) { return {category, "", -1, "tile_" + tile.hash}; }
 
 // Art for a rect of a page, any size.
 struct Patch {
@@ -49,21 +51,31 @@ import::Image compose(const import::Image& page, const std::vector<Patch>& patch
   import::Image out;
   out.width = static_cast<u32>(std::lround(page.width * scale_x)), out.height = static_cast<u32>(std::lround(page.height * scale_y));
   out.pixels.resize(size_t(out.width) * out.height * 4);
-  for (u32 y = 0; y < out.height; ++y)
-    for (u32 x = 0; x < out.width; ++x) {
-      const u32 sx = std::min(page.width - 1, static_cast<u32>(x / scale_x)), sy = std::min(page.height - 1, static_cast<u32>(y / scale_y));
-      std::memcpy(&out.pixels[(size_t(y) * out.width + x) * 4], &page.pixels[(size_t(sy) * page.width + sx) * 4], 4);
+  // Rows [first_y, last_y) of `out` from x0 on take the texels of `source` its columns name; a row that repeats the source row of the one
+  // above is copied from it.
+  const auto fill = [&out](const import::Image& source, const std::vector<u32>& columns, u32 x0, u32 first_y, u32 last_y, const auto& source_row) {
+    for (u32 y = first_y; y < last_y; ++y) {
+      u8* row = &out.pixels[(size_t(y) * out.width + x0) * 4];
+      const u32 sy = source_row(y);
+      if (y > first_y && sy == source_row(y - 1)) {
+        std::memcpy(row, row - size_t(out.width) * 4, columns.size() * 4);
+        continue;
+      }
+      const u8* texels = &source.pixels[size_t(sy) * source.width * 4];
+      for (size_t i = 0; i < columns.size(); ++i) std::memcpy(row + i * 4, texels + size_t(columns[i]) * 4, 4);
     }
+  };
+  std::vector<u32> columns(out.width);
+  for (u32 x = 0; x < out.width; ++x) columns[x] = std::min(page.width - 1, static_cast<u32>(x / scale_x));
+  fill(page, columns, 0, 0, out.height, [&](u32 y) { return std::min(page.height - 1, static_cast<u32>(y / scale_y)); });
   for (const Patch& patch : patches) {
     const u32 x0 = static_cast<u32>(std::lround(patch.x * scale_x)), x1 = std::min(out.width, static_cast<u32>(std::lround((patch.x + patch.w) * scale_x)));
     const u32 y0 = static_cast<u32>(std::lround(patch.y * scale_y)), y1 = std::min(out.height, static_cast<u32>(std::lround((patch.y + patch.h) * scale_y)));
+    if (x1 <= x0 || y1 <= y0) continue;
     const import::Image& art = *patch.image;
-    for (u32 y = y0; y < y1; ++y)
-      for (u32 x = x0; x < x1; ++x) {
-        const u32 sx = std::min(art.width - 1, static_cast<u32>(u64(x - x0) * art.width / (x1 - x0)));
-        const u32 sy = std::min(art.height - 1, static_cast<u32>(u64(y - y0) * art.height / (y1 - y0)));
-        std::memcpy(&out.pixels[(size_t(y) * out.width + x) * 4], &art.pixels[(size_t(sy) * art.width + sx) * 4], 4);
-      }
+    columns.resize(x1 - x0);
+    for (u32 x = x0; x < x1; ++x) columns[x - x0] = std::min(art.width - 1, static_cast<u32>(u64(x - x0) * art.width / (x1 - x0)));
+    fill(art, columns, x0, y0, y1, [&](u32 y) { return std::min(art.height - 1, static_cast<u32>(u64(y - y0) * art.height / (y1 - y0))); });
   }
   return out;
 }
@@ -80,6 +92,45 @@ const FieldCharacterArt& characters_of(const vfs::Vfs& vfs) {
   auto& slot = cache[&vfs];
   if (!slot) slot = std::make_unique<FieldCharacterArt>(vfs);
   return *slot;
+}
+
+// Writes the tiles of `category` that lie outside `character`'s region. Returns the files written.
+u32 dump_tiles(const assets::ModelAsset& asset, const std::string& category, const std::vector<ModelTile>& tiles,
+               const std::optional<FieldCharacterArt::Match>& character, bool forced) {
+  u32 written = 0;
+  for (const ModelTile& tile : tiles) {
+    if (character && inside(tile, *character)) continue;
+    const import::Image pixels = cut(asset.textures[tile.texture], tile.x, tile.y, tile.w, tile.h);
+    const std::vector<u8> file = model_file_pixels(tile.w, tile.h, pixels.pixels.data());
+    const TextureKey key = tile_key(category, tile);
+    written += (forced ? tr::dump_forced(key, tile.w, tile.h, file.data()) : tr::dump(key, tile.w, tile.h, file.data())) ? 1u : 0u;
+  }
+  return written;
+}
+
+// The active mods' replacements of the tiles outside `character`'s region, as patches of their pages; `images` keeps them alive.
+void replace_tiles(const assets::ModelAsset& asset, const std::string& category, const std::vector<ModelTile>& tiles,
+                   const std::optional<FieldCharacterArt::Match>& character, std::vector<std::vector<Patch>>& patches,
+                   std::vector<std::unique_ptr<import::Image>>& images) {
+  for (const ModelTile& tile : tiles) {
+    if (character && inside(tile, *character)) continue;
+    const import::Image original = cut(asset.textures[tile.texture], tile.x, tile.y, tile.w, tile.h);
+    auto art = std::make_unique<import::Image>(original);
+    if (!tr::replace(tile_key(category, tile), art->width, art->height, art->pixels)) continue;
+    model_restore_stp(original.width, original.height, original.pixels.data(), art->width, art->height, art->pixels);
+    log::debug("{}: tile {} (page {} at {},{} {}x{}) replaced by {}x{}", category, tile.hash, tile.texture, tile.x, tile.y, tile.w, tile.h, art->width,
+               art->height);
+    patches[tile.texture].push_back({tile.x, tile.y, tile.w, tile.h, art.get()});
+    images.push_back(std::move(art));
+  }
+}
+
+void compose_pages(assets::ModelAsset& asset, const std::vector<std::vector<Patch>>& patches) {
+  for (size_t texture = 0; texture < patches.size(); ++texture) {
+    if (patches[texture].empty()) continue;
+    asset.mod_textures.resize(asset.textures.size());
+    asset.mod_textures[texture] = compose(asset.textures[texture], patches[texture]);
+  }
 }
 
 }  // namespace
@@ -203,15 +254,21 @@ std::optional<FieldCharacterArt::Match> FieldCharacterArt::match(const assets::M
 
 u32 dump_room_model_tiles(const assets::ModelAsset& asset, const FieldCharacterArt& characters, bool forced) {
   const std::vector<ModelTile> tiles = model_tiles(asset);
-  const auto character = characters.match(asset, tiles);
-  u32 written = 0;
-  for (const ModelTile& tile : tiles) {
-    if (character && inside(tile, *character)) continue;
-    const import::Image pixels = cut(asset.textures[tile.texture], tile.x, tile.y, tile.w, tile.h);
-    const std::vector<u8> file = model_file_pixels(tile.w, tile.h, pixels.pixels.data());
-    written += (forced ? tr::dump_forced(tile_key(tile), tile.w, tile.h, file.data()) : tr::dump(tile_key(tile), tile.w, tile.h, file.data())) ? 1u : 0u;
-  }
-  return written;
+  return dump_tiles(asset, kRoomModel, tiles, characters.match(asset, tiles), forced);
+}
+
+u32 dump_model_tiles(const assets::ModelAsset& asset, const std::string& category, bool forced) {
+  return dump_tiles(asset, category, model_tiles(asset), std::nullopt, forced);
+}
+
+void resolve_model_tiles(assets::ModelAsset& asset, const std::string& category) {
+  if (!tr::active() || asset.textures.empty()) return;
+  const std::vector<ModelTile> tiles = model_tiles(asset);
+  if (tr::settings().dump) dump_tiles(asset, category, tiles, std::nullopt, false);
+  std::vector<std::vector<Patch>> patches(asset.textures.size());
+  std::vector<std::unique_ptr<import::Image>> images;
+  replace_tiles(asset, category, tiles, std::nullopt, patches, images);
+  compose_pages(asset, patches);
 }
 
 void resolve_room_model_textures(assets::ModelAsset& asset, const vfs::Vfs& vfs) {
@@ -244,23 +301,8 @@ void resolve_room_model_textures(assets::ModelAsset& asset, const vfs::Vfs& vfs)
       images.push_back(std::move(art));
     }
   }
-  if (replacing)
-    for (const ModelTile& tile : tiles) {
-      if (character && inside(tile, *character)) continue;
-      const import::Image original = cut(asset.textures[tile.texture], tile.x, tile.y, tile.w, tile.h);
-      auto art = std::make_unique<import::Image>(original);
-      if (!tr::replace(tile_key(tile), art->width, art->height, art->pixels)) continue;
-      model_restore_stp(original.width, original.height, original.pixels.data(), art->width, art->height, art->pixels);
-      log::debug("room model: tile {} (page {} at {},{} {}x{}) replaced by {}x{}", tile.hash, tile.texture, tile.x, tile.y, tile.w, tile.h, art->width,
-                 art->height);
-      patches[tile.texture].push_back({tile.x, tile.y, tile.w, tile.h, art.get()});
-      images.push_back(std::move(art));
-    }
-  for (size_t texture = 0; texture < patches.size(); ++texture) {
-    if (patches[texture].empty()) continue;
-    asset.mod_textures.resize(asset.textures.size());
-    asset.mod_textures[texture] = compose(asset.textures[texture], patches[texture]);
-  }
+  if (replacing) replace_tiles(asset, kRoomModel, tiles, character, patches, images);
+  compose_pages(asset, patches);
 }
 
 }  // namespace oc::render

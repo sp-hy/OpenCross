@@ -1,0 +1,23 @@
+# Run speed cheat and the pushable block of jac_b34i (entity 4 at 0, -650). The leader walks right into it for 42 ticks, two pad
+# steps a tick: the solid test and the push hand-over run once per pad step, so the block takes one step a tick where normal speed
+# gives it one every second tick. Per step walked nothing changes: block, leader and followers stand where the same walk leaves
+# them at normal speed with Right held for 84 ticks (the block 155 units on, the leader behind it).
+0 wait 5
+- request party_add 1
+- request party_add 2
+- load jac_b34i 0
+- wait room jac_b34i 300
+- wait idle 300
+- put ent 1 -200 -650
+- put ent 2 -330 -650
+- put ent 3 -460 -650
+- wait 240
+- key down right
+- wait 40
+- key up right
+- wait 100
+- assert near 4 155 -650 1
+- assert near player 64.9 -650 1
+- assert near 2 -134 -650 1
+- assert near 3 -331.1 -650 1
+- quit

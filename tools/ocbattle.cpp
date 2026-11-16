@@ -572,7 +572,7 @@ int comp_colour(int ci, int ce, const std::array<int, 3>& ring, int ct, int base
 }
 
 // `ocbattle cast <scene> <actor> <element> <target> [seeds]`: the rules alone (no view): start the scene with the default party, cast the element from
-// `actor` at `target` as the Debug tab does, finish the action, print the target's status words and (for a PC) which grid cells the seal greys.
+// `actor` at `target` as the Debug tab does, finish the action, print the target's HP and status words and (for a PC) which grid cells the seal greys.
 int cmd_cast(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vector<std::string>& args) {
   if (args.size() < 4) {
     std::fprintf(stderr, "usage: ocbattle cast <scene> <actor> <element[,element...]> <target> [seeds]\n");
@@ -600,7 +600,7 @@ int cmd_cast(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vec
     }
     const Unit& tu = battle.unit(target);
     const u32 lo0 = tu.lo, hi0 = tu.hi;
-    const int countdown0 = tu.countdown;
+    const int countdown0 = tu.countdown, hp0 = tu.hp;
     int code = -1;
     for (const int cast : casts) {
       if (battle.outcome() != Outcome::Ongoing) break;
@@ -611,9 +611,9 @@ int cmd_cast(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vec
     }
     if (casts.size() > 1)
       for (const std::string& line : battle.drain_log()) std::printf("   %s\n", line.c_str());
-    std::printf("seed %d: %s casts %d at %s: lo %08x -> %08x, hi %08x -> %08x, countdown %d -> %d, code %d, outcome %d result %d\n", seed,
-                battle.unit(actor).name.c_str(), el, tu.name.c_str(), lo0, tu.lo, hi0, tu.hi, countdown0, tu.countdown, code, static_cast<int>(battle.outcome()),
-                battle.result_code());
+    std::printf("seed %d: %s casts %d at %s: hp %d -> %d, lo %08x -> %08x, hi %08x -> %08x, countdown %d -> %d, code %d, outcome %d result %d\n", seed,
+                battle.unit(actor).name.c_str(), el, tu.name.c_str(), hp0, tu.hp, lo0, tu.lo, hi0, tu.hi, countdown0, tu.countdown, code,
+                static_cast<int>(battle.outcome()), battle.result_code());
     if (tu.pc) {
       int sealed = 0, filled = 0;
       for (int cell = 0; cell < data::kGridCells; ++cell) {

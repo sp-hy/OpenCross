@@ -1,0 +1,101 @@
+# Widescreen off in a 16:9 window: the shops, the name entry, the party screen and the main menu with its screens are 4:3 pictures
+# between black bars; nothing of them, the backdrop's lower-left swirl included, is drawn beside the picture (sides 0 0).
+# wide_menus_off_orig runs the same script with the PS1 disc art at the PS1 display size.
+0 wait idle 600
+- request party_add 1
+- request keyitem 62
+# ---- element shop and blacksmith
+- request elementshop 0
+- wait shop open 300
+- wait 80
+- sides 0 0
+- screenshot wmo_01_element_shop.png
+- tap cancel
+- wait shop closed 300
+- wait idle 300
+- request weaponshop 0
+- wait shop open 300
+- wait 80
+- sides 0 0
+- tap cancel
+- wait shop closed 300
+- wait idle 300
+# ---- name entry for Kid
+- request rename 1
+- wait menu open 120
+- wait 30
+- sides 0 0
+- screenshot wmo_02_name_entry.png
+- tap down
+- tap confirm
+- wait menu closed 120
+- wait idle 300
+# ---- party screen
+- request party
+- wait menu open 120
+- wait 30
+- sides 0 0
+- tap cancel
+- wait menu closed 200
+- wait idle 300
+# ---- the main menu, then Status
+- request menu
+- wait menu open 300
+- wait 30
+- sides 0 0
+- screenshot wmo_03_main_menu.png
+- tap confirm
+- wait 10
+- tap confirm
+- wait 60
+- sides 0 0
+- tap cancel
+- wait 50
+# ---- Elements: Use / Allocate, the member pick, the grid
+- tap down
+- tap confirm
+- wait 10
+- tap down
+- tap confirm
+- wait 10
+- tap confirm
+- wait 70
+- sides 0 0
+- tap cancel
+- wait 50
+- tap cancel
+- wait 10
+- tap cancel
+- wait 10
+# ---- Equip
+- tap down
+- tap confirm
+- wait 10
+- tap confirm
+- wait 60
+- sides 0 0
+- tap cancel
+- wait 50
+- tap cancel
+- wait 10
+# ---- Key Items
+- tap down
+- wait 10
+- tap confirm
+- wait 60
+- sides 0 0
+- tap cancel
+- wait 50
+# ---- Customize
+- tap down
+- tap confirm
+- wait 60
+- sides 0 0
+- tap cancel
+- wait 60
+# ---- Save / Load
+- tap down
+- tap confirm
+- wait 60
+- sides 0 0
+- quit
