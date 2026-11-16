@@ -175,6 +175,8 @@ void bind_cheats(const Cheats* set);
 //            Ps1ResGraphics = the field picture, battle 3D and title sea at 320 x 224; Ps1ResUi = the menus / shops / title menu / name entry /
 //            Continue / party screens at their PS1 overlay's display size (512x448, 640x448, ...), the battle HUD / menus / results, the pause
 //            screen and the field dialogue windows in a 320(+2e) x 240 picture; the PS1 disc textures of the menus are used only in classic art.
+//            LegacyFieldModels (Retro look): field characters keep their field models; off = they are drawn with their Status-screen
+//            model, posed by their field model (game/menu_rig.h).
 //            RenderScale: the 3D pictures (field picture, battle 3D, title sea, world map) are drawn into an off-screen target at this
 //            multiple of the output resolution (above 1 = supersampled, area-filtered down; below 1 = bilinear up) and composited under
 //            the 2D / UI drawn at output resolution; with Ps1ResGraphics the multiple of the PS1 320 x 224 target instead (2 = 640 x 448); one of
@@ -202,7 +204,6 @@ void bind_cheats(const Cheats* set);
 //            HideFeatureIcons: the play-time feature icons (auto battle, battle boost, encounters off, slow, fast) are not drawn; the toggles work as before.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
-//            MenuModelsInField: field characters are drawn with their Status-screen model, posed by their field model (game/menu_rig.h).
 //   [Shaders] (opt-in, off by default, any art mode) Characters: kCharacterShaderNames, the shading of the field actors, the battle units
 //            and their weapons and the status screen's model (render/mesh_pipeline.h CharacterShading); Matcap: the matcap style's look (a
 //            built-in or a mod's shaders/matcaps/<name>.png); StyleStrength 0..1: how much of the style's shading shows; Outlines: a dark
@@ -288,7 +289,7 @@ struct Config {
   bool hide_feature_icons = false;
   bool retain_battle_scenery = false;
   bool full_precision_effects = false;
-  bool menu_models_in_field = false;
+  bool legacy_field_models = true;
   CharacterShader character_shader = CharacterShader::Off;
   std::string matcap = "clay";
   float style_strength = 1.0f;
@@ -372,6 +373,9 @@ struct Config {
   bool save(const std::filesystem::path& file) const;
   // Switches those five off: RDE starts every launch with them off. load() still reads them (a --config ini for tests).
   void clear_session_toggles();
+  // The player's own ini (not a --config one) reads a missing key with the player's defaults: the Graphics tab's enhancements on
+  // the HD models in fields and RenderScale 2. Called before load(); a --config ini keeps the faithful member defaults.
+  void use_player_defaults();
 };
 
 // First launch (no opencross.ini): the [Game] Language the OS asks for: en fr it de es -> the same, ja -> jp, anything else en.

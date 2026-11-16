@@ -236,6 +236,7 @@ bool Config::load(const std::filesystem::path& file) {
     render_scale = best;
   }
   ps1_jitter = parse_bool(ini.get("Video", "Ps1Jitter"), ps1_jitter);
+  legacy_field_models = parse_bool(ini.get("Video", "LegacyFieldModels"), legacy_field_models);
   {
     const int stored_msaa = parse_int(ini.get("Video", "Msaa"), msaa);
     msaa = 1;
@@ -250,10 +251,9 @@ bool Config::load(const std::filesystem::path& file) {
   hide_feature_icons = parse_bool(ini.get("Enhancements", "HideFeatureIcons"), hide_feature_icons);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   full_precision_effects = parse_bool(ini.get("Enhancements", "FullPrecisionEffects"), full_precision_effects);
-  menu_models_in_field = parse_bool(ini.get("Enhancements", "MenuModelsInField"), menu_models_in_field);
   {
     const bool legacy = parse_bool(ini.get("Enhancements", "EnhancedLighting"), false) || parse_bool(ini.get("Enhancements", "SpellLights"), false);
-    lighting = parse_bool(ini.get("Enhancements", "Lighting"), legacy);
+    lighting = parse_bool(ini.get("Enhancements", "Lighting"), legacy || lighting);
   }
   {
     const int legacy = parse_int(ini.get("Enhancements", "SeamBlend"), -1);
@@ -425,13 +425,13 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "Ps1ResUi", on_off(ps1_res_ui));
   ini.set("Video", "RenderScale", fmt_float(render_scale));
   ini.set("Video", "Ps1Jitter", on_off(ps1_jitter));
+  ini.set("Video", "LegacyFieldModels", on_off(legacy_field_models));
   ini.set("Video", "Msaa", std::to_string(msaa));
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
   ini.set("Enhancements", "HideFeatureIcons", on_off(hide_feature_icons));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "FullPrecisionEffects", on_off(full_precision_effects));
-  ini.set("Enhancements", "MenuModelsInField", on_off(menu_models_in_field));
   ini.set("Enhancements", "Lighting", on_off(lighting));
   ini.set("Enhancements", "EdgeBlend", on_off(edge_blend));
   ini.set("Shaders", "Characters", kCharacterShaderNames[static_cast<size_t>(character_shader)]);
@@ -545,6 +545,12 @@ bool Config::save(const std::filesystem::path& file) const {
 void Config::clear_session_toggles() {
   fast_mode = slow_mode = false;
   cheats.no_encounters = cheats.battle_boost = cheats.auto_battle = false;
+}
+
+void Config::use_player_defaults() {
+  lighting = edge_blend = retain_battle_scenery = full_precision_effects = true;
+  legacy_field_models = false;
+  render_scale = 2.0f;
 }
 
 namespace {

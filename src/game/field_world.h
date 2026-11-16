@@ -487,7 +487,7 @@ class FieldWorld final : public script::FieldHost {
   void set_camera_relative(bool on) { camera_relative_ = on; }
   // [Shaders] the character shaders: the shading of the field actors.
   void set_character_shading(render::CharacterShading shading) { character_shading_ = shading; }
-  // [Enhancements] MenuModelsInField: characters are drawn with their menu model, posed by their field model (game/menu_rig.h).
+  // HD models in fields: characters are drawn with their menu model, posed by their field model (game/menu_rig.h).
   void set_menu_models(bool on) { menu_models_ = on; }
   // Draws the frame's shadow tiles: before anything of the frame needs depth (ShadowPipeline::begin_tiles).
   void prepare_shadows(const render::Frame& frame, float alpha);
@@ -990,7 +990,7 @@ class FieldWorld final : public script::FieldHost {
   std::map<int, ModelSource> model_sources_;
   // by character id, kept across rooms
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
-  // [Enhancements] MenuModelsInField, by battle model (the model byte for a character) and field mesh (WornModel::field_mesh): the detailed
+  // HD models in fields, by battle model (the model byte for a character) and field mesh (WornModel::field_mesh): the detailed
   // body (a character's menu model, an NPC's battle model) and how it follows a field model with skeleton `skeleton` (texture registry
   // generation `generation`). No body = drawn with the field model (no detailed body, or the skeletons do not match).
   struct MenuBody {
@@ -1016,7 +1016,7 @@ class FieldWorld final : public script::FieldHost {
   std::vector<std::optional<assets::Skeleton>> field_skeletons_;
   bool field_skeletons_hd_ = false;
   WornModel worn_body(const std::shared_ptr<ModelHandle>& model);
-  // With MenuModelsInField, the menu body `actor` is drawn with (null = its own model): `palette` (the actor's) becomes the menu model's
+  // With HD models in fields, the menu body `actor` is drawn with (null = its own model): `palette` (the actor's) becomes the menu model's
   // and its size is folded into `model`.
   const MenuBody* dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model);
   struct PrefetchedCharacter {

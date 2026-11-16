@@ -20,10 +20,11 @@ int failures = 0;
     }                                                         \
   } while (0)
 
-Config load_text(const char* text) {
+Config load_text(const char* text, bool player_ini = false) {
   const std::filesystem::path path = std::filesystem::temp_directory_path() / "oc_test_config.ini";
   { std::ofstream(path) << text; }
   Config config;
+  if (player_ini) config.use_player_defaults();
   CHECK(config.load(path));
   std::filesystem::remove(path);
   return config;
@@ -86,6 +87,18 @@ int main() {
   { std::ifstream in(f4); ss4 << in.rdbuf(); }
   std::filesystem::remove(f4);
   CHECK(ss4.str().find("FullPrecisionEffects=1") != std::string::npos);
+  // LegacyFieldModels: on in a --config ini, off in the player's ini, whose four Graphics enhancements default on; stored keys win.
+  CHECK(defaults.legacy_field_models && !defaults.retain_battle_scenery);
+  {
+    const Config player = load_text("", true);
+    CHECK(!player.legacy_field_models && player.lighting && player.edge_blend && player.retain_battle_scenery && player.full_precision_effects);
+    CHECK(!player.autohide_cast_hud && !player.hide_feature_icons);
+    CHECK(player.render_scale == 2.0f && defaults.render_scale == 1.0f && load_text("[Video]\nRenderScale=1\n", true).render_scale == 1.0f);
+    const Config stored = load_text("[Video]\nLegacyFieldModels=1\n[Enhancements]\nLighting=0\nEdgeBlend=0\n", true);
+    CHECK(stored.legacy_field_models && !stored.lighting && !stored.edge_blend && stored.full_precision_effects);
+    CHECK(!load_text("[Enhancements]\nMenuModelsInField=0\n", true).legacy_field_models);
+    CHECK(!load_text("[Video]\nLegacyFieldModels=0\n").legacy_field_models);
+  }
   // [Shaders]: all off by default; the styles, switches and full-screen options parse and are written back; the old [Video] Crt reads as crt.
   {
     CHECK(defaults.character_shader == CharacterShader::Off && defaults.matcap == "clay" && !defaults.outlines && !defaults.rim);

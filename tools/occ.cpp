@@ -18,7 +18,7 @@
 //   occ models-validate                      validate every model class (players, monsters, field, at0, weapons, kmd, ex)
 //   occ room-songs [room]                    every PLAY_SONG of the room scripts with the song id and its BGM track
 //   occ room-models [room]                   import every room model (subfiles 11+) of all rooms / one room, report failures
-//   occ menu-rigs [--hd] [byte]              how each menu model's skeleton matches its character's field model ([Enhancements] MenuModelsInField);
+//   occ menu-rigs [--hd] [byte]              how each menu model's skeleton matches its character's field model (HD models in fields);
 //                                            with a model byte (hex), every joint of that pair; --audit: drift over every field clip and
 //                                            mesh-region checks; --motion: how the posed mesh follows the field mesh over every
 //                                            field clip; --rooms: room copies of character field models
@@ -1398,7 +1398,7 @@ PoseAgreement pose_agreement(const assets::ModelAsset& field, const game::MenuRi
   return result;
 }
 
-// A field model and the detailed body [Enhancements] MenuModelsInField draws for it: every playable character's (menu model, by model byte)
+// A field model and the detailed body the HD models in fields draw for it: every playable character's (menu model, by model byte)
 // and every story NPC's of game::npc_bodies (battle model, with the first room copy of its field model). `only` >= 0 keeps the one with that
 // battle model number.
 struct RigPair {
@@ -1909,7 +1909,7 @@ int cmd_menu_rig_motion(vfs::Vfs& fs, bool hd, int only) {
 }
 
 // occ menu-rigs --rooms [--hd]: which room models are a playable character's field model (the same skeleton and mesh, game::same_skeleton /
-// same_mesh), so MenuModelsInField also draws those NPCs with the character's menu model; per character byte the room models with the same
+// same_mesh), so the HD models in fields also draw those NPCs with the character's menu model; per character byte the room models with the same
 // skeleton and mesh, with the same skeleton but another mesh (another person on the character's rig: not taken), and with the field
 // model's joint count and parents but other rest values (not taken).
 int cmd_menu_rig_rooms(vfs::Vfs& fs, bool hd) {
@@ -2049,7 +2049,7 @@ float colour_overlap(const std::array<float, kColourBins>& lhs, const std::array
 // occ menu-rigs --npcs [--hd]: for every monster battle model with at least kMinNpcJoints joints, the room models it may be the battle body
 // of, grouped by game::body_fingerprint (each with its joints, triangles, height over width, colour overlap, the number of rooms it is in
 // and one of them): those in the most rooms where one of the model's enemy names speaks (a message opening with "Name:"), then those whose
-// colours (body_colours) overlap the battle model's most. What the NPC bodies of [Enhancements] MenuModelsInField are chosen from.
+// colours (body_colours) overlap the battle model's most. What the NPC bodies of HD models in fields are chosen from.
 int cmd_menu_rig_npcs(vfs::Vfs& fs, bool hd) {
   constexpr size_t kMinNpcJoints = 12, kShown = 3;
   fs.set_hd_mode(hd);

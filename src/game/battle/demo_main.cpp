@@ -216,6 +216,7 @@ int ocbattleview_main(int argc, char** argv) {
   const std::filesystem::path exe = platform::exe_dir();
   log::init((exe / "ocbattleview.log").string());
   platform::Config config;
+  if (config_file.empty()) config.use_player_defaults();
   config.load(config_file.empty() ? exe / "opencross.ini" : config_file);
   if (config_file.empty()) config.clear_session_toggles();
   // [Cheats] of the harness ini (e.g. AlwaysLoot = a Pilfer that lands).

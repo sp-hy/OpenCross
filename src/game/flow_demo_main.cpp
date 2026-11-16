@@ -51,6 +51,7 @@ int ocflow_main(int argc, char** argv) {
   const std::filesystem::path exe = platform::exe_dir();
   log::init((exe / "ocflow.log").string());
   platform::Config config;
+  config.use_player_defaults();
   config.load(exe / "opencross.ini");
   import::Lang lang = import::Lang::En;
   import::parse_lang(lang_code, lang);

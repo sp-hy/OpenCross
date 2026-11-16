@@ -116,7 +116,9 @@ void check_wide(ImVec2 display, int width = -1, int height = -1, bool widescreen
     stayed_right = stayed_right && cursor().GetCenter().x > middle;
   }
   CHECK(stayed_right);
+  // On the right-hand control of a two-control row the first Left stays in the row (checked below); the next one crosses.
   harness.press({ImGuiKey_GamepadDpadLeft});
+  if (cursor().GetCenter().x > middle) harness.press({ImGuiKey_GamepadDpadLeft});
   CHECK(cursor().GetCenter().x < middle);
 
   // The right column's rows that hold two controls (the check box grids, the radio pairs), found going down on the left-hand control of

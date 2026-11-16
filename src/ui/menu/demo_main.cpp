@@ -44,6 +44,7 @@ int ocmenudemo_main(int argc, char** argv) {
   const std::filesystem::path exe = platform::exe_dir();
   log::init((exe / "ocmenudemo.log").string());
   platform::Config config;
+  config.use_player_defaults();
   config.load(exe / "opencross.ini");
   const std::filesystem::path game_dir = platform::find_game_dir(config.game_dir);
   vfs::Vfs files;

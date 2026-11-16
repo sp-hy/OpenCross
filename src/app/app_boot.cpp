@@ -86,6 +86,7 @@ void App::init_config(int argc, char** argv) {
 #else
   log_forced = true;
 #endif
+  if (own_ini) config.use_player_defaults();
   first_launch = !config.load(config_file);
   // RDE's play-time toggles start every launch off; an older build's ini may still hold them. A --config ini keeps them (tests).
   if (own_ini) config.clear_session_toggles();

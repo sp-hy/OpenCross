@@ -1,7 +1,7 @@
 // `opencross modelview [-g dir] [--model stem] [--sd]`: a window that shows one character model (field character, battle player,
 // monster, or a room's own model such as an NPC's) with an orbit camera, raw animation clips and an original / modded comparison. The original copy reads a Vfs
 // without mods and skips texture replacement; the modded copy uses the mods enabled in opencross.ini. A playable field character can be
-// shown as [Enhancements] MenuModelsInField draws it: its menu model posed by the field clip (game/menu_rig.h). Writes nothing: no save,
+// shown as the HD models in fields draw it: its menu model posed by the field clip (game/menu_rig.h). Writes nothing: no save,
 // no config, no mod settings.
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_timer.h>
@@ -166,7 +166,7 @@ void show_stats(const char* label, const Side& side) {
     ImGui::TextWrapped("More joints than the renderer's %u (the game draws it the same way).", render::MeshPipeline::kMaxJoints);
 }
 
-// Contact sheets of a playable field character for reviewing [Enhancements] MenuModelsInField: one row per clip (the field model's own,
+// Contact sheets of a playable field character for reviewing HD models in fields: one row per clip (the field model's own,
 // then its event pack's; a one-keyframe pose repeats across the row), kSheetFrames keyframes across each row, and per keyframe the field
 // model and the menu model posed from it, from the front and from the side. kSheetRows rows a page, written to <sheet>_p<N>.png;
 // unmodded files, the chosen art set. With --poses, the named poses only, in larger cells: kPoseFrames a row, kPoseRows rows a page; a
@@ -178,6 +178,7 @@ constexpr float kSheetZoom = 0.62f;
 
 int run_sheet(const mv::Options& options) {
   platform::Config config;
+  config.use_player_defaults();
   config.load(platform::exe_dir() / "opencross.ini");
   const std::string requested = !options.game_dir.empty() ? options.game_dir : !env_game_dir().empty() ? env_game_dir() : config.game_dir;
   const auto game_dir = platform::find_game_dir(requested);
@@ -321,6 +322,7 @@ int run_sheet(const mv::Options& options) {
 
 int run_viewer(const mv::Options& options) {
   platform::Config config;
+  config.use_player_defaults();
   config.load(platform::exe_dir() / "opencross.ini");
   const std::string requested = !options.game_dir.empty() ? options.game_dir : !env_game_dir().empty() ? env_game_dir() : config.game_dir;
   const auto game_dir = platform::find_game_dir(requested);
@@ -466,7 +468,7 @@ int run_viewer(const mv::Options& options) {
     ImGui::TextWrapped("Original ignores every mod. Modded uses the mods enabled in the Mods tab; change them there and reload.");
     if (original.body >= 0 || modded.body >= 0) {
       ImGui::Checkbox("Override with detailed body", &menu_model);
-      ImGui::TextWrapped("As the HD models in fields enhancement draws this character: the Status screen's model (a story NPC: the battle "
+      ImGui::TextWrapped("As the HD models in fields draw this character: the Status screen's model (a story NPC: the battle "
                          "model), on the battle skeleton, posed by the field clip.");
       const Side& shown = show_modded ? modded : original;
       if (menu_model && shown.menu) {

@@ -42,7 +42,7 @@ struct CharacterTextures {
   assets::ModelAsset::EyeSwap eye;
 };
 std::optional<CharacterTextures> read_character_textures(const vfs::Vfs& files, const std::string& stem, bool original_size = false);
-// The detailed body [Enhancements] MenuModelsInField draws for battle model `body` (the game's battle model numbering, which the menu models
+// The detailed body the HD models in fields draw for battle model `body` (the game's battle model numbering, which the menu models
 // share): menu model `body` up to kLastMenuModel, else the battle model itself (battle/monster/...: an NPC's).
 std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int body, bool hd_art, std::string* err);
 // Its file name: the menu model's, else the battle model's.

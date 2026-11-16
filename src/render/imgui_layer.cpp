@@ -838,6 +838,12 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "rough). Off: the window's resolution.",
                      cfg.ps1_res_ui))
         change.ps1_res = true;
+      if (check_cell("Use legacy models in field",
+                     "Draws the characters in the field with their original field models. Off: the playable characters, and the story "
+                     "characters and enemies that have one, are drawn with their detailed Status-screen or battle model, moving as their "
+                     "field models do.",
+                     cfg.legacy_field_models))
+        change.enhancements = true;
       ImGui::EndTable();
     }
   };
@@ -991,11 +997,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "fade out and restart (light patches, lamp shimmer) pulse about twice as hard and may flicker. Off: the PS1's "
                      "brightness, with smooth gradients.",
                      cfg.full_precision_effects))
-        change.enhancements = true;
-      if (check_cell("HD models in fields",
-                     "Draws the playable characters in the field with the detailed models of the Status screen instead of their field "
-                     "models, moving as their field models do. Off: the field models.",
-                     cfg.menu_models_in_field))
         change.enhancements = true;
       ImGui::EndTable();
     }

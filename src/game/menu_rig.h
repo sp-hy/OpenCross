@@ -1,5 +1,5 @@
 #pragma once
-// [Enhancements] MenuModelsInField: a character's menu model (the Status screen's mesh, on its battle model's skeleton), or a story NPC's
+// HD models in fields: a character's menu model (the Status screen's mesh, on its battle model's skeleton), or a story NPC's
 // battle model, posed by the field model, whose skeleton has other joints, rest angles and proportions. "Menu model" below stands for both.
 //
 // Matching, once per model pair: both rest poses are built in model space and scaled to the same height (the joints' vertical extent).

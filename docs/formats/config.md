@@ -21,7 +21,7 @@ OpenCross keeps every user setting, the developer/automation switches and the Es
 
 ## 2. Keys
 
-Sections are listed in the order `Config::save` writes them; keys in each table are in written order. "Default" is the value the struct holds before the file is read (the first-launch overrides are in section 3). "Written" notes keys that are saved only conditionally.
+Sections are listed in the order `Config::save` writes them; keys in each table are in written order. "Default" is the value the struct holds before the file is read (what a `--config` ini reads; the player's ini and first-launch overrides are in section 3). "Written" notes keys that are saved only conditionally.
 
 ### 2.1 `[Paths]`
 
@@ -53,8 +53,9 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `ArtMode` | `hd` | `hd original modded` | Art set: RDE's HD assets / the PS1 disc assets / HD plus the mods and OpenCross's own improvements. `classic` is accepted as an alias of `original`. Any other value reads as `hd` and logs a warning. F6 cycles it. |
 | `Ps1ResGraphics` | 0 | bool | "Retro look": draw the field picture, battle 3D and title sea (backgrounds, models, effects) at the PS1's 320 x 224 and scale up with sharp pixels. |
 | `Ps1ResUi` | 0 | bool | "Retro look": draw the menus, shops, title menu, name entry, Continue and party screens at their PS1 display size, and the battle HUD, results, pause screen and dialogue windows in the 320 x 224 picture, scaled up with sharp pixels. In original art the menus use the PS1 disc textures. |
-| `RenderScale` | 1.00 | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1ResGraphics`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
+| `RenderScale` | 1.00 (player's ini 2.00, section 3) | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1ResGraphics`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
 | `Ps1Jitter` | 0 | bool | Integer vertex snapping and affine texture mapping in the 3D passes. |
+| `LegacyFieldModels` | 1 | bool | "Retro look" (*Use legacy models in field*): the field actors keep their field models. Off (the player's ini default, section 3), the HD models in fields: field actors wearing a character's field model (model bytes 0..0x32: the party, an NPC wearing a room's own copy of a character's field model, and the remote parties' members) are drawn with that character's menu model (the Status screen's, `model.md` section 12) as tall as the field model (feet to the top of the head and hair, held props not counted), posed every frame by the field model's animation (`docs/architecture.md`, HD models in fields). The menu model's own part flags apply; a prop built into its mesh that the field model does not carry is not drawn (Nikki's guitar, Korcha's oar, Janice's drum, Pierre's shield), and a piece whose field piece the actor's animation hides is hidden with it; its stock-environment parts draw with their own texture, as there is no environment page in the field. All 51 menu models are used: 14 matched automatically, the other 37 by a hand-made joint pairing (`occ menu-rigs` lists which; `occ menu-rigs --audit`, `occ menu-rigs --motion` and `opencross modelview --sheet` check them over every field clip). Pieces only the menu model has ride on their parent joint (NeoFio's vines hang from her forearms). Story NPCs and field enemies whose battle model is more detailed than their field model (Solt, Peppor, the Acacia and Porre privates and sergeants, the Polis Police robot, Dario, Dark Serge and 19 enemies, `docs/architecture.md`) are drawn with that battle model the same way, known by their field mesh in every room; the Porre soldiers' battle rifle takes the field rifle's place (drawn only while the field rifle is), and a prop only the field model has (Radius's cane, the mounted Dragoon's lance, the Fossicker's shovel) is carried over onto the detailed body. Simulation, attach points, collision and scripts still use the field model. |
 | `Msaa` | 1 | 1, 2, 4, 8 | Multisample antialiasing of the window-resolution pictures. The stored value is rounded down to a listed level; the GPU layer lowers it to what the hardware supports. |
 | `Anisotropy` | 1 | 1, 2, 4, 8, 16 | Anisotropic filtering of the bilinear 3D textures. Rounded down to a listed level. |
 
@@ -93,7 +94,7 @@ Movies stay at normal speed in both speed modes, and both are off in room 386 (z
 
 ### 2.5 `[Enhancements]`
 
-Opt-in improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is also a checkbox in the Graphics tab.
+Improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is also a checkbox in the Graphics tab (`AutoHideCastHud` and `HideFeatureIcons` in the General tab). The Graphics tab's four (`RetainBattleScenery`, `FullPrecisionEffects`, `Lighting`, `EdgeBlend`) are on by default in the player's ini (section 3); the Default column is the member default a `--config` ini reads.
 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
@@ -103,7 +104,6 @@ Opt-in improvements, independent of `Ps1ResGraphics` and `Ps1ResUi`; each is als
 | `FullPrecisionEffects` | 0 | bool | Effect sprites keep the half 5-bit colour level the PS1 loses to rounding, as RDE draws them (`room_effects.md` 4.3): brighter faint glows that pulse about twice as hard when one object ends and the next grows in. Off: the PS1's average loss, without its steps. |
 | `Lighting` | 0 | bool | Key light on field and battle characters, bright spell effects light the battle units and stage, and units cast shadows of their real shape on the floor: in battle from the stage's sun and spells (`battle_stage.md` 8.3.2), in the field straight below them (`docs/rules/field_actors.md` section 7), on the status screen along the PS1 flat shadow's own ray; the title's manta rays and turtle cast theirs straight down onto the sea floor (`title_scene.md` 2.1.1). The battle floor also darkens smoothly per vertex with distance; off = the stepped PS1 look. |
 | `EdgeBlend` | 0 | bool | Cross-fade the faces along texture seams of the battle stage and title meshes. |
-| `MenuModelsInField` | 0 | bool | Field actors wearing a character's field model (model bytes 0..0x32: the party, an NPC wearing a room's own copy of a character's field model, and the remote parties' members) are drawn with that character's menu model (the Status screen's, `model.md` section 12) as tall as the field model (feet to the top of the head and hair, held props not counted), posed every frame by the field model's animation (`docs/architecture.md`, HD models in fields). The menu model's own part flags apply; a prop built into its mesh that the field model does not carry is not drawn (Nikki's guitar, Korcha's oar, Janice's drum, Pierre's shield), and a piece whose field piece the actor's animation hides is hidden with it; its stock-environment parts draw with their own texture, as there is no environment page in the field. All 51 menu models are used: 14 matched automatically, the other 37 by a hand-made joint pairing (`occ menu-rigs` lists which; `occ menu-rigs --audit`, `occ menu-rigs --motion` and `opencross modelview --sheet` check them over every field clip). Pieces only the menu model has ride on their parent joint (NeoFio's vines hang from her forearms). Story NPCs and field enemies whose battle model is more detailed than their field model (Solt, Peppor, the Acacia and Porre privates and sergeants, the Polis Police robot, Dario, Dark Serge and 19 enemies, `docs/architecture.md`) are drawn with that battle model the same way, known by their field mesh in every room; the Porre soldiers' battle rifle takes the field rifle's place (drawn only while the field rifle is), and a prop only the field model has (Radius's cane, the mounted Dragoon's lance, the Fossicker's shovel) is carried over onto the detailed body. Simulation, attach points, collision and scripts still use the field model. |
 
 ### 2.5.1 `[Shaders]`
 
@@ -251,9 +251,19 @@ All off by default; they never lock saving. The first three also toggle from the
 | `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |
 | `NoCraftCost` | 0 | The forge builds without needing materials or gold and takes neither. |
 
-## 3. First-launch defaults
+## 3. Player and first-launch defaults
 
-When no ini exists the following differ from the values an ini without those keys reads (route inis keep the struct defaults, so their frame size and framing do not change):
+**The player's ini.** The default `opencross.ini` and a `--profile` one (not a `--config` ini, and also as read by the dev tools that use the player's ini) read a missing key of the following with these defaults instead of section 2's, so the faithful member defaults stay what a route or test ini reads:
+
+| Key | Player's ini | `--config` ini |
+|---|---|---|
+| `[Video] RenderScale` | 2.00 | 1.00 |
+| `[Video] LegacyFieldModels` | 0 (HD models in fields) | 1 |
+| `[Enhancements] RetainBattleScenery`, `FullPrecisionEffects`, `Lighting`, `EdgeBlend` | 1 | 0 |
+
+A player's ini written by an older build already holds the four `[Enhancements]` keys and keeps their stored values; it has no `LegacyFieldModels`, so it gets the HD models in fields.
+
+**First launch.** When no ini exists the following also differ from the values an ini without those keys reads (route inis keep the struct defaults, so their frame size and framing do not change):
 
 | Key | First launch | Key absent from an existing ini |
 |---|---|---|
@@ -278,7 +288,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Language` | Dialogue, flow, menus, shop and results switch at once. A movie already playing keeps its language. |
 | `Portraits` | Field, menu and results portraits switch at once. |
 | `Driver` | Needs a restart; the Backend row offers a *Restart now* button once it differs from the one the run started with. |
-| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1ResGraphics`, `Ps1ResUi`, `RenderScale`, `Ps1Jitter`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, `CameraRelative`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
+| `Filter`, `FilterRooms`, `FilterEffects`, `FovDeg`, `Widescreen`, `WideHud`, `WideEdgeFade`, `Ps1ResGraphics`, `Ps1ResUi`, `RenderScale`, `Ps1Jitter`, `LegacyFieldModels`, `FrameCap`, all of `[Enhancements]`, all of `[Shaders]`, `FastMode`, `SlowMode`, `FastRate`, `SlowRate`, `AutoSave`, `CameraRelative`, all of `[Cheats]` | Read every frame (or every tick) from the in-memory settings; no restart. |
 | `Log` | The Debug tab starts or stops the log at once. |
 | `[Multiplayer] Enabled`, `Server`, `ServerUrl` | Connect, reconnect or disconnect at once; an address field applies when it is left. |
 | other `[Multiplayer]` keys | Read every frame; `Name` goes to the server as a `profile` message. |
@@ -301,5 +311,6 @@ Editing the file by hand while the game runs has no effect: the file is read onc
 | `[Enhancements] EnhancedLighting`, `SpellLights` | Either on = `Lighting` default on; an explicit `Lighting` wins. |
 | `[Enhancements] SeamBlend` | `0` = `EdgeBlend` off, `1` or `2` = on; an explicit `EdgeBlend` wins. |
 | `[Mods] DumpTextures`, `ReplaceTextures` | Skipped (never taken as mod names) and not written back. |
+| `[Enhancements] MenuModelsInField` | Ignored and not written back; `[Video] LegacyFieldModels` replaces it. |
 
 None of the legacy keys is written by `save`.

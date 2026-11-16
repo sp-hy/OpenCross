@@ -361,7 +361,7 @@ FieldWorld::WornModel FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& 
   return worn_models_[model.get()] = {model, found, field_mesh};
 }
 
-// [Enhancements] MenuModelsInField: an actor wearing a character's field model (character model bytes up to the last menu model, the
+// HD models in fields: an actor wearing a character's field model (character model bytes up to the last menu model, the
 // numbering the Status screen's body uses) or a story NPC's (worn_body) is drawn with the detailed body, the character's menu model or the
 // NPC's battle model, when the two skeletons match (MenuRig::usable). The body is read and matched on first use and again after an art or
 // texture change; every model with the same skeleton shares the match.

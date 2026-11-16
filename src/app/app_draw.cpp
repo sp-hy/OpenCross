@@ -191,7 +191,7 @@ void App::apply_frame_options() {
     if (battle_ready) battle.set_autohide_cast(config.autohide_cast_hud);
     if (battle_ready) battle.set_keep_intro_layer(config.retain_battle_scenery);
     if (world_ok) world.set_cast_shadows(config.lighting);
-    if (world_ok) world.set_menu_models(config.menu_models_in_field);
+    if (world_ok) world.set_menu_models(!config.legacy_field_models);
     if (world_ok) world.set_camera_relative(config.camera_relative);
     status_model.set_cast_shadows(config.lighting);
     title_bd.set_cast_shadows(config.lighting);
