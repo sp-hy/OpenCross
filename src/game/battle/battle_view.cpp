@@ -93,11 +93,19 @@ bool BattleView::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spri
   const u8 px[4] = {255, 255, 255, 255};
   if (!white_.tex.create(ctx, 1, 1, render::TextureFormat::Rgba8, px)) return false;
   white_.set = render::TexRef(white_.tex, nearest_);
-  if (!load_tex(win_base_, "hd/battle/shapes/battle-win4-large-base.png") || !load_tex(win_frame_, "hd/battle/shapes/battle-win4-large-frame.png"))
-    log::warn("battle: HD panel PNGs missing, HD mode uses plain boxes");
-  for (size_t i = 0; i < plates_.size(); ++i)
-    if (!load_tex(plates_[i], std::format("hd/menu/menuelem/menuelem_{}.png", i + 1).c_str())) log::warn("battle: element plate {} missing", i + 1);
-  load_hud_art(vfs);
+  // Played from the PS1 discs there is no RDE art: the HUD is the disc's own sheets, the text the PS1 font at one font pixel per PS1 pixel
+  // (4 canvas units wide, a 960 / 216 unit HUD line high).
+  ps1_hud_ = !vfs.has_archive("hd");
+  if (ps1_hud_) {
+    text_.set_pixel_aspect(960.0f / 216.0f / 4.0f);
+    load_ps1_hud(vfs);
+  } else {
+    if (!load_tex(win_base_, "hd/battle/shapes/battle-win4-large-base.png") || !load_tex(win_frame_, "hd/battle/shapes/battle-win4-large-frame.png"))
+      log::warn("battle: HD panel PNGs missing, HD mode uses plain boxes");
+    for (size_t i = 0; i < plates_.size(); ++i)
+      if (!load_tex(plates_[i], std::format("hd/menu/menuelem/menuelem_{}.png", i + 1).c_str())) log::warn("battle: element plate {} missing", i + 1);
+    load_hud_art(vfs);
+  }
 
   ready_ = true;
   return true;
@@ -167,7 +175,7 @@ void BattleView::shutdown() {
     tex.tex.destroy();
     tex.set = {};
   }
-  for (Tex* tex : {&white_, &win_base_, &win_frame_}) {
+  for (Tex* tex : {&white_, &win_base_, &win_frame_, &sheet_semi_, &sheet_opaque_}) {
     tex->tex.destroy();
     tex->set = {};
   }

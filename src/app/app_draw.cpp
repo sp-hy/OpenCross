@@ -124,6 +124,7 @@ void App::draw_frame(const render::Frame& frame) {
     if (!movie_open) movie_player.draw_held(frame, vw, vh);
     if (flow_ready) flow.draw_overlay(frame, vw, vh);
   }
+  if (disc_prompt_ok && disc_prompt.active()) disc_prompt.draw(frame, vw, vh, true);
   // The title's 4:3 override ends with the composition (the ticks use the real value).
   render::set_wide_extra(wide_extra);
 

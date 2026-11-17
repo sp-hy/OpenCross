@@ -1,18 +1,23 @@
 """Reference captures of the original PlayStation game in stock DuckStation.
 
     python -X utf8 tools/py/ps1_capture.py prep  [--save tmp/save.dat] [--tag TAG] [--row0 e,e,..] [--disc 1|2|PATH | --disc2]
+                                                 [--region japan|usa] [--ds-dir D --port P]
     python -X utf8 tools/py/ps1_capture.py scene <name> [--state-every N] [--dump-every N] [--disc 1|2|PATH]
     python -X utf8 tools/py/ps1_capture.py cast  batch|summon|tech|enemy|attack [--tag T] [--ids a,b] [--char N] ...
 
 prep     forges the memory card, boots the disc, drives the title screen and the Load menu and writes the base states
-         tmp/ref/states/{field53_encounter,bg00_prestart,bg00_menu}[_TAG].sav (+ manifest[_TAG].txt with the frame of every step).
+         tmp/ref/states/{field53_encounter,bg00_prestart,bg00_menu}[_TAG].sav (+ manifest[_TAG].txt with the frame of every step;
+         tmp/ref/states_usa/ on the USA build).
 scene    one named scene (element casts, serge_attack, bg00_zen0, bg21_cam4, golem, frogprince) -> tmp/ref/<scene>/.
 cast     any battle effect -> tmp/r34/<id>/ref/{states,frames,manifest.txt} (batch / summon / tech / enemy / attack).
 
 --disc    1 (default), 2 (the disc 2 image found by ps1ref.disc2()) or an image path. On disc 2 the forged card marks the save as
          a disc-2 game (script variable 0x42 = 1; the game refuses a disc-1 save there), goes to disc 2's own per-game card file
-         (SLPM-87396_1.mcd) and the default tag is "d2", so the base
+         and the default tag is "d2", so the base
          states are *_d2.sav. A saved state re-inserts the disc it was made on, so disc-2 states must be made on disc 2.
+--region  japan (default) or usa (also OC_PS1_REGION; an image path decides by itself): picks the build. A USA run forges a
+         USA-build save (cc_save_forge.py --region usa), presses the build's own confirm button and keeps its base states in
+         tmp/ref/states_usa/.
 
 Every menu step is a press followed by run_until on a RAM value (never the PNGs); the frame each step happened at is
 written to the manifest. One emulator at a time.
@@ -25,36 +30,52 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import ps1_ram  # noqa: E402
 import ps1ref  # noqa: E402
 from ps1ref import Session  # noqa: E402
 
 ROOT = ps1ref.ROOT
 REF = os.path.join(ROOT, "tmp", "ref")
-STATES = os.path.join(REF, "states")
-MCD = os.path.join(ps1ref.DS_DIR, "memcards", "SLPM-87395_1.mcd")
+STATES_DIRS = {"japan": os.path.join(REF, "states"), "usa": os.path.join(REF, "states_usa")}
+STATES = STATES_DIRS["japan"]
+CARDS = os.path.join(ps1ref.DS_DIR, "memcards")
+# DuckStation names a per-game card after the disc's serial: (build, disc number) -> serial.
+CARD_SERIALS = {("japan", 1): "SLPM-87395", ("japan", 2): "SLPM-87396", ("usa", 1): "SLUS-01041", ("usa", 2): "SLUS-01080"}
 FORGE = os.path.join(HERE, "cc_save_forge.py")
 SERGE_STATS = "hp=1023,atk=1,def=127,hit=127,evd=0,mag=1,mdef=127"
 STD_ROW0 = "1,29,36,12,19,32,2,43"
 DISC = None      # image path for the Sessions of this module (None = disc 1)
 DISC_NO = 1
+REGION = "japan"
 
 
-def set_disc(spec):
-    """spec: None / "1" (disc 1), "2" (ps1ref.disc2()) or an image path; sets DISC / DISC_NO and returns the path (None = default)."""
-    global DISC, DISC_NO
+def set_disc(spec, region=None):
+    """spec: None / "1" (disc 1), "2" (disc 2) or an image path; region: japan / usa (default OC_PS1_REGION, else japan; an
+    image path decides by itself). Sets DISC / DISC_NO / REGION / STATES, switches ps1_ram.RAM to the build and returns the path."""
+    global DISC, DISC_NO, REGION, STATES
     spec = None if spec in (None, "", "1", 1) else str(spec)
+    region = ps1_ram.normalize(region or os.environ.get("OC_PS1_REGION"))
     if spec == "2":
-        DISC = ps1ref.disc2()
+        DISC = ps1ref.disc2(region)
         if not DISC:
-            raise SystemExit("no disc 2 image found in %s (name containing 'Disc 2'), or give --disc PATH" % ps1ref.GAMES_DIR)
+            raise SystemExit("no %s disc 2 image found in %s (name containing 'Disc 2'), or give --disc PATH" % (region, ps1ref.GAMES_DIR))
         DISC_NO = 2
     elif spec:
         DISC = spec
         low = os.path.basename(spec).lower()
         DISC_NO = 2 if ("disc 2" in low or "disc2" in low) else 1
     else:
-        DISC, DISC_NO = None, 1
+        DISC, DISC_NO = ps1ref.default_disc(region), 1
+        if not DISC:
+            raise SystemExit("no %s disc 1 image found in %s (name containing 'Disc 1'), or give --disc PATH" % (region, ps1ref.GAMES_DIR))
+    REGION = ps1_ram.RAM.use(ps1_ram.region_of_disc(DISC)).region
+    STATES = STATES_DIRS[REGION]
     return DISC
+
+
+def card_path():
+    """The per-game memory card file of the disc in use, in the emulator folder of CARDS."""
+    return os.path.join(CARDS, CARD_SERIALS[(REGION, DISC_NO)] + "_1.mcd")
 
 
 def log(msg):
@@ -66,7 +87,8 @@ def rel(p):
 
 
 def forge(save, row0, char=0, party=None, extra=(), grid1="37,43,19,1"):
-    """Forged memory card: slot 2 of the owner's save copy at room 53 entrance 1, standard party and grid row."""
+    """Forged memory card: slot 2 of the owner's save copy at room 53 entrance 1, standard party and grid row, written as a save
+    of the build in use to the per-game card of the disc in use."""
     save = save if os.path.isabs(save) else os.path.join(ROOT, save)
     if not os.path.isfile(save):
         raise SystemExit("save copy %s not found" % save)
@@ -77,15 +99,15 @@ def forge(save, row0, char=0, party=None, extra=(), grid1="37,43,19,1"):
         cmd += ["--grid", "%d:0:%s" % (char, row0)]
     if grid1 and row0:
         cmd += ["--grid", "%d:1:%s" % (char, grid1)]
-    mcd = MCD
     if DISC_NO == 2:
         cmd += ["--var", "0x42=1"]        # story variable 0x42 = disc number - 1: Continue accepts the save on disc 2
-        mcd = os.path.join(os.path.dirname(MCD), "SLPM-87396_1.mcd")   # the per-game card is named by the disc's serial
-    cmd += ["--mcd", mcd, "--mcd-only"]
+    mcd = card_path()
+    os.makedirs(os.path.dirname(mcd), exist_ok=True)
+    cmd += ["--region", REGION, "--mcd", mcd, "--mcd-only"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode:
         raise SystemExit("forge failed: " + r.stdout + r.stderr)
-    log("forged memory card %s (row 0 = %s)" % (rel(mcd), row0))
+    log("forged %s memory card %s (row 0 = %s)" % (REGION, rel(mcd), row0))
 
 
 class Steps:
@@ -133,13 +155,17 @@ class Steps:
 def boot_to_load(g, st, file_no=3):
     """Cold boot to the Load menu with the forged card in slot 1 and the cursor on `file_no` (1-based; CHRONOnn is file nn + 1), then load it."""
     g.run(40)
-    # Start skips the opening movie; the title ignores Start while it fades in, so press until the title answers
-    # (title_var leaves 0 once the title took the press).
+    # Start skips the opening movie; the title ignores Start while it fades in, so press until the title answers. title_var is
+    # 0 while the title waits and leaves 0 once it took the press; before the title is up it may hold a stale nonzero value
+    # (the USA build), so only a change after a 0 counts.
+    seen_zero = False
     for _ in range(40):
         g.press("Start", 6)
         done = False
         for _ in range(24):
-            if g.watch(["title_var"])["title_var"]:
+            if not g.watch(["title_var"])["title_var"]:
+                seen_zero = True
+            elif seen_zero:
                 done = True
                 break
             g.step(0)
@@ -152,13 +178,13 @@ def boot_to_load(g, st, file_no=3):
     g.run(30)
     g.press("Down", 6, 20)
     st.add("Down to Continue (verified by the card prompt below)")
-    st.do("Circle: Continue -> card prompt", "Circle", lambda w: w["mt_mode"] == 1, 400, settle=40)
-    st.do("Circle: card 1 -> memory-card check", "Circle", lambda w: w["mt_mode"] == 2, 400, settle=40)
+    st.do("Confirm: Continue -> card prompt", "Confirm", lambda w: w["mt_mode"] == 1, 400, settle=40)
+    st.do("Confirm: card 1 -> memory-card check", "Confirm", lambda w: w["mt_mode"] == 2, 400, settle=40)
     st.wait("file grid up (mt_mode 32)", lambda w: w["mt_mode"] == 32, 400)
     g.run(10)
     for i in range(1, file_no):
         st.do("Right -> file %d (ld_cur %d)" % (i + 1, i), "Right", lambda w, i=i: w["ld_cur"] == i, 200, gap=10, settle=40)
-    st.do("Circle: load file %d" % file_no, "Circle", lambda w: w["mt_mode"] == 33, 200, settle=60)
+    st.do("Confirm: load file %d" % file_no, "Confirm", lambda w: w["mt_mode"] == 33, 200, settle=60)
 
 
 def write_manifest(path, head, steps):
@@ -173,13 +199,16 @@ def save_base(g, name):
 
 
 def prep(a):
-    set_disc(a.disc)
+    global CARDS
+    set_disc(a.disc, getattr(a, "region", None) or REGION)
+    ds_dir = getattr(a, "ds_dir", None) or ps1ref.DS_DIR
+    CARDS = os.path.join(ds_dir, "memcards")
     sfx = "_" + (a.tag or ("d2" if DISC_NO == 2 else "")) if (a.tag or DISC_NO == 2) else ""
     row0 = a.row0 or STD_ROW0
     os.makedirs(STATES, exist_ok=True)
     forge(a.save, row0)
     names = {"enc": "field53_encounter%s.sav" % sfx, "pre": "bg00_prestart%s.sav" % sfx, "menu": "bg00_menu%s.sav" % sfx}
-    with Session(DISC, ds_dir=getattr(a, "ds_dir", ps1ref.DS_DIR), port=getattr(a, "port", ps1ref.GDB_PORT)) as g:
+    with Session(DISC, ds_dir=ds_dir, port=getattr(a, "port", None) or ps1ref.GDB_PORT) as g:
         st = Steps(g)
         boot_to_load(g, st)
         st.wait("room 53 reached (loc 53)", lambda w: w["loc"] == 53, 3000)
@@ -195,7 +224,7 @@ def prep(a):
         total = g.frame
     write_manifest(os.path.join(STATES, "manifest%s.txt" % sfx), [
         "date: %s" % datetime.datetime.now().isoformat(timespec="seconds"),
-        "emulator: stock DuckStation, disc %s" % os.path.basename(DISC or ps1ref.default_disc() or "?"),
+        "emulator: stock DuckStation, disc %s (%s build)" % (os.path.basename(DISC or ps1ref.default_disc() or "?"), REGION),
         "card: forged slot 2, room 53 entrance 1, grid row 0 = %s" % row0, "total frames from cold boot: %d" % total, ""], st.rows)
     log("base states: " + ", ".join(names.values()))
 
@@ -209,6 +238,9 @@ def main(argv):
     p.add_argument("--row0", default="")
     p.add_argument("--disc", default="1", help="1, 2 or an image path")
     p.add_argument("--disc2", action="store_true", help="same as --disc 2")
+    p.add_argument("--region", default=os.environ.get("OC_PS1_REGION") or "japan", help="japan or usa")
+    p.add_argument("--ds-dir", default=ps1ref.DS_DIR, help="DuckStation folder (a private copy for parallel runs)")
+    p.add_argument("--port", type=int, default=ps1ref.GDB_PORT, help="GDB port of that folder")
     if argv and argv[0] == "scene":      # tools/py/ps1_scene.py
         import ps1_scene
         return ps1_scene.main(argv[1:])

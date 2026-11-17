@@ -19,7 +19,7 @@ This document covers the skinned character and monster models (battle players, b
 
 There are no `.ome` model files in the archive except the status-screen models under `menu/player` (section 12). `.ltc` exists only for players; `.ltd` exists for 10 players and all monsters (a player `.ltd` equals the first Atim of its `.ltc`). The 10 players with both (slash, jakotu, carshu, zoah, malchera, radius, farga, harley, gyada, olha) are also enemy models: the file table gives the party slot the `.ltc` (model id k < 52: entry 3193 + 3k) and the enemy slot the `.ltd` (Karsh: model 7 `carshu.ltc`, model 70 `carshu.ltd`). One monster (`battle/monster/p_gorem/P_gorem.obj`) has no texture sibling. Folder names are Japanese romanisation (`selju` = Serge; `carshu` is a player folder).
 
-**cpt** container: `u32 N; N x u32 offset` (relative to the cpt start) `+ u32 EOF`. The EOF pointer is present in every cpt, so an entry's end is the next pointer.
+**cpt** container: `u32 N; N x u32 offset` (relative to the cpt start) `+ u32 EOF`. The EOF pointer is present in every cpt but the Atim's (section 8), so an entry's end is the next pointer.
 
 **DRP** container: `"drp\0", u32 0, u16 size_field` (`count = size_field/64`), then `count x u32` absolute offsets. The entry at offset p is `u32 0, char name[4], u8 type, u24 v` followed by the data; the data length is `v / 16` (v is 16x the length).
 
@@ -206,6 +206,7 @@ frame 0   : 12 bytes per joint for ALL joints: s16 rx,ry,rz, s16 tx,ty,tz     (J
 frame k>0 : for each joint in order, 6 bytes rotation if rot flag, then 6 bytes translation if trans flag; size = 6*popcount(flags)
             the final frame may carry 1-3 padding bytes (0x77) up to the animation end
 ```
+The packs that are files of their own (`battle/effects/syoukan/st_0N.mtc`) carry the EOF pointer too, so the trailing bytes of a file read from a PS1 disc (`disc.md` section 4) never reach an animation.
 Every frame size matches over 25 anims x 252 models and all external packs. Joints with both flags set exist (e.g. carshu joint 6).
 
 One pack can serve two skeletons in different index ranges: `darkdark.prd` (Forever Zero, element 152) holds entries 0-3 for 39 joints and entries 4-7 for 37, and its script plays `SetAnim 0x84..0x87` on the 37-joint Lynx. Entries are read by index with the model's joint count, so `load_mdl_clips` keeps an entry of another joint count as an empty clip, and only a pack with no fitting entry fails.
@@ -314,7 +315,7 @@ There is one weapon renderer in the main library (no separate battle / field / m
 
 ## 8. Textures
 
-**Atim** (`.ltd`, each half of `.ltc`): `cpt{ CLUT object, image object [, image object] }`. Object header 16 bytes: `u32 type (0x1101 CLUT / 0x1100 image), u16 vramX, u16 vramY, u32 0, u16 w, u16 h`.
+**Atim** (`.ltd`, each half of `.ltc`): `cpt{ CLUT object, image object [, image object] }`. Object header 16 bytes: `u32 type (0x1101 CLUT / 0x1100 image), u16 vramX, u16 vramY, u32 0, u16 w, u16 h`. The Atim's cpt has no EOF word, so its last image object runs to the end of its buffer: the whole `.ltd`, or an `.ltc` entry (the `.ltc`'s own cpt has the EOF word, so those end exactly). A `.ltd` read from a PS1 disc is up to 7 bytes longer (`disc.md` section 4), and the importer takes the object's `16 + 2*w*h` bytes and ignores the rest.
 * CLUT: 256 x RGB555 (`w = 256`), `h` rows (1 or 2; 2 = alternate palette, 33 monsters). Colour 0x0000 is transparent. Bit 15 is STP (per-texel semi-transparency, section 5). OpenCross keeps STP in the RGBA alpha of every model texture (Atim, field TIM, HD TIM, room-model VRAM window): 0 = colour 0x0000, `kStpAlpha` 0xBF = STP set (0x8000 = opaque black + STP), 255 = STP clear.
 * Image: `w` in 16-bit words (pixels = 2w, 8bpp), `h` rows, data size `2*w*h`; VRAM position (0,256) for the main image. Sizes seen: 128x256 (players, most monsters), 256x256, 128x128, a few odd (112x128, 64x...). Two-image files (kurage, manet) hold the images stacked vertically (v >= the first image height addresses the second).
 

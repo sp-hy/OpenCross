@@ -23,6 +23,7 @@
 #endif
 
 #include "core/log.h"
+#include "platform/paths.h"
 #include "platform/window.h"
 #include "render/imgui_nav.h"
 
@@ -459,16 +460,18 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
   auto sec_game = [&] {
   section("Game");
   if (begin_rows("game")) {
-    row("Language", "Dialogue and menu text language.");
+    row("Language", "Dialogue and menu text language. Playing from the PS1 discs: the discs' own language.");
     static const char* const kLangs[] = {"en", "fr", "it", "de", "es", "jp"};
     static const std::vector<std::string> kLangNames = {"English", "Francais", "Italiano", "Deutsch", "Espanol", "Japanese"};
     int li = 0;
     for (int i = 0; i < 6; ++i)
       if (cfg.language == kLangs[i]) li = i;
+    ImGui::BeginDisabled(platform::disc_mode());
     if (combo("##lang", li, kLangNames)) {
       cfg.language = kLangs[li];
       change.language = true;
     }
+    ImGui::EndDisabled();
     row("Auto-save", "RDE's auto-save (card 1, slot 0) on every location change.");
     if (ImGui::Checkbox("##autosave", &cfg.auto_save)) change.other = true;
     row("Steam Connection", "Connects to Steam as the Radical Dreamers Edition, so Steam shows you playing it and its achievements unlock. Needs Steam running. "
@@ -526,13 +529,16 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     row("Voice volume", "Loudness of the voice lines, on top of the master volume.");
     ImGui::SetNextItemWidth(-FLT_MIN);
     if (ImGui::SliderInt("##voicevol", &cfg.voice_volume, 0, 100, "%d%%")) change.audio = true;
-    row("Music source", "Remastered: RDE's arranged soundtrack. Original: the PS1 sequences played by the built-in synthesiser.");
+    row("Music source", "Remastered: RDE's arranged soundtrack. Original: the PS1 sequences played by the built-in synthesiser (always, "
+                        "playing from the PS1 discs).");
     static const std::vector<std::string> kBgm = {"Remastered", "Original (PS1)"};
     int bgm = cfg.bgm_source == "original" ? 1 : 0;
+    ImGui::BeginDisabled(platform::disc_mode());
     if (combo("##bgm", bgm, kBgm)) {
       cfg.bgm_source = bgm == 1 ? "original" : "remastered";
       change.bgm_source = true;
     }
+    ImGui::EndDisabled();
     end_rows();
   }
 
@@ -791,6 +797,8 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
   auto sec_art = [&] {
   section("Art");
   if (begin_rows("art")) {
+    // The PS1 discs have only the classic art and the 1999 portraits.
+    ImGui::BeginDisabled(platform::disc_mode());
     row("Art mode", "Switches the art live (F6 cycles the art modes); nothing is reloaded or restarted.");
     std::vector<std::string> names;
     int ai = 0;
@@ -809,6 +817,7 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
       cfg.portraits = pt == 1 ? "1999" : "2021";
       change.portraits = true;
     }
+    ImGui::EndDisabled();
     end_rows();
   }
 
@@ -834,6 +843,8 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "(times the render scale) and scaled up with sharp pixels, in every art mode. Off: the window's resolution.",
                      cfg.ps1_res_graphics))
         change.ps1_res = true;
+      // The PS1 discs have only the PS1-resolution UI and the field models.
+      ImGui::BeginDisabled(platform::disc_mode());
       if (check_cell("PS1 resolution UI",
                      "The menus, shops, title menu, name entry, Continue and party screens are drawn at their PS1 display size, and the battle "
                      "HUD, battle menus, results, pause screen and the dialogue windows in the 320 x 224 picture, scaled up with sharp pixels, "
@@ -847,6 +858,7 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "field models do.",
                      cfg.legacy_field_models))
         change.enhancements = true;
+      ImGui::EndDisabled();
       ImGui::EndTable();
     }
   };

@@ -1,0 +1,19 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlays (base 0x801C5E00) whose overlay is not identified; they share addresses, so read these as hints only.
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_overlay_image_base = 0x801C5E00;  # data: Load address of the per-effect overlay image
+fx_vertex_collapse_to_init = 0x801C6290;  # function: Collapses each vertex toward its init position over time
+fx_vertex_sway_skin = 0x801C6380;  # function: Sways skinned vertices with growing amplitude
+fx_vertex_mean_truncating = 0x801C6E98;  # function: Truncating integer mean of a vertex array
+fx_mesh_draw_transform = 0x801C6FA4;  # function: GTE helper that rotates and projects a mesh
+fx_line_ring_set_emitter_vel = 0x801C7288;  # function: Sets emitter velocity and position for a line ring slot
+fx_vertex_wave_skin_b = 0x801C7368;  # function: Cosine wave on skinned vertices with advancing phase
+fx_vertex_wave_skin_a = 0x801C742C;  # function: Cosine wave on skinned vertices with advancing phase
+fx_sheet_draw_variant_c = 0x801C7608;  # function: Sheet draw variant with fog
+fx_sheet_draw_variant_d = 0x801C7960;  # function: Sheet draw variant with fog
+fx_sheet_draw_variant_a = 0x801C7DCC;  # function: Sheet draw variant for triangles without fog
+fx_sheet_draw_variant_b = 0x801C8110;  # function: Sheet draw variant for quads without fog
+fx_water_ripple_damp = 0x801C82EC;  # function: Ripple propagation with damping
+fx_water_field_newest_index = 0x801C8580;  # data: Index of the newest ripple field buffer
+fx_water_field_buffers = 0x801C85C4;  # data: Two 21 by 21 ripple field arrays

@@ -4,6 +4,7 @@
 #include <array>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -137,8 +138,9 @@ constexpr size_t kExeStringsOffset = 0x508E0;  // in cdrom/prog/slps_023.64
 // table start, the first one = 2 * entry count) to strings of glyphs and message control codes ending in 0x00.
 class ExeStrings {
  public:
-  // False if the executable is too short or the table header does not fit.
-  bool load(ByteSpan exe);
+  // The tables at file offset `offset` (another build keeps them elsewhere). False if the executable is too short or the table
+  // header does not fit.
+  bool load(ByteSpan exe, size_t offset = kExeStringsOffset);
   bool loaded() const { return !tables_.empty(); }
   // The string's bytes up to (not including) its 0x00; empty for an unknown table or entry.
   ByteSpan get(int table, int index) const;
@@ -164,6 +166,10 @@ std::optional<DialogueBlock> parse_dialogue_block(ByteSpan block);
 Message parse_ps1(ByteSpan stream, const JpGlyphs& glyphs);
 // Same stream rendered as RDE markup (the jp.csv notation) for display and comparison.
 std::string ps1_to_markup(ByteSpan stream, const JpGlyphs& glyphs);
+// A build's glyph codes: the code point of the glyph that starts `bytes` (its first byte >= 0x20, not empty) and its byte count in
+// `length`; 0 for an unknown glyph (written as its hex bytes in brackets).
+using GlyphDecoder = std::function<char32_t(ByteSpan bytes, size_t& length)>;
+std::string ps1_to_markup(ByteSpan stream, const GlyphDecoder& decode);
 
 // Loads and decodes the dialogue block of a room: cdrom/map/mapbin/<name>.bin subfile 8. nullopt if absent.
 std::optional<Bytes> read_room_dialogue_block(const vfs::Vfs& vfs, std::string_view room_name);
@@ -184,7 +190,12 @@ class TextTable {
   // Numeric key (the file's own number parsed with base auto-detection).
   const std::string* get(u64 key, Lang lang) const;
   size_t rows() const { return rows_.size(); }
+  // Row `index` (< rows()): the key, then one cell per heading.
+  const std::vector<std::string>& row(size_t index) const { return rows_[index]; }
   const std::vector<std::string>& header() const { return header_; }
+  // Builds a table without a file: the heading row, then rows (key first, one cell per heading after it).
+  void set_header(std::vector<std::string> header) { header_ = std::move(header); }
+  void add_row(std::vector<std::string> row);
   // A mod's rows (TextMod) over this table: a row whose key is here has the cells `rows` has a column for replaced (columns matched by
   // heading, any case; other languages keep theirs), a new key is added. `changed(key, heading, value)` is called for every cell set.
   void overlay(const TextTable& rows, const std::function<void(const std::string&, const std::string&, const std::string&)>& changed);
@@ -231,10 +242,16 @@ struct FieldTable {
   }
 };
 
+class Ps1Text;
+
 class LangTables {
  public:
-  // Binds to a mounted install; nothing is read until needed. `vfs` must outlive this object.
+  // Binds to a mounted install; nothing is read until needed. `vfs` must outlive this object. With no lang.dat (the PS1 discs) the
+  // text comes from the PS1 files (import/ps1_text.h) in the disc's own language, whatever language is asked for; a table with no
+  // PS1 source is absent.
   void init(const vfs::Vfs* vfs) { vfs_ = vfs; }
+  // The text comes from the PS1 files (no lang.dat).
+  bool from_disc();
 
   // Reads the per-language field tables (<lang>.csv, Ex_<lang>.csv, mesgen, mess_wend, btel_<lang>). Returns false if
   // <lang>.csv is not available. Lookups call this lazily.
@@ -296,6 +313,8 @@ class LangTables {
   void each_mod_rows(std::string_view member, const std::function<void(const TextMod&, std::string_view)>& apply) const;
   // Merges the mods' rows of a (room / battle, msg) table; `rooms` = field text (a mod's rooms from 1000 on -> internal ids).
   void merge_field_rows(FieldTable& table, std::string_view member, bool rooms) const;
+  // Field lookup from the PS1 room messages: the grammar forms of the speaker, newlines, the disc language's normalisation.
+  std::optional<std::string> lookup_disc_field(int room_id, int msg_index, int speaker, LookupInfo* info);
 
   const vfs::Vfs* vfs_ = nullptr;
   std::array<PerLang, 6> langs_;
@@ -303,6 +322,9 @@ class LangTables {
   bool wend_loaded_ = false;
   std::unordered_map<std::string, TextTable> tables_;
   std::unordered_map<std::string, bool> tables_tried_;
+  // The PS1 text source; set on first use when the install has no lang.dat.
+  std::shared_ptr<Ps1Text> disc_;
+  bool disc_tried_ = false;
 };
 
 // Decodes a lang.dat text member: UTF-16LE BOM, UTF-8 BOM or plain UTF-8 -> UTF-8 without BOM.

@@ -30,6 +30,11 @@ u32 text_color(u8 idx, u32 alpha) {
   return pack_rgba(entry.r, entry.g, entry.b, static_cast<u8>(alpha));
 }
 
+// The PS1 font in a message window: the field screen's 320 pixels across the 1280-unit canvas and its 216 lines down the 960 units, so a
+// font pixel is 4 units wide and 960 / 216 high. Default text is white (the sprite colour 0x80 on the glyph's full texel).
+constexpr float kPs1MessageAspect = kCanvasHeight / 216.0f / 4.0f;
+u32 ps1_text_color(u8 idx, u32 alpha) { return idx <= 1 ? pack_rgba(255, 255, 255, static_cast<u8>(alpha)) : text_color(idx, alpha); }
+
 // Per-skin tile UVs of the message frame (skin =texture index 0..15 = w01..w15, w17).
 struct SkinUv {
   float b0v, bv, bdv, lu, ldu, ldv, r0u, r0du, r24v, ru, rv, rdu, rdv;
@@ -388,24 +393,32 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   scale_ = text_scale;
   render::TextBatch* batch = text_;
   LayoutMetrics metrics;
+  ps1_ = batch->is_ps1(face);
+  batch->set_pixel_aspect(ps1_ ? kPs1MessageAspect : 1.0f);
   metrics.line_height = batch->line_height(face, text_scale);
+  batch->set_pixel_aspect(1.0f);
   metrics.max_width = wrap_width_ * (text_scale / 0.5f);
-  // Glyphs advance by the width they count for, on the 2-unit grid of the 640-wide layout.
-  if (wrap)
+  if (ps1_) {
+    // The disc's own text in the PS1 font: its line breaks as written, every glyph at the PS1 pen advance.
+    metrics.advance = [batch, face, text_scale](char32_t ch) { return batch->advance(face, ch, text_scale); };
+    metrics.glyph_width = [batch, face, text_scale](char32_t ch, bool) { return batch->advance(face, ch, text_scale); };
+    metrics.max_width = 0;
+  } else if (wrap)
+    // Glyphs advance by the width they count for, on the 2-unit grid of the 640-wide layout.
     metrics.glyph_width = [this, batch, face, italic, text_scale](char32_t ch, bool slanted) {
       if (symbol_face_ != render::kNoFace && button_symbol(ch)) return jp_glyph_width(ch, 0.0f) * (text_scale / 0.5f);
       return wrap_glyph_width(batch->glyph_measure(slanted && italic != render::kNoFace ? italic : face, ch), slanted) * (text_scale / 0.5f);
     };
   else
     metrics.glyph_width = [batch, face, text_scale](char32_t ch, bool) { return jp_glyph_width(ch, batch->glyph_measure(face, ch)) * (text_scale / 0.5f); };
-  metrics.pen_grid = 2.0f;
-  metrics.wrap = wrap;
+  metrics.pen_grid = ps1_ ? 0.0f : 2.0f;
+  metrics.wrap = wrap && !ps1_;
   // Choice indent: non-JP only.
-  if (choice_mode_ && wrap) {
+  if (choice_mode_ && wrap && !ps1_) {
     metrics.choice_space_first = 2.0f * 70.0f * 0.45f * (text_scale / 0.5f);
     metrics.choice_space = 2.0f * 20.0f * 0.45f * (text_scale / 0.5f);
   }
-  if (wrap) {
+  if (wrap && !ps1_) {
     metrics.button_advance_spaced = 0.9f * 40.0f * (text_scale / 0.5f);
     metrics.button_advance = 0.9f * 55.0f * (text_scale / 0.5f);
   }
@@ -711,11 +724,12 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
     float vw, vh;
     ~View() {
       sprites->set_view(vw, vh);
-      if (batch) batch->set_pixel_grid(0.0f, 0.0f);
+      if (batch) batch->set_pixel_grid(0.0f, 0.0f), batch->set_pixel_aspect(1.0f);
     }
   } view{sprites_, text_, vw, vh};
   sprites_->set_view(vw, vh / flat);
   if (text_) text_->set_pixel_grid(1.0f, flat);
+  if (text_) text_->set_pixel_aspect(ps1_ ? kPs1MessageAspect : 1.0f);
   // Both art modes draw the same frame model; only the skin texture (and the font face chosen by the caller) differs.
   const bool tiled = skin_set_ && skin_mode_ == mode_ && !label_;
   const float cw = vw / zoom;
@@ -786,8 +800,9 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
           ch = static_cast<char32_t>(U'0' + digits_[static_cast<size_t>(glyph.digit)]);
           hl = hl || glyph.digit == digit_cursor_;
         }
-        text_->draw_glyph(glyph_face(ch, glyph.italic), ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_, text_color(hl ? 6 : glyph.color, a), scale_ * zoom,
-                          pass);
+        const u8 colour = hl ? 6 : glyph.color;
+        text_->draw_glyph(glyph_face(ch, glyph.italic), ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_,
+                          ps1_ ? ps1_text_color(colour, a) : text_color(colour, a), scale_ * zoom, pass);
       }
     }
     for (u32 i = 0; i < shown; ++i) {

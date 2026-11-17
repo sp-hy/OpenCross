@@ -1,38 +1,33 @@
 #include "game/disc_index.h"
 
-#include <cctype>
-
 #include "core/log.h"
+#include "vfs/disc_names.h"
 #include "vfs/vfs.h"
 
 namespace oc::game {
 
 namespace {
-std::vector<std::string> parse(ByteSpan bytes) {
-  std::vector<std::string> out;
-  out.reserve(bytes.size() / 0x40);
-  for (size_t offset = 0; offset + 0x40 <= bytes.size(); offset += 0x40) {
-    std::string path;
-    for (size_t i = 0; i < 0x40 && bytes[offset + i]; ++i) {
-      const char ch = static_cast<char>(bytes[offset + i]);
-      path += ch == '\\' ? '/' : static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
-    }
-    out.push_back(std::move(path));
-  }
-  return out;
-}
 const std::string kEmpty;
 }  // namespace
 
 bool DiscIndex::from_bytes(ByteSpan disc1, ByteSpan disc2) {
-  rec_[0] = parse(disc1);
-  rec_[1] = disc2.empty() ? rec_[0] : parse(disc2);
+  rec_[0] = vfs::parse_disc_records(disc1);
+  rec_[1] = disc2.empty() ? rec_[0] : vfs::parse_disc_records(disc2);
   return !rec_[0].empty();
+}
+
+void DiscIndex::load_builtin() {
+  rec_[0] = vfs::builtin_disc_records(1);
+  rec_[1] = vfs::builtin_disc_records(2);
 }
 
 bool DiscIndex::load(const vfs::Vfs& vfs) {
   const auto disc1 = vfs.read("cdrom/cdrom.fnd");
-  if (!disc1) return false;
+  if (!disc1) {
+    load_builtin();
+    log::info("disc index: {} records (built in)", rec_[0].size());
+    return true;
+  }
   const auto disc2 = vfs.read("cdrom/cdrom2.fnd");
   const bool ok = from_bytes(*disc1, disc2 ? ByteSpan(*disc2) : ByteSpan());
   if (ok) log::info("disc index: {} records (disc 2 {})", rec_[0].size(), disc2 ? "present" : "missing, shares disc 1");

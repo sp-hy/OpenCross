@@ -6,17 +6,25 @@
 // Menu: New Game / Continue / Settings / Quit (variant 2: New Game + / Continue +). New Game and Continue fade to black before they are
 // reported. New Game (+) first opens the vibration page: "On" / "Off" + the footer "Vibration Function"; confirm reports New Game
 // with vibration() = the choice, cancel returns to page 0.
+// Played from the PS1 discs (no cdrom2 archive) the label atlases carry the PS1's own lettering and cursor: those items draw only
+// their atlas cell, and Settings / Quit draw a label-less bar (title_blank_bars) under their label in the PS1 font.
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "audio/mixer.h"
+#include "import/tim.h"
 #include "ui/title/canvas.h"
 #include "ui/title/nav.h"
 
 namespace oc::ui {
 
 enum class TitleChoice { None, NewGame, Continue, Settings, Quit };
+
+// A label-less option bar built from a 4bpp title label atlas (indexed, 32-row cells): 32 rows from cell `plain`, then 32 from cell
+// `selected`, every row filled with its most common index. The selected half keeps its own pixels left of the plain cell's lettering
+// (the cursor). `label_x` (optional) receives that first lettering column. An image that is not indexed or lacks a cell gives {}.
+import::Image title_blank_bars(const import::Image& atlas, int plain, int selected, int* label_x = nullptr);
 
 class TitleScreen {
  public:
@@ -87,15 +95,21 @@ class TitleScreen {
   void start_song(int song);
   std::u32string label(int i) const;
   bool enabled(int i) const { return page_ == 1 || variant_ == 2 || i != 1 || has_saves_; }
+  // The option list, footer and cursor when played from the PS1 discs.
+  void draw_disc_menu(DrawList& dl) const;
 
   UiKit* kit_ = nullptr;
   audio::Mixer* mixer_ = nullptr;
   render::TexRef logo_ = {};
   render::TexRef bg_[2] = {{}, {}};
   // The option underline sprites: the blanked label atlases (map/etc/openfont.tim for variant 1, menu/title/cmptitle.tim for
-  // variant 2; only the index-14 underline pixels are left), 256 x 325.
+  // variant 2; only the index-14 underline pixels are left), 256 x 325. From the PS1 discs (disc_) they are the labelled originals.
   render::TexRef bars_[2] = {{}, {}};
   float bars_h_[2] = {0, 0};
+  bool disc_ = false;
+  // Disc only: the label-less bar of Settings / Quit (rows 0..31 plain, 32..63 selected) and the art's lettering column (PS1 px).
+  render::TexRef blank_bars_ = {};
+  float label_x_ = 0;
   import::Lang lang_ = import::Lang::En;
   ArtMode mode_ = ArtMode::Hd;
   Phase phase_ = Phase::FadeIn;

@@ -1,10 +1,10 @@
 #pragma once
-// Text drawing on top of SpriteBatch: DirectXTK spritefont faces (RDE HD fonts) and the PS1 1-bit bitmap font.
+// Text drawing on top of SpriteBatch: DirectXTK spritefont faces (RDE HD fonts) and the PS1's own 1-bit font.
 //
 // Each face owns one RGBA8 glyph atlas generated from the requested glyphs (the source spritefonts are up to 190 MB,
 // so they are never uploaded whole). RDE spritefonts pack masks in the colour channels: R = glyph fill,
 // B = fill + outline + shadow; the fill is drawn in the text colour and the B mask in a dark backdrop colour.
-// The PS1 bitmap font is drawn with nearest sampling; its backdrop is a one-pixel drop shadow.
+// The PS1 font is drawn with nearest sampling; its backdrop is a black drop shadow one font pixel down and right.
 //
 // Call prepare() for every string before the frame it appears in (it may rebuild an atlas);
 // draw calls between SpriteBatch::begin() and end() never touch the GPU resources.
@@ -14,8 +14,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "import/ps1_font.h"
 #include "import/spritefont.h"
-#include "import/text.h"
 #include "render/sprite_batch.h"
 
 namespace oc::render {
@@ -64,8 +64,18 @@ class TextBatch {
   // Spritefont face. `scale` in draw calls multiplies the font's own pixel size (RDE draws its 70 pt faces at 0.5).
   // `extra` joins the first atlas build (ASCII + extra in one rebuild instead of two).
   FaceId add_spritefont(std::shared_ptr<const import::SpriteFont> font, const SpriteFontOptions& opt = {}, std::u32string_view extra = {});
-  // PS1 bitmap font (needs JpGlyphs::load_bitmaps). `scale` is a pixel multiplier (2 = 22 px glyphs).
-  FaceId add_bitmap_font(std::shared_ptr<const import::JpGlyphs> glyphs);
+  // The PS1's own font. In every call `scale` is read as for a 70-point spritefont: one font pixel is kPs1PixelScale * scale view units
+  // wide (the message scale 0.5 on the 1280-wide canvas = one pixel of the 320-wide field screen) and pixel_aspect() times that high.
+  FaceId add_ps1_font(std::shared_ptr<const import::Ps1Font> font);
+  static constexpr float kPs1PixelScale = 8.0f;
+  bool is_ps1(FaceId face) const {
+    const Face* font_face = this->face(face);
+    return font_face && font_face->ps1;
+  }
+  // Height / width of a PS1 font pixel in view units for the next draws and metrics (1 = square, the default). The field's message
+  // canvas shows 216 display lines over its 960 units, so its pixels are 960 / 216 / 4 as high as wide.
+  void set_pixel_aspect(float aspect) { aspect_ = aspect; }
+  float pixel_aspect() const { return aspect_; }
 
   // Makes sure every code point of `text` has an atlas entry. Not callable between begin() and end().
   void prepare(FaceId face, std::u32string_view text);
@@ -172,10 +182,9 @@ class TextBatch {
     TexRef set_nearest;
   };
   struct Face {
-    bool bitmap = false;
     SpriteFontOptions opt;
     std::shared_ptr<const import::SpriteFont> font;
-    std::shared_ptr<const import::JpGlyphs> jp;
+    std::shared_ptr<const import::Ps1Font> ps1;
     std::vector<char32_t> wanted;
     std::unordered_map<char32_t, Entry> entries;
     std::unique_ptr<Atlas> fill;
@@ -196,12 +205,15 @@ class TextBatch {
   }
   const Entry* entry(const Face& font_face, char32_t ch) const;
   bool rebuild_spritefont(Face& font_face);
-  bool build_bitmap_atlas(Face& font_face);
+  bool build_ps1_atlas(Face& font_face);
+  // View units per PS1 font pixel on x at `scale`.
+  static float ps1_pixel(float scale) { return kPs1PixelScale * scale; }
   std::unique_ptr<Atlas> make_atlas(u32 w, u32 h, const std::vector<u8>& rgba, const Sampler& sampler, bool with_nearest = false, UploadBatch* batch = nullptr);
 
   GpuContext* ctx_ = nullptr;
   SpriteBatch* sprites_ = nullptr;
   float grid_x_ = 0, grid_y_ = 0;
+  float aspect_ = 1.0f;
   Sampler linear_, nearest_;
   std::vector<Face> faces_;
 };

@@ -1,0 +1,35 @@
+# PS1 project symbol list, USA build (SLUS_010.41): battle init overlay btlinit.prg (base 0x801EE000).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+sys_ngplus_is_carry_id = 0x801EE05C;  # function: Tests whether an id is carried (below 0x7E, outside the 12 summons).
+sys_ngplus_carry_over = 0x801EE0B0;  # function: Play-init that ORs cleared bitmaps into the New Game+ carry-over words.
+btl_init_display_setup = 0x801EE140;  # function: Sets up the battle display and draw environment (0,10,256,216).
+btl_init_display_setup_e178 = 0x801EE178;  # function: Sets up the battle display: 320x224 buffer with GTE offset (160,112) and screen distance 512.
+btl_open_battle_prd = 0x801EE364;  # function: Opens the battle.prd archive during battle init.
+btl_load_stage_file = 0x801EE5A8;  # function: Loads the stage background file chosen by the battlefield id and flags the fight as in progress; then starts the stage intro (boss for a direct scene id above 0x1FF, else a random one of the bti0..bti7 present), fade for a field battle, and loop.
+btl_unit_refresh_stat_totals = 0x801EE850;  # function: Rebuilds a unit weapon, armour and skip-mask totals from its equipment; an HP% accessory raises the current HP (not the max HP) by its percent, +1 when unchanged (so 0 becomes 1), cap 999.
+btl_unit_copy_equipment = 0x801EED70;  # function: Copies a character weapon, armour and accessory stat records into the battle unit.
+btl_player_spawn = 0x801EEE64;  # function: Spawns a party member unit in battle and runs its start-of-battle script; in a monster-party scene the slot takes the picked monster record instead of the character. Sets control flag bit 31 when HP <= max HP / 4, never the dead flag, so a member whose record holds the KO bit stands (the low-HP stance at 0 HP).
+btl_enemy_size_model = 0x801EF858;  # function: Sizes and prepares an enemy model and its weapon at spawn.
+btl_enemy_spawn = 0x801EFC00;  # function: Spawns one enemy unit: applies spawn script, model and weapon setup.
+btl_spawn_enemies = 0x801F0914;  # function: Loops over the scene enemies and spawns each one.
+btl_place_party = 0x801F0CEC;  # function: Places the party in ascending character id: the first PC, then (after the held intro wait; a field battle without the hold flag does not wait, which cuts the stage intro when the first PC has loaded) starts a random party intro and loads / places the others one by one
+btl_unit_build_grid = 0x801F117C;  # function: Builds a unit's battle grid from its record cells (only cells without the 0x4000 lock bit), the cell flags, and the gauge cap (deepest row with an element).
+btl_unit_reset_gauge_and_grid = 0x801F15A8;  # function: Sets a unit's gauge to -1 and builds its battle grid.
+btl_enemy_spawn_copy_record = 0x801F15F0;  # function: Copies a monster record into a unit and doubles HP in New Game Plus; also used for the party slots of a monster-party scene.
+btl_party_unit_from_record = 0x801F1864;  # function: copies a character record (0xCC bytes) into a party unit, its status byte with it (KO bit 0x80 included, HP left as saved: HP 0 alone is no KO), adds lo 0x400400, AP and countdown 8, builds the grid
+btl_script_build_contexts = 0x801F1BD8;  # function: Builds one script interpreter context per battle entity; script variables 0x00..0x0E and 0x60..0x7E start as the field variables 0x3D0..0x3DE and 0x3E0..0x3FE.
+btl_scene_select = 0x801F213C;  # function: Maps the battle id to a scene record and reads the scene entry; overwrites the battle id word with the scene number, so every later test compares the scene.
+btlinit_globals_reset = 0x801F25B4;  # function: resets the battle globals at battle start, the ring summon colour (0 = none) among them
+btl_init_party_relief = 0x801F2B40;  # function: first battle-init step, run before the scene select: resets the battle work, copies the party ids and applies the Relief Charm swap unless the battle id is 0x3DD
+btl_init_main = 0x801F2D90;  # function: Battle init driver: audio, table loads, scene select, enemy spawn, unit arrays and party setup.
+btl_start_transition_sequence = 0x801F2E44;  # function: Starts the embedded transition sequence at battle start.
+btl_init_clear_screen_white = 0x801F2F34;  # function: Copies the displayed frame to VRAM and clears the screen to white.
+btl_transition_sequence_blob = 0x801F3074;  # data: Embedded transition sequence data started at battle init.
+btl_scene_variant_rows = 0x801F4E58;  # data: Scene variant roll threshold rows.
+btl_form_tech_table = 0x801F4E7C;  # data: Per-form first and second tech table for transformed party members.
+btl_symtbl_ptr = 0x801F4EA8;  # data: Pointer to the loaded symtbl (battle id x 8 variants -> scene) table.
+btl_scenedat_ptr = 0x801F4EAC;  # data: Pointer to the loaded scenedat records; advanced to the selected scene record.
+btl_colour_row_flag = 0x801F4EB4;  # data: Set when a party member's battle grid holds the Chrono Cross element (0x7E); turns on the colour-history row.
+btl_scene_variant = 0x801F4ECC;  # data: Scene variant index used when mapping battle id to scene.

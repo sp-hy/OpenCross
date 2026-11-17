@@ -1,0 +1,26 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay saraman.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_saraman_dispatch_op = 0x801C5E04;  # function: Overlay dispatcher; ops 0x180-0x184
+fx_saraman_bake_ground = 0x801C6218;  # function: Ground bake, same code as the shared one
+fx_saraman_init = 0x801C7204;  # function: Init: binds model page and loads wave data
+fx_saraman_op_180_inward_spin = 0x801C7538;  # function: Op 0x180: pieces move inward and spin
+fx_saraman_op_181 = 0x801C7764;  # function: Op 0x181 handler
+fx_saraman_op_182 = 0x801C77B4;  # function: Op 0x182 handler
+fx_saraman_op_184 = 0x801C77C0;  # function: Op 0x184 handler
+fx_saraman_op_183_load_motion = 0x801C77EC;  # function: Op 0x183: loads a motion file into the heap
+fx_saraman_joint_follow = 0x801C785C;  # function: Particle update that puts the particle at joint 1 of the 'sara' model
+fx_saraman_frame = 0x801C798C;  # function: Frame: waits for ticks and CD
+fx_saraman_exit = 0x801C8048;  # function: Exit for Salamander
+fx_saraman_draw_mesh_cued = 0x801C80B8;  # function: Draws a baked mesh through the overlay's fog builders
+fx_saraman_time = 0x801C8B78;  # data: Time since init, in ticks
+fx_saraman_pit_flag = 0x801C8B80;  # data: Pit on flag set when first motion file is loaded
+fx_saraman_loading = 0x801C8B88;  # data: Set while a streamed motion file is being read
+fx_saraman_motion_next = 0x801C8B8C;  # data: Index of the next streamed motion file to attach
+fx_saraman_load_index = 0x801C8B90;  # data: Index of the motion file read next
+fx_saraman_ready = 0x801C8B94;  # data: Three flags, one per motion file read in
+fx_saraman_creature_on = 0x801C8BAC;  # data: Set when the first motion file is in and the creature shows
+fx_saraman_bank_done = 0x801C8BB0;  # data: Set when the wave bank is uploaded
+fx_saraman_op_181_params = 0x801C8BD0;  # data: Parameters copied from op 0x181 operands
+fx_saraman_motion_buffers = 0x801C8FD8;  # data: Three buffers of the streamed motion files; when the last clip ends the third is freed and the party model reload starts

@@ -168,6 +168,24 @@ void BattleView::btext(int flags, const std::u32string& text, float x, float y, 
   namespace ft = ui::font;
   if (text.empty()) return;
   const int style = flags & 0xFF;
+  if (fonts_.ps1()) {
+    // Disc mode: the PS1 font at one font pixel per PS1 pixel, every line's glyph cells from the PS1 point; styles 0x81 / 0x85 centre on
+    // x, 0x84 inside the 256 px from x; the multi-line styles keep their line pitch. No shrink.
+    const float pitch = style == 1 ? 13.0f : style == 3 ? 7.0f : style == 0x83 || style == 0xB8 ? 16.0f : 0.0f;
+    const int align = style == 0x81 || style == 0x84 || style == 0x85 ? ft::kCentre : ft::kLeft;
+    const float pen_x = (style == 0x84 ? x + 128.0f : x) * kPs1Px;
+    const ft::Ink ink{ft::col_k(colour, 31), render::pack_rgba(0, 0, 0), true, false};
+    size_t begin = 0;
+    for (float line_y = y;; line_y += pitch) {
+      const size_t end = text.find(U'\n', begin);
+      std::u32string line = text.substr(begin, end == std::u32string::npos ? std::u32string::npos : end - begin);
+      fonts_.prepare(ft::kBattle, line);
+      add_text_op(ft::kBattle, std::move(line), pen_x, line_y * kRowScale, ink, kPs1Px / render::TextBatch::kPs1PixelScale, align);
+      if (end == std::u32string::npos) break;
+      begin = end + 1;
+    }
+    return;
+  }
   const int lang = std::clamp(static_cast<int>(lang_), 0, 5);
   const bool jp = (flags & 0x10000) ? true : (flags & 0x20000) ? false : lang == 5;
   int slot = jp ? ft::kBattleJp : ft::kBattle;
@@ -456,6 +474,10 @@ void battle_waku_prepare(render::DecodedImage& img, bool frame) {
 //    cell sprites, levels below it take the first, above it the second;
 //  * status icons: one 6 x 5 icon per status group the unit's status word meets, packed left to right from (x + 6, y - 8).
 void BattleView::build_party_panels() {
+  if (ps1_hud_) {
+    ps1_party_panels();
+    return;
+  }
   int count = 0;
   for (int i = 0; i < battle::kPcSlots; ++i) count += bunit(i).present ? 1 : 0;
   if (count == 0) return;
@@ -540,6 +562,12 @@ void BattleView::build_status_plate_column(u32 lo, bool right) {
   const size_t first = op_count();
   for (const bstat::Placed& placed : bstat::place(lo, right)) {
     const bstat::Plate& plate = bstat::kPlates[static_cast<size_t>(placed.plate)];
+    if (ps1_hud_) {
+      // Disc mode: one frame of the status sheet 0x78 per plate (triangle and name): frame 7 + the bit's rank among the bits that have one.
+      constexpr u32 kPlateBits = 0x33377339u;
+      add_sheet(0x78, 7 + std::popcount(kPlateBits & (plate.bit - 1)), static_cast<float>(placed.x), static_cast<float>(placed.y));
+      continue;
+    }
     const float u0 = (12.0f * static_cast<float>(plate.colour) + 0.5f) / 80.0f, u1 = u0 + 11.0f / 80.0f;
     add_img(hud_[kHStatus], static_cast<float>(placed.x) * kPs1Px, static_cast<float>(placed.y + 1) * kRowScale, 3 * kPs1Px, 6 * kRowScale, u0,
             40.5f / 64.0f, u1, 63.5f / 64.0f);
@@ -1333,6 +1361,11 @@ void BattleView::add_skin_box(float x, float y, float w, float h) {
 // battle_11.png holds the two frames side by side: the full diamond in the left 9 of 16 columns, the turned one in the right 7. Both frames
 // share the top-left corner.
 void BattleView::add_menu_cursor(float x, float y) {
+  if (ps1_hud_) {
+    // The disc's cursor sheet 0x0C, frames 1 / 2.
+    add_sheet_at(0x0C, ((tick_count_ >> 4) & 1) + 1, x / kPs1Px, y / kRowScale);
+    return;
+  }
   if (((tick_count_ >> 4) & 1) == 0)
     add_img(hud_[kHDiamond], x, y, 9 * kPs1Px, 8 * kRowScale, 0, 0, 0.5625f, 1);
   else
@@ -1360,13 +1393,14 @@ void BattleView::build_command_ui() {
   // plates) at PS1 (8, 22), or - for an item-like action (mode 5) - the battle_08_93 plate whatever the colour.
   auto header_plate = [&](const data::ElemRec& er, float y) {
     if (er.mode() == 5) {
-      add_img(eplate_item_, 8 * kPs1Px, y * kRowScale, 120 * kPs1Px, 16 * kRowScale);
+      if (ps1_hud_) add_sheet(0xB4, 1, 8, y);
+      else add_img(eplate_item_, 8 * kPs1Px, y * kRowScale, 120 * kPs1Px, 16 * kRowScale);
       return;
     }
     const int ci = data::colour_index_of_bit(er.colour_bit());
     const int pc = ci >= 0 && ci < 6 ? ci : (er.colour_bit() & 0xFC) == 0xFC ? 6 : -1;
     // The 140-plate table: unused set, frame 3 (steady).
-    if (pc >= 0) add_img(eplate_[static_cast<size_t>(pc * 10 + 2)], 8 * kPs1Px, y * kRowScale, 120 * kPs1Px, 16 * kRowScale);
+    if (pc >= 0) add_name_plate(false, pc, 3, 8, y);
   };
   const bool act_hdr = act_.phase != Act::Phase::None && !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && act_.actor >= 0;
   // Any unit: the action covers PCs and enemies. An element with record byte 0 bit 0x80 (death casts, form changes, boss moves such as the
@@ -1400,7 +1434,7 @@ void BattleView::build_command_ui() {
           const int opc = oci >= 0 && oci < 6 ? oci : (oe.colour_bit() & 0xFC) == 0xFC ? 6 : -1;
           const bool used = cu.used[static_cast<size_t>(idx)] || element_greyed(active_pc_, idx);
           if (opc >= 0)
-            add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + opc * 10 + hdr_.fold_frame() - 1)], 8 * kPs1Px, (60.0f + 15.0f * static_cast<float>(idx % data::kGridCols)) * kRowScale, 120 * kPs1Px, 16 * kRowScale);
+            add_name_plate(used, opc, hdr_.fold_frame(), 8, 60.0f + 15.0f * static_cast<float>(idx % data::kGridCols));
         }
       }
       header_plate(tables_->elements[static_cast<size_t>(id)], y);
@@ -1471,9 +1505,24 @@ void BattleView::build_command_ui() {
       }
       if (sel) add_menu_cursor(32.5f * kPs1Px, yl * kRowScale + ref_y(5) - 4 * kRowScale);
       const u32 mask = ui_ != Ui::Top && k < 3 ? hit_row_mask : 0xFFFFFFu;
+      // Disc mode: the row is a battle-font frame (top menu 1..4; HIT% rows 7..9 "N-(  %)" with the percentage's digits at x 63 / 70,
+      // Element 2) at PS1 (44, 166 + 10 row), in the row's colour word.
+      const int row_frame = ui_ == Ui::Top ? (command <= 3 ? command + 1 : 0) : k < 3 ? k + 7 : 2;
+      if (ps1_hud_ && row_frame > 0) {
+        const float row_y = 166.0f + 10.0f * static_cast<float>(k - (rows - 4));
+        add_sheet(0x04, row_frame, 44, row_y, row_colour & mask);
+        if (ui_ != Ui::Top && k < 3) {
+          const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
+          if ((pct / 10) % 10 != 0) add_sheet(0x04, (pct / 10) % 10 + 101, 63, row_y, row_colour & mask);
+          add_sheet(0x04, pct % 10 + 101, 70, row_y, row_colour & mask);
+        }
+        continue;
+      }
       btext(cmd_flags, label, 44, yl, remap_text_colour(row_colour) & mask);
     }
-    if (ui_ == Ui::Chain) {
+    if (ui_ == Ui::Chain && ps1_hud_) {
+      add_sheet(0x04, 10, 84, 166);
+    } else if (ui_ == Ui::Chain) {
       // "HIT%" caption: battle-osak-010 (50 x 9 PS1 px leader line, drawn at (x, y - 8)) with the caption
       // (命中率 / "HIT%" per language, flags 0x10002, colour 0x757575) above it.
       add_img(hud_[kHOsak], 82 * kPs1Px, ref_y(170), 62 * kPs1Px, ref_y(11));
@@ -1492,7 +1541,9 @@ void BattleView::build_command_ui() {
                                 : command == kSwapCommand  ? kSwapLabel[jp ? 0 : li]
                                 : jp                       ? kCommandCaptionJp[command & 3]
                                                            : kCommand[li][command & 3];
-      btext(0xA, caption, 300, 22, 0);
+      // Disc mode: the headline sheet 0x00 (frames 1..4), added at a dim grey.
+      if (ps1_hud_ && command <= 3) add_sheet(0x00, command + 1, 300, 22, 0x606060, 2);
+      else btext(0xA, caption, 300, 22, 0);
       set_group(caption0, 1);
     }
     build_status_plates(active_pc_, true);
@@ -1565,15 +1616,20 @@ void BattleView::build_target_ui(bool cam_hint) {
     set_group(op_count() - 1, 2);
   }
   // info window
-  add_img(hud_[kHWaku03], 6 * kPs1Px, 163 * kRowScale, 96 * kPs1Px, 48 * kRowScale, 0, 0, 1, 1, 0xFFFFFFFFu, 1);
+  if (!ps1_hud_) add_img(hud_[kHWaku03], 6 * kPs1Px, 163 * kRowScale, 96 * kPs1Px, 48 * kRowScale, 0, 0, 1, 1, 0xFFFFFFFFu, 1);
   const int tu_i = targets_[static_cast<size_t>(std::clamp(target_cursor_, 0, static_cast<int>(targets_.size()) - 1))];
   const battle::Unit& tu = bunit(tu_i);
+  if (ps1_hud_) {
+    const std::u32string side = !all ? std::u32string() : both_sides ? xlat("敵・味方全体", U"All Enemies/Allies")
+                                                   : tgt_mode_ == Tgt::AllyAll ? xlat("味方全体", U"All Allies") : xlat("敵全体", U"All Enemies");
+    ps1_target_info(tu_i, side);
+  }
   // Side labels: 0xC0 = 敵・味方全体, 0x80 = 敵全体, 0x40 = 味方全体; translated: All Enemies/Allies | All Enemies | All Allies.
-  if (all)
+  if (all && !ps1_hud_)
     btext(jp ? 0x10085 : 0x85,
           both_sides ? xlat("敵・味方全体", U"All Enemies/Allies") : tgt_mode_ == Tgt::AllyAll ? xlat("味方全体", U"All Allies") : xlat("敵全体", U"All Enemies"), 0x37,
           0xA9, 0x959595);
-  else {
+  else if (!ps1_hud_) {
     // Script op 7D 1 shows the enemy's letter: "-A" outside JP, "・" + the full-width letter in JP.
     std::u32string nm = import::utf8_to_u32(tu.name);
     if (!tu.pc && tu.letter != 0 && brain_.vm() && brain_.vm()->menu_entry100()) {
@@ -1588,7 +1644,7 @@ void BattleView::build_target_ui(bool cam_hint) {
   // max left-aligned from 0x3F, all in the HP colour (<= 1/4 max 0x4080, <= 1/8 max 0x3080, else 0x808080); else "????". The sex glyph is group
   // `U+0x14 >> 14` (1 male, 2 female; rolled at spawn when the record has none); a second dot at x 0x50 shows the colour of the colour shield (merged hi
   // & 0x3F, U+1B4).
-  if (!all && (tu.pc || (tu.lo & 0x400u))) {
+  if (!ps1_hud_ && !all && (tu.pc || (tu.lo & 0x400u))) {
     btext(jp ? 0x10004 : 4, xlat("ＨＰ", U"HP"), 10, 0xB3, 0x8A8A8A);
     // HP known: every PC, an enemy only once an Infoscope landed on it. A versus battle never shows the other party's.
     if (versus_ ? tu_i < battle::kPcSlots : (tu.pc || (tu.lo & 0x400000u))) {
@@ -1626,7 +1682,13 @@ void BattleView::build_target_ui(bool cam_hint) {
     const float hx = 0xF6, hy = 0xE;
     // Keyboard: the key cap of the Triangle (Menu) key.
     const int menu_button = platform::map_source(platform::active_map(), 3) & 7;
-    if (kb_mode_) {
+    if (ps1_hud_) {
+      // Disc mode: the camera sheet 0x84: the glyph of the button on the camera function (frames 1..4 circle square triangle cross,
+      // 7..10 L1 L2 R1 R2) and the camera icon with NORMAL / DYNAMIC (frames 5 / 6).
+      static constexpr std::array<int, 8> kButtonFrame = {1, 4, 2, 3, 7, 9, 8, 10};
+      add_sheet(0x84, kButtonFrame[static_cast<size_t>(menu_button)], hx, hy);
+      add_sheet(0x84, cam_dynamic_ ? 6 : 5, hx, hy);
+    } else if (kb_mode_) {
       const int cell = platform::keyboard_cell(platform::action_vk(platform::button_action(menu_button)));
       add_img(hud_[kHKeys], hx * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale, static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
               static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f);
@@ -1636,8 +1698,10 @@ void BattleView::build_target_ui(bool cam_hint) {
       const float col = static_cast<float>(cell % 13), row = static_cast<float>(cell / 13 * 2 + 1);
       add_img(hud_[kHPad], hx * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale, col / 13.0f, row / 4.0f, (col + 1.0f) / 13.0f, (row + 1.0f) / 4.0f);
     }
-    add_img(hud_[kHCam], (hx + 15) * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale);
-    btext(0x20003, cam_dynamic_ ? kCamDynamic[li] : kCamNormal[li], hx + 27, hy + 3, 0x757575);
+    if (!ps1_hud_) {
+      add_img(hud_[kHCam], (hx + 15) * kPs1Px, hy * kRowScale, 12 * kPs1Px, 12 * kRowScale);
+      btext(0x20003, cam_dynamic_ ? kCamDynamic[li] : kCamNormal[li], hx + 27, hy + 3, 0x757575);
+    }
   }
   // The top-right hint: the right group.
   set_group(hint0, 1);
@@ -1710,7 +1774,7 @@ void BattleView::build_element_ui() {
       static const int kPulse[4] = {1, 2, 3, 2};
       // While sliding every plate (the selected one too) takes the slide table's frame at the step just taken, 4..10 = the unfolding frames.
       const int frame = sel ? kPulse[(tick_count_ >> 2) & 3] : elem_state_ == 1 || elem_state_ == 3 ? kSlideFrame[elem_idx_] : 3;
-      add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + pc * 10 + frame - 1)], static_cast<float>(elem_x_) * kPs1Px, row_y * kRowScale, 120 * kPs1Px, 16 * kRowScale);
+      add_name_plate(used, pc, frame, static_cast<float>(elem_x_), row_y);
     }
     if (!rest) continue;
     // The name's leading icon code (Greek alpha..delta) is drawn by the fonts as the list icon (alpha = the boxed "x1" of consumables).
@@ -1730,8 +1794,13 @@ void BattleView::build_element_ui() {
       // Window at (0x136, 10): X = x - 0x98 + 4 (JP: 16 px further right, the sprite keeps its 152 x 56 size), Y = y - 4 -> subtractive
       // base + frame; the JP rows sit at x 0xBB, 16 right of the others.
       const float dw = 152.0f, dx = (lang_ == import::Lang::Jp ? 310.0f + 16.0f : 310.0f) - dw + 4.0f;
-      add_img(hud_[kHWin4Base], dx * kPs1Px, 6 * kRowScale, dw * kPs1Px, 56 * kRowScale, 0, 0, 1, 1, 0xFFFFFFFFu, 3);
-      add_img(hud_[kHWin4Frame], dx * kPs1Px, 6 * kRowScale, dw * kPs1Px, 56 * kRowScale);
+      if (ps1_hud_) {
+        // Disc mode: the window sheet 0x70 drawn at its point (0x136, 10), its grey body subtracted.
+        add_sheet(0x70, 1, lang_ == import::Lang::Jp ? 310.0f + 16.0f : 310.0f, 10, 0x808080, 3);
+      } else {
+        add_img(hud_[kHWin4Base], dx * kPs1Px, 6 * kRowScale, dw * kPs1Px, 56 * kRowScale, 0, 0, 1, 1, 0xFFFFFFFFu, 3);
+        add_img(hud_[kHWin4Frame], dx * kPs1Px, 6 * kRowScale, dw * kPs1Px, 56 * kRowScale);
+      }
     }
     for (int row = 0; row < 3; ++row) {
       const std::string* text = lang_tables_.sysmes((0x1Au << 16) | static_cast<u32>(id * 3 + row), lang_);

@@ -785,6 +785,7 @@ void FieldWorld::set_disc(int disc) {
   log::info("field: disc {} -> {} (file index cdrom{}.fnd)", disc_, disc, disc == 2 ? "2" : "");
   disc_ = disc;
   stem_ids_.clear();
+  if (on_disc_change_) on_disc_change_(disc);
 }
 
 // The room's .prd is disc index record 368 + 3 * id + 1 (bin, prd, ctd), which names another room's .prd in 195 rooms (dem_05 ->

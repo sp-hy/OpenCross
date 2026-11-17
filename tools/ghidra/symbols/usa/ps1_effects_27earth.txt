@@ -1,0 +1,7 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay 27earth.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_27earth_init = 0x801C5E9C;  # function: Init: sets rotation flag 0x800 when the caster has the monster bit
+fx_27earth_rotate_records = 0x801C5EF4;  # function: Rotates sub-records of type-10 objects by 0x800 when flagged
+fx_27earth_rotation_flag = 0x801C6284;  # data: Rotation angle set to 0x800 when the caster has the monster bit

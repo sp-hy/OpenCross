@@ -57,6 +57,13 @@ struct ModSetting {
   std::string load_on = "modded";
 };
 
+// [Paths] Source: where the game data comes from. auto = an RDE install when one is found, else the player's PS1 discs; rde and
+// disc force one. The ini words in that order.
+enum class DataSource { Auto, Rde, Disc };
+inline constexpr const char* kDataSourceNames[] = {"auto", "rde", "disc"};
+// [Disc] Region: the PS1 build played when discs of both regions are found; "" = not chosen yet.
+inline constexpr const char* kDiscRegionNames[] = {"", "jp", "usa"};
+
 // [Video] WindowMode: windowed (fixed size Width x Height, not user-resizable), borderless (desktop-size fullscreen window on Display),
 // exclusive (fullscreen with the display mode closest to Width x Height).
 enum class WindowMode { Windowed, Borderless, Exclusive };
@@ -161,6 +168,8 @@ void bind_cheats(const Cheats* set);
 
 // The typed settings of opencross.ini. Each member's ini section / key and meaning:
 //   [Paths]  GameDir / SaveDir (empty = auto-discover), SaveFile: file name inside SaveDir (routes use a scratch copy, never the user's).
+//            Source: DataSource. Disc1 / Disc2: the player's PS1 disc images; DiscDir: a folder searched for them (empty = not set).
+//   [Disc]   Region: kDiscRegionNames, the build to play when both regions' discs are found (an unknown word reads as "").
 //   [Video]  Aspect: the aspect ratio the Resolution list is filtered by (kAspects; an ini without the key takes the shape of its stored size).
 //            Width / Height: window size (windowed) or the exclusive fullscreen mode. WindowMode (legacy Fullscreen=1 reads as borderless).
 //            Display: monitor index (0 = primary / first). VSync. Driver: the graphics backend (auto | vulkan | direct3d12; changes apply on restart). FrameCap: frames per second limit when VSync is off (0 = unlimited).
@@ -250,6 +259,11 @@ struct Config {
   std::string game_dir;
   std::string save_dir;
   std::string save_file = "save.dat";
+  DataSource source = DataSource::Auto;
+  std::string disc1;
+  std::string disc2;
+  std::string disc_dir;
+  std::string disc_region;
   std::string aspect = "4:3";
   int width = 1280;
   int height = 960;

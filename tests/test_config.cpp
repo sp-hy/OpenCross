@@ -210,6 +210,38 @@ int main() {
     CHECK(again.player_id == parsed.player_id && !again.show_players && again.max_parties == 32 && again.translucent && !again.show_labels && !again.chat_bubbles && again.hide_global_chat);
     CHECK(again.chat == ChatDisplay::Always && !again.mute_hides_party && again.muted == parsed.muted && !parsed.challenges && !again.challenges);
   }
+  // Data source: auto with no discs and no region by default; the words parse, unknown ones keep the default, all survive a save.
+  {
+    const Config source_defaults;
+    CHECK(source_defaults.source == DataSource::Auto && source_defaults.disc1.empty() && source_defaults.disc2.empty());
+    CHECK(source_defaults.disc_dir.empty() && source_defaults.disc_region.empty());
+    CHECK(load_text("[Paths]\nSource=rde\n").source == DataSource::Rde);
+    CHECK(load_text("[Paths]\nSource=disc\n").source == DataSource::Disc);
+    CHECK(load_text("[Paths]\nSource=Disc\n").source == DataSource::Auto);
+    CHECK(load_text("[Disc]\nRegion=usa\n").disc_region == "usa");
+    CHECK(load_text("[Disc]\nRegion=jp\n").disc_region == "jp");
+    CHECK(load_text("[Disc]\nRegion=pal\n").disc_region.empty());
+    Config discs = load_text("[Paths]\nSource=disc\nDisc1=D:\\Games\\Chrono Cross (Disc 1).cue\nDisc2=D:\\Games\\Chrono Cross (Disc 2).chd\n"
+                             "DiscDir=..\\images\n[Disc]\nRegion=usa\n");
+    CHECK(discs.disc1 == "D:\\Games\\Chrono Cross (Disc 1).cue" && discs.disc2 == "D:\\Games\\Chrono Cross (Disc 2).chd");
+    CHECK(discs.disc_dir == "..\\images");
+    const std::filesystem::path out = std::filesystem::temp_directory_path() / "oc_test_config_disc.ini";
+    CHECK(discs.save(out));
+    Config reloaded;
+    CHECK(reloaded.load(out));
+    std::stringstream text;
+    text << std::ifstream(out, std::ios::binary).rdbuf();
+    std::filesystem::remove(out);
+    CHECK(reloaded.source == DataSource::Disc && reloaded.disc1 == discs.disc1 && reloaded.disc2 == discs.disc2);
+    CHECK(reloaded.disc_dir == discs.disc_dir && reloaded.disc_region == "usa");
+    CHECK(text.str().find("[Disc]\nRegion=usa\n") != std::string::npos);
+    const std::filesystem::path blank = std::filesystem::temp_directory_path() / "oc_test_config_disc_blank.ini";
+    CHECK(source_defaults.save(blank));
+    std::stringstream blank_text;
+    blank_text << std::ifstream(blank, std::ios::binary).rdbuf();
+    std::filesystem::remove(blank);
+    CHECK(blank_text.str().find("Source=auto\nDisc1=\nDisc2=\nDiscDir=\n") != std::string::npos);
+  }
   if (failures) return 1;
   std::printf("test_config: ok\n");
   return 0;

@@ -15,7 +15,7 @@ File layout (little endian):
 Body (at offset_to_data, decompressed if needed): StateWrapper stream; a section marker is u32 length + the name (no NUL), e.g.
 "System", "CPU", "Bus", "DMA", "GPU", "GPU-VRAM". "Bus" is followed directly by u32 ram_size (0x200000, or 0x800000 with the
 8MB option), the RAM bytes sit some words later: RAM is located by the main exe signature at guest 0x80010000
-(`0800e003 00000000 0780023c 803b4224`). VRAM = the 1 MiB right after the "GPU-VRAM" marker. CPU: r0..r31 start 16 bytes after
+(`ps1_ram.EXE_SIGNATURES`), which also tells the build (Japanese or USA) and so the RAM map the state is read with. VRAM = the 1 MiB right after the "GPU-VRAM" marker. CPU: r0..r31 start 16 bytes after
 the end of the "CPU" marker, followed by hi, lo, pc, npc.
 Needs the `zstandard` module for zstd states.
 """
@@ -23,8 +23,10 @@ import os
 import struct
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ps1_ram  # noqa: E402
+
 ZSTD_MAGIC = b"\x28\xb5\x2f\xfd"
-EXE_SIG = bytes.fromhex("0800e003000000000780023c803b4224")  # guest 0x80010000
 EXE_ADDR = 0x10000
 VRAM_TAG = b"GPU-VRAM"
 VRAM_SIZE = 0x100000
@@ -54,66 +56,65 @@ def decompress_body(raw, hdr):
     raise ValueError("unsupported data compression type %d" % comp)
 
 
-# Watch table: (name, guest address, width in bytes, signed). Notes: unit U(i) =
-# 0x800E06A0 + 0x410 i, current action e0666/e0667/e0668, effect load state 0x800720F8, overlay resident 0x800856F0,
-# battle id 0x80075906, area 0x800790FC, location u16 0x80077C26, field ring 0x800DFF98 (slots at bytes 0/4/8).
+# Watch table: (name, ps1_ram name, offset, width in bytes, signed). Battle unit i is the ps1_ram name unit<i> (the record
+# stride differs between the builds); the field ring slots are bytes 0 / 4 / 8 of `ring`.
 WATCH = [
-    ("ovl_id", 0x800A9F00, 4, False),
-    ("mt_ovl", 0x801D2800, 4, False),
-    ("mt_mode", 0x801F5488, 1, False),
-    ("mt_cur", 0x801F54A8, 1, False),
-    ("mt_scroll", 0x801F54A0, 1, False),
-    ("title_var", 0x801F377C, 1, False),
-    ("mt_5480", 0x801F5480, 1, False),
-    ("mt_5478", 0x801F5478, 1, False),
-    ("mt_547c", 0x801F547C, 1, False),
-    ("ld_5010", 0x801F5010, 1, False),
-    ("ld_cur", 0x801F4FE4, 4, False),
-    ("ld_card", 0x801F502C, 4, False),
-    ("pad_e0", 0x800855E0, 2, False),
-    ("pad_e2", 0x800855E2, 2, False),
-    ("pad_e4", 0x800855E4, 2, False),
-    ("pad_e6", 0x800855E6, 2, False),
-    ("loc", 0x80077C26, 2, False),
-    ("btl_id", 0x80075906, 2, False),
-    ("area", 0x800790FC, 2, False),
-    ("btl_frame", 0x800E0518, 4, False),
-    ("tgt_064b", 0x800E064B, 1, False),
-    ("phase_fc40", 0x800DFC40, 1, False),
-    ("pc_0649", 0x800E0649, 1, False),
-    ("menu_064a", 0x800E064A, 1, False),
-    ("cur_064e", 0x800E064E, 1, False),
-    ("e065a", 0x800E065A, 1, False),
-    ("e0652", 0x800E0652, 1, False),
-    ("tgt_0650", 0x800E0650, 1, False),
-    ("ui_0642", 0x800E0642, 1, False),
-    ("hint_f0ae", 0x800DF0AE, 1, False),
-    ("act_kind", 0x800E0666, 1, False),
-    ("act_str", 0x800E0667, 1, False),
-    ("act_elem", 0x800E0668, 2, False),
-    ("act_actor", 0x800E0634, 1, False),
-    ("e05da", 0x800E05DA, 2, False),
-    ("tgt0", 0x800E0637, 1, False),   # current action target list (0xFF end)
-    ("tgt1", 0x800E0638, 1, False),
-    ("tgt2", 0x800E0639, 1, False),
-    ("att_310e", 0x800E310E, 1, False),
-    ("cur_310f", 0x800E310F, 1, False),
-    ("u3_sta", 0x800E06A0 + 0x410 * 3 + 0x19E, 2, True),
-    ("e3372", 0x800E3372, 2, False),
-    ("fx_load", 0x800720F8, 4, False),
-    ("ovl", 0x800856F0, 4, False),
-    ("ring0", 0x800DFF98, 1, False),
-    ("ring1", 0x800DFF9C, 1, False),
-    ("ring2", 0x800DFFA0, 1, False),
-    ("party0", 0x800786F4, 1, False),
-    ("party1", 0x800786F5, 1, False),
-    ("party2", 0x800786F6, 1, False),
-    ("u0_hp", 0x800E06A0 + 0xB8, 2, True),
-    ("u0_gauge", 0x800E06A0 + 0x16E, 2, True),
-    ("u0_sta", 0x800E06A0 + 0x19E, 2, True),
-    ("u3_hp", 0x800E06A0 + 0x410 * 3 + 0xB8, 2, True),
-    ("u4_hp", 0x800E06A0 + 0x410 * 4 + 0xB8, 2, True),
-    ("u5_hp", 0x800E06A0 + 0x410 * 5 + 0xB8, 2, True),
+    ("ovl_id", "ovl_id", 0, 4, False),
+    ("mt_ovl", "menu_ovl_id", 0, 4, False),
+    ("mt_mode", "mt_mode", 0, 1, False),
+    ("mt_cur", "mt_cur", 0, 1, False),
+    ("mt_scroll", "mt_scroll", 0, 1, False),
+    ("title_var", "title_var", 0, 1, False),
+    ("mt_5480", "mt_5480", 0, 1, False),
+    ("mt_5478", "mt_5478", 0, 1, False),
+    ("mt_547c", "mt_547c", 0, 1, False),
+    ("ld_5010", "ld_5010", 0, 1, False),
+    ("ld_cur", "ld_cur", 0, 4, False),
+    ("ld_card", "ld_card", 0, 4, False),
+    ("pad_e0", "pad_held", 0, 2, False),
+    ("pad_e2", "pad_held", 2, 2, False),
+    ("pad_e4", "pad_held", 4, 2, False),
+    ("pad_e6", "pad_held", 6, 2, False),
+    ("loc", "loc", 0, 2, False),
+    ("btl_id", "btl_id", 0, 2, False),
+    ("area", "area", 0, 2, False),
+    ("btl_frame", "btl_frame", 0, 4, False),
+    ("tgt_064b", "tgt_064b", 0, 1, False),
+    ("phase_fc40", "phase_fc40", 0, 1, False),
+    ("pc_0649", "pc_0649", 0, 1, False),
+    ("menu_064a", "menu_064a", 0, 1, False),
+    ("cur_064e", "cur_064e", 0, 1, False),
+    ("e065a", "e065a", 0, 1, False),
+    ("e0652", "e0652", 0, 1, False),
+    ("tgt_0650", "tgt_0650", 0, 1, False),
+    ("ui_0642", "ui_0642", 0, 1, False),
+    ("hint_f0ae", "hint_f0ae", 0, 1, False),
+    ("act_kind", "act_kind", 0, 1, False),
+    ("act_str", "act_str", 0, 1, False),
+    ("act_elem", "act_elem", 0, 2, False),
+    ("act_actor", "act_actor", 0, 1, False),
+    ("e05da", "act_element", 0, 2, False),
+    ("tgt0", "act_targets", 0, 1, False),   # current action target list (0xFF end)
+    ("tgt1", "act_targets", 1, 1, False),
+    ("tgt2", "act_targets", 2, 1, False),
+    ("att_310e", "att_310e", 0, 1, False),
+    ("cur_310f", "cur_310f", 0, 1, False),
+    ("u3_sta", "unit3", ps1_ram.UNIT_STAMINA, 2, True),
+    ("e3372", "e3372", 0, 2, False),
+    ("fx_load", "fx_load", 0, 4, False),
+    ("ovl", "ovl_resident", 0, 4, False),
+    ("ring0", "ring", 0, 1, False),
+    ("ring1", "ring", 4, 1, False),
+    ("ring2", "ring", 8, 1, False),
+    ("party0", "party", 0, 1, False),
+    ("party1", "party", 1, 1, False),
+    ("party2", "party", 2, 1, False),
+    ("u0_hp", "units", ps1_ram.UNIT_HP, 2, True),
+    ("u0_gauge", "units", ps1_ram.UNIT_GAUGE, 2, True),
+    ("u0_sta", "units", ps1_ram.UNIT_STAMINA, 2, True),
+    ("u3_hp", "unit3", ps1_ram.UNIT_HP, 2, True),
+    ("u4_hp", "unit4", ps1_ram.UNIT_HP, 2, True),
+    ("u5_hp", "unit5", ps1_ram.UNIT_HP, 2, True),
 ]
 
 
@@ -130,9 +131,14 @@ class State:
         self.compressed = self.hdr["data_compression_type"] != 0
         body = self.body = decompress_body(raw, self.hdr)
         self.body_file_off = None if self.compressed else self.hdr["offset_to_data"]
-        sig = body.find(EXE_SIG)
+        sig, region = -1, None
+        for r, signature in ps1_ram.EXE_SIGNATURES.items():
+            sig, region = body.find(signature), r
+            if sig >= EXE_ADDR:
+                break
         if sig < EXE_ADDR:
             raise ValueError("%s: main exe signature not found" % path)
+        self.map = ps1_ram.RamMap(region)   # the build's addresses: st.map.btl_id
         self.ram_off = sig - EXE_ADDR   # offset in the body (file offset = body_file_off + ram_off when uncompressed)
         bus = body.find(marker("Bus"))
         if bus < 0:
@@ -175,25 +181,25 @@ class State:
 
     def watch(self, table=WATCH):
         row = {}
-        for name, addr, width, signed in table:
-            o = self._o(addr)
+        m = self.map
+        for name, key, offset, width, signed in table:
+            o = self._o(getattr(m, key) + offset)
             v = int.from_bytes(self.ram[o:o + width], "little", signed=signed)
             row[name] = v
-        # Derived: the element of the current action = (pgdat record pointer e30a0 - table base [e3368]) / 0x2C,
-        # the field leader's position (field.prg: entity pointer 0x800E9F7C, +0x3C X / +0x44 Z, 16.16),
-        # and the first word of the resident effect overlay at 0x801C5E00.
-        p, base = self.u32(0x800E30A0), self.u32(0x800E3368)
+        # Derived: the element of the current action = (pgdat record pointer - table base) / 0x2C,
+        # the field leader's position, and the first word of the resident effect overlay.
+        p, base = self.u32(m.pgdat_ptr), self.u32(m.pgdat_base)
         row["elem"] = (p - base) // 0x2C if base and p >= base and p - base < 0x2C * 600 else -1
-        # Field entities: table [0x800E8894], stride 0x278, the controlled entity's index is the
-        # byte 0x800E9F7C (FE 4C); X / Z are 16.16 at +0x3C / +0x44.
-        ents, lead = self.u32(0x800E8894), self.u8(0x800E9F7C)
+        # Field entities: table [fld_entities], stride 0x278, the controlled entity's index is the
+        # byte fld_lead (FE 4C); X / Z are 16.16 at +0x3C / +0x44.
+        ents, lead = self.u32(m.fld_entities), self.u8(m.fld_lead)
         if 0x80000000 <= ents < 0x80000000 + self.ram_size and lead < 64:
             e = self._o(ents) + lead * 0x278
             row["lead_x"] = struct.unpack_from("<i", self.ram, e + 0x3C)[0] >> 16
             row["lead_z"] = struct.unpack_from("<i", self.ram, e + 0x44)[0] >> 16
         else:
             row["lead_x"] = row["lead_z"] = None
-        row["ovl0"] = "%08x" % self.u32(0x801C5E00)
+        row["ovl0"] = "%08x" % self.u32(m.effect_ovl)
         return row
 
     def vram_pixel(self, x, y):
@@ -251,9 +257,10 @@ def manifest(paths, elem=None):
             ov = next((p2 for p2 in paths if frame_of(p2) >= first and State(p2).watch()["ovl"] != 0), None)
             out.append("pack_resident_from: %s (first state with ovl != 0)" % (frame_of(ov) if ov else None))
             for nm, stt in (("at cast", st), ("at pack start", State(ov) if ov else st)):
-                eye = [stt.s16(0x80071F68 + 2 * k) for k in range(3)]
-                tg = [stt.s16(0x80071F70 + 2 * k) for k in range(3)]
-                out.append("camera %s: eye %s target %s H %d (RAM 0x80071F68 / 70 / 84; pick name: ref_info.py)" % (nm, eye, tg, stt.u16(0x80071F84)))
+                eye = [stt.s16(stt.map.camera_eye + 2 * k) for k in range(3)]
+                tg = [stt.s16(stt.map.camera_target + 2 * k) for k in range(3)]
+                out.append("camera %s: eye %s target %s H %d (RAM camera_eye / target / h; pick name: ref_info.py)" % (
+                    nm, eye, tg, stt.u16(stt.map.camera_h)))
             break
     return chr(10).join(out)
 
@@ -294,7 +301,7 @@ def campick(paths):
             reg = fr.Registry(st)
             base, ts = fr.tasks(st)
             for e, cb, d in ts:
-                if cb == fr.CB_SEQ:
+                if cb == st.map.cb_seq:
                     for n in (fr.tag(st.u32(d + 0x10)), reg.name_of_data(st.u32(d + 4))):
                         n = n.rstrip(".")
                         if shot.match(n) and n.strip("0") and n not in seen:
@@ -315,8 +322,8 @@ def main(argv):
     cmd = argv[0]
     if cmd == "info":
         st = State(argv[1])
-        print("%s: %s v%d %s, body %d B (%s), RAM %d B at %d, VRAM at %d" % (
-            argv[1], st.serial, st.version, st.title.encode("ascii", "replace").decode(), st.body_len,
+        print("%s: %s v%d %s (%s build), body %d B (%s), RAM %d B at %d, VRAM at %d" % (
+            argv[1], st.serial, st.version, st.title.encode("ascii", "replace").decode(), st.map.region, st.body_len,
             {0: "uncompressed", 1: "deflate", 2: "zstd", 3: "xz"}.get(st.hdr["data_compression_type"], "?"), st.ram_size, st.ram_off, st.vram_off))
         print(fmt_row(st.watch()))
     elif cmd == "watch":

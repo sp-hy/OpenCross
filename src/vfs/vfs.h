@@ -1,13 +1,14 @@
 #pragma once
-// Virtual file system over the Radical Dreamers Edition install.
+// Virtual file system over the game data.
 //
 // RDE ships the game as ZIP archives in <GameDir>\data: cdrom.dat (the PS1 file tree), cdrom2.dat (HD-mode
 // overrides of some PS1 files), hd.dat, lang.dat, font.dat, ui.dat, movie.dat. Members are addressed by the same
 // paths the game uses, e.g. "cdrom/map/mapbin/alu_a01f.bin". This module only knows archives and paths; it has
-// no idea what the bytes mean.
+// no idea what the bytes mean. A backend (vfs/backend.h) supplies the archives: RDE's install, or a source that has only some
+// of them (the PS1 discs: "cdrom" alone, its files depending on the disc in the drive, set_disc).
 //
 // Lookup order for read(path): mod overlay (vfs/mods.h: loose files from <GameDir>\mods\<mod>\..., resolved to these
-// logical paths, or members of a mod's <archive>.dat) -> archive <first path segment>.dat.
+// logical paths, or members of a mod's <archive>.dat) -> the backend's archive <first path segment>.
 // HD-mode override: when set_hd_mode(true), every "cdrom/<x>" read is tried as "cdrom2/<x>" first (RDE's HD
 // override layer: HD-mode rooms, models, textures). In original mode only RDE's fixed exception list goes to cdrom2
 // (see cdrom2_first). Callers always ask for "cdrom/..." paths.
@@ -22,11 +23,10 @@
 #include <vector>
 
 #include "core/types.h"
+#include "vfs/backend.h"
 
 namespace oc::vfs {
 
-// One mounted .dat (ZIP) file; thread-safe reads.
-class Archive;
 class ModArchive;
 
 // One overlay file: the loose file `file`, or, when `member` is set, that normalised member of the packed mod `file`.
@@ -54,9 +54,18 @@ class Vfs {
   Vfs();
   ~Vfs();
 
-  // Mounts <game_dir>/data/*.dat lazily; returns false if the directory does not look like an RDE install.
+  // Mounts <game_dir>/data/*.dat lazily (RdeBackend); returns false if the directory does not look like an RDE install.
   bool open(const std::filesystem::path& game_dir);
+  // Serves the shipped archives from `backend`; `game_dir` is the folder game_dir() reports (the mods folder's parent).
+  void open(std::unique_ptr<Backend> backend, const std::filesystem::path& game_dir);
   const std::filesystem::path& game_dir() const { return game_dir_; }
+
+  // The disc in the drive (1 or 2; others clamp), for a backend whose files depend on it. Thread-safe; a read already under way
+  // finishes on the disc it started on.
+  void set_disc(int disc) { disc_ = disc >= 2 ? 2 : 1; }
+  int disc() const { return disc_.load(); }
+  // The backend serves this shipped archive ("hd", "movie", ...); false before open.
+  bool has_archive(std::string_view archive) const;
 
   // Replaces the mod overlay (empty = no mods). Thread-safe against concurrent reads. Bumps generation() when the content changes.
   void set_overlay(Overlay overlay);
@@ -71,7 +80,7 @@ class Vfs {
 
   // "cdrom/map/mapbin/alu_a01f.bin" -> bytes; std::nullopt if absent. Case-insensitive; '\' accepted.
   std::optional<Bytes> read(std::string_view path) const;
-  // "cdrom/..." from the PS1 disc image itself (data\cdrom.dat), never the cdrom2 override: original-art screens need the files RDE
+  // "cdrom/..." from the PS1 file tree itself (data\cdrom.dat), never the cdrom2 override: original-art screens need the files RDE
   // blanks in cdrom2 (map/window/w*.tim are all-transparent there). Other archives: as read(). The mod overlay still applies.
   std::optional<Bytes> read_disc(std::string_view path) const;
   bool exists(std::string_view path) const;
@@ -79,12 +88,12 @@ class Vfs {
   // big files (movies) can be streamed instead of read whole.
   std::optional<std::filesystem::path> loose_file(std::string_view path) const;
 
-  // Member names of one shipped archive ("cdrom", "hd", ...), in archive order. Empty if the archive is absent. Mod path resolution
-  // matches against these; a mod replaces members but never adds any.
+  // Member names of one shipped archive ("cdrom", "hd", ...), in the backend's order (RDE: archive order). Empty if the archive is
+  // absent. Mod path resolution matches against these; a mod replaces members but never adds any.
   std::vector<std::string> list(std::string_view archive) const;
 
  private:
-  Archive* archive(std::string_view name) const;
+  std::optional<Bytes> read_shipped(std::string_view archive, const std::string& member) const;
   std::optional<Bytes> read_overlay(const std::string& logical) const;
   bool cdrom2_first(const std::string& member) const;
   std::shared_ptr<const Overlay> overlay() const;
@@ -109,6 +118,7 @@ class Vfs {
  private:
   std::filesystem::path game_dir_;
   bool hd_mode_ = false;
+  std::atomic<int> disc_{1};
   std::atomic<std::uint32_t> generation_{0};
   struct Impl;
   std::unique_ptr<Impl> impl_;

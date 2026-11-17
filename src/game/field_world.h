@@ -314,7 +314,9 @@ class FieldWorld final : public script::FieldHost {
   // ---- discs: the file index in use. The disc is data-driven: FE 65 and the DiscCheck at every
   // map transition set it from variable 0x42 (= disc - 1); a loaded save takes it from its variable 0x42 too.
   int disc() const { return disc_; }
+  // Every change of the disc goes through here and calls the host's disc hook (the data source follows the disc in the drive).
   void set_disc(int disc);
+  void set_on_disc_change(std::function<void(int)> cb) { on_disc_change_ = std::move(cb); }
   // The rooms mods add and each mod's ids for them (game/mod_rooms.h; owned by the caller, null = none). A listed room with no .bin is
   // logged. Mod rooms run under their internal ids (map_id(), the dialogue text, jumps); scripts see their owner's ids.
   void set_mod_rooms(const ModRooms* rooms);
@@ -1277,6 +1279,7 @@ class FieldWorld final : public script::FieldHost {
   std::function<void(int)> on_key_item_;
   std::function<void(int)> on_item_given_;
   std::function<void(u32)> on_var_bit_set_;
+  std::function<void(int)> on_disc_change_;
   MovieRequest movie_req_;
   // the sequence the playing movie started ("" = none)
   std::string movie_sequence_;

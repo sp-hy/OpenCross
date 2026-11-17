@@ -12,9 +12,11 @@
 namespace oc::render {
 
 namespace {
-constexpr int kBitmapCols = 64;
-constexpr int kBitmapCell = 12;
-constexpr int kBitmapRows = (import::kJpGlyphSlots + kBitmapCols - 1) / kBitmapCols;
+// PS1 font atlas: 64 cells per row, each kMaxWidth + 1 x 12 texels (the glyph, a blank column and a blank row, so a sample at a cell's
+// edge never reads the next glyph).
+constexpr int kPs1Cols = 64;
+constexpr int kPs1CellW = import::Ps1Font::kMaxWidth + 1;
+constexpr int kPs1CellH = 12;
 constexpr u32 kMaxAtlasHeight = 4096;
 constexpr u32 kAtlasWidth = 2048;
 // Pixel fonts: largest relative size error of whole-pixel font pixels (round(pitch) vs RDE's pitch) before the glyph is drawn
@@ -128,25 +130,24 @@ FaceId TextBatch::add_spritefont(std::shared_ptr<const import::SpriteFont> font,
   return id;
 }
 
-FaceId TextBatch::add_bitmap_font(std::shared_ptr<const import::JpGlyphs> glyphs) {
-  if (!ctx_ || !glyphs || !glyphs->has_bitmaps()) return kNoFace;
+FaceId TextBatch::add_ps1_font(std::shared_ptr<const import::Ps1Font> font) {
+  if (!ctx_ || !font || font->count() == 0) return kNoFace;
   Face new_face;
-  new_face.bitmap = true;
-  new_face.jp = std::move(glyphs);
-  if (!build_bitmap_atlas(new_face)) return kNoFace;
+  new_face.ps1 = std::move(font);
+  if (!build_ps1_atlas(new_face)) return kNoFace;
   faces_.push_back(std::move(new_face));
   return static_cast<FaceId>(faces_.size() - 1);
 }
 
-bool TextBatch::build_bitmap_atlas(Face& font_face) {
-  const u32 w = kBitmapCols * kBitmapCell, h = kBitmapRows * kBitmapCell;
+bool TextBatch::build_ps1_atlas(Face& font_face) {
+  const int count = font_face.ps1->count();
+  const u32 w = kPs1Cols * kPs1CellW, h = static_cast<u32>((count + kPs1Cols - 1) / kPs1Cols * kPs1CellH);
   std::vector<u8> px(static_cast<size_t>(w) * h * 4, 0);
-  for (int idx = 0; idx < import::kJpGlyphSlots; ++idx) {
-    const u16* rows = font_face.jp->rows(idx);
-    if (!rows) continue;
-    int cx = (idx % kBitmapCols) * kBitmapCell, cy = (idx / kBitmapCols) * kBitmapCell;
-    for (int y = 0; y < import::kJpGlyphSize; ++y) {
-      for (int x = 0; x < import::kJpGlyphSize; ++x) {
+  for (int idx = 0; idx < count; ++idx) {
+    const u16* rows = font_face.ps1->rows(idx);
+    const int cx = (idx % kPs1Cols) * kPs1CellW, cy = (idx / kPs1Cols) * kPs1CellH;
+    for (int y = 0; y < import::Ps1Font::kRows; ++y) {
+      for (int x = 0; x < import::Ps1Font::kMaxWidth; ++x) {
         if (!(rows[y] & (0x8000 >> x))) continue;
         u8* pixel = &px[(static_cast<size_t>(cy + y) * w + static_cast<size_t>(cx + x)) * 4];
         pixel[0] = pixel[1] = pixel[2] = pixel[3] = 255;
@@ -159,8 +160,8 @@ bool TextBatch::build_bitmap_atlas(Face& font_face) {
 
 void TextBatch::prepare(FaceId id, std::u32string_view text) {
   Face* font_face = face(id);
-  // The bitmap atlas is complete from the start.
-  if (!font_face || font_face->bitmap) return;
+  // The PS1 font atlas is complete from the start.
+  if (!font_face || font_face->ps1) return;
   bool added = false;
   for (char32_t ch : text) {
     if (ch == U'\n' || font_face->entries.count(ch)) continue;
@@ -339,9 +340,10 @@ const TextBatch::Entry* TextBatch::entry(const Face& font_face, char32_t ch) con
 float TextBatch::advance(FaceId id, char32_t ch, float scale) const {
   const Face* font_face = face(id);
   if (!font_face) return 0;
-  if (font_face->bitmap) {
-    int idx = font_face->jp->index_for(ch);
-    return static_cast<float>(idx < 0 ? 12 : import::JpGlyphs::advance(idx)) * scale;
+  if (font_face->ps1) {
+    // A character the font lacks advances like a space.
+    const int idx = font_face->ps1->index_for(ch);
+    return static_cast<float>(font_face->ps1->advance(idx < 0 ? font_face->ps1->index_for(U' ') : idx)) * ps1_pixel(scale);
   }
   const Entry* glyph_entry = entry(*font_face, ch);
   if (!glyph_entry) return font_face->font->line_spacing * 0.25f * scale;
@@ -350,7 +352,7 @@ float TextBatch::advance(FaceId id, char32_t ch, float scale) const {
 
 float TextBatch::glyph_measure(FaceId id, char32_t ch) const {
   const Face* font_face = face(id);
-  if (!font_face || font_face->bitmap || !font_face->font) return 0.0f;
+  if (!font_face || !font_face->font) return 0.0f;
   if (font_face->opt.layout && font_face->opt.layout->find(static_cast<u32>(ch))) return font_face->opt.layout->measure(static_cast<u32>(ch));
   return font_face->font->measure(static_cast<u32>(ch));
 }
@@ -358,7 +360,8 @@ float TextBatch::glyph_measure(FaceId id, char32_t ch) const {
 float TextBatch::line_height(FaceId id, float scale) const {
   const Face* font_face = face(id);
   if (!font_face) return 0;
-  return (font_face->bitmap ? 13.0f : font_face->font->line_spacing) * scale;
+  if (font_face->ps1) return static_cast<float>(import::Ps1Font::kLineHeight) * ps1_pixel(scale) * aspect_;
+  return font_face->font->line_spacing * scale;
 }
 
 float TextBatch::measure(FaceId id, std::u32string_view text, float scale) const {
@@ -381,17 +384,27 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
   if (pass == Pass::Backdrop && !style.backdrop) return;
   const u32 alpha = color >> 24;
   const u32 back_color = (style.backdrop_color & 0x00FFFFFFu) | (alpha << 24);
-  if (font_face->bitmap) {
-    int idx = font_face->jp->index_for(ch);
-    if (idx < 0 || !font_face->fill || ch == U' ' || ch == 0x3000) return;
-    const float cu = 1.0f / static_cast<float>(kBitmapCols), cv = 1.0f / static_cast<float>(kBitmapRows);
-    const float frac = static_cast<float>(import::kJpGlyphSize) / static_cast<float>(kBitmapCell);
-    float u0 = static_cast<float>(idx % kBitmapCols) * cu, v0 = static_cast<float>(idx / kBitmapCols) * cv;
-    float sz = static_cast<float>(import::kJpGlyphSize) * scale;
-    float dx = pass == Pass::Backdrop ? scale : 0.0f;
-    sprites_->draw(font_face->fill->set, std::floor(x + dx), std::floor(y + dx), sz, sz, u0, v0, u0 + cu * frac, v0 + cv * frac,
-                   pass == Pass::Backdrop ? back_color : color);
-    if (audit_on_ && pass == Pass::Fill) audit_glyph(nullptr, ch, std::floor(x), std::floor(y), std::floor(x) + sz, std::floor(y) + sz);
+  if (font_face->ps1) {
+    // The glyph cell hangs from the pen at (x, y), nearest sampled; the backdrop is the same glyph in black one font pixel down and
+    // right (the PS1 draws no outline). Positions snap to whole pixels of the target (the PS1-resolution grid when one is set), and a
+    // font pixel covers a whole number of target pixels (at least one), so no glyph column or row is dropped by the sampling.
+    const int idx = font_face->ps1->index_for(ch);
+    if (idx < 0 || !font_face->fill) {
+      if (audit_on_ && pass == Pass::Fill) audit_glyph(nullptr, ch, x, y, x, y);
+      return;
+    }
+    const float gx = grid_x_ > 0 ? grid_x_ : 1.0f, gy = grid_y_ > 0 ? grid_y_ : 1.0f;
+    const float pw = std::max(1.0f, std::round(ps1_pixel(scale) * gx)) / gx, ph = std::max(1.0f, std::round(ps1_pixel(scale) * aspect_ * gy)) / gy;
+    const int atlas_rows = (font_face->ps1->count() + kPs1Cols - 1) / kPs1Cols;
+    const float atlas_w = static_cast<float>(kPs1Cols * kPs1CellW), atlas_h = static_cast<float>(atlas_rows * kPs1CellH);
+    const float u0 = static_cast<float>((idx % kPs1Cols) * kPs1CellW) / atlas_w, v0 = static_cast<float>((idx / kPs1Cols) * kPs1CellH) / atlas_h;
+    const float u1 = u0 + static_cast<float>(import::Ps1Font::kMaxWidth) / atlas_w, v1 = v0 + static_cast<float>(import::Ps1Font::kRows) / atlas_h;
+    const float w = static_cast<float>(import::Ps1Font::kMaxWidth) * pw, h = static_cast<float>(import::Ps1Font::kRows) * ph;
+    const bool shadow = pass == Pass::Backdrop;
+    const float x0 = std::round((x + (shadow ? pw : 0.0f)) * gx) / gx, y0 = std::round((y + (shadow ? ph : 0.0f)) * gy) / gy;
+    const u32 shade = alpha << 24;
+    sprites_->draw(font_face->fill->set, x0, y0, w, h, u0, v0, u1, v1, shadow ? shade : color);
+    if (audit_on_ && !shadow) audit_glyph(nullptr, ch, x0, y0, x0 + static_cast<float>(font_face->ps1->advance(idx)) * pw, y0 + h);
     return;
   }
   const Entry* glyph_entry = entry(*font_face, ch);

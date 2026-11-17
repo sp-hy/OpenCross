@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "import/ps1_font.h"
 
 namespace oc::ui::font {
 
@@ -122,6 +123,11 @@ void FontSet::init(const vfs::Vfs& vfs, render::TextBatch& text) {
   vfs_ = &vfs;
   text_ = &text;
   faces_ = {};
+  ps1_ = {};
+  if (vfs.has_archive("font")) return;
+  ps1_.tried = true;
+  if (auto font = import::load_ps1_font(vfs)) ps1_.id = text.add_ps1_font(std::move(font));
+  if (ps1_.id == render::kNoFace) log::warn("font: no spritefonts and no PS1 font");
 }
 
 const import::SfGlyph* FontSet::metrics(const Face& face, char32_t ch) {
@@ -132,6 +138,7 @@ const import::SfGlyph* FontSet::metrics(const Face& face, char32_t ch) {
 
 FontSet::Face* FontSet::get(int slot_index, bool classic) {
   if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_) return nullptr;
+  if (ps1()) return &ps1_;
   const int file = kSlotFile[slot_index];
   Face& face = faces_[static_cast<size_t>((classic ? kFiles : 0) + file)];
   if (!face.tried) {
@@ -160,7 +167,7 @@ render::FaceId FontSet::face(int slot_index, bool classic) {
 }
 
 void FontSet::prefetch(int slot_index) {
-  if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_) return;
+  if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_ || ps1()) return;
   Face& face = faces_[static_cast<size_t>((classic_ ? kFiles : 0) + kSlotFile[slot_index])];
   if (face.tried || face.pending.valid()) return;
   face.pending = std::async(std::launch::async, [vfs = vfs_, name = member(slot_index, classic_)] { return load(*vfs, name); });
@@ -186,6 +193,7 @@ void FontSet::prepare(int slot_index, std::u32string_view text) {
 float FontSet::measure(int slot_index, std::u32string_view text, float scale) {
   Face* face = get(slot_index, classic_);
   if (!face) return 0;
+  if (!face->font) return text_->measure(face->id, text, scale);
   float x = 0, right = 0;
   for (char32_t ch : text) {
     if (ch == U'\n') {
@@ -209,6 +217,13 @@ void FontSet::draw(int slot_index, std::u32string_view text, float x, float y, c
   text_->audit_run();
   if (align == kCentre) x -= measure(slot_index, text, scale) * 0.5f;
   else if (align == kRight) x -= measure(slot_index, text, scale);
+  if (!face->font) {
+    // The PS1 font: the fill colour, a black drop shadow where the ink has a shadow.
+    render::TextStyle style;
+    style.backdrop = ink.shadow;
+    text_->draw(face->id, text, x * k, y * k, ink.normal, scale * k, style);
+    return;
+  }
   render::TextStyle style;
   style.backdrop_color = ink.outline;
   style.shadow = ink.shadow;

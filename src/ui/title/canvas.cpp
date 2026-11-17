@@ -94,7 +94,7 @@ bool UiKit::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBat
   white_set_ = render::TexRef(white_, nearest_);
   lowres_.init(ctx, sprites);
   if (!text_.init(ctx, sprites)) return false;
-  // The PS1 glyph table backs the name codec only; nothing draws the 1-bit font.
+  // The JP glyph table backs the name codec; the PS1 font face (disc mode) is the FontSet's.
   jp_ = std::make_shared<import::JpGlyphs>();
   if (auto exe = vfs.read("cdrom/prog/slps_023.64"); !exe || !jp_->load_bitmaps(*exe)) log::warn("ui: PS1 font bitmaps unavailable");
   fonts_.init(vfs, text_);

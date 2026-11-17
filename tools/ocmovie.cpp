@@ -1,10 +1,13 @@
-// ocmovie: Bink 2 FMV tool.
-//   ocmovie [-g <game dir>] [-l <lang>] play <name> [seconds]        window + audio, A/V synced; Esc/Enter/Space skips
+// ocmovie: FMV tool (RDE's Bink 2 movies, or the PS1 discs' movie streams with --disc).
+//   ocmovie [-g <game dir>] [-l <lang>] play <name> [seconds] [full|short]  window + audio, A/V synced; Esc/Enter/Space skips;
+//                                                                          full / short = the staff-roll layout of rows 11 / 12
 //   ocmovie [-g <game dir>] [-l <lang>] dump <name> <frame> <out.png>  decode to frame N (0-based) and save it (headless)
 //   ocmovie [-g <game dir>] [-l <lang>] info <name>           size, rate, length, audio peak and rms per 10 s
 //   ocmovie [-g <game dir>] [-l <lang>] table             the field script's movie operand -> movie.dat member mapping of both discs
+//   ocmovie --disc <image> [--disc <image>] strip <name> a|b <out.png>   a disc stream's staff-roll strip, row A or B
 // <name> is a movie.dat member without extension ("a01op", "title"); <lang> (default en) picks a01op_<lang> etc.
-// The game dir defaults to $OPENCROSS_GAMEDIR, then the exe directory and its parents.
+// The game dir defaults to $OPENCROSS_GAMEDIR, then the exe directory and its parents. --disc (repeatable, before the subcommand)
+// reads the movies from PS1 disc images instead (disc 1 / disc 2 told apart by their content), as disc mode does.
 #include <SDL3/SDL.h>
 
 #include <algorithm>
@@ -17,6 +20,8 @@
 #include "audio/mixer.h"
 #include "core/log.h"
 #include "game/disc_index.h"
+#include "import/disc/disc_backend.h"
+#include "import/disc/disc_search.h"
 #include "movie/decoder.h"
 #include "movie/player.h"
 #include "platform/paths.h"
@@ -32,9 +37,11 @@ namespace {
 
 int usage() {
   std::fprintf(stderr,
-               "usage: ocmovie [-g <game dir>] [-l <lang>] play <name> [seconds]\n"
-               "       ocmovie [-g <game dir>] [-l <lang>] dump <name> <frame> <out.png>\n"
-               "       ocmovie [-g <game dir>] [-l <lang>] info <name>\n");
+               "usage: ocmovie [-g <game dir> | --disc <image>...] [-l <lang>] play <name> [seconds] [full|short]\n"
+               "       ocmovie [-g <game dir> | --disc <image>...] [-l <lang>] dump <name> <frame> <out.png>\n"
+               "       ocmovie [-g <game dir> | --disc <image>...] [-l <lang>] info <name>\n"
+               "       ocmovie [-g <game dir>] table\n"
+               "       ocmovie --disc <image>... strip <name> a|b <out.png>\n");
   return 2;
 }
 
@@ -46,7 +53,25 @@ bool load_decoder(const vfs::Vfs& game_fs, const std::string& name, const std::s
     return false;
   }
   auto bytes = game_fs.read(member);
-  return bytes && decoder.open(std::move(*bytes));
+  return bytes && decoder.open(std::move(*bytes), member);
+}
+
+int cmd_strip(const vfs::Vfs& game_fs, const std::string& lang, const std::string& name, bool second, const std::string& out) {
+  movie::Decoder decoder;
+  std::string member;
+  if (!load_decoder(game_fs, name, lang, decoder, member)) return 1;
+  std::vector<u8> rgba;
+  u32 w = 0, h = 0;
+  if (!decoder.staff_strip(second, rgba, w, h)) {
+    std::fprintf(stderr, "%s carries no staff strip\n", member.c_str());
+    return 1;
+  }
+  if (!tool::write_png(out, w, h, rgba)) {
+    std::fprintf(stderr, "cannot write %s\n", out.c_str());
+    return 1;
+  }
+  std::printf("%s strip %c -> %s (%ux%u)\n", member.c_str(), second ? 'B' : 'A', out.c_str(), w, h);
+  return 0;
 }
 
 int cmd_dump(const vfs::Vfs& game_fs, const std::string& lang, const std::string& name, u64 frame, const std::string& out) {
@@ -130,7 +155,8 @@ int cmd_table(const vfs::Vfs& game_fs, const std::string& lang) {
   return 0;
 }
 
-int cmd_play(const vfs::Vfs& game_fs, const std::string& lang, const std::string& name, double seconds) {
+// `staff`: "full" / "short" = the staff-roll layout of disc 2 rows 11 / 12, else the plain picture.
+int cmd_play(const vfs::Vfs& game_fs, const std::string& lang, const std::string& name, double seconds, const std::string& staff) {
   platform::Window window;
   if (!window.create("ocmovie", 960, 720, false)) return 1;
   render::GpuContext ctx;
@@ -146,6 +172,8 @@ int cmd_play(const vfs::Vfs& game_fs, const std::string& lang, const std::string
   movie::Player player;
   if (audio_ok) player.set_mixer(&mixer);
   if (!player.open(game_fs, name, lang) || !player.init_gpu(ctx, sprites)) return 1;
+  if ((staff == "full" || staff == "short") && !player.set_staff_roll(game_fs, movie::staff_strip_member(lang), staff == "short"))
+    return 1;
 
   platform::Input input;
   platform::FrameTimer timer;
@@ -181,19 +209,43 @@ int ocmovie_main(int argc, char** argv) {
   std::vector<std::string> args(argv + 1, argv + argc);
   std::string game_dir = tool::env_game_dir();
   std::string lang = "en";
-  while (args.size() >= 2 && (args[0] == "-g" || args[0] == "-l")) {
-    (args[0] == "-g" ? game_dir : lang) = args[1];
+  std::vector<std::string> images;
+  while (args.size() >= 2 && (args[0] == "-g" || args[0] == "-l" || args[0] == "--disc")) {
+    if (args[0] == "--disc") images.push_back(args[1]);
+    else (args[0] == "-g" ? game_dir : lang) = args[1];
     args.erase(args.begin(), args.begin() + 2);
   }
   if (args.empty() || (args.size() < 2 && args[0] != "table")) return usage();
-  const auto dir = platform::find_game_dir(game_dir);
   vfs::Vfs game_fs;
-  if (dir.empty() || !game_fs.open(dir)) {
-    std::fprintf(stderr, "game dir not found (use -g or OPENCROSS_GAMEDIR)\n");
-    return 1;
+  if (!images.empty()) {
+    std::vector<import::disc::FoundDisc> found;
+    std::vector<std::string> notes;
+    for (const std::string& image : images) import::disc::add_image_file(image, found, notes);
+    for (const std::string& note : notes) std::fprintf(stderr, "%s\n", note.c_str());
+    auto backend = std::make_unique<import::disc::DiscBackend>();
+    bool mounted = false;
+    for (const import::disc::FoundDisc& disc : found) {
+      std::string error;
+      if (backend->mount(static_cast<int>(disc.identity.disc_number), disc.source, &error)) mounted = true;
+      else std::fprintf(stderr, "%s: %s\n", disc.where.c_str(), error.c_str());
+    }
+    if (!mounted) {
+      std::fprintf(stderr, "no Chrono Cross disc in the images given\n");
+      return 1;
+    }
+    game_fs.open(std::move(backend), platform::find_game_dir(game_dir));
+  } else {
+    const auto dir = platform::find_game_dir(game_dir);
+    if (dir.empty() || !game_fs.open(dir)) {
+      std::fprintf(stderr, "game dir not found (use -g or OPENCROSS_GAMEDIR)\n");
+      return 1;
+    }
   }
   const std::string& cmd = args[0];
-  if (cmd == "play") return cmd_play(game_fs, lang, args[1], args.size() > 2 ? std::atof(args[2].c_str()) : 0.0);
+  if (cmd == "play")
+    return cmd_play(game_fs, lang, args[1], args.size() > 2 ? std::atof(args[2].c_str()) : 0.0, args.size() > 3 ? args[3] : "");
+  if (cmd == "strip" && args.size() == 4 && (args[2] == "a" || args[2] == "b"))
+    return cmd_strip(game_fs, lang, args[1], args[2] == "b", args[3]);
   if (cmd == "dump" && args.size() == 4)
     return cmd_dump(game_fs, lang, args[1], std::strtoull(args[2].c_str(), nullptr, 10), args[3]);
   if (cmd == "table") return cmd_table(game_fs, lang);

@@ -1,0 +1,7 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay muteki.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_muteki_init = 0x801C5EB4;  # function: Muteki init task
+fx_muteki_op_180 = 0x801C5F88;  # function: Op 0x180 spawns a screen sprite with life position velocity colour
+fx_muteki_done = 0x801C60C0;  # function: Finishing task

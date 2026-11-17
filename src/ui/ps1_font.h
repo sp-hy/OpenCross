@@ -8,6 +8,9 @@
 // release; slots, scales and colours are identical in both modes, and so is the layout: the small kb file's glyphs are laid out with
 // the large kb file's metrics (pen advance, offsets, measure; the other small files keep their own).
 //
+// Played from the PS1 discs there are no spritefonts: every slot is then the PS1's own font (import::Ps1Font, the face of the disc's
+// build), drawn at the slot's scale with a black drop shadow; measure / draw use its pixel metrics.
+//
 // FontSet = the 14 RDE font slots for one render::TextBatch, loaded in the current art mode on first use.
 //   ui::font::FontSet fonts;  fonts.init(vfs, text);  fonts.set_classic(original_art);
 //   fonts.prepare(font::kBn, s);                                  // outside SpriteBatch begin()/end() (may rebuild an atlas)
@@ -99,6 +102,9 @@ class FontSet {
   void set_classic(bool classic) { classic_ = classic; }
   bool classic() const { return classic_; }
 
+  // True when the slots draw the PS1 font (no spritefont archive).
+  bool ps1() const { return ps1_.id != render::kNoFace; }
+
   // Face of a slot in the current (or the given) mode; loads the file on first use. kNoFace if the file is missing.
   render::FaceId face(int slot_index) { return face(slot_index, classic_); }
   render::FaceId face(int slot_index, bool classic);
@@ -139,6 +145,8 @@ class FontSet {
   bool classic_ = false;
   // Indexed [classic * kFiles + file].
   std::array<Face, 2 * kFiles> faces_{};
+  // The PS1 font face standing in for every slot (font == null).
+  Face ps1_;
 };
 
 }  // namespace oc::ui::font

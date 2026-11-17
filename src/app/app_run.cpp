@@ -17,15 +17,22 @@
 #include "game/free_cam.h"
 #include "platform/keymap.h"
 #include "platform/pad_remap.h"
+#include "platform/paths.h"
 #include "render/camera.h"
 
 namespace oc::app {
 
 int App::run() {
+  // Quit on the screens before the game (app_source.cpp): nothing else was started.
+  if (quit_requested) {
+    ctx.wait_idle();
+    return 0;
+  }
   frametime_log = std::getenv("OC_FRAMETIME") != nullptr;
   ft_prev = std::chrono::steady_clock::now();
   while (window.pump(input) && !quit_requested && !restart_for_update) {
     log_frametime();
+    poll_drive_discs();
     frame_pad_remap();
     multiplayer_input();
     frame_hotkeys();
@@ -38,8 +45,8 @@ int App::run() {
       update_loop_speed(frame_dt);
       loop_speed.field = field_stepper.advance(frame_dt * loop_speed.field_factor);
     }
-    // The art mode cycles SD -> HD -> Modded -> SD (also in the options window).
-    if (input.key_pressed[SDL_SCANCODE_F6]) {
+    // The art mode cycles SD -> HD -> Modded -> SD (also in the options window); disc mode has only the classic art.
+    if (input.key_pressed[SDL_SCANCODE_F6] && !platform::disc_mode()) {
       config.art_mode = config.art_mode == platform::ArtMode::Original ? platform::ArtMode::Hd
                         : config.art_mode == platform::ArtMode::Hd     ? platform::ArtMode::Modded
                                                                        : platform::ArtMode::Original;
@@ -335,6 +342,8 @@ bool App::simulate() {
     loop_speed.field = {0, 1.0f};
     return true;
   }
+  // Disc mode's insert-disc screen holds the game as the PS1 does (the picture frozen under its veil).
+  if (disc_prompt_frame()) return true;
   if (routing && world_ok) {
     route_frame();
   } else if (replaying) {

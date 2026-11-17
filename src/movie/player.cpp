@@ -48,6 +48,8 @@ std::string resolve_member(const vfs::Vfs& fs, std::string_view name, std::strin
     }
     if (fs.exists(stem + ".bk2")) return stem + ".bk2";
   }
+  const std::string stream = "cdrom/movie/" + (base == "a01op" ? std::string("newop") : base) + ".stv";
+  if (fs.exists(stream)) return stream;
   return {};
 }
 
@@ -74,6 +76,8 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
   }
   width_ = dec_->width();
   height_ = dec_->height();
+  display_w_ = dec_->display_width();
+  display_h_ = dec_->display_height();
   fps_ = dec_->fps();
   has_audio_ = dec_->has_audio() && mixer_;
   if (has_audio_) mixer_->movie_start(level);
@@ -144,11 +148,21 @@ bool Player::init_gpu(render::GpuContext& ctx, render::SpriteBatch& sprites) {
   return static_cast<bool>(set_);
 }
 
-bool Player::set_staff_roll(const vfs::Vfs& fs, std::string_view member) {
+bool Player::set_staff_roll(const vfs::Vfs& fs, std::string_view member, bool short_roll) {
   release_strip();
   if (!ctx_) return false;
-  auto bytes = fs.read(member);
   render::DecodedImage image;
+  if (dec_ && dec_->staff_strip(short_roll, image.rgba, image.width, image.height)) {
+    // The stream's strips are laid out for their own roll: one row per frame whatever the row's last frame.
+    if (!strip_texture_.create(*ctx_, image.width, image.height, render::TextureFormat::Rgba8, image.rgba.data())) return false;
+    strip_set_ = render::TexRef(strip_texture_, sampler_);
+    strip_w_ = image.width;
+    strip_h_ = image.height;
+    strip_last_ = image.height + 1;
+    log::info("movie: staff roll, stream strip {} {}x{}", short_roll ? 'B' : 'A', strip_w_, strip_h_);
+    return true;
+  }
+  auto bytes = fs.read(member);
   if (!bytes || !render::decode_image(*bytes, image) ||
       !strip_texture_.create(*ctx_, image.width, image.height, render::TextureFormat::Rgba8, image.rgba.data())) {
     log::error("movie: staff strip '{}' could not be read", member);
@@ -158,6 +172,7 @@ bool Player::set_staff_roll(const vfs::Vfs& fs, std::string_view member) {
   strip_set_ = render::TexRef(strip_texture_, sampler_);
   strip_w_ = image.width;
   strip_h_ = image.height;
+  strip_last_ = last_;
   log::info("movie: staff roll, strip {} {}x{}, last frame {}", member, strip_w_, strip_h_, last_);
   return true;
 }
@@ -165,7 +180,7 @@ bool Player::set_staff_roll(const vfs::Vfs& fs, std::string_view member) {
 void Player::release_strip() {
   strip_set_ = {};
   strip_texture_.destroy();
-  strip_w_ = strip_h_ = 0;
+  strip_w_ = strip_h_ = strip_last_ = 0;
 }
 
 Player::Rect Player::picture_rect(float vw, float vh) const {
@@ -176,8 +191,8 @@ Player::Rect Player::picture_rect(float vw, float vh) const {
     return {x0 + w * kPanelX, y0 + h * kPanelY, w * kPanelSize, h * kPanelSize};
   }
   // The shared 4:3 fit zoom.
-  const float scale = render::canvas_fit(vw, vh, static_cast<float>(width_), static_cast<float>(height_)).s;
-  const float w = static_cast<float>(width_) * scale, h = static_cast<float>(height_) * scale;
+  const float scale = render::canvas_fit(vw, vh, static_cast<float>(display_w_), static_cast<float>(display_h_)).s;
+  const float w = static_cast<float>(display_w_) * scale, h = static_cast<float>(display_h_) * scale;
   return {(vw - w) * 0.5f, (vh - h) * 0.5f, w, h};
 }
 
@@ -189,7 +204,7 @@ bool Player::strip_quad(float vw, float vh, StripQuad& quad) const {
   quad.y0 = fit.oy, quad.y1 = fit.oy + 960.0f * fit.sy;
   const float span = staff_strip_span(strip_w_, strip_h_);
   // The decoder has moved on to the next frame by the time the shown one is drawn: frame number = 0-based index + 2.
-  quad.v0 = staff_strip_top(shown_ + 2, last_, strip_w_, strip_h_), quad.v1 = quad.v0 + span;
+  quad.v0 = staff_strip_top(shown_ + 2, strip_last_, strip_w_, strip_h_), quad.v1 = quad.v0 + span;
   if (span <= 0.0f || quad.v1 <= 0.0f || quad.v0 >= 1.0f) return false;
   const float per_v = (quad.y1 - quad.y0) / span;
   if (quad.v0 < 0.0f) quad.y0 -= quad.v0 * per_v, quad.v0 = 0.0f;

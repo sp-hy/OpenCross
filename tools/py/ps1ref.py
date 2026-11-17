@@ -28,43 +28,51 @@ import sys
 import time
 from ctypes import wintypes
 
+import ps1_ram
 from backstop import Backstop
+from ps1_ram import RAM
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 DS_DIR = os.path.join(ROOT, "tools", "duckstation")
 GDB_PORT = 2345
 
-# Game RAM map (JP SLPS-02364 main executable; the RDE and SLPM re-release carry the same executable).
-PAD_RAW = 0x800856A0        # raw 34-byte pad-1 buffer the pad library fills every frame: [0]=status [1]=type [2..3]=buttons (active low)
-PAD_READER = 0x8002B62C     # per-frame pad reader; the frame hook (one hit = one game frame of input)
-PAD_HELD = 0x800855E0       # the game's decoded pad words: held, pressed, released, repeat (u16 each)
+class _Buttons(dict):
+    """Raw PS1 pad button bits (standard digital pad halfword, active low on the wire). "Confirm" and "Cancel" name the game's
+    own roles and resolve in the build that is running: Circle / Cross on the Japanese build, Cross / Circle on the USA one."""
 
-# Raw PS1 pad button bits (standard digital pad halfword, active low on the wire).
-BUTTONS = {
+    def __missing__(self, name):
+        if name in ("Confirm", "Cancel"):
+            usa = RAM.region == "usa"
+            return self["Cross" if (name == "Confirm") == usa else "Circle"]
+        raise KeyError(name)
+
+
+BUTTONS = _Buttons({
     "Select": 0x0001, "L3": 0x0002, "R3": 0x0004, "Start": 0x0008,
     "Up": 0x0010, "Right": 0x0020, "Down": 0x0040, "Left": 0x0080,
     "L2": 0x0100, "R2": 0x0200, "L1": 0x0400, "R1": 0x0800,
     "Triangle": 0x1000, "Circle": 0x2000, "Cross": 0x4000, "Square": 0x8000,
-}
+})
 
-# Watch table: name -> (address, width, signed). Same names as the save-state reader so logs stay comparable.
+# Watch table: name -> (ps1_ram name, offset, width, signed). Same names as the save-state reader so logs stay comparable.
 WATCH = {
-    "ovl_id": (0x800A9F00, 4, False), "mt_ovl": (0x801D2800, 4, False), "ovl": (0x800856F0, 4, False),
-    "loc": (0x80077C26, 2, False), "btl_id": (0x80075906, 2, False), "area": (0x800790FC, 2, False),
-    "btl_frame": (0x800E0518, 4, False), "tgt_064b": (0x800E064B, 1, False), "phase_fc40": (0x800DFC40, 1, False),
-    "menu_064a": (0x800E064A, 1, False), "cur_064e": (0x800E064E, 1, False), "e05da": (0x800E05DA, 2, False),
-    "act_kind": (0x800E0666, 1, False), "act_str": (0x800E0667, 1, False), "act_elem": (0x800E0668, 2, False),
-    "act_actor": (0x800E0634, 1, False), "tgt0": (0x800E0637, 1, False),
-    "pad_held": (0x800855E0, 2, False), "pad_pressed": (0x800855E2, 2, False),
-    "title_var": (0x801F377C, 1, False), "mt_mode": (0x801F5488, 1, False), "mt_cur": (0x801F54A8, 1, False),
-    "ld_cur": (0x801F4FE4, 4, False), "ld_card": (0x801F502C, 4, False),
-    "fx_load": (0x800720F8, 4, False),
-    "ring0": (0x800DFF98, 1, False), "ring1": (0x800DFF9C, 1, False), "ring2": (0x800DFFA0, 1, False),
-    "party0": (0x800786F4, 1, False), "party1": (0x800786F5, 1, False), "party2": (0x800786F6, 1, False),
-    "u0_hp": (0x800E06A0 + 0xB8, 2, True), "u0_gauge": (0x800E06A0 + 0x16E, 2, True), "u0_sta": (0x800E06A0 + 0x19E, 2, True),
-    "u3_hp": (0x800E06A0 + 0x410 * 3 + 0xB8, 2, True), "u4_hp": (0x800E06A0 + 0x410 * 4 + 0xB8, 2, True),
-    "u5_hp": (0x800E06A0 + 0x410 * 5 + 0xB8, 2, True),
+    "ovl_id": ("ovl_id", 0, 4, False), "mt_ovl": ("menu_ovl_id", 0, 4, False), "ovl": ("ovl_resident", 0, 4, False),
+    "loc": ("loc", 0, 2, False), "btl_id": ("btl_id", 0, 2, False), "area": ("area", 0, 2, False),
+    "btl_frame": ("btl_frame", 0, 4, False), "tgt_064b": ("tgt_064b", 0, 1, False), "phase_fc40": ("phase_fc40", 0, 1, False),
+    "menu_064a": ("menu_064a", 0, 1, False), "cur_064e": ("cur_064e", 0, 1, False), "e05da": ("act_element", 0, 2, False),
+    "act_kind": ("act_kind", 0, 1, False), "act_str": ("act_str", 0, 1, False), "act_elem": ("act_elem", 0, 2, False),
+    "act_actor": ("act_actor", 0, 1, False), "tgt0": ("act_targets", 0, 1, False),
+    "pad_held": ("pad_held", 0, 2, False), "pad_pressed": ("pad_held", 2, 2, False),
+    "title_var": ("title_var", 0, 1, False), "mt_mode": ("mt_mode", 0, 1, False), "mt_cur": ("mt_cur", 0, 1, False),
+    "ld_cur": ("ld_cur", 0, 4, False), "ld_card": ("ld_card", 0, 4, False),
+    "fx_load": ("fx_load", 0, 4, False),
+    "ring0": ("ring", 0, 1, False), "ring1": ("ring", 4, 1, False), "ring2": ("ring", 8, 1, False),
+    "party0": ("party", 0, 1, False), "party1": ("party", 1, 1, False), "party2": ("party", 2, 1, False),
+    "u0_hp": ("units", ps1_ram.UNIT_HP, 2, True), "u0_gauge": ("units", ps1_ram.UNIT_GAUGE, 2, True),
+    "u0_sta": ("units", ps1_ram.UNIT_STAMINA, 2, True),
+    "u3_hp": ("unit3", ps1_ram.UNIT_HP, 2, True), "u4_hp": ("unit4", ps1_ram.UNIT_HP, 2, True),
+    "u5_hp": ("unit5", ps1_ram.UNIT_HP, 2, True),
 }
 
 
@@ -72,8 +80,8 @@ GAMES_DIR = os.path.join(DS_DIR, "games")   # the convention: disc images live h
 
 
 def _find_disc(which, region=None):
-    """Disc image lookup. `which` is 1 or 2; `region` is "japan" (default, the version RDE embeds and the one the RAM map
-    applies to) or "usa" (English text; different executable, so only screenshots/states, no RAM-driven stepping).
+    """Disc image lookup. `which` is 1 or 2; `region` is "japan" (default, the version RDE embeds) or "usa" (English text, its
+    own executable; `Session` switches the RAM map to it).
     Order: OC_PS1_DISC (a file, or a folder to search), tools/duckstation/games/, then ~/Documents/DuckStation/games/.
     File names must contain "Disc 1" / "Disc 2" (or "disc1" / "disc2") and the region word; .cue, .chd are accepted."""
     region = (region or os.environ.get("OC_PS1_REGION") or "japan").lower()
@@ -281,7 +289,9 @@ class Session:
             raise RuntimeError("DuckStation not installed; run tools\\duckstation.ps1 -Setup")
         self.disc = disc or default_disc()
         if not self.disc:
-            raise RuntimeError("no disc image: put your Chrono Cross (Japan) Disc 1 .cue/.chd (and Disc 2) into %s, or set OC_PS1_DISC" % GAMES_DIR)
+            raise RuntimeError("no disc image: put your Chrono Cross Disc 1 .cue/.chd (and Disc 2) into %s, or set OC_PS1_DISC" % GAMES_DIR)
+        # The disc decides the build, and with it every address the session and the drivers use (ps1_ram.RAM).
+        self.region = RAM.use(ps1_ram.region_of_disc(self.disc)).region
         self.shots = os.path.join(ds_dir, "screenshots")
         self.states = os.path.join(ds_dir, "savestates")
         self.videos = os.path.join(ds_dir, "videos")
@@ -317,7 +327,7 @@ class Session:
                     raise RuntimeError("DuckStation did not start its GDB server")
                 time.sleep(0.5)
         self.win = Window(self.proc.pid)
-        self.gdb.breakpoint(PAD_READER, True)
+        self.gdb.breakpoint(RAM.pad_reader, True)
         self._to_hook()
 
     def __enter__(self):
@@ -329,7 +339,7 @@ class Session:
     def close(self):
         if self.gdb:
             try:
-                self.gdb.breakpoint(PAD_READER, False)
+                self.gdb.breakpoint(RAM.pad_reader, False)
             except Exception:
                 pass
             self.gdb.close()
@@ -349,7 +359,7 @@ class Session:
             if not self.extra_breakpoints:
                 return          # the frame hook is the only breakpoint, so this stop is it
             pc = self.gdb.pc()
-            if pc == PAD_READER:
+            if pc == RAM.pad_reader:
                 return
             if not self.on_stop(pc):
                 return
@@ -367,7 +377,7 @@ class Session:
 
     def _inject(self, held):
         buttons = (~held) & 0xFFFF
-        self.gdb.write(PAD_RAW, bytes([0x00, 0x41]) + buttons.to_bytes(2, "little"))
+        self.gdb.write(RAM.pad_raw, bytes([0x00, 0x41]) + buttons.to_bytes(2, "little"))
 
     def step(self, held=None):
         """Advance one game frame with the given held button mask (default: the current hold)."""
@@ -405,8 +415,8 @@ class Session:
     def watch(self, names=None):
         out = {}
         for k in (names or WATCH):
-            addr, width, signed = WATCH[k]
-            out[k] = self.gdb.u(addr, width, signed)
+            name, offset, width, signed = WATCH[k]
+            out[k] = self.gdb.u(getattr(RAM, name) + offset, width, signed)
         return out
 
     def read(self, addr, n):
@@ -483,10 +493,10 @@ def main(argv):
     b.add_argument("--audio", action="store_true", help="capture audio for the whole run into OUT/audio.wav")
     a = ap.parse_args(argv)
     if a.cmd == "boot":
-        presses = _parse_presses(a.press)
         os.makedirs(a.out, exist_ok=True)
         with Session(a.disc, a.state) as g:
             print("attached; disc", g.disc, "pc", hex(g.gdb.pc()))
+            presses = _parse_presses(a.press)
             if a.audio:
                 g.audio_capture(True)
             active = []

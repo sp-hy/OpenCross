@@ -24,7 +24,7 @@ This folder documents the engine, the file formats it reads, and how its behavio
 - `tools/` dev tools linked into `opencross.exe` (`opencross <tool>`; `oc*.cpp`), capture and comparison helper scripts (`duckstation.ps1`, `ours_cast*.ps1`, `quiet_start.ps1`, `rde_*.py`), `ghidra_setup.ps1` with `tools/ghidra/` (Ghidra scripts and the `symbols/` catalogues), and `tools/py/` (Python importers, validators, PS1 reference drivers, comparison scripts).
 - `tests/` unit tests (`test_*.cpp`, ctest) and `tests/routes/` scripted routes (`<name>.ini` + `<name>.txt`, `run.ps1`).
 - `launcher/` the 32-bit proxy DLL for RDE's launcher, a CMake project of its own.
-- `docs/` this guide, `architecture.md`, `validation.md`, `rde_internals.md`, `tools.md`, `formats/` (file formats), `rules/` (game behaviour). `third_party/` vendored libraries (`clhca`, `librempeg`); `scripts/` librempeg build helpers.
+- `docs/` this guide, `architecture.md`, `validation.md`, `rde_internals.md`, `tools.md`, `formats/` (file formats), `rules/` (game behaviour). `third_party/` vendored libraries (`clhca`, `librempeg`, `libchdr` for CHD disc images: built with the project, nothing to install); `scripts/` librempeg build helpers.
 - `build.ps1`, `CMakeLists.txt`, `CMakePresets.json`, `vcpkg.json` the build; `build/` output; `tmp/` scratch (captures, forged saves).
 - `README.md`, `CREDITS.md`, `LICENSE`.
 

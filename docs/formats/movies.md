@@ -9,7 +9,7 @@ This document covers how the field-script movie ops (`7E U` PLAY_MOVIE, `D4 U x`
 |---|---|---|
 | +0 | start | frame offset used by some rows (section 4) |
 | +4 | 1 | |
-| +8 | end | frame count: the file's own frame numbers (STR frames = Bink frames; 15 fps, `ending_s` 30 fps) |
+| +8 | end | frame count: the file's own frame numbers (STR frames = Bink frames except in four movies, section 10.6; 15 fps, `ending_s` 30 fps) |
 | +0xC | mode | 0, or 3 / 4 for the two ending_s rows (disc 2 rows 11 / 12): the staff-roll layout (section 4) |
 | +0x10 | **movie number** | |
 | +0x14 | volume | 0x7F full, 0x6E on row 0, 0x50 / 0 on a few rows |
@@ -17,7 +17,7 @@ This document covers how the field-script movie ops (`7E U` PLAY_MOVIE, `D4 U x`
 The operand is not the movie number. Rows 1..15 happen to be the identity, but row 0 is number 19 (the opening `newop`) and rows 16..23 map as 16 -> number 0 `a07b_ite`, 17 -> 16 `b17opkid`, 18 -> 17, 19 -> 18, 20..23 -> numbers 7 / 5 / 15 / 16 again. The title room (`opening.bin`) plays `D4 #0` on disc 1 = the opening FMV `a01op` (the logo scene appears when it ends or is skipped) and `D4 #1` on disc 2 = `titleb`. OpenCross: all rows are in `src/game/disc_index.cpp` (`DiscIndex::movie_row`).
 
 ## 2. Number to file
-The movie's file index is **6035 + number** in the `.fnd` of the disc in the drive (`cdrom.fnd` disc 1, `cdrom2.fnd` disc 2; the record is `c:\movie\<name>.stv`). The disc is variable 0x42 (disc - 1) / the DiscCheck (`FieldWorld::disc()`). Disc 1 rows address the 20 disc-1 records (numbers 0..19), disc 2 rows the 11 disc-2 records. A record that is not `c:\movie\...` plays nothing.
+The movie's file index is **6035 + number** in the `.fnd` of the disc in the drive (`cdrom.fnd` disc 1, `cdrom2.fnd` disc 2; the record is `c:\movie\<name>.stv`, a PS1 movie stream, section 10; on the discs themselves OpenCross reads it as `cdrom/movie/<name>.stv`). The disc is variable 0x42 (disc - 1) / the DiscCheck (`FieldWorld::disc()`). Disc 1 rows address the 20 disc-1 records (numbers 0..19), disc 2 rows the 11 disc-2 records. A record that is not `c:\movie\...` plays nothing.
 
 Name to archive member: `movie/<name>.bk2`, except the three per-language movies: `newop` -> `a01op_<lang>`, `b28end` -> `b28end_<lang>`, `final` -> `final_<lang>`, suffix `en fr it de es jp`. `movie.dat` holds 46 members (stored, not compressed): the 6 languages of those three, `ending_s`, `title`, `titleb` and the other `a..` / `b..` movies. OpenCross: for each stem, `<name>_<lang>` is tried before `<name>`, and at each stem a mod's loose `.mp4` / `.mkv` before the `.bk2` (`movie::resolve_member`); the language comes from the config, so a mod may localise any movie.
 
@@ -41,7 +41,7 @@ OpenCross: `DiscIndex::movie_range` returns the range; `movie::Player::open(...,
 
 **The staff roll (disc 2 rows 11 / 12, modes 3 / 4).** `ending` entrance 1 plays row 11 (the whole `ending_s`, last frame 8951); `opa_a04f`, `opa_b04f` and `ryu_b28i` play row 12 (last frame 8130). Both show the movie in a small panel and a credits strip that scrolls up beside it. RDE (the reference; frame grabs of the whole roll, the layout is the same in every frame):
 - Picture = the 4:3 fit of the window (height min(h, w * 3 / 4), centred), without the crop bands. **Movie panel**: x 0.48 .. 0.97, y 0.46 .. 0.95 of it (0.49 of the picture each way, the whole 640 x 480 movie scaled into it); black elsewhere.
-- **Strip** image: `hd/staff/staff24.png` in Japanese, `hd/staff/staff24us.png` in every other language (English, French, Italian, German, Spanish), 144 x 8950 RGB, white names and lilac headings on black, content rows 225 .. 8691. It is drawn on RDE's 1280 x 960 canvas over the game viewport (`render::overlay_fit`: 8/960 bands, the rows squashed by 944/960 x 928/960): x 0 .. 0.45 of the canvas width (576 units, 4 per strip pixel), y canvas 0 .. 960, i.e. window y 0.0083 .. 0.9589 of the picture. The area shows span = 144 * 3 / (8950 * 4 * 0.45) of the strip's height, 240 rows. Linear filtering, the movie's alpha (1 while it plays). The strip, the panel and their placement are the same in both art modes: RDE draws the PNG with original art too (the PS1's own strip, streamed with the movie, is Japanese only), so OpenCross's Classic mode uses it as well.
+- **Strip** image: `hd/staff/staff24.png` in Japanese, `hd/staff/staff24us.png` in every other language (English, French, Italian, German, Spanish), 144 x 8950 RGB, white names and lilac headings on black, content rows 225 .. 8691. It is drawn on RDE's 1280 x 960 canvas over the game viewport (`render::overlay_fit`: 8/960 bands, the rows squashed by 944/960 x 928/960): x 0 .. 0.45 of the canvas width (576 units, 4 per strip pixel), y canvas 0 .. 960, i.e. window y 0.0083 .. 0.9589 of the picture. The area shows span = 144 * 3 / (8950 * 4 * 0.45) of the strip's height, 240 rows. Linear filtering, the movie's alpha (1 while it plays). The strip, the panel and their placement are the same in both art modes: RDE draws the PNG with original art too, so OpenCross's Classic mode uses it as well. The two PNGs are exactly the strips the discs stream with the movie (section 10): `staff24.png` = the Japanese disc's, `staff24us.png` = the USA disc's. Played from the discs (no `hd.dat`), the strip comes from the stream itself: row A for row 11 (the same picture as the PNG of the disc's region), row B for row 12 (section 10.5), whatever the language setting; it is drawn in the same place and scrolls by the formula below with last = the strip's row count + 1 (8951) on both rows, since row B is already laid out for the shorter roll.
 - **Scroll**: the strip row at the top of the area, as a fraction of the strip's height, is top = (span * 0.52 + 1) * F / last - span, F = Bink's frame number while frame F - 1 is shown, last = the row's last frame (8951 / 8130). At frame 0 the strip's first row sits at the bottom edge; at the last frame the strip's end stands 0.52 of the span above the bottom, past the last credit. Row 12 therefore scrolls 8951 / 8130 = 1.10 times as fast as row 11, about 1.01 strip rows per frame on row 11.
 - The PS1 (DuckStation, Japanese disc 2) builds the same picture in 24-bit colour on a 208-line display: the strip rows come from the STR's data sectors (0x1B0 bytes = 144 pixels each), kept in a 272-row ring that moves one row per movie frame while the stream has rows buffered, one row per display line over the left 144 of 320 pixels (0.45); the movie panel stands higher than RDE's, x 0.47 .. 0.97, y 0.36 .. 0.87 of the 320 x 240 output. RDE's data has no STR, and its PNG rows are those strip rows (the same picture in a DuckStation grab, which scales the 224 lines to 240), so OpenCross uses the PNG and RDE's layout in every art mode.
 
@@ -49,6 +49,8 @@ OpenCross: `App::start_movie` switches a mode 3 / 4 row to the layout (`movie::P
 
 ## 5. Decoder and file access (OpenCross)
 Bink 2 is decoded with librempeg (built locally by `scripts\build-librempeg.ps1`, commit pinned in CREDITS.md); audio is pulled from the same stream. YUV->RGBA runs on the decoder worker thread; the frame texture is created at the movie's own size.
+
+**Disc movie streams.** Without `movie.dat` (disc mode), `movie::resolve_member` falls back, after a mod's `.mp4` / `.mkv` / `.bk2`, to the disc's stream `cdrom/movie/<name>.stv` (`a01op` is the discs' `newop`; every other name is the record's own). `Decoder::open` with a member ending in `.stv` reads it without librempeg: `import::StrStream` indexes the sectors (section 10), `import::mdec_decode` decodes each frame (section 10.3) straight to RGBA, and each group's two ADPCM payloads decode with the SPU decoder (`audio::adpcm_decode_block`, the history carried per channel) to 44,100 Hz stereo, resampled to 48 kHz like the Bink sound. One `step()` decodes the audio groups stored before the next frame, then the frame; frame index = frame number - 1, time = index / fps (15, or 30 for `ending_s`), frame count = the highest frame number. A frame that does not decode repeats the previous picture (none does on either region's discs). The 320 x 224 frames fill the same 4:3 picture as the Bink files (`Decoder::display_width` / `display_height` = 4x the width by 3x the width, the picture's shape on screen; the texture keeps the frame size). Play ranges and the clock are the same as for Bink, with one difference in `App::start_movie`: a row without a range still ends at the row's end field, which is the stream's frame count on every row except the Japanese `newop` (end 2280, stream 2705), so its 420 black frames after the opening are not shown. The staff roll takes its strip from the stream (section 4). Measured on `a07a_jka` (Japanese disc 1, frame index 100): mean absolute RGB error 2.1 against RDE's Bink frame box-downscaled to 320 x 224 (librempeg's own `mdec` decoder: 2.2; the two STR decodes differ by 0.6 on average, at most 8, from rounding); `ocmovie info` gives the same length and RMS per 10 s as the Bink track (-20.0 / -11.8 / -12.5 / -21.5 dBFS against -20.0 / -11.8 / -12.5 / -21.6).
 
 - **Streams.** The first video and first audio stream are used; a movie without audio plays against the wall clock. Frame time = decode index / frame rate (`avg_frame_rate`, else `r_frame_rate`, else 15), not the container timestamps. Video decodes with automatic codec threading.
 - **Mod codecs.** Besides Bink (`.bk2`), mods may supply HEVC or H.264 in `.mp4` / `.mkv` (any codec librempeg decodes; the file name is the container hint). Accepted pixel formats: YUV 4:2:0 / 4:2:2 / 4:4:4 8-bit, full-range 4:2:0 (YUVJ), 4:2:0 with alpha (alpha plane copied to RGBA alpha), 4:2:0 10-bit (shifted to 8); anything else logs an error and drops the frame.
@@ -90,4 +92,88 @@ The PS1 and RDE have no pause during a movie, so the pause is an OpenCross featu
 - Skip while paused is not possible: the pause screen is modal and swallows every button. Resume first, then skip. Esc still opens the settings window, which pauses the host as before.
 
 ## 9. Verification
-Tests: `tests/test_flow.cpp` (`DiscIndex` movie checks incl. ranges), `test_movie` (`test_mixer_hold`, `test_player_pause_flag`, `test_held_frame` (hold / fade alphas), `test_staff_strip`, the wall-clock Player check, play ranges on `a05kid`, the strip images and `ending_s`'s frame count). Routes: `tests/routes/movie.txt` (title room `D4 #0` -> `movie/a01op_en.bk2`, skip with confirm), `title.txt` / `title_orig.txt` / `newgame.txt` (boot FMV = a01op), `movie_opn.txt` (opn_a05i `7E #3` -> `a03kidfb`), `movie_jump.txt` (bak_a17e `DC #472,#1` + `7E #18` -> `b18sikai` plays, then bak_a15e with variables 0x08 / 0x06 / 0x02 / 0x3A = 538 / 472 / 1 / 1), `movie_flow.txt` (title -> New Game -> name -> opn_a01i, then `load opn_a05i 1` requests and starts `a03kidfb`), `staff_roll.txt` (disc 2 `ending` entrance 1 -> row 11 `ending_s` in the staff-roll layout).
+Tests: `tests/test_flow.cpp` (`DiscIndex` movie checks incl. ranges), `test_movie` (`test_mixer_hold`, `test_player_pause_flag`, `test_held_frame` (hold / fade alphas), `test_staff_strip`, the wall-clock Player check, play ranges on `a05kid`, the strip images and `ending_s`'s frame count). Routes: `tests/routes/movie.txt` (title room `D4 #0` -> `movie/a01op_en.bk2`, skip with confirm), `title.txt` / `title_orig.txt` / `newgame.txt` (boot FMV = a01op), `movie_opn.txt` (opn_a05i `7E #3` -> `a03kidfb`), `movie_jump.txt` (bak_a17e `DC #472,#1` + `7E #18` -> `b18sikai` plays, then bak_a15e with variables 0x08 / 0x06 / 0x02 / 0x3A = 538 / 472 / 1 / 1), `movie_flow.txt` (title -> New Game -> name -> opn_a01i, then `load opn_a05i 1` requests and starts `a03kidfb`), `staff_roll.txt` (disc 2 `ending` entrance 1 -> row 11 `ending_s` in the staff-roll layout). Disc streams: `test_str` (MDEC frames built bit by bit, both interleaves, frame assembly, audio pairing, strip rows, the decoder end to end on a synthetic stream); `ocmovie --disc` plays, dumps and inspects them from the images.
+
+## 10. PS1 movie streams (`c:\movie\<name>.stv` on the discs)
+The PS1 discs hold the movies as interleaved sector streams: file records 6035.. of the disc's `.fnd` (section 2), 20 on disc 1, 11 on disc 2. They are not standard XA movies: every sector is a Mode 2 **form 1** data sector (subheader file 0, channel 0, submode 0x08, coding 0; the last sector of a stream has submode 0x89 = data + end of record + end of file), and the audio is SPU ADPCM carried in data sectors, not XA ADPCM. All sector kinds are told apart by a header in the 2048-byte user data, so the subheader is never needed.
+
+### 10.1 Sector header (user data 0x00..0x1F, little-endian)
+| off | size | video sector | audio sector | staff strip sector |
+|---|---|---|---|---|
+| 0x00 | u16 | 0x0160 | 0x0160 | 0x0160 |
+| 0x02 | u8 | 1 | channel: 0 left, 1 right | 3 |
+| 0x03 | u8 | 0x80 + (disc - 1) | disc - 1 | disc - 1 |
+| 0x04 | u16 | chunk number in the frame, 0-based | = channel | 0 |
+| 0x06 | u16 | chunks per frame (8; 3 in `ending_s`) | 2 | 1 |
+| 0x08 | u32 / u16 | frame number, 1-based | group counter (u16; ignore) | counter (u16; ignore) |
+| 0x0C | u32 | frame bitstream size in bytes (at most chunks x 2016) | filler | filler |
+| 0x10 | u16 x 2 | width, height (320 x 224; `ending_s` 160 x 112) | filler | filler |
+| 0x14 | 8 bytes | copy of the bitstream's 8-byte header (10.3) | filler | filler |
+| 0x1C | u32 | 0 | filler | filler |
+
+The type is byte 0x03 bit 7 (video) and byte 0x02; the low bits of byte 0x03 carry the disc number, so disc 2 streams read `60 01 01 81` (video) / `60 01 00 01` (audio). Filler is 0xFF (disc 1 audio sectors also hold u16 0 and u32 2016 at 0x0A / 0x0C; nothing reads them). One more type exists: `60 01 02 00`, a pair of audio-end sectors (channel 0 and 1) in place of the audio of the last group of the Japanese `newop` only; it carries no sound.
+
+### 10.2 Interleave, frame rate, end
+- **15 fps movies** (all but `ending_s`): groups of 10 sectors, one frame each: `L R V0 V1 .. V7` (left audio, right audio, 8 video chunks). Every frame takes 8 video sectors whatever its size; the chunks after the bitstream end are 0xFF filler.
+- **`ending_s`** (30 fps): groups of 10 sectors, two frames each: `L R S V0 V1 V2 S V0 V1 V2` (S = staff strip sector, one before each frame).
+- The stream is read at double CD speed: 150 sectors a second, so a group lasts 1/15 s; frame rate = 150 / sectors per frame (10 or 5). Audio: one L + R pair of 2940 samples each per group = 44,100 Hz.
+- **End**: the stream ends with its file (record size / the last sector's end-of-file submode); the last video frame carries the highest frame number. The frame count of each movie is in 10.6.
+
+### 10.3 Video bitstream (one frame = chunks 0..n-1 of the frame, payload 2016 bytes from user data 0x20, cut to the frame size)
+Standard PlayStation MDEC "version 2" frames, the same in every movie: 8-byte header u16 MDEC length (the size of the run-length stream the frame expands to; not needed), u16 0x3800, u16 quantiser (1..15 in these discs), u16 version = 2; then the bitstream, read as little-endian 16-bit words with the bits taken from the most significant end. Macroblocks of 16 x 16 pixels in column order (top to bottom, then the next column; 20 x 14 for 320 x 224), each six 8 x 8 blocks in the order Cr, Cb, Y top-left, Y top-right, Y bottom-left, Y bottom-right. Per block: a 10-bit signed DC value, then MPEG-1 intra AC run / level codes (the MPEG-1 DCT coefficient table), escape = `000001` + 6-bit run + 10-bit signed level, end of block = `10`. Dequantisation: DC = value x 2 (10-bit precision, independent of the quantiser), AC = (level x quantiser x matrix + 4) / 8 rounded toward zero, with the MPEG-1 default intra matrix (at the coefficient's natural position, after the zigzag scan); then the 8 x 8 inverse DCT (f = 1/4 sum C(u) C(v) F cos cos, C(0) = 1/sqrt 2), luma + 128. The result is full-range YCbCr 4:2:0, BT.601 (R = Y + 1.402 Cr, G = Y - 0.344 Cb - 0.714 Cr, B = Y + 1.772 Cb), each chroma sample covering 2 x 2 pixels.
+
+### 10.4 Audio sectors
+User data 0x20..0x7F is 0xFF. At 0x80 a 0x50-byte block: `AKAO`, u32 group index (0-based), 8 zero bytes, u32 remaining bytes (falls by 1680 per group), u32 0, u32 0x11, u32 0x1000 (the SPU pitch for 44,100 Hz), u32 1680 (payload size), zeros. Payload at 0xD0: 1680 bytes = 105 SPU ADPCM blocks of 16 bytes (byte 0 = predictor << 4 | shift, byte 1 = flags, 14 bytes of 4-bit samples, low nibble first, 28 samples); the flags are 2 in every block and 3 in the last (SPU loop markers; decoding ignores them). 0x760..0x7FF: ten silent filler blocks (`00 03 00 ..`). Decoding: the PS1 SPU's five predictors, the history carried across sectors of the same channel. Left = channel 0, right = channel 1; both sectors of a group share the AKAO block. The audio of a group is stored just before that group's frame(s).
+
+### 10.5 Staff strip sectors (`ending_s` only)
+User data 0x20: two rows of 0x1B0 bytes, 144 pixels of 24-bit RGB each; 0x380.. is 0xFF. Row A of the 8950 strip sectors, in order, forms the 144 x 8950 strip of the whole roll (disc 2 row 11); it is pixel-identical to RDE's `staff24.png` on the Japanese disc and to `staff24us.png` on the USA disc, so the USA strip is in English. Row B is the same credits laid out for the shorter roll (disc 2 row 12, last frame 8130): its content ends about 830 rows earlier and stands 8951 / 8130 = 1.10 times faster through the frames.
+
+### 10.6 Japanese vs USA, and STR vs Bink frames
+Frame counts (video frames in the stream; Bink = the `movie.dat` member's header). Both regions' `field.prg` hold the same row table (section 1).
+
+| movie | JP STR | USA STR | Bink | relation |
+|---|---|---|---|---|
+| a02koryu, a11koryu | 467 | 467 | 468 | 1:1 |
+| a03kidfb | 335 | 335 | 335 | 1:1 |
+| a04opstn | 813 | 813 | 815 | 1:1 |
+| a05kid | 139 | 139 | 140 | 1:1 |
+| a06jkotu | 270 | 270 | 271 | 1:1 |
+| a07a_jka | 489 | 489 | 489 | 1:1 |
+| a07b_ite | 65 | 65 | 66 | 1:1 |
+| a08hanyo, b08hanyo | 205 | 205 | 206 | 1:1 |
+| a09ko_fb | 377 | 377 | 378 | 1:1 |
+| a10hyofb | 192 | 192 | 192 | 1:1 |
+| a12kidfb | 374 | 374 | 375 | 1:1 |
+| a13hyo | 414 | 414 | 415 | 1:1 |
+| a14seisn | 645 | 645 | 646 | 1:1 |
+| a15kid | 734 | 734 | 736 | 1:1 |
+| b17opkid | 495 | 495 | 495 | 1:1 |
+| b18sikai | 795 | 795 | 796 | 1:1 |
+| b19selya | 1464 | 1464 | 1466 | 1:1 |
+| b20kojin | 446 | 446 | 447 | 1:1 |
+| b22fujyo | 764 | 764 | 766 | 1:1 |
+| b23_7ryu | 1437 | 1437 | 1439 | 1:1 |
+| b24hoshi | 660 | 660 | 662 | 1:1 |
+| b25mezam | 250 | 250 | 251 | 1:1 |
+| b26saise | 1027 | 1027 | 1029 | 1:1 |
+| ending_s | 8950 | 8950 | 8951 | 1:1 (30 fps) |
+| title | 275 | 275 | 275 | 1:1 |
+| newop | 2705 | 2285 | 2162 (`a01op_*`) | STR n = Bink n - 120 |
+| titleb | 395 | 395 | 275 (= `title`) | STR n = Bink n - 120 |
+| final | 442 | 442 | 570 (`final_*`) | different edit |
+| b28end | 1140 | 1140 | 1510 (`b28end_*`) | different edit |
+
+"1:1": STR frame n is Bink frame n (frame signatures match at offset 0; the Bink file may have one or two extra frames at the end); the picture is the same, the Bink one a 4x upscale of the full 320 x 224 frame to 1280 x 960 (no crop). Every ranged row (section 4) is a 1:1 movie, so the play ranges apply to the STR unchanged. The others:
+- `newop` and `titleb` start with 120 frames (8 s) of the Squaresoft logo that the Bink files lack; `titleb`'s Bink is the same file as `title`. The Japanese `newop` ends with 420 black frames after frame 2285 (row 0's end is 2280).
+- `newop`, `final` and `b28end` carry text in the picture: the JP and USA streams differ only in those frames (`newop` 359..953, `final` 2..205, `b28end` 50..957, in Japanese / English; plus the Japanese `newop`'s black tail); RDE's per-language Bink files re-time those passages, so their frame numbers do not match the STR.
+- `ending_s`: the video and audio sectors are identical in both regions; only the strip sectors differ (10.5). Every other movie is byte-identical between the regions.
+- Audio: the STR's sound is RDE's Bink track (correlation 0.998 on `a07a_jka`; Bink starts 116 samples, 2.6 ms, earlier).
+
+### 10.7 Cooked (2048-byte) images
+Nothing a movie needs is lost in a 2048-byte `.iso`: video, audio and strip sectors are all form 1, their headers are in the user data, and the whole disc (all four images) has no form 2 sectors apart from four empty ones in the system area (sectors 12..15). Movies play with sound from a cooked image.
+
+### 10.8 Decoding with librempeg
+librempeg's `mdec` decoder decodes these frames exactly as they are (every frame of every movie, both regions, no errors; pictures match the Bink frames), and its `adpcm_psx` decoder decodes the audio when it is given one packet of 3360 bytes per group = left payload then right payload, as stereo with block_align 3360 (it matches a reference SPU ADPCM decode: correlation 1.0, 2940 samples per channel per group, only rounding differences). Its `psxstr` demuxer is not enough on its own:
+- raw 2352-byte input: it sorts sectors by subheader submode, and every sector here is "data", so audio sectors are taken as video chunks; the stream's first sector (audio) sets the picture size to 65535 x 65535 and the decoder fails to open;
+- 2048-byte input: it knows the Chrono Cross audio type bytes and decodes disc 1 movies completely (video, and audio with the `fastaudio` parser enabled), but on disc 2 the video type `60 01 01 81` is not recognised (probing fails; forced, video would be taken as audio), strip sectors and the `newop` end sectors are taken as audio, and the frame rate is fixed at 15 fps (wrong for `ending_s`).
+OpenCross therefore does not use librempeg for these streams: it demuxes them itself (10.1 / 10.2, `import::StrStream`), decodes the MDEC frames with its own decoder (10.3, `import::mdec_decode`) and the audio with the SPU ADPCM decoder the music already uses (section 5); the librempeg build stays Bink / HEVC / H.264 only.

@@ -7,7 +7,10 @@
 #include <cstring>
 #include <string>
 
+#include "audio/adpcm.h"
 #include "core/log.h"
+#include "import/mdec.h"
+#include "import/str_stream.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -182,10 +185,104 @@ struct Decoder::Impl {
   }
 };
 
+// A disc movie stream: the bytes, their index, the next frame and audio group to decode, the ADPCM history of each channel and the
+// last good picture (a frame that fails to decode repeats it).
+struct Decoder::Stream {
+  Bytes file;
+  import::StrStream index;
+  size_t next_frame = 0, next_audio = 0;
+  audio::AdpcmState channels[2];
+  std::vector<u8> last_rgba;
+};
+
 Decoder::Decoder() : impl_(std::make_unique<Impl>()) {}
 Decoder::~Decoder() = default;
 
+void Decoder::resample(size_t sample_count, int rate) {
+  Impl& state = *impl_;
+  // Output sample at source position p interpolates src[floor(p)] and src[floor(p)+1]; index -1 is rs_prev.
+  const double ratio = static_cast<double>(rate) / kAudioRate;
+  // p must stay below n-1 so src[i0+1] exists; p = n-1 is produced by the next chunk from rs_prev.
+  const double limit = static_cast<double>(sample_count) - 1.0;
+  while (state.rs_pos < limit) {
+    const long i0 = static_cast<long>(std::floor(state.rs_pos));
+    const float frac = static_cast<float>(state.rs_pos - static_cast<double>(i0));
+    for (size_t channel = 0; channel < 2; ++channel) {
+      const float prev = i0 < 0 ? state.rs_prev[channel] : state.src[static_cast<size_t>(i0) * 2 + channel];
+      const float next = state.src[static_cast<size_t>(i0 + 1) * 2 + channel];
+      audio_.push_back(prev + (next - prev) * frac);
+    }
+    state.rs_pos += ratio;
+  }
+  state.rs_pos -= static_cast<double>(sample_count);
+  state.rs_prev[0] = state.src[(sample_count - 1) * 2];
+  state.rs_prev[1] = state.src[(sample_count - 1) * 2 + 1];
+}
+
+bool Decoder::open_stream(Bytes file) {
+  stream_ = std::make_unique<Stream>();
+  stream_->file = std::move(file);
+  if (!stream_->index.parse(stream_->file)) {
+    log::error("movie: not a movie stream");
+    return false;
+  }
+  const import::StrStream& index = stream_->index;
+  width_ = index.width();
+  height_ = index.height();
+  fps_ = index.fps();
+  frames_ = index.frame_count();
+  has_audio_ = !index.audio().empty();
+  return width_ && height_;
+}
+
+bool Decoder::staff_strip(bool second, std::vector<u8>& rgba, u32& w, u32& h) const {
+  if (!stream_ || !stream_->index.strip_rows()) return false;
+  rgba = stream_->index.strip_image(second);
+  w = import::StrStream::kStripWidth;
+  h = static_cast<u32>(stream_->index.strip_rows());
+  return true;
+}
+
+// One frame per step, after the audio groups the stream holds before it; the last step decodes the audio left and ends.
+bool Decoder::step_stream() {
+  Stream& stream = *stream_;
+  const import::StrStream& index = stream.index;
+  const size_t audio_until = stream.next_frame < index.frames().size() ? index.frames()[stream.next_frame].audio_before : index.audio().size();
+  Impl& state = *impl_;
+  for (; stream.next_audio < audio_until; ++stream.next_audio) {
+    constexpr size_t kBlockBytes = 16, kBlockSamples = 28;
+    state.src.resize(static_cast<size_t>(import::StrStream::kAudioSamples) * 2);
+    for (int channel = 0; channel < 2; ++channel) {
+      const ByteSpan payload = index.audio_payload(index.audio()[stream.next_audio], channel);
+      s16 pcm[kBlockSamples];
+      for (size_t block = 0; block * kBlockBytes < payload.size(); ++block) {
+        audio::adpcm_decode_block(payload.data() + block * kBlockBytes, stream.channels[channel], pcm);
+        for (size_t i = 0; i < kBlockSamples; ++i)
+          state.src[(block * kBlockSamples + i) * 2 + static_cast<size_t>(channel)] = static_cast<float>(pcm[i]) / 32768.0f;
+      }
+    }
+    resample(import::StrStream::kAudioSamples, static_cast<int>(import::StrStream::kAudioRate));
+  }
+  if (stream.next_frame >= index.frames().size()) {
+    eof_ = true;
+    return false;
+  }
+  const import::StrStream::Frame& frame = index.frames()[stream.next_frame++];
+  VideoFrame video_frame;
+  video_frame.index = frame.number ? frame.number - 1 : 0;
+  video_frame.pts = static_cast<double>(video_frame.index) / fps_;
+  if (import::mdec_decode(index.bitstream(frame), width_, height_, video_frame.rgba)) {
+    stream.last_rgba = video_frame.rgba;
+  } else {
+    log::warn("movie: frame {} does not decode; the previous one stays", frame.number);
+    video_frame.rgba = stream.last_rgba.empty() ? std::vector<u8>(static_cast<size_t>(width_) * height_ * 4, 0) : stream.last_rgba;
+  }
+  video_.push_back(std::move(video_frame));
+  return true;
+}
+
 bool Decoder::open(Bytes file, const std::string& name) {
+  if (name.ends_with(".stv")) return open_stream(std::move(file));
   Impl& state = *impl_;
   state.file = std::move(file);
   state.mem = {state.file.data(), state.file.size(), 0};
@@ -266,6 +363,7 @@ bool Decoder::probe(const std::string& name) {
 bool Decoder::step() {
   Impl& state = *impl_;
   if (eof_) return false;
+  if (stream_) return step_stream();
 
   auto drain_video = [&]() {
     for (;;) {
@@ -294,23 +392,7 @@ bool Decoder::step() {
                        : reinterpret_cast<const float*>(frame.data[0])[i * static_cast<size_t>(channels) + static_cast<size_t>(src_channel)];
           }
         }
-        // Output sample at source position p interpolates src[floor(p)] and src[floor(p)+1]; index -1 is rs_prev.
-        const double ratio = static_cast<double>(frame.sample_rate ? frame.sample_rate : 44100) / kAudioRate;
-        // p must stay below n-1 so src[i0+1] exists; p = n-1 is produced by the next chunk from rs_prev.
-        const double limit = static_cast<double>(sample_count) - 1.0;
-        while (state.rs_pos < limit) {
-          const long i0 = static_cast<long>(std::floor(state.rs_pos));
-          const float frac = static_cast<float>(state.rs_pos - static_cast<double>(i0));
-          for (size_t channel = 0; channel < 2; ++channel) {
-            const float prev = i0 < 0 ? state.rs_prev[channel] : state.src[static_cast<size_t>(i0) * 2 + channel];
-            const float next = state.src[static_cast<size_t>(i0 + 1) * 2 + channel];
-            audio_.push_back(prev + (next - prev) * frac);
-          }
-          state.rs_pos += ratio;
-        }
-        state.rs_pos -= static_cast<double>(sample_count);
-        state.rs_prev[0] = state.src[(sample_count - 1) * 2];
-        state.rs_prev[1] = state.src[(sample_count - 1) * 2 + 1];
+        resample(sample_count, frame.sample_rate ? frame.sample_rate : 44100);
       } else {
         log::error("movie: unsupported audio sample format {}", frame.format);
       }

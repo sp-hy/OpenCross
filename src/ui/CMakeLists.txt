@@ -26,6 +26,8 @@ add_library(oc_ui STATIC
   feature_icons.cpp
   world_name.h
   world_name.cpp
+  disc_prompt.h
+  disc_prompt.cpp
   menu/game_state.h
   menu/game_state.cpp
   menu/use_flow.h

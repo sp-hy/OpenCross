@@ -2,7 +2,7 @@ r"""The effect registry (global resource list) at the first frames of a battle, 
 
     python tools/py/ps1_registry.py [--frames 200] [--every 40] [--out DIR] SCENE [SCENE ...]   (SCENE or A-B range)
 
-One short DuckStation session per scene, started from tmp\ref\states\field53_encounter.sav: the battle id 0x80075906 is poked to
+One short DuckStation session per scene, started from tmp\ref\states\field53_encounter.sav: the battle id (ps1_ram btl_id) is poked to
 0x200|scene, FRAMES frames are stepped, and every EVERY frames the registry is read straight from RAM.
 Output: DIR\<scene>.txt (text only): per sample "# frame F btl_frame B ovl O n N" then "type name addr" lines of the registry.
 No mash, no extra pokes: the registry of the untouched battle start (the stage = the area of the base state). Disc 1 scenes only.
@@ -14,10 +14,10 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from fx_ref import Registry  # noqa: E402
+from ps1_ram import RAM  # noqa: E402
 
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 ENC_STATE = os.path.join(ROOT, "tmp", "ref", "states", "field53_encounter.sav")
-BTL_ID = 0x80075906
 
 
 def sample(g, frame):
@@ -38,7 +38,7 @@ def one(scene, out, frames, every, state, disc=None, ds_dir=None, port=2345):
     lines = []
     kw = {"ds_dir": ds_dir} if ds_dir else {}
     with ps1ref.Session(disc=disc, state=state, port=port, **kw) as g:
-        g.poke(BTL_ID, 0x200 | scene, 2)
+        g.poke(RAM.btl_id, 0x200 | scene, 2)
         for f in range(1, frames + 1):
             g.step()
             if f % every == 0:

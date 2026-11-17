@@ -1,0 +1,233 @@
+# RDE menu / shop string keys (the JP overlay address) -> USA menu message: index in the 'mess' entry of
+# menu/menutest.prd and the line / tab segment holding the same English text (cc_text.py usa-menu).
+# match: exact = the whole message, segment = one line or tab field of it, contained = inside a longer segment.
+# columns: table	key	mess	segment	match
+menutest	0x801F2798	129	0	contained
+menutest	0x801F27A0			none
+menutest	0x801F27B0	131		exact
+menutest	0x801F27D0	134	0	segment
+menutest	0x801F27E4	11	1	segment
+menutest	0x801F27EC	11	2	segment
+menutest	0x801F29B0			none
+menutest	0x801F29C9			none
+menutest	0x801F29CA	158		exact
+menutest	0x801F29CB			none
+menutest	0x801F29D1			none
+menutest	0x801F29D2	156		exact
+menutest	0x801F29D3			none
+menutest	0x801F2A04	161		exact
+menutest	0x801F2A10	78		exact
+menutest	0x801F2A20	79		exact
+menutest	0x801F2A2C	80		exact
+menutest	0x801F2A3C	81		exact
+menutest	0x801F2A88			none
+menutest	0x801F2BD0	11	1	segment
+menutest	0x801F2BD8	11	2	segment
+menutest	0x801F2BE0			none
+menutest	0x801F2C18			none
+menutest	0x801F2CA4			none
+menutest	0x801F2CDC	40	1	contained
+menutest	0x801F2CF8	40	2	contained
+menutest	0x801F2D14			none
+menutest	0x801F2D30			none
+menutest	0x801F2E08			none
+menutest	0x801F2E78	46	0	contained
+menutest	0x801F2ECD			none
+menutest	0x801F2ECE			none
+menutest	0x801F2EE0			none
+menutest	0x801F2F1C	50	0	contained
+menutest	0x801F2F38	132		exact
+menutest	0x801F2F74	133		exact
+menutest	0x801F2FA4			none
+menutest	0x801F2FC0			none
+menutest	0x801F2FF0			none
+menutest	0x801F300C			none
+menutest	0x801F307C			none
+menutest	0x801F3098			none
+menutest	0x801F3115			none
+menutest	0x801F3116			none
+menutest	0x801F3149			none
+menutest	0x801F314A			none
+menutest	0x801F3161			none
+menutest	0x801F3162			none
+menutest	0x801F3181			none
+menutest	0x801F3182			none
+menutest	0x801F46F0			none
+menutest	0x801F470A	71	2	segment
+menutest	0x801F4758	72	0	segment
+menutest	0x801F4772	72	1	segment
+menutest	0x801F47C0	73	0	segment
+menutest	0x801F47DA	73	1	segment
+menutest	0x801F47F4	73	2	segment
+menutest	0x801F4828	74	0	segment
+menutest	0x801F4842	74	1	segment
+menutest	0x801F485C	74	2	segment
+menutest	0x801F4890	134	0	segment
+menutest	0x801F48C4			none
+menutest	0x801F48F8	75		exact
+menutest	0x801F492C	76		exact
+menutest	0x801F4960	75		exact
+menutest	0x801F4994	76		exact
+menutest	0x801F49C8	77	0	segment
+menutest	0x801F49E2	77	1	contained
+menutest	0x801F49FC	77	2	contained
+menutest	0x801F4A16	77	3	contained
+menutest	0x801F4A30	171		exact
+menutest	0x801F4A33	172		exact
+menutest	0x801F4A36	173		exact
+menutest	0x801F4A39	174		exact
+menutest	0x801F4A3C	175		exact
+menutest	0x801F4A3F	176		exact
+menutest	0x801F4A7C	83	0	segment
+menutest	0x801F4A8E	83	1	segment
+menutest	0x801F4AA0	83	2	segment
+menutest	0x801F4AB2	84	0	segment
+menutest	0x801F4AC4	84	1	segment
+menutest	0x801F4AD6	84	2	segment
+menutest	0x801F4AE8	85	0	segment
+menutest	0x801F4AFA	84	1	segment
+menutest	0x801F4B0C	85	2	segment
+menutest	0x801F4B1E	86	0	segment
+menutest	0x801F4B30	86	1	segment
+menutest	0x801F4B42	86	2	segment
+menutest	0x801F4B54	87	0	segment
+menutest	0x801F4B66	84	1	segment
+menutest	0x801F4B78	84	2	segment
+menutest	0x801F4B8A	89	0	segment
+menutest	0x801F4BAE	89	1	segment
+menutest	0x801F4BC0	89	2	segment
+menutest	0x801F4BD2	88	0	contained
+menutest	0x801F4BE4	88	1	segment
+menutest	0x801F4BF6	88	2	segment
+menutest	0x801F4C08			none
+menutest	0x801F4C2C	90	1	segment
+menutest	0x801F4C3E	90	2	segment
+menutest	0x801F4C86			none
+menutest	0x801F4C98	107		exact
+menutest	0x801F4CAA	127		exact
+menutest	0x801F4CBC	84	1	segment
+menutest	0x801F4CCE			none
+menutest	0x801F4CE0			none
+menutest	0x801F4CF2	108	0	contained
+menutest	0x801F4D04	110		exact
+menutest	0x801F4D16	111		exact
+menutest	0x801F4D28			none
+menutest	0x801F4D3A	117		exact
+menutest	0x801F4D4C			none
+menutest	0x801F4D5E			none
+menutest	0x801F4D70			none
+menutest	0x801F4D82			none
+menutest	0x801F4D94			none
+menutest	0x801F4DA6	152		exact
+menutest	0x801F4DB8	120		exact
+menutest	0x801F4DCA			none
+menutest	0x801F4DDC			none
+menutest	0x801F4DEE			none
+menutest	0x801F4E00			none
+menutest	0x801F4E24	10	0	contained
+menutest	0x801F4E36			none
+menutest	0x801F4E48			none
+menutest	0x801F4E6C			none
+menutest	0x801F4E7E			none
+menutest	0x801F4EA4	92	0	contained
+menutest	0x801F4EB8	93	0	contained
+menutest	0x801F4ECC	94	0	contained
+menutest	0x801F4EE0	95	0	contained
+menutest	0x801F4EF4	96	0	contained
+menutest	0x801F4F08			none
+menutest	0x801F4F1C	98	0	contained
+menutest	0x801F4F30	99	0	contained
+menutest	0x801F4F44	100	0	contained
+menutest	0x801F4F58	101	0	contained
+menutest	0x801F4F6C			none
+menutest	0x801F4F80	103	0	contained
+menutest	0x801F4F94	104	0	contained
+menutest	0x801F4FA8	105	0	contained
+menutest	0x801F4FBC	106	0	contained
+menutest	0x801E8E18	91		exact
+shopmenu	0x801DF40C	148		exact
+shopmenu	0x801DF424	0		exact
+shopmenu	0x801DF438			none
+shopmenu	0x801DF470	6		exact
+shopmenu	0x801DF4A4	7		exact
+shopmenu	0x801DF4D5	1		exact
+shopmenu	0x801DF4D6	3		exact
+shopmenu	0x801DF4E5	2		exact
+shopmenu	0x801DF4E6	4		exact
+shopmenu	0x801DF538	10	1	contained
+shopmenu	0x801DF540	5	1	contained
+shopmenu	0x801DF54C	143		exact
+shopmenu	0x801DF558	154		exact
+shopmenu	0x801DF560	151		exact
+shopmenu	0x801DF568			none
+shopmenu	0x801DF581			none
+shopmenu	0x801DF582	158		exact
+shopmenu	0x801DF583			none
+shopmenu	0x801DF589			none
+shopmenu	0x801DF58A	156		exact
+shopmenu	0x801DF58B			none
+shopmenu	0x801DF590	152		exact
+shopmenu	0x801DF5A9			none
+shopmenu	0x801DF5B5			none
+shopmenu	0x801DF5C1			none
+shopmenu	0x801DF5CD			none
+shopmenu	0x801DF5D9			none
+shopmenu	0x801DF5E5			none
+shopmenu	0x801DF5F8			none
+shopmenu	0x801DF668			none
+shopmenu	0x801DF688	153		exact
+shopmenu	0x801DF6A0	10		exact
+shopmenu	0x801DF6DC	8		exact
+shopmenu	0x801DF6EC	9		exact
+shopmenu	0x801DF6F8	11	0	segment
+shopmenu	0x801DF72D	138		exact
+shopmenu	0x801DF734	154		exact
+shopmenu	0x801DF73C	136		exact
+shopmenu	0x801DF744	7		exact
+shopmenu	0x801DF760			none
+shopmenu	0x801DF774			none
+shopmenu	0x801DF77D			none
+shopmenu	0x801DF77E			none
+shopmenu	0x801DF77F			none
+shopmenu	0x801DF780			none
+shopmenu	0x801DF781			none
+shopmenu	0x801DF782			none
+shopmenu	0x801DF784	135		exact
+shopmenu	0x801DF7B4	11	1	segment
+shopmenu	0x801DF7BC	11	2	segment
+shopmenu	0x801DF814	13		exact
+shopmenu	0x801DF834	20	0	segment
+shopmenu	0x801DF835	14		exact
+shopmenu	0x801DF845	15		exact
+shopmenu	0x801DF846	26		exact
+shopmenu	0x801DF847	27		exact
+shopmenu	0x801DF848	28		exact
+shopmenu	0x801DF855	16		exact
+shopmenu	0x801DF856	33		exact
+shopmenu	0x801DF857	34		exact
+shopmenu	0x801DF858	35		exact
+shopmenu	0x801DF859	4		exact
+shopmenu	0x801DF892	17		exact
+shopmenu	0x801DF893	18		exact
+shopmenu	0x801DF894	19		exact
+shopmenu	0x801DF8A0	11	1	segment
+shopmenu	0x801DF8AC	11	2	segment
+shopmenu	0x801DF8FD	21		exact
+shopmenu	0x801DF8FE	22		exact
+shopmenu	0x801DF8FF	23		exact
+shopmenu	0x801DF914	24		exact
+shopmenu	0x801DF92D	25		exact
+shopmenu	0x801DF92E	31		exact
+shopmenu	0x801DF95C	29	0	segment
+shopmenu	0x801DF985	30		exact
+shopmenu	0x801DF99C	32		exact
+shopmenu	0x801DF9E5	37		exact
+shopmenu	0x801DFAC8	146		exact
+shopmenu	0x801DFAD0	10	1	contained
+shopmenu	0x801DFAD8	142		exact
+shopmenu	0x801DFAE4	143		exact
+shopmenu	0x801DFAF0	144		exact
+shopmenu	0x801DFAF8			none
+shopmenu	0x801DFB0C			none
+shopmenu	0x801DFB28	154		exact
+shopmenu	0x801DFB30	151		exact

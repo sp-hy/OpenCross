@@ -29,6 +29,9 @@ plain stored ZIP with the same members, which OpenCross and ps1 read like RDE's 
   --flags N            only the 2 summary flag bits (raw head 0x42; 2 = a New Game+ game, 3 = cleared)
   --mcd PATH           also write the forged memcard1.mcr as a raw 128 KiB memory card image (stock DuckStation .mcd)
   --mcd-only           with --mcd: skip writing the output save.dat
+  --region usa         make the forged slot a USA-build save: card file BASLUSP01041USCHROnn, the USA title text, the 44 name
+                       records and the preview leader name in the USA game font (the default English names). The block layout
+                       is otherwise the same in both builds; the other slots of the card are left as they are
 
   rowlen CHAR ROW      (own sub-command) print the number of cells of that grid row. Tech cells (Pilfer = 163 ...) are plain
                        element ids in the save record, so --grid places techs like elements.
@@ -49,6 +52,48 @@ REC_SIZE = 0xCC
 NAME_OFF = 0xD80C
 UNLOCK_OFF = 0xDAD8
 QTY_OFF = 0xDD98
+TITLE_OFF, TITLE_END = 0x04, 0x24
+PREVIEW_NAME_OFF = 0x28
+
+# The USA build's default character names (what its new game puts in the 44 name records) and its title text.
+US_NAMES = ("Serge Kid Guile Norris Nikki Viper Riddel Karsh Zoah Marcy Korcha Luccia Poshul Razzly Zappa Orcha Radius "
+            "Fargo Macha Glenn Leena Miki Harle Janice Draggy Starky Sprigg Mojo Turnip NeoFio Greco Skelly Funguy Irenes "
+            "Mel Leah Van Sneff Steena Doc Grobyc Pierre Orlha Pip").split()
+US_TITLE = "ＣＨＲＯＮＯ　ＣＲＯＳＳ　"
+
+
+def us_font(text):
+    """Text in the USA game font: space 0x20, digits 0x28.., A-Z 0x32.., a-z 0x4C.."""
+    out = bytearray()
+    for ch in text:
+        if ch == " ":
+            out.append(0x20)
+        elif ch.isdigit():
+            out.append(0x28 + int(ch))
+        elif "A" <= ch <= "Z":
+            out.append(0x32 + ord(ch) - ord("A"))
+        elif "a" <= ch <= "z":
+            out.append(0x4C + ord(ch) - ord("a"))
+        else:
+            raise ValueError("no USA font code for %r" % ch)
+    return bytes(out)
+
+
+def make_usa(blk, img, slot):
+    """Rewrite a block (raw head `blk`, image `img`, both in place) as the USA build writes it for file `slot`."""
+    title = (US_TITLE + "".join(chr(0xFF10 + int(d)) for d in "%02d" % (slot + 1))).encode("shift_jis")
+    blk[TITLE_OFF:TITLE_END] = title.ljust(TITLE_END - TITLE_OFF, b"\0")
+    for i, name in enumerate(US_NAMES):
+        img[NAME_OFF + 0x10 * i:NAME_OFF + 0x10 * (i + 1)] = us_font(name).ljust(0x10, b"\0")
+    blk[PREVIEW_NAME_OFF:PREVIEW_NAME_OFF + 12] = img[NAME_OFF:NAME_OFF + 12]
+
+
+def us_dir_frame(frame, slot):
+    """Directory frame renamed to the USA file name of `slot`, XOR byte recomputed."""
+    out = bytearray(frame)
+    out[0x0A:0x1E] = ("BA%sUSCHRO%02d" % (c.US_PRODUCT, slot)).encode("ascii")
+    out[0x7F] = c._xor(out[:0x7F])
+    return bytes(out)
 
 
 def level_masks(char_id):
@@ -92,7 +137,7 @@ def main(argv):
     src, dst = argv[0], argv[1]
     args = argv[2:]
     opts = {"slot": None, "room": None, "entrance": None, "party": None, "recruit": [], "char": [], "grid": [],
-            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "item": [], "element": [], "flags": None, "mcd": None, "mcd_only": False}
+            "unlock": [], "var": [], "set_bit": [], "clear_bit": [], "stars": None, "scenario": None, "key_items": None, "gold": None, "item": [], "element": [], "flags": None, "mcd": None, "mcd_only": False, "region": "japan"}
     i = 0
     while i < len(args):
         a = args[i]
@@ -146,6 +191,10 @@ def main(argv):
             opts["mcd_only"] = True
             i += 1
             continue
+        elif a == "--region":
+            if v not in ("japan", "usa"):
+                raise SystemExit("--region is japan or usa")
+            opts["region"] = v
         else:
             raise SystemExit("unknown option %s" % a)
         i += 2
@@ -292,10 +341,15 @@ def main(argv):
         img[0xD73C + k] = qty & 0xFF
         log.append("element %d x%d (stock slot %d)" % (eid, qty, k))
 
+    if opts["region"] == "usa":
+        make_usa(blk, img, slot)
+        log.append("USA-build save")
     new_blk = c.pack_block(bytes(blk), bytes(img))
     data = bytearray(card_member.data)
     base = c.BLOCK * entry.idx
     data[base:base + c.BLOCK] = new_blk
+    if opts["region"] == "usa":
+        data[0x80 * entry.idx:0x80 * (entry.idx + 1)] = us_dir_frame(data[0x80 * entry.idx:0x80 * (entry.idx + 1)], slot)
     card_member.data = bytes(data)
     if opts["mcd_only"] and not opts["mcd"]:
         raise SystemExit("--mcd-only needs --mcd PATH")

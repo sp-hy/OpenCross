@@ -1,5 +1,5 @@
 #pragma once
-// Where things live: the exe, the RDE install (data\cdrom.dat), and the RDE save folder.
+// Where things live: the exe, the RDE install (data\cdrom.dat), whether the game runs from the PS1 discs instead, and the save folder.
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -17,6 +17,13 @@ std::filesystem::path local_data_dir();
 
 // Config value if it is a valid install, else the exe dir, else its parents. Empty path if nothing is found.
 std::filesystem::path find_game_dir(std::string_view configured);
+
+// Disc mode: the game data comes from the player's PS1 discs instead of an RDE install (set once at boot). The settings that need RDE's
+// data (art mode, music source, language, HD models in the field, portraits) are fixed in it, and the settings window greys them out.
+void set_disc_mode(bool on);
+bool disc_mode();
+// The save folder of disc mode without [Paths] SaveDir: %LOCALAPPDATA%\OpenCross\saves\<region> (local_data_dir), region "jp" or "usa".
+std::filesystem::path disc_save_dir(std::string_view region);
 
 // The save folder. RDE uses <Documents>\My Games\CHRONO CROSS  THE RADICAL DREAMERS
 // EDITION\Steam\<SteamID64>\ of the logged-in Steam user and creates it at boot. Order here:

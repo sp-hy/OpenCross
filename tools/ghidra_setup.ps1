@@ -17,6 +17,11 @@
                    ps1_menu.txt), then ExportAll.java writes <OutDir>\ps1\<overlay>\. With -Overlays the main
                    exe is not re-imported unless -IncludeMain is given.
   -IncludeMain     Import the main exe as well when -Overlays is used.
+  -Region <name>   japan (default) or usa. usa takes the symbol lists and overlays.csv from
+                   tools\ghidra\symbols\usa\, expects -Ps1Exe to be the USA executable (SLUS_010.41) and the
+                   overlays in -OverlayDir, and exports to <OutDir>\ps1_usa.
+  -OverlayDir <dir> Folder of overlay files (<name>.prg, as read from the disc) to import instead of the
+                   cdrom.dat archive; required for -Region usa.
   -Symbols <path>  "name = 0xADDR;" symbol list applied to whichever target is imported (ApplySymbols.java).
                    Default: tools\ghidra\symbols\ps1_main.txt for -Ps1Exe and
                    tools\ghidra\symbols\chronocross_1010.txt for -GameDir, when those files exist.
@@ -39,6 +44,8 @@ param(
     [string]$Ps1Exe,
     [string[]]$Overlays,
     [switch]$IncludeMain,
+    [ValidateSet('japan', 'usa')][string]$Region = 'japan',
+    [string]$OverlayDir,
     [string]$Symbols,
     [string]$OutDir,
     [switch]$SetupOnly,
@@ -117,6 +124,11 @@ if (-not $GameDir -and -not $Ps1Exe) { throw 'Give -GameDir and/or -Ps1Exe (or -
 
 # Default symbol lists shipped with the project; -Symbols overrides them for every target.
 $symbolDir = Join-Path $ghidraTools 'symbols'
+$ps1Name = 'ps1'
+if ($Region -eq 'usa') {
+    $symbolDir = Join-Path $symbolDir 'usa'
+    $ps1Name = 'ps1_usa'
+}
 function Resolve-Symbols([string]$defaultName) {
     if ($Symbols) { return $Symbols }
     $p = Join-Path $symbolDir $defaultName
@@ -192,6 +204,7 @@ if ($importMain) {
     if (-not (Test-Path -LiteralPath $Ps1Exe)) { throw "Not found: $Ps1Exe" }
     $bytes = $null
     if (Test-ZipFile $Ps1Exe) {
+        if ($Region -eq 'usa') { throw 'cdrom.dat holds the Japanese build; give the USA executable (SLUS_010.41) in -Ps1Exe.' }
         $bytes = Read-ZipEntry $Ps1Exe 'prog/slps_023.64'
     } else {
         $bytes = [IO.File]::ReadAllBytes($Ps1Exe)
@@ -210,7 +223,7 @@ if ($importMain) {
     [IO.File]::WriteAllBytes($bin, $bytes)
     Write-Host ("PS1 image: {0} bytes, entry PC {1}" -f $bytes.Length, $(if ($entryPc) { '0x{0:X8}' -f $entryPc } else { 'unknown' }))
 
-    $out = Export-Staged 'ps1'
+    $out = Export-Staged $ps1Name
     $postArgs = @()
     if ($entryPc) { $postArgs += @('-postScript', 'Ps1Seed.java', ('0x{0:X8}' -f $entryPc)) }
     $ps1Symbols = Resolve-Symbols 'ps1_main.txt'
@@ -220,16 +233,21 @@ if ($importMain) {
         $postArgs += @('-postScript', 'ApplySymbols.java', $symCopy)
     }
     $postArgs += @('-postScript', 'ExportAll.java', $out)
-    Invoke-Headless 'ps1' (@('-import', $bin, '-overwrite',
+    Invoke-Headless $ps1Name (@('-import', $bin, '-overwrite',
             '-loader', 'BinaryLoader', '-processor', 'MIPS:LE:32:default',
             '-loader-baseAddr', '0x80010000', '-scriptPath', $scripts) + $postArgs)
-    Publish-Export $out 'ps1'
+    Publish-Export $out $ps1Name
 }
 
 if ($Overlays) {
-    if (-not $Ps1Exe) { throw '-Overlays needs -Ps1Exe <cdrom.dat>.' }
-    if (-not (Test-Path -LiteralPath $Ps1Exe)) { throw "Not found: $Ps1Exe" }
-    if (-not (Test-ZipFile $Ps1Exe)) { throw '-Overlays needs the game''s cdrom.dat archive, not a bare executable.' }
+    if ($OverlayDir) {
+        if (-not (Test-Path -LiteralPath $OverlayDir -PathType Container)) { throw "Not found: $OverlayDir" }
+    } else {
+        if ($Region -eq 'usa') { throw '-Region usa -Overlays needs -OverlayDir with the overlay files read from the USA disc.' }
+        if (-not $Ps1Exe) { throw '-Overlays needs -Ps1Exe <cdrom.dat> or -OverlayDir.' }
+        if (-not (Test-Path -LiteralPath $Ps1Exe)) { throw "Not found: $Ps1Exe" }
+        if (-not (Test-ZipFile $Ps1Exe)) { throw '-Overlays needs the game''s cdrom.dat archive (or -OverlayDir), not a bare executable.' }
+    }
     $catalogue = Import-Csv -LiteralPath (Join-Path $symbolDir 'overlays.csv') | Where-Object { $_.overlay -ne 'main' }
     $wanted = @($Overlays | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
     if ($wanted -contains 'all') {
@@ -245,11 +263,15 @@ if ($Overlays) {
     New-Item -ItemType Directory -Force -Path $ovlDir | Out-Null
     foreach ($ov in $chosen) {
         $name = $ov.overlay
-        $bytes = Read-ZipEntry $Ps1Exe $ov.prg_file
+        if ($OverlayDir) {
+            $bytes = [IO.File]::ReadAllBytes((Join-Path $OverlayDir (Split-Path $ov.prg_file -Leaf)))
+        } else {
+            $bytes = Read-ZipEntry $Ps1Exe $ov.prg_file
+        }
         $bin = Join-Path $ovlDir "$name.bin"
         [IO.File]::WriteAllBytes($bin, $bytes)
         Write-Host ("Overlay {0}: {1} bytes at {2}" -f $name, $bytes.Length, $ov.load_base)
-        $out = Export-Staged "ps1_$name"
+        $out = Export-Staged "${ps1Name}_$name"
         $postArgs = @('-postScript', 'Ps1Seed.java')
         $symFile = $null
         if ($Symbols) { $symFile = $Symbols }
@@ -267,10 +289,10 @@ if ($Overlays) {
             $postArgs += @('-postScript', 'ApplySymbols.java', $symCopy)
         }
         $postArgs += @('-postScript', 'ExportAll.java', $out)
-        Invoke-Headless 'ps1' (@('-import', $bin, '-overwrite',
+        Invoke-Headless $ps1Name (@('-import', $bin, '-overwrite',
                 '-loader', 'BinaryLoader', '-processor', 'MIPS:LE:32:default',
                 '-loader-baseAddr', $ov.load_base, '-scriptPath', $scripts) + $postArgs)
-        Publish-Export $out "ps1\$name"
+        Publish-Export $out "$ps1Name\$name"
     }
 }
 

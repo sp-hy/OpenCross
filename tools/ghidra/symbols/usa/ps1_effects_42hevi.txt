@@ -1,0 +1,11 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay 42hevi.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_42hevi_bake_ground = 0x801C610C;  # function: Ground bake for the effect
+fx_42hevi_hole_callback = 0x801C7180;  # function: Hole particle callback that replaces its draw
+fx_42hevi_update_yuka = 0x801C734C;  # function: Update for the yuka ground object
+fx_42hevi_init = 0x801C73AC;  # function: Init for Gravitonne
+fx_42hevi_frame = 0x801C7500;  # function: Frame update
+fx_42hevi_task_op_103_shadow = 0x801C79FC;  # function: Op 0x103 task: sets the shadow bit on first fall tick
+fx_42hevi_suri_vertex_ptr = 0x801C7DE4;  # data: Pointer to the suri vertex buffer

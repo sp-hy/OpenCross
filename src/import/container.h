@@ -22,6 +22,13 @@ struct Cpt {
   bool has_eof_pointer = false;
 };
 
+// A file read from a PS1 disc is up to kFilePadding bytes longer than the file itself: the disc's file table gives sizes rounded
+// up to 8 bytes. A block whose own header gives its length and that runs to the end of the buffer (the last entry of a cpt without
+// EOF word, the last section of a file) ends at `end` when that is the buffer's `size` or at most kFilePadding bytes before it. A
+// shorter buffer is truncated data.
+inline constexpr u64 kFilePadding = 7;
+constexpr bool ends_at(u64 end, u64 size) { return end <= size && size - end <= kFilePadding; }
+
 // Parses a cpt lump. Returns std::nullopt if the pointer table is inconsistent with the buffer size.
 std::optional<Cpt> parse_cpt(ByteSpan data);
 

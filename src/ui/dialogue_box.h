@@ -213,6 +213,8 @@ class DialogueBox {
   float wrap_width_ = 0;
   // JP text: no word wrap, own choice cursor offsets.
   bool jp_ = false;
+  // The message face is the PS1 font (disc mode): PS1 pen advance and line height, no word wrap.
+  bool ps1_ = false;
   float scale_ = 1;
   // Text area in canvas units (largest page).
   float text_w_ = 0, text_h_ = 0;

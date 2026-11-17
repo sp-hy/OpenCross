@@ -1,0 +1,33 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay lasdes2.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_lasdes2_dispatch = 0x801C5E04;  # function: overlay entry: init / frame / release and the private ops 0x100-0x10F, the rest to the stock handler
+fx_lasdes2_task_song_wait = 0x801C63B0;  # function: task that frees itself once the song change has finished
+fx_lasdes2_task_tint = 0x801C63E4;  # function: screen tint task, lerps the tint colour from the start to the target colour over its length
+fx_lasdes2_tint_task_new = 0x801C6518;  # function: creates a tint task with its target colour and length
+fx_lasdes2_tint_start = 0x801C6580;  # function: op 0x10D: drops running tint tasks and starts a new one unless colour and mode are unchanged
+fx_lasdes2_task_clut_fade = 0x801C66C4;  # function: env CLUT row fade task (the boss death fade code)
+fx_lasdes2_task_cross_in = 0x801C6818;  # function: op 0x104 task: the second camera's view brightness 0 -> 0x80
+fx_lasdes2_task_cross_out = 0x801C6898;  # function: op 0x105 task: the second view's brightness 0x80 -> 0, then its camera stops
+fx_lasdes2_task_cross_fill = 0x801C6920;  # function: op 0x106 task: the fill 0 -> 0xFF, then the head camera stops
+fx_lasdes2_task_dissolve = 0x801C69C0;  # function: op 0x100 task: poses target 0 and runs the dissolve draw with the growing radius
+fx_lasdes2_init = 0x801C6B0C;  # function: init: units drawn by the overlay, kie0 / kie1 found, CLUT row saved, the private ordering tables allocated
+fx_lasdes2_models_pose_draw = 0x801C6C30;  # function: poses and draws every visible unit not flagged 0x800, and the pseudo-actor
+fx_lasdes2_units_weapons = 0x801C6DF8;  # function: draws the weapons of the units whose box is on screen
+fx_lasdes2_count_list = 0x801C72A8;  # function: length of a camera key list (count word or linked list)
+fx_lasdes2_camera_matrix = 0x801C72DC;  # function: builds the camera matrix from the eye / target / roll globals
+fx_lasdes2_camera_apply = 0x801C7408;  # function: steps the second camera's tracks and writes its pose into the camera globals
+fx_lasdes2_frame_copy = 0x801C78BC;  # function: files the copy of the displayed picture to VRAM (0x1C0, 0x100) and the clear tile
+fx_lasdes2_copy_quads = 0x801C79EC;  # function: five 64-wide additive quads of the VRAM copy at the second view's brightness
+fx_lasdes2_frame = 0x801C7C64;  # function: per-frame draw: the plain pass, or the two camera passes of a cross-fade
+fx_lasdes2_release = 0x801C8128;  # function: release: units back to the stock draw, buffers freed, pause allowed again
+fx_lasdes2_particle_draw = 0x801C81BC;  # function: replaced particle callback, the face drawn as ABR 1 own CLUT plus ABR 2 white CLUT
+fx_lasdes2_dissolve_draw = 0x801C8708;  # function: the dissolve draw of target 0 with kie0 / kie1 fired at partial faces
+fx_lasdes2_cam = 0x801CA668;  # data: the second camera task of a cross-fade (0 = none)
+fx_lasdes2_fill = 0x801CA66C;  # data: the cross-fade fill subtracted from the first view, 0..0xFF
+fx_lasdes2_alpha = 0x801CA670;  # data: the second view's brightness, 0..0x80
+fx_lasdes2_eye_rects = 0x801CA674;  # data: seven VRAM rectangles of the eye frames op 0x10C copies to (0x3C4, 0x32)
+fx_lasdes2_tint_rgb = 0x801CA8DC;  # data: the screen tint colour
+fx_lasdes2_tint_mode = 0x801CA8E0;  # data: the screen tint mode (0 opaque, 1..4 ABR + 1)
+fx_lasdes2_ot_buffer = 0x801CA8E4;  # data: the two private ordering tables of the second camera's pass

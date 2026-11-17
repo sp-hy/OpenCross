@@ -146,6 +146,20 @@ bool Config::load(const std::filesystem::path& file) {
   game_dir = ini.get("Paths", "GameDir", game_dir);
   save_dir = ini.get("Paths", "SaveDir", save_dir);
   save_file = ini.get("Paths", "SaveFile", save_file);
+  {
+    const std::string stored = ini.get("Paths", "Source");
+    for (size_t i = 0; i < std::size(kDataSourceNames); ++i)
+      if (stored == kDataSourceNames[i]) source = static_cast<DataSource>(i);
+  }
+  disc1 = ini.get("Paths", "Disc1", disc1);
+  disc2 = ini.get("Paths", "Disc2", disc2);
+  disc_dir = ini.get("Paths", "DiscDir", disc_dir);
+  {
+    const std::string stored = ini.get("Disc", "Region", disc_region);
+    disc_region.clear();
+    for (const char* name : kDiscRegionNames)
+      if (stored == name) disc_region = stored;
+  }
   width = std::max(320, parse_int(ini.get("Video", "Width"), width));
   height = std::max(240, parse_int(ini.get("Video", "Height"), height));
   {
@@ -399,6 +413,10 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Paths", "GameDir", game_dir);
   ini.set("Paths", "SaveDir", save_dir);
   if (save_file != "save.dat") ini.set("Paths", "SaveFile", save_file);
+  ini.set("Paths", "Source", kDataSourceNames[static_cast<size_t>(source)]);
+  ini.set("Paths", "Disc1", disc1);
+  ini.set("Paths", "Disc2", disc2);
+  ini.set("Paths", "DiscDir", disc_dir);
   ini.set("Video", "Aspect", aspect);
   ini.set("Video", "Width", std::to_string(width));
   ini.set("Video", "Height", std::to_string(height));
@@ -546,6 +564,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Debug", "ScriptSpeed", std::to_string(debug_script_speed));
   ini.set("Debug", "Record", debug_record);
   ini.set("Debug", "Replay", debug_replay);
+  ini.set("Disc", "Region", disc_region);
   std::ofstream out(file, std::ios::binary | std::ios::trunc);
   if (!out) return false;
   out << "; OpenCross settings. Leave GameDir/SaveDir empty to auto-discover.\n\n" << ini.serialize();

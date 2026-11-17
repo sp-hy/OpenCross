@@ -28,8 +28,12 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `GameDir` | empty | folder containing `data\cdrom.dat` | Game install. Used only if it holds `data\cdrom.dat`; otherwise (and when empty) the exe folder and up to 12 parent folders are searched. |
-| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe` (of the `--profile` folder in such a run), except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. |
+| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe` (of the `--profile` folder in such a run), except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. Playing from the PS1 discs, empty = `%LOCALAPPDATA%\OpenCross\saves\jp` or `\usa` by the discs' build. |
 | `SaveFile` | `save.dat` | file name | Save file name inside `SaveDir`. Written only when it differs from `save.dat`. Automated runs point it at a scratch copy. |
+| `Source` | `auto` | `auto rde disc` | Where the game data comes from. `auto`: the RDE install (`GameDir` and its search); else the images `Disc1` / `Disc2` name and those in `DiscDir`; else the disc images next to `opencross.exe`; else the discs in the optical drives; the first of these that has a Chrono Cross disc is used, and with none the "no game files found" screen shows. `rde` searches only the install, `disc` skips it (tests use `disc`). Images are recognised by their content, never by their name. An unknown value keeps `auto`. Playing from the discs fixes the art (classic), `[Audio] BgmSource` (`original`), `[Video] Ps1ResUi` (on), `[Game] Language` (the discs' language), `[Video] LegacyFieldModels` (on) and `[Game] Portraits` (`1999`) for the run; the ini keeps the player's values. |
+| `Disc1` | empty | file | The player's image of PS1 disc 1 (`.cue`, `.chd`, `.iso`, an `.m3u` or multi-disc `.pbp` naming both, ...). Empty = not set. A file that holds disc 2 serves as disc 2. The not-found screen's Browse... writes it. |
+| `Disc2` | empty | file | The image of disc 2, as `Disc1`. |
+| `DiscDir` | empty | folder | A folder whose image files (not its subfolders) are searched for the discs. Empty = not set. |
 
 ### 2.2 `[Video]`
 
@@ -253,6 +257,12 @@ All off by default; they never lock saving. The first three also toggle from the
 | `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |
 | `NoCraftCost` | 0 | The forge builds without needing materials or gold and takes neither. |
 
+### 2.10 `[Disc]`
+
+| Key | Default | Values / clamp | Meaning |
+|---|---|---|---|
+| `Region` | empty | empty, `jp`, `usa` | The PS1 build played when disc images of both regions are found; empty = not chosen yet: the version picker asks at boot and writes the answer here. Any other value reads as empty. |
+
 ## 3. Player and first-launch defaults
 
 **The player's ini.** The default `opencross.ini` and a `--profile` one (not a `--config` ini, and also as read by the dev tools that use the player's ini) read a missing key of the following with these defaults instead of section 2's, so the faithful member defaults stay what a route or test ini reads:
@@ -275,7 +285,7 @@ A player's ini written by an older build already holds the four `[Enhancements]`
 | `[Video] Widescreen` | 1 | 0 |
 | `[Game] Language` | from the OS | `en` |
 
-The language comes from the OS's preferred locales in order: the first of `en fr it de es` maps to itself, `ja` to `jp`; region suffixes (`en-US`, `pt_BR`) are ignored; with nothing supported, `en`. Everything else is the default of section 2. The `[Paths]` keys are written empty, so game and save folders are discovered on every run.
+The language comes from the OS's preferred locales in order: the first of `en fr it de es` maps to itself, `ja` to `jp`; region suffixes (`en-US`, `pt_BR`) are ignored; with nothing supported, `en`. Everything else is the default of section 2. The `[Paths]` keys are written empty (`Source` as `auto`), so game and save folders are discovered on every run.
 
 ## 4. Live versus restart
 
@@ -299,7 +309,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Achievements` | Read every frame: off stops the set at once and drops the waiting popups. |
 | `HideAchievementNotices` | Read every frame: on drops the waiting popups at once. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
-| `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
+| `[Paths]`, `[Disc]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]`, `[Disc]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
 
 Editing the file by hand while the game runs has no effect: the file is read once at boot and overwritten by the next save.
 

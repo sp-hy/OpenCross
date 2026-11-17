@@ -200,7 +200,9 @@ def read_zip(path_or_bytes, password=PASSWORD):
 # --------------------------------------------------------------------------
 
 BLOCK = 0x2000
-CC_PRODUCT = "SLPSP02364"            # JP product code used by RDE (also SLUSP01041 for the US disc)
+# Product codes in the card file names: Japanese build (RDE) BISLPSP02364CHRONOnn, USA build BASLUSP01041USCHROnn.
+CC_PRODUCT = "SLPSP02364"
+US_PRODUCT = "SLUSP01041"
 
 
 class DirEntry:
@@ -246,10 +248,10 @@ class Card:
         return out
 
     def cc_slots(self):
-        """{slot_number: (dir entry, block bytes)} for CHRONOnn saves (first block of each file)."""
+        """{slot_number: (dir entry, block bytes)} for CHRONOnn (Japanese) and USCHROnn (USA) saves (first block of each file)."""
         res = {}
         for e in self.dir:
-            if e.first and "CHRONO" in e.name and (CC_PRODUCT in e.name or "SLUSP01041" in e.name):
+            if e.first and ((CC_PRODUCT in e.name and "CHRONO" in e.name) or (US_PRODUCT in e.name and "USCHRO" in e.name)):
                 try:
                     n = int(e.name[-2:])
                 except ValueError:
