@@ -73,7 +73,7 @@ bool HcaStream::open(ByteSpan sab_bytes) {
 
 // The samples start right after the material header and its extradata; the stream size bounds them, the file end too.
 bool HcaStream::open_pcm(const SabMaterial& material) {
-  if ((material.channels != 1 && material.channels != 2) || material.sample_rate != 48000) return false;
+  if ((material.channels != 1 && material.channels != 2) || material.sample_rate < 8000 || material.sample_rate > 192000) return false;
   const u32 frame_bytes = 2u * material.channels;
   const size_t available = std::min<size_t>(material.stream_size, data_.size() - material.data_offset);
   pcm_channels_ = material.channels;

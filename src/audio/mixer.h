@@ -15,6 +15,7 @@
 
 #include "audio/akao_player.h"
 #include "audio/hca_stream.h"
+#include "audio/stream_resampler.h"
 #include "core/types.h"
 
 struct SDL_AudioStream;
@@ -139,12 +140,13 @@ class Mixer {
   // Seconds since the song start, unwrapped across loops.
   double bgm_seconds() const { return bgm_secs_.load(std::memory_order_relaxed); }
 
-  // Status (audio thread updates; relaxed reads). current_song: -1 = none; bgm_position in samples. A one-shot song that ran out stays
+  // Status (audio thread updates; relaxed reads). current_song: -1 = none; bgm_position_seconds: the remastered stream's position in
+  // the song (wrapped at the loop), in seconds of the stream's own rate. A one-shot song that ran out stays
   // current until a stop or another song (a request for it changes nothing); sounding() is false once it has ended.
   int current_song() const { return song_.load(std::memory_order_relaxed); }
   bool playing() const { return song_.load(std::memory_order_relaxed) >= 0; }
   bool sounding() const { return sounding_.load(std::memory_order_relaxed); }
-  u32 bgm_position() const { return bgm_pos_.load(std::memory_order_relaxed); }
+  double bgm_position_seconds() const { return bgm_pos_secs_.load(std::memory_order_relaxed); }
   bool device_open() const { return stream_ != nullptr; }
   // The queue is drained (an output device or a capture runs), so the status above follows the commands.
   bool live() const { return stream_ != nullptr || capture_ != nullptr; }
@@ -219,7 +221,8 @@ class Mixer {
   std::atomic<bool> hold_{false};
   float level_ = 0, level_target_ = 0, level_step_ = 0;  // per-frame linear ramp
   u32 fade_left_ = 0;
-  std::vector<s16> scratch_;
+  StreamResampler bgm_resampler_;
+  std::vector<float> bgm_pcm_;
   std::atomic<int> song_{-1};
   std::atomic<bool> sounding_{false};
   std::atomic<bool> mono_{false};
@@ -229,7 +232,7 @@ class Mixer {
   std::FILE* capture_ = nullptr;
   u64 capture_frames_ = 0;
   double capture_carry_ = 0;
-  std::atomic<u32> bgm_pos_{0};
+  std::atomic<double> bgm_pos_secs_{0};
   std::atomic<float> level_view_{0};
   // Published by the audio thread for the live source switch.
   std::atomic<bool> bgm_akao_{false};
@@ -237,7 +240,7 @@ class Mixer {
   std::atomic<float> level_target_view_{0};
   std::atomic<u32> fade_left_view_{0};
   double bgm_base_ = 0;    // HCA: song seconds at bgm_frames_ == 0 (the start / seek position)
-  u64 bgm_frames_ = 0;     // HCA: frames played since bgm_base_
+  u64 bgm_frames_ = 0;     // HCA: output frames played since bgm_base_
 
   SDL_AudioStream* stream_ = nullptr;
   static void sdl_callback(void* user, SDL_AudioStream* stream, int additional, int total);

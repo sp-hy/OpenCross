@@ -74,6 +74,7 @@ Source: `tools/ocaudio.cpp`. `<song>` is a song id or `BGMnnn`.
 |---|---|---|
 | `decode` | `<song \| file.sab> <out.wav> [seconds]` | Remastered track to WAV; no seconds = whole track, no looping. A path ending in `.sab` decodes that file from disk (a replacement track, HCA or 16-bit PCM) instead of the game's. |
 | `play` | `<song> [seconds]` | Plays the remastered track (default 10 s). |
+| `mix` | `<song \| file.sab> <out.wav> [seconds]` | Renders the remastered track (or a `.sab` from disk) through the mixer into a 48 kHz WAV (default 20 s), with the rate conversion a track at another rate gets in the game; prints the stream rate and the stream position reached. |
 | `render-seq` | `<music NNN> <out.wav> [seconds] [rate] [keys.txt]` | Original AKAO music through the engine's sequencer (default 20 s, 44100 Hz), with the sound effects its FE 0B ops request mixed in; prints the header gate mask. `keys.txt` lists every voice key-on / key-off (`update KON|KOFF channel voice`, update = 240 Hz sequencer update). |
 | `play-seq` | `<music NNN> [seconds]` | Plays the same live (default 20 s). |
 | `render-sfx` | `<sfx id \| r<frame>> <out.wav> [seconds] [rate] [room]` | Renders one sound effect (default 3 s, 44100 Hz = SPU rate, 48000 = mixer). `room` selects the room bank overlaying instruments 208..223; `battle:<room>` = that room re-entered after a battle. `r<frame>` plays the room's yos1 frame instead of an effect00 id. |
@@ -286,7 +287,7 @@ Source: `tools/ocguide.cpp`. Reads GameFAQs pages the way the guide overlay does
 | `ocbattle fx-audit` | `battle_effects_audit.csv` in the working folder (or `--csv`), optional `--md`. |
 | `ocbattleview` | `ocbattleview.log`, `battle_shot.png`, `shot_NNNNNN.png` next to the exe or in `--shotdir`. |
 | `ocflow`, `ocmenudemo`, `ocshopdemo` | `flow_shots/`, `menu_shots/`, `shop_shots/` next to the exe, or the folder given to `--shots`. |
-| `ocaudio decode`, `render-seq`, `render-sfx` | The WAV path given. |
+| `ocaudio decode`, `mix`, `render-seq`, `render-sfx` | The WAV path given. |
 | `ocguide` | The browser profile in `%LOCALAPPDATA%\OpenCross\guides\browser`; `html` also the file given. |
 
 ## 2. Gates

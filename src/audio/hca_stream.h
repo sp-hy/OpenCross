@@ -1,6 +1,7 @@
 #pragma once
-// Pull decoder for the stream inside a .sab: HCA, or the 16-bit PCM some replacement tracks carry (mono or stereo, 48 kHz).
-// Output is interleaved s16 stereo at the stream rate (48 kHz), a mono PCM sample on both sides.
+// Pull decoder for the stream inside a .sab: HCA, or the 16-bit PCM some replacement tracks carry (mono or stereo).
+// Output is interleaved s16 stereo at the stream's own rate (48 kHz in RDE's files; replacement tracks may use another, which the
+// mixer converts), a mono PCM sample on both sides.
 // Sample positions are in output samples (after the HCA mute_header is skipped), the same coordinates as the SEAD
 // material loop points: sample s lives in HCA block (s + mute_header) / 1024, or at PCM frame s.
 #include <memory>

@@ -6,6 +6,8 @@ add_library(oc_audio STATIC
   sab.cpp
   hca_stream.h
   hca_stream.cpp
+  stream_resampler.h
+  stream_resampler.cpp
   bgm_table.h
   bgm_table.cpp
   mixer.h

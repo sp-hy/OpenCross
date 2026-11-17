@@ -1,6 +1,7 @@
 // ocaudio: remastered BGM tool.
 //   ocaudio [-g <game dir>] decode <song id | BGMnnn | file.sab> <out.wav> [seconds]   (no seconds = whole track, no looping)
 //   ocaudio [-g <game dir>] play <song id | BGMnnn> [seconds]
+//   ocaudio [-g <game dir>] mix <song id | BGMnnn | file.sab> <out.wav> [seconds]   through the mixer (48 kHz, rate converted)
 //   ocaudio [-g <game dir>] render-seq <music NNN> <out.wav> [seconds] [rate] [keys.txt]   original AKAO music through our sequencer
 //     (with the sound effects its FE 0B ops request; keys.txt lists every voice key-on / key-off: update, KON / KOFF, channel, voice)
 //   ocaudio [-g <game dir>] play-seq <music NNN> [seconds]
@@ -164,8 +165,29 @@ int cmd_play(const vfs::Vfs& fs, const std::string& which, double seconds) {
   auto t0 = std::chrono::steady_clock::now();
   while (std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count() < seconds)
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  std::printf("position %u samples, level %.4f\n", mixer.bgm_position(), double(mixer.bgm_level()));
+  std::printf("position %.3f s, level %.4f\n", mixer.bgm_position_seconds(), double(mixer.bgm_level()));
   mixer.close_device();
+  return 0;
+}
+
+int cmd_mix(const vfs::Vfs& fs, const std::string& which, const std::string& out, double seconds) {
+  const bool disk = which.size() > 4 && which.ends_with(".sab");
+  int song = -1, file = disk ? -1 : resolve(which, song);
+  if (!disk && file < 0) return usage();
+  auto stream = disk ? open_stream(read_disk_file(which), which) : load(fs, file);
+  if (!stream) return 1;
+  const u32 rate = stream->sample_rate();
+  audio::Mixer mixer;
+  if (!mixer.start_capture(out)) {
+    std::fprintf(stderr, "cannot write %s\n", out.c_str());
+    return 1;
+  }
+  mixer.play(stream, song < 0 ? std::max(file, 0) : song, 127, 0.0);
+  const int ticks = int(seconds * 60.0);
+  for (int i = 0; i < ticks; ++i) mixer.capture_tick(1.0 / 60.0);
+  std::printf("%s: stream %u Hz, mixed %.3f s at %u Hz, stream position %.3f s\n", which.c_str(), rate,
+              double(mixer.captured_frames()) / audio::Mixer::kRate, audio::Mixer::kRate, mixer.bgm_position_seconds());
+  std::printf("wrote %s\n", out.c_str());
   return 0;
 }
 
@@ -607,6 +629,7 @@ int ocaudio_main(int argc, char** argv) {
   if (args[0] == "decode" && args.size() >= 3)
     return cmd_decode(fs, args[1], args[2], args.size() > 3 ? std::atof(args[3].c_str()) : 0.0);
   if (args[0] == "play" && args.size() >= 2) return cmd_play(fs, args[1], args.size() > 2 ? std::atof(args[2].c_str()) : 10.0);
+  if (args[0] == "mix" && args.size() >= 3) return cmd_mix(fs, args[1], args[2], args.size() > 3 ? std::atof(args[3].c_str()) : 20.0);
   if (args[0] == "render-seq" && args.size() >= 3)
     return cmd_render_seq(fs, args[1], args[2], args.size() > 3 ? std::atof(args[3].c_str()) : 20.0,
                           args.size() > 4 ? u32(std::atoi(args[4].c_str())) : 44100u, args.size() > 5 ? args[5] : std::string());

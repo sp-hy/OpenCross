@@ -304,6 +304,7 @@ void Mixer::apply(const Cmd& cmd) {
       akao_.reset();
       bgm_ = cmd.stream;
       bgm_->seek(u32(std::max(0.0, cmd.seconds) * bgm_->sample_rate()));
+      bgm_resampler_.reset(bgm_->sample_rate(), kRate);
       bgm_base_ = std::max(0.0, cmd.seconds);
       bgm_frames_ = 0;
       bgm_akao_.store(false);
@@ -333,7 +334,7 @@ void Mixer::apply(const Cmd& cmd) {
       bgm_.reset();
       akao_.reset();
       song_.store(-1);
-      bgm_pos_.store(0);
+      bgm_pos_secs_.store(0);
       break;
     case Cmd::Fade:
       if (!bgm_ && !akao_) break;
@@ -375,6 +376,7 @@ void Mixer::apply(const Cmd& cmd) {
       akao_.reset();
       if (cmd.stream) {
         bgm_ = cmd.stream;
+        bgm_resampler_.reset(bgm_->sample_rate(), kRate);
         bgm_base_ = cmd.seconds;
         bgm_frames_ = 0;
       } else {
@@ -466,13 +468,13 @@ void Mixer::render(float* out, u32 frames) {
     u32 done = 0;
     while (done < frames) {
       u32 want = std::min<u32>(frames - done, 1024);
-      scratch_.resize(size_t(want) * 2);
-      u32 got = bgm_->read(scratch_.data(), want);
+      bgm_pcm_.resize(size_t(want) * 2);
+      u32 got = bgm_resampler_.read(*bgm_, bgm_pcm_.data(), want);
       for (u32 i = 0; i < got; ++i) {
         step_fade();
-        const float gain = level_ * bus_level * (1.0f / 32768.0f);
-        out[(size_t(done) + i) * 2] += float(scratch_[size_t(i) * 2]) * gain;
-        out[(size_t(done) + i) * 2 + 1] += float(scratch_[size_t(i) * 2 + 1]) * gain;
+        const float gain = level_ * bus_level;
+        out[(size_t(done) + i) * 2] += bgm_pcm_[size_t(i) * 2] * gain;
+        out[(size_t(done) + i) * 2 + 1] += bgm_pcm_[size_t(i) * 2 + 1] * gain;
       }
       done += want;
       bgm_frames_ += got;
@@ -482,8 +484,8 @@ void Mixer::render(float* out, u32 frames) {
       }
     }
     if (bgm_) {
-      bgm_pos_.store(bgm_->position(), std::memory_order_relaxed);
-      bgm_secs_.store(bgm_base_ + double(bgm_frames_) / double(bgm_->sample_rate()), std::memory_order_relaxed);
+      bgm_pos_secs_.store(double(bgm_->position()) / double(bgm_->sample_rate()), std::memory_order_relaxed);
+      bgm_secs_.store(bgm_base_ + double(bgm_frames_) / double(kRate), std::memory_order_relaxed);
     }
   }
   const bool mono = mono_.load(std::memory_order_relaxed);

@@ -188,7 +188,7 @@ void FieldWorld::start_battle_music(int flags) {
   // so the field music resumes where the encounter cut it: the remastered stream by its position, the original music by the
   // sound driver's music push (its next start of the same song resumes the saved sequencer state).
   handoff_.resume_song = bgm_remastered_ ? mixer_->current_song() : -1;
-  handoff_.resume_seconds = static_cast<double>(mixer_->bgm_position()) / audio::Mixer::kRate;
+  handoff_.resume_seconds = mixer_->bgm_position_seconds();
   mixer_->push_music();
   mixer_->stop();
   song_change_ = {};

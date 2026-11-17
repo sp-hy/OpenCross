@@ -22,6 +22,7 @@
 #include "audio/mixer.h"
 #include "audio/sab.h"
 #include "audio/sfx.h"
+#include "audio/stream_resampler.h"
 
 using namespace oc;
 
@@ -124,6 +125,56 @@ void test_sab_pcm() {
     }
     const std::vector<s16> wrapped = stream.read(1);
     CHECK(wrapped.size() == 2 && wrapped[0] == s16(2 * channels + 1));
+  }
+}
+
+// A replacement track at 88.2 kHz reaches the 48 kHz mixer at its own pitch and length: a 1 kHz stereo PCM sine keeps 1 kHz (zero
+// crossings over the steady middle), its amplitude and its duration, and a 30 kHz tone above the output Nyquist is filtered out.
+void test_stream_resampler() {
+  constexpr u32 kIn = 88200, kOut = 48000, kFrames = 88200;
+  for (const double tone : {1000.0, 30000.0}) {
+    Bytes bytes = synthetic_sab();
+    const size_t entry = 0x100 + 3 * 0x20 + 0x20;
+    bytes[entry + 4] = 2;
+    bytes[entry + 5] = audio::kSabCodecPcm16;
+    put32(bytes, entry + 8, kIn);
+    put32(bytes, entry + 0x0C, 0);
+    put32(bytes, entry + 0x10, 0);
+    put32(bytes, entry + 0x14, 0);
+    put32(bytes, entry + 0x18, kFrames * 4);
+    bytes.resize(entry + 0x20 + size_t(kFrames) * 4);
+    for (u32 i = 0; i < kFrames; ++i) {
+      const s16 value = s16(std::lround(16000.0 * std::sin(2.0 * 3.141592653589793 * tone * i / kIn)));
+      for (int side = 0; side < 2; ++side) {
+        bytes[entry + 0x20 + size_t(i) * 4 + size_t(side) * 2] = u8(u16(value) & 0xFF);
+        bytes[entry + 0x20 + size_t(i) * 4 + size_t(side) * 2 + 1] = u8(u16(value) >> 8);
+      }
+    }
+    audio::HcaStream stream;
+    CHECK(stream.open(bytes) && stream.sample_rate() == kIn);
+    audio::StreamResampler resampler;
+    resampler.reset(stream.sample_rate(), kOut);
+    std::vector<float> out(size_t(kOut) * 2 * 2);
+    u32 total = 0;
+    while (total < kOut * 2) {
+      const u32 got = resampler.read(stream, out.data() + size_t(total) * 2, 997);
+      total += got;
+      if (got < 997) break;
+    }
+    CHECK(total >= kOut - 1 && total <= kOut + 1);
+    int crossings = 0;
+    float peak = 0.0f;
+    for (u32 i = kOut / 4; i < kOut * 3 / 4; ++i) {
+      peak = std::max(peak, std::abs(out[size_t(i) * 2]));
+      if ((out[size_t(i) * 2] < 0.0f) != (out[size_t(i + 1) * 2] < 0.0f)) ++crossings;
+      CHECK(out[size_t(i) * 2] == out[size_t(i) * 2 + 1]);
+    }
+    if (tone < kOut / 2) {
+      CHECK(crossings >= 998 && crossings <= 1002);
+      CHECK(std::abs(peak - 16000.0f / 32768.0f) < 0.01f);
+    } else {
+      CHECK(peak < 0.002f);
+    }
   }
 }
 
@@ -1499,6 +1550,7 @@ int main() {
   test_pitch_rate();
   test_sab();
   test_sab_pcm();
+  test_stream_resampler();
   test_loop_math();
   test_table();
   test_mixer_gain();
