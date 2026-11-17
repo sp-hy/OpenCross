@@ -574,6 +574,11 @@ void test_disc_index() {
   d1[2679 + 22] = "c:/work/cdrom/battle/event/evt0000.pac";
   d2[6035] = "c:/movie/final.stv";
   d2[6035 + 10] = "c:/movie/ending_s.stv";
+  constexpr size_t kPackRecord = 0x795 + 368 - 0x83;
+  d1[2 * 0x32 + 2 + 368 - 0x83] = "C:\\work\\cdrom\\fieldobj\\player\\gren2\\gren2.obj";
+  d1[kPackRecord + 0x13] = "c:\\work\\cdrom\\fieldobj\\ex\\gren.bin";
+  d1[kPackRecord + 0x32] = "c:\\work\\cdrom\\fieldobj\\ex\\gren.bin";
+  d1[kPackRecord + 0x33] = "c:\\work\\cdrom\\fieldobj\\ex\\dummy.bin";
   game::DiscIndex idx;
   const Bytes b1 = rec(d1, 6100), b2 = rec(d2, 6100);
   CHECK(idx.from_bytes(b1, b2) && idx.loaded());
@@ -604,6 +609,11 @@ void test_disc_index() {
   CHECK(idx.battle_script(1, 22) == "cdrom/battle/event/evt0000.pac" && idx.battle_script(1, 512) == "cdrom/battle/event/evt0000.pac");
   // A disc-1 movie is no movie on disc 2.
   CHECK(idx.movie_name_of(2, 19).empty());
+  // A model byte's animation pack is its own record: Glenn's two-sword body gren2 (0x32) takes gren, as his own byte does; a dummy or
+  // empty record is no pack.
+  CHECK(idx.field_model_stem(1, 0x32) == "gren2/gren2");
+  CHECK(idx.field_pack_name(1, 0x32) == "gren" && idx.field_pack_name(1, 0x13) == "gren");
+  CHECK(idx.field_pack_name(1, 0x33).empty() && idx.field_pack_name(1, 0x3C).empty() && idx.field_pack_name(1, -1).empty());
 }
 
 void test_location_key() {

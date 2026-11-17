@@ -208,7 +208,7 @@ class Lang:
         info["speaker"] = sp
         for r, (key, vals) in enumerate(self.mesgen(lang)):
             n = 0
-            while key in res and n < 16:
+            while key in res and n < 4096:
                 rep = vals[sp] if sp < len(vals) else vals[0]
                 if lang == "en" and r == 26 and sp == 14 and room == 0x1D6 and msg in (0, 3, 6):
                     rep = "ah"

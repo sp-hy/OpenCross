@@ -22,6 +22,8 @@ class DiscIndex {
   static constexpr int kMapBase = 368;
   static constexpr int kMovieBase = 6035;
   static constexpr int kBattleScriptBase = 2679;
+  // Field file id of model byte 0's animation pack (fieldobj/ex, one file per model byte).
+  static constexpr int kFieldPackBase = 0x795;
 
   // False if cdrom.fnd is missing.
   bool load(const vfs::Vfs& vfs);
@@ -37,6 +39,10 @@ class DiscIndex {
   // Field model of a character model byte (file index 2 * byte + 2 of the field's file ids): "<folder>/<file>" under fieldobj/player
   // (the file need not be named after its folder: 0x3D = neko2/neko), "" when the record names no field player model.
   std::string field_model_stem(int disc, int model_byte) const;
+  // Animation pack of a character model byte (file index kFieldPackBase + byte of the field's file ids): the <name> of
+  // fieldobj/ex/<name>.bin, which need not be the model's own file name (0x32 = gren2 takes gren), "" when the record names no
+  // pack (a dummy or empty record).
+  std::string field_pack_name(int disc, int model_byte) const;
   // Battle script of a scene as a logical path. Several scenes share a file through their record, so the file's number need not be
   // the scene's; a scene with no script record gets the shared template.
   std::string battle_script(int disc, int scene) const;

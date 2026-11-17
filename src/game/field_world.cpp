@@ -260,10 +260,11 @@ std::shared_ptr<ModelHandle> FieldWorld::own_room_model(int index) {
 
 namespace {
 
-// The field model of a player file (fieldobj/player/<folder>/<file>), its texture mods resolved. Any thread.
-std::optional<assets::ModelAsset> read_character_model(const vfs::Vfs& files, const std::string& stem) {
+// The field model of a player file (fieldobj/player/<folder>/<file>) with the animation pack fieldobj/ex/<pack>.bin, its texture mods
+// resolved. Any thread.
+std::optional<assets::ModelAsset> read_character_model(const vfs::Vfs& files, const std::string& stem, const std::string& pack) {
   std::string err;
-  auto asset = read_model_files(files, "fieldobj/player/" + stem, &err);
+  auto asset = read_model_files(files, "fieldobj/player/" + stem, pack, &err);
   if (!asset) {
     log::warn("player model {}: {}", stem, err);
     return std::nullopt;
@@ -297,7 +298,8 @@ std::shared_ptr<ModelHandle> FieldWorld::character_model(int char_id) {
       char_models_[char_id] = nullptr;
       return nullptr;
     }
-    if (std::optional<assets::ModelAsset> asset = read_character_model(*files_, stem)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
+    if (std::optional<assets::ModelAsset> asset = read_character_model(*files_, stem, model_pack(char_id)))
+      handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
   }
   char_models_[char_id] = handle;
   return handle;
@@ -307,9 +309,10 @@ void FieldWorld::prefetch_character_model(int model_byte) {
   if (model_byte < 0 || model_byte >= 0x100 || !files_ || char_models_.contains(model_byte) || char_prefetch_.contains(model_byte)) return;
   std::string stem = model_stem(model_byte);
   if (stem.empty()) return;
-  char_prefetch_[model_byte] = std::async(std::launch::async, [files = files_, ctx = ctx_, stem = std::move(stem)]() -> std::optional<PrefetchedCharacter> {
+  char_prefetch_[model_byte] = std::async(std::launch::async, [files = files_, ctx = ctx_, stem = std::move(stem),
+                                                               pack = model_pack(model_byte)]() -> std::optional<PrefetchedCharacter> {
     const unsigned generation = render::texture_registry::generation();
-    std::optional<assets::ModelAsset> asset = read_character_model(*files, stem);
+    std::optional<assets::ModelAsset> asset = read_character_model(*files, stem, pack);
     if (!asset) return std::nullopt;
     render::ModelUploads uploads = render::prepare_model_uploads(*asset);
     render::ModelTextures textures = ctx ? render::prepare_model_textures(*ctx, *asset, uploads) : render::ModelTextures{};

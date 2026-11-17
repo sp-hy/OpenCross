@@ -259,7 +259,8 @@ bool FieldWorld::casts_shadow(size_t index) const {
   return entity.actor.loaded() && !ent_not_drawn(static_cast<int>(index)) && entity.shadow_grey > 0 && !(vm_.entity(static_cast<int>(index)).flags38 & 0x10C420);
 }
 
-// [Enhancements] Lighting: each actor flattened straight down onto its own floor height, one tile per actor. The tile is sized to the pose, so a raised arm
+// [Enhancements] Lighting: each actor flattened straight down onto its own floor height, one tile per actor, standing (Actor::upright_matrix: a
+// model leaned toward the camera would lay its whole body's shadow behind it, seen as a dark rim around the figure). The tile is sized to the pose, so a raised arm
 // stays inside it; an actor past the mask's tiles keeps the blob. The strength is the PS1 shadow's (water and stairs fade it out the same way).
 // The remote members drawn take the tiles left after the room's actors, at the strength of their blob.
 void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
@@ -282,7 +283,7 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
   auto cast_tile = [&](Actor& actor, float floor_y, int grey) {
     if (tile == 0) shadow_tiles_.begin_tiles(frame);
     const ActorPose pose = actor.pose(alpha);
-    render::Mat4 model = actor.model_matrix(alpha);
+    render::Mat4 model = actor.upright_matrix(alpha);
     actor.palette(alpha, palette);
     const MenuBody* menu = dress(actor, palette, model);
     float reach = 0.0f;

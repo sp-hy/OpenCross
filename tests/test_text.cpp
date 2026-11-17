@@ -313,6 +313,16 @@ void test_char_names() {
   for (int column = 0; column < 50; ++column) columns += "," + std::to_string(column);
   tables.set_mesgen(import::Lang::En, columns + "\n");
   CHECK(tables.lookup_field(27, 1, import::Lang::En, data::line_speaker(0, true)) == "49");
+
+  // A key is replaced however often it occurs (a long Guile line carries 32 word-space keys).
+  std::string spaced = "27\t2\t", expected;
+  for (int word = 0; word < 40; ++word) {
+    spaced += "w{-}";
+    expected += "w ";
+  }
+  tables.set_field_csv(import::Lang::En, spaced + "\n");
+  tables.set_mesgen(import::Lang::En, "{-}, \n");
+  CHECK(tables.lookup_field(27, 2, import::Lang::En) == expected);
 }
 
 void test_menu_forms() {

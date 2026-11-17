@@ -558,6 +558,12 @@ std::string FieldWorld::model_stem(int model_byte) const {
   return discs_.loaded() ? discs_.field_model_stem(disc_, model_byte) : std::string();
 }
 
+std::string FieldWorld::model_pack(int model_byte) const {
+  if (discs_.loaded()) return discs_.field_pack_name(disc_, model_byte);
+  const std::string stem = model_stem(model_byte);
+  return stem.substr(stem.find_last_of('/') + 1);
+}
+
 // D9: char = U@1 (FD / FE / FF = slot 0 / 1 / 2, <= 0x2B an id, else none). Nothing to do (none, or the
 // byte already b) -> pc += 6. Else the byte is written; a character outside the party -> pc += 6; a party member's model is replaced:
 // files read, pc += 5 onto the DA, which installs the model on that slot's entity once loaded.

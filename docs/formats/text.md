@@ -91,7 +91,7 @@ sysmes categories (2,683 rows): 00 items/equipment (256), 01 default character n
 1. Rows of `<lang>.csv` are keyed by `(room, msg)`. A row is loaded only if no earlier row in the file has a larger room id (RDE stops reading at the first greater room; this matters only for the unsorted `Ex_es.csv` blocks of rooms 374 and 474, which RDE never loads).
 2. `{wend(` rule: if `mess_wend.csv` has `(room,msg)` and the text contains `{wend(`, cut there and append the override (non-JP only).
 3. FR/IT/DE/ES with an `Ex_<lang>.csv` row use variant `v[speaker]`. The speaker is the first `{NAME%}` tag in the leading tag run (`{SERGE%}` = 0 ... `{PIP%}` = 43, `{LYNX%}` = 49; ids 44..48 reuse 43), else the script's speaker; default 0 -> 1. `{PARTYn%}` and `{playwork}` need live party state; `cc_text.py` ignores them.
-4. Substitute every `mesgen` key with `value[speaker]` (EN: dialect tokens; JP: grammar forms; empty fields collapse).
+4. Substitute every `mesgen` key with `value[speaker]` (EN: dialect tokens; JP: grammar forms; empty fields collapse), key by key in file order. Every occurrence is replaced, however many there are: each search starts again at the beginning of the text. A long EN line can carry 30 or more `{-}` (word space) keys.
 5. `\n` -> LF, delete `{n/a}`, non-JP: normalise spaces and quotes. A missing row shows "MESSAGE NOT FOUND" and an empty window.
 
 OpenCross: `LangTables` in `src/import/text.h` implements this.

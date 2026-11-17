@@ -1087,7 +1087,7 @@ Actor::Axes Actor::axes_at(float alpha) const {
   return result;
 }
 
-render::Mat4 Actor::model_matrix(float alpha) const {
+render::Mat4 Actor::placed_matrix(float alpha, bool tilted) const {
   // Attached: the parent's joint at the same render fraction x the joint-space transform.
   if (attached_) {
     render::Mat4 joint_world;
@@ -1100,7 +1100,7 @@ render::Mat4 Actor::model_matrix(float alpha) const {
   // model's forward is -Z, which gives the angle yaw + 0x800.
   const float angle = (actor_pose.yaw + static_cast<float>(kModelYawBias) * 2.0f) * kUnitsToRad;
   render::Mat4 rotation = render::mat4_rotation_y(angle);
-  if (axes.pitch != 0.0f || axes.roll != 0.0f || (axes.local_yaw != 0.0f && !tilt_world)) {
+  if (tilted && (axes.pitch != 0.0f || axes.roll != 0.0f || (axes.local_yaw != 0.0f && !tilt_world))) {
     // The model matrix is RotMatrix({pitch, yaw, roll}) = pitch about X, yaw about Y, roll about Z
     // (a sword stuck in the ground is pitch 1100 = ~97 deg).
     const float pitch_rad = axes.pitch * kUnitsToRad, local_yaw_rad = axes.local_yaw * kUnitsToRad, roll_rad = axes.roll * kUnitsToRad;

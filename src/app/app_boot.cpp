@@ -115,6 +115,11 @@ void App::init_config(int argc, char** argv) {
   save_dir = save_pick.dir;
   log::info("game dir: {}", game_dir.empty() ? "(not found)" : game_dir.string());
   log::info("save dir: {} ({})", save_dir.empty() ? "(not found)" : save_dir.string(), save_pick.how);
+  // A --config run without its own [Paths] SaveDir found the player's save folder: it never auto-saves into it.
+  if (!own_ini && config.save_dir.empty() && config.auto_save) {
+    config.auto_save = false;
+    log::info("autosave off: a --config run without [Paths] SaveDir");
+  }
 }
 
 bool App::init_window() {

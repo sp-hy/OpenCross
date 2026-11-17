@@ -68,7 +68,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `Steam` | 0 | bool | Connect to Steam as the game: presence and achievements (General tab). `--config` runs and `OC_QUIET` runs never connect. |
 | `Achievements` | 0 | bool | OpenCross's own achievement set (`rules/oc_achievements.md`; General tab). Off: nothing is evaluated and no popup shows; the Achievements tab still lists the stored unlocks. The player's ini reads a missing key as 1 (section 3). |
 | `HideAchievementNotices` | 0 | bool | No unlock notice (the Achievements tab's *Hide notifications* box): neither OpenCross's popup nor the Steam achievement toast shows. Achievements are still earned and listed. The player's ini reads a missing key as 1 (section 3). |
-| `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. |
+| `AutoSave` | 1 | bool | RDE's auto-save (card 1, slot 0) on every location change. A `--config` run with an empty `[Paths] SaveDir` (which finds the player's own save folder) keeps it off. |
 | `CameraRelative` | 0 | bool | General tab, Quality of life section. Field movement follows the room camera: up on the stick or the arrows walks along the camera's up axis on the floor (its forward row projected on XZ), the other directions turn with it. Off: the game's headings plus the room's control yaw (op 63). Read every frame. |
 | `FastRate` | 0 | 0..5; 1 reads as 0 | Fast mode speed. 0 = RDE's (4x in the field, 2x in battle); 2..5 = that many times in both. |
 | `SlowRate` | 50 | 10..90 | Slow mode speed in percent of normal, in the field and in battle. In the field, one 1/30 s stretch every 10 s (every 300th field frame) runs at normal speed. |

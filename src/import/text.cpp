@@ -20,6 +20,7 @@ namespace oc::import {
 namespace {
 
 constexpr char32_t kReplacement = 0xFFFD;
+constexpr int kMaxMesgenReplacements = 4096;
 
 const char* const kSpeakers[50] = {
     "SERGE",  "KID",    "GUILE",   "NORRIS", "NIKKI",  "VIPER",  "RIDDEL", "KARSH",  "ZOAH",   "MARCY",
@@ -1225,13 +1226,13 @@ std::optional<std::string> LangTables::lookup_field(int room_id, int msg, Lang l
   }
   for (size_t entry = 0; entry < per_lang.mesgen.size(); ++entry) {
     const auto& [key, vals] = per_lang.mesgen[entry];
+    // Every occurrence is replaced, searching again from the start after each one. The bound only stops a modded value that
+    // contains its own key from growing the text forever; no real message comes near it.
     int replaced = 0;
-    while (res.find(key) != std::string::npos && replaced < 16) {
+    for (size_t at = res.find(key); at != std::string::npos && replaced < kMaxMesgenReplacements; at = res.find(key), ++replaced) {
       std::string rep = static_cast<size_t>(sp) < vals.size() ? vals[static_cast<size_t>(sp)] : vals[0];
       if (lang == Lang::En && entry == 26 && sp == 14 && room_id == 0x1D6 && (msg == 0 || msg == 3 || msg == 6)) rep = "ah";
-      size_t at = res.find(key);
       res.replace(at, key.size(), rep);
-      ++replaced;
     }
   }
   replace_all(res, "\\n", "\n");

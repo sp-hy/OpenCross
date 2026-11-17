@@ -65,6 +65,10 @@ std::string character_name(const vfs::Vfs& files, const std::string& stem, ByteS
 }  // namespace
 
 std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err) {
+  return read_model_files(files, stem, stem.substr(stem.find_last_of('/') + 1), err);
+}
+
+std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, const std::string& ex_pack, std::string* err) {
   auto read = [&](const std::string& path) { return files.read(path).value_or(Bytes{}); };
   const std::string base = "cdrom/" + stem;
   const Bytes obj = read(base + ".obj");
@@ -81,8 +85,8 @@ std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const 
       if (err) *err = base + ".tim not found";
       return std::nullopt;
     }
-    const std::string name = stem.substr(slash + 1);
-    asset = import::load_field_model(obj, tim, read("cdrom/fieldobj/ex/" + name + ".bin"), err, read("hd/" + stem + ".tim"));
+    const Bytes pack = ex_pack.empty() ? Bytes{} : read("cdrom/fieldobj/ex/" + ex_pack + ".bin");
+    asset = import::load_field_model(obj, tim, pack, err, read("hd/" + stem + ".tim"));
   } else {
     // A player folder holds a .ltc (main image + closed-eye strip); its .ltd is a copy of the main image that HD art did not redraw for the
     // cdrom2 mesh, so the .ltc is read whenever there is one, for the party and for the enemies sharing the model.

@@ -382,7 +382,10 @@ class Actor {
   // World matrices of all joints at the interpolated animation time (blended during a cross-fade).
   void palette(float alpha, std::vector<render::Mat4>& out) const;
   // Model -> world: translation * yaw * uniform scale (model units to world units).
-  render::Mat4 model_matrix(float alpha) const;
+  render::Mat4 model_matrix(float alpha) const { return placed_matrix(alpha, true); }
+  // The model matrix of the standing figure: without the pitch and roll that op AD composes in the world frame to lean the model toward
+  // the camera (the world-map party). The floor shadow is cast with it.
+  render::Mat4 upright_matrix(float alpha) const { return placed_matrix(alpha, !tilt_world); }
   const render::MeshModel* gpu() const { return model_ ? model_->gpu.get() : nullptr; }
   const assets::ModelAsset* asset() const { return model_ ? &model_->asset : nullptr; }
 
@@ -485,6 +488,7 @@ class Actor {
   static constexpr float kAxisSnapRatio = 1.5f;
   Axes axes_now() const { return {pitch, local_yaw, roll, {axis_scale[0], axis_scale[1], axis_scale[2]}}; }
   Axes axes_at(float alpha) const;
+  render::Mat4 placed_matrix(float alpha, bool tilted) const;
   Axes axes_prev_;
   bool axes_prev_ok_ = false, axes_ticked_ = false;
   // Display segment of one channel (position x, y, z / yaw).

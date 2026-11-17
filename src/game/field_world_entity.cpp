@@ -659,7 +659,7 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   // kid06, ...); dummy records load nothing. The name tables below are the fallback when the index is missing.
   if (discs_.loaded()) {
     constexpr int kFidToRecord = DiscIndex::kMapBase - 0x83;
-    const std::string& rec = discs_.record(disc_, ((arg & 0x100) ? 0x795 : 0x7D6) + (arg & 0xFF) + kFidToRecord);
+    const std::string& rec = discs_.record(disc_, ((arg & 0x100) ? DiscIndex::kFieldPackBase : 0x7D6) + (arg & 0xFF) + kFidToRecord);
     if (const size_t pos = rec.find("fieldobj/ex/"); pos != std::string::npos && rec.ends_with(".bin")) {
       name = rec.substr(pos + 12, rec.size() - pos - 16);
       if (name == "dummy") name.clear();

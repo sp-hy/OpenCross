@@ -11,7 +11,7 @@
 //
 // Entity -> model rules:
 //   SETUP_NPC n  -> room model n (.bin subfile 11 + n, texture = the .ctd TIM named by its header), own s4 animations.
-//   SETUP_PC ref -> party slot (0xFF leader, 0xFE, 0xFD) -> character -> fieldobj/player/<folder> (+ fieldobj/ex/<folder>.bin).
+//   SETUP_PC ref -> party slot (0xFF leader, 0xFE, 0xFD) -> character -> fieldobj/player/<folder> (+ the model byte's pack, model_pack()).
 //   SET_ANIMATION n -> s4 clip n (n < 0x80) or ex clip n - 0x80.
 #include <array>
 #include <functional>
@@ -1390,6 +1390,9 @@ class FieldWorld final : public script::FieldHost {
   void defeated_enter_room();
   // Path stem under fieldobj/player of a character model byte (file id 2b + 2): "<folder>/<file>", e.g. "neko2/neko"
   std::string model_stem(int model_byte) const;
+  // Animation pack of a character model byte (file id 0x795 + byte), the clips 0x80 + k it plays without a LOAD_ANIMATION: "<name>"
+  // of fieldobj/ex/<name>.bin ("gren" for 0x32 = gren2/gren2), "" = none; without the disc index the pack named after the model's file.
+  std::string model_pack(int model_byte) const;
   // character record model byte (D9 / DB)
   int model_byte(int char_id) const;
   static int model_byte_in(const save::SaveSlot& slot, int char_id);

@@ -537,6 +537,7 @@ btl_random_variant_flag = 0x80075908;  # data: nonzero for field battles; picks 
 btl_result_code = 0x80075909;  # data: battle result code: victory, wipe, fled, scripted
 sys_char_records = 0x80075910;  # data: character record array, 0xCC bytes per character
 sys_limit_mode_bits = 0x80075911;  # data: byte whose bits 3-7 hold the selected limit mode
+sys_char_model_byte = 0x8007593D;  # data: model byte of character record 0 (+0x2D, stride 0xCC): picks the field model files 2b+2 / 2b+3 and the default animation pack 0x795 + b
 btl_weapon_mesh_bucket = 0x800759AC;  # data: draw bucket for weapon meshes, drawn with the effects
 sys_script_variables = 0x80077C20;  # data: global script variable block
 sys_location_id = 0x80077C26;  # data: map id the party stands in

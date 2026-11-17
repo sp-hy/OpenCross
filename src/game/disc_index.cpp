@@ -69,6 +69,16 @@ std::string DiscIndex::field_model_stem(int disc, int model_byte) const {
   return stem.find('/') == std::string::npos ? std::string() : stem;
 }
 
+std::string DiscIndex::field_pack_name(int disc, int model_byte) const {
+  constexpr int kFidToRecord = kMapBase - 0x83;
+  if (model_byte < 0 || model_byte >= 0x100) return {};
+  const std::string& rec = record(disc, kFieldPackBase + model_byte + kFidToRecord);
+  const size_t at = rec.find("fieldobj/ex/");
+  if (at == std::string::npos || !rec.ends_with(".bin")) return {};
+  std::string name = rec.substr(at + 12, rec.size() - at - 16);
+  return name == "dummy" ? std::string() : name;
+}
+
 bool DiscIndex::has_room(int disc, std::string_view stem) const {
   const size_t count = rec_[disc >= 2 ? 1 : 0].size();
   for (int id = 0; kMapBase + 3 * static_cast<size_t>(id) < count; ++id)

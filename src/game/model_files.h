@@ -19,6 +19,9 @@ class Vfs;
 namespace oc::game {
 
 std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err);
+// A field model with the animation pack fieldobj/ex/<ex_pack>.bin instead of the one named after its file ("" = no pack): a character
+// model byte's pack is the one its file record names (DiscIndex::field_pack_name).
+std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, const std::string& ex_pack, std::string* err);
 
 // Sorted lower-case stems of every character model in the cdrom archive (field players, battle players, battle monsters).
 std::vector<std::string> model_stems(const vfs::Vfs& files);

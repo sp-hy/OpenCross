@@ -1,0 +1,20 @@
+# sui_a01f: Serge, Kid and Glenn with both Einlanzers (model byte 0x32, fieldobj/player/gren2). Pressing the action button at
+# lily pad entity 4 runs each member's script 9 (ANIM_PACK_RESTORE_START: the pack of the model byte, file 0x795 + 0x32 = gren.bin),
+# then script 4: crouch 0x86 (clip 15), jump 0x87 (16) and the 15-tick tween holding 0x88 (17), landing 0x89 (18), stand 1. Kid
+# lands (0x89) while Glenn, 15 ticks behind him, is in the air holding clip 17, about 70 ticks after the press.
+0 wait flow field 600
+- request party_add 1
+- request party_add 19
+- set model 19 50
+- load sui_a01f
+- wait flow field 600
+- wait idle 600
+- approach 4 40 1500
+- track 120 keys
+- action
+- wait 65
+- assert anim p1 137
+- assert anim p2 136
+- assert key p2 17 0
+- wait 60
+- quit
