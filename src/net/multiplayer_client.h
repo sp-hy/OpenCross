@@ -246,13 +246,15 @@ class MultiplayerClient {
   double now() const { return now_; }
 
   State state() const { return state_; }
-  // The status line: "Connected", "Connecting...", "Could not reach the server; retrying in 8 s", the server's version message...
+  // The status line: "Connected" ("Connected, 3 travellers online" once the server sent its count), "Connecting...", "Could not reach the server; retrying in 8 s", the server's version message...
   std::string status_text() const;
   const std::string& pid() const { return pid_; }
   // The server accepted the admin token.
   bool admin() const { return admin_; }
   // Other players in the local player's room (from the server's `occupancy`).
   int occupancy() const { return occupancy_; }
+  // Players online on the server, the local one included (from the server's `online`); -1 until the server sent it.
+  int online() const { return online_; }
 
   // The remote parties in the local player's room, in the order they arrived.
   const std::vector<RemoteParty>& parties() const { return parties_; }
@@ -324,6 +326,7 @@ class MultiplayerClient {
   double last_pres_ = -1.0;
   std::uint32_t pres_seq_ = 0;
   int occupancy_ = 0;
+  int online_ = -1;
 
   std::vector<RemoteParty> parties_;
   // The last pres seq taken from each remote party.

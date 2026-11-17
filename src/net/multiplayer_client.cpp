@@ -227,6 +227,7 @@ void MultiplayerClient::stop() {
   parties_.clear();
   party_seq_.clear();
   occupancy_ = 0;
+  online_ = -1;
   room_chat_.clear();
   clear_challenges();
   pvp_battle_.clear();
@@ -254,6 +255,7 @@ void MultiplayerClient::connect_now() {
   state_ = State::Connecting;
   room_sent_ = party_sent_ = pose_sent_ = false;
   occupancy_ = 0;
+  online_ = -1;
   parties_.clear();
   party_seq_.clear();
   last_sent_ = last_received_ = now_;
@@ -273,6 +275,7 @@ void MultiplayerClient::dropped(const std::string& reason) {
   parties_.clear();
   party_seq_.clear();
   occupancy_ = 0;
+  online_ = -1;
   clear_challenges();
   if (!pvp_battle_.empty()) {
     pvp_.resuming = true;
@@ -831,6 +834,8 @@ void MultiplayerClient::handle(const Json& message) {
     if (RemoteParty* party = find_party(message.string_of("pid"))) apply_pres(*party, message);
   } else if (type == "occupancy") {
     occupancy_ = clamped(message, "others", 0, 1 << 20);
+  } else if (type == "online") {
+    online_ = clamped(message, "count", 0, 1 << 20);
   } else if (type == "chat") {
     handle_chat(message);
   } else if (type == "challenge") {
@@ -855,6 +860,7 @@ void MultiplayerClient::handle(const Json& message) {
       transport_->close();
       parties_.clear();
       occupancy_ = 0;
+      online_ = -1;
       clear_challenges();
       pvp_battle_.clear();
       pvp_ = {};
@@ -869,7 +875,9 @@ std::string MultiplayerClient::status_text() const {
     case State::Off: return "Disconnected";
     case State::Connecting:
     case State::Greeting: return "Connecting...";
-    case State::Connected: return "Connected";
+    case State::Connected:
+      if (online_ < 0) return "Connected";
+      return std::format("Connected, {} {} online", online_, online_ == 1 ? "traveller" : "travellers");
     case State::Waiting: return std::format("{}; retrying in {:.0f} s", last_error_, std::max(0.0, retry_at_ - now_));
     case State::Banned: return server_message_.empty() ? "Banned from this server" : "Banned from this server: " + server_message_;
     case State::VersionTooOld: return server_message_.empty() ? "This OpenCross version is too old for the server" : server_message_;

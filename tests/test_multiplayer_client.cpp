@@ -275,6 +275,21 @@ void test_ping_and_silence() {
   CHECK(session.client.state() == MultiplayerClient::State::Waiting);
 }
 
+// The server's online count joins the Connected status ("traveller" for one), and a drop forgets it.
+void test_online() {
+  Session session;
+  CHECK(session.client.online() == -1 && session.client.status_text() == "Connected");
+  session.wire.receive(R"({"t":"online","count":1})");
+  session.step(0.0);
+  CHECK(session.client.status_text() == "Connected, 1 traveller online");
+  session.wire.receive(R"({"t":"online","count":7})");
+  session.step(0.0);
+  CHECK(session.client.online() == 7 && session.client.status_text() == "Connected, 7 travellers online");
+  session.wire.closed("Connection lost");
+  session.step(0.0);
+  CHECK(session.client.online() == -1);
+}
+
 void test_backoff() {
   Session session;
   session.wire.closed("Connection lost");
@@ -796,6 +811,7 @@ int main() {
   test_hostile_server();
   test_pres_rules();
   test_ping_and_silence();
+  test_online();
   test_backoff();
   test_remote_table();
   test_chat();

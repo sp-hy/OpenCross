@@ -381,6 +381,13 @@ export class World extends DurableObject<Env> {
     for (const ws of sockets) if (ws !== except) this.send(ws, { t: "occupancy", others: sockets.length - 1 });
   }
 
+  // Everyone connected hears how many players are online (distinct pids past their hello) whenever one arrives or leaves.
+  private online(): void {
+    const sockets = this.ctx.getWebSockets().filter((ws) => this.conn(ws).hello);
+    const count = new Set(sockets.map((ws) => this.conn(ws).pid)).size;
+    for (const ws of sockets) this.send(ws, { t: "online", count });
+  }
+
   private enterRoom(ws: WebSocket, conn: Conn, room: string): void {
     conn.room = room;
     this.save(ws, conn);
@@ -417,6 +424,7 @@ export class World extends DurableObject<Env> {
       this.leaveRoom(ws, conn);
       this.leaveChallenges(ws, conn);
       this.save(ws, conn);
+      this.online();
       if (conn.battle) await this.leaveBattle(ws, conn);
     }
     try {
@@ -651,6 +659,7 @@ export class World extends DurableObject<Env> {
       t: "welcome", pid, admin: conn.admin,
       limits: { chat_len: CHAT_LEN, name_len: NAME_LEN, pres_hz: 10, chat_per_10s: CHAT_PER_10S },
     });
+    this.online();
   }
 
   private onRoom(ws: WebSocket, conn: Conn, msg: Msg): void {

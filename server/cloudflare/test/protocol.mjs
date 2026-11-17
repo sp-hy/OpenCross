@@ -35,7 +35,12 @@ class Client {
     this.inbox = [];
     this.closed = false;
     this.closeCode = 0;
-    ws.addEventListener("message", (event) => this.inbox.push(JSON.parse(event.data)));
+    this.online = [];
+    ws.addEventListener("message", (event) => {
+      const msg = JSON.parse(event.data);
+      if (msg.t === "online") this.online.push(msg.count);
+      else this.inbox.push(msg);
+    });
     ws.addEventListener("close", (event) => {
       this.closed = true;
       this.closeCode = event.code;
@@ -93,6 +98,15 @@ class Client {
     return this.closed;
   }
 
+  async onlineCount(pred, ms = 2000) {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      if (this.online.length > 0 && pred(this.online[this.online.length - 1])) return true;
+      await sleep(10);
+    }
+    return false;
+  }
+
   close() {
     this.ws.close();
   }
@@ -147,6 +161,25 @@ async function testHandshake() {
   bad.ws.send("not json");
   check("error bad", (await bad.take("error"))?.code === "bad");
   bad.close();
+}
+
+// The online count is the number of distinct players past their hello: a second connection of the same player does not add one,
+// and every connected player hears it rise and fall.
+async function testOnline() {
+  await sleep(500);
+  const a = await Client.join("Ona");
+  check("online after welcome", await a.onlineCount((n) => n >= 1));
+  const before = a.online[a.online.length - 1];
+  const b = await Client.join("Onb");
+  check("online rises for others", await a.onlineCount((n) => n === before + 1));
+  check("online sent to the joiner", await b.onlineCount((n) => n === before + 1));
+  const twin = await Client.join("Onb", undefined, { id: b.id });
+  await sleep(200);
+  check("same player counts once", a.online[a.online.length - 1] === before + 1 && twin.online[twin.online.length - 1] === before + 1);
+  twin.close();
+  b.close();
+  check("online falls on disconnect", await a.onlineCount((n) => n === before));
+  a.close();
 }
 
 async function testRooms() {
@@ -731,7 +764,7 @@ async function testIdle() {
 }
 
 const tests = [
-  testHandshake, testRooms, testChat, testNoHistory, testPresRate, testAdmin, testAdminChat, testPresClamp, testPvpFlag, testPm, testChallengeRefusals,
+  testHandshake, testOnline, testRooms, testChat, testNoHistory, testPresRate, testAdmin, testAdminChat, testPresClamp, testPvpFlag, testPm, testChallengeRefusals,
   testChallengeTimeAndLeave, testChallengeAccept, testBattleRelay, testBattleResume, testBattleForfeit, testIdle, testAuthLockout,
 ];
 for (const test of tests) {

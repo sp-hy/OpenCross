@@ -42,6 +42,7 @@ Names are labels, not identities. Nothing proves a Steam name, and two players m
 | `party` | `pid`, `models` | A player in your room changed party. |
 | `pres` | `pid` and the `pres` members | A player in your room moved. |
 | `occupancy` | `others` | How many other players are in your room; sent with `peers` and on every `join` / `leave`. |
+| `online` | `count` | How many players are connected to the server, you included (distinct `pid`s past their `hello`: a second connection of the same player does not count again); sent to everyone after each `welcome` and each disconnect. The client's status line then reads `Connected, N travellers online` (`traveller` for 1); before the first `online` (an older server) it reads `Connected`. |
 | `chat` | `scope`, `pid`, `name`, `text`, `ts` (Unix ms), `admin` (present and true when the sender's `hello` carried the right admin token) | A chat line; `room` lines only reach players in the sender's room at the time. `scope` `pm`: section 8.1. |
 | `challenge`, `challenge_end`, `pvp_start` | | Battle challenges, section 8.2. |
 | `pvp_side`, `pvp_cmd`, `pvp_hash`, `pvp_away`, `pvp_back`, `pvp_resumed`, `pvp_gone` | | The battle link, section 8.4. |
