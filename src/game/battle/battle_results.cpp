@@ -40,21 +40,23 @@ constexpr int kFaceX0 = 0x10, kFaceDX = 0x28, kFaceW = 32, kFaceH = 224;
 // "PowerUp" / "Spoils" headline, right-aligned (viva frames 5 / 6).
 constexpr int kHeadX = 0x134, kHeadY = 0x10;
 // Gold digits (osak, 8 px pitch; y = 0x32 + 0x90) end 6 px before the "G" (part 0x30 at panel +88 -> text at 0x101).
-constexpr int kGoldRight = 0xFB;
+constexpr float kGoldRight = 256.5f;
+// Display lines the wallpaper and the fades cover.
+constexpr float kScreenLines = 224.0f;
+// Headline face scale (the face's top at the headline's y).
+constexpr float kHeadScale = 0.8f;
 // Wallpaper tile (btend.prd 'bg', HD battle_37.tim).
 constexpr int kTileW = 32, kTileH = 32;
 
-// Stat columns of a left row (panel-relative; digit slots 8 px apart, right edges): STR / HIT / MAG on y = 32, DEF / EVD / MDEF on y = 44
-// (label parts 12 / 10 / 27 and 0 / 8 / 2 of levu frame 2; digit x inferred from the label extents).
+// Stat columns of a left row (panel-relative label x, right edge of the digits, y): STR / HIT / MAG on y = 32, DEF / EVD / MDEF on
+// y = 44 (label parts 12 / 10 / 27 and 0 / 8 / 2 of levu frame 2).
 struct StatCol {
   int label_x, digits_right, y;
 };
 // Order: ATK DEF HIT EVD MAG MDEF.
-constexpr StatCol kStatCols[6] = {{12, 50, 32}, {7, 50, 44}, {56, 98, 32}, {56, 98, 44}, {104, 146, 32}, {104, 146, 44}};
-// Digit cells: x = X0 + {40, 40, 88, 88, 136, 136}[k] + 8 j - 6 (2 cells: the right edges above), y = y0 + {32, 44, 32, 44, 32, 44}[k].
-// UP markers (sheet levu frame 1) at X0 + kUpX[i] - 8 / y0 + kUpY[i] for i = HP, ATK, DEF, HIT, EVD, MAG, MDEF;
-// the sprite's own part offset is kUpDy.
-constexpr int kUpX[7] = {20, 20, 20, 68, 68, 116, 116}, kUpY[7] = {12, 24, 36, 24, 36, 24, 36}, kUpDy = 5;
+constexpr StatCol kStatCols[6] = {{12, 46, 32}, {7, 46, 44}, {56, 94, 32}, {56, 94, 44}, {104, 144, 32}, {104, 144, 44}};
+// UP markers (sheet levu frame 1) at X0 + kUpX[i] - 8 / y0 + kUpY[i] for i = HP, ATK, DEF, HIT, EVD, MAG, MDEF.
+constexpr int kUpX[7] = {20, 20, 20, 68, 68, 116, 116}, kUpY[7] = {12, 24, 36, 24, 36, 24, 36};
 // Stat label keys in the shared message text.
 const char* kStatJp[7] = {"ＨＰ", "腕力", "耐久力", "正確さ", "身軽さ", "魔力", "抗魔"};
 const char* kStatEn[7] = {"HP", "STR.", "RES.", "ACC.", "AGI.", "MAG.", "M.RES"};
@@ -70,13 +72,12 @@ constexpr int kHealAmount[4] = {80, 160, 320, 16};
 constexpr float kLabelPx = 70.0f * 0.325f / SY, kBigPx = 70.0f * 0.35f / SY, kMidPx = 70.0f * 0.35f / SY, kPanelPx = 70.0f * 0.5f / SY;
 // Colour index (green white black red yellow blue) -> battle_08_NN file number.
 constexpr u32 kHdColourFile[6] = {10, 5, 13, 7, 3, 12};
+// Item kind (category low nibble) of the forge materials.
+constexpr int kMaterialKind = 4;
+// Spoils item names wider than this (PS1 units) are drawn scaled down to it, both ways, about the point kNarrowAnchor lines below
+// the name's y.
+constexpr float kItemNameMaxW = 102.0f, kNarrowAnchor = 18.0f;
 
-// sysmes names carry a leading icon code (Greek alpha..delta: element kind / material) that the RDE fonts draw as the list icon; the
-// results screen draws the PS1 icon itself (sico / EquipIcon), so the code is dropped from the name.
-std::u32string strip_icon(std::u32string name) {
-  if (!name.empty() && name[0] >= 0x3B1 && name[0] <= 0x3B4) name.erase(0, 1);
-  return name;
-}
 u32 rgba(int r, int g, int b, int a = 255) { return render::pack_rgba(static_cast<u8>(r), static_cast<u8>(g), static_cast<u8>(b), static_cast<u8>(a)); }
 // Scale the colour channels, keep alpha.
 u32 tint(u32 colour, float factor) {
@@ -295,15 +296,15 @@ struct BattleResults::Impl {
   void rect(float x, float y, float w, float h, u32 colour) { quad(white, x, y, w, h, colour); }
   float measure(int slot, const std::u32string& text_u32, float sc) { return fonts.measure(slot, text_u32, sc) / SX; }
   // Text at PS1 (x, y): align 0 left, 1 centre, 2 right. `ps1_px` = glyph box height in PS1 lines. The font slot's canvas offset times the
-  // draw scale (offX / offY * scale) is added to the PS1 position.
-  void txt(int slot, const std::u32string& text_u32, float x, float y, u32 colour, float ps1_px, int align = 0) {
+  // draw scale (offX / offY * scale) is added to the PS1 position. `exact`: render::TextStyle::exact.
+  void txt(int slot, const std::u32string& text_u32, float x, float y, u32 colour, float ps1_px, int align = 0, bool exact = false) {
     if (text_u32.empty()) return;
     const float sc = scale_for(ps1_px);
     const float w = measure(slot, text_u32, sc);
     if (align == 1) x -= w * 0.5f;
     if (align == 2) x -= w;
     const ui::font::SlotInfo& si = ui::font::slot(slot);
-    const ui::font::Ink ink{colour, rgba(33, 33, 33, static_cast<int>(colour >> 24)), true, false};
+    const ui::font::Ink ink{colour, rgba(33, 33, 33, static_cast<int>(colour >> 24)), true, false, exact};
     fonts.draw(slot, text_u32, (x + shift) * SX + si.off_x * sc + ox / zoom, y * SY + si.off_y * sc + oy / zoom, ink, sc, ui::font::kLeft, zoom);
   }
   // Names and numbers drawn as 'osak' glyphs: kb_70 text.
@@ -311,7 +312,7 @@ struct BattleResults::Impl {
   void num(int value, float right, float y, u32 colour = kColDigit) { big(import::utf8_to_u32(std::to_string(value)), right, y, colour, 2); }
 
   void draw_wall() {
-    if (hd_wall.ok()) quad(hd_wall, edge_x0, 0, edge_w, 216, 0xFFFFFFFFu, edge_x0 / kTileW, 0, (edge_x0 + edge_w) / kTileW, 216.0f / kTileH);
+    if (hd_wall.ok()) quad(hd_wall, edge_x0, 0, edge_w, kScreenLines, 0xFFFFFFFFu, edge_x0 / kTileW, 0, (edge_x0 + edge_w) / kTileW, kScreenLines / kTileH);
   }
   void draw_faces() {
     // Three 32 x 224 strips at x = 0x10 + 0x28 s, drawn first (under the rows) at half brightness.
@@ -330,23 +331,23 @@ struct BattleResults::Impl {
     const bool after = row.shown;
     // HP line: label part 20 at (8, 21), current HP digits at X0 + 0x20 + 8 j, "/" part 28 at (55, 21), max at X0 + 0x40 + 8 j
     txt(label_slot(), stat_label(0), x0 + 8, y0 + 21, kColText, kLabelPx);
-    txt(label_slot(), U"/", x0 + 56, y0 + 20, kColText, kMidPx);
+    txt(label_slot(), U"/", x0 + 54.75f, y0 + 21, kColText, kMidPx);
     const int max_hp = after ? row.max_hp : row.max_hp - row.gain[0];
     num(std::clamp(row.hp, 0, 9999), x0 + 54, y0 + 20);
-    num(max_hp, x0 + 86, y0 + 20);
+    num(max_hp, x0 + 82, y0 + 20);
     // six stats (two rows of three)
     for (int k = 0; k < 6; ++k) {
       const StatCol& col = kStatCols[k];
       const int value = after ? row.stat[static_cast<size_t>(k + 1)] : row.stat[static_cast<size_t>(k + 1)] - row.gain[static_cast<size_t>(k + 1)];
-      txt(label_slot(), stat_label(k + 1), x0 + static_cast<float>(col.label_x) - (lang != import::Lang::Jp && k == 0 ? 5.0f : 0.0f), y0 + static_cast<float>(col.y) + 1.0f, kColText, kLabelPx);
+      txt(label_slot(), stat_label(k + 1), x0 + static_cast<float>(col.label_x) - (lang != import::Lang::Jp && k == 0 ? 5.0f : 0.0f), y0 + static_cast<float>(col.y), kColText, kLabelPx);
       num(std::clamp(value, 0, 99), x0 + static_cast<float>(col.digits_right), y0 + static_cast<float>(col.y));
     }
     // "UP" marker (levu frame 1 = btend/up.png 16 x 16) on every stat with a non-zero gain (a stat pulled back to its Lv 99 value too),
     // once the member's page was shown:
-    // sprite at X0 + kUpX[i] - 8, y0 + kUpY[i] + kUpDy with i = HP, ATK, DEF, HIT, EVD, MAG, MDEF
+    // sprite at X0 + kUpX[i] - 8, y0 + kUpY[i] with i = HP, ATK, DEF, HIT, EVD, MAG, MDEF
     if (after)
       for (int i = 0; i < 7; ++i)
-        if (row.gain[static_cast<size_t>(i)] != 0) draw_up(x0 + static_cast<float>(kUpX[i] - 8), y0 + static_cast<float>(kUpY[i] + kUpDy));
+        if (row.gain[static_cast<size_t>(i)] != 0) draw_up(x0 + static_cast<float>(kUpX[i] - 8), y0 + static_cast<float>(kUpY[i]));
     // element-grid thumbnail: gg dots at X0 + 0x66 + 4 grid_row, y0 + 6 + 2 grid_col for every occupied cell; bright up to the gauge level
     for (int grid_row = 0; grid_row < data::kGridRows; ++grid_row)
       for (int grid_col = 0; grid_col < data::kGridCols; ++grid_col) {
@@ -359,18 +360,23 @@ struct BattleResults::Impl {
   }
   void draw_up(float x, float y) { quad(hd_up, x, y, 16, 16); }
   void draw_headline(bool spoils) {
-    // Headline (viva frame 5 / 6) right-aligned at (0x134, 0x10), hidden while sliding out. Drawn with the ch_100 face
-    // (same file in both art modes) from btlexit.txt 0x10005 / 6, with a shadow colour 0x414E60 under the 0xB8C7D5 text.
+    // Headline (viva frame 5 / 6) right-aligned at (0x134, 0x10), hidden while sliding out. Drawn with the ch_100 face at 0.8
+    // (same file in both art modes) from btlexit.txt 0x10005 / 6: text 0xD5C7B8 over an outline 0x604E41, both added to the
+    // picture at half strength.
     if (phase == Phase::Exit) return;
     const float x = static_cast<float>(kHeadX), y = static_cast<float>(kHeadY);
     if (const render::FaceId face_ch = fonts.face(kHead); face_ch != render::kNoFace) {
       const std::u32string headline = label(spoils ? 0x10006 : 0x10005);
-      // The word is 12.8 PS1 lines tall (ascender to descender) with its ink top 25.7 lines
-      // down, i.e. the 100 px face at 0.47, 6.5 lines below the PS1 y.
-      const float sc = 0.47f;
+      const float sc = kHeadScale;
       const float w = measure(kHead, headline, sc);
-      text.draw(face_ch, headline, cx(x - w) + 2 * zoom, cy(y + 6.5f) + 2 * zoom, rgba(0x60, 0x4E, 0x41), sc * zoom);
-      text.draw(face_ch, headline, cx(x - w), cy(y + 6.5f), rgba(0xD5, 0xC7, 0xB8), sc * zoom);
+      render::TextStyle style;
+      style.backdrop_color = rgba(0x60, 0x4E, 0x41);
+      // The outline pass covers the glyph too, so the fill adds only the difference.
+      style.shadow = false;
+      const render::BlendMode old_blend = sprites->blend();
+      sprites->set_blend(render::BlendMode::AddAlpha);
+      text.draw(face_ch, headline, cx(x - w), cy(y), rgba(0xD5 - 0x60, 0xC7 - 0x4E, 0xB8 - 0x41, 0x80), sc * zoom, style);
+      sprites->set_blend(old_blend);
       return;
     }
   }
@@ -378,8 +384,8 @@ struct BattleResults::Impl {
     const float px = static_cast<float>(kPanelX), py = static_cast<float>(kPanelY) + slide;
     quad(hd_panel, px - 16, py, kPanelW, kPanelH);
     // gold line: osak digits ending before the "G" part (0x30, panel +88 - 7), then 獲得 / "Received" (part 0x32, +96 - 7)
-    num(std::clamp(gold, 0, 9999999), static_cast<float>(kGoldRight), py + 144, kColDigit);
-    txt(label_slot(), U"G", px + 81, py + 144, kColText, kMidPx);
+    num(std::clamp(gold, 0, 9999999), kGoldRight, py + 144, kColDigit);
+    txt(label_slot(), U"G", px + 81, py + 145, kColText, kMidPx);
     txt(label_slot(), label(26), px + 89, py + 145, kColText, kMidPx);
     if (phase == Phase::Spoils) draw_spoils(px, py);
     else if (phase == Phase::Heal) draw_heal_menu(px, py);
@@ -388,14 +394,14 @@ struct BattleResults::Impl {
     else draw_powerup(px, py);
   }
   void draw_powerup(float px, float py) {
-    // Member name at (0xB4, 0x42); one line per stat with a non-zero gain: label (key 11 + k) at (0xC0, 0x52 + 0xE n), the gain (3 digit
-    // slots at 0xF0 + 0xC j, no sign) right-aligned at 0x108 + 0xC. The digits are those of the gain as an unsigned 32-bit number, so a
-    // negative gain shows the last three digits of 2^32 + gain, leading zeros included.
+    // Member name at (0xA5, 0x42); one line per stat with a non-zero gain: label (key 11 + k) at (0xC0, 0x52 + 0xE n), the gain (no
+    // sign) left-aligned at 0xF7. The digits are those of the gain as an unsigned 32-bit number, so a negative gain shows the last
+    // three digits of 2^32 + gain, leading zeros included.
     // Nobody grew: only the slots with a gain are drawn, so the blank page keeps its headline and shows no name and no lines.
     if (cur >= static_cast<int>(gain_list.size())) return;
     const int slot = gain_list[static_cast<size_t>(cur)];
     const Row& row = rows[static_cast<size_t>(slot)];
-    txt(label_slot(), row.name, px + 4, py + 16, kColName, kPanelPx);
+    txt(label_slot(), row.name, px - 11, py + 16, kColName, kPanelPx);
     int line = 0;
     for (int k = 0; k < 7; ++k) {
       if (row.gain[static_cast<size_t>(k)] == 0) continue;
@@ -404,22 +410,20 @@ struct BattleResults::Impl {
       // the gain digits are 7.3 lines tall = the kb font at 0.5, not the 0.35 of the row digits
       const int gain = row.gain[static_cast<size_t>(k)];
       const std::string digits = gain > 0 ? std::to_string(gain) : std::format("{:03}", static_cast<u32>(gain) % 1000u);
-      txt(kDigits, import::utf8_to_u32(digits), px + 100, y - 1, kColDigit, kPanelPx, 2);
+      txt(kDigits, import::utf8_to_u32(digits), px + 71, y, kColDigit, kPanelPx);
     }
   }
   void draw_star_page(float px, float py) {
-    // Pulsing star (levu 4 / btend/star.png) at (0xB4, 0x3C); "Received" (key 26) at (0xCC, 0x42); "->" (27) at (0xD8, 0x52),
-    // the star-up counter at 0xE4, "/" (28) at 0xFC, the star level at 0x108 (y 0x52); the leader's name at (0xB4, 0x82); the growth
-    // message (key 30, or 32 at star 99) at (0xB4, 0x92) and (0xB4, 0xA2).
+    // Pulsing star (levu 4 / btend/star.png) at (0xB4, 0x3C); "Received" (key 26) at (0xCC, 0x41); "->" (27) at (0xD8, 0x51), the
+    // star-up counter at 0xE4, "/" (28) at 0xFC and the star level at 0x108 (y 0x51; the numbers in the label face, left-aligned); the
+    // growth message (key 30, or 32 at star 99) at (0xB4, 0x92) and (0xB4, 0xA2). No name line.
     const float brightness = static_cast<float>(pulse) / 128.0f;
     quad(hd_star, px + 4, py + 10, 20, 20, tint(0xFFFFFFFFu, brightness));
-    txt(label_slot(), label(26), px + 28, py + 17, kColText, kPanelPx);
-    txt(label_slot(), label(27), px + 40, py + 33, kColText, kPanelPx);
-    num(counter, px + 52 + 16, py + 32);
-    txt(label_slot(), label(28), px + 76, py + 33, kColText, kPanelPx);
-    num(star, px + 88 + 16, py + 32);
-    const int lead = first_present();
-    if (lead >= 0) txt(label_slot(), rows[static_cast<size_t>(lead)].name, px + 4, py + 80, kColName, kPanelPx);
+    txt(label_slot(), label(26), px + 28, py + 16, kColText, kPanelPx);
+    txt(label_slot(), label(27), px + 40, py + 32, kColText, kPanelPx);
+    txt(label_slot(), import::utf8_to_u32(std::to_string(counter)), px + 52, py + 32, kColText, kPanelPx);
+    txt(label_slot(), label(28), px + 76, py + 32, kColText, kPanelPx);
+    txt(label_slot(), import::utf8_to_u32(std::to_string(star)), px + 88, py + 32, kColText, kPanelPx);
     const std::u32string msg = label(star >= 99 ? 32 : 30);
     // the EN/FR/.. message carries its own line break; JP uses two keys (30 / 31)
     size_t newline = msg.find(U'\n');
@@ -438,39 +442,41 @@ struct BattleResults::Impl {
     }
   }
   // Heal menu: the question (key 18, three lines) at (0xAC, 0x3C) and the three choices (keys 21, 23, 25) at (0xB0, 0x70 / 0x90 / 0xB0), their
-  // second line 16 lines below; the cursor 'curs' frame 1 / 2 (blinking every 16 frames) at (0xA8, 0x72 + 0x20 * cursor). Non-English Latin texts of the choices
+  // second line 16 lines below; the cursor 'curs' frame 1 / 2 (alternating every 16 frames) at (0xA8 / 0xA6, 0x72 + 0x20 * cursor). Non-English Latin texts of the choices
   // are drawn at x 0.85.
   void draw_heal_menu(float /*px*/, float py) {
     const float dy = py - static_cast<float>(kPanelY);
-    lines(label(18), 0xAC, 0x3C + dy + 1, kPanelPx);
+    lines(label(18), 0xAC, 0x3C + dy, kPanelPx);
     const bool small = lang != import::Lang::En && lang != import::Lang::Jp;
-    for (int i = 0; i < 3; ++i) lines(label(21 + 2 * static_cast<u64>(i)), 0xB0, 0x70 + 0x20 * static_cast<float>(i) + dy + 1, small ? kPanelPx * 0.85f : kPanelPx);
+    for (int i = 0; i < 3; ++i) lines(label(21 + 2 * static_cast<u64>(i)), 0xB0, 0x70 + 0x20 * static_cast<float>(i) + dy, small ? kPanelPx * 0.85f : kPanelPx);
     if (hd_cursor.ok()) {
       const bool second = ((age >> 4) & 1) != 0;
       const float y = 0x72 + 0x20 * static_cast<float>(cursor) + dy;
       if (!second) quad(hd_cursor, 0xA8, y, 9, 8, 0xFFFFFFFFu, 0, 0, 0.5625f, 1);
-      else quad(hd_cursor, 0xA8, y, 7, 8, 0xFFFFFFFFu, 0.5625f, 0, 1, 1);
+      else quad(hd_cursor, 0xA6, y, 7, 8, 0xFFFFFFFFu, 0.5625f, 0, 1, 1);
     }
   }
   // Healed page: header key 34 at (0xC0, 0x3E); one row per healing element used, y = 0x4E + 0x12 n: the colour plate (menu_pg +B colour, sheet frame 3) at
-  // 0xAC, the element name centred on 0xE8, "x" at 0x118 and the number of uses (tens at 0x11E, ones at 0x11E or 0x124).
+  // (0xAC, row - 1), the element name centred on 0xE8, "x" at 0x118 and the number of uses (tens at 0x11E, ones at 0x11E or 0x124).
   void draw_healed(float px, float py) {
-    txt(label_slot(), label(34), px + 16, py + 13, kColText, kPanelPx);
+    txt(label_slot(), label(34), px + 16, py + 12, kColText, kPanelPx);
     int line = 0;
     for (const Healer& healer : used) {
       const float y = py + 28 + 18.0f * static_cast<float>(line++);
       const int ci = plate_of(healer.id);
-      if (ci >= 0) quad(hd_plate[static_cast<size_t>(ci)], px - 4, y + 1, 120, 16);
-      txt(label_slot(), strip_icon(import::utf8_to_u32(tables->element_name(healer.id))), 0xE8, y + 3, kColText, kPanelPx, 1);
+      if (ci >= 0) quad(hd_plate[static_cast<size_t>(ci)], px - 4, y, 120, 16);
+      txt(label_slot(), import::utf8_to_u32(tables->element_name(healer.id)), 0xE8, y + 3, kColText, kPanelPx, 1);
       txt(label_slot(), U"x", 0x118, y + 6, kColText, kLabelPx);
       txt(kDigits, import::utf8_to_u32(std::to_string(healer.count)), 0x11E - 1, y + 6, kColDigit, kLabelPx);
     }
   }
   void draw_spoils(float px, float py) {
-    // Header (key 35) at (0xBA, 0x3E); row n at y = 0x4E + 0x12 n: item icon (sico kind + 1 / EquipIcon cell) at 0xB0 and
-    // the name at 0xC2; element: the colour plate (sheet colour << 2, frame 3 / battle_08_NN_03) at 0xAC and the name on it.
-    // The names are centred at x = 0xE8.
-    txt(label_slot(), label(35), px + 10, py + 13, kColText, kPanelPx);
+    // Header (key 35) at (0xBA, 0x3E); row n at y = 0x4E + 0x12 n, in drop order: item icon (sico kind + 1 / EquipIcon cell) at 0xB0
+    // and the name left-aligned at (0xC2, row + 2); element: the colour plate (sheet colour << 2, frame 3 / battle_08_NN_03) at 0xAC
+    // and the name centred on x = 0xE8 at row + 4. Names keep their sysmes prefix glyph (alpha consumable, gamma trap, delta
+    // material), which the fonts draw as the kind's icon left of the name. A material has no item icon of its own (its sico frame is empty).
+    // A long item name is narrowed to kItemNameMaxW; element names are drawn full size.
+    txt(label_slot(), label(35), px + 10, py + 12, kColText, kPanelPx);
     int line = 0;
     for (const Drop& drop : drops) {
       if (line >= 6) break;
@@ -478,11 +484,16 @@ struct BattleResults::Impl {
       if (drop.element) {
         const int ci = std::clamp(drop.colour, 0, 5);
         quad(hd_plate[static_cast<size_t>(ci)], px - 4, y + 1, 120, 16);
-        txt(label_slot(), drop.name, 0xE8, y + 3, kColName, kPanelPx, 1);
+        txt(label_slot(), drop.name, 0xE8, y + 4, kColName, kPanelPx, 1);
       } else {
-        const float u0 = 0.0075f + 0.2f * static_cast<float>(std::clamp(drop.kind, 0, 4));
-        quad(hd_equip, px, y, 16, 16, 0xFFFFFFFFu, u0, 0.0075f, u0 + 0.185f, 0.9925f);
-        txt(label_slot(), drop.name, 0xE8, y + 3, kColName, kPanelPx, 1);
+        if (drop.kind != kMaterialKind) {
+          const float u0 = 0.0075f + 0.2f * static_cast<float>(std::clamp(drop.kind, 0, 4));
+          quad(hd_equip, px, y, 16, 16, 0xFFFFFFFFu, u0, 0.0075f, u0 + 0.185f, 0.9925f);
+        }
+        const float w = measure(label_slot(), drop.name, scale_for(kPanelPx));
+        const bool narrow = w > kItemNameMaxW;
+        const float px_h = narrow ? kPanelPx * kItemNameMaxW / w : kPanelPx;
+        txt(label_slot(), drop.name, 0xC2, y + 2 + kNarrowAnchor * (1.0f - px_h / kPanelPx), kColName, px_h, 0, narrow);
       }
     }
     if (drops.empty()) txt(label_slot(), U"-", 0xE8, py + 31, kColText, kPanelPx, 1);
@@ -591,11 +602,6 @@ struct BattleResults::Impl {
     if (row.shown) return;
     row.shown = true;
     if (!row.ko) row.hp = std::min(row.hp + row.gain[0], 999);
-  }
-  int first_present() const {
-    for (int i = 0; i < battle::kPcSlots; ++i)
-      if (rows[static_cast<size_t>(i)].present) return i;
-    return -1;
   }
 
   // ---- state -----------------------------------------------------------------------------------------------------------
@@ -830,22 +836,33 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
   }
   impl.gold = rewards.gold;
   impl.star_up = rewards.star_up;
+  // Debug: show the star-up page as after a boss fight (the rewards are not changed).
+  if (std::getenv("OC_RESULTS_STAR")) impl.star_up = true;
   impl.star = finished.growth().star;
   impl.counter = finished.growth().counter;
   impl.drops.clear();
-  for (u16 id : rewards.items) {
-    Impl::Drop drop;
-    drop.id = id;
-    drop.name = strip_icon(import::utf8_to_u32(impl.tables->item_name(id)));
-    if (const data::ItemInfo* info = impl.tables->item(id)) drop.kind = info->kind();
-    impl.drops.push_back(std::move(drop));
+  std::vector<u16> words = rewards.drops;
+  // Debug: replace the drops with these drop words (comma list; bit 15 = element).
+  if (const char* list = std::getenv("OC_RESULTS_DROPS")) {
+    words.clear();
+    for (const char* cursor = list; *cursor;) {
+      if (const u16 word = static_cast<u16>(std::strtol(cursor, nullptr, 0))) words.push_back(word);
+      while (*cursor && *cursor != ',') ++cursor;
+      if (*cursor == ',') ++cursor;
+    }
   }
-  for (u16 id : rewards.elements) {
+  for (u16 word : words) {
     Impl::Drop drop;
-    drop.element = true;
-    drop.id = id & 0x7F;
-    drop.name = strip_icon(import::utf8_to_u32(impl.tables->element_name(drop.id)));
-    if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
+    drop.element = (word & 0x8000) != 0;
+    if (drop.element) {
+      drop.id = word & 0x7F;
+      drop.name = import::utf8_to_u32(impl.tables->element_name(drop.id));
+      if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
+    } else {
+      drop.id = word;
+      drop.name = import::utf8_to_u32(impl.tables->item_name(word));
+      if (const data::ItemInfo* info = impl.tables->item(word)) drop.kind = info->kind();
+    }
     impl.drops.push_back(std::move(drop));
   }
   impl.phase = Phase::PowerUp;
@@ -863,7 +880,8 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
   impl.draws = 0;
   impl.prepare_all();
   impl.play(0x47);
-  log::info("battle results: gold {} items {} elements {} gains for {} members{}", impl.gold, rewards.items.size(), rewards.elements.size(), impl.gain_list.size(),
+  const auto elements = std::count_if(impl.drops.begin(), impl.drops.end(), [](const Impl::Drop& drop) { return drop.element; });
+  log::info("battle results: gold {} items {} elements {} gains for {} members{}", impl.gold, impl.drops.size() - static_cast<size_t>(elements), elements, impl.gain_list.size(),
             impl.star_up ? " (star up)" : "");
   return true;
 }
@@ -892,13 +910,29 @@ void BattleResults::update(float dt, const platform::Input& in) {
 void BattleResults::draw(const render::Frame& frame, float vw, float vh, bool resume) {
   Impl& impl = *impl_;
   if (impl.phase == Phase::Idle || impl.phase == Phase::Done || !impl.ctx) return;
-  const render::Letterbox lb = render::Letterbox::wide(vw, vh, impl.canvas_cols);
-  impl.zoom = lb.scale / SX, impl.ox = lb.ox, impl.oy = lb.oy;
-  impl.edge_x0 = lb.x0, impl.edge_w = lb.w;
+  // RDE's canvas over the field and battle (render::overlay_fit), flatter than wide: the batch draws in a view whose y unit is sy / sx
+  // pixels, so one zoom serves both axes, and the text snaps to that grid.
+  const render::OverlayFit of = render::overlay_fit(vw, vh);
+  const float flat = of.sy / of.sx;
+  impl.zoom = of.sx, impl.ox = of.ox, impl.oy = of.oy / flat;
+  const float cols = vw / (SX * of.sx);
+  impl.edge_x0 = impl.canvas_cols > 0.0f ? -(cols - 320.0f) * 0.5f : 0.0f;
+  impl.edge_w = impl.canvas_cols > 0.0f ? cols : 320.0f;
+  struct View {
+    render::SpriteBatch* sprites;
+    render::TextBatch* batch;
+    float vw, vh;
+    ~View() {
+      sprites->set_view(vw, vh);
+      batch->set_pixel_grid(0.0f, 0.0f);
+    }
+  } view{impl.sprites, &impl.text, vw, vh};
   if (impl.draws++ == 0 || impl.pt == 0)
     log::debug("battle results: phase {} at age {} (hd {}, art: wall {} row {} panel {})", static_cast<int>(impl.phase), impl.age, impl.hd, impl.hd_wall.ok(),
                impl.hd_row.ok(), impl.hd_panel.ok());
   impl.sprites->begin(frame, vw, vh, resume);
+  impl.sprites->set_view(vw, vh / flat);
+  impl.text.set_pixel_grid(1.0f, flat);
   impl.shift = 0;
   impl.draw_wall();
   impl.shift = -impl.layout_cols;
@@ -910,8 +944,8 @@ void BattleResults::draw(const render::Frame& frame, float vw, float vh, bool re
   impl.draw_headline(impl.phase == Phase::Spoils);
   impl.shift = 0;
   // fades: from black over the first 0x3C frames, to black over the exit's 0x1E frames
-  if (impl.age < kFadeIn) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(0, 0, 0, 255 - 255 * impl.age / kFadeIn));
-  if (impl.phase == Phase::Exit) impl.rect(impl.edge_x0, 0, impl.edge_w, 216, rgba(0, 0, 0, std::min(255, 255 * impl.pt / kExit)));
+  if (impl.age < kFadeIn) impl.rect(impl.edge_x0, 0, impl.edge_w, kScreenLines, rgba(0, 0, 0, 255 - 255 * impl.age / kFadeIn));
+  if (impl.phase == Phase::Exit) impl.rect(impl.edge_x0, 0, impl.edge_w, kScreenLines, rgba(0, 0, 0, std::min(255, 255 * impl.pt / kExit)));
   impl.sprites->end();
 }
 

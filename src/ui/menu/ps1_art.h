@@ -116,16 +116,20 @@ void parchment_grid(TileFn&& tile, float canvas_w, float canvas_h, float left, f
     }
 }
 
-// The 4:3 picture of a canvas_w x canvas_h canvas fitted into a vw x vh view, as a scissor of `frame` over its full height. A parchment
+// The window columns left .. left + width_px as a scissor of `frame` over its full height (the pixels whose centre they cover); picture_clip:
+// the 4:3 picture of a canvas_w x canvas_h canvas fitted into a vw x vh view. A parchment
 // screen without widened columns cuts every draw at the picture's left and right edges, so art that overhangs the canvas (the lower-left
 // swirl) stays out of the black bars; the pixels are those whose centre the canvas covers.
-inline render::Rect picture_clip(const render::Frame& frame, float vw, float vh, float canvas_w, float canvas_h) {
-  const render::CanvasFit fit = render::canvas_fit(vw, vh, canvas_w, canvas_h);
+inline render::Rect columns_clip(const render::Frame& frame, float vw, float left, float width_px) {
   const float pixels = static_cast<float>(frame.extent.width) / vw;
   const s32 width = static_cast<s32>(frame.extent.width);
-  const s32 x0 = std::clamp(static_cast<s32>(std::ceil(fit.ox * pixels - 0.5f)), 0, width);
-  const s32 x1 = std::clamp(static_cast<s32>(std::ceil((fit.ox + canvas_w * fit.s) * pixels - 0.5f)), x0, width);
+  const s32 x0 = std::clamp(static_cast<s32>(std::ceil(left * pixels - 0.5f)), 0, width);
+  const s32 x1 = std::clamp(static_cast<s32>(std::ceil((left + width_px) * pixels - 0.5f)), x0, width);
   return {x0, 0, static_cast<u32>(x1 - x0), frame.extent.height};
+}
+inline render::Rect picture_clip(const render::Frame& frame, float vw, float vh, float canvas_w, float canvas_h) {
+  const render::CanvasFit fit = render::canvas_fit(vw, vh, canvas_w, canvas_h);
+  return columns_clip(frame, vw, fit.ox, canvas_w * fit.s);
 }
 
 // Gap in the bottom edge of a menu frame (HD shape id), PS1 px from the frame's left: the element list frame 53 leaves 130..228 open for

@@ -107,13 +107,15 @@ void MainMenu::Impl::build_settings() {
     const bool right = gs->option(setting.mask);
     const u32 chosen = ps1_colour(0x004048);
     const std::u32string label = utf32(menu_str(setting.label, "?"));
-    TP(i == 5 ? 100.0f : 72.0f, y, label, kText, 0.9f);
-    // Button glyph of function 1 at (0x48, 0xB0), 24 x 24.
-    if (i == 5) btn(72, 176, 1);
+    // The texts sit 1.4 lines above the row's highlight.
+    const float text_y = y - 1.4f;
+    TP((i == 5 ? 100.0f : 72.0f) + kRowDx, text_y, label, kText, kRowRel);
+    // Button glyph of function 1 at (73.6, 176), 24 x 24.
+    if (i == 5) btn(73.6f, 176, 1);
     // Chosen-choice highlight, drawn before the choices.
     rect(PX(right ? 375.0f : 277.0f), PY(y - 2), PX(82), PY(20), ps1_colour(0x0060A0));
-    TP(278, y, utf32(menu_str(setting.left, "-")), !right ? chosen : kText, 0.9f);
-    TP(376, y, utf32(menu_str(setting.right, "-")), right ? chosen : kText, 0.9f);
+    TP(278 + kRowDx, text_y, utf32(menu_str(setting.left, "-")), !right ? chosen : kText, kRowRel);
+    TP(376 + kRowDx, text_y, utf32(menu_str(setting.right, "-")), right ? chosen : kText, kRowRel);
   }
   if (skin_pick) {
     skin_preview();

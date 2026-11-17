@@ -731,10 +731,19 @@ void PartyScreen::draw(const render::Frame& frame, float vw, float vh, bool resu
 
 void PartyScreen::draw_view(const render::Frame& frame, float vw, float vh, bool resume) {
   Impl& impl = *impl_;
-  // One layer column = 2 PS1 px of this screen.
-  const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, impl.canvas_cols);
-  impl.zoom = letterbox.scale / (2.0f * kSx), impl.ox = letterbox.ox, impl.oy = letterbox.oy;
-  impl.edge_x0 = 2.0f * letterbox.x0, impl.edge_w = 2.0f * letterbox.w;
+  // 4:3: RDE's canvas over the field (render::overlay_fit), drawn in a view whose y unit is sy / sx pixels so one zoom serves both
+  // axes. Widescreen: the widened frame, one layer column = 2 PS1 px of this screen.
+  float flat = 1.0f;
+  if (impl.canvas_cols > 0.0f) {
+    const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, impl.canvas_cols);
+    impl.zoom = letterbox.scale / (2.0f * kSx), impl.ox = letterbox.ox, impl.oy = letterbox.oy;
+    impl.edge_x0 = 2.0f * letterbox.x0, impl.edge_w = 2.0f * letterbox.w;
+  } else {
+    const render::OverlayFit fit = render::overlay_fit(vw, vh);
+    flat = fit.sy / fit.sx;
+    impl.zoom = fit.sx, impl.ox = fit.ox, impl.oy = fit.oy / flat;
+    impl.edge_x0 = 0.0f, impl.edge_w = 640.0f;
+  }
   impl.spread = 2.0f * impl.layout_cols;
   // Resources and glyphs before begin() (they may upload / wait for the GPU).
   for (int character : impl.grid().roster()) impl.face(character);
@@ -745,8 +754,16 @@ void PartyScreen::draw_view(const render::Frame& frame, float vw, float vh, bool
   impl.sprites->begin(frame, vw, vh, resume);
   // The screen is cleared before the menu.
   impl.sprites->draw(impl.white, 0, 0, vw, vh, 0, 0, 1, 1, render::pack_rgba(0, 0, 0));
+  if (flat != 1.0f) {
+    impl.sprites->set_view(vw, vh / flat);
+    impl.text->set_pixel_grid(1.0f, flat);
+  }
   impl.draw_screen();
   impl.sprites->end();
+  if (flat != 1.0f) {
+    impl.sprites->set_view(vw, vh);
+    impl.text->set_pixel_grid(0.0f, 0.0f);
+  }
 }
 
 }  // namespace oc::ui

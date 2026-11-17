@@ -215,8 +215,9 @@ void OcAchievements::battle_actions(std::span<const std::vector<battle::ActionEv
       element_cast(first.element);
       ring_pending_ = true;
     }
+    // The party's trap held the element: a forced fizzle that springs the trap with another element (or none) is no catch.
     if (first.kind == Kind::Element && first.actor >= battle::kPcSlots &&
-        std::any_of(action.begin(), action.end(), [](const battle::ActionEvent& hit) { return hit.caught; }))
+        std::any_of(action.begin(), action.end(), [](const battle::ActionEvent& hit) { return hit.caught && hit.trap.pc == hit.element; }))
       happen(Src::TrapCatch);
     for (const battle::ActionEvent& hit : action) {
       if (!battle::is_pc_slot(hit.actor)) continue;

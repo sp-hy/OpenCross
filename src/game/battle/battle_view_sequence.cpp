@@ -55,7 +55,8 @@ void BattleView::begin_group() {
   // A revive clears the target's death flag and refreshes its low-HP bit from the new HP when the action resolves, before its pack plays:
   // the target holds its knocked-out clip until a script restarts it (Revive's get-up table, or the pack end's idle restart), and those
   // scripts then pick the standing branch. It also sets the idle-pose word to 1 and gives a PC its face flag back (the eye ops act again).
-  // A KO sets the death flag at the same point (a scripted death owes it to its death cast): the pack's end does not restart that unit.
+  // A KO sets the death flag at the same point: the pack's end does not restart that unit. A unit whose death is scripted (op 5C) never takes
+  // the flag; it owes its death to its death cast from here, so the tables the pack starts on it before the killing hit lands read it alive.
   for (const battle::ActionEvent& event : act_.ev)
     if (event.revived) {
       Visual& visual = vis_[static_cast<size_t>(event.target)];
@@ -64,8 +65,10 @@ void BattleView::begin_group() {
       visual.revive_hp = event.hp_after;
       visual.script_pose = 1;
       anm_face_on(event.target);
-    } else if (event.ko && !event.ko_owed && event.target >= 0) {
-      vis_[static_cast<size_t>(event.target)].ko_resolved = true;
+    } else if (event.ko && event.target >= 0) {
+      Visual& visual = vis_[static_cast<size_t>(event.target)];
+      if (event.ko_owed) visual.death_owed = true;
+      else visual.ko_resolved = true;
     }
   // A unit that already had the KO bit and that the action did not hit takes the death flag as well, and nothing restarts it. The party
   // members the poison step knocked out take it too, their eyes shut at once (anm_eye_shut) and their idle-pose word becomes 8, so every
@@ -734,12 +737,9 @@ void BattleView::begin_finish() {
 
 void BattleView::tick_finish() {
   ++finish_ticks_;
-  if (victory_song_ >= 0) {
-    if (finish_ticks_ == kVictoryThemeFade) audio_.fade_music(0, kVictoryThemeFadeTicks);
-    if (finish_ticks_ == kVictoryThemeFade + kVictorySongDelay) {
-      audio_.play_song(victory_song_);
-      victory_song_ = -1;
-    }
+  if (victory_song_ >= 0 && finish_ticks_ == kVictorySongChange) {
+    audio_.change_song(victory_song_, false);
+    victory_song_ = -1;
   }
   switch (finish_) {
     case Finish::Victory:

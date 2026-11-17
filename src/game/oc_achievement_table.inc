@@ -3,7 +3,7 @@
 // Story and places.
 {.id = "oc_story_cross", .title = "Wrong Side of the Tide", .description = "Cross into Another World for the first time", .category = Cat::Story, .rule = Rule::Room, .ids = {28}},
 {.id = "oc_story_manor", .title = "Uninvited Guests", .description = "Reach Viper Manor", .category = Cat::Story, .rule = Rule::Room, .ids = {194, 197}},
-{.id = "oc_story_three_routes", .title = "Every Door Tried", .description = "Reach Viper Manor with each of the three guides (Guile, Nikki, Pierre), across any saves", .category = Cat::Story, .rule = Rule::Profile, .source = Src::VarBits, .var = 0x1C2, .ids = {0, 1, 2}},
+{.id = "oc_story_three_routes", .title = "Every Door Tried", .description = "Recruit each of the three Viper Manor guides (Guile, Nikki, Pierre), across any saves", .category = Cat::Story, .rule = Rule::Profile, .source = Src::VarBits, .var = 0x1C2, .ids = {0, 1, 2}},
 {.id = "oc_story_fort", .title = "Top of the Fort", .description = "Reach Fort Dragonia", .category = Cat::Story, .rule = Rule::Room, .ids = {311, 312}},
 {.id = "oc_story_swap", .title = "Not Yourself", .description = "Go through the body swap", .category = Cat::Story, .spoiler = true, .rule = Rule::Body, .ids = {0x31}},
 {.id = "oc_story_vortex", .title = "Out of the Vortex", .description = "Leave the Temporal Vortex", .category = Cat::Story, .spoiler = true, .rule = Rule::RoomPair, .prev_ids = {372, 374}, .ids = {236}},

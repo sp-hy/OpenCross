@@ -21,6 +21,8 @@ namespace {
 
 // Row pitch the canvas-unit text helper centres a line in.
 constexpr float kListRowPitch = 46.0f;
+// Canvas units RDE draws the ink-placed text (HT) right of its ink coordinate.
+constexpr float kInkDx = 4.0f;
 
 const Str6 kTitles[6] = {
     {{"Member's Condition", "Statut du membre", "Condizioni dell'alleato", "Gefährtenstatus", "Estado del miembro", "Member's Condition"}},
@@ -307,7 +309,7 @@ void MainMenu::Impl::HT(render::FaceId face, float x, float y, const std::u32str
   cmd.face = face;
   cmd.scale = scale;
   cmd.color = colour;
-  cmd.x = right ? PX(x) - text->measure(face, str, scale) - 12.0f * scale : PX(x) - (kb ? 22.5f : 25.4f) * scale;
+  cmd.x = right ? PX(x) - text->measure(face, str, scale) - 12.0f * scale + kInkDx : PX(x) - (kb ? 22.5f : 25.4f) * scale + kInkDx;
   cmd.y = PY(y) - (kb ? 32.3f : 25.6f) * scale;
   emit(std::move(cmd));
 }
@@ -381,15 +383,15 @@ void MainMenu::Impl::Hand(float pivot_x, float pivot_y, int angle, float brightn
 }
 
 // Screen title `title_index` (right-aligned bn, with its underline) and the bottom bar: the star glyph with the star counter / star
-// level (both capped 99), the Time label and value, the gold and its "G". `dx` shifts the bar / title (the Status screen sits 1.7 PS1
-// px left of the main list). Widescreen: the title goes with the right group, the bar with the left one.
-void MainMenu::Impl::bar_and_title(int title_index, bool bar, float dx) {
+// level (both capped 99), the Time label and value, the gold and its "G". Widescreen: the title goes with the right group, the bar
+// with the left one.
+void MainMenu::Impl::bar_and_title(int title_index, bool bar) {
   group(Right);
   const std::u32string title = utf32(S6(kTitles[std::clamp(title_index, 0, 5)]));
-  HT(face_gn, 487.6f + dx, 24.4f, title, kText, 0.26f, true);
+  HT(face_gn, 487.6f, 24.4f, title, kText, 0.26f, true);
   text->prepare(face_gn, title);
   const float title_w = text->measure(face_gn, title, 0.26f) / xscale;
-  rect(PX(487.6f + dx - title_w - 1.0f), PY(34.6f), PX(title_w + 2.6f), 2.2f, rgb(200, 190, 190));
+  rect(PX(487.6f - title_w - 1.0f), PY(34.6f), PX(title_w + 2.6f), 2.2f, rgb(200, 190, 190));
   group(Left);
   if (!bar) return;
   const u32 seconds = gs->play_seconds();
@@ -401,16 +403,16 @@ void MainMenu::Impl::bar_and_title(int title_index, bool bar, float dx) {
     stars_logged = shown;
     log::info("menu: star counter {} (save 0x5A5 / 0x5A4; progression 0x40 = {})", shown, gs->slot.progression());
   }
-  StarGlyph(30.0f + dx, 0x186 + 2, 0.54f, 2.0f);
-  HN(52.2f + dx, 394.2f, stars_current, kText, 0.29f);
-  HT(face_kb, 66.1f + dx, 394.2f, utf32("/"), kText, 0.29f);
-  HN(86.5f + dx, 394.2f, stars_total, kText, 0.29f);
-  HS(0x76, 116.3f + dx, 383.9f, utf32(cm("PLAY")));
-  HN(195.6f + dx, 383.9f, playtime);
+  StarGlyph(30.0f, 0x186 + 2, 0.54f, 5.0f);
+  HN(52.2f, 394.2f, stars_current, kText, 0.29f);
+  HT(face_kb, 66.1f, 394.2f, utf32("/"), kText, 0.29f);
+  HN(86.5f, 394.2f, stars_total, kText, 0.29f);
+  HS(0x76, 116.3f, 383.9f, utf32(cm("PLAY")));
+  HN(195.6f, 383.9f, playtime);
   std::string gold = grouped_gold(gs->gold());
   gold.erase(0, gold.find_first_not_of(' '));
-  HN(195.6f + dx, 401.9f, gold);
-  HS(0x77, 204.1f + dx + (jp() ? -2.0f : 0.0f), 402.6f, utf32("G"));
+  HN(195.6f, 401.9f, gold);
+  HS(0x77, 204.1f + (jp() ? -2.0f : 0.0f), 402.6f, utf32("G"));
 }
 
 // Baked-in sheet captions: the PS1 frames carry "HP / STR. / ACC." etc. in the picture; the HD shapes are blank there and the
@@ -543,10 +545,10 @@ void MainMenu::Impl::portrait_strip(int character, float x, u32 col, float dy) {
   }
 }
 
-// Shrinks `rel` until the text is at most `maxw` PS1 px wide.
+// Text wider than `maxw` PS1 px is shrunk to exactly that width.
 float MainMenu::Impl::fit_rel(const std::u32string& str, float maxw, float rel) {
-  while (rel > 0.4f && twp(str, rel) > maxw) rel -= 0.04f;
-  return rel;
+  const float width = twp(str, rel);
+  return width > maxw && width > 0.0f ? rel * maxw / width : rel;
 }
 
 void MainMenu::Impl::TPfit(float x, float y, const std::u32string& str, float maxw, u32 colour, float rel) {
@@ -582,11 +584,12 @@ void MainMenu::Impl::draw(const render::Frame& frame, float vw, float vh, bool r
   draw_view(frame, vw, vh, resume, false);
 }
 
-// `in_pass`: vw x vh is the widened canvas itself (zoom 1; canvas x = 0 sits canvas_s in). Otherwise the window: the 4:3 canvas fit, or
-// with widescreen the widened frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts everything after the
-// clear at the picture's sides (ps1::picture_clip).
+// `in_pass`: vw x vh is the widened canvas itself (zoom 1; canvas x = 0 sits canvas_s in). Otherwise the window: RDE's menu canvas
+// (render::menu_fit, drawn in a view whose y unit is sy / sx pixels so one zoom serves both axes), or with widescreen the widened
+// frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts everything after the clear at the canvas's sides.
 void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass) {
   const bool clipped = !in_pass && canvas_s <= 0.0f;
+  float flat = 1.0f;
   if (in_pass) {
     zoom = 1.0f, ox = reach = canvas_s, oy = 0.0f;
   } else if (canvas_s > 0.0f) {
@@ -594,10 +597,28 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
     zoom = letterbox.scale * 0.25f, ox = letterbox.ox, oy = letterbox.oy;
     reach = -4.0f * letterbox.x0;
   } else {
-    const render::CanvasFit cf = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
-    zoom = cf.s, ox = cf.ox, oy = cf.oy;
+    const render::OverlayFit fit = render::menu_fit(vw, vh);
+    flat = fit.sy / fit.sx;
+    zoom = fit.sx, ox = fit.ox, oy = fit.oy / flat;
     reach = 0.0f;
   }
+  struct View {
+    render::SpriteBatch* sprites;
+    render::TextBatch* batch;
+    float vw, vh;
+    bool flattened;
+    ~View() {
+      if (!flattened) return;
+      sprites->set_view(vw, vh);
+      batch->set_pixel_grid(0.0f, 0.0f);
+    }
+  } view{sprites, text, vw, vh, flat != 1.0f};
+  const auto flatten = [&] {
+    if (!view.flattened) return;
+    sprites->set_view(vw, vh / flat);
+    text->set_pixel_grid(1.0f, flat);
+  };
+  const render::Rect clip = ps1::columns_clip(frame, vw, ox, kCanvasW * zoom);
   build();
   auto draw_cmds = [&](size_t first, size_t last) {
     for (size_t i = first; i < last; ++i) {
@@ -615,9 +636,10 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
   sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
   if (clipped) {
     sprites->end();
-    frame.set_scissor(ps1::picture_clip(frame, vw, vh, kCanvasW, kCanvasH));
+    frame.set_scissor(clip);
     sprites->begin(frame, vw, vh, true);
   }
+  flatten();
   draw_cmds(0, split);
   sprites->end();
   if (with_model) {
@@ -631,8 +653,8 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
     slot.char_id = character;
     slot.model = model_number(character, kLastMenuModel);
     slot.weapon_model = model_number(character);
-    slot.origin_x = ox, slot.origin_y = oy;
-    slot.unit_x = xscale * zoom, slot.unit_y = PY(1) * zoom;
+    slot.origin_x = ox, slot.origin_y = oy * flat;
+    slot.unit_x = xscale * zoom, slot.unit_y = PY(1) * zoom * flat;
     slot.camera = model_cam;
     slot.camera_prev = model_cam_prev;
     slot.session = model_session;
@@ -651,8 +673,9 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
       slot.hidden_meshes = 1u << kShieldConstruct;
     slot.dt = dt;
     model_view->draw(frame, vw, vh, slot);
-    if (clipped) frame.set_scissor(ps1::picture_clip(frame, vw, vh, kCanvasW, kCanvasH));
+    if (clipped) frame.set_scissor(clip);
     sprites->begin(frame, vw, vh, true);
+    flatten();
     draw_cmds(split, cmds.size());
     sprites->end();
   } else {
@@ -661,7 +684,8 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
   if (clipped) frame.set_scissor(frame.full());
   if (text->audit_enabled()) {
     text->audit_view(vw, vh);
-    for (const AuditBox& box : audit_boxes) text->audit_obstacle(ox + box.x * zoom, oy + box.y * zoom, box.w * zoom, box.h * zoom, box.label);
+    for (const AuditBox& box : audit_boxes)
+      text->audit_obstacle(ox + box.x * zoom, (oy + box.y * zoom) * flat, box.w * zoom, box.h * zoom * flat, box.label);
   }
   model_wanted = false;
 }

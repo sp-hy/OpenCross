@@ -283,8 +283,10 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
       font_face.entries[ch] = glyph_entry;
       continue;
     }
-    glyph_entry.adv = static_cast<float>(glyph->width()) + glyph->x_advance + glyph->x_offset;
-    glyph_entry.off_x = glyph->x_offset;
+    const import::SfGlyph* layout = font_face.opt.layout ? font_face.opt.layout->find(static_cast<u32>(ch)) : nullptr;
+    const import::SfGlyph& place = layout ? *layout : *glyph;
+    glyph_entry.adv = static_cast<float>(place.width()) + place.x_advance + place.x_offset;
+    glyph_entry.off_x = place.x_offset;
     glyph_entry.off_y = glyph->y_offset;
     auto it = seen.find(glyph);
     if (it != seen.end() && items[it->second].glyph) {
@@ -348,7 +350,9 @@ float TextBatch::advance(FaceId id, char32_t ch, float scale) const {
 
 float TextBatch::glyph_measure(FaceId id, char32_t ch) const {
   const Face* font_face = face(id);
-  return font_face && !font_face->bitmap && font_face->font ? font_face->font->measure(static_cast<u32>(ch)) : 0.0f;
+  if (!font_face || font_face->bitmap || !font_face->font) return 0.0f;
+  if (font_face->opt.layout && font_face->opt.layout->find(static_cast<u32>(ch))) return font_face->opt.layout->measure(static_cast<u32>(ch));
+  return font_face->font->measure(static_cast<u32>(ch));
 }
 
 float TextBatch::line_height(FaceId id, float scale) const {
@@ -411,7 +415,8 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
       // px, py: target pixels per font pixel.
       const float px = pv * grid_x_, py = pv * grid_y_;
       const float nx = std::round(px), ny = std::round(py);
-      const bool whole = nx >= 1.0f && ny >= 1.0f && std::fabs(nx - px) <= kPixelSizeTolerance * px && std::fabs(ny - py) <= kPixelSizeTolerance * py;
+      const bool whole = !style.exact && nx >= 1.0f && ny >= 1.0f && std::fabs(nx - px) <= kPixelSizeTolerance * px &&
+                         std::fabs(ny - py) <= kPixelSizeTolerance * py;
       const float cx = x + glyph_entry->off_x * scale + static_cast<float>(glyph_entry->nx) * pv * 0.5f;
       const float base = font_face->baseline > 0.0f ? y + font_face->baseline * pv : y + (glyph_entry->off_y / font_face->opt.pixel_pitch + static_cast<float>(glyph_entry->ny)) * pv;
       // The line's baseline on a target row.
@@ -444,7 +449,7 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
   const float whole_px = std::max(1.0f, std::round(pitch));
   // Whole pixels only where they keep RDE's size (whole_px = round(pitch) would draw 0.35 menu text 31 % too big
   // with the same advance - "letters too close", JP "too big" - and 0.3125 text 27 % too small); otherwise RDE's own exact draw.
-  if (glyph_entry->px && pitch >= 0.75f && std::fabs(whole_px - pitch) <= kPixelSizeTolerance * pitch && atlas->set_nearest) {
+  if (!style.exact && glyph_entry->px && pitch >= 0.75f && std::fabs(whole_px - pitch) <= kPixelSizeTolerance * pitch && atlas->set_nearest) {
     // Whole screen pixels per font pixel: whole_px = round(pitch). The glyph keeps its exact RDE centre on x; on y it
     // hangs from the face baseline, snapped once per pen line, so every glyph of a line shares the baseline row.
     const float w = static_cast<float>(glyph_entry->nx) * whole_px, h = static_cast<float>(glyph_entry->ny) * whole_px;

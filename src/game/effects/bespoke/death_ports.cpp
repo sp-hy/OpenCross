@@ -886,7 +886,9 @@ constexpr FbParams kFb[] = {
 // private ops renumbered: 0x107 / 0x108 part hide /
 // show on target 0, 0x109 / 0x10A the env CLUT fade / restore, op 0x59 replaced. The scene ops (D = s16 @+4; every task runs once in the tick that
 // starts it, then once per tick, and ends once t > D):
-//   0x101 / 0x103  the music changes to song 0x3B / to song s16 @+8
+//   0x101          the song change to song 0x3B, held silent until 0x102 releases it
+//   0x102          the held song plays
+//   0x103          the song change to song s16 @+8, played at its start
 //   0x104          a second camera plays the pack's shot named @+8 and its view fades in: alpha = 0x80 t / D (the fill is reset)
 //   0x105          the second view fades out (alpha = 0x80 - 0x80 t / D), then the second camera ends
 //   0x106          the battle camera's view fades out (fill = 0xFF t / D, subtracted), then the battle camera ends and the second takes over
@@ -910,10 +912,11 @@ class Lasdes2 : public Dissolve {
       case 0x108: Dissolve::command(0x105, args, count); break;
       case 0x109: Dissolve::command(0x102, args, count); break;
       case 0x10A: Dissolve::command(0x103, args, count); break;
-      case 0x101: song(0x3B); break;
-      // After the song change: the sound channels come back and pausing is allowed again; the audio host needs neither.
-      case 0x102: break;
-      case 0x103: song(arg(args, count, 8)); break;
+      case 0x101: song(0x3B, true); break;
+      case 0x102:
+        if (ctx_.hooks.release_song) ctx_.hooks.release_song();
+        break;
+      case 0x103: song(arg(args, count, 8), false); break;
       case 0x104: cross_in(args, count, duration); break;
       case 0x105: cross_ramp(duration, true); break;
       case 0x106: cross_ramp(duration, false); break;
@@ -933,8 +936,8 @@ class Lasdes2 : public Dissolve {
   bool done() const override { return Dissolve::done() && tasks_.empty(); }
 
  private:
-  void song(int id) const {
-    if (ctx_.hooks.play_song) ctx_.hooks.play_song(id);
+  void song(int id, bool hold) const {
+    if (ctx_.hooks.change_song) ctx_.hooks.change_song(id, hold);
   }
   void cross_in(const int* args, int count, int duration) {
     if (!ctx_.models) return;

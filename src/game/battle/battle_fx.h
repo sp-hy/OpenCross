@@ -271,8 +271,11 @@ class BattleFxRun {
     std::function<void(int phase)> form;
     // An overlay writes a unit's idle-pose word (effects::FxHooks::set_pose).
     std::function<void(int unit, int pose)> pose;
-    // An overlay changes the music (effects::FxHooks::play_song).
-    std::function<void(int song)> song;
+    // An overlay changes the music (effects::FxHooks::change_song / release_song).
+    std::function<void(int song, bool hold)> song;
+    std::function<void()> song_release;
+    // Op 0x7A: stall while a song change runs.
+    std::function<bool()> song_changing;
   };
   BattleFxRun(std::shared_ptr<const FxPack> pack, const assets::RoomEffects& particle_lib, u32 seed);
   ~BattleFxRun();

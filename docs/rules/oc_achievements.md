@@ -40,7 +40,7 @@ Ids in the tables are the game's own: room ids are the script's numbers (variabl
 | `cast` | An element in the listed ids is cast by a party member and runs (a cast caught in an element trap does not count). |
 | `item` | A script gives (op BB) the listed item id, in any room. |
 | `count` | A profile counter reaches N. |
-| `profile` | Every member of the listed set has been seen, across any saves on the profile; the members are tracked in `[Seen]`. |
+| `profile` | Every member of the listed set has been seen, across any saves on the profile; the members are tracked in `[Seen]`. A member is a room, a won scene, a model byte, a bit of a variable, a summon's colour, a double or triple tech, or an ending, as the row says. |
 | `set` | Every listed achievement is unlocked. |
 | `event` | The battle event named in the row happens (section 3). |
 
@@ -61,7 +61,7 @@ Ids in the tables are the game's own: room ids are the script's numbers (variabl
 | `big_hit` | One hit by a party member takes 9,999 HP or more from one enemy. |
 | `last_standing` | A battle whose scene has the boss flag ends won with exactly one party member above 0 HP. |
 | `one_colour` | After a party member's cast, all three field-effect colours are the same colour. |
-| `trap_catch` | An element trap the party set catches an enemy's element. |
+| `trap_catch` | An element trap the party set catches an enemy's element: the trap holds that element. A scripted fizzle that springs the trap whatever it holds is no catch unless the trap held the element. |
 | `level_eight` | A party member casts an element whose table level is 8 (element 126, the Chrono Cross, excluded). |
 
 ## 4. Story and places
@@ -70,7 +70,7 @@ Ids in the tables are the game's own: room ids are the script's numbers (variabl
 |---|---|---|---|
 | `oc_story_cross` | Wrong Side of the Tide | Cross into Another World for the first time | room 28 |
 | `oc_story_manor` | Uninvited Guests | Reach Viper Manor | room 194, 197 |
-| `oc_story_three_routes` | Every Door Tried | Reach Viper Manor with each of the three guides (Guile, Nikki, Pierre), across any saves | profile: `var_bits` variable 0x1C2 bits 0 (Nikki), 1 (Pierre), 2 (Guile) |
+| `oc_story_three_routes` | Every Door Tried | Recruit each of the three Viper Manor guides (Guile, Nikki, Pierre), across any saves | profile: `var_bits` variable 0x1C2 bits 0 (Nikki), 1 (Pierre), 2 (Guile), which Termina's scripts set when that guide joins and the manor's routes test |
 | `oc_story_fort` | Top of the Fort | Reach Fort Dragonia | room 311, 312 |
 | `oc_story_swap` | Not Yourself | Go through the body swap | body 0x31 |
 | `oc_story_vortex` | Out of the Vortex | Leave the Temporal Vortex | room_pair 372, 374 to 236 |

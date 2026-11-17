@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <utility>
 
 #include "audio/bgm_table.h"
 #include "audio/hca_stream.h"
@@ -76,6 +77,8 @@ void BattleAudio::begin_battle() {
   groups_.clear();
   started_music_ = false;
   ducked_ = false;
+  change_ = {};
+  held_ = false;
 }
 
 void BattleAudio::load_group(const std::string& key, ByteSpan drp, int wp_class, Kind kind) {
@@ -305,9 +308,34 @@ bool BattleAudio::start_song(int song, bool warn_on_failure) {
   return true;
 }
 
-void BattleAudio::play_song(int song) {
-  if (!mixer_ || !vfs_) return;
-  if (start_song(song, false)) log::info("battle audio: song {}", song);
+// The sound driver's song change in battle: the fade and the stop of the old song, then the read of the new song's files, which the
+// original game streams from the disc after the stop (OpenCross reads them at once), and the start.
+void BattleAudio::change_song(int song, bool hold) {
+  if (!mixer_ || !vfs_ || song_changing()) return;
+  change_ = {song, 0, hold};
+  if (mixer_->playing()) mixer_->fade(0, kChangeFadeTicks / 60.0);
+  log::info("battle audio: song change to {}{}", song, hold ? " (held)" : "");
+}
+
+void BattleAudio::release_song() {
+  change_.hold = false;
+  if (!held_ || !mixer_) return;
+  held_ = false;
+  mixer_->resume();
+}
+
+void BattleAudio::tick() {
+  if (!song_changing()) return;
+  ++change_.ticks;
+  if (change_.ticks == kChangeCutTick && mixer_->playing()) mixer_->stop();
+  if (change_.ticks < kChangeStartTick) return;
+  const Change change = std::exchange(change_, {});
+  if (!start_song(change.song, false)) return;
+  if (change.hold) {
+    mixer_->pause();
+    held_ = true;
+  }
+  log::info("battle audio: song {}{}", change.song, change.hold ? " (held)" : "");
 }
 
 // The field starts the battle theme itself on an encounter, so a theme already playing is adopted; a kept field song (C9 flag 1, also when the
@@ -357,6 +385,8 @@ void BattleAudio::stop_music() {
   if (mixer_ && started_music_) mixer_->stop();
   started_music_ = false;
   song_ = -1;
+  change_ = {};
+  held_ = false;
 }
 
 }  // namespace oc::game

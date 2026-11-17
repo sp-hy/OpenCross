@@ -11,6 +11,8 @@ namespace oc::ui {
 
 // ---- equip
 namespace {
+// Canvas units RDE draws the equip stat captions left of their pen x.
+constexpr float kCaptionInkDx = 4.0f;
 // The row under the list cursor. Rows past the end of the list are blank and act like the reserved row: on an accessory list they take
 // the accessory off when the slot is filled.
 EquipCand row_at(const std::vector<EquipCand>& candidates, int row, bool fill_ok) {
@@ -82,7 +84,7 @@ void MainMenu::Impl::CapL(u32 flags, float left_x, float y, std::string_view key
   cmd.face = face;
   cmd.scale = scale;
   cmd.color = kCap;
-  cmd.x = PX(left_x + key_dx);
+  cmd.x = PX(left_x + key_dx) - kCaptionInkDx;
   cmd.y = PY(y + key_dy) + (PY(16) - text->line_height(face, scale)) * 0.5f;
   emit(std::move(cmd));
 }
@@ -115,7 +117,7 @@ void MainMenu::Impl::build_equip() {
   for (int k = 0; k < 5; ++k) {
     const int id = gs->equipped(character, k);
     const float y = k == 0 ? 212.0f : k == 1 ? 260.0f : 308.0f + 24.0f * static_cast<float>(k - 2);
-    if (id > 0) TPfit(82, y, item_name(id), 128, kText, 0.9f);
+    if (id > 0) TPfit(82 + kRowDx, y, item_name(id), 128, kText, kRowRel);
     if (k == eslot) tri(52, y, !eq_list);
   }
   // stats: current (lower box) and, in list mode, the preview with its direction colour
@@ -125,8 +127,8 @@ void MainMenu::Impl::build_equip() {
     float x, y, py;
     int cap;
   };
-  static const Pos kPos[6] = {{&Stats::atk, 107, 137, 89, 999}, {&Stats::def, 107, 153, 105, 999}, {&Stats::mag, 102, 169, 121, 999},
-                              {&Stats::mdef, 182, 169, 121, 999}, {&Stats::hit, 180, 137, 89, 99}, {&Stats::evd, 180, 153, 105, 99}};
+  static const Pos kPos[6] = {{&Stats::atk, 100.4f, 137, 89, 999}, {&Stats::def, 100.4f, 153, 105, 999}, {&Stats::mag, 100.4f, 169, 121, 999},
+                              {&Stats::mdef, 182, 169, 121, 999}, {&Stats::hit, 176.5f, 137, 89, 99}, {&Stats::evd, 176.5f, 153, 105, 99}};
   Stats pre = cur;
   const EquipCand under = row_at(cands, eq_cur, eslot >= 2 && gs->equipped(character, eslot) != 0);
   const bool preview = eq_list && under.ok;
@@ -159,9 +161,11 @@ void MainMenu::Impl::build_equip() {
     CapL(style, kCapX[i], kPos[i].y, kCapNames[i].jp, kCapNames[i].en, capdx[i], capdy[i], kPos[i].x + numdx[i] - left);
     if (eq_list) CapL(style, kCapX[i], kPos[i].py, kCapNames[i].jp, kCapNames[i].en, capdx[i], capdy[i], kArrowX[i] - left);
   }
+  // The current values' rows (y 137 / 153 / 169) sit lower than their captions, the further down the more.
+  auto row_dy = [](float y) { return y > 160.0f ? 1.8f : y > 145.0f ? 1.4f : 0.5f; };
   for (int i = 0; i < 6; ++i) {
     const Pos& pos = kPos[i];
-    Digits(pos.x + numdx[i], pos.y + curdy[i], padded_number(std::min(cur.*(pos.stat), pos.cap), 3), 8);
+    Digits(pos.x + numdx[i], pos.y + curdy[i] + row_dy(pos.y), padded_number(std::min(cur.*(pos.stat), pos.cap), 3), 8);
     if (preview) {
       const int new_value = pre.*(pos.stat), old_value = cur.*(pos.stat);
       Digits(pos.x + numdx[i], pos.py + predy[i], padded_number(std::min(new_value, pos.cap), 3), 8,
@@ -178,7 +182,7 @@ void MainMenu::Impl::build_equip() {
   static const float kPercentY[4] = {137, 153, 89, 105};
   for (int row = 0; row < (eq_list ? 4 : 2); ++row) {
     if (wind) sheet_part(203, kPercentY[row], 153, 20, 12, 10);
-    else HT(face_kb != render::kNoFace ? face_kb : face_gn, 205, kPercentY[row] + 1.7f, U"%", kText, 0.275f);
+    else HT(face_kb != render::kNoFace ? face_kb : face_gn, 205, kPercentY[row] + 1.7f + (row < 2 ? row_dy(kPercentY[row]) : 0.0f), U"%", kText, 0.275f);
   }
   if (wind) {
     sheet_part(45, 133, 85, 18, 128, 2);
@@ -198,7 +202,7 @@ void MainMenu::Impl::build_equip() {
     if (cand.stock_slot < 0) continue;
     const float y = 43.0f + 24.0f * static_cast<float>(row);
     const u32 col = cand.ok ? kText : rgb(128, 128, 128);
-    TPfit(305, y, item_name(cand.item), 138, col, 0.9f);
+    TPfit(305 + kRowDx, y, item_name(cand.item), 138, col, kRowRel);
     // The second Einlanzer (item 0x40) is a pair: its row always shows 2.
     Digits(449, y, padded_number(cand.item == 0x40 ? 2 : std::min(cand.qty, 99), 2), 16, col);
   }
@@ -222,7 +226,7 @@ void MainMenu::Impl::build_equip() {
 // the token and kKeyCapRise canvas units above the line's top, over the run of spaces that follows; the text after the token resumes
 // kKeyCapAdvance canvas units further on. Any other {..} stays as written.
 void MainMenu::Impl::key_item_line(const std::string& description, float x, float y, float maxw) {
-  constexpr float kLinePitch = 24.0f, kKeyCap = 50.0f, kKeyCapIndent = 65.0f, kKeyCapRise = 16.0f, kKeyCapAdvance = 59.0f, kTextScale = 0.95f;
+  constexpr float kLinePitch = 24.0f, kKeyCap = 50.0f, kKeyCapIndent = 65.0f, kKeyCapRise = 16.0f, kKeyCapAdvance = 59.0f, kTextScale = 0.97f;
   struct Piece {
     std::u32string text;
     platform::Action action = platform::Action::FastSpeed;
@@ -250,13 +254,14 @@ void MainMenu::Impl::key_item_line(const std::string& description, float x, floa
       }
     }
     flush();
-    auto width = [&](float rel) {
-      float total = 0;
-      for (const Piece& piece : pieces) total += piece.glyph ? kKeyCapAdvance / xscale : twp(piece.text, rel);
-      return total;
-    };
+    // A line wider than maxw is shrunk to fit it exactly (the key caps keep their size).
+    float caps = 0, text_w = 0;
+    for (const Piece& piece : pieces) {
+      if (piece.glyph) caps += kKeyCapAdvance / xscale;
+      else text_w += twp(piece.text, kTextScale);
+    }
     float rel = kTextScale;
-    while (rel > 0.4f && width(rel) > maxw) rel -= 0.04f;
+    if (text_w > 0.0f && caps + text_w > maxw) rel = kTextScale * std::max(0.0f, maxw - caps) / text_w;
     const float cell_w = kKeyCap / kKeyCapW, cell_h = kKeyCap / kKeyCapH;
     float pen = x;
     for (const Piece& piece : pieces) {
@@ -288,7 +293,7 @@ void MainMenu::Impl::build_keyitems() {
   for (int row = 0; row < 15; ++row) {
     const int idx = ki_scroll + row;
     if (idx >= cnt) break;
-    TPfit(75, 46.0f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]), 135, kText, 0.9f);
+    TPfit(75 + kRowDx, 44.6f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]), 135, kText, kRowRel);
   }
   group(Right);
   Frame(0x3E, 238, 318);
@@ -301,11 +306,11 @@ void MainMenu::Impl::build_keyitems() {
       // Classic art + Ps1ResUi: cdrom/menu/keyitem/<name>.tim (255 x 255 texels at (0xEA, 0x24)).
       if (Tex* p1 = ps1_screen() ? texs.ps1("ps1:keyitem" + std::to_string(id), [&] { return ps1::keyitem(*vfs, id); }) : nullptr)
         Img(p1, PX(234), PY(36), PX(255), PY(255), 0, 0, ps1::kKeyItemUv, ps1::kKeyItemUv);
-      else if (const Tex* tex = texs.load(path)) Img(tex, PX(234), PY(36), PX(255), PY(255));
+      else if (const Tex* tex = texs.load(path)) Img(tex, PX(234), PY(37.4f), PX(255), PY(255));
     }
     for (int line = 0; line < 3; ++line) {
       const std::string description = trim(table_row("keyitem", id * 3 + line));
-      if (!description.empty()) key_item_line(description, 246, 334.0f + 24.0f * static_cast<float>(line), 228);
+      if (!description.empty()) key_item_line(description, 244.8f, 334.0f + 24.0f * static_cast<float>(line), 228);
     }
   }
 }

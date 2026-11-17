@@ -639,6 +639,7 @@ BattleFxRun::BattleFxRun(std::shared_ptr<const FxPack> pack, const assets::RoomE
   };
   sh.other = [this](const assets::SeqCmd& cmd) { on_other(cmd); };
   sh.actor_busy = [this] { return cb_.actor_busy ? cb_.actor_busy() : false; };
+  sh.song_changing = [this] { return cb_.song_changing ? cb_.song_changing() : false; };
   sh.has_target = [this](int target) { return target >= 0 && target < static_cast<int>(scene_.targets.size()); };
   seq_->set_hooks(std::move(sh));
 }
@@ -767,7 +768,8 @@ effects::FxContext BattleFxRun::make_context(const effects::ViewParams& view) co
   if (cb_.lights) ctx.hooks.lights = cb_.lights;
   if (cb_.form) ctx.hooks.form_swap = cb_.form;
   if (cb_.pose) ctx.hooks.set_pose = cb_.pose;
-  if (cb_.song) ctx.hooks.play_song = cb_.song;
+  if (cb_.song) ctx.hooks.change_song = cb_.song;
+  if (cb_.song_release) ctx.hooks.release_song = cb_.song_release;
   ctx.hooks.start_for_caster = [this](std::string_view name, int caster) { seq_->start_caster_clone(name, caster); };
   ctx.hooks.script_gate = [] { return bseq::Vm::global(0); };
   ctx.hooks.clear_script_gate = [] { bseq::Vm::set_global(0, 0); };

@@ -7,6 +7,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "game/effects/bespoke/bespoke.h"
@@ -149,15 +150,19 @@ void test_lasdes2() {
   ms.units.resize(4);
   ms.targets = {3};
   st.ctx.models = &ms;
-  std::vector<int> songs;
-  st.ctx.hooks.play_song = [&songs](int song) { songs.push_back(song); };
+  std::vector<std::pair<int, bool>> songs;
+  int released = 0;
+  st.ctx.hooks.change_song = [&songs](int song, bool hold) { songs.emplace_back(song, hold); };
+  st.ctx.hooks.release_song = [&released] { ++released; };
   auto effect = BespokeRegistry::instance().create("lasdes2", st.ctx);
   CHECK(effect != nullptr);
   if (!effect) return;
   std::vector<int> words = {0, 0, 0x42};
   effect->command(0x101, words.data(), static_cast<int>(words.size()));
+  effect->command(0x102, words.data(), static_cast<int>(words.size()));
   effect->command(0x103, words.data(), static_cast<int>(words.size()));
-  CHECK(songs == std::vector<int>({0x3B, 0x42}));
+  const std::vector<std::pair<int, bool>> expected_songs = {{0x3B, true}, {0x42, false}};
+  CHECK(songs == expected_songs && released == 1);
   words = {4, 0, 's' | ('t' << 8), '0' | ('1' << 8)};
   effect->command(0x104, words.data(), static_cast<int>(words.size()));
   CHECK(ms.cross.shot == "st01" && ms.cross.serial == 1);

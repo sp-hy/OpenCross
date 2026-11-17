@@ -17,7 +17,6 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 2. Fidelity gaps (not modelled)
 
-* **P2 OpenCross achievements: finish the implementation.** `docs/rules/oc_achievements.md` is the spec: 173 achievements, rule kinds, battle events, the profile file `achievements.txt`, the `[Game] Achievements` key, the Achievements tab and the popup. Every id in it has been read from the game data (room scripts, `pgdat` participants, the name tables). Done when every row and rule kind is in `src/game/oc_achievement_table.inc` and `game::OcAchievements`, each rule kind and battle event has a unit test in `tests/`, and the tab and popup are checked in a run; then remove this entry.
 
 
 

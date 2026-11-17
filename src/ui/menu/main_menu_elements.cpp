@@ -418,7 +418,7 @@ void MainMenu::Impl::build_use() {
     tri(0, 177.0f + 20.0f * static_cast<float>(use.roster_row), true);
     pointer(240.0f + bounce, 224.0f, false);
   } else {
-    for (size_t i = 0; i < members.size() && i < 3; ++i) status_panel(members[i], 47.0f, 27.0f + 132.0f * static_cast<float>(i));
+    for (size_t i = 0; i < members.size() && i < 3; ++i) status_panel(members[i], 47.0f, 27.0f + 132.7f * static_cast<float>(i));
     if (use.target) {
       tri(30, 37.0f + 132.0f * static_cast<float>(use.target_cur), true);
       pointer(38.0f - bounce, 224.0f, true);
@@ -447,7 +447,7 @@ void MainMenu::Impl::build_use() {
   tri(251, 47.0f + 24.0f * static_cast<float>(use.list_cur - use.list_scroll), !use.target);
   if (cnt > 0 && use.list_cur < cnt) {
     const int id = gs->slot.elements[static_cast<size_t>(list[static_cast<size_t>(use.list_cur)])].id;
-    element_info(id, 260, 340, 378.5f, 19.5f);
+    element_info(id, 260, 342, 378.5f, 19.5f);
   }
   group(Centre);
   message(PX(268), PY(412));
@@ -483,7 +483,7 @@ void MainMenu::Impl::element_info(int id, float x, float y0, float y1, float pit
     return row ? trim(*row) : std::string();
   };
   TP(x, y0, utf32(menu_str(0x801F29B0, "Lv")), kName, kRel);
-  Digits(x + 26, y0, padded_number(rules->el_level(id), 1), 16, kName);
+  Digits(x + 24, y0, padded_number(rules->el_level(id), 1), 16, kName);
   if (const data::ElemRec* record = rules->elem(id)) {
     TP(x + 48.5f, y0, U"\u00B1", kName, kRel);
     Digits(x + 53, y0, padded_number(record->raw[0x12] & 0xF, 1), 16, kName);

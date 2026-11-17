@@ -3,8 +3,8 @@
 // tag. Sounds are looked up like the engine's one resource list (Resident / Actor / Pack groups, newest first; closing a group cuts its
 // sounds), the chant plays at the start of an element cast with mask 0x100 and the theme is ducked until the pack ends.
 // Music: the field starts a battle with its battle song (the boss theme 0x31 with flag 0x40, else the battle theme 2 / 0x14) unless the
-// battle request keeps the field music (flag 1). There is no victory voice; after a win the view fades the theme out and starts the
-// victory song (BattleView::tick_finish).
+// battle request keeps the field music (flag 1). Every later song (the victory song, an effect's song) goes through the song change
+// (change_song). There is no victory voice.
 #include <bitset>
 #include <map>
 #include <memory>
@@ -79,15 +79,24 @@ class BattleAudio {
   // with keep_field_music the field song continues instead.
   void start_battle_theme(int battle_flags, bool keep_field_music);
   // Music ducking of an element cast: the cast start fades the theme to 0x66 over 0x6D frames, the effect end back to 0x7F over 0x60 frames.
-  // restore_cast() is a no-op unless duck_cast() ran.
+  // restore_cast() is a no-op unless duck_cast() ran. The view calls neither while effect op 0x7B's flag is set.
   void duck_cast();
   void restore_cast();
-  // Effect sequence op 0x54: the music fades to `volume` (low 7 bits) over `ticks` frames; the effect end's restore_cast() still applies.
+  // Effect sequence op 0x54: the music fades to `volume` (low 7 bits) over `ticks` frames; the effect end's restore_cast() still applies
+  // unless op 0x7B's flag is set.
   void fade_music(int volume, int ticks);
   // The pack opens (~1.85 s after the chant): the chant (mask 0x100) fades out over 0x3C frames and its channels stay silent until replaced.
   void fade_chant();
-  // A one-shot theme (the victory songs 0x16 / 0x17).
-  void play_song(int song);
+  // Song change, counted in refreshes from the request (tick()): a song that is playing fades to silence over kChangeFadeTicks and stops
+  // at kChangeCutTick, the new song starts at kChangeStartTick. `hold` (an effect's request): the new song starts paused, silent at its
+  // first sample, until release_song(). One change at a time: a request while one runs is dropped.
+  void change_song(int song, bool hold);
+  // The held song plays on from where it stands; a change still running starts its song unpaused.
+  void release_song();
+  bool song_changing() const { return change_.song >= 0; }
+  static constexpr int kChangeFadeTicks = 16, kChangeCutTick = 17, kChangeStartTick = 20;
+  // One battle refresh (also the frames slow motion skips).
+  void tick();
   void stop_music();
 
   // Offline check of one sound (tools): plays every program of `tag` for `seconds` and reports when the last voice stopped and what
@@ -127,6 +136,15 @@ class BattleAudio {
   bool ducked_ = false;
   // The song this battle started (for the live BgmSource switch).
   int song_ = -1;
+  // The running song change (song -1 = none); `ticks` = refreshes since the request.
+  struct Change {
+    int song = -1;
+    int ticks = 0;
+    bool hold = false;
+  };
+  Change change_;
+  // The music stands paused by a held change.
+  bool held_ = false;
   // base_: wave0000 alone, the start table when no field published one (tools, the battle harness).
   // live_tbl_: the one live table, from the field's; every opened file's banks overlay it, nothing is restored.
   std::shared_ptr<const audio::InstrumentTable> base_;

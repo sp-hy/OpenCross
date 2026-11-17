@@ -255,6 +255,8 @@ struct RouteOut {
   std::string request;
   // `art`: hd / original / modded / toggle.
   std::string art;
+  // `settings`: the tab the settings window opens on, or `close`.
+  std::string settings;
   int request_arg = 0;
   int request_arg2 = 0;
   int request_arg3 = 0;

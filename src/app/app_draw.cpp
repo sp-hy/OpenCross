@@ -502,8 +502,9 @@ void App::draw_field_ui(const SceneFrame& sf) {
                       world.vm().var(0x52) != 0;
     import::Lang name_lang = import::Lang::En;
     import::parse_lang(config.language, name_lang);
-    world_name.draw(frame, vw, vh, world.view().letterbox(vw, vh).left(), show, ui::WorldName::home_map(world.map_id()), name_lang,
-                    screen_clock);
+    const render::Letterbox lb = world.view().letterbox(vw, vh);
+    world_name.draw(frame, vw, vh, lb.x0 < 0.0f ? lb.left() : render::overlay_fit(vw, vh).ox, show, ui::WorldName::home_map(world.map_id()),
+                    name_lang, screen_clock);
   }
   if (world.overlay_needed()) {
     sprites.begin(frame, vw, vh, true);
@@ -530,8 +531,7 @@ void App::draw_field_ui(const SceneFrame& sf) {
   }
   // RDE's room card (HD art) over the room fade, under the menus.
   if (world_name_ok)
-    world_name.draw_room_card(frame, vw, vh, world.view().letterbox(vw, vh).left(),
-                              platform::art_is_hd(config.art_mode) && !game::free_cam().hide_overlays() ? world.room_card() : nullptr,
+    world_name.draw_room_card(frame, vw, vh, platform::art_is_hd(config.art_mode) && !game::free_cam().hide_overlays() ? world.room_card() : nullptr,
                               screen_clock);
   if (menu_ok && !menu.closed()) menu.draw(frame, vw, vh, true);
   // Widescreen: the main menu, the shops and the party screen cover the widened frame themselves.

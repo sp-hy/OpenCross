@@ -34,6 +34,8 @@ struct SequenceHooks {
   // Flow conditions (default: false = not blocking).
   // actor_busy (op 50): stall while true.
   std::function<bool()> actor_busy;
+  // song_changing (op 7A): stall while true.
+  std::function<bool()> song_changing;
   // next_target (op 4D): restart the loop body for the next target when true (used when has_target is unset).
   std::function<bool()> next_target;
   // True when the action has a k-th target. Drives the per-task target loop of sequences with header flag bit0 (op 4D and the

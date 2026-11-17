@@ -1193,6 +1193,12 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.art = args[1];
     return true;
   }
+  // settings <tab>|close: open the settings window on a tab, or close it
+  if (op == "settings") {
+    if (args.size() < 2) return bad("settings <tab>|close");
+    out.settings = args[1];
+    return true;
+  }
   // snap [hexvar...]: remember the state `assert same` compares
   if (op == "snap") {
     Snap snap;

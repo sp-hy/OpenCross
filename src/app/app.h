@@ -368,7 +368,7 @@ class App {
   std::string mp_version;
   std::optional<std::string> mp_battle_data;
   std::chrono::steady_clock::time_point mp_epoch = std::chrono::steady_clock::now();
-  // API names earned this run; routes read them.
+  // Steam API names and OpenCross achievement ids earned this run; routes read them.
   std::vector<std::string> earned_achievements;
   // OpenCross's own achievements: the rules, the tab's session state, the popup, and the profile file (empty: nothing is written).
   game::OcAchievements oc_achievements;

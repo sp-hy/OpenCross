@@ -18,6 +18,7 @@ usage:
   --lang        game language, 0 en 1 fr 2 it 3 de 4 es 5 jp: written to Language= of the scratch config.ini before boot (the game reads it
                 only at boot, so it cannot be combined with --attach)
   --graphics    art mode, 0 original 1 HD: written to GraphicsMode= of the scratch config.ini before boot (read only at boot)
+  --resolution  window size WxH: written to ResolutionWidth= / ResolutionHeight= of the scratch config.ini before boot
   --keep-open   leave the game running; otherwise only the process this tool started is killed
 Library: launch(), Rde(pid).redirect(path), Rde.replace_card1(data), check_save_path(path).
 Run from the repo root (it imports tools/rde_win.py for the window helpers).
@@ -59,7 +60,7 @@ k32.VirtualAllocEx.argtypes = [wt.HANDLE, ctypes.c_void_p, ctypes.c_size_t, wt.D
 k32.VirtualAllocEx.restype = ctypes.c_void_p
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-GAME_DIR = os.path.dirname(REPO)
+GAME_DIR = os.environ.get("OPENCROSS_GAMEDIR") or os.path.dirname(REPO)
 TOOLS_DIR = os.path.join(REPO, "tools")
 
 
@@ -98,10 +99,10 @@ def check_real_saves(before):
         raise SystemExit("REAL SAVE FOLDER CHANGED during the run: " + ", ".join(changed))
 
 
-def reset_sandbox(save=None, language=None, graphics=None):
+def reset_sandbox(save=None, language=None, graphics=None, resolution=None):
     """Empties the scratch folder the patched game uses, then gives each Steam id the test save and the real config (with Language=
-    set to `language` and GraphicsMode= to `graphics` when given), so the boot, which runs before any redirect, reads and writes only
-    these copies."""
+    set to `language`, GraphicsMode= to `graphics` and ResolutionWidth= / ResolutionHeight= to the (w, h) `resolution` when given),
+    so the boot, which runs before any redirect, reads and writes only these copies."""
     root = os.path.join(documents(), SANDBOX, GAME_SUBDIR)
     shutil.rmtree(os.path.dirname(root), ignore_errors=True)
     real = os.path.join(documents(), "My Games", GAME_SUBDIR, "Steam")
@@ -112,13 +113,16 @@ def reset_sandbox(save=None, language=None, graphics=None):
         if os.path.isfile(config):
             scratch = os.path.join(folder, "config.ini")
             shutil.copyfile(config, scratch)
-            if language is not None or graphics is not None:
+            if language is not None or graphics is not None or resolution is not None:
                 with open(scratch, "r", encoding="utf-8") as fh:
                     text = fh.read()
                 if language is not None:
                     text = re.sub(r"(?m)^Language=.*$", "Language=%d" % language, text, count=1)
                 if graphics is not None:
                     text = re.sub(r"(?m)^GraphicsMode=.*$", "GraphicsMode=%d" % graphics, text, count=1)
+                if resolution is not None:
+                    text = re.sub(r"(?m)^ResolutionWidth=.*$", "ResolutionWidth=%d" % resolution[0], text, count=1)
+                    text = re.sub(r"(?m)^ResolutionHeight=.*$", "ResolutionHeight=%d" % resolution[1], text, count=1)
                 with open(scratch, "w", encoding="utf-8", newline="") as fh:
                     fh.write(text)
         if save and os.path.isfile(save):
@@ -154,10 +158,10 @@ def sandbox_save_path(process):
         raise SystemExit("the save folder string did not change: refusing to run")
 
 
-def launch(save=None, startupinfo=None, language=None, graphics=None):
+def launch(save=None, startupinfo=None, language=None, graphics=None, resolution=None):
     """Starts CHRONOCROSS.exe from the game folder in the scratch save folder and returns the Popen. Never starts it unpatched."""
     env = dict(os.environ, SteamAppId=STEAM_APP_ID, SteamGameId=STEAM_APP_ID)
-    reset_sandbox(save, language, graphics)
+    reset_sandbox(save, language, graphics, resolution)
     process = subprocess.Popen([os.path.join(GAME_DIR, "CHRONOCROSS.exe")], cwd=GAME_DIR, env=env, startupinfo=startupinfo, creationflags=CREATE_SUSPENDED)
     try:
         sandbox_save_path(process)
@@ -273,10 +277,12 @@ def main():
     ap.add_argument("--keep-open", action="store_true")
     ap.add_argument("--lang", type=int)
     ap.add_argument("--graphics", type=int)
+    ap.add_argument("--resolution")
     args = ap.parse_args()
 
-    if (args.lang is not None or args.graphics is not None) and args.attach:
-        raise SystemExit("--lang and --graphics are read at boot: they cannot be combined with --attach")
+    if (args.lang is not None or args.graphics is not None or args.resolution) and args.attach:
+        raise SystemExit("--lang, --graphics and --resolution are read at boot: they cannot be combined with --attach")
+    resolution = tuple(int(part) for part in args.resolution.lower().split("x")) if args.resolution else None
     save = check_save_path(args.save)
     if not os.path.isfile(save):
         raise SystemExit("save file not found: " + save)
@@ -295,7 +301,7 @@ def main():
         pid = pids[0]
     else:
         before = real_save_hashes()
-        proc = launch(save, language=args.lang, graphics=args.graphics)
+        proc = launch(save, language=args.lang, graphics=args.graphics, resolution=resolution)
         pid = proc.pid
         print("started pid", pid)
         time.sleep(args.title_wait)

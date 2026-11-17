@@ -392,7 +392,7 @@ class BattleView {
     // The status word the party panel's ailment icons are drawn from: copied at battle start, a swap, and with hp_shown at an action end
     // or a command menu start, so a status an action inflicts shows once the action is over.
     u32 status_shown = 0;
-    // Scripted death: the KO hit landed but the death cast has not ended; scripts see the unit alive.
+    // Scripted death: the action holding the KO hit has begun and the death cast has not ended; scripts see the unit alive.
     bool death_owed = false;
     // The KO is on screen (set by the hit that causes it).
     bool ko_shown = false;
@@ -1110,9 +1110,8 @@ class BattleView {
   static constexpr int kLootDropWait = 80, kLootDropMsg = 40;
   bool fled_outro_ = false;
   int finish_ticks_ = 0;
-  // Victory music, in ticks: kVictoryThemeFade = from the win to the start of the battle theme's fade to silence; kVictoryThemeFadeTicks =
-  // the length of that fade; kVictorySongDelay = from the start of the fade to the victory song.
-  static constexpr int kVictoryThemeFade = 43, kVictoryThemeFadeTicks = 16, kVictorySongDelay = 20;
+  // Victory music: the song change to the victory song is requested this many ticks after the win (BattleAudio::change_song).
+  static constexpr int kVictorySongChange = 43;
   // The victory song still to start (-1 = none).
   int victory_song_ = -1;
 
@@ -1571,7 +1570,8 @@ class BattleView {
   float fx_slow_alpha(float alpha) const;
   // Stage emitters of a name on / off (ops 0x26 / 0x27 / 0x36-0x3D / 0x5F / 0x60).
   void fx_stage_layer(std::string_view name, bool on, bool any_duration);
-  // Op 0x7B: the gate ops 0x5F / 0x60 act only while set.
+  // Op 0x7B, cleared by op 0x60 and at the battle start: the gate ops 0x5F / 0x60 act only while set, and while it is set an element
+  // cast does not duck the music and the effect end does not restore it (a pack's own music fade stays where it put the music).
   bool fx_bti_gate_ = false;
   // ---- battle-script presentation requests (pac_vm.h Event; battle_view_script.cpp script_event)
   // Event message window (ops E0 / E2 / 62): the btel_<lang>.csv row (remapped battle id << 16 | message), one {bpage} chunk per page (UTF-8,

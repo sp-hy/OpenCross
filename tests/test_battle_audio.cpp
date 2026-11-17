@@ -1,12 +1,14 @@
 // BattleAudio's tag lookup against the engine's resource list: newest group first, a drp's nested drps before its own
 // entries, its own entries last to first, weapon-class renames inside the actor's file only, a closed group's tags gone.
-// Synthetic drps (the payloads are only checked for the 'A' signature); needs the game install for the instrument base table (SKIP without).
+// Synthetic drps (the payloads are only checked for the 'A' signature); then the song change on the original music. Needs the game install
+// for the instrument base table and the songs (SKIP without).
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <vector>
 
+#include "audio/mixer.h"
 #include "game/battle/battle_audio.h"
 #include "platform/paths.h"
 #include "vfs/vfs.h"
@@ -185,6 +187,45 @@ int main() {
     check(note(209) == 52, "reopening a file loads its bank again");
     bank_audio.begin_battle();
     check(note(208) != 51 && note(176) != 31, "a new battle starts from wave0000 again");
+  }
+
+  // The song change, one tick per refresh: the old song plays on (fading) until kChangeCutTick, the new one starts at kChangeStartTick; a
+  // held one stays silent until release_song(); a second request while the change runs is dropped. Original music, no output device.
+  {
+    audio::Mixer mixer;
+    BattleAudio music;
+    music.init(&mixer, &files);
+    music.set_remastered(false);
+    music.begin_battle();
+    music.start_battle_theme(0, false);
+    std::vector<float> pcm(800 * 2);
+    const auto step = [&] {
+      music.tick();
+      mixer.render(pcm.data(), 800);
+      double energy = 0;
+      for (float sample : pcm) energy += double(sample) * sample;
+      return energy;
+    };
+    step();
+    const int theme = mixer.current_song();
+    check(theme >= 0, "the battle theme plays");
+    music.change_song(0x16, true);
+    music.change_song(0x3B, false);
+    for (int i = 1; i < BattleAudio::kChangeCutTick; ++i) step();
+    check(mixer.current_song() == theme, "the old song plays until the cut");
+    step();
+    check(!mixer.playing() && music.song_changing(), "the old song stops at the cut");
+    for (int i = BattleAudio::kChangeCutTick + 1; i < BattleAudio::kChangeStartTick; ++i) step();
+    check(!mixer.playing(), "nothing plays between the cut and the start");
+    step();
+    check(!music.song_changing() && mixer.current_song() == 0x16, "the requested song starts; the second request was dropped");
+    double held = 0;
+    for (int i = 0; i < 120; ++i) held += step();
+    check(held == 0, "a held song is silent");
+    music.release_song();
+    double played = 0;
+    for (int i = 0; i < 240; ++i) played += step();
+    check(played > 0, "the released song plays");
   }
 
   std::printf(g_fail ? "test_battle_audio: %d failures\n" : "test_battle_audio: all passed\n", g_fail);

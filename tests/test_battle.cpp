@@ -2030,7 +2030,7 @@ void test_forced_victory_pays_defeated_only() {
   CHECK_EQ(battle.result_code(), 0);
   // Unit 3 only (unit 4 still stands, not in the mask).
   CHECK_EQ(battle.rewards().gold, 25);
-  CHECK_EQ(battle.rewards().elements.size() + battle.rewards().items.size(), 1u);
+  CHECK_EQ(battle.rewards().drops.size(), 1u);
 }
 
 void test_victory_and_growth() {
@@ -2047,8 +2047,8 @@ void test_victory_and_growth() {
     CHECK(fixture.battle.outcome() == Outcome::Victory);
     CHECK_EQ(fixture.battle.rewards().gold, 25);
     // Lo -> r=0 -> rare slot 1.
-    CHECK(fixture.battle.rewards().elements.size() + fixture.battle.rewards().items.size() == 1);
-    CHECK_EQ(fixture.battle.rewards().elements[0], 0x69);
+    CHECK(fixture.battle.rewards().drops.size() == 1);
+    CHECK_EQ(fixture.battle.rewards().drops[0], 0x8069);
     // minor growth with progress: P = min(0 + 1, 8) = 1 of 8, pending 0 -> nothing to grow towards
     CHECK_EQ(fixture.battle.growth().progress, 1);
     CHECK_EQ(fixture.battle.rewards().gains[0][1], 0);
@@ -6511,7 +6511,7 @@ void test_versus_draw_and_surrender() {
     CHECK(battle.apply(versus_attack(0, {0}, 3)));
     CHECK(battle.outcome() == Outcome::Victory && battle.versus_end() == VersusEnd::Knockout);
     CHECK_EQ(battle.winner(), 0);
-    CHECK(battle.rewards().gold == 0 && battle.rewards().items.empty() && !battle.rewards().star_up);
+    CHECK(battle.rewards().gold == 0 && battle.rewards().drops.empty() && !battle.rewards().star_up);
   }
   for (const int side : {0, 1}) {
     ScriptedRng rng{Lo::Fallback::Lo};

@@ -31,6 +31,8 @@ struct TextStyle {
   // false: the backdrop is the outline ring only (RDE colour helpers H2 / H3 / H5 pass Shadow = 0, text_core 3.1). Needs a face
   // added with SpriteFontOptions::outline_mask; other faces keep the fill + outline + shadow mask.
   bool shadow = true;
+  // Pixel faces keep the exact scaled glyph size instead of snapping it to whole pixels (text scaled down to fit a width).
+  bool exact = false;
 };
 
 struct SpriteFontOptions {
@@ -44,6 +46,9 @@ struct SpriteFontOptions {
   // whole number of screen pixels (round(pitch * scale), at least 1), the glyph centred on its exact RDE box and the line's glyphs
   // sharing one baseline. Pen advance and measure are unchanged (RDE's float layout). Other glyphs draw the source rect (linear).
   float pixel_pitch = 0.0f;
+  // Metrics only (pen advance, x offset, measure) taken from this font where it has the character; the glyph is drawn at the metric
+  // glyph's box left. RDE's original graphics lay the small kb file out with the large one's metrics.
+  std::shared_ptr<const import::SpriteFont> layout;
 };
 
 class TextBatch {

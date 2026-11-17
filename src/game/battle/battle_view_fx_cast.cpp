@@ -134,8 +134,8 @@ void BattleView::fx_charge_begin() {
   }
   // Chant: mask 0x100, pan 0x80, volume 0x7F; the mask makes the next chant end this one.
   if (const std::string chant = bunit(act_.actor).pc ? "sing" : "msin"; charged && !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
-  // The theme fades to 0x66 over 0x6D frames while the spell runs.
-  audio_.duck_cast();
+  // The theme fades to 0x66 over 0x6D frames while the spell runs, unless op 0x7B's flag is set.
+  if (!fx_bti_gate_) audio_.duck_cast();
   if (!dbg_.effects || fx_) return;
   const battle::ActionEvent& e0 = act_.ev.front();
   if (e0.element <= 0 || static_cast<size_t>(e0.element) >= tables_->elements.size()) return;
@@ -367,7 +367,9 @@ bool BattleView::fx_begin() {
   };
   cb.form = [this](int ph) { fx_form_phase(ph); };
   cb.pose = [this](int unit, int pose) { fx_set_pose(unit, pose); };
-  cb.song = [this](int song) { audio_.play_song(song); };
+  cb.song = [this](int song, bool hold) { audio_.change_song(song, hold); };
+  cb.song_release = [this] { audio_.release_song(); };
+  cb.song_changing = [this] { return audio_.song_changing(); };
   cb.fog_off = [this] {
     fx_fog_on_ = false;
     fx_unit_fog_.fill(false);

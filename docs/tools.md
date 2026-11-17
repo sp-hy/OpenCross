@@ -389,6 +389,8 @@ A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_
 | `OC_ACT0_MODEL` | `battle_view_pseudo.cpp` | model number | Overrides the model of the pseudo-action. |
 | `OC_RESULTS_HURT` | `battle_results.cpp` | HP | Caps every living member's HP at this value (at least 1) on the results screen. |
 | `OC_RESULTS_HEALER` | `battle_results.cpp` | `id,id,...` | Puts these element ids in the first open cells of every living member. |
+| `OC_RESULTS_DROPS` | `battle_results.cpp` | `word,word,...` (decimal or `0x` hex) | Replaces the drops the results screen lists with these drop words, in order (bit 15 = element id, else item id): `0x806E,2` lists the Red Wolf trap and Copper. The stock is not changed. |
+| `OC_RESULTS_STAR` | `battle_results.cpp` | set | Opens the results screen on the star-up page, as after a boss fight; the rewards are not changed. |
 | `OC_CAM_PICK` | `battle_camera.cpp`, `battle_view_util.h`, `src/game/effects/sequence_player.cpp` | camera name (e.g. `apr0`, `p01`) | Forces the camera pick; in an effect sequence's random camera pool a comma list is accepted and `name@k` limits the match to the k-th pool of the run. |
 | `OC_CAM_KEYS` | `battle_camera.cpp` | set | Logs the keys of each camera shot. |
 | `OC_CAM_TRACE` | `battle_camera.cpp` | set | Logs the camera pose every tick. |

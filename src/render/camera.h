@@ -125,6 +125,19 @@ inline OverlayFit overlay_fit(float vw, float vh) {
   return fit;
 }
 
+// RDE's canvas over its full-display screens (the main menu): the same 4:3 viewport less the bands, the 960 canvas rows filling the
+// 944/960 h of it (no 216-line squash): sx = h / 960, sy = sx * 944/960.
+inline OverlayFit menu_fit(float vw, float vh) {
+  constexpr float kCanvasW = 1280.0f, kCanvasH = 960.0f, kBand = 8.0f, kBandFree = 944.0f / 960.0f;
+  const float h = std::min(vh, vw * kCanvasH / kCanvasW);
+  OverlayFit fit;
+  fit.sx = h / kCanvasH;
+  fit.sy = fit.sx * kBandFree;
+  fit.ox = (vw - kCanvasW * fit.sx) * 0.5f;
+  fit.oy = (vh - h) * 0.5f + kBand * fit.sx;
+  return fit;
+}
+
 // The area of the window that shows layer space (4:3, or wider in widescreen: see field()). `scale` is horizontal; `scale_y` vertical
 // (= scale except in the field frame). Layer column x maps to window x `ox + x * scale`; the visible columns are [x0, x0 + w]
 // (x0 = -wide_extra(), w = 320 + 2 * wide_extra() in widescreen).

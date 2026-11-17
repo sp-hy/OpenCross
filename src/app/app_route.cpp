@@ -230,6 +230,8 @@ void App::route_frame() {
       config.art_mode = !hd ? platform::ArtMode::Original : out.art == "modded" ? platform::ArtMode::Modded : platform::ArtMode::Hd;
       apply_art_mode();
     }
+    if (out.settings == "close") ui.options_open = false;
+    else if (!out.settings.empty()) ui.open(out.settings);
     if (!out.request.empty()) route_request(out);
     if (!out.remote.empty() && !apply_route_remote(world, out)) {
       log::error("route: no remote party {}", out.remote_party.pid);

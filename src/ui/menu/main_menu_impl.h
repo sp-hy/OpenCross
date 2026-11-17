@@ -219,6 +219,8 @@ struct MainMenu::Impl {
   float zoom = 1, ox = 0, oy = 0;
   // T / TP text scale at rel 1 (bn_70).
   static constexpr float base = 0.36f;
+  // List rows (item / key item names, the Customize rows): RDE's 0.35 text scale, pen 1.6 PS1 px left of the row's x.
+  static constexpr float kRowRel = 0.97f, kRowDx = -1.6f;
   std::vector<Cmd> cmds;
   // Button glyphs / key caps of the screen being built: drawn after everything else, over the frame borders.
   std::vector<Cmd> key_caps;
@@ -459,7 +461,7 @@ struct MainMenu::Impl {
   void list_and_bar(int list_id, int sel, bool bar = true);
 
   // Defined in main_menu_draw.cpp.
-  void bar_and_title(int title_index, bool bar = true, float dx = 0);
+  void bar_and_title(int title_index, bool bar = true);
   std::string stars_logged;
 
   // Defined in main_menu_main.cpp.

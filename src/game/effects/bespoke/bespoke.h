@@ -102,8 +102,10 @@ struct FxHooks {
   // The global anmseq word 0 that battle scripts write: spark's impact helper runs while it is non-zero and clears it at the last slot.
   std::function<int()> script_gate;
   std::function<void()> clear_script_gate;
-  // The song-change request of the field's music player: the current song ends and `song` starts (lasdes2 ops 0x101 / 0x103).
-  std::function<void(int song)> play_song;
+  // The song change of the music player: the current song fades out and `song` starts; `hold` = it starts paused until release_song
+  // (lasdes2 ops 0x101 / 0x102 / 0x103).
+  std::function<void(int song, bool hold)> change_song;
+  std::function<void()> release_song;
 };
 // ---- battle models the overlays steer (PS1 model block fields) ------------------------------------------------
 // Units and axes are the PS1's: world y down, positions in world units (the 20.12 fields >> 12), angles 4096 = one turn, scale 4096 = 1.0.

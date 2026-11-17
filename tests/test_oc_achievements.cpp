@@ -342,14 +342,18 @@ int main() {
     present(new_battle, {{next}});
     CHECK(!has(new_battle, "oc_cast_one_colour"));
   }
-  {  // trap_catch: an enemy's element caught by the party's trap.
+  {  // trap_catch: an enemy's element caught by the party's trap; not a forced fizzle the party's trap did not hold.
     OcAchievements achievements = make();
     battle::ActionEvent caught = cast(4, 10);
     caught.caught = true;
     battle::ActionEvent own = cast(0, 10);
     own.caught = true;
-    present(achievements, {{own}, {cast(4, 10)}});
+    own.trap.enemy = 10;
+    battle::ActionEvent forced = caught;
+    forced.trap.pc = 11;
+    present(achievements, {{own}, {cast(4, 10)}, {forced}});
     CHECK(!has(achievements, "oc_cast_trap"));
+    caught.trap.pc = 10;
     present(achievements, {{caught}});
     CHECK(has(achievements, "oc_cast_trap"));
   }

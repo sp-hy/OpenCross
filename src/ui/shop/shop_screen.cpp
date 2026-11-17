@@ -861,7 +861,7 @@ struct ShopScreen::Impl {
       log::warn("shop: hd/menu/handle.png not available");
       return;
     }
-    Img(quad.tex, SX(pivot_x) - quad.half_w, SY(pivot_y) - quad.half_h, 2 * quad.half_w, 2 * quad.half_h, 0, 0, 1, 1, rgb(175, 172, 172));
+    Img(quad.tex, SX(pivot_x) - quad.half_w, SY(pivot_y) - quad.half_h, 2 * quad.half_w, 2 * quad.half_h, 0, 0, 1, 1, rgb(222, 222, 222));
   }
 
   // Caption and icon in the top notch of a list panel at unit (x, y): the weapon / armour / accessory frames 0x9A..0x9C and 0xA0..0xA2
@@ -913,8 +913,8 @@ struct ShopScreen::Impl {
     }
   }
   // Compass dial of the top lists: the deco disc at (382, 293) 128 x 149, the needle on the pivot (446, 367) aimed at the selected
-  // label, the labels (2 for the element shop, 3 for the smith) with leader lines like the main menu's list entries 2..4: along the
-  // label, a 12-unit diagonal down-right, then on toward the needle tip.
+  // label, the labels (2 for the element shop, 3 for the smith) with leader lines for list entries 2..4: along the label, a diagonal
+  // 11.5 across and 10.8 down, then on toward the needle tip.
   void compass(int sel, const std::vector<std::string>& labels, bool bright) {
     static const float kPos[2][3][2] = {{{301, 333}, {292, 349}, {0, 0}}, {{299, 332}, {289, 349}, {279, 365}}};
     const bool two_labels = labels.size() == 2;
@@ -925,18 +925,18 @@ struct ShopScreen::Impl {
     if (std::getenv("OC_SHOP_LOG"))
       log::info("shop compass: sel {} angle {} theta {:.2f} deg tip dir (canvas) {:.1f} deg", sel, angle, (angle + 1024) * 180.0 / 2048.0,
                 std::atan2(-std::sin((angle + 1024) * 3.14159265 / 2048.0) * 960.0 / 432.0, -std::cos((angle + 1024) * 3.14159265 / 2048.0) * 2.5) * 180.0 / 3.14159265);
-    const u32 line_colour = rgb(200, 190, 190);
-    const float thickness = 2.2f;
+    const u32 line_colour = rgb(156, 148, 148);
+    const float thickness = 2.2f, diag_w = 11.5f, diag_h = 10.8f;
     for (size_t i = 0; i < labels.size(); ++i) {
       const int entry = 2 + static_cast<int>(i);
-      const float line_x = kPos[two_labels ? 0 : 1][i][0] - 2.8f, line_y = kPos[two_labels ? 0 : 1][i][1] + 12.4f;
-      const float bend_x = 383.0f - 12.4f * static_cast<float>(entry), end_x = 387.5f + 1.4f * static_cast<float>(entry - 1);
+      const float line_x = kPos[two_labels ? 0 : 1][i][0] + 0.5f, line_y = kPos[two_labels ? 0 : 1][i][1] + 13.6f;
+      const float bend_x = 380.9f - 10.65f * static_cast<float>(entry), end_x = 379.9f + 2.4f * static_cast<float>(entry);
       rect(SX(line_x), SY(line_y) - thickness * 0.5f, SX(bend_x - line_x), thickness, line_colour);
       for (int step = 0; step <= 24; ++step) {
         const float along = static_cast<float>(step) / 24.0f;
-        rect(SX(bend_x + 12.0f * along) - thickness * 0.5f, SY(line_y + 12.0f * along) - thickness * 0.5f, thickness, thickness, line_colour);
+        rect(SX(bend_x + diag_w * along) - thickness * 0.5f, SY(line_y + diag_h * along) - thickness * 0.5f, thickness, thickness, line_colour);
       }
-      rect(SX(bend_x + 12.0f), SY(line_y + 12.0f) - thickness * 0.5f, SX(end_x - bend_x - 12.0f), thickness, line_colour);
+      rect(SX(bend_x + diag_w), SY(line_y + diag_h) - thickness * 0.5f, SX(end_x - bend_x - diag_w), thickness, line_colour);
     }
     for (size_t i = 0; i < labels.size(); ++i)
       RT(7, kPos[two_labels ? 0 : 1][i][0], kPos[two_labels ? 0 : 1][i][1], labels[i], static_cast<int>(i) == sel ? 0x004E77u : 0x808080u);
@@ -952,9 +952,9 @@ struct ShopScreen::Impl {
     char buffer[24];
     std::snprintf(buffer, sizeof buffer, "%03u:%02u:%02u", sec / 3600, sec / 60 % 60, sec % 60);
     RT(jp ? 5 : 0x90, 0x94, 0x17E, buffer);
-    // Gold x offset by digit count.
+    // Gold x offset by digit count, from x 0x7C + 3.2.
     static const int kX7C[9] = {37, 34, 30, 27, 23, 19, 16, 12, 0};
-    RT(jp ? 5 : 0x90, 0x7C + static_cast<float>(kX7C[std::min(digit_count(gs->gold()), 9) - 1]), 400, grouped_gold(gs->gold()));
+    RT(jp ? 5 : 0x90, 0x7C + 3.2f + static_cast<float>(kX7C[std::min(digit_count(gs->gold()), 9) - 1]), 400, grouped_gold(gs->gold()));
     RT(5, jp ? 0xD4 - 10.0f : 0xD4 - 8.0f, jp ? 400.0f : 401.0f, U"G");
   }
   std::string table_row(std::string_view table, int key) {
@@ -1291,7 +1291,7 @@ struct ShopScreen::Impl {
         for (const shop::Mat& material : shop::recipe(*gs, item)) {
           if (material_index >= 32) break;
           // Name at (0xE4 + 0x80 (u & 1), 0x30 + 24 (u >> 1)), style 0xAF (JP 1), colour 0x303080 on a forge shortage;
-          // at x + 0x50: need "%2d" (x, y + 2) or "-" (style 5) at (x + 2, y) when disassembling, "/" (x + 0x10, y),
+          // at x + 0x50: need "%2d" (x, y + 2) or "-" (style 5) at (x + 2, y) when disassembling, "/" (x + 0x10, y + 2),
           // have "%2d" (x + 0x18, y + 2); numbers style 0x90 with dx 3 below 10.
           const float x = 228.0f + 128.0f * static_cast<float>(material_index & 1), y = 48.0f + 24.0f * static_cast<float>(material_index >> 1);
           const int have = gs->item_count(material.id);
@@ -1304,7 +1304,7 @@ struct ShopScreen::Impl {
           if (operation == Operation::Forge)
             RT(nst, xb + (std::min(material.qty, 99) < 10 ? 3.0f : 0.0f), y + 2, fmt("%2d", std::min(material.qty, 99)), col);
           else RT(5, xb + 2, y, U"-", col);
-          RT(lang_index() == 5 ? 5 : 0xB0, xb + 0x10, y, U"/", col);
+          RT(lang_index() == 5 ? 5 : 0xB0, xb + 0x10, y + 2, U"/", col);
           RT(nst, xb + 0x18 + (std::min(have, 99) < 10 ? 3.0f : 0.0f), y + 2, fmt("%2d", std::min(have, 99)), col);
           ++material_index;
         }
@@ -1698,10 +1698,12 @@ struct ShopScreen::Impl {
     draw_view(frame, vw, vh, resume, false);
   }
   // `in_pass`: vw x vh is the widened canvas itself (zoom 1; canvas x = 0 sits 4 units per widescreen column in). Otherwise the window:
-  // the 4:3 canvas fit, or with widescreen the widened frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts
-  // everything after the clear at the picture's sides (ps1::picture_clip).
+  // RDE's canvas over the field (render::overlay_fit, drawn in a view whose y unit is sy / sx pixels so one zoom serves both axes),
+  // or with widescreen the widened frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts everything after
+  // the clear at the canvas's sides.
   void draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass) {
     const bool clipped = !in_pass && canvas_cols <= 0.0f;
+    float flat = 1.0f;
     if (in_pass) {
       zoom = 1.0f, ox = reach = 4.0f * canvas_cols, oy = 0.0f;
     } else if (canvas_cols > 0.0f) {
@@ -1709,8 +1711,9 @@ struct ShopScreen::Impl {
       zoom = letterbox.scale * 0.25f, ox = letterbox.ox, oy = letterbox.oy;
       reach = -4.0f * letterbox.x0;
     } else {
-      const render::CanvasFit cf = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
-      zoom = cf.s, ox = cf.ox, oy = cf.oy;
+      const render::OverlayFit fit = render::overlay_fit(vw, vh);
+      flat = fit.sy / fit.sx;
+      zoom = fit.sx, ox = fit.ox, oy = fit.oy / flat;
       reach = 0.0f;
     }
     build();
@@ -1718,14 +1721,22 @@ struct ShopScreen::Impl {
     sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
     if (clipped) {
       sprites->end();
-      frame.set_scissor(ps1::picture_clip(frame, vw, vh, kCanvasW, kCanvasH));
+      frame.set_scissor(ps1::columns_clip(frame, vw, ox, kCanvasW * zoom));
       sprites->begin(frame, vw, vh, true);
+    }
+    if (flat != 1.0f) {
+      sprites->set_view(vw, vh / flat);
+      text->set_pixel_grid(1.0f, flat);
     }
     for (const Cmd& cmd : cmds) {
       if (cmd.kind == Cmd::Text) fonts.draw(cmd.slot, cmd.text, cmd.x + ox / zoom, cmd.y + oy / zoom, cmd.ink, cmd.scale, cmd.align, zoom);
       else sprites->draw(cmd.set, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.h * zoom, cmd.u0, cmd.v0, cmd.u1, cmd.v1, cmd.color);
     }
     sprites->end();
+    if (flat != 1.0f) {
+      sprites->set_view(vw, vh);
+      text->set_pixel_grid(0.0f, 0.0f);
+    }
     if (clipped) frame.set_scissor(frame.full());
   }
 };

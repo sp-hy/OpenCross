@@ -180,8 +180,8 @@ void BattleView::fx_end() {
   if (fx_prev_bank_) camera_.set_bank(fx_prev_bank_);
   // The pack closes: its tags leave the list and its sounds are cut.
   audio_.end_pack();
-  // The theme returns to 0x7F over 0x60 frames.
-  audio_.restore_cast();
+  // The theme returns to 0x7F over 0x60 frames, unless op 0x7B's flag is set.
+  if (!fx_bti_gate_) audio_.restore_cast();
   if (fx_faded_) camera_.start_fade(0.0f, 20);
   fx_faded_ = false;
 }

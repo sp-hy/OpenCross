@@ -1922,15 +1922,12 @@ void BattleView::build_result_ui() {
     float ly = y + 120;
     add_text(std::format("Gold  {}", rewards.gold), x + 50, ly, kWhite);
     ly += 56;
-    for (u16 it : rewards.items) {
-      add_text("Item  " + tables_->item_name(it), x + 50, ly, kWhite, 0, 0.8f);
+    for (u16 drop : rewards.drops) {
+      if (drop & 0x8000) add_text("Element  " + tables_->element_name(drop & 0x7FFF), x + 50, ly, kGreen, 0, 0.8f);
+      else add_text("Item  " + tables_->item_name(drop), x + 50, ly, kWhite, 0, 0.8f);
       ly += 42;
     }
-    for (u16 el : rewards.elements) {
-      add_text("Element  " + tables_->element_name(el), x + 50, ly, kGreen, 0, 0.8f);
-      ly += 42;
-    }
-    if (rewards.items.empty() && rewards.elements.empty()) add_text("No drops", x + 50, ly, kGrey, 0, 0.8f);
+    if (rewards.drops.empty()) add_text("No drops", x + 50, ly, kGrey, 0, 0.8f);
     if (rewards.star_up) add_text("Star level up!", x + w / 2, y + 90, col(255, 200, 80), 1, 0.9f);
     // right / lower: stat growth per PC (battle::Battle::settle -> compute_rewards: minor growth, or the pending gains of a boss battle)
     static const char* kStat[7] = {"HP", "STR", "DEF", "HIT", "EVD", "MAG", "MDF"};

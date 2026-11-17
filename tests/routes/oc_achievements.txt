@@ -1,0 +1,37 @@
+# Four characters recruited before the first room sample (every 60 ticks): one sample unlocks all four, one panel lists them.
+0 wait 5
+- assert unearned oc_join_kid
+- request party_add 1
+- request party_add 2
+- request party_add 4
+- request party_add 5
+- assert unearned oc_join_kid
+- wait 60
+- assert earned oc_join_kid
+- assert earned oc_join_guile
+- assert earned oc_join_nikki
+- assert earned oc_join_viper
+- assert unearned oc_join_10
+- wait 20
+- screenshot oc_ach_popup_batch.png
+# Key items given as a script gives them (op BB): the Hydra Humour, the Dragon Tear and the Time Egg. Their popup waits for the panel up.
+- assert unearned oc_story_humour
+- request keyitem 21
+- request keyitem 24
+- request keyitem 53
+- assert earned oc_story_humour
+- assert earned oc_story_tear
+- assert earned oc_item_time_egg
+# Another World's Opassa Beach (room 57): a room sample within 60 ticks.
+- assert unearned oc_place_opassa
+- load opa_b04f 0
+- wait room opa_b04f
+- wait 70
+- assert earned oc_place_opassa
+- assert unearned oc_place_cape
+# The settings window on the Achievements tab; the popup waits while it is open.
+- settings Achievements
+- wait 10
+- screenshot oc_ach_tab.png
+- settings close
+- wait 5

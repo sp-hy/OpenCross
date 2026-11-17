@@ -287,6 +287,8 @@ void BattleView::tick() {
   ++frame_count_;
   if (act_.phase == Act::Phase::Cast && act_.actor >= 0 && act_.actor < battle::kPcSlots) orbit_held_ = true;
   if (!orbit_held_) orbit_clock_ += 2;
+  // The song change counts refreshes, slow motion or not.
+  audio_.tick();
   // Effect slow motion skips the game tick.
   if (fx_slow_skip()) return;
   ++tick_count_;

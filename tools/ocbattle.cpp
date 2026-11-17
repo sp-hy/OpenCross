@@ -887,10 +887,13 @@ int cmd_sim(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vect
   std::printf("result: %s  (scene %d, seed %u, %d commands, %d actions, %u rng calls)\n",
               outcome >= 0 && outcome <= 2 ? outcome_names[outcome] : "stalled/ongoing", scene, seed, turns, battle.actions(), rng.calls());
   const Rewards& rewards = battle.rewards();
-  std::printf("rewards: gold=%d items=%zu elements=%zu star_up=%d progress=%d star=%d counter=%d\n", rewards.gold, rewards.items.size(), rewards.elements.size(),
+  const auto elements = static_cast<size_t>(std::count_if(rewards.drops.begin(), rewards.drops.end(), [](u16 drop) { return (drop & 0x8000) != 0; }));
+  std::printf("rewards: gold=%d items=%zu elements=%zu star_up=%d progress=%d star=%d counter=%d\n", rewards.gold, rewards.drops.size() - elements, elements,
               rewards.star_up ? 1 : 0, battle.growth().progress, battle.growth().star, battle.growth().counter);
-  for (const u16 item : rewards.items) std::printf("  item 0x%X %s\n", item, ascii(tables.item_name(item)).c_str());
-  for (const u16 element : rewards.elements) std::printf("  element %u %s\n", element, ascii(tables.element_name(element)).c_str());
+  for (const u16 drop : rewards.drops)
+    if (!(drop & 0x8000)) std::printf("  item 0x%X %s\n", drop, ascii(tables.item_name(drop)).c_str());
+  for (const u16 drop : rewards.drops)
+    if (drop & 0x8000) std::printf("  element %u %s\n", drop & 0x7FFF, ascii(tables.element_name(drop & 0x7FFF)).c_str());
   for (size_t i = 0; i < battle.party().size(); ++i) {
     const auto& member = battle.party()[i];
     std::printf("  %s hp=%d/%d gains:", ascii(member.name).c_str(), member.hp, member.stat[0]);

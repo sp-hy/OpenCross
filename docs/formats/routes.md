@@ -145,6 +145,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `set model <char> <byte>` | Write the model byte of a party member's character record. |
 | `put [ent <n>] <x> <z>` | Place every party entity, or entity `n` only, at a world point (integer coordinates). |
 | `art hd\|original\|modded\|toggle` | Switch the art mode as F6 does, without saving the ini; `toggle` flips between the HD family and original. |
+| `settings <tab>\|close` | Open the settings window on the tab named `tab` (as Esc does, which a route cannot press), or close it. |
 | `request <kind> [arg]` | Ask the host for what a field opcode would, then wait 4 ticks. The screen it opens is handled by following `wait` / `tap` lines. Kinds in the table below. |
 | `remote add <pid> <name> <m0> <m1> <m2> <x> <y> <z> <facing>` | A remote party (`multiplayer.md` section 5) as if the network had sent it, without a server: the field model byte of each party slot (`-1` empty), and its leader standing at the world point with the facing (4096 per turn), in the field state. Adding a `pid` again replaces it. The route's parties are shown with the network's (the network's entry wins a shared `pid`) and stay across room loads until `remote clear`. |
 | `remote move <pid> <x> <y> <z> <facing> <clip> <moving>` | A new leader pose of the party, as one `pres` message: `clip` a field clip id (2 run, 3 walk), `moving` 0 or 1. The state is kept. A `pid` the route never added fails the run (exit 1). |
@@ -212,7 +213,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `room <name>` | The field room is `<name>`. |
 | `var <hexid> <value>` | The script variable equals `value`. |
 | `title_hold on\|off` | The title scene is / is not held on black until its logo movie takes over. |
-| `earned <api name>`, `unearned <api name>` | The achievement was / was not earned this run. Route runs never connect to Steam; the rules still run. |
+| `earned <name>`, `unearned <name>` | The achievement was / was not earned this run: a Steam API name, or the id of an OpenCross achievement (`rules/oc_achievements.md`; the route's ini sets `[Game] Achievements=1`). Route runs never connect to Steam; the rules still run. |
 | `dialogue open\|closed` | A dialogue is open / closed. |
 | `portrait left\|right\|none` | A dialogue is open and the last field window opened has its face panel on that side (`none`: no face, or a label). |
 | `text <words...>` | An open dialogue's message contains the words. |

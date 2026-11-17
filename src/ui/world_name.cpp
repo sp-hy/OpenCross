@@ -75,14 +75,14 @@ void WorldName::draw(const render::Frame& frame, float vw, float vh, float left,
   if (loaded_lang_ != static_cast<int>(lang)) load(lang);
   const render::TexRef set = set_[home ? 0 : 1];
   if (!set) return;
-  const render::CanvasFit fit = render::canvas_fit(vw, vh);
+  const render::OverlayFit fit = render::overlay_fit(vw, vh);
   sprites_->begin(frame, vw, vh, true);
-  sprites_->draw(set, left + kX0 * fit.s, fit.oy + kY0 * fit.s, (kX1 - kX0) * fit.s, (kY1 - kY0) * fit.s, 0.0f, 0.0f, 1.0f, 1.0f,
+  sprites_->draw(set, left + kX0 * fit.sx, fit.oy + kY0 * fit.sy, (kX1 - kX0) * fit.sx, (kY1 - kY0) * fit.sy, 0.0f, 0.0f, 1.0f, 1.0f,
                  render::pack_rgba(255, 255, 255, static_cast<u8>(alpha_ * 255.0 + 0.5)));
   sprites_->end();
 }
 
-void WorldName::draw_room_card(const render::Frame& frame, float vw, float vh, float left, const import::RoomCard* card, double clock) {
+void WorldName::draw_room_card(const render::Frame& frame, float vw, float vh, const import::RoomCard* card, double clock) {
   const double frames = frames_since(card_last_, clock);
   if (!ctx_) return;
   if (card) shown_ = card;
@@ -102,9 +102,9 @@ void WorldName::draw_room_card(const render::Frame& frame, float vw, float vh, f
       log::warn("room card: {} unavailable", path);
   }
   if (!card_set_) return;
-  const render::CanvasFit fit = render::canvas_fit(vw, vh);
+  const render::OverlayFit fit = render::overlay_fit(vw, vh);
   sprites_->begin(frame, vw, vh, true);
-  sprites_->draw(card_set_, left + shown_->x0 * fit.s, fit.oy + shown_->y0 * fit.s, (shown_->x1 - shown_->x0) * fit.s, (shown_->y1 - shown_->y0) * fit.s,
+  sprites_->draw(card_set_, fit.ox + shown_->x0 * fit.sx, fit.oy + shown_->y0 * fit.sy, (shown_->x1 - shown_->x0) * fit.sx, (shown_->y1 - shown_->y0) * fit.sy,
                  0.0f, 0.0f, 1.0f, 1.0f, render::pack_rgba(255, 255, 255, static_cast<u8>(card_alpha_ * 255.0 + 0.5)));
   sprites_->end();
 }

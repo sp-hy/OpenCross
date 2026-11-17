@@ -283,12 +283,12 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
   const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
   const float number_scale = 0.275f;
   const int lang_idx = lang_index();
-  HL(card_x + 7.0f, card_y + 11.9f, char_name(character), kName, 0.35f);
+  HL(card_x + 8.2f, card_y + 11.9f, char_name(character), kName, 0.35f);
   HS(0x4, card_x + 7.7f, card_y + 30.7f, capt("\xEF\xBC\xA8\xEF\xBC\xB0", "HP"));
   const u32 hp_colour = ch.cur_hp < ch.max_hp / 8 ? kSel : kText;
-  HN(card_x + 51.9f, card_y + 30.7f, std::to_string(std::min<int>(ch.cur_hp, 999)), hp_colour, 0.29f);
+  HN(card_x + 50.7f, card_y + 30.7f, std::to_string(std::min<int>(ch.cur_hp, 999)), hp_colour, 0.29f);
   HT(face_kb, card_x + 73.1f, card_y + 30.7f, utf32("/"), kText, 0.29f);
-  HN(card_x + 100.1f, card_y + 30.7f, std::to_string(std::min<int>(ch.max_hp, 999)), kText, 0.29f);
+  HN(card_x + 98.9f, card_y + 30.7f, std::to_string(std::min<int>(ch.max_hp, 999)), kText, 0.29f);
   static const float kInnateDx[6] = {0, 0, 0, -10, -8, -2}, kInnateDy[6] = {2, 2, 2, 2, 2, 3};
   HS(0x64, card_x + 120.0f, card_y + 34.9f, capt("\xE5\x85\x88\xE5\xA4\xA9\xE5\xB1\x9E\xE6\x80\xA7", "INNATE"), kText, dl(kInnateDx, lang_idx),
      dl(kInnateDy, lang_idx));
@@ -298,7 +298,7 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
     static const char* const kJpKey[6] = {"\xE8\x85\x95\xE5\x8A\x9B", "\xE6\xAD\xA3\xE7\xA2\xBA\xE3\x81\x95", "\xE9\xAD\x94\xE5\x8A\x9B",
                                           "\xE8\x80\x90\xE4\xB9\x85\xE5\x8A\x9B", "\xE8\xBA\xAB\xE8\xBB\xBD\xE3\x81\x95", "\xE6\x8A\x97\xE9\xAD\x94"};
     static const char* const kEnglish[6] = {"STR.", "ACC.", "MAG.", "RES.", "AGI.", "M.RES"};
-    static const float kLabelX[3] = {7.0f, 61.8f, 115.3f}, kNumberX[3] = {55.9f, 109.6f, 165.8f};
+    static const float kLabelX[3] = {7.0f, 61.8f, 115.3f}, kNumberX[3] = {55.9f, 108.4f, 167.0f};
     static const float kColumnDx[3][6] = {{3, 4, 3, 3, 3, 3}, {-4, -2, -3, -3, -3, 1}, {6, 9, 5, 5, 5, -1}};
     static const float kLabelDx[6] = {-2, -1, -6, 3, -1, -6};
     const int values[6] = {std::min<int>(ch.atk, 99), std::min<int>(ch.hit, 99), std::min<int>(ch.mag, 99), std::min<int>(ch.def, 99),
@@ -320,7 +320,9 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
     HS(0x66, card_x + 49.2f, card_y + 80.6f, capt("\xE3\x82\xB9\xE3\x82\xBF\xE3\x83\x9F\xE3\x83\x8A\xE5\x9B\x9E\xE5\xBE\xA9\xE5\x8A\x9B", "STAMINA RECOVERY"), kText,
        dl(kStaminaDx, lang_idx), dl(kStaminaDy, lang_idx));
     static const float kThirdColumnDx[6] = {6, 9, 5, 5, 5, -1};
-    HN(card_x + 167.0f + dl(kThirdColumnDx, lang_idx), card_y + 80.6f + (lang_idx == 5 ? 1.0f : 0.0f), std::to_string(std::min(gs->stamina_recovery(character), 99)),
+    // The equip header's (group 0x2F) value sits 1.4 lines higher than the status panel's.
+    const float stamina_y = card_y + 80.6f + (group_id == 0x2F ? -1.4f : 0.0f) + (lang_idx == 5 ? 1.0f : 0.0f);
+    HN(card_x + 167.0f + dl(kThirdColumnDx, lang_idx), stamina_y, std::to_string(std::min(gs->stamina_recovery(character), 99)),
        kText, number_scale);
   }
   mini_grid(character, card_x + 0x83, card_y + 6);
@@ -467,7 +469,7 @@ std::vector<std::u32string> MainMenu::Impl::profile_lines(int character) {
 
 void MainMenu::Impl::build_status() {
   const int character = cur_char();
-  const float panel_x = 40.0f;
+  const float panel_x = 42.0f;
   group(Left);
   status_panel(character, panel_x, 42);
   if (profile) {
@@ -479,7 +481,7 @@ void MainMenu::Impl::build_status() {
       text->prepare(face_gn, lines[i]);
       const float width = text->measure(face_gn, lines[i], 0.35f) / xscale;
       const float slope = width < 155.0f ? 0.0f : width < 236.0f ? 0.002f : width < 286.0f ? 0.0015f : 0.0012f;
-      HT(face_gn, 52.0f, 198.2f + 24.0f * static_cast<float>(i), lines[i], kText, 0.35f + (155.0f - width) * slope);
+      HT(face_gn, panel_x + 12.4f, 198.2f + 24.0f * static_cast<float>(i), lines[i], kText, 0.35f + (155.0f - width) * slope);
     }
   } else {
     Frame(49, panel_x, 180);
@@ -490,7 +492,7 @@ void MainMenu::Impl::build_status() {
     for (int slot = 0; slot < 5; ++slot) {
       const int id = gs->equipped(character, slot);
       const float y = slot == 0 ? 198.2f : slot == 1 ? 246.8f : 294.5f + 24.0f * static_cast<float>(slot - 2);
-      if (id > 0) HL(80.0f, y, item_name(id), kName, 0.39f);
+      if (id > 0) HL(panel_x + 40.0f, y, item_name(id), kName, 0.39f);
     }
   }
   if (model_view) {
@@ -501,12 +503,12 @@ void MainMenu::Impl::build_status() {
     portrait_strip(character, 388.0f, kWhite);
     group(Left);
   }
-  btn(0xE1 - 2, 0x172, 4);
+  btn(0xE1, 0x172, 4);
   // Widescreen: the R1 glyph flanks the model on the right, so it moves out with the right group.
   group(Right);
-  btn(0x1C9 - 2, 0x172, 5);
+  btn(0x1C9, 0x172, 5);
   group(Left);
-  bar_and_title(0, true, -1.7f);
+  bar_and_title(0);
 }
 
 // The glyph of the pad button (or key cap) bound to `action` in the canvas cell (x, y, w, h): ui/gamepad.png cells (13 x 4, the plain rows)

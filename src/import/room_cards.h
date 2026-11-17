@@ -14,7 +14,7 @@ struct RoomCard {
   int entrance = 0;
   // hd.dat path of the picture.
   std::string_view image;
-  // Placement on the 1280 x 960 canvas, from the picture's left edge.
+  // Placement on RDE's 1280 x 960 canvas over the field (render::overlay_fit, centred 4:3 also in widescreen).
   float x0 = 0, y0 = 0, x1 = 0, y1 = 0;
   // Background tile groups (bit n = group n) hidden while the card is up.
   u32 hidden_groups = 0;

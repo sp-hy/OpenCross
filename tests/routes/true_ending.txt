@@ -63,6 +63,7 @@
 - autoshot 300 30 te_cin_
 - wait room end_a01e 12000
 - assert result 4
+- assert song 59                      # lasdes2's song 0x3B plays on from the battle into the monologue
 - wait 600
 - screenshot te_90_end.png
 - autoshot 1200 60 te_end_

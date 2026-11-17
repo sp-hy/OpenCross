@@ -212,8 +212,8 @@ struct Unit {
 
 struct Rewards {
   int gold = 0;
-  std::vector<u16> items;
-  std::vector<u16> elements;
+  // Dropped words in defeated-enemy slot order (bit 15 = element id, else item id): the results screen lists them in this order.
+  std::vector<u16> drops;
   // Pilfered words (bit 15 = element id, else item id; mode 30): added to the stock at battle end, on a victory only.
   std::vector<u16> stolen;
   // Enemy casts caught by the party's element trap (mode 5): added to the element stock whatever the outcome.

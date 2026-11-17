@@ -781,7 +781,7 @@ u64 Battle::state_hash() const {
   // The summon bypasses enter the hash only while one is set.
   if (cheats_.summon_any_ring || cheats_.summon_repeat) hash.add(static_cast<u64>(cheats_.summon_any_ring ? 1 : 0) | (cheats_.summon_repeat ? 2 : 0));
   hash.add(static_cast<u64>(rewards_.gold));
-  for (const std::vector<u16>* words : {&rewards_.items, &rewards_.elements, &rewards_.stolen, &rewards_.trapped}) {
+  for (const std::vector<u16>* words : {&rewards_.drops, &rewards_.stolen, &rewards_.trapped}) {
     hash.add(words->size());
     for (const u16 word : *words) hash.add(word);
   }
@@ -3269,7 +3269,7 @@ void Battle::compute_rewards() {
     // An enemy a summon killed skips the roll and gives that colour's shiny material; boss fights keep the roll.
     const auto summon_kill = std::find_if(summon_kills_.begin(), summon_kills_.end(), [&](u16 mask) { return (mask >> i) & 1; });
     if (!boss_ && summon_kill != summon_kills_.end()) {
-      rewards_.items.push_back(kShinyMaterial[static_cast<size_t>(summon_kill - summon_kills_.begin())]);
+      rewards_.drops.push_back(kShinyMaterial[static_cast<size_t>(summon_kill - summon_kills_.begin())]);
       continue;
     }
     int slot = drop_roll(rng_, unit.drop_base);
@@ -3278,8 +3278,7 @@ void Battle::compute_rewards() {
     if (cheats_.always_loot && drop_index < tables_.drops.size()) slot = tables_.drops[drop_index].slot[1] ? 1 : 0;
     if (slot >= 0 && drop_index < tables_.drops.size()) {
       const u16 drop = tables_.drops[drop_index].slot[static_cast<size_t>(slot)];
-      if (drop & 0x8000) rewards_.elements.push_back(drop & 0x7FFF);
-      else if (drop) rewards_.items.push_back(drop);
+      if (drop) rewards_.drops.push_back(drop);
     }
   }
   bool gold_gear = opt_.gold_bonus;

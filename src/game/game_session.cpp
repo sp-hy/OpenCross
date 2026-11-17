@@ -330,10 +330,10 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   }
   sum.gold = rewards.gold;
   gs.set_gold(static_cast<u32>(std::min<u64>(9999999ull, static_cast<u64>(gs.gold()) + static_cast<u64>(std::max(0, rewards.gold)))));
-  for (u16 id : rewards.items)
-    if (gs.add_item(id)) ++sum.items;
-  for (u16 id : rewards.elements)
-    if (gs.add_element(id)) ++sum.elements;
+  for (u16 drop : rewards.drops) {
+    if (drop & 0x8000) sum.elements += gs.add_element(drop & 0x7FFF) ? 1 : 0;
+    else sum.items += gs.add_item(drop) ? 1 : 0;
+  }
   if (rewards.star_up) {
     sum.star_up = true;
     // The core ran from the real star: its growth state is the new one (stars 0..99).

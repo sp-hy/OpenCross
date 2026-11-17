@@ -75,6 +75,31 @@ std::shared_ptr<const import::SpriteFont> load(const vfs::Vfs& vfs, const std::s
   return font;
 }
 
+std::shared_ptr<const import::SpriteFont> load_metrics(const vfs::Vfs& vfs, const std::string& name) {
+  static std::mutex mu;
+  static std::map<std::string, std::weak_ptr<const import::SpriteFont>> cache;
+  std::lock_guard<std::mutex> lock(mu);
+  if (auto it = cache.find(name); it != cache.end())
+    if (auto cached = it->second.lock()) return cached;
+  auto raw = vfs.read(name);
+  if (!raw) {
+    log::warn("font: {} not found", name);
+    return nullptr;
+  }
+  std::string err;
+  auto parsed = import::parse_spritefont(std::move(*raw), &err);
+  if (!parsed) {
+    log::warn("font: {}: {}", name, err);
+    return nullptr;
+  }
+  auto metrics = std::make_shared<import::SpriteFont>();
+  metrics->glyphs = std::move(parsed->glyphs);
+  metrics->line_spacing = parsed->line_spacing;
+  std::shared_ptr<const import::SpriteFont> font = std::move(metrics);
+  cache[name] = font;
+  return font;
+}
+
 u32 col_k(u32 colour, int brightness_k, u8 alpha) {
   const float factor = static_cast<float>(brightness_k & 31) / 3968.0f;
   auto channel = [&](int shift) { return to8(std::min(1.0f, static_cast<float>((colour >> shift) & 0xFF) * factor)); };
@@ -99,6 +124,12 @@ void FontSet::init(const vfs::Vfs& vfs, render::TextBatch& text) {
   faces_ = {};
 }
 
+const import::SfGlyph* FontSet::metrics(const Face& face, char32_t ch) {
+  if (face.layout)
+    if (const import::SfGlyph* glyph = face.layout->find(static_cast<u32>(ch))) return glyph;
+  return face.font->find_or_default(static_cast<u32>(ch));
+}
+
 FontSet::Face* FontSet::get(int slot_index, bool classic) {
   if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_) return nullptr;
   const int file = kSlotFile[slot_index];
@@ -107,9 +138,12 @@ FontSet::Face* FontSet::get(int slot_index, bool classic) {
     face.tried = true;
     if (face.pending.valid()) face.font = face.pending.get();
     else face.font = load(*vfs_, member(slot_index, classic));
+    if (classic && file == kSlotFile[kKb])
+      face.layout = face.pending_layout.valid() ? face.pending_layout.get() : load_metrics(*vfs_, member(kKb, false));
     if (face.font) {
       render::SpriteFontOptions opt;
       opt.narrow = classic;
+      opt.layout = face.layout;
       opt.outline_mask = true;
       // small_ files: pixel fonts with 16 font pixels per point size (70 / 16 = 4.375 texels). ch_100 / cur_70 are the HD files in
       // both sets and fail the per-glyph grid test, so they keep RDE's linear drawing.
@@ -130,6 +164,8 @@ void FontSet::prefetch(int slot_index) {
   Face& face = faces_[static_cast<size_t>((classic_ ? kFiles : 0) + kSlotFile[slot_index])];
   if (face.tried || face.pending.valid()) return;
   face.pending = std::async(std::launch::async, [vfs = vfs_, name = member(slot_index, classic_)] { return load(*vfs, name); });
+  if (classic_ && kSlotFile[slot_index] == kSlotFile[kKb])
+    face.pending_layout = std::async(std::launch::async, [vfs = vfs_] { return load_metrics(*vfs, member(kKb, false)); });
 }
 
 bool FontSet::ready(int slot_index) {
@@ -157,7 +193,7 @@ float FontSet::measure(int slot_index, std::u32string_view text, float scale) {
       continue;
     }
     if (ch == U'\r') continue;
-    const import::SfGlyph* glyph = face->font->find_or_default(static_cast<u32>(ch));
+    const import::SfGlyph* glyph = metrics(*face, ch);
     if (!glyph) continue;
     x = std::max(x + glyph->x_offset, 0.0f);
     if (!(is_blank(ch) && glyph->width() <= 1 && glyph->height() <= 1)) right = std::max(right, x + static_cast<float>(glyph->width()));
@@ -176,6 +212,7 @@ void FontSet::draw(int slot_index, std::u32string_view text, float x, float y, c
   render::TextStyle style;
   style.backdrop_color = ink.outline;
   style.shadow = ink.shadow;
+  style.exact = ink.exact;
   // Additive (H5): dst + alpha * (normal * fill + outline * (ring - fill)) = the outline colour over the fill + ring mask, then
   // (normal - outline) over the fill mask, both added with the colour's alpha.
   u32 fill_colour = ink.normal;
@@ -197,7 +234,7 @@ void FontSet::draw(int slot_index, std::u32string_view text, float x, float y, c
         continue;
       }
       if (ch == U'\r') continue;
-      const import::SfGlyph* glyph = face->font->find_or_default(static_cast<u32>(ch));
+      const import::SfGlyph* glyph = metrics(*face, ch);
       if (!glyph) continue;
       px = std::max(px + glyph->x_offset, 0.0f);
       text_->draw_glyph(face->id, ch, (x + (px - glyph->x_offset) * scale) * k, (y + py * scale) * k, fill_colour, scale * k, pass, style);

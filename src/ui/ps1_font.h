@@ -5,7 +5,8 @@
 // text lists. "Original graphics" (config GraphicsMode = 0) only swaps the font files: the loader reads
 // data\font\small_font_<face>.spritefont instead of large_font_<face> and draws every glyph one texel narrower. The small_ files
 // are pixel fonts (one font pixel = about 4.4 texels, fill / outline ring / drop-shadow masks) - the classic look of the PS1 English
-// release; layout, slots, scales and colours are identical in both modes.
+// release; slots, scales and colours are identical in both modes, and so is the layout: the small kb file's glyphs are laid out with
+// the large kb file's metrics (pen advance, offsets, measure; the other small files keep their own).
 //
 // FontSet = the 14 RDE font slots for one render::TextBatch, loaded in the current art mode on first use.
 //   ui::font::FontSet fonts;  fonts.init(vfs, text);  fonts.set_classic(original_art);
@@ -59,6 +60,8 @@ std::string member(int slot_index, bool classic);
 // Parsed spritefont, shared process-wide while any FontSet / screen holds it (kb / kt are ~190 MB each). Sets the loader's default
 // character ('#' for kb kt bn gn gn_italic ik; none for ci cur ch).
 std::shared_ptr<const import::SpriteFont> load(const vfs::Vfs& vfs, const std::string& member);
+// Only the glyph metrics and line spacing of a spritefont (no pixels), for laying out another face's glyphs; shared like load().
+std::shared_ptr<const import::SpriteFont> load_metrics(const vfs::Vfs& vfs, const std::string& member);
 
 // ---- colours. Colour words are PS1 0x00BBGGRR; 0x80 per channel = 1.0 at k 31.
 // outline doubles as the shadow colour where the helper draws a shadow; shadow = false for H2 / H3 / H5;
@@ -68,6 +71,8 @@ struct Ink {
   u32 outline = render::pack_rgba(33, 33, 33);
   bool shadow = true;
   bool additive = false;
+  // render::TextStyle::exact.
+  bool exact = false;
 };
 // col * k: per channel min(1, byte * (k & 31) / 3968).
 u32 col_k(u32 colour, int brightness_k, u8 alpha = 255);
@@ -116,10 +121,14 @@ class FontSet {
   struct Face {
     render::FaceId id = render::kNoFace;
     std::shared_ptr<const import::SpriteFont> font;
+    // render::SpriteFontOptions::layout (the small kb file only).
+    std::shared_ptr<const import::SpriteFont> layout;
     bool tried = false;
-    std::future<std::shared_ptr<const import::SpriteFont>> pending;
+    std::future<std::shared_ptr<const import::SpriteFont>> pending, pending_layout;
   };
   Face* get(int slot_index, bool classic);
+  // The glyph whose metrics place `ch` (the face's layout file when it has the character, else the face's own).
+  static const import::SfGlyph* metrics(const Face& face, char32_t ch);
   // Text for the next face build (prepare()).
   std::u32string first_extra_;
 

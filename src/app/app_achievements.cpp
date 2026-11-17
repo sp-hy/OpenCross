@@ -102,6 +102,7 @@ void App::update_oc_achievements(int ticks) {
     }
   for (const size_t row : oc_achievements.take_unlocked()) {
     log::info("oc achievement earned: {}", oc_achievements.rows()[row].id);
+    earned_achievements.emplace_back(oc_achievements.rows()[row].id);
     if (!config.hide_achievement_notices) oc_popup.push(oc_achievements.rows()[row].title);
   }
   if (oc_achievements.take_dirty()) save_oc_achievements();

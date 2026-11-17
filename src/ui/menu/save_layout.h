@@ -38,7 +38,7 @@ constexpr float kTimeRight = 540, kTimeY = 245.6f;
 constexpr float kGoldRight = 531, kGoldY = 259.8f, kGoldUnitX = 533, kGoldUnitScale = 0.26f;
 constexpr float kLocX = 285, kLocY1 = 275.3f, kLocY2 = 291.8f, kLocScale = 0.28f;
 // Message box text ("Please select a file." ...) and the state-0 description ("Save a File" / "Load a File").
-constexpr float kMsgInkX = 147.5f, kMsgInkY = 338.5f, kMsgScale = 0.31f, kMsgWidth = 400;
+constexpr float kMsgInkX = 147.5f, kMsgInkY = 338.5f, kMsgScale = 0.35f, kMsgWidth = 400;
 constexpr float kTopMsgInkX = 97.5f, kTopMsgInkY = 284.5f;
 // Save / Load list: labels at the top right with leader lines (horizontal run, then a short diagonal) toward the dial
 // (menutim_02 at the same canvas size as the main list's) whose needle aims at the end of the selected entry's line.
