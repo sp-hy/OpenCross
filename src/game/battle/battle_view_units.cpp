@@ -892,7 +892,12 @@ void BattleView::tex_flip_paste_hd(ModelHandle& model, int dx, int dy, const std
 }
 
 void BattleView::tick_units() {
-  for (int i = 0; i < battle::kUnits; ++i) {
+  // The game's order: the monsters' scripts first, then the party's (g_vfxIndexMap, filled by BattleObj_PopulateFromActorWorkArea as the
+  // battle activates each actor, the monsters before the party in every recording). A target's hit reaction therefore sees the caster's
+  // hit one tick later than with the party first: Dash & Slash's 'hit0' (bound by the target) and the shots it picks come a tick after
+  // the caster's op, with Serge one dash step further on.
+  for (int n = 0; n < battle::kUnits; ++n) {
+    const int i = (n + battle::kPcSlots) % battle::kUnits;
     Visual& visual = vis_[static_cast<size_t>(i)];
     const battle::Unit& unit_rec = bunit(i);
     if (!unit_rec.present) continue;
