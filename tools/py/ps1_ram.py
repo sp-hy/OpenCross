@@ -76,6 +76,13 @@ _TABLE = {
     "e3372": (0x800E3372, 0x800DDEFA),
     "cb_damv": (0x800B07B8, 0x800A9BF0),          # damage digit flight stage callback
     "cb_dam1": (0x800B06D4, 0x800A9B0C),          # damage digit rest stage callback
+    # what the Dopplegang creature pick writes: the unit and form the unit swap takes, the form flag, the action's model word,
+    # and the four-byte rows mapping a pool slot to its battle model
+    "swap_form": (0x800DFFA8, 0x800DA980),
+    "swap_unit": (0x800DFFAC, 0x800DA984),
+    "swap_has_form": (0x800DFFD4, 0x800DA9AC),
+    "action_model": (0x800DFC46, 0x800DA61E),
+    "dopple_models": (0x800DEB44, 0x800D8700),
     # field overlay state
     "fld_entities": (0x800E8894, 0x800E257C),     # pointer to the entity table, stride 0x278
     "fld_lead": (0x800E9F7C, 0x800E3C6C),         # index of the controlled entity, u8
@@ -105,6 +112,7 @@ EXE_SIGNATURES = {"japan": bytes.fromhex("0800e003000000000780023c803b4224"),
 UNIT_STRIDES = (0x410, 0x438)
 UNIT_COUNT = 9
 UNIT_HP, UNIT_COUNTDOWN, UNIT_GAUGE, UNIT_MODEL, UNIT_STAMINA = 0xB8, 0x16C, 0x16E, 0x190, 0x19E
+UNIT_KIND = 0x2D
 
 
 class RamMap:

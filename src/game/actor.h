@@ -61,6 +61,10 @@ class ActorShadows {
   static void floor_normal(const WalkMesh& walk, int tri, float out[3]);
   // One tick of an actor's eased floor slope (ShadowParams::tile_slope_x / _z) toward triangle `tri`'s; off the mesh (a ladder) it stays.
   static void ease_slope(const WalkMesh& walk, int tri, float& slope_x, float& slope_z);
+  // How far a posed model reaches from (x, z) along world x or z: every vertex placed as the skinner places it (a rigid mesh on joint 0), with
+  // `model` x `palette[joint]`. `joints` is scratch for the joints' world matrices.
+  static float model_reach(const assets::ModelAsset& asset, const render::Mat4& model, std::span<const render::Mat4> palette, float x, float z,
+                           std::vector<render::Mat4>& joints);
 
  private:
   render::Texture tex_;

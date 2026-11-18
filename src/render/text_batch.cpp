@@ -393,12 +393,12 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
     // column or row is dropped by the sampling.
     const import::Ps1Font& font = *font_face->ps1;
     const bool shadow = pass == Pass::Backdrop;
-    if (shadow && !font.shadow()) return;
     const int idx = font.index_for(ch);
     if (idx < 0 || !font_face->fill) {
       if (audit_on_ && pass == Pass::Fill) audit_glyph(nullptr, ch, x, y, x, y);
       return;
     }
+    if (shadow && !font.shadow(idx)) return;
     const float gx = grid_x_ > 0 ? grid_x_ : 1.0f, gy = grid_y_ > 0 ? grid_y_ : 1.0f;
     const float pw = std::max(1.0f, std::round(ps1_pixel(scale) * gx)) / gx, ph = std::max(1.0f, std::round(ps1_pixel(scale) * aspect_ * gy)) / gy;
     const int cell_w = font.cell_w() + 1, cell_h = font.cell_h() + 1;

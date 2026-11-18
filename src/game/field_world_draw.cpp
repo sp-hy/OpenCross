@@ -260,8 +260,9 @@ bool FieldWorld::casts_shadow(size_t index) const {
 }
 
 // [Enhancements] Lighting: each actor flattened straight down onto its own floor height, one tile per actor, standing (Actor::upright_matrix: a
-// model leaned toward the camera would lay its whole body's shadow behind it, seen as a dark rim around the figure). The tile is sized to the pose, so a raised arm
-// stays inside it; an actor past the mask's tiles keeps the blob. The strength is the PS1 shadow's (water and stairs fade it out the same way).
+// model leaned toward the camera would lay its whole body's shadow behind it, seen as a dark rim around the figure). The tile is sized to the posed
+// mesh, so a raised arm or a wide model on one joint (a boat) stays inside it instead of being cut off at the tile's edge; an actor past the
+// mask's tiles keeps the blob. The strength is the PS1 shadow's (water and stairs fade it out the same way).
 // The remote members drawn take the tiles left after the room's actors, at the strength of their blob.
 void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
   for (Ent& entity : ents_) entity.shadow_tile = -1;
@@ -276,7 +277,7 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
   alpha = interp_alpha(alpha);
   static constexpr float kPoseMargin = 72.0f, kMinHalf = 96.0f, kMaxHalf = 640.0f;
   static constexpr int kMaxTiles = static_cast<int>(render::ShadowPipeline::kMaxCasters);
-  std::vector<render::Mat4> palette;
+  std::vector<render::Mat4> palette, joints;
   std::vector<float> halves;
   int tile = 0;
   // The next tile: sized to the pose, placed at `floor_y`, the silhouette cast at strength `grey`; returns the tile's half span.
@@ -286,11 +287,8 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
     render::Mat4 model = actor.upright_matrix(alpha);
     actor.palette(alpha, palette);
     const MenuBody* menu = dress(actor, palette, model);
-    float reach = 0.0f;
-    for (const render::Mat4& joint : palette) {
-      const render::Mat4 world = model * joint;
-      reach = std::max({reach, std::fabs(world.at(0, 3) - pose.x), std::fabs(world.at(2, 3) - pose.z)});
-    }
+    const assets::ModelAsset* asset = menu ? &menu->body->asset : actor.asset();
+    const float reach = asset ? ActorShadows::model_reach(*asset, model, palette, pose.x, pose.z, joints) : 0.0f;
     const float half = std::clamp(reach + kPoseMargin, kMinHalf, kMaxHalf);
     halves.push_back(half);
     shadow_tiles_.place_tile(tile++, pose.x, pose.z, floor_y, half);

@@ -7,6 +7,7 @@
 #include "core/log.h"
 #include "import/container.h"
 #include "import/tim.h"
+#include "render/shadow_pipeline.h"
 #include "vfs/vfs.h"
 
 namespace oc::game {
@@ -1294,6 +1295,28 @@ void ActorShadows::ease_slope(const WalkMesh& walk, int tri, float& slope_x, flo
   slope_z += (std::clamp(-normal[2] / normal[1], -kMaxSlope, kMaxSlope) - slope_z) * kSlopeEase;
 }
 
+float ActorShadows::model_reach(const assets::ModelAsset& asset, const render::Mat4& model, std::span<const render::Mat4> palette, float x, float z,
+                                std::vector<render::Mat4>& joints) {
+  joints.clear();
+  for (const render::Mat4& joint : palette) joints.push_back(model * joint);
+  auto joint_world = [&](u16 joint) -> const render::Mat4& { return joint < joints.size() ? joints[joint] : model; };
+  float reach = 0.0f;
+  for (const assets::Mesh& mesh : asset.meshes)
+    for (const assets::SkinVertex& vertex : mesh.pool) {
+      float world_x = 0.0f, world_z = 0.0f;
+      for (size_t k = 0; k < 2; ++k) {
+        const float weight = mesh.skinned ? vertex.weight[k] : (k == 0 ? 1.0f : 0.0f);
+        if (weight == 0.0f) continue;
+        const render::Mat4& world = joint_world(mesh.skinned ? vertex.joint[k] : u16{0});
+        const assets::Vec3& pos = mesh.skinned ? vertex.local[k] : vertex.bind_pos;
+        world_x += weight * (world.at(0, 0) * pos[0] + world.at(0, 1) * pos[1] + world.at(0, 2) * pos[2] + world.at(0, 3));
+        world_z += weight * (world.at(2, 0) * pos[0] + world.at(2, 1) * pos[1] + world.at(2, 2) * pos[2] + world.at(2, 3));
+      }
+      reach = std::max({reach, std::fabs(world_x - x), std::fabs(world_z - z)});
+    }
+  return reach;
+}
+
 void ActorShadows::draw(render::SpriteBatch& sprites, const render::FieldCamera& camera, const render::Letterbox& lb, float scroll_x,
                         float scroll_y, std::span<const ShadowParams> shadows, bool linear, render::TexRef mask) const {
   const render::TexRef set = linear ? set_linear_ : set_nearest_;
@@ -1332,14 +1355,15 @@ void ActorShadows::draw(render::SpriteBatch& sprites, const render::FieldCamera&
     const float slot = std::floor(std::max(slot_z, 0.0f) / 16.0f) + shadow.layer + 0.5f;
     // The actor's silhouette: its tile on the eased floor plane and in the blob's slot, so it meets the backdrop as the blob does. Tile x, z are world x, z.
     if (shadow.tile_half > 0.0f && mask) {
+      const float span = shadow.tile_half * render::ShadowPipeline::kTileKeep, uv_span = shadow.tile_uv[2] * render::ShadowPipeline::kTileKeep;
       for (int k = 0; k < 4 && ok; ++k) {
-        const float side_x = (kShadowCorner[k][0] > 0.0f ? 1.0f : -1.0f) * shadow.tile_half, side_z = (kShadowCorner[k][1] > 0.0f ? 1.0f : -1.0f) * shadow.tile_half;
+        const float side_x = (kShadowCorner[k][0] > 0.0f ? 1.0f : -1.0f) * span, side_z = (kShadowCorner[k][1] > 0.0f ? 1.0f : -1.0f) * span;
         render::FieldCamera::Projected pr;
         ok = camera.project({shadow.x + side_x, shadow.y + shadow.tile_slope_x * side_x + shadow.tile_slope_z * side_z, shadow.z + side_z}, pr);
         xy[k * 2] = lb.ox + (pr.sx + scroll_x) * lb.scale;
         xy[k * 2 + 1] = lb.oy + (pr.sy + scroll_y) * lb.scale_y;
-        uv[k * 2] = shadow.tile_uv[0] + (side_x > 0.0f ? shadow.tile_uv[2] : -shadow.tile_uv[2]);
-        uv[k * 2 + 1] = shadow.tile_uv[1] + (side_z > 0.0f ? -shadow.tile_uv[2] : shadow.tile_uv[2]);
+        uv[k * 2] = shadow.tile_uv[0] + (side_x > 0.0f ? uv_span : -uv_span);
+        uv[k * 2 + 1] = shadow.tile_uv[1] + (side_z > 0.0f ? -uv_span : uv_span);
       }
       if (!ok) continue;
       sprites.set_blend(render::BlendMode::Multiply);

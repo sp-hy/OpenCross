@@ -1,5 +1,5 @@
 // Disc reader on synthetic images written to a temp folder: a small disc with the Chrono Cross layout (ISO volume, file table,
-// disc-number sector) in every container (cooked iso, raw bin, cue with one and two files, ccd, mds with subchannel, m3u, single
+// disc-number sector) in every container (cooked iso, raw bin, cue with one and two files, ccd with its table of contents, mds with subchannel, m3u, single
 // and multi-disc pbp), CHD and encrypted-PBP refusal, the table decode, identification of an unknown build and of other discs, and
 // the search merging the discs of several places by build and disc number.
 #include <miniz.h>
@@ -241,7 +241,17 @@ void test_containers(const fs::path& dir) {
 
   write_file(dir / "clone.img", raw);
   write_file(dir / "clone.sub", Bytes(kSectors * kSubchannelSize, 0));
-  write_file(dir / "clone.ccd", std::string("[CloneCD]\r\nVersion=3\r\n[Disc]\r\nTocEntries=4\r\n[TRACK 1]\r\nMODE=2\r\nINDEX 1=0\r\n"));
+  const auto ccd_text = [](int sessions, int scrambled, int track_lba, int lead_out) {
+    const auto entry = [](int index, const char* point, int control, int plba) {
+      return "[Entry " + std::to_string(index) + "]\r\nSession=1\r\nPoint=" + point + "\r\nADR=0x01\r\nControl=0x0" + std::to_string(control) +
+             "\r\nTrackNo=0\r\nPLBA=" + std::to_string(plba) + "\r\n";
+    };
+    return "[CloneCD]\r\nVersion=3\r\n[Disc]\r\nTocEntries=4\r\nSessions=" + std::to_string(sessions) +
+           "\r\nDataTracksScrambled=" + std::to_string(scrambled) + "\r\n[Session 1]\r\nPreGapMode=2\r\n" + entry(0, "0xa0", 4, 4350) +
+           entry(1, "0xa1", 4, 4350) + entry(2, "0xa2", 4, lead_out) + entry(3, "0x01", 4, track_lba) +
+           "[TRACK 1]\r\nMODE=2\r\nINDEX 1=0\r\n";
+  };
+  write_file(dir / "clone.ccd", ccd_text(1, 0, 0, kSectors));
   CHECK(detect_format(dir / "clone.ccd") == ImageFormat::CloneCd);
   if (auto source = open_image(dir / "clone.ccd", &error)) {
     check_disc(*source, user, true, 1);
@@ -249,6 +259,24 @@ void test_containers(const fs::path& dir) {
   } else {
     CHECK(!"ccd opens");
   }
+  Bytes padded = raw;
+  padded.resize(raw.size() + 3 * kRawSectorSize, 0);
+  write_file(dir / "padded.img", padded);
+  write_file(dir / "padded.ccd", ccd_text(1, 0, 0, kSectors));
+  if (auto source = open_image(dir / "padded.ccd", &error)) check_disc(*source, user, true, 1);
+  else CHECK(!"ccd with a longer image opens");
+  write_file(dir / "short.img", raw);
+  write_file(dir / "short.ccd", ccd_text(1, 0, 0, kSectors + 5));
+  CHECK(!open_image(dir / "short.ccd", &error) && error.find("shorter") != std::string::npos);
+  write_file(dir / "multi.img", raw);
+  write_file(dir / "multi.ccd", ccd_text(2, 0, 0, kSectors));
+  CHECK(!open_image(dir / "multi.ccd", &error) && error.find("multi-session") != std::string::npos);
+  write_file(dir / "scrambled.img", raw);
+  write_file(dir / "scrambled.ccd", ccd_text(1, 1, 0, kSectors));
+  CHECK(!open_image(dir / "scrambled.ccd", &error) && error.find("scrambled") != std::string::npos);
+  write_file(dir / "negative.img", raw);
+  write_file(dir / "negative.ccd", ccd_text(1, 0, -1, kSectors));
+  CHECK(!open_image(dir / "negative.ccd", &error) && error.find("ascend") != std::string::npos);
 
   Bytes mdf;
   for (u32 lba = 0; lba < kSectors; ++lba) {

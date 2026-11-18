@@ -9,7 +9,7 @@ Names this project has established, one `name = 0xADDR;  # function|data: descri
 | `ps1_field.txt` | `prog/field.prg` | `0x800A9F00` | 573 / 226 |
 | `ps1_battle.txt` | `prog/battle.prg` | `0x800A9F00` | 541 / 281 |
 | `ps1_btlinit.txt` | `prog/btlinit.prg` | `0x801EE000` | 24 / 7 |
-| `ps1_btlexit.txt` | `prog/btlexit.prg` | `0x801EA800` | 54 / 40 |
+| `ps1_btlexit.txt` | `prog/btlexit.prg` | `0x801EA800` | 54 / 42 |
 | `ps1_menu.txt` | `prog/menutest.prg`, `namemenu.prg`, `shopmenu.prg` (and the memmenu/monmenu screens) | `0x801D2800 (0x801EE000 for memmenu, monmenu)` | 247 / 156 |
 | `rde_hooks.csv` | catalogue of the RDE exe's hooks (`CHRONOCROSS.exe`) | n/a | 2,034 rows |
 | `overlays.csv` | catalogue of the PS1 overlays | n/a | 106 overlays plus the main exe |

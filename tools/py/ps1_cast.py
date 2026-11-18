@@ -8,7 +8,7 @@
                                                [--disc 1|2|PATH | --disc2]
                                                [--p2-every N --p2-lo A --p2-hi B] [--p2-dump N] [--party-ids a,b] [--forge-args "x|y"]
     python -X utf8 tools/py/ps1_cast.py force  --scene N --ids e[:unit[:g+g]],.. [--char C [--party-ids a,b]] [--unit U] [--target T] [--window N] [--area A] [--menu-frames N]
-                                               [--field-poke ADDR=VAL[:W];..] [--start-limit N]
+                                               [--field-poke ADDR=VAL[:W];..] [--start-limit N] [--form F]
     python -X utf8 tools/py/ps1_cast.py attack --tag T [--keys "Confirm:40,Confirm:80,..."] [--frames 560]
 
 force queues one target; --target-mask 3+4 writes every unit an all-targets element hits, as the menu does (ocbattleview hits every present unit of the
@@ -18,6 +18,10 @@ start within --start-limit run frames, or a GDB timeout, fails that one cast (ca
 field-state memory (field script variables) before the battle id is poked, e.g. 0x80077DE8=2:2 sets field variable 0x1C8 on the
 Japanese build (the variable block is ps1_ram script_vars, variable n at +2n). The manifest records
 `area:` (battlefield operand) and `party_ids:` (character ids of the party) for tools/ours_cast34.ps1.
+A forced Dopplegang cast (element 238) skips the creature pick, which is what tells the unit swap which unit and form to take; force
+refuses it without --form F and with it writes what the pick writes for the caster: the swap unit, the swap form F (a pool slot s is
+form 0x40 + s, the caster's own body its character id) and the action's model word. Without them the swap takes whatever the
+battle start left there (unit 0xFF on the USA build, which resets the game to the title).
 
 Output per element id: tmp/r34/<id>/ref/{states/state_NNNNNN.sav (every 5 run frames), frames/frame_NNNNNN.png (every 4), manifest.txt}.
 Run frame 0 = the state the capture stage starts from (the cast's target select up; the confirming press is the first input).
@@ -60,6 +64,7 @@ STATES = pc.STATES
 OUT = os.path.join(ROOT, "tmp", "r34")
 FILL_POOL = [1, 29, 36, 12, 19, 32, 2, 43, 55, 73, 88, 40, 25]
 STD_ROW = [1, 29, 36, 12, 19, 32, 2, 43]
+DOPPLEGANG = 238
 SUMMON_RING = {37: 0x20, 38: 0x20, 39: 0x08, 40: 0x08, 41: 0x01, 42: 0x01, 43: 0x10, 44: 0x10, 45: 0x02, 46: 0x02, 47: 0x04, 48: 0x04}
 WATCH_FIELDS = "btl_frame,tgt_064b,act_kind,act_actor,tgt0,e05da,elem,fx_load,ovl,ovl0,party0,u0_hp,u3_hp,u4_hp,u5_hp,loc,btl_id,area".split(",")
 
@@ -560,6 +565,18 @@ def force_queue(g, unit, element, target, group=None, mask_units=None):
     g.poke(head_addr, head + 1, 2)
 
 
+def pick_form(g, unit, form):
+    """The creature pick's writes for a Dopplegang cast of unit: swap unit and form, the form flag cleared, and the action's model word
+    (the slot's battle model for a creature, the character id for the own body; bit 15 while the caster is in a character body)."""
+    g.poke(RAM.swap_has_form, 0, 1)
+    g.poke(RAM.swap_unit, unit, 1)
+    g.poke(RAM.swap_form, form, 2)
+    model = g.gdb.u(RAM.dopple_models + (form - 0x40) * 4, 2) if form >= 0x40 else form
+    if g.gdb.u(RAM.unit(unit, ps1_ram.UNIT_KIND), 1) < 0x40:
+        model |= 0x8000
+    g.poke(RAM.action_model, model, 2)
+
+
 UNIT_COUNT = 9
 RAM_END = 0x80200000
 
@@ -622,6 +639,9 @@ def run_force(a):
         parts = spec.split(":")
         specs.append((int(parts[0]), int(parts[1]) if len(parts) > 1 else a.unit,
                       [int(v) for v in parts[2].split("+")] if len(parts) > 2 else None))
+    if a.form is None and any(elem == DOPPLEGANG for elem, _, _ in specs):
+        raise SystemExit("a forced Dopplegang cast (element %d) needs --form F: the form the skipped creature pick would hand to the unit swap "
+                         "(pool slot s = 0x40 + s, the caster's own body = its character id)" % DOPPLEGANG)
     with sess(enc) as g:
         if a.field_poke:   # field-state memory (script variables) must be set before the battle loads
             apply_pokes(g, parse_pokes(a.field_poke))
@@ -652,6 +672,8 @@ def run_force(a):
             shutil.rmtree(ref)
         try:
             with sess(menu) as g:
+                if elem == DOPPLEGANG:
+                    pick_form(g, unit, a.form)
                 force_queue(g, unit, elem, a.target, group, mask_units)
                 seen = capture_run(g, ref, a.window, state_every=5, dump_every=4, expect=(elem, min(a.start_limit, a.window)))
         except (CastError, TimeoutError, ConnectionError, OSError, RuntimeError) as e:   # the session closed its emulator; the next cast starts a fresh one
@@ -693,6 +715,7 @@ def main(argv):
     ap.add_argument("--var-poke", default="")
     ap.add_argument("--field-poke", default="", help="force: ADDR=VAL[:W];.. written in the field state before the battle id (field script variables)")
     ap.add_argument("--start-limit", type=int, default=400, help="force: run frames the forced cast may take to start before the capture is given up")
+    ap.add_argument("--form", type=lambda v: int(v, 0), default=None, help="force: the creature pick's form for a Dopplegang cast (pool slot s = 0x40 + s)")
     ap.add_argument("--menu-poke", default="")
     ap.add_argument("--pre-poke", default="")
     ap.add_argument("--hold-enemies", action="store_true", help="menu casts: set every enemy's turn countdown to 900 before the confirm, so no enemy turn follows the cast")

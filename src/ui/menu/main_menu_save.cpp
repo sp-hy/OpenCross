@@ -15,6 +15,10 @@ namespace oc::ui {
 
 namespace {
 
+// The USA menu overlay's own YES / NO of the overwrite question, by their menutest keys.
+constexpr const char* kUsaYesKey = "prg:801F2D50";
+constexpr const char* kUsaNoKey = "prg:801F2D54";
+
 SavePrev preview_of(const save::SaveSlot& data, int slot, int block) {
   SavePrev preview;
   preview.used = true;
@@ -425,6 +429,24 @@ void MainMenu::Impl::build_save() {
   const bool listed = save_phase == 1 || save_phase == 4;
   // Box index; box 0 is the auto-save entry. Page: the row = the file number.
   const int cursor = save_phase == 0 ? -1 : on_page ? page_cur : load_mode ? load_cur : save_cur + 1;
+  // Played from the USA discs the texts are menu messages by number (one line of one, without its tab indent) and the overlay's words.
+  const bool usa = !texs.hd() && !jp();
+  const import::TextTable* usa_table = usa ? lt.table("menutest") : nullptr;
+  auto usa_text = [&](const std::string& key) {
+    const std::string* row = usa_table ? usa_table->get(key, lang) : nullptr;
+    return row ? utf32(*row) : std::u32string();
+  };
+  auto mess = [&](int number) { return usa_text("mess:" + std::to_string(number)); };
+  auto mess_line = [&](int number, int line) {
+    const std::u32string text = mess(number);
+    size_t start = 0;
+    for (int i = 0; i < line && start < text.size(); ++i) {
+      const size_t end = text.find(U'\n', start);
+      start = end == std::u32string::npos ? text.size() : end + 1;
+    }
+    const size_t first = std::min(text.size(), text.find_first_not_of(U"\t ", start));
+    return text.substr(first, text.find(U'\n', first) - first);
+  };
   // Widescreen: list + dial right, slot grid left; the wide detail / message frames stay centred. The page's list takes the dial's place.
   if (!(on_page && listed) && !save_only) {
     group(Right);
@@ -437,8 +459,12 @@ void MainMenu::Impl::build_save() {
   if (!listed) {
     if (!save_only) {
       Frame(85, sl::kTopMsgX, sl::kTopMsgY);
-      const std::u32string description = utf32(menu_str(top_cur == 0 ? 0x801F2BE0 : 0x801F2C18, top_cur == 0 ? "Save a File" : "Load a File"));
-      HL(sl::kTopMsgInkX, sl::kTopMsgInkY, description, kText, sl::kMsgScale);
+      if (usa) {
+        PT(sl::kUsaTopTextX, sl::kUsaTopTextY, mess(top_cur == 0 ? 38 : 39));
+      } else {
+        const std::u32string description = utf32(menu_str(top_cur == 0 ? 0x801F2BE0 : 0x801F2C18, top_cur == 0 ? "Save a File" : "Load a File"));
+        HL(sl::kTopMsgInkX, sl::kTopMsgInkY, description, kText, sl::kMsgScale);
+      }
     }
     if (save_phase == 0) return;
     Frame(86, sl::kMsgX, sl::kMsgY);
@@ -450,6 +476,14 @@ void MainMenu::Impl::build_save() {
     if (save_phase == 3) {
       if (on_page) line(146, 336, "No save data in OpenCross.");
       else line(146, 336, menu_str(save_card == 1 ? 0x801F3181 : 0x801F3182, save_card == 1 ? "No save data in Slot 1." : "No save data in Slot 2."));
+      return;
+    }
+    if (usa) {
+      PT(sl::kUsaMsgTextX, sl::kUsaMsgTextY, mess_line(40, 0));
+      PT(sl::kUsaChoiceX, sl::usa_choice_y(0), U"OpenCross");
+      PT(sl::kUsaChoiceX, sl::usa_choice_y(1), mess_line(40, 1));
+      PT(sl::kUsaChoiceX, sl::usa_choice_y(2), mess_line(40, 2));
+      tri(sl::kUsaChoiceCursorX, sl::usa_choice_y(save_card), true);
       return;
     }
     line(146, 336, menu_str(0x801F2CA4, "Please choose a slot."));
@@ -570,38 +604,48 @@ void MainMenu::Impl::build_save() {
     group(Centre);
   }
   // Saving: no detail panel; the progress frame (its bar stays empty: the write holds the screen until it is done), the saving line in
-  // frame 0x55 and an empty frame 0x56.
+  // frame 0x55 and an empty frame 0x56 (USA discs, a card: the card's saving message and the do-not-remove warning in frame 0x56).
   if (save_phase == 4) {
     Frame(81, sl::kProgressX, sl::kProgressY);
     if (texs.hd())
       HT(face_gn, sl::kProgressX + sl::kProgressCapDx, sl::caption_y(sl::kProgressY, sl::kSlotCapScale), capt("process", "Progress"), kText, sl::kSlotCapScale);
     Frame(85, sl::kTopMsgX, sl::kTopMsgY);
-    HLfit(sl::kTopMsgInkX, sl::kTopMsgInkY, utf32(msg), sl::kMsgWidth, sl::kMsgScale);
     Frame(86, sl::kMsgX, sl::kMsgY);
+    if (usa && !on_page) {
+      PT(sl::kUsaTopTextX, sl::kUsaTopTextY, mess(save_card == 1 ? 47 : 48));
+      PT(sl::kUsaMsgTextX, sl::kUsaMsgTextY, mess(43));
+      return;
+    }
+    HLfit(sl::kTopMsgInkX, sl::kTopMsgInkY, utf32(msg), sl::kMsgWidth, sl::kMsgScale);
     return;
   }
   // message box (frame 0x56): "Please select a file." / the overwrite question / the result
   Frame(86, sl::kMsgX, sl::kMsgY);
   auto msg_line = [&](const std::u32string& str) { HLfit(sl::kMsgInkX, sl::kMsgInkY, str, sl::kMsgWidth, sl::kMsgScale); };
   if (save_confirm) {
-    msg_line(utf32(menu_str(0x801F2EE0, "")));
+    if (usa) PT(sl::kUsaMsgTextX, sl::kUsaMsgTextY, mess(49));
+    else msg_line(utf32(menu_str(0x801F2EE0, "")));
     // Yes / No: frame 0x57 at (0x192, 0x150), cursor at (0x198, 0x160 + 0x16 row).
     Frame(87, 402, 336);
-    HL(434, 356, utf32(menu_str(0x801F2BD0, "Yes")), kText, sl::kMsgScale);
-    HL(434, 378, utf32(menu_str(0x801F2BD8, "No")), kText, sl::kMsgScale);
+    if (usa) {
+      PT(sl::kUsaYesNoX, sl::kUsaYesY, usa_text(kUsaYesKey));
+      PT(sl::kUsaYesNoX, sl::kUsaNoY, usa_text(kUsaNoKey));
+    } else {
+      HL(434, 356, utf32(menu_str(0x801F2BD0, "Yes")), kText, sl::kMsgScale);
+      HL(434, 378, utf32(menu_str(0x801F2BD8, "No")), kText, sl::kMsgScale);
+    }
     tri(408, 352.0f + 22.0f * static_cast<float>(confirm_cur), true);
   } else if (!msg.empty()) {
     msg_line(utf32(msg));
-  } else if (!texs.hd() && !jp()) {
-    // The USA discs name the prompt by its menu message, drawn from the text point (146, 332).
-    const import::TextTable* table = lt.table("menutest");
-    if (const std::string* row = table ? table->get("mess:44", lang) : nullptr) PT(146, 332, utf32(*row));
+  } else if (usa) {
+    PT(sl::kUsaMsgTextX, sl::kUsaMsgTextY, mess(44));
   } else {
     msg_line(utf32(menu_str(0x801F2E08, "Please select a file.")));
   }
   // Detail panel of the cursor box: faces, name / AUTO SAVE, star + stars, Time, gold, location
   if (!cp.used) {
-    HL(sl::kFaceX + 7.0f, sl::kNameY, utf32(menu_str(0x801F2E78, "EMPTY")), kText, sl::kNameScale);
+    if (usa && !on_page) PT(sl::kUsaEmptyX, sl::kUsaEmptyY, mess(46));
+    else HL(sl::kFaceX + 7.0f, sl::kNameY, utf32(menu_str(0x801F2E78, "EMPTY")), kText, sl::kNameScale);
     return;
   }
   for (int i = 0; i < 3; ++i)

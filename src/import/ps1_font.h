@@ -10,7 +10,9 @@
 // offset from the pen and the line top, advancing by its offset + width + 1 (a code without a frame advances 4). Lines are 18 pixels
 // apart; no shadow.
 // Console font (import::ConsoleFont, from the player's BIOS): 16 x 15 cells at a 16-pixel advance, ink (165, 165, 173) over a grey 74
-// copy one pixel down and right.
+// copy one pixel down and right. The JP menus draw α β γ δ (the kind marks before element and material names) with the four symbol
+// cells of their own (entry "gaij" of menu/menutest.prd: a 4-bit TIM, 16 x 64, one 16-row cell per letter, of which the first 15
+// rows are drawn; a non-zero texel is ink), in the ink colour and with no shadow.
 //   auto font = import::load_ps1_font(vfs);   // null when the disc's executable is not there
 //   int i = font->index_for(U'A');  font->level(i, x, y);  font->advance(i);
 #include <memory>
@@ -50,6 +52,9 @@ class Ps1Font {
   bool load_usa_menu(ByteSpan pictures, ByteSpan menutest);
   // The console font.
   bool load_console(std::shared_ptr<const ConsoleFont> font);
+  // Console font: α β γ δ take the symbol cells of `menutest` (menu/menutest.prd) from here on. False, and nothing changes, when the
+  // font is not the console font or the file has no such entry.
+  bool load_gaij(ByteSpan menutest);
 
   Build build() const { return build_; }
   int count() const { return count_; }
@@ -66,6 +71,8 @@ class Ps1Font {
   int line_height() const;
   // The 1-bit fonts are drawn over a dark copy one pixel down and right, in this grey; the menu sheet is not.
   bool shadow() const { return build_ != Build::UsaMenu; }
+  // Whether glyph `index` gets that copy (a symbol cell of load_gaij does not).
+  bool shadow(int index) const { return shadow() && gaij_slot(index) < 0; }
   u8 shadow_level() const { return shadow_level_; }
   // Glyph of a code point, -1 when the font has none. Characters the font lacks are tried in a substitute form (full-width <->
   // ASCII, typographic quotes and dashes, accented capitals drawn with the build's generic accent).
@@ -80,6 +87,8 @@ class Ps1Font {
 
  private:
   int direct(char32_t cp) const;
+  // Symbol cell (0..3) that draws glyph `index`, -1 for a glyph of the font itself.
+  int gaij_slot(int index) const;
   Build build_ = Build::Japan;
   int count_ = 0;
   int cell_w_ = kMaxWidth, cell_h_ = kRows;
@@ -94,13 +103,16 @@ class Ps1Font {
   std::unordered_map<char32_t, int> usa_index_;
   JpGlyphs jp_;
   std::shared_ptr<const ConsoleFont> console_;
+  // Symbol cells: cell_w_ x cell_h_ ink flags each, empty when none are loaded.
+  std::vector<u8> gaij_;
 };
 
 // The font of the PS1 disc the VFS serves: the USA build when disc record 2059 is the 256-byte width table, else the Japanese
 // build. Null when the executable is missing or too short.
 std::shared_ptr<const Ps1Font> load_ps1_font(const vfs::Vfs& vfs);
 // The font of the disc's menus: the USA menu sheet (menu/menutim.prd and menu/menutest.prd), else the 1-bit font of load_ps1_font
-// in the JP menus' shades. On the JP disc the console font (console_font()) replaces that 1-bit font when the player has a BIOS.
+// in the JP menus' shades. On the JP disc the console font (console_font()), with the menus' symbol cells (load_gaij), replaces that
+// 1-bit font when the player has a BIOS.
 std::shared_ptr<const Ps1Font> load_ps1_menu_font(const vfs::Vfs& vfs);
 // The font of the screens that draw the console font on both builds (name entry): console_font(), else load_ps1_font.
 std::shared_ptr<const Ps1Font> load_ps1_console_font(const vfs::Vfs& vfs);

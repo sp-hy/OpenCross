@@ -16,8 +16,8 @@ Blocks it writes (the room-id block is kept as it is):
                   holding a key's text when it sits inside a longer field, from usa_menu_strings.tsv
 
 The menu rows are matched against lang.dat's menutest.txt / shopmenu.txt JP column, ignoring line breaks and blanks: the
-overlay strings at the key (one or several in a row), or 1 to 3 strings near it per line, whose text equals the row. A row
-with no match is the disc's own text: the string at its key, continued by the strings that follow it while each brings the
+overlay strings at the key (one or several in a row), or 1 to 3 strings near it per line, whose text equals the row (when the key starts a
+string, the first of them must be that string). A row with no match is the disc's own text: the string at its key, continued by the strings that follow it while each brings the
 text closer to the row (strings that are another row's key end it, except one directly after the key whose follower is not
 a key: the other memory card's form of the same line, which shares the rest), or no source when the key is not the start of
 a string. The output keeps
@@ -146,7 +146,7 @@ def menu_parts(lang, z):
                             found = None
                             break
                         found.append(hit)
-                    if found:
+                    if found and (off not in strings or found[0][0] == off):
                         parts = [(a, i > 0 and j == 0) for i, hit in enumerate(found) for j, a in enumerate(hit)]
                         kind = "composed"
                 if not parts and want and off in strings:

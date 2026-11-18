@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <system_error>
@@ -253,13 +254,76 @@ DiscSet open_plain(const fs::path& path, u32 stride, const std::string& containe
   return single(std::move(source), error);
 }
 
+struct CcdEntry {
+  long point = -1;
+  long control = 0;
+  long plba = 0;
+};
+
+// The CloneCD control file: "[Disc]" gives the session count and whether data tracks are scrambled, each "[Entry n]" one table of
+// contents row (point 1..99 a track start, 0xA2 the lead-out; PLBA counts from disc time 00:02:00 like an LBA).
+struct CcdToc {
+  long sessions = 1;
+  long scrambled = 0;
+  std::vector<CcdEntry> entries;
+};
+
+CcdToc parse_ccd(const std::string& text) {
+  CcdToc toc;
+  std::string section;
+  for (const std::string& line : split_lines(text)) {
+    if (line.empty()) continue;
+    if (line.front() == '[') {
+      section = lower(line.substr(1, line.find(']') == std::string::npos ? std::string::npos : line.find(']') - 1));
+      if (section.starts_with("entry")) toc.entries.emplace_back();
+      continue;
+    }
+    const size_t eq = line.find('=');
+    if (eq == std::string::npos) continue;
+    const std::string key = lower(line.substr(0, eq));
+    const long value = std::strtol(line.c_str() + eq + 1, nullptr, 0);
+    if (section == "disc") {
+      if (key == "sessions") toc.sessions = value;
+      else if (key == "datatracksscrambled") toc.scrambled = value;
+    } else if (section.starts_with("entry")) {
+      if (key == "point") toc.entries.back().point = value;
+      else if (key == "control") toc.entries.back().control = value;
+      else if (key == "plba") toc.entries.back().plba = value;
+    }
+  }
+  return toc;
+}
+
 DiscSet open_clonecd(const fs::path& path) {
+  std::string error;
+  const std::string text = read_text(path, &error);
+  if (!error.empty()) return failure(error);
+  const CcdToc toc = parse_ccd(text);
+  if (toc.sessions > 1) return failure("ccd: multi-session images are not supported");
+  if (toc.scrambled != 0) return failure("ccd: scrambled data tracks are not supported");
   fs::path image = path;
   image.replace_extension(".img");
-  if (size_of_file(image) == 0) return failure("ccd: image file not found: " + image.string());
+  const u64 available = size_of_file(image) / kRawSectorSize;
+  if (available == 0) return failure("ccd: image file not found: " + image.string());
+  u64 count = available;
+  long previous = -1;
+  bool tracks = false;
+  for (const CcdEntry& entry : toc.entries) {
+    if (entry.point >= 1 && entry.point <= 99) {
+      if (entry.plba < 0 || entry.plba <= previous) return failure("ccd: track starts do not ascend");
+      previous = entry.plba;
+      tracks = true;
+    } else if (entry.point == 0xA2 && entry.plba > 0) {
+      if (static_cast<u64>(entry.plba) > available) return failure("ccd: the image is shorter than the lead-out");
+      count = static_cast<u64>(entry.plba);
+    }
+  }
+  if (!toc.entries.empty() && !tracks) return failure("ccd: no tracks");
   fs::path sub = path;
   sub.replace_extension(".sub");
-  return open_plain(image, kRawSectorSize, size_of_file(sub) > 0 ? "ccd+img+sub" : "ccd+img");
+  std::unique_ptr<SectorSource> source = make_file_source({image}, {{0, 0, kRawSectorSize, 0, static_cast<u32>(count)}},
+                                                          size_of_file(sub) > 0 ? "ccd+img+sub" : "ccd+img", &error);
+  return single(std::move(source), error);
 }
 
 u16 get16(ByteSpan bytes, size_t at) { return static_cast<u16>(bytes[at] | bytes[at + 1] << 8); }

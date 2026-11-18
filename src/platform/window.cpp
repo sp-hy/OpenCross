@@ -305,6 +305,7 @@ bool Window::pump(Input& input) {
     }
   }
   input.pad_connected = pad_ != nullptr;
+  input.pad_rumble = pad_ && SDL_GetBooleanProperty(SDL_GetGamepadProperties(pad_), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
   for (int button = 0; button < SDL_GAMEPAD_BUTTON_COUNT; ++button)
     input.pad_down[button] = pad_ && SDL_GetGamepadButton(pad_, static_cast<SDL_GamepadButton>(button));
   for (int axis = 0; axis < SDL_GAMEPAD_AXIS_COUNT; ++axis) {

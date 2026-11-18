@@ -469,9 +469,14 @@ struct ShopScreen::Impl {
       return deny(result_text(result));
     }
     sfx(5);
-    say(ss(0x801DF4A4), kText);
+    thank();
     if (operation == Operation::SellElement) cur = scroll = 0;
     after_change();
+  }
+
+  // After a buy or an element sale. Played from the discs no thank-you line follows: the overlay prepares it but never draws it.
+  void thank() {
+    if (texs.hd()) say(ss(0x801DF4A4), kText);
   }
 
   void start_pick(int id) {
@@ -525,7 +530,7 @@ struct ShopScreen::Impl {
         return deny(result_text(result));
       }
       sfx(5);
-      say(ss(0x801DF4A4), kText);
+      thank();
       cur = scroll = 0;
       after_change();
       return;
@@ -668,7 +673,8 @@ struct ShopScreen::Impl {
   // X = x * 2.5 + offX * scale, Y = int(y + dy) * 960 / 432 + offY * scale (offsets at the scale before any shrink), scale = slot scale
   // * multiplier. Colour helpers by mode: Lines = H1(c, 20, 6), one draw per line at a 16 * sy pitch; H3(c, 0x6319, 3); H4(c, 0x6319, 1);
   // Base (style 0x80) = shrink to 97 units with H1(c, 20, 9); Centre (0x81) = centred, scale * min(1, 136 * 2.5 / w), 0x909090 ->
-  // 0x808080; Right (0x82). `align_override` >= 0 replaces the style's alignment (only where OpenCross keeps its own geometry).
+  // 0x808080 (not on the discs); Right (0x82). `align_override` >= 0 replaces the style's alignment (only where OpenCross keeps its own
+  // geometry).
   // Language index, 5 = JP.
   int lang_index() const { return static_cast<int>(lang); }
   void RT(int style, float x, float y, const std::u32string& str, u32 col = 0x808080, int align_override = -1) {
@@ -759,10 +765,10 @@ struct ShopScreen::Impl {
       }
       default: break;
     }
-    if (colour_mode == Mode::Centre && (col & 0xFFFFFF) == 0x909090) col = 0x808080;
-    const font::SlotInfo& slot_info = font::slot(slot);
     // Played from the discs: the disc's menu font at one font pixel per PS1 pixel, its pen at the PS1 point (no RDE nudges).
     const bool disc_font = fonts.ps1();
+    if (colour_mode == Mode::Centre && (col & 0xFFFFFF) == 0x909090 && !disc_font) col = 0x808080;
+    const font::SlotInfo& slot_info = font::slot(slot);
     float scale = disc_font ? 2.5f / render::TextBatch::kPs1PixelScale : slot_info.scale * mul;
     const float sy = 960.0f / 432.0f;
     const float canvas_x = disc_font ? x * 2.5f : x * 2.5f + slot_info.off_x * scale;
@@ -792,10 +798,13 @@ struct ShopScreen::Impl {
       case Mode::Right: align = font::kRight; break;
     }
     if (align_override >= 0) align = align_override;
+    // Played from the discs the PS1 colour word (0x80 = 1.0) modulates the font's own greys; a channel over 0x80 brightens past them,
+    // the part over 1.0 drawn as a second, additive copy. Base / Centre keep the PS1 size.
+    u32 boost = 0;
     if (disc_font) {
-      // The PS1 colour word (0x80 = 1.0) on the font's own greys; Base / Centre keep the PS1 size.
-      ink.normal = render::pack_rgba(static_cast<u8>(std::min(255u, (col & 0xFF) * 2)), static_cast<u8>(std::min(255u, (col >> 8 & 0xFF) * 2)),
-                                     static_cast<u8>(std::min(255u, (col >> 16 & 0xFF) * 2)));
+      const int red = static_cast<int>(col & 0xFF), green = static_cast<int>(col >> 8 & 0xFF), blue = static_cast<int>(col >> 16 & 0xFF);
+      ink.normal = rgb(std::min(255, red * 2), std::min(255, green * 2), std::min(255, blue * 2));
+      if (std::max({red, green, blue}) > 0x80) boost = rgb(std::max(0, red - 0x80) * 2, std::max(0, green - 0x80) * 2, std::max(0, blue - 0x80) * 2);
       scale = 2.5f / render::TextBatch::kPs1PixelScale;
     }
     // The console font's centred strings sit 3 pixels right of the measured centre.
@@ -810,7 +819,12 @@ struct ShopScreen::Impl {
       cmd.align = align;
       cmd.scale = scale;
       cmd.x = canvas_x + group_dx + centre_dx, cmd.y = line_y;
-      cmds.push_back(std::move(cmd));
+      cmds.push_back(cmd);
+      if (boost) {
+        cmd.ink.normal = boost;
+        cmd.add = true;
+        cmds.push_back(std::move(cmd));
+      }
     };
     if (colour_mode != Mode::Lines) {
       push(str, canvas_y);

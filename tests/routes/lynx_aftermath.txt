@@ -1,0 +1,71 @@
+# The Lynx fight's aftermath: jac_b20i's win branch jumps to jac_b51e, then jac_b17i, jac_b36e and jac_b02f, whose entrance-4 event
+# (entity 10: the party in the sea, scenario set to 52) jumps to gal_b09i. There the wake-up event opens the save-point menu under the
+# black screen fog; once the menu is closed the fog lifts, the event plays on and the field comes back with the controls free.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1
+- wait 20
+- tap right                           # file 01
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait 230
+- approach 4 20 1500                  # the trigger in front of the desk
+- tap confirm
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 6000
+- assert result 0
+- mash until room jac_b51e 3000
+- mash until room jac_b17i 6000
+- mash until room jac_b36e 6000
+- mash until room jac_b02f 6000
+- assert var 0 48
+- mash until menu open 6000           # gal_b09i's save-point menu, opened by the wake-up event
+- wait 30
+- tap cancel
+- wait menu closed 600
+- mash until idle 0 6000
+- assert party 0,1,2
+- assert room gal_b09i
+- assert var 0 52
+- screenshot lynx_aftermath.png
+- quit

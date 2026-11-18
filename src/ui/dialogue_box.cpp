@@ -937,6 +937,8 @@ void DialogueBox::draw_ps1(float vw, float vh, const render::CanvasFit* fit, flo
   // Leaf and hand frames of the skin sheet (128 x 96): 16 x 16 at v 80, the hand's at u 0..48, the leaf's at u 64..112.
   const TextPage* page = tw_.page();
   const int phase = std::min(3, static_cast<int>(blink_ / (5.0f / 30.0f)) % 5);
+  // The PS1's leaf runs its four frames in order, four 30 Hz field frames each.
+  const int leaf_phase = static_cast<int>(blink_ / (4.0f / 30.0f)) % 4;
   auto cursor = [&](int frame, float x, float y) {
     const float u0 = static_cast<float>(frame * kPs1Cursor) / 128.0f, v0 = 80.0f / 96.0f;
     quad(skin_set_, x, y, kPs1Cursor, kPs1Cursor, u0, v0, u0 + kPs1Cursor / 128.0f, v0 + kPs1Cursor / 96.0f, opaque);
@@ -947,7 +949,7 @@ void DialogueBox::draw_ps1(float vw, float vh, const render::CanvasFit* fit, flo
     if (shown > 0) {
       const LayoutGlyph& glyph = page->glyphs[shown - 1];
       const float pen = (glyph.x + text_->advance(face_, glyph.ch, scale_)) / kPs1Unit;
-      cursor(4 + phase, static_cast<float>(text_x) + pen, static_cast<float>(top + line_of(glyph) * kPs1LineHeight + kPs1LeafDrop));
+      cursor(4 + leaf_phase, static_cast<float>(text_x) + pen, static_cast<float>(top + line_of(glyph) * kPs1LineHeight + kPs1LeafDrop));
     }
   }
   if (!skinned || !page) return;

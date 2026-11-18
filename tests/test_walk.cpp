@@ -1,6 +1,6 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
 // by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, the screen ripple grid and the
-// frame echo's projection, the dialogue portrait side; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
+// frame echo's projection, the dialogue portrait side, the shadow tile's model reach; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
 // the key-item range), the FE 2F reset and the seeded script RAND; the button panel's rules (FE D1).
 #include <array>
 #include <cmath>
@@ -389,6 +389,30 @@ void test_attached_rigid() {
   rider.clear_attached();
   CHECK(!rider.attached());
 }
+// The shadow tile's reach is the posed mesh's, not its joints': a rigid mesh on one joint at the origin reaches as far as its widest vertex, a
+// skinned vertex as far as its joint plus its offset, blended by the weights; scaled and placed by the model matrix.
+void test_model_reach() {
+  assets::ModelAsset asset;
+  assets::Mesh rigid;
+  rigid.skinned = false;
+  rigid.pool.resize(2);
+  rigid.pool[0].bind_pos = {-150.0f, 40.0f, 30.0f};
+  rigid.pool[1].bind_pos = {90.0f, 0.0f, -200.0f};
+  asset.meshes.push_back(rigid);
+  std::vector<render::Mat4> palette(2), joints;
+  render::Mat4 model = render::mat4_scale(0.5f);
+  model.at(0, 3) = 1000.0f;
+  model.at(2, 3) = -500.0f;
+  CHECK(near(game::ActorShadows::model_reach(asset, model, palette, 1000.0f, -500.0f, joints), 100.0f));
+  assets::Mesh skinned;
+  skinned.pool.resize(1);
+  skinned.pool[0].joint = {1, 0};
+  skinned.pool[0].weight = {0.5f, 0.5f};
+  skinned.pool[0].local = {assets::Vec3{20.0f, 0.0f, 0.0f}, assets::Vec3{-20.0f, 0.0f, 0.0f}};
+  asset.meshes = {skinned};
+  palette[1].at(0, 3) = 600.0f;
+  CHECK(near(game::ActorShadows::model_reach(asset, model, palette, 1000.0f, -500.0f, joints), 150.0f));
+}
 // The script-set model axes are drawn blended between ticks: a roll of 0 then 8 draws as 4 at half a tick; a jump past the snap limit,
 // a scale reset and the first tick after creation draw the current value.
 void test_axes_blend() {
@@ -737,6 +761,7 @@ int main() {
   test_actor_anim();
   test_stair_clip();
   test_attached_rigid();
+  test_model_reach();
   test_axes_blend();
   test_screen_warp();
   test_frame_echo();

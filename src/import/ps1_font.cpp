@@ -48,6 +48,9 @@ constexpr u8 kJapanMenuFill = 165, kJapanMenuShadow = 74;
 // The console font's ink (5-bit levels 20, 20, 21) and its pen advance.
 constexpr u32 kConsoleInk = 165 | 165 << 8 | 173 << 16;
 constexpr int kConsoleAdvance = 16;
+// The JP menus' symbol cells: α β γ δ, one 16-row cell each down the 4-bit picture.
+constexpr char32_t kGaijChars[] = {0x03B1, 0x03B2, 0x03B3, 0x03B4};
+constexpr int kGaijCellRows = 16;
 
 u16 le16(ByteSpan bytes, size_t at) { return at + 2 <= bytes.size() ? static_cast<u16>(bytes[at] | (bytes[at + 1] << 8)) : 0; }
 
@@ -180,7 +183,32 @@ bool Ps1Font::load_console(std::shared_ptr<const ConsoleFont> font) {
   rows_.clear();
   widths_.clear();
   levels_.clear();
+  gaij_.clear();
   return true;
+}
+
+bool Ps1Font::load_gaij(ByteSpan menutest) {
+  if (build_ != Build::Console) return false;
+  const auto menu = parse_drp(menutest);
+  const DrpEntry* entry = menu ? drp_entry(*menu, "gaij") : nullptr;
+  const auto tim = entry ? parse_tim(entry->data) : std::nullopt;
+  constexpr int kCells = static_cast<int>(std::size(kGaijChars));
+  if (!tim || tim->bpp != 4 || tim->image.w * 4 < cell_w_ || tim->image.h < kCells * kGaijCellRows) return false;
+  gaij_.assign(static_cast<size_t>(kCells * cell_w_ * cell_h_), 0);
+  for (int cell = 0; cell < kCells; ++cell)
+    for (int y = 0; y < cell_h_; ++y)
+      for (int x = 0; x < cell_w_; ++x) {
+        const u16 word = tim->image.data[static_cast<size_t>((cell * kGaijCellRows + y) * tim->image.w + x / 4)];
+        gaij_[static_cast<size_t>((cell * cell_h_ + y) * cell_w_ + x)] = (word >> (4 * (x & 3)) & 15) != 0;
+      }
+  return true;
+}
+
+int Ps1Font::gaij_slot(int index) const {
+  if (gaij_.empty() || index < 0) return -1;
+  for (int slot = 0; slot < static_cast<int>(std::size(kGaijChars)); ++slot)
+    if (ConsoleFont::cell_of(kGaijChars[slot]) == index) return slot;
+  return -1;
 }
 
 int Ps1Font::left(int index) const {
@@ -194,7 +222,11 @@ int Ps1Font::top(int index) const {
 u8 Ps1Font::level(int index, int x, int y) const {
   if (index < 0 || index >= count_ || x < 0 || y < 0 || x >= cell_w_ || y >= cell_h_) return 0;
   if (build_ == Build::UsaMenu) return levels_[static_cast<size_t>((index * cell_h_ + y) * cell_w_ + x)];
-  if (build_ == Build::Console) return console_->pixel(index, x, y) ? fill_level_ : 0;
+  if (build_ == Build::Console) {
+    const int slot = gaij_slot(index);
+    if (slot >= 0) return gaij_[static_cast<size_t>((slot * cell_h_ + y) * cell_w_ + x)] ? fill_level_ : 0;
+    return console_->pixel(index, x, y) ? fill_level_ : 0;
+  }
   return rows_[static_cast<size_t>(index) * kRows + static_cast<size_t>(y)] & (0x8000 >> x) ? fill_level_ : 0;
 }
 
@@ -257,7 +289,10 @@ std::shared_ptr<const Ps1Font> load_ps1_menu_font(const vfs::Vfs& vfs) {
   auto exe = vfs.read_disc("cdrom/prog/slps_023.64");
   auto widths = vfs.read_disc("cdrom/#record/02059");
   const bool japan = exe && !(widths && widths->size() == 256);
-  if (japan && font->load_console(console_font())) return font;
+  if (japan && font->load_console(console_font())) {
+    if (menutest) font->load_gaij(*menutest);
+    return font;
+  }
   if (japan && font->load_japan(*exe, true)) return font;
   return load_ps1_font(vfs);
 }

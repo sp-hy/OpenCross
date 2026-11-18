@@ -1,7 +1,7 @@
 // Checks for the PS1 font (import::Ps1Font) on synthetic executables: glyph lookup and substitutes in both builds, the Japanese 8 / 12
 // pixel advance, the USA width table, the USA menu sheet (glyph pictures, offsets, advances), and a message laid out with the PS1 metrics (pen at the summed advances, 13-pixel lines, the
 // disc's own line breaks, no word wrap). The console font (import::ConsoleFont) is found by structure in a fabricated table: its base, the
-// rejections, the file search and its use as a Ps1Font.
+// rejections, the file search and its use as a Ps1Font, with the JP menus' symbol cells in place of the Greek letters.
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -247,6 +247,39 @@ void test_console() {
   CHECK(ps1.shadow() && ps1.shadow_level() == 74);
 }
 
+// The JP menus' symbol cells: a 4-bit 16 x 64 TIM in entry "gaij", cell k = rows 16k.., the first 15 rows drawn, in place of the
+// console font's α β γ δ and without the shadow.
+void test_gaij() {
+  using import::ConsoleFont;
+  Bytes tim;
+  for (u32 word : {0x10u, 0x08u}) put16(tim, word), put16(tim, word >> 16);
+  put16(tim, 12 + 32), put16(tim, 0), put16(tim, 0), put16(tim, 0), put16(tim, 16), put16(tim, 1);
+  for (int i = 0; i < 16; ++i) put16(tim, i ? 0x7FFFu : 0);
+  put16(tim, 12 + 4 * 64 * 2), put16(tim, 0), put16(tim, 0), put16(tim, 0), put16(tim, 4), put16(tim, 64);
+  std::vector<u16> words(4 * 64, 0);
+  words[1 * 4 + 0] = 0x0100;
+  words[(16 + 15) * 4 + 0] = 0x0001;
+  words[(48 + 14) * 4 + 3] = 0x1000;
+  for (u16 word : words) put16(tim, word);
+  const Bytes menutest = fake_drp({{"main", 3, Bytes(16, 0)}, {"gaij", 7, tim}});
+
+  auto console = ConsoleFont::from_image(fake_console_image(0x12345));
+  import::Ps1Font font;
+  CHECK(!font.load_gaij(menutest));
+  CHECK(font.load_console(console));
+  CHECK(!font.load_gaij(fake_drp({{"main", 3, Bytes(16, 0)}})));
+  const int alpha = font.index_for(0x03B1), beta = font.index_for(0x03B2), delta = font.index_for(0x03B4);
+  CHECK(font.level(alpha, 0, 0) == 165 && font.shadow(alpha));
+  CHECK(font.load_gaij(menutest));
+  CHECK(font.level(alpha, 2, 1) == 165 && font.level(alpha, 0, 0) == 0 && font.level(alpha, 15, 0) == 0);
+  CHECK(font.level(beta, 0, 0) == 0 && font.level(beta, 0, 14) == 0);
+  CHECK(font.level(delta, 15, 14) == 165 && font.level(delta, 14, 14) == 0);
+  CHECK(!font.shadow(alpha) && !font.shadow(delta) && font.shadow(font.index_for(U'セ')));
+  CHECK(font.level(font.index_for(U'セ'), 0, 0) == 165 && font.advance(alpha) == 16);
+  // Loading the console font again drops the cells.
+  CHECK(font.load_console(console) && font.shadow(alpha) && font.level(alpha, 0, 0) == 165);
+}
+
 void test_layout() {
   import::Ps1Font font;
   CHECK(font.load_japan(fake_exe(import::Ps1Font::kJapanOffset, import::kJpGlyphSlots)));
@@ -283,6 +316,7 @@ int main() {
   test_usa_menu();
   test_layout();
   test_console();
+  test_gaij();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

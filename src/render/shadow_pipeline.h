@@ -29,6 +29,8 @@ class ShadowPipeline {
   static constexpr u32 kMaxCasters = 48;
   // begin_tiles(): tiles per side, so kTileGrid * kTileGrid >= kMaxCasters.
   static constexpr int kTileGrid = 8;
+  // The share of a tile's span the floor quad samples: half a texel of tiles() off each side, so a linear sample never reads the next tile.
+  static constexpr float kTileKeep = 1.0f - 1.0f / static_cast<float>(kMaskSize / 2 / kTileGrid);
 
   ShadowPipeline() = default;
   ~ShadowPipeline() { destroy(); }
@@ -47,7 +49,7 @@ class ShadowPipeline {
   void place_tile(int index, float x, float z, float floor_y, float half);
   // The tile's centre in the uv of tiles(), and half its span.
   static std::array<float, 3> tile_uv(int index);
-  // After end_mask(): blurs tiles 0 .. half.size() - 1, each `half[i]` units either way of its actor, into tiles().
+  // After end_mask(): blurs tiles 0 .. half.size() - 1, each `half[i]` units either way of its actor, into tiles(); a tile reads only its own texels.
   void soften_tiles(const Frame& frame, std::span<const float> half);
   TexRef tiles() const { return soft_.ref(linear_); }
   // One model's shadow from one light of the mask: the direction toward the light (y > 0) and how much shadow it throws, 0..1.

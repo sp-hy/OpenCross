@@ -146,7 +146,9 @@ void ShadowPipeline::soften_tiles(const Frame& frame, std::span<const float> hal
   for (size_t i = 0; i < half.size(); ++i) {
     const int index = static_cast<int>(i);
     soft_frame.set_scissor(Rect{static_cast<int32_t>(static_cast<u32>(index % kTileGrid) * tile_pixels), static_cast<int32_t>(static_cast<u32>(index / kTileGrid) * tile_pixels), tile_pixels, tile_pixels});
-    const float push[4] = {kSoftness / half[i] * tile_uv(index)[2], 0, 0, 0};
+    const std::array<float, 3> uv = tile_uv(index);
+    const float inner = uv[2] - 0.5f / static_cast<float>(kMaskSize);
+    const float push[8] = {kSoftness / half[i] * uv[2], 0, 0, 0, uv[0] - inner, uv[1] - inner, uv[0] + inner, uv[1] + inner};
     SDL_PushGPUFragmentUniformData(ctx_->cmd(), 0, push, sizeof push);
     SDL_DrawGPUPrimitives(render_pass, 3, 1, 0, 0);
   }

@@ -170,6 +170,8 @@ struct MainMenu::Impl {
   int ki_cur = 0, ki_scroll = 0;
   int set_cur = 0;
   bool skin_pick = false;
+  // Played from the discs: the Vibration Function and stick rows are live only with a pad that has motors / any pad (update_settings).
+  bool vibration_live = true, stick_live = true;
   // The Controller assignment page: 0 closed, 2 field pair, 3 battle pair; pad_cur = its cursor row, pad_l2 / pad_r2 the trigger
   // state of the last update.
   int pad_state = 0, pad_cur = 0;

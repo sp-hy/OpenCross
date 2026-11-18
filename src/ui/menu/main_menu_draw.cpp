@@ -250,8 +250,8 @@ void MainMenu::Impl::Count(float x, float y, int count, u32 colour) {
 u32 MainMenu::Impl::ps1_colour(u32 bgr, int a) const {
   const int red = static_cast<int>(bgr & 0xFF) * 2, green = static_cast<int>(bgr >> 8 & 0xFF) * 2, blue = static_cast<int>(bgr >> 16 & 0xFF) * 2;
   const u32 colour = rgb(std::min(255, red), std::min(255, green), std::min(255, blue), a);
-  if (red > 255 || green > 255 || blue > 255)
-    colour_boosts[colour] = rgb(std::clamp(red - 255, 0, 255), std::clamp(green - 255, 0, 255), std::clamp(blue - 255, 0, 255), a);
+  if (red > 256 || green > 256 || blue > 256)
+    colour_boosts[colour] = rgb(std::clamp(red - 256, 0, 255), std::clamp(green - 256, 0, 255), std::clamp(blue - 256, 0, 255), a);
   return colour;
 }
 
@@ -619,9 +619,12 @@ void MainMenu::Impl::pointer(float x, float y, bool left) {
 }
 
 // Button glyph of function slot `slot_index`, read through the active Controller assignment (slots 0..3); the glyphs of glyph_button.
+// The disc glyphs follow the Japanese build, where Circle confirms; played from the USA discs, where Cross confirms, the confirm and
+// cancel glyphs trade places (the Customize run / walk row shows Circle there).
 void MainMenu::Impl::btn(float x, float y, int slot_index, u32 colour) {
   slot_index = std::clamp(slot_index, 0, 7);
   if (slot_index < 4) slot_index = platform::map_source(platform::active_map(), slot_index) & 7;
+  if (!texs.hd() && !jp() && slot_index < 2) slot_index ^= 1;
   glyph_button(x, y, slot_index, colour);
 }
 

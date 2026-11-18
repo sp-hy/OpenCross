@@ -749,6 +749,7 @@ btl_unit_no_stamina_cost_timer = 0x800DB47E;  # data: u8 steps left on unit 0's 
 btl_unit_stat_mods = 0x800DB49C;  # data: the six percent stat modifiers of the first unit (Att Hit Def Evd MAtt MDef, stride 0x438); the target setup applies them whatever the status bits, only a running-out hi bit 6..11 timer resets one to 100
 btl_target_memory = 0x800DB4AC;  # data: Remembered target per caster
 btl_menu_row_memory = 0x800DB4AF;  # data: Last command row per PC
+btl_unit_record_backup = 0x800DD670;  # data: Backup of the unit record before the first creature form
 btl_script_state_ptr = 0x800DDB30;  # data: Pointer to the battle script state with the script variables
 btl_script_part0 = 0x800DDB5C;  # data: Pointer to the script block of the event pack
 btl_acting_list = 0x800DDB60;  # data: List of acting unit numbers, 0xFF means none
@@ -805,6 +806,8 @@ btl_combo_partner_cells = 0x800DDFA4;  # data: two bytes, the cell index each pa
 btl_dopple_caster_char = 0x800DDFAE;  # data: Character id of the caster shown first in the creature list
 btl_dopple_scroll_max = 0x800DDFC0;  # data: Maximum scroll row of the creature list
 btl_weapon_tech_total = 0x800DDFCA;  # data: s16 running sum of a weapon tech's per-hit values: the value its target takes
+btl_elem_mode39_slot = 0x800DDFCC;  # data: pool slot element mode 39 drew from the Dopplegang pool; indexes btl_dopple_model_table
+btl_queued_element_id = 0x800DDFCE;  # data: element id of the action being executed, kept after the id word is replaced by the mode
 btl_colour_history_reset = 0x800DDFD0;  # data: set by a colourless cast: the next cast clears the history first
 btl_pip_form_flag = 0x800DDFD1;  # data: Pip form flag keeping the active PC
 btl_script_run_index = 0x800DDFD8;  # data: run-list index of the script entity the per-frame pass is interpreting
@@ -812,4 +815,4 @@ btl_attacked_queue = 0x800DDFE8;  # data: nine-byte queue of target units whose 
 fld_actor_array_ptr = 0x800E257C;  # data: Pointer to the array of 0x278-byte field actor records (ambiguous)
 fld_change_music_flag = 0x800E5618;  # data: Set by the battle handler to change music at transition (ambiguous)
 fld_encounter_state = 0x800E575A;  # data: Nonzero while an encounter sequence runs (ambiguous)
-# Not found in this build (code or layout changed): btl_text_draw, btl_item_name_text, btl_elem_description_draw, btl_element_menu_rebuild, btl_unit_model_build, btl_elem_mode31_stub, btl_draw_element_names, fld_restore_state_after_battle, btl_unit_record_backup, btl_grid_growth_table, btl_heal_target_stamina, btl_queued_element_id
+# Not found in this build (code or layout changed): btl_text_draw, btl_item_name_text, btl_elem_description_draw, btl_element_menu_rebuild, btl_unit_model_build, btl_elem_mode31_stub, btl_draw_element_names, fld_restore_state_after_battle, btl_heal_target_stamina

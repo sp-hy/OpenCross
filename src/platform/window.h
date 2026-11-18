@@ -22,6 +22,8 @@ struct Input {
   std::array<bool, kKeys> key_down{};
   std::array<bool, kKeys> key_pressed{};
   bool pad_connected = false;
+  // The open pad has motors.
+  bool pad_rumble = false;
   std::array<bool, kButtons> pad_down{};
   std::array<bool, kButtons> pad_pressed{};
   std::array<float, kAxes> pad_axis{};

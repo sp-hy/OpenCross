@@ -79,6 +79,13 @@ inline float choice_y(int line) { return kChoiceY0 + kChoiceStep * static_cast<f
 inline float choice_y(int line, int font_line) {
   return font_line > 0 ? 336.0f + static_cast<float>(font_line * (line + 1)) : choice_y(line);
 }
+// Played from the USA discs the texts are the menu's messages, from the PS1's text points: the Save / Load description and the saving
+// lines from (96, 278), the message frame's texts from (146, 332), the card choice's lines 18 apart from (273, 350) with the pointer at
+// (201, line), "EMPTY BLOCK" from (92, 242) and the overwrite question's YES / NO from (432, 352 / 374).
+constexpr float kUsaTopTextX = 96, kUsaTopTextY = 278, kUsaMsgTextX = 146, kUsaMsgTextY = 332;
+constexpr float kUsaChoiceX = 273, kUsaChoiceY0 = 350, kUsaChoiceStep = 18, kUsaChoiceCursorX = 201;
+constexpr float kUsaEmptyX = 92, kUsaEmptyY = 242, kUsaYesNoX = 432, kUsaYesY = 352, kUsaNoY = 374;
+inline float usa_choice_y(int line) { return kUsaChoiceY0 + kUsaChoiceStep * static_cast<float>(line); }
 // Location caption of a save: savetbl row = the number of scenario start values <= the save's scenario (u16 head 0x40), at least 1.
 inline int location_key(int scenario) {
   static constexpr int kStart[30] = {0, 8, 16, 24, 26, 28, 30, 36, 52, 64, 72, 80, 88, 92, 100, 108, 112, 116, 124, 128, 140, 144, 156, 164, 172, 184, 195, 202, 209, 999};
