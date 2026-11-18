@@ -678,14 +678,17 @@ void MainMenu::Impl::draw(const render::Frame& frame, float vw, float vh, bool r
     sprites->end();
     resume = true;
     if (lowres.begin(frame, display, text, lf, kCanvasW + 2.0f * canvas_s, kCanvasH)) {
-      draw_view(lf, kCanvasW + 2.0f * canvas_s, kCanvasH, resume, true);
+      // The target's window rectangle: the widened frame's, else the canvas rectangle (LowRes::end's own).
+      PassWindow window{&frame, vw, vh, display, {}};
       if (canvas_s > 0.0f) {
         const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, canvas_cols);
-        const render::Letterbox::Rect target_rect{letterbox.left(), letterbox.oy, letterbox.width(), render::kLayerH * letterbox.scale};
-        lowres.end(frame, vw, vh, &target_rect);
+        window.rect = {letterbox.left(), letterbox.oy, letterbox.width(), render::kLayerH * letterbox.scale};
       } else {
-        lowres.end(frame, vw, vh);
+        const render::CanvasFit fit = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
+        window.rect = {fit.ox, fit.oy, kCanvasW * fit.s, kCanvasH * fit.s};
       }
+      draw_view(lf, kCanvasW + 2.0f * canvas_s, kCanvasH, resume, true, ps1_menu_models() ? nullptr : &window);
+      lowres.end(frame, vw, vh, &window.rect);
       return;
     }
   }
@@ -695,7 +698,8 @@ void MainMenu::Impl::draw(const render::Frame& frame, float vw, float vh, bool r
 // `in_pass`: vw x vh is the widened canvas itself (zoom 1; canvas x = 0 sits canvas_s in). Otherwise the window: RDE's menu canvas
 // (render::menu_fit, drawn in a view whose y unit is sy / sx pixels so one zoom serves both axes), or with widescreen the widened
 // frame's zoom (a quarter of the layer-column scale) and origin. The 4:3 fit cuts everything after the clear at the canvas's sides.
-void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass) {
+void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float vh, bool resume, bool in_pass, const PassWindow* window) {
+  render::Frame frame = pass_frame;
   const bool clipped = !in_pass && canvas_s <= 0.0f;
   float flat = 1.0f;
   if (in_pass) {
@@ -784,7 +788,24 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
         gs->equipped(character, 4) != kHerosShield)
       slot.hidden_meshes = 1u << kShieldConstruct;
     slot.dt = dt;
-    model_view->draw(frame, vw, vh, slot);
+    if (window) {
+      // The 2D so far goes to the window; the model is drawn there over the target's rectangle, and the pass starts again for the rest.
+      lowres.end(*window->frame, window->vw, window->vh, &window->rect);
+      const float to_x = window->rect.w / vw, to_y = window->rect.h / vh;
+      slot.origin_x = window->rect.x + slot.origin_x * to_x, slot.origin_y = window->rect.y + slot.origin_y * to_y;
+      slot.unit_x *= to_x, slot.unit_y *= to_y;
+      const render::Frame& out = *window->frame;
+      out.set_scissor(ps1::columns_clip(out, window->vw, window->rect.x, window->rect.w));
+      model_view->draw(out, window->vw, window->vh, slot);
+      out.set_scissor(out.full());
+      if (!lowres.begin(out, window->display, text, frame, vw, vh)) {
+        model_wanted = false;
+        text->set_pixel_aspect(old_aspect);
+        return;
+      }
+    } else {
+      model_view->draw(frame, vw, vh, slot);
+    }
     if (clipped) frame.set_scissor(clip);
     sprites->begin(frame, vw, vh, true);
     flatten();

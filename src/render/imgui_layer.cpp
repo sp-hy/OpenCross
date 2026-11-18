@@ -843,13 +843,12 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "(times the render scale) and scaled up with sharp pixels, in every art mode. Off: the window's resolution.",
                      cfg.ps1_res_graphics))
         change.ps1_res = true;
-      // The PS1 discs have only the PS1-resolution UI and the field models.
-      ImGui::BeginDisabled(platform::disc_mode());
       if (check_cell("PS1 resolution UI",
                      "The menus, shops, title menu, name entry, Continue and party screens are drawn at their PS1 display size, and the battle "
                      "HUD, battle menus, results, pause screen and the dialogue windows in the 320 x 224 picture, scaled up with sharp pixels, "
                      "in every art mode. Original art uses the PS1's own disc textures, HD / modded art point-sample RDE's art (small text gets "
-                     "rough). Off: the window's resolution.",
+                     "rough). Off: the window's resolution. Playing from the PS1 discs the screens always keep their PS1 size; off draws "
+                     "the menus' 3D models (the Status screen's character) at the window's resolution.",
                      cfg.ps1_res_ui))
         change.ps1_res = true;
       if (check_cell("Use legacy models in field",
@@ -858,7 +857,6 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "field models do.",
                      cfg.legacy_field_models))
         change.enhancements = true;
-      ImGui::EndDisabled();
       ImGui::EndTable();
     }
   };

@@ -136,9 +136,7 @@ void App::save_config() const {
   platform::Config stored = config;
   stored.art_mode = disc_held.art_mode;
   stored.bgm_source = disc_held.bgm_source;
-  stored.ps1_res_ui = disc_held.ps1_res_ui;
   stored.language = disc_held.language;
-  stored.legacy_field_models = disc_held.legacy_field_models;
   stored.portraits = disc_held.portraits;
   stored.save(config_file);
 }

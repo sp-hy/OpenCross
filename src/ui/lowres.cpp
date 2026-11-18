@@ -6,11 +6,14 @@ namespace oc::ui {
 
 namespace {
 bool g_ps1_menus = true;
+bool g_ps1_menu_models = true;
 constexpr float kCanvasWidth = 1280.0f, kCanvasHeightUnits = 960.0f;
 }  // namespace
 
 void set_ps1_menus(bool on) { g_ps1_menus = on; }
 bool ps1_menus() { return g_ps1_menus; }
+void set_ps1_menu_models(bool on) { g_ps1_menu_models = on; }
+bool ps1_menu_models() { return g_ps1_menu_models; }
 
 bool LowRes::init(render::GpuContext& ctx, render::SpriteBatch& sprites) {
   shutdown();

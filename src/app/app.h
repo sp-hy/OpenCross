@@ -292,6 +292,9 @@ class App {
 
   // ---- app_draw.cpp -----------------------------------------------------------------------------------------------------------
   void draw_frame(const render::Frame& frame);
+  // The UI screens' PS1-resolution pass: [Video] Ps1ResUi, or always when playing from the PS1 discs (their screens exist only in the
+  // PS1 layout); there the setting decides only whether the menus' 3D models are drawn at the PS1 size or the window's.
+  bool ps1_ui_pass() const;
   void apply_frame_options();
   // [Shaders] the full-screen look of this frame from the settings.
   render::ScreenSettings screen_look() const;

@@ -574,9 +574,18 @@ struct MainMenu::Impl {
   bool lowres_on() const { return ps1_menus(); }
   bool ps1_screen() const { return mode == ArtMode::Original && ps1_menus(); }
 
+  // The window side of the pass when its 3D model is drawn at window resolution (ps1_menu_models() off): draw_view ends the pass before
+  // the model, draws the model into `frame` with the pass's canvas mapped onto `rect`, and starts the pass again for the rest.
+  struct PassWindow {
+    const render::Frame* frame = nullptr;
+    float vw = 0, vh = 0;
+    Ps1Display display{};
+    render::Letterbox::Rect rect{};
+  };
+
   // Defined in main_menu_draw.cpp.
   void draw(const render::Frame& frame, float vw, float vh, bool resume);
-  void draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass = false);
+  void draw_view(const render::Frame& frame, float vw, float vh, bool resume, bool in_pass = false, const PassWindow* window = nullptr);
 };
 
 }  // namespace oc::ui

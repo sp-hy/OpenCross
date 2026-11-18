@@ -148,11 +148,9 @@ OpenedDiscs open_discs(const SourceSearch& search, vfs::Vfs& files, const fs::pa
 void apply_disc_settings(platform::Config& config, std::string_view region_word) {
   config.art_mode = platform::ArtMode::Original;
   config.bgm_source = "original";
-  config.ps1_res_ui = true;
   config.language = region_word == "usa" ? "en" : "jp";
-  config.legacy_field_models = true;
   config.portraits = "1999";
-  log::info("disc mode ({}): classic art, original music, PS1-resolution UI, language {}", region_word, config.language);
+  log::info("disc mode ({}): classic art, original music, language {}", region_word, config.language);
 }
 
 bool open_game_data(platform::Config& config, const fs::path& exe, vfs::Vfs& files, std::string* error) {
