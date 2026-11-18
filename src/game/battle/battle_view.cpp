@@ -397,6 +397,7 @@ void BattleView::run_load_step(LoadJob& job) {
   camera_ = BattleCamera{};
   camera_.set_bank(&bank_);
   camera_.set_anchor([this](int unit, int point) { return anchor_frame(unit, point); });
+  camera_.set_split_shots(true);  // the shot list steps after the units (tick(): camera_.tick_shots())
   // Timeline op 0x22: the emitter of that name in the loaded resources: the stage's, else the acting unit's own (a fierce attack's at0.prd timelines);
   // a per-target repeat serving a later target starts a clone that follows that target (a sweep's projectiles, one per enemy).
   camera_.set_emitter_hook([this](const std::string& name, int target) {

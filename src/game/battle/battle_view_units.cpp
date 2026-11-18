@@ -299,16 +299,18 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
     if (listed < 0) return false;
     const Visual& other = vis_[static_cast<size_t>(listed)];
     float px = other.x, pz = other.z;
-    // Modes 1-4: origin + R(yaw) * the joint extent (max x / min x / min z / max z).
+    // Modes 1-4: origin + R(yaw) * the joint extent (max x / min x / min z / max z). AnmSeq_UpdatePoseBBox (0x8009E510) measures the
+    // joints from the root joint's own x / z, not from the model's origin (Dash & Slash's dash past the target: z 68 off without it).
     if (mode >= 1 && mode <= 4 && other.has_model) {
       std::vector<render::Mat4> pal;
       other.pose.palette(1.0f, pal);
       float mn_x = 1e9f, mx_x = -1e9f, mn_z = 1e9f, mx_z = -1e9f;
+      const float root_x = pal.empty() ? 0.0f : pal[0].at(0, 3), root_z = pal.empty() ? 0.0f : pal[0].at(2, 3);
       for (const render::Mat4& joint : pal) {
-        mn_x = std::min(mn_x, joint.at(0, 3));
-        mx_x = std::max(mx_x, joint.at(0, 3));
-        mn_z = std::min(mn_z, joint.at(2, 3));
-        mx_z = std::max(mx_z, joint.at(2, 3));
+        mn_x = std::min(mn_x, joint.at(0, 3) - root_x);
+        mx_x = std::max(mx_x, joint.at(0, 3) - root_x);
+        mn_z = std::min(mn_z, joint.at(2, 3) - root_z);
+        mx_z = std::max(mx_z, joint.at(2, 3) - root_z);
       }
       if (!pal.empty()) {
         const float lx = mode == 1 ? mx_x : (mode == 2 ? mn_x : 0.0f), lz = mode == 3 ? mn_z : (mode == 4 ? mx_z : 0.0f);
