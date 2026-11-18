@@ -160,7 +160,8 @@ std::vector<OpticalDriveInfo> list_optical_drives() {
     const HANDLE file = open_device(letter, 0);
     if (file != INVALID_HANDLE_VALUE) {
       info.product = product_of(file);
-      info.media = change_count(file).has_value();
+      info.generation = change_count(file);
+      info.media = info.generation.has_value();
       CloseHandle(file);
     }
     wchar_t label[MAX_PATH + 1] = {};

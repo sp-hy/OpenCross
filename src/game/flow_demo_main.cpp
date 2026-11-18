@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 
+#include "app/data_source.h"
 #include "core/log.h"
 #include "game/game_flow.h"
 #include "platform/config.h"
@@ -53,14 +54,18 @@ int ocflow_main(int argc, char** argv) {
   platform::Config config;
   config.use_player_defaults();
   config.load(exe / "opencross.ini");
-  import::Lang lang = import::Lang::En;
-  import::parse_lang(lang_code, lang);
-  const std::filesystem::path game_dir = platform::find_game_dir(config.game_dir);
   vfs::Vfs files;
-  if (game_dir.empty() || !files.open(game_dir)) {
-    log::error("game dir not found");
+  if (std::string error; !app::open_game_data(config, exe, files, &error)) {
+    log::error("game data: {}", error);
     return 1;
   }
+  // The discs have the original art only, and the text of their build.
+  if (platform::disc_mode()) {
+    hd = false;
+    lang_code = config.language;
+  }
+  import::Lang lang = import::Lang::En;
+  import::parse_lang(lang_code, lang);
   platform::Window window;
   if (!window.create("OpenCross flow", 1280, 960, false)) return 1;
   render::GpuContext ctx;
@@ -107,6 +112,7 @@ int ocflow_main(int argc, char** argv) {
       if (shot_dir.empty()) shot_dir = exe / "flow_shots";
       std::filesystem::create_directories(shot_dir);
       for (bool use_hd : {true, false}) {
+        if (use_hd && platform::disc_mode()) continue;
         const std::string suffix = use_hd ? "hd" : "orig";
         steps.push_back({[&flow, &mode_of, use_hd] {
                            flow.set_art_mode(mode_of(use_hd));
@@ -149,7 +155,7 @@ int ocflow_main(int argc, char** argv) {
           step_frame = 0;
         }
         dt = 1.0f / 60.0f;
-      } else if (input.key_pressed[SDL_SCANCODE_F1]) {
+      } else if (input.key_pressed[SDL_SCANCODE_F1] && !platform::disc_mode()) {
         hd = !hd;
         flow.set_art_mode(mode_of(hd));
       }

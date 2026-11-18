@@ -1,11 +1,17 @@
 // Checks for the text importer: PS1 control-code tokenisation, markup parsing, spritefont header parsing on a synthetic
-// blob, lang.dat lookup on tiny synthetic tables, the dialogue typewriter, and the JP overlay string scan.
+// blob, lang.dat lookup on tiny synthetic tables, the dialogue typewriter, the JP overlay string scan, and the text of a disc session
+// read from a synthetic disc's files (executable string tables, a room's message block, a battle script, the battle and key item
+// files) for the USA and the Japanese build.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
 #include <map>
+#include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "data/char_name.h"
 #include "import/ps1_text.h"
@@ -13,6 +19,9 @@
 #include "import/text.h"
 #include "ui/dialogue_box.h"
 #include "ui/typewriter.h"
+#include "vfs/backend.h"
+#include "vfs/disc_names.h"
+#include "vfs/vfs.h"
 
 using namespace oc;
 using import::TokKind;
@@ -728,6 +737,197 @@ void test_overlay_strings() {
   CHECK(at(0x801D2818) == "\xE6\x89\x80\xE6\x8C\x81\xE6\x95\xB0");
 }
 
+// ---- The text of a disc session (no lang.dat): every lookup read from the PS1 files of a synthetic disc.
+
+// The "cdrom" archive alone, its members held in memory.
+class MemoryCdrom final : public vfs::Backend {
+ public:
+  explicit MemoryCdrom(std::map<std::string, Bytes> members) : members_(std::move(members)) {}
+  bool has_archive(std::string_view archive) const override { return archive == "cdrom"; }
+  bool contains(std::string_view archive, const std::string& member, int) const override {
+    return archive == "cdrom" && members_.contains(member);
+  }
+  std::optional<Bytes> read(std::string_view archive, const std::string& member, int) const override {
+    const auto found = archive == "cdrom" ? members_.find(member) : members_.end();
+    return found == members_.end() ? std::nullopt : std::optional<Bytes>(found->second);
+  }
+  std::vector<std::string> list(std::string_view archive) const override {
+    std::vector<std::string> names;
+    if (archive == "cdrom")
+      for (const auto& [name, bytes] : members_) names.push_back(name);
+    return names;
+  }
+
+ private:
+  std::map<std::string, Bytes> members_;
+};
+
+void set16(Bytes& out, size_t at, u32 value) {
+  out[at] = static_cast<u8>(value);
+  out[at + 1] = static_cast<u8>(value >> 8);
+}
+void set32(Bytes& out, size_t at, u32 value) {
+  set16(out, at, value);
+  set16(out, at + 2, value >> 16);
+}
+
+// ASCII letters, digits and spaces in the USA glyph codes.
+Bytes usa_text(std::string_view text) {
+  Bytes out;
+  for (const char ch : text) {
+    if (ch >= 'A' && ch <= 'Z') out.push_back(static_cast<u8>(0x32 + (ch - 'A')));
+    else if (ch >= 'a' && ch <= 'z') out.push_back(static_cast<u8>(0x4C + (ch - 'a')));
+    else if (ch >= '0' && ch <= '9') out.push_back(static_cast<u8>(0x28 + (ch - '0')));
+    else out.push_back(0x20);
+  }
+  return out;
+}
+
+// A u16 offset table (the first offset is twice the entry count) of `strings`, each ended by 0x00, plus the entry that marks the end.
+Bytes offset_table(const std::vector<Bytes>& strings) {
+  Bytes out(2 * (strings.size() + 1), 0);
+  for (size_t i = 0; i <= strings.size(); ++i) {
+    set16(out, 2 * i, static_cast<u32>(out.size()));
+    if (i == strings.size()) break;
+    out.insert(out.end(), strings[i].begin(), strings[i].end());
+    out.push_back(0);
+  }
+  out.push_back(0);
+  return out;
+}
+
+// An executable whose string tables sit at `base`: `count` tables, those not in `tables` empty.
+Bytes exe_with_strings(u32 base, u32 count, const std::map<u32, std::vector<Bytes>>& tables) {
+  Bytes exe(base + 4 + 4 * count, 0);
+  set32(exe, base, count);
+  for (u32 table = 0; table < count; ++table) {
+    set32(exe, base + 4 + 4 * table, static_cast<u32>(exe.size() - base));
+    const auto found = tables.find(table);
+    const Bytes body = offset_table(found == tables.end() ? std::vector<Bytes>{} : found->second);
+    exe.insert(exe.end(), body.begin(), body.end());
+  }
+  return exe;
+}
+
+// A message block: the 8-byte record headers, then each record's bytes.
+Bytes dialogue_block(const std::vector<Bytes>& records) {
+  Bytes out(8 * records.size(), 0);
+  for (size_t i = 0; i < records.size(); ++i) {
+    set16(out, 8 * i, static_cast<u32>(out.size()));
+    out.insert(out.end(), records[i].begin(), records[i].end());
+  }
+  return out;
+}
+
+// sszl coding of `data` as literals only.
+Bytes lzss_literals(const Bytes& data) {
+  Bytes out = {'s', 's', 'z', 'l', 0, 0, 0, 0, 0, 0, 0, 0};
+  set32(out, 4, static_cast<u32>(data.size()));
+  u32 bits = 0;
+  int pending = 0;
+  const auto put_bits = [&](u32 value, int count) {
+    for (int i = count - 1; i >= 0; --i) {
+      bits = bits << 1 | ((value >> i) & 1u);
+      if (++pending == 8) {
+        out.push_back(static_cast<u8>(bits));
+        bits = 0;
+        pending = 0;
+      }
+    }
+  };
+  for (const u8 byte : data) put_bits(0x100u | byte, 9);
+  if (pending) out.push_back(static_cast<u8>(bits << (8 - pending)));
+  return out;
+}
+
+// A room file: a cpt of nine entries whose entry 8 is the LZSS-coded message block.
+Bytes room_file(const Bytes& block) {
+  const Bytes coded = lzss_literals(block);
+  constexpr u32 kEntries = 9;
+  Bytes out(4 + 4 * kEntries, 0);
+  set32(out, 0, kEntries);
+  for (u32 i = 0; i < kEntries; ++i) set32(out, 4 + 4 * i, static_cast<u32>(out.size()));
+  out.insert(out.end(), coded.begin(), coded.end());
+  return out;
+}
+
+Bytes concat(std::initializer_list<Bytes> parts) {
+  Bytes out;
+  for (const Bytes& part : parts) out.insert(out.end(), part.begin(), part.end());
+  return out;
+}
+
+// The USA build: names and items from the executable's tables, a room message with a line break, a grammar form by speaker, a battle
+// event from the scene's script, the battle messages and the key item descriptions; the text is English whatever language is asked.
+// The Japanese build is told apart by its table header; an executable of neither build gives no disc text.
+void test_disc_text() {
+  using import::Lang;
+  const Bytes kNewlineCode = {0x01};
+  const Bytes usa_exe = exe_with_strings(0x4803C, 55,
+                                         {{0, {usa_text("Potion"), usa_text("Ether")}},
+                                          {1, {usa_text("Serge"), usa_text("Kid")}},
+                                          {7, {usa_text("pal"), usa_text("mate"), usa_text("sir")}}});
+  const Bytes room =
+      room_file(dialogue_block({concat({usa_text("Hi"), kNewlineCode, usa_text("there"), Bytes{0}}), concat({usa_text("Bye"), Bytes{0}})}));
+  const std::string battle_member = vfs::disc_record_member(vfs::builtin_disc_records(1)[2679 + 3]);
+  CHECK(battle_member.starts_with("battle/event/"));
+  const Bytes event_block = dialogue_block({concat({usa_text("Wait"), Bytes{0}})});
+  Bytes pac(16, 0);
+  set32(pac, 8, 16);
+  set32(pac, 12, static_cast<u32>(16 + event_block.size()));
+  pac.insert(pac.end(), event_block.begin(), event_block.end());
+  std::map<std::string, Bytes> members = {
+      {"prog/slps_023.64", usa_exe},
+      {"map/mapbin/alu_a01f.bin", room},
+      {battle_member, pac},
+      {"battle/data/btmes.dat", dialogue_block({concat({usa_text("  Stolen"), kNewlineCode, Bytes{0}})})},
+      {"menu/keyitem.dat", offset_table({usa_text("Key"), usa_text("opens"), Bytes{}, usa_text("Map"), Bytes{}, Bytes{}})},
+  };
+  vfs::Vfs files;
+  files.open(std::make_unique<MemoryCdrom>(members), ".");
+  import::LangTables tables;
+  tables.init(&files);
+  CHECK(tables.from_disc());
+  CHECK(tables.default_name(0, Lang::En) == U"Serge" && tables.default_name(1, Lang::Jp) == U"Kid");
+  CHECK(tables.item_name(1, Lang::En) == U"Ether");
+  const auto hello = tables.lookup_field(27, 0, Lang::En);
+  CHECK(hello && hello->starts_with("Hi\nthere"));
+  const auto bye = tables.lookup_field(27, 1, Lang::Fr);
+  CHECK(bye && bye->starts_with("Bye"));
+  CHECK(!tables.lookup_field(27, 2, Lang::En) && !tables.lookup_field(28, 0, Lang::En));
+  const std::string* wait = tables.battle_event(3, 0, Lang::En);
+  CHECK(wait && wait->starts_with("Wait"));
+  CHECK(!tables.battle_event(4, 0, Lang::En));
+  const std::string* stolen = tables.battle_message(0, Lang::En);
+  CHECK(stolen && *stolen == "Stolen");
+  const import::TextTable* keyitem = tables.table("keyitem");
+  const std::string* key = keyitem ? keyitem->get(std::string_view("0"), Lang::En) : nullptr;
+  const std::string* map = keyitem ? keyitem->get(std::string_view("3"), Lang::En) : nullptr;
+  CHECK(key && *key == "Key\nopens" && map && *map == "Map");
+  CHECK(!tables.table("cmnmes"));
+  import::Ps1Text text;
+  CHECK(text.open(files) && std::string(text.build().name) == "usa");
+  if (text.open(files)) CHECK(text.resolve_grammar("x{gram(1)}y", 2) == "xsiry");
+
+  // The Japanese build: digits and capitals share the USA codes' places in its glyph table.
+  std::map<std::string, Bytes> jp_members = {{"prog/slps_023.64", exe_with_strings(0x508E0, 28, {{1, {Bytes{0x32, 0x28, 0x29}}}})}};
+  vfs::Vfs jp_files;
+  jp_files.open(std::make_unique<MemoryCdrom>(jp_members), ".");
+  import::LangTables jp;
+  jp.init(&jp_files);
+  CHECK(jp.from_disc());
+  CHECK(jp.default_name(0, Lang::Jp) == U"A01");
+  import::Ps1Text jp_text;
+  CHECK(jp_text.open(jp_files) && std::string(jp_text.build().name) == "jp");
+
+  std::map<std::string, Bytes> other_members = {{"prog/slps_023.64", exe_with_strings(0x1000, 28, {})}};
+  vfs::Vfs other_files;
+  other_files.open(std::make_unique<MemoryCdrom>(other_members), ".");
+  import::LangTables other;
+  other.init(&other_files);
+  CHECK(!other.from_disc());
+}
+
 }  // namespace
 
 int main() {
@@ -747,6 +947,7 @@ int main() {
   test_digit_entry();
   test_window_opening();
   test_overlay_strings();
+  test_disc_text();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

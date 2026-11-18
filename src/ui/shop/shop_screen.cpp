@@ -1027,11 +1027,18 @@ struct ShopScreen::Impl {
     const import::Ps1Font* disc_font = text->ps1_font(fonts.face(font::kBn));
     return disc_font && (disc_font->build() == import::Ps1Font::Build::Usa || disc_font->build() == import::Ps1Font::Build::UsaMenu);
   }
-  // A string of the USA shop overlay itself, by its address there.
-  std::string ss_usa_prg(u32 address) {
+  // A string of the disc's shop overlay itself, by its address there.
+  std::string ss_prg(u32 address) {
     if (const import::TextTable* table = lang_tables.table("shopmenu"))
       if (const std::string* row = table->get(std::format("prg:{:08X}", address), lang)) return *row;
     return {};
+  }
+  // Played from the JP discs, the overlay's own string at `address` (where RDE's row joins it with the next one, the PS1 draws the two
+  // apart); otherwise the shopmenu.txt row.
+  std::string ss_jp_part(u32 address) {
+    if (texs.hd() || usa_disc()) return ss(address);
+    const std::string part = ss_prg(address);
+    return part.empty() ? ss(address) : part;
   }
   // Played from the JP discs a count's unit is one 16-px cell of a label string: its first character.
   std::u32string unit(u32 key) {
@@ -1211,7 +1218,7 @@ struct ShopScreen::Impl {
     } else if (id >= 0x61 && id <= 0x7D) {
       RT(1, 0x12A, 0x60, usa_mess(0xA3));
     }
-    RT(1, 0x12A, 0x4E, ss_usa_prg(0x801DF44C));
+    RT(1, 0x12A, 0x4E, ss_prg(0x801DF44C));
     usa_number(fmt("%1d", rules->el_level(id)), 0x14A, 0x4E);
     Sprite("suji", 1, 0x15E, 0x4C), Sprite("suji", 2, 0x15E, 0x52);
     usa_number(fmt("%1d", record->raw[0x12] & 0xF), 0x166, 0x4E);
@@ -1798,7 +1805,7 @@ struct ShopScreen::Impl {
   }
 
   // "Exchange Rate" panel at (0x14, 0x20), one row per entry at y = 0x44 + 18 i: the goods name (first character dropped, ":" added,
-  // style 0x82 = right edge at 0x92), the colour column at 0x94 (a colour dot from kTradeCol, or a text for mask 0) and the level
+  // style 0x82 = right edge at 0x92, 0x94 on the JP discs), the colour column at 0x94 (a colour dot from kTradeCol, or a text for mask 0) and the level
   // sum "%d" at (0xA4, y) (style 0x98).
   // Played from the discs the colour dot is frame 0x5A in the colour; on the USA discs the caption is message 0x87, the name ends at
   // x 0x90 with ":" there, and the level sum is in USA digits from x 0xA4.
@@ -1818,7 +1825,7 @@ struct ShopScreen::Impl {
         continue;
       }
       if (const int goods = trade.row.goods[static_cast<size_t>(i)]; goods > 0)
-        RT(0x82, 0x92, y, drop_first(item_name(goods)) + (lang_index() == 5 ? U"：" : U":"));
+        RT(0x82, texs.hd() ? 146.0f : 148.0f, y, drop_first(item_name(goods)) + (lang_index() == 5 ? U"：" : U":"));
       const int colour = shop::colour_index(entry.mask);
       if (colour == 0) RT(1, 0x94, y, ss(0x801DF7C4));
       else if (!texs.hd()) Sprite(0x5A, 0x94, y, ps1_colour(kTradeCol[colour - 1]));
@@ -1870,9 +1877,12 @@ struct ShopScreen::Impl {
     // "No. in Stock"
     RT(1, 0x142, 0xA6, ss(0x801DF73C));
     RT(1, 0x1DC, 0xA7, texs.hd() ? utf32(ss(0x801DF735)) : unit(0x801DF734));
-    // Stock "%9d" at (0x13A, 0xA7): dx n < 10 ? 0x72 : 0x6E (JP 4 : 0), dy -2.
+    // Stock "%9d" at (0x13A, 0xA7): dx n < 10 ? 0x72 : 0x6E (JP 4 : 0), dy -2. Played from the JP discs the PS1's 16-px cells from
+    // the point itself, as the need below and the offer list's remaining count.
+    const bool cells = !texs.hd();
     const int stock = shop::item_stock(*gs, goods);
-    RT(0x98, static_cast<float>(0x13A + (stock < 10 ? (jp ? 4 : 0x72) : (jp ? 0 : 0x6E))), 0xA7 - 2, full_width(fmt("%9d", stock)));
+    if (cells) RT(0x98, 0x13A, 0xA7, full_width(fmt("%9d", stock)));
+    else RT(0x98, static_cast<float>(0x13A + (stock < 10 ? (jp ? 4 : 0x72) : (jp ? 0 : 0x6E))), 0xA7 - 2, full_width(fmt("%9d", stock)));
     // Colour condition strip at (0x14E, 0xD2), x shifted per language. Played from the JP discs: the first five cells of the
     // post's title at (0x14E, 0xD2), then the colour's name in its colour at 0x19E and the "only" word at 0x1AE, or "all colours"
     // at 0x19E.
@@ -1901,8 +1911,10 @@ struct ShopScreen::Impl {
     RT(1, static_cast<float>(0x1BE + (jp ? 0 : -0x23) + kLw[lang_idx]), 0xE4 + (jp ? 0.0f : 1.0f), ss(0x801DF774));
     // Need "%5d" at (0x16E, 0xE4): dx (L in 1, 2, 4 ? -0x2A : 0) + (n < 10 ? 4 : 0).
     const int need = trade_slot().need;
-    RT(0x98, static_cast<float>(0x16E + ((lang_idx == 1 || lang_idx == 2 || lang_idx == 4) ? -0x2A : 0) + (need < 10 ? 4 : 0)), 0xE4,
-       full_width(fmt("%5d", need)));
+    if (cells) RT(0x98, 0x16E, 0xE4, full_width(fmt("%5d", need)));
+    else
+      RT(0x98, static_cast<float>(0x16E + ((lang_idx == 1 || lang_idx == 2 || lang_idx == 4) ? -0x2A : 0) + (need < 10 ? 4 : 0)), 0xE4,
+         full_width(fmt("%5d", need)));
   }
   // Offer list at (0x14, 0x20); row r at y = 0x38 + 24 r: plate (colour sheet frame 3) at (0x4A, 0x33 + 24 r),
   // "Lv" at 0x32, level "%d" at 0x42, "x" + stock - offered (suji) at 0x100, "-" + offered at 0x118 in 0x7A6AA5, the name
@@ -1967,8 +1979,8 @@ struct ShopScreen::Impl {
       trade_goods_list();
       group(Right);
       trade_info();
-      RT(1, 0x150, 0x10E, ss(0x801DF6EC));
-      RT(1, 0x150, 0x11E, ss(0x801DF6F9));
+      RT(1, 0x150, 0x10E, ss_jp_part(0x801DF6EC));
+      RT(1, 0x150, 0x11E, texs.hd() || usa_disc() ? ss(0x801DF6F9) : ss_prg(0x801DF6F8));
       group(Left);
       marker(0x1E, 0x46 + 18.0f * static_cast<float>(trade.goods_cur), true);
     } else {
@@ -1990,15 +2002,16 @@ struct ShopScreen::Impl {
         }
       } else if (sum < need) {
         // "levels' worth to go"
-        RT(1, static_cast<float>(0x26 + kDx[lang_idx]), 0x14E, ss(0x801DF760));
+        RT(1, static_cast<float>(0x26 + kDx[lang_idx]), 0x14E, ss_jp_part(0x801DF760));
         RT(1, 0xB6, 0x14E, ss(0x801DF76C));
         // Remaining "%5d" at (0x66, 0x14E), dy -1.
         const int remaining = need - sum;
         const int dx = lang_idx == 5 ? (remaining < 10 ? 0 : -4) : (remaining < 10 ? 4 : 0) - ((lang_idx == 2 || lang_idx == 4) ? 0x3D : 0x20);
-        RT(0x98, static_cast<float>(0x66 + dx), 0x14E - 1, full_width(fmt("%5d", remaining)));
+        if (!texs.hd()) RT(0x98, 0x66, 0x14E, full_width(fmt("%5d", remaining)));
+        else RT(0x98, static_cast<float>(0x66 + dx), 0x14E - 1, full_width(fmt("%5d", remaining)));
       } else {
         // "Required Lv reached"
-        RT(1, static_cast<float>(0x26 + kDx[lang_idx]), 0x14E, ss(0x801DF668));
+        RT(1, static_cast<float>(0x26 + kDx[lang_idx]), 0x14E, ss_jp_part(0x801DF668));
         RT(1, 0xA6, 0x14E, ss(0x801DF67C));
       }
       if (!trade.confirm) {

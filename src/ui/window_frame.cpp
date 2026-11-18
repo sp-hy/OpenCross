@@ -75,9 +75,10 @@ std::vector<Span> texel_spans(int first, int count, int origin, int size, bool t
 
 }  // namespace
 
-std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_scale) {
+std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_scale, bool shift_right) {
   std::vector<WinQuad> quads;
   const int fill_w = (w + 8) / 2;
+  const int right_shift = shift_right ? -1 : 0;
   // The pieces are linked to the front of one draw list in table order, so the last one is drawn first.
   for (int index = 9; index >= 0; --index) {
     const SkinPiece& piece = kRectPieces[index];
@@ -86,13 +87,13 @@ std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_s
     bool tiled = true;
     switch (piece.kind) {
       case PieceKind::TopLeft: tiled = false; break;
-      case PieceKind::TopRight: tiled = false, shift = -1, dx = w; break;
+      case PieceKind::TopRight: tiled = false, shift = right_shift, dx = w; break;
       case PieceKind::BottomLeft: tiled = false, dy = h + 4; break;
-      case PieceKind::BottomRight: tiled = false, shift = -1, dx = w, dy = h + 4; break;
+      case PieceKind::BottomRight: tiled = false, shift = right_shift, dx = w, dy = h + 4; break;
       case PieceKind::TopEdge: extra_w = w - piece.w - 32, dx = 16; break;
       case PieceKind::BottomEdge: extra_w = w - piece.w - 32, dx = 16, dy = h + 4; break;
       case PieceKind::LeftEdge: extra_h = h - piece.h - 24, dy = 12; break;
-      case PieceKind::RightEdge: extra_h = h - piece.h - 24, dy = 12, shift = -1, dx = w; break;
+      case PieceKind::RightEdge: extra_h = h - piece.h - 24, dy = 12, shift = right_shift, dx = w; break;
       case PieceKind::FillLeft: extra_w = fill_w - piece.w, extra_h = h - piece.h + 16, dx = -4, dy = -8; break;
       case PieceKind::FillRight: extra_w = fill_w - piece.w, extra_h = h - piece.h + 16, shift = fill_w, dx = fill_w - 4, dy = -8; break;
     }
@@ -102,10 +103,11 @@ std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_s
     const int u0 = (piece.u + shift) & 0xFF;
     const std::vector<Span> columns = texel_spans(u0, width, piece.u, piece.w, tiled, x_scale);
     const std::vector<Span> rows = texel_spans(piece.v, height, piece.v, piece.h, tiled, 1.0f);
+    const bool fill = piece.kind == PieceKind::FillLeft || piece.kind == PieceKind::FillRight;
     for (const Span& row : rows)
       for (const Span& col : columns)
         quads.push_back({cx + x_scale * static_cast<float>(x) + col.p0, cy + static_cast<float>(y) + row.p0, col.p1 - col.p0, row.p1 - row.p0, col.t0 / kSheetW,
-                         row.t0 / kSheetH, (col.t1 - col.t0) / kSheetW, (row.t1 - row.t0) / kSheetH});
+                         row.t0 / kSheetH, (col.t1 - col.t0) / kSheetW, (row.t1 - row.t0) / kSheetH, fill});
   }
   return quads;
 }

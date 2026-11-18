@@ -16,7 +16,7 @@ Common conventions:
 | `OPENCROSS_GAMEDIR` | Game folder when `-g` is absent. Most tools then fall back to the usual discovery (`platform::find_game_dir`); `occ`, `ocaudio`, `ocprd` fail without either. |
 | `-l <lang>` | `ocmovie` only: language of the movie (default `en`). |
 | `-v` | Verbose: `ochd`, `ocstage validate`, `ocbattle soak`, `pac-soak`, `fx-audit`, `versus`, `occ dialogue-*`. |
-| `ocbattleview`, `ocflow`, `ocmenudemo`, `ocshopdemo` | Take no `-g`; they read `opencross.ini` next to the exe (`[Paths] GameDir`, else discovery). |
+| `ocbattleview`, `ocflow`, `ocmenudemo`, `ocshopdemo` | Take no `-g`; they read `opencross.ini` next to the exe (`ocbattleview`: or `--config`) and search for the data as the game does (`[Paths] Source`, `GameDir`, `Disc1` / `Disc2` / `DiscDir`, `[Disc] Region`; `docs/architecture.md` 3.7). |
 | `ocmodelview` | `-g`, else `OPENCROSS_GAMEDIR`, else `[Paths] GameDir` of `opencross.ini` next to the exe, else discovery. |
 
 `ocbattle soak` exits 1 on anomalies or exceptions, `pac-soak` on exceptions, `versus` on a divergence, `ochd` on decode or size failures, `ocstage validate` when a stage fails; `ocbattle fx-audit` exits 0 after a completed run.
@@ -585,7 +585,7 @@ Screens show the key caps of set 0.
 | Tool | Key | Action |
 |---|---|---|
 | all five | Esc | Quits. |
-| `ocbattleview` | F1 | Toggles HD / original art. |
+| `ocbattleview` | F1 | Toggles HD / original art (not on the discs: original only). |
 | `ocbattleview` | F3 | Toggles the camera overlay (F9 works too). |
 | `ocbattleview` | Enter | Confirm (scripted by `--auto`, `--keys`); the other keys are the battle keymap. |
 | `ocflow` | F1 | Toggles HD / original art (not in `--shots` runs). |

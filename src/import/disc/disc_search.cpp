@@ -93,6 +93,45 @@ std::vector<DiscGroup> group_discs(const std::vector<FoundDisc>& found) {
   return groups;
 }
 
+void merge_place(std::vector<FoundDisc>& found, std::vector<FoundDisc> place) {
+  if (found.empty()) {
+    found = std::move(place);
+    return;
+  }
+  const size_t earlier = found.size();
+  for (FoundDisc& disc : place) {
+    const std::string key = build_key(disc.identity);
+    const auto same_build = [&](const FoundDisc& known) { return build_key(known.identity) == key; };
+    if (std::none_of(found.begin(), found.begin() + static_cast<std::ptrdiff_t>(earlier), same_build)) continue;
+    const bool have_number = std::any_of(found.begin(), found.end(), [&](const FoundDisc& known) {
+      return same_build(known) && known.identity.disc_number == disc.identity.disc_number;
+    });
+    if (!have_number) found.push_back(std::move(disc));
+  }
+}
+
+bool has_complete_set(const std::vector<FoundDisc>& found) {
+  const std::vector<DiscGroup> groups = group_discs(found);
+  return std::any_of(groups.begin(), groups.end(), [](const DiscGroup& group) { return group.complete(); });
+}
+
+DiscFit disc_fit(const DiscIdentity& identity, int needed, const std::string& build) {
+  if (!identity.chrono_cross) return DiscFit::NotChronoCross;
+  if (static_cast<int>(identity.disc_number) != needed) return DiscFit::OtherDisc;
+  if (build_key(identity) != build) return DiscFit::OtherBuild;
+  return DiscFit::Fits;
+}
+
+DiscPick pick_disc(const std::vector<FoundDisc>& found, int needed, const std::string& build) {
+  DiscPick pick;
+  for (size_t i = 0; i < found.size(); ++i) {
+    const DiscFit fit = disc_fit(found[i].identity, needed, build);
+    if (fit == DiscFit::Fits) return {static_cast<int>(i), fit};
+    pick.fit = std::max(pick.fit, fit);
+  }
+  return pick;
+}
+
 SetChoice choose_set(const std::vector<DiscGroup>& groups, Region preferred) {
   const bool any_complete = std::any_of(groups.begin(), groups.end(), [](const DiscGroup& group) { return group.complete(); });
   std::vector<int> pool;

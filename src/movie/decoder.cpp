@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 #include "audio/adpcm.h"
@@ -185,14 +186,15 @@ struct Decoder::Impl {
   }
 };
 
-// A disc movie stream: the bytes, their index, the next frame and audio group to decode, the ADPCM history of each channel and the
-// last good picture (a frame that fails to decode repeats it).
+// A disc movie stream: its reader and the stream read over it, the ADPCM history of each channel, the last good picture (a frame that
+// fails to decode repeats it) and the strip sectors read so far (a copy the main thread may read while the worker steps).
 struct Decoder::Stream {
-  Bytes file;
+  std::unique_ptr<vfs::Reader> reader;
   import::StrStream index;
-  size_t next_frame = 0, next_audio = 0;
   audio::AdpcmState channels[2];
   std::vector<u8> last_rgba;
+  mutable std::mutex strip_mutex;
+  Bytes strip;
 };
 
 Decoder::Decoder() : impl_(std::make_unique<Impl>()) {}
@@ -219,10 +221,15 @@ void Decoder::resample(size_t sample_count, int rate) {
   state.rs_prev[1] = state.src[(sample_count - 1) * 2 + 1];
 }
 
-bool Decoder::open_stream(Bytes file) {
+bool Decoder::open_stream(std::unique_ptr<vfs::Reader> reader) {
   stream_ = std::make_unique<Stream>();
-  stream_->file = std::move(file);
-  if (!stream_->index.parse(stream_->file)) {
+  vfs::Reader* source = reader.get();
+  stream_->reader = std::move(reader);
+  constexpr size_t kSector = import::StrStream::kSectorBytes;
+  const auto read = [source](u32 first, u32 count, u8* out) {
+    return source->read(static_cast<u64>(first) * kSector, count * kSector, out);
+  };
+  if (!stream_->index.open(read, static_cast<u32>(source->size() / kSector))) {
     log::error("movie: not a movie stream");
     return false;
   }
@@ -231,29 +238,40 @@ bool Decoder::open_stream(Bytes file) {
   height_ = index.height();
   fps_ = index.fps();
   frames_ = index.frame_count();
-  has_audio_ = !index.audio().empty();
+  has_audio_ = index.has_audio();
   return width_ && height_;
 }
 
 bool Decoder::staff_strip(bool second, std::vector<u8>& rgba, u32& w, u32& h) const {
-  if (!stream_ || !stream_->index.strip_rows()) return false;
-  rgba = stream_->index.strip_image(second);
+  if (!stream_ || !stream_->index.has_strip()) return false;
+  std::lock_guard lock(stream_->strip_mutex);
+  rgba = import::StrStream::strip_image(stream_->strip, frames_, second);
   w = import::StrStream::kStripWidth;
-  h = static_cast<u32>(stream_->index.strip_rows());
+  h = static_cast<u32>(frames_);
   return true;
+}
+
+size_t Decoder::staff_strip_rows() const {
+  if (!stream_) return 0;
+  std::lock_guard lock(stream_->strip_mutex);
+  return stream_->strip.size() / import::StrStream::kStripSectorBytes;
 }
 
 // One frame per step, after the audio groups the stream holds before it; the last step decodes the audio left and ends.
 bool Decoder::step_stream() {
   Stream& stream = *stream_;
-  const import::StrStream& index = stream.index;
-  const size_t audio_until = stream.next_frame < index.frames().size() ? index.frames()[stream.next_frame].audio_before : index.audio().size();
   Impl& state = *impl_;
-  for (; stream.next_audio < audio_until; ++stream.next_audio) {
+  import::StrStream::Item item;
+  bool frame = false;
+  while (stream.index.next(item)) {
+    if (!item.audio) {
+      frame = true;
+      break;
+    }
     constexpr size_t kBlockBytes = 16, kBlockSamples = 28;
     state.src.resize(static_cast<size_t>(import::StrStream::kAudioSamples) * 2);
     for (int channel = 0; channel < 2; ++channel) {
-      const ByteSpan payload = index.audio_payload(index.audio()[stream.next_audio], channel);
+      const Bytes& payload = channel ? item.right : item.left;
       s16 pcm[kBlockSamples];
       for (size_t block = 0; block * kBlockBytes < payload.size(); ++block) {
         audio::adpcm_decode_block(payload.data() + block * kBlockBytes, stream.channels[channel], pcm);
@@ -263,26 +281,40 @@ bool Decoder::step_stream() {
     }
     resample(import::StrStream::kAudioSamples, static_cast<int>(import::StrStream::kAudioRate));
   }
-  if (stream.next_frame >= index.frames().size()) {
+  if (const Bytes& strip = stream.index.strip_data(); strip.size() > stream.strip.size()) {
+    std::lock_guard lock(stream.strip_mutex);
+    stream.strip.insert(stream.strip.end(), strip.begin() + static_cast<std::ptrdiff_t>(stream.strip.size()), strip.end());
+  }
+  if (!frame) {
     eof_ = true;
     return false;
   }
-  const import::StrStream::Frame& frame = index.frames()[stream.next_frame++];
   VideoFrame video_frame;
-  video_frame.index = frame.number ? frame.number - 1 : 0;
+  video_frame.index = item.number ? item.number - 1 : 0;
   video_frame.pts = static_cast<double>(video_frame.index) / fps_;
-  if (import::mdec_decode(index.bitstream(frame), width_, height_, video_frame.rgba)) {
+  if (import::mdec_decode(item.bitstream, width_, height_, video_frame.rgba)) {
     stream.last_rgba = video_frame.rgba;
   } else {
-    log::warn("movie: frame {} does not decode; the previous one stays", frame.number);
+    log::warn("movie: frame {} does not decode; the previous one stays", item.number);
     video_frame.rgba = stream.last_rgba.empty() ? std::vector<u8>(static_cast<size_t>(width_) * height_ * 4, 0) : stream.last_rgba;
   }
   video_.push_back(std::move(video_frame));
   return true;
 }
 
+bool Decoder::open(std::unique_ptr<vfs::Reader> reader, const std::string& name) {
+  if (!reader) return false;
+  if (name.ends_with(".stv")) return open_stream(std::move(reader));
+  Bytes file(static_cast<size_t>(reader->size()));
+  if (!reader->read(0, file.size(), file.data())) {
+    log::error("movie: {} does not read", name);
+    return false;
+  }
+  return open(std::move(file), name);
+}
+
 bool Decoder::open(Bytes file, const std::string& name) {
-  if (name.ends_with(".stv")) return open_stream(std::move(file));
+  if (name.ends_with(".stv")) return open_stream(std::make_unique<vfs::MemoryReader>(std::move(file)));
   Impl& state = *impl_;
   state.file = std::move(file);
   state.mem = {state.file.data(), state.file.size(), 0};

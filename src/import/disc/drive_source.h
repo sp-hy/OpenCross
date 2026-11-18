@@ -11,6 +11,7 @@
 #include "core/types.h"
 #include "import/disc/disc_ident.h"
 #include "import/disc/sector_source.h"
+#include "platform/optical.h"
 
 namespace oc::import::disc {
 
@@ -92,5 +93,9 @@ struct DriveCandidate {
 std::vector<DriveCandidate> probe_optical_drives();
 // The drives holding a Chrono Cross disc, in drive-letter order.
 std::vector<DriveCandidate> scan_optical_drives();
+
+// One line per drive: its name, media-change count and volume label. It changes whenever a disc is put in, taken out, swapped or
+// becomes readable, whatever the disc is; nothing is opened or read (list_optical_drives).
+std::string drive_media_signature(const std::vector<platform::OpticalDriveInfo>& drives);
 
 }  // namespace oc::import::disc

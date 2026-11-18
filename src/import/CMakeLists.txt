@@ -77,7 +77,7 @@ add_library(oc_disc STATIC
   disc/disc_backend.h
   disc/disc_backend.cpp
 )
-target_link_libraries(oc_disc PUBLIC oc_core oc_vfs PRIVATE miniz::miniz chdr oc_optical)
+target_link_libraries(oc_disc PUBLIC oc_core oc_vfs oc_optical PRIVATE miniz::miniz chdr)
 
 # Battle stage importer (battle/bg/bg_NN.prd + .ctd), its own target next to oc_text.
 add_library(oc_stage STATIC

@@ -47,6 +47,7 @@
 #include "game/game_flow.h"
 #include "game/route_script.h"
 #include "game/title_backdrop.h"
+#include "app/data_source.h"
 #include "import/disc/disc_backend.h"
 #include "import/disc/disc_search.h"
 #include "import/disc/drive_source.h"
@@ -150,25 +151,13 @@ class App {
   void init_start_state();
 
   // ---- app_source.cpp ---------------------------------------------------------------------------------------------------------
-  // What one search for game data found ([Paths] Source order: RDE, the discs the settings name, disc images next to the exe, optical
-  // drives).
-  struct SourceSearch {
-    std::filesystem::path rde_dir;
-    std::vector<import::disc::FoundDisc> found;
-    std::vector<import::disc::DiscGroup> groups;
-    import::disc::SetChoice choice;
-    // The places searched and the files there that cannot be played, for the not-found screen.
-    std::vector<std::string> searched, notes;
-    bool playable() const { return !rde_dir.empty() || choice.group >= 0; }
-  };
   // Picks the game data before anything reads it and opens the VFS over it, showing the not-found screen and the version picker while
   // nothing can be played; then the save folder. False when the player quit there.
   bool init_source();
+  // app::search_sources (data_source.h) through scan_image_file.
   SourceSearch search_sources();
   // The image file's discs into `search`; a file found unusable before (same size and time) is not opened again.
   void scan_image_file(const std::filesystem::path& file, SourceSearch& search);
-  // The Chrono Cross discs in the optical drives.
-  std::vector<import::disc::FoundDisc> optical_discs();
   // Per frame in disc mode: a disc taken out of its drive is unmounted; while one is missing the drives are searched every 2 s and a
   // disc of the build being played is mounted by its disc number (a swap on a single drive).
   void poll_drive_discs();
@@ -180,7 +169,6 @@ class App {
   // `notes` then keeps its lines, else it gets why picked files cannot be played.
   bool take_browsed_files(std::vector<std::string>& notes);
   void open_discs(const SourceSearch& search);
-  void find_console_font(const SourceSearch& search, const import::disc::DiscGroup& group);
   // Disc mode's fixed settings (paths.h disc_mode); the ini keeps the player's own (save_config writes them back).
   void apply_disc_mode();
   void pick_save_dir();
@@ -192,8 +180,9 @@ class App {
   bool disc_prompt_frame();
   // Looks for disc 1 or 2 of the played build in the configured images, the images next to the exe and the drives, and mounts it.
   ui::DiscPrompt::MountResult mount_disc(int disc);
-  // The image files and their stamps where the prompt looks, for noticing a new image.
-  std::string image_signature();
+  // The state of every place the prompt looks: each drive's media-change count and label, the image files and their stamps. Any
+  // change (whatever disc it brings) makes the prompt try again.
+  std::string source_signature();
   // The VFS has the game's files (an RDE install or a disc).
   bool data_ready() const { return files.has_archive("cdrom"); }
 
@@ -387,8 +376,8 @@ class App {
   bool drive_wait = false;
   // Something new may hold a disc (a drive's media changed, a file was picked, the image files changed): the prompt tries again.
   bool disc_source_changed = false;
-  std::string image_stamps;
-  std::chrono::steady_clock::time_point next_image_check;
+  std::string source_stamps;
+  std::chrono::steady_clock::time_point next_source_check;
   std::chrono::steady_clock::time_point next_drive_scan;
   std::string source_warning;
   platform::Config disc_held;

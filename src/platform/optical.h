@@ -18,6 +18,8 @@ struct OpticalDriveInfo {
   // Vendor and product of the device ("" when the system does not say).
   std::string product;
   bool media = false;
+  // The drive's media-change count (OpticalDrive::media_generation); nullopt without a disc.
+  std::optional<u32> generation;
   // Volume label of the disc in it ("" without a disc or a label).
   std::string label;
 };

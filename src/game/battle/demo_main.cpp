@@ -42,6 +42,7 @@
 #include <utility>
 #include <vector>
 
+#include "app/data_source.h"
 #include "audio/mixer.h"
 #include "core/log.h"
 #include "data/tables.h"
@@ -221,12 +222,13 @@ int ocbattleview_main(int argc, char** argv) {
   if (config_file.empty()) config.clear_session_toggles();
   // [Cheats] of the harness ini (e.g. AlwaysLoot = a Pilfer that lands).
   platform::bind_cheats(&config.cheats);
-  const std::filesystem::path game_dir = platform::find_game_dir(config.game_dir);
   vfs::Vfs files;
-  if (game_dir.empty() || !files.open(game_dir)) {
-    log::error("game dir not found");
+  if (std::string error; !app::open_game_data(config, exe, files, &error)) {
+    log::error("game data: {}", error);
     return 1;
   }
+  // The discs have the original art only.
+  if (platform::disc_mode()) hd = false;
   // In HD mode cdrom2 overrides cdrom.
   files.set_hd_mode(hd);
   vfs::ModManager mods;
@@ -335,6 +337,8 @@ int ocbattleview_main(int argc, char** argv) {
       rc = 1;
     } else {
       view.set_art_mode(hd);
+      // The discs' text is the build's language.
+      if (import::Lang lang; platform::disc_mode() && import::parse_lang(config.language, lang)) view.set_language(lang);
       // --ring
       if (battle::Battle* current = view.battle_mut(); current && have_ring) current->set_ring(start_ring);
       // --etrap / --ptrap
@@ -399,7 +403,7 @@ int ocbattleview_main(int argc, char** argv) {
       while (rc == 0 && window.pump(input)) {
         platform::stick_to_dpad(input, stick_dpad);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
-        if (input.key_pressed[SDL_SCANCODE_F1]) {
+        if (input.key_pressed[SDL_SCANCODE_F1] && !platform::disc_mode()) {
           hd = !hd;
           files.set_hd_mode(hd);
           view.set_art_mode(hd);

@@ -49,6 +49,25 @@ struct DiscGroup {
 // The builds in the order their first disc was found.
 std::vector<DiscGroup> group_discs(const std::vector<FoundDisc>& found);
 
+// Adds the discs found in one searched place to those of the places searched before it. The first place holding a Chrono Cross disc
+// gives all of its discs; a later place gives only the disc numbers a build found earlier still lacks, so a set can be split between
+// places (disc 1 named in the settings, disc 2 next to the exe) while a later place never brings in another build.
+void merge_place(std::vector<FoundDisc>& found, std::vector<FoundDisc> place);
+// Some build has both discs among those found: the places after need not be searched.
+bool has_complete_set(const std::vector<FoundDisc>& found);
+
+// How a disc found while disc 1 or 2 of the played build is asked for fits that request, from the furthest miss to a fit.
+enum class DiscFit { NoDisc, NotChronoCross, OtherDisc, OtherBuild, Fits };
+DiscFit disc_fit(const DiscIdentity& identity, int needed, const std::string& build);
+struct DiscPick {
+  // Index into the found list of the first disc that fits, -1 = none.
+  int index = -1;
+  // Fits, or the closest miss among the discs found (NoDisc when the list is empty).
+  DiscFit fit = DiscFit::NoDisc;
+};
+// `found` may hold discs that are not Chrono Cross (or do not read: no source, chrono_cross false); they are never picked.
+DiscPick pick_disc(const std::vector<FoundDisc>& found, int needed, const std::string& build);
+
 struct SetChoice {
   // Index into the groups, -1 = nothing to play (or the region must be asked first).
   int group = -1;

@@ -113,6 +113,8 @@ class Player {
   // `colour` tints the strip (the held frame's fade passes its alpha).
   void draw_strip(float view_w, float view_h, u32 colour = 0xFFFFFFFFu);
   void release_strip();
+  // A disc stream's strip rows arrive as the stream is read: the texture is uploaded again once kStripBatch more rows are in.
+  void refresh_strip();
 
   audio::Mixer* mixer_ = nullptr;
   render::GpuContext* ctx_ = nullptr;
@@ -124,6 +126,10 @@ class Player {
   render::TexRef strip_set_;
   // strip_last_: the `last` frame the strip's scroll runs to (staff_strip_top).
   u32 strip_w_ = 0, strip_h_ = 0, strip_last_ = 0;
+  // The strip comes from the disc stream (row B when strip_second_); strip_rows_ of its rows are in the texture.
+  bool strip_stream_ = false, strip_second_ = false;
+  size_t strip_rows_ = 0;
+  static constexpr size_t kStripBatch = 32;
 
   std::string member_;
   u32 width_ = 0, height_ = 0, display_w_ = 0, display_h_ = 0;

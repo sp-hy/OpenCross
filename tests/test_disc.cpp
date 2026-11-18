@@ -1,6 +1,7 @@
 // Disc reader on synthetic images written to a temp folder: a small disc with the Chrono Cross layout (ISO volume, file table,
 // disc-number sector) in every container (cooked iso, raw bin, cue with one and two files, ccd, mds with subchannel, m3u, single
-// and multi-disc pbp), CHD and encrypted-PBP refusal, the table decode, identification of an unknown build and of other discs.
+// and multi-disc pbp), CHD and encrypted-PBP refusal, the table decode, identification of an unknown build and of other discs, and
+// the search merging the discs of several places by build and disc number.
 #include <miniz.h>
 
 #include <algorithm>
@@ -17,6 +18,7 @@
 
 #include "import/disc/disc_ident.h"
 #include "import/disc/disc_image.h"
+#include "import/disc/disc_search.h"
 #include "import/disc/disc_table.h"
 #include "import/disc/sha256.h"
 
@@ -402,6 +404,45 @@ void test_identity(const fs::path& dir) {
   if (auto source = open_image(dir / "novolume.iso", &error)) CHECK(!identify(*source).chrono_cross);
 }
 
+// The search over two places: disc 1 of build X named in the settings, a folder holding X's disc 2, X's disc 1 again and both discs
+// of build Y (another executable). The folder fills X's missing disc and nothing else; a place with a whole set ends the search.
+void test_search_places(const fs::path& dir) {
+  const auto build_disc = [](u32 disc_number, bool other_build) {
+    std::vector<Bytes> user = make_user_sectors("CHRONOCROSS", disc_number);
+    if (other_build) user[38][0] ^= 0x5A;
+    return join(user);
+  };
+  write_file(dir / "named" / "x1.iso", build_disc(1, false));
+  write_file(dir / "folder" / "x1 copy.iso", build_disc(1, false));
+  write_file(dir / "folder" / "x2.iso", build_disc(2, false));
+  write_file(dir / "folder" / "y1.iso", build_disc(1, true));
+  write_file(dir / "folder" / "y2.iso", build_disc(2, true));
+
+  std::vector<FoundDisc> found, place;
+  std::vector<std::string> notes;
+  add_image_file(dir / "named" / "x1.iso", place, notes);
+  merge_place(found, std::move(place));
+  CHECK(found.size() == 1 && !has_complete_set(found));
+  place.clear();
+  for (const fs::path& file : image_files_in(dir / "folder")) add_image_file(file, place, notes);
+  CHECK(place.size() == 4 && notes.empty());
+  merge_place(found, std::move(place));
+  CHECK(found.size() == 2 && has_complete_set(found));
+  CHECK(found[0].where.ends_with("x1.iso") && found[0].where.find("named") != std::string::npos);
+  CHECK(found[1].where.ends_with("x2.iso") && found[1].identity.disc_number == 2);
+  const std::vector<DiscGroup> groups = group_discs(found);
+  CHECK(groups.size() == 1 && groups[0].complete());
+  CHECK(choose_set(groups, Region::Unknown).group == 0);
+
+  // A first place that holds nothing leaves the next one to give every disc it has.
+  std::vector<FoundDisc> fresh;
+  merge_place(fresh, {});
+  place.clear();
+  for (const fs::path& file : image_files_in(dir / "folder")) add_image_file(file, place, notes);
+  merge_place(fresh, std::move(place));
+  CHECK(fresh.size() == 4 && group_discs(fresh).size() == 2);
+}
+
 void test_threads(const fs::path& dir) {
   std::string error;
   const std::unique_ptr<SectorSource> source = open_image(dir / "multi.cue", &error);
@@ -432,6 +473,7 @@ int main() {
   test_containers(dir);
   test_pbp(dir);
   test_identity(dir);
+  test_search_places(dir);
   test_threads(dir);
   fs::remove_all(dir, ec);
   if (failures) std::printf("%d failure(s)\n", failures);

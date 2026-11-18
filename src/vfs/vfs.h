@@ -84,6 +84,8 @@ class Vfs {
   // blanks in cdrom2 (map/window/w*.tim are all-transparent there). Other archives: as read(). The mod overlay still applies.
   std::optional<Bytes> read_disc(std::string_view path) const;
   bool exists(std::string_view path) const;
+  // `path` as a reader (the same lookup as read()), null if absent: a shipped member the backend can read in parts is not read whole.
+  std::unique_ptr<Reader> open_reader(std::string_view path) const;
   // The mod's loose file on disk when `path` resolves to one through the active overlay (never a member of a packed mod), so
   // big files (movies) can be streamed instead of read whole.
   std::optional<std::filesystem::path> loose_file(std::string_view path) const;

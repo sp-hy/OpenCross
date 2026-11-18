@@ -48,9 +48,9 @@ Ps1Grid ps1_page(Ps1Page page, const import::JpGlyphs& glyphs) {
   switch (page) {
     case Ps1Page::Katakana: {
       fill_kana_left(grid, glyphs, 0xF81A);
-      // Voiced / semi-voiced block, 5 per row.
+      // Voiced / semi-voiced block, then the small kana and ヴ, 5 per row.
       unsigned code = 0xF848;
-      for (size_t row = 0; row < 6; ++row)
+      for (size_t row = 0; row < 7; ++row)
         for (size_t col = 0; col < 5; ++col) grid[row][5 + col] = codepoint_of(glyphs, code++);
       fill_punct(grid, glyphs);
       break;

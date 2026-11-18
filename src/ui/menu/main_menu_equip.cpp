@@ -313,7 +313,9 @@ void MainMenu::Impl::build_keyitems() {
   for (int row = 0; row < 15; ++row) {
     const int idx = ki_scroll + row;
     if (idx >= cnt) break;
-    TPfit(75 + kRowDx, 44.6f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]), 135, kText, kRowRel);
+    // Played from the discs the names are drawn from the PS1's text point (75, 46 + 24 row), at their full width.
+    if (!texs.hd()) PT(75, 46.0f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]));
+    else TPfit(75 + kRowDx, 44.6f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]), 135, kText, kRowRel);
   }
   group(Right);
   Frame(0x3E, 238, 318);

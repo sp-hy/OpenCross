@@ -17,10 +17,15 @@ Blocks it writes (the room-id block is kept as it is):
 
 The menu rows are matched against lang.dat's menutest.txt / shopmenu.txt JP column, ignoring line breaks and blanks: the
 overlay strings at the key (one or several in a row), or 1 to 3 strings near it per line, whose text equals the row. A row
-with no match keeps the one string at its key, or has no source when the key is not the start of a string. The output keeps
-the overlay's own line breaks. Sources: data/cdrom.dat, data/lang.dat.
+with no match is the disc's own text: the string at its key, continued by the strings that follow it while each brings the
+text closer to the row (strings that are another row's key end it, except one directly after the key whose follower is not
+a key: the other memory card's form of the same line, which shares the rest), or no source when the key is not the start of
+a string. The output keeps
+the overlay's own line breaks between strings in a row, except in a row whose text is one line: the PS1 draws that row on one
+line. Sources: data/cdrom.dat, data/lang.dat.
 """
 import argparse
+import difflib
 import itertools
 import os
 import re
@@ -69,6 +74,27 @@ def bare(text):
     return re.sub(r"[\s　]", "", text)
 
 
+def likeness(text, want):
+    return difflib.SequenceMatcher(None, bare(text), bare(want), autojunk=False).ratio()
+
+
+def continued(strings, following, keyed, off, want):
+    """The string at off and the strings after it that bring the text closer to want (see the module notes)."""
+    run = [off]
+    best = likeness(strings[off], want)
+    at = following.get(off)
+    if at in keyed and following.get(at) not in keyed:
+        at = following.get(at)
+    while at is not None and at not in keyed and len(run) < 4:
+        score = likeness("".join(strings[a] for a in run + [at]), want)
+        if score <= best:
+            break
+        run.append(at)
+        best = score
+        at = following.get(at)
+    return run
+
+
 def menu_parts(lang, z):
     """[(table, key, [(address, starts_line)])] for the rows that are not the single string at their key."""
     rows = []
@@ -77,8 +103,16 @@ def menu_parts(lang, z):
         strings = sjis_strings(z.read(prg))
         starts = sorted(strings)
         following = {a: starts[i + 1] for i, a in enumerate(starts[:-1])}
+        column = jp_column(lang, name)
+        keyed = set()
+        for key_text, want in column:
+            try:
+                if want:
+                    keyed.add(int(key_text, 0) - MENU_BASE)
+            except ValueError:
+                pass
         counts = {}
-        for key_text, want in jp_column(lang, name):
+        for key_text, want in column:
             try:
                 key = int(key_text, 0)
             except ValueError:
@@ -94,7 +128,7 @@ def menu_parts(lang, z):
                     while len(run) < 6 and run[-1] in following:
                         run.append(following[run[-1]])
                         if bare("".join(strings[a] for a in run)) == bare(want):
-                            parts, kind = [(a, i > 0) for i, a in enumerate(run)], "lines"
+                            parts, kind = [(a, i > 0 and "\n" in want) for i, a in enumerate(run)], "lines"
                             break
                 if not parts and want:
                     near = [a for a in starts if abs(a - off) < 0x400]
@@ -115,6 +149,10 @@ def menu_parts(lang, z):
                     if found:
                         parts = [(a, i > 0 and j == 0) for i, hit in enumerate(found) for j, a in enumerate(hit)]
                         kind = "composed"
+                if not parts and want and off in strings:
+                    run = continued(strings, following, keyed, off, want)
+                    if len(run) > 1:
+                        parts, kind = [(a, i > 0 and "\n" in want) for i, a in enumerate(run)], "continued"
                 if not parts and off in strings:
                     kind = "edited"
             counts[kind] = counts.get(kind, 0) + 1

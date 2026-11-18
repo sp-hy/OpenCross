@@ -409,10 +409,15 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
     const float w = static_cast<float>(font.cell_w()) * pw, h = static_cast<float>(font.cell_h()) * ph;
     const float x0 = std::round((x + static_cast<float>(font.left(idx) + (shadow ? 1 : 0)) * pw) * gx) / gx;
     const float y0 = std::round((y + static_cast<float>(font.top(idx) + (shadow ? 1 : 0)) * ph) * gy) / gy;
-    const u32 shade = pack_rgba(font.shadow_level(), font.shadow_level(), font.shadow_level(), static_cast<u8>(alpha));
     const u32 ink = font.ink();
     auto tint = [&](int shift) { return static_cast<u8>(((color >> shift) & 0xFF) * ((ink >> shift) & 0xFF) / 255); };
     const u32 fill = pack_rgba(tint(0), tint(8), tint(16), static_cast<u8>(alpha));
+    // The console font's shadow is its second grey under the same colour as the ink.
+    const bool tinted_shadow = font.build() == import::Ps1Font::Build::Console;
+    auto shadow_tint = [&](int shift) {
+      return static_cast<u8>(tinted_shadow ? ((color >> shift) & 0xFF) * font.shadow_level() / 255 : font.shadow_level());
+    };
+    const u32 shade = pack_rgba(shadow_tint(0), shadow_tint(8), shadow_tint(16), static_cast<u8>(alpha));
     sprites_->draw(font_face->fill->set, x0, y0, w, h, u0, v0, u1, v1, shadow ? shade : fill);
     if (audit_on_ && !shadow) audit_glyph(nullptr, ch, x0, y0, x0 + static_cast<float>(font.advance(idx)) * pw, y0 + h);
     return;

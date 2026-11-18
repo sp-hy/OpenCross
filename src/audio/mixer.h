@@ -132,8 +132,7 @@ class Mixer {
   bool held() const { return hold_.load(std::memory_order_acquire); }
 
   // Live [Audio] BgmSource switch: restarts the playing song on the other source at the same musical position (same volume / fade
-  // state, ~15 ms declick instead of a gap). `song` = the PS1 song id on the NEW source (-1 = the current id; the remastered battle
-  // theme 0x14 <-> AKAO song 2 differ). Main thread (reads the song files). False when nothing plays or the new source cannot load;
+  // state, ~15 ms declick instead of a gap). `song` = the PS1 song id on the NEW source (-1 = the current id). Main thread (reads the song files). False when nothing plays or the new source cannot load;
   // true also when the song already plays on that source. Position: bgm_seconds() mapped through map_song_position().
   bool switch_bgm_source(bool remastered, int song = -1);
   bool bgm_is_akao() const { return bgm_akao_.load(std::memory_order_relaxed); }

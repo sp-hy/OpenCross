@@ -52,14 +52,18 @@ bool load_decoder(const vfs::Vfs& game_fs, const std::string& name, const std::s
     std::fprintf(stderr, "movie '%s' not found\n", name.c_str());
     return false;
   }
-  auto bytes = game_fs.read(member);
-  return bytes && decoder.open(std::move(*bytes), member);
+  return decoder.open(game_fs.open_reader(member), member);
 }
 
 int cmd_strip(const vfs::Vfs& game_fs, const std::string& lang, const std::string& name, bool second, const std::string& out) {
   movie::Decoder decoder;
   std::string member;
   if (!load_decoder(game_fs, name, lang, decoder, member)) return 1;
+  // The strip rows arrive as the stream is read.
+  while (decoder.step()) {
+    decoder.video().clear();
+    decoder.audio().clear();
+  }
   std::vector<u8> rgba;
   u32 w = 0, h = 0;
   if (!decoder.staff_strip(second, rgba, w, h)) {

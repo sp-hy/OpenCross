@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/types.h"
+#include "vfs/backend.h"
 
 namespace oc::movie {
 
@@ -30,6 +31,8 @@ class Decoder {
 
   // Takes ownership of the movie's bytes; `name` is the format hint (a name ending in ".stv" is a disc movie stream).
   bool open(Bytes file, const std::string& name = "movie.bk2");
+  // The same over a reader: a disc movie stream is read as it is decoded, any other movie is read whole first.
+  bool open(std::unique_ptr<vfs::Reader> reader, const std::string& name);
   // Streams a movie file from disk (same probing as open, the file name as the format hint); the file stays open until the decoder
   // is destroyed.
   bool open_file(const std::filesystem::path& path);
@@ -40,9 +43,11 @@ class Decoder {
   u32 display_width() const { return stream_ ? width_ * 4 : width_; }
   u32 display_height() const { return stream_ ? width_ * 3 : height_; }
   double fps() const { return fps_; }
-  // A disc stream's staff-roll strip (RGBA, w x h, one row per strip sector): row A (`second` = false) or row B. False when the
-  // movie carries none.
+  // A disc stream's staff-roll strip (RGBA, w x h, one row per frame): row A (`second` = false) or row B; the rows the decoder has not
+  // read yet are black. False when the movie carries none. Thread-safe against step().
   bool staff_strip(bool second, std::vector<u8>& rgba, u32& w, u32& h) const;
+  // The strip rows read so far (they arrive ahead of the frames decoded). Thread-safe against step().
+  size_t staff_strip_rows() const;
   // The container's video frame count (0 when it does not say).
   u64 frame_count() const { return frames_; }
   bool has_audio() const { return has_audio_; }
@@ -58,7 +63,7 @@ class Decoder {
  private:
   // Format / stream / codec setup over the AVIO already in Impl; `name` hints the container.
   bool probe(const std::string& name);
-  bool open_stream(Bytes file);
+  bool open_stream(std::unique_ptr<vfs::Reader> reader);
   bool step_stream();
   // Appends `count` interleaved stereo frames of impl_->src at `rate` Hz to audio_, resampled to kAudioRate.
   void resample(size_t count, int rate);

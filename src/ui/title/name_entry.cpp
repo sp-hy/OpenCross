@@ -224,12 +224,14 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   } else {
     dl.rect(white_set, -reach, 0, kCanvasW + 2.0f * reach, kCanvasHeight, render::pack_rgba(60, 38, 18));
   }
-  // Played from the discs the swirls and the dial are the compass meshes (square pictures centred on their draw points).
+  // Played from the discs the swirls and the dial are the compass meshes (square pictures centred on their draw points), added at a
+  // quarter (the PS1's B + F / 4).
   const bool disc_art = !kit.vfs().has_archive("hd");
   auto mesh = [&](const char* name, int scale_x, int scale_y, float x, float y) {
     const NameEntry::Pic pic_mesh = ps1_pic("ps1:" + std::string(name) + std::to_string(scale_y),
                                             [&] { return ps1::mesh_picture(kit.vfs(), name, 0, scale_x, scale_y, 0x808080, true).rgba; });
-    if (pic_mesh.set) dl.image(pic_mesh.set, canvas_x(x - pic_mesh.w / 2), canvas_y(y - pic_mesh.h / 2), canvas_x(pic_mesh.w), canvas_y(pic_mesh.h));
+    if (pic_mesh.set)
+      dl.add(pic_mesh.set, canvas_x(x - pic_mesh.w / 2), canvas_y(y - pic_mesh.h / 2), canvas_x(pic_mesh.w), canvas_y(pic_mesh.h), render::pack_rgba(64, 64, 64));
   };
   if (disc_art) {
     mesh("deco", ps1::kMeshAspect, 0x1000, 0x48, 0x187);
@@ -387,7 +389,8 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     const bool focus = static_cast<int>(i) == button_;
     const bool tab = buttons_[i] == Button::Katakana || buttons_[i] == Button::Hiragana || buttons_[i] == Button::Alnum;
     const bool active_tab = tab && static_cast<int>(buttons_[i]) == static_cast<int>(page_);
-    if (disc_art) sheet(0x71 + static_cast<int>(buttons_[i]), 446, 367, focus || active_tab ? render::pack_rgba(0xEE, 0x9C, 0x00) : 0xFFFFFFFFu);
+    // The discs light the focused label alone: the active page's tab is plain while the focus is elsewhere.
+    if (disc_art) sheet(0x71 + static_cast<int>(buttons_[i]), 446, 367, focus ? render::pack_rgba(0xEE, 0x9C, 0x00) : 0xFFFFFFFFu);
     else dl.text(hd_face, labs[i].first, labs[i].second.x, labs[i].second.y, focus ? orange : (active_tab && ps1 ? orange : normal), lab_scale(0.365f));
   }
   {
@@ -611,10 +614,17 @@ void NameEntry::draw_disc_text(DrawList& dl, UiKit& kit) const {
         pen += kMenuBlankAdvance;
         continue;
       }
+      // The PS1 shows a full stop of this line as one row: the dot's top row, on the dot's bottom row.
+      int ink_top = font.cell_h(), ink_bottom = -1;
+      if (ch == U'.')
+        for (int y = 0; y < font.cell_h(); ++y)
+          for (int x = 0; x < font.cell_w(); ++x)
+            if (font.level(index, x, y)) ink_top = std::min(ink_top, y), ink_bottom = std::max(ink_bottom, y);
       for (int y = 0; y < font.cell_h(); ++y)
         for (int x = 0; x < font.cell_w(); ++x) {
+          if (ink_bottom >= 0 && y != ink_top) continue;
           const u8 grey = font.level(index, x, y);
-          const int px = pen + font.left(index) + x, py = font.top(index) + y;
+          const int px = pen + font.left(index) + x, py = font.top(index) + (ink_bottom >= 0 ? ink_bottom : y);
           if (!grey || px < 0 || py < 0 || px >= width || py >= height) continue;
           u8* out = &rgba[(static_cast<size_t>(py) * static_cast<size_t>(width) + static_cast<size_t>(px)) * 4];
           out[0] = out[1] = out[2] = grey, out[3] = 255;

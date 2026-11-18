@@ -61,15 +61,15 @@ bool Player::open(const vfs::Vfs& fs, std::string_view name, std::string_view la
     return false;
   }
   dec_ = std::make_unique<Decoder>();
-  // A mod's loose movie streams from disk (they are hundreds of MB); archive members, a packed mod's included, are read whole.
+  // A mod's loose movie streams from disk (they are hundreds of MB), and so does a disc's movie stream; other archive members, a packed
+  // mod's included, are read whole.
   if (auto loose = fs.loose_file(member_)) {
     if (!dec_->open_file(*loose)) {
       dec_.reset();
       return false;
     }
   } else {
-    auto bytes = fs.read(member_);
-    if (!bytes || !dec_->open(std::move(*bytes), member_)) {
+    if (!dec_->open(fs.open_reader(member_), member_)) {
       dec_.reset();
       return false;
     }
@@ -159,6 +159,9 @@ bool Player::set_staff_roll(const vfs::Vfs& fs, std::string_view member, bool sh
     strip_w_ = image.width;
     strip_h_ = image.height;
     strip_last_ = image.height + 1;
+    strip_stream_ = true;
+    strip_second_ = short_roll;
+    strip_rows_ = dec_->staff_strip_rows();
     log::info("movie: staff roll, stream strip {} {}x{}", short_roll ? 'B' : 'A', strip_w_, strip_h_);
     return true;
   }
@@ -181,6 +184,17 @@ void Player::release_strip() {
   strip_set_ = {};
   strip_texture_.destroy();
   strip_w_ = strip_h_ = strip_last_ = 0;
+  strip_stream_ = false;
+  strip_rows_ = 0;
+}
+
+void Player::refresh_strip() {
+  if (!strip_stream_ || !dec_ || !ctx_ || !strip_set_) return;
+  const size_t rows = dec_->staff_strip_rows();
+  if (rows <= strip_rows_ || (rows < strip_rows_ + kStripBatch && rows < strip_h_)) return;
+  render::DecodedImage image;
+  if (dec_->staff_strip(strip_second_, image.rgba, image.width, image.height)) strip_texture_.update(*ctx_, image.rgba.data());
+  strip_rows_ = rows;
 }
 
 Player::Rect Player::picture_rect(float vw, float vh) const {
@@ -329,6 +343,7 @@ void Player::update(double dt) {
     last_change_ = clock_;
     if (ctx_ && texture_) texture_.update(*ctx_, current_.rgba.data());
   }
+  refresh_strip();
   bool queue_empty;
   {
     std::lock_guard lk(mu_);

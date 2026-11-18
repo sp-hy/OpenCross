@@ -407,6 +407,8 @@ struct MainMenu::Impl {
   void Frame(int frame, float x, float y, u32 colour = kWhite, float* out_w = nullptr, float* out_h = nullptr, bool large = false);
   void TP(float x, float y, const std::u32string& str, u32 colour = kText, float rel = 1);
   void TP(float x, float y, std::string_view str, u32 colour = kText, float rel = 1) { TP(x, y, utf32(str), colour, rel); }
+  // Played from the discs: text from a PS1 text point (x, y), placed as the overlay's text routine places it.
+  void PT(float x, float y, const std::u32string& str, u32 colour = kText);
   // Text width in PS1 px.
   float twp(const std::u32string& str, float rel = 1) { return tw(str, rel) / xscale; }
 
@@ -542,6 +544,7 @@ struct MainMenu::Impl {
 
   // Defined in main_menu_settings.cpp.
   void build_settings();
+  void build_settings_disc();
   void skin_preview();
   void update_pad_page(const Nav& nav, const platform::Input& in);
   void build_pad_page();
@@ -564,7 +567,7 @@ struct MainMenu::Impl {
 
   // ===================================================== draw
   // [Video] Ps1ResUi (any art mode): the whole screen into a target of menutest's display size
-  // (512 x 448; Save / Load and Settings on the 640 x 448 mode), scaled up nearest.
+  // (512 x 448; Save / Load, and Settings with RDE's data, on the 640 x 448 mode), scaled up nearest.
   // lowres_on() = that pass; ps1_screen() = the PS1 disc textures, classic art only (HD keeps its own art, point-sampled).
   // Widescreen: the canvas grows by canvas_s = 4 * screen_extra() canvas units per side; the target grows with it
   // (512 + 3.2 e / 640 + 4 e texels wide) and is shown in the window rectangle of the widened 240-row frame.

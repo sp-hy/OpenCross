@@ -28,6 +28,9 @@ class DiscBackend final : public vfs::Backend {
   bool has_archive(std::string_view archive) const override;
   bool contains(std::string_view archive, const std::string& member, int disc) const override;
   std::optional<Bytes> read(std::string_view archive, const std::string& member, int disc) const override;
+  // Reads only the sectors a request covers. The reader keeps its disc's source, so it goes on reading after an unmount (a drive whose
+  // disc has left fails its reads).
+  std::unique_ptr<vfs::Reader> open_reader(std::string_view archive, const std::string& member, int disc) const override;
   // "cdrom": every member the indexes name that a mounted disc holds data for, disc 1's names first.
   std::vector<std::string> list(std::string_view archive) const override;
 

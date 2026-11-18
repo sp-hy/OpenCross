@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cstring>
 
-#include "platform/optical.h"
-
 namespace oc::import::disc {
 
 namespace {
@@ -176,6 +174,13 @@ std::vector<DriveCandidate> scan_optical_drives() {
   std::vector<DriveCandidate> out;
   for (DriveCandidate& candidate : probe_optical_drives())
     if (candidate.source && candidate.identity.chrono_cross) out.push_back(std::move(candidate));
+  return out;
+}
+
+std::string drive_media_signature(const std::vector<platform::OpticalDriveInfo>& drives) {
+  std::string out;
+  for (const platform::OpticalDriveInfo& info : drives)
+    out += info.drive + " " + (info.generation ? std::to_string(*info.generation) : std::string("-")) + " " + info.label + "\n";
   return out;
 }
 

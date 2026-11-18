@@ -18,6 +18,10 @@ add_subdirectory(game)
 add_subdirectory(data)
 add_subdirectory(battle)
 
+# Where the game data comes from (an RDE install or the PS1 discs): the app and the dev viewers share the search.
+add_library(oc_source STATIC app/data_source.h app/data_source.cpp)
+target_link_libraries(oc_source PUBLIC oc_core oc_platform oc_vfs oc_disc PRIVATE oc_text)
+
 # The exe's File Version / Product Version resource = project(OpenCross VERSION ...).
 configure_file(opencross.rc.in ${CMAKE_CURRENT_BINARY_DIR}/opencross.rc @ONLY)
 add_executable(opencross WIN32
@@ -36,5 +40,5 @@ add_executable(opencross WIN32
   app/app_achievements.cpp
   app/app_source.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/opencross.rc)
-target_link_libraries(opencross PRIVATE oc_core oc_disc oc_platform oc_net oc_versus_link oc_vfs oc_import oc_render oc_ui oc_audio oc_game oc_data oc_battle_view oc_flow oc_movie oc_save oc_menu_model oc_tools SDL3::SDL3)
+target_link_libraries(opencross PRIVATE oc_core oc_disc oc_source oc_platform oc_net oc_versus_link oc_vfs oc_import oc_render oc_ui oc_audio oc_game oc_data oc_battle_view oc_flow oc_movie oc_save oc_menu_model oc_tools SDL3::SDL3)
 set_target_properties(opencross PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/$<CONFIG>)

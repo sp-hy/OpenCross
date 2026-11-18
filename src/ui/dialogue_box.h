@@ -55,11 +55,15 @@ class DialogueBox {
   void close() { open_ = false; }
   // Field "label" window (world-map location names): no frame / portrait; at the PS1 window position (set_ps1_window) when the field engine gave one.
   void set_label(bool on) { label_ = on; }
-  // Window position chosen by the field engine, PS1 pixels (320x240). Reset by open().
-  void set_ps1_window(int x, int y) {
+  // Window position chosen by the field engine, PS1 pixels (320x240): the text area's top-left. `width` / `lines` are the PS1's size of
+  // the text area (pixels, the page leaf's 12 and a portrait's 64 included; 0 = taken from the layout), which the window of the PS1
+  // font is built around. Reset by open().
+  void set_ps1_window(int x, int y, int width = 0, int lines = 0) {
     has_win_ = true;
     win_x_ = x;
     win_y_ = y;
+    win_w_ = width;
+    win_lines_ = lines;
   }
   bool label() const { return label_; }
   bool is_open() const { return open_ && !tw_.closed(); }
@@ -177,6 +181,10 @@ class DialogueBox {
   static Geo frame_geo_for(int skin_idx, bool jp, float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left);
   static Geo frame_geo_box(int skin_idx, float left, float top, float right, float bottom);
   void draw_tiles(const Geo& geo, float zoom, float alpha, bool has_portrait, bool portrait_left);
+  // The window of a message in the PS1 font (disc mode), laid out as the PS1 lays its field window.
+  void draw_ps1(float vw, float vh, const render::CanvasFit* fit, float alpha);
+  // Glyph passes of the shown page from the text origin (tx, ty) in canvas units.
+  void draw_text(float tx, float ty, float zoom, float alpha, bool choosing, int hl_line);
   // Window y of canvas y 0 for the draw in progress (render::canvas_fit oy).
   float yo_ = 0;
   bool load_skin(int index);
@@ -200,7 +208,7 @@ class DialogueBox {
   bool open_ = false;
   bool label_ = false;
   bool has_win_ = false;
-  int win_x_ = 0, win_y_ = 0;
+  int win_x_ = 0, win_y_ = 0, win_w_ = 0, win_lines_ = 0;
   Typewriter tw_;
   render::FaceId face_ = render::kNoFace;
   // Face for {italic} glyphs (kNoFace: the regular face).
@@ -321,8 +329,8 @@ class DialogueDemo {
   void set_portrait_set(const std::string& set);
   // Frameless label window (field SETUP_DIALOG_WINDOW flag 0x10).
   void set_label(bool on);
-  // Top-left of the text area in PS1 pixels (call after show()).
-  void set_ps1_window(int x, int y);
+  // Top-left of the text area in PS1 pixels and its PS1 size (call after show(); DialogueBox::set_ps1_window).
+  void set_ps1_window(int x, int y, int width = 0, int lines = 0);
   // The shown window opens at full size without the grow (field window flag 0x20; call after show()).
   void skip_grow();
   // The shown message whole and opaque at once: no grow, fade or typing (call after show()).

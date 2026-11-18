@@ -202,9 +202,9 @@ void test_table() {
   CHECK(!audio::bgm_entry_by_file(25) && !audio::bgm_entry_by_file(73));
   CHECK(audio::bgm_path(2) == "cdrom/sound/bgm/BGM002.sab");
   for (int i = 0; i < audio::kBgmSongCount; ++i) CHECK(audio::bgm_entry(i)->song_id == i);
-  // Battle song of the A3 / C9 flags: 0x40 = the boss theme on both sources (des_b06f's Fire Dragon C9 #453 carries flags 0x40).
-  CHECK(audio::battle_song(0, false) == 2 && audio::battle_song(0, true) == 0x14);
-  CHECK(audio::battle_song(0x40, false) == 0x31 && audio::battle_song(0x40, true) == 0x31 && audio::battle_song(0x70, true) == 0x31);
+  // Battle song of the A3 / C9 flags: the battle theme 0x14 (music021), 0x40 = the boss theme (des_b06f's Fire Dragon C9 #453 carries flags 0x40).
+  CHECK(audio::battle_song(0) == 0x14 && audio::battle_song(0x31) == 0x14 && audio::bgm_entry(audio::kBattleSong)->file_no == 21);
+  CHECK(audio::battle_song(0x40) == 0x31 && audio::battle_song(0x70) == 0x31);
   CHECK(audio::bgm_entry(audio::kBossBattleSong)->file_no == 50);
 }
 

@@ -27,7 +27,8 @@ namespace oc::ui {
 
 class DiscPrompt {
  public:
-  enum class MountResult { Ok, NoDisc, WrongDisc, WrongBuild };
+  // NotGame: a disc that is not Chrono Cross or does not read; WrongDisc: the other disc number; WrongBuild: the other build's disc.
+  enum class MountResult { Ok, NoDisc, NotGame, WrongDisc, WrongBuild };
   // The build whose screen layout is drawn (the two builds place the lines and the digit differently).
   enum class Layout { Japan, Usa };
   enum class Phase { Closed, FadeIn, Waiting, Error, FadeOut };

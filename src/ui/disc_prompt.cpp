@@ -25,6 +25,22 @@ struct LayoutInfo {
 constexpr LayoutInfo kLayouts[2] = {{57.0f, 97.0f, 44}, {72.0f, 109.0f, 160}};
 // The atlas: the prompt for disc 1, the prompt for disc 2, the "wrong disc" line, one 16-row band each.
 constexpr int kAtlasH = 3 * kLineH;
+
+const char* result_name(DiscPrompt::MountResult result) {
+  switch (result) {
+    case DiscPrompt::MountResult::Ok:
+      return "mounted";
+    case DiscPrompt::MountResult::NoDisc:
+      return "no disc";
+    case DiscPrompt::MountResult::NotGame:
+      return "not a Chrono Cross disc";
+    case DiscPrompt::MountResult::WrongDisc:
+      return "wrong disc";
+    case DiscPrompt::MountResult::WrongBuild:
+      return "wrong build";
+  }
+  return "";
+}
 }  // namespace
 
 bool DiscPrompt::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites, render::TextBatch& text) {
@@ -96,8 +112,7 @@ void DiscPrompt::open(int needed_disc) {
 void DiscPrompt::attempt() {
   pending_ = false;
   last_ = host_.try_mount ? host_.try_mount(disc_) : MountResult::NoDisc;
-  log::info("disc prompt: disc {} attempt: {}", disc_,
-            last_ == MountResult::Ok ? "mounted" : last_ == MountResult::NoDisc ? "no disc" : last_ == MountResult::WrongDisc ? "wrong disc" : "wrong build");
+  log::info("disc prompt: disc {} attempt: {}", disc_, result_name(last_));
   phase_ = last_ == MountResult::Ok ? Phase::FadeOut : Phase::Error;
   frame_ = 0;
 }

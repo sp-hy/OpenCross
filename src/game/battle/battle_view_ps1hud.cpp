@@ -229,9 +229,9 @@ void BattleView::ps1_field_ring() {
 //  * the level digit (sheet 0x10, digit + 1) at (x + 9, y + 12) and "Lv" (frame 13) at (x + 4, y + 18), colour 0x408040;
 //  * HP in the HP colour: the current value's last three digits in 8 px slots from x + 4 (its leading zeros left out), "/" (frame 11) at
 //    x + 28 and the maximum from x + 36, at y + 26;
+//  * the stamina bar (rectangles, bhud::stamina_fill) at (x + 8, y + 35), under the stamina line;
 //  * stamina at y + 37: "Sta." (frame 14) at x + 34, the tens digit (frame digit + 15) at x + 42, "." (frame 25) at x + 47 and the units
 //    at x + 52, all 5 px further right with a hundreds digit at x + 30; below zero "Out.-" (frame 26) and the red digits (12 frames on);
-//  * the stamina bar (rectangles, bhud::stamina_fill) at (x + 8, y + 35);
 //  * the element grid (sheet 0x08, half blended): a 5 x 3 cell per occupied unlocked cell at (x + 18 + 4 level, y + 6 + 2 slot), frame 3
 //    below the gauge level, 2 above it, the gauge level itself alternating between them;
 //  * status icons (sheet 0x78 frames 1..6) left to right from (x + 6, y - 6).
@@ -276,6 +276,12 @@ void BattleView::ps1_party_panels() {
     }
     add_sheet(kSheetDigits, 11, px + 28, py + 26, hp_colour);
 
+    const float bar_x = (px + 8) * kPs1Px, bar_y = (py + 35) * kRowScale;
+    add_rect(bar_x, bar_y, 52 * kPs1Px, 4 * kRowScale, col(0, 0, 0));
+    add_rect(bar_x + kPs1Px, bar_y + kRowScale, 50 * kPs1Px, 2 * kRowScale, col(0, 0, 0));
+    const bhud::StaminaFill fill = bhud::stamina_fill(unit.stamina);
+    const u32 bar_colour = fill.colour == bhud::BarColour::Red ? col(255, 0, 0) : fill.colour == bhud::BarColour::Yellow ? col(255, 255, 0) : col(0, 255, 255);
+    add_rect(bar_x + kPs1Px, bar_y + kRowScale, static_cast<float>(fill.width) * kPs1Px, 2 * kRowScale, bar_colour);
     const bool out = unit.stamina < 0;
     const int frame_shift = out ? 12 : 0;
     const std::array<int, 9> sta = split_digits(std::min(std::abs(unit.stamina), 999));
@@ -286,12 +292,6 @@ void BattleView::ps1_party_panels() {
     add_sheet(kSheetDigits, frame_shift + 25, px + 47 + shift, sta_y);
     add_sheet(kSheetDigits, sta[8] + frame_shift + 15, px + 52 + shift, sta_y);
     add_sheet(kSheetDigits, out ? 26 : 14, px + 34, sta_y);
-    const float bar_x = (px + 8) * kPs1Px, bar_y = (py + 35) * kRowScale;
-    add_rect(bar_x, bar_y, 52 * kPs1Px, 4 * kRowScale, col(0, 0, 0));
-    add_rect(bar_x + kPs1Px, bar_y + kRowScale, 50 * kPs1Px, 2 * kRowScale, col(0, 0, 0));
-    const bhud::StaminaFill fill = bhud::stamina_fill(unit.stamina);
-    const u32 bar_colour = fill.colour == bhud::BarColour::Red ? col(255, 0, 0) : fill.colour == bhud::BarColour::Yellow ? col(255, 255, 0) : col(0, 255, 255);
-    add_rect(bar_x + kPs1Px, bar_y + kRowScale, static_cast<float>(fill.width) * kPs1Px, 2 * kRowScale, bar_colour);
 
     for (int row = 0; row < data::kGridRows; ++row)
       for (int slot = 0; slot < data::kGridCols; ++slot) {

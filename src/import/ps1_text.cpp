@@ -376,11 +376,13 @@ std::unordered_map<u32, std::string> overlay_sjis_strings(ByteSpan image, u32 ba
   return strings;
 }
 
-// JP: every Shift-JIS string of the overlay under its guest address (overlay_sjis_strings), then the composed rows over them.
+// JP: every Shift-JIS string of the overlay under its guest address (overlay_sjis_strings), then the composed rows over them. The
+// strings also stay under "prg:" and their address ("prg:801F4BD2"), where no composed row covers them.
 void Ps1Text::overlay_menu(TextTable& out, int table, std::string_view path) const {
   const auto file = vfs_->read(path);
   if (!file) return;
   const std::unordered_map<u32, std::string> strings = overlay_sjis_strings(*file, build_->menu_base);
+  for (const auto& [address, text] : strings) add(out, std::format("prg:{:08X}", address), text);
   std::vector<std::pair<u32, std::string>> rows(strings.begin(), strings.end());
   for (const Ps1MenuPart& part : build_->menu_parts) {
     if (part.table != table) continue;
@@ -426,15 +428,14 @@ void Ps1Text::message_menu(TextTable& out, int table) const {
     while (text.ends_with('\n')) text.pop_back();
     add(out, hex_key(row.key, 8), trim_blanks(std::move(text)));
   }
-  // Every message by its number ("mess:N", leading blanks kept), and for the shop table the ASCII strings of the USA shop overlay by
-  // their guest address ("prg:801DF44C"): the USA overlays name some words that no JP string maps to.
+  // Every message by its number ("mess:N", leading blanks kept), and the ASCII strings of the table's USA overlay by their guest
+  // address ("prg:801DF44C"): the USA overlays name some words that no JP string maps to.
   for (size_t i = 0; i < messages.size(); ++i) {
     std::string text = messages[i];
     while (text.ends_with('\n')) text.pop_back();
     add(out, "mess:" + std::to_string(i), text);
   }
-  if (table != 1) return;
-  const auto overlay = vfs_->read("cdrom/prog/shopmenu.prg");
+  const auto overlay = vfs_->read(table == 1 ? "cdrom/prog/shopmenu.prg" : "cdrom/prog/menutest.prg");
   if (!overlay) return;
   const ByteSpan bytes(*overlay);
   for (size_t i = 0; i < bytes.size();) {

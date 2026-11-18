@@ -1,11 +1,46 @@
 #include "import/disc/disc_backend.h"
 
+#include <algorithm>
+#include <cstring>
 #include <mutex>
 
 namespace oc::import::disc {
 
 namespace {
+
 size_t side_of(int disc) { return disc >= 2 ? 1 : 0; }
+
+// One file record read sector by sector.
+class RecordReader final : public vfs::Reader {
+ public:
+  RecordReader(std::shared_ptr<const SectorSource> source, FileSpan span) : source_(std::move(source)), span_(span) {}
+  u64 size() const override { return span_.size; }
+  bool read(u64 offset, size_t count, u8* out) override {
+    if (offset > span_.size || count > span_.size - offset) return false;
+    while (count) {
+      const u32 sector = static_cast<u32>(offset / kUserSectorSize);
+      const size_t within = static_cast<size_t>(offset % kUserSectorSize);
+      if (within == 0 && count >= kUserSectorSize) {
+        const u32 whole = static_cast<u32>(count / kUserSectorSize);
+        if (!source_->read_user(span_.lba + sector, whole, out)) return false;
+        const size_t done = static_cast<size_t>(whole) * kUserSectorSize;
+        out += done, offset += done, count -= done;
+        continue;
+      }
+      if (!source_->read_user(span_.lba + sector, 1, scratch_)) return false;
+      const size_t piece = std::min(count, kUserSectorSize - within);
+      std::memcpy(out, scratch_ + within, piece);
+      out += piece, offset += piece, count -= piece;
+    }
+    return true;
+  }
+
+ private:
+  std::shared_ptr<const SectorSource> source_;
+  FileSpan span_;
+  u8 scratch_[kUserSectorSize];
+};
+
 }  // namespace
 
 DiscBackend::DiscBackend(const vfs::DiscNames& names) : names_(names) {}
@@ -87,6 +122,13 @@ std::optional<Bytes> DiscBackend::read(std::string_view archive, const std::stri
   const Located found = locate(member, disc);
   if (!found.disc) return std::nullopt;
   return read_record(*found.disc->source, found.disc->table, found.record);
+}
+
+std::unique_ptr<vfs::Reader> DiscBackend::open_reader(std::string_view archive, const std::string& member, int disc) const {
+  if (archive != "cdrom") return nullptr;
+  const Located found = locate(member, disc);
+  if (!found.disc || found.record >= found.disc->table.size()) return nullptr;
+  return std::make_unique<RecordReader>(found.disc->source, found.disc->table.span(found.record));
 }
 
 std::vector<std::string> DiscBackend::list(std::string_view archive) const {

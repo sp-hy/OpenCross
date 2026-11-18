@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <format>
 
 #include "platform/pad_remap.h"
 #include "ui/menu/menu_common.h"
@@ -31,6 +32,13 @@ const SettingRow kSettings[8] = {
     {0x200, 0x801F4BD2, 0x801F4BE4, 0x801F4BF6},
     {0x400, 0x801F4B8A, 0x801F4BAE, 0x801F4BC0},
     {0x800, 0x801F4C08, 0x801F4C2C, 0x801F4C3E}};
+
+// Played from the discs. JP: the overlay's own strings: the second words of the Vibration Function and stick rows and the stick row's
+// label when the right stick walks. USA: the first of the eight row messages ("label TAB left TAB right") and the stick row's two
+// prefix words.
+constexpr u32 kJpVibrationTail = 0x801F4B9C, kJpStickTail = 0x801F4C1A, kJpRightStick = 0x801F4C86;
+constexpr u32 kUsaLeftWord = 0x801F2490, kUsaRightWord = 0x801F2498;
+constexpr int kUsaFirstRowMessage = 0x53;
 
 // The assignment page's texts are the menutest.txt rows from this address on, 0x12 bytes apart; a text id is its row + 5.
 constexpr u32 kPadTextBase = 0x801F4C98, kPadTextStep = 0x12;
@@ -98,6 +106,10 @@ void MainMenu::Impl::build_settings() {
     build_pad_page();
     return;
   }
+  if (!texs.hd()) {
+    build_settings_disc();
+    return;
+  }
   Frame(64, 48, 44);
   // "Customize" in the frame's top notch.
   notch_caption(48, 44, 5);
@@ -122,6 +134,62 @@ void MainMenu::Impl::build_settings() {
   } else {
     tri(40, 60.0f + 24.0f * static_cast<float>(set_cur), true);
   }
+}
+
+// Played from the discs: the panel frame 64 at (48, 44) with its caption; row i's texts at y 60 + 24 i, the label at x 72, the
+// choices at 278 and 376 over the flat 82 x 20 bar (0xA0, 0x60, 0) at (277 or 375, y - 2). The chosen word is drawn at 0x004048 (JP)
+// or 0x707070 (USA). The button row draws the glyph of the run / walk button at (72, y - 4) and its label at x 100 (JP) / 96 (USA); the
+// JP Vibration Function and stick rows draw their second word at x 200 / 168, the USA stick row writes "Left " or "Right " before
+// its message.
+void MainMenu::Impl::build_settings_disc() {
+  constexpr float kPanelX = 48, kPanelY = 44, kLabelX = kPanelX + 0x18, kLeftX = kPanelX + 0xE6, kChoiceStep = 0x62;
+  constexpr int kButtonRow = 5, kVibrationRow = 6, kStickRow = 7;
+  Frame(64, kPanelX, kPanelY);
+  const import::TextTable* table = lt.table("menutest");
+  auto row_text = [&](const std::string& key) {
+    const std::string* row = table ? table->get(key, lang) : nullptr;
+    return row ? utf32(*row) : std::u32string();
+  };
+  auto prg = [&](u32 address) { return row_text(std::format("prg:{:08X}", address)); };
+  const bool right_stick = gs->option(opt::kControllerEdit) && (gs->slot.button_cfg[2] & 0xF) != 0;
+  const u32 chosen = ps1_colour(jp() ? 0x004048 : 0x707070);
+  for (int i = 0; i < 8; ++i) {
+    const SettingRow& setting = kSettings[i];
+    const float y = kPanelY + 0x10 + 24.0f * static_cast<float>(i);
+    const bool right = gs->option(setting.mask);
+    rect(PX(kLeftX - 1 + (right ? kChoiceStep : 0)), PY(y - 2), PX(82), PY(20), rgb(0xA0, 0x60, 0));
+    std::u32string words[3];
+    if (jp()) {
+      words[0] = prg(i == kStickRow && right_stick ? kJpRightStick : setting.label);
+      words[1] = prg(setting.left), words[2] = prg(setting.right);
+    } else {
+      int word = 0;
+      bool separator = true;
+      for (char32_t ch : row_text("mess:" + std::to_string(kUsaFirstRowMessage + i))) {
+        const bool tab = ch == U'\t' || ch == U'\n';
+        if (!tab && separator && !words[word].empty() && word < 2) ++word;
+        if (!tab) words[word].push_back(ch);
+        separator = tab;
+      }
+    }
+    float label_x = kLabelX;
+    if (i == kButtonRow) {
+      btn(kLabelX, y - 4, 1);
+      label_x = kPanelX + (jp() ? 0x34 : 0x30);
+    }
+    if (i == kStickRow && !jp()) {
+      const std::u32string prefix = prg(right_stick ? kUsaRightWord : kUsaLeftWord);
+      PT(kLabelX, y, prefix);
+      label_x += twp(prefix);
+    }
+    PT(label_x, y, words[0]);
+    if (jp() && i == kVibrationRow) PT(kPanelX + 0x98, y, prg(kJpVibrationTail));
+    if (jp() && i == kStickRow) PT(kPanelX + 0x78, y, prg(kJpStickTail));
+    PT(kLeftX, y, words[1], right ? kText : chosen);
+    PT(kLeftX + kChoiceStep, y, words[2], right ? chosen : kText);
+  }
+  if (skin_pick) skin_preview();
+  else tri(40, kPanelY + 0x10 + 24.0f * static_cast<float>(set_cur), true);
 }
 
 // State 1 (ui/window_frame.h): the skin of the chosen frame as a real

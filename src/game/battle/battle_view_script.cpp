@@ -498,12 +498,18 @@ void BattleView::build_window(const ScriptMsg& msg) {
   const bool jp = lang_ == import::Lang::Jp;
   const int slot = jp ? ui::font::kKb : ui::font::kBn;
   const float sc = ui::font::slot(slot).scale;
+  // Disc mode: the line's pen advance in the PS1 font.
+  const render::FaceId ps1_face = fonts_.ps1() ? fonts_.face(ui::font::kBattle) : render::kNoFace;
   float last_w = 0;
   for (size_t line = 0; line < lines.size(); ++line) {
     float x = 0;
     for (const SmsgSeg& seg : lines[line]) {
       const std::u32string text = import::utf8_to_u32(seg.text);
       btext(0x83, text, msg.x + x, msg.ty + 16.0f * static_cast<float>(line), seg.colour);
+      if (ps1_face != render::kNoFace) {
+        for (char32_t ch : text) x += text_.advance(ps1_face, ch, kPs1Px / render::TextBatch::kPs1PixelScale) / kPs1Px;
+        continue;
+      }
       fonts_.prepare(slot, text);
       x += std::trunc(fonts_.measure(slot, text, sc) / kPs1Px);
     }
@@ -511,8 +517,9 @@ void BattleView::build_window(const ScriptMsg& msg) {
   }
   if (msg.waits >= smsg_count(pg, "{wait(") && smsg_tag_arg(pg, "{wend(") < 0) {
     const int cell = (tick_count_ & 0x3F) >> 3;
-    // Disc mode: the same eight frames are the battle sheet "mark".
-    if (ps1_hud_) add_sheet_at(0xAC, cell + 1, msg.x + 8.0f + last_w, msg.ty + 16.0f * static_cast<float>(lines.size() - 1));
+    // Disc mode: the same eight frames are the battle sheet "mark", drawn at the pen after the last line (its frames sit 8 px below the
+    // draw point, which is 8 px above the line).
+    if (ps1_hud_) add_sheet(0xAC, cell + 1, msg.x + last_w, msg.ty + 16.0f * static_cast<float>(lines.size() - 1) - 8.0f);
     else
       add_img(hud_[kHPageCur], (msg.x + 8.0f + last_w) * kPs1Px, (msg.ty + 16.0f * static_cast<float>(lines.size() - 1)) * kSmsgPY, 16 * kPs1Px, 16 * kSmsgPY,
             static_cast<float>(cell) / 8.0f, 0, static_cast<float>(cell + 1) / 8.0f, 1);

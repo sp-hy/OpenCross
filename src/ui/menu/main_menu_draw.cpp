@@ -212,6 +212,21 @@ void MainMenu::Impl::TP(float x, float y, const std::u32string& str, u32 colour,
   emit(std::move(cmd));
 }
 
+// The console font's cells start at the point; the USA menu font's glyph frames hang from it by their own offsets.
+void MainMenu::Impl::PT(float x, float y, const std::u32string& str, u32 colour) {
+  if (str.empty()) return;
+  render::FaceId face;
+  float scale;
+  pick_face(str, 1.0f, face, scale);
+  text->prepare(face, str);
+  Cmd cmd;
+  cmd.kind = Cmd::Text;
+  cmd.text = str;
+  cmd.face = face;
+  cmd.x = PX(x), cmd.y = PY(y), cmd.color = colour, cmd.scale = ps1_scale();
+  emit(std::move(cmd));
+}
+
 // PS1 number print in `advance`-px cells: the whole string right-aligned in the field with kb_70 (0.34 / 0.29 / 0.275 of the slot scale
 // for 16 / 12 / 8 px cells), in both art modes.
 void MainMenu::Impl::Digits(float x, float y, const std::string& number, float advance, u32 colour) {
@@ -653,7 +668,9 @@ void MainMenu::Impl::draw(const render::Frame& frame, float vw, float vh, bool r
   canvas_s = 4.0f * canvas_cols;
   render::Frame lf;
   if (lowres_on()) {
-    Ps1Display display = screen == MenuScreen::Save || screen == MenuScreen::Settings ? kMenuWide : kMenutest;
+    // Played from the discs the Customize screen keeps the 512-wide mode, as its layout does.
+    const bool wide = screen == MenuScreen::Save || (screen == MenuScreen::Settings && texs.hd());
+    Ps1Display display = wide ? kMenuWide : kMenutest;
     display.w = static_cast<u32>(std::lround(static_cast<float>(display.w) * (kCanvasW + 2.0f * canvas_s) / kCanvasW));
     // The window is cleared first: the target covers the picture only, and the field's own edge columns can lie just outside it.
     sprites->begin(frame, vw, vh, resume);

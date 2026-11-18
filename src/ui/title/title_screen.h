@@ -7,12 +7,14 @@
 // reported. New Game (+) first opens the vibration page: "On" / "Off" + the footer "Vibration Function"; confirm reports New Game
 // with vibration() = the choice, cancel returns to page 0.
 // Played from the PS1 discs (no cdrom2 archive) the label atlases carry the PS1's own lettering and cursor: those items draw only
-// their atlas cell, and Settings / Quit draw a label-less bar (title_blank_bars) under their label in the PS1 font.
+// their atlas cell, and Settings / Quit draw a cell built from that art and the PS1 menu font (title_disc_label).
 #include <functional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "audio/mixer.h"
+#include "import/ps1_font.h"
 #include "import/tim.h"
 #include "ui/title/canvas.h"
 #include "ui/title/nav.h"
@@ -25,6 +27,21 @@ enum class TitleChoice { None, NewGame, Continue, Settings, Quit };
 // `selected`, every row filled with its most common index. The selected half keeps its own pixels left of the plain cell's lettering
 // (the cursor). `label_x` (optional) receives that first lettering column. An image that is not indexed or lacks a cell gives {}.
 import::Image title_blank_bars(const import::Image& atlas, int plain, int selected, int* label_x = nullptr);
+
+// A line of text as coverage, 0..255 per pixel (width x height, row-major), and the rows its first character's ink spans.
+struct TitleInk {
+  u32 width = 0, height = 0;
+  int first_top = 0, first_bottom = -1;
+  std::vector<u8> cover;
+};
+// `text` in a PS1 font, glyph greys scaled so the brightest is 255.
+TitleInk title_ink(const import::Ps1Font& font, std::u32string_view text);
+// A whole option of the disc's menu for a label the art has no cell for, RGBA in the layout of title_blank_bars (plain over selected):
+// the label-less bars with `ink` drawn in the art's lettering look and the underline cut where the lettering ends, as the art cuts its
+// own. The ink starts at the plain cell's lettering column, scaled so its first character spans the rows of the cell's first letter,
+// slanted like the art's italic; its colour runs from the cell's darkest lettering colour (no coverage) to its most common one (full).
+// {} when title_blank_bars gives {} or the ink is empty.
+import::Image title_disc_label(const import::Image& atlas, int plain, int selected, const TitleInk& ink);
 
 class TitleScreen {
  public:
@@ -107,9 +124,11 @@ class TitleScreen {
   render::TexRef bars_[2] = {{}, {}};
   float bars_h_[2] = {0, 0};
   bool disc_ = false;
-  // Disc only: the label-less bar of Settings / Quit (rows 0..31 plain, 32..63 selected) and the art's lettering column (PS1 px).
-  render::TexRef blank_bars_ = {};
-  float label_x_ = 0;
+  // Disc only: the cells of Settings / Quit (rows 0..31 plain, 32..63 selected), built once for the language of the first begin().
+  void build_disc_labels();
+  import::Image disc_atlas_;
+  render::TexRef disc_labels_[2] = {{}, {}};
+  bool disc_labels_built_ = false;
   import::Lang lang_ = import::Lang::En;
   ArtMode mode_ = ArtMode::Hd;
   Phase phase_ = Phase::FadeIn;

@@ -1310,8 +1310,8 @@ std::optional<std::string> LangTables::lookup_disc_field(int room_id, int msg, i
   const Lang lang = disc_->build().lang;
   const int sp = detect_speaker(*markup, speaker, lang);
   std::string res = disc_->resolve_grammar(*markup, sp);
+  // No non-JP normalisation: the disc's own font draws every code it decodes to (the choice indent stays the 12-pixel blank U+3000).
   replace_all(res, "\\n", "\n");
-  if (lang != Lang::Jp) res = normalise_nonjp(res, lang);
   if (info) {
     info->speaker = sp;
     info->variant = false;

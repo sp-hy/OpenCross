@@ -590,6 +590,10 @@ void MainMenu::Impl::build_save() {
     tri(408, 352.0f + 22.0f * static_cast<float>(confirm_cur), true);
   } else if (!msg.empty()) {
     msg_line(utf32(msg));
+  } else if (!texs.hd() && !jp()) {
+    // The USA discs name the prompt by its menu message, drawn from the text point (146, 332).
+    const import::TextTable* table = lt.table("menutest");
+    if (const std::string* row = table ? table->get("mess:44", lang) : nullptr) PT(146, 332, utf32(*row));
   } else {
     msg_line(utf32(menu_str(0x801F2E08, "Please select a file.")));
   }
@@ -609,6 +613,28 @@ void MainMenu::Impl::build_save() {
   std::string gold = grouped_gold(cp.gold);
   gold.erase(0, gold.find_first_not_of(' '));
   const auto ln = location_lines(cp.scenario);
+  if (!texs.hd()) {
+    // Played from the discs both builds draw the detail as the load screen does: the name from (284, 246), the numbers as main-sheet
+    // frames (the star (6) at (388, 250) and its count in big digits ending at x 414 on row 251, both yellow for a cleared save;
+    // "Time" (36) at (437, 244) with the play time in small digits and ":" (35) from x 469; "G" (33) at (532, 258) with the gold
+    // before it, "." (32) between the thousands, 8 px apart) and the location from (284, 268), its second line 19 below (JP: one line
+    // from (284, 278)).
+    PT(284, 246, name);
+    const u32 star_colour = ps1_colour((cp.flags & 1) ? 0x108080 : 0x808080);
+    Sprite(6, 388, 250, star_colour);
+    float x = 414;
+    for (auto it = stars.rbegin(); it != stars.rend(); ++it, x -= 12) Sprite(9 + (*it - '0'), x, 251, star_colour);
+    Sprite(36, 437, 244);
+    x = 469;
+    for (char ch : tb) Sprite(ch == ':' ? 35 : 21 + (ch - '0'), x, 244), x += 8;
+    x = 532;
+    Sprite(33, x, 258);
+    for (auto it = gold.rbegin(); it != gold.rend(); ++it) Sprite(*it == ',' ? 32 : 21 + (*it - '0'), x -= 8, 258);
+    const float location_y = jp() ? 278.0f : 268.0f;
+    PT(284, location_y, utf32(ln.first));
+    PT(284, location_y + 19.0f, utf32(ln.second));
+    return;
+  }
   {
     // Name / auto-save caption: style 0x83 / 0xB7, shrink to 97, two lines for the auto-save outside EN / JP (save_layout.h name_fit).
     const int ds = jp() ? font::kKb : font::kBn;

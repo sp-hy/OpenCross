@@ -428,7 +428,7 @@ bool FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int m
   }
   y = std::clamp(y, 0x14, std::max(0x14, 0xC4 - box_height));
   x = std::clamp(x, 0x20, std::max(0x20, 0x120 - width));
-  dlg.set_ps1_window(x, y);
+  dlg.set_ps1_window(x, y, width, lines);
   // Flag 0x20: the window opens at full size (no grow from the speaker).
   if (fl & 0x20) dlg.skip_grow();
   log::debug("field: dialogue window ps1 ({}, {}) {}x{} px mode {} above {} flags {:#x} op62 {},{},{},{}", x, y, width, box_height, mode, above, fl,

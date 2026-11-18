@@ -13,6 +13,8 @@ struct WinQuad {
   // Position and size in canvas units, then the normalised sheet uv.
   float x = 0, y = 0, w = 0, h = 0;
   float u0 = 0, v0 = 0, du = 0, dv = 0;
+  // A tile of the fill halves (build_skin_rect), which the PS1 draws semi-transparent.
+  bool fill = false;
 };
 
 // quads are in draw order: fill grid, corners + top / bottom edges, left edge, right corners + right edge.
@@ -35,7 +37,8 @@ float skin_window_x(int skin);
 // `x_scale` screen pixels wide and one high (the 640-wide screens draw the sheet twice as wide). Edge and fill pieces repeat their
 // tile of the sheet, so such a piece comes back as one quad per run of whole tiles. A texel drawn two pixels wide starts one pixel early
 // (the PS1 rounds a pixel's texture coordinate to the nearest texel), so the quads hold half texels at a piece's ends. Quads in screen
-// pixels, uv normalised to the sheet, in draw order.
-std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_scale);
+// pixels, uv normalised to the sheet, in draw order. The right corners and the right edge start one texel left on the 640-wide screens
+// (`shift_right`); the field's message windows, one texel per pixel, start them on their own texel.
+std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_scale, bool shift_right = true);
 
 }  // namespace oc::ui

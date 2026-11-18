@@ -1466,7 +1466,10 @@ void BattleView::build_command_ui() {
     const float lift = 11.0f * static_cast<float>(rows - 4);
     const float bx = 28 * kPs1Px, by = ref_y(177 - lift), bw = 68 * kPs1Px;
     // Interior 52 x 36 + the 8 px skin frame; 0.8 row shorter than the nominal 52 so the top and bottom padding round the text are equal (0.67 row pitch).
-    add_skin_box(bx, by, bw, 51.2f * kRowScale + ref_y(lift));
+    // Disc mode: the PS1's own box, (28, 160) 68 x 52, growing up by the 10 px row pitch.
+    const float ps1_lift = 10.0f * static_cast<float>(rows - 4);
+    if (ps1_hud_) add_skin_box(bx, (160 - ps1_lift) * kRowScale, bw, (52 + ps1_lift) * kRowScale);
+    else add_skin_box(bx, by, bw, 51.2f * kRowScale + ref_y(lift));
     const int cur = ui_ == Ui::Top ? top_cursor_ : chain_cursor_;
     const bool fatigued = (unit.lo & battle::st::kFatigued) != 0;
     const u32 hit_row_mask = battle_->costs_waived(unit) ? 0xFFFF00u : 0xFFFFFFu;
@@ -1502,13 +1505,14 @@ void BattleView::build_command_ui() {
         label = kCommand[li][1];
         if (!any_element || unit.gauge < 0 || unit.stamina == 0) row_colour = kDim;
       }
-      if (sel) add_menu_cursor(32.5f * kPs1Px, yl * kRowScale + ref_y(5) - 4 * kRowScale);
       const u32 mask = ui_ != Ui::Top && k < 3 ? hit_row_mask : 0xFFFFFFu;
       // Disc mode: the row is a battle-font frame (top menu 1..4; HIT% rows 7..9 "N-(  %)" with the percentage's digits at x 63 / 70,
-      // Element 2) at PS1 (44, 166 + 10 row), in the row's colour word.
+      // Element 2) at PS1 (44, 166 + 10 row), in the row's colour word; the cursor's top-left at (34, the row's y).
       const int row_frame = ui_ == Ui::Top ? (command <= 3 ? command + 1 : 0) : k < 3 ? k + 7 : 2;
+      const float row_y = 166.0f + 10.0f * static_cast<float>(k) - ps1_lift;
+      if (sel && ps1_hud_) add_menu_cursor(34 * kPs1Px, row_y * kRowScale);
+      else if (sel) add_menu_cursor(32.5f * kPs1Px, yl * kRowScale + ref_y(5) - 4 * kRowScale);
       if (ps1_hud_ && row_frame > 0) {
-        const float row_y = 166.0f + 10.0f * static_cast<float>(k - (rows - 4));
         add_sheet(0x04, row_frame, 44, row_y, row_colour & mask);
         if (ui_ != Ui::Top && k < 3) {
           const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
@@ -1517,7 +1521,9 @@ void BattleView::build_command_ui() {
         }
         continue;
       }
-      btext(cmd_flags, label, 44, yl, remap_text_colour(row_colour) & mask);
+      // Disc mode: a row the sheet lacks (party swap, End Turn) in the PS1 font, level with the sheet rows (the USA font's capitals
+      // start one pixel below the line, the Japanese glyphs on it).
+      btext(cmd_flags, label, 44, ps1_hud_ ? row_y - (jp ? 0.0f : 1.0f) : yl, remap_text_colour(row_colour) & mask);
     }
     if (ui_ == Ui::Chain && ps1_hud_) {
       add_sheet(0x04, 10, 84, 166);

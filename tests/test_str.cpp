@@ -1,6 +1,6 @@
 // PS1 movie streams on synthetic data: MDEC frames built bit by bit (flat and coloured macroblocks, AC and escape codes, a bad
 // code), sector streams in both interleaves (15 fps L R V..V, 30 fps with staff strip sectors), frame assembly cut to the bitstream
-// size, audio pairing, strip rows, and the movie decoder playing a stream end to end.
+// size, audio pairing, strip rows, reading a long stream in parts, and the movie decoder playing a stream end to end.
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -193,6 +193,33 @@ Bytes test_frame(int luma, size_t extra) {
   return frame;
 }
 
+// Reads the stream from memory; `sectors_read` (optional) adds up the sectors asked for.
+StrStream::ReadSectors memory_sectors(const Bytes& stream, size_t* sectors_read = nullptr) {
+  return [&stream, sectors_read](u32 first, u32 count, u8* out) {
+    const size_t from = static_cast<size_t>(first) * StrStream::kSectorBytes, size = static_cast<size_t>(count) * StrStream::kSectorBytes;
+    if (from + size > stream.size()) return false;
+    std::memcpy(out, stream.data() + from, size);
+    if (sectors_read) *sectors_read += count;
+    return true;
+  };
+}
+
+u32 sectors_of(const Bytes& stream) { return static_cast<u32>(stream.size() / StrStream::kSectorBytes); }
+
+std::vector<StrStream::Item> items_of(StrStream& index) {
+  std::vector<StrStream::Item> items;
+  StrStream::Item item;
+  while (index.next(item)) items.push_back(std::move(item));
+  return items;
+}
+
+// 'A' for an audio group, 'F' for a frame, in the order the stream hands them out.
+std::string order_of(const std::vector<StrStream::Item>& items) {
+  std::string order;
+  for (const StrStream::Item& item : items) order += item.audio ? 'A' : 'F';
+  return order;
+}
+
 void test_stream_15fps() {
   // Disc 1 layout, three groups L R V0..V7; frame 2 spans two chunks, the other chunks are filler.
   Bytes stream;
@@ -203,17 +230,16 @@ void test_stream_15fps() {
     for (u16 chunk = 0; chunk < 8; ++chunk) append(stream, video_sector(0, chunk, 8, group + 1, frames[group], 32, 16));
   }
   StrStream index;
-  CHECK(index.parse(stream));
-  CHECK(index.frames().size() == 3);
+  CHECK(index.open(memory_sectors(stream), sectors_of(stream)));
   CHECK(index.frame_count() == 3);
   CHECK(index.width() == 32 && index.height() == 16);
   CHECK(std::abs(index.fps() - 15.0) < 1e-9);
-  CHECK(index.audio().size() == 3);
-  CHECK(index.frames()[0].audio_before == 1 && index.frames()[2].audio_before == 3);
-  CHECK(index.frames()[1].chunks.size() == 2);
-  CHECK(index.bitstream(index.frames()[1]) == frames[1]);
-  CHECK(index.audio_payload(index.audio()[0], 1)[2] == 0xFF);
-  CHECK(index.strip_rows() == 0);
+  CHECK(index.has_audio() && !index.has_strip());
+  const std::vector<StrStream::Item> items = items_of(index);
+  CHECK(order_of(items) == "AFAFAF");
+  CHECK(items.size() == 6 && items[3].number == 2 && items[3].bitstream == frames[1] && items[3].sector == 12);
+  CHECK(items.size() == 6 && items[0].right.size() == StrStream::kAudioBytes && items[0].right[2] == 0xFF && items[0].left[2] == 0x11);
+  CHECK(index.strip_data().empty());
 
   movie::Decoder decoder;
   CHECK(decoder.open(stream, "movie/test.stv"));
@@ -264,34 +290,76 @@ void test_stream_30fps() {
   append(stream, sector_header(2, 0));
   append(stream, audio_sector(1, 1, 0));
   StrStream index;
-  CHECK(index.parse(stream));
-  CHECK(index.frames().size() == 8 && index.frame_count() == 8);
+  CHECK(index.open(memory_sectors(stream), sectors_of(stream)));
+  CHECK(index.frame_count() == 8);
   CHECK(std::abs(index.fps() - 30.0) < 1e-9);
-  CHECK(index.audio().size() == 4);
-  CHECK(index.frames()[1].audio_before == 1 && index.frames()[2].audio_before == 2);
-  CHECK(index.strip_rows() == 8);
-  const std::vector<u8> row_a = index.strip_image(false), row_b = index.strip_image(true);
+  CHECK(index.has_audio() && index.has_strip());
+  CHECK(order_of(items_of(index)) == "AFFAFFAFFAFF");
+  CHECK(index.strip_data().size() == 8 * StrStream::kStripSectorBytes);
+  const std::vector<u8> row_a = StrStream::strip_image(index.strip_data(), 8, false);
+  const std::vector<u8> row_b = StrStream::strip_image(index.strip_data(), 8, true);
   CHECK(row_a.size() == 144u * 8u * 4u);
   CHECK(row_a[0] == 1 && row_a[3] == 255 && row_a[(7 * 144 + 143) * 4 + 2] == 8);
   CHECK(row_b[0] == 101 && row_b[7 * 144 * 4] == 108);
+  // Rows past the sectors read are black.
+  const std::vector<u8> partial = StrStream::strip_image(ByteSpan(index.strip_data()).first(2 * StrStream::kStripSectorBytes), 8, false);
+  CHECK(partial[144 * 4] == 2 && partial[2 * 144 * 4] == 0 && partial[2 * 144 * 4 + 3] == 255);
 
+  // The decoder's strip is one row per frame; its rows arrive as the stream is read.
   movie::Decoder decoder;
   CHECK(decoder.open(stream, "movie/ending.stv"));
   CHECK(std::abs(decoder.fps() - 30.0) < 1e-9);
   std::vector<u8> strip;
   u32 strip_w = 0, strip_h = 0;
-  CHECK(decoder.staff_strip(true, strip, strip_w, strip_h) && strip_w == 144 && strip_h == 8 && strip == row_b);
+  CHECK(decoder.staff_strip_rows() == 0);
+  CHECK(decoder.staff_strip(true, strip, strip_w, strip_h) && strip_w == 144 && strip_h == 8 && strip[0] == 0);
+  while (decoder.step()) decoder.video().clear();
+  CHECK(decoder.staff_strip_rows() == 8);
+  CHECK(decoder.staff_strip(true, strip, strip_w, strip_h) && strip_h == 8 && strip == row_b);
+}
+
+// A long stream is read in blocks as it goes: opening it and taking the first items reads its first and last sectors and a little
+// ahead, not the whole; reading on gives every frame, and the frame count comes from its last sectors.
+void test_stream_in_parts() {
+  Bytes stream;
+  const Bytes frame = test_frame(0, 0);
+  constexpr u32 kGroups = 400;
+  for (u32 group = 0; group < kGroups; ++group) {
+    append(stream, audio_sector(0, 0, 1));
+    append(stream, audio_sector(1, 0, 1));
+    for (u16 chunk = 0; chunk < 8; ++chunk) append(stream, video_sector(0, chunk, 8, group + 1, frame, 32, 16));
+  }
+  size_t sectors_read = 0;
+  StrStream index;
+  CHECK(index.open(memory_sectors(stream, &sectors_read), sectors_of(stream)));
+  CHECK(index.frame_count() == kGroups);
+  StrStream::Item item;
+  CHECK(index.next(item) && item.audio);
+  CHECK(index.next(item) && !item.audio && item.number == 1);
+  CHECK(sectors_read < 1024);
+  u32 frames = 1, last = 1;
+  while (index.next(item))
+    if (!item.audio) ++frames, last = item.number;
+  CHECK(frames == kGroups && last == kGroups);
+
+  // A read that fails ends the stream.
+  StrStream broken;
+  CHECK(broken.open(memory_sectors(stream), sectors_of(stream) + 64));
+  u32 broken_frames = 0;
+  while (broken.next(item))
+    if (!item.audio) ++broken_frames;
+  CHECK(broken_frames < kGroups);
 }
 
 void test_not_a_stream() {
   StrStream index;
   Bytes noise(StrStream::kSectorBytes * 4, 0xAB);
-  CHECK(!index.parse(noise));
+  CHECK(!index.open(memory_sectors(noise), sectors_of(noise)));
   // A frame missing a chunk its bitstream needs is dropped.
   Bytes stream;
   const Bytes frame = test_frame(0, 3000);
   append(stream, video_sector(0, 0, 8, 1, frame, 32, 16));
-  CHECK(!index.parse(stream));
+  CHECK(!index.open(memory_sectors(stream), sectors_of(stream)));
   movie::Decoder decoder;
   CHECK(!decoder.open(noise, "x.stv"));
 }
@@ -302,6 +370,7 @@ int main() {
   test_mdec();
   test_stream_15fps();
   test_stream_30fps();
+  test_stream_in_parts();
   test_not_a_stream();
   if (failures) {
     std::printf("%d failure(s)\n", failures);

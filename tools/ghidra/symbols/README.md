@@ -5,12 +5,12 @@ Names this project has established, one `name = 0xADDR;  # function|data: descri
 | File | Applies to | Load base | Entries (functions / data) |
 | --- | --- | --- | --- |
 | `chronocross_1010.txt` | `CHRONOCROSS.exe` v1.0.1.0 (x86 PE, image base `0x400000`) | import default | hook plumbing plus the described functions |
-| `ps1_main.txt` | `prog/slps_023.64` (header stripped) | `0x80010000` | 504 / 247 |
-| `ps1_field.txt` | `prog/field.prg` | `0x800A9F00` | 348 / 182 |
-| `ps1_battle.txt` | `prog/battle.prg` | `0x800A9F00` | 428 / 157 |
-| `ps1_btlinit.txt` | `prog/btlinit.prg` | `0x801EE000` | 22 / 7 |
-| `ps1_btlexit.txt` | `prog/btlexit.prg` | `0x801EA800` | 35 / 21 |
-| `ps1_menu.txt` | `prog/menutest.prg`, `namemenu.prg`, `shopmenu.prg` (and the memmenu/monmenu screens) | `0x801D2800 (0x801EE000 for memmenu, monmenu)` | 197 / 131 |
+| `ps1_main.txt` | `prog/slps_023.64` (header stripped) | `0x80010000` | 685 / 284 |
+| `ps1_field.txt` | `prog/field.prg` | `0x800A9F00` | 573 / 226 |
+| `ps1_battle.txt` | `prog/battle.prg` | `0x800A9F00` | 541 / 281 |
+| `ps1_btlinit.txt` | `prog/btlinit.prg` | `0x801EE000` | 24 / 7 |
+| `ps1_btlexit.txt` | `prog/btlexit.prg` | `0x801EA800` | 54 / 40 |
+| `ps1_menu.txt` | `prog/menutest.prg`, `namemenu.prg`, `shopmenu.prg` (and the memmenu/monmenu screens) | `0x801D2800 (0x801EE000 for memmenu, monmenu)` | 247 / 156 |
 | `rde_hooks.csv` | catalogue of the RDE exe's hooks (`CHRONOCROSS.exe`) | n/a | 2,034 rows |
 | `overlays.csv` | catalogue of the PS1 overlays | n/a | 106 overlays plus the main exe |
 | `ps1_effects_<overlay>.txt` (77 files) | `prog/<overlay>.prg`, one file per named effect overlay | `0x801C5E00` | 179 / 23 |

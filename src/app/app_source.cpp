@@ -1,20 +1,17 @@
-// Where the game data comes from. [Paths] Source=auto searches, in order: an RDE install (find_game_dir), the images [Paths] Disc1 /
-// Disc2 name and those in [Paths] DiscDir, the images next to opencross.exe, the optical drives; the first place that has a Chrono
-// Cross disc is used. rde searches only the first, disc skips it. While nothing can be played the "no game files found" screen shows
-// (searched again every 2 s), and when Japanese and USA sets are both found with no [Disc] Region the version picker asks. Disc mode
-// fixes the settings that need RDE's data and keeps its saves apart from RDE's.
+// Where the game data comes from (the search itself is app/data_source.h). While nothing can be played the "no game files found"
+// screen shows (searched again every 2 s), and when Japanese and USA sets are both found with no [Disc] Region the version picker asks.
+// Disc mode fixes the settings that need RDE's data and keeps its saves apart from RDE's; discs in optical drives are watched, and a
+// disc the story needs that is not mounted brings up the insert-disc screen.
 #include "app/app.h"
 
 #include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_timer.h>
 
-#include <algorithm>
 #include <chrono>
 #include <system_error>
 
 #include "core/log.h"
-#include "import/console_font.h"
 #include "platform/paths.h"
 #include "render/imgui_data_screen.h"
 
@@ -42,6 +39,11 @@ std::string file_stamp(const fs::path& file) {
 
 Region region_of_word(const std::string& word) { return word == "jp" ? Region::Japan : word == "usa" ? Region::Usa : Region::Unknown; }
 
+std::string disc_words(const import::disc::DiscIdentity& identity) {
+  if (!identity.chrono_cross) return "no Chrono Cross disc (" + identity.reason + ")";
+  return (identity.known_build ? identity.build : std::string("an unknown build")) + ", disc " + std::to_string(identity.disc_number);
+}
+
 constexpr auto kRescanEvery = std::chrono::seconds(2);
 
 }  // namespace
@@ -59,14 +61,6 @@ void App::scan_image_file(const fs::path& file, SourceSearch& search) {
   search.notes.insert(search.notes.end(), notes.begin(), notes.end());
 }
 
-std::vector<import::disc::FoundDisc> App::optical_discs() {
-  std::vector<import::disc::FoundDisc> found;
-  for (import::disc::DriveCandidate& drive : import::disc::scan_optical_drives())
-    found.push_back({drive.drive + (drive.product.empty() ? "" : " (" + drive.product + ")"),
-                     std::shared_ptr<const import::disc::SectorSource>(std::move(drive.source)), std::move(drive.identity)});
-  return found;
-}
-
 void App::poll_drive_discs() {
   if (!disc_backend) return;
   for (size_t side = 0; side < drive_discs.size(); ++side) {
@@ -80,7 +74,7 @@ void App::poll_drive_discs() {
   const auto now = std::chrono::steady_clock::now();
   if (!drive_wait || now < next_drive_scan) return;
   next_drive_scan = now + kRescanEvery;
-  for (import::disc::FoundDisc& disc : optical_discs()) {
+  for (import::disc::FoundDisc& disc : app::optical_discs()) {
     const import::disc::DiscIdentity& identity = disc.identity;
     const std::string key = import::disc::build_key(identity);
     const int number = static_cast<int>(identity.disc_number);
@@ -97,40 +91,8 @@ void App::poll_drive_discs() {
   }
 }
 
-App::SourceSearch App::search_sources() {
-  using platform::DataSource;
-  SourceSearch search;
-  if (config.source != DataSource::Disc) {
-    search.rde_dir = platform::find_game_dir(config.game_dir);
-    search.searched.push_back("Radical Dreamers Edition install (data\\cdrom.dat): " +
-                              (config.game_dir.empty() ? std::string() : "[Paths] GameDir " + config.game_dir + ", ") + "the folder of opencross.exe (" +
-                              utf8(exe) + ") and its parent folders");
-    if (!search.rde_dir.empty() || config.source == DataSource::Rde) return search;
-  }
-  const auto finish = [&] {
-    search.groups = import::disc::group_discs(search.found);
-    search.choice = import::disc::choose_set(search.groups, region_of_word(config.disc_region));
-    return search;
-  };
-  for (const std::string* named : {&config.disc1, &config.disc2}) {
-    if (named->empty()) continue;
-    const fs::path file = from_utf8(*named);
-    search.searched.push_back("[Paths] Disc" + std::string(named == &config.disc1 ? "1" : "2") + ": " + *named);
-    std::error_code ec;
-    if (fs::is_regular_file(file, ec)) scan_image_file(file, search);
-    else search.notes.push_back(*named + ": file not found");
-  }
-  if (!config.disc_dir.empty()) {
-    search.searched.push_back("[Paths] DiscDir: " + config.disc_dir);
-    for (const fs::path& file : import::disc::image_files_in(from_utf8(config.disc_dir))) scan_image_file(file, search);
-  }
-  if (!search.found.empty()) return finish();
-  search.searched.push_back("Disc images in the folder of opencross.exe: " + utf8(exe));
-  for (const fs::path& file : import::disc::image_files_in(exe)) scan_image_file(file, search);
-  if (!search.found.empty()) return finish();
-  search.searched.push_back("Optical drives");
-  search.found = optical_discs();
-  return finish();
+SourceSearch App::search_sources() {
+  return app::search_sources(config, exe, [this](const fs::path& file, SourceSearch& search) { scan_image_file(file, search); });
 }
 
 bool App::init_source() {
@@ -150,71 +112,19 @@ bool App::init_source() {
 }
 
 void App::open_discs(const SourceSearch& search) {
-  const import::disc::DiscGroup& group = search.groups[static_cast<size_t>(search.choice.group)];
-  auto backend = std::make_unique<import::disc::DiscBackend>();
-  std::string boot_file;
-  for (int number = 1; number <= 2; ++number) {
-    const int index = group.disc[static_cast<size_t>(number - 1)];
-    if (index < 0) {
-      log::info("data: disc {} not found; it is asked for when the story needs it", number);
-      continue;
-    }
-    const import::disc::FoundDisc& disc = search.found[static_cast<size_t>(index)];
-    boot_file = disc.identity.boot_file;
-    drive_discs[static_cast<size_t>(number - 1)] = dynamic_cast<const import::disc::DriveSource*>(disc.source.get());
-    std::string error;
-    if (backend->mount(number, disc.source, &error))
-      log::info("data: disc {}: {} ({}, {})", number, disc.where, disc.identity.known_build ? disc.identity.build : "unknown build",
-                disc.source->description());
-    else
-      log::warn("data: disc {}: {}: {}", number, disc.where, error);
-  }
-  const Region region = group.region == Region::Unknown ? Region::Japan : group.region;
-  disc_region_word = region == Region::Usa ? "usa" : "jp";
-  disc_build_key = group.key;
-  if (!group.known_build) {
-    source_warning = "Unknown Chrono Cross version (boot file " + boot_file + "): playing it as the " + import::disc::region_name(region) + " version.";
-    log::warn("data: {}", source_warning);
-  }
-  disc_backend = backend.get();
-  files.open(std::move(backend), exe);
-  find_console_font(search, group);
-  // Disc 1 is in the drive until the story or a save says otherwise.
-  files.set_disc(1);
-  platform::set_disc_mode(true);
+  const OpenedDiscs opened = app::open_discs(search, files, exe);
+  disc_backend = opened.backend;
+  drive_discs = opened.drives;
+  disc_region_word = opened.region_word;
+  disc_build_key = opened.build_key;
+  source_warning = opened.warning;
   apply_disc_mode();
   log::warn("data: mods were made for RDE's data; on the {} discs a mod's files may not match the game's", disc_region_word);
 }
 
-// The console font comes from a BIOS image in the exe's folder or in a folder of the opened disc images (only those folders, not
-// their subfolders).
-void App::find_console_font(const SourceSearch& search, const import::disc::DiscGroup& group) {
-  std::vector<fs::path> dirs{exe};
-  for (const int index : group.disc) {
-    if (index < 0) continue;
-    std::string where = search.found[static_cast<size_t>(index)].where;
-    std::error_code ec;
-    if (const size_t mark = where.rfind(" #"); mark != std::string::npos && !fs::is_regular_file(from_utf8(where), ec)) where.resize(mark);
-    const fs::path file = from_utf8(where);
-    if (!fs::is_regular_file(file, ec)) continue;
-    const fs::path dir = file.parent_path();
-    if (std::none_of(dirs.begin(), dirs.end(), [&](const fs::path& known) { return fs::equivalent(known, dir, ec); })) dirs.push_back(dir);
-  }
-  fs::path file;
-  import::set_console_font(import::find_console_font(dirs, &file));
-  if (file.empty()) log::info("console font: no BIOS image in the exe's or the disc images' folders; the menus draw the disc's font");
-  else log::info("console font: {}", utf8(file));
-}
-
 void App::apply_disc_mode() {
   disc_held = config;
-  config.art_mode = platform::ArtMode::Original;
-  config.bgm_source = "original";
-  config.ps1_res_ui = true;
-  config.language = disc_region_word == "usa" ? "en" : "jp";
-  config.legacy_field_models = true;
-  config.portraits = "1999";
-  log::info("disc mode ({}): classic art, original music, PS1-resolution UI, language {}", disc_region_word, config.language);
+  apply_disc_settings(config, disc_region_word);
 }
 
 void App::save_config() const {
@@ -252,8 +162,8 @@ void App::disc_changed(int disc) {
   drive_wait = true;
 }
 
-std::string App::image_signature() {
-  std::string signature;
+std::string App::source_signature() {
+  std::string signature = import::disc::drive_media_signature(platform::list_optical_drives());
   const auto add = [&](const fs::path& file) { signature += utf8(file) + "|" + file_stamp(file) + "\n"; };
   for (const std::string* named : {&config.disc1, &config.disc2})
     if (!named->empty()) add(from_utf8(*named));
@@ -273,30 +183,39 @@ ui::DiscPrompt::MountResult App::mount_disc(int disc) {
   if (!config.disc_dir.empty())
     for (const fs::path& file : import::disc::image_files_in(from_utf8(config.disc_dir))) scan_image_file(file, search);
   for (const fs::path& file : import::disc::image_files_in(exe)) scan_image_file(file, search);
-  for (import::disc::FoundDisc& found : optical_discs()) search.found.push_back(std::move(found));
-  Result result = Result::NoDisc;
-  for (const import::disc::FoundDisc& found : search.found) {
-    const import::disc::DiscIdentity& identity = found.identity;
-    const std::string key = import::disc::build_key(identity);
-    if (static_cast<int>(identity.disc_number) != disc) {
-      if (result == Result::NoDisc) result = Result::WrongDisc;
-      continue;
-    }
-    if (key != disc_build_key) {
-      result = Result::WrongBuild;
-      continue;
-    }
+  for (import::disc::FoundDisc& found : app::optical_discs(true)) search.found.push_back(std::move(found));
+  using import::disc::DiscFit;
+  const import::disc::DiscPick pick = import::disc::pick_disc(search.found, disc, disc_build_key);
+  if (pick.index >= 0) {
+    const import::disc::FoundDisc& found = search.found[static_cast<size_t>(pick.index)];
     std::string error;
     if (!disc_backend->mount(disc, found.source, &error)) {
       log::warn("data: disc {}: {}: {}", disc, found.where, error);
-      continue;
+      return Result::NotGame;
     }
     drive_discs[static_cast<size_t>(disc - 1)] = dynamic_cast<const import::disc::DriveSource*>(found.source.get());
     log::info("data: disc {} mounted from {}", disc, found.where);
     return Result::Ok;
   }
-  log::info("data: disc {} not found ({})", disc, result == Result::WrongBuild ? "another version's disc" : result == Result::WrongDisc ? "the other disc" : "no disc");
-  return result;
+  for (const import::disc::FoundDisc& found : search.found)
+    log::info("data: disc {} wanted; {} holds {}", disc, found.where, disc_words(found.identity));
+  switch (pick.fit) {
+    case DiscFit::NoDisc:
+      log::info("data: disc {} not found (no disc)", disc);
+      return Result::NoDisc;
+    case DiscFit::NotChronoCross:
+      log::info("data: disc {} not found (not a Chrono Cross disc)", disc);
+      return Result::NotGame;
+    case DiscFit::OtherDisc:
+      log::info("data: disc {} not found (the other disc)", disc);
+      return Result::WrongDisc;
+    case DiscFit::OtherBuild:
+      log::info("data: disc {} not found (another version's disc)", disc);
+      return Result::WrongBuild;
+    case DiscFit::Fits:
+      break;
+  }
+  return Result::NoDisc;
 }
 
 void App::init_disc_prompt() {
@@ -311,10 +230,10 @@ void App::init_disc_prompt() {
     std::vector<std::string> notes;
     if (take_browsed_files(notes)) disc_source_changed = true;
     for (const std::string& note : notes) log::info("data: {}", note);
-    if (const auto now = std::chrono::steady_clock::now(); now >= next_image_check) {
-      next_image_check = now + kRescanEvery;
-      if (std::string stamps = image_signature(); stamps != image_stamps) {
-        image_stamps = std::move(stamps);
+    if (const auto now = std::chrono::steady_clock::now(); now >= next_source_check) {
+      next_source_check = now + kRescanEvery;
+      if (std::string stamps = source_signature(); stamps != source_stamps) {
+        source_stamps = std::move(stamps);
         disc_source_changed = true;
       }
     }
@@ -324,7 +243,7 @@ void App::init_disc_prompt() {
   };
   host.browse = [this](int) { browse_for_discs(); };
   disc_prompt.set_host(std::move(host));
-  image_stamps = image_signature();
+  source_stamps = source_signature();
 }
 
 bool App::disc_prompt_frame() {

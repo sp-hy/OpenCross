@@ -158,6 +158,17 @@ std::optional<Bytes> Vfs::read(std::string_view path) const {
   return read_shipped(arc, member);
 }
 
+std::unique_ptr<Reader> Vfs::open_reader(std::string_view path) const {
+  auto [arc, member] = split_archive_path(path);
+  if (auto bytes = read_overlay(arc + "/" + member)) return std::make_unique<MemoryReader>(std::move(*bytes));
+  const Backend* shipped = impl_->backend.get();
+  if (!shipped) return nullptr;
+  const int disc = disc_.load();
+  if (arc == "cdrom" && cdrom2_first(member))
+    if (auto reader = shipped->open_reader("cdrom2", member, disc)) return reader;
+  return shipped->open_reader(arc, member, disc);
+}
+
 std::optional<Bytes> Vfs::read_disc(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
   if (arc != "cdrom") return read(path);

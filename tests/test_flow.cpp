@@ -80,6 +80,8 @@ void test_pages() {
   CHECK(hira[0][0] == U'あ' && hira[0][4] == U'お' && hira[9][4] == U'ん');
   // The row reads ya _ yu _ yo.
   CHECK(kata[7][1] == 0 && kata[7][2] != 0);
+  // The right block's last kana row: small tsu, ya, yu, yo and vu.
+  CHECK(kata[6][5] == U'ッ' && kata[6][9] == U'ヴ');
   CHECK(alnum[0][0] == U'Ａ' && alnum[0][5] == U'Ｆ' && alnum[2][5] == U'Ｚ' && alnum[3][0] == U'ａ' && alnum[6][9] == U'９');
 }
 

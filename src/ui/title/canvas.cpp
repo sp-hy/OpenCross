@@ -68,6 +68,7 @@ void DrawList::replay(render::SpriteBatch& sprites, const render::Frame& frame, 
   if (canvas.clip) frame.set_scissor(ps1::picture_clip(frame, canvas.vw, canvas.vh, kCanvasW, kCanvasHeight));
   sprites.begin(frame, canvas.vw, canvas.vh, resume);
   for (const Op& op : ops_) {
+    if (op.blend != sprites.blend()) sprites.set_blend(op.blend);
     switch (op.kind) {
       case Kind::Image:
         if (op.set)
