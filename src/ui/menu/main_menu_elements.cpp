@@ -592,7 +592,8 @@ void MainMenu::Impl::build_grid() {
     // The level number is its own print at (0x66, 0x19) in kb x 0.625, offset by a per-language x
     // {-10, 5, 0x1B, -0x10, 0xB, -10}[L], so it follows the end of the translated caption (FR / IT / ES are longer).
     static const float k42EDE0[6] = {-10, 5, 0x1B, -0x10, 0xB, -10};
-    HS(0x91, 0x66 + k42EDE0[lang_index()], 0x19, utf32(std::to_string(cell_row + 1)), kText);
+    // The disc frame's own caption runs further right: the number follows it after a space.
+    HS(0x91, 0x66 + k42EDE0[lang_index()] + (texs.hd() ? 0.0f : 8.0f), 0x19, utf32(std::to_string(cell_row + 1)), kText);
   }
   grid_minimap(character, 50, 45, cell_row, held);
   // The cell strip of the shown row (the old row while a row change slides it out), shifted by the slide and clipped to x 13..231; the
@@ -666,7 +667,8 @@ void MainMenu::Impl::build_grid() {
       static const char* const kFallback[2][2] = {{"Remove All", "Remove"}, {"Auto Allocate", "Fill Blanks"}};
       const std::u32string nm = utf32(menu_str(kLabel[arrow_side][idx], kFallback[arrow_side][idx]));
       const float rel = fit_rel(nm, 124, 0.9f);
-      TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt, nm, col, rel);
+      // The PS1 font's label sits 3 px lower, centred in the empty box.
+      TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt + (ps1_text() ? 3.0f : 0.0f), nm, col, rel);
       if (!list_dim) {
         if (arrow_side) pointer(287.0f - static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), true);
         else pointer(443.0f + static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), false);

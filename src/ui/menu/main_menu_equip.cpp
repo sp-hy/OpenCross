@@ -117,7 +117,8 @@ void MainMenu::Impl::build_equip() {
   for (int k = 0; k < 5; ++k) {
     const int id = gs->equipped(character, k);
     const float y = k == 0 ? 212.0f : k == 1 ? 260.0f : 308.0f + 24.0f * static_cast<float>(k - 2);
-    if (id > 0) TPfit(82 + kRowDx, y, item_name(id), 128, kText, kRowRel);
+    // The PS1 font's names sit 3 px higher, clear of the slot's underline.
+    if (id > 0) TPfit(82 + kRowDx, y - (ps1_text() ? 3.0f : 0.0f), item_name(id), 128, kText, kRowRel);
     if (k == eslot) tri(52, y, !eq_list);
   }
   // stats: current (lower box) and, in list mode, the preview with its direction colour
@@ -233,11 +234,20 @@ void MainMenu::Impl::build_equip() {
   const int item = eq_list ? under.item : gs->equipped(character, eslot);
   // The PS1 starts the lines 20 pixels further right in the box.
   const float spec_x = ps1_text() ? 288.0f : 268.0f;
-  if (item > 0)
+  if (item > 0) {
+    std::string specs[3];
+    int rows = 0, lines = 0;
     for (int ln = 0; ln < 3; ++ln) {
-      const std::string spec = trim(table_row("waa_spec", item * 3 + ln));
-      if (!spec.empty()) TPfit(spec_x, 340.0f + 16.0f * static_cast<float>(ln), utf32(spec), 205, kText, 0.74f);
+      specs[ln] = trim(table_row("waa_spec", item * 3 + ln));
+      if (specs[ln].empty()) continue;
+      rows = ln + 1;
+      lines = ln + 1 + static_cast<int>(std::count(specs[ln].begin(), specs[ln].end(), '\n'));
     }
+    // With the PS1 font the lines (a row may break into several) are centred in the box: three lines start at y 352.
+    const float top = ps1_text() ? 352.0f + 8.0f * static_cast<float>(3 - std::min(lines, 3)) : 340.0f;
+    for (int ln = 0; ln < rows; ++ln)
+      if (!specs[ln].empty()) TPfit(spec_x, top + 16.0f * static_cast<float>(ln), utf32(specs[ln]), 205, kText, 0.74f);
+  }
 }
 
 // One description row of a key item at PS1 (x, y). A row may hold several lines (split at '\n', a '\r' is dropped), kLinePitch rows
