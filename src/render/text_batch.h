@@ -72,6 +72,11 @@ class TextBatch {
     const Face* font_face = this->face(face);
     return font_face && font_face->ps1;
   }
+  // The PS1 font of a face (its glyph pictures, for ink boxes); null for a spritefont face.
+  const import::Ps1Font* ps1_font(FaceId face) const {
+    const Face* font_face = this->face(face);
+    return font_face ? font_face->ps1.get() : nullptr;
+  }
   // Height / width of a PS1 font pixel in view units for the next draws and metrics (1 = square, the default). The field's message
   // canvas shows 216 display lines over its 960 units, so its pixels are 960 / 216 / 4 as high as wide.
   void set_pixel_aspect(float aspect) { aspect_ = aspect; }

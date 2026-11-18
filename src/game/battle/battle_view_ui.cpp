@@ -563,9 +563,8 @@ void BattleView::build_status_plate_column(u32 lo, bool right) {
   for (const bstat::Placed& placed : bstat::place(lo, right)) {
     const bstat::Plate& plate = bstat::kPlates[static_cast<size_t>(placed.plate)];
     if (ps1_hud_) {
-      // Disc mode: one frame of the status sheet 0x78 per plate (triangle and name): frame 7 + the bit's rank among the bits that have one.
-      constexpr u32 kPlateBits = 0x33377339u;
-      add_sheet(0x78, 7 + std::popcount(kPlateBits & (plate.bit - 1)), static_cast<float>(placed.x), static_cast<float>(placed.y));
+      // Disc mode: one frame of the status sheet 0x78 per plate (triangle and name).
+      add_sheet(0x78, bstat::sheet_frame(plate.bit), static_cast<float>(placed.x), static_cast<float>(placed.y));
       continue;
     }
     const float u0 = (12.0f * static_cast<float>(plate.colour) + 0.5f) / 80.0f, u1 = u0 + 11.0f / 80.0f;
@@ -1795,16 +1794,19 @@ void BattleView::build_element_ui() {
       // base + frame; the JP rows sit at x 0xBB, 16 right of the others.
       const float dw = 152.0f, dx = (lang_ == import::Lang::Jp ? 310.0f + 16.0f : 310.0f) - dw + 4.0f;
       if (ps1_hud_) {
-        // Disc mode: the window sheet 0x70 drawn at its point (0x136, 10), its grey body subtracted.
-        add_sheet(0x70, 1, lang_ == import::Lang::Jp ? 310.0f + 16.0f : 310.0f, 10, 0x808080, 3);
+        // Disc mode: the window sheet 0x70 drawn at its point (0x136, 10) in both builds (the USA sheet is wider), its grey body
+        // subtracted.
+        add_sheet(0x70, 1, 310.0f, 10, 0x808080, 3);
       } else {
         add_img(hud_[kHWin4Base], dx * kPs1Px, 6 * kRowScale, dw * kPs1Px, 56 * kRowScale, 0, 0, 1, 1, 0xFFFFFFFFu, 3);
         add_img(hud_[kHWin4Frame], dx * kPs1Px, 6 * kRowScale, dw * kPs1Px, 56 * kRowScale);
       }
     }
+    // Disc mode: the USA rows start at x 0x93.
+    const float text_x = lang_ == import::Lang::Jp ? 187.0f : ps1_hud_ ? 147.0f : 171.0f;
     for (int row = 0; row < 3; ++row) {
       const std::string* text = lang_tables_.sysmes((0x1Au << 16) | static_cast<u32>(id * 3 + row), lang_);
-      if (text && !text->empty()) btext(1, import::utf8_to_u32(*text), lang_ == import::Lang::Jp ? 187.0f : 171.0f, static_cast<float>(row * 13 + 0x10), 0x757575);
+      if (text && !text->empty()) btext(1, import::utf8_to_u32(*text), text_x, static_cast<float>(row * 13 + 0x10), 0x757575);
     }
   }
   set_group(desc0, 1);
@@ -1947,9 +1949,15 @@ void BattleView::build_swap_ui() {
     float tx = 0xA2;
     for (const bstat::Placed& placed : bstat::place(statuses(*member), false)) {
       const bstat::Plate& plate = bstat::kPlates[static_cast<size_t>(placed.plate)];
-      const float u0 = (12.0f * static_cast<float>(plate.colour) + 0.5f) / 80.0f, u1 = u0 + 11.0f / 80.0f;
-      add_img(hud_[kHStatus], tx * kPs1Px, (y + 5) * kRowScale, 3 * kPs1Px, 6 * kRowScale, u0, 40.5f / 64.0f, u1, 63.5f / 64.0f);
+      const float triangle_x = tx;
       tx += 4;
+      // Disc mode: the triangle part (3 x 6 at (0, 1)) of the status's plate frame.
+      if (ps1_hud_) {
+        add_sheet_cut(0x78, bstat::sheet_frame(plate.bit), 0, 1, 3, 6, triangle_x, y + 5);
+        continue;
+      }
+      const float u0 = (12.0f * static_cast<float>(plate.colour) + 0.5f) / 80.0f, u1 = u0 + 11.0f / 80.0f;
+      add_img(hud_[kHStatus], triangle_x * kPs1Px, (y + 5) * kRowScale, 3 * kPs1Px, 6 * kRowScale, u0, 40.5f / 64.0f, u1, 63.5f / 64.0f);
     }
   }
   // The scroll triangles as one-canvas-row spans (the Dopplegang list's shape at this window's right edge).

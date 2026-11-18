@@ -148,9 +148,12 @@ int max_name_length(int char_id, import::Lang lang, bool hd_keyboard) {
   return char_id == 5 ? 4 : 6;
 }
 
-std::u32string validate_name(std::u32string_view typed) {
+std::u32string validate_name(std::u32string_view typed, const import::NameMenuText* disc) {
   std::u32string trimmed = trim_blanks(typed);
-  if (trimmed.empty() || is_reserved_name(trimmed)) return {};
+  if (trimmed.empty()) return {};
+  if (!disc) return is_reserved_name(trimmed) ? std::u32string() : trimmed;
+  for (const std::u32string& reserved : disc->reserved)
+    if (disc->reserved_prefix ? trimmed.starts_with(reserved) : trimmed == reserved) return {};
   return trimmed;
 }
 

@@ -38,12 +38,16 @@ struct Ps1MenuPart {
   u8 lines;
 };
 
-// USA: the menu message holding a menutest (table 0) / shopmenu (1) key's text and its line / tab field (255 = the whole message).
+// USA: the menu message holding a menutest (table 0) / shopmenu (1) key's text and its line / tab field (255 = the whole message;
+// a run of line breaks and tabs separates two fields). A key whose text sits inside a longer field takes `length` characters of it
+// from `start` (length 0 = the whole field).
 struct Ps1MenuString {
   u8 table;
   u32 key;
   u16 message;
   u8 segment;
+  u8 start;
+  u8 length;
 };
 
 enum class Ps1Charset {
@@ -78,7 +82,7 @@ struct Ps1TextBuild {
   int grammar_by_id;
   // Glyphs of character 13's name that name code 0x83 shows.
   int short_name_glyphs;
-  // JP menus: load address of the menu overlays (prog/menutest.prg, prog/shopmenu.prg) and their composed rows.
+  // Load address of the menu overlays (prog/menutest.prg, prog/shopmenu.prg; the same in both builds); JP menus: their composed rows.
   u32 menu_base;
   std::span<const Ps1MenuPart> menu_parts;
   // USA menus: the key -> message lines.
@@ -89,11 +93,19 @@ struct Ps1TextBuild {
 
 // The known builds.
 std::span<const Ps1TextBuild> ps1_text_builds();
+// Loads the string tables of the build the executable belongs to into `out`; that build, or null when none is recognised.
+const Ps1TextBuild* load_exe_strings(ByteSpan exe, ExeStrings& out);
+// The table of `build` that holds sysmes category `category` (0x00 items, 0x01 names, 0x17 techs, ...); -1 when none does.
+int ps1_category_table(const Ps1TextBuild& build, u32 category);
 
 // Two-byte Shift-JIS code -> Unicode for the characters the JP menu files use; 0 if not in the table.
 char32_t sjis_to_unicode(u16 code);
 // A Shift-JIS string (CR LF = newline) -> UTF-8; nullopt if a byte sequence is not a character the table knows or is a control code.
 std::optional<std::string> sjis_to_utf8(ByteSpan bytes);
+// Every NUL-terminated Shift-JIS string of an overlay image under its guest address (`base` + offset), strings holding a line break
+// left out. A run that does not decode (a string right behind a pointer table, with no NUL between them) is tried again from its next
+// byte, so the string after the table keeps its own address.
+std::unordered_map<u32, std::string> overlay_sjis_strings(ByteSpan image, u32 base);
 
 class Ps1Text {
  public:

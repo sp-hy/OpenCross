@@ -72,6 +72,8 @@ MtStyle mt_style(u32 flags, int lang_index) {
 }  // namespace mainmenu
 
 void MainMenu::Impl::emit(Cmd&& cmd) {
+  // The disc's menu font carries its own greys: the neutral text colours draw it unchanged.
+  if (cmd.kind == Cmd::Text && ps1_text() && (cmd.color == kText || cmd.color == kName || cmd.color == kCap)) cmd.color = kWhite;
   if (cmd.kind != Cmd::Text && cmd.w > 0 && (cmd.x < sprite_clip_left || cmd.x + cmd.w > sprite_clip_right)) {
     const float left = std::max(cmd.x, sprite_clip_left), right = std::min(cmd.x + cmd.w, sprite_clip_right);
     if (right <= left) return;
@@ -81,7 +83,14 @@ void MainMenu::Impl::emit(Cmd&& cmd) {
     cmd.x = left, cmd.w = right - left;
   }
   cmd.x += gdx;
+  const auto boost = cmd.kind == Cmd::Text && ps1_text() ? colour_boosts.find(cmd.color) : colour_boosts.end();
   cmds.push_back(std::move(cmd));
+  if (boost != colour_boosts.end()) {
+    Cmd extra = cmds.back();
+    extra.color = boost->second;
+    extra.add = true;
+    cmds.push_back(std::move(extra));
+  }
 }
 
 void MainMenu::Impl::rect(float x, float y, float w, float h, u32 colour) {
@@ -105,6 +114,7 @@ void MainMenu::Impl::Img(const Tex* tex, float x, float y, float w, float h, flo
   cmd.kind = Cmd::Img;
   cmd.set = tex->set;
   cmd.x = x, cmd.y = y, cmd.w = w, cmd.h = h, cmd.u0 = u0, cmd.v0 = v0, cmd.u1 = u1, cmd.v1 = v1, cmd.color = colour;
+  cmd.add = img_add;
   emit(std::move(cmd));
 }
 
@@ -112,7 +122,7 @@ void MainMenu::Impl::Img(const Tex* tex, float x, float y, float w, float h, flo
 // positions and scales in both art modes; only the font files differ.
 void MainMenu::Impl::pick_face(const std::u32string& str, float rel, render::FaceId& face, float& scale) const {
   face = face_gn;
-  scale = base * rel;
+  scale = ps1_text() ? ps1_scale() : base * rel;
   if (face_kb != render::kNoFace && (jp() || !glyphs_ok(str))) face = face_kb;
 }
 
@@ -134,7 +144,7 @@ void MainMenu::Impl::T(float x, float y, const std::u32string& str, u32 colour, 
   cmd.kind = Cmd::Text;
   cmd.text = str;
   cmd.face = face;
-  cmd.x = x, cmd.y = y + (kListRowPitch - text->line_height(face, scale)) * 0.5f, cmd.color = colour, cmd.scale = scale;
+  cmd.x = x, cmd.y = y + (kListRowPitch - text->line_height(face, scale)) * 0.5f + console_drop(face), cmd.color = colour, cmd.scale = scale;
   emit(std::move(cmd));
 }
 
@@ -156,8 +166,16 @@ u32 MainMenu::Impl::grey(int ps1_level) {
 
 // Panel shape `frame` with its top-left corner at PS1 (x, y), transparent interior (the parchment shows); the shape images are 4x the
 // PS1 pixel size except the "-large" variants and frame 121 (1:1). With the PS1 disc art the panel is built from the "wind" sheet
-// pieces at the shape's size, with the caption notch cut out of the top edge.
+// pieces at the shape's size, with the caption notch cut out of the top edge. Played from the discs (no HD art) the panel is the sheet
+// frame itself, its lines with its caption words and icons, and its size reaches from the frame origin to the frame's far edges.
 void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w, float* out_h, bool large) {
+  if (!texs.hd()) {
+    Tex* panel = texs.sheet("main", frame);
+    if (out_w) *out_w = panel ? panel->ox + panel->w : 100;
+    if (out_h) *out_h = panel ? panel->oy + panel->h : 50;
+    if (panel) Img(panel, PX(x + panel->ox), PY(y + panel->oy), PX(panel->w), PY(panel->h), 0, 0, 1, 1, colour);
+    return;
+  }
   Tex* tex = texs.shape(frame, lang, large);
   const float div = (large || frame == 121) ? 1.0f : 4.0f;
   const float w = tex ? tex->w / div : 100, h = tex ? tex->h / div : 50;
@@ -190,7 +208,7 @@ void MainMenu::Impl::TP(float x, float y, const std::u32string& str, u32 colour,
   cmd.kind = Cmd::Text;
   cmd.text = str;
   cmd.face = face;
-  cmd.x = PX(x), cmd.y = PY(y) + (PY(16) - text->line_height(face, scale)) * 0.5f, cmd.color = colour, cmd.scale = scale;
+  cmd.x = PX(x), cmd.y = PY(y) + (PY(16) - text->line_height(face, scale)) * 0.5f + console_drop(face), cmd.color = colour, cmd.scale = scale;
   emit(std::move(cmd));
 }
 
@@ -205,8 +223,11 @@ void MainMenu::Impl::Digits(float x, float y, const std::string& number, float a
 
 // PS1 colour word 0xBBGGRR (0x80 = 1.0).
 u32 MainMenu::Impl::ps1_colour(u32 bgr, int a) const {
-  return rgb(std::min(255, static_cast<int>(bgr & 0xFF) * 2), std::min(255, static_cast<int>(bgr >> 8 & 0xFF) * 2),
-             std::min(255, static_cast<int>(bgr >> 16 & 0xFF) * 2), a);
+  const int red = static_cast<int>(bgr & 0xFF) * 2, green = static_cast<int>(bgr >> 8 & 0xFF) * 2, blue = static_cast<int>(bgr >> 16 & 0xFF) * 2;
+  const u32 colour = rgb(std::min(255, red), std::min(255, green), std::min(255, blue), a);
+  if (red > 255 || green > 255 || blue > 255)
+    colour_boosts[colour] = rgb(std::clamp(red - 255, 0, 255), std::clamp(green - 255, 0, 255), std::clamp(blue - 255, 0, 255), a);
+  return colour;
 }
 
 void MainMenu::Impl::message(float x, float y) {
@@ -232,6 +253,7 @@ void MainMenu::Impl::build() {
   group(Centre);
   xscale = screen == MenuScreen::Save ? 2.0f : 2.5f;
   select_fonts();
+  if (ps1_text()) text->set_pixel_aspect(PY(1.0f) / xscale);
   background();
   switch (screen) {
     case MenuScreen::Main: build_main(); break;
@@ -243,6 +265,17 @@ void MainMenu::Impl::build() {
     case MenuScreen::KeyItems: build_keyitems(); break;
     case MenuScreen::Settings: build_settings(); break;
     case MenuScreen::Save: build_save(); break;
+  }
+  if (!texs.hd()) {
+    // The disc's swirls, over the screen as on the PS1 (the portrait strips included): the compass meshes "deco" at (0x48, 0x187) and
+    // "dec1" at (0xD9, -0x10), the latter at 0.8, added at a quarter (the PS1's B + F / 4).
+    group(Centre);
+    img_add = true;
+    if (Tex* deco = texs.mesh("deco", ps1::kMeshAspect, 0x1000, 0x808080, true))
+      Img(deco, PX(0x48 + deco->ox), PY(0x187 + deco->oy), PX(deco->w), PY(deco->h), 0, 0, 1, 1, shade(kWhite, 0.25f));
+    if (Tex* dec1 = texs.mesh("dec1", ps1::kMeshAspect * 0xCCC >> 12, 0xCCC, 0x808080, true))
+      Img(dec1, PX(0xD9 + dec1->ox), PY(-0x10 + dec1->oy), PX(dec1->w), PY(dec1->h), 0, 0, 1, 1, shade(kWhite, 0.25f));
+    img_add = false;
   }
   cmds.insert(cmds.end(), std::make_move_iterator(key_caps.begin()), std::make_move_iterator(key_caps.end()));
   key_caps.clear();
@@ -286,6 +319,8 @@ void MainMenu::Impl::background() {
     rect(-reach, 0, kCanvasW + 2.0f * reach, kCanvasH, rgb(60, 38, 18));
   }
   model_layer = cmds.size();
+  // The disc's swirls are drawn over the screen (build()).
+  if (!texs.hd()) return;
   if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
     Img(deco, -140, 537.8f, 640, 662, 0, 0, 1, 1, rgb(160, 160, 176));
     Img(deco, 287, -300, 512, 529, 0, 0, 1, 1, rgb(160, 160, 176));
@@ -307,10 +342,19 @@ void MainMenu::Impl::HT(render::FaceId face, float x, float y, const std::u32str
   cmd.kind = Cmd::Text;
   cmd.text = str;
   cmd.face = face;
-  cmd.scale = scale;
   cmd.color = colour;
-  cmd.x = right ? PX(x) - text->measure(face, str, scale) - 12.0f * scale + kInkDx : PX(x) - (kb ? 22.5f : 25.4f) * scale + kInkDx;
-  cmd.y = PY(y) - (kb ? 32.3f : 25.6f) * scale;
+  if (ps1_text()) {
+    const font::InkBox ink = font::ps1_ink(*text, face, str);
+    // On the 640-wide save screen the console font's cells sit 4 pixels left of and 3 above these points.
+    const bool wide_console = screen == MenuScreen::Save && console_drop(face) != 0.0f;
+    cmd.scale = ps1_scale();
+    cmd.x = PX((right ? x - ink.right : x + font::kPs1InkShift - ink.left) - (wide_console ? 4.0f : 0.0f));
+    cmd.y = PY(y - ink.top - (wide_console ? 3.0f : 0.0f));
+  } else {
+    cmd.scale = scale;
+    cmd.x = right ? PX(x) - text->measure(face, str, scale) - 12.0f * scale + kInkDx : PX(x) - (kb ? 22.5f : 25.4f) * scale + kInkDx;
+    cmd.y = PY(y) - (kb ? 32.3f : 25.6f) * scale;
+  }
   emit(std::move(cmd));
 }
 
@@ -379,13 +423,57 @@ void MainMenu::Impl::leader(int entry, float x_ink, float cap_y, u32 colour) {
 
 void MainMenu::Impl::Hand(float pivot_x, float pivot_y, int angle, float brightness) {
   const NeedleTexture::Quad needle = needle_tex.get(texs, *vfs, angle, 2.5f, 960.0f / 448.0f);
-  if (needle.tex) Img(needle.tex, PX(pivot_x) - needle.half_w, PY(pivot_y) - needle.half_h, 2 * needle.half_w, 2 * needle.half_h, 0, 0, 1, 1, shade(rgb(175, 172, 172), brightness));
+  // The disc's needle carries its own grey.
+  const u32 grey_colour = texs.hd() ? rgb(175, 172, 172) : kWhite;
+  if (needle.tex) Img(needle.tex, PX(pivot_x) - needle.half_w, PY(pivot_y) - needle.half_h, 2 * needle.half_w, 2 * needle.half_h, 0, 0, 1, 1, shade(grey_colour, brightness));
 }
 
 // Screen title `title_index` (right-aligned bn, with its underline) and the bottom bar: the star glyph with the star counter / star
-// level (both capped 99), the Time label and value, the gold and its "G". Widescreen: the title goes with the right group, the bar
-// with the left one.
+// level (both capped 99), the Time label and value, the gold and its "G". Widescreen: the title goes with the right group, the bar with the left one.
+void MainMenu::Impl::Sprite(int frame, float x, float y, u32 colour) {
+  if (Tex* tex = texs.sheet("main", frame)) Img(tex, PX(x + tex->ox), PY(y + tex->oy), PX(tex->w), PY(tex->h), 0, 0, 1, 1, colour);
+}
+
+void MainMenu::Impl::SpriteNumber(int value, float x, float y, bool big, u32 colour) {
+  value = std::max(value, 0);
+  do {
+    Sprite((big ? 9 : 21) + value % 10, x, y, colour);
+    x -= big ? 12.0f : 8.0f;
+    value /= 10;
+  } while (value > 0);
+}
+
+// Played from the discs the title is sheet frame 41 + index at (490, 35) and the bar is sprites: the star (frame 6), the counter in big
+// digits around the "/" (19), "Time" (36) and the play time in small digits with ":" (35), the gold with "." (32) between the thousands
+// and "G" (33).
 void MainMenu::Impl::bar_and_title(int title_index, bool bar) {
+  if (!texs.hd()) {
+    group(Right);
+    Sprite(41 + std::clamp(title_index, 0, 5), 490, 35);
+    group(Left);
+    if (!bar) return;
+    SpriteNumber(std::min<int>(gs->slot.stars_current(), 99), 56, 392, true);
+    Sprite(6, 30, 390);
+    Sprite(19, 66, 392);
+    SpriteNumber(std::min<int>(gs->slot.stars_total(), 99), 90, 392, true);
+    Sprite(36, 116, 382);
+    const u32 seconds = gs->play_seconds();
+    const int fields[3] = {static_cast<int>(std::min<u32>(seconds / 3600, 999)), static_cast<int>(seconds / 60 % 60), static_cast<int>(seconds % 60)};
+    float x = 148;
+    for (int field = 0; field < 3; ++field) {
+      const int digits = field == 0 ? 3 : 2;
+      for (int k = digits - 1; k >= 0; --k, x += 8) Sprite(21 + fields[field] / (k == 2 ? 100 : k == 1 ? 10 : 1) % 10, x, 382);
+      if (field < 2) Sprite(35, x, 382), x += 8;
+    }
+    const std::string gold = grouped_gold(gs->gold());
+    float gold_x = 212;
+    Sprite(33, gold_x, 400);
+    for (auto it = gold.rbegin(); it != gold.rend() && *it != ' '; ++it) {
+      gold_x -= 8;
+      Sprite(*it == ',' ? 32 : 21 + (*it - '0'), gold_x, 400);
+    }
+    return;
+  }
   group(Right);
   const std::u32string title = utf32(S6(kTitles[std::clamp(title_index, 0, 5)]));
   HT(face_gn, 487.6f, 24.4f, title, kText, 0.26f, true);
@@ -428,6 +516,8 @@ std::u32string MainMenu::Impl::capt(std::string_view key, const char* fallback) 
 // (no icon; the label shrinks to the notch). The cmnmes rows of these captions are Latin in every language, JP included; the JP
 // column of "Customize" is empty, so the key itself shows there.
 void MainMenu::Impl::notch_caption(float frame_x, float frame_y, int kind) {
+  // Played from the discs the caption and its icon are part of the frame.
+  if (!texs.hd()) return;
   static const char* const kKey[7] = {"Weapon", "Armor", "Accessories", "Elements", "Key Items", "Customize", "Profile"};
   static const char* const kEnglish[7] = {"Weapons", "Armor", "Accessories", "Elements", "Key Items", "Customize", "Profile"};
   // Room for the text inside the frame's notch (caption_gap_end - 10).
@@ -547,6 +637,7 @@ void MainMenu::Impl::portrait_strip(int character, float x, u32 col, float dy) {
 
 // Text wider than `maxw` PS1 px is shrunk to exactly that width.
 float MainMenu::Impl::fit_rel(const std::u32string& str, float maxw, float rel) {
+  if (ps1_text()) return rel;
   const float width = twp(str, rel);
   return width > maxw && width > 0.0f ? rel * maxw / width : rel;
 }
@@ -619,16 +710,20 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
     text->set_pixel_grid(1.0f, flat);
   };
   const render::Rect clip = ps1::columns_clip(frame, vw, ox, kCanvasW * zoom);
+  const float old_aspect = text->pixel_aspect();
   build();
   auto draw_cmds = [&](size_t first, size_t last) {
+    bool adding = false;
     for (size_t i = first; i < last; ++i) {
       const Cmd& cmd = cmds[i];
+      if (cmd.add != adding) sprites->set_blend(cmd.add ? render::BlendMode::Add : render::BlendMode::Alpha), adding = cmd.add;
       if (cmd.kind == Cmd::Text) {
         text->draw(cmd.face, cmd.text, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.color, cmd.scale * zoom);
       } else {
         sprites->draw(cmd.set, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.h * zoom, cmd.u0, cmd.v0, cmd.u1, cmd.v1, cmd.color);
       }
     }
+    if (adding) sprites->set_blend(render::BlendMode::Alpha);
   };
   const bool with_model = model_view && model_wanted && screen == MenuScreen::Status;
   const size_t split = with_model ? std::min(model_layer, cmds.size()) : cmds.size();
@@ -688,6 +783,7 @@ void MainMenu::Impl::draw_view(const render::Frame& frame, float vw, float vh, b
       text->audit_obstacle(ox + box.x * zoom, (oy + box.y * zoom) * flat, box.w * zoom, box.h * zoom * flat, box.label);
   }
   model_wanted = false;
+  text->set_pixel_aspect(old_aspect);
 }
 
 }  // namespace oc::ui

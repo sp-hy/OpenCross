@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "data/char_name.h"
+#include "import/ps1_font.h"
 #include "platform/keymap.h"
 #include "ui/lowres.h"
 #include "ui/menu/main_menu.h"
@@ -54,6 +55,8 @@ struct Cmd {
   std::u32string text;
   render::FaceId face = render::kNoFace;
   float scale = 1;
+  // Added to the picture (the PS1's B + F semi-transparency) instead of alpha-blended.
+  bool add = false;
 };
 
 // One box of the save / load grid. The boxes follow the card's DIRECTORY order (one box per block of every CHRONOnn file) and a box shows
@@ -410,6 +413,8 @@ struct MainMenu::Impl {
   // Defined in main_menu_draw.cpp.
   void Digits(float x, float y, const std::string& number, float advance, u32 colour = kText);
   u32 ps1_colour(u32 bgr, int a = 255) const;
+  // Colours ps1_colour gave for a channel over 0x80 -> the part over 1.0, which disc-mode text adds in a second copy.
+  mutable std::map<u32, u32> colour_boosts;
   void message(float x, float y);
   const Tex* portrait(int form);
   void build();
@@ -431,6 +436,15 @@ struct MainMenu::Impl {
   // ---- menu text: labels = bn_70 (face_gn), numbers = kb_70, both placed by their INK box: x = left edge (or right edge with
   // `right`), y = cap top, in PS1 px. Same in both art modes.
   bool hd_ink() const { return face_gn != render::kNoFace && face_kb != render::kNoFace; }
+  // Played from the PS1 discs (no spritefonts) every face is the disc's menu font, drawn at one font pixel per PS1 pixel and placed by
+  // its own ink box (font::ps1_ink).
+  bool ps1_text() const { return fonts.ps1(); }
+  float ps1_scale() const { return xscale / render::TextBatch::kPs1PixelScale; }
+  // How far below a list row's text point the console font's cells sit (font::kConsoleCellDrop); 0 for any other face.
+  float console_drop(render::FaceId face) const {
+    const import::Ps1Font* font = text->ps1_font(face);
+    return font && font->build() == import::Ps1Font::Build::Console ? PY(font::kConsoleCellDrop) : 0.0f;
+  }
 
   // Defined in main_menu_draw.cpp.
   bool glyphs_ok(const std::u32string& str) const;
@@ -439,6 +453,12 @@ struct MainMenu::Impl {
   void HN(float right_x, float y, const std::string& number, u32 colour = kText, float scale = 0.275f);
   void Disc(float cx, float cy, float radius, u32 colour);
   void StarGlyph(float x, float y, float mul, float dy, u32 colour = kText);
+  // Img() draws additively while set (the disc's semi-transparent compass meshes).
+  bool img_add = false;
+  // Played from the discs: frame `frame` of the menu sheet with its origin at PS1 (x, y), and a number as sheet digits right-aligned on the
+  // units slot at x (big: frames 9..18, 12 px apart; small: frames 21..30, 8 px apart).
+  void Sprite(int frame, float x, float y, u32 colour = kWhite);
+  void SpriteNumber(int value, float x, float y, bool big, u32 colour = kWhite);
   void Seg(float x0, float y0, float x1, float y1, float thickness, u32 colour);
   void leader_raw(float start_x, float y, float bend_x, float end_x, u32 colour);
   void leader(int entry, float x_ink, float cap_y, u32 colour);

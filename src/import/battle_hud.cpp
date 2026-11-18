@@ -1,8 +1,10 @@
 #include "import/battle_hud.h"
 
 #include <algorithm>
+#include <span>
 #include <string_view>
 
+#include "core/span_reader.h"
 #include "import/container.h"
 #include "import/lzss.h"
 #include "import/room_effects.h"
@@ -14,6 +16,9 @@ const char* const kHudSheetNames[kHudSheets] = {
     "viva", "osak", "gg",   "curs", "2bnu", "arro", "gree", "grey", "purp", "red",  "yell", "blue", "niji", "xgre", "xwhi", "xbla",
     "xred", "xyel", "xblu", "xnij", "xoff", "egre", "ewhi", "ebla", "ered", "eyel", "eblu", "enij", "win4", "waku", "stat", "colo",
     "etra", "cami", "ugre", "ugr1", "upur", "ured", "uyel", "ublu", "unij", "paus", "elef", "mark", "slow", "elme", "ccba"};
+
+const char* const kResultsSheetNames[kResultsSheets] = {"gree", "grey", "purp", "red",  "yell", "blue", "gg",  "curs",
+                                                        "osak", "viva", "sico", "levu", "2bnu", "paus", "elef"};
 
 namespace {
 
@@ -29,18 +34,24 @@ std::optional<Tim> tim_in(ByteSpan data) {
   return unpacked ? parse_tim(*unpacked) : std::nullopt;
 }
 
-// Every TIM of a drp and its nested drps onto `vram`, in file order; the window skin "win1" and the digit sheet "numf" are also decoded
-// into `skin` / `digits`.
-void load_tims(ByteSpan data, Vram& vram, HudFrame& skin, HudFrame& digits, int depth = 0) {
+struct NamedTim {
+  std::string_view name;
+  HudFrame* out;
+};
+
+// Every TIM of a drp and its nested drps onto `vram`, in file order; the TIMs `named` lists are also decoded into their frames.
+void load_tims(ByteSpan data, Vram& vram, std::span<const NamedTim> named_tims, int depth = 0) {
   auto drp = parse_drp(data);
   if (!drp) return;
   for (const DrpEntry& entry : drp->entries) {
-    if (entry.type == 1 && depth < 4 && is_drp(entry.data)) load_tims(entry.data, vram, skin, digits, depth + 1);
+    if (entry.type == 1 && depth < 4 && is_drp(entry.data)) load_tims(entry.data, vram, named_tims, depth + 1);
     if (entry.type != 4) continue;
     auto tim = tim_in(entry.data);
     if (!tim) continue;
     vram.blit_tim(*tim);
-    HudFrame* named = entry.name == "win1" ? &skin : entry.name == "numf" ? &digits : nullptr;
+    HudFrame* named = nullptr;
+    for (const NamedTim& candidate : named_tims)
+      if (entry.name == candidate.name) named = candidate.out;
     if (!named) continue;
     if (auto indexed = decode_tim(*tim, 0, true)) {
       const Image rgba = to_rgba(*indexed);
@@ -86,30 +97,40 @@ HudFrame compose(const Vram& vram, const std::vector<assets::EffectSprite>& part
   return out;
 }
 
-}  // namespace
+// The frames of every sheet `names` lists, composed from the "tana" pack over `vram`; the first sheet of a name wins.
+void compose_sheets(ByteSpan tana, const Vram& vram, const char* const* names, std::span<std::vector<HudFrame>> out) {
+  const assets::RoomEffects pack = load_battle_effects(tana, {}, vram);
+  for (const assets::SpriteSheet& sheet : pack.sheets)
+    for (size_t n = 0; n < out.size(); ++n) {
+      std::vector<HudFrame>& frames = out[n];
+      if (!frames.empty() || std::string_view(sheet.name.c_str()) != names[n]) continue;
+      for (const std::vector<assets::EffectSprite>& parts : sheet.frames) frames.push_back(compose(vram, parts));
+    }
+}
 
-const HudFrame* HudArt::frame(int type, int frame_number) const {
-  const int sheet = type / 4;
-  if (type < 0 || (type & 3) || sheet >= kHudSheets || frame_number < 1) return nullptr;
-  const std::vector<HudFrame>& frames = sheets[static_cast<size_t>(sheet)];
+const HudFrame* sheet_frame(std::span<const std::vector<HudFrame>> sheets, int type, int frame_number) {
+  const size_t sheet = static_cast<size_t>(type / 4);
+  if (type < 0 || (type & 3) || sheet >= sheets.size() || frame_number < 1) return nullptr;
+  const std::vector<HudFrame>& frames = sheets[sheet];
   if (static_cast<size_t>(frame_number) > frames.size()) return nullptr;
   const HudFrame& found = frames[static_cast<size_t>(frame_number - 1)];
   return found.w > 0 && found.h > 0 ? &found : nullptr;
 }
+
+}  // namespace
+
+const HudFrame* HudArt::frame(int type, int frame_number) const { return sheet_frame(sheets, type, frame_number); }
+
+const HudFrame* ResultsArt::frame(int type, int frame_number) const { return sheet_frame(sheets, type, frame_number); }
 
 std::optional<HudArt> load_battle_hud(ByteSpan prd, ByteSpan prg, bool usa) {
   const Bytes tana = nested_pack(prd, "tana");
   if (tana.empty()) return std::nullopt;
   HudArt art;
   Vram vram;
-  load_tims(prd, vram, art.skin, art.digits);
-  const assets::RoomEffects pack = load_battle_effects(tana, {}, vram);
-  for (const assets::SpriteSheet& sheet : pack.sheets)
-    for (int n = 0; n < kHudSheets; ++n) {
-      std::vector<HudFrame>& frames = art.sheets[static_cast<size_t>(n)];
-      if (!frames.empty() || std::string_view(sheet.name.c_str()) != kHudSheetNames[n]) continue;
-      for (const std::vector<assets::EffectSprite>& parts : sheet.frames) frames.push_back(compose(vram, parts));
-    }
+  const NamedTim named[] = {{"win1", &art.skin}, {"numf", &art.digits}};
+  load_tims(prd, vram, named);
+  compose_sheets(tana, vram, kHudSheetNames, art.sheets);
   for (size_t frame = 0; frame < art.name_advance.size(); ++frame) {
     u8 advance = kJapanNameAdvance;
     if (usa) {
@@ -119,6 +140,51 @@ std::optional<HudArt> load_battle_hud(ByteSpan prd, ByteSpan prg, bool usa) {
     art.name_advance[frame] = advance;
   }
   return art;
+}
+
+std::optional<ResultsArt> load_results_art(ByteSpan prd) {
+  const Bytes tana = nested_pack(prd, "tana");
+  if (tana.empty()) return std::nullopt;
+  ResultsArt art;
+  Vram vram;
+  const NamedTim named[] = {{"bg", &art.wall}};
+  load_tims(prd, vram, named);
+  compose_sheets(tana, vram, kResultsSheetNames, art.sheets);
+  return art;
+}
+
+std::optional<Bytes> load_exit_member(ByteSpan exdat, u32 index) {
+  const SpanReader pack(exdat);
+  if (exdat.size() < 4 + 4 * (static_cast<size_t>(index) + 2) || pack.at<u32>(0) <= index) return std::nullopt;
+  const u32 begin = pack.at<u32>(4 + 4 * index), end = pack.at<u32>(4 + 4 * (index + 1));
+  if (begin >= end || end > exdat.size()) return std::nullopt;
+  return lzss_decode(exdat.subspan(begin, end - begin));
+}
+
+std::vector<Bytes> load_exit_messages(ByteSpan exdat, bool pairs) {
+  constexpr size_t kEntry = 8;
+  std::vector<Bytes> out;
+  auto block = load_exit_member(exdat, 3);
+  if (!block || block->size() < kEntry) return out;
+  const SpanReader table(*block);
+  const size_t count = std::min<size_t>(table.at<u16>(0) / kEntry, block->size() / kEntry);
+  for (size_t i = 0; i < count; ++i) {
+    Bytes text;
+    for (size_t at = table.at<u16>(i * kEntry); at < block->size() && (*block)[at] >= 0x20; ++at) {
+      text.push_back((*block)[at]);
+      if (pairs && (*block)[at] >= 0xF8 && at + 1 < block->size()) text.push_back((*block)[++at]);
+    }
+    out.push_back(std::move(text));
+  }
+  return out;
+}
+
+std::vector<u8> load_exit_item_icons(ByteSpan exdat) {
+  constexpr size_t kItem = 12, kIcon = 10;
+  std::vector<u8> out;
+  if (auto block = load_exit_member(exdat, 5))
+    for (size_t at = 0; at + kItem <= block->size(); at += kItem) out.push_back(static_cast<u8>((*block)[at + kIcon] & 0x0F));
+  return out;
 }
 
 }  // namespace oc::import

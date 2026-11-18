@@ -66,6 +66,11 @@ bool KeyMapScreen::begin(UiKit& kit, import::Lang lang) {
   acc_ = 0;
   next_ = false;
   pad_held_ = false;
+  // The guide's pages are RDE's; played from the PS1 discs the screen is skipped.
+  if (!kit.vfs().has_archive("hd")) {
+    done_ = true;
+    return false;
+  }
   if (loaded_lang_ != li) {
     auto load = [&](const std::string& path) {
       auto raw = kit.vfs().read(path);

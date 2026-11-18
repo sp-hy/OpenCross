@@ -174,19 +174,23 @@ bool KeyItemPopup::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Sp
   impl.fonts.init(vfs, text);
   impl.fonts.set_classic(!impl.hd);
   impl.lt.init(&vfs);
-  // Display order of the field list: 64 key-item codes from a table in field.prg.
+  // Display order of the field list: 64 key-item codes from a table in field.prg, at the Japanese or the USA build's offset (the
+  // one holding a permutation of 0..63).
   for (int i = 0; i < kSlots; ++i) impl.order[static_cast<size_t>(i)] = static_cast<u8>(i);
-  if (auto prg = vfs.read("cdrom/prog/field.prg"); prg && prg->size() >= 0x3E128 + kSlots) {
-    std::array<bool, kSlots> seen{};
-    bool ok = true;
-    for (int i = 0; i < kSlots; ++i) {
-      const u8 code = (*prg)[0x3E128 + static_cast<size_t>(i)];
-      if (code >= kSlots || seen[code]) ok = false;
-      else seen[code] = true;
-    }
-    if (ok) {
-      for (int i = 0; i < kSlots; ++i) impl.order[static_cast<size_t>(i)] = (*prg)[0x3E128 + static_cast<size_t>(i)];
+  if (auto prg = vfs.read("cdrom/prog/field.prg")) {
+    for (const size_t offset : {size_t{0x3E128}, size_t{0x3E9C8}}) {
+      if (prg->size() < offset + kSlots) continue;
+      std::array<bool, kSlots> seen{};
+      bool ok = true;
+      for (int i = 0; i < kSlots; ++i) {
+        const u8 code = (*prg)[offset + static_cast<size_t>(i)];
+        if (code >= kSlots || seen[code]) ok = false;
+        else seen[code] = true;
+      }
+      if (!ok) continue;
+      for (int i = 0; i < kSlots; ++i) impl.order[static_cast<size_t>(i)] = (*prg)[offset + static_cast<size_t>(i)];
       impl.order_from_disc = true;
+      break;
     }
   }
   if (!impl.order_from_disc) log::warn("keyitem list: field.prg order table unavailable; ascending order");

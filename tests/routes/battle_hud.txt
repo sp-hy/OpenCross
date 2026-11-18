@@ -1,6 +1,7 @@
 # Battle HUD route: Continue from the save copy (the party of the real save, so the status plates must show
 # "Serge" / "Kid", not the save's kana default names), request encounter 1 from the field (request battle), then the Attack target
-# selection: status plates, the target cursor over the enemy, the target info window (name, HP ????, sex, INNATE dot) and the camera
+# selection: status plates, the target cursor over the enemy, the target info window (name with its letter suffix, Komodo Pup-A,
+# HP ????, sex, INNATE dot) and the camera
 # hint with the keyboard key cap. Shots: bh_01 top menu, bh_02 target selection, bh_03 DYNAMIC hint, bh_04 the results screen.
 0 wait flow title 300
 - wait movie start 300

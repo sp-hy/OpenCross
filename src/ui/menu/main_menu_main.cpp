@@ -190,7 +190,14 @@ void MainMenu::Impl::update_choice(const Nav& nav) {
 // Dial + needle of the main list / Use-Allocate picker: the menutim_02 swirl scaled over the dial spot, the needle at `hand_angle`
 // (eased per frame by hand_tick). Both art modes.
 void MainMenu::Impl::clock_dial() {
-  if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) Img(deco, PX(382), PY(293), PX(128), PY(149), 0, 0, 1, 1, rgb(172, 172, 182));
+  if (!texs.hd()) {
+    img_add = true;
+    if (Tex* deco = texs.mesh("deco", ps1::kMeshAspect * 0x800 >> 12, 0x800, 0x808080, true))
+      Img(deco, PX(446 + deco->ox), PY(367 + deco->oy), PX(deco->w), PY(deco->h), 0, 0, 1, 1, shade(kWhite, 0.25f));
+    img_add = false;
+  } else if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
+    Img(deco, PX(382), PY(293), PX(128), PY(149), 0, 0, 1, 1, rgb(172, 172, 182));
+  }
   Hand(446, 367, hand_angle);
 }
 
@@ -228,6 +235,14 @@ void MainMenu::Impl::list_and_bar(int list_id, int sel, bool bar) {
   const u32 line_colour = rgb(200, 190, 190);
   clock_dial();
   const int count = list_id == 0 ? 6 : 2;
+  if (!texs.hd()) {
+    // Played from the discs the leader lines (frame 4 / 0x25) and the labels (frames 0x5F.. / 0x65..) are sheet frames at the dial's
+    // centre, the chosen label in 0x004E77.
+    Sprite(list_id == 0 ? 4 : 0x25, 446, 367);
+    for (int entry = 0; entry < count; ++entry) Sprite((list_id == 0 ? 0x5F : 0x65) + entry, 446, 367, entry == sel ? ps1_colour(0x004E77) : kWhite);
+    bar_and_title(list_id == 0 ? sel : 1, bar);
+    return;
+  }
   float maxw = 0;
   for (int entry = 0; entry < count; ++entry) maxw = std::max(maxw, twp(utf32(S6(list_id == 0 ? kMainLabels[entry] : kPickLabels[entry])), rel));
   const float dmax = hd ? list_maxw(list_id, 0) - list_maxw(list_id, lang_index()) : 0.0f;
@@ -283,7 +298,23 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
   const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
   const float number_scale = 0.275f;
   const int lang_idx = lang_index();
-  HL(card_x + 8.2f, card_y + 11.9f, char_name(character), kName, 0.35f);
+  // The PS1 draws the card's name 1 pixel left and 4 higher than this layout.
+  HL(card_x + (ps1_text() ? 6.0f : 8.2f), card_y + (ps1_text() ? 7.9f : 11.9f), char_name(character), kName, 0.35f);
+  if (!texs.hd()) {
+    // Played from the discs the captions are the frame's own; the numbers are sheet digits at the PS1's slots.
+    SpriteNumber(std::min<int>(ch.cur_hp, 999), card_x + 60, card_y + 29, true);
+    SpriteNumber(std::min<int>(ch.max_hp, 999), card_x + 108, card_y + 29, true);
+    const int innate = gs->innate(character);
+    Disc(PX(card_x + 166.2f), PY(card_y + 37.5f), 13.5f, innate ? element_colour(innate) : rgb(120, 120, 130));
+    if (stats) {
+      const int values[6] = {ch.atk, ch.hit, ch.mag, ch.def, ch.evd, ch.mdef};
+      for (int stat = 0; stat < 6; ++stat)
+        SpriteNumber(std::min(values[stat], 99), card_x + 48 + 56 * static_cast<float>(stat % 3), card_y + (stat < 3 ? 47 : 63), false);
+    }
+    if (stamina) SpriteNumber(std::min(gs->stamina_recovery(character), 99), card_x + 158, card_y + 79, false);
+    mini_grid(character, card_x + 0x83, card_y + 6);
+    return;
+  }
   HS(0x4, card_x + 7.7f, card_y + 30.7f, capt("\xEF\xBC\xA8\xEF\xBC\xB0", "HP"));
   const u32 hp_colour = ch.cur_hp < ch.max_hp / 8 ? kSel : kText;
   HN(card_x + 50.7f, card_y + 30.7f, std::to_string(std::min<int>(ch.cur_hp, 999)), hp_colour, 0.29f);
@@ -431,7 +462,8 @@ void MainMenu::Impl::build_roster() {
 }
 
 // Status / Elements-use member panel (frame 52): the card with stats and stamina, plus the status-ailment badges (frames 91..94 for
-// poison / burn / sprain / flu, drawn at x - 0x11).
+// poison / burn / sprain / flu, drawn at x - 0x11). Played from the discs a badge is the disc's word frame over the dot (frame 90) in the
+// ailment's colour, both with their origin at (panel x + dx, panel y + 0x66).
 void MainMenu::Impl::status_panel(int character, float panel_x, float panel_y) {
   const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
   Frame(52, panel_x, panel_y);
@@ -440,10 +472,18 @@ void MainMenu::Impl::status_panel(int character, float panel_x, float panel_y) {
     u8 bit;
     int frame;
     float dx;
-  } kBadge[4] = {{0x01, 91, 0x10}, {0x10, 92, 0x38}, {0x20, 93, 0x60}, {0x08, 94, 0x88}};
-  for (const auto& badge : kBadge)
-    if (ch.status & badge.bit)
-      if (Tex* tex = texs.shape(badge.frame, lang)) Img(tex, PX(panel_x + badge.dx - 0x11), PY(panel_y + 0x66), PX(tex->w / 4.0f), PY(tex->h / 4.0f));
+    u32 dot;
+  } kBadge[4] = {{0x01, 91, 0x10, rgb(52, 120, 0)}, {0x10, 92, 0x38, rgb(255, 142, 0)}, {0x20, 93, 0x60, rgb(0, 176, 255)}, {0x08, 94, 0x88, rgb(241, 0, 0)}};
+  for (const auto& badge : kBadge) {
+    if (!(ch.status & badge.bit)) continue;
+    if (!texs.hd()) {
+      const float x = panel_x + badge.dx, y = panel_y + 0x66;
+      if (Tex* dot = texs.sheet("main", 90)) Img(dot, PX(x + dot->ox), PY(y + dot->oy), PX(dot->w), PY(dot->h), 0, 0, 1, 1, badge.dot);
+      if (Tex* word = texs.sheet("main", badge.frame)) Img(word, PX(x + word->ox), PY(y + word->oy), PX(word->w), PY(word->h));
+    } else if (Tex* tex = texs.shape(badge.frame, lang)) {
+      Img(tex, PX(panel_x + badge.dx - 0x11), PY(panel_y + 0x66), PX(tex->w / 4.0f), PY(tex->h / 4.0f));
+    }
+  }
 }
 
 // ---- status: panel (40, 42), equipment frames below it, title + bottom bar, member-switch glyphs. The PS1 draws a live 3D model on
@@ -477,11 +517,15 @@ void MainMenu::Impl::build_status() {
     notch_caption(panel_x, 180, 6);
     // 0.35 up to 155 px wide; wider lines shrink by a slope that eases off with the width.
     const std::vector<std::u32string> lines = profile_lines(character);
+    // The discs' menu fonts (the USA menu sheet, the console font) draw the profile 2 pixels higher in its frame than this layout.
+    const import::Ps1Font* disc_font = text->ps1_font(face_gn);
+    const bool raised = disc_font && (disc_font->build() == import::Ps1Font::Build::UsaMenu || disc_font->build() == import::Ps1Font::Build::Console);
+    const float lines_y = 198.2f - (raised ? 2.0f : 0.0f);
     for (size_t i = 0; i < lines.size(); ++i) {
       text->prepare(face_gn, lines[i]);
       const float width = text->measure(face_gn, lines[i], 0.35f) / xscale;
       const float slope = width < 155.0f ? 0.0f : width < 236.0f ? 0.002f : width < 286.0f ? 0.0015f : 0.0012f;
-      HT(face_gn, panel_x + 12.4f, 198.2f + 24.0f * static_cast<float>(i), lines[i], kText, 0.35f + (155.0f - width) * slope);
+      HT(face_gn, ps1_text() ? 52.0f : panel_x + 12.4f, lines_y + 24.0f * static_cast<float>(i), lines[i], kText, 0.35f + (155.0f - width) * slope);
     }
   } else {
     Frame(49, panel_x, 180);

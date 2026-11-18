@@ -20,7 +20,8 @@ namespace {
 constexpr float kBackdropW = 640, kBackdropH = 220, kTile = 64;
 // Picks: names start at x 64 + 96 slot - 6 * (Japanese glyph count) + a per-name nudge, y 100; the cursor at x 14 + 96 slot, y 98.
 constexpr float kPickNameX = 64, kPickY = 100, kPickCursorX = 14, kPickCursorY = 98, kColumnPitch = 96;
-// List: the window (16, 128, 288, 78); names at x 28 + 96 col, y 128 + 13 row + 2; the cursor at x 16 + 96 col, y 128 + 13 row - 2.
+// List: the window (16, 128, 288, 78); names at x 28 + 96 col, y 128 + 13 row + 2 (the PS1 font from the discs: + 0); the cursor at
+// x 16 + 96 col, y 128 + 13 row - 2.
 constexpr float kListX = 16, kListY = 128, kListW = 288, kListH = 78, kListNameX = 28, kListTextDy = 2;
 // Cursor: 8 x 8 px, drawn 4 px below its point; 5 frames of 8 menu frames (the counter wraps at 40).
 constexpr float kCursorSize = 8, kCursorDy = 4;
@@ -32,6 +33,22 @@ constexpr int kNameGlyphs = 8;
 constexpr float kCanvasPerPx = 4;
 // Colours (0x00BBGGRR, 0x80 = 1.0).
 constexpr u32 kWhite = 0x757575, kRed = 0x000075, kOrange = 0x285085;
+// Played from the PS1 discs: the sprite colours of the PS1's name glyphs (white, taken red, cursor orange) over their black copy one
+// pixel down and right, and the cursor picture: entry 2 of map/etc/systim.bin, 4bpp 20 x 60, five 8 x 12 frames down the left
+// column, each frame's 8 x 13 texels drawn into the 8 x 8 cursor.
+constexpr u32 kPs1White = 0x808080, kPs1Red = 0x000080, kPs1Orange = 0x285080;
+constexpr size_t kCursorEntry = 2;
+constexpr float kCursorTexelsW = 8, kCursorTexelsH = 13, kCursorPitch = 12;
+
+// A PS1 quad maps `texels` over `pixels` and gives a pixel the texel nearest the texture coordinate at its left (top) edge; drawn with
+// samples at pixel centres the texture coordinates move by this many texels (and a hair, so a tie rounds up as on the PS1).
+float ps1_texel_bias(float texels, float pixels) { return 0.5f - 0.5f * texels / pixels + 1.0f / 1024.0f; }
+
+// The PS1 colour word (0x80 = 1.0) as a sprite colour.
+u32 ps1_colour(u32 colour) {
+  auto channel = [&](int shift) { return static_cast<u8>(std::min(255u, ((colour >> shift) & 0xFF) * 255u / 0x80)); };
+  return render::pack_rgba(channel(0), channel(8), channel(16));
+}
 
 // Per-language name styles: a few long names (by pool slot) are drawn smaller and lower. Styles 0x7D..0x8E replace the slot's
 // scale and add dy (PS1 px); every other name keeps the slot's scale.
@@ -109,10 +126,13 @@ struct MonsterPickScreen::Impl {
   render::Sampler linear, nearest;
   render::Texture white_tex, tile_tex, cursor_tex;
   render::TexRef white = {}, tile = {}, cursor = {};
+  float cursor_w = 1, cursor_h = 1;
   import::LangTables lt;
   import::Lang lang = import::Lang::En;
   font::FontSet fonts;
   bool hd = true;
+  // Played from the PS1 discs (no hd archive): the PS1's cursor picture and the names in the PS1 font at one font pixel per pixel.
+  bool disc = false;
   MonsterModelView* models = nullptr;
   Backdrop backdrop;
 
@@ -143,6 +163,14 @@ struct MonsterPickScreen::Impl {
     return found ? std::min(kNameGlyphs, static_cast<int>(import::utf8_to_u32(*found).size())) : 0;
   }
 
+  // From the discs: half the name's width in the PS1 font (pixels); the Japanese 12-pixel glyphs (at most kNameGlyphs) give the rule's
+  // 6 per glyph, the USA build takes the whole name.
+  float half_width(int pool_slot) {
+    const std::u32string str = jp() ? name(pool_slot).substr(0, kNameGlyphs) : name(pool_slot);
+    const render::FaceId face = fonts.face(slot());
+    if (str.empty() || face == render::kNoFace) return 0;
+    return 0.5f * text->measure(face, str, 1.0f / render::TextBatch::kPs1PixelScale);
+  }
   bool make(render::Texture& texture, render::TexRef& ref, u32 w, u32 h, const void* rgba, bool lin) {
     if (!rgba || !texture.create(*ctx, w, h, render::TextureFormat::Rgba8, rgba)) return false;
     ref = render::TexRef(texture, lin ? linear : nearest);
@@ -160,6 +188,18 @@ struct MonsterPickScreen::Impl {
     log::warn("monster picker: map/etc/systim.bin backdrop tile unavailable");
   }
   void load_cursor() {
+    if (disc) {
+      if (auto raw = vfs->read_disc("cdrom/map/etc/systim.bin"))
+        if (auto cpt = import::parse_cpt(ByteSpan(raw->data(), raw->size())); cpt && cpt->entries.size() > kCursorEntry)
+          if (auto tim = import::parse_tim(cpt->entries[kCursorEntry].data))
+            if (auto decoded = import::decode_tim(*tim)) {
+              const import::Image rgba = import::to_rgba(*decoded);
+              cursor_w = static_cast<float>(rgba.width), cursor_h = static_cast<float>(rgba.height);
+              if (make(cursor_tex, cursor, rgba.width, rgba.height, rgba.pixels.data(), false)) return;
+            }
+      log::warn("monster picker: map/etc/systim.bin cursor picture unavailable");
+      return;
+    }
     render::DecodedImage img;
     if (auto raw = vfs->read("hd/menu/monmenu_cur.png"); raw && render::decode_image(*raw, img) &&
                                                           make(cursor_tex, cursor, img.width, img.height, img.rgba.data(), true))
@@ -176,6 +216,16 @@ struct MonsterPickScreen::Impl {
     const std::u32string str = name(pool_slot);
     if (str.empty()) return;
     if (prep) return fonts.prepare(slot(), str);
+    if (disc) {
+      const render::FaceId face = fonts.face(slot());
+      if (face == render::kNoFace) return;
+      const u32 ps1 = colour == kRed ? kPs1Red : colour == kOrange ? kPs1Orange : kPs1White;
+      const float old_aspect = text->pixel_aspect();
+      text->set_pixel_aspect(lb.scale_y / lb.scale);
+      text->draw(face, str, wx(x), wy(y), ps1_colour(ps1), lb.scale / render::TextBatch::kPs1PixelScale);
+      text->set_pixel_aspect(old_aspect);
+      return;
+    }
     const font::SlotInfo& info = font::slot(slot());
     float scale = info.scale;
     if (const u8 style = name_style(lang_index(), static_cast<u8>(pool_slot)); style) {
@@ -188,6 +238,11 @@ struct MonsterPickScreen::Impl {
   }
   void draw_cursor(float x, float y) {
     const int frame = static_cast<int>(tick % (kCursorFrames * kCursorPeriod)) / kCursorPeriod;
+    if (disc) {
+      const float u0 = ps1_texel_bias(kCursorTexelsW, kCursorSize), v0 = kCursorPitch * static_cast<float>(frame) + ps1_texel_bias(kCursorTexelsH, kCursorSize);
+      return quad(cursor, x, y + kCursorDy, kCursorSize, kCursorSize, u0 / cursor_w, v0 / cursor_h, (u0 + kCursorTexelsW) / cursor_w,
+                  (v0 + kCursorTexelsH) / cursor_h);
+    }
     // monmenu_cur.png: the right-pointing frames in the left column (32 x 48 cells of an 80 x 240 sheet).
     const float u1 = 32.0f / 80.0f, v0 = static_cast<float>(frame) / kCursorFrames, v1 = static_cast<float>(frame + 1) / kCursorFrames;
     quad(cursor, x, y + kCursorDy, kCursorSize, kCursorSize, 0, v0, u1, v1);
@@ -207,8 +262,9 @@ struct MonsterPickScreen::Impl {
     for (int pick_slot = 0; pick_slot < MonsterPicker::kPicks; ++pick_slot) {
       const int pool_slot = picker.pick_slot(pick_slot);
       if (pool_slot < 0) continue;
-      const float nudge = jp() ? 0.0f : pick_nudge(static_cast<u8>(pool_slot));
-      const float x = kPickNameX + kColumnPitch * static_cast<float>(pick_slot) - kHalfGlyph * static_cast<float>(glyphs(pool_slot)) + nudge;
+      const float nudge = jp() || disc ? 0.0f : pick_nudge(static_cast<u8>(pool_slot));
+      const float half = disc ? half_width(pool_slot) : kHalfGlyph * static_cast<float>(glyphs(pool_slot));
+      const float x = kPickNameX + kColumnPitch * static_cast<float>(pick_slot) - half + nudge;
       label(pool_slot, x, kPickY, pick_slot == picker.slot() ? kOrange : kWhite);
     }
     if (picker.mode() == MonsterPicker::Mode::Slots) {
@@ -228,7 +284,7 @@ struct MonsterPickScreen::Impl {
       u32 colour = picker.taken(position) ? kRed : kWhite;
       if (picker.mode() == MonsterPicker::Mode::List && position == picker.cursor()) colour = kOrange;
       label(pool_slot, kListNameX + kColumnPitch * static_cast<float>(col),
-            kListY + MonsterPicker::kRowPitch * static_cast<float>(row) + offset + kListTextDy, colour);
+            kListY + MonsterPicker::kRowPitch * static_cast<float>(row) + offset + (disc ? 0.0f : kListTextDy), colour);
     }
   }
 };
@@ -246,6 +302,7 @@ bool MonsterPickScreen::init(render::GpuContext& ctx, const vfs::Vfs& vfs, rende
   if (!impl.make(impl.white_tex, impl.white, 1, 1, px, false)) return false;
   impl.fonts.init(vfs, text);
   impl.fonts.set_classic(!impl.hd);
+  impl.disc = !vfs.has_archive("hd");
   impl.load_tile();
   impl.load_cursor();
   return true;

@@ -3,12 +3,17 @@
 //   Both art modes: RDE keyboard, 10 x 14 Latin grid, up to 12
 //   characters; JP: the kana pages (katakana / hiragana / alphanumeric), 10 x 10 grid, 6 characters (Viper 4). Original art swaps
 //   only the font files (small_font_*) and the portrait strip folder (hd/menu/playtim/1999).
+//   Played from the PS1 discs: the disc's own screen at the PS1 points; the USA build has one 10 x 10 page (letters and digits) and
+//   6 characters, its text from the disc (import::load_name_menu); grid, name and the JP prompt in the console font's 16-pixel cells.
 // The logic (cursor, buffer, validation) is plain data driven by press(); update()/draw() add input mapping and rendering.
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "import/name_menu.h"
+#include "import/ps1_font.h"
 #include "ui/title/canvas.h"
 #include "ui/title/name_codec.h"
 #include "ui/title/nav.h"
@@ -28,6 +33,8 @@ class NameEntry {
     std::u32string default_name;
     std::u32string initial;
     const import::JpGlyphs* glyphs = nullptr;
+    // Played from the PS1 discs: the disc's name-entry text; null on RDE.
+    std::shared_ptr<const import::NameMenuText> disc;
   };
   enum class Button { Katakana, Hiragana, Alnum, Confirm, Default };
 
@@ -46,14 +53,16 @@ class NameEntry {
   bool in_buttons() const { return in_buttons_; }
   int row() const { return row_; }
   int col() const { return col_; }
-  int rows() const { return !ps1_pages() ? kLatinRows : kPs1Rows; }
-  int cols() const { return !ps1_pages() ? kLatinCols : kPs1Cols; }
+  int rows() const { return ps1_pages() || usa_grid() ? kPs1Rows : kLatinRows; }
+  int cols() const { return ps1_pages() || usa_grid() ? kPs1Cols : kLatinCols; }
   // The character at a grid cell; 0 = blank cell.
   char32_t cell(int grid_row, int grid_col) const;
   Button button() const { return buttons_[static_cast<size_t>(button_)]; }
   const std::vector<Button>& buttons() const { return buttons_; }
   int page() const { return static_cast<int>(page_); }
   bool ps1_pages() const { return lang_ == import::Lang::Jp; }
+  // The USA disc's single page.
+  bool usa_grid() const { return disc_ && !disc_->grid.empty(); }
   float reject_flash() const { return flash_; }
 
   // ---- io
@@ -70,6 +79,11 @@ class NameEntry {
   // A cached hd.dat PNG (freed with the UiKit).
   Pic pic(UiKit& kit, const std::string& path) const;
   mutable std::map<std::string, Pic> pics_;
+  // Played from the discs: the grid cells, the name with its slot lines and the prompt, at the PS1 points (canvas = 2.5 x, 2.2222 y).
+  void draw_disc_text(DrawList& dl, UiKit& kit) const;
+  // A character in a 16 x 16 cell of the console font, the stand-in the disc's own 1-bit font in its greys; cached.
+  Pic cell_pic(UiKit& kit, char32_t ch) const;
+  mutable std::shared_ptr<const import::Ps1Font> cell_font_, menu_font_;
   void insert(char32_t c);
   void set_name(const std::u32string& s);
   void play(int id) {
@@ -79,6 +93,7 @@ class NameEntry {
   int char_id_ = 0;
   import::Lang lang_ = import::Lang::En;
   ArtMode mode_ = ArtMode::Hd;
+  std::shared_ptr<const import::NameMenuText> disc_;
   std::u32string default_;
   std::u32string buf_, result_;
   int max_ = 12, pos_ = 0;

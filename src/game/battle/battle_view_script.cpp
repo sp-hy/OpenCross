@@ -511,7 +511,10 @@ void BattleView::build_window(const ScriptMsg& msg) {
   }
   if (msg.waits >= smsg_count(pg, "{wait(") && smsg_tag_arg(pg, "{wend(") < 0) {
     const int cell = (tick_count_ & 0x3F) >> 3;
-    add_img(hud_[kHPageCur], (msg.x + 8.0f + last_w) * kPs1Px, (msg.ty + 16.0f * static_cast<float>(lines.size() - 1)) * kSmsgPY, 16 * kPs1Px, 16 * kSmsgPY,
+    // Disc mode: the same eight frames are the battle sheet "mark".
+    if (ps1_hud_) add_sheet_at(0xAC, cell + 1, msg.x + 8.0f + last_w, msg.ty + 16.0f * static_cast<float>(lines.size() - 1));
+    else
+      add_img(hud_[kHPageCur], (msg.x + 8.0f + last_w) * kPs1Px, (msg.ty + 16.0f * static_cast<float>(lines.size() - 1)) * kSmsgPY, 16 * kPs1Px, 16 * kSmsgPY,
             static_cast<float>(cell) / 8.0f, 0, static_cast<float>(cell + 1) / 8.0f, 1);
   }
 }

@@ -1392,21 +1392,30 @@ def usa_menu_key(text):
     return re.sub(r"\s+", " ", text.replace(BS + "n", " ")).strip().lower()
 
 
+def usa_menu_span(segment, key):
+    """(start, length) of the characters of `segment` whose usa_menu_key is `key`, or None."""
+    quote = "[\"“”]"
+    words = (quote.join(re.escape(part) for part in word.split('"')) for word in key.split(" "))
+    match = re.search(r"\s+".join(words), segment, re.IGNORECASE)
+    return (match.start(), match.end() - match.start()) if match else None
+
+
 def cmd_usa_menu(a):
     """menutest.txt / shopmenu.txt keys (JP overlay addresses) -> the USA menu message (and line) holding the same text."""
     build = UsaBuild(a.disc, a.disc2)
     mess = build.menu_messages()
     parts = []
     for i, message in enumerate(mess):
-        parts.append((usa_menu_key(message), i, ""))
+        parts.append((usa_menu_key(message), i, "", message))
         for j, seg in enumerate(re.split(r"[\n\t]+", message)):
             if seg.strip():
-                parts.append((usa_menu_key(seg), i, str(j)))
+                parts.append((usa_menu_key(seg), i, str(j), seg))
     lang = Lang()
     rows = ["# RDE menu / shop string keys (the JP overlay address) -> USA menu message: index in the 'mess' entry of",
             "# menu/menutest.prd and the line / tab segment holding the same English text (cc_text.py usa-menu).",
             "# match: exact = the whole message, segment = one line or tab field of it, contained = inside a longer segment.",
-            "# columns: table\tkey\tmess\tsegment\tmatch"]
+            "# start / length (contained only): the characters of the segment that hold the text.",
+            "# columns: table\tkey\tmess\tsegment\tmatch\tstart\tlength"]
     for table in ("menutest", "shopmenu"):
         sheet = parse_tsv(decode_text(lang.read(table + ".txt")))
         col = [i for i, h in enumerate(sheet[0]) if h.strip().lower() == "en"][0]
@@ -1424,9 +1433,10 @@ def cmd_usa_menu(a):
             if not hit:
                 hit = next((part for part in parts if k and k in part[0] and part[2]), None)
                 how = "contained" if hit else "none"
+            span = usa_menu_span(hit[3], k) if how == "contained" else None
             st[how] += 1
-            rows.append("%s\t%s\t%s\t%s\t%s" % (table, r[0].upper().replace("0X", "0x"), hit[1] if hit else "",
-                                               hit[2] if hit else "", how))
+            rows.append("%s\t%s\t%s\t%s\t%s%s" % (table, r[0].upper().replace("0X", "0x"), hit[1] if hit else "",
+                                                 hit[2] if hit else "", how, "\t%d\t%d" % span if span else ""))
         out("%s: %s" % (table, dict(st)))
     out("USA menu messages: %d" % len(mess))
     if a.verbose:

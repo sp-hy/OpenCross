@@ -15,6 +15,17 @@ btl_exit_store_vars_free_stage = 0x801EC0C4;  # function: Frees the battle stage
 btl_exit_free_battle_stage = 0x801EC7E8;  # function: Frees the battle stage before the results screen.
 btl_exit_game_over = 0x801ECDC0;  # function: Game-over path that hands off to the main game loader.
 btl_exit_draw_portrait_strips = 0x801ECFA4;  # function: Draws the three 32x224 party portrait strips.
+btl_exit_select_sheet = 0x801EADE0;  # function: makes the results sheet of a type (4 x index into the results sheet name list) the current one
+btl_exit_draw_frame_mode = 0x801EAE50;  # function: draws a frame of the current sheet at a point with a blend mode and colour word
+btl_exit_draw_frame = 0x801EAEA8;  # function: draws a frame of the current sheet at a point, opaque, colour 0x808080
+btl_exit_draw_text_cells = 0x801EB874;  # function: draws a pre-rendered text line as 12 x 12 cells with a shadow copy; returns the line's width, which the star page places "and friends" after
+btl_exit_draw_member_rows = 0x801ED144;  # function: Draws the left results rows with names (each glyph advanced by the font's width of its character), HP digits and UP markers.
+btl_exit_draw_powerup_page = 0x801ED894;  # function: Draws the PowerUp page with member name and grown stat lines.
+btl_results_sheet_names = 0x801F279C;  # data: the results screen's sheet names, four bytes each
+btl_results_gold_digit_x = 0x801F2808;  # data: x offsets of the seven gold digit slots (from x 0xD4 in this build)
+btl_results_heal_line_x = 0x801F2838;  # data: x offsets of the heal question's eight lines
+btl_results_heal_line_y = 0x801F2848;  # data: y offsets of the heal question's eight lines
+btl_results_heal_cursor_rows = 0x801F2858;  # data: cursor row (x 16 px) of the three heal choices
 btl_exit_draw_headline = 0x801ED0F4;  # function: Draws the right-aligned results headline frame.
 btl_exit_draw_gold_line = 0x801ED758;  # function: Draws the gold received line on every results page.
 btl_exit_heal_question_state = 0x801EDA10;  # function: Heal-item menu state that shows the question and three choices.
@@ -71,4 +82,4 @@ btl_results_unlock_flash_dots = 0x801F5DF0;  # data: Flashing state for newly un
 btl_gold_bonus_flag = 0x801F5E93;  # data: Copy of the gear gold bonus flag used for the x125/100 gold bonus.
 btl_results_pending_tenths = 0x801F5E9E;  # data: the current star row's pending-tenths byte, the scale of the minor growth aim
 btl_results_progress_cap = 0x801F5EA0;  # data: the current star row's progress cap (step x battles)
-# Not found in this build (code or layout changed): btl_exit_draw_member_rows, btl_exit_draw_powerup_page, btl_results_enter
+# Not found in this build (code or layout changed): btl_results_enter

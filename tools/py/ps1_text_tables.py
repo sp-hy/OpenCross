@@ -4,7 +4,7 @@ Run with:  python -I tools/py/ps1_text_tables.py [--check]
 
 Blocks it writes (the room-id block is kept as it is):
   kJpGlyphChars   the JP glyph table, from tools/py/data/jp_glyphs.tsv (cc_text.py glyphs --write)
-  kSjisChars      the Shift-JIS characters the JP menu files use (menutest.prg, shopmenu.prg, menutest.prd, the .ome profiles),
+  kSjisChars      the Shift-JIS characters the JP menu files use (menutest.prg, shopmenu.prg, namemenu.prg, menutest.prd, the .ome profiles),
                   code -> Unicode by the standard code page
   kMenuPartsJp    how a menutest / shopmenu row is put together from the menu overlay's strings when it is not the one string
                   at its key address: the parts (guest addresses) and which of them start a new line
@@ -12,7 +12,8 @@ Blocks it writes (the room-id block is kept as it is):
   kSaveTitleProgressJp  the story-progress value of each save-location title of menutest.prd's "stbl" (JP), the key a USA
                   title (which starts with its progress value) is matched by
   kUsaGlyphChars  the USA glyph table, from tools/py/data/usa_glyphs.tsv (field font column)
-  kMenuStringsUsa the USA menu message and line / tab field of each menutest / shopmenu key, from usa_menu_strings.tsv
+  kMenuStringsUsa the USA menu message and line / tab field of each menutest / shopmenu key, and the characters of that field
+                  holding a key's text when it sits inside a longer field, from usa_menu_strings.tsv
 
 The menu rows are matched against lang.dat's menutest.txt / shopmenu.txt JP column, ignoring line breaks and blanks: the
 overlay strings at the key (one or several in a row), or 1 to 3 strings near it per line, whose text equals the row. A row
@@ -35,7 +36,7 @@ OC = os.path.normpath(os.path.join(HERE, "..", ".."))
 INC = os.path.join(OC, "src", "import", "text_tables.inc")
 MENU_BASE = 0x801D2800
 MENU_SOURCES = (("menutest.txt", "prog/menutest.prg", 0), ("shopmenu.txt", "prog/shopmenu.prg", 1))
-SJIS_FILES = ("prog/menutest.prg", "prog/shopmenu.prg", "menu/menutest.prd")
+SJIS_FILES = ("prog/menutest.prg", "prog/shopmenu.prg", "prog/namemenu.prg", "menu/menutest.prd")
 
 
 def sjis_strings(b):
@@ -189,7 +190,8 @@ def usa_menu_strings():
                 continue
             cells = line.rstrip("\n").split("\t")
             if len(cells) >= 5 and cells[2] and cells[4] != "none":
-                rows.append((0 if cells[0] == "menutest" else 1, int(cells[1], 0), int(cells[2]), int(cells[3]) if cells[3] else 255))
+                span = (int(cells[5]), int(cells[6])) if len(cells) >= 7 else (0, 0)
+                rows.append((0 if cells[0] == "menutest" else 1, int(cells[1], 0), int(cells[2]), int(cells[3]) if cells[3] else 255) + span)
     return rows
 
 
@@ -238,7 +240,7 @@ def build(lang, z, old):
             "inline constexpr struct { unsigned char code; unsigned short cp; } kUsaGlyphChars[] = {"]
     out += pairs(usa_glyph_block(), 8, lambda r: "{0x%X,0x%X}," % r)
     out += ["};", "// kMenuStringsUsa: Ps1MenuString rows (import/ps1_text.h)", "inline constexpr Ps1MenuString kMenuStringsUsa[] = {"]
-    out += pairs(usa_menu_strings(), 4, lambda r: "{%d,0x%X,%d,%d}," % r)
+    out += pairs(usa_menu_strings(), 4, lambda r: "{%d,0x%X,%d,%d,%d,%d}," % r)
     out += ["};"] + room_block
     return "\r\n".join(out) + "\r\n", stats
 

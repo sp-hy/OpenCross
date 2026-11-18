@@ -2,6 +2,7 @@
 // Pure geometry: the quads (canvas units, 1280 x 960) of one window of a skin sheet wNN.png / wN.tim - the 7 x 4 fill grid, the corner
 // pieces, the top / bottom / left / right edge strips and the page leaf - so the menu can draw them through its own sprite path and a
 // unit test can check the layout. Same piece model as the message window (DialogueBox::draw_tiles) and the key-item list panel.
+// build_skin_rect lays a skin's pieces around any rectangle the PS1's way (the party screens' windows).
 #pragma once
 
 #include <vector>
@@ -28,5 +29,13 @@ SkinWindow build_skin_window(int skin, int leaf_phase);
 
 // Rest x of the grid's first column per skin.
 float skin_window_x(int skin);
+
+// A window of a PS1 skin sheet (wN.tim, 128 x 96 texels) around any rectangle, laid out as the PS1's window builder lays one: ten pieces
+// (two fill halves, the four corners, the right, left, bottom and top edges) about the centre (cx, cy), `w` x `h` texels, every texel
+// `x_scale` screen pixels wide and one high (the 640-wide screens draw the sheet twice as wide). Edge and fill pieces repeat their
+// tile of the sheet, so such a piece comes back as one quad per run of whole tiles. A texel drawn two pixels wide starts one pixel early
+// (the PS1 rounds a pixel's texture coordinate to the nearest texel), so the quads hold half texels at a piece's ends. Quads in screen
+// pixels, uv normalised to the sheet, in draw order.
+std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_scale);
 
 }  // namespace oc::ui

@@ -3,6 +3,7 @@
 #include "ui/window_frame.h"
 
 #include <algorithm>
+#include <cmath>
 
 namespace oc::ui {
 namespace {
@@ -34,7 +35,80 @@ constexpr SkinUv kUv[16] = {
 constexpr float kRest[16] = {434, 429, 430, 429.5f, 431, 436, 432, 429, 429, 429, 432, 430, 430, 429.5f, 429, 430};
 constexpr float kPitch = 64.5f, kTile = 65.0f, kEdge = 70.0f, kCorner = 175.0f, kTop = 640.0f, kLastRow = kTop + 3 * kPitch;
 
+// The PS1 window builder's pieces: the sheet rectangle (u, v, w, h), the point of the rectangle that sits at the piece's base position
+// (ox, oy; the position is (u - ox, v - oy) from the window's top-left corner minus half its size), and how the piece follows the window.
+enum class PieceKind { TopLeft, TopRight, BottomLeft, BottomRight, TopEdge, BottomEdge, LeftEdge, RightEdge, FillLeft, FillRight };
+struct SkinPiece {
+  int u, v, w, h, ox, oy;
+  PieceKind kind;
+};
+constexpr SkinPiece kRectPieces[10] = {
+    {0, 0, 16, 16, 0, 16, PieceKind::TopEdge},       {0, 16, 16, 16, 0, 16, PieceKind::BottomEdge},  {16, 0, 16, 16, 32, 0, PieceKind::LeftEdge},
+    {16, 16, 16, 16, 16, 16, PieceKind::RightEdge},  {32, 0, 48, 40, 64, 24, PieceKind::TopLeft},    {80, 0, 48, 40, 96, 24, PieceKind::TopRight},
+    {32, 40, 48, 40, 64, 56, PieceKind::BottomLeft}, {80, 40, 48, 40, 96, 56, PieceKind::BottomRight}, {0, 32, 32, 32, 0, 32, PieceKind::FillLeft},
+    {0, 32, 32, 32, 0, 32, PieceKind::FillRight}};
+constexpr float kSheetW = 128.0f, kSheetH = 96.0f;
+
+// One run of a piece along one axis: pixels p0..p1 from the piece's start show sheet texels t0..t1.
+struct Span {
+  float p0, p1, t0, t1;
+};
+// The runs of `count` texels from `first` on, `scale` pixels per texel. Through a tile window (`tiled`) the sheet coordinate wraps inside
+// origin .. origin + size. The PS1 rounds the texture coordinate of a pixel to the nearest texel, so texel k covers the pixels from
+// ceil(scale (k - 1/2)) on: two pixels wide it starts one pixel early, the piece's first texel shows half and the texel after the last one
+// fills the piece's last half texel.
+std::vector<Span> texel_spans(int first, int count, int origin, int size, bool tiled, float scale) {
+  auto sheet = [&](int k) { return tiled ? origin + (first + k) % size : first + k; };
+  auto edge = [&](int k) { return std::ceil(scale * (static_cast<float>(k) - 0.5f)); };
+  const float end = scale * static_cast<float>(count);
+  std::vector<Span> spans;
+  for (int k = 0; k <= count;) {
+    int last = k;
+    while (last < count && sheet(last + 1) == sheet(last) + 1) ++last;
+    const float p0 = std::max(0.0f, edge(k)), p1 = std::min(end, edge(last + 1));
+    if (p1 > p0)
+      spans.push_back({p0, p1, static_cast<float>(sheet(k)) + (p0 - edge(k)) / scale, static_cast<float>(sheet(k)) + (p1 - edge(k)) / scale});
+    k = last + 1;
+  }
+  return spans;
+}
+
 }  // namespace
+
+std::vector<WinQuad> build_skin_rect(float cx, float cy, int w, int h, float x_scale) {
+  std::vector<WinQuad> quads;
+  const int fill_w = (w + 8) / 2;
+  // The pieces are linked to the front of one draw list in table order, so the last one is drawn first.
+  for (int index = 9; index >= 0; --index) {
+    const SkinPiece& piece = kRectPieces[index];
+    // dx, dy: added to the base position; extra_w / extra_h: added to the sheet rectangle's size; shift: added to its u.
+    int dx = 0, dy = -4, extra_w = 0, extra_h = 0, shift = 0;
+    bool tiled = true;
+    switch (piece.kind) {
+      case PieceKind::TopLeft: tiled = false; break;
+      case PieceKind::TopRight: tiled = false, shift = -1, dx = w; break;
+      case PieceKind::BottomLeft: tiled = false, dy = h + 4; break;
+      case PieceKind::BottomRight: tiled = false, shift = -1, dx = w, dy = h + 4; break;
+      case PieceKind::TopEdge: extra_w = w - piece.w - 32, dx = 16; break;
+      case PieceKind::BottomEdge: extra_w = w - piece.w - 32, dx = 16, dy = h + 4; break;
+      case PieceKind::LeftEdge: extra_h = h - piece.h - 24, dy = 12; break;
+      case PieceKind::RightEdge: extra_h = h - piece.h - 24, dy = 12, shift = -1, dx = w; break;
+      case PieceKind::FillLeft: extra_w = fill_w - piece.w, extra_h = h - piece.h + 16, dx = -4, dy = -8; break;
+      case PieceKind::FillRight: extra_w = fill_w - piece.w, extra_h = h - piece.h + 16, shift = fill_w, dx = fill_w - 4, dy = -8; break;
+    }
+    const int x = dx + piece.u - piece.ox - w / 2, y = dy + piece.v - piece.oy - h / 2;
+    const int width = piece.w + extra_w, height = piece.h + extra_h;
+    if (width <= 0 || height <= 0) continue;
+    const int u0 = (piece.u + shift) & 0xFF;
+    const std::vector<Span> columns = texel_spans(u0, width, piece.u, piece.w, tiled, x_scale);
+    const std::vector<Span> rows = texel_spans(piece.v, height, piece.v, piece.h, tiled, 1.0f);
+    for (const Span& row : rows)
+      for (const Span& col : columns)
+        quads.push_back({cx + x_scale * static_cast<float>(x) + col.p0, cy + static_cast<float>(y) + row.p0, col.p1 - col.p0, row.p1 - row.p0, col.t0 / kSheetW,
+                         row.t0 / kSheetH, (col.t1 - col.t0) / kSheetW, (row.t1 - row.t0) / kSheetH});
+  }
+  return quads;
+}
 
 float skin_window_x(int skin) { return kRest[std::clamp(skin, 0, 15)]; }
 

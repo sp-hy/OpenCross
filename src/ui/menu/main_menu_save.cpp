@@ -339,12 +339,23 @@ void MainMenu::Impl::do_save() {
 void MainMenu::Impl::save_dial() {
   namespace sl = save_layout;
   const float brightness = save_phase == 0 ? 1.0f : 0.5f;
-  if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png"))
+  if (!texs.hd()) {
+    if (Tex* deco = texs.mesh("deco", 0x800, 0x800, 0x808080, true))
+      img_add = true, Img(deco, PX(sl::kPivotX + deco->ox), PY(sl::kPivotY + deco->oy), PX(deco->w), PY(deco->h), 0, 0, 1, 1, shade(kWhite, 0.25f * brightness)), img_add = false;
+  } else if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
     Img(deco, PX(sl::kDialX), PY(sl::kDialY), PX(sl::kDialW), PY(sl::kDialH), 0, 0, 1, 1, shade(rgb(172, 172, 182), brightness));
+  }
   Hand(sl::kPivotX, sl::kPivotY, hand_angle, brightness);
   const u32 line_colour = shade(rgb(200, 190, 190), brightness);
   const render::FaceId list_face = slot_face(mt_style(7, lang_index()).slot);
-  for (int entry = 0; entry < 2; ++entry) {
+  // Played from the discs the leader lines (frame 3) sit at the dial's centre and the labels (frames 0x6A / 0x6B) 3 rows above it.
+  if (!texs.hd()) {
+    Sprite(3, sl::kPivotX, 0x89, shade(kWhite, brightness));
+    for (int entry = 0; entry < 2; ++entry)
+      Sprite(0x6A + entry, sl::kPivotX, 0x86,
+             shade((entry == 0 && !can_save) ? ps1_colour(0x404040) : entry == top_cur ? ps1_colour(0x004E77) : kWhite, brightness));
+  }
+  for (int entry = 0; entry < (texs.hd() ? 2 : 0); ++entry) {
     const std::u32string label = capt(entry == 0 ? "\xE3\x82\xBB\xE3\x83\xBC\xE3\x83\x96" : "\xE3\x83\xAD\xE3\x83\xBC\xE3\x83\x89", entry == 0 ? "Save" : "Load");
     const u32 colour = shade((entry == 0 && !can_save) ? ps1_colour(0x404040) : entry == top_cur ? kSel : kText, brightness);
     HT(list_face, sl::kListX[entry], sl::kListY[entry], label, colour, sl::kListScale);
@@ -511,20 +522,28 @@ void MainMenu::Impl::build_save() {
         while (scale > 0.18f && text->measure(face_gn, str, scale) > PX(sl::kFileCapMaxW)) scale -= 0.01f;
       }
       text->prepare(face_gn, caption);
-      HT(face_gn, sl::kFileCapX, sl::caption_y(sl::kDetailY, scale), caption, kText, scale);
+      if (texs.hd()) HT(face_gn, sl::kFileCapX, sl::caption_y(sl::kDetailY, scale), caption, kText, scale);
     }
   } else {
     group(Left);
     Frame(82 + save_card - 1, sl::kGridX, sl::kGridY);
     // Caption tab: cmnmes "slot" in bn.
-    HT(face_gn, sl::kSlotCapX, sl::kSlotCapY, capt("slot", "Slot") + (save_card == 1 ? U" 1" : U" 2"), kText, sl::kSlotCapScale);
+    // Played from the discs the frames carry their own captions ("MEMORY CARD Slot N", "Block#", "Processing").
+    if (texs.hd()) HT(face_gn, sl::kSlotCapX, sl::kSlotCapY, capt("slot", "Slot") + (save_card == 1 ? U" 1" : U" 2"), kText, sl::kSlotCapScale);
     group(Centre);
     if (save_phase != 4) Frame(84, sl::kDetailX, sl::kDetailY);
     // Caption tab (bn): "File#" + the number + 1 of the cursor box's FILE, parsed from the CHRONOnn name; an
     // empty box shows no number; "File#  1" = CHRONO00, the auto-save.
-    if (cursor >= 0 && save_phase != 4)
+    if (cursor >= 0 && save_phase != 4 && texs.hd())
       HT(face_gn, sl::kFileCapX, sl::kFileCapY, capt("File#", "File#") + (cp.used ? utf32(sl::file_number(cp.slot)) : std::u32string()), kText,
          sl::kFileCapScale);
+    if (cursor >= 0 && save_phase != 4 && !texs.hd() && cp.used) {
+      const import::Ps1Font* disc_font = text->ps1_font(face_gn);
+      const float number_x = sl::block_number_x(disc_font && (disc_font->build() == import::Ps1Font::Build::Usa || disc_font->build() == import::Ps1Font::Build::UsaMenu));
+      const std::string number = padded_number(cp.slot + 1, 2);
+      for (size_t i = 0; i < number.size(); ++i)
+        if (number[i] != ' ') Sprite(21 + (number[i] - '0'), number_x + 8.0f * static_cast<float>(i), sl::kBlockNumY);
+    }
     group(Left);
     // Boxes: no fill (the parchment shows); icon only when the box holds a file.
     int max_n = 0;
@@ -552,7 +571,8 @@ void MainMenu::Impl::build_save() {
   // frame 0x55 and an empty frame 0x56.
   if (save_phase == 4) {
     Frame(81, sl::kProgressX, sl::kProgressY);
-    HT(face_gn, sl::kProgressX + sl::kProgressCapDx, sl::caption_y(sl::kProgressY, sl::kSlotCapScale), capt("process", "Progress"), kText, sl::kSlotCapScale);
+    if (texs.hd())
+      HT(face_gn, sl::kProgressX + sl::kProgressCapDx, sl::caption_y(sl::kProgressY, sl::kSlotCapScale), capt("process", "Progress"), kText, sl::kSlotCapScale);
     Frame(85, sl::kTopMsgX, sl::kTopMsgY);
     HLfit(sl::kTopMsgInkX, sl::kTopMsgInkY, utf32(msg), sl::kMsgWidth, sl::kMsgScale);
     Frame(86, sl::kMsgX, sl::kMsgY);
@@ -613,8 +633,8 @@ void MainMenu::Impl::build_save() {
   HN(sl::kTimeRight, sl::kTimeY, tb, kText, sl::kNumScale);
   HN(sl::kGoldRight, sl::kGoldY, gold, kText, sl::kNumScale);
   HL(sl::kGoldUnitX, sl::kGoldY, U"G", kText, sl::kGoldUnitScale);
-  if (!ln.first.empty()) HLfit(sl::kLocX, sl::kLocY1, utf32(ln.first), 250, sl::kLocScale);
-  if (!ln.second.empty()) HLfit(sl::kLocX, sl::kLocY2, utf32(ln.second), 250, sl::kLocScale);
+  if (!ln.first.empty()) HLfit(sl::kLocX, ps1_text() ? sl::kLocY1Ps1 : sl::kLocY1, utf32(ln.first), 250, sl::kLocScale);
+  if (!ln.second.empty()) HLfit(sl::kLocX, ps1_text() ? sl::kLocY2Ps1 : sl::kLocY2, utf32(ln.second), 250, sl::kLocScale);
 }
 
 }  // namespace oc::ui

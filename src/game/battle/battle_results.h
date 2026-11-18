@@ -7,7 +7,9 @@
 // is hurt and the grids still hold unused healing elements] -> spoils -> exit (black fade, panels slide out).
 // The heal menu changes only party HP: the host reads it back with take_final_hp() after done() and writes it over the
 // HP that apply_battle_result stored (the HP gain of the growth is added to the current HP here, as are the heals). Both art modes draw the same btlexit-levu / btend PNGs;
-// original art only swaps the font files (small_font_*) and the portrait folder (hd/battle/face/1999).
+// original art only swaps the font files (small_font_*) and the portrait folder (hd/battle/face/1999). Played from the PS1 discs (no hd
+// archive) the screen is the PS1's own: battle/btend.prd's sheets at the PS1's coordinates, the battle/face portraits and the messages of
+// battle/data/exdat.dat in the PS1 font.
 //
 //   BattleResults results;  results.init(ctx, vfs, sprites, tables, lang);  results.set_sfx(fn);
 //   if (results.open(battle, scene_id)) { per frame: results.update(dt, input); results.draw(frame, vw, vh); until results.done(); }

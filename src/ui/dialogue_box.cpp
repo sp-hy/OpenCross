@@ -33,7 +33,14 @@ u32 text_color(u8 idx, u32 alpha) {
 // The PS1 font in a message window: the field screen's 320 pixels across the 1280-unit canvas and its 216 lines down the 960 units, so a
 // font pixel is 4 units wide and 960 / 216 high. Default text is white (the sprite colour 0x80 on the glyph's full texel).
 constexpr float kPs1MessageAspect = kCanvasHeight / 216.0f / 4.0f;
-u32 ps1_text_color(u8 idx, u32 alpha) { return idx <= 1 ? pack_rgba(255, 255, 255, static_cast<u8>(alpha)) : text_color(idx, alpha); }
+// The PS1's colour code table, sprite colours with 0x80 = 1.0: white, blue, cyan, magenta, green, yellow, red, white, grey (8: USA).
+u32 ps1_text_color(u8 idx, u32 alpha) {
+  static const u8 table[9][3] = {{0x80, 0x80, 0x80}, {0x00, 0x00, 0x80}, {0x00, 0x80, 0x80}, {0x80, 0x00, 0x80}, {0x00, 0x80, 0x00},
+                                 {0x80, 0x80, 0x00}, {0x80, 0x00, 0x00}, {0x80, 0x80, 0x80}, {0x46, 0x46, 0x46}};
+  const u8* entry = table[idx < 9 ? idx : 0];
+  auto channel = [](u8 value) { return static_cast<u8>(std::min(255, value * 2)); };
+  return pack_rgba(channel(entry[0]), channel(entry[1]), channel(entry[2]), static_cast<u8>(alpha));
+}
 
 // Per-skin tile UVs of the message frame (skin =texture index 0..15 = w01..w15, w17).
 struct SkinUv {
@@ -120,7 +127,8 @@ bool DialogueBox::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spr
   if (!white_.create(ctx, 1, 1, render::TextureFormat::Rgba8, white)) return false;
   white_set_ = render::TexRef(white_, nearest_);
   (void)skin;
-  if (!load_skin(3)) log::warn("dialogue: window skin not found (no frame drawn)");
+  // The box starts in HD mode; without an hd archive set_mode() loads the disc skin, so only a missing HD skin is worth a warning.
+  if (!load_skin(3) && vfs.has_archive("hd")) log::warn("dialogue: window skin not found (no frame drawn)");
   return static_cast<bool>(white_set_);
 }
 
@@ -166,7 +174,7 @@ bool DialogueBox::skin_current(int index) const {
 
 void DialogueBox::set_mode(ArtMode mode) {
   mode_ = mode;
-  if (!skin_current(skin_idx_)) load_skin(skin_idx_);
+  if (!skin_current(skin_idx_) && !load_skin(skin_idx_)) log::warn("dialogue: window skin not found (no frame drawn)");
   refresh_face();
 }
 
@@ -974,6 +982,9 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
     impl.last_speaker = li.speaker;
   }
   import::TextContext tctx = tables_.make_context(lang);
+  // The USA discs' text rules (case, name suffixes, Zoah's capitals) apply to their own text only.
+  tctx.usa_rules = tables_.from_disc() && lang != import::Lang::Jp;
+  tctx.speaker = impl.last_speaker;
   if (party_name) {
     auto base = tctx.party_name;
     tctx.party_name = [this, base](int slot) {
@@ -1002,6 +1013,17 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
     };
   }
   import::Message flat = import::flatten(msg, tctx);
+  // Played from the PS1 discs a button code is text: the name of the button the function is assigned to ("○ button", the
+  // executable's table of the eight button names). The codes past the four functions keep their glyph.
+  if (tables_.from_disc())
+    for (import::Token& token : flat.tokens) {
+      if (token.kind != import::TokKind::Button || token.arg < 0 || token.arg > 3) continue;
+      const int source = platform::map_source(platform::active_map(), token.arg);
+      if (const std::string* name = tables_.sysmes(0x1Bu << 16 | static_cast<u32>(source), lang); name && !name->empty()) {
+        token.kind = import::TokKind::Text;
+        token.text = import::utf8_to_u32(*name);
+      }
+    }
   impl.plain.clear();
   for (const import::Token& token : flat.tokens)
     if (token.kind == import::TokKind::Text) impl.plain += import::u32_to_utf8(token.text);

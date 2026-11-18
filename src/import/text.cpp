@@ -431,8 +431,24 @@ Message flatten(const Message& message, const TextContext& ctx) {
   builder.msg.source = message.source;
   int case_mode = 0;
   bool hide = false;
+  // USA rules: the pending name suffix (1 y, 2 i).
+  int suffix = 0;
+  constexpr int kZoah = 8, kLeah = 35;
+  if (ctx.usa_rules && ctx.speaker == kZoah) case_mode = 2;
+  auto usa_upper = [](char32_t ch) -> char32_t {
+    if (ch >= U'a' && ch <= U'z') return ch - 0x20;
+    if (ch == 0xE4 || ch == 0xEB || ch == 0xEF || ch == 0xF6 || ch == 0xFC) return ch - 0x20;
+    return ch;
+  };
   auto emit = [&](std::u32string text) {
     if (text.empty()) return;
+    if (ctx.usa_rules) {
+      if (case_mode == 1) text[0] = usa_upper(text[0]), case_mode = 0;
+      else if (case_mode == 2)
+        for (char32_t& ch : text) ch = usa_upper(ch);
+      builder.run += text;
+      return;
+    }
     if (case_mode == 1 && !text.empty()) {
       text[0] = (text[0] < 0x80) ? static_cast<char32_t>(std::toupper(static_cast<int>(text[0]))) : text[0];
       case_mode = 0;
@@ -448,6 +464,15 @@ Message flatten(const Message& message, const TextContext& ctx) {
     if (name.empty()) {
       for (const char* ch = fallback; *ch; ++ch) name.push_back(static_cast<char32_t>(*ch));
     }
+    if (suffix && ctx.usa_rules) {
+      if (name.size() > 6) name.resize(6);
+      const char32_t last = name.empty() ? 0 : name.back();
+      if (last != U'I' && last != U'Y' && last != U'i' && last != U'y') {
+        const bool capital = last >= U'A' && last <= U'Z';
+        name.push_back(suffix == 1 ? (capital ? U'Y' : U'y') : (capital ? U'I' : U'i'));
+      }
+      suffix = 0;
+    }
     return name;
   };
   for (const Token& token : message.tokens) {
@@ -461,6 +486,10 @@ Message flatten(const Message& message, const TextContext& ctx) {
         const char* tag = speaker_tag(token.arg);
         std::u32string name = named(ctx.speaker_name, token.arg, tag ? tag : "?");
         if (token.arg2 > 0 && static_cast<size_t>(token.arg2) < name.size()) name.resize(static_cast<size_t>(token.arg2));
+        if (ctx.usa_rules) {
+          emit(std::move(name));
+          break;
+        }
         // A case code in front of a name has no effect.
         case_mode = 0;
         builder.run += name;
@@ -476,9 +505,14 @@ Message flatten(const Message& message, const TextContext& ctx) {
         emit(std::u32string(digits.begin(), digits.end()));
         break;
       }
-      case TokKind::Case: case_mode = (token.arg == 1 || token.arg == 2) ? token.arg : 0; break;
+      case TokKind::Case:
+        if (!ctx.usa_rules) case_mode = (token.arg == 1 || token.arg == 2) ? token.arg : 0;
+        else if (case_mode != 2) case_mode = token.arg == 3 ? (ctx.speaker == kLeah ? 1 : case_mode) : token.arg;
+        break;
       case TokKind::HideName: hide = true; break;
       case TokKind::Suffix:
+        if (ctx.usa_rules) suffix = token.arg;
+        break;
       case TokKind::Accent:
         // No display form.
         break;

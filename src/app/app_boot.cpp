@@ -24,8 +24,9 @@ namespace oc::app {
 
 namespace {
 
-// Uploads ui/background.png from the install; leaves `texture` empty if the file is missing.
+// Uploads ui/background.png from the install; leaves `texture` empty if the file is missing (always on the PS1 discs).
 bool load_test_image(const vfs::Vfs& files, render::GpuContext& ctx, render::Texture& texture) {
+  if (!files.has_archive("ui")) return false;
   auto bytes = files.read("ui/background.png");
   if (!bytes) {
     log::warn("ui/background.png not found in the install");
@@ -484,7 +485,7 @@ void App::init_menus() {
     key_popup_ok = key_popup.init(ctx, files, sprites, menu_text);
     // RDE pause screen (Start / P): colour filter + PAUSE bar + Vibration / World Names rows.
     pause_ok = pause_screen.init(ctx, files, sprites, menu_text);
-    feature_icons_ok = feature_icons.init(ctx, files, sprites);
+    feature_icons_ok = feature_icons.init(ctx, files, sprites, menu_text);
     world_name_ok = world_name.init(ctx, files, sprites);
     // The Tele-Porter's "Current Party" screen.
     party_ok = party_screen.init(ctx, files, sprites, menu_text, lang);
@@ -609,8 +610,11 @@ void App::init_title() {
 void App::init_start_state() {
   if (world_ok && config.debug_battle < 0) {
     if (flow_ready) {
-      if (!flow_enabled) flow.machine().new_game(U"Serge", false);
-      else if (*flow_start == game::FlowState::Opening) flow.machine().new_game(U"Serge");
+      // The hero's default name in the game's language (the disc's own on the PS1 discs).
+      std::u32string hero = name_tables.default_name(0, lang);
+      if (hero.empty()) hero = U"Serge";
+      if (!flow_enabled) flow.machine().new_game(hero, false);
+      else if (*flow_start == game::FlowState::Opening) flow.machine().new_game(hero);
       world.set_game_state(&flow.game_state());
     }
     if (sweeping) {

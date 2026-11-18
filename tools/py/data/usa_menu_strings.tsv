@@ -1,8 +1,9 @@
 # RDE menu / shop string keys (the JP overlay address) -> USA menu message: index in the 'mess' entry of
 # menu/menutest.prd and the line / tab segment holding the same English text (cc_text.py usa-menu).
 # match: exact = the whole message, segment = one line or tab field of it, contained = inside a longer segment.
-# columns: table	key	mess	segment	match
-menutest	0x801F2798	129	0	contained
+# start / length (contained only): the characters of the segment that hold the text.
+# columns: table	key	mess	segment	match	start	length
+menutest	0x801F2798	129	0	contained	8	18
 menutest	0x801F27A0			none
 menutest	0x801F27B0	131		exact
 menutest	0x801F27D0	134	0	segment
@@ -26,16 +27,16 @@ menutest	0x801F2BD8	11	2	segment
 menutest	0x801F2BE0			none
 menutest	0x801F2C18			none
 menutest	0x801F2CA4			none
-menutest	0x801F2CDC	40	1	contained
-menutest	0x801F2CF8	40	2	contained
+menutest	0x801F2CDC	40	1	contained	12	6
+menutest	0x801F2CF8	40	2	contained	12	6
 menutest	0x801F2D14			none
 menutest	0x801F2D30			none
 menutest	0x801F2E08			none
-menutest	0x801F2E78	46	0	contained
+menutest	0x801F2E78	46	0	contained	0	5
 menutest	0x801F2ECD			none
 menutest	0x801F2ECE			none
 menutest	0x801F2EE0			none
-menutest	0x801F2F1C	50	0	contained
+menutest	0x801F2F1C	50	0	contained	0	7
 menutest	0x801F2F38	132		exact
 menutest	0x801F2F74	133		exact
 menutest	0x801F2FA4			none
@@ -69,9 +70,9 @@ menutest	0x801F492C	76		exact
 menutest	0x801F4960	75		exact
 menutest	0x801F4994	76		exact
 menutest	0x801F49C8	77	0	segment
-menutest	0x801F49E2	77	1	contained
-menutest	0x801F49FC	77	2	contained
-menutest	0x801F4A16	77	3	contained
+menutest	0x801F49E2	77	1	contained	6	28
+menutest	0x801F49FC	77	2	contained	6	12
+menutest	0x801F4A16	77	3	contained	6	28
 menutest	0x801F4A30	171		exact
 menutest	0x801F4A33	172		exact
 menutest	0x801F4A36	173		exact
@@ -96,7 +97,7 @@ menutest	0x801F4B78	84	2	segment
 menutest	0x801F4B8A	89	0	segment
 menutest	0x801F4BAE	89	1	segment
 menutest	0x801F4BC0	89	2	segment
-menutest	0x801F4BD2	88	0	contained
+menutest	0x801F4BD2	88	0	contained	7	7
 menutest	0x801F4BE4	88	1	segment
 menutest	0x801F4BF6	88	2	segment
 menutest	0x801F4C08			none
@@ -108,7 +109,7 @@ menutest	0x801F4CAA	127		exact
 menutest	0x801F4CBC	84	1	segment
 menutest	0x801F4CCE			none
 menutest	0x801F4CE0			none
-menutest	0x801F4CF2	108	0	contained
+menutest	0x801F4CF2	108	0	contained	7	12
 menutest	0x801F4D04	110		exact
 menutest	0x801F4D16	111		exact
 menutest	0x801F4D28			none
@@ -124,26 +125,26 @@ menutest	0x801F4DCA			none
 menutest	0x801F4DDC			none
 menutest	0x801F4DEE			none
 menutest	0x801F4E00			none
-menutest	0x801F4E24	10	0	contained
+menutest	0x801F4E24	10	0	contained	0	6
 menutest	0x801F4E36			none
 menutest	0x801F4E48			none
 menutest	0x801F4E6C			none
 menutest	0x801F4E7E			none
-menutest	0x801F4EA4	92	0	contained
-menutest	0x801F4EB8	93	0	contained
-menutest	0x801F4ECC	94	0	contained
-menutest	0x801F4EE0	95	0	contained
-menutest	0x801F4EF4	96	0	contained
+menutest	0x801F4EA4	92	0	contained	1	11
+menutest	0x801F4EB8	93	0	contained	1	11
+menutest	0x801F4ECC	94	0	contained	1	9
+menutest	0x801F4EE0	95	0	contained	1	12
+menutest	0x801F4EF4	96	0	contained	1	17
 menutest	0x801F4F08			none
-menutest	0x801F4F1C	98	0	contained
-menutest	0x801F4F30	99	0	contained
-menutest	0x801F4F44	100	0	contained
-menutest	0x801F4F58	101	0	contained
+menutest	0x801F4F1C	98	0	contained	1	15
+menutest	0x801F4F30	99	0	contained	1	15
+menutest	0x801F4F44	100	0	contained	1	17
+menutest	0x801F4F58	101	0	contained	1	10
 menutest	0x801F4F6C			none
-menutest	0x801F4F80	103	0	contained
-menutest	0x801F4F94	104	0	contained
-menutest	0x801F4FA8	105	0	contained
-menutest	0x801F4FBC	106	0	contained
+menutest	0x801F4F80	103	0	contained	1	15
+menutest	0x801F4F94	104	0	contained	1	13
+menutest	0x801F4FA8	105	0	contained	1	20
+menutest	0x801F4FBC	106	0	contained	1	16
 menutest	0x801E8E18	91		exact
 shopmenu	0x801DF40C	148		exact
 shopmenu	0x801DF424	0		exact
@@ -154,8 +155,8 @@ shopmenu	0x801DF4D5	1		exact
 shopmenu	0x801DF4D6	3		exact
 shopmenu	0x801DF4E5	2		exact
 shopmenu	0x801DF4E6	4		exact
-shopmenu	0x801DF538	10	1	contained
-shopmenu	0x801DF540	5	1	contained
+shopmenu	0x801DF538	10	1	contained	13	5
+shopmenu	0x801DF540	5	1	contained	14	9
 shopmenu	0x801DF54C	143		exact
 shopmenu	0x801DF558	154		exact
 shopmenu	0x801DF560	151		exact
@@ -223,7 +224,7 @@ shopmenu	0x801DF985	30		exact
 shopmenu	0x801DF99C	32		exact
 shopmenu	0x801DF9E5	37		exact
 shopmenu	0x801DFAC8	146		exact
-shopmenu	0x801DFAD0	10	1	contained
+shopmenu	0x801DFAD0	10	1	contained	13	5
 shopmenu	0x801DFAD8	142		exact
 shopmenu	0x801DFAE4	143		exact
 shopmenu	0x801DFAF0	144		exact

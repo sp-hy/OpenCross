@@ -75,6 +75,8 @@ class FlowMachine {
   FlowState state() const { return state_; }
   void start(FlowState state) { state_ = state; }
   bool has_saves() const { return has_saves_; }
+  // Played from the PS1 discs: the disc's name rules (import::load_name_menu) for on_name; null = RDE's.
+  void set_name_rules(std::shared_ptr<const import::NameMenuText> disc) { name_rules_ = std::move(disc); }
 
   // ---- events
   // Title -> NameEntry / SlotSelect; Settings / Quit actions.
@@ -143,6 +145,7 @@ class FlowMachine {
   bool vibration_ = false;
   import::Lang lang_ = import::Lang::En;
   bool has_saves_ = false;
+  std::shared_ptr<const import::NameMenuText> name_rules_;
   const data::GameTables* tables_ = nullptr;
   const ui::GameFontCodec* codec_ = nullptr;
   ui::MenuRules rules_;

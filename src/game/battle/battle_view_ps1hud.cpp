@@ -19,7 +19,6 @@ using namespace bv;
 namespace {
 
 constexpr float kRowScale = kCanvasH / 216.0f;
-constexpr int kAtlasW = 1024;
 
 // Sheet types (import::kHudSheetNames).
 constexpr int kSheetFont = 0x04, kSheetGrid = 0x08, kSheetDigits = 0x10, kSheetPanel = 0x74, kSheetStatus = 0x78,
@@ -57,7 +56,7 @@ render::DecodedImage upscaled(const import::HudFrame& frame, int factor, Keep ke
 }  // namespace
 
 void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
-  for (std::vector<SheetFrame>& frames : sheet_frames_) frames.clear();
+  sheet_frames_.clear();
   auto prd = vfs.read("cdrom/battle/battle.prd");
   auto prg = vfs.read("cdrom/prog/battle.prg");
   // The USA build's font width record is there only on its discs.
@@ -70,47 +69,13 @@ void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
     return;
   }
   name_advance_ = art->name_advance;
-  // Shelf packing in sheet order, one transparent texel between frames.
-  int pen_x = 0, pen_y = 0, shelf = 0;
-  struct Placed {
-    const import::HudFrame* frame;
-    int x, y;
-  };
-  std::vector<Placed> placed;
-  for (size_t sheet = 0; sheet < art->sheets.size(); ++sheet)
-    for (const import::HudFrame& frame : art->sheets[sheet]) {
-      if (frame.w <= 0 || frame.h <= 0) continue;
-      if (pen_x + frame.w + 1 > kAtlasW) pen_x = 0, pen_y += shelf, shelf = 0;
-      placed.push_back({&frame, pen_x, pen_y});
-      pen_x += frame.w + 1;
-      shelf = std::max(shelf, frame.h + 1);
-    }
-  const int atlas_h = std::max(1, pen_y + shelf);
-  std::vector<u8> semi(static_cast<size_t>(kAtlasW) * static_cast<size_t>(atlas_h) * 4, 0), opaque(semi.size(), 0);
-  size_t next = 0;
-  for (size_t sheet = 0; sheet < art->sheets.size(); ++sheet)
-    for (const import::HudFrame& frame : art->sheets[sheet]) {
-      SheetFrame out;
-      if (frame.w > 0 && frame.h > 0) {
-        const Placed& at = placed[next++];
-        out = {frame.x, frame.y, frame.w, frame.h, static_cast<float>(at.x) / kAtlasW, static_cast<float>(at.y) / static_cast<float>(atlas_h),
-               static_cast<float>(at.x + frame.w) / kAtlasW, static_cast<float>(at.y + frame.h) / static_cast<float>(atlas_h)};
-        for (int y = 0; y < frame.h; ++y)
-          for (int x = 0; x < frame.w; ++x) {
-            const u8* texel = &frame.rgba[(static_cast<size_t>(y) * static_cast<size_t>(frame.w) + static_cast<size_t>(x)) * 4];
-            if (texel[3] == 0) continue;
-            std::vector<u8>& dst = texel[3] == import::kStpAlpha ? semi : opaque;
-            u8* pixel = &dst[(static_cast<size_t>(at.y + y) * kAtlasW + static_cast<size_t>(at.x + x)) * 4];
-            pixel[0] = texel[0], pixel[1] = texel[1], pixel[2] = texel[2], pixel[3] = 255;
-          }
-      }
-      sheet_frames_[sheet].push_back(out);
-    }
-  for (auto [tex, rgba] : {std::pair{&sheet_semi_, &semi}, std::pair{&sheet_opaque_, &opaque}}) {
-    if (!tex->tex.create(*ctx_, kAtlasW, static_cast<u32>(atlas_h), render::TextureFormat::Rgba8, rgba->data())) continue;
+  SheetAtlas atlas = pack_sheets(art->sheets);
+  sheet_frames_ = std::move(atlas.frames);
+  for (auto [tex, rgba] : {std::pair{&sheet_semi_, &atlas.semi}, std::pair{&sheet_opaque_, &atlas.opaque}}) {
+    if (!tex->tex.create(*ctx_, static_cast<u32>(atlas.width), static_cast<u32>(atlas.height), render::TextureFormat::Rgba8, rgba->data())) continue;
     tex->set = render::TexRef(tex->tex, nearest_);
-    tex->w = kAtlasW;
-    tex->h = static_cast<float>(atlas_h);
+    tex->w = static_cast<float>(atlas.width);
+    tex->h = static_cast<float>(atlas.height);
   }
   auto upload = [&](Tex& tex, const render::DecodedImage& img) {
     if (img.width == 0 || !tex.tex.create(*ctx_, img.width, img.height, render::TextureFormat::Rgba8, img.rgba.data())) return;
@@ -129,6 +94,11 @@ void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
     const render::DecodedImage digits = upscaled(art->digits, kHd, [](u8 a) { return a != 0; });
     upload(hud_[kHDigits], digits);
     digit_x_ = column_ink_runs(digits.rgba, digits.width, digits.height);
+    // The disc's "miss!" has its letters apart: every run after the ten digits belongs to that one glyph.
+    if (digit_x_.size() > 11) {
+      digit_x_[10].second = digit_x_.back().second;
+      digit_x_.resize(11);
+    }
     if (digit_x_.size() != 11) digit_x_.clear();
   }
   constexpr int kCursorFrames = 4;
@@ -175,23 +145,23 @@ void BattleView::add_sheet_at(int type, int frame, float left, float top, u32 co
   add_sheet(type, frame, left - static_cast<float>(f.x), top - static_cast<float>(f.y), colour, mode);
 }
 
-// The battle font's frames: 101.. the digits, 111.. A-Z, 137 / 138 / 139 / 140 = / ' + -, 149.. a-z; the kana and kanji follow the
-// Japanese text codes from 0x76 on (frame = code - 0x6B).
+void BattleView::add_sheet_cut(int type, int frame, int dx, int dy, int w, int h, float left, float top) {
+  const size_t sheet = static_cast<size_t>(type / 4);
+  if (type < 0 || sheet >= sheet_frames_.size() || frame < 1 || static_cast<size_t>(frame) > sheet_frames_[sheet].size()) return;
+  const SheetFrame& picture = sheet_frames_[sheet][static_cast<size_t>(frame - 1)];
+  const int cut_x = std::max(dx - picture.x, 0), cut_y = std::max(dy - picture.y, 0);
+  const int cut_w = std::min(w, picture.w - cut_x), cut_h = std::min(h, picture.h - cut_y);
+  if (cut_w <= 0 || cut_h <= 0) return;
+  const float du = (picture.u1 - picture.u0) / static_cast<float>(picture.w), dv = (picture.v1 - picture.v0) / static_cast<float>(picture.h);
+  const float u0 = picture.u0 + du * static_cast<float>(cut_x), v0 = picture.v0 + dv * static_cast<float>(cut_y);
+  const float u1 = u0 + du * static_cast<float>(cut_w), v1 = v0 + dv * static_cast<float>(cut_h);
+  for (const Tex* tex : {&sheet_semi_, &sheet_opaque_})
+    add_img(*tex, left * kPs1Px, top * kRowScale, static_cast<float>(cut_w) * kPs1Px, static_cast<float>(cut_h) * kRowScale, u0, v0, u1, v1, col(255, 255, 255));
+}
+
 int BattleView::sheet_glyph(char32_t ch) const {
-  if (ch >= U'0' && ch <= U'9') return static_cast<int>(ch - U'0') + 101;
-  if (ch >= U'A' && ch <= U'Z') return static_cast<int>(ch - U'A') + 111;
-  if (ch >= U'a' && ch <= U'z') return static_cast<int>(ch - U'a') + 149;
-  switch (ch) {
-    case U'\'': return 138;
-    case U'+': return 139;
-    case U'-': return 140;
-    case U'/': return 137;
-    default: break;
-  }
-  const int index = glyph_codes_.index_for(ch);
-  const int frame = index + 0x20 - 0x6B;
-  const std::vector<SheetFrame>& font = sheet_frames_[kSheetFont / 4];
-  return index >= 0 && frame >= 11 && static_cast<size_t>(frame) <= font.size() ? frame : 0;
+  constexpr size_t kFont = kSheetFont / 4;
+  return font_frame(ch, glyph_codes_, kFont < sheet_frames_.size() ? sheet_frames_[kFont].size() : 0);
 }
 
 float BattleView::add_sheet_name(std::u32string_view text, float x, float y, u32 colour, int max_glyphs) {
@@ -338,7 +308,8 @@ void BattleView::ps1_party_panels() {
 }
 
 // The target info window (sheet 0x74 frame 3 at (6, 165), its body subtracted): the name (or the side label) in the battle font on
-// line 0xA9, centred on x 0x37 (the Japanese glyphs 10 px apart from (9 - n) x 5 + 10); "HP" (sheet 0x10 frame 12) at (10, 0xB3) and "/"
+// line 0xA9, the Japanese one centred on x 0x37 (at most 11 glyphs 10 px apart from (9 - n) x 5 + 10, the letter after "・"), the USA one
+// from x 10 (at most 15 glyphs at their widths, the letter after a space); "HP" (sheet 0x10 frame 12) at (10, 0xB3) and "/"
 // (frame 11) at (0x37, 0xBB); a known HP in the HP colour, the current value's last six digits in 8 px slots from x 5 (leading zeros left
 // out) and the maximum from 0x3F, else "?" (battle font frame 5) four times from 0x1F and from 0x3F, 6 px apart; from sheet 0x7C the
 // sex mark (frame 1 / 2) at (0x1E, 0xC5), "INNATE:" (frame 3) at (0x30, 0xC6) and the innate colour's dot at (0x48, 0xC5), a colour
@@ -355,20 +326,18 @@ void BattleView::ps1_target_info(int unit, const std::u32string& side) {
     name = import::utf8_to_u32(tu.name);
     if (!tu.pc && tu.letter != 0 && brain_.vm() && brain_.vm()->menu_entry100()) {
       const char32_t letter = static_cast<char32_t>(U'A' + tu.letter - 1);
-      name += jp ? std::u32string(U"・") + static_cast<char32_t>(letter - U'A' + U'Ａ') : std::u32string(U"-") + letter;
+      name += jp ? std::u32string(U"・") + static_cast<char32_t>(letter - U'A' + U'Ａ') : std::u32string(U" ") + letter;
     }
   }
-  if (name.size() > 11) name.resize(11);
   if (jp) {
+    if (name.size() > 11) name.resize(11);
     float x = static_cast<float>((9 - static_cast<int>(name.size())) * 5);
     for (char32_t ch : name) {
       x += 10;
       if (const int frame = sheet_glyph(ch)) add_sheet(kSheetFont, frame, x, 0xA9);
     }
   } else {
-    float width = 0;
-    for (char32_t ch : name) width += static_cast<float>(name_advance_[static_cast<size_t>(sheet_glyph(ch))]);
-    add_sheet_name(name, std::floor(0x37 - width * 0.5f), 0xA9, 0x808080, 11);
+    add_sheet_name(name, 10, 0xA9, 0x808080, 15);
   }
   if (!side.empty() || !(tu.pc || (tu.lo & 0x400u))) return;
   add_sheet(kSheetDigits, 12, 10, 0xB3);

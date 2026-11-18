@@ -36,7 +36,16 @@ bool FieldWorld::init(const vfs::Vfs& files, render::GpuContext& ctx, render::Sp
   if (const char* env = std::getenv("OC_STUCK_TICKS"); env && std::atoi(env) > 0) watchdog_.stuck_limit = static_cast<u32>(std::atoi(env));
   install_name_hooks();
   discs_.load(files);
-  if (auto exe = files.read("cdrom/prog/slps_023.64"); !exe || !exe_strings_.load(*exe)) log::warn("field: executable strings unavailable");
+  exe_build_ = nullptr;
+  if (auto exe = files.read("cdrom/prog/slps_023.64")) exe_build_ = import::load_exe_strings(*exe, exe_strings_);
+  if (!exe_build_) log::warn("field: executable strings unavailable");
+  usa_widths_.clear();
+  grammar_columns_.clear();
+  if (exe_build_ && exe_build_->charset == import::Ps1Charset::UsaGlyphs)
+    if (auto widths = files.read("cdrom/#record/02059"); widths && widths->size() == 256) usa_widths_ = std::move(*widths);
+  if (exe_build_ && exe_build_->grammar_columns)
+    if (auto prg = files.read(exe_build_->grammar_columns); prg && prg->size() >= exe_build_->grammar_columns_offset + 50)
+      grammar_columns_.assign(prg->begin() + exe_build_->grammar_columns_offset, prg->begin() + exe_build_->grammar_columns_offset + 50);
   ctx_ = &ctx;
   sprites_ = &sprites;
   meshes_ = &meshes;

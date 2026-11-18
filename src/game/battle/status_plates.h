@@ -3,6 +3,7 @@
 // order. Each plate is a colour triangle and the status name. Plate n of the column sits at y = 50 + 12 (n % 9) in column n / 9; the right
 // column (the active PC's, top menu) starts at x 248 and continues at 210, the left one (the target cursor unit's) at 16 and 54.
 #include <array>
+#include <bit>
 #include <vector>
 
 #include "core/types.h"
@@ -51,5 +52,8 @@ inline std::vector<Placed> place(u32 lo, bool right) {
   }
   return out;
 }
+
+// Played from the PS1 discs: the plate's frame of the battle status sheet (0x78): 7 + the bit's rank among the bits that have one.
+inline int sheet_frame(u32 bit) { return 7 + std::popcount(0x33377339u & (bit - 1)); }
 
 }  // namespace oc::game::bstat

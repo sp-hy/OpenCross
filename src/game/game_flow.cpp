@@ -116,7 +116,7 @@ void FlowMachine::set_language(import::Lang lang) {
 }
 
 void FlowMachine::new_game(std::u32string_view name, bool opening_party) {
-  const std::u32string v = ui::validate_name(name);
+  const std::u32string v = ui::validate_name(name, name_rules_.get());
   custom_names_.clear();
   custom_names_[0] = v.empty() ? std::u32string(name) : v;
   gs_ = ui::GameState(new_game_slot(tables_, codec_, custom_names_[0], seed_, opening_party), &rules_);
@@ -145,7 +145,7 @@ FlowAction FlowMachine::on_title(ui::TitleChoice choice) {
 FlowAction FlowMachine::on_name(std::u32string_view name) {
   FlowAction action;
   if (state_ != FlowState::NameEntry) return action;
-  const std::u32string validated = ui::validate_name(name);
+  const std::u32string validated = ui::validate_name(name, name_rules_.get());
   if (validated.empty()) return action;
   new_game(validated);
   state_ = FlowState::Opening;
@@ -326,6 +326,8 @@ void GameFlow::enter_name() {
   setup.mode = mode_;
   setup.default_name = lang_tables_.default_name(0, lang_);
   setup.glyphs = &kit_.glyphs();
+  if (!kit_.vfs().has_archive("hd")) setup.disc = import::load_name_menu(kit_.vfs());
+  machine_.set_name_rules(setup.disc);
   name_.begin(setup);
 }
 
@@ -343,6 +345,7 @@ void GameFlow::begin_rename(int char_id, bool guide) {
   const auto& cn = machine_.custom_names();
   if (auto it = cn.find(char_id); it != cn.end()) setup.initial = it->second;
   setup.glyphs = &kit_.glyphs();
+  if (!kit_.vfs().has_archive("hd")) setup.disc = import::load_name_menu(kit_.vfs());
   name_.begin(setup);
 }
 
@@ -729,6 +732,11 @@ void GameFlow::draw(const render::Frame& frame, float vw, float vh, bool resume)
 
 void GameFlow::begin_boot_logo() {
   if (!ready_) return;
+  // The PS1 discs have no boot logo: the game starts with its own logo movie.
+  if (!kit_.vfs().has_archive("ui")) {
+    boot_logo_.begin(0);
+    return;
+  }
   // Japanese loads notice.png, else logo.png; the Japanese sequence swaps in notice2.png at counter 180 and logo.png at 360.
   static const char* const kJa[3] = {"ui/notice.png", "ui/notice2.png", "ui/logo.png"};
   static const char* const kOther[1] = {"ui/logo.png"};

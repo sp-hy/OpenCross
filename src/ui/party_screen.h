@@ -8,7 +8,9 @@
 // map/window/w17.tim in both modes, so they are invisible), the mostly transparent HD backdrop
 // hd/menu/shapes/memmenu.png / memmenu2.png with the window lines, portraits hd/face/<set>/<name>.png, the cursor
 // hd/menu/memmenu_cur.png, memmenu2's arrow hd/menu/memmenu2_cur.png and the PC text (memmenu.txt, cmnmes). Original art swaps
-// only the font files (small_font_*) and the face folder (1999).
+// only the font files (small_font_*) and the face folder (1999). Played from the PS1 discs the screen draws the PS1's own art: the w17
+// windows (ui::build_skin_rect), the fmenu.tim words and digits placed by the overlay's table (import::find_party_menu_layout), the face
+// TIMs, the name in the field font and the line cursor.
 //
 //   s.open(game_state) / s.open_relief(game_state);  per frame: if (int sfx = s.update(input, dt)) play(sfx);  s.draw(frame, vw, vh);
 //   when s.take_finished(): Party -> write s.result() as the party (compacted); Relief -> write s.relief_result().

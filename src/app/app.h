@@ -180,6 +180,7 @@ class App {
   // `notes` then keeps its lines, else it gets why picked files cannot be played.
   bool take_browsed_files(std::vector<std::string>& notes);
   void open_discs(const SourceSearch& search);
+  void find_console_font(const SourceSearch& search, const import::disc::DiscGroup& group);
   // Disc mode's fixed settings (paths.h disc_mode); the ini keeps the player's own (save_config writes them back).
   void apply_disc_mode();
   void pick_save_dir();

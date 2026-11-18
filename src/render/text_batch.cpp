@@ -12,11 +12,9 @@
 namespace oc::render {
 
 namespace {
-// PS1 font atlas: 64 cells per row, each kMaxWidth + 1 x 12 texels (the glyph, a blank column and a blank row, so a sample at a cell's
-// edge never reads the next glyph).
+// PS1 font atlas: 64 cells per row, each the font's glyph cell and a blank column and row, so a sample at a cell's edge never reads the
+// next glyph.
 constexpr int kPs1Cols = 64;
-constexpr int kPs1CellW = import::Ps1Font::kMaxWidth + 1;
-constexpr int kPs1CellH = 12;
 constexpr u32 kMaxAtlasHeight = 4096;
 constexpr u32 kAtlasWidth = 2048;
 // Pixel fonts: largest relative size error of whole-pixel font pixels (round(pitch) vs RDE's pitch) before the glyph is drawn
@@ -139,18 +137,22 @@ FaceId TextBatch::add_ps1_font(std::shared_ptr<const import::Ps1Font> font) {
   return static_cast<FaceId>(faces_.size() - 1);
 }
 
+// Every glyph pixel is opaque: white for a 1-bit font (its ink colour is applied when drawn, so the shadow keeps its own grey), the
+// texel's grey for the menu sheet. The text colour multiplies it.
 bool TextBatch::build_ps1_atlas(Face& font_face) {
-  const int count = font_face.ps1->count();
-  const u32 w = kPs1Cols * kPs1CellW, h = static_cast<u32>((count + kPs1Cols - 1) / kPs1Cols * kPs1CellH);
+  const import::Ps1Font& font = *font_face.ps1;
+  const int count = font.count(), cell_w = font.cell_w() + 1, cell_h = font.cell_h() + 1;
+  const u32 w = static_cast<u32>(kPs1Cols * cell_w), h = static_cast<u32>((count + kPs1Cols - 1) / kPs1Cols * cell_h);
   std::vector<u8> px(static_cast<size_t>(w) * h * 4, 0);
   for (int idx = 0; idx < count; ++idx) {
-    const u16* rows = font_face.ps1->rows(idx);
-    const int cx = (idx % kPs1Cols) * kPs1CellW, cy = (idx / kPs1Cols) * kPs1CellH;
-    for (int y = 0; y < import::Ps1Font::kRows; ++y) {
-      for (int x = 0; x < import::Ps1Font::kMaxWidth; ++x) {
-        if (!(rows[y] & (0x8000 >> x))) continue;
+    const int cx = (idx % kPs1Cols) * cell_w, cy = (idx / kPs1Cols) * cell_h;
+    for (int y = 0; y < font.cell_h(); ++y) {
+      for (int x = 0; x < font.cell_w(); ++x) {
+        const u8 level = font.level(idx, x, y);
+        if (!level) continue;
         u8* pixel = &px[(static_cast<size_t>(cy + y) * w + static_cast<size_t>(cx + x)) * 4];
-        pixel[0] = pixel[1] = pixel[2] = pixel[3] = 255;
+        pixel[0] = pixel[1] = pixel[2] = font.shadow() ? 255 : level;
+        pixel[3] = 255;
       }
     }
   }
@@ -360,7 +362,7 @@ float TextBatch::glyph_measure(FaceId id, char32_t ch) const {
 float TextBatch::line_height(FaceId id, float scale) const {
   const Face* font_face = face(id);
   if (!font_face) return 0;
-  if (font_face->ps1) return static_cast<float>(import::Ps1Font::kLineHeight) * ps1_pixel(scale) * aspect_;
+  if (font_face->ps1) return static_cast<float>(font_face->ps1->line_height()) * ps1_pixel(scale) * aspect_;
   return font_face->font->line_spacing * scale;
 }
 
@@ -385,26 +387,34 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
   const u32 alpha = color >> 24;
   const u32 back_color = (style.backdrop_color & 0x00FFFFFFu) | (alpha << 24);
   if (font_face->ps1) {
-    // The glyph cell hangs from the pen at (x, y), nearest sampled; the backdrop is the same glyph in black one font pixel down and
-    // right (the PS1 draws no outline). Positions snap to whole pixels of the target (the PS1-resolution grid when one is set), and a
-    // font pixel covers a whole number of target pixels (at least one), so no glyph column or row is dropped by the sampling.
-    const int idx = font_face->ps1->index_for(ch);
+    // The glyph cell hangs from the pen at (x, y) by the glyph's offset, nearest sampled; the backdrop of a 1-bit font is the same
+    // glyph in the shadow colour one font pixel down and right (the PS1 draws no outline). Positions snap to whole pixels of the target
+    // (the PS1-resolution grid when one is set), and a font pixel covers a whole number of target pixels (at least one), so no glyph
+    // column or row is dropped by the sampling.
+    const import::Ps1Font& font = *font_face->ps1;
+    const bool shadow = pass == Pass::Backdrop;
+    if (shadow && !font.shadow()) return;
+    const int idx = font.index_for(ch);
     if (idx < 0 || !font_face->fill) {
       if (audit_on_ && pass == Pass::Fill) audit_glyph(nullptr, ch, x, y, x, y);
       return;
     }
     const float gx = grid_x_ > 0 ? grid_x_ : 1.0f, gy = grid_y_ > 0 ? grid_y_ : 1.0f;
     const float pw = std::max(1.0f, std::round(ps1_pixel(scale) * gx)) / gx, ph = std::max(1.0f, std::round(ps1_pixel(scale) * aspect_ * gy)) / gy;
-    const int atlas_rows = (font_face->ps1->count() + kPs1Cols - 1) / kPs1Cols;
-    const float atlas_w = static_cast<float>(kPs1Cols * kPs1CellW), atlas_h = static_cast<float>(atlas_rows * kPs1CellH);
-    const float u0 = static_cast<float>((idx % kPs1Cols) * kPs1CellW) / atlas_w, v0 = static_cast<float>((idx / kPs1Cols) * kPs1CellH) / atlas_h;
-    const float u1 = u0 + static_cast<float>(import::Ps1Font::kMaxWidth) / atlas_w, v1 = v0 + static_cast<float>(import::Ps1Font::kRows) / atlas_h;
-    const float w = static_cast<float>(import::Ps1Font::kMaxWidth) * pw, h = static_cast<float>(import::Ps1Font::kRows) * ph;
-    const bool shadow = pass == Pass::Backdrop;
-    const float x0 = std::round((x + (shadow ? pw : 0.0f)) * gx) / gx, y0 = std::round((y + (shadow ? ph : 0.0f)) * gy) / gy;
-    const u32 shade = alpha << 24;
-    sprites_->draw(font_face->fill->set, x0, y0, w, h, u0, v0, u1, v1, shadow ? shade : color);
-    if (audit_on_ && !shadow) audit_glyph(nullptr, ch, x0, y0, x0 + static_cast<float>(font_face->ps1->advance(idx)) * pw, y0 + h);
+    const int cell_w = font.cell_w() + 1, cell_h = font.cell_h() + 1;
+    const int atlas_rows = (font.count() + kPs1Cols - 1) / kPs1Cols;
+    const float atlas_w = static_cast<float>(kPs1Cols * cell_w), atlas_h = static_cast<float>(atlas_rows * cell_h);
+    const float u0 = static_cast<float>((idx % kPs1Cols) * cell_w) / atlas_w, v0 = static_cast<float>((idx / kPs1Cols) * cell_h) / atlas_h;
+    const float u1 = u0 + static_cast<float>(font.cell_w()) / atlas_w, v1 = v0 + static_cast<float>(font.cell_h()) / atlas_h;
+    const float w = static_cast<float>(font.cell_w()) * pw, h = static_cast<float>(font.cell_h()) * ph;
+    const float x0 = std::round((x + static_cast<float>(font.left(idx) + (shadow ? 1 : 0)) * pw) * gx) / gx;
+    const float y0 = std::round((y + static_cast<float>(font.top(idx) + (shadow ? 1 : 0)) * ph) * gy) / gy;
+    const u32 shade = pack_rgba(font.shadow_level(), font.shadow_level(), font.shadow_level(), static_cast<u8>(alpha));
+    const u32 ink = font.ink();
+    auto tint = [&](int shift) { return static_cast<u8>(((color >> shift) & 0xFF) * ((ink >> shift) & 0xFF) / 255); };
+    const u32 fill = pack_rgba(tint(0), tint(8), tint(16), static_cast<u8>(alpha));
+    sprites_->draw(font_face->fill->set, x0, y0, w, h, u0, v0, u1, v1, shadow ? shade : fill);
+    if (audit_on_ && !shadow) audit_glyph(nullptr, ch, x0, y0, x0 + static_cast<float>(font.advance(idx)) * pw, y0 + h);
     return;
   }
   const Entry* glyph_entry = entry(*font_face, ch);

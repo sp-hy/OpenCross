@@ -4,6 +4,8 @@
 // once the scenario has reached 0x34 (Viper Manor, the first talk with Melchior) a second row "World Names : On" with the arrows
 // turned to up / down. Left / right flip Vibration, up / down flip World Names (no cursor). Text = lang.dat ui_pausemenu.txt (ids
 // 0 PAUSE, 1 Vibration Function, 2 World Names, 3 Off, 4 On), bar art = ui.dat ui/pause.png, font ui_font_gnb (HD) in both art modes.
+// Played from the PS1 discs (no ui archive; the PS1 has no pause screen) the same rows are PS1-font text in one PS1 menu window
+// (menutim.prd "wind" frame over a translucent black fill), centred on the 320 x 240 picture, the build's own words (no lang.dat).
 //   p.open(vibration, world_row, world_names);   per frame: sfx = p.input(dx, dy, toggle, close);   p.draw(...)
 #include <array>
 #include <chrono>
@@ -48,15 +50,21 @@ class PauseScreen {
   void draw(const render::Frame& frame, float vw, float vh, bool resume = false);
 
  private:
-  std::u32string ui_text(int id, const char32_t* fallback);
+  // Row text `id` of ui_pausemenu, else the English / Japanese words.
+  std::u32string ui_text(int id);
+  void draw_ps1(const render::Frame& frame, float vw, float vh, bool resume, const std::u32string& title, const std::u32string& line,
+                const std::u32string& line2);
 
   render::GpuContext* ctx_ = nullptr;
   const vfs::Vfs* vfs_ = nullptr;
   render::SpriteBatch* sprites_ = nullptr;
   render::TextBatch* text_ = nullptr;
   render::Sampler linear_, nearest_;
-  render::Texture white_, bar_;
-  render::TexRef white_set_ = {}, bar_set_ = {};
+  render::Texture white_, bar_, wind_;
+  render::TexRef white_set_ = {}, bar_set_ = {}, wind_set_ = {};
+  // The disc look: PS1 font + window frame instead of the RDE bars.
+  bool ps1_ = false;
+  float wind_w_ = 0, wind_h_ = 0;
   float bar_w_ = 0, bar_h_ = 0;
   // ui/ui_font_gnb.spritefont: the bold condensed face of the pause screen.
   std::shared_ptr<const import::SpriteFont> font_;

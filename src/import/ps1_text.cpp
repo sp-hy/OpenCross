@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <format>
 
 #include "import/container.h"
 #include "vfs/disc_names.h"
@@ -29,7 +30,7 @@ constexpr Ps1TextBuild kBuilds[] = {
      2, 21, nullptr, 0, 0, 2, 0x801D2800, kMenuPartsJp, {}, kOmeFilesJp},
     {"usa", Lang::En, Ps1Charset::UsaGlyphs, 0x4803C, 55,
      {{{0x00, 0}, {0x01, 1}, {0x17, 4}, {0x18, 5}, {0x19, 6}, {0x1A, 2}, {0x1B, 3}}},
-     7, 0x30, "cdrom/prog/field.prg", 0x3EA84, 0x20, 3, 0, {}, kMenuStringsUsa, {}},
+     7, 0x30, "cdrom/prog/field.prg", 0x3EA84, 0x20, 3, 0x801D2800, {}, kMenuStringsUsa, kOmeFilesJp},
 };
 
 u32 le16(ByteSpan bytes, size_t at) { return at + 2 <= bytes.size() ? static_cast<u32>(bytes[at] | (bytes[at + 1] << 8)) : 0; }
@@ -127,6 +128,18 @@ std::string usa_menu_text(ByteSpan bytes) {
 
 std::span<const Ps1TextBuild> ps1_text_builds() { return kBuilds; }
 
+const Ps1TextBuild* load_exe_strings(ByteSpan exe, ExeStrings& out) {
+  for (const Ps1TextBuild& build : kBuilds)
+    if (le32(exe, build.strings_offset) == build.table_count && out.load(exe, build.strings_offset)) return &build;
+  return nullptr;
+}
+
+int ps1_category_table(const Ps1TextBuild& build, u32 category) {
+  for (const auto& entry : build.categories)
+    if (entry.category == category) return entry.table;
+  return -1;
+}
+
 char32_t sjis_to_unicode(u16 code) {
   const auto* end = std::end(kSjisChars);
   const auto* it = std::lower_bound(std::begin(kSjisChars), end, code, [](const auto& entry, u16 value) { return entry.code < value; });
@@ -181,13 +194,15 @@ std::string Ps1Text::markup(ByteSpan stream) const {
   replace_all(text, "{name(130)}", "{SERGE%2}");
   replace_all(text, "{name(131)}", "{RAZZLY%" + std::to_string(build_->short_name_glyphs) + "}");
   if (usa) {
-    // Capitals (the next glyph, the rest, the next glyph for one speaker), the name suffixes, colour 8 = grey.
+    // Capitals (the next glyph, the rest, the next glyph for one speaker), the name suffixes. Colour codes keep the PS1's numbers
+    // (8 = grey), which the PS1 colour table of the disc text draws.
     replace_all(text, "{case(0)}", "{Cap}");
     replace_all(text, "{case(1)}", "{CAP}");
     replace_all(text, "{case(2)}", "{CapL}");
     replace_all(text, "{suffix(0)}", "{-y}");
     replace_all(text, "{suffix(1)}", "{-i}");
-    replace_all(text, "{color(8)}", "{color(GRAY)}");
+    // Byte FF lies past the field font's last glyph and its width-table entry is 0: it draws nothing.
+    replace_all(text, "[ff]", "");
   }
   return text;
 }
@@ -342,22 +357,30 @@ void Ps1Text::line_triples(TextTable& out, std::string_view path) const {
   }
 }
 
-// JP: every Shift-JIS string of the overlay under its guest address, then the composed rows over them.
-void Ps1Text::overlay_menu(TextTable& out, int table, std::string_view path) const {
-  const auto file = vfs_->read(path);
-  if (!file) return;
-  const ByteSpan bytes(*file);
+std::unordered_map<u32, std::string> overlay_sjis_strings(ByteSpan image, u32 base) {
   std::unordered_map<u32, std::string> strings;
-  for (size_t i = 0; i < bytes.size();) {
-    if (bytes[i] == 0) {
+  for (size_t i = 0; i < image.size();) {
+    if (image[i] == 0) {
       ++i;
       continue;
     }
-    const ByteSpan run = up_to_nul(bytes.subspan(i));
-    if (auto text = sjis_to_utf8(run); text && text->find('\n') == std::string::npos)
-      strings.emplace(build_->menu_base + static_cast<u32>(i), std::move(*text));
+    const ByteSpan run = up_to_nul(image.subspan(i));
+    auto text = sjis_to_utf8(run);
+    if (!text) {
+      ++i;
+      continue;
+    }
+    if (text->find('\n') == std::string::npos) strings.emplace(base + static_cast<u32>(i), std::move(*text));
     i += run.size() + 1;
   }
+  return strings;
+}
+
+// JP: every Shift-JIS string of the overlay under its guest address (overlay_sjis_strings), then the composed rows over them.
+void Ps1Text::overlay_menu(TextTable& out, int table, std::string_view path) const {
+  const auto file = vfs_->read(path);
+  if (!file) return;
+  const std::unordered_map<u32, std::string> strings = overlay_sjis_strings(*file, build_->menu_base);
   std::vector<std::pair<u32, std::string>> rows(strings.begin(), strings.end());
   for (const Ps1MenuPart& part : build_->menu_parts) {
     if (part.table != table) continue;
@@ -387,14 +410,39 @@ void Ps1Text::message_menu(TextTable& out, int table) const {
     std::string text = messages[row.message];
     if (row.segment != 0xFF) {
       std::vector<std::string> fields(1);
+      bool separator = false;
       for (char ch : text) {
-        if (ch == '\n' || ch == '\t') fields.emplace_back();
-        else fields.back().push_back(ch);
+        if (ch == '\n' || ch == '\t') {
+          if (!separator) fields.emplace_back();
+          separator = true;
+        } else {
+          fields.back().push_back(ch);
+          separator = false;
+        }
       }
       text = row.segment < fields.size() ? fields[row.segment] : std::string();
+      if (row.length) text = u32_to_utf8(utf8_to_u32(text).substr(row.start, row.length));
     }
     while (text.ends_with('\n')) text.pop_back();
     add(out, hex_key(row.key, 8), trim_blanks(std::move(text)));
+  }
+  // Every message by its number ("mess:N", leading blanks kept), and for the shop table the ASCII strings of the USA shop overlay by
+  // their guest address ("prg:801DF44C"): the USA overlays name some words that no JP string maps to.
+  for (size_t i = 0; i < messages.size(); ++i) {
+    std::string text = messages[i];
+    while (text.ends_with('\n')) text.pop_back();
+    add(out, "mess:" + std::to_string(i), text);
+  }
+  if (table != 1) return;
+  const auto overlay = vfs_->read("cdrom/prog/shopmenu.prg");
+  if (!overlay) return;
+  const ByteSpan bytes(*overlay);
+  for (size_t i = 0; i < bytes.size();) {
+    const ByteSpan run = up_to_nul(bytes.subspan(i));
+    const bool ascii = run.size() >= 2 && (i == 0 || bytes[i - 1] == 0) &&
+                       std::all_of(run.begin(), run.end(), [](u8 ch) { return ch >= 0x20 && ch < 0x7F; });
+    if (ascii) add(out, std::format("prg:{:08X}", build_->menu_base + static_cast<u32>(i)), usa_menu_text(run));
+    i += run.size() + 1;
   }
 }
 

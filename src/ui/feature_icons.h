@@ -5,11 +5,14 @@
 // When the window leaves more than 75 canvas units of black beside the 4:3 picture the column moves 93 units out into the left bar.
 // After an auto-save the "AUTO SAVE" strip (atlas row 1, drawn 212 x 53 at x 83 beside the column's first slot, 80 % opaque) shows for
 // a 120-frame count that runs down once per 60 Hz frame, twice while no toggle is on (so 2 s with icons, 1 s without).
-//   icons.init(ctx, vfs, sprites);   icons.show_autosave();   per frame: icons.draw(frame, vw, vh, active, lang);
+// Played from the PS1 discs (no ui archive) each icon is a short word in the PS1 font, one font pixel per pixel of the 320-wide
+// picture, the words stacked upwards from the same bottom edge one 13-pixel line apart, AUTO SAVE on the bottom line right of them.
+//   icons.init(ctx, vfs, sprites, text);   icons.show_autosave();   per frame: icons.draw(frame, vw, vh, active, lang);
 #include <chrono>
 
 #include "import/text.h"
 #include "render/sprite_batch.h"
+#include "render/text_batch.h"
 #include "render/texture.h"
 #include "vfs/vfs.h"
 
@@ -26,7 +29,7 @@ class FeatureIcons {
   FeatureIcons(const FeatureIcons&) = delete;
   FeatureIcons& operator=(const FeatureIcons&) = delete;
 
-  bool init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites);
+  bool init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites, render::TextBatch& text);
   void shutdown();
   void show_autosave() { autosave_ = 120.0; }
   // Draws over the finished frame (inside no begin / end). The atlas of `lang` is loaded on first use.
@@ -35,11 +38,20 @@ class FeatureIcons {
   int shown() const { return shown_; }
 
  private:
+  struct Icon {
+    bool on;
+    int col, row;
+    const char32_t* word;
+  };
   void load(import::Lang lang);
+  void draw_words(const render::Frame& frame, float vw, float vh, const Icon* icons, int count, float shift, bool autosave);
 
   render::GpuContext* ctx_ = nullptr;
   const vfs::Vfs* vfs_ = nullptr;
   render::SpriteBatch* sprites_ = nullptr;
+  render::TextBatch* text_ = nullptr;
+  // The PS1 font when the disc is the data source (the icons are then words).
+  render::FaceId face_ = render::kNoFace;
   render::Sampler linear_;
   render::Texture atlas_;
   render::TexRef atlas_set_ = {};

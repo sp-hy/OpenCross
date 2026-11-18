@@ -118,8 +118,11 @@ import::Image title_blank_bars(const import::Image& atlas, int plain, int select
 bool TitleScreen::init(UiKit& kit, audio::Mixer* mixer) {
   kit_ = &kit;
   mixer_ = mixer;
-  if (auto png = kit.vfs().read("hd/title/title.png")) logo_ = kit.upload_png(*png);
-  if (!logo_) log::warn("title: hd/title/title.png unavailable");
+  // The HD logo is RDE's; the PS1 discs have only the room's own logo layers.
+  if (kit.vfs().has_archive("hd")) {
+    if (auto png = kit.vfs().read("hd/title/title.png")) logo_ = kit.upload_png(*png);
+    if (!logo_) log::warn("title: hd/title/title.png unavailable");
+  }
   bg_[0] = upload_tim(kit, "cdrom/menu/title/bg0.tim", nullptr, nullptr);
   bg_[1] = upload_tim(kit, "cdrom/menu/title/bg1.tim", nullptr, nullptr);
   if (!bg_[0]) log::warn("title: cdrom/menu/title/bg0.tim unavailable");

@@ -721,6 +721,7 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 | `tools/duckstation.ps1`, `tools/py/ps1ref.py`, `ps1_ram.py`, `ps1_capture.py`, `ps1_cast.py`, `ps1_audio.py`, `ps1_registry.py`, `ps1_scene.py`, `ps1_state.py` | `README.md` section 3 and `validation.md` section 3 |
 | `tools/ghidra_setup.ps1`, `tools/ghidra/` | `README.md` |
 | `tools/py/ps1_text_tables.py` (writes the generated blocks of `src/import/text_tables.inc`) | [`formats/text.md`](formats/text.md) section 12 |
+| `tools/py/console_font_chars.py` (writes `src/import/console_font_chars.inc`, the console font's character order) | [`formats/text.md`](formats/text.md) section 7.15 |
 | `tools/py/cc_*.py` importers and save tools (`cc_audio`, `cc_container`, `cc_effects`, `cc_emitter_ops`, `cc_fieldscript`, `cc_lzss`, `cc_model`, `cc_model_util`, `cc_prd`, `cc_room`, `cc_save`, `cc_save_forge`, `cc_stage`, `cc_tables`, `cc_text`, `cc_tim`) | `README.md`, [`formats/`](formats/) |
 
 ## 6. Recipes

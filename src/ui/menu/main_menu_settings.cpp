@@ -256,7 +256,7 @@ void MainMenu::Impl::build_pad_page() {
   pointer(kHeaderX + 0x10 - drift, kHeaderY + 0x16, true);
   pointer(kHeaderX + drift + 0x130, kHeaderY + 0x16, false);
   Frame(0x41, kRowsX, kRowsY);
-  {
+  if (texs.hd()) {
     const std::u32string caption = utf32(menu_str(kPadCaption, "Controller"));
     float scale = 0.31f;
     text->prepare(face_gn, caption);

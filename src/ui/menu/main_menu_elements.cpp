@@ -437,7 +437,8 @@ void MainMenu::Impl::build_use() {
     plate(cur_char(), stack.id, 275, 42.0f + 24.0f * static_cast<float>(row));
     const std::u32string nm = element_name(stack.id);
     const float rel = fit_rel(nm, 140, 0.9f);
-    TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y, nm, row == lit_row ? ps1_colour(0x7A6AA5) : kText, rel);
+    // The disc draws the name 1 pixel lower on its plate.
+    TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y + (ps1_text() ? 1.0f : 0.0f), nm, row == lit_row ? ps1_colour(0x7A6AA5) : kText, rel);
     Digits(453, y, padded_number(std::min<int>(stack.qty, 99), 2), 16, kText);
   }
   const int total = std::max(cnt, kVisibleRows);
@@ -521,8 +522,17 @@ void MainMenu::Impl::plate(int character, int id, float x, float y) {
   if (Tex* tex = plate_tex(kTile[colour])) Img(tex, PX(x), PY(y), PX(184), PY(24), 0, 0, 1, 1, grey(0x80));
 }
 
-// Thin 173x24 frame around an empty slot (eleempty.png), both art modes.
+// Thin 173x24 frame around an empty slot (eleempty.png), both art modes. Played from the discs it is the PS1's own outline: 2-px lines of
+// grey 0x848484 round (x + 5, y + 4) .. (x + 179, y + 29).
 void MainMenu::Impl::empty_box(float x, float y) {
+  if (!texs.hd()) {
+    const u32 line = rgb(132, 132, 132);
+    rect(PX(x + 5), PY(y + 4), PX(174), PY(2), line);
+    rect(PX(x + 5), PY(y + 27), PX(174), PY(2), line);
+    rect(PX(x + 5), PY(y + 6), PX(2), PY(21), line);
+    rect(PX(x + 177), PY(y + 6), PX(2), PY(21), line);
+    return;
+  }
   if (Tex* tex = texs.load("hd/menu/eleempty.png")) Img(tex, PX(x + 4), PY(y), PX(174), PY(25));
 }
 
@@ -549,6 +559,12 @@ void MainMenu::Impl::grid_minimap(int character, float px, float py, int sel_row
       if (hold_id > 0 && row >= lo && row <= hi) tint = ps1_colour(0xA04040);
       if (row == sel_row) tint = grey(0xA0);
       const float x = px + 18.0f * static_cast<float>(row), y = py + 9.0f * static_cast<float>(col);
+      if (!texs.hd()) {
+        // The disc's "elbi" sheet of menuelem.prd: frame 8 the empty cell, the colours by HD file number.
+        static const int kElbiFrame[9] = {0, 8, 4, 3, 7, 2, 6, 5, 9};
+        if (Tex* tex = texs.sheet("elbi", kElbiFrame[file])) Img(tex, PX(x + tex->ox), PY(y + tex->oy), PX(tex->w), PY(tex->h), 0, 0, 1, 1, tint);
+        continue;
+      }
       char path[48];
       std::snprintf(path, sizeof path, "hd/menu/menuelem/menuelem_%d.png", file);
       if (Tex* tex = texs.load(path)) Img(tex, PX(x), PY(y), PX(16), PY(8), 0, 0, 1, 1, tint);
@@ -572,7 +588,7 @@ void MainMenu::Impl::build_grid() {
   Frame(56, 10, 27);
   {
     // Caption "Element Level N" in the grid frame's top gap (cmnmes "Element Level"; ink at (19.7, 27), bn 0.31, bn in every language).
-    HT(face_gn, 19.7f, 27.0f, capt("Element Level", "Element Level"), kText, 0.31f);
+    if (texs.hd()) HT(face_gn, 19.7f, 27.0f, capt("Element Level", "Element Level"), kText, 0.31f);
     // The level number is its own print at (0x66, 0x19) in kb x 0.625, offset by a per-language x
     // {-10, 5, 0x1B, -0x10, 0xB, -10}[L], so it follows the end of the translated caption (FR / IT / ES are longer).
     static const float k42EDE0[6] = {-10, 5, 0x1B, -0x10, 0xB, -10};

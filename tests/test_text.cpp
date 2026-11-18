@@ -1,5 +1,5 @@
 // Checks for the text importer: PS1 control-code tokenisation, markup parsing, spritefont header parsing on a synthetic
-// blob, lang.dat lookup on tiny synthetic tables, and the dialogue typewriter.
+// blob, lang.dat lookup on tiny synthetic tables, the dialogue typewriter, and the JP overlay string scan.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -8,6 +8,7 @@
 #include <string>
 
 #include "data/char_name.h"
+#include "import/ps1_text.h"
 #include "import/spritefont.h"
 #include "import/text.h"
 #include "ui/dialogue_box.h"
@@ -115,6 +116,26 @@ void test_markup() {
   import::Message flat = import::flatten(import::parse_markup("{Cap}hello SERGE%{-y}!{mend}", import::Lang::En), ctx);
   CHECK(text_of(flat) == "Hello Serge!");
   CHECK(flat.tokens.back().kind == TokKind::End);
+}
+
+// The USA discs' text rules are off by default, so RDE's text flattens as before; switched on, {-y} / {-i} cut the next name to six
+// glyphs and append the letter (nothing after a final y), {CAP} lasts and reaches names, {CapL} only for Leah, Zoah in capitals.
+void test_usa_rules() {
+  import::TextContext ctx;
+  ctx.speaker_name = [](int id) {
+    return std::u32string(id == 0 ? U"Serge" : id == 1 ? U"Kidkidkid" : id == 13 ? U"Razzly" : U"GUILE");
+  };
+  const auto flat = [&](const char* markup) { return text_of(import::flatten(import::parse_markup(markup, import::Lang::En), ctx)); };
+  const char* sample = "{-y}SERGE%, {-i}KID%, {-y}RAZZLY%, {-i}GUILE%. {CAP}hi SERGE% ok{mend}";
+  CHECK(flat(sample) == "Serge, Kidkidkid, Razzly, GUILE. HI Serge ok");
+  CHECK(flat("{CapL}hi{mend}") == "hi");
+  ctx.usa_rules = true;
+  CHECK(flat(sample) == "Sergey, Kidkidi, Razzly, GUILEI. HI SERGE OK");
+  CHECK(flat("{CapL}hi{mend}") == "hi");
+  ctx.speaker = 35;
+  CHECK(flat("{CapL}hi{mend}") == "Hi");
+  ctx.speaker = 8;
+  CHECK(flat("Hello SERGE% \xC3\xA4\xC3\xA9{mend}") == "HELLO SERGE \xC3\x84\xC3\xA9");
 }
 
 void put32(Bytes& out, u32 value) {
@@ -692,11 +713,27 @@ void test_window_opening() {
   CHECK(!changed.growing() && changed.alpha() == 1.0f);
 }
 
+// The JP overlay string scan: a Shift-JIS string right behind a pointer table (no NUL between them) keeps its own address, and the
+// strings around it decode as before: 個数 at +0, two pointers, 鍛冶屋 at +0x10, 所持数 at +0x18.
+void test_overlay_strings() {
+  const u8 image[] = {0x8C, 0xC2, 0x90, 0x94, 0x00, 0x00, 0x00, 0x00, 0xB8, 0x97, 0x1D, 0x80, 0xD4, 0x97, 0x1D, 0x80,
+                      0x92, 0x62, 0x96, 0xE8, 0x89, 0xAE, 0x00, 0x00, 0x8F, 0x8A, 0x8E, 0x9D, 0x90, 0x94, 0x00, 0x00};
+  const auto strings = import::overlay_sjis_strings(ByteSpan(image, sizeof image), 0x801D2800);
+  auto at = [&](u32 address) {
+    const auto found = strings.find(address);
+    return found == strings.end() ? std::string("<none>") : found->second;
+  };
+  CHECK(at(0x801D2800) == "\xE5\x80\x8B\xE6\x95\xB0");
+  CHECK(at(0x801D2810) == "\xE9\x8D\x9B\xE5\x86\xB6\xE5\xB1\x8B");
+  CHECK(at(0x801D2818) == "\xE6\x89\x80\xE6\x8C\x81\xE6\x95\xB0");
+}
+
 }  // namespace
 
 int main() {
   test_ps1_tokens();
   test_markup();
+  test_usa_rules();
   test_spritefont();
   test_lang();
   test_char_names();
@@ -709,6 +746,7 @@ int main() {
   test_frame_rows();
   test_digit_entry();
   test_window_opening();
+  test_overlay_strings();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

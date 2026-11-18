@@ -10,10 +10,15 @@
 #include <cstdlib>
 #include <format>
 #include <map>
+#include <optional>
 #include <vector>
 
 #include "core/log.h"
 #include "data/char_name.h"
+#include "game/battle/hud_sheets.h"
+#include "import/battle_hud.h"
+#include "import/ps1_font.h"
+#include "import/ps1_text.h"
 #include "import/tim.h"
 #include "platform/keymap.h"
 #include "render/text_batch.h"
@@ -78,6 +83,40 @@ constexpr int kMaterialKind = 4;
 // the name's y.
 constexpr float kItemNameMaxW = 102.0f, kNarrowAnchor = 18.0f;
 
+// Disc mode: the PS1's own screen. Sheet types of battle/btend.prd (import::kResultsSheetNames; the colour plates are types 0..0x14 by
+// colour index).
+constexpr int kSheetGrid = 0x18, kSheetCursor = 0x1C, kSheetFont = 0x20, kSheetHeadline = 0x24, kSheetItemIcon = 0x28, kSheetPanels = 0x2C,
+              kSheetCount = 0x38;
+// Row cells from the row origin: the six stats' two digit slots (ATK DEF HIT EVD MAG MDEF; x - 6 + 8 j) and the UP markers (kUpX - 8,
+// kUpY). The gold digits (seven slots) from x 0xB8 (USA 0xD4) on the panel's line + 0x90, the separators at 0xC0 / 0xE0 (USA 0xDC / 0xFC).
+constexpr int kDigitX[6] = {40, 40, 88, 88, 136, 136}, kDigitY[6] = {32, 44, 32, 44, 32, 44};
+constexpr int kGoldX[7] = {0, 16, 24, 32, 48, 56, 64};
+// Heal question: its eight lines at (0xA8 + x, 0x32 + y); the cursor at (0xA8, 0x72 + 16 row) for the three choices.
+constexpr int kHealX[8] = {4, 4, 4, 8, 8, 8, 8, 8}, kHealY[8] = {10, 26, 42, 62, 78, 94, 110, 126};
+constexpr int kHealCursorRow[3] = {0, 2, 4};
+// The results messages (battle/data/exdat.dat): 1..10 the digits, 0x0B.. the seven stat-up labels, 0x12.. the heal question's eight lines,
+// the star page's Received, arrow, slash, "and friends" (alone: 0x24), the two growth lines (0x20 / 0x21 at 99 stars), the healed and
+// spoils headers.
+constexpr int kMsgDigit0 = 1, kMsgStatUp = 0x0B, kMsgHeal = 0x12, kMsgReceived = 0x1A, kMsgArrow = 0x1B, kMsgSlash = 0x1C, kMsgFriends = 0x1D,
+              kMsgGrowth = 0x1E, kMsgGrowth99 = 0x20, kMsgHealed = 0x22, kMsgSpoils = 0x23, kMsgAlone = 0x24;
+
+// The nine decimal digits of a value, most significant first; the leading zeros before the last digit are -1.
+std::array<int, 9> split_digits(u32 value) {
+  std::array<int, 9> digits{};
+  for (int i = 8; i >= 0; --i) {
+    digits[static_cast<size_t>(i)] = static_cast<int>(value % 10);
+    value /= 10;
+  }
+  for (size_t i = 0; i < 8 && digits[i] == 0; ++i) digits[i] = -1;
+  return digits;
+}
+
+// sysmes names carry a leading icon code (Greek alpha..delta: element kind / material) that the RDE fonts draw as the list icon; the
+// results screen draws the PS1 icon itself (sico / EquipIcon), so the code is dropped from the name.
+std::u32string strip_icon(std::u32string name) {
+  if (!name.empty() && name[0] >= 0x3B1 && name[0] <= 0x3B4) name.erase(0, 1);
+  return name;
+}
 u32 rgba(int r, int g, int b, int a = 255) { return render::pack_rgba(static_cast<u8>(r), static_cast<u8>(g), static_cast<u8>(b), static_cast<u8>(a)); }
 // Scale the colour channels, keep alpha.
 u32 tint(u32 colour, float factor) {
@@ -88,8 +127,9 @@ u32 tint(u32 colour, float factor) {
 }  // namespace
 
 struct BattleResults::Impl {
-  // Sampler choice: filtered by [Video] Filter*, filtered + repeating (wallpaper), always nearest (the white pixel).
-  enum Kind { kLin, kRep, kFixed };
+  // Sampler choice: filtered by [Video] Filter*, filtered + repeating (wallpaper), always nearest (the white pixel, the disc art), always
+  // nearest + repeating (the disc's wallpaper).
+  enum Kind { kLin, kRep, kFixed, kFixedRep };
   struct Tex {
     render::Texture tex;
     render::TexRef set;
@@ -150,6 +190,18 @@ struct BattleResults::Impl {
   // Portrait cache, key "<dir>/pNN".
   std::map<std::string, std::unique_ptr<Tex>> hd_face;
 
+  // Disc mode (no hd archive): the PS1's screen, drawn from battle/btend.prd's sheets at the PS1's coordinates (the semi-transparent
+  // texels and the others in two atlases), the wallpaper tile, the portraits battle/face/pNN.tim, the messages of battle/data/exdat.dat
+  // in the PS1 font.
+  bool disc = false, usa = false;
+  std::vector<std::vector<SheetFrame>> sheet_frames;
+  Tex sheet_semi, sheet_opaque, disc_wall;
+  std::vector<std::u32string> messages;
+  // Item id -> icon (sheet "sico" frame icon + 1).
+  std::vector<u8> item_icons;
+  import::JpGlyphs glyph_codes;
+  std::shared_ptr<const import::Ps1Font> ps1_font;
+
   // state
   Phase phase = Phase::Idle;
   // age: frames since open; pt: frames in the phase.
@@ -184,6 +236,7 @@ struct BattleResults::Impl {
   // ---- loading ---------------------------------------------------------------------------------------------------------
   const render::Sampler& sampler_for(Kind kind) const {
     if (kind == kFixed) return nearest;
+    if (kind == kFixedRep) return repeat_nearest;
     if (kind == kRep) return bilinear ? repeat_linear : repeat_nearest;
     return bilinear ? linear : nearest;
   }
@@ -241,12 +294,48 @@ struct BattleResults::Impl {
     if (auto raw = vfs->read("hd/battle/battle/battle_37.tim")) load_tim(hd_wall, *raw, kRep);
     if (!hd_row.ok() || !hd_panel.ok()) log::warn("battle results: HD btlexit panels missing");
   }
+  void load_art() {
+    if (disc) load_disc_art();
+    else load_hd_art();
+  }
+  void load_disc_art() {
+    auto prd = vfs->read("cdrom/battle/btend.prd");
+    std::optional<import::ResultsArt> art;
+    if (prd) art = import::load_results_art(*prd);
+    if (!art) {
+      log::warn("battle results: the disc's results sheets (btend.prd) are missing");
+      return;
+    }
+    SheetAtlas atlas = pack_sheets(art->sheets);
+    sheet_frames = std::move(atlas.frames);
+    make_tex(sheet_semi, static_cast<u32>(atlas.width), static_cast<u32>(atlas.height), atlas.semi.data(), kFixed);
+    make_tex(sheet_opaque, static_cast<u32>(atlas.width), static_cast<u32>(atlas.height), atlas.opaque.data(), kFixed);
+    if (art->wall.w > 0) {
+      std::vector<u8> wall = art->wall.rgba;
+      for (size_t i = 3; i < wall.size(); i += 4) wall[i] = wall[i] ? 255 : 0;
+      make_tex(disc_wall, static_cast<u32>(art->wall.w), static_cast<u32>(art->wall.h), wall.data(), kFixedRep);
+    }
+    ps1_font = import::load_ps1_font(*vfs);
+    usa = ps1_font && ps1_font->build() == import::Ps1Font::Build::Usa;
+    messages.clear();
+    item_icons.clear();
+    import::Ps1Text source;
+    if (auto exdat = vfs->read("cdrom/battle/data/exdat.dat"); exdat && source.open(*vfs)) {
+      for (const Bytes& message : import::load_exit_messages(*exdat, !usa)) messages.push_back(import::utf8_to_u32(source.markup(message)));
+      item_icons = import::load_exit_item_icons(*exdat);
+    }
+    if (messages.empty()) log::warn("battle results: the disc's results messages (exdat.dat) are missing");
+  }
   Tex* face(int portrait_id) {
     char key[80];
-    std::snprintf(key, sizeof key, "%s/p%02d", hd ? portrait_set.c_str() : "1999", portrait_id);
+    std::snprintf(key, sizeof key, "%s/p%02d", disc ? "disc" : hd ? portrait_set.c_str() : "1999", portrait_id);
     if (auto it = hd_face.find(key); it != hd_face.end()) return it->second->ok() ? it->second.get() : nullptr;
     auto tex = std::make_unique<Tex>();
-    load_png(*tex, std::string("hd/battle/face/") + key + ".png");
+    if (disc) {
+      if (auto raw = vfs->read(std::format("cdrom/battle/face/p{:02}.tim", portrait_id))) load_tim(*tex, *raw, kFixed);
+    } else {
+      load_png(*tex, std::string("hd/battle/face/") + key + ".png");
+    }
     Tex* result = tex->ok() ? tex.get() : nullptr;
     hd_face[key] = std::move(tex);
     return result;
@@ -498,6 +587,222 @@ struct BattleResults::Impl {
     }
     if (drops.empty()) txt(label_slot(), U"-", 0xE8, py + 31, kColText, kPanelPx, 1);
   }
+
+  // ---- disc mode drawing (PS1 coordinates) ----------------------------------------------------------------------------------
+  // A sheet frame at PS1 (x, y) in colour word `colour` (texel x colour / 0x80, up to twice as bright) and mode 0 (opaque) or 1..4
+  // (ABR mode - 1: (B + F) / 2, B + F, B - F, B + F / 4), which as on the PS1 blends only the texels with the semi-transparency bit.
+  void sheet(int type, int frame, float x, float y, u32 colour = 0x808080, int mode = 0) {
+    const size_t index = static_cast<size_t>(type / 4);
+    if (type < 0 || index >= sheet_frames.size() || frame < 1 || static_cast<size_t>(frame) > sheet_frames[index].size()) return;
+    const SheetFrame& picture = sheet_frames[index][static_cast<size_t>(frame - 1)];
+    if (picture.w <= 0) return;
+    const float px = cx(x + static_cast<float>(picture.x)), py = cy(y + static_cast<float>(picture.y));
+    const float pw = static_cast<float>(picture.w) * SX * zoom, ph = static_cast<float>(picture.h) * SY * zoom;
+    // Per channel the colour's factor (0x80 = 1) split into the part up to 1 and the brightening above it.
+    auto tint = [&](float divide, bool over) {
+      auto channel = [&](int shift) {
+        const float factor = static_cast<float>((colour >> shift) & 0xFF) / 128.0f / divide;
+        return static_cast<int>(std::lround(255.0f * std::clamp(over ? factor - 1.0f : factor, 0.0f, 1.0f)));
+      };
+      return rgba(channel(0), channel(8), channel(16));
+    };
+    const bool bright = ((colour & 0xFF) > 0x80) || (((colour >> 8) & 0xFF) > 0x80) || (((colour >> 16) & 0xFF) > 0x80);
+    auto draw = [&](const Tex& tex, u32 col, render::BlendMode blend) {
+      if (!tex.ok()) return;
+      sprites->set_blend(blend);
+      sprites->draw(tex.set, px, py, pw, ph, picture.u0, picture.v0, picture.u1, picture.v1, col);
+    };
+    switch (mode == 0 ? -1 : (mode - 1) & 3) {
+      case 0: draw(sheet_semi, (tint(1, false) & 0x00FFFFFFu) | 0x80000000u, render::BlendMode::Alpha); break;
+      case 1: draw(sheet_semi, tint(1, false), render::BlendMode::Add); break;
+      case 2: draw(sheet_semi, tint(1, false), render::BlendMode::Subtract); break;
+      case 3: draw(sheet_semi, tint(4, false), render::BlendMode::Add); break;
+      default: draw(sheet_semi, tint(1, false), render::BlendMode::Alpha); break;
+    }
+    draw(sheet_opaque, tint(1, false), render::BlendMode::Alpha);
+    if (bright) draw(sheet_opaque, tint(1, true), render::BlendMode::Add);
+    sprites->set_blend(render::BlendMode::Alpha);
+  }
+  float by_build(int usa_value, int japan_value) const { return static_cast<float>(usa ? usa_value : japan_value); }
+  size_t font_frames() const { return static_cast<size_t>(kSheetFont / 4) < sheet_frames.size() ? sheet_frames[kSheetFont / 4].size() : 0; }
+  std::u32string message(int index) const { return index >= 0 && static_cast<size_t>(index) < messages.size() ? messages[static_cast<size_t>(index)] : std::u32string(); }
+  // PS1 font text from PS1 (x, y): white with the black shadow one pixel down and right.
+  void ps1_text(const std::u32string& text_u32, float x, float y) {
+    if (text_u32.empty()) return;
+    const ui::font::Ink ink{rgba(255, 255, 255), rgba(0, 0, 0), true, false};
+    fonts.draw(ui::font::kBn, text_u32, (x + shift) * SX + ox / zoom, y * SY + oy / zoom, ink, SX / render::TextBatch::kPs1PixelScale, ui::font::kLeft, zoom);
+  }
+  float ps1_width(const std::u32string& text_u32) { return fonts.measure(ui::font::kBn, text_u32, SX / render::TextBatch::kPs1PixelScale) / SX; }
+  // The digits of `value` as digit messages 12 px apart from x; `slots` = the value's last digits drawn, the leading blank ones left out.
+  float ps1_digits(u32 value, int slots, float x, float y) {
+    const std::array<int, 9> digits = split_digits(value);
+    for (size_t i = 9 - static_cast<size_t>(slots); i < 9; ++i)
+      if (digits[i] >= 0) ps1_text(message(kMsgDigit0 + digits[i]), x, y), x += 12;
+    return x;
+  }
+  // A name in the battle font from (x, y): at most six glyphs, 9 px apart (USA: the PS1 font's advance of each character).
+  void sheet_name(const std::u32string& name, float x, float y) {
+    int count = 0;
+    for (char32_t ch : name) {
+      if (count++ >= 6) break;
+      if (const int frame = font_frame(ch, glyph_codes, font_frames())) sheet(kSheetFont, frame, x, y);
+      x += usa && ps1_font ? static_cast<float>(ps1_font->advance(ps1_font->index_for(ch))) : 9.0f;
+    }
+  }
+  void disc_wall_draw() {
+    if (disc_wall.ok()) quad(disc_wall, edge_x0, 0, edge_w, 216, 0xFFFFFFFFu, edge_x0 / disc_wall.w, 0, (edge_x0 + edge_w) / disc_wall.w, 216.0f / disc_wall.h);
+  }
+  // The portrait strips (32 x 224 at x 0x10 + 0x28 slot), every texel semi-transparent: half wallpaper, half portrait.
+  void disc_faces() {
+    for (int slot = 0; slot < battle::kPcSlots; ++slot) {
+      const Row& row = rows[static_cast<size_t>(slot)];
+      if (!row.present) continue;
+      if (Tex* portrait = face(row.portrait)) quad(*portrait, static_cast<float>(kFaceX0 + kFaceDX * slot), 0, kFaceW, kFaceH, rgba(255, 255, 255, 128));
+    }
+  }
+  // A party row at (8, 0x20 + 60 slot) (the slide moves it right; the right panel moves up by as much): the frame with its labels (levu frame 2), the name, HP current / max
+  // (the current value's leading zero digits left out, the maximum's last three digits), the six stats (two digits), the UP markers once
+  // the member's page was shown, the grid map (a gg cell per occupied cell, bright up to the gauge level, half blended).
+  void disc_row(int slot) {
+    const Row& row = rows[static_cast<size_t>(slot)];
+    const float x0 = static_cast<float>(kRowX) + slide, y0 = static_cast<float>(kRowY0 + kRowPitch * slot);
+    sheet(kSheetPanels, 2, x0, y0);
+    sheet_name(row.name, x0 + 12, y0 + 8);
+    const bool after = row.shown;
+    const std::array<int, 9> hp = split_digits(static_cast<u32>(std::clamp(row.hp, 0, 999999)));
+    bool started = false;
+    for (int j = 0; j < 3; ++j) {
+      const int digit = hp[static_cast<size_t>(6 + j)];
+      if (digit <= 0 && !started && j != 2) continue;
+      started = true;
+      sheet(kSheetFont, std::max(digit, 0) + 101, x0 + 0x20 + 8.0f * static_cast<float>(j), y0 + 0x14);
+    }
+    const std::array<int, 9> top = split_digits(static_cast<u32>(std::max(after ? row.max_hp : row.max_hp - row.gain[0], 0)));
+    for (int j = 0, k = 0; j < 3; ++j)
+      if (const int digit = top[static_cast<size_t>(6 + j)]; digit >= 0) sheet(kSheetFont, digit + 101, x0 + 0x40 + 8.0f * static_cast<float>(k++), y0 + 0x14);
+    for (int k = 0; k < 6; ++k) {
+      const int value = after ? row.stat[static_cast<size_t>(k + 1)] : row.stat[static_cast<size_t>(k + 1)] - row.gain[static_cast<size_t>(k + 1)];
+      const std::array<int, 9> digits = split_digits(static_cast<u32>(std::clamp(value, 0, 99)));
+      for (int j = 0; j < 2; ++j) {
+        const int digit = digits[static_cast<size_t>(7 + j)];
+        if (digit < 0 && j == 0) continue;
+        sheet(kSheetFont, std::max(digit, 0) + 101, x0 + static_cast<float>(kDigitX[k] + 8 * j - 6), y0 + static_cast<float>(kDigitY[k]));
+      }
+    }
+    if (after)
+      for (int i = 0; i < 7; ++i)
+        if (row.gain[static_cast<size_t>(i)] != 0) sheet(kSheetPanels, 1, x0 + static_cast<float>(kUpX[i] - 8), y0 + static_cast<float>(kUpY[i]), 0x808080, 4);
+    for (int level = 0; level < data::kGridRows; ++level)
+      for (int cell = 0; cell < data::kGridCols; ++cell) {
+        if ((row.cells[static_cast<size_t>(level * data::kGridCols + cell)] & 0x3FFF) == 0) continue;
+        sheet(kSheetGrid, level <= row.gauge ? 3 : 2, x0 + 0x66 + 4.0f * static_cast<float>(level), y0 + 6 + 2.0f * static_cast<float>(cell), 0xFFFFFF, 1);
+      }
+  }
+  // The right panel (levu frame 3 at (0xB0, 0x32), sliding in y), the gold line on every page and the page; the headline (viva frame 5
+  // PowerUp / 6 Spoils at (0x134, 0x10), added at colour 0x606060) until the exit.
+  void disc_panel() {
+    const float panel_y = static_cast<float>(kPanelY) - slide, dy = -slide;
+    sheet(kSheetPanels, 3, static_cast<float>(kPanelX), panel_y);
+    const std::array<int, 9> gold_digits = split_digits(static_cast<u32>(std::clamp(gold, 0, 9999999)));
+    const float gold_x = by_build(0xD4, 0xB8);
+    bool started = false;
+    for (int j = 0; j < 7; ++j) {
+      const int digit = gold_digits[static_cast<size_t>(2 + j)];
+      if (digit <= 0 && !started && j != 6) continue;
+      started = true;
+      sheet(kSheetFont, std::max(digit, 0) + 101, gold_x + static_cast<float>(kGoldX[j]), panel_y + 0x90);
+    }
+    if (gold_digits[2] >= 0) sheet(kSheetFont, 138, by_build(0xDC, 0xC0), panel_y + 0x90);
+    if (gold_digits[5] >= 0) sheet(kSheetFont, 138, by_build(0xFC, 0xE0), panel_y + 0x90);
+    if (phase == Phase::Spoils) disc_spoils(dy);
+    else if (phase == Phase::Heal) disc_heal_menu(dy);
+    else if (phase == Phase::Healed) disc_healed(dy);
+    else if (star_page) disc_star_page(dy);
+    else disc_powerup(dy);
+    if (phase != Phase::Exit) sheet(kSheetHeadline, phase == Phase::Spoils ? 6 : 5, 0x134, 0x10, 0x606060, 2);
+  }
+  // The member's name at (0xB4, 0x42); a line per grown stat from y 0x52, 14 apart: its label at 0xC0 and the gain's last three digits
+  // (unsigned) as digit messages from 0xF0, 12 apart.
+  void disc_powerup(float dy) {
+    if (cur >= static_cast<int>(gain_list.size())) return;
+    const Row& row = rows[static_cast<size_t>(gain_list[static_cast<size_t>(cur)])];
+    ps1_text(row.name, 0xB4, 0x42 + dy);
+    float y = 0x52 + dy;
+    for (int k = 0; k < 7; ++k) {
+      const int gain = row.gain[static_cast<size_t>(k)];
+      if (gain == 0) continue;
+      ps1_text(message(kMsgStatUp + k), 0xC0, y);
+      ps1_digits(static_cast<u32>(gain), 3, 0xF0, y);
+      y += 14;
+    }
+  }
+  // The pulsing star (levu frame 4, added at a quarter), Received, the arrow, the star-up counter, the slash and the star level (digits
+  // 12 apart, the tens left out below 10), the leader's name and "and friends" (alone: blanks) after it, the two growth lines.
+  // Japanese: star (0xB4, 0x3C), Received 0xCC, arrow 0xD8, counter 0xE4, slash 0xFC, stars 0x108, name and lines from 0xB4. USA: star
+  // (0xEC, 0x3C), Received 0xB4, arrow 0xD8, counter tens 0xE8 and units 0xF4, slash 0x100, stars 0x108, name and lines from 0xAC.
+  void disc_star_page(float dy) {
+    const u32 level = static_cast<u32>(pulse);
+    sheet(kSheetPanels, 4, by_build(0xEC, 0xB4), 0x3C + dy, level | (level << 8) | (level << 16), 4);
+    ps1_text(message(kMsgReceived), by_build(0xB4, 0xCC), 0x42 + dy);
+    const float line = 0x52 + dy;
+    ps1_text(message(kMsgArrow), 0xD8, line);
+    ps1_text(message(kMsgSlash), by_build(0x100, 0xFC), line);
+    const std::array<int, 9> count = split_digits(static_cast<u32>(std::clamp(counter, 0, 99)));
+    const std::array<int, 9> stars = split_digits(static_cast<u32>(std::clamp(star, 0, 99)));
+    if (count[7] >= 0) ps1_text(message(kMsgDigit0 + count[7]), by_build(0xE8, 0xE4), line);
+    ps1_text(message(kMsgDigit0 + count[8]), by_build(0xF4, count[7] >= 0 ? 0xF0 : 0xE4), line);
+    if (stars[7] >= 0) ps1_text(message(kMsgDigit0 + stars[7]), 0x108, line);
+    ps1_text(message(kMsgDigit0 + stars[8]), static_cast<float>(stars[7] >= 0 ? 0x114 : 0x108), line);
+    const float left = by_build(0xAC, 0xB4);
+    const int lead = first_present();
+    const std::u32string name = lead >= 0 ? rows[static_cast<size_t>(lead)].name : std::u32string();
+    ps1_text(name, left, 0x82 + dy);
+    const bool friends = rows[1].present;
+    const float after_name = usa ? left + ps1_width(name) : left + 12.0f * (static_cast<float>(name.size()) - 6.0f);
+    ps1_text(message(friends ? kMsgFriends : kMsgAlone), after_name, 0x82 + dy);
+    for (int i = 0; i < 2; ++i) ps1_text(message((star >= 99 ? kMsgGrowth99 : kMsgGrowth) + i), left, 0x92 + 16.0f * static_cast<float>(i) + dy);
+  }
+  // The question and the three choices (eight message lines) and the blinking cursor (curs frame 1 / 2, 16 frames each).
+  void disc_heal_menu(float dy) {
+    for (int i = 0; i < 8; ++i) ps1_text(message(kMsgHeal + i), 0xA8 + static_cast<float>(kHealX[i]), 0x32 + static_cast<float>(kHealY[i]) + dy);
+    sheet(kSheetCursor, ((age >> 4) & 1) + 1, 0xA8, 0x72 + 16.0f * static_cast<float>(kHealCursorRow[std::clamp(cursor, 0, 2)]) + dy);
+  }
+  // The header at (0xC0, 0x3E); per healing element used, 18 apart: its colour plate (frame 3 at (0xAC, 0x4E)), the name centred on
+  // 0xE8 at y + 2, the "x" (elef frame 10) at (0x118, y + 4) and the count (elef frame digit + 11, tens at 0x11E, units 6 further).
+  void disc_healed(float dy) {
+    ps1_text(message(kMsgHealed), 0xC0, 0x3E + dy);
+    float y = 0x4E + dy;
+    for (const Healer& healer : used) {
+      const int ci = plate_of(healer.id);
+      if (ci >= 0) sheet(ci * 4, 3, 0xAC, y);
+      const std::u32string name = strip_icon(import::utf8_to_u32(tables->element_name(healer.id)));
+      ps1_text(name, 0xE8 - ps1_width(name) * 0.5f, y + 2);
+      sheet(kSheetCount, 10, 0x118, y + 4);
+      const std::array<int, 9> digits = split_digits(static_cast<u32>(std::clamp(healer.count, 0, 99)));
+      if (digits[7] >= 0) sheet(kSheetCount, digits[7] + 11, 0x11E, y + 4);
+      sheet(kSheetCount, digits[8] + 11, static_cast<float>(digits[7] >= 0 ? 0x124 : 0x11E), y + 4);
+      y += 18;
+    }
+  }
+  // The header at (0xBA, 0x3E); per drop, 18 apart from y 0x4E: an item's icon (sico frame kind + 1) at 0xB0 and its name at (0xC2,
+  // y + 2); an element's colour plate (frame 3) at (0xAC, y + 1) and its name centred on 0xE8 at y + 3.
+  void disc_spoils(float dy) {
+    ps1_text(message(kMsgSpoils), 0xBA, 0x3E + dy);
+    float y = 0x4E + dy;
+    int line = 0;
+    for (const Drop& drop : drops) {
+      if (line++ >= 6) break;
+      if (drop.element) {
+        sheet(std::clamp(drop.colour, 0, 5) * 4, 3, 0xAC, y + 1);
+        ps1_text(drop.name, 0xE8 - ps1_width(drop.name) * 0.5f, y + 3);
+      } else {
+        const int icon = static_cast<size_t>(drop.id) < item_icons.size() ? item_icons[static_cast<size_t>(drop.id)] : 0;
+        sheet(kSheetItemIcon, icon + 1, 0xB0, y);
+        ps1_text(drop.name, 0xC2, y + 2);
+      }
+      y += 18;
+    }
+  }
   // ---- heal menu logic ------------------------------------------------------------------------------------------
   // menu_pg.bin row of an element (16 bytes): +A & 3 healing tier, 0x80 all party, 0x40 consumable stack; +B 0x40 = healing element,
   // 0x3F colour mask (0x01 green, 0x02 white, 0x04 black, 0x08 red, 0x10 yellow, 0x20 blue = plate sheet order).
@@ -602,6 +907,12 @@ struct BattleResults::Impl {
     if (row.shown) return;
     row.shown = true;
     if (!row.ko) row.hp = std::min(row.hp + row.gain[0], 999);
+  }
+
+  int first_present() const {
+    for (int i = 0; i < battle::kPcSlots; ++i)
+      if (rows[static_cast<size_t>(i)].present) return i;
+    return -1;
   }
 
   // ---- state -----------------------------------------------------------------------------------------------------------
@@ -709,16 +1020,19 @@ bool BattleResults::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::S
   } else {
     log::warn("battle results: menu_pg.bin missing; the heal menu is never offered");
   }
+  impl.disc = !vfs.has_archive("hd");
+  // Disc mode draws the PS1 font one font pixel per PS1 pixel of the 320 x 216 screen.
+  if (impl.disc) impl.text.set_pixel_aspect(SY / SX);
   impl.fonts.init(vfs, impl.text);
   impl.fonts.set_classic(!impl.hd);
-  impl.load_hd_art();
+  impl.load_art();
   return true;
 }
 
 void BattleResults::shutdown() {
   Impl& impl = *impl_;
   if (!impl.ctx) return;
-  for (Impl::Tex* tex : {&impl.white, &impl.hd_row, &impl.hd_panel, &impl.hd_up, &impl.hd_star, &impl.hd_gg_on, &impl.hd_gg_off, &impl.hd_equip, &impl.hd_wall, &impl.hd_cursor}) impl.free_tex(*tex);
+  for (Impl::Tex* tex : {&impl.white, &impl.hd_row, &impl.hd_panel, &impl.hd_up, &impl.hd_star, &impl.hd_gg_on, &impl.hd_gg_off, &impl.hd_equip, &impl.hd_wall, &impl.hd_cursor, &impl.sheet_semi, &impl.sheet_opaque, &impl.disc_wall}) impl.free_tex(*tex);
   for (Impl::Tex& tex : impl.hd_plate) impl.free_tex(tex);
   for (auto& [key, tex] : impl.hd_face) impl.free_tex(*tex);
   impl.hd_face.clear();
@@ -733,14 +1047,15 @@ void BattleResults::set_art_mode(bool hd, bool force) {
   impl.hd = hd;
   if (changed && impl.ctx) {
     // A pure rendering swap: re-read every image, the font files and the portraits through the (re-pointed) VFS; the screen state is untouched.
-    for (Impl::Tex* tex : {&impl.hd_row, &impl.hd_panel, &impl.hd_up, &impl.hd_star, &impl.hd_gg_on, &impl.hd_gg_off, &impl.hd_equip, &impl.hd_wall, &impl.hd_cursor}) impl.free_tex(*tex);
+    for (Impl::Tex* tex : {&impl.hd_row, &impl.hd_panel, &impl.hd_up, &impl.hd_star, &impl.hd_gg_on, &impl.hd_gg_off, &impl.hd_equip, &impl.hd_wall, &impl.hd_cursor, &impl.sheet_semi, &impl.sheet_opaque, &impl.disc_wall}) impl.free_tex(*tex);
     for (Impl::Tex& tex : impl.hd_plate) impl.free_tex(tex);
     for (auto& [key, tex] : impl.hd_face) impl.free_tex(*tex);
     impl.hd_face.clear();
     impl.text.destroy();
     impl.text.init(*impl.ctx, *impl.sprites);
+    if (impl.disc) impl.text.set_pixel_aspect(SY / SX);
     impl.fonts.init(*impl.vfs, impl.text);
-    impl.load_hd_art();
+    impl.load_art();
   }
   // Only the font files and the portrait folder differ between the modes.
   impl.fonts.set_classic(!hd);
@@ -755,7 +1070,7 @@ void BattleResults::set_filter(bool bilinear) {
     if (!tex.ok()) return;
     tex.set = render::TexRef(tex.tex, impl.sampler_for(tex.kind));
   };
-  for (Impl::Tex* tex : {&impl.hd_row, &impl.hd_panel, &impl.hd_up, &impl.hd_star, &impl.hd_gg_on, &impl.hd_gg_off, &impl.hd_equip, &impl.hd_wall, &impl.hd_cursor}) rebind(*tex);
+  for (Impl::Tex* tex : {&impl.hd_row, &impl.hd_panel, &impl.hd_up, &impl.hd_star, &impl.hd_gg_on, &impl.hd_gg_off, &impl.hd_equip, &impl.hd_wall, &impl.hd_cursor, &impl.sheet_semi, &impl.sheet_opaque, &impl.disc_wall}) rebind(*tex);
   for (Impl::Tex& tex : impl.hd_plate) rebind(tex);
   for (auto& [key, tex] : impl.hd_face) rebind(*tex);
 }
@@ -911,13 +1226,21 @@ void BattleResults::draw(const render::Frame& frame, float vw, float vh, bool re
   Impl& impl = *impl_;
   if (impl.phase == Phase::Idle || impl.phase == Phase::Done || !impl.ctx) return;
   // RDE's canvas over the field and battle (render::overlay_fit), flatter than wide: the batch draws in a view whose y unit is sy / sx
-  // pixels, so one zoom serves both axes, and the text snaps to that grid.
-  const render::OverlayFit of = render::overlay_fit(vw, vh);
-  const float flat = of.sy / of.sx;
-  impl.zoom = of.sx, impl.ox = of.ox, impl.oy = of.oy / flat;
-  const float cols = vw / (SX * of.sx);
-  impl.edge_x0 = impl.canvas_cols > 0.0f ? -(cols - 320.0f) * 0.5f : 0.0f;
-  impl.edge_w = impl.canvas_cols > 0.0f ? cols : 320.0f;
+  // pixels, so one zoom serves both axes, and the text snaps to that grid. The PS1 screen played from the discs keeps the widened
+  // 4:3 frame.
+  float flat = 1.0f;
+  if (impl.disc) {
+    const render::Letterbox lb = render::Letterbox::wide(vw, vh, impl.canvas_cols);
+    impl.zoom = lb.scale / SX, impl.ox = lb.ox, impl.oy = lb.oy;
+    impl.edge_x0 = lb.x0, impl.edge_w = lb.w;
+  } else {
+    const render::OverlayFit of = render::overlay_fit(vw, vh);
+    flat = of.sy / of.sx;
+    impl.zoom = of.sx, impl.ox = of.ox, impl.oy = of.oy / flat;
+    const float cols = vw / (SX * of.sx);
+    impl.edge_x0 = impl.canvas_cols > 0.0f ? -(cols - 320.0f) * 0.5f : 0.0f;
+    impl.edge_w = impl.canvas_cols > 0.0f ? cols : 320.0f;
+  }
   struct View {
     render::SpriteBatch* sprites;
     render::TextBatch* batch;
@@ -928,20 +1251,32 @@ void BattleResults::draw(const render::Frame& frame, float vw, float vh, bool re
     }
   } view{impl.sprites, &impl.text, vw, vh};
   if (impl.draws++ == 0 || impl.pt == 0)
-    log::debug("battle results: phase {} at age {} (hd {}, art: wall {} row {} panel {})", static_cast<int>(impl.phase), impl.age, impl.hd, impl.hd_wall.ok(),
-               impl.hd_row.ok(), impl.hd_panel.ok());
+    log::debug("battle results: phase {} at age {} (hd {}, disc {}, art: wall {} row {} panel {})", static_cast<int>(impl.phase), impl.age, impl.hd, impl.disc,
+               impl.disc ? impl.disc_wall.ok() : impl.hd_wall.ok(), impl.disc ? impl.sheet_opaque.ok() : impl.hd_row.ok(), impl.hd_panel.ok());
   impl.sprites->begin(frame, vw, vh, resume);
-  impl.sprites->set_view(vw, vh / flat);
-  impl.text.set_pixel_grid(1.0f, flat);
+  if (flat != 1.0f) {
+    impl.sprites->set_view(vw, vh / flat);
+    impl.text.set_pixel_grid(1.0f, flat);
+  }
   impl.shift = 0;
-  impl.draw_wall();
-  impl.shift = -impl.layout_cols;
-  impl.draw_faces();
-  for (int slot = 0; slot < battle::kPcSlots; ++slot)
-    if (impl.rows[static_cast<size_t>(slot)].present) impl.draw_row(slot);
-  impl.shift = impl.layout_cols;
-  impl.draw_panel();
-  impl.draw_headline(impl.phase == Phase::Spoils);
+  if (impl.disc) {
+    impl.disc_wall_draw();
+    impl.shift = -impl.layout_cols;
+    impl.disc_faces();
+    for (int slot = 0; slot < battle::kPcSlots; ++slot)
+      if (impl.rows[static_cast<size_t>(slot)].present) impl.disc_row(slot);
+    impl.shift = impl.layout_cols;
+    impl.disc_panel();
+  } else {
+    impl.draw_wall();
+    impl.shift = -impl.layout_cols;
+    impl.draw_faces();
+    for (int slot = 0; slot < battle::kPcSlots; ++slot)
+      if (impl.rows[static_cast<size_t>(slot)].present) impl.draw_row(slot);
+    impl.shift = impl.layout_cols;
+    impl.draw_panel();
+    impl.draw_headline(impl.phase == Phase::Spoils);
+  }
   impl.shift = 0;
   // fades: from black over the first 0x3C frames, to black over the exit's 0x1E frames
   if (impl.age < kFadeIn) impl.rect(impl.edge_x0, 0, impl.edge_w, kScreenLines, rgba(0, 0, 0, 255 - 255 * impl.age / kFadeIn));

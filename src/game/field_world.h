@@ -46,6 +46,7 @@
 #include "game/room_view.h"
 #include "render/render_target.h"
 #include "render/shadow_pipeline.h"
+#include "import/ps1_text.h"
 #include "import/room_cards.h"
 #include "import/room_fixes.h"
 #include "import/text.h"
@@ -1339,6 +1340,15 @@ class FieldWorld final : public script::FieldHost {
   bool dialogue_kept_ = false, dialogue_below_ = false;
   // The executable's name / item / grammar-form strings (window widths).
   import::ExeStrings exe_strings_;
+  // The build the executable's string tables belong to (their table numbers differ per build); null when unknown.
+  const import::Ps1TextBuild* exe_build_ = nullptr;
+  // USA build: the pen advance of every single-byte glyph (the 256-byte width record) and the dialect column of character ids 0..49;
+  // both empty for the JP build.
+  Bytes usa_widths_, grammar_columns_;
+  // ps1_string_width's table number of grammar form 0 (form n = kGrammarTables + n).
+  static constexpr int kGrammarTables = 0x100;
+  // Pen advance of a text glyph code in pixels: the USA width record, else 8 below 0x75 and 12 from there (JP).
+  int glyph_width(u8 code) const { return usa_widths_.empty() ? (code < 0x75 ? 8 : 12) : usa_widths_[code - 0x20u]; }
   // entity whose script opened it
   int dialogue_owner_ = -1;
   int dialogue_face_ = -1;

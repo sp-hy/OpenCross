@@ -799,3 +799,4 @@ fld_move_hold_circle_hit = 0x800E7848;  # data: movement phase: index of the las
 fld_op_entity_distance_2d = 0x800C50C4;  # function: script op 4E: distance between two entities on X / Z, from the whole-unit halves of their positions
 fld_op_entity_distance_3d = 0x800C4FD8;  # function: script op 4F: 3-axis distance between two entities, from the whole-unit halves of their positions
 fld_op_jump_unless_near = 0x800C80F0;  # function: script op 79: jumps unless the 3D whole-unit distance from the running entity to the operand entity is under the limit
+fld_rect_corners = 0x800DAF50;  # function: Writes the four corner vectors (z 0) of a rectangle given as x, y, width, height

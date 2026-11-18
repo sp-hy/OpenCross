@@ -9,12 +9,14 @@
 #include "core/log.h"
 #include "data/char_name.h"
 #include "game/party_editor.h"
+#include "import/party_menu.h"
 #include "import/tim.h"
 #include "ui/localized_path.h"
 #include "ui/lowres.h"
 #include "ui/menu/game_state.h"
 #include "ui/ps1_font.h"
 #include "ui/title/nav.h"
+#include "ui/window_frame.h"
 
 namespace oc::ui {
 
@@ -64,6 +66,13 @@ struct Rec {
   int innate = 0, portrait = 0, body = 0;
 };
 
+// A PS1 quad maps `texels` over `pixels` and gives a pixel the texel nearest the texture coordinate at its left (top) edge; the target is
+// sampled at pixel centres, so the texture coordinates move by this many texels (and a hair, so a tie rounds up as on the PS1).
+float ps1_texel_bias(float texels, float pixels) { return 0.5f - 0.5f * texels / pixels + 1.0f / 1024.0f; }
+
+// The numbers' points: HP, max HP, then the six stats.
+constexpr int kPos[8][2] = {{0x72, 0x2E}, {0xBA, 0x2E}, {0x82, 0x39}, {0xE6, 0x39}, {0x82, 0x45}, {0xE6, 0x45}, {0x82, 0x51}, {0xE6, 0x51}};
+
 }  // namespace
 
 struct PartyScreen::Impl {
@@ -98,7 +107,9 @@ struct PartyScreen::Impl {
   };
   std::array<Sprt, 3> spr{};
   std::array<u8, 24> elem_rgb{};
-  bool tables_ok = false;
+  // Played from the PS1 discs (no hd archive): the screen draws the PS1's own art (draw_disc_*).
+  bool disc = false;
+  std::optional<import::PartyMenuLayout> layout;
 
   // State
   Kind kind = Kind::Party;
@@ -175,7 +186,7 @@ struct PartyScreen::Impl {
     // Classic art + [Video] Ps1ResUi: the PS1 face TIM of the same picture (cdrom/face/<stem>.tim,
     // 64 x 64, from cdrom.dat; hd/face/1999/NN_<stem>.png is its 4x redraw). The disc has one such TIM for every
     // portrait byte 0..91 (0x0E -> 0x5A l_zappa).
-    if (!hd && ps1_menus()) {
+    if ((!hd && ps1_menus()) || disc) {
       const std::string nm = kFaceNames[pb];
       const std::string stem = nm.size() > 3 && nm[2] == '_' ? nm.substr(3) : nm;
       if (Tex* disc_face = tim("cdrom/face/" + stem + ".tim"); disc_face && disc_face->set) return disc_face;
@@ -184,21 +195,14 @@ struct PartyScreen::Impl {
   }
 
   void load_tables() {
-    auto prg = vfs->read_disc("cdrom/prog/memmenu.prg");
-    tables_ok = false;
-    if (!prg || prg->size() < 0x1F00) return;
-    const Bytes& image = *prg;
-    auto rd16 = [&](size_t offset) { return static_cast<int>(static_cast<s16>(image[offset] | (image[offset + 1] << 8))); };
-    auto at = [](u32 address) { return static_cast<size_t>(address - 0x801EE000u); };
-    // Sprite records: {x, y, w, h, u, v, -, -, clut x, clut y, colour}.
-    for (size_t i = 0; i < spr.size(); ++i) {
-      const size_t offset = at(0x801F1DEC) + i * 0x16;
-      spr[i] = {rd16(offset), rd16(offset + 2)};
+    if (auto prg = vfs->read_disc("cdrom/prog/memmenu.prg")) layout = import::find_party_menu_layout(ByteSpan(prg->data(), prg->size()));
+    if (!layout) {
+      log::warn("party screen: memmenu.prg tables not found");
+      return;
     }
-    for (size_t i = 0; i < elem_rgb.size(); ++i) elem_rgb[i] = image[at(0x801F1ECC) + i];
-    // Sanity check: label sprite 3 is 176 wide.
-    tables_ok = rd16(at(0x801F1DEC) + 3 * 0x16 + 4) == 176;
-    if (!tables_ok) log::warn("party screen: memmenu.prg tables do not match");
+    for (size_t i = 0; i < spr.size(); ++i) spr[i] = {layout->labels[i].x, layout->labels[i].y};
+    for (size_t i = 0; i < layout->element_rgb.size(); ++i)
+      for (size_t k = 0; k < 3; ++k) elem_rgb[i * 3 + k] = layout->element_rgb[i][k];
   }
 
   // ---------------------------------------------------------------- text
@@ -281,14 +285,117 @@ struct PartyScreen::Impl {
     sprites->draw(set, ox + (left + dx) * kSx * zoom, oy + (y * kSy + yoff + (top - y) * kSy) * zoom, (right - left) * kSx * zoom,
                   (bottom - top) * ys * zoom, a0, b0, a1, b1, colour);
   }
-  // Portrait 64 x 32 PS1 px, drawn 4.0 canvas px per PS1 row and 7 px lower for portrait bytes 0..0x31.
+  // Portrait 64 x 32 PS1 px, drawn 4.0 canvas px per PS1 row and 7 px lower for portrait bytes 0..0x31. From the discs: the 64 x 64 face
+  // TIM squeezed into 64 x 32, texels 0..63 of each axis.
   void portrait(int character, float x, float y, u32 col, const Clip& cl = {}) {
     Tex* face_tex = face(character);
     if (!face_tex) return;
+    if (disc) {
+      const float su = ps1_texel_bias(63, 64), sv = ps1_texel_bias(63, 32);
+      return draw_quad(face_tex->set, x, y, 64, 32, su / 64.0f, sv / 64.0f, (63.0f + su) / 64.0f, (63.0f + sv) / 64.0f, col, cl);
+    }
     const int pb = recs[static_cast<size_t>(character)].portrait == 0x0E ? 0x5A : recs[static_cast<size_t>(character)].portrait;
     if (pb < 0x32) draw_quad(face_tex->set, x, y, 64, 32, 0, 0, 1, 1, col, cl, 4.0f, 7.0f);
     else draw_quad(face_tex->set, x, y, 64, 32, 0, 0, 1, 1, col, cl);
   }
+
+  // ---------------------------------------------------------------- the PS1 art (played from the discs)
+  // A window of the menus' skin map/window/w17.tim about (cx, cy), w x h sheet texels, two pixels per texel across.
+  void disc_window(float cx, float cy, int w, int h, u32 colour) {
+    Tex* skin = tim("cdrom/map/window/w17.tim");
+    if (!skin) return;
+    for (const WinQuad& quad : build_skin_rect(cx, cy, w, h, 2.0f))
+      draw_quad(skin->set, quad.x, quad.y, quad.w, quad.h, quad.u0, quad.v0, quad.u0 + quad.du, quad.v0 + quad.dv, colour);
+  }
+  // One rectangle of map/etc/fmenu.tim, one texel per pixel.
+  void disc_cell(float x, float y, float w, float h, float u, float v, u32 colour) {
+    Tex* sheet = tim("cdrom/map/etc/fmenu.tim");
+    if (!sheet || sheet->w <= 0 || sheet->h <= 0) return;
+    draw_quad(sheet->set, x, y, w, h, u / sheet->w, v / sheet->h, (u + w) / sheet->w, (v + h) / sheet->h, colour);
+  }
+  void disc_label(const import::PartyMenuSprite& label, float dy, u32 colour) {
+    disc_cell(static_cast<float>(label.x), static_cast<float>(label.y) + dy, static_cast<float>(label.w), static_cast<float>(label.h),
+              static_cast<float>(label.u), static_cast<float>(label.v), colour);
+  }
+  // A number as the PS1 lays it: six decimal places with the leading zeros blank (the units always shown); HP fields draw the last three
+  // in the large digits (16 x 12 cells at v 0x94, 16 px apart), the stats the last two in the small ones (14 x 12 at v 0xA2).
+  void disc_number(int value, bool large, int x, int y, u32 colour) {
+    std::array<int, 6> places{};
+    for (int i = 5, rest = std::max(0, value); i >= 0; --i, rest /= 10) places[static_cast<size_t>(i)] = rest % 10;
+    for (size_t i = 0; i < 5 && places[i] == 0; ++i) places[i] = -1;
+    const int cell = large ? 16 : 14, first = large ? 3 : 4;
+    for (int i = first; i < 6; ++i)
+      if (const int digit = places[static_cast<size_t>(i)]; digit >= 0)
+        disc_cell(static_cast<float>(x + (i - first) * cell), static_cast<float>(y), static_cast<float>(cell), 12, static_cast<float>(digit * cell),
+                  static_cast<float>(large ? 0x94 : 0xA2), colour);
+  }
+  // A flat line rectangle in an untextured PS1 colour (0xFF = full).
+  void disc_line(float x, float y, float w, float h, u32 colour) {
+    draw_quad(white, x, y, w, h, 0, 0, 1, 1, render::pack_rgba(static_cast<u8>(colour), static_cast<u8>(colour >> 8), static_cast<u8>(colour >> 16)));
+  }
+  // The cursor around a 64 x 32 cell at (x, y): white lines on the top and left, grey 0x40 lines on the right and bottom over the corners.
+  void disc_cursor(float x, float y, int fade, const Clip& cl) {
+    const float left = x - 3, top = y - 2, right = x + 0x41, bottom = y + 0x20;
+    auto line = [&](float x0, float y0, float x1, float y1, u32 colour) {
+      const float l = std::max(x0, cl.x0), t = std::max(y0, cl.y0), r = std::min(x1 + 1, cl.x1), b = std::min(y1 + 1, cl.y1);
+      if (l < r && t < b) disc_line(l, t, r - l, b - t, sub(colour, fade));
+    };
+    line(left, top, right, top, 0xFFFFFF);
+    line(left, top, left, bottom, 0xFFFFFF);
+    line(right, top, right, bottom, 0x404040);
+    line(left, bottom, right, bottom, 0x404040);
+  }
+  // The name as the overlay writes it into video memory: the field font's glyphs in 12-texel cells, white ink, 11 rows, one blank
+  // texel after the last cell (at least six cells).
+  Tex* name_strip(const std::u32string& str, const import::Ps1Font& font) {
+    std::string key = "ps1 name";
+    for (char32_t ch : str) key += ' ' + std::to_string(static_cast<u32>(ch));
+    if (auto it = texs.find(key); it != texs.end()) return it->second.get();
+    constexpr int kCell = 12, kRows = 11;
+    const int width = static_cast<int>(std::max<size_t>(str.size(), 6)) * kCell + 1;
+    std::vector<u8> rgba(static_cast<size_t>(width * kRows * 4), 0);
+    for (size_t i = 0; i < str.size(); ++i)
+      if (const u16* rows = font.rows(font.index_for(str[i])))
+        for (int y = 0; y < kRows; ++y)
+          for (int x = 0; x < kCell; ++x)
+            if (rows[y] & (0x8000u >> x)) std::fill_n(&rgba[static_cast<size_t>((y * width + static_cast<int>(i) * kCell + x) * 4)], 4, u8{255});
+    return store(key, static_cast<u32>(width), kRows, rgba.data(), false);
+  }
+  // `pixels` columns from (x, y) showing the strip from `u` on, each texel two pixels wide: the first texel shows one pixel
+  // (ps1_texel_bias).
+  void stretched(const Tex& strip, float x, float y, float u, float pixels, u32 colour) {
+    const float bias = ps1_texel_bias(1, 2);
+    draw_quad(strip.set, x, y, pixels, strip.h, (u + bias) / strip.w, 0, (u + bias + pixels / 2) / strip.w, 1, colour);
+  }
+  // The shown member's name in the field font, each glyph texel two pixels wide: the overlay's three name quads, the last one first
+  // (a darker copy further right, then two copies one pixel apart). The JP overlay draws six 12-texel cells as one quad of 144 pixels; the
+  // USA one draws every glyph's cell as its own quad of 23 pixels (no column of the next cell shows), one texel further than the font's
+  // advance from the previous.
+  void disc_name(int character, int fade) {
+    if (!layout) return;
+    const std::u32string header = name(character);
+    if (header.empty()) return;
+    const int slot = def_slot();
+    const render::FaceId face_id = fonts.face(slot);
+    const import::Ps1Font* font = face_id == render::kNoFace ? nullptr : text->ps1_font(face_id);
+    Tex* strip = font ? name_strip(header, *font) : nullptr;
+    if (!strip) return;
+    for (size_t copy = layout->name.size(); copy-- > 0;) {
+      const import::PartyMenuSprite& quad = layout->name[copy];
+      const u32 colour = c80(sub(quad.colour, fade));
+      if (jp()) {
+        stretched(*strip, static_cast<float>(quad.x), static_cast<float>(quad.y), 0, static_cast<float>(quad.w), colour);
+        continue;
+      }
+      float pen = static_cast<float>(quad.x);
+      for (size_t i = 0; i < header.size(); ++i) {
+        stretched(*strip, pen, static_cast<float>(quad.y), static_cast<float>(i * 12), static_cast<float>(quad.w - 1), colour);
+        const int glyph = font->index_for(header[i]);
+        pen += 2.0f * static_cast<float>((glyph < 0 ? 0 : font->advance(glyph)) + 1);
+      }
+    }
+  }
+  void draw_disc_text(bool relief, bool grid_mode, bool reserve_on, int fade);
 
   void draw_screen();
 };
@@ -306,6 +413,7 @@ bool PartyScreen::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spr
   impl.white = render::TexRef(impl.white_tex, impl.nearest);
   impl.fonts.init(vfs, text);
   impl.fonts.set_classic(!impl.hd);
+  impl.disc = !vfs.has_archive("hd");
   impl.load_tables();
   return impl.fonts.face(font::kBn, false) != render::kNoFace;
 }
@@ -513,7 +621,13 @@ void PartyScreen::Impl::draw_screen() {
 
   // Main layer: backdrop, grid cells (visible rows), then the party slots (Party) or the fixed slot 0 + silhouette and icon (Relief).
   grouped = true;
-  if (Tex* bg = png(localized_path(*vfs, relief ? "hd/menu/shapes/memmenu2.png" : "hd/menu/shapes/memmenu.png", lang))) {
+  if (disc) {
+    // The three windows: Member, Status, Current Party (with the reserve, the last one reaches down over both rows).
+    disc_window(0x1D0, 0x70, 0x88, 0xAA, col(0x808080));
+    disc_window(0xA0, 0x40, 0x66, 0x4A, col(0x808080));
+    if (reserve_on) disc_window(0xA0, (party_y + kReserveY + 32) / 2, 0x66, static_cast<int>(kReserveY + 32 - party_y), col(0x808080));
+    else disc_window(0xA0, 0xB5, 0x66, 0x20, col(0x808080));
+  } else if (Tex* bg = png(localized_path(*vfs, relief ? "hd/menu/shapes/memmenu2.png" : "hd/menu/shapes/memmenu.png", lang))) {
     if (!reserve_on) {
       draw_quad(bg->set, 0, 0, 640, 216, 0, 0, 1, 1, col(0x808080));
     } else {
@@ -551,8 +665,13 @@ void PartyScreen::Impl::draw_screen() {
     // Record 0 at (0x40, 0xA5), then the relief member as a black silhouette.
     portrait(0, 0x40, 0xA5, col(0x808080));
     if (rel.relief() >= 0) portrait(rel.relief(), kReliefSlot * 0x44 + 0x40, 0xA5, col(0x000000));
-    // The arrow (memmenu2_cur.png, 8 cells of 16 x 16) at (0x84 + (t & 0x1F), 0xAD), n = (~(t >> 3)) & 3.
-    if (Tex* ic = png("hd/menu/memmenu2_cur.png")) {
+    // The arrow (memmenu2_cur.png, 8 cells of 16 x 16; from the discs the skin sheet's row of cells at v 80) at (0x84 + (t & 0x1F), 0xAD),
+    // n = (~(t >> 3)) & 3.
+    if (Tex* skin = disc ? tim("cdrom/map/window/w17.tim") : nullptr) {
+      const int tick = frame, cell = (~(tick >> 3)) & 3;
+      draw_quad(skin->set, static_cast<float>(0x84 + (tick & 0x1F)), 0xAD, 16, 16, static_cast<float>(cell * 16) / skin->w, 80.0f / skin->h,
+                static_cast<float>(cell * 16 + 16) / skin->w, 96.0f / skin->h, col(0x808080));
+    } else if (Tex* ic = disc ? nullptr : png("hd/menu/memmenu2_cur.png")) {
       const int tick = frame, cell = (~(tick >> 3)) & 3;
       draw_quad(ic->set, static_cast<float>(0x84 + (tick & 0x1F)), 0xAD, 16, 16, static_cast<float>(cell) / 8.0f, 0, static_cast<float>(cell + 1) / 8.0f, 1,
                 col(0x808080));
@@ -569,9 +688,10 @@ void PartyScreen::Impl::draw_screen() {
           portrait(character, static_cast<float>((index - reserve_first) * 0x44 + 0x40), kReserveY, col(ed.slot() == 3 + index ? 0x000000 : 0x404040));
   }
   // Top layer: lifted grid portrait + grid cursor (grid mode), lifted slot portrait + slot cursor.
-  Tex* cur = png("hd/menu/memmenu_cur.png");
+  Tex* cur = disc ? nullptr : png("hd/menu/memmenu_cur.png");
   auto cursor = [&](float x, float y, const Clip& cl) {
-    if (cur) draw_quad(cur->set, x - 3, y - 2, 69, 35, 0, 0, 1, 1, col(0x808080), cl);
+    if (disc) disc_cursor(x, y, fade, cl);
+    else if (cur) draw_quad(cur->set, x - 3, y - 2, 69, 35, 0, 0, 1, 1, col(0x808080), cl);
   };
   if (grid_mode) {
     const int i = party_grid.cursor(), character = party_grid.cell(i);
@@ -591,14 +711,16 @@ void PartyScreen::Impl::draw_screen() {
     if (const int character = ed.at(ed.slot()); character >= 0) portrait(character, x - 2, y - 1, col(0x808080));
     cursor(x, y, {});
     // Arrows (the Relief screen's, cell 0; mirrored on the left) when the reserve row scrolls past slots on either side.
-    if (Tex* arrow = reserve_on ? png("hd/menu/memmenu2_cur.png") : nullptr) {
+    if (Tex* arrow = !reserve_on ? nullptr : disc ? tim("cdrom/map/window/w17.tim") : png("hd/menu/memmenu2_cur.png")) {
       constexpr float kArrow = 10;
-      if (reserve_first > 0) draw_quad(arrow->set, 0x34, kReserveY + 11, kArrow, kArrow, 1.0f / 8.0f, 0, 0, 1, col(0x808080));
-      if (reserve_last < static_cast<int>(ed.reserve().size()))
-        draw_quad(arrow->set, 0x108, kReserveY + 11, kArrow, kArrow, 0, 0, 1.0f / 8.0f, 1, col(0x808080));
+      // The cell's texel rectangle: from the discs the skin sheet's first arrow (16 x 16 at v 80), else the first eighth of the strip.
+      const float u1 = disc ? 16.0f / arrow->w : 1.0f / 8.0f, v0 = disc ? 80.0f / arrow->h : 0.0f, v1 = disc ? 96.0f / arrow->h : 1.0f;
+      if (reserve_first > 0) draw_quad(arrow->set, 0x34, kReserveY + 11, kArrow, kArrow, u1, v0, 0, v1, col(0x808080));
+      if (reserve_last < static_cast<int>(ed.reserve().size())) draw_quad(arrow->set, 0x108, kReserveY + 11, kArrow, kArrow, 0, v0, u1, v1, col(0x808080));
     }
   }
 
+  if (disc) return draw_disc_text(relief, grid_mode, reserve_on, fade);
   // Text in queue order: help, labels, stat labels, "●", numbers, name header.
   // Help text: key 6, or 5 in grid mode (Relief is always in grid mode). One line per row, def slot, mul 1.2,
   // H4(col, 0x6319, 4), pitch 12 * sy; first line at y 111 (FR / IT) or 120. The shared reserve panel takes its place.
@@ -674,7 +796,6 @@ void PartyScreen::Impl::draw_screen() {
     draw_text(font::kKb, field < 2 ? 1.0f : 0.9f, static_cast<float>(x + dx), static_cast<float>(y), to_u32(digits), sub(0x808080, fade), 0x6319, 6,
               false);
   };
-  static constexpr int kPos[8][2] = {{0x72, 0x2E}, {0xBA, 0x2E}, {0x82, 0x39}, {0xE6, 0x39}, {0x82, 0x45}, {0xE6, 0x45}, {0x82, 0x51}, {0xE6, 0x51}};
   for (int field = 0; field < 8; ++field) {
     const int value = !shown_rec ? 0 : field == 0 ? shown_rec->hp : field == 1 ? shown_rec->max_hp : shown_rec->st[static_cast<size_t>(field - 2)];
     num(value, field, kPos[field][0], kPos[field][1]);
@@ -695,6 +816,40 @@ void PartyScreen::Impl::draw_screen() {
     }
     draw_text(slot, mul, 0x44, 0x1C, header, sub(0x696969, fade), 0x6318, 7, true, dy);
   }
+}
+
+// From the discs every word is a sprite of map/etc/fmenu.tim placed by the overlay's table: the help line (the member grid's or the
+// party slots'), the captions (the Relief screen has no "Current Party"), the stat labels and the innate dot in the element's colour;
+// then the numbers and the name.
+void PartyScreen::Impl::draw_disc_text(bool relief, bool grid_mode, bool reserve_on, int fade) {
+  if (!layout) return;
+  const auto& labels = layout->labels;
+  auto tint = [&](u32 colour) { return c80(sub(colour, fade)); };
+  if (!reserve_on) disc_label(labels[grid_mode ? 5 : 6], 0, tint(labels[5].colour));
+  disc_label(labels[0], 0, tint(labels[0].colour));
+  if (!relief) disc_label(labels[1], reserve_on ? kPanelShift : 0.0f, tint(labels[1].colour));
+  disc_label(labels[2], 0, tint(labels[2].colour));
+  disc_label(labels[3], 0, tint(labels[3].colour));
+  if (reserve_on) {
+    const int reserve_font = jp() ? font::kKb : font::kBn;
+    draw_text(reserve_font, 1.0f, static_cast<float>(spr[1].x), static_cast<float>(spr[1].y) + kReserveLabelDrop,
+              kReserveLabel[std::clamp(static_cast<int>(lang), 0, 5)], sub(0x808080, fade), 0x6319, 6, false);
+  }
+  const int shown = relief ? rel.shown() : ed.shown();
+  const Rec* shown_rec = shown >= 0 ? &recs[static_cast<size_t>(shown)] : nullptr;
+  if (shown_rec) {
+    size_t bit = 0;
+    for (int bits = shown_rec->innate >> 2; bit < 5 && !(bits & 1); ++bit) bits >>= 1;
+    const auto& rgb = layout->element_rgb[bit];
+    disc_label(labels[4], 0, tint(rgb[0] | rgb[1] << 8 | rgb[2] << 16));
+  }
+  for (int field = 0; field < 8; ++field) {
+    const int value = !shown_rec ? 0 : field == 0 ? shown_rec->hp : field == 1 ? shown_rec->max_hp : shown_rec->st[static_cast<size_t>(field - 2)];
+    disc_number(value, field < 2, kPos[field][0], kPos[field][1], tint(0x808080));
+  }
+  const game::PartyGrid& party_grid = grid();
+  const int named = grid_mode ? (party_grid.scrolling() ? -1 : party_grid.cell(party_grid.cursor())) : ed.at(ed.slot());
+  if (named >= 0) disc_name(named, fade);
 }
 
 void PartyScreen::draw(const render::Frame& frame, float vw, float vh, bool resume) {
@@ -732,9 +887,9 @@ void PartyScreen::draw(const render::Frame& frame, float vw, float vh, bool resu
 void PartyScreen::draw_view(const render::Frame& frame, float vw, float vh, bool resume) {
   Impl& impl = *impl_;
   // 4:3: RDE's canvas over the field (render::overlay_fit), drawn in a view whose y unit is sy / sx pixels so one zoom serves both
-  // axes. Widescreen: the widened frame, one layer column = 2 PS1 px of this screen.
+  // axes. Widescreen, and the PS1 screen played from the discs: the widened frame, one layer column = 2 PS1 px of this screen.
   float flat = 1.0f;
-  if (impl.canvas_cols > 0.0f) {
+  if (impl.canvas_cols > 0.0f || impl.disc) {
     const render::Letterbox letterbox = render::Letterbox::wide(vw, vh, impl.canvas_cols);
     impl.zoom = letterbox.scale / (2.0f * kSx), impl.ox = letterbox.ox, impl.oy = letterbox.oy;
     impl.edge_x0 = 2.0f * letterbox.x0, impl.edge_w = 2.0f * letterbox.w;

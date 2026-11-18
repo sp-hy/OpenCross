@@ -37,12 +37,21 @@ add_library(oc_text STATIC
   ps1_text.cpp
   ps1_font.h
   ps1_font.cpp
+  console_font.h
+  console_font.cpp
+  console_font_chars.inc
   battle_hud.h
   battle_hud.cpp
+  menu_art.h
+  menu_art.cpp
+  party_menu.h
+  party_menu.cpp
+  name_menu.h
+  name_menu.cpp
   spritefont.h
   spritefont.cpp
 )
-target_link_libraries(oc_text PUBLIC oc_import oc_vfs)
+target_link_libraries(oc_text PUBLIC oc_import oc_vfs oc_stage)
 
 # PS1 disc images (containers, the game's file table, build identification). Unlike the decoders above it opens the image files
 # itself.

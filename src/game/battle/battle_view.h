@@ -48,6 +48,7 @@
 #include "game/battle/battle_fx.h"
 #include "game/battle/battle_fx_textures.h"
 #include "game/battle/cast_header.h"
+#include "game/battle/hud_sheets.h"
 #include "game/disc_index.h"
 #include "game/effects/gpu_effects.h"
 #include "game/effects/light_extract.h"
@@ -964,6 +965,8 @@ class BattleView {
   void add_sheet(int type, int frame, float x, float y, u32 colour = 0x808080, int mode = 0);
   // The same frame with its picture's top-left corner at PS1 (left, top).
   void add_sheet_at(int type, int frame, float left, float top, u32 colour = 0x808080, int mode = 0);
+  // A w x h rectangle of a frame's picture at (dx, dy) from the frame's origin, opaque, its top-left at PS1 (left, top).
+  void add_sheet_cut(int type, int frame, int dx, int dy, int w, int h, float left, float top);
   // A name in the battle font (sheet 0x04 glyph frames) from PS1 (x, y), at most `max_glyphs` glyphs; returns the pen's end x.
   float add_sheet_name(std::u32string_view text, float x, float y, u32 colour = 0x808080, int max_glyphs = 6);
   // The battle-font glyph frame of a character (0 = none).
@@ -1329,11 +1332,7 @@ class BattleView {
   // Disc mode: every frame of the PS1 HUD sheets packed into two nearest-sampled atlases, the texels with the semi-transparency bit and the
   // others; sheet_frames_[type / 4][frame - 1] = a frame's picture (offset from its origin and size in PS1 px, atlas UVs).
   bool ps1_hud_ = false;
-  struct SheetFrame {
-    int x = 0, y = 0, w = 0, h = 0;
-    float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
-  };
-  std::array<std::vector<SheetFrame>, import::kHudSheets> sheet_frames_;
+  std::vector<std::vector<SheetFrame>> sheet_frames_;
   Tex sheet_semi_, sheet_opaque_;
   std::array<u8, 512> name_advance_{};
   import::JpGlyphs glyph_codes_;

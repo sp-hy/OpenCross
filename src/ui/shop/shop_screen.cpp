@@ -48,6 +48,8 @@ struct Cmd {
   int slot = -1;
   font::Ink ink;
   int align = 0;
+  // Added to the picture (the PS1's B + F semi-transparency) instead of alpha-blended.
+  bool add = false;
 };
 
 enum class Operation { None, Buy, SellElement, Forge, Break, SellGear };
@@ -179,10 +181,12 @@ struct ShopScreen::Impl {
     if (!shop_data.load_waa_shop(files)) log::warn("shop: waa_shop.bin missing; using the table loader rows");
     if (!texs.init(context, files, sprite_batch, "shop")) return false;
     lowres.init(context, sprite_batch);
-    fonts.init(files, text_batch);
+    fonts.init(files, text_batch, true);
     fonts.set_classic(mode == ArtMode::Original);
-    skin = texs.load("hd/window/w01.png");
-    cursor_tex = texs.load("hd/menu/menutest_cur.png");
+    if (texs.hd()) {
+      skin = texs.load("hd/window/w01.png");
+      cursor_tex = texs.load("hd/menu/menutest_cur.png");
+    }
     ready = fonts.face(font::kBn, false) != render::kNoFace;
     if (!ready) log::error("shop: no usable font");
     return ready;
@@ -589,8 +593,11 @@ struct ShopScreen::Impl {
     cmd.kind = Cmd::Img;
     cmd.set = tex->set;
     cmd.x = x + group_dx, cmd.y = y, cmd.w = w, cmd.h = h, cmd.u0 = u0, cmd.v0 = v0, cmd.u1 = u1, cmd.v1 = v1, cmd.color = colour;
+    cmd.add = img_add;
     cmds.push_back(std::move(cmd));
   }
+  // Img() draws additively while set (the disc's semi-transparent compass meshes).
+  bool img_add = false;
   // Fallback frame when a menu-main shape is missing: a 3 x 3 grid of the w01 window skin around a dark fill.
   void Panel(float x, float y, float w, float h) {
     if (skin && skin->set) {
@@ -617,7 +624,16 @@ struct ShopScreen::Impl {
   // Panel frame with its top-left corner at unit (x, y), in both art modes. Classic art with the PS1 disc textures builds the frame from
   // the disc's "wind" sheet pieces (the shape only supplies the panel size and its caption notch); the interior stays transparent so
   // the parchment shows through.
+  // Played from the discs (no HD art) the panel is the sheet frame itself (lines, caption words, icons), its size from the frame origin
+  // to its far edges.
   void Frame(int frame, float x, float y, u32 colour = kWhite, float* out_w = nullptr, float* out_h = nullptr) {
+    if (!texs.hd()) {
+      Tex* panel = texs.sheet("main", frame);
+      if (out_w) *out_w = panel ? panel->ox + panel->w : 100;
+      if (out_h) *out_h = panel ? panel->oy + panel->h : 50;
+      if (panel) Img(panel, SX(x + panel->ox), SY(y + panel->oy), SX(panel->w), SY(panel->h), 0, 0, 1, 1, colour);
+      return;
+    }
     Tex* tex = texs.shape(frame, lang);
     const float w = tex ? tex->w / 4.0f : 100, h = tex ? tex->h / 4.0f : 50;
     if (out_w) *out_w = w;
@@ -745,10 +761,12 @@ struct ShopScreen::Impl {
     }
     if (colour_mode == Mode::Centre && (col & 0xFFFFFF) == 0x909090) col = 0x808080;
     const font::SlotInfo& slot_info = font::slot(slot);
-    float scale = slot_info.scale * mul;
+    // Played from the discs: the disc's menu font at one font pixel per PS1 pixel, its pen at the PS1 point (no RDE nudges).
+    const bool disc_font = fonts.ps1();
+    float scale = disc_font ? 2.5f / render::TextBatch::kPs1PixelScale : slot_info.scale * mul;
     const float sy = 960.0f / 432.0f;
-    const float canvas_x = x * 2.5f + slot_info.off_x * scale;
-    float canvas_y = std::floor(y + dy) * sy + slot_info.off_y * scale;
+    const float canvas_x = disc_font ? x * 2.5f : x * 2.5f + slot_info.off_x * scale;
+    float canvas_y = disc_font ? y * sy : std::floor(y + dy) * sy + slot_info.off_y * scale;
     fonts.prepare(slot, str);
     font::Ink ink = font::h1(col, 20, 6);
     int align = font::kLeft;
@@ -774,6 +792,15 @@ struct ShopScreen::Impl {
       case Mode::Right: align = font::kRight; break;
     }
     if (align_override >= 0) align = align_override;
+    if (disc_font) {
+      // The PS1 colour word (0x80 = 1.0) on the font's own greys; Base / Centre keep the PS1 size.
+      ink.normal = render::pack_rgba(static_cast<u8>(std::min(255u, (col & 0xFF) * 2)), static_cast<u8>(std::min(255u, (col >> 8 & 0xFF) * 2)),
+                                     static_cast<u8>(std::min(255u, (col >> 16 & 0xFF) * 2)));
+      scale = 2.5f / render::TextBatch::kPs1PixelScale;
+    }
+    // The console font's centred strings sit 3 pixels right of the measured centre.
+    const import::Ps1Font* face_font = disc_font ? text->ps1_font(fonts.face(slot)) : nullptr;
+    const float centre_dx = align == font::kCentre && face_font && face_font->build() == import::Ps1Font::Build::Console ? 3.0f * 2.5f : 0.0f;
     auto push = [&](const std::u32string& line_text, float line_y) {
       Cmd cmd;
       cmd.kind = Cmd::Text;
@@ -782,7 +809,7 @@ struct ShopScreen::Impl {
       cmd.ink = ink;
       cmd.align = align;
       cmd.scale = scale;
-      cmd.x = canvas_x + group_dx, cmd.y = line_y;
+      cmd.x = canvas_x + group_dx + centre_dx, cmd.y = line_y;
       cmds.push_back(std::move(cmd));
     };
     if (colour_mode != Mode::Lines) {
@@ -855,19 +882,20 @@ struct ShopScreen::Impl {
     if (Tex* tex = texs.plate(kPlateTim[colour_slot], ps1_on())) Img(tex, SX(x), SY(y), SX(184), SY(24), 0, 0, 1, 1, grey(0x70));
   }
   // The dial needle (handle.png turned by `angle`, 4096 = 2 pi) centred on the pivot at unit (pivot_x, pivot_y); see NeedleTexture.
-  void Hand(float pivot_x, float pivot_y, int angle) {
+  void Hand(float pivot_x, float pivot_y, int angle, u32 tint = kWhite) {
     const NeedleTexture::Quad quad = needle_tex.get(texs, *vfs, angle, 2.5f, 960.0f / 432.0f);
     if (!quad.tex) {
       log::warn("shop: hd/menu/handle.png not available");
       return;
     }
-    Img(quad.tex, SX(pivot_x) - quad.half_w, SY(pivot_y) - quad.half_h, 2 * quad.half_w, 2 * quad.half_h, 0, 0, 1, 1, rgb(222, 222, 222));
+    Img(quad.tex, SX(pivot_x) - quad.half_w, SY(pivot_y) - quad.half_h, 2 * quad.half_w, 2 * quad.half_h, 0, 0, 1, 1, texs.hd() ? rgb(222, 222, 222) : tint);
   }
 
   // Caption and icon in the top notch of a list panel at unit (x, y): the weapon / armour / accessory frames 0x9A..0x9C and 0xA0..0xA2
   // use EquipIcon cells 0..2 with their own caption offsets, every other frame the Elements cell 3. Classic art with the disc textures
   // draws the frame's own header part from the menutim "icon" sheet at its part offset instead of the EquipIcon cell.
   void panel_caption(int frame, float x, float y) {
+    if (!texs.hd()) return;
     int cell = 3;
     float caption_x = 35;
     const char* key = "Elements";
@@ -907,7 +935,15 @@ struct ShopScreen::Impl {
     } else {
       rect(-reach, 0, kCanvasW + 2.0f * reach, kCanvasH, rgb(60, 38, 18));
     }
-    if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
+    if (!texs.hd()) {
+      // Added at a quarter, the PS1's B + F / 4.
+      img_add = true;
+      if (Tex* deco = texs.mesh("deco", ps1::kMeshAspect, 0x1000, 0x808080, true))
+        Img(deco, SX(0x48 + deco->ox), SY(0x187 + deco->oy), SX(deco->w), SY(deco->h), 0, 0, 1, 1, shade(kWhite, 0.25f));
+      if (Tex* dec1 = texs.mesh("dec1", ps1::kMeshAspect * 0xCCC >> 12, 0xCCC, 0x808080, true))
+        Img(dec1, SX(0xD9 + dec1->ox), SY(-0x10 + dec1->oy), SX(dec1->w), SY(dec1->h), 0, 0, 1, 1, shade(kWhite, 0.25f));
+      img_add = false;
+    } else if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
       Img(deco, SX(-56), SY(242), SX(256), SY(298), 0, 0, 1, 1, rgb(150, 150, 170));
       Img(deco, SX(115), SY(-135), SX(204), SY(238), 0, 0, 1, 1, rgb(150, 150, 170));
     }
@@ -915,10 +951,24 @@ struct ShopScreen::Impl {
   // Compass dial of the top lists: the deco disc at (382, 293) 128 x 149, the needle on the pivot (446, 367) aimed at the selected
   // label, the labels (2 for the element shop, 3 for the smith) with leader lines for list entries 2..4: along the label, a diagonal
   // 11.5 across and 10.8 down, then on toward the needle tip.
+  // Played from the discs the dial is sheet art at its centre (446, 367) over the half-scale deco mesh: the leader lines (frame
+  // `lines_frame`, 0x88 element shop, 0x8B blacksmith) and one label frame per entry from `label_frame` (element shop 0x89 Buy / Sell,
+  // blacksmith 0x94 Forge / Disassemble / Trade-in, 0x97 Weapons / Armor / Accessories), the chosen one in 0x004E77. While a list
+  // has the focus (`bright` false) the lines, labels and needle are drawn at half brightness; the deco keeps its own.
+  void disc_dial(int sel, int lines_frame, int label_frame, int count, bool bright) {
+    if (Tex* deco = texs.mesh("deco", ps1::kMeshAspect * 0x800 >> 12, 0x800, 0x808080, true))
+      img_add = true, Img(deco, SX(446 + deco->ox), SY(367 + deco->oy), SX(deco->w), SY(deco->h), 0, 0, 1, 1, shade(kWhite, 0.25f)), img_add = false;
+    const float level = bright ? 1.0f : 0.5f;
+    Sprite(lines_frame, 446, 367, shade(kWhite, level));
+    Hand(446, 367, needle.ticked ? needle.angle : kNeedleAng[std::clamp(sel, 0, 2)], shade(kWhite, level));
+    for (int entry = 0; entry < count; ++entry) Sprite(label_frame + entry, 446, 367, shade(entry == sel ? rgb(0xEE, 0x9C, 0) : kWhite, level));
+  }
   void compass(int sel, const std::vector<std::string>& labels, bool bright) {
     static const float kPos[2][3][2] = {{{301, 333}, {292, 349}, {0, 0}}, {{299, 332}, {289, 349}, {279, 365}}};
     const bool two_labels = labels.size() == 2;
-    if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) Img(deco, SX(382), SY(293), SX(128), SY(149), 0, 0, 1, 1, bright ? rgb(200, 200, 215) : rgb(100, 100, 108));
+    if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
+      Img(deco, SX(382), SY(293), SX(128), SY(149), 0, 0, 1, 1, bright ? rgb(200, 200, 215) : rgb(100, 100, 108));
+    }
     // Without update() (screenshots) the needle sits at the exact table angle.
     const int angle = needle.ticked ? needle.angle : kNeedleAng[std::clamp(sel, 0, 2)];
     Hand(446, 367, angle);
@@ -941,9 +991,91 @@ struct ShopScreen::Impl {
     for (size_t i = 0; i < labels.size(); ++i)
       RT(7, kPos[two_labels ? 0 : 1][i][0], kPos[two_labels ? 0 : 1][i][1], labels[i], static_cast<int>(i) == sel ? 0x004E77u : 0x808080u);
   }
-  // Footer: star count (star glyph at x, y + 2), "%2d" counts, PLAY label + time, gold + unit.
+  // Played from the discs: frame `frame` of the menu sheet with its origin at unit (x, y), and a run of small sheet digits (frames 21..30,
+  // ":" 35, "." 32) from x, 8 apart, or big ones (9..18, 12 apart).
+  void Sprite(int frame, float x, float y, u32 colour = kWhite) { Sprite("main", frame, x, y, colour); }
+  void Sprite(std::string_view sheet, int frame, float x, float y, u32 colour = kWhite) {
+    if (Tex* tex = texs.sheet(sheet, frame)) Img(tex, SX(x + tex->ox), SY(y + tex->oy), SX(tex->w), SY(tex->h), 0, 0, 1, 1, colour);
+  }
+  void SpriteText(const std::string& str, float x, float y, bool big, u32 colour = kWhite) {
+    for (char ch : str) {
+      if (ch >= '0' && ch <= '9') Sprite((big ? 9 : 21) + (ch - '0'), x, y, colour);
+      else if (!big && ch == ':') Sprite(35, x, y, colour);
+      else if (!big && ch == ',') Sprite(32, x, y, colour);
+      x += big ? 12.0f : 8.0f;
+    }
+  }
+  // A grouped amount (the 11-cell gold template) in small digits from x, then "G" (frame 0x21) at x + 0x58.
+  void SpriteAmount(long long amount, float x, float y) {
+    SpriteText(grouped_gold(static_cast<u32>(std::max(0LL, amount))), x, y, false);
+    Sprite(0x21, x + 0x58, y);
+  }
+  // A count as the "suji" sheet draws it: its sign or "x" frame at x, the tens digit (frame 0x0B + digit, only when not 0) at x + 8,
+  // the units at x + 16.
+  void SujiCount(int sign_frame, int value, float x, float y, u32 colour) {
+    Sprite("suji", sign_frame, x, y, colour);
+    if (value / 10 % 10) Sprite("suji", 0x0B + value / 10 % 10, x + 8, y, colour);
+    Sprite("suji", 0x0B + value % 10, x + 16, y, colour);
+  }
+  // PS1 colour word (0x80 = 1.0) as a modulation colour.
+  static u32 ps1_colour(u32 bgr) {
+    return rgb(static_cast<int>(std::min(255u, (bgr & 0xFF) * 2)), static_cast<int>(std::min(255u, (bgr >> 8 & 0xFF) * 2)),
+               static_cast<int>(std::min(255u, (bgr >> 16 & 0xFF) * 2)));
+  }
+  // Played from the USA discs, whose shop overlay lays several panels out again and names its words by menu message number.
+  bool usa_disc() {
+    const import::Ps1Font* disc_font = text->ps1_font(fonts.face(font::kBn));
+    return disc_font && (disc_font->build() == import::Ps1Font::Build::Usa || disc_font->build() == import::Ps1Font::Build::UsaMenu);
+  }
+  // A string of the USA shop overlay itself, by its address there.
+  std::string ss_usa_prg(u32 address) {
+    if (const import::TextTable* table = lang_tables.table("shopmenu"))
+      if (const std::string* row = table->get(std::format("prg:{:08X}", address), lang)) return *row;
+    return {};
+  }
+  // Played from the JP discs a count's unit is one 16-px cell of a label string: its first character.
+  std::u32string unit(u32 key) {
+    const std::u32string label = utf32(ss(key));
+    return label.substr(0, 1);
+  }
+  std::string usa_mess(int number) {
+    if (const import::TextTable* table = lang_tables.table("shopmenu"))
+      if (const std::string* row = table->get("mess:" + std::to_string(number), lang)) return *row;
+    return {};
+  }
+  // USA digits of a formatted number: each digit from 4 px right of the pen, the pen moving by the glyph's width + 2; any other
+  // character moves it 9.
+  void usa_number(const std::string& str, float x, float y, u32 colour = 0x808080) {
+    float pen = 0;
+    for (char ch : str) {
+      if (ch < '0' || ch > '9') {
+        pen += 9;
+        continue;
+      }
+      const std::u32string digit(1, static_cast<char32_t>(ch));
+      RT(1, x + 4 + pen, y, digit, colour);
+      fonts.prepare(font::kBn, digit);
+      pen += fonts.measure(font::kBn, digit, 2.5f / render::TextBatch::kPs1PixelScale) / 2.5f + 2;
+    }
+  }
+  // Footer: star count (star glyph at x, y + 2), "%2d" counts, PLAY label + time, gold + unit. Played from the discs the same sheet
+  // frames as the main menu's bar at the same points.
   void footer() {
     group(Left);
+    if (!texs.hd()) {
+      Sprite(6, 0x1E, 0x186);
+      SpriteText(padded_number(std::min<int>(gs->slot.stars_current(), 99), 2), 0x2C, 0x188, true);
+      Sprite(0x13, 0x42, 0x188);
+      SpriteText(padded_number(std::min<int>(gs->slot.stars_total(), 99), 2), 0x4E, 0x188, true);
+      Sprite(0x24, 0x74, 0x17E);
+      const u32 seconds = gs->play_seconds();
+      char time[24];
+      std::snprintf(time, sizeof time, "%03u:%02u:%02u", std::min<u32>(seconds / 3600, 999), seconds / 60 % 60, seconds % 60);
+      SpriteText(time, 0x94, 0x17E, false);
+      SpriteText(grouped_gold(gs->gold()), 0x7C, 400, false);
+      Sprite(0x21, 0xD4, 400);
+      return;
+    }
     const bool jp = lang_index() == 5;
     RT(0x10004, 0x1E, 0x186 + 2, U"\u2605");    RT(jp ? 4 : 0x91, 0x2C, 0x188, padded_number(std::min<int>(gs->slot.stars_current(), 99), 2));
     RT(jp ? 5 : 0xB0, 0x42, 0x188, U"/");    RT(jp ? 4 : 0x91, 0x4E, 0x188, padded_number(std::min<int>(gs->slot.stars_total(), 99), 2));
@@ -973,6 +1105,8 @@ struct ShopScreen::Impl {
     static const int kEl[6] = {0x1D, 4, 7, 0x1A, 0, 0x12}, kTr[6] = {0x20, 6, 0x10, 0x18, 0xB, 0xE}, kSm[6] = {-0x17, 1, -1, -10, -9, 4};
     const int lang_idx = std::clamp(lang_index(), 0, 5);
     const int dx0 = kind == ShopKind::Element ? kEl[lang_idx] : kind == ShopKind::Trading ? kTr[lang_idx] : kSm[lang_idx];
+    // Played from the discs the title is centred on x 368 (element shop and blacksmith alike).
+    if (fonts.ps1()) return RT(1, 368.0f, 0x92, title_text, 0x808080, font::kCentre);
     // Strip base: element shop / trading post (0x124, 0x92), 10 cells; blacksmith (0x15C, 0x92), 3 cells.
     RT(1, static_cast<float>((kind == ShopKind::Smith ? 0x15C : 0x124) + dx0), 0x92, title_text);
   }
@@ -987,6 +1121,7 @@ struct ShopScreen::Impl {
   // Total amount at (0x16E, 0xED): the 11-character grouped string (style 0x7C, dx
   // 0x2A - 4d (JP 0x23 - 4d), dy -4 (JP -3)), then "G" at x + 0x58, dy -2 (JP dx -6). Always colour 0x808080.
   void total_g(long long amount) {
+    if (!texs.hd()) return SpriteAmount(amount, 0x16E, 0xED);
     const u32 clamped = static_cast<u32>(std::max(0LL, amount));
     const bool jp = lang_index() == 5;
     const int digits = clamped == 0 ? 0 : digit_count(clamped);
@@ -1006,32 +1141,98 @@ struct ShopScreen::Impl {
       banner(title_text());
       if (kind == ShopKind::Element) {
         message(stage == Stage::Top ? ss(0x801DF424) : std::string());
-        compass(top_cur, {cm("買う"), cm("売る")}, stage == Stage::Top);
+        if (!texs.hd()) disc_dial(top_cur, 0x88, 0x89, 2, stage == Stage::Top);
+        else compass(top_cur, {cm("買う"), cm("売る")}, stage == Stage::Top);
       } else if (stage == Stage::Top) {
         message(ss(0x801DF814));
-        compass(top_cur, {cm("鍛造"), cm("分解"), cm("下取り")}, true);
+        if (!texs.hd()) disc_dial(top_cur, 0x8B, 0x94, 3, true);
+        else compass(top_cur, {cm("鍛造"), cm("分解"), cm("下取り")}, true);
       } else {
         static const u32 kForge[3] = {0x801DF835, 0x801DF845, 0x801DF855};
         message(ss(kForge[std::min(2, top_cur)]));
-        compass(cat_cur, {cm("武器"), cm("防具"), cm("アクセサリー")}, true);
+        if (!texs.hd()) disc_dial(cat_cur, 0x8B, 0x97, 3, true);
+        else compass(cat_cur, {cm("武器"), cm("防具"), cm("アクセサリー")}, true);
       }
       footer();
       return;
     }
+    // Played from the discs the dial stays under the lists, dimmed (the blacksmith's party strip covers it).
+    if (!texs.hd()) {
+      group(Right);
+      if (kind == ShopKind::Element) disc_dial(top_cur, 0x88, 0x89, 2, false);
+      else disc_dial(cat_cur, 0x8B, 0x97, 3, false);
+    }
     if (kind == ShopKind::Element) build_element_list();
     else build_smith_list();
-    footer();
+    // Played from the discs the bottom bar is not drawn while the sell-from-party list is up.
+    if (texs.hd() || stage != Stage::Pick) footer();
   }
 
+  // The info panel's x: 314, on the USA discs 294 (their wider panel frame starts further left).
+  float info_panel_x() { return usa_disc() ? 294.0f : 314.0f; }
   // ---- element shop lists: list panel at (20,32), info panel at (314,70)
+  // The element description (sysmes 0x1A row id * 3 + 1, its second line joined after a newline).
+  std::string element_description(int id) {
+    const std::string* description = lang_tables.sysmes((0x1Au << 16) | static_cast<u32>(id * 3 + 1), lang);
+    return description && !trim(*description).empty() ? *description : std::string();
+  }
+  // Played from the discs: the description's lines 18 px apart from (x, 0x72).
+  void disc_description(const std::string& description, float x) {
+    size_t start = 0;
+    for (float y = 0x72; start <= description.size(); y += 0x12) {
+      const size_t end = description.find('\n', start);
+      RT(1, x, y, description.substr(start, end == std::string::npos ? std::string::npos : end - start));
+      if (end == std::string::npos) break;
+      start = end + 1;
+    }
+  }
+  // The USA discs' element info panel (frame 133 at x 294): menu messages 0x95 / 0x96 at (0x12E, 0x9E / 0xB0) with the counts
+  // in small digits from x 0x1A2, the description from (0x12A, 0x72), a consumable's message 0xA3 or an innate-only element's 0xA4
+  // and its colour (0xA5 + colour) at (0x12A, 0x60), and the level row on y 0x4E: "Lv" at 0x12A, the level at 0x14A, the sign at
+  // 0x15E, the level change at 0x166, the target word (messages 0x9B..0xA1) at 0x17A.
+  void info_panel_element_usa(int id, int allocated, int stock) {
+    Frame(133, 294, 70);
+    RT(1, 0x12E, 0x9E, usa_mess(0x95));
+    RT(1, 0x12E, 0xB0, usa_mess(0x96));
+    if (id <= 0) return;
+    SpriteText(fmt("%4d", allocated), 0x1A2, 0xA0, false);
+    SpriteText(fmt("%4d", stock), 0x1A2, 0xB2, false);
+    disc_description(element_description(id), 0x12A);
+    const data::ElemRec* record = rules ? rules->elem(id) : nullptr;
+    if (!record) return;
+    if (rules->el_innate_only(id)) {
+      int ci = 0;
+      for (int bit_index = 2; bit_index < 8; ++bit_index)
+        if (rules->el_colour(id) & (1 << bit_index)) ci = bit_index - 2;
+      const std::u32string note = utf32(usa_mess(0xA4));
+      RT(1, 0x12A, 0x60, note);
+      fonts.prepare(font::kBn, note);
+      RT(1, 0x12A + fonts.measure(font::kBn, note, 2.5f / render::TextBatch::kPs1PixelScale) / 2.5f, 0x60, usa_mess(0xA5 + ci));
+    } else if (id >= 0x61 && id <= 0x7D) {
+      RT(1, 0x12A, 0x60, usa_mess(0xA3));
+    }
+    RT(1, 0x12A, 0x4E, ss_usa_prg(0x801DF44C));
+    usa_number(fmt("%1d", rules->el_level(id)), 0x14A, 0x4E);
+    Sprite("suji", 1, 0x15E, 0x4C), Sprite("suji", 2, 0x15E, 0x52);
+    usa_number(fmt("%1d", record->raw[0x12] & 0xF), 0x166, 0x4E);
+    const shop::TargetWord word = shop::element_target_word(record->raw[4]);
+    int target = word.side == shop::TargetSide::Both ? (word.all ? 0x9F : 0xA0) : word.side == shop::TargetSide::Enemy ? (word.all ? 0x9B : 0x9D)
+                                                                                                                       : (word.all ? 0x9C : 0x9E);
+    if (record->raw[4] & 4) target = 0xA1;
+    RT(1, 0x17A, 0x4E, usa_mess(target));
+  }
   void info_panel_element(int id, int allocated, int stock) {
+    if (!texs.hd() && usa_disc()) return info_panel_element_usa(id, allocated, stock);
     Frame(133, 314, 70);
     RT(1, 0x142, 0xA6, ss(0x801DF538));
     RT(1, 0x176, 0x9E, ss(0x801DF540));
     RT(1, 0x176, 0xB0, ss(0x801DF54C));
+    // Played from the discs the counts' unit stands after them at (0x1DC, 0xA7).
+    if (!texs.hd()) RT(1, 0x1DC, 0xA7, unit(0x801DF558));
     if (id <= 0) return;
-    // counts "%4d" at (0x1B6, 0xA0 / 0xB2): style 0x90 (JP 5), dx d == 1 ? 0x21 : 0x1E (JP 3 : 0)
+    // counts "%4d" at (0x1B6, 0xA0 / 0xB2): style 0x90 (JP 5), dx d == 1 ? 0x21 : 0x1E (JP 3 : 0); small sheet digits from the discs
     auto count = [&](float y, int value) {
+      if (!texs.hd()) return SpriteText(fmt("%4d", value), 0x1B6, y, false);
       const int dx = lang_index() == 5 ? (digit_count(value) == 1 ? 3 : 0) : (digit_count(value) == 1 ? 0x21 : 0x1E);
       RT(lang_index() == 5 ? 5 : 0x90, static_cast<float>(0x1B6 + dx), y, fmt("%4d", value));
     };
@@ -1040,10 +1241,10 @@ struct ShopScreen::Impl {
     // description: one entry, sysmes 0x1A row id*3+1 at (0x13E, 0x72), style 0x7B (row id*3+2 is never drawn).
     // Consumables (0x61..0x7D, not JP) use 0xBA = 0x7B plus the "(Consum.)" label at canvas (791, Y) with its own scale.
     const bool consum = id >= 0x61 && id <= 0x7D && lang_index() != 5;
-    if (const std::string* description = lang_tables.sysmes((0x1Au << 16) | static_cast<u32>(id * 3 + 1), lang);
-        description && !trim(*description).empty())
-      RT(consum ? 0xBA : 0x7B, 0x13E, 0x72, *description);
-    if (consum) {
+    if (!texs.hd()) disc_description(element_description(id), 0x13E);
+    else if (const std::string description = element_description(id); !description.empty())
+      RT(consum ? 0xBA : 0x7B, 0x13E, 0x72, description);
+    if (consum && texs.hd()) {
       static const char* const kLbl[5] = {"(Consum.)", "(consommable)", "(consumabile)", "(Einweg)", "(consumible)"};
       static const float kY[5] = {214, 219, 219, 217, 216.5f}, kS[5] = {0.335f, 0.3f, 0.3f, 0.306f, 0.33f};
       const int lang_idx = std::clamp(lang_index(), 0, 4);
@@ -1071,7 +1272,9 @@ struct ShopScreen::Impl {
     // element-type text at (0x18E, 0x4E), style 0x79.
     RT(1, 0x13E, 0x4E, ss(0x801DF568));
     RT(1, 0x15E, 0x4E + 3, full_width(fmt("%1d", rules->el_level(id))));
-    RT(0x10001, 0x172 - 2, 0x4C + 5, U"\u00B1");
+    // Played from the discs the sign is the "suji" sheet's "+" (frame 1) over its "-" (frame 2), 0x38 right of the panel.
+    if (!texs.hd()) Sprite("suji", 1, info_panel_x() + 0x38, 0x4C), Sprite("suji", 2, info_panel_x() + 0x38, 0x52);
+    else RT(0x10001, 0x172 - 2, 0x4C + 5, U"\u00B1");
     RT(1, static_cast<float>(0x17A + (lang_index() != 5 ? 2 : 0) + 1), 0x4E + 3, full_width(fmt("%1d", record->raw[0x12] & 0xF)));
     const shop::TargetWord word = shop::element_target_word(record->raw[4]);
     const u32 key = (word.all ? 0x801DF589u : 0x801DF581u) + static_cast<u32>(word.side);
@@ -1084,8 +1287,15 @@ struct ShopScreen::Impl {
     Frame(134, 342, 200);
     RT(1, 0x15E, 0xD4, ss(lbl1));
     RT(1, 0x15E, 0xE8, ss(lbl2));
+    // Played from the JP discs the count's unit follows at (0x1BE, 0xD4).
+    if (!texs.hd() && !usa_disc()) RT(1, 0x1BE, 0xD4, unit(kind == ShopKind::Smith ? 0x801DFB08 : 0x801DF558));
     const bool jp = lang_index() == 5;
     const float dy = jp ? 0.0f : -1.0f;
+    // Played from the discs the count is in big sheet digits: "%2d" from x 0x19E, the sell-from-party list's "%4d" from x 0x186.
+    if (!texs.hd()) {
+      SpriteText(fmt(stage == Stage::Pick ? "%4d" : "%2d", shown), stage == Stage::Pick ? 0x186 : 0x19E, 0xD6, true);
+      return total_g(total);
+    }
     if (selling) {
       const int x = digit_count(shown);
       RT(jp ? 4 : 0x91, static_cast<float>(0x186 + (jp ? (9 - x) * 4 : 0x2B - 4 * x)), 0xD6 + dy, fmt("%4d", shown));
@@ -1112,12 +1322,17 @@ struct ShopScreen::Impl {
       const int count = pick.placed[static_cast<size_t>(character)];
       RT(1, x, y, char_name(character), count != 0 ? 0x4E77u : 0x808080u);
       if (count == 0) continue;
+      // Played from the discs the count is the "suji" sheet's "x" and digits from x + 0x60.
+      if (!texs.hd()) {
+        SujiCount(10, count, x + 0x60, y, kWhite);
+        continue;
+      }
       RT(1, x + 0x60, y, U"×");
       RT(1, x + 0x68 + (count < 10 ? 8.0f : 0.0f), y, fmt("%d", count));
     }
     if (!listed) return;
     Frame(140, 200, 392);
-    RT(1, 0xFA, 0x194, ss(0x801DF590));
+    RT(1, !texs.hd() && usa_disc() ? 0xE0 : 0xFA, 0x194, ss(0x801DF590));
     if (pick.on_confirm) marker(0xD0, 0x195, true);
     else marker(pick.cursor < save::kNumChars / 2 ? 16.0f : 144.0f, 16.0f * static_cast<float>(pick.cursor % (save::kNumChars / 2)) + 29.0f, true);
   }
@@ -1147,7 +1362,9 @@ struct ShopScreen::Impl {
       RT(0x81, 0x84, 0x34 + 24.0f * static_cast<float>(row), element_name(id), sel ? 0x7A6AA5u : 0x909090u);
       // price "%5d" at (0xE4, 0x34 + 24 r): dx 0xF - 4d, style 0x91 (JP 4)
       const int price = static_cast<int>(buying ? shop::element_price(*gs, id) : shop::element_sell_unit(*gs, id));
-      RT(lang_index() == 5 ? 4 : 0x91, static_cast<float>(0xE4 + 0xF - 4 * digit_count(price)), y0 + 20, fmt("%5d", price));
+      // Played from the discs: "%5d" in big sheet digits from x 0xE4 (USA 0xDC).
+      if (!texs.hd()) SpriteText(fmt("%5d", price), usa_disc() ? 0xDC : 0xE4, y0 + 20, true);
+      else RT(lang_index() == 5 ? 4 : 0x91, static_cast<float>(0xE4 + 0xF - 4 * digit_count(price)), y0 + 20, fmt("%5d", price));
     }
     marker(20, 52.0f + 24.0f * static_cast<float>(cur - scroll), stage == Stage::List);
     group(Right);
@@ -1168,12 +1385,17 @@ struct ShopScreen::Impl {
   // (hd/menu/smithy.png): weapon / armour n = 3 when it is the
   // one worn, else 1 when the item's power is higher than the worn one's, 2 when lower; accessory n = 3 when worn in any of the 3 slots.
   void party_strip(int item) {
-    if (Tex* plate_frame = texs.shape(173, lang)) Img(plate_frame, SX(230 - 3), SY(314 - 8), SX(plate_frame->w / 4.0f), SY(plate_frame->h / 4.0f));
+    const bool disc = !texs.hd();
+    if (disc) {
+      if (Tex* plate_frame = texs.sheet("main", 173)) Img(plate_frame, SX(230 + plate_frame->ox), SY(314 + plate_frame->oy), SX(plate_frame->w), SY(plate_frame->h));
+    } else if (Tex* plate_frame = texs.shape(173, lang)) {
+      Img(plate_frame, SX(230 - 3), SY(314 - 8), SX(plate_frame->w / 4.0f), SY(plate_frame->h / 4.0f));
+    }
     if (!rules || !rules->tables) return;
     const data::GameTables& tb = *rules->tables;
     const data::ItemInfo* ii = item >= 0 && item < static_cast<int>(tb.item_info.size()) ? &tb.item_info[static_cast<size_t>(item)] : nullptr;
     auto power = [&](int id) { return id >= 0 && id < static_cast<int>(tb.gear.size()) ? tb.gear[static_cast<size_t>(id)].power() : 0; };
-    Tex* smithy = texs.load("hd/menu/smithy.png");
+    Tex* smithy = disc ? nullptr : texs.load("hd/menu/smithy.png");
     for (int character = 0; character < 44; ++character) {
       const float x = 230.0f + 24.0f * static_cast<float>(character % 11), y = 314.0f + 24.0f * static_cast<float>(character / 11);
       const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
@@ -1182,8 +1404,13 @@ struct ShopScreen::Impl {
       else if (!ii || !ii->can_equip(character)) brightness = 0x30;
       // Faces sheet frame: frame_no 1..0x33 are drawn as faces.
       const int frame_no = (ch.model_id & 0xFF) + 1;
-      if (frame_no >= 1 && frame_no <= 0x33)
-        if (const Tex* face = face_tex(frame_no - 1)) Img(face, SX(x), SY(y), SX(24), SY(24), 0, 0, 1, 1, grey(brightness));
+      if (frame_no >= 1 && frame_no <= 0x33) {
+        if (disc) {
+          if (Tex* face = texs.sheet("face", frame_no)) Img(face, SX(x + face->ox), SY(y + face->oy), SX(face->w), SY(face->h), 0, 0, 1, 1, grey(brightness));
+        } else if (const Tex* face = face_tex(frame_no - 1)) {
+          Img(face, SX(x), SY(y), SX(24), SY(24), 0, 0, 1, 1, grey(brightness));
+        }
+      }
       if (item <= 0 || brightness != 0x70 || !ii) continue;
       int mark = 0;
       const int ik = ii->cat & 0xF;
@@ -1196,7 +1423,13 @@ struct ShopScreen::Impl {
         for (int k = 0; k < 3; ++k)
           if (ch.accessory[static_cast<size_t>(k)] == item) mark = 3;
       }
-      if (!mark || !smithy) continue;
+      if (!mark) continue;
+      // The disc's marks are frames 52..54 of the same sheet, at their own offsets from the face.
+      if (disc) {
+        if (Tex* tex = texs.sheet("face", 51 + mark)) Img(tex, SX(x + tex->ox), SY(y + tex->oy), SX(tex->w), SY(tex->h));
+        continue;
+      }
+      if (!smithy) continue;
       // The three mark rects in smithy.png (480 x 1024): (236, 972, 36, 40), (332, 972, 36, 40), (440, 972, 24, 36).
       static const float kU[3] = {236, 332, 440}, kMw[3] = {36, 36, 24}, kMh[3] = {40, 40, 36};
       const int mark_index = mark - 1;
@@ -1234,12 +1467,21 @@ struct ShopScreen::Impl {
     if (forge_like) {
       Frame(154 + std::clamp(category, 0, 2), 20, 32);
       panel_caption(0x9A + std::clamp(category, 0, 2), 20, 32);
-      RT(1, 0x1E, 0x14C, ss(0x801DFAD0));
-      RT(1, 0x50, 0x144, ss(0x801DFAD8));
-      RT(1, 0x50, 0x154, ss(0x801DFAE4));
-      // "%2d" counts at (0xA0, 0x148 / 0x158): style 0x90, dy -2, dx by language and digit count.
+      // Played from the USA discs: messages 0x8E / 0x8F at (0x1E, 0x144 / 0x154), no caption; from the JP discs the count's unit at
+      // (0xBE, 0x14C).
+      if (!texs.hd() && usa_disc()) {
+        RT(1, 0x1E, 0x144, usa_mess(0x8E));
+        RT(1, 0x1E, 0x154, usa_mess(0x8F));
+      } else {
+        RT(1, 0x1E, 0x14C, ss(0x801DFAD0));
+        RT(1, 0x50, 0x144, ss(0x801DFAD8));
+        RT(1, 0x50, 0x154, ss(0x801DFAE4));
+        if (!texs.hd()) RT(1, 0xBE, 0x14C, unit(0x801DFB08));
+      }
+      // "%2d" counts at (0xA0, 0x148 / 0x158): style 0x90, dy -2, dx by language and digit count; small sheet digits from the discs.
       if (item > 0) {
         auto count = [&](float y, int value) {
+          if (!texs.hd()) return SpriteText(fmt("%2d", value), 0xA0, y, false);
           const bool one = digit_count(value) == 1;
           const int lang_idx = lang_index(),
                     dx = lang_idx == 5 ? (one ? 4 : 0) : lang_idx == 4 ? (one ? 0x26 : 0x22) : (one ? 0x18 : 0x14);
@@ -1265,6 +1507,10 @@ struct ShopScreen::Impl {
       // Sell price "%6d" at (0xC4, 0x32 + 24 r): dx 0x16 - 4d, style 0x91 (JP 4).
       if (!forge_like) {
         const int price = static_cast<int>(shop::gear_sell_price(*gs, id, 1));
+        if (!texs.hd()) {
+          SpriteText(fmt("%6d", price), 0xC4, 0x32 + 24.0f * static_cast<float>(row), true);
+          continue;
+        }
         RT(lang_index() == 5 ? 4 : 0x91, static_cast<float>(0xC4 + 0x16 - 4 * digit_count(price)), 0x32 + 24.0f * static_cast<float>(row),
            fmt("%6d", price));
       }
@@ -1274,16 +1520,27 @@ struct ShopScreen::Impl {
     if (forge_like) {
       // material panel: forge (266x210) / disassemble (266x168) at (220,32)
       Frame(operation == Operation::Forge ? 157 : 159, 220, 32);
-      RT(1, operation == Operation::Forge ? 364.0f : 300.0f, 0x1C, ss(operation == Operation::Forge ? 0x801DFAF8 : 0x801DFB0C));
+      // Played from the USA discs the caption is message 0x91 at (0x174, 0x1C) / 0x93 at (0x134, 0x1C); from the JP discs the
+      // disassemble caption has a second part at (0x19C, 0x1C).
+      if (!texs.hd() && usa_disc()) {
+        RT(1, operation == Operation::Forge ? 0x174 : 0x134, 0x1C, usa_mess(operation == Operation::Forge ? 0x91 : 0x93));
+      } else {
+        RT(1, operation == Operation::Forge ? 364.0f : 300.0f, 0x1C, ss(operation == Operation::Forge ? 0x801DFAF8 : 0x801DFB0C));
+        if (!texs.hd() && operation == Operation::Break) RT(1, 0x19C, 0x1C, ss(0x801DFB1C));
+      }
       if (operation == Operation::Forge) {
-        RT(1, 0x154, 0xD4, ss(0x801DFAF0));
+        RT(1, 0x154, 0xD4, !texs.hd() && usa_disc() ? usa_mess(0x90) : ss(0x801DFAF0));
         // fee: 11-character grouped string at (0x174, 0xD8), style 0x90, dx 0x35 - 4d (JP 0x37 - 4d); "G" (0x1CC, 0xD8) dy +1.
         // The "No crafting cost" cheat makes it free.
         if (item > 0) {
           const u32 fee = platform::cheats().no_craft_cost ? 0u : static_cast<u32>(std::max(0LL, static_cast<long long>(shop::forge_cost(*gs, item))));
           const bool jp = lang_index() == 5;
-          RT(jp ? 5 : 0x90, static_cast<float>(0x174 + (jp ? 0x37 : 0x35) - 4 * digit_count(fee)), 0xD8, grouped_gold(fee));
-          RT(5, 0x1CC, jp ? 216.0f : 217.0f, U"G");
+          if (!texs.hd()) {
+            SpriteAmount(fee, 0x174, 0xD8);
+          } else {
+            RT(jp ? 5 : 0x90, static_cast<float>(0x174 + (jp ? 0x37 : 0x35) - 4 * digit_count(fee)), 0xD8, grouped_gold(fee));
+            RT(5, 0x1CC, jp ? 216.0f : 217.0f, U"G");
+          }
         }
       }
       if (item > 0) {
@@ -1300,6 +1557,16 @@ struct ShopScreen::Impl {
           // drop_first removes the material glyph U+03B4.
           RT(lang_index() == 5 ? 1 : 0xAF, x, y, drop_first(item_name(material.id)), col);
           const float xb = x + 0x50;
+          // Played from the discs: "%2d" small sheet digits at (x, y + 2) or the dash frame 0x9E at (x + 2, y), the slash frame 0x13 at
+          // (x + 0x10, y), the stock at (x + 0x18, y + 2).
+          if (!texs.hd()) {
+            if (operation == Operation::Forge) SpriteText(fmt("%2d", std::min(material.qty, 99)), xb, y + 2, false, ps1_colour(col));
+            else Sprite(0x9E, xb + 2, y, ps1_colour(col));
+            Sprite(0x13, xb + 0x10, y, ps1_colour(col));
+            SpriteText(fmt("%2d", std::min(have, 99)), xb + 0x18, y + 2, false, ps1_colour(col));
+            ++material_index;
+            continue;
+          }
           const int nst = lang_index() == 5 ? 5 : 0x90;
           if (operation == Operation::Forge)
             RT(nst, xb + (std::min(material.qty, 99) < 10 ? 3.0f : 0.0f), y + 2, fmt("%2d", std::min(material.qty, 99)), col);
@@ -1312,13 +1579,23 @@ struct ShopScreen::Impl {
       party_strip(item);
     } else {
       // trade-in: info panel with Stock / No. equipped / No. stockpiled and the item description
-      Frame(133, 314, 70);
-      RT(1, 0x142, 0xA6, ss(0x801DFAD0));
-      RT(1, 0x172, 0x9D, ss(0x801DFAD8));
-      RT(1, 0x172, 0xAF, ss(0x801DFAE4));
-      // "%2d" counts at (0x1C2, 0xA1 / 0xB3): style 0x90, dy -2, dx by language.
+      // Played from the USA discs: messages 0x8E / 0x8F at (0x12E, 0x9D / 0xAF), the counts from x 0x1AE, the description from
+      // x 0x12E, no caption; from the JP discs the count's unit at (0x1DC, 0xA7).
+      const bool usa = !texs.hd() && usa_disc();
+      Frame(133, info_panel_x(), 70);
+      if (usa) {
+        RT(1, 0x12E, 0x9D, usa_mess(0x8E));
+        RT(1, 0x12E, 0xAF, usa_mess(0x8F));
+      } else {
+        RT(1, 0x142, 0xA6, ss(0x801DFAD0));
+        RT(1, 0x172, 0x9D, ss(0x801DFAD8));
+        RT(1, 0x172, 0xAF, ss(0x801DFAE4));
+        if (!texs.hd()) RT(1, 0x1DC, 0xA7, unit(0x801DFB08));
+      }
+      // "%2d" counts at (0x1C2, 0xA1 / 0xB3): style 0x90, dy -2, dx by language; small sheet digits from the discs.
       if (item > 0) {
         auto count = [&](float y, int value) {
+          if (!texs.hd()) return SpriteText(fmt("%2d", value), usa ? 0x1AE : 0x1C2, y, false);
           static const int kOne[6] = {13, 19, 5, -12, 0x21, 4}, kMore[6] = {10, 16, 2, -15, 0x1E, 0};
           const int lang_idx = std::clamp(lang_index(), 0, 5), dx = digit_count(value) == 1 ? kOne[lang_idx] : kMore[lang_idx];
           RT(lang_idx == 5 ? 5 : 0x90, static_cast<float>(0x1C2 + dx), y - 2, fmt("%2d", value));
@@ -1327,7 +1604,7 @@ struct ShopScreen::Impl {
         count(0xB3, gs->item_count(item));
         // description: one entry waa_spec row item * 3 at (0x142, 0x5E), style 0x8F (the 0x6E / 0x7E slots stay empty)
         const std::string spec = table_row("waa_spec", item * 3);
-        if (!trim(spec).empty()) RT(0x8F, 0x142, 0x5E, spec);
+        if (!trim(spec).empty()) RT(0x8F, usa ? 0x12E : 0x142, 0x5E, spec);
       }
     }
     // messages / Yes-No rows / quantity window
@@ -1523,24 +1800,65 @@ struct ShopScreen::Impl {
   // "Exchange Rate" panel at (0x14, 0x20), one row per entry at y = 0x44 + 18 i: the goods name (first character dropped, ":" added,
   // style 0x82 = right edge at 0x92), the colour column at 0x94 (a colour dot from kTradeCol, or a text for mask 0) and the level
   // sum "%d" at (0xA4, y) (style 0x98).
+  // Played from the discs the colour dot is frame 0x5A in the colour; on the USA discs the caption is message 0x87, the name ends at
+  // x 0x90 with ":" there, and the level sum is in USA digits from x 0xA4.
   void trade_goods_list() {
+    const bool usa = !texs.hd() && usa_disc();
     Frame(144, 0x14, 0x20);
-    RT(1, 0x24, 0x2C, ss(0x801DF784));
+    RT(1, 0x24, 0x2C, usa ? usa_mess(0x87) : ss(0x801DF784));
     const int entry_count = std::min(trade.row.count, 16);
     for (int i = 0; i < entry_count; ++i) {
       const float y = 0x44 + 18.0f * static_cast<float>(i);
       const shop::TradeSlot& entry = trade.row.slot[static_cast<size_t>(i)];
+      if (usa) {
+        if (const int goods = trade.row.goods[static_cast<size_t>(i)]; goods > 0) RT(1, 0x90, y, drop_first(item_name(goods)), 0x808080, font::kRight);
+        RT(1, 0x90, y, U":");
+        if (const int colour = shop::colour_index(entry.mask); colour != 0) Sprite(0x5A, 0x94, y, ps1_colour(kTradeCol[colour - 1]));
+        usa_number(fmt("%d", entry.need), 0xA4, y);
+        continue;
+      }
       if (const int goods = trade.row.goods[static_cast<size_t>(i)]; goods > 0)
         RT(0x82, 0x92, y, drop_first(item_name(goods)) + (lang_index() == 5 ? U"：" : U":"));
       const int colour = shop::colour_index(entry.mask);
       if (colour == 0) RT(1, 0x94, y, ss(0x801DF7C4));
+      else if (!texs.hd()) Sprite(0x5A, 0x94, y, ps1_colour(kTradeCol[colour - 1]));
       else RT(0x10001, 0x94, y, U"●", kTradeCol[colour - 1]);
       RT(0x98, 0xA4, y, full_width(fmt("%d", entry.need)));
     }
   }
   // Info panel at (0x13A, 0x46) (description, "No. in Stock" + "%9d"), colour box at (0x146, 200) ("All Element
   // Colors" / "<colour> Elements only!" merged under the 5-cell strip at (0x14E, 0xD2), style 0xB5) and "<need> levels' worth".
+  // The USA discs' trading-post info panel (frame 133 at x 0x12C): the description's three lines from (0x134, 0x5E), message 0x88 at
+  // (0x134, 0xA6) with the stock "%9d" in USA digits from x 0x17C, the colour condition at (0x14E, 0xD2) (message 0xAA + colour, then
+  // message 0x89 after it; 0x8A for any colour), the need "%5d" from x 0x146 and message 0x8B at x 0x176 on row 0xE4.
+  void trade_info_usa() {
+    Frame(133, 0x12C, 0x46);
+    Frame(145, 0x146, 200);
+    if (const int goods = trade_goods(); goods > 0) {
+      const std::string spec = table_row("waa_spec", goods * 3);
+      size_t start = 0;
+      for (float y = 0x5E; start <= spec.size(); y += 0x10) {
+        const size_t end = spec.find('\n', start);
+        RT(1, 0x134, y, spec.substr(start, end == std::string::npos ? std::string::npos : end - start));
+        if (end == std::string::npos) break;
+        start = end + 1;
+      }
+    }
+    RT(1, 0x134, 0xA6, usa_mess(0x88));
+    usa_number(fmt("%9d", shop::item_stock(*gs, trade_goods())), 0x17C, 0xA7);
+    if (const int colour = shop::colour_index(trade_slot().mask); colour != 0) {
+      const std::u32string name = utf32(usa_mess(0xAA + colour));
+      RT(1, 0x14E, 0xD2, name);
+      fonts.prepare(font::kBn, name);
+      RT(1, 0x14E + fonts.measure(font::kBn, name, 2.5f / render::TextBatch::kPs1PixelScale) / 2.5f, 0xD2, usa_mess(0x89));
+    } else {
+      RT(1, 0x14E, 0xD2, usa_mess(0x8A));
+    }
+    usa_number(fmt("%5d", trade_slot().need), 0x146, 0xE4);
+    RT(1, 0x176, 0xE4, usa_mess(0x8B));
+  }
   void trade_info() {
+    if (!texs.hd() && usa_disc()) return trade_info_usa();
     const bool jp = lang_index() == 5;
     const int lang_idx = std::clamp(lang_index(), 0, 5);
     Frame(133, 0x13A, 0x46);
@@ -1551,19 +1869,31 @@ struct ShopScreen::Impl {
       if (const std::string spec = table_row("waa_spec", goods * 3); !trim(spec).empty()) RT(0x8F, 0x142, 0x5E, spec);
     // "No. in Stock"
     RT(1, 0x142, 0xA6, ss(0x801DF73C));
-    RT(1, 0x1DC, 0xA7, ss(0x801DF735));
+    RT(1, 0x1DC, 0xA7, texs.hd() ? utf32(ss(0x801DF735)) : unit(0x801DF734));
     // Stock "%9d" at (0x13A, 0xA7): dx n < 10 ? 0x72 : 0x6E (JP 4 : 0), dy -2.
     const int stock = shop::item_stock(*gs, goods);
     RT(0x98, static_cast<float>(0x13A + (stock < 10 ? (jp ? 4 : 0x72) : (jp ? 0 : 0x6E))), 0xA7 - 2, full_width(fmt("%9d", stock)));
-    // Colour condition strip at (0x14E, 0xD2), x shifted per language.
-    static const int kDx0[6] = {0x20, 6, 0x10, 0x18, 0xB, 0xE};
-    RT(0xB5, static_cast<float>(0x14E + kDx0[lang_idx]), 0xD2, ss(0x801DF689));
+    // Colour condition strip at (0x14E, 0xD2), x shifted per language. Played from the JP discs: the first five cells of the
+    // post's title at (0x14E, 0xD2), then the colour's name in its colour at 0x19E and the "only" word at 0x1AE, or "all colours"
+    // at 0x19E.
     const int colour = shop::colour_index(trade_slot().mask);
-    if (colour == 0) {
-      RT(0xB5, 0x14E, 0xD2, ss(0x801DF72D));
+    if (!texs.hd()) {
+      RT(1, 0x14E, 0xD2, utf32(ss(0x801DF688)).substr(0, 5));
+      if (colour != 0) {
+        RT(1, 0x19E, 0xD2, ss(0x801DF79C + 4u * static_cast<u32>(colour - 1)), kTradeCol[colour - 1]);
+        RT(1, 0x1AE, 0xD2, ss(0x801DF77C));
+      } else {
+        RT(1, 0x19E, 0xD2, ss(0x801DF72C));
+      }
     } else {
-      RT(1, 0x19E, 0xD2, ss(0x801DF79C + 4u * static_cast<u32>(colour - 1)), kTradeCol[colour - 1]);
-      RT(0xB5, 0x14E, 0xD2, ss(0x801DF77C + static_cast<u32>(colour)));
+      static const int kDx0[6] = {0x20, 6, 0x10, 0x18, 0xB, 0xE};
+      RT(0xB5, static_cast<float>(0x14E + kDx0[lang_idx]), 0xD2, ss(0x801DF689));
+      if (colour == 0) {
+        RT(0xB5, 0x14E, 0xD2, ss(0x801DF72D));
+      } else {
+        RT(1, 0x19E, 0xD2, ss(0x801DF79C + 4u * static_cast<u32>(colour - 1)), kTradeCol[colour - 1]);
+        RT(0xB5, 0x14E, 0xD2, ss(0x801DF77C + static_cast<u32>(colour)));
+      }
     }
     RT(1, 0x14E, 0xE4, ss(0x801DF794));
     // "levels' worth" label at (0x1BE, 0xE4): dx0 (JP 0 : -0x23) + per language, dy +1 (not JP).
@@ -1577,7 +1907,12 @@ struct ShopScreen::Impl {
   // Offer list at (0x14, 0x20); row r at y = 0x38 + 24 r: plate (colour sheet frame 3) at (0x4A, 0x33 + 24 r),
   // "Lv" at 0x32, level "%d" at 0x42, "x" + stock - offered (suji) at 0x100, "-" + offered at 0x118 in 0x7A6AA5, the name
   // centred on 0xA4 (style 0x81). Rows the entry's colour mask refuses are 0x404040.
+  // Played from the discs: the "Lv" frame 0x92 at (0x32, y), the level in small digits from x 0x42, the stock and offered counts as
+  // the "suji" sheet's "x" / "-" and digits from x 0x100 / 0x118; the USA discs draw the whole list 10 px further left.
   void trade_offer_list() {
+    const bool disc = !texs.hd();
+    const float saved_dx = group_dx;
+    if (disc && usa_disc()) group_dx -= SX(10);
     Frame(147, 0x14, 0x20);
     panel_caption(0x93, 0x14, 0x20);
     if (trade.offer_top + 11 < trade.element_rows) scroll_arrow(0x132, 0x133, false);
@@ -1597,6 +1932,15 @@ struct ShopScreen::Impl {
       const u32 c12 = ok ? 0x808080u : 0x404040u, c14 = ok ? (row == trade.offer_cur ? 0x7A6AA5u : 0x909090u) : 0x404040u;
       const float y = 0x38 + 24.0f * static_cast<float>(row);
       plate_indexed(shop::colour_index(rules ? rules->el_colour(id) : 0), 0x4A, 0x33 + 24.0f * static_cast<float>(row), c12);
+      if (disc) {
+        const int offered = trade.offered[static_cast<size_t>(element_index)];
+        Sprite(0x92, 0x32, y, ps1_colour(c12));
+        SpriteText(fmt("%d", rules ? rules->el_level(id) : 0), 0x42, y, false, ps1_colour(c12));
+        SujiCount(10, std::clamp(shop::element_stock(*gs, id) - offered, 0, 99), 0x100, y, ps1_colour(c12));
+        if (offered) SujiCount(2, offered, 0x118, y, ps1_colour(0x7A6AA5));
+        RT(0x81, 0xA4, y, element_name(id), c14);
+        continue;
+      }
       RT(5, 0x32, y, U"Lv", c12);
       RT(lang_index() == 5 ? 5 : 0x90, 0x42, y, fmt("%d", rules ? rules->el_level(id) : 0), c12);
       const int offered_count = trade.offered[static_cast<size_t>(element_index)];
@@ -1608,6 +1952,7 @@ struct ShopScreen::Impl {
       }
       RT(0x81, 0xA4, y, element_name(id), c14);
     }
+    group_dx = saved_dx;
   }
   void build_trading() {
     const int lang_idx = std::clamp(lang_index(), 0, 5);
@@ -1635,7 +1980,15 @@ struct ShopScreen::Impl {
       const int sum = shop::offer_levels(*gs, trade.elements, trade.offered), need = trade_slot().need;
       // Status line at (0x26, 0x14E): dx by language, no style remap.
       static const int kDx[6] = {0x41, 0x41, 0x24, 0x41, 0x24, 0};
-      if (sum < need) {
+      if (!texs.hd() && usa_disc()) {
+        // USA discs: the remaining "%5d" in USA digits from x 0x26 and message 0x8C at x 0x53, or message 0x8D.
+        if (sum < need) {
+          usa_number(fmt("%5d", need - sum), 0x26, 0x14E);
+          RT(1, 0x53, 0x14E, usa_mess(0x8C));
+        } else {
+          RT(1, 0x26, 0x14E, usa_mess(0x8D));
+        }
+      } else if (sum < need) {
         // "levels' worth to go"
         RT(1, static_cast<float>(0x26 + kDx[lang_idx]), 0x14E, ss(0x801DF760));
         RT(1, 0xB6, 0x14E, ss(0x801DF76C));
@@ -1728,15 +2081,22 @@ struct ShopScreen::Impl {
       sprites->set_view(vw, vh / flat);
       text->set_pixel_grid(1.0f, flat);
     }
+    bool adding = false;
+    // A PS1 font pixel is one pixel of the 512 x 432 display.
+    const float old_aspect = text->pixel_aspect();
+    if (fonts.ps1()) text->set_pixel_aspect(960.0f / 432.0f / 2.5f);
     for (const Cmd& cmd : cmds) {
+      if (cmd.add != adding) sprites->set_blend(cmd.add ? render::BlendMode::Add : render::BlendMode::Alpha), adding = cmd.add;
       if (cmd.kind == Cmd::Text) fonts.draw(cmd.slot, cmd.text, cmd.x + ox / zoom, cmd.y + oy / zoom, cmd.ink, cmd.scale, cmd.align, zoom);
       else sprites->draw(cmd.set, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.h * zoom, cmd.u0, cmd.v0, cmd.u1, cmd.v1, cmd.color);
     }
+    if (adding) sprites->set_blend(render::BlendMode::Alpha);
     sprites->end();
     if (flat != 1.0f) {
       sprites->set_view(vw, vh);
       text->set_pixel_grid(0.0f, 0.0f);
     }
+    text->set_pixel_aspect(old_aspect);
     if (clipped) frame.set_scissor(frame.full());
   }
 };

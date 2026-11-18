@@ -9,10 +9,12 @@
 #include <SDL3/SDL_scancode.h>
 #include <SDL3/SDL_timer.h>
 
+#include <algorithm>
 #include <chrono>
 #include <system_error>
 
 #include "core/log.h"
+#include "import/console_font.h"
 #include "platform/paths.h"
 #include "render/imgui_data_screen.h"
 
@@ -176,11 +178,32 @@ void App::open_discs(const SourceSearch& search) {
   }
   disc_backend = backend.get();
   files.open(std::move(backend), exe);
+  find_console_font(search, group);
   // Disc 1 is in the drive until the story or a save says otherwise.
   files.set_disc(1);
   platform::set_disc_mode(true);
   apply_disc_mode();
   log::warn("data: mods were made for RDE's data; on the {} discs a mod's files may not match the game's", disc_region_word);
+}
+
+// The console font comes from a BIOS image in the exe's folder or in a folder of the opened disc images (only those folders, not
+// their subfolders).
+void App::find_console_font(const SourceSearch& search, const import::disc::DiscGroup& group) {
+  std::vector<fs::path> dirs{exe};
+  for (const int index : group.disc) {
+    if (index < 0) continue;
+    std::string where = search.found[static_cast<size_t>(index)].where;
+    std::error_code ec;
+    if (const size_t mark = where.rfind(" #"); mark != std::string::npos && !fs::is_regular_file(from_utf8(where), ec)) where.resize(mark);
+    const fs::path file = from_utf8(where);
+    if (!fs::is_regular_file(file, ec)) continue;
+    const fs::path dir = file.parent_path();
+    if (std::none_of(dirs.begin(), dirs.end(), [&](const fs::path& known) { return fs::equivalent(known, dir, ec); })) dirs.push_back(dir);
+  }
+  fs::path file;
+  import::set_console_font(import::find_console_font(dirs, &file));
+  if (file.empty()) log::info("console font: no BIOS image in the exe's or the disc images' folders; the menus draw the disc's font");
+  else log::info("console font: {}", utf8(file));
 }
 
 void App::apply_disc_mode() {
