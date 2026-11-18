@@ -170,10 +170,9 @@ class BattleCamera {
   const std::string& shot_name() const { return last_name_; }
 
   void tick(CamEvents& events);
-  // Split mode (the battle view's camera): tick() leaves the shot list out and the host calls tick_shots() after its units moved, as the
-  // game ticks the camera tasks in the particle walk after the AnmSeq tick (a following shot, flag 1, frames this tick's places); a shot
-  // picked by a timeline takes its first step the tick after (the walk ticks camera tasks before the streams that load them). Off: tick()
-  // does both, as before.
+  // Split mode (the battle view's camera): tick() leaves the shot list out and the host calls tick_shots() after its units moved, so a
+  // following shot (flag 1) frames this tick's places. A shot picked between tick() and tick_shots() (by a timeline or by the host) takes its
+  // first step on the next tick; one picked after tick_shots() steps on the next tick_shots(). Off: tick() does both.
   void set_split_shots(bool on) { split_ = on; }
   void tick_shots();
   CamPose pose(float alpha) const;
@@ -242,8 +241,11 @@ class BattleCamera {
   const assets::StageCamera* shot_ = nullptr;
   // Head progress, 0..4096.
   float progress_ = 0;
-  bool split_ = false;  // set_split_shots
-  bool fresh_ = false;  // split mode: the head was picked this tick (no step until the next)
+  // Split mode: set_split_shots. step_due_: tick() ran and tick_shots() has not yet; fresh_: the head was picked then, so its first step
+  // waits for the next tick.
+  bool split_ = false;
+  bool step_due_ = false;
+  bool fresh_ = false;
   CamPose prev_, cur_;
   std::string last_name_;
   bool lift_ = false;

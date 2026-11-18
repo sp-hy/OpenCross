@@ -299,8 +299,8 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
     if (listed < 0) return false;
     const Visual& other = vis_[static_cast<size_t>(listed)];
     float px = other.x, pz = other.z;
-    // Modes 1-4: origin + R(yaw) * the joint extent (max x / min x / min z / max z). AnmSeq_UpdatePoseBBox (0x8009E510) measures the
-    // joints from the root joint's own x / z, not from the model's origin (Dash & Slash's dash past the target: z 68 off without it).
+    // Modes 1-4: origin + R(yaw) * the joint extent (max x / min x / min z / max z), measured from the root joint's own x / z, not from the
+    // model's origin.
     if (mode >= 1 && mode <= 4 && other.has_model) {
       std::vector<render::Mat4> pal;
       other.pose.palette(1.0f, pal);
@@ -892,10 +892,8 @@ void BattleView::tex_flip_paste_hd(ModelHandle& model, int dx, int dy, const std
 }
 
 void BattleView::tick_units() {
-  // The game's order: the monsters' scripts first, then the party's (g_vfxIndexMap, filled by BattleObj_PopulateFromActorWorkArea as the
-  // battle activates each actor, the monsters before the party in every recording). A target's hit reaction therefore sees the caster's
-  // hit one tick later than with the party first: Dash & Slash's 'hit0' (bound by the target) and the shots it picks come a tick after
-  // the caster's op, with Serge one dash step further on.
+  // The monsters' scripts run first, then the party's (units 3-8, then 0-2): a PC caster's hit reaches its target's script on the next tick,
+  // so the reaction and the shots it picks start one tick after the caster's op.
   for (int n = 0; n < battle::kUnits; ++n) {
     const int i = (n + battle::kPcSlots) % battle::kUnits;
     Visual& visual = vis_[static_cast<size_t>(i)];

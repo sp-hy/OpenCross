@@ -317,8 +317,7 @@ void BattleView::tick() {
   for (const auto& [unit, yaw] : pending_rot_) set_rot_now(unit, yaw);
   pending_rot_.clear();
   anm_tick();
-  // The camera's shot list after the units moved (the game's particle walk runs after the AnmSeq tick): a following shot frames this
-  // tick's places (Dash & Slash's dash shot held one tick short of the game's otherwise, Serge at the frame's edge).
+  // The camera's shot list steps after the units moved, so a following shot (flag 1) frames this tick's places.
   camera_.tick_shots();
   // The battle-script stream (E0 / E2 / delays / executor waits) and its message window.
   script_pump();

@@ -348,7 +348,7 @@ bool BattleCamera::select(const std::string& name) {
   }
   shot_ = shot;
   progress_ = 0;
-  fresh_ = split_;
+  fresh_ = step_due_;
   frozen_ = frame;
   frozen_scale_ = scale;
   return true;
@@ -592,6 +592,7 @@ void BattleCamera::run(Runner& runner, CamEvents& events) {
 // flag bit 4 clamps the eye to the ground and flag bit 6 pulls the eye in to 6144 from the world origin. When the head ends the next task of
 // the list resumes at its own progress; an ended head with no task behind it holds the pose registers.
 void BattleCamera::tick(CamEvents& events) {
+  step_due_ = split_;
   fade_prev_ = fade_cur_;
   if (fade_left_ > 0) {
     fade_cur_ += (fade_to_ - fade_cur_) / static_cast<float>(fade_left_);
@@ -626,6 +627,7 @@ void BattleCamera::tick(CamEvents& events) {
 
 // The shot list's step (tick(), or the host after its units moved in split mode): see tick().
 void BattleCamera::tick_shots() {
+  step_due_ = false;
   if (shot_) {
     for (Task& task : bg_) task.progress = std::min(4096.0f, task.progress + static_cast<float>(progress_step(*task.shot)));
     std::erase_if(bg_, [](const Task& task) { return task.progress >= 4096.0f; });
