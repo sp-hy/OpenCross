@@ -95,15 +95,13 @@ enum Align : int { kLeft = 0, kCentre = 1, kRight = 2 };
 // The ink box of the first line of `str` in a PS1 face, in font pixels from the pen and the line top: left of the first glyph's ink,
 // right of the last glyph's ink, cap top = the first inked row of "A". All zero for a spritefont face. Menus place disc-mode text by it
 // where they place a spritefont string by its ink. The console font is placed by its cells instead: left 0, right the pen after the
-// last glyph, and the cells hang kConsoleCellDrop pixels below the layout's cap top.
+// last glyph, and the cells start at the layout's cap top.
 struct InkBox {
   float left = 0, top = 0, right = 0;
 };
 InkBox ps1_ink(const render::TextBatch& text, render::FaceId face, std::u32string_view str);
 // The menus' layouts give a left-aligned string's ink edge; the PS1 draws the same strings this many pixels further right.
 inline constexpr float kPs1InkShift = 2.0f;
-// The PS1 draws a console-font cell this many pixels below the cap top of RDE's layout.
-inline constexpr float kConsoleCellDrop = 8.0f;
 
 class FontSet {
  public:

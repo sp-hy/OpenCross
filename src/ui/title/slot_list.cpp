@@ -388,13 +388,8 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       line(146, 336, menu_str(card_ == 1 ? 0x801F2FF0 : 0x801F300C, card_ == 1 ? "Save data in Slot 1 is corrupted." : "Save data in Slot 2 is corrupted."));
       return;
     }
-    // Played from the USA discs the lines follow the message one menu-font line (18 px) apart, the pitch of the PS1's own card
-    // choice, and so stay inside the frame. The JP disc's card choice is 24 px apart, which leaves no room for a third line: there
-    // the lines keep the layout's 20.
-    const import::Ps1Font* line_font = ink && bn_font && bn_font->build() == import::Ps1Font::Build::UsaMenu ? bn_font : nullptr;
-    auto choice_y = [&](int choice) {
-      return line_font ? 336.0f + static_cast<float>(line_font->line_height() * (choice + 1)) : sl::choice_y(choice);
-    };
+    const int font_line = ink && bn_font ? bn_font->line_height() : 0;
+    auto choice_y = [&](int choice) { return sl::choice_y(choice, font_line); };
     line(146, 336, menu_str(0x801F2CA4, "Please choose a slot."));
     line(sl::kChoiceX, choice_y(0), U"OpenCross");
     line(sl::kChoiceX, choice_y(1), menu_str(0x801F2CDC, "Slot 1"));
@@ -647,7 +642,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       size_t line_start = 0;
       for (int line = 0;; ++line) {
         const size_t line_end = name.find(U'\n', line_start);
-        label(sl::kNameX, sl::kNameY + (nf.dy + nf.pitch * static_cast<float>(line)) * (448.0f / 960.0f) + (console ? sl::kConsoleNameDy : 0.0f),
+        label(sl::kNameX, sl::kNameY + (nf.dy + nf.pitch * static_cast<float>(line)) * (448.0f / 960.0f),
               name.substr(line_start, line_end == std::u32string::npos ? line_end : line_end - line_start), sl::kNameScale * nf.mul);
         if (line_end == std::u32string::npos) break;
         line_start = line_end + 1;

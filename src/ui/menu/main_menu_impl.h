@@ -414,6 +414,7 @@ struct MainMenu::Impl {
 
   // Defined in main_menu_draw.cpp.
   void Digits(float x, float y, const std::string& number, float advance, u32 colour = kText);
+  void Count(float x, float y, int count, u32 colour = kText);
   u32 ps1_colour(u32 bgr, int a = 255) const;
   // Colours ps1_colour gave for a channel over 0x80 -> the part over 1.0, which disc-mode text adds in a second copy.
   mutable std::map<u32, u32> colour_boosts;
@@ -442,10 +443,10 @@ struct MainMenu::Impl {
   // its own ink box (font::ps1_ink).
   bool ps1_text() const { return fonts.ps1(); }
   float ps1_scale() const { return xscale / render::TextBatch::kPs1PixelScale; }
-  // How far below a list row's text point the console font's cells sit (font::kConsoleCellDrop); 0 for any other face.
-  float console_drop(render::FaceId face) const {
+  // The face draws the given disc menu font (the console font of the JP menus, the USA menu sheet).
+  bool font_build(render::FaceId face, import::Ps1Font::Build build) const {
     const import::Ps1Font* font = text->ps1_font(face);
-    return font && font->build() == import::Ps1Font::Build::Console ? PY(font::kConsoleCellDrop) : 0.0f;
+    return font && font->build() == build;
   }
 
   // Defined in main_menu_draw.cpp.

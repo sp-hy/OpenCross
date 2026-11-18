@@ -144,7 +144,7 @@ void MainMenu::Impl::T(float x, float y, const std::u32string& str, u32 colour, 
   cmd.kind = Cmd::Text;
   cmd.text = str;
   cmd.face = face;
-  cmd.x = x, cmd.y = y + (kListRowPitch - text->line_height(face, scale)) * 0.5f + console_drop(face), cmd.color = colour, cmd.scale = scale;
+  cmd.x = x, cmd.y = y + (kListRowPitch - text->line_height(face, scale)) * 0.5f, cmd.color = colour, cmd.scale = scale;
   emit(std::move(cmd));
 }
 
@@ -170,6 +170,8 @@ u32 MainMenu::Impl::grey(int ps1_level) {
 // frame itself, its lines with its caption words and icons, and its size reaches from the frame origin to the frame's far edges.
 void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w, float* out_h, bool large) {
   if (!texs.hd()) {
+    // The JP disc's description frame is narrower than the USA disc's and stands 27 pixels further right.
+    if (frame == 0x36 && jp()) x += 27;
     Tex* panel = texs.sheet("main", frame);
     if (out_w) *out_w = panel ? panel->ox + panel->w : 100;
     if (out_h) *out_h = panel ? panel->oy + panel->h : 50;
@@ -208,7 +210,7 @@ void MainMenu::Impl::TP(float x, float y, const std::u32string& str, u32 colour,
   cmd.kind = Cmd::Text;
   cmd.text = str;
   cmd.face = face;
-  cmd.x = PX(x), cmd.y = PY(y) + (PY(16) - text->line_height(face, scale)) * 0.5f + console_drop(face), cmd.color = colour, cmd.scale = scale;
+  cmd.x = PX(x), cmd.y = PY(y) + (PY(16) - text->line_height(face, scale)) * 0.5f, cmd.color = colour, cmd.scale = scale;
   emit(std::move(cmd));
 }
 
@@ -232,8 +234,16 @@ void MainMenu::Impl::PT(float x, float y, const std::u32string& str, u32 colour)
 void MainMenu::Impl::Digits(float x, float y, const std::string& number, float advance, u32 colour) {
   const size_t first = number.find_first_not_of(' ');
   if (first == std::string::npos) return;
-  HT(face_kb != render::kNoFace ? face_kb : face_gn, x + advance * static_cast<float>(number.size()), y + 1.7f, utf32(number.substr(first)),
-     colour, advance >= 16 ? 0.34f : advance >= 12 ? 0.29f : 0.275f, true);
+  // Played from the discs the digits stand on the row's text point.
+  HT(face_kb != render::kNoFace ? face_kb : face_gn, x + advance * static_cast<float>(number.size()), y + (ps1_text() ? 0.0f : 1.7f),
+     utf32(number.substr(first)), colour, advance >= 16 ? 0.34f : advance >= 12 ? 0.29f : 0.275f, true);
+}
+
+// A stock count of a list row in two 16-px cells from x; the USA menu font prints it left-aligned from the field's start.
+void MainMenu::Impl::Count(float x, float y, int count, u32 colour) {
+  const render::FaceId face = face_kb != render::kNoFace ? face_kb : face_gn;
+  if (font_build(face, import::Ps1Font::Build::UsaMenu)) HT(face, x + 2.0f, y, utf32(std::to_string(count)), colour, 0.34f);
+  else Digits(x, y, padded_number(count, 2), 16, colour);
 }
 
 // PS1 colour word 0xBBGGRR (0x80 = 1.0).
@@ -361,7 +371,7 @@ void MainMenu::Impl::HT(render::FaceId face, float x, float y, const std::u32str
   if (ps1_text()) {
     const font::InkBox ink = font::ps1_ink(*text, face, str);
     // On the 640-wide save screen the console font's cells sit 4 pixels left of and 3 above these points.
-    const bool wide_console = screen == MenuScreen::Save && console_drop(face) != 0.0f;
+    const bool wide_console = screen == MenuScreen::Save && font_build(face, import::Ps1Font::Build::Console);
     cmd.scale = ps1_scale();
     cmd.x = PX((right ? x - ink.right : x + font::kPs1InkShift - ink.left) - (wide_console ? 4.0f : 0.0f));
     cmd.y = PY(y - ink.top - (wide_console ? 3.0f : 0.0f));

@@ -39,6 +39,8 @@ OpenCross is a from-scratch C++20 engine that plays Chrono Cross from the Steam 
 
 ## Practical rules
 
+- RDE mode is the product; work and test on it. DuckStation (the Japanese build) stays the behaviour reference. Disc mode (playing from the player's own PS1 disc images, `docs/architecture.md` 3.7) is a secondary mode few players use: run no disc-mode tests, USA-build captures or disc-mode comparisons unless the task is about disc mode. A change to shared code needs only the usual RDE checks.
+
 - Before new work, sync your clone or fork with `main`: with no work of its own, `git fetch upstream` then `git reset --hard upstream/main` (or GitHub's Sync fork, Discard commits); with unmerged work, `git pull --rebase upstream main`. Before every commit, rebase again the same way (`git fetch upstream` then `git rebase upstream/main`, with uncommitted changes stashed or autostashed), so the commit lands on the current `main`. A PR that lists more than its own commits is rebased before it is merged.
 - Test windows take no focus and play no sound: set `OC_QUIET=1` (the route runner and `ocbattleview --frames` do).
 - Never touch a real save folder (`Documents\My Games\...\Steam\<id>`); use forged saves under `tmp\` or `[Paths] SaveDir`.

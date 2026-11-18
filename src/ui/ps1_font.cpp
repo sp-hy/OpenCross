@@ -119,7 +119,6 @@ InkBox ps1_ink(const render::TextBatch& text, render::FaceId face, std::u32strin
   const import::Ps1Font* font = text.ps1_font(face);
   if (!font) return box;
   if (font->build() == import::Ps1Font::Build::Console) {
-    box.top = -kConsoleCellDrop;
     for (char32_t ch : str) {
       if (ch == U'\n') break;
       box.right += static_cast<float>(font->advance(font->index_for(ch)));

@@ -117,8 +117,9 @@ void MainMenu::Impl::build_equip() {
   for (int k = 0; k < 5; ++k) {
     const int id = gs->equipped(character, k);
     const float y = k == 0 ? 212.0f : k == 1 ? 260.0f : 308.0f + 24.0f * static_cast<float>(k - 2);
-    // The PS1 font's names sit 3 px higher, clear of the slot's underline.
-    if (id > 0) TPfit(82 + kRowDx, y - (ps1_text() ? 3.0f : 0.0f), item_name(id), 128, kText, kRowRel);
+    // Played from the discs the names are drawn from the PS1's text point (82, y), at their full width.
+    if (id > 0 && !texs.hd()) PT(82, y, item_name(id));
+    else if (id > 0) TPfit(82 + kRowDx, y, item_name(id), 128, kText, kRowRel);
     if (k == eslot) tri(52, y, !eq_list);
   }
   // stats: current (lower box) and, in list mode, the preview with its direction colour
@@ -221,9 +222,10 @@ void MainMenu::Impl::build_equip() {
     if (cand.stock_slot < 0) continue;
     const float y = 43.0f + 24.0f * static_cast<float>(row);
     const u32 col = cand.ok ? kText : rgb(128, 128, 128);
-    TPfit(305 + kRowDx, y, item_name(cand.item), 138, col, kRowRel);
+    if (!texs.hd()) PT(305, y, item_name(cand.item), col);
+    else TPfit(305 + kRowDx, y, item_name(cand.item), 138, col, kRowRel);
     // The second Einlanzer (item 0x40) is a pair: its row always shows 2.
-    Digits(449, y, padded_number(cand.item == 0x40 ? 2 : std::min(cand.qty, 99), 2), 16, col);
+    Count(449, y, cand.item == 0x40 ? 2 : std::min(cand.qty, 99), col);
   }
   if (eq_list) tri(273, 43.0f + 24.0f * static_cast<float>(eq_cur - eq_scroll), true);
   const int total = std::max(cnt, kVisibleRows);
@@ -232,21 +234,24 @@ void MainMenu::Impl::build_equip() {
   // description box (frame 0x36 large: 236x88 at (253,332)) with the waa_spec lines at (268, 340 + 16 l)
   Frame(0x36, 253, 332, kWhite, nullptr, nullptr, true);
   const int item = eq_list ? under.item : gs->equipped(character, eslot);
-  // The PS1 starts the lines 20 pixels further right in the box.
-  const float spec_x = ps1_text() ? 288.0f : 268.0f;
-  if (item > 0) {
-    std::string specs[3];
-    int rows = 0, lines = 0;
+  if (item <= 0) return;
+  if (!ps1_text()) {
     for (int ln = 0; ln < 3; ++ln) {
-      specs[ln] = trim(table_row("waa_spec", item * 3 + ln));
-      if (specs[ln].empty()) continue;
-      rows = ln + 1;
-      lines = ln + 1 + static_cast<int>(std::count(specs[ln].begin(), specs[ln].end(), '\n'));
+      const std::string spec = trim(table_row("waa_spec", item * 3 + ln));
+      if (!spec.empty()) TPfit(268, 340.0f + 16.0f * static_cast<float>(ln), utf32(spec), 205, kText, 0.74f);
     }
-    // With the PS1 font the lines (a row may break into several) are centred in the box: three lines start at y 352.
-    const float top = ps1_text() ? 352.0f + 8.0f * static_cast<float>(3 - std::min(lines, 3)) : 340.0f;
-    for (int ln = 0; ln < rows; ++ln)
-      if (!specs[ln].empty()) TPfit(spec_x, top + 16.0f * static_cast<float>(ln), utf32(specs[ln]), 205, kText, 0.74f);
+    return;
+  }
+  // Played from the discs every line (a row may hold several) is its own print from the PS1's text point (288, 340), 16 pixels below
+  // the one before.
+  float top = 340.0f;
+  for (int ln = 0; ln < 3; ++ln) {
+    const std::string spec = trim(table_row("waa_spec", item * 3 + ln));
+    for (size_t start = 0; start < spec.size(); top += 16.0f) {
+      const size_t end = std::min(spec.find('\n', start), spec.size());
+      PT(288, top, utf32(spec.substr(start, end - start)));
+      start = end + 1;
+    }
   }
 }
 
@@ -341,7 +346,7 @@ void MainMenu::Impl::build_keyitems() {
       else if (const Tex* tex = texs.load(path)) Img(tex, PX(234), PY(37.4f), PX(255), PY(255));
     }
     // The USA disc's lines sit 1 pixel lower than this layout; the console font's cells sit on it.
-    const float top = ps1_text() && console_drop(face_gn) == 0.0f ? 335.0f : 334.0f;
+    const float top = font_build(face_gn, import::Ps1Font::Build::UsaMenu) ? 335.0f : 334.0f;
     for (int line = 0; line < 3; ++line) {
       const std::string description = trim(table_row("keyitem", id * 3 + line));
       if (!description.empty()) key_item_line(description, ps1_text() ? 246.0f : 244.8f, top + 24.0f * static_cast<float>(line), 228);

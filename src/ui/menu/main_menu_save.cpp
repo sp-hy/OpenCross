@@ -453,10 +453,12 @@ void MainMenu::Impl::build_save() {
       return;
     }
     line(146, 336, menu_str(0x801F2CA4, "Please choose a slot."));
-    line(sl::kChoiceX, sl::choice_y(0), "OpenCross");
-    line(sl::kChoiceX, sl::choice_y(1), menu_str(0x801F2CDC, "Slot 1"));
-    line(sl::kChoiceX, sl::choice_y(2), menu_str(0x801F2CF8, "Slot 2"));
-    tri(sl::kChoiceCursorX, sl::choice_y(save_card) + 1.0f, true);
+    const import::Ps1Font* line_font = ps1_text() ? text->ps1_font(face_gn) : nullptr;
+    const int font_line = line_font ? line_font->line_height() : 0;
+    line(sl::kChoiceX, sl::choice_y(0, font_line), "OpenCross");
+    line(sl::kChoiceX, sl::choice_y(1, font_line), menu_str(0x801F2CDC, "Slot 1"));
+    line(sl::kChoiceX, sl::choice_y(2, font_line), menu_str(0x801F2CF8, "Slot 2"));
+    tri(sl::kChoiceCursorX, sl::choice_y(save_card, font_line) + 1.0f, true);
     return;
   }
   const SavePrev cp = cursor < 0 ? SavePrev{} : on_page ? page_prev[static_cast<size_t>(cursor)] : prev[static_cast<size_t>(cursor)];

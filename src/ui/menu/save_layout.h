@@ -44,9 +44,9 @@ constexpr float kGoldRight = 531, kGoldY = 259.8f, kGoldUnitX = 533, kGoldUnitSc
 constexpr float kLocX = 285, kLocY1 = 275.3f, kLocY2 = 291.8f, kLocScale = 0.28f;
 // The PS1 menu font's two location lines, one 18-pixel line apart (the load screen's text sits 4 pixels higher still).
 constexpr float kLocY1Ps1 = 272, kLocY2Ps1 = 290;
-// The console font (JP disc) on the load screen: the name 2 pixels higher, the location 10 lower, the message 1 left and 1 lower than
+// The console font (JP disc) on the load screen: the location 10 pixels lower, the message 1 left and 1 lower than
 // the menu font at the points above.
-constexpr float kConsoleNameDy = -2, kConsoleLocDy = 10, kConsoleMsgDx = -1, kConsoleMsgDy = 1;
+constexpr float kConsoleLocDy = 10, kConsoleMsgDx = -1, kConsoleMsgDy = 1;
 // Message box text ("Please select a file." ...) and the state-0 description ("Save a File" / "Load a File").
 constexpr float kMsgInkX = 147.5f, kMsgInkY = 338.5f, kMsgScale = 0.35f, kMsgWidth = 400;
 constexpr float kTopMsgInkX = 97.5f, kTopMsgInkY = 284.5f;
@@ -74,6 +74,11 @@ inline float row_y(int row) { return kRowY0 + kRowStep * static_cast<float>(row)
 // (266, line + 1).
 constexpr float kChoiceX = 298, kChoiceY0 = 356, kChoiceStep = 20, kChoiceCursorX = 266;
 inline float choice_y(int line) { return kChoiceY0 + kChoiceStep * static_cast<float>(line); }
+// Played from the discs the lines follow the message one line of the disc's menu font apart (`font_line`: the console font 16, the USA
+// menu font 18), so the three lines stay inside the frame with even margins; 0 keeps the layout's lines.
+inline float choice_y(int line, int font_line) {
+  return font_line > 0 ? 336.0f + static_cast<float>(font_line * (line + 1)) : choice_y(line);
+}
 // Location caption of a save: savetbl row = the number of scenario start values <= the save's scenario (u16 head 0x40), at least 1.
 inline int location_key(int scenario) {
   static constexpr int kStart[30] = {0, 8, 16, 24, 26, 28, 30, 36, 52, 64, 72, 80, 88, 92, 100, 108, 112, 116, 124, 128, 140, 144, 156, 164, 172, 184, 195, 202, 209, 999};
