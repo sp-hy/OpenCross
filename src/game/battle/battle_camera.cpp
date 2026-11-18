@@ -348,6 +348,7 @@ bool BattleCamera::select(const std::string& name) {
   }
   shot_ = shot;
   progress_ = 0;
+  fresh_ = split_;
   frozen_ = frame;
   frozen_scale_ = scale;
   return true;
@@ -620,11 +621,20 @@ void BattleCamera::tick(CamEvents& events) {
     if (std::sqrt(eye_left) * frame_rate * rate_units < 256.0f && std::sqrt(target_left) * frame_rate * rate_units < 256.0f) glide_rate_ = 0;
   }
 
+  if (!split_) tick_shots();
+}
+
+// The shot list's step (tick(), or the host after its units moved in split mode): see tick().
+void BattleCamera::tick_shots() {
   if (shot_) {
     for (Task& task : bg_) task.progress = std::min(4096.0f, task.progress + static_cast<float>(progress_step(*task.shot)));
     std::erase_if(bg_, [](const Task& task) { return task.progress >= 4096.0f; });
     const bool was_running = progress_ < 4096.0f;
     if (!was_running) return;
+    if (fresh_) {
+      fresh_ = false;
+      return;
+    }
     progress_ = std::min(4096.0f, progress_ + static_cast<float>(progress_step(*shot_)));
     CamPose goal;
     goal_pose(goal);

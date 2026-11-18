@@ -317,6 +317,9 @@ void BattleView::tick() {
   for (const auto& [unit, yaw] : pending_rot_) set_rot_now(unit, yaw);
   pending_rot_.clear();
   anm_tick();
+  // The camera's shot list after the units moved (the game's particle walk runs after the AnmSeq tick): a following shot frames this
+  // tick's places (Dash & Slash's dash shot held one tick short of the game's otherwise, Serge at the frame's edge).
+  camera_.tick_shots();
   // The battle-script stream (E0 / E2 / delays / executor waits) and its message window.
   script_pump();
   smsg_tick();
@@ -345,6 +348,7 @@ void BattleView::start_stage_intro(bool preroll) {
   for (int i = 0; i < kBtlinitLoadTicks; ++i) {
     CamEvents cam_events;
     camera_.tick(cam_events);
+    camera_.tick_shots();
     // The intro's 0x2B / 0x2C layer tasks step with the timelines.
     fx_screen_tick();
     stage_scene_.tick();

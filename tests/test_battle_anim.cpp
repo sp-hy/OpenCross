@@ -423,6 +423,19 @@ void test_camera() {
   CHECK(retired.select("cam2"));
   for (int i = 0; i < 55; ++i) retired.tick(ev);
   CHECK(!retired.task_running() && near(retired.pose(1.0f).eye[0], 1000.0f, 1.0f));
+
+  // Split mode: tick() leaves the shot list to tick_shots(), and a shot picked this tick takes its first step on the next one.
+  BattleCamera split;
+  split.set_bank(&bank);
+  split.set_split_shots(true);
+  CHECK(split.select("cam1"));
+  split.tick(ev);
+  split.tick_shots();  // the pick tick: no step yet
+  CHECK(near(split.pose(1.0f).eye[0], 0.0f, 0.2f));
+  split.tick(ev);
+  CHECK(near(split.pose(1.0f).eye[0], 0.0f, 0.2f));  // tick() alone: still no step
+  split.tick_shots();
+  CHECK(near(split.pose(1.0f).eye[0], 1000.0f * (40.0f / 4096.0f), 0.2f));
 }
 
 // The ticks (1-based) on which a timeline played its 0x4C sound, and the first tick after which it no longer runs.
