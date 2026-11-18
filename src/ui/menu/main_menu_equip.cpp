@@ -117,7 +117,9 @@ void MainMenu::Impl::build_equip() {
   for (int k = 0; k < 5; ++k) {
     const int id = gs->equipped(character, k);
     const float y = k == 0 ? 212.0f : k == 1 ? 260.0f : 308.0f + 24.0f * static_cast<float>(k - 2);
-    if (id > 0) TPfit(82 + kRowDx, y, item_name(id), 128, kText, kRowRel);
+    // Played from the discs the names are drawn from the PS1's text point (82, y), at their full width.
+    if (id > 0 && !texs.hd()) PT(82, y, item_name(id));
+    else if (id > 0) TPfit(82 + kRowDx, y, item_name(id), 128, kText, kRowRel);
     if (k == eslot) tri(52, y, !eq_list);
   }
   // stats: current (lower box) and, in list mode, the preview with its direction colour
@@ -152,7 +154,15 @@ void MainMenu::Impl::build_equip() {
   // rows of ATK. / M. ATT. / M. DEF. / HIT% (y 0x59 / 0x79).
   const float curdy[6] = {0, lang_idx == 5 ? -1.0f : 0, 0, 0, 0, lang_idx == 5 ? -1.0f : 0};
   const float predy[6] = {lang_idx == 5 ? 1.0f : 0, 0, lang_idx == 5 ? 1.0f : 0, lang_idx == 5 ? 1.0f : 0, lang_idx == 5 ? 1.0f : 0, 0};
+  // Played from the discs the captions, "%", the divider and the preview arrows are sheet frame 48 at the header's origin (and 48 rows up
+  // for the preview rows), the numbers small sheet digits with their units at x 116 / 194.
+  const bool disc = !texs.hd();
+  if (disc) {
+    Sprite(48, 42, 42);
+    if (eq_list) Sprite(48, 42, -6);
+  }
   for (int i = 0; i < 6; ++i) {
+    if (disc) continue;
     // Style 0x67 for HIT%, else 2 (the force-JP bit is cleared on the cmnmes hit).
     const u32 style = i == 4 ? 0x67u : 2u;
     // English left edge of the caption (the JP sheet caption's x plus the English offset) and the preview arrow that ends its room.
@@ -165,6 +175,16 @@ void MainMenu::Impl::build_equip() {
   auto row_dy = [](float y) { return y > 160.0f ? 1.8f : y > 145.0f ? 1.4f : 0.5f; };
   for (int i = 0; i < 6; ++i) {
     const Pos& pos = kPos[i];
+    if (disc) {
+      const float units = pos.x < 150 ? 116.0f : 194.0f;
+      SpriteNumber(std::min(cur.*(pos.stat), pos.cap), units, pos.y, false);
+      if (preview) {
+        const int new_value = pre.*(pos.stat), old_value = cur.*(pos.stat);
+        SpriteNumber(std::min(new_value, pos.cap), units, pos.py, false,
+                     new_value > old_value ? ps1_colour(0x004E77) : new_value < old_value ? ps1_colour(0x9F6D00) : kWhite);
+      }
+      continue;
+    }
     Digits(pos.x + numdx[i], pos.y + curdy[i] + row_dy(pos.y), padded_number(std::min(cur.*(pos.stat), pos.cap), 3), 8);
     if (preview) {
       const int new_value = pre.*(pos.stat), old_value = cur.*(pos.stat);
@@ -175,12 +195,12 @@ void MainMenu::Impl::build_equip() {
   // Parts of the header's sheet frame that the panel art leaves out, at PS1 positions: "%" after the HIT / EVD values (the current rows
   // always, the preview rows in list mode, drawn as a number-face glyph over HD art). With the disc art the frame is built from the
   // "wind" sheet, so the divider and, in list mode, the six preview arrows are drawn from that sheet too.
-  Tex* wind = ps1_screen() ? texs.ps1("ps1:wind", [&] { return ps1::menutim(*vfs, "wind"); }) : nullptr;
+  Tex* wind = ps1_screen() && !disc ? texs.ps1("ps1:wind", [&] { return ps1::menutim(*vfs, "wind"); }) : nullptr;
   auto sheet_part = [&](float x, float y, float u, float v, float w, float h) {
     Img(wind, PX(x), PY(y), PX(w), PY(h), u / wind->w, v / wind->h, (u + w) / wind->w, (v + h) / wind->h);
   };
   static const float kPercentY[4] = {137, 153, 89, 105};
-  for (int row = 0; row < (eq_list ? 4 : 2); ++row) {
+  for (int row = 0; row < (disc ? 0 : eq_list ? 4 : 2); ++row) {
     if (wind) sheet_part(203, kPercentY[row], 153, 20, 12, 10);
     else HT(face_kb != render::kNoFace ? face_kb : face_gn, 205, kPercentY[row] + 1.7f + (row < 2 ? row_dy(kPercentY[row]) : 0.0f), U"%", kText, 0.275f);
   }
@@ -202,9 +222,10 @@ void MainMenu::Impl::build_equip() {
     if (cand.stock_slot < 0) continue;
     const float y = 43.0f + 24.0f * static_cast<float>(row);
     const u32 col = cand.ok ? kText : rgb(128, 128, 128);
-    TPfit(305 + kRowDx, y, item_name(cand.item), 138, col, kRowRel);
+    if (!texs.hd()) PT(305, y, item_name(cand.item), col);
+    else TPfit(305 + kRowDx, y, item_name(cand.item), 138, col, kRowRel);
     // The second Einlanzer (item 0x40) is a pair: its row always shows 2.
-    Digits(449, y, padded_number(cand.item == 0x40 ? 2 : std::min(cand.qty, 99), 2), 16, col);
+    Count(449, y, cand.item == 0x40 ? 2 : std::min(cand.qty, 99), col);
   }
   if (eq_list) tri(273, 43.0f + 24.0f * static_cast<float>(eq_cur - eq_scroll), true);
   const int total = std::max(cnt, kVisibleRows);
@@ -213,11 +234,25 @@ void MainMenu::Impl::build_equip() {
   // description box (frame 0x36 large: 236x88 at (253,332)) with the waa_spec lines at (268, 340 + 16 l)
   Frame(0x36, 253, 332, kWhite, nullptr, nullptr, true);
   const int item = eq_list ? under.item : gs->equipped(character, eslot);
-  if (item > 0)
+  if (item <= 0) return;
+  if (!ps1_text()) {
     for (int ln = 0; ln < 3; ++ln) {
       const std::string spec = trim(table_row("waa_spec", item * 3 + ln));
       if (!spec.empty()) TPfit(268, 340.0f + 16.0f * static_cast<float>(ln), utf32(spec), 205, kText, 0.74f);
     }
+    return;
+  }
+  // Played from the discs every line (a row may hold several) is its own print from the PS1's text point (288, 340), 16 pixels below
+  // the one before.
+  float top = 340.0f;
+  for (int ln = 0; ln < 3; ++ln) {
+    const std::string spec = trim(table_row("waa_spec", item * 3 + ln));
+    for (size_t start = 0; start < spec.size(); top += 16.0f) {
+      const size_t end = std::min(spec.find('\n', start), spec.size());
+      PT(288, top, utf32(spec.substr(start, end - start)));
+      start = end + 1;
+    }
+  }
 }
 
 // One description row of a key item at PS1 (x, y). A row may hold several lines (split at '\n', a '\r' is dropped), kLinePitch rows
@@ -293,7 +328,9 @@ void MainMenu::Impl::build_keyitems() {
   for (int row = 0; row < 15; ++row) {
     const int idx = ki_scroll + row;
     if (idx >= cnt) break;
-    TPfit(75 + kRowDx, 44.6f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]), 135, kText, kRowRel);
+    // Played from the discs the names are drawn from the PS1's text point (75, 46 + 24 row), at their full width.
+    if (!texs.hd()) PT(75, 46.0f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]));
+    else TPfit(75 + kRowDx, 44.6f + 24.0f * static_cast<float>(row), key_item_name(ids[static_cast<size_t>(idx)]), 135, kText, kRowRel);
   }
   group(Right);
   Frame(0x3E, 238, 318);
@@ -308,9 +345,11 @@ void MainMenu::Impl::build_keyitems() {
         Img(p1, PX(234), PY(36), PX(255), PY(255), 0, 0, ps1::kKeyItemUv, ps1::kKeyItemUv);
       else if (const Tex* tex = texs.load(path)) Img(tex, PX(234), PY(37.4f), PX(255), PY(255));
     }
+    // The USA disc's lines sit 1 pixel lower than this layout; the console font's cells sit on it.
+    const float top = font_build(face_gn, import::Ps1Font::Build::UsaMenu) ? 335.0f : 334.0f;
     for (int line = 0; line < 3; ++line) {
       const std::string description = trim(table_row("keyitem", id * 3 + line));
-      if (!description.empty()) key_item_line(description, 244.8f, 334.0f + 24.0f * static_cast<float>(line), 228);
+      if (!description.empty()) key_item_line(description, ps1_text() ? 246.0f : 244.8f, top + 24.0f * static_cast<float>(line), 228);
     }
   }
 }

@@ -48,9 +48,12 @@
 #include "game/battle/battle_fx.h"
 #include "game/battle/battle_fx_textures.h"
 #include "game/battle/cast_header.h"
+#include "game/battle/hud_sheets.h"
 #include "game/disc_index.h"
 #include "game/effects/gpu_effects.h"
 #include "game/effects/light_extract.h"
+#include "import/battle_hud.h"
+#include "import/text.h"
 #include "render/particles.h"
 #include "game/battle/battle_pose.h"
 #include "game/battle/battle_seq.h"
@@ -928,6 +931,9 @@ class BattleView {
   void add_box(float x, float y, float w, float h, bool fill = true);
   void add_bar(float x, float y, float w, float h, float frac, u32 fill);
   void add_plate(int colour_index, float x, float y, float w, float h, u32 tint = 0xFFFFFFFFu);
+  // An element name plate (120 x 16 PS1 px from PS1 (x, y)): colour set 0..6 (green white black red yellow blue, all colours), the
+  // greyed set when `used`; frames 1..3 steady, 4..10 the slide.
+  void add_name_plate(bool used, int plate_colour, int frame, float x, float y);
   struct Tex;
   void add_img(const Tex& tex, float x, float y, float w, float h, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, u32 tint = 0xFFFFFFFFu, int blend = 0);
   // The red diamond menu cursor with its top-left at canvas (x, y): the 9 x 8 diamond and the 7 x 8 turned one alternate every 16 ticks.
@@ -951,6 +957,24 @@ class BattleView {
   void build_target_ui(bool cam_hint = true);
   void build_message_window(const std::vector<std::pair<std::u32string, u32>>& lines);
   void load_hud_art(const vfs::Vfs& vfs);
+  // battle_view_ps1hud.cpp: disc mode (no RDE `hd` archive) draws the PS1's own battle HUD sheets at the PS1's coordinates.
+  void load_ps1_hud(const vfs::Vfs& vfs);
+  // Frame `frame` (1-based) of HUD sheet `type` (import::kHudSheetNames, type = 4 x index) with its origin at PS1 (x, y). `colour` = PS1
+  // colour word (0x80 per channel = unchanged); `mode` 0 opaque, 1..4 the semi-transparent texels blended as (B + F) / 2, B + F, B - F,
+  // B + F / 4, the others opaque.
+  void add_sheet(int type, int frame, float x, float y, u32 colour = 0x808080, int mode = 0);
+  // The same frame with its picture's top-left corner at PS1 (left, top).
+  void add_sheet_at(int type, int frame, float left, float top, u32 colour = 0x808080, int mode = 0);
+  // A w x h rectangle of a frame's picture at (dx, dy) from the frame's origin, opaque, its top-left at PS1 (left, top).
+  void add_sheet_cut(int type, int frame, int dx, int dy, int w, int h, float left, float top);
+  // A name in the battle font (sheet 0x04 glyph frames) from PS1 (x, y), at most `max_glyphs` glyphs; returns the pen's end x.
+  float add_sheet_name(std::u32string_view text, float x, float y, u32 colour = 0x808080, int max_glyphs = 6);
+  // The battle-font glyph frame of a character (0 = none).
+  int sheet_glyph(char32_t ch) const;
+  void ps1_field_ring();
+  void ps1_party_panels();
+  // The target info window of unit `unit`, or of a side when `side` (the side label) is not empty.
+  void ps1_target_info(int unit, const std::u32string& side);
   void rebuild_ring();
   // The field ring of the presented action (the rules run ahead of the replay) and the cell shift that walks the drawn ring toward it.
   std::array<int, 3> presented_ring() const;
@@ -1305,6 +1329,13 @@ class BattleView {
   std::array<Tex, 140> eplate_;
   // menu/menuelem/menuelem_1..8 (empty, blue, green, black, red, white, yellow, rainbow).
   std::array<Tex, 8> plates_;
+  // Disc mode: every frame of the PS1 HUD sheets packed into two nearest-sampled atlases, the texels with the semi-transparency bit and the
+  // others; sheet_frames_[type / 4][frame - 1] = a frame's picture (offset from its origin and size in PS1 px, atlas UVs).
+  bool ps1_hud_ = false;
+  std::vector<std::vector<SheetFrame>> sheet_frames_;
+  Tex sheet_semi_, sheet_opaque_;
+  std::array<u8, 512> name_advance_{};
+  import::JpGlyphs glyph_codes_;
   render::Sampler linear_, nearest_;
 
   // element effects

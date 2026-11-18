@@ -12,6 +12,7 @@
 #include "platform/pad_remap.h"
 #include "ui/ps1_font.h"
 #include "ui/ps1_window.h"
+#include "ui/window_frame.h"
 
 namespace oc::ui {
 
@@ -28,6 +29,29 @@ u32 text_color(u8 idx, u32 alpha) {
                                {0, 255, 0},     {106, 106, 106}, {255, 166, 0}};
   const Rgb& entry = table[idx < 7 ? idx : 0];
   return pack_rgba(entry.r, entry.g, entry.b, static_cast<u8>(alpha));
+}
+
+// A window in the PS1 font (disc mode) is the PS1's own: it is laid out in field pixels, which land on the canvas as the field picture
+// does: a column is 4 canvas units (the 320 columns over the 1280 units), and the buffer rows 0..224 span the layer rows 2..238 at 4
+// units each, so a row is kPs1RowScale times as high as a column is wide. Default text is white (the sprite colour 0x80 on the
+// glyph's full texel).
+constexpr float kPs1Unit = kCanvasWidth / render::kLayerW;
+constexpr float kPs1RowScale = render::kPresentRows / render::kFieldRows;
+// PS1 window metrics, field pixels: lines 13 apart; the text 4 right of the window's left edge (64 more with the portrait on the left);
+// the frame built around the text area 8 wider than it; the 64 x 64 portrait centred on the window's height; the page leaf 4 below the
+// top of its line at the pen; a choice's hand 17 right of the text origin and 2 above its line; leaf and hand frames 16 x 16. The
+// text area's width counts 12 for the page leaf and 64 for a portrait.
+constexpr int kPs1LineHeight = 13, kPs1TextInset = 4, kPs1FrameExtra = 8, kPs1FaceSize = 64, kPs1FaceRoom = 64, kPs1LeafRoom = 12;
+constexpr int kPs1LeafDrop = 4, kPs1HandX = 17, kPs1HandRise = 2, kPs1Cursor = 16;
+// The PS1's colour of the selected choice line, and of the number entry's cursor digit.
+u32 ps1_highlight(u32 alpha) { return pack_rgba(255, 156, 74, static_cast<u8>(alpha)); }
+// The PS1's colour code table, sprite colours with 0x80 = 1.0: white, blue, cyan, magenta, green, yellow, red, white, grey (8: USA).
+u32 ps1_text_color(u8 idx, u32 alpha) {
+  static const u8 table[9][3] = {{0x80, 0x80, 0x80}, {0x00, 0x00, 0x80}, {0x00, 0x80, 0x80}, {0x80, 0x00, 0x80}, {0x00, 0x80, 0x00},
+                                 {0x80, 0x80, 0x00}, {0x80, 0x00, 0x00}, {0x80, 0x80, 0x80}, {0x46, 0x46, 0x46}};
+  const u8* entry = table[idx < 9 ? idx : 0];
+  auto channel = [](u8 value) { return static_cast<u8>(std::min(255, value * 2)); };
+  return pack_rgba(channel(entry[0]), channel(entry[1]), channel(entry[2]), static_cast<u8>(alpha));
 }
 
 // Per-skin tile UVs of the message frame (skin =texture index 0..15 = w01..w15, w17).
@@ -115,7 +139,8 @@ bool DialogueBox::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spr
   if (!white_.create(ctx, 1, 1, render::TextureFormat::Rgba8, white)) return false;
   white_set_ = render::TexRef(white_, nearest_);
   (void)skin;
-  if (!load_skin(3)) log::warn("dialogue: window skin not found (no frame drawn)");
+  // The box starts in HD mode; without an hd archive set_mode() loads the disc skin, so only a missing HD skin is worth a warning.
+  if (!load_skin(3) && vfs.has_archive("hd")) log::warn("dialogue: window skin not found (no frame drawn)");
   return static_cast<bool>(white_set_);
 }
 
@@ -161,7 +186,7 @@ bool DialogueBox::skin_current(int index) const {
 
 void DialogueBox::set_mode(ArtMode mode) {
   mode_ = mode;
-  if (!skin_current(skin_idx_)) load_skin(skin_idx_);
+  if (!skin_current(skin_idx_) && !load_skin(skin_idx_)) log::warn("dialogue: window skin not found (no frame drawn)");
   refresh_face();
 }
 
@@ -388,24 +413,32 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   scale_ = text_scale;
   render::TextBatch* batch = text_;
   LayoutMetrics metrics;
+  ps1_ = batch->is_ps1(face);
+  batch->set_pixel_aspect(ps1_ ? kPs1RowScale : 1.0f);
   metrics.line_height = batch->line_height(face, text_scale);
+  batch->set_pixel_aspect(1.0f);
   metrics.max_width = wrap_width_ * (text_scale / 0.5f);
-  // Glyphs advance by the width they count for, on the 2-unit grid of the 640-wide layout.
-  if (wrap)
+  if (ps1_) {
+    // The disc's own text in the PS1 font: its line breaks as written, every glyph at the PS1 pen advance.
+    metrics.advance = [batch, face, text_scale](char32_t ch) { return batch->advance(face, ch, text_scale); };
+    metrics.glyph_width = [batch, face, text_scale](char32_t ch, bool) { return batch->advance(face, ch, text_scale); };
+    metrics.max_width = 0;
+  } else if (wrap)
+    // Glyphs advance by the width they count for, on the 2-unit grid of the 640-wide layout.
     metrics.glyph_width = [this, batch, face, italic, text_scale](char32_t ch, bool slanted) {
       if (symbol_face_ != render::kNoFace && button_symbol(ch)) return jp_glyph_width(ch, 0.0f) * (text_scale / 0.5f);
       return wrap_glyph_width(batch->glyph_measure(slanted && italic != render::kNoFace ? italic : face, ch), slanted) * (text_scale / 0.5f);
     };
   else
     metrics.glyph_width = [batch, face, text_scale](char32_t ch, bool) { return jp_glyph_width(ch, batch->glyph_measure(face, ch)) * (text_scale / 0.5f); };
-  metrics.pen_grid = 2.0f;
-  metrics.wrap = wrap;
+  metrics.pen_grid = ps1_ ? 0.0f : 2.0f;
+  metrics.wrap = wrap && !ps1_;
   // Choice indent: non-JP only.
-  if (choice_mode_ && wrap) {
+  if (choice_mode_ && wrap && !ps1_) {
     metrics.choice_space_first = 2.0f * 70.0f * 0.45f * (text_scale / 0.5f);
     metrics.choice_space = 2.0f * 20.0f * 0.45f * (text_scale / 0.5f);
   }
-  if (wrap) {
+  if (wrap && !ps1_) {
     metrics.button_advance_spaced = 0.9f * 40.0f * (text_scale / 0.5f);
     metrics.button_advance = 0.9f * 55.0f * (text_scale / 0.5f);
   }
@@ -699,6 +732,7 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
   if (!open_ || tw_.closed() || !sprites_) return;
   const float alpha = opening_.alpha();
   if (alpha * 255.0f < 1.0f) return;
+  if (ps1_) return draw_ps1(vw, vh, fit, alpha);
   // The window draws RDE's canvas (render::overlay_fit), flatter than wide, in a view whose y unit is sy / sx pixels so that one zoom
   // serves both axes; the PS1-resolution pass (explicit fit) draws into the target's own pixels. The text snaps to the pixel grid.
   const render::OverlayFit of = fit ? render::OverlayFit{fit->s, fit->s, fit->ox, fit->oy} : render::overlay_fit(vw, vh);
@@ -711,7 +745,7 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
     float vw, vh;
     ~View() {
       sprites->set_view(vw, vh);
-      if (batch) batch->set_pixel_grid(0.0f, 0.0f);
+      if (batch) batch->set_pixel_grid(0.0f, 0.0f), batch->set_pixel_aspect(1.0f);
     }
   } view{sprites_, text_, vw, vh};
   sprites_->set_view(vw, vh / flat);
@@ -772,29 +806,7 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
   const int hl_line = choice_line();
 
   const TextPage* page = tw_.page();
-  if (page) {
-    const u32 shown = std::min<u32>(tw_.visible(), static_cast<u32>(page->glyphs.size()));
-    const u32 a = static_cast<u32>(255.0f * alpha);
-    for (render::TextBatch::Pass pass : {render::TextBatch::Pass::Backdrop, render::TextBatch::Pass::Fill}) {
-      for (u32 i = 0; i < shown; ++i) {
-        const LayoutGlyph& glyph = page->glyphs[i];
-        if (glyph.button >= 0) continue;
-        bool hl = choosing && line_h_ > 0 && static_cast<int>(std::lround(glyph.y / line_h_)) == hl_line;
-        char32_t ch = glyph.ch;
-        // A number-entry digit shows the entry's value; the cursor digit is orange.
-        if (glyph.digit >= 0 && static_cast<size_t>(glyph.digit) < digits_.size()) {
-          ch = static_cast<char32_t>(U'0' + digits_[static_cast<size_t>(glyph.digit)]);
-          hl = hl || glyph.digit == digit_cursor_;
-        }
-        text_->draw_glyph(glyph_face(ch, glyph.italic), ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_, text_color(hl ? 6 : glyph.color, a), scale_ * zoom,
-                          pass);
-      }
-    }
-    for (u32 i = 0; i < shown; ++i) {
-      const LayoutGlyph& glyph = page->glyphs[i];
-      if (glyph.button >= 0) draw_button(glyph.button, tx + glyph.x, ty + glyph.y + kButtonDrop * (scale_ / 0.5f), zoom, alpha);
-    }
-  }
+  draw_text(tx, ty, zoom, alpha, choosing, hl_line);
 
   // Wait cursor (both art modes): the leaf quad of the skin texture (70 x 70, uv (u0, 0.83333) size (0.124, 0.16667),
   // u0 = {.5, .625, .75, .875}[phase], phase 0..4 advancing every 5 frames and wrapping, phase 4 shows the last frame again), at the end of the revealed text
@@ -830,6 +842,124 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
     sprites_->draw(skin_set_, (tx + cc.x) * zoom, (ty + cc.y) * zoom + yo_, cc.w * zoom, cc.h * zoom, u0, 0.83333f, u0 + 0.124f, 1.0f,
                    pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha)));
   }
+}
+
+void DialogueBox::draw_text(float tx, float ty, float zoom, float alpha, bool choosing, int hl_line) {
+  const TextPage* page = tw_.page();
+  if (!page) return;
+  const u32 shown = std::min<u32>(tw_.visible(), static_cast<u32>(page->glyphs.size()));
+  const u32 a = static_cast<u32>(255.0f * alpha);
+  for (render::TextBatch::Pass pass : {render::TextBatch::Pass::Backdrop, render::TextBatch::Pass::Fill}) {
+    for (u32 i = 0; i < shown; ++i) {
+      const LayoutGlyph& glyph = page->glyphs[i];
+      if (glyph.button >= 0) continue;
+      bool hl = choosing && line_h_ > 0 && static_cast<int>(std::lround(glyph.y / line_h_)) == hl_line;
+      char32_t ch = glyph.ch;
+      // A number-entry digit shows the entry's value; the cursor digit is highlighted.
+      if (glyph.digit >= 0 && static_cast<size_t>(glyph.digit) < digits_.size()) {
+        ch = static_cast<char32_t>(U'0' + digits_[static_cast<size_t>(glyph.digit)]);
+        hl = hl || glyph.digit == digit_cursor_;
+      }
+      const u32 colour = ps1_ ? (hl ? ps1_highlight(a) : ps1_text_color(glyph.color, a)) : text_color(hl ? u8{6} : glyph.color, a);
+      text_->draw_glyph(glyph_face(ch, glyph.italic), ch, (tx + glyph.x) * zoom, (ty + glyph.y) * zoom + yo_, colour, scale_ * zoom, pass);
+    }
+  }
+  for (u32 i = 0; i < shown; ++i) {
+    const LayoutGlyph& glyph = page->glyphs[i];
+    if (glyph.button >= 0) draw_button(glyph.button, tx + glyph.x, ty + glyph.y + kButtonDrop * (scale_ / 0.5f), zoom, alpha);
+  }
+}
+
+// The PS1's field window around the text area the field engine placed (set_ps1_window: its top-left and size in field pixels; without
+// one, the layout's size at the bottom centre): the skin's frame and fill around a box 8 wider than the text area and 13 per line high,
+// the fill halves semi-transparent; the portrait, the text, the page leaf and the choice hand at the PS1's offsets (kPs1*). Everything
+// is placed in field pixels and mapped to the canvas as the field picture is (kPs1Unit, kPs1RowScale).
+void DialogueBox::draw_ps1(float vw, float vh, const render::CanvasFit* fit, float alpha) {
+  const render::CanvasFit cf = fit ? *fit : render::canvas_fit(vw, vh);
+  const float zoom = cf.s;
+  yo_ = cf.oy;
+  struct TextGrid {
+    render::TextBatch* batch;
+    ~TextGrid() { batch->set_pixel_grid(0.0f, 0.0f), batch->set_pixel_aspect(1.0f); }
+  } text_grid{text_};
+  text_->set_pixel_grid(1.0f, 1.0f);
+  text_->set_pixel_aspect(kPs1RowScale);
+  const float canvas_left = (vw / zoom - kCanvasWidth) * 0.5f;
+  auto canvas_x = [&](float x) { return canvas_left + kPs1Unit * x; };
+  auto canvas_y = [&](float y) { return kPs1Unit * (render::kFieldCrop + y * kPs1RowScale); };
+  auto quad = [&](const render::TexRef& tex, float x, float y, float w, float h, float u0, float v0, float u1, float v1, u32 colour) {
+    sprites_->draw(tex, canvas_x(x) * zoom, canvas_y(y) * zoom + yo_, kPs1Unit * w * zoom, kPs1Unit * kPs1RowScale * h * zoom, u0, v0, u1, v1,
+                   colour);
+  };
+  const u8 a = static_cast<u8>(255.0f * alpha);
+  const u32 opaque = pack_rgba(255, 255, 255, a);
+  const bool has_portrait = portrait_ >= 0 && portrait_on_ && !label_;
+  const bool face_left = has_portrait && portrait_left_;
+  const bool skinned = skin_set_ && skin_mode_ == mode_;
+
+  int width = win_w_, lines = win_lines_;
+  if (!has_win_ || width <= 0) {
+    width = static_cast<int>(std::lround(text_w_ / kPs1Unit)) + kPs1LeafRoom + (has_portrait ? kPs1FaceRoom : 0);
+    lines = has_portrait ? std::max(4, lines_) : lines_;
+  }
+  lines = std::max(1, lines);
+  const int box_w = width + kPs1FrameExtra, box_h = lines * kPs1LineHeight;
+  const int left = (has_win_ ? win_x_ : 0xA0 - width / 2) - kPs1TextInset;
+  const int top = has_win_ ? win_y_ : 0xB7 - box_h / 2;
+  const int text_x = left + kPs1TextInset + (face_left ? kPs1FaceRoom : 0);
+
+  // The fill under the portrait, the frame over it.
+  std::vector<WinQuad> pieces;
+  if (skinned && !label_)
+    pieces = build_skin_rect(static_cast<float>(left + box_w / 2), static_cast<float>(top + box_h / 2), box_w, box_h, 1.0f, false);
+  auto draw_pieces = [&](bool fill) {
+    const u32 colour = fill ? pack_rgba(255, 255, 255, static_cast<u8>(a / 2)) : opaque;
+    for (const WinQuad& piece : pieces)
+      if (piece.fill == fill) quad(skin_set_, piece.x, piece.y, piece.w, piece.h, piece.u0, piece.v0, piece.u0 + piece.du, piece.v0 + piece.dv, colour);
+  };
+  draw_pieces(true);
+  if (has_portrait && face_now_ && face_now_->set) {
+    // On the right the face's left column is the box centre + half the width (rounded down) - 63; on the left it starts 2 left of the
+    // box and is drawn mirrored across 63 texels, column j showing texel 63 - round(63 j / 64).
+    const float face_x = static_cast<float>(face_left ? left - 2 : left + box_w / 2 * 2 - (kPs1FaceSize - 1));
+    const float face_y = static_cast<float>(top + box_h / 2 - kPs1FaceSize / 2);
+    const float size = static_cast<float>(kPs1FaceSize);
+    const float u0 = face_left ? (size - 0.5f) / size : 0.0f, u1 = face_left ? 0.5f / size : 1.0f;
+    quad(face_now_->set, face_x, face_y, size, size, u0, 0, u1, 1, opaque);
+  }
+  draw_pieces(false);
+
+  const Typewriter::State st = tw_.state();
+  const bool choosing = line_count_ > 0 && (st == Typewriter::State::WaitClose || st == Typewriter::State::Closing);
+  const int hl_line = choice_line();
+  draw_text(canvas_x(static_cast<float>(text_x)), canvas_y(static_cast<float>(top)), zoom, alpha, choosing, hl_line);
+
+  // Leaf and hand frames of the skin sheet (128 x 96): 16 x 16 at v 80, the hand's at u 0..48, the leaf's at u 64..112.
+  const TextPage* page = tw_.page();
+  const int phase = std::min(3, static_cast<int>(blink_ / (5.0f / 30.0f)) % 5);
+  auto cursor = [&](int frame, float x, float y) {
+    const float u0 = static_cast<float>(frame * kPs1Cursor) / 128.0f, v0 = 80.0f / 96.0f;
+    quad(skin_set_, x, y, kPs1Cursor, kPs1Cursor, u0, v0, u0 + kPs1Cursor / 128.0f, v0 + kPs1Cursor / 96.0f, opaque);
+  };
+  auto line_of = [&](const LayoutGlyph& glyph) { return line_h_ > 0 ? static_cast<int>(std::lround(glyph.y / line_h_)) : 0; };
+  if (skinned && !label_ && tw_.waiting_for_input() && page && !page->glyphs.empty() && line_count_ == 0 && glyph_cursor_ < 0) {
+    const u32 shown = std::min<u32>(tw_.visible(), static_cast<u32>(page->glyphs.size()));
+    if (shown > 0) {
+      const LayoutGlyph& glyph = page->glyphs[shown - 1];
+      const float pen = (glyph.x + text_->advance(face_, glyph.ch, scale_)) / kPs1Unit;
+      cursor(4 + phase, static_cast<float>(text_x) + pen, static_cast<float>(top + line_of(glyph) * kPs1LineHeight + kPs1LeafDrop));
+    }
+  }
+  if (!skinned || !page) return;
+  int hand_line = -1;
+  float hand_x = static_cast<float>(text_x + kPs1HandX);
+  if (choosing) hand_line = hl_line;
+  if (glyph_cursor_ >= 0 && static_cast<size_t>(glyph_cursor_) < page->glyphs.size()) {
+    const LayoutGlyph& glyph = page->glyphs[static_cast<size_t>(glyph_cursor_)];
+    hand_line = line_of(glyph);
+    hand_x += glyph.x / kPs1Unit;
+  }
+  if (hand_line >= 0) cursor(phase, hand_x, static_cast<float>(top + hand_line * kPs1LineHeight - kPs1HandRise));
 }
 
 // ---------------------------------------------------------------------------------------------- DialogueDemo
@@ -959,6 +1089,9 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
     impl.last_speaker = li.speaker;
   }
   import::TextContext tctx = tables_.make_context(lang);
+  // The USA discs' text rules (case, name suffixes, Zoah's capitals) apply to their own text only.
+  tctx.usa_rules = tables_.from_disc() && lang != import::Lang::Jp;
+  tctx.speaker = impl.last_speaker;
   if (party_name) {
     auto base = tctx.party_name;
     tctx.party_name = [this, base](int slot) {
@@ -987,6 +1120,17 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
     };
   }
   import::Message flat = import::flatten(msg, tctx);
+  // Played from the PS1 discs a button code is text: the name of the button the function is assigned to ("○ button", the
+  // executable's table of the eight button names). The codes past the four functions keep their glyph.
+  if (tables_.from_disc())
+    for (import::Token& token : flat.tokens) {
+      if (token.kind != import::TokKind::Button || token.arg < 0 || token.arg > 3) continue;
+      const int source = platform::map_source(platform::active_map(), token.arg);
+      if (const std::string* name = tables_.sysmes(0x1Bu << 16 | static_cast<u32>(source), lang); name && !name->empty()) {
+        token.kind = import::TokKind::Text;
+        token.text = import::utf8_to_u32(*name);
+      }
+    }
   impl.plain.clear();
   for (const import::Token& token : flat.tokens)
     if (token.kind == import::TokKind::Text) impl.plain += import::u32_to_utf8(token.text);
@@ -1087,7 +1231,7 @@ void DialogueDemo::close() {
   voice_sync();
 }
 void DialogueDemo::set_label(bool on) { impl_->box.set_label(on); }
-void DialogueDemo::set_ps1_window(int x, int y) { impl_->box.set_ps1_window(x, y); }
+void DialogueDemo::set_ps1_window(int x, int y, int width, int lines) { impl_->box.set_ps1_window(x, y, width, lines); }
 void DialogueDemo::skip_grow() { impl_->box.skip_grow(); }
 void DialogueDemo::show_at_once() { impl_->box.show_at_once(); }
 void DialogueDemo::show_status(bool on) { impl_->status_on = on; }

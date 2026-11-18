@@ -2,6 +2,7 @@
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
@@ -93,6 +94,15 @@ fs::path find_game_dir(std::string_view configured) {
   }
   return {};
 }
+
+namespace {
+std::atomic<bool> g_disc_mode{false};
+}  // namespace
+
+void set_disc_mode(bool on) { g_disc_mode = on; }
+bool disc_mode() { return g_disc_mode.load(); }
+
+fs::path disc_save_dir(std::string_view region) { return local_data_dir() / "saves" / fs::path(std::string(region)); }
 
 namespace {
 // The quoted strings of a VDF text in order, with \" and \\ unescaped.

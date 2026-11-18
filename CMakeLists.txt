@@ -47,6 +47,7 @@ find_package(Stb REQUIRED)
 find_package(SPNG CONFIG REQUIRED)
 # shaderc (glslc) and sdl3-shadercross are build tools only (src/render/CMakeLists.txt); neither library is linked.
 
+add_subdirectory(third_party/libchdr)
 add_subdirectory(src)
 add_subdirectory(tools)
 

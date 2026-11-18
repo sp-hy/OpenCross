@@ -6,7 +6,9 @@
 //   names centred under them, the 3 x 6 list of pool creatures in the list window (13 px rows, clipped, scrolling) and the cursor
 //   (hd/menu/monmenu_cur.png, 5 frames of 8 menu frames) at the slot or at the list cell.
 // Text is RDE's: the battle font (gn_70 / kt_70, large_ or small_ files by art mode), white 0x808080, taken entries red 0x000080, the
-// selected slot and the list cursor's entry orange 0x285080; the cursor art is the same in both art modes.
+// selected slot and the list cursor's entry orange 0x285080; the cursor art is the same in both art modes. Played from the PS1 discs the
+// names are the PS1 font at one font pixel per pixel over their black copy, white / red / orange as the PS1's sprite colours, and the
+// cursor is the PS1's picture (map/etc/systim.bin entry 2).
 //
 //   s.open(pool, round, table); per frame: if (int sfx = s.update(input, dt)) play(sfx); s.draw(frame, vw, vh);
 //   when s.take_finished(): s.result() = the pool slots of the three picks (-1 none); the table holds the round's list positions.

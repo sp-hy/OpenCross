@@ -1,5 +1,6 @@
 // Checks for the title / name entry / flow logic: name encoding round trip (game font <-> Unicode, save record), name rules,
 // the keyboard pages, the NameEntry cursor / buffer / validation and the FlowMachine state transitions.
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <utility>
@@ -79,6 +80,8 @@ void test_pages() {
   CHECK(hira[0][0] == U'あ' && hira[0][4] == U'お' && hira[9][4] == U'ん');
   // The row reads ya _ yu _ yo.
   CHECK(kata[7][1] == 0 && kata[7][2] != 0);
+  // The right block's last kana row: small tsu, ya, yu, yo and vu.
+  CHECK(kata[6][5] == U'ッ' && kata[6][9] == U'ヴ');
   CHECK(alnum[0][0] == U'Ａ' && alnum[0][5] == U'Ｆ' && alnum[2][5] == U'Ｚ' && alnum[3][0] == U'ａ' && alnum[6][9] == U'９');
 }
 
@@ -210,6 +213,70 @@ void test_name_entry() {
   ui::NameEntry jp_entry;
   jp_entry.begin(jp);
   CHECK(jp_entry.max_len() == 6 && jp_entry.button() == ui::NameEntry::Button::Katakana && jp_entry.buffer() == U"セルジュ　　");
+}
+
+// The USA disc's name entry: the overlay's grid strips and prompt (a synthetic file of the USA build's size and layout), one 10 x 10
+// page, blank rows that type a space, 6 characters.
+void test_usa_disc_entry() {
+  std::vector<u8> prg(15512, 0);
+  auto strip = [&](size_t at, const char* chars) {
+    for (size_t i = 0; i < 5; ++i) {
+      const char ch = chars[i];
+      const u16 code = ch == ' ' ? 0x8140 : ch >= 'a' ? 0x8281 + (ch - 'a') : ch >= 'A' ? 0x8260 + (ch - 'A') : 0x824F + (ch - '0');
+      prg[at + 2 * i] = static_cast<u8>(code >> 8), prg[at + 2 * i + 1] = static_cast<u8>(code);
+    }
+  };
+  const char* left[7] = {"ABCDE", "KLMNO", "UVWXY", "abcde", "klmno", "uvwxy", "01234"};
+  const char* right[7] = {"FGHIJ", "PQRST", "Z    ", "fghij", "pqrst", "z    ", "56789"};
+  for (size_t row = 0; row < 7; ++row) strip(0x367C + 12 * row, left[row]), strip(0x36DC + 12 * row, right[row]);
+  const char prompt[] = "Please select a name...";
+  std::copy(std::begin(prompt), std::end(prompt), prg.begin() + 0x3760);
+  prg[0x3A28] = 6;
+  const u8 crono[] = {0x34, 0x5D, 0x5A, 0x59, 0x5A}, chrono[] = {0x34, 0x53, 0x5D, 0x5A, 0x59, 0x5A};
+  std::copy(std::begin(crono), std::end(crono), prg.begin() + 0x3750);
+  std::copy(std::begin(chrono), std::end(chrono), prg.begin() + 0x3758);
+  const auto text = import::parse_name_menu(prg);
+  CHECK(text && text->grid.size() == 10 && text->max_length == 6 && text->prompt == U"Please select a name...");
+  // The USA rule: a name beginning with Crono or Chrono is refused, case-sensitive; RDE's rule is unchanged.
+  if (text) {
+    CHECK(text->reserved_prefix && text->reserved.size() == 2 && text->reserved[0] == U"Crono" && text->reserved[1] == U"Chrono");
+    CHECK(ui::validate_name(U"Crono ", text.get()).empty() && ui::validate_name(U"Chronos", text.get()).empty());
+    CHECK(ui::validate_name(U"chrono", text.get()) == U"chrono" && ui::validate_name(U"CRONO", text.get()) == U"CRONO");
+    CHECK(ui::validate_name(U" Crono", text.get()) == U" Crono" && ui::validate_name(U"   ", text.get()).empty());
+    CHECK(ui::validate_name(U"chrono").empty() && ui::validate_name(U"Chronos") == U"Chronos");
+  }
+  // The JP disc rule: クロノ as the whole name only.
+  import::NameMenuText jp_text;
+  jp_text.reserved = {U"クロノ"};
+  CHECK(ui::validate_name(U"クロノ　", &jp_text).empty() && ui::validate_name(U"くろの", &jp_text) == U"くろの");
+  CHECK(ui::validate_name(U"クロノス", &jp_text) == U"クロノス" && ui::validate_name(U"Chrono", &jp_text) == U"Chrono");
+  CHECK(!import::parse_name_menu(std::vector<u8>(100, 0)));
+  if (!text) return;
+  CHECK(text->grid[0][0] == U'A' && text->grid[0][9] == U'J' && text->grid[2][6] == 0 && text->grid[6][9] == U'9' && text->grid[9][9] == 0);
+
+  ui::NameEntry entry;
+  auto setup = latin_setup();
+  setup.disc = text;
+  entry.begin(setup);
+  CHECK(entry.max_len() == 6 && entry.rows() == 10 && entry.cols() == 10 && entry.buttons().size() == 3);
+  CHECK(entry.in_buttons() && entry.button() == ui::NameEntry::Button::Alnum && entry.buffer() == U"Serge ");
+  // Into the grid; down to the blank rows: no wrap, a blank cell types a space, past the last row back to the buttons.
+  entry.press(ui::NameKey::Confirm);
+  for (int i = 0; i < 9; ++i) entry.press(ui::NameKey::Down);
+  CHECK(!entry.in_buttons() && entry.row() == 9 && entry.cell(9, 0) == 0);
+  entry.press(ui::NameKey::Confirm);
+  CHECK(entry.buffer()[0] == U' ' && entry.cursor_pos() == 1);
+  entry.press(ui::NameKey::Down);
+  CHECK(entry.in_buttons() && entry.row() == 9);
+  // The digits row; then Confirm accepts the typed name.
+  entry.press(ui::NameKey::Confirm);
+  for (int i = 0; i < 3; ++i) entry.press(ui::NameKey::Up);
+  entry.press(ui::NameKey::Confirm);
+  CHECK(entry.buffer().substr(0, 2) == U" 0");
+  entry.press(ui::NameKey::Left);
+  entry.press(ui::NameKey::Down);
+  entry.press(ui::NameKey::Confirm);
+  CHECK(entry.done() && entry.result() == U" 0rge");
 }
 
 void test_flow() {
@@ -713,6 +780,7 @@ int main() {
   test_rules();
   test_pages();
   test_name_entry();
+  test_usa_disc_entry();
   test_flow();
   test_party_editor();
   test_party_reserve();

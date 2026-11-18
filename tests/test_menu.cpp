@@ -1,13 +1,16 @@
 // Menu rule tests on synthetic data: grid allocation legality, stock accounting, auto-fill, the three sort orders,
-// equipment compatibility / stat previews, element use, the options word, the Status model camera between ticks and the language
-// suffix lookup of HD images.
+// equipment compatibility / stat previews, element use, the options word, the Status model camera between ticks, the language
+// suffix lookup of HD images, the skin window around a rectangle and the party screens' layout table.
 #include <cstdio>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 #include <vector>
 
+#include "import/party_menu.h"
 #include "ui/localized_path.h"
+#include "ui/window_frame.h"
 #include "ui/menu/game_state.h"
 #include "ui/menu/hand.h"
 #include "ui/menu/menu_model.h"
@@ -536,6 +539,51 @@ void test_ps1_art() {
   CHECK(std::string(ps1::face_name(0)) == "seljyu" && std::string(ps1::face_name(1)) == "kid" && ps1::face_name(50) == nullptr);
 }
 
+// The skin window around a rectangle (the party screen's Status window, 102 x 74 texels about (160, 64), two pixels per texel across):
+// the pieces stay inside the corner pieces' reach, every quad shows as many texels as its pixels hold, and a stretched texel starts one
+// pixel early, so the top-left corner starts half a texel into its sheet rectangle.
+void test_skin_rect() {
+  const std::vector<WinQuad> quads = build_skin_rect(160, 64, 102, 74, 2.0f);
+  CHECK(!quads.empty());
+  float left = 1e9f, top = 1e9f, right = -1e9f, bottom = -1e9f;
+  for (const WinQuad& quad : quads) {
+    left = std::min(left, quad.x), top = std::min(top, quad.y), right = std::max(right, quad.x + quad.w), bottom = std::max(bottom, quad.y + quad.h);
+    CHECK(std::fabs(quad.du * 128.0f * 2.0f - quad.w) < 0.01f && std::fabs(quad.dv * 96.0f - quad.h) < 0.01f);
+  }
+  CHECK(left == 160 - 2 * 83 && right == 160 + 2 * 83 && top == 64 - 65 && bottom == 64 + 65);
+  bool corner = false;
+  for (const WinQuad& quad : quads)
+    if (quad.x == left && quad.y == top) corner = corner || (std::fabs(quad.w - 96.0f) < 0.01f && std::fabs(quad.u0 * 128.0f - 32.5f) < 0.01f);
+  CHECK(corner);
+}
+
+// The party screens' layout table found by its content in an overlay image: seven label records, the name records, the element colours.
+void test_party_menu_layout() {
+  std::vector<u8> prg(0x400, 0);
+  const size_t base = 0x100;
+  auto put16 = [&](size_t at, int value) { prg[at] = static_cast<u8>(value), prg[at + 1] = static_cast<u8>(value >> 8); };
+  for (size_t i = 0; i < 7; ++i) {
+    const size_t at = base + i * 0x16;
+    put16(at, 60 + static_cast<int>(i)), put16(at + 2, 11), put16(at + 4, 88), put16(at + 6, 12);
+    prg[at + 10] = 60;
+    put16(at + 12, 88), put16(at + 14, 12), put16(at + 16, 0x3C0), put16(at + 18, 0xF2);
+    prg[at + 20] = 0x80;
+  }
+  for (size_t i = 0; i < 3; ++i) {
+    const size_t at = base + 7 * 0x16 + 2 + i * 0x16;
+    put16(at, 66 + static_cast<int>(i)), put16(at + 2, 29), put16(at + 4, 144), put16(at + 6, 11);
+    prg[at + 10] = 0xF3;
+    put16(at + 12, 72), put16(at + 14, 11), put16(at + 16, 0x380), put16(at + 18, 0xF8);
+    prg[at + 20] = i == 2 ? 0x40 : 0x64;
+  }
+  prg[base + 0xE0] = 0x12;
+  const auto layout = import::find_party_menu_layout(ByteSpan(prg.data(), prg.size()));
+  CHECK(layout && layout->labels[3].x == 63 && layout->labels[0].v == 60 && layout->name[2].colour == 0x404040 && layout->name[0].w == 144);
+  CHECK(layout && layout->element_rgb[0][0] == 0x12);
+  prg[base + 3 * 0x16 + 20] = 0x40;
+  CHECK(!import::find_party_menu_layout(ByteSpan(prg.data(), prg.size())));
+}
+
 // The Status camera drawn between two model ticks: the previous tick's camera at 0, the current one at 1, linear in between; the turn
 // carries on across the wrap of 4096 instead of spinning back.
 void test_menu_camera_blend() {
@@ -665,6 +713,8 @@ void test_use_flow() {
 int main() {
   test_localized_path();
   test_ps1_art();
+  test_skin_rect();
+  test_party_menu_layout();
   test_menu_camera_blend();
   test_grid();
   test_grid_summon_copies();

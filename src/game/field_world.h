@@ -46,6 +46,7 @@
 #include "game/room_view.h"
 #include "render/render_target.h"
 #include "render/shadow_pipeline.h"
+#include "import/ps1_text.h"
 #include "import/room_cards.h"
 #include "import/room_fixes.h"
 #include "import/text.h"
@@ -314,7 +315,9 @@ class FieldWorld final : public script::FieldHost {
   // ---- discs: the file index in use. The disc is data-driven: FE 65 and the DiscCheck at every
   // map transition set it from variable 0x42 (= disc - 1); a loaded save takes it from its variable 0x42 too.
   int disc() const { return disc_; }
+  // Every change of the disc goes through here and calls the host's disc hook (the data source follows the disc in the drive).
   void set_disc(int disc);
+  void set_on_disc_change(std::function<void(int)> cb) { on_disc_change_ = std::move(cb); }
   // The rooms mods add and each mod's ids for them (game/mod_rooms.h; owned by the caller, null = none). A listed room with no .bin is
   // logged. Mod rooms run under their internal ids (map_id(), the dialogue text, jumps); scripts see their owner's ids.
   void set_mod_rooms(const ModRooms* rooms);
@@ -1277,6 +1280,7 @@ class FieldWorld final : public script::FieldHost {
   std::function<void(int)> on_key_item_;
   std::function<void(int)> on_item_given_;
   std::function<void(u32)> on_var_bit_set_;
+  std::function<void(int)> on_disc_change_;
   MovieRequest movie_req_;
   // the sequence the playing movie started ("" = none)
   std::string movie_sequence_;
@@ -1336,6 +1340,15 @@ class FieldWorld final : public script::FieldHost {
   bool dialogue_kept_ = false, dialogue_below_ = false;
   // The executable's name / item / grammar-form strings (window widths).
   import::ExeStrings exe_strings_;
+  // The build the executable's string tables belong to (their table numbers differ per build); null when unknown.
+  const import::Ps1TextBuild* exe_build_ = nullptr;
+  // USA build: the pen advance of every single-byte glyph (the 256-byte width record) and the dialect column of character ids 0..49;
+  // both empty for the JP build.
+  Bytes usa_widths_, grammar_columns_;
+  // ps1_string_width's table number of grammar form 0 (form n = kGrammarTables + n).
+  static constexpr int kGrammarTables = 0x100;
+  // Pen advance of a text glyph code in pixels: the USA width record, else 8 below 0x75 and 12 from there (JP).
+  int glyph_width(u8 code) const { return usa_widths_.empty() ? (code < 0x75 ? 8 : 12) : usa_widths_[code - 0x20u]; }
   // entity whose script opened it
   int dialogue_owner_ = -1;
   int dialogue_face_ = -1;

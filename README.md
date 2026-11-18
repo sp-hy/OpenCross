@@ -2,9 +2,9 @@
 
 # OpenCross
 
-OpenCross is a native PC engine for Chrono Cross, built in C++20 on SDL3 and its GPU API (Vulkan or Direct3D 12). Drop it into your **Chrono Cross: The Radical Dreamers Edition** folder on Steam and it plays the game from your own files and saves, started from the game's own launcher or on its own.
+OpenCross is a native PC engine for Chrono Cross, built in C++20 on SDL3 and its GPU API (Vulkan or Direct3D 12). Drop it into your **Chrono Cross: The Radical Dreamers Edition** folder on Steam and it plays the game from your own files and saves, started from the game's own launcher or on its own. It can also play the original **PlayStation release** from your own disc images or a CD drive, Japanese or North American.
 
-OpenCross is a fan project, not affiliated with Square Enix, and ships no game data. A legitimately owned copy of the Radical Dreamers Edition is required.
+OpenCross is a fan project, not affiliated with Square Enix, and ships no game data. A legitimately owned copy of the Radical Dreamers Edition, or of the PlayStation game, is required.
 
 ## Status
 
@@ -13,6 +13,7 @@ OpenCross is **in development**. Exploring the world, talking to characters, the
 ## Features
 
 - **Both art styles**: switch between the remastered HD art and the original PlayStation look at any time.
+- **PlayStation discs**: play the Japanese or North American PlayStation release from your own disc images (`.cue`/`.bin`, `.chd`, `.iso` and more) or a CD drive, with its own text, menus and battle screens.
 - **Widescreen**: the field, world map, battles and menus fill wide and ultrawide screens; movies stay in 4:3.
 - **High frame rates**: supports rendering at any frame rate.
 - **HD models in fields**: the characters walk the field with their detailed Status-screen and battle models.
@@ -36,7 +37,7 @@ OpenCross is **in development**. Exploring the world, talking to characters, the
 
 - **OS**: Windows 10 or 11, 64-bit, or Linux and Steam Deck through Proton.
 - **GPU**: a graphics card with Vulkan or Direct3D 12 support. OpenCross picks one automatically, but can be changed in the settings.
-- **Game**: Chrono Cross: The Radical Dreamers Edition on Steam, installed.
+- **Game**: Chrono Cross: The Radical Dreamers Edition on Steam, installed, or your own images of the PlayStation discs (Japanese SLPS-02364/02365 or North American SLUS-01041/01080), or the discs in a CD drive.
 - **Controller** (optional): any controller SDL supports, such as Xbox, PlayStation or Switch pads, including rumble.
 
 ## Installing
@@ -54,6 +55,20 @@ WINEDLLOVERRIDES="xinput9_1_0=n,b" %command%
 ```
 
 OpenCross finds your Steam saves on its own and writes its settings to `opencross.ini` next to the executable. Its own achievements are kept in `achievements.txt` beside it.
+
+## Playing from the PlayStation discs
+
+Without the Radical Dreamers Edition, OpenCross plays the original PlayStation game. Use your own dumps of both discs:
+
+1. Put `opencross.exe` in a folder of its own.
+2. Put your disc images next to it, or anywhere and point OpenCross at them: the **no game files found** screen has a **Browse...** button, or set `Disc1` / `Disc2` (or `DiscDir`) under `[Paths]` in `opencross.ini`. A disc in a CD drive is found too.
+3. Run `opencross.exe`.
+
+Images are recognised by their content, not their file names. Supported: `.cue`/`.bin`, `.chd`, `.iso`, `.img`, CloneCD `.ccd`, Alcohol `.mds`/`.mdf`, `.pbp` and `.m3u`. If you have the Radical Dreamers Edition installed too, set `Source=disc` under `[Paths]` to play the discs instead. When the story moves to the other disc, OpenCross asks for it as the PlayStation did, and picks it up when it appears in the drive or the folder.
+
+Played from the discs, the game uses the PlayStation's own art, music, text and screens, in the discs' language. The PC options (widescreen, HD models in fields, shaders, speed modes, cheats) work as usual. Saves are kept in `%LOCALAPPDATA%\OpenCross\saves\jp` or `\usa`.
+
+The Japanese menus use the PlayStation's built-in kanji font. To get it, put a copy of your own PlayStation BIOS dump (`.bin` or `.rom`) next to `opencross.exe` or next to your disc images. Without one, OpenCross uses the game's own smaller font.
 
 ## Mods
 
@@ -81,6 +96,8 @@ What a mod can replace:
 Mods that change game data, such as stats, text or scripts, show **Won't change until restart** in the Mods tab: changes to them apply the next time the game starts.
 
 Manage mods in the **Mods** tab of the settings window (Esc): turn them on or off, change the order, and press **Rescan** after adding one. When two mods replace the same file, the higher one wins. **Load on** picks which art style a mod applies to: Modded (default), SD, HD or All. Game data always applies.
+
+Playing from the PlayStation discs, mods go in a `mods` folder next to `opencross.exe`, and only mods set to load on SD or All apply. Mods are made for the Radical Dreamers Edition's files, so a mod may not match the North American discs.
 
 A `mod.ini` at a mod's root names the mod and can turn on engine features such as Party Swap, or give new rooms their ids. The Mods tab's **Engine features** page shows what each mod turns on, and lets you turn on the extras that work without a mod.
 

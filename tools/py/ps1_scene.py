@@ -1,10 +1,12 @@
 """Scene captures of the original PlayStation game in stock DuckStation.
 
     python -X utf8 tools/py/ps1_scene.py <scene> [--state-every N] [--dump-every N] [--frames N] [--ds-dir D] [--port P]
+                                           [--disc 1|2|PATH] [--region japan|usa]
     python -X utf8 tools/py/ps1_scene.py list
 
-Each scene loads one of the base states (tmp/ref/states, written by `ps1_capture.py prep`), drives the battle menu with
-presses that are each verified from RAM, then steps frame by frame and writes tmp/ref/<scene>/
+Each scene loads one of the base states (tmp/ref/states, or tmp/ref/states_usa on the USA build, written by
+`ps1_capture.py prep`), drives the battle menu with presses that are each verified from RAM, then steps frame by frame and
+writes tmp/ref/<scene>/ (tmp/ref/<scene>_usa/ on the USA build)
 {frames/frame_NNNNNN.png, states/state_NNNNNN.sav, manifest.txt}. NNNNNN = game frames stepped since the capture started
 (0 = the state the capture began at). One emulator at a time per (ds-dir, port).
 
@@ -16,7 +18,6 @@ import argparse
 import datetime
 import os
 import shutil
-import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -24,11 +25,10 @@ sys.path.insert(0, HERE)
 import ps1ref  # noqa: E402
 import ps1_capture as cap  # noqa: E402
 import ps1_state  # noqa: E402
+from ps1_ram import RAM  # noqa: E402
 from ps1ref import Session  # noqa: E402
-from ps1_capture import Steps, log, rel, STATES, REF, STD_ROW0, SERGE_STATS, FORGE, ROOT  # noqa: E402
+from ps1_capture import Steps, log, rel, REF, STD_ROW0  # noqa: E402
 
-AREA_WORD = 0x800790FC
-RING = (0x800DFF98, 0x800DFF9C, 0x800DFFA0)
 LIST_OPEN_CELL = 3          # the element list opens on the 4th cell of the row; Down walks the row with wrap-around
 FP_ROW0 = "1,29,36,12,19,32,2,37"
 FP_GRID1 = "43,19,1"
@@ -58,33 +58,45 @@ class Scene:
         self.sc = SCENES[name]
         self.a = a
         self.ds = os.path.abspath(a.ds_dir)
-        self.out = os.path.join(REF, name)
+        self.out = os.path.join(REF, name + ("_usa" if cap.REGION == "usa" else ""))
         self.events = []
         self.steps = None
 
     # -- menu driving (every step verified from RAM) ---------------------------------------------------------------
     def weak_hit(self, g, st, then_menu):
-        """Attack -> target -> weak hit. then_menu: wait for the command menu to be back (menu_064a 1, gauge 0)."""
-        st.do("Circle: Attack -> target select (tgt_064b 2)", "Circle", lambda w: w["tgt_064b"] == 2, 120, hold=4)
+        """Attack -> target -> weak hit. then_menu: wait for the command menu to be back (menu_064a 1, gauge 0); the USA build
+        keeps the HIT% box open instead, so there the hit taken (gauge 0) is enough."""
+        st.do("Confirm: Attack -> target select (tgt_064b 2)", "Confirm", lambda w: w["tgt_064b"] == 2, 120, hold=4)
         g.run(100)
-        st.do("Circle: target -> HIT% box (tgt_064b 3)", "Circle", lambda w: w["tgt_064b"] == 3, 200, hold=4)
+        st.do("Confirm: target -> HIT% box (tgt_064b 3)", "Confirm", lambda w: w["tgt_064b"] == 3, 200, hold=4)
         g.run(45)
         st.add("HIT% box settled (45 frames after tgt_064b 3)")
         if not then_menu:
             return
-        st.do("Circle: weak hit lands (u0_gauge 0, tgt_064b 1)", "Circle", lambda w: w["u0_gauge"] == 0 and w["tgt_064b"] == 1, 300, hold=4)
+        if RAM.region == "usa":
+            # The USA build keeps the HIT% box open after a hit, with the Element row added; no command menu comes back.
+            st.do("Confirm: weak hit taken (u0_gauge 0, box stays open)", "Confirm", lambda w: w["u0_gauge"] == 0 and w["tgt_064b"] == 3, 300, hold=4)
+            return
+        st.do("Confirm: weak hit lands (u0_gauge 0, tgt_064b 1)", "Confirm", lambda w: w["u0_gauge"] == 0 and w["tgt_064b"] == 1, 300, hold=4)
         st.wait("command menu back (menu_064a 1)", lambda w: w["menu_064a"] == 1 and w["tgt_064b"] == 1, 400)
 
     def element_cast(self, g, st, elem, downs):
-        st.do("Down to Element (cur_064e 1)", "Down", lambda w: w["cur_064e"] == 1, 60, hold=4, settle=20)
-        st.do("Circle: element list open (tgt_064b 2)", "Circle", lambda w: w["tgt_064b"] == 2 and w["menu_064a"] == 0, 120, hold=4, settle=40)
+        if g.watch(["tgt_064b"])["tgt_064b"] == 3:
+            # HIT% box still open (USA build): Element is its row 3. Presses are dropped while the hit plays, so each Down is
+            # repeated until the cursor moves.
+            while g.watch(["cur_064e"])["cur_064e"] != 3:
+                prev = g.watch(["cur_064e"])["cur_064e"]
+                st.do("Down in the HIT%% box (cur_064e %d)" % prev, "Down", lambda w, p=prev: w["cur_064e"] != p, 300, hold=4, gap=6, settle=20)
+        else:
+            st.do("Down to Element (cur_064e 1)", "Down", lambda w: w["cur_064e"] == 1, 60, hold=4, settle=20)
+        st.do("Confirm: element list open (tgt_064b 2)", "Confirm", lambda w: w["tgt_064b"] == 2 and w["menu_064a"] == 0, 120, hold=4, settle=40)
         g.run(30)
         st.add("list settled (cursor cur_064e %d)" % g.watch(["cur_064e"])["cur_064e"])
         for i in range(downs):
             prev = g.watch(["cur_064e"])["cur_064e"]
             st.do("Down %d/%d in the element list" % (i + 1, downs), "Down", lambda w, p=prev: w["cur_064e"] != p, 60, hold=4, gap=6, settle=20)
         g.run(6)
-        st.do("Circle: element -> target (tgt_064b 3)", "Circle", lambda w: w["tgt_064b"] == 3, 120, hold=4)
+        st.do("Confirm: element -> target (tgt_064b 3)", "Confirm", lambda w: w["tgt_064b"] == 3, 120, hold=4)
         got = g.watch(["e05da"])["e05da"]
         if got != elem:
             raise RuntimeError("selected element %d, wanted %d (watch %s)" % (got, elem, g.watch()))
@@ -141,7 +153,7 @@ class Scene:
                 continue
             rows.append("%6d %s" % (ps1_state.frame_of(p), ps1_state.fmt_row({k: row.get(k) for k in fields if k in row})))
         head = ["scene: " + self.name, "date: " + datetime.datetime.now().isoformat(timespec="seconds"),
-                "emulator: stock DuckStation, disc %s" % os.path.basename(cap.DISC or ps1ref.default_disc() or "?")]
+                "emulator: stock DuckStation, disc %s (%s build)" % (os.path.basename(cap.DISC or ps1ref.default_disc() or "?"), cap.REGION)]
         text = head + lines + self.events + ["", "steps (frame = frames stepped since the base state was loaded):"] + self.steps.rows + \
             ["", "watch (tools\\py\\ps1_state.py watch states):"] + rows
         with open(os.path.join(self.out, "manifest.txt"), "w", encoding="utf-8") as fh:
@@ -154,7 +166,7 @@ class Scene:
         os.makedirs(self.out)
         kind = sc["kind"]
         base = {"elem": "bg00_menu", "attack": "bg00_menu", "prestart": "bg00_prestart", "bg21": "field53_encounter"}.get(kind) or sc["base"]
-        base_path = os.path.join(STATES, base + ("_d2" if cap.DISC_NO == 2 else "") + ".sav")
+        base_path = os.path.join(cap.STATES, base + ("_d2" if cap.DISC_NO == 2 else "") + ".sav")
         if kind == "summon" and not os.path.isfile(base_path):
             build_fp_base(self.ds, a.port, base_path)
         with Session(cap.DISC, state=base_path, ds_dir=self.ds, port=a.port) as g:
@@ -163,42 +175,42 @@ class Scene:
             lines = []
             if kind in ("elem", "summon"):
                 if kind == "summon":
-                    for r in RING:
-                        g.poke(r, sc["ring"], 4)
+                    for slot in range(3):
+                        g.poke(RAM.ring + 4 * slot, sc["ring"], 4)
                     st.add("ring poked to 0x%X x3" % sc["ring"])
                 row0 = sc.get("row0", STD_ROW0)
                 downs = downs_for(sc["elem"], row0)
                 self.weak_hit(g, st, True)
                 self.element_cast(g, st, sc["elem"], downs)
-                st.add("target step settled; the cast Circle is pressed at run frame 12 of the capture")
+                st.add("target step settled; the cast Confirm is pressed at run frame 12 of the capture")
                 total = a.frames or 360
                 if kind == "elem":
                     lines = ["element: %d (pgdat), Serge row 0, Down x%d in the level-1 list" % (sc["elem"], downs),
                              "base: %s.sav + menu steps (see steps)" % base, "encounter: room 53 entrance 1, bg_00",
-                             "frames: frames\\frame_NNNNNN.png = run frame N (320x240); the cast Circle is pressed at run frame 12, the cast pose starts at run frame ~20 (tgt_064b 5), act_kind 1 and the pack load (fx_load) a little later",
+                             "frames: frames\\frame_NNNNNN.png = run frame N (320x240); the cast Confirm is pressed at run frame 12, the cast pose starts at run frame ~20 (tgt_064b 5), act_kind 1 and the pack load (fx_load) a little later",
                              "states: states\\state_NNNNNN.sav every %d frames (RAM/VRAM: ps1_state.py)" % a.state_every]
                 else:
                     lines = ["summon: element %d, ring poked to 0x%X x3 (Down x%d)" % (sc["elem"], sc["ring"], downs),
                              "base: %s.sav + menu steps" % base, "states: every %d frames" % a.state_every]
-                self.capture(g, total, (0, total), presses=[(12, "Circle", 4)])
+                self.capture(g, total, (0, total), presses=[(12, "Confirm", 4)])
             elif kind == "attack":
                 self.weak_hit(g, st, False)
                 total, window = a.frames or sc["total"], sc["window"]
-                lines = ["action: weak attack (row 1 of the HIT% box) with the Sea Swallow; Circle at run frame 40, the hit lands at ~50 (u3_hp drops, u0_gauge 0)",
-                         "base: HIT% box up, Serge at the target (bg00_menu.sav + two Circles)", "encounter: as the element scenes (bg_00)",
+                lines = ["action: weak attack (row 1 of the HIT% box) with the Sea Swallow; Confirm at run frame 40, the hit lands at ~50 (u3_hp drops, u0_gauge 0)",
+                         "base: HIT% box up, Serge at the target (bg00_menu.sav + two Confirms)", "encounter: as the element scenes (bg_00)",
                          "window: frames %d..%d written; states every %d frames" % (window[0], window[1], a.state_every)]
-                self.capture(g, total, window, presses=[(40, "Circle", 4)])
+                self.capture(g, total, window, presses=[(40, "Confirm", 4)])
             elif kind == "prestart":
                 total, window = a.frames or sc["total"], sc["window"]
                 lines = ["base: bg00_prestart.sav (battle overlay loaded, battle frame counter 0); battle tick = run frame - 10"]
                 self.capture(g, total, window)
             elif kind == "bg21":
-                g.poke(AREA_WORD, 21, 2)
-                st.add("battlefield word %08X poked to 21" % AREA_WORD)
+                g.poke(RAM.area, 21, 2)
+                st.add("battlefield word %08X poked to 21" % RAM.area)
                 st.wait("bg_21 battle loaded (ovl 8, area 21, btl_frame 0)",
                         lambda w: w["ovl_id"] == 8 and w["area"] == 21 and w["btl_frame"] == 0 and w["u0_hp"] == 1023 and w["u0_sta"] == 70, 1500)
-                g.save_state(os.path.join(STATES, "bg21_prestart.sav"))
-                g.screenshot(os.path.join(STATES, "bg21_prestart.png"))
+                g.save_state(os.path.join(cap.STATES, "bg21_prestart.sav"))
+                g.screenshot(os.path.join(cap.STATES, "bg21_prestart.png"))
                 st.add("saved bg21_prestart.sav")
                 total, window = a.frames or sc["total"], sc["window"]
                 lines = ["base: bg21_prestart.sav (poked encounter: area 21 -> bg_21); battle tick = run frame - 10; window frames %d..%d, states every %d" % (window[0], window[1], a.state_every)]
@@ -209,15 +221,9 @@ class Scene:
 
 def build_fp_base(ds, port, out_path):
     """bg00_menu variant whose grid row 0 holds Frog Prince (37) in the 8th cell: forged card, cold boot, battle menu."""
-    mcd = os.path.join(ds, "memcards", "SLPM-87395_1.mcd")
-    save = os.path.join(ROOT, "tmp", "save.dat")
-    cmd = [sys.executable, "-X", "utf8", FORGE, save, "x", "--slot", "2", "--room", "53", "--entrance", "1", "--party", "0",
-           "--char", "0:" + SERGE_STATS, "--grid", "0:0:" + FP_ROW0, "--grid", "0:1:" + FP_GRID1, "--mcd", mcd, "--mcd-only"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode:
-        raise SystemExit("forge failed: " + r.stdout + r.stderr)
-    log("forged Frog Prince card into " + rel(mcd))
-    with Session(ds_dir=ds, port=port) as g:
+    cap.CARDS = os.path.join(ds, "memcards")
+    cap.forge(os.path.join("tmp", "save.dat"), FP_ROW0, grid1=FP_GRID1)
+    with Session(cap.DISC, ds_dir=ds, port=port) as g:
         st = Steps(g)
         cap.boot_to_load(g, st)
         st.wait("room 53 reached (loc 53)", lambda w: w["loc"] == 53, 3000)
@@ -236,6 +242,7 @@ def main(argv):
     ap.add_argument("--ds-dir", default=ps1ref.DS_DIR)
     ap.add_argument("--port", type=int, default=ps1ref.GDB_PORT)
     ap.add_argument("--disc", default="1", help="1, 2 or an image path (disc 2 uses the *_d2 base states from 'prep --disc2')")
+    ap.add_argument("--region", default=os.environ.get("OC_PS1_REGION") or "japan", help="japan or usa (base states of 'prep --region usa')")
     ap.add_argument("--tries", type=int, default=3, help="retries when the emulator process dies mid-run")
     a = ap.parse_args(argv)
     if a.scene == "list":
@@ -243,7 +250,7 @@ def main(argv):
         return 0
     if a.scene not in SCENES:
         raise SystemExit("unknown scene %s (%s)" % (a.scene, " ".join(SCENES)))
-    cap.set_disc(a.disc)
+    cap.set_disc(a.disc, a.region)
     for attempt in range(a.tries):
         try:
             Scene(a.scene, a).run()

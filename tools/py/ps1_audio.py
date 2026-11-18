@@ -2,8 +2,9 @@
 
     python -X utf8 tools/py/ps1_audio.py --state tmp/ref/states/bg00_menu.sav --out tmp/x2c/fireball --cast 5 --frames 1100
     (--cast N: the battle menu is driven condition by condition like ps1_scene.py, N Downs in the element list; the action
-    frame is the frame after the cast-confirming Circle's first frame, and only hits from there on are traced)
-    python -X utf8 tools/py/ps1_audio.py --state S.sav --out OUT --press "Circle:12@40,Circle:12@80,Down:20@300" --frames 600
+    frame is the frame after the cast-confirming press's first frame, and only hits from there on are traced)
+    python -X utf8 tools/py/ps1_audio.py --state S.sav --out OUT --press "Confirm:12@40,Confirm:12@80,Down:20@300" --frames 600
+    (Confirm / Cancel are the build's own buttons: Circle / Cross on the Japanese build, Cross / Circle on the USA one)
 
 Phase 1 (stepped, frame-exact): load the state, apply the presses, save a state at the action frame, then keep stepping
 --frames MORE frames with the sound breakpoints active, logging every hit with its exact frame. Phase 2 (free run, no
@@ -24,19 +25,18 @@ import time
 import wave
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ps1_ram
 import ps1ref
 import ps1_scene
 from ps1_capture import Steps, STD_ROW0
+from ps1_ram import RAM
 from ps1ref import Session, BUTTONS
-
-SOUND_PCS = "800368c4,8004a118,8004a168,8004f5c8,8004e9d0"
-ANIM_PCS = "800b9ddc,800b9f90"      # per-frame animation sound calls; fire every frame, so opt in with --pcs
 
 FPS = 60.0
 
 
 def parse_presses(spec):
-    """'Circle:12@40,Down:20@300' -> [(start_frame, mask, hold)]"""
+    """'Confirm:12@40,Down:20@300' -> [(start_frame, mask, hold)]"""
     out = []
     for item in [x for x in spec.split(",") if x]:
         m = re.match(r"^([A-Za-z0-9+]+):(\d+)@(\d+)$", item)
@@ -89,7 +89,9 @@ def main(argv):
     ap.add_argument("--cast", type=int, default=-1, help="element cast key sequence (0 = first entry)")
     ap.add_argument("--frames", type=int, default=300, help="free-run game frames to record (trace this many frames after the action frame; record frames/60 s)")
     ap.add_argument("--action-frame", type=int, default=-1, help="frame to save action.sav and start recording (default: last press end)")
-    ap.add_argument("--pcs", default=SOUND_PCS, help="hex PCs to trace (add %s for the per-frame animation calls)" % ANIM_PCS)
+    ap.add_argument("--pcs", default="", help="hex PCs to trace (default: the build's sound-request entries, ps1_ram sound_pcs; "
+                    "add --anim for the per-frame animation sound calls)")
+    ap.add_argument("--anim", action="store_true", help="also trace the per-frame animation sound calls (they fire every frame)")
     ap.add_argument("--disc")
     ap.add_argument("--ds-dir", default=ps1ref.DS_DIR)
     ap.add_argument("--port", type=int, default=ps1ref.GDB_PORT)
@@ -97,9 +99,9 @@ def main(argv):
 
     out = os.path.abspath(a.out)
     os.makedirs(out, exist_ok=True)
+    RAM.use(ps1_ram.region_of_disc(a.disc or ps1ref.default_disc()))
     presses = parse_presses(a.press)
     action = a.action_frame if a.action_frame >= 0 else max([s + h for s, m, h in presses] or [0])
-    pcs = [int(x, 16) for x in a.pcs.split(",") if x]
     tpath = os.path.join(out, "trace.txt")
     action_sav = os.path.join(out, "action.sav")
     wav_path = os.path.join(out, "audio.wav")
@@ -107,17 +109,21 @@ def main(argv):
     with open(tpath, "w") as tf:
         # Phase 1: stepped, input injected, sound breakpoints logged to `action + frames`
         g = Tracer(a.disc, a.state, ds_dir=a.ds_dir, port=a.port, trace_file=tf)
+        # The session has picked the build from the disc, so the default PCs are that build's.
+        pcs = [int(x, 16) for x in a.pcs.split(",") if x] or list(RAM.sound_pcs)
+        if a.anim:
+            pcs += RAM.anim_pcs
         try:
             if a.cast >= 0:
-                # Menu driven by the same RAM-verified steps as ps1_scene.py; tracing starts at the cast-confirming Circle.
+                # Menu driven by the same RAM-verified steps as ps1_scene.py; tracing starts at the cast-confirming press.
                 st = Steps(g)
                 row0 = [int(x) for x in STD_ROW0.split(",")]
                 elem = row0[(ps1_scene.LIST_OPEN_CELL + a.cast) % len(row0)]
                 ps1_scene.Scene.weak_hit(None, g, st, True)
                 ps1_scene.Scene.element_cast(None, g, st, elem, a.cast)
                 g.run(12)
-                presses.append((g.frame, BUTTONS["Circle"], 4))
-                # The state is saved after the first Circle frame (the game has taken the press), so the free run needs no input.
+                presses.append((g.frame, BUTTONS["Confirm"], 4))
+                # The state is saved after the first confirm frame (the game has taken the press), so the free run needs no input.
                 action = g.frame + 1
                 menu_rows = st.rows
             for pc in pcs:
@@ -143,7 +149,7 @@ def main(argv):
     # Phase 2: free run from the action state, no breakpoints, nothing pressed
     g = Session(a.disc, action_sav, ds_dir=a.ds_dir, port=a.port, realtime=True)   # wall-clock capture needs 60 Hz pacing
     try:
-        g.gdb.breakpoint(ps1ref.PAD_READER, False)
+        g.gdb.breakpoint(RAM.pad_reader, False)
         for f in glob.glob(os.path.join(g.videos, "*")):
             os.remove(f)
         g.audio_capture(True)
@@ -161,7 +167,8 @@ def main(argv):
         m.write("state %s\npress %s\ncast %d\nphase1_frames %d\naction_frame %d\nfree_frames %d\nfree_wall_s %.3f\n"
                 % (os.path.abspath(a.state), a.press, a.cast, p1_frames, action, a.frames, t1 - t0))
         m.write("wav channels %d width %d rate %d samples %d seconds %.3f\n" % (info + (secs,)))
-        m.write("pcs %s\nnote free run has no input and no breakpoints; audio time = (trace frame - action_frame)/60\n" % a.pcs)
+        m.write("pcs %s (%s build)\nnote free run has no input and no breakpoints; audio time = (trace frame - action_frame)/60\n"
+                % (",".join("%08x" % pc for pc in pcs), RAM.region))
     print("audio.wav %.2f s (expected %.2f s)  trace lines %d" % (secs, a.frames / FPS, sum(1 for _ in open(tpath))))
     return 0
 

@@ -3171,15 +3171,15 @@ void test_pac_resolved_ops() {
   {
     // engine flags, scripted-death flag, home facing, menu cursor
     pac::Module module;
-    const Bytes body = {0x81, 0x00, 0xAF, 0x01, 0x39, 0x00, 0x7D, 0x01, 0x5C, 0x00, 0xE3, 0x80,
+    const Bytes body = {0x81, 0x00, 0xAF, 0x01, 0x39, 0x00, 0x7D, 0x00, 0x5C, 0x00, 0xE3, 0x80,
                         0x85, 0x05, 0x80, 0xE3, 0x80, 0x7B, 0x02, 0x80};
     CHECK(module.parse(assemble_slot2(body)));
     ResolvedHost host;
     pac::Vm vm(module, host);
     vm.tick(), vm.tick();
-    CHECK(vm.end_check_enabled() && vm.ui_enabled() && !vm.menu_locked() && !vm.menu_entry100() && !vm.scripted_death(3));
+    CHECK(vm.end_check_enabled() && vm.ui_enabled() && !vm.menu_locked() && vm.menu_entry100() && !vm.scripted_death(3));
     CHECK(vm.run_slot(3, 2, queued));
-    CHECK(!vm.end_check_enabled() && !vm.ui_enabled() && vm.menu_locked() && vm.menu_entry100());
+    CHECK(!vm.end_check_enabled() && !vm.ui_enabled() && vm.menu_locked() && !vm.menu_entry100());
     CHECK(vm.scripted_death(3));
     CHECK_EQ(host.facing_unit, 3);
     CHECK_EQ(host.facing, 5);

@@ -27,6 +27,11 @@ inline float box_y(int box) { return kBoxY + kBoxStep * static_cast<float>(box /
 // HD captions in the frames' top gaps: "Slot 1" (cmnmes "slot") and "File# N" (cmnmes "File#", N = box index + 1).
 constexpr float kSlotCapX = 76, kSlotCapY = 84.6f, kSlotCapScale = 0.25f;
 constexpr float kFileCapX = 95, kFileCapY = 228.7f, kFileCapScale = 0.31f;
+// Played from the discs the detail frame's "Block#" caption is followed by "%2d" of the file's CHRONOnn number + 1 in the small
+// sheet digits (frame 21 + digit, 8 px apart) from (120, 228), on the USA discs (whose caption is longer) from (132, 228); an empty
+// box shows none.
+constexpr float kBlockNumY = 228;
+inline float block_number_x(bool usa) { return usa ? 132.0f : 120.0f; }
 // Detail panel: leader name / AUTO SAVE, star + count, Time + value, gold + G, two location lines.
 constexpr float kNameX = 285, kNameY = 250.2f, kNameScale = 0.33f;
 // Star "★": list position (0x54 + 0x130 - 2, 0xE6 + 0x14 + 1), kb_70 at
@@ -37,6 +42,11 @@ constexpr float kTimeLabelX = 439, kTimeLabelY = 245.6f, kSmallScale = 0.25f;
 constexpr float kTimeRight = 540, kTimeY = 245.6f;
 constexpr float kGoldRight = 531, kGoldY = 259.8f, kGoldUnitX = 533, kGoldUnitScale = 0.26f;
 constexpr float kLocX = 285, kLocY1 = 275.3f, kLocY2 = 291.8f, kLocScale = 0.28f;
+// The PS1 menu font's two location lines, one 18-pixel line apart (the load screen's text sits 4 pixels higher still).
+constexpr float kLocY1Ps1 = 272, kLocY2Ps1 = 290;
+// The console font (JP disc) on the load screen: the location 10 pixels lower, the message 1 left and 1 lower than
+// the menu font at the points above.
+constexpr float kConsoleLocDy = 10, kConsoleMsgDx = -1, kConsoleMsgDy = 1;
 // Message box text ("Please select a file." ...) and the state-0 description ("Save a File" / "Load a File").
 constexpr float kMsgInkX = 147.5f, kMsgInkY = 338.5f, kMsgScale = 0.35f, kMsgWidth = 400;
 constexpr float kTopMsgInkX = 97.5f, kTopMsgInkY = 284.5f;
@@ -64,6 +74,11 @@ inline float row_y(int row) { return kRowY0 + kRowStep * static_cast<float>(row)
 // (266, line + 1).
 constexpr float kChoiceX = 298, kChoiceY0 = 356, kChoiceStep = 20, kChoiceCursorX = 266;
 inline float choice_y(int line) { return kChoiceY0 + kChoiceStep * static_cast<float>(line); }
+// Played from the discs the lines follow the message one line of the disc's menu font apart (`font_line`: the console font 16, the USA
+// menu font 18), so the three lines stay inside the frame with even margins; 0 keeps the layout's lines.
+inline float choice_y(int line, int font_line) {
+  return font_line > 0 ? 336.0f + static_cast<float>(font_line * (line + 1)) : choice_y(line);
+}
 // Location caption of a save: savetbl row = the number of scenario start values <= the save's scenario (u16 head 0x40), at least 1.
 inline int location_key(int scenario) {
   static constexpr int kStart[30] = {0, 8, 16, 24, 26, 28, 30, 36, 52, 64, 72, 80, 88, 92, 100, 108, 112, 116, 124, 128, 140, 144, 156, 164, 172, 184, 195, 202, 209, 999};

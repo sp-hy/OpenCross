@@ -1,0 +1,9 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay jakotu.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_jakotu_init = 0x801C5E9C;  # function: Init for the ring effect
+fx_jakotu_frame = 0x801C5F4C;  # function: Per-frame ring growth with hold and faster growth phases
+fx_jakotu_ring_colour = 0x801C6208;  # function: Ring colour gate with three levels
+fx_jakotu_draw_a = 0x801C6324;  # function: Ring draw bracketed by show and hide
+fx_jakotu_draw_b = 0x801C63C0;  # function: Ring draw with colour per vertex

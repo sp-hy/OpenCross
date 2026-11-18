@@ -585,7 +585,6 @@ btl_elem_pulse_index = 0x800E05A8;  # data: Pulse index of the element list
 btl_elem_slide_step = 0x800E05AA;  # data: Step index of the plate slide tables
 btl_elem_minimap_columns = 0x800E05AC;  # data: Number of level columns shown by the minimap
 btl_cast_header_mode = 0x800E05B2;  # data: Cast header animation state
-btl_enemy_cast_effect_id = 0x800E05BC;  # data: Effect id latched when an action is built
 btl_cast_header_color = 0x800E05C9;  # data: Element colour field of the current action (record byte 5 >> 2); 0 = colourless, which skips the element trap check
 btl_action_element_id = 0x800E05DA;  # data: Element id of the current action
 btl_menu_level = 0x800E062C;  # data: Selected element level

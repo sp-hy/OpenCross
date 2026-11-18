@@ -71,7 +71,7 @@ Atim parse_atim(ByteSpan data) {
     if (reader.at<u32>(0) != 0x1101) failf("atim: CLUT object type {:#x}", reader.at<u32>(0));
     atim.clut_w = reader.at<u16>(12);
     atim.clut_h = reader.at<u16>(14);
-    if (atim.clut_w == 0 || atim.clut_h == 0 || reader.size() != 16 + 2ull * atim.clut_w * atim.clut_h) fail("atim: CLUT size");
+    if (atim.clut_w == 0 || atim.clut_h == 0 || !ends_at(16 + 2ull * atim.clut_w * atim.clut_h, reader.size())) fail("atim: CLUT size");
     atim.clut.resize(static_cast<size_t>(atim.clut_w) * atim.clut_h);
     for (size_t i = 0; i < atim.clut.size(); ++i) atim.clut[i] = reader.at<u16>(16 + 2 * i);
   }
@@ -81,8 +81,8 @@ Atim parse_atim(ByteSpan data) {
     Atim::Img image;
     image.w = reader.at<u16>(12) * 2u;
     image.h = reader.at<u16>(14);
-    if (image.w == 0 || image.h == 0 || reader.size() != 16ull + static_cast<size_t>(image.w) * image.h) fail("atim: image size");
-    image.px = cpt->entries[i].data.subspan(16);
+    if (image.w == 0 || image.h == 0 || !ends_at(16ull + static_cast<size_t>(image.w) * image.h, reader.size())) fail("atim: image size");
+    image.px = cpt->entries[i].data.subspan(16, static_cast<size_t>(image.w) * image.h);
     atim.images.push_back(image);
   }
   return atim;

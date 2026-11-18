@@ -58,15 +58,16 @@ def extract_ref(refdir):
         except Exception as e:  # a state we cannot read: skip it
             print("fx_diff: state %s unreadable (%s)" % (p, e))
             continue
-        t = {"seqs": [], "objs": [], "units": {}, "cam": None, "fog": None, "warp": None, "bf": st.u32(0x800E0518)}
+        ram = st.map
+        t = {"seqs": [], "objs": [], "units": {}, "cam": None, "fog": None, "warp": None, "bf": st.u32(ram.btl_frame)}
         try:
             reg = fr.Registry(st)
             base, ts = fr.tasks(st)
             for e, cb, d in ts:
-                if cb == fr.CB_SEQ:
+                if cb == ram.cb_seq:
                     seq = st.u32(d + 4)
                     t["seqs"].append({"name": reg.name_of_data(seq), "tag": fr.tag(st.u32(d + 0x10)), "elapsed": st.s16(d + 0x14), "wait": st.s16(d + 0x18)})
-                elif cb == fr.CB_OBJECT:
+                elif cb == ram.cb_object:
                     o = d
                     vel = [struct.unpack_from("<i", st.ram, st._o(o + k))[0] >> 6 for k in (0x10, 0x14, 0x18)]
                     t["objs"].append({
@@ -78,7 +79,7 @@ def extract_ref(refdir):
             print("fx_diff: %s: effect tables unreadable (%s)" % (os.path.basename(p), e))
         try:
             for u in range(12):
-                c = 0x800E31B0 + 0x30 * u
+                c = ram.unit_ctrl + 0x30 * u
                 m = st.u32(c)
                 if not (0x80000000 <= m < 0x80800000):
                     continue
@@ -89,12 +90,13 @@ def extract_ref(refdir):
         except Exception as e:
             print("fx_diff: %s: unit blocks unreadable (%s)" % (os.path.basename(p), e))
         try:
-            t["cam"] = {"eye": [st.s16(0x80071F68 + 2 * i) for i in range(3)], "tgt": [st.s16(0x80071F70 + 2 * i) for i in range(3)], "H": st.s16(0x80071F84),
-                        "roll": st.s16(0x80071F80)}
-            t["fog"] = {"near": st.u16(0x8008DBB8), "far": st.u16(0x8008DBB2), "rgb": [st.u8(0x8008DBB4), st.u8(0x8008DBB5), st.u8(0x8008DBB6)], "on": st.u8(0x800721E0)}
-            t["warp"] = {"on": st.u8(0x800720D8), "ang": list(fr.s16x3(st, 0x800720E0)), "tr": list(fr.s16x3(st, 0x800720E8)),
-                         "col": [st.u8(0x800720F0), st.u8(0x800720F1), st.u8(0x800720F2)], "off": [st.s16(0x800720F4), st.s16(0x800720F6)],
-                         "abr": st.u8(0x800720FC), "slow_n": st.u8(0x800720FF), "slow_x": st.u8(0x80072100)}
+            t["cam"] = {"eye": [st.s16(ram.camera_eye + 2 * i) for i in range(3)], "tgt": [st.s16(ram.camera_target + 2 * i) for i in range(3)],
+                        "H": st.s16(ram.camera_h), "roll": st.s16(ram.camera_roll)}
+            t["fog"] = {"near": st.u16(ram.fog_near), "far": st.u16(ram.fog_far), "rgb": [st.u8(ram.fog_rgb + i) for i in range(3)], "on": st.u8(ram.fog_on)}
+            w = ram.warp
+            t["warp"] = {"on": st.u8(w), "ang": list(fr.s16x3(st, w + 8)), "tr": list(fr.s16x3(st, w + 0x10)),
+                         "col": [st.u8(w + 0x18), st.u8(w + 0x19), st.u8(w + 0x1A)], "off": [st.s16(w + 0x1C), st.s16(w + 0x1E)],
+                         "abr": st.u8(w + 0x24), "slow_n": st.u8(w + 0x27), "slow_x": st.u8(w + 0x28)}
         except Exception as e:
             print("fx_diff: %s: camera / fog / warp unreadable (%s)" % (os.path.basename(p), e))
         out[f] = t

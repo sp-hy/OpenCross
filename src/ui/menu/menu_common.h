@@ -118,6 +118,8 @@ struct Tex {
   render::Texture tex;
   render::TexRef set = {};
   float w = 0, h = 0;
+  // A disc sheet frame (TexCache::sheet): its top-left relative to the frame origin, PS1 px.
+  float ox = 0, oy = 0;
 };
 
 // Textures of one screen: HD files by path (through Vfs::cache_key, so a mod switch loads the file again), PS1 disc art and generated
@@ -195,6 +197,35 @@ class TexCache {
     texs_[key] = std::move(tex);
     return result;
   }
+  // Frame `frame` of the disc's menu sheet `sheet` (ps1::sheet_picture), nearest-sampled, with its offset in ox / oy.
+  Tex* sheet(std::string_view sheet, int frame) {
+    const std::string key = "ps1:" + std::string(sheet) + std::to_string(frame);
+    if (auto it = texs_.find(key); it != texs_.end()) return it->second.get();
+    const ps1::SheetPicture picture = ps1::sheet_picture(*vfs_, sheet, frame);
+    std::unique_ptr<Tex> tex;
+    if (picture.rgba) tex = create(picture.rgba.w, picture.rgba.h, picture.rgba.px.data(), false);
+    else log::warn("{}: PS1 art {} not available", log_prefix_, key);
+    if (tex) tex->ox = static_cast<float>(picture.x), tex->oy = static_cast<float>(picture.y);
+    Tex* result = tex.get();
+    texs_[key] = std::move(tex);
+    return result;
+  }
+  // Compass mesh `mesh` of the disc's menu art at that scale (ps1::mesh_picture, unturned), with its offset in ox / oy.
+  Tex* mesh(std::string_view mesh, int scale_x, int scale_y, u32 colour, bool semi) {
+    const std::string key = "ps1:" + std::string(mesh) + std::to_string(scale_x) + "x" + std::to_string(scale_y);
+    if (auto it = texs_.find(key); it != texs_.end()) return it->second.get();
+    const ps1::SheetPicture picture = ps1::mesh_picture(*vfs_, mesh, 0, scale_x, scale_y, colour, semi);
+    std::unique_ptr<Tex> tex;
+    if (picture.rgba) tex = create(picture.rgba.w, picture.rgba.h, picture.rgba.px.data(), false);
+    else log::warn("{}: PS1 art {} not available", log_prefix_, key);
+    if (tex) tex->ox = static_cast<float>(picture.x), tex->oy = static_cast<float>(picture.y);
+    Tex* result = tex.get();
+    texs_[key] = std::move(tex);
+    return result;
+  }
+  // True when RDE's HD menu art is there; played from the PS1 discs it is not, and every picture comes from the disc.
+  bool hd() const { return vfs_->has_archive("hd"); }
+
   // The PS1 art when `ps1_art` is set and the disc has it, else the HD file.
   template <class MakeFn>
   Tex* ps1_or_hd(bool ps1_art, const std::string& key, MakeFn&& make, const std::string& hd_path) {
@@ -257,7 +288,7 @@ class TexCache {
   std::map<std::string, std::unique_ptr<Tex>> texs_;
 };
 
-// The dial needle: handle.png turned by the needle angle and resampled (render_hand) into ONE texture, re-uploaded in place when the
+// The dial needle: handle.png (on the discs the needle mesh) turned by the needle angle and resampled (render_hand) into ONE texture, re-uploaded in place when the
 // angle changes - the eased needle passes through many angles, so a texture per angle would be wasteful. `sx` / `sy` = canvas px per PS1 px of the screen; the image is centred on the pivot with half extents half_w / half_h.
 class NeedleTexture {
  public:
@@ -274,12 +305,21 @@ class NeedleTexture {
         quad.half_w = half_w_, quad.half_h = half_h_;
         return quad;
       }
+    bool updated = false;
+    if (!cache.hd()) {
+      // Played from the discs: the needle mesh "hari" turned by the angle, the same square at every angle.
+      const ps1::SheetPicture picture = ps1::mesh_picture(vfs, "hari", angle, 0x1000, 0x1000, ps1::kNeedleGrey, false);
+      if (!picture.rgba) return quad;
+      quad.tex = cache.upload("hand", picture.rgba.w, picture.rgba.h, picture.rgba.px.data(), false, &updated);
+      if (updated) angle_ = angle, valid_ = true;
+      half_w_ = quad.half_w = -static_cast<float>(picture.x) * sx, half_h_ = quad.half_h = -static_cast<float>(picture.y) * sy;
+      return quad;
+    }
     if (src_.rgba.empty()) {
       auto raw = vfs.read("hd/menu/handle.png");
       if (!raw || !render::decode_image(*raw, src_)) return quad;
     }
     const HandImage image = render_hand(src_.rgba.data(), src_.width, src_.height, angle, sx, sy);
-    bool updated = false;
     quad.tex = cache.upload("hand", image.w, image.h, image.rgba.data(), true, &updated);
     if (updated) angle_ = angle, valid_ = true;
     half_w_ = quad.half_w = image.half_w, half_h_ = quad.half_h = image.half_h;

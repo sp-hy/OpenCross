@@ -69,6 +69,11 @@ class DrawList {
     op.x = x, op.y = y, op.w = w, op.h = h, op.color = color, op.u0 = u0, op.v0 = v0, op.u1 = u1, op.v1 = v1;
     ops_.push_back(std::move(op));
   }
+  // The whole image added to the picture (dst += texel x color), as the PS1's additive semi-transparency.
+  void add(render::TexRef set, float x, float y, float w, float h, u32 color) {
+    image(set, x, y, w, h, color);
+    ops_.back().blend = render::BlendMode::Add;
+  }
   // Text with its top-left at (x, y). align: 0 left, 1 centre on x, 2 right edge at x.
   void text(render::FaceId face, std::u32string str, float x, float y, u32 color, float scale, int align = 0,
             bool backdrop = true);
@@ -92,6 +97,7 @@ class DrawList {
     render::TexRef set = {};
     float x = 0, y = 0, w = 0, h = 0, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
     u32 color = 0xFFFFFFFFu;
+    render::BlendMode blend = render::BlendMode::Alpha;
     render::FaceId face = render::kNoFace;
     std::u32string str;
     float scale = 1;
@@ -115,7 +121,7 @@ class UiKit {
   void request_lowres(DrawList& dl, const Ps1Display& display);
   render::SpriteBatch& sprites() { return *sprites_; }
   const vfs::Vfs& vfs() const { return *vfs_; }
-  // PS1 glyph table: only the text codec uses it (the PS1 1-bit font is never drawn).
+  // JP glyph table of the text codec (the PS1 font face, drawn in disc mode, is fonts().ps1()).
   const import::JpGlyphs& glyphs() const { return *jp_; }
 
   // Font slots in the current art mode (original art = the small_font_* files, same layout / scale / colour).

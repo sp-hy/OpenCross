@@ -25,8 +25,12 @@ class DiscIndex {
   // Field file id of model byte 0's animation pack (fieldobj/ex, one file per model byte).
   static constexpr int kFieldPackBase = 0x795;
 
-  // False if cdrom.fnd is missing.
+  // cdrom.fnd / cdrom2.fnd through the VFS (RDE); without cdrom.fnd (the PS1 discs) the built-in copy (vfs/disc_names.h).
   bool load(const vfs::Vfs& vfs);
+  // The built-in copy of both indexes.
+  void load_builtin();
+  // Number of records of a disc's index.
+  size_t size(int disc) const { return rec_[disc >= 2 ? 1 : 0].size(); }
   // `disc2` may be empty (then both discs share disc 1).
   bool from_bytes(ByteSpan disc1, ByteSpan disc2);
   bool loaded() const { return !rec_[0].empty(); }

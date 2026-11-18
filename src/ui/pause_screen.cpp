@@ -1,9 +1,12 @@
 #include "ui/pause_screen.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "core/log.h"
+#include "import/ps1_font.h"
 #include "render/camera.h"
+#include "ui/menu/ps1_art.h"
 
 namespace oc::ui {
 
@@ -28,6 +31,18 @@ bool PauseScreen::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spr
   const u8 px[4] = {255, 255, 255, 255};
   if (!white_.create(ctx, 1, 1, render::TextureFormat::Rgba8, px)) return false;
   white_set_ = render::TexRef(white_, nearest_);
+  lt_.init(&vfs);
+  if (!vfs.has_archive("ui")) {
+    ps1_ = true;
+    if (auto font = import::load_ps1_font(vfs)) face_ = text.add_ps1_font(std::move(font));
+    const ps1::Rgba wind = ps1::menutim(vfs, "wind");
+    if (wind && wind_.create(ctx, wind.w, wind.h, render::TextureFormat::Rgba8, wind.px.data())) {
+      wind_set_ = render::TexRef(wind_, nearest_);
+      wind_w_ = static_cast<float>(wind.w), wind_h_ = static_cast<float>(wind.h);
+    }
+    if (face_ == render::kNoFace || !wind_set_) log::warn("pause: PS1 font or menu window art unavailable");
+    return true;
+  }
   render::DecodedImage img;
   // The art is drawn as it is (a plain sprite draw, no recolouring): white 4 px outline + white arrows, translucent-black fill
   // (alpha 175), lavender-grey 4 px drop shadow; the text is white.
@@ -47,7 +62,6 @@ bool PauseScreen::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spr
   } else {
     log::warn("pause: ui/ui_font_gnb.spritefont unavailable");
   }
-  lt_.init(&vfs);
   return true;
 }
 
@@ -55,8 +69,10 @@ void PauseScreen::shutdown() {
   if (!ctx_) return;
   bar_set_ = {};
   white_set_ = {};
+  wind_set_ = {};
   bar_.destroy();
   white_.destroy();
+  wind_.destroy();
   linear_.destroy();
   nearest_.destroy();
   ctx_ = nullptr;
@@ -98,10 +114,12 @@ int PauseScreen::input(int dx, int dy, bool toggle, bool close) {
   return sfx;
 }
 
-std::u32string PauseScreen::ui_text(int id, const char32_t* fallback) {
+std::u32string PauseScreen::ui_text(int id) {
+  static constexpr const char32_t* kWords[2][5] = {{U"PAUSE", U"Vibration Function", U"World Names", U"Off", U"On"},
+                                                   {U"PAUSE", U"バイブレーション機能", U"ワールド名表示", U"OFF", U"ON"}};
   if (const import::TextTable* table = lt_.table("ui_pausemenu"))
     if (const std::string* str = table->get(static_cast<u64>(id), lang_); str && !str->empty()) return import::utf8_to_u32(*str);
-  return fallback;
+  return kWords[lang_ == import::Lang::Jp ? 1 : 0][id];
 }
 
 // The title bar is the art at its natural size; the option bar is sized to its text plus the two arrows tucked inside its right end
@@ -111,9 +129,13 @@ void PauseScreen::draw(const render::Frame& frame, float vw, float vh, bool resu
   if (!open_ || !ctx_) return;
   const render::CanvasFit fit = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
   const float zoom = fit.s, ox = fit.ox, oy = fit.oy;
-  const std::u32string title = ui_text(0, U"PAUSE");
-  const std::u32string line = ui_text(1, U"Vibration Function") + U" : " + ui_text(vibration_ ? 4 : 3, vibration_ ? U"On" : U"Off");
-  const std::u32string line2 = ui_text(2, U"World Names") + U" : " + ui_text(world_names_ ? 4 : 3, world_names_ ? U"On" : U"Off");
+  const std::u32string title = ui_text(0);
+  const std::u32string line = ui_text(1) + U" : " + ui_text(vibration_ ? 4 : 3);
+  const std::u32string line2 = ui_text(2) + U" : " + ui_text(world_names_ ? 4 : 3);
+  if (ps1_) {
+    draw_ps1(frame, vw, vh, resume, title, line, line2);
+    return;
+  }
   if (face_ != render::kNoFace) {
     text_->prepare(face_, title);
     text_->prepare(face_, line);
@@ -179,6 +201,46 @@ void PauseScreen::draw(const render::Frame& frame, float vw, float vh, bool resu
   };
   option_row(line, kRowY, false);
   if (world_row_) option_row(line2, kRow2Y, true);
+  sprites_->end();
+}
+
+// The disc look, laid out in pixels of the 320 x 240 picture (4 canvas units each): the title line, a 6-pixel gap and the option
+// rows at the font's 13-pixel pitch, every line centred, inside a window 14 pixels wider than the widest line on each side and
+// 8 pixels taller above and below, its frame the menu window pieces and its inside a translucent black.
+void PauseScreen::draw_ps1(const render::Frame& frame, float vw, float vh, bool resume, const std::u32string& title,
+                           const std::u32string& line, const std::u32string& line2) {
+  constexpr float kPx = 4.0f, kPadX = 14.0f, kPadY = 8.0f, kGap = 6.0f, kPitch = 13.0f, kScale = 0.5f;
+  if (face_ == render::kNoFace) return;
+  const render::CanvasFit fit = render::canvas_fit(vw, vh, kCanvasW, kCanvasH);
+  const float zoom = fit.s, scale = kScale * zoom;
+  text_->prepare(face_, title);
+  text_->prepare(face_, line);
+  if (world_row_) text_->prepare(face_, line2);
+  auto width_px = [&](const std::u32string& str) { return std::ceil(text_->measure(face_, str, scale) / (kPx * zoom)); };
+  const float text_w = std::max({width_px(title), width_px(line), world_row_ ? width_px(line2) : 0.0f});
+  const float win_w = text_w + 2.0f * kPadX, win_h = 2.0f * kPadY + kGap + kPitch * (world_row_ ? 3.0f : 2.0f);
+  const float left = std::floor((kCanvasW / kPx - win_w) * 0.5f), top = std::floor((kCanvasH / kPx - win_h) * 0.5f);
+  auto vx = [&](float px) { return fit.ox + px * kPx * zoom; };
+  auto vy = [&](float px) { return fit.oy + px * kPx * zoom; };
+
+  sprites_->begin(frame, vw, vh, resume);
+  sprites_->draw(white_set_, vx(left + 2.0f), vy(top + 2.0f), (win_w - 4.0f) * kPx * zoom, (win_h - 4.0f) * kPx * zoom, 0, 0, 1, 1,
+                 render::pack_rgba(0, 0, 0, 160));
+  if (wind_set_)
+    ps1::frame_pieces(
+        [&](float dx, float dy, float dw, float dh, float sx, float sy, float sw, float sh) {
+          sprites_->draw(wind_set_, dx, dy, dw, dh, sx / wind_w_, sy / wind_h_, (sx + sw) / wind_w_, (sy + sh) / wind_h_);
+        },
+        vx(left), vy(top), win_w * kPx * zoom, win_h * kPx * zoom, kPx * zoom, kPx * zoom);
+  render::TextStyle style;
+  style.backdrop_color = render::pack_rgba(0, 0, 0, 255);
+  auto centred = [&](const std::u32string& str, float row_top) {
+    text_->draw(face_, str, vx(left + std::floor((win_w - width_px(str)) * 0.5f)), vy(row_top), render::pack_rgba(255, 255, 255), scale,
+                style);
+  };
+  centred(title, top + kPadY);
+  centred(line, top + kPadY + kPitch + kGap);
+  if (world_row_) centred(line2, top + kPadY + 2.0f * kPitch + kGap);
   sprites_->end();
 }
 

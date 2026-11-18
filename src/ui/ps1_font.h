@@ -8,6 +8,10 @@
 // release; slots, scales and colours are identical in both modes, and so is the layout: the small kb file's glyphs are laid out with
 // the large kb file's metrics (pen advance, offsets, measure; the other small files keep their own).
 //
+// Played from the PS1 discs there are no spritefonts: every slot is then the PS1's own font (import::Ps1Font, the face of the disc's
+// build), drawn at the slot's scale; measure / draw use its pixel metrics. A menu set (init with `menu`) draws the disc's menu font
+// (the USA menu sheet; the 1-bit font on the JP disc), the others the 1-bit font of the field text.
+//
 // FontSet = the 14 RDE font slots for one render::TextBatch, loaded in the current art mode on first use.
 //   ui::font::FontSet fonts;  fonts.init(vfs, text);  fonts.set_classic(original_art);
 //   fonts.prepare(font::kBn, s);                                  // outside SpriteBatch begin()/end() (may rebuild an atlas)
@@ -88,16 +92,33 @@ Ink message(float r, float g, float b, float a = 1.0f);
 
 enum Align : int { kLeft = 0, kCentre = 1, kRight = 2 };
 
+// The ink box of the first line of `str` in a PS1 face, in font pixels from the pen and the line top: left of the first glyph's ink,
+// right of the last glyph's ink, cap top = the first inked row of "A". All zero for a spritefont face. Menus place disc-mode text by it
+// where they place a spritefont string by its ink. The console font is placed by its cells instead: left 0, right the pen after the
+// last glyph, and the cells start at the layout's cap top.
+struct InkBox {
+  float left = 0, top = 0, right = 0;
+};
+InkBox ps1_ink(const render::TextBatch& text, render::FaceId face, std::u32string_view str);
+// The menus' layouts give a left-aligned string's ink edge; the PS1 draws the same strings this many pixels further right.
+inline constexpr float kPs1InkShift = 2.0f;
+
 class FontSet {
  public:
   FontSet() = default;
   FontSet(const FontSet&) = delete;
   FontSet& operator=(const FontSet&) = delete;
 
-  void init(const vfs::Vfs& vfs, render::TextBatch& text);
+  // `menu`: the set of a menu screen (main menu, shops, title menus), which draws the disc's menu font.
+  void init(const vfs::Vfs& vfs, render::TextBatch& text, bool menu = false);
+  // Forgets every face (their TextBatch is gone); init() again before the next use.
+  void reset();
   // Art mode: false = HD (large_ files), true = original / classic art (small_ files, glyphs one texel narrower).
   void set_classic(bool classic) { classic_ = classic; }
   bool classic() const { return classic_; }
+
+  // True when the slots draw the PS1 font (no spritefont archive).
+  bool ps1() const { return ps1_.id != render::kNoFace; }
 
   // Face of a slot in the current (or the given) mode; loads the file on first use. kNoFace if the file is missing.
   render::FaceId face(int slot_index) { return face(slot_index, classic_); }
@@ -139,6 +160,8 @@ class FontSet {
   bool classic_ = false;
   // Indexed [classic * kFiles + file].
   std::array<Face, 2 * kFiles> faces_{};
+  // The PS1 font face standing in for every slot (font == null).
+  Face ps1_;
 };
 
 }  // namespace oc::ui::font

@@ -17,6 +17,13 @@ namespace oc::ui {
 
 namespace {
 using render::pack_rgba;
+// The OpenCross page's list frame.
+constexpr int kPageFrame = 64;
+// Played from the discs: blank PS1 px between the page's columns, and around its caption in the frame's top gap.
+constexpr float kDiscColumnGap = 8, kDiscCaptionPad = 3;
+// The main sheet's star frame, drawn this many PS1 px from a row's cap top.
+constexpr int kSheetStar = 6;
+constexpr float kSheetStarDy = -7;
 }  // namespace
 
 std::u32string format_playtime(u32 frames) {
@@ -177,6 +184,8 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   auto canvas_x = [](float x) { return 2.0f * x; };
   auto canvas_y = [](float y) { return y * 960.0f / 448.0f; };
   const u32 white = pack_rgba(240, 240, 240), text_c = pack_rgba(206, 197, 197);
+  // The disc's menu font carries its own greys: the neutral text colour draws it unchanged.
+  const u32 white_ps1 = pack_rgba(255, 255, 255);
   // Fallback text with its top-left at PS1 (x, y) when the bn / kb fonts are missing (gn_70).
   auto txt = [&](float x, float y, const std::u32string& str, u32 col, float rel = 1.0f) {
     dl.text(gnf, str, canvas_x(x), canvas_y(y), col, 0.42f * rel);
@@ -185,6 +194,14 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   // bearing 25.4 s; kb 32.3 s / 22.5 s (as main_menu.cpp HT).
   auto ink_text = [&](render::FaceId face_id, float x, float y, const std::u32string& str, u32 col, float sc, bool right = false) {
     if (str.empty()) return;
+    if (kit.text().is_ps1(face_id)) {
+      // The disc's menu font, one font pixel per PS1 pixel, by its own ink box.
+      const font::InkBox box = font::ps1_ink(kit.text(), face_id, str);
+      // On the 640-wide screens the PS1 draws the layout's strings 3 pixels further left and 4 higher.
+      const float pen_x = (right ? x - box.right : x + font::kPs1InkShift - box.left) - 3.0f;
+      dl.text(face_id, str, canvas_x(pen_x), canvas_y(y - box.top - 4.0f), col == text_c ? white_ps1 : col, canvas_x(1.0f) / render::TextBatch::kPs1PixelScale);
+      return;
+    }
     const bool kb = face_id == kbf;
     const float px = right ? canvas_x(x) - dl.measure(face_id, str, sc) - 12.0f * sc : canvas_x(x) - (kb ? 22.5f : 25.4f) * sc;
     dl.text(face_id, str, px, canvas_y(y) - (kb ? 32.3f : 25.6f) * sc, col, sc);
@@ -194,6 +211,8 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       while (sc > 0.18f && dl.measure(bnf, str, sc) > canvas_x(maxw)) sc -= 0.01f;
     ink_text(bnf, x, y, str, text_c, sc);
   };
+  const import::Ps1Font* bn_font = kit.text().ps1_font(bnf);
+  const bool console = bn_font && bn_font->build() == import::Ps1Font::Build::Console;
   auto number = [&](float xr, float y, const std::string& str, float sc) {
     ink_text(kbf, xr, y, std::u32string(str.begin(), str.end()), text_c, sc, true);
   };
@@ -256,6 +275,8 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   // Classic art + [Video] Ps1ResUi: the list at 640 x 448 with the PS1 disc art where the PS1 has it: faces
   // cdrom/face/<stem>.tim, box icons menutim.prd p0ic..pfic.
   const bool ps1_art = classic && ps1_menus();
+  // Played from the discs the frames carry their own captions ("MEMORY CARD Slot N", "Block#").
+  const bool disc_frames = !kit.vfs().has_archive("hd");
   kit.request_lowres(dl, kMenuWide);
   auto face_pic = [&](int id) -> NamePic {
     if (ps1_art) {
@@ -274,9 +295,34 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     if (auto it = face_files_.find(id); it != face_files_.end()) return pic(it->second);
     return ps1pic("ps1:face" + std::to_string(id), [&] { return ps1::face(kit.vfs(), id); });
   };
+  // The PS1 window pieces (ps1::frame_pieces) over a canvas rectangle, with a caption gap of `tab_w` canvas px at `tab_x`.
+  auto wind_frame = [&](float cx, float cy, float cw, float ch, float tab_x, float tab_w) {
+    const NamePic wd = ps1pic("ps1:wind", [&] { return ps1::menutim(kit.vfs(), "wind"); });
+    if (wd.set)
+      ps1::frame_pieces(
+          [&](float dx, float dy, float dw, float dh, float sx, float sy, float sw, float sh) {
+            dl.image(wd.set, dx, dy, dw, dh, 0xFFFFFFFFu, sx / wd.w, sy / wd.h, (sx + sw) / wd.w, (sy + sh) / wd.h);
+          },
+          cx, cy, cw, ch, canvas_x(1), canvas_y(1), tab_x, tab_w);
+  };
   // Frames: the RDE shape (transparent interior) in both modes; the PS1 sheet pieces
   // (ps1::frame_pieces) only when the PNG is missing. `tab_x` / `tab_w` (PS1 px from the frame's left) cut that fallback's caption gap.
-  auto frame = [&](int shape, float x, float y, float tab_x = 0, float tab_w = 0) {
+  // Played from the discs (no HD art) the panel is the sheet frame itself, its caption included, in `colour`; the OpenCross page's
+  // frame (64), which the PS1 has no screen for, is the window pieces at the sheet frame's size with its own caption gap.
+  auto frame = [&](int shape, float x, float y, float tab_x = 0, float tab_w = 0, u32 colour = 0xFFFFFFFFu) {
+    if (!kit.vfs().has_archive("hd")) {
+      ps1::SheetBounds box;
+      if (!ps1::sheet_bounds(kit.vfs(), "main", shape, box)) return;
+      if (shape == kPageFrame) {
+        wind_frame(canvas_x(x + static_cast<float>(box.x)), canvas_y(y + static_cast<float>(box.y)), canvas_x(static_cast<float>(box.w)),
+                   canvas_y(static_cast<float>(box.h)), canvas_x(tab_x), canvas_x(tab_w));
+        return;
+      }
+      const NamePic panel = ps1pic("ps1:frame" + std::to_string(shape), [&] { return ps1::sheet_picture(kit.vfs(), "main", shape).rgba; });
+      if (panel.set) dl.image(panel.set, canvas_x(x + static_cast<float>(box.x)), canvas_y(y + static_cast<float>(box.y)), canvas_x(static_cast<float>(box.w)),
+                              canvas_y(static_cast<float>(box.h)), colour);
+      return;
+    }
     char path[80];
     std::snprintf(path, sizeof path, "hd/menu/shapes/menu-main-%03d%s.png", shape,
                   std::array<const char*, 6>{"_en", "_fr", "_it", "_de", "_es", "_jp"}[static_cast<size_t>(li)]);
@@ -293,17 +339,8 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       const NamePic sz = pic(path);
       fw = sz.w / 4.0f, fh = sz.h / 4.0f;
     }
-    if (shape_pic.set) {
-      dl.image(shape_pic.set, canvas_x(x), canvas_y(y), canvas_x(fw), canvas_y(fh));
-    } else {
-      const NamePic wd = ps1pic("ps1:wind", [&] { return ps1::menutim(kit.vfs(), "wind"); });
-      if (wd.set)
-        ps1::frame_pieces(
-            [&](float dx, float dy, float dw, float dh, float sx, float sy, float sw, float sh) {
-              dl.image(wd.set, dx, dy, dw, dh, 0xFFFFFFFFu, sx / wd.w, sy / wd.h, (sx + sw) / wd.w, (sy + sh) / wd.h);
-            },
-            canvas_x(x), canvas_y(y), canvas_x(fw), canvas_y(fh), canvas_x(1), canvas_y(1), canvas_x(tab_x), canvas_x(tab_w));
-    }
+    if (shape_pic.set) dl.image(shape_pic.set, canvas_x(x), canvas_y(y), canvas_x(fw), canvas_y(fh));
+    else wind_frame(canvas_x(x), canvas_y(y), canvas_x(fw), canvas_y(fh), canvas_x(tab_x), canvas_x(tab_w));
   };
   if (!tables_) tables_ = std::make_unique<import::LangTables>(), tables_->init(&kit.vfs());
   auto menu_str = [&](u32 addr, const char* fb) -> std::u32string {
@@ -351,11 +388,13 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       line(146, 336, menu_str(card_ == 1 ? 0x801F2FF0 : 0x801F300C, card_ == 1 ? "Save data in Slot 1 is corrupted." : "Save data in Slot 2 is corrupted."));
       return;
     }
+    const int font_line = ink && bn_font ? bn_font->line_height() : 0;
+    auto choice_y = [&](int choice) { return sl::choice_y(choice, font_line); };
     line(146, 336, menu_str(0x801F2CA4, "Please choose a slot."));
-    line(sl::kChoiceX, sl::choice_y(0), U"OpenCross");
-    line(sl::kChoiceX, sl::choice_y(1), menu_str(0x801F2CDC, "Slot 1"));
-    line(sl::kChoiceX, sl::choice_y(2), menu_str(0x801F2CF8, "Slot 2"));
-    pointer(sl::kChoiceCursorX, sl::choice_y(card_) + 1.0f);
+    line(sl::kChoiceX, choice_y(0), U"OpenCross");
+    line(sl::kChoiceX, choice_y(1), menu_str(0x801F2CDC, "Slot 1"));
+    line(sl::kChoiceX, choice_y(2), menu_str(0x801F2CF8, "Slot 2"));
+    pointer(sl::kChoiceCursorX, choice_y(card_) + 1.0f);
     return;
   }
 
@@ -374,12 +413,35 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   if (card_ == 0) {
     // ---- OpenCross page: frame 64 with the caption in its tab, kPageRows rows from top_ (save_layout.h)
     cur = rows_[static_cast<size_t>(sel_)] ? &*rows_[static_cast<size_t>(sel_)] : nullptr;
-    frame(64, sl::kPageX, sl::kPageY, 8, 53);
-    const float cap_x = sl::kPageX + (sl::kSlotCapX - sl::kGridX);
-    float page_cap_scale = sl::kSlotCapScale;
-    while (page_cap_scale > 0.18f && dl.measure(kit.face_bn(), U"OpenCross", page_cap_scale) > canvas_x(sl::kPageCapMaxW)) page_cap_scale -= 0.01f;
-    if (ink) ink_text(kit.face_bn(), cap_x, sl::caption_y(sl::kPageY, page_cap_scale), U"OpenCross", text_c, page_cap_scale);
-    else txt(cap_x, sl::kPageY - 4.0f, U"OpenCross", white, 0.55f);
+    // Played from the discs every row is in the PS1 menu font at its own size (it does not shrink): the columns follow the widest
+    // number and leader, the play time keeps its right edge, and a location wider than the room left before the time loses
+    // characters from its end. The Auto row shows its leader like the others (its number already says Auto).
+    const bool ps1_rows = ink && kit.text().is_ps1(bnf);
+    auto ps1_width = [&](render::FaceId face_id, const std::u32string& str) {
+      const font::InkBox box = font::ps1_ink(kit.text(), face_id, str);
+      return box.right - box.left;
+    };
+    const std::u32string page_caption = U"OpenCross";
+    if (ps1_rows) {
+      // The caption stands in the frame's top gap, centred on its double line.
+      const float cap_w = ps1_width(kit.face_bn(), page_caption);
+      int cap_top = 0, cap_bottom = -1;
+      if (const int capital = bn_font ? bn_font->index_for(U'O') : -1; capital >= 0)
+        for (int y = 0; y < bn_font->cell_h(); ++y)
+          for (int x = 0; x < bn_font->cell_w(); ++x)
+            if (bn_font->level(capital, x, y)) cap_top = cap_bottom < 0 ? y : cap_top, cap_bottom = y;
+      frame(kPageFrame, sl::kPageX, sl::kPageY, 8, cap_w + 2 * kDiscCaptionPad);
+      // ink_text places a PS1 string kPs1InkShift - 3 right of the given ink edge and 4 above the given cap top.
+      ink_text(kit.face_bn(), sl::kPageX + 8 + kDiscCaptionPad - font::kPs1InkShift + 3.0f,
+               sl::kPageY + sl::kBorderMid - static_cast<float>(cap_bottom - cap_top + 1) / 2.0f + 4.0f, page_caption, text_c, 1.0f);
+    } else {
+      frame(kPageFrame, sl::kPageX, sl::kPageY, 8, 53);
+      const float cap_x = sl::kPageX + (sl::kSlotCapX - sl::kGridX);
+      float page_cap_scale = sl::kSlotCapScale;
+      while (page_cap_scale > 0.18f && dl.measure(kit.face_bn(), page_caption, page_cap_scale) > canvas_x(sl::kPageCapMaxW)) page_cap_scale -= 0.01f;
+      if (ink) ink_text(kit.face_bn(), cap_x, sl::caption_y(sl::kPageY, page_cap_scale), page_caption, text_c, page_cap_scale);
+      else txt(cap_x, sl::kPageY - 4.0f, page_caption, white, 0.55f);
+    }
     const u32 sel_c = pack_rgba(192, 120, 0), dim_c = pack_rgba(140, 132, 132);
     const std::u32string empty_text = menu_str(0x801F2E78, "EMPTY");
     // Leader (auto-save caption on Auto) and first location line of every file; one row scale for the whole page.
@@ -390,13 +452,28 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       if (!rows_[file_no]) continue;
       const save::SaveSlot& data = rows_[file_no]->data;
       const auto party = data.party();
-      std::u32string name = file_no == 0 ? import::utf8_to_u32(sl::auto_save_caption(li))
-                                        : party[0] < save::kNumChars && name_of_ ? name_of_(data, rows_[file_no]->ext_names, party[0]) : std::u32string();
+      std::u32string name = file_no == 0 && !ps1_rows ? import::utf8_to_u32(sl::auto_save_caption(li))
+                            : party[0] < save::kNumChars && name_of_ ? name_of_(data, rows_[file_no]->ext_names, party[0])
+                                                                     : std::u32string();
       std::replace(name.begin(), name.end(), U'\n', U' ');
       labels[file_no] = {std::move(name), sl::row_location(location_lines(data).first)};
-      while (ink && row_scale > 0.18f && (dl.measure(bnf, labels[file_no].first, row_scale) > canvas_x(name_w) ||
-                                          dl.measure(bnf, labels[file_no].second, row_scale) > canvas_x(sl::kRowLocW)))
+      while (ink && !ps1_rows && row_scale > 0.18f && (dl.measure(bnf, labels[file_no].first, row_scale) > canvas_x(name_w) ||
+                                                       dl.measure(bnf, labels[file_no].second, row_scale) > canvas_x(sl::kRowLocW)))
         row_scale -= 0.01f;
+    }
+    float name_x = sl::kRowNameX, loc_x = sl::kRowLocX;
+    if (ps1_rows) {
+      float number_w = std::max(ps1_width(bnf, import::utf8_to_u32(sl::page_number(0))), ps1_width(bnf, import::utf8_to_u32(sl::page_number(save::kOcFiles))));
+      float leader_w = ps1_width(bnf, empty_text);
+      for (const auto& [leader, location] : labels) leader_w = std::max(leader_w, ps1_width(bnf, leader));
+      name_x = sl::kRowNumX + number_w + kDiscColumnGap;
+      loc_x = name_x + leader_w + kDiscColumnGap;
+      const std::string widest_time = sl::playtime(0);
+      const float loc_end = sl::kRowTimeRight - ps1_width(kbf, std::u32string(widest_time.begin(), widest_time.end())) - kDiscColumnGap;
+      for (auto& [leader, location] : labels) {
+        while (!location.empty() && loc_x + ps1_width(bnf, location) > loc_end) location.pop_back();
+        location = sl::row_location(location);
+      }
     }
     auto row_text = [&](render::FaceId face_id, float x, float y, const std::u32string& str, u32 col, bool right = false) {
       if (!ink) {
@@ -414,17 +491,20 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       if (row_no == sel_) pointer(sl::kRowCursorX, y - 1.5f);
       row_text(bnf, sl::kRowNumX, y, import::utf8_to_u32(sl::page_number(row_no)), col);
       if (!row) {
-        row_text(bnf, sl::kRowNameX, y, empty_text, row_no == sel_ ? sel_c : dim_c);
+        row_text(bnf, name_x, y, empty_text, row_no == sel_ ? sel_c : dim_c);
         continue;
       }
       const save::SaveSlot& data = row->data;
-      row_text(bnf, sl::kRowNameX, y, labels[static_cast<size_t>(row_no)].first, col);
-      row_text(bnf, sl::kRowLocX, y, labels[static_cast<size_t>(row_no)].second, col);
+      row_text(bnf, name_x, y, labels[static_cast<size_t>(row_no)].first, col);
+      row_text(bnf, loc_x, y, labels[static_cast<size_t>(row_no)].second, col);
       const std::string time = sl::playtime(data.playtime_frames());
       row_text(ink ? kbf : gnf, sl::kRowTimeRight, y, std::u32string(time.begin(), time.end()), col, true);
       const u32 star_c = (data.summary_flags() & 1) ? sl::cleared_star_colour(col) : col;
       const std::string stars = std::to_string(std::min<int>(data.stars_total(), 99));
-      row_text(ink ? kbf : gnf, sl::kRowStarX, y, U"\u2605", star_c);
+      // A PS1 font without the star draws the menu sheet's star (frame 6), as the detail panel does.
+      if (ps1_rows && bn_font && bn_font->index_for(U'\u2605') < 0)
+        frame(kSheetStar, sl::kRowStarX, y + kSheetStarDy, 0, 0, (data.summary_flags() & 1) ? sl::cleared_star_colour(0xFFFFFFFFu) : 0xFFFFFFFFu);
+      else row_text(ink ? kbf : gnf, sl::kRowStarX, y, U"\u2605", star_c);
       row_text(ink ? kbf : gnf, sl::kRowStarsX, y, std::u32string(stars.begin(), stars.end()), star_c);
     }
     // Scroll marks: small triangles at the top / bottom right while rows lie above / below.
@@ -444,7 +524,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
 
   // ---- slot grid
   frame(82 + card_ - 1, sl::kGridX, sl::kGridY, 8, 40);
-  {
+  if (!disc_frames) {
     // Caption tab (memory-card slot), bn font in every language.
     const std::u32string caption = cmn("slot", "Slot") + (card_ == 1 ? U" 1" : U" 2");
     if (ink) ink_text(kit.face_bn(), sl::kSlotCapX, sl::kSlotCapY, caption, text_c, sl::kSlotCapScale);
@@ -482,7 +562,15 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   }
   // ---- detail frame + caption
   frame(84, sl::kDetailX, sl::kDetailY, 30, 34);
-  if (cur || card_ == 0) {
+  if (disc_frames && cur && card_ != 0) {
+    const import::Ps1Font* disc_font = kit.text().ps1_font(kit.face_bn());
+    const float number_x = sl::block_number_x(disc_font && (disc_font->build() == import::Ps1Font::Build::Usa || disc_font->build() == import::Ps1Font::Build::UsaMenu));
+    char number[8];
+    std::snprintf(number, sizeof number, "%2d", cur->slot + 1);
+    for (size_t i = 0; number[i]; ++i)
+      if (number[i] != ' ') frame(21 + (number[i] - '0'), number_x + 8.0f * static_cast<float>(i), sl::kBlockNumY);
+  }
+  if (!disc_frames && (cur || card_ == 0)) {
     // Caption: the box FILE's number + 1 (used boxes only; page: the row's number), bn font in every language.
     const std::u32string caption =
         cmn("File#", "File#") + import::utf8_to_u32(card_ == 0 ? sl::page_caption(sel_) : sl::file_number(cur->slot));
@@ -501,7 +589,7 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
   {
     const bool none = card_ != 0 && entries_.empty();
     const std::u32string message = menu_str(none ? 0x801F2F1C : 0x801F2E08, none ? "No Data" : "Please select a file.");
-    if (ink) label(sl::kMsgInkX, sl::kMsgInkY, message, sl::kMsgScale, sl::kMsgWidth);
+    if (ink) label(sl::kMsgInkX + (console ? sl::kConsoleMsgDx : 0.0f), sl::kMsgInkY + (console ? sl::kConsoleMsgDy : 0.0f), message, sl::kMsgScale, sl::kMsgWidth);
     else txt(146, 336, message, white, 1.0f);
   }
   // Continue+ (variant 2): a refused slot shows no details, but its menutest message in the DETAIL frame: message 7 / 8 (flag bit 0,
@@ -560,19 +648,37 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
         line_start = line_end + 1;
       }
     }
-    {
-      // The star is the kb_70 glyph "★" (slot 0, mul 0.625, H3), pen at list (kStarX, kStarY).
-      const font::SlotInfo& k0 = font::slot(font::kKb);
-      const float sc = k0.scale * 0.625f;
-      dl.text(kbf, U"★", canvas_x(sl::kStarX) + k0.off_x * sc, canvas_y(sl::kStarY) + k0.off_y * sc, star_c, sc);
+    if (disc_frames && bn_font && (bn_font->build() == import::Ps1Font::Build::Japan || console)) {
+      // The JP disc draws the numbers as main-sheet frames, as on the menu bar: the star (6), the count in big digits (9 + d, 12 px
+      // apart, last at x 414), "PLAY" (36) and the play time in small digits (21 + d) with ":" (35), the gold right-aligned before
+      // "G" (33) with "." (32) between the thousands, 8 px apart. A cleared save's star and count are tinted yellow.
+      const u32 star_tint = (save_data.summary_flags() & 1) ? sl::cleared_star_colour(0xFFFFFFFFu) : 0xFFFFFFFFu;
+      frame(kSheetStar, 388, 250, 0, 0, star_tint);
+      float x = 414;
+      for (auto it = stars.rbegin(); it != stars.rend(); ++it, x -= 12) frame(9 + (*it - '0'), x, 251, 0, 0, star_tint);
+      frame(36, 437, 244);
+      x = 469;
+      for (char ch : tb) frame(ch == ':' ? 35 : 21 + (ch - '0'), x, 244), x += 8;
+      x = 532;
+      frame(33, x, 258);
+      for (auto it = gold.rbegin(); it != gold.rend(); ++it) frame(*it == ',' ? 32 : 21 + (*it - '0'), x -= 8, 258);
+    } else {
+      {
+        // The star is the kb_70 glyph "★" (slot 0, mul 0.625, H3), pen at list (kStarX, kStarY).
+        const font::SlotInfo& k0 = font::slot(font::kKb);
+        const float sc = k0.scale * 0.625f;
+        dl.text(kbf, U"★", canvas_x(sl::kStarX) + k0.off_x * sc, canvas_y(sl::kStarY) + k0.off_y * sc, star_c, sc);
+      }
+      ink_text(kbf, sl::kStarsX, sl::kStarsY, std::u32string(stars.begin(), stars.end()), star_c, sl::kNumScale);
+      label(sl::kTimeLabelX, sl::kTimeLabelY, pl, sl::kSmallScale);
+      number(sl::kTimeRight, sl::kTimeY, tb, sl::kNumScale);
+      number(sl::kGoldRight, sl::kGoldY, gold, sl::kNumScale);
+      label(sl::kGoldUnitX, sl::kGoldY, U"G", sl::kGoldUnitScale);
     }
-    ink_text(kbf, sl::kStarsX, sl::kStarsY, std::u32string(stars.begin(), stars.end()), star_c, sl::kNumScale);
-    label(sl::kTimeLabelX, sl::kTimeLabelY, pl, sl::kSmallScale);
-    number(sl::kTimeRight, sl::kTimeY, tb, sl::kNumScale);
-    number(sl::kGoldRight, sl::kGoldY, gold, sl::kNumScale);
-    label(sl::kGoldUnitX, sl::kGoldY, U"G", sl::kGoldUnitScale);
-    label(sl::kLocX, sl::kLocY1, l1, sl::kLocScale, 250);
-    label(sl::kLocX, sl::kLocY2, l2, sl::kLocScale, 250);
+    const bool ps1_text = kit.text().is_ps1(bnf);
+    const float loc_dy = console ? sl::kConsoleLocDy : 0.0f;
+    label(sl::kLocX, ps1_text ? sl::kLocY1Ps1 + loc_dy : sl::kLocY1, l1, sl::kLocScale, 250);
+    label(sl::kLocX, ps1_text ? sl::kLocY2Ps1 + loc_dy : sl::kLocY2, l2, sl::kLocScale, 250);
     return;
   }
   txt(284, 246, name, white, 0.85f);

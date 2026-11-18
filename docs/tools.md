@@ -16,7 +16,7 @@ Common conventions:
 | `OPENCROSS_GAMEDIR` | Game folder when `-g` is absent. Most tools then fall back to the usual discovery (`platform::find_game_dir`); `occ`, `ocaudio`, `ocprd` fail without either. |
 | `-l <lang>` | `ocmovie` only: language of the movie (default `en`). |
 | `-v` | Verbose: `ochd`, `ocstage validate`, `ocbattle soak`, `pac-soak`, `fx-audit`, `versus`, `occ dialogue-*`. |
-| `ocbattleview`, `ocflow`, `ocmenudemo`, `ocshopdemo` | Take no `-g`; they read `opencross.ini` next to the exe (`[Paths] GameDir`, else discovery). |
+| `ocbattleview`, `ocflow`, `ocmenudemo`, `ocshopdemo` | Take no `-g`; they read `opencross.ini` next to the exe (`ocbattleview`: or `--config`) and search for the data as the game does (`[Paths] Source`, `GameDir`, `Disc1` / `Disc2` / `DiscDir`, `[Disc] Region`; `docs/architecture.md` 3.7). |
 | `ocmodelview` | `-g`, else `OPENCROSS_GAMEDIR`, else `[Paths] GameDir` of `opencross.ini` next to the exe, else discovery. |
 
 `ocbattle soak` exits 1 on anomalies or exceptions, `pac-soak` on exceptions, `versus` on a divergence, `ochd` on decode or size failures, `ocstage validate` when a stage fails; `ocbattle fx-audit` exits 0 after a completed run.
@@ -65,6 +65,7 @@ Source: `tools/octext.cpp`. Language arguments are the `--lang` codes (`en fr it
 | `msg` | `<room> <idx> [lang]` | One message in every form: PS1 stream as RDE markup, `lang.dat` row, rich-text tokens, flattened tokens. `<room>` is a map file stem or a numeric `lang.dat` id. |
 | `find` | `<text> [lang]` | Every room message whose `lang.dat` row contains the text. |
 | `coverage` | none | Per language: message records of every room versus `lang.dat` rows (`{ERROR}` placeholders). |
+| `ps1font` | `<out.png> <text> [--disc <image>] [--scale N]` | The text (UTF-8, `\n` = new line) in the PS1 font as a message window draws it (`docs/formats/text.md` 7.14): white glyphs at the pen advance, a black shadow one pixel down and right, 13-pixel lines, on dark grey, N screen pixels per font pixel; prints each line's width. `--disc` reads the font of that disc image (Japanese or USA build); without it, the game folder's Japanese executable. |
 
 ### 1.3 `ocaudio` (BGM and SFX)
 
@@ -167,11 +168,12 @@ Environment: `OC_SOAK_LIST`, `OC_FIND_*`, `OC_FX_MISSING`, `FXA_TRACE`, `FXA_TEX
 
 ### 1.8 `ocmovie` (FMV)
 
-Source: `tools/ocmovie.cpp`. `<name>` is a `movie.dat` member without extension (`a01op`, `title`); `-l` picks the language variant.
+Source: `tools/ocmovie.cpp`. `<name>` is a `movie.dat` member without extension (`a01op`, `title`); `-l` picks the language variant. `--disc <image>` (repeatable, before the subcommand; e.g. both discs' `.cue`) reads the movies from PS1 disc images instead of RDE, as disc mode does: `<name>` then resolves to the disc's stream `cdrom/movie/<name>.stv` (`a01op` = `newop`; `movies.md` section 5).
 
 | Subcommand | Arguments | Meaning |
 |---|---|---|
-| `play` | `<name> [seconds]` | Window and audio, A/V synced; Esc / Enter / Space skips. |
+| `play` | `<name> [seconds] [full\|short]` | Window and audio, A/V synced; Esc / Enter / Space skips. `full` / `short`: the staff-roll layout of disc 2 rows 11 / 12 (`ending_s`; with `--disc` the stream's strip row A / B). |
+| `strip` | `<name> a\|b <out.png>` | With `--disc`: a stream's staff-roll strip (row A or B of its strip sectors) as a 144-pixel-wide PNG. |
 | `dump` | `<name> <frame> <out.png>` | Headless decode to frame N (0-based), saved as PNG. |
 | `info` | `<name>` | Size, frame rate, frame count, duration, audio; the sound's peak and its RMS per 10 s in dBFS (`b28end`'s track is digital silence). |
 | `table` | none | The field script's movie operand to `movie.dat` member mapping of both discs. |
@@ -276,7 +278,20 @@ Source: `tools/ocsteam.cpp`. Connects to the running Steam client as the game, p
 
 Source: `tools/ocguide.cpp`. Reads GameFAQs pages the way the guide overlay does, through the hidden WebView2 browser (`platform::WebPageReader`, profile in `%LOCALAPPDATA%\OpenCross\guides\browser`), or Steam's browser when the runtime is missing or `OC_GUIDE_BROWSER=steam` is set, for checking the page scripts when the site changes. `html <url> <file>` saves the page's HTML as the browser sees it; `list` prints the game's guide list (group, category, title, author, version and size, address); `guide <url>` prints the first page of a guide: its title, author, version line, page count and each block (kind, level, the first 90 characters). `identity` prints what any page can read about that browser (user agent, client-hint brands, platform, languages, `navigator.webdriver`, whether the WebView2 host object exists, the page's visibility) from a local `data:` page, without a request. If the site asks for a visitor check, the WebView2 window opens and the tool waits up to four minutes. Exits 1 when neither the WebView2 runtime nor Steam is available or the page cannot be read or parsed. `html`, `list` and `guide` each load a GameFAQs page: run them by hand, rarely, one page at a time, never in a loop, a gate or a route. No unit test, route or CI step contacts the site.
 
-### 1.15 Files written by the tools
+### 1.15 `ocdisc` (PS1 disc images)
+
+Source: `tools/ocdisc.cpp`, on the disc reader in `src/import/disc/` (`docs/formats/disc.md`). `<image>` is any container the reader opens (cue sheet, raw `.bin` / `.img`, `.iso`, CloneCD `.ccd`, Alcohol `.mds`, `.m3u`, unencrypted `.pbp`), recognised by content. `<image>` may also be an optical drive (`D:`), read through the drive source (`docs/formats/disc.md` 7). `--disc N` (1-based, default 1) picks a disc of a playlist or a multi-disc PBP. Read-only on the image.
+
+| Subcommand | Arguments | Meaning |
+|---|---|---|
+| `identify` | `<image>` | Every disc the image names: container and layout (raw 2352 or cooked 2048), sector count, volume, boot file, executable SHA-256, then the disc number and build, "unknown build, closest region ..." or why it is not Chrono Cross. Exit 1 when a disc is not Chrono Cross. |
+| `ls` | `<image> [--disc N] [--from R] [--count M]` | File table records: record, start LBA, size, empty flag. |
+| `extract` | `<image> <record> <out> [--disc N]` | One record's bytes to a file (works for records the `.fnd` leaves unnamed). |
+| `verify` | `<image> --against <cdrom.dat> [--disc N]` | Each record against the `cdrom.dat` member the `.fnd` of the disc's number names (`cdrom.fnd` / `cdrom2.fnd`); a shorter or longer copy within one sector counts as identical (trailing sector padding). Prints the differing and missing members, the unnamed records that hold data, then the counts: identical, differ, missing, unnamed, outside `cdrom.dat` (the `c:\movie\` records), empty slots. Exit 1 on any difference or missing member. |
+| `audit` | `<image> --against <cdrom.dat> [--disc N] [--only C1,C2]` | Every file of the disc through the importers the engine uses for it, next to the same importers on the `cdrom.dat` member of that name (`docs/formats/disc.md` 4: disc files carry up to 7 trailing bytes). Both sides serve the same set of files (the disc's, plus the two `.fnd` indexes from `cdrom.dat`). Per-file checks: `tim`, `sszl`, `drp`, `room`, `room-models`, `room-sound` (yos0 banks / yos1 frames), `room-prd`, `model` (field and battle models as the engine reads them), `field-ex`, `weapon`, `stage`, `effect` (battle effect packs and their meshes), `pac`, `music`, `wave` (instrument banks), `menu-model`, and the validators `room-check`, `model-check`, `stage-check` (the format checks of `occ` / `ocstage validate`); whole-game checks run once: `tables`, `menu-tables`, `sfx`, `text-tables` (one per table), `text-rooms`, `text-battles`, `font`, `disc-index`, `title`, `menu-art`, `battle-fx` (every effect slot). A Japanese disc must give the same outcome and the same decoded result (a digest; the trailing zero bytes of a drp entry are not hashed) as the member; another build must import wherever the member does (a validator failing on its edited data is a note, not a problem). Prints per check the files, the failures on each side, the problems and notes, then every problem and note. `--only` runs the named checks. Exit 1 on any problem. About ten minutes per disc in a Debug build. |
+| `drives` | | Every optical drive: device name, disc or no disc, volume label, then for a disc the read mode (raw via READ CD / raw read, or cooked 2048), sector count and the same identity lines as `identify`. Prints `no optical drives` when the system has none. Exit 1 when no drive holds a Chrono Cross disc. |
+
+### 1.16 Files written by the tools
 
 | Tool | Output |
 |---|---|
@@ -335,7 +350,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_EXE` | `tools/py/sfx_batch.py` | exe path | `opencross.exe` that `sfx_batch.py` runs (default `build\win-x64\bin\Debug\opencross.exe`). |
 | `OC_WC` | `tools/py/sfx_batch.py` | integer | Passed to `ocbattleseq sfx` as the weapon class (default `0`). |
 | `OC_PS1_DISC` | `tools/py/ps1ref.py` | disc file or folder | Disc image, or a folder searched for `Disc 1` / `Disc 2` images. |
-| `OC_PS1_REGION` | `tools/py/ps1ref.py` | `japan` (default), `usa` | Region of the disc images picked. |
+| `OC_PS1_REGION` | `tools/py/ps1ref.py`, `tools/py/ps1_ram.py`, `tools/py/ps1_capture.py`, `ps1_scene.py`, `ps1_cast.py` | `japan` (default), `usa` | Region of the disc images picked, the default of the drivers' `--region`, and the RAM map used when no disc or state tells the build (`validation.md` section 3.8). |
 | `CROP` | `tools/py/cmp_frames.py`, `tools/py/trans_measure.py`, `tools/py/trans_sharp.py` | `y0,y1` fractions (`cmp_frames`, default `0.10,0.74`); `x,y,w,h` px (others) | Crop of the compared frames. |
 | `RDE_WHITE_ONLY` | `tools/rde_capture.py` | set | Only a frame with mean luma above 200 starts the post-white recording; a sudden luma jump (room fade) does not. |
 
@@ -520,9 +535,10 @@ A versus battle (`docs/rules/versus.md`) does not start while one of `OC_BATTLE_
 | F3 | `app_run.cpp`, `cheats.cpp` | Toggles No Encounters on the press (pad L3 tap); saved. |
 | F4 | `app_run.cpp`, `cheats.cpp` | Toggles Battle Boost on the press (pad R3 tap); saved. |
 | F5 | `app_run.cpp`, `cheats.cpp` | Toggles Auto-battle on the press (pad L3 + R3); saved. |
-| F6 | `app_run.cpp` | Cycles art mode SD, HD, Modded, then SD; saved to the config. |
+| F6 | `app_run.cpp` | Cycles art mode SD, HD, Modded, then SD; saved to the config. Does nothing when playing from the PS1 discs. |
 | F7 | `app_run.cpp` | Toggles widescreen; saved (not during a route or replay). |
 | F8 | `app_run.cpp` | Toggles the Debug tab. |
+| F9 / F10 | `app_source.cpp` | Only while disc mode's insert-disc screen shows: F9 opens the file dialog for a disc image, F10 searches the configured images, the images next to the exe and the drives again. |
 | Alt+Enter | `app_run.cpp` | Windowed <-> fullscreen (the last fullscreen mode of the session, else borderless); saved (not during a route or replay). The Enter is not passed to the game. |
 | F9 | `battle_view_ui.cpp` | Toggles the battle camera debug overlay. |
 | `` ` `` (the key left of 1), pad LB + RB | `app_run.cpp`, `imgui_guide.cpp` | Shows or hides the guide overlay when `[Guide] Enabled` is on (not while a text field has the keyboard, not during a route or replay). The pad chord toggles one frame after both shoulders are down; a shoulder pressed a frame before the other still reaches the game (or turns a page in the overlay) first. While the overlay is shown, Esc and the pad's B close it, the arrows, the d-pad and both sticks scroll, PageUp / PageDown, Space and either shoulder button alone turn a page on the press and, held for a second, one page every 0.08 s; Home / End jump to the ends. |
@@ -569,7 +585,7 @@ Screens show the key caps of set 0.
 | Tool | Key | Action |
 |---|---|---|
 | all five | Esc | Quits. |
-| `ocbattleview` | F1 | Toggles HD / original art. |
+| `ocbattleview` | F1 | Toggles HD / original art (not on the discs: original only). |
 | `ocbattleview` | F3 | Toggles the camera overlay (F9 works too). |
 | `ocbattleview` | Enter | Confirm (scripted by `--auto`, `--keys`); the other keys are the battle keymap. |
 | `ocflow` | F1 | Toggles HD / original art (not in `--shots` runs). |
@@ -675,6 +691,7 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 |---|---|---|---|
 | `tools/py/save_check.py` [-I] | `<save.dat> [slot]` | verdict per slot on stdout | Read-only directory, title, checksum and preview check of card 1, plus the ext_save member and the HMAC of the other members. |
 | `tools/py/ngplus_diff.py` [np] | `A B [--all] [--saved-vars]`; a state `.sav` (needs `zstandard`), a raw save block `.bin` (`OC_SLOT_DUMP`) or `<save.dat>:<slot>` | field diff on stdout | Field-by-field diff of two game states in save terms. |
+| `tools/py/cc_save_forge.py` [-I] | `<in save.dat> <out save.dat> --slot N [edits] [--region usa] [--mcd PATH [--mcd-only]]` | a plain stored ZIP `save.dat` and / or a raw 128 KiB card image | Copies a save with one slot rewritten for reference captures (room, party, stats, grid, items, variables); `--region usa` writes the slot as a USA-build save (`formats/save.md` section 15). |
 | `tools/py/cc_save_keyitem.py` [-I] | `<in save.dat> <out save.dat> <slot> <key item>...` | a plain stored ZIP `save.dat` | Copies a save with key items added to one slot, checksum recomputed. |
 | `tests/routes/check_save_dump.py` [-I] | `<dump.json>` (from `cc_save.py dump`) | pass or fail list | Checks that the `save` route's fields land at their expected save-record offsets. |
 | `tests/routes/run_save.ps1` | none; `OC_BUILD_DIR`; needs a save copy `tmp\save.dat` | exit code | Save round trip: blank scratch card, route `save`, `cc_save.py` checks, route `continue_save`. |
@@ -701,8 +718,10 @@ Run the scripts from the repo root. `python -I` (isolated: no user site-packages
 
 | Script | Documented in |
 |---|---|
-| `tools/duckstation.ps1`, `tools/py/ps1ref.py`, `ps1_capture.py`, `ps1_cast.py`, `ps1_audio.py`, `ps1_registry.py`, `ps1_scene.py`, `ps1_state.py` | `README.md` section 3 and `validation.md` section 3 |
+| `tools/duckstation.ps1`, `tools/py/ps1ref.py`, `ps1_ram.py`, `ps1_capture.py`, `ps1_cast.py`, `ps1_audio.py`, `ps1_registry.py`, `ps1_scene.py`, `ps1_state.py` | `README.md` section 3 and `validation.md` section 3 |
 | `tools/ghidra_setup.ps1`, `tools/ghidra/` | `README.md` |
+| `tools/py/ps1_text_tables.py` (writes the generated blocks of `src/import/text_tables.inc`) | [`formats/text.md`](formats/text.md) section 12 |
+| `tools/py/console_font_chars.py` (writes `src/import/console_font_chars.inc`, the console font's character order) | [`formats/text.md`](formats/text.md) section 7.15 |
 | `tools/py/cc_*.py` importers and save tools (`cc_audio`, `cc_container`, `cc_effects`, `cc_emitter_ops`, `cc_fieldscript`, `cc_lzss`, `cc_model`, `cc_model_util`, `cc_prd`, `cc_room`, `cc_save`, `cc_save_forge`, `cc_stage`, `cc_tables`, `cc_text`, `cc_tim`) | `README.md`, [`formats/`](formats/) |
 
 ## 6. Recipes

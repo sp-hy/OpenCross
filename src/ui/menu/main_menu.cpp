@@ -45,9 +45,9 @@ bool MainMenu::Impl::init(render::GpuContext& context, const vfs::Vfs& files, re
   lt.init(&files);
   if (!texs.init(context, files, sprite_batch, "menu")) return false;
   lowres.init(context, sprite_batch);
-  fonts.init(files, text_batch);
+  fonts.init(files, text_batch, true);
   select_fonts();
-  cursor_tex = texs.load("hd/menu/menutest_cur.png");
+  if (texs.hd()) cursor_tex = texs.load("hd/menu/menutest_cur.png");
   ready = face_gn != render::kNoFace;
   if (!ready) log::error("menu: no usable font");
   return ready;
@@ -62,7 +62,7 @@ void MainMenu::Impl::select_fonts() {
   face_gn = fonts.face(font::kBn);
   face_kb = fonts.face(font::kKb);
   face_ik = lang == import::Lang::Jp ? fonts.face(font::kIk) : render::kNoFace;
-  gn = font::load(*vfs, font::member(font::kBn, classic));
+  if (!fonts.ps1()) gn = font::load(*vfs, font::member(font::kBn, classic));
 }
 
 void MainMenu::Impl::shutdown() {

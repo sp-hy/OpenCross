@@ -6,6 +6,7 @@
 #include <mutex>
 
 #include "core/log.h"
+#include "import/ps1_font.h"
 
 namespace oc::ui::font {
 
@@ -113,15 +114,67 @@ u32 c16_col(u32 colour, u32 c16, u8 alpha) {
   return render::pack_rgba(channel(0, 0), channel(8, 5), channel(16, 10), alpha);
 }
 
+InkBox ps1_ink(const render::TextBatch& text, render::FaceId face, std::u32string_view str) {
+  InkBox box;
+  const import::Ps1Font* font = text.ps1_font(face);
+  if (!font) return box;
+  if (font->build() == import::Ps1Font::Build::Console) {
+    for (char32_t ch : str) {
+      if (ch == U'\n') break;
+      box.right += static_cast<float>(font->advance(font->index_for(ch)));
+    }
+    return box;
+  }
+  auto inked = [&](int index, int x, int y) { return font->level(index, x, y) != 0; };
+  if (const int cap = font->index_for(U'A'); cap >= 0) {
+    int row = 0;
+    auto blank_row = [&] {
+      for (int x = 0; x < font->cell_w(); ++x)
+        if (inked(cap, x, row)) return false;
+      return true;
+    };
+    while (row < font->cell_h() && blank_row()) ++row;
+    box.top = static_cast<float>(row + font->top(cap));
+  }
+  const int blank = font->index_for(U' ');
+  float pen = 0;
+  bool any = false;
+  for (char32_t ch : str) {
+    if (ch == U'\n') break;
+    const int index = font->index_for(ch);
+    int first = -1, last = -1;
+    for (int x = 0; index >= 0 && x < font->cell_w(); ++x)
+      for (int y = 0; y < font->cell_h(); ++y)
+        if (inked(index, x, y)) {
+          if (first < 0) first = x;
+          last = x;
+          break;
+        }
+    if (first >= 0) {
+      const float left = pen + static_cast<float>(font->left(index));
+      if (!any) box.left = left + static_cast<float>(first);
+      any = true;
+      box.right = left + static_cast<float>(last + 1);
+    }
+    pen += static_cast<float>(font->advance(index >= 0 ? index : blank));
+  }
+  return box;
+}
+
 Ink message(float r, float g, float b, float a) {
   return {render::pack_rgba(to8(r - 0.085f), to8(g - 0.085f), to8(b - 0.085f), to8(a)), render::pack_rgba(33, 33, 33, to8(a)), true,
           false};
 }
 
-void FontSet::init(const vfs::Vfs& vfs, render::TextBatch& text) {
+void FontSet::init(const vfs::Vfs& vfs, render::TextBatch& text, bool menu) {
   vfs_ = &vfs;
   text_ = &text;
   faces_ = {};
+  ps1_ = {};
+  if (vfs.has_archive("font")) return;
+  ps1_.tried = true;
+  if (auto font = menu ? import::load_ps1_menu_font(vfs) : import::load_ps1_font(vfs)) ps1_.id = text.add_ps1_font(std::move(font));
+  if (ps1_.id == render::kNoFace) log::warn("font: no spritefonts and no PS1 font");
 }
 
 const import::SfGlyph* FontSet::metrics(const Face& face, char32_t ch) {
@@ -130,8 +183,16 @@ const import::SfGlyph* FontSet::metrics(const Face& face, char32_t ch) {
   return face.font->find_or_default(static_cast<u32>(ch));
 }
 
+void FontSet::reset() {
+  faces_ = {};
+  ps1_ = {};
+  vfs_ = nullptr;
+  text_ = nullptr;
+}
+
 FontSet::Face* FontSet::get(int slot_index, bool classic) {
   if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_) return nullptr;
+  if (ps1()) return &ps1_;
   const int file = kSlotFile[slot_index];
   Face& face = faces_[static_cast<size_t>((classic ? kFiles : 0) + file)];
   if (!face.tried) {
@@ -160,7 +221,7 @@ render::FaceId FontSet::face(int slot_index, bool classic) {
 }
 
 void FontSet::prefetch(int slot_index) {
-  if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_) return;
+  if (slot_index < 0 || slot_index >= kSlotCount || !vfs_ || !text_ || ps1()) return;
   Face& face = faces_[static_cast<size_t>((classic_ ? kFiles : 0) + kSlotFile[slot_index])];
   if (face.tried || face.pending.valid()) return;
   face.pending = std::async(std::launch::async, [vfs = vfs_, name = member(slot_index, classic_)] { return load(*vfs, name); });
@@ -186,6 +247,7 @@ void FontSet::prepare(int slot_index, std::u32string_view text) {
 float FontSet::measure(int slot_index, std::u32string_view text, float scale) {
   Face* face = get(slot_index, classic_);
   if (!face) return 0;
+  if (!face->font) return text_->measure(face->id, text, scale);
   float x = 0, right = 0;
   for (char32_t ch : text) {
     if (ch == U'\n') {
@@ -209,6 +271,13 @@ void FontSet::draw(int slot_index, std::u32string_view text, float x, float y, c
   text_->audit_run();
   if (align == kCentre) x -= measure(slot_index, text, scale) * 0.5f;
   else if (align == kRight) x -= measure(slot_index, text, scale);
+  if (!face->font) {
+    // The PS1 font: the fill colour, a black drop shadow where the ink has a shadow.
+    render::TextStyle style;
+    style.backdrop = ink.shadow;
+    text_->draw(face->id, text, x * k, y * k, ink.normal, scale * k, style);
+    return;
+  }
   render::TextStyle style;
   style.backdrop_color = ink.outline;
   style.shadow = ink.shadow;

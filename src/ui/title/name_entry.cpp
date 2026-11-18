@@ -32,10 +32,11 @@ void NameEntry::begin(const Setup& setup) {
   char_id_ = setup.char_id;
   lang_ = setup.lang;
   mode_ = setup.mode;
+  disc_ = setup.disc;
   // Default restores the name the screen opened with: the custom name when there is one, else the language's name.
   default_ = setup.initial.empty() ? setup.default_name : setup.initial;
-  // 12 characters non-JP, JP 6 (Viper 4), in both art modes.
-  max_ = max_name_length(char_id_, lang_, true);
+  // 12 characters non-JP, JP 6 (Viper 4), in both art modes; the USA disc's own limit.
+  max_ = usa_grid() ? disc_->max_length : max_name_length(char_id_, lang_, true);
   done_ = false;
   result_.clear();
   flash_ = 0;
@@ -69,6 +70,7 @@ void NameEntry::set_name(const std::u32string& name) {
 
 char32_t NameEntry::cell(int grid_row, int grid_col) const {
   if (grid_row < 0 || grid_col < 0 || grid_row >= rows() || grid_col >= cols()) return 0;
+  if (usa_grid()) return disc_->grid[static_cast<size_t>(grid_row)][static_cast<size_t>(grid_col)];
   if (!ps1_pages()) {
     const char32_t ch = latin_rows()[static_cast<size_t>(grid_row)][static_cast<size_t>(grid_col)];
     return ch == U' ' ? 0 : ch;
@@ -120,7 +122,7 @@ void NameEntry::press(NameKey key) {
       }
       switch (buttons_[static_cast<size_t>(button_)]) {
         case Button::Confirm: {
-          std::u32string validated = validate_name(buf_);
+          std::u32string validated = validate_name(buf_, disc_.get());
           if (validated.empty()) {
             flash_ = 0.45f;
             play(0x18);
@@ -222,7 +224,20 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   } else {
     dl.rect(white_set, -reach, 0, kCanvasW + 2.0f * reach, kCanvasHeight, render::pack_rgba(60, 38, 18));
   }
-  const NameEntry::Pic dial = pic(kit, "hd/menu/menutim/menutim_02.png");
+  // Played from the discs the swirls and the dial are the compass meshes (square pictures centred on their draw points), added at a
+  // quarter (the PS1's B + F / 4).
+  const bool disc_art = !kit.vfs().has_archive("hd");
+  auto mesh = [&](const char* name, int scale_x, int scale_y, float x, float y) {
+    const NameEntry::Pic pic_mesh = ps1_pic("ps1:" + std::string(name) + std::to_string(scale_y),
+                                            [&] { return ps1::mesh_picture(kit.vfs(), name, 0, scale_x, scale_y, 0x808080, true).rgba; });
+    if (pic_mesh.set)
+      dl.add(pic_mesh.set, canvas_x(x - pic_mesh.w / 2), canvas_y(y - pic_mesh.h / 2), canvas_x(pic_mesh.w), canvas_y(pic_mesh.h), render::pack_rgba(64, 64, 64));
+  };
+  if (disc_art) {
+    mesh("deco", ps1::kMeshAspect, 0x1000, 0x48, 0x187);
+    mesh("dec1", ps1::kMeshAspect * 0xCCC >> 12, 0xCCC, 0xD9, -0x10);
+  }
+  const NameEntry::Pic dial = disc_art ? NameEntry::Pic{} : pic(kit, "hd/menu/menutim/menutim_02.png");
   if (dial.set) {
     const u32 tint = render::pack_rgba(160, 160, 176);
     // Two decorative swirls, deco A and deco B.
@@ -245,7 +260,16 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     }
   }
   // ---- grid panel (menu-main-121, 362x256 at (130,32)), name bar (menu-main-118 at (120,304)), prompt bar (menu-main-119 at (56,360))
+  // Played from the discs (no HD art) the panel is the sheet frame itself, its caption included.
   auto panel = [&](int frame, float x, float y, float pw, float ph, float tab_x = 0, float tab_w = 0) {
+    if (disc_art) {
+      ps1::SheetBounds box;
+      if (!ps1::sheet_bounds(kit.vfs(), "main", frame, box)) return;
+      const NameEntry::Pic panel = ps1_pic("ps1:frame" + std::to_string(frame), [&] { return ps1::sheet_picture(kit.vfs(), "main", frame).rgba; });
+      if (panel.set) dl.image(panel.set, canvas_x(x + static_cast<float>(box.x)), canvas_y(y + static_cast<float>(box.y)), canvas_x(static_cast<float>(box.w)),
+                              canvas_y(static_cast<float>(box.h)));
+      return;
+    }
     char path[64];
     std::snprintf(path, sizeof path, "hd/menu/shapes/menu-main-%03d.png", frame);
     const NameEntry::Pic shape = pic(kit, path);
@@ -268,7 +292,7 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   // The name bar leaves a gap in the top edge for the "Name" tab (original art).
   panel(118, 120, 304, 128, 40, 14.0f, 76.0f);
   panel(119, 56, 360, 192, 40);
-  {
+  if (!disc_art) {
     // Title "Name": the tab label of the name bar, in the notch at the top-left of the panel at (120, 304), left aligned.
     const std::u32string title = kTitle[li];
     const render::FaceId title_face = hd_face;
@@ -278,7 +302,8 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   }
 
   // ---- grid cells
-  const int nr = rows(), nc = cols();
+  const int nr = disc_ ? 0 : rows(), nc = cols();
+  if (disc_) draw_disc_text(dl, kit);
   for (int grid_row = 0; grid_row < nr; ++grid_row)
     for (int grid_col = 0; grid_col < nc; ++grid_col) {
       const char32_t ch = cell(grid_row, grid_col);
@@ -295,22 +320,36 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
       }
     }
   // Cursor sprite (menu-main-120, 32x32) over the cell.
-  if (!in_buttons_) {
-    const NameEntry::Pic cur = pic(kit, "hd/menu/shapes/menu-main-120.png");
+  if (!in_buttons_ && !disc_) {
     float x, y;
     if (!ps1) {
       x = 347.5f + 62.5f * static_cast<float>(col_), y = 100.0f + 53.33f * static_cast<float>(row_);
     } else {
       x = 2.5f * (32.0f * static_cast<float>(col_) + 16.0f * static_cast<float>(col_ / 5) + 149.0f), y = 2.2222f * (24.0f * static_cast<float>(row_) + 49.0f);
     }
+    // (x, y) is the top-left of the cursor frame's parts (the disc's sheet frame 120, 32 x 32).
+    const NameEntry::Pic cur = disc_art ? ps1_pic("ps1:sheet120", [&] { return ps1::sheet_picture(kit.vfs(), "main", 120).rgba; })
+                                    : pic(kit, "hd/menu/shapes/menu-main-120.png");
     if (cur.set) dl.image(cur.set, x, y, 80, 71.1f);
     else dl.rect(white_set, x, y, 80, 71.1f, render::pack_rgba(255, 224, 128, 90));
   }
 
   // ---- compass dial (canvas (955,651) 320x331) with the needle pointing at the focused label
+  if (disc_art) mesh("deco", ps1::kMeshAspect * 0x800 >> 12, 0x800, 446, 367);
   if (dial.set) dl.image(dial.set, 955, 651, 320, 331, render::pack_rgba(190, 190, 205));
   // ---- label leader lines (PS1 button strips): an underline below each label, a diagonal step and a run toward the dial
-  if (!jp && !ps1) {
+  // Played from the discs the leader lines (frame 0x70) and the button labels (0x71 + the PS1 button index; the USA sheet leaves the
+  // kana tabs empty) are sheet frames at the dial's centre, the focused one in 0x004E77.
+  auto sheet = [&](int frame, float x, float y, u32 colour) {
+    ps1::SheetBounds box;
+    if (!ps1::sheet_bounds(kit.vfs(), "main", frame, box)) return;
+    const NameEntry::Pic pic_frame = ps1_pic("ps1:sheet" + std::to_string(frame), [&] { return ps1::sheet_picture(kit.vfs(), "main", frame).rgba; });
+    if (pic_frame.set)
+      dl.image(pic_frame.set, canvas_x(x + static_cast<float>(box.x)), canvas_y(y + static_cast<float>(box.y)), canvas_x(static_cast<float>(box.w)),
+               canvas_y(static_cast<float>(box.h)), colour);
+  };
+  if (disc_art) sheet(0x70, 446, 367, 0xFFFFFFFFu);
+  if (!jp && !ps1 && !disc_art) {
     const u32 lc = render::pack_rgba(205, 198, 190, 170);
     static const float kLead[3][6] = {{672, 792, 868, 901, 819, 928}, {653, 827, 835, 868, 856, 972}, {631, 863, 803, 835, 890, 988}};
     for (const auto& lead : kLead) {
@@ -350,7 +389,9 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     const bool focus = static_cast<int>(i) == button_;
     const bool tab = buttons_[i] == Button::Katakana || buttons_[i] == Button::Hiragana || buttons_[i] == Button::Alnum;
     const bool active_tab = tab && static_cast<int>(buttons_[i]) == static_cast<int>(page_);
-    dl.text(hd_face, labs[i].first, labs[i].second.x, labs[i].second.y, focus ? orange : (active_tab && ps1 ? orange : normal), lab_scale(0.365f));
+    // The discs light the focused label alone: the active page's tab is plain while the focus is elsewhere.
+    if (disc_art) sheet(0x71 + static_cast<int>(buttons_[i]), 446, 367, focus ? render::pack_rgba(0xEE, 0x9C, 0x00) : 0xFFFFFFFFu);
+    else dl.text(hd_face, labs[i].first, labs[i].second.x, labs[i].second.y, focus ? orange : (active_tab && ps1 ? orange : normal), lab_scale(0.365f));
   }
   {
     // The needle (handle.png: 98x14 PS1 px quad, tip at the left) turned about the dial centre (446, 367) so its tip points at the
@@ -378,6 +419,20 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
       const std::string key = "hand";
       if (auto it = pics_.find(key); it != pics_.end() && (hand_pic_angle_ == angle || !it->second.set)) {
         hand = it->second;
+      } else if (disc_art) {
+        // The needle mesh, the same square at every angle.
+        const ps1::SheetPicture needle = ps1::mesh_picture(kit.vfs(), "hari", angle, 0x1000, 0x1000, ps1::kNeedleGrey, false);
+        if (needle.rgba) {
+          if (auto jt = pics_.find(key); jt != pics_.end() && jt->second.set) {
+            hand = jt->second;
+            kit.update_rgba(hand.set, needle.rgba.px.data());
+          } else {
+            hand.set = kit.upload_rgba(needle.rgba.w, needle.rgba.h, needle.rgba.px.data(), false);
+            hand.w = canvas_x(static_cast<float>(-needle.x)), hand.h = canvas_y(static_cast<float>(-needle.y));
+          }
+          hand_pic_angle_ = angle;
+        }
+        pics_[key] = hand;
       } else if (auto raw = kit.vfs().read("hd/menu/handle.png")) {
         render::DecodedImage src;
         if (render::decode_image(*raw, src)) {
@@ -394,12 +449,12 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
         }
         pics_[key] = hand;
       }
-      if (hand.set) dl.image(hand.set, px - hand.w, py - hand.h, 2 * hand.w, 2 * hand.h, render::pack_rgba(210, 205, 205));
+      if (hand.set) dl.image(hand.set, px - hand.w, py - hand.h, 2 * hand.w, 2 * hand.h, disc_art ? 0xFFFFFFFFu : render::pack_rgba(210, 205, 205));
     }
   }
 
   // ---- name bar contents: glyphs, slot underscores, (JP) the title kanji for Viper
-  for (int i = 0; i < max_; ++i) {
+  for (int i = 0; i < (disc_ ? 0 : max_); ++i) {
     const bool cur = i == pos_;
     const char32_t ch = buf_[static_cast<size_t>(i)];
     const float gx = jp ? 330.0f + 40.0f * static_cast<float>(i) : 322.5f + 25.0f * static_cast<float>(i) + (bn ? offset_x(0.25f) : 0.0f);
@@ -412,12 +467,12 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     if (jp) dl.rect(white_set, gx + 2.5f, 746.7f, 32.5f, 4.4f, cur ? (blink ? orange : render::pack_rgba(120, 75, 0)) : normal);
     else dl.text(hd_face, U"_", gx, 715.6f + dyn, cur ? orange : normal, 0.25f * gsc, 1);
   }
-  if (char_id_ == 5 && jp) {
+  if (char_id_ == 5 && jp && !disc_) {
     dl.text(hd_face, U"大", 490, 708.9f, normal, 0.35f * gsc);
     dl.text(hd_face, U"佐", 530, 708.9f, normal, 0.35f * gsc);
   }
-  if (flash_ > 0) dl.rect(white_set, 300, 676, 320, 89, render::pack_rgba(220, 40, 40, static_cast<u8>(std::min(1.0f, flash_ / 0.45f) * 150)));
-  {
+  if (flash_ > 0 && !disc_) dl.rect(white_set, 300, 676, 320, 89, render::pack_rgba(220, 40, 40, static_cast<u8>(std::min(1.0f, flash_ / 0.45f) * 150)));
+  if (!disc_) {
     // Prompt in the prompt bar at (200 (DE 175), 833.3).
     const std::u32string prompt = kPrompt[li];
     const render::FaceId prompt_face = hd_face;
@@ -448,6 +503,138 @@ NameEntry::Pic NameEntry::pic(UiKit& kit, const std::string& path) const {
   }
   pics_[path] = loaded;
   return loaded;
+}
+
+namespace {
+
+// The console font's 16 x 16 cell: glyph pixels in its grey over a darker copy one pixel down and right. Without a BIOS, a stand-in
+// glyph's ink is centred on x and its capitals stand on the cell's row 13, where the console font's do.
+constexpr int kCell = 16, kCellBase = 13;
+constexpr u8 kCellFill[3] = {165, 165, 173};
+constexpr u8 kCellShadow = 74;
+// Pen advance of a character the menu sheet has no frame for.
+constexpr int kMenuBlankAdvance = 4;
+
+}  // namespace
+
+NameEntry::Pic NameEntry::cell_pic(UiKit& kit, char32_t ch) const {
+  const std::string key = "ps1:cell" + std::to_string(static_cast<u32>(ch));
+  if (auto it = pics_.find(key); it != pics_.end()) return it->second;
+  Pic loaded;
+  if (!cell_font_) cell_font_ = import::load_ps1_console_font(kit.vfs());
+  const import::Ps1Font* font = cell_font_.get();
+  const int index = font ? font->index_for(ch) : -1;
+  if (index >= 0) {
+    const bool console = font->build() == import::Ps1Font::Build::Console;
+    int first = font->cell_w(), last = -1, base = 0;
+    for (int y = 0; y < font->cell_h(); ++y)
+      for (int x = 0; x < font->cell_w(); ++x)
+        if (font->level(index, x, y)) first = std::min(first, x), last = std::max(last, x);
+    const int capital = font->index_for(U'A');
+    for (int y = 0; y < font->cell_h(); ++y)
+      for (int x = 0; x < font->cell_w(); ++x)
+        if (font->level(capital, x, y)) base = y;
+    const int ox = console || last < first ? 0 : (kCell - 1 - (last - first + 1)) / 2 - first;
+    const int oy = console ? 0 : std::clamp(kCellBase - base, 0, std::max(0, kCell - 1 - font->cell_h()));
+    std::vector<u8> rgba(static_cast<size_t>(kCell) * kCell * 4, 0);
+    auto put = [&](int x, int y, const u8* rgb) {
+      if (x < 0 || y < 0 || x >= kCell || y >= kCell) return;
+      u8* out = &rgba[(static_cast<size_t>(y) * kCell + static_cast<size_t>(x)) * 4];
+      out[0] = rgb[0], out[1] = rgb[1], out[2] = rgb[2], out[3] = 255;
+    };
+    const u8 shadow[3] = {kCellShadow, kCellShadow, kCellShadow};
+    for (int pass = 0; pass < 2; ++pass)
+      for (int y = 0; y < font->cell_h(); ++y)
+        for (int x = 0; x < font->cell_w(); ++x)
+          if (font->level(index, x, y)) put(x + ox + 1 - pass, y + oy + 1 - pass, pass ? kCellFill : shadow);
+    loaded.set = kit.upload_rgba(kCell, kCell, rgba.data(), false);
+    loaded.w = loaded.h = static_cast<float>(kCell);
+  }
+  pics_[key] = loaded;
+  return loaded;
+}
+
+void NameEntry::draw_disc_text(DrawList& dl, UiKit& kit) const {
+  auto canvas_x = [](float x) { return 2.5f * x; };
+  auto canvas_y = [](float y) { return 2.2222f * y; };
+  // Sprite colour 0x004E77 (the focused cell and name slot) as a tint; the slot line under the cursor is 0x009CEE, the others grey.
+  const u32 focus_tint = render::pack_rgba(0xEE, 0x9C, 0x00), line_grey = render::pack_rgba(0x80, 0x80, 0x80);
+  auto cell_at = [&](char32_t ch, int x, int y, bool focus) {
+    if (!ch || ch == U' ' || ch == U'　') return;
+    const Pic glyph = cell_pic(kit, ch);
+    if (glyph.set)
+      dl.image(glyph.set, canvas_x(static_cast<float>(x)), canvas_y(static_cast<float>(y)), canvas_x(kCell), canvas_y(kCell), focus ? focus_tint : 0xFFFFFFFFu);
+  };
+  // Grid: cell (column c, row r) at (150 + 32 c, 50 + 24 r); the kana pages leave 16 more pixels between their two blocks of five.
+  auto cell_x = [&](int grid_col) { return 150 + 32 * grid_col + (ps1_pages() ? 16 * (grid_col / 5) : 0); };
+  for (int grid_row = 0; grid_row < rows(); ++grid_row)
+    for (int grid_col = 0; grid_col < cols(); ++grid_col)
+      cell_at(cell(grid_row, grid_col), cell_x(grid_col), 50 + 24 * grid_row, !in_buttons_ && grid_row == row_ && grid_col == col_);
+  // The cursor: frame 120 of the main sheet at the focused cell's point.
+  ps1::SheetBounds box;
+  if (!in_buttons_ && ps1::sheet_bounds(kit.vfs(), "main", 120, box)) {
+    Pic& cursor = pics_["ps1:sheet120"];
+    if (!cursor.set)
+      if (const ps1::Rgba im = ps1::sheet_picture(kit.vfs(), "main", 120).rgba)
+        cursor.set = kit.upload_rgba(im.w, im.h, im.px.data(), false), cursor.w = static_cast<float>(im.w), cursor.h = static_cast<float>(im.h);
+    if (cursor.set)
+      dl.image(cursor.set, canvas_x(static_cast<float>(cell_x(col_) + box.x)), canvas_y(static_cast<float>(50 + 24 * row_ + box.y)),
+               canvas_x(static_cast<float>(box.w)), canvas_y(static_cast<float>(box.h)));
+  }
+  // The name: a cell per character from (132, 320), the cursor's slot in the focus colour, each slot underlined by a 2-pixel line from
+  // x + 1 to x + 14 on rows 336 / 337; Viper's rank follows his name on the JP disc.
+  for (int i = 0; i < max_; ++i) {
+    const int x = 132 + 16 * i;
+    cell_at(buf_[static_cast<size_t>(i)], x, 320, i == pos_);
+    dl.rect(kit.white(), canvas_x(static_cast<float>(x + 1)), canvas_y(336), canvas_x(14), canvas_y(2), i == pos_ ? focus_tint : line_grey);
+  }
+  if (char_id_ == 5)
+    for (size_t i = 0; i < disc_->rank.size(); ++i) cell_at(disc_->rank[i], 196 + 16 * static_cast<int>(i), 320, false);
+  // The prompt from (68, 376): the USA disc's in the menu sheet, the JP disc's in console-font cells.
+  if (!usa_grid()) {
+    for (size_t i = 0; i < disc_->prompt.size(); ++i) cell_at(disc_->prompt[i], 68 + 16 * static_cast<int>(i), 376, false);
+    return;
+  }
+  Pic& prompt = pics_["ps1:prompt"];
+  if (!prompt.set) {
+    if (!menu_font_) menu_font_ = import::load_ps1_menu_font(kit.vfs());
+    if (!menu_font_) return;
+    const import::Ps1Font& font = *menu_font_;
+    int width = 0;
+    for (char32_t ch : disc_->prompt) {
+      const int index = font.index_for(ch);
+      width += index >= 0 ? font.advance(index) : kMenuBlankAdvance;
+    }
+    const int height = font.line_height();
+    std::vector<u8> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4, 0);
+    int pen = 0;
+    for (char32_t ch : disc_->prompt) {
+      const int index = font.index_for(ch);
+      if (index < 0) {
+        pen += kMenuBlankAdvance;
+        continue;
+      }
+      // The PS1 shows a full stop of this line as one row: the dot's top row, on the dot's bottom row.
+      int ink_top = font.cell_h(), ink_bottom = -1;
+      if (ch == U'.')
+        for (int y = 0; y < font.cell_h(); ++y)
+          for (int x = 0; x < font.cell_w(); ++x)
+            if (font.level(index, x, y)) ink_top = std::min(ink_top, y), ink_bottom = std::max(ink_bottom, y);
+      for (int y = 0; y < font.cell_h(); ++y)
+        for (int x = 0; x < font.cell_w(); ++x) {
+          if (ink_bottom >= 0 && y != ink_top) continue;
+          const u8 grey = font.level(index, x, y);
+          const int px = pen + font.left(index) + x, py = font.top(index) + (ink_bottom >= 0 ? ink_bottom : y);
+          if (!grey || px < 0 || py < 0 || px >= width || py >= height) continue;
+          u8* out = &rgba[(static_cast<size_t>(py) * static_cast<size_t>(width) + static_cast<size_t>(px)) * 4];
+          out[0] = out[1] = out[2] = grey, out[3] = 255;
+        }
+      pen += font.advance(index);
+    }
+    if (width > 0) prompt.set = kit.upload_rgba(static_cast<u32>(width), static_cast<u32>(height), rgba.data(), false);
+    prompt.w = static_cast<float>(width), prompt.h = static_cast<float>(height);
+  }
+  if (prompt.set) dl.image(prompt.set, canvas_x(68), canvas_y(376), canvas_x(prompt.w), canvas_y(prompt.h));
 }
 
 }  // namespace oc::ui

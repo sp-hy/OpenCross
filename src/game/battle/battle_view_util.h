@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <format>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "core/types.h"
 #include "render/sprite_batch.h"
@@ -32,6 +34,23 @@ inline const u32 kWhite = render::pack_rgba(255, 255, 255), kYellow = render::pa
                  kRed = render::pack_rgba(255, 90, 90), kGreen = render::pack_rgba(120, 255, 140);
 
 inline float lerp(float from, float to, float amount) { return from + (to - from) * amount; }
+
+// The runs of columns of an RGBA picture (w x h) that hold a texel with alpha: the glyphs of a digit sheet, first and last column each.
+inline std::vector<std::pair<int, int>> column_ink_runs(const std::vector<u8>& rgba, u32 w, u32 h) {
+  std::vector<std::pair<int, int>> runs;
+  int start = -1;
+  for (u32 x = 0; x <= w; ++x) {
+    bool ink = false;
+    if (x < w)
+      for (u32 y = 0; y < h && !ink; ++y) ink = rgba[(static_cast<size_t>(y) * w + x) * 4 + 3] != 0;
+    if (ink && start < 0) start = static_cast<int>(x);
+    if (!ink && start >= 0) {
+      runs.emplace_back(start, static_cast<int>(x) - 1);
+      start = -1;
+    }
+  }
+  return runs;
+}
 
 // The end yaw (radians, unwrapped from `from`) of a RotateT to the 12-bit yaw `to`: the 12-bit difference taken as signed, so an exact half
 // turn goes the negative way.

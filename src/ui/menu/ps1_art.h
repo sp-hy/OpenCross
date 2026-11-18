@@ -4,11 +4,13 @@
 // (frame pieces, captions, dial lines), cdrom/face/<name>.tim (64x64 avatars). Everything is nearest-sampled by the callers.
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string_view>
 #include <vector>
 
 #include "core/types.h"
 #include "import/text.h"
+#include "import/tim.h"
 #include "render/camera.h"
 #include "render/gpu_context.h"
 #include "vfs/vfs.h"
@@ -27,16 +29,33 @@ struct Rgba {
   const u8* at(u32 x, u32 y) const { return &px[(static_cast<size_t>(y) * w + x) * 4]; }
 };
 
-// The brown parchment tile: 4bpp 64x64 at VRAM (896, 96) inside systim.bin; the menus draw 8 x 7 of them.
+// The brown parchment tile: 4bpp 64x64 at VRAM (896, 96) inside systim.bin; the menus draw 8 x 7 of them. parchment_tim = the TIM itself.
 Rgba parchment(const vfs::Vfs& fs);
+std::optional<import::Tim> parchment_tim(const vfs::Vfs& fs);
 // One TIM entry of cdrom/menu/menutim.prd by its 4-char drp name ("wind", "suji", ...).
 Rgba menutim(const vfs::Vfs& fs, std::string_view entry);
-// Frame `frame` (1-based) of the menu's "main" sprite sheet (cdrom/menu/menutest.prd type-3 entry): every part (s16 x, y, u8 u, v, u16 CLUT,
-// u8 w, h, u16 flags: texture page in the low byte, bit 9 / 10 mirrored in x / y) cut from the menutim.prd TIM that holds its CLUT and
-// texels, the last part first. The image is kSheetFrameW x kSheetFrameH with the frame origin at kSheetFrameOriginX / Y: wide enough for
-// the panel frames, whose parts reach 300 px right of and below their origin (the list frame's "Reorder" label part sits at (159, 288)).
+// Frame `frame` (1-based) of the menu's "main" sprite sheet (import::MenuArt). The image is kSheetFrameW x kSheetFrameH with the frame
+// origin at kSheetFrameOriginX / Y: wide enough for the panel frames, whose parts reach 300 px right of and below their origin (the list
+// frame's "Reorder" label part sits at (159, 288)).
 inline constexpr int kSheetFrameW = 512, kSheetFrameH = 512, kSheetFrameOriginX = 192, kSheetFrameOriginY = 192;
 Rgba sheet_frame(const vfs::Vfs& fs, int frame);
+// Frame `frame` of the sheet `sheet` of the disc's menu art (import::MenuArt, read once per Vfs), cut to its parts: `x` / `y` = the
+// picture's top-left relative to the frame origin.
+struct SheetPicture {
+  int x = 0, y = 0;
+  Rgba rgba;
+};
+SheetPicture sheet_picture(const vfs::Vfs& fs, std::string_view sheet, int frame);
+// The rectangle the frame's parts cover, relative to its origin (x, y = top-left); false when the frame is missing.
+struct SheetBounds {
+  int x = 0, y = 0, w = 0, h = 0;
+};
+bool sheet_bounds(const vfs::Vfs& fs, std::string_view sheet, int frame, SheetBounds& out);
+// A compass mesh of the disc's menu art ("deco", "dec1", "hari"; import::MenuArt::mesh) drawn as a picture centred on its draw point.
+SheetPicture mesh_picture(const vfs::Vfs& fs, std::string_view mesh_name, int angle, int scale_x, int scale_y, u32 colour, bool semi);
+// The menus' compass meshes: the dial's scale (1/2), the swirls' (1 and 0.8, x times kMeshAspect on the 512-wide screens), the needle's
+// grey; the swirls and the dial are drawn semi-transparent.
+inline constexpr int kMeshAspect = 0xD99, kNeedleGrey = 0x707070;
 // Face avatar of character id 0..49 (cdrom/face/<name>.tim, 64x64). Empty Rgba if the id has none.
 Rgba face(const vfs::Vfs& fs, int char_id);
 // Retail portrait strip of character id 0..49 (cdrom/menu/playtim/pNN.tim, 8bpp 128x224: left half = top 224 rows, right half = bottom).

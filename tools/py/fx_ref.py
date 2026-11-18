@@ -7,15 +7,15 @@ sequences, the PS1 display buffer of a DuckStation state, and the effect engine'
         the two 320 x 224 display buffers (VRAM y 0 / 240) of each state: the same statistics (15-bit -> 8-bit, x 255 / 31)
     python tools/py/fx_ref.py objects STATE|DIR [--name TAG] [--from A] [--upto B]
         the effect engine's task table (ym_effect_work, base = sentinel + 0xC - 0xC000): every live particle object
-        (callback 0x80038E60) and the damage digits' damv / dam1 stages (0x800B07B8 / 0x800B06D4, "stage ..."): emitter / sprite name,
+        (callback cb_object) and the damage digits' damv / dam1 stages (cb_damv / cb_dam1, "stage ..."): emitter / sprite name,
         position (16.16 high halves), velocity, scale, angles, colour, life, bias, flags
         --mat: also the object matrix (+0x30, s16 / 4096); --bit7: only objects with flag bits 15 + 7
-    python tools/py/fx_ref.py seqs    STATE|DIR          the sequence tasks (callback 0x8002A26C): tag, elapsed, wait, cursor
-    python tools/py/fx_ref.py warp    STATE|DIR          the screen-copy warp globals 0x800720D8..0x800720FF (ops 0x3E-0x40)
-    python tools/py/fx_ref.py models  STATE|DIR          the unit model blocks (ctrl 0x800E31B0 + 0x30 u): +0x7E flags, colour, pos, rot, scale
-    python tools/py/fx_ref.py nodes   STATE              the effect registry (0x800721E4): type, name, data pointer
+    python tools/py/fx_ref.py seqs    STATE|DIR          the sequence tasks (callback cb_seq): tag, elapsed, wait, cursor
+    python tools/py/fx_ref.py warp    STATE|DIR          the screen-copy warp globals (ps1_ram warp; ops 0x3E-0x40)
+    python tools/py/fx_ref.py models  STATE|DIR          the unit model blocks (ctrl unit_ctrl + 0x30 u): +0x7E flags, colour, pos, rot, scale
+    python tools/py/fx_ref.py nodes   STATE              the effect registry (effect_registry): type, name, data pointer
 
-Needs PIL + numpy (Python 3.13 has both) and zstandard (ps1_state.py).
+Addresses are ps1_ram names, resolved in the build of each state. Needs PIL + numpy (Python 3.13 has both) and zstandard (ps1_state.py).
 """
 import os
 import struct
@@ -24,14 +24,12 @@ import sys
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from ps1_ram import RAM  # noqa: E402
 from ps1_state import State, frame_of, list_states  # noqa: E402
 
-CB_OBJECT = 0x80038E60
-# The damage digits' first two stages run their own callbacks: damv (flight, battle.prg 0x800B07B8) and dam1 (rest, 0x800B06D4);
-# dam2 (fade) is a plain object. `objects` lists all three ("cd" = the damv countdown +0x82: the digit waits while it is >= 1).
-CB_DAMV = 0x800B07B8
-CB_DAM1 = 0x800B06D4
-CB_SEQ = 0x8002A26C
+# Task callbacks come from the state's build (st.map): cb_object (particle object), cb_seq (sequence task), and the damage
+# digits' first two stages, which run their own callbacks: cb_damv (flight) and cb_dam1 (rest); dam2 (fade) is a plain object.
+# `objects` lists all three ("cd" = the damv countdown +0x82: the digit waits while it is >= 1).
 WORK_SIZE = 0xC000
 
 
@@ -141,13 +139,16 @@ def tag(v):
 
 class Registry:
     def __init__(self, st):
-        """st: a State, or a read(addr, n) callable returning n bytes of guest RAM (a live session's read)."""
+        """st: a State, or a read(addr, n) callable returning n bytes of guest RAM (a live session's read; the running
+        session's build, ps1_ram.RAM)."""
         if callable(st):
             u32 = lambda a: int.from_bytes(st(a, 4), "little")  # noqa: E731
+            head = RAM.effect_registry
         else:
             u32 = st.u32
+            head = st.map.effect_registry
         self.nodes = []
-        p = u32(0x800721E4)
+        p = u32(head)
         n = 0
         while 0x80000000 <= p < 0x80200000 and n < 4096:
             name = u32(p + 4)
@@ -169,7 +170,7 @@ class Registry:
 
 
 def walk(st, base, end):
-    """The chain from the head entry (base + 4) by next index * 4; valid iff it ends at the sentinel 0x80072118 (= base + size - 0xC)."""
+    """The chain from the head entry (base + 4) by next index * 4; valid iff it ends at the sentinel effect_work_end (= base + size - 0xC)."""
     out = []
     idx = st.u16(base + 4)
     n = 0
@@ -192,7 +193,7 @@ def tasks(st):
     """Entries: +0 u32 (bit 31 active, bits 16-30 previous index, bits 0-15 next index; indices in 4-byte units from the work base), +4 the
     tick callback, +8 the draw callback, +0xC the task data (the 0x94-byte particle object, the sequence task, ...). The work size is the
     allocation size argument (0xC000 on the PS1, 0x13000 in RDE, which keeps it above the first 2 MB), so it is searched."""
-    end = st.u32(0x80072118)
+    end = st.u32(st.map.effect_work_end)
     if not (0x80000000 <= end < 0x80000000 + st.ram_size):
         return None, []
     for size in (WORK_SIZE, 0x13000, 0x4000, 0x100) + tuple(range(0x1000, 0x40000, 4)):
@@ -220,7 +221,8 @@ def cmd_objects(args):
         st = State(p)
         reg = Registry(st)
         base, ts = tasks(st)
-        objs = [(e, cb, d) for (e, cb, d) in ts if cb in (CB_OBJECT, CB_DAMV, CB_DAM1)]
+        m = st.map
+        objs = [(e, cb, d) for (e, cb, d) in ts if cb in (m.cb_object, m.cb_damv, m.cb_dam1)]
         print("== %s: work base %s, %d tasks, %d objects" % (os.path.basename(p), hex(base) if base else None, len(ts), len(objs)))
         for e, cb, o in objs:
             owner = reg.name_of_data(st.u32(o + 0xC))
@@ -240,7 +242,7 @@ def cmd_objects(args):
             bias = st.s16(o + 0x7E)
             flags = st.u32(o + 0x88)
             frame = st.s16(o + 0x7A)
-            stage = {CB_DAMV: " stage damv cd %d" % st.s16(o + 0x82), CB_DAM1: " stage dam1"}.get(cb, "")
+            stage = {m.cb_damv: " stage damv cd %d" % st.s16(o + 0x82), m.cb_dam1: " stage dam1"}.get(cb, "")
             print("  %s em %s spr %s pos %6d %6d %6d vel %7d %7d %7d acc %6d %6d %6d sc %5d %5d %5d ang %5d %5d %5d col %4d %4d %4d rgb %3d %3d %3d life %4d bias %4d fr %2d fl %08x%s" % (
                 hex(o), owner, sprite, *pos, *(v >> 6 for v in vel), *(v >> 3 for v in acc), *sc, *ang, *col, *drawc, life, bias, frame, flags, stage))
             if mat:
@@ -254,12 +256,12 @@ def cmd_seqs(args):
         base, ts = tasks(st)
         rows = []
         for e, cb, d in ts:
-            if cb == CB_SEQ:
+            if cb == st.map.cb_seq:
                 seq = st.u32(d + 4)
                 rows.append("seq %s hdr %s flags %08x op@%s label@%s tag %s elapsed %d wait %d cursor %d inherited %d" % (
                     reg.name_of_data(seq), hex(seq), st.u32(seq) if 0x80000000 <= seq < 0x80200000 else 0, hex(st.u32(d + 8)), hex(st.u32(d + 0xC)),
                     tag(st.u32(d + 0x10)), st.s16(d + 0x14), st.s16(d + 0x18), st.s16(d + 0x1A), st.s16(d + 0x1C)))
-            elif cb != CB_OBJECT:
+            elif cb != st.map.cb_object:
                 rows.append("task cb %s data %s" % (hex(cb), hex(d)))
         print("== %s: %d tasks" % (os.path.basename(p), len(ts)))
         for r in rows:
@@ -269,13 +271,14 @@ def cmd_seqs(args):
 def cmd_warp(args):
     for p in list_states(args):
         st = State(p)
-        on = st.u8(0x800720D8)  # a byte flag
-        ang = s16x3(st, 0x800720E0)
-        tr = s16x3(st, 0x800720E8)
-        col = (st.u8(0x800720F0), st.u8(0x800720F1), st.u8(0x800720F2))
-        off = (st.s16(0x800720F4), st.s16(0x800720F6))
+        w = st.map.warp
+        on = st.u8(w)  # a byte flag
+        ang = s16x3(st, w + 8)
+        tr = s16x3(st, w + 0x10)
+        col = (st.u8(w + 0x18), st.u8(w + 0x19), st.u8(w + 0x1A))
+        off = (st.s16(w + 0x1C), st.s16(w + 0x1E))
         print("%6d warp on %d ang %5d %5d %5d trans %5d %5d %5d col %3d %3d %3d off %4d %4d abr %d fog %d slow %d/%d" % (
-            frame_of(p), on, *ang, *tr, *col, *off, st.u8(0x800720FC), st.u8(0x800721E0), st.u8(0x800720FF), st.u8(0x80072100)))
+            frame_of(p), on, *ang, *tr, *col, *off, st.u8(w + 0x24), st.u8(st.map.fog_on), st.u8(w + 0x27), st.u8(w + 0x28)))
 
 
 def cmd_models(args):
@@ -283,7 +286,7 @@ def cmd_models(args):
         st = State(p)
         print("== %s" % os.path.basename(p))
         for u in range(12):
-            c = 0x800E31B0 + 0x30 * u
+            c = st.map.unit_ctrl + 0x30 * u
             m = st.u32(c)
             if not (0x80000000 <= m < 0x80200000):
                 continue

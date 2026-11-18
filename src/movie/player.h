@@ -1,6 +1,7 @@
 #pragma once
-// FMV player: decodes a movie.dat Bink 2 member (or a mod's mp4 / mkv replacement) on a worker thread, paces frames against the
-// audio clock (the mixer's movie PCM stream; wall clock without a mixer) and exposes the current frame as an RGBA texture.
+// FMV player: decodes a movie.dat Bink 2 member (or a mod's mp4 / mkv replacement, or a PS1 disc's movie stream) on a worker
+// thread, paces frames against the audio clock (the mixer's movie PCM stream; wall clock without a mixer) and exposes the current
+// frame as an RGBA texture.
 //
 // Usage:  Player p; p.set_mixer(&mixer); p.open(vfs, "a01op", "en"); p.init_gpu(ctx, sprites);
 //         each frame:  p.update(dt);  ...  p.draw(frame, vw, vh);  until p.finished().
@@ -27,7 +28,8 @@ class Vfs;
 namespace oc::movie {
 
 // Member for a movie name: "<name>_<lang>" if that exists (a01op, b28end, final), else "<name>"; at each, a mod's .mp4 / .mkv
-// replacement before the .bk2. Empty if absent.
+// replacement before the .bk2. Without any of them (the PS1 discs have no movie.dat), the disc's stream "cdrom/movie/<name>.stv"
+// (a01op is the discs' newop). Empty if absent.
 std::string resolve_member(const vfs::Vfs& fs, std::string_view name, std::string_view lang);
 // The staff-roll credits strip for a language: the Japanese strip for "jp", the English one for every other language.
 std::string_view staff_strip_member(std::string_view lang);
@@ -67,9 +69,10 @@ class Player {
 
   // Creates the frame texture and sampler. Optional for headless use (then see frame_rgba()).
   bool init_gpu(render::GpuContext& ctx, render::SpriteBatch& sprites);
-  // After init_gpu: switches to the staff-roll layout with the credits strip `member` (a PNG, one row per movie frame). False (and
-  // the plain layout) when the strip cannot be read.
-  bool set_staff_roll(const vfs::Vfs& fs, std::string_view member);
+  // After init_gpu: switches to the staff-roll layout with the credits strip `member` (a PNG, one row per movie frame). A disc movie
+  // stream carries its own strips and uses them instead: row A for the full roll, row B for the short one (`short_roll`), scrolled at
+  // one strip row per frame. False (and the plain layout) when the strip cannot be read.
+  bool set_staff_roll(const vfs::Vfs& fs, std::string_view member, bool short_roll = false);
 
   // Advances the clock by dt seconds (when no audio clock applies) and picks the frame due now; uploads it if it changed.
   void update(double dt);
@@ -110,6 +113,8 @@ class Player {
   // `colour` tints the strip (the held frame's fade passes its alpha).
   void draw_strip(float view_w, float view_h, u32 colour = 0xFFFFFFFFu);
   void release_strip();
+  // A disc stream's strip rows arrive as the stream is read: the texture is uploaded again once kStripBatch more rows are in.
+  void refresh_strip();
 
   audio::Mixer* mixer_ = nullptr;
   render::GpuContext* ctx_ = nullptr;
@@ -119,10 +124,15 @@ class Player {
   render::TexRef set_;
   render::Texture strip_texture_;
   render::TexRef strip_set_;
-  u32 strip_w_ = 0, strip_h_ = 0;
+  // strip_last_: the `last` frame the strip's scroll runs to (staff_strip_top).
+  u32 strip_w_ = 0, strip_h_ = 0, strip_last_ = 0;
+  // The strip comes from the disc stream (row B when strip_second_); strip_rows_ of its rows are in the texture.
+  bool strip_stream_ = false, strip_second_ = false;
+  size_t strip_rows_ = 0;
+  static constexpr size_t kStripBatch = 32;
 
   std::string member_;
-  u32 width_ = 0, height_ = 0;
+  u32 width_ = 0, height_ = 0, display_w_ = 0, display_h_ = 0;
   double fps_ = 15.0;
   bool has_audio_ = false;
   bool held_ = false;

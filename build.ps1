@@ -1,4 +1,4 @@
-# Build OpenCross from PowerShell:  .build.ps1 [debug|release] [-Configure] [-Test] [-Target a,b] [-WholeProgram]  (builds are serialised by a mutex)
+# Build OpenCross from PowerShell:  .build.ps1 [debug|release] [-Configure] [-Test] [-Target a,b] [-WholeProgram]  (builds of one checkout are serialised by a mutex; other worktrees build in parallel)
 # vcpkg is -VcpkgRoot, else $env:VCPKG_ROOT, else the folder of vcpkg.exe on PATH; a root other than the cached one reconfigures.
 # Loads the MSVC x64 environment, points CMake at vcpkg, configures (once, with -Configure, or when -WholeProgram changes) and builds.
 # -WholeProgram turns on whole-program optimisation for Release (OC_WHOLE_PROGRAM; the published build). Without it the build is configured
@@ -45,7 +45,8 @@ foreach ($line in $envDump) {
 }
 $env:VCPKG_ROOT = $VcpkgRoot
 
-$mutex = New-Object System.Threading.Mutex($false, 'Global\OpenCrossBuild')
+$rootKey = [BitConverter]::ToString([Security.Cryptography.SHA1]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($root.ToLowerInvariant()))).Replace('-', '')
+$mutex = New-Object System.Threading.Mutex($false, "Global\OpenCrossBuild-$rootKey")
 [void] $mutex.WaitOne()
 Push-Location $root
 try {

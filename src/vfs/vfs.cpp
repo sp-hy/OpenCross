@@ -7,8 +7,8 @@
 #include <set>
 
 #include "core/log.h"
-#include "vfs/archive.h"
 #include "vfs/mod_archive.h"
+#include "vfs/rde_backend.h"
 
 namespace oc::vfs {
 
@@ -47,8 +47,8 @@ std::pair<std::string, std::string> split_archive_path(std::string_view path) {
   return {normalised.substr(0, slash), normalised.substr(slash + 1)};
 }
 
-// `archives`: shipped archive name -> the opened archive, nullptr = known missing. `mods`: packed mod path -> what opening it gave,
-// with the size and time it had then.
+// `backend`: the shipped archives (set by open, null before). `mods`: packed mod path -> what opening it gave, with the size and
+// time it had then.
 struct Vfs::Impl {
   struct OpenedMod {
     std::shared_ptr<ModArchive> archive;
@@ -56,7 +56,7 @@ struct Vfs::Impl {
     std::string stamp;
   };
   mutable std::mutex mutex;
-  mutable std::map<std::string, std::unique_ptr<Archive>> archives;
+  std::unique_ptr<Backend> backend;
   mutable std::map<std::filesystem::path, OpenedMod> mods;
   std::shared_ptr<const Overlay> overlay = std::make_shared<Overlay>();
 };
@@ -71,8 +71,20 @@ bool Vfs::open(const std::filesystem::path& game_dir) {
     log::error("vfs: {} does not contain data\\cdrom.dat", game_dir.string());
     return false;
   }
-  impl_->archives.clear();
+  impl_->backend = std::make_unique<RdeBackend>(game_dir / "data");
   return true;
+}
+
+void Vfs::open(std::unique_ptr<Backend> backend, const std::filesystem::path& game_dir) {
+  game_dir_ = game_dir;
+  impl_->backend = std::move(backend);
+}
+
+bool Vfs::has_archive(std::string_view archive) const { return impl_->backend && impl_->backend->has_archive(archive); }
+
+std::optional<Bytes> Vfs::read_shipped(std::string_view archive, const std::string& member) const {
+  if (!impl_->backend) return std::nullopt;
+  return impl_->backend->read(archive, member, disc_.load());
 }
 
 void Vfs::set_overlay(Overlay overlay) {
@@ -129,23 +141,6 @@ std::optional<Bytes> Vfs::read_overlay(const std::string& logical) const {
   return read_mod_file(it->second);
 }
 
-Archive* Vfs::archive(std::string_view name) const {
-  std::lock_guard lock(impl_->mutex);
-  std::string key(name);
-  auto it = impl_->archives.find(key);
-  if (it != impl_->archives.end()) return it->second.get();
-  auto file = game_dir_ / "data" / (key + ".dat");
-  std::unique_ptr<Archive> opened;
-  std::error_code ec;
-  if (std::filesystem::is_regular_file(file, ec)) {
-    opened = std::make_unique<Archive>(file);
-    if (!opened->ok()) opened.reset();
-  }
-  Archive* raw = opened.get();
-  impl_->archives.emplace(key, std::move(opened));
-  return raw;
-}
-
 // RDE tries data\cdrom2\X before data\cdrom\X for every file in HD mode, and for a fixed list of files in original
 // mode (openfont.tim, cmptitle.tim, map/window/*, ending.ctd).
 bool Vfs::cdrom2_first(const std::string& member) const {
@@ -158,32 +153,37 @@ std::optional<Bytes> Vfs::read(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
   if (auto bytes = read_overlay(arc + "/" + member)) return bytes;
   if (arc == "cdrom" && cdrom2_first(member)) {
-    if (Archive* cdrom2 = archive("cdrom2")) {
-      if (auto bytes = cdrom2->read(member)) return bytes;
-    }
+    if (auto bytes = read_shipped("cdrom2", member)) return bytes;
   }
-  Archive* shipped = archive(arc);
-  if (!shipped) return std::nullopt;
-  return shipped->read(member);
+  return read_shipped(arc, member);
+}
+
+std::unique_ptr<Reader> Vfs::open_reader(std::string_view path) const {
+  auto [arc, member] = split_archive_path(path);
+  if (auto bytes = read_overlay(arc + "/" + member)) return std::make_unique<MemoryReader>(std::move(*bytes));
+  const Backend* shipped = impl_->backend.get();
+  if (!shipped) return nullptr;
+  const int disc = disc_.load();
+  if (arc == "cdrom" && cdrom2_first(member))
+    if (auto reader = shipped->open_reader("cdrom2", member, disc)) return reader;
+  return shipped->open_reader(arc, member, disc);
 }
 
 std::optional<Bytes> Vfs::read_disc(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
   if (arc != "cdrom") return read(path);
   if (auto bytes = read_overlay(arc + "/" + member)) return bytes;
-  Archive* shipped = archive(arc);
-  if (!shipped) return std::nullopt;
-  return shipped->read(member);
+  return read_shipped(arc, member);
 }
 
 bool Vfs::exists(std::string_view path) const {
   auto [arc, member] = split_archive_path(path);
   if (auto ov = overlay(); ov->files.contains(arc + "/" + member)) return true;
-  if (arc == "cdrom" && cdrom2_first(member)) {
-    if (Archive* cdrom2 = archive("cdrom2"); cdrom2 && cdrom2->contains(member)) return true;
-  }
-  Archive* shipped = archive(arc);
-  return shipped && shipped->contains(member);
+  const Backend* shipped = impl_->backend.get();
+  if (!shipped) return false;
+  const int disc = disc_.load();
+  if (arc == "cdrom" && cdrom2_first(member) && shipped->contains("cdrom2", member, disc)) return true;
+  return shipped->contains(arc, member, disc);
 }
 
 std::optional<std::filesystem::path> Vfs::loose_file(std::string_view path) const {
@@ -226,8 +226,7 @@ bool Vfs::has_texture_under(std::string_view prefix, std::string_view except) co
 }
 
 std::vector<std::string> Vfs::list(std::string_view name) const {
-  Archive* arc = archive(name);
-  return arc ? arc->names() : std::vector<std::string>{};
+  return impl_->backend ? impl_->backend->list(name) : std::vector<std::string>{};
 }
 
 }  // namespace oc::vfs

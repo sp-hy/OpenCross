@@ -1,0 +1,58 @@
+# USA executable string tables: index, entries (the last offset only ends the table), what they hold, the RDE
+# table and key they correspond to, and the Japanese executable's table of the same content (cc_text.py usa-tables).
+# columns: table	entries	kind	rde	jp_table	dialect_arg	match
+0	256	items	sysmes 0x00	0		
+1	65	character names	sysmes 0x01	1		
+2	1536	battle strings and descriptions	sysmes 0x1A	26		
+3	8	button names	sysmes 0x1B	27		
+4	512	elements and techs	sysmes 0x17	23		
+5	65	key items	sysmes 0x18	24		
+6	256	enemy names	sysmes 0x19	25		
+7	23	dialect form	mesgen_en {-}		0x01	50/50
+8	23	dialect form	mesgen_en {a}		0x02	50/50
+9	23	dialect form	mesgen_en {e}		0x03	50/50
+10	23	dialect form	mesgen_en {i}		0x04	50/50
+11	23	dialect form	mesgen_en {o}		0x05	50/50
+12	23	dialect form	mesgen_en {u}		0x06	50/50
+13	23	dialect form	mesgen_en {g'}		0x07	50/50
+14	23	dialect form	mesgen_en {'re}		0x08	49/50
+15	23	dialect form	mesgen_en {h'}		0x09	50/50
+16	23	dialect form	mesgen_en {l}		0x0A	50/50
+17	23	dialect form	mesgen_en {rr}		0x0B	50/50
+18	23	dialect form	mesgen_en {rw}		0x0C	50/50
+19	23	dialect form	mesgen_en {rwr}		0x0D	50/50
+20	23	dialect form	mesgen_en {f}		0x0E	50/50
+21	23	dialect form	mesgen_en {thd}		0x0F	50/50
+22	23	dialect form	mesgen_en {thf}		0x10	50/50
+23	23	dialect form	mesgen_en {thff}		0x11	50/50
+24	23	dialect form	mesgen_en {thvv}		0x12	50/50
+25	23	dialect form	mesgen_en {sth}		0x13	50/50
+26	23	dialect form	mesgen_en {stz}		0x14	50/50
+27	23	dialect form	mesgen_en {w}		0x15	50/50
+28	23	dialect form	mesgen_en {-umeth}		0x16	50/50
+29	23	dialect form	mesgen_en {-a-}		0x17	50/50
+30	23	dialect form	mesgen_en {-an-}		0x18	50/50
+31	23	dialect form	mesgen_en {-the-}		0x19	50/50
+32	23	dialect form	mesgen_en {-I-}		0x1A	49/50
+33	23	dialect form	mesgen_en {-my-}		0x1B	48/50
+34	23	dialect form	mesgen_en {-me-}		0x1C	50/50
+35	23	dialect form	mesgen_en {-you-}		0x1D	48/50
+36	23	dialect form	mesgen_en {-your-}		0x1E	48/50
+37	23	dialect form	mesgen_en {yes}		0x1F	48/50
+38	52	dialect form	mesgen_en {SERGE}		0x20	49/50
+39	23	dialect form	mesgen_en {n't}		0x21	48/50
+40	23	dialect form	mesgen_en {n't-you}		0x22	47/50
+41	23	dialect form	mesgen_en {can't}		0x23	48/50
+42	23	dialect form	mesgen_en {can't-you}		0x24	47/50
+43	23	dialect form	mesgen_en {won't}		0x25	48/50
+44	23	dialect form	mesgen_en {won't-you}		0x26	47/50
+45	23	dialect form	mesgen_en {aren't}		0x27	47/50
+46	23	dialect form	mesgen_en {aren't-you}		0x28	47/50
+47	23	dialect form	mesgen_en {'ve}		0x29	49/50
+48	23	dialect form	mesgen_en {'ll}		0x2A	49/50
+49	23	dialect form	mesgen_en {'ld}		0x2B	49/50
+50	23	dialect form	mesgen_en {'d}		0x2C	49/50
+51	23	dialect form	mesgen_en {t-you}		0x2D	49/50
+52	23	dialect form	mesgen_en {'s}		0x2E	49/50
+53	23	dialect form	mesgen_en {ss}		0x2F	50/50
+54	23	dialect form	mesgen_en {wha}		0x30	50/50

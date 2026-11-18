@@ -2,7 +2,7 @@
 // Battle sound: the battle theme, the cast-time music ducking and the AKAO sound effects the animation scripts and effect sequences name by
 // tag. Sounds are looked up like the engine's one resource list (Resident / Actor / Pack groups, newest first; closing a group cuts its
 // sounds), the chant plays at the start of an element cast with mask 0x100 and the theme is ducked until the pack ends.
-// Music: the field starts a battle with its battle song (the boss theme 0x31 with flag 0x40, else the battle theme 2 / 0x14) unless the
+// Music: the field starts a battle with its battle song (the boss theme 0x31 with flag 0x40, else the battle theme 0x14) unless the
 // battle request keeps the field music (flag 1). Every later song (the victory song, an effect's song) goes through the song change
 // (change_song). There is no victory voice.
 #include <bitset>
@@ -75,7 +75,7 @@ class BattleAudio {
   audio::Sfx* sfx() { return sfx_.get(); }
 
   // Music.
-  // Starts the battle song of the request's flags (audio::battle_song: the boss theme 0x31 with flag 0x40, else the battle theme 2 / 0x14);
+  // Starts the battle song of the request's flags (audio::battle_song: the boss theme 0x31 with flag 0x40, else the battle theme 0x14);
   // with keep_field_music the field song continues instead.
   void start_battle_theme(int battle_flags, bool keep_field_music);
   // Music ducking of an element cast: the cast start fades the theme to 0x66 over 0x6D frames, the effect end back to 0x7F over 0x60 frames.

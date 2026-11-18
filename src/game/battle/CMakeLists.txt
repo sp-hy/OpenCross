@@ -47,6 +47,9 @@ add_library(oc_battle_view STATIC
   battle_view_anm.cpp
   battle_view_camera.cpp
   battle_view_hud.cpp
+  battle_view_ps1hud.cpp
+  hud_sheets.h
+  hud_sheets.cpp
   battle_view_draw.cpp
   battle_view_shadows.cpp
   battle_view_trail.cpp

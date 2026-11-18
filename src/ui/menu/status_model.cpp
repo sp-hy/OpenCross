@@ -12,6 +12,7 @@
 #include "import/model.h"
 #include "import/room_effects.h"
 #include "import/tim.h"
+#include "ui/menu/ps1_art.h"
 
 namespace oc::ui {
 
@@ -109,11 +110,14 @@ std::optional<assets::ModelAsset> shut_eyes(const assets::ModelAsset& open, Byte
 
 // The menu's stock environment page as a 256 x 256 8 bpp texture: texel (u, v) is byte u & 1 of the frame word at (320 + u / 2, 256 + v),
 // coloured by the frame word at (byte, 239). The parchment frame comes from the tile the menu uploads (hd/map/etc/tile.tim, its 4x image
-// sampled every 4th texel at 1x, CLUT word | 0x8000).
+// sampled every 4th texel at 1x, CLUT word | 0x8000; played from the discs, the disc's own 1x tile in systim.bin).
 std::optional<import::Image> menu_env_page(const vfs::Vfs& vfs) {
-  const auto raw = vfs.read("hd/map/etc/tile.tim");
-  if (!raw) return std::nullopt;
-  const auto tim = import::parse_tim(*raw);
+  std::optional<import::Tim> tim;
+  if (vfs.has_archive("hd")) {
+    if (const auto raw = vfs.read("hd/map/etc/tile.tim")) tim = import::parse_tim(*raw);
+  } else {
+    tim = ps1::parchment_tim(vfs);
+  }
   if (!tim || tim->bpp != 4 || !tim->has_clut || tim->clut.data.size() < 16) return std::nullopt;
   const u32 width = static_cast<u32>(tim->image.w) * 4, height = tim->image.h, step = width / kParchmentTile;
   if (step == 0 || height < kParchmentTile * step) return std::nullopt;

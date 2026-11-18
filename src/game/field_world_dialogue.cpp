@@ -219,7 +219,8 @@ bool FieldWorld::portrait_on_left(int heading, int portrait_yaw, int model_yaw, 
   return yaw_delta >= 0x800u;
 }
 
-// PS1 text width of a dialogue message in pixels: glyphs below 0x75 are 8 wide, the rest 12; the widest line wins. Names, items,
+// PS1 text width of a dialogue message in pixels: each glyph at the build's pen advance (JP: 8 below 0x75, 12 from there; USA: the
+// width record); the widest line wins. Names, items,
 // the speaker's grammar forms (0x12) and button names are measured as the strings the PS1 substitutes (its executable tables and
 // the save's names); a numeric field (0x0A / 0x0B) counts as 0x48 / 0x30, a digit entry (0x10) as -0x50.
 int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const {
@@ -231,8 +232,8 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const 
   while (i < bytes.size()) {
     const u8 code = bytes[i];
     if (code >= 0x20) {
-      width += code < 0x75 ? 8 : 12;
-      i += code > 0xF7 ? 2 : 1;
+      width += glyph_width(code);
+      i += code > 0xF7 && usa_widths_.empty() ? 2 : 1;
       continue;
     }
     const int arg = i + 1 < bytes.size() ? bytes[i + 1] : 0;
@@ -260,7 +261,7 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const 
       case 0x10: width -= 0x50; i += 2; break;
       case 0x12: {
         const int speaker_char = speaker >= 0 && speaker < static_cast<int>(ents_.size()) ? std::max(0, ents_[static_cast<size_t>(speaker)].char_id) : 0;
-        width += ps1_string_width(arg + 1, speaker_char);
+        width += ps1_string_width(kGrammarTables + arg, speaker_char);
         i += 2;
         break;
       }
@@ -294,14 +295,27 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const 
   return std::max(widest, width);
 }
 
-// Width of a substituted string: table 0 ids 0x200.. are elements / techs (table 23), 0x400.. key items (24); character names
-// (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name (Lynx's while his body is Lynx's and
-// GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's. Inside, glyphs count as in a message, a nested name
-// (code 8) adds its width, and the first other control code ends it.
+// Width of a substituted string, `table` numbered as in the JP executable: table 0 ids 0x200.. are elements / techs (table 23),
+// 0x400.. key items (24); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
+// (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's; 27 the button
+// names; kGrammarTables + n grammar form n of speaker `id`. The table is looked up in the build's own string tables (the USA build
+// numbers them differently and reads a grammar form by the speaker's dialect column). Inside, glyphs count as in a message, a nested
+// name (code 8) adds its width, and the first other control code ends it.
 int FieldWorld::ps1_string_width(int table, int id) const {
   if (table == 0 && id >= 0x200) {
     table = id < 0x400 ? 23 : 24;
     id -= id < 0x400 ? 0x200 : 0x400;
+  }
+  int exe_table = -1, row = id;
+  if (exe_build_) {
+    const u32 category = table == 1 ? 0x01 : table == 23 ? 0x17 : table == 24 ? 0x18 : table == 27 ? 0x1B : 0x00;
+    if (table < kGrammarTables) {
+      exe_table = import::ps1_category_table(*exe_build_, category);
+    } else if (const int form = table - kGrammarTables; form >= 1 && form <= exe_build_->grammar_forms) {
+      exe_table = exe_build_->grammar_table + form - 1;
+      if (!grammar_columns_.empty())
+        row = form == exe_build_->grammar_by_id ? id + 1 : id >= 0 && static_cast<size_t>(id) < grammar_columns_.size() ? grammar_columns_[static_cast<size_t>(id)] + 1 : 1;
+    }
   }
   std::span<const u8> text;
   size_t glyph_limit = std::numeric_limits<size_t>::max();
@@ -314,15 +328,15 @@ int FieldWorld::ps1_string_width(int table, int id) const {
     const auto& name = gs_->slot.chars[static_cast<size_t>(id)].name;
     text = std::span<const u8>(name.data(), static_cast<size_t>(std::find(name.begin(), name.end(), u8{0}) - name.begin()));
   } else {
-    text = exe_strings_.get(table, table == 1 && id >= 0x2C ? data::kLynxBody : id);
+    text = exe_strings_.get(exe_table, table == 1 && id >= 0x2C ? data::kLynxBody : row);
   }
   int width = 0;
   size_t glyphs = 0;
   for (size_t i = 0; i < text.size() && glyphs < glyph_limit;) {
     const u8 code = text[i];
     if (code >= 0x20) {
-      width += code < 0x75 ? 8 : 12;
-      i += code > 0xF7 ? 2 : 1;
+      width += glyph_width(code);
+      i += code > 0xF7 && usa_widths_.empty() ? 2 : 1;
       ++glyphs;
     } else if (code == 4 || code == 5 || code == 0xE || code == 0xF || code == 0x16 || code == 0x17) {
       i += 2;
@@ -414,7 +428,7 @@ bool FieldWorld::place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int m
   }
   y = std::clamp(y, 0x14, std::max(0x14, 0xC4 - box_height));
   x = std::clamp(x, 0x20, std::max(0x20, 0x120 - width));
-  dlg.set_ps1_window(x, y);
+  dlg.set_ps1_window(x, y, width, lines);
   // Flag 0x20: the window opens at full size (no grow from the speaker).
   if (fl & 0x20) dlg.skip_grow();
   log::debug("field: dialogue window ps1 ({}, {}) {}x{} px mode {} above {} flags {:#x} op62 {},{},{},{}", x, y, width, box_height, mode, above, fl,

@@ -3,15 +3,24 @@
 //                                    rich-text tokens, flattened tokens. <room> = map file stem or numeric lang.dat id.
 //   octext find <text> [lang]        every room message whose lang.dat row contains <text>
 //   octext coverage                  per language: message records of every room vs lang.dat rows ({ERROR} placeholders)
+//   octext ps1font <out.png> <text> [--disc <image>] [--scale N]
+//                                    <text> (UTF-8, "\n" = new line) in the PS1 font as the message window draws it: white glyphs,
+//                                    black shadow one pixel down and right, 13-pixel lines, on dark grey; prints each line's width.
+//                                    --disc reads the font of that disc image (JP or USA build), else the game dir's JP executable.
 // GameDir comes from -g <dir>, the OPENCROSS_GAMEDIR environment variable, or the usual discovery (platform::find_game_dir).
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "import/disc/disc_backend.h"
+#include "import/disc/disc_image.h"
+#include "import/ps1_font.h"
 #include "import/text.h"
 #include "platform/paths.h"
 #include "tool_util.h"
@@ -34,8 +43,98 @@ std::string escape_newlines(const std::string& text) {
 }
 
 int usage() {
-  std::fprintf(stderr, "usage: octext [-g <gamedir>] msg <room> <idx> [lang]\n       octext [-g <gamedir>] coverage\n");
+  std::fprintf(stderr,
+               "usage: octext [-g <gamedir>] msg <room> <idx> [lang]\n       octext [-g <gamedir>] coverage\n"
+               "       octext [-g <gamedir>] ps1font <out.png> <text> [--disc <image>] [--scale N]\n");
   return 2;
+}
+
+// The PS1 font rendering of `text` at whole-pixel scale `scale`: glyphs at the pen, the pen moving by each glyph's advance, a black
+// shadow one pixel down and right, lines 13 pixels apart, 4 pixels of margin.
+int cmd_ps1font(const import::Ps1Font& font, const std::string& out, const std::string& utf8, int scale) {
+  std::u32string text;
+  for (char32_t ch : import::utf8_to_u32(utf8)) {
+    if (!text.empty() && text.back() == U'\\' && ch == U'n') text.back() = U'\n';
+    else text.push_back(ch);
+  }
+  std::vector<int> widths(1, 0);
+  for (char32_t ch : text) {
+    if (ch == U'\n') widths.push_back(0);
+    else widths.back() += font.advance(std::max(font.index_for(ch), font.index_for(U' ')));
+  }
+  constexpr int kMargin = 4;
+  const int w = *std::max_element(widths.begin(), widths.end()) + 2 * kMargin + import::Ps1Font::kMaxWidth;
+  const int h = static_cast<int>(widths.size()) * import::Ps1Font::kLineHeight + 2 * kMargin;
+  std::vector<u8> grey(static_cast<size_t>(w) * h, 64);
+  auto plot = [&](int x, int y, u8 value) {
+    if (x >= 0 && y >= 0 && x < w && y < h) grey[static_cast<size_t>(y) * w + x] = value;
+  };
+  for (int pass = 0; pass < 2; ++pass) {
+    int pen_x = kMargin, pen_y = kMargin;
+    for (char32_t ch : text) {
+      if (ch == U'\n') {
+        pen_x = kMargin;
+        pen_y += import::Ps1Font::kLineHeight;
+        continue;
+      }
+      const int index = font.index_for(ch);
+      if (index < 0) {
+        std::fprintf(stderr, "ps1font: no glyph for U+%04X\n", static_cast<unsigned>(ch));
+        pen_x += font.advance(font.index_for(U' '));
+        continue;
+      }
+      const u16* rows = font.rows(index);
+      for (int y = 0; y < import::Ps1Font::kRows; ++y)
+        for (int x = 0; x < import::Ps1Font::kMaxWidth; ++x)
+          if (rows[y] & (0x8000 >> x)) plot(pen_x + x + (pass == 0), pen_y + y + (pass == 0), pass == 0 ? 0 : 255);
+      pen_x += font.advance(index);
+    }
+  }
+  Bytes rgba(static_cast<size_t>(w) * scale * h * scale * 4);
+  for (int y = 0; y < h * scale; ++y)
+    for (int x = 0; x < w * scale; ++x) {
+      u8* px = &rgba[(static_cast<size_t>(y) * w * scale + x) * 4];
+      px[0] = px[1] = px[2] = grey[static_cast<size_t>(y / scale) * w + x / scale];
+      px[3] = 255;
+    }
+  for (size_t i = 0; i < widths.size(); ++i) std::printf("line %zu: %d px\n", i, widths[i]);
+  std::printf("build %s, %d glyphs\n", font.build() == import::Ps1Font::Build::Usa ? "USA" : "Japan", font.count());
+  return tool::write_png(out, static_cast<u32>(w * scale), static_cast<u32>(h * scale), rgba) ? 0 : 1;
+}
+
+int ps1font_main(const std::vector<std::string>& args, const std::string& gamedir) {
+  std::string disc_path;
+  int scale = 1;
+  std::vector<std::string> positional;
+  for (size_t i = 1; i < args.size(); ++i) {
+    if (args[i] == "--disc" && i + 1 < args.size()) disc_path = args[++i];
+    else if (args[i] == "--scale" && i + 1 < args.size()) scale = std::max(1, std::atoi(args[++i].c_str()));
+    else positional.push_back(args[i]);
+  }
+  if (positional.size() != 2) return usage();
+  vfs::Vfs game_fs;
+  if (!disc_path.empty()) {
+    std::string error;
+    std::shared_ptr<const import::disc::SectorSource> source = import::disc::open_image(std::filesystem::path(disc_path), &error);
+    auto backend = std::make_unique<import::disc::DiscBackend>();
+    if (!source || !backend->mount(1, source, &error)) {
+      std::fprintf(stderr, "ps1font: %s\n", error.c_str());
+      return 1;
+    }
+    game_fs.open(std::move(backend), std::filesystem::path(disc_path).parent_path());
+  } else {
+    const std::filesystem::path dir = platform::find_game_dir(gamedir);
+    if (dir.empty() || !game_fs.open(dir)) {
+      std::fprintf(stderr, "game directory not found (use -g <dir> or OPENCROSS_GAMEDIR)\n");
+      return 1;
+    }
+  }
+  const std::shared_ptr<const import::Ps1Font> font = import::load_ps1_font(game_fs);
+  if (!font) {
+    std::fprintf(stderr, "ps1font: no PS1 executable\n");
+    return 1;
+  }
+  return cmd_ps1font(*font, positional[0], positional[1], scale);
 }
 
 // Room ids that share a stem are separate lang.dat rooms; only the requested id is shown.
@@ -162,6 +261,7 @@ int octext_main(int argc, char** argv) {
   }
   if (gamedir.empty()) gamedir = tool::env_game_dir();
   if (args.empty()) return usage();
+  if (args[0] == "ps1font") return ps1font_main(args, gamedir);
   vfs::Vfs game_fs;
   const std::filesystem::path dir = platform::find_game_dir(gamedir);
   if (dir.empty() || !game_fs.open(dir)) {

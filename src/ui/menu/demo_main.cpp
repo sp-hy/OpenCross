@@ -7,7 +7,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <string>
 
+#include "app/data_source.h"
 #include "core/log.h"
 #include "import/text.h"
 #include "platform/config.h"
@@ -46,11 +48,15 @@ int ocmenudemo_main(int argc, char** argv) {
   platform::Config config;
   config.use_player_defaults();
   config.load(exe / "opencross.ini");
-  const std::filesystem::path game_dir = platform::find_game_dir(config.game_dir);
   vfs::Vfs files;
-  if (game_dir.empty() || !files.open(game_dir)) {
-    log::error("game dir not found");
+  if (std::string error; !app::open_game_data(config, exe, files, &error)) {
+    log::error("game data: {}", error);
     return 1;
+  }
+  // The discs have the original art only, and the text of their build.
+  if (platform::disc_mode()) {
+    hd = false;
+    import::parse_lang(config.language, lang);
   }
   platform::Window window;
   if (!window.create("OpenCross menu", 1280, 960, false)) return 1;
@@ -83,7 +89,7 @@ int ocmenudemo_main(int argc, char** argv) {
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
         if (input.key_pressed[SDL_SCANCODE_F3]) demo.open();
         if (input.key_pressed[SDL_SCANCODE_F4]) demo.screenshot_sequence(ctx, exe / "menu_shots");
-        if (input.key_pressed[SDL_SCANCODE_F1]) {
+        if (input.key_pressed[SDL_SCANCODE_F1] && !platform::disc_mode()) {
           hd = !hd;
           demo.set_mode(hd ? ui::ArtMode::Hd : ui::ArtMode::Original);
         }

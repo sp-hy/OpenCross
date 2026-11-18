@@ -1,0 +1,17 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay 2boll.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_2boll_init = 0x801C6E88;  # function: Init for Aqua Ball
+fx_2boll_hook_a = 0x801C6FC8;  # function: Hook installed by the effect
+fx_2boll_hook_b = 0x801C7160;  # function: Hook installed by the effect
+fx_2boll_frame = 0x801C7210;  # function: Frame update
+fx_2boll_exit = 0x801C74A4;  # function: Exit for Aqua Ball
+fx_2boll_draw_sheet = 0x801C74B4;  # function: Draws the ground sheet
+fx_2boll_build_gt3_cued = 0x801C7608;  # function: Sheet GT3 builder of the fog path: per-corner colour toward the far colour
+fx_2boll_build_gt4_cued = 0x801C7960;  # function: Sheet GT4 builder of the fog path: per-corner colour toward the far colour
+fx_2boll_build_gt3 = 0x801C7DCC;  # function: Sheet GT3 builder without fog
+fx_2boll_build_gt4 = 0x801C8110;  # function: Sheet GT4 builder without fog
+fx_2boll_first_splash = 0x801C8578;  # data: Set once the first '2' particle has fired the splash emitters
+fx_2boll_buffer_cur = 0x801C857C;  # data: Index of the ripple buffer the particle hooks stamp and a step reads (shipped 0)
+fx_2boll_buffer_other = 0x801C8580;  # data: Index of the ripple buffer a step writes and the sheet draws (shipped 1)

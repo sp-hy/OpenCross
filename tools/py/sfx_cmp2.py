@@ -20,7 +20,7 @@ def resmap(statedir):
             st = c.State(p)
         except Exception:
             continue
-        e = st.u32(0x800721e4); n = 0
+        e = st.u32(st.map.effect_registry); n = 0
         while e and n < 4000:
             n += 1
             if (st.u32(e + 8) & 0x3F) == 0x16:

@@ -36,10 +36,14 @@ inline constexpr Ps1Display kNameMenu{512, 432, "lowres namemenu 512x432"};
 inline constexpr Ps1Display kMemmenu{640, 216, "lowres memmenu 640x216"};
 inline constexpr Ps1Display kFieldWin{320, 216, "lowres field 320x216"};
 
-// Global switch, set by the host from [Video] Ps1ResUi. Screens run the pass in EVERY art mode
-// when it is on; only the PS1 disc textures stay classic-only (mode == Original && ps1_menus()).
+// Global switch, set by the host from [Video] Ps1ResUi (always on when playing from the PS1 discs). Screens run the pass in EVERY art
+// mode when it is on; only the PS1 disc textures stay classic-only (mode == Original && ps1_menus()).
 void set_ps1_menus(bool on);
 bool ps1_menus();
+// The 3D models a screen draws inside the pass (the Status screen's character) go into its target; off, they are drawn at window
+// resolution between the 2D drawn before and after them. Set by the host from [Video] Ps1ResUi.
+void set_ps1_menu_models(bool on);
+bool ps1_menu_models();
 
 class LowRes {
  public:

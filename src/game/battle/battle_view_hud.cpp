@@ -22,6 +22,9 @@ using namespace bv;
 // ------------------------------------------------------------------------------------------------------------ HUD art
 namespace {
 
+// Canvas y per PS1 HUD line.
+constexpr float kRowScale = kCanvasH / 216.0f;
+
 // 8-bit palettised BMP -> grey mask ((r+g+b)/3 of the palette entry, like the RDE field ring loader).
 bool decode_bmp_mask(ByteSpan data, std::vector<u8>& out, int w, int h) {
   if (data.size() < 54 || data[0] != 'B' || data[1] != 'M') return false;
@@ -245,18 +248,7 @@ void BattleView::load_hud_art(const vfs::Vfs& vfs) {
         img.height = rgba.height;
         img.rgba.assign(rgba.pixels.begin(), rgba.pixels.end());
         if (upload(hud_[kHDigits], img)) {
-          digit_x_.clear();
-          int start = -1;
-          for (u32 x = 0; x <= img.width; ++x) {
-            bool ink = false;
-            if (x < img.width)
-              for (u32 y = 0; y < img.height && !ink; ++y) ink = img.rgba[(static_cast<size_t>(y) * img.width + x) * 4 + 3] != 0;
-            if (ink && start < 0) start = static_cast<int>(x);
-            if (!ink && start >= 0) {
-              digit_x_.emplace_back(start, static_cast<int>(x) - 1);
-              start = -1;
-            }
-          }
+          digit_x_ = column_ink_runs(img.rgba, img.width, img.height);
           if (digit_x_.size() != 11) {
             log::warn("battle: damage digit sheet has {} glyph runs (expected 11)", digit_x_.size());
             digit_x_.clear();
@@ -530,6 +522,11 @@ void BattleView::add_box(float x, float y, float w, float h, bool fill_on) {
 }
 
 void BattleView::add_plate(int colour_index, float x, float y, float w, float h, u32 tint) {
+  if (ps1_hud_) {
+    // Disc mode: the grid plate sheets 0x34.. (green white black red yellow blue), 0x50 = empty; a dimmed plate is half blended.
+    add_sheet_at(colour_index >= 0 && colour_index < 6 ? 0x34 + 4 * colour_index : 0x50, 1, x / kPs1Px, y / kRowScale, 0x808080, (tint >> 24) < 255 ? 1 : 0);
+    return;
+  }
   Op op;
   op.kind = Op::Plate;
   op.x = x;
@@ -541,6 +538,11 @@ void BattleView::add_plate(int colour_index, float x, float y, float w, float h,
   ops_.push_back(std::move(op));
 }
 
+void BattleView::add_name_plate(bool used, int plate_colour, int frame, float x, float y) {
+  if (ps1_hud_) add_sheet((used ? 0x88 : 0x18) + 4 * plate_colour, frame, x, y);
+  else add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + plate_colour * 10 + frame - 1)], x * kPs1Px, y * kRowScale, 120 * kPs1Px, 16 * kRowScale);
+}
+
 void BattleView::add_bar(float x, float y, float w, float h, float frac, u32 fill) {
   frac = std::clamp(frac, 0.0f, 1.0f);
   add_rect(x - 2, y - 2, w + 4, h + 4, col(0, 0, 0, 200));
@@ -550,6 +552,10 @@ void BattleView::add_bar(float x, float y, float w, float h, float frac, u32 fil
 
 // Field ring: the composited 52x28 image at PS1 (7, 10) under the white battle_28_01 frame.
 void BattleView::build_field_ring() {
+  if (ps1_hud_) {
+    ps1_field_ring();
+    return;
+  }
   rebuild_ring();
   add_img(hud_[kHRing], 7 * kPs1Px, 10 * kPs1Px, 52 * kPs1Px, 28 * kPs1Px);
   add_img(hud_[kHField], 7 * kPs1Px, 10 * kPs1Px, 52 * kPs1Px, 28 * kPs1Px);
@@ -625,6 +631,10 @@ void BattleView::build_colour_row() {
     const int entry = colour_row_[i];
     if (entry <= 0 || entry >= static_cast<int>(kColourDotFrame.size())) continue;
     const int frame = kColourDotFrame[static_cast<size_t>(entry)];
+    if (ps1_hud_) {
+      add_sheet(0xB8, frame, static_cast<float>(0x68 + 16 * i), 0x10);
+      continue;
+    }
     add_img(hud_[kHColourDot + static_cast<size_t>(frame - 1)], static_cast<float>(0x68 + 16 * i) * kPs1Px, 0x10 * kPs1Px, 16 * kPs1Px, 16 * kPs1Px);
   }
 }
@@ -641,7 +651,14 @@ void BattleView::build_message_window(const std::vector<std::pair<std::u32string
     wmax = std::max(wmax, fonts_.measure(ui::font::kBn, line.first, ui::font::slot(ui::font::kBn).scale));
   }
   const float line_count = static_cast<float>(lines.size());
-  add_panel(24 * kPs1Px, 138 * kPs1Px, std::min(std::max(wmax + 40, 300.0f), 1180.0f), 16 * kPs1Px * line_count + 6 * kPs1Px);
+  if (ps1_hud_) {
+    // Disc mode: the battle window skin round the lines (PS1 font, one pixel per PS1 pixel; 8 px skin outside the text block).
+    float widest = 0;
+    for (const auto& line : lines) widest = std::max(widest, fonts_.measure(ui::font::kBattle, line.first, kPs1Px / render::TextBatch::kPs1PixelScale));
+    add_skin_box(24 * kPs1Px, 136 * kRowScale, std::min(widest + 16 * kPs1Px, kCanvasW - 48 * kPs1Px), (16 * line_count + 16) * kRowScale);
+  } else {
+    add_panel(24 * kPs1Px, 138 * kPs1Px, std::min(std::max(wmax + 40, 300.0f), 1180.0f), 16 * kPs1Px * line_count + 6 * kPs1Px);
+  }
   for (size_t i = 0; i < lines.size(); ++i) {
     const size_t before = ops_.size();
     btext(0x83, lines[i].first, 32, 144 * kPs1Px / (kCanvasH / 216.0f) + 16.0f * static_cast<float>(i), 0x757575);

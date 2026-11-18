@@ -15,9 +15,6 @@ namespace oc::game {
 
 namespace {
 
-using audio::kPs1BattleSong;
-using audio::kRdeBattleSong;
-
 bool weapon_name(const std::string& name) {
   return name.size() == 4 && std::isdigit(static_cast<unsigned char>(name[0])) && (name[1] == 's' || name[1] == 'm' || name[1] == 'l');
 }
@@ -54,12 +51,9 @@ bool BattleAudio::set_remastered(bool on) {
   if (!mixer_ || !started_music_ || song_ < 0) return false;
   // The field restored its own song over a finished battle's: nothing to switch.
   if (mixer_->playing() && mixer_->current_song() != song_) return false;
-  int song = song_;
-  if (on && song == kPs1BattleSong) song = kRdeBattleSong;
-  else if (!on && song == kRdeBattleSong) song = kPs1BattleSong;
   // The jingle ran out: nothing to carry, the battle still owns the music.
   if (!mixer_->sounding()) return true;
-  if (mixer_->switch_bgm_source(on, song)) song_ = song;
+  mixer_->switch_bgm_source(on, song_);
   return true;
 }
 
@@ -346,7 +340,7 @@ void BattleAudio::start_battle_theme(int battle_flags, bool keep_field_music) {
     log::info("battle audio: field music kept (C9 flag 1; song {})", mixer_->current_song());
     return;
   }
-  const int theme = audio::battle_song(battle_flags, remastered_);
+  const int theme = audio::battle_song(battle_flags);
   if (mixer_->playing() && mixer_->current_song() == theme) {
     started_music_ = true;
     song_ = mixer_->current_song();

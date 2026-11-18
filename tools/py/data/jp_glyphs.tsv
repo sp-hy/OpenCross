@@ -1,7 +1,7 @@
-# JP glyph table: disc glyph bytes -> character, derived by aligning lang.dat jp.csv with the disc message bytes
+# JP glyph table: disc glyph bytes -> character, derived by aligning lang.dat jp.csv with the disc message bytes (codes the dialogue never uses: the executable, battle and menu tables against their lang.dat tables)
 # columns: bytes(hex)	bitmap_index	char	votes	share	runner_up
 # conf: share>=0.9 and votes>=3 is solid; the rest are listed anyway (low=see column 7)
-# bitmap_index = (b0-0x20) for b0<0xF8, else (b0-0xF7)*256+(b1-0x20): row in the exe bitmap table at 0x8005670C
+# bitmap_index = (b0-0x20) for b0<0xF8, else (b0-0xF7)*256+(b1-0x20): row in the exe bitmap table
 20	0	 	4743	1.000		ok
 21	1	(	2	1.000		low
 22	2	)	2	1.000		low
@@ -146,6 +146,7 @@ c5	165	ょ	1251	1.000		ok
 c6	166	。	14362	1.000		ok
 c7	167	「	6397	1.000		ok
 c8	168	」	27	1.000		ok
+c9	169	＃	3	1.000		ok
 ca	170	ー	47331	1.000		ok
 cb	171	～	1500	1.000		ok
 cc	172	…	12033	1.000	いx2	ok
@@ -173,6 +174,7 @@ e1	193	Ｈ	1	1.000		low
 e2	194	Ｉ	66	1.000		ok
 e3	195	Ｊ	1	1.000		low
 e4	196	Ｋ	4	1.000		ok
+e5	197	Ｌ	9	1.000		ok
 e6	198	Ｍ	1349	1.000		ok
 e7	199	Ｎ	570	1.000		ok
 e8	200	Ｏ	178	1.000		ok
@@ -187,15 +189,18 @@ f2	210	Ｙ	2661	1.000		ok
 f3	211	Ｚ	3199	1.000		ok
 f4	212	／	60	1.000		ok
 f5	213	、	14719	1.000	とx1	ok
+f7	215	‥	124	1.000		ok
 f800	224	ａ	1140	1.000		ok
 f801	225	ｂ	300	1.000		ok
 f802	226	ｃ	720	1.000		ok
 f804	228	ｅ	300	1.000		ok
+f808	232	ｉ	1	1.000		low
 f80c	236	ｍ	1	1.000		low
 f80e	238	ｏ	2703	1.000		ok
 f811	241	ｒ	2140	1.000		ok
 f812	242	ｓ	68	1.000		ok
 f813	243	ｔ	2140	1.000		ok
+f815	245	ｖ	6	1.000		ok
 f817	247	ｘ	535	1.000		ok
 f818	248	ｙ	535	1.000		ok
 f819	249	ｚ	535	1.000		ok
@@ -348,6 +353,7 @@ f8ae	398	川	567	1.000		ok
 f8b0	400	移	12	1.000		ok
 f8b1	401	鍛	10	1.000		ok
 f8b2	402	舟	1	1.000		low
+f8b3	403	衣	6	1.000		ok
 f8b4	404	違	127	1.000		ok
 f8b5	405	遺	159	1.000		ok
 f8b6	406	医	263	1.000		ok
@@ -411,6 +417,7 @@ f8f7	471	加	669	1.000		ok
 f8f8	472	可	123	1.000		ok
 f8f9	473	嫁	10	1.000		ok
 f8fa	474	家	87	1.000		ok
+f8fb	475	銀	23	1.000		ok
 f8fc	476	科	8	1.000		ok
 f8fd	477	暇	5	1.000		ok
 f8fe	478	果	479	1.000		ok
@@ -491,6 +498,7 @@ f952	562	還	8	0.889	帰x1	low
 f953	563	間	1654	1.000		ok
 f954	564	関	68	1.000		ok
 f955	565	含	4	1.000		ok
+f956	566	眼	1	1.000		low
 f957	567	岩	147	1.000		ok
 f958	568	頑	34	1.000		ok
 f959	569	顔	269	1.000		ok
@@ -638,6 +646,7 @@ f9f0	720	兼	2	1.000		low
 f9f1	721	剣	578	1.000		ok
 f9f2	722	嫌	27	1.000		ok
 f9f3	723	建	78	1.000		ok
+f9f4	724	拳	3	1.000		ok
 f9f5	725	検	2	1.000		low
 f9f6	726	権	7	1.000		ok
 f9f7	727	犬	6	1.000		ok
@@ -735,6 +744,7 @@ fa5a	826	砂	351	1.000		ok
 fa5b	827	鎖	5	1.000		ok
 fa5c	828	座	2150	1.000		ok
 fa5d	829	牢	7	1.000		ok
+fa5e	830	狼	1	1.000		low
 fa5f	831	下	1625	1.000		ok
 fa60	832	再	321	1.000		ok
 fa61	833	最	909	1.000		ok
@@ -752,6 +762,7 @@ fa6d	845	菜	3	1.000		ok
 fa6e	846	裁	2	1.000		low
 fa6f	847	老	45	1.000		ok
 fa71	849	際	83	1.000		ok
+fa72	850	剤	1	1.000		low
 fa73	851	在	159	1.000		ok
 fa74	852	材	25	1.000		ok
 fa75	853	罪	18	1.000		ok
@@ -774,6 +785,7 @@ fa86	870	散	130	1.000		ok
 fa87	871	産	5	1.000		ok
 fa88	872	算	1	1.000		low
 fa89	873	賛	1	1.000		low
+fa8a	874	酸	1	1.000		low
 fa8b	875	斬	3	1.000		ok
 fa8d	877	残	135	1.000		ok
 fa8e	878	仕	132	1.000		ok
@@ -822,11 +834,13 @@ fabb	923	式	13	1.000		ok
 fabc	924	識	12	1.000		ok
 fabd	925	軸	359	1.000		ok
 fabe	926	列	4	1.000		ok
+fabf	927	劣	1	1.000		low
 fac0	928	執	1	1.000		low
 fac1	929	失	208	1.000		ok
 fac2	930	室	29	1.000		ok
 fac3	931	質	22	1.000		ok
 fac4	932	実	173	1.000		ok
+fac5	933	舎	1	1.000		low
 fac7	935	射	1	1.000		low
 fac8	936	捨	326	1.000		ok
 fac9	937	赦	10	1.000		ok
@@ -835,6 +849,7 @@ facb	939	謝	33	1.000		ok
 facc	940	車	4	1.000		ok
 facd	941	邪	232	1.000		ok
 face	942	借	90	1.000		ok
+facf	943	烈	1	1.000		low
 fad0	944	若	67	1.000		ok
 fad1	945	寂	4	1.000		ok
 fad2	946	弱	11	0.917	悪x1	ok
@@ -905,6 +920,7 @@ fb16	1014	小	829	1.000		ok
 fb17	1015	少	110	1.000		ok
 fb18	1016	床	7	1.000		ok
 fb19	1017	承	70	1.000		ok
+fb1b	1019	昇	37	1.000		ok
 fb1c	1020	沼	90	1.000		ok
 fb1d	1021	消	401	1.000		ok
 fb1e	1022	冷	11	1.000		ok
@@ -914,6 +930,7 @@ fb21	1025	省	63	1.000		ok
 fb22	1026	章	129	1.000		ok
 fb23	1027	笑	334	1.000		ok
 fb24	1028	紹	4	1.000		ok
+fb25	1029	銅	17	1.000		ok
 fb26	1030	衝	62	1.000		ok
 fb27	1031	証	88	1.000		ok
 fb28	1032	詳	8	1.000		ok
@@ -1163,6 +1180,7 @@ fc33	1299	沈	4	1.000		ok
 fc34	1300	珍	22	1.000		ok
 fc37	1303	追	77	1.000		ok
 fc38	1304	痛	23	1.000		ok
+fc3a	1306	潰	1	1.000		low
 fc3c	1308	吊	60	1.000		ok
 fc3d	1309	亭	2	1.000		low
 fc3e	1310	低	62	1.000		ok
@@ -1193,6 +1211,7 @@ fc59	1337	転	317	1.000		ok
 fc5a	1338	伝	116	1.000		ok
 fc5b	1339	殿	57	1.000		ok
 fc5d	1341	電	4	1.000		ok
+fc5e	1342	吐	2	1.000		low
 fc5f	1343	力	8474	1.000		ok
 fc60	1344	渡	474	1.000		ok
 fc61	1345	登	203	0.995	上x1	ok
@@ -1266,6 +1285,7 @@ fca6	1414	脳	13	1.000		ok
 fca7	1415	波	421	1.000		ok
 fca8	1416	派	28	1.000		ok
 fca9	1417	破	161	1.000		ok
+fcaa	1418	馬	1	1.000		low
 fcab	1419	廃	1028	1.000		ok
 fcac	1420	拝	2	1.000		low
 fcad	1421	排	6	1.000		ok
@@ -1305,6 +1325,7 @@ fcd1	1457	範	1	1.000		low
 fcd2	1458	飯	5	1.000		ok
 fcd3	1459	晩	11	1.000		ok
 fcd4	1460	番	12740	1.000		ok
+fcd5	1461	盤	1	1.000		low
 fcd6	1462	泉	4	1.000		ok
 fcd7	1463	否	5	1.000		ok
 fcd8	1464	雑	64	1.000		ok
@@ -1368,6 +1389,7 @@ fd17	1527	腹	30	1.000		ok
 fd18	1528	払	224	1.000		ok
 fd19	1529	物	385	1.000		ok
 fd1a	1530	分	501	1.000		ok
+fd1b	1531	憤	1	1.000		low
 fd1d	1533	流	192	1.000		ok
 fd1e	1534	留	11	1.000		ok
 fd1f	1535	粒	3	1.000		ok
@@ -1456,6 +1478,7 @@ fd75	1621	明	153	1.000		ok
 fd76	1622	迷	44	1.000		ok
 fd77	1623	鳴	312	1.000		ok
 fd78	1624	滅	493	1.000		ok
+fd79	1625	免	1	1.000		low
 fd7a	1626	面	866	1.000		ok
 fd7b	1627	模	5	1.000		ok
 fd7c	1628	毛	7	1.000		ok
@@ -1516,6 +1539,7 @@ fdb9	1689	出	1378	1.000		ok
 fdba	1690	称	6	1.000		ok
 fdbb	1691	上	2513	0.999	登x2	ok
 fdbc	1692	常	287	1.000		ok
+fdbd	1693	版	1	1.000		low
 fdbe	1694	数	5977	1.000		ok
 fdbf	1695	選	1423	1.000		ok
 fdc0	1696	前	1274	1.000		ok
@@ -1541,6 +1565,7 @@ fdd3	1715	抑	3	1.000		ok
 fdd4	1716	欲	29	1.000		ok
 fdd5	1717	浴	2	1.000		low
 fdd6	1718	←	1	1.000		low
+fdd9	1721	→	12	1.000		ok
 fdda	1722	＋	7680	1.000		ok
 fddb	1723	（	139	1.000		ok
 fddc	1724	）	127	1.000		ok
@@ -1555,6 +1580,7 @@ fde5	1733	○	20	1.000		ok
 fde6	1734	”	596	1.000		ok
 fde8	1736	×	59	1.000		ok
 fde9	1737	＆	2	1.000		low
+fdea	1738	☆	19	1.000		ok
 fded	1741	※	3081	1.000		ok
 fdee	1742	＜	3	1.000		ok
 fdef	1743	＞	3	1.000		ok
@@ -1579,9 +1605,13 @@ fe02	1762	覗	120	1.000		ok
 fe03	1763	辞	60	1.000		ok
 fe04	1764	訴	181	1.000		ok
 fe05	1765	促	1	1.000		low
+fe06	1766	催	1	1.000		low
 fe07	1767	冶	4	1.000		ok
 fe08	1768	核	1	1.000		low
+fe09	1769	豆	1	1.000		low
+fe0a	1770	粘	1	1.000		low
 fe0b	1771	胞	7	1.000		ok
+fe0c	1772	津	1	1.000		low
 fe0d	1773	渦	5	1.000		ok
 fe0f	1775	耕	1	1.000		low
 fe10	1776	鐘	2	1.000		low

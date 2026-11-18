@@ -1,0 +1,6 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay enrou.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_enrou_init_spawn_thre = 0x801C5F30;  # function: Init: spawns the thre child object
+fx_enrou_op_100_stop_emitter = 0x801C60E4;  # function: Op 0x100: stops emitter and shortens particle life

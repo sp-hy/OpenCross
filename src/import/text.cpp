@@ -11,6 +11,7 @@
 #include "core/log.h"
 #include "import/container.h"
 #include "import/lzss.h"
+#include "import/ps1_text.h"
 #include "vfs/vfs.h"
 
 namespace oc::import {
@@ -430,8 +431,24 @@ Message flatten(const Message& message, const TextContext& ctx) {
   builder.msg.source = message.source;
   int case_mode = 0;
   bool hide = false;
+  // USA rules: the pending name suffix (1 y, 2 i).
+  int suffix = 0;
+  constexpr int kZoah = 8, kLeah = 35;
+  if (ctx.usa_rules && ctx.speaker == kZoah) case_mode = 2;
+  auto usa_upper = [](char32_t ch) -> char32_t {
+    if (ch >= U'a' && ch <= U'z') return ch - 0x20;
+    if (ch == 0xE4 || ch == 0xEB || ch == 0xEF || ch == 0xF6 || ch == 0xFC) return ch - 0x20;
+    return ch;
+  };
   auto emit = [&](std::u32string text) {
     if (text.empty()) return;
+    if (ctx.usa_rules) {
+      if (case_mode == 1) text[0] = usa_upper(text[0]), case_mode = 0;
+      else if (case_mode == 2)
+        for (char32_t& ch : text) ch = usa_upper(ch);
+      builder.run += text;
+      return;
+    }
     if (case_mode == 1 && !text.empty()) {
       text[0] = (text[0] < 0x80) ? static_cast<char32_t>(std::toupper(static_cast<int>(text[0]))) : text[0];
       case_mode = 0;
@@ -447,6 +464,15 @@ Message flatten(const Message& message, const TextContext& ctx) {
     if (name.empty()) {
       for (const char* ch = fallback; *ch; ++ch) name.push_back(static_cast<char32_t>(*ch));
     }
+    if (suffix && ctx.usa_rules) {
+      if (name.size() > 6) name.resize(6);
+      const char32_t last = name.empty() ? 0 : name.back();
+      if (last != U'I' && last != U'Y' && last != U'i' && last != U'y') {
+        const bool capital = last >= U'A' && last <= U'Z';
+        name.push_back(suffix == 1 ? (capital ? U'Y' : U'y') : (capital ? U'I' : U'i'));
+      }
+      suffix = 0;
+    }
     return name;
   };
   for (const Token& token : message.tokens) {
@@ -460,6 +486,10 @@ Message flatten(const Message& message, const TextContext& ctx) {
         const char* tag = speaker_tag(token.arg);
         std::u32string name = named(ctx.speaker_name, token.arg, tag ? tag : "?");
         if (token.arg2 > 0 && static_cast<size_t>(token.arg2) < name.size()) name.resize(static_cast<size_t>(token.arg2));
+        if (ctx.usa_rules) {
+          emit(std::move(name));
+          break;
+        }
         // A case code in front of a name has no effect.
         case_mode = 0;
         builder.run += name;
@@ -475,9 +505,14 @@ Message flatten(const Message& message, const TextContext& ctx) {
         emit(std::u32string(digits.begin(), digits.end()));
         break;
       }
-      case TokKind::Case: case_mode = (token.arg == 1 || token.arg == 2) ? token.arg : 0; break;
+      case TokKind::Case:
+        if (!ctx.usa_rules) case_mode = (token.arg == 1 || token.arg == 2) ? token.arg : 0;
+        else if (case_mode != 2) case_mode = token.arg == 3 ? (ctx.speaker == kLeah ? 1 : case_mode) : token.arg;
+        break;
       case TokKind::HideName: hide = true; break;
       case TokKind::Suffix:
+        if (ctx.usa_rules) suffix = token.arg;
+        break;
       case TokKind::Accent:
         // No display form.
         break;
@@ -580,9 +615,9 @@ const u16* JpGlyphs::rows(int index) const {
 }
 
 // ---------------------------------------------------------------------------------------------- PS1 executable strings
-bool ExeStrings::load(ByteSpan exe) {
+bool ExeStrings::load(ByteSpan exe, size_t offset) {
   tables_.clear();
-  const size_t base = kExeStringsOffset;
+  const size_t base = offset;
   auto u16_at = [&](size_t at) { return static_cast<u32>(exe[at] | (exe[at + 1] << 8)); };
   auto u32_at = [&](size_t at) { return u16_at(at) | (u16_at(at + 2) << 16); };
   if (exe.size() < base + 4) return false;
@@ -599,8 +634,9 @@ bool ExeStrings::load(ByteSpan exe) {
         size_t end = at;
         while (end < exe.size() && exe[end] != 0) {
           const u8 code = exe[end];
-          const bool two = code >= 0xF8 || code == 4 || code == 5 || code == 8 || code == 0xE || code == 0xF || code == 0x16 || code == 0x17;
-          end += two ? 2 : 1;
+          const bool one_arg = code == 4 || code == 5 || code == 6 || code == 8 || code == 0xA || code == 0xB || code == 0xE || code == 0xF ||
+                               code == 0x10 || code == 0x12 || (code >= 0x15 && code <= 0x19) || code == 0x1B || code == 0x1C || code == 0x1E;
+          end += code == 7 ? 3 : code >= 0xF8 || one_arg ? 2 : 1;
         }
         entries.emplace_back(static_cast<u32>(at), static_cast<u32>(std::min(end, exe.size()) - at));
       }
@@ -722,33 +758,35 @@ Message parse_ps1(ByteSpan stream, const JpGlyphs& glyphs) {
 }
 
 std::string ps1_to_markup(ByteSpan stream, const JpGlyphs& glyphs) {
+  return ps1_to_markup(stream, [&glyphs](ByteSpan bytes, size_t& length) -> char32_t {
+    length = 1;
+    if (bytes[0] == 0xFF) return 0xFF03;
+    if (bytes[0] < 0xF8 || bytes.size() < 2) return glyphs.to_unicode(bytes[0], 0);
+    length = 2;
+    return glyphs.to_unicode(bytes[0], bytes[1]);
+  });
+}
+
+std::string ps1_to_markup(ByteSpan stream, const GlyphDecoder& decode) {
   std::string out;
   size_t i = 0, size = stream.size();
   char buf[48];
   while (i < size) {
     u8 code = stream[i];
     if (code >= 0x20) {
-      char32_t cp;
-      int len = 1;
-      if (code == 0xFF) {
-        cp = 0xFF03;
-      } else if (code >= 0xF8 && i + 1 < size) {
-        cp = glyphs.to_unicode(code, stream[i + 1]);
-        len = 2;
-      } else {
-        cp = glyphs.to_unicode(code, 0);
-      }
+      size_t len = 1;
+      const char32_t cp = decode(stream.subspan(i), len);
       if (cp) {
         out += u32_to_utf8(std::u32string_view(&cp, 1));
       } else {
         out += "[";
-        for (int k = 0; k < len; ++k) {
-          std::snprintf(buf, sizeof buf, "%02x", stream[i + static_cast<size_t>(k)]);
+        for (size_t k = 0; k < len && i + k < size; ++k) {
+          std::snprintf(buf, sizeof buf, "%02x", stream[i + k]);
           out += buf;
         }
         out += "]";
       }
-      i += static_cast<size_t>(len);
+      i += len;
       continue;
     }
     int na = ctrl_args(code);
@@ -894,6 +932,12 @@ void TextTable::parse(std::string_view text) {
     rows_.push_back(std::move(row));
     index_row(static_cast<u32>(rows_.size() - 1));
   }
+}
+
+void TextTable::add_row(std::vector<std::string> row) {
+  if (row.empty()) return;
+  rows_.push_back(std::move(row));
+  index_row(static_cast<u32>(rows_.size() - 1));
 }
 
 void TextTable::index_row(u32 idx) {
@@ -1106,12 +1150,25 @@ void LangTables::merge_field_rows(FieldTable& table, std::string_view member, bo
   });
 }
 
+bool LangTables::from_disc() {
+  if (!disc_tried_) {
+    disc_tried_ = true;
+    if (vfs_ && !vfs_->has_archive("lang")) {
+      auto source = std::make_shared<Ps1Text>();
+      if (source->open(*vfs_)) disc_ = std::move(source);
+      else log::warn("text: no lang.dat and the PS1 executable is not a known build");
+    }
+  }
+  return disc_ != nullptr;
+}
+
 bool LangTables::load_language(Lang lang) {
   PerLang& per_lang = per(lang);
   if (per_lang.loaded) return true;
   std::string txt;
   const std::string code = lang_code(lang);
-  if (!read_member(code + ".csv", txt)) return false;
+  // Without lang.dat the tables hold only the mods' rows; the rest comes from the PS1 files.
+  if (!read_member(code + ".csv", txt) && !from_disc()) return false;
   per_lang.field = FieldTable();
   per_lang.field.parse(txt, true);
   merge_field_rows(per_lang.field, code + ".csv", true);
@@ -1194,7 +1251,8 @@ void LangTables::set_battle_csv(Lang lang, std::string_view csv) {
 
 const std::string* LangTables::raw_field(int room_id, int msg, Lang lang) {
   if (!ensure(lang)) return nullptr;
-  return per(lang).field.find(static_cast<u32>(room_id), static_cast<u32>(msg));
+  const std::string* row = per(lang).field.find(static_cast<u32>(room_id), static_cast<u32>(msg));
+  return row || !from_disc() ? row : disc_->field(room_id, msg);
 }
 
 size_t LangTables::field_row_count(Lang lang) { return ensure(lang) ? per(lang).field.rows.size() : 0; }
@@ -1203,6 +1261,7 @@ std::optional<std::string> LangTables::lookup_field(int room_id, int msg, Lang l
   if (!ensure(lang)) return std::nullopt;
   PerLang& per_lang = per(lang);
   const std::string* row = per_lang.field.find(static_cast<u32>(room_id), static_cast<u32>(msg));
+  if (!row && from_disc()) return lookup_disc_field(room_id, msg, speaker, info);
   if (!row) return std::nullopt;
   std::string base = *row;
   if (lang != Lang::Jp) {
@@ -1245,8 +1304,24 @@ std::optional<std::string> LangTables::lookup_field(int room_id, int msg, Lang l
   return res;
 }
 
+std::optional<std::string> LangTables::lookup_disc_field(int room_id, int msg, int speaker, LookupInfo* info) {
+  const std::string* markup = disc_->field(room_id, msg);
+  if (!markup) return std::nullopt;
+  const Lang lang = disc_->build().lang;
+  const int sp = detect_speaker(*markup, speaker, lang);
+  std::string res = disc_->resolve_grammar(*markup, sp);
+  // No non-JP normalisation: the disc's own font draws every code it decodes to (the choice indent stays the 12-pixel blank U+3000).
+  replace_all(res, "\\n", "\n");
+  if (info) {
+    info->speaker = sp;
+    info->variant = false;
+  }
+  return res;
+}
+
 Message LangTables::field_message(int room_id, int msg, Lang lang, int speaker) {
   auto markup = lookup_field(room_id, msg, lang, speaker);
+  if (from_disc() && !per(lang).field.find(static_cast<u32>(room_id), static_cast<u32>(msg))) lang = disc_->build().lang;
   if (!markup) {
     Message message = parse_markup("MESSAGE NOT FOUND{mend}", Lang::Jp);
     message.source = "MESSAGE NOT FOUND";
@@ -1257,7 +1332,8 @@ Message LangTables::field_message(int room_id, int msg, Lang lang, int speaker) 
 
 const std::string* LangTables::battle_event(u32 battle_id, u32 msg, Lang lang) {
   if (!ensure(lang)) return nullptr;
-  return per(lang).battle.find(battle_id, msg);
+  const std::string* row = per(lang).battle.find(battle_id, msg);
+  return row || !from_disc() ? row : disc_->battle_event(battle_id, msg);
 }
 
 void LangTables::set_table(std::string_view name, std::string_view utf8) { tables_[std::string(name)].parse(utf8); }
@@ -1269,9 +1345,11 @@ const TextTable* LangTables::table(std::string_view name) {
   if (tables_tried_[key]) return nullptr;
   tables_tried_[key] = true;
   std::string txt;
-  if (!read_member(key + ".txt", txt)) return nullptr;
+  std::optional<TextTable> disc_table;
+  if (!read_member(key + ".txt", txt) && !(from_disc() && (disc_table = disc_->table(key)))) return nullptr;
   TextTable& loaded = tables_[key];
-  loaded.parse(txt);
+  if (disc_table) loaded = std::move(*disc_table);
+  else loaded.parse(txt);
   // The mods' rows (a header row naming the columns they set, then their rows).
   RowSetters setters(key + ".txt");
   each_mod_rows(key + ".txt", [&](const TextMod& mod, std::string_view text) {

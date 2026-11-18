@@ -97,6 +97,9 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
   u32 mstart = 0, mend = 0;
   game::DiscIndex::movie_range(world.disc(), rq.index, mstart, mend);
   const auto* row = game::DiscIndex::movie_row(world.disc(), rq.index);
+  // A disc's movie stream counts frames as the table does, so every row stops at its own end (the stream's frame count; the
+  // Japanese opening's black tail after it is not shown).
+  if (row && !mend && movie::resolve_member(files, rq.name, config.language).ends_with(".stv")) mend = row->end;
   const float level = row ? static_cast<float>(row->volume) / 127.0f : 1.0f;
   if (!movie_player.open(files, rq.name, config.language, mstart, mend, level) ||
       !movie_player.init_gpu(ctx, sprites)) {
@@ -108,7 +111,8 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
     return;
   }
   // The two ending_s rows (modes 3 / 4) show the staff roll: the movie in a panel beside the scrolling credits strip.
-  if (row && (row->mode == 3 || row->mode == 4)) movie_player.set_staff_roll(files, movie::staff_strip_member(config.language));
+  if (row && (row->mode == 3 || row->mode == 4))
+    movie_player.set_staff_roll(files, movie::staff_strip_member(config.language), row->mode == 4);
   movie_open = true;
   movie_fade = rq.fade;
   ctx.set_clear_color(0.0f, 0.0f, 0.0f);

@@ -5,15 +5,20 @@ Names this project has established, one `name = 0xADDR;  # function|data: descri
 | File | Applies to | Load base | Entries (functions / data) |
 | --- | --- | --- | --- |
 | `chronocross_1010.txt` | `CHRONOCROSS.exe` v1.0.1.0 (x86 PE, image base `0x400000`) | import default | hook plumbing plus the described functions |
-| `ps1_main.txt` | `prog/slps_023.64` (header stripped) | `0x80010000` | 504 / 247 |
-| `ps1_field.txt` | `prog/field.prg` | `0x800A9F00` | 348 / 182 |
-| `ps1_battle.txt` | `prog/battle.prg` | `0x800A9F00` | 428 / 157 |
-| `ps1_btlinit.txt` | `prog/btlinit.prg` | `0x801EE000` | 22 / 7 |
-| `ps1_btlexit.txt` | `prog/btlexit.prg` | `0x801EA800` | 35 / 21 |
-| `ps1_menu.txt` | `prog/menutest.prg`, `namemenu.prg`, `shopmenu.prg` (and the memmenu/monmenu screens) | `0x801D2800 (0x801EE000 for memmenu, monmenu)` | 197 / 131 |
+| `ps1_main.txt` | `prog/slps_023.64` (header stripped) | `0x80010000` | 685 / 284 |
+| `ps1_field.txt` | `prog/field.prg` | `0x800A9F00` | 573 / 226 |
+| `ps1_battle.txt` | `prog/battle.prg` | `0x800A9F00` | 541 / 281 |
+| `ps1_btlinit.txt` | `prog/btlinit.prg` | `0x801EE000` | 24 / 7 |
+| `ps1_btlexit.txt` | `prog/btlexit.prg` | `0x801EA800` | 54 / 40 |
+| `ps1_menu.txt` | `prog/menutest.prg`, `namemenu.prg`, `shopmenu.prg` (and the memmenu/monmenu screens) | `0x801D2800 (0x801EE000 for memmenu, monmenu)` | 247 / 156 |
 | `rde_hooks.csv` | catalogue of the RDE exe's hooks (`CHRONOCROSS.exe`) | n/a | 2,034 rows |
 | `overlays.csv` | catalogue of the PS1 overlays | n/a | 106 overlays plus the main exe |
 | `ps1_effects_<overlay>.txt` (77 files) | `prog/<overlay>.prg`, one file per named effect overlay | `0x801C5E00` | 179 / 23 |
+| `usa/` | the same lists and `overlays.csv` for the USA build (`SLUS_010.41` and its overlays) | `usa/overlays.csv` | about 98% of the Japanese entries |
+
+## The USA build
+
+`usa/` mirrors the PS1 lists above with the addresses of the USA build: the same names and descriptions, one file per Japanese list, and `usa/overlays.csv` with that build's load bases (the field, battle, title and miyatest overlays load at `0x800A3308`, btlexit at `0x801EA000`) and sizes. The addresses were found by matching each Japanese list against the USA programs (aligned code, call and data references, function signatures, table contents); an entry whose USA address was inferred rather than matched says so at the end of its description, and the names not found in the USA build (code or layout changed) are listed in a comment at the end of each file. Maintain them alongside the Japanese lists: a name added to a Japanese list gets its USA address too when it is known. `ghidra_setup.ps1 -Region usa` applies them.
 
 ## Which Ghidra program
 

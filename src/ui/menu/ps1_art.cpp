@@ -4,9 +4,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <optional>
 #include <string>
 
 #include "import/container.h"
+#include "import/menu_art.h"
 #include "import/tim.h"
 
 namespace oc::ui::ps1 {
@@ -54,15 +57,20 @@ std::u32string bitmap_text(const import::JpGlyphs& glyphs, std::u32string text) 
   return text;
 }
 
-Rgba parchment(const vfs::Vfs& fs) {
+std::optional<import::Tim> parchment_tim(const vfs::Vfs& fs) {
   auto raw = fs.read_disc("cdrom/map/etc/systim.bin");
-  if (!raw) return {};
+  if (!raw) return std::nullopt;
   for (size_t i = 0; i + 32 < raw->size(); i += 4) {
     if (std::memcmp(raw->data() + i, "\x10\0\0\0", 4) != 0) continue;
     auto tim = import::parse_tim(ByteSpan(raw->data() + i, raw->size() - i));
-    if (tim && tim->bpp == 4 && tim->has_clut && tim->image.x == 896 && tim->image.y == 96 && tim->image.w == 16 && tim->image.h == 64) return decode(*tim);
+    if (tim && tim->bpp == 4 && tim->has_clut && tim->image.x == 896 && tim->image.y == 96 && tim->image.w == 16 && tim->image.h == 64) return tim;
   }
-  return {};
+  return std::nullopt;
+}
+
+Rgba parchment(const vfs::Vfs& fs) {
+  const auto tim = parchment_tim(fs);
+  return tim ? decode(*tim) : Rgba{};
 }
 
 Rgba menutim(const vfs::Vfs& fs, std::string_view entry) {
@@ -78,67 +86,117 @@ Rgba menutim(const vfs::Vfs& fs, std::string_view entry) {
 }
 
 namespace {
-// The first entry named `name` of type `type` in a drp, searching nested drps too.
-std::optional<ByteSpan> drp_entry(ByteSpan data, std::string_view name, u8 type) {
-  auto drp = import::parse_drp(data);
-  if (!drp) return std::nullopt;
-  for (const auto& entry : drp->entries) {
-    if (entry.name == name && entry.type == type) return entry.data;
-    if (import::is_drp(entry.data))
-      if (auto inner = drp_entry(entry.data, name, type)) return inner;
+// The disc's menu art, decoded once per Vfs (the menu files are the same on both discs of a set).
+const import::MenuArt* menu_art(const vfs::Vfs& fs) {
+  static std::map<const vfs::Vfs*, std::optional<import::MenuArt>> cache;
+  auto it = cache.find(&fs);
+  if (it == cache.end()) {
+    auto test = fs.read_disc("cdrom/menu/menutest.prd");
+    auto tims = fs.read_disc("cdrom/menu/menutim.prd");
+    auto elem = fs.read_disc("cdrom/menu/menuelem.prd");
+    auto smithy = fs.read_disc("cdrom/menu/smithy.prd");
+    std::vector<ByteSpan> packs;
+    if (elem) packs.emplace_back(*elem);
+    if (smithy) packs.emplace_back(*smithy);
+    std::optional<import::MenuArt> art;
+    if (test && tims) art = import::load_menu_art(*test, *tims, packs);
+    it = cache.emplace(&fs, std::move(art)).first;
   }
-  return std::nullopt;
+  return it->second ? &*it->second : nullptr;
 }
 }  // namespace
 
+SheetPicture sheet_picture(const vfs::Vfs& fs, std::string_view sheet, int frame) {
+  SheetPicture out;
+  const import::MenuArt* art = menu_art(fs);
+  if (!art) return out;
+  import::MenuPicture picture = art->compose(sheet, frame);
+  if (!picture) return out;
+  out.x = picture.x, out.y = picture.y;
+  out.rgba.w = static_cast<u32>(picture.w), out.rgba.h = static_cast<u32>(picture.h), out.rgba.px = std::move(picture.rgba);
+  return out;
+}
+
+bool sheet_bounds(const vfs::Vfs& fs, std::string_view sheet, int frame, SheetBounds& out) {
+  const import::MenuArt* art = menu_art(fs);
+  const import::MenuPicture extent = art ? art->extent(sheet, frame) : import::MenuPicture{};
+  if (!extent) return false;
+  out = {extent.x, extent.y, extent.w, extent.h};
+  return true;
+}
+
+// A flat mesh drawn the menus' way on the CPU: each vertex (x, y) scaled by (scale_x, scale_y) / 4096 and turned by `angle` (4096 = a full
+// turn, clockwise on screen) about the draw point, each triangle filled at the pixel centres it covers with its corner colours and texel
+// coordinates interpolated, the colour = corner colour x texel / 0x80 x `colour` / 0x80. `semi`: semi-transparent texels (all of an
+// untextured face) get alpha 64. The picture is the same square for every angle, centred on the draw point.
+SheetPicture mesh_picture(const vfs::Vfs& fs, std::string_view mesh_name, int angle, int scale_x, int scale_y, u32 colour, bool semi) {
+  SheetPicture out;
+  const import::MenuArt* art = menu_art(fs);
+  const import::MenuArt::Mesh* mesh = art ? art->mesh(mesh_name) : nullptr;
+  if (!mesh || mesh->triangles.empty()) return out;
+  const double turn = static_cast<double>(angle) * 2.0 * 3.14159265358979323846 / 4096.0, cs = std::cos(turn), sn = std::sin(turn);
+  const double kx = scale_x / 4096.0, ky = scale_y / 4096.0;
+  double reach = 0;
+  for (const auto& triangle : mesh->triangles)
+    for (const auto& pos : triangle.pos) reach = std::max(reach, std::hypot(pos[0] * kx, pos[1] * ky));
+  const int half = static_cast<int>(std::ceil(reach)) + 1, side = 2 * half;
+  out.x = out.y = -half;
+  out.rgba.w = out.rgba.h = static_cast<u32>(side);
+  out.rgba.px.assign(static_cast<size_t>(side) * static_cast<size_t>(side) * 4, 0);
+  const int tint[3] = {static_cast<int>(colour & 0xFF), static_cast<int>(colour >> 8 & 0xFF), static_cast<int>(colour >> 16 & 0xFF)};
+  for (const auto& triangle : mesh->triangles) {
+    double px[3], py[3];
+    for (int k = 0; k < 3; ++k) {
+      const double x = triangle.pos[static_cast<size_t>(k)][0] * kx, y = triangle.pos[static_cast<size_t>(k)][1] * ky;
+      px[k] = cs * x - sn * y + half, py[k] = sn * x + cs * y + half;
+    }
+    const double area = (px[1] - px[0]) * (py[2] - py[0]) - (px[2] - px[0]) * (py[1] - py[0]);
+    if (std::fabs(area) < 1e-9) continue;
+    const import::MenuPicture* page = triangle.page >= 0 ? &mesh->pages[static_cast<size_t>(triangle.page)] : nullptr;
+    const int x0 = std::max(0, static_cast<int>(std::floor(std::min({px[0], px[1], px[2]})))), x1 = std::min(side - 1, static_cast<int>(std::ceil(std::max({px[0], px[1], px[2]}))));
+    const int y0 = std::max(0, static_cast<int>(std::floor(std::min({py[0], py[1], py[2]})))), y1 = std::min(side - 1, static_cast<int>(std::ceil(std::max({py[0], py[1], py[2]}))));
+    for (int y = y0; y <= y1; ++y)
+      for (int x = x0; x <= x1; ++x) {
+        const double cx = x + 0.5, cy = y + 0.5;
+        const double w0 = ((px[1] - cx) * (py[2] - cy) - (px[2] - cx) * (py[1] - cy)) / area;
+        const double w1 = ((px[2] - cx) * (py[0] - cy) - (px[0] - cx) * (py[2] - cy)) / area;
+        const double weight[3] = {w0, w1, 1.0 - w0 - w1};
+        if (weight[0] < 0 || weight[1] < 0 || weight[2] < 0) continue;
+        int rgb[3];
+        for (int channel = 0; channel < 3; ++channel) {
+          double value = 0;
+          for (int k = 0; k < 3; ++k) value += weight[k] * triangle.rgb[static_cast<size_t>(k)][static_cast<size_t>(channel)];
+          rgb[channel] = static_cast<int>(value);
+        }
+        u8 alpha = semi ? 64 : 255;
+        if (page) {
+          double u = 0, v = 0;
+          for (int k = 0; k < 3; ++k) u += weight[k] * triangle.uv[static_cast<size_t>(k)][0], v += weight[k] * triangle.uv[static_cast<size_t>(k)][1];
+          const u8* texel = &page->rgba[(static_cast<size_t>(std::clamp(static_cast<int>(v), 0, 255)) * 256 + static_cast<size_t>(std::clamp(static_cast<int>(u), 0, 255))) * 4];
+          if (texel[3] == 0) continue;
+          if (texel[3] != import::kStpAlpha) alpha = 255;
+          for (int channel = 0; channel < 3; ++channel) rgb[channel] = rgb[channel] * texel[channel] / 0x80;
+        }
+        u8* dst = &out.rgba.px[(static_cast<size_t>(y) * static_cast<size_t>(side) + static_cast<size_t>(x)) * 4];
+        for (int channel = 0; channel < 3; ++channel) dst[channel] = static_cast<u8>(std::min(255, rgb[channel] * tint[channel] / 0x80));
+        dst[3] = alpha;
+      }
+  }
+  return out;
+}
+
 Rgba sheet_frame(const vfs::Vfs& fs, int frame) {
-  auto test = fs.read_disc("cdrom/menu/menutest.prd");
-  auto tims = fs.read_disc("cdrom/menu/menutim.prd");
-  if (!test || !tims) return {};
-  const auto sheet = drp_entry(ByteSpan(test->data(), test->size()), "main", 3);
-  const auto tim_drp = import::parse_drp(ByteSpan(tims->data(), tims->size()));
-  if (!sheet || !tim_drp || sheet->size() < 0xC) return {};
-  auto u16_at = [&](size_t offset) { return static_cast<u16>((*sheet)[offset] | (*sheet)[offset + 1] << 8); };
-  if (frame < 1 || frame > u16_at(2) || 0xC + 2 * static_cast<size_t>(frame) > sheet->size()) return {};
-  const size_t base = u16_at(0xC + 2 * static_cast<size_t>(frame - 1));
-  if (base + 4 > sheet->size()) return {};
-  const int count = u16_at(base);
-  struct Source {
-    import::Tim tim;
-    Rgba rgba;
-  };
-  std::vector<Source> sources;
-  for (const auto& entry : tim_drp->entries)
-    if (auto tim = import::parse_tim(entry.data); tim && tim->has_clut && tim->bpp == 4) sources.push_back({*tim, decode(*tim)});
+  const SheetPicture picture = sheet_picture(fs, "main", frame);
+  if (!picture.rgba) return {};
   Rgba out;
   out.w = kSheetFrameW, out.h = kSheetFrameH;
   out.px.assign(static_cast<size_t>(out.w) * out.h * 4, 0);
-  for (int part = count - 1; part >= 0; --part) {
-    const size_t at = base + 4 + 12 * static_cast<size_t>(part);
-    if (at + 12 > sheet->size()) break;
-    const int x = static_cast<s16>(u16_at(at)), y = static_cast<s16>(u16_at(at + 2));
-    const int u = (*sheet)[at + 4], v = (*sheet)[at + 5], clut = u16_at(at + 6), w = (*sheet)[at + 8], h = (*sheet)[at + 9];
-    const int flags = u16_at(at + 10);
-    // Texture page: 64-halfword columns, 256-row halves; 4 texels per halfword.
-    const int texel_x = (flags & 0xF) * 64 * 4 + u, texel_y = ((flags >> 4) & 1) * 256 + v;
-    const int clut_x = (clut & 0x3F) * 16, clut_y = clut >> 6;
-    for (const Source& source : sources) {
-      const import::TimBlock& image = source.tim.image;
-      if (source.tim.clut.x != clut_x || source.tim.clut.y != clut_y) continue;
-      const int sx = texel_x - image.x * 4, sy = texel_y - image.y;
-      if (sx < 0 || sy < 0 || sx + w > image.w * 4 || sy + h > image.h) continue;
-      for (int row = 0; row < h; ++row)
-        for (int col = 0; col < w; ++col) {
-          const int tx = sx + ((flags & 0x200) ? w - 1 - col : col), ty = sy + ((flags & 0x400) ? h - 1 - row : row);
-          const int dx = kSheetFrameOriginX + x + col, dy = kSheetFrameOriginY + y + row;
-          if (dx < 0 || dy < 0 || dx >= kSheetFrameW || dy >= kSheetFrameH) continue;
-          const u8* texel = source.rgba.at(static_cast<u32>(tx), static_cast<u32>(ty));
-          if (texel[3] == 0) continue;
-          std::memcpy(&out.px[(static_cast<size_t>(dy) * out.w + static_cast<size_t>(dx)) * 4], texel, 4);
-        }
-      break;
+  for (u32 row = 0; row < picture.rgba.h; ++row)
+    for (u32 col = 0; col < picture.rgba.w; ++col) {
+      const int dx = kSheetFrameOriginX + picture.x + static_cast<int>(col), dy = kSheetFrameOriginY + picture.y + static_cast<int>(row);
+      if (dx < 0 || dy < 0 || dx >= kSheetFrameW || dy >= kSheetFrameH) continue;
+      std::memcpy(&out.px[(static_cast<size_t>(dy) * out.w + static_cast<size_t>(dx)) * 4], picture.rgba.at(col, row), 4);
     }
-  }
   return out;
 }
 

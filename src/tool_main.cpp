@@ -14,6 +14,7 @@ int ocprd_main(int, char**);
 int ocstage_main(int, char**);
 int ocbattle_main(int, char**);
 int ocmovie_main(int, char**);
+int ocdisc_main(int, char**);
 int ocbattleview_main(int, char**);
 int ocbattleseq_main(int, char**);
 int ocflow_main(int, char**);
@@ -40,6 +41,7 @@ constexpr Tool kTools[] = {
     {"ocstage", ocstage_main, "battle stage inspector / exporter / validator"},
     {"ocbattle", ocbattle_main, "battle tables, headless simulator, formulas, soaks"},
     {"ocmovie", ocmovie_main, "play / dump / inspect FMVs"},
+    {"ocdisc", ocdisc_main, "PS1 disc images: identify, list / extract file records, verify against cdrom.dat"},
     {"ocbattleview", ocbattleview_main, "one battle in a window"},
     {"ocbattleseq", ocbattleseq_main, "battle model animation-sequence dump"},
     {"ocflow", ocflow_main, "title / name entry / slot list screens in a window"},

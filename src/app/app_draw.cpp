@@ -10,6 +10,7 @@
 
 #include "core/log.h"
 #include "game/free_cam.h"
+#include "platform/paths.h"
 #include "render/particles.h"
 #include "render/ps1_jitter.h"
 #include "render/stage_pipeline.h"
@@ -124,6 +125,7 @@ void App::draw_frame(const render::Frame& frame) {
     if (!movie_open) movie_player.draw_held(frame, vw, vh);
     if (flow_ready) flow.draw_overlay(frame, vw, vh);
   }
+  if (disc_prompt_ok && disc_prompt.active()) disc_prompt.draw(frame, vw, vh, true);
   // The title's 4:3 override ends with the composition (the ticks use the real value).
   render::set_wide_extra(wide_extra);
 
@@ -149,7 +151,7 @@ void App::draw_frame(const render::Frame& frame) {
     feature_icons.draw(frame, vw, vh, active, icon_lang);
   }
   // The pause screen's bars + text go over the filtered picture.
-  if (pause_on && !(config.ps1_res_ui && ps1_pass_43(frame, vw, vh, &menu_text, [&](const render::Frame& lf) { pause_screen.draw(lf, 1280.0f, 960.0f, true); })))
+  if (pause_on && !(ps1_ui_pass() && ps1_pass_43(frame, vw, vh, &menu_text, [&](const render::Frame& lf) { pause_screen.draw(lf, 1280.0f, 960.0f, true); })))
     pause_screen.draw(frame, vw, vh, true);
 }
 
@@ -171,10 +173,13 @@ render::ScreenSettings App::screen_look() const {
   return look;
 }
 
+bool App::ps1_ui_pass() const { return config.ps1_res_ui || platform::disc_mode(); }
+
 // The [Video] / [Enhancements] settings and the game options the drawers read, applied every frame.
 void App::apply_frame_options() {
-  // [Video] Ps1ResUi (Esc options): the UI screens' PS1-resolution pass.
-  ui::set_ps1_menus(config.ps1_res_ui);
+  // [Video] Ps1ResUi (Esc options): the UI screens' PS1-resolution pass, and whether the menus' 3D models go into it.
+  ui::set_ps1_menus(ps1_ui_pass());
+  ui::set_ps1_menu_models(config.ps1_res_ui);
   // [Video] Filter: the field actors' texture sampling, one global setting (Graphics tab).
   if (world_ok) world.view().linear_filter = config.filter == platform::TexFilter::Bilinear;
   if (results_ok) results.set_filter(config.filter == platform::TexFilter::Bilinear);
@@ -363,8 +368,8 @@ void App::draw_battle_picture(const SceneFrame& sf) {
   const render::Frame& frame = sf.frame;
   const float vw = sf.vw, vh = sf.vh;
   if (sf.results_up) {
-    if (!(config.ps1_res_ui && ps1_pass_wide(frame, vw, vh, results.text_batch(),
-                                          [&](const render::Frame& lf, float, float, const render::Letterbox& lb) { results.draw(lf, lb.vw, lb.vh, true); })))
+    if (!(ps1_ui_pass() && ps1_pass_wide(frame, vw, vh, results.text_batch(),
+                                    [&](const render::Frame& lf, float, float, const render::Letterbox& lb) { results.draw(lf, lb.vw, lb.vh, true); })))
       results.draw(frame, vw, vh, true);
   } else if (sf.battle_lowres) {
     // Original art + [Video] Ps1ResGraphics: the battle 3D (stage, shadows, units, effects) into the 320 x 224 battle buffer size
@@ -485,10 +490,11 @@ void App::draw_field_full(const SceneFrame& sf) {
   }
 }
 
-// [Video] Ps1ResUi: the HUD, menus, digits and text in the 320 (+ 2e) x 240 PS1 picture (any art mode), else at window resolution.
+// [Video] Ps1ResUi (always from the discs): the HUD, menus, digits and text in the 320 (+ 2e) x 240 PS1 picture (any art mode), else at
+// window resolution.
 void App::draw_battle_ui(const SceneFrame& sf) {
-  if (!(config.ps1_res_ui && ps1_pass_wide(sf.frame, sf.vw, sf.vh, battle.text_batch(),
-                                        [&](const render::Frame& lf, float, float, const render::Letterbox& lb) { battle.draw_ui(lf, true, &lb); })))
+  if (!(ps1_ui_pass() && ps1_pass_wide(sf.frame, sf.vw, sf.vh, battle.text_batch(),
+                                  [&](const render::Frame& lf, float, float, const render::Letterbox& lb) { battle.draw_ui(lf, true, &lb); })))
     battle.draw_ui(sf.frame, true);
 }
 
@@ -509,7 +515,7 @@ void App::draw_field_ui(const SceneFrame& sf) {
   if (world.overlay_needed()) {
     sprites.begin(frame, vw, vh, true);
     // With Ps1ResUi the status icons and dialogue windows go into the PS1-resolution target below.
-    const bool ps1_windows = config.ps1_res_ui;
+    const bool ps1_windows = ps1_ui_pass();
     world.draw_overlay(sprites, vw, vh, !ps1_windows);
     sprites.end();
     if (ps1_windows &&

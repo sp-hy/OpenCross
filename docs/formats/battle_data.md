@@ -13,7 +13,7 @@ The PS1 numbers (scene 2534 = groups, 2535 = enemy stats, 0008 = drops) are PS1 
 | File | Size | What it is | Records |
 |---|---|---|---|
 | `player.dat` | 19032 | cpt[6] of sszl: 0 `scenedat`, 1 `monster`, 2 `symtbl`, 3 `btbgdat`, 4 `waa`, 5 `btmes` | |
-| `exdat.dat` | 5764 | cpt[7] of sszl: 0 aux A, 1 `el_mask`, 2 `ditem`, 3 aux B, 4 `menu_pg`, 5 `menu_waa`, 6 `lv99para` | |
+| `exdat.dat` | 5764 | cpt[7] of sszl: 0 aux A, 1 `el_mask`, 2 `ditem`, 3 results messages, 4 `menu_pg`, 5 `menu_waa`, 6 `lv99para` | |
 | `eqp.dat` | 5744 | cpt[1] -> sszl -> identical to `pgdat.bin` (misleading name) | |
 | `ditem.dat` | 1606 | sszl -> 2048 B = exdat part 2: drop tables | 256 x 8 B |
 | `monster.bin` | 39072 | enemy stats (= player part 1) | 222 x 0xB0 |
@@ -43,7 +43,7 @@ The PS1 numbers (scene 2534 = groups, 2535 = enemy stats, 0008 = drops) are PS1 
 
 Every plain `battle/data` file that is also a bundle part is byte-identical to the decoded part. `char_w1..5` have records like `char.bin` with different values, then a 408-byte tail of leftover record copies (not `lv99para`; the loader ignores it). The `*.prd` files under `menu/` and `battle/help.prd` are resource packs and are not parsed here. Row counts of `waa_spec.dat` and `keyitem.dat` match the `waa_spec.txt` and `keyitem.txt` language tables.
 
-`exdat` part 0 is the star-progress table, 100 x 4 B `{u8 battles, u8 pending_tenths, u16 step}` indexed by star level (`GameTables::star_rows`, section 3 growth); `step` is strictly increasing (1,2,4,6,10,15,21,29,...). Aux part (purpose unknown): part 3 is 652 B of 8-byte rows `{u16 id (0x140, 0x142, ...), u16 n, u16 1, u16 v}`.
+`exdat` part 0 is the star-progress table, 100 x 4 B `{u8 battles, u8 pending_tenths, u16 step}` indexed by star level (`GameTables::star_rows`, section 3 growth); `step` is strictly increasing (1,2,4,6,10,15,21,29,...). Part 3 holds the results screen's messages (`rules/battle.md` 8.4.1): 8-byte rows `{u16 offset, u16 cells, u16 1, u16 width}`, the first offset (0x140 in the Japanese build, 0x130 in the USA one) also ending the rows; each offset points at PS1 text bytes ending in a control byte; `cells` is the number of 12-px cells the line is drawn in, `width` its width in pixels (12 per cell in the Japanese build, the text's own width in the USA one). The USA disc's file differs in part 3 (its text) and in one item record of part 5 (item 61, bytes 0..6).
 
 The battle RNG permutation (`GameTables::rng_table`) is 256 bytes read from the executable member `prog/slps_023.64` at file offset 0x5B584. `rnd(lo, hi)` (lo, hi taken as u16) returns `lo` if `lo == hi`, 0 if `hi == 0`; for `hi < 0x100` it steps an index over the permutation and returns `lo + table[index] % (hi - lo + 1)`, otherwise it uses a 15-bit LCG (`state * 1103515245 + 12345`, bits 16-30) in place of the table; the same LCG is the libc `rand()` of script op 1F. The start index is the first LCG value mod 256.
 

@@ -1,7 +1,9 @@
 #pragma once
 // The OpenCross application: everything the process owns, from the boot sequence to the main loop and the frame composition.
 // One translation unit per concern:
-//   app_boot.cpp      init(): config -> window -> VFS / mods -> GPU -> audio -> routes -> flow / saves -> menus -> field -> battle -> title
+//   app_boot.cpp      init(): config -> window -> GPU -> data source -> VFS / mods -> renderer -> audio -> routes -> flow / saves -> menus
+//                     -> field -> battle -> title
+//   app_source.cpp    the data source: an RDE install or the player's PS1 discs, the not-found screen, the version picker, disc mode
 //   app_sim.cpp       advance(): one block of simulation (flow, pause, movies, menus, the field), the art / audio switches
 //   app_battle.cpp    the field -> battle hand-off and back
 //   app_route.cpp     scripted routes, input replay, the room sweep
@@ -19,7 +21,9 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -43,6 +47,10 @@
 #include "game/game_flow.h"
 #include "game/route_script.h"
 #include "game/title_backdrop.h"
+#include "app/data_source.h"
+#include "import/disc/disc_backend.h"
+#include "import/disc/disc_search.h"
+#include "import/disc/drive_source.h"
 #include "import/text.h"
 #include "movie/player.h"
 #include "net/multiplayer_client.h"
@@ -62,6 +70,7 @@
 #include "render/texture.h"
 #include "save/cc_save.h"
 #include "save/oc_saves.h"
+#include "ui/disc_prompt.h"
 #include "ui/keyitem_popup.h"
 #include "ui/lowres.h"
 #include "ui/menu/main_menu.h"
@@ -127,6 +136,8 @@ class App {
   // ---- app_boot.cpp -----------------------------------------------------------------------------------------------------------
   void init_config(int argc, char** argv);
   bool init_window();
+  // The GPU device and the ImGui layer: what the screens before the game (app_source.cpp) need.
+  bool init_gpu();
   void init_vfs();
   bool init_render();
   void init_audio();
@@ -138,6 +149,42 @@ class App {
   void init_battle();
   void init_title();
   void init_start_state();
+
+  // ---- app_source.cpp ---------------------------------------------------------------------------------------------------------
+  // Picks the game data before anything reads it and opens the VFS over it, showing the not-found screen and the version picker while
+  // nothing can be played; then the save folder. False when the player quit there.
+  bool init_source();
+  // app::search_sources (data_source.h) through scan_image_file.
+  SourceSearch search_sources();
+  // The image file's discs into `search`; a file found unusable before (same size and time) is not opened again.
+  void scan_image_file(const std::filesystem::path& file, SourceSearch& search);
+  // Per frame in disc mode: a disc taken out of its drive is unmounted; while one is missing the drives are searched every 2 s and a
+  // disc of the build being played is mounted by its disc number (a swap on a single drive).
+  void poll_drive_discs();
+  // The not-found screen / version picker, frame by frame, until `search` is playable (true) or the player quits (false).
+  bool source_screen(SourceSearch& search);
+  // The file dialog of the not-found screen's Browse...; its answer arrives on another thread (browsed_files).
+  void browse_for_discs();
+  // Files picked with Browse... go to [Paths] Disc1 / Disc2 by the disc they hold. False when nothing was picked since the last call;
+  // `notes` then keeps its lines, else it gets why picked files cannot be played.
+  bool take_browsed_files(std::vector<std::string>& notes);
+  void open_discs(const SourceSearch& search);
+  // Disc mode's fixed settings (paths.h disc_mode); the ini keeps the player's own (save_config writes them back).
+  void apply_disc_mode();
+  void pick_save_dir();
+  // The field changed the disc in the drive: the VFS reads it, and the drives are searched when it is not mounted.
+  void disc_changed(int disc);
+  // The "insert disc" screen: set up at boot in disc mode; per frame, opened when the disc the story names (variable 0x42 of the
+  // field, or of the save being loaded) is not mounted, and while it shows the game stands still. True while it shows.
+  void init_disc_prompt();
+  bool disc_prompt_frame();
+  // Looks for disc 1 or 2 of the played build in the configured images, the images next to the exe and the drives, and mounts it.
+  ui::DiscPrompt::MountResult mount_disc(int disc);
+  // The state of every place the prompt looks: each drive's media-change count and label, the image files and their stamps. Any
+  // change (whatever disc it brings) makes the prompt try again.
+  std::string source_signature();
+  // The VFS has the game's files (an RDE install or a disc).
+  bool data_ready() const { return files.has_archive("cdrom"); }
 
   // ---- app_sim.cpp ------------------------------------------------------------------------------------------------------------
   static bool confirm_edge(const platform::Input& in);
@@ -224,10 +271,9 @@ class App {
   void settings_pad_filter();
   // Alt+Enter: windowed <-> fullscreen.
   void toggle_fullscreen_key();
-  // Writes the settings to opencross.ini; a --config ini (a route or test) is never rewritten.
-  void save_config() const {
-    if (own_ini) config.save(config_file);
-  }
+  // Writes the settings to opencross.ini; a --config ini (a route or test) is never rewritten. Disc mode's fixed settings are written as
+  // the player had them.
+  void save_config() const;
   // Mods reach a run started with the player's own ini and no [Debug] Script, or one that sets [Debug] ScriptMods.
   bool with_mods() const { return (own_ini && config.debug_script.empty()) || config.debug_script_mods; }
   // RDE's speed toggles do nothing in room 386 and in the battles launched from it (the room decides, not the battle id); a standalone
@@ -246,6 +292,9 @@ class App {
 
   // ---- app_draw.cpp -----------------------------------------------------------------------------------------------------------
   void draw_frame(const render::Frame& frame);
+  // The UI screens' PS1-resolution pass: [Video] Ps1ResUi, or always when playing from the PS1 discs (their screens exist only in the
+  // PS1 layout); there the setting decides only whether the menus' 3D models are drawn at the PS1 size or the window's.
+  bool ps1_ui_pass() const;
   void apply_frame_options();
   // [Shaders] the full-screen look of this frame from the settings.
   render::ScreenSettings screen_look() const;
@@ -320,9 +369,29 @@ class App {
   bool first_launch = false;
   std::filesystem::path game_dir;
   std::filesystem::path save_dir;
+  // Disc mode: the build played ("jp" / "usa"), the warning about an unknown build ("" = none), the ini's own values of the settings
+  // disc mode fixes, the not-found screen's memory of unusable image files (path -> size/time and why) and the Browse... answer.
+  std::string disc_region_word;
+  // The played build (DiscGroup::key), the mounted discs that sit in an optical drive (null = an image or none), and the drive search
+  // after a disc left its drive.
+  std::string disc_build_key;
+  std::array<const import::disc::DriveSource*, 2> drive_discs{};
+  bool drive_wait = false;
+  // Something new may hold a disc (a drive's media changed, a file was picked, the image files changed): the prompt tries again.
+  bool disc_source_changed = false;
+  std::string source_stamps;
+  std::chrono::steady_clock::time_point next_source_check;
+  std::chrono::steady_clock::time_point next_drive_scan;
+  std::string source_warning;
+  platform::Config disc_held;
+  std::map<std::filesystem::path, std::pair<std::string, std::vector<std::string>>> unusable_images;
+  std::mutex browse_mutex;
+  std::optional<std::vector<std::filesystem::path>> browsed_files;
 
   platform::Window window;
   vfs::Vfs files;
+  // The disc backend inside `files` in disc mode (owned by it), else null.
+  import::disc::DiscBackend* disc_backend = nullptr;
   vfs::ModManager mods;
   // The engine features of this run (core/features.h): the enabled mods' mod.ini and [Features], resolved once at launch.
   features::Resolved features;
@@ -456,6 +525,9 @@ class App {
 
   // ---- menus and screens ------------------------------------------------------------------------------------------------------
   render::TextBatch menu_text;
+  // Disc mode's "insert disc" screen.
+  ui::DiscPrompt disc_prompt;
+  bool disc_prompt_ok = false;
   // [Video] Ps1ResUi: the PS1-resolution target of the battle HUD / results / pause screen / field windows (any art mode).
   ui::LowRes ps1_ui;
   ui::MainMenu menu;

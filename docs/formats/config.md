@@ -28,8 +28,12 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | Key | Default | Values / clamp | Meaning |
 |---|---|---|---|
 | `GameDir` | empty | folder containing `data\cdrom.dat` | Game install. Used only if it holds `data\cdrom.dat`; otherwise (and when empty) the exe folder and up to 12 parent folders are searched. |
-| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe` (of the `--profile` folder in such a run), except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. |
+| `SaveDir` | empty | folder | Folder holding the save file. Non-empty = that folder; a relative one (`savee`, `..\saves`) is taken from the folder of `opencross.exe` (of the `--profile` folder in such a run), except in `--config` runs, where it is taken from the working folder (the routes' `tmp`). Don't start it with `\`, which means the root of the drive. Empty = the newest `Documents\My Games\CHRONO CROSS  THE RADICAL DREAMERS EDITION\Steam\<id>` folder that contains a `save.dat`; else the current Steam user's folder (registry, then `loginusers.vdf`); else the most recently modified `Steam\<id>` folder; else `saves` next to the exe. Playing from the PS1 discs, empty = `%LOCALAPPDATA%\OpenCross\saves\jp` or `\usa` by the discs' build. |
 | `SaveFile` | `save.dat` | file name | Save file name inside `SaveDir`. Written only when it differs from `save.dat`. Automated runs point it at a scratch copy. |
+| `Source` | `auto` | `auto rde disc` | Where the game data comes from. `auto`: the RDE install (`GameDir` and its search); else the images `Disc1` / `Disc2` name and those in `DiscDir`; else the disc images next to `opencross.exe`; else the discs in the optical drives; the first of these that has a Chrono Cross disc is used, and with none the "no game files found" screen shows. `rde` searches only the install, `disc` skips it (tests use `disc`). Images are recognised by their content, never by their name. An unknown value keeps `auto`. Playing from the discs fixes the art (classic), `[Audio] BgmSource` (`original`), `[Game] Language` (the discs' language) and `[Game] Portraits` (`1999`) for the run; the ini keeps the player's values. The discs' screens are always drawn at their PS1 size (`Ps1ResUi`). |
+| `Disc1` | empty | file | The player's image of PS1 disc 1 (`.cue`, `.chd`, `.iso`, an `.m3u` or multi-disc `.pbp` naming both, ...). Empty = not set. A file that holds disc 2 serves as disc 2. The not-found screen's Browse... writes it. |
+| `Disc2` | empty | file | The image of disc 2, as `Disc1`. |
+| `DiscDir` | empty | folder | A folder whose image files (not its subfolders) are searched for the discs. Empty = not set. |
 
 ### 2.2 `[Video]`
 
@@ -52,7 +56,7 @@ Sections are listed in the order `Config::save` writes them; keys in each table 
 | `Widescreen` | 0 | bool | The field, world map, battle and title sea fill the window's width, and so does the backdrop of the main menu, party screen, shops, name entry, battle results and monster picker; the title menu, slot lists, user guide, dialogue, logo and movies stay 4:3. Off = 4:3 with black bars. F7 toggles it. |
 | `ArtMode` | `hd` | `hd original modded` | Art set: RDE's HD assets / the PS1 disc assets / HD plus the mods and OpenCross's own improvements. `classic` is accepted as an alias of `original`. Any other value reads as `hd` and logs a warning. F6 cycles it. |
 | `Ps1ResGraphics` | 0 | bool | "Retro look": draw the field picture, battle 3D and title sea (backgrounds, models, effects) at the PS1's 320 x 224 and scale up with sharp pixels. |
-| `Ps1ResUi` | 0 | bool | "Retro look": draw the menus, shops, title menu, name entry, Continue and party screens at their PS1 display size, and the battle HUD, results, pause screen and dialogue windows in the 320 x 224 picture, scaled up with sharp pixels. In original art the menus use the PS1 disc textures. |
+| `Ps1ResUi` | 0 | bool | "Retro look": draw the menus, shops, title menu, name entry, Continue and party screens at their PS1 display size, and the battle HUD, results, pause screen and dialogue windows in the 320 x 224 picture, scaled up with sharp pixels. In original art the menus use the PS1 disc textures. Playing from the PS1 discs those screens are always drawn at their PS1 size, and this key decides only the menus' 3D models (the Status screen's character): on, in the PS1-sized picture; off, at the window's resolution. |
 | `RenderScale` | 1.00 (player's ini 2.00, section 3) | `0.5 0.75 1 1.5 2 3 4` | Resolution of the 3D pictures as a multiple of the output (with `Ps1ResGraphics`: of the 320 x 224 PS1 picture). The stored value snaps to the nearest listed value. |
 | `Ps1Jitter` | 0 | bool | Integer vertex snapping and affine texture mapping in the 3D passes. |
 | `LegacyFieldModels` | 1 | bool | "Retro look" (*Use legacy models in field*): the field actors keep their field models. Off (the player's ini default, section 3), the HD models in fields: field actors wearing a character's field model (model bytes 0..0x32: the party, an NPC wearing a room's own copy of a character's field model, and the remote parties' members) are drawn with that character's menu model (the Status screen's, `model.md` section 12) as tall as the field model (feet to the top of the head and hair, held props not counted), posed every frame by the field model's animation (`docs/architecture.md`, HD models in fields). The menu model's own part flags apply; a prop built into its mesh that the field model does not carry is not drawn (Nikki's guitar, Korcha's oar, Janice's drum, Pierre's shield), and a piece whose field piece the actor's animation hides is hidden with it; its stock-environment parts draw with their own texture, as there is no environment page in the field. All 51 menu models are used: 14 matched automatically, the other 37 by a hand-made joint pairing (`occ menu-rigs` lists which; `occ menu-rigs --audit`, `occ menu-rigs --motion` and `opencross modelview --sheet` check them over every field clip). Pieces only the menu model has ride on their parent joint (NeoFio's vines hang from her forearms). Story NPCs and field enemies whose battle model is more detailed than their field model (Solt, Peppor, the Acacia and Porre privates and sergeants, the Polis Police robot, Dario, Dark Serge and 19 enemies, `docs/architecture.md`) are drawn with that battle model the same way, known by their field mesh in every room; the Porre soldiers' battle rifle takes the field rifle's place (drawn only while the field rifle is), and a prop only the field model has (Radius's cane, the mounted Dragoon's lance, the Fossicker's shovel) is carried over onto the detailed body. Simulation, attach points, collision and scripts still use the field model. |
@@ -253,6 +257,12 @@ All off by default; they never lock saving. The first three also toggle from the
 | `SharedGrowth` | 0 | A won fight's stat growth also reaches every recruited character outside the party and the knocked-out members (a normal fight's minor growth; a boss's star-up bonus for the knocked-out). With `InstantGrowth`, one win takes everyone to the star's full gain. |
 | `NoCraftCost` | 0 | The forge builds without needing materials or gold and takes neither. |
 
+### 2.10 `[Disc]`
+
+| Key | Default | Values / clamp | Meaning |
+|---|---|---|---|
+| `Region` | empty | empty, `jp`, `usa` | The PS1 build played when disc images of both regions are found; empty = not chosen yet: the version picker asks at boot and writes the answer here. Any other value reads as empty. |
+
 ## 3. Player and first-launch defaults
 
 **The player's ini.** The default `opencross.ini` and a `--profile` one (not a `--config` ini, and also as read by the dev tools that use the player's ini) read a missing key of the following with these defaults instead of section 2's, so the faithful member defaults stay what a route or test ini reads:
@@ -275,7 +285,7 @@ A player's ini written by an older build already holds the four `[Enhancements]`
 | `[Video] Widescreen` | 1 | 0 |
 | `[Game] Language` | from the OS | `en` |
 
-The language comes from the OS's preferred locales in order: the first of `en fr it de es` maps to itself, `ja` to `jp`; region suffixes (`en-US`, `pt_BR`) are ignored; with nothing supported, `en`. Everything else is the default of section 2. The `[Paths]` keys are written empty, so game and save folders are discovered on every run.
+The language comes from the OS's preferred locales in order: the first of `en fr it de es` maps to itself, `ja` to `jp`; region suffixes (`en-US`, `pt_BR`) are ignored; with nothing supported, `en`. Everything else is the default of section 2. The `[Paths]` keys are written empty (`Source` as `auto`), so game and save folders are discovered on every run.
 
 ## 4. Live versus restart
 
@@ -299,7 +309,7 @@ The settings window applies a change as soon as it is made and saves the file in
 | `Achievements` | Read every frame: off stops the set at once and drops the waiting popups. |
 | `HideAchievementNotices` | Read every frame: on drops the waiting popups at once. |
 | `Steam` | On: connects at once. Off: disconnects and stops achievements at once; Steam shows the game as playing until the process exits. |
-| `[Paths]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
+| `[Paths]`, `[Disc]`, `Aspect`, `[Debug]` (other than `Log`, `Panels`), `[Ui]` | `[Paths]`, `[Disc]` and `[Debug]` are read at boot only. `Aspect` only filters the Resolution list. `[Ui]` is read each time the settings window opens. |
 
 Editing the file by hand while the game runs has no effect: the file is read once at boot and overwritten by the next save.
 

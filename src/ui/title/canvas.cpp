@@ -68,6 +68,7 @@ void DrawList::replay(render::SpriteBatch& sprites, const render::Frame& frame, 
   if (canvas.clip) frame.set_scissor(ps1::picture_clip(frame, canvas.vw, canvas.vh, kCanvasW, kCanvasHeight));
   sprites.begin(frame, canvas.vw, canvas.vh, resume);
   for (const Op& op : ops_) {
+    if (op.blend != sprites.blend()) sprites.set_blend(op.blend);
     switch (op.kind) {
       case Kind::Image:
         if (op.set)
@@ -94,10 +95,10 @@ bool UiKit::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBat
   white_set_ = render::TexRef(white_, nearest_);
   lowres_.init(ctx, sprites);
   if (!text_.init(ctx, sprites)) return false;
-  // The PS1 glyph table backs the name codec only; nothing draws the 1-bit font.
+  // The JP glyph table backs the name codec; the PS1 font face (disc mode) is the FontSet's: the title menus draw the disc's menu font.
   jp_ = std::make_shared<import::JpGlyphs>();
   if (auto exe = vfs.read("cdrom/prog/slps_023.64"); !exe || !jp_->load_bitmaps(*exe)) log::warn("ui: PS1 font bitmaps unavailable");
-  fonts_.init(vfs, text_);
+  fonts_.init(vfs, text_, true);
   if (fonts_.face(font::kGn, false) == render::kNoFace) {
     log::error("ui: no usable font (font/large_font_gn_70.spritefont)");
     return false;
@@ -110,8 +111,8 @@ void UiKit::shutdown() {
   white_set_ = {};
   lowres_.shutdown();
   text_.destroy();
-  // Re-init the fonts to drop the face ids (the TextBatch is gone).
-  if (vfs_) fonts_.init(*vfs_, text_);
+  // Drop the face ids (the TextBatch is gone).
+  fonts_.reset();
   white_.destroy();
   linear_.destroy();
   nearest_.destroy();

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/types.h"
+#include "import/name_menu.h"
 #include "import/text.h"
 
 namespace oc::ui {
@@ -51,7 +52,8 @@ std::u32string trim_blanks(std::u32string_view name);
 bool is_reserved_name(std::u32string_view name);
 // Longest name: RDE Latin keyboard 12, PS1 pages 6; Viper (id 5) 4 on the PS1 pages (honorific).
 int max_name_length(int char_id, import::Lang lang, bool hd_keyboard);
-// Validates a typed name: trims, rejects empty and reserved names. Returns the stored form ("" = rejected).
-std::u32string validate_name(std::u32string_view typed);
+// Validates a typed name: trims, rejects empty and reserved names. Returns the stored form ("" = rejected). `disc`: played from the PS1
+// discs, the disc's own reserved names and rule replace is_reserved_name.
+std::u32string validate_name(std::u32string_view typed, const import::NameMenuText* disc = nullptr);
 
 }  // namespace oc::ui

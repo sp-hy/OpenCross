@@ -264,7 +264,7 @@ class Vm {
   int colour_gate() const { return colour_gate_; }
   // An element revive brings the unit back: its entity (the first bound to the unit) runs again, a PC's slot-3 flag is cleared.
   void revive(int unit);
-  // 7D: shows list entry 100 in the PC menu.
+  // 7D: shows the enemy letter suffix (glyph 100 and the letter) in the target label; set at battle init.
   bool menu_entry100() const { return flag_831_; }
   // 5C.
   bool scripted_death(int unit) const { return unit >= 0 && unit < kUnits && scripted_death_[static_cast<size_t>(unit)]; }
@@ -359,7 +359,7 @@ class Vm {
   int budget_ = 0;
   u64 ops_ = 0;
   std::array<u64, 256> op_counts_{};
-  bool flag_ui_ = true, flag_end_ = true, flag_menu_lock_ = false, flag_831_ = false, sfx_muted_ = false, no_drops_ = false;
+  bool flag_ui_ = true, flag_end_ = true, flag_menu_lock_ = false, flag_831_ = true, sfx_muted_ = false, no_drops_ = false;
   int forced_result_ = -1;
   u8 colour_gate_ = 0;
   // Set by an enemy's A6: the entity leaves the run list once its pass ends.

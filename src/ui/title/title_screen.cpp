@@ -1,8 +1,10 @@
 #include "ui/title/title_screen.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <iterator>
+#include <optional>
 
 #include "audio/bgm_table.h"
 #include "core/log.h"
@@ -45,34 +47,220 @@ constexpr int kChimeSounds[3] = {59, 61, 62};
 constexpr float kMusicFadeDelay = 14.0f;
 constexpr float kMusicFadeFrames = 20.0f;
 
-// Decodes a TIM into an uploaded RGBA image (nearest sampled).
-render::TexRef upload_tim(UiKit& kit, const char* path, float* w, float* h) {
+// Disc menu labels built from the PS1 font: a character the font has no glyph for advances kBlankAdvance pixels; the art's italic
+// moves kSlant pixels right per row up; ink below kMinCover of full coverage is left out.
+constexpr int kBlankAdvance = 4;
+constexpr float kSlant = 0.2f;
+constexpr float kMinCover = 0.125f;
+constexpr u32 kCellRows = 32;
+
+std::optional<import::Image> read_tim(UiKit& kit, const char* path) {
   auto raw = kit.vfs().read(path);
-  if (!raw) return {};
+  if (!raw) return std::nullopt;
   auto tim = import::parse_tim(*raw);
-  if (!tim) return {};
-  auto img = import::decode_tim(*tim);
-  if (!img) return {};
-  import::Image rgba = import::to_rgba(*img);
+  if (!tim) return std::nullopt;
+  return import::decode_tim(*tim);
+}
+
+// Uploads a decoded TIM as an RGBA image (nearest sampled).
+render::TexRef upload_image(UiKit& kit, const import::Image& img, float* w, float* h) {
+  import::Image rgba = import::to_rgba(img);
   if (w) *w = static_cast<float>(rgba.width);
   if (h) *h = static_cast<float>(rgba.height);
   return kit.upload_rgba(rgba.width, rgba.height, rgba.pixels.data(), false);
 }
 
+render::TexRef upload_tim(UiKit& kit, const char* path, float* w, float* h) {
+  auto img = read_tim(kit, path);
+  return img ? upload_image(kit, *img, w, h) : render::TexRef{};
+}
+
+// The most common index of one image row.
+u8 row_mode(const import::Image& img, u32 row) {
+  std::array<u32, 256> counts{};
+  for (u32 x = 0; x < img.width; ++x) ++counts[img.pixels[static_cast<size_t>(row) * img.width + x]];
+  return static_cast<u8>(std::max_element(counts.begin(), counts.end()) - counts.begin());
+}
+
 }  // namespace
+
+import::Image title_blank_bars(const import::Image& atlas, int plain, int selected, int* label_x) {
+  const u32 cells = atlas.height / kCellRows;
+  if (!atlas.indexed || plain < 0 || selected < 0 || static_cast<u32>(std::max(plain, selected)) >= cells ||
+      atlas.pixels.size() < static_cast<size_t>(atlas.width) * atlas.height)
+    return {};
+  // The plain cell's lettering starts at the first column where a row leaves its most common index.
+  u32 left = atlas.width;
+  for (u32 row = 0; row < kCellRows; ++row) {
+    const u32 y = static_cast<u32>(plain) * kCellRows + row;
+    const u8 mode = row_mode(atlas, y);
+    for (u32 x = 0; x < left; ++x)
+      if (atlas.pixels[static_cast<size_t>(y) * atlas.width + x] != mode) left = x;
+  }
+  if (label_x) *label_x = static_cast<int>(left);
+  import::Image out = atlas;
+  out.height = 2 * kCellRows;
+  out.pixels.assign(static_cast<size_t>(atlas.width) * out.height, 0);
+  for (u32 half = 0; half < 2; ++half) {
+    const u32 cell = static_cast<u32>(half == 0 ? plain : selected);
+    for (u32 row = 0; row < kCellRows; ++row) {
+      const u32 y = cell * kCellRows + row;
+      const u8 mode = row_mode(atlas, y);
+      for (u32 x = 0; x < atlas.width; ++x) {
+        const u8 src = atlas.pixels[static_cast<size_t>(y) * atlas.width + x];
+        out.pixels[static_cast<size_t>(half * kCellRows + row) * atlas.width + x] = half == 1 && x < left ? src : mode;
+      }
+    }
+  }
+  return out;
+}
+
+TitleInk title_ink(const import::Ps1Font& font, std::u32string_view text) {
+  TitleInk ink;
+  int width = 0, height = font.line_height();
+  for (char32_t ch : text) {
+    const int index = font.index_for(ch);
+    width += index >= 0 ? font.advance(index) : kBlankAdvance;
+    if (index >= 0) height = std::max(height, font.top(index) + font.cell_h());
+  }
+  if (width <= 0 || height <= 0) return ink;
+  ink.width = static_cast<u32>(width), ink.height = static_cast<u32>(height);
+  ink.cover.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0);
+  int pen = 0;
+  ink.first_top = height;
+  u8 brightest = 0;
+  for (size_t i = 0; i < text.size(); ++i) {
+    const int index = font.index_for(text[i]);
+    if (index < 0) {
+      pen += kBlankAdvance;
+      continue;
+    }
+    for (int y = 0; y < font.cell_h(); ++y)
+      for (int x = 0; x < font.cell_w(); ++x) {
+        const u8 level = font.level(index, x, y);
+        const int px = pen + font.left(index) + x, py = font.top(index) + y;
+        if (!level || px < 0 || py < 0 || px >= width || py >= height) continue;
+        u8& dst = ink.cover[static_cast<size_t>(py) * ink.width + static_cast<size_t>(px)];
+        dst = std::max(dst, level);
+        brightest = std::max(brightest, level);
+        if (i == 0) ink.first_top = std::min(ink.first_top, py), ink.first_bottom = std::max(ink.first_bottom, py);
+      }
+    pen += font.advance(index);
+  }
+  if (!brightest) return {};
+  for (u8& value : ink.cover) value = static_cast<u8>(value * 255 / brightest);
+  return ink;
+}
+
+import::Image title_disc_label(const import::Image& atlas, int plain, int selected, const TitleInk& ink) {
+  int label_x = 0;
+  const import::Image bars = title_blank_bars(atlas, plain, selected, &label_x);
+  if (bars.pixels.empty() || ink.cover.empty() || ink.first_bottom < ink.first_top) return {};
+  const u32 width = atlas.width;
+  auto index_at = [&](int cell, u32 row, u32 x) { return atlas.pixels[(static_cast<size_t>(cell) * kCellRows + row) * width + x]; };
+  auto colour = [&](u8 index) { return index < atlas.palette.size() ? atlas.palette[index] : 0u; };
+  auto luma = [&](u8 index) {
+    const u32 rgba = colour(index);
+    return (rgba & 0xFF) * 3 + (rgba >> 8 & 0xFF) * 6 + (rgba >> 16 & 0xFF);
+  };
+  // Lettering rows are the rows whose most common index is the cell's top row's (the clear one); the others carry the underline.
+  const u8 clear = row_mode(atlas, static_cast<u32>(plain) * kCellRows);
+  auto lettering_row = [&](int cell, u32 row) { return row_mode(atlas, static_cast<u32>(cell) * kCellRows + row) == clear; };
+  // The art's own lettering look per cell: its most common and darkest index.
+  struct Look {
+    u32 fill = 0, edge = 0;
+  };
+  auto look_of = [&](int cell) {
+    std::array<u32, 256> counts{};
+    for (u32 row = 0; row < kCellRows; ++row)
+      if (lettering_row(cell, row))
+        for (u32 x = static_cast<u32>(label_x); x < width; ++x)
+          if (const u8 index = index_at(cell, row, x); index != clear) ++counts[index];
+    int fill = -1, edge = -1;
+    for (int index = 0; index < 256; ++index) {
+      if (!counts[static_cast<size_t>(index)]) continue;
+      if (fill < 0 || counts[static_cast<size_t>(index)] > counts[static_cast<size_t>(fill)]) fill = index;
+      if (edge < 0 || luma(static_cast<u8>(index)) < luma(static_cast<u8>(edge))) edge = index;
+    }
+    return fill < 0 ? Look{} : Look{colour(static_cast<u8>(fill)), colour(static_cast<u8>(edge))};
+  };
+  // The plain cell's first letter (the columns from label_x up to the first one without lettering) gives the rows to fill; its last
+  // lettering column and the underline's end give the gap the art leaves after its label.
+  int art_top = static_cast<int>(kCellRows), art_bottom = -1, art_right = -1, bar_end = -1;
+  bool first_letter = true;
+  for (u32 x = static_cast<u32>(label_x); x < width; ++x) {
+    bool any = false;
+    for (u32 row = 0; row < kCellRows; ++row) {
+      if (!lettering_row(plain, row)) {
+        if (index_at(plain, row, x) != clear) bar_end = static_cast<int>(x);
+        continue;
+      }
+      if (index_at(plain, row, x) == clear) continue;
+      any = true;
+      art_right = static_cast<int>(x);
+      if (first_letter) art_top = std::min(art_top, static_cast<int>(row)), art_bottom = std::max(art_bottom, static_cast<int>(row));
+    }
+    if (!any && art_bottom >= 0) first_letter = false;
+  }
+  if (art_bottom < art_top) return {};
+  const int gap = std::max(0, bar_end - art_right);
+  const float scale = static_cast<float>(art_bottom - art_top + 1) / static_cast<float>(ink.first_bottom - ink.first_top + 1);
+  auto cover_at = [&](int x, int y) -> float {
+    if (x < 0 || y < 0 || x >= static_cast<int>(ink.width) || y >= static_cast<int>(ink.height)) return 0.0f;
+    return ink.cover[static_cast<size_t>(y) * ink.width + static_cast<size_t>(x)] / 255.0f;
+  };
+  auto sample = [&](float x, float y) {
+    const float fx = std::floor(x), fy = std::floor(y), tx = x - fx, ty = y - fy;
+    const int x0 = static_cast<int>(fx), y0 = static_cast<int>(fy);
+    return (cover_at(x0, y0) * (1 - tx) + cover_at(x0 + 1, y0) * tx) * (1 - ty) + (cover_at(x0, y0 + 1) * (1 - tx) + cover_at(x0 + 1, y0 + 1) * tx) * ty;
+  };
+  import::Image out = import::to_rgba(bars);
+  const Look looks[2] = {look_of(plain), look_of(selected)};
+  int right = -1;
+  for (u32 half = 0; half < 2; ++half)
+    for (u32 row = 0; row < kCellRows; ++row) {
+      const float font_y = static_cast<float>(ink.first_top) + (static_cast<float>(row) + 0.5f - static_cast<float>(art_top)) / scale - 0.5f;
+      const float slant = kSlant * (static_cast<float>(art_bottom + 1) - (static_cast<float>(row) + 0.5f));
+      for (u32 x = static_cast<u32>(label_x); x < width; ++x) {
+        const float font_x = (static_cast<float>(x) + 0.5f - static_cast<float>(label_x) - slant) / scale - 0.5f;
+        const float cover = sample(font_x, font_y);
+        if (cover < kMinCover) continue;
+        u8* dst = &out.pixels[(static_cast<size_t>(half * kCellRows + row) * width + x) * 4];
+        for (u32 channel = 0; channel < 3; ++channel) {
+          const float edge = static_cast<float>(looks[half].edge >> (8 * channel) & 0xFF), fill = static_cast<float>(looks[half].fill >> (8 * channel) & 0xFF);
+          dst[channel] = static_cast<u8>(std::lround(edge + (fill - edge) * std::min(cover, 1.0f)));
+        }
+        dst[3] = 255;
+        right = std::max(right, static_cast<int>(x));
+      }
+    }
+  // The underline ends `gap` columns after the label.
+  for (u32 half = 0; half < 2; ++half)
+    for (u32 row = 0; row < kCellRows; ++row)
+      if (!lettering_row(half == 0 ? plain : selected, row))
+        for (u32 x = static_cast<u32>(std::max(0, right + gap + 1)); x < width; ++x) out.pixels[(static_cast<size_t>(half * kCellRows + row) * width + x) * 4 + 3] = 0;
+  return out;
+}
 
 bool TitleScreen::init(UiKit& kit, audio::Mixer* mixer) {
   kit_ = &kit;
   mixer_ = mixer;
-  if (auto png = kit.vfs().read("hd/title/title.png")) logo_ = kit.upload_png(*png);
-  if (!logo_) log::warn("title: hd/title/title.png unavailable");
+  // The HD logo is RDE's; the PS1 discs have only the room's own logo layers.
+  if (kit.vfs().has_archive("hd")) {
+    if (auto png = kit.vfs().read("hd/title/title.png")) logo_ = kit.upload_png(*png);
+    if (!logo_) log::warn("title: hd/title/title.png unavailable");
+  }
   bg_[0] = upload_tim(kit, "cdrom/menu/title/bg0.tim", nullptr, nullptr);
   bg_[1] = upload_tim(kit, "cdrom/menu/title/bg1.tim", nullptr, nullptr);
   if (!bg_[0]) log::warn("title: cdrom/menu/title/bg0.tim unavailable");
   // Underline atlases: map/etc/openfont.tim (variant 1) and menu/title/cmptitle.tim (variant 2). Both are cdrom2-first in either art
   // mode (Vfs::cdrom2_first), i.e. the blanked copies: only the underline of each 32-row label cell is left.
-  bars_[0] = upload_tim(kit, "cdrom/map/etc/openfont.tim", nullptr, &bars_h_[0]);
+  // From the PS1 discs (no cdrom2) both are the labelled originals; Settings / Quit then take cells built from cells 0 / 1.
+  disc_ = !kit.vfs().has_archive("cdrom2");
+  const auto atlas = read_tim(kit, "cdrom/map/etc/openfont.tim");
+  bars_[0] = atlas ? upload_image(kit, *atlas, nullptr, &bars_h_[0]) : render::TexRef{};
   bars_[1] = upload_tim(kit, "cdrom/menu/title/cmptitle.tim", nullptr, &bars_h_[1]);
+  if (disc_ && atlas) disc_atlas_ = *atlas;
   return true;
 }
 
@@ -82,6 +270,21 @@ void TitleScreen::shutdown() {
   logo_ = {};
   bg_[0] = bg_[1] = {};
   bars_[0] = bars_[1] = {};
+  disc_labels_[0] = disc_labels_[1] = {};
+  disc_labels_built_ = false;
+  disc_atlas_ = {};
+}
+
+void TitleScreen::build_disc_labels() {
+  if (disc_labels_built_ || !kit_ || disc_atlas_.pixels.empty()) return;
+  disc_labels_built_ = true;
+  const auto menu_font = import::load_ps1_menu_font(kit_->vfs());
+  if (!menu_font) return;
+  const int lang_idx = std::min(lang_index(lang_), 5);
+  const char32_t* const labels[2] = {kSettings[lang_idx], kQuit[lang_idx]};
+  for (int i = 0; i < 2; ++i)
+    if (const import::Image cell = title_disc_label(disc_atlas_, 0, 1, title_ink(*menu_font, labels[i])); !cell.pixels.empty())
+      disc_labels_[i] = kit_->upload_rgba(cell.width, cell.height, cell.pixels.data(), false);
 }
 
 void TitleScreen::begin(import::Lang lang, ArtMode mode, bool has_saves, int song, bool backdrop) {
@@ -89,6 +292,7 @@ void TitleScreen::begin(import::Lang lang, ArtMode mode, bool has_saves, int son
   mode_ = mode;
   has_saves_ = has_saves;
   backdrop_ = backdrop;
+  build_disc_labels();
   variant_ = 1;
   page_ = 0;
   phase_ = backdrop ? Phase::Prompt : Phase::FadeIn;
@@ -299,6 +503,8 @@ void TitleScreen::draw(DrawList& dl) const {
       const font::Ink ink{pack_rgba(230, 230, 230, ab), pack_rgba(33, 33, 33, ab), true, false};
       dl.text(kit_->fonts().face(font::kBn), prompt, 640, 700.111f, ink, font::slot(font::kBn).scale * 0.95f, 1);
     }
+  } else if (menu_phase && disc_) {
+    draw_disc_menu(dl);
   } else if (menu_phase) {
     // Option i at PS1 (60, 269 + 32 i) = canvas (120, 576.4 + 68.57 i), slot 5 (ci_70) at the slot scale 0.6 x 1.0,
     // H2(colour, 0x14, 4): selected 0x6090B0, others 0x909090; cursor "▶" (U+25B6) in slot 6 (cur_70) at PS1 (30, 267 + 32 sel),
@@ -355,6 +561,28 @@ void TitleScreen::draw(DrawList& dl) const {
             font::slot(font::kCur).scale);
   }
   // The fade (fade_alpha()) is drawn by GameFlow::draw in window space over the whole screen in use (widescreen: over the 3D sea too).
+}
+
+// The PS1's own items are whole atlas cells (lettering, cursor and underline in one 256 x 32 sprite, rows 32 n .. 32 n + 31): option
+// i at PS1 (0, 0x10E + 0x20 i) with cell page * 4 + 2 i + (selected), the vibration footer as cells 8 / 9 at (0x13A, 200) /
+// (0x23A, 200). Settings / Quit draw their built cells (title_disc_label) the same way.
+void TitleScreen::draw_disc_menu(DrawList& dl) const {
+  const float ps1_scale = kCanvasHeight / 448.0f;
+  auto sprite = [&](render::TexRef tex, float tex_h, float x, float y, int cell, float w) {
+    const float v0 = 32.0f * static_cast<float>(cell) / tex_h, v1 = std::min(32.0f * static_cast<float>(cell) + 32.0f, tex_h) / tex_h;
+    dl.image(tex, 2.0f * x, y * ps1_scale, 2.0f * w, (v1 - v0) * tex_h * ps1_scale, 0xFFFFFFFFu, 0.0f, v0, w / 256.0f, v1);
+  };
+  const int atlas = variant_ == 2 ? 1 : 0;
+  if (const render::TexRef bars = bars_[atlas]; bars && bars_h_[atlas] > 0) {
+    if (page_ == 1) {
+      sprite(bars, bars_h_[atlas], 0x13A, 200, 8, 256.0f);
+      sprite(bars, bars_h_[atlas], 0x23A, 200, 9, 256.0f);
+    }
+    for (int i = 0; i < std::min(item_count(), 2); ++i)
+      sprite(bars, bars_h_[atlas], 0, 270.0f + 32.0f * static_cast<float>(i), page_ * 4 + 2 * i + (i == sel_ ? 1 : 0), 256.0f);
+  }
+  for (int i = 2; i < item_count(); ++i)
+    if (disc_labels_[i - 2]) sprite(disc_labels_[i - 2], 2.0f * kCellRows, 0, 270.0f + 32.0f * static_cast<float>(i), i == sel_ ? 1 : 0, 256.0f);
 }
 
 }  // namespace oc::ui

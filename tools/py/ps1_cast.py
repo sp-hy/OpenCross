@@ -1,6 +1,6 @@
 """Reference casts of battle effects from the original PlayStation game in stock DuckStation.
 
-    python -X utf8 tools/py/ps1_cast.py batch  --tag T --ids a,b [--only id] [--frames N] [--keys "Right:565,Circle:590"]
+    python -X utf8 tools/py/ps1_cast.py batch  --tag T --ids a,b [--only id] [--frames N] [--keys "Right:565,Confirm:590"]
     python -X utf8 tools/py/ps1_cast.py summon --tag T --ids 43
     python -X utf8 tools/py/ps1_cast.py tech   --char N --ids 163 [--tag T]
     python -X utf8 tools/py/ps1_cast.py enemy  --scene N [--area A] [--frames N] [--poke ADDR=VAL:W;..] [--menu-frames N] [--menu-mash]
@@ -9,17 +9,18 @@
                                                [--p2-every N --p2-lo A --p2-hi B] [--p2-dump N] [--party-ids a,b] [--forge-args "x|y"]
     python -X utf8 tools/py/ps1_cast.py force  --scene N --ids e[:unit[:g+g]],.. [--char C [--party-ids a,b]] [--unit U] [--target T] [--window N] [--area A] [--menu-frames N]
                                                [--field-poke ADDR=VAL[:W];..] [--start-limit N]
-    python -X utf8 tools/py/ps1_cast.py attack --tag T [--keys "Circle:40,Circle:80,..."] [--frames 560]
+    python -X utf8 tools/py/ps1_cast.py attack --tag T [--keys "Confirm:40,Confirm:80,..."] [--frames 560]
 
 force queues one target; --target-mask 3+4 writes every unit an all-targets element hits, as the menu does (ocbattleview hits every present unit of the
 target's side that the all-target cast mask allows, so give those enemies). force checks every caster, group member and the target against the scene's units before it queues anything (a unit that is absent, hidden or
 dead would hang the cast): unit numbers are the script's bind_unit operand minus 0xE0, and the refusal lists the valid units. A cast that does not
 start within --start-limit run frames, or a GDB timeout, fails that one cast (captures.txt says so) and the batch goes on. --field-poke writes
-field-state memory (field script variables) before the battle id is poked, e.g. 0x80077DE8=2:2 sets field variable 0x1C8. The manifest records
+field-state memory (field script variables) before the battle id is poked, e.g. 0x80077DE8=2:2 sets field variable 0x1C8 on the
+Japanese build (the variable block is ps1_ram script_vars, variable n at +2n). The manifest records
 `area:` (battlefield operand) and `party_ids:` (character ids of the party) for tools/ours_cast34.ps1.
 
 Output per element id: tmp/r34/<id>/ref/{states/state_NNNNNN.sav (every 5 run frames), frames/frame_NNNNNN.png (every 4), manifest.txt}.
-Run frame 0 = the state the capture stage starts from (the cast's target select up; the confirming Circle is the first input).
+Run frame 0 = the state the capture stage starts from (the cast's target select up; the confirming press is the first input).
 --keys Button:frame = extra presses at that run frame (e.g. a creature list opened by the cast).
 --hold-enemies (batch / summon / tech): no enemy turn follows the cast, so the capture ends on the command orbit as an ocbattleview cast does;
 without it an enemy whose countdown runs out acts right after the cast and its attack camera holds the picture.
@@ -32,6 +33,8 @@ The emulator is a private copy (tmp/ds_cast, GDB port 2348), so other drivers ca
 --disc / --disc2: boot disc 2 (ps1ref.disc2()) for the scenes only disc 2 has (342-344, 458-471, 509). The base states are the
 *_d2 ones of 'ps1_capture.py prep --disc2' (built on first use); a saved state re-inserts its own disc, so disc-1 states cannot
 be used there. Applies to every mode.
+--region usa (or OC_PS1_REGION=usa): the USA build: its base states (tmp/ref/states_usa, 'ps1_capture.py prep --region usa'), a forged
+USA-build card for tagged bases, its confirm button, output under tmp/r34_usa/ instead of tmp/r34/.
 """
 import argparse
 import datetime
@@ -43,15 +46,16 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import ps1_capture as pc  # noqa: E402
+import ps1_ram  # noqa: E402
 import ps1_state as ps  # noqa: E402
 import ps1ref  # noqa: E402
+from ps1_ram import RAM  # noqa: E402
 from ps1ref import BUTTONS, Session  # noqa: E402
 
 ROOT = ps1ref.ROOT
 CAST_DS = os.path.join(ROOT, "tmp", "ds_cast")
 CAST_PORT = 2348
-CAST_MCD = os.path.join(CAST_DS, "memcards", "SLPM-87395_1.mcd")
-pc.MCD = CAST_MCD           # the forged card goes into the private emulator's folder
+pc.CARDS = os.path.join(CAST_DS, "memcards")
 STATES = pc.STATES
 OUT = os.path.join(ROOT, "tmp", "r34")
 FILL_POOL = [1, 29, 36, 12, 19, 32, 2, 43, 55, 73, 88, 40, 25]
@@ -100,11 +104,6 @@ def parse_pokes(spec):
         out.append((int(a, 0), int(v, 0), int(w)))
     return out
 
-
-# Turn countdown word and HP of a battle unit (units 3..8 are the enemy slots).
-UNIT_COUNTDOWN = 0x800E080C
-UNIT_HP = 0x800E0758
-UNIT_STRIDE = 0x410
 
 
 def apply_pokes(g, pokes):
@@ -257,13 +256,14 @@ def drive_cast(g, cid, idx, cols, extra_keys, steps, limit=3000):
     """Menu driver from the first command menu to the confirmed cast, every step gated on RAM (no fixed frame numbers: the enemy's
     turn order differs between runs, so the HIT% box opens at different times).
 
-    Command menu (tgt_064b 1 + menu_064a 1): Circle -> target select (tgt 2) -> Circle -> HIT% box (tgt 3). A box whose gauge is -1
-    (u0_gauge) gets Circle on the weak row; once a command menu has been seen with gauge >= 0 the next box has the Element row
+    Command menu (tgt_064b 1 + menu_064a 1): Confirm -> target select (tgt 2) -> Confirm -> HIT% box (tgt 3). A box whose gauge is -1
+    (u0_gauge) gets Confirm on the weak row; once a command menu has been seen with gauge >= 0 the next box has the Element row
     (the box shown right after a hit is that hit's animation and is ignored). Element row = cursor 3 (cur_064e): Up until it is
-    there, Circle. The element list shows the cursor as cur_064e = the grid column of the entry (cols: the set bits of the row's level
+    there, Confirm. The element list shows the cursor as cur_064e = the grid column of the entry (cols: the set bits of the row's level
     mask, ascending; Serge's row starts at column 2, Zappa's at 5); Down walks with wrap ((idx - open) mod n presses,
-    each checked against cur_064e). Circle -> target select (tgt 3, e05da = the selected id, checked): that state is returned, the
-    confirming Circle is the first input of the capture.
+    each checked against cur_064e). Confirm -> target select (tgt 3, e05da = the selected id, checked): that state is returned, the
+    confirming press is the first input of the capture. The USA build keeps the box open after a hit, already with the Element
+    row, and shows no command menu in between; the box with gauge >= 0 and no action running (act_kind 0) is used then.
     A cursor move blocks the next press for ~13 frames, so presses are spaced 14 frames apart."""
     B = BUTTONS
     GAP = 14
@@ -288,24 +288,24 @@ def drive_cast(g, cid, idx, cols, extra_keys, steps, limit=3000):
                 steps["rows"].append("step: element list open at index %d (cur_064e %d), %d Downs to index %d" % (at, cur, downs, idx))
                 cool = GAP
             elif cur == cols[idx]:
-                held, cool = B["Circle"], GAP
+                held, cool = B["Confirm"], GAP
             elif walked > len(cols) + 2:
                 raise CastError("Down walked %d times without reaching list index %d (cur_064e %d)" % (walked, idx, cur))
             else:
                 held, cool = B["Down"], GAP
                 walked += 1
         elif w["tgt_064b"] == 1 and w["menu_064a"] == 1:
-            held, cool = B["Circle"], GAP
+            held, cool = B["Confirm"], GAP
             if w["u0_gauge"] >= 0:
                 armed = True
         elif w["tgt_064b"] == 2 and not in_list:
-            held, cool = B["Circle"], GAP
+            held, cool = B["Confirm"], GAP
         elif w["tgt_064b"] == 3 and not in_list:
             if w["u0_gauge"] < 0:
-                held, cool = B["Circle"], GAP
+                held, cool = B["Confirm"], GAP
             elif armed or w["act_kind"] == 0:   # a first menu that never re-arms (tech casts) still gets its target step
                 if w["cur_064e"] == 3:
-                    held, cool = B["Circle"], GAP
+                    held, cool = B["Confirm"], GAP
                     steps["elem_sent"] = g.frame
                 else:
                     held, cool = B["Up"], GAP
@@ -334,8 +334,8 @@ def capture_id(a, mode, cid, base, row, work):
         if mode == "summon":
             if cid not in SUMMON_RING:
                 raise SystemExit("no ring colour known for summon %d" % cid)
-            for addr in (0x800DFF98, 0x800DFF9C, 0x800DFFA0):
-                g.poke(addr, SUMMON_RING[cid], 4)
+            for slot in range(3):
+                g.poke(RAM.ring + 4 * slot, SUMMON_RING[cid], 4)
         if a.menu_poke:
             apply_pokes(g, parse_pokes(a.menu_poke))
         f0 = g.frame
@@ -347,15 +347,16 @@ def capture_id(a, mode, cid, base, row, work):
         if mode == "tech" and w["party0"] != a.char:
             raise RuntimeError("party0 is %d, not character %d" % (w["party0"], a.char))
         keys = Keys()
-        keys.press("Circle", 0)
+        keys.press("Confirm", 0)
         for item in [x for x in (a.keys or "").split(",") if x]:
             b, f = item.split(":")
             keys.press(b, int(f))
         if a.pre_poke:
             apply_pokes(g, parse_pokes(a.pre_poke))
         if a.hold_enemies:
-            apply_pokes(g, [(UNIT_COUNTDOWN + UNIT_STRIDE * unit, 900, 2) for unit in range(3, 9)
-                            if int.from_bytes(g.read(UNIT_HP + UNIT_STRIDE * unit, 2), "little", signed=True) > 0])
+            # Turn countdown of every living enemy (units 3..8 are the enemy slots).
+            apply_pokes(g, [(RAM.unit(unit, ps1_ram.UNIT_COUNTDOWN), 900, 2) for unit in range(3, 9)
+                            if int.from_bytes(g.read(RAM.unit(unit, ps1_ram.UNIT_HP), 2), "little", signed=True) > 0])
         bh = g.watch(["u3_hp", "u4_hp", "u5_hp"])
         start_frame = g.frame
         seen = capture_run(g, ref, frames, keys=keys)
@@ -368,7 +369,7 @@ def capture_id(a, mode, cid, base, row, work):
     write_manifest(ref, cid, mode, [
         "row 0 of character %d: %s (list index %d, wrap length %d)" % (a.char, ",".join(map(str, row)), idx, n)] + steps["rows"] + [
         "base_hp: %6d %s" % (0, bhs),
-        "base: run frame 0 of this capture = the target select of the cast, the confirming Circle is pressed at run frame 0 (stage 1 from %s, %d frames)" % (os.path.basename(base), start_frame - f0),
+        "base: run frame 0 of this capture = the target select of the cast, the confirming press is at run frame 0 (stage 1 from %s, %d frames)" % (os.path.basename(base), start_frame - f0),
         "stage-1 e05da: %d" % w["e05da"],
         "ram checks: e05da %s (act_elem %s) with act_kind %s at the first fx_load != 0 (run frame %s)" % (seen["elem"], seen.get("act_elem"), seen["kind"], seen["fx"]),
         "window found: %s" % ok])
@@ -404,7 +405,7 @@ def run_pc(a, mode):
 def run_attack(a):
     if not a.tag:
         raise SystemExit("--tag is required")
-    ks = a.keys or "Circle:40,Circle:80,Circle:200,Circle:300,Cross:420"
+    ks = a.keys or "Confirm:40,Confirm:80,Confirm:200,Confirm:300,Cancel:420"
     frames = a.frames or 560
     k = Keys()
     for item in ks.split(","):
@@ -449,9 +450,9 @@ def run_enemy(a):
     log("pass 1: %d frames, state every %d, no frames, mash %s" % (p1_frames, a.p1_every, a.mash))
     with sess(enc) as g:
         bid = 0x200 | scene
-        g.poke(0x80075906, bid, 2)
+        g.poke(RAM.btl_id, bid, 2)
         if a.area is not None and a.area >= 0:
-            g.poke(0x800790FC, a.area, 2)
+            g.poke(RAM.area, a.area, 2)
         log("battle id poked to 0x%X (area %s)" % (bid, a.area))
         if a.poke or a.var_poke:   # pokes need the running battle (the battle init would overwrite them in the field state)
             menu_k = Keys()
@@ -466,8 +467,8 @@ def run_enemy(a):
             else:
                 raise RuntimeError("no battle menu reached from the poked encounter within %d frames: %s" % (a.menu_frames, g.watch()))
             pokes = parse_pokes(a.poke)
-            if a.var_poke:   # battle-script variables: u16 at [0x800E2FC8] + 0x84 + (id & 0xFFFE)
-                vb = g.gdb.u(0x800E2FC8, 4)
+            if a.var_poke:   # battle-script variables: u16 at [btl_vars_ptr] + 0x84 + (id & 0xFFFE)
+                vb = g.gdb.u(RAM.btl_vars_ptr, 4)
                 for item in [x for x in a.var_poke.split(";") if x]:
                     vid, val = item.split("=")
                     pokes.append((vb + 0x84 + (int(vid, 0) & 0xFFFE), int(val, 0), 2))
@@ -526,7 +527,7 @@ def run_enemy(a):
         prune_capture(ref, r["elem"], a.no_prune)
         write_manifest(ref, r["elem"], "enemy", [
             "enemy_unit: %d scene %d" % (r["unit"], scene), "target_unit: %d" % r["target"],
-            "base: pass-1 state frame %d (scene poke 0x80075906 = 0x%X, area %s, extra pokes: %s)" % (f0, 0x200 | scene, a.area, a.poke),
+            "base: pass-1 state frame %d (scene poke btl_id = 0x%X, area %s, extra pokes: %s)" % (f0, 0x200 | scene, a.area, a.poke),
             "harvest: pass-1 start %d end %d; reproduction at run frame %d: e05da=%d act_actor=%d -> %s" % (
                 r["start"], r["end"], rel, e, u, "OK" if repro else "MISMATCH")])
         report.append("%s\telem %d unit %d target %d repro %s" % (name, r["elem"], r["unit"], r["target"], "OK" if repro else "MISMATCH"))
@@ -541,7 +542,7 @@ def run_enemy(a):
 def force_queue(g, unit, element, target, group=None, mask_units=None):
     """Writes one element action into the unit's action queue, as the script's queue_attack op does, so its next turn casts it.
     mask_units = every unit an all-targets element hits, as the menu's target ring writes them; default the one target."""
-    vb = g.gdb.u(0x800E2FC8, 4)
+    vb = g.gdb.u(RAM.btl_vars_ptr, 4)
     head_addr = vb + unit * 2 + 0x81C
     head = g.gdb.u(head_addr, 2)
     head = head - 0x10000 if head >= 0x8000 else head
@@ -554,12 +555,12 @@ def force_queue(g, unit, element, target, group=None, mask_units=None):
     g.poke(entry + 0x6BA, 1, 1)
     mask = 0
     for u in mask_units or [target]:
-        mask |= g.gdb.u(0x800DE90C + u * 2, 2)
+        mask |= g.gdb.u(RAM.target_masks + u * 2, 2)
     g.poke(entry + 0x6B4, mask, 2)
     g.poke(head_addr, head + 1, 2)
 
 
-UNIT_BLOCK, UNIT_STRIDE, UNIT_MODEL, UNIT_COUNT = 0x800E06A0, 0x410, 0x800E0830, 9
+UNIT_COUNT = 9
 RAM_END = 0x80200000
 
 
@@ -567,9 +568,9 @@ def read_units(g):
     """One dict per unit slot 0..8 of the running battle: current HP, model pointer, position and the reason the slot cannot act (or None)."""
     out = []
     for u in range(UNIT_COUNT):
-        base = UNIT_BLOCK + u * UNIT_STRIDE
-        hp = g.gdb.u(base + 0xB8, 2)
-        model = g.gdb.u(UNIT_MODEL + u * UNIT_STRIDE, 4)
+        base = RAM.unit(u)
+        hp = g.gdb.u(base + ps1_ram.UNIT_HP, 2)
+        model = g.gdb.u(RAM.unit(u, ps1_ram.UNIT_MODEL), 4)
         row = {"unit": u, "hp": hp, "model": model, "x": 0, "z": 0, "why": None}
         if not (0x80010000 <= model < RAM_END) or model & 3:
             row["why"] = "no model (pointer 0x%08X): the slot is absent" % model
@@ -625,9 +626,9 @@ def run_force(a):
         if a.field_poke:   # field-state memory (script variables) must be set before the battle loads
             apply_pokes(g, parse_pokes(a.field_poke))
         if scene is not None:
-            g.poke(0x80075906, 0x200 | scene, 2)
+            g.poke(RAM.btl_id, 0x200 | scene, 2)
         if a.area is not None and a.area >= 0:
-            g.poke(0x800790FC, a.area, 2)
+            g.poke(RAM.area, a.area, 2)
         for k in range(a.menu_frames + 1):
             if k >= 100 and k % 5 == 0:
                 w = g.watch(["ovl_id", "tgt_064b", "btl_frame"])
@@ -640,8 +641,8 @@ def run_force(a):
         for elem, unit, group in specs:
             check_units(units, [("caster of element %d" % elem, unit)] + [("group member of element %d" % elem, m) for m in group or []] +
                         [("target", a.target)] + [("target", m) for m in mask_units or []], scene)
-        area = g.gdb.u(0x800790FC, 2)
-        party_ids = a.party_ids or ",".join(str(g.gdb.u(0x800786F4 + i, 1)) for i in range(3))
+        area = g.gdb.u(RAM.area, 2)
+        party_ids = a.party_ids or ",".join(str(g.gdb.u(RAM.party + i, 1)) for i in range(3))
         retry(g.save_state, menu)
     report = []
     for elem, unit, group in specs:
@@ -703,7 +704,7 @@ def main(argv):
     ap.add_argument("--no-prune", action="store_true")
     ap.add_argument("--skip-existing", action="store_true")
     ap.add_argument("--rebuild", action="store_true")
-    ap.add_argument("--mash", default="Circle")
+    ap.add_argument("--mash", default="Confirm")
     ap.add_argument("--max-caps", type=int, default=99)
     ap.add_argument("--p1-every", type=int, default=30)
     ap.add_argument("--p2-every", type=int, default=5)
@@ -715,8 +716,9 @@ def main(argv):
     ap.add_argument("--keys", default="")
     ap.add_argument("--disc", default="1", help="1, 2 or an image path")
     ap.add_argument("--disc2", action="store_true", help="same as --disc 2")
+    ap.add_argument("--region", default=os.environ.get("OC_PS1_REGION") or "japan", help="japan or usa (base states of 'prep --region usa', output tmp/r34_usa)")
     a = ap.parse_args(argv)
-    global CAST_DS, CAST_PORT, CAST_MCD
+    global CAST_DS, CAST_PORT, STATES, OUT
     if a.ds_dir:
         CAST_DS = os.path.abspath(a.ds_dir)
         CAST_PORT = a.port or (2348 if os.path.basename(CAST_DS) == "ds_cast" else 2345)
@@ -724,9 +726,11 @@ def main(argv):
         CAST_DS, CAST_PORT = ps1ref.DS_DIR, ps1ref.GDB_PORT
     if a.port:
         CAST_PORT = a.port
-    CAST_MCD = os.path.join(CAST_DS, "memcards", "SLPM-87395_1.mcd")
-    pc.MCD = CAST_MCD
-    pc.set_disc("2" if a.disc2 else a.disc)
+    pc.CARDS = os.path.join(CAST_DS, "memcards")
+    pc.set_disc("2" if a.disc2 else a.disc, a.region)
+    STATES = pc.STATES
+    if pc.REGION == "usa":
+        OUT = os.path.join(ROOT, "tmp", "r34_usa")
     if not os.path.isdir(CAST_DS):
         raise SystemExit("private emulator folder %s missing (copy tools/duckstation, set GDBServerPort = %d)" % (CAST_DS, CAST_PORT))
     if a.mode == "force":

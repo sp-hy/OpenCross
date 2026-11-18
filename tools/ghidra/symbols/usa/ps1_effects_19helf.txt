@@ -1,0 +1,6 @@
+# PS1 project symbol list, USA build (SLUS_010.41): effect overlay 19helf.prg (base 0x801C5E00).
+# Format: name = 0xADDR;  # function|data: description. Names come from this project's own reverse engineering.
+# Apply with tools\ghidra\ApplySymbols.java <this file> (see symbols\README.md).
+# Addresses found by matching the Japanese list against the USA executable and overlays; the names and descriptions are the same.
+fx_19helf_op_101_grow = 0x801C6028;  # function: Op 0x101: scales the model 0 to full and moves back
+fx_19helf_op_100_shrink = 0x801C6190;  # function: Op 0x100: interpolates position while shrinking scale

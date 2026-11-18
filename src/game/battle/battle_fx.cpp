@@ -16,6 +16,7 @@
 #include "import/model.h"
 #include "import/room_effects.h"
 #include "import/tim.h"
+#include "vfs/disc_names.h"
 
 namespace oc::game {
 
@@ -414,9 +415,11 @@ bool BattleFxLibrary::init(const vfs::Vfs& vfs, bool bind_globals) {
   vfs_ = &vfs;
   cache_.clear();
   slots_.clear();
-  const auto fnd1 = vfs.read("cdrom/cdrom.fnd");
-  if (!fnd1) return false;
-  const auto fnd2 = vfs.read("cdrom/cdrom2.fnd");
+  // Disc mode has no index files; the built-in copy of both discs' indexes stands in.
+  auto fnd1 = vfs.read("cdrom/cdrom.fnd");
+  const bool builtin = !fnd1;
+  if (builtin) fnd1 = vfs::builtin_index_bytes(1);
+  const auto fnd2 = builtin ? std::optional<Bytes>(vfs::builtin_index_bytes(2)) : vfs.read("cdrom/cdrom2.fnd");
   const Bytes b2 = fnd2 ? *fnd2 : Bytes{};
   slots_ = effects::battle_effect_slots(*fnd1, b2, [&](const std::string& path) { return vfs.exists("cdrom/" + path); });
   // Summon motion streams: group-11 local index 0x2D + n (group 11 starts at fnd entry 4323).

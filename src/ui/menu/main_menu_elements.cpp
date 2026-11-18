@@ -437,8 +437,9 @@ void MainMenu::Impl::build_use() {
     plate(cur_char(), stack.id, 275, 42.0f + 24.0f * static_cast<float>(row));
     const std::u32string nm = element_name(stack.id);
     const float rel = fit_rel(nm, 140, 0.9f);
-    TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y, nm, row == lit_row ? ps1_colour(0x7A6AA5) : kText, rel);
-    Digits(453, y, padded_number(std::min<int>(stack.qty, 99), 2), 16, kText);
+    // The disc draws the name 1 pixel lower on its plate.
+    TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y + (ps1_text() ? 1.0f : 0.0f), nm, row == lit_row ? ps1_colour(0x7A6AA5) : kText, rel);
+    Count(453, y, std::min<int>(stack.qty, 99), kText);
   }
   const int total = std::max(cnt, kVisibleRows);
   if (use.list_scroll > 0) scroll_arrow(485, 35, true);
@@ -447,7 +448,9 @@ void MainMenu::Impl::build_use() {
   tri(251, 47.0f + 24.0f * static_cast<float>(use.list_cur - use.list_scroll), !use.target);
   if (cnt > 0 && use.list_cur < cnt) {
     const int id = gs->slot.elements[static_cast<size_t>(list[static_cast<size_t>(use.list_cur)])].id;
-    element_info(id, 260, 342, 378.5f, 19.5f);
+    // The JP disc puts the line 2 pixels and the description 6.5 higher.
+    const bool console = font_build(face_gn, import::Ps1Font::Build::Console);
+    element_info(id, 260, console ? 340.0f : 342.0f, console ? 372.0f : 378.5f, 19.5f);
   }
   group(Centre);
   message(PX(268), PY(412));
@@ -477,23 +480,30 @@ Tex* MainMenu::Impl::plate_tex(int tile) {
 // line 0, e.g. "Single Ally (Consum.)") at y0, wrapped at a space onto the next line (x, y0 + 18) when it would pass x 462; the two
 // description lines at y1 (+ pitch).
 void MainMenu::Impl::element_info(int id, float x, float y0, float y1, float pitch) {
-  constexpr float kRel = 0.97f, kTargetX = 80, kRightEdge = 462, kWrapPitch = 18;
+  constexpr float kRel = 0.97f, kRightEdge = 462, kWrapPitch = 18;
+  // The JP disc lays the line out in the console font's cells, 28 pixels further right (its frame stands 27 further right): the level's
+  // cell 32, the plus-minus 49, the reach's cell 60 and the target 84 pixels from the start.
+  struct Columns {
+    float start, level, sign, reach, target;
+  };
+  const Columns cols = font_build(face_gn, import::Ps1Font::Build::Console) ? Columns{28, 32, 49, 60, 84} : Columns{0, 24, 48.5f, 53, 80};
+  x += cols.start;
   auto description = [&](int line) {
     const std::string* row = lt.sysmes((0x1Au << 16) | static_cast<u32>(id * 3 + line), lang);
     return row ? trim(*row) : std::string();
   };
   TP(x, y0, utf32(menu_str(0x801F29B0, "Lv")), kName, kRel);
-  Digits(x + 24, y0, padded_number(rules->el_level(id), 1), 16, kName);
+  Digits(x + cols.level, y0, padded_number(rules->el_level(id), 1), 16, kName);
   if (const data::ElemRec* record = rules->elem(id)) {
-    TP(x + 48.5f, y0, U"\u00B1", kName, kRel);
-    Digits(x + 53, y0, padded_number(record->raw[0x12] & 0xF, 1), 16, kName);
+    TP(x + cols.sign, y0, U"\u00B1", kName, kRel);
+    Digits(x + cols.reach, y0, padded_number(record->raw[0x12] & 0xF, 1), 16, kName);
   }
   const std::string target = description(0);
   size_t cut = target.size();
-  while (cut != std::string::npos && cut > 0 && twp(utf32(target.substr(0, cut)), kRel) > kRightEdge - x - kTargetX)
+  while (cut != std::string::npos && cut > 0 && twp(utf32(target.substr(0, cut)), kRel) > kRightEdge - x - cols.target)
     cut = target.rfind(' ', cut - 1);
   if (cut == std::string::npos || cut == 0) cut = target.size();
-  TP(x + kTargetX, y0, utf32(target.substr(0, cut)), kName, kRel);
+  TP(x + cols.target, y0, utf32(target.substr(0, cut)), kName, kRel);
   if (cut < target.size()) TP(x, y0 + kWrapPitch, utf32(trim(target.substr(cut))), kName, kRel);
   for (int line = 1; line <= 2; ++line)
     if (const std::string text_line = description(line); !text_line.empty())
@@ -521,8 +531,17 @@ void MainMenu::Impl::plate(int character, int id, float x, float y) {
   if (Tex* tex = plate_tex(kTile[colour])) Img(tex, PX(x), PY(y), PX(184), PY(24), 0, 0, 1, 1, grey(0x80));
 }
 
-// Thin 173x24 frame around an empty slot (eleempty.png), both art modes.
+// Thin 173x24 frame around an empty slot (eleempty.png), both art modes. Played from the discs it is the PS1's own outline: 2-px lines of
+// grey 0x848484 round (x + 5, y + 4) .. (x + 179, y + 29).
 void MainMenu::Impl::empty_box(float x, float y) {
+  if (!texs.hd()) {
+    const u32 line = rgb(132, 132, 132);
+    rect(PX(x + 5), PY(y + 4), PX(174), PY(2), line);
+    rect(PX(x + 5), PY(y + 27), PX(174), PY(2), line);
+    rect(PX(x + 5), PY(y + 6), PX(2), PY(21), line);
+    rect(PX(x + 177), PY(y + 6), PX(2), PY(21), line);
+    return;
+  }
   if (Tex* tex = texs.load("hd/menu/eleempty.png")) Img(tex, PX(x + 4), PY(y), PX(174), PY(25));
 }
 
@@ -549,6 +568,12 @@ void MainMenu::Impl::grid_minimap(int character, float px, float py, int sel_row
       if (hold_id > 0 && row >= lo && row <= hi) tint = ps1_colour(0xA04040);
       if (row == sel_row) tint = grey(0xA0);
       const float x = px + 18.0f * static_cast<float>(row), y = py + 9.0f * static_cast<float>(col);
+      if (!texs.hd()) {
+        // The disc's "elbi" sheet of menuelem.prd: frame 8 the empty cell, the colours by HD file number.
+        static const int kElbiFrame[9] = {0, 8, 4, 3, 7, 2, 6, 5, 9};
+        if (Tex* tex = texs.sheet("elbi", kElbiFrame[file])) Img(tex, PX(x + tex->ox), PY(y + tex->oy), PX(tex->w), PY(tex->h), 0, 0, 1, 1, tint);
+        continue;
+      }
       char path[48];
       std::snprintf(path, sizeof path, "hd/menu/menuelem/menuelem_%d.png", file);
       if (Tex* tex = texs.load(path)) Img(tex, PX(x), PY(y), PX(16), PY(8), 0, 0, 1, 1, tint);
@@ -572,11 +597,13 @@ void MainMenu::Impl::build_grid() {
   Frame(56, 10, 27);
   {
     // Caption "Element Level N" in the grid frame's top gap (cmnmes "Element Level"; ink at (19.7, 27), bn 0.31, bn in every language).
-    HT(face_gn, 19.7f, 27.0f, capt("Element Level", "Element Level"), kText, 0.31f);
+    if (texs.hd()) HT(face_gn, 19.7f, 27.0f, capt("Element Level", "Element Level"), kText, 0.31f);
     // The level number is its own print at (0x66, 0x19) in kb x 0.625, offset by a per-language x
     // {-10, 5, 0x1B, -0x10, 0xB, -10}[L], so it follows the end of the translated caption (FR / IT / ES are longer).
     static const float k42EDE0[6] = {-10, 5, 0x1B, -0x10, 0xB, -10};
-    HS(0x91, 0x66 + k42EDE0[lang_index()], 0x19, utf32(std::to_string(cell_row + 1)), kText);
+    // Played from the discs the number is a big sheet digit after the frame's own caption, in both builds.
+    if (!texs.hd()) SpriteNumber(cell_row + 1, 0x66, 0x19, true);
+    else HS(0x91, 0x66 + k42EDE0[lang_index()], 0x19, utf32(std::to_string(cell_row + 1)), kText);
   }
   grid_minimap(character, 50, 45, cell_row, held);
   // The cell strip of the shown row (the old row while a row change slides it out), shifted by the slide and clipped to x 13..231; the
@@ -650,7 +677,8 @@ void MainMenu::Impl::build_grid() {
       static const char* const kFallback[2][2] = {{"Remove All", "Remove"}, {"Auto Allocate", "Fill Blanks"}};
       const std::u32string nm = utf32(menu_str(kLabel[arrow_side][idx], kFallback[arrow_side][idx]));
       const float rel = fit_rel(nm, 124, 0.9f);
-      TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt, nm, col, rel);
+      // The USA menu font's label sits 1 px lower, centred in the empty box.
+      TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt + (font_build(face_gn, import::Ps1Font::Build::UsaMenu) ? 1.0f : 0.0f), nm, col, rel);
       if (!list_dim) {
         if (arrow_side) pointer(287.0f - static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), true);
         else pointer(443.0f + static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), false);
@@ -663,7 +691,7 @@ void MainMenu::Impl::build_grid() {
     const std::u32string nm = element_name(stack.id);
     const float rel = fit_rel(nm, 124, 0.9f);
     TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt, nm, col, rel);
-    Digits(453, yt, padded_number(std::min<int>(stack.qty, 99), 2), 16, col);
+    Count(453, yt, std::min<int>(stack.qty, 99), col);
   }
   const float cursor_y = 47.0f + 24.0f * static_cast<float>(list_cur - list_scroll);
   if (prompt != GridPrompt::None) tri(251, cursor_y, false);
@@ -691,7 +719,8 @@ void MainMenu::Impl::build_grid() {
   } else {
     const int id = focus == 1 ? gs->cell_element(character, cell_row, cell_col) : list_element(list_cur);
     if (id > 0 && id < 0x80) {
-      element_info(id, 260, 344, 384, 19.5f);
+      // The JP disc puts the description 4 pixels higher.
+      element_info(id, 260, 344, font_build(face_gn, import::Ps1Font::Build::Console) ? 380.0f : 384.0f, 19.5f);
       if (rules->el_innate_only(id)) {
         const int colour_mask = colour_index(character, id) >= 0 ? rules->el_colour(id) : 0;
         int ci = 0;
@@ -724,6 +753,10 @@ void MainMenu::Impl::grid_help(int character) {
     default: break;
   }
   const bool scope = entry == 5 || entry == 6;
+  // The JP disc's box (its frame 27 pixels further right) holds the text and the choice cursors 28 pixels further right, the text
+  // 1 pixel higher.
+  const bool console = font_build(face_gn, import::Ps1Font::Build::Console);
+  const float box_dx = console ? 28.0f : 0.0f, text_dy = console ? -1.0f : 0.0f;
   // Leading spaces and runs of two or more advance 4.06 PS1 px each (they line the words up with the choice cursors); single spaces
   // inside a phrase are the font's.
   constexpr float kSpaceAdvance = 4.06f;
@@ -745,22 +778,22 @@ void MainMenu::Impl::grid_help(int character) {
     if (!row || row->empty()) continue;
     std::string row_text = *row;
     const bool choice_line = entry >= 4 && entry <= 6 && line == 2;
-    float x = choice_line ? 286.0f : 260.0f;
-    if (scope && line == 0) row_text = import::u32_to_utf8(char_name(character)) + " " + trim(row_text), x = 302;
+    float x = box_dx + (choice_line ? 286.0f : 260.0f);
+    if (scope && line == 0) row_text = import::u32_to_utf8(char_name(character)) + " " + trim(row_text), x = box_dx + 302;
     const u32 colour = scope && line == 2 && stand_in >= 0 ? ps1_colour(0x404040) : kName;
     size_t start = 0;
     for (int piece = 0; line + piece < 4 && start <= row_text.size(); ++piece) {
       const size_t end = std::min(row_text.find('\n', start), row_text.size());
       const std::string part = row_text.substr(start, end - start);
-      spaced_line(x, (choice_line ? 342.5f : 345.0f) + 18.0f * static_cast<float>(line + piece), part, colour);
+      spaced_line(x, text_dy + (choice_line ? 342.5f : 345.0f) + 18.0f * static_cast<float>(line + piece), part, colour);
       start = end + 1;
     }
   }
   switch (prompt) {
-    case GridPrompt::RemoveAll: tri(290.0f + 80.0f * static_cast<float>(prompt_cur), 382, true); break;
+    case GridPrompt::RemoveAll: tri(box_dx + 290.0f + 80.0f * static_cast<float>(prompt_cur), 382, true); break;
     case GridPrompt::AutoAllocate:
-    case GridPrompt::FillBlanks: tri(276, 344.0f + 36.0f * static_cast<float>(prompt_cur), true); break;
-    case GridPrompt::Sort: tri(268, 365.0f + 18.0f * static_cast<float>(prompt_cur), true); break;
+    case GridPrompt::FillBlanks: tri(box_dx + 276, 344.0f + 36.0f * static_cast<float>(prompt_cur), true); break;
+    case GridPrompt::Sort: tri(box_dx + 268, 365.0f + 18.0f * static_cast<float>(prompt_cur), true); break;
     default: break;
   }
 }

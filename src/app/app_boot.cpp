@@ -1,5 +1,5 @@
-// The boot sequence: config -> window -> VFS / mods -> GPU -> audio -> routes -> flow / saves -> menus -> field -> battle -> title,
-// then the start state ([Debug] Room / Flow / Battle, the room sweep, or the title with RDE's boot logo).
+// The boot sequence: config -> window -> GPU -> data source (app_source.cpp) -> VFS / mods -> renderer -> audio -> routes -> flow /
+// saves -> menus -> field -> battle -> title, then the start state ([Debug] Room / Flow / Battle, the room sweep, or the title with RDE's boot logo).
 #include "app/app.h"
 
 #include <algorithm>
@@ -24,8 +24,9 @@ namespace oc::app {
 
 namespace {
 
-// Uploads ui/background.png from the install; leaves `texture` empty if the file is missing.
+// Uploads ui/background.png from the install; leaves `texture` empty if the file is missing (always on the PS1 discs).
 bool load_test_image(const vfs::Vfs& files, render::GpuContext& ctx, render::Texture& texture) {
+  if (!files.has_archive("ui")) return false;
   auto bytes = files.read("ui/background.png");
   if (!bytes) {
     log::warn("ui/background.png not found in the install");
@@ -42,10 +43,13 @@ bool load_test_image(const vfs::Vfs& files, render::GpuContext& ctx, render::Tex
 int App::init(int argc, char** argv) {
   init_config(argc, argv);
   if (!init_window()) return 1;
+  if (!init_gpu()) return 1;
+  // The player quit on the not-found screen or the version picker: run() ends at once.
+  if (!init_source()) return 0;
   init_vfs();
   // The menu's kb_70 face (~190 MB) is read on a worker while the renderer and the other screens start; init_menus finds it parsed.
   std::future<std::shared_ptr<const import::SpriteFont>> menu_font;
-  if (!files.game_dir().empty())
+  if (files.has_archive("font"))
     menu_font = std::async(std::launch::async, [this] { return ui::font::load(files, ui::font::member(ui::font::kKb, !platform::art_is_hd(config.art_mode))); });
   if (!init_render()) return 1;
   init_audio();
@@ -54,6 +58,7 @@ int App::init(int argc, char** argv) {
   init_saves();
   init_menus();
   init_field();
+  init_disc_prompt();
   init_battle();
   init_oc_achievements();
   init_title();
@@ -110,11 +115,7 @@ void App::init_config(int argc, char** argv) {
   // Scripted runs stay off the player's Steam account.
   steam_allowed = own_ini && !std::getenv("OC_QUIET");
 
-  game_dir = platform::find_game_dir(config.game_dir);
-  const platform::SaveDirPick save_pick = platform::find_save_dir(config.save_dir, own_ini ? profile_dir : std::filesystem::path());
-  save_dir = save_pick.dir;
-  log::info("game dir: {}", game_dir.empty() ? "(not found)" : game_dir.string());
-  log::info("save dir: {} ({})", save_dir.empty() ? "(not found)" : save_dir.string(), save_pick.how);
+  // The game data and the save folder are found by init_source, once the window can show the not-found screen.
   // A --config run without its own [Paths] SaveDir found the player's save folder: it never auto-saves into it.
   if (!own_ini && config.save_dir.empty() && config.auto_save) {
     config.auto_save = false;
@@ -134,12 +135,14 @@ bool App::init_window() {
 }
 
 void App::init_vfs() {
-  if (game_dir.empty() || !files.open(game_dir)) log::warn("VFS unavailable; running without game data");
+  // init_source opened the discs already; an RDE install is opened here.
+  if (!game_dir.empty() && !files.open(game_dir)) log::warn("VFS unavailable; running without game data");
   name_tables.init(&files);
   // RDE: cdrom2 overrides cdrom in HD mode.
   files.set_hd_mode(platform::art_is_hd(config.art_mode));
-  // Mods: <GameDir>\mods\<name>\..., archives and bare .dat files there, resolved once; the overlay follows the art mode (Modded = HD + mods).
-  if (!files.game_dir().empty()) {
+  // Mods: <GameDir>\mods\<name>\... (disc mode: next to opencross.exe), archives and bare .dat files there, resolved once; the overlay
+  // follows the art mode (Modded = HD + mods).
+  if (data_ready()) {
     {  // a missing <GameDir>\mods is created so players see where mods go (the Mods tab's Rescan finds what they drop in)
       std::error_code ec;
       if (!std::filesystem::exists(files.game_dir() / "mods", ec)) {
@@ -199,7 +202,8 @@ void App::init_vfs() {
   // Mods tab "Dump all textures": the headless dump on a worker thread, progress polled by the tab.
   render::TextureDumpHooks hooks;
   // `what` holds game::DumpSet bits.
-  hooks.start = [this](unsigned what) { return !files.game_dir().empty() && what != 0 && texture_dump_job.start(files.game_dir(), what); };
+  // The dump opens the RDE install a second time: there is none in disc mode.
+  hooks.start = [this](unsigned what) { return !game_dir.empty() && what != 0 && texture_dump_job.start(game_dir, what); };
   hooks.cancel = [this] { texture_dump_job.request_cancel(); };
   hooks.running = [this] { return texture_dump_job.running(); };
   hooks.status = [this] {
@@ -215,23 +219,28 @@ void App::init_vfs() {
   render::set_texture_dump_hooks(std::move(hooks));
 }
 
-bool App::init_render() {
+bool App::init_gpu() {
   if (!ctx.init(window.handle(), config.vsync, config.gpu_driver)) return false;
   ctx.set_msaa(static_cast<u32>(config.msaa));
   ctx.set_anisotropy(static_cast<u32>(config.anisotropy));
   ctx.set_clear_color(0.08f, 0.09f, 0.14f);
+  if (!ui.init(ctx, window.handle())) return false;
+  window.set_event_hook(&render::ImGuiLayer::event_hook, &ui);
+  return true;
+}
 
+bool App::init_render() {
   // The [Shaders] full-screen pass.
   screen_ok = screen_pass.init(ctx);
   if (!screen_ok) log::warn("full-screen shader pass unavailable");
   if (!sprites.init(ctx)) return false;
   if (!meshes.init(ctx)) return false;
   if (!linear.create(ctx, true)) return false;
-  if (!ui.init(ctx, window.handle())) return false;
   if (ctx.driver_fallback()) ui.toast("Graphics backend: " + config.gpu_driver + " unavailable, using " + ctx.driver());
+  // The unknown build warning of disc mode, on the first screen.
+  if (!source_warning.empty()) ui.toast(source_warning, 8.0);
   load_shader_looks();
   ui.on_restart = [this] { restart_for_update = true; };
-  window.set_event_hook(&render::ImGuiLayer::event_hook, &ui);
   guide.init(platform::local_data_dir() / "guides");
   ui.quality_rows = [this] {
     if (guide.settings_rows(config)) ui.mark_changed();
@@ -315,8 +324,8 @@ void App::init_audio() {
     return [this, file = *line] { return files.read_mod_file(file); };
   });
   apply_audio_config();
-  if (!files.game_dir().empty()) mixer.set_vfs(&files);
-  sfx_ok = !files.game_dir().empty() && !sweeping && sfx_bank.load(files);
+  if (data_ready()) mixer.set_vfs(&files);
+  sfx_ok = data_ready() && !sweeping && sfx_bank.load(files);
   if (!sfx_ok && !sweeping) log::warn("audio: effect00.dat / wave0000.dat unavailable; sound effects are only logged");
   if (sfx_ok) mixer.set_sfx_bank(&sfx_bank);
   sfx_sink = sfx_ok ? static_cast<audio::Sfx*>(&akao_sfx) : static_cast<audio::Sfx*>(&log_sfx);
@@ -370,7 +379,7 @@ bool App::init_routes() {
 }
 
 void App::init_flow() {
-  if (!files.game_dir().empty() && !sweeping) tables_ok = tables.load(files);
+  if (data_ready() && !sweeping) tables_ok = tables.load(files);
 
   if (tables_ok) {
     flow_ready = flow.init(ctx, files, sprites, &tables, lang, &mixer);
@@ -476,7 +485,7 @@ void App::init_menus() {
     key_popup_ok = key_popup.init(ctx, files, sprites, menu_text);
     // RDE pause screen (Start / P): colour filter + PAUSE bar + Vibration / World Names rows.
     pause_ok = pause_screen.init(ctx, files, sprites, menu_text);
-    feature_icons_ok = feature_icons.init(ctx, files, sprites);
+    feature_icons_ok = feature_icons.init(ctx, files, sprites, menu_text);
     world_name_ok = world_name.init(ctx, files, sprites);
     // The Tele-Porter's "Current Party" screen.
     party_ok = party_screen.init(ctx, files, sprites, menu_text, lang);
@@ -495,8 +504,10 @@ void App::init_menus() {
 }
 
 void App::init_field() {
-  if (files.game_dir().empty() || !world.init(files, ctx, sprites, meshes, lang)) return;
+  if (!data_ready() || !world.init(files, ctx, sprites, meshes, lang)) return;
   world.set_mod_rooms(&mod_rooms);
+  // The VFS reads the disc the field puts in the drive (FE 65, the map transitions' disc check, a loaded save, a debug warp).
+  world.set_on_disc_change([this](int disc) { disc_changed(disc); });
   // No pickup panel: the room script shows its own "received" message window; only logged here.
   world.set_on_key_item([this](int item) {
     const std::string name = item < static_cast<int>(tables.key_item_names.size()) ? tables.key_item_names[static_cast<size_t>(item)] : std::string("?");
@@ -538,7 +549,7 @@ void App::init_field() {
 
 // [Debug] Battle=<scene>: start straight in a battle (development view) instead of the field.
 void App::init_battle() {
-  if (!files.game_dir().empty() && !sweeping && (config.debug_battle >= 0 || world_ok)) {
+  if (data_ready() && !sweeping && (config.debug_battle >= 0 || world_ok)) {
     if (!tables_ok) tables_ok = tables.load(files);
     battle_ready = tables_ok && battle.init(ctx, files, sprites, meshes, tables, &mixer);
     if (battle_ready) {
@@ -583,7 +594,7 @@ void App::init_battle() {
 void App::init_title() {
   if (flow_ready) flow.set_title_scene(world_ok && config.debug_battle < 0 && !sweeping);
   // The title room's underwater 3D scene: D3 PLAY_EFFECT "tit0".."tit3" are sequences of the global title.prd.
-  if (flow_ready && world_ok && !files.game_dir().empty() && config.debug_battle < 0 && !sweeping && title_bd.init(files, ctx, sprites, meshes)) {
+  if (flow_ready && world_ok && data_ready() && config.debug_battle < 0 && !sweeping && title_bd.init(files, ctx, sprites, meshes)) {
     world.set_effect_tap([this](script::NamedOp op, std::string_view effect_name) {
       if (world.room_name() != game::kTitleRoom) return false;
       if (op == script::NamedOp::PlayEffect && effect_name.size() == 4 && effect_name.compare(0, 3, "tit") == 0) {
@@ -599,8 +610,11 @@ void App::init_title() {
 void App::init_start_state() {
   if (world_ok && config.debug_battle < 0) {
     if (flow_ready) {
-      if (!flow_enabled) flow.machine().new_game(U"Serge", false);
-      else if (*flow_start == game::FlowState::Opening) flow.machine().new_game(U"Serge");
+      // The hero's default name in the game's language (the disc's own on the PS1 discs).
+      std::u32string hero = name_tables.default_name(0, lang);
+      if (hero.empty()) hero = U"Serge";
+      if (!flow_enabled) flow.machine().new_game(hero, false);
+      else if (*flow_start == game::FlowState::Opening) flow.machine().new_game(hero);
       world.set_game_state(&flow.game_state());
     }
     if (sweeping) {

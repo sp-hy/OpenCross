@@ -474,6 +474,8 @@ void FieldWorld::sim_tick() {
       portrait_left_ = (debug_.show_flags & 0x800) == 0;
       dialogue_.set_portrait_flags(true, portrait_left_);
     }
+    // A forced face is placed and sized as a speaker's portrait is.
+    if (debug_.show_face >= 0) place_dialogue_window(dialogue_, -1, debug_.show_message, debug_.show_flags & 0xFF, true);
     if (debug_.show_choice >= 0) dialogue_choice(debug_.show_choice_first, debug_.show_choice);
   }
 
