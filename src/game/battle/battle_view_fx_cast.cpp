@@ -427,6 +427,7 @@ bool BattleView::fx_begin() {
       fx_screen_tick();
       CamEvents cam_events;
       camera_.tick(cam_events);
+      camera_.tick_shots();
       for (const std::string& tag : cam_events.sounds) play_tag_sound(tag, 127);
       fx_->catch_up(fx_scene(), 1);
     }

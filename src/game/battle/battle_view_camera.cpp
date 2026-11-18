@@ -317,6 +317,8 @@ void BattleView::tick() {
   for (const auto& [unit, yaw] : pending_rot_) set_rot_now(unit, yaw);
   pending_rot_.clear();
   anm_tick();
+  // The camera's shot list steps after the units moved, so a following shot (flag 1) frames this tick's places.
+  camera_.tick_shots();
   // The battle-script stream (E0 / E2 / delays / executor waits) and its message window.
   script_pump();
   smsg_tick();
@@ -345,6 +347,7 @@ void BattleView::start_stage_intro(bool preroll) {
   for (int i = 0; i < kBtlinitLoadTicks; ++i) {
     CamEvents cam_events;
     camera_.tick(cam_events);
+    camera_.tick_shots();
     // The intro's 0x2B / 0x2C layer tasks step with the timelines.
     fx_screen_tick();
     stage_scene_.tick();

@@ -170,6 +170,11 @@ class BattleCamera {
   const std::string& shot_name() const { return last_name_; }
 
   void tick(CamEvents& events);
+  // Split mode (the battle view's camera): tick() leaves the shot list out and the host calls tick_shots() after its units moved, so a
+  // following shot (flag 1) frames this tick's places. A shot picked between tick() and tick_shots() (by a timeline or by the host) takes its
+  // first step on the next tick; one picked after tick_shots() steps on the next tick_shots(). Off: tick() does both.
+  void set_split_shots(bool on) { split_ = on; }
+  void tick_shots();
   CamPose pose(float alpha) const;
   // Debug free camera (game/free_cam.h): while set, pose() returns this instead of the shot's pose (the shot timeline keeps running underneath).
   // The host clears it before reading the shot's pose each frame and sets it again when the free camera is on.
@@ -236,6 +241,11 @@ class BattleCamera {
   const assets::StageCamera* shot_ = nullptr;
   // Head progress, 0..4096.
   float progress_ = 0;
+  // Split mode: set_split_shots. step_due_: tick() ran and tick_shots() has not yet; fresh_: the head was picked then, so its first step
+  // waits for the next tick.
+  bool split_ = false;
+  bool step_due_ = false;
+  bool fresh_ = false;
   CamPose prev_, cur_;
   std::string last_name_;
   bool lift_ = false;

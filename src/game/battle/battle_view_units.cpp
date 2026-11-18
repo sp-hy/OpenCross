@@ -299,16 +299,18 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
     if (listed < 0) return false;
     const Visual& other = vis_[static_cast<size_t>(listed)];
     float px = other.x, pz = other.z;
-    // Modes 1-4: origin + R(yaw) * the joint extent (max x / min x / min z / max z).
+    // Modes 1-4: origin + R(yaw) * the joint extent (max x / min x / min z / max z), measured from the root joint's own x / z, not from the
+    // model's origin.
     if (mode >= 1 && mode <= 4 && other.has_model) {
       std::vector<render::Mat4> pal;
       other.pose.palette(1.0f, pal);
       float mn_x = 1e9f, mx_x = -1e9f, mn_z = 1e9f, mx_z = -1e9f;
+      const float root_x = pal.empty() ? 0.0f : pal[0].at(0, 3), root_z = pal.empty() ? 0.0f : pal[0].at(2, 3);
       for (const render::Mat4& joint : pal) {
-        mn_x = std::min(mn_x, joint.at(0, 3));
-        mx_x = std::max(mx_x, joint.at(0, 3));
-        mn_z = std::min(mn_z, joint.at(2, 3));
-        mx_z = std::max(mx_z, joint.at(2, 3));
+        mn_x = std::min(mn_x, joint.at(0, 3) - root_x);
+        mx_x = std::max(mx_x, joint.at(0, 3) - root_x);
+        mn_z = std::min(mn_z, joint.at(2, 3) - root_z);
+        mx_z = std::max(mx_z, joint.at(2, 3) - root_z);
       }
       if (!pal.empty()) {
         const float lx = mode == 1 ? mx_x : (mode == 2 ? mn_x : 0.0f), lz = mode == 3 ? mn_z : (mode == 4 ? mx_z : 0.0f);
@@ -890,7 +892,10 @@ void BattleView::tex_flip_paste_hd(ModelHandle& model, int dx, int dy, const std
 }
 
 void BattleView::tick_units() {
-  for (int i = 0; i < battle::kUnits; ++i) {
+  // The monsters' scripts run first, then the party's (units 3-8, then 0-2): a PC caster's hit reaches its target's script on the next tick,
+  // so the reaction and the shots it picks start one tick after the caster's op.
+  for (int n = 0; n < battle::kUnits; ++n) {
+    const int i = (n + battle::kPcSlots) % battle::kUnits;
     Visual& visual = vis_[static_cast<size_t>(i)];
     const battle::Unit& unit_rec = bunit(i);
     if (!unit_rec.present) continue;
