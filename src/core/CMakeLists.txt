@@ -1,4 +1,6 @@
 add_library(oc_core STATIC
+  element_icon.cpp
+  element_icon.h
   features.cpp
   features.h
   log.cpp

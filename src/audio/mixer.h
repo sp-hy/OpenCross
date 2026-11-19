@@ -10,11 +10,13 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "audio/akao_player.h"
 #include "audio/hca_stream.h"
+#include "audio/song_memory.h"
 #include "audio/stream_resampler.h"
 #include "core/types.h"
 
@@ -61,20 +63,28 @@ class Mixer {
   void set_bus_gain(Bus bus, float gain) { bus_[size_t(bus)].store(gain, std::memory_order_relaxed); }
   float bus_gain(Bus bus) const { return bus_[size_t(bus)].load(std::memory_order_relaxed); }
 
-  // BGM commands (any thread). volume is RDE's 0..127; start_seconds as RDE's play command.
-  void play(std::shared_ptr<HcaStream> stream, int song_id, int volume127 = 127, double start_seconds = 0.0);
+  // BGM commands (any thread). volume is RDE's 0..127; start_seconds as RDE's play command. `resumable`: the song takes part in the
+  // music resume (set_music_resume).
+  void play(std::shared_ptr<HcaStream> stream, int song_id, int volume127 = 127, double start_seconds = 0.0, bool resumable = false);
   // Original music: AKAO sequence `musicNNN` (+ its instrument bank) rendered by our own sequencer on the BGM bus.
   // `song_id` is the game's music number (mapped to the file through the song table like play()). Reads the files on
   // the calling thread; returns false (and plays nothing) if they cannot be loaded. Needs set_vfs().
   void set_vfs(const vfs::Vfs* fs) { vfs_ = fs; }
   // The effect00 bank the original music's FE 0B ops play from (the SFX channel pool, like the play-SFX command). Main thread.
   void set_sfx_bank(const SfxBank* bank) { sfx_bank_ = bank; }
-  bool play_akao_bgm(int song_id, int volume127 = 127);
+  bool play_akao_bgm(int song_id, int volume127 = 127, bool resumable = false);
   // Music push / pop (original music): push_music saves the AKAO song that plays now with its whole sequencer state (nothing when no
   // AKAO song runs; the previous push is kept then). The next play_akao_bgm of that song id resumes from the saved state instead of
-  // the song start and uses the push up. drop_pushed_music forgets it.
+  // the song start and uses the push up. drop_pushed_music forgets it and the music resume's places.
   void push_music();
   void drop_pushed_music();
+  // Music resume ([Audio] MusicResume; any thread): a resumable song that is cut off while it sounds (stopped, or replaced by another
+  // song) leaves its place in a SongMemory, the sequencer state of the original music or the stream position of the remastered one.
+  // A resumable start of that song on the same source less than kSongResumeSeconds of mixer time later (rendered audio: real time
+  // with an output device) continues from the place and fades in from 1/32 of its volume over 31/120 s; a start at an explicit
+  // position (the post-battle restore of the remastered stream) or from the music push keeps that and drops the place. Off: no place
+  // is kept and the ones kept are dropped.
+  void set_music_resume(bool on) { resume_on_.store(on, std::memory_order_relaxed); }
   // SFX channel pool (AKAO programs on the SFX bus; up to 40 concurrent channels, 24 voices).
   void play_sfx(const SfxProgram& program);
   void stop_sfx();
@@ -181,9 +191,17 @@ class Mixer {
     double fade_secs = 0;
     // PlayAkao / Switch: the programs the song's FE 0B ops request.
     std::shared_ptr<const SfxTriggers> triggers;
+    // Play / PlayAkao: the song takes part in the music resume.
+    bool resumable = false;
   };
   void push(Cmd cmd);
   void apply(const Cmd& cmd);
+  // Music resume, audio thread: keeps the place of the song that sounds now (before a stop or another song replaces it).
+  void remember_song();
+  // The place the started song was cut at on its source, when the music resume applies to this start (the caller seeks / restores it).
+  std::optional<SongPlace> resume_place(const Cmd& cmd, bool akao);
+  // The resumed song's fade-in to `gain`.
+  void fade_in_resumed(float gain);
   // Sets the BGM level at once (no fade) and unpauses.
   void arm_level(float gain);
   // One frame of the linear BGM level ramp.
@@ -211,6 +229,12 @@ class Mixer {
   std::shared_ptr<const SfxTriggers> akao_triggers_;
   std::shared_ptr<const AkaoPlayer::MusicContext> pushed_;
   int pushed_song_ = -1;
+  std::atomic<bool> resume_on_{false};
+  SongMemory song_places_;
+  // The current song takes part in the music resume.
+  bool bgm_resumable_ = false;
+  // Frames rendered since the mixer was made: the music resume's clock.
+  u64 clock_frames_ = 0;
   std::unique_ptr<AkaoPlayer> sfx_player_;
   std::vector<float> fscratch_;
   const vfs::Vfs* vfs_ = nullptr;

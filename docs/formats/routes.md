@@ -84,14 +84,14 @@ The parser accepts 29 top-level verbs. `ent` is an entity index of the room, `ch
 | `tap <name> [ticks]` | Press, hold `ticks` (default 3, minimum 1), release, then 3 free ticks; finishes after the gap. |
 | `action` | `tap` of Enter (the confirm key) with the default timing. |
 | `pad on\|off` | Virtual pad connected with no button held / disconnected; releases its buttons. |
-| `pad tap <a\|b\|x\|y\|start\|l3\|r3> [ticks]` | Press and release a pad button (a = south, b = east, x = west, y = north, l3 / r3 = the stick clicks); connects the pad; same timing as `tap`. |
+| `pad tap <a\|b\|x\|y\|start\|l3\|r3\|back\|lb\|rb>[+<button>...] [ticks]` | Press and release a pad button (a = south, b = east, x = west, y = north, l3 / r3 = the stick clicks, back = Back / View, lb / rb = the shoulders), or several joined by `+` held together (a chord, e.g. `rb+back`); connects the pad; same timing as `tap`. |
 | `walk <x> <z> [tol] [timeout]` | Steer the virtual stick along a walk-mesh path until the player is within `tol` (default 24) of the world point. Replans every 40 ticks. Succeeds early if the room changed or a battle began. Fails when blocked (no 3-unit move in 150 ticks while the controls are free) or on timeout. |
 | `walk_ent <ent> [tol] [timeout]` | Same toward an entity's current position. Fails if the entity does not exist. |
 | `approach <ent> [tol] [timeout]` | `walk_ent` that never fails: it also ends (with a log line) when blocked for 40 ticks, on timeout, or when a dialogue opens / the controls are taken. |
 | `skip [timeout]` | Press confirm every 10 ticks while a dialogue is open; finishes after 45 consecutive ticks with no dialogue open. Fails if a dialogue stays open past the timeout. |
 | `mash until <what> <value> [timeout]` | Press confirm for 3 of every 12 ticks until the condition holds. `<what> <value>` = `flow <state>`, `room <name>`, `movie start\|end`, `idle <any>` (the argument must be present, its value is ignored), `shop open\|closed`, `menu open\|closed`, `message <n>` (a dialogue is open and the last field window opened shows message `n` of the room). |
 | `choose <n> [timeout]` | Confirm plain messages (3 of every 24 ticks) until a choice is pending, press Down `n` times (every 6 ticks), then confirm every 12 ticks until the dialogue closes. |
-| `fight [timeout]` | Wait for a battle (fail "no battle started" after `timeout`), then switch the battle view and results screen to auto and tap confirm 2 of every 8 ticks until the battle is over. Fails after 3 x `timeout` ticks in the battle. |
+| `fight [timeout]` | Wait for a battle (fail "no battle started" after `timeout`), then switch the battle view and results screen to auto and tap confirm 2 of every 8 ticks until the battle is over or the Retry battle choice is up. Fails after 3 x `timeout` ticks in the battle. |
 
 Key names for `key` and `tap`:
 
@@ -123,12 +123,13 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `wait room <name>` | The field room is `<name>`, no battle is active and the screen has faded back in. |
 | `wait dialogue open\|closed` | A dialogue is open (anything other than `open` means closed). |
 | `wait text <words...>` | An open dialogue's message (plain text, newlines as spaces) contains the words joined by single spaces. |
-| `wait battle start\|end\|results` | A battle is active / not active / the post-battle results screen (or a versus battle's outcome plate) is up. |
-| `wait idle` | The controls are free: no dialogue, fade, transition, menu, shop, key-item list, pause, party screen or movie, and no battle; and the input has settled: the pad lock after a room load or a closed screen and the menu-button wait after a menu screen have run out, and no load or menu-open fade (or its black veil) is running. A menu key tapped right after it opens the menu. `mash until idle` uses the same test. |
+| `wait battle start\|end\|results\|retry` | A battle is active / not active / the post-battle results screen (or a versus battle's outcome plate) is up / the Retry battle choice is up (`rules/battle.md` 7.6). |
+| `wait idle` | The controls are free: no dialogue, fade, transition, menu, shop, key-item list, pause, dialogue log window, party screen or movie, and no battle; and the input has settled: the pad lock after a room load or a closed screen and the menu-button wait after a menu screen have run out, and no load or menu-open fade (or its black veil) is running. A menu key tapped right after it opens the menu. `mash until idle` uses the same test. |
 | `wait flow <title\|name\|slots\|opening\|field>` | The game flow is in that state and no movie is playing. |
 | `wait movie start\|end` | A movie is playing / has finished (`start` or `open` = wanted playing). |
 | `wait guide <0\|1\|2>` | The user guide shows that page (1 controller, 2 keyboard, 0 closed). |
 | `wait menu open\|closed` | The main menu, a save screen, rename, party or New Game+ list is up / gone. |
+| `wait records` | The record pages' room-script scan has finished (`[Game] OpenCrossMenu`; `rules/menus.md` 17.6). |
 | `wait shop open\|closed` | A shop screen is up / gone. |
 
 ### 3.3 Loads, writes and requests (debug state changes, return at once unless noted)
@@ -139,6 +140,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `set var <hexid> <value>` | Write a script variable. |
 | `set group <0..31> <0\|1>` | Show / hide a background tile group as BG_GROUP_ON / OFF (80 / 81) do. |
 | `set option <hexmask> <0\|1>` | Set or clear bits of the settings options word (0x200 run/walk toggle, 0x800 analog stick). |
+| `set skin <byte>` | Set the window frame byte of the game options (0..14; 15 and up reach the last sheet) with Custom window frame (options bit 0x8) on, and variable 0x44 to it, as leaving the frame picker does. |
 | `set buttons <0..3> <hexword>` | Write one word of the game's button configuration (0 field, 1 battle, 2 field analog, 3 battle analog; `formats/save.md` section 6). It acts while the options word has 0x100 set (`set option 100 1`); the route's keys and pad buttons then pass through the assignment like real input. |
 | `set hp <char> <value>` | Write a character's current HP. |
 | `set status <char> <hexbits>` | Write a character's status bits (1 poison, 8 burn, 10 sprain, 20 flu, hex). |
@@ -231,6 +233,8 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `movie playing\|idle` | A movie is / is not playing. |
 | `guide <0\|1\|2>` | The user guide page equals the value. |
 | `pause open\|closed` | The pause screen is up / not up. |
+| `dialoguelog open\|closed`, `dialoguelog entries <min> [max]`, `dialoguelog cursor <n>` | The dialogue log window (over the field, or the OpenCross row's page) is up / not up; it lists between min and max entries (logged with the count and the cursor); its selected entry is n (0 = the oldest). |
+| `retry open\|closed` | The Retry battle choice is up / not up. |
 | `icons <n>` | The last frame drew n play-time feature icons (slow, fast, encounters off, battle boost, auto battle; `text.md` 10.2). |
 | `name <char> <text>` | The typed name of the character (UTF-8; one word, since arguments split on spaces); `-` = no typed name. |
 | `party <id,id,id>` | The party ids in slot order (`-` = empty slot), e.g. `0,1,22`. |
@@ -239,6 +243,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `location <id>` | The saved location word of the state. |
 | `gold <n>` | The gold held. |
 | `option <hexmask> set\|clear` | All mask bits of the settings options word are set / not all set. |
+| `config <section> <key> <value>` | The settings in force store that key with that value (as `opencross.ini` would hold it; logged), e.g. `assert config Game RecordsHints full`. A `--config` run never writes its ini, so this is how a route checks a setting changed in a menu. |
 | `hp <char> <min> <max>` | Current HP in the range. |
 | `status <char> <hexmask> set\|clear` | All mask bits are set / not all set. |
 | `near <ent\|player> <x> <z> <tol>` | World position within `tol` of the point. |

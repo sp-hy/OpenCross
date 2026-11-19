@@ -332,6 +332,77 @@ void test_target_word() {
   CHECK(shop::element_target_word(0xC0).side == shop::TargetSide::Both);
   CHECK(shop::element_target_word(0x00).side == shop::TargetSide::Ally);
 }
+
+// Equip compare: the slot a piece is compared in, its stats against the worn gear, who may wear it and the page order.
+void test_equip_compare() {
+  Fixture fixture;
+  GameState& game_state = fixture.gs;
+  data::GameTables& tables = fixture.tables;
+  tables.gear.resize(256);
+  auto gear = [&](int id, int kind, u32 wearers, std::array<int, 3> stats, int flags = 0, int slot_mask = 0) {
+    fixture.item(id, kind, 10);
+    tables.item_info[static_cast<size_t>(id)].equip_lo = wearers;
+    auto& raw = tables.gear[static_cast<size_t>(id)].raw;
+    raw[4] = static_cast<u8>(stats[0]), raw[5] = static_cast<u8>(stats[1]), raw[6] = static_cast<u8>(stats[2]);
+    raw[8] = static_cast<u8>(flags), raw[0xA] = static_cast<u8>(slot_mask);
+  };
+  // 40 / 45 weapons, 41 armour, 42 / 43 offence accessories of one kind (slot mask 1), 44 a defence accessory (mask 2), 46 an accessory
+  // of a third kind (mask 4); a material (8) is no gear.
+  gear(40, 0, 0b101, {30, 1, 6});
+  gear(45, 0, 0b111, {10, 1, 6});
+  gear(41, 1, 0b1011, {12, 3, 0});
+  gear(42, 2, 0xFF, {5, 0, 0}, data::gearflag::kOffence, 1);
+  gear(43, 2, 0xFF, {0, 4, 0}, data::gearflag::kOffence, 1);
+  gear(44, 2, 0xFF, {3, 0, 4}, data::gearflag::kDefence, 2);
+  gear(46, 2, 0xFF, {0, 0, 0}, 0, 4);
+  CHECK(shop::is_gear(game_state, 40) && shop::is_gear(game_state, 44) && !shop::is_gear(game_state, 8) && !shop::is_gear(game_state, 20));
+  game_state.slot.set_party({0, 1, 0xFF});
+  for (int character = 0; character < 5; ++character) game_state.slot.set_recruited(character, true);
+  // Character 4 is recruited but excluded.
+  game_state.slot.unk_e1b8[2] |= 1u << 4;
+  save::SaveChar& serge = game_state.slot.chars[0];
+  serge.atk = 50, serge.mag = 20, serge.hit = 60, serge.def = 30, serge.mdef = 25, serge.evd = 10;
+  serge.weapon = 45;
+  serge.accessory[1] = 42;
+  game_state.slot.chars[2].weapon = 40;
+
+  // Weapon: ATK 50 + 5 + 10 -> 50 + 5 + 30; M.ATT and HIT keep their values.
+  const shop::GearCompare weapon = shop::gear_compare(game_state, 0, 40);
+  CHECK(weapon.wearable && !weapon.worn && weapon.eslot == 0);
+  const auto weapon_changes = shop::stat_changes(weapon.now, weapon.with);
+  CHECK(weapon_changes.size() == 1 && weapon_changes[0].stat == shop::Stat::Atk && weapon_changes[0].now == 65 && weapon_changes[0].with == 85);
+  CHECK(!shop::gear_compare(game_state, 1, 40).wearable);
+  const shop::GearCompare worn = shop::gear_compare(game_state, 2, 40);
+  CHECK(worn.wearable && worn.worn && shop::stat_changes(worn.now, worn.with).empty());
+  CHECK(shop::gear_compare(game_state, 0, 41).eslot == 1);
+  CHECK(shop::gear_compare(game_state, 0, 8).eslot == -1 && !shop::gear_compare(game_state, 0, 8).wearable);
+
+  // Accessories: one of the worn one's kind replaces it, another kind takes the first empty slot, a worn one compares in its own slot.
+  const shop::GearCompare same_kind = shop::gear_compare(game_state, 0, 43);
+  CHECK(same_kind.eslot == 3);
+  const auto swap_changes = shop::stat_changes(same_kind.now, same_kind.with);
+  CHECK(swap_changes.size() == 2 && swap_changes[0].stat == shop::Stat::Atk && swap_changes[0].with == 60 && swap_changes[1].stat == shop::Stat::Mag &&
+        swap_changes[1].now == 21 && swap_changes[1].with == 25);
+  const shop::GearCompare defence = shop::gear_compare(game_state, 0, 44);
+  CHECK(defence.eslot == 2);
+  const auto defence_changes = shop::stat_changes(defence.now, defence.with);
+  CHECK(defence_changes.size() == 2 && defence_changes[0].stat == shop::Stat::Def && defence_changes[0].with == 33 &&
+        defence_changes[1].stat == shop::Stat::Evd && defence_changes[1].with == 14);
+  CHECK(shop::gear_compare(game_state, 0, 42).worn && shop::gear_compare(game_state, 0, 42).eslot == 3);
+  serge.accessory = {44, 42, 43};
+  CHECK(shop::gear_compare(game_state, 0, 46).eslot == 2);
+
+  // Displayed values: HIT and EVD stop at 99, so a change above it is no change.
+  Stats high, higher;
+  high.hit = 120, higher.hit = 130, high.atk = 998, higher.atk = 1200;
+  const auto capped = shop::stat_changes(high, higher);
+  CHECK(capped.size() == 1 && capped[0].stat == shop::Stat::Atk && capped[0].with == 999);
+
+  // Order: the party, then the available wearers outside it, then the others; the excluded character is left out.
+  int others = -1;
+  CHECK(shop::compare_order(game_state, 40, &others) == (std::vector<int>{0, 1, 2, 3}) && others == 1);
+  CHECK(shop::compare_order(game_state, 41, &others) == (std::vector<int>{0, 1, 3, 2}) && others == 1);
+}
 }  // namespace
 
 int main() {
@@ -341,6 +412,7 @@ int main() {
   test_forge();
   test_breakdown_and_sell();
   test_trade();
+  test_equip_compare();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

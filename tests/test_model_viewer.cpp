@@ -147,6 +147,7 @@ void test_options() {
   CHECK(!mv::parse_options({"--unknown"}).error.empty());
   CHECK(mv::parse_options({"--help"}).help);
   CHECK(mv::parse_options({"--back"}).back && !options.back);
+  CHECK(mv::parse_options({"--mods"}).mods && !options.mods);
 }
 
 }  // namespace

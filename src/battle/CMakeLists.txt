@@ -11,5 +11,7 @@ add_library(oc_battle STATIC
   pac_vm.h
   pac_vm.cpp
   pac_opcodes.inc
+  opponents.h
+  opponents.cpp
 )
 target_link_libraries(oc_battle PUBLIC oc_core oc_data)

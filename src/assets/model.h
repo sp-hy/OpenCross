@@ -241,6 +241,9 @@ struct ModelAsset {
   // A replacement image for textures[i] (empty vector / width 0 = none), any size, STP kept: a texture mod's (render::resolve_model_textures)
   // or, on an effect pack's copy of a battle unit, the unit's drawn art cut into the page. Drawn in place of textures[i] AND hd_textures[i].
   std::vector<import::Image> mod_textures;
+  // The mod's model replacement (game/model_mods.h) whose meshes this asset draws, for logs; empty = the model's own. Its images are in
+  // mod_textures, which the texture mods then leave alone.
+  std::string mesh_mod;
 
   // Pixels of the main texture `base` (RGBA8, w x h; the 1x image, the 4x one or a replacement of any size) with frame `frame` (1 or 2)
   // of the eye strip pasted over the two eye rects (nearest). `strip` = a replacement of the strip (any size) instead of the model's own.

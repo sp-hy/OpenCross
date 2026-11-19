@@ -477,9 +477,6 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
     row("Steam Connection", "Connects to Steam as the Radical Dreamers Edition, so Steam shows you playing it and its achievements unlock. Needs Steam running. "
                  "Turning it off stops achievements at once; Steam keeps showing you playing until OpenCross closes.");
     if (ImGui::Checkbox("##steam", &cfg.steam)) change.other = true;
-    row("Achievements", "OpenCross's own achievements, kept for you in achievements.txt next to opencross.ini and listed in the Achievements tab. "
-                        "They never change the game. Off: nothing is earned and no notice shows; the tab still lists what you have.");
-    if (ImGui::Checkbox("##ocachievements", &cfg.achievements)) change.other = true;
     row("Session", "Restart goes back to the start of the game without closing OpenCross. Quit closes OpenCross. Either way, progress since your "
                    "last save is lost.");
     if (ImGui::Button("Restart##session")) change.restart_game = true;
@@ -491,17 +488,58 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
   };
   auto sec_quality = [&] {
   section("Quality of life");
+  // The checkboxes two to a line, as the Graphics tab's check grids, when two of the widest fit side by side; else one to a line.
+  {
+    struct Box {
+      const char* label;
+      const char* help;
+      bool* value;
+      bool enhancements;
+    };
+    const Box boxes[] = {
+        {"Camera-relative Movement", "In the field, up on the stick or the arrows walks away from the camera, whatever way the room is "
+         "drawn. Off: the game's own directions (each room's fixed axes).", &cfg.camera_relative, false},
+        {"Hide menus during casts", "Hides the battle HUD, menus, field effect ring and message windows while an element, tech or summon "
+         "plays, as holding the pad's Select does. The damage numbers still show, and the spell's name stays "
+         "for 2 seconds before it fades.", &cfg.autohide_cast_hud, true},
+        {"Hide cheat and speed icons", "Hides the icons at the bottom left that show which of Slow mode, Fast mode, No encounters, Battle boost "
+         "and Auto battle are on. They keep working, and their keys and buttons still switch them.", &cfg.hide_feature_icons, false},
+        {"Compare gear in shops", "At the blacksmith and the trading post, shows for the highlighted weapon, armour or accessory what it "
+         "would change for your party against what they wear now, and who else could wear it. Square pages "
+         "through every member.", &cfg.equip_compare, false},
+        {"Retry lost battles", "When the party is wiped in a battle whose loss would end the game, bosses included, a window offers Retry (the "
+         "same battle again from the state it began with), Retry after changes (Elements, Equip and Items first; the battle "
+         "starts again when the menu closes) or Give up (the normal game over). Battles the story lets you lose go on as the "
+         "story wants.", &cfg.retry_battle, false},
+        {"Element grid presets", "Adds a third pair of rows to the element grid editor, Save Preset and Load Preset: three slots per character "
+         "that keep the grid's layout, each shown as its colour mix and top element. Loading fills the grid from "
+         "the elements you own and lists the ones you lack. Presets are kept in the OpenCross save folder, for "
+         "every save.", &cfg.grid_presets, false},
+        {"Auto-advance messages", "A message shown in full that waits for the confirm button goes on by itself after a pause for reading: "
+         "longer messages wait longer, and a voice line that plays is heard to its end. Choices, number entries "
+         "and messages the game closes by itself are left alone; the confirm button still goes on at once.", &cfg.auto_advance, false},
+    };
+    float widest = 0;
+    for (const Box& box : boxes) widest = std::max(widest, ImGui::CalcTextSize(box.label).x);
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float cell = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + widest + 2.0f * style.CellPadding.x;
+    const int columns = ImGui::GetContentRegionAvail().x >= 2.0f * cell ? 2 : 1;
+    if (ImGui::BeginTable("quality_boxes", columns, ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_NoSavedSettings)) {
+      for (const Box& box : boxes) {
+        ImGui::TableNextColumn();
+        if (ImGui::Checkbox(box.label, box.value)) (box.enhancements ? change.enhancements : change.other) = true;
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) tooltip(box.help);
+      }
+      ImGui::EndTable();
+    }
+  }
   if (begin_rows("quality")) {
-    row("Camera-relative Movement", "In the field, up on the stick or the arrows walks away from the camera, whatever way the room is "
-                                    "drawn. Off: the game's own directions (each room's fixed axes).");
-    if (ImGui::Checkbox("##camrel", &cfg.camera_relative)) change.other = true;
-    row("Hide menus during casts", "Hides the battle HUD, menus, field effect ring and message windows while an element, tech or summon "
-                                   "plays, as holding the pad's Select does. The damage numbers still show, and the spell's name stays "
-                                   "for 2 seconds before it fades.");
-    if (ImGui::Checkbox("##autohidecast", &cfg.autohide_cast_hud)) change.enhancements = true;
-    row("Hide cheat and speed icons", "Hides the icons at the bottom left that show which of Slow mode, Fast mode, No encounters, Battle boost "
-                                      "and Auto battle are on. They keep working, and their keys and buttons still switch them.");
-    if (ImGui::Checkbox("##hidefeatureicons", &cfg.hide_feature_icons)) change.other = true;
+    if (cfg.auto_advance) {
+      row("Auto-advance delay", "The reading pause in percent of the standard one (1 second, plus 1/25 second per letter; 1/12 second per "
+                                "character in Japanese).");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      if (ImGui::SliderInt("##autoadvancedelay", &cfg.auto_advance_delay, 25, 300, "%d%%")) change.other = true;
+    }
     if (quality_rows) quality_rows();
     end_rows();
   }
@@ -539,6 +577,9 @@ OptionsChange ImGuiLayer::general_tab(platform::Config& cfg) {
       change.bgm_source = true;
     }
     ImGui::EndDisabled();
+    row("Resume music", "When the game goes back to a song it cut off less than 5 minutes ago (for a battle, a fanfare or a scene's own "
+                        "song), the song continues where it stopped instead of starting over. Off: as the original game.");
+    if (ImGui::Checkbox("##musicresume", &cfg.music_resume)) change.other = true;
     end_rows();
   }
 
@@ -1010,6 +1051,13 @@ OptionsChange ImGuiLayer::graphics_tab(platform::Config& cfg) {
                      "fade out and restart (light patches, lamp shimmer) pulse about twice as hard and may flicker. Off: the PS1's "
                      "brightness, with smooth gradients.",
                      cfg.full_precision_effects))
+        change.enhancements = true;
+      if (check_cell("Element colour symbols",
+                     "Draws a symbol beside every element colour the game shows (element lists and grids, shops, the battle element menu and "
+                     "field effect ring, the innate colour on the Status screen): a flame for red, a water drop for blue, a leaf for green, a "
+                     "lightning bolt for yellow, a star for white and a crescent moon for black. For players who find the colours hard to tell "
+                     "apart. Off: the colours alone, as in the original.",
+                     cfg.element_symbols))
         change.enhancements = true;
       ImGui::EndTable();
     }

@@ -173,6 +173,9 @@ bool DialogueBox::load_skin(int index) {
   skin_set_ = render::TexRef(skin_, hd ? linear_ : nearest_);
   skin_w_ = static_cast<float>(w);
   skin_h_ = static_cast<float>(h);
+  skin_alpha_.resize(static_cast<size_t>(w) * h);
+  for (size_t i = 0; i < skin_alpha_.size(); ++i) skin_alpha_[i] = px[i * 4 + 3];
+  ++skin_loads_;
   skin_idx_ = index;
   skin_mode_ = mode_;
   skin_generation_ = vfs_->generation();
@@ -221,6 +224,8 @@ constexpr const char* kFaceNames[92] = {
     "70_migel", "71_garai", "72_marji", "73_fio", "74_raz_ane", "75_l_bros", "76_l_friend", "77_maburle", "78_galdorb", "79_wife",
     "80_ban_rich", "81_ban_bin", "82_jigoku", "kao00", "kao00", "kao00", "kao00", "kao00", "kao00", "kao00",
     "l_zappa", "kid_2"};
+
+const char* dialogue_face_art(int face_id) { return face_id >= 0 && face_id < kDialogueFaces ? kFaceNames[face_id] : ""; }
 
 void DialogueBox::refresh_face() {
   face_now_ = nullptr;
@@ -276,25 +281,40 @@ const render::TexRef* DialogueBox::button_sheet(const std::string& member) {
   return set;
 }
 
-// The button glyph of {key(n)} at canvas (x, y): the key cap of the bound key in keyboard style, else the pad glyph.
+// The button glyph of {key(n)} at canvas (x, y).
 void DialogueBox::draw_button(int key, float x, float y, float zoom, float alpha) {
-  const ButtonArt art = button_art(key);
-  const u32 colour = pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha));
   const float size = kButtonSize * (scale_ / 0.5f);
+  draw_button_quad(key, x * zoom, y * zoom + yo_, size * zoom, pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha)));
+}
+
+// A button glyph as a `size` square at view (x, y): the key cap of the bound key in keyboard style, else the pad glyph.
+void DialogueBox::draw_button_quad(int key, float x, float y, float size, u32 colour) {
+  const ButtonArt art = button_art(key);
   if (key_caps_) {
     const int cell = platform::keyboard_cell(art.vk);
     const std::string member = std::string("ui/keyboard_") + "efigsj"[std::clamp(key_cap_lang_, 0, 5)] + ".png";
     if (const render::TexRef* sheet = button_sheet(member); sheet && cell > 0)
-      sprites_->draw(*sheet, x * zoom, y * zoom + yo_, size * zoom, size * zoom, static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
+      sprites_->draw(*sheet, x, y, size, size, static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
                      static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f, colour);
     return;
   }
   if (art.pad_cell < 0) return;
   if (const render::TexRef* sheet = button_sheet("ui/gamepad.png")) {
     const int col = art.pad_cell % 13, row = (art.pad_cell / 13) * 2 + 1;
-    sprites_->draw(*sheet, x * zoom, y * zoom + yo_, size * zoom, size * zoom, static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f,
-                   static_cast<float>(col + 1) / 13.0f, static_cast<float>(row + 1) / 4.0f, colour);
+    sprites_->draw(*sheet, x, y, size, size, static_cast<float>(col) / 13.0f, static_cast<float>(row) / 4.0f, static_cast<float>(col + 1) / 13.0f,
+                   static_cast<float>(row + 1) / 4.0f, colour);
   }
+}
+
+void DialogueBox::draw_key(int key, float x, float y, float size, float vw, float vh) {
+  if (!sprites_) return;
+  const render::OverlayFit of = render::overlay_fit(vw, vh);
+  const float zoom = of.sx;
+  const float flat = of.sy / of.sx;
+  const float canvas_left = (vw / zoom - 1280.0f) * 0.5f;
+  sprites_->set_view(vw, vh / flat);
+  draw_button_quad(key, (canvas_left + x) * zoom, y * zoom + of.oy / flat, size * zoom, pack_rgba(255, 255, 255));
+  sprites_->set_view(vw, vh);
 }
 
 void DialogueBox::set_portrait(int face_id) {
@@ -344,6 +364,7 @@ void DialogueBox::open(const import::Message& flat, render::FaceId face, float t
   opening_.start(true);
   blink_ = 0;
   chosen_ = -1;
+  chosen_text_.clear();
   line_count_ = 0;
   choice_ = 0;
   glyph_cursor_ = -1;
@@ -477,11 +498,35 @@ void DialogueBox::confirm() {
   // In-window choice: the result is the cursor's *line number* in the message (the cursor starts at the first
   // option line), not the option index.
   // A message ending in {wend(n)} is in Closing while the list is up: the pick still counts.
-  if ((tw_.state() == Typewriter::State::WaitClose || tw_.state() == Typewriter::State::Closing) && line_count_ > 0)
+  if ((tw_.state() == Typewriter::State::WaitClose || tw_.state() == Typewriter::State::Closing) && line_count_ > 0) {
     chosen_ = line_first_ + choice_;
+    chosen_text_ = page_line_text(choice_line());
+  }
   tw_.confirm();
   // The page cursor animation restarts on every page.
   blink_ = 0;
+}
+
+std::u32string DialogueBox::page_line_text(int line) const {
+  std::u32string out;
+  const TextPage* page = tw_.page();
+  if (!page || line_h_ <= 0) return out;
+  for (const LayoutGlyph& glyph : page->glyphs)
+    if (static_cast<int>(std::lround(glyph.y / line_h_)) == line) {
+      const bool digit = glyph.digit >= 0 && static_cast<size_t>(glyph.digit) < digits_.size();
+      out += digit ? static_cast<char32_t>(U'0' + digits_[static_cast<size_t>(glyph.digit)]) : glyph.ch;
+    }
+  const auto blank = [](char32_t ch) { return ch == U' ' || ch == 0x3000 || ch == 0xA0; };
+  while (!out.empty() && blank(out.back())) out.pop_back();
+  size_t begin = 0;
+  while (begin < out.size() && blank(out[begin])) ++begin;
+  return out.substr(begin);
+}
+
+bool DialogueBox::auto_advance_due(float scale) const {
+  if (!open_ || label_ || opening_.growing() || !tw_.waiting_for_input()) return false;
+  if (line_count_ > 0 || !digits_.empty() || glyph_cursor_ >= 0) return false;
+  return tw_.wait_seconds() >= auto_advance_seconds(tw_.read_glyphs(), jp_, scale);
 }
 
 void DialogueBox::rect(float x, float y, float w, float h, u32 color) {
@@ -581,8 +626,22 @@ void DialogueBox::draw_frame(float left, float top, float right, float bottom, f
   sprites_->set_view(vw, vh);
 }
 
+void DialogueBox::draw_portrait(int face_id, float x, float y, float size, float alpha, float vw, float vh) {
+  if (!sprites_ || face_id < 0 || face_id >= 92 || !vfs_ || alpha * 255.0f < 1.0f) return;
+  const std::string key = vfs_->cache_key((mode_ == ArtMode::Hd ? portrait_set_ : std::string("ps1")) + "/" + kFaceNames[face_id]);
+  const auto it = faces_.find(key);
+  if (it == faces_.end() || !it->second || !it->second->set) return;
+  const render::OverlayFit of = render::overlay_fit(vw, vh);
+  const float zoom = of.sx;
+  const float flat = of.sy / of.sx;
+  const float canvas_left = (vw / zoom - 1280.0f) * 0.5f;
+  sprites_->set_view(vw, vh / flat);
+  sprites_->draw(it->second->set, (canvas_left + x) * zoom, y * zoom + of.oy / flat, size * zoom, size * zoom, 0, 0, 1, 1,
+                 pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha)));
+  sprites_->set_view(vw, vh);
+}
+
 void DialogueBox::draw_tiles(const Geo& geo, float zoom, float alpha, bool has_portrait, bool portrait_left) {
-  const SkinUv& uv = kSkins[std::clamp(geo.skin, 0, 15)];
   const bool light = geo.skin <= 5;
   const u32 colF = pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha));
   const u32 colG = pack_rgba(255, 255, 255, static_cast<u8>(255.0f * alpha * (light ? 0.85f : 1.0f)));
@@ -619,35 +678,130 @@ void DialogueBox::draw_tiles(const Geo& geo, float zoom, float alpha, bool has_p
     sprites_->draw(face_now_->set, fx * zoom, fy * zoom + yo_, 280 * zoom, 280 * zoom, portrait_left ? 1.0f : 0.0f, 0, portrait_left ? 0.0f : 1.0f, 1,
                    colF);
   }
+  frame_pieces(geo, [&](const Piece& piece) { quad(piece.x, piece.y, piece.w, piece.h, piece.u, piece.v, piece.du, piece.dv, colF); });
+}
+
+void DialogueBox::frame_pieces(const Geo& geo, const std::function<void(const Piece&)>& out) {
+  const SkinUv& uv = kSkins[std::clamp(geo.skin, 0, 15)];
   // Top / bottom edges.
   const float bk = geo.skin == 2 ? -0.09f : geo.skin == 5 ? -0.18f : geo.skin == 6 ? -0.175f : geo.skin == 9 ? -0.184f : geo.skin == 10 ? -0.167f : -0.187f;
   for (int j = 1; j <= 19; ++j) {
     const float x = static_cast<float>(j) * kTH + 1.5f * 0.98f * kTH + geo.T0x - kTW / 1.03f + kTW;
     if (x > geo.R0x) break;
-    quad(x, geo.T0y + 1.475f * kTH - kTW * 1.05f, kTH, kTH, 0, 0, 0.123f, 0.16667f, colF);
-    quad(x, geo.last + 0.5f * kTH - kTW * bk, kTH, kTH, 0, uv.bv, 0.123f, uv.bdv, colF);
+    out({x, geo.T0y + 1.475f * kTH - kTW * 1.05f, kTH, kTH, 0, 0, 0.123f, 0.16667f});
+    out({x, geo.last + 0.5f * kTH - kTW * bk, kTH, kTH, 0, uv.bv, 0.123f, uv.bdv});
   }
   // Left edge.
   const float lk = geo.skin == 0 ? 1.02f : geo.skin == 6 ? 0.99f : geo.skin == 8 ? 1.01f : 1.0f;
   for (int i = 0; i < geo.rows; ++i) {
     const float y = geo.T0y + 2.68f * kTW + static_cast<float>(i) * kTH * 0.999f;
     if (!(geo.B0y + 30 > y + 0.2f * kTH)) break;
-    quad(geo.X0 - 0.735f * kTW * lk, y, kTH, kTH, uv.lu, 0, uv.ldu, uv.ldv, colF);
+    out({geo.X0 - 0.735f * kTW * lk, y, kTH, kTH, uv.lu, 0, uv.ldu, uv.ldv});
   }
   // Corners T0, B0.
   // Skin 8, one text line: the corner sheets' v0 shift.
   const bool f8 = geo.skin == 8 && geo.rows == 2;
-  quad(geo.T0x, geo.T0y, kCorner, kCorner, 0.3125f, f8 ? 0.004f : 0.0f, 0.3125f, 0.416f, colF);
-  quad(geo.T0x, geo.B0y, kCorner, kCorner, 0.3125f, f8 ? 0.43f : uv.b0v, 0.3125f, 0.416f, colF);
+  out({geo.T0x, geo.T0y, kCorner, kCorner, 0.3125f, f8 ? 0.004f : 0.0f, 0.3125f, 0.416f});
+  out({geo.T0x, geo.B0y, kCorner, kCorner, 0.3125f, f8 ? 0.43f : uv.b0v, 0.3125f, 0.416f});
   // Right edge, R0, R24.
-  quad(geo.R0x, geo.T0y, kCorner, kCorner, uv.r0u, f8 ? 0.004f : 0.0f, uv.r0du, 0.416f, colF);
+  out({geo.R0x, geo.T0y, kCorner, kCorner, uv.r0u, f8 ? 0.004f : 0.0f, uv.r0du, 0.416f});
   static const float kR[16] = {.32f, .4f, .4f, .4f, .32f, .368f, .407f, .4f, .404f, .403f, .4035f, .404f, .4f, .4f, .4f, .4f};
   for (int i = 1; i < geo.rows; ++i) {
     const float y = geo.T0y + 1.615f * kTW + static_cast<float>(i) * kTH - (geo.skin == 0 ? 1.0f : 0.0f);
     if (y > geo.B0y) break;
-    quad(geo.R0x + kCorner * kR[std::clamp(geo.skin, 0, 15)], y, kTH, kTH, uv.ru, uv.rv, uv.rdu, uv.rdv, colF);
+    out({geo.R0x + kCorner * kR[std::clamp(geo.skin, 0, 15)], y, kTH, kTH, uv.ru, uv.rv, uv.rdu, uv.rdv});
   }
-  quad(geo.R0x, geo.B0y, kCorner, kCorner, uv.r0u, f8 ? 0.43f : uv.r24v, uv.r0du, 0.416f, colF);
+  out({geo.R0x, geo.B0y, kCorner, kCorner, uv.r0u, f8 ? 0.43f : uv.r24v, uv.r0du, 0.416f});
+}
+
+// The frame's pixels on a one-unit grid over its outer bounds (each cell takes the sheet texel under its centre), then per row the side
+// edges nearest the box's centre, and the top / bottom edges over the middle half of the width.
+const DialogueBox::FrameClear& DialogueBox::frame_clear(float left, float top, float right, float bottom) {
+  const float box[4] = {left, top, right, bottom};
+  if (clear_loads_ == skin_loads_ && skin_loads_ != 0 && std::equal(box, box + 4, clear_box_) && skin_current(skin_idx_)) return clear_;
+  FrameClear& clear = clear_;
+  clear = FrameClear{};
+  clear.box_left_ = left, clear.box_top_ = top, clear.box_right_ = right, clear.box_bottom_ = bottom;
+  clear.top_ = top, clear.bottom_ = bottom, clear.rows_from_ = top;
+  std::copy(box, box + 4, clear_box_);
+  clear_loads_ = skin_loads_;
+  if (!skin_current(skin_idx_) || skin_alpha_.empty()) return clear;
+  const FrameBox fill = frame_box(skin_idx_, left, top, right, bottom);
+  clear.box_left_ = fill.left, clear.box_top_ = fill.top, clear.box_right_ = fill.right, clear.box_bottom_ = fill.bottom;
+  const Geo geo = frame_geo_box(skin_idx_, left, top, right, bottom);
+  const int x0 = static_cast<int>(std::floor(geo.T0x)), y0 = static_cast<int>(std::floor(geo.T0y));
+  const int cols = static_cast<int>(std::ceil(geo.R0x + kCorner)) - x0 + 1, rows = static_cast<int>(std::ceil(geo.B0y + kCorner)) - y0 + 1;
+  std::vector<u8> cover(static_cast<size_t>(cols) * static_cast<size_t>(rows), 0);
+  const int sheet_w = static_cast<int>(skin_w_), sheet_h = static_cast<int>(skin_h_);
+  frame_pieces(geo, [&](const Piece& piece) {
+    if (piece.w <= 0 || piece.h <= 0) return;
+    const int cx0 = std::max(0, static_cast<int>(std::ceil(piece.x - 0.5f)) - x0), cx1 = std::min(cols, static_cast<int>(std::ceil(piece.x + piece.w - 0.5f)) - x0);
+    const int cy0 = std::max(0, static_cast<int>(std::ceil(piece.y - 0.5f)) - y0), cy1 = std::min(rows, static_cast<int>(std::ceil(piece.y + piece.h - 0.5f)) - y0);
+    for (int cy = cy0; cy < cy1; ++cy) {
+      const float v = piece.v + piece.dv * (static_cast<float>(cy + y0) + 0.5f - piece.y) / piece.h;
+      const int ty = std::clamp(static_cast<int>(v * skin_h_), 0, sheet_h - 1);
+      for (int cx = cx0; cx < cx1; ++cx) {
+        const float u = piece.u + piece.du * (static_cast<float>(cx + x0) + 0.5f - piece.x) / piece.w;
+        const int tx = std::clamp(static_cast<int>(u * skin_w_), 0, sheet_w - 1);
+        if (skin_alpha_[static_cast<size_t>(ty) * sheet_w + tx] >= 128) cover[static_cast<size_t>(cy) * cols + cx] = 1;
+      }
+    }
+  });
+  const auto covered = [&](int x, int y) {
+    const int cx = x - x0, cy = y - y0;
+    return cx >= 0 && cy >= 0 && cx < cols && cy < rows && cover[static_cast<size_t>(cy) * cols + cx] != 0;
+  };
+  const int mid_x = static_cast<int>(std::lround((left + right) * 0.5f)), mid_y = static_cast<int>(std::lround((top + bottom) * 0.5f));
+  const int quarter = static_cast<int>((right - left) * 0.25f);
+  int inner_top = y0, inner_bottom = y0 + rows;
+  for (int x = mid_x - quarter; x <= mid_x + quarter; ++x) {
+    for (int y = mid_y; y >= y0; --y)
+      if (covered(x, y)) {
+        inner_top = std::max(inner_top, y + 1);
+        break;
+      }
+    for (int y = mid_y; y < y0 + rows; ++y)
+      if (covered(x, y)) {
+        inner_bottom = std::min(inner_bottom, y);
+        break;
+      }
+  }
+  clear.top_ = std::max(clear.box_top_, static_cast<float>(inner_top));
+  clear.bottom_ = std::min(clear.box_bottom_, static_cast<float>(inner_bottom));
+  clear.rows_from_ = static_cast<float>(y0);
+  clear.left_edge_.assign(static_cast<size_t>(rows), clear.box_left_);
+  clear.right_edge_.assign(static_cast<size_t>(rows), clear.box_right_);
+  for (int cy = 0; cy < rows; ++cy) {
+    for (int x = mid_x; x >= x0; --x)
+      if (covered(x, cy + y0)) {
+        clear.left_edge_[static_cast<size_t>(cy)] = static_cast<float>(x + 1);
+        break;
+      }
+    for (int x = mid_x; x < x0 + cols; ++x)
+      if (covered(x, cy + y0)) {
+        clear.right_edge_[static_cast<size_t>(cy)] = static_cast<float>(x);
+        break;
+      }
+  }
+  return clear;
+}
+
+float DialogueBox::FrameClear::left(float y0, float y1) const {
+  float edge = box_left_;
+  if (left_edge_.empty()) return edge;
+  const int from = std::max(0, static_cast<int>(std::floor(y0 - rows_from_)));
+  const int to = std::min(static_cast<int>(left_edge_.size()), static_cast<int>(std::ceil(y1 - rows_from_)));
+  for (int row = from; row < to; ++row) edge = std::max(edge, left_edge_[static_cast<size_t>(row)]);
+  return edge;
+}
+
+float DialogueBox::FrameClear::right(float y0, float y1) const {
+  float edge = box_right_;
+  if (right_edge_.empty()) return edge;
+  const int from = std::max(0, static_cast<int>(std::floor(y0 - rows_from_)));
+  const int to = std::min(static_cast<int>(right_edge_.size()), static_cast<int>(std::ceil(y1 - rows_from_)));
+  for (int row = from; row < to; ++row) edge = std::min(edge, right_edge_[static_cast<size_t>(row)]);
+  return edge;
 }
 
 int DialogueBox::first_choice_line(const TextPage& page, float line_h) {
@@ -1060,6 +1214,7 @@ void DialogueDemo::show_text(const import::Message& flat) {
   room_ = -1;
   msg_ = 0;
   voice_page_ = -1;
+  log_pending_ = false;
   impl.plain.clear();
   for (const import::Token& token : flat.tokens)
     if (token.kind == import::TokKind::Text) impl.plain += import::u32_to_utf8(token.text);
@@ -1137,6 +1292,36 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
   for (const import::Token& token : flat.tokens)
     if (token.kind == import::TokKind::Text) impl.plain += import::u32_to_utf8(token.text);
     else if (token.kind == import::TokKind::Newline || token.kind == import::TokKind::Page) impl.plain += ' ';
+  log_pending_ = static_cast<bool>(on_logged);
+  if (log_pending_) {
+    log_entry_ = {};
+    // The speaker the text names: a name placeholder in its leading tag run.
+    for (const import::Token& token : msg.tokens) {
+      using import::TokKind;
+      if (token.kind == TokKind::Color || token.kind == TokKind::Italic || token.kind == TokKind::Speed || token.kind == TokKind::Case ||
+          token.kind == TokKind::Delay || token.kind == TokKind::Accent)
+        continue;
+      if (token.kind == TokKind::Name || token.kind == TokKind::PartyName || token.kind == TokKind::PlayWork) {
+        import::Message name;
+        name.tokens.push_back(token);
+        for (const import::Token& part : import::flatten(name, tctx).tokens)
+          if (part.kind == TokKind::Text) log_entry_.speaker += import::u32_to_utf8(part.text);
+      }
+      break;
+    }
+    // The text as shown: its lines and pages one per line; a button glyph as the name of its button (sysmes 0x1B).
+    for (const import::Token& token : flat.tokens) {
+      if (token.kind == import::TokKind::Text) {
+        log_entry_.text += import::u32_to_utf8(token.text);
+      } else if (token.kind == import::TokKind::Newline || token.kind == import::TokKind::Page) {
+        log_entry_.text += '\n';
+      } else if (token.kind == import::TokKind::Button && token.arg >= 0 && token.arg <= 3) {
+        const int source = platform::map_source(platform::active_map(), token.arg);
+        if (const std::string* name = tables_.sysmes(0x1Bu << 16 | static_cast<u32>(source), lang)) log_entry_.text += *name;
+      }
+    }
+    while (!log_entry_.text.empty() && (log_entry_.text.back() == '\n' || log_entry_.text.back() == ' ')) log_entry_.text.pop_back();
+  }
 
   // Face (0x43A060 glyph loop): JP kt_70, else gn_70 with gn_italic_70 for italic glyphs; scale 0.5, no font-table offset.
   const bool jp = lang == import::Lang::Jp;
@@ -1174,6 +1359,25 @@ void DialogueDemo::update(float dt, TextPace pace) {
   impl_->box.update(dt, pace);
   if (script_set && impl_->box.digit_entry()) script_set(kDigitEntryVar, impl_->box.digit_value());
   voice_sync();
+  log_sync();
+}
+
+void DialogueDemo::note_voice(std::string rel) {
+  if (log_pending_ && !rel.empty()) log_entry_.voices.push_back(std::move(rel));
+}
+
+// A label window (world-map names, inscriptions) is not a message of the log.
+void DialogueDemo::log_sync() {
+  if (!log_pending_ || impl_->box.is_open()) return;
+  log_pending_ = false;
+  const DialogueBox& box = impl_->box;
+  if (!on_logged || box.label() || log_entry_.text.empty()) return;
+  log_entry_.face = box.shown_portrait();
+  if (log_entry_.speaker.empty() && log_entry_.face >= 0 && log_entry_.face < 44)
+    log_entry_.speaker = import::u32_to_utf8(char_name ? char_name(log_entry_.face) : tables_.default_name(log_entry_.face, impl_->lang));
+  if (box.chosen() >= 0) log_entry_.choice = import::u32_to_utf8(box.chosen_text());
+  on_logged(std::move(log_entry_));
+  log_entry_ = {};
 }
 
 void DialogueDemo::voice_sync() {
@@ -1217,6 +1421,7 @@ int DialogueDemo::chosen() const { return impl_->box.chosen(); }
 int DialogueDemo::picking_line() const { return impl_->box.picking_line(); }
 int DialogueDemo::progress() const { return impl_->box.page_index() * 0x10000 + static_cast<int>(impl_->box.typewriter().visible()); }
 bool DialogueDemo::digit_entry() const { return impl_->box.digit_entry(); }
+bool DialogueDemo::auto_advance_due(float scale) const { return impl_->box.auto_advance_due(scale); }
 void DialogueDemo::move_digit(int step, int shift) {
   impl_->box.move_digit(step, shift);
   if (script_set && impl_->box.digit_entry()) script_set(kDigitEntryVar, impl_->box.digit_value());
@@ -1231,11 +1436,14 @@ void DialogueDemo::set_portrait_set(const std::string& set) { impl_->box.set_por
 void DialogueDemo::close() {
   impl_->box.close();
   voice_sync();
+  log_sync();
 }
 void DialogueDemo::set_label(bool on) { impl_->box.set_label(on); }
 void DialogueDemo::set_ps1_window(int x, int y, int width, int lines) { impl_->box.set_ps1_window(x, y, width, lines); }
 void DialogueDemo::skip_grow() { impl_->box.skip_grow(); }
 void DialogueDemo::show_at_once() { impl_->box.show_at_once(); }
+float DialogueDemo::text_width() const { return impl_->box.text_width(); }
+float DialogueDemo::text_height() const { return impl_->box.text_height(); }
 void DialogueDemo::show_status(bool on) { impl_->status_on = on; }
 import::Lang DialogueDemo::language() const { return impl_->lang; }
 

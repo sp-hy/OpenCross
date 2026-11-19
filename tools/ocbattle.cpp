@@ -10,9 +10,13 @@
 //                                         every scene's battle with the auto policy over N seeds (default 3), command cap per battle (default 2000)
 //   ocbattle cast <scene> <actor> <element[,element...]> <target> [seeds]   cast elements headless, print the target's status words
 //   ocbattle debug-kill [enemy_id [count]] [--scene S] [--keep-script]      the Debug tab's enemy replacement: scenes that do not end in victory
+//   ocbattle opponents [--scene S | --from A --to B] [--seeds N] [--cap N] [--star N]   per enemy unit: targetable, down, how the fight ends
 //   ocbattle pac-disasm <scene>           disassemble battle/event/evtNNN.pac (same text as cc_tables.py bscript dump)
 //   ocbattle pac-soak [turns] [-v]        run every scene's scripts in a dummy battle for N commands (default 40)
 //        [--scene N | --from A --to B]    only these scenes; OC_SOAK_LIST=1 prints each scene's outcome
+//        [--difficulty story|normal|hard|veryhard]   run with that Cheats tab preset (enemy HP, damage taken and dealt)
+//        [--randomizer SEED]              the randomizer on (items, elements, enemy shuffle): each scene runs as the encounter group
+//                                         that comes in its place, tuned for its area, with the moved drops
 //   ocbattle formula <name> <args...>     evaluate one formula; `ocbattle formula` lists them
 //   ocbattle fx-audit [--csv F] [--md F]  play every battle effect pack headless, per-pack status (tools/ocbattle_fx.cpp)
 //        [--rng lo|mid|hi|seed:N]         roll source for formulas with random terms (default mid)
@@ -41,13 +45,17 @@
 #include <vector>
 
 #include "battle/battle.h"
+#include "battle/opponents.h"
 #include "battle/pac_vm.h"
 #include "data/tables.h"
 #include "game/disc_index.h"
 #include "game/game_session.h"
+#include "game/randomizer.h"
+#include "game/room_scan.h"
 #include "platform/paths.h"
 #include "save/cc_save.h"
 #include "ui/menu/game_state.h"
+#include "ui/shop/shop_logic.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
@@ -75,10 +83,11 @@ int usage() {
                "       ocbattle [-g <gamedir>] xcheck [--n N] [--seed N]\n"
                "       ocbattle [-g <gamedir>] soak [--seeds N] [--scene S | --from A --to B] [--cap N] [--party-from save.dat:slot] [--brain scripted|random] [-v]\n"
                "       ocbattle [-g <gamedir>] pac-disasm <scene>\n"
-               "       ocbattle [-g <gamedir>] pac-soak [turns] [--scene S | --from A --to B] [-v]\n"
+               "       ocbattle [-g <gamedir>] pac-soak [turns] [--scene S | --from A --to B] [--difficulty story|normal|hard|veryhard] [-v]\n"
                "       ocbattle [-g <gamedir>] elements\n"
                "       ocbattle [-g <gamedir>] cast <scene> <actor> <element[,element...]> <target> [seeds]\n"
                "       ocbattle [-g <gamedir>] debug-kill [enemy_id [count]] [--scene S] [--keep-script]\n"
+               "       ocbattle [-g <gamedir>] opponents [--scene S | --from A --to B] [--seeds N] [--cap N] [--star N]\n"
                "       ocbattle [-g <gamedir>] fx-reg (SCENE [--bg N] | --index [--all] | --file PATH | --refs NAME | --s6 | --grep NAME)\n"
                "       ocbattle [-g <gamedir>] fx-audit [--csv FILE] [--md FILE] [--eid N] [--ticks N] [-v] [--find NAME] [--rng lo|mid|hi|seed:N]\n"
                "       ocbattle [-g <gamedir>] versus <seed> [--a save.dat:slot] [--b save.dat:slot] [--cmds FILE | --auto N] [--fuzz SEEDS] [--cap N] [-v]\n"
@@ -1023,10 +1032,23 @@ int cmd_pac_disasm(const vfs::Vfs& vfs, const std::vector<std::string>& args) {
 int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vector<std::string>& args) {
   int turns = 40, from = 0, to = static_cast<int>(tables.scenes.size()) - 1;
   bool verbose = false;
+  Battle::Cheats cheats;
+  game::randomizer::Settings randomizer;
   for (size_t i = 0; i < args.size(); ++i) {
     const std::string& arg = args[i];
     if (arg == "-v") verbose = true;
-    else if (arg == "--scene" && i + 1 < args.size()) from = to = std::atoi(args[++i].c_str());
+    else if (arg == "--difficulty" && i + 1 < args.size()) {
+      const std::string name = args[++i];
+      const battle::DifficultyPreset preset = name == "story"      ? battle::DifficultyPreset::Story
+                                              : name == "hard"     ? battle::DifficultyPreset::Hard
+                                              : name == "veryhard" ? battle::DifficultyPreset::VeryHard
+                                                                   : battle::DifficultyPreset::Normal;
+      const battle::Difficulty difficulty = battle::difficulty_preset(preset);
+      cheats.hp_percent = difficulty.hp, cheats.taken_percent = difficulty.taken, cheats.dealt_percent = difficulty.dealt;
+    } else if (arg == "--randomizer" && i + 1 < args.size()) {
+      randomizer.items = randomizer.elements = randomizer.enemies = true;
+      randomizer.seed = static_cast<u32>(std::strtoul(args[++i].c_str(), nullptr, 10));
+    } else if (arg == "--scene" && i + 1 < args.size()) from = to = std::atoi(args[++i].c_str());
     else if (arg == "--from" && i + 1 < args.size()) from = std::atoi(args[++i].c_str());
     else if (arg == "--to" && i + 1 < args.size()) to = std::atoi(args[++i].c_str());
     else if (!arg.empty() && std::all_of(arg.begin(), arg.end(), [](char ch) { return std::isdigit(static_cast<unsigned char>(ch)) != 0; })) turns = std::atoi(arg.c_str());
@@ -1034,6 +1056,15 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
       std::fprintf(stderr, "pac-soak: unknown argument '%s'\n", arg.c_str());
       return 2;
     }
+  }
+  std::optional<game::randomizer::Plan> plan;
+  int moved = 0;
+  if (randomizer.enabled()) {
+    ui::MenuRules rules;
+    rules.load_pg(vfs);
+    ui::shop::ShopData smiths = ui::shop::ShopData::from_tables(tables);
+    smiths.load_waa_shop(vfs);
+    plan = game::randomizer::build(randomizer, game::randomizer::gather(game::scan_rooms(vfs), tables, &rules, smiths.waa_shop));
   }
   int started = 0, no_pac = 0, failed = 0, cmds = 0, scenes = 0;
   u64 ops = 0;
@@ -1049,7 +1080,17 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
       Battle battle(tables, rng, brain);
       std::vector<PartyMember> party;
       for (int id : {0, 1, 2}) party.push_back(make_party_member(tables, id, 0, "char"));
-      if (!battle.start(party, scene)) continue;
+      battle.set_cheats(cheats);
+      BattleOptions opt;
+      int run_scene = scene;
+      if (plan) {
+        opt.drops = plan->drops();
+        opt.enemy_tuning = plan->tuning(scene);
+        run_scene = plan->scene(scene);
+        moved += run_scene != scene ? 1 : 0;
+        if (verbose && run_scene != scene) std::printf("scene %d: runs as scene %d (HP %d %%)\n", scene, run_scene, opt.enemy_tuning[0].hp_percent);
+      }
+      if (!battle.start(party, run_scene, opt)) continue;
       ++started;
       if (!brain.active()) {
         ++no_pac;
@@ -1061,7 +1102,8 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
         GameRng rng2(static_cast<u32>(scene) + 1000, tables.rng_table);
         pac::ScriptedBrain brain2(pac_loader(vfs));
         Battle b2(tables, rng2, brain2);
-        if (b2.start(party, scene) && brain2.active()) {
+        b2.set_cheats(cheats);
+        if (b2.start(party, run_scene, opt) && brain2.active()) {
           for (int rep = 0; rep < 2; ++rep)
             for (int unit = 0; unit < kUnits; ++unit)
               for (int slot : {2, 4, 3}) {
@@ -1108,6 +1150,7 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
     }
   }
   std::printf("pac-soak: %d scenes, %d battles started (%d without pac), %d commands, %d exceptions\n", scenes, started, no_pac, cmds, failed);
+  if (plan) std::printf("  randomizer seed %u: %d scenes ran as another encounter group\n", randomizer.seed, moved);
   std::printf("  outcomes: victory %d wiped %d fled %d ongoing/other %d\n", ended[0], ended[1], ended[2], ended[3]);
   std::printf("  ops executed %llu; scripted turns %d (empty plans %d, no slot-2 fallbacks %d, timeouts %d, slot-4 reaction attacks %d)\n",
               static_cast<unsigned long long>(ops), tot.turns, tot.empty_plans, tot.fallbacks, tot.timeouts, tot.reaction_attacks);
@@ -1124,6 +1167,105 @@ int cmd_pac_soak(const data::GameTables& tables, const vfs::Vfs& vfs, const std:
   list("invalid opcodes reached (-1 pc out of range, -2 call overflow)", invalid, " %d");
   list("unmodelled unit fields (0x10000 = write)", fields, " %X");
   return failed ? 1 : 0;
+}
+
+// ------------------------------------------------------------------------------------------------ opponents
+// `ocbattle opponents [--scene S | --from A --to B] [--seeds N] [--cap N] [--star N]`: per scene and enemy unit, whether the party can fight
+// it. Each enemy unit gets N focused battles (god mode, the default party at that star): every PC turn attacks that unit while it is
+// alive and targetable, else the first other enemy that is, else defends. One line per unit: its record and name, the record's HP, the
+// scene's off-stage and scripted-death bits, the rule's verdict (`kept` 1: battle::kept_from_party), the battles in which it was ever
+// targetable and in which it went down, and how they ended (V victory, W wiped, F fled, S<code> scripted, O still going at the cap).
+int cmd_opponents(const data::GameTables& tables, const vfs::Vfs& vfs, const std::vector<std::string>& args) {
+  int from = 0, to = static_cast<int>(tables.scenes.size()) - 1, seeds = 3, cap = 300, star = 40;
+  for (size_t i = 0; i < args.size(); ++i) {
+    const std::string& arg = args[i];
+    if (arg == "--scene" && i + 1 < args.size()) from = to = std::atoi(args[++i].c_str());
+    else if (arg == "--from" && i + 1 < args.size()) from = std::atoi(args[++i].c_str());
+    else if (arg == "--to" && i + 1 < args.size()) to = std::atoi(args[++i].c_str());
+    else if (arg == "--seeds" && i + 1 < args.size()) seeds = std::max(1, std::atoi(args[++i].c_str()));
+    else if (arg == "--cap" && i + 1 < args.size()) cap = std::max(1, std::atoi(args[++i].c_str()));
+    else if (arg == "--star" && i + 1 < args.size()) star = std::atoi(args[++i].c_str());
+    else return usage();
+  }
+  std::vector<PartyMember> party;
+  for (int id : {0, 1, 2}) party.push_back(make_party_member(tables, id, star, "char"));
+  Battle::Cheats cheats;
+  cheats.god_mode = true;
+  for (int scene = std::max(0, from); scene <= to && scene < static_cast<int>(tables.scenes.size()); ++scene) {
+    const data::SceneRec& rec = tables.scenes[static_cast<size_t>(scene)];
+    for (int focus = kPcSlots; focus < kUnits; ++focus) {
+      int targetable = 0, down = 0, present = 0, record = -1, kept = 0, counted = 0;
+      std::string name, ends;
+      for (int seed = 1; seed <= seeds; ++seed) {
+        try {
+          GameRng rng(static_cast<u32>(scene * 16 + seed), tables.rng_table);
+          pac::ScriptedBrain brain(pac_loader(vfs));
+          Battle battle(tables, rng, brain);
+          battle.set_cheats(cheats);
+          if (!battle.start(party, scene) || !battle.unit(focus).present) break;
+          ++present;
+          kept = battle::kept_from_party(battle, brain) >> focus & 1u;
+          counted = brain.active() && battle::ends_on_count(brain.vm()->module());
+          record = battle.unit(focus).src_id;
+          name = ascii(battle.unit(focus).name);
+          bool seen = false, fell = false;
+          const auto look = [&] {
+            const Unit& unit = battle.unit(focus);
+            seen = seen || (unit.alive() && !battle.untargetable(focus));
+            fell = fell || !unit.alive();
+          };
+          look();
+          for (int turn = 0; turn < cap && battle.outcome() == Outcome::Ongoing; ++turn) {
+            int pc = -1;
+            for (int i = 0; i < kPcSlots; ++i)
+              if (battle.can_act(i)) {
+                pc = i;
+                break;
+              }
+            if (pc < 0) break;
+            Command command;
+            command.actor = pc;
+            int aim = -1;
+            for (int i = kPcSlots; i < kUnits; ++i)
+              if (battle.unit(i).alive() && !battle.untargetable(i) && (aim < 0 || i == focus)) aim = i;
+            if (aim >= 0) {
+              command.kind = Command::Kind::Attack;
+              command.target = aim;
+              int budget = battle.unit(pc).stamina;
+              constexpr int max_chain = 4;
+              for (int k = 0; k < max_chain; ++k) {
+                int strength = std::min(k, 2);
+                while (strength >= 0 && battle.chain_cost(strength, battle.unit(pc)) > budget) --strength;
+                if (strength < 0) break;
+                budget -= battle.chain_cost(strength, battle.unit(pc));
+                command.chain.push_back(strength);
+              }
+              if (command.chain.empty()) command.kind = Command::Kind::Defend, command.target = -1;
+            }
+            if (!battle.apply(command)) break;
+            look();
+          }
+          look();
+          targetable += seen ? 1 : 0;
+          down += fell ? 1 : 0;
+          const Outcome outcome = battle.outcome();
+          ends += outcome == Outcome::Victory   ? " V"
+                  : outcome == Outcome::Wiped    ? " W"
+                  : outcome == Outcome::Fled     ? " F"
+                  : outcome == Outcome::Ongoing  ? " O"
+                                                 : std::format(" S{}", battle.result_code());
+        } catch (const std::exception& ex) {
+          ends += std::format(" X({})", ex.what());
+        }
+      }
+      if (!present) continue;
+      const int slot = focus - kPcSlots;
+      const int hp = record >= 0 && static_cast<size_t>(record) < tables.enemies.size() ? tables.enemies[static_cast<size_t>(record)].max_hp() : 0;
+      std::printf("scene %d unit %d record %d %s hp %d offstage %d owed %d kept %d counted %d targetable %d/%d down %d/%d ends%s\n", scene, focus, record,
+                  name.c_str(), hp, rec.raw[0x1B] >> slot & 1, rec.raw[0x10] >> slot & 1, kept, counted, targetable, present, down, present, ends.c_str());
+    }
+  }
+  return 0;
 }
 
 // Element ids the enemy battle scripts queue (QueuedAttack type 1/2/3/6), counted once per scene: every slot 2..4 of every unit's entity run
@@ -1247,6 +1389,7 @@ int ocbattle_main(int argc, char** argv) {
   if (args[0] == "elements") return cmd_elements(tables);
   if (args[0] == "cast") return cmd_cast(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "debug-kill") return cmd_debug_kill(tables, vfs, {args.begin() + 1, args.end()});
+  if (args[0] == "opponents") return cmd_opponents(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "fx-reg") return cmd_fx_reg(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "versus") return cmd_versus(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "versus-net") return cmd_versus_net(tables, {args.begin() + 1, args.end()});

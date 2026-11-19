@@ -10,6 +10,7 @@
 #include "data/tables.h"
 #include "import/text.h"
 #include "save/cc_save.h"
+#include "save/grid_preset.h"
 
 namespace oc::vfs {
 class Vfs;
@@ -75,6 +76,19 @@ struct EquipCand {
 };
 
 enum class SortMode { InnateFirst = 0, AttackFirst = 1, HealFirst = 2 };
+
+// What a saved grid preset shows in place of a name: the two colours its single-colour elements hold most of (colour index 0..5 as the
+// grid screen's plates: green, white, black, red, yellow, blue; -1 none) and its highest-level element (0 when it has none).
+struct PresetSummary {
+  int colours[2] = {-1, -1};
+  int top_id = 0;
+};
+
+// The result of loading a preset: the elements placed and the elements the stock lacked, as (element id, copies short).
+struct PresetLoad {
+  int placed = 0;
+  std::vector<std::pair<int, int>> missing;
+};
 
 // Option bits of the options word (save head 0x5A0).
 namespace opt {
@@ -181,6 +195,13 @@ class GameState {
   // every member first and fills row by row across the members, so they share the stock in that order.
   int auto_fill(int character, bool reset);
   int auto_fill_party(bool reset);
+  // The member's element cells (unlocked, below 0x80, not fixed) as a preset of slot 0.
+  save::GridPreset preset_of(int character) const;
+  // Loads a preset the way the editor's own moves do: Remove All first, then every preset cell that is unlocked and empty takes its
+  // element from the stock through place() (a stack cell keeps the saved count, extra copies go back). An element the stock lacks
+  // leaves its cell empty and is reported; no element is created or lost.
+  PresetLoad apply_preset(int character, const save::GridPreset& preset, bool keep_summon_copy = false);
+  PresetSummary preset_summary(const save::GridPreset& preset) const;
   // Re-packs the element stock.
   void sort_elements(SortMode mode, int character);
 
@@ -193,6 +214,8 @@ class GameState {
   // ---- equipment
   // Weapon, armour, accessory x3.
   static constexpr int kEquipSlots = 5;
+  // Bag ids below this are the materials.
+  static constexpr int kFirstGearId = 0x20;
   int equipped(int character, int eslot) const;
   Stats stats(int character) const { return stats_with(character, -1, 0); }
   // Status screen "STAMINA RECOVERY": the character record value plus the stamina accessories.
@@ -222,8 +245,6 @@ class GameState {
   int auto_fill_members(const std::vector<int>& members, bool reset);
   const data::StatRec* rec(int character) const;
   int accessory_conflict(int character, int eslot, int item) const;
-  // Bag ids below this are the materials.
-  static constexpr int kFirstGearId = 0x20;
   // Whether a bag id belongs in the slot's list: its item kind is min(eslot, 2); an accessory list also takes every material id.
   bool listed(int item, int eslot) const;
 };

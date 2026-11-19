@@ -946,6 +946,19 @@ void test_hud_rules() {
     CHECK(fill.width == width[i]);
     CHECK(fill.colour == (stamina[i] >= 40 ? bhud::BarColour::Cyan : stamina[i] >= 10 ? bhud::BarColour::Yellow : bhud::BarColour::Red));
   }
+  CHECK(!bhud::enemy_hp_shown(0, true, false, true));
+  CHECK(!bhud::enemy_hp_shown(1, true, false, false));
+  CHECK(bhud::enemy_hp_shown(1, true, false, true));
+  CHECK(bhud::enemy_hp_shown(2, true, false, false));
+  CHECK(!bhud::enemy_hp_shown(2, false, false, true));
+  CHECK(!bhud::enemy_hp_shown(2, true, true, true));
+  CHECK(bhud::enemy_hp_fill(0, 100, 66) == 0);
+  CHECK(bhud::enemy_hp_fill(1, 1000, 66) == 1);
+  CHECK(bhud::enemy_hp_fill(50, 100, 66) == 33);
+  CHECK(bhud::enemy_hp_fill(100, 100, 66) == 66);
+  CHECK(bhud::enemy_hp_fill(150, 100, 66) == 66);
+  CHECK(bhud::enemy_hp_tone(100, 100) == 0 && bhud::enemy_hp_tone(26, 100) == 0 && bhud::enemy_hp_tone(25, 100) == 1);
+  CHECK(bhud::enemy_hp_tone(13, 100) == 1 && bhud::enemy_hp_tone(12, 100) == 2);
 }
 
 int main() {

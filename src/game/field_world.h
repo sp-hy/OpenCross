@@ -21,6 +21,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "audio/mixer.h"
@@ -250,11 +251,11 @@ class FieldWorld final : public script::FieldHost {
   void set_audio(audio::Mixer* mixer, audio::Sfx* sfx);
   // [Audio] BgmSource: remastered = RDE .sab streams; original = the PS1 AKAO sequence (musicNNN + its bank) on our sequencer.
   // Flow rule: New Game / Continue end the title music (the title room's song must not carry into the next room) and forget the
-  // music a battle start pushed.
+  // music a battle start pushed and the music resume's places.
   void stop_music() {
     if (mixer_) {
-      mixer_->drop_pushed_music();
       mixer_->stop();
+      mixer_->drop_pushed_music();
     }
     pending_song_ = -1;
     song_change_ = {};
@@ -262,8 +263,11 @@ class FieldWorld final : public script::FieldHost {
   }
   // The room's current song from its start, after the mixer was stopped outside the scripts (the title prompt's music fade).
   void restart_song() {
-    if (last_song_ >= 0) start_song(last_song_, bgm_volume_);
+    if (last_song_ >= 0) start_song(last_song_, bgm_volume_, 0.0, false);
   }
+  // The room's song again after the host played music of its own over it (the Extras jukebox and theatre): a song that loops starts as a
+  // resumable song (from where it was cut under the music resume, else from its start); otherwise the music stays stopped.
+  void resume_room_song();
   // The field's sounds around a menu screen that replaces the field (fade out as it opens, the C6 slots back as it closes).
   void fade_screen_sounds(bool opening);
   void set_bgm_remastered(bool on, bool restart = true);
@@ -386,9 +390,15 @@ class FieldWorld final : public script::FieldHost {
   // sequences "tit0".."tit3" that the room has no .prd entry for).
   // Host hook: a key item (1..64) was newly obtained through give_item.
   void set_on_key_item(std::function<void(int)> cb) { on_key_item_ = std::move(cb); }
+  // Host hook: a dialogue window shows face `id` (a dialogue face id) as its portrait.
+  void set_on_face(std::function<void(int)> cb) { on_face_ = std::move(cb); }
   // Host hooks for achievements: a script gave item `id` (give_item) / set a variable bit.
   void set_on_item_given(std::function<void(int)> cb) { on_item_given_ = std::move(cb); }
   void set_on_var_bit_set(std::function<void(u32)> cb) { on_var_bit_set_ = std::move(cb); }
+  // Host hooks for the randomizer: the room's script code after it is read, before INIT runs (`room` = the stem); the fresh game FE 3F
+  // has just built (not a New Game+).
+  void set_script_patch(std::function<void(std::string_view room, Bytes& code)> cb) { script_patch_ = std::move(cb); }
+  void set_on_new_game(std::function<void(save::SaveSlot&)> cb) { on_new_game_ = std::move(cb); }
   // Field key-item list. Tele-Porter (1), Relief Charm (61) and Smith Spirit (63) are usable only
   // while script vars 0x46 and 0x3C are both 1; every other owned item always is.
   bool key_item_usable(int item) const;
@@ -488,6 +498,15 @@ class FieldWorld final : public script::FieldHost {
   void set_cast_shadows(bool on) { cast_shadows_ = on; }
   // [Game] CameraRelative: the pad / arrow headings turn with the room camera (pad_heading) instead of the control yaw (op 63).
   void set_camera_relative(bool on) { camera_relative_ = on; }
+  // [Game] AutoAdvance / AutoAdvanceDelay (percent): the modal message windows confirm themselves after their reading pause
+  // (ui::DialogueBox::auto_advance_due) while no voice line plays and no button panel is open.
+  void set_auto_advance(bool on, int delay_percent) {
+    auto_advance_ = on;
+    auto_advance_scale_ = static_cast<float>(delay_percent) / 100.0f;
+  }
+  // [Game] OpenCrossMenu: `hook` receives each room message whose framed window has closed (ui::DialogueDemo::on_logged), from the windows
+  // opened after this call; empty = nothing is gathered.
+  void set_dialogue_log(std::function<void(save::DialogueEntry)> hook) { dialogue_log_ = std::move(hook); }
   // [Shaders] the character shaders: the shading of the field actors.
   void set_character_shading(render::CharacterShading shading) { character_shading_ = shading; }
   // HD models in fields: characters are drawn with their menu model, posed by their field model (game/menu_rig.h).
@@ -907,7 +926,8 @@ class FieldWorld final : public script::FieldHost {
   // True once a room light (type-17 emitter object) has lit a slot. The PS1 shades FE 64 actors from the slots whatever they hold; with all three
   // at intensity 0 that is black, which no shipped scene intends, so until a light exists the actor keeps its flat zone colour.
   bool lights_active() const { return lights_.slot[0].intensity > 0 || lights_.slot[1].intensity > 0 || lights_.slot[2].intensity > 0; }
-  void start_song(int song, int volume, double start_seconds = 0.0);
+  // `resumable` = false: the song takes no part in the music resume (the battle theme the encounter starts). The one-shot songs never do.
+  void start_song(int song, int volume, double start_seconds = 0.0, bool resumable = true);
   // The field song after a battle (or a battle song that led to none): the room's last song where the battle cut it, or silence.
   void restore_field_song();
   u32 rand_u32() {
@@ -995,11 +1015,13 @@ class FieldWorld final : public script::FieldHost {
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
   // HD models in fields, by battle model (the model byte for a character) and field mesh (WornModel::field_mesh): the detailed
   // body (a character's menu model, an NPC's battle model) and how it follows a field model with skeleton `skeleton` (texture registry
-  // generation `generation`). No body = drawn with the field model (no detailed body, or the skeletons do not match).
+  // generation `generation`). No body = drawn with the field model (no detailed body, or the skeletons do not match). all_uses: read
+  // for a character's all-uses model file alone (the HD models in fields off).
   struct MenuBody {
     std::shared_ptr<ModelHandle> body;
     assets::Skeleton skeleton;
     unsigned generation = 0;
+    bool all_uses = false;
     MenuRig rig;
   };
   std::map<std::pair<int, int>, MenuBody> menu_bodies_;
@@ -1200,6 +1222,9 @@ class FieldWorld final : public script::FieldHost {
   render::ShadowPipeline shadow_tiles_;
   bool cast_shadows_ = false, shadow_tiles_failed_ = false;
   bool camera_relative_ = false;
+  bool auto_advance_ = false;
+  float auto_advance_scale_ = 1.0f;
+  std::function<void(save::DialogueEntry)> dialogue_log_;
   render::CharacterShading character_shading_;
   // art mode: party actors use their 4x texture
   bool hd_ = true;
@@ -1262,7 +1287,7 @@ class FieldWorld final : public script::FieldHost {
   int cue_song_ = -1;
   // The last song whose remastered stream could not be loaded (-1 = none).
   int failed_stream_ = -1;
-  bool play_stream(int song, int volume, double start_seconds);
+  bool play_stream(int song, int volume, double start_seconds, bool resumable = false);
   // FE 29: C6 slots kept across the next room change
   u32 sfx_keep_slots_ = 0;
 
@@ -1278,6 +1303,9 @@ class FieldWorld final : public script::FieldHost {
   MovieState movie_state_ = MovieState::None;
   std::function<bool(script::NamedOp, std::string_view)> effect_tap_;
   std::function<void(int)> on_key_item_;
+  std::function<void(std::string_view, Bytes&)> script_patch_;
+  std::function<void(save::SaveSlot&)> on_new_game_;
+  std::function<void(int)> on_face_;
   std::function<void(int)> on_item_given_;
   std::function<void(u32)> on_var_bit_set_;
   std::function<void(int)> on_disc_change_;

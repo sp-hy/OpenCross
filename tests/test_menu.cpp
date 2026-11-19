@@ -1,9 +1,11 @@
-// Menu rule tests on synthetic data: grid allocation legality, stock accounting, auto-fill, the three sort orders,
-// equipment compatibility / stat previews, element use, the options word, the Status model camera between ticks, the language
+// Menu rule tests on synthetic data: grid allocation legality, stock accounting, grid presets, auto-fill, the three sort orders,
+// equipment compatibility / stat previews, element use, the options word, the Status model camera between ticks, the Bestiary creature's
+// fitted camera distance, the language
 // suffix lookup of HD images, the skin window around a rectangle and the party screens' layout table.
 #include <cstdio>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <string>
 #include <vector>
@@ -290,6 +292,90 @@ void test_autofill_order() {
   CHECK(party_state.cell_element(1, 0, 2) == 1 && party_state.cell_element(0, 1, 2) == 0);
   party_state.clear_all(1);
   CHECK(party_state.auto_fill(0, false) == 1 && party_state.cell_element(0, 1, 2) == 1);
+}
+
+// Copies of an element anywhere the character can hold them: the stock plus the member's cells (a stack cell counts its copies).
+int copies_of(const GameState& game_state, int id) {
+  int total = game_state.element_count(id);
+  for (const save::GridPresetCell& cell : game_state.preset_of(0).cells)
+    if (cell.id == id) total += cell.count;
+  return total;
+}
+
+void test_grid_presets() {
+  Fixture fixture;
+  GameState& game_state = fixture.gs;
+  fixture.stock(1, 3);
+  fixture.stock(2, 1);
+  fixture.stock(3, 7);
+  fixture.stock(7, 1);
+  const int ids[] = {1, 2, 3, 7};
+  int before[4];
+  for (int i = 0; i < 4; ++i) before[i] = copies_of(game_state, ids[i]);
+  CHECK(game_state.place(0, 0, 2, 1) == Why::Ok && game_state.place(0, 0, 3, 3) == Why::Ok);
+  CHECK(game_state.place(0, 0, 4, 7) == Why::Ok && game_state.place(0, 1, 2, 2) == Why::Ok);
+
+  const save::GridPreset saved = game_state.preset_of(0);
+  CHECK(saved.cells.size() == 4);
+  CHECK(saved.cells[0].row == 0 && saved.cells[0].col == 2 && saved.cells[0].id == 1 && saved.cells[0].count == 1);
+  CHECK(saved.cells[1].id == 3 && saved.cells[1].count == 5);
+  // Blue twice (elements 1 and 2); green (3) and black (7) tie on one, so the lower colour index follows; the top level is element 2's.
+  const PresetSummary summary = game_state.preset_summary(saved);
+  CHECK(summary.colours[0] == 5 && summary.colours[1] == 0 && summary.top_id == 2);
+
+  // Remove All, then Load: the same layout, every copy where it was.
+  game_state.clear_all(0);
+  CHECK(game_state.preset_of(0).cells.empty());
+  PresetLoad load = game_state.apply_preset(0, saved);
+  CHECK(load.placed == 4 && load.missing.empty());
+  CHECK(game_state.cell_element(0, 0, 2) == 1 && game_state.cell_element(0, 0, 3) == 3 && game_state.cell_count(0, 0, 3) == 5);
+  CHECK(game_state.cell_element(0, 0, 4) == 7 && game_state.cell_element(0, 1, 2) == 2);
+  for (int i = 0; i < 4; ++i) CHECK(copies_of(game_state, ids[i]) == before[i]);
+
+  // Loading over another layout returns what the new one does not use; loading twice changes nothing.
+  game_state.clear_all(0);
+  CHECK(game_state.place(0, 0, 5, 1) == Why::Ok);
+  load = game_state.apply_preset(0, saved);
+  CHECK(load.placed == 4 && load.missing.empty() && game_state.cell_element(0, 0, 5) == 0);
+  CHECK(game_state.apply_preset(0, saved).placed == 4);
+  for (int i = 0; i < 4; ++i) CHECK(copies_of(game_state, ids[i]) == before[i]);
+
+  // An element another character holds (not in the stock) is reported and its cell stays empty; the rest is placed.
+  game_state.clear_all(0);
+  while (game_state.take_element(7)) {
+  }
+  load = game_state.apply_preset(0, saved);
+  CHECK(load.placed == 3 && game_state.cell_element(0, 0, 4) == 0);
+  CHECK(load.missing.size() == 1 && load.missing[0].first == 7 && load.missing[0].second == 1);
+  CHECK(copies_of(game_state, 1) == before[0] && copies_of(game_state, 2) == before[1] && copies_of(game_state, 3) == before[2]);
+  CHECK(game_state.element_count(7) == 0 && game_state.preset_of(0).cells.size() == 3);
+
+  // A stack with fewer copies than saved takes them all and reports the shortfall.
+  game_state.clear_all(0);
+  for (auto& stack : game_state.slot.elements)
+    if (stack.id == 3) stack.qty = 2;
+  load = game_state.apply_preset(0, saved);
+  CHECK(game_state.cell_element(0, 0, 3) == 3 && game_state.cell_count(0, 0, 3) == 2 && game_state.element_count(3) == 0);
+  CHECK(load.missing.size() == 2 && load.missing[0].first == 3 && load.missing[0].second == 3 && load.missing[1].first == 7);
+
+  // A saved count of 3 puts two of the five taken copies back.
+  game_state.clear_all(0);
+  while (game_state.take_element(3)) {
+  }
+  fixture.stock(3, 7);
+  save::GridPreset three;
+  three.cells.push_back({0, 3, 3, 3});
+  CHECK(game_state.apply_preset(0, three).missing.empty());
+  CHECK(game_state.cell_count(0, 0, 3) == 3 && game_state.element_count(3) == 4);
+
+  // A locked cell is skipped and keeps its element in the stock; a cell the grid has no cell for too.
+  game_state.clear_all(0);
+  save::GridPreset locked;
+  locked.cells.push_back({0, 6, 1, 1});
+  locked.cells.push_back({0, 0, 1, 1});
+  const int stock_one = game_state.element_count(1);
+  load = game_state.apply_preset(0, locked);
+  CHECK(load.placed == 0 && load.missing.empty() && game_state.element_count(1) == stock_one);
 }
 
 void test_sort() {
@@ -599,6 +685,27 @@ void test_menu_camera_blend() {
   CHECK(still.yaw == static_cast<float>(cur.yaw & 0xFFF) && still.distance == 2032.0f);
 }
 
+// The Bestiary creature's camera: at the fitted distance every point of a model turning through a whole turn projects inside the half box,
+// and some point reaches the box's edge (the fit is tight).
+void test_turning_fit() {
+  const std::vector<std::array<float, 3>> points = {{300, -400, 0}, {-120, 380, 90}, {40, 0, -500}, {0, 900, 0}, {250, 650, 250}};
+  std::vector<std::array<float, 2>> reach;
+  for (const auto& point : points) reach.push_back({std::abs(point[1]), std::hypot(point[0], point[2])});
+  const float scale = 256, half_w = 120, half_h = 90;
+  const float distance = turning_fit_distance(reach, scale, half_w, half_h);
+  float widest = 0;
+  for (int step = 0; step < 4096; ++step) {
+    const float turn = 6.2831853f * static_cast<float>(step) / 4096.0f;
+    for (const auto& point : points) {
+      const float x = point[0] * std::cos(turn) + point[2] * std::sin(turn), z = -point[0] * std::sin(turn) + point[2] * std::cos(turn);
+      const float sx = std::abs(scale * x / (distance + z)) / half_w, sy = std::abs(scale * point[1] / (distance + z)) / half_h;
+      widest = std::max({widest, sx, sy});
+    }
+  }
+  CHECK(widest <= 1.0001f);
+  CHECK(widest > 0.999f);
+}
+
 void test_localized_path() {
   vfs::Vfs files;
   vfs::Overlay overlay;
@@ -716,10 +823,12 @@ int main() {
   test_skin_rect();
   test_party_menu_layout();
   test_menu_camera_blend();
+  test_turning_fit();
   test_grid();
   test_grid_summon_copies();
   test_autofill();
   test_autofill_order();
+  test_grid_presets();
   test_sort();
   test_learn_tech();
   test_equip();

@@ -192,6 +192,7 @@ class Host {
 class Vm {
  public:
   Vm(const Module& module, Host& host);
+  const Module& module() const { return mod_; }
 
   // One interpreter pass over every entity (once per frame).
   void tick();

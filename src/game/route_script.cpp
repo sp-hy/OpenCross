@@ -52,6 +52,9 @@ int pad_button_for(const std::string& name) {
   if (name == "start") return SDL_GAMEPAD_BUTTON_START;
   if (name == "l3") return SDL_GAMEPAD_BUTTON_LEFT_STICK;
   if (name == "r3") return SDL_GAMEPAD_BUTTON_RIGHT_STICK;
+  if (name == "back") return SDL_GAMEPAD_BUTTON_BACK;
+  if (name == "lb") return SDL_GAMEPAD_BUTTON_LEFT_SHOULDER;
+  if (name == "rb") return SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
   return -1;
 }
 
@@ -278,18 +281,26 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       return true;
     }
     if (args[1] != "tap" || args.size() < 3) return bad("pad on|off|tap <button>");
-    const int button = pad_button_for(args[2]);
-    if (button < 0) return bad("unknown pad button " + args[2]);
+    // Buttons joined by '+' are held together (a chord).
+    std::vector<size_t> buttons;
+    for (size_t from = 0;;) {
+      const size_t plus = args[2].find('+', from);
+      const std::string name = args[2].substr(from, plus == std::string::npos ? std::string::npos : plus - from);
+      const int button = pad_button_for(name);
+      if (button < 0) return bad("unknown pad button " + name);
+      buttons.push_back(static_cast<size_t>(button));
+      if (plus == std::string::npos) break;
+      from = plus + 1;
+    }
     int ticks = 3;
     if (args.size() > 3) to_int(args[3], ticks);
     pad_on_ = true;
-    const size_t index = static_cast<size_t>(button);
     if (phase_ == 0) {
-      pad_held_[index] = true;
+      for (const size_t index : buttons) pad_held_[index] = true;
       aux_ = st.tick;
       phase_ = 1;
     } else if (phase_ == 1 && st.tick >= aux_ + static_cast<u64>(std::max(1, ticks))) {
-      pad_held_[index] = false;
+      for (const size_t index : buttons) pad_held_[index] = false;
       phase_ = 2;
       aux_ = st.tick;
     } else if (phase_ == 2 && st.tick >= aux_ + 3) {
@@ -330,6 +341,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
         if (timed_out(3)) return bad("timed out waiting for the results screen");
         return false;
       }
+      if (args.size() > 2 && args[2] == "retry") {
+        if (st.retry) return true;
+        if (timed_out(3)) return bad("timed out waiting for the retry choice");
+        return false;
+      }
       if (start ? st.battle : !st.battle) return true;
       if (timed_out(3)) return bad(std::string("timed out waiting for battle ") + (start ? "start" : "end"));
       return false;
@@ -351,6 +367,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (args.size() < 3 || (args[2] != "odd" && args[2] != "even")) return bad("wait parity <odd|even>");
       if ((st.field_ticks & 1u) == (args[2] == "odd" ? 1u : 0u)) return true;
       if (timed_out(3)) return bad("timed out waiting for tick parity " + args[2]);
+      return false;
+    }
+    if (args[1] == "records") {
+      if (st.records_ready) return true;
+      if (timed_out(2)) return bad("timed out waiting for the records scan");
       return false;
     }
     if (args[1] == "guide") {
@@ -557,7 +578,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       return false;
     }
     for (int sc : {SDL_SCANCODE_RETURN, SDL_SCANCODE_DOWN}) hold(sc, false);
-    if (!st.battle) return true;
+    if (!st.battle || st.retry) return true;
     // The view rotates the PCs and chains Weak / Strong / Fierce itself.
     out.battle_auto = true;
     if (st.tick - aux_ > 3 * timeout_arg(args, 1)) return bad("battle did not finish");
@@ -942,6 +963,23 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (st.feature_icons != count) return bad("feature icons drawn: " + std::to_string(st.feature_icons) + ", expected " + args[2]);
     } else if (args[1] == "pause") {
       if (st.pause != (args[2] == "open")) return bad(std::string("the pause screen is ") + (st.pause ? "up" : "not up"));
+    } else if (args[1] == "dialoguelog") {
+      // open|closed, entries <min> [max] (the entries the open window lists), cursor <n> (its selected entry, 0 = the oldest)
+      const bool open = st.dialogue_log >= 0;
+      int low = 0, high = 0;
+      if (args[2] == "open" || args[2] == "closed") {
+        if (open != (args[2] == "open")) return bad(std::string("the dialogue log window is ") + (open ? "up" : "not up"));
+      } else if (args[2] == "entries" && args.size() > 3 && to_int(args[3], low)) {
+        high = args.size() > 4 && to_int(args[4], high) ? high : 1 << 30;
+        if (st.dialogue_log < low || st.dialogue_log > high) return bad(std::format("the dialogue log window lists {} entries", st.dialogue_log));
+        log::info("route: the dialogue log window lists {} entries, cursor on {}", st.dialogue_log, st.dialogue_log_cursor);
+      } else if (args[2] == "cursor" && args.size() > 3 && to_int(args[3], low)) {
+        if (!open || st.dialogue_log_cursor != low) return bad(std::format("the dialogue log cursor is on {}", st.dialogue_log_cursor));
+      } else {
+        return bad("assert dialoguelog open|closed | entries <min> [max] | cursor <n>");
+      }
+    } else if (args[1] == "retry") {
+      if (st.retry != (args[2] == "open")) return bad(std::string("the retry choice is ") + (st.retry ? "up" : "not up"));
     } else if (args[1] == "flow") {
       if (st.flow != args[2]) return bad("flow is " + st.flow);
     } else if (args[1] == "menu" || args[1] == "shop" || args[1] == "movie") {
@@ -972,6 +1010,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (args.size() < 4 || !to_hex(args[2], mask) || !st.options) return bad("assert option <hexmask> set|clear");
       const int got = st.options();
       if (((got & mask) == mask) != (args[3] == "set")) return bad(std::format("options word is {:#06x}, expected {:#x} {}", got, mask, args[3]));
+    } else if (args[1] == "config") {
+      if (args.size() < 5 || !st.config_value) return bad("assert config <section> <key> <value>");
+      const std::string got = st.config_value(args[2], args[3]);
+      if (got != args[4]) return bad(std::format("[{}] {} is '{}', expected '{}'", args[2], args[3], got, args[4]));
+      log::info("route: [{}] {} is {}", args[2], args[3], got);
     } else if (args[1] == "result") {
       int want = 0;
       if (!to_int(args[2], want) || st.battle_result != want) return bad(std::format("BATTLE_RESULT is {}", st.battle_result));
@@ -1056,6 +1099,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.set_option = true;
     out.option_mask = mask;
     out.option_on = value;
+    return true;
+  }
+  if (op == "set" && args.size() >= 3 && args[1] == "skin") {
+    int skin = 0;
+    if (!to_int(args[2], skin) || skin < 0 || skin > 255) return bad("set skin <0..255>");
+    out.set_skin = true;
+    out.skin = skin;
     return true;
   }
   if (op == "set") {

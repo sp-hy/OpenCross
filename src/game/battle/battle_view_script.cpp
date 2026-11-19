@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <string_view>
 
 #include "core/log.h"
 #include "import/text.h"
@@ -320,6 +321,7 @@ void BattleView::smsg_open(const ScriptMsgReq& req) {
     msg.ty = 0x2E;
   }
   msg.open = 1;
+  if (story_log_ && !req.sys) story_begin(msg, actor);
   route_events_.push_back("w" + std::to_string(req.msg));
   // Voices: voices/battle/<scene>/<msg>-<page>-<unit>.mp3.
   if (audio::VoicePlayer* voices = audio::VoicePlayer::instance(); voices && !req.sys) voices->battle_open(scene_id_, req.msg, actor);
@@ -409,9 +411,30 @@ void BattleView::smsg_tick() {
   tick_window(plate_);
 }
 
+// The event window's message as the dialogue log keeps it: the pages as shown, one per line, and the speaker its first line names
+// ("Name:").
+void BattleView::story_begin(const ScriptMsg& msg, const std::string& actor) {
+  story_entry_ = {};
+  for (const std::string& page : msg.pages) {
+    std::string shown = smsg_strip_tags(smsg_expand(page, 0x7FFFFFFF, actor, msg.item));
+    while (!shown.empty() && (shown.back() == '\n' || shown.back() == ' ')) shown.pop_back();
+    if (shown.empty()) continue;
+    if (!story_entry_.text.empty()) story_entry_.text += '\n';
+    story_entry_.text += shown;
+  }
+  const std::string first = story_entry_.text.substr(0, story_entry_.text.find('\n'));
+  for (const std::string_view colon : {std::string_view(":"), std::string_view("\xEF\xBC\x9A")})
+    if (first.size() > colon.size() && first.ends_with(colon)) story_entry_.speaker = first.substr(0, first.size() - colon.size());
+  story_pending_ = !story_entry_.text.empty();
+}
+
 void BattleView::tick_window(ScriptMsg& msg) {
   if (msg.open == 0) return;
-  if (audio::VoicePlayer* voices = audio::VoicePlayer::instance(); voices && !msg.sys) voices->battle_sync(static_cast<int>(msg.page), msg.open < 0 || msg.page >= msg.pages.size());
+  if (audio::VoicePlayer* voices = audio::VoicePlayer::instance(); voices && !msg.sys) {
+    voices->battle_sync(static_cast<int>(msg.page), msg.open < 0 || msg.page >= msg.pages.size());
+    if (story_pending_)
+      if (std::string rel = voices->take_found(); !rel.empty()) story_entry_.voices.push_back(std::move(rel));
+  }
   const int grow_frames = msg.grow_frames(kSmsgGrowStep);
   // Closing.
   if (msg.open < 0) {
@@ -419,6 +442,10 @@ void BattleView::tick_window(ScriptMsg& msg) {
       msg.open = 0;
       log::debug("battle script: message closed at tick {}", tick_count_);
       msg.pages.clear();
+      if (!msg.sys && story_pending_ && story_log_) {
+        story_pending_ = false;
+        story_log_(std::move(story_entry_));
+      }
     }
     return;
   }

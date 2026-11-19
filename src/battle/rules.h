@@ -224,10 +224,30 @@ std::array<int, 7> typical_star_growth(const std::array<int, 7>& base, const std
 inline int progress_cap(const StarRow& row) { return static_cast<short>(row.step * row.battles); }
 
 // ---- victory
-// x125/100 with the gear bonus.
-int gold_reward(int base_total, bool bonus);
-// Drop roll for one defeated enemy: returns the chosen row slot index (1 rare, 0 common) or -1.
-int drop_roll(Rng& rng, int drop_base);
+// x125/100 with the gear bonus, then `percent` / 100 (the Cheats tab's gold multiplier), limited to the gold cap.
+constexpr int kRewardGoldCap = 9999999;
+int gold_reward(int base_total, bool bonus, int percent = 100);
+// Rare-loot multiplier of the Cheats tab: 1 is the game's own chance, kRareLootAlways is the Always loot behaviour.
+constexpr int kRareLootAlways = 10;
+// A chance in percent times the multiplier, at most 100.
+int scaled_rare_chance(int base_percent, int multiplier);
+// Drop roll for one defeated enemy: returns the chosen row slot index (1 rare, 0 common) or -1. The rare band (`drop_base / 20` percent)
+// is multiplied by `rare_multiplier` (at most 100 percent); the common band keeps its own bound.
+int drop_roll(Rng& rng, int drop_base, int rare_multiplier = 1);
+
+// ---- difficulty (Cheats tab)
+// Percent scalings of the enemies' HP and of the damage taken / dealt; 100 is the game's own value.
+struct Difficulty {
+  int hp = 100, taken = 100, dealt = 100;
+  bool operator==(const Difficulty&) const = default;
+};
+enum class DifficultyPreset { Story, Normal, Hard, VeryHard };
+constexpr int kDifficultyMin = 25, kDifficultyMax = 400;
+Difficulty difficulty_preset(DifficultyPreset preset);
+// A damage figure times percent / 100 (floor); a hit of at least 1 stays at least 1 unless the percentage is 0. Zero and negative values pass.
+int scale_percent(int value, int percent);
+// An enemy's max HP times percent / 100, at least 1 and at most 32767.
+int scaled_enemy_hp(int max_hp, int percent);
 
 // ---- encounters
 // Enemy-group variant of an encounter: one rnd(0, 2549); band i ({lo, hi}: the rolls in [lo, hi)) gives variant 7 - i, no band 0.

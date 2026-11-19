@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <map>
 
 #include "ui/menu/save_layout.h"
 #include "vfs/vfs.h"
@@ -480,6 +481,64 @@ int GameState::auto_fill(int character, bool reset) {
 }
 
 int GameState::auto_fill_party(bool reset) { return auto_fill_members(party(), reset); }
+
+save::GridPreset GameState::preset_of(int character) const {
+  save::GridPreset preset;
+  preset.character = static_cast<u8>(character);
+  for (int row = 0; row < kRows; ++row)
+    for (int col = 0; col < kCols; ++col) {
+      const int id = cell_element(character, row, col);
+      if (!cell_available(character, row, col) || id <= 0 || id >= 0x80 || rules->el_fixed(id)) continue;
+      const int copies = rules->el_stack(id) ? std::clamp(cell_count(character, row, col), 1, kStackMax) : 1;
+      preset.cells.push_back({static_cast<u8>(row), static_cast<u8>(col), static_cast<u16>(id), static_cast<u8>(copies)});
+    }
+  return preset;
+}
+
+PresetLoad GameState::apply_preset(int character, const save::GridPreset& preset, bool keep_summon_copy) {
+  PresetLoad result;
+  if (character < 0 || character >= save::kNumChars) return result;
+  clear_all(character);
+  std::map<int, int> lacking;
+  save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
+  for (const save::GridPresetCell& entry : preset.cells) {
+    const int id = entry.id, row = entry.row, col = entry.col;
+    if (id <= 0 || id >= 0x80 || !cell_available(character, row, col) || cell_element(character, row, col) != 0) continue;
+    const int want = rules->el_stack(id) ? std::clamp<int>(entry.count, 1, kStackMax) : 1;
+    const Why why = place(character, row, col, id, keep_summon_copy);
+    if (why == Why::NoStock) lacking[id] += want;
+    if (why != Why::Ok) continue;
+    ++result.placed;
+    if (!rules->el_stack(id)) continue;
+    const size_t cell = static_cast<size_t>(cell_index(character, row, col));
+    const int held = ch.equipped_qty[cell];
+    for (int i = want; i < held; ++i) add_element(id);
+    ch.equipped_qty[cell] = static_cast<u8>(std::min(held, want));
+    if (held < want) lacking[id] += want - held;
+  }
+  result.missing.assign(lacking.begin(), lacking.end());
+  return result;
+}
+
+PresetSummary GameState::preset_summary(const save::GridPreset& preset) const {
+  PresetSummary summary;
+  int counts[6] = {};
+  int top_level = 0;
+  for (const save::GridPresetCell& entry : preset.cells) {
+    const int bits = rules->el_colour(entry.id) & 0xFC;
+    if (std::popcount(static_cast<unsigned>(bits)) == 1) ++counts[std::countr_zero(static_cast<unsigned>(bits)) - 2];
+    if (const int level = rules->el_level(entry.id); level > top_level) top_level = level, summary.top_id = entry.id;
+  }
+  for (int slot_index = 0; slot_index < 2; ++slot_index) {
+    int best = -1;
+    for (int colour = 0; colour < 6; ++colour)
+      if (counts[colour] > 0 && (best < 0 || counts[colour] > counts[best])) best = colour;
+    if (best < 0) break;
+    summary.colours[slot_index] = best;
+    counts[best] = 0;
+  }
+  return summary;
+}
 
 void GameState::sort_elements(SortMode mode, int character) {
   struct SortEntry {

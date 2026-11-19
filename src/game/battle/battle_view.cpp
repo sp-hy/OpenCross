@@ -126,6 +126,7 @@ void BattleView::unload_scene() {
   // must not leave a half-open window / pending position / engaged PC / menu-facing memory in the next scripted fight).
   smsg_ = ScriptMsg{};
   plate_ = ScriptMsg{};
+  story_pending_ = false;
   sys_pending_ = false;
   froze_ = false;
   wipe_hold_ = 0;
@@ -371,6 +372,8 @@ void BattleView::run_load_step(LoadJob& job) {
   bopt.duel_relief = opt.duel_relief;
   bopt.party_swap = opt.party_swap;
   bopt.swap_reserve = opt.swap_reserve;
+  bopt.drops = opt.drops;
+  bopt.enemy_tuning = opt.enemy_tuning;
   bopt.unnamed_kid_label = data::unnamed_kid_label(lang_);
   bopt.enemy_names.resize(tables_->enemies.size());
   for (size_t i = 0; i < bopt.enemy_names.size(); ++i)

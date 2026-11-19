@@ -470,6 +470,37 @@ void test_wrap_limit() {
   CHECK(wrap_limit(1490, 1, Lang::En, 9) == 925.0f);
 }
 
+// Auto-advance: the reading pause grows with the glyphs read since the last confirm (spaces not counted), the slider scales it, and the
+// typewriter counts the time it has waited for confirm; a wait of the script's own ({wend}) is not an input wait.
+void test_auto_advance() {
+  using namespace ui;
+  CHECK(std::fabs(auto_advance_seconds(0, false, 1.0f) - 1.0f) < 1e-5f);
+  CHECK(std::fabs(auto_advance_seconds(50, false, 1.0f) - 3.0f) < 1e-5f);
+  CHECK(std::fabs(auto_advance_seconds(24, true, 1.0f) - 3.0f) < 1e-5f);
+  CHECK(std::fabs(auto_advance_seconds(50, false, 0.5f) - 1.5f) < 1e-5f);
+  LayoutMetrics lm;
+  lm.advance = [](char32_t) { return 10.0f; };
+  lm.line_height = 20;
+  const auto flat = import::flatten(import::parse_markup("{speed(255)}ab cd{bwait}efg{bpage}hi{mend}", import::Lang::En), {});
+  Typewriter tw;
+  tw.start(layout_pages(flat, lm));
+  tw.update(0.02f);
+  CHECK(tw.state() == Typewriter::State::WaitConfirm && tw.read_glyphs() == 4 && tw.wait_seconds() < 0.02f);
+  tw.update(0.5f);
+  CHECK(std::fabs(tw.wait_seconds() - 0.5f) < 0.02f);
+  tw.confirm();
+  tw.update(0.02f);
+  CHECK(tw.state() == Typewriter::State::WaitPage && tw.read_glyphs() == 3 && tw.wait_seconds() < 0.02f);
+  tw.confirm();
+  tw.update(0.02f);
+  CHECK(tw.state() == Typewriter::State::WaitClose && tw.read_glyphs() == 2);
+  const auto timed = import::flatten(import::parse_markup("{speed(255)}hello{wend(60)}{mend}", import::Lang::En), {});
+  Typewriter closing;
+  closing.start(layout_pages(timed, lm));
+  closing.update(0.5f);
+  CHECK(closing.state() == Typewriter::State::Closing && !closing.waiting_for_input() && closing.wait_seconds() == 0.0f);
+}
+
 void test_typewriter() {
   using namespace ui;
   import::Message message = import::parse_markup("ab{wait(30)}c{bpage}d{wait}{mend}", import::Lang::En);
@@ -938,6 +969,7 @@ int main() {
   test_lang();
   test_char_names();
   test_typewriter();
+  test_auto_advance();
   test_choice_lines();
   test_menu_forms();
   test_word_wrap();

@@ -8,6 +8,7 @@
 // (counter). The growth progress counter is head 0x598 (SaveSlot::growth_progress): battle_setup takes it,
 // apply_battle_result returns the new value, and the host stores it back; a new game starts at 0.
 #include <array>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -75,6 +76,21 @@ void settle_pip_form(ui::GameState& gs, const data::GameTables& tables, int form
 // took Serge's slots, -1 = none) is written as Serge unless Serge himself came in (Serge takes back his saved slot when the stand-in swapped out). With `reserve_size` slots (the Reserve setting), each
 // member who left the party takes the reserve slot of one who came in (slot order, then empty slots). True when the saved party changed.
 bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in, int reserve_size = 0);
+
+// A lost battle ends the game: the party was wiped (Outcome::Wiped, which a script's forced code 1 gives too) in a battle whose flags
+// lack 2 (losable). Every other ending, a losable wipe included, hands its result code back to the field script.
+bool wipe_ends_game(battle::Outcome outcome, int battle_flags);
+
+// What a retried battle (Quality of life's Retry lost battles) starts from again: the whole saved state as the battle began (party and bench
+// records, inventory, element stock, element grids, gold, star and battle counters of the head) and the field VM's global variables
+// (the Dopplegang pool, the saved battle variables 0x3D0..0x3DE and every other variable a battle's return writes).
+struct BattleSnapshot {
+  save::SaveSlot slot;
+  std::vector<u16> vars;
+};
+BattleSnapshot take_battle_snapshot(const ui::GameState& gs, std::span<const u16> vars);
+// Puts the snapshot back; `vars` gets as many variables as both hold.
+void restore_battle_snapshot(const BattleSnapshot& snapshot, ui::GameState& gs, std::span<u16> vars);
 
 std::string utf8_from_u32(std::u32string_view text);
 

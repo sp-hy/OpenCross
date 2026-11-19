@@ -38,6 +38,10 @@ add_executable(opencross WIN32
   app/app_run.cpp
   app/app_sim.cpp
   app/app_achievements.cpp
+  app/app_collection.cpp
+  app/app_randomizer.cpp
+  app/app_dialogue_log.cpp
+  app/app_extras.cpp
   app/app_source.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/opencross.rc)
 target_link_libraries(opencross PRIVATE oc_core oc_disc oc_source oc_platform oc_net oc_versus_link oc_vfs oc_import oc_render oc_ui oc_audio oc_game oc_data oc_battle_view oc_flow oc_movie oc_save oc_menu_model oc_tools SDL3::SDL3)

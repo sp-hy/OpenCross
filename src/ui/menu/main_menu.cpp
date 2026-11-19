@@ -29,6 +29,8 @@ const char* menu_screen_name(MenuScreen screen) {
     case MenuScreen::KeyItems: return "key_items";
     case MenuScreen::Settings: return "settings";
     case MenuScreen::Save: return "save";
+    case MenuScreen::OpenCross: return "opencross";
+    case MenuScreen::OcPage: return "oc_page";
   }
   return "?";
 }
@@ -161,6 +163,10 @@ Nav MainMenu::Impl::poll(const platform::Input& in) {
   nav.sq = key_pressed(Action::Item) || pad_pressed(SDL_GAMEPAD_BUTTON_WEST);
   nav.l1 = key_pressed(Action::SelectLeft) || pad_pressed(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER);
   nav.r1 = key_pressed(Action::SelectRight) || pad_pressed(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+  nav.page_up = in.key_pressed[SDL_SCANCODE_PAGEUP];
+  nav.page_down = in.key_pressed[SDL_SCANCODE_PAGEDOWN];
+  nav.home = in.key_pressed[SDL_SCANCODE_HOME];
+  nav.end = in.key_pressed[SDL_SCANCODE_END];
   return nav;
 }
 
@@ -170,10 +176,14 @@ void MainMenu::Impl::open(GameState& state, bool allow_save) {
   saved = false;
   can_save = allow_save;
   save_only = false;
+  limited = false;
   closed = false;
   screen = MenuScreen::Main;
   sub = 0;
   main_cur = gs->option(opt::kCursorMemory) ? mem_cur : 0;
+  // A remembered OpenCross row that is gone now: the row in its place, Save/Load.
+  if (main_cur == kOcRow && !oc_row()) main_cur = 5;
+  back_to_oc = false;
   member = pick_cur = 0;
   roster = Roster::Off;
   roster_anim = roster_top = roster_row = roster_no = 0;
@@ -188,9 +198,11 @@ void MainMenu::Impl::open(GameState& state, bool allow_save) {
   repeat.reset();
 }
 
-// Opens a screen: from the main list or the Use / Allocate list through the open transition, else at once.
+// Opens a screen: from the main list, the Use / Allocate list or an OpenCross list through the open transition, else at once (the lists
+// themselves switch at once).
 void MainMenu::Impl::enter(MenuScreen target) {
-  if ((screen == MenuScreen::Main || screen == MenuScreen::ElementChoice) && target != MenuScreen::ElementChoice) {
+  const bool from_list = screen == MenuScreen::Main || screen == MenuScreen::ElementChoice || screen == MenuScreen::OpenCross;
+  if (from_list && target != MenuScreen::ElementChoice && target != MenuScreen::OpenCross) {
     transition = Transition::Open, transition_t = 0, open_target = target;
     portraits_away = target == MenuScreen::Status || target == MenuScreen::ElementGrid || target == MenuScreen::Equip;
     return;
@@ -212,22 +224,27 @@ void MainMenu::Impl::show(MenuScreen target) {
     case MenuScreen::KeyItems: ki_cur = ki_scroll = 0; break;
     case MenuScreen::Settings: set_cur = 0, skin_pick = false, pad_state = 0; break;
     case MenuScreen::Save: save_cur = 0, load_cur = 1, top_cur = can_save ? 0 : 1, save_phase = 0, save_card = 1, load_mode = false, save_confirm = false, load_previews(); break;
+    case MenuScreen::OpenCross: oc_cur = oc_page_cur = 0, oc_group.reset(); break;
+    case MenuScreen::OcPage: enter_page(); break;
     default: break;
   }
 }
 
-// Returns to the main list: from a screen through the back transition, from the Use / Allocate list at once.
+// Returns to the main list: from a screen through the back transition, from the Use / Allocate or an OpenCross list at once.
 void MainMenu::Impl::back_to_main(int cursor, bool to_pick) {
-  if (screen != MenuScreen::Main && screen != MenuScreen::ElementChoice) {
+  back_to_oc = false;
+  if (screen != MenuScreen::Main && screen != MenuScreen::ElementChoice && screen != MenuScreen::OpenCross) {
     transition = Transition::Back, transition_t = 0, back_cursor = cursor, back_to_pick = to_pick;
     return;
   }
   land_on_main(cursor, to_pick);
 }
 
-// A screen opened from the roster returns to the roster (same row), not to the main list.
+// A screen opened from the roster returns to the roster (same row), not to the main list; an OpenCross page returns to the OpenCross list
+// it was opened from.
 void MainMenu::Impl::land_on_main(int cursor, bool to_pick) {
-  screen = MenuScreen::Main;
+  screen = back_to_oc ? MenuScreen::OpenCross : MenuScreen::Main;
+  back_to_oc = false;
   sub = 0;
   main_cur = cursor;
   if (to_pick) sub = 1, pick_cur = member;
@@ -278,24 +295,32 @@ void MainMenu::Impl::update(const platform::Input& in, int ticks) {
     case MenuScreen::KeyItems: update_keyitems(nav); break;
     case MenuScreen::Settings: update_settings(nav, in); break;
     case MenuScreen::Save: update_save(nav); break;
+    case MenuScreen::OpenCross: update_oc_list(nav); break;
+    case MenuScreen::OcPage: update_page(nav); break;
   }
-  // the needle eases once per frame on the screens that draw a dial (main list, Use / Allocate toggle, Save / Load list)
+  // the needle eases once per frame on the screens that draw a dial (main list, Use / Allocate toggle, the OpenCross lists, Save / Load list)
   if (screen == MenuScreen::ElementChoice || allocate_pick()) hand_tick(1, choice_cur, table_angle(1, choice_cur));
-  else if (screen == MenuScreen::Main) hand_tick(0, main_cur, table_angle(0, main_cur));
+  else if (screen == MenuScreen::OpenCross) hand_tick(oc_group ? 5 : 4, oc_slot(oc_list_cur()), table_angle(0, oc_slot(oc_list_cur())));
+  else if (screen == MenuScreen::Main) hand_tick(0, main_pos(main_cur), table_angle(0, main_pos(main_cur)));
   else if (screen == MenuScreen::Save) hand_tick(3, top_cur, save_list_angle(top_cur));
 }
 
-// Needle angles per list (4096 = 2 pi): 0 main, 1 Use / Allocate, 2 popup, 3 Save / Load.
+// Needle angles per list (4096 = 2 pi): 0 main (by slot; slot 6 = the seventh row a shown OpenCross row adds, pointing at the ring where
+// that row's leader meets it), 1 Use / Allocate, 2 popup, 3 Save / Load. The OpenCross lists (4 the groups, 5 a group's pages) point like
+// the main list's slots.
 int MainMenu::Impl::table_angle(int list, int sel) {
-  static const int kAngle[4][6] = {{-576, -768, -960, -1104, -1248, -1434}, {-576, -960, 0, 0, 0, 0}, {-1104, -1248, -1434, 0, 0, 0}, {-768, -1104, 0, 0, 0, 0}};
-  return kAngle[std::clamp(list, 0, 3)][std::clamp(sel, 0, 5)];
+  static const int kAngle[4][7] = {{-576, -768, -960, -1104, -1248, -1434, -1600},
+                                   {-576, -960, 0, 0, 0, 0, 0},
+                                   {-1104, -1248, -1434, 0, 0, 0, 0},
+                                   {-768, -1104, 0, 0, 0, 0, 0}};
+  return kAngle[std::clamp(list, 0, 3)][std::clamp(sel, 0, 6)];
 }
 
 // When the list changes the needle snaps to entry 0's angle; while the selection differs from the settled one,
 // angle += ((target - angle) / 10) * step with step counting 0..10 once per frame (integer division: 10 %, 20 % ... of the remaining
 // way, the 11th frame lands exactly), then the selection settles. A selection settled earlier is drawn at its exact angle.
 void MainMenu::Impl::hand_tick(int list, int sel, int target) {
-  if (list != hand_list) hand_angle = list == 3 ? save_list_angle(0) : table_angle(list, 0), hand_list = list;
+  if (list != hand_list) hand_angle = list == 3 ? save_list_angle(0) : list >= 4 ? table_angle(0, oc_slot(0)) : table_angle(list, 0), hand_list = list;
   if (sel == hand_settled) {
     hand_angle = target;
     return;
@@ -347,7 +372,42 @@ void MainMenu::set_wide_columns(float canvas_columns, float layout_columns) {
   impl_->wide_cols = std::clamp(layout_columns, 0.0f, impl_->canvas_cols);
 }
 bool MainMenu::save_locked() const { return impl_->save_locked; }
+void MainMenu::set_oc_page(OcPage page, bool on) {
+  const u32 bit = 1u << static_cast<int>(page);
+  impl_->oc_pages_on = on ? impl_->oc_pages_on | bit : impl_->oc_pages_on & ~bit;
+}
+void MainMenu::set_collection(const save::Collection* collection) { impl_->collection = collection; }
+void MainMenu::set_records_show_all(bool on) { impl_->records_show_all = on; }
+void MainMenu::set_grid_presets(save::Collection* collection, std::function<void()> changed) {
+  impl_->preset_store = collection;
+  impl_->preset_changed = std::move(changed);
+}
+void MainMenu::set_enemy_view(EnemyModelView* view) { impl_->enemy_view = view; }
+void MainMenu::set_enemy_order(const data::BestiaryOrder* order) { impl_->enemy_order = order; }
+void MainMenu::set_records_info(const RecordsInfo* info) { impl_->records_info = info; }
+void MainMenu::set_records_hints(int level) { impl_->records_hints = level; }
+void MainMenu::set_dialogue_log_view(DialogueLogView* view) { impl_->log_view = view; }
+void MainMenu::set_extras(const ExtrasCatalog* catalog, ExtrasHost* host) {
+  impl_->extras_catalog = catalog;
+  impl_->extras_host = host;
+}
+void MainMenu::set_extras_unlock_all(bool on) { impl_->extras_unlock_all = on; }
+void MainMenu::set_achievements(const AchievementList* list) { impl_->achievements = list; }
+void MainMenu::set_achievement_settings(bool on, bool hide_notices) {
+  impl_->achievements_on = on;
+  impl_->hide_achievement_notices = hide_notices;
+}
+void MainMenu::set_oc_options_host(std::function<void(const OcOptions&)> changed, std::function<void()> reset) {
+  impl_->oc_options_changed = std::move(changed);
+  impl_->oc_reset = std::move(reset);
+}
 void MainMenu::open(GameState& state, bool can_save) { impl_->open(state, can_save); }
+void MainMenu::open_limited(GameState& state) {
+  Impl& impl = *impl_;
+  impl.open(state, false);
+  impl.limited = true;
+  if (!impl.main_row_open(impl.main_cur)) impl.main_cur = 1;
+}
 void MainMenu::open_save_list(GameState& state) {
   Impl& impl = *impl_;
   impl.open(state, true);
@@ -362,6 +422,9 @@ bool MainMenu::saved() const { return impl_->saved; }
 MenuScreen MainMenu::screen() const { return impl_->screen; }
 bool MainMenu::camera_takes_triggers() const {
   return !impl_->closed && impl_->screen == MenuScreen::Status && impl_->model_view && impl_->model_cam_manual;
+}
+bool MainMenu::extras_shown() const {
+  return !impl_->closed && impl_->screen == MenuScreen::OcPage && impl_->shown_def().enter == &Impl::enter_extras;
 }
 bool MainMenu::pad_page_open() const { return !impl_->closed && impl_->screen == MenuScreen::Settings && impl_->pad_state != 0; }
 std::optional<MainMenu::LoadRequest> MainMenu::take_load_request() {
@@ -395,7 +458,12 @@ void MainMenu::update(const platform::Input& in, int ticks) {
   impl_->pad_present = in.pad_connected;
   impl_->update(in, ticks);
 }
-void MainMenu::draw(const render::Frame& frame, float vw, float vh, bool resume) { impl_->draw(frame, vw, vh, resume); }
+void MainMenu::draw(const render::Frame& frame, float vw, float vh, bool resume) {
+  Impl& impl = *impl_;
+  impl.draw(frame, vw, vh, resume);
+  // The DialogueLog page: the log window over the menu's picture, at window resolution.
+  if (!impl.closed && impl.log_view && impl.screen == MenuScreen::OcPage && impl.shown_def().page == OcPage::DialogueLog) impl.log_view->draw(frame, vw, vh);
+}
 
 void MainMenu::debug_show(MenuScreen screen, int variant) {
   Impl& impl = *impl_;
@@ -415,7 +483,7 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
     // Variant 1: the listed element picked, waiting for a cell; 2: the Auto Allocate question (list rows switched by Right); 3: the
     // Remove All question; 4: Reorder.
     if (variant == 1) impl.pick_element = true, impl.to_grid(impl.cell_row, 0, false);
-    if (variant == 2) impl.list_cur = 0, impl.arrow_side = true, impl.prompt = GridPrompt::AutoAllocate;
+    if (variant == 2) impl.list_cur = 0, impl.label_page = 1, impl.prompt = GridPrompt::AutoAllocate;
     if (variant == 3) impl.list_cur = 0, impl.prompt = GridPrompt::RemoveAll, impl.prompt_cur = 1;
     if (variant == 4) impl.list_cur = 0, impl.prompt = GridPrompt::Sort;
     impl.grid_unlock = 0;
@@ -460,6 +528,11 @@ void MainMenu::debug_show(MenuScreen screen, int variant) {
     impl.confirm_cur = 0;
   }
   if (screen == MenuScreen::Save && variant == 4) impl.can_save = false, impl.top_cur = 1;
+  if (screen == MenuScreen::OpenCross) impl.main_cur = Impl::kOcRow, impl.oc_cur = std::clamp(variant, 0, std::max(0, static_cast<int>(impl.oc_labels().size()) - 1));
+  if (screen == MenuScreen::OcPage) {
+    impl.oc_shown = std::clamp(variant, 0, Impl::kOcPageCount - 1);
+    impl.enter_page();
+  }
 }
 
 }  // namespace oc::ui

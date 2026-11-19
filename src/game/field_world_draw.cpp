@@ -13,6 +13,7 @@
 #include "game/field_world_internal.h"
 #include "game/mirror_copy.h"
 #include "game/model_files.h"
+#include "game/model_mods.h"
 #include "import/tim.h"
 #include "render/texture.h"
 #include "render/texture_registry.h"
@@ -363,21 +364,35 @@ FieldWorld::WornModel FieldWorld::worn_body(const std::shared_ptr<ModelHandle>& 
 // HD models in fields: an actor wearing a character's field model (character model bytes up to the last menu model, the
 // numbering the Status screen's body uses) or a story NPC's (worn_body) is drawn with the detailed body, the character's menu model or the
 // NPC's battle model, when the two skeletons match (MenuRig::usable). The body is read and matched on first use and again after an art or
-// texture change; every model with the same skeleton shares the match.
+// texture change; every model with the same skeleton shares the match. With the HD models in fields off, a character's own field model
+// that no mod file replaces is dressed the same way in its all-uses model file (game/model_mods.h), when a mod has one.
 const FieldWorld::MenuBody* FieldWorld::dress(const Actor& actor, std::vector<render::Mat4>& palette, render::Mat4& model) {
-  if (!menu_models_ || !files_ || !meshes_ || !actor.model_handle()) return nullptr;
-  const WornModel worn = worn_body(actor.model_handle());
+  if (!files_ || !meshes_ || !actor.model_handle()) return nullptr;
+  const ModelHandle* field = actor.model_handle().get();
+  const bool all_uses = !menu_models_;
+  WornModel worn;
+  if (!all_uses) {
+    worn = worn_body(actor.model_handle());
+  } else if (field->asset.mesh_mod.empty()) {
+    for (const auto& [byte, handle] : char_models_)
+      if (handle == actor.model_handle() && byte <= kLastMenuModel && has_character_model(*files_, menu_model_stem(byte), hd_)) worn.body = byte;
+  }
   const int body = worn.body;
   if (body < 0) return nullptr;
-  const ModelHandle* field = actor.model_handle().get();
   const unsigned generation = render::texture_registry::generation();
   MenuBody& menu = menu_bodies_[{body, worn.field_mesh}];
-  if (menu.generation != generation || !same_skeleton(menu.skeleton, field->asset.skeleton)) {
+  if (menu.generation != generation || menu.all_uses != all_uses || !same_skeleton(menu.skeleton, field->asset.skeleton)) {
     menu = MenuBody{};
     menu.skeleton = field->asset.skeleton;
     menu.generation = generation;
+    menu.all_uses = all_uses;
     std::string err;
-    if (auto asset = read_body_model(*files_, body, hd_, &err)) {
+    auto asset = read_body_model(*files_, body, hd_, &err, all_uses ? MenuModelMods::AllUses : MenuModelMods::Status);
+    if (asset && all_uses && asset->mesh_mod.empty()) {
+      asset.reset();
+      err = "its all-uses model file is not used";
+    }
+    if (asset) {
       menu.rig = match_body_rig(field->asset, *asset, body);
       if (menu.rig.usable) {
         menu.body = Actor::make_model(*meshes_, std::move(*asset));

@@ -169,8 +169,9 @@ void show_stats(const char* label, const Side& side) {
 // Contact sheets of a playable field character for reviewing HD models in fields: one row per clip (the field model's own,
 // then its event pack's; a one-keyframe pose repeats across the row), kSheetFrames keyframes across each row, and per keyframe the field
 // model and the menu model posed from it, from the front and from the side. kSheetRows rows a page, written to <sheet>_p<N>.png;
-// unmodded files, the chosen art set. With --poses, the named poses only, in larger cells: kPoseFrames a row, kPoseRows rows a page; a
-// single pose fills the page. With --back, from behind and from three quarters behind.
+// unmodded files (with --mods the enabled mods' copies, framed on the unmodded model), the chosen art set. With --poses, the named poses
+// only, in larger cells: kPoseFrames a row, kPoseRows rows a page; a single pose fills the page. With --back, from behind and from three
+// quarters behind.
 constexpr int kSheetRows = 6, kSheetFrames = 3, kSheetView = 110, kSheetRowHeight = 170, kSheetLabel = 18;
 constexpr int kPoseRows = 3, kPoseFrames = 2;
 // Closer than the viewer's fitted framing: a cell is narrow and the model stands upright in it.
@@ -188,6 +189,11 @@ int run_sheet(const mv::Options& options) {
     return 1;
   }
   files.set_hd_mode(options.hd);
+  vfs::ModManager mods;
+  if (options.mods) {
+    mods.scan(files, game_dir / "mods", render::mod_prefs(config));
+    mods.apply(files, options.hd ? vfs::ModArt::Modded : vfs::ModArt::Sd);
+  }
   game::DiscIndex discs;
   discs.load(files);
   const std::string stem = lower_ascii(options.model);
@@ -212,7 +218,7 @@ int run_sheet(const mv::Options& options) {
     render::GpuContext& gpu;
     ~WaitBeforeRelease() { gpu.wait_idle(); }
   } wait_before_release{context};
-  load_side(side, files, entry, options.index, false, options.hd, menu_byte, meshes);
+  load_side(side, files, entry, options.index, options.mods, options.hd, menu_byte, meshes);
   if (side.asset && side.body < 0) {
     std::fprintf(stderr, "--sheet needs a playable field character or a story NPC with a detailed body (--model fieldobj/player/<folder>/<file> "
                          "or map/mapbin/<room> --index <model>)\n");
@@ -252,7 +258,14 @@ int run_sheet(const mv::Options& options) {
     cells.push_back({static_cast<size_t>(found - side.asset->clips.begin()), key, std::format("{} key {:.2f}", name, key)});
     ++clip_count;
   }
-  const mv::Bounds bounds = mv::rest_bounds(*side.asset);
+  mv::Bounds bounds = mv::rest_bounds(*side.asset);
+  if (options.mods && entry.kind != mv::Kind::Room) {
+    vfs::Vfs plain;
+    if (plain.open(game_dir)) {
+      plain.set_hd_mode(options.hd);
+      if (const auto own = game::read_model_files(plain, entry.stem, nullptr)) bounds = mv::rest_bounds(*own);
+    }
+  }
   std::vector<render::Mat4> palette, menu_palette;
   platform::Input input;
   int pages = 0;
@@ -632,10 +645,10 @@ int ocmodelview_main(int argc, char** argv) {
   if (options.help || !options.error.empty()) {
     if (!options.error.empty()) std::fprintf(stderr, "%s\n", options.error.c_str());
     std::fprintf(options.error.empty() ? stdout : stderr,
-                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--index <room model>] [--sd] [--sheet <png base> [--poses <clip:key,...>] [--back]]\n"
+                 "usage: opencross modelview [-g <dir>] [--model <stem>] [--index <room model>] [--sd] [--sheet <png base> [--poses <clip:key,...>] [--back] [--mods]]\n"
                  "  <stem> as listed in the viewer, e.g. fieldobj/player/selju/selju, or map/mapbin/obo_b01f with --index\n"
                  "  --sheet: contact sheets of a playable field character or a story NPC, field model and detailed body per clip,\n"
-                 "  to <base>_pN.png; --poses: these poses only, e.g. s4_02:3.5,ex_04:9; --back: seen from behind\n");
+                 "  to <base>_pN.png; --poses: these poses only, e.g. s4_02:3.5,ex_04:9; --back: seen from behind; --mods: the enabled mods' copies\n");
     return options.error.empty() ? 0 : 2;
   }
   try {

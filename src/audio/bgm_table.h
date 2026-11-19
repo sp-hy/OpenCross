@@ -20,6 +20,11 @@ constexpr int kBgmSongCount = 68;
 const BgmEntry* bgm_entry(int song_id);        // nullptr if out of range
 const BgmEntry* bgm_entry_by_file(int file_no);  // nullptr if the file is not referenced by the song table
 std::string bgm_path(int file_no);             // "cdrom/sound/bgm/BGM002.sab"
+// Every song but the six one-shot jingles (loop 0..0) loops, on both sources.
+inline bool song_loops(int song_id) {
+  const BgmEntry* entry = bgm_entry(song_id);
+  return entry && entry->loop_end > 0;
+}
 
 // The encounter song: the battle theme 0x14 on both sources, or the boss theme 0x31 for a battle request with flag 0x40.
 constexpr int kBattleSong = 0x14, kBossBattleSong = 0x31;

@@ -4,5 +4,7 @@ add_library(oc_data STATIC
   tables.cpp
   char_name.h
   char_name.cpp
+  bestiary.h
+  bestiary.cpp
 )
 target_link_libraries(oc_data PUBLIC oc_core oc_vfs oc_import oc_text)

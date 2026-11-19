@@ -190,15 +190,20 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   }
   // Voice lines (CrossFix layout).
   if (audio::VoicePlayer* vp = audio::VoicePlayer::instance()) {
-    dlg.on_page = [vp, &dlg](int room, int msg, int sp, int tag, int page) { vp->field_page(&dlg, room, msg, sp, tag, page); };
+    dlg.on_page = [vp, &dlg](int room, int msg, int sp, int tag, int page) {
+      vp->field_page(&dlg, room, msg, sp, tag, page);
+      dlg.note_voice(vp->take_found());
+    };
     dlg.on_close = [vp, &dlg] { vp->field_close(&dlg); };
   }
+  dlg.on_logged = dialogue_log_;
   const bool lynx_in_party = std::any_of(party_chars_.begin(), party_chars_.end(), [this](int char_id) { return model_byte(char_id) == data::kLynxBody; });
   dlg.show(room_id_, message, speaker_id, data::line_speaker(speaker_id, lynx_in_party));
   // The portrait panel exists only when the window flags have bit 0; the face is the
   // speaker (name tag of the line / script speaker) unless SET_DIALOG_FACE chose one; (flags & 0x1001) == 1 = left.
   dlg.set_portrait_flags(true, portrait_left_);
   dlg.set_portrait(lbl ? -1 : dialogue_face_);
+  if (!lbl && dialogue_face_ >= 0 && on_face_) on_face_(dialogue_face_);
   // E0 passes no entity: it speaks as the running entity, which also places the window (labels too).
   const bool below = place_dialogue_window(dlg, speaker >= 0 ? speaker : target, message, flag_byte, !lbl && dialogue_face_ >= 0);
   if (win_slot == 0) dialogue_below_ = below;

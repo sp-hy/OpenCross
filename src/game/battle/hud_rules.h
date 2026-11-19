@@ -1,6 +1,6 @@
 #pragma once
-// Pure rules of the battle HUD that BattleView applies: where a left / right press moves the target cursor, and how the stamina bar of a
-// party panel is filled.
+// Pure rules of the battle HUD that BattleView applies: where a left / right press moves the target cursor, how the stamina bar of a
+// party panel is filled, and the enemy HP bars.
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -55,5 +55,19 @@ inline StaminaFill stamina_fill(int stamina) {
   const BarColour colour = stamina < 0 || magnitude < 10 ? BarColour::Red : magnitude < 40 ? BarColour::Yellow : BarColour::Cyan;
   return {std::max(magnitude * 100 / 140, 1), colour};
 }
+
+// The enemy HP bars ([Cheats] EnemyHpBars): `mode` 0 off, 1 only for a kind already defeated, 2 always. Only an enemy of the player's own
+// battle gets one; `defeated` is whether the collection holds its kind.
+inline bool enemy_hp_shown(int mode, bool enemy, bool versus, bool defeated) { return enemy && !versus && (mode == 2 || (mode == 1 && defeated)); }
+
+// The fill width, in pixels of a `width` px track, of an enemy HP bar: proportional, rounded up, never empty while the unit lives.
+inline int enemy_hp_fill(int hp, int max_hp, int width) {
+  if (hp <= 0 || max_hp <= 0) return 0;
+  return std::clamp(static_cast<int>((static_cast<long long>(hp) * width + max_hp - 1) / max_hp), 1, width);
+}
+
+// The fill colour class of an enemy HP bar, as the party HP digits: 0 white, 1 orange at a quarter of the maximum or less, 2 red-orange at an
+// eighth or less.
+inline int enemy_hp_tone(int hp, int max_hp) { return hp * 8 <= max_hp ? 2 : hp * 4 <= max_hp ? 1 : 0; }
 
 }  // namespace oc::game::bhud

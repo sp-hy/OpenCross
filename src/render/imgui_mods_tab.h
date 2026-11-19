@@ -1,6 +1,7 @@
 #pragma once
 // Esc overlay tab "Mods": the mod folders of <GameDir>\mods in priority order, each with an enable checkbox, up / down priority,
-// a "Load on" combo (Modded / SD / HD / All), file counts and the conflicts (which mod wins), plus Rescan.
+// a "Load on" combo (Modded / SD / HD / All), file counts and the conflicts (which mod wins), plus Rescan; the Engine features and
+// Randomizer pages beside the list.
 #include <functional>
 #include <string>
 #include <vector>
@@ -37,6 +38,30 @@ struct TextureDumpHooks {
   std::function<std::string()> summary;
 };
 void set_texture_dump_hooks(TextureDumpHooks hooks);
+
+// The "Export all models" button next to it runs game::ModelExportJob the same way (every model as glTF, both art sets). Without hooks the
+// button is not shown.
+struct ModelExportHooks {
+  // False when already running.
+  std::function<bool()> start;
+  std::function<void()> cancel;
+  std::function<bool()> running;
+  // "<phase> n / total, F files".
+  std::function<std::string()> status;
+  // Progress of the current phase, 0..1.
+  std::function<float()> fraction;
+  // The last finished run's one-line summary ("" before).
+  std::function<std::string()> summary;
+};
+void set_model_export_hooks(ModelExportHooks hooks);
+
+// The Randomizer page (the list's third tab) reads the game's side through these; the app installs them. Its settings are the
+// [Randomizer] feature's, stored like any addon's ([Features] in opencross.ini), and apply at once.
+struct RandomizerHooks {
+  // What the plan in force moves ("" while it is off or not built yet).
+  std::function<std::string()> status;
+};
+void set_randomizer_hooks(RandomizerHooks hooks);
 
 // Draws the tab body (call between BeginTabItem / EndTabItem). Returns true when the mod set changed: cfg.mods has been updated,
 // the caller saves the ini and re-applies the art mode (ModManager::apply + the art swap).

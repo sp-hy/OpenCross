@@ -92,7 +92,14 @@ int main() {
   {
     const Config player = load_text("", true);
     CHECK(!player.legacy_field_models && player.lighting && player.edge_blend && player.retain_battle_scenery && player.full_precision_effects);
-    CHECK(!player.autohide_cast_hud && !player.hide_feature_icons);
+    CHECK(!player.autohide_cast_hud && !player.hide_feature_icons && !player.equip_compare && !defaults.equip_compare);
+    CHECK(load_text("[Enhancements]\nEquipCompare=1\n", true).equip_compare);
+    CHECK(!player.music_resume && !player.auto_advance && player.auto_advance_delay == 100);
+    const Config qol = load_text("[Game]\nAutoAdvance=1\nAutoAdvanceDelay=900\n[Audio]\nMusicResume=1\n");
+    CHECK(qol.auto_advance && qol.auto_advance_delay == 300 && qol.music_resume);
+    // OpenCrossMenu: on in the player's ini, off in a --config one; the stored value wins.
+    CHECK(player.opencross_menu && !defaults.opencross_menu && load_text("[Game]\nOpenCrossMenu=1\n").opencross_menu);
+    CHECK(!load_text("[Game]\nOpenCrossMenu=0\n", true).opencross_menu);
     CHECK(player.achievements && player.hide_achievement_notices && !defaults.achievements && !defaults.hide_achievement_notices);
     CHECK(!load_text("[Game]\nHideAchievementNotices=0\n", true).hide_achievement_notices);
     CHECK(player.render_scale == 2.0f && defaults.render_scale == 1.0f && load_text("[Video]\nRenderScale=1\n", true).render_scale == 1.0f);

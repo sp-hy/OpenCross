@@ -4,7 +4,9 @@
 // main_menu_draw.cpp, and each screen (main list / status, elements, equip / key items, settings, save) in its own main_menu_*.cpp.
 #include <array>
 #include <chrono>
+#include <functional>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -29,6 +31,8 @@ const u32 kText = rgb(206, 197, 197), kName = rgb(164, 164, 164), kSel = rgb(192
 struct Str6 {
   const char* by_lang[6];
 };
+// The OpenCross row's label (main_menu_opencross.cpp).
+extern const Str6 kOpenCrossLabel;
 
 // The menutest text styles: the font slot, the scale multiplier and the canvas-px nudges (dx / dy are added after scaling) of a list
 // entry with `flags` (bits 0-7 = style; bit 16 = force JP, bit 17 = force non-JP) for the global language (0 en, 1 fr, 2 it, 3 de, 4 es,
@@ -45,12 +49,16 @@ struct Nav {
        r1 = false;
   // Held this update (no repeat): the four directions and L2 / R2 (keyboard SlowSpeed / FastSpeed, pad triggers past half way).
   bool held_up = false, held_down = false, held_left = false, held_right = false, l2 = false, r2 = false;
+  // The keyboard's PageUp / PageDown / Home / End (the scrolling pages).
+  bool page_up = false, page_down = false, home = false, end = false;
 };
 
 struct Cmd {
-  enum Kind : u8 { Rect, Img, Text } kind = Rect;
+  // Icon: an element colour icon centred on (x, y), w canvas units wide; `icon` is its colour index and `light` its brightness (0..255).
+  enum Kind : u8 { Rect, Img, Text, Icon } kind = Rect;
   render::TexRef set = {};
   float x = 0, y = 0, w = 0, h = 0, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+  int icon = 0, light = 255;
   u32 color = kWhite;
   std::u32string text;
   render::FaceId face = render::kNoFace;
@@ -78,7 +86,25 @@ struct SavePrev {
   std::u32string leader;
 };
 
-enum class GridPrompt { None, RemoveAll, AutoAllocate, FillBlanks, Sort };
+enum class GridPrompt { None, RemoveAll, AutoAllocate, FillBlanks, Sort, PresetSave, PresetLoad, PresetReport };
+
+// What a member card shows (MainMenu::Impl::card_body): a character's record, or an enemy's. `known` false = the numbers are not revealed;
+// grid_character = the character whose grid minimap the card carries (-1 none). wide_hp = the HP row holds up to five digits a side
+// (an enemy's), in fixed columns.
+struct CardValues {
+  std::u32string name;
+  int cur_hp = 0, max_hp = 0;
+  bool hp_low = false;
+  bool wide_hp = false;
+  // Known HP that means nothing (a record above the unit HP cap): "???" for both numbers.
+  bool hp_unknown = false;
+  int innate = 0;
+  // ATK, HIT, MAG, DEF, EVD, MDEF (the captions STR. ACC. MAG. RES. AGI. M.RES).
+  std::array<int, 6> stats{};
+  int stamina = 0;
+  bool known = true;
+  int grid_character = -1;
+};
 
 }  // namespace mainmenu
 
@@ -119,6 +145,9 @@ struct MainMenu::Impl {
   std::string portrait_set = "2021";
   MenuScreen screen = MenuScreen::Main;
   bool closed = true, can_save = true;
+  // The retried battle's menu (open_limited): only Elements, Equip and Items of the main list can be chosen.
+  bool limited = false;
+  bool main_row_open(int entry) const { return !limited || (entry >= 1 && entry <= 3); }
   // Debug tab tools were used: the save screen shows a warning (saving itself stays allowed).
   bool save_locked = false;
   int frames = 0;
@@ -152,12 +181,14 @@ struct MainMenu::Impl {
   // elements: use
   UseFlow use;
   // elements: grid. focus 0 = the stock list, 1 = the grid row of `cell_row`. List rows 0 / 1 are Remove All / Remove, or with
-  // `arrow_side` (Right on the list) Auto Allocate / Fill Blanks. An element (or Remove) picked in the list first waits for a cell
+  // `label_page` 1 (Right on the list) Auto Allocate / Fill Blanks, or with 2 (only while the grid presets are on) Save Preset / Load
+  // Preset. An element (or Remove) picked in the list first waits for a cell
   // (`pick_element`); a cell picked first waits for an element or Remove from the list (`pick_cell`), or, taken back onto the grid, for a
   // cell to swap with (`swapping`, from swap_row / swap_col). `prompt` is the question in the description panel, `prompt_cur` its
   // choice. list_dim / grid_dim: that half has lost its highlight.
   int focus = 0, list_cur = 0, list_scroll = 0, cell_row = 0, cell_col = 0, swap_row = -1, swap_col = -1, prompt_cur = 0;
-  bool arrow_side = false, pick_element = false, pick_cell = false, swapping = false, list_dim = false, grid_dim = false;
+  int label_page = 0;
+  bool pick_element = false, pick_cell = false, swapping = false, list_dim = false, grid_dim = false;
   GridPrompt prompt = GridPrompt::None;
   // Grid timing in menu frames (`frames`): input waits until grid_unlock; the cell names of the shown row reappear one per frame from
   // labels_from; a row change slides the old row out and the new one in from slide_from (slide_dir +1 = out to the left, slide_row =
@@ -321,6 +352,7 @@ struct MainMenu::Impl {
   int party_pick_start() const { return std::min(member, std::max(0, static_cast<int>(party().size()) - 1)); }
 
   // Defined in main_menu_main.cpp.
+  const char* main_label(int row) const;
   void update_main(const Nav& nav);
   void update_roster(const Nav& nav);
   void update_status(const Nav& nav);
@@ -329,6 +361,8 @@ struct MainMenu::Impl {
   // The body of a character (data::character_body) and what it picks up to `last` (data::menu_form).
   int body(int character) const;
   int model_number(int character, int last = data::kLastFormBody) const;
+  // The weapon part the character holds and the constructs its gear hides.
+  void model_gear(int character, MenuModelSlot& slot) const;
   void restart_model();
   void step_model_camera(const Nav& nav, int ticks);
   void update_choice(const Nav& nav);
@@ -351,6 +385,7 @@ struct MainMenu::Impl {
   void list_changed();
   void apply_to_cell();
   void update_grid_prompt(const Nav& nav);
+  int label_pages() const { return preset_store ? 3 : 2; }
   void update_grid_list(const Nav& nav);
   void update_grid_cells(const Nav& nav);
   void update_grid(const Nav& nav);
@@ -406,7 +441,8 @@ struct MainMenu::Impl {
 
   // Defined in main_menu_draw.cpp.
   static u32 grey(int ps1_level);
-  void Frame(int frame, float x, float y, u32 colour = kWhite, float* out_w = nullptr, float* out_h = nullptr, bool large = false);
+  void Frame(int frame, float x, float y, u32 colour = kWhite, float* out_w = nullptr, float* out_h = nullptr, bool large = false,
+             float height = 0);
   void TP(float x, float y, const std::u32string& str, u32 colour = kText, float rel = 1);
   void TP(float x, float y, std::string_view str, u32 colour = kText, float rel = 1) { TP(x, y, utf32(str), colour, rel); }
   // Played from the discs: text from a PS1 text point (x, y), placed as the overlay's text routine places it.
@@ -457,6 +493,11 @@ struct MainMenu::Impl {
   void HL(float x, float y, const std::u32string& str, u32 colour = kText, float scale = 0.3125f, bool right = false);
   void HN(float right_x, float y, const std::string& number, u32 colour = kText, float scale = 0.275f);
   void Disc(float cx, float cy, float radius, u32 colour);
+  // The element colour icon of a colour index (0..5) centred on canvas (cx, cy), `size` canvas units wide, while the symbols are on; `light`
+  // dims it like the plate it sits on. Not drawn where it would cross the sprite clip.
+  void symbol(int colour, float cx, float cy, float size, int light = 255);
+  // The member card's innate colour mark centred on canvas (cx, cy): the colour disc, or with the symbols on the colour's icon.
+  void innate_mark(float cx, float cy, int innate);
   void StarGlyph(float x, float y, float mul, float dy, u32 colour = kText);
   // Img() draws additively while set (the disc's semi-transparent compass meshes).
   bool img_add = false;
@@ -487,6 +528,7 @@ struct MainMenu::Impl {
 
   // Defined in main_menu_draw.cpp.
   void bar_and_title(int title_index, bool bar = true);
+  void screen_title(const std::u32string& title);
   std::string stars_logged;
 
   // Defined in main_menu_main.cpp.
@@ -505,6 +547,7 @@ struct MainMenu::Impl {
 
   // Defined in main_menu_main.cpp.
   void card_hd(float card_x, float card_y, int character, bool stats, bool stamina, int group_id = 7);
+  void card_body(float card_x, float card_y, const CardValues& values, bool stats, bool stamina, int group_id);
   void member_card(int character, float x, float y);
   void build_main();
   void build_roster();
@@ -567,6 +610,243 @@ struct MainMenu::Impl {
   void build_save();
 
   bool pad_present = false;
+
+  // ===================================================== grid presets (main_menu_presets.cpp)
+  // [Game] GridPresets: the GRID chunk of `preset_store` (null = off); `preset_changed` runs after each write. `preset_missing` is the
+  // report of the last load: (element id, copies short).
+  save::Collection* preset_store = nullptr;
+  std::function<void()> preset_changed;
+  std::vector<std::pair<int, int>> preset_missing;
+  // The presets as read when the slot window opened.
+  save::GridPresets preset_cache;
+  bool update_preset_prompt(const Nav& nav);
+  bool run_preset(int character);
+  std::u32string preset_summary_text(const save::GridPreset* preset);
+  void build_preset_window();
+  const char* preset_help(bool save_row);
+  std::u32string preset_label(bool save_row);
+
+  // ===================================================== the OpenCross row (main_menu_opencross.cpp)
+  // The row's id in main_cur (the stock rows are 0..5); it is drawn in slot 5, Save/Load in slot 6.
+  static constexpr int kOcRow = 6;
+  // Bit (1 << OcPage) = the page is offered.
+  u32 oc_pages_on = 0;
+  const save::Collection* collection = nullptr;
+  bool records_show_all = false;
+  EnemyModelView* enemy_view = nullptr;
+  // The Bestiary page's numbers and places (the scan service's); null until the scan has finished.
+  const data::BestiaryOrder* enemy_order = nullptr;
+  // The row's groups, in list order: a group of one page opens that page. A group's label is its entry in the group list.
+  enum class OcGroup { Chronicle, Extras, DialogueLog, Achievements };
+  struct OcGroupDef {
+    OcGroup group;
+    Str6 label;
+  };
+  static const OcGroupDef kOcGroups[];
+  // oc_cur: the cursor of the group list (an index into oc_groups()); oc_group: the group whose page list is shown (none: the group
+  // list); oc_page_cur: that list's cursor (an index into oc_group_pages()); oc_shown: the page shown (a row of kOcPages); back_to_oc:
+  // the back transition lands on the list the page was opened from.
+  int oc_cur = 0;
+  std::optional<OcGroup> oc_group;
+  int oc_page_cur = 0;
+  int oc_shown = 0;
+  bool back_to_oc = false;
+  bool oc_row() const { return oc_pages_on != 0; }
+  // A page: what switches it on, its group, its Extras section (Extras pages only), its label in the page list, its screen title, its
+  // screen functions, and whether the page list shows it (an unlisted page is opened from another page). The table holds the pages in
+  // list order.
+  struct OcPageDef {
+    OcPage page;
+    OcGroup group;
+    int section;
+    Str6 label, title;
+    void (Impl::*enter)();
+    void (Impl::*update)(const Nav&);
+    void (Impl::*build)();
+    bool listed = true;
+  };
+  static constexpr int kOcPageCount = 14;
+  static const OcPageDef kOcPages[kOcPageCount];
+  const OcPageDef& shown_def() const;
+  bool page_on(const OcPageDef& def) const { return (oc_pages_on & (1u << static_cast<int>(def.page))) != 0; }
+  // The main list's rows in screen order, and the slot of a row.
+  std::vector<int> main_rows() const;
+  int main_pos(int row) const;
+  // The groups with a page on, in list order; a group's pages that are on (rows of kOcPages), in list order.
+  std::vector<OcGroup> oc_groups() const;
+  std::vector<int> oc_group_pages(OcGroup group) const;
+  // The labels of the list shown (the groups, or the open group's pages), its cursor, and the main-list slot of its entry `index` (the
+  // entries are centred on the seven slots).
+  std::vector<std::u32string> oc_labels() const;
+  int oc_list_cur() const { return oc_group ? oc_page_cur : oc_cur; }
+  int oc_slot(int index) const;
+  // OK on the OpenCross row: the group list, or with one group its page list, or with one page that page.
+  void enter_oc();
+  void open_oc_group(OcGroup group);
+  // The label slots of the main list (PS1 px): ink left and cap top of English text with the HD faces.
+  static float slot_x(int slot) { return 295.3f - 9.1f * static_cast<float>(slot); }
+  static float slot_y(int slot) { return 303.4f + 15.95f * static_cast<float>(slot); }
+  void update_oc_list(const Nav& nav);
+  void oc_list();
+  // The page shown: its entry, input and drawing (dispatched through the page table).
+  void enter_page();
+  void update_page(const Nav& nav);
+  void build_page();
+  void leave_page();
+
+  // ---- Bestiary page: one entry per species (the monster records sharing a name), its variants inside, numbered in story order.
+  struct Species {
+    std::vector<int> records;
+  };
+  std::vector<Species> species;
+  // en_order: species indices in the list's order (a species' number is its index + 1); en_cur / en_top: cursor and first visible row
+  // (both in en_order); en_variant: the variant shown of the cursor's species; en_sort: 0 by number, 1 by name, 2 by area; en_panel: what
+  // the lower panel shows (0 the loot, 1 the places, 2 the traits); en_built_from: the order the list was built from.
+  std::vector<int> en_order;
+  int en_cur = 0, en_top = 0, en_variant = 0, en_sort = 0, en_panel = 0;
+  const data::BestiaryOrder* en_built_from = nullptr;
+  static constexpr int kEnemyRows = 12;
+  // The Bestiary list panel cut to its rows (frame 141 from y 32), so the loot panel fits under it.
+  static constexpr float kEnemyListH = 258.0f;
+  // Place names by story_areas() index in the language they were read in, with their world (with_world).
+  std::map<int, std::u32string> place_names;
+  import::Lang place_lang = import::Lang::En;
+  // "Name (Home)" / "Name (Another)" in the text language; the name alone for World::None.
+  std::u32string with_world(const std::u32string& name, data::World world);
+  // The creature model of this frame's page (draw_view draws it when enemy_wanted).
+  EnemyModelSlot enemy_slot;
+  bool enemy_wanted = false;
+  bool enemy_met(int monster) const;
+  bool enemy_beaten(int monster) const;
+  bool enemy_looted(int monster, int slot) const;
+  bool species_met(const Species& entry) const;
+  std::u32string enemy_name(int monster);
+  std::u32string loot_name(u16 word);
+  std::u32string place_name(int area);
+  // The record's places in story order, each name once; empty before the scan has finished.
+  std::vector<std::u32string> record_places(int monster);
+  // The names of the statuses the record's weakness masks double (the named statuses only), in bit order.
+  std::vector<std::u32string> status_weaknesses(int monster);
+  // 0: the Dopplegang pool cannot hold the record; 1: it can; 2: the current save's pool holds it.
+  int dopple_state(int monster) const;
+  void enter_enemies();
+  void sort_enemies();
+  void show_species(int index);
+  void update_enemies(const Nav& nav);
+  void build_enemies();
+
+  // ---- Characters, Elements, Key items and Treasure pages (main_menu_records.cpp). records_info: the scan's knowledge, null while the
+  // scan runs; records_hints: the Hints setting (0 off, 1 hints, 2 full). rc_ids: the page's entries in list order (character, element,
+  // key item ids; area indices); rc_cur / rc_top: cursor and first visible row; rc_part: the page of the Treasure page's right list.
+  const RecordsInfo* records_info = nullptr;
+  int records_hints = 0;
+  std::vector<int> rc_ids;
+  int rc_cur = 0, rc_top = 0, rc_part = 0;
+  static constexpr int kTreasureRows = 13;
+  // One row of a page's list: its number, the name or "???", the dim colour unless seen, a colour symbol (-1 none) and a tag.
+  struct RecordRow {
+    int number = 0;
+    std::u32string name;
+    bool seen = false;
+    int icon = -1;
+    std::u32string tag;
+    u32 tag_colour = kSel;
+  };
+  void update_records(const Nav& nav);
+  void record_list(const std::vector<RecordRow>& rows, const std::u32string& count_line);
+  void records_wait(float x, float y);
+  void panel_line(int line, const std::u32string& label, const std::u32string& value, u32 colour = kText);
+  std::u32string area_list(const std::vector<std::string>& areas);
+  std::u32string story_caption(int story);
+  bool character_seen(int character) const;
+  void enter_characters();
+  void build_characters();
+  int element_held(int id) const;
+  bool element_seen(int id) const;
+  void enter_elements();
+  void build_elements();
+  bool key_item_seen(int id) const;
+  void enter_key_items();
+  void build_key_items();
+  void enter_treasure();
+  void update_treasure(const Nav& nav);
+  int treasure_rows(int area) const;
+  std::u32string give_name(int id);
+  void build_treasure();
+
+  // ---- DialogueLog page: the dialogue log window (DialogueLogView), drawn by MainMenu::draw over the menu's picture.
+  DialogueLogView* log_view = nullptr;
+  void enter_dialogue_log();
+  void update_dialogue_log(const Nav& nav);
+  void build_dialogue_log();
+
+  // ---- Achievements page (main_menu_achievements.cpp): OpenCross's own achievements, filtered by category, in the record pages' list
+  // (rc_ids: the rows the filter shows, indices into achievements->rows; rc_cur / rc_top). ach_filter: the filter (0 all, else a category
+  // + 1); ach_spoilers: the Options page's Show spoilers (this session only).
+  const AchievementList* achievements = nullptr;
+  bool achievements_on = false, hide_achievement_notices = false, ach_spoilers = false;
+  int ach_filter = 0;
+  void enter_achievements();
+  void update_achievements(const Nav& nav);
+  void build_achievements();
+  void filter_achievement_list();
+  // The kOcPages row of the Achievements page or of its Options page.
+  static int achievement_page_row(bool options);
+
+  // ---- Options pages (main_menu_options.cpp): the Chronicle's settings and Reset, the Extras' and the Achievements' settings, laid out
+  // and driven as the Customize screen. oc_options_changed / oc_reset: the host's hooks (MainMenu::set_oc_options_host); opt_cur: the cursor row; opt_ask:
+  // the Reset question is up, opt_yes: its cursor is on Yes.
+  std::function<void(const MainMenu::OcOptions&)> oc_options_changed;
+  std::function<void()> oc_reset;
+  int opt_cur = 0;
+  bool opt_ask = false, opt_yes = false;
+  void enter_options();
+  void update_options(const Nav& nav);
+  void build_options();
+
+  // ---- Extras pages (main_menu_extras.cpp): Jukebox, Theatre, Portraits and Models, one section each.
+  enum class ExtrasSection { Jukebox, Theatre, Portraits, Models };
+  static constexpr int kExtrasSections = 4;
+  const ExtrasCatalog* extras_catalog = nullptr;
+  ExtrasHost* extras_host = nullptr;
+  bool extras_unlock_all = false;
+  ExtrasSection ex_section = ExtrasSection::Jukebox;
+  // The list cursor and first visible row of each list section; the gallery's cursor (an index into ex_faces) and art set.
+  std::array<int, kExtrasSections> ex_cur{}, ex_top{};
+  std::vector<GalleryFace> ex_faces;
+  bool ex_faces_1999 = false;
+  // Jukebox: the song playing (-1 none), its source, shuffle (else each song loops), the ticks it has played and the shuffle state.
+  int jb_song = -1;
+  bool jb_remastered = true, jb_shuffle = false;
+  int jb_ticks = 0;
+  u32 jb_random = 0x2545F491u;
+  // Model viewer: the clip (the menu model's poses 0..2 and the hurt pose 3), the camera turning by itself or by Left / Right.
+  int mv_pose = 0;
+  bool mv_auto = true;
+  MenuCamera mv_cam, mv_cam_prev;
+  int mv_frames = 0;
+  u32 mv_session = 0;
+  // `frames` at the page's last update: the ticks since then drive the jukebox clock and the model.
+  int ex_frames = 0;
+  // The character model of this frame's page (draw_view draws it when model_wanted).
+  MenuModelSlot mv_slot;
+  bool song_unlocked(int song) const;
+  bool movie_unlocked(int key) const;
+  bool face_unlocked(const GalleryFace& face) const;
+  bool character_unlocked(int character) const;
+  int extras_count() const;
+  void enter_extras();
+  void update_extras(const Nav& nav);
+  void step_jukebox(int ticks);
+  void play_jukebox(int song);
+  void stop_jukebox();
+  void build_jukebox();
+  void build_theatre();
+  void build_portraits();
+  void build_models();
+  void extras_list(int count, const std::function<void(int row, float cap)>& line);
+  void extras_panel(const std::array<std::u32string, 4>& labels, const std::array<std::u32string, 4>& values);
+  void extras_hints(int first_button, const std::u32string& first_hint, const std::u32string& triangle_hint);
 
   // ===================================================== draw
   // [Video] Ps1ResUi (any art mode): the whole screen into a target of menutest's display size

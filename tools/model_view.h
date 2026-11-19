@@ -54,10 +54,11 @@ struct Options {
   std::string game_dir, model, sheet, poses, error;
   // The room model shown for a room stem.
   int index = 0;
-  // back: the sheet views the models from behind and from three quarters behind instead of from the front and the side.
-  bool hd = true, help = false, back = false;
+  // back: the sheet views the models from behind and from three quarters behind instead of from the front and the side. mods: the sheet
+  // draws the copies the enabled mods make (framed on the unmodded model).
+  bool hd = true, help = false, back = false, mods = false;
 };
-// -g <dir>, --model <stem>, --index <room model>, --sheet <png base>, --poses <clip:key,...>, --back, --sd, --help / -h.
+// -g <dir>, --model <stem>, --index <room model>, --sheet <png base>, --poses <clip:key,...>, --back, --mods, --sd, --help / -h.
 Options parse_options(const std::vector<std::string>& args);
 
 }  // namespace oc::tool::model_view

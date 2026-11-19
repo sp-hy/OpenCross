@@ -4,6 +4,8 @@ add_library(oc_ui STATIC
   typewriter.cpp
   dialogue_box.h
   dialogue_box.cpp
+  dialogue_log_view.h
+  dialogue_log_view.cpp
   keyitem_popup.h
   keyitem_popup.cpp
   lowres.h
@@ -28,6 +30,8 @@ add_library(oc_ui STATIC
   world_name.cpp
   disc_prompt.h
   disc_prompt.cpp
+  retry_prompt.h
+  retry_prompt.cpp
   menu/game_state.h
   menu/game_state.cpp
   menu/use_flow.h
@@ -41,6 +45,17 @@ add_library(oc_ui STATIC
   menu/main_menu_equip.cpp
   menu/main_menu_settings.cpp
   menu/main_menu_save.cpp
+  menu/main_menu_opencross.cpp
+  menu/main_menu_records.cpp
+  menu/records_info.h
+  menu/records_info.cpp
+  menu/main_menu_extras.cpp
+  menu/extras.h
+  menu/extras.cpp
+  menu/main_menu_presets.cpp
+  menu/main_menu_options.cpp
+  menu/main_menu_achievements.cpp
+  menu/achievements_info.h
   menu/menu_demo.h
   menu/menu_demo.cpp
   menu/ps1_art.h
@@ -56,8 +71,10 @@ add_library(oc_ui STATIC
 )
 target_link_libraries(oc_ui PUBLIC oc_core oc_platform oc_vfs oc_import oc_text oc_render oc_save oc_data SDL3::SDL3)
 
-# Status-screen and Grand Slam picker model views (they need the field Actor, so they live outside oc_ui, which oc_game depends on).
-add_library(oc_menu_model STATIC menu/status_model.h menu/status_model.cpp menu/picker_model.h menu/picker_model.cpp)
+# Status-screen, Enemies-page and Grand Slam picker model views (they need the field Actor, so they live outside oc_ui, which oc_game
+# depends on).
+add_library(oc_menu_model STATIC menu/status_model.h menu/status_model.cpp menu/picker_model.h menu/picker_model.cpp menu/enemy_model.h
+            menu/enemy_model.cpp)
 target_link_libraries(oc_menu_model PUBLIC oc_ui oc_game oc_battle_view oc_render oc_import)
 
 add_subdirectory(title)

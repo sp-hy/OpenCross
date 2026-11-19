@@ -11,6 +11,7 @@
 
 #include "core/log.h"
 #include "import/tim.h"
+#include "platform/config.h"
 
 namespace oc::game {
 
@@ -341,7 +342,9 @@ void BattleView::ps1_target_info(int unit, const std::u32string& side) {
   }
   if (!side.empty() || !(tu.pc || (tu.lo & 0x400u))) return;
   add_sheet(kSheetDigits, 12, 10, 0xB3);
-  if (versus_ ? unit < battle::kPcSlots : (tu.pc || (tu.lo & 0x400000u))) {
+  const bool hp_bar = enemy_hp_bar_on(unit, false);
+  if (hp_bar) add_enemy_hp_bar(unit, 0x1E, 0xB5, 68);
+  if (versus_ ? unit < battle::kPcSlots : (tu.pc || (tu.lo & 0x400000u) || (hp_bar && platform::cheats().enemy_hp_numbers))) {
     const u32 hp_colour = tu.hp * 8 <= tu.max_hp ? 0x3080u : tu.hp * 4 <= tu.max_hp ? 0x4080u : 0x808080u;
     add_sheet(kSheetDigits, 11, 0x37, 0xBB, hp_colour);
     const std::array<int, 9> cur = split_digits(std::clamp(tu.hp, 0, 999999)), top = split_digits(std::clamp(tu.max_hp, 0, 999999));

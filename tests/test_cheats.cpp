@@ -32,9 +32,15 @@ int main() {
   const platform::Cheats& cheats = config.cheats;
   CHECK(!cheats.no_encounters && !cheats.battle_boost && !cheats.auto_battle && !cheats.god_mode && !cheats.no_clip && !cheats.max_stamina && !cheats.free_elements &&
         !cheats.always_hit && !cheats.max_money && !cheats.shop_all_elements && !cheats.shop_all_weapons && !cheats.run_speed && !cheats.always_loot && !cheats.instant_growth && !cheats.no_craft_cost && !cheats.shared_growth);
-  CHECK(!cheats.summon_any_time && !cheats.more_summons && !config.hide_feature_icons);
+  CHECK(!cheats.summon_any_time && !cheats.more_summons && !config.retry_battle && !config.hide_feature_icons);
+  CHECK(cheats.enemy_colours == platform::EnemyColours::Off && !config.element_symbols);
   CHECK(!game::battle_cheats().summon_any_ring && !game::battle_cheats().summon_repeat);
-  config.cheats.more_summons = config.hide_feature_icons = true;
+  CHECK(cheats.enemy_hp_mode == platform::EnemyHpMode::Off && !cheats.enemy_hp_numbers && cheats.enemy_hp_place == platform::EnemyHpPlace::Window);
+  config.cheats.enemy_hp_mode = platform::EnemyHpMode::Defeated;
+  config.cheats.enemy_hp_numbers = true;
+  config.cheats.enemy_hp_place = platform::EnemyHpPlace::Both;
+  config.cheats.more_summons = config.retry_battle = config.hide_feature_icons = config.element_symbols = true;
+  config.cheats.enemy_colours = platform::EnemyColours::Defeated;
   config.cheats.no_encounters = config.cheats.no_clip = config.cheats.always_loot = config.cheats.no_craft_cost = config.cheats.shop_all_weapons = config.cheats.shared_growth = true;
   const std::filesystem::path path = std::filesystem::temp_directory_path() / "oc_test_cheats.ini";
   CHECK(config.save(path));
@@ -43,7 +49,9 @@ int main() {
   std::filesystem::remove(path);
   CHECK(reloaded.cheats.no_clip && reloaded.cheats.always_loot && reloaded.cheats.no_craft_cost && reloaded.cheats.shop_all_weapons && reloaded.cheats.shared_growth);
   CHECK(!reloaded.cheats.god_mode && !reloaded.cheats.max_money && !reloaded.cheats.instant_growth);
-  CHECK(reloaded.cheats.more_summons && !reloaded.cheats.summon_any_time && reloaded.hide_feature_icons);
+  CHECK(reloaded.cheats.more_summons && reloaded.retry_battle && !reloaded.cheats.summon_any_time && reloaded.hide_feature_icons);
+  CHECK(reloaded.element_symbols && reloaded.cheats.enemy_colours == platform::EnemyColours::Defeated);
+  CHECK(reloaded.cheats.enemy_hp_mode == platform::EnemyHpMode::Defeated && reloaded.cheats.enemy_hp_numbers && reloaded.cheats.enemy_hp_place == platform::EnemyHpPlace::Both);
   // The summon toggles reach the battle rules through the bound set.
   platform::bind_cheats(&reloaded.cheats);
   CHECK(game::battle_cheats().summon_repeat && !game::battle_cheats().summon_any_ring);
@@ -66,6 +74,33 @@ int main() {
     CHECK(hand.slow_mode && hand.cheats.no_encounters && hand.cheats.battle_boost && hand.cheats.auto_battle && hand.fast_rate == 3);
     hand.clear_session_toggles();
     CHECK(!hand.fast_mode && !hand.slow_mode && !hand.cheats.no_encounters && !hand.cheats.battle_boost && !hand.cheats.auto_battle && hand.fast_rate == 3);
+    std::filesystem::remove(path);
+  }
+
+  // --- boosts and difficulty: the game's own values by default, a round trip, clamped on load, handed to the battle rules
+  {
+    platform::Config boosts;
+    const platform::Cheats& own = boosts.cheats;
+    CHECK(own.gold_percent == 100 && own.rare_loot == 1 && own.enemy_hp_percent == 100 && own.damage_taken_percent == 100 && own.damage_dealt_percent == 100 &&
+          !own.difficulty_bosses_only);
+    const battle::Battle::Cheats plain = game::battle_cheats();
+    CHECK(plain.gold_percent == 100 && plain.rare_loot == 1 && plain.hp_percent == 100 && plain.taken_percent == 100 && plain.dealt_percent == 100 && !plain.difficulty_bosses_only);
+    boosts.cheats.gold_percent = 250, boosts.cheats.rare_loot = 4, boosts.cheats.enemy_hp_percent = 150, boosts.cheats.damage_taken_percent = 75,
+    boosts.cheats.damage_dealt_percent = 300, boosts.cheats.difficulty_bosses_only = true;
+    CHECK(boosts.save(path));
+    platform::Config back;
+    CHECK(back.load(path));
+    CHECK(back.cheats.gold_percent == 250 && back.cheats.rare_loot == 4 && back.cheats.enemy_hp_percent == 150 && back.cheats.damage_taken_percent == 75 &&
+          back.cheats.damage_dealt_percent == 300 && back.cheats.difficulty_bosses_only);
+    platform::bind_cheats(&back.cheats);
+    const battle::Battle::Cheats live = game::battle_cheats();
+    CHECK(live.gold_percent == 250 && live.rare_loot == 4 && live.hp_percent == 150 && live.taken_percent == 75 && live.dealt_percent == 300 && live.difficulty_bosses_only);
+    platform::bind_cheats(nullptr);
+    std::ofstream(path) << "[Cheats]\nGoldPercent=9000\nRareLoot=0\nEnemyHpPercent=1\nDamageTakenPercent=99999\nDamageDealtPercent=-5\n";
+    platform::Config wild;
+    CHECK(wild.load(path));
+    CHECK(wild.cheats.gold_percent == 400 && wild.cheats.rare_loot == 1 && wild.cheats.enemy_hp_percent == 25 && wild.cheats.damage_taken_percent == 400 &&
+          wild.cheats.damage_dealt_percent == 25);
     std::filesystem::remove(path);
   }
 

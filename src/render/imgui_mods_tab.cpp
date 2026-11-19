@@ -30,8 +30,9 @@
 #include "vfs/vfs.h"
 
 // The Mods tab: a list | detail split with a draggable divider (stacked when the tab is narrow), then a bottom bar (Rescan, Discover Mods, Model Viewer, the Textures
-// popover, the restart notice). The list has two tabs in one row style: Mods (drag to reorder, on / off, warnings, Load on) and Engine
-// features (addons the player switches, mod kits the mods use). The detail pane shows the selected row.
+// popover, the restart notice). The list has three tabs in one row style: Mods (drag to reorder, on / off, warnings, Load on), Engine
+// features (addons the player switches, mod kits the mods use) and Randomizer (its switches; seed and spread in the detail pane). The
+// detail pane shows the selected row.
 
 namespace oc::render {
 
@@ -42,7 +43,8 @@ std::string list_signature(const vfs::ModManager& mods) {
   std::string text;
   for (const vfs::Mod& mod : mods.mods())
     text += mod.name + (mod.enabled ? "|1|" : "|0|") + vfs::load_on_name(mod.load_on) + "|" + std::to_string(mod.files.size()) + "|" + std::to_string(mod.data.size()) + "|" +
-            std::to_string(mod.archives.size()) + "|" + std::to_string(mod.textures.size()) + "|" + std::to_string(mod.voices.size()) + "\n";
+            std::to_string(mod.archives.size()) + "|" + std::to_string(mod.textures.size()) + "|" + std::to_string(mod.models.size()) + "|" +
+            std::to_string(mod.voices.size()) + "\n";
   return text;
 }
 
@@ -55,12 +57,21 @@ std::string data_signature(const vfs::ModManager& mods) {
 }
 
 TextureDumpHooks g_dump_hooks;
+ModelExportHooks g_export_hooks;
+RandomizerHooks g_randomizer_hooks;
 
 // The tab's state for the session: the open list tab, the selection, the split, the mod a gamepad carries.
 struct TabState {
   bool features_tab = false;
-  // A feature link in a mod's details asks for the Engine features tab.
+  bool randomizer_tab = false;
+  // A feature link in a mod's details asks for the Engine features tab (the Randomizer tab for that feature).
   bool open_features_tab = false;
+  bool open_randomizer_tab = false;
+  // The seed was changed on the page this session (the page warns about a game in progress). The seed and spread being edited: they
+  // apply when the field is left, not at every keystroke or step of the slider.
+  bool seed_changed = false;
+  int seed_edit = 0, spread_edit = 0;
+  bool seed_editing = false, spread_editing = false;
   // The selected mod (folder name) and feature id.
   std::string mod;
   int feature = -1;
@@ -143,11 +154,11 @@ void tip(const char* text) {
 // A folder in mods with nothing in it: no row (the footer names it).
 bool is_empty(const vfs::Mod& mod) {
   return mod.error.empty() && !mod.has_manifest && mod.files.empty() && mod.data.empty() && mod.archives.empty() && mod.textures.empty() &&
-         mod.shaders.empty() && mod.voices.empty() && mod.unmatched.empty() && mod.ambiguous.empty();
+         mod.models.empty() && mod.shaders.empty() && mod.voices.empty() && mod.unmatched.empty() && mod.ambiguous.empty();
 }
 
 // Game data has no art mode.
-bool data_only(const vfs::Mod& mod) { return !mod.data.empty() && mod.files.empty() && mod.textures.empty(); }
+bool data_only(const vfs::Mod& mod) { return !mod.data.empty() && mod.files.empty() && mod.textures.empty() && mod.models.empty(); }
 
 // A mod by its mod.ini Name when it has one (the folder name otherwise).
 std::string shown_name(const vfs::Mod& mod) { return mod.has_manifest && !mod.manifest.name.empty() ? mod.manifest.name : mod.name; }
@@ -245,15 +256,36 @@ void group_label(const char* text) {
   ImGui::TextDisabled("%s", text);
 }
 
-// ---- texture dump: the top bar's Textures button and its popover ----
-// Texture replacement (render/texture_registry.h) is always on - a texture mod is switched by its own row; dumping is this popover. While a
-// dump runs the button shows its progress, so the popover can close.
+// A background job of the popover: while it runs, a Cancel button on the line of its start button, a progress bar and its status; after,
+// its last summary. `cancel_label` keeps the jobs' Cancel buttons apart.
+template <typename Hooks>
+void draw_job_state(const Hooks& hooks, bool running, const char* cancel_label) {
+  if (running) {
+    ImGui::SameLine();
+    if (ImGui::Button(cancel_label)) hooks.cancel();
+    ImGui::ProgressBar(hooks.fraction ? hooks.fraction() : 0.0f, ImVec2(ImGui::GetFontSize() * 22.0f, 0));
+    ImGui::TextUnformatted(hooks.status ? hooks.status().c_str() : "");
+  } else if (hooks.summary) {
+    const std::string summary = hooks.summary();
+    if (!summary.empty()) {
+      ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+      ImGui::TextUnformatted(summary.c_str());
+      ImGui::PopTextWrapPos();
+    }
+  }
+}
+
+// ---- texture dump and model export: the top bar's Textures button and its popover ----
+// Texture replacement (render/texture_registry.h) is always on - a texture mod is switched by its own row; dumping is this popover, and so is
+// the glTF model export. While either job runs the button shows its progress, so the popover can close.
 void draw_textures_button(platform::Config& cfg, bool* settings_dirty) {
   const bool running = g_dump_hooks.running && g_dump_hooks.running();
-  const std::string label = running ? std::format("Textures {:.0f} %###textures", (g_dump_hooks.fraction ? g_dump_hooks.fraction() : 0.0f) * 100.0f)
-                                    : std::string("Textures###textures");
+  const bool exporting = g_export_hooks.running && g_export_hooks.running();
+  const std::function<float()>& fraction_of = running ? g_dump_hooks.fraction : g_export_hooks.fraction;
+  const std::string label = running || exporting ? std::format("Textures {:.0f} %###textures", (fraction_of ? fraction_of() : 0.0f) * 100.0f)
+                                                 : std::string("Textures###textures");
   if (ImGui::Button(label.c_str())) ImGui::OpenPopup("textures_pop");
-  tip("Dump the game's textures as PNGs, to make texture mods from.");
+  tip("Dump the game's textures as PNGs, to make texture mods from, or export the models as glTF.");
   if (!ImGui::BeginPopup("textures_pop")) return;
   const texture_registry::Stats ts = texture_registry::stats();
   ImGui::TextDisabled("This session: %u dumped, %u replaced%s", ts.dumped, ts.replaced, ts.failed ? " (write errors, see the log)" : "");
@@ -298,21 +330,20 @@ void draw_textures_button(platform::Config& cfg, bool* settings_dirty) {
     tip("Loads the ticked kinds in the background and writes their textures (the ones that are not files) as PNGs to <GameDir>/dump/textures.\n"
         "Battle stages, the title and room meshes come as ONE image per object. The game stays playable meanwhile.\n"
         "Copy files (keeping the sub-folders) into mods/<name>/textures/ to replace them.");
-    if (running) {
-      ImGui::SameLine();
-      if (ImGui::Button("Cancel")) g_dump_hooks.cancel();
-      ImGui::ProgressBar(g_dump_hooks.fraction ? g_dump_hooks.fraction() : 0.0f, ImVec2(ImGui::GetFontSize() * 22.0f, 0));
-      ImGui::TextUnformatted(g_dump_hooks.status ? g_dump_hooks.status().c_str() : "");
-    } else if (g_dump_hooks.summary) {
-      const std::string summary = g_dump_hooks.summary();
-      if (!summary.empty()) {
-        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
-        ImGui::TextUnformatted(summary.c_str());
-        ImGui::PopTextWrapPos();
-      }
-    }
+    draw_job_state(g_dump_hooks, running, "Cancel");
+  }
+  if (g_export_hooks.start) {
+    ImGui::Separator();
+    ImGui::BeginDisabled(exporting);
+    if (ImGui::Button("Export all models")) g_export_hooks.start();
+    ImGui::EndDisabled();
+    tip("Writes every field, battle and Status-screen model and every weapon as glTF (.glb) to <GameDir>/dump/models, once with the "
+        "classic art (classic/) and once with the HD art (hd/): mesh, skeleton, textures and every animation, named by the clip numbers "
+        "the game's scripts use. The game stays playable meanwhile.");
+    draw_job_state(g_export_hooks, exporting, "Cancel###export_cancel");
   }
   ImGui::EndPopup();
+
 }
 
 // ---- engine features ----
@@ -450,7 +481,7 @@ bool draw_feature_list(platform::Config& cfg, const vfs::ModManager& mods, const
     ImGui::TableSetupColumn("on");
     ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch);
     for (const features::Feature& feature : features::table()) {
-      if (!*feature.section || !feature.player || feature.settings.empty()) continue;
+      if (!*feature.section || !feature.player || feature.settings.empty() || feature.id == features::kRandomizer) continue;
       ImGui::PushID(feature.id);
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
@@ -566,6 +597,125 @@ bool draw_feature_detail(platform::Config& cfg, const vfs::ModManager& mods, con
   return settings;
 }
 
+// ---- randomizer ----
+
+size_t randomizer_setting(const features::Feature& feature, std::string_view key) {
+  for (size_t k = 0; k < feature.settings.size(); ++k)
+    if (same_key(feature.settings[k].key, key)) return k;
+  return 0;
+}
+
+// True while any of the randomizer's switches is on.
+bool randomizer_on(const features::Feature& feature, const std::vector<int>& values) {
+  for (size_t k = 0; k < feature.settings.size(); ++k)
+    if (is_flag(feature.settings[k]) && values[k] != 0) return true;
+  return false;
+}
+
+// A stored "Randomizer.Enabled" (its former master switch) is dropped when the player changes a switch, after the switches it turned off are
+// stored as they stand, so the change does not bring the others back.
+void drop_legacy_switch(platform::Config& cfg, const features::Feature& feature, const std::vector<int>& now, const std::vector<int>& base) {
+  const std::string legacy = std::string(feature.section) + ".Enabled";
+  const auto entry = own_setting(cfg, legacy);
+  if (entry == cfg.features.end()) return;
+  cfg.features.erase(entry);
+  for (size_t k = 0; k < feature.settings.size(); ++k)
+    if (is_flag(feature.settings[k])) store_setting(cfg, std::string(feature.section) + "." + feature.settings[k].key, now[k], base[k]);
+}
+
+// The Randomizer page's list: the tiers and extras, a checkbox row each.
+bool draw_randomizer_list(platform::Config& cfg, const vfs::ModManager& mods, const FeatureView& view) {
+  const features::Feature* feature = features::find(features::table(), features::kRandomizer);
+  if (!feature) return false;
+  bool settings = false;
+  const std::vector<int>& now = view.now.values.at(feature->id);
+  const std::vector<int>& base = view.mods_only.values.at(feature->id);
+  const RowBands bands;
+  if (ImGui::BeginTable("randomizer", 2, RowBands::kFlags)) {
+    ImGui::TableSetupColumn("on");
+    ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch);
+    for (size_t k = 0; k < feature->settings.size(); ++k) {
+      const features::Setting& setting = feature->settings[k];
+      if (!is_flag(setting)) continue;
+      const std::string key = std::string(feature->section) + "." + setting.key;
+      ImGui::PushID(static_cast<int>(k));
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      bool value = now[k] != 0;
+      if (ImGui::Checkbox("##on", &value)) {
+        drop_legacy_switch(cfg, *feature, now, base);
+        store_setting(cfg, key, value ? 1 : 0, base[k]);
+        settings = true;
+      }
+      ImGui::TableNextColumn();
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::AlignTextToFramePadding();
+      ImGui::TextUnformatted(setting.label);
+      settings |= source_note(cfg, mods, key, view.mods_only.sources.at(feature->id)[k]);
+      ImGui::PopTextWrapPos();
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  return settings;
+}
+
+// The Randomizer page's details: what it does, the seed (typed or picked at random) and the spread, and what the plan moves.
+bool draw_randomizer_detail(platform::Config& cfg, const vfs::ModManager& mods, const FeatureView& view) {
+  const features::Feature* feature = features::find(features::table(), features::kRandomizer);
+  if (!feature) return false;
+  bool settings = false;
+  const std::vector<int>& now = view.now.values.at(feature->id);
+  const std::vector<int>& base = view.mods_only.values.at(feature->id);
+  const std::vector<std::string>& sources = view.mods_only.sources.at(feature->id);
+  const size_t seed_k = randomizer_setting(*feature, "Seed"), spread_k = randomizer_setting(*feature, "Spread");
+  const features::Setting& seed_setting = feature->settings[seed_k];
+  const std::string seed_key = std::string(feature->section) + ".Seed", spread_key = std::string(feature->section) + ".Spread";
+  render::ImGuiLayer::section(feature->label);
+  ImGui::TextUnformatted(feature->about);
+  ImGui::TextDisabled("Opened chests stay opened. Switched off, everything not yet collected is as in the game again; what you received stays. "
+                      "Shops, drops and encounters follow at once, chests from the next room you enter, starting gear and elements at New Game.");
+  const bool on = randomizer_on(*feature, now);
+  render::ImGuiLayer::section("Seed");
+  if (!g_state.seed_editing) g_state.seed_edit = now[seed_k];
+  ImGui::SetNextItemWidth(control_width(seed_setting) * 1.6f);
+  ImGui::InputInt("##seed", &g_state.seed_edit, 0, 0);
+  g_state.seed_editing = ImGui::IsItemActive();
+  const bool seed_done = ImGui::IsItemDeactivatedAfterEdit();
+  g_state.seed_edit = std::clamp(g_state.seed_edit, seed_setting.min, seed_setting.max);
+  tip(std::format("{} to {}. The same seed and settings give the same game.", seed_setting.min, seed_setting.max).c_str());
+  if (seed_done && g_state.seed_edit != now[seed_k]) {
+    store_setting(cfg, seed_key, g_state.seed_edit, base[seed_k]);
+    settings = g_state.seed_changed = true;
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("New seed")) {
+    store_setting(cfg, seed_key, static_cast<int>(SDL_GetTicksNS() % static_cast<Uint64>(seed_setting.max)) + 1, base[seed_k]);
+    settings = g_state.seed_changed = true;
+  }
+  tip("Picks a seed at random.");
+  settings |= source_note(cfg, mods, seed_key, sources[seed_k]);
+  if (g_state.seed_changed)
+    ImGui::TextColored(kWarnColour, "Changing the seed in the middle of a game can give some things twice and leave others out of reach.");
+  render::ImGuiLayer::section("Spread");
+  if (!g_state.spread_editing) g_state.spread_edit = now[spread_k];
+  ImGui::SetNextItemWidth(std::min(ImGui::GetContentRegionAvail().x, ImGui::GetFontSize() * 16.0f));
+  ImGui::SliderInt("##spread", &g_state.spread_edit, 0, 100, "%d");
+  g_state.spread_editing = ImGui::IsItemActive();
+  if (!g_state.spread_editing && g_state.spread_edit != now[spread_k]) {
+    store_setting(cfg, spread_key, g_state.spread_edit, base[spread_k]);
+    settings = true;
+  }
+  settings |= source_note(cfg, mods, spread_key, sources[spread_k]);
+  ImGui::TextDisabled("0: a thing only trades places with one of similar value and stage. 100: anywhere. Every thing still exists once, so "
+                      "forging and the records keep working. Key items never move; bosses and story battles stay where they are.");
+  render::ImGuiLayer::section("This seed");
+  const std::string status = g_randomizer_hooks.status ? g_randomizer_hooks.status() : std::string();
+  if (status.empty()) ImGui::TextDisabled(on ? "Prepared when the game first needs it." : "Nothing is switched on: the game is as it ships.");
+  else ImGui::TextUnformatted(status.c_str());
+  return settings;
+}
+
 // ---- mods ----
 
 struct Issue {
@@ -593,6 +743,11 @@ std::vector<Issue> mod_issues(const vfs::Mod& mod, size_t index, const std::vect
     if (conflict.winner != index) lost.push_back(conflict.target);
   if (!lost.empty())
     out.push_back({std::format("{} file{} replaced by a mod above", lost.size(), lost.size() == 1 ? "" : "s"), first_names(lost)});
+  if (const std::vector<std::string> refused = vfs::file_problems(mod); !refused.empty()) {
+    std::string detail;
+    for (const std::string& line : refused) detail += (detail.empty() ? "" : "\n") + line;
+    out.push_back({std::format("{} model{} not used", refused.size(), refused.size() == 1 ? "" : "s"), detail});
+  }
   for (const std::string& problem : mod.manifest.problems) out.push_back({"mod.ini", problem});
   if (mod.has_manifest) {
     const features::ModInput input{mod.name, &mod.manifest};
@@ -612,7 +767,7 @@ struct TabCache {
 TabCache g_cache;
 
 const TabCache& tab_cache(const platform::Config& cfg, const vfs::ModManager& mods) {
-  std::string signature = list_signature(mods);
+  std::string signature = list_signature(mods) + std::to_string(vfs::file_problems_generation()) + "\n";
   for (const auto& [key, value] : cfg.features) signature += key + "=" + value + "\n";
   if (signature == g_cache.signature && g_cache.conflicts.size() == mods.mods().size()) return g_cache;
   g_cache.signature = std::move(signature);
@@ -918,6 +1073,7 @@ void draw_mod_detail(const vfs::ModManager& mods, const TabCache& cache) {
   };
   line(mod.files.size(), kFilesColour, "replaced files, in the art modes Load on picks");
   line(mod.textures.size(), kFilesColour, "textures");
+  line(mod.models.size(), kFilesColour, "models");
   line(mod.voices.size(), kFilesColour, "voice lines");
   line(mod.shaders.size(), kFilesColour, "shader looks");
   line(mod.archives.size(), kFilesColour, "archives");
@@ -943,7 +1099,7 @@ void draw_mod_detail(const vfs::ModManager& mods, const TabCache& cache) {
       ImGui::PushID(section.c_str());
       if (ImGui::TextLink(feature->label)) {
         g_state.feature = feature->id;
-        g_state.open_features_tab = true;
+        (feature->id == features::kRandomizer ? g_state.open_randomizer_tab : g_state.open_features_tab) = true;
       }
       if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayShort)) render::ImGuiLayer::tooltip(std::format("[{}] {}", section, detail).c_str());
       ImGui::PopID();
@@ -995,6 +1151,8 @@ void open_model_viewer() {
 }
 
 void set_texture_dump_hooks(TextureDumpHooks hooks) { g_dump_hooks = std::move(hooks); }
+void set_model_export_hooks(ModelExportHooks hooks) { g_export_hooks = std::move(hooks); }
+void set_randomizer_hooks(RandomizerHooks hooks) { g_randomizer_hooks = std::move(hooks); }
 
 std::vector<vfs::ModPref> mod_prefs(const platform::Config& cfg) {
   std::vector<vfs::ModPref> out;
@@ -1025,10 +1183,15 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
   // stacks above the detail (the divider between them). A list edit rebuilds the cache before the detail pane reads it (its per-mod entries
   // follow the order).
   const TabCache& cache = tab_cache(cfg, mods);
-  if (!g_launch.taken) g_launch = {true, data_signature(mods), cache.features.now.values};
+  // The randomizer applies its settings at once (the app follows them), so they never ask for a restart.
+  const auto launch_features = [](std::map<int, std::vector<int>> values) {
+    values.erase(features::kRandomizer);
+    return values;
+  };
+  if (!g_launch.taken) g_launch = {true, data_signature(mods), launch_features(cache.features.now.values)};
   const FeatureView& view = cache.features;
   // Game data and features are read once at launch: a restart is needed while either differs from what the game started with.
-  const bool restart = data_signature(mods) != g_launch.data || cache.features.now.values != g_launch.features;
+  const bool restart = data_signature(mods) != g_launch.data || launch_features(cache.features.now.values) != g_launch.features;
   const ImVec2 avail = ImGui::GetContentRegionAvail();
   const bool wide = avail.x >= ImGuiLayer::two_column_width();
   const float bar = ImGui::GetFrameHeightWithSpacing() * (restart && !wide ? 2.0f : 1.0f);
@@ -1048,7 +1211,7 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
         if (!is_empty(mod)) ++shown, on += mod.enabled ? 1 : 0;
       const std::string mods_label = std::format("Mods ({}/{})###mods", on, shown);
       if (ImGui::BeginTabItem(mods_label.c_str())) {
-        g_state.features_tab = false;
+        g_state.features_tab = g_state.randomizer_tab = false;
         if (ImGui::BeginChild("rows", ImVec2(0, 0), ImGuiChildFlags_NavFlattened)) {
           if (shown == 0) ImGui::TextDisabled("No mods found.");
           changed |= draw_mod_list(mods, cache, art);
@@ -1060,7 +1223,17 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
       g_state.open_features_tab = false;
       if (ImGui::BeginTabItem("Engine features###features", nullptr, flags)) {
         g_state.features_tab = true;
+        g_state.randomizer_tab = false;
         if (ImGui::BeginChild("rows", ImVec2(0, 0), ImGuiChildFlags_NavFlattened)) settings |= draw_feature_list(cfg, mods, view);
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+      }
+      const ImGuiTabItemFlags randomizer_flags = g_state.open_randomizer_tab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+      g_state.open_randomizer_tab = false;
+      if (ImGui::BeginTabItem("Randomizer###randomizer", nullptr, randomizer_flags)) {
+        g_state.features_tab = false;
+        g_state.randomizer_tab = true;
+        if (ImGui::BeginChild("rows", ImVec2(0, 0), ImGuiChildFlags_NavFlattened)) settings |= draw_randomizer_list(cfg, mods, view);
         ImGui::EndChild();
         ImGui::EndTabItem();
       }
@@ -1098,7 +1271,8 @@ bool draw_mods_tab(platform::Config& cfg, vfs::ModManager& mods, const vfs::Vfs&
     if (wide) begin_nav_column(panes, 1);
     // Every line wraps at the pane's edge.
     ImGui::PushTextWrapPos(0.0f);
-    if (g_state.features_tab) settings |= draw_feature_detail(cfg, mods, view);
+    if (g_state.randomizer_tab) settings |= draw_randomizer_detail(cfg, mods, view);
+    else if (g_state.features_tab) settings |= draw_feature_detail(cfg, mods, view);
     else draw_mod_detail(mods, cache);
     ImGui::PopTextWrapPos();
     if (wide) end_nav_column();

@@ -9,8 +9,10 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "import/text.h"
+#include "render/element_icon_draw.h"
 namespace oc::game {
 
 using namespace bv;
@@ -92,6 +94,9 @@ void BattleView::replay(const render::Frame&, const render::Letterbox& lb, float
         if (op.blend) sprites_->set_blend(op.blend == 1 ? render::BlendMode::Multiply : op.blend == 3 ? render::BlendMode::Subtract : render::BlendMode::Add);
         sprites_->draw(op.tex->set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, op.u0, op.v0, op.u1, op.v1, op.color);
         if (op.blend) sprites_->set_blend(render::BlendMode::Alpha);
+        break;
+      case Op::Icon:
+        render::draw_element_icon(*sprites_, white_.set, op.icon, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.w * canvas_scale, static_cast<int>(op.color & 0xFF));
         break;
       case Op::Plate: {
         const Tex& plate = plates_[static_cast<size_t>(std::clamp(op.plate, 0, 7))];

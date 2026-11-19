@@ -18,8 +18,10 @@
 #include <cmath>
 #include <format>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "import/text.h"
+#include "platform/config.h"
 #include "platform/keymap.h"
 #include "platform/pad_remap.h"
 #include "render/texture.h"
@@ -1400,6 +1402,7 @@ void BattleView::build_command_ui() {
     const int pc = ci >= 0 && ci < 6 ? ci : (er.colour_bit() & 0xFC) == 0xFC ? 6 : -1;
     // The 140-plate table: unused set, frame 3 (steady).
     if (pc >= 0) add_name_plate(false, pc, 3, 8, y);
+    add_plate_symbol(pc, 8, y);
   };
   const bool act_hdr = act_.phase != Act::Phase::None && !act_.ev.empty() && act_.ev.front().kind == battle::ActionEvent::Kind::Element && act_.actor >= 0;
   // Any unit: the action covers PCs and enemies. An element with record byte 0 bit 0x80 (death casts, form changes, boss moves such as the
@@ -1557,6 +1560,53 @@ void BattleView::build_command_ui() {
   if (ui_ == Ui::Target) build_target_ui();
 }
 
+// [Cheats] EnemyHpBars. `over_enemy` asks for the bars over the units, else for the target window's; the setting's placement decides which
+// of the two are on.
+bool BattleView::enemy_hp_bar_on(int unit, bool over_enemy) const {
+  const platform::Cheats& cheats = platform::cheats();
+  if (cheats.enemy_hp_mode == platform::EnemyHpMode::Off) return false;
+  if (cheats.enemy_hp_place == (over_enemy ? platform::EnemyHpPlace::Window : platform::EnemyHpPlace::Enemies)) return false;
+  const battle::Unit& tu = bunit(unit);
+  const bool defeated = cheats.enemy_hp_mode == platform::EnemyHpMode::Defeated && enemy_defeated_ && enemy_defeated_(tu.src_id);
+  return tu.present && bhud::enemy_hp_shown(static_cast<int>(cheats.enemy_hp_mode), !tu.pc, versus_, defeated);
+}
+
+// The bar copies the stamina bar's build: a black 1 px frame round a track, the fill inside it in the party HP digits' colour (white,
+// orange at a quarter, red-orange at an eighth); the track is dark grey so the lost part shows.
+void BattleView::add_enemy_hp_bar(int unit, float x, float y, float width) {
+  const battle::Unit& tu = bunit(unit);
+  const float bar_x = x * kPs1Px, bar_y = y * kRowScale;
+  add_rect(bar_x, bar_y, width * kPs1Px, 4 * kRowScale, col(0, 0, 0));
+  add_rect(bar_x + kPs1Px, bar_y + kRowScale, (width - 2) * kPs1Px, 2 * kRowScale, col(60, 60, 60));
+  const int fill = bhud::enemy_hp_fill(tu.hp, tu.max_hp, static_cast<int>(width) - 2);
+  static const u32 kTone[3] = {col(255, 255, 255), col(255, 128, 0), col(255, 96, 0)};
+  if (fill > 0) add_rect(bar_x + kPs1Px, bar_y + kRowScale, static_cast<float>(fill) * kPs1Px, 2 * kRowScale, kTone[bhud::enemy_hp_tone(tu.hp, tu.max_hp)]);
+}
+
+// The bars of the whole battle: above the head of each living enemy that is on stage, centred, 40 PS1 px wide, with "HP / max" over it when
+// the numbers are on. Pinned to the 4:3 picture (group 2) like the target cursor, so they follow the unit with the camera.
+void BattleView::build_enemy_hp_bars() {
+  constexpr float kWidth = 40.0f;
+  for (int i = 0; i < battle::kUnits; ++i) {
+    const battle::Unit& tu = bunit(i);
+    const Visual& visual = vis_[static_cast<size_t>(i)];
+    if (!tu.present || tu.pc || tu.hp <= 0 || !visual.has_model || !enemy_hp_bar_on(i, true)) continue;
+    if (visual.fade <= 0.0f || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)] || anm_hidden(i)) continue;
+    if (ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) continue;
+    const std::array<float, 3> world = unit_world(i, 1.0f);
+    float cx = 0, cy = 0;
+    if (!cam_.project(world[0], world[1] + visual.height, world[2], cx, cy)) continue;
+    const float x = cx / kPs1Px, y = cy / kRowScale - 8.0f;
+    const size_t from = op_count();
+    add_enemy_hp_bar(i, x - kWidth / 2, y, kWidth);
+    if (platform::cheats().enemy_hp_numbers) {
+      const std::u32string text = digits_u32(std::clamp(tu.hp, 0, 99999)) + U"/" + digits_u32(std::clamp(tu.max_hp, 0, 99999));
+      btext(0x85, text, x, y - 9.0f, hp_colour(tu.hp, tu.max_hp));
+    }
+    set_group(from, 2);
+  }
+}
+
 // Target selection, identical in both art modes:
 //  * cursor: for every unit of the target list a camera-facing quad at the model's attach point 14, the four constant vertices
 //    (-192, -704, -192) (192, -704, -192) (192, -320, -192) (-192, -320, -192) (y up = negative, z toward the camera) through the perspective
@@ -1570,6 +1620,16 @@ void BattleView::build_command_ui() {
 //  * camera hint: at (0xF6, 0xE) the "NORMAL" / "DYNAMIC" text at (+27, +3) (flags 0x20003, colour 0x757575) and the camera icon at (+15, 0),
 //    plus the button glyph of the camera key (12 x 12 at (0xF6, 0xE)): the pad icon, or in keyboard mode the key cap of the bound key from
 //    ui/keyboard_<l>.png.
+// [Cheats] EnemyColours: an enemy's innate colour icon is shown for every enemy, or only for those the collection has seen defeated.
+bool BattleView::enemy_colour_shown(const battle::Unit& unit) const {
+  if (unit.pc || data::colour_index_of_bit(static_cast<u8>(unit.innate & 0xFC)) < 0) return false;
+  switch (platform::cheats().enemy_colours) {
+    case platform::EnemyColours::Always: return true;
+    case platform::EnemyColours::Defeated: return enemy_defeated_(unit.src_id);
+    default: return false;
+  }
+}
+
 void BattleView::build_target_ui(bool cam_hint) {
   if (targets_.empty()) return;
   // The name + HP block shows when the ring holds ONE living unit,
@@ -1628,6 +1688,7 @@ void BattleView::build_target_ui(bool cam_hint) {
     const std::u32string side = !all ? std::u32string() : both_sides ? xlat("敵・味方全体", U"All Enemies/Allies")
                                                    : tgt_mode_ == Tgt::AllyAll ? xlat("味方全体", U"All Allies") : xlat("敵全体", U"All Enemies");
     ps1_target_info(tu_i, side);
+    if (side.empty() && enemy_colour_shown(tu)) add_icon(data::colour_index_of_bit(static_cast<u8>(tu.innate & 0xFC)), 94.0f * kPs1Px, 0xAD * kRowScale, 36.0f);
   }
   // Side labels: 0xC0 = 敵・味方全体, 0x80 = 敵全体, 0x40 = 味方全体; translated: All Enemies/Allies | All Enemies | All Allies.
   if (all && !ps1_hud_)
@@ -1642,6 +1703,12 @@ void BattleView::build_target_ui(bool cam_hint) {
       nm += jp ? std::u32string(U"・") + static_cast<char32_t>(letter - U'A' + U'Ａ') : std::u32string(U"-") + letter;
     }
     btext(0x85, nm, 0x37, 0xA9, 0x8A8A8A);
+    if (enemy_colour_shown(tu)) {
+      const int slot = jp ? ui::font::kBattleJp : ui::font::kBattle;
+      fonts_.prepare(slot, nm);
+      const float width = std::min(fonts_.measure(slot, nm, ui::font::slot(slot).scale), 86.0f * kPs1Px);
+      add_icon(data::colour_index_of_bit(static_cast<u8>(tu.innate & 0xFC)), std::min(0x37 * kPs1Px + width * 0.5f + 24.0f, 98.0f * kPs1Px), 0xAD * kRowScale, 36.0f);
+    }
   }
   // The HP / sex / innate block needs status lo 0x400, the HP digits status lo 0x400000. Every unit has 0x400,
   // so the block is always drawn; 0x400000 (HP known) is a PC's from the start and an enemy's only from its
@@ -1651,8 +1718,11 @@ void BattleView::build_target_ui(bool cam_hint) {
   // & 0x3F, U+1B4).
   if (!ps1_hud_ && !all && (tu.pc || (tu.lo & 0x400u))) {
     btext(jp ? 0x10004 : 4, xlat("ＨＰ", U"HP"), 10, 0xB3, 0x8A8A8A);
+    // [Cheats] EnemyHpBars: the bar beside the HP label, and with the numbers on the digits even before an Infoscope.
+    const bool hp_bar = enemy_hp_bar_on(tu_i, false);
+    if (hp_bar) add_enemy_hp_bar(tu_i, 0x1E, 0xB5, 68);
     // HP known: every PC, an enemy only once an Infoscope landed on it. A versus battle never shows the other party's.
-    if (versus_ ? tu_i < battle::kPcSlots : (tu.pc || (tu.lo & 0x400000u))) {
+    if (versus_ ? tu_i < battle::kPcSlots : (tu.pc || (tu.lo & 0x400000u) || (hp_bar && platform::cheats().enemy_hp_numbers))) {
       const int hp = std::clamp(tu.hp, 0, 99999), mhp = std::clamp(tu.max_hp, 0, 99999);
       const u32 hpc = hp_colour(hp, mhp);
       btext(4, U"/", 0x37, 0xBB, hpc);
@@ -1673,10 +1743,12 @@ void BattleView::build_target_ui(bool cam_hint) {
     // The innate byte's colour mask is bits 2..7 (bit 1 = absorbs its own colour).
     const int ci = data::colour_index_of_bit(static_cast<u8>(tu.innate & 0xFC));
     // Style 0xB: the colour word is not remapped.
-    if (ci >= 0 && ci < 6) btext(0xB, U"●", 0x48 + 7, 0xC5 + 2, kInnateDot[ci]);
+    if (ci >= 0 && ci < 6 && element_symbols()) add_icon(ci, 0x53 * kPs1Px, 0xCA * kRowScale, 32.0f);
+    else if (ci >= 0 && ci < 6) btext(0xB, U"●", 0x48 + 7, 0xC5 + 2, kInnateDot[ci]);
     const int cs = data::colour_index_of_bit(static_cast<u8>((tu.hi & 0x3Fu) << 2));
     // The colour shield's dot uses the same +7 / +2 nudge.
-    if (cs >= 0 && cs < 6) btext(0xB, U"●", 0x50 + 7, 0xC5 + 2, kInnateDot[cs]);
+    if (cs >= 0 && cs < 6 && element_symbols()) add_icon(cs, 0x5B * kPs1Px, 0xCA * kRowScale, 32.0f);
+    else if (cs >= 0 && cs < 6) btext(0xB, U"●", 0x50 + 7, 0xC5 + 2, kInnateDot[cs]);
   }
   // Camera mode hint and the cursor unit's status plates: not shown under the Dopplegang list. An element's ring shows the plates only while
   // it holds one unit and the cursor is drawn (not under the DYNAMIC camera, above).
@@ -1757,6 +1829,10 @@ void BattleView::build_element_ui() {
       const float x = (160 + 15.0f * static_cast<float>(level)) * kPs1Px, y = ref_y(118 + 7.5f * static_cast<float>(slot));
       add_plate(ci, x, y, 13 * kPs1Px, ref_y(6), col(255, 255, 255, a));
       set_group(op_count() - 1, 1);
+      if (element_symbols()) {
+        add_icon(data::colour_index_of_bit(elem.colour_bit()), x + 6.5f * kPs1Px, y + ref_y(3), 24.0f, level > unit.gauge ? 150 : 255);
+        set_group(op_count() - 1, 1);
+      }
     }
   // Name list: one plate per valid slot of the level at PS1 (11, 60 + 15 slot); the selected slot's plate is the
   // bright one; names are the tech-title entries with the level offset suffix; greyed (0x404040) when the cell is used.
@@ -1782,6 +1858,7 @@ void BattleView::build_element_ui() {
       add_name_plate(used, pc, frame, static_cast<float>(elem_x_), row_y);
     }
     if (!rest) continue;
+    add_plate_symbol(pc, static_cast<float>(elem_x_), row_y, used ? 90 : 255);
     // The name's leading icon code (Greek alpha..delta) is drawn by the fonts as the list icon (alpha = the boxed "x1" of consumables).
     btext(0x81, import::utf8_to_u32(elem_label(tables_->element_name(id), elem, idx / data::kGridCols)), 11 + 57, row_y + 3, used ? 0x404040 : 0x757575);
     // Consumable stock (a cell without a counter, e.g. a debug party, shows none): "x" and the units digit as style-9 glyph text at

@@ -166,6 +166,8 @@ Options parse_options(const std::vector<std::string>& args) {
       options.help = true;
     } else if (arg == "--back") {
       options.back = true;
+    } else if (arg == "--mods") {
+      options.mods = true;
     } else if (arg == "--sd") {
       options.hd = false;
     } else if (arg == "--index") {

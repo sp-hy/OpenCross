@@ -1,7 +1,8 @@
 // Checks for oc_audio: SAB header parse on a synthetic blob, loop-wrap maths, the BGM table, the mixer gain formula, and the AKAO side
 // (ADPCM decode, ADSR envelopes, the sequencer, SFX channel allocation, pitch vs output rate, live BGM switching, battle sound rendering,
-// the music gate mask, DA portamento, FE 0B sound requests, music push / pop, note lengths, held-note fine tune, LFO rate words across
-// channel starts, keymap / patch-zone envelopes, drum notes under legato, fixed voices and the note-on fine tune).
+// the music gate mask, DA portamento, FE 0B sound requests, music push / pop, the music resume's places, note lengths, held-note fine
+// tune, LFO rate words across channel starts, keymap / patch-zone envelopes, drum notes under legato, fixed voices and the note-on fine
+// tune).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -22,6 +23,7 @@
 #include "audio/mixer.h"
 #include "audio/sab.h"
 #include "audio/sfx.h"
+#include "audio/song_memory.h"
 #include "audio/stream_resampler.h"
 
 using namespace oc;
@@ -1150,6 +1152,71 @@ void test_music_push() {
   std::printf("music push: held reg %04X, next note %.1f ms later than the song that kept playing\n", held, delay_ms);
 }
 
+// Music resume: a place is kept under 5 minutes, used once, only on its own source, one per song; a song cut off and resumed from its
+// place keeps the clock and the notes of the same song rendered without the cut, while a fresh start begins again at tick 0.
+void test_music_resume() {
+  CHECK(audio::song_resume_fresh(10.0, 10.0) && audio::song_resume_fresh(10.0, 309.9));
+  CHECK(!audio::song_resume_fresh(10.0, 310.0) && !audio::song_resume_fresh(10.0, 9.0));
+  CHECK(audio::song_loops(11) && !audio::song_loops(9) && !audio::song_loops(0) && !audio::song_loops(-1));
+  audio::SongMemory memory;
+  audio::SongPlace hca;
+  hca.stream_seconds = 12.5;
+  hca.song_seconds = 40.0;
+  memory.remember(11, hca, 0.0);
+  CHECK(!memory.take(11, true, 1.0));
+  CHECK(!memory.take(11, false, 1.0));
+  memory.remember(11, hca, 0.0);
+  hca.stream_seconds = 20.0;
+  memory.remember(11, hca, 5.0);
+  memory.remember(12, hca, 6.0);
+  const auto place = memory.take(11, false, 304.0);
+  CHECK(place && place->stream_seconds == 20.0 && place->song_seconds == 40.0);
+  CHECK(!memory.take(11, false, 304.0));
+  CHECK(!memory.take(12, false, 306.0) && memory.empty());
+  memory.remember(13, hca, 0.0);
+  memory.remember(14, hca, 400.0);
+  CHECK(!memory.take(13, false, 401.0) && memory.take(14, false, 401.0));
+  memory.remember(15, hca, 0.0);
+  memory.forget(15);
+  CHECK(memory.empty());
+
+  auto bank = audio::parse_bank(tiny_bank());
+  if (!bank) return;
+  auto table = std::make_shared<audio::InstrumentTable>();
+  table->overlay(bank);
+  auto seq = std::make_shared<audio::AkaoSeq>();
+  seq->code = std::make_shared<audio::AkaoCode>();
+  seq->code->data = {0xFE, 0x00, 0x00, 0x80, 0xA1, 0x00, 0xA5, 0x05, 0xA8, 0x7F, 0xC8, 3, 25, 47, 58, 80, 102, 124, 0xCA};
+  seq->channels = {{0, 0}};
+  auto sounding_reg = [](const audio::AkaoPlayer& player) {
+    for (int v = 0; v < audio::AkaoPlayer::kVoices; ++v)
+      if (player.probe_voice(v).active) return player.probe_voice(v).reg;
+    return -1;
+  };
+  constexpr u32 kCut = 48510, kAfter = 44100;
+  std::vector<float> out(size_t(kCut) * 2);
+  audio::AkaoPlayer kept(44100), cut(44100), resumed(44100), fresh(44100);
+  for (audio::AkaoPlayer* player : {&kept, &cut, &resumed, &fresh}) player->load_music(seq, table);
+  kept.render(out.data(), kCut);
+  cut.render(out.data(), kCut);
+  audio::SongPlace akao;
+  akao.akao = true;
+  akao.context = cut.save_context();
+  akao.song_seconds = cut.seconds();
+  memory.remember(11, akao, 100.0);
+  const auto taken = memory.take(11, true, 200.0);
+  CHECK(taken && taken->context);
+  if (!taken || !taken->context) return;
+  resumed.restore_context(*taken->context);
+  kept.render(out.data(), kAfter);
+  resumed.render(out.data(), kAfter);
+  fresh.render(out.data(), kAfter);
+  CHECK(resumed.ticks() == kept.ticks() && std::fabs(resumed.seconds() - kept.seconds()) < 1e-9 && fresh.ticks() < kept.ticks());
+  CHECK(sounding_reg(resumed) == sounding_reg(kept) && sounding_reg(fresh) != sounding_reg(kept));
+  std::printf("music resume: resumed at tick %u, %u ticks later reg %04X as without the cut (a fresh start: %04X)\n", cut.ticks(),
+              kept.ticks() - cut.ticks(), sounding_reg(resumed), sounding_reg(fresh));
+}
+
 // Steps an SFX player one sequencer tick at a time and records the probe of the channel slot the program runs on.
 std::vector<audio::AkaoPlayer::ChannelProbe> trace_sfx_ticks(const std::vector<u8>& program, int ticks,
                                                              const std::function<void(audio::AkaoPlayer&, int)>& at_tick = {}) {
@@ -1556,6 +1623,7 @@ int main() {
   test_mixer_gain();
   test_bgm_switch();
   test_music_push();
+  test_music_resume();
   test_lfo_rate_slide();
   test_protected_loop_end();
   test_note_lengths();

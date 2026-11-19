@@ -18,6 +18,7 @@
 #include "render/camera.h"
 #include "render/sprite_batch.h"
 #include "render/text_batch.h"
+#include "save/dialogue_log.h"
 #include "ui/typewriter.h"
 #include "vfs/vfs.h"
 
@@ -27,6 +28,11 @@ enum class ArtMode { Hd, Original };
 
 constexpr float kCanvasWidth = 1280.0f;
 constexpr float kCanvasHeight = 960.0f;
+
+// Dialogue face ids 0..kDialogueFaces - 1 and the portrait picture of each: hd/face/<2021|1999>/<name>.png ("" outside the range). Some
+// ids share a picture.
+constexpr int kDialogueFaces = 92;
+const char* dialogue_face_art(int face_id);
 
 class DialogueBox {
  public:
@@ -66,6 +72,9 @@ class DialogueBox {
     win_lines_ = lines;
   }
   bool label() const { return label_; }
+  // The widest line of the open message's pages, canvas units (4 per PS1 pixel across), and the height of its tallest page.
+  float text_width() const { return text_w_; }
+  float text_height() const { return text_h_; }
   bool is_open() const { return open_ && !tw_.closed(); }
   bool finished() const { return !open_ || tw_.closed(); }
   // The {bpage} page being shown (0-based).
@@ -100,6 +109,10 @@ class DialogueBox {
   int selected_choice() const { return choice_; }
   // -1 until a choice was confirmed; in-window: the message line number (first..last).
   int chosen() const { return chosen_; }
+  // The confirmed option as the window showed it: the glyphs of the highlighted line, without the indent (empty until confirmed).
+  const std::u32string& chosen_text() const { return chosen_text_; }
+  // The portrait the window shows (RDE face id), -1 none.
+  int shown_portrait() const { return portrait_on_ && !label_ ? portrait_ : -1; }
   // Hand cursor of an in-window choice at message line `line` of `page`, relative to the text origin (canvas units): the 70 x 70 quad at
   // the first glyph of the line (offsets by language and skin). valid = false when the line has no glyph on the page.
   struct ChoiceCursor {
@@ -153,9 +166,33 @@ class DialogueBox {
     float outer_w = 0, outer_h = 0;
   };
   static FrameBox frame_box(int skin_idx, float left, float top, float right, float bottom);
+  // Where the loaded skin's frame round a box of the canvas (draw_frame's box) leaves the inside clear: the frame pieces as draw_frame
+  // places them, their pixels (alpha at least half) on a one-unit grid of the canvas, the fill not counted. Corner pieces and ornaments
+  // count, so skins of any border width and shape give their own edges. Without a loaded skin the box itself is clear.
+  class FrameClear {
+   public:
+    // The inner edges of the top and bottom sides: below the lowest frame pixel of the upper half and above the highest of the lower
+    // half, over the middle half of the box's width.
+    float top() const { return top_; }
+    float bottom() const { return bottom_; }
+    // The inner edges of the left and right sides over the rows y0..y1: right of the rightmost frame pixel of the left half, left of the
+    // leftmost of the right half.
+    float left(float y0, float y1) const;
+    float right(float y0, float y1) const;
+
+   private:
+    friend class DialogueBox;
+    float box_left_ = 0, box_top_ = 0, box_right_ = 0, box_bottom_ = 0, top_ = 0, bottom_ = 0, rows_from_ = 0;
+    // Per canvas row from rows_from_: the side's inner edge, or the box's edge where the frame has no pixel on that row.
+    std::vector<float> left_edge_, right_edge_;
+  };
+  const FrameClear& frame_clear(float left, float top, float right, float bottom);
 
   void update(float dt, TextPace pace = {});
   void confirm();
+  // Auto-advance: the open framed window waits for the confirm button and nothing else (no choice list, number entry or glyph
+  // cursor), and has waited its reading pause (auto_advance_seconds of the glyphs read, times `scale`).
+  bool auto_advance_due(float scale) const;
   // Between SpriteBatch::begin() and end(). vw/vh: the view size passed to begin().
   // The canvas (1280 x 960 units) maps to the window as RDE draws it over the field (render::overlay_fit: RDE's 4:3 viewport, flatter
   // than wide), so the box covers RDE's screen pixels; `fit` overrides it (the PS1-resolution pass: {0.25, 0, 0} into a (320 + 2e) x 240
@@ -164,6 +201,12 @@ class DialogueBox {
   // The loaded skin's fill over a box of the canvas and its frame around it (frame_box; x 0 = the 1280-wide canvas's left edge), whether
   // or not a message is open. Same pass and view as draw(). Nothing when no skin is loaded.
   void draw_frame(float left, float top, float right, float bottom, float alpha, float vw, float vh, const render::CanvasFit* fit = nullptr);
+  // The portrait of RDE face `face_id` (the art set_portrait loads for the current mode and set) as a `size` square at canvas (x, y), in
+  // the same pass and view as draw_frame. Load it first with set_portrait outside SpriteBatch begin() / end(); an unloaded face draws
+  // nothing. The portrait set_portrait chose last stays the window's.
+  void draw_portrait(int face_id, float x, float y, float size, float alpha, float vw, float vh);
+  // The button glyph of {key(n)} (set_button_style) as a `size` square at canvas (x, y), in the same pass and view as draw_frame.
+  void draw_key(int key, float x, float y, float size, float vw, float vh);
 
   const Typewriter& typewriter() const { return tw_; }
   // {fset(n)} / {fwait(n)}: the field event register (script variable 0x22), see Typewriter::event_get.
@@ -181,6 +224,11 @@ class DialogueBox {
   static Geo frame_geo_for(int skin_idx, bool jp, float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left);
   static Geo frame_geo_box(int skin_idx, float left, float top, float right, float bottom);
   void draw_tiles(const Geo& geo, float zoom, float alpha, bool has_portrait, bool portrait_left);
+  // The frame pieces of a window (edges, then corners), in draw order: canvas rectangle and sheet UV rectangle each.
+  struct Piece {
+    float x, y, w, h, u, v, du, dv;
+  };
+  static void frame_pieces(const Geo& geo, const std::function<void(const Piece&)>& out);
   // The window of a message in the PS1 font (disc mode), laid out as the PS1 lays its field window.
   void draw_ps1(float vw, float vh, const render::CanvasFit* fit, float alpha);
   // Glyph passes of the shown page from the text origin (tx, ty) in canvas units.
@@ -200,9 +248,15 @@ class DialogueBox {
   render::TexRef white_set_ = {};
   render::TexRef skin_set_ = {};
   float skin_w_ = 0, skin_h_ = 0;
+  // The loaded sheet's alpha (skin_w_ x skin_h_), for frame_clear.
+  std::vector<u8> skin_alpha_;
   // Art mode and mod overlay generation (vfs::Vfs::generation) the loaded skin texture belongs to.
   ArtMode skin_mode_ = ArtMode::Hd;
   std::uint32_t skin_generation_ = 0;
+  // The last frame_clear and what it was measured for (the skin load it measured, counted by skin_loads_, and the box).
+  FrameClear clear_;
+  std::uint32_t skin_loads_ = 0, clear_loads_ = 0;
+  float clear_box_[4] = {};
 
   ArtMode mode_ = ArtMode::Hd;
   bool open_ = false;
@@ -251,8 +305,12 @@ class DialogueBox {
   int key_cap_lang_ = 0;
   const render::TexRef* button_sheet(const std::string& member);
   void draw_button(int key, float x, float y, float zoom, float alpha);
+  void draw_button_quad(int key, float x, float y, float size, u32 colour);
   int choice_ = 0;
   int chosen_ = -1;
+  std::u32string chosen_text_;
+  // The glyphs of line `line` of the shown page, without leading and trailing blanks.
+  std::u32string page_line_text(int line) const;
   int glyph_cursor_ = -1;
   // In-window choice lines.
   int line_first_ = 0, line_count_ = 0;
@@ -303,6 +361,8 @@ class DialogueDemo {
   // Field integration (FieldWorld).
   bool is_open() const;
   void confirm();
+  // DialogueBox::auto_advance_due of the shown message.
+  bool auto_advance_due(float scale) const;
   void move_choice(int delta);
   // MULTI_CHOICE: options are lines first..last of the open message.
   void set_line_choice(int first, int last);
@@ -335,6 +395,9 @@ class DialogueDemo {
   void skip_grow();
   // The shown message whole and opaque at once: no grow, fade or typing (call after show()).
   void show_at_once();
+  // DialogueBox::text_width / text_height of the shown text.
+  float text_width() const;
+  float text_height() const;
   void close();
   // The demo status line at the top left (default on).
   void show_status(bool on);
@@ -353,6 +416,12 @@ class DialogueDemo {
   // (page 0 right after show()); on_close() once when the window closes. Unset in the demo viewer.
   std::function<void(int room, int msg, int speaker, int tag_speaker, int page)> on_page;
   std::function<void()> on_close;
+  // Dialogue log ([Game] OpenCrossMenu): set before show(), it receives the room message once its framed window has closed (by the
+  // player, the script or a room change): the portrait, the speaker the text names (else the portrait's character), the text as
+  // shown, the option picked and the voice files noted for its pages. Unset: nothing is gathered.
+  std::function<void(save::DialogueEntry)> on_logged;
+  // The voice file (path below a voices folder) a page of the shown message played; empty = none.
+  void note_voice(std::string rel);
 
   import::LangTables& tables() { return tables_; }
   int room_id() const { return room_; }
@@ -368,6 +437,10 @@ class DialogueDemo {
   // The `speaker` argument of the last show().
   int show_speaker_ = 0;
   void voice_sync();
+  // The shown message's log entry, waiting for its window to close (on_logged).
+  bool log_pending_ = false;
+  save::DialogueEntry log_entry_;
+  void log_sync();
 };
 
 }  // namespace oc::ui

@@ -54,29 +54,42 @@ void FieldWorld::set_bgm_remastered(bool on, bool restart) {
 }
 
 // Starts `song` unless it already plays (then only its volume is re-armed, so a song carries across rooms without a gap).
-void FieldWorld::start_song(int song, int volume, double start_seconds) {
+void FieldWorld::start_song(int song, int volume, double start_seconds, bool resumable) {
   if (!mixer_ || !files_) return;
   if (mixer_->current_song() == song || pending_song_ == song) {
     mixer_->fade(volume, 0.0);
     return;
   }
+  resumable = resumable && audio::song_loops(song);
   if (!bgm_remastered_) {
     log::debug("audio: tick {} play song {} (AKAO) volume {}", tick_count_, song, volume);
-    mixer_->play_akao_bgm(song, volume);
+    mixer_->play_akao_bgm(song, volume, resumable);
     if (mixer_->device_open()) {
       pending_song_ = song;
       pending_ticks_ = 0;
     }
     return;
   }
-  if (play_stream(song, volume, start_seconds) && mixer_->device_open()) {
+  if (play_stream(song, volume, start_seconds, resumable) && mixer_->device_open()) {
     pending_song_ = song;
     pending_ticks_ = 0;
   }
 }
 
+void FieldWorld::resume_room_song() {
+  if (!mixer_) return;
+  pending_song_ = -1;
+  if (last_song_ < 0 || !audio::song_loops(last_song_)) {
+    mixer_->stop();
+    return;
+  }
+  log::debug("audio: tick {} room song {} back after the host's music", tick_count_, last_song_);
+  if (!bgm_remastered_) mixer_->play_akao_bgm(last_song_, bgm_volume_, true);
+  else if (!play_stream(last_song_, bgm_volume_, 0.0, true)) mixer_->stop();
+}
+
 // The remastered stream of `song` on the mixer; false when it cannot be loaded.
-bool FieldWorld::play_stream(int song, int volume, double start_seconds) {
+bool FieldWorld::play_stream(int song, int volume, double start_seconds, bool resumable) {
   const audio::BgmEntry* entry = audio::bgm_entry(song);
   if (!entry) {
     log::warn("audio: song {} has no BGM entry", song);
@@ -98,7 +111,7 @@ bool FieldWorld::play_stream(int song, int volume, double start_seconds) {
   if (failed_stream_ == song) failed_stream_ = -1;
   log::debug("audio: tick {} play song {} (BGM{:03}) volume {}", tick_count_, song, entry->file_no, volume);
   cue_song_ = -1;
-  mixer_->play(std::move(stream), song, volume, start_seconds);
+  mixer_->play(std::move(stream), song, volume, start_seconds, resumable);
   return true;
 }
 

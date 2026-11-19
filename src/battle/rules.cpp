@@ -350,14 +350,37 @@ std::array<int, 7> typical_star_growth(const std::array<int, 7>& base, const std
 }
 
 // ------------------------------------------------------------------------------------------------ victory
-int gold_reward(int base_total, bool bonus) { return bonus ? base_total * 125 / 100 : base_total; }
+int gold_reward(int base_total, bool bonus, int percent) {
+  const int gear = bonus ? base_total * 125 / 100 : base_total;
+  return static_cast<int>(std::clamp<s64>(static_cast<s64>(gear) * percent / 100, 0, kRewardGoldCap));
+}
 
-int drop_roll(Rng& rng, int drop_base) {
+int scaled_rare_chance(int base_percent, int multiplier) { return std::min(100, base_percent * std::max(1, multiplier)); }
+
+int drop_roll(Rng& rng, int drop_base, int rare_multiplier) {
   const int roll = rng.rnd(0, 99);
-  if (roll < drop_base / 20) return 1;
+  if (roll < scaled_rare_chance(drop_base / 20, rare_multiplier)) return 1;
   if (roll < drop_base / 2) return 0;
   return -1;
 }
+
+// ------------------------------------------------------------------------------------------------ difficulty
+Difficulty difficulty_preset(DifficultyPreset preset) {
+  switch (preset) {
+    case DifficultyPreset::Story: return {50, 50, 150};
+    case DifficultyPreset::Hard: return {150, 150, 100};
+    case DifficultyPreset::VeryHard: return {200, 200, 75};
+    default: return {};
+  }
+}
+
+int scale_percent(int value, int percent) {
+  if (value <= 0 || percent == 100) return value;
+  const int scaled = static_cast<int>(static_cast<s64>(value) * percent / 100);
+  return percent > 0 ? std::max(1, scaled) : 0;
+}
+
+int scaled_enemy_hp(int max_hp, int percent) { return std::clamp(static_cast<int>(static_cast<s64>(max_hp) * percent / 100), 1, 32767); }
 
 // ------------------------------------------------------------------------------------------------ encounters
 int encounter_variant(Rng& rng, const std::vector<std::array<u16, 2>>& bands) {

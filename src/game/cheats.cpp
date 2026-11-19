@@ -3,7 +3,9 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <utility>
 
 #include "render/imgui_layer.h"
 
@@ -22,6 +24,12 @@ battle::Battle::Cheats battle_cheats() {
   out.shared_growth = cheats.shared_growth;
   out.summon_any_ring = cheats.summon_any_time;
   out.summon_repeat = cheats.more_summons;
+  out.gold_percent = cheats.gold_percent;
+  out.rare_loot = cheats.rare_loot;
+  out.hp_percent = cheats.enemy_hp_percent;
+  out.taken_percent = cheats.damage_taken_percent;
+  out.dealt_percent = cheats.damage_dealt_percent;
+  out.difficulty_bosses_only = cheats.difficulty_bosses_only;
   return out;
 }
 
@@ -198,6 +206,17 @@ bool draw_cheats_tab(platform::Config& cfg) {
              "while stars are left.");
       toggle("100% hit", "##c_hit", cheats.always_hit, "Every weapon attack of the party hits.");
       toggle("Always loot", "##c_loot", cheats.always_loot, "Every enemy drops its rare drop (else the common one) and every steal lands on the rare item.");
+      ImGuiLayer::row("Enemy colours",
+                      "Shows each enemy's innate colour as an icon beside its name in the target window: never, only for enemies you have already "
+                      "defeated (from the collection), or always. It does not need Element colour symbols.");
+      {
+        int mode = static_cast<int>(cheats.enemy_colours);
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ImGui::Combo("##c_enemycolours", &mode, "Off\0Defeated\0Always\0")) {
+          cheats.enemy_colours = static_cast<platform::EnemyColours>(mode);
+          changed = true;
+        }
+      }
       toggle("Max stat growth", "##c_growth", cheats.instant_growth, "Every won battle grants each member the full stat gain of the star, and raises any stat below what a typical character has from the star-ups so far up to it.");
       toggle("Growth for everyone", "##c_shared", cheats.shared_growth,
              "Every won battle also grows the stats of every recruited character outside the party, and of members who were knocked out, "
@@ -206,7 +225,55 @@ bool draw_cheats_tab(platform::Config& cfg) {
       ImGuiLayer::end_rows();
     }
   };
+  auto percent_slider = [&](const char* label, const char* id, int& value, int lo, int hi, const char* help) {
+    ImGuiLayer::row(label, help);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    if (ImGui::SliderInt(id, &value, lo, hi, "%d%%")) changed = true;
+  };
+  auto boosts = [&] {
+    ImGuiLayer::section("Boosts");
+    if (ImGuiLayer::begin_rows("cheats_boosts")) {
+      percent_slider("Gold from fights", "##c_gold", cheats.gold_percent, 0, 400,
+                     "Multiplies the gold a won fight pays, after the Profiteer Purse bonus (100% = the game's own, 0% pays nothing); the total stays within the 9,999,999 G cap.");
+      ImGuiLayer::row("Rare loot chance",
+                      "Multiplies the chance of the rare kill drop and of the rare item when stealing: 1x is the game's own, 2x doubles it, and so on up to 100%. "
+                      "The top step, Always, is the Always loot cheat: every enemy drops its rare drop and every steal lands on it.");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      if (ImGui::SliderInt("##c_rare", &cheats.rare_loot, 1, battle::kRareLootAlways, cheats.rare_loot >= battle::kRareLootAlways ? "Always" : "%dx")) changed = true;
+      ImGuiLayer::end_rows();
+    }
+    ImGuiLayer::section("Difficulty");
+    if (ImGuiLayer::begin_rows("cheats_difficulty")) {
+      ImGuiLayer::row("Preset", "Sets the three values below in one click; each stays adjustable. Story 50% / 50% / 150%, Normal 100% / 100% / 100%, "
+                                "Hard 150% / 150% / 100%, Very Hard 200% / 200% / 75% (enemy HP / damage taken / damage dealt).");
+      const battle::Difficulty now{cheats.enemy_hp_percent, cheats.damage_taken_percent, cheats.damage_dealt_percent};
+      constexpr std::array<std::pair<const char*, battle::DifficultyPreset>, 4> kPresets{{{"Story", battle::DifficultyPreset::Story},
+                                                                                          {"Normal", battle::DifficultyPreset::Normal},
+                                                                                          {"Hard", battle::DifficultyPreset::Hard},
+                                                                                          {"Very Hard", battle::DifficultyPreset::VeryHard}}};
+      for (size_t i = 0; i < kPresets.size(); ++i) {
+        const battle::Difficulty preset = battle::difficulty_preset(kPresets[i].second);
+        if (i > 0) ImGui::SameLine();
+        const bool current = now == preset;
+        if (current) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+        if (ImGui::Button(kPresets[i].first)) {
+          cheats.enemy_hp_percent = preset.hp, cheats.damage_taken_percent = preset.taken, cheats.damage_dealt_percent = preset.dealt;
+          changed = true;
+        }
+        if (current) ImGui::PopStyleColor();
+      }
+      percent_slider("Enemy HP", "##c_ehp", cheats.enemy_hp_percent, battle::kDifficultyMin, battle::kDifficultyMax,
+                     "Enemies start with this share of their HP (applied after the New Game+ doubling and the gender scaling).");
+      percent_slider("Damage taken", "##c_taken", cheats.damage_taken_percent, battle::kDifficultyMin, battle::kDifficultyMax,
+                     "Scales every hit on the party: weapon attacks, elements and techs. Heals are not scaled.");
+      percent_slider("Damage dealt", "##c_dealt", cheats.damage_dealt_percent, battle::kDifficultyMin, battle::kDifficultyMax,
+                     "Scales every hit the party does to enemies: weapon attacks, elements and techs. Heals are not scaled.");
+      toggle("Bosses only", "##c_bossonly", cheats.difficulty_bosses_only, "The three difficulty values apply in boss fights only. Gold and loot boosts always apply.");
+      ImGuiLayer::end_rows();
+    }
+  };
   auto right = [&] {
+    boosts();
     ImGuiLayer::section("Game speed");
     if (ImGuiLayer::begin_rows("cheats_speed")) {
       ImGuiLayer::row("Fast mode", "RDE's high-speed mode: the field and battles run faster, message text shows faster. Music, movies, menus, shops and the play time "
@@ -234,6 +301,29 @@ bool draw_cheats_tab(platform::Config& cfg) {
       ImGuiLayer::row("Slow speed", "How fast the game runs in Slow mode, in percent of normal speed (RDE: 50%).");
       ImGui::SetNextItemWidth(-FLT_MIN);
       if (ImGui::SliderInt("##slowspeed", &cfg.slow_rate, 10, 90, "%d%%")) changed = true;
+      ImGuiLayer::end_rows();
+    }
+    ImGuiLayer::section("Enemy HP");
+    if (ImGuiLayer::begin_rows("cheats_enemyhp")) {
+      ImGuiLayer::row("HP bars", "Shows enemy HP bars in battle. Off: none. Defeated: only for kinds of enemy you have already defeated (the Records collection). Always: every enemy.");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      {
+        int mode = static_cast<int>(cheats.enemy_hp_mode);
+        if (ImGui::Combo("##c_hpmode", &mode, "Off\0Defeated\0Always\0")) {
+          cheats.enemy_hp_mode = static_cast<platform::EnemyHpMode>(mode);
+          changed = true;
+        }
+      }
+      toggle("Show numbers", "##c_hpnum", cheats.enemy_hp_numbers, "The bars come with the enemy's HP and maximum HP as numbers, in the target window even before an Infoscope has shown them.");
+      ImGuiLayer::row("Where", "Target window: beside the enemy's name while you choose a target. Over enemies: a thin bar above each enemy for the whole battle. Both: the two together.");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      {
+        int place = static_cast<int>(cheats.enemy_hp_place);
+        if (ImGui::Combo("##c_hpplace", &place, "Target window\0Over enemies\0Both\0")) {
+          cheats.enemy_hp_place = static_cast<platform::EnemyHpPlace>(place);
+          changed = true;
+        }
+      }
       ImGuiLayer::end_rows();
     }
     ImGuiLayer::section("Field");

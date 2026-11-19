@@ -142,6 +142,22 @@ struct MultiplayerSettings {
 //   shared_growth      a won fight's growth also reaches the bench and the knocked-out members
 //   summon_any_time    a party summon can be cast whatever colours the field ring holds
 //   more_summons       a summon placed in the grid editor keeps its stock copy, and a summon cast does not use up its cell
+//   gold_percent       fight gold times this percent (0..400)
+//   rare_loot          rare drop and rare steal chance multiplier (1..10, 10 = Always loot)
+//   enemy_hp_percent, damage_taken_percent, damage_dealt_percent   difficulty scalings (25..400)
+//   difficulty_bosses_only   the three difficulty scalings apply in boss fights only
+//   enemy_hp_mode      enemy HP bars in battle: off, only for enemy kinds already defeated, or always
+//   enemy_hp_numbers   the bars come with the HP numbers
+//   enemy_hp_place     where the bars are drawn: the target window, over the enemies, or both
+//   enemy_colours      the target window shows each enemy's innate colour icon: never, for the enemies already defeated (the collection),
+//                      or always
+enum class EnemyHpMode { Off, Defeated, Always };
+enum class EnemyHpPlace { Window, Enemies, Both };
+inline constexpr const char* kEnemyHpModeNames[] = {"off", "defeated", "always"};
+inline constexpr const char* kEnemyHpPlaceNames[] = {"window", "enemies", "both"};
+enum class EnemyColours { Off, Defeated, Always };
+inline constexpr const char* kEnemyColourNames[] = {"off", "defeated", "always"};
+inline constexpr const char* kRecordsHintNames[] = {"off", "hints", "full"};
 struct Cheats {
   bool no_encounters = false;
   bool battle_boost = false;
@@ -161,6 +177,16 @@ struct Cheats {
   bool shared_growth = false;
   bool summon_any_time = false;
   bool more_summons = false;
+  EnemyColours enemy_colours = EnemyColours::Off;
+  int gold_percent = 100;
+  int rare_loot = 1;
+  int enemy_hp_percent = 100;
+  int damage_taken_percent = 100;
+  int damage_dealt_percent = 100;
+  bool difficulty_bosses_only = false;
+  EnemyHpMode enemy_hp_mode = EnemyHpMode::Off;
+  bool enemy_hp_numbers = false;
+  EnemyHpPlace enemy_hp_place = EnemyHpPlace::Window;
 };
 // The live cheat set (a default all-off one until bind_cheats is called).
 const Cheats& cheats();
@@ -213,8 +239,10 @@ void bind_cheats(const Cheats* set);
 //            the stage / title meshes, any art mode.
 //            AutoHideCastHud: the battle HUD / menus / windows are hidden during element, tech and summon casts (as pad Select held), except the cast header for its first 2 seconds.
 //            HideFeatureIcons: the play-time feature icons (auto battle, battle boost, encounters off, slow, fast) are not drawn; the toggles work as before.
+//            EquipCompare: the blacksmith and the trading post show what the highlighted piece of gear would change for each character.
 //            RetainBattleScenery: the battle stage's intro-only layer (bg_00's sea, fish and birds, dust, smoke ...) stays for the whole battle.
 //            FullPrecisionEffects: effect sprites keep the light the PS1 loses to rounding (as RDE); faint glows pulse harder.
+//            ElementSymbols: each of the six element colours gets a themed icon wherever the game shows the colour.
 //   [Shaders] (opt-in, off by default, any art mode) Characters: kCharacterShaderNames, the shading of the field actors, the battle units
 //            and their weapons and the status screen's model (render/mesh_pipeline.h CharacterShading); Matcap: the matcap style's look (a
 //            built-in or a mod's shaders/matcaps/<name>.png); StyleStrength 0..1: how much of the style's shading shows; Outlines: a dark
@@ -285,6 +313,14 @@ struct Config {
   bool auto_save = true;
   // [Game] CameraRelative: field movement follows the camera (up = away from it on the floor) instead of the room's control yaw.
   bool camera_relative = false;
+  // [Game] AutoAdvance: a fully shown message waiting for confirm (no choice, no number entry) goes on by itself after a reading
+  // pause; AutoAdvanceDelay scales the pause, in percent.
+  bool auto_advance = false;
+  // [Game] RetryBattle: a wipe that would end the game offers Retry / Retry after changes / Give up.
+  bool retry_battle = false;
+  int auto_advance_delay = 100;
+  // [Game] GridPresets: the element grid editor's third label pair, Save Preset / Load Preset (three slots per character).
+  bool grid_presets = false;
   int fast_rate = 0;
   int slow_rate = 50;
   bool widescreen = false;
@@ -303,8 +339,10 @@ struct Config {
   bool edge_blend = false;
   bool autohide_cast_hud = false;
   bool hide_feature_icons = false;
+  bool equip_compare = false;
   bool retain_battle_scenery = false;
   bool full_precision_effects = false;
+  bool element_symbols = false;
   bool legacy_field_models = true;
   CharacterShader character_shader = CharacterShader::Off;
   std::string matcap = "clay";
@@ -337,6 +375,8 @@ struct Config {
   float sfx = 1.0f;
   bool voices = true;
   int voice_volume = 100;
+  // [Audio] MusicResume: a song cut off less than 5 minutes ago continues where it stopped when the game starts it again.
+  bool music_resume = false;
   std::string debug_room;
   std::string debug_flow;
   std::uint32_t debug_seed = 0;
@@ -355,6 +395,16 @@ struct Config {
   bool achievements = false;
   // [Game] HideAchievementNotices: no unlock popup or toast, for OpenCross's achievements and Steam's alike.
   bool hide_achievement_notices = false;
+  // [Game] OpenCrossMenu: the OpenCross row of the main menu (Chronicle, Extras, Dialogue log) and everything they record: the
+  // collection file (enemies met and beaten, characters, elements and key items had, the Extras unlocks), the dialogue log, the
+  // room-script scan. On in the player's ini (use_player_defaults).
+  bool opencross_menu = false;
+  // [Game] RecordsShowAll: the record pages show every entry as met, defeated and with all its loot received.
+  bool records_show_all = false;
+  // [Game] RecordsHints: what the record pages tell of chances still open (kRecordsHintNames: off, hints, full).
+  int records_hints = 0;
+  // [Game] ExtrasUnlockAll: the Extras pages show everything as unlocked.
+  bool extras_unlock_all = false;
   bool debug_panels = false;
   int debug_entrance = 0;
   int debug_auto_confirm = 0;
@@ -391,10 +441,13 @@ struct Config {
   bool load(const std::filesystem::path& file);
   // save() never writes RDE's five play-time toggles (FastMode, SlowMode, NoEncounters, BattleBoost, AutoBattle).
   bool save(const std::filesystem::path& file) const;
+  // The sections and keys save() writes.
+  Ini to_ini() const;
   // Switches those five off: RDE starts every launch with them off. load() still reads them (a --config ini for tests).
   void clear_session_toggles();
-  // The player's own ini (not a --config one) reads a missing key with the player's defaults: the Graphics tab's enhancements on
-  // the HD models in fields, RenderScale 2, OpenCross's achievements on and achievement notices hidden. Called before load(); a --config ini keeps the faithful member defaults.
+  // The player's own ini (not a --config one) reads a missing key with the player's defaults: the Graphics tab's enhancements on the HD
+  // models in fields, RenderScale 2, OpenCross's achievements on and achievement notices hidden, the OpenCross menu row on. Called before
+  // load(); a --config ini keeps the faithful member defaults.
   void use_player_defaults();
 };
 

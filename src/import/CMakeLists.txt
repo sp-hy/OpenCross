@@ -20,6 +20,10 @@ add_library(oc_import STATIC
   chip2.cpp
   model.h
   model.cpp
+  gltf.h
+  gltf.cpp
+  gltf_model.h
+  gltf_model.cpp
   str_stream.h
   str_stream.cpp
   mdec.h

@@ -56,8 +56,12 @@ int App::init(int argc, char** argv) {
   if (!init_routes()) return 2;
   init_flow();
   init_saves();
+  init_collection();
+  init_dialogue_log();
   init_menus();
   init_field();
+  init_randomizer();
+  init_extras();
   init_disc_prompt();
   init_battle();
   init_oc_achievements();
@@ -217,6 +221,22 @@ void App::init_vfs() {
   };
   hooks.summary = [this] { return texture_dump_job.progress().summary(); };
   render::set_texture_dump_hooks(std::move(hooks));
+  // The "Export all models" button: every model as glTF into <GameDir>\dump\models, on a worker thread (no RDE install in disc mode).
+  render::ModelExportHooks export_hooks;
+  export_hooks.start = [this] { return !game_dir.empty() && model_export_job.start(game_dir); };
+  export_hooks.cancel = [this] { model_export_job.request_cancel(); };
+  export_hooks.running = [this] { return model_export_job.running(); };
+  export_hooks.status = [this] {
+    auto& progress = model_export_job.progress();
+    return progress.phase() + " " + std::to_string(progress.done.load()) + " / " + std::to_string(progress.total.load()) + ", " +
+           std::to_string(progress.files.load()) + " files";
+  };
+  export_hooks.fraction = [this] {
+    auto& progress = model_export_job.progress();
+    return progress.total ? static_cast<float>(progress.done.load()) / static_cast<float>(progress.total.load()) : 0.0f;
+  };
+  export_hooks.summary = [this] { return model_export_job.progress().summary(); };
+  render::set_model_export_hooks(std::move(export_hooks));
 }
 
 bool App::init_gpu() {
@@ -243,6 +263,7 @@ bool App::init_render() {
   ui.on_restart = [this] { restart_for_update = true; };
   guide.init(platform::local_data_dir() / "guides");
   ui.quality_rows = [this] {
+    opencross_menu_row();
     if (guide.settings_rows(config)) ui.mark_changed();
   };
   ui.add_tab("Mods", [this] {
@@ -251,9 +272,11 @@ bool App::init_render() {
       ui.mark_changed();
       mods_dirty = true;
     } else if (settings_dirty) {
-      // The dump category checkboxes: save the ini only.
+      // The dump category checkboxes and the feature settings: save the ini only.
       ui.mark_changed();
     }
+    // The randomizer follows its settings at once.
+    if (settings_dirty) update_randomizer();
   }, 30);
   ui.add_tab("Cheats", [this] {
     if (game::draw_cheats_tab(config)) ui.mark_changed();
@@ -456,8 +479,10 @@ void App::init_menus() {
   if (menu_text.init(ctx, sprites)) {
     menu_ok = menu.init(ctx, files, sprites, menu_text, tables, lang);
     if (menu_ok) {
-      // A rotating 3D member on the Status screen.
+      // A rotating 3D member on the Status screen, the creature of the Bestiary page.
       menu.set_model_view(&status_model);
+      menu.set_enemy_view(&enemy_models);
+      menu.set_collection(&collection);
       menu.set_rules(&flow.machine().rules());
       menu.set_custom_names(&flow.machine().custom_names());
       menu.set_saved_name_lookup([this](const save::SaveSlot& data, const std::map<int, std::u32string>& ext_names, int id) { return flow.saved_name(data, ext_names, id); });
@@ -483,8 +508,27 @@ void App::init_menus() {
       shop.set_sfx(ui_sfx);
     }
     key_popup_ok = key_popup.init(ctx, files, sprites, menu_text);
+    dialogue_log_view_ok = dialogue_log_view.init(ctx, files, sprites);
+    dialogue_log_view.set_log(&dialogue_log);
+    if (menu_ok && dialogue_log_view_ok) menu.set_dialogue_log_view(&dialogue_log_view);
+    // The Options pages' changes go to the ini at once.
+    if (menu_ok)
+      menu.set_oc_options_host(
+          [this](const ui::MainMenu::OcOptions& options) {
+            config.records_hints = options.records_hints;
+            config.records_show_all = options.records_show_all;
+            config.extras_unlock_all = options.extras_unlock_all;
+            config.achievements = options.achievements;
+            config.hide_achievement_notices = options.hide_achievement_notices;
+            log::info("menu options: RecordsHints {}, RecordsShowAll {}, ExtrasUnlockAll {}, Achievements {}, HideAchievementNotices {}",
+                      platform::kRecordsHintNames[std::clamp(options.records_hints, 0, 2)], options.records_show_all ? 1 : 0,
+                      options.extras_unlock_all ? 1 : 0, options.achievements ? 1 : 0, options.hide_achievement_notices ? 1 : 0);
+            save_config();
+          },
+          [this] { reset_collection(); });
     // RDE pause screen (Start / P): colour filter + PAUSE bar + Vibration / World Names rows.
     pause_ok = pause_screen.init(ctx, files, sprites, menu_text);
+    retry_prompt.init(ctx, files, sprites);
     feature_icons_ok = feature_icons.init(ctx, files, sprites, menu_text);
     world_name_ok = world_name.init(ctx, files, sprites);
     // The Tele-Porter's "Current Party" screen.
@@ -516,6 +560,7 @@ void App::init_field() {
   world.set_on_item_given([this](int id) {
     achievements.item_given(id, world.vm().var(script::var::kMapId));
     oc_achievements.item_given(id);
+    if (randomizer_settings.enabled() && randomizer_pools) log::info("randomizer: the field gave {} ({:#x})", randomizer_pools->thing_name(id), id);
   });
   world.set_on_var_bit_set([this](u32 bit_ref) { achievements.var_bit_set(bit_ref, world.vm().var(script::var::kMapId)); });
   world.set_art_mode(platform::art_is_hd(config.art_mode));
@@ -557,6 +602,7 @@ void App::init_battle() {
       battle.set_bgm_remastered(config.bgm_source != "original");
       battle.set_auto(config.debug_battle_auto);
       battle.set_language(lang);
+      battle.set_enemy_defeated_query([this](int monster_id) { return collection.enemy_defeated(monster_id); });
     } else {
       log::warn("battle view unavailable; field encounters will be skipped");
     }

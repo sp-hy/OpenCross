@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdlib>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "game/free_cam.h"
 #include "platform/paths.h"
@@ -192,12 +193,14 @@ void App::apply_frame_options() {
     meshes.set_enhanced_lighting(config.lighting);
     render::set_edge_blend(config.edge_blend);
     render::ParticleBatch::set_full_precision(config.full_precision_effects);
+    set_element_symbols(config.element_symbols);
     if (battle_ready) battle.set_spell_lights(config.lighting);
     if (battle_ready) battle.set_autohide_cast(config.autohide_cast_hud);
     if (battle_ready) battle.set_keep_intro_layer(config.retain_battle_scenery);
     if (world_ok) world.set_cast_shadows(config.lighting);
     if (world_ok) world.set_menu_models(!config.legacy_field_models);
     if (world_ok) world.set_camera_relative(config.camera_relative);
+    if (world_ok) world.set_auto_advance(config.auto_advance, config.auto_advance_delay);
     status_model.set_cast_shadows(config.lighting);
     title_bd.set_cast_shadows(config.lighting);
   }
@@ -217,6 +220,7 @@ void App::apply_frame_options() {
   if (battle_ready && world_ok)
     battle.set_menu_options(world.game_state().option(ui::opt::kCursorMemory), world.game_state().option(ui::opt::kAutoAttack));
   if (world_ok) mixer.set_mono(world.game_state().option(ui::opt::kMono));
+  mixer.set_music_resume(config.music_resume);
   {  // Vibration Function (an option bit): the sequence tasks' motor bytes of this frame -> the gamepad (platform::Rumble)
     const bool vib = world_ok && world.game_state().option(ui::opt::kVibration);
     window.set_rumble(platform::Rumble::instance().flush(vib, frame_dt));
@@ -290,7 +294,15 @@ void App::draw_scene(SceneFrame& sf) {
   if (field_shown) draw_field_full(sf);
   // Render scale: the scene target into the window (the frame is cleared black under every 3D picture: additive = a plain copy).
   if (sf.scene_scaled) composite_scene(sf);
-  if (sf.battle_3d) draw_battle_ui(sf);
+  // Retry battle: the choice over the ended battle's picture (without the HUD), then the limited menu over the whole frame.
+  if (sf.battle_3d && !retry_busy()) draw_battle_ui(sf);
+  if (battle_shown && retry_menu && menu_ok && !menu.closed()) {
+    menu.draw(sf.frame, vw, vh, true);
+  } else if (battle_shown && retry_choosing) {
+    sprites.begin(sf.frame, vw, vh, true);
+    retry_prompt.draw(vw, vh);
+    sprites.end();
+  }
   if (field_shown) draw_field_ui(sf);
   if (sf.title_scene && world.room_name() == game::kTitleRoom) draw_title_menu(sf);
 }
@@ -548,6 +560,7 @@ void App::draw_field_ui(const SceneFrame& sf) {
     party_screen.draw(frame, vw, vh, true);
   }
   if (monster_picker_ok && monster_picker.active()) monster_picker.draw(frame, vw, vh);
+  if (dialogue_log_open) dialogue_log_view.draw(frame, vw, vh);
 }
 
 // The title screen over the title room. Widescreen: the New Game / Continue menu is the static 4:3 menu picture; the 3D sea beside

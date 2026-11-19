@@ -117,6 +117,10 @@ class WindowOpening {
   float since_text_s_ = 0;
 };
 
+// Auto-advance ([Game] AutoAdvance): the reading pause before a message part of `glyphs` glyphs that waits for confirm goes on by itself,
+// times `scale`: 1 s plus 1/25 s a glyph, 1/12 s a glyph in the JP text (a JP glyph carries about twice a Latin letter's reading).
+float auto_advance_seconds(u32 glyphs, bool jp, float scale);
+
 class Typewriter {
  public:
   enum class State : u8 { Idle, Revealing, WaitConfirm, WaitPage, WaitClose, Closing, Closed };
@@ -138,6 +142,10 @@ class Typewriter {
   size_t page_index() const { return page_; }
   size_t page_count() const { return pages_.size(); }
   u32 visible() const { return visible_; }
+  // Auto-advance: seconds of text clock spent in the current confirm / page / close wait (0 outside one), and the glyphs other than
+  // spaces revealed on the page since the last confirm (what the player has to read before the wait).
+  float wait_seconds() const { return wait_s_; }
+  u32 read_glyphs() const;
   const TextPage* page() const { return page_ < pages_.size() ? &pages_[page_] : nullptr; }
 
   // Field event register = script variable 0x22: {fset(n)} writes n to it when the reveal reaches it; {fwait(n)} holds the reveal
@@ -165,6 +173,9 @@ class Typewriter {
   int auto_close_ = -1;
   float close_s_ = 0;
   bool fast_ = false;
+  // Glyph count at the page start or the last confirm wait's release; time in the current input wait.
+  u32 read_from_ = 0;
+  float wait_s_ = 0;
   TextPace pace_;
 };
 

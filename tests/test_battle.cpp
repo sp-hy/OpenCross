@@ -5421,6 +5421,123 @@ void test_run_drops_stolen_loot() {
   }
 }
 
+// The Cheats tab boosts and difficulty formulas: gold multiplier, rare-chance multiplier, percent scaling, enemy HP, presets.
+void test_boost_formulas() {
+  CHECK_EQ(gold_reward(100, false, 0), 0);
+  CHECK_EQ(gold_reward(100, false, 250), 250);
+  CHECK_EQ(gold_reward(100, true, 200), 250);
+  CHECK_EQ(gold_reward(100, true, 400), 500);
+  CHECK_EQ(gold_reward(9000000, true, 400), kRewardGoldCap);
+  CHECK_EQ(gold_reward(100, true), 125);
+  CHECK_EQ(scaled_rare_chance(10, 1), 10);
+  CHECK_EQ(scaled_rare_chance(10, 3), 30);
+  CHECK_EQ(scaled_rare_chance(20, 9), 100);
+  CHECK_EQ(scaled_rare_chance(7, 0), 7);
+  Lo r10({10}), r10b({10}), r10c({10}), r60({60});
+  CHECK_EQ(drop_roll(r10, 150), 0);
+  CHECK_EQ(drop_roll(r10b, 150, 2), 1);
+  CHECK_EQ(drop_roll(r10c, 150, kRareLootAlways), 1);
+  CHECK_EQ(drop_roll(r60, 150, kRareLootAlways), 1);
+  CHECK_EQ(scale_percent(100, 100), 100);
+  CHECK_EQ(scale_percent(100, 150), 150);
+  CHECK_EQ(scale_percent(7, 50), 3);
+  CHECK_EQ(scale_percent(1, 25), 1);
+  CHECK_EQ(scale_percent(5, 0), 0);
+  CHECK_EQ(scale_percent(0, 400), 0);
+  CHECK_EQ(scale_percent(-1, 400), -1);
+  CHECK_EQ(scaled_enemy_hp(10498, 100), 10498);
+  CHECK_EQ(scaled_enemy_hp(10498, 50), 5249);
+  CHECK_EQ(scaled_enemy_hp(30000, 400), 32767);
+  CHECK_EQ(scaled_enemy_hp(1, 25), 1);
+  CHECK(difficulty_preset(DifficultyPreset::Normal) == Difficulty{});
+  CHECK(difficulty_preset(DifficultyPreset::Story) == (Difficulty{50, 50, 150}));
+  CHECK(difficulty_preset(DifficultyPreset::Hard) == (Difficulty{150, 150, 100}));
+  CHECK(difficulty_preset(DifficultyPreset::VeryHard) == (Difficulty{200, 200, 75}));
+}
+
+// What one fight shows under a set of cheats: the enemy's starting max HP, the damage a PC weapon hit does to it and an enemy weapon hit
+// does to a PC, a Cure on a PC, and the gold of the win.
+struct BoostRun {
+  int enemy_hp = 0, dealt = 0, taken = 0, heal = 0, gold = 0;
+};
+
+BoostRun run_boosts(const Battle::Cheats& cheats, bool boss) {
+  data::GameTables tables = make_tables();
+  if (boss) tables.scenes[0].raw[0x1A] = 0x80;
+  ScriptedRng rng{Lo::Fallback::Lo};
+  NullBrain brain;
+  Battle battle{tables, rng, brain};
+  battle.set_cheats(cheats);
+  rng.push(0);
+  rng.push(100);
+  CHECK(battle.start({make_member(0, "A"), make_member(1, "B"), make_member(2, "C")}, 0));
+  BoostRun run;
+  run.enemy_hp = battle.unit(3).max_hp;
+  battle.do_weapon_attack(0, 3, 2);
+  run.dealt = battle.events().back().value;
+  battle.do_weapon_attack(3, 0, 2);
+  run.taken = battle.events().back().value;
+  const int hp = battle.unit(0).hp;
+  battle.unit_mut(0).hp = 1;
+  battle.do_element(1, 3, 0, 0);
+  run.heal = battle.unit(0).hp - 1;
+  battle.unit_mut(0).hp = hp;
+  battle.unit_mut(3).hp = 1;
+  Command attack;
+  attack.kind = Command::Kind::Attack;
+  attack.actor = 0;
+  attack.chain = {2};
+  CHECK(battle.apply(attack));
+  CHECK(battle.outcome() == Outcome::Victory);
+  run.gold = battle.rewards().gold;
+  return run;
+}
+
+// Boosts and difficulty in a fight: defaults change nothing; each percentage scales its own figure; heals are not scaled; the
+// bosses-only switch keeps ordinary fights at the game's values; gold stacks on the gear bonus and is not part of the switch.
+void test_boosts_and_difficulty() {
+  const BoostRun base = run_boosts({}, false);
+  CHECK(base.dealt > 0 && base.taken > 0 && base.heal > 0);
+  CHECK_EQ(base.enemy_hp, 9999 * 0x69 / 100);
+  CHECK_EQ(base.gold, 25);
+  Battle::Cheats hard;
+  hard.hp_percent = 150, hard.taken_percent = 200, hard.dealt_percent = 50, hard.gold_percent = 300, hard.rare_loot = 4;
+  const BoostRun scaled = run_boosts(hard, false);
+  CHECK_EQ(scaled.enemy_hp, scaled_enemy_hp(base.enemy_hp, 150));
+  CHECK_EQ(scaled.dealt, scale_percent(base.dealt, 50));
+  CHECK_EQ(scaled.taken, scale_percent(base.taken, 200));
+  CHECK_EQ(scaled.heal, base.heal);
+  CHECK_EQ(scaled.gold, 75);
+  hard.difficulty_bosses_only = true;
+  const BoostRun ordinary = run_boosts(hard, false);
+  CHECK(ordinary.enemy_hp == base.enemy_hp && ordinary.dealt == base.dealt && ordinary.taken == base.taken && ordinary.heal == base.heal);
+  CHECK_EQ(ordinary.gold, 75);
+  const BoostRun boss = run_boosts(hard, true);
+  CHECK_EQ(boss.enemy_hp, scaled.enemy_hp);
+  CHECK_EQ(boss.dealt, scaled.dealt);
+  CHECK_EQ(boss.taken, scaled.taken);
+  Battle::Cheats cap;
+  cap.hp_percent = 400;
+  CHECK_EQ(run_boosts(cap, false).enemy_hp, 32767);
+}
+
+// The rare steal chance rises with the multiplier and its top step lands every steal on the rare word, as Always loot does.
+void test_rare_loot_steal() {
+  for (const int multiplier : {1, 5, kRareLootAlways}) {
+    Fixture fixture;
+    fixture.tables.elements.resize(5);
+    fixture.tables.elements[4].raw[5] = 0x80, fixture.tables.elements[4].raw[6] = 1, fixture.tables.elements[4].raw[7] = 30;
+    fixture.tables.drops[0].slot = {0x0005, 0x8069, 0x0007, 0x8061};
+    fixture.battle.unit_mut(3).drop_row = 0;
+    fixture.battle.set_cheats({.rare_loot = multiplier});
+    fixture.rng.push(0);
+    fixture.rng.push(multiplier == 1 ? 50 : 3);
+    fixture.battle.do_element(0, 4, 0, 3);
+    CHECK_EQ(fixture.battle.rewards().stolen.size(), 1u);
+    CHECK_EQ(fixture.battle.rewards().stolen[0], multiplier == 1 ? 0x0007 : 0x8061);
+  }
+}
+
 // Mode 7 with record +0xE != 0 changes the stats only of a target wearing the hero set (Medalsome); +0xC != 0 then heals by the heal
 // formula with +0xC as its power, landed or not. A target with hi 0x2000000 takes the heal as damage.
 void test_stat_mode_hero_gate_and_heal() {
@@ -7010,6 +7127,9 @@ int main() {
   test_combo_techs();
   test_combo_real_tables();
   test_run_drops_stolen_loot();
+  test_boost_formulas();
+  test_boosts_and_difficulty();
+  test_rare_loot_steal();
   test_stat_mode_hero_gate_and_heal();
   test_dopple_form_gauge_cap();
   test_stolen_loot_needs_victory();

@@ -6,11 +6,13 @@
 #include <cstdio>
 #include <vector>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "data/char_name.h"
 #include "game/party_editor.h"
 #include "import/party_menu.h"
 #include "import/tim.h"
+#include "render/element_icon_draw.h"
 #include "ui/localized_path.h"
 #include "ui/lowres.h"
 #include "ui/menu/game_state.h"
@@ -777,10 +779,16 @@ void PartyScreen::Impl::draw_screen() {
   if (shown >= 0) {
     int bit = 0;
     for (int bits = recs[static_cast<size_t>(shown)].innate >> 2; bit < 6 && !(bits & 1); ++bit) bits >>= 1;
-    const u32 element_colour = elem_rgb[static_cast<size_t>(bit * 3)] | (elem_rgb[static_cast<size_t>(bit * 3 + 1)] << 8) |
-                               (elem_rgb[static_cast<size_t>(bit * 3 + 2)] << 16);
-    draw_text(font::kKb, 0.65f, static_cast<float>(0x8E + (lang_index == 3 ? 0xD : 0xA)), static_cast<float>(0x5F + (jp() ? 1 : 0)), U"●",
-              sub(sub(element_colour, fade), fade), 0x6319, 6, false);
+    const float mark_x = static_cast<float>(0x8E + (lang_index == 3 ? 0xD : 0xA)), mark_y = static_cast<float>(0x5F + (jp() ? 1 : 0));
+    if (element_symbols() && bit < kElementIconCount) {
+      if (!prep)
+        render::draw_element_icon(*sprites, white, bit, ox + (mark_x + 10.0f + group_dx(mark_x)) * kSx * zoom, oy + (mark_y + 2.5f) * kSy * zoom,
+                                  22.0f * kSx * zoom, 22.0f * kSx * zoom, std::max(0, 255 - 4 * fade));
+    } else {
+      const u32 element_colour = elem_rgb[static_cast<size_t>(bit * 3)] | (elem_rgb[static_cast<size_t>(bit * 3 + 1)] << 8) |
+                                 (elem_rgb[static_cast<size_t>(bit * 3 + 2)] << 16);
+      draw_text(font::kKb, 0.65f, mark_x, mark_y, U"●", sub(sub(element_colour, fade), fade), 0x6319, 6, false);
+    }
   }
   // Numbers: 3 digits (style 0x84) for HP / max HP, 2 (0x85) for the stats; one-digit values 7 units right; right column + 10
   // (+ 6 in FR / IT). Slot 0 (kb_70) in every language, H3.

@@ -267,6 +267,7 @@ void FieldWorld::opaque_op(u16 key, std::span<const u8>) {
     if (!plus) {
       const auto globals = ngplus::new_game_globals();
       for (size_t i = 0; i < globals.size(); ++i) vm_.set_var(static_cast<u16>(0x3D0 + 2 * i), globals[i]);
+      if (on_new_game_) on_new_game_(gs_->slot);
     }
     defeated_ = {};
     // The field's own party table (party_chars_) is not touched: the script's 7D / 7B that follow edit it.
@@ -650,19 +651,23 @@ void FieldWorld::update(const platform::Input& in, int ticks) {
     input_.clear_key_latch();
   }
   if (modal_window_open()) {
-    // The modal windows (all of them: a choice and the page-turn of a plain message share the confirm key).
+    // The modal windows (all of them: a choice and the page-turn of a plain message share the confirm key). Auto-advance confirms a
+    // window that waits for nothing but the key, once its reading pause is over and no voice line plays.
+    const audio::VoicePlayer* voice = audio::VoicePlayer::instance();
+    const bool auto_ok = auto_advance_ && !panel_.is_open() && !(voice && voice->active());
+    const auto auto_confirm = [&](const ui::DialogueDemo& box) { return auto_ok && box.auto_advance_due(auto_advance_scale_); };
     if (dialogue_.is_open() && !label_) {
       if (up) dialogue_.move_choice(-1);
       if (down) dialogue_.move_choice(1);
       if (dialogue_.digit_entry() && (digit_step != 0 || digit_shift != 0)) dialogue_.move_digit(digit_step, digit_shift);
-      if (confirm) confirm_window(dialogue_, dialogue_owner_);
+      if (confirm || auto_confirm(dialogue_)) confirm_window(dialogue_, dialogue_owner_);
     }
     for (auto& window : extra_win_) {
       if (!window.box || !window.box->is_open() || window.label) continue;
       if (up) window.box->move_choice(-1);
       if (down) window.box->move_choice(1);
       if (window.box->digit_entry() && (digit_step != 0 || digit_shift != 0)) window.box->move_digit(digit_step, digit_shift);
-      if (confirm) confirm_window(*window.box, window.owner);
+      if (confirm || auto_confirm(*window.box)) confirm_window(*window.box, window.owner);
     }
     input_.action_pending = false;
   } else if (confirm) {

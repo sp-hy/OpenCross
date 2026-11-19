@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdio>
 
+#include "core/element_icon.h"
+#include "data/tables.h"
 #include "platform/keymap.h"
 #include "ui/menu/menu_common.h"
 #include "ui/menu/ps1_art.h"
@@ -25,13 +27,26 @@ const Str6 kPickLabels[2] = {{{"Use", "Utiliser", "Usa", "Einsetzen", "Usar", "ã
 
 }  // namespace
 
+const char* MainMenu::Impl::main_label(int row) const { return row == kOcRow ? S6(kOpenCrossLabel) : S6(kMainLabels[std::clamp(row, 0, 5)]); }
+
 void MainMenu::Impl::update_main(const Nav& nav) {
   const int party_size = static_cast<int>(party().size());
   if (sub == 0) {
-    if (nav.up) main_cur = wrap(main_cur - 1, 6), sfx(1);
-    if (nav.down) main_cur = wrap(main_cur + 1, 6), sfx(1);
+    // The cursor holds the row; Up / Down step through the rows in their screen order (the OpenCross row above Save/Load), passing over
+    // the rows a limited menu does not offer. An OpenCross row switched off under the cursor leaves it on Save/Load.
+    if (main_cur == kOcRow && !oc_row()) main_cur = 5;
+    const std::vector<int> rows = main_rows();
+    const int count = static_cast<int>(rows.size());
+    const auto step = [&](int delta) {
+      int pos = main_pos(main_cur);
+      do pos = wrap(pos + delta, count), main_cur = rows[static_cast<size_t>(pos)];
+      while (!main_row_open(main_cur));
+      sfx(1);
+    };
+    if (nav.up) step(-1);
+    if (nav.down) step(1);
     if (nav.cancel) {
-      mem_cur = main_cur;
+      if (!limited) mem_cur = main_cur;
       closed = true;
       sfx(6);
     } else if (nav.ok) {
@@ -45,6 +60,7 @@ void MainMenu::Impl::update_main(const Nav& nav) {
         case 4: enter(MenuScreen::Settings); break;
         // Load is always available; Save is gated inside.
         case 5: enter(MenuScreen::Save); break;
+        case kOcRow: enter_oc(); break;
       }
     }
   } else if (roster != Roster::Off) {
@@ -132,6 +148,16 @@ void MainMenu::Impl::update_status(const Nav& nav) {
 }
 
 int MainMenu::Impl::model_number(int character, int last) const { return data::menu_form(character, body(character), last); }
+
+void MainMenu::Impl::model_gear(int character, MenuModelSlot& slot) const {
+  if (const int weapon = gs->equipped(character, 0); weapon > 0 && rules && rules->tables)
+    if (const data::GearRec* gear = rules->tables->gear_rec(weapon)) slot.weapon_part = gear->tier() & 0xF;
+  // Pierre's construct 3 (the Hero's Shield) shows only while he wears one.
+  constexpr int kPierre = 41, kHerosShield = 0xC1, kShieldConstruct = 3;
+  if (character == kPierre && gs->equipped(character, 2) != kHerosShield && gs->equipped(character, 3) != kHerosShield &&
+      gs->equipped(character, 4) != kHerosShield)
+    slot.hidden_meshes = 1u << kShieldConstruct;
+}
 
 void MainMenu::Impl::restart_model() {
   model_cam = model_cam_prev = MenuCamera{};
@@ -227,24 +253,39 @@ float MainMenu::Impl::list_dx(int list_id, int lang_idx, int entry) {
   return kPickDx[lang_idx] + ((lang_idx == 3 || lang_idx == 5) ? 0.0f : (entry ? 2.0f : 0.0f));
 }
 
-// `list_id` 0 = main list, 1 = Use / Allocate picker. Entry 5 (Save/Load) is never dimmed: loading is always possible.
+// `list_id` 0 = main list (`sel` = the row; the rows take the slots in main_rows order), 1 = Use / Allocate picker. Save/Load is never
+// dimmed: loading is always possible; a limited menu dims the rows it does not offer.
 void MainMenu::Impl::list_and_bar(int list_id, int sel, bool bar) {
   // hd: labels are drawn by their ink box (both art modes; false only without the bn / kb faces).
   const bool hd = hd_ink();
   const float rel = 0.9f;
   const u32 line_colour = rgb(200, 190, 190);
   clock_dial();
-  const int count = list_id == 0 ? 6 : 2;
+  const std::vector<int> rows = list_id == 0 ? main_rows() : std::vector<int>{0, 1};
+  const int count = static_cast<int>(rows.size());
+  auto label_of = [&](int entry) { return utf32(list_id == 0 ? main_label(rows[static_cast<size_t>(entry)]) : S6(kPickLabels[entry])); };
   if (!texs.hd()) {
     // Played from the discs the leader lines (frame 4 / 0x25) and the labels (frames 0x5F.. / 0x65..) are sheet frames at the dial's
-    // centre, the chosen label in 0x004E77.
+    // centre, the chosen label in 0x004E77. The OpenCross row is font text with its own leader in the stock sixth slot; Save/Load then
+    // moves one slot down with a leader of its own.
     Sprite(list_id == 0 ? 4 : 0x25, 446, 367);
-    for (int entry = 0; entry < count; ++entry) Sprite((list_id == 0 ? 0x5F : 0x65) + entry, 446, 367, entry == sel ? ps1_colour(0x004E77) : kWhite);
+    for (int entry = 0; entry < count; ++entry) {
+      const int row = list_id == 0 ? rows[static_cast<size_t>(entry)] : entry;
+      const bool dim = list_id == 0 && !main_row_open(row);
+      if (row == kOcRow) {
+        PT(slot_x(entry), slot_y(entry), label_of(entry), dim ? ps1_colour(0x404040) : row == sel ? kSel : kText);
+        continue;
+      }
+      const u32 colour = dim ? ps1_colour(0x404040) : row == sel ? ps1_colour(0x004E77) : kWhite;
+      const float dx = slot_x(entry) - slot_x(row), dy = slot_y(entry) - slot_y(row);
+      Sprite((list_id == 0 ? 0x5F : 0x65) + row, 446 + dx, 367 + dy, colour);
+      if (entry != row) leader(entry, slot_x(entry), slot_y(entry), rgb(200, 190, 190));
+    }
     bar_and_title(list_id == 0 ? sel : 1, bar);
     return;
   }
   float maxw = 0;
-  for (int entry = 0; entry < count; ++entry) maxw = std::max(maxw, twp(utf32(S6(list_id == 0 ? kMainLabels[entry] : kPickLabels[entry])), rel));
+  for (int entry = 0; entry < count; ++entry) maxw = std::max(maxw, twp(label_of(entry), rel));
   const float dmax = hd ? list_maxw(list_id, 0) - list_maxw(list_id, lang_index()) : 0.0f;
   const MtStyle list_style = mt_style(7, lang_index());
   const render::FaceId list_face = slot_face(list_style.slot);
@@ -252,8 +293,9 @@ void MainMenu::Impl::list_and_bar(int list_id, int sel, bool bar) {
   // Use / Allocate picker: ink left / cap top per entry, leader at cap + 13.3 from ink - 2.6 to the bend, then on to the ring.
   static const float kPickX[2] = {296.6f, 279.6f}, kPickY[2] = {313.6f, 346.8f}, kPickBend[2] = {384.4f, 359.5f}, kPickEnd[2] = {397.0f, 386.2f};
   for (int entry = 0; entry < count; ++entry) {
-    const std::u32string label = utf32(S6(list_id == 0 ? kMainLabels[entry] : kPickLabels[entry]));
-    const u32 colour = entry == sel ? kSel : kText;
+    const std::u32string label = label_of(entry);
+    const int row = rows[static_cast<size_t>(entry)];
+    const u32 colour = list_id == 0 && !main_row_open(row) ? ps1_colour(0x404040) : row == sel ? kSel : kText;
     if (hd && list_id == 1) {
       const float x = kPickX[entry] + dmax + list_dx(1, lang_index(), entry) - list_dx(1, 0, entry), y = kPickY[entry] + (jp() ? 1.0f : 0.0f);
       HT(list_face, x, y, label, colour, list_scale);
@@ -261,9 +303,8 @@ void MainMenu::Impl::list_and_bar(int list_id, int sel, bool bar) {
       continue;
     }
     if (hd && list_id == 0) {
-      // Main list: left-aligned ink at 295.3 - 9.1 i, cap top 303.4 + 16 i
-      const float x = 295.3f - 9.1f * static_cast<float>(entry) + dmax + list_dx(0, lang_index(), entry) - list_dx(0, 0, entry),
-                  y = 303.4f + 15.95f * static_cast<float>(entry) + (jp() ? 1.0f : 0.0f);
+      // Main list: left-aligned ink at the slot (295.3 - 9.1 i, cap top 303.4 + 16 i)
+      const float x = slot_x(entry) + dmax + list_dx(0, lang_index(), entry) - list_dx(0, 0, entry), y = slot_y(entry) + (jp() ? 1.0f : 0.0f);
       HT(list_face, x, y, label, colour, list_scale);
       leader(entry, x, y - (jp() ? 1.0f : 0.0f), line_colour);
       continue;
@@ -290,41 +331,80 @@ void MainMenu::Impl::mini_grid(int character, float x, float y) {
   }
 }
 
+void MainMenu::Impl::innate_mark(float cx, float cy, int innate) {
+  const int colour = data::colour_index_of_bit(static_cast<u8>(innate & 0xFC));
+  if (element_symbols() && colour >= 0) symbol(colour, cx, cy, 34.0f);
+  else Disc(cx, cy, 13.5f, innate ? element_colour(innate) : rgb(120, 120, 130));
+}
+
 // Member card body (card-relative PS1 px, ink boxes calibrated for English): name, HP / HP, six stats, INNATE + dot,
 // optional stamina row, grid minimap. The captions are cmnmes rows placed with per-key, per-language offsets relative to
 // English; `group` = the frame's sheet group (7 main-list card, 0x34 status / Elements-use panel, 0x2F equip header), which only the
 // Italian M.RES offset depends on. The JP rows sit 1 px lower and their captions take the JP-specific offsets.
 void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool stats, bool stamina, int group_id) {
   const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
+  CardValues values;
+  values.name = char_name(character);
+  values.cur_hp = std::min<int>(ch.cur_hp, 999), values.max_hp = std::min<int>(ch.max_hp, 999);
+  values.hp_low = ch.cur_hp < ch.max_hp / 8;
+  values.innate = gs->innate(character);
+  values.stats = {std::min<int>(ch.atk, 99), std::min<int>(ch.hit, 99), std::min<int>(ch.mag, 99),
+                  std::min<int>(ch.def, 99), std::min<int>(ch.evd, 99), std::min<int>(ch.mdef, 99)};
+  values.stamina = std::min(gs->stamina_recovery(character), 99);
+  values.grid_character = character;
+  card_body(card_x, card_y, values, stats, stamina, group_id);
+}
+
+// The card of card_hd drawn from `values`; numbers that are not `known` are left out on the disc art and read "??" otherwise.
+void MainMenu::Impl::card_body(float card_x, float card_y, const CardValues& values, bool stats, bool stamina, int group_id) {
   const float number_scale = 0.275f;
   const int lang_idx = lang_index();
   // The PS1 draws the card's name 1 pixel left and 4 higher than this layout.
-  HL(card_x + (ps1_text() ? 6.0f : 8.2f), card_y + (ps1_text() ? 7.9f : 11.9f), char_name(character), kName, 0.35f);
+  HL(card_x + (ps1_text() ? 6.0f : 8.2f), card_y + (ps1_text() ? 7.9f : 11.9f), values.name, kName, 0.35f);
+  const int innate = values.innate;
   if (!texs.hd()) {
     // Played from the discs the captions are the frame's own; the numbers are sheet digits at the PS1's slots.
-    SpriteNumber(std::min<int>(ch.cur_hp, 999), card_x + 60, card_y + 29, true);
-    SpriteNumber(std::min<int>(ch.max_hp, 999), card_x + 108, card_y + 29, true);
-    const int innate = gs->innate(character);
-    Disc(PX(card_x + 166.2f), PY(card_y + 37.5f), 13.5f, innate ? element_colour(innate) : rgb(120, 120, 130));
-    if (stats) {
-      const int values[6] = {ch.atk, ch.hit, ch.mag, ch.def, ch.evd, ch.mdef};
-      for (int stat = 0; stat < 6; ++stat)
-        SpriteNumber(std::min(values[stat], 99), card_x + 48 + 56 * static_cast<float>(stat % 3), card_y + (stat < 3 ? 47 : 63), false);
+    if (values.known && !values.hp_unknown) {
+      // Wide values in the small digits, so five fit before each slot.
+      SpriteNumber(values.cur_hp, card_x + 60, card_y + 29, !values.wide_hp);
+      SpriteNumber(values.max_hp, card_x + 108, card_y + 29, !values.wide_hp);
     }
-    if (stamina) SpriteNumber(std::min(gs->stamina_recovery(character), 99), card_x + 158, card_y + 79, false);
-    mini_grid(character, card_x + 0x83, card_y + 6);
+    innate_mark(PX(card_x + 166.2f), PY(card_y + 37.5f), innate);
+    if (stats && values.known)
+      for (int stat = 0; stat < 6; ++stat)
+        SpriteNumber(values.stats[static_cast<size_t>(stat)], card_x + 48 + 56 * static_cast<float>(stat % 3), card_y + (stat < 3 ? 47 : 63), false);
+    if (stamina) SpriteNumber(values.stamina, card_x + 158, card_y + 79, false);
+    if (values.grid_character >= 0) mini_grid(values.grid_character, card_x + 0x83, card_y + 6);
     return;
   }
+  auto number = [&](int value) { return values.known ? std::to_string(value) : std::string("??"); };
+  auto hp_number = [&](int value) { return values.known && values.hp_unknown ? std::string("???") : number(value); };
   HS(0x4, card_x + 7.7f, card_y + 30.7f, capt("\xEF\xBC\xA8\xEF\xBC\xB0", "HP"));
-  const u32 hp_colour = ch.cur_hp < ch.max_hp / 8 ? kSel : kText;
-  HN(card_x + 50.7f, card_y + 30.7f, std::to_string(std::min<int>(ch.cur_hp, 999)), hp_colour, 0.29f);
-  HT(face_kb, card_x + 73.1f, card_y + 30.7f, utf32("/"), kText, 0.29f);
-  HN(card_x + 98.9f, card_y + 30.7f, std::to_string(std::min<int>(ch.max_hp, 999)), kText, 0.29f);
+  const u32 hp_colour = values.hp_low ? kSel : kText;
+  if (values.wide_hp) {
+    // Two five-digit columns, numbers and slash right-aligned: the maximum's right edge at x 104 (before INNATE), the slash 3 px before
+    // its column, the current value's column 3 px before the slash; the numbers shrink when the columns would reach the caption (x 28).
+    const render::FaceId face = face_kb != render::kNoFace ? face_kb : face_gn;
+    auto width = [&](const std::u32string& str, float scale) {
+      text->prepare(face, str);
+      return text->measure(face, str, scale) / xscale;
+    };
+    constexpr float kRight = 104.0f, kLeft = 28.0f, kGap = 3.0f;
+    const float slash = width(U"/", 0.29f), digits = width(U"00000", 0.29f);
+    const float scale = 0.29f * std::min(1.0f, (kRight - kLeft - slash - 2 * kGap) / (2 * digits));
+    const float slash_right = kRight - digits * scale / 0.29f - kGap;
+    HN(card_x + slash_right - slash - kGap, card_y + 30.7f, hp_number(values.cur_hp), hp_colour, scale);
+    HN(card_x + slash_right, card_y + 30.7f, "/", kText, 0.29f);
+    HN(card_x + kRight, card_y + 30.7f, hp_number(values.max_hp), kText, scale);
+  } else {
+    HN(card_x + 50.7f, card_y + 30.7f, number(values.cur_hp), hp_colour, 0.29f);
+    HT(face_kb, card_x + 73.1f, card_y + 30.7f, utf32("/"), kText, 0.29f);
+    HN(card_x + 98.9f, card_y + 30.7f, number(values.max_hp), kText, 0.29f);
+  }
   static const float kInnateDx[6] = {0, 0, 0, -10, -8, -2}, kInnateDy[6] = {2, 2, 2, 2, 2, 3};
   HS(0x64, card_x + 120.0f, card_y + 34.9f, capt("\xE5\x85\x88\xE5\xA4\xA9\xE5\xB1\x9E\xE6\x80\xA7", "INNATE"), kText, dl(kInnateDx, lang_idx),
      dl(kInnateDy, lang_idx));
-  const int innate = gs->innate(character);
-  Disc(PX(card_x + 166.2f), PY(card_y + 37.5f), 13.5f, innate ? element_colour(innate) : rgb(120, 120, 130));
+  innate_mark(PX(card_x + 166.2f), PY(card_y + 37.5f), innate);
   if (stats) {
     static const char* const kJpKey[6] = {"\xE8\x85\x95\xE5\x8A\x9B", "\xE6\xAD\xA3\xE7\xA2\xBA\xE3\x81\x95", "\xE9\xAD\x94\xE5\x8A\x9B",
                                           "\xE8\x80\x90\xE4\xB9\x85\xE5\x8A\x9B", "\xE8\xBA\xAB\xE8\xBB\xBD\xE3\x81\x95", "\xE6\x8A\x97\xE9\xAD\x94"};
@@ -332,8 +412,6 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
     static const float kLabelX[3] = {7.0f, 61.8f, 115.3f}, kNumberX[3] = {55.9f, 108.4f, 167.0f};
     static const float kColumnDx[3][6] = {{3, 4, 3, 3, 3, 3}, {-4, -2, -3, -3, -3, 1}, {6, 9, 5, 5, 5, -1}};
     static const float kLabelDx[6] = {-2, -1, -6, 3, -1, -6};
-    const int values[6] = {std::min<int>(ch.atk, 99), std::min<int>(ch.hit, 99), std::min<int>(ch.mag, 99), std::min<int>(ch.def, 99),
-                           std::min<int>(ch.evd, 99), std::min<int>(ch.mdef, 99)};
     for (int stat = 0; stat < 6; ++stat) {
       const float y = card_y + (stat < 3 ? 47.1f : 63.5f);
       float dx = lang_idx == 5 ? -kLabelDx[stat] : 0.0f, dy = lang_idx == 5 ? 2.0f : 0.0f;
@@ -343,7 +421,7 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
         dy = dl(kMagicResDy, lang_idx);
       }
       HS(stat == 5 ? 0x65 : 0x2, card_x + kLabelX[stat % 3], y, capt(kJpKey[stat], kEnglish[stat]), kText, dx, dy);
-      HN(card_x + kNumberX[stat % 3] + dl(kColumnDx[stat % 3], lang_idx), y + (lang_idx == 5 ? 1.0f : 0.0f), std::to_string(values[stat]), kText, number_scale);
+      HN(card_x + kNumberX[stat % 3] + dl(kColumnDx[stat % 3], lang_idx), y + (lang_idx == 5 ? 1.0f : 0.0f), number(values.stats[static_cast<size_t>(stat)]), kText, number_scale);
     }
   }
   if (stamina) {
@@ -353,10 +431,9 @@ void MainMenu::Impl::card_hd(float card_x, float card_y, int character, bool sta
     static const float kThirdColumnDx[6] = {6, 9, 5, 5, 5, -1};
     // The equip header's (group 0x2F) value sits 1.4 lines higher than the status panel's.
     const float stamina_y = card_y + 80.6f + (group_id == 0x2F ? -1.4f : 0.0f) + (lang_idx == 5 ? 1.0f : 0.0f);
-    HN(card_x + 167.0f + dl(kThirdColumnDx, lang_idx), stamina_y, std::to_string(std::min(gs->stamina_recovery(character), 99)),
-       kText, number_scale);
+    HN(card_x + 167.0f + dl(kThirdColumnDx, lang_idx), stamina_y, std::to_string(values.stamina), kText, number_scale);
   }
-  mini_grid(character, card_x + 0x83, card_y + 6);
+  if (values.grid_character >= 0) mini_grid(values.grid_character, card_x + 0x83, card_y + 6);
 }
 
 // One party card of the main list at PS1 (x, y), and for each ailment its mark beside the card: sheet frames 0xAE + mark, each one 8 x 16 cut of
@@ -407,6 +484,7 @@ void MainMenu::Impl::build_main() {
     member_card(members[i], 250.0f + 16.0f * static_cast<float>(i) + kCardSlide * static_cast<float>(moved), 42.0f + 84.0f * static_cast<float>(i));
   group(Right);
   if (toggle) list_and_bar(1, choice_cur);
+  else if (screen == MenuScreen::OpenCross) oc_list();
   else list_and_bar(0, main_cur, !listing);
   if (listing) build_roster();
   group(Centre);

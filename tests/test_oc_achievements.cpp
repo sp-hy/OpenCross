@@ -1,5 +1,6 @@
 // game/oc_achievements.h: OpenCross's own achievement set: every rule kind, the battle events, counters, profile sets across saves,
-// sets, the gates, the profile file round trip, and the ending state machine shared with the Steam evaluator.
+// sets, the gates, the profile file round trip, the ending state machine shared with the Steam evaluator, the menu page's rows and
+// filter, and the popup.
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -479,6 +480,31 @@ int main() {
     CHECK(!OcAchievements::parse_profile("[Unlocked]\noc_boss_hydra=yesterday\n"));
     CHECK(OcAchievements::parse_profile("").has_value());
     CHECK(OcAchievements::utc_now().size() == 17 && OcAchievements::utc_now().back() == 'Z');
+  }
+  {  // The menu page's rows: table order, the unlocked count, a local date for an unlock, the progress of a locked counter; the filter.
+    OcAchievements achievements = make();
+    achievements.forged(10);
+    const ui::AchievementList list = game::achievement_list(achievements);
+    CHECK(list.rows.size() == achievements.rows().size());
+    CHECK(list.unlocked == achievements.unlocked_count() && list.unlocked == 2);
+    const ui::AchievementRow& forge = list.rows[row_of(achievements, "oc_item_forge_10")];
+    CHECK(forge.unlocked && forge.date.size() == 10 && forge.date.starts_with("2026-11-1") && forge.progress.empty());
+    const ui::AchievementRow& fifty = list.rows[row_of(achievements, "oc_item_forge_50")];
+    CHECK(!fifty.unlocked && fifty.date.empty() && fifty.progress == "10 / 50");
+    CHECK(fifty.title == achievements.rows()[row_of(achievements, "oc_item_forge_50")].title);
+    CHECK(list.rows[row_of(achievements, "oc_boss_hydra")].progress.empty());
+    const ui::AchievementRow& spoiler = list.rows[row_of(achievements, "oc_end_ngplus")];
+    CHECK(spoiler.spoiler && ui::achievement_hidden(spoiler, false) && !ui::achievement_hidden(spoiler, true));
+    CHECK(!ui::achievement_hidden(forge, false));
+    CHECK(ui::filter_achievements(list, 0).size() == list.rows.size());
+    size_t filtered = 0;
+    for (int filter = 1; filter < ui::kAchievementFilters; ++filter) {
+      const std::vector<int> shown = ui::filter_achievements(list, filter);
+      filtered += shown.size();
+      CHECK(!shown.empty() && std::is_sorted(shown.begin(), shown.end()));
+      for (const int row : shown) CHECK(list.rows[static_cast<size_t>(row)].category == filter - 1);
+    }
+    CHECK(filtered == list.rows.size());
   }
   {  // The popup: a panel takes every unlock waiting when it opens; unlocks during a panel wait for the next one.
     game::OcAchievementPopup popup;

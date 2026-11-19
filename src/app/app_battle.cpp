@@ -1,18 +1,23 @@
 // The field -> battle hand-off (field A3 / C9): the field has faded to black; the BattleView runs on the field's party, then the
 // result is handed back (rewards, HP, the game-over room). A versus battle takes the same path in and out with nothing of the save in it:
 // no Relief Charm write, seed variable or party swap on the way in, no result, rewards, HP or BATTLE_RESULT on the way back.
+// Retry battle (Cheats): the state each field battle starts from is kept; a wipe that would end the game asks first and can start the
+// battle again from it.
 #include "app/app.h"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <format>
+#include <string>
 
 #include "battle/rng.h"
 #include "battle/rules.h"
 #include "battle/versus.h"
 #include "core/log.h"
 #include "game/game_session.h"
+#include "platform/keymap.h"
 
 namespace oc::app {
 
@@ -97,6 +102,7 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
       bopt.duel_names = game::duel_names(gstate, names);
       if (const int relief = gstate.slot.head[ui::kReliefHead]; relief != 0xFF) bopt.duel_relief = relief;
     }
+    randomize_battle(battle_args.scene, bopt);
   }
   battle_args.party = std::move(party);
   return battle_args;
@@ -136,11 +142,15 @@ void App::start_field_battle() {
     battle.begin_transition(ctx, fb_last_n >= 0 && fb_anchor ? fb_anchor : render::TexRef{}, strip_clock);
     battle_in_field = true;
     battle_scene = scene;
+    battle_tuning = bopt.enemy_tuning;
     ++battle_starts;
     versus_running = bopt.versus.has_value();
     versus_next.reset();
+    if (versus_running) retry_point.reset();
+    else take_retry_point(rq, scene);
     oc_achievements.battle_started();
     log::info("battle: field encounter id {:#x} -> scene {}{}", rq.battle_id, scene, versus_running ? " (versus)" : "");
+    record_battle_start();
   } else if (bopt.versus) {
     log::warn("battle: could not start the versus battle (carrier scene {})", scene);
     versus_next.reset();
@@ -245,6 +255,7 @@ void App::finish_field_battle(bool after_results) {
     const bool boss = tables_ok && battle_scene >= 0 && static_cast<size_t>(battle_scene) < tables.scenes.size() && tables.scenes[static_cast<size_t>(battle_scene)].boss();
     oc_achievements.battle_ended(battle_scene, code, boss, standing, fight->ring());
   }
+  record_battle_end(code);
   // A monster-party fight (the Grand Slam) writes nothing back: no rewards, records, HP or Dopplegang pool.
   const bool written_back = battle.battle() && !battle.battle()->monster_party();
   const int pip_form_before = world.game_state().slot.chars[static_cast<size_t>(battle::kPipCharId)].model_id;
@@ -278,15 +289,130 @@ void App::finish_field_battle(bool after_results) {
   }
   game::settle_pip_form(world.game_state(), tables, pip_form_before);
   world.end_battle(code, after_results ? game::BattleResults::kFieldFadeDelay : 0);
-  if (code == 1 && !(battle_flags & 2)) {
-    // Party wiped in a fight that is not losable (BATTLE flag 2 clear): the next map becomes 9 (the game-over room, map digit 009 = the
-    // room file after the title room 008) and is loaded; its own script shows the screen and leaves. The title is only the fallback
-    // when that room cannot be loaded.
-    const std::string over = world.room_stem_for_id(9);
-    log::info("game over: map 9 ({})", over.empty() ? "?" : over);
-    mixer.stop();
-    if ((over.empty() || !world.load_room(over, 0)) && flow_ready) flow.start(game::FlowState::Title);
+  retry_point.reset();
+  if (game::wipe_ends_game(battle.outcome(), battle_flags)) enter_game_over();
+}
+
+// Party wiped in a fight that is not losable (BATTLE flag 2 clear): the next map becomes 9 (the game-over room, map digit 009 = the room
+// file after the title room 008) and is loaded; its own script shows the screen and leaves. The title is only the fallback when that
+// room cannot be loaded.
+void App::enter_game_over() {
+  const std::string over = world.room_stem_for_id(9);
+  log::info("game over: map 9 ({})", over.empty() ? "?" : over);
+  mixer.stop();
+  if ((over.empty() || !world.load_room(over, 0)) && flow_ready) flow.start(game::FlowState::Title);
+}
+
+namespace {
+
+// The retry log's view of the state: gold, the inventory and element stock (kinds and copies) and the party's HP.
+std::string retry_state_line(const ui::GameState& gs) {
+  int items = 0, item_copies = 0, elements = 0, element_copies = 0;
+  for (const save::ItemStack& stack : gs.slot.items)
+    if (stack.id != 0 && stack.qty != 0) ++items, item_copies += stack.qty;
+  for (const save::ItemStack& stack : gs.slot.elements)
+    if (stack.id != 0 && stack.qty != 0) ++elements, element_copies += stack.qty;
+  std::string hp;
+  for (const u8 id : gs.slot.party())
+    if (id < save::kNumChars) hp += std::format("{}{}/{}", hp.empty() ? "" : " ", gs.slot.chars[id].cur_hp, gs.slot.chars[id].max_hp);
+  return std::format("gold {}, items {} ({} copies), elements {} ({} copies), HP {}", gs.gold(), items, item_copies, elements, element_copies, hp);
+}
+
+}  // namespace
+
+void App::take_retry_point(const game::FieldWorld::BattleRequest& rq, int scene) {
+  retry_point = RetryPoint{game::take_battle_snapshot(world.game_state(), world.vm().variables()), rq, scene, ext_host.battles};
+}
+
+bool App::retry_offered() {
+  return config.retry_battle && retry_point && !versus_running && battle.battle() && game::wipe_ends_game(battle.outcome(), battle_flags);
+}
+
+void App::open_retry() {
+  const ui::GameState& gs = world.game_state();
+  retry_prompt.open(platform::art_is_hd(config.art_mode), gs.option(ui::opt::kCustomWindow) ? gs.skin : 0, lang);
+  retry_choosing = true;
+  log::info("retry: party wiped in scene {} (battle id {:#x}, flags {:#x}): Retry / Retry after changes / Give up", battle_scene,
+            retry_point->request.battle_id, battle_flags);
+}
+
+bool App::retry_step(const platform::Input& in, double dt, int ticks) {
+  if (retry_menu) {
+    menu.update(in, ticks);
+    if (!menu.closed()) return true;
+    retry_menu = false;
+    world.state_edited();
+    log::info("retry: menu closed: {}", retry_state_line(world.game_state()));
+    restart_field_battle();
+    return true;
   }
+  if (!retry_choosing) return false;
+  const int dy = (platform::action_pressed(in, platform::Action::Down) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_DOWN])) -
+                 (platform::action_pressed(in, platform::Action::Up) || (in.pad_connected && in.pad_pressed[SDL_GAMEPAD_BUTTON_DPAD_UP]));
+  if (const int sfx = retry_prompt.input(dy, confirm_edge(in))) ui_sfx(sfx);
+  retry_prompt.update(static_cast<float>(dt));
+  switch (retry_prompt.take_choice()) {
+    case ui::RetryPrompt::Choice::None:
+      break;
+    case ui::RetryPrompt::Choice::Retry:
+      retry_choosing = false;
+      log::info("retry: Retry");
+      restore_retry_point();
+      restart_field_battle();
+      break;
+    case ui::RetryPrompt::Choice::RetryAfterChanges:
+      retry_choosing = false;
+      log::info("retry: Retry after changes");
+      restore_retry_point();
+      if (menu_ok) {
+        menu.open_limited(world.game_state());
+        retry_menu = true;
+      } else {
+        restart_field_battle();
+      }
+      break;
+    case ui::RetryPrompt::Choice::GiveUp:
+      retry_choosing = false;
+      log::info("retry: Give up");
+      finish_field_battle();
+      break;
+  }
+  return true;
+}
+
+void App::restore_retry_point() {
+  if (const battle::Battle* fight = battle.battle()) {
+    std::string hp;
+    for (int i = 0; i < battle::kPcSlots; ++i)
+      if (fight->unit(i).present) hp += std::format("{}{}", hp.empty() ? "" : " ", fight->unit(i).hp);
+    log::info("retry: the battle ended with HP {}; before the restore: {}", hp, retry_state_line(world.game_state()));
+  }
+  game::restore_battle_snapshot(retry_point->state, world.game_state(), world.vm().variables());
+  ext_host.battles = retry_point->battles;
+  log::info("retry: restored the battle's start: {}", retry_state_line(world.game_state()));
+}
+
+// The same scene (the encounter's enemy group as first rolled) on the same battlefield, with the same flags (music, disguise) and the
+// party as the state now holds it; the battle draws new random numbers. The field stays in its battle state throughout.
+void App::restart_field_battle() {
+  const game::FieldWorld::BattleRequest rq = retry_point->request;
+  const int scene = retry_point->scene;
+  FieldBattleArgs fa = make_field_battle_args(rq);
+  // The scene is the one first rolled, so its randomizer tuning is too.
+  fa.bopt.enemy_tuning = battle_tuning;
+  take_retry_point(rq, scene);
+  if (battle_ready && battle.start(scene, std::move(fa.party), fa.bopt)) {
+    battle.begin_transition(ctx, render::TexRef{}, 0);
+    ++battle_starts;
+    oc_achievements.battle_started();
+    log::info("retry: battle restarted: scene {} on battlefield {}, {}", scene, rq.field, retry_state_line(world.game_state()));
+    return;
+  }
+  log::warn("retry: could not start scene {} again; the game over follows", scene);
+  battle_in_field = false;
+  retry_point.reset();
+  world.end_battle(1);
+  enter_game_over();
 }
 
 // Title scene (attract demo) battle request. dem_06's `C9 #415` is reachable only with ROOM_PARAM 3 (the attract chain enters it with

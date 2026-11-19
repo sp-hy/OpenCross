@@ -168,6 +168,7 @@ std::optional<Insn> decode_insn(ByteSpan code, u32 off, std::string* error) {
         operand = {OperandKind::Var, value, {}};
       }
     }
+    operand.pos = operand_pos;
     ins.ops.push_back(std::move(operand));
   }
   if (key == 0x02) ins.cond = mode & 0xF;

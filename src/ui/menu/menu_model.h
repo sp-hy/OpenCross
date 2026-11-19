@@ -1,7 +1,12 @@
 #pragma once
-// Hook for the 3D character model of the Status screen (the member's model on the right).
+// Hooks for the 3D models of the menu: the Status screen's character (the member's model on the right) and the Bestiary page's creature.
 // oc_ui cannot depend on the mesh pipeline / Actor (oc_game depends on oc_ui), so the host supplies a MenuModelView
 // (ui/menu/status_model.h in oc_menu_model is the implementation) and MainMenu calls it between the parchment and the rest of its sprites.
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <span>
+
 #include "core/types.h"
 #include "render/gpu_context.h"
 
@@ -68,6 +73,46 @@ class MenuModelView {
   virtual void draw(const render::Frame& frame, float vw, float vh, const MenuModelSlot& slot) = 0;
   // The nearest camera distance of a menu model (its .ome's own value), 0 when unknown.
   virtual int min_distance(int model) = 0;
+};
+
+// The Bestiary and Characters pages' model: a battle model in the stand-by clip, turning about its vertical axis, fitted into a box of the
+// screen.
+struct EnemyModelSlot {
+  // Monster record and its battle model number (record +0x2D, or a character's battle model); -1 = none.
+  int monster = -1;
+  int model = -1;
+  // The part of the model's weapon pack it holds (an enemy's weapon item's tier & 0x7F, a character's equipped weapon's tier & 0xF);
+  // -1 = no weapon.
+  int weapon_part = -1;
+  // Drawn with its texture forced fully black (an enemy never met).
+  bool silhouette = false;
+  // Window pixels of the PS1 screen point (0, 0) and of one PS1 pixel.
+  float origin_x = 0, origin_y = 0;
+  float unit_x = 1, unit_y = 1;
+  // The box the model fits in, PS1 px.
+  float box_x = 0, box_y = 0, box_w = 0, box_h = 0;
+  // 4x textures + linear filtering.
+  bool hd = true;
+  // Seconds since the previous draw.
+  float dt = 0;
+};
+
+// The nearest camera distance at which a model turning about its vertical axis stays inside a box at every turn, seen through a
+// perspective of `scale` (window px at distance 1) with the box centre on the model's centre. `reach` holds per point its height off the
+// centre and its distance from the axis; `half_w` / `half_h` are the half box in window px. A point at `r` from the axis and `dy` off the
+// centre stays inside once distance >= r * sqrt(kx^2 + 1) and distance >= ky * dy + r, with kx = scale / half_w and ky = scale / half_h.
+inline float turning_fit_distance(std::span<const std::array<float, 2>> reach, float scale, float half_w, float half_h) {
+  const float kx = scale / half_w, ky = scale / half_h;
+  float distance = 1.0f;
+  for (const auto& point : reach) distance = std::max({distance, point[1] * std::sqrt(kx * kx + 1.0f), ky * point[0] + point[1]});
+  return distance;
+}
+
+class EnemyModelView {
+ public:
+  virtual ~EnemyModelView() = default;
+  // Called with no SpriteBatch pass open, once per frame while the Bestiary page shows a creature.
+  virtual void draw(const render::Frame& frame, float vw, float vh, const EnemyModelSlot& slot) = 0;
 };
 
 }  // namespace oc::ui

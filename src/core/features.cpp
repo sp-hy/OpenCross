@@ -23,10 +23,22 @@ constexpr std::array<Setting, 2> kPartyScreenSettings = {{
     {"ReturnToSlot", 1, 0, 1, "A pick returns the cursor to the slot it filled"},
 }};
 
-// Party swap and the party screen tweaks work on the game as shipped (addons). The mod UI and model source ops have no setting: a mod's
+// The randomizer (game/randomizer.h): every placement follows from Seed and the stable ids alone. Spread 0 swaps a thing only with one
+// of similar value and stage, 100 anywhere. Items / Elements are the tiers, the rest the extras; the randomizer is on while any switch is.
+constexpr std::array<Setting, 7> kRandomizerSettings = {{
+    {"Seed", 1, 0, 999999999, "Seed: the same seed gives the same game"},
+    {"Spread", 0, 0, 100, "Spread: 0 = similar value and stage only, 100 = anywhere"},
+    {"Items", 0, 0, 1, "Items: chests and pickups, kill drops and steals, smith stock"},
+    {"Elements", 0, 0, 1, "Elements: found in the world (summons too), drops and steals, element shop stock"},
+    {"Enemies", 0, 0, 1, "Enemy shuffle: normal encounter groups change areas, scaled to the area they land in"},
+    {"StartGear", 0, 0, 1, "Starting equipment (New Game)"},
+    {"StartElements", 0, 0, 1, "Starting elements (New Game)"},
+}};
+
+// Party swap, the party screen tweaks and the randomizer work on the game as shipped (addons). The mod UI and model source ops have no setting: a mod's
 // own scripts use them (and check the level first), and name them in Requires (mod kits). So does the button panel: the engine's own
 // correction of kji_b01i uses it for the story's code machine, and a mod's script can use it for a code of its own.
-constexpr std::array<Feature, 6> kFeatures = {{
+constexpr std::array<Feature, 7> kFeatures = {{
     {kExtensionRange, 1, "", "Extension ops (FE C0-FE FF)", {}},
     {kPartySwap, 2, "PartySwap", "Party swap", kPartySwapSettings, true,
      "A Swap command in battle: the acting character trades places with a reserve member. The party comes back after the battle unless "
@@ -42,6 +54,9 @@ constexpr std::array<Feature, 6> kFeatures = {{
     {kButtonPanel, 1, "ButtonPanel", "Button panel", {}, false,
      "RDE's on-screen button picker for a code a script reads from the pad: a Circle, Cross or Triangle opens it, and the button picked "
      "on its grid is what the script's key-latch tests read. Field script FE D1 BUTTON_PANEL, just before the tests."},
+    {kRandomizer, 1, "Randomizer", "Randomizer", kRandomizerSettings, true,
+     "Shuffles what chests, enemies and shops hold, and optionally the encounters and the starting gear, from a seed. Nothing goes into "
+     "your saves: switch it on or off at any time."},
 }};
 
 std::string_view trim(std::string_view text) {
@@ -67,6 +82,11 @@ int setting_index(const Feature& feature, std::string_view key) {
   for (size_t k = 0; k < feature.settings.size(); ++k)
     if (same(feature.settings[k].key, key)) return static_cast<int>(k);
   return -1;
+}
+
+// The randomizer's former master switch: 0 turns every switch off, 1 changes nothing.
+bool legacy_switch(const Feature& feature, std::string_view key) {
+  return feature.id == kRandomizer && same(key, "Enabled") && setting_index(feature, key) < 0 && setting_index(feature, "Items") >= 0;
 }
 
 }  // namespace
@@ -193,6 +213,16 @@ Resolved resolve(std::span<const ModInput> mods, std::span<const std::pair<std::
     out.sources[feature.id].assign(feature.settings.size(), std::string());
   }
   auto apply = [&](const std::string& from, const Feature& feature, std::string_view key, std::string_view text) {
+    if (legacy_switch(feature, key)) {
+      int on = 1;
+      if (!parse_value(text, on) || on != 0) return;
+      for (const char* name : {"Items", "Elements", "Enemies", "StartGear", "StartElements"}) {
+        const size_t slot = static_cast<size_t>(setting_index(feature, name));
+        out.values[feature.id][slot] = 0;
+        out.sources[feature.id][slot] = from;
+      }
+      return;
+    }
     const int index = setting_index(feature, key);
     if (index < 0) {
       out.issues.push_back({from, std::format("[{}] has no setting '{}'", feature.section, key)});
@@ -236,17 +266,22 @@ Resolved resolve(std::span<const ModInput> mods, std::span<const std::pair<std::
         out.issues.push_back({mod->name, std::format("needs a newer OpenCross (feature '{}')", section.name)});
         continue;
       }
-      for (const auto& [key, text] : section.values) apply(mod->name, *feature, key, text);
+      for (const bool legacy : {false, true})
+        for (const auto& [key, text] : section.values)
+          if (legacy_switch(*feature, key) == legacy) apply(mod->name, *feature, key, text);
     }
   }
-  for (const auto& [name, text] : overrides) {
-    const size_t dot = name.find('.');
-    const Feature* feature = dot == std::string::npos ? nullptr : find(features, std::string_view(name).substr(0, dot));
-    if (!feature) {
-      out.issues.push_back({"opencross.ini", std::format("[Features] {}: no such feature", name)});
-      continue;
+  for (const bool legacy : {false, true}) {
+    for (const auto& [name, text] : overrides) {
+      const size_t dot = name.find('.');
+      const Feature* feature = dot == std::string::npos ? nullptr : find(features, std::string_view(name).substr(0, dot));
+      if (!feature) {
+        if (!legacy) out.issues.push_back({"opencross.ini", std::format("[Features] {}: no such feature", name)});
+        continue;
+      }
+      const std::string_view key = std::string_view(name).substr(dot + 1);
+      if (legacy_switch(*feature, key) == legacy) apply("opencross.ini", *feature, key, text);
     }
-    apply("opencross.ini", *feature, std::string_view(name).substr(dot + 1), text);
   }
   return out;
 }

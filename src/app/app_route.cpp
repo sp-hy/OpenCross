@@ -81,6 +81,7 @@ void App::init_route_state() {
   rstate.song = [this] { return mixer.sounding() ? mixer.current_song() : -1; };
   rstate.gold = [this] { return static_cast<long long>(world.game_state().gold()); };
   rstate.options = [this] { return static_cast<int>(world.game_state().options()); };
+  rstate.config_value = [this](const std::string& section, const std::string& key) { return config.to_ini().get(section, key); };
   rstate.battle_events = [this] { return battle_ready ? battle.route_events() : std::vector<std::string>(); };
   rstate.battle_camera = [this] { return battle_ready ? battle.route_camera() : std::string(); };
   rstate.battle_menu = [this] { return battle_ready ? battle.route_menu() : std::string(); };
@@ -117,7 +118,7 @@ void App::fill_route_state() {
   // The results screen is up, or a versus battle's outcome plate (route: wait battle results).
   rstate.battle_finished = (results_ok && results.active()) || (battle_ready && battle_in_field && battle.versus_plate());
   rstate.settling = (world_ok && world.input_settling()) || (flow_ready && flow.veiled());
-  rstate.field_idle = field_visible() && world.idle() && world.fade_level() < 0.05f && !movie_open && !(menu_ok && !menu.closed()) && !shop_open && !(key_popup_ok && key_popup.active()) && !(pause_ok && pause_screen.active()) && !(party_ok && party_screen.active()) && !(monster_picker_ok && monster_picker.active());
+  rstate.field_idle = field_visible() && world.idle() && world.fade_level() < 0.05f && !movie_open && !(menu_ok && !menu.closed()) && !shop_open && !(key_popup_ok && key_popup.active()) && !(pause_ok && pause_screen.active()) && !dialogue_log_open && !(party_ok && party_screen.active()) && !(monster_picker_ok && monster_picker.active());
   rstate.fade = world_ok ? world.fade_level() : 0.0f;
   rstate.battle_result = field_visible() ? world.battle_result() : 0;
   rstate.flow = flow_ready && flow_enabled ? game::flow_state_name(flow.state()) : "field";
@@ -126,7 +127,12 @@ void App::fill_route_state() {
                (monster_picker_ok && monster_picker.active());
   rstate.shop = shop_open;
   rstate.guide_page = flow_ready ? flow.guide_page() : 0;
+  rstate.records_ready = records_info.has_value();
   rstate.pause = pause_ok && pause_screen.active();
+  const bool log_page = menu_ok && !menu.closed() && menu.screen() == ui::MenuScreen::OcPage && dialogue_log_view.active();
+  rstate.dialogue_log = dialogue_log_open || log_page ? static_cast<int>(dialogue_log_view.entry_count()) : -1;
+  rstate.dialogue_log_cursor = dialogue_log_view.cursor();
+  rstate.retry = retry_choosing;
   rstate.feature_icons = feature_icons_ok ? feature_icons.shown() : 0;
   rstate.field_ticks = world_ok ? world.tick_count() : 0;
   rstate.room_loads = world.room_loads();
@@ -245,6 +251,11 @@ void App::route_frame() {
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
     if (out.set_buttons) world.game_state().slot.button_cfg[static_cast<size_t>(out.buttons_index)] = static_cast<u32>(out.buttons_value);
     if (out.set_option) world.game_state().set_option(static_cast<u16>(out.option_mask), out.option_on != 0);
+    if (out.set_skin) {
+      world.game_state().skin = static_cast<u8>(out.skin);
+      world.game_state().set_option(ui::opt::kCustomWindow, true);
+      world.vm().set_var(script::var::kCurrentFrame, out.skin);
+    }
     if (out.set_group) world.bg_layer(out.group, out.group_on != 0);
     if (out.set_var) world.vm().set_var(static_cast<u16>(out.var_id), out.var_value);
     // A warp takes the disc from the story variable 0x42 like a map jump; a room only the other disc holds takes that disc.

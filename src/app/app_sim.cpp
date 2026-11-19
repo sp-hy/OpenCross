@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <exception>
+#include <format>
+#include <string>
 
 #include "core/log.h"
 #include "game/disc_index.h"
@@ -91,12 +93,22 @@ void App::end_movie() {
 }
 
 void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
+  if (!open_movie(rq, world.disc())) {
+    world.movie_finished();
+    world.lock_input(kMovieInputLock);
+    if (flow_ready) flow.set_title_logo_ready(true);
+    return;
+  }
+  if (const auto* row = game::DiscIndex::movie_row(world.disc(), rq.index)) unlock_extra(save::Unlock::Movie, save::movie_key(world.disc(), row->number));
+}
+
+bool App::open_movie(const game::FieldWorld::MovieRequest& rq, int disc) {
   movie_player.set_mixer(mixer.device_open() ? &mixer : nullptr);
   // The field movie table's frame range: a few rows play part of a file (the title / Zelbess excerpts). The row's volume scales the
   // movie's sound (0 on two disc 2 rows: the movie plays silent under the field's music, which keeps playing through every movie).
   u32 mstart = 0, mend = 0;
-  game::DiscIndex::movie_range(world.disc(), rq.index, mstart, mend);
-  const auto* row = game::DiscIndex::movie_row(world.disc(), rq.index);
+  game::DiscIndex::movie_range(disc, rq.index, mstart, mend);
+  const auto* row = game::DiscIndex::movie_row(disc, rq.index);
   // A disc's movie stream counts frames as the table does, so every row stops at its own end (the stream's frame count; the
   // Japanese opening's black tail after it is not shown).
   if (row && !mend && movie::resolve_member(files, rq.name, config.language).ends_with(".stv")) mend = row->end;
@@ -105,10 +117,7 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
       !movie_player.init_gpu(ctx, sprites)) {
     log::warn("movie: {} could not be opened; skipped", rq.name);
     movie_player.close();
-    world.movie_finished();
-    world.lock_input(kMovieInputLock);
-    if (flow_ready) flow.set_title_logo_ready(true);
-    return;
+    return false;
   }
   // The two ending_s rows (modes 3 / 4) show the staff roll: the movie in a panel beside the scrolling credits strip.
   if (row && (row->mode == 3 || row->mode == 4))
@@ -117,6 +126,7 @@ void App::start_movie(const game::FieldWorld::MovieRequest& rq) {
   movie_fade = rq.fade;
   ctx.set_clear_color(0.0f, 0.0f, 0.0f);
   log::info("movie: {} ({}x{}, {:.1f} fps)", movie_player.member(), movie_player.width(), movie_player.height(), movie_player.fps());
+  return true;
 }
 
 void App::open_main_menu(bool script) {
@@ -152,6 +162,13 @@ void App::open_shop(const game::FieldWorld::MenuRequest& rq) {
   using script::MenuKind;
   const ui::ShopKind kind = rq.kind == MenuKind::ElementShop ? ui::ShopKind::Element : rq.kind == MenuKind::TradingPost ? ui::ShopKind::Trading : ui::ShopKind::Smith;
   world.fade_screen_sounds(true);
+  ui::shop::StockMap stock = randomizer_stock_map();
+  if (stock && kind != ui::ShopKind::Trading) {
+    std::string listed;
+    for (int id : stock(kind, rq.arg, {})) listed += std::format(" {}", randomizer_pools->thing_name(kind == ui::ShopKind::Element ? 0x200 + id : id));
+    log::info("randomizer: shop {} stock:{}", rq.arg, listed);
+  }
+  shop.set_stock_map(std::move(stock));
   shop.open(flow.game_state(), kind, rq.arg);
   shop_open = true;
   log::info("shop: {} {} opened", kind == ui::ShopKind::Element ? "element shop" : kind == ui::ShopKind::Trading ? "trading post" : "blacksmith", rq.arg);
@@ -260,7 +277,11 @@ void App::apply_flow_action(const game::FlowAction& flow_action) {
     }
   }
   // After a load / Continue / New Game the next tick only records the location.
-  if (action.state_changed && flow.state() != game::FlowState::Opening) autosave.note_load();
+  if (action.state_changed && flow.state() != game::FlowState::Opening) {
+    autosave.note_load();
+    note_dialogue_load();
+    record_slot("load");
+  }
   if (action.quit) quit_requested = true;
   if (action.open_settings) ui.options_open = true;
   if (action.stop_music && world_ok) world.stop_music();
@@ -318,7 +339,7 @@ bool App::pause_modal(const platform::Input& in) {
     // Not over the title scene (its logo / attract movies) or the title's own screens (menu, slot list, name entry).
     if (flow_ready && (flow.scene_mode() || flow.owns_screen())) return false;
     // Not over a versus battle: the other player's game does not pause.
-    const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active() && !versus_running;
+    const bool over_battle = (battle_ok || battle_in_field) && !battle.transition_active() && !versus_running && !retry_busy();
     if (start_edge && (over_battle || movie_open)) {
       open_pause();
       log::info("pause: opened over {} (vibration {})", movie_open ? "a movie" : "a battle", pause_screen.vibration());
@@ -361,13 +382,16 @@ void App::restart_game() {
   if (pause_ok) pause_screen.close();
   if (movie_open) {
     movie_player.close();
-    movie_open = false;
+    movie_open = theatre_open = false;
     ctx.set_clear_color(0.08f, 0.09f, 0.14f);
   }
+  extras_music = false;
   deferred_flow_set = false;
   battle_in_field = false;
   battle_scene = -1;
   fb_args.reset();
+  retry_point.reset();
+  retry_choosing = retry_menu = false;
   if (results_ok) results.abort();
   if (menu_ok) menu.close();
   menu_from_script = false;
@@ -490,6 +514,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   }
   // The pause screen (any context) owns the input; battle / movie / field stand still under it.
   if (pause_modal(in)) return;
+  // The dialogue log window (any time in the field): everything under it stands still while it is open.
+  if (dialogue_log_step(in)) return;
   if (battle_ok) {
     if (results_ok && results.active()) {
       results.update(static_cast<float>(dt), in);
@@ -517,10 +543,12 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   }
   if (movie_open) {
     movie_player.update(dt);
-    if (world_ok)
+    if (world_ok && !theatre_open)
       for (int tick = 0; tick < ticks; ++tick) world.movie_tick();
     if (movie_skip_edge(in)) movie_player.skip();
-    if (movie_player.finished()) {
+    if (movie_player.finished() && theatre_open) {
+      end_theatre();
+    } else if (movie_player.finished()) {
       end_movie();
       if (deferred_flow_set) {
         deferred_flow_set = false;
@@ -593,10 +621,13 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
       if (results.done()) finish_field_battle(true);
       return;
     }
+    // Retry battle: the choice after a wipe, or the limited menu before the battle starts again.
+    if (retry_step(in, dt, ticks)) return;
     apply_loop_speed(loop_speed.battle_factor, false);
     battle.update(static_cast<float>(dt) * loop_speed.battle_factor, in);
     // A versus battle has no results screen and writes nothing back.
     if (battle.finished() && versus_running) finish_versus_battle();
+    else if (battle.finished() && retry_offered()) open_retry();
     else if (battle.finished() && !(results_ok && battle.battle() && results.open(*battle.battle(), battle_scene))) finish_field_battle();
     return;
   }
@@ -621,6 +652,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
         return;
       }
       world.state_edited();
+      if (menu.saved()) record_slot("save");
       // The menu hands the skin byte back to the field as variable 0x44.
       world.vm().set_var(script::var::kCurrentFrame, flow.game_state().skin);
       world.fade_screen_sounds(false);
@@ -776,6 +808,7 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
         log::info("autosave: map {:#x} written ({}{})", world.map_id(), targets.card ? "card 1" : "", targets.page ? (targets.card ? " + OpenCross" : "OpenCross") : "");
         // RDE's "AUTO SAVE" strip.
         if (feature_icons_ok) feature_icons.show_autosave();
+        record_slot("autosave");
       }
     }
   }

@@ -1,5 +1,5 @@
-// OpenCross's own achievements: the profile file next to the player's ini, the tab, the per-frame feed of game::OcAchievements (room
-// samples, the battle's actions, forges) and the unlock popup.
+// OpenCross's own achievements: the profile file next to the player's ini, the rows of the menu's Achievements page, the per-frame feed
+// of game::OcAchievements (room samples, the battle's actions, forges) and the unlock popup.
 #include "app/app.h"
 
 #include <fstream>
@@ -18,9 +18,7 @@ constexpr int kPip = 43;
 
 // A --config run keeps its unlocks in memory: no file is read or written.
 void App::init_oc_achievements() {
-  ui.add_tab("Achievements", [this] {
-    if (game::draw_oc_achievements_tab(oc_achievements, oc_achievements_tab, config.hide_achievement_notices)) ui.mark_changed();
-  }, 45);
+  if (menu_ok) menu.set_achievements(&oc_achievement_rows);
   if (tables_ok) {
     std::vector<game::OcAchievements::ElementInfo> elements(tables.elements.size());
     for (size_t id = 0; id < tables.elements.size(); ++id) {
@@ -80,6 +78,11 @@ void App::update_oc_achievements(int ticks) {
   // Taken every frame, so nothing piles up while the set is off. A versus battle counts nothing on either side.
   const std::vector<std::vector<battle::ActionEvent>> actions = battle_ready ? battle.take_begun_actions() : std::vector<std::vector<battle::ActionEvent>>{};
   const int forged = shop_ok ? shop.take_forged_count() : 0;
+  // The Achievements page's rows: built on the first frame and again after every change of the profile.
+  if (oc_achievement_rows_stale) {
+    oc_achievement_rows = game::achievement_list(oc_achievements);
+    oc_achievement_rows_stale = false;
+  }
   oc_achievements.set_enabled(config.achievements);
   oc_achievements.set_blocked(debug_tools.saving_disabled());
   if (!config.achievements || config.hide_achievement_notices) oc_popup.clear();
@@ -105,7 +108,10 @@ void App::update_oc_achievements(int ticks) {
     earned_achievements.emplace_back(oc_achievements.rows()[row].id);
     if (!config.hide_achievement_notices) oc_popup.push(oc_achievements.rows()[row].title);
   }
-  if (oc_achievements.take_dirty()) save_oc_achievements();
+  if (oc_achievements.take_dirty()) {
+    save_oc_achievements();
+    oc_achievement_rows_stale = true;
+  }
 }
 
 void App::oc_achievements_overlay() { oc_popup.draw(frame_dt * 60.0, movie_open || ui.options_open); }

@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <optional>
 #include <string>
 
@@ -36,6 +37,8 @@ Mixer::~Mixer() {
 
 bool Mixer::start_capture(const std::string& path) {
   if (capture_ || stream_) return false;
+  std::error_code ec;
+  if (const std::filesystem::path parent = std::filesystem::path(path).parent_path(); !parent.empty()) std::filesystem::create_directories(parent, ec);
   capture_ = std::fopen(path.c_str(), "wb");
   if (!capture_) return false;
   auto write32 = [&](u32 value) { std::fwrite(&value, 4, 1, capture_); };
@@ -117,15 +120,17 @@ void Mixer::push(Cmd cmd) {
   queue_.push_back(std::move(cmd));
 }
 
-void Mixer::play(std::shared_ptr<HcaStream> stream, int song_id, int volume127, double start_seconds) {
-  push({Cmd::Play, std::move(stream), song_id, std::clamp(volume127, 0, 127), start_seconds});
+void Mixer::play(std::shared_ptr<HcaStream> stream, int song_id, int volume127, double start_seconds, bool resumable) {
+  Cmd cmd{Cmd::Play, std::move(stream), song_id, std::clamp(volume127, 0, 127), start_seconds};
+  cmd.resumable = resumable;
+  push(std::move(cmd));
 }
 void Mixer::stop() { push({Cmd::Stop, nullptr, -1, 0, 0}); }
 void Mixer::fade(int target_volume127, double seconds) { push({Cmd::Fade, nullptr, -1, std::clamp(target_volume127, 0, 127), seconds}); }
 void Mixer::pause() { push({Cmd::Pause, nullptr, -1, 0, 0}); }
 void Mixer::resume() { push({Cmd::Resume, nullptr, -1, 0, 0}); }
 
-bool Mixer::play_akao_bgm(int song_id, int volume127) {
+bool Mixer::play_akao_bgm(int song_id, int volume127, bool resumable) {
   if (!vfs_) return false;
   const BgmEntry* entry = bgm_entry(song_id);
   if (!base_table_) base_table_ = load_akao_base_table(*vfs_);
@@ -133,6 +138,7 @@ bool Mixer::play_akao_bgm(int song_id, int volume127) {
   if (!music) return false;
   auto player = std::make_shared<AkaoPlayer>(kRate, false);
   Cmd cmd{Cmd::PlayAkao, nullptr, song_id, std::clamp(volume127, 0, 127), 0};
+  cmd.resumable = resumable;
   cmd.triggers = sfx_bank_ ? make_sfx_triggers(*sfx_bank_, *music->seq) : nullptr;
   player->collect_sfx_requests = cmd.triggers != nullptr;
   player->load_music(music->seq, music->table);
@@ -301,14 +307,26 @@ void Mixer::apply(const Cmd& cmd) {
         break;
       }
       if (!cmd.stream) break;
+      remember_song();
       akao_.reset();
       bgm_ = cmd.stream;
-      bgm_->seek(u32(std::max(0.0, cmd.seconds) * bgm_->sample_rate()));
-      bgm_resampler_.reset(bgm_->sample_rate(), kRate);
-      bgm_base_ = std::max(0.0, cmd.seconds);
-      bgm_frames_ = 0;
-      bgm_akao_.store(false);
-      arm_level(bgm_gain(cmd.volume));
+      {
+        double start = std::max(0.0, cmd.seconds), song_seconds = start;
+        const std::optional<SongPlace> place = resume_place(cmd, false);
+        if (place) {
+          start = place->stream_seconds;
+          song_seconds = place->song_seconds;
+          log::debug("audio: song {} resumes its stream at {:.3f} s", cmd.song, start);
+        }
+        bgm_->seek(u32(start * bgm_->sample_rate()));
+        bgm_resampler_.reset(bgm_->sample_rate(), kRate);
+        bgm_base_ = song_seconds;
+        bgm_frames_ = 0;
+        bgm_akao_.store(false);
+        arm_level(bgm_gain(cmd.volume));
+        if (place) fade_in_resumed(bgm_gain(cmd.volume));
+      }
+      bgm_resumable_ = cmd.resumable;
       song_.store(cmd.song);
       break;
     case Cmd::PlayAkao:
@@ -317,20 +335,32 @@ void Mixer::apply(const Cmd& cmd) {
         break;
       }
       if (!cmd.akao) break;
-      if (pushed_ && pushed_song_ == cmd.song) {
-        cmd.akao->restore_context(*pushed_);
-        log::debug("audio: song {} resumes the pushed music at {:.3f} s (tick {})", cmd.song, cmd.akao->seconds(), cmd.akao->ticks());
-        pushed_.reset();
-        pushed_song_ = -1;
+      remember_song();
+      {
+        bool resumed = false;
+        if (pushed_ && pushed_song_ == cmd.song) {
+          cmd.akao->restore_context(*pushed_);
+          log::debug("audio: song {} resumes the pushed music at {:.3f} s (tick {})", cmd.song, cmd.akao->seconds(), cmd.akao->ticks());
+          pushed_.reset();
+          pushed_song_ = -1;
+          if (resume_on_.load(std::memory_order_relaxed)) song_places_.forget(cmd.song);
+        } else if (const std::optional<SongPlace> place = resume_place(cmd, true)) {
+          cmd.akao->restore_context(*place->context);
+          log::debug("audio: song {} resumes its sequencer at {:.3f} s (tick {})", cmd.song, cmd.akao->seconds(), cmd.akao->ticks());
+          resumed = true;
+        }
+        bgm_.reset();
+        akao_ = cmd.akao;
+        akao_triggers_ = cmd.triggers;
+        arm_level(akao_gain(cmd.volume));
+        if (resumed) fade_in_resumed(akao_gain(cmd.volume));
       }
-      bgm_.reset();
-      akao_ = cmd.akao;
-      akao_triggers_ = cmd.triggers;
-      arm_level(akao_gain(cmd.volume));
+      bgm_resumable_ = cmd.resumable;
       song_.store(cmd.song);
       bgm_akao_.store(true);
       break;
     case Cmd::Stop:
+      remember_song();
       bgm_.reset();
       akao_.reset();
       song_.store(-1);
@@ -420,8 +450,44 @@ void Mixer::apply(const Cmd& cmd) {
     case Cmd::DropPush:
       pushed_.reset();
       pushed_song_ = -1;
+      song_places_.clear();
       break;
   }
+}
+
+void Mixer::remember_song() {
+  const int song = song_.load();
+  if (!resume_on_.load(std::memory_order_relaxed) || !bgm_resumable_ || song < 0) return;
+  SongPlace place;
+  if (akao_) {
+    if (akao_->active_channels() == 0) return;
+    place.akao = true;
+    place.context = akao_->save_context();
+    place.song_seconds = akao_->seconds();
+  } else if (bgm_) {
+    place.stream_seconds = double(bgm_->position()) / double(bgm_->sample_rate());
+    place.song_seconds = bgm_base_ + double(bgm_frames_) / double(kRate);
+  } else {
+    return;
+  }
+  log::debug("audio: song {} cut at {:.3f} s: its place is kept for the music resume", song, place.song_seconds);
+  song_places_.remember(song, std::move(place), double(clock_frames_) / double(kRate));
+}
+
+std::optional<SongPlace> Mixer::resume_place(const Cmd& cmd, bool akao) {
+  if (!resume_on_.load(std::memory_order_relaxed)) return std::nullopt;
+  if (!cmd.resumable || (!akao && cmd.seconds > 0.0)) {
+    song_places_.forget(cmd.song);
+    return std::nullopt;
+  }
+  return song_places_.take(cmd.song, akao, double(clock_frames_) / double(kRate));
+}
+
+void Mixer::fade_in_resumed(float gain) {
+  level_ = gain / 32.0f;
+  level_target_ = gain;
+  fade_left_ = u32(31.0 / 120.0 * kRate);
+  level_step_ = (level_target_ - level_) / float(fade_left_);
 }
 
 // The command queue is drained under a try-lock: the audio thread never blocks, commands it cannot take apply next callback. While
@@ -538,6 +604,8 @@ void Mixer::render(float* out, u32 frames) {
   level_view_.store(level_, std::memory_order_relaxed);
   level_target_view_.store(level_target_, std::memory_order_relaxed);
   fade_left_view_.store(fade_left_, std::memory_order_relaxed);
+  clock_frames_ += frames;
+  if (!resume_on_.load(std::memory_order_relaxed) && !song_places_.empty()) song_places_.clear();
 }
 
 void Mixer::sdl_callback(void* user, SDL_AudioStream* stream, int additional, int) {

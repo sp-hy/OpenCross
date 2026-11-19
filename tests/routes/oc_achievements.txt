@@ -29,9 +29,60 @@
 - wait 70
 - assert earned oc_place_opassa
 - assert unearned oc_place_cape
-# The settings window on the Achievements tab; the popup waits while it is open.
-- settings Achievements
+# The OpenCross row's Achievements page (oc_ach_page): the earned rows bright with their date. Square steps the filter to Recruits
+# (oc_ach_recruits); Triangle opens its Options page, where Hide notices and Show spoilers turn on (oc_ach_options); Cancel returns to
+# the page, and the filter on Items and endgame shows the ending rows by name (oc_ach_spoilers). Back in Serge's room first: the beach
+# starts a scene.
+- load alu_a03i 0
+- wait room alu_a03i
+- wait idle 600
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
 - wait 10
-- screenshot oc_ach_tab.png
-- settings close
-- wait 5
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap up                              # Achievements, the group list's last entry
+- wait 10
+- tap confirm
+- wait 60
+- screenshot oc_ach_page.png
+- tap item
+- wait 10
+- tap item
+- wait 10
+- tap item
+- wait 10
+- screenshot oc_ach_recruits.png
+- tap triangle
+- wait 30
+- assert config Game Achievements 1
+- assert config Game HideAchievementNotices 0
+- tap down
+- wait 10
+- tap right
+- wait 10
+- assert config Game HideAchievementNotices 1
+- tap down
+- wait 10
+- tap right
+- wait 10
+- screenshot oc_ach_options.png
+- tap cancel
+- wait 30
+- tap item
+- wait 10
+- tap item
+- wait 10
+- tap item
+- wait 10
+- screenshot oc_ach_spoilers.png
+- tap cancel
+- wait 60
+- tap cancel
+- wait 30
+- tap cancel
+- wait menu closed 200

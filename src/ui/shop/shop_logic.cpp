@@ -45,8 +45,12 @@ bool ShopData::load_waa_shop(const vfs::Vfs& vfs) {
   return true;
 }
 
-std::vector<int> ShopData::element_row(int shop_id) const { return row_ids(el_shop, shop_id); }
-std::vector<int> ShopData::gear_row(int shop_id) const { return row_ids(waa_shop, shop_id); }
+std::vector<int> ShopData::element_row(int shop_id) const {
+  return stock_map ? stock_map(Kind::Element, shop_id, row_ids(el_shop, shop_id)) : row_ids(el_shop, shop_id);
+}
+std::vector<int> ShopData::gear_row(int shop_id) const {
+  return stock_map ? stock_map(Kind::Smith, shop_id, row_ids(waa_shop, shop_id)) : row_ids(waa_shop, shop_id);
+}
 
 // ------------------------------------------------------------------------------------------------ element shop
 int element_price(const GameState& gs, int id) {
@@ -313,6 +317,68 @@ Res sell_gear(GameState& gs, int item, int qty) {
   for (int k = 0; k < qty; ++k) gs.take_item(item);
   add_gold(gs, gear_sell_price(gs, item, qty));
   return Res::Ok;
+}
+
+// ------------------------------------------------------------------------------------------------ equip compare
+bool is_gear(const GameState& gs, int item) {
+  const data::ItemInfo* item_info = info(gs, item);
+  return item >= GameState::kFirstGearId && item_info && item_info->kind() <= 2;
+}
+
+GearCompare gear_compare(const GameState& gs, int character, int item) {
+  GearCompare out;
+  out.character = character;
+  if (!is_gear(gs, item) || character < 0 || character >= save::kNumChars) return out;
+  const int kind = info(gs, item)->kind();
+  out.eslot = kind;
+  if (kind == 2) {
+    auto mask = [&](int id) -> int {
+      const data::GearRec* gear = id > 0 ? gs.rules->tables->gear_rec(id) : nullptr;
+      return gear ? gear->slot_mask() : 0;
+    };
+    int held = -1, overlap = -1, empty = -1;
+    for (int k = 2; k < GameState::kEquipSlots; ++k) {
+      const int worn = gs.equipped(character, k);
+      if (worn == item && held < 0) held = k;
+      if (worn && (mask(worn) & mask(item)) && overlap < 0) overlap = k;
+      if (!worn && empty < 0) empty = k;
+    }
+    out.eslot = held >= 0 ? held : overlap >= 0 ? overlap : empty >= 0 ? empty : 2;
+  }
+  out.wearable = info(gs, item)->can_equip(character);
+  out.worn = gs.equipped(character, out.eslot) == item;
+  out.now = gs.stats(character);
+  out.with = out.worn ? out.now : gs.stats_with(character, out.eslot, item);
+  return out;
+}
+
+std::vector<StatChange> stat_changes(const Stats& now, const Stats& with) {
+  std::vector<StatChange> out;
+  auto add = [&](Stat stat, int before, int after, int cap) {
+    before = std::min(before, cap), after = std::min(after, cap);
+    if (before != after) out.push_back({stat, before, after});
+  };
+  add(Stat::Atk, now.atk, with.atk, 999);
+  add(Stat::Mag, now.mag, with.mag, 999);
+  add(Stat::Hit, now.hit, with.hit, 99);
+  add(Stat::Def, now.def, with.def, 999);
+  add(Stat::Mdef, now.mdef, with.mdef, 999);
+  add(Stat::Evd, now.evd, with.evd, 99);
+  return out;
+}
+
+std::vector<int> compare_order(const GameState& gs, int item, int* others) {
+  const std::vector<int> party = gs.party();
+  std::vector<int> out = party, unable;
+  int able = 0;
+  for (int character = 0; character < save::kNumChars; ++character) {
+    if (!gs.available(character) || std::find(party.begin(), party.end(), character) != party.end()) continue;
+    if (gear_compare(gs, character, item).wearable) out.push_back(character), ++able;
+    else unable.push_back(character);
+  }
+  out.insert(out.end(), unable.begin(), unable.end());
+  if (others) *others = able;
+  return out;
 }
 
 // ------------------------------------------------------------------------------------------------ trading post

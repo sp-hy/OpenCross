@@ -400,4 +400,18 @@ bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battl
   return true;
 }
 
+bool wipe_ends_game(battle::Outcome outcome, int battle_flags) { return outcome == battle::Outcome::Wiped && !(battle_flags & 2); }
+
+BattleSnapshot take_battle_snapshot(const ui::GameState& gs, std::span<const u16> vars) {
+  BattleSnapshot snapshot;
+  snapshot.slot = gs.slot;
+  snapshot.vars.assign(vars.begin(), vars.end());
+  return snapshot;
+}
+
+void restore_battle_snapshot(const BattleSnapshot& snapshot, ui::GameState& gs, std::span<u16> vars) {
+  gs.slot = snapshot.slot;
+  std::copy_n(snapshot.vars.begin(), std::min(snapshot.vars.size(), vars.size()), vars.begin());
+}
+
 }  // namespace oc::game

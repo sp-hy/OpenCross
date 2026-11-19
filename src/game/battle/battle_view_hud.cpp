@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <format>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "import/container.h"
 #include "import/lzss.h"
@@ -471,6 +472,29 @@ void BattleView::add_rect(float x, float y, float w, float h, u32 color) {
   ops_.push_back(std::move(op));
 }
 
+void BattleView::add_icon(int colour, float cx, float cy, float size, int light) {
+  Op op;
+  op.kind = Op::Icon;
+  op.x = cx;
+  op.y = cy;
+  op.w = size;
+  op.icon = colour;
+  op.color = col(static_cast<u8>(light), 0, 0);
+  ops_.push_back(std::move(op));
+}
+
+void BattleView::add_plate_symbol(int colour, float x, float y, int light) {
+  if (element_symbols() && colour >= 0 && colour < kElementIconCount) add_icon(colour, (x + 7.0f) * kPs1Px, (y + 8.0f) * kRowScale, 52.0f, light);
+}
+
+void BattleView::build_ring_symbols() {
+  if (!element_symbols()) return;
+  for (size_t slot = 0; slot < 3; ++slot) {
+    const int colour = ring_cells_[slot * 4];
+    if (colour >= 0 && colour < kElementIconCount) add_icon(colour, (65.5f + 10.0f * static_cast<float>(slot)) * kPs1Px, 15.5f * kPs1Px, 38.0f);
+  }
+}
+
 size_t BattleView::op_count() const { return ops_.size(); }
 
 void BattleView::set_group(size_t from, int grp, float shift) {
@@ -559,6 +583,7 @@ void BattleView::build_field_ring() {
   rebuild_ring();
   add_img(hud_[kHRing], 7 * kPs1Px, 10 * kPs1Px, 52 * kPs1Px, 28 * kPs1Px);
   add_img(hud_[kHField], 7 * kPs1Px, 10 * kPs1Px, 52 * kPs1Px, 28 * kPs1Px);
+  build_ring_symbols();
   // Caption: "FIELD EFFECT" per language, flags 0x20086 (style 0x86: gn x 0.65, quarter shrink, H2), colour 0x757575, at PS1 (60, 23) in
   // 240-line units.
   static const char32_t* kCaption[6] = {U"FIELD EFFECT", U"EFFET DE CHAMP", U"EFFETTO DI CAMPO", U"FELDEFFEKT", U"AMBIENTE ELEMENTAL", U"FiELD EFFECT"};
@@ -593,6 +618,7 @@ void BattleView::build_element_trap() {
   } else if (trap.pc > 0 && static_cast<size_t>(trap.pc) < tables_->elements.size()) {
     const int colour = data::colour_index_of_bit(static_cast<u8>(tables_->elements[static_cast<size_t>(trap.pc)].b(5) & 0xFC));
     if (colour >= 0) add_img(trap_marks_[static_cast<size_t>(colour)], 88 * kPs1Px, 39 * kCanvasH / 216.0f, 5 * kPs1Px, 5 * kCanvasH / 216.0f);
+    if (element_symbols() && colour >= 0) add_icon(colour, 90.5f * kPs1Px, 41.5f * kRowScale, 28.0f);
   }
   btext(kStyle, trap.enemy != 0 ? xlat("?", U"?") : xlat("NO", U"NO"), 88, 46, kColour);
 }
@@ -633,9 +659,11 @@ void BattleView::build_colour_row() {
     const int frame = kColourDotFrame[static_cast<size_t>(entry)];
     if (ps1_hud_) {
       add_sheet(0xB8, frame, static_cast<float>(0x68 + 16 * i), 0x10);
+      if (element_symbols()) add_icon(entry - 1, static_cast<float>(0x68 + 16 * i + 8) * kPs1Px, 0x18 * kPs1Px, 44.0f);
       continue;
     }
     add_img(hud_[kHColourDot + static_cast<size_t>(frame - 1)], static_cast<float>(0x68 + 16 * i) * kPs1Px, 0x10 * kPs1Px, 16 * kPs1Px, 16 * kPs1Px);
+    if (element_symbols()) add_icon(entry - 1, static_cast<float>(0x68 + 16 * i + 8) * kPs1Px, 0x18 * kPs1Px, 44.0f);
   }
 }
 
@@ -709,6 +737,7 @@ void BattleView::build_hud() {
         ops_[g0].shift = 13 * 4.0f;
       }
     build_colour_row();
+    build_enemy_hp_bars();
   }
 
   if (!hud_off) {

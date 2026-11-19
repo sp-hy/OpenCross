@@ -45,7 +45,11 @@
 #include "platform/steam.h"
 #include "game/field_world.h"
 #include "game/game_flow.h"
+#include "game/game_session.h"
+#include "game/model_export.h"
+#include "game/randomizer.h"
 #include "game/route_script.h"
+#include "game/scan_service.h"
 #include "game/title_backdrop.h"
 #include "app/data_source.h"
 #include "import/disc/disc_backend.h"
@@ -69,15 +73,21 @@
 #include "render/text_batch.h"
 #include "render/texture.h"
 #include "save/cc_save.h"
+#include "save/collection.h"
+#include "save/dialogue_log.h"
+#include "save/extras_unlocks.h"
 #include "save/oc_saves.h"
+#include "ui/dialogue_log_view.h"
 #include "ui/disc_prompt.h"
 #include "ui/keyitem_popup.h"
 #include "ui/lowres.h"
+#include "ui/menu/enemy_model.h"
 #include "ui/menu/main_menu.h"
 #include "ui/menu/picker_model.h"
 #include "ui/menu/status_model.h"
 #include "ui/monster_pick_screen.h"
 #include "ui/party_screen.h"
+#include "ui/retry_prompt.h"
 #include "ui/feature_icons.h"
 #include "ui/pause_screen.h"
 #include "ui/world_name.h"
@@ -192,6 +202,8 @@ class App {
   void apply_art_mode();
   void end_movie();
   void start_movie(const game::FieldWorld::MovieRequest& rq);
+  // Opens and starts the movie of row `rq.index` of disc `disc`'s movie table; false when it cannot be opened.
+  bool open_movie(const game::FieldWorld::MovieRequest& rq, int disc);
   void open_main_menu(bool script);
   void handle_script_menu(const game::FieldWorld::MenuRequest& rq);
   void open_name_entry(int char_id);
@@ -213,7 +225,29 @@ class App {
   void field_battle_load_step();
   void start_field_battle();
   void finish_field_battle(bool after_results = false);
+  // A wipe in a battle that is not losable: the game-over room (map 9), the title when it cannot be loaded.
+  void enter_game_over();
   void scene_battle();
+  // Retry lost battles (Quality of life): every field battle keeps the state it began from; a wipe that would end the game opens the choice
+  // instead of the game over. Retry restores the state and starts the same scene again, Retry after changes restores it and opens the
+  // limited main menu, whose closing starts the battle; Give up runs the battle's normal end.
+  struct RetryPoint {
+    game::BattleSnapshot state;
+    game::FieldWorld::BattleRequest request;
+    int scene = -1;
+    // ext_save.dat's battle counter.
+    u32 battles = 0;
+  };
+  void take_retry_point(const game::FieldWorld::BattleRequest& rq, int scene);
+  bool retry_offered();
+  void open_retry();
+  // One frame of the choice or of the limited menu; false when neither is up.
+  bool retry_step(const platform::Input& in, double dt, int ticks);
+  void restore_retry_point();
+  void restart_field_battle();
+  bool retry_busy() const { return retry_choosing || retry_menu; }
+  std::optional<RetryPoint> retry_point;
+  bool retry_choosing = false, retry_menu = false;
   // A versus battle (rules/versus.md) from the field: the next battle request is `setup` (the field's battle request path with a carrier
   // scene; nothing of the save goes in or comes back), the other side plays through `link`, `net` = a server's battle (pvp_end at the
   // end). False when it cannot start now (not a free field, a battle under way, a dev switch of the battle set, no stage).
@@ -233,9 +267,72 @@ class App {
   bool versus_running = false, versus_net = false;
 
   // ---- app_achievements.cpp ---------------------------------------------------------------------------------------------------
-  // Adds the tab, gives the rules the element table and reads achievements.txt next to the player's ini.
+  // Gives the rules the element table, reads achievements.txt next to the player's ini and hands the menu the Achievements page's rows.
   void init_oc_achievements();
   void save_oc_achievements();
+  // The collection file ([Game] OpenCrossMenu): read beside the OpenCross saves; field battles record into it (app_collection.cpp).
+  void init_collection();
+  void record_battle_start();
+  void record_battle_end(int code);
+  void save_collection();
+  // The Chronicle's Reset: forgets everything recorded but the grid presets.
+  void reset_collection();
+  // The General tab's OpenCross menu row.
+  void opencross_menu_row();
+  // The OpenCross row's pages and their Options pages, once per frame.
+  void update_opencross_menu();
+  // ---- app_randomizer.cpp -----------------------------------------------------------------------------------------------------
+  // The randomizer's hooks into the field, the shops and the Mods tab page; the settings of the launch.
+  void init_randomizer();
+  // The [Randomizer] values after a Mods tab change: the plan follows them at once (no restart).
+  void update_randomizer();
+  // The plan while the randomizer is on (built on first use; waits for the scan), else null.
+  const game::randomizer::Plan* randomizer();
+  // The shop rows as the randomizer gives them (an empty function while it is off or its tiers leave the shops alone).
+  ui::shop::StockMap randomizer_stock_map();
+  // A field encounter's scene and options under the enemy shuffle and the moved drops.
+  void randomize_battle(int& scene, game::BattleView::StartOptions& bopt);
+  // Marks in the collection what the open game holds (its recruited characters, elements and key items), after a load and a save.
+  void record_slot(const char* why);
+  // Builds the record pages' knowledge once the scan has finished and hands it to the menu.
+  void update_records_info();
+
+  // ---- app_dialogue_log.cpp --------------------------------------------------------------------------------------------------- The
+  // dialogue log ([Game] OpenCrossMenu): the log file read beside the OpenCross saves (written only with the player's own ini), the hooks
+  // of the field and the battle, a loaded game's divider, the log window over the field and the replay of a logged line's voice files.
+  void init_dialogue_log();
+  void dialogue_log_frame();
+  void add_dialogue_line(save::DialogueEntry entry);
+  void note_dialogue_load();
+  // The window over the field: opened / closed by the L key or the pad's RB + Back, its input while it is open (true = it took the
+  // frame). `in` loses the Back press while RB is held, so the chord does not change the leader.
+  bool dialogue_log_step(platform::Input& in);
+  bool dialogue_log_allowed() const;
+  void close_dialogue_log();
+
+  // ---- app_extras.cpp --------------------------------------------------------------------------------------------------------- The
+  // Extras pages ([Game] OpenCrossMenu): the songs and movies they list, the player of its jukebox and theatre, and the unlocks play adds
+  // to the collection file (a song that sounded, a movie that started, a face a dialogue window showed).
+  struct ExtrasPlayer final : ui::ExtrasHost {
+    App* app = nullptr;
+    bool play_song(int song, bool remastered) override;
+    void switch_song_source(bool remastered) override;
+    void stop_song() override;
+    bool play_movie(int disc, int row) override;
+    bool remastered_music() const override;
+  };
+  void init_extras();
+  // Once per frame: the playing song's unlock, and the field's music back when the page that took it is gone.
+  void update_extras();
+  void unlock_extra(save::Unlock kind, int index);
+  // The music the page played (a jukebox song or a movie) gives way to the field's own.
+  void give_music_back();
+  // A theatre movie ended or was skipped: back to the page.
+  void end_theatre();
+  ui::ExtrasCatalog extras_catalog;
+  ExtrasPlayer extras_player;
+  // The page's music replaced the field's; a theatre movie plays (movie_open is set too).
+  bool extras_music = false, theatre_open = false;
   // The set's state for `ticks` ticks of play: the battle's begun actions, forges, the room samples; unlocks go to the file and the popup.
   void update_oc_achievements(int ticks);
   // The unlock popup, inside the ImGui frame.
@@ -399,6 +496,7 @@ class App {
   // built once at launch with the features (App::init_vfs).
   game::ModRooms mod_rooms;
   game::TextureDumpJob texture_dump_job;
+  game::ModelExportJob model_export_job;
 
   // ---- rendering --------------------------------------------------------------------------------------------------------------
   render::GpuContext ctx;
@@ -439,9 +537,11 @@ class App {
   std::chrono::steady_clock::time_point mp_epoch = std::chrono::steady_clock::now();
   // Steam API names and OpenCross achievement ids earned this run; routes read them.
   std::vector<std::string> earned_achievements;
-  // OpenCross's own achievements: the rules, the tab's session state, the popup, and the profile file (empty: nothing is written).
+  // OpenCross's own achievements: the rules, the rows the Achievements page shows, the popup, and the profile file (empty: nothing is
+  // written).
   game::OcAchievements oc_achievements;
-  game::OcAchievementsTab oc_achievements_tab;
+  ui::AchievementList oc_achievement_rows;
+  bool oc_achievement_rows_stale = true;
   game::OcAchievementPopup oc_popup;
   std::filesystem::path oc_achievements_file;
   bool restart_for_update = false;
@@ -519,6 +619,29 @@ class App {
   bool have_save_dat = false;
   // The OpenCross save page (folder OpenCross next to save.dat).
   save::OcSaves oc_saves;
+  // What the record pages show; written only by a run with the player's own ini (a --config run keeps it in memory).
+  save::Collection collection;
+  // The room-script scan the record pages read (treasure, recruitment, where enemies appear), run in the background once the OpenCross menu
+  // is on.
+  game::ScanService scan_service;
+  // The randomizer (features::kRandomizer): the settings in force, the pools read from the scan and the tables, the plan built from both.
+  game::randomizer::Settings randomizer_settings;
+  std::optional<game::randomizer::Pools> randomizer_pools;
+  std::optional<game::randomizer::Plan> randomizer_plan;
+  // What the Characters, Elements, Key items and Treasure pages know from that scan (game/records_info.h).
+  std::optional<ui::RecordsInfo> records_info;
+  // The dialogue log: the logged messages and their window (dialogue_log_open: shown over the field); dialogue_log_hooked = the field
+  // and battle hooks are installed; dialogue_log_chord = RB + Back were both down last frame; the held direction's repeat count; the
+  // voice files a replay still has to play; dialogue_log_keys = the keyboard was used last (the window draws key caps, else pad glyphs).
+  save::DialogueLog dialogue_log;
+  ui::DialogueLogView dialogue_log_view;
+  bool dialogue_log_view_ok = false;
+  bool dialogue_log_open = false;
+  bool dialogue_log_hooked = false;
+  bool dialogue_log_chord = false;
+  int dialogue_log_held = 0;
+  std::vector<std::string> dialogue_log_replay;
+  bool dialogue_log_keys = false;
   std::filesystem::path save_path;
   save::ExtHost ext_host;
   game::Autosave autosave;
@@ -533,11 +656,14 @@ class App {
   ui::MainMenu menu;
   ui::ShopScreen shop;
   ui::StatusModelView status_model{meshes, files};
+  ui::EnemyModelLibrary enemy_models{meshes, files};
   ui::KeyItemPopup key_popup;
   // FieldWorld::room_loads() when the key-item list opened.
   u64 key_popup_room = 0;
   ui::PauseScreen pause_screen;
   bool pause_ok = false;
+  // The choice after a wipe (Retry battle).
+  ui::RetryPrompt retry_prompt;
   // RDE's feature icons and the hotkeys / pad buttons of its play-time toggles.
   ui::FeatureIcons feature_icons;
   bool feature_icons_ok = false;
@@ -581,6 +707,8 @@ class App {
   // results_shown: the standalone [Debug] Battle opens the screen once; battle_scene: scene of the running field encounter.
   bool results_shown = false;
   int battle_scene = -1;
+  // The randomizer's tuning of the running field encounter (a retry starts the same scene with it).
+  std::array<battle::EnemyTuning, 3> battle_tuning{};
   game::TitleBackdrop title_bd;
   // The field tick the title scene began at.
   u64 title_scene_tick0 = 0;

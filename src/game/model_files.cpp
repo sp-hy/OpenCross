@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "game/battle/model_table.h"
+#include "game/model_mods.h"
 #include "import/container.h"
 #include "import/model.h"
 #include "render/character_texture.h"
@@ -62,13 +63,9 @@ std::string character_name(const vfs::Vfs& files, const std::string& stem, ByteS
   if (!modded || !(player || stem.starts_with("battle/monster/"))) return {};
   return borrowed_tim(files, stem, texture);
 }
-}  // namespace
 
-std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err) {
-  return read_model_files(files, stem, stem.substr(stem.find_last_of('/') + 1), err);
-}
-
-std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, const std::string& ex_pack, std::string* err) {
+// The model as shipped, before any mod's model file.
+std::optional<assets::ModelAsset> read_shipped_model(const vfs::Vfs& files, const std::string& stem, const std::string& ex_pack, std::string* err) {
   auto read = [&](const std::string& path) { return files.read(path).value_or(Bytes{}); };
   const std::string base = "cdrom/" + stem;
   const Bytes obj = read(base + ".obj");
@@ -104,6 +101,30 @@ std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const 
   return asset;
 }
 
+// A battle player model with a Status-screen model (the battle models up to kLastMenuModel) wears its character's all-uses file.
+void wear_all_uses(const vfs::Vfs& files, assets::ModelAsset& asset, const std::string& stem) {
+  if (!stem.starts_with("battle/player/")) return;
+  const bool hd = files.hd_mode();
+  for (int model = 0; model <= kLastMenuModel; ++model) {
+    if (kBattleModels[static_cast<size_t>(model)] != stem) continue;
+    const std::string name = menu_model_stem(model);
+    if (!has_character_model(files, name, hd)) return;
+    if (const auto menu = read_menu_model(files, model, hd, nullptr, MenuModelMods::AllUses)) wear_character_model(files, asset, *menu, name, hd);
+    return;
+  }
+}
+}  // namespace
+
+std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, std::string* err) {
+  return read_model_files(files, stem, stem.substr(stem.find_last_of('/') + 1), err);
+}
+
+std::optional<assets::ModelAsset> read_model_files(const vfs::Vfs& files, const std::string& stem, const std::string& ex_pack, std::string* err) {
+  std::optional<assets::ModelAsset> asset = read_shipped_model(files, stem, ex_pack, err);
+  if (asset && !apply_model_mod(files, *asset, stem, files.hd_mode())) wear_all_uses(files, *asset, stem);
+  return asset;
+}
+
 std::string battle_character(const vfs::Vfs& files, const std::string& stem) {
   auto texture = files.read("cdrom/" + stem + ".ltc");
   if (!texture) texture = files.read("cdrom/" + stem + ".ltd");
@@ -134,7 +155,7 @@ std::string menu_model_stem(int model) {
   return std::string(path.substr(path.rfind('/') + 1));
 }
 
-std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err) {
+std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int model, bool hd_art, std::string* err, MenuModelMods mods) {
   const std::string stem = menu_model_stem(model);
   if (stem.empty()) {
     if (err) *err = "no menu model " + std::to_string(model);
@@ -191,13 +212,18 @@ std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int mod
       asset->textures[0] = image;
     }
   }
+  if (mods == MenuModelMods::AllUses || !apply_model_mod(files, *asset, "menu/player/" + stem, hd_art))
+    apply_model_mod(files, *asset, character_model_stem(stem), hd_art);
   return asset;
 }
 
 std::optional<CharacterTextures> read_character_textures(const vfs::Vfs& files, const std::string& stem, bool original_size) {
   std::optional<assets::ModelAsset> battle;
   for (int model = 0; model <= kLastMenuModel && !battle; ++model)
-    if (menu_model_stem(model) == stem) battle = read_model_files(files, std::string(kBattleModels[static_cast<size_t>(model)]), nullptr);
+    if (menu_model_stem(model) == stem) {
+      const std::string battle_stem(kBattleModels[static_cast<size_t>(model)]);
+      battle = read_shipped_model(files, battle_stem, battle_stem.substr(battle_stem.find_last_of('/') + 1), nullptr);
+    }
   if (!battle || battle->character != stem || !battle->has_hd(0)) return std::nullopt;
   CharacterTextures out;
   const size_t strip = battle->main_texture_count;
@@ -214,8 +240,8 @@ std::string body_model_stem(int body) {
   return std::string(path.substr(path.rfind('/') + 1));
 }
 
-std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int body, bool hd_art, std::string* err) {
-  if (body <= kLastMenuModel) return read_menu_model(files, body, hd_art, err);
+std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int body, bool hd_art, std::string* err, MenuModelMods mods) {
+  if (body <= kLastMenuModel) return read_menu_model(files, body, hd_art, err, mods);
   if (body_model_stem(body).empty()) {
     if (err) *err = "no battle model " + std::to_string(body);
     return std::nullopt;

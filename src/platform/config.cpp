@@ -206,6 +206,9 @@ bool Config::load(const std::filesystem::path& file) {
   slow_mode = parse_bool(ini.get("Game", "SlowMode"), slow_mode) && !fast_mode;
   auto_save = parse_bool(ini.get("Game", "AutoSave"), auto_save);
   camera_relative = parse_bool(ini.get("Game", "CameraRelative"), camera_relative);
+  auto_advance = parse_bool(ini.get("Game", "AutoAdvance"), auto_advance);
+  auto_advance_delay = std::clamp(parse_int(ini.get("Game", "AutoAdvanceDelay"), auto_advance_delay), 25, 300);
+  grid_presets = parse_bool(ini.get("Game", "GridPresets"), grid_presets);
   fast_rate = std::clamp(parse_int(ini.get("Game", "FastRate"), fast_rate), 0, 5);
   if (fast_rate == 1) fast_rate = 0;
   slow_rate = std::clamp(parse_int(ini.get("Game", "SlowRate"), slow_rate), 10, 90);
@@ -269,8 +272,10 @@ bool Config::load(const std::filesystem::path& file) {
   }
   autohide_cast_hud = parse_bool(ini.get("Enhancements", "AutoHideCastHud"), autohide_cast_hud);
   hide_feature_icons = parse_bool(ini.get("Enhancements", "HideFeatureIcons"), hide_feature_icons);
+  equip_compare = parse_bool(ini.get("Enhancements", "EquipCompare"), equip_compare);
   retain_battle_scenery = parse_bool(ini.get("Enhancements", "RetainBattleScenery"), retain_battle_scenery);
   full_precision_effects = parse_bool(ini.get("Enhancements", "FullPrecisionEffects"), full_precision_effects);
+  element_symbols = parse_bool(ini.get("Enhancements", "ElementSymbols"), element_symbols);
   {
     const bool legacy = parse_bool(ini.get("Enhancements", "EnhancedLighting"), false) || parse_bool(ini.get("Enhancements", "SpellLights"), false);
     lighting = parse_bool(ini.get("Enhancements", "Lighting"), legacy || lighting);
@@ -314,6 +319,7 @@ bool Config::load(const std::filesystem::path& file) {
   sfx = clamp01(parse_float(ini.get("Audio", "Sfx"), sfx));
   voices = parse_bool(ini.get("Audio", "Voices"), voices);
   voice_volume = std::clamp(parse_int(ini.get("Audio", "VoiceVolume"), voice_volume), 0, 100);
+  music_resume = parse_bool(ini.get("Audio", "MusicResume"), music_resume);
   guide_enabled = parse_bool(ini.get("Guide", "Enabled"), guide_enabled);
   guide_url = ini.get("Guide", "Url", guide_url);
   {
@@ -378,6 +384,26 @@ bool Config::load(const std::filesystem::path& file) {
   cheats.no_craft_cost = parse_bool(ini.get("Cheats", "NoCraftCost"), cheats.no_craft_cost);
   cheats.summon_any_time = parse_bool(ini.get("Cheats", "SummonAnyTime"), cheats.summon_any_time);
   cheats.more_summons = parse_bool(ini.get("Cheats", "MoreSummons"), cheats.more_summons);
+  {
+    const std::string word = ini.get("Cheats", "EnemyColours");
+    for (size_t i = 0; i < std::size(kEnemyColourNames); ++i)
+      if (word == kEnemyColourNames[i]) cheats.enemy_colours = static_cast<EnemyColours>(i);
+  }
+  cheats.gold_percent = std::clamp(parse_int(ini.get("Cheats", "GoldPercent"), cheats.gold_percent), 0, 400);
+  cheats.rare_loot = std::clamp(parse_int(ini.get("Cheats", "RareLoot"), cheats.rare_loot), 1, 10);
+  cheats.enemy_hp_percent = std::clamp(parse_int(ini.get("Cheats", "EnemyHpPercent"), cheats.enemy_hp_percent), 25, 400);
+  cheats.damage_taken_percent = std::clamp(parse_int(ini.get("Cheats", "DamageTakenPercent"), cheats.damage_taken_percent), 25, 400);
+  cheats.damage_dealt_percent = std::clamp(parse_int(ini.get("Cheats", "DamageDealtPercent"), cheats.damage_dealt_percent), 25, 400);
+  cheats.difficulty_bosses_only = parse_bool(ini.get("Cheats", "DifficultyBossesOnly"), cheats.difficulty_bosses_only);
+  retry_battle = parse_bool(ini.get("Game", "RetryBattle"), retry_battle);
+  {
+    const std::string mode = ini.get("Cheats", "EnemyHpBars"), place = ini.get("Cheats", "EnemyHpPlace");
+    for (size_t i = 0; i < std::size(kEnemyHpModeNames); ++i)
+      if (mode == kEnemyHpModeNames[i]) cheats.enemy_hp_mode = static_cast<EnemyHpMode>(i);
+    for (size_t i = 0; i < std::size(kEnemyHpPlaceNames); ++i)
+      if (place == kEnemyHpPlaceNames[i]) cheats.enemy_hp_place = static_cast<EnemyHpPlace>(i);
+    cheats.enemy_hp_numbers = parse_bool(ini.get("Cheats", "EnemyHpNumbers"), cheats.enemy_hp_numbers);
+  }
   portraits = ini.get("Game", "Portraits", portraits) == "1999" ? "1999" : "2021";
   bgm_source = ini.get("Audio", "BgmSource", bgm_source) == "original" ? "original" : "remastered";
   debug_exit_after_screenshot = parse_bool(ini.get("Debug", "ExitAfterScreenshot"), debug_exit_after_screenshot);
@@ -385,6 +411,14 @@ bool Config::load(const std::filesystem::path& file) {
   steam = parse_bool(ini.get("Game", "Steam"), steam);
   achievements = parse_bool(ini.get("Game", "Achievements"), achievements);
   hide_achievement_notices = parse_bool(ini.get("Game", "HideAchievementNotices"), hide_achievement_notices);
+  opencross_menu = parse_bool(ini.get("Game", "OpenCrossMenu"), opencross_menu);
+  records_show_all = parse_bool(ini.get("Game", "RecordsShowAll"), records_show_all);
+  {
+    const std::string word = ini.get("Game", "RecordsHints");
+    for (size_t i = 0; i < std::size(kRecordsHintNames); ++i)
+      if (word == kRecordsHintNames[i]) records_hints = static_cast<int>(i);
+  }
+  extras_unlock_all = parse_bool(ini.get("Game", "ExtrasUnlockAll"), extras_unlock_all);
   debug_panels = parse_bool(ini.get("Debug", "Panels"), debug_panels);
   debug_entrance = parse_int(ini.get("Debug", "Entrance"), debug_entrance);
   debug_battle = parse_int(ini.get("Debug", "Battle"), debug_battle);
@@ -408,7 +442,7 @@ bool Config::load(const std::filesystem::path& file) {
   return true;
 }
 
-bool Config::save(const std::filesystem::path& file) const {
+Ini Config::to_ini() const {
   Ini ini;
   ini.set("Paths", "GameDir", game_dir);
   ini.set("Paths", "SaveDir", save_dir);
@@ -434,6 +468,9 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "WideEdgeFade", std::to_string(wide_edge_fade));
   ini.set("Game", "AutoSave", on_off(auto_save));
   ini.set("Game", "CameraRelative", on_off(camera_relative));
+  ini.set("Game", "AutoAdvance", on_off(auto_advance));
+  ini.set("Game", "AutoAdvanceDelay", std::to_string(auto_advance_delay));
+  ini.set("Game", "GridPresets", on_off(grid_presets));
   ini.set("Game", "FastRate", std::to_string(fast_rate));
   ini.set("Game", "SlowRate", std::to_string(slow_rate));
   ini.set("Video", "Widescreen", on_off(widescreen));
@@ -456,8 +493,10 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Video", "Anisotropy", std::to_string(anisotropy));
   ini.set("Enhancements", "AutoHideCastHud", on_off(autohide_cast_hud));
   ini.set("Enhancements", "HideFeatureIcons", on_off(hide_feature_icons));
+  ini.set("Enhancements", "EquipCompare", on_off(equip_compare));
   ini.set("Enhancements", "RetainBattleScenery", on_off(retain_battle_scenery));
   ini.set("Enhancements", "FullPrecisionEffects", on_off(full_precision_effects));
+  ini.set("Enhancements", "ElementSymbols", on_off(element_symbols));
   ini.set("Enhancements", "Lighting", on_off(lighting));
   ini.set("Enhancements", "EdgeBlend", on_off(edge_blend));
   ini.set("Shaders", "Characters", kCharacterShaderNames[static_cast<size_t>(character_shader)]);
@@ -485,6 +524,7 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Audio", "Sfx", fmt_float(sfx));
   ini.set("Audio", "Voices", on_off(voices));
   ini.set("Audio", "VoiceVolume", std::to_string(voice_volume));
+  ini.set("Audio", "MusicResume", on_off(music_resume));
   ini.set("Guide", "Enabled", on_off(guide_enabled));
   ini.set("Guide", "Url", guide_url);
   {
@@ -537,6 +577,17 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Cheats", "NoCraftCost", on_off(cheats.no_craft_cost));
   ini.set("Cheats", "SummonAnyTime", on_off(cheats.summon_any_time));
   ini.set("Cheats", "MoreSummons", on_off(cheats.more_summons));
+  ini.set("Cheats", "EnemyColours", kEnemyColourNames[static_cast<size_t>(cheats.enemy_colours)]);
+  ini.set("Cheats", "GoldPercent", std::to_string(cheats.gold_percent));
+  ini.set("Cheats", "RareLoot", std::to_string(cheats.rare_loot));
+  ini.set("Cheats", "EnemyHpPercent", std::to_string(cheats.enemy_hp_percent));
+  ini.set("Cheats", "DamageTakenPercent", std::to_string(cheats.damage_taken_percent));
+  ini.set("Cheats", "DamageDealtPercent", std::to_string(cheats.damage_dealt_percent));
+  ini.set("Cheats", "DifficultyBossesOnly", on_off(cheats.difficulty_bosses_only));
+  ini.set("Game", "RetryBattle", on_off(retry_battle));
+  ini.set("Cheats", "EnemyHpBars", kEnemyHpModeNames[static_cast<size_t>(cheats.enemy_hp_mode)]);
+  ini.set("Cheats", "EnemyHpNumbers", on_off(cheats.enemy_hp_numbers));
+  ini.set("Cheats", "EnemyHpPlace", kEnemyHpPlaceNames[static_cast<size_t>(cheats.enemy_hp_place)]);
   ini.set("Game", "Portraits", portraits);
   ini.set("Audio", "BgmSource", bgm_source);
   ini.set("Debug", "ExitAfterScreenshot", on_off(debug_exit_after_screenshot));
@@ -544,6 +595,10 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Game", "Steam", on_off(steam));
   ini.set("Game", "Achievements", on_off(achievements));
   ini.set("Game", "HideAchievementNotices", on_off(hide_achievement_notices));
+  ini.set("Game", "OpenCrossMenu", on_off(opencross_menu));
+  ini.set("Game", "RecordsShowAll", on_off(records_show_all));
+  ini.set("Game", "RecordsHints", kRecordsHintNames[static_cast<size_t>(std::clamp(records_hints, 0, 2))]);
+  ini.set("Game", "ExtrasUnlockAll", on_off(extras_unlock_all));
   ini.set("Debug", "Panels", on_off(debug_panels));
   ini.set("Debug", "Entrance", std::to_string(debug_entrance));
   ini.set("Debug", "AutoConfirm", std::to_string(debug_auto_confirm));
@@ -565,9 +620,13 @@ bool Config::save(const std::filesystem::path& file) const {
   ini.set("Debug", "Record", debug_record);
   ini.set("Debug", "Replay", debug_replay);
   ini.set("Disc", "Region", disc_region);
+  return ini;
+}
+
+bool Config::save(const std::filesystem::path& file) const {
   std::ofstream out(file, std::ios::binary | std::ios::trunc);
   if (!out) return false;
-  out << "; OpenCross settings. Leave GameDir/SaveDir empty to auto-discover.\n\n" << ini.serialize();
+  out << "; OpenCross settings. Leave GameDir/SaveDir empty to auto-discover.\n\n" << to_ini().serialize();
   return static_cast<bool>(out);
 }
 
@@ -578,7 +637,7 @@ void Config::clear_session_toggles() {
 
 void Config::use_player_defaults() {
   lighting = edge_blend = retain_battle_scenery = full_precision_effects = true;
-  achievements = hide_achievement_notices = true;
+  achievements = hide_achievement_notices = opencross_menu = true;
   legacy_field_models = false;
   render_scale = 2.0f;
 }

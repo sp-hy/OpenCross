@@ -344,7 +344,7 @@ void resolve_model_textures(assets::ModelAsset& asset) {
   const bool character = !asset.character.empty();
   for (size_t i = 0; i < asset.textures.size(); ++i) {
     const import::Image& img = asset.textures[i];
-    if (!rgba_image(img)) continue;
+    if (!rgba_image(img) || (!asset.mesh_mod.empty() && asset.has_mod(i))) continue;
     // The character textures cover the main texture and the eye strip; they are dumped with the status-screen model.
     const bool covered = character && (i == 0 || i == asset.main_texture_count);
     if (covered && resolve_character_texture(asset, i)) continue;

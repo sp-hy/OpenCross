@@ -304,7 +304,9 @@ std::string Battle::enemy_label(int monster_id) const {
   return index < opt_.enemy_names.size() && !opt_.enemy_names[index].empty() ? opt_.enemy_names[index] : tables_.enemy_name(monster_id);
 }
 
-void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
+// A group the randomizer moved scales its record's max HP before NG+ and the gender, its four battle stats and gold after the record is
+// read, and rolls its drops on the given row.
+void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt, const EnemyTuning& tuning) {
   Unit& unit = units_[static_cast<size_t>(slot)];
   const auto& rec = tables_.enemies[static_cast<size_t>(monster_id)];
   unit = Unit{};
@@ -313,7 +315,7 @@ void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
   unit.src_id = monster_id;
   unit.name = enemy_label(monster_id);
   if (unit.name.empty()) unit.name = std::format("monster{}", monster_id);
-  int max_hp = std::min<int>(rec.max_hp(), 32767);
+  int max_hp = std::min<int>(scale_percent(rec.max_hp(), tuning.hp_percent), 32767);
   if (opt.ng_plus && scene_ != 0x1DD) max_hp = std::min(max_hp * 2, 30000);
   // The duel's bodies replace the gender word before it is rolled and scales the HP.
   const std::optional<DuelBody> duel = scene_ == 0x1DD ? duel_body(slot, monster_id, opt.duel_third) : std::nullopt;
@@ -323,9 +325,12 @@ void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
   if (gender & 0x40) max_hp = max_hp * 0x69 / 100;
   else if (gender & 0x80) max_hp = std::max(1, max_hp * 0x5F / 100);
   max_hp = std::min(max_hp, 32767);
+  if (difficulty_applies()) max_hp = scaled_enemy_hp(max_hp, cheats_.hp_percent);
   unit.max_hp = unit.hp = max_hp;
   unit.gender = static_cast<u16>((gender_word & 0x3FFF) | (gender << 8));
   load_monster_record(unit, rec, st::kInfoShown);
+  if (tuning.stat_percent != 100)
+    for (int* stat : {&unit.atk, &unit.def, &unit.mag, &unit.mdef}) *stat = std::clamp(scale_percent(*stat, tuning.stat_percent), 1, 255);
   if (monster_party_) unlock_monster_grid(unit);
   // The gauge tops out at the deepest grid row holding an element in a cell without the lock bit (0x4000); every stock monster cell
   // carries that bit, so an enemy gauge stays at -1.
@@ -337,8 +342,8 @@ void Battle::init_enemy(int slot, int monster_id, const BattleOptions& opt) {
   unit.ap = ap;
   unit.countdown = rng_.rnd(scene_ > 0x17F ? 1 : 0, ap);
   if (tables_.gear.empty()) unit.eq.wp = 22;
-  unit.gold = rec.gold();
-  unit.drop_row = rec.drop_row();
+  unit.gold = scale_percent(rec.gold(), tuning.gold_percent);
+  unit.drop_row = tuning.drop_row >= 0 ? tuning.drop_row : rec.drop_row();
   unit.kind = rec.model();
   unit.drop_base = rec.drop_base();
   if (duel) {
@@ -489,7 +494,7 @@ bool Battle::start(std::vector<PartyMember> party, int scene, const BattleOption
     if (scene_rec.enemy_id(group) == 0xFF || scene_rec.enemy_count(group) == 0) continue;
     if (scene_rec.enemy_id(group) >= tables_.enemies.size()) continue;
     for (int copy = 0; copy < scene_rec.enemy_count(group) && slot < kUnits; ++copy) {
-      init_enemy(slot, scene_rec.enemy_id(group), opt);
+      init_enemy(slot, scene_rec.enemy_id(group), opt, opt.enemy_tuning[static_cast<size_t>(group)]);
       // The instances of a group of more than one are numbered 1, 2, 3 ... (letters A, B, C ...) in slot order, restarting per group; a
       // group of one gets none.
       if (scene_rec.enemy_count(group) > 1) units_[static_cast<size_t>(slot)].letter = static_cast<u8>(copy + 1);
@@ -780,6 +785,10 @@ u64 Battle::state_hash() const {
     hash.add(cheat);
   // The summon bypasses enter the hash only while one is set.
   if (cheats_.summon_any_ring || cheats_.summon_repeat) hash.add(static_cast<u64>(cheats_.summon_any_ring ? 1 : 0) | (cheats_.summon_repeat ? 2 : 0));
+  // The boosts and the difficulty enter the hash only while one is set.
+  if (cheats_.gold_percent != 100 || cheats_.rare_loot != 1 || cheats_.hp_percent != 100 || cheats_.taken_percent != 100 || cheats_.dealt_percent != 100)
+    for (const int value : {cheats_.gold_percent, cheats_.rare_loot, cheats_.hp_percent, cheats_.taken_percent, cheats_.dealt_percent, static_cast<int>(cheats_.difficulty_bosses_only)})
+      hash.add(static_cast<u64>(value));
   hash.add(static_cast<u64>(rewards_.gold));
   for (const std::vector<u16>* words : {&rewards_.drops, &rewards_.stolen, &rewards_.trapped}) {
     hash.add(words->size());
@@ -789,6 +798,15 @@ u64 Battle::state_hash() const {
 }
 
 // ------------------------------------------------------------------------------------------------ queries
+std::vector<int> Battle::defeated_enemies() const {
+  std::vector<int> out;
+  for (int i = kPcSlots; i < kUnits; ++i) {
+    const Unit& unit = units_[static_cast<size_t>(i)];
+    if (unit.present && !unit.pc && (!unit.alive() || brain_.defeated(i))) out.push_back(unit.src_id);
+  }
+  return out;
+}
+
 int Battle::alive_count(bool pcs) const {
   int count = 0;
   for (int i = pcs ? 0 : kPcSlots; i < (pcs ? kPcSlots : kUnits); ++i)
@@ -1422,6 +1440,12 @@ void Battle::god_filter(int target, DamageOut& dmg) const {
   dmg.code = 1;
 }
 
+int Battle::hit_percent(int actor, int target) const {
+  if (!difficulty_applies()) return 100;
+  if (target < kPcSlots) return actor == target ? 100 : cheats_.taken_percent;
+  return actor >= 0 && actor < kPcSlots ? cheats_.dealt_percent : 100;
+}
+
 // Code 3 heals, code 2 and negative values do nothing; a self-inflicted KO leaves the actor at 1 HP. Battle boost cancels the damage
 // (code 0 or 1, the value 0 included) a PC would take; its heals still land.
 void Battle::damage_unit(int actor, int target, int value, int code) {
@@ -1681,6 +1705,7 @@ bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool mi
   } else if ((target_unit.hi & st::kHiWeaponAbsorb) && damage.value > 0) {
     damage.code = 3;
   }
+  if (damage.code == 0) damage.value = scale_percent(damage.value, hit_percent(actor, target));
   god_filter(target, damage);
   ev.gated = damage.code != 2 && colour_gated(actor, target, -1);
   if (ev.gated) damage.value = 0;
@@ -1866,6 +1891,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     DamageOut damage = element_damage(rng_, in);
     const bool roll_landed = damage.code != 2 && damage.value != 0;
     if (replace >= 0 && !in.target_immune) damage.value = replace;
+    if (damage.code == 0) damage.value = scale_percent(damage.value, hit_percent(actor, target));
     god_filter(target, damage);
     damage.value = reduce(damage.value);
     if (damage.code != 3) rolled_damage = damage.value;
@@ -2235,25 +2261,29 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         // outside the unit table.
         if (element.rd16(0xE) != 0) rare = 20;
       }
+      if (caster.pc) rare = scaled_rare_chance(rare, cheats_.rare_loot);
       const size_t drop_index = static_cast<size_t>(target_unit.drop_row & 0x3FFF);
-      if (drop_index >= tables_.drops.size() || (tables_.drops[drop_index].slot[2] == 0 && tables_.drops[drop_index].slot[3] == 0)) {
+      const std::vector<data::DropRow>& drops = drop_table();
+      if (drop_index >= drops.size() || (drops[drop_index].slot[2] == 0 && drops[drop_index].slot[3] == 0)) {
         say(std::format("{} uses {} on {}: nothing to steal", caster.name, nm, target_unit.name));
         break;
       }
-      if (!(cheats_.always_loot && caster.pc) && rng_.rnd(0, 100) >= chance) {
+      if (!(loot_always() && caster.pc) && rng_.rnd(0, 100) >= chance) {
         say(std::format("{} uses {} on {}: the steal fails (chance {})", caster.name, nm, target_unit.name, chance));
         steal_msg = 2;
         break;
       }
       const bool rare_roll = rng_.rnd(0, 99) < rare;
       // Cheats: always loot -> the rare word.
-      const u16 word = tables_.drops[drop_index].slot[(rare_roll || (cheats_.always_loot && caster.pc && tables_.drops[drop_index].slot[3] != 0)) ? 3 : 2];
+      const int pick = (rare_roll || (loot_always() && caster.pc &&drops[drop_index].slot[3] != 0)) ? 3 : 2;
+      const u16 word = drops[drop_index].slot[static_cast<size_t>(pick)];
       target_unit.stolen = true;
       code_override = 0;
       steal_word = word;
       // Message drop_index: 0 item, 1 element.
       steal_msg = (word & 0x8000) ? 1 : 0;
       rewards_.stolen.push_back(word);
+      rewards_.stolen_loot.push_back({target_unit.src_id, pick});
       say(std::format("{} steals {} from {}", caster.name, (word & 0x8000) ? tables_.element_name(word & 0x7FFF) : tables_.item_name(word), target_unit.name));
       break;
     }
@@ -2414,6 +2444,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       }
       // Otherwise the sum takes the gear steps once more (the last hitter's flag 0x04, the target's 0x08); that value decides "no damage"
       // (which takes the sum as damage even from an absorber) and is the drain; a weapon absorber is healed by the sum.
+      if (!absorb) total = scale_percent(total, hit_percent(actor, target));
       const Unit& last = units_[static_cast<size_t>(last_hitter)];
       int geared = std::max(0, total);
       if (last.eq.gear_flags & data::gearflag::kDmgUp) geared = geared * 125 / 100;
@@ -3171,6 +3202,7 @@ bool Battle::apply(const Command& cmd, std::string* why) {
         // Running away with pilfered loot drops it: the loot is gone and the system window shows row 5 ('Dropped the stolen goods!').
         if (!rewards_.stolen.empty()) {
           rewards_.stolen.clear();
+          rewards_.stolen_loot.clear();
           ev.sys_msg = 5;
         }
         note_event(ev);
@@ -3272,19 +3304,23 @@ void Battle::compute_rewards() {
       rewards_.drops.push_back(kShinyMaterial[static_cast<size_t>(summon_kill - summon_kills_.begin())]);
       continue;
     }
-    int slot = drop_roll(rng_, unit.drop_base);
+    int slot = drop_roll(rng_, unit.drop_base, cheats_.rare_loot);
     const size_t drop_index = static_cast<size_t>(unit.drop_row & 0x3FFF);
     // Cheats: always loot - the rare drop (row slot 1), else the common one (slot 0).
-    if (cheats_.always_loot && drop_index < tables_.drops.size()) slot = tables_.drops[drop_index].slot[1] ? 1 : 0;
-    if (slot >= 0 && drop_index < tables_.drops.size()) {
-      const u16 drop = tables_.drops[drop_index].slot[static_cast<size_t>(slot)];
-      if (drop) rewards_.drops.push_back(drop);
+    const std::vector<data::DropRow>& drops = drop_table();
+    if (loot_always() && drop_index < drops.size()) slot = drops[drop_index].slot[1] ? 1 : 0;
+    if (slot >= 0 && drop_index < drops.size()) {
+      const u16 drop = drops[drop_index].slot[static_cast<size_t>(slot)];
+      if (drop) {
+        rewards_.drops.push_back(drop);
+        rewards_.drop_loot.push_back({unit.src_id, slot});
+      }
     }
   }
   bool gold_gear = opt_.gold_bonus;
   for (const Unit& pu : units_)
     if (pu.present && pu.pc && (pu.eq.gear_flags & data::gearflag::kGold)) gold_gear = true;
-  rewards_.gold = gold_reward(gold, gold_gear);
+  rewards_.gold = gold_reward(gold, gold_gear, cheats_.gold_percent);
 
   // Growth: a normal fight grows the party members that are not knocked out (a frozen one grows), a boss fight is the star-up of the party and the bench.
   if (growth_.star >= 99 || growth_.star >= static_cast<int>(tables_.star_rows.size())) return;

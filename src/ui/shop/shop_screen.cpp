@@ -12,10 +12,14 @@
 #include <map>
 #include <utility>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/tables.h"
 #include "platform/config.h"
 #include "platform/keymap.h"
+#include "platform/pad_remap.h"
+#include "render/element_icon_draw.h"
 #include "ui/lowres.h"
 #include "ui/menu/menu_common.h"
 #include "ui/menu/ps1_art.h"
@@ -35,13 +39,17 @@ struct Nav {
   bool up = false, down = false, left = false, right = false, ok = false, cancel = false;
   // ok_rep: Circle with auto-repeat (the first press, then every repeat while held).
   bool ok_rep = false;
+  // page: the item key / pad Square (the gear compare panel's next page).
+  bool page = false;
 };
 
 // One drawing command of the frame: a rectangle, an image, or a text drawn through FontSet in a font slot at canvas (x, y).
 struct Cmd {
-  enum Kind : u8 { Rect, Img, Text } kind = Rect;
+  // Icon: an element colour icon centred on (x, y), w canvas units wide; `icon` is its colour index.
+  enum Kind : u8 { Rect, Img, Text, Icon } kind = Rect;
   render::TexRef set = {};
   float x = 0, y = 0, w = 0, h = 0, u0 = 0, v0 = 0, u1 = 1, v1 = 1;
+  int icon = 0;
   u32 color = kWhite;
   std::u32string text;
   float scale = 1;
@@ -150,6 +158,13 @@ struct ShopScreen::Impl {
   NeedleTexture needle_tex;
   // Auto-repeat state for: up, down, left, right, Circle.
   DirectionRepeat<5> repeat;
+  // [Enhancements] EquipCompare: the panel's page of the highlighted piece (`item`; another piece starts again at page 0). kb_mode: the
+  // last input came from the keyboard, so the page button shows its key cap instead of the pad glyph.
+  struct Compare {
+    bool on = false;
+    int item = 0, page = 0;
+  } compare;
+  bool kb_mode = false;
 
   // ---- drawing
   float zoom = 1, ox = 0, oy = 0;
@@ -242,6 +257,12 @@ struct ShopScreen::Impl {
     nav.ok = key_pressed(Action::Ok) || pad_pressed(SDL_GAMEPAD_BUTTON_SOUTH);
     nav.cancel = key_pressed(Action::Cancel) || pad_pressed(SDL_GAMEPAD_BUTTON_EAST);
     nav.ok_rep = nav.ok || fire[4];
+    nav.page = key_pressed(Action::Item) || pad_pressed(SDL_GAMEPAD_BUTTON_WEST);
+    bool any_pad = false, any_key = false;
+    for (bool pressed : in.pad_pressed) any_pad = any_pad || pressed;
+    for (bool pressed : in.key_pressed) any_key = any_key || pressed;
+    if (any_pad) kb_mode = false;
+    if (any_key) kb_mode = true;
     return nav;
   }
 
@@ -380,6 +401,7 @@ struct ShopScreen::Impl {
     const int count = list_size();
     if (nav.up) move_cursor(cur, count, -1), fix_scroll();
     if (nav.down) move_cursor(cur, count, 1), fix_scroll();
+    if (nav.page && kind == ShopKind::Smith && count > 0) page_compare(ids[static_cast<size_t>(cur)]);
     if (nav.cancel) {
       sfx(6);
       msg.clear();
@@ -418,6 +440,20 @@ struct ShopScreen::Impl {
         start_quantity();
         break;
     }
+  }
+  // The compare panel's page for `item`: another piece than the one paged last starts at page 0.
+  int& compare_page(int item) {
+    if (item != compare.item) compare.item = item, compare.page = 0;
+    return compare.page;
+  }
+  // The page button: the next page of three characters, after the last one the party's page again.
+  void page_compare(int item) {
+    if (!compare.on || !shop::is_gear(*gs, item)) return;
+    const int pages = (static_cast<int>(shop::compare_order(*gs, item).size()) + 2) / 3;
+    if (pages < 2) return;
+    int& page = compare_page(item);
+    page = (page + 1) % pages;
+    sfx(1);
   }
   void deny(const std::string& message_text) {
     sfx(0x18);
@@ -599,6 +635,14 @@ struct ShopScreen::Impl {
     cmd.set = tex->set;
     cmd.x = x + group_dx, cmd.y = y, cmd.w = w, cmd.h = h, cmd.u0 = u0, cmd.v0 = v0, cmd.u1 = u1, cmd.v1 = v1, cmd.color = colour;
     cmd.add = img_add;
+    cmds.push_back(std::move(cmd));
+  }
+  // The element colour icon of a colour index (0..5) centred on canvas (cx, cy), `size` canvas units wide, while the symbols are on.
+  void symbol(int colour, float cx, float cy, float size) {
+    if (!element_symbols() || colour < 0 || colour >= kElementIconCount) return;
+    Cmd cmd;
+    cmd.kind = Cmd::Icon;
+    cmd.x = cx + group_dx, cmd.y = cy, cmd.w = size, cmd.icon = colour;
     cmds.push_back(std::move(cmd));
   }
   // Img() draws additively while set (the disc's semi-transparent compass meshes).
@@ -894,6 +938,7 @@ struct ShopScreen::Impl {
     for (int bit = 7; bit >= 2; --bit)
       if (colour_bits & (1 << bit)) colour_slot = bit - 2;
     if (Tex* tex = texs.plate(kPlateTim[colour_slot], ps1_on())) Img(tex, SX(x), SY(y), SX(184), SY(24), 0, 0, 1, 1, grey(0x70));
+    symbol(data::colour_index_of_bit(static_cast<u8>(colour_bits & 0xFC)), SX(x + 15.0f), SY(y + 12.0f), 40.0f);
   }
   // The dial needle (handle.png turned by `angle`, 4096 = 2 pi) centred on the pivot at unit (pivot_x, pivot_y); see NeedleTexture.
   void Hand(float pivot_x, float pivot_y, int angle, u32 tint = kWhite) {
@@ -902,7 +947,8 @@ struct ShopScreen::Impl {
       log::warn("shop: hd/menu/handle.png not available");
       return;
     }
-    Img(quad.tex, SX(pivot_x) - quad.half_w, SY(pivot_y) - quad.half_h, 2 * quad.half_w, 2 * quad.half_h, 0, 0, 1, 1, texs.hd() ? rgb(222, 222, 222) : tint);
+    Img(quad.tex, SX(pivot_x) - quad.half_w, SY(pivot_y) - quad.half_h, 2 * quad.half_w, 2 * quad.half_h, 0, 0, 1, 1,
+        texs.hd() ? shade(rgb(222, 222, 222), static_cast<float>(tint & 0xFF) / 255.0f) : tint);
   }
 
   // Caption and icon in the top notch of a list panel at unit (x, y): the weapon / armour / accessory frames 0x9A..0x9C and 0xA0..0xA2
@@ -936,6 +982,7 @@ struct ShopScreen::Impl {
   void plate_indexed(int colour_index, float x, float y, u32 colour) {
     if (colour_index < 1 || colour_index > 6) return;
     if (Tex* tex = texs.plate(kPlateTim[colour_index - 1], ps1_on())) Img(tex, SX(x), SY(y), SX(184), SY(24), 0, 0, 1, 1, grey(static_cast<int>(colour & 0xFF)));
+    symbol(colour_index - 1, SX(x + 15.0f), SY(y + 12.0f), 40.0f);
   }
 
   // Parchment: 8 x 7 tiles of hd/map/etc/tile.tim (the whole 256 x 256 image is one tile) in both art modes, the disc tile with the
@@ -977,7 +1024,8 @@ struct ShopScreen::Impl {
     Hand(446, 367, needle.ticked ? needle.angle : kNeedleAng[std::clamp(sel, 0, 2)], shade(kWhite, level));
     for (int entry = 0; entry < count; ++entry) Sprite(label_frame + entry, 446, 367, shade(entry == sel ? rgb(0xEE, 0x9C, 0) : kWhite, level));
   }
-  void compass(int sel, const std::vector<std::string>& labels, bool bright) {
+  // `level` scales the needle, the leader lines and the labels (0.5 under a list).
+  void compass(int sel, const std::vector<std::string>& labels, bool bright, float level = 1.0f) {
     static const float kPos[2][3][2] = {{{301, 333}, {292, 349}, {0, 0}}, {{299, 332}, {289, 349}, {279, 365}}};
     const bool two_labels = labels.size() == 2;
     if (Tex* deco = texs.load("hd/menu/menutim/menutim_02.png")) {
@@ -985,11 +1033,11 @@ struct ShopScreen::Impl {
     }
     // Without update() (screenshots) the needle sits at the exact table angle.
     const int angle = needle.ticked ? needle.angle : kNeedleAng[std::clamp(sel, 0, 2)];
-    Hand(446, 367, angle);
+    Hand(446, 367, angle, shade(kWhite, level));
     if (std::getenv("OC_SHOP_LOG"))
       log::info("shop compass: sel {} angle {} theta {:.2f} deg tip dir (canvas) {:.1f} deg", sel, angle, (angle + 1024) * 180.0 / 2048.0,
                 std::atan2(-std::sin((angle + 1024) * 3.14159265 / 2048.0) * 960.0 / 432.0, -std::cos((angle + 1024) * 3.14159265 / 2048.0) * 2.5) * 180.0 / 3.14159265);
-    const u32 line_colour = rgb(156, 148, 148);
+    const u32 line_colour = shade(rgb(156, 148, 148), level);
     const float thickness = 2.2f, diag_w = 11.5f, diag_h = 10.8f;
     for (size_t i = 0; i < labels.size(); ++i) {
       const int entry = 2 + static_cast<int>(i);
@@ -1003,7 +1051,7 @@ struct ShopScreen::Impl {
       rect(SX(bend_x + diag_w), SY(line_y + diag_h) - thickness * 0.5f, SX(end_x - bend_x - diag_w), thickness, line_colour);
     }
     for (size_t i = 0; i < labels.size(); ++i)
-      RT(7, kPos[two_labels ? 0 : 1][i][0], kPos[two_labels ? 0 : 1][i][1], labels[i], static_cast<int>(i) == sel ? 0x004E77u : 0x808080u);
+      RT(7, kPos[two_labels ? 0 : 1][i][0], kPos[two_labels ? 0 : 1][i][1], labels[i], shade(static_cast<int>(i) == sel ? 0x004E77u : 0x808080u, level));
   }
   // Played from the discs: frame `frame` of the menu sheet with its origin at unit (x, y), and a run of small sheet digits (frames 21..30,
   // ":" 35, "." 32) from x, 8 apart, or big ones (9..18, 12 apart).
@@ -1177,11 +1225,14 @@ struct ShopScreen::Impl {
       footer();
       return;
     }
-    // Played from the discs the dial stays under the lists, dimmed (the blacksmith's party strip covers it).
+    // The blacksmith's dial stays under its lists with its needle, lines and labels at half brightness (the forge's party strip covers
+    // it); the HD deco disc keeps its brightness. Played from the discs the element shop's dial stays too.
+    group(Right);
     if (!texs.hd()) {
-      group(Right);
       if (kind == ShopKind::Element) disc_dial(top_cur, 0x88, 0x89, 2, false);
       else disc_dial(cat_cur, 0x8B, 0x97, 3, false);
+    } else if (kind == ShopKind::Smith) {
+      compass(cat_cur, {cm("武器"), cm("防具"), cm("アクセサリー")}, true, 0.5f);
     }
     if (kind == ShopKind::Element) build_element_list();
     else build_smith_list();
@@ -1423,15 +1474,7 @@ struct ShopScreen::Impl {
       int brightness = 0x70;
       if (!gs->slot.recruited(character)) brightness = 0;
       else if (!ii || !ii->can_equip(character)) brightness = 0x30;
-      // Faces sheet frame: frame_no 1..0x33 are drawn as faces.
-      const int frame_no = (ch.model_id & 0xFF) + 1;
-      if (frame_no >= 1 && frame_no <= 0x33) {
-        if (disc) {
-          if (Tex* face = texs.sheet("face", frame_no)) Img(face, SX(x + face->ox), SY(y + face->oy), SX(face->w), SY(face->h), 0, 0, 1, 1, grey(brightness));
-        } else if (const Tex* face = face_tex(frame_no - 1)) {
-          Img(face, SX(x), SY(y), SX(24), SY(24), 0, 0, 1, 1, grey(brightness));
-        }
-      }
+      strip_face(character, x, y, brightness);
       if (item <= 0 || brightness != 0x70 || !ii) continue;
       int mark = 0;
       const int ik = ii->cat & 0xF;
@@ -1458,6 +1501,118 @@ struct ShopScreen::Impl {
           (kU[mark_index] + kMw[mark_index]) / smithy->w, (972.0f + kMh[mark_index]) / smithy->h);
     }
   }
+  // A face of the party strip, 24 x 24 units at (x, y) and PS1 brightness `brightness`: the smithy sheet's face frame (model id + 1, frames
+  // 1..0x33) played from the discs, else face_tex.
+  void strip_face(int character, float x, float y, int brightness) {
+    const int frame_no = (gs->slot.chars[static_cast<size_t>(character)].model_id & 0xFF) + 1;
+    if (frame_no < 1 || frame_no > 0x33) return;
+    if (!texs.hd()) {
+      if (Tex* face = texs.sheet("face", frame_no)) Img(face, SX(x + face->ox), SY(y + face->oy), SX(face->w), SY(face->h), 0, 0, 1, 1, grey(brightness));
+    } else if (const Tex* face = face_tex(frame_no - 1)) {
+      Img(face, SX(x), SY(y), SX(24), SY(24), 0, 0, 1, 1, grey(brightness));
+    }
+  }
+
+  // ---- gear compare panel ([Enhancements] EquipCompare)
+  // The panel's own words by language (en fr it de es jp); the stat captions are the Equip screen's (cmnmes).
+  enum CompareText { kEquipped, kCannotEquip, kNoChange, kOneOther, kOthers, kCompareTexts };
+  static constexpr const char* kCompareText[kCompareTexts][6] = {
+      {"Equipped", "Équipé", "Equipaggiato", "Ausgerüstet", "Equipado", "装備中"},
+      {"Can't equip", "Non équipable", "Non equipaggiabile", "Nicht ausrüstbar", "No equipable", "装備できない"},
+      {"No change", "Aucun changement", "Nessuna modifica", "Keine Änderung", "Sin cambios", "変化なし"},
+      {"Also usable by: 1 other", "Aussi pour : 1 autre", "Usabile anche da: 1 altro", "Auch für: 1 weitere Person", "También para: 1 más",
+       "ほかに1人が装備できる"},
+      {"Also usable by: %d others", "Aussi pour : %d autres", "Usabile anche da: %d altri", "Auch für: %d weitere Personen",
+       "También para: %d más", "ほかに%d人が装備できる"},
+  };
+  std::string compare_text(CompareText which, int count = 0) {
+    char buffer[96];
+    std::snprintf(buffer, sizeof buffer, kCompareText[which][std::clamp(lang_index(), 0, 5)], count);
+    return buffer;
+  }
+  // The page button's glyph (Square, wherever the player's button map put it), 16 x 16 units at (x, y): the disc's sheet glyph played
+  // from the discs or with the PS1 textures, the keyboard key cap after keyboard input, else the pad glyph.
+  void page_glyph(float x, float y) {
+    const int button = platform::map_source(platform::active_map(), 2) & 7;
+    if (!texs.hd() || ps1_on()) {
+      if (Tex* tex = texs.sheet("main", 0x7C + button)) {
+        const float k = 16.0f / 24.0f;
+        Img(tex, SX(x + tex->ox * k), SY(y + tex->oy * k), SX(tex->w * k), SY(tex->h * k));
+      }
+      return;
+    }
+    static const char* const kAtlas[6] = {"e", "f", "i", "g", "s", "j"};
+    if (kb_mode) {
+      if (Tex* tex = texs.load(std::string("ui/keyboard_") + kAtlas[std::clamp(lang_index(), 0, 5)] + ".png")) {
+        const int cell = platform::keyboard_cell(platform::action_vk(platform::button_action(button)));
+        Img(tex, SX(x), SY(y), SX(16), SY(16), static_cast<float>(cell & 15) / 16.0f, static_cast<float>(cell >> 4) / 7.0f,
+            static_cast<float>((cell & 15) + 1) / 16.0f, static_cast<float>((cell >> 4) + 1) / 7.0f);
+      }
+    } else if (Tex* tex = texs.load("ui/gamepad.png")) {
+      const int cell = platform::pad_glyph_cell(button), column = cell % 13, row = (cell / 13) * 2 + 1;
+      Img(tex, SX(x), SY(y), SX(16), SY(16), static_cast<float>(column) / 13.0f, static_cast<float>(row) / 4.0f, static_cast<float>(column + 1) / 13.0f,
+          static_cast<float>(row + 1) / 4.0f);
+    }
+  }
+  // An up or down arrow, 7 x 6 units, its top-left corner at (x, y).
+  void stat_arrow(float x, float y, bool up, u32 colour) {
+    for (int i = 0; i < 6; ++i) {
+      const float width = 7.0f * static_cast<float>(up ? i + 1 : 6 - i) / 6.0f;
+      rect(SX(x + (7.0f - width) * 0.5f), SY(y + static_cast<float>(i)), SX(width), SY(1) + 0.6f, colour);
+    }
+  }
+  // The panel in the party strip's frame (frame 173 at (230, 314)) for the highlighted piece `item` (weapon, armour or accessory): three
+  // rows 24 units apart, each a face (dimmed when the character cannot wear the piece) and up to three changed stats (caption, the
+  // value with the piece, an arrow in the Equip screen's raised / lowered colour), or "Equipped", "Can't equip", "No change"; under them
+  // "Also usable by: N others" and, with more than one page, the page button and "page/pages". Page 0 is the party.
+  void compare_panel(int item) {
+    if (!compare.on || !shop::is_gear(*gs, item)) return;
+    if (!texs.hd()) {
+      if (Tex* plate_frame = texs.sheet("main", 173)) Img(plate_frame, SX(230 + plate_frame->ox), SY(314 + plate_frame->oy), SX(plate_frame->w), SY(plate_frame->h));
+    } else if (Tex* plate_frame = texs.shape(173, lang)) {
+      Img(plate_frame, SX(230 - 3), SY(314 - 8), SX(plate_frame->w / 4.0f), SY(plate_frame->h / 4.0f));
+    }
+    int others = 0;
+    const std::vector<int> order = shop::compare_order(*gs, item, &others);
+    const int pages = (static_cast<int>(order.size()) + 2) / 3;
+    int& page = compare_page(item);
+    page = std::clamp(page, 0, std::max(0, pages - 1));
+    // Caption keys of the caption table; without the table (played from the discs) the key itself in Japanese, else the English word.
+    static const struct {
+      const char* key;
+      const char* en;
+    } kCaption[6] = {{"攻撃力", "ATK."}, {"魔法攻撃", "M. ATT."}, {"命中率", "HIT%"}, {"防御力", "DEF."}, {"魔法防御", "M. DEF."}, {"回避率", "EVD%"}};
+    for (int row = 0; row < 3; ++row) {
+      const size_t index = static_cast<size_t>(page * 3 + row);
+      if (index >= order.size()) break;
+      const shop::GearCompare result = shop::gear_compare(*gs, order[index], item);
+      const float y = 314.0f + 24.0f * static_cast<float>(row);
+      strip_face(result.character, 230, y, result.wearable ? 0x70 : 0x30);
+      if (!result.wearable || result.worn) {
+        RT(1, 262, y + 4, compare_text(result.worn ? kEquipped : kCannotEquip), result.worn ? 0x808080u : 0x404040u);
+        continue;
+      }
+      const std::vector<shop::StatChange> changes = shop::stat_changes(result.now, result.with);
+      if (changes.empty()) RT(1, 262, y + 4, compare_text(kNoChange));
+      for (size_t i = 0; i < std::min<size_t>(changes.size(), 3); ++i) {
+        const shop::StatChange& change = changes[i];
+        const float x = 262.0f + 78.0f * static_cast<float>(i);
+        const bool up = change.with > change.now;
+        const u32 colour = up ? 0x004E77u : 0x9F6D00u;
+        const auto& caption = kCaption[static_cast<int>(change.stat)];
+        const std::string word = cm(caption.key);
+        RT(5, x, y + 7, word == caption.key && lang_index() != 5 ? std::string(caption.en) : word);
+        RT(lang_index() == 5 ? 5 : 0x90, x + 63, y + 6, fmt("%d", change.with), colour, font::kRight);
+        stat_arrow(x + 66, y + 9, up, ps1_colour(colour));
+      }
+    }
+    RT(1, 236, 388, others == 1 ? compare_text(kOneOther) : compare_text(kOthers, others));
+    if (pages > 1) {
+      page_glyph(438, 389);
+      RT(lang_index() == 5 ? 5 : 0x90, 458, 392, fmt("%d", page + 1) + "/" + fmt("%d", pages));
+    }
+  }
+
   // Face sprites: hd/face/<2021 | 1999>/NN_name.png by art mode. faces_listed: 1 = 2021, 2 = 1999.
   std::map<int, std::string> face_files;
   int faces_listed = 0;
@@ -1597,7 +1752,7 @@ struct ShopScreen::Impl {
           ++material_index;
         }
       }
-      party_strip(item);
+      if (operation == Operation::Forge && !compare.on) party_strip(item);
     } else {
       // trade-in: info panel with Stock / No. equipped / No. stockpiled and the item description
       // Played from the USA discs: messages 0x8E / 0x8F at (0x12E, 0x9D / 0xAF), the counts from x 0x1AE, the description from
@@ -1628,6 +1783,7 @@ struct ShopScreen::Impl {
         if (!trim(spec).empty()) RT(0x8F, usa ? 0x12E : 0x142, 0x5E, spec);
       }
     }
+    compare_panel(item);
     // messages / Yes-No rows / quantity window
     if (stage == Stage::Confirm) {
       if (operation == Operation::Forge) message(ss(0x801DF834), 0x71);
@@ -1726,6 +1882,7 @@ struct ShopScreen::Impl {
         trade.stage = 0;
         sfx(6);
       }
+      if (nav.page && go) page_compare(trade_goods());
       return;
     }
     // State 2: Element offer; one row name is prepared per frame (after a scroll only the new row 0 / 10).
@@ -1995,6 +2152,7 @@ struct ShopScreen::Impl {
       trade_info();
       RT(1, 0x150, 0x10E, ss_jp_part(0x801DF6EC));
       RT(1, 0x150, 0x11E, texs.hd() || usa_disc() ? ss(0x801DF6F9) : ss_prg(0x801DF6F8));
+      compare_panel(trade_goods());
       group(Left);
       marker(0x1E, 0x46 + 18.0f * static_cast<float>(trade.goods_cur), true);
     } else {
@@ -2115,6 +2273,7 @@ struct ShopScreen::Impl {
     for (const Cmd& cmd : cmds) {
       if (cmd.add != adding) sprites->set_blend(cmd.add ? render::BlendMode::Add : render::BlendMode::Alpha), adding = cmd.add;
       if (cmd.kind == Cmd::Text) fonts.draw(cmd.slot, cmd.text, cmd.x + ox / zoom, cmd.y + oy / zoom, cmd.ink, cmd.scale, cmd.align, zoom);
+      else if (cmd.kind == Cmd::Icon) render::draw_element_icon(*sprites, texs.white_set(), cmd.icon, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.w * zoom);
       else sprites->draw(cmd.set, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.h * zoom, cmd.u0, cmd.v0, cmd.u1, cmd.v1, cmd.color);
     }
     if (adding) sprites->set_blend(render::BlendMode::Alpha);
@@ -2150,6 +2309,8 @@ void ShopScreen::set_wide_columns(float canvas_columns, float layout_columns) {
   impl_->layout_cols = std::clamp(layout_columns, 0.0f, impl_->canvas_cols);
 }
 void ShopScreen::set_custom_names(const std::map<int, std::u32string>* names) { impl_->custom_names = names; }
+void ShopScreen::set_equip_compare(bool on) { impl_->compare.on = on; }
+void ShopScreen::set_stock_map(shop::StockMap map) { impl_->shop_data.stock_map = std::move(map); }
 void ShopScreen::set_sfx(std::function<void(int)> fn) { impl_->sfx_fn = std::move(fn); }
 void ShopScreen::open(GameState& state, ShopKind kind, int shop_id) { impl_->open(state, kind, shop_id); }
 void ShopScreen::close() { impl_->closed = true; }

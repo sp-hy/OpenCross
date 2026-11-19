@@ -28,6 +28,32 @@ constexpr const char* kCharFolders[44] = {
     "ilenes", "mell",    "liia",   "banc",      "sunef",   "steena", "doc",    "gyada",  "pierre",  "olha",     "tumaru"};
 }  // namespace
 
+// Part colour: the per-part colour word is (model colour x entry rgb) >> 7 for every part (the env parts' word is multiplied the same way),
+// so an entry rgb other than 0x80 scales that part's texels: sky's act0 / act1 (tech/sky.prd, 0xFC 0xFC 0xFC on parts 0 / 1) draw at ~2x,
+// gyada / jakotu / malchera / pierre / zoah's env-over parts (0x60..0x70) at 0.75..0.88. Op 0xA0 writes the same word and overrides this.
+void model_shading_entries(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp) {
+  for (size_t k = 0; k < asset.shading.size() && k < 32; ++k) {
+    const assets::ShadingEntry& entry = asset.shading[k];
+    if (entry.flags & 1) dp.hidden_meshes |= 1u << k;
+    if ((entry.flags & 0x80) && (entry.flags & 0x60)) dp.env_meshes |= 1u << k;
+    if ((entry.flags & 0x60) && !(entry.flags & 0x80)) {
+      if (entry.flags & 0x40) dp.stock_env_over |= 1u << k;
+      else dp.stock_env_replace |= 1u << k;
+      dp.stock_env_abr[k] = static_cast<u8>((entry.flags >> 2) & 3);
+    }
+    if (entry.r != 0x80 || entry.g != 0x80 || entry.b != 0x80) {
+      dp.part_mask |= 1u << k;
+      dp.part_tint[k][0] = entry.r / 128.0f, dp.part_tint[k][1] = entry.g / 128.0f, dp.part_tint[k][2] = entry.b / 128.0f;
+    }
+  }
+}
+
+void model_ot_faces(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp) {
+  dp.ot_faces = true;
+  for (size_t k = 0; k < asset.shading.size() && k < 32; ++k)
+    if (asset.shading[k].flags & 0x10) dp.near_meshes |= 1u << k;
+}
+
 void ModelCache::clear() {
   models.clear();
   weapons.clear();

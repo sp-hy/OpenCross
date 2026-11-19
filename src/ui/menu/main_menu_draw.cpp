@@ -6,10 +6,12 @@
 #include <cstdio>
 #include <iterator>
 
+#include "core/element_icon.h"
 #include "core/log.h"
 #include "platform/keymap.h"
 #include "platform/pad_remap.h"
 #include "render/camera.h"
+#include "render/element_icon_draw.h"
 #include "ui/lowres.h"
 #include "ui/menu/menu_common.h"
 #include "ui/menu/ps1_art.h"
@@ -24,13 +26,14 @@ constexpr float kListRowPitch = 46.0f;
 // Canvas units RDE draws the ink-placed text (HT) right of its ink coordinate.
 constexpr float kInkDx = 4.0f;
 
-const Str6 kTitles[6] = {
+const Str6 kTitles[7] = {
     {{"Member's Condition", "Statut du membre", "Condizioni dell'alleato", "Gefährtenstatus", "Estado del miembro", "Member's Condition"}},
     {{"Allocate/Use Elements", "Assigner/Utiliser éléments", "Assegna/Usa Elementi", "Elemente zuteilen/einsetzen", "Asignar/Usar elementos", "Power Elements"}},
     {{"Change Equipment", "Changer d'équipement", "Cambia equipaggiamento", "Ausrüstung ändern", "Cambiar equipo", "Change Equipments"}},
     {{"Key Items", "Objets clefs", "Oggetti importanti", "Wichtige Gegenstände", "Objetos clave", "Key Items"}},
     {{"Configuration", "Configuration", "Configurazione", "Konfiguration", "Configuración", "Customize"}},
-    {{"Save/Load Progress", "Sauv./Charger la progression", "Salva o carica i progressi", "Fortschritt speichern/laden", "Guardar/Cargar una partida", "File Operation"}}};
+    {{"Save/Load Progress", "Sauv./Charger la progression", "Salva o carica i progressi", "Fortschritt speichern/laden", "Guardar/Cargar una partida", "File Operation"}},
+    {{"OpenCross", "OpenCross", "OpenCross", "OpenCross", "OpenCross", "OpenCross"}}};
 
 }  // namespace
 
@@ -74,7 +77,7 @@ MtStyle mt_style(u32 flags, int lang_index) {
 void MainMenu::Impl::emit(Cmd&& cmd) {
   // The disc's menu font carries its own greys: the neutral text colours draw it unchanged.
   if (cmd.kind == Cmd::Text && ps1_text() && (cmd.color == kText || cmd.color == kName || cmd.color == kCap)) cmd.color = kWhite;
-  if (cmd.kind != Cmd::Text && cmd.w > 0 && (cmd.x < sprite_clip_left || cmd.x + cmd.w > sprite_clip_right)) {
+  if ((cmd.kind == Cmd::Rect || cmd.kind == Cmd::Img) && cmd.w > 0 && (cmd.x < sprite_clip_left || cmd.x + cmd.w > sprite_clip_right)) {
     const float left = std::max(cmd.x, sprite_clip_left), right = std::min(cmd.x + cmd.w, sprite_clip_right);
     if (right <= left) return;
     const float u_per_x = (cmd.u1 - cmd.u0) / cmd.w, u0 = cmd.u0;
@@ -167,8 +170,10 @@ u32 MainMenu::Impl::grey(int ps1_level) {
 // Panel shape `frame` with its top-left corner at PS1 (x, y), transparent interior (the parchment shows); the shape images are 4x the
 // PS1 pixel size except the "-large" variants and frame 121 (1:1). With the PS1 disc art the panel is built from the "wind" sheet
 // pieces at the shape's size, with the caption notch cut out of the top edge. Played from the discs (no HD art) the panel is the sheet
-// frame itself, its lines with its caption words and icons, and its size reaches from the frame origin to the frame's far edges.
-void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w, float* out_h, bool large) {
+// frame itself, its lines with its caption words and icons, and its size reaches from the frame origin to the frame's far edges. A
+// `height` below the shape's own cuts the panel shorter: its top and bottom 24 px as they are, the straight sides between them stretched
+// (not played from the discs, where the sheet frame keeps its size).
+void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w, float* out_h, bool large, float height) {
   if (!texs.hd()) {
     // The JP disc's description frame is narrower than the USA disc's and stands 27 pixels further right.
     if (frame == 0x36 && jp()) x += 27;
@@ -180,7 +185,9 @@ void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w
   }
   Tex* tex = texs.shape(frame, lang, large);
   const float div = (large || frame == 121) ? 1.0f : 4.0f;
-  const float w = tex ? tex->w / div : 100, h = tex ? tex->h / div : 50;
+  const float w = tex ? tex->w / div : 100, full_h = tex ? tex->h / div : 50;
+  const bool cut = height > 48.0f && height < full_h;
+  const float h = cut ? height : full_h;
   if (out_w) *out_w = w;
   if (out_h) *out_h = h;
   if (!tex) return;
@@ -193,6 +200,12 @@ void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w
         },
         PX(x), PY(y), PX(w), PY(h), PX(1), PY(1), gap > 0 ? PX(8) : 0.0f, gap > 0 ? PX(gap - 8) : 0.0f, PX(foot.start),
         PX(foot.end - foot.start));
+  } else if (cut) {
+    constexpr float kEnd = 24.0f;
+    const float edge = kEnd / full_h;
+    Img(tex, PX(x), PY(y), PX(w), PY(kEnd), 0, 0, 1, edge, colour);
+    Img(tex, PX(x), PY(y + kEnd), PX(w), PY(h - 2 * kEnd), 0, edge, 1, 1 - edge, colour);
+    Img(tex, PX(x), PY(y + h - kEnd), PX(w), PY(kEnd), 0, 1 - edge, 1, 1, colour);
   } else {
     Img(tex, PX(x), PY(y), PX(w), PY(h), 0, 0, 1, 1, colour);
   }
@@ -290,6 +303,8 @@ void MainMenu::Impl::build() {
     case MenuScreen::KeyItems: build_keyitems(); break;
     case MenuScreen::Settings: build_settings(); break;
     case MenuScreen::Save: build_save(); break;
+    case MenuScreen::OpenCross: build_main(); break;
+    case MenuScreen::OcPage: build_page(); break;
   }
   if (!texs.hd()) {
     // The disc's swirls, over the screen as on the PS1 (the portrait strips included): the compass meshes "deco" at (0x48, 0x187) and
@@ -402,6 +417,15 @@ void MainMenu::Impl::Disc(float cx, float cy, float radius, u32 colour) {
   }
 }
 
+void MainMenu::Impl::symbol(int colour, float cx, float cy, float size, int light) {
+  if (!element_symbols() || colour < 0 || colour >= kElementIconCount) return;
+  if (cx - size * 0.5f < sprite_clip_left || cx + size * 0.5f > sprite_clip_right) return;
+  Cmd cmd;
+  cmd.kind = Cmd::Icon;
+  cmd.x = cx, cmd.y = cy, cmd.w = size, cmd.icon = colour, cmd.light = light;
+  emit(std::move(cmd));
+}
+
 // The star "★" as a kb_70 list entry at list (x, y): scale = the slot scale * mul, pen X = x * sx + offX * scale, Y = y * sy + offY *
 // scale + dy.
 void MainMenu::Impl::StarGlyph(float x, float y, float mul, float dy, u32 colour) {
@@ -439,10 +463,12 @@ void MainMenu::Impl::leader_raw(float start_x, float y, float bend_x, float end_
   rect(PX(bend_x + 12.0f), PY(y + 12.0f) - thickness * 0.5f, PX(end_x - bend_x - 12.0f), thickness, colour);
 }
 
-// Leader line of main-list entry `entry`: from just left of the label's ink to the dial ring.
+// Leader line of main-list slot `entry`: from just left of the label's ink to the dial ring. The seventh slot (shown with the OpenCross
+// row) meets the ring on its lower curve, further right.
 void MainMenu::Impl::leader(int entry, float x_ink, float cap_y, u32 colour) {
+  constexpr float kSeventhSlotEnd = 402.0f;
   const float bend_x = 383.0f - 12.4f * static_cast<float>(entry);
-  const float end_x = entry == 0 ? 397.0f : 387.5f + 1.4f * static_cast<float>(entry - 1);
+  const float end_x = entry == 0 ? 397.0f : entry == 6 ? kSeventhSlotEnd : 387.5f + 1.4f * static_cast<float>(entry - 1);
   leader_raw(x_ink - 2.8f, cap_y + 12.0f, bend_x, end_x, colour);
 }
 
@@ -473,9 +499,14 @@ void MainMenu::Impl::SpriteNumber(int value, float x, float y, bool big, u32 col
 // and "G" (33).
 void MainMenu::Impl::bar_and_title(int title_index, bool bar) {
   if (!texs.hd()) {
-    group(Right);
-    Sprite(41 + std::clamp(title_index, 0, 5), 490, 35);
-    group(Left);
+    // The OpenCross title has no sheet frame: it is font text at the HD title's place.
+    if (title_index < 6) {
+      group(Right);
+      Sprite(41 + std::max(title_index, 0), 490, 35);
+      group(Left);
+    } else {
+      screen_title(utf32(S6(kTitles[6])));
+    }
     if (!bar) return;
     SpriteNumber(std::min<int>(gs->slot.stars_current(), 99), 56, 392, true);
     Sprite(6, 30, 390);
@@ -499,13 +530,7 @@ void MainMenu::Impl::bar_and_title(int title_index, bool bar) {
     }
     return;
   }
-  group(Right);
-  const std::u32string title = utf32(S6(kTitles[std::clamp(title_index, 0, 5)]));
-  HT(face_gn, 487.6f, 24.4f, title, kText, 0.26f, true);
-  text->prepare(face_gn, title);
-  const float title_w = text->measure(face_gn, title, 0.26f) / xscale;
-  rect(PX(487.6f - title_w - 1.0f), PY(34.6f), PX(title_w + 2.6f), 2.2f, rgb(200, 190, 190));
-  group(Left);
+  screen_title(utf32(S6(kTitles[std::clamp(title_index, 0, 6)])));
   if (!bar) return;
   const u32 seconds = gs->play_seconds();
   char playtime[24];
@@ -526,6 +551,16 @@ void MainMenu::Impl::bar_and_title(int title_index, bool bar) {
   gold.erase(0, gold.find_first_not_of(' '));
   HN(195.6f, 401.9f, gold);
   HS(0x77, 204.1f + (jp() ? -2.0f : 0.0f), 402.6f, utf32("G"));
+}
+
+// The screen title, right-aligned at the top right with its underline (right group).
+void MainMenu::Impl::screen_title(const std::u32string& title) {
+  group(Right);
+  HT(face_gn, 487.6f, 24.4f, title, kText, 0.26f, true);
+  text->prepare(face_gn, title);
+  const float title_w = text->measure(face_gn, title, 0.26f) / xscale;
+  rect(PX(487.6f - title_w - 1.0f), PY(34.6f), PX(title_w + 2.6f), 2.2f, rgb(200, 190, 190));
+  group(Left);
 }
 
 // Baked-in sheet captions: the PS1 frames carry "HP / STR. / ACC." etc. in the picture; the HD shapes are blank there and the
@@ -753,13 +788,17 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
       if (cmd.add != adding) sprites->set_blend(cmd.add ? render::BlendMode::Add : render::BlendMode::Alpha), adding = cmd.add;
       if (cmd.kind == Cmd::Text) {
         text->draw(cmd.face, cmd.text, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.color, cmd.scale * zoom);
+      } else if (cmd.kind == Cmd::Icon) {
+        render::draw_element_icon(*sprites, texs.white_set(), cmd.icon, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.w * zoom, cmd.light);
       } else {
         sprites->draw(cmd.set, ox + cmd.x * zoom, oy + cmd.y * zoom, cmd.w * zoom, cmd.h * zoom, cmd.u0, cmd.v0, cmd.u1, cmd.v1, cmd.color);
       }
     }
     if (adding) sprites->set_blend(render::BlendMode::Alpha);
   };
-  const bool with_model = model_view && model_wanted && screen == MenuScreen::Status;
+  const bool with_status = model_view && model_wanted && (screen == MenuScreen::Status || screen == MenuScreen::OcPage);
+  const bool with_enemy = enemy_view && enemy_wanted && screen == MenuScreen::OcPage;
+  const bool with_model = with_status || with_enemy;
   const size_t split = with_model ? std::min(model_layer, cmds.size()) : cmds.size();
   sprites->begin(frame, vw, vh, resume);
   sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
@@ -776,48 +815,62 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
     float dt = model_clock.time_since_epoch().count() == 0 ? 0.0f : std::chrono::duration<float>(now - model_clock).count();
     model_clock = now;
     dt = std::min(dt, 0.1f);
-    const int character = cur_char();
-    const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
-    MenuModelSlot slot;
-    slot.char_id = character;
-    slot.model = model_number(character, kLastMenuModel);
-    slot.weapon_model = model_number(character);
-    slot.origin_x = ox, slot.origin_y = oy * flat;
-    slot.unit_x = xscale * zoom, slot.unit_y = PY(1) * zoom * flat;
-    slot.camera = model_cam;
-    slot.camera_prev = model_cam_prev;
-    slot.session = model_session;
-    slot.hd = mode == ArtMode::Hd;
-    slot.status = ch.status;
-    slot.tick = static_cast<u32>(model_frames / 2);
-    // The hurt pose replaces pose 0 below an eighth of the HP or with a status of mask 0x39.
-    const bool hurt = ch.cur_hp < ch.max_hp / 8 || (ch.status & 0x39) != 0;
-    slot.pose = hurt && model_pose == 0 ? 3 : model_pose;
-    if (const int weapon = gs->equipped(character, 0); weapon > 0 && rules && rules->tables)
-      if (const data::GearRec* gear = rules->tables->gear_rec(weapon)) slot.weapon_part = gear->tier() & 0xF;
-    // Pierre's construct 3 (the Hero's Shield) shows only while he wears one.
-    constexpr int kPierre = 41, kHerosShield = 0xC1, kShieldConstruct = 3;
-    if (character == kPierre && gs->equipped(character, 2) != kHerosShield && gs->equipped(character, 3) != kHerosShield &&
-        gs->equipped(character, 4) != kHerosShield)
-      slot.hidden_meshes = 1u << kShieldConstruct;
-    slot.dt = dt;
+    float origin_x = ox, origin_y = oy * flat, unit_x = xscale * zoom, unit_y = PY(1) * zoom * flat;
+    auto draw_model = [&](const render::Frame& out, float out_w, float out_h) {
+      if (with_enemy) {
+        EnemyModelSlot slot = enemy_slot;
+        slot.origin_x = origin_x, slot.origin_y = origin_y, slot.unit_x = unit_x, slot.unit_y = unit_y;
+        slot.hd = mode == ArtMode::Hd;
+        slot.dt = dt;
+        enemy_view->draw(out, out_w, out_h, slot);
+        return;
+      }
+      if (screen == MenuScreen::OcPage) {
+        MenuModelSlot slot = mv_slot;
+        slot.origin_x = origin_x, slot.origin_y = origin_y, slot.unit_x = unit_x, slot.unit_y = unit_y;
+        slot.hd = mode == ArtMode::Hd;
+        slot.dt = dt;
+        model_view->draw(out, out_w, out_h, slot);
+        return;
+      }
+      const int character = cur_char();
+      const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
+      MenuModelSlot slot;
+      slot.char_id = character;
+      slot.model = model_number(character, kLastMenuModel);
+      slot.weapon_model = model_number(character);
+      slot.origin_x = origin_x, slot.origin_y = origin_y;
+      slot.unit_x = unit_x, slot.unit_y = unit_y;
+      slot.camera = model_cam;
+      slot.camera_prev = model_cam_prev;
+      slot.session = model_session;
+      slot.hd = mode == ArtMode::Hd;
+      slot.status = ch.status;
+      slot.tick = static_cast<u32>(model_frames / 2);
+      // The hurt pose replaces pose 0 below an eighth of the HP or with a status of mask 0x39.
+      const bool hurt = ch.cur_hp < ch.max_hp / 8 || (ch.status & 0x39) != 0;
+      slot.pose = hurt && model_pose == 0 ? 3 : model_pose;
+      model_gear(character, slot);
+      slot.dt = dt;
+      model_view->draw(out, out_w, out_h, slot);
+    };
     if (window) {
       // The 2D so far goes to the window; the model is drawn there over the target's rectangle, and the pass starts again for the rest.
       lowres.end(*window->frame, window->vw, window->vh, &window->rect);
       const float to_x = window->rect.w / vw, to_y = window->rect.h / vh;
-      slot.origin_x = window->rect.x + slot.origin_x * to_x, slot.origin_y = window->rect.y + slot.origin_y * to_y;
-      slot.unit_x *= to_x, slot.unit_y *= to_y;
+      origin_x = window->rect.x + origin_x * to_x, origin_y = window->rect.y + origin_y * to_y;
+      unit_x *= to_x, unit_y *= to_y;
       const render::Frame& out = *window->frame;
       out.set_scissor(ps1::columns_clip(out, window->vw, window->rect.x, window->rect.w));
-      model_view->draw(out, window->vw, window->vh, slot);
+      draw_model(out, window->vw, window->vh);
       out.set_scissor(out.full());
       if (!lowres.begin(out, window->display, text, frame, vw, vh)) {
-        model_wanted = false;
+        model_wanted = enemy_wanted = false;
         text->set_pixel_aspect(old_aspect);
         return;
       }
     } else {
-      model_view->draw(frame, vw, vh, slot);
+      draw_model(frame, vw, vh);
     }
     if (clipped) frame.set_scissor(clip);
     sprites->begin(frame, vw, vh, true);
@@ -833,7 +886,7 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
     for (const AuditBox& box : audit_boxes)
       text->audit_obstacle(ox + box.x * zoom, (oy + box.y * zoom) * flat, box.w * zoom, box.h * zoom * flat, box.label);
   }
-  model_wanted = false;
+  model_wanted = enemy_wanted = false;
   text->set_pixel_aspect(old_aspect);
 }
 

@@ -195,7 +195,7 @@ void FieldWorld::start_battle_music(int flags) {
   handoff_.battle_music_stopped = true;
   // The battle song starts DURING the encounter effect, not at the battle load; BattleAudio::start_battle_theme then finds it playing.
   // Flag 0x40 picks the boss theme; the battle adopts the same song so there is no restart at the load.
-  start_song(audio::battle_song(flags), 127);
+  start_song(audio::battle_song(flags), 127, 0.0, false);
 }
 
 void FieldWorld::cancel_battle_music() {

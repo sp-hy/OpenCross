@@ -1,9 +1,11 @@
 // Mods found directly in the mods folder: bare .dat files and ZIP / 7z / RAR archives read live, like folders. The archives are built
-// here: ZIP and 7z with libarchive's writer, RAR by hand (stored members need no compressor).
+// here: ZIP and 7z with libarchive's writer, RAR by hand (stored members need no compressor). Model replacements (models\classic|hd\...glb)
+// and the problems reported for them.
 #include <archive.h>
 #include <archive_entry.h>
 #include <miniz.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <filesystem>
@@ -163,6 +165,10 @@ int main() {
   std::ofstream(dir / "notes.txt") << "not a mod";
   fs::create_directories(dir / "Folder Mod");
   std::ofstream(dir / "Folder Mod" / "x.bin") << "x";
+  fs::create_directories(dir / "Folder Mod" / "Wrapper" / "models" / "hd" / "battle" / "player" / "selju2");
+  std::ofstream(dir / "Folder Mod" / "Wrapper" / "models" / "hd" / "battle" / "player" / "selju2" / "Selju.glb") << "glb";
+  fs::create_directories(dir / "Folder Mod" / "models" / "battle");
+  std::ofstream(dir / "Folder Mod" / "models" / "battle" / "nowhere.glb") << "glb";
   // Wrapped in a folder of its own: the voices folder then sits at the top of the mod.
   write_archive(dir / "Wrapped.zip", false, {{"Wrapped Pack/voices/123/5-0-serge.mp3", "zip voice"}, {"Wrapped Pack/textures/tiles/cafef00d.png", "png"}});
   // Not unwrapped: a single textures folder is the layout itself.
@@ -225,6 +231,17 @@ int main() {
   const auto png = texture ? files.read_mod_file(*texture) : std::nullopt;
   CHECK(png && std::string(png->begin(), png->end()) == "png");
 
+  // A model replacement: models\<classic|hd>\<member stem>.glb below any wrapper; without the art set folder it matches nothing.
+  const vfs::Mod* with_model = find_mod(mods, "Folder Mod");
+  CHECK(with_model && with_model->models.size() == 1 && with_model->models[0].target == "hd/battle/player/selju2/selju" &&
+        std::find(with_model->unmatched.begin(), with_model->unmatched.end(), "models/battle/nowhere.glb") != with_model->unmatched.end());
+  const auto model = files.model_file("hd/battle/player/selju2/selju");
+  CHECK(model && files.model_file("classic/battle/player/selju2/selju") == std::nullopt);
+  const unsigned before = vfs::file_problems_generation();
+  if (model) vfs::report_file_problem(*model, "not used, joint_03 is missing");
+  CHECK(vfs::file_problems_generation() != before && with_model && vfs::file_problems(*with_model).size() == 1 &&
+        vfs::file_problems(*with_model)[0] == "Wrapper/models/hd/battle/player/selju2/Selju.glb: not used, joint_03 is missing");
+
   const vfs::Mod* broken = find_mod(mods, "Broken.zip");
   CHECK(broken && !broken->error.empty() && broken->files.empty());
 
@@ -233,6 +250,7 @@ int main() {
   fs::last_write_time(dir / "Solid.7z", fs::last_write_time(dir / "Solid.7z") + std::chrono::seconds(5));
   mods.scan(files, dir, mods.prefs());
   CHECK(voices("Solid.7z") == 3);
+  CHECK(find_mod(mods, "Folder Mod") && vfs::file_problems(*find_mod(mods, "Folder Mod")).empty());
   CHECK(line(dir / "Solid.7z" / "voices" / "9" / "1-0-kid.mp3") == "new voice");
 
   // Past the memory limit an archive is walked per read; members are found in any order and in any number of reads.

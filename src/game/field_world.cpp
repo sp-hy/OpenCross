@@ -505,6 +505,7 @@ bool FieldWorld::load_room(std::string_view name, int param) {
     status_ = std::format("room {}: bad script", name);
     return false;
   }
+  if (script_patch_) script_patch_(name, mod->code);
   if (sfx_) {
     // Every sound ends except the FE 29 slots playing a global sound; the keep mask is cleared for the new room.
     sfx_->leave_room(sfx_keep_slots_);

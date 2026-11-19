@@ -54,9 +54,9 @@ void test_table() {
   CHECK(features::level(0) == 1);
   CHECK(features::level(9999) == 0);
   CHECK(features::find(features::table(), 0) && !features::find(features::table(), ""));
-  // Settings start with Enabled; an addon (the Mods tab's toggle) has settings, a mod kit none.
+  // Settings start with Enabled (the randomizer has none: it is on while any switch is); an addon (the Mods tab's toggle) has settings, a mod kit none.
   for (const features::Feature& feature : features::table()) {
-    if (!feature.settings.empty()) CHECK(*feature.section && std::string(feature.settings[0].key) == "Enabled");
+    if (!feature.settings.empty() && feature.id != features::kRandomizer) CHECK(*feature.section && std::string(feature.settings[0].key) == "Enabled");
     CHECK(feature.player == !feature.settings.empty());
   }
   // The tiers: party swap is the player's, the mod UI a mod's (named in Requires by its section).

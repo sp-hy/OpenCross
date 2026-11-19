@@ -90,11 +90,12 @@ std::optional<Bytes> Vfs::read_shipped(std::string_view archive, const std::stri
 void Vfs::set_overlay(Overlay overlay) {
   auto next = std::make_shared<const Overlay>(std::move(overlay));
   std::set<std::filesystem::path> used;
-  for (const auto* files : {&next->files, &next->textures})
+  for (const auto* files : {&next->files, &next->textures, &next->models})
     for (const auto& [target, source] : *files)
       if (!source.member.empty()) used.insert(source.file);
   std::lock_guard lock(impl_->mutex);
-  if (next->files != impl_->overlay->files || next->textures != impl_->overlay->textures || next->enhance != impl_->overlay->enhance)
+  if (next->files != impl_->overlay->files || next->textures != impl_->overlay->textures || next->models != impl_->overlay->models ||
+      next->enhance != impl_->overlay->enhance)
     ++generation_;
   impl_->overlay = std::move(next);
   // A reader in progress keeps its archive alive through the shared pointer.
@@ -197,6 +198,14 @@ std::optional<std::filesystem::path> Vfs::loose_file(std::string_view path) cons
 }
 
 bool Vfs::has_textures() const { return !overlay()->textures.empty(); }
+
+std::optional<OverlayFile> Vfs::model_file(std::string_view key) const {
+  auto ov = overlay();
+  if (ov->models.empty()) return std::nullopt;
+  auto it = ov->models.find(std::string(key));
+  if (it == ov->models.end()) return std::nullopt;
+  return it->second;
+}
 
 bool Vfs::enhanced() const { return overlay()->enhance; }
 

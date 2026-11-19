@@ -21,7 +21,8 @@ struct Setting {
 
 // One feature. `id` = the number GET_FEATURE_LEVEL (field script FE C0) takes, `level` = the version this build implements, `section` =
 // its mod.ini section (a mod sets it, or names it in Requires) and its key prefix in opencross.ini [Features] (empty: no mod names it,
-// as feature 0, the extension range itself). A feature with settings has the setting "Enabled" first.
+// as feature 0, the extension range itself). A feature with settings has the setting "Enabled" first, except the randomizer:
+// it is on while any of its switches is, and a stored "Enabled=0" turns them all off.
 // `player`: an addon works on the game as shipped, so the player keeps its toggle and settings in the Mods tab (it has settings). Otherwise
 // it is a mod kit: it does nothing without a mod's own scripts or data, has no settings (its mod.ini section takes no keys), and the Mods
 // tab only names the enabled mods that use it. `about` = one or
@@ -43,6 +44,7 @@ constexpr int kModUi = 2;
 constexpr int kPartyScreen = 3;
 constexpr int kModelSources = 5;
 constexpr int kButtonPanel = 6;
+constexpr int kRandomizer = 7;
 
 std::span<const Feature> table();
 // nullptr when the build has no such feature. Sections compare case-insensitively.

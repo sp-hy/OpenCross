@@ -157,6 +157,11 @@ void App::frame_hotkeys() {
   const bool start_pressed = input.pad_connected && input.pad_pressed[SDL_GAMEPAD_BUTTON_START];
   const u64 now_ms = SDL_GetTicks();
   guide_hotkeys();
+  // Esc closes the dialogue log window instead of opening the settings window.
+  if (dialogue_log_open && input.key_pressed[SDL_SCANCODE_ESCAPE] && !routing && !replaying) {
+    close_dialogue_log();
+    input.key_pressed[SDL_SCANCODE_ESCAPE] = false;
+  }
   bool settings_key = input.key_pressed[SDL_SCANCODE_ESCAPE];
   start_tap = false;
   if (start_pressed) {
@@ -323,9 +328,16 @@ void App::frame_settings() {
              : config.wide_hud == 1 ? std::min(wide_extra, render::wide_extra_for(16.0f, 9.0f)) : wide_extra;
   if (battle_ready) battle.set_wide_hud_columns(hud_cols);
   if (menu_ok) menu.set_wide_columns(wide_extra, hud_cols);
+  // [Game] OpenCrossMenu: the row's pages and their settings, the record pages' numbers and places once the background scan has
+  // finished; the dialogue log's hooks, window style, voice replay and Clear; the Extras unlocks and the music the pages borrow.
+  update_opencross_menu();
+  dialogue_log_frame();
+  update_extras();
+  if (menu_ok) menu.set_grid_presets(config.grid_presets ? &collection : nullptr, [this] { save_collection(); });
   if (results_ok) results.set_wide_columns(wide_extra, hud_cols);
   if (party_ok) party_screen.set_wide_columns(wide_extra, hud_cols);
   if (shop_ok) shop.set_wide_columns(wide_extra, hud_cols);
+  if (shop_ok) shop.set_equip_compare(config.equip_compare);
   if (flow_ready) flow.set_wide_columns(wide_extra);
   if (battle_ready) {
     battle.set_auto(config.debug_battle_auto);
@@ -367,7 +379,7 @@ bool App::simulate() {
 void App::field_frame() {
   // PageUp / PageDown: cycle through the rooms (rooms that fail to load are skipped); only in the field without the flow.
   int dir = 0;
-  if (!flow_enabled && !movie_open) {
+  if (!flow_enabled && !movie_open && !dialogue_log_open) {
     if (input.key_pressed[SDL_SCANCODE_PAGEDOWN]) dir = 1;
     if (input.key_pressed[SDL_SCANCODE_PAGEUP]) dir = -1;
   }
@@ -389,6 +401,8 @@ void App::field_frame() {
       step.alpha = 1.0f;
       loop_speed.field = {0, 1.0f};
     }
+    // The dialogue log window holds the field: its picture stays at the last tick's state.
+    if (dialogue_log_open) step.alpha = 1.0f;
     advance(input, frame_dt, ticks);
     // A replay runs 1:1: it gets the ticks the field loop ran.
     if (recorder.active()) recorder.write(frame_dt, loop_speed.on ? loop_speed.field.ticks : ticks, input);

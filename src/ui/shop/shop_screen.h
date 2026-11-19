@@ -49,6 +49,10 @@ class ShopScreen {
   void set_wide_columns(float canvas_columns, float layout_columns);
   // Typed character names by id (the picker of the element Sell shows them); must outlive the screen.
   void set_custom_names(const std::map<int, std::u32string>* names);
+  // [Enhancements] EquipCompare: the blacksmith's lists and the trading post's equipment goods show the gear compare panel.
+  void set_equip_compare(bool on);
+  // The randomizer's stock (shop::ShopData::stock_map); an empty function = the shops' own rows.
+  void set_stock_map(shop::StockMap map);
   // Sound hook: 1 cursor, 8 confirm, 6 cancel, 0x18 denied, 5 bought/sold, 0xBF forged/broken down, 0x1B traded.
   void set_sfx(std::function<void(int)> fn);
 

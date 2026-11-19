@@ -88,6 +88,11 @@ class VoicePlayer {
   // Battle script message (BattleView::smsg_*): the message opens, then per tick the current page and whether the window closes.
   void battle_open(int battle, int msg, std::string_view unit_name);
   void battle_sync(int page, bool closing);
+  // The relative path (as find takes it) of the file the last field / battle line request found, then empty; empty when it found none.
+  // Main thread.
+  std::string take_found();
+  // Plays the line at `rel` again (a logged line); a path no voices folder has any more stops the running line.
+  void replay(std::string_view rel, const void* owner);
 
  private:
   void worker();
@@ -113,6 +118,8 @@ class VoicePlayer {
   std::set<std::string> logged_;
 
   FieldVoiceNames field_names_;  // main thread only
+  // take_found (main thread only).
+  std::string found_;
 
   // Battle line in progress (main thread only).
   int b_battle_ = -1, b_msg_ = -1, b_page_ = -1;

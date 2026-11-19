@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <utility>
 
 #include "audio/mixer.h"
 #include "core/log.h"
@@ -332,10 +333,16 @@ void VoicePlayer::worker() {
 
 // A new line always ends the previous one, even when its file is not found.
 void VoicePlayer::request(const std::string& rel, const std::vector<std::string>& alt, const void* owner) {
+  found_.clear();
   if (!enabled()) return;
   std::filesystem::path file = find(rel);
-  for (size_t i = 0; file.empty() && i < alt.size(); ++i) file = find(alt[i]);
+  found_ = rel;
+  for (size_t i = 0; file.empty() && i < alt.size(); ++i) {
+    file = find(alt[i]);
+    found_ = alt[i];
+  }
   if (file.empty()) {
+    found_.clear();
     stop();
     std::lock_guard lk(log_mu_);
     if (roots_ && logged_.insert(rel).second) log::debug("voice: not found voices/{}", rel);
@@ -344,7 +351,16 @@ void VoicePlayer::request(const std::string& rel, const std::vector<std::string>
   play(file, owner);
 }
 
+std::string VoicePlayer::take_found() { return std::exchange(found_, std::string()); }
+
+void VoicePlayer::replay(std::string_view rel, const void* owner) {
+  const std::filesystem::path file = find(rel);
+  if (file.empty()) stop();
+  else play(file, owner);
+}
+
 void VoicePlayer::field_page(const void* owner, int scene, int dialog, int speaker, int tag_speaker, int page) {
+  found_.clear();
   if (!enabled()) return;
   std::vector<std::string> rels = field_names_.rels(scene, dialog, page, speaker, tag_speaker);
   const std::string first = rels.front();

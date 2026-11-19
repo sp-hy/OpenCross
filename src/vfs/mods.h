@@ -63,7 +63,9 @@ struct ModFile {
 // member replacements that follow "load on", `data` the matched game data, `archives` the <archive>.dat files (their members are in
 // `files` / `data`), `textures` the texture replacements (target = canonical texture
 // path), `shaders` the [Shaders] looks (<mod>\shaders\matcaps\<name>.png, <mod>\shaders\luts\<name>.png; target = "matcaps/<name>" /
-// "luts/<name>", lower case, no extension), `voices` the voice lines (<mod>\voices\**\*.mp3, or any .mp3 when the folder itself is called "voices"; played by
+// "luts/<name>", lower case, no extension), `models` the model replacements (<mod>\[wrapper\]models\classic|hd\<member stem>.glb; target =
+// "classic/<stem>" / "hd/<stem>", lower case, no extension), `voices` the voice lines (<mod>\voices\**\*.mp3, or any .mp3 when the folder
+// itself is called "voices"; played by
 // audio::VoicePlayer, not VFS targets). `added` lists the rel paths of the new members (rule 3; they are in `files` / `data` too).
 // `unmatched` / `ambiguous` list the rel paths that match no shipped member and name no archive / whose best match is not unique.
 struct Mod {
@@ -79,6 +81,7 @@ struct Mod {
   std::vector<ModFile> archives;
   std::vector<ModFile> textures;
   std::vector<ModFile> shaders;
+  std::vector<ModFile> models;
   std::vector<ModFile> voices;
   // text\<member>: the mod's own rows of a lang.dat text member (target = the member name, lower case), merged over the member
   // (import::TextMod) instead of replacing it.
@@ -90,6 +93,13 @@ struct Mod {
   bool has_manifest = false;
   features::Manifest manifest;
 };
+
+// Problems met while using a mod's file (a model replacement the game refused), by file, until the next ModManager::scan. Thread-safe.
+void report_file_problem(const OverlayFile& file, std::string problem);
+// The problems of `mod`'s files, as "<rel>: <problem>".
+std::vector<std::string> file_problems(const Mod& mod);
+// Changes whenever a problem is reported or the list is cleared.
+unsigned file_problems_generation();
 
 // Persisted per-mod settings, in priority order.
 struct ModPref {

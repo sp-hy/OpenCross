@@ -15,7 +15,8 @@
 //                                 (RDE's keys, platform/keymap.h), escape, select, start|space, a..z, f1..f9
 //   tap <name> [ticks]            press and release (default 3 ticks held, then 3 ticks free)
 //   pad on|off                    a virtual pad is connected (no button held) from now on / not any more
-//   pad tap <a|b|x|y|start> [ticks]   press and release a button of the virtual pad (connects it)
+//   pad tap <a|b|x|y|start|l3|r3|back|lb|rb>[+<button>...] [ticks]   press and release a button of the virtual pad, or several held
+//                                 together (connects it)
 //   action                        = tap confirm
 //   walk <x> <z> [tol] [timeout]  steer the stick until the player is within tol (default 24) of the world point
 //   walk_ent <ent> [tol] [timeout]  same, towards entity <ent> of the room
@@ -32,6 +33,7 @@
 //   wait guide <0|1|2> [timeout]  the user guide shows that page (1 controller, 2 keyboard, 0 closed)
 //   wait menu open|closed [timeout]  the main menu / a shop / the rename screen is up / gone
 //   wait shop open|closed [timeout]  a shop screen (FE 5E / 68) is up / gone
+//   wait records [timeout]        the record pages' room-script scan has finished ([Game] OpenCrossMenu)
 //   skip [timeout]                confirm every 10 ticks until a dialogue that is open has closed (45 quiet ticks end it)
 //   mash until flow <state> | room <name> | movie start|end | idle x | shop open|closed | menu open|closed [timeout]   confirm every 12 ticks until it holds
 //                                 (`idle` still needs an argument after it, `x` above; its value is ignored)
@@ -46,6 +48,8 @@
 //   assert battle plate [word]    the last versus battle showed its outcome plate (that word: Victory, Defeat, Draw, No result)
 //   assert result <n>             (BATTLE_RESULT)       assert flow <state> | assert menu open|closed | assert shop open|closed |
 //   assert movie playing|idle      assert guide <0|1|2>     assert pause open|closed (the RDE pause screen)
+//   assert dialoguelog open|closed | entries <min> [max] | cursor <n>   the dialogue log window is up / lists that many entries / has
+//                                 entry n selected (0 = the oldest)
 //   assert icons <n>              the last frame drew n play-time feature icons (slow, fast, encounters off, battle boost, auto battle)
 //   assert text <words...>        the open dialogue's message contains the words
 //   assert choiceline <n>         the choice hand / highlight is on message line n of the open list (translated numbering, DialogueBox::choice_line)
@@ -69,6 +73,7 @@
 //   assert gold <n>               the gold held
 //   assert song <id|none>         the song the music mixer plays (none = no song or it has ended; needs a running mix)
 //   assert option <hexmask> set|clear   all mask bits of the settings options word are set / not all set
+//   assert config <section> <key> <value>   the settings in force store that key with that value (e.g. assert config Game RecordsHints full)
 //   mark / assert screen right|left|up|down   player screen movement since the mark
 //   mark ent <n> / assert moved <n> <min>   entity <n> is at least <min> world units from where `mark ent` saw it
 //   assert ent <n> model|body|char|shown|moving|paused|wet <value>   room model index / character model byte worn (-1 none) /
@@ -156,6 +161,8 @@ struct RouteState {
   bool battle = false;
   // Result panel confirmed (the driver hands back to the field next step).
   bool battle_finished = false;
+  // The Retry battle choice is up after a wipe.
+  bool retry = false;
   // Game flow state (title / name / slots / opening / field).
   std::string flow = "field";
   bool movie = false;
@@ -166,6 +173,11 @@ struct RouteState {
   int guide_page = 0;
   // The pause screen is up.
   bool pause = false;
+  // The record pages know what the room-script scan found.
+  bool records_ready = false;
+  // The dialogue log window: the entries it lists (-1 = not up) and its selected entry.
+  int dialogue_log = -1;
+  int dialogue_log_cursor = -1;
   // Play-time feature icons (slow, fast, encounters off, battle boost, auto battle) drawn on the last frame.
   int feature_icons = 0;
   // Field simulation ticks so far.
@@ -195,6 +207,8 @@ struct RouteState {
   std::function<int()> song;
   std::function<long long()> gold;
   std::function<int()> options;
+  // The value a [section] key of the settings in force would be stored with (empty: no such key).
+  std::function<std::string(const std::string&, const std::string&)> config_value;
   std::function<std::vector<std::array<float, 2>>(float, float, float, float, bool)> path;
   // Counters since start: FieldWorld::load_room calls, in-place art swaps of the field room, field battles, title sequences (tit0..3).
   u64 room_loads = 0;
@@ -241,6 +255,9 @@ struct RouteOut {
   // `set option <hexmask> <0|1>`: one bit of the Settings options word.
   bool set_option = false;
   int option_mask = 0, option_on = 0;
+  // `set skin <byte>`: the window frame byte of the game options, with Custom window frame on.
+  bool set_skin = false;
+  int skin = 0;
   bool set_buttons = false;
   int buttons_index = 0, buttons_value = 0;
   // `set group <n> <0|1>`: show / hide a background tile group as BG_GROUP_ON / OFF do.

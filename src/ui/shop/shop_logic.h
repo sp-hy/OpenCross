@@ -5,6 +5,7 @@
 // Table caveat: data::GameTables::waa_shop is parsed as 32 u16 per row; the real layout is 32 rows x 64 u16, so
 // ShopData re-reads it with load_waa_shop() when a Vfs is available.
 #include <array>
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -26,9 +27,14 @@ enum class Res {
   BadOffer,        // offer below the required level sum, or an element the entry refuses
 };
 
+// The stock of a shop as a row reads it; the randomizer replaces a row's ids (game/randomizer.h).
+using StockMap = std::function<std::vector<int>(Kind kind, int shop_id, std::vector<int> row)>;
+
 struct ShopData {
   std::vector<std::vector<u16>> el_shop, waa_shop;
   std::vector<std::vector<data::TradeEntry>> trade;
+  // Applied to element_row / gear_row when set.
+  StockMap stock_map;
 
   static ShopData from_tables(const data::GameTables& tables) { return {tables.el_shop, tables.waa_shop, tables.trade}; }
   // 32 rows x 64 u16 (0-terminated rows); false if the file is missing.
@@ -99,6 +105,32 @@ Res breakdown(GameState& gs, int item, int* gold_gain = nullptr);
 long long gear_sell_price(const GameState& gs, int item, int qty);
 std::vector<int> gear_sell_list(const GameState& gs, int category);
 Res sell_gear(GameState& gs, int item, int qty);
+
+// ---- equip compare ([Enhancements] EquipCompare): what a piece of gear would change for a character, against what it wears now.
+// The slot compared: weapon 0, armour 1; an accessory takes the slot already holding it, else the slot of a worn accessory whose slot
+// mask overlaps its own (the one it would replace), else the first empty accessory slot, else slot 2. `wearable` = the piece is a
+// weapon, armour or accessory and its equippable-by mask has the character's bit; `worn` = the character wears it in that slot.
+struct GearCompare {
+  int character = -1;
+  int eslot = -1;
+  bool wearable = false;
+  bool worn = false;
+  Stats now, with;
+};
+GearCompare gear_compare(const GameState& gs, int character, int item);
+// Weapon, armour or accessory (item kind 0..2, id at or above the first gear id).
+bool is_gear(const GameState& gs, int item);
+// Stat order of the changes: ATK, M.ATT, HIT, DEF, M.DEF, EVD. Values are the Equip screen's displayed ones (HIT and EVD capped at
+// 99, the others at 999); a change is a stat whose displayed value differs.
+enum class Stat { Atk, Mag, Hit, Def, Mdef, Evd };
+struct StatChange {
+  Stat stat = Stat::Atk;
+  int now = 0, with = 0;
+};
+std::vector<StatChange> stat_changes(const Stats& now, const Stats& with);
+// The characters the compare panel pages through, three a page: the party in its order, then every other available character, those
+// who can wear the piece first, each part by id. `others` (optional) receives the available characters outside the party who can wear it.
+std::vector<int> compare_order(const GameState& gs, int item, int* others = nullptr);
 
 // ---- trading post. trade.bin row = 16 entries {u8 goods id, u8 colour mask, u16 level sum}.
 struct TradeSlot {

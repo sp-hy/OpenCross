@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <atomic>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <set>
 #include <unordered_map>
 
@@ -136,6 +139,30 @@ bool texture_target(const std::vector<std::string>& rel, std::string& target) {
   return false;
 }
 
+// "[wrapper/]models/<classic|hd>/<member stem>.glb" (lower-case components) -> "<classic|hd>/<member stem>".
+bool model_target(const std::vector<std::string>& rel, std::string& target) {
+  if (rel.empty() || rel.back().size() <= 4 || !rel.back().ends_with(".glb")) return false;
+  for (size_t i = 0; i + 2 < rel.size(); ++i) {
+    if (rel[i] != "models" || (rel[i + 1] != "classic" && rel[i + 1] != "hd")) continue;
+    target.clear();
+    for (size_t k = i + 1; k < rel.size(); ++k) target += (k > i + 1 ? "/" : "") + rel[k];
+    target.resize(target.size() - 4);
+    return true;
+  }
+  return false;
+}
+
+struct FileProblems {
+  std::mutex mutex;
+  std::map<std::pair<fs::path, std::string>, std::string> by_file;
+  std::atomic<unsigned> generation{0};
+};
+
+FileProblems& file_problem_list() {
+  static FileProblems list;
+  return list;
+}
+
 // A resolved game file goes with the files that follow "load on" or with the mod's game data.
 void add_matched(Mod& mod, ModFile mod_file) {
   (is_game_data(mod_file.target) ? mod.data : mod.files).push_back(std::move(mod_file));
@@ -152,7 +179,7 @@ bool is_packed(const std::string& lowered_name) {
 }
 
 // Length of the leading folders every member shares: an archive made from a folder starts inside it, where a mod folder would.
-// "voices", "textures" and "shaders" are mod layout, not wrappers.
+// "voices", "textures", "shaders" and "models" are mod layout, not wrappers.
 size_t wrapper_length(const std::vector<std::string>& names) {
   if (names.empty()) return 0;
   size_t length = 0;
@@ -160,7 +187,7 @@ size_t wrapper_length(const std::vector<std::string>& names) {
     const size_t slash = names[0].find('/', length);
     if (slash == std::string::npos) return length;
     const std::string_view folder = std::string_view(names[0]).substr(length, slash - length);
-    if (folder == "voices" || folder == "textures" || folder == "shaders") return length;
+    if (folder == "voices" || folder == "textures" || folder == "shaders" || folder == "models") return length;
     const std::string_view prefix = std::string_view(names[0]).substr(0, slash + 1);
     if (!std::all_of(names.begin(), names.end(), [&](const std::string& name) { return name.starts_with(prefix); })) return length;
     length = slash + 1;
@@ -237,6 +264,10 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
       return;
     }
   }
+  if (model_target(rel, mod_file.target)) {
+    mod.models.push_back(std::move(mod_file));
+    return;
+  }
   if (fname.size() > 4 && (fname.ends_with(".mp4") || fname.ends_with(".mkv")) &&
       idx.by_name.contains(fname.substr(0, fname.size() - 4) + ".bk2")) {
     mod_file.target = "movie/" + fname;
@@ -273,6 +304,27 @@ bool is_game_data(std::string_view target) {
   return std::any_of(kFolders.begin(), kFolders.end(), within) || std::find(kFiles.begin(), kFiles.end(), target) != kFiles.end();
 }
 
+void report_file_problem(const OverlayFile& file, std::string problem) {
+  FileProblems& list = file_problem_list();
+  const std::lock_guard lock(list.mutex);
+  std::string& held = list.by_file[{file.file, file.member}];
+  if (held == problem) return;
+  held = std::move(problem);
+  ++list.generation;
+}
+
+std::vector<std::string> file_problems(const Mod& mod) {
+  FileProblems& list = file_problem_list();
+  const std::lock_guard lock(list.mutex);
+  std::vector<std::string> out;
+  if (list.by_file.empty()) return out;
+  for (const ModFile& model : mod.models)
+    if (const auto it = list.by_file.find({model.file, model.member}); it != list.by_file.end()) out.push_back(model.rel + ": " + it->second);
+  return out;
+}
+
+unsigned file_problems_generation() { return file_problem_list().generation.load(); }
+
 const char* load_on_name(ModLoadOn load_on) {
   switch (load_on) {
     case ModLoadOn::Modded: return "modded";
@@ -302,14 +354,23 @@ bool loads_on(ModLoadOn load_on, ModArt art) {
 }
 
 // Mods are collected in name order, then reordered by the saved priority. Each file is classified in turn (add_file): a <archive>.dat
-// that is a ZIP = its members are resolved one by one (add_archive); textures\<category>\...png = a dumped texture's replacement; an .mp3 under voices\ (or
-// anywhere in a mod called "voices") = a voice line (its "voices/<name>" target is not a VFS target, kept for the count / display);
+// that is a ZIP = its members are resolved one by one (add_archive); textures\<category>\...png = a dumped texture's replacement;
+// models\<classic|hd>\...glb = a model's replacement; an .mp3 under voices\ (or anywhere in a mod called "voices") = a voice line
+// (its "voices/<name>" target is not a VFS target, kept for the count / display);
 // an .mp4 / .mkv named after a shipped movie (a01op_de.mp4 for a01op_de.bk2) = its replacement, kept as "movie/<name>.mp4|.mkv";
 // everything else is resolved against the shipped member index, and what matches nothing there but names an archive is added (added_target).
 void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vector<ModPref>& prefs) {
   dir_ = mods_dir;
   mods_.clear();
   packed_voices_.clear();
+  {
+    FileProblems& problems = file_problem_list();
+    const std::lock_guard lock(problems.mutex);
+    if (!problems.by_file.empty()) {
+      problems.by_file.clear();
+      ++problems.generation;
+    }
+  }
   std::error_code ec;
   if (mods_dir.empty() || !fs::is_directory(mods_dir, ec)) {
     log::info("mods: no mods folder at {}", u8(mods_dir));
@@ -369,9 +430,10 @@ void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vecto
     } else {
       add_file(mod, vfs, idx, {{}, mod.source, {}, mod.name}, false, {});
     }
-    log::info("mods: '{}' ({}, load on {}): {} matched, {} game data, {} archive(s), {} texture(s), {} voice(s), {} added, {} unmatched, {} ambiguous{}{}",
+    log::info("mods: '{}' ({}, load on {}): {} matched, {} game data, {} archive(s), {} texture(s), {} model(s), {} voice(s), {} added, {} unmatched, {} "
+              "ambiguous{}{}",
               mod.name, mod.enabled ? "enabled" : "disabled", load_on_name(mod.load_on), mod.files.size(), mod.data.size(), mod.archives.size(),
-              mod.textures.size(), mod.voices.size(), mod.added.size(), mod.unmatched.size(), mod.ambiguous.size(),
+              mod.textures.size(), mod.models.size(), mod.voices.size(), mod.added.size(), mod.unmatched.size(), mod.ambiguous.size(),
               mod.error.empty() ? "" : ", cannot read: ", mod.error);
     if (mod.has_manifest)
       log::info("mods: '{}' mod.ini: '{}' {} by {}, {} feature section(s), requires {}, {} problem(s)", mod.name, mod.manifest.name, mod.manifest.version,
@@ -420,8 +482,9 @@ void ModManager::apply(Vfs& vfs, ModArt art) {
     ++active;
     for (const ModFile& file : mod.files) ov.files.try_emplace(file.target, OverlayFile{file.file, file.member});
     for (const ModFile& texture : mod.textures) ov.textures.try_emplace(texture.target, OverlayFile{texture.file, texture.member});
+    for (const ModFile& model : mod.models) ov.models.try_emplace(model.target, OverlayFile{model.file, model.member});
   }
-  log::info("mods: {} active mod(s), {} file(s), {} texture(s)", active, ov.files.size(), ov.textures.size());
+  log::info("mods: {} active mod(s), {} file(s), {} texture(s), {} model(s)", active, ov.files.size(), ov.textures.size(), ov.models.size());
   vfs.set_overlay(std::move(ov));
 }
 
@@ -438,7 +501,7 @@ std::vector<ModManager::Conflict> ModManager::conflicts(size_t index) const {
   const auto provides = [](const Mod& mod, const ModFile& file) {
     const auto same = [&](const ModFile& candidate) { return candidate.target == file.target; };
     return std::any_of(mod.files.begin(), mod.files.end(), same) || std::any_of(mod.textures.begin(), mod.textures.end(), same) ||
-           std::any_of(mod.data.begin(), mod.data.end(), same);
+           std::any_of(mod.models.begin(), mod.models.end(), same) || std::any_of(mod.data.begin(), mod.data.end(), same);
   };
   const auto check = [&](const ModFile& file, bool any_mode = false) {
     bool clash = false;
@@ -452,6 +515,7 @@ std::vector<ModManager::Conflict> ModManager::conflicts(size_t index) const {
   };
   for (const ModFile& file : me.files) check(file);
   for (const ModFile& texture : me.textures) check(texture);
+  for (const ModFile& model : me.models) check(model);
   for (const ModFile& data : me.data) check(data, true);
   return out;
 }

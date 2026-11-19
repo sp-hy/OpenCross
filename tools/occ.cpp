@@ -15,13 +15,18 @@
 //                                            (DialogueBox::choice_cursor rect asserts), classes + counts
 //   occ dialogue-sizes [room] [-v]          blast radius of the no-3-line-minimum window rule: messages whose frame changes height (count + examples)
 //   occ script-soak                          run every room's script (INIT + 600 ticks, NullHost) and report problems
+//   occ scan <outdir> [--save <save.dat> <card> <slot>] [--room <stem>]   static room-script scan: treasure, battles, joins, story sets as CSV
+//                                            (tools/occ_scan.cpp)
+//   occ randomize <out.txt> [--seed N] [--spread N] [--no-items] [--no-elements] [--enemies] [--start-gear] [--start-elements] [--entries]
+//                                            the randomizer's spoiler log for those settings (tools/occ_randomize.cpp)
 //   occ models-validate                      validate every model class (players, monsters, field, at0, weapons, kmd, ex)
 //   occ room-songs [room]                    every PLAY_SONG of the room scripts with the song id and its BGM track
 //   occ room-models [room]                   import every room model (subfiles 11+) of all rooms / one room, report failures
 //   occ menu-rigs [--hd] [byte]              how each menu model's skeleton matches its character's field model (HD models in fields);
 //                                            with a model byte (hex), every joint of that pair; --audit: drift over every field clip and
 //                                            mesh-region checks; --motion: how the posed mesh follows the field mesh over every
-//                                            field clip; --rooms: room copies of character field models
+//                                            field clip; --battle: how a character's all-uses model file follows the battle
+//                                            clips (game/model_mods.h); --rooms: room copies of character field models
 //   occ battlefields [--inc <file>]          which rooms fight on which stage (every BATTLE op of every room script -> bg_NN); --inc writes
 //                                            src/data/battlefield_rooms.inc (the Debug tab's battlefield labels)
 //   occ world-markers [--inc <file>]         the overworld screens' location markers: label text (EN) -> target room, and the room-prefix ->
@@ -29,6 +34,7 @@
 //   occ disc-names <out.inc>                 the two disc file indexes (cdrom.fnd, cdrom2.fnd) as the built-in name table
 //                                            src/vfs/disc_names.inc
 //   occ dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] [--packs TEXT] <outdir>   headless texture dump (tools/occ_dump_textures.cpp)
+//   occ export-models [field|battle|menu|weapons|all] [--classic] [--hd] [--only TEXT] [--verify] <outdir>   glTF model export (tools/occ_export_models.cpp)
 //   occ save-info | save-slots | save-roundtrip | save-blank <save.dat> ...   save-file tools, no GameDir needed (tools/occ_save.cpp)
 // GameDir comes from -g <dir> or the OPENCROSS_GAMEDIR environment variable.
 #include <algorithm>
@@ -52,6 +58,7 @@
 #include "game/disc_index.h"
 #include "game/menu_rig.h"
 #include "game/model_files.h"
+#include "game/model_mods.h"
 #include "game/room_models.h"
 #include "core/log.h"
 #include "import/chip2.h"
@@ -92,6 +99,15 @@ using namespace oc;
 // Defined in tools/occ_dump_textures.cpp.
 int occ_dump_textures(vfs::Vfs& fs, const std::vector<std::string>& args);
 
+// Defined in tools/occ_scan.cpp.
+int occ_scan(const vfs::Vfs& fs, const std::vector<std::string>& args);
+
+// Defined in tools/occ_randomize.cpp.
+int occ_randomize(const vfs::Vfs& fs, const std::vector<std::string>& args);
+
+// Defined in tools/occ_export_models.cpp.
+int occ_export_models(vfs::Vfs& fs, const std::vector<std::string>& args);
+
 namespace {
 
 // ---------------------------------------------------------------- rooms
@@ -124,6 +140,7 @@ int usage() {
                "  | info <path>\n"
                "  | lzss <path> <out>\n"
                "  | dump-textures [stages|title|effects|rooms|models|weapons|all] [--raw] [--source] [--packs TEXT] <outdir>\n"
+               "  | export-models [field|battle|menu|weapons|all] [--classic] [--hd] [--only TEXT] [--verify] <outdir>\n"
                "  | room <name> <outdir>\n"
                "  | rooms-validate\n"
                "  | rooms-check\n"
@@ -137,11 +154,13 @@ int usage() {
                "  | dialogue-choices [room] [-v]\n"
                "  | dialogue-sizes [room] [-v]\n"
                "  | script-soak\n"
+               "  | scan <outdir> [--save <save.dat> <card> <slot>] [--room <stem>]\n"
+               "  | randomize <out.txt> [--seed N] [--spread N] [--no-items] [--no-elements] [--enemies] [--start-gear] [--start-elements] [--entries]\n"
                "  | model <path-stem> <outdir>\n"
                "  | models-validate\n"
                "  | room-songs [room]\n"
                "  | room-models [room]\n"
-               "  | menu-rigs [--hd] [--audit | --motion | --rooms | --npcs] [byte]\n"
+               "  | menu-rigs [--hd] [--audit | --motion | --battle | --rooms | --npcs] [byte]\n"
                "  | save-info <save.dat>\n"
                "  | save-slots <save.dat>\n"
                "  | save-roundtrip <save.dat> <out.dat>\n"
@@ -1969,6 +1988,199 @@ int cmd_menu_rig_motion(vfs::Vfs& fs, bool hd, int only) {
   return 0;
 }
 
+// occ menu-rigs --battle [--hd] [byte]: the battle side of a character's all-uses model file (game/model_mods.h) for every Status-screen
+// model and its battle model: joint counts, whether the two skeletons have the same joints and parents and the same rest pose, and how the
+// Status model's own mesh, bound onto the battle skeleton (game::battle_joint_map, rebind_meshes), follows the battle mesh over every
+// battle clip (internal and at0), sampled four times a keyframe, in % of the battle model's height. Per pair one line of worst values, each
+// with its battle joint, clip and keyframe:
+//   stretch  the longest a triangle edge grows over its length in the Status model's own pose clip, with the battle mesh's worst growth
+//            over its rest pose beside it;
+//   seam     for a piece that touches the piece carrying it in the Status model's own pose, the gap that opens between the two, with
+//            the battle mesh's worst gap beside it (its pieces touching in its own first pose clip);
+//   sink / lift  the Status mesh's lowest vertex below / above the battle mesh's lowest vertex;
+//   hand     per used attach point, how much further the nearest Status-mesh vertex of its joint lies from it than the nearest battle-mesh
+//            vertex of that joint (what the battle hangs on the point, a weapon, an effect, is placed by the battle skeleton).
+// With a byte: the same worst values per clip.
+int cmd_battle_rig_motion(vfs::Vfs& fs, bool hd, int only) {
+  constexpr int kSubsteps = 4, kSeamPairs = 6;
+  constexpr float kSeamTouch = 0.03f;
+  fs.set_hd_mode(hd);
+  struct Worst {
+    float value = 0.0f;
+    std::string where = "-";
+    void take(float now, int joint, const std::string& clip, float key) {
+      if (now <= value) return;
+      value = now;
+      where = std::format("j{} {} k{:.2f}", joint, clip, key);
+    }
+  };
+  struct Row {
+    Worst stretch, battle_stretch, seam_gap, battle_seam, sink, lift, hand;
+  };
+  auto cell = [](const Worst& worst) { return std::format("{:5.1f} {}", worst.value, worst.where); };
+  std::printf("%-4s %-9s %-7s %-6s %-28s %-28s %-28s %-28s %s\n", "byte", "menu", "joints", "same", "stretch (battle)", "seam (battle)", "sink", "lift", "hand");
+  Row all;
+  int pairs = 0, same_skeletons = 0, same_joints = 0;
+  for (int model = 0; model <= game::kLastMenuModel; ++model) {
+    if (only >= 0 && model != only) continue;
+    const std::string stem(game::kBattleModels[static_cast<size_t>(model)]);
+    if (!stem.starts_with("battle/player/")) continue;
+    std::string err;
+    const auto battle = game::read_model_files(fs, stem, &err);
+    const auto menu = game::read_menu_model(fs, model, hd, &err);
+    if (!battle || !menu) {
+      std::printf("%-4X %-9s not read: %s\n", model, game::menu_model_stem(model).c_str(), err.c_str());
+      continue;
+    }
+    const std::vector<int> map = game::battle_joint_map(*battle, *menu, err);
+    const bool same = game::same_skeleton(battle->skeleton, menu->skeleton);
+    bool identity = map.size() == battle->skeleton.joints.size();
+    for (size_t j = 0; identity && j < map.size(); ++j) identity = map[j] == static_cast<int>(j);
+    const std::string joints = std::format("{}/{}", battle->skeleton.joints.size(), menu->skeleton.joints.size());
+    if (map.empty()) {
+      std::printf("%-4X %-9s %-7s %s\n", model, game::menu_model_stem(model).c_str(), joints.c_str(), err.c_str());
+      continue;
+    }
+    ++pairs;
+    same_skeletons += same ? 1 : 0;
+    same_joints += identity ? 1 : 0;
+    assets::ModelAsset worn = *battle;
+    worn.meshes = same ? menu->meshes : game::rebind_meshes(menu->meshes, menu->skeleton, battle->skeleton, map);
+    const u32 hidden = hidden_constructs(*battle);
+    PosedMesh battle_mesh = posed_mesh(*battle, hidden), worn_mesh = posed_mesh(worn, hidden), own_mesh = posed_mesh(*menu, hidden);
+    std::vector<render::Mat4> battle_palette, menu_palette;
+    game::UnitPose pose, menu_pose;
+    pose.set_model(&*battle);
+    menu_pose.set_model(&*menu);
+    pose.palette_at(-1, 0.0f, battle_palette);
+    pose_mesh(battle_mesh, battle_palette, 1.0f);
+    float top = 0.0f;
+    for (const assets::Vec3& point : battle_mesh.at) top = std::max(top, -point[1]);
+    const float height = top > 0.0f ? top : 1.0f, percent = 100.0f / height;
+    std::vector<float> battle_rest_edge(battle_mesh.edges.size());
+    for (size_t i = 0; i < battle_mesh.edges.size(); ++i) battle_rest_edge[i] = distance(battle_mesh.at[battle_mesh.edges[i][0]], battle_mesh.at[battle_mesh.edges[i][1]]);
+    int own_clip = -1;
+    for (size_t index = 0; index < menu->clips.size() && own_clip < 0; ++index)
+      if (menu->clips[index].source == "s4" && menu->clips[index].index == 0 && menu->clips[index].frame_count > 0) own_clip = static_cast<int>(index);
+    menu_pose.palette_at(own_clip, 0.0f, menu_palette);
+    pose_mesh(own_mesh, menu_palette, 1.0f);
+    std::vector<float> own_edge(own_mesh.edges.size());
+    for (size_t i = 0; i < own_mesh.edges.size(); ++i) own_edge[i] = distance(own_mesh.at[own_mesh.edges[i][0]], own_mesh.at[own_mesh.edges[i][1]]);
+    std::vector<int> piece_of(worn_mesh.vertices.size(), -1);
+    for (size_t j = 0; j < worn_mesh.pieces.size(); ++j)
+      for (const u32 index : worn_mesh.pieces[j]) piece_of[index] = static_cast<int>(j);
+    struct Seam {
+      int joint;
+      std::vector<std::array<u32, 2>> pairs;
+    };
+    // The pieces of `mesh` (on the battle skeleton) that touch the piece carrying them where `touch` (the same vertices) lies.
+    auto seams_of = [&](const PosedMesh& mesh, const std::vector<assets::Vec3>& touch) {
+      std::vector<Seam> out;
+      for (size_t j = 0; j < mesh.pieces.size(); ++j) {
+        if (mesh.pieces[j].size() < 4) continue;
+        int carrier = battle->skeleton.joints[j].parent;
+        while (carrier >= 0 && mesh.pieces[static_cast<size_t>(carrier)].empty()) carrier = battle->skeleton.joints[static_cast<size_t>(carrier)].parent;
+        if (carrier < 0) continue;
+        std::vector<std::pair<float, std::array<u32, 2>>> near;
+        for (const u32 own : mesh.pieces[j])
+          for (const u32 other : mesh.pieces[static_cast<size_t>(carrier)]) {
+            const float gap = distance(touch[own], touch[other]);
+            if (gap <= kSeamTouch * height) near.push_back({gap, {own, other}});
+          }
+        if (near.empty()) continue;
+        std::ranges::sort(near, {}, [](const auto& entry) { return entry.first; });
+        Seam seam{static_cast<int>(j), {}};
+        for (size_t k = 0; k < near.size() && k < static_cast<size_t>(kSeamPairs); ++k) seam.pairs.push_back(near[k].second);
+        out.push_back(std::move(seam));
+      }
+      return out;
+    };
+    auto widest = [](const std::vector<Seam>& seams, const PosedMesh& mesh, Worst& worst, float scale, const std::string& clip, float key) {
+      for (const Seam& seam : seams) {
+        float gap = 1e30f;
+        for (const auto& ends : seam.pairs) gap = std::min(gap, distance(mesh.at[ends[0]], mesh.at[ends[1]]));
+        worst.take(gap * scale, seam.joint, clip, key);
+      }
+    };
+    const std::vector<Seam> seams = seams_of(worn_mesh, own_mesh.at);
+    int battle_clip = -1;
+    for (size_t index = 0; index < battle->clips.size() && battle_clip < 0; ++index)
+      if (battle->clips[index].source == "s4" && battle->clips[index].index == 0 && battle->clips[index].frame_count > 0) battle_clip = static_cast<int>(index);
+    PosedMesh battle_own = battle_mesh;
+    pose.palette_at(battle_clip, 0.0f, battle_palette);
+    pose_mesh(battle_own, battle_palette, 1.0f);
+    const std::vector<Seam> battle_seams = seams_of(battle_mesh, battle_own.at);
+    // The nearest vertex of a joint's piece to a point; -1 when the joint carries none.
+    auto nearest = [](const PosedMesh& mesh, size_t joint, const assets::Vec3& point) {
+      float best = -1.0f;
+      if (joint >= mesh.pieces.size()) return best;
+      for (const u32 index : mesh.pieces[joint]) {
+        const float gap = distance(mesh.at[index], point);
+        if (best < 0.0f || gap < best) best = gap;
+      }
+      return best;
+    };
+    Row whole;
+    for (size_t index = 0; index < battle->clips.size(); ++index) {
+      const assets::AnimationClip& clip = battle->clips[index];
+      if (clip.frame_count == 0) continue;
+      Row one;
+      Row& row = only >= 0 ? one : whole;
+      const int samples = clip.frame_count > 1 ? static_cast<int>(clip.frame_count - 1) * kSubsteps + 1 : 1;
+      for (int sample = 0; sample < samples; ++sample) {
+        const float key = static_cast<float>(sample) / static_cast<float>(kSubsteps);
+        pose.palette_at(static_cast<int>(index), key, battle_palette);
+        pose_mesh(battle_mesh, battle_palette, 1.0f);
+        pose_mesh(worn_mesh, battle_palette, 1.0f);
+        for (size_t i = 0; i < worn_mesh.edges.size(); ++i)
+          row.stretch.take((distance(worn_mesh.at[worn_mesh.edges[i][0]], worn_mesh.at[worn_mesh.edges[i][1]]) - own_edge[i]) * percent,
+                           piece_of[worn_mesh.edges[i][0]], clip.name, key);
+        for (size_t i = 0; i < battle_mesh.edges.size(); ++i)
+          row.battle_stretch.take((distance(battle_mesh.at[battle_mesh.edges[i][0]], battle_mesh.at[battle_mesh.edges[i][1]]) - battle_rest_edge[i]) * percent, 0,
+                                  clip.name, key);
+        widest(seams, worn_mesh, row.seam_gap, percent, clip.name, key);
+        widest(battle_seams, battle_mesh, row.battle_seam, percent, clip.name, key);
+        float battle_low = -1e30f, worn_low = -1e30f;
+        int low_joint = -1;
+        for (const assets::Vec3& point : battle_mesh.at) battle_low = std::max(battle_low, point[1]);
+        for (size_t i = 0; i < worn_mesh.at.size(); ++i)
+          if (worn_mesh.at[i][1] > worn_low) worn_low = worn_mesh.at[i][1], low_joint = piece_of[i];
+        row.sink.take((worn_low - battle_low) * percent, low_joint, clip.name, key);
+        row.lift.take((battle_low - worn_low) * percent, low_joint, clip.name, key);
+        for (const assets::AttachPoint& attach : battle->attach.points) {
+          if (!attach.used || attach.joint >= battle_palette.size()) continue;
+          const render::Mat4& frame = battle_palette[attach.joint];
+          assets::Vec3 point{};
+          for (int axis = 0; axis < 3; ++axis)
+            point[static_cast<size_t>(axis)] =
+                frame.at(axis, 0) * attach.pos[0] + frame.at(axis, 1) * attach.pos[1] + frame.at(axis, 2) * attach.pos[2] + frame.at(axis, 3);
+          const float own = nearest(battle_mesh, attach.joint, point), worn_gap = nearest(worn_mesh, attach.joint, point);
+          if (own >= 0.0f && worn_gap >= 0.0f) row.hand.take((worn_gap - own) * percent, attach.joint, clip.name, key);
+        }
+      }
+      if (only < 0) continue;
+      std::printf("  %-7s %-28s %-28s %-28s %-28s %s\n", clip.name.c_str(), std::format("{} ({:.1f})", cell(one.stretch), one.battle_stretch.value).c_str(),
+                  std::format("{} ({:.1f})", cell(one.seam_gap), one.battle_seam.value).c_str(), cell(one.sink).c_str(), cell(one.lift).c_str(),
+                  cell(one.hand).c_str());
+      for (Worst Row::* member : {&Row::stretch, &Row::battle_stretch, &Row::seam_gap, &Row::battle_seam, &Row::sink, &Row::lift, &Row::hand})
+        if ((one.*member).value > (whole.*member).value) whole.*member = one.*member;
+    }
+    std::printf("%-4X %-9s %-7s %-6s %-28s %-28s %-28s %-28s %s\n", model, game::menu_model_stem(model).c_str(), joints.c_str(),
+                same ? "rest" : identity ? "joints" : "paired", std::format("{} ({:.1f})", cell(whole.stretch), whole.battle_stretch.value).c_str(),
+                std::format("{} ({:.1f})", cell(whole.seam_gap), whole.battle_seam.value).c_str(), cell(whole.sink).c_str(), cell(whole.lift).c_str(),
+                cell(whole.hand).c_str());
+    for (Worst Row::* member : {&Row::stretch, &Row::battle_stretch, &Row::seam_gap, &Row::battle_seam, &Row::sink, &Row::lift, &Row::hand})
+      if ((whole.*member).value > (all.*member).value) {
+        all.*member = whole.*member;
+        (all.*member).where = game::menu_model_stem(model) + " " + (all.*member).where;
+      }
+  }
+  std::printf("menu-rigs --battle: %d pairs (%d the same skeleton, %d the same joints and parents); worst stretch %s, seam %s, sink %s, lift %s, hand %s\n",
+              pairs, same_skeletons, same_joints, cell(all.stretch).c_str(), cell(all.seam_gap).c_str(), cell(all.sink).c_str(), cell(all.lift).c_str(),
+              cell(all.hand).c_str());
+  return 0;
+}
+
 // occ menu-rigs --rooms [--hd]: which room models are a playable character's field model (the same skeleton and mesh, game::same_skeleton /
 // same_mesh), so the HD models in fields also draw those NPCs with the character's menu model; per character byte the room models with the same
 // skeleton and mesh, with the same skeleton but another mesh (another person on the character's rig: not taken), and with the field
@@ -2469,6 +2681,7 @@ int occ_main(int argc, char** argv) {
     return write_file(args[2], *out) ? 0 : 1;
   }
   if (cmd == "dump-textures") return occ_dump_textures(fs, args);
+  if (cmd == "export-models") return occ_export_models(fs, args);
   if (cmd == "room" && args.size() == 3) return cmd_room(fs, args[1], args[2]);
   if (cmd == "rooms-validate" && args.size() == 1) return cmd_rooms_validate(fs);
   if (cmd == "rooms-check" && args.size() == 1) return cmd_rooms_check(fs);
@@ -2499,12 +2712,14 @@ int occ_main(int argc, char** argv) {
     return cmd_dialogue_sizes(fs, only, verbose);
   }
   if (cmd == "script-soak" && args.size() == 1) return cmd_script_soak(fs);
+  if (cmd == "scan") return occ_scan(fs, args);
+  if (cmd == "randomize") return occ_randomize(fs, args);
   if (cmd == "model" && args.size() == 3) return cmd_model(fs, args[1], args[2]);
   if (cmd == "models-validate" && args.size() == 1) return cmd_models_validate(fs);
   if (cmd == "room-songs" && (args.size() == 1 || args.size() == 2)) return cmd_room_songs(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "room-models" && (args.size() == 1 || args.size() == 2)) return cmd_room_models(fs, args.size() == 2 ? args[1] : std::string());
   if (cmd == "menu-rigs" && args.size() <= 4) {
-    bool hd = false, rooms = false, audit = false, npcs = false, motion = false;
+    bool hd = false, rooms = false, audit = false, npcs = false, motion = false, battle = false;
     int only = -1;
     for (size_t i = 1; i < args.size(); ++i) {
       if (args[i] == "--hd") hd = true;
@@ -2512,11 +2727,13 @@ int occ_main(int argc, char** argv) {
       else if (args[i] == "--audit") audit = true;
       else if (args[i] == "--npcs") npcs = true;
       else if (args[i] == "--motion") motion = true;
+      else if (args[i] == "--battle") battle = true;
       else only = static_cast<int>(std::strtol(args[i].c_str(), nullptr, 16));
     }
     if (npcs) return cmd_menu_rig_npcs(fs, hd);
     if (rooms) return cmd_menu_rig_rooms(fs, hd);
     if (motion) return cmd_menu_rig_motion(fs, hd, only);
+    if (battle) return cmd_battle_rig_motion(fs, hd, only);
     return audit ? cmd_menu_rig_audit(fs, hd, only) : cmd_menu_rigs(fs, hd, only);
   }
   return usage();

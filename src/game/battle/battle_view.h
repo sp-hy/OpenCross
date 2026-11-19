@@ -64,6 +64,7 @@
 #include "render/sprite_batch.h"
 #include "render/render_target.h"
 #include "render/stage_pipeline.h"
+#include "save/dialogue_log.h"
 #include "game/battle/stage_scene.h"
 #include "game/battle/versus_link.h"
 #include "import/text.h"
@@ -121,6 +122,9 @@ class BattleView {
     // Party swap (battle::BattleOptions::party_swap / swap_reserve).
     bool party_swap = false;
     std::vector<int> swap_reserve;
+    // The randomizer's drop table and enemy tuning (battle::BattleOptions::drops / enemy_tuning).
+    std::shared_ptr<const std::vector<data::DropRow>> drops;
+    std::array<battle::EnemyTuning, 3> enemy_tuning{};
     // The battle id word: an encounter id < 0x200, or scene + 0x200 for a scene started directly; -1 = scene + 0x200.
     int battle_id = -1;
     // The battlefield operand (stage bg_NN); -1: the scene record's default.
@@ -248,6 +252,12 @@ class BattleView {
   void set_select_held(bool held) { select_held_ = held; }
   // [Enhancements] AutoHideCastHud: the same hiding during every cast, without Select, but the cast header stays a moment so the spell is named.
   void set_autohide_cast(bool on) { autohide_cast_ = on; }
+  // The [Cheats] EnemyHpBars and EnemyColours "defeated" modes: whether the enemy kind with this monster.bin record has been defeated before
+  // (the collection); the default answers no, so those modes show nothing until the host sets one.
+  void set_enemy_defeated_query(std::function<bool(int monster_id)> query) { enemy_defeated_ = std::move(query); }
+  // [Game] OpenCrossMenu: `hook` receives each battle-script message of the event window (a story line; not the system plate) once its
+  // window has closed: its pages as shown, the speaker its first line names and the voice files that played. Empty = nothing gathered.
+  void set_story_log(std::function<void(save::DialogueEntry)> hook) { story_log_ = std::move(hook); }
   // [Enhancements] RetainBattleScenery: the stage's `bti0` layer is not stopped when the intro ends (nor by a pack's op 0x60).
   void set_keep_intro_layer(bool on);
   // Call between ctx.begin_frame() and ctx.end_frame(). `sprites_resume` = another sprite pass already ran this frame.
@@ -686,16 +696,9 @@ class BattleView {
   std::shared_ptr<TrailState> trail_;
   // per-unit model state of the scripts (show / hide, parts, model colour + semi-transparency, colour fade 0x8E): false = the model is hidden
   bool anm_unit_apply(int unit, render::MeshPipeline::DrawParams& dp) const;
-  // Battle models are painter-sorted per face like every PS1 model: one ordering-table slot per face = average z >> 4, or the NEAREST
-  // corner's z >> 4 for the parts whose shading flag has 0x10 (hair / capes laid over the body).
-  static void unit_ot_faces(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp) {
-    dp.ot_faces = true;
-    for (size_t k = 0; k < asset.shading.size() && k < 32; ++k)
-      if (asset.shading[k].flags & 0x10) dp.near_meshes |= 1u << k;
-  }
-  // The S3 shading entries as the stock model draw reads them: flag bit 0 = part hidden, 0x80 with 0x20 / 0x40 = env-mapped with the model's
-  // own page, 0x20 / 0x40 without 0x80 = the stock env page (replace / over, ABR = flags bits 2-3), and the part colour word = model colour x
-  // the entry's rgb >> 7 (0x80 neutral). Shared by the unit draw and the pseudo-actor (pa_draw).
+  // One ordering-table slot per face (model_ot_faces).
+  static void unit_ot_faces(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp) { model_ot_faces(asset, dp); }
+  // The S3 shading entries (model_shading_entries) with this stage's stock env page. Shared by the unit draw and the pseudo-actor (pa_draw).
   void shading_params(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp);
   // The model scale words applied to a model-space point.
   void anm_scale_point(int unit, float& x, float& y, float& z) const;
@@ -926,6 +929,13 @@ class BattleView {
   // Plain HUD text (dev overlay, the standalone result / game-over stub): RDE battle font (slot 2) at 0.42 x scale_mul, canvas units.
   void add_text(const std::string& text, float x, float y, u32 color, int align = 0, float scale_mul = 1.0f);
   void add_rect(float x, float y, float w, float h, u32 color);
+  // The element colour icon of colour index `colour` (0..5) centred on canvas (cx, cy), `size` wide; `light` (0..255) dims it. Always drawn: the
+  // callers decide whether the symbols or the enemy-colour assist ask for it.
+  void add_icon(int colour, float cx, float cy, float size, int light = 255);
+  // The icon of an element colour at PS1 position (x, y) of an element name plate, while the symbols are on.
+  void add_plate_symbol(int colour, float x, float y, int light = 255);
+  // One icon per slot of the drawn field ring, right of the ring, while the symbols are on.
+  void build_ring_symbols();
   void add_panel(float x, float y, float w, float h);
   // The PS1 battle window: black fill, 1 px white line, chamfered top-right / bottom-left.
   void add_box(float x, float y, float w, float h, bool fill = true);
@@ -955,6 +965,7 @@ class BattleView {
   void add_skin_box(float x, float y, float w, float h);
   // Target cursor, info window and the camera-mode hint (Ui::Target; the Dopplegang list: no hint).
   void build_target_ui(bool cam_hint = true);
+  bool enemy_colour_shown(const battle::Unit& unit) const;
   void build_message_window(const std::vector<std::pair<std::u32string, u32>>& lines);
   void load_hud_art(const vfs::Vfs& vfs);
   // battle_view_ps1hud.cpp: disc mode (no RDE `hd` archive) draws the PS1's own battle HUD sheets at the PS1's coordinates.
@@ -975,6 +986,12 @@ class BattleView {
   void ps1_party_panels();
   // The target info window of unit `unit`, or of a side when `side` (the side label) is not empty.
   void ps1_target_info(int unit, const std::u32string& side);
+  // [Cheats] EnemyHpBars: whether `unit` gets a bar, in the target window / over the enemy (the mode, the placement and the defeated query).
+  bool enemy_hp_bar_on(int unit, bool over_enemy) const;
+  // The bar of an enemy: a black frame, a dark track and the fill, `width` PS1 px wide at PS1 (x, y) 4 rows high.
+  void add_enemy_hp_bar(int unit, float x, float y, float width);
+  // The thin bars over the living, shown enemies (and their numbers).
+  void build_enemy_hp_bars();
   void rebuild_ring();
   // The field ring of the presented action (the rules run ahead of the replay) and the cell shift that walks the drawn ring toward it.
   std::array<int, 3> presented_ring() const;
@@ -1656,6 +1673,11 @@ class BattleView {
   bool hud_script_off_ = false;
   bool select_held_ = false;
   bool autohide_cast_ = false;
+  std::function<bool(int)> enemy_defeated_ = [](int) { return false; };
+  // The event window's message for the dialogue log, sent when the window has closed (set_story_log).
+  std::function<void(save::DialogueEntry)> story_log_;
+  save::DialogueEntry story_entry_;
+  bool story_pending_ = false;
   // ops_ range of this frame's cast header, and the frame the current cast began (-1 = no cast).
   size_t cast_header_from_ = 0, cast_header_to_ = 0;
   int cast_began_ = -1;
@@ -1673,6 +1695,7 @@ class BattleView {
   void smsg_open(const ScriptMsgReq& req);
   void smsg_tick();
   void tick_window(ScriptMsg& msg);
+  void story_begin(const ScriptMsg& msg, const std::string& actor);
   void build_window(const ScriptMsg& msg);
   // True while a message window owns the confirm button.
   bool smsg_input(bool ok);

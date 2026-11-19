@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -216,6 +217,13 @@ struct Rewards {
   std::vector<u16> drops;
   // Pilfered words (bit 15 = element id, else item id; mode 30): added to the stock at battle end, on a victory only.
   std::vector<u16> stolen;
+  // Where a drop or a pilfered word came from: the monster record and the slot of its drop row (0 / 1 the kill drop common / rare,
+  // 2 / 3 the steal common / rare). One per entry of `stolen`, and one per rolled drop (a summon's shiny material has none).
+  struct Loot {
+    int monster = -1;
+    int slot = 0;
+  };
+  std::vector<Loot> drop_loot, stolen_loot;
   // Enemy casts caught by the party's element trap (mode 5): added to the element stock whatever the outcome.
   std::vector<u16> trapped;
   // Grid cells the enemy side's element trap destroyed: (character id, grid cell row * 10 + col). The retail game writes the save record
@@ -492,6 +500,15 @@ struct VersusSide {
   std::array<u16, 16> dopple{};
 };
 
+// An enemy group the randomizer moved to another area: its max HP, ATK DEF MAG MDEF and gold in percent of the record's, and the drop row
+// its units roll on instead of their own (-1 = their own).
+struct EnemyTuning {
+  int hp_percent = 100;
+  int stat_percent = 100;
+  int gold_percent = 100;
+  int drop_row = -1;
+};
+
 struct BattleOptions {
   bool ng_plus = false;
   // Gear gold bonus (x125/100).
@@ -527,6 +544,10 @@ struct BattleOptions {
   // member. swap_reserve = the character ids that may come in (each must be in `bench`; the host applies the reserve rules).
   bool party_swap = false;
   std::vector<int> swap_reserve;
+  // The randomizer (an OpenCross feature, off in the game as shipped; game/randomizer.h): the kill-drop and steal table read instead of
+  // ditem (null: ditem), and per enemy group of the scene (0..2) the tuning of an encounter group it moved to another area.
+  std::shared_ptr<const std::vector<data::DropRow>> drops;
+  std::array<EnemyTuning, 3> enemy_tuning{};
 };
 
 // The knocked-out units when a hit pass starts, as masks of unit slots: `again` = the roster's ones (the party, an enemy whose scripted
@@ -594,6 +615,8 @@ class Battle {
   // The Outcome value, or the script's code for Outcome::Scripted.
   int result_code() const { return result_code_; }
   const Rewards& rewards() const { return rewards_; }
+  // The monster records of the enemy units that are down (knocked out or out of the fight) or that a script marked defeated, in slot order.
+  std::vector<int> defeated_enemies() const;
   // The party records; versus side B's with side 1.
   const std::vector<PartyMember>& party(int side = 0) const { return versus_ && side == 1 ? party_b_ : party_; }
   const GrowthState& growth() const { return growth_; }
@@ -784,6 +807,11 @@ class Battle {
     bool god_mode = false, boost = false, max_stamina = false, free_elements = false, always_hit = false, always_loot = false, instant_growth = false, shared_growth = false;
     // summon_any_ring: a PC summon does not need the ring's colour (a star still does). summon_repeat: a PC summon cast leaves its cell unused.
     bool summon_any_ring = false, summon_repeat = false;
+    // Boosts: gold_percent scales the fight's gold; rare_loot is the rare-drop and rare-steal multiplier (kRareLootAlways = Always loot).
+    // Difficulty: enemy HP at the start, damage taken by the party and dealt to the enemies, in percent; difficulty_bosses_only limits
+    // the three to boss fights.
+    int gold_percent = 100, rare_loot = 1, hp_percent = 100, taken_percent = 100, dealt_percent = 100;
+    bool difficulty_bosses_only = false;
   };
   void set_cheats(const Cheats& cheats) {
     if (!versus_) cheats_ = cheats;
@@ -936,11 +964,20 @@ class Battle {
   };
   std::optional<DuelBody> duel_body(int slot, int monster_id, int third) const;
   std::string enemy_label(int monster_id) const;
-  void init_enemy(int slot, int monster_id, const BattleOptions& opt);
+  void init_enemy(int slot, int monster_id, const BattleOptions& opt, const EnemyTuning& tuning);
+  // The kill-drop and steal table: the randomizer's when it gives one, else ditem.
+  const std::vector<data::DropRow>& drop_table() const { return opt_.drops ? *opt_.drops : tables_.drops; }
   void init_party_monster(int slot, int monster_id, const BattleOptions& opt);
   void unlock_monster_grid(Unit& unit) const;
   int next_ready_unit();
   void god_filter(int target, DamageOut& dmg) const;
+  // The difficulty settings apply in every fight, or only in boss fights with the bosses-only switch.
+  bool difficulty_applies() const { return !cheats_.difficulty_bosses_only || boss_; }
+  // Percent a hit of `actor` on `target` is scaled by: the damage-taken setting for a hit on a PC (a unit's hit on itself excepted), the
+  // damage-dealt setting for a PC's hit on an enemy, 100 for enemies hitting enemies.
+  int hit_percent(int actor, int target) const;
+  // Cheats tab: the Always loot toggle, or the rare-loot multiplier at its top step.
+  bool loot_always() const { return cheats_.always_loot || cheats_.rare_loot >= kRareLootAlways; }
   // Max stamina / God mode / battle boost refills, run after every action and hit.
   void apply_cheat_state();
   // Battle boost (RDE): a PC's pending damage is cancelled (the result reads as a miss) and every resolved hit or miss strips the negative

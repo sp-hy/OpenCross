@@ -41,10 +41,12 @@ struct OverlayFile {
 // The active mods' files for the current art mode (built by ModManager::apply). Keys are logical paths, normalised (lower case, '/'):
 // `files` maps "cdrom/<member>" (cdrom2 members are addressed as cdrom/, like every caller does), "hd/<member>", ... to the mod's
 // file (first mod in priority wins); `textures` maps a canonical texture path ("battle_stage/bg_07/00_m1_c320x480.png") to its
-// replacement PNG.
+// replacement PNG; `models` maps "<classic|hd>/<member stem>" ("hd/battle/player/selju/selju", "classic/menu/player/selju") to a model
+// replacement (.glb).
 struct Overlay {
   std::unordered_map<std::string, OverlayFile> files;
   std::unordered_map<std::string, OverlayFile> textures;
+  std::unordered_map<std::string, OverlayFile> models;
   // Modded art: OpenCross's own improvements on RDE's art are on (HD art stays as RDE draws it).
   bool enhance = false;
 };
@@ -114,6 +116,8 @@ class Vfs {
   // True when an active mod has a texture whose canonical path starts with `prefix` and does not go on with `except`.
   bool has_texture_under(std::string_view prefix, std::string_view except) const;
   bool has_textures() const;
+  // The active mods' model replacement for "<classic|hd>/<member stem>" (lower case, '/'), if any.
+  std::optional<OverlayFile> model_file(std::string_view key) const;
   // Overlay::enhance of the installed overlay.
   bool enhanced() const;
 

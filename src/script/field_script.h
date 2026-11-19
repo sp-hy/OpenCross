@@ -39,11 +39,13 @@ const OpInfo* find_op(u16 key);
 std::span<const OpInfo> op_table();
 
 enum class OperandKind : u8 { Byte, Char, Word, Imm, Var, Jump, Str, Mode };
-// `value`: Imm is signed (S/T literals), everything else is unsigned. `text`: Str only (the four ASCII characters).
+// `value`: Imm is signed (S/T literals), everything else is unsigned. `text`: Str only (the four ASCII characters). `pos`: the code
+// offset of the operand's first byte.
 struct Operand {
   OperandKind kind = OperandKind::Byte;
   s32 value = 0;
   std::string text;
+  u32 pos = 0;
 };
 
 enum class Flow : u8 { Next, End, Goto };

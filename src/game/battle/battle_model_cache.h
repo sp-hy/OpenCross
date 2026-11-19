@@ -30,6 +30,14 @@ class Vfs;
 
 namespace oc::game {
 
+// The S3 shading entries of a battle model as the stock model draw reads them, whatever the stage: flag bit 0 = part hidden, 0x80 with
+// 0x20 / 0x40 = env-mapped with the model's own page, 0x20 / 0x40 without 0x80 = the stock env page (replace / over, ABR = flags bits
+// 2-3; the caller supplies the page), and the part colour word = model colour x the entry's rgb >> 7 (0x80 neutral).
+void model_shading_entries(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp);
+// Battle models are painter-sorted per face like every PS1 model: one ordering-table slot per face = average z >> 4, or the NEAREST
+// corner's z >> 4 for the parts whose shading flag has 0x10 (hair / capes laid over the body).
+void model_ot_faces(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp);
+
 // Scripts and resources shared by every unit that uses the same model folder: the model's S5 state-script block, the external 'atk'
 // table and the camera entries (type 0x0C / 0x10: the atk0..3 sequences and their shots) of its at0.prd, the raw at0.prd (sound
 // registration happens per battle, with the weapon class) and the model's own S6 DRP (44 monsters), whose emitter headers stay

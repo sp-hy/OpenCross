@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "battle/battle.h"
+#include "battle/opponents.h"
 #include "battle/pac_vm.h"
 #include "battle/rng.h"
 #include "data/tables.h"
@@ -200,6 +201,33 @@ void check_confused_pc_casts_grid_elements(const data::GameTables& tables, const
   check(weapon > 20, "confused: the other turns are weapon hits");
 }
 
+// Who the party can fight: scene 394 keeps Nikki (record 194, untargetable from his init script, never revealed) beside the three Cassowaries
+// it fights; scene 60 keeps the Malebranche (193) beside the Loch Nest (27); the Radius tutorial (386) is fought; scene 84 keeps its
+// Komodo Pup off-stage but the Portalgheist's script can reveal it. A hand-assembled module: 5B 0 with a variable unit may name any enemy,
+// with a constant one only that unit.
+void check_opponents(const data::GameTables& tables, const vfs::Vfs& files) {
+  auto has = [](const std::vector<int>& records, int record) { return std::find(records.begin(), records.end(), record) != records.end(); };
+  const std::vector<SceneOpponents> scenes = scene_opponents(tables, loader(files));
+  check(scenes.size() == tables.scenes.size(), "opponents: one entry per scene");
+  if (scenes.size() <= 394) return;
+  check(has(scenes[394].kept, 194) && !has(scenes[394].fought, 194), "opponents 394: Nikki is kept from the party");
+  check(has(scenes[394].fought, 19) && !has(scenes[394].kept, 19), "opponents 394: the Cassowaries are fought");
+  check(has(scenes[60].kept, 193) && has(scenes[60].fought, 27), "opponents 60: Malebranche kept, Loch Nest fought");
+  check(has(scenes[386].fought, 0) && scenes[386].kept.empty(), "opponents 386: Radius is fought");
+  check(has(scenes[84].fought, 3) && scenes[84].kept.empty(), "opponents 84: the off-stage Komodo Pup can be revealed");
+  pac::Module module;
+  module.entities = 2;
+  module.base = 0;
+  module.bytes = {0x5B, 0x00, 0x10, 0x04, 0x5B, 0x00, 0xE9, 0x80, 0x00};
+  module.end = module.bytes.size();
+  module.ptr.assign(2, {});
+  module.ptr[1][1] = 4;
+  check(revealable_units(module, {-1, 5}) == 0x1F8u, "revealable: a variable unit names every enemy unit");
+  module.bytes[2] = 0xE4;
+  module.bytes[3] = 0x80;
+  check(revealable_units(module, {-1, 5}) == (1u << 4 | 1u << 5), "revealable: unit E4, and E9 as the entity's own unit 5");
+}
+
 }  // namespace
 
 int main() {
@@ -220,6 +248,7 @@ int main() {
   check_dopple_way_back_after_pip_form(tables, files);
   check_dopple_growth_after_way_back(tables, files);
   check_confused_pc_casts_grid_elements(tables, files);
+  check_opponents(tables, files);
   if (failures == 0) std::printf("battle_scripts: all passed\n");
   return failures == 0 ? 0 : 1;
 }

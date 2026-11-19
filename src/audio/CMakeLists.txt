@@ -12,6 +12,7 @@ add_library(oc_audio STATIC
   bgm_table.cpp
   mixer.h
   mixer.cpp
+  song_memory.h
   adpcm.h
   adpcm.cpp
   akao_tables.h

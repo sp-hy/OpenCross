@@ -355,6 +355,8 @@ void Typewriter::replace_pages(std::vector<TextPage> pages) {
 
 void Typewriter::begin_page() {
   visible_ = 0;
+  read_from_ = 0;
+  wait_s_ = 0;
   ev_ = 0;
   acc_ = 0;
   delay_s_ = 0;
@@ -384,7 +386,12 @@ void Typewriter::step() {
     if (close_s_ <= 0) state_ = State::Closed;
     return;
   }
+  if (waiting_for_input()) {
+    wait_s_ += tick;
+    return;
+  }
   if (state_ != State::Revealing) return;
+  wait_s_ = 0;
   const TextPage& page = pages_[page_];
   if (delay_s_ > 0 && !fast_) {
     delay_s_ -= tick;
@@ -444,6 +451,22 @@ void Typewriter::step() {
   }
 }
 
+u32 Typewriter::read_glyphs() const {
+  const TextPage* shown = page();
+  if (!shown) return 0;
+  const u32 end = std::min<u32>(visible_, static_cast<u32>(shown->glyphs.size()));
+  u32 count = 0;
+  for (u32 i = std::min(read_from_, end); i < end; ++i) {
+    const LayoutGlyph& glyph = shown->glyphs[i];
+    if (glyph.button >= 0 || (glyph.ch != U' ' && glyph.ch != U'\u00A0' && glyph.ch != U'\u3000')) ++count;
+  }
+  return count;
+}
+
+float auto_advance_seconds(u32 glyphs, bool jp, float scale) {
+  return (1.0f + static_cast<float>(glyphs) / (jp ? 12.0f : 25.0f)) * scale;
+}
+
 void Typewriter::reveal_now() {
   if (state_ != State::Revealing) return;
   fast_ = true;
@@ -455,6 +478,7 @@ void Typewriter::confirm() {
     case State::Revealing: fast_ = true; break;
     case State::WaitConfirm:
       state_ = State::Revealing;
+      read_from_ = visible_;
       break;
     case State::WaitPage:
       if (page_ + 1 < pages_.size()) {

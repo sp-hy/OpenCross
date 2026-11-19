@@ -5,6 +5,9 @@ add_library(oc_tools STATIC
   occ.cpp
   occ_save.cpp
   occ_dump_textures.cpp
+  occ_scan.cpp
+  occ_randomize.cpp
+  occ_export_models.cpp
   octext.cpp
   ocaudio.cpp
   ochd.cpp

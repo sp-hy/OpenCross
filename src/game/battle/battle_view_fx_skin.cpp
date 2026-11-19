@@ -585,28 +585,9 @@ render::TexRef BattleView::stock_env_page_set() {
   return fx_textures_.stock_env_page_set(*ctx_, *sprites_, nearest_, asset);
 }
 
-// The shading entries of a model as the stock draw reads them (battle_view.h). Part colour: the per-part colour word is
-// (model colour x entry rgb) >> 7 for every part (the env parts' word is multiplied the same way), so an entry rgb
-// other than 0x80 scales that part's texels: sky's act0 / act1 (tech/sky.prd, 0xFC 0xFC 0xFC on parts 0 / 1) draw at ~2x, gyada / jakotu /
-// malchera / pierre / zoah's env-over parts (0x60..0x70) at 0.75..0.88. Op 0xA0 (anm_unit_apply) writes the same word and overrides this.
+// The shading entries of a model as the stock draw reads them (model_shading_entries) with the stage's stock env page.
 void BattleView::shading_params(const assets::ModelAsset& asset, render::MeshPipeline::DrawParams& dp) {
-  for (size_t k = 0; k < asset.shading.size() && k < 32; ++k) {
-    const assets::ShadingEntry& entry = asset.shading[k];
-    // Flag bit 0: the part starts hidden.
-    if (entry.flags & 1) dp.hidden_meshes |= 1u << k;
-    // Env-mapped with the model's own page.
-    if ((entry.flags & 0x80) && (entry.flags & 0x60)) dp.env_meshes |= 1u << k;
-    // Flag 0x20 / 0x40 without 0x80: the stock env page.
-    if ((entry.flags & 0x60) && !(entry.flags & 0x80)) {
-      if (entry.flags & 0x40) dp.stock_env_over |= 1u << k;
-      else dp.stock_env_replace |= 1u << k;
-      dp.stock_env_abr[k] = static_cast<u8>((entry.flags >> 2) & 3);
-    }
-    if (entry.r != 0x80 || entry.g != 0x80 || entry.b != 0x80) {
-      dp.part_mask |= 1u << k;
-      dp.part_tint[k][0] = entry.r / 128.0f, dp.part_tint[k][1] = entry.g / 128.0f, dp.part_tint[k][2] = entry.b / 128.0f;
-    }
-  }
+  model_shading_entries(asset, dp);
   if (dp.stock_env_over || dp.stock_env_replace) dp.stock_env_set = stock_env_page_set();
 }
 

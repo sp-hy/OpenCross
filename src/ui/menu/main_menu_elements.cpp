@@ -98,7 +98,8 @@ int MainMenu::Impl::slide_offset(int& shown_row) const {
 
 void MainMenu::Impl::grid_reset() {
   focus = 0, list_cur = list_scroll = 0, cell_col = 0, prompt_cur = 0, swap_row = swap_col = -1;
-  arrow_side = pick_element = pick_cell = swapping = list_dim = grid_dim = false;
+  label_page = 0;
+  pick_element = pick_cell = swapping = list_dim = grid_dim = false;
   prompt = GridPrompt::None;
   cell_row = gs->first_open_row(cur_char());
   labels_from = slide_from = -100;
@@ -264,25 +265,31 @@ void MainMenu::Impl::update_grid_prompt(const Nav& nav) {
         return;
       }
       break;
+    case GridPrompt::PresetSave:
+    case GridPrompt::PresetLoad:
+    case GridPrompt::PresetReport:
+      if (update_preset_prompt(nav)) lock_grid(kLockOpen);
+      return;
     default: break;
   }
   if (nav.cancel) prompt = GridPrompt::None, sfx(6);
 }
 
-// The list half. Right shows the second pair of label rows (a second Right, like Left, moves to the grid); Triangle opens Reorder. OK on
-// Remove All / Auto Allocate / Fill Blanks asks its question; on Remove or an element it picks the row and moves to the grid, an element
+// The list half. Right shows the next pair of label rows (past the last pair, like Left on the first, it moves to the grid); Triangle
+// opens Reorder. OK on Remove All / Auto Allocate / Fill Blanks asks its question, on Save Preset / Load Preset opens the slot window; on Remove or an element it picks the row and moves to the grid, an element
 // to its own level row clamped to the unlocked rows (refused silently when no unlocked row is in its reach). With a cell picked first,
 // OK puts the row into that cell and Left takes the cell back to the grid to be swapped.
 void MainMenu::Impl::update_grid_list(const Nav& nav) {
   const int character = cur_char();
   const int count = static_cast<int>(grid_list().size());
+  label_page = std::min(label_page, label_pages() - 1);
   if (nav.up && list_cur > 0) --list_cur, sfx(1);
   if (nav.down && list_cur + 1 < count) ++list_cur, sfx(1);
   scroll_to(list_cur, list_scroll, kVisibleRows);
   if (nav.left) {
     sfx(1);
-    if (arrow_side) {
-      arrow_side = false;
+    if (label_page > 0) {
+      --label_page;
     } else {
       if (pick_cell) swapping = true, swap_row = cell_row, swap_col = cell_col;
       to_grid(cell_row, kLockToGrid, true);
@@ -290,10 +297,10 @@ void MainMenu::Impl::update_grid_list(const Nav& nav) {
     }
   } else if (nav.right && !pick_cell) {
     sfx(1);
-    if (!arrow_side) {
-      arrow_side = true;
+    if (label_page + 1 < label_pages()) {
+      ++label_page;
     } else {
-      arrow_side = false;
+      label_page = 0;
       to_grid(cell_row, kLockToGrid, true);
       list_dim = true;
     }
@@ -302,15 +309,19 @@ void MainMenu::Impl::update_grid_list(const Nav& nav) {
     sfx(1);
   } else if (nav.ok) {
     if (pick_cell) {
-      if (list_cur != 0 && (!arrow_side || list_cur > 1)) apply_to_cell();
+      if (list_cur != 0 && (label_page == 0 || list_cur > 1)) apply_to_cell();
       else sfx(0x18);
       return;
     }
     sfx(1);
-    if (list_cur == 0) {
-      prompt = arrow_side ? GridPrompt::AutoAllocate : GridPrompt::RemoveAll;
-      prompt_cur = arrow_side ? 0 : 1;
-    } else if (list_cur == 1 && arrow_side) {
+    if (label_page == 2 && list_cur < 2) {
+      prompt = list_cur == 0 ? GridPrompt::PresetSave : GridPrompt::PresetLoad;
+      prompt_cur = 0;
+      preset_cache = save::GridPresets::read(*preset_store);
+    } else if (list_cur == 0) {
+      prompt = label_page == 1 ? GridPrompt::AutoAllocate : GridPrompt::RemoveAll;
+      prompt_cur = label_page == 1 ? 0 : 1;
+    } else if (list_cur == 1 && label_page == 1) {
       prompt = GridPrompt::FillBlanks, prompt_cur = 0;
     } else if (const int id = list_element(list_cur); id == 0) {
       pick_element = true;
@@ -529,6 +540,7 @@ void MainMenu::Impl::plate(int character, int id, float x, float y) {
   if (colour < 0) return;
   static const int kTile[8] = {9, 12, 10, 11, 13, 8, 0, 38};
   if (Tex* tex = plate_tex(kTile[colour])) Img(tex, PX(x), PY(y), PX(184), PY(24), 0, 0, 1, 1, grey(0x80));
+  symbol(colour, PX(x + 15.0f), PY(y + 12.0f), 40.0f);
 }
 
 // Thin 173x24 frame around an empty slot (eleempty.png), both art modes. Played from the discs it is the PS1's own outline: 2-px lines of
@@ -560,10 +572,8 @@ void MainMenu::Impl::grid_minimap(int character, float px, float py, int sel_row
       const int id = gs->cell_element(character, row, col);
       // file 1 = empty cell.
       int file = 1;
-      if (id > 0) {
-        const int colour = colour_index(character, id);
-        file = colour < 0 ? 1 : kFile[colour];
-      }
+      const int colour = id > 0 ? colour_index(character, id) : -1;
+      if (colour >= 0) file = kFile[colour];
       u32 tint = grey(0x30);
       if (hold_id > 0 && row >= lo && row <= hi) tint = ps1_colour(0xA04040);
       if (row == sel_row) tint = grey(0xA0);
@@ -572,11 +582,12 @@ void MainMenu::Impl::grid_minimap(int character, float px, float py, int sel_row
         // The disc's "elbi" sheet of menuelem.prd: frame 8 the empty cell, the colours by HD file number.
         static const int kElbiFrame[9] = {0, 8, 4, 3, 7, 2, 6, 5, 9};
         if (Tex* tex = texs.sheet("elbi", kElbiFrame[file])) Img(tex, PX(x + tex->ox), PY(y + tex->oy), PX(tex->w), PY(tex->h), 0, 0, 1, 1, tint);
-        continue;
+      } else {
+        char path[48];
+        std::snprintf(path, sizeof path, "hd/menu/menuelem/menuelem_%d.png", file);
+        if (Tex* tex = texs.load(path)) Img(tex, PX(x), PY(y), PX(16), PY(8), 0, 0, 1, 1, tint);
       }
-      char path[48];
-      std::snprintf(path, sizeof path, "hd/menu/menuelem/menuelem_%d.png", file);
-      if (Tex* tex = texs.load(path)) Img(tex, PX(x), PY(y), PX(16), PY(8), 0, 0, 1, 1, tint);
+      symbol(colour, PX(x + 8.0f), PY(y + 4.0f), 16.0f, std::clamp(static_cast<int>(tint & 0xFF), 90, 255));
     }
 }
 
@@ -663,7 +674,9 @@ void MainMenu::Impl::build_grid() {
   // "Elements" + icon in the list frame's top gap.
   notch_caption(253, 27, 3);
   const int bounce = ((frames % 23) * 0x3000) >> 16;
-  for (int i = 0; i < kVisibleRows; ++i) {
+  const bool window = prompt == GridPrompt::PresetSave || prompt == GridPrompt::PresetLoad || prompt == GridPrompt::PresetReport;
+  if (window) build_preset_window();
+  for (int i = 0; !window && i < kVisibleRows; ++i) {
     const int idx = list_scroll + i;
     if (idx >= cnt) break;
     const float yp = 42.0f + 24.0f * static_cast<float>(i), yt = 47.0f + 24.0f * static_cast<float>(i);
@@ -672,16 +685,16 @@ void MainMenu::Impl::build_grid() {
     // switches to.
     if (list[static_cast<size_t>(idx)] < 0) {
       empty_box(275, yp);
-      if ((idx == 0 || arrow_side) && (list_dim || pick_cell)) col = ps1_colour(0x404040);
+      if ((idx == 0 || label_page > 0) && (list_dim || pick_cell)) col = ps1_colour(0x404040);
       static const u32 kLabel[2][2] = {{0x801F2A10, 0x801F2A20}, {0x801F2A2C, 0x801F2A3C}};
       static const char* const kFallback[2][2] = {{"Remove All", "Remove"}, {"Auto Allocate", "Fill Blanks"}};
-      const std::u32string nm = utf32(menu_str(kLabel[arrow_side][idx], kFallback[arrow_side][idx]));
+      const std::u32string nm = label_page == 2 ? preset_label(idx == 0) : utf32(menu_str(kLabel[label_page][idx], kFallback[label_page][idx]));
       const float rel = fit_rel(nm, 124, 0.9f);
       // The USA menu font's label sits 1 px lower, centred in the empty box.
       TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt + (font_build(face_gn, import::Ps1Font::Build::UsaMenu) ? 1.0f : 0.0f), nm, col, rel);
       if (!list_dim) {
-        if (arrow_side) pointer(287.0f - static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), true);
-        else pointer(443.0f + static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), false);
+        if (label_page > 0) pointer(287.0f - static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), true);
+        if (label_page + 1 < label_pages()) pointer(443.0f + static_cast<float>(bounce), 49.0f + 24.0f * static_cast<float>(i), false);
       }
       continue;
     }
@@ -694,11 +707,13 @@ void MainMenu::Impl::build_grid() {
     Count(453, yt, std::min<int>(stack.qty, 99), col);
   }
   const float cursor_y = 47.0f + 24.0f * static_cast<float>(list_cur - list_scroll);
-  if (prompt != GridPrompt::None) tri(251, cursor_y, false);
-  else if ((focus == 0 && !list_dim) || pick_element) tri(251, cursor_y, true);
+  if (!window) {
+    if (prompt != GridPrompt::None) tri(251, cursor_y, false);
+    else if ((focus == 0 && !list_dim) || pick_element) tri(251, cursor_y, true);
+  }
   const int total = std::max(cnt, kVisibleRows);
-  if (list_scroll > 0) scroll_arrow(485, 35, true);
-  if (list_scroll + kVisibleRows < total) scroll_arrow(485, 311, false);
+  if (list_scroll > 0 && !window) scroll_arrow(485, 35, true);
+  if (list_scroll + kVisibleRows < total && !window) scroll_arrow(485, 311, false);
   // Reorder (Triangle) in the gap of the list frame's bottom edge: the glyph at (0x181, 0x137) and the sheet's "Reorder" part at
   // (0x19C, 0x13B), which RDE replaces in both of its art modes by the cmnmes text in style 0x74, 3 PS1 px lower (4 in German and
   // Japanese). The disc's part is the Japanese word, so only the Japanese PS1-resolution classic screen draws it. Dim off the list.
@@ -744,7 +759,17 @@ void MainMenu::Impl::build_grid() {
 // character stands in), 7 = the sort orders. The choice lines of 4 / 5 / 6 (line 2) sit at x 286, 2.5 px higher. Choice cursors: Yes / No
 // (290 + 80 c, 382), member / party (276, 344 + 36 c), sort (268, 365 + 18 c).
 void MainMenu::Impl::grid_help(int character) {
-  int entry = (arrow_side ? 2 : 0) + list_cur;
+  if (label_page == 2 && (prompt == GridPrompt::None || prompt >= GridPrompt::PresetSave)) {
+    const char* help = preset_help(prompt == GridPrompt::None ? list_cur == 0 : prompt == GridPrompt::PresetSave);
+    for (int line = 0; *help != '\0'; ++line) {
+      const char* end = help;
+      while (*end != '\0' && *end != '\n') ++end;
+      TPfit(260, 345.0f + 18.0f * static_cast<float>(line), utf32(std::string(help, end)), 210, kName, 0.98f);
+      help = *end == '\n' ? end + 1 : end;
+    }
+    return;
+  }
+  int entry = (label_page == 1 ? 2 : 0) + list_cur;
   switch (prompt) {
     case GridPrompt::RemoveAll: entry = 4; break;
     case GridPrompt::AutoAllocate: entry = 5; break;
