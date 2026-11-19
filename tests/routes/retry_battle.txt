@@ -1,0 +1,81 @@
+# Retry battle route: a wipe in a battle that is not losable opens the Retry choice (Retry / Retry after changes / Give up). Retry puts
+# the battle's start state back (savecheck against the mark taken before the request) and fights the same scene again; Retry after changes
+# opens the main menu limited to Elements, Equip and Items (Down wraps from Items to Elements past the dimmed rows), whose closing restarts
+# the fight; Give up is the normal end: result 1 and the game-over room.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600- set hp 0 1
+- set hp 1 1
+- set hp 2 1
+- set hp 3 1
+- request savemark
+- request battle 1
+- wait battle start 600
+- wait 240
+- tap confirm
+- fight 6000
+- wait battle retry 600
+- assert retry open
+- assert battle active
+- wait 30
+- screenshot rb_prompt.png
+- tap confirm
+- wait 20
+- assert retry closed
+- assert battle active
+- request savecheck
+- wait 240
+- tap confirm
+- fight 6000
+- wait battle retry 600
+- tap down
+- wait 10
+- tap confirm
+- wait menu open 300
+- wait 60
+- screenshot rb_menu.png
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap down
+- wait 10
+- screenshot rb_menu_wrap.png
+- tap cancel
+- wait menu closed 300
+- assert battle active
+- wait 240
+- tap confirm
+- fight 6000
+- wait battle retry 600
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap confirm
+- wait battle end 600
+- wait 200
+- assert result 1
+- assert room ending
+- log retry_battle done
+- quit

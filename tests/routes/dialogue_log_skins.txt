@@ -1,0 +1,154 @@
+# Dialogue log ([Game] OpenCrossMenu=1) over every window skin: in Termina (tel_b02f) the portrait painter's choice is answered three
+# times, six entries with portraits, more than the list shows (the scroll bar is drawn). The log window then opens once per skin byte
+# 0..15 (set skin: the 16 sheets, Custom window frame on) on the newest entry, each a shot (dlk_<byte>.png), and last the OpenCross row's
+# Dialogue log page (the group list's third entry, a group of one page) with skin byte 2 (dlk_page.png). The title, the place "k/n", the
+# portraits, the text, the selected row's band and the scroll bar must sit inside the frame's inner edge in every shot (log line
+# "dialogue log: skin ... clear inside ...").
+0 wait 5
+- request party_add 1
+- assert party 0,1,-
+- wait idle 600
+- approach 7 60 600
+- action
+- wait text Shall I draw you a portrait
+- choose 2
+- wait text Come again
+- skip
+- wait idle 600
+- action
+- wait text Shall I draw you a portrait
+- choose 2
+- wait text Come again
+- skip
+- wait idle 600
+- action
+- wait text Shall I draw you a portrait
+- choose 2
+- wait text Come again
+- skip
+- wait idle 600
+- set skin 0
+- tap l
+- wait 10
+- assert dialoguelog open
+- assert dialoguelog entries 6 6
+- screenshot dlk_00.png
+- tap l
+- wait 10
+- set skin 1
+- tap l
+- wait 10
+- screenshot dlk_01.png
+- tap l
+- wait 10
+- set skin 2
+- tap l
+- wait 10
+- screenshot dlk_02.png
+- tap l
+- wait 10
+- set skin 3
+- tap l
+- wait 10
+- screenshot dlk_03.png
+- tap l
+- wait 10
+- set skin 4
+- tap l
+- wait 10
+- screenshot dlk_04.png
+- tap l
+- wait 10
+- set skin 5
+- tap l
+- wait 10
+- screenshot dlk_05.png
+- tap l
+- wait 10
+- set skin 6
+- tap l
+- wait 10
+- screenshot dlk_06.png
+- tap l
+- wait 10
+- set skin 7
+- tap l
+- wait 10
+- screenshot dlk_07.png
+- tap l
+- wait 10
+- set skin 8
+- tap l
+- wait 10
+- screenshot dlk_08.png
+- tap l
+- wait 10
+- set skin 9
+- tap l
+- wait 10
+- screenshot dlk_09.png
+- tap l
+- wait 10
+- set skin 10
+- tap l
+- wait 10
+- screenshot dlk_10.png
+- tap l
+- wait 10
+- set skin 11
+- tap l
+- wait 10
+- screenshot dlk_11.png
+- tap l
+- wait 10
+- set skin 12
+- tap l
+- wait 10
+- screenshot dlk_12.png
+- tap l
+- wait 10
+- set skin 13
+- tap l
+- wait 10
+- screenshot dlk_13.png
+- tap l
+- wait 10
+- set skin 14
+- tap l
+- wait 10
+- screenshot dlk_14.png
+- tap l
+- wait 10
+- set skin 15
+- tap l
+- wait 10
+- screenshot dlk_15.png
+- tap l
+- wait 10
+- assert dialoguelog closed
+- set skin 2
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap down
+- wait 10
+- tap down                            # Dialogue log
+- wait 10
+- tap confirm                         # a group of one page opens it
+- wait 40
+- assert dialoguelog open
+- assert dialoguelog entries 6 6
+- screenshot dlk_page.png
+- tap cancel
+- wait 30
+- tap cancel
+- wait 30
+- tap cancel
+- wait menu closed 200
+- quit

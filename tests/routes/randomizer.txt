@@ -1,0 +1,22 @@
+# Randomizer: open two chests of opa_a03f (entity 19, a bone in the game; entity 20, an Ivory Helmet; both away from the roaming
+# monster) and element shop 0 under seed 1234. The party is put beside each chest and walks into it (approach ends when blocked), so
+# it faces the chest when it confirms.
+0 wait idle 900
+- put 560 224
+- wait 10
+- approach 19 40 300
+- action
+- wait 30
+- skip 900
+- wait idle 600
+- put -1470 1884
+- wait 10
+- approach 20 40 300
+- action
+- wait 30
+- skip 900
+- wait idle 600
+- request elementshop 0
+- wait shop open 300
+- wait 60
+- quit

@@ -1,0 +1,63 @@
+# The OpenCross row with every page on ([Game] OpenCrossMenu) in Arni: after the room-script scan the row opens the
+# group list (oc_01: Chronicle, Extras, Dialogue log), Chronicle its page list (oc_02: Bestiary, Characters, Elements, Key items,
+# Treasure, Options), OK the Bestiary page (oc_03); Cancel returns to the Chronicle list on Bestiary (oc_04) and again to the group list on
+# Chronicle (oc_05); Extras opens its page list (oc_06: Jukebox, Theatre, Portraits, Models, Options), Portraits its page (oc_07), Cancel back on
+# Portraits (oc_08); the Dialogue log entry opens the log at once (oc_09) and Cancel returns to the group list on it (oc_10); Cancel
+# returns to the main list on the OpenCross row (oc_11).
+0 wait idle 600
+- wait records 60000
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- screenshot oc_01_groups.png
+- tap confirm                         # Chronicle
+- wait 30
+- screenshot oc_02_chronicle.png
+- tap confirm                         # Bestiary
+- wait 80
+- screenshot oc_03_bestiary.png
+- tap cancel
+- wait 60
+- screenshot oc_04_back_chronicle.png
+- tap cancel
+- wait 30
+- screenshot oc_05_back_groups.png
+- tap down                            # Extras
+- wait 10
+- tap confirm
+- wait 30
+- screenshot oc_06_extras.png
+- tap down
+- wait 10
+- tap down                            # Portraits
+- wait 10
+- tap confirm
+- wait 60
+- screenshot oc_07_portraits.png
+- tap cancel
+- wait 60
+- screenshot oc_08_back_extras.png
+- tap cancel
+- wait 30
+- tap down                            # Dialogue log
+- wait 10
+- tap confirm
+- wait 40
+- assert dialoguelog open
+- screenshot oc_09_log.png
+- tap cancel
+- wait 60
+- assert dialoguelog closed
+- screenshot oc_10_back_groups.png
+- tap cancel
+- wait 30
+- screenshot oc_11_main.png
+- tap cancel
+- wait menu closed 200
+- quit

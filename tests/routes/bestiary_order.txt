@@ -1,0 +1,48 @@
+# The Bestiary page in story order: the Arni encounter (two Komodo Pups) records them as met and beaten, then the page by number with the
+# opening dream's Cybot and Alphabat first and the Komodo Pup fourth (bo_01), the Komodo Pup's places (bo_02) and traits (bo_03), the
+# order by name with the met Komodo Pup first (bo_04) and by area (bo_05). The log has "scan: ... enemy species numbered" before the page.
+0 wait idle 600
+- request party_add 1
+- request battle 1
+- fight 6000
+- wait idle 900
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap confirm                         # Chronicle
+- wait 30
+- tap confirm
+- wait 600
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap down
+- wait 60
+- screenshot bo_01_by_number.png
+- tap triangle
+- wait 30
+- screenshot bo_02_places.png
+- tap triangle
+- wait 30
+- screenshot bo_03_traits.png
+- tap item
+- wait 40
+- screenshot bo_04_by_name.png
+- tap item
+- wait 40
+- screenshot bo_05_by_area.png
+- tap cancel
+- wait 60
+- tap cancel
+- wait 30
+- tap cancel
+- wait 20
+- tap cancel
+- wait menu closed 200

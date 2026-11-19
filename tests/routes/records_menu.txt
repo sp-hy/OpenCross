@@ -1,0 +1,40 @@
+# The OpenCross row with [Game] OpenCrossMenu: the Arni encounter (two Komodo Pups) records them as met and beaten with their drops (log
+# "records: scene 6 met 3 3" and "records: scene 6 result 0 beaten 3 3 loot ..."), then the main list on the OpenCross row above
+# Save/Load (rm_01), the Chronicle page list (rm_02; the row opens the group list, Chronicle is its first entry), the Bestiary
+# page by number with an unmet silhouette (rm_03), by name with the met Komodo Pup first (rm_04), and Cancel back on the page list
+# (rm_05).
+0 wait idle 600
+- request party_add 1
+- request battle 1
+- fight 6000
+- wait idle 900
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- screenshot rm_01_row.png
+- tap confirm
+- wait 30
+- tap confirm                         # Chronicle
+- wait 30
+- screenshot rm_02_pages.png
+- tap confirm
+- wait 80
+- screenshot rm_03_enemies.png
+- tap item
+- wait 10
+- tap left
+- wait 40
+- screenshot rm_04_by_name.png
+- tap cancel
+- wait 60
+- screenshot rm_05_back.png
+- tap cancel
+- wait 30
+- tap cancel
+- wait 20
+- tap cancel
+- wait menu closed 200

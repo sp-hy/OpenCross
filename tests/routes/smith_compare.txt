@@ -1,0 +1,61 @@
+# Blacksmith with [Enhancements] EquipCompare: the compare panel replaces the forge's party strip (Serge / Kid / Guile, then pages of
+# three of the other recruited characters through the item key) and sits under the sell list over the dial.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right                           # file 04
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait room opa_b04f 600
+- mash until idle 1 3000              # the beach's arrival lines
+- request weaponshop 0
+- wait shop open 300
+- wait 80
+- tap confirm                         # Forge
+- wait 30
+- tap down
+- wait 10
+- tap down                            # Accessories
+- wait 10
+- tap confirm
+- wait 30
+- screenshot smith_compare_forge.png  # the party's DEF / M. DEF. with the helmet, 10 others can wear it, page 1/5
+- tap item
+- wait 10
+- screenshot smith_compare_page2.png  # the next three recruited characters
+- assert shop open
+- tap cancel
+- wait 20
+- tap cancel
+- wait 20
+- tap down
+- wait 10
+- tap down                            # Sell
+- wait 10
+- tap confirm
+- wait 30
+- tap up                              # Armor
+- wait 10
+- tap confirm
+- wait 30
+- screenshot smith_compare_sell.png   # the panel over the dial, lowered stats in the lowered colour
+- assert shop open
+- quit

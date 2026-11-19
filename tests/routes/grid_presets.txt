@@ -1,0 +1,122 @@
+# The grid editor with [Game] GridPresets: Serge's grid (elements 1, 7, 13, 19 in level 1, 4 and 10 in level 2) is saved to slot 2, emptied with Remove All and
+# loaded back (log "grid preset: character 0 loaded slot 1": the stock plus grid copies keep their total); then Serge is emptied again,
+# Kid auto-allocates from the stock, and Serge's preset is loaded, which lists the elements Kid now holds.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right                           # file 04
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait room opa_b04f 600
+- mash until idle 1 3000              # the beach's arrival lines
+- request menu
+- wait menu open 300
+- wait 20
+- tap down                            # Elements
+- wait 10
+- tap confirm
+- wait 40
+- tap down                            # Allocate
+- wait 10
+- tap confirm
+- wait 60
+- tap confirm                         # Serge
+- wait 120
+- screenshot gp_01_grid.png
+- tap right                           # Auto Allocate / Fill Blanks
+- wait 10
+- tap right                           # Save Preset / Load Preset
+- wait 10
+- screenshot gp_02_labels.png
+- tap confirm
+- wait 20
+- screenshot gp_03_save_window.png
+- tap down                            # slot 2
+- wait 10
+- tap confirm
+- wait 20
+- tap confirm                         # the window again, to show the slot's summary
+- wait 20
+- screenshot gp_04_saved.png
+- tap cancel
+- wait 20
+- tap left
+- wait 10
+- tap left                            # Remove All / Remove
+- wait 10
+- tap confirm
+- wait 10
+- tap left                            # Yes
+- wait 10
+- tap confirm
+- wait 60
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap down                            # Load Preset
+- wait 10
+- tap confirm
+- wait 20
+- tap down                            # slot 2
+- wait 10
+- tap confirm
+- wait 60
+- screenshot gp_05_loaded.png
+- tap left
+- wait 10
+- tap left
+- wait 10
+- tap up
+- wait 10
+- tap confirm                         # Remove All
+- wait 10
+- tap left
+- wait 10
+- tap confirm
+- wait 60
+- tap j                               # Kid (R1)
+- wait 60
+- tap right                           # Auto Allocate, this member: takes elements from the stock Serge just returned
+- wait 10
+- tap confirm
+- wait 10
+- tap confirm
+- wait 60
+- tap h                               # Serge (L1)
+- wait 60
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap down                            # Load Preset
+- wait 10
+- tap confirm
+- wait 20
+- tap down                            # slot 2: the elements Kid now holds are short
+- wait 10
+- tap confirm
+- wait 60
+- screenshot gp_06_missing.png
+- tap confirm
+- wait 20
+- screenshot gp_07_closed.png
+- quit

@@ -1,0 +1,44 @@
+# Dialogue log ([Game] OpenCrossMenu=1) in the opening: New Game (name "Serge") -> opn_a01i, the first messages confirmed page by page
+# (log lines "dialogue log: Doc | Doc: ..." and "dialogue log: Kid | Kid: ..."); with the third message on screen L opens the log
+# window over the scene on the two finished ones, each with its speaker's portrait (dls_01), and L closes it again.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap confirm                         # New Game
+- wait 20
+- tap confirm                         # the vibration page
+- wait flow name 600
+- wait 90
+- tap confirm
+- wait 90
+- tap confirm
+- wait 90
+- tap down
+- tap confirm                         # the default name
+- wait movie start 300
+- wait 60
+- tap confirm
+- wait movie end 300
+- wait room opn_a01i 900
+- wait dialogue open 1500
+- wait 60
+- tap confirm
+- wait 90
+- tap confirm
+- wait 90
+- tap confirm
+- wait 90
+- tap l
+- wait 10
+- assert dialoguelog open
+- assert dialoguelog entries 2 2
+- screenshot dls_01_kid.png
+- tap l
+- wait 10
+- assert dialoguelog closed
+- assert dialogue open
+- quit

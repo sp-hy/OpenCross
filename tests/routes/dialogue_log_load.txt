@@ -1,0 +1,35 @@
+# Dialogue log ([Game] OpenCrossMenu=1) across a load: Continue from the save copy in tmp (card 1, slot 5, as battle_hud.txt) adds a
+# divider with the save's location caption and play time (log line "dialogue log: loaded <area> at <s> s of play"), the log window's
+# last entry (dll_01).
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (memory-card choice)
+- wait 20
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down                            # slot 5
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- tap l
+- wait 10
+- assert dialoguelog open
+- assert dialoguelog entries 1 1
+- screenshot dll_01_divider.png
+- tap l
+- wait 10
+- assert dialoguelog closed
+- quit

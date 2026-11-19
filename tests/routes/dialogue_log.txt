@@ -1,0 +1,90 @@
+# Dialogue log ([Game] OpenCrossMenu=1) in Termina (tel_b02f): the portrait painter's choice is answered "No thanks" (log line "dialogue
+# log: ... | picked No thanks"), then with "Come again!" still on screen L opens the log window over the scene on that one entry
+# (dl_01): the field and the open window stand still under it (assert frozen) while it takes a page key; L closes it and the scene goes
+# on ("Come again!" is logged). The pad's RB + Back opens it too, on the newest of the two entries, without changing the leader (Back
+# held with RB is not Select); B closes it. The key-item button asks to clear the log over the field and cancel answers No (the window
+# stays). Last the OpenCross row opens its Dialogue log page (the group list's third entry), which lists the same two entries (dl_03);
+# the key-item button asks to clear it, on No (dl_04), OK on No keeps both, then Left and OK on Yes (dl_05) empty it (dl_06, "dialogue
+# log: cleared").
+0 wait 5
+- request party_add 1
+- assert party 0,1,-
+- wait idle 600
+- approach 7 60 600
+- action
+- wait text Shall I draw you a portrait
+- choose 2
+- wait text Come again
+- wait 30
+- tap l
+- wait 10
+- assert dialoguelog open
+- snap
+- assert dialoguelog entries 1 1
+- assert dialoguelog cursor 0
+- screenshot dl_01_newest.png
+- tap h
+- wait 10
+- assert frozen
+- tap l
+- wait 10
+- assert dialoguelog closed
+- skip
+- wait idle 600
+- pad tap rb+back
+- wait 10
+- assert dialoguelog open
+- assert dialoguelog entries 2 2
+- assert dialoguelog cursor 1
+- tap item                            # Clear log?
+- wait 10
+- tap cancel                          # No: the window stays
+- wait 10
+- assert dialoguelog open
+- assert dialoguelog entries 2 2
+- pad tap b
+- wait 10
+- assert dialoguelog closed
+- assert party 0,1,-
+- wait idle 600
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap down
+- wait 10
+- tap down                            # Dialogue log
+- wait 10
+- tap confirm                         # a group of one page opens it
+- wait 40
+- assert dialoguelog open
+- assert dialoguelog entries 2 2
+- screenshot dl_03_page.png
+- tap item                            # Clear log? (on No)
+- wait 10
+- screenshot dl_04_clear_ask.png
+- tap confirm                         # No
+- wait 10
+- assert dialoguelog entries 2 2
+- tap item
+- wait 10
+- tap left                            # Yes
+- wait 10
+- screenshot dl_05_clear_yes.png
+- tap confirm
+- wait 10
+- assert dialoguelog entries 0 0
+- screenshot dl_06_cleared.png
+- tap cancel
+- wait 30
+- tap cancel
+- wait 30
+- tap cancel
+- wait menu closed 200
+- assert dialoguelog closed
+- quit

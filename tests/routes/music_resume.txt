@@ -1,0 +1,17 @@
+# Music resume ([Audio] MusicResume=1; music_resume.ini plays the remastered soundtrack, music_resume_orig.ini the original music):
+# alu_a06f plays song 4 for 10 s, crn_b01i (song 57) cuts it for 5 s, then alu_a06f again: song 4 goes on from where the room change
+# cut it (log: "audio: song 4 cut at <t> s", then "song 4 resumes its stream at" / "resumes its sequencer at"), not from its start.
+# The mixer runs on the capture of music_resume.env (OC_AUDIO_DUMP). With MusicResume=0 the same run restarts song 4.
+0 wait 5
+- wait room alu_a06f 300
+- wait 600
+- assert song 4
+- load crn_b01i 0
+- wait room crn_b01i 300
+- wait 300
+- assert song 57
+- load alu_a06f 0
+- wait room alu_a06f 300
+- wait 240
+- assert song 4
+- quit

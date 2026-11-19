@@ -1,0 +1,52 @@
+# The grid editor with [Game] GridPresets off: the label rows page twice (Remove All / Remove, Auto Allocate / Fill Blanks), and the second
+# Right moves to the grid, as in the original; the shots are the reference for the feature off.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (no page files)
+- wait 20
+- tap right                           # file 04
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait room opa_b04f 600
+- mash until idle 1 3000              # the beach's arrival lines
+- request menu
+- wait menu open 300
+- wait 20
+- tap down                            # Elements
+- wait 10
+- tap confirm
+- wait 40
+- tap down                            # Allocate
+- wait 10
+- tap confirm
+- wait 60
+- tap confirm                         # Serge
+- wait 120
+- screenshot gpo_01_grid.png
+- tap right
+- wait 10
+- screenshot gpo_02_page2.png
+- tap right
+- wait 40
+- screenshot gpo_03_cells.png
+- tap down
+- wait 20
+- screenshot gpo_04_cells_down.png
+- quit

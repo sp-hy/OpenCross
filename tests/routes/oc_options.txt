@@ -1,0 +1,102 @@
+# The Options pages of the OpenCross row ([Game] OpenCrossMenu=1) in Arni: the Chronicle page list ends on Options (oo_01); its page
+# (oo_02) steps Hints off -> hints -> full with Right and turns Show all on with Left (oo_03), each checked with assert config; the
+# Bestiary then lists every species by name (oo_04). Reset asks with the cursor on No (oo_05): Cancel is No, then Left and OK on Yes
+# (oo_06) empty the collection (log "records: the collection was reset"). The Extras' Options page turns Unlock all on (oo_07) and the
+# Portraits page shows every face (oo_08). Each change logs "menu options: ...".
+0 wait idle 600
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap confirm                         # Chronicle
+- wait 30
+- tap up                              # Options, the list's last entry
+- wait 10
+- screenshot oo_01_chronicle_list.png
+- tap confirm
+- wait 60
+- screenshot oo_02_chronicle_options.png
+- assert config Game RecordsHints off
+- assert config Game RecordsShowAll 0
+- tap right
+- wait 10
+- assert config Game RecordsHints hints
+- tap right
+- wait 10
+- assert config Game RecordsHints full
+- tap down                            # Show all
+- wait 10
+- tap left
+- wait 10
+- assert config Game RecordsShowAll 1
+- screenshot oo_03_changed.png
+- tap cancel
+- wait 60
+- tap down                            # Bestiary (the list wraps)
+- wait 10
+- tap confirm
+- wait 80
+- tap item                            # by name
+- wait 40
+- screenshot oo_04_bestiary_all.png
+- tap cancel
+- wait 60
+- tap up                              # Options
+- wait 10
+- tap confirm
+- wait 60
+- tap up                              # Reset (the rows wrap)
+- wait 10
+- tap confirm
+- wait 10
+- screenshot oo_05_reset_ask.png
+- tap cancel                          # No
+- wait 10
+- tap confirm
+- wait 10
+- tap left                            # Yes
+- wait 10
+- screenshot oo_06_reset_yes.png
+- tap confirm
+- wait 10
+- assert config Game RecordsHints full
+- tap cancel
+- wait 60
+- tap cancel
+- wait 30
+- tap down                            # Extras
+- wait 10
+- tap confirm
+- wait 30
+- tap up                              # Options
+- wait 10
+- tap confirm
+- wait 60
+- assert config Game ExtrasUnlockAll 0
+- tap right
+- wait 10
+- assert config Game ExtrasUnlockAll 1
+- screenshot oo_07_extras_options.png
+- tap cancel
+- wait 60
+- tap up
+- wait 10
+- tap up                              # Portraits
+- wait 10
+- tap confirm
+- wait 60
+- screenshot oo_08_portraits_all.png
+- tap cancel
+- wait 60
+- tap cancel
+- wait 30
+- tap cancel
+- wait 20
+- tap cancel
+- wait menu closed 200
+- quit

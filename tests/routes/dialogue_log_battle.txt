@@ -1,0 +1,30 @@
+# Dialogue log ([Game] OpenCrossMenu=1) in a scripted battle on its own battlefield: the Viper Manor treasure vault chest (jac_b25i ent
+# 23, battle 409, Serge and Kid as chest_battle.txt) opens the Boxer Boys' fight, whose battle script asks "Which of us do you
+# choose?" in the event window. That line is logged when its window closes (log line "dialogue log: ... | Which of us do you
+# choose?"); the damage numbers and plates are not. Back in the vault the log window lists that one line (dlb_01).
+0 wait 5
+- request party_add 1
+- load jac_b25i 0
+- wait room jac_b25i 600
+- wait idle 600
+- approach 23 40 900
+- tap confirm
+- wait 60
+- tap confirm
+- wait 60
+- wait battle start 900
+- wait 400
+- tap confirm
+- fight 6000
+- wait 600
+- wait idle 1800
+- assert battle inactive
+- tap l
+- wait 10
+- assert dialoguelog open
+- assert dialoguelog entries 1 1
+- screenshot dlb_01_battle.png
+- tap l
+- wait 10
+- assert dialoguelog closed
+- quit

@@ -1,0 +1,117 @@
+# The Extras pages ([Game] OpenCrossMenu): alu_a01f's song 4 and crn_b01i's song 57 unlock as they sound, the faces of the clinic scene's windows
+# (gal_b06i, scenario 54, as in portrait_side) as they show and movie row 3 (a03kidfb) as it starts (log "extras: unlocked ..."). Then
+# the main menu's OpenCross row, whose group list opens the Extras page list (its second entry), and its pages: the jukebox (ex_01) plays song 57
+# in place of the field's song 4 (ex_02), Square moves it to the original music, OK stops it (song 4 back) and OK plays it again on the
+# original music; Cancel stops it (song 4 back) on the page list (ex_07); the theatre plays a03kidfb (ex_03, skipped) and returns with
+# song 4 back (ex_04); the portrait gallery with the faces seen and the rest as silhouettes (ex_05); the model viewer on Serge in his
+# second pose (ex_06); Cancel leaves with song 4 playing. The mixer runs on the capture of extras_menu.env (OC_AUDIO_DUMP).
+0 wait 60
+- assert song 4
+- request party_add 1
+- request party_add 2
+- set var 0x00 54
+- set var 0x188 0x10
+- load gal_b06i 1
+- wait room gal_b06i 600
+- mash until message 26 1200
+- set var 0x00 0
+- load crn_b01i 0
+- wait room crn_b01i 300
+- wait 120
+- assert song 57
+- load alu_a01f 0
+- wait room alu_a01f 300
+- wait 60
+- request movie 3
+- wait movie start 300
+- wait 60
+- tap confirm
+- wait movie end 300
+- wait idle 900
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap down                            # Extras
+- wait 10
+- tap confirm
+- wait 30
+- tap confirm
+- wait 80
+- screenshot ex_01_jukebox.png
+- tap right
+- tap right
+- tap right
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- tap down
+- wait 10
+- tap confirm
+- wait 60
+- assert song 57
+- screenshot ex_02_playing.png
+- tap item
+- wait 30
+- assert song 57
+- tap confirm
+- wait 30
+- assert song 4
+- tap confirm
+- wait 60
+- assert song 57
+- tap cancel
+- wait 60
+- assert song 4
+- tap down                            # Theatre
+- wait 10
+- screenshot ex_07_list.png
+- tap confirm
+- wait 60
+- tap down
+- tap down
+- tap down
+- wait 10
+- tap confirm
+- wait movie start 300
+- wait 60
+- screenshot ex_03_theatre_movie.png
+- tap confirm
+- wait movie end 300
+- wait 40
+- assert song 4
+- screenshot ex_04_theatre.png
+- tap cancel
+- wait 60
+- tap down                            # Portraits
+- wait 10
+- tap confirm
+- wait 60
+- screenshot ex_05_portraits.png
+- tap cancel
+- wait 60
+- tap down                            # Models
+- wait 10
+- tap confirm
+- wait 60
+- tap item
+- wait 60
+- screenshot ex_06_models.png
+- tap cancel
+- wait 60
+- tap cancel
+- wait 30
+- tap cancel
+- wait 20
+- tap cancel
+- wait menu closed 200
+- wait 30
+- assert song 4
+- quit

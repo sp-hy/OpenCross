@@ -1,0 +1,113 @@
+# The record pages: Continue file 05 (story 44, Serge / Kid / Guile recruited, Leena missed; the load marks them in the collection,
+# log "records: the load (story 44) added ..."), wait for the room-script scan, then the OpenCross row's Chronicle list (rp_01), the
+# Characters page on Serge (rp_02) and on Leena, missed at story 44 (rp_03), the Elements page on Ice Lance (rp_04), the Key items
+# page on the Hero's Medal, missed (rp_05), and the Treasure page, its places split by world, on Arni Village (Another) (rp_06) and
+# Viper Manor (Another) (rp_07).
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1 (memory-card choice)
+- wait 60
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap right                           # file 05
+- wait 10
+- tap confirm
+- wait flow field 600
+- wait idle 600
+- wait records 60000
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap confirm                         # Chronicle
+- wait 30
+- tap down                            # Characters
+- wait 10
+- screenshot rp_01_pages.png
+- tap confirm
+- wait 80
+- screenshot rp_02_characters.png
+- tap right
+- wait 10
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap down                            # 20 Leena
+- wait 40
+- screenshot rp_03_leena.png
+- tap cancel
+- wait 60
+- tap down                            # Elements
+- wait 10
+- tap confirm
+- wait 60
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap down                            # 4 Ice Lance
+- wait 40
+- screenshot rp_04_elements.png
+- tap cancel
+- wait 60
+- tap down                            # Key items
+- wait 10
+- tap confirm
+- wait 40
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap right
+- wait 40
+- screenshot rp_05_keyitems.png
+- tap cancel
+- wait 60
+- tap down                            # Treasure
+- wait 10
+- tap confirm
+- wait 60
+- tap down                            # Arni Village (Another)
+- wait 40
+- screenshot rp_06_treasure.png
+- tap right
+- wait 10
+- tap right
+- wait 10
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap down                            # Viper Manor (Another)
+- wait 40
+- screenshot rp_07_viper.png
+- tap cancel
+- wait 60
+- tap cancel
+- wait 30
+- tap cancel
+- wait 20
+- tap cancel
+- wait menu closed 200

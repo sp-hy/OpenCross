@@ -1,0 +1,16 @@
+# Auto-advance ([Game] AutoAdvance=1): Skelly's grandmother's house (tel_b11i), the first talk to the grandmother, with no confirm
+# pressed after the talk starts. Every message goes on by itself after its reading pause (text.md 7.8: 1 s + 1/25 s a glyph read),
+# so the conversation reaches its end and the controls come back. Log: "field: tick <n> dialogue room 92 message <m>" per message.
+0 wait 5
+- request party_add 1
+- walk 500 0 40 400
+- approach 4 60 600
+- action
+- wait text Who might you be
+- mark time
+- wait text Grandma, they are travelers
+- assert elapsed 60 600
+- wait idle 3600
+- assert var 0x40C 0                 # ent 4 cleared $room[6] (the conversation ran to its end)
+- assert var 0x402 1                 # first talk done ($room[1])
+- quit
