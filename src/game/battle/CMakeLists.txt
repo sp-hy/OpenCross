@@ -55,6 +55,9 @@ add_library(oc_battle_view STATIC
   battle_view_trail.cpp
   battle_view_pseudo.cpp
   battle_view_showcase.cpp
+  battle_view_preview.cpp
+  spell_preview.h
+  spell_preview.cpp
   battle_view_ui.cpp
   battle_view_versus.cpp
   texture_dump.h

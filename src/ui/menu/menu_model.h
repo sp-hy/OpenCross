@@ -89,7 +89,7 @@ struct EnemyModelSlot {
   // Window pixels of the PS1 screen point (0, 0) and of one PS1 pixel.
   float origin_x = 0, origin_y = 0;
   float unit_x = 1, unit_y = 1;
-  // The box the model fits in, PS1 px.
+  // The box the model fits in, PS1 px (with the widescreen shift of its screen group).
   float box_x = 0, box_y = 0, box_w = 0, box_h = 0;
   // 4x textures + linear filtering.
   bool hd = true;
@@ -113,6 +113,29 @@ class EnemyModelView {
   virtual ~EnemyModelView() = default;
   // Called with no SpriteBatch pass open, once per frame while the Bestiary page shows a creature.
   virtual void draw(const render::Frame& frame, float vw, float vh, const EnemyModelSlot& slot) = 0;
+};
+
+// The Elements page's spell: the element cast in a battle of its own, drawn as its effects alone (no stage, no units) in a box of the
+// screen, again after each cast has ended.
+struct SpellViewSlot {
+  // Element id; 0 = none.
+  int element = 0;
+  // The character record that casts it (its owner for a tech).
+  int caster = 0;
+  // Window pixels of the PS1 screen point (0, 0) and of one PS1 pixel.
+  float origin_x = 0, origin_y = 0;
+  float unit_x = 1, unit_y = 1;
+  // The box the battle picture fills, PS1 px (with the widescreen shift of its screen group).
+  float box_x = 0, box_y = 0, box_w = 0, box_h = 0;
+  // Seconds since the previous draw.
+  float dt = 0;
+};
+
+class SpellView {
+ public:
+  virtual ~SpellView() = default;
+  // Called with no SpriteBatch pass open, once per frame while the Elements page shows a seen element.
+  virtual void draw(const render::Frame& frame, float vw, float vh, const SpellViewSlot& slot) = 0;
 };
 
 }  // namespace oc::ui

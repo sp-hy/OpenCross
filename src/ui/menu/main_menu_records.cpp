@@ -31,7 +31,6 @@ const Str6 kChoice = {{"A choice in a talk", "Un choix en parlant", "Una scelta 
 const Str6 kWithItem = {{"With", "Avec", "Con", "Mit", "Con", "もちもの："}};
 const Str6 kWithParty = {{"With in party", "Avec dans l'équipe", "Con in squadra", "Mit in der Gruppe", "Con en el grupo", "パーティー："}};
 const Str6 kAlone = {{"If another did not join", "Si un autre n'est pas venu", "Se un altro non si è unito", "Wenn ein anderer fehlt", "Si otro no se unió", "ほかがいないとき"}};
-const Str6 kHeld = {{"Held", "Possédés", "Posseduti", "Im Besitz", "En posesión", "しょじ"}};
 const Str6 kUsable = {{"Usable by", "Utilisable par", "Usabile da", "Nutzbar von", "Usable por", "つかえる"}};
 const Str6 kEveryone = {{"Everyone", "Tout le monde", "Tutti", "Alle", "Todos", "みんな"}};
 const Str6 kNoOne = {{"No one yet", "Personne encore", "Nessuno per ora", "Noch niemand", "Nadie aún", "まだいない"}};
@@ -55,23 +54,26 @@ void MainMenu::Impl::update_records(const Nav& nav) {
   const int before = rc_cur;
   if (nav.up) rc_cur = std::max(rc_cur - 1, 0);
   if (nav.down) rc_cur = std::min(rc_cur + 1, std::max(count - 1, 0));
-  if (nav.left) rc_cur = std::max(rc_cur - kRows, 0);
-  if (nav.right) rc_cur = std::min(rc_cur + kRows, std::max(count - 1, 0));
+  if (nav.left) rc_cur = std::max(rc_cur - rc_rows, 0);
+  if (nav.right) rc_cur = std::min(rc_cur + rc_rows, std::max(count - 1, 0));
   if (rc_cur != before) rc_part = 0, sfx(1);
-  scroll_to(rc_cur, rc_top, kRows);
+  scroll_to(rc_cur, rc_top, rc_rows);
   if (nav.cancel) leave_page(), sfx(6);
 }
 
-// The list in the roster panel (frame 141 at (8, 32), 17 rows 20 px apart): the number (right edge x 48), the name (from x 56, or from
-// x 26 for a row without a number, shrunk to fit before the tag), the tag right-aligned at x 230; the cursor and the scroll arrows; below
-// the panel the count line.
+// The list in the roster panel (frame 141 at (8, 32), rc_rows rows 20 px apart; cut to the Bestiary's height with its 12 rows): the
+// number (right edge x 48), the name (from x 56, or from x 26 for a row without a number, shrunk to fit before the tag), the tag
+// right-aligned at x 230; the cursor and the scroll arrows; the count line below the panel, or with 12 rows below the description panel
+// under it.
 void MainMenu::Impl::record_list(const std::vector<RecordRow>& rows, const std::u32string& count_line) {
   const int count = static_cast<int>(rows.size());
+  const bool short_list = rc_rows < kRows;
+  const float bottom = short_list ? 32 + kEnemyListH : 370.0f;
   group(Left);
-  Frame(141, 8, 32);
-  if (rc_top + kRows < count) scroll_arrow(237, 354, false);
+  Frame(141, 8, 32, kWhite, nullptr, nullptr, false, short_list ? kEnemyListH : 0.0f);
+  if (rc_top + rc_rows < count) scroll_arrow(237, bottom - 16, false);
   if (rc_top > 0) scroll_arrow(237, 50, true);
-  for (int row = 0; row < kRows && rc_top + row < count; ++row) {
+  for (int row = 0; row < rc_rows && rc_top + row < count; ++row) {
     const RecordRow& entry = rows[static_cast<size_t>(rc_top + row)];
     const float cap = 42.2f + 20.0f * static_cast<float>(row);
     float left = 56, room = 170.0f;
@@ -97,17 +99,23 @@ void MainMenu::Impl::record_list(const std::vector<RecordRow>& rows, const std::
     HL(left, cap, entry.name, entry.seen ? kText : kName, width < room ? 0.35f : 0.35f * room / width);
   }
   if (count > 0) tri(0, 42.0f + 20.0f * static_cast<float>(rc_cur - rc_top), true);
-  TPfit(24, 388, count_line, 208, kText, 0.8f);
+  TPfit(24, short_list ? bottom + 4 + lower_panel_h() + 6 : 388.0f, count_line, 208, kText, 0.8f);
 }
 
 // The short wait line while the scan runs.
 void MainMenu::Impl::records_wait(float x, float y) { TPfit(x, y, utf32(S6(kWait)), 220, kName, 0.8f); }
 
-// A line of the description panel (frame 0x3E at (246, 318)): the label at x 258 and the value at x 342, shrunk to fit.
-void MainMenu::Impl::panel_line(int line, const std::u32string& label, const std::u32string& value, u32 colour) {
-  const float y = 327.0f + 18.5f * static_cast<float>(line);
-  if (!label.empty()) TPfit(258, y, label, 78, kCap, 0.8f);
-  TPfit(label.empty() ? 258.0f : 342.0f, y, value, label.empty() ? 232.0f : 148.0f, colour, 0.8f);
+float MainMenu::Impl::lower_panel_h() {
+  Tex* shape = texs.hd() ? texs.shape(0x3E, lang, false) : nullptr;
+  return shape ? shape->h / 4.0f : 100.0f;
+}
+
+// A line of the description panel (frame 0x3E with its corner at (x, y), by default (246, 318)): the label 12 px in and the value 96 px
+// in, shrunk to fit; lines 18.5 px apart from 9 px down.
+void MainMenu::Impl::panel_line(int line, const std::u32string& label, const std::u32string& value, u32 colour, float x, float y) {
+  const float row_y = y + 9.0f + 18.5f * static_cast<float>(line);
+  if (!label.empty()) TPfit(x + 12, row_y, label, 78, kCap, 0.8f);
+  TPfit(label.empty() ? x + 12 : x + 96, row_y, value, label.empty() ? 232.0f : 148.0f, colour, 0.8f);
 }
 
 std::u32string MainMenu::Impl::area_list(const std::vector<std::string>& areas) {
@@ -127,7 +135,7 @@ bool MainMenu::Impl::character_seen(int character) const {
 void MainMenu::Impl::enter_characters() {
   rc_ids.clear();
   for (int character = 0; character < kCharacters; ++character) rc_ids.push_back(character);
-  rc_cur = rc_top = rc_part = 0;
+  rc_cur = rc_top = rc_part = 0, rc_rows = kRows;
 }
 
 // Left: the 44 characters by id ("???" until recruited in some save; tagged "Missed" once the chance is gone, "Closes soon" with hints),
@@ -206,7 +214,7 @@ void MainMenu::Impl::build_characters() {
   model_gear(character, gear);
   enemy_slot.weapon_part = gear.weapon_part;
   enemy_slot.silhouette = !seen_here;
-  enemy_slot.box_x = kBoxX, enemy_slot.box_y = kBoxY, enemy_slot.box_w = kBoxW, enemy_slot.box_h = kBoxH;
+  enemy_slot.box_x = kBoxX + gdx / xscale, enemy_slot.box_y = kBoxY, enemy_slot.box_w = kBoxW, enemy_slot.box_h = kBoxH;
   enemy_wanted = enemy_view != nullptr;
   Frame(7, kCardX, kCardY);
   if (slot.recruited(character)) {
@@ -241,13 +249,15 @@ void MainMenu::Impl::enter_elements() {
   rc_ids.clear();
   for (int id = 1; id <= kLastElement; ++id)
     if (rules && rules->elem(id) && !trim(import::u32_to_utf8(element_name(id))).empty()) rc_ids.push_back(id);
-  rc_cur = rc_top = rc_part = 0;
+  rc_cur = rc_top = rc_part = 0, rc_rows = kEnemyRows;
 }
 
-// Left: the elements by id with their colour symbol (while the symbols are on), "???" until held in some save, "Missed" for a one-off
-// no longer obtainable; the count of those seen. Right: the element's row plate with its name and the copies held (stock and the
-// recruited characters' grids), its level, reach and description, who of the recruited characters can place it; the panel: where it is
-// given (the scan's places, the element shops, enemies), with hints also for one never held.
+// Left: the elements by id in the Bestiary's 12-row list with their colour symbol (while the symbols are on), "???" until held in some
+// save, "Missed" for a one-off no longer obtainable; under it the description panel (frame 0x3E at (8, 294)): who of the recruited
+// characters can place it, then where it is given (the scan's places, the element shops, enemies), with hints also for one never held;
+// the count of those seen below. Right, at the bottom as on the Elements screen: the element's row plate at (275, 302) with its name and
+// the copies held (stock and the recruited characters' grids), and the description panel (frame 0x36 large at (253, 332)) with its
+// level, reach and description; the area above stays free.
 void MainMenu::Impl::build_elements() {
   const RecordsInfo* info = records_info;
   std::vector<RecordRow> rows;
@@ -271,14 +281,45 @@ void MainMenu::Impl::build_elements() {
   group(Right);
   const int id = rc_ids[static_cast<size_t>(rc_cur)];
   const bool seen_here = element_seen(id);
+  constexpr float kPlateY = 302, kPanelX = 8, kPanelY = 32 + kEnemyListH + 4;
+  // The spell's box: the roster panel's frame cut to the height above the plate and centred over the plate, the spell inside its lines.
+  constexpr float kBoxY = 36, kBoxH = kPlateY - 4 - kBoxY, kInset = 2, kPlateCentre = 275 + 92;
+  float box_w = 238, box_h = kBoxH;
+  if (Tex* shape = texs.hd() ? texs.shape(141, lang, false) : nullptr) box_w = shape->w / 4.0f;
+  const float box_x = kPlateCentre - 0.5f * box_w;
+  Frame(141, box_x, kBoxY, kWhite, &box_w, &box_h, false, kBoxH);
   if (seen_here) {
-    plate(0, id, 275, 42);
+    plate(0, id, 275, kPlateY);
     const std::u32string name = element_name(id);
     const float rel = fit_rel(name, 140, 0.9f);
-    TP(301.0f + (128.0f - twp(name, rel)) * 0.5f, 47, name, kText, rel);
-    TPfit(258, 78, utf32(S6(kHeld)), 100, kCap, 0.8f);
-    Count(453, 78, std::min(element_held(id), 99));
-    element_info(id, 260, 102, 138, 19.5f);
+    TP(301.0f + (128.0f - twp(name, rel)) * 0.5f, kPlateY + 5, name, kText, rel);
+    Count(453, kPlateY + 5, std::min(element_held(id), 99));
+    // The spell above the plate, cast by the first character who may hold it.
+    spell_slot = SpellViewSlot{};
+    spell_slot.element = id;
+    for (int character = 0; character < kCharacters; ++character)
+      if (gs->eligible(character, id)) {
+        spell_slot.caster = character;
+        break;
+      }
+    spell_slot.box_x = box_x + kInset + gdx / xscale, spell_slot.box_y = kBoxY + kInset;
+    spell_slot.box_w = box_w - 2 * kInset, spell_slot.box_h = std::min(box_h, kBoxH) - 2 * kInset;
+    spell_wanted = spell_view != nullptr;
+  } else {
+    empty_box(275, kPlateY);
+    TP(301.0f + (128.0f - twp(utf32("???"), 0.9f)) * 0.5f, kPlateY + 5, utf32("???"), kName, 0.9f);
+  }
+  Frame(0x36, 253, 332, kWhite, nullptr, nullptr, true);
+  // The JP disc puts the description 4 pixels higher.
+  if (seen_here) element_info(id, 260, 344, font_build(face_gn, import::Ps1Font::Build::Console) ? 380.0f : 384.0f, 19.5f);
+
+  group(Left);
+  Frame(0x3E, kPanelX, kPanelY);
+  auto line_at = [&](int line, const std::u32string& label, const std::u32string& value, u32 colour = kText) {
+    panel_line(line, label, value, colour, kPanelX, kPanelY);
+  };
+  int line = 0;
+  if (seen_here) {
     std::u32string users;
     int eligible = 0, recruited = 0;
     for (int character = 0; character < kCharacters; ++character) {
@@ -288,32 +329,27 @@ void MainMenu::Impl::build_elements() {
       ++eligible;
       users += (users.empty() ? U"" : U", ") + char_name(character);
     }
-    TPfit(258, 186, utf32(S6(kUsable)), 220, kCap, 0.8f);
-    TPfit(258, 205, eligible == 0 ? utf32(S6(kNoOne)) : eligible == recruited ? utf32(S6(kEveryone)) : users, 222, kText, 0.8f);
-  } else {
-    empty_box(275, 42);
-    TP(301.0f + (128.0f - twp(utf32("???"), 0.9f)) * 0.5f, 47, utf32("???"), kName, 0.9f);
+    line_at(line++, {}, utf32(S6(kUsable)), kCap);
+    line_at(line++, {}, eligible == 0 ? utf32(S6(kNoOne)) : eligible == recruited ? utf32(S6(kEveryone)) : users);
   }
-  Frame(0x3E, 246, 318);
   if (!info) {
-    panel_line(0, {}, utf32(S6(kWait)), kName);
+    line_at(line, {}, utf32(S6(kWait)), kName);
     return;
   }
   const auto found = info->elements.find(id);
   if (found == info->elements.end()) return;
   const GiveInfo& give = found->second;
-  int line = 0;
-  if (!seen_here && give_missed(*info, give, gs->slot)) panel_line(line++, {}, utf32(S6(kMissed)), kSel);
+  if (!seen_here && give_missed(*info, give, gs->slot)) line_at(line++, {}, utf32(S6(kMissed)), kSel);
   if (!seen_here && records_hints == kHintsOff) return;
-  if (!give.areas.empty()) panel_line(line++, utf32(S6(kWhere)), area_list(give.areas));
+  if (!give.areas.empty()) line_at(line++, utf32(S6(kWhere)), area_list(give.areas));
   std::u32string other;
   if (give.shop) other = utf32(S6(kShops));
   if (give.enemy) other += (other.empty() ? U"" : U", ") + utf32(S6(kEnemies));
-  if (!other.empty()) panel_line(line++, give.areas.empty() ? utf32(S6(kWhere)) : std::u32string(), other);
+  if (!other.empty() && line < 4) line_at(line++, give.areas.empty() ? utf32(S6(kWhere)) : std::u32string(), other);
   if (records_hints == kHintsFull && !seen_here && !give.repeatable && !give.shop && !give.enemy && !give.one_offs.empty()) {
     int last = 0;
     for (const GiveInfo::OneOff& one_off : give.one_offs) last = std::max(last, one_off.story_hi);
-    if (last < kStoryOpen && line < 4) panel_line(line++, utf32(S6(kUntil)), story_caption(last));
+    if (last < kStoryOpen && line < 4) line_at(line++, utf32(S6(kUntil)), story_caption(last));
   }
 }
 
@@ -326,7 +362,7 @@ void MainMenu::Impl::enter_key_items() {
   rc_ids.clear();
   for (int id = 1; id <= kLastKeyItem; ++id)
     if (!trim(import::u32_to_utf8(key_item_name(id))).empty()) rc_ids.push_back(id);
-  rc_cur = rc_top = rc_part = 0;
+  rc_cur = rc_top = rc_part = 0, rc_rows = kRows;
 }
 
 // Left: the key items by id, "???" until held in some save, "Missed" for one no longer obtainable; the count of those seen. Right: the
@@ -392,7 +428,7 @@ void MainMenu::Impl::build_key_items() {
 // ===================================================== Treasure page
 void MainMenu::Impl::enter_treasure() {
   rc_ids.clear();
-  rc_cur = rc_top = rc_part = 0;
+  rc_cur = rc_top = rc_part = 0, rc_rows = kRows;
 }
 
 // The areas fill in once the scan is ready; L1 / R1 turn the pages of the chosen area's treasure list (wrap, sfx 1).

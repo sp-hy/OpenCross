@@ -1,0 +1,44 @@
+# The Elements page of the OpenCross row ([Game] OpenCrossMenu, RecordsShowAll): the 12-row list with the usable-by / where panel under
+# it, the element's plate and description at the bottom right, and its spell above them. Aqua Beam (re_01: its battle loading, the box
+# black; re_02 / re_03: the cast; log "Serge casts Aqua Beam"), then Frog Prince, the first summon, three screens down (re_04 / re_05; log
+# "casts ... Frog Prince"), cast by the first character whose innate colour allows it.
+0 wait idle 600
+- tap triangle 1
+- wait menu open 200
+- wait 40
+- tap up
+- wait 10
+- tap up
+- wait 30
+- tap confirm
+- wait 30
+- tap confirm                         # Chronicle
+- wait 30
+- tap down
+- wait 10
+- tap down
+- wait 10
+- tap confirm                         # Elements
+- wait 10
+- screenshot re_01_loading.png
+- wait 240
+- screenshot re_02_aqua_beam.png
+- wait 240
+- screenshot re_03_aqua_beam.png
+- tap right
+- wait 6
+- tap right
+- wait 6
+- tap right
+- wait 600
+- screenshot re_04_frog_prince.png
+- wait 200
+- screenshot re_05_frog_prince.png
+- tap cancel
+- wait 30
+- tap cancel
+- wait 20
+- tap cancel
+- wait 20
+- tap cancel
+- wait menu closed 200

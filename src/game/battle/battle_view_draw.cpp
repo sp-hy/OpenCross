@@ -276,7 +276,7 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
   if (post_fx) ctx_->hold_depth();
 
   fx_draw_fog(frame, lb, true, sprites_resume);
-  if (stage_scene_.ready()) {
+  if (stage_scene_.ready() && preview_element_ == 0) {
     {
       // GTE depth cue of the stage objects (effects op 0x2D ramps it; the fog flag is set by ops 0x24 / 0x6C).
       render::StagePipeline::DepthCue cue;
@@ -287,14 +287,14 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
     stage_scene_.draw(stage_pipe_, frame, scissor, fx_view(), lb, alpha_, linear_filter_ < 0 ? hd_ : linear_filter_ != 0);
   }
   // Otherwise the stage objects depth-cue per packet (StageScene::set_depth_cue).
-  if (!stage_scene_.ready()) fx_draw_fog(frame, lb, false, sprites_resume);
+  if (!stage_scene_.ready() || preview_element_ > 0) fx_draw_fog(frame, lb, false, sprites_resume);
 
   meshes_->begin(frame, scissor);
   draw_units(vp, view);
   meshes_->end();
   if (post_fx) draw_post_fx(frame, lb, scissor, vp, view);
   // The stage's smoke / dust sheets.
-  stage_scene_.draw_sprites(frame, scissor, fx_view(), lb, alpha_);
+  if (preview_element_ == 0) stage_scene_.draw_sprites(frame, scissor, fx_view(), lb, alpha_);
   // Effect quads stay inside the draw area too.
   frame.set_scissor(scissor);
   fx_draw(frame, lb);
@@ -326,7 +326,7 @@ void BattleView::draw_units(const render::Mat4& vp, const render::Mat4& view) {
   for (int i = 0; i < battle::kUnits; ++i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    if (showcase_on_ || !unit.present || !visual.has_model || !visual.model->gpu) continue;
+    if (showcase_on_ || preview_element_ > 0 || !unit.present || !visual.has_model || !visual.model->gpu) continue;
     const float fade = lerp(visual.fade_prev, visual.fade, alpha_), flash = lerp(visual.flash_prev, visual.flash, alpha_);
     if (!unit.pc && fade <= 0.0f) continue;
     // unplaced_: a PC placed after a held intro.
@@ -462,7 +462,7 @@ void BattleView::draw_post_fx(const render::Frame& frame, const render::Letterbo
   for (int i = 0; i < battle::kUnits; ++i) {
     const Visual& visual = vis_[static_cast<size_t>(i)];
     // The units draw_units shows.
-    if (showcase_on_ || !bunit(i).present || !visual.has_model || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)]) continue;
+    if (showcase_on_ || preview_element_ > 0 || !bunit(i).present || !visual.has_model || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)]) continue;
     if ((!bunit(i).pc && lerp(visual.fade_prev, visual.fade, alpha_) <= 0.0f) || (ghosted(i) && !entry_shown_[static_cast<size_t>(i)])) continue;
     const effects::FxModel* om = fx_ && fx_->bespoke_models() && static_cast<size_t>(i) < fx_->bespoke_models()->units.size()
                                      ? &fx_->bespoke_models()->units[static_cast<size_t>(i)]

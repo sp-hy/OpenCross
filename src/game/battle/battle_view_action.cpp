@@ -80,6 +80,7 @@ void BattleView::update(float dt, const platform::Input& in) {
   // action at tick 2 would cut Serge's entry 8 while the model is still hidden, leaving him invisible for the whole fight.
   bool spawning = false;
   for (int i = 0; i < battle::kUnits; ++i) spawning = spawning || (bunit(i).present && vis_[static_cast<size_t>(i)].spawn && vis_[static_cast<size_t>(i)].vm.running());
+  if (preview_element_ > 0) preview_tick(busy || spawning, dt);
   // A Debug tab cast is dropped in a versus battle.
   if (versus_) dbg_.cast_element = 0, dbg_.weapon = -1;
   // Dev: a pending harness cast does not wait for a button on the scene's script windows.

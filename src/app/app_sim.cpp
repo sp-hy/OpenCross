@@ -69,6 +69,7 @@ void App::apply_art_mode() {
   files.set_hd_mode(hd);
   if (world_ok) world.set_art_mode(hd, mods_changed);
   if (battle_ready) battle.set_art_mode(hd, mods_changed);
+  spell_preview.set_art_mode(hd, mods_changed);
   if (results_ok) results.set_art_mode(hd, mods_changed);
   if (party_ok) party_screen.set_hd(hd);
   if (flow_ready) flow.set_art_mode(am);

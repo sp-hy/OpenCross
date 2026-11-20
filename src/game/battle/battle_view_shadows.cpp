@@ -59,7 +59,7 @@ void BattleView::collect_shadow_casters() {
   for (int i = 0; i < battle::kUnits; ++i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    if (showcase_on_ || !unit.present || !visual.has_model || !visual.model->gpu || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)] || (ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) || anm_hidden(i)) continue;
+    if (showcase_on_ || preview_element_ > 0 || !unit.present || !visual.has_model || !visual.model->gpu || fx_hidden_[static_cast<size_t>(i)] || unplaced_[static_cast<size_t>(i)] || (ghosted(i) && !entry_shown_[static_cast<size_t>(i)]) || anm_hidden(i)) continue;
     if (!unit.pc && lerp(visual.fade_prev, visual.fade, alpha_) <= 0.0f) continue;
     const effects::FxModel* om = fx_ && fx_->bespoke_models() && static_cast<size_t>(i) < fx_->bespoke_models()->units.size()
                                      ? &fx_->bespoke_models()->units[static_cast<size_t>(i)]

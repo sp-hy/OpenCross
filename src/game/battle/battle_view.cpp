@@ -52,13 +52,14 @@ BattleView::BattleView() = default;
 BattleView::~BattleView() { shutdown(); }
 
 bool BattleView::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites, render::MeshPipeline& meshes,
-                      const data::GameTables& tables, audio::Mixer* mixer) {
+                      const data::GameTables& tables, audio::Mixer* mixer, bool hud) {
   shutdown();
   ctx_ = &ctx;
   vfs_ = &vfs;
+  hud_assets_ = hud;
   // Enemy AI = the scene's battle script, found through the disc index:
   // slot 2 plans each enemy turn, slot 3 / 4 react to deaths / hits.
-  discs_.load(vfs);
+  if (hud) discs_.load(vfs);
   brain_.set_loader([this](int scene) { return vfs_->read(discs_.battle_script(1, scene)); });
   lang_tables_.init(&vfs);
   sprites_ = &sprites;
@@ -98,8 +99,8 @@ bool BattleView::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spri
   ps1_hud_ = !vfs.has_archive("hd");
   if (ps1_hud_) {
     text_.set_pixel_aspect(960.0f / 216.0f / 4.0f);
-    load_ps1_hud(vfs);
-  } else {
+    if (hud) load_ps1_hud(vfs);
+  } else if (hud) {
     if (!load_tex(win_base_, "hd/battle/shapes/battle-win4-large-base.png") || !load_tex(win_frame_, "hd/battle/shapes/battle-win4-large-frame.png"))
       log::warn("battle: HD panel PNGs missing, HD mode uses plain boxes");
     for (size_t i = 0; i < plates_.size(); ++i)
@@ -269,7 +270,7 @@ bool BattleView::begin_load(int scene_id, std::vector<battle::PartyMember> party
 // fonts - started by the host at title / first room load so the swirl and the white pay nothing. Idempotent; begin_load calls it again as the fallback.
 void BattleView::warm_up() {
   if (!ready_) return;
-  prefetch_fonts();
+  if (hud_assets_) prefetch_fonts();
   if (!fxlib_ready_ && !fxlib_job_.valid()) fxlib_job_ = std::async(std::launch::async, [this] { return fxlib_.init(*vfs_); });
 }
 
@@ -378,8 +379,10 @@ void BattleView::run_load_step(LoadJob& job) {
   bopt.enemy_tuning = opt.enemy_tuning;
   bopt.unnamed_kid_label = data::unnamed_kid_label(lang_);
   bopt.enemy_names.resize(tables_->enemies.size());
-  for (size_t i = 0; i < bopt.enemy_names.size(); ++i)
-    if (const std::string* text = lang_tables_.sysmes((0x19u << 16) | static_cast<u32>(i), lang_)) bopt.enemy_names[i] = *text;
+  // The enemies' names are only shown by the HUD.
+  if (hud_assets_)
+    for (size_t i = 0; i < bopt.enemy_names.size(); ++i)
+      if (const std::string* text = lang_tables_.sysmes((0x19u << 16) | static_cast<u32>(i), lang_)) bopt.enemy_names[i] = *text;
   // Dev: OC_DOPPLE_SLOTS sets the Dopplegang pool slots Big Catch picks from ("26,106"; "all" = all 256 bits, every save var 0x3E0..0x3FE 0xFFFF,
   // Big Catch skips bits past the 220-row table; "debug" = the debug list: every table row whose second halfword (`val`) is non-zero, pool bits ignored).
   if (const char* env = std::getenv("OC_DOPPLE_SLOTS")) {
@@ -582,6 +585,10 @@ void BattleView::run_load_step(LoadJob& job) {
   }
   // kFonts .. kFonts + 2: the HUD faces read by prefetch_fonts (kb_70, kt_70, the ch_100 command headline); one face per call (each builds its
   // first glyph atlas: ~10 ms in Release), retried on a later frame while the worker is still reading the file.
+  if (!hud_assets_) {
+    job.done = true;
+    return;
+  }
   const int face = job.step - kFonts;
   const int slot = face == 0 ? ui::font::kKb : face == 1 ? ui::font::kBattleJp : ui::font::kCh;
   if (!job.block && !fonts_.ready(slot)) {

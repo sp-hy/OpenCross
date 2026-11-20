@@ -37,6 +37,7 @@
 #include "game/autosave.h"
 #include "game/battle/battle_results.h"
 #include "game/battle/battle_view.h"
+#include "game/battle/spell_preview.h"
 #include "game/battle/texture_dump.h"
 #include "game/cheats.h"
 #include "game/achievements.h"
@@ -698,6 +699,8 @@ class App {
   game::FieldWorld world;
   bool world_ok = false;
   game::BattleView battle;
+  // The Elements page's spell, a battle view of its own.
+  game::SpellPreview spell_preview;
   // battle_ok: [Debug] Battle, the battle view runs alone; battle_ready: BattleView initialised (tables loaded); battle_in_field: a
   // field encounter is being fought.
   bool battle_ok = false;

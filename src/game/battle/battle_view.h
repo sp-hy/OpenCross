@@ -82,9 +82,9 @@ class BattleView {
   BattleView& operator=(const BattleView&) = delete;
 
   // `tables` and `mixer` (optional) must outlive the view. The mixer plays the battle theme (when the field did not keep its music)
-  // and the sound effects.
+  // and the sound effects. hud = false (the spell preview): no battle scripts, HUD art or HUD fonts are read.
   bool init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::SpriteBatch& sprites, render::MeshPipeline& meshes,
-            const data::GameTables& tables, audio::Mixer* mixer = nullptr);
+            const data::GameTables& tables, audio::Mixer* mixer = nullptr, bool hud = true);
   // Waits for the GPU; also called by the destructor.
   void shutdown();
 
@@ -238,6 +238,16 @@ class BattleView {
   void set_debug(const Debug& debug) { dbg_ = debug; }
   // [Debug] Showcase: the next start() puts every playable character on the stage in its battle stance and hides the battle's units.
   void set_showcase(bool on) { showcase_on_ = on; }
+  // The OpenCross menu's spell view (battle_view_preview.cpp). set_preview(element) before start(): the battle runs without its script,
+  // both sides invincible, the lead PC casts `element` as soon as the view ticks and again kPreviewGap seconds after each cast has ended;
+  // the units, their shadows, the stage and the HUD are not drawn. 0 = an ordinary battle.
+  void set_preview(int element);
+  // A preview battle that is not presenting a cast takes `element` for its next cast, which starts at once; false (nothing changed) while
+  // a cast is running.
+  bool preview_recast(int element);
+  // The window rectangle `rect`: black, and with `scene` the effects of the preview battle, drawn in a target of the rectangle's size
+  // (nothing reaches outside it) whose rows the battle picture fills, its column 160 at the centre.
+  void draw_preview(const render::Frame& frame, const render::Rect& rect, bool scene);
   const Debug& debug() const { return dbg_; }
   // Effect state for tools / tests.
   bool fx_active() const { return fx_ != nullptr; }
@@ -533,6 +543,14 @@ class BattleView {
   void draw_units(const render::Mat4& view_proj, const render::Mat4& view);
   bool showcase_on_ = false;
   std::vector<ShowcaseModel> showcase_;
+  // spell preview (battle_view_preview.cpp): the element cast again and again, the seconds since the last cast ended.
+  static constexpr float kPreviewGap = 1.0f;
+  bool hud_assets_ = true;
+  int preview_element_ = 0;
+  float preview_wait_ = 0;
+  bool preview_busy_ = true;
+  render::RenderTarget preview_rt_;
+  void preview_tick(bool busy, float dt);
   void apply_camera(float alpha);
   // The command-menu orbit around party slot `pc` at this tick.
   CamPose orbit_pose(int pc) const;

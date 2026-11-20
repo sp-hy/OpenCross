@@ -798,7 +798,8 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
   };
   const bool with_status = model_view && model_wanted && (screen == MenuScreen::Status || screen == MenuScreen::OcPage);
   const bool with_enemy = enemy_view && enemy_wanted && screen == MenuScreen::OcPage;
-  const bool with_model = with_status || with_enemy;
+  const bool with_spell = spell_view && spell_wanted && screen == MenuScreen::OcPage;
+  const bool with_model = with_status || with_enemy || with_spell;
   const size_t split = with_model ? std::min(model_layer, cmds.size()) : cmds.size();
   sprites->begin(frame, vw, vh, resume);
   sprites->draw(texs.white_set(), 0, 0, vw, vh, 0, 0, 1, 1, rgb(0, 0, 0, 255));
@@ -817,6 +818,13 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
     dt = std::min(dt, 0.1f);
     float origin_x = ox, origin_y = oy * flat, unit_x = xscale * zoom, unit_y = PY(1) * zoom * flat;
     auto draw_model = [&](const render::Frame& out, float out_w, float out_h) {
+      if (with_spell) {
+        SpellViewSlot slot = spell_slot;
+        slot.origin_x = origin_x, slot.origin_y = origin_y, slot.unit_x = unit_x, slot.unit_y = unit_y;
+        slot.dt = dt;
+        spell_view->draw(out, out_w, out_h, slot);
+        return;
+      }
       if (with_enemy) {
         EnemyModelSlot slot = enemy_slot;
         slot.origin_x = origin_x, slot.origin_y = origin_y, slot.unit_x = unit_x, slot.unit_y = unit_y;
@@ -865,7 +873,7 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
       draw_model(out, window->vw, window->vh);
       out.set_scissor(out.full());
       if (!lowres.begin(out, window->display, text, frame, vw, vh)) {
-        model_wanted = enemy_wanted = false;
+        model_wanted = enemy_wanted = spell_wanted = false;
         text->set_pixel_aspect(old_aspect);
         return;
       }
@@ -886,7 +894,7 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
     for (const AuditBox& box : audit_boxes)
       text->audit_obstacle(ox + box.x * zoom, (oy + box.y * zoom) * flat, box.w * zoom, box.h * zoom * flat, box.label);
   }
-  model_wanted = enemy_wanted = false;
+  model_wanted = enemy_wanted = spell_wanted = false;
   text->set_pixel_aspect(old_aspect);
 }
 

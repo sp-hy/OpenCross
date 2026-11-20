@@ -383,6 +383,7 @@ void MainMenu::set_grid_presets(save::Collection* collection, std::function<void
   impl_->preset_changed = std::move(changed);
 }
 void MainMenu::set_enemy_view(EnemyModelView* view) { impl_->enemy_view = view; }
+void MainMenu::set_spell_view(SpellView* view) { impl_->spell_view = view; }
 void MainMenu::set_enemy_order(const data::BestiaryOrder* order) { impl_->enemy_order = order; }
 void MainMenu::set_records_info(const RecordsInfo* info) { impl_->records_info = info; }
 void MainMenu::set_records_hints(int level) { impl_->records_hints = level; }

@@ -465,9 +465,7 @@ void MainMenu::Impl::build_enemies() {
   const int count = static_cast<int>(en_order.size());
   // Left column: the list cut to its rows, the loot panel under it, the button hints under that.
   constexpr float kLootX = 8, kLootY = 32 + kEnemyListH + 4;
-  float loot_h = 100;
-  if (Tex* shape = texs.hd() ? texs.shape(0x3E, lang, false) : nullptr) loot_h = shape->h / 4.0f;
-  const float hint_y = kLootY + loot_h + 6;
+  const float hint_y = kLootY + lower_panel_h() + 6;
   group(Left);
   Frame(141, 8, 32, kWhite, nullptr, nullptr, false, kEnemyListH);
   if (!enemy_order) {
@@ -519,7 +517,7 @@ void MainMenu::Impl::build_enemies() {
     enemy_slot.weapon_part = gear ? gear->tier() & 0x7F : 0;
   }
   enemy_slot.silhouette = !met;
-  enemy_slot.box_x = kBoxX, enemy_slot.box_y = kBoxY, enemy_slot.box_w = kBoxW, enemy_slot.box_h = kBoxH;
+  enemy_slot.box_x = kBoxX + gdx / xscale, enemy_slot.box_y = kBoxY, enemy_slot.box_w = kBoxW, enemy_slot.box_h = kBoxH;
   enemy_wanted = enemy_view != nullptr;
   if (entry.records.size() > 1) {
     const std::string shown = std::to_string(en_variant + 1) + "/" + std::to_string(entry.records.size());

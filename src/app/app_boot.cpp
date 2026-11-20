@@ -482,6 +482,10 @@ void App::init_menus() {
       // A rotating 3D member on the Status screen, the creature of the Bestiary page.
       menu.set_model_view(&status_model);
       menu.set_enemy_view(&enemy_models);
+      spell_preview.configure(ctx, files, sprites, meshes, tables);
+      spell_preview.set_art_mode(platform::art_is_hd(config.art_mode), false);
+      spell_preview.set_language(lang);
+      menu.set_spell_view(&spell_preview);
       menu.set_collection(&collection);
       menu.set_rules(&flow.machine().rules());
       menu.set_custom_names(&flow.machine().custom_names());

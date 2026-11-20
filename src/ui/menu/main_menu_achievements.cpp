@@ -74,7 +74,7 @@ void MainMenu::Impl::filter_achievement_list() {
 
 void MainMenu::Impl::enter_achievements() {
   ach_filter = 0;
-  rc_cur = rc_top = rc_part = 0;
+  rc_cur = rc_top = rc_part = 0, rc_rows = kRows;
   filter_achievement_list();
 }
 

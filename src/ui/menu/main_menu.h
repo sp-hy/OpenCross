@@ -94,6 +94,8 @@ class MainMenu {
   void set_grid_presets(save::Collection* collection, std::function<void()> changed);
   // The Bestiary page's battle model (optional; without it the page draws none). Must outlive the menu.
   void set_enemy_view(EnemyModelView* view);
+  // The Elements page's spell (optional; without it the page leaves its box empty). Must outlive the menu.
+  void set_spell_view(SpellView* view);
   // What the Characters, Elements, Key items and Treasure pages know from the room-script scan; null while it runs (the pages that need it
   // show a wait line). Must outlive the menu or be replaced.
   void set_records_info(const RecordsInfo* info);

@@ -634,6 +634,7 @@ struct MainMenu::Impl {
   const save::Collection* collection = nullptr;
   bool records_show_all = false;
   EnemyModelView* enemy_view = nullptr;
+  SpellView* spell_view = nullptr;
   // The Bestiary page's numbers and places (the scan service's); null until the scan has finished.
   const data::BestiaryOrder* enemy_order = nullptr;
   // The row's groups, in list order: a group of one page opens that page. A group's label is its entry in the group list.
@@ -716,6 +717,9 @@ struct MainMenu::Impl {
   // The creature model of this frame's page (draw_view draws it when enemy_wanted).
   EnemyModelSlot enemy_slot;
   bool enemy_wanted = false;
+  // The Elements page's spell of this frame (draw_view draws it when spell_wanted).
+  SpellViewSlot spell_slot;
+  bool spell_wanted = false;
   bool enemy_met(int monster) const;
   bool enemy_beaten(int monster) const;
   bool enemy_looted(int monster, int slot) const;
@@ -737,11 +741,12 @@ struct MainMenu::Impl {
 
   // ---- Characters, Elements, Key items and Treasure pages (main_menu_records.cpp). records_info: the scan's knowledge, null while the
   // scan runs; records_hints: the Hints setting (0 off, 1 hints, 2 full). rc_ids: the page's entries in list order (character, element,
-  // key item ids; area indices); rc_cur / rc_top: cursor and first visible row; rc_part: the page of the Treasure page's right list.
+  // key item ids; area indices); rc_cur / rc_top: cursor and first visible row; rc_part: the page of the Treasure page's right list;
+  // rc_rows: the list's rows (17, or the Bestiary's 12 on a page with its panel under the list).
   const RecordsInfo* records_info = nullptr;
   int records_hints = 0;
   std::vector<int> rc_ids;
-  int rc_cur = 0, rc_top = 0, rc_part = 0;
+  int rc_cur = 0, rc_top = 0, rc_part = 0, rc_rows = 17;
   static constexpr int kTreasureRows = 13;
   // One row of a page's list: its number, the name or "???", the dim colour unless seen, a colour symbol (-1 none) and a tag.
   struct RecordRow {
@@ -755,7 +760,9 @@ struct MainMenu::Impl {
   void update_records(const Nav& nav);
   void record_list(const std::vector<RecordRow>& rows, const std::u32string& count_line);
   void records_wait(float x, float y);
-  void panel_line(int line, const std::u32string& label, const std::u32string& value, u32 colour = kText);
+  void panel_line(int line, const std::u32string& label, const std::u32string& value, u32 colour = kText, float x = 246, float y = 318);
+  // The height of the description panel (frame 0x3E).
+  float lower_panel_h();
   std::u32string area_list(const std::vector<std::string>& areas);
   std::u32string story_caption(int story);
   bool character_seen(int character) const;
