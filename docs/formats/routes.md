@@ -224,6 +224,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `battle active\|inactive` | A battle is / is not active. |
 | `battle events <tokens...>` | The battle view's route events (`w<msg>` = script window opened, `a` = action began) start with exactly those tokens. |
 | `battle menu <slot\|-> <guards>` | The party slot whose top command menu is up and has taken over from the menu entry (`-` = none, or the window still opening), then one digit per party slot: 1 = the unit holds Defend's guard. Example: `battle menu 1 100`. |
+| `battle hitbox <shown> <cursor> <waiting> <stamina>` | The HIT% box of the PC whose menu is up: 1 when it is drawn (also during the run-up and the hits it starts), else 0; its cursor row (0..2 the strengths, 3 Element); the strength picks waiting for the running hit; that PC's stamina. `- - - -` without a menu PC. Example: `battle hitbox 1 0 2 50`. |
 | `battle facing <yaw> <yaw> <yaw>` | The yaw each party slot's model shows (12 bit, 4096 = 360 deg), `-` for an empty slot. Example: `battle facing 1258 1024 1024`. |
 | `battle plate [word]` | The last versus battle ended on its outcome plate; with a word, that plate (`Victory`, `Defeat`, `Draw`, `No result`). |
 | `battle camera orbit <slot>\|shot\|target\|hold` | What drove the battle camera on the last tick: the menu orbit round that party slot, a camera shot or timeline, a target-selection glide, or nothing (the pose stays). |

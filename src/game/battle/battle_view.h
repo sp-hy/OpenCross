@@ -303,6 +303,8 @@ class BattleView {
   // Route vocabulary (`assert battle menu`): the party slot whose top command menu is up ("-" = none), a space, then one digit per party
   // slot, 1 = the unit holds Defend's guard.
   std::string route_menu() const;
+  // "<shown> <cursor> <waiting> <stamina>": the HIT% box (1 = drawn), its cursor row, the picks waiting for the running hit and the menu PC's stamina.
+  std::string route_hit_box() const;
   // Route vocabulary (`assert battle facing`): the yaw each party slot's model shows (12 bit, 4096 = 360 deg), "-" = no unit.
   std::string route_facing() const;
   // The host shows the btlexit results screen (BattleResults) after a victory: the view finishes right after the victory pose /
@@ -580,7 +582,13 @@ class BattleView {
   void begin_disengage(bool approach_shot = false);
   // Leaving the HIT% menu, also while the PC still runs up to the target: Cross (pass 0) or a switch key (+1 next / -1 previous PC).
   void leave_hit_menu(int pass);
-  void chain_pick(int strength);
+  // One hit of the HIT% menu from where the PC stands; false when it is dropped (the stamina cannot start it).
+  bool chain_pick(int strength);
+  // The HIT% box's buttons, in the menu and while the run-up or a picked hit runs (hit_box_).
+  void hit_box_input(bool ok, bool cancel, int vdir, int hit_pass);
+  // Starts the oldest waiting HIT% pick the stamina can start; false when none is left.
+  bool start_waiting_hit();
+  bool hit_box_shown() const { return active_pc_ >= 0 && (ui_ == Ui::Chain || (ui_ == Ui::Wait && hit_box_)); }
   size_t hit_end(size_t first) const;
   void start_hit();
   void start_return();
@@ -1164,6 +1172,12 @@ class BattleView {
   int top_cursor_ = 0, chain_cursor_ = 0, cell_ = 0, target_cursor_ = 0;
   // The HIT% visit's stamina budget (Battle::hit_budget), taken while the top menu runs; each accepted strength pick takes its cost.
   int hit_budget_ = 0;
+  // The HIT% box stays up from the target confirm through the run-up and every hit it starts, while the menu waits (Ui::Wait): it is drawn
+  // and its cursor moves. A strength pick taken while a hit runs waits in hit_queue_ (at most kHitQueue picks) and starts when that hit's
+  // action ends; the waiting picks are dropped when the PC's turn ends first.
+  static constexpr size_t kHitQueue = 4;
+  bool hit_box_ = false;
+  std::vector<int> hit_queue_;
   // Leaving the HIT% menu: the PC the top menu reopens on once the leaving PC is home (-1 = menu_pc_after); pass_switch_ = it was a switch
   // key, so the menu entry starts again with SFX 0x16.
   int pass_pc_ = -1;

@@ -132,6 +132,7 @@ namespace oc::game {
 //   battle_camera() -> what drives the battle camera ("orbit <slot>", "shot", "target", "hold"), "" = no battle view;
 //   battle_menu() -> "<slot> <guards>": the party slot whose top command menu is up ("-" none), one digit per slot (1 = guarding);
 //   battle_facing() -> "<yaw> <yaw> <yaw>": the yaw each party slot's model shows (4096/turn), "-" = no unit;
+//   battle_hit_box() -> "<shown> <cursor> <waiting> <stamina>": the HIT% box drawn (1 / 0), its cursor row, the picks waiting, the menu PC's stamina;
 //   battle_sig() -> battle state summary (scene, unit HP / KO / outcome), "" = no battle;
 //   char_stat(char, 0 current HP | 1 max HP | 2 status bits) -> value, -1 = none; set_char_stat is the debug write of the same.
 struct RouteState {
@@ -221,6 +222,7 @@ struct RouteState {
   std::function<std::string()> battle_camera;
   std::function<std::string()> battle_menu;
   std::function<std::string()> battle_facing;
+  std::function<std::string()> battle_hit_box;
   // The word of the outcome plate the last versus battle showed ("" = none).
   std::function<std::string()> battle_plate;
   std::function<std::string()> battle_sig;

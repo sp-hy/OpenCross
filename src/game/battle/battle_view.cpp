@@ -141,6 +141,8 @@ void BattleView::unload_scene() {
   pass_pc_ = -1;
   pass_switch_ = false;
   hit_budget_ = 0;
+  hit_box_ = false;
+  hit_queue_.clear();
   menu_face_ui_ = Ui::Intro;
   menu_face_pc_ = tgt_face_unit_ = -2;
   last_actor_ = -1;

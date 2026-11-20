@@ -3,7 +3,7 @@
 # leave keys already work while the PC runs up to the target.
 0 wait 30
 - tap confirm                         # skip the intro shots
-- wait 72
+- wait 74
 - assert battle menu 0 000
 - tap confirm                         # Serge: Attack
 - wait 20

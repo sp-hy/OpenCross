@@ -945,6 +945,12 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
       const std::string got = st.battle_menu ? st.battle_menu() : std::string();
       if (got != want) return bad("battle menu is '" + got + "', expected '" + want + "'");
+    } else if (args[1] == "battle" && args[2] == "hitbox") {
+      // assert battle hitbox <shown> <cursor> <waiting> <stamina>: the HIT% box of the menu PC
+      std::string want;
+      for (size_t i = 3; i < args.size(); ++i) want += (i > 3 ? " " : "") + args[i];
+      const std::string got = st.battle_hit_box ? st.battle_hit_box() : std::string();
+      if (got != want) return bad("battle hit box is '" + got + "', expected '" + want + "'");
     } else if (args[1] == "battle" && args[2] == "facing") {
       // assert battle facing <yaw|-> x3: the yaw each party slot's model shows
       std::string want;

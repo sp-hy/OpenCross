@@ -1,0 +1,33 @@
+# HIT% box from the target confirm: drawn and its cursor live through the run-up and the hits; a strength pick during the run-up is
+# dropped; picks made while a hit runs wait and start one after the other; Cross waits for the last waiting hit to end.
+0 wait 30
+- tap confirm                         # skip the intro shots
+- wait 74
+- assert battle menu 0 000
+- tap confirm                         # Serge: Attack
+- wait 20
+- tap confirm                         # target -> Serge runs up, the HIT% box is up at once
+- assert battle hitbox 1 0 0 70
+- tap down                            # the cursor moves during the run-up
+- assert battle hitbox 1 1 0 70
+- tap confirm                         # a pick during the run-up is dropped
+- tap up
+- wait 150
+- assert battle hitbox 1 0 0 70       # arrived, no hit ran
+- tap confirm                         # weak hit
+- assert battle hitbox 1 0 0 60
+- tap confirm                         # two more weak picks wait for it
+- tap confirm
+- assert battle hitbox 1 0 2 60
+- tap cancel                          # Cross is dropped while hits run or wait
+- tap down
+- assert battle hitbox 1 1 2 60
+- tap up
+- wait 300
+- assert battle hitbox 1 0 0 40       # the waiting picks ran one after the other
+- assert battle events a a a
+- assert battle menu - 000
+- tap cancel                          # now Cross leaves: Serge hops home, his top menu again
+- wait 120
+- assert battle menu 0 000
+- quit

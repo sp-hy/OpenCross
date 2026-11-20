@@ -220,10 +220,10 @@ void BattleView::update(float dt, const platform::Input& in) {
       } else if (ui_ == Ui::Wait && engaged_ && active_pc_ >= 0) {
         sync_shown();
         const bool more = can_act(active_pc_) && bunit(engaged_target_).standing() && !engaged_after_cast_;
-        if (more) {
+        // A pick that waited for the hit's end starts on the tick the hit's action ends; with none the menu takes the buttons again.
+        if (more && !start_waiting_hit()) {
           ui_ = Ui::Chain;
-          chain_auto_cursor();
-        } else {
+        } else if (!more) {
           engaged_after_cast_ = false;
           begin_disengage();
         }
@@ -231,6 +231,7 @@ void BattleView::update(float dt, const platform::Input& in) {
         // Op AF: no command menu opens while the script lock is set (evt409 locks it until its first message is read).
       } else if (ui_ == Ui::Wait) {
         ui_ = Ui::Top;
+        hit_box_ = false;
         top_cursor_ = 0;
         sync_shown();
         // The top menu reopens on the PC that attacked while it can still act - after its chain ends, an enemy turn in between or the
@@ -330,6 +331,10 @@ void BattleView::begin_engage(int pc, int target) {
     begin_move(pc, visual.x + dx / length * dist, visual.z + dz / length * dist, 30, false);
   }
   ui_ = Ui::Wait;
+  // The HIT% box is up from the confirm; Accuracy Selection = Auto puts its cursor at the confirm and at each hit's start.
+  hit_box_ = true;
+  hit_queue_.clear();
+  chain_auto_cursor();
 }
 
 // The way home ends the camera's tasks first; a cancelled HIT% menu then starts the approach shot again for the hop, any other end of the turn
@@ -339,6 +344,8 @@ void BattleView::begin_disengage(bool approach_shot) {
   const bool was_engaged = engaged_;
   engaged_ = false;
   engage_arrive_ = false;
+  hit_box_ = false;
+  hit_queue_.clear();
   if (pc < 0 || !act_.ev.empty() || act_.phase != Act::Phase::None) return;
   if (was_engaged) {
     end_camera_tasks();
@@ -369,15 +376,29 @@ void BattleView::leave_hit_menu(int pass) {
 }
 
 // A pick of the percentage menu: one hit at once, from where the PC stands. A hit the stamina cannot start (a PC without stamina cost whose
-// stamina is below the hit's unfatigued cost) is dropped and the menu stays open.
-void BattleView::chain_pick(int strength) {
+// stamina is below the hit's unfatigued cost) is dropped and the menu stays open. The box stays up while the hit runs, unless the hit
+// leaves the stamina below 10, which ends the visit.
+bool BattleView::chain_pick(int strength) {
   battle::Command cmd;
   cmd.kind = battle::Command::Kind::Attack;
   cmd.actor = active_pc_;
   cmd.target = engaged_target_;
   cmd.chain = {strength};
-  if (!validate_command(cmd)) return;
+  if (!validate_command(cmd)) return false;
   execute(cmd);
+  if (ui_ != Ui::Wait) return false;
+  hit_box_ = bunit(active_pc_).stamina >= 10;
+  chain_auto_cursor();
+  return true;
+}
+
+bool BattleView::start_waiting_hit() {
+  while (!hit_queue_.empty()) {
+    const int strength = hit_queue_.front();
+    hit_queue_.erase(hit_queue_.begin());
+    if (chain_pick(strength)) return true;
+  }
+  return false;
 }
 
 void BattleView::execute(const battle::Command& cmd) {
@@ -547,6 +568,11 @@ std::string BattleView::route_menu() const {
   out += ' ';
   for (int i = 0; i < battle::kPcSlots; ++i) out += battle_ && bunit(i).guard ? '1' : '0';
   return out;
+}
+
+std::string BattleView::route_hit_box() const {
+  if (!battle_ || !battle::is_pc_slot(active_pc_)) return "- - - -";
+  return std::format("{} {} {} {}", hit_box_shown() ? 1 : 0, chain_cursor_, hit_queue_.size(), bunit(active_pc_).stamina);
 }
 
 std::string BattleView::route_facing() const {

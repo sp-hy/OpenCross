@@ -791,6 +791,56 @@ void BattleView::auto_chain() {
   chain_pick(hit_level);
 }
 
+// The HIT% box: 1 / 2 / 3 hit (percentages) + Element, from the target confirm on. Up / Down move the cursor at any time. While the PC runs
+// up to the target a strength pick or the Element row is dropped, and the leave keys work: Cross keeps the menu on this PC with its window
+// still open (no new entry), Right / R1 and Left / L1 pass it to the next / previous PC that can act once the PC is home. While a hit runs
+// or picks wait, a strength pick the visit's budget pays is taken at the press (its sound, the budget spent) and waits for the running
+// hit's end, up to kHitQueue waiting picks (one more is dropped in silence); the leave keys and an Element row that is not dim are dropped.
+void BattleView::hit_box_input(bool ok, bool cancel, int vdir, int hit_pass) {
+  const battle::Unit& unit = bunit(active_pc_);
+  const bool run_up = ui_ == Ui::Wait && engage_arrive_;
+  const bool hit_running = (ui_ == Ui::Wait && !run_up) || !hit_queue_.empty();
+  chain_cursor_ = ((chain_cursor_ + vdir) % 4 + 4) % 4;
+  if (vdir != 0) audio_.play_menu(1);
+  if (cancel || hit_pass != 0) {
+    if (!hit_running) leave_hit_menu(cancel ? 0 : hit_pass);
+    return;
+  }
+  if (!ok || run_up) return;
+  if (chain_cursor_ == 3) {
+    if (hit_running) {
+      if (unit.gauge < 0 || unit.stamina <= 0 || elem_open_level(unit, tables_->elements.size()) < 0) audio_.play_menu(0x18);
+      return;
+    }
+    open_element_menu_now();
+    const int first = elem_open_cell(unit, tables_->elements.size());
+    // Dim row: nothing selectable.
+    if (first < 0 || unit.stamina <= 0) {
+      audio_.play_menu(0x18);
+      return;
+    }
+    audio_.play_menu(8);
+    pending_cmd_ = {};
+    pending_cmd_.actor = active_pc_;
+    pending_cmd_.kind = battle::Command::Kind::Element;
+    cell_ = first;
+    hit_box_ = false;
+    ui_ = Ui::Element;
+    return;
+  }
+  if (hit_running && hit_queue_.size() >= kHitQueue) return;
+  const int cost = battle_->chain_cost(chain_cursor_, unit);
+  if (cost > hit_budget_) {
+    audio_.play_menu(0x18);
+    return;
+  }
+  // A hit row plays SFX 0x27 - row.
+  audio_.play_menu(0x27 - chain_cursor_);
+  hit_budget_ -= cost;
+  if (hit_running) hit_queue_.push_back(chain_cursor_);
+  else chain_pick(chain_cursor_);
+}
+
 void BattleView::handle_input(const platform::Input& in) {
   auto key = [&](int scancode) { return in.key_pressed[static_cast<size_t>(scancode)]; };
   auto pad = [&](int button) { return in.pad_pressed[static_cast<size_t>(button)]; };
@@ -842,10 +892,9 @@ void BattleView::handle_input(const platform::Input& in) {
   // The HIT% menu's leave keys: Cross, and Right / R1 and Left / L1 to pass the menu to the next / previous PC that can act.
   const int hit_pass = (act(Action::SelectRight) || pad(SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) || right ? 1 : 0) -
                        (act(Action::SelectLeft) || pad(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) || left ? 1 : 0);
-  // The HIT% menu is up from the target confirm: while the PC runs up to the target the leave keys already work; a strength pick or the
-  // Element row waits for the arrival, so one pressed now is dropped.
-  if (ui_ == Ui::Wait && engage_arrive_ && act_.phase == Act::Phase::Approach && act_.ev.empty() && !auto_) {
-    if (cancel || hit_pass != 0) leave_hit_menu(cancel ? 0 : hit_pass);
+  // The HIT% box is up from the target confirm, through the run-up and the hits it starts.
+  if (ui_ == Ui::Wait && hit_box_ && !auto_ && active_pc_ >= 0) {
+    hit_box_input(ok, cancel, (down ? 1 : 0) - (up ? 1 : 0), hit_pass);
     return;
   }
   if (ui_ == Ui::Wait) return;
@@ -1076,41 +1125,10 @@ void BattleView::handle_input(const platform::Input& in) {
       }
       break;
     }
-    // 1 / 2 / 3 hit (percentages) + Element, with the PC standing at the enemy; each pick executes at once.
-    case Ui::Chain: {
-      step(chain_cursor_, 4, vdir);
-      if (vdir != 0) audio_.play_menu(1);
-      // Leave: the PC returns under the approach shot, back to the command menu. Cross keeps the menu on this PC with its window still
-      // open (no new entry); Right / R1 and Left / L1 pass it to the next / previous PC that can act once the PC is home.
-      if (cancel || hit_pass != 0) {
-        leave_hit_menu(cancel ? 0 : hit_pass);
-        break;
-      }
-      if (!ok) break;
-      if (chain_cursor_ == 3) {
-        open_element_menu_now();
-        const int first = elem_open_cell(unit, tables_->elements.size());
-        // Dim row: nothing selectable.
-        if (first < 0 || unit.stamina <= 0) {
-          audio_.play_menu(0x18);
-          break;
-        }
-        audio_.play_menu(8);
-        pending_cmd_ = {};
-        pending_cmd_.actor = active_pc_;
-        pending_cmd_.kind = battle::Command::Kind::Element;
-        cell_ = first;
-        ui_ = Ui::Element;
-      } else if (const int cost = battle_->chain_cost(chain_cursor_, unit); cost <= hit_budget_) {
-        // A hit row plays SFX 0x27 - row.
-        audio_.play_menu(0x27 - chain_cursor_);
-        hit_budget_ -= cost;
-        chain_pick(chain_cursor_);
-      } else {
-        audio_.play_menu(0x18);
-      }
+    // The HIT% box with the PC standing at the enemy and no hit running: a pick starts at once.
+    case Ui::Chain:
+      hit_box_input(ok, cancel, vdir, hit_pass);
       break;
-    }
     case Ui::Element: {
       // The plates are sliding: no input.
       if (!elem_slide_step(cell_ / data::kGridCols)) break;
@@ -1446,14 +1464,14 @@ void BattleView::build_command_ui() {
   if (active_pc_ >= 0 && ui_ == Ui::Dopple) build_dopple_ui();
   if (active_pc_ >= 0 && ui_ == Ui::Swap) build_swap_ui();
   build_entry_outline();
-  if (active_pc_ < 0 || !(ui_ == Ui::Top || ui_ == Ui::Chain || ui_ == Ui::Element || ui_ == Ui::Target)) return;
+  if (active_pc_ < 0 || !(ui_ == Ui::Top || hit_box_shown() || ui_ == Ui::Element || ui_ == Ui::Target)) return;
   const battle::Unit& unit = bunit(active_pc_);
   // Command window (white-bordered black box at PS1 (28, 177), 68 x 54; rows 11 px apart, the animated red diamond cursor left of the row).
   // The box is the PS1's own line box in both art modes. Top: Attack / Element / Defend / Run Away (sheet 0x04 g1..4,
   // XLAT 0x10002 -> style 2, gn_70 x 0.425). Engaged (the PC stands at its target): "1-(92%)" "2-(79%)" "3-(69%)" + Element, with the "HIT%"
   // caption; a strength the stamina cannot pay is dimmed.
   const size_t cmd0 = op_count();
-  if (menu_live() || ui_ == Ui::Chain) {
+  if (menu_live() || hit_box_shown()) {
     // A pickable level exists (used cells count).
     const bool any_element = elem_open_level(unit, tables_->elements.size()) >= 0;
     // Row colours (PS1 colour words 0x808080 white / 0x8080 yellow / 0x404040 dim, remapped for the HD text):
@@ -1528,9 +1546,9 @@ void BattleView::build_command_ui() {
       // start one pixel below the line, the Japanese glyphs on it).
       btext(cmd_flags, label, 44, ps1_hud_ ? row_y - (jp ? 0.0f : 1.0f) : yl, remap_text_colour(row_colour) & mask);
     }
-    if (ui_ == Ui::Chain && ps1_hud_) {
+    if (hit_box_shown() && ps1_hud_) {
       add_sheet(0x04, 10, 84, 166);
-    } else if (ui_ == Ui::Chain) {
+    } else if (hit_box_shown()) {
       // "HIT%" caption: battle-osak-010 (50 x 9 PS1 px leader line, drawn at (x, y - 8)) with the caption
       // (命中率 / "HIT%" per language, flags 0x10002, colour 0x757575) above it.
       add_img(hud_[kHOsak], 82 * kPs1Px, ref_y(170), 62 * kPs1Px, ref_y(11));
