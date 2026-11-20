@@ -304,6 +304,11 @@ std::u32string BattleView::xlat(const char* jp, const char32_t* fallback) {
   return lang_ == import::Lang::Jp ? import::utf8_to_u32(jp) : std::u32string(fallback);
 }
 
+std::string BattleView::element_name(int id) {
+  if (const std::string* row = lang_tables_.sysmes((0x17u << 16) | static_cast<u32>(id), lang_); row && !row->empty()) return *row;
+  return tables_->element_name(id);
+}
+
 // ---------------------------------------------------------------------------------------------- waku art preparation
 // The party panel art (the subtractive base and the flash frame, 64 x 48 PS1 px at 4x) is drawn through a bilinear sampler, and the files
 // have two defects that would show: their transparent texels carry RGB 255 (base) or 0 (frame), which a bilinear edge sample mixes in (the base
@@ -520,7 +525,7 @@ void BattleView::build_party_panels() {
     const bhud::StaminaFill fill = bhud::stamina_fill(unit.stamina);
     const u32 bar_colour = fill.colour == bhud::BarColour::Red ? col(255, 0, 0) : fill.colour == bhud::BarColour::Yellow ? col(255, 255, 0) : col(0, 255, 255);
     add_rect(bar_x + kPs1Px, bar_y + kRowScale, static_cast<float>(fill.width) * kPs1Px, 2 * kRowScale, bar_colour);
-    const float text_y = jp ? py + 37 : py + 37.8f;
+    const float text_y = jp ? py + 38.5f : py + 37.8f;
     btext(out ? (jp ? 0x10082 : 0x82) : (jp ? 0x10005 : 5), out ? kOutLabel[lang] : kStaLabel[lang], out ? px + 22 : px + 26, text_y, 0x8A8A8A);
     const int digit_style = out ? 0x82 : 5;
     float digit_x = px + 42;
@@ -1434,7 +1439,7 @@ void BattleView::build_command_ui() {
       header_plate(tables_->elements[static_cast<size_t>(id)], 22);
       // Header: title text x 0x44, y = plate + 3: name + "%+d".
       if (element_colour(id, act_.actor) & 0xFC)
-        btext(0x81, import::utf8_to_u32(elem_label(tables_->element_name(id), tables_->elements[static_cast<size_t>(id)], act_.ev.front().row)),
+        btext(0x81, import::utf8_to_u32(elem_label(element_name(id), tables_->elements[static_cast<size_t>(id)], act_.ev.front().row)),
               0x44, 22 + 3, 0x757575);
     }
     cast_header_to_ = op_count();
@@ -1458,7 +1463,7 @@ void BattleView::build_command_ui() {
         }
       }
       header_plate(tables_->elements[static_cast<size_t>(id)], y);
-      btext(0x81, import::utf8_to_u32(elem_label(tables_->element_name(id), tables_->elements[static_cast<size_t>(id)], hdr_cell_ / data::kGridCols)), 0x44, y + 3, 0x757575);
+      btext(0x81, import::utf8_to_u32(elem_label(element_name(id), tables_->elements[static_cast<size_t>(id)], hdr_cell_ / data::kGridCols)), 0x44, y + 3, 0x757575);
     }
   }
   if (active_pc_ >= 0 && ui_ == Ui::Dopple) build_dopple_ui();
@@ -1514,7 +1519,9 @@ void BattleView::build_command_ui() {
         if (command == 1 && (!any_element || unit.gauge < 0 || unit.stamina == 0)) row_colour = kDim;
       } else if (k < 3) {
         const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
-        label = import::utf8_to_u32(std::format("{}-({}%)", k + 1, pct));
+        // JP: the cmnmes key 弱－(　　％) / 中 / 強 with the percentage in its blanks; else "N-(pct%)".
+        static const char32_t* kStrengthJp[3] = {U"弱－(", U"中－(", U"強－("};
+        label = jp ? kStrengthJp[k] + digits_u32(pct) + U" ％)" : import::utf8_to_u32(std::format("{}-({}%)", k + 1, pct));
         if (fatigued) {
           static const int kThr[3] = {12, 25, 37};
           row_colour = unit.stamina < kThr[k] ? kDim : unit.stamina < kThr[k] + 12 ? kYellowWord : kWhiteWord;
@@ -1550,9 +1557,9 @@ void BattleView::build_command_ui() {
       add_sheet(0x04, 10, 84, 166);
     } else if (hit_box_shown()) {
       // "HIT%" caption: battle-osak-010 (50 x 9 PS1 px leader line, drawn at (x, y - 8)) with the caption
-      // (命中率 / "HIT%" per language, flags 0x10002, colour 0x757575) above it.
+      // (命中率 / "HIT%" per language, flags 0x10002, colour 0x757575) above it; the JP glyphs stand 4 lines higher, clear of the line.
       add_img(hud_[kHOsak], 82 * kPs1Px, ref_y(170), 62 * kPs1Px, ref_y(11));
-      btext(cmd_flags, kHitCaption[li], 93, 165 * kRefLineY, 0x757575);
+      btext(cmd_flags, kHitCaption[li], 93, (165 - (jp ? 4.0f : 0.0f)) * kRefLineY, 0x757575);
     }
   }
   // WideHudEdges: the command box (PS1 x 28, HIT% caption to 144) moves 21 px further out so its left margin equals the field-effect ring's (7 PS1 px).
@@ -1878,7 +1885,7 @@ void BattleView::build_element_ui() {
     if (!rest) continue;
     add_plate_symbol(pc, static_cast<float>(elem_x_), row_y, used ? 90 : 255);
     // The name's leading icon code (Greek alpha..delta) is drawn by the fonts as the list icon (alpha = the boxed "x1" of consumables).
-    btext(0x81, import::utf8_to_u32(elem_label(tables_->element_name(id), elem, idx / data::kGridCols)), 11 + 57, row_y + 3, used ? 0x404040 : 0x757575);
+    btext(0x81, import::utf8_to_u32(elem_label(element_name(id), elem, idx / data::kGridCols)), 11 + 57, row_y + 3, used ? 0x404040 : 0x757575);
     // Consumable stock (a cell without a counter, e.g. a debug party, shows none): "x" and the units digit as style-9 glyph text at
     // (x + 0x72 / 0x78, 63 + 15 slot + 2), 0x757575.
     if ((elem.flags0() & 0x10) && (unit.qty[static_cast<size_t>(idx)] > 0 || unit.used[static_cast<size_t>(idx)])) {

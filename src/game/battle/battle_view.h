@@ -982,6 +982,8 @@ class BattleView {
   void add_text_op(int slot, std::u32string text, float x, float y, const ui::font::Ink& ink, float scale, int align);
   // cmnmes XLAT of a JP key in the current language.
   std::u32string xlat(const char* jp, const char32_t* fallback);
+  // An element or tech name in the current language (sysmes group 0x17), else the built-in table's.
+  std::string element_name(int id);
   // HIT% menu cursor after each hit (option "Battle attack select: Auto").
   void chain_auto_cursor();
   size_t op_count() const;
