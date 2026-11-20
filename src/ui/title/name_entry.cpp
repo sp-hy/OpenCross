@@ -191,11 +191,20 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   auto offset_x = [&](float sc) { return bn ? font::slot(list_slot).off_x * sc : 0.0f; };
   auto offset_y = [&](float sc) { return bn ? font::slot(list_slot).off_y * sc : 0.0f; };
   const render::FaceId cell_face = hd_face;
+  // The button labels: bn_70 like the list, ik_70 in JP.
+  const int label_slot = jp ? font::kIk : list_slot;
+  const render::FaceId label_list_face = kit.fonts().face(label_slot);
+  const render::FaceId label_face = label_list_face != render::kNoFace ? label_list_face : hd_face;
+  const int label_offset_slot = label_list_face != render::kNoFace ? label_slot : list_slot;
+  auto label_offset_x = [&](float sc) { return bn ? font::slot(label_offset_slot).off_x * sc : 0.0f; };
+  auto label_offset_y = [&](float sc) { return bn ? font::slot(label_offset_slot).off_y * sc : 0.0f; };
+  // The JP labels are drawn smaller and lower, so each stands on the leader line under it.
+  const float label_scale = jp ? 0.30f : 0.365f, label_drop = jp ? 6.5f : 0.0f;
   // Every glyph the screen can show (all pages, the labels, the prompt, the name) goes into the face's atlas in one call: each cell is
   // its own string, and a new glyph rebuilds the atlas, so preparing them cell by cell stalls the first frame of every page.
   if (!disc_) {
     std::u32string all = buf_ + U"_" + kChange[li] + kConfirm[li] + kDefault[li] + kPrompt[li];
-    if (jp) all += U"大佐カタカナひらがな";
+    if (jp) all += U"大佐";
     if (ps1_pages()) {
       for (const Ps1Grid& grid : pages_)
         for (const auto& row : grid)
@@ -207,6 +216,7 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
           if (const char32_t ch = cell(grid_row, grid_col)) all += ch;
     }
     kit.text().prepare(hd_face, all);
+    kit.text().prepare(label_face, std::u32string(kChange[li]) + kConfirm[li] + kDefault[li] + (jp ? U"カタカナひらがな" : U""));
   }
   // Spec font scale -> gn spritefont scale (0.35 <-> 0.42); the list fonts take the spec scale as is.
   const float gsc = bn ? 1.0f : 1.2f;
@@ -398,8 +408,8 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     const int button_index = static_cast<int>(kind);
     // Rows 16 PS1 lines apart from 316; the kana pages' labels step 9 PS1 pixels left from 308, the keyboard's 8 from 285.
     const float label_x = ps1 ? 770.0f - 22.5f * static_cast<float>(button_index)
-                              : canvas_x(285.0f - 8.0f * static_cast<float>(button_index)) + offset_x(0.365f);
-    const Lab position = {label_x, canvas_y(316.0f + 16.0f * static_cast<float>(button_index)) + offset_y(0.365f)};
+                              : canvas_x(285.0f - 8.0f * static_cast<float>(button_index)) + label_offset_x(label_scale);
+    const Lab position = {label_x, canvas_y(316.0f + 16.0f * static_cast<float>(button_index)) + label_offset_y(label_scale) + label_drop};
     labs.push_back({std::move(label), position});
     // The leader line under the label: underline, a diagonal step down to the right, a run to the dial.
     if (!disc_art) {
@@ -424,7 +434,7 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     // plain while another button has the focus.
     const bool lit = focus || (!disc_art && active_tab && ps1 && !in_buttons_);
     if (disc_art) sheet(0x71 + static_cast<int>(buttons_[i]), 446, 367, focus ? render::pack_rgba(0xEE, 0x9C, 0x00) : 0xFFFFFFFFu);
-    else dl.text(hd_face, labs[i].first, labs[i].second.x, labs[i].second.y, lit ? orange : normal, lab_scale(0.365f));
+    else dl.text(label_face, labs[i].first, labs[i].second.x, labs[i].second.y, lit ? orange : normal, lab_scale(label_scale));
   }
   {
     // The needle (handle.png: 98x14 PS1 px quad, tip at the left) turned about the dial centre (446, 367) so its tip points at the

@@ -54,6 +54,8 @@ class Window {
   // Tools / demos: windowed or borderless fullscreen on the first monitor.
   bool create(const char* title, int width, int height, bool fullscreen) { return create(title, width, height, fullscreen ? 1 : 0, 0); }
   void destroy();
+  // Takes the window off the screen while the game shuts down (the swapchain stays valid).
+  void hide();
 
   // Window mode (platform::WindowMode as int: 0 windowed, 1 borderless fullscreen, 2 exclusive fullscreen), size (windowed size /
   // exclusive mode; borderless uses the desktop size) and monitor index. Live: the caller recreates the swapchain afterwards.

@@ -5,7 +5,8 @@
 //   download(): the release asset "opencross.exe" (or a .zip holding opencross.exe, root or one folder deep) -> <exe>.new next to
 //               the running exe; checked: PE header, the asset size, and its SHA-256 when GitHub lists a digest.
 //               Then the swap, no helper exe: a running exe can be RENAMED on Windows (not overwritten), so
-//               <exe> -> <exe>.old, <exe>.new -> <exe>. The next launch runs the new version; restart() starts it now.
+//               <exe> -> <exe>.old, <exe>.new -> <exe>. The next launch runs the new version; "Restart now" starts it
+//               at exit (platform/process_exit.h).
 //   The launcher proxy (asset XINPUT9_1_0.dll, the OpenCross button in RDE's own launcher) goes with it, by the same swap, next to the
 //   exe when RDE's launcher is there. check() also offers it alone when the installed copy is missing or differs from the release's
 //   digest, which is how an install that arrived as a bare opencross.exe gets it.
@@ -87,8 +88,6 @@ public:
   Status status() const;
   bool busy() const;
 
-  // Starts the (new) exe with the same command line; call once the game has shut down. False when CreateProcess failed.
-  static bool restart();
   static void cleanup_after_update();
 
 private:

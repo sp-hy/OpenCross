@@ -256,7 +256,7 @@ Sources: `src/game/flow_demo_main.cpp`, `src/ui/menu/demo_main.cpp`, `src/ui/sho
 
 | Tool | Flags | Meaning |
 |---|---|---|
-| `ocflow` | `--shots [dir]`, `--orig`, `--lang <en\|fr\|it\|de\|es\|jp>`, `--save <file>` | Title, name entry and slot list screens without a field, with the exe folder's `opencross.ini` (its `[Video] Ps1ResUi` picks the PS1-resolution UI pass as in the game). `--shots` writes title / name entry / slot list shots for both art modes to `dir` (default `flow_shots` next to the exe) and exits. Continue reads `--save`, else a `save.dat` in the scratch folder, else the game's own save folder. |
+| `ocflow` | `--shots [dir]`, `--orig`, `--lang <en\|fr\|it\|de\|es\|jp>`, `--save <file>` | Title, name entry and slot list screens without a field, with the exe folder's `opencross.ini` (its `[Video] Ps1ResUi` picks the PS1-resolution UI pass as in the game). `--shots` writes title (prompt, menu, vibration page) / name entry / slot list shots for both art modes to `dir` (default `flow_shots` next to the exe) and exits. Continue reads `--save`, else a `save.dat` in the scratch folder, else the game's own save folder. |
 | `ocmenudemo` | `--shots [dir]`, `--orig`, `--lang <code>`, `--slot N`, `--drive` | Main menu on slot N (default 4). `--shots` writes the sequence to `dir` (default `menu_shots` next to the exe) and exits; `--drive` plays a scripted key sequence through every screen and logs the resulting state. |
 | `ocshopdemo` | `--shots [dir]`, `--orig`, `--lang <code>` | Element shop, blacksmith, trading post. `--shots` writes to `dir` (default `shop_shots` next to the exe) and exits. |
 

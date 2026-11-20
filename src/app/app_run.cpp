@@ -18,15 +18,18 @@
 #include "platform/keymap.h"
 #include "platform/pad_remap.h"
 #include "platform/paths.h"
+#include "platform/process_exit.h"
 #include "render/camera.h"
 
 namespace oc::app {
 
-int App::run() {
+void App::run() {
   // Quit on the screens before the game (app_source.cpp): nothing else was started.
   if (quit_requested) {
+    window.hide();
+    platform::begin_exit(0, false);
     ctx.wait_idle();
-    return 0;
+    return;
   }
   frametime_log = std::getenv("OC_FRAMETIME") != nullptr;
   ft_prev = std::chrono::steady_clock::now();
@@ -103,6 +106,9 @@ int App::run() {
     if (route_finished) break;
   }
 
+  // The window goes at once; what follows only releases resources.
+  window.hide();
+  platform::begin_exit(exit_code, restart_for_update);
   if (world_ok && (routing || replaying) && world.view().loaded()) {
     float fx = 0, fz = 0;
     world.player_xz(fx, fz);
@@ -115,8 +121,6 @@ int App::run() {
   log::info("exiting after {} simulation ticks, {} validation messages", world_ok ? world.tick_count() : 0,
             render::GpuContext::validation_message_count());
   ctx.wait_idle();
-  if (restart_for_update) platform::Updater::restart();
-  return exit_code;
 }
 
 // OC_FRAMETIME logs the wall time of main-loop iterations over 20 ms while a field -> battle hand-over is running; a value starting

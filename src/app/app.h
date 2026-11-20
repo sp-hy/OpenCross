@@ -139,8 +139,9 @@ class App {
 
   // Boots the game. Returns 0 when it may run, else the process exit code.
   int init(int argc, char** argv);
-  // The main loop; returns the process exit code.
-  int run();
+  // The main loop and the teardown after it. The process exit code (and a restart for the updater) goes to platform::begin_exit, which
+  // also bounds the teardown; main ends the process with platform::finish_exit once the App is destroyed.
+  void run();
 
  private:
   // ---- app_boot.cpp -----------------------------------------------------------------------------------------------------------

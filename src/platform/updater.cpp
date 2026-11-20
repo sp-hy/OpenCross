@@ -649,28 +649,10 @@ void Updater::run(bool install) {
 #endif
 }
 
-bool Updater::restart() {
-#ifdef _WIN32
-  const fs::path exe = exe_path();
-  std::wstring cmd = GetCommandLineW();
-  STARTUPINFOW si{};
-  si.cb = sizeof(si);
-  PROCESS_INFORMATION pi{};
-  if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi)) {
-    log::error("update: restart failed ({})", GetLastError());
-    return false;
-  }
-  CloseHandle(pi.hThread);
-  CloseHandle(pi.hProcess);
-  return true;
-#else
-  return false;
-#endif
-}
-
 // Deletes a <exe>.new that never got swapped in and the <exe>.old of a finished update; the latter on a detached thread with
 // retries, since right after a restart the previous process may still be closing and holding its file. The launcher proxy's leftovers
-// the same way; a launcher still running keeps its .old until a later start.
+// the same way. A launcher still running, or the previous process waiting for this one to exit (platform/process_exit.h), keeps its
+// .old until a later start.
 void Updater::cleanup_after_update() {
   const auto clean = [](const fs::path& file) {
     const fs::path old = fs::path(file).concat(".old"), fresh = fs::path(file).concat(".new");

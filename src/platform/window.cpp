@@ -228,6 +228,10 @@ void Window::destroy() {
   window_ = nullptr;
 }
 
+void Window::hide() {
+  if (window_) SDL_HideWindow(window_);
+}
+
 void Window::open_gamepad() {
   if (pad_) return;
   int count = 0;

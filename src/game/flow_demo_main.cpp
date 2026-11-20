@@ -124,6 +124,12 @@ int ocflow_main(int argc, char** argv) {
                          45, "title_prompt_" + suffix + ".png"});
         steps.push_back({[&flow] { flow.title().skip_to_menu(); }, 3, "title_menu_" + suffix + ".png"});
         steps.push_back({[&flow] {
+                           ui::Nav nav;
+                           nav.confirm = true;
+                           flow.title().update(nav, 0.0f);
+                         },
+                         3, "title_vibration_" + suffix + ".png"});
+        steps.push_back({[&flow] {
                            flow.start(game::FlowState::NameEntry);
                            flow.name_entry().press(ui::NameKey::Down);
                            flow.name_entry().press(ui::NameKey::Right);

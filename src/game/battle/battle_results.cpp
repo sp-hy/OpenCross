@@ -348,6 +348,15 @@ struct BattleResults::Impl {
       if (const std::string* text_utf8 = tt->get(key, lang); text_utf8 && !text_utf8->empty()) return import::utf8_to_u32(*text_utf8);
     return {};
   }
+  // Item and element names in the game's language (sysmes; elements in group 0x17), else the built-in table's.
+  std::u32string item_name(int id) {
+    const std::u32string name = lt.item_name(id, lang);
+    return name.empty() ? import::utf8_to_u32(tables->item_name(id)) : name;
+  }
+  std::u32string element_name(int id) {
+    if (const std::string* row = lt.sysmes((0x17u << 16) | static_cast<u32>(id), lang); row && !row->empty()) return import::utf8_to_u32(*row);
+    return import::utf8_to_u32(tables->element_name(id));
+  }
   // cmnmes: JP key -> language column; untranslated = the EN word.
   std::u32string stat_label(int stat) {
     if (const import::TextTable* tt = lt.table("cmnmes"))
@@ -365,8 +374,8 @@ struct BattleResults::Impl {
   void prepare_all() {
     prepare(U"0123456789+-/ ");
     for (int k = 0; k < 7; ++k) prepare(stat_label(k)), prepare(label(11 + static_cast<u64>(k)));
-    for (u64 key : {26ull, 27ull, 28ull, 30ull, 31ull, 32ull, 33ull, 35ull, 0x10005ull, 0x10006ull}) prepare(label(key));
-    prepare(U"G");
+    for (u64 key : {18ull, 21ull, 23ull, 25ull, 26ull, 27ull, 28ull, 30ull, 31ull, 32ull, 33ull, 34ull, 35ull, 0x10005ull, 0x10006ull}) prepare(label(key));
+    prepare(U"Gx");
     for (const Row& row : rows) prepare(row.name);
     for (const Drop& drop : drops) prepare(drop.name);
   }
@@ -473,9 +482,13 @@ struct BattleResults::Impl {
     const float px = static_cast<float>(kPanelX), py = static_cast<float>(kPanelY) + slide;
     quad(hd_panel, px - 16, py, kPanelW, kPanelH);
     // gold line: osak digits ending before the "G" part (0x30, panel +88 - 7), then 獲得 / "Received" (part 0x32, +96 - 7)
-    num(std::clamp(gold, 0, 9999999), kGoldRight, py + 144, kColDigit);
-    txt(label_slot(), U"G", px + 81, py + 145, kColText, kMidPx);
-    txt(label_slot(), label(26), px + 89, py + 145, kColText, kMidPx);
+    // A text too long for the panel (JP) moves the whole line left until it ends 4 units inside the panel's right edge.
+    const std::u32string received = label(26);
+    const float overflow = px + 89 + measure(label_slot(), received, scale_for(kMidPx)) - (px - 16 + kPanelW - 4);
+    const float gold_x = -std::max(0.0f, overflow);
+    num(std::clamp(gold, 0, 9999999), kGoldRight + gold_x, py + 144, kColDigit);
+    txt(label_slot(), U"G", px + 81 + gold_x, py + 145, kColText, kMidPx);
+    txt(label_slot(), received, px + 89 + gold_x, py + 145, kColText, kMidPx);
     if (phase == Phase::Spoils) draw_spoils(px, py);
     else if (phase == Phase::Heal) draw_heal_menu(px, py);
     else if (phase == Phase::Healed) draw_healed(px, py);
@@ -554,7 +567,7 @@ struct BattleResults::Impl {
       const float y = py + 28 + 18.0f * static_cast<float>(line++);
       const int ci = plate_of(healer.id);
       if (ci >= 0) quad(hd_plate[static_cast<size_t>(ci)], px - 4, y, 120, 16);
-      txt(label_slot(), import::utf8_to_u32(tables->element_name(healer.id)), 0xE8, y + 3, kColText, kPanelPx, 1);
+      txt(label_slot(), element_name(healer.id), 0xE8, y + 3, kColText, kPanelPx, 1);
       txt(label_slot(), U"x", 0x118, y + 6, kColText, kLabelPx);
       txt(kDigits, import::utf8_to_u32(std::to_string(healer.count)), 0x11E - 1, y + 6, kColDigit, kLabelPx);
     }
@@ -775,7 +788,7 @@ struct BattleResults::Impl {
     for (const Healer& healer : used) {
       const int ci = plate_of(healer.id);
       if (ci >= 0) sheet(ci * 4, 3, 0xAC, y);
-      const std::u32string name = strip_icon(import::utf8_to_u32(tables->element_name(healer.id)));
+      const std::u32string name = strip_icon(element_name(healer.id));
       ps1_text(name, 0xE8 - ps1_width(name) * 0.5f, y + 2);
       sheet(kSheetCount, 10, 0x118, y + 4);
       const std::array<int, 9> digits = split_digits(static_cast<u32>(std::clamp(healer.count, 0, 99)));
@@ -883,6 +896,7 @@ struct BattleResults::Impl {
       }
       if (healers[i].count - left > 0) {
         used.push_back({healers[i].id, healers[i].count - left});
+        prepare(element_name(healers[i].id) + import::utf8_to_u32(std::to_string(healers[i].count - left)));
         log::info("battle results: heal element {} used {} time(s)", healers[i].id, healers[i].count - left);
       }
       if (hurt_count() == 0) break;
@@ -1171,11 +1185,11 @@ bool BattleResults::open(const battle::Battle& finished, int scene_id) {
     drop.element = (word & 0x8000) != 0;
     if (drop.element) {
       drop.id = word & 0x7F;
-      drop.name = import::utf8_to_u32(impl.tables->element_name(drop.id));
+      drop.name = impl.element_name(drop.id);
       if (static_cast<size_t>(drop.id) < impl.tables->elements.size()) drop.colour = data::colour_index_of_bit(impl.tables->elements[static_cast<size_t>(drop.id)].colour_bit());
     } else {
       drop.id = word;
-      drop.name = import::utf8_to_u32(impl.tables->item_name(word));
+      drop.name = impl.item_name(word);
       if (const data::ItemInfo* info = impl.tables->item(word)) drop.kind = info->kind();
     }
     impl.drops.push_back(std::move(drop));

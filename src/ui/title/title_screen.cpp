@@ -514,12 +514,13 @@ void TitleScreen::draw(DrawList& dl) const {
     const bool style82 = page_ == 0 && variant_ == 2;
     const float y0 = 576.4f + (style82 && lang_ == import::Lang::Jp ? 6.0f * kCanvasHeight / 448.0f : 0.0f), pitch = 68.57f;
     const font::Slot face_slot = style82 && lang_ == import::Lang::Jp ? font::kKb : font::kCi;
-    // Footer: JP slot 0 kb_70, else slot 5 ci_70, at PS1 (0x144, 200 / JP 206), colour 0x909090.
+    // Footer: JP slot 0 kb_70, else slot 5 ci_70, at PS1 (0x144, 200 / JP 206) plus the slot's offsets, colour 0x909090.
     if (page_ == 1) {
       const bool jp = lang_ == import::Lang::Jp;
       const font::Slot fs = jp ? font::kKb : font::kCi;
-      dl.text(kit_->fonts().face(fs), kVibration[std::min(lang_index(lang_), 5)], 0x144 * 2.0f, (jp ? 206.0f : 200.0f) * kCanvasHeight / 448.0f,
-              font::h2(0x909090, 0x14, 4), font::slot(fs).scale);
+      const font::SlotInfo& info = font::slot(fs);
+      dl.text(kit_->fonts().face(fs), kVibration[std::min(lang_index(lang_), 5)], 0x144 * 2.0f + info.off_x * info.scale,
+              (jp ? 206.0f : 200.0f) * kCanvasHeight / 448.0f + info.off_y * info.scale, font::h2(0x909090, 0x14, 4), info.scale);
     }
     const float sc = font::slot(face_slot).scale;
     // The PS1 underline per option: a sprite at PS1 (0, 0x10E + 0x20 i), 32 rows from atlas cell n = page * 4 + 2 i + (selected),

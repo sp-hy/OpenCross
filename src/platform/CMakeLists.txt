@@ -5,6 +5,8 @@ add_library(oc_platform STATIC
   keymap.cpp
   pad_remap.h
   pad_remap.cpp
+  process_exit.h
+  process_exit.cpp
   paths.h
   paths.cpp
   rumble.h
