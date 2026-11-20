@@ -374,7 +374,7 @@ fld_op_fe02_exit_transition = 0x800C8F14;  # function: FE 02: stores the next ro
 fld_op_refresh_mirror_object = 0x800C8F54;  # function: script op FE 51: rebuilds the mirror copy's display object from the room model or an alternative asset (unused)
 fld_entity_effect_reflect_copy = 0x800C9210;  # function: script op: reflected copy of the model on a chosen axis and plane
 fld_op_fe04_no_pan_clamp = 0x800C9468;  # function: FE 04: global flag bit 8 = b & 1 (skip pan clamps)
-fld_op_store_global_byte = 0x800C94BC;  # function: script op that stores an operand byte into a global and advances 3
+fld_op_set_frame_vsyncs = 0x800C94BC;  # function: script op FE 05: stores its operand in fld_frame_vsyncs (minimum vsyncs per drawn field frame)
 fld_op_fe06_pushable = 0x800C94FC;  # function: FE 06: sets the pushable entity flag when b is 0, clears it otherwise
 fld_op_fe07_scripted_turn = 0x800C9564;  # function: FE 07: entity status bit 13; on clear restores the saved turn rate and clears bits 14 / 15
 fld_op_fe0c_entity_scripted_turn = 0x800C9608;  # function: FE 0C: FE 07 applied to another entity

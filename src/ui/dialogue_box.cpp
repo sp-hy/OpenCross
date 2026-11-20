@@ -76,6 +76,11 @@ constexpr SkinUv kSkins[16] = {
     {.408f, .1655f, .166f, .126f, .125f, .161f, .625f, .3125f, .408f, .125f, .17067f, .1275f, .161f},
     {.408f, .16666f, .166f, .126f, .125f, .161f, .625f, .3125f, .408f, .125f, .17067f, .1275f, .161f}};
 constexpr float kTW = 61.75f, kTH = 66.5f, kCorner = 2.5f * kTH;
+// JP message windows: lines 13 rows of the 216-line display apart at glyph scale 0.5; the text origin 4 rows above the non-JP one,
+// truncated to a whole canvas unit; the frame's base row 20 above the JP text origin (non-JP: 35).
+constexpr float kJpLinePitch = 13.0f * kCanvasHeight / 216.0f;
+constexpr int kJpOriginRows = 4;
+constexpr float kJpFrameDrop = 20.0f;
 
 // Frameless (label) window: inset around the text (canvas units).
 constexpr float kPadX = 64, kPadY = 44;
@@ -436,7 +441,7 @@ std::vector<TextPage> DialogueBox::layout(render::FaceId face, render::FaceId it
   LayoutMetrics metrics;
   ps1_ = batch->is_ps1(face);
   batch->set_pixel_aspect(ps1_ ? kPs1RowScale : 1.0f);
-  metrics.line_height = batch->line_height(face, text_scale);
+  metrics.line_height = jp_ && !ps1_ ? kJpLinePitch * (text_scale / 0.5f) : batch->line_height(face, text_scale);
   batch->set_pixel_aspect(1.0f);
   metrics.max_width = wrap_width_ * (text_scale / 0.5f);
   if (ps1_) {
@@ -537,7 +542,7 @@ void DialogueBox::rect(float x, float y, float w, float h, u32 color) {
 // 10 units right of the text origin (23.5 with the portrait on the left; JP: 6 left of it), less 270 with the portrait on the left (the
 // face sits between the frame's left edge and the text). The left edge X0 is 40 left of the base line (JP: 25, 5 with the portrait on the
 // left). The right corner starts past the end of the widest line by 36 (4 before it from three text lines on), by 253 with the portrait
-// on the right (the face's room), by 233 with it on the left.
+// on the right (the face's room), by 233 with it on the left. The top row is 35 above the text origin (JP: 20).
 DialogueBox::Geo DialogueBox::frame_geo(float x, float y, float text_width, int lines, bool has_portrait, bool portrait_left) const {
   return frame_geo_for(skin_idx_, jp_, x, y, text_width, lines, has_portrait, portrait_left);
 }
@@ -549,7 +554,7 @@ DialogueBox::Geo DialogueBox::frame_geo_for(int skin_idx, bool jp, float x, floa
   const bool face_left = has_portrait && portrait_left;
   const float base = x + (jp ? -6.0f : face_left ? 23.5f : 10.0f) - (face_left ? 270.0f : 0.0f);
   geo.X0 = base - (!jp ? 40.0f : face_left ? 5.0f : 25.0f);
-  geo.Y0 = y - 35;
+  geo.Y0 = y - (jp ? kJpFrameDrop : 35.0f);
   geo.rows = lines + 1;
   if (has_portrait && geo.rows < 5) geo.rows = 5;
   geo.T0x = geo.X0 - 1.28f * kTW * (skin_idx == 0 ? 1.013f : 1.0f);
@@ -916,10 +921,11 @@ void DialogueBox::draw(float vw, float vh, const render::CanvasFit* fit) {
     const float minx = g0.T0x, maxx = g0.R0x + kCorner;
     float ox, oy;
     if (has_win_) {
-      // Glyph 0 at ((2 x + (portrait left ? 124 : -4)) * 2, 2 y * 960 / 432); the frame is kept inside the
-      // canvas (screen clamp).
+      // Glyph 0 at ((2 x + (portrait left ? 124 : -4)) * 2, 2 y * 960 / 432), JP 4 rows higher and truncated; the frame is kept
+      // inside the canvas (screen clamp).
       ox = (cw - 1280.0f) * 0.5f + 4.0f * static_cast<float>(win_x_) + (has_portrait && portrait_left_ ? 248.0f : -8.0f);
-      oy = 2.0f * static_cast<float>(win_y_) * kCanvasHeight / 432.0f;
+      oy = jp_ ? std::floor(2.0f * static_cast<float>(win_y_ - kJpOriginRows) * kCanvasHeight / 432.0f + 1e-3f)
+               : 2.0f * static_cast<float>(win_y_) * kCanvasHeight / 432.0f;
       const Geo g1 = frame_geo(ox, oy, text_w_, lines, has_portrait, has_portrait && portrait_left_);
       const float frame_left = g1.T0x, frame_right = g1.R0x + kCorner, frame_bottom = g1.B0y + kCorner;
       if (frame_right - frame_left >= cw) ox += (cw - (frame_right + frame_left)) * 0.5f;

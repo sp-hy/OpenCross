@@ -1,0 +1,12 @@
+# alu_b01f, Japanese text: the villager by the gate (entity 5) answers with message 1, three lines on its first page. The screenshot
+# shows the window to compare with RDE: line tops 57.78 canvas units apart, the text 4 display rows above the non-JP origin.
+0 wait 5
+- request party_add 1
+- wait idle 1200
+- approach 5 40 900
+- action
+- wait text ここは、アルニ村じゃよ。
+- wait 200
+- assert dialogue open
+- screenshot jp_message.png
+- quit

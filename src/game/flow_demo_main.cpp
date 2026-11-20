@@ -17,6 +17,7 @@
 #include "platform/paths.h"
 #include "platform/window.h"
 #include "render/gpu_context.h"
+#include "ui/lowres.h"
 
 namespace {
 
@@ -66,6 +67,8 @@ int ocflow_main(int argc, char** argv) {
   }
   import::Lang lang = import::Lang::En;
   import::parse_lang(lang_code, lang);
+  // The PS1-resolution UI pass as the game takes it from the settings.
+  ui::set_ps1_menus(config.ps1_res_ui || platform::disc_mode());
   platform::Window window;
   if (!window.create("OpenCross flow", 1280, 960, false)) return 1;
   render::GpuContext ctx;

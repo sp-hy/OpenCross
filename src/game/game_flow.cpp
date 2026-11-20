@@ -700,8 +700,9 @@ void GameFlow::draw(const render::Frame& frame, float vw, float vh, bool resume)
     list_->flush(kit_.sprites(), frame, ui::Canvas::fit(vw, vh), resume);
     return;
   }
-  // The name entry's parchment covers the widened frame; every other screen here is a 4:3 picture.
-  const ui::Canvas name_canvas = ui::Canvas::wide(vw, vh, wide_cols_);
+  // The name entry's parchment covers the widened frame; every other screen here is a 4:3 picture. The name entry is laid out on
+  // RDE's field canvas, flatter than wide.
+  const ui::Canvas name_canvas = ui::Canvas::wide(vw, vh, wide_cols_).overlaid();
   if (rename_active_) {
     if (rename_guide_) keymap_.draw(*list_, kit_);
     else name_.draw(*list_, kit_, name_canvas.reach);

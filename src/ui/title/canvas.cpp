@@ -67,20 +67,30 @@ void UiKit::request_lowres(DrawList& dl, const Ps1Display& display) {
 void DrawList::replay(render::SpriteBatch& sprites, const render::Frame& frame, const Canvas& canvas, bool resume) {
   if (canvas.clip) frame.set_scissor(ps1::picture_clip(frame, canvas.vw, canvas.vh, kCanvasW, kCanvasHeight));
   sprites.begin(frame, canvas.vw, canvas.vh, resume);
+  // A flattened canvas draws in a view whose y unit is `flat` pixels, so one scale serves both axes; the text snaps to that grid.
+  const bool flattened = canvas.flat != 1.0f;  if (flattened) {
+    sprites.set_view(canvas.vw, canvas.vh / canvas.flat);
+    text_->set_pixel_grid(1.0f, canvas.flat);
+  }
+  const float oy = canvas.oy / canvas.flat;
   for (const Op& op : ops_) {
     if (op.blend != sprites.blend()) sprites.set_blend(op.blend);
     switch (op.kind) {
       case Kind::Image:
         if (op.set)
-          sprites.draw(op.set, canvas.ox + op.x * canvas.scale, canvas.oy + op.y * canvas.scale, op.w * canvas.scale, op.h * canvas.scale, op.u0,
-                       op.v0, op.u1, op.v1, op.color);
+          sprites.draw(op.set, canvas.ox + op.x * canvas.scale, oy + op.y * canvas.scale, op.w * canvas.scale, op.h * canvas.scale, op.u0, op.v0,
+                       op.u1, op.v1, op.color);
         break;
       case Kind::Text:
-        text_->draw(op.face, op.str, canvas.ox + op.x * canvas.scale, canvas.oy + op.y * canvas.scale, op.color, op.scale * canvas.scale, op.style);
+        text_->draw(op.face, op.str, canvas.ox + op.x * canvas.scale, oy + op.y * canvas.scale, op.color, op.scale * canvas.scale, op.style);
         break;
     }
   }
   sprites.end();
+  if (flattened) {
+    sprites.set_view(canvas.vw, canvas.vh);
+    text_->set_pixel_grid(0.0f, 0.0f);
+  }
   if (canvas.clip) frame.set_scissor(frame.full());
   ops_.clear();
 }

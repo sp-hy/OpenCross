@@ -26,6 +26,17 @@ struct Canvas {
   float cols = 0, reach = 0;
   // The draws are cut at the 4:3 picture's sides (ps1::picture_clip): wide() without columns.
   bool clip = false;
+  // Height of a canvas unit over its width (1 = square). overlaid() sets RDE's field-canvas squash (render::overlay_fit).
+  float flat = 1;
+  // The same fit as RDE's overlay canvas: canvas 0 at the band below the viewport's top, the rows scaled by 944/960 * 928/960. The
+  // band-free viewport then ends at canvas y kOverlayRows.
+  static constexpr float kOverlayRows = kCanvasHeight * 960.0f / 928.0f;
+  Canvas overlaid() const {
+    Canvas canvas = *this;
+    canvas.oy += 8.0f * scale;
+    canvas.flat = 944.0f / 960.0f * 928.0f / 960.0f;
+    return canvas;
+  }
   // The shared 4:3 fit of the canvas into a vw x vh view (render::canvas_fit).
   static Canvas fit(float vw, float vh) {
     Canvas canvas;

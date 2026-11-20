@@ -1,6 +1,7 @@
 // Checks for the title / name entry / flow logic: name encoding round trip (game font <-> Unicode, save record), name rules,
-// the keyboard pages, the NameEntry cursor / buffer / validation and the FlowMachine state transitions.
+// the keyboard pages, the NameEntry cursor / buffer / validation, the name entry's canvas fit and the FlowMachine state transitions.
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <map>
 #include <utility>
@@ -711,6 +712,18 @@ void test_any_button() {
   CHECK(!game::GameFlow::any_button(in));
 }
 
+// The name entry's canvas: RDE's field canvas, 8 rows down and flatter than wide; the band-free viewport ends at canvas 993.1.
+void test_overlay_canvas() {
+  const ui::Canvas plain = ui::Canvas::fit(1280.0f, 960.0f);
+  const ui::Canvas flat = plain.overlaid();
+  CHECK(plain.flat == 1.0f && flat.scale == plain.scale && flat.ox == plain.ox);
+  CHECK(std::abs(flat.oy - (plain.oy + 8.0f)) < 1e-4f);
+  CHECK(std::abs(flat.flat - 0.9506f) < 1e-4f);
+  CHECK(std::abs(flat.oy + ui::Canvas::kOverlayRows * flat.scale * flat.flat - (plain.oy + 952.0f * plain.scale)) < 0.01f);
+  const ui::Canvas half = ui::Canvas::fit(640.0f, 480.0f);
+  CHECK(std::abs(half.overlaid().oy - (half.oy + 8.0f * half.scale)) < 1e-4f && half.overlaid().flat == flat.flat);
+}
+
 // RDE's boot logo timing: 180 frames per image, 30-frame fades, a skip jumps to the next image.
 void test_boot_logo() {
   ui::BootLogo logo;
@@ -777,6 +790,7 @@ int main() {
   test_codec();
   test_any_button();
   test_boot_logo();
+  test_overlay_canvas();
   test_rules();
   test_pages();
   test_name_entry();

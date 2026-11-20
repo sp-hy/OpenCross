@@ -182,15 +182,33 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   const bool jp = lang_ == import::Lang::Jp;
   const bool ps1 = ps1_pages();
   const render::FaceId gn_face = kit.face(mode_);
-  // non-JP: bn_70 (slot 4, the default list font); JP: kt_70 (slot 1), else gn.
-  const render::FaceId kt_face = kit.fonts().face(font::kKtName);
-  const render::FaceId hd_face = jp ? (kt_face != render::kNoFace ? kt_face : gn_face) : kit.face_bn();
-  const bool bn = !jp && hd_face != gn_face;
-  // Text position: X = (x + dx) * sx + font.offX * scale, Y likewise (bn_70: offX -80/7, offY -120/7).
-  auto offset_x = [&](float sc) { return bn ? -11.428572f * sc : 0.0f; };
-  auto offset_y = [&](float sc) { return bn ? -17.142857f * sc : 0.0f; };
+  // The language's default list font: bn_70 (slot 4), JP kb_70 (slot 0); gn when it is missing.
+  const int list_slot = jp ? font::kKb : font::kBn;
+  const render::FaceId list_face = kit.fonts().face(list_slot);
+  const render::FaceId hd_face = list_face != render::kNoFace ? list_face : gn_face;
+  const bool bn = hd_face != gn_face;
+  // Text position: X = (x + dx) * sx + font.offX * scale, Y likewise (the slot's offsets).
+  auto offset_x = [&](float sc) { return bn ? font::slot(list_slot).off_x * sc : 0.0f; };
+  auto offset_y = [&](float sc) { return bn ? font::slot(list_slot).off_y * sc : 0.0f; };
   const render::FaceId cell_face = hd_face;
-  // Spec font scale -> gn / kt spritefont scale (0.35 <-> 0.42); bn_70 takes the spec scale as is.
+  // Every glyph the screen can show (all pages, the labels, the prompt, the name) goes into the face's atlas in one call: each cell is
+  // its own string, and a new glyph rebuilds the atlas, so preparing them cell by cell stalls the first frame of every page.
+  if (!disc_) {
+    std::u32string all = buf_ + U"_" + kChange[li] + kConfirm[li] + kDefault[li] + kPrompt[li];
+    if (jp) all += U"大佐カタカナひらがな";
+    if (ps1_pages()) {
+      for (const Ps1Grid& grid : pages_)
+        for (const auto& row : grid)
+          for (char32_t ch : row)
+            if (ch) all += ch;
+    } else {
+      for (int grid_row = 0; grid_row < rows(); ++grid_row)
+        for (int grid_col = 0; grid_col < cols(); ++grid_col)
+          if (const char32_t ch = cell(grid_row, grid_col)) all += ch;
+    }
+    kit.text().prepare(hd_face, all);
+  }
+  // Spec font scale -> gn spritefont scale (0.35 <-> 0.42); the list fonts take the spec scale as is.
   const float gsc = bn ? 1.0f : 1.2f;
   auto lab_scale = [&](float spec) { return spec * gsc; };
   const render::TexRef white_set = kit.white();
@@ -220,9 +238,9 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   if (!tile.set) tile = ps1_pic("ps1:tile", [&] { return ps1::parchment(kit.vfs()); });
   if (tile.set) {
     ps1::parchment_grid([&](float x, float y, float w, float h, float u0, float u1) { dl.image(tile.set, x, y, w, h, 0xFFFFFFFFu, u0, 0.0f, u1, 1.0f); },
-                        kCanvasW, kCanvasHeight, -reach, kCanvasW + 1.0f + reach);
+                        kCanvasW, Canvas::kOverlayRows, -reach, kCanvasW + 1.0f + reach);
   } else {
-    dl.rect(white_set, -reach, 0, kCanvasW + 2.0f * reach, kCanvasHeight, render::pack_rgba(60, 38, 18));
+    dl.rect(white_set, -reach, 0, kCanvasW + 2.0f * reach, Canvas::kOverlayRows, render::pack_rgba(60, 38, 18));
   }
   // Played from the discs the swirls and the dial are the compass meshes (square pictures centred on their draw points), added at a
   // quarter (the PS1's B + F / 4).
@@ -293,12 +311,14 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
   panel(118, 120, 304, 128, 40, 14.0f, 76.0f);
   panel(119, 56, 360, 192, 40);
   if (!disc_art) {
-    // Title "Name": the tab label of the name bar, in the notch at the top-left of the panel at (120, 304), left aligned.
+    // Title "Name": the tab label of the name bar, in the notch at the top-left of the panel at (120, 304), left aligned. A frame
+    // caption: bn_70 in every language.
     const std::u32string title = kTitle[li];
-    const render::FaceId title_face = hd_face;
-    const float sc = lab_scale(0.30f);
-    dl.text(title_face, title, canvas_x(120) + 18.0f + offset_x(0.30f), canvas_y(304) + 7.0f - 0.5f * kit.text().line_height(title_face, sc), title_c,
-            sc);
+    const render::FaceId bn_face = kit.face_bn();
+    const bool title_bn = bn_face != gn_face;
+    const float sc = title_bn ? 0.30f : 0.30f * 1.2f;
+    const float title_dx = title_bn ? font::slot(font::kBn).off_x * 0.30f : 0.0f;
+    dl.text(bn_face, title, canvas_x(120) + 18.0f + title_dx, canvas_y(304) + 7.0f - 0.5f * kit.text().line_height(bn_face, sc), title_c, sc);
   }
 
   // ---- grid cells
@@ -314,9 +334,9 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
                     cy = canvas_y(48.0f + 24.0f * static_cast<float>(grid_row)) + offset_y(0.35f);
         if (ch) dl.text(hd_face, std::u32string(1, ch), cx, cy, focus ? orange : normal, 0.35f * gsc, 1);
       } else {
-        const float cx = (grid_col < 5 ? 375.0f + 80.0f * static_cast<float>(grid_col) : 815.0f + 80.0f * static_cast<float>(grid_col - 5)),
-                    cy = 111.1f + 53.33f * static_cast<float>(grid_row);
-        if (ch) dl.text(cell_face, std::u32string(1, ch), cx + 20.0f, cy, focus ? orange : normal, 0.5f, 1);
+        const float cx = canvas_x(158.0f + 32.0f * static_cast<float>(grid_col) + 16.0f * static_cast<float>(grid_col / 5)) + offset_x(0.35f),
+                    cy = canvas_y(50.0f + 24.0f * static_cast<float>(grid_row)) + offset_y(0.35f);
+        if (ch) dl.text(cell_face, std::u32string(1, ch), cx, cy, focus ? orange : normal, 0.35f * gsc, 1);
       }
     }
   // Cursor sprite (menu-main-120, 32x32) over the cell.
@@ -349,18 +369,18 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
                canvas_y(static_cast<float>(box.h)), colour);
   };
   if (disc_art) sheet(0x70, 446, 367, 0xFFFFFFFFu);
-  if (!jp && !ps1 && !disc_art) {
-    const u32 lc = render::pack_rgba(205, 198, 190, 170);
-    static const float kLead[3][6] = {{672, 792, 868, 901, 819, 928}, {653, 827, 835, 868, 856, 972}, {631, 863, 803, 835, 890, 988}};
-    for (const auto& lead : kLead) {
-      dl.rect(white_set, lead[0], lead[1], lead[2] - lead[0], 2.0f, lc);
-      const float dx = lead[3] - lead[2], dy = lead[4] - lead[1];
-      const int steps = 12;
-      for (int k = 0; k < steps; ++k)
-        dl.rect(white_set, lead[2] + dx * static_cast<float>(k) / steps, lead[1] + dy * static_cast<float>(k) / steps, dx / steps + 2.0f, 2.0f, lc);
-      dl.rect(white_set, lead[3], lead[4], lead[5] - lead[3], 2.0f, lc);
-    }
-  }
+  // Per PS1 button index 0..4: the underline's row and right end, the diagonal's end (where the needle points) and the run's end at
+  // the dial's rim.
+  struct Lead {
+    float underline_y, underline_end, step_x, step_y, run_end;
+  };
+  static constexpr Lead kLead[5] = {{734.3f, 932, 961, 760.6f, 975},
+                                    {769.0f, 899, 926, 795.3f, 966},
+                                    {804.7f, 869, 897, 831.0f, 966},
+                                    {840.5f, 837, 865, 866.8f, 974},
+                                    {875.2f, 807, 835, 902.6f, 989}};
+  // The RDE keyboard's underlines start at fixed points (Change Name, Confirm, Default); the kana pages' at their labels.
+  static constexpr float kLatinLeadStart[3] = {672, 653, 631};
   // ---- button labels
   struct Lab {
     float x, y;
@@ -376,42 +396,45 @@ void NameEntry::draw(DrawList& dl, UiKit& kit, float reach) const {
     else label = kind == Button::Katakana ? U"カタカナ" : kind == Button::Hiragana ? U"ひらがな" : U"英数字";
     // button_index is the PS1 button index 0..4 (Alnum / "Change Name" = 2, Confirm 3, Default 4).
     const int button_index = static_cast<int>(kind);
-    Lab position;
-    // The RDE keyboard labels sit 14 canvas px above the baseline.
-    if (!jp && !ps1)
-      position = {canvas_x(285.0f - 8.0f * static_cast<float>(button_index)) + offset_x(0.365f),
-                  canvas_y(316.0f + 16.0f * static_cast<float>(button_index)) + offset_y(0.365f) - 14.0f};
-    else position = {770.0f - 22.5f * static_cast<float>(button_index), 704.4f + 35.56f * static_cast<float>(button_index)};
+    // Rows 16 PS1 lines apart from 316; the kana pages' labels step 9 PS1 pixels left from 308, the keyboard's 8 from 285.
+    const float label_x = ps1 ? 770.0f - 22.5f * static_cast<float>(button_index)
+                              : canvas_x(285.0f - 8.0f * static_cast<float>(button_index)) + offset_x(0.365f);
+    const Lab position = {label_x, canvas_y(316.0f + 16.0f * static_cast<float>(button_index)) + offset_y(0.365f)};
     labs.push_back({std::move(label), position});
+    // The leader line under the label: underline, a diagonal step down to the right, a run to the dial.
+    if (!disc_art) {
+      const Lead& lead = kLead[std::clamp(button_index, 0, 4)];
+      const float start = ps1 ? position.x : kLatinLeadStart[std::clamp(button_index - 2, 0, 2)];
+      const u32 lc = render::pack_rgba(205, 198, 190, 170);
+      dl.rect(white_set, start, lead.underline_y, lead.underline_end - start, 2.0f, lc);
+      const float dx = lead.step_x - lead.underline_end, dy = lead.step_y - lead.underline_y;
+      const int steps = 12;
+      for (int k = 0; k < steps; ++k)
+        dl.rect(white_set, lead.underline_end + dx * static_cast<float>(k) / steps, lead.underline_y + dy * static_cast<float>(k) / steps,
+                dx / steps + 2.0f, 2.0f, lc);
+      dl.rect(white_set, lead.step_x, lead.step_y, lead.run_end - lead.step_x, 2.0f, lc);
+    }
   }
   for (size_t i = 0; i < labs.size(); ++i) {
     // The focused button is highlighted whether or not the cursor is in the grid.
     const bool focus = static_cast<int>(i) == button_;
     const bool tab = buttons_[i] == Button::Katakana || buttons_[i] == Button::Hiragana || buttons_[i] == Button::Alnum;
     const bool active_tab = tab && static_cast<int>(buttons_[i]) == static_cast<int>(page_);
-    // The discs light the focused label alone: the active page's tab is plain while the focus is elsewhere.
+    // The discs light the focused label alone. RDE lights it too, and the active page's tab while the cursor is in the grid; the tab is
+    // plain while another button has the focus.
+    const bool lit = focus || (!disc_art && active_tab && ps1 && !in_buttons_);
     if (disc_art) sheet(0x71 + static_cast<int>(buttons_[i]), 446, 367, focus ? render::pack_rgba(0xEE, 0x9C, 0x00) : 0xFFFFFFFFu);
-    else dl.text(hd_face, labs[i].first, labs[i].second.x, labs[i].second.y, focus ? orange : (active_tab && ps1 ? orange : normal), lab_scale(0.365f));
+    else dl.text(hd_face, labs[i].first, labs[i].second.x, labs[i].second.y, lit ? orange : normal, lab_scale(0.365f));
   }
   {
     // The needle (handle.png: 98x14 PS1 px quad, tip at the left) turned about the dial centre (446, 367) so its tip points at the
-    // end of the focused button's leader line (HD) / the right end of its label (original); resampled per angle (menu/hand.h).
+    // end of the focused button's diagonal step; resampled per angle (menu/hand.h).
     NameEntry::Pic hand;
     HandImage hi;
     const float px = 1115.0f, py = 816.0f;
     if (!labs.empty()) {
-      const Lab focused_label = labs[static_cast<size_t>(button_)].second;
-      const int button_index = static_cast<int>(buttons_[static_cast<size_t>(button_)]);
-      float tx, ty;
-      if (!jp && !ps1) {
-        // End of leader line 0..2 (Change Name / Confirm / Default).
-        static const float kEnd[3][2] = {{928, 819}, {972, 835}, {988, 851}};
-        const int lead_index = std::clamp(button_index - 2, 0, 2);
-        tx = kEnd[lead_index][0], ty = kEnd[lead_index][1];
-      } else {
-        tx = focused_label.x + 160.0f, ty = focused_label.y + 15.0f;
-      }
-      hand_target_ = hand_angle_toward(tx - px, ty - py, 2.5f, 2.2222f);
+      const Lead& lead = kLead[std::clamp(static_cast<int>(buttons_[static_cast<size_t>(button_)]), 0, 4)];
+      hand_target_ = hand_angle_toward(lead.step_x - px, lead.step_y - py, 2.5f, 2.2222f);
       // First frame: start on the focused button.
       if (!hand_init_) hand_init_ = true, hand_angle_ = hand_target_, hand_settled_ = button_, hand_t_ = 0;
       const int angle = hand_angle_;

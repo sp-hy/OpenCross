@@ -823,3 +823,4 @@ btl_hud_status_icons_dirty = 0x800E0207;  # data: u8 flag: the panel draw recopi
 btl_hud_shown_hp = 0x800E33C8;  # data: s16 per party slot: the HP the party panel draws, copied from the unit's HP while btl_hud_status_icons_dirty is set (an instant death shows the old HP until the action ends)
 btl_hud_shown_max_hp = 0x800E33D0;  # data: s16 per party slot: the max HP the party panel draws, copied with btl_hud_shown_hp
 btl_hud_hp_colour = 0x800E33D8;  # data: u32 per party slot: colour word of the panel's HP digits, grey above a quarter of the max HP, then two warning colours at a quarter and an eighth or less
+btl_msg_setup = 0x800BFBCC;  # function: starts a battle message state: text pointer at +0 and +0x14, page +0x30 = 0, colours and flags
