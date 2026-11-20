@@ -247,6 +247,12 @@ void BattleView::apply_camera(float alpha) {
     pose.roll_deg = 0.0f;
     camera_.set_free_pose(pose);
   }
+  // A controlled run's own camera (Control `camera`: an editor's orbit): exactly its H, whatever the player's FOV setting.
+  if (control_pose_) {
+    pose = *control_pose_;
+    pose.h = control_pose_->h / render::fov_scale();
+    camera_.set_free_pose(pose);
+  }
   // Dev: the camera as DRAWN (draw alpha, PS1 axes: y down), then every unit's facing in 4096ths of a turn (- = absent).
   if (static const bool trace = std::getenv("OC_DRAW_CAM") != nullptr; trace) {
     std::string yaws;
@@ -268,7 +274,7 @@ void BattleView::apply_camera(float alpha) {
   const std::array<float, 3>& right = axes.right;
   const std::array<float, 3>& down = axes.down;
   // An anchored shot keeps the ground under the eye at least 256 units below the view centre line: the view is raised along its own up axis.
-  if (source.ground_lift() && !free_cam().on()) {
+  if (source.ground_lift() && !free_cam().on() && !control_pose_) {
     const float ground_y = dot(down, {0.0f, -pose.eye[1], 0.0f});
     if (ground_y < 256.0f)
       for (size_t i = 0; i < 3; ++i) cam_.eye[i] -= down[i] * (256.0f - ground_y);
@@ -342,7 +348,8 @@ void BattleView::start_stage_intro(bool preroll) {
     log::info("battle: intro timeline {} at tick {} (hand-over tick {}, bracket clock {})", intro_pending_, tick_count_, white_ticks_, rde_m0_ + tick_count_);
     intro_pending_.clear();
   }
-  if (field_battle_ && bank_.sequence("fade")) camera_.play_sequence("fade");
+  // A live intro (a stage preview) leaves the field battle's darkening out: in the game it goes under the hand-over's warp.
+  if (field_battle_ && !intro_live_ && bank_.sequence("fade")) camera_.play_sequence("fade");
   if (!preroll) return;
   for (int i = 0; i < kBtlinitLoadTicks; ++i) {
     CamEvents cam_events;
@@ -389,10 +396,12 @@ void BattleView::tick_camera() {
   if (ui_ == Ui::Intro) {
     ++intro_ticks_;
     const bool rde_load = rde_hand_ && white_ticks_ >= 0;
-    if (!intro_started_ && (!rde_load || white_ticks_ >= encstrips::kIntroStart)) start_stage_intro(!rde_load);
+    if (!intro_started_ && (!rde_load || white_ticks_ >= encstrips::kIntroStart)) start_stage_intro(!rde_load && !intro_live_);
     // The load ends (under the RDE hand-over: kLoadHold ticks after the take-over): the first PC is placed; a field battle's `pli*` starts now,
     // a held intro's after the `bti*` timeline and its shot.
-    if (intro_started_ && pli_after_load_ && (!rde_load || white_ticks_ >= encstrips::kLoadHold)) {
+    // A live intro (intro_live_) stands for the load: the party intro after its ticks.
+    if (intro_started_ && pli_after_load_ && (!rde_load || white_ticks_ >= encstrips::kLoadHold) &&
+        (!intro_live_ || intro_ticks_ > kBtlinitLoadTicks)) {
       pli_after_load_ = false;
       int first = -1;
       for (int i = 0; i < battle::kPcSlots; ++i)

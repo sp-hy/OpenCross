@@ -133,7 +133,7 @@ DamageOut weapon_damage(Rng& rng, const WeaponIn& in) {
   const int lo = in.target_afraid ? 5 : 0;
   const int hi = in.strength == 2 ? 15 : 14;
   const int crit_roll = in.crit_roll ? rng.rnd(lo, hi) : 0;
-  out.crit = crit_roll >= (in.hero_set ? 7 : 15) || in.slayer;
+  out.crit = crit_roll >= (in.hero_set ? 7 : 15) || in.slayer || in.forced_crit;
   const int bonus = out.crit ? kCritBonus[static_cast<size_t>(in.weapon_class & 15)] : 0;
   int dmg = coloured * (100 + bonus) / 100;
   if (in.opposite_colour) dmg = dmg * 300 / 200;

@@ -59,6 +59,21 @@ class StageScene {
   // The position shift the stage's own emitters run with: 3 (default: field / title), 5 in battle.
   // Takes effect at the next load().
   void set_pos_shift(int shift) { pos_shift_ = shift; }
+  // A controlled run's live drag (Control `xform` in a battle: an editor's effects drafted into the stage): the named emitters' objects
+  // drawn moved (EmitterSystem::set_draw_xform). Kept across loads (a restart loads the stage again).
+  void set_draw_xform(std::optional<effects::DrawXform> xform) {
+    xform_ = std::move(xform);
+    if (em_) em_->set_draw_xform(xform_);
+  }
+  // A controlled run's floor grid (Control `grid` in a battle), drawn with the stage's effects (effects::add_grid_quads, sorted with
+  // them). Kept across loads.
+  void set_debug_grid(std::optional<effects::FloorGrid> grid) { grid_ = grid; }
+  // A controlled run's bare stage (Control `stage 0`): the stage's meshes, the unit shadows on them and its own emitters' sprites not
+  // drawn (the floor grid still is); drawing only, the stage loads and runs as usual. Kept across loads.
+  void set_hidden(bool on) { hidden_ = on; }
+  bool hidden() const { return hidden_; }
+  // Control `replay` in a battle: the named stage emitters played again from their start (EmitterSystem::replay).
+  int replay(const std::vector<std::string>& names) { return em_ ? em_->replay(names) : 0; }
   void clear();
   bool ready() const { return mesh_ != nullptr; }
 
@@ -198,6 +213,10 @@ class StageScene {
   render::ParticleBatch particles_;
   bool sprites_ok_ = false, particles_ready_ = false;
   int pos_shift_ = 3;
+  // Set by set_draw_xform / set_debug_grid / set_hidden.
+  std::optional<effects::DrawXform> xform_;
+  std::optional<effects::FloorGrid> grid_;
+  bool hidden_ = false;
   render::StagePipeline::DepthCue cue_;
   render::LightSet spell_lights_;
   effects::FxGround ground_;

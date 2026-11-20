@@ -99,6 +99,9 @@ void LowRes::end(const render::Frame& frame, float vw, float vh, const render::L
   // boundary, where the quad's two triangles could round differently.
   const float bu = 1.0f / (64.0f * tw), bv = 1.0f / (64.0f * th);
   sprites_->begin(frame, vw, vh, true);
+  // A preview's depth stamp (SpriteBatch::set_depth_stamp) comes from the windows' own pixels, not the white / black bases.
+  const bool stamped = sprites_->depth_stamp();
+  sprites_->set_depth_stamp(false);
   if (multiply && mul_set_) {
     sprites_->set_blend(render::BlendMode::Multiply);
     sprites_->draw(mul_set_, ox, oy, dw, dh, bu, bv, 1.0f + bu, 1.0f + bv);
@@ -107,6 +110,7 @@ void LowRes::end(const render::Frame& frame, float vw, float vh, const render::L
     sprites_->set_blend(render::BlendMode::Subtract);
     sprites_->draw(sub_set_, ox, oy, dw, dh, bu, bv, 1.0f + bu, 1.0f + bv);
   }
+  sprites_->set_depth_stamp(stamped);
   sprites_->set_blend(render::BlendMode::Premultiplied);
   sprites_->draw(set_, ox, oy, dw, dh, bu, bv, 1.0f + bu, 1.0f + bv);
   sprites_->set_blend(render::BlendMode::Alpha);

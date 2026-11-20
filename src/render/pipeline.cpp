@@ -14,6 +14,8 @@ SDL_GPUColorTargetBlendState blend_state(Blend requested) {
                       : requested == Blend::MultiplyKeepAlpha ? Blend::Multiply
                                                               : requested;
   SDL_GPUColorTargetBlendState state{};
+  // Keep: a depth-only draw, no colour component written.
+  if (requested == Blend::Keep) return state;
   state.color_write_mask = SDL_GPU_COLORCOMPONENT_R | SDL_GPU_COLORCOMPONENT_G | SDL_GPU_COLORCOMPONENT_B | SDL_GPU_COLORCOMPONENT_A;
   if (blend == Blend::None) return state;
   state.enable_blend = true;

@@ -381,6 +381,16 @@ class Actor {
   int fade_source() const { return from_clip_ >= 0 && fade_cur_ < fade_len_ ? (from_clip_ << 12) | (static_cast<int>(from_cur_ * 4.0f + 0.5f) & 0xFFF) : -1; }
   // Keyframe position in the current clip (route trace hook, debug dump).
   float anim_time() const { return t_cur_; }
+  // The pose at the end of the last tick, for a controller that poses the model itself (Control `state`): the clip and its keyframe
+  // position, the clip faded from (-1: no cross-fade running) and its position, and the current clip's share of the blend (0..1).
+  struct PoseNow {
+    int clip = -1;
+    float time = 0;
+    int from_clip = -1;
+    float from_time = 0;
+    float weight = 1;
+  };
+  PoseNow pose_now() const;
   size_t clip_count() const { return model_ ? model_->asset.clips.size() : 0; }
 
   // World matrices of all joints at the interpolated animation time (blended during a cross-fade).
@@ -434,6 +444,7 @@ class Actor {
   struct Local {
     assets::Vec3 rot, trans;
   };
+  float fade_weight(int elapsed) const;
   void set_clip(int clip_index);
   // Restart from keyframe 0; `fade` = the blend word (ticks & 0x1FFF, 0 = cut; 0x8000 = source keeps running).
   void start_clip(int clip_index, int fade);

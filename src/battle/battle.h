@@ -798,6 +798,11 @@ class Battle {
     if (!versus_) inv_party_ = party, inv_enemies_ = enemies;
   }
   bool invincible(int unit) const { return unit < kPcSlots ? (inv_party_ || cheats_.god_mode || cheats_.boost) : inv_enemies_; }
+  // Debug tools (route `set critical`): every weapon hit of this battle is a critical (the roll is still drawn: the stream stays the same).
+  void set_force_crit(bool on) { force_crit_ = on; }
+  // Debug tools (route `set hit`): every weapon attack and steal of this battle hits (1) or misses (0); -1 = the roll decides. The roll is
+  // still drawn, so the stream stays the same.
+  void set_force_hit(int hit) { force_hit_ = hit; }
   // RDE's rule for the Radius tutorial (battle 386): its first enemy slot never dies. A hit's damage is cut to HP - 1 and a KO does not
   // stay (the tutorial's own idle script rewrites that unit's HP every tick).
   static constexpr int kUndyingScene = 386, kUndyingUnit = 3;
@@ -1027,6 +1032,8 @@ class Battle {
   bool cast_all_ = false;
   // Set by set_invincible.
   bool inv_party_ = false, inv_enemies_ = false;
+  bool force_crit_ = false;
+  int force_hit_ = -1;
   Cheats cheats_;
   Outcome outcome_ = Outcome::Ongoing;
   int result_code_ = -1;

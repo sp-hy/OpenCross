@@ -55,7 +55,7 @@ bool BattleView::weapon_matrix(int unit, int slot, render::Mat4& out) const {
 // Every visible unit with a model casts a drop shadow; the stage scene builds the hulls.
 void BattleView::collect_shadow_casters() {
   shadow_casters_.clear();
-  if (!stage_scene_.ready()) return;
+  if (!stage_scene_.ready() || hide_units_) return;
   for (int i = 0; i < battle::kUnits; ++i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];

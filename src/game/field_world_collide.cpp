@@ -134,6 +134,11 @@ int FieldWorld::entity_clip(int ent, bool source) const {
   return (actor.cur_clip() << 12) | (static_cast<int>(actor.anim_time() * 4.0f + 0.5f) & 0xFFF);
 }
 
+Actor::PoseNow FieldWorld::entity_pose(int ent) const {
+  if (ent < 0 || ent >= static_cast<int>(ents_.size())) return {};
+  return ents_[static_cast<size_t>(ent)].actor.pose_now();
+}
+
 int FieldWorld::entity_yaw(int ent) const {
   if (ent == -1) ent = player_entity();
   if (ent < 0 || ent >= static_cast<int>(ents_.size())) return 0;
@@ -168,6 +173,90 @@ bool FieldWorld::in_box(int i, float px, float pz, float margin) const {
   return std::fabs(lx) <= hw && std::fabs(lz) <= hh;
 }
 
+bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_z) {
+  const int player = player_entity();
+  const WalkMesh& walk = view_.walk();
+  if (player < 0 || ent <= 0 || ent >= static_cast<int>(ents_.size()) || ent == player || walk.empty()) return false;
+  const ActorPose& target = ents_[static_cast<size_t>(ent)].actor.current();
+  const ActorPose& lead = ents_[static_cast<size_t>(player)].actor.current();
+  const float rp = ent_radius(player);
+  const bool box = ent_box(ent);
+  // Search directions: toward where the leader stands first, then alternating either side of it (16 in all).
+  const float home = std::atan2(lead.z - target.z, lead.x - target.x);
+  // Centre distance along a direction: a circle's is fixed (the middle of the band talk range minus touch range: the talk
+  // event, not the touch one); a box's lies between its solid rectangle and its talk margin, so it depends on the direction.
+  auto reach = [&](float angle) {
+    if (dist > 0) return dist;
+    if (!box) return rp + ent_radius(ent) + (kTouchMargin + kTalkMargin) * 0.5f;
+    float inner = 0, outer = 0;
+    for (float out = 0; out < 2048.0f && !outer; out += 2.0f) {
+      const float px = target.x + out * std::cos(angle), pz = target.z + out * std::sin(angle);
+      if (!inner && !in_box(ent, px, pz, 0)) inner = out;
+      if (!in_box(ent, px, pz, kBoxMargin)) outer = out;
+    }
+    return (inner + outer) * 0.5f;
+  };
+  // Another entity the spot must keep out of: its touch range (a circle) or talk box (an exit or door box), on the same floor.
+  auto crowded = [&](float px, float pz, float py) {
+    for (int i = 1; i < static_cast<int>(ents_.size()); ++i) {
+      if (i == ent || i == player || ents_[static_cast<size_t>(i)].pc_slot >= 0 || !ents_[static_cast<size_t>(i)].placed) continue;
+      const script::Entity& other = vm_.entity(i);
+      if (other.flags38 & 0x400012) continue;
+      const ActorPose& op = ents_[static_cast<size_t>(i)].actor.current();
+      if (std::fabs(op.y - py) > ent_height(i) + ent_height(player)) continue;
+      if (ent_box(i) ? in_box(i, px, pz, kBoxMargin)
+                     : std::hypot(op.x - px, op.z - pz) < rp + ent_radius(i) + kTouchMargin) return true;
+    }
+    return false;
+  };
+  // Best spot first: on the target's floor (score 3), + clear of other entities (+2), + the ground between it and the target
+  // walkable (+1: not across a counter or a wall gap). The first direction with the best score wins.
+  // The floor: step_triggers' height test (Y down) takes a leader at py with target.y - h_target <= py <= target.y + h_leader;
+  // an entity raised above the walk mesh (a figure on a pedestal) is talked to from the floor below it.
+  const float y_lo = target.y - ent_height(ent), y_hi = target.y + ent_height(player), y_hint = (y_lo + y_hi) * 0.5f;
+  auto floor_ok = [&](int tri, float px, float pz) {
+    if (tri < 0) return false;
+    const float py = walk.height(tri, px, pz);
+    return y_lo <= py && py <= y_hi;
+  };
+  int best = -1;
+  float bx = 0, bz = 0, by = 0;
+  for (int k = 0; k < 16 && best < 6; ++k) {
+    const float angle = home + static_cast<float>((k + 1) / 2) * (k % 2 ? 1.0f : -1.0f) * (2.0f * kPi / 16.0f);
+    const float centre = reach(angle);
+    const float px = target.x + centre * std::cos(angle), pz = target.z + centre * std::sin(angle);
+    const int tri = walk.find_triangle(px, pz, y_hint);
+    if (!floor_ok(tri, px, pz)) continue;
+    const float py = walk.height(tri, px, pz);
+    int score = 3 + (crowded(px, pz, py) ? 0 : 2);
+    bool between = true;
+    for (float frac = 0.25f; frac < 0.8f && between; frac += 0.25f) {
+      const float sx = target.x + frac * centre * std::cos(angle), sz = target.z + frac * centre * std::sin(angle);
+      between = floor_ok(walk.find_triangle(sx, sz, y_hint), sx, sz);
+    }
+    score += between ? 1 : 0;
+    if (score > best) best = score, bx = px, bz = pz, by = py;
+  }
+  if (const u32 flags = vm_.entity(ent).flags38; flags & (0x400012 | script::flag38::kNoAction))
+    log::info("route: put beside ent {}: it takes no talk now (flags38 {:X})", ent, flags);
+  if (best < 0) return false;
+  // The talk cone is centred on the bearing from the leader to the entity: the party faces it (the model turned at once).
+  const int face = bearing(target.x - bx, target.z - bz);
+  for (int slot = 0; slot < 3; ++slot) {
+    const int pe = party_entity(slot);
+    if (pe < 0) continue;
+    Actor& actor = ents_[static_cast<size_t>(pe)].actor;
+    actor.set_height(by, true);
+    actor.set_position(walk, bx, bz, true, false);
+    actor.set_facing(face);
+    actor.snap_facing();
+    ents_[static_cast<size_t>(pe)].placed = true;
+  }
+  out_x = bx;
+  out_z = bz;
+  return true;
+}
+
 u32 FieldWorld::walk_flags(int i) const {
   // After the move, every entity but the controlled one takes `table[attr of its triangle]`, except that an
   // entity with free height (op 26 / 3F with y) and the FE 19 bit clear gets 0. The controlled entity
@@ -186,7 +275,7 @@ u32 FieldWorld::walk_flags(int i) const {
 // screen frozen. An empty party slot (no model) stays out via slot_inactive.
 bool FieldWorld::ent_not_drawn(int i) const {
   const u32 flags = vm_.entity(i).flags38;
-  if (flags & (0x20 | script::flag38::kNo3dObject | script::flag38::kOffScreen)) return true;
+  if (flags & (0x20 | script::flag38::kNo3dObject | (draw_offscreen_ ? 0u : script::flag38::kOffScreen))) return true;
   return (flags & script::flag38::kInactive) && ents_[static_cast<size_t>(i)].slot_inactive;
 }
 

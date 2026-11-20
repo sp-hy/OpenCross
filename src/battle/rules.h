@@ -126,6 +126,8 @@ struct WeaponIn {
   bool hero_set = false;
   // False for a weapon tech: no crit roll is drawn, only the slayer mask makes a critical.
   bool crit_roll = true;
+  // Debug tools (Battle::set_force_crit): a critical whatever the roll.
+  bool forced_crit = false;
   bool target_afraid = false, slayer = false;
   // Attack colour == kOpp[target colour].
   bool opposite_colour = false;

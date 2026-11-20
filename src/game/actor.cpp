@@ -1183,6 +1183,24 @@ void Actor::compose(const std::vector<Local>& local, float alpha, bool head, std
   }
 }
 
+// The current clip's share of a cross-fade `elapsed` ticks in: the curve's 0x1000-based weight, else linear over the fade.
+float Actor::fade_weight(int elapsed) const {
+  return fade_curve_ == 1 ? static_cast<float>(exp_blend_weight(elapsed)) / 4096.0f
+                          : std::clamp(static_cast<float>(elapsed) / static_cast<float>(std::max(fade_len_, 1)), 0.0f, 1.0f);
+}
+
+Actor::PoseNow Actor::pose_now() const {
+  PoseNow out;
+  out.clip = clip_;
+  out.time = t_cur_;
+  if (clip_ >= 0 && from_clip_ >= 0 && fade_weight(fade_cur_) < 1.0f) {
+    out.from_clip = from_clip_;
+    out.from_time = from_cur_;
+    out.weight = fade_weight(fade_cur_);
+  }
+  return out;
+}
+
 void Actor::locals(float alpha, std::vector<Local>& local) const {
   if (clip_ < 0) {
     // No clips: rest pose.
@@ -1196,10 +1214,7 @@ void Actor::locals(float alpha, std::vector<Local>& local) const {
       return time;
     };
     sample_local(clip_at(clip_), at(clip_, t_prev_, t_cur_), local);
-    auto weight = [&](int elapsed) {
-      return fade_curve_ == 1 ? static_cast<float>(exp_blend_weight(elapsed)) / 4096.0f
-                              : std::clamp(static_cast<float>(elapsed) / static_cast<float>(std::max(fade_len_, 1)), 0.0f, 1.0f);
-    };
+    auto weight = [&](int elapsed) { return fade_weight(elapsed); };
     const float w0 = weight(fade_prev_);
     const float blend_weight = w0 + (weight(fade_cur_) - w0) * alpha;
     if (from_clip_ >= 0 && blend_weight < 1.0f) {

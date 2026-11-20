@@ -81,6 +81,48 @@ ViewParams ViewParams::from_room(const assets::RoomCamera& camera) {
   return view;
 }
 
+void add_grid_quads(const ViewParams& vp, const FloorGrid& grid, std::vector<DrawQuad>& quads) {
+  const auto& rot = vp.rot.m;
+  auto project = [&](float x, float y, float z, float& sx, float& sy, float& depth) {
+    const float view_x = rot[0] * x + rot[1] * y + rot[2] * z + vp.trans[0], view_y = rot[3] * x + rot[4] * y + rot[5] * z + vp.trans[1];
+    depth = rot[6] * x + rot[7] * y + rot[8] * z + vp.trans[2];
+    if (depth < 16.0f) return false;
+    sx = vp.ox + vp.h * view_x / depth + vp.scroll_x, sy = vp.oy + vp.h * view_y / depth + vp.scroll_y;
+    return true;
+  };
+  u32 order = quads.empty() ? 0 : quads.back().order + 1;
+  auto line = [&](float ax, float ay, float az, float bx, float by, float bz, std::array<u8, 3> rgb, float width) {
+    float x0, y0, d0, x1, y1, d1;
+    if (!project(ax, ay, az, x0, y0, d0) || !project(bx, by, bz, x1, y1, d1)) return;
+    const float dx = x1 - x0, dy = y1 - y0, len = std::hypot(dx, dy);
+    const float nx = len > 1e-4f ? -dy / len * width : width, ny = len > 1e-4f ? dx / len * width : 0.0f;
+    DrawQuad quad;
+    quad.untextured = 2;
+    quad.x[0] = x0 - nx, quad.y[0] = y0 - ny, quad.x[1] = x1 - nx, quad.y[1] = y1 - ny;
+    quad.x[2] = x0 + nx, quad.y[2] = y0 + ny, quad.x[3] = x1 + nx, quad.y[3] = y1 + ny;
+    quad.r = quad.r1 = rgb[0], quad.g = quad.g1 = rgb[1], quad.b = quad.b1 = rgb[2];
+    quad.blend = 0;
+    quad.slot = std::clamp(static_cast<int>((d0 + d1) * 0.5f) >> 4, 0, 0xFFF);
+    quad.order = order++;
+    quads.push_back(quad);
+  };
+  const float step = grid.step, x0 = (std::round(grid.cx / step) - static_cast<float>(grid.half)) * step,
+              z0 = (std::round(grid.cz / step) - static_cast<float>(grid.half)) * step;
+  const int cells = 2 * grid.half;
+  constexpr std::array<u8, 3> kGrey{92, 92, 92}, kX{200, 64, 64}, kY{90, 180, 72}, kZ{72, 112, 210};
+  for (int i = 0; i <= cells; ++i)
+    for (int j = 0; j < cells; ++j) {
+      const float along = static_cast<float>(i) * step, across = static_cast<float>(j) * step;
+      // Lines along z at x = x0 + along, lines along x at z = z0 + along.
+      const bool on_z_axis = x0 + along == 0.0f, on_x_axis = z0 + along == 0.0f;
+      line(x0 + along, 0, z0 + across, x0 + along, 0, z0 + across + step, on_z_axis ? kZ : kGrey, on_z_axis ? 0.75f : 0.4f);
+      line(x0 + across, 0, z0 + along, x0 + across + step, 0, z0 + along, on_x_axis ? kX : kGrey, on_x_axis ? 0.75f : 0.4f);
+    }
+  // PS1 y is down: up = -y.
+  const float span = static_cast<float>(cells) * step;
+  if (x0 <= 0.0f && 0.0f <= x0 + span && z0 <= 0.0f && 0.0f <= z0 + span) line(0, 0, 0, 0, -step, 0, kY, 0.75f);
+}
+
 void sort_draw_order(std::vector<DrawQuad>& quads) {
   std::stable_sort(quads.begin(), quads.end(), [](const DrawQuad& lhs, const DrawQuad& rhs) {
     if (lhs.slot != rhs.slot) return lhs.slot > rhs.slot;

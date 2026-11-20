@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <iterator>
 
 #include "core/log.h"
 #include "import/text.h"
@@ -25,6 +26,61 @@ namespace oc::game {
 using namespace bv;
 
 // ----------------------------------------------------------------------------------------------------------- update
+void BattleView::set_route_trace(std::vector<std::string>* lines, const u64* tick) {
+  rtrace_ = lines;
+  rtrace_tick_ = tick;
+  if (!lines) {
+    bseq::Vm::sink = nullptr;
+    return;
+  }
+  bseq::Vm::sink = [this](const bseq::Vm& vm, const bseq::Table* table, int pc, const s16* words, int len) {
+    if (!rtrace_) return;
+    int unit = &vm == &pa_.vm ? battle::kUnits : -1;
+    for (int i = 0; i < battle::kUnits && unit < 0; ++i)
+      if (&vis_[static_cast<size_t>(i)].vm == &vm) unit = i;
+    std::string line = std::format("a {} {} {} {}", *rtrace_tick_, unit, trace_table_name(table), pc);
+    for (int k = 0; k < len; ++k) line += std::format(" {}", words[k]);
+    rtrace_->push_back(std::move(line));
+  };
+}
+
+std::string BattleView::trace_table_name(const bseq::Table* table) const {
+  if (!table) return "?";
+  if (fx_pack_) {
+    if (table == &fx_pack_->anim) return "pack:anim";
+    for (const auto& [tag, pack_table] : fx_pack_->tables)
+      if (table == &pack_table) return "pack:" + tag;
+  }
+  for (const auto& [stem, sc] : model_cache_.scripts)
+    if (sc && table == &sc->s5) return "s5:" + stem;
+    else if (sc && table == &sc->atk) return "atk:" + stem;
+  if (table == &model_cache_.fallback_atk) return "atk:fallback";
+  if (table == &pa_.own_table) return "own";
+  return "?";
+}
+
+void BattleView::trace_seq(std::string_view seq, const assets::SeqCmd& cmd) {
+  if (!rtrace_) return;
+  std::string line = std::format("s {} {} {} {}", *rtrace_tick_, seq.empty() ? std::string("?") : std::string(seq), cmd.offset, cmd.op);
+  line += ' ';
+  for (u8 byte : cmd.data) line += std::format("{:02x}", byte);
+  if (cmd.data.empty()) line += '-';
+  rtrace_->push_back(std::move(line));
+}
+
+const char* BattleView::action_phase_name(int phase) {
+  static constexpr const char* kNames[] = {"none", "approach", "hit", "return", "cast", "release", "run", "swap", "settle"};
+  return phase >= 0 && phase < static_cast<int>(std::size(kNames)) ? kNames[phase] : "?";
+}
+
+bool BattleView::route_idle() const {
+  if (!battle_ || ui_ == Ui::Intro || finish_ != Finish::None || dbg_.cast_element > 0 || dbg_.weapon >= 0) return false;
+  if (!queue_.empty() || act_.phase != Act::Phase::None || !pending_.empty() || script_busy() || cast_handover_ > 0) return false;
+  for (int i = 0; i < battle::kUnits; ++i)
+    if (bunit(i).present && vis_[static_cast<size_t>(i)].spawn && vis_[static_cast<size_t>(i)].vm.running()) return false;
+  return true;
+}
+
 void BattleView::update(float dt, const platform::Input& in) {
   // The pause screen: nothing ticks (battle_view.h set_paused).
   if (paused_) return;
@@ -89,6 +145,7 @@ void BattleView::update(float dt, const platform::Input& in) {
     const int el = dbg_.cast_element, weapon = dbg_.weapon;
     dbg_.cast_element = 0;
     dbg_.weapon = -1;
+    ++debug_actions_;
     // Dev: OC_GHOST="u:flag,..." sets the script ghost word of those units before the cast (1 = off-stage, 0 = shown), so a ghost-pair scene's
     // harness cast starts from the state a real script run would have reached (scene 431: Bunyip's two forms, u3 hidden / u4 shown).
     if (const char* ghost_env = std::getenv("OC_GHOST"); ghost_env && brain_.vm())

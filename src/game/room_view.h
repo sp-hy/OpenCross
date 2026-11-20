@@ -39,6 +39,10 @@ class RoomView {
   // Loads the room's background, camera and walk mesh. The scroll starts at (0, 0) with all layers visible. A matching prefetch()
   // hands over its work, so only the GPU uploads are left.
   bool load(std::string_view name);
+  // True when load(name) with this .prd would keep the built art: the room on show again with unchanged art inputs (an editor's reload).
+  bool same_art(std::string_view name, const std::string& prd_request);
+  // The last load kept the built art (and prepared no room models: the world keeps the ones it has).
+  bool art_reused() const { return art_reused_; }
   void unload() { clear(); }
   // Starts the CPU part of a later load(name) with this .prd path (set_prd_path's form) on a worker thread: file reads, the import,
   // the 1x composition and, in HD art, the 4x one. load() uses it when the room, the .prd, the art mode and the file set still match,
@@ -60,7 +64,14 @@ class RoomView {
   std::optional<assets::StageAsset> effect_meshes() const;
   WalkMesh& walk() { return walk_; }
   const WalkMesh& walk() const { return walk_; }
+  // The room's camera: the simulation's (input directions, culls, sound pans, window places). Drawers use draw_camera.
   const render::FieldCamera& camera() const { return camera_; }
+  // A controlled run's own camera (Control `camera`: an editor's orbit around effects): every drawer of room-space content (actors,
+  // shadows, effects, room meshes) projects through it instead of the room's, the background layers are not drawn (they are the room
+  // camera's picture) and the picture spans every column; the simulation keeps the room's camera. Kept across room loads.
+  void set_camera_override(std::optional<render::FieldCamera> camera) { camera_override_ = std::move(camera); }
+  bool camera_overridden() const { return camera_override_.has_value(); }
+  const render::FieldCamera& draw_camera() const { return camera_override_ ? *camera_override_ : camera_; }
   size_t layer_count() const { return layers_; }
   // Composed (layer, group) images in the scene.
   size_t group_count() const { return groups_; }
@@ -77,6 +88,12 @@ class RoomView {
   static Limits widen(Limits limits, int extra);
   // True while the simulation stands still: draws use the latest tick, not a sweeping alpha.
   void set_interp_frozen(bool frozen) { interp_frozen_ = frozen; }
+  // A scroll for drawing only (a controlled run's whole-room picture): scroll_at returns it while on; the simulation's scroll is untouched.
+  void set_draw_scroll(bool on, float x = 0.0f, float y = 0.0f) {
+    draw_scroll_on_ = on;
+    draw_scroll_x_ = x;
+    draw_scroll_y_ = y;
+  }
   // `snap` also resets the interpolation source. `fine_x, fine_y` (at most 2 px) is the display-only sub-pixel offset of
   // ScrollSmoother; scroll_x / scroll_y stay the integer scroll.
   void set_scroll(int x, int y, bool snap, float fine_x = 0.0f, float fine_y = 0.0f);
@@ -132,7 +149,13 @@ class RoomView {
   // Window area of the field picture: buffer rows 0..224 in RDE's cropped 4:3 viewport (render::Letterbox::field), or 1:1 while the
   // field is drawn into the PS1-resolution target (set_target_pass). Every drawer of room-space content must use this mapping.
   render::Letterbox letterbox(float view_w, float view_h) const {
+    if (room_pass_) return render::Letterbox::room(view_w, view_h, target_scale_);
     return target_pass_ ? render::Letterbox::identity(view_w, view_h, target_scale_) : render::Letterbox::field(view_w, view_h);
+  }
+  // A controlled run's whole-room picture (App::draw_room_shot): the target pass maps more than one screen both ways (Letterbox::room).
+  void set_room_pass(bool on, float scale = 1.0f) {
+    room_pass_ = on;
+    target_scale_ = scale;
   }
   // Layer columns of the field picture in `lb` at scroll x `scroll_x` (scroll_at): the visible columns [lb.x0, lb.x0 + lb.w]; in widescreen
   // cut to the room picture's own columns (black where the picture ends).
@@ -204,6 +227,7 @@ class RoomView {
   render::TexRef fade_set_;
   WalkMesh walk_;
   render::FieldCamera camera_;
+  std::optional<render::FieldCamera> camera_override_;
   std::vector<std::string> rooms_;
   // Back to front.
   std::vector<std::unique_ptr<Item>> items_;
@@ -224,6 +248,9 @@ class RoomView {
   int art_x0_ = 0, art_x1_ = 320;
   // See set_interp_frozen.
   bool interp_frozen_ = false;
+  bool draw_scroll_on_ = false;
+  bool room_pass_ = false;
+  float draw_scroll_x_ = 0, draw_scroll_y_ = 0;
   // Scroll S (layer pixels, added to tile positions), latest tick; then the previous tick, for render interpolation.
   int pan_x_ = 0, pan_y_ = 0;
   int prev_pan_x_ = 0, prev_pan_y_ = 0;
@@ -244,6 +271,20 @@ class RoomView {
   std::unique_ptr<assets::RoomScene> scene_;
   std::vector<std::optional<PreparedRoomModel>> prepared_models_;
   std::optional<import::Chip2> chip2_;
+  // The art inputs of the loaded room (art_key_of; 0 = none): a reload of the same room with the same key keeps the built art.
+  u64 art_key_ = 0;
+  bool art_reused_ = false;
+  bool reuse_art(std::string_view name, const std::string& prd_request);
+  // The room's current files and their art key (key 0: not readable).
+  struct ArtCheck {
+    std::string prd_request, prd_path;
+    std::optional<Bytes> bin, prd;
+    u32 generation = 0;
+    u64 key = 0;
+  };
+  ArtCheck current_art(const std::string& prd_request) const;
+  // What the last same_art read (FieldWorld::load_room asks it just before load): reuse_art takes it instead of reading the files again.
+  std::optional<ArtCheck> checked_;
 };
 
 }  // namespace oc::game

@@ -267,6 +267,7 @@ int Vm::step(const Ctx& ctx, std::vector<Event>& out) {
   if (op < 0 || op > 0xAC) return end();
   const int len = kLen[op];
   if (trace) trace(pc, &words[static_cast<size_t>(pc)], std::min(len, static_cast<int>(words.size()) - pc));
+  if (sink) sink(*this, table_, pc, &words[static_cast<size_t>(pc)], std::min(len, static_cast<int>(words.size()) - pc));
   auto emit = [&](Event::Kind kind, int a = 0, int b = 0, int c = 0, int d = 0, u32 tag = 0) {
     Event event;
     event.kind = kind;

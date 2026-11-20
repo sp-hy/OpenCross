@@ -72,6 +72,9 @@ void BattleView::fx_reset_scene() {
   // The ground overlay is freed.
   stage_scene_.ground_overlay_end();
   fx_pack_.reset();
+  // The pseudo-actor points into a pack's models (FxGpu::models, its own group 0xE handle): it goes with them. A scene that starts while
+  // a pack still plays (an editor's run restarted mid-action) would otherwise tick a pose on freed memory.
+  pa_ = PseudoActor{};
   fx_gpu_.clear();
   fx_lib_gpu_.reset();
   fx_lib_key_ = nullptr;
@@ -166,6 +169,7 @@ void BattleView::fx_charge_begin() {
     fx_fog_on_ = false;
     fx_unit_fog_.fill(false);
   };
+  cb.trace = [this](std::string_view seq, const assets::SeqCmd& cmd) { trace_seq(seq, cmd); };
   fx_->set_callbacks(std::move(cb));
   fx_->set_sfx(audio_.sfx());
   fx_->set_lights(&fx_lights_);
@@ -379,6 +383,7 @@ bool BattleView::fx_begin() {
     for (size_t k = 0; k < 3; ++k) back[k] = static_cast<float>(fx_ambient_.cur[k]) / 256.0f;
     return true;
   };
+  cb.trace = [this](std::string_view seq, const assets::SeqCmd& cmd) { trace_seq(seq, cmd); };
   fx_->set_callbacks(std::move(cb));
   fx_->set_sfx(audio_.sfx());
   fx_->set_lights(&fx_lights_);

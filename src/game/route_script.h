@@ -27,6 +27,14 @@
 //   wait text <words...>          an open dialogue shows a message containing the words (plain text, newlines as spaces); no timeout
 //                                 argument, the default timeout applies (every other wait form takes an optional [timeout])
 //   wait battle start|end|results [timeout]   (results = the post-battle results screen or a versus battle's outcome plate is up)
+//   wait battle idle [timeout]    the battle view is idle: past the intro, no action, event or script window running, no harness action waiting
+//   cast <element> [caster] [target] [timeout]   battle harness: that unit (PCs 0-2, enemies 3+; default PC 0) casts the element on
+//                                 that unit (default the first enemy) once the view is idle; finishes when the cast begins
+//   attack <0|1|2> [unit] [timeout]   battle harness: party unit (default 0) attacks the first enemy (weak / medium / strong); finishes
+//                                 when the attack begins
+//   set invincible <party 0|1> <enemies 0|1>   battle: no unit of that side drops below 1 HP (Battle::set_invincible)
+//   set battle hp <unit> <n | n%>  battle: a unit's HP now (1 .. max)      set critical <0|1>   battle: weapon hits are criticals
+//   set hit <0|1>                 battle: weapon attacks and steals always hit / miss
 //   wait idle [timeout]           controls free again (no dialogue, no fade, no transition)
 //   wait flow <title|name|slots|opening|field> [timeout]   the game flow reached that state
 //   wait movie start|end [timeout]   an FMV is playing / has finished
@@ -40,6 +48,9 @@
 //   choose <n> [timeout]          wait for a dialogue, move the choice cursor down n times, confirm
 //   fight [timeout]               mash the battle menu (attack chain) until the battle view has finished
 //   autoshot <every> <count> <prefix>   background screenshots every <every> ticks (<prefix>NN.png) while later commands run
+//   read <ticks>                  from now on, in the background: a message window whose text has not moved for <ticks> ticks is
+//                                 confirmed, as a player reading each page (0 = off); a {wait(n)} pause longer than <ticks> is
+//                                 pressed through too
 //   screenshot <file.png>         capture the next rendered frame (relative names go to shots/ next to the route's ini file)
 //   sides <min%> <max%>           the next rendered frame's columns beside the 4:3 picture: the lit share of the left side and of the
 //                                 right side is within the range (99 100 = a widescreen backdrop, 0 0 = black bars)
@@ -58,6 +69,8 @@
 //   set var <hexid> <value>       debug write of a script variable
 //   set option <hexmask> <0|1>    debug write of one bit of the Settings options word (0x200 = [button] Pressed: Run / Walk, 0x800 = analog stick)
 //   put [ent <n>] <x> <z>         debug: place the party (leader and followers), or entity n, at a world point on the walk mesh
+//   put beside <ent> [dist]       debug: place the party on the walk mesh beside entity <ent> where it stands now, the leader facing
+//                                 it: in talk range, out of touch range (dist = centre distance, default the middle of that band)
 //   set model <char> <byte>       D9 + DA on a party member (the character record model byte)
 //   set hp <char> <value> | set status <char> <hexbits>   debug write of a character's current HP / status bits (1 poison, 8 burn,
 //                                 10 sprain, 20 flu)
@@ -107,7 +120,7 @@
 //   remote move <pid> <x> <y> <z> <facing> <clip> <moving>   a new leader pose of that party (clip a field clip id, moving 0 / 1)
 //   remote state <pid> <0..3>     its state (0 field, 1 battle, 2 menu, 3 event)      remote clear   no remote party any more
 //   assert remote <n>             exactly n remote parties were picked to be drawn on the last tick
-//   log <text...>                 message in the log
+//   log <text...>                 message in the log (also handed to the host as RouteOut::note)
 //   quit                          end the run
 #include <array>
 #include <filesystem>
@@ -160,6 +173,10 @@ struct RouteState {
   // Message index of the last field window opened (-1: none).
   int message = -1;
   bool battle = false;
+  // The battle view is idle (BattleView::route_idle: past the intro, nothing running, no harness action waiting).
+  bool battle_idle = false;
+  // Harness actions (`cast`, `attack`) the battle view has begun since the battle started.
+  int battle_actions = 0;
   // Result panel confirmed (the driver hands back to the field next step).
   bool battle_finished = false;
   // The Retry battle choice is up after a wipe.
@@ -253,6 +270,9 @@ struct RouteOut {
   bool put = false;
   int put_ent = -1;
   float put_x = 0, put_z = 0;
+  // `put beside <ent> [dist]`: the party beside entity put_beside (-1 = none), put_dist 0 = the host's default distance.
+  int put_beside = -1;
+  float put_dist = 0;
   bool set_var = false;
   // `set option <hexmask> <0|1>`: one bit of the Settings options word.
   bool set_option = false;
@@ -268,6 +288,19 @@ struct RouteOut {
   int var_id = 0, var_value = 0;
   // `fight`: let the battle view play itself.
   bool battle_auto = false;
+  // `cast <element> [caster] [target]` / `attack <strength> [unit]`: a harness action for the battle view (BattleView::Debug):
+  // battle_cast element id (0 = none), battle_weapon strength 0..2 (-1 = none), battle_caster / battle_target units (-1 = the view's
+  // default: PC 0 on the first enemy).
+  int battle_cast = 0, battle_weapon = -1, battle_caster = -1, battle_target = -1;
+  // `set invincible <party 0|1> <enemies 0|1>` (-1 = unchanged).
+  int invincible_party = -1, invincible_enemies = -1;
+  // `set battle hp <unit> <n | n%>`: a battle unit's HP now (hp_unit -1 = none; hp_percent: n % of its max HP).
+  int hp_unit = -1, hp_value = 0;
+  bool hp_percent = false;
+  // `set critical <0|1>`: the battle's weapon hits are criticals from now on (-1 = unchanged).
+  int critical = -1;
+  // `set hit <0|1>`: the battle's weapon attacks and steals hit / miss from now on (-1 = unchanged).
+  int hit = -1;
   // Log the entity table.
   bool dump = false;
   // Host request (see "request"): kind.
@@ -285,6 +318,8 @@ struct RouteOut {
   bool done = false;
   bool failed = false;
   std::string message;
+  // The text of a `log` line run this tick ("" = none).
+  std::string note;
 };
 
 class Route {
@@ -306,6 +341,7 @@ class Route {
   void hold(int scancode, bool down);
   void press_edge(int scancode, platform::Input& in);
   void fail(RouteOut& out, const Cmd& cmd, const std::string& why);
+  void read_step(const RouteState& st);
 
   std::vector<Cmd> cmds_;
   size_t pc_ = 0;
@@ -347,6 +383,9 @@ class Route {
   u64 stuck_tick_ = 0;
   float stuck_x_ = 0, stuck_z_ = 0;
   u32 fight_step_ = 0;
+  // `read` state: the delay, ticks the windows' typewriters have stood still, their positions then, ticks left holding confirm.
+  int read_ticks_ = 0, read_still_ = 0, read_hold_ = 0;
+  std::vector<int> read_prev_;
   // Autoshot state.
   int as_every_ = 0, as_left_ = 0, as_n_ = 0;
   u64 as_next_ = 0;

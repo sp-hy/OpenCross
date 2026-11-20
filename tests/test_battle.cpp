@@ -4739,6 +4739,15 @@ void test_hero_set() {
     rolls.push(7);
     CHECK_EQ(weapon_damage(rolls, weapon).crit, hero);
   }
+  {
+    // Debug tools' forced critical: a critical with every roll low, the roll still drawn (the same stream after it)
+    weapon.hero_set = false;
+    weapon.forced_crit = true;
+    Lo rolls(Lo::Fallback::Lo);
+    for (int i = 0; i < 14; ++i) rolls.push(0);
+    CHECK(weapon_damage(rolls, weapon).crit);
+    weapon.forced_crit = false;
+  }
   // A weak hit with every roll low: ATK 9, weapon 16 (32 doubled) against DEF 0, armour 4: raw 8 (17), x1125/1000 for the white attacker.
   const auto weak_hit = [](bool hero) {
     Fixture fixture;
@@ -4750,6 +4759,20 @@ void test_hero_set() {
   };
   CHECK_EQ(weak_hit(false), 9);
   CHECK_EQ(weak_hit(true), 19);
+  {
+    // Debug tools' forced hit / miss: a missing roll hits, a hitting roll misses; the roll still drawn (the same stream after it)
+    Fixture fixture;
+    fixture.battle.unit_mut(3).innate = 0;
+    fixture.battle.set_force_hit(1);
+    fixture.rng.push(1000);
+    const int hp0 = fixture.battle.unit(3).hp;
+    fixture.battle.do_weapon_attack(0, 3, 0);
+    CHECK_EQ(hp0 - fixture.battle.unit(3).hp, 9);
+    fixture.battle.set_force_hit(0);
+    fixture.battle.do_weapon_attack(0, 3, 0);
+    CHECK_EQ(fixture.battle.events().back().code, 2);
+    CHECK_EQ(hp0 - fixture.battle.unit(3).hp, 9);
+  }
   // The flag is fixed from the equipment at battle start; a Dopplegang form (the monster's gear) keeps it, and so does the way back.
   data::GameTables tables = make_tables();
   ScriptedRng rng{Lo::Fallback::Lo};

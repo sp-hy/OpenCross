@@ -156,6 +156,7 @@ struct SequencePlayer::Impl {
   // A non-camera command met inside a camera pool (0x23 run): the spawn / sound / ambient ops run at once, the rest goes to the host.
   void exec_other(const assets::SeqCmd& cmd, int target, size_t ti) {
     ++st.commands;
+    if (hooks.trace && tasks[ti].seq) hooks.trace(tasks[ti].seq->name, cmd);
     ++st.op_hits[cmd.op & 0x1FF];
     switch (cmd.op) {
       case 0x20: case 0x21: case 0x42: case 0x67: break;
@@ -243,6 +244,7 @@ struct SequencePlayer::Impl {
       disp_caster = task.caster;
       ++st.commands;
       ++st.op_hits[cmd.op & 0x1FF];
+      if (hooks.trace) hooks.trace(task.seq->name, cmd);
       // Dev trace: one line per executed command.
       if (static const bool trace = std::getenv("OC_FX_SEQ") != nullptr; trace)
         std::fprintf(stderr, "fxseq: t%lld %s #%zu op %02X wait %d %s\n", tick_n, task.caster > 0 ? "sado" : std::string(task.seq->name).c_str(), task.pc, cmd.op, static_cast<int>(static_cast<s16>(cmd.wait)), cmd.name.c_str());

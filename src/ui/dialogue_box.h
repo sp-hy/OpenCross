@@ -372,6 +372,8 @@ class DialogueDemo {
   int picking_line() const;
   // Typewriter position of the open message: page * 0x10000 + revealed glyphs.
   int progress() const;
+  // The page being shown is fully typed and waits for the player (the typewriter's waiting_for_input).
+  bool page_typed() const;
   // Number entry ({input(n)}) of the open message, started from script variable 0x18 (the digit-entry result) at show(); while it takes
   // input, update() writes its value back to that variable every frame. See DialogueBox::start_digits.
   bool digit_entry() const;

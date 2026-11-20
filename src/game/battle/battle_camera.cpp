@@ -304,6 +304,7 @@ bool BattleCamera::select(const std::string& name) {
   }
   glide_rate_ = 0;
   last_name_ = name;
+  ++selects_;
   CamFrame frame;
   float scale = 1.0f;
   make_frame(*shot, frame, scale);

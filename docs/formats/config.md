@@ -228,6 +228,9 @@ Developer and automation switches, read once at boot (except `Log` and `Panels`,
 | `Script` | empty | file path | Route script of timed inputs and commands; the run exits when it ends. |
 | `ScriptMods` | 0 | bool | A scripted or `--config` run keeps the enabled mods and their `mod.ini` features (otherwise it runs the game as shipped): for routes that test a mod's rooms or features. |
 | `ScriptSpeed` | 2 | min 1 | Simulation ticks per rendered frame while a route script runs. |
+| `Control` | 0 | bool | With `Script`: the program that started OpenCross drives the run over stdin / stdout (seek to a tick, the frame out, restart), and the run waits for its commands instead of exiting at the end (`routes.md` section 8.1). |
+| `DraftDir` | | path | A mod folder outside the game's `mods` folder, taken as one more mod, enabled in every art mode and first in priority: an editor's unsaved files for a run it drives (`Control`; `reload` looks at it again). |
+| `ControlDepth` | 0 | bool | With `Control`: each frame comes with its depth image (`routes.md` section 8.1). The field is then drawn straight into the frame: PS1-resolution graphics, render scale, MSAA, the full-screen shader and the grade are off for the run. |
 | `Record` | empty | file path | Write the session's inputs to this file (replayable). Ignored while replaying. |
 | `Replay` | empty | file path | Replay a recorded session; its room and entrance replace `Room` and `Entrance`. |
 

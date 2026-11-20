@@ -168,6 +168,8 @@ class BattleCamera {
   }
   // The last selected shot's name (single-key shots included).
   const std::string& shot_name() const { return last_name_; }
+  // Shots selected so far (a trace sees each select, also the same name twice).
+  int selects() const { return selects_; }
 
   void tick(CamEvents& events);
   // Split mode (the battle view's camera): tick() leaves the shot list out and the host calls tick_shots() after its units moved, so a
@@ -248,6 +250,7 @@ class BattleCamera {
   bool fresh_ = false;
   CamPose prev_, cur_;
   std::string last_name_;
+  int selects_ = 0;
   bool lift_ = false;
   CamPose glide_goal_;
   int glide_rate_ = 0;

@@ -45,6 +45,19 @@ void RoomMeshes::upload_textures() const {
   }
 }
 
+bool RoomMeshes::texture_rgba(int index, u32& width, u32& height, std::vector<u8>& rgba) const {
+  const bool baked = !asset_.object_textures.empty();
+  const size_t count = baked ? asset_.object_textures.size() : asset_.textures.size();
+  if (index < 0 || static_cast<size_t>(index) >= count) return false;
+  const size_t ti = static_cast<size_t>(index);
+  import::Image img = baked ? asset_.object_textures[ti].image : asset_.textures[ti].image.indexed ? import::to_rgba(asset_.textures[ti].image) : asset_.textures[ti].image;
+  if (!img.width || !img.height || img.pixels.size() < static_cast<size_t>(img.width) * img.height * 4u) return false;
+  width = img.width, height = img.height;
+  rgba = std::move(img.pixels);
+  rgba.resize(static_cast<size_t>(width) * height * 4u);
+  return true;
+}
+
 // The recompose rewrites the UVs of the parts and the object images, so the sets are re-made.
 void RoomMeshes::refresh_tiles() const {
   tile_gen_ = render::texture_registry::generation();
@@ -64,15 +77,17 @@ const assets::StagePart* RoomMeshes::find(const std::string& name) const {
 
 namespace {
 
-// One corner of a triangle while it is cut along the texture-window wrap lines (op 36): screen position, colour, scrolled texel position.
+// One corner of a triangle while it is cut along the texture-window wrap lines (op 36): screen position, colour, scrolled texel position,
+// 1 / view depth (linear in screen space, so a cut corner's depth stays on the face).
 struct WrapVert {
-  float x, y, rgb[3], texel[2];
+  float x, y, rgb[3], texel[2], inv_z;
 };
 
 WrapVert lerp(const WrapVert& from, const WrapVert& to, float frac) {
   WrapVert result;
   result.x = from.x + (to.x - from.x) * frac;
   result.y = from.y + (to.y - from.y) * frac;
+  result.inv_z = from.inv_z + (to.inv_z - from.inv_z) * frac;
   for (int k = 0; k < 3; ++k) result.rgb[k] = from.rgb[k] + (to.rgb[k] - from.rgb[k]) * frac;
   for (int k = 0; k < 2; ++k) result.texel[k] = from.texel[k] + (to.texel[k] - from.texel[k]) * frac;
   return result;
@@ -167,6 +182,7 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
         }
         tri.x[corner] = letterbox.ox + (view.ox + view.h * cx / cz + view.scroll_x) * letterbox.scale;
         tri.y[corner] = letterbox.oy + (view.oy + view.h * cy / cz + view.scroll_y) * letterbox.scale_y;
+        tri.z[corner] = cz;
         cz_sum += cz;
         tri.u[corner] = vertex.uv[0];
         tri.v[corner] = 1.0f - vertex.uv[1];
@@ -198,6 +214,8 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
       tri.slot = std::clamp(mesh.fixed_slot ? mesh.bias : (static_cast<int>(packet_z) >> 4) + mesh.bias, 0, 0xFFF);
       tri.blend = blend;
       tri.set = set;
+      tri.tex = ti;
+      tri.z[3] = tri.z[2];
       const bool textured = sm.texture >= 0 && part->vertices[idx[0]].uv_scale[0] > 0.0f;
       if (textured) {
         const assets::StageVertex& first = part->vertices[idx[0]];
@@ -229,6 +247,7 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
         const assets::StageVertex& vertex = part->vertices[idx[corner]];
         poly[static_cast<size_t>(corner)].x = tri.x[corner];
         poly[static_cast<size_t>(corner)].y = tri.y[corner];
+        poly[static_cast<size_t>(corner)].inv_z = 1.0f / tri.z[corner];
         for (int ch = 0; ch < 3; ++ch) poly[static_cast<size_t>(corner)].rgb[ch] = tri.rgb[corner][ch];
         poly[static_cast<size_t>(corner)].texel[0] = vertex.uv_raw[0] + phase[0];
         poly[static_cast<size_t>(corner)].texel[1] = vertex.uv_raw[1] + phase[1];
@@ -267,6 +286,7 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
             for (int corner = 0; corner < 3; ++corner) {
               piece.x[corner] = corners[corner]->x;
               piece.y[corner] = corners[corner]->y;
+              piece.z[corner] = 1.0f / corners[corner]->inv_z;
               for (int ch = 0; ch < 3; ++ch) piece.rgb[corner][ch] = static_cast<u8>(std::clamp(corners[corner]->rgb[ch], 0.0f, 255.0f));
               float texel[2] = {corners[corner]->texel[0] - static_cast<float>(kx) * win[0], corners[corner]->texel[1] - static_cast<float>(ky) * win[1]};
               if (bound[0]) texel[0] = std::clamp(texel[0], off[0] + 0.5f, off[0] + win[0] - 0.5f);
@@ -278,6 +298,7 @@ size_t RoomMeshes::project(const EmitterSystem::MeshInstance& mesh, const ViewPa
             }
             piece.x[3] = piece.x[2];
             piece.y[3] = piece.y[2];
+            piece.z[3] = piece.z[2];
             piece.u[3] = piece.u[2];
             piece.v[3] = piece.v[2];
             piece.texel_u[3] = piece.texel_u[2];

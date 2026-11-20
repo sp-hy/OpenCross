@@ -22,6 +22,9 @@ class ObjectHeap {
   // The next search starts at the highest block, so the next object lands at the top of the arena.
   void search_from_top();
   void reset();
+  // Bytes the used blocks take, node headers included (what the game's arena has given out).
+  u32 used_bytes() const;
+  u32 size() const { return bytes_; }
 
  private:
   struct Block {

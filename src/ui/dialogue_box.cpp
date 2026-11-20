@@ -1426,6 +1426,7 @@ void DialogueDemo::set_line_choice(int first, int last) { impl_->box.set_line_ch
 int DialogueDemo::chosen() const { return impl_->box.chosen(); }
 int DialogueDemo::picking_line() const { return impl_->box.picking_line(); }
 int DialogueDemo::progress() const { return impl_->box.page_index() * 0x10000 + static_cast<int>(impl_->box.typewriter().visible()); }
+bool DialogueDemo::page_typed() const { return impl_->box.typewriter().waiting_for_input(); }
 bool DialogueDemo::digit_entry() const { return impl_->box.digit_entry(); }
 bool DialogueDemo::auto_advance_due(float scale) const { return impl_->box.auto_advance_due(scale); }
 void DialogueDemo::move_digit(int step, int shift) {

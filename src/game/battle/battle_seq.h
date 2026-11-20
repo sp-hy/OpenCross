@@ -247,6 +247,8 @@ class Vm {
 
   // Debug hook: called before every op with its word index and the op's words.
   std::function<void(int pc, const s16* words, int len)> trace;
+  // Trace sink for every VM (a controlled run's `btrace`): the VM, its table, the op's word index and words. Null = off.
+  static inline std::function<void(const Vm& vm, const Table* table, int pc, const s16* words, int len)> sink;
 
   int loop_flag() const { return loop_; }
   int var(int index) const { return vars_[static_cast<size_t>(index & 0x7F)]; }

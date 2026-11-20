@@ -504,8 +504,11 @@ void FieldWorld::sim_tick() {
   // while an op that sets it (26, 3F / 40, 5B, B8 / B9, BA, every form) runs in this pass. Other entities keep it until 25.
   for (const int ent : party_ent_)
     if (ent >= 0 && ent < static_cast<int>(ents_.size())) vm_.entity(ent).flags38 &= ~0x40u;
-  vm_.tick();
-  step_watchdog();
+  // A controlled run with [Debug] HoldScripts: after the room's INIT (run at the load) no script record runs; the world goes on.
+  if (!hold_scripts_) {
+    vm_.tick();
+    step_watchdog();
+  }
   // An entity the scripts left inactive (SET_VISIBLE 0) neither turns nor picks a clip this tick.
   // The stair clip follows the tile an actor stands on when a frame of two ticks ends; the run speed cheat fits such a frame into one tick.
   const bool frame_end = (tick_count_ & 1) == 0 || (platform::cheats().run_speed && controls_free());

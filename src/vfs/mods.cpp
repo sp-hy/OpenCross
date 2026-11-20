@@ -359,7 +359,7 @@ bool loads_on(ModLoadOn load_on, ModArt art) {
 // (its "voices/<name>" target is not a VFS target, kept for the count / display);
 // an .mp4 / .mkv named after a shipped movie (a01op_de.mp4 for a01op_de.bk2) = its replacement, kept as "movie/<name>.mp4|.mkv";
 // everything else is resolved against the shipped member index, and what matches nothing there but names an archive is added (added_target).
-void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vector<ModPref>& prefs) {
+void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vector<ModPref>& prefs, const fs::path& draft) {
   dir_ = mods_dir;
   mods_.clear();
   packed_voices_.clear();
@@ -397,6 +397,14 @@ void ModManager::scan(const Vfs& vfs, const fs::path& mods_dir, const std::vecto
     found.erase(it);
   }
   for (Mod& mod : found) mods_.push_back(std::move(mod));
+  if (!draft.empty() && fs::is_directory(draft, ec)) {
+    Mod mod;
+    mod.name = kDraftMod;
+    mod.root = draft;
+    mod.enabled = true;
+    mod.load_on = ModLoadOn::All;
+    mods_.insert(mods_.begin(), std::move(mod));
+  }
   if (mods_.empty()) {
     log::info("mods: {} has no mods", u8(mods_dir));
     return;

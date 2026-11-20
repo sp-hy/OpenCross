@@ -144,6 +144,8 @@ inline OverlayFit menu_fit(float vw, float vh) {
 struct Letterbox {
   float ox = 0, oy = 0, scale = 1, scale_y = 1, vw = 320, vh = 240;
   float x0 = 0, w = kLayerW;
+  // The visible field rows [y0, y0 + h] (the field picture clips its tiles and actors to them): the 224 rows, except in room().
+  float y0 = 0, h = kFieldRows;
   // Window x of the first visible column and the window width of the visible columns.
   float left() const { return ox + x0 * scale; }
   float width() const { return w * scale; }
@@ -207,6 +209,20 @@ struct Letterbox {
     box.w = std::max(cols, kLayerW);
     return box;
   }
+  // `scale`:1 onto a w x h target showing w / scale columns and h / scale rows of field (a controlled run's whole-room picture or camera view,
+  // App::draw_room_shot): columns 0..320 and rows 0..224 centred, the extra columns and rows on both sides of them (fewer than a screen:
+  // the middle part of it), square pixels.
+  static Letterbox room(float w, float h, float scale) {
+    Letterbox box = identity(w, h, scale);
+    const float cols = w / scale, rows = h / scale;
+    box.x0 = -(cols - kLayerW) * 0.5f;
+    box.ox = -box.x0 * scale;
+    box.w = cols;
+    box.y0 = -(rows - kFieldRows) * 0.5f;
+    box.oy = -box.y0 * scale;
+    box.h = rows;
+    return box;
+  }
   // Widescreen: a screen-space primitive spanning all 320 columns (a flash, fade or colour wash) is stretched to the visible width;
   // anything narrower keeps its place. `x` = the primitive's `count` corner x values in layer columns.
   void widen_full_width(float* x, int count) const {
@@ -239,7 +255,18 @@ class FieldCamera {
     return out;
   }
 
+  // Any GTE camera: rotation (row-major, 1.0 = 1), translation and projection distance, as a room camera block holds them.
+  static FieldCamera from_gte(const assets::Mat3& rot, const assets::Vec3& trans, float h) {
+    FieldCamera out;
+    out.rot_ = rot;
+    out.trans_ = trans;
+    out.proj_h_ = h;
+    return out;
+  }
+
   float h() const { return proj_h_; }
+  const assets::Mat3& rot() const { return rot_; }
+  const assets::Vec3& trans() const { return trans_; }
   Mat4 view() const { return mat4_from_rt(rot_, trans_); }
 
   // World point -> layer-space screen position + camera depth. False when behind the camera.
