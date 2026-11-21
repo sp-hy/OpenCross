@@ -212,7 +212,8 @@ void MainMenu::Impl::Frame(int frame, float x, float y, u32 colour, float* out_w
   if (text->audit_enabled()) audit_boxes.push_back({PX(x) + gdx, PY(y), PX(w), PY(h), "frame " + std::to_string(frame)});
 }
 
-// Text with its top-left at PS1 (x, y), centred in a 16-px row.
+// Text with its top-left at PS1 (x, y), centred in a 16-px row. kb_70's line box is taller above its ink than the Latin face's, so its
+// text moves 4.5 x rel PS1 px down to stand in the row where the Latin text does.
 void MainMenu::Impl::TP(float x, float y, const std::u32string& str, u32 colour, float rel) {
   if (str.empty()) return;
   render::FaceId face;
@@ -223,7 +224,8 @@ void MainMenu::Impl::TP(float x, float y, const std::u32string& str, u32 colour,
   cmd.kind = Cmd::Text;
   cmd.text = str;
   cmd.face = face;
-  cmd.x = PX(x), cmd.y = PY(y) + (PY(16) - text->line_height(face, scale)) * 0.5f, cmd.color = colour, cmd.scale = scale;
+  const float kb_drop = face == face_kb && !ps1_text() ? PY(4.5f * rel) : 0.0f;
+  cmd.x = PX(x), cmd.y = PY(y) + (PY(16) - text->line_height(face, scale)) * 0.5f + kb_drop, cmd.color = colour, cmd.scale = scale;
   emit(std::move(cmd));
 }
 

@@ -450,7 +450,7 @@ void MainMenu::Impl::build_use() {
     const float rel = fit_rel(nm, 140, 0.9f);
     // The disc draws the name 1 pixel lower on its plate.
     TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, y + (ps1_text() ? 1.0f : 0.0f), nm, row == lit_row ? ps1_colour(0x7A6AA5) : kText, rel);
-    Count(453, y, std::min<int>(stack.qty, 99), kText);
+    Count(element_count_x(), y, std::min<int>(stack.qty, 99), kText);
   }
   const int total = std::max(cnt, kVisibleRows);
   if (use.list_scroll > 0) scroll_arrow(485, 35, true);
@@ -704,7 +704,7 @@ void MainMenu::Impl::build_grid() {
     const std::u32string nm = element_name(stack.id);
     const float rel = fit_rel(nm, 124, 0.9f);
     TP(301.0f + (128.0f - twp(nm, rel)) * 0.5f, yt, nm, col, rel);
-    Count(453, yt, std::min<int>(stack.qty, 99), col);
+    Count(element_count_x(), yt, std::min<int>(stack.qty, 99), col);
   }
   const float cursor_y = 47.0f + 24.0f * static_cast<float>(list_cur - list_scroll);
   if (!window) {

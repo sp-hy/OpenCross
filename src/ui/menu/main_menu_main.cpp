@@ -600,10 +600,12 @@ void MainMenu::Impl::build_status() {
     const bool raised = disc_font && (disc_font->build() == import::Ps1Font::Build::UsaMenu || disc_font->build() == import::Ps1Font::Build::Console);
     const float lines_y = 198.2f - (raised ? 2.0f : 0.0f);
     for (size_t i = 0; i < lines.size(); ++i) {
-      text->prepare(face_gn, lines[i]);
-      const float width = text->measure(face_gn, lines[i], 0.35f) / xscale;
+      // Japanese (or any line the Latin face lacks glyphs for) uses kb_70.
+      const render::FaceId face = (jp() || !glyphs_ok(lines[i])) && face_kb != render::kNoFace ? face_kb : face_gn;
+      text->prepare(face, lines[i]);
+      const float width = text->measure(face, lines[i], 0.35f) / xscale;
       const float slope = width < 155.0f ? 0.0f : width < 236.0f ? 0.002f : width < 286.0f ? 0.0015f : 0.0012f;
-      HT(face_gn, ps1_text() ? 52.0f : panel_x + 12.4f, lines_y + 24.0f * static_cast<float>(i), lines[i], kText, 0.35f + (155.0f - width) * slope);
+      HT(face, ps1_text() ? 52.0f : panel_x + 12.4f, lines_y + 24.0f * static_cast<float>(i), lines[i], kText, 0.35f + (155.0f - width) * slope);
     }
   } else {
     Frame(49, panel_x, 180);

@@ -293,7 +293,7 @@ void MainMenu::Impl::build_elements() {
     const std::u32string name = element_name(id);
     const float rel = fit_rel(name, 140, 0.9f);
     TP(301.0f + (128.0f - twp(name, rel)) * 0.5f, kPlateY + 5, name, kText, rel);
-    Count(453, kPlateY + 5, std::min(element_held(id), 99));
+    Count(element_count_x(), kPlateY + 5, std::min(element_held(id), 99));
     // The spell above the plate, cast by the first character who may hold it.
     spell_slot = SpellViewSlot{};
     spell_slot.element = id;

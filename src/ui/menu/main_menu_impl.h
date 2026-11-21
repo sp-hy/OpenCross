@@ -453,6 +453,9 @@ struct MainMenu::Impl {
   // Defined in main_menu_draw.cpp.
   void Digits(float x, float y, const std::string& number, float advance, u32 colour = kText);
   void Count(float x, float y, int count, u32 colour = kText);
+  // The element list's count field: the PS1's x 453 with the PS1 font; the HD digits reach further right, so they start 7 px left
+  // and end midway between the row plate and the list frame.
+  float element_count_x() const { return ps1_text() ? 453.0f : 446.0f; }
   u32 ps1_colour(u32 bgr, int a = 255) const;
   // Colours ps1_colour gave for a channel over 0x80 -> the part over 1.0, which disc-mode text adds in a second copy.
   mutable std::map<u32, u32> colour_boosts;
