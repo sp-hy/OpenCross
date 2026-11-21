@@ -342,6 +342,7 @@ bool App::route_step() {
   update_loop_speed(1.0 / 60.0);
   loop_speed.field = loop_speed.field_factor == 1.0f ? platform::FixedStep::Result{1, 0.0f} : field_stepper.advance(loop_speed.field_factor / 60.0);
   advance(in, 1.0 / 60.0, 1);
+  if (control_anim_playing) control_anim_step();
   mixer.capture_tick(1.0 / 60.0);
   if (recorder.active()) recorder.write(1.0 / 60.0, 1, in);
   if (battle_ready) {
