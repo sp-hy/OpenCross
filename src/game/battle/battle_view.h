@@ -129,6 +129,9 @@ class BattleView {
     int battle_id = -1;
     // The battlefield operand (stage bg_NN); -1: the scene record's default.
     int battlefield = -1;
+    // The stage intro plays live for the load's ticks (kBtlinitLoadTicks) before the party intro, not fast-forwarded by the load: what a
+    // field battle shows under the RDE hand-over, without the hand-over ([Debug] BattleIntroLive, a stage preview).
+    bool intro_live = false;
     // 1 keep the field music, 2 losable (a wipe is not game over), 4 dragoon disguise (every PC except Poshul / Mojo uses model 0x3B),
     // 0x10 no victory music, 0x20 the field restarts no music after the battle (host side).
     int flags = 0;
@@ -249,8 +252,36 @@ class BattleView {
   // (nothing reaches outside it) whose rows the battle picture fills, its column 160 at the centre.
   void draw_preview(const render::Frame& frame, const render::Rect& rect, bool scene);
   const Debug& debug() const { return dbg_; }
+  // Route vocabulary (`cast`, `attack`, `wait battle idle`): the harness actions (Debug cast_element / weapon) begun since start(), and
+  // whether the view is idle: past the intro and the spawn scripts, no action, event, script window or menu hand-over running and no
+  // harness action waiting; the point where a command menu would take over.
+  int debug_actions() const { return debug_actions_; }
+  // The presented action's phase (0 = none; then approach, hit, return, cast, release, run, swap, settle): an action runs from the tick
+  // its phase leaves none to the tick it is none again, its pre-roll and the settle (the hit reactions and numbers) included.
+  int action_phase() const { return static_cast<int>(act_.phase); }
+  static const char* action_phase_name(int phase);
+  bool route_idle() const;
+  // A controlled run's `btrace`: from now on (null = off) every anmseq op any unit runs, every effect-sequence command and every camera
+  // select is appended to `lines` as text, with `tick` (the caller's counter) as its time:
+  //   a <tick> <unit> <table> <pc> <word>...   unit 0-8, 9 = the pack's pseudo-actor, -1 other; table = pack:<tag> / pack:anim /
+  //                                            s5:<model> / atk:<model> / own / ?; pc = the op's word index in that table
+  //   s <tick> <sequence> <offset> <op> <hex bytes after the 4-byte prefix>   offset = the command's byte offset in its sequence
+  //   c <tick> <shot>
+  void set_route_trace(std::vector<std::string>* lines, const u64* tick);
+  // Camera shots selected so far (BattleCamera::selects).
+  int camera_selects() const { return camera_.selects(); }
+  const std::string& camera_shot() const { return camera_.shot_name(); }
+  // The camera's pose at the end of the last tick (stage world, y up): a tool comparing it with a recording of the game.
+  CamPose camera_pose() const { return camera_.pose(1.0f); }
+  // A unit's place on the floor (x, z; false: no such unit shown), for the same comparisons.
+  bool unit_place(int unit, float& x, float& z) const {
+    if (!battle_ || unit < 0 || unit >= battle::kUnits || static_cast<size_t>(unit) >= vis_.size() || !bunit(unit).present) return false;
+    x = vis_[static_cast<size_t>(unit)].x, z = vis_[static_cast<size_t>(unit)].z;
+    return true;
+  }
   // Effect state for tools / tests.
   bool fx_active() const { return fx_ != nullptr; }
+  // Effect casts since start() (each run's seed is 1 + the casts before it).
   int fx_casts() const { return fx_casts_; }
 
   void update(float dt, const platform::Input& in);
@@ -268,6 +299,34 @@ class BattleView {
   // [Game] OpenCrossMenu: `hook` receives each battle-script message of the event window (a story line; not the system plate) once its
   // window has closed: its pages as shown, the speaker its first line names and the voice files that played. Empty = nothing gathered.
   void set_story_log(std::function<void(save::DialogueEntry)> hook) { story_log_ = std::move(hook); }
+  // A controlled run's `hud 0`: no HUD / menus / windows at all (the damage digits stay), for an editor's bare picture of an action.
+  void set_hud_hidden(bool on) { hud_hidden_ = on; }
+  // A controlled run's Control `camera` (an editor previewing effects on a stage): the picture drawn through `pose` (y-up stage world, as a
+  // shot's) instead of the shot's, the battle going on underneath; `hide_units`: the units and their shadows not drawn (the stage and
+  // the effects alone). nullopt: the battle's own camera again.
+  void set_control_camera(const std::optional<CamPose>& pose, bool hide_units) {
+    control_pose_ = pose;
+    hide_units_ = pose && hide_units;
+  }
+  bool control_camera() const { return control_pose_.has_value(); }
+  // Control `xform` in a battle: the stage's named emitters drawn moved (StageScene::set_draw_xform).
+  void set_stage_xform(std::optional<effects::DrawXform> xform) { stage_scene_.set_draw_xform(std::move(xform)); }
+  // Control `grid` in a battle: the floor grid drawn with the stage's effects (StageScene::set_debug_grid).
+  void set_stage_grid(std::optional<effects::FloorGrid> grid) { stage_scene_.set_debug_grid(grid); }
+  // Control `stage 0` / `stage 1`: the stage not drawn / drawn again (StageScene::set_hidden), for an editor's bare view of an action.
+  void set_stage_hidden(bool on) { stage_scene_.set_hidden(on); }
+  bool stage_hidden() const { return stage_scene_.hidden(); }
+  // Control `replay` in a battle: the named stage emitters played again from their start.
+  int replay_stage_effects(const std::vector<std::string>& names) { return stage_scene_.replay(names); }
+  // Control `fxmem` in a battle: the stage emitters' arena use (null before the stage loads).
+  const effects::EmitterSystem* stage_emitters() { return stage_scene_.emitters(); }
+  // Route `set battle hp`: unit `unit`'s HP now (`percent`: of its max HP), 1 .. max; false without a battle or a unit there.
+  bool debug_set_hp(int unit, int value, bool percent) {
+    if (!battle_ || unit < 0 || unit >= battle::kUnits || !bunit(unit).present) return false;
+    battle::Unit& target = bunit_mut(unit);
+    target.hp = std::clamp(percent ? target.max_hp * value / 100 : value, 1, std::max(1, target.max_hp));
+    return true;
+  }
   // [Enhancements] RetainBattleScenery: the stage's `bti0` layer is not stopped when the intro ends (nor by a pack's op 0x60).
   void set_keep_intro_layer(bool on);
   // Call between ctx.begin_frame() and ctx.end_frame(). `sprites_resume` = another sprite pass already ran this frame.
@@ -1112,6 +1171,8 @@ class BattleView {
   CamBank bank_;
   BattleAudio audio_;
   bool boss_scene_ = false, field_battle_ = true;
+  // StartOptions::intro_live of the battle running.
+  bool intro_live_ = false;
   // PCs not yet placed while a held intro (timeline op 0x73) runs.
   std::array<bool, battle::kUnits> unplaced_{};
   // Battle id word > 0x1FF: the stage's 'boss' timeline instead of a random bti*.
@@ -1244,6 +1305,13 @@ class BattleView {
   bool paused_ = false;
   // The OC_ROUTE_ELEM / OC_DEV_VAR dev hooks ran.
   bool route_elem_done_ = false;
+  // set_route_trace's sink and clock (null = off).
+  std::vector<std::string>* rtrace_ = nullptr;
+  const u64* rtrace_tick_ = nullptr;
+  std::string trace_table_name(const bseq::Table* table) const;
+  void trace_seq(std::string_view seq, const assets::SeqCmd& cmd);
+  // Harness actions begun since start() (debug_actions).
+  int debug_actions_ = 0;
   bool dev_var_done_ = false;
   // The host shows BattleResults after a victory (set_external_results).
   bool external_results_ = false;
@@ -1712,6 +1780,10 @@ class BattleView {
   std::function<void(save::DialogueEntry)> story_log_;
   save::DialogueEntry story_entry_;
   bool story_pending_ = false;
+  bool hud_hidden_ = false;
+  // Set by set_control_camera.
+  std::optional<CamPose> control_pose_;
+  bool hide_units_ = false;
   // ops_ range of this frame's cast header, and the frame the current cast began (-1 = no cast).
   size_t cast_header_from_ = 0, cast_header_to_ = 0;
   int cast_began_ = -1;

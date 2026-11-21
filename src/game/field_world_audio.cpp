@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <utility>
 
 #include "audio/bgm_table.h"
@@ -96,14 +97,17 @@ bool FieldWorld::play_stream(int song, int volume, double start_seconds, bool re
     failed_stream_ = song;
     return false;
   }
-  std::optional<Bytes> bytes;
-  {
+  const std::string path = audio::bgm_path(entry->file_no);
+  if (bgm_cache_path_ != path || bgm_cache_gen_ != files_->generation()) {
     ScopedTimer read_timer("audio: bgm zip read");
-    bytes = files_->read(audio::bgm_path(entry->file_no));
+    std::optional<Bytes> bytes = files_->read(path);
+    bgm_cache_path_ = bytes ? path : std::string{};
+    bgm_cache_gen_ = files_->generation();
+    bgm_cache_ = bytes ? std::move(*bytes) : Bytes{};
   }
   auto stream = std::make_shared<audio::HcaStream>();
   ScopedTimer open_timer("audio: bgm HcaStream::open");
-  if (!bytes || !stream->open(*bytes)) {
+  if (bgm_cache_path_.empty() || !stream->open(bgm_cache_)) {
     log::warn("audio: could not load {}", audio::bgm_path(entry->file_no));
     failed_stream_ = song;
     return false;
@@ -351,6 +355,8 @@ void FieldWorld::play_movie(int index, int flags) {
               movie_state_ == MovieState::Requested ? "waiting for the host" : "playing");
     return;
   }
+  // A traced scene notes the movie (`f`).
+  if (auto* trace = vm_.trace()) trace->notes.push_back(std::format("f {} {}", trace->tick, index));
   const std::string name = discs_.movie_name(disc_, index);
   // Flag 8 (any D4 in the data, or a movie that ends in a recorded DC jump) fades the last frame out; without it the frame is held.
   const bool fade = ((flags | (movie_jump_.active ? 8 : 0)) & 8) != 0;

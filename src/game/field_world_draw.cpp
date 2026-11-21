@@ -220,7 +220,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
   view_.draw(sprites, vw, vh, alpha);
   view_.set_late(-1e9f, false);
   static const bool no_shadows = std::getenv("OC_FIELD_SHADOWS") && std::getenv("OC_FIELD_SHADOWS")[0] == '0';
-  if (!shadows_ok_ || no_shadows) return;
+  if (!shadows_ok_ || no_shadows || hide_actors_) return;
   std::vector<ShadowParams> shadows;
   for (size_t index = 0; index < ents_.size(); ++index) {
     const Ent& entity = ents_[index];
@@ -237,7 +237,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
     shadow.scale_z = static_cast<float>(static_cast<s16>(vm_ent.scale[2]));
     shadow.grey = entity.shadow_grey;
     shadow.layer = static_cast<float>(vm_ent.word_b8);
-    if (render::FieldCamera::Projected projected; view_.camera().project({shadow.x, shadow.y, shadow.z}, projected) &&
+    if (render::FieldCamera::Projected projected; view_.draw_camera().project({shadow.x, shadow.y, shadow.z}, projected) &&
                                                   !in_slab(std::floor(std::max(projected.z, 0.0f) / 16.0f) + shadow.layer))
       continue;
     if (entity.shadow_tile >= 0) {
@@ -252,7 +252,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
   const render::Letterbox lb = view_.letterbox(vw, vh);
   float scroll_x, scroll_y;
   view_.scroll_at(alpha, scroll_x, scroll_y);
-  shadows_.draw(sprites, view_.camera(), lb, scroll_x, scroll_y, shadows, hd_ && view_.art_mode_hd(), shadow_tiles_.ready() ? shadow_tiles_.tiles() : render::TexRef{});
+  shadows_.draw(sprites, view_.draw_camera(), lb, scroll_x, scroll_y, shadows, hd_ && view_.art_mode_hd(), shadow_tiles_.ready() ? shadow_tiles_.tiles() : render::TexRef{});
 }
 
 bool FieldWorld::casts_shadow(size_t index) const {
@@ -419,13 +419,13 @@ const FieldWorld::MenuBody* FieldWorld::dress(const Actor& actor, std::vector<re
 // behind (layer 0's z) and flat / untinted, so the nearer layers cover or blend over the copy.
 void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& frame, float alpha, render::MeshPipeline::DrawParams::WetFaces wet) {
   alpha = interp_alpha(alpha);
-  if (!view_.loaded()) return;
+  if (!view_.loaded() || hide_actors_) return;
   using Wet = render::MeshPipeline::DrawParams::WetFaces;
   const render::Letterbox lb = view_.letterbox(static_cast<float>(frame.extent.width), static_cast<float>(frame.extent.height));
   float scroll_x, scroll_y;
   view_.scroll_at(alpha, scroll_x, scroll_y);
   const render::Rect scissor = view_.clip_rect(lb, scroll_x, static_cast<float>(frame.extent.width), static_cast<float>(frame.extent.height));
-  const render::Mat4 view_proj = view_.camera().view_proj(scroll_x, scroll_y, lb), view = view_.camera().view();
+  const render::Mat4 view_proj = view_.draw_camera().view_proj(scroll_x, scroll_y, lb), view = view_.draw_camera().view();
   float water_bias = static_cast<float>(water_bias_);
   if (water_bias_ < 0) {
     water_bias = 8;
@@ -840,6 +840,9 @@ void FieldWorld::draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh
 }
 
 void FieldWorld::draw_windows(render::SpriteBatch& sprites, float vw, float vh, bool ps1) {
+  // A preview's depth: the windows are nearest (an editor's overlays go behind them).
+  const bool stamped = sprites.depth_stamp();
+  sprites.set_depth_stamp(true);
   draw_group_sprites(sprites, vw, vh, ps1);
   draw_status_icons(sprites, vw, vh, ps1);
   const render::CanvasFit ps1_fit{0.25f, 0.0f, 0.0f};
@@ -852,6 +855,7 @@ void FieldWorld::draw_windows(render::SpriteBatch& sprites, float vw, float vh, 
   dialogue_.draw(vw, vh, fit);
   for (auto& window : extra_win_)
     if (window.box) window.box->draw(vw, vh, fit);
+  sprites.set_depth_stamp(stamped);
 }
 
 // ------------------------------------------------------------------------------------------------ FE 02 captured-frame transitions

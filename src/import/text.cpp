@@ -1,6 +1,7 @@
 #include "import/text.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -1098,7 +1099,14 @@ long long mod_text_room(const TextMod& mod, long long room) {
   const auto it = room >= 1000 ? mod.rooms.find(static_cast<int>(room)) : mod.rooms.end();
   return it == mod.rooms.end() ? room : it->second;
 }
+
+std::atomic<u32>& mods_generation() {
+  static std::atomic<u32> generation{0};
+  return generation;
+}
 }  // namespace
+
+u32 text_mods_generation() { return mods_generation().load(); }
 
 void set_text_mods(std::vector<TextMod> mods) {
   for (TextMod& mod : mods) {
@@ -1107,6 +1115,7 @@ void set_text_mods(std::vector<TextMod> mods) {
     mod.files = std::move(lower);
   }
   text_mod_list() = std::move(mods);
+  ++mods_generation();
 }
 
 const std::vector<TextMod>& text_mods() { return text_mod_list(); }
@@ -1162,7 +1171,19 @@ bool LangTables::from_disc() {
   return disc_ != nullptr;
 }
 
+void LangTables::follow_mods() {
+  const u32 now = text_mods_generation();
+  if (now == mods_generation_) return;
+  mods_generation_ = now;
+  // Tables a test set by hand (set_field_csv, ...) stay.
+  if (!vfs_) return;
+  for (PerLang& per_lang : langs_) per_lang = PerLang{};
+  wend_ = FieldTable();
+  wend_loaded_ = false;
+}
+
 bool LangTables::load_language(Lang lang) {
+  follow_mods();
   PerLang& per_lang = per(lang);
   if (per_lang.loaded) return true;
   std::string txt;
@@ -1214,9 +1235,13 @@ bool LangTables::load_language(Lang lang) {
   return true;
 }
 
-bool LangTables::ensure(Lang lang) { return per(lang).loaded || load_language(lang); }
+bool LangTables::ensure(Lang lang) {
+  follow_mods();
+  return per(lang).loaded || load_language(lang);
+}
 
 void LangTables::ensure_wend() {
+  follow_mods();
   if (wend_loaded_) return;
   wend_loaded_ = true;
   std::string txt;

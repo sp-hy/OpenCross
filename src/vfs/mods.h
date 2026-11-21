@@ -108,12 +108,17 @@ struct ModPref {
   ModLoadOn load_on = ModLoadOn::Modded;
 };
 
+// The [Debug] DraftDir folder's mod name (ModManager::scan `draft`).
+inline constexpr std::string_view kDraftMod = "(draft)";
+
 class ModManager {
  public:
   // Scans <mods_dir>\<name>\** and resolves every file against vfs.list(). Order and settings come from `prefs` (by name);
   // mods not in `prefs` are appended in name order with the defaults; prefs whose mod is gone are dropped. Logs each mod's
   // matched / unmatched / ambiguous counts.
-  void scan(const Vfs& vfs, const std::filesystem::path& mods_dir, const std::vector<ModPref>& prefs);
+  // `draft`: a folder outside the mods folder taken as one more mod, enabled in every art mode and first in priority ([Debug] DraftDir:
+  // an editor's unsaved files over everything else for a controlled run).
+  void scan(const Vfs& vfs, const std::filesystem::path& mods_dir, const std::vector<ModPref>& prefs, const std::filesystem::path& draft = {});
   std::vector<ModPref> prefs() const;
   // The enabled mods with a mod.ini, in priority order ("load on" does not apply: features are not art), for features::resolve. The
   // pointers live until the next scan.

@@ -68,6 +68,8 @@ class DebugTools {
   static const char* element_kind_name(ElemKind kind);
   // `raw_name` without the prefix glyph, limited to what the UI font draws (Latin-1); other characters are dropped.
   static std::string plain_name(const std::string& raw_name);
+  // The Invincible checkboxes' applied state, set from outside (route `set invincible`); apply() then keeps the battle view in step.
+  void set_invincible(bool party, bool enemies) { inv_party_ = party, inv_enemies_ = enemies; }
 
  private:
   struct Action {

@@ -323,6 +323,8 @@ void BattleView::draw_scene_3d(const render::Frame& frame, const render::Letterb
 }
 
 void BattleView::draw_units(const render::Mat4& vp, const render::Mat4& view) {
+  // Control `camera ... noactors`: no units drawn.
+  if (hide_units_) return;
   for (int i = 0; i < battle::kUnits; ++i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];

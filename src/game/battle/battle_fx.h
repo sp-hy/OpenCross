@@ -276,6 +276,8 @@ class BattleFxRun {
     std::function<void()> song_release;
     // Op 0x7A: stall while a song change runs.
     std::function<bool()> song_changing;
+    // Every sequence command executed (SequenceHooks::trace).
+    std::function<void(std::string_view seq, const assets::SeqCmd&)> trace;
   };
   BattleFxRun(std::shared_ptr<const FxPack> pack, const assets::RoomEffects& particle_lib, u32 seed);
   ~BattleFxRun();

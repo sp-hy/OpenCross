@@ -189,14 +189,16 @@ void FieldWorld::step_sound_emitters() {
 }
 
 // ------------------------------------------------------------------------------------------------ effect system per room
-void FieldWorld::clear_effects() {
+void FieldWorld::clear_effects(bool keep_meshes) {
   sequences_.reset();
   emitters_.reset();
   lights_ = effects::LightTable{};
   bk_ = {};
   bank_ = effects::EffectBank{};
-  gpu_fx_.clear();
-  room_meshes_.clear();
+  if (!keep_meshes) {
+    gpu_fx_.clear();
+    room_meshes_.clear();
+  }
   seq_post_ = {};
   seq_dim_ = {};
 }
@@ -324,12 +326,14 @@ void FieldWorld::seq_post_step() {
 // footprints) and the encounter pack, with the hooks that place emitters on entities. An entity anchor is the model's rotation times
 // its scale at its position (a wake offset shrinks and turns with the figure); a bone anchor is the follower's basis.
 void FieldWorld::build_effects() {
-  clear_effects();
+  const bool keep_meshes = std::exchange(keep_room_meshes_, false);
+  clear_effects(keep_meshes);
   effects_logged_ = false;
   const assets::RoomScene* scene = view_.scene();
   if (!scene || (scene->effects.emitters.empty() && scene->effects.sequences.empty() && !lib_loaded_)) return;
   bank_.add(&scene->effects);
-  if (auto meshes = view_.effect_meshes()) room_meshes_.set(std::move(*meshes), ctx_, sprites_);
+  if (!keep_meshes)
+    if (auto meshes = view_.effect_meshes()) room_meshes_.set(std::move(*meshes), ctx_, sprites_);
   if (lib_loaded_) bank_.add(&lib_fx_);
   if (lib_loaded_) bank_.add(&fenc_fx_);
   effects::EmitterSystem::Config cfg;
@@ -389,7 +393,8 @@ void FieldWorld::build_effects() {
   sequences_->set_hooks(std::move(seq_hooks));
   // Every room entry starts the pack's repeating sequence 'loop' when it has one (ambient birds, smoke, bubbles).
   sequences_->start("loop");
-  if (particles_ok_ && effects_gpu_) gpu_fx_.load(bank_);
+  // A reload that kept the room's art kept its effects too (RoomView::reuse_art): the sheets are on the GPU already.
+  if (particles_ok_ && effects_gpu_ && !keep_meshes) gpu_fx_.load(bank_);
   log::info("field: {} effects: {} emitters, {} sequences, {} sheets", scene->name, scene->effects.emitters.size(),
             scene->effects.sequences.size(), scene->effects.sheets.size());
 }
@@ -457,6 +462,19 @@ void FieldWorld::step_wakes() {
 }
 
 // ------------------------------------------------------------------------------------------------ drawing
+void FieldWorld::collect_effect_meshes(const effects::ViewParams& view, std::vector<effects::RoomMeshTri>& out) const {
+  if (!emitters_ || !particles_ok_ || room_meshes_.empty()) return;
+  std::vector<effects::EmitterSystem::MeshInstance> instances;
+  emitters_->collect_meshes(view, 1.0f, instances);
+  // The identity letterbox: the layer point (ox / oy of `view`).
+  const render::Letterbox layer;
+  for (const auto& instance : instances) {
+    if (!instance.name || instance.sprite_type != 14 || !room_meshes_.has(*instance.name)) continue;
+    effects::ViewParams moved;
+    room_meshes_.project(instance, emitters_->xform_view(instance.owner, view, moved) ? moved : view, layer, out);
+  }
+}
+
 // Depth-tested particle quads of the room's emitters plus the sprite-type-14 mesh objects (the room's own textured packet meshes and
 // the encounter's untextured ones, Gouraud-shaded from their vertex colours times the object colour / 128). Everything is merged into
 // one painter's order: farther ordering-table slot first, inside a slot the later-submitted primitive first. Only the content inside
@@ -465,9 +483,17 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
   alpha = interp_alpha(alpha);
   if (!emitters_ || !particles_ok_ || !effects_gpu_ || !view_.loaded() || !view_.scene()) return;
   effects::ViewParams vp = effects::ViewParams::from_room(view_.scene()->camera);
+  // A controlled run's own camera (RoomView::set_camera_override).
+  if (view_.camera_overridden()) {
+    const render::FieldCamera& cam = view_.draw_camera();
+    for (size_t i = 0; i < 9; ++i) vp.rot.m[i] = cam.rot()[i];
+    for (size_t i = 0; i < 3; ++i) vp.trans[i] = cam.trans()[i];
+    vp.h = cam.h();
+  }
   view_.scroll_at(alpha, vp.scroll_x, vp.scroll_y);
   std::vector<effects::DrawQuad> quads;
   emitters_->collect_quads(vp, alpha, quads);
+  if (debug_grid_ && view_.camera_overridden()) effects::add_grid_quads(vp, *debug_grid_, quads);
   if (slab_min_ > -1e8f || slab_max_ < 1e8f)
     quads.erase(std::remove_if(quads.begin(), quads.end(), [&](const effects::DrawQuad& quad) { return !in_slab(static_cast<float>(quad.slot)); }),
                 quads.end());
@@ -496,9 +522,12 @@ void FieldWorld::draw_effects(const render::Frame& frame, float vw, float vh, fl
     u32 order = static_cast<u32>(quads.size()) + 1000000u;
     for (const auto& instance : instances) {
       if (!instance.name || instance.sprite_type != 14) continue;
+      // Control `xform`: a dragged effect's mesh projects through the moved view (its centre and matrix already are).
+      effects::ViewParams moved_vp;
+      const effects::ViewParams& mesh_vp = emitters_->xform_view(instance.owner, vp, moved_vp) ? moved_vp : vp;
       if (room_meshes_.has(*instance.name)) {
         std::vector<effects::RoomMeshTri> room_tris;
-        room_meshes_.project(instance, vp, lb, alpha, room_tris);
+        room_meshes_.project(instance, mesh_vp, lb, alpha, room_tris);
         for (const effects::RoomMeshTri& room_tri : room_tris) {
           if (!in_slab(static_cast<float>(room_tri.slot))) continue;
           Tri tri{};

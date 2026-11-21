@@ -42,6 +42,15 @@ bool load_test_image(const vfs::Vfs& files, render::GpuContext& ctx, render::Tex
 
 int App::init(int argc, char** argv) {
   init_config(argc, argv);
+  // A controlled run with depth: the field straight into the frame, whose depth image is the one read back.
+  const bool want_depth = config.debug_control && config.debug_control_depth && !config.debug_script.empty();
+  if (want_depth) {
+    config.ps1_res_graphics = false;
+    config.render_scale = 1.0f;
+    config.msaa = 1;
+    config.fullscreen_shader = platform::FullscreenShader::Off;
+    config.grade = platform::kBuiltinGrades[0];
+  }
   if (!init_window()) return 1;
   if (!init_gpu()) return 1;
   // The player quit on the not-found screen or the version picker: run() ends at once.
@@ -52,6 +61,7 @@ int App::init(int argc, char** argv) {
   if (files.has_archive("font"))
     menu_font = std::async(std::launch::async, [this] { return ui::font::load(files, ui::font::member(ui::font::kKb, !platform::art_is_hd(config.art_mode))); });
   if (!init_render()) return 1;
+  control_depth = want_depth && ctx.enable_depth_readback();
   init_audio();
   if (!init_routes()) return 2;
   init_flow();
@@ -68,6 +78,7 @@ int App::init(int argc, char** argv) {
   init_title();
   init_start_state();
   init_route_state();
+  init_control();
   init_debug_tab();
   init_multiplayer();
   return 0;
@@ -154,7 +165,7 @@ void App::init_vfs() {
         else log::warn("mods: cannot create {}: {}", (files.game_dir() / "mods").string(), ec.message());
       }
     }
-    mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config));
+    mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config), std::filesystem::path(std::u8string(config.debug_draft_dir.begin(), config.debug_draft_dir.end())));
     // New folders get their defaults (written with the next save).
     render::store_mod_prefs(config, mods);
     // Scripted and --config runs test the game as shipped: no mod reaches them, also through a later art change, unless [Debug] ScriptMods
@@ -171,34 +182,7 @@ void App::init_vfs() {
     for (const features::Resolved::Conflict& conflict : features.conflicts)
       log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
   }
-  // Mod rooms ([Rooms] in mod.ini, each mod's own ids) and the mods' text rows (text\<member>), from the mods enabled at launch too.
-  {
-    std::vector<game::ModRooms::Mod> room_mods;
-    std::map<std::string, std::string> owners;
-    std::vector<import::TextMod> text_mods;
-    for (const vfs::Mod& mod : mods.mods()) {
-      if (!with_mods() || !mod.enabled) continue;
-      if (mod.has_manifest && !mod.manifest.rooms.empty())
-        room_mods.push_back({mod.name, std::map<int, std::string>(mod.manifest.rooms.begin(), mod.manifest.rooms.end())});
-      // The mod whose room script runs owns the room: its ids are the ones that script uses (the first mod in the list wins a file).
-      for (const std::vector<vfs::ModFile>* list : {&mod.data, &mod.files})
-        for (const vfs::ModFile& file : *list)
-          if (file.target.starts_with("cdrom/map/mapbin/") && file.target.ends_with(".bin"))
-            owners.try_emplace(file.target.substr(17, file.target.size() - 21), mod.name);
-    }
-    mod_rooms.set(std::move(room_mods), std::move(owners));
-    for (const vfs::Mod& mod : mods.mods()) {
-      if (!with_mods() || !mod.enabled || mod.text.empty()) continue;
-      import::TextMod text{mod.name, {}, {}};
-      for (const vfs::ModFile& file : mod.text)
-        text.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
-      if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(mod.name))
-        for (const auto& [id, stem] : *rooms) text.rooms[id] = mod_rooms.internal_id(stem);
-      log::info("mods: '{}' text rows for {} member(s)", mod.name, text.files.size());
-      text_mods.push_back(std::move(text));
-    }
-    import::set_text_mods(std::move(text_mods));
-  }
+  install_mod_rooms_and_text();
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);
@@ -611,12 +595,15 @@ void App::init_battle() {
       log::warn("battle view unavailable; field encounters will be skipped");
     }
     if (config.debug_battle >= 0) {
+      // The standalone battle's start options, kept for every start (a controlled run's restarts play the same fight).
       game::BattleView::StartOptions options;
-      options.battlefield = config.debug_showcase_stage;
       battle.set_showcase(config.debug_showcase);
-      // [Debug] Seed makes the standalone fight repeatable unless the environment already pins OC_BATTLE_SEED.
-      if (config.debug_seed && !std::getenv("OC_BATTLE_SEED")) _putenv_s("OC_BATTLE_SEED", std::to_string(config.debug_seed).c_str());
-      battle_ok = battle_ready && battle.start(config.debug_battle, {}, options);
+      // [Debug] Seed makes the standalone fight repeatable unless the environment already pins OC_BATTLE_SEED; a controlled run is
+      // always seeded (seed 1 when Seed is 0), so its restarts play the same fight.
+      const u32 seed = config.debug_seed ? config.debug_seed : config.debug_control && routing ? 1u : 0u;
+      if (seed && !std::getenv("OC_BATTLE_SEED")) _putenv_s("OC_BATTLE_SEED", std::to_string(seed).c_str());
+      debug_battle_options = options;
+      battle_ok = battle_ready && start_debug_battle();
       if (battle_ok && config.debug_showcase) {
         // Front-on overview of the line-up (the characters face -x).
         game::free_cam().set_on(true);
@@ -639,6 +626,24 @@ void App::init_battle() {
       log::warn("battle results screen unavailable; the battle view shows its own panel");
     }
   }
+}
+
+// The standalone battle: the scene of [Debug] Battle, the party of BattleParty (character ids; the battle's default party when empty) on
+// the battlefield of BattleField (else ShowcaseStage, else the scene's own).
+bool App::start_debug_battle() {
+  std::vector<battle::PartyMember> party;
+  for (size_t at = 0; at < config.debug_battle_party.size() && party.size() < 3;) {
+    const size_t comma = config.debug_battle_party.find(',', at);
+    const std::string id = config.debug_battle_party.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+    if (!id.empty()) party.push_back(battle::make_party_member(tables, std::atoi(id.c_str()), 0, "char"));
+    if (comma == std::string::npos) break;
+    at = comma + 1;
+  }
+  game::BattleView::StartOptions options = debug_battle_options;
+  options.battlefield = config.debug_battle_field >= 0 ? config.debug_battle_field : config.debug_showcase_stage;
+  options.intro_live = config.debug_battle_intro_live;
+  results_shown = false;
+  return battle.start(config.debug_battle, std::move(party), options);
 }
 
 void App::init_title() {
@@ -707,6 +712,46 @@ void App::init_start_state() {
                         : (config.debug_autowalk ? static_cast<u64>(config.debug_action_tick + 90) : 40u);
   screenshot_name = config.debug_autowalk ? "screenshot_dialogue.png" : "screenshot.png";
   sweep_idx = sweep_first;
+}
+
+// Mod rooms ([Rooms] in mod.ini, each mod's own ids) and the mods' text rows (text\<member>), from the enabled mods: at launch, and
+// again when a controlled run reads the mods again (Control `reload`, a plan with another DraftDir), so an editor's draft text plays.
+void App::install_mod_rooms_and_text() {
+  std::vector<game::ModRooms::Mod> room_mods;
+  std::map<std::string, std::string> owners;
+  std::vector<import::TextMod> text_mods;
+  for (const vfs::Mod& mod : mods.mods()) {
+    if (!with_mods() || !mod.enabled) continue;
+    if (mod.has_manifest && !mod.manifest.rooms.empty())
+      room_mods.push_back({mod.name, std::map<int, std::string>(mod.manifest.rooms.begin(), mod.manifest.rooms.end())});
+    // The mod whose room script runs owns the room: its ids are the ones that script uses (the first mod in the list wins a file). The
+    // draft folder (a controlled run's DraftDir: an editor's copy of a mod's room) owns none: the room keeps the owner its mod gives it,
+    // so the script's mod-local ids (characters, variables, rooms) mean what they mean in the game.
+    if (mod.name == vfs::kDraftMod) continue;
+    for (const std::vector<vfs::ModFile>* list : {&mod.data, &mod.files})
+      for (const vfs::ModFile& file : *list)
+        if (file.target.starts_with("cdrom/map/mapbin/") && file.target.ends_with(".bin"))
+          owners.try_emplace(file.target.substr(17, file.target.size() - 21), mod.name);
+  }
+  mod_rooms.set(std::move(room_mods), std::move(owners));
+  for (const vfs::Mod& mod : mods.mods()) {
+    if (!with_mods() || !mod.enabled || mod.text.empty()) continue;
+    import::TextMod text{mod.name, {}, {}};
+    for (const vfs::ModFile& file : mod.text)
+      text.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
+    if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(mod.name))
+      for (const auto& [id, stem] : *rooms) text.rooms[id] = mod_rooms.internal_id(stem);
+    // The draft folder (a controlled run's DraftDir: an editor's unsaved dialog) has no [Rooms]: its rows name a mod room by the id
+    // the room's own mod gives it.
+    if (mod.name == vfs::kDraftMod)
+      for (const vfs::Mod& other : mods.mods())
+        if (other.enabled && other.name != mod.name)
+          if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(other.name))
+            for (const auto& [id, stem] : *rooms) text.rooms.try_emplace(id, mod_rooms.internal_id(stem));
+    log::info("mods: '{}' text rows for {} member(s)", mod.name, text.files.size());
+    text_mods.push_back(std::move(text));
+  }
+  import::set_text_mods(std::move(text_mods));
 }
 
 }  // namespace oc::app

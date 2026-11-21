@@ -25,6 +25,7 @@ int EmitterSystem::Impl::spawn(size_t hi, const Basis* parent) {
   const s64 node = heap.alloc(header.huge ? 0xFC : header.big ? 0xD8 : 0x94);
   if (node < 0) {
     ++st.dropped;
+    ++usage.full;
     return -1;
   }
   Object obj;

@@ -1,9 +1,12 @@
 // Field script VM tests: hand-assembled snippets run through FieldVM with a NullHost / scripted host.
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <cstdlib>
+#include <format>
 #include <string>
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 #include "script/field_host.h"
@@ -278,6 +281,36 @@ void test_bit_ops() {
   // Bit set: 73 falls through. Bit clear: 73 jumped.
   CHECK_EQ(vm.var(V(2)), 1);
   CHECK_EQ(vm.var(V(3)), 0);
+}
+
+// FieldVM::set_forced_branches ([Debug] ForceBranches): after a listed instruction runs, the record goes on at the address given,
+// whatever the instruction decided; without the map the test decides.
+void test_forced_branches() {
+  for (bool forced : {false, true}) {
+    Asm script;
+    const u16 init = script.here();
+    script.set(V(0), 5);
+    const u16 at = script.here();
+    // v == 5: falls through.
+    script.if_jump(V(0), 0, 5, 0);
+    script.set(V(1), 1);
+    const size_t jmp = script.code.size();
+    script.jump(0);
+    const u16 els = script.here();
+    script.set(V(1), 2);
+    const u16 end = script.here();
+    script.stop();
+    script.code[at + 6] = static_cast<u8>(els);
+    script.code[at + 7] = static_cast<u8>(els >> 8);
+    script.code[jmp + 1] = static_cast<u8>(end);
+    script.code[jmp + 2] = static_cast<u8>(end >> 8);
+    NullHost host;
+    FieldVM vm(host);
+    const std::unordered_map<u32, u32> ways = {{at, els}};
+    if (forced) vm.set_forced_branches(&ways);
+    vm.load(make_module(script, {{{{0, init}}}}));
+    CHECK_EQ(vm.var(V(1)), forced ? 2 : 1);
+  }
 }
 
 // IF_JUMP: execution falls through when the condition is TRUE and jumps when it is FALSE.
@@ -1513,6 +1546,99 @@ void test_fe2f_keeps_debug_mode() {
   CHECK_EQ(vm.var(0x40), 0);
 }
 
+// scene_state leaves out a touch record queued but not run yet (the leader in a box entity's talk box queues it every tick): an empty
+// one never keeps a scene going, one that runs on (waits) does.
+void test_scene_state_queued_touch() {
+  Asm script;
+  const u16 upd = script.here();
+  script.wait_frame().jump(upd);
+  // Runs and ends in one tick (a slot that is only STOP is no touch script at all).
+  const u16 empty = script.here();
+  script.inc(V(2)).stop();
+  const u16 waits = script.here();
+  script.wait(3);
+  script.stop();
+  NullHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{}}, {{{1, upd}, {3, empty}}}, {{{1, upd}, {3, waits}}}}));
+  vm.tick();
+  for (int round = 0; round < 3; ++round) {
+    CHECK(vm.trigger_collision(1));
+    CHECK(vm.scene_state(600) == FieldVM::SceneState::Done);
+    vm.tick();
+    CHECK(vm.scene_state(600) == FieldVM::SceneState::Done);
+  }
+  CHECK_EQ(vm.var(V(2)), 3);
+  CHECK(vm.trigger_collision(2));
+  CHECK(vm.scene_state(600) == FieldVM::SceneState::Done);
+  vm.tick();
+  CHECK(vm.scene_state(600) == FieldVM::SceneState::Running);
+}
+
+// Control `trace` (a controller's timeline): the idle UPDATE loop leaves no events, a wait that runs again every tick is one event, the end
+// is its own; scene_state follows the class < 7 record; a room load ends the trace.
+void test_trace() {
+  Asm script;
+  const u16 upd = script.here();
+  // RUN_SCRIPT_BLOCKING THIS, script 5, class 1.
+  script.raw({0x09, 0xFB, (1 << 5) | 5});
+  script.park();
+  const u16 child = script.here();
+  script.wait(3);
+  const u16 end = script.here();
+  script.stop();
+  NullHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{1, upd}, {5, child}}}}));
+  FieldVM::Trace trace;
+  vm.set_trace(&trace);
+  bool ran = false;
+  for (u32 tick = 0; tick < 10; ++tick) {
+    trace.tick = tick;
+    vm.tick();
+    ran |= vm.scene_state(600) == FieldVM::SceneState::Running;
+  }
+  CHECK(ran);
+  CHECK(vm.scene_state(600) == FieldVM::SceneState::Done);
+  CHECK_EQ(trace.events.size(), 2);
+  if (trace.events.size() == 2) {
+    const FieldVM::TraceEvent& waited = trace.events[0];
+    const FieldVM::TraceEvent& ended = trace.events[1];
+    CHECK_EQ(waited.pc, child);
+    CHECK_EQ(waited.id, 5);
+    CHECK_EQ(waited.cls, 1);
+    CHECK_EQ(waited.flags, FieldVM::kTraceYield);
+    CHECK_EQ(ended.pc, end);
+    CHECK_EQ(ended.flags, FieldVM::kTraceEnd);
+    CHECK(ended.tick > waited.tick);
+  }
+  vm.load(make_module(script, {{{{1, upd}, {5, child}}}}));
+  CHECK(trace.room_loaded);
+  const size_t before = trace.events.size();
+  vm.tick();
+  CHECK_EQ(trace.events.size(), before);
+  // A bit test notes the variable that holds the bit (a `v` read), as a compare does.
+  Asm bits;
+  const u16 bupd = bits.here();
+  bits.raw({0x09, 0xFB, (1 << 5) | 5});
+  bits.park();
+  const u16 test = bits.here();
+  // JUMP_IF_BIT_CLEAR bit 3 of V(1), literal.
+  bits.raw({0x73}).word((V(1) << 4) | 3).raw({0x80}).word(test);
+  bits.stop();
+  FieldVM bvm(host);
+  bvm.load(make_module(bits, {{{{1, bupd}, {5, test}}}}));
+  bvm.set_var(V(1), 8);
+  FieldVM::Trace btrace;
+  bvm.set_trace(&btrace);
+  for (u32 tick = 0; tick < 4; ++tick) {
+    btrace.tick = tick;
+    bvm.tick();
+  }
+  const std::string want = std::format(" {} {} 8 r", test, V(1));
+  CHECK(std::ranges::any_of(btrace.notes, [&](const std::string& note) { return note.starts_with("v ") && note.ends_with(want); }));
+}
+
 // Softlock watchdog bookkeeping: a record that yields on one wait instruction is counted (strict), a polling loop of a class < 7 script is
 // counted (loop), WAIT / STOP_EXEC and the idle UPDATE loop are not.
 void test_stuck_watchdog() {
@@ -1975,6 +2101,9 @@ int main() {
   test_fe50_restore();
   test_fe2f_keeps_debug_mode();
   test_stuck_watchdog();
+  test_trace();
+  test_scene_state_queued_touch();
+  test_forced_branches();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

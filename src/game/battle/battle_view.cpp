@@ -335,6 +335,9 @@ void BattleView::run_load_step(LoadJob& job) {
   hand_toggle_ = 1;
   finished_ = false;
   route_events_.clear();
+  debug_actions_ = 0;
+  // The effect runs' seeds count from the battle's start (1 + casts so far), so a battle started again plays the same particles.
+  fx_casts_ = 0;
   scene_id_ = scene_id;
   if (scene_id < 0 || static_cast<size_t>(scene_id) >= tables_->scenes.size()) {
     log::error("battle: scene {} out of range", scene_id);
@@ -451,6 +454,7 @@ void BattleView::run_load_step(LoadJob& job) {
     return index >= 0 && index < static_cast<int>(targets.size());
   });
   const int scene_bg = tables_->scenes[static_cast<size_t>(scene_id)].bg();
+  intro_live_ = opt.intro_live;
   int bg = (opt.battlefield >= 0 && opt.battlefield < 100) ? opt.battlefield : scene_bg;
   // Dev: OC_BATTLE_FIELD forces the stage.
   if (const char* env = std::getenv("OC_BATTLE_FIELD"); env && *env && !versus_) bg = std::atoi(env);

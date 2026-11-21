@@ -765,7 +765,7 @@ void BattleView::build_hud() {
   const bool casting = act_.phase == Act::Phase::Cast || act_.phase == Act::Phase::Release;
   if (!casting) cast_began_ = -1;
   else if (cast_began_ < 0) cast_began_ = frame_count_;
-  if (free_cam().hide_overlays() || (select_held_ && casting)) ops_.clear();
+  if (free_cam().hide_overlays() || hud_hidden_ || (select_held_ && casting)) ops_.clear();
   else if (autohide_cast_ && casting) keep_cast_header();
   if (dbg_.overlay) build_camera_overlay();
 }

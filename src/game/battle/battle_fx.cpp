@@ -641,6 +641,9 @@ BattleFxRun::BattleFxRun(std::shared_ptr<const FxPack> pack, const assets::RoomE
     if (cb_.ambient) cb_.ambient(r, g, b, ticks);
   };
   sh.other = [this](const assets::SeqCmd& cmd) { on_other(cmd); };
+  sh.trace = [this](std::string_view seq, const assets::SeqCmd& cmd) {
+    if (cb_.trace) cb_.trace(seq, cmd);
+  };
   sh.actor_busy = [this] { return cb_.actor_busy ? cb_.actor_busy() : false; };
   sh.song_changing = [this] { return cb_.song_changing ? cb_.song_changing() : false; };
   sh.has_target = [this](int target) { return target >= 0 && target < static_cast<int>(scene_.targets.size()); };

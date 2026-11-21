@@ -9,6 +9,7 @@
 #include "core/log.h"
 #include "render/buffer.h"
 #include "render/render_target.h"
+#include "render/shaders.h"
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <stb_image_write.h>
@@ -21,6 +22,9 @@
 namespace oc::render {
 
 namespace {
+
+#include "screen.vert.inc"
+#include "depth_pack.frag.inc"
 
 std::atomic<u32> g_gpu_messages{0};
 SDL_LogOutputFunction g_previous_log = nullptr;
@@ -161,7 +165,11 @@ bool GpuContext::ensure_frame_images(u32 width, u32 height) {
     if (image) SDL_ReleaseGPUTexture(device_, image);
   frame_msaa_color_ = frame_overlay_depth_ = nullptr;
   frame_color_ = make_image(device_, width, height, color_format(), SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER, "frame colour");
-  frame_depth_ = make_image(device_, width, height, depth_format_, SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET, "frame depth", samples);
+  const SDL_GPUTextureUsageFlags depth_usage =
+      SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | (depth_readback_ && samples == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : 0);
+  frame_depth_ = make_image(device_, width, height, depth_format_, depth_usage, "frame depth", samples);
+  if (depth_pack_) SDL_ReleaseGPUTexture(device_, depth_pack_);
+  depth_pack_ = nullptr;
   frame_samples_ = samples;
   extent_ = {width, height};
   if (!frame_color_ || !frame_depth_) return false;
@@ -349,7 +357,7 @@ void GpuContext::begin_rendering(const PassImages& images, bool clear_color, con
   depth_info.texture = images.depth;
   depth_info.clear_depth = 1.0f;
   depth_info.load_op = load_depth ? SDL_GPU_LOADOP_LOAD : SDL_GPU_LOADOP_CLEAR;
-  depth_info.store_op = images.depth && images.depth == held_depth_ ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
+  depth_info.store_op = images.depth && (images.depth == held_depth_ || images.depth == kept_depth_) ? SDL_GPU_STOREOP_STORE : SDL_GPU_STOREOP_DONT_CARE;
   depth_info.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
   depth_info.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
   pass_ = SDL_BeginGPURenderPass(cmd_, &color_info, 1, &depth_info);
@@ -513,6 +521,75 @@ void GpuContext::flush_streams() {
   streams_.clear();
 }
 
+bool GpuContext::enable_depth_readback() {
+  if (!device_ || !SDL_GPUTextureSupportsFormat(device_, depth_format_, SDL_GPU_TEXTURETYPE_2D,
+                                               SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER)) {
+    log::warn("depth readback: the depth format cannot be sampled on this device");
+    return false;
+  }
+  depth_readback_ = true;
+  extent_ = {};
+  return true;
+}
+
+// The packed depth (depth_pack.frag) of `depth` (the frame's or the capture target's) into depth_pack_: a pass after the frame's own (the
+// depth image is no longer a target then).
+bool GpuContext::pack_depth(SDL_GPUTexture* depth, Extent extent) {
+  if (!depth || extent.width == 0 || extent.height == 0) return false;
+  if (!depth_pack_pipeline_) {
+    depth_pack_vs_ = create_shader(*this, SDL_GPU_SHADERSTAGE_VERTEX, screen_vert, ShaderDesc{0, 0, 0}, "screen.vert");
+    depth_pack_fs_ = create_shader(*this, SDL_GPU_SHADERSTAGE_FRAGMENT, depth_pack_frag, ShaderDesc{1, 0, 0}, "depth_pack.frag");
+    SDL_GPUSamplerCreateInfo sampler{};
+    sampler.min_filter = sampler.mag_filter = SDL_GPU_FILTER_NEAREST;
+    sampler.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    sampler.address_mode_u = sampler.address_mode_v = sampler.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    depth_pack_sampler_ = SDL_CreateGPUSampler(device_, &sampler);
+    if (!depth_pack_vs_ || !depth_pack_fs_ || !depth_pack_sampler_) return false;
+    SDL_GPUColorTargetDescription target{};
+    target.format = color_format();
+    target.blend_state.src_color_blendfactor = target.blend_state.src_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ONE;
+    target.blend_state.dst_color_blendfactor = target.blend_state.dst_alpha_blendfactor = SDL_GPU_BLENDFACTOR_ZERO;
+    target.blend_state.color_blend_op = target.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+    SDL_GPUGraphicsPipelineCreateInfo info{};
+    info.vertex_shader = depth_pack_vs_;
+    info.fragment_shader = depth_pack_fs_;
+    info.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+    info.rasterizer_state.fill_mode = SDL_GPU_FILLMODE_FILL;
+    info.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+    info.rasterizer_state.front_face = SDL_GPU_FRONTFACE_COUNTER_CLOCKWISE;
+    info.multisample_state.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    info.depth_stencil_state.compare_op = SDL_GPU_COMPAREOP_ALWAYS;
+    info.target_info.color_target_descriptions = &target;
+    info.target_info.num_color_targets = 1;
+    depth_pack_pipeline_ = SDL_CreateGPUGraphicsPipeline(device_, &info);
+    if (!depth_pack_pipeline_) {
+      log::error("depth readback: SDL_CreateGPUGraphicsPipeline: {}", SDL_GetError());
+      return false;
+    }
+  }
+  if (depth_pack_ && (depth_pack_extent_.width != extent.width || depth_pack_extent_.height != extent.height)) {
+    SDL_ReleaseGPUTexture(device_, depth_pack_);
+    depth_pack_ = nullptr;
+  }
+  if (!depth_pack_) {
+    depth_pack_ = make_image(device_, extent.width, extent.height, color_format(), SDL_GPU_TEXTUREUSAGE_COLOR_TARGET, "packed depth");
+    if (!depth_pack_) return false;
+    depth_pack_extent_ = extent;
+  }
+  SDL_GPUColorTargetInfo color{};
+  color.texture = depth_pack_;
+  color.load_op = SDL_GPU_LOADOP_DONT_CARE;
+  color.store_op = SDL_GPU_STOREOP_STORE;
+  SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd_, &color, 1, nullptr);
+  if (!pass) return false;
+  SDL_BindGPUGraphicsPipeline(pass, depth_pack_pipeline_);
+  const SDL_GPUTextureSamplerBinding binding{depth, depth_pack_sampler_};
+  SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+  SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+  SDL_EndGPURenderPass(pass);
+  return true;
+}
+
 // A requested screenshot / capture reads the frame's colour image back once the frame's fence signals.
 void GpuContext::end_frame() {
   if (!in_frame_) return;
@@ -523,14 +600,37 @@ void GpuContext::end_frame() {
 
   const bool capture = !screenshot_path_.empty() || static_cast<bool>(capture_cb_);
   SDL_GPUTransferBuffer* download = nullptr;
+  auto depth_callback = std::move(depth_cb_);
+  depth_cb_ = nullptr;
+  // What the captures read: the frame, or this frame's capture target (set_capture_source).
+  const RenderTarget* source = std::exchange(capture_target_, nullptr);
+  kept_depth_ = nullptr;
+  const Extent cap = source ? Extent{source->width(), source->height()} : extent_;
+  SDL_GPUTexture* cap_color = source ? source->color() : frame_color_;
+  SDL_GPUTexture* cap_depth = source ? source->depth()
+                              : depth_readback_ && frame_samples_ == SDL_GPU_SAMPLECOUNT_1 ? frame_depth_ : nullptr;
+  SDL_GPUTransferBuffer* depth_download = nullptr;
+  if (depth_callback && pack_depth(cap_depth, cap)) {
+    const SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, cap.width * cap.height * 4, 0};
+    depth_download = SDL_CreateGPUTransferBuffer(device_, &info);
+    if (depth_download) {
+      SDL_GPUCopyPass* pass = SDL_BeginGPUCopyPass(cmd_);
+      const SDL_GPUTextureRegion region{depth_pack_, 0, 0, 0, 0, 0, cap.width, cap.height, 1};
+      const SDL_GPUTextureTransferInfo destination{depth_download, 0, cap.width, cap.height};
+      SDL_DownloadFromGPUTexture(pass, &region, &destination);
+      SDL_EndGPUCopyPass(pass);
+    } else {
+      log::error("depth readback: buffer allocation failed: {}", SDL_GetError());
+    }
+  }
   if (capture) {
-    const SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, extent_.width * extent_.height * 4, 0};
+    const SDL_GPUTransferBufferCreateInfo info{SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, cap.width * cap.height * 4, 0};
     download = SDL_CreateGPUTransferBuffer(device_, &info);
     if (download) {
       SDL_GPUCopyPass* pass = SDL_BeginGPUCopyPass(cmd_);
-      const SDL_GPUTextureRegion source{frame_color_, 0, 0, 0, 0, 0, extent_.width, extent_.height, 1};
-      const SDL_GPUTextureTransferInfo destination{download, 0, extent_.width, extent_.height};
-      SDL_DownloadFromGPUTexture(pass, &source, &destination);
+      const SDL_GPUTextureRegion region{cap_color, 0, 0, 0, 0, 0, cap.width, cap.height, 1};
+      const SDL_GPUTextureTransferInfo destination{download, 0, cap.width, cap.height};
+      SDL_DownloadFromGPUTexture(pass, &region, &destination);
       SDL_EndGPUCopyPass(pass);
     } else {
       log::error("screenshot: readback buffer allocation failed: {}", SDL_GetError());
@@ -550,7 +650,7 @@ void GpuContext::end_frame() {
     upload_cmd_ = nullptr;
   }
 
-  if (download) {
+  if (download || depth_download) {
     SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd_);
     if (fence) {
       SDL_WaitForGPUFences(device_, true, &fence, 1);
@@ -560,23 +660,34 @@ void GpuContext::end_frame() {
     auto callback = std::move(capture_cb_);
     screenshot_path_.clear();
     capture_cb_ = nullptr;
-    std::vector<u8> px(static_cast<size_t>(extent_.width) * extent_.height * 4);
-    if (void* mapped = SDL_MapGPUTransferBuffer(device_, download, false)) {
+    if (depth_download) {
+      std::vector<u8> packed(static_cast<size_t>(cap.width) * cap.height * 4);
+      if (void* mapped = SDL_MapGPUTransferBuffer(device_, depth_download, false)) {
+        std::memcpy(packed.data(), mapped, packed.size());
+        SDL_UnmapGPUTransferBuffer(device_, depth_download);
+        depth_callback(std::move(packed), cap.width, cap.height);
+      } else {
+        log::error("depth readback: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
+      }
+      SDL_ReleaseGPUTransferBuffer(device_, depth_download);
+    }
+    std::vector<u8> px(static_cast<size_t>(cap.width) * cap.height * 4);
+    if (void* mapped = download ? SDL_MapGPUTransferBuffer(device_, download, false) : nullptr) {
       std::memcpy(px.data(), mapped, px.size());
       SDL_UnmapGPUTransferBuffer(device_, download);
       for (size_t i = 3; i < px.size(); i += 4) px[i] = 255;
-      if (callback) callback(std::vector<u8>(px), extent_.width, extent_.height);
+      if (callback) callback(std::vector<u8>(px), cap.width, cap.height);
       if (!shot_path.empty()) {
-        if (stbi_write_png(shot_path.string().c_str(), static_cast<int>(extent_.width), static_cast<int>(extent_.height), 4, px.data(),
-                           static_cast<int>(extent_.width) * 4))
+        if (stbi_write_png(shot_path.string().c_str(), static_cast<int>(cap.width), static_cast<int>(cap.height), 4, px.data(),
+                           static_cast<int>(cap.width) * 4))
           log::info("screenshot saved: {}", shot_path.string());
         else
           log::error("screenshot: could not write {}", shot_path.string());
       }
-    } else {
+    } else if (download) {
       log::error("screenshot: SDL_MapGPUTransferBuffer: {}", SDL_GetError());
     }
-    SDL_ReleaseGPUTransferBuffer(device_, download);
+    if (download) SDL_ReleaseGPUTransferBuffer(device_, download);
   } else {
     if (capture) {
       screenshot_path_.clear();
@@ -605,9 +716,16 @@ void GpuContext::shutdown() {
   white_texture_ = nullptr;
   white_sampler_ = nullptr;
   white_ = TexRef();
-  for (SDL_GPUTexture* image : {frame_color_, frame_depth_, frame_msaa_color_, frame_overlay_depth_})
+  for (SDL_GPUTexture* image : {frame_color_, frame_depth_, frame_msaa_color_, frame_overlay_depth_, depth_pack_})
     if (image) SDL_ReleaseGPUTexture(device_, image);
-  frame_color_ = frame_depth_ = frame_msaa_color_ = frame_overlay_depth_ = nullptr;
+  frame_color_ = frame_depth_ = frame_msaa_color_ = frame_overlay_depth_ = depth_pack_ = nullptr;
+  if (depth_pack_pipeline_) SDL_ReleaseGPUGraphicsPipeline(device_, depth_pack_pipeline_);
+  if (depth_pack_vs_) SDL_ReleaseGPUShader(device_, depth_pack_vs_);
+  if (depth_pack_fs_) SDL_ReleaseGPUShader(device_, depth_pack_fs_);
+  if (depth_pack_sampler_) SDL_ReleaseGPUSampler(device_, depth_pack_sampler_);
+  depth_pack_pipeline_ = nullptr;
+  depth_pack_vs_ = depth_pack_fs_ = nullptr;
+  depth_pack_sampler_ = nullptr;
   extent_ = {};
   SDL_ReleaseWindowFromGPUDevice(device_, window_);
   SDL_DestroyGPUDevice(device_);

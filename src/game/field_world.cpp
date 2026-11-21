@@ -413,8 +413,8 @@ void FieldWorld::prefetch_sourced_model(const std::string& key) {
 }
 
 // ------------------------------------------------------------------------------------------------ room loading
-void FieldWorld::clear_room() {
-  clear_effects();
+void FieldWorld::clear_room(bool keep_art) {
+  clear_effects(keep_art);
   lighting_.clear();
   watchdog_.reset();
   sfx_vol_.fill(SfxSlide{});
@@ -422,8 +422,10 @@ void FieldWorld::clear_room() {
   sfx_records_.fill(SfxSlotRecord{});
   song_cue_ = {};
   ents_.clear();
-  room_models_.clear();
-  room_model_tried_.clear();
+  if (!keep_art) {
+    room_models_.clear();
+    room_model_tried_.clear();
+  }
   room_prepared_.clear();
   model_sources_.clear();
   // Room entries are decoded against this room's models.
@@ -476,9 +478,11 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   ScopedTimer total_timer("field: load_room TOTAL");
   ++room_loads_;
   if (files_) const_cast<vfs::Vfs*>(files_)->set_hd_mode(hd_);
+  // The room on show loaded again with the same art (an editor's reload): its room models and effect meshes stay.
+  const bool keep_art = view_.same_art(name, prd_path_for(name)) && room_models_gen_ == render::texture_registry::generation();
   {
     ScopedTimer timer("field: clear_room (incl. GPU idle wait)");
-    clear_room();
+    clear_room(keep_art);
   }
   // The party's models build on workers while the room loads; INIT's party binds take them.
   prefetch_party_models(gs_->slot);
@@ -535,8 +539,13 @@ bool FieldWorld::load_room(std::string_view name, int param) {
     if (!walk.empty()) ent_state.actor.place(walk, 0, start[0], start[1], to_internal(0));
     ent_state.actor.set_facing(to_internal(0));
   }
-  room_models_.assign(scene->models.size(), nullptr);
-  room_model_tried_.assign(scene->models.size(), false);
+  const bool kept = keep_art && view_.art_reused() && room_models_.size() == scene->models.size();
+  if (!kept) {
+    room_models_.assign(scene->models.size(), nullptr);
+    room_model_tried_.assign(scene->models.size(), false);
+    room_models_gen_ = render::texture_registry::generation();
+  }
+  keep_room_meshes_ = kept;
 
   // The control yaw (op 63) and the portrait yaw (FE 6A) are 0 at every room load.
   control_yaw_ = 0;

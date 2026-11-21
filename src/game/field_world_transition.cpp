@@ -327,6 +327,17 @@ void FieldWorld::snap_camera_to_player(bool keep_scroll) {
   view_.set_scroll(camera_.cam.x, camera_.cam.y, true);
 }
 
+void FieldWorld::debug_pin_scroll(int x, int y) {
+  scroll_pinned_ = true;
+  pin_x_ = x;
+  pin_y_ = y;
+  camera_.cam.x = x;
+  camera_.cam.y = y;
+  camera_.smooth.reset(x, y);
+  view_.set_scroll(x, y, true);
+  step_cull();
+}
+
 void FieldWorld::step_camera() {
   camera_.advance(view_, vm_.global_flags(), pose_of(camera_entity()), camera_override());
   // Screen shake: advance the amplitude ramp, then offset the scroll (re-clamped to the pan limits unless limits are off).
@@ -341,6 +352,11 @@ void FieldWorld::step_camera() {
   // One camera: the retail integer scroll above is the only eased value. The display (RoomView::scroll_at) interpolates it between
   // ticks, sub-pixel. A second float-eased copy would drift from it (the integer ease stalls); ScrollSmoother instead only
   // filters the integer scroll's whole-pixel steps, trailing it by at most 2 px, and the shakes below are added on top unfiltered.
+  if (scroll_pinned_) {
+    camera_.cam.x = pin_x_;
+    camera_.cam.y = pin_y_;
+    camera_.smooth.reset(pin_x_, pin_y_);
+  }
   camera_.smooth.step(camera_.cam.x, camera_.cam.y);
   int sx = camera_.cam.x, sy = camera_.cam.y;
   if (shake_.ax != 0) sx = camera_.clamp_x(view_, vm_.global_flags(), camera_.cam.x + shake_offset(shake_.ax));

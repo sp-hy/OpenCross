@@ -76,8 +76,9 @@ void build_screen_warp(const ScreenWarpParams& params, std::vector<WarpQuad>& ou
 }
 
 
-bool RenderTarget::create(GpuContext& ctx, u32 width, u32 height, bool multisampled) {
+bool RenderTarget::create(GpuContext& ctx, u32 width, u32 height, bool multisampled, bool samplable_depth) {
   destroy();
+  samplable_depth_ = samplable_depth && !multisampled;
   ctx_ = &ctx;
   device_ = ctx.device();
   width_ = width;
@@ -122,7 +123,8 @@ bool RenderTarget::prepare_samples(GpuContext& ctx) {
       msaa_color_ = SDL_CreateGPUTexture(device_, &info);
     }
     info.format = ctx.depth_format();
-    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET;
+    info.usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET |
+                 (samplable_depth_ && samples == SDL_GPU_SAMPLECOUNT_1 ? SDL_GPU_TEXTUREUSAGE_SAMPLER : SDL_GPUTextureUsageFlags{0});
     depth_ = SDL_CreateGPUTexture(device_, &info);
     if (depth_ && (msaa_color_ || samples == SDL_GPU_SAMPLECOUNT_1)) return true;
     log::error("render target {}x{} ({} samples): SDL_CreateGPUTexture: {}", width_, height_, 1u << static_cast<u32>(samples), SDL_GetError());

@@ -116,6 +116,8 @@ void App::fill_route_state() {
   rstate.message = field_visible() ? world.last_dialogue_message() : -1;
   rstate.choice_line = field_visible() ? world.dialogue_choice_line() : -1;
   rstate.battle = battle_in_field || battle_ok;
+  rstate.battle_idle = battle_ready && (battle_in_field || battle_ok) && battle.route_idle();
+  rstate.battle_actions = battle_ready ? battle.debug_actions() : 0;
   // The results screen is up, or a versus battle's outcome plate (route: wait battle results).
   rstate.battle_finished = (results_ok && results.active()) || (battle_ready && battle_in_field && battle.versus_plate());
   rstate.settling = (world_ok && world.input_settling()) || (flow_ready && flow.veiled());
@@ -158,6 +160,9 @@ void App::route_request(const game::RouteOut& out) {
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
   else if (rk == "party_add") { world.party_add(out.request_arg); world.state_edited(); }
+  // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::start_script; class 3 = a talk's): an
+  // editor runs any one script of a room, not only the ones a talk or a touch starts
+  else if (rk == "script") world.vm().start_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
   else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
@@ -222,14 +227,49 @@ Bytes App::route_save_block() {
 
 // Scripted input: fixed ticks per frame, one route step per tick.
 void App::route_frame() {
-  for (int k = 0; k < config.debug_script_speed && !route_finished; ++k) {
-    platform::Input in;
-    game::RouteOut out;
-    fill_route_state();
+  if (controlled) {
+    control_frame();
+    return;
+  }
+  for (int k = 0; k < config.debug_script_speed && !route_finished; ++k)
+    if (route_step()) break;
+  step = {0, 0.0f};
+}
+
+// A controlled run goes on ticking with no input once its route has ended (the scene plays out).
+bool App::route_step() {
+  platform::Input in;
+  game::RouteOut out;
+  fill_route_state();
+  if (!(controlled && route_finished)) {
     route.step(rstate, in, out);
     pad_remap.apply(in, platform::active_map());
     if (out.battle_auto && battle_ready) battle.set_auto(true);
     if (out.battle_auto && results_ok) results.set_auto(true);
+    // Battle harness (`cast`, `attack`, `set invincible`): written now, so the next tick of a seek sees it.
+    if (battle_ready && (out.battle_cast > 0 || out.battle_weapon >= 0 || out.invincible_party >= 0)) {
+      game::BattleView::Debug debug = battle.debug();
+      if (out.battle_cast > 0) {
+        debug.cast_element = out.battle_cast;
+        // Both or neither: the view's explicit caster / target path, else PC `lead` on the first enemy.
+        const bool pair = out.battle_caster >= 0 && out.battle_target >= 0;
+        debug.cast_actor = pair ? out.battle_caster : -1;
+        debug.cast_target = pair ? out.battle_target : -1;
+        debug.lead = !pair && out.battle_caster >= 0 ? out.battle_caster : 0;
+      }
+      if (out.battle_weapon >= 0) debug.weapon = out.battle_weapon, debug.lead = std::max(0, out.battle_caster);
+      if (out.invincible_party >= 0) {
+        debug.inv_party = out.invincible_party != 0, debug.inv_enemies = out.invincible_enemies != 0;
+        debug_tools.set_invincible(debug.inv_party, debug.inv_enemies);
+      }
+      battle.set_debug(debug);
+    }
+    // Battle harness `set battle hp` / `set critical` / `set hit`: the battle's outcome set up before an action (a previewer's Low HP / Dies /
+    // Critical / Miss).
+    if (battle_ready && out.hp_unit >= 0 && !battle.debug_set_hp(out.hp_unit, out.hp_value, out.hp_percent))
+      log::warn("route: set battle hp: no unit {} in the battle", out.hp_unit);
+    if (battle_ready && out.critical >= 0 && battle.battle_mut()) battle.battle_mut()->set_force_crit(out.critical != 0);
+    if (battle_ready && out.hit >= 0 && battle.battle_mut()) battle.battle_mut()->set_force_hit(out.hit);
     if (out.dump) log::info("route: tick {} entities of {}:\n{}", route_tick, rstate.room, world.dump_entities());
     // Route `art`: the F6 path (not saved to the ini).
     if (!out.art.empty()) {
@@ -250,6 +290,13 @@ void App::route_frame() {
     else if (out.put)
       for (int slot = 0; slot < 3; ++slot)
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
+    if (out.put_beside >= 0) {
+      float bx = 0, bz = 0;
+      if (world.put_party_beside(out.put_beside, out.put_dist, bx, bz))
+        log::info("route: put beside ent {}: the party at {:.0f},{:.0f}", out.put_beside, bx, bz);
+      else
+        log::warn("route: put beside ent {}: no walkable spot beside it (the party stays)", out.put_beside);
+    }
     if (out.set_buttons) world.game_state().slot.button_cfg[static_cast<size_t>(out.buttons_index)] = static_cast<u32>(out.buttons_value);
     if (out.set_option) world.game_state().set_option(static_cast<u16>(out.option_mask), out.option_on != 0);
     if (out.set_skin) {
@@ -285,20 +332,26 @@ void App::route_frame() {
       });
     if (out.failed) {
       log::error("route FAILED at tick {}: {}\nentities:\n{}", route_tick, out.message, field_visible() ? world.dump_entities() : std::string("(no room)"));
-      ctx.request_screenshot(shots_dir / "route_failed.png");
+      if (controlled) control_reply(std::format("failed {} {}", route_tick, out.message));
+      else ctx.request_screenshot(shots_dir / "route_failed.png");
       exit_code = 1;
     }
+    if (controlled && !out.note.empty()) control_reply(std::format("log {} {}", route_tick, out.note));
     if (out.done) route_finished = true;
-    update_loop_speed(1.0 / 60.0);
-    loop_speed.field = loop_speed.field_factor == 1.0f ? platform::FixedStep::Result{1, 0.0f} : field_stepper.advance(loop_speed.field_factor / 60.0);
-    advance(in, 1.0 / 60.0, 1);
-    mixer.capture_tick(1.0 / 60.0);
-    if (recorder.active()) recorder.write(1.0 / 60.0, 1, in);
-    ++route_tick;
-    // Render this tick before the next command.
-    if (!out.screenshot.empty() || out.measure_sides || route_finished) break;
   }
-  step = {0, 0.0f};
+  update_loop_speed(1.0 / 60.0);
+  loop_speed.field = loop_speed.field_factor == 1.0f ? platform::FixedStep::Result{1, 0.0f} : field_stepper.advance(loop_speed.field_factor / 60.0);
+  advance(in, 1.0 / 60.0, 1);
+  mixer.capture_tick(1.0 / 60.0);
+  if (recorder.active()) recorder.write(1.0 / 60.0, 1, in);
+  if (battle_ready) {
+    const int phase = battle.action_phase();
+    if (phase != 0 && act_phase == 0) act_begun = route_tick;
+    act_phase = phase;
+  }
+  ++route_tick;
+  // Render this tick before the next command.
+  return !out.screenshot.empty() || out.measure_sides || route_finished;
 }
 
 void App::replay_frame() {

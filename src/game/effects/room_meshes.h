@@ -22,11 +22,15 @@ struct RoomMeshTri {
   // of the texture page origin (0, 1) and the size of one texel (2, 3), so u = texels[0] + texel_u * texels[2]. A texel size of 0 = none.
   float texel_u[4]{}, texel_v[4]{};
   float texels[4]{};
+  // Each corner's view depth (an editor unprojects the corners with it; Control `fxsprites`).
+  float z[4]{};
   u8 rgb[4][3]{};
   // GPU blend of ParticleBatch: 0 opaque, 1 B/2+F/2, 2 B+F, 3 B-F, 4 B+F/4.
   int blend = 0;
   int slot = 0;
   render::TexRef set;
+  // The face's texture: its index for texture_rgba(), -1 = untextured.
+  int tex = -1;
 };
 
 class RoomMeshes {
@@ -41,6 +45,8 @@ class RoomMeshes {
   void clear();
   bool empty() const { return parts_.empty(); }
   bool has(const std::string& name) const { return find(name) != nullptr; }
+  // Texture `index` (RoomMeshTri::tex) as RGBA, as uploaded; false when there is none.
+  bool texture_rgba(int index, u32& width, u32& height, std::vector<u8>& rgba) const;
 
   // Projects the faces of mesh `mesh.name` (view-space centre + matrix of the object, EmitterSystem::MeshInstance) to layer-space triangles.
   // Back faces are dropped like the game's NCLIP test; op 37 morphs the vertices toward `mesh.morph_name` (phase interpolated by `alpha`),

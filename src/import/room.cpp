@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 
+#include "core/hash.h"
 #include "core/span_reader.h"
 #include "import/container.h"
 #include "import/lzss.h"
@@ -293,6 +294,58 @@ std::optional<assets::RoomScene> load_room(std::string_view name, ByteSpan bin, 
     if (error) *error = std::string("malformed data: ") + exception.what();
   }
   return std::nullopt;
+}
+
+std::optional<u64> room_art_key(ByteSpan bin, ByteSpan ctd) {
+  try {
+    const std::vector<ByteSpan> parts = split_cpt(bin, "bin");
+    Fnv64 hash;
+    hash.add(parts.size());
+    for (size_t i = 0; i < parts.size(); ++i) {
+      if (i == kStub || i == kScript || i == kTris || i == kVerts || i == kConst || i == kDialog) continue;
+      hash.add(i);
+      hash.add_bytes(parts[i].data(), parts[i].size());
+    }
+    hash.add_bytes(ctd.data(), ctd.size());
+    return hash.value();
+  } catch (const Fail&) {
+  } catch (const std::exception&) {
+  }
+  return std::nullopt;
+}
+
+bool reload_room_logic(std::string_view name, ByteSpan bin, assets::RoomScene& scene, std::string* error) {
+  try {
+    // build()'s steps for these subfiles, into a scratch scene first so a failure leaves `scene` as it was.
+    const std::vector<ByteSpan> parts = split_cpt(bin, "bin");
+    if (parts.size() < kModel0) throw Fail{"bin: only " + std::to_string(parts.size()) + " subfiles"};
+    assets::RoomScene logic;
+    logic.walk = parse_walk(parts[kTris], parts[kVerts]);
+    SpanReader const_reader(parts[kConst]);
+    for (size_t i = 0; i + 4 <= parts[kConst].size(); i += 4) logic.attr_flags.push_back(const_reader.u32_());
+    const Bytes stub = unpack(parts[kStub], "zones");
+    for (size_t i = 0; i + 24 <= stub.size(); i += 24) {
+      SpanReader zone_reader(ByteSpan(stub).subspan(i, 24));
+      assets::RoomZone zone;
+      for (auto& corner : zone.corner)
+        for (auto& coordinate : corner) coordinate = zone_reader.s16_();
+      logic.zones.push_back(zone);
+    }
+    logic.script_bytes = unpack(parts[kScript], "script");
+    apply_script_fixes(name, logic.script_bytes);
+    logic.dialogue_bytes = unpack(parts[kDialog], "dialogue");
+    scene.walk = std::move(logic.walk);
+    scene.attr_flags = std::move(logic.attr_flags);
+    scene.zones = std::move(logic.zones);
+    scene.script_bytes = std::move(logic.script_bytes);
+    scene.dialogue_bytes = std::move(logic.dialogue_bytes);
+    return true;
+  } catch (const Fail& failure) {
+    if (error) *error = failure.msg;
+  } catch (const std::exception& exception) {
+    if (error) *error = std::string("malformed data: ") + exception.what();
+  }
+  return false;
 }
 
 std::optional<std::vector<assets::RoomModelHeader>> load_room_models(ByteSpan bin, ByteSpan ctd, std::string* error) {

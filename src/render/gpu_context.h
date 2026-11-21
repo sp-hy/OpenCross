@@ -142,6 +142,18 @@ class GpuContext {
   // Hands the next finished frame to `callback` as tightly packed RGBA8 (w*h*4, alpha 255): used to freeze the last field frame
   // for the battle transition (blocks for that frame).
   void request_capture(std::function<void(std::vector<u8>&&, u32, u32)> callback) { capture_cb_ = std::move(callback); }
+  // A controlled run's depth readback: frame images made with a samplable depth image (single-sampled frames only). Call before the
+  // first frame; false when the device cannot sample the depth format.
+  bool enable_depth_readback();
+  // Hands the next finished frame's depth to `callback` as RGBA8 (w*h*4): the 0..1 depth value (ordering-table slot / kDepthRange) as a
+  // 24-bit integer in r, g, b, high byte first. Needs enable_depth_readback(); the depth is what the frame's own depth image holds at the
+  // end of the frame (targets drawn into their own images leave theirs out).
+  void request_depth_capture(std::function<void(std::vector<u8>&&, u32, u32)> callback) { depth_cb_ = std::move(callback); }
+  // This frame's captures (request_capture / request_depth_capture) read `target` instead of the frame: a single-sampled target made with
+  // a samplable depth (RenderTarget::create), its depth kept (keep_depth) while it was drawn. Cleared by end_frame.
+  void set_capture_source(const RenderTarget* target) { capture_target_ = target; }
+  // The depth image `depth` is stored when its passes end (not discarded): a target whose depth is read after the frame. nullptr = none.
+  void keep_depth(SDL_GPUTexture* depth) { kept_depth_ = depth; }
 
   bool begin_frame(Frame& frame);
   void end_frame();
@@ -252,6 +264,19 @@ class GpuContext {
   // of the overlay pass.
   SDL_GPUTexture* frame_msaa_color_ = nullptr;
   SDL_GPUTexture* frame_overlay_depth_ = nullptr;
+  // Depth readback (enable_depth_readback): the packed depth image, its pass and the shaders / sampler it uses.
+  bool depth_readback_ = false;
+  std::function<void(std::vector<u8>&&, u32, u32)> depth_cb_;
+  SDL_GPUTexture* depth_pack_ = nullptr;
+  SDL_GPUGraphicsPipeline* depth_pack_pipeline_ = nullptr;
+  SDL_GPUShader* depth_pack_vs_ = nullptr;
+  SDL_GPUShader* depth_pack_fs_ = nullptr;
+  SDL_GPUSampler* depth_pack_sampler_ = nullptr;
+  // Draws the packed depth of `depth` into depth_pack_ (created on first use); false when it cannot.
+  bool pack_depth(SDL_GPUTexture* depth, Extent extent);
+  const RenderTarget* capture_target_ = nullptr;
+  SDL_GPUTexture* kept_depth_ = nullptr;
+  Extent depth_pack_extent_{};
   SDL_GPUSampleCount frame_samples_ = SDL_GPU_SAMPLECOUNT_1;
   bool overlay_ = false;
   Extent extent_{};

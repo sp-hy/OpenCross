@@ -42,6 +42,13 @@ s64 ObjectHeap::alloc(u32 size) {
   return -1;
 }
 
+u32 ObjectHeap::used_bytes() const {
+  u32 used = 0;
+  for (size_t i = 0; i + 1 < blocks_.size(); ++i)
+    if (blocks_[i].used) used += blocks_[i + 1].node - blocks_[i].node;
+  return used;
+}
+
 void ObjectHeap::free(u32 node) {
   size_t i = containing(node);
   if (blocks_[i].node != node || !blocks_[i].used) return;

@@ -7,6 +7,7 @@
 //   app_sim.cpp       advance(): one block of simulation (flow, pause, movies, menus, the field), the art / audio switches
 //   app_battle.cpp    the field -> battle hand-off and back
 //   app_route.cpp     scripted routes, input replay, the room sweep
+//   app_control.cpp   a route run driven by another program over stdin / stdout ([Debug] Control)
 //   app_debug.cpp     the Esc overlay's Debug tab
 //   app_run.cpp       run(): the main loop (hotkeys, per-frame settings, mode dispatch, the options window's changes)
 //   app_draw.cpp      draw_frame(): the frame composition (scene target, PS1-resolution passes, 8F warp, overlays, pillarboxing)
@@ -21,11 +22,13 @@
 #include <cstdio>
 #include <filesystem>
 #include <functional>
+#include <iosfwd>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "audio/mixer.h"
@@ -98,6 +101,9 @@
 
 namespace oc::app {
 
+// The command lines a controlled run has received and not yet taken (app_control.cpp).
+struct ControlInbox;
+
 // Everything the BattleView needs from a field encounter request. Built when the load begins (the hold) and reused by the take-over.
 struct FieldBattleArgs {
   game::FieldWorld::BattleRequest rq;
@@ -159,6 +165,10 @@ class App {
   void init_menus();
   void init_field();
   void init_battle();
+  // [Debug] Battle: (re)start the standalone battle with [Debug] BattleParty / BattleField (boot and a controlled run's restart).
+  bool start_debug_battle();
+  // The standalone battle's start options as init_battle set them up (start_debug_battle copies them; it sets the battlefield).
+  game::BattleView::StartOptions debug_battle_options;
   void init_title();
   void init_start_state();
 
@@ -202,6 +212,7 @@ class App {
   static bool confirm_edge(const platform::Input& in);
   void apply_audio_config();
   void apply_art_mode();
+  void install_mod_rooms_and_text();
   void end_movie();
   void start_movie(const game::FieldWorld::MovieRequest& rq);
   // Opens and starts the movie of row `rq.index` of disc `disc`'s movie table; false when it cannot be opened.
@@ -348,9 +359,50 @@ class App {
   void fill_route_state();
   void route_request(const game::RouteOut& out);
   void route_frame();
+  // One route step and one simulation tick; true = draw now (a screenshot was asked for, or the route ended).
+  bool route_step();
   void replay_frame();
   // Returns false when the sweep is over (the main loop ends).
   bool sweep_frame();
+
+  // ---- app_control.cpp --------------------------------------------------------------------------------------------------------
+  // [Debug] Control: another program drives the route run over stdin / stdout (docs/formats/routes.md, "Controlled runs").
+  void init_control();
+  // The frame's work while controlled: take the commands, run towards the asked tick, ask for the frame once it is reached.
+  void control_frame();
+  // Starts the run over from its first route line, in the same process (new game, seed, room, route).
+  void control_restart();
+  // `btrace <from> <ticks> <file>`: a battle action's trace (BattleView::set_route_trace) from driver tick `from` until the view is idle.
+  std::string control_btrace(u64 from, u64 ticks, const std::string& file);
+  void control_reply(const std::string& line);
+  // The `state` reply of the tick reached: the camera scroll and the entities' places.
+  std::string control_state();
+  // The `trace` command: the scripts' timeline from driver tick `from` on, run without drawing (its reply line).
+  std::string control_trace(u64 from, u64 ticks, const std::string& file);
+  // `plan <ini>`: another run in the same process (a room or a standalone battle, its route, party, draft folder, window shape), as if
+  // started with that ini's [Debug] / [Video] keys; the reply line.
+  std::string control_plan(const std::string& file);
+  // `camera ...` / `camera off`: the field drawn through a controller's own camera (an editor's orbit); the reply line.
+  std::string control_camera(std::istringstream& words);
+  // `fxsprites ...`: the room effects' sprite quads at a tick through a controller's camera, written to a file (nothing drawn).
+  std::string control_fxsprites(std::istringstream& words);
+  // Back to the room's camera, the actors drawn (a new plan, `camera off`).
+  void control_camera_off();
+  // One command line (control_frame): its reply, "" when there is none now.
+  std::string control_command(const std::string& op, std::istringstream& words);
+  // The other commands (docs/formats/routes.md 8.1), each giving its reply line.
+  std::string control_seek(const std::string& op, std::istringstream& words);
+  std::string control_scroll(std::istringstream& words);
+  std::string control_xform(std::istringstream& words);
+  std::string control_grid(std::istringstream& words);
+  std::string control_replay(std::istringstream& words);
+  std::string control_fxmem();
+  std::string control_campose();
+  std::string control_stage(std::istringstream& words);
+  // The mods scanned again with the draft folder and applied (`reload`, a `plan` with another DraftDir).
+  void control_rescan_mods();
+  // [Debug] HoldScripts / ForceBranches applied to the field (the run's start, each `plan`).
+  void control_apply_debug_keys();
 
   // ---- app_debug.cpp ----------------------------------------------------------------------------------------------------------
   game::DebugTools::Ctx debug_tools_ctx();
@@ -404,6 +456,8 @@ class App {
   void draw_battle_picture(const SceneFrame& sf);
   void draw_title_lowres(const SceneFrame& sf);
   void draw_field_lowres(const SceneFrame& sf);
+  // Control `room`: the whole room (the camera's pan range) in one pass into room_rt, which this frame's captures then read.
+  void draw_room_shot(const SceneFrame& sf);
   void draw_field_full(const SceneFrame& sf);
   void draw_battle_ui(const SceneFrame& sf);
   void draw_field_ui(const SceneFrame& sf);
@@ -553,6 +607,15 @@ class App {
   // Classic art, [Video] Ps1ResGraphics: the field picture is drawn into the PS1 field buffer size (320 x 224) and scaled up with nearest
   // sampling into RDE's field frame, so models / effects have the pixel size of the 1x backdrops.
   render::RenderTarget field_rt;
+  // Control `room`: the whole-room picture's target (samplable depth) and the pan range of the shot asked for this frame.
+  render::RenderTarget room_rt;
+  struct RoomBounds {
+    int x_max = 0, x_min = 0, y_max = 0, y_min = 0;
+    // Control `view`: zoom > 0 = the game camera's frame at scroll (x, y) showing zoom times as much room each way, the message windows in
+    // it (x_max..y_min unused).
+    float zoom = 0, x = 0, y = 0;
+  };
+  std::optional<RoomBounds> control_room, room_shot_pending;
   render::Sampler nearest;
   render::TexRef field_rt_set;
   // 8F screen ripple: the frame drawn so far is re-drawn warped. Classic PS1-resolution art: the deep part goes into field_rt, the
@@ -779,8 +842,27 @@ class App {
   // ---- routes -----------------------------------------------------------------------------------------------------------------
   game::RouteState rstate;
   u64 route_tick = 0;
+  // A controlled battle run's presented action (BattleView::action_phase) as of the last route step, and the route tick its phase left
+  // none (btrace reports it: the action begins a tick or so before the route's `cast` line sees it begun).
+  int act_phase = 0;
+  u64 act_begun = 0;
+  // [Debug] ForceBranches as the VM reads it (control_apply_debug_keys).
+  std::unordered_map<u32, u32> forced_branches;
   int exit_code = 0;
   bool route_finished = false;
+  // Controlled run: the command lines read from stdin (a reader thread fills `control_inbox`), the tick asked for (-1 = none), the
+  // file its frame goes to, whether the frame capture is on its way, and the host's quit.
+  bool controlled = false;
+  std::shared_ptr<ControlInbox> control_inbox;
+  long long control_target = -1;
+  std::filesystem::path control_frame_file;
+  bool control_capture_pending = false;
+  // [Debug] ControlDepth and the device can read the depth back: each frame comes with <frame file>.depth.
+  bool control_depth = false;
+  // Control `camera`: the colour a `view` picture is cleared to while the run draws through its own camera (no background layers).
+  float control_backdrop[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  // Control `stage 0`: the colour a standalone battle is cleared to while its stage is not drawn.
+  float stage_backdrop[3] = {0.0f, 0.0f, 0.0f};
 
   // ---- debugging --------------------------------------------------------------------------------------------------------------
   // A field room is shown this frame (the Debug tab's field sections).

@@ -232,9 +232,12 @@ struct TextMod {
   // The mod's room id -> internal id, for its field text rows of those rooms (other ids are the game's rows).
   std::map<int, int> rooms;
 };
-// Set once at launch (priority order, first wins), before text is read; read by every LangTables.
+// Set at launch (priority order, first wins), before text is read; read by every LangTables. A controlled run sets them again when it
+// reads the mods again (Control `reload`, a plan with another DraftDir: an editor's unsaved dialog in its draft folder): each call bumps
+// text_mods_generation(), and a LangTables reads its field / battle rows and mess_wend again at its next lookup after a change.
 void set_text_mods(std::vector<TextMod> mods);
 const std::vector<TextMod>& text_mods();
+u32 text_mods_generation();
 
 // Field csv: (room, msg) -> text. `load_rows_rule` implements "a row is loaded only if no earlier row has a larger room".
 struct FieldTable {
@@ -313,6 +316,9 @@ class LangTables {
   PerLang& per(Lang lang) { return langs_[static_cast<int>(lang)]; }
   bool ensure(Lang lang);
   void ensure_wend();
+  // The mods' rows changed since this object read its field / battle rows (set_text_mods): forget them (read again when needed). The
+  // language-column tables stay (callers hold pointers into them; their mod rows are read once).
+  void follow_mods();
   bool read_member(std::string_view name, std::string& out_utf8) const;
   // The enabled mods' row files of `member` (TextMod), lowest priority first, decoded.
   void each_mod_rows(std::string_view member, const std::function<void(const TextMod&, std::string_view)>& apply) const;
@@ -325,6 +331,7 @@ class LangTables {
   std::array<PerLang, 6> langs_;
   FieldTable wend_;
   bool wend_loaded_ = false;
+  u32 mods_generation_ = 0;
   std::unordered_map<std::string, TextTable> tables_;
   std::unordered_map<std::string, bool> tables_tried_;
   // The PS1 text source; set on first use when the install has no lang.dat.

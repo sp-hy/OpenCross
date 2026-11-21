@@ -213,6 +213,7 @@ StageScene::LoadResult StageScene::load_step(double budget_ms, std::string* err)
   cfg.seed = 0x5347u;
   cfg.pos_shift = pos_shift_;
   em_ = std::make_unique<effects::EmitterSystem>(bank_, cfg);
+  if (xform_) em_->set_draw_xform(xform_);
   effects::ActorHooks ah;
   ah.anchor_basis = [](int, effects::Basis& out) {
     out = effects::Basis{};
@@ -327,7 +328,8 @@ void StageScene::draw_sprites(const render::Frame& frame, render::Rect scissor, 
     log::info("stage: sprites: {} spawned, {} live, {} unresolved", st.type_spawns[3], st.live, st.unresolved_sprites);
   }
   std::vector<effects::DrawQuad> quads;
-  em_->collect_quads(view, alpha, quads);
+  if (!hidden_) em_->collect_quads(view, alpha, quads);
+  if (grid_) effects::add_grid_quads(view, *grid_, quads);
   if (quads.empty()) return;
   effects::sort_draw_order(quads);
   frame.set_scissor(scissor);
@@ -500,7 +502,7 @@ void StageScene::build_shadow(const ShadowCaster& caster, const Footprint& fp, c
 void StageScene::draw(render::StagePipeline& pipe, const render::Frame& frame, render::Rect scissor, const effects::ViewParams& view,
                       const render::Letterbox& lb, float alpha, bool linear) {
   drawn_ = 0;
-  if (!mesh_ || !em_) return;
+  if (!mesh_ || !em_ || hidden_) return;
   // When the mod overlay changed, re-apply the tile replacements live.
   if (asset_ && !tile_group_.empty() && tile_gen_ != render::texture_registry::generation()) {
     tile_gen_ = render::texture_registry::generation();

@@ -104,6 +104,29 @@ bool FieldWorld::dialogue_blocked() {
   return true;
 }
 
+void FieldWorld::trace_windows() {
+  script::FieldVM::Trace* trace = vm_.trace();
+  if (!trace) return;
+  std::vector<const ui::DialogueDemo*> boxes{&dialogue_};
+  for (const ExtraWindow& window : extra_win_) boxes.push_back(window.box.get());
+  if (trace->windows.size() < boxes.size()) trace->windows.resize(boxes.size());
+  for (size_t i = 0; i < boxes.size(); ++i) {
+    const ui::DialogueDemo* box = boxes[i];
+    const bool open = box && box->is_open();
+    const int page = open ? box->progress() >> 16 : -1;
+    const bool typed = open && box->page_typed();
+    script::FieldVM::Trace::Window& was = trace->windows[i];
+    if (!open) {
+      if (was.open) trace->notes.push_back(std::format("w {} {} close", trace->tick, i));
+      was = {};
+      continue;
+    }
+    if (!was.open || page != was.page) trace->notes.push_back(std::format("w {} {} page {}", trace->tick, i, page));
+    if (typed && (!was.typed || page != was.page)) trace->notes.push_back(std::format("w {} {} typed {}", trace->tick, i, page));
+    was = {true, box->msg_index(), page, typed};
+  }
+}
+
 void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   // Which window: window 0 when it is free, else the first free extra one (created and wired like window 0 on first use).
   ui::DialogueDemo* box = &dialogue_;
@@ -128,6 +151,9 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     if (!box) return;
   }
   ui::DialogueDemo& dlg = *box;
+  // An editor's screenplay (Control `trace`): which window, who speaks (entity, -1 none), which message, whose script opened it.
+  if (auto* trace = vm_.trace())
+    trace->notes.push_back(std::format("d {} {} {} {} {}", trace->tick, win_slot, speaker, message, vm_.running_entity()));
   int speaker_id = 0;
   if (speaker >= 0 && speaker < static_cast<int>(ents_.size())) speaker_id = std::max(0, ents_[static_cast<size_t>(speaker)].char_id);
   // Portrait: the speaking entity's face (party members: their character id; others only after

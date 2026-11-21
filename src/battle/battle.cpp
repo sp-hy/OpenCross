@@ -1653,7 +1653,7 @@ bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool mi
   // Dev: every PC weapon attack misses.
   static const bool force_miss = std::getenv("OC_BATTLE_MISS") != nullptr;
   const bool rolled = roll_hit(rng_, chance);
-  const bool hit = rolled && !missed && !(force_miss && attacker.pc);
+  const bool hit = (force_hit_ >= 0 ? force_hit_ == 1 : rolled) && !missed && !(force_miss && attacker.pc);
   static const char* kStrName[] = {"weak", "medium", "heavy"};
   ActionEvent ev;
   ev.kind = ActionEvent::Kind::Weapon;
@@ -1698,6 +1698,7 @@ bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool mi
   input.target_afraid = (target_unit.lo & st::kAfraid) != 0;
   input.opposite_colour = ct >= 0 && attack_colour < 6 && kOpp[static_cast<size_t>(ct)] == attack_colour;
   input.guarding = target_unit.pc && target_unit.guard;
+  input.forced_crit = force_crit_;
   DamageOut damage = weapon_damage(rng_, input);
   if (target_unit.hi & st::kHiWeaponImmune) {
     damage.value = 0;
@@ -2268,7 +2269,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         say(std::format("{} uses {} on {}: nothing to steal", caster.name, nm, target_unit.name));
         break;
       }
-      if (!(loot_always() && caster.pc) && rng_.rnd(0, 100) >= chance) {
+      const bool roll_failed = !(loot_always() && caster.pc) && rng_.rnd(0, 100) >= chance;
+      if (force_hit_ >= 0 ? force_hit_ == 0 : roll_failed) {
         say(std::format("{} uses {} on {}: the steal fails (chance {})", caster.name, nm, target_unit.name, chance));
         steal_msg = 2;
         break;
@@ -2424,6 +2426,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         input.target_afraid = (target_unit.lo & st::kAfraid) != 0;
         input.opposite_colour = ct >= 0 && ce >= 0 && kOpp[static_cast<size_t>(ct)] == ce;
         input.guarding = target_unit.pc && target_unit.guard;
+        input.forced_crit = force_crit_;
         const DamageOut damage = weapon_damage(rng_, input);
         // A weapon-immune target's hit is the miss value -1, and the misses add up like damage.
         total += immune ? -1 : damage.value;
