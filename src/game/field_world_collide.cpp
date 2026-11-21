@@ -272,11 +272,16 @@ u32 FieldWorld::walk_flags(int i) const {
 
 // Not DRAWN: the draw passes skip an actor with flag bit 0x20 (TOGGLE_COLLISION b != 0), 0x4000 or 0x8000 (off screen, step_cull) -
 // never bit 0x10. SET_VISIBLE 0 only sets 0x10 = inactive (no script, no anim update, no collision / talk), so the model stays on
-// screen frozen. An empty party slot (no model) stays out via slot_inactive.
+// screen frozen. An empty party slot (no model) stays out via slot_inactive. An entity attached (D6) to a parent with bit 0x20 is not
+// drawn either: it stays attached and shows again on the parent's hand when the parent does.
 bool FieldWorld::ent_not_drawn(int i) const {
   const u32 flags = vm_.entity(i).flags38;
   if (flags & (0x20 | script::flag38::kNo3dObject | (draw_offscreen_ ? 0u : script::flag38::kOffScreen))) return true;
-  return (flags & script::flag38::kInactive) && ents_[static_cast<size_t>(i)].slot_inactive;
+  const Ent& ent_state = ents_[static_cast<size_t>(i)];
+  if (ent_state.actor.attached() && ent_state.attach_to >= 0 && ent_state.attach_to < static_cast<int>(ents_.size()) &&
+      (vm_.entity(ent_state.attach_to).flags38 & 0x20))
+    return true;
+  return (flags & script::flag38::kInactive) && ent_state.slot_inactive;
 }
 
 bool FieldWorld::ent_hidden(int i) const {
