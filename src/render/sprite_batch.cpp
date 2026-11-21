@@ -88,6 +88,10 @@ bool SpriteBatch::init(GpuContext& ctx) {
   if (!pipeline_sub_keep_.create(ctx, pd)) return false;
   pd.blend = Blend::MultiplyKeepAlpha;
   if (!pipeline_mul_keep_.create(ctx, pd)) return false;
+  pd.blend = Blend::Keep;
+  pd.depth_test = true;
+  pd.depth_write = true;
+  if (!pipeline_stamp_.create(ctx, pd)) return false;
 
   if (!create_quad_index_buffer(ctx, index_buffer_, kMaxQuads)) return false;
   return vertices_.create(ctx, sizeof(SpriteVertex) * 4 * kMaxQuads, SDL_GPU_BUFFERUSAGE_VERTEX);
@@ -108,6 +112,7 @@ void SpriteBatch::destroy() {
   pipeline_pre_.destroy();
   pipeline_add_alpha_.destroy();
   pipeline_add_keep_.destroy();
+  pipeline_stamp_.destroy();
   pipeline_sub_keep_.destroy();
   pipeline_mul_keep_.destroy();
   capture_ = nullptr;
@@ -167,7 +172,22 @@ void SpriteBatch::flush() {
   const SDL_GPUTextureSamplerBinding binding{current_.texture, current_.sampler};
   SDL_BindGPUFragmentSamplers(ctx_->pass(), 0, &binding, 1);
   SDL_DrawGPUIndexedPrimitives(ctx_->pass(), (quad_count_ - flushed_quads_) * 6, 1, 0, static_cast<s32>(flushed_quads_ * 4), 0);
+  // The depth stamp: the same quads again, the nearest depth where they cover (z 0), no colour.
+  if (stamp_ && !depth_mode_) {
+    SDL_BindGPUGraphicsPipeline(ctx_->pass(), pipeline_stamp_.handle());
+    SDL_PushGPUVertexUniformData(ctx_->cmd(), 0, view_transform_, sizeof view_transform_);
+    push_filter();
+    SDL_DrawGPUIndexedPrimitives(ctx_->pass(), (quad_count_ - flushed_quads_) * 6, 1, 0, static_cast<s32>(flushed_quads_ * 4), 0);
+    bind_pipeline();
+  }
   flushed_quads_ = quad_count_;
+}
+
+void SpriteBatch::set_depth_stamp(bool on) {
+  on = on && stamp_allowed_;
+  if (on == stamp_) return;
+  flush();
+  stamp_ = on;
 }
 
 void SpriteBatch::draw(TexRef texture, float x, float y, float w, float h, float u0, float v0, float u1,

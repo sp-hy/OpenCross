@@ -31,6 +31,8 @@ struct SequenceHooks {
   std::function<void(int r, int g, int b, int ticks)> ambient;
   // Every other op (actor visibility, brightness, fades, flashes, tint ramps, colour matrix, overlay-private ops...).
   std::function<void(const assets::SeqCmd&)> other;
+  // Every command a task executes (traces): its sequence's name and the command.
+  std::function<void(std::string_view seq, const assets::SeqCmd&)> trace;
   // Flow conditions (default: false = not blocking).
   // actor_busy (op 50): stall while true.
   std::function<bool()> actor_busy;

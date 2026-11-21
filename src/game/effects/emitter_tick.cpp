@@ -346,6 +346,22 @@ void EmitterSystem::Impl::step_frame(int ticks) {
   u32 run = 0;
   for (const auto& header : headers) run += header.linked ? 1u : 0u;
   st.running = run;
+  if (heap_usage_tracked()) measure_usage();
+}
+
+void EmitterSystem::Impl::measure_usage() {
+  usage.size = heap.size();
+  usage.used = heap.used_bytes();
+  usage.peak_bytes = std::max(usage.peak_bytes, usage.used);
+  usage.peak_objects = std::max(usage.peak_objects, static_cast<u32>(objs.size()));
+  std::map<int, u32> per_owner;
+  for (const Object& obj : objs)
+    if (obj.heap_held) ++per_owner[obj.owner];
+  for (const auto& [owner, count] : per_owner) {
+    if (owner < 0 || static_cast<size_t>(owner) >= headers.size()) continue;
+    u32& peak = usage.per_emitter[headers[static_cast<size_t>(owner)].nm()];
+    peak = std::max(peak, count);
+  }
 }
 
 std::vector<size_t> EmitterSystem::Impl::heap_order() const {

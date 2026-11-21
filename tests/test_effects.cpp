@@ -1073,9 +1073,15 @@ void test_object_heap() {
   heap.search_from_top();
   CHECK(heap.alloc(0x10) == 0x3E30);
   heap.reset();
+  CHECK(heap.used_bytes() == 0);
+  CHECK(heap.alloc(0x94) == 0x3F54);
+  CHECK(heap.used_bytes() == 0x94 + effects::ObjectHeap::kNodeBytes);
+  heap.free(0x3F54);
+  CHECK(heap.used_bytes() == 0);
   int count = 0;
   while (heap.alloc(0x94) >= 0) ++count;
   CHECK(count == 102);
+  CHECK(heap.used_bytes() == 102 * (0x94 + effects::ObjectHeap::kNodeBytes));
 }
 
 int main() {

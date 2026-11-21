@@ -30,6 +30,7 @@ add_executable(opencross WIN32
   app/app.h
   app/app_battle.cpp
   app/app_boot.cpp
+  app/app_control.cpp
   app/app_debug.cpp
   app/app_draw.cpp
   app/app_feedback.cpp

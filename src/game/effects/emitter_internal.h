@@ -31,6 +31,9 @@ constexpr u32 kFlagViewSpace = 1u << 25, kFlagWorldQuad = 1u << 26, kFlagNoDeath
 // Nested spawn limit (death / child chains).
 constexpr int kMaxDepth = 6;
 
+// effects::track_heap_usage's switch.
+bool heap_usage_tracked();
+
 struct Header {
   const assets::Emitter* def = nullptr;
   // A per-target clone header is named "sado"; the original keeps its name.
@@ -152,9 +155,16 @@ struct EmitterSystem::Impl {
   // Set by set_lights().
   LightTable* lights = nullptr;
   std::vector<Header> headers;
+  std::optional<DrawXform> draw_xform;
+  // DrawXform: the view moved for the dragged emitters (R' = R A, t' = R (pivot + shift - A pivot) + t), and whether an object's owner is one.
+  ViewParams moved_view(const ViewParams& base) const;
+  bool xformed(int owner) const;
   std::vector<Object> objs;
   ObjectHeap heap;
   EmitterStats st;
+  HeapUsage usage;
+  // After a tick: the arena's use into `usage` (its peaks).
+  void measure_usage();
   u64 tick_count = 0;
   // set_frame_ticks: 60 Hz ticks per frame step, and the ticks counted since the last step.
   int frame_ticks = 1;

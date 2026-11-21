@@ -147,6 +147,68 @@ int main() {
     while (sim.step() && ++guard < 20) {}
     CHECK(!sim.last.failed);
   }
+  // ---- read: confirms a window only after its text has stood still for the delay; log hands its text to the host
+  {
+    Sim sim;
+    std::string err;
+    const auto route_file = write_tmp("oc_route_read.txt", "0 read 20\n- log hello there\n- wait 200\n- quit\n");
+    CHECK(sim.route.load(route_file, &err));
+    sim.st.room = "r";
+    sim.st.room_valid = true;
+    sim.step();
+    sim.step();
+    CHECK(sim.last.note == "hello there");
+    int typed = 0;
+    sim.st.dialogue = true;
+    sim.st.dialogue_progress = [&typed] { return std::vector<int>{typed}; };
+    int first_press = -1;
+    for (int i = 0; i < 60 && first_press < 0; ++i) {
+      if (i < 30) ++typed;
+      sim.step();
+      if (sim.pressed[SDL_SCANCODE_RETURN]) first_press = i;
+    }
+    // Typing until step 29, then 20 still ticks.
+    CHECK(first_press >= 49 && first_press <= 51);
+    sim.st.dialogue = false;
+    for (int i = 0; i < 40; ++i) {
+      sim.step();
+      CHECK(!sim.pressed[SDL_SCANCODE_RETURN]);
+    }
+  }
+  // ---- put beside: hands the entity and the distance to the host; a bad entity fails the run
+  {
+    Sim sim;
+    std::string err;
+    CHECK(sim.route.load(write_tmp("oc_route_beside.txt", "0 put beside 5\n- put beside 7 60\n- quit\n"), &err));
+    sim.st.room = "r";
+    sim.st.room_valid = true;
+    sim.step();
+    CHECK(sim.last.put_beside == 5 && sim.last.put_dist == 0.0f && !sim.last.put);
+    sim.step();
+    CHECK(sim.last.put_beside == 7 && sim.last.put_dist == 60.0f);
+    Sim bad;
+    CHECK(bad.route.load(write_tmp("oc_route_beside_bad.txt", "0 put beside x\n"), &err));
+    bad.step();
+    CHECK(bad.last.failed);
+  }
+  // ---- battle harness: set battle hp (a value, a percentage), set critical, set hit; a bad unit fails the run
+  {
+    Sim sim;
+    std::string err;
+    CHECK(sim.route.load(write_tmp("oc_route_hp.txt", "0 set battle hp 3 1\n- set battle hp 0 25%\n- set critical 1\n- set hit 0\n- quit\n"), &err));
+    sim.step();
+    CHECK(sim.last.hp_unit == 3 && sim.last.hp_value == 1 && !sim.last.hp_percent && sim.last.critical == -1);
+    sim.step();
+    CHECK(sim.last.hp_unit == 0 && sim.last.hp_value == 25 && sim.last.hp_percent);
+    sim.step();
+    CHECK(sim.last.critical == 1 && sim.last.hp_unit == -1 && sim.last.hit == -1);
+    sim.step();
+    CHECK(sim.last.hit == 0 && sim.last.critical == -1);
+    Sim bad;
+    CHECK(bad.route.load(write_tmp("oc_route_hp_bad.txt", "0 set battle hp x 5\n"), &err));
+    bad.step();
+    CHECK(bad.last.failed);
+  }
   // ---- bad command
   {
     Sim sim;

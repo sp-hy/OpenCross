@@ -50,10 +50,33 @@ bool origin_off_screen(u32 flags, const Vec3& origin, const ViewParams& view) {
 
 using namespace emitter_detail;
 
-void EmitterSystem::Impl::collect_meshes(const ViewParams& view, float tick_alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
+ViewParams EmitterSystem::Impl::moved_view(const ViewParams& base) const {
+  ViewParams moved = base;
+  if (!draw_xform) return moved;
+  const auto& r = base.rot.m;
+  const auto& a = draw_xform->matrix.m;
+  for (size_t i = 0; i < 3; ++i)
+    for (size_t j = 0; j < 3; ++j) moved.rot.m[i * 3 + j] = r[i * 3] * a[j] + r[i * 3 + 1] * a[3 + j] + r[i * 3 + 2] * a[6 + j];
+  Vec3 offset{};
+  for (size_t k = 0; k < 3; ++k)
+    offset[k] = draw_xform->pivot[k] + draw_xform->shift[k] -
+                (a[k * 3] * draw_xform->pivot[0] + a[k * 3 + 1] * draw_xform->pivot[1] + a[k * 3 + 2] * draw_xform->pivot[2]);
+  for (size_t i = 0; i < 3; ++i) moved.trans[i] = base.trans[i] + r[i * 3] * offset[0] + r[i * 3 + 1] * offset[1] + r[i * 3 + 2] * offset[2];
+  return moved;
+}
+
+bool EmitterSystem::Impl::xformed(int owner) const {
+  return draw_xform && owner >= 0 && static_cast<size_t>(owner) < headers.size() &&
+         std::find(draw_xform->names.begin(), draw_xform->names.end(), headers[static_cast<size_t>(owner)].nm()) != draw_xform->names.end();
+}
+
+void EmitterSystem::Impl::collect_meshes(const ViewParams& base_view, float tick_alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
   const float alpha = frame_blend(tick_alpha);
+  const ViewParams moved = moved_view(base_view);
   for (const size_t index : heap_order()) {
     const Object& obj = objs[index];
+    // DrawXform: a dragged emitter's mesh is placed through the moved view (its drawer projects with xform_view too).
+    const ViewParams& view = xformed(obj.owner) ? moved : base_view;
     if (!obj.alive || (obj.stype != 14 && obj.stype != 19 && obj.stype != 20) || !obj.mesh_name || obj.poly_tag >= 0 || dev_skip(obj)) continue;
     if (!with_suppressed && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].draw_off) continue;
     MeshInstance mi;
@@ -371,11 +394,13 @@ void EmitterSystem::Impl::collect_flare(const Object& obj, const ViewParams& vie
   out.push_back(quad);
 }
 
-void EmitterSystem::Impl::collect(const ViewParams& view, float tick_alpha, std::vector<DrawQuad>& out) const {
+void EmitterSystem::Impl::collect(const ViewParams& base_view, float tick_alpha, std::vector<DrawQuad>& out) const {
   const float alpha = frame_blend(tick_alpha);
   u32 order = out.empty() ? 0 : out.back().order + 1;
+  const ViewParams moved = moved_view(base_view);
   for (const size_t index : heap_order()) {
     const Object& obj = objs[index];
+    const ViewParams& view = xformed(obj.owner) ? moved : base_view;
     // Drawn by its overlay (collect_tagged) / filtered out by OC_FX_ONLY.
     if (obj.poly_tag >= 0 || dev_skip(obj)) continue;
     if (obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].cb_no_draw) continue;

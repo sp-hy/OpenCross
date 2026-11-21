@@ -278,6 +278,10 @@ void bind_cheats(const Cheats* set);
 //            ShowFace: force this portrait (face) id on the message (-1 = the scripts' own); ShowFlags: its window flags (the dialog op's
 //            flag byte; 0x800 / 0x1000 put the portrait right / left). Script: route file of timed inputs / commands
 //            (src/game/route_script.h); the run exits when it ends; ScriptSpeed: simulation ticks per rendered frame while it runs.
+//            Control: with Script, another program drives the run through stdin / stdout (seek to a tick, frames out, restart; the
+//            protocol is in docs/formats/routes.md); the run then waits for commands instead of running on and exiting.
+//            ControlDepth: with Control, each frame comes with its depth image (<frame file>.depth); the field is then drawn straight into
+//            the frame (no PS1-resolution graphics, render scale 1, no MSAA, no full-screen shader or grade).
 //            Record: write the real session's inputs to this file (replayable); Replay: replay a recorded session (room / entrance come
 //            from the file). Battle: start directly in a battle with this encounter scene id (-1 = off); BattleAuto: the battle plays
 //            itself (first ready PC: Attack -> fierce on the first enemy).
@@ -408,6 +412,10 @@ struct Config {
   bool debug_panels = false;
   int debug_entrance = 0;
   int debug_auto_confirm = 0;
+  bool debug_control = false;
+  bool debug_control_depth = false;
+  // [Debug] DraftDir: a mod folder outside the game's mods folder, loaded first (vfs::ModManager::scan `draft`).
+  std::string debug_draft_dir;
   bool debug_auto_teleport = false;
   int debug_sweep_ticks = 0;
   int debug_sweep_talk = 0;
@@ -428,6 +436,19 @@ struct Config {
   // scene's own) with the free camera on.
   bool debug_showcase = false;
   int debug_showcase_stage = -1;
+  // [Debug] BattleParty / BattleField: the Battle= scene's party (character ids, slot 0 first; empty = 0, 1, 22) and battlefield
+  // (stage bg_NN; -1 = ShowcaseStage, else the scene's own). Read only, like Control.
+  std::string debug_battle_party;
+  int debug_battle_field = -1;
+  // [Debug] BattleIntroLive: the Battle= scene's stage intro (`bti*`) plays live for the load's ticks before the party intro cuts it, as
+  // the game shows it under the field's hand-over (without one the load fast-forwards it): an editor's stage preview. Read only.
+  bool debug_battle_intro_live = false;
+  // [Debug] HoldScripts: a controlled run's room stops running scripts after its INIT (FieldWorld::set_hold_scripts): effects and
+  // background animation go on, no cutscene starts. Also a `plan` key.
+  bool debug_hold_scripts = false;
+  // [Debug] ForceBranches: `<pc>:<to>,...` (decimal script addresses): in a controlled run, after the instruction at <pc> runs the record
+  // goes on at <to> (FieldVM::set_forced_branches): an editor's run of one way of a test. Also a `plan` key; empty = none.
+  std::string debug_force_branches;
 
   Cheats cheats;
   MultiplayerSettings multiplayer;

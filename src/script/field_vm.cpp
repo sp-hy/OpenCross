@@ -38,7 +38,24 @@ bool FieldVM::var_unsigned(u32 id) const { return (mod_.sign_mask[(id >> 6) & 31
 
 s32 FieldVM::read_var(u32 id) const {
   const u16 raw = vars_[(id >> 1) & (kVarSlots - 1)];
-  return var_unsigned(id) ? static_cast<s32>(raw) : static_cast<s32>(static_cast<s16>(raw));
+  const s32 value = var_unsigned(id) ? static_cast<s32>(raw) : static_cast<s32>(static_cast<s16>(raw));
+  if (trace_ && exec_pc_ != kNoPc) note_var(id, value, false);
+  return value;
+}
+
+void FieldVM::write_var(u32 id, s32 value) {
+  vars_[(id >> 1) & (kVarSlots - 1)] = static_cast<u16>(value);
+  if (trace_ && exec_pc_ != kNoPc) note_var(id, value, true);
+}
+
+void FieldVM::note_var(u32 id, s32 value, bool write) const {
+  // The word handle as the script names it.
+  const u32 handle = id & 0xFFFEu;
+  const u64 key = (static_cast<u64>(write) << 63) | (static_cast<u64>(ent_ & 0x7FFF) << 48) | (static_cast<u64>(exec_pc_ & 0xFFFFFF) << 16) | handle;
+  const auto it = trace_->last_var.find(key);
+  if (it != trace_->last_var.end() && it->second == value) return;
+  trace_->last_var[key] = value;
+  trace_->notes.push_back(std::format("v {} {} {} {} {} {}", trace_->tick, ent_, exec_pc_, handle, value, write ? 'w' : 'r'));
 }
 
 s32 FieldVM::var(u16 id) const { return read_var(id); }
@@ -274,19 +291,32 @@ void FieldVM::dispatch(int ent, int rec_index, bool run_mode) {
       break;
     }
     const u32 pc = rec_->pc;
+    const u16 id = rec_->id, cls = rec_->state;
     if (pc >= mod_.code.size()) {
       ++stats_.invalid_pc;
+      if (trace_ && !run_mode) trace_event(ent, rec_index, id, cls, pc, kTraceEnd);
       release();
       break;
     }
     const u8 op = mod_.code[pc];
     if (op == 0) {
+      if (trace_ && !run_mode) trace_event(ent, rec_index, id, cls, pc, kTraceEnd);
       release();
       break;
     }
     yield_ = false;
     base_ = pc;
+    // A dispatch inside an instruction (a spawn run at once) gives the outer one its pc back.
+    const u32 outer_pc = exec_pc_;
+    exec_pc_ = trace_ && !run_mode ? pc : kNoPc;
+    // JUMP_IF_BIT_CLEAR reads its bit without read_var: the trace notes the word the bit is in, as for a compare
+    if (op == 0x73 && exec_pc_ != kNoPc) read_var((static_cast<u32>(operand_s(1, 3, 0x80)) >> 4) & 0xFFFEu);
     exec(op);
+    if (forced_ && !ended_) {
+      if (const auto it = forced_->find(pc); it != forced_->end()) rec_->pc = it->second;
+    }
+    exec_pc_ = outer_pc;
+    if (trace_ && !run_mode) trace_event(ent, rec_index, id, cls, pc, static_cast<u8>((yield_ ? kTraceYield : 0) | (ended_ ? kTraceEnd : 0)));
     if (kTraceOps)
       log::info("vm: tick {} ent {} rec {} pc {:04X} op {:02X}{}{} budget {}", stats_.ticks, ent, rec_index, pc, op,
                 op == 0xFE ? std::format(" {:02X}", mod_.code_byte(pc + 1)) : std::string(), yield_ ? " yield" : "", budget_);
@@ -308,6 +338,33 @@ void FieldVM::dispatch(int ent, int rec_index, bool run_mode) {
     }
     rec_->last_start_pc = start_pc;
   }
+}
+
+void FieldVM::trace_event(int ent, int rec, u16 id, u16 cls, u32 pc, u8 flags) {
+  // The idle UPDATE loops are not the scene's (most of the events otherwise).
+  if (cls >= 7 && id == 1) return;
+  const size_t at = static_cast<size_t>(ent) * kRecordsPerEntity + static_cast<size_t>(rec);
+  if (trace_->last.size() <= at) trace_->last.resize(at + 1, kNoPc);
+  if (pc == trace_->last[at] && !(flags & kTraceEnd)) return;
+  trace_->last[at] = flags & kTraceEnd ? kNoPc : pc;
+  trace_->events.push_back(
+      {trace_->tick, pc, static_cast<u16>(ent), static_cast<u8>(rec), static_cast<u8>(id), static_cast<u8>(cls), flags});
+}
+
+FieldVM::SceneState FieldVM::scene_state(u32 stall) const {
+  bool live = false;
+  for (const Entity& entity : ents_)
+    for (const ScriptRecord& record : entity.rec) {
+      if (record.state >= 7) continue;
+      const u8 op = mod_.code_byte(record.pc);
+      if (op == 0x0B || op == 0x3B || (op == 0xFE && mod_.code_byte(record.pc + 1) == 0x16)) continue;
+      // A touch record the trigger pass queued this tick and that has not run yet: the leader standing in a touch range (a box
+      // entity's talk box is its touch box too) queues it again every tick, so only one that runs on (yields) is the scene's.
+      if (record.id == 3 && record.state == 4 && record.last_start_pc == kNoPc) continue;
+      if (record.stuck < stall && record.loops < stall) return SceneState::Running;
+      live = true;
+    }
+  return live ? SceneState::Stalled : SceneState::Done;
 }
 
 namespace {
@@ -394,6 +451,11 @@ u32 FieldVM::load_flags(size_t ent) const {
 }
 
 void FieldVM::load(FieldScriptModule module, std::span<const u32> flag_table) {
+  // A traced scene ends where its room does: the next room's scripts are not its own.
+  if (trace_) {
+    trace_->room_loaded = true;
+    trace_ = nullptr;
+  }
   mod_ = std::move(module);
   ents_.assign(mod_.entity_count(), Entity{});
   ui_.clear();

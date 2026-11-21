@@ -310,6 +310,12 @@ class FieldWorld final : public script::FieldHost {
   void set_battle_saved_vars(const std::array<u16, 8>& vars);
   // Resets the transient world (variables, queued requests) for a new game; keeps the state object.
   void reset_for_new_game();
+  // The field's tick count and the status block's generator as a fresh start has them (party idling is seeded from the tick count),
+  // so a run restarted in the same process plays exactly as it did from boot.
+  void reset_clock() {
+    tick_count_ = 0;
+    fstat_ = {};
+  }
   // The script reset the game to its boot state (FE 2F) since the last call: true once.
   bool take_game_reset() {
     const bool reset = game_reset_;
@@ -552,6 +558,15 @@ class FieldWorld final : public script::FieldHost {
   // RDE's HD card of this room entrance (import::room_cards, drawn by ui::WorldName): up from the room's load until a fade to black
   // over its dismiss length starts; nullptr when there is none or it was taken down.
   const import::RoomCard* room_card() const { return room_card_; }
+  // A controlled run's restart (App::control_restart): no screen fade left from the run before (a movie's fade-out, an A8 fade to
+  // black), as at boot.
+  void clear_screen_fade() {
+    fade_ = fade_target_ = 0.0f;
+    fade_step_ = 1.0f;
+    fade_hold_ = 0;
+    fade_add_ = fade_black_ = false;
+    fade_kind_ = 0;
+  }
   // Field menu closed: the field comes back from black over `ticks`.
   void fade_in_from_black(int ticks) {
     fade_ = 1.0f;
@@ -632,9 +647,53 @@ class FieldWorld final : public script::FieldHost {
   int entity_clip(int ent, bool source = false) const;
   // route hook: model yaw in script space (= facing once the turn is done)
   int entity_yaw(int ent) const;
+  // Control `state`: the entity's actor pose at the end of the last tick (Actor::pose_now); a default one when there is no such entity.
+  Actor::PoseNow entity_pose(int ent) const;
   // Route planner (debug automation): waypoints over the walk mesh from (x0, z0) to (x1, z1), A* across triangle adjacency with
   // optional straight-line smoothing (off = plain triangle centroids, safer along walls); empty when either end is off the mesh or unreachable. Solid entities are not considered.
   std::vector<std::array<float, 2>> find_path(float x0, float z0, float x1, float z1, bool smooth = true) const;
+  // Route `put beside`: the party on the walk mesh beside entity `ent` where it stands now, the leader facing it, so the action
+  // button talks at once. dist = centre distance (0 = inside talk range, outside touch range). Spot written to (x, z); false =
+  // no walkable spot around it (the party stays).
+  bool put_party_beside(int ent, float dist, float& x, float& z);
+  // Controlled runs: the field scroll held at (x, y) layer pixels from now on (the camera's follow and script targets ignored) and the
+  // off-screen cull redone for it at once, so a frame of the same tick shows that part of the room; unpin = the camera again.
+  void debug_pin_scroll(int x, int y);
+  void debug_unpin_scroll() { scroll_pinned_ = false; }
+  // A controlled run's whole-room picture: entities off the camera's screen are drawn too (their off-screen flag is the sim's, for its
+  // own scroll); set around the draw and the state reply only.
+  void set_draw_offscreen(bool on) { draw_offscreen_ = on; }
+  // A controlled run's picture without the actors and their shadows (Control `camera ... noactors`: effects alone); drawing only.
+  void set_hide_actors(bool on) { hide_actors_ = on; }
+  // [Debug] HoldScripts (a controlled run): the room's scripts stop after its INIT (no cutscene starts, actors stand), its effects and
+  // background animation go on: an editor's picture of the room's effects.
+  void set_hold_scripts(bool on) { hold_scripts_ = on; }
+  // A controlled run: the room on show loaded again with unchanged art keeps its built art, room models and effects (RoomView::same_art).
+  void set_keep_same_art(bool on) { view_.set_keep_same_art(on); }
+  // A controlled run's floor grid (Control `grid`), drawn with the effects (effects::add_grid_quads) only while the run draws through its
+  // own camera (RoomView::set_camera_override). Drawing only.
+  void set_debug_grid(std::optional<effects::FloorGrid> grid) { debug_grid_ = grid; }
+  // Control `xform`: the named room effects drawn moved (effects::DrawXform); drawing only. False: no effects in this run.
+  bool set_effect_xform(std::optional<effects::DrawXform> xform) {
+    if (!emitters_) return false;
+    emitters_->set_draw_xform(std::move(xform));
+    return true;
+  }
+  // Control `fxsprites`: the room effects' sprite quads as they stand, projected through `view` (an editor's own camera), in draw order
+  // (EmitterSystem::collect_quads at the tick, sort_draw_order); nothing is drawn. False: no effects in this run.
+  bool collect_effect_quads(const effects::ViewParams& view, std::vector<effects::DrawQuad>& out) const {
+    if (!emitters_ || !particles_ok_) return false;
+    emitters_->collect_quads(view, 1.0f, out);
+    effects::sort_draw_order(out);
+    return true;
+  }
+  // Control `fxsprites`: the faces of the room effects' meshes (sprite type 14 of the room's effect .prd, RoomMeshes) as they stand,
+  // projected through `view` to the layer point (no letterbox), each corner with its view depth; a dragged effect's through its moved
+  // view, as draw_effects does. The textures: room_meshes().texture_rgba(RoomMeshTri::tex).
+  void collect_effect_meshes(const effects::ViewParams& view, std::vector<effects::RoomMeshTri>& out) const;
+  const effects::RoomMeshes& room_meshes() const { return room_meshes_; }
+  // Control `replay`: each named room effect played again from its start (EmitterSystem::replay), the room going on. The number replayed.
+  int replay_effects(const std::vector<std::string>& names) { return emitters_ ? emitters_->replay(names) : 0; }
   // Sweep check: problems of the room's background layer ops ("" = fine). Every literal group of a BG_LAYER_ON / OFF (80 / 81) / C2
   // reachable from the entity scripts must be a tile group of the room, and after INIT at least one group image must be visible.
   std::string layer_report(std::string* notes = nullptr) const;
@@ -652,6 +711,8 @@ class FieldWorld final : public script::FieldHost {
   // ticks and the blocked script resumes with BATTLE_RESULT (var 0x32: 0 victory, 1 party wiped, 2 fled) set.
   using BattleRequest = BattleHandoff::BattleRequest;
   bool battle_ready() const { return handoff_.ready(); }
+  // A room change is asked for or under way (5A and the like, until the next room has loaded).
+  bool room_change_pending() const { return jump_.active || trans_ != Trans::None; }
   // The host loads the battle behind the swirl / the frozen hold: battle_requested() from request_battle() on (font prefetch),
   // battle_loading() while the hold runs (BattleView::load_step each frame), peek_battle() reads the request without taking it.
   bool battle_requested() const { return handoff_.requested(); }
@@ -742,6 +803,9 @@ class FieldWorld final : public script::FieldHost {
   void setup_dialog_window(int ent, std::span<const s32> v5) override;
   void set_dialog_face(int face) override;
   bool dialogue_open() override;
+  // Control `trace`: each message window's state after a tick into the trace's notes when it changed (`w <tick> <win> page <n>` /
+  // `typed <n>` (the page fully shown, waiting) / `close`); with open_dialogue's `d` line an editor knows when each page reads.
+  void trace_windows();
   bool drop_culled_dialogue() override;
   bool dialogue_blocked() override;
   void open_dialogue(int speaker, int message, int flags) override;
@@ -837,7 +901,8 @@ class FieldWorld final : public script::FieldHost {
   };
 
   // ---- room / model plumbing
-  void clear_room();
+  // keep_art: the same room's art stays (an editor's reload, RoomView::same_art): its room models and effect meshes are not dropped.
+  void clear_room(bool keep_art = false);
   // Room model `index` as 0F / D1 name it: the source FE D0 gave the number, else the room's own model.
   std::shared_ptr<ModelHandle> room_model(int index);
   std::shared_ptr<ModelHandle> own_room_model(int index);
@@ -1007,6 +1072,14 @@ class FieldWorld final : public script::FieldHost {
   // by room model index (null = not loaded / failed)
   std::vector<std::shared_ptr<ModelHandle>> room_models_;
   std::vector<bool> room_model_tried_;
+  // texture_registry::generation() when room_models_ were made: a reload that keeps the art keeps them only while it is the same.
+  unsigned room_models_gen_ = 0;
+  // build_effects keeps room_meshes_ (set by load_room when the art was kept).
+  bool keep_room_meshes_ = false;
+  bool draw_offscreen_ = false;
+  bool hide_actors_ = false;
+  bool hold_scripts_ = false;
+  std::optional<effects::FloorGrid> debug_grid_;
   // The room's models built with the room (RoomView::take_prepared_models), taken by room_model on first use.
   std::vector<std::optional<PreparedRoomModel>> room_prepared_;
   // FE D0: room model index -> where its model comes from in this room
@@ -1287,6 +1360,10 @@ class FieldWorld final : public script::FieldHost {
   int cue_song_ = -1;
   // The last song whose remastered stream could not be loaded (-1 = none).
   int failed_stream_ = -1;
+  // The last BGM file read (path, Vfs::generation, bytes): a song started again (a room reloaded, a return from a battle) is not read again.
+  std::string bgm_cache_path_;
+  u32 bgm_cache_gen_ = 0;
+  Bytes bgm_cache_;
   bool play_stream(int song, int volume, double start_seconds, bool resumable = false);
   // FE 29: C6 slots kept across the next room change
   u32 sfx_keep_slots_ = 0;
@@ -1300,6 +1377,9 @@ class FieldWorld final : public script::FieldHost {
   std::array<int, 3> monster_party_{-1, -1, -1};
   // Scroll in effect before the picker opened.
   int picker_scroll_x_ = 0, picker_scroll_y_ = 0;
+  // debug_pin_scroll
+  bool scroll_pinned_ = false;
+  int pin_x_ = 0, pin_y_ = 0;
   MovieState movie_state_ = MovieState::None;
   std::function<bool(script::NamedOp, std::string_view)> effect_tap_;
   std::function<void(int)> on_key_item_;
@@ -1315,7 +1395,7 @@ class FieldWorld final : public script::FieldHost {
 
   // room effects
   void build_effects();
-  void clear_effects();
+  void clear_effects(bool keep_meshes = false);
   // effect/particle.prd (shared sprite library)
   assets::RoomEffects lib_fx_;
   bool lib_loaded_ = false;

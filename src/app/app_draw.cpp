@@ -292,6 +292,7 @@ void App::draw_scene(SceneFrame& sf) {
   if (battle_shown) draw_battle_picture(sf);
   if (field_shown && sf.field_lowres) draw_field_lowres(sf);
   if (field_shown) draw_field_full(sf);
+  if (field_shown && room_shot_pending) draw_room_shot(sf);
   // Render scale: the scene target into the window (the frame is cleared black under every 3D picture: additive = a plain copy).
   if (sf.scene_scaled) composite_scene(sf);
   // Retry battle: the choice over the ended battle's picture (without the HUD), then the limited menu over the whole frame.
@@ -465,6 +466,61 @@ void App::draw_field_lowres(const SceneFrame& sf) {
   show_lowres(sf, shown, world.view().letterbox(sf.pw, sf.ph), lw, lh);
 }
 
+// Control `room`: the whole room in one pass, 2x, square pixels: a target of (320 + x range) x (224 + y range) layer pixels drawn at the
+// middle of the pan range (a draw-only scroll: Letterbox::room centres columns 0..320 and rows 0..224, so the target covers screen points
+// [-x_max, 320 - x_min) x [-y_max, 224 - y_min)), the widescreen columns widened to it (effect culls), every entity drawn whatever the
+// sim's off-screen cull says. The frame's captures read this target (GpuContext::set_capture_source).
+//
+// Control `view` (bounds.zoom > 0): the same pass over the region the game camera's frame shows at scroll (bounds.x, bounds.y) - its
+// widescreen columns included - times zoom each way, at the window's resolution (2x at least), then the message windows screen-fixed over
+// it.
+void App::draw_room_shot(const SceneFrame& sf) {
+  const RoomBounds bounds = *room_shot_pending;
+  room_shot_pending.reset();
+  const bool camera_view = bounds.zoom > 0;
+  float cols = render::kLayerW + static_cast<float>(std::max(0, bounds.x_max - bounds.x_min));
+  float rows = render::kFieldRows + static_cast<float>(std::max(0, bounds.y_max - bounds.y_min));
+  float mid_x = (bounds.x_max + bounds.x_min) * 0.5f, mid_y = (bounds.y_max + bounds.y_min) * 0.5f;
+  float scale = 2.0f;
+  if (camera_view) {
+    cols = (render::kLayerW + 2.0f * render::wide_extra()) * bounds.zoom;
+    rows = render::kFieldRows * bounds.zoom;
+    mid_x = bounds.x;
+    mid_y = bounds.y;
+    scale = std::max(2.0f, sf.pw / cols);
+  }
+  const u32 tw = static_cast<u32>(std::lround(cols * scale)), th = static_cast<u32>(std::lround(rows * scale));
+  if (!(room_rt.valid() && room_rt.width() == tw && room_rt.height() == th) && !room_rt.create(ctx, tw, th, false, true)) return;
+  render::Frame rf;
+  ctx.keep_depth(room_rt.depth());
+  // A controlled run's own camera (Control `camera`): no background layers, the picture cleared to the controller's backdrop.
+  if (world.view().camera_overridden())
+    ctx.begin_target(room_rt, sf.frame, rf, control_backdrop);
+  else
+    ctx.begin_target(room_rt, sf.frame, rf);
+  const float wide_was = render::wide_extra();
+  render::set_wide_extra((cols - render::kLayerW) * 0.5f);
+  game::RoomView& view = world.view();
+  view.set_room_pass(true, scale);
+  view.set_draw_scroll(true, mid_x, mid_y);
+  world.set_draw_offscreen(true);
+  draw_field_slab(sf, rf, static_cast<float>(tw), static_cast<float>(th), false);
+  world.set_draw_offscreen(false);
+  view.set_draw_scroll(false);
+  view.set_room_pass(false);
+  view.set_target_pass(false);
+  render::set_wide_extra(wide_was);
+  if (camera_view) {
+    // The message windows as on screen: their canvas fitted to the view (screen-fixed whatever the zoom), the preview's depth stamped.
+    sprites.allow_depth_stamp(control_depth);
+    sprites.begin(rf, static_cast<float>(tw), static_cast<float>(th), true);
+    world.draw_windows(sprites, static_cast<float>(tw), static_cast<float>(th));
+    sprites.end();
+  }
+  ctx.end_target(room_rt);
+  ctx.set_capture_source(&room_rt);
+}
+
 // The window-resolution field picture (the layers went in before the battle picture; here the actors, effects and near layers).
 void App::draw_field_full(const SceneFrame& sf) {
   const render::Frame& pf = sf.pf;
@@ -524,18 +580,23 @@ void App::draw_field_ui(const SceneFrame& sf) {
     world_name.draw(frame, vw, vh, lb.x0 < 0.0f ? lb.left() : render::overlay_fit(vw, vh).ox, show, ui::WorldName::home_map(world.map_id()),
                     name_lang, screen_clock);
   }
+  sprites.allow_depth_stamp(control_depth);
   if (world.overlay_needed()) {
     sprites.begin(frame, vw, vh, true);
     // With Ps1ResUi the status icons and dialogue windows go into the PS1-resolution target below.
     const bool ps1_windows = ps1_ui_pass();
     world.draw_overlay(sprites, vw, vh, !ps1_windows);
     sprites.end();
-    if (ps1_windows &&
-        !ps1_pass_wide(frame, vw, vh, nullptr, [&](const render::Frame& lf, float tw, float th, const render::Letterbox&) {
+    // The PS1-resolution windows' composite stamps the preview's depth too (draw_windows does in the frame).
+    if (ps1_windows) sprites.set_depth_stamp(true);
+    const bool ps1_drawn = ps1_windows &&
+        ps1_pass_wide(frame, vw, vh, nullptr, [&](const render::Frame& lf, float tw, float th, const render::Letterbox&) {
           sprites.begin(lf, tw, th, true);
           world.draw_windows(sprites, tw, th, true);
           sprites.end();
-        })) {
+        });
+    sprites.set_depth_stamp(false);
+    if (!ps1_drawn) {
       sprites.begin(frame, vw, vh, true);
       world.draw_windows(sprites, vw, vh);
       sprites.end();

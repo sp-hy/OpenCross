@@ -15,6 +15,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "core/types.h"
@@ -187,6 +188,56 @@ class FieldVM {
   const ModUi& mod_ui() const { return ui_; }
   VmStats& stats() { return stats_; }
 
+  // ---- trace (a controller's timeline of the scripts, [Debug] Control `trace`) -------------------------------------------
+  // One event per instruction a record runs at a new place (a wait that runs again at the same pc every tick is one event) and
+  // one when a record ends; INIT runs and the idle UPDATE loops (class 7, slot 1) are not traced. `tick` is the controller's tick, set before each tick.
+  struct TraceEvent {
+    u32 tick = 0;
+    u32 pc = 0;
+    u16 ent = 0;
+    u8 rec = 0;
+    // The script slot the record runs and its priority class.
+    u8 id = 0xFF;
+    u8 cls = 0;
+    // kTraceYield: the instruction yielded; kTraceEnd: the record ended there.
+    u8 flags = 0;
+  };
+  static constexpr u8 kTraceYield = 1, kTraceEnd = 2;
+  struct Trace {
+    u32 tick = 0;
+    std::vector<TraceEvent> events;
+    // Per entity * record: the pc of its last event (kNoPc: none, or it ended).
+    std::vector<u32> last;
+    // load() ran (another room): the trace stopped there.
+    bool room_loaded = false;
+    // Text lines beside the events (Control `trace` writes them to <file>.txt), for an editor's screenplay: `v <tick> <ent> <pc>
+    // <handle> <value> r|w` a script instruction read / wrote a variable (a read only when its value differs from the last one
+    // noted at that pc: polling loops); the world adds dialog windows (`d`, `w`) and movies (`f`).
+    std::vector<std::string> notes;
+    // (write bit, entity, pc, handle) -> the value noted last.
+    std::unordered_map<u64, s32> last_var;
+    // Each message window's state after the last tick (FieldWorld::trace_windows).
+    struct Window {
+      bool open = false;
+      int message = -1, page = -1;
+      bool typed = false;
+    };
+    std::vector<Window> windows;
+  };
+  static constexpr u32 kNoPc = 0xFFFFFFFFu;
+  void set_trace(Trace* trace) { trace_ = trace; }
+  Trace* trace() const { return trace_; }
+  // The entity whose script record is running (during a dispatch; the last one after it).
+  int running_entity() const { return ent_; }
+  // Where a triggered scene stands: Done = no record of class < 7 is live but parked ones (0B, 3B and FE 16 never advance),
+  // Stalled = every other one has waited or polled in place for `stall` ticks, else Running. A touch (slot 3) record queued but
+  // not run yet doesn't count: one that ends in the tick it runs is queued again every tick the leader stays in range.
+  enum class SceneState { Running, Done, Stalled };
+  SceneState scene_state(u32 stall) const;
+  // An editor's "this way" at branches ([Debug] ForceBranches): after the instruction at a key's address runs, the record goes on at
+  // the value's address. Null = none. The map stays the caller's.
+  void set_forced_branches(const std::unordered_map<u32, u32>* forced) { forced_ = forced; }
+
   // ---- softlock watchdog ---------------------------------------------------------------------------------------------------
   // `id` / `cls` are the script slot number and priority class of the record, `pc` the code offset of the instruction
   // it waits on, `key` its opcode key (0xFExx on the extended page). `strict` = it yields on the same instruction every
@@ -236,6 +287,8 @@ class FieldVM {
   std::array<u8, 8> slot_ent_{};
   std::array<u8, 256> ent_ref_tables_[3]{};
   VmStats stats_;
+  Trace* trace_ = nullptr;
+  void trace_event(int ent, int rec, u16 id, u16 cls, u32 pc, u8 flags);
   ModUi ui_;
   std::set<u16> logged_;
 
@@ -262,7 +315,13 @@ class FieldVM {
   s32 operand_u(u32 offset) const { return imm_or_var(word_at(offset)); }
   s32 operand_s(u32 offset, u32 mode_off, u32 mask) const;
   s32 read_var(u32 id) const;
-  void write_var(u32 id, s32 value) { vars_[(id >> 1) & (kVarSlots - 1)] = static_cast<u16>(value); }
+  void write_var(u32 id, s32 value);
+  // A traced variable access (Trace::notes `v`), while an instruction runs (exec_pc_).
+  void note_var(u32 id, s32 value, bool write) const;
+  // The pc of the instruction running in a traced dispatch (kNoPc: none).
+  u32 exec_pc_ = kNoPc;
+  // Set by set_forced_branches.
+  const std::unordered_map<u32, u32>* forced_ = nullptr;
   bool var_unsigned(u32 id) const;
   // Character reference (entity index, party slot, character id or self) -> entity index, -1 when absent.
   int resolve_character(u8 char_ref) const;

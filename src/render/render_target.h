@@ -46,7 +46,8 @@ class RenderTarget {
   RenderTarget& operator=(const RenderTarget&) = delete;
 
   // `multisampled`: drawn with the context's MSAA (GpuContext::set_msaa) into a multisampled image that is resolved into color().
-  bool create(GpuContext& ctx, u32 width, u32 height, bool multisampled = false);
+  // `samplable_depth`: the depth image can be read after the pass (GpuContext::set_capture_source; single-sampled targets).
+  bool create(GpuContext& ctx, u32 width, u32 height, bool multisampled = false, bool samplable_depth = false);
   void destroy();
   // Matches the multisampled images to the context's MSAA (begin_target calls it); color() and the TexRefs of it stay valid.
   bool prepare_samples(GpuContext& ctx);
@@ -72,6 +73,7 @@ class RenderTarget {
   SDL_GPUTexture* depth_ = nullptr;
   u32 width_ = 0, height_ = 0;
   bool multisampled_ = false;
+  bool samplable_depth_ = false;
   SDL_GPUSampleCount samples_ = SDL_GPU_SAMPLECOUNT_1;
 };
 

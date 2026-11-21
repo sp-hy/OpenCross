@@ -41,6 +41,14 @@ std::optional<assets::RoomScene> load_room(std::string_view name, ByteSpan bin, 
 // Only the room's models (RoomScene::models, their texture pages cut from the room's VRAM): the .bin / .ctd read without the layers,
 // script or effects, for a model shown in another room.
 std::optional<std::vector<assets::RoomModelHeader>> load_room_models(ByteSpan bin, ByteSpan ctd, std::string* error = nullptr);
+// A fingerprint of what a room's built art comes from: the .ctd and every .bin subfile but the ones a script, walk mesh or zone edit
+// changes (zones, script, walk triangles / vertices, walk attributes, dialogue). Equal keys: the backgrounds, palettes, camera and room
+// models are the same (an editor's reload of an edited room keeps its built art). nullopt: not a room .bin.
+std::optional<u64> room_art_key(ByteSpan bin, ByteSpan ctd);
+// The other half: what load_room reads from the subfiles room_art_key leaves out (walk mesh, walk attributes, zones, script, dialogue),
+// written over `scene`. With the art key unchanged, `scene` then equals a fresh load_room, without composing the backgrounds and models
+// again (most of a room import: an editor's reload and a controlled run's restart skip it). On failure `scene` is untouched.
+bool reload_room_logic(std::string_view name, ByteSpan bin, assets::RoomScene& scene, std::string* error = nullptr);
 
 struct RoomValidation {
   std::vector<std::string> errors;    // format violations: a room with errors counts as a failure

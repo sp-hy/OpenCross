@@ -80,7 +80,13 @@ void App::run() {
     // black as well, also for [Debug] Battle.
     const bool boot_logo = flow_ready && flow.boot_logo_active();
     const bool black_clear = field_visible() || battle_ok || boot_logo;
-    if (!movie_open) ctx.set_clear_color(black_clear ? 0.0f : 0.08f, black_clear ? 0.0f : 0.09f, black_clear ? 0.0f : 0.14f);
+    // Control `stage 0` in a standalone battle: its colour in place of the stage; Control `camera`: its flat colour behind the stage.
+    if (battle_ok && battle_ready && battle.stage_hidden())
+      ctx.set_clear_color(stage_backdrop[0], stage_backdrop[1], stage_backdrop[2]);
+    else if (battle_ok && battle_ready && battle.control_camera())
+      ctx.set_clear_color(control_backdrop[0], control_backdrop[1], control_backdrop[2]);
+    else if (!movie_open)
+      ctx.set_clear_color(black_clear ? 0.0f : 0.08f, black_clear ? 0.0f : 0.09f, black_clear ? 0.0f : 0.14f);
     render::Frame frame;
     if (!ctx.begin_frame(frame)) {
       // Minimised or swapchain being rebuilt.
@@ -103,7 +109,7 @@ void App::run() {
     if (!routing && !replaying && !sweeping) limiter.wait(config.frame_cap);
 
     if (exit_when_idle && ++exit_countdown > 3) break;
-    if (route_finished) break;
+    if (route_finished && !controlled) break;
   }
 
   // The window goes at once; what follows only releases resources.

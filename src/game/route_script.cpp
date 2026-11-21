@@ -182,6 +182,7 @@ void Route::step(const RouteState& st, platform::Input& in, RouteOut& out) {
       ++pc_;
     }
   }
+  if (read_ticks_ > 0) read_step(st);
   if (as_left_ > 0 && st.tick >= as_next_ && out.screenshot.empty()) {
     out.screenshot = std::format("{}{:02}.png", as_prefix_, as_n_++);
     as_next_ = st.tick + static_cast<u64>(std::max(1, as_every_));
@@ -229,6 +230,32 @@ void Route::step(const RouteState& st, platform::Input& in, RouteOut& out) {
     in.pad_connected = true;
     in.pad_axis[SDL_GAMEPAD_AXIS_LEFTX] = stick_x_;
     in.pad_axis[SDL_GAMEPAD_AXIS_LEFTY] = stick_y_;
+  }
+}
+
+// `read`: a message window whose typewriter has not moved for read_ticks_ ticks is confirmed (held for 2 ticks), as a player who
+// reads each page and then presses on.
+void Route::read_step(const RouteState& st) {
+  if (read_hold_ > 0) {
+    if (--read_hold_ == 0) hold(SDL_SCANCODE_RETURN, false);
+    return;
+  }
+  if (!st.dialogue) {
+    read_still_ = 0;
+    read_prev_.clear();
+    return;
+  }
+  const std::vector<int> now = st.dialogue_progress ? st.dialogue_progress() : std::vector<int>();
+  if (now == read_prev_) {
+    ++read_still_;
+  } else {
+    read_still_ = 0;
+    read_prev_ = now;
+  }
+  if (read_still_ >= read_ticks_) {
+    hold(SDL_SCANCODE_RETURN, true);
+    read_hold_ = 2;
+    read_still_ = 0;
   }
 }
 
@@ -344,6 +371,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (args.size() > 2 && args[2] == "retry") {
         if (st.retry) return true;
         if (timed_out(3)) return bad("timed out waiting for the retry choice");
+        return false;
+      }
+      if (args.size() > 2 && args[2] == "idle") {
+        if (st.battle && st.battle_idle) return true;
+        if (timed_out(3)) return bad("timed out waiting for the battle view to be idle");
         return false;
       }
       if (start ? st.battle : !st.battle) return true;
@@ -586,6 +618,27 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     // needs confirms too: tap confirm every 8 ticks (2 ticks held); presses during animations are ignored.
     if ((st.tick - aux_) % 8 < 2) hold(SDL_SCANCODE_RETURN, true);
     return false;
+  }
+  // cast <element> [caster] [target] [timeout] / attack <0|1|2> [unit] [timeout]: a battle harness action (BattleView::Debug), asked
+  // for once the battle is up; the view begins it when idle. Finishes when the view has begun it.
+  if (op == "cast" || op == "attack") {
+    const bool cast = op == "cast";
+    int what = 0, unit = -1, target = -1;
+    const size_t units = cast ? 2 : 1;
+    if (args.size() < 2 || !to_int(args[1], what) || (cast ? what <= 0 : what < 0 || what > 2) ||
+        (args.size() > 2 && !to_int(args[2], unit)) || (cast && args.size() > 3 && !to_int(args[3], target)))
+      return bad(cast ? "cast <element> [caster] [target] [timeout]" : "attack <0|1|2> [unit] [timeout]");
+    if (phase_ == 0) {
+      if (!st.battle) return timed_out(units + 2) ? bad("no battle to " + op + " in") : false;
+      if (cast) out.battle_cast = what, out.battle_caster = unit, out.battle_target = target;
+      else out.battle_weapon = what, out.battle_caster = unit;
+      aux_ = static_cast<u64>(st.battle_actions);
+      phase_ = 1;
+      return false;
+    }
+    if (static_cast<u64>(st.battle_actions) > aux_) return true;
+    if (!st.battle) return bad("the battle ended before the " + op + " began");
+    return timed_out(units + 2) ? bad("the " + op + " did not begin") : false;
   }
   if (op == "autoshot") {
     if (args.size() < 4 || !to_int(args[1], as_every_) || !to_int(args[2], as_left_)) return bad("autoshot <every> <count> <prefix>");
@@ -1072,6 +1125,15 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     st.set_char_stat(id, hp ? 0 : 2, value);
     return true;
   }
+  // put beside <ent> [dist]: the party beside entity <ent> where it stands now, the leader facing it (the host picks the spot)
+  if (op == "put" && args.size() > 1 && args[1] == "beside") {
+    int ent = 0, dist = 0;
+    if (args.size() < 3 || !to_int(args[2], ent) || ent < 0 || (args.size() > 3 && (!to_int(args[3], dist) || dist < 0)))
+      return bad("put beside <ent> [dist]");
+    out.put_beside = ent;
+    out.put_dist = static_cast<float>(dist);
+    return true;
+  }
   // put [ent <n>] <x> <z>
   if (op == "put") {
     int x = 0, z = 0, ent = -1;
@@ -1081,6 +1143,36 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.put_ent = ent;
     out.put_x = static_cast<float>(x);
     out.put_z = static_cast<float>(z);
+    return true;
+  }
+  if (op == "set" && args.size() >= 4 && args[1] == "invincible") {
+    int party = 0, enemies = 0;
+    if (!to_int(args[2], party) || !to_int(args[3], enemies)) return bad("set invincible <party 0|1> <enemies 0|1>");
+    out.invincible_party = party != 0;
+    out.invincible_enemies = enemies != 0;
+    return true;
+  }
+  if (op == "set" && args.size() >= 5 && args[1] == "battle" && args[2] == "hp") {
+    int unit = 0, value = 0;
+    std::string v = args[4];
+    const bool percent = !v.empty() && v.back() == '%';
+    if (percent) v.pop_back();
+    if (!to_int(args[3], unit) || unit < 0 || !to_int(v, value) || value < 0) return bad("set battle hp <unit> <n | n%>");
+    out.hp_unit = unit;
+    out.hp_value = value;
+    out.hp_percent = percent;
+    return true;
+  }
+  if (op == "set" && args.size() >= 3 && args[1] == "critical") {
+    int on = 0;
+    if (!to_int(args[2], on)) return bad("set critical <0|1>");
+    out.critical = on != 0;
+    return true;
+  }
+  if (op == "set" && args.size() >= 3 && args[1] == "hit") {
+    int on = 0;
+    if (!to_int(args[2], on)) return bad("set hit <0|1>");
+    out.hit = on != 0;
     return true;
   }
   if (op == "set" && args.size() >= 4 && args[1] == "buttons") {
@@ -1337,6 +1429,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     std::string message;
     for (size_t i = 1; i < args.size(); ++i) message += (i > 1 ? " " : "") + args[i];
     log::info("route: {}", message);
+    out.note = message;
+    return true;
+  }
+  if (op == "read") {
+    if (args.size() < 2 || !to_int(args[1], read_ticks_) || read_ticks_ < 0) return bad("read <ticks>");
+    read_still_ = 0;
+    read_prev_.clear();
     return true;
   }
   if (op == "quit") {

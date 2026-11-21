@@ -119,6 +119,21 @@ struct ViewParams {
   static ViewParams from_room(const assets::RoomCamera& camera);
 };
 
+// A draw-time transform of some emitters' objects (an editor's live drag, Control `xform`): their objects are drawn through the view moved
+// so that a point x shows at A (x - pivot) + pivot + shift with A = `matrix` (R' = R A, t' = R (pivot + shift - A pivot) + t); the
+// simulation is untouched.
+struct DrawXform {
+  std::vector<std::string> names;
+  Mat3 matrix;
+  Vec3 pivot{0, 0, 0}, shift{0, 0, 0};
+};
+
+// An editor's floor grid (Control `grid`): lines on y = 0 every `step` units, `half` steps each way from (cx, cz).
+struct FloorGrid {
+  float cx = 0, cz = 0, step = 250;
+  int half = 12;
+};
+
 // One drawn sprite quad. Corners are in the order of the texture's corners (u0v0, u1v0, u0v1, u1v1): the orientation flag of
 // the sprite is already folded into the screen positions, so rasterisers sample the unmirrored RGBA.
 struct DrawQuad {
@@ -146,6 +161,10 @@ struct DrawQuad {
 };
 // Sorts into draw order: farthest slot first, and inside a slot the later-submitted quad first.
 void sort_draw_order(std::vector<DrawQuad>& quads);
+// The floor grid's cell sides, each an effect line quad (untextured 2, opaque, one colour; the x axis red, z blue, a y stub green), filed
+// by the depth of its middle (>> 4, as an effect line) so it sorts with the particles; a side with an end behind the camera is left out.
+// Appended to `quads`.
+void add_grid_quads(const ViewParams& vp, const FloorGrid& grid, std::vector<DrawQuad>& quads);
 
 // ---- light slots (sprite type 17 = a light) ------------------------------------------
 // The three GTE light slots: every live type-17 object writes its slot each tick (position, colour bytes, intensity = scale x,
@@ -196,6 +215,19 @@ struct EmitterStats {
   // Header starts (start / start_for_target / attach).
   u32 starts = 0;
 };
+
+// The object arena's use since the last EmitterSystem::reset_usage() (replay() resets it): an editor's effect-memory gauge (Control
+// `fxmem`). Measured after each tick, as the arena stands between ticks, while track_heap_usage is on (a controlled run turns it on).
+struct HeapUsage {
+  u32 size = 0, used = 0, peak_bytes = 0, peak_objects = 0;
+  // Spawns the arena had no room for (the game drops those objects).
+  u32 full = 0;
+  // Per emitter name: the most of its objects live at once.
+  std::map<std::string, u32, std::less<>> per_emitter;
+};
+
+// Every emitter system measures its HeapUsage after each tick while this is on (off by default: play pays nothing for the gauge).
+void track_heap_usage(bool on);
 
 class EmitterSystem {
  public:
@@ -262,6 +294,15 @@ class EmitterSystem {
   // Sequence op 0x55: stop the named headers, then every live object of theirs with life != 0 gets life := 1 (it dies on the
   // next tick, death child included) and a persistent one (life 0) is freed.
   bool stop_expire(std::string_view name);
+  // An editor's loop (Control `replay`): each named emitter killed (its objects gone) and started again from its first frame, everything
+  // else going on. The number of names found.
+  int replay(const std::vector<std::string>& names) {
+    int found = 0;
+    for (const std::string& name : names)
+      if (kill(name) && start(name)) ++found;
+    reset_usage();
+    return found;
+  }
   // Patch the op-0x30 anchor, then start.
   bool attach(std::string_view name, int anchor_id);
   // Anim-sequence op 1D: EVERY header named `name` gets the anchor (its op 0x30) and is restarted.
@@ -284,6 +325,11 @@ class EmitterSystem {
 
   // Live objects -> quads at the tick alpha (0 = previous tick, 1 = current; spread over the frame step, set_frame_ticks). Appends to `out`.
   void collect_quads(const ViewParams& view, float alpha, std::vector<DrawQuad>& out) const;
+  // DrawXform for collect_quads (nullopt: none).
+  void set_draw_xform(std::optional<DrawXform> xform);
+  // The view a mesh drawer projects an object of emitter `owner` (MeshInstance::owner) with: `base` moved by the DrawXform when the
+  // emitter is one it names (true, `out` set), else false.
+  bool xform_view(int owner, const ViewParams& base, ViewParams& out) const;
 
   // Live mesh sprites (sprite type 14, battle effects). `centre` / `mat` already include the view: camera-space = centre + mat * v with v
   // the mesh vertex in PS1 file space (x, y down, z). The renderer projects with ViewParams::h / ox / oy and orders by OT slot.
@@ -435,6 +481,8 @@ class EmitterSystem {
   void collect_tagged(const ViewParams& view, float alpha, std::vector<TaggedInstance>& out) const;
 
   EmitterStats stats() const;
+  const HeapUsage& heap_usage() const;
+  void reset_usage();
   size_t live_objects() const;
   u64 ticks() const;
 

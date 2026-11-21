@@ -1,12 +1,25 @@
 #include "game/effects/emitter_internal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 
 namespace oc::effects {
 
+namespace emitter_detail {
+
+namespace {
+std::atomic<bool> heap_usage_on{false};
+}  // namespace
+
+bool heap_usage_tracked() { return heap_usage_on.load(std::memory_order_relaxed); }
+
+}  // namespace emitter_detail
+
 using namespace emitter_detail;
+
+void track_heap_usage(bool on) { heap_usage_on.store(on, std::memory_order_relaxed); }
 
 // ---- public API ---------------------------------------------------------------------------------------------------------------
 
@@ -333,6 +346,12 @@ bool EmitterSystem::spawn_at(std::string_view name, int x, int y, int z, int ang
 void EmitterSystem::collect_quads(const ViewParams& view, float alpha, std::vector<DrawQuad>& out) const {
   impl_->collect(view, alpha, out);
 }
+void EmitterSystem::set_draw_xform(std::optional<DrawXform> xform) { impl_->draw_xform = std::move(xform); }
+bool EmitterSystem::xform_view(int owner, const ViewParams& base, ViewParams& out) const {
+  if (!impl_->xformed(owner)) return false;
+  out = impl_->moved_view(base);
+  return true;
+}
 void EmitterSystem::collect_meshes(const ViewParams& view, float alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
   impl_->collect_meshes(view, alpha, out, with_suppressed);
 }
@@ -392,6 +411,11 @@ bool EmitterSystem::object_view(size_t i, ObjectView& out) const {
 }
 
 EmitterStats EmitterSystem::stats() const { return impl_->st; }
+const HeapUsage& EmitterSystem::heap_usage() const { return impl_->usage; }
+void EmitterSystem::reset_usage() {
+  impl_->usage = {};
+  impl_->measure_usage();
+}
 size_t EmitterSystem::live_objects() const { return impl_->objs.size(); }
 u64 EmitterSystem::ticks() const { return impl_->tick_count; }
 

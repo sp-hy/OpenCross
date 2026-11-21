@@ -7,6 +7,7 @@
 #include "import/tim.h"
 #include "game/draw_offset.h"
 #include "game/mirror_copy.h"
+#include "render/camera.h"
 
 using namespace oc;
 
@@ -235,6 +236,45 @@ void test_room_group_sprites() {
   CHECK(import::room_group_sprites("jac_b06i").empty());
 }
 
+// A room .bin cpt of 12 subfiles of 4 bytes: `edit` fills the ones a script / walk mesh / zone edit changes (zones 2, script 3, walk
+// triangles 4 / vertices 5, walk attributes 6, dialogue 8), `art` the others (camera, CLUTs, layers, sounds, models).
+Bytes make_room_bin(u8 edit, u8 art) {
+  constexpr u32 kCount = 12;
+  Bytes out;
+  put32(out, kCount);
+  const u32 first = 8 + 4 * kCount;
+  for (u32 i = 0; i < kCount; ++i) put32(out, first + 4 * i);
+  put32(out, first + 4 * kCount);
+  for (u32 i = 0; i < kCount; ++i) {
+    const bool edited = i == 2 || i == 3 || i == 4 || i == 5 || i == 6 || i == 8;
+    for (int k = 0; k < 4; ++k) out.push_back(static_cast<u8>(i * 16 + (edited ? edit : art)));
+  }
+  return out;
+}
+
+// import::room_art_key: the same for rooms that differ only in what a script / walk mesh / zone edit changes, different when an art
+// subfile or the .ctd differs, none for a file that is not a room cpt.
+void test_room_art_key() {
+  const Bytes ctd = {1, 2, 3, 4};
+  const auto base = import::room_art_key(make_room_bin(0, 0), ctd);
+  CHECK(base.has_value());
+  CHECK(import::room_art_key(make_room_bin(5, 0), ctd) == base);
+  CHECK(import::room_art_key(make_room_bin(0, 5), ctd) != base);
+  CHECK(import::room_art_key(make_room_bin(0, 0), Bytes{1, 2, 3, 5}) != base);
+  CHECK(!import::room_art_key(Bytes{1, 2}, ctd));
+}
+
+// Letterbox::room (a controlled run's whole-room picture): columns 0..320 and rows 0..224 centred in the target, the extra ones on both
+// sides; the other mappings keep the 224 field rows.
+void test_room_letterbox() {
+  const render::Letterbox room = render::Letterbox::room(1280, 720, 2.0f);
+  CHECK(room.x0 == -160.0f && room.w == 640.0f && room.ox == 320.0f);
+  CHECK(room.y0 == -68.0f && room.h == 360.0f && room.oy == 136.0f && room.scale_y == 2.0f);
+  const render::Letterbox id = render::Letterbox::identity(640, 480, 2.0f);
+  CHECK(id.y0 == 0.0f && id.h == render::kFieldRows && id.oy == 0.0f);
+  CHECK(render::Letterbox::field(1280, 960).h == render::kFieldRows);
+}
+
 int main() {
   test_colour();
   test_tim4();
@@ -247,6 +287,8 @@ int main() {
   test_room_bg_fixes();
   test_room_cards();
   test_room_group_sprites();
+  test_room_art_key();
+  test_room_letterbox();
   std::printf(failures ? "%d failure(s)\n" : "ok\n", failures);
   return failures ? 1 : 0;
 }

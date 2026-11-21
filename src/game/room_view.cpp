@@ -10,6 +10,7 @@
 #include <future>
 #include <thread>
 
+#include "core/hash.h"
 #include "core/log.h"
 #include "core/parallel.h"
 #include "core/timer.h"
@@ -68,9 +69,24 @@ struct RoomView::Prepared {
   std::future<Chip2Result> chip2_future;
   Chip2Result chip2;
   bool chip2_done = false;
+  // art_key_of the inputs read (0 = none).
+  u64 art_key = 0;
 };
 
 namespace {
+// What the built art of a room comes from: its .ctd and art subfiles (import::room_art_key), the .prd read, the art mode and the mods'
+// overlay (Vfs::generation: a mod's HD art). 0 = no key (never equal to a loaded room's).
+u64 art_key_of(std::optional<u64> room, const std::string& prd_path, const std::optional<Bytes>& prd, bool hd, u32 generation) {
+  if (!room) return 0;
+  Fnv64 hash;
+  hash.add(*room);
+  hash.add_text(prd ? prd_path : std::string{});
+  if (prd) hash.add_bytes(prd->data(), prd->size());
+  hash.add(hd ? 1 : 0);
+  hash.add(generation);
+  return hash.value() ? hash.value() : 1;
+}
+
 // The 4x images composed ahead are held until the load uploads them; a room above this many bytes composes them at load time instead
 // (ensure_hd streams them through a small window).
 constexpr size_t kPrefetchHdBytes = size_t{512} << 20;
@@ -113,6 +129,58 @@ void RoomView::clear() {
   group_tint_.clear();
   hd_ready_ = hd_failed_ = false;
   loaded_ = false;
+  art_key_ = 0;
+}
+
+// A reload of the room on show whose art inputs are unchanged (an editor's reload after a script, walk mesh or zone edit; a room entered
+// again from itself, a controlled run's restart): the script, walk mesh, zones and dialogue are read again; the scene's art half, the
+// built backgrounds, palettes and HD textures stay. False: load it the usual way.
+RoomView::ArtCheck RoomView::current_art(const std::string& prd_request) const {
+  ArtCheck check;
+  check.prd_request = prd_request;
+  check.generation = files_->generation();
+  const std::string base = "cdrom/map/mapbin/" + name_;
+  check.bin = files_->read(base + ".bin");
+  const auto ctd = files_->read(base + ".ctd");
+  if (!check.bin || !ctd) return check;
+  check.prd_path = prd_request.empty() ? base + ".prd" : prd_request;
+  check.prd = files_->read(check.prd_path);
+  check.key = art_key_of(import::room_art_key(*check.bin, *ctd), check.prd_path, check.prd, hd_, files_->generation());
+  return check;
+}
+
+bool RoomView::same_art(std::string_view name, const std::string& prd_request) {
+  checked_.reset();
+  if (!keep_same_art_ || !files_ || !loaded_ || !scene_ || art_key_ == 0 || name != name_ || chip2_future_.valid() || prefetch_.valid())
+    return false;
+  checked_ = current_art(prd_request);
+  return checked_->key == art_key_;
+}
+
+bool RoomView::reuse_art(std::string_view name, const std::string& prd_request) {
+  std::optional<ArtCheck> checked = std::move(checked_);
+  checked_.reset();
+  if (!keep_same_art_ || !files_ || !loaded_ || !scene_ || art_key_ == 0 || name != name_ || chip2_future_.valid()) return false;
+  ScopedTimer timer("room: reload keeping the built art");
+  if (!checked || checked->prd_request != prd_request || checked->generation != files_->generation()) checked = current_art(prd_request);
+  if (checked->key != art_key_) return false;
+  const auto& bin = checked->bin;
+  const auto& prd = checked->prd;
+  const std::string& prd_path = checked->prd_path;
+  // Only the subfiles the key leaves out are read again (import::reload_room_logic); the rest of the scene is what a full import gives for
+  // the same key: the layers, camera, CLUTs, models, sound banks and the .prd's effects (the loaded ones stay, at the same addresses: the
+  // world's uploaded effect sheets are keyed by their sprites). Nothing writes those during play (reload_art, which does, clears the key).
+  if (!import::reload_room_logic(name_, *bin, *scene_)) return false;
+  // The world keeps its room models (same art); one it never loaded builds at first use.
+  prepared_models_.clear();
+  art_reused_ = true;
+  loaded_prd_path_ = prd ? prd_path : std::string{};
+  walk_.init(scene_->walk, scene_->attr_flags);
+  group_tint_.clear();
+  layer_mask_ = 0xFFFFFFFFu;
+  set_scroll(0, 0, true);
+  log::info("room {}: reloaded with its built art kept", name_);
+  return true;
 }
 
 bool RoomView::init(const vfs::Vfs& files, render::GpuContext& ctx, render::SpriteBatch& sprites, render::MeshPipeline& meshes) {
@@ -202,6 +270,7 @@ std::unique_ptr<RoomView::Prepared> RoomView::prepare(const vfs::Vfs& files, ren
     prd = files.read(prd_path);
     if (prd && prd_path != base + ".prd") log::info("room {}: effects from {} (disc index .prd record)", name, prd_path);
     if (prd) prep->prd_path = prd_path;
+    prep->art_key = art_key_of(import::room_art_key(*bin, *ctd), prd_path, prd, hd, files.generation());
   }
   {
     ScopedTimer timer("room: import (lzss + 1x composition + effects)");
@@ -250,6 +319,8 @@ std::unique_ptr<RoomView::Prepared> RoomView::prepare(const vfs::Vfs& files, ren
 bool RoomView::load(std::string_view name) {
   const std::string prd_request = std::move(prd_path_);
   prd_path_.clear();
+  art_reused_ = false;
+  if (!prefetch_.valid() && reuse_art(name, prd_request)) return true;
   std::unique_ptr<Prepared> prep;
   if (prefetch_.valid()) {
     const bool match = prefetch_name_ == name && prefetch_prd_ == prd_request && prefetch_hd_ == hd_ && files_ &&
@@ -272,6 +343,7 @@ bool RoomView::load(std::string_view name) {
     return false;
   }
   loaded_prd_path_ = prep->prd_path;
+  art_key_ = prep->art_key;
   prepared_models_ = std::move(prep->models);
   scene_ = std::make_unique<assets::RoomScene>(std::move(*prep->scene));
   const assets::RoomScene* scene = scene_.get();
@@ -430,6 +502,7 @@ std::optional<assets::StageAsset> RoomView::effect_meshes() const {
 bool RoomView::reload_art(bool hd) {
   drop_prefetch();
   hd_ = hd;
+  art_key_ = 0;
   if (!loaded_ || !scene_) return false;
   // RDE's two file sets differ only in art for a room (checked over all 566 rooms of cdrom.dat / cdrom2.dat): .bin subfiles 11+ (room
   // model meshes / UVs) and the .ctd texture pages; the script, walk mesh, camera, zones, CLUTs and every .prd are byte-identical.
@@ -644,6 +717,11 @@ void RoomView::scroll_at(float alpha, float& sx, float& sy) const {
   // and the current tick, interpolated by the render alpha, kept sub-pixel in every art mode. There is no second, separately eased camera:
   // two eases (integer + float) drift apart by up to 11 px and interpolating from one to the other every frame shows as a
   // constant shake / doubled picture. ScrollSmoother's offset rides on the integer scroll, at most 2 px behind it.
+  if (draw_scroll_on_) {
+    sx = draw_scroll_x_;
+    sy = draw_scroll_y_;
+    return;
+  }
   if (interp_frozen_) alpha = 1.0f;
   const float from_x = static_cast<float>(prev_pan_x_) + prev_fine_x_, to_x = static_cast<float>(pan_x_) + fine_x_;
   const float from_y = static_cast<float>(prev_pan_y_) + prev_fine_y_, to_y = static_cast<float>(pan_y_) + fine_y_;
@@ -664,6 +742,8 @@ float RoomView::slot_parallax(int slot) const {
 }
 
 void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alpha) const {
+  // A controlled run's own camera: the layers are the room camera's picture, not drawn.
+  if (camera_override_) return;
   const render::Letterbox lb = letterbox(vw, vh);
   const float scale_x = lb.scale, sy = lb.scale_y, ox = lb.ox, oy = lb.oy;
   float scroll_x, scroll_y;
@@ -693,8 +773,8 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     const float px = static_cast<float>(it->x) + (parallax == 0.0f ? (fixed_to_edge_ ? lb.x0 : 0.0f) : scroll_x * parallax);
     const float py = static_cast<float>(it->y) + scroll_y * parallax;
     // Clip to the 320x224 field picture (widescreen: its visible columns lb.x0 .. lb.x0 + lb.w) by adjusting UVs (SpriteBatch has no scissor).
-    const float cx0 = std::max(px, lb.x0), cy0 = std::max(py, 0.0f);
-    const float cx1 = std::min(px + static_cast<float>(it->w), lb.x0 + lb.w), cy1 = std::min(py + static_cast<float>(it->h), kViewH);
+    const float cx0 = std::max(px, lb.x0), cy0 = std::max(py, lb.y0);
+    const float cx1 = std::min(px + static_cast<float>(it->w), lb.x0 + lb.w), cy1 = std::min(py + static_cast<float>(it->h), lb.y0 + lb.h);
     if (cx1 <= cx0 || cy1 <= cy0) continue;
     const float fw = static_cast<float>(it->w), fh = static_cast<float>(it->h);
     // Depth in the shared ordering space: the layer z (minimum 8), larger = farther.
@@ -765,8 +845,8 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
 void RoomView::picture_columns(const render::Letterbox& lb, float scroll_x, float& c0, float& c1) const {
   c0 = lb.x0;
   c1 = lb.x0 + lb.w;
-  // 4:3: the 320 columns.
-  if (lb.x0 >= 0.0f || !loaded_) return;
+  // 4:3: the 320 columns; a controlled run's own camera: every column (no room picture to end).
+  if (lb.x0 >= 0.0f || !loaded_ || camera_override_) return;
   // Widescreen: the picture reaches as far as the layers' tiles go (art_x0_ .. art_x1_, screen columns
   // scroll + x); beyond them the frame stays black (no actor / effect / shadow drawn over it). The camera block's pan limits
   // (-x_max .. 320 - x_min) only bound the scroll: rooms such as man_bo1f paint further than 4:3 panning can reach.
@@ -778,15 +858,15 @@ void RoomView::picture_columns(const render::Letterbox& lb, float scroll_x, floa
 render::Rect RoomView::clip_rect(const render::Letterbox& lb, float scroll_x, float fw, float fh, bool rounded) const {
   float c0, c1;
   picture_columns(lb, scroll_x, c0, c1);
-  const float left = lb.ox + c0 * lb.scale, width = (c1 - c0) * lb.scale, height = kViewH * lb.scale_y;
+  const float left = lb.ox + c0 * lb.scale, width = (c1 - c0) * lb.scale, height = lb.h * lb.scale_y, top = lb.oy + lb.y0 * lb.scale_y;
   // The host's field pass clip (App::field_clip): rounded edges, clamped to the frame.
   if (rounded) {
-    const float x0 = std::max(0.0f, std::round(left)), y0 = std::max(0.0f, std::round(lb.oy));
+    const float x0 = std::max(0.0f, std::round(left)), y0 = std::max(0.0f, std::round(top));
     return {static_cast<s32>(x0), static_cast<s32>(y0),
             static_cast<u32>(std::max(0.0f, std::min(fw - x0, std::round(width)))), static_cast<u32>(std::max(0.0f, std::min(fh - y0, std::round(height))))};
   }
   // The actor pass scissor: floor of the origin, ceil of the size.
-  return {static_cast<s32>(std::max(0.0f, std::floor(left))), static_cast<s32>(std::max(0.0f, std::floor(lb.oy))),
+  return {static_cast<s32>(std::max(0.0f, std::floor(left))), static_cast<s32>(std::max(0.0f, std::floor(top))),
           static_cast<u32>(std::ceil(width)), static_cast<u32>(std::ceil(height))};
 }
 
@@ -797,7 +877,7 @@ void RoomView::draw_actors(render::MeshPipeline& meshes, const render::Frame& fr
   float scroll_x, scroll_y;
   scroll_at(alpha, scroll_x, scroll_y);
   const render::Rect scissor = clip_rect(lb, scroll_x, static_cast<float>(frame.extent.width), static_cast<float>(frame.extent.height));
-  const render::Mat4 view_proj = camera_.view_proj(scroll_x, scroll_y, lb), view = camera_.view();
+  const render::Mat4 view_proj = draw_camera().view_proj(scroll_x, scroll_y, lb), view = draw_camera().view();
   std::vector<render::Mat4> palette;
   meshes.begin(frame, scissor);
   for (size_t ai = 0; ai < actors.size(); ++ai) {

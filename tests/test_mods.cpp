@@ -281,6 +281,17 @@ int main() {
     fs::remove(dir / "Big.rar");
   }
 
+  // A draft folder comes first and enabled, and stays out of the stored preferences (a player's [Mods] never names it).
+  {
+    fs::create_directories(tmp / "Draft");
+    mods.scan(files, dir, mods.prefs(), tmp / "Draft");
+    CHECK(!mods.mods().empty() && mods.mods().front().name == vfs::kDraftMod && mods.mods().front().enabled);
+    const std::vector<vfs::ModPref> stored = mods.prefs();
+    CHECK(std::none_of(stored.begin(), stored.end(), [](const vfs::ModPref& pref) { return pref.name == vfs::kDraftMod; }));
+    mods.scan(files, dir, stored);
+    CHECK(!find_mod(mods, std::string(vfs::kDraftMod)));
+  }
+
   // A .dat inside an archive cannot be read in place; it is reported, not loaded.
   write_archive(dir / "Nested.zip", false, {{"lang.dat", "PK"}, {"voices/3/1-0-kid.mp3", "x"}});
   mods.scan(files, dir, mods.prefs());
@@ -531,6 +542,20 @@ int main() {
     // Columns by heading: the mod sets English only, French keeps the game's; a new key is added.
     CHECK(cell("0x000001", import::Lang::En) == "Hi-Potion" && cell("0x000001", import::Lang::Fr) == "Potion fr");
     CHECK(cell("0x000099", import::Lang::En) == "New item");
+    // The mods' rows set again (a controlled run's reload: an editor's draft text): a LangTables that read them reads them again.
+    std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta edited\n";
+    {
+      const vfs::Mod* beta = find_mod(text_mods_found, "Beta");
+      import::TextMod text{"Beta", {}, {}};
+      for (const vfs::ModFile& file : beta->text)
+        text.files[file.target] = [&text_files, source = vfs::OverlayFile{file.file, file.member}] { return text_files.read_mod_file(source); };
+      std::vector<import::TextMod> again;
+      again.push_back(std::move(text));
+      const u32 generation = import::text_mods_generation();
+      import::set_text_mods(std::move(again));
+      CHECK(import::text_mods_generation() == generation + 1);
+    }
+    CHECK(row(27, 1) == "beta edited" && row(27, 0) == "game line");
     import::set_text_mods({});
   }
 

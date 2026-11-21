@@ -103,6 +103,9 @@ void test_actor_anim() {
   actor.step_visual(true, true);
   // The run slot.
   CHECK(actor.clip_name() == "s4_02");
+  // pose_now (Control `state`): the run clip, the walk clip it fades from and the run's share of the blend, below 1 while it runs.
+  const game::Actor::PoseNow fading = actor.pose_now();
+  CHECK(fading.clip == 2 && fading.from_clip == 3 && fading.weight > 0.0f && fading.weight < 1.0f);
   actor.set_anim_slot(game::kSlotStand, 4);
   actor.step_visual(false, false);
   // The switch to the stand clip waits for the running 0x20-tick cross-fade.

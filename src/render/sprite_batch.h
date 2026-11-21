@@ -94,6 +94,12 @@ class SpriteBatch {
   void replay(const SpriteLayerCapture& capture, BlendMode mode, BlendMode as);
   // Debug (env OC_LOWRES_LOG=1): while a tag is set, the first draw of every texture logs "<tag>: texture W x H" once per tag.
   void set_log_tag(const char* tag);
+  // Preview depth ([Debug] ControlDepth): while the stamp is on, every quad drawn without depth also writes the nearest depth where it
+  // covers (its transparent texels excepted), so an editor's overlays sort behind the windows. set_depth_stamp does nothing unless
+  // allowed.
+  void allow_depth_stamp(bool on) { stamp_allowed_ = on; }
+  bool depth_stamp() const { return stamp_; }
+  void set_depth_stamp(bool on);
   void end();
 
  private:
@@ -112,6 +118,10 @@ class SpriteBatch {
   Pipeline pipeline_pre_, pipeline_add_alpha_;
   // The layer-capture variants of Add / Subtract / Multiply (destination alpha kept).
   Pipeline pipeline_add_keep_, pipeline_sub_keep_, pipeline_mul_keep_;
+  // The depth stamp: no colour, depth written.
+  Pipeline pipeline_stamp_;
+  bool stamp_allowed_ = false;
+  bool stamp_ = false;
   SpriteLayerCapture* capture_ = nullptr;
   BlendMode mode_ = BlendMode::Alpha;
   SpriteFilter filter_ = SpriteFilter::Sampler;

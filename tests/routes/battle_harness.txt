@@ -1,0 +1,16 @@
+# Battle harness (cast / attack / wait battle idle / set invincible): the actions begin once the view is idle, play out, and the
+# battle goes on (no unit can fall).
+0 set invincible 1 1
+- wait battle idle 1200
+- cast 1
+- log harness: cast begun
+- wait battle idle 1200
+- assert battle active
+- screenshot bh_01_after_cast.png
+- attack 2
+- wait battle idle 1200
+- assert battle active
+- cast 1 0 3
+- wait battle idle 1200
+- assert battle active
+- quit
