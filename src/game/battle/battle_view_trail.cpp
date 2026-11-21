@@ -79,6 +79,8 @@ struct BattleView::TrailState {
       bool on = false;
       // Op 0x53: a plain colour ramp, not the op 0x8E flash draw.
       bool plain = false;
+      // Started by a script op this tick: the game's task list runs before the scripts, so the first step is the next tick's.
+      bool fresh = false;
       int left = 0, cur[3]{}, step[3]{}, to[3]{};
     } fade;
     // Op 0x83: the model scale (4096 = 1.0), a ramp of `scale_left` ticks.
@@ -219,7 +221,7 @@ void BattleView::trail_event(int unit, const bseq::Event& event) {
         for (size_t k = 0; k < 3; ++k) model.rgb[k] = event.ang[k];
         break;
       }
-      model.fade.on = model.fade.plain = true;
+      model.fade.on = model.fade.plain = model.fade.fresh = true;
       model.fade.left = event.a;
       start_colour_ramp(event.a, event.off, event.ang, model.fade.cur, model.fade.step, model.fade.to);
       for (size_t k = 0; k < 3; ++k) model.rgb[k] = event.off[k];
@@ -267,11 +269,13 @@ void BattleView::trail_event(int unit, const bseq::Event& event) {
       if (event.b != 0) {
         model.fade = {};
         model.tinted = true;
+        // The fade replaces the unit's renderer (the flash routine, then the plain one): the depth-cued renderer of effect op 0x24 is gone.
+        fx_unit_fog_[unit_index] = false;
         if (event.a < 1) {
           for (size_t k = 0; k < 3; ++k) model.rgb[k] = event.ang[k];
           break;
         }
-        model.fade.on = true;
+        model.fade.on = model.fade.fresh = true;
         model.fade.left = event.a;
         start_colour_ramp(event.a, event.off, event.ang, model.fade.cur, model.fade.step, model.fade.to);
         for (size_t k = 0; k < 3; ++k) model.rgb[k] = event.off[k];
@@ -402,6 +406,10 @@ void BattleView::trail_tick() {
       if (blink.timer < 0) blink.timer = blink.state == 0 ? blink.ticks_a : blink.ticks_b;
     }
     if (!model.fade.on) continue;
+    if (model.fade.fresh) {
+      model.fade.fresh = false;
+      continue;
+    }
     for (size_t k = 0; k < 3; ++k) {
       model.fade.cur[k] = std::clamp(model.fade.cur[k] + model.fade.step[k], 0, 0xFF0);
       model.rgb[k] = model.fade.cur[k] >> kColourFixedShift;
