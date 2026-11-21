@@ -470,7 +470,8 @@ std::vector<features::ModInput> ModManager::feature_inputs() const {
 std::vector<ModPref> ModManager::prefs() const {
   std::vector<ModPref> out;
   out.reserve(mods_.size());
-  for (const Mod& mod : mods_) out.push_back({mod.name, mod.enabled, mod.load_on});
+  for (const Mod& mod : mods_)
+    if (mod.name != kDraftMod) out.push_back({mod.name, mod.enabled, mod.load_on});
   return out;
 }
 

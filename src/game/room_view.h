@@ -40,7 +40,9 @@ class RoomView {
   // hands over its work, so only the GPU uploads are left.
   bool load(std::string_view name);
   // True when load(name) with this .prd would keep the built art: the room on show again with unchanged art inputs (an editor's reload).
+  // Always false unless set_keep_same_art is on (a controlled run): play loads every room the usual way.
   bool same_art(std::string_view name, const std::string& prd_request);
+  void set_keep_same_art(bool on) { keep_same_art_ = on; }
   // The last load kept the built art (and prepared no room models: the world keeps the ones it has).
   bool art_reused() const { return art_reused_; }
   void unload() { clear(); }
@@ -274,6 +276,7 @@ class RoomView {
   // The art inputs of the loaded room (art_key_of; 0 = none): a reload of the same room with the same key keeps the built art.
   u64 art_key_ = 0;
   bool art_reused_ = false;
+  bool keep_same_art_ = false;
   bool reuse_art(std::string_view name, const std::string& prd_request);
   // The room's current files and their art key (key 0: not readable).
   struct ArtCheck {

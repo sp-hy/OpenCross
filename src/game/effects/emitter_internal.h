@@ -31,6 +31,9 @@ constexpr u32 kFlagViewSpace = 1u << 25, kFlagWorldQuad = 1u << 26, kFlagNoDeath
 // Nested spawn limit (death / child chains).
 constexpr int kMaxDepth = 6;
 
+// effects::track_heap_usage's switch.
+bool heap_usage_tracked();
+
 struct Header {
   const assets::Emitter* def = nullptr;
   // A per-target clone header is named "sado"; the original keeps its name.

@@ -346,7 +346,7 @@ void EmitterSystem::Impl::step_frame(int ticks) {
   u32 run = 0;
   for (const auto& header : headers) run += header.linked ? 1u : 0u;
   st.running = run;
-  measure_usage();
+  if (heap_usage_tracked()) measure_usage();
 }
 
 void EmitterSystem::Impl::measure_usage() {

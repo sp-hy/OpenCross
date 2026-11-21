@@ -668,6 +668,8 @@ class FieldWorld final : public script::FieldHost {
   // [Debug] HoldScripts (a controlled run): the room's scripts stop after its INIT (no cutscene starts, actors stand), its effects and
   // background animation go on: an editor's picture of the room's effects.
   void set_hold_scripts(bool on) { hold_scripts_ = on; }
+  // A controlled run: the room on show loaded again with unchanged art keeps its built art, room models and effects (RoomView::same_art).
+  void set_keep_same_art(bool on) { view_.set_keep_same_art(on); }
   // A controlled run's floor grid (Control `grid`), drawn with the effects (effects::add_grid_quads) only while the run draws through its
   // own camera (RoomView::set_camera_override). Drawing only.
   void set_debug_grid(std::optional<effects::FloorGrid> grid) { debug_grid_ = grid; }

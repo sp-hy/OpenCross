@@ -19,6 +19,7 @@
 #include <thread>
 
 #include "core/log.h"
+#include "game/effects/emitter_system.h"
 
 namespace oc::app {
 
@@ -60,6 +61,8 @@ void App::init_control() {
   controlled = routing && config.debug_control;
   if (!controlled) return;
   if (!config.debug_seed) world.set_seed(1);
+  effects::track_heap_usage(true);
+  world.set_keep_same_art(true);
   control_apply_debug_keys();
   control_inbox = std::make_shared<ControlInbox>();
   std::thread([inbox = control_inbox] {

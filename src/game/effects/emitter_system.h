@@ -217,7 +217,7 @@ struct EmitterStats {
 };
 
 // The object arena's use since the last EmitterSystem::reset_usage() (replay() resets it): an editor's effect-memory gauge (Control
-// `fxmem`). Measured after each tick, as the arena stands between ticks.
+// `fxmem`). Measured after each tick, as the arena stands between ticks, while track_heap_usage is on (a controlled run turns it on).
 struct HeapUsage {
   u32 size = 0, used = 0, peak_bytes = 0, peak_objects = 0;
   // Spawns the arena had no room for (the game drops those objects).
@@ -225,6 +225,9 @@ struct HeapUsage {
   // Per emitter name: the most of its objects live at once.
   std::map<std::string, u32, std::less<>> per_emitter;
 };
+
+// Every emitter system measures its HeapUsage after each tick while this is on (off by default: play pays nothing for the gauge).
+void track_heap_usage(bool on);
 
 class EmitterSystem {
  public:

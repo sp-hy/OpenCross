@@ -229,8 +229,13 @@ Developer and automation switches, read once at boot (except `Log` and `Panels`,
 | `ScriptMods` | 0 | bool | A scripted or `--config` run keeps the enabled mods and their `mod.ini` features (otherwise it runs the game as shipped): for routes that test a mod's rooms or features. |
 | `ScriptSpeed` | 2 | min 1 | Simulation ticks per rendered frame while a route script runs. |
 | `Control` | 0 | bool | With `Script`: the program that started OpenCross drives the run over stdin / stdout (seek to a tick, the frame out, restart), and the run waits for its commands instead of exiting at the end (`routes.md` section 8.1). |
-| `DraftDir` | | path | A mod folder outside the game's `mods` folder, taken as one more mod, enabled in every art mode and first in priority: an editor's unsaved files for a run it drives (`Control`; `reload` looks at it again). |
+| `DraftDir` | | path | Read only with `Control` and `Script`: a mod folder outside the game's `mods` folder, taken as one more mod, enabled in every art mode and first in priority, also without `ScriptMods` (the other mods stay off then): an editor's unsaved files for a run it drives (`reload` looks at it again). Never stored in `[Mods]`. |
 | `ControlDepth` | 0 | bool | With `Control`: each frame comes with its depth image (`routes.md` section 8.1). The field is then drawn straight into the frame: PS1-resolution graphics, render scale, MSAA, the full-screen shader and the grade are off for the run. |
+| `BattleParty` | empty | character ids | The standalone battle's party (`Battle`): character ids, slot 0 first (`0,1,22`); empty = Serge, Kid, Harle. |
+| `BattleField` | -1 | int | The standalone battle's battlefield (stage `bg_NN`); -1 = `ShowcaseStage`, else the scene's own. |
+| `BattleIntroLive` | 0 | bool | The standalone battle's stage intro plays live for the load's ticks instead of being fast-forwarded by the load (a stage previewer). |
+| `HoldScripts` | 0 | bool | With `Control`: the room's scripts stop after its INIT; effects, background animation and the clock go on (`routes.md` section 8). |
+| `ForceBranches` | empty | `<pc>:<to>,...` | With `Control`: after the field script instruction at `<pc>` runs, its record goes on at `<to>` (decimal script addresses; `routes.md` section 8). |
 | `Record` | empty | file path | Write the session's inputs to this file (replayable). Ignored while replaying. |
 | `Replay` | empty | file path | Replay a recorded session; its room and entrance replace `Room` and `Entrance`. |
 

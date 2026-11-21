@@ -151,7 +151,8 @@ RoomView::ArtCheck RoomView::current_art(const std::string& prd_request) const {
 
 bool RoomView::same_art(std::string_view name, const std::string& prd_request) {
   checked_.reset();
-  if (!files_ || !loaded_ || !scene_ || art_key_ == 0 || name != name_ || chip2_future_.valid() || prefetch_.valid()) return false;
+  if (!keep_same_art_ || !files_ || !loaded_ || !scene_ || art_key_ == 0 || name != name_ || chip2_future_.valid() || prefetch_.valid())
+    return false;
   checked_ = current_art(prd_request);
   return checked_->key == art_key_;
 }
@@ -159,7 +160,7 @@ bool RoomView::same_art(std::string_view name, const std::string& prd_request) {
 bool RoomView::reuse_art(std::string_view name, const std::string& prd_request) {
   std::optional<ArtCheck> checked = std::move(checked_);
   checked_.reset();
-  if (!files_ || !loaded_ || !scene_ || art_key_ == 0 || name != name_ || chip2_future_.valid()) return false;
+  if (!keep_same_art_ || !files_ || !loaded_ || !scene_ || art_key_ == 0 || name != name_ || chip2_future_.valid()) return false;
   ScopedTimer timer("room: reload keeping the built art");
   if (!checked || checked->prd_request != prd_request || checked->generation != files_->generation()) checked = current_art(prd_request);
   if (checked->key != art_key_) return false;

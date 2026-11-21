@@ -1,12 +1,25 @@
 #include "game/effects/emitter_internal.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 
 namespace oc::effects {
 
+namespace emitter_detail {
+
+namespace {
+std::atomic<bool> heap_usage_on{false};
+}  // namespace
+
+bool heap_usage_tracked() { return heap_usage_on.load(std::memory_order_relaxed); }
+
+}  // namespace emitter_detail
+
 using namespace emitter_detail;
+
+void track_heap_usage(bool on) { heap_usage_on.store(on, std::memory_order_relaxed); }
 
 // ---- public API ---------------------------------------------------------------------------------------------------------------
 

@@ -165,13 +165,18 @@ void App::init_vfs() {
         else log::warn("mods: cannot create {}: {}", (files.game_dir() / "mods").string(), ec.message());
       }
     }
-    mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config), std::filesystem::path(std::u8string(config.debug_draft_dir.begin(), config.debug_draft_dir.end())));
+    // [Debug] DraftDir is read only by a controlled run (an editor's unsaved files).
+    const bool controlled_run = config.debug_control && !config.debug_script.empty();
+    const std::string draft_dir = controlled_run ? config.debug_draft_dir : std::string{};
+    mods.scan(files, files.game_dir() / "mods", render::mod_prefs(config), std::filesystem::path(std::u8string(draft_dir.begin(), draft_dir.end())));
     // New folders get their defaults (written with the next save).
     render::store_mod_prefs(config, mods);
     // Scripted and --config runs test the game as shipped: no mod reaches them, also through a later art change, unless [Debug] ScriptMods
-    // keeps them (a route testing a mod). The ini's choices stay as they are.
-    if (with_mods()) mods.apply(files, render::mod_art(config.art_mode));
-    else for (vfs::Mod& mod : mods.mods()) mod.enabled = false;
+    // keeps them (a route testing a mod). The ini's choices stay as they are. A controlled run's draft folder stays on.
+    if (!with_mods())
+      for (vfs::Mod& mod : mods.mods())
+        if (mod.name != vfs::kDraftMod) mod.enabled = false;
+    if (with_mods() || has_draft_mod()) mods.apply(files, render::mod_art(config.art_mode));
   }
   // Engine features follow the mods enabled at launch (like game data, a later Mods tab change waits for the next launch). A run without
   // mods has the [Features] lines of its own ini only (a route that tests a feature turns it on there).
@@ -721,7 +726,7 @@ void App::install_mod_rooms_and_text() {
   std::map<std::string, std::string> owners;
   std::vector<import::TextMod> text_mods;
   for (const vfs::Mod& mod : mods.mods()) {
-    if (!with_mods() || !mod.enabled) continue;
+    if (!(with_mods() || mod.name == vfs::kDraftMod) || !mod.enabled) continue;
     if (mod.has_manifest && !mod.manifest.rooms.empty())
       room_mods.push_back({mod.name, std::map<int, std::string>(mod.manifest.rooms.begin(), mod.manifest.rooms.end())});
     // The mod whose room script runs owns the room: its ids are the ones that script uses (the first mod in the list wins a file). The
@@ -735,7 +740,7 @@ void App::install_mod_rooms_and_text() {
   }
   mod_rooms.set(std::move(room_mods), std::move(owners));
   for (const vfs::Mod& mod : mods.mods()) {
-    if (!with_mods() || !mod.enabled || mod.text.empty()) continue;
+    if (!(with_mods() || mod.name == vfs::kDraftMod) || !mod.enabled || mod.text.empty()) continue;
     import::TextMod text{mod.name, {}, {}};
     for (const vfs::ModFile& file : mod.text)
       text.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };

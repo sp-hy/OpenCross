@@ -16,6 +16,7 @@
 //   app_achievements.cpp OpenCross's own achievements: the profile file, the tab, the per-frame feed and the unlock popup
 // The members stand in the order the objects are created; destruction runs in reverse, so every GPU resource goes before ctx and
 // the voice player before the mixer.
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -427,6 +428,10 @@ class App {
   void save_config() const;
   // Mods reach a run started with the player's own ini and no [Debug] Script, or one that sets [Debug] ScriptMods.
   bool with_mods() const { return (own_ini && config.debug_script.empty()) || config.debug_script_mods; }
+  // A controlled run's [Debug] DraftDir is in the mod list (it applies even when with_mods() is off).
+  bool has_draft_mod() const {
+    return std::any_of(mods.mods().begin(), mods.mods().end(), [](const vfs::Mod& mod) { return mod.name == vfs::kDraftMod; });
+  }
   // RDE's speed toggles do nothing in room 386 and in the battles launched from it (the room decides, not the battle id); a standalone
   // battle is never locked.
   bool speed_locked() const;
