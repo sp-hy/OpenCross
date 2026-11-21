@@ -68,7 +68,8 @@
 //   load <room> [param]           debug warp to a room
 //   set var <hexid> <value>       debug write of a script variable
 //   set option <hexmask> <0|1>    debug write of one bit of the Settings options word (0x200 = [button] Pressed: Run / Walk, 0x800 = analog stick)
-//   put [ent <n>] <x> <z>         debug: place the party (leader and followers), or entity n, at a world point on the walk mesh
+//   put [ent <n> | v] <x> <z>     debug: place the party (leader and followers), or entity n, at a world point on the walk mesh;
+//                                 `v`: the leader there and the followers in the party V behind it
 //   put beside <ent> [dist]       debug: place the party on the walk mesh beside entity <ent> where it stands now, the leader facing
 //                                 it: in talk range, out of touch range (dist = centre distance, default the middle of that band)
 //   set model <char> <byte>       D9 + DA on a party member (the character record model byte)
@@ -266,8 +267,10 @@ struct RouteOut {
   // Debug warp.
   std::string load_room;
   int load_param = 0;
-  // `put x z`: place the party at a world point; `put ent n x z`: entity n only.
+  // `put x z`: place the party at a world point; `put ent n x z`: entity n only; `put v x z` (put_v): the leader there, the followers
+  // in the party V behind it.
   bool put = false;
+  bool put_v = false;
   int put_ent = -1;
   float put_x = 0, put_z = 0;
   // `put beside <ent> [dist]`: the party beside entity put_beside (-1 = none), put_dist 0 = the host's default distance.
