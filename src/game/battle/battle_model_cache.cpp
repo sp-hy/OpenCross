@@ -227,12 +227,11 @@ void ModelCache::reload_weapons(const vfs::Vfs& vfs, render::MeshPipeline& meshe
   }
 }
 
-// S5 (state scripts) of the model and the 'atk' / camera data of its at0.prd.
+// S5 (state scripts) of the model and the 'atk' / camera data of its attack pack (attack_pack_of: its own at0.prd or the one the file table lends it).
 std::shared_ptr<ModelScripts> ModelCache::load_scripts_for(const vfs::Vfs& vfs, const CamBank* bank, const std::string& stem) {
   if (stem.empty()) return nullptr;
   if (auto it = scripts.find(stem); it != scripts.end()) return it->second;
   auto loaded = std::make_shared<ModelScripts>();
-  const std::string folder = stem.substr(0, stem.find_last_of('/'));
   if (auto obj = vfs.read("cdrom/" + stem + ".obj")) {
     loaded->has_s5 = bseq::load_model_table(*obj, loaded->s5);
     // S6 = the model's own DRP (44 monsters): sequences mag1..mag4 (type 0x10) + camera records mag<k> / big<k> (0x0C). The monster's cast script
@@ -250,7 +249,7 @@ std::shared_ptr<ModelScripts> ModelCache::load_scripts_for(const vfs::Vfs& vfs, 
       }
     }
   }
-  if (auto at0 = vfs.read("cdrom/" + folder + "/at0.prd")) {
+  if (auto at0 = vfs.read("cdrom/" + attack_pack_of(stem))) {
     loaded->has_atk = bseq::load_atk_table(*at0, loaded->atk);
     loaded->cam.add_drp(*at0);
     loaded->at0 = std::move(*at0);

@@ -73,8 +73,6 @@ std::optional<assets::ModelAsset> read_shipped_model(const vfs::Vfs& files, cons
     if (err) *err = base + ".obj not found";
     return std::nullopt;
   }
-  const size_t slash = stem.find_last_of('/');
-  const std::string folder = slash == std::string::npos ? std::string{} : stem.substr(0, slash);
   std::optional<assets::ModelAsset> asset;
   if (stem.starts_with("fieldobj/")) {
     const Bytes tim = read(base + ".tim");
@@ -89,7 +87,7 @@ std::optional<assets::ModelAsset> read_shipped_model(const vfs::Vfs& files, cons
     // cdrom2 mesh, so the .ltc is read whenever there is one, for the party and for the enemies sharing the model.
     Bytes texture = read(base + ".ltc");
     if (texture.empty()) texture = read(base + ".ltd");
-    asset = import::load_model(obj, texture, read("cdrom/" + folder + "/at0.prd"), err);
+    asset = import::load_model(obj, texture, read("cdrom/" + attack_pack_of(stem)), err);
     if (asset && files.hd_mode()) {
       const std::string name = character_name(files, stem, texture, files.enhanced());
       const Bytes tim = name.empty() ? Bytes{} : read("hd/menu/player/" + name + ".tim");

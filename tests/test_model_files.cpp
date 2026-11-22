@@ -3,7 +3,8 @@
 // is the 4x image of that page and the eye strip's shut frame comes from its right half. The field's models from elsewhere (FE D0):
 // battle models made field models, their field scale, another room's model. The character textures: the texture is the Status-screen
 // TIM's open half and, with the eye strip, rebuilds the TIM. A battle player without a Status-screen TIM, and a monster, keeps its 1x
-// texture in HD art and borrows the TIM of the player with the same main page in the Modded art mode. Needs the game install (SKIP without one).
+// texture in HD art and borrows the TIM of the player with the same main page in the Modded art mode. A battle model's attack pack is the
+// file table's, which lends some models another model's. Needs the game install (SKIP without one).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -191,6 +192,39 @@ int check_model_sources(const vfs::Vfs& files) {
   return failures;
 }
 
+// Attack packs (kBattleAttackPacks): every model's pack is on the disc; natak plays yoroi's attack clips; tank, whose lent pack (elf's)
+// has another joint count, still loads, without attack clips; a stem outside the table keeps its own folder's at0.prd.
+int check_attack_packs(const vfs::Vfs& files) {
+  int failures = 0;
+  for (size_t id = 0; id < game::kBattleModels.size(); ++id) {
+    const std::string stem(game::kBattleModels[id]);
+    if (!stem.empty() && !stem.starts_with("battle/wepon/") && !files.exists("cdrom/" + game::attack_pack_of(stem))) {
+      std::printf("FAIL model %zu %s: attack pack %s not on the disc\n", id, stem.c_str(), game::attack_pack_of(stem).c_str());
+      ++failures;
+    }
+  }
+  if (game::attack_pack_of("battle/monster/natak/natak") != "battle/monster/yoroi/at0.prd" ||
+      game::attack_pack_of("battle/player/selju2/selju") != "battle/player/selju2/at0.prd" ||
+      game::attack_pack_of("battle/monster/none/none") != "battle/monster/none/at0.prd") {
+    std::printf("FAIL attack_pack_of: natak %s, selju %s, unknown stem %s\n", game::attack_pack_of("battle/monster/natak/natak").c_str(),
+                game::attack_pack_of("battle/player/selju2/selju").c_str(), game::attack_pack_of("battle/monster/none/none").c_str());
+    ++failures;
+  }
+  auto attack_clips = [](const std::optional<assets::ModelAsset>& asset) {
+    return asset ? std::count_if(asset->clips.begin(), asset->clips.end(), [](const assets::AnimationClip& clip) { return clip.source == "at0"; }) : -1;
+  };
+  std::string err;
+  const auto natak = game::read_model_files(files, "battle/monster/natak/natak", &err);
+  const auto yoroi = game::read_model_files(files, "battle/monster/yoroi/yoroi", &err);
+  const auto tank = game::read_model_files(files, "battle/monster/tank/tank", &err);
+  if (attack_clips(natak) <= 0 || attack_clips(natak) != attack_clips(yoroi) || attack_clips(tank) != 0) {
+    std::printf("FAIL attack clips: natak %td, yoroi %td, tank %td (want natak = yoroi > 0, tank 0) %s\n", attack_clips(natak), attack_clips(yoroi),
+                attack_clips(tank), err.c_str());
+    ++failures;
+  }
+  return failures;
+}
+
 }  // namespace
 
 int main() {
@@ -282,6 +316,7 @@ int main() {
   }
   files.set_hd_mode(false);
   failures += check_model_sources(files);
+  failures += check_attack_packs(files);
   std::printf("%d player models checked, %d failures\n", checked, failures);
   return failures == 0 ? 0 : 1;
 }

@@ -815,6 +815,10 @@ class BattleView {
   // element effects (battle_view_fx*.cpp)
   // start_release: starts the pack of the current element; false = generic path.
   bool fx_begin();
+  // The effect-pack id of the current action's element (-1 = none), and a build of that pack's GPU resources ahead of time, during the
+  // charge, so the charge -> pack hand-over reuses the cache instead of loading and baking the summon model in one frame mid-cast.
+  int fx_action_eid() const;
+  void fx_prefetch_pack();
   std::vector<int> cast_elements_;
   std::vector<std::vector<battle::ActionEvent>> begun_actions_;
   // Cast start: cast pose, chant, the colour's charge pack "ch0N".

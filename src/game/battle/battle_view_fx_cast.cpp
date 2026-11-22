@@ -186,6 +186,8 @@ void BattleView::fx_charge_begin() {
              fx_scene().unit[static_cast<size_t>(act_.actor)].height);
   if (const auto& visual = vis_[static_cast<size_t>(act_.actor)]; visual.has_model && visual.model)
     log::debug("battle fx: caster model S1 extent {} {} {}", visual.model->asset.extent[0], visual.model->asset.extent[1], visual.model->asset.extent[2]);
+  // Build the element pack now, behind the charge camera's cut, so fx_begin's hand-over does not stall the view loading the summon model.
+  fx_prefetch_pack();
 }
 
 bool BattleView::fx_charge_done() const {
@@ -321,20 +323,43 @@ bool host_script_lands_hits(const bseq::Table& table) {
 
 }  // namespace
 
-bool BattleView::fx_begin() {
-  if (!dbg_.effects || act_.ev.empty() || fx_) return false;
+// The effect-pack id of the current action's element: the element table's, the caught-trap pack, or the monster trap pack a creature casts;
+// -1 when the action has no element pack.
+int BattleView::fx_action_eid() const {
+  if (act_.ev.empty()) return -1;
   const battle::ActionEvent& e0 = act_.ev.front();
-  if (e0.kind != battle::ActionEvent::Kind::Element) return false;
-  if (e0.element <= 0 || static_cast<size_t>(e0.element) >= tables_->elements.size()) return false;
+  if (e0.kind != battle::ActionEvent::Kind::Element) return -1;
+  if (e0.element <= 0 || static_cast<size_t>(e0.element) >= tables_->elements.size()) return -1;
   const data::ElemRec& rec = tables_->elements[static_cast<size_t>(e0.element)];
-  if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
-  if (!fxlib_ready_) return false;
   int eid = e0.caught ? BattleFxLibrary::caught_eid(rec) : e0.fx_eid >= 0 ? e0.fx_eid : BattleFxLibrary::element_eid(rec);
   // A MONSTER that casts a trap element runs montrap.prd (eid 397: `main` = camera
   // `cam` + ENEMY_B_FN + per-target `tgef`, emitters cr1 / clr1 / iz32 ...), not the party's etrap (396) / sumtrap (395) pack (`camr`, `atk5`, pt / pt1).
   // The eid is chosen by the monster's battle script, not the element table; the three trap eids are the whole set.
   if ((eid == 395 || eid == 396) && !bunit(std::max(0, act_.actor)).pc) eid = 397;
-  if (eid <= 1) return false;
+  return eid <= 1 ? -1 : eid;
+}
+
+// Builds the current element's pack GPU resources while the caster charges, so fx_begin's hand-over hits the fx_gpu_ cache. The heavy case
+// is a summon: its creature model is large and otherwise loads and bakes in the single frame fx_begin runs, freezing the view on the last
+// charge frame; building it now spends that time during the charge camera's cut instead. A no-op once the pack is cached.
+void BattleView::fx_prefetch_pack() {
+  if (!dbg_.effects || fx_) return;
+  const int eid = fx_action_eid();
+  if (eid < 0) return;
+  if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
+  if (!fxlib_ready_) return;
+  if (std::shared_ptr<const FxPack> pack = fxlib_.get(eid)) fx_gpu_for(pack);
+}
+
+bool BattleView::fx_begin() {
+  if (!dbg_.effects || act_.ev.empty() || fx_) return false;
+  const battle::ActionEvent& e0 = act_.ev.front();
+  if (e0.kind != battle::ActionEvent::Kind::Element) return false;
+  if (e0.element <= 0 || static_cast<size_t>(e0.element) >= tables_->elements.size()) return false;
+  if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
+  if (!fxlib_ready_) return false;
+  const int eid = fx_action_eid();
+  if (eid < 0) return false;
   std::shared_ptr<const FxPack> pack = fxlib_.get(eid);
   if (!pack || !fx_gpu_for(pack)) return false;
   fx_state_log("pack start");

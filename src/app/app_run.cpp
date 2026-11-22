@@ -450,7 +450,10 @@ void App::apply_options_change(const render::OptionsChange& change) {
   if (change.language) {
     import::Lang nl;
     if (import::parse_lang(config.language, nl)) {
+      lang = nl;
       if (world_ok) world.set_language(nl);
+      if (battle_ready) battle.set_language(nl);
+      if (menu_ok) spell_preview.set_language(nl);
       if (flow_ready) flow.set_language(nl);
       ext_host.language = static_cast<u32>(nl);
       if (menu_ok) menu.set_language(nl);

@@ -3,7 +3,8 @@
 // "Vibration Function : On" with the small left / right arrows at the bar's right end; on a map with a world name (script var 0x50)
 // once the scenario has reached 0x34 (Viper Manor, the first talk with Melchior) a second row "World Names : On" with the arrows
 // turned to up / down. Left / right flip Vibration, up / down flip World Names (no cursor). Text = lang.dat ui_pausemenu.txt (ids
-// 0 PAUSE, 1 Vibration Function, 2 World Names, 3 Off, 4 On), bar art = ui.dat ui/pause.png, font ui_font_gnb (HD) in both art modes.
+// 0 PAUSE, 1 Vibration Function, 2 World Names, 3 Off, 4 On), bar art = ui.dat ui/pause.png, font ui_font_gnb (HD) in both art modes,
+// in Japanese kb_70 (the gnb face has no kana or kanji).
 // Played from the PS1 discs (no ui archive; the PS1 has no pause screen) the same rows are PS1-font text in one PS1 menu window
 // (menutim.prd "wind" frame over a translucent black fill), centred on the 320 x 240 picture, the build's own words (no lang.dat).
 //   p.open(vibration, world_row, world_names);   per frame: sfx = p.input(dx, dy, toggle, close);   p.draw(...)
@@ -11,6 +12,7 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include "import/text.h"
 #include "render/sprite_batch.h"
@@ -50,8 +52,19 @@ class PauseScreen {
   void draw(const render::Frame& frame, float vw, float vh, bool resume = false);
 
  private:
+  // A spritefont face of the pause text, `scale` = canvas units per font texel, `ink_mid` = the font-texel offset from the pen's
+  // line top to the middle of the capital P's glyph box; `spacing` = canvas units added after every glyph; `arrow_gap` / `title_pad`
+  // = canvas units from the text's pen end to the arrow pair / to the title bar's right end.
+  struct Face {
+    std::shared_ptr<const import::SpriteFont> font;
+    render::FaceId id = render::kNoFace;
+    float scale = 1.0f, ink_mid = 0.0f, spacing = 0.0f, arrow_gap = 0.0f, title_pad = 0.0f;
+  };
   // Row text `id` of ui_pausemenu, else the English / Japanese words.
   std::u32string ui_text(int id);
+  // gnb sized so that its P fills the bar as RDE's does; kb_70 for Japanese, read on its first use.
+  bool make_face(Face& face, const std::string& member, std::u32string_view extra, float spacing, float arrow_gap, float title_pad);
+  const Face& face();
   void draw_ps1(const render::Frame& frame, float vw, float vh, bool resume, const std::u32string& title, const std::u32string& line,
                 const std::u32string& line2);
 
@@ -66,11 +79,11 @@ class PauseScreen {
   bool ps1_ = false;
   float wind_w_ = 0, wind_h_ = 0;
   float bar_w_ = 0, bar_h_ = 0;
-  // ui/ui_font_gnb.spritefont: the bold condensed face of the pause screen.
-  std::shared_ptr<const import::SpriteFont> font_;
+  // The disc look's PS1 font.
   render::FaceId face_ = render::kNoFace;
-  // Canvas units per font texel: the cap height is 55 % of the bar height.
-  float font_scale_ = 1.0f;
+  // ui/ui_font_gnb.spritefont (the bold condensed face) and kb_70 for Japanese.
+  Face latin_, jp_;
+  bool jp_tried_ = false;
   import::LangTables lt_;
   import::Lang lang_ = import::Lang::En;
   bool open_ = false, vibration_ = true, world_row_ = false, world_names_ = true;

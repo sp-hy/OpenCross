@@ -394,11 +394,12 @@ std::set<u32> actor_script_tags(const vfs::Vfs& vfs) {
       }
   };
   if (const auto prd = vfs.read("cdrom/battle/battle.prd")) walk(*prd);
-  std::set<std::string> seen;
+  std::set<std::string> seen, packs;
   for (const std::string_view sv : kBattleModels) {
     const std::string stem(sv);
     if (stem.empty() || !seen.insert(stem).second) continue;
-    if (const auto at0 = vfs.read("cdrom/" + stem.substr(0, stem.find_last_of('/')) + "/at0.prd")) walk(*at0);
+    if (const std::string pack = attack_pack_of(stem); packs.insert(pack).second)
+      if (const auto at0 = vfs.read("cdrom/" + pack)) walk(*at0);
     const auto obj = vfs.read("cdrom/" + stem + ".obj");
     if (!obj) continue;
     bseq::Table table;

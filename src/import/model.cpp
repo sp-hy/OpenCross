@@ -715,8 +715,9 @@ void fit_eye_rects(ModelAsset& asset) {
   }
 }
 
+// `skip_unfit_ext`: an external pack whose joint count differs from the skeleton's adds no clips instead of failing the load.
 ModelAsset load_mdl(ByteSpan obj, const TexInfo& tex, ByteSpan ext_pack, const char* ext_source, bool field, Notes& notes,
-                    ByteSpan hd_tim = {}) {
+                    ByteSpan hd_tim = {}, bool skip_unfit_ext = false) {
   // HD-mode (cdrom2) field models carry a trailing block (~0.2-0.5 KB, a second 'drp' table) after the EOF pointer.
   if (obj.size() > 32) {
     u32 eof = 0;
@@ -820,10 +821,10 @@ ModelAsset load_mdl(ByteSpan obj, const TexInfo& tex, ByteSpan ext_pack, const c
   // External pack
   if (!ext_pack.empty()) {
     const auto raws = parse_anim_pack(ext_pack, 0);
-    for (size_t i = 0; i < raws.size(); ++i) {
-      if (raws[i].joints != nj) failf("external anim J={} != model J={}", raws[i].joints, nj);
-      asset.clips.push_back(make_clip(raws[i], raw, ext_source, static_cast<u32>(i)));
-    }
+    const auto unfit = std::find_if(raws.begin(), raws.end(), [&](const auto& anim) { return anim.joints != nj; });
+    if (unfit != raws.end() && !skip_unfit_ext) failf("external anim J={} != model J={}", unfit->joints, nj);
+    if (unfit == raws.end())
+      for (size_t i = 0; i < raws.size(); ++i) asset.clips.push_back(make_clip(raws[i], raw, ext_source, static_cast<u32>(i)));
   }
   if (s6) {
     if (auto drp = parse_drp(obj.subspan(s6))) asset.drp_entries = static_cast<u32>(drp->entries.size());
@@ -1170,7 +1171,7 @@ std::optional<ModelAsset> load_model(ByteSpan obj, ByteSpan tex, ByteSpan at0_pr
         ti.have = true;
       }
     }
-    return load_mdl(obj, ti, ext, "at0", false, notes, hd_tim);
+    return load_mdl(obj, ti, ext, "at0", false, notes, hd_tim, true);
   });
 }
 

@@ -12,7 +12,7 @@ This document covers the skinned character and monster models (battle players, b
 | `*.ltd` (battle player/monster) | 158 | **Atim**: 1 CLUT object + 1..2 8bpp image objects |
 | `*.ltc` (battle player) | 52 | cpt of 2 Atims: main texture + a 128x32 overlay strip (the closed-eye frames, section 8) |
 | `fieldobj/player/<n>/<n>.tim` | 56 | standard PS1 TIM, 8bpp + CLUT (flag 9), 16928 bytes |
-| `battle/*/at0.prd` | 194 | **DRP** (nested resource pack, below). Type 0x19 entry `at0` = the external attack-animation pack of the model |
+| `battle/*/at0.prd` | 194 | **DRP** (nested resource pack, below). Type 0x19 entry `at0` = the external attack-animation pack of the model; which pack a battle model uses is the file table's (`battle_data.md` 3.1: nine models use another model's) |
 | `fieldobj/ex/*.bin` | 116 | cpt of 2: [animation pack (event/extra clips), animation-sequence table for those clips (6.1)]; `dummy.bin` is a text stub, not a cpt |
 | `battle/wepon/*.bin` | 29 | cpt: (TIM 4bpp, Mesh) x N pairs + 2 four-byte `77 77 77 20` pad entries |
 | `battle/wepon/**.kmd` | 17 | single **Mesh** (section 7) |

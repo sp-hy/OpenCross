@@ -22,7 +22,8 @@ bool apply_battle_hd_tim(assets::ModelAsset& asset, ByteSpan tim);
 // `hd_tim` (optional, last argument of load_model / load_field_model) is the matching hd.dat TIM; when its size is an
 // integer multiple of the 1x main texture it fills ModelAsset::hd_textures[0] / hd_scale, otherwise it is ignored.
 // Battle player/monster model. `tex` is an .ltd or .ltc (may be empty), `at0_prd` the type-0x19 holder
-// (at0.prd, may be empty; its clips are appended with source "at0").
+// (at0.prd, may be empty; its clips are appended with source "at0", unless their joint count differs from the model's: a pack another
+// model lends that does not fit this skeleton adds no clips).
 std::optional<assets::ModelAsset> load_model(ByteSpan obj, ByteSpan tex, ByteSpan at0_prd, std::string* err = nullptr,
                                           ByteSpan hd_tim = {});
 
