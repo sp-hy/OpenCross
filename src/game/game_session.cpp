@@ -288,7 +288,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
         if (k == 2 && member.kind <= 0x2D) break;
         const int cell = battle::kPipTechCells[k];
         const int idx = gs.cell_index(member.char_id, cell / ui::GameState::kCols, cell % ui::GameState::kCols);
-        if (idx >= 0) save_char.grid[static_cast<size_t>(idx)] = static_cast<u16>(member.cells[static_cast<size_t>(cell)] & 0x1FF);
+        if (idx >= 0) save_char.grid[static_cast<size_t>(idx)] = static_cast<u16>(member.cells[static_cast<size_t>(cell)] & 0x3FFF);
       }
       log::info("session: {} keeps form {:#x}", member.name, member.kind);
     }
@@ -306,11 +306,11 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   if (progress) *progress = finished_battle.growth().progress;
   const battle::Rewards& rewards = finished_battle.rewards();
   // Element traps (pgdat mode 5), written during the battle whatever its outcome: an enemy cast caught by the party's trap
-  // goes into the element stock (id & 0xFF, 0xC0 slots, count cap 99); a PC cast caught by the enemy's trap destroys its grid
+  // goes into the element stock (0xC0 slots, count cap 99); a PC cast caught by the enemy's trap destroys its grid
   // cell in the save record (the battle cell -> record cell index map is GameState::cell_index).
   int trapped = 0, lost = 0;
   for (u16 id : rewards.trapped)
-    if (gs.add_element(id & 0xFF)) ++trapped;
+    if (gs.add_element(id)) ++trapped;
   for (const auto& [char_id, cell] : rewards.lost_cells) {
     if (char_id < 0 || char_id >= save::kNumChars) continue;
     const int k = gs.cell_index(char_id, cell / ui::GameState::kCols, cell % ui::GameState::kCols);
@@ -323,9 +323,9 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   // Stars current: the summons cast spent theirs whatever the outcome (a star-up raised it too).
   gs.slot.head[kCounterOff] = static_cast<u8>(std::clamp(finished_battle.growth().counter, 0, 255));
   if (!victory) return sum;
-  // Pilfered loot (mode 30) is kept only on a victory: bit 15 = element stock (id & 0xFF, as a trapped element), else the item stock.
+  // Pilfered loot (mode 30) is kept only on a victory: bit 15 = element stock (id & 0x7FFF, as a trapped element), else the item stock.
   for (u16 loot : rewards.stolen) {
-    if (loot & 0x8000) gs.add_element(loot & 0xFF);
+    if (loot & 0x8000) gs.add_element(loot & 0x7FFF);
     else if (loot) gs.add_item(loot);
   }
   sum.gold = rewards.gold;

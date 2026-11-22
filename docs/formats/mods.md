@@ -41,6 +41,42 @@ A mod's `text\<member>` (directly in the mod's root, after a wrapper folder) hol
 * **Mod rooms:** field text rows (`<lang>.csv`, `Ex_<lang>.csv`, `mess_wend.csv`) of a room id the mod's `[Rooms]` (section 8) lists are stored under that room's internal id, so two mods' room 1001 keep their own text; any other id is the game's own row of that id (the game's text has rows from 1000 on too: the `fin_` scenes at 1000 + map id). Battle rows (`btel_`) keep their battle ids.
 * The startup log lists `mods: '<mod>' text rows for N member(s)`.
 
+### 1.3 Table rows (`tables\`)
+
+A mod's `tables\<table>.txt` (directly in the mod's root, after a wrapper folder) changes single fields of the records of one battle / menu table, instead of replacing the whole file, so several mods that each change a few records stack. `<table>` names the file it changes:
+
+| table | records | file |
+|---|---|---|
+| `monster` | enemies, 0xB0 bytes | `battle/data/monster.bin` |
+| `char`, `char20`, `char_w0` .. `char_w5` | the 51 characters of that set, 0xB0 bytes | `battle/data/<table>.bin` |
+| `pgdat` | elements and techs, 0x2C bytes | `battle/data/pgdat.bin` |
+| `waa` | equipment stats, 0x1C bytes (256) | `battle/data/player.dat` part 4 |
+| `menu_waa` | item info: who equips, price, category, 12 bytes (256) | `battle/data/exdat.dat` part 5 |
+| `scenedat` | battle scenes, 28 bytes | `battle/data/player.dat` part 0 |
+| `ditem` | drop rows, 4 x u16 | `battle/data/ditem.dat` |
+
+UTF-8 text, CR LF or LF, an optional BOM. `[<index>]` starts a record (the record's index in the table, decimal or `0x` hex); each following line is `<field>=<value>`. A field is a name from the list below or `0x<offset>:u8|u16|u32` for a byte the names do not cover (the record's byte offset). Values are decimal, `0x` hex or negative (stored in the field's width); integers are little-endian like the files. Blank lines and lines starting with `;` or `#` are skipped.
+
+```
+; tables\monster.txt
+[12]
+max_hp=900
+atk=40
+0xA6:u8=3
+```
+
+Field names (`data/table_rows.cpp`):
+* `monster`, `char*`: `innate`, `growth_col`, `gender`, `max_hp` (u16), `atk`, `def`, `hit`, `evd`, `mag`, `mdef`, `status_dur`, `stamina_rate`, `weapon`, `armour`, `accessory_0` .. `accessory_3` (u16), `drop_base`, `model`, `ap`, `weapon_model`, `level_mask_0` .. `level_mask_7` (u16), `cell_0` .. `cell_47` (u16, the listed grid cells), `drop_row`, `gold` (u16), `hit_med`, `hit_heavy`, `star_growth`;
+* `pgdat`: `flags0`, `colour_bit`, `level`, `mode`, `power`, `status_pct`, `variance`, `hits`, `status_lo`, `status_hi` (u32);
+* `waa`: `tier`, `class` (the whole byte: class and the sweep bit), `mode`, `colour`, `power`, `mag`, `acc`, `var`, `flags`, `slot_mask` (u16), `mask_lo`, `mask_hi`, `status_lo`, `status_hi` (u32);
+* `menu_waa`: `equip_lo`, `equip_hi` (u32), `price10` (u16, the price / 10), `cat`, `extra`;
+* `scenedat`: `enemy_0` .. `enemy_2`, `count_0` .. `count_2`;
+* `ditem`: `slot_0` .. `slot_3` (u16).
+
+* **Merge** (`data::apply_table_rows`, when the tables load at launch): the table as the game ships it, or as a mod's whole file replaces it, then the enabled mods' rows, lowest priority first, so the first mod in the list wins a field both set. Rows change existing records only: a record past the end of the table is skipped. The rows belong to the game's own tables only: the background room scan behind the Bestiary page's numbers reads the unmodified game.
+* **Conflicts:** a field two mods set to different values is logged (`tables: <table> [<index>] 0x<offset>: '<mod>' wins over '<mod>'`); a line that cannot be read, or a record or field the table does not have, is logged as a warning and skipped.
+* The startup log lists `tables: '<mod>' <table>: N field(s)` per mod and table.
+
 ## 2. Resolution (once per scan, case-insensitive, component-wise)
 
 1. **Archive overlay.** A file named `<archive>.dat`, where `data\<archive>.dat` is one of the archives OpenCross reads (`cdrom cdrom2 hd lang font ui movie`) and the file starts with the ZIP signature `PK\3\4`, is a set of member replacements, not a new archive. Each of its members is resolved by rule 2 as the path `<archive>/<member>` (`cdrom2.dat` members as `cdrom/<member>`) and read in place from the ZIP, with nothing unpacked; every member it does not hold still comes from the shipped archive, so the file may hold one member or all of them. The members behave like loose files: they count in the mod's files and conflicts, the first active mod in the list wins each one, several mods' copies of the same `.dat` combine, and a `cdrom.dat` member wins over the `cdrom2` copy. A member that cannot be read falls back to the game's copy. A `.dat` not matching this rule is resolved as an ordinary file by rule 2.

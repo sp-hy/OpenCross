@@ -288,8 +288,9 @@ bool App::route_step() {
     if (out.put && out.put_ent >= 0)
       world.set_position_xz(out.put_ent, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
     else if (out.put)
-      for (int slot = 0; slot < 3; ++slot)
+      for (int slot = 0; slot < (out.put_v ? 1 : 3); ++slot)
         if (const int pe = world.party_entity(slot); pe >= 0) world.set_position_xz(pe, static_cast<s32>(out.put_x), static_cast<s32>(out.put_z), 0);
+    if (out.put && out.put_ent < 0 && out.put_v) world.place_followers();
     if (out.put_beside >= 0) {
       float bx = 0, bz = 0;
       if (world.put_party_beside(out.put_beside, out.put_dist, bx, bz))
@@ -342,6 +343,7 @@ bool App::route_step() {
   update_loop_speed(1.0 / 60.0);
   loop_speed.field = loop_speed.field_factor == 1.0f ? platform::FixedStep::Result{1, 0.0f} : field_stepper.advance(loop_speed.field_factor / 60.0);
   advance(in, 1.0 / 60.0, 1);
+  if (control_anim_playing) control_anim_step();
   mixer.capture_tick(1.0 / 60.0);
   if (recorder.active()) recorder.write(1.0 / 60.0, 1, in);
   if (battle_ready) {

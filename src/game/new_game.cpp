@@ -49,7 +49,7 @@ void load_records(const data::GameTables* tables, save::SaveSlot& slot, bool dre
     rec.armour = file_rec.armour();
     for (int i = 0; i < 3; ++i) rec.accessory[static_cast<size_t>(i)] = file_rec.accessory(i);
     rec.model_id = file_rec.model();
-    for (int k = 0; k < 48; ++k) rec.grid[static_cast<size_t>(k)] = file_rec.cell_listed(k) & 0x1FF;
+    for (int k = 0; k < 48; ++k) rec.grid[static_cast<size_t>(k)] = file_rec.cell_listed(k) & 0x3FFF;
   }
   for (auto& item : slot.items) item = {};
   for (auto& element : slot.elements) element = {};

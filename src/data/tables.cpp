@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "core/hash.h"
+#include "data/table_rows.h"
 #include "import/container.h"
 #include "import/lzss.h"
 #include "import/text.h"
@@ -152,6 +153,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   if (!mon) return fail("battle/data/monster.bin missing");
   enemies.resize(mon->size() / kStatRecSize);
   for (size_t i = 0; i < enemies.size(); ++i) copy_rec(enemies[i].raw, *mon, i * kStatRecSize);
+  apply_table_rows(game_fs, "monster", enemies.size(), [&](size_t i) { return std::span<u8>(enemies[i].raw); });
 
   // --- characters (+ presets). Every set takes its Lv 99 targets from lv99para.bin; the bytes after the 51 records of char_w1..5 are
   // leftover record copies, not Lv 99 rows.
@@ -165,6 +167,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
     }
     CharSet char_set;
     for (size_t i = 0; i < kNumChars; ++i) copy_rec(char_set.rec[i].raw, *set_bytes, i * kStatRecSize);
+    apply_table_rows(game_fs, set_name, kNumChars, [&](size_t i) { return std::span<u8>(char_set.rec[i].raw); });
     for (size_t i = 0; i < kNumChars && i * 8 + 8 <= lv99_file.size(); ++i) {
       const size_t offset = i * 8;
       char_set.lv99[i] = {rd16(lv99_file, offset), lv99_file[offset + 2], lv99_file[offset + 3], lv99_file[offset + 4],
@@ -180,6 +183,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   for (size_t i = 0; i < elements.size(); ++i) copy_rec(elements[i].raw, *pg, i * kElemRecSize);
   for (const ElementFix& fix : kElementFixes)
     if (fix.element < elements.size() && elements[fix.element].raw[fix.offset] == fix.retail) elements[fix.element].raw[fix.offset] = fix.rde;
+  apply_table_rows(game_fs, "pgdat", elements.size(), [&](size_t i) { return std::span<u8>(elements[i].raw); });
 
   // --- growth
   auto gr = read_battle(game_fs, "el_mask.bin");
@@ -192,6 +196,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   if (player.size() < 4) return fail("battle/data/player.dat unreadable");
   scenes.resize(player[0].size() / 28);
   for (size_t i = 0; i < scenes.size(); ++i) copy_rec(scenes[i].raw, player[0], i * 28);
+  apply_table_rows(game_fs, "scenedat", scenes.size(), [&](size_t i) { return std::span<u8>(scenes[i].raw); });
   symtbl.resize(player[2].size() / 2);
   for (size_t i = 0; i < symtbl.size(); ++i) symtbl[i] = rd16(player[2], i * 2);
   btbgdat.resize(player[3].size() / 3);
@@ -201,12 +206,14 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   if (player.size() > 4 && player[4].size() >= 256 * kGearRecSize) {
     gear.resize(256);
     for (size_t i = 0; i < 256; ++i) copy_rec(gear[i].raw, player[4], i * kGearRecSize);
+    apply_table_rows(game_fs, "waa", gear.size(), [&](size_t i) { return std::span<u8>(gear[i].raw); });
   }
 
   // --- drops
   auto dit = read_battle(game_fs, "ditem.dat");
   if (!dit) return fail("battle/data/ditem.dat missing");
   Bytes dd = import::is_lzss(*dit) ? import::lzss_decode(*dit).value_or(Bytes{}) : *dit;
+  apply_table_rows(game_fs, "ditem", dd.size() / 8, [&](size_t i) { return std::span<u8>(dd.data() + i * 8, 8); });
   drops.resize(dd.size() / 8);
   for (size_t i = 0; i < drops.size(); ++i)
     for (size_t k = 0; k < 4; ++k) drops[i].slot[k] = rd16(dd, i * 8 + k * 2);
@@ -215,6 +222,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err) {
   auto ex = load_bundle(game_fs, "exdat.dat");
   if (!ex.empty()) {
     if (ex.size() > 5 && ex[5].size() >= 256 * 12) {
+      apply_table_rows(game_fs, "menu_waa", 256, [&](size_t i) { return std::span<u8>(ex[5].data() + i * 12, 12); });
       item_info.resize(256);
       for (size_t i = 0; i < 256; ++i) {
         const size_t offset = i * 12;

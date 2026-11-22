@@ -131,7 +131,7 @@ Source: `main_menu_elements.cpp`, `main_menu_presets.cpp`; rules `game_state.cpp
 **List dimming.** A listed element is dimmed when the character may not hold it; when a cell is picked and its row is outside the element's window (not while swapping); or when the element's reach (level row +- low nibble) misses every row between the first and deepest unlocked row of the character.
 
 **Prompts** (question in the description panel; Cancel dismisses, sfx 6):
-* Remove All: Yes / No (Left / Right), default No; Yes removes every element with 0 < id < 0x80 from unlocked cells of the member (fixed ones stay), sfx 0x17.
+* Remove All: Yes / No (Left / Right), default No; Yes removes every element with 0 < id < 0x80 (OpenCross: and a mod's element records, `formats/battle_data.md` 5) from unlocked cells of the member (fixed ones stay), sfx 0x17.
 * Auto Allocate / Fill Blanks: choice "this member" (default) or "whole party" (Up / Down). The whole party is refused (sfx 0x18) while a stand-in is active. Auto Allocate clears the member(s) first, Fill Blanks only fills empty cells.
 * Save Preset / Load Preset (only with `[Game] GridPresets`): OK opens the slot window (Presets, below).
 * Reorder (Triangle on the list): three orders, cursor starts on the first (Up / Down wrap); the stock is repacked from slot 0 with quantities kept.

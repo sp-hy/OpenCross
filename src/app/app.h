@@ -400,6 +400,10 @@ class App {
   std::string control_fxmem();
   std::string control_campose();
   std::string control_stage(std::istringstream& words);
+  std::string control_anim(std::istringstream& words);
+  // After each tick of a controlled run: a Control `anim` that has played out puts its actor back on the animation it had.
+  void control_anim_step();
+  void control_anim_end();
   // The mods scanned again with the draft folder and applied (`reload`, a `plan` with another DraftDir).
   void control_rescan_mods();
   // [Debug] HoldScripts / ForceBranches applied to the field (the run's start, each `plan`).
@@ -868,6 +872,13 @@ class App {
   float control_backdrop[4] = {0.0f, 0.0f, 0.0f, 1.0f};
   // Control `stage 0`: the colour a standalone battle is cleared to while its stage is not drawn.
   float stage_backdrop[3] = {0.0f, 0.0f, 0.0f};
+  // Control `anim` playing: the entity, the animation id it goes back to (-1 = its automatic clip), the ticks shown so far and at least,
+  // and the room load it was asked in (another room's entity of that number is someone else).
+  struct ControlAnim {
+    int ent = -1, idle = -1, ticks = 0, min_ticks = 0;
+    u64 room_load = 0;
+  };
+  std::optional<ControlAnim> control_anim_playing;
 
   // ---- debugging --------------------------------------------------------------------------------------------------------------
   // A field room is shown this frame (the Debug tab's field sections).

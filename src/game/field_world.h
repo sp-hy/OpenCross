@@ -670,6 +670,10 @@ class FieldWorld final : public script::FieldHost {
   void set_hold_scripts(bool on) { hold_scripts_ = on; }
   // A controlled run: the room on show loaded again with unchanged art keeps its built art, room models and effects (RoomView::same_art).
   void set_keep_same_art(bool on) { view_.set_keep_same_art(on); }
+  // Control `anim`: the entity's actor back on its automatic clip (stand, walk or run as it moves), no script animation in force.
+  void clear_animation(int ent) {
+    if (ent >= 0 && ent < static_cast<int>(ents_.size())) ents_[static_cast<size_t>(ent)].actor.clear_play();
+  }
   // A controlled run's floor grid (Control `grid`), drawn with the effects (effects::add_grid_quads) only while the run draws through its
   // own camera (RoomView::set_camera_override). Drawing only.
   void set_debug_grid(std::optional<effects::FloorGrid> grid) { debug_grid_ = grid; }

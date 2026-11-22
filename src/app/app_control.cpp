@@ -98,6 +98,7 @@ void App::control_restart() {
   if (!route.load(config.debug_script, &err)) control_reply("failed 0 " + err);
   route_tick = 0;
   route_finished = false;
+  control_anim_playing.reset();
   // A field battle the run before started (a scene's own fight): over, as at boot (the room load below clears the field's side). Left
   // running, every later run would wait for a room with no battle (route `wait room`).
   if (battle_in_field) {
@@ -572,6 +573,49 @@ std::string App::control_scroll(std::istringstream& words) {
   return std::format("scroll {} {}", x, y);
 }
 
+// `anim <entity> <anim> [min ticks]`: the entity's actor plays the script animation id now (as SET_ANIMATION), then, once that id has
+// played out (the anim-done bit WAIT_ANIMATION waits for) and at least `min ticks` have passed, goes back to the id it had (an editor's
+// play button on a room that stands still); the id in force starts again from the top. A second `anim` replaces the first; its actor goes back at once when it is another one.
+std::string App::control_anim(std::istringstream& words) {
+  int ent = -1, anim = -1, min_ticks = 0;
+  words >> ent >> anim;
+  if (!(words >> min_ticks)) min_ticks = 0;
+  if (ent < 0 || anim < 0 || anim > 0xFE || min_ticks < 0) return "error anim <entity> <anim 0..254> [min ticks]";
+  if (!field_visible()) return "error anim: no room on show";
+  if (static_cast<size_t>(ent) >= world.entity_count()) return std::format("error anim: no entity {}", ent);
+  const game::Actor& actor = world.ent(static_cast<size_t>(ent)).actor;
+  if (!actor.loaded()) return std::format("error anim: entity {} has no model", ent);
+  if (!actor.has_script_clip(anim)) return std::format("error anim: entity {} has no animation {}", ent, anim);
+  int idle = actor.requested_anim();
+  if (control_anim_playing) {
+    if (control_anim_playing->ent == ent) idle = control_anim_playing->idle;
+    else control_anim_end();
+  }
+  // The id already in force plays again from its start (SET_ANIMATION 0xFF re-submits it; the same id would go on where it is).
+  world.set_animation(ent, anim == actor.requested_anim() ? 0xFF : anim);
+  control_anim_playing = ControlAnim{ent, idle, 0, min_ticks, world.room_loads()};
+  return std::format("anim {} {}", ent, anim);
+}
+
+void App::control_anim_step() {
+  ControlAnim& playing = *control_anim_playing;
+  if (playing.room_load != world.room_loads()) {
+    control_anim_playing.reset();
+    return;
+  }
+  if (++playing.ticks < playing.min_ticks || world.animation_busy(playing.ent)) return;
+  control_anim_end();
+}
+
+void App::control_anim_end() {
+  const ControlAnim playing = *control_anim_playing;
+  control_anim_playing.reset();
+  if (playing.room_load != world.room_loads()) return;
+  if (playing.idle < 0) world.clear_animation(playing.ent);
+  else world.set_animation(playing.ent, playing.idle);
+  control_reply(std::format("anim done {} {}", playing.ent, route_tick));
+}
+
 // `xform <name,name,...> <a0 .. a8> <pivot x y z> <shift x y z>` / `xform off`: the named effects drawn as moved by A about the pivot and
 // by the shift (an editor's live drag, effects::DrawXform); in a standalone battle the stage's own emitters (an editor's effects drafted
 // into the stage pack). `camera off` and a `plan` end it.
@@ -754,6 +798,7 @@ std::string App::control_command(const std::string& op, std::istringstream& word
     return std::format("hud {}", on == 0 ? 0 : 1);
   }
   if (op == "stage") return control_stage(words);
+  if (op == "anim") return control_anim(words);
   if (op == "tick") return std::format("tick {}", route_tick);
   if (op == "quit") {
     quit_requested = true;

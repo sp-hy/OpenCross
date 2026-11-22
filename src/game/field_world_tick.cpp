@@ -46,9 +46,9 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
   }
   if (key == 0xFE69 && gs_) {
     // FE 69 on character record 1 (Kid). The pending list lives in script variables, so a save inside the scene keeps it.
-    // b == 0 SAVE: both lists' first 24 words are zeroed; then each cell k whose id (& 0x1FF) is below 0x80, empty ones included, writes
-    // its id to variable kIds + 2k and ORs its copy count into nibble (k & 1) of variable kCounts + 2 * (k >> 1); the cell keeps only
-    // its flag bits and its count is cleared; the stock is untouched. b != 0 RESTORE adds the 48 listed elements to the STOCK (not
+    // b == 0 SAVE: both lists' first 24 words are zeroed; then each cell k whose id is below 0x80 (or a mod's element record), empty
+    // ones included, writes its id to variable kIds + 2k and ORs its copy count into nibble (k & 1) of variable kCounts + 2 * (k >> 1);
+    // the cell keeps only its flag bits and its count is cleared; the stock is untouched. b != 0 RESTORE adds the 48 listed elements to the STOCK (not
     // back into the grid): the count of entry k is read from nibble (k & 1) of variable kCounts + 2k, one word per entry rather than
     // the packed word SAVE wrote, and only for elements whose copies count (one copy otherwise); then the 48 ids and 24 count words
     // are zeroed.
@@ -64,8 +64,8 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
         put(static_cast<u16>(kCounts + 2 * i), 0);
       }
       for (size_t k = 0; k < ch.grid.size(); ++k) {
-        const int id = ch.grid[k] & 0x1FF;
-        if (id >= 0x80) continue;
+        const int id = ch.grid[k] & 0x3FFF;
+        if (id >= 0x80 && !gs_->is_element(id)) continue;
         put(static_cast<u16>(kIds + 2 * k), static_cast<u16>(id));
         const u16 word = static_cast<u16>(kCounts + 2 * (k >> 1));
         put(word, static_cast<u16>(vm_.var(word) | (ch.equipped_qty[k] & 0xF) << (4 * (k & 1))));

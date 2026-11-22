@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/cheats.h"
 #include "game/free_cam.h"
 #include "platform/paths.h"
@@ -188,6 +189,16 @@ void App::init_vfs() {
       log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
   }
   install_mod_rooms_and_text();
+  // The mods' table rows (tables\<table>.txt), read when the tables load.
+  std::vector<data::TableMod> table_mods;
+  for (const vfs::Mod& mod : mods.mods()) {
+    if (!(with_mods() || mod.name == vfs::kDraftMod) || !mod.enabled || mod.tables.empty()) continue;
+    data::TableMod table{mod.name, {}};
+    for (const vfs::ModFile& file : mod.tables)
+      table.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
+    table_mods.push_back(std::move(table));
+  }
+  data::set_table_mods(&files, std::move(table_mods));
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);
@@ -449,6 +460,8 @@ void App::init_saves() {
     // The OpenCross page lives next to its save file: "OpenCross" for save.dat, "<name>_OpenCross" for another [Paths] SaveFile.
     const std::string stem = save_path.stem().string();
     oc_saves.set_dir(save_path.parent_path() / (stem == "save" ? std::string("OpenCross") : stem + "_OpenCross"));
+    // Element ids past 511 (a mod's records) go into side files there, for every slot write (save::set_wide_store).
+    save::set_wide_store(oc_saves.dir() / "wide");
     oc_saves.load();
   }
   if (flow_ready && have_save_dat) flow.set_save_dat(&save_dat, &oc_saves);

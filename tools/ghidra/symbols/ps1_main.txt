@@ -812,6 +812,7 @@ btl_anm_step_models = 0x800A3310;  # function: steps the animation sequences of 
 sys_task_list_append = 0x800A3518;  # function: links a task node in at the tail of a task list (tasks run in creation order)
 btl_anm_task_register = 0x800A35EC;  # function: creates an animation task/follower object with a callback
 btl_anm_follower_free = 0x800A3658;  # function: frees a follower object
+btl_anm_tasks_run = 0x800A3784;  # function: runs every active animation task once (fades, moves, trails); the per-frame loop calls it before the model scripts
 sys_model_draw_plain = 0x800A3804;  # function: plain model draw routine
 sys_model_draw_generic = 0x800A39D4;  # function: generic model draw path using shading entries
 sys_model_face_ft3_avg = 0x800A3CE4;  # function: textured triangle face builder, average-z ordering
