@@ -191,6 +191,22 @@ int main() {
     bad.step();
     CHECK(bad.last.failed);
   }
+  // ---- put / put ent / put v: the point, the entity and the party V flag
+  {
+    Sim sim;
+    std::string err;
+    CHECK(sim.route.load(write_tmp("oc_route_put.txt", "0 put 10 -20\n- put ent 4 5 6\n- put v -998 163\n- quit\n"), &err));
+    sim.step();
+    CHECK(sim.last.put && sim.last.put_ent == -1 && !sim.last.put_v && sim.last.put_x == 10.0f && sim.last.put_z == -20.0f);
+    sim.step();
+    CHECK(sim.last.put && sim.last.put_ent == 4 && !sim.last.put_v && sim.last.put_x == 5.0f);
+    sim.step();
+    CHECK(sim.last.put && sim.last.put_ent == -1 && sim.last.put_v && sim.last.put_x == -998.0f && sim.last.put_z == 163.0f);
+    Sim bad;
+    CHECK(bad.route.load(write_tmp("oc_route_put_bad.txt", "0 put v 5\n"), &err));
+    bad.step();
+    CHECK(bad.last.failed);
+  }
   // ---- battle harness: set battle hp (a value, a percentage), set critical, set hit; a bad unit fails the run
   {
     Sim sim;

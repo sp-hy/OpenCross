@@ -1134,12 +1134,15 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     out.put_dist = static_cast<float>(dist);
     return true;
   }
-  // put [ent <n>] <x> <z>
+  // put [ent <n> | v] <x> <z>
   if (op == "put") {
     int x = 0, z = 0, ent = -1;
-    const size_t at = args.size() > 1 && args[1] == "ent" ? 3 : 1;
-    if (args.size() < at + 2 || (at == 3 && !to_int(args[2], ent)) || !to_int(args[at], x) || !to_int(args[at + 1], z)) return bad("put [ent <n>] <x> <z>");
+    const bool in_v = args.size() > 1 && args[1] == "v";
+    const size_t at = args.size() > 1 && args[1] == "ent" ? 3 : in_v ? 2 : 1;
+    if (args.size() < at + 2 || (at == 3 && !to_int(args[2], ent)) || !to_int(args[at], x) || !to_int(args[at + 1], z))
+      return bad("put [ent <n> | v] <x> <z>");
     out.put = true;
+    out.put_v = in_v;
     out.put_ent = ent;
     out.put_x = static_cast<float>(x);
     out.put_z = static_cast<float>(z);

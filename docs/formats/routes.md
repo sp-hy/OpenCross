@@ -152,7 +152,7 @@ All waits take an optional trailing `[timeout]` except `wait <ticks>` and `wait 
 | `set hp <char> <value>` | Write a character's current HP. |
 | `set status <char> <hexbits>` | Write a character's status bits (1 poison, 8 burn, 10 sprain, 20 flu, hex). |
 | `set model <char> <byte>` | Write the model byte of a party member's character record. |
-| `put [ent <n>] <x> <z>` | Place every party entity, or entity `n` only, at a world point (integer coordinates). |
+| `put [ent <n> \| v] <x> <z>` | Place every party entity, or entity `n` only, at a world point (integer coordinates). `put v`: the leader there and the members of slots 1 and 2 in the party V behind it, as on a room entry (128 units, heading +- 0x200 off straight behind, the leader's height and facing; `fieldscript.md` 0E), the follower trails restarting there: the party stands apart instead of on one spot. |
 | `put beside <ent> [dist]` | Place every party entity on the walk mesh beside entity `ent` where it stands now, the leader facing it: a following `tap confirm` talks to it at once (no walk; a patrolling entity is met where it is). The spot is inside the talk range and outside the touch range (`dist` = centre distance instead), on the entity's floor, clear of other entities when it can be, toward where the party stood first. No walkable spot: a warning, the party stays. |
 | `art hd\|original\|modded\|toggle` | Switch the art mode as F6 does, without saving the ini; `toggle` flips between the HD family and original. |
 | `settings <tab>\|close` | Open the settings window on the tab named `tab` (as Esc does, which a route cannot press), or close it. |
