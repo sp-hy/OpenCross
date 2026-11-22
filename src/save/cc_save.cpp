@@ -1,13 +1,13 @@
 #include "save/cc_save.h"
 
-#include "core/log.h"
-
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
+
+#include "core/log.h"
 
 namespace oc::save {
 

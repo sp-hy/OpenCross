@@ -240,7 +240,8 @@ void test_slot() {
     CHECK(back.elements[5].id == 600 && back.elements[5].qty == 3 && back.chars[1].grid[4] == 700 && back.chars[1].grid[5] == 12);
     CHECK(decode_block(encode_block(slot)).tail == slot.tail);
     set_wide_store({});
-    CHECK(decode_block(block).elements[5].id == 0);  // the block alone: as RDE reads it
+    // The block alone, as RDE reads it.
+    CHECK(decode_block(block).elements[5].id == 0);
     std::error_code ec;
     std::filesystem::remove_all(store, ec);
   }

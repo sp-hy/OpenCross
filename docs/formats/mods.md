@@ -73,7 +73,7 @@ Field names (`data/table_rows.cpp`):
 * `scenedat`: `enemy_0` .. `enemy_2`, `count_0` .. `count_2`;
 * `ditem`: `slot_0` .. `slot_3` (u16).
 
-* **Merge** (`data::apply_table_rows`, when the tables load at launch): the table as the game ships it, or as a mod's whole file replaces it, then the enabled mods' rows, lowest priority first, so the first mod in the list wins a field both set. Rows change existing records only: a record past the end of the table is skipped.
+* **Merge** (`data::apply_table_rows`, when the tables load at launch): the table as the game ships it, or as a mod's whole file replaces it, then the enabled mods' rows, lowest priority first, so the first mod in the list wins a field both set. Rows change existing records only: a record past the end of the table is skipped. The rows belong to the game's own tables only: the background room scan behind the Bestiary page's numbers reads the unmodified game.
 * **Conflicts:** a field two mods set to different values is logged (`tables: <table> [<index>] 0x<offset>: '<mod>' wins over '<mod>'`); a line that cannot be read, or a record or field the table does not have, is logged as a warning and skipped.
 * The startup log lists `tables: '<mod>' <table>: N field(s)` per mod and table.
 

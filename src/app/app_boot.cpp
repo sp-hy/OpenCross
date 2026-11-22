@@ -198,7 +198,7 @@ void App::init_vfs() {
       table.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
     table_mods.push_back(std::move(table));
   }
-  data::set_table_mods(std::move(table_mods));
+  data::set_table_mods(&files, std::move(table_mods));
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);

@@ -11,9 +11,13 @@ namespace oc::data {
 
 namespace {
 
-std::vector<TableMod>& mods_storage() {
-  static std::vector<TableMod> mods;
-  return mods;
+struct TableModStore {
+  const vfs::Vfs* files = nullptr;
+  std::vector<TableMod> mods;
+};
+TableModStore& mods_storage() {
+  static TableModStore store;
+  return store;
 }
 
 // Field names built from a prefix and an index (cell_0 .. cell_47) need storage that outlives the tables.
@@ -124,8 +128,7 @@ std::span<const TableField> table_fields(std::string_view table) {
   return {};
 }
 
-void set_table_mods(std::vector<TableMod> mods) { mods_storage() = std::move(mods); }
-const std::vector<TableMod>& table_mods() { return mods_storage(); }
+void set_table_mods(const vfs::Vfs* files, std::vector<TableMod> mods) { mods_storage() = {files, std::move(mods)}; }
 
 std::vector<RowWrite> parse_rows(std::string_view text, std::span<const TableField> fields, std::vector<std::string>* problems) {
   std::vector<RowWrite> out;
@@ -243,8 +246,10 @@ size_t apply_table_rows(const std::vector<TableMod>& mods, std::string_view tabl
   return total;
 }
 
-size_t apply_table_rows(std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record) {
-  return apply_table_rows(table_mods(), table, count, record);
+size_t apply_table_rows(const vfs::Vfs& files, std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record) {
+  const TableModStore& store = mods_storage();
+  if (store.files != &files || store.mods.empty()) return 0;
+  return apply_table_rows(store.mods, table, count, record);
 }
 
 }  // namespace oc::data

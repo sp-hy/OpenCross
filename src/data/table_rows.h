@@ -3,7 +3,7 @@
 // whole file, so several mods that each change a few records stack. The table is named after the file it changes (monster,
 // pgdat, char, char20, waa, menu_waa, scenedat, ditem). Rows apply over the table as the game files (or a mod's whole-file
 // replacement) give it, lowest priority first, so the first mod in the list wins a field; a field two mods set differently is
-// logged. Format: docs/formats/mods.md, section 1.3.
+// logged.
 #include <functional>
 #include <map>
 #include <optional>
@@ -13,6 +13,10 @@
 #include <vector>
 
 #include "core/types.h"
+
+namespace oc::vfs {
+class Vfs;
+}
 
 namespace oc::data {
 
@@ -31,9 +35,9 @@ struct TableMod {
   std::string name;
   std::map<std::string, std::function<std::optional<Bytes>()>> files;
 };
-// Set once at launch (priority order, first wins), before the tables are loaded.
-void set_table_mods(std::vector<TableMod> mods);
-const std::vector<TableMod>& table_mods();
+// Set once at launch (priority order, first wins), before the tables are loaded. The rows belong to the tables read through `files`
+// only: tables loaded through another VFS (the background scan's unmodified game) keep the files as they are.
+void set_table_mods(const vfs::Vfs* files, std::vector<TableMod> mods);
 
 // One field write parsed from a row file.
 struct RowWrite {
@@ -49,8 +53,9 @@ struct RowWrite {
 std::vector<RowWrite> parse_rows(std::string_view text, std::span<const TableField> fields, std::vector<std::string>* problems);
 
 // Applies the rows of every table mod for `table` to records 0..count-1, lowest priority first; `record(i)` gives record i's bytes.
-// A row for a record past `count` or a field past the record's end is skipped and logged. Returns the number of fields written.
-size_t apply_table_rows(std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record);
+// A row for a record past `count` or a field past the record's end is skipped and logged. Returns the number of fields written; none
+// when `files` is not the VFS the mods were set for.
+size_t apply_table_rows(const vfs::Vfs& files, std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record);
 // The same for an explicit mod list (tests).
 size_t apply_table_rows(const std::vector<TableMod>& mods, std::string_view table, size_t count,
                         const std::function<std::span<u8>(size_t)>& record, std::vector<std::string>* log_lines = nullptr);

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "data/table_rows.h"
+#include "vfs/vfs.h"
 
 using namespace oc;
 
@@ -73,13 +74,16 @@ int main() {
     CHECK(skipped);
   }
 
-  // The global list (set at launch) is what apply_table_rows reads without an explicit list.
+  // The global list (set at launch) is what apply_table_rows reads without an explicit list, for the VFS it was set for only.
   {
-    data::set_table_mods({mod_with("Only", "ditem", "[0]\nslot_3=0x1FF\n")});
+    const vfs::Vfs game, plain;
+    data::set_table_mods(&game, {mod_with("Only", "ditem", "[0]\nslot_3=0x1FF\n")});
     std::array<u8, 8> row{};
-    data::apply_table_rows("ditem", 1, [&](size_t) { return std::span<u8>(row); });
+    CHECK(data::apply_table_rows(plain, "ditem", 1, [&](size_t) { return std::span<u8>(row); }) == 0);
+    CHECK(row[6] == 0 && row[7] == 0);
+    data::apply_table_rows(game, "ditem", 1, [&](size_t) { return std::span<u8>(row); });
     CHECK(row[6] == 0xFF && row[7] == 0x01);
-    data::set_table_mods({});
+    data::set_table_mods(nullptr, {});
   }
 
   if (failures == 0) std::printf("table_rows: OK\n");
