@@ -460,6 +460,8 @@ void App::init_saves() {
     // The OpenCross page lives next to its save file: "OpenCross" for save.dat, "<name>_OpenCross" for another [Paths] SaveFile.
     const std::string stem = save_path.stem().string();
     oc_saves.set_dir(save_path.parent_path() / (stem == "save" ? std::string("OpenCross") : stem + "_OpenCross"));
+    // Element ids past 511 (a mod's records) go into side files there, for every slot write (save::set_wide_store).
+    save::set_wide_store(oc_saves.dir() / "wide");
     oc_saves.load();
   }
   if (flow_ready && have_save_dat) flow.set_save_dat(&save_dat, &oc_saves);

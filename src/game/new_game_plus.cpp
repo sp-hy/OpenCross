@@ -127,7 +127,7 @@ void fresh_record(const data::GameTables* tables, int id, save::SaveChar& out) {
   out.armour = file_rec.armour();
   for (int i = 0; i < 3; ++i) out.accessory[static_cast<size_t>(i)] = file_rec.accessory(i);
   out.model_id = file_rec.model();
-  for (int k = 0; k < 48; ++k) out.grid[static_cast<size_t>(k)] = file_rec.cell_listed(k) & 0x1FF;
+  for (int k = 0; k < 48; ++k) out.grid[static_cast<size_t>(k)] = file_rec.cell_listed(k) & 0x3FFF;
   out.unlocked = newgame::kInitialUnlocks;
 }
 

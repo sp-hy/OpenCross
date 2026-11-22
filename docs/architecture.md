@@ -482,7 +482,7 @@ All in `src/audio/`; output is 48 kHz stereo float.
 
 `src/save/`; format: `docs/formats/save.md`.
 
-- `cc_save.*`: `SaveSlot` (the 0x2000-byte slot block) with `decode_block` / `encode_block` (exact inverse; unknown fields survive). `SaveDat` wraps `save.dat`, a ZIP of `memcard1.mcr`, `memcard2.mcr`, `rd_save.dat`, `achievement.dat`, `ext_save.dat` (`load`, `save` via temp file and rename, `create_empty`, `ensure_cards`, `card(n)`).
+- `cc_save.*`: `SaveSlot` (the 0x2000-byte slot block) with `decode_block` / `encode_block` (exact inverse; unknown fields survive; element ids past 511 go through the slot's side file in the store `set_wide_store` names, `formats/save.md` section 16). `SaveDat` wraps `save.dat`, a ZIP of `memcard1.mcr`, `memcard2.mcr`, `rd_save.dat`, `achievement.dat`, `ext_save.dat` (`load`, `save` via temp file and rename, `create_empty`, `ensure_cards`, `card(n)`).
 - `memcard.*`: the 128 KB PS1 card image. `encrypted_zip.*`, `crypto.*`: WinZip AE-2 AES-256 reader and writer with local AES, SHA-1, HMAC, PBKDF2.
 - `ext_save.*`: per-slot language, battle counter, 44 custom names (`ExtHost` is the live source). `oc_saves.*`: the OpenCross page, an auto-save plus 100 files in an `OpenCross` folder next to `save.dat`. `collection.*`: the collection file in the same folder (`docs/formats/save.md` section 13.1), what the record pages read. `dialogue_log.*`: the dialogue log file in the same folder (section 13.2).
 - `game::Autosave` decides when to write on a location change; `App::advance` writes card 1 slot 0 and/or the OpenCross page.
@@ -514,6 +514,7 @@ All in `src/audio/`; output is 48 kHz stereo float.
 | `<save dir>\OpenCross\auto.ocsav` and `001.ocsav` to `100.ocsav` | the OpenCross save page (`<name>_OpenCross` for another `[Paths] SaveFile`) |
 | `<save dir>\OpenCross\dialogue_log.txt` | the dialogue log (`[Game] OpenCrossMenu`; never written by a `--config` run): an entry appended per finished message window and loaded game, rewritten with the newest 1,000 once it holds 2,000 and by the log window's Clear log; a file that cannot be read is renamed `dialogue_log.txt.bad` |
 | `<save dir>\OpenCross\collection.dat` | the record pages' collection (`[Game] OpenCrossMenu`; never written by a `--config` run): rewritten when a field battle, a load or a save adds to it and by the Chronicle's Reset; a file that cannot be read is renamed `collection.dat.bad` |
+| `<save dir>\OpenCross\wide\<key>.ocx` | a slot's side file (element ids past 511), written with any slot that has such ids, card or page |
 | `<GameDir>\dump\textures\...` | texture dumps (Mods tab, `occ dump-textures`) |
 | `<GameDir>\dump\models\...` | glTF model export, `classic\` and `hd\` (Mods tab, `occ export-models`) |
 | `<GameDir>\mods\` | created empty at boot if missing |

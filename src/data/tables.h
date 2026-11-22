@@ -91,6 +91,16 @@ struct ElemRec {
   }
 };
 
+// Element records past vanilla's 527 are a mod's own: their kind byte (+0x01, bit 1 = tech) says element or tech. Vanilla ids keep
+// their blocks (1..0x7F elements and consumables, 0x80.. techs, enemy actions and specials), whatever their kind.
+inline constexpr int kVanillaElemRecs = 527;
+// Field-script item ids (BB / B4 / D5, ItemWork text) from here name element `id - kScriptElementBase`, any record: the vanilla
+// range 0x200 + id ends at 511 where the key items start (0x401..). Operands carry 15 bits, so ids up to 0x6FFF.
+inline constexpr int kScriptElementBase = 0x1000;
+inline bool mod_element(const std::vector<ElemRec>& elements, int id) {
+  return id >= kVanillaElemRecs && id < static_cast<int>(elements.size()) && (elements[static_cast<size_t>(id)].raw[1] & 0x02) == 0;
+}
+
 // scenedat.bin record. boss() marks a star-up battle.
 struct SceneRec {
   std::array<u8, 28> raw{};

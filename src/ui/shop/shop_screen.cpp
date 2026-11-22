@@ -1311,8 +1311,9 @@ struct ShopScreen::Impl {
     count(0xA0, allocated);
     count(0xB2, stock);
     // description: one entry, sysmes 0x1A row id*3+1 at (0x13E, 0x72), style 0x7B (row id*3+2 is never drawn).
-    // Consumables (0x61..0x7D, not JP) use 0xBA = 0x7B plus the "(Consum.)" label at canvas (791, Y) with its own scale.
-    const bool consum = id >= 0x61 && id <= 0x7D && lang_index() != 5;
+    // Consumables (0x61..0x7D, or a mod's element record past the vanilla ones with a consumable stack; not JP) use 0xBA = 0x7B plus the
+    // "(Consum.)" label at canvas (791, Y) with its own scale.
+    const bool consum = ((id >= 0x61 && id <= 0x7D) || (id >= data::kVanillaElemRecs && rules && rules->el_stack(id))) && lang_index() != 5;
     if (!texs.hd()) disc_description(element_description(id), 0x13E);
     else if (const std::string description = element_description(id); !description.empty())
       RT(consum ? 0xBA : 0x7B, 0x13E, 0x72, description);

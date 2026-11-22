@@ -327,13 +327,17 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const 
 }
 
 // Width of a substituted string, `table` numbered as in the JP executable: table 0 ids 0x200.. are elements / techs (table 23),
-// 0x400.. key items (24); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
+// 0x400.. key items (24), from
+// data::kScriptElementBase elements again (table 23; a mod's records past the table measure 0); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
 // (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's; 27 the button
 // names; kGrammarTables + n grammar form n of speaker `id`. The table is looked up in the build's own string tables (the USA build
 // numbers them differently and reads a grammar form by the speaker's dialect column). Inside, glyphs count as in a message, a nested
 // name (code 8) adds its width, and the first other control code ends it.
 int FieldWorld::ps1_string_width(int table, int id) const {
-  if (table == 0 && id >= 0x200) {
+  if (table == 0 && id >= data::kScriptElementBase) {
+    table = 23;
+    id -= data::kScriptElementBase;
+  } else if (table == 0 && id >= 0x200) {
     table = id < 0x400 ? 23 : 24;
     id -= id < 0x400 ? 0x200 : 0x400;
   }

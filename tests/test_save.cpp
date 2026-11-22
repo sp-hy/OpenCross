@@ -223,6 +223,27 @@ void test_slot() {
   wide.chars[2].weapon = 600;
   const SaveSlot narrowed = decode_block(encode_block(wide));
   CHECK(narrowed.items[3].qty == 127 && narrowed.chars[2].max_hp == 1023 && narrowed.chars[2].weapon == 511);
+  // Element ids past 511: the stream drops them; with a store they come back from the side file.
+  {
+    SaveSlot mod = slot;
+    mod.elements[5] = {600, 3};
+    mod.chars[1].grid[4] = 0x4000 | 700;
+    mod.chars[1].grid[5] = 0x8000 | 12;
+    set_wide_store({});
+    const SaveSlot dropped = decode_block(encode_block(mod));
+    CHECK(dropped.elements[5].id == 0 && dropped.chars[1].grid[4] == 0 && dropped.chars[1].grid[5] == 12);
+    CHECK(dropped.tail == slot.tail);
+    const std::filesystem::path store = std::filesystem::temp_directory_path() / "oc_test_wide";
+    set_wide_store(store);
+    const Bytes block = encode_block(mod);
+    const SaveSlot back = decode_block(block);
+    CHECK(back.elements[5].id == 600 && back.elements[5].qty == 3 && back.chars[1].grid[4] == 700 && back.chars[1].grid[5] == 12);
+    CHECK(decode_block(encode_block(slot)).tail == slot.tail);
+    set_wide_store({});
+    CHECK(decode_block(block).elements[5].id == 0);  // the block alone: as RDE reads it
+    std::error_code ec;
+    std::filesystem::remove_all(store, ec);
+  }
   // The summary's faces follow the model byte up to 0x31: Serge as Lynx (0x31) shows Lynx, Glenn with two swords (0x32) his own face.
   SaveSlot forms = slot;
   forms.set_party({0, 0x13, 0xFF});

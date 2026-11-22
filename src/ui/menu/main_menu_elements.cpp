@@ -640,7 +640,7 @@ void MainMenu::Impl::build_grid() {
     const std::u32string nm = element_name(id);
     const float rel = fit_rel(nm, 124, 0.9f);
     TP(46.0f + (128.0f - twp(nm, rel)) * 0.5f, yt, nm, col, rel);
-    if (id < 0x80) {
+    if (rules->is_element(id)) {
       const int level_delta = shown_row - (rules->el_level(id) - 1);
       if (level_delta != 0)
         TP(46.0f + 128.0f + 6.0f, yt, utf32(std::string(level_delta > 0 ? "+" : "-") + std::to_string(std::abs(level_delta))), col, 0.75f);
@@ -733,7 +733,7 @@ void MainMenu::Impl::build_grid() {
     grid_help(character);
   } else {
     const int id = focus == 1 ? gs->cell_element(character, cell_row, cell_col) : list_element(list_cur);
-    if (id > 0 && id < 0x80) {
+    if (rules->is_element(id)) {
       // The JP disc puts the description 4 pixels higher.
       element_info(id, 260, 344, font_build(face_gn, import::Ps1Font::Build::Console) ? 380.0f : 384.0f, 19.5f);
       if (rules->el_innate_only(id)) {
