@@ -86,6 +86,9 @@ struct Mod {
   // text\<member>: the mod's own rows of a lang.dat text member (target = the member name, lower case), merged over the member
   // (import::TextMod) instead of replacing it.
   std::vector<ModFile> text;
+  // tables\<table>.txt: the mod's field changes to one battle / menu table's records (target = the table name, lower case, no
+  // extension), applied over the table (data::TableMod) instead of replacing it.
+  std::vector<ModFile> tables;
   std::vector<std::string> added;
   std::vector<std::string> unmatched;
   std::vector<std::string> ambiguous;
