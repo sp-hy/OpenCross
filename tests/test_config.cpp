@@ -249,6 +249,14 @@ int main() {
     std::filesystem::remove(blank);
     CHECK(blank_text.str().find("Source=auto\nDisc1=\nDisc2=\nDiscDir=\n") != std::string::npos);
   }
+  // [Debug] SkipBattles: a result list in battle order (0..2), spaces and bad items skipped; -1 or empty = the battles are fought.
+  {
+    CHECK(parse_skip_battles("0,1, 2") == std::vector<int>({0, 1, 2}));
+    CHECK(parse_skip_battles("2") == std::vector<int>({2}));
+    CHECK(parse_skip_battles("-1").empty() && parse_skip_battles("").empty() && parse_skip_battles("x,7").empty());
+    CHECK(load_text("[Debug]\nSkipBattles=1,0\n").debug_skip_battles == std::vector<int>({1, 0}));
+    CHECK(load_text("").debug_skip_battles.empty());
+  }
   if (failures) return 1;
   std::printf("test_config: ok\n");
   return 0;

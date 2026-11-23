@@ -439,6 +439,9 @@ bool Config::load(const std::filesystem::path& file) {
   debug_battle_intro_live = parse_bool(ini.get("Debug", "BattleIntroLive"), debug_battle_intro_live);
   debug_hold_scripts = parse_bool(ini.get("Debug", "HoldScripts"), debug_hold_scripts);
   debug_force_branches = ini.get("Debug", "ForceBranches", debug_force_branches);
+  if (const std::string skip = ini.get("Debug", "SkipBattles"); !skip.empty()) debug_skip_battles = parse_skip_battles(skip);
+  debug_skip_movies = parse_bool(ini.get("Debug", "SkipMovies"), debug_skip_movies);
+  debug_skip_menus = parse_bool(ini.get("Debug", "SkipMenus"), debug_skip_menus);
   debug_auto_teleport = parse_bool(ini.get("Debug", "AutoTeleport"), debug_auto_teleport);
   debug_sweep_ticks = parse_int(ini.get("Debug", "SweepTicks"), debug_sweep_ticks);
   debug_sweep_talk = parse_int(ini.get("Debug", "SweepTalk"), debug_sweep_talk);
@@ -680,6 +683,18 @@ std::string detect_os_language() {
     SDL_free(locales);
   }
   return language_from_locales(codes);
+}
+
+std::vector<int> parse_skip_battles(const std::string& text) {
+  std::vector<int> out;
+  std::string_view rest = text;
+  while (!rest.empty()) {
+    const size_t comma = rest.find(',');
+    const std::string item(trim(rest.substr(0, comma)));
+    if (const int value = parse_int(item, -1); value >= 0 && value <= 2) out.push_back(value);
+    rest = comma == std::string_view::npos ? std::string_view() : rest.substr(comma + 1);
+  }
+  return out;
 }
 
 }  // namespace oc::platform

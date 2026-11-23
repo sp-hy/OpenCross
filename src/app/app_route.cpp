@@ -160,9 +160,9 @@ void App::route_request(const game::RouteOut& out) {
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
   else if (rk == "party_add") { world.party_add(out.request_arg); world.state_edited(); }
-  // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::start_script; class 3 = a talk's): an
-  // editor runs any one script of a room, not only the ones a talk or a touch starts
-  else if (rk == "script") world.vm().start_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
+  // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::request_script; class 3 = a talk's): an
+  // editor runs any one script of a room, not only the ones a talk or a touch starts; one live already is the asked-for one
+  else if (rk == "script") world.vm().request_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
   else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
