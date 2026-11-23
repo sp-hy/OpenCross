@@ -564,9 +564,11 @@ void BattleView::add_plate(int plate_colour, float x, float y, float w, float h,
   ops_.push_back(std::move(op));
 }
 
-void BattleView::add_name_plate(bool used, int plate_colour, int frame, float x, float y) {
+void BattleView::add_name_plate(bool used, int plate_colour, int frame, float x, float y, u8 opacity) {
   if (ps1_hud_) add_sheet((used ? 0x88 : 0x18) + 4 * plate_colour, frame, x, y);
-  else add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + plate_colour * 10 + frame - 1)], x * kPs1Px, y * kRowScale, 120 * kPs1Px, 16 * kRowScale);
+  else
+    add_img(eplate_[static_cast<size_t>((used ? 70 : 0) + plate_colour * 10 + frame - 1)], x * kPs1Px, y * kRowScale, 120 * kPs1Px, 16 * kRowScale, 0, 0, 1, 1,
+            col(255, 255, 255, opacity));
 }
 
 void BattleView::add_bar(float x, float y, float w, float h, float frac, u32 fill) {

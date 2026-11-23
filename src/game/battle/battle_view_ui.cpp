@@ -1886,13 +1886,33 @@ void BattleView::build_element_ui() {
     const float row_y = 60.0f + 15.0f * static_cast<float>(slot);
     // The plate is the battle_08_<T>_<n>.png sprite (used cells: battle_76; 120 x 16 PS1 px at (8, row_y)): the element colour (+ 7 when the cell
     // is greyed) names the sprite set, the frame n: the selected plate pulses 1, 2, 3, 2 every 4 ticks, the others stay on 3.
-    // Every colour (0xFC) uses the rainbow set.
+    // Every colour (0xFC) uses the rainbow set. The sprite plates cross-fade: each pulse frame is the keyframe of the middle of its
+    // 4 ticks, and between two the next one is drawn over the current one by the share of the way there. The white set's frames 2 and 3
+    // are both near white, so its 1, 2, 3, 2 cycle reads as a blink; it glows instead from frame 1 to frame 2 and back, frame 2 drawn
+    // over frame 1 with an opacity that rises and falls linearly over the same 16 ticks.
     const int pc = plate_colour_of(elem.colour_bit());
     if (pc >= 0) {
       static const int kPulse[4] = {1, 2, 3, 2};
+      constexpr int kWhitePlate = 1;
       // While sliding every plate (the selected one too) takes the slide table's frame at the step just taken, 4..10 = the unfolding frames.
       const int frame = sel ? kPulse[(tick_count_ >> 2) & 3] : elem_state_ == 1 || elem_state_ == 3 ? kSlideFrame[elem_idx_] : 3;
-      add_name_plate(used, pc, frame, static_cast<float>(elem_x_), row_y);
+      if (sel && !ps1_hud_) {
+        const float pulse = (static_cast<float>(tick_count_) + tick_alpha_) / 4.0f - 0.5f;
+        const float step = std::floor(pulse);
+        if (pc == kWhitePlate) {
+          const float cycle = pulse - 4.0f * std::floor(pulse / 4.0f);
+          add_name_plate(used, pc, 1, static_cast<float>(elem_x_), row_y);
+          const u8 glow = static_cast<u8>(std::lround((1.0f - std::fabs(cycle - 2.0f) / 2.0f) * 255.0f));
+          if (glow > 0) add_name_plate(used, pc, 2, static_cast<float>(elem_x_), row_y, glow);
+        } else {
+          const int from = static_cast<int>(static_cast<s64>(step) & 3);
+          add_name_plate(used, pc, kPulse[from], static_cast<float>(elem_x_), row_y);
+          const u8 share = static_cast<u8>(std::lround((pulse - step) * 255.0f));
+          if (share > 0) add_name_plate(used, pc, kPulse[(from + 1) & 3], static_cast<float>(elem_x_), row_y, share);
+        }
+      } else {
+        add_name_plate(used, pc, frame, static_cast<float>(elem_x_), row_y);
+      }
     }
     if (!rest) continue;
     add_plate_symbol(pc, static_cast<float>(elem_x_), row_y, used ? 90 : 255);

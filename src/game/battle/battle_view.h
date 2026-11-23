@@ -1057,7 +1057,7 @@ class BattleView {
   void add_plate(int plate_colour, float x, float y, float w, float h, u32 tint = 0xFFFFFFFFu);
   // An element name plate (120 x 16 PS1 px from PS1 (x, y)): colour set 0..6 (green white black red yellow blue, all colours), the
   // greyed set when `used`; frames 1..3 steady, 4..10 the slide.
-  void add_name_plate(bool used, int plate_colour, int frame, float x, float y);
+  void add_name_plate(bool used, int plate_colour, int frame, float x, float y, u8 opacity = 255);
   struct Tex;
   void add_img(const Tex& tex, float x, float y, float w, float h, float u0 = 0, float v0 = 0, float u1 = 1, float v1 = 1, u32 tint = 0xFFFFFFFFu, int blend = 0);
   // The red diamond menu cursor with its top-left at canvas (x, y): the 9 x 8 diamond and the 7 x 8 turned one alternate every 16 ticks.
