@@ -173,6 +173,19 @@ bool FieldWorld::in_box(int i, float px, float pz, float margin) const {
   return std::fabs(lx) <= hw && std::fabs(lz) <= hh;
 }
 
+bool FieldWorld::takes_talk(int ent) const {
+  if (ent <= 0 || ent >= static_cast<int>(ents_.size())) return false;
+  return !(vm_.entity(ent).flags38 & (0x400012 | script::flag38::kNoAction));
+}
+
+bool FieldWorld::bring_in(int ent) {
+  if (ent <= 0 || ent >= static_cast<int>(ents_.size())) return false;
+  script::Entity& script_ent = vm_.entity(ent);
+  if (!(script_ent.flags38 & script::flag38::kInactive)) return false;
+  script_ent.flags38 &= ~(script::flag38::kInactive | 0x20u);
+  return true;
+}
+
 bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_z) {
   const int player = player_entity();
   const WalkMesh& walk = view_.walk();
@@ -213,7 +226,8 @@ bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_
   // walkable (+1: not across a counter or a wall gap). The first direction with the best score wins.
   // The floor: step_triggers' height test (Y down) takes a leader at py with target.y - h_target <= py <= target.y + h_leader;
   // an entity raised above the walk mesh (a figure on a pedestal) is talked to from the floor below it.
-  const float y_lo = target.y - ent_height(ent), y_hi = target.y + ent_height(player), y_hint = (y_lo + y_hi) * 0.5f;
+  // 2 units inside the trigger pass's height test: the leader's height is kept whole, so a floor at the very edge can fail it by one.
+  const float y_lo = target.y - ent_height(ent) + 2.0f, y_hi = target.y + ent_height(player) - 2.0f, y_hint = (y_lo + y_hi) * 0.5f;
   auto floor_ok = [&](int tri, float px, float pz) {
     if (tri < 0) return false;
     const float py = walk.height(tri, px, pz);
@@ -221,9 +235,14 @@ bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_
   };
   int best = -1;
   float bx = 0, bz = 0, by = 0;
-  for (int k = 0; k < 16 && best < 6; ++k) {
-    const float angle = home + static_cast<float>((k + 1) / 2) * (k % 2 ? 1.0f : -1.0f) * (2.0f * kPi / 16.0f);
-    const float centre = reach(angle);
+  // The band's middle first; when no direction has walkable ground there (an entity behind a counter with a large talk radius), the
+  // rest of the band from just outside the touch range to the talk edge, nearest first.
+  const int passes = dist > 0 || box ? 1 : 1 + static_cast<int>((kTalkMargin - kTouchMargin) / 4.0f);
+  for (int k = 0; k < 16 * passes && best < 6; ++k) {
+    if (k >= 16 && k % 16 == 0 && best >= 0) break;
+    const int dir = k % 16;
+    const float angle = home + static_cast<float>((dir + 1) / 2) * (dir % 2 ? 1.0f : -1.0f) * (2.0f * kPi / 16.0f);
+    const float centre = k < 16 ? reach(angle) : rp + ent_radius(ent) + kTouchMargin + 2.0f + 4.0f * static_cast<float>(k / 16 - 1);
     const float px = target.x + centre * std::cos(angle), pz = target.z + centre * std::sin(angle);
     const int tri = walk.find_triangle(px, pz, y_hint);
     if (!floor_ok(tri, px, pz)) continue;
