@@ -1419,6 +1419,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     if (phase_ == 0) {
       out.request = args[1];
       out.request_arg = out.request_arg2 = out.request_arg3 = 0;
+      out.request_text = args.size() > 2 ? args[2] : std::string();
       if (args.size() > 2) to_int(args[2], out.request_arg);
       if (args.size() > 3) to_int(args[3], out.request_arg2);
       if (args.size() > 4) to_int(args[4], out.request_arg3);

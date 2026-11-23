@@ -3,11 +3,14 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <optional>
 
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/game_session.h"
 #include "script/field_host.h"
 
@@ -160,8 +163,17 @@ void App::route_request(const game::RouteOut& out) {
   const std::string& rk = out.request;
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
-  // The character id as a script of the running room names it (a mod's own id through the room's owner).
-  else if (rk == "party_add") { world.party_add(world.script_character(out.request_arg)); world.state_edited(); }
+  // The character id as a script of the running room names it (a mod's own id through the room's owner), or a character mods add by
+  // its name (any room).
+  else if (rk == "party_add") {
+    const std::string& text = out.request_text;
+    const bool named = !text.empty() && !std::isdigit(static_cast<unsigned char>(text[0])) && text[0] != '-';
+    const std::optional<size_t> by_name = named ? data::table_rows().id_of("char", text) : std::nullopt;
+    const int character = named ? (by_name ? static_cast<int>(*by_name) : -1) : world.script_character(out.request_arg);
+    if (!world.party_add(character))
+      log::warn("route: party_add {}: not added (no such character here, already in the party or the party is full)", text);
+    world.state_edited();
+  }
   // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::request_script; class 3 = a talk's): an
   // editor runs any one script of a room, not only the ones a talk or a touch starts; one live already is the asked-for one
   else if (rk == "script") world.vm().request_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
