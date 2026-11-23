@@ -20,6 +20,9 @@ using namespace field_internal;
 
 namespace {
 
+// Ticks of the field's fade from black after a movie with the fade flag that stays in the room.
+constexpr int kMovieFadeIn = 0x60;
+
 // Footstep sound of floor type `type` (0x11 dry / 0x12 water registers) for walker `who` (the party member's character id, or the
 // value a script set), `left` = foot event bit 0. Values >= 0x100 are effect00 program ids & 0xFF, smaller ones room frames.
 int footstep_sound(int type, int who, int left) {
@@ -393,6 +396,13 @@ void FieldWorld::movie_finished() {
   movie_state_ = MovieState::None;
   if (sequences_ && !movie_sequence_.empty()) sequences_->stop(movie_sequence_);
   movie_sequence_.clear();
+  // A movie with the fade flag that doesn't jump to another room hands the field back black and fades it in over kMovieFadeIn ticks,
+  // whatever fade the script set before it: a scene that sets black before such a movie need not fade in itself. Without the flag
+  // the field keeps the fade the script set.
+  if (!movie_jump_.active && movie_req_.fade) {
+    fade(1, 0);
+    fade(0, kMovieFadeIn);
+  }
   start_movie_jump();
 }
 
