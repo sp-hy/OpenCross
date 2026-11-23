@@ -105,6 +105,7 @@ bool BattleView::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Spri
       log::warn("battle: HD panel PNGs missing, HD mode uses plain boxes");
     for (size_t i = 0; i < plates_.size(); ++i)
       if (!load_tex(plates_[i], std::format("hd/menu/menuelem/menuelem_{}.png", i + 1).c_str())) log::warn("battle: element plate {} missing", i + 1);
+    load_ps1_sheets(vfs);
     load_hud_art(vfs);
   }
 
@@ -222,6 +223,8 @@ void BattleView::set_art_mode(bool hd, bool force) {
   // pack playing now keeps its copy to its end (the pseudo-actor points into it).
   for (auto it = fx_gpu_.begin(); it != fx_gpu_.end();)
     it = it->second && it->second->art_dependent && !(fx_pack_ && fx_pack_->eid == it->first) ? fx_gpu_.erase(it) : std::next(it);
+  // A prefetch under way uploaded the old art's sheets: the pack builds again at its hand-over.
+  fx_prefetch_.reset();
   std::vector<std::string> stems;
   for (const auto& [stem, handle] : model_cache_.models)
     if (handle) stems.push_back(stem);

@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <format>
 #include <limits>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -1650,10 +1651,11 @@ bool Battle::weapon_strike(int actor, int target, int strength, int aim, bool mi
   Unit& attacker = units_[static_cast<size_t>(actor)];
   Unit& target_unit = units_[static_cast<size_t>(target)];
   const int chance = hit_chance_for(actor, target, strength, aim >= 0);
-  // Dev: every PC weapon attack misses.
-  static const bool force_miss = std::getenv("OC_BATTLE_MISS") != nullptr;
+  // Dev: every PC weapon attack misses; "all": every weapon attack, the enemies' too.
+  static const char* const force_miss = std::getenv("OC_BATTLE_MISS");
+  static const bool force_miss_all = force_miss && std::string_view(force_miss) == "all";
   const bool rolled = roll_hit(rng_, chance);
-  const bool hit = (force_hit_ >= 0 ? force_hit_ == 1 : rolled) && !missed && !(force_miss && attacker.pc);
+  const bool hit = (force_hit_ >= 0 ? force_hit_ == 1 : rolled) && !missed && !(force_miss && (attacker.pc || force_miss_all));
   static const char* kStrName[] = {"weak", "medium", "heavy"};
   ActionEvent ev;
   ev.kind = ActionEvent::Kind::Weapon;

@@ -815,10 +815,12 @@ class BattleView {
   // element effects (battle_view_fx*.cpp)
   // start_release: starts the pack of the current element; false = generic path.
   bool fx_begin();
-  // The effect-pack id of the current action's element (-1 = none), and a build of that pack's GPU resources ahead of time, during the
-  // charge, so the charge -> pack hand-over reuses the cache instead of loading and baking the summon model in one frame mid-cast.
+  // The effect-pack id of the current action's element (-1 = none). fx_prefetch_pack opens the build of that pack's GPU resources at the
+  // charge start and fx_prefetch_step advances it one bounded step per video frame, so the charge -> pack hand-over finds it in the cache
+  // instead of loading, baking and uploading the pack (a summon's creature model, a level-6 element's meshes) in one frame.
   int fx_action_eid() const;
   void fx_prefetch_pack();
+  void fx_prefetch_step();
   std::vector<int> cast_elements_;
   std::vector<std::vector<battle::ActionEvent>> begun_actions_;
   // Cast start: cast pose, chant, the colour's charge pack "ch0N".
@@ -935,6 +937,19 @@ class BattleView {
     FxGpu& operator=(const FxGpu&) = delete;
   };
   FxGpu* fx_gpu_for(const std::shared_ptr<const FxPack>& pack);
+  // One pack's FxGpu built in steps: the pack read, the sprite upload, the mesh bake, the mesh textures (in slices of the budget), the mesh
+  // buffers, the HD mesh index, the models and the overlay's atlases. fx_gpu_step runs one step (true = finished: the result is in fx_gpu_,
+  // or `failed`).
+  struct FxGpuBuild {
+    enum class Step { Pack, Sprites, Meshes, MeshTextures, MeshBuffers, HdIndex, Models, OverlayAtlases, Done };
+    int eid = -1;
+    std::shared_ptr<const FxPack> pack;
+    std::unique_ptr<FxGpu> gpu;
+    render::StageCreateJob mesh_job;
+    Step step = Step::Pack;
+    bool failed = false;
+  };
+  bool fx_gpu_step(FxGpuBuild& build, double budget_ms);
   // battle.prd's meshes (once per scene).
   FxGpu* fx_gpu_resident(const FxResident* resident);
   // The mods' tile replacements of a mesh asset (render/stage_tiles.h): applied before its GPU copy is made (`fresh`), and again, with the object
@@ -947,9 +962,10 @@ class BattleView {
   // variant: `out_mdl` = mdl with the cdrom2 S1, `out_vram` = vram with the cdrom2 image + CLUT written at the same place. Returns the stem.
   std::string fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
                                 import::Vram& out_vram);
-  // FNV-1a of the disc S1 -> battle model stems with a cdrom2 .obj.
+  // FNV-1a of the disc S1 -> battle model stems with a cdrom2 .obj, built once per session by fx_hd_mesh_index.
   std::unordered_map<u64, std::vector<std::string>> fx_hd_mesh_index_;
   bool fx_hd_mesh_indexed_ = false;
+  void fx_hd_mesh_index();
   void fx_draw_models(const render::Frame& frame, const render::Letterbox& lb, FxGpu& gpu,
                       const std::vector<effects::EmitterSystem::MeshInstance>& inst);
   // A PC's weapon mesh is registered under the two-digit character number ("02" = Guile, "19" = Glenn, "37" = Sneff, "39" = Doc: the names
@@ -1029,7 +1045,9 @@ class BattleView {
   // The PS1 battle window: black fill, 1 px white line, chamfered top-right / bottom-left.
   void add_box(float x, float y, float w, float h, bool fill = true);
   void add_bar(float x, float y, float w, float h, float frac, u32 fill);
-  void add_plate(int colour_index, float x, float y, float w, float h, u32 tint = 0xFFFFFFFFu);
+  // A grid minimap plate at canvas (x, y): colour set 0..6 as add_name_plate, anything else the empty plate. HD art draws menuelem_N
+  // stretched to w x h, Classic art and disc mode the PS1 sheet's plate at its own size.
+  void add_plate(int plate_colour, float x, float y, float w, float h, u32 tint = 0xFFFFFFFFu);
   // An element name plate (120 x 16 PS1 px from PS1 (x, y)): colour set 0..6 (green white black red yellow blue, all colours), the
   // greyed set when `used`; frames 1..3 steady, 4..10 the slide.
   void add_name_plate(bool used, int plate_colour, int frame, float x, float y);
@@ -1061,6 +1079,9 @@ class BattleView {
   void load_hud_art(const vfs::Vfs& vfs);
   // battle_view_ps1hud.cpp: disc mode (no RDE `hd` archive) draws the PS1's own battle HUD sheets at the PS1's coordinates.
   void load_ps1_hud(const vfs::Vfs& vfs);
+  // Decodes battle.prd's HUD sheets into sheet_frames_ and the two atlases (both data sources; RDE's Classic art draws the element grid
+  // minimap from them).
+  std::optional<import::HudArt> load_ps1_sheets(const vfs::Vfs& vfs);
   // Frame `frame` (1-based) of HUD sheet `type` (import::kHudSheetNames, type = 4 x index) with its origin at PS1 (x, y). `colour` = PS1
   // colour word (0x80 per channel = unchanged); `mode` 0 opaque, 1..4 the semi-transparent texels blended as (B + F) / 2, B + F, B - F,
   // B + F / 4, the others opaque.
@@ -1450,10 +1471,11 @@ class BattleView {
   Tex eplate_item_;
   // Element-list name plates battle_08_<T>_<n> / battle_76_<T>_<n> (120 x 16): [used * 70 + colour * 10 + frame - 1], frames 1..3 steady, 4..10 the slide.
   std::array<Tex, 140> eplate_;
-  // menu/menuelem/menuelem_1..8 (empty, blue, green, black, red, white, yellow, rainbow).
+  // menu/menuelem/menuelem_1..8 (empty, blue, green, black, red, white, yellow, rainbow), the minimap plates in HD art.
   std::array<Tex, 8> plates_;
-  // Disc mode: every frame of the PS1 HUD sheets packed into two nearest-sampled atlases, the texels with the semi-transparency bit and the
-  // others; sheet_frames_[type / 4][frame - 1] = a frame's picture (offset from its origin and size in PS1 px, atlas UVs).
+  // Every frame of the PS1 HUD sheets packed into two nearest-sampled atlases, the texels with the semi-transparency bit and the others;
+  // sheet_frames_[type / 4][frame - 1] = a frame's picture (offset from its origin and size in PS1 px, atlas UVs). Disc mode draws the
+  // whole HUD from them, RDE data only the minimap plates in Classic art.
   bool ps1_hud_ = false;
   std::vector<std::vector<SheetFrame>> sheet_frames_;
   Tex sheet_semi_, sheet_opaque_;
@@ -1521,6 +1543,8 @@ class BattleView {
   FxFrame fx_frame_;
   SpellLights spell_;
   std::map<int, std::unique_ptr<FxGpu>> fx_gpu_;
+  // The prefetch build of the current cast's pack (fx_prefetch_pack), while it is not finished.
+  std::optional<FxGpuBuild> fx_prefetch_;
   // The resident library sheets, uploaded once per scene and shared by every pack's GpuEffects.
   std::shared_ptr<effects::GpuEffects> fx_lib_gpu_;
   const void* fx_lib_key_ = nullptr;

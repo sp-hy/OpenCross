@@ -1,6 +1,6 @@
 // BattleView in disc mode: the PS1's own battle HUD art (import::HudArt, the battle.prd sheets) packed into atlases, and the HUD pieces
 // drawn from it at the PS1's coordinates: the field ring with its label, trap block and star count, the party status panels and the
-// target info window.
+// target info window. With RDE data only the sheets are loaded, for the element grid minimap in Classic art.
 #include "game/battle/battle_view.h"
 #include "game/battle/battle_view_util.h"
 #include "game/battle/hud_rules.h"
@@ -56,7 +56,7 @@ render::DecodedImage upscaled(const import::HudFrame& frame, int factor, Keep ke
 
 }  // namespace
 
-void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
+std::optional<import::HudArt> BattleView::load_ps1_sheets(const vfs::Vfs& vfs) {
   sheet_frames_.clear();
   auto prd = vfs.read("cdrom/battle/battle.prd");
   auto prg = vfs.read("cdrom/prog/battle.prg");
@@ -66,10 +66,9 @@ void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
   std::optional<import::HudArt> art;
   if (prd) art = import::load_battle_hud(*prd, prg ? ByteSpan(*prg) : ByteSpan{}, usa);
   if (!art) {
-    log::warn("battle: the disc's HUD sheets (battle.prd) are missing");
-    return;
+    log::warn("battle: the PS1 HUD sheets (battle.prd) are missing");
+    return std::nullopt;
   }
-  name_advance_ = art->name_advance;
   SheetAtlas atlas = pack_sheets(art->sheets);
   sheet_frames_ = std::move(atlas.frames);
   for (auto [tex, rgba] : {std::pair{&sheet_semi_, &atlas.semi}, std::pair{&sheet_opaque_, &atlas.opaque}}) {
@@ -78,6 +77,13 @@ void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
     tex->w = static_cast<float>(atlas.width);
     tex->h = static_cast<float>(atlas.height);
   }
+  return art;
+}
+
+void BattleView::load_ps1_hud(const vfs::Vfs& vfs) {
+  std::optional<import::HudArt> art = load_ps1_sheets(vfs);
+  if (!art) return;
+  name_advance_ = art->name_advance;
   auto upload = [&](Tex& tex, const render::DecodedImage& img) {
     if (img.width == 0 || !tex.tex.create(*ctx_, img.width, img.height, render::TextureFormat::Rgba8, img.rgba.data())) return;
     tex.set = render::TexRef(tex.tex, nearest_);

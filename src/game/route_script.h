@@ -98,6 +98,7 @@
 //   assert gap <a> <b> <min> <max>      xz distance between two entities (same names) is in [min, max]
 //   assert level <a> <b> <tol>          world y of two entities (p0 | p1 | p2 | <ent>) differs by at most tol
 //   mark time / assert elapsed <min> <max>   driver ticks since `mark time` are within [min, max]
+//   assert fade <min%> <max%>      the field screen fade (0 = the picture, 100 = black or white) is within [min, max] percent
 //   assert height <p0..p2|ent> <min> <max>   world y (down = +) of the entity; assert anim <who> <id|stair>   submitted clip id / on a stair tile
 //   trace <ent> <ticks>           log an entity's position / facing / model yaw / screen fade every tick for N ticks and a speed / turn summary
 //   (trace also logs clip / keyframe*4 per tick) assert traceclip <max_src_moves> <max_clip_changes>   cross-fade source keyframe moves / clip changes of the last trace

@@ -37,6 +37,12 @@ constexpr float kRowScale = kCanvasH / 216.0f;
 constexpr float kRefLineY = 216.0f / 236.0f;
 inline float ref_y(float ref_line) { return ref_line * kRefLineY * kRowScale; }
 
+// Plate colour set of an element colour byte: 0..5 one colour, 6 every colour (0xFC, the rainbow set), -1 none.
+int plate_colour_of(u8 colour_bit) {
+  const int ci = data::colour_index_of_bit(colour_bit);
+  return ci >= 0 ? ci : (colour_bit & 0xFC) == 0xFC ? 6 : -1;
+}
+
 // Stamina labels per language (JP has no translation row: the key itself in the JP font).
 const char32_t* kStaLabel[6] = {U"Sta.", U"End.", U"Vig.", U"Asd.", U"Vit.", U"Sta."};
 const char32_t* kOutLabel[6] = {U"Out.-", U"End.-", U"Vig.-", U"Asd.-", U"Vit.-", U"Out.－"};
@@ -1821,9 +1827,10 @@ std::vector<int> BattleView::level_slots(int level) const {
   return out;
 }
 
-// The battle element menu (PS1 px), the same art in both modes:
-//  * grid minimap at (160 + 15 * level, 118 + 7.5 * slot) in measured lines, 13 x 6 cells = menuelem_N plates
-//    in the element colour; the selected level's column blinks to the white plate, levels above the gauge are semi-transparent;
+// The battle element menu (PS1 px), the same art in both modes except the minimap plates:
+//  * grid minimap at (160 + 15 * level, 118 + 7.5 * slot) in measured lines, 13 x 6 cells = grid plates in the element colour (HD art
+//    menuelem_N, Classic art the PS1 sheet's); the selected level's column blinks to the empty plate, levels above the gauge are
+//    semi-transparent;
 //  * the level's elements as name plates (battle-win4-large base + frame, 114 x 14 at x 11, one per valid slot at PS1 y 60 + 15 * slot, no
 //    scrolling; coloured ends in the element colour; the selected slot's plate is the bright one); the names are tech-title entries (style
 //    0x80081: 0x81 centred on the plate, y + 3; colour 0x757575, used cells 0x404040) with a "%+d" level-offset suffix;
@@ -1838,8 +1845,9 @@ void BattleView::build_element_ui() {
   const int shown_lvl = elem_shown_ >= 0 ? elem_shown_ : sel_lvl;
   const bool rest = elem_state_ == 0 && shown_lvl == sel_lvl;
   const std::vector<int> slots = level_slots(shown_lvl);
-  // Grid minimap: every cell of the battle copy as a menuelem plate at (160 + 15 level, 72 + 7 slot); the selected level's whole column
-  // blinks to the white plate while (frame & 0x1f) > 0xf, levels above the gauge are drawn semi-transparent.
+  // Grid minimap: every cell of the battle copy as a grid plate (HD art menuelem_N, Classic art the PS1 sheet's plate; Chrono Cross the
+  // rainbow one); the selected level's whole column swaps to the empty (dark) plate while (frame & 0x1f) > 0xf, whatever the cells'
+  // colours, and back; levels above the gauge are drawn semi-transparent.
   const bool blink = (tick_count_ & 0x1f) > 0xf;
   // The minimap and the description window (PS1 x >= 158) form the right group.
   // One more level column appears per frame after opening, up to 8.
@@ -1849,12 +1857,12 @@ void BattleView::build_element_ui() {
       const int id = unit.cells[static_cast<size_t>(idx)] & 0x3FFF;
       if (id == 0 || static_cast<size_t>(id) >= tables_->elements.size() || !unit.usable[static_cast<size_t>(idx)]) continue;
       const data::ElemRec& elem = tables_->elements[static_cast<size_t>(cell_element(active_pc_, idx))];
-      const int ci = blink && level == sel_lvl ? 4 : data::colour_index_of_bit(elem.colour_bit());
+      const bool dark = blink && level == sel_lvl;
       const u8 a = level > unit.gauge ? 128 : 255;
       const float x = (160 + 15.0f * static_cast<float>(level)) * kPs1Px, y = ref_y(118 + 7.5f * static_cast<float>(slot));
-      add_plate(ci, x, y, 13 * kPs1Px, ref_y(6), col(255, 255, 255, a));
+      add_plate(dark ? -1 : plate_colour_of(elem.colour_bit()), x, y, 13 * kPs1Px, ref_y(6), col(255, 255, 255, a));
       set_group(op_count() - 1, 1);
-      if (element_symbols()) {
+      if (element_symbols() && !dark) {
         add_icon(data::colour_index_of_bit(elem.colour_bit()), x + 6.5f * kPs1Px, y + ref_y(3), 24.0f, level > unit.gauge ? 150 : 255);
         set_group(op_count() - 1, 1);
       }
@@ -1866,7 +1874,6 @@ void BattleView::build_element_ui() {
     // A tech that a party member's tech completes shows (and casts) the double / triple tech instead.
     const int id = cell_element(active_pc_, idx);
     const data::ElemRec& elem = tables_->elements[static_cast<size_t>(id)];
-    const int ci = data::colour_index_of_bit(elem.colour_bit());
     // Used or colour-sealed = the greyed plate set + 0x404040 text.
     const bool used = unit.used[static_cast<size_t>(idx)] || element_greyed(active_pc_, idx);
     const bool sel = idx == cell_ && rest;
@@ -1875,7 +1882,7 @@ void BattleView::build_element_ui() {
     // The plate is the battle_08_<T>_<n>.png sprite (used cells: battle_76; 120 x 16 PS1 px at (8, row_y)): the element colour (+ 7 when the cell
     // is greyed) names the sprite set, the frame n: the selected plate pulses 1, 2, 3, 2 every 4 ticks, the others stay on 3.
     // Every colour (0xFC) uses the rainbow set.
-    const int pc = ci >= 0 && ci < 6 ? ci : (elem.colour_bit() & 0xFC) == 0xFC ? 6 : -1;
+    const int pc = plate_colour_of(elem.colour_bit());
     if (pc >= 0) {
       static const int kPulse[4] = {1, 2, 3, 2};
       // While sliding every plate (the selected one too) takes the slide table's frame at the step just taken, 4..10 = the unfolding frames.

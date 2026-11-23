@@ -207,12 +207,18 @@ void BattleView::fill_ctx(int unit, bseq::Ctx& ctx) const {
   }
   const bool reacting = visual.script_kind == kReact && visual.has_react;
   ctx.hit_code = reacting ? visual.react_ev.code : 0;
-  // Op 0x47 (GetHitType) reads the hit code of the entity running the script - for the CASTER's pack script that is its own. A steal writes the
+  // Op 0x47 (GetHitType) reads the hit code of the entity running the script - for the CASTER's script that is its own. A weapon hit writes
+  // its result code into the attacker's block as well as the target's (a sweep: the last target's), so the attack script branches on it: the
+  // weapon's impact sound plays only on a code other than 2, and a miss leaves the dodge sound of the target's reaction alone. A steal writes the
   // result code (0 landed / 2 failed or nothing) into the three PC blocks AND the target's, so Pilfer's caster branches on it (steal_k main:
-  // code 2 = sfx 'miss' + the frustration clip 0x82 instead of the bag clip 0x81). Other actions leave the caster's word as it was (not modelled: 0).
-  // creature >= 0 = Big Catch (mode 39): its miss writes the code into the caster's block too.
-  if (!reacting && unit == act_.actor && act_.phase != Act::Phase::None && !act_.ev.empty() && (act_.ev.front().steal_msg >= 0 || act_.ev.front().creature >= 0))
-    ctx.hit_code = act_.ev[std::min(act_.hit, act_.ev.size() - 1)].code;
+  // code 2 = sfx 'miss' + the frustration clip 0x82 instead of the bag clip 0x81). Other elements leave the caster's word as it was (not
+  // modelled: 0). creature >= 0 = Big Catch (mode 39): its miss writes the code into the caster's block too.
+  if (!reacting && unit == act_.actor && act_.phase != Act::Phase::None && !act_.ev.empty()) {
+    const size_t first = std::min(act_.hit, act_.ev.size() - 1);
+    const battle::ActionEvent& head = act_.ev[first];
+    if (head.kind == battle::ActionEvent::Kind::Weapon) ctx.hit_code = act_.ev[hit_end(first) - 1].code;
+    else if (act_.ev.front().steal_msg >= 0 || act_.ev.front().creature >= 0) ctx.hit_code = head.code;
+  }
   // The scripts see the *presented* state: a unit the rules already killed stays alive on screen until the hit that kills it lands (ko_shown).
   // A table a pack / overlay started on the unit (kReact without a hit event: death tables, fx_model_requests) reads the state the rules
   // already wrote (hp 0 since the cast): that is where the "dead" voices of a multi-kill spell come from (Volcano: two "dead" voices after the

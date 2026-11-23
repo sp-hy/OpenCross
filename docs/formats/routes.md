@@ -221,7 +221,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 
 | Assert | Passes when |
 |---|---|
-| `room <name>` | The field room is `<name>`. |
+| `room <name>` | The field room is `<name>` and the screen has faded back in (as `wait room`). |
 | `var <hexid> <value>` | The script variable equals `value`. |
 | `title_hold on\|off` | The title scene is / is not held on black until its logo movie takes over. |
 | `earned <name>`, `unearned <name>` | The achievement was / was not earned this run: a Steam API name, or the id of an OpenCross achievement (`rules/oc_achievements.md`; the route's ini sets `[Game] Achievements=1`). Route runs never connect to Steam; the rules still run. |
@@ -271,6 +271,7 @@ An assert finishes at once; a failing one stops the run (section 4). Passing ass
 | `offmesh <p1\|p2\|ent N\|npcs> <max>` | Ticks the member stood off the walkable mesh is at most `max`; `npcs` takes the worst placed non-party model entity. |
 | `elapsed <min> <max>` | Driver ticks since `mark time` within the range. |
 | `scroll <x> <y> [tol]` | The field scroll (layer pixels, before the shake offset) is within `tol` (default 0) of `(x, y)` on each axis. |
+| `fade <min%> <max%>` | The field screen fade, in whole percent (0 = the picture, 100 = black or white), is within the range (logged). A held last movie frame is drawn over it and does not count. |
 | `same [tol]` | Nothing from the `snap` changed: room, flow, room-load / battle-start / title-sequence counters, battle summary, every entity's position (within `tol` units, default 0), facing and yaw, listed variables. |
 | `frozen` | No field tick ran and no message window's typewriter moved since `snap`. |
 | `swaps <n>` | Exactly `n` in-place art swaps of the field room since `snap`. |

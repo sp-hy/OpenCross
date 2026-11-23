@@ -75,6 +75,7 @@ void BattleView::fx_reset_scene() {
   // The pseudo-actor points into a pack's models (FxGpu::models, its own group 0xE handle): it goes with them. A scene that starts while
   // a pack still plays (an editor's run restarted mid-action) would otherwise tick a pose on freed memory.
   pa_ = PseudoActor{};
+  fx_prefetch_.reset();
   fx_gpu_.clear();
   fx_lib_gpu_.reset();
   fx_lib_key_ = nullptr;
@@ -139,6 +140,8 @@ void BattleView::fx_charge_begin() {
   if (const std::string chant = bunit(act_.actor).pc ? "sing" : "msin"; charged && !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
   // The theme fades to 0x66 over 0x6D frames while the spell runs, unless op 0x7B's flag is set.
   if (!fx_bti_gate_) audio_.duck_cast();
+  // The element pack builds during the charge (fx_prefetch_step), so fx_begin's hand-over does not stall the view.
+  fx_prefetch_pack();
   if (!dbg_.effects || fx_) return;
   const battle::ActionEvent& e0 = act_.ev.front();
   if (e0.element <= 0 || static_cast<size_t>(e0.element) >= tables_->elements.size()) return;
@@ -186,8 +189,6 @@ void BattleView::fx_charge_begin() {
              fx_scene().unit[static_cast<size_t>(act_.actor)].height);
   if (const auto& visual = vis_[static_cast<size_t>(act_.actor)]; visual.has_model && visual.model)
     log::debug("battle fx: caster model S1 extent {} {} {}", visual.model->asset.extent[0], visual.model->asset.extent[1], visual.model->asset.extent[2]);
-  // Build the element pack now, behind the charge camera's cut, so fx_begin's hand-over does not stall the view loading the summon model.
-  fx_prefetch_pack();
 }
 
 bool BattleView::fx_charge_done() const {
@@ -339,16 +340,27 @@ int BattleView::fx_action_eid() const {
   return eid <= 1 ? -1 : eid;
 }
 
-// Builds the current element's pack GPU resources while the caster charges, so fx_begin's hand-over hits the fx_gpu_ cache. The heavy case
-// is a summon: its creature model is large and otherwise loads and bakes in the single frame fx_begin runs, freezing the view on the last
-// charge frame; building it now spends that time during the charge camera's cut instead. A no-op once the pack is cached.
+// Opens the build of the current element's pack GPU resources at the charge start; fx_prefetch_step runs it during the charge, so fx_begin's
+// hand-over hits the fx_gpu_ cache. The heavy cases are the summons (the creature model) and the level-6 elements (their meshes and atlases):
+// read, baked and uploaded in the one frame fx_begin runs, they would freeze the view on the last charge frame. A no-op once the pack is
+// cached. The charge's own instance is running here, so `fx_` is no reason to skip.
 void BattleView::fx_prefetch_pack() {
-  if (!dbg_.effects || fx_) return;
+  fx_prefetch_.reset();
+  if (!dbg_.effects) return;
   const int eid = fx_action_eid();
-  if (eid < 0) return;
+  if (eid < 0 || fx_gpu_.count(eid)) return;
   if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
   if (!fxlib_ready_) return;
-  if (std::shared_ptr<const FxPack> pack = fxlib_.get(eid)) fx_gpu_for(pack);
+  fx_prefetch_.emplace();
+  fx_prefetch_->eid = eid;
+}
+
+// One step of the prefetch, the mesh textures in slices of a few milliseconds: the work is spread over the charge's frames.
+void BattleView::fx_prefetch_step() {
+  constexpr double kSliceMs = 4.0;
+  if (!fx_prefetch_ || !fx_gpu_step(*fx_prefetch_, kSliceMs)) return;
+  log::debug("battle fx: eid {} built ahead {} at tick {}", fx_prefetch_->eid, fx_prefetch_->failed ? "failed" : "done", tick_count_);
+  fx_prefetch_.reset();
 }
 
 bool BattleView::fx_begin() {

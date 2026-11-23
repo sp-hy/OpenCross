@@ -558,8 +558,8 @@ class FieldWorld final : public script::FieldHost {
   // RDE's HD card of this room entrance (import::room_cards, drawn by ui::WorldName): up from the room's load until a fade to black
   // over its dismiss length starts; nullptr when there is none or it was taken down.
   const import::RoomCard* room_card() const { return room_card_; }
-  // A controlled run's restart (App::control_restart): no screen fade left from the run before (a movie's fade-out, an A8 fade to
-  // black), as at boot.
+  // No screen fade left: the picture shows, and the next A8 to black acts. At a movie's end, and at a controlled run's restart
+  // (App::control_restart), as at boot.
   void clear_screen_fade() {
     fade_ = fade_target_ = 0.0f;
     fade_step_ = 1.0f;

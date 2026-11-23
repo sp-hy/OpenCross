@@ -545,10 +545,12 @@ void BattleView::add_box(float x, float y, float w, float h, bool fill_on) {
   }
 }
 
-void BattleView::add_plate(int colour_index, float x, float y, float w, float h, u32 tint) {
-  if (ps1_hud_) {
-    // Disc mode: the grid plate sheets 0x34.. (green white black red yellow blue), 0x50 = empty; a dimmed plate is half blended.
-    add_sheet_at(colour_index >= 0 && colour_index < 6 ? 0x34 + 4 * colour_index : 0x50, 1, x / kPs1Px, y / kRowScale, 0x808080, (tint >> 24) < 255 ? 1 : 0);
+void BattleView::add_plate(int plate_colour, float x, float y, float w, float h, u32 tint) {
+  const bool colour = plate_colour >= 0 && plate_colour < 6, rainbow = plate_colour == 6;
+  if (ps1_hud_ || (!hd_ && !sheet_frames_.empty())) {
+    // The PS1 grid plate sheets 0x34.. (green white black red yellow blue, 0x4C all colours), 0x50 = empty; a dimmed plate is half blended.
+    const int sheet = colour ? 0x34 + 4 * plate_colour : rainbow ? 0x4C : 0x50;
+    add_sheet_at(sheet, 1, x / kPs1Px, y / kRowScale, 0x808080, (tint >> 24) < 255 ? 1 : 0);
     return;
   }
   Op op;
@@ -558,7 +560,7 @@ void BattleView::add_plate(int colour_index, float x, float y, float w, float h,
   op.w = w;
   op.h = h;
   op.color = tint;
-  op.plate = colour_index >= 0 && colour_index < 6 ? kPlateOfColour[colour_index] - 1 : 0;
+  op.plate = colour ? kPlateOfColour[plate_colour] - 1 : rainbow ? 7 : 0;
   ops_.push_back(std::move(op));
 }
 

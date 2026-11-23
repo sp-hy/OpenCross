@@ -1,0 +1,81 @@
+# The Lynx fight's win branch without Kid in the party: jac_b20i runs entity 5's script 5 (Kid stands in as a room actor), plays movie 7,
+# fades to black, plays movie 16 and goes on with the scene; no fade follows the second movie, so the field must come back at the movie's
+# end. Then the room jumps to jac_b51e (entrance 4) and the aftermath runs as with Kid (jac_b17i, jac_b36e, jac_b02f, gal_b09i's save-point
+# menu under the black fog), ending with the field faded in and the controls free.
+0 wait flow title 300
+- wait movie start 300
+- tap confirm
+- wait movie end 300
+- wait 150
+- tap confirm
+- wait 60
+- tap down                            # Continue
+- wait 10
+- tap confirm
+- wait flow slots 300
+- wait 20
+- tap confirm                         # Slot 1
+- wait 20
+- tap right                           # file 01
+- wait 6
+- tap confirm
+- wait flow field 600
+- wait 230
+- assert party 0,12,2
+- approach 4 20 1500                  # the trigger in front of the desk
+- tap confirm
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- skip 3000
+- fight 6000
+- assert result 0
+- read 20
+- wait movie start 6000               # movie 7
+- wait movie end 6000
+- wait movie start 600                # movie 16, after the FADE 1
+- wait movie end 6000
+- wait dialogue open 600              # Lynx's line after the movies
+- assert fade 0 0
+- assert room jac_b20i
+- screenshot lynx_no_kid_scene.png
+- read 0
+- mash until room jac_b51e 12000
+- mash until room jac_b17i 6000
+- mash until room jac_b36e 6000
+- mash until room jac_b02f 6000
+- mash until menu open 6000           # gal_b09i's save-point menu, opened by the wake-up event
+- wait 30
+- tap cancel
+- wait menu closed 600
+- mash until idle 0 6000
+- assert room gal_b09i
+- assert party 0,12,2
+- assert var 0 52
+- quit

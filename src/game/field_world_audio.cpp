@@ -389,10 +389,13 @@ void FieldWorld::movie_tick() {
   if (sequences_ && !movie_sequence_.empty()) sequences_->tick();
 }
 
+// The field display comes back at a movie's end without the screen fade: an A8 fade to black before the movie no longer covers the
+// picture, and a FADE 1 after the movie acts again (scripts that want black re-issue it).
 void FieldWorld::movie_finished() {
   movie_state_ = MovieState::None;
   if (sequences_ && !movie_sequence_.empty()) sequences_->stop(movie_sequence_);
   movie_sequence_.clear();
+  clear_screen_fade();
   start_movie_jump();
 }
 

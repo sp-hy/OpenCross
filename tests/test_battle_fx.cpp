@@ -132,6 +132,46 @@ static int check_thrown_weapon_meshes(vfs::Vfs& files) {
   return bad;
 }
 
+// A weapon attack's sounds follow the hit code each script reads: the attacker's script (at0.prd entry 0 variant 0, a PC's and an enemy's)
+// plays the impact sound `_s00` only for a landed hit, and on a miss (code 2) the target's reaction (variant 7) plays the dodge sound `thgh`.
+static int check_weapon_miss_sounds(vfs::Vfs& files) {
+  int bad = 0;
+  const auto sounds = [](const bseq::Table& table, int variant, int hit_code, bool monster) {
+    std::vector<std::string> tags;
+    bseq::Ctx ctx;
+    ctx.hit_code = hit_code;
+    ctx.monster = monster;
+    ctx.clip_frames = [](int) { return 8; };
+    bseq::Vm vm;
+    if (!vm.start(&table, 0, variant)) return tags;
+    std::vector<bseq::Event> out;
+    for (int k = 0; k < 600 && vm.running(); ++k) {
+      out.clear();
+      vm.tick(ctx, out);
+      for (const bseq::Event& event : out)
+        if (event.kind == bseq::Event::Sfx) tags.push_back(bseq::tag_str(event.tag));
+    }
+    return tags;
+  };
+  const auto has = [](const std::vector<std::string>& tags, const char* tag) { return std::find(tags.begin(), tags.end(), tag) != tags.end(); };
+  for (const char* folder : {"player/selju2", "monster/umibouz"}) {
+    const auto prd = files.read(std::string("cdrom/battle/") + folder + "/at0.prd");
+    bseq::Table table;
+    if (!prd || !bseq::load_atk_table(*prd, table)) {
+      std::printf("FAIL weapon miss sounds: no attack table for %s\n", folder);
+      ++bad;
+      continue;
+    }
+    const bool monster = std::string(folder).starts_with("monster/");
+    if (!has(sounds(table, 0, 0, monster), "_s00") || has(sounds(table, 0, 2, monster), "_s00") || !has(sounds(table, 7, 2, monster), "thgh") ||
+        has(sounds(table, 7, 0, monster), "thgh")) {
+      std::printf("FAIL weapon miss sounds: %s\n", folder);
+      ++bad;
+    }
+  }
+  return bad;
+}
+
 // 3voice op 0x100: the operand's tag starts on the named acting-list entry; a zero tag starts nothing.
 static int check_3voice_start() {
   effects::FxContext ctx;
@@ -192,6 +232,7 @@ int main() {
   if (check_lenz(files)) return 1;
   if (check_thrown_weapon_meshes(files)) return 1;
   if (check_ko_pose_picks(files)) return 1;
+  if (check_weapon_miss_sounds(files)) return 1;
   {
     // A party member's model follows its kind byte: Serge in Lynx's body is the sel_yam2 model.
     battle::Unit body;

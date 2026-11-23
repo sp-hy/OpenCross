@@ -766,6 +766,13 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       log::info("route: scroll {},{} (want {},{} tol {})", st.scroll_x, st.scroll_y, want_x, want_y, tol);
       if (std::abs(st.scroll_x - want_x) > tol || std::abs(st.scroll_y - want_y) > tol)
         return bad(std::format("scroll is {},{}, expected {},{} (tol {})", st.scroll_x, st.scroll_y, want_x, want_y, tol));
+    } else if (args[1] == "fade") {
+      // assert fade <min%> <max%>: the field screen fade in whole percent (0 = the picture, 100 = black or white)
+      int lo = 0, hi = 0;
+      if (args.size() < 4 || !to_int(args[2], lo) || !to_int(args[3], hi)) return bad("assert fade <min%> <max%>");
+      const int got = static_cast<int>(std::lround(st.fade * 100.0f));
+      log::info("route: screen fade {} % (want {}..{})", got, lo, hi);
+      if (got < lo || got > hi) return bad(std::format("screen fade is {} %, expected {}..{}", got, lo, hi));
     } else if (args[1] == "elapsed") {
       // assert elapsed <min> <max>: driver ticks since `mark time`
       int lo = 0, hi = 0;

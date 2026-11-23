@@ -57,6 +57,21 @@ void paste_unit_art(assets::ModelAsset& copy, const assets::ModelAsset& unit) {
   }
 }
 
+u64 fnv1a(ByteSpan bytes) {
+  u64 hash = 1469598103934665603ull;
+  for (u8 byte : bytes) hash = (hash ^ byte) * 1099511628211ull;
+  return hash;
+}
+
+// The pack registers type-0x0B models (sprite type 20).
+bool pack_has_models(const FxPack& pack) {
+  const auto drp = import::parse_drp(pack.prd);
+  if (!drp) return false;
+  for (const auto& entry : drp->entries)
+    if (entry.type == 0x0B) return true;
+  return false;
+}
+
 }  // namespace
 
 FxScene BattleView::fx_scene() const {
@@ -271,27 +286,25 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
   }
 }
 
+// Once per session: index the battle models that ship a cdrom2 (HD art) .obj (battle/player, 3 battle/monster).
+void BattleView::fx_hd_mesh_index() {
+  if (fx_hd_mesh_indexed_ || !vfs_) return;
+  fx_hd_mesh_indexed_ = true;
+  for (const std::string& file : vfs_->list("cdrom2")) {
+    if (!file.starts_with("battle/") || !file.ends_with(".obj")) continue;
+    const auto disc = vfs_->read_disc("cdrom/" + file);
+    if (!disc) continue;
+    const ByteSpan s1 = import::mdl_section(*disc, 0);
+    if (!s1.empty()) fx_hd_mesh_index_[fnv1a(s1)].push_back(file.substr(0, file.size() - 4));
+  }
+}
+
 std::string BattleView::fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
                                           import::Vram& out_vram) {
-  auto fnv = [](ByteSpan bytes) {
-    u64 hash = 1469598103934665603ull;
-    for (u8 byte : bytes) hash = (hash ^ byte) * 1099511628211ull;
-    return hash;
-  };
-  // Once per session: index the battle models that ship a cdrom2 (HD art) .obj (battle/player, 3 battle/monster).
-  if (!fx_hd_mesh_indexed_) {
-    fx_hd_mesh_indexed_ = true;
-    for (const std::string& file : vfs_->list("cdrom2")) {
-      if (!file.starts_with("battle/") || !file.ends_with(".obj")) continue;
-      const auto disc = vfs_->read_disc("cdrom/" + file);
-      if (!disc) continue;
-      const ByteSpan s1 = import::mdl_section(*disc, 0);
-      if (!s1.empty()) fx_hd_mesh_index_[fnv(s1)].push_back(file.substr(0, file.size() - 4));
-    }
-  }
+  fx_hd_mesh_index();
   const ByteSpan s1 = import::mdl_section(mdl, 0);
   if (s1.empty()) return {};
-  const auto it = fx_hd_mesh_index_.find(fnv(s1));
+  const auto it = fx_hd_mesh_index_.find(fnv1a(s1));
   if (it == fx_hd_mesh_index_.end()) return {};
   for (const std::string& stem : it->second) {
     const auto disc = vfs_->read_disc("cdrom/" + stem + ".obj");
@@ -574,75 +587,142 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
     if (pack->meshes) fx_apply_mesh_tiles(*it->second, *pack->meshes, false);
     return it->second.get();
   }
-  auto gpu = std::make_unique<FxGpu>();
-  gpu->sprites = std::make_unique<effects::GpuEffects>();
-  effects::EffectBank bank;
-  bank.add(&pack->fx);
-  if (pack->extra) bank.add(pack->extra.get());
-  // battle.prd's sheets (b28, 64ke, smok ...): resident, named by the packs.
-  if (pack->resident)
-    for (const auto& resident_pack : pack->resident->packs) bank.add_library(resident_pack.get());
-  bank.add_library(&fxlib_.particle_lib());
-  const void* lib_key = pack->resident.get();
-  // The library sheets (battle.prd's, the particle library): one upload per scene.
-  if (!fx_lib_gpu_ || fx_lib_key_ != lib_key) {
-    fx_lib_gpu_.reset();
-    auto lib = std::make_shared<effects::GpuEffects>();
-    if (lib->init(*ctx_, *sprites_) && lib->load(bank, effects::GpuEffects::Which::LibrariesOnly)) {
-      fx_lib_gpu_ = std::move(lib);
-      fx_lib_key_ = lib_key;
-    }
+  // The rest of a prefetch of this pack, or a build of its own.
+  FxGpuBuild local;
+  const bool prefetched = fx_prefetch_ && fx_prefetch_->eid == pack->eid;
+  FxGpuBuild& build = prefetched ? *fx_prefetch_ : local;
+  if (!prefetched) {
+    build.eid = pack->eid;
+    build.pack = pack;
   }
-  if (fx_lib_gpu_) gpu->sprites->set_shared(fx_lib_gpu_);
-  // RDE's 4x sheet pages (FxPack::hd_sprites) are drawn in HD art; the upload is rebuilt on an art switch.
-  gpu->sprites->set_hd(hd_);
-  gpu->art_dependent = pack->hd_sprites > 0;
-  if (!gpu->sprites->init(*ctx_, *sprites_) ||
-      !gpu->sprites->load(bank, fx_lib_gpu_ ? effects::GpuEffects::Which::SkipLibraries : effects::GpuEffects::Which::All)) {
-    log::warn("battle fx: eid {}: texture upload failed", pack->eid);
-    return nullptr;
+  while (!fx_gpu_step(build, 1e9)) {
   }
-  if (pack->meshes) {
-    assets::StageAsset& st = *pack->meshes;
-    const auto meshes_start = std::chrono::steady_clock::now();
-    const double bake_ms = mesh_bake_off() ? 0.0 : bake_fx_pack_meshes(*pack, fxlib_.particle_lib());
-    fx_apply_mesh_tiles(*gpu, st, true);
-    for (size_t i = 0; i < st.parts.size(); ++i) gpu->parts.emplace(st.parts[i].name, static_cast<int>(i));
-    // Effect meshes draw through the stage pipeline.
-    gpu->stage = stage_pipe_.create(st);
-    log::debug("battle fx: eid {}: meshes: {} tile(s) in {} object(s), bake {:.1f} ms, tiles + upload {:.1f} ms", pack->eid, st.tiles.size(), st.object_textures.size(), bake_ms,
-               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - meshes_start).count() - bake_ms);
-  }
-  const auto models_start = std::chrono::steady_clock::now();
-  fx_load_models(*gpu, *pack);
-  if (!gpu->models.empty())
-    log::debug("battle fx: eid {}: {} model(s) loaded in {:.1f} ms", pack->eid, gpu->models.size(),
-               std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - models_start).count());
-  // Bespoke overlays' own textured packets sample the pack's mesh atlases through the particle batch, with normalised UVs: a texture mod's
-  // effect_mesh image of any size stands in, as it does for the mesh sprites the stage pipeline draws.
-  if (pack->meshes && pack->bespoke) {
-    const assets::StageAsset& st = *pack->meshes;
-    gpu->art_dependent = true;
-    for (size_t i = 0; i < st.textures.size(); ++i) {
-      const assets::StageTexture& stage_tex = st.textures[i];
-      auto tex = std::make_unique<render::Texture>();
-      render::TexRef set;
-      const bool usable = stage_tex.image.width && stage_tex.image.height && !stage_tex.image.indexed;
-      u32 width = stage_tex.image.width, height = stage_tex.image.height;
-      std::vector<u8> replaced;
-      if (usable && render::texture_registry::active()) {
-        replaced.assign(stage_tex.image.pixels.begin(), stage_tex.image.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(width) * height * 4));
-        const render::TextureKey key = render::stage_group_key("effect_mesh", static_cast<int>(i), stage_tex.mode, stage_tex.clut_x, stage_tex.clut_y, width, height, replaced.data());
-        if (!render::texture_registry::replace(key, width, height, replaced)) replaced.clear();
+  const bool failed = build.failed;
+  if (prefetched) fx_prefetch_.reset();
+  if (failed) return nullptr;
+  const auto it = fx_gpu_.find(pack->eid);
+  return it == fx_gpu_.end() ? nullptr : it->second.get();
+}
+
+bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
+  using Step = FxGpuBuild::Step;
+  auto fail = [&] {
+    build.failed = true;
+    build.step = Step::Done;
+    return true;
+  };
+  switch (build.step) {
+    case Step::Pack:
+      if (!build.pack) build.pack = fxlib_.get(build.eid);
+      if (!build.pack) return fail();
+      // Built meanwhile (a pack can be both prefetched and asked for).
+      if (fx_gpu_.count(build.pack->eid)) {
+        build.step = Step::Done;
+        return true;
       }
-      if (usable && tex->create(*ctx_, width, height, render::TextureFormat::Rgba8, replaced.empty() ? stage_tex.image.pixels.data() : replaced.data()))
-        set = render::TexRef(*tex, nearest_);
-      gpu->textures.push_back(std::move(tex));
-      gpu->sets.push_back(set);
+      build.step = Step::Sprites;
+      return false;
+    case Step::Sprites: {
+      const FxPack& pack = *build.pack;
+      build.gpu = std::make_unique<FxGpu>();
+      FxGpu& gpu = *build.gpu;
+      gpu.sprites = std::make_unique<effects::GpuEffects>();
+      effects::EffectBank bank;
+      bank.add(&pack.fx);
+      if (pack.extra) bank.add(pack.extra.get());
+      // battle.prd's sheets (b28, 64ke, smok ...): resident, named by the packs.
+      if (pack.resident)
+        for (const auto& resident_pack : pack.resident->packs) bank.add_library(resident_pack.get());
+      bank.add_library(&fxlib_.particle_lib());
+      const void* lib_key = pack.resident.get();
+      // The library sheets (battle.prd's, the particle library): one upload per scene.
+      if (!fx_lib_gpu_ || fx_lib_key_ != lib_key) {
+        fx_lib_gpu_.reset();
+        auto lib = std::make_shared<effects::GpuEffects>();
+        if (lib->init(*ctx_, *sprites_) && lib->load(bank, effects::GpuEffects::Which::LibrariesOnly)) {
+          fx_lib_gpu_ = std::move(lib);
+          fx_lib_key_ = lib_key;
+        }
+      }
+      if (fx_lib_gpu_) gpu.sprites->set_shared(fx_lib_gpu_);
+      // RDE's 4x sheet pages (FxPack::hd_sprites) are drawn in HD art; the upload is rebuilt on an art switch.
+      gpu.sprites->set_hd(hd_);
+      gpu.art_dependent = pack.hd_sprites > 0;
+      if (!gpu.sprites->init(*ctx_, *sprites_) ||
+          !gpu.sprites->load(bank, fx_lib_gpu_ ? effects::GpuEffects::Which::SkipLibraries : effects::GpuEffects::Which::All)) {
+        log::warn("battle fx: eid {}: texture upload failed", pack.eid);
+        return fail();
+      }
+      build.step = pack.meshes ? Step::Meshes : Step::HdIndex;
+      return false;
     }
+    case Step::Meshes: {
+      assets::StageAsset& st = *build.pack->meshes;
+      const auto meshes_start = std::chrono::steady_clock::now();
+      const double bake_ms = mesh_bake_off() ? 0.0 : bake_fx_pack_meshes(*build.pack, fxlib_.particle_lib());
+      fx_apply_mesh_tiles(*build.gpu, st, true);
+      for (size_t i = 0; i < st.parts.size(); ++i) build.gpu->parts.emplace(st.parts[i].name, static_cast<int>(i));
+      log::debug("battle fx: eid {}: meshes: {} tile(s) in {} object(s), bake {:.1f} ms, tiles {:.1f} ms", build.eid, st.tiles.size(), st.object_textures.size(), bake_ms,
+                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - meshes_start).count() - bake_ms);
+      // Effect meshes draw through the stage pipeline; the packs name their own texture group.
+      build.mesh_job = stage_pipe_.create_begin();
+      build.mesh_job.group.clear();
+      build.step = Step::MeshTextures;
+      return false;
+    }
+    case Step::MeshTextures:
+      if (stage_pipe_.create_textures(build.mesh_job, *build.pack->meshes, budget_ms)) build.step = Step::MeshBuffers;
+      return false;
+    case Step::MeshBuffers:
+      build.gpu->stage = stage_pipe_.create_finish(build.mesh_job, *build.pack->meshes);
+      build.step = Step::HdIndex;
+      return false;
+    case Step::HdIndex:
+      if (hd_ && vfs_ && vfs_->hd_mode() && pack_has_models(*build.pack)) fx_hd_mesh_index();
+      build.step = Step::Models;
+      return false;
+    case Step::Models: {
+      const auto models_start = std::chrono::steady_clock::now();
+      fx_load_models(*build.gpu, *build.pack);
+      if (!build.gpu->models.empty())
+        log::debug("battle fx: eid {}: {} model(s) loaded in {:.1f} ms", build.eid, build.gpu->models.size(),
+                   std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - models_start).count());
+      build.step = Step::OverlayAtlases;
+      return false;
+    }
+    case Step::OverlayAtlases: {
+      const FxPack& pack = *build.pack;
+      FxGpu& gpu = *build.gpu;
+      // Bespoke overlays' own textured packets sample the pack's mesh atlases through the particle batch, with normalised UVs: a texture mod's
+      // effect_mesh image of any size stands in, as it does for the mesh sprites the stage pipeline draws.
+      if (pack.meshes && pack.bespoke) {
+        const assets::StageAsset& st = *pack.meshes;
+        gpu.art_dependent = true;
+        for (size_t i = 0; i < st.textures.size(); ++i) {
+          const assets::StageTexture& stage_tex = st.textures[i];
+          auto tex = std::make_unique<render::Texture>();
+          render::TexRef set;
+          const bool usable = stage_tex.image.width && stage_tex.image.height && !stage_tex.image.indexed;
+          u32 width = stage_tex.image.width, height = stage_tex.image.height;
+          std::vector<u8> replaced;
+          if (usable && render::texture_registry::active()) {
+            replaced.assign(stage_tex.image.pixels.begin(), stage_tex.image.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(width) * height * 4));
+            const render::TextureKey key = render::stage_group_key("effect_mesh", static_cast<int>(i), stage_tex.mode, stage_tex.clut_x, stage_tex.clut_y, width, height, replaced.data());
+            if (!render::texture_registry::replace(key, width, height, replaced)) replaced.clear();
+          }
+          if (usable && tex->create(*ctx_, width, height, render::TextureFormat::Rgba8, replaced.empty() ? stage_tex.image.pixels.data() : replaced.data()))
+            set = render::TexRef(*tex, nearest_);
+          gpu.textures.push_back(std::move(tex));
+          gpu.sets.push_back(set);
+        }
+      }
+      fx_gpu_[pack.eid] = std::move(build.gpu);
+      build.step = Step::Done;
+      return true;
+    }
+    case Step::Done:
+      return true;
   }
-  FxGpu* raw = gpu.get();
-  fx_gpu_[pack->eid] = std::move(gpu);
-  return raw;
+  return true;
 }
 }  // namespace oc::game
