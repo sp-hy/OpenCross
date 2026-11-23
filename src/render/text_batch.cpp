@@ -176,7 +176,6 @@ void TextBatch::prepare(FaceId id, std::u32string_view text) {
 }
 
 bool TextBatch::rebuild_spritefont(Face& font_face) {
-  const auto tmp0 = std::chrono::steady_clock::now();
   const import::SpriteFont& sf = *font_face.font;
   struct Item {
     const import::SfGlyph* glyph = nullptr;
@@ -277,7 +276,6 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
       }
     }
   }
-  const auto tmp1 = std::chrono::steady_clock::now();
   font_face.entries.clear();
   for (auto& [ch, glyph] : map) {
     Entry glyph_entry;
@@ -323,14 +321,12 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
   font_face.back.reset();
   font_face.outline.reset();
   const bool nearest = !pixels.empty();
-  const auto tmp2 = std::chrono::steady_clock::now();
   // The 2-3 atlases share one queue wait.
   UploadBatch batch;
   font_face.fill = make_atlas(aw, ah, fill, linear_, nearest, &batch);
   font_face.back = make_atlas(aw, ah, back, linear_, nearest, &batch);
   if (!outline.empty()) font_face.outline = make_atlas(aw, ah, outline, linear_, nearest, &batch);
   batch.flush(*ctx_);
-  { const auto tmp3 = std::chrono::steady_clock::now(); auto ms_between = [](auto from, auto to) { return std::chrono::duration<double, std::milli>(to - from).count(); }; log::debug("TMP rebuild: pack+fill {:.1f} entries+idle {:.1f} atlases {:.1f} ({}x{} glyphs {})", ms_between(tmp0, tmp1), ms_between(tmp1, tmp2), ms_between(tmp2, tmp3), aw, ah, font_face.wanted.size()); }
   return font_face.fill && font_face.back;
 }
 
@@ -363,7 +359,7 @@ float TextBatch::line_height(FaceId id, float scale) const {
   const Face* font_face = face(id);
   if (!font_face) return 0;
   if (font_face->ps1) return static_cast<float>(font_face->ps1->line_height()) * ps1_pixel(scale) * aspect_;
-  return font_face->font->line_spacing * scale;
+  return font_face->font->line_spacing * scale * row_scale_;
 }
 
 float TextBatch::measure(FaceId id, std::u32string_view text, float scale) const {
@@ -443,10 +439,12 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
       // px, py: target pixels per font pixel.
       const float px = pv * grid_x_, py = pv * grid_y_;
       const float nx = std::round(px), ny = std::round(py);
-      const bool whole = !style.exact && nx >= 1.0f && ny >= 1.0f && std::fabs(nx - px) <= kPixelSizeTolerance * px &&
+      const bool whole = !style.exact && row_scale_ == 1.0f && nx >= 1.0f && ny >= 1.0f && std::fabs(nx - px) <= kPixelSizeTolerance * px &&
                          std::fabs(ny - py) <= kPixelSizeTolerance * py;
+      // pr: view units per font pixel on y.
+      const float pr = pv * row_scale_;
       const float cx = x + glyph_entry->off_x * scale + static_cast<float>(glyph_entry->nx) * pv * 0.5f;
-      const float base = font_face->baseline > 0.0f ? y + font_face->baseline * pv : y + (glyph_entry->off_y / font_face->opt.pixel_pitch + static_cast<float>(glyph_entry->ny)) * pv;
+      const float base = font_face->baseline > 0.0f ? y + font_face->baseline * pr : y + (glyph_entry->off_y / font_face->opt.pixel_pitch + static_cast<float>(glyph_entry->ny)) * pr;
       // The line's baseline on a target row.
       const float base_row = std::round(base * grid_y_);
       float x0, y0, w, h;
@@ -458,16 +456,17 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
         w = wt / grid_x_, h = ht / grid_y_;
       } else {
         // RDE's exact glyph size, area-filtered.
-        w = static_cast<float>(glyph_entry->nx) * pv, h = static_cast<float>(glyph_entry->ny) * pv;
+        w = static_cast<float>(glyph_entry->nx) * pv, h = static_cast<float>(glyph_entry->ny) * pr;
         x0 = cx - w * 0.5f;
-        y0 = base_row / grid_y_ - static_cast<float>(glyph_entry->up) * pv;
+        y0 = base_row / grid_y_ - static_cast<float>(glyph_entry->up) * pr;
       }
       sprites_->draw(atlas->set_nearest ? atlas->set_nearest : atlas->set, x0, y0, w, h, glyph_entry->pu0, glyph_entry->pv0, glyph_entry->pu1, glyph_entry->pv1, col);
       if (audit_on_ && pass == Pass::Fill) audit_glyph(font_face->font.get(), ch, x0, y0, x0 + w, y0 + h);
     } else {
-      sprites_->draw(atlas->set, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, glyph_entry->w * scale, glyph_entry->h * scale, glyph_entry->u0, glyph_entry->v0, glyph_entry->u1, glyph_entry->v1, col);
+      const float scale_y = scale * row_scale_;
+      sprites_->draw(atlas->set, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, glyph_entry->w * scale, glyph_entry->h * scale_y, glyph_entry->u0, glyph_entry->v0, glyph_entry->u1, glyph_entry->v1, col);
       if (audit_on_ && pass == Pass::Fill)
-        audit_glyph(font_face->font.get(), ch, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, x + (glyph_entry->off_x + glyph_entry->w) * scale, y + (glyph_entry->off_y + glyph_entry->h) * scale);
+        audit_glyph(font_face->font.get(), ch, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, x + (glyph_entry->off_x + glyph_entry->w) * scale, y + (glyph_entry->off_y + glyph_entry->h) * scale_y);
     }
     sprites_->set_filter(old);
     return;
@@ -477,7 +476,7 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
   const float whole_px = std::max(1.0f, std::round(pitch));
   // Whole pixels only where they keep RDE's size (whole_px = round(pitch) would draw 0.35 menu text 31 % too big
   // with the same advance - "letters too close", JP "too big" - and 0.3125 text 27 % too small); otherwise RDE's own exact draw.
-  if (!style.exact && glyph_entry->px && pitch >= 0.75f && std::fabs(whole_px - pitch) <= kPixelSizeTolerance * pitch && atlas->set_nearest) {
+  if (!style.exact && row_scale_ == 1.0f && glyph_entry->px && pitch >= 0.75f && std::fabs(whole_px - pitch) <= kPixelSizeTolerance * pitch && atlas->set_nearest) {
     // Whole screen pixels per font pixel: whole_px = round(pitch). The glyph keeps its exact RDE centre on x; on y it
     // hangs from the face baseline, snapped once per pen line, so every glyph of a line shares the baseline row.
     const float w = static_cast<float>(glyph_entry->nx) * whole_px, h = static_cast<float>(glyph_entry->ny) * whole_px;
@@ -488,10 +487,11 @@ void TextBatch::draw_glyph(FaceId id, char32_t ch, float x, float y, u32 color, 
     if (audit_on_ && pass == Pass::Fill) audit_glyph(font_face->font.get(), ch, std::round(cx - w * 0.5f), top, std::round(cx - w * 0.5f) + w, top + h);
     return;
   }
-  sprites_->draw(atlas->set, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, glyph_entry->w * scale, glyph_entry->h * scale, glyph_entry->u0, glyph_entry->v0, glyph_entry->u1,
+  const float scale_y = scale * row_scale_;
+  sprites_->draw(atlas->set, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, glyph_entry->w * scale, glyph_entry->h * scale_y, glyph_entry->u0, glyph_entry->v0, glyph_entry->u1,
                  glyph_entry->v1, pass == Pass::Backdrop ? back_color : color);
   if (audit_on_ && pass == Pass::Fill)
-    audit_glyph(font_face->font.get(), ch, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, x + (glyph_entry->off_x + glyph_entry->w) * scale, y + (glyph_entry->off_y + glyph_entry->h) * scale);
+    audit_glyph(font_face->font.get(), ch, x + glyph_entry->off_x * scale, y + glyph_entry->off_y * scale, x + (glyph_entry->off_x + glyph_entry->w) * scale, y + (glyph_entry->off_y + glyph_entry->h) * scale_y);
 }
 
 void TextBatch::draw(FaceId id, std::u32string_view text, float x, float y, u32 color, float scale,

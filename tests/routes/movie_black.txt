@@ -1,0 +1,14 @@
+# des_b06f's first exit to the world map: FADE 1,#90, PLAY_MOVIE #11 (a11koryu, movie flags 0), then SET_NEXT_ROOM #253 with no fade
+# in between. A movie without flag 8 leaves the screen fade as it was, so the screen stays black from the movie's end until wld_b01 fades
+# in; the old room is never shown again.
+0 wait 120
+- set var cc 0                        # bit 0x4000 clear: the exit plays the movie
+- request script 16 3 4               # the exit box's ON_COLLISION
+- wait movie start 1200
+- wait 60
+- mash until movie end 6000
+- assert fade 100 100                 # still black from the FADE 1; the room switches at once
+- wait room wld_b01 1200
+- assert var 0x08 308                 # PREVIOUS_MAP_ID = des_b06f
+- assert var 0x02 11
+- quit

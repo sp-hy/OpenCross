@@ -1,6 +1,6 @@
 # The Lynx fight's win branch without Kid in the party: jac_b20i runs entity 5's script 5 (Kid stands in as a room actor), plays movie 7,
-# fades to black, plays movie 16 and goes on with the scene; no fade follows the second movie, so the field must come back at the movie's
-# end. Then the room jumps to jac_b51e (entrance 4) and the aftermath runs as with Kid (jac_b17i, jac_b36e, jac_b02f, gal_b09i's save-point
+# fades to black, plays movie 16 and goes on with the scene; no fade follows the second movie, whose flag 8 brings the field back from
+# black over 0x60 ticks at its end. Then the room jumps to jac_b51e (entrance 4) and the aftermath runs as with Kid (jac_b17i, jac_b36e, jac_b02f, gal_b09i's save-point
 # menu under the black fog), ending with the field faded in and the controls free.
 0 wait flow title 300
 - wait movie start 300
@@ -61,7 +61,9 @@
 - wait movie end 6000
 - wait movie start 600                # movie 16, after the FADE 1
 - wait movie end 6000
+- assert fade 95 100                  # the field fades back in from black
 - wait dialogue open 600              # Lynx's line after the movies
+- wait 100
 - assert fade 0 0
 - assert room jac_b20i
 - screenshot lynx_no_kid_scene.png

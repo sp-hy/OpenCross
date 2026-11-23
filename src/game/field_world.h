@@ -58,6 +58,10 @@
 #include "ui/dialogue_box.h"
 #include "ui/menu/game_state.h"
 
+namespace oc::import {
+class Ps1Font;
+}
+
 namespace oc::game {
 
 // A script-started movement of one entity (walk / follow / move / tween / jump).
@@ -165,6 +169,8 @@ struct Ent {
   std::string note;
   // flat light colour, eased per tick (room_lighting.h)
   ActorLight light;
+  // The actor's colour multiplier (light and ENTITY_RGB) at the start of the tick; the draw blends from it to the current one.
+  std::array<float, 3> tint_prev{1.0f, 1.0f, 1.0f};
   bool light_init = false;
   // route check: ticks a party follower stood off the walkable mesh
   int off_mesh_ticks = 0;
@@ -177,6 +183,8 @@ struct Ent {
   u16 wake_count = 0;
   // shadow strength: starts at 0x40, eases toward (R+G+B)/6, 0 on water / stairs
   int shadow_grey = 0x40;
+  // shadow_grey at the start of the tick; the drawn shadow blends from it (FieldWorld::drawn_shadow_grey).
+  int shadow_grey_prev = 0x40;
   // [Enhancements] Lighting: this frame's tile of the shadow mask, -1 = the blob, and the units it spans either way of the actor.
   int shadow_tile = -1;
   float shadow_half = 0;
@@ -446,7 +454,7 @@ class FieldWorld final : public script::FieldHost {
   void draw_actors(render::MeshPipeline& meshes, const render::Frame& frame, float alpha,
                    render::MeshPipeline::DrawParams::WetFaces wet = render::MeshPipeline::DrawParams::WetFaces::DryOnly);
   // `windows` = false leaves the status icons and the dialogue / extra windows to draw_windows() (the PS1-resolution pass, [Video] Ps1ResUi).
-  void draw_overlay(render::SpriteBatch& sprites, float vw, float vh, bool windows = true);
+  void draw_overlay(render::SpriteBatch& sprites, float vw, float vh, float alpha, bool windows = true);
   // The mod UI of the room's scripts (script::ModUi): its rects, lines and cursor, drawn by draw_windows under the dialogue windows (its
   // text elements are message windows, sync_mod_ui_windows).
   void draw_mod_ui(render::SpriteBatch& sprites, float vw, float vh, const render::CanvasFit* fit);
@@ -454,11 +462,11 @@ class FieldWorld final : public script::FieldHost {
   // column = 1 pixel, canvas unit = 1/4 pixel); otherwise the window's letterbox / render::canvas_fit.
   void draw_windows(render::SpriteBatch& sprites, float vw, float vh, bool ps1 = false);
   // Ps1ResUi: after the window pass - transition veil, room fade, captured frame (draw_overlay(windows = false) leaves them out).
-  void draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh);
+  void draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh, float alpha);
   void draw_veil_transition(render::SpriteBatch& sprites, float vw, float vh);
-  void draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh);
+  void draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh, float alpha);
   // A shown mod UI (its rects, lines and text windows) also needs the overlay pass.
-  bool overlay_needed() const { return any_window_open() || vm_.mod_ui().shown || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || handoff_.in_intro_or_hold() ||
+  bool overlay_needed() const { return any_window_open() || vm_.mod_ui().shown || fade_ > 0.001f || tint_active() || capture_shown() || seq_dim_shown() || drawn_prev_shown() || handoff_.in_intro_or_hold() ||
                                        status_icons_shown() || (view_.layer_mask() & sprite_groups()) != 0; }
 
   // ---- 8F / 90 screen ripple (render/render_target.h build_screen_warp) ---------------------------------------------
@@ -489,7 +497,7 @@ class FieldWorld final : public script::FieldHost {
     std::array<int, 3> echo_scale{0x1000, 0x1000, 0x1000};
     std::array<int, 3> echo_rot{0, 0, 0};
   };
-  JoltView jolt_view() const;
+  JoltView jolt_view(float alpha) const;
   // Where the frame echo puts the previous output's point (x, y), in buffer pixels from the projection centre: the point at depth 512
   // under the field's projection distance 512, scaled by echo_scale and turned by RotMatrix(echo_rot) (Rx * Ry * Rz). `share` (0..1]
   // is the part of one pass drawn (the half tick of a 30 Hz field: scale^share, angles * share).
@@ -497,6 +505,11 @@ class FieldWorld final : public script::FieldHost {
   // Dialogue portrait side (window flags bit 12): window flag 0x800 forces the right, 0x1000 the left; otherwise the portrait is on
   // the right when (script heading + portrait yaw + model yaw) & 0xFFF lies in 0x401..0xC00, else on the left.
   static bool portrait_on_left(int heading, int portrait_yaw, int model_yaw, u32 window_flags);
+  // What the message window widths read: the executable's name / item / grammar-form strings, the build's pen advance and font, and
+  // the dialogue's name tables (init does this).
+  void load_text_metrics(const vfs::Vfs& files);
+  // Width in PS1 pixels of a room message's text area (place_dialogue_window), `speaker` the entity that speaks.
+  int ps1_message_width(std::span<const u8> bytes, int speaker);
   // The ordering-table slab every field drawer honours (layers, shadows, actor faces, effect quads): only content with lo < slot <= hi is
   // drawn. The host draws the deep part (ot, inf], warps it, then the near part (-inf, ot]. Reset to everything after use.
   void set_draw_slab(float lo, float hi);
@@ -558,8 +571,8 @@ class FieldWorld final : public script::FieldHost {
   // RDE's HD card of this room entrance (import::room_cards, drawn by ui::WorldName): up from the room's load until a fade to black
   // over its dismiss length starts; nullptr when there is none or it was taken down.
   const import::RoomCard* room_card() const { return room_card_; }
-  // No screen fade left: the picture shows, and the next A8 to black acts. At a movie's end, and at a controlled run's restart
-  // (App::control_restart), as at boot.
+  // No screen fade left: the picture shows, and the next A8 to black acts. At a controlled run's restart (App::control_restart), as at
+  // boot.
   void clear_screen_fade() {
     fade_ = fade_target_ = 0.0f;
     fade_step_ = 1.0f;
@@ -1265,6 +1278,19 @@ class FieldWorld final : public script::FieldHost {
     int abr = 0, elapsed = 0, ticks = 0;
   };
   SeqPost seq_post_;
+  // The screen colours, room fade, post pass and back colour at the start of the tick (snapshot_drawn): the draw blends from them to
+  // the current values by the frame's alpha, so a ramp that steps once a tick moves smoothly at any display rate.
+  struct DrawnPrev {
+    std::array<float, 3> fog{};
+    std::array<std::array<int, 3>, 2> dim{};
+    std::array<int, 8> post{};
+    std::array<int, 3> post_rgb{};
+    std::array<int, 3> bk{};
+    float fade = 0.0f;
+  } drawn_prev_;
+  void snapshot_drawn();
+  bool drawn_prev_shown() const;
+  int drawn_shadow_grey(const Ent& entity, float alpha) const;
   void seq_post_op(const assets::SeqCmd& cmd);
   void seq_post_step();
   void seq_dim_set(size_t slot, int r, int g, int b, int mode, int ticks);
@@ -1440,8 +1466,7 @@ class FieldWorld final : public script::FieldHost {
   bool choice_pending_ = false;
   bool portrait_left_ = false;
   int flags_hi_for(int flag_byte) const;
-  int ps1_message_width(std::span<const u8> bytes, int speaker) const;
-  int ps1_string_width(int table, int id) const;
+  int ps1_string_width(int table, int id);
   // Returns true when the window went under the speaker.
   bool place_dialogue_window(ui::DialogueDemo& dlg, int speaker, int message, int flag_byte, bool portrait);
   // -1: no other message window is open; 1: another open window sits under its speaker; 0: the others sit elsewhere.
@@ -1452,6 +1477,8 @@ class FieldWorld final : public script::FieldHost {
   bool dialogue_kept_ = false, dialogue_below_ = false;
   // The executable's name / item / grammar-form strings (window widths).
   import::ExeStrings exe_strings_;
+  // The build's message font: the width of a name the executable has no string for.
+  std::shared_ptr<const import::Ps1Font> exe_font_;
   // The build the executable's string tables belong to (their table numbers differ per build); null when unknown.
   const import::Ps1TextBuild* exe_build_ = nullptr;
   // USA build: the pen advance of every single-byte glyph (the 256-byte width record) and the dialect column of character ids 0..49;

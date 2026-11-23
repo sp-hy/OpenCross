@@ -70,6 +70,26 @@ bool EmitterSystem::Impl::xformed(int owner) const {
          std::find(draw_xform->names.begin(), draw_xform->names.end(), headers[static_cast<size_t>(owner)].nm()) != draw_xform->names.end();
 }
 
+Mat3 EmitterSystem::Impl::blended_matrix(const Object& obj, float alpha) {
+  if (alpha >= 1.0f || (obj.flags & kFlagFaceVelMask)) return obj.mat;
+  auto lerp_s16 = [&](s16 prev, s16 cur) { return static_cast<float>(prev) + static_cast<float>(static_cast<s16>(cur - prev)) * alpha; };
+  const int a0 = static_cast<int>(std::lround(lerp_s16(obj.pang[0], obj.ang[0])));
+  const int a1 = static_cast<int>(std::lround(lerp_s16(obj.pang[1], obj.ang[1])));
+  const int a2 = static_cast<int>(std::lround(lerp_s16(obj.pang[2], obj.ang[2])));
+  const float s0 = lerp_s16(obj.pscale[0], obj.scale[0]), s1 = lerp_s16(obj.pscale[1], obj.scale[1]), s2 = lerp_s16(obj.pscale[2], obj.scale[2]);
+  const Mat3 mat = (a0 == 0 && a1 == 0 && a2 == 0) ? Mat3::identity() : Mat3::from_angles(a0, a1, a2, obj.flags & kFlagZyx);
+  return mat.scaled_columns(s0 / 4096.0f, s1 / 4096.0f, s2 / 4096.0f);
+}
+
+std::array<u8, 3> EmitterSystem::Impl::blended_rgb(const Object& obj, float alpha) {
+  std::array<u8, 3> rgb{};
+  for (size_t i = 0; i < 3; ++i) {
+    const float colour = static_cast<float>(obj.pcol[i]) + static_cast<float>(static_cast<s16>(obj.col[i] - obj.pcol[i])) * alpha;
+    rgb[i] = static_cast<u8>((static_cast<int>(colour) >> 4) & 0xFF);
+  }
+  return rgb;
+}
+
 void EmitterSystem::Impl::collect_meshes(const ViewParams& base_view, float tick_alpha, std::vector<MeshInstance>& out, bool with_suppressed) const {
   const float alpha = frame_blend(tick_alpha);
   const ViewParams moved = moved_view(base_view);
@@ -81,7 +101,7 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& base_view, float tick
     if (!with_suppressed && obj.owner >= 0 && static_cast<size_t>(obj.owner) < headers.size() && headers[static_cast<size_t>(obj.owner)].draw_off) continue;
     MeshInstance mi;
     mi.name = obj.mesh_name;
-    mi.world_mat = obj.mat;
+    mi.world_mat = blended_matrix(obj, alpha);
     mi.motion = obj.motion;
     mi.motion_prev = obj.motion_prev;
     // The drawer blends motion and morph by the tick alpha: over a longer frame step they are resolved here.
@@ -131,7 +151,8 @@ void EmitterSystem::Impl::collect_meshes(const ViewParams& base_view, float tick
     mi.centre = vc;
     // world_mat = obj.mat, with the attach joint's rotation in front (flag bit 7).
     mi.mat = (obj.flags & kFlagWorldQuad) ? view.rot * mi.world_mat : mi.world_mat;
-    for (size_t i = 0; i < 3; ++i) mi.rgb[i] = static_cast<u8>((static_cast<int>(obj.col[i]) >> 4) & 0xFF);
+    const std::array<u8, 3> mesh_rgb = blended_rgb(obj, alpha);
+    for (size_t i = 0; i < 3; ++i) mi.rgb[i] = mesh_rgb[i];
     mi.blend = static_cast<int>(obj.flags & 7);
     mi.flags = obj.flags;
     mi.bias = obj.bias;
@@ -421,28 +442,14 @@ void EmitterSystem::Impl::collect(const ViewParams& base_view, float tick_alpha,
     const auto& frame = sh.frames[static_cast<size_t>(fidx - 1)];
     if (frame.empty()) continue;
 
-    auto lerp_s16 = [&](s16 prev, s16 cur) {
-      return static_cast<float>(prev) + static_cast<float>(static_cast<s16>(cur - prev)) * alpha;
-    };
     Vec3 wpos;
     for (size_t i = 0; i < 3; ++i) {
       const double prev = static_cast<double>(obj.ppos[i]) / 65536.0, cur = static_cast<double>(obj.pos[i]) / 65536.0;
       wpos[i] = static_cast<float>(std::fabs(cur - prev) > 20000.0 ? cur : prev + (cur - prev) * alpha);
     }
-    Mat3 mat = obj.mat;
-    if (alpha < 1.0f && !(obj.flags & kFlagFaceVelMask)) {
-      const int a0 = static_cast<int>(std::lround(lerp_s16(obj.pang[0], obj.ang[0])));
-      const int a1 = static_cast<int>(std::lround(lerp_s16(obj.pang[1], obj.ang[1])));
-      const int a2 = static_cast<int>(std::lround(lerp_s16(obj.pang[2], obj.ang[2])));
-      const float s0 = lerp_s16(obj.pscale[0], obj.scale[0]), s1 = lerp_s16(obj.pscale[1], obj.scale[1]), s2 = lerp_s16(obj.pscale[2], obj.scale[2]);
-      mat = (a0 == 0 && a1 == 0 && a2 == 0) ? Mat3::identity() : Mat3::from_angles(a0, a1, a2, obj.flags & kFlagZyx);
-      mat = mat.scaled_columns(s0 / 4096.0f, s1 / 4096.0f, s2 / 4096.0f);
-    }
-    int rgb[3];
-    for (size_t i = 0; i < 3; ++i) {
-      const float colour = static_cast<float>(obj.pcol[i]) + static_cast<float>(static_cast<s16>(obj.col[i] - obj.pcol[i])) * alpha;
-      rgb[i] = (static_cast<int>(colour) >> 4) & 0xFF;
-    }
+    Mat3 mat = blended_matrix(obj, alpha);
+    const std::array<u8, 3> blended = blended_rgb(obj, alpha);
+    int rgb[3] = {blended[0], blended[1], blended[2]};
 
     // Child expressed in a parent frame (flag bit 15), resolved live.
     if (obj.flags & kFlagRelParent) {

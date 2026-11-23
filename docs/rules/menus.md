@@ -140,13 +140,13 @@ Source: `main_menu_elements.cpp`, `main_menu_presets.cpp`; rules `game_state.cpp
 * **Save** writes the member's cells to the slot, replacing what it held: every unlocked cell holding an element with 0 < id < 0x80 that is not fixed, as (row, column, element id, copies), the copies being the stack cell's count and 1 elsewhere (techs and fixed innate elements are not part of a preset). An empty grid empties the slot. The chunk is written at once (`formats/save.md` section 13.1); sfx 0x17.
 * **Load** (an empty slot is refused, sfx 0x18) does what the editor's own moves do in one step, through `GameState::apply_preset`: Remove All for the member (unlocked cells, fixed ones stay), then each preset cell in order that is unlocked and still empty takes its element through `place` (so level windows, eligibility, the stock and a "More than one summon" cheat apply as for a hand placement; a cell the member cannot hold, a locked cell or one that no longer exists stays empty without a message). A stack cell keeps the saved count: the copies `place` took beyond it go back to the stock. Nothing is created or lost: for every element the stock plus the member's cells hold the same number of copies afterwards, except that a cell whose element the stock lacks is left empty. Elements held by other characters are not in the stock, so they count as lacking. The lacking elements are listed afterwards in the window (name, and "xN" for N missing copies; Up / Down scroll, OK or Cancel closes); with none lacking the window closes at once. Load takes the Remove All lock (27 frames) and plays sfx 0x17. The log line `grid preset: character C loaded slot S` gives the stock and grid copies before and after.
 
-**Reorder orders** (stable sort by group, then key):
+**Reorder orders** (stable sort by group, then key). The kinds are the record's (`formats/battle_data.md` section 5, `data::element_kind`); over the game's records they are the id blocks in brackets, and a mod's element record joins the group of its kind:
 
 | Order | Groups |
 |---|---|
 | Innate first | any id: group 0 if the element colour has the member's innate colour (key id); group 2 if it has the opposite colour (key stock slot); everything else group 1, ordered by the exchange sort below |
-| Attack first | ids 1..0x30 group 0 by descending id; the rest group 1 by id |
-| Heal first | 0x80 group 0; 0x55..0x6B group 1 by id; 0x31..0x54 group 2 by id; 1..0x30 group 3 by descending id; 0x6C..0x7D group 4 by descending id; rest group 5 by id |
+| Attack first | attack elements and summons (1..0x30) group 0 by descending id; the rest group 1 by id |
+| Heal first | id 0x80 group 0; healing elements and consumables (0x55..0x6B) group 1 by id; support elements (0x31..0x54) group 2 by id; attack elements and summons (1..0x30) group 3 by descending id; traps (0x6C..0x7D) group 4 by descending id; the rest (the Chrono Cross, ids that are not elements) group 5 by id |
 
 The opposite colour pairs are bits 0x04 <-> 0x40, 0x08 <-> 0x10, 0x20 <-> 0x80; the member's innate colour is the innate bit masked with 0xFC (a member with no single innate bit has no opposite group).
 

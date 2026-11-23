@@ -153,6 +153,8 @@ class BattleFxLibrary {
   // It is instantiated when a cast starts; its op 0x41 releases the element pack. Null without
   // battle.prd or for colour < 0.
   std::shared_ptr<const FxPack> charge_pack(int colour);
+  // A charge pack's effect id (FxPack::eid): -1 - colour, below every element pack's.
+  static int charge_eid(int colour) { return -1 - colour; }
   static int element_eid(const data::ElemRec& elem) { return elem.raw[0x10] | (elem.raw[0x11] << 8); }
   // The pack a cast caught in an element trap plays instead of its own: 197 + colour for an element, 203 + colour for a summon (record
   // byte 0 bit 0x40), colour 0..5 as the charge's; 0 for a record without a single colour.

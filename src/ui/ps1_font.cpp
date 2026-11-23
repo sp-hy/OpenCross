@@ -306,7 +306,7 @@ void FontSet::draw(int slot_index, std::u32string_view text, float x, float y, c
       const import::SfGlyph* glyph = metrics(*face, ch);
       if (!glyph) continue;
       px = std::max(px + glyph->x_offset, 0.0f);
-      text_->draw_glyph(face->id, ch, (x + (px - glyph->x_offset) * scale) * k, (y + py * scale) * k, fill_colour, scale * k, pass, style);
+      text_->draw_glyph(face->id, ch, (x + (px - glyph->x_offset) * scale) * k, (y + py * scale * text_->row_scale()) * k, fill_colour, scale * k, pass, style);
       px += static_cast<float>(glyph->width()) + glyph->x_advance;
     }
   }

@@ -62,14 +62,14 @@ bool BattleView::Cam::screen(float x, float y, float z, float& sx, float& sy) co
   return true;
 }
 
-// The canvas spans the 4:3 letterbox (Letterbox::fit), the picture its rows [kFieldCrop, kLayerH - kFieldCrop] (Letterbox::field).
-// Widescreen: the picture's extra columns lie left / right of the canvas at the same scale, so a unit there projects to canvas x < 0 or
-// > 1280 and its damage digits / cursor still land on it.
+// The point in HUD canvas units: column x 4 units, framebuffer row x 960 / 216 units, the rows the HUD replay shows in the picture's own rows,
+// so a HUD op placed there lands on the unit. Widescreen: the picture's extra columns lie left / right of the canvas at the same scale, so a
+// unit there projects to canvas x < 0 or > 1280 and its cursor still lands on it.
 bool BattleView::Cam::project(float x, float y, float z, float& cx, float& cy) const {
   float sx = 0, sy = 0;
   if (!screen(x, y, z, sx, sy)) return false;
   cx = sx * (kCanvasW / render::kLayerW);
-  cy = (render::kFieldCrop + sy * (render::kLayerH - 2.0f * render::kFieldCrop) / kBufferRows) * (kCanvasH / render::kLayerH);
+  cy = sy * (kCanvasH / 216.0f);
   return true;
 }
 

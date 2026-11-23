@@ -1040,6 +1040,16 @@ void Actor::end_tick() {
   };
   const float pos[3] = {cur_.x, cur_.y, cur_.z};
   const float yw[1] = {cur_.yaw};
+  const float jump_x = pos[0] - mean_pos_[0][0], jump_y = pos[1] - mean_pos_[0][1], jump_z = pos[2] - mean_pos_[0][2];
+  const bool restart = smooth_warp_ || jump_x * jump_x + jump_y * jump_y + jump_z * jump_z > 150.0f * 150.0f;
+  bool still = true;
+  for (int j = kFollowMeanTicks; j >= 0; --j)
+    for (int i = 0; i < 3; ++i) {
+      mean_pos_[j][i] = restart || j == 0 ? pos[i] : mean_pos_[j - 1][i];
+      if (j < kFollowMeanTicks) still = still && std::fabs(mean_pos_[j][i] - mean_pos_[j + 1][i]) <= 1e-4f;
+    }
+  follow_mean_ = followed_tick_ || (follow_mean_ && !still);
+  followed_tick_ = false;
   close(smooth_pos_, pos, 3, false, smooth_warp_);
   close(smooth_yaw_, yw, 1, true, smooth_warp_);
   smooth_warp_ = false;
@@ -1054,6 +1064,14 @@ ActorPose Actor::pose(float alpha) const {
     result.x = pos_chan.from[0] + (pos_chan.to[0] - pos_chan.from[0]) * blend;
     result.y = pos_chan.from[1] + (pos_chan.to[1] - pos_chan.from[1]) * blend;
     result.z = pos_chan.from[2] + (pos_chan.to[2] - pos_chan.from[2]) * blend;
+    if (follow_mean_) {
+      float* const out[3] = {&result.x, &result.y, &result.z};
+      for (int i = 0; i < 3; ++i) {
+        float sum = 0.0f;
+        for (int j = 0; j < kFollowMeanTicks; ++j) sum += mean_pos_[j + 1][i] + (mean_pos_[j][i] - mean_pos_[j + 1][i]) * alpha;
+        *out[i] = sum / static_cast<float>(kFollowMeanTicks);
+      }
+    }
     const Chan& yaw_chan = smooth_yaw_;
     const float yaw_blend = std::clamp((static_cast<float>(yaw_chan.age) + alpha) / static_cast<float>(yaw_chan.span), 0.0f, 1.0f);
     float y = std::fmod(yaw_chan.from[0] + wrap_units(yaw_chan.to[0] - yaw_chan.from[0]) * yaw_blend, 4096.0f);
@@ -1080,6 +1098,8 @@ Actor::Axes Actor::axes_at(float alpha) const {
   result.pitch = angle(axes_prev_.pitch, now.pitch);
   result.local_yaw = angle(axes_prev_.local_yaw, now.local_yaw);
   result.roll = angle(axes_prev_.roll, now.roll);
+  const float rise = now.y_offset - axes_prev_.y_offset;
+  result.y_offset = std::fabs(rise) > kAxisSnapUnits ? now.y_offset : axes_prev_.y_offset + rise * alpha;
   for (int i = 0; i < 3; ++i) {
     const float prev = axes_prev_.scale[i], cur = now.scale[i];
     const float lo = std::min(std::fabs(prev), std::fabs(cur)), hi = std::max(std::fabs(prev), std::fabs(cur));
@@ -1133,7 +1153,7 @@ render::Mat4 Actor::placed_matrix(float alpha, bool tilted) const {
   }
   render::Mat4 scaling = render::mat4_scale(scale);
   for (int i = 0; i < 3; ++i) scaling.at(i, i) *= axes.scale[i];
-  return render::mat4_translation(actor_pose.x, actor_pose.y + y_offset, actor_pose.z) * rotation * scaling;
+  return render::mat4_translation(actor_pose.x, actor_pose.y + axes.y_offset, actor_pose.z) * rotation * scaling;
 }
 
 void Actor::sample_local(const assets::AnimationClip& clip, float frame, std::vector<Local>& out) const {

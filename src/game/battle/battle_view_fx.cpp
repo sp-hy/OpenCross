@@ -286,17 +286,28 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
   }
 }
 
-// Once per session: index the battle models that ship a cdrom2 (HD art) .obj (battle/player, 3 battle/monster).
-void BattleView::fx_hd_mesh_index() {
-  if (fx_hd_mesh_indexed_ || !vfs_) return;
-  fx_hd_mesh_indexed_ = true;
-  for (const std::string& file : vfs_->list("cdrom2")) {
-    if (!file.starts_with("battle/") || !file.ends_with(".obj")) continue;
+// Once per session: index the battle models that ship a cdrom2 (HD art) .obj (battle/player, 3 battle/monster), in listing order.
+bool BattleView::fx_hd_mesh_index(double budget_ms) {
+  if (fx_hd_mesh_indexed_ || !vfs_) return true;
+  const auto started = std::chrono::steady_clock::now();
+  if (!fx_hd_mesh_files_) {
+    fx_hd_mesh_files_.emplace();
+    for (const std::string& file : vfs_->list("cdrom2"))
+      if (file.starts_with("battle/") && file.ends_with(".obj")) fx_hd_mesh_files_->push_back(file);
+    std::ranges::reverse(*fx_hd_mesh_files_);
+  }
+  while (!fx_hd_mesh_files_->empty()) {
+    if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() >= budget_ms) return false;
+    const std::string file = std::move(fx_hd_mesh_files_->back());
+    fx_hd_mesh_files_->pop_back();
     const auto disc = vfs_->read_disc("cdrom/" + file);
     if (!disc) continue;
     const ByteSpan s1 = import::mdl_section(*disc, 0);
     if (!s1.empty()) fx_hd_mesh_index_[fnv1a(s1)].push_back(file.substr(0, file.size() - 4));
   }
+  fx_hd_mesh_indexed_ = true;
+  fx_hd_mesh_files_.reset();
+  return true;
 }
 
 std::string BattleView::fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
@@ -589,8 +600,9 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
   }
   // The rest of a prefetch of this pack, or a build of its own.
   FxGpuBuild local;
-  const bool prefetched = fx_prefetch_ && fx_prefetch_->eid == pack->eid;
-  FxGpuBuild& build = prefetched ? *fx_prefetch_ : local;
+  const auto queued = std::ranges::find(fx_prefetch_, pack->eid, &FxGpuBuild::eid);
+  const bool prefetched = queued != fx_prefetch_.end();
+  FxGpuBuild& build = prefetched ? *queued : local;
   if (!prefetched) {
     build.eid = pack->eid;
     build.pack = pack;
@@ -598,7 +610,7 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
   while (!fx_gpu_step(build, 1e9)) {
   }
   const bool failed = build.failed;
-  if (prefetched) fx_prefetch_.reset();
+  if (prefetched) fx_prefetch_.erase(queued);
   if (failed) return nullptr;
   const auto it = fx_gpu_.find(pack->eid);
   return it == fx_gpu_.end() ? nullptr : it->second.get();
@@ -613,7 +625,8 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
   };
   switch (build.step) {
     case Step::Pack:
-      if (!build.pack) build.pack = fxlib_.get(build.eid);
+      // A charge pack's id is BattleFxLibrary::charge_eid(colour) = -1 - colour.
+      if (!build.pack) build.pack = build.eid < 0 ? fxlib_.charge_pack(-1 - build.eid) : fxlib_.get(build.eid);
       if (!build.pack) return fail();
       // Built meanwhile (a pack can be both prefetched and asked for).
       if (fx_gpu_.count(build.pack->eid)) {
@@ -627,7 +640,7 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
       build.gpu = std::make_unique<FxGpu>();
       FxGpu& gpu = *build.gpu;
       gpu.sprites = std::make_unique<effects::GpuEffects>();
-      effects::EffectBank bank;
+      effects::EffectBank& bank = build.bank;
       bank.add(&pack.fx);
       if (pack.extra) bank.add(pack.extra.get());
       // battle.prd's sheets (b28, 64ke, smok ...): resident, named by the packs.
@@ -648,12 +661,21 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
       // RDE's 4x sheet pages (FxPack::hd_sprites) are drawn in HD art; the upload is rebuilt on an art switch.
       gpu.sprites->set_hd(hd_);
       gpu.art_dependent = pack.hd_sprites > 0;
-      if (!gpu.sprites->init(*ctx_, *sprites_) ||
-          !gpu.sprites->load(bank, fx_lib_gpu_ ? effects::GpuEffects::Which::SkipLibraries : effects::GpuEffects::Which::All)) {
+      build.sheets = fx_lib_gpu_ ? effects::GpuEffects::Which::SkipLibraries : effects::GpuEffects::Which::All;
+      if (!gpu.sprites->init(*ctx_, *sprites_) || !gpu.sprites->load_begin()) {
         log::warn("battle fx: eid {}: texture upload failed", pack.eid);
         return fail();
       }
-      build.step = pack.meshes ? Step::Meshes : Step::HdIndex;
+      build.step = Step::SpriteSheets;
+      return false;
+    }
+    case Step::SpriteSheets: {
+      bool loaded = false;
+      if (!build.gpu->sprites->load_more(build.bank, build.sheets, budget_ms, loaded)) {
+        log::warn("battle fx: eid {}: texture upload failed", build.eid);
+        return fail();
+      }
+      if (loaded) build.step = build.pack->meshes ? Step::Meshes : Step::HdIndex;
       return false;
     }
     case Step::Meshes: {
@@ -678,7 +700,7 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
       build.step = Step::HdIndex;
       return false;
     case Step::HdIndex:
-      if (hd_ && vfs_ && vfs_->hd_mode() && pack_has_models(*build.pack)) fx_hd_mesh_index();
+      if (hd_ && vfs_ && vfs_->hd_mode() && pack_has_models(*build.pack) && !fx_hd_mesh_index(budget_ms)) return false;
       build.step = Step::Models;
       return false;
     case Step::Models: {

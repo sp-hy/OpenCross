@@ -400,6 +400,8 @@ int ocbattleview_main(int argc, char** argv) {
       std::array<bool, 4> stick_dpad{};
       platform::FrameTimer timer;
       int frames = 0, lost_frames = 0;
+      // OC_FRAMETIME: the wall time of each frame's update and draw, those over 17 ms or every frame with a value starting with `2`.
+      const char* frametime = std::getenv("OC_FRAMETIME");
       while (rc == 0 && window.pump(input)) {
         platform::stick_to_dpad(input, stick_dpad);
         if (input.key_pressed[SDL_SCANCODE_ESCAPE]) break;
@@ -453,6 +455,7 @@ int ocbattleview_main(int argc, char** argv) {
           have_frame = true;
         }
         const double real_dt = timer.tick();
+        const auto update_start = std::chrono::steady_clock::now();
         // --shot: one tick per frame, deterministic.
         view.update(shot_frames >= 0 || shot_every > 0 ? 1.0f / 60.0f : static_cast<float>(real_dt), input);
         if (mixer) mixer->capture_tick(1.0 / 60.0);
@@ -468,9 +471,15 @@ int ocbattleview_main(int argc, char** argv) {
           ctx.request_screenshot((shot_dir.empty() ? exe : shot_dir) / name);
           log::debug("shot frame {}", frames);
         }
+        const auto draw_start = std::chrono::steady_clock::now();
         view.draw(frame);
         view.draw_transition(frame, false);
         ctx.end_frame();
+        if (frametime) {
+          const double update_ms = std::chrono::duration<double, std::milli>(draw_start - update_start).count();
+          const double draw_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - draw_start).count();
+          if (update_ms + draw_ms > 17.0 || frametime[0] == '2') log::info("frametime: frame {} update {:.1f} ms draw {:.1f} ms", frames, update_ms, draw_ms);
+        }
         ++frames;
         if (shot_frames >= 0 && frames > shot_frames + 3) break;
         if (max_frames >= 0 && frames > max_frames) break;

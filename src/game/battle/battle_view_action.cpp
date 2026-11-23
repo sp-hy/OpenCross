@@ -113,9 +113,11 @@ void BattleView::update(float dt, const platform::Input& in) {
   const auto st = stepper_.advance(static_cast<double>(dt));
   // The ticks see the stepper's remainder as before (fx attach / skin reads of alpha_).
   alpha_ = tick_alpha_;
+  const int casts = fx_casts_;
   for (int i = 0; i < st.ticks; ++i) tick();
-  // One step of a pack build under way per video frame, however many ticks the frame ran.
-  fx_prefetch_step();
+  // The pack builds under way step once per video frame, however many ticks the frame ran; not in a frame that started a pack (the charge,
+  // the hand-over), which has work enough of its own.
+  if (fx_casts_ == casts) fx_prefetch_step();
   tick_alpha_ = st.alpha;
   alpha_ = fx_slow_alpha(st.alpha);
   for (LogLine& line : log_) line.ttl -= dt;

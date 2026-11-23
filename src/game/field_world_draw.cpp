@@ -169,6 +169,30 @@ void FieldWorld::set_entity_rgb(int ent, int r, int g, int b) {
 
 bool FieldWorld::tint_active() const { return fog_.cur[0] > 0.5f || fog_.cur[1] > 0.5f || fog_.cur[2] > 0.5f; }
 
+// Start of a tick (and the end of a room load): what is drawn now becomes the start of the next blend.
+void FieldWorld::snapshot_drawn() {
+  drawn_prev_.fog = fog_.cur;
+  for (size_t slot = 0; slot < seq_dim_.size(); ++slot) drawn_prev_.dim[slot] = seq_dim_[slot].cur;
+  drawn_prev_.post = seq_post_.cur;
+  drawn_prev_.post_rgb = seq_post_.rgb;
+  drawn_prev_.bk = bk_.cur;
+  drawn_prev_.fade = fade_;
+  for (Ent& entity : ents_) {
+    entity.tint_prev = RoomLighting::tint(entity.light, entity.rgb);
+    entity.shadow_grey_prev = entity.shadow_grey;
+  }
+  view_.snapshot_group_tint();
+}
+
+int FieldWorld::drawn_shadow_grey(const Ent& entity, float alpha) const {
+  return static_cast<int>(std::lround(static_cast<float>(entity.shadow_grey_prev) + static_cast<float>(entity.shadow_grey - entity.shadow_grey_prev) * alpha));
+}
+
+bool FieldWorld::drawn_prev_shown() const {
+  const bool fog = drawn_prev_.fog[0] > 0.5f || drawn_prev_.fog[1] > 0.5f || drawn_prev_.fog[2] > 0.5f;
+  return fog || drawn_prev_.fade > 0.001f || drawn_prev_.dim[0] != std::array<int, 3>{} || drawn_prev_.dim[1] != std::array<int, 3>{};
+}
+
 // ------------------------------------------------------------------------------------------------ shadows and background
 // Per actor, once per tick: the shadow strength eases by 2 toward (R + G + B) / 6 of the entity colour (128 each -> 64),
 // toward 0 on a triangle with any of the flags 0x6E000 (stairs, water); an actor that is not drawn has none.
@@ -235,7 +259,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
     ActorShadows::floor_normal(view_.walk(), entity.actor.triangle(), shadow.normal);
     shadow.scale_x = static_cast<float>(static_cast<s16>(vm_ent.scale[0]));
     shadow.scale_z = static_cast<float>(static_cast<s16>(vm_ent.scale[2]));
-    shadow.grey = entity.shadow_grey;
+    shadow.grey = drawn_shadow_grey(entity, alpha);
     shadow.layer = static_cast<float>(vm_ent.word_b8);
     if (render::FieldCamera::Projected projected; view_.draw_camera().project({shadow.x, shadow.y, shadow.z}, projected) &&
                                                   !in_slab(std::floor(std::max(projected.z, 0.0f) / 16.0f) + shadow.layer))
@@ -257,7 +281,7 @@ void FieldWorld::draw_background(render::SpriteBatch& sprites, float vw, float v
 
 bool FieldWorld::casts_shadow(size_t index) const {
   const Ent& entity = ents_[index];
-  return entity.actor.loaded() && !ent_not_drawn(static_cast<int>(index)) && entity.shadow_grey > 0 && !(vm_.entity(static_cast<int>(index)).flags38 & 0x10C420);
+  return entity.actor.loaded() && !ent_not_drawn(static_cast<int>(index)) && (entity.shadow_grey > 0 || entity.shadow_grey_prev > 0) && !(vm_.entity(static_cast<int>(index)).flags38 & 0x10C420);
 }
 
 // [Enhancements] Lighting: each actor flattened straight down onto its own floor height, one tile per actor, standing (Actor::upright_matrix: a
@@ -309,7 +333,7 @@ void FieldWorld::prepare_shadows(const render::Frame& frame, float alpha) {
     if (!casts_shadow(index) || !entity.actor.gpu()) continue;
     const bool jumping = entity.motion.active && (entity.motion.kind == script::MotionKind::Jump || entity.motion.kind == script::MotionKind::Tween);
     entity.shadow_tile = tile;
-    entity.shadow_half = cast_tile(entity.actor, jumping ? ground_y(entity) : entity.actor.pose(alpha).y, entity.shadow_grey);
+    entity.shadow_half = cast_tile(entity.actor, jumping ? ground_y(entity) : entity.actor.pose(alpha).y, drawn_shadow_grey(entity, alpha));
   }
   if (remote_current())
     for (RemoteParties::Party& party : remote_.parties()) {
@@ -469,7 +493,7 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
     dp.near_meshes = entity.actor.near_parts();
     if (menu) menu_model_parts(menu->body->asset, dp);
     const auto tint = RoomLighting::tint(entity.light, entity.rgb);
-    for (size_t channel = 0; channel < 3; ++channel) dp.tint[channel] = tint[channel];
+    for (size_t channel = 0; channel < 3; ++channel) dp.tint[channel] = entity.tint_prev[channel] + (tint[channel] - entity.tint_prev[channel]) * alpha;
     if (const int slot = RoomLighting::water_slot(tri_flags); slot >= 0 && !(vm_ent.flags38 & 0x10C020)) {
       dp.water_level = static_cast<float>(vm_.water_level(static_cast<size_t>(slot)));
       for (size_t channel = 0; channel < 3; ++channel) dp.water_tint[channel] = static_cast<float>(underwater_rgb_[channel]) / 128.0f;
@@ -481,7 +505,8 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
       if (entity.actor.attach_world(9, waist)) {
         const effects::LightMatrices lm = effects::light_matrices(lights_, {waist[0], waist[1], waist[2]}, true);
         dp.light.on = true;
-        for (size_t channel = 0; channel < 3; ++channel) dp.light.bk[channel] = static_cast<float>(bk_.cur[channel]) / 256.0f;
+        for (size_t channel = 0; channel < 3; ++channel)
+          dp.light.bk[channel] = (static_cast<float>(drawn_prev_.bk[channel]) + static_cast<float>(bk_.cur[channel] - drawn_prev_.bk[channel]) * alpha) / 256.0f;
         for (size_t light = 0; light < 3; ++light)
           for (size_t channel = 0; channel < 3; ++channel) {
             dp.light.dir[light][channel] = lm.dir[light][channel];
@@ -518,8 +543,11 @@ void FieldWorld::draw_actors(render::MeshPipeline& meshes, const render::Frame& 
 // Screen fog (68): a full-screen flat quad over the picture columns in the PS1 semi-transparency mode of the fog (0 = half add, 1 add,
 // 2 subtract, 3 quarter add). Sequence screen colour (2B / 2C): a quad over the whole visible frame, opaque or blended by its mode,
 // skipped while black. Then (with `windows`) the transition veil, the windows, the room fade and the captured frame.
-void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, bool windows) {
-  if (tint_active() && white_set_) {
+void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, float alpha, bool windows) {
+  auto blend = [&](float from, float to) { return from + (to - from) * alpha; };
+  std::array<float, 3> fog{};
+  for (size_t i = 0; i < 3; ++i) fog[i] = blend(drawn_prev_.fog[i], fog_.cur[i]);
+  if ((fog[0] > 0.5f || fog[1] > 0.5f || fog[2] > 0.5f) && white_set_) {
     auto to_u8 = [&](float value) { return static_cast<u8>(std::lround(std::clamp(value, 0.0f, 255.0f))); };
     float gain = 1.0f;
     render::BlendMode mode = render::BlendMode::Subtract;
@@ -534,32 +562,35 @@ void FieldWorld::draw_overlay(render::SpriteBatch& sprites, float vw, float vh, 
     view_.picture_columns(lb, static_cast<float>(view_.scroll_x()), col0, col1);
     sprites.set_blend(mode);
     sprites.draw(white_set_, lb.ox + col0 * lb.scale, lb.oy, (col1 - col0) * lb.scale, render::kFieldRows * lb.scale_y, 0, 0, 1, 1,
-                 render::pack_rgba(to_u8(fog_.cur[0] * gain), to_u8(fog_.cur[1] * gain), to_u8(fog_.cur[2] * gain), 255));
+                 render::pack_rgba(to_u8(fog[0] * gain), to_u8(fog[1] * gain), to_u8(fog[2] * gain), 255));
     sprites.set_blend(render::BlendMode::Alpha);
   }
-  for (const SeqDim& dim : seq_dim_) {
-    if (dim.cur == std::array<int, 3>{} || !white_set_) continue;
+  for (size_t slot = 0; slot < seq_dim_.size(); ++slot) {
+    const SeqDim& dim = seq_dim_[slot];
+    std::array<float, 3> colour{};
+    for (size_t i = 0; i < 3; ++i) colour[i] = blend(static_cast<float>(drawn_prev_.dim[slot][i]), static_cast<float>(dim.cur[i]));
+    if (colour == std::array<float, 3>{} || !white_set_) continue;
     const render::Letterbox lb = view_.letterbox(vw, vh);
     render::BlendMode mode = render::BlendMode::Alpha;
     float gain = 1.0f;
-    u8 alpha = 255;
+    u8 opacity = 255;
     switch (dim.mode) {
       case 0: break;
-      case 1: alpha = 128; break;
+      case 1: opacity = 128; break;
       case 2: mode = render::BlendMode::Add; break;
       case 3: mode = render::BlendMode::Subtract; break;
       default: mode = render::BlendMode::Add; gain = 0.25f; break;
     }
-    auto to_u8 = [&](int value) { return static_cast<u8>(std::clamp(static_cast<int>(static_cast<float>(value) * gain + 0.5f), 0, 255)); };
+    auto to_u8 = [&](float value) { return static_cast<u8>(std::clamp(static_cast<int>(value * gain + 0.5f), 0, 255)); };
     sprites.set_blend(mode);
     sprites.draw(white_set_, lb.left(), lb.oy, lb.width(), render::kFieldRows * lb.scale_y, 0, 0, 1, 1,
-                 render::pack_rgba(to_u8(dim.cur[0]), to_u8(dim.cur[1]), to_u8(dim.cur[2]), alpha));
+                 render::pack_rgba(to_u8(colour[0]), to_u8(colour[1]), to_u8(colour[2]), opacity));
     sprites.set_blend(render::BlendMode::Alpha);
   }
   if (windows) {
     draw_veil_transition(sprites, vw, vh);
     draw_windows(sprites, vw, vh);
-    draw_veil_fade(sprites, vw, vh);
+    draw_veil_fade(sprites, vw, vh, alpha);
     draw_capture(sprites, vw, vh);
   }
 }
@@ -811,9 +842,9 @@ void FieldWorld::sync_panel_window() {
 }
 
 // The veils and the captured frame after the PS1-resolution window pass, so that the windows sit under the fade as in the other order.
-void FieldWorld::draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh) {
+void FieldWorld::draw_overlay_tail(render::SpriteBatch& sprites, float vw, float vh, float alpha) {
   draw_veil_transition(sprites, vw, vh);
-  draw_veil_fade(sprites, vw, vh);
+  draw_veil_fade(sprites, vw, vh, alpha);
   draw_capture(sprites, vw, vh);
 }
 
@@ -830,9 +861,10 @@ void FieldWorld::draw_veil_transition(render::SpriteBatch& sprites, float vw, fl
 
 // The slot-0 screen fade over the screen in use (the 4:3 fit, or the whole widened frame in widescreen): it adds toward white for a
 // kind 2 room change and subtracts toward black otherwise (room changes, A8, menu returns).
-void FieldWorld::draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh) {
-  if (fade_ <= 0.001f || !white_set_) return;
-  const u8 level = static_cast<u8>(std::lround(std::min(1.0f, fade_) * 255.0f));
+void FieldWorld::draw_veil_fade(render::SpriteBatch& sprites, float vw, float vh, float alpha) {
+  const float fade = drawn_prev_.fade + (fade_ - drawn_prev_.fade) * alpha;
+  if (fade <= 0.001f || !white_set_) return;
+  const u8 level = static_cast<u8>(std::lround(std::clamp(fade, 0.0f, 1.0f) * 255.0f));
   const render::Letterbox::Rect rect = render::Letterbox::veil_rect(vw, vh);
   sprites.set_blend(fade_add_ ? render::BlendMode::Add : render::BlendMode::Subtract);
   sprites.draw(white_set_, rect.x, rect.y, rect.w, rect.h, 0, 0, 1, 1, render::pack_rgba(level, level, level, 255));
@@ -928,19 +960,23 @@ void FieldWorld::draw_capture(render::SpriteBatch& sprites, float vw, float vh) 
 // drawn (every rotation the encounter ramp carries is 0). Otherwise the damage jolt: for 8 frames after a hit the previous picture
 // is pasted over the new one at 50 %, shifted by (rsin(n * 64) >> 10, rcos(n * 0x39) >> 10) PS1 pixels and scaled by
 // 0x1010 + (rsin(n * 128) << 4 >> 12) / 0x1000 about the centre, n = 7 .. 0.
-FieldWorld::JoltView FieldWorld::jolt_view() const {
+FieldWorld::JoltView FieldWorld::jolt_view(float alpha) const {
   JoltView jolt;
   if (seq_post_.on && jolt_n_ < 0) {
     const SeqPost& post = seq_post_;
-    const float z = 4096.0f + static_cast<float>(post.cur[5]);
+    std::array<float, 8> cur{};
+    for (size_t i = 0; i < cur.size(); ++i)
+      cur[i] = static_cast<float>(drawn_prev_.post[i]) + static_cast<float>(post.cur[i] - drawn_prev_.post[i]) * alpha;
+    const float z = 4096.0f + cur[5];
     if (z > 64.0f) {
       jolt.on = jolt.post = true;
       jolt.n = static_cast<int>(tick_count_ & 0x3FFFFFFF);
       jolt.scale = 4096.0f / z;
-      jolt.tx = static_cast<float>(post.cur[3]) * 0.25f * jolt.scale + static_cast<float>(post.cur[6]);
-      jolt.ty = static_cast<float>(post.cur[4]) * 0.25f * jolt.scale + static_cast<float>(post.cur[7]);
+      jolt.tx = cur[3] * 0.25f * jolt.scale + cur[6];
+      jolt.ty = cur[4] * 0.25f * jolt.scale + cur[7];
       jolt.mode = post.abr;
-      jolt.rgb = post.rgb;
+      for (size_t i = 0; i < 3; ++i)
+        jolt.rgb[i] = static_cast<int>(std::lround(static_cast<float>(drawn_prev_.post_rgb[i]) + static_cast<float>(post.rgb[i] - drawn_prev_.post_rgb[i]) * alpha));
       return jolt;
     }
   }

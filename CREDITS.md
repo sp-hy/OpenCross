@@ -46,5 +46,15 @@ This file lists (A) the third-party libraries and build tools OpenCross uses, (B
 | Name | Where |
 |---|---|
 | BathoryDormin | Nexus Mods |
+| dsthomaz | Nexus Mods |
+| EDWARD861 | Nexus Mods |
+| glennct | Nexus Mods |
+| GrobikG | Nexus Mods |
+| jsonting | Nexus Mods |
+| Nickk348 | Nexus Mods |
+| shade0180 | Nexus Mods |
+| Tayruu | Nexus Mods |
+| TravisPlaysGames | Nexus Mods |
+| tyrant626 | Nexus Mods |
 
 Chrono Cross © 1999 Square (Square Enix). The Radical Dreamers Edition © 2022 Square Enix / D4 Enterprise. OpenCross is a fan project; it requires a legitimately owned copy of the Radical Dreamers Edition.

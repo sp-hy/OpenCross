@@ -62,7 +62,16 @@ void BattleView::replay(const render::Frame&, const render::Letterbox& lb, float
     return rect;
   };
   auto to_x = [&](float x) { return lb.ox + x * canvas_scale; };
-  auto to_y = [&](float y) { return lb.oy + y * canvas_scale; };
+  // The HUD is built in PS1 rows at 960 / 216 canvas units per row and shown in the battle picture's own rows: the 224 framebuffer rows
+  // over the layer rows [kFieldCrop, kLayerH - kFieldCrop], so a HUD sprite and the 3D picture share every row as on the PS1.
+  constexpr float kHudOy = render::kFieldCrop * (kCanvasH / render::kLayerH);
+  constexpr float kHudRowY = (render::kLayerH - 2.0f * render::kFieldCrop) / render::kFieldRows * (kCanvasH / render::kLayerH) / (kCanvasH / 216.0f);
+  // Text takes RDE's canvas placement over the battle instead: the 960 rows of the 4:3 fit less its bands, scaled by 928 / 960 about
+  // their top (its row ratio 944 / 960 x 928 / 960), with glyphs that much flatter; the PS1 font of disc mode is sprites, on the HUD's rows.
+  const float text_row_y = fonts_.ps1() ? kHudRowY : 944.0f / 960.0f * 928.0f / 960.0f;
+  auto hud_y = [](float y) { return kHudOy + y * kHudRowY; };
+  auto to_y = [&](float y) { return lb.oy + hud_y(y) * canvas_scale; };
+  const float row_scale = kHudRowY * canvas_scale;
   // Screen fade (battle scripts 0x2B / 0x2C, run-away, game over): over the scene, under the HUD.
   const float fa = camera_.fade_alpha(alpha);
   if (fa > 0.003f) {
@@ -76,6 +85,9 @@ void BattleView::replay(const render::Frame&, const render::Letterbox& lb, float
   // shifts by the picture's extra columns, 4 canvas units per column).
   // [Video] WideHud: default 0, 16:9 = min(e, 49), full = e.
   const float edge_dx = wide_hud_cols_ * 4.0f;
+  const float square_aspect = text_.pixel_aspect();
+  text_.set_row_scale(text_row_y);
+  text_.set_pixel_aspect(square_aspect * text_row_y);
   for (const Op& op : ops_) {
     const float dx = op.grp == 2 || edge_dx <= 0.0f ? 0.0f : static_cast<float>(op.grp) * edge_dx + op.shift;
     switch (op.kind) {
@@ -84,15 +96,15 @@ void BattleView::replay(const render::Frame&, const render::Letterbox& lb, float
         if (op.x <= 0.0f && op.x + op.w >= kCanvasW) {
           const render::Letterbox pic = picture_rect();
           const float left = std::min(to_x(op.x + dx), pic.left()), right = std::max(to_x(op.x + dx + op.w), pic.left() + pic.width());
-          sprites_->draw(white_.set, left, to_y(op.y), right - left, op.h * canvas_scale, 0, 0, 1, 1, op.color);
+          sprites_->draw(white_.set, left, to_y(op.y), right - left, op.h * row_scale, 0, 0, 1, 1, op.color);
           break;
         }
-        sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, 0, 0, 1, 1, op.color);
+        sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * row_scale, 0, 0, 1, 1, op.color);
         break;
       case Op::Img:
         // Blend 3 = PS1 ABR 2 (B - F).
         if (op.blend) sprites_->set_blend(op.blend == 1 ? render::BlendMode::Multiply : op.blend == 3 ? render::BlendMode::Subtract : render::BlendMode::Add);
-        sprites_->draw(op.tex->set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, op.u0, op.v0, op.u1, op.v1, op.color);
+        sprites_->draw(op.tex->set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * row_scale, op.u0, op.v0, op.u1, op.v1, op.color);
         if (op.blend) sprites_->set_blend(render::BlendMode::Alpha);
         break;
       case Op::Icon:
@@ -101,7 +113,7 @@ void BattleView::replay(const render::Frame&, const render::Letterbox& lb, float
       case Op::Plate: {
         const Tex& plate = plates_[static_cast<size_t>(std::clamp(op.plate, 0, 7))];
         // menuelem_N.png, drawn in both art modes.
-        if (plate.set) sprites_->draw(plate.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, 0, 0, 1, 1, op.color);
+        if (plate.set) sprites_->draw(plate.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * row_scale, 0, 0, 1, 1, op.color);
         break;
       }
       case Op::Panel:
@@ -109,24 +121,26 @@ void BattleView::replay(const render::Frame&, const render::Letterbox& lb, float
         if (win_base_.set && win_frame_.set) {
           // Plain stretch of the subtractive base plate (as the element description window draws it), then the 9-sliced frame.
           sprites_->set_blend(render::BlendMode::Subtract);
-          sprites_->draw(win_base_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, 0, 0, 1, 1, 0xFFFFFFFFu);
+          sprites_->draw(win_base_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * row_scale, 0, 0, 1, 1, 0xFFFFFFFFu);
           sprites_->set_blend(render::BlendMode::Alpha);
-          nine_slice(win_frame_.set, win_frame_.w, win_frame_.h, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, 28.0f, 14.0f * canvas_scale, 0xFFFFFFFFu);
+          nine_slice(win_frame_.set, win_frame_.w, win_frame_.h, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * row_scale, 28.0f, 14.0f * canvas_scale, 0xFFFFFFFFu);
         } else {
-          sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * canvas_scale, 0, 0, 1, 1, col(16, 20, 90, 225));
+          sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, op.h * row_scale, 0, 0, 1, 1, col(16, 20, 90, 225));
           const float border = 4 * canvas_scale;
           const u32 edge = col(225, 225, 245);
           sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), op.w * canvas_scale, border, 0, 0, 1, 1, edge);
           sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y + op.h) - border, op.w * canvas_scale, border, 0, 0, 1, 1, edge);
-          sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), border, op.h * canvas_scale, 0, 0, 1, 1, edge);
-          sprites_->draw(white_.set, to_x(op.x + dx + op.w) - border, to_y(op.y), border, op.h * canvas_scale, 0, 0, 1, 1, edge);
+          sprites_->draw(white_.set, to_x(op.x + dx), to_y(op.y), border, op.h * row_scale, 0, 0, 1, 1, edge);
+          sprites_->draw(white_.set, to_x(op.x + dx + op.w) - border, to_y(op.y), border, op.h * row_scale, 0, 0, 1, 1, edge);
         }
         break;
       case Op::Text:  // canvas -> FontSet pen units (canvas_scale view px per canvas unit, letterbox origin folded into the pen)
-        fonts_.draw(op.slot, op.text, op.x + dx + lb.ox / canvas_scale, op.y + lb.oy / canvas_scale, op.ink, op.scale, op.align, canvas_scale);
+        fonts_.draw(op.slot, op.text, op.x + dx + lb.ox / canvas_scale, kHudOy + op.y * text_row_y + lb.oy / canvas_scale, op.ink, op.scale, op.align, canvas_scale);
         break;
     }
   }
+  text_.set_row_scale(1.0f);
+  text_.set_pixel_aspect(square_aspect);
 
   // Damage / heal / miss numbers (particles, battle_numbers.h): every digit is a view-space sprite at
   // (x, y, z + H << 5) projected with the live H about the projection centre (cam_.ox / oy, incl. the screen shake), its numf quad

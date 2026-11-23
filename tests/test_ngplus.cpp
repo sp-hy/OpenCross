@@ -37,6 +37,21 @@ int count_el(const std::array<save::ItemStack, save::kNumElements>& stacks, int 
   return total;
 }
 
+// Element records with the flag bytes of the game's blocks (attack, summon, support, healing, consumable, trap, the Chrono Cross, an
+// empty element record, techs).
+data::GameTables element_kinds() {
+  data::GameTables tables;
+  tables.elements.resize(0xA0);
+  for (int id = 1; id < 0xA0; ++id) {
+    auto& raw = tables.elements[static_cast<size_t>(id)].raw;
+    const bool summon = id >= 0x25 && id <= 0x30, support = id >= 0x31 && id <= 0x54, healing = id >= 0x55 && id <= 0x60,
+               consumable = id >= 0x61 && id <= 0x6B, trap = id >= 0x6C && id <= 0x7D, tech = id >= 0x80;
+    raw[0] = summon ? 0x41 : support ? 0x08 : healing ? 0x04 : consumable ? 0x14 : trap ? 0x12 : 0x01;
+    raw[1] = tech ? 0x02 : (id < 0x25 || support || healing) ? 0x01 : 0x00;
+  }
+  return tables;
+}
+
 void test_variant() {
   // FE 59 -> mode 3 -> variant 1 (title list), FE 84 -> mode 0x30 -> variant 2 (New Game+ list), FE 85 -> mode 4 -> variant 3 (save list).
   CHECK(ng::title_variant(ng::launcher_mode_for_op(0x59)) == 1);
@@ -60,8 +75,10 @@ void test_variant() {
   CHECK(var_slot.new_game_plus() && var_slot.ng_flag() == 2 && var_slot.head[0x206] == 2);
   // Not-carried lists.
   CHECK(!ng::carries_item(0x26) && !ng::carries_item(0x58) && !ng::carries_item(0xFD) && ng::carries_item(0x126) && ng::carries_item(1));
-  CHECK(ng::carries_element(0x10) && ng::carries_element(0x24) && !ng::carries_element(0x25) && !ng::carries_element(0x30) &&
-        ng::carries_element(0x31) && !ng::carries_element(0x7E) && !ng::carries_element(0));
+  const data::GameTables kinds = element_kinds();
+  const auto carries = [&](int id) { return ng::carries_element(kinds.elements, id); };
+  CHECK(carries(0x10) && carries(0x24) && !carries(0x25) && !carries(0x30) && carries(0x31) && carries(0x61) && carries(0x6C) &&
+        !carries(0x7E) && !carries(0x7F) && !carries(0x90) && !carries(0));
 }
 
 save::SaveSlot cleared_game() {
@@ -106,9 +123,10 @@ save::SaveSlot cleared_game() {
 
 void test_new_game_plus() {
   const save::SaveSlot cleared = cleared_game();
-  const save::SaveSlot plus = ng::new_game_plus_slot(nullptr, cleared);
+  const data::GameTables kinds = element_kinds();
+  const save::SaveSlot plus = ng::new_game_plus_slot(&kinds, cleared);
   const save::SaveChar& serge = plus.chars[0];
-  // records: stats from the cleared game, gear / model / innate / grid of the new game (zeros without tables), status cleared
+  // records: stats from the cleared game, gear / model / innate / grid of the new game (zeros without character sets), status cleared
   CHECK(serge.max_hp == 999 && serge.cur_hp == 500 && serge.atk == 90 && serge.mdef == 70 && serge.hp_extra == 7 && serge.bonus[3] == 9);
   CHECK(serge.status == 0 && serge.weapon == 0 && serge.model_id == 0 && serge.colour_bit == 0 && serge.grid[0] == 0);
   CHECK(serge.unlocked[7] == 0x3FF);

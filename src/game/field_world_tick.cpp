@@ -461,6 +461,7 @@ void FieldWorld::sweep_talk(int ticks, const std::function<void()>& settle) {
 
 void FieldWorld::sim_tick() {
   ++tick_count_;
+  snapshot_drawn();
   // Cheats: max money (the in-game cap).
   if (platform::cheats().max_money && gs_) gs_->set_gold(9999999);
   view_.set_interp_frozen(exit_frozen());

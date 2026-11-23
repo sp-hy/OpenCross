@@ -81,6 +81,10 @@ class TextBatch {
   // canvas shows 216 display lines over its 960 units, so its pixels are 960 / 216 / 4 as high as wide.
   void set_pixel_aspect(float aspect) { aspect_ = aspect; }
   float pixel_aspect() const { return aspect_; }
+  // Height / width of a sprite-font glyph for the next draws and line pitches (1 = square, the default): the glyph and its offset from the
+  // pen are scaled on y, its advance is not. A screen whose rows are flatter than its columns (the battle HUD) sets its row ratio.
+  void set_row_scale(float row_scale) { row_scale_ = row_scale; }
+  float row_scale() const { return row_scale_; }
 
   // Makes sure every code point of `text` has an atlas entry. Not callable between begin() and end().
   void prepare(FaceId face, std::u32string_view text);
@@ -219,6 +223,7 @@ class TextBatch {
   SpriteBatch* sprites_ = nullptr;
   float grid_x_ = 0, grid_y_ = 0;
   float aspect_ = 1.0f;
+  float row_scale_ = 1.0f;
   Sampler linear_, nearest_;
   std::vector<Face> faces_;
 };

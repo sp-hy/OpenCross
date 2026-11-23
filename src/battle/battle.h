@@ -194,8 +194,9 @@ struct Unit {
   bool record_ko = false;
   // Frozen (lo 0x20000000) landed with its timer: the unit's next action first clears lo 0x60000000 (Battle::thaw_on_action).
   bool freeze_pending = false;
-  // The unit's result code slot (0 hit, 1 no damage, 2 miss, 3 heal; 0xFF = it was the last action's caster). It keeps its value between
-  // actions: a mode that writes no code (36) shows the one the unit's last action left.
+  // The unit's result code slot (0 hit, 1 no damage, 2 miss, 3 heal; 0xFF = an action's caster that no pass wrote). Written by the passes
+  // that hit the unit and by those of its own actions; it keeps its value between actions: a mode that writes no code (36) shows the one the
+  // unit's last action left.
   int result_code = 0;
   bool alive() const { return present && !(lo & (st::kKO | st::kDefeated)); }
   // In the turn order: a frozen unit is out of alive() but its countdown runs and it takes its turn at 0.
@@ -285,6 +286,10 @@ struct ActionEvent {
   // The result word the element mode wrote into the caster's control block (anim op 0xA9 reads it): Beta (mode 47) the field colour
   // bit << 2, Shuffle (mode 48) the swapped HP value; -1 = the mode wrote none.
   int caster_word = -1;
+  // Element: every unit's result code slot (Unit::result_code) after this target's pass; written = false for the other kinds. The casters'
+  // scripts read their slot as the action's last pass left it.
+  std::array<u8, kUnits> result_slots{};
+  bool result_slots_written = false;
   // Part of an all-targets element.
   bool all_targets = false;
   // The cast was caught in the other side's element trap: it fizzles, and the trap pack of its colour plays instead of its own effect.
@@ -883,6 +888,8 @@ class Battle {
     event.trap_before = trap_before_;
     if ((event.kind == ActionEvent::Kind::Weapon || event.kind == ActionEvent::Kind::Element) && event.target >= 0 && event.target < kUnits)
       units_[static_cast<size_t>(event.target)].result_code = event.code;
+    // A weapon hit writes its code into the attacker's slot too.
+    if (event.kind == ActionEvent::Kind::Weapon && event.actor >= 0 && event.actor < kUnits) units_[static_cast<size_t>(event.actor)].result_code = event.code;
     events_.push_back(event);
   }
   WeaponIn weapon_in(const Unit& attacker, const Unit& target_unit, int mult, int strength) const;

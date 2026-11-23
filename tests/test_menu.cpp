@@ -388,6 +388,16 @@ void test_sort() {
     return result;
   };
   for (int id : {0x80, 0x10, 0x03, 0x60, 0x35, 0x70, 0x55, 0x6C, 0x02, 0x40}) fixture.stock(id, 1);
+  // The record kinds of the game's blocks (data::element_kind): attack, support, healing, trap, a tech.
+  auto kind = [&](int id, u8 flag0, u8 flag1) {
+    fixture.tables.elements[static_cast<size_t>(id)].raw[0] = flag0;
+    fixture.tables.elements[static_cast<size_t>(id)].raw[1] = flag1;
+  };
+  for (int id : {0x10, 0x03, 0x02}) kind(id, 0x01, 0x01);
+  for (int id : {0x35, 0x40}) kind(id, 0x08, 0x01);
+  for (int id : {0x55, 0x60}) kind(id, 0x04, 0x01);
+  for (int id : {0x6C, 0x70}) kind(id, 0x12, 0x00);
+  kind(0x80, 0x81, 0x02);
   game_state.sort_elements(SortMode::AttackFirst, 0);
   CHECK((ids() == std::vector<int>{0x10, 0x03, 0x02, 0x35, 0x40, 0x55, 0x60, 0x6C, 0x70, 0x80}));
   game_state.sort_elements(SortMode::HealFirst, 0);

@@ -121,6 +121,8 @@ class RoomView {
   void set_fixed_to_edge(bool on) { fixed_to_edge_ = on; }
   // C2 SET_LAYER_OPACITY: the colour the group's tiles are modulated with (bytes, 128 = neutral). Cleared by load().
   void set_group_tint(size_t group, int r, int g, int b);
+  // Start of a tick: the group tints now drawn become the start of the next blend (draw blends to the current ones by alpha).
+  void snapshot_group_tint() { group_tint_prev_ = group_tint_; }
   // Debug: one line per drawn texture (group, z, rectangle, alpha).
   std::string describe_items() const;
   // Selects the 1x or the 4x (RDE .chip2) background set; the HD set is built on first use. Rooms with no chip2 stay 1x.
@@ -262,7 +264,7 @@ class RoomView {
   u32 hidden_groups_ = 0;
   bool fixed_to_edge_ = false;
   // Per group, 1 = neutral.
-  std::vector<std::array<float, 3>> group_tint_;
+  std::vector<std::array<float, 3>> group_tint_, group_tint_prev_;
   bool loaded_ = false;
   bool target_pass_ = false;
   float target_scale_ = 1.0f;

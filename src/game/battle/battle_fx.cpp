@@ -459,7 +459,7 @@ std::shared_ptr<const FxPack> BattleFxLibrary::charge_pack(int colour) {
       if (!dec) continue;
       auto pack = std::make_shared<FxPack>();
       // No slot: a negative id keeps the GPU caches apart from the element packs.
-      pack->eid = -1 - idx;
+      pack->eid = charge_eid(idx);
       pack->fx = import::load_battle_effects(*dec, {}, vram, {});
       // The sheets and meshes (maru, wa0 ...) are sato's: resident.
       pack->resident = resident_;

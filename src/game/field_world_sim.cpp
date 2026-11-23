@@ -750,6 +750,7 @@ void FieldWorld::step_followers() {
     const int ring = slot - 1;
     if (prev < 0) return;
     ent_state.followed = true;
+    ent_state.actor.mark_followed();
     u32& state = vm_.entity(ent).flags270;
     const Trail& tr = trails_[static_cast<size_t>(ring)];
     const int idx = (tr.head - 1) & 0x7F;

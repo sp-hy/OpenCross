@@ -491,7 +491,7 @@ void BattleView::build_ring_symbols() {
   if (!element_symbols()) return;
   for (size_t slot = 0; slot < 3; ++slot) {
     const int colour = ring_cells_[slot * 4];
-    if (colour >= 0 && colour < kElementIconCount) add_icon(colour, (65.5f + 10.0f * static_cast<float>(slot)) * kPs1Px, 15.5f * kPs1Px, 38.0f);
+    if (colour >= 0 && colour < kElementIconCount) add_icon(colour, (65.5f + 10.0f * static_cast<float>(slot)) * kPs1Px, 15.5f * kRowScale, 38.0f);
   }
 }
 
@@ -583,13 +583,12 @@ void BattleView::build_field_ring() {
     return;
   }
   rebuild_ring();
-  add_img(hud_[kHRing], 7 * kPs1Px, 10 * kPs1Px, 52 * kPs1Px, 28 * kPs1Px);
-  add_img(hud_[kHField], 7 * kPs1Px, 10 * kPs1Px, 52 * kPs1Px, 28 * kPs1Px);
+  add_img(hud_[kHRing], 7 * kPs1Px, 10 * kRowScale, 52 * kPs1Px, 28 * kRowScale);
+  add_img(hud_[kHField], 7 * kPs1Px, 10 * kRowScale, 52 * kPs1Px, 28 * kRowScale);
   build_ring_symbols();
-  // Caption: "FIELD EFFECT" per language, flags 0x20086 (style 0x86: gn x 0.65, quarter shrink, H2), colour 0x757575, at PS1 (60, 23) in
-  // 240-line units.
+  // Caption: "FIELD EFFECT" per language, flags 0x20086 (style 0x86: gn x 0.65, quarter shrink, H2), colour 0x757575, at PS1 (60, 21).
   static const char32_t* kCaption[6] = {U"FIELD EFFECT", U"EFFET DE CHAMP", U"EFFETTO DI CAMPO", U"FELDEFFEKT", U"AMBIENTE ELEMENTAL", U"FiELD EFFECT"};
-  btext(0x20086, kCaption[std::clamp(static_cast<int>(lang_), 0, 5)], 60, 23 * kPs1Px / (kCanvasH / 216.0f), 0x757575);
+  btext(0x20086, kCaption[std::clamp(static_cast<int>(lang_), 0, 5)], 60, 21, 0x757575);
   build_element_trap();
   build_star_count();
 }
@@ -661,11 +660,11 @@ void BattleView::build_colour_row() {
     const int frame = kColourDotFrame[static_cast<size_t>(entry)];
     if (ps1_hud_) {
       add_sheet(0xB8, frame, static_cast<float>(0x68 + 16 * i), 0x10);
-      if (element_symbols()) add_icon(entry - 1, static_cast<float>(0x68 + 16 * i + 8) * kPs1Px, 0x18 * kPs1Px, 44.0f);
+      if (element_symbols()) add_icon(entry - 1, static_cast<float>(0x68 + 16 * i + 8) * kPs1Px, 0x18 * kRowScale, 44.0f);
       continue;
     }
-    add_img(hud_[kHColourDot + static_cast<size_t>(frame - 1)], static_cast<float>(0x68 + 16 * i) * kPs1Px, 0x10 * kPs1Px, 16 * kPs1Px, 16 * kPs1Px);
-    if (element_symbols()) add_icon(entry - 1, static_cast<float>(0x68 + 16 * i + 8) * kPs1Px, 0x18 * kPs1Px, 44.0f);
+    add_img(hud_[kHColourDot + static_cast<size_t>(frame - 1)], static_cast<float>(0x68 + 16 * i) * kPs1Px, 0x10 * kRowScale, 16 * kPs1Px, 16 * kRowScale);
+    if (element_symbols()) add_icon(entry - 1, static_cast<float>(0x68 + 16 * i + 8) * kPs1Px, 0x18 * kRowScale, 44.0f);
   }
 }
 
@@ -687,11 +686,11 @@ void BattleView::build_message_window(const std::vector<std::pair<std::u32string
     for (const auto& line : lines) widest = std::max(widest, fonts_.measure(ui::font::kBattle, line.first, kPs1Px / render::TextBatch::kPs1PixelScale));
     add_skin_box(24 * kPs1Px, 136 * kRowScale, std::min(widest + 16 * kPs1Px, kCanvasW - 48 * kPs1Px), (16 * line_count + 16) * kRowScale);
   } else {
-    add_panel(24 * kPs1Px, 138 * kPs1Px, std::min(std::max(wmax + 40, 300.0f), 1180.0f), 16 * kPs1Px * line_count + 6 * kPs1Px);
+    add_panel(24 * kPs1Px, 138 * kRowScale, std::min(std::max(wmax + 40, 300.0f), 1180.0f), (16 * line_count + 6) * kRowScale);
   }
   for (size_t i = 0; i < lines.size(); ++i) {
     const size_t before = ops_.size();
-    btext(0x83, lines[i].first, 32, 144 * kPs1Px / (kCanvasH / 216.0f) + 16.0f * static_cast<float>(i), 0x757575);
+    btext(0x83, lines[i].first, 32, 144 + 16.0f * static_cast<float>(i), 0x757575);
     // The log line's fade.
     for (size_t index = before; index < ops_.size(); ++index) {
       const u32 alpha = (lines[i].second >> 24) & 0xFF;

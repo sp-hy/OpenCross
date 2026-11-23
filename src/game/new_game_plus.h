@@ -9,11 +9,13 @@
 //     carried state and gets the Relief Charm + Time Shifter.
 #include <array>
 #include <span>
+#include <vector>
 
 #include "core/types.h"
 #include "save/cc_save.h"
 
 namespace oc::data {
+struct ElemRec;
 struct GameTables;
 }
 namespace oc::ui {
@@ -46,8 +48,9 @@ int launcher_mode_for_op(int fe_op);
 
 // Quantity != 0 is tested separately.
 bool carries_item(int id);
-// Ids < 0x7E outside 0x25..0x30 (the 12 summons; 0x7E = Chrono Cross).
-bool carries_element(int id);
+// By the record's kind (data::element_kind): every element but the summons and the Other kind (the Chrono Cross, ids that are not
+// elements); vanilla that is the ids below 0x7E outside 0x25..0x30.
+bool carries_element(const std::vector<data::ElemRec>& elements, int id);
 
 // Why the Continue+ list (variant 2) refuses a slot: the 2 summary flag bits, bit 0 -> "This game data has been completed.".
 // Inline: the title list (oc_title) uses it.

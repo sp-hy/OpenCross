@@ -324,7 +324,7 @@ void App::begin_scene_target(SceneFrame& sf) {
   sf.pw = vw;
   sf.ph = vh;
   // The jolt / encounter feed-back passes work on the finished picture: with Ps1ResGraphics the PS1-resolution field is scaled up into the target.
-  const game::FieldWorld::JoltView jolt = sf.field_shown && !sf.title_sea ? world.jolt_view() : game::FieldWorld::JoltView{};
+  const game::FieldWorld::JoltView jolt = sf.field_shown && !sf.title_sea ? world.jolt_view(step.alpha) : game::FieldWorld::JoltView{};
   sf.jolt = jolt;
   // Made ahead once per window size (a failed creation is not retried every frame; the passes try again when they run).
   if (sf.field_shown && !sf.title_sea && (frame.extent.width != transition_w || frame.extent.height != transition_h)) {
@@ -585,7 +585,7 @@ void App::draw_field_ui(const SceneFrame& sf) {
     sprites.begin(frame, vw, vh, true);
     // With Ps1ResUi the status icons and dialogue windows go into the PS1-resolution target below.
     const bool ps1_windows = ps1_ui_pass();
-    world.draw_overlay(sprites, vw, vh, !ps1_windows);
+    world.draw_overlay(sprites, vw, vh, step.alpha, !ps1_windows);
     sprites.end();
     // The PS1-resolution windows' composite stamps the preview's depth too (draw_windows does in the frame).
     if (ps1_windows) sprites.set_depth_stamp(true);
@@ -604,7 +604,7 @@ void App::draw_field_ui(const SceneFrame& sf) {
     // The room fade / transition veil / captured frame go over the windows (the non-Ps1 order).
     if (ps1_windows) {
       sprites.begin(frame, vw, vh, true);
-      world.draw_overlay_tail(sprites, vw, vh);
+      world.draw_overlay_tail(sprites, vw, vh, step.alpha);
       sprites.end();
     }
   }

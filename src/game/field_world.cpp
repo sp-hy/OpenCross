@@ -18,6 +18,7 @@
 #include "game/new_game.h"
 #include "game/room_models.h"
 #include "import/battle_stage.h"
+#include "import/ps1_font.h"
 #include "import/room_effects.h"
 #include "import/tim.h"
 #include "render/texture.h"
@@ -30,12 +31,7 @@ using namespace field_internal;
 FieldWorld::FieldWorld() : vm_(*this) {}
 FieldWorld::~FieldWorld() { shutdown(); }
 
-bool FieldWorld::init(const vfs::Vfs& files, render::GpuContext& ctx, render::SpriteBatch& sprites, render::MeshPipeline& meshes,
-                      import::Lang lang) {
-  files_ = &files;
-  if (const char* env = std::getenv("OC_STUCK_TICKS"); env && std::atoi(env) > 0) watchdog_.stuck_limit = static_cast<u32>(std::atoi(env));
-  install_name_hooks();
-  discs_.load(files);
+void FieldWorld::load_text_metrics(const vfs::Vfs& files) {
   exe_build_ = nullptr;
   if (auto exe = files.read("cdrom/prog/slps_023.64")) exe_build_ = import::load_exe_strings(*exe, exe_strings_);
   if (!exe_build_) log::warn("field: executable strings unavailable");
@@ -46,6 +42,17 @@ bool FieldWorld::init(const vfs::Vfs& files, render::GpuContext& ctx, render::Sp
   if (exe_build_ && exe_build_->grammar_columns)
     if (auto prg = files.read(exe_build_->grammar_columns); prg && prg->size() >= exe_build_->grammar_columns_offset + 50)
       grammar_columns_.assign(prg->begin() + exe_build_->grammar_columns_offset, prg->begin() + exe_build_->grammar_columns_offset + 50);
+  exe_font_ = import::load_ps1_font(files);
+  dialogue_.tables().init(&files);
+}
+
+bool FieldWorld::init(const vfs::Vfs& files, render::GpuContext& ctx, render::SpriteBatch& sprites, render::MeshPipeline& meshes,
+                      import::Lang lang) {
+  files_ = &files;
+  if (const char* env = std::getenv("OC_STUCK_TICKS"); env && std::atoi(env) > 0) watchdog_.stuck_limit = static_cast<u32>(std::atoi(env));
+  install_name_hooks();
+  discs_.load(files);
+  load_text_metrics(files);
   ctx_ = &ctx;
   sprites_ = &sprites;
   meshes_ = &meshes;
@@ -600,6 +607,7 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   entry_cut_ = 4;
   entry_window_ = 4;
   pick_auto_target();
+  snapshot_drawn();
   status_ = std::format("{} (room id {}, entrance {})", name, room_id_, param);
   log::info("field: {} loaded, {} entities, {} models, {} zones, auto target {}", name, ents_.size(), scene->models.size(),
             scene->zones.size(), auto_target_);

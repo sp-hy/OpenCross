@@ -554,6 +554,7 @@ void GameState::sort_elements(SortMode mode, int character) {
     if (stack.id == 0 || stack.qty == 0) continue;
     SortEntry entry{stack.id, stack.qty, static_cast<int>(i), 0, 0};
     const int id = stack.id;
+    const data::ElementKind kind = rules->el_kind(id);
     switch (mode) {
       case SortMode::InnateFirst: {
         const int col = rules->el_colour(id);
@@ -563,15 +564,15 @@ void GameState::sort_elements(SortMode mode, int character) {
         break;
       }
       case SortMode::AttackFirst:
-        if (id >= 1 && id <= 0x30) entry.group = 0, entry.sub = -id;
+        if (kind == data::ElementKind::Attack || kind == data::ElementKind::Summon) entry.group = 0, entry.sub = -id;
         else entry.group = 1, entry.sub = id;
         break;
       case SortMode::HealFirst:
         if (id == 0x80) entry.group = 0;
-        else if (id >= 0x55 && id <= 0x6B) entry.group = 1, entry.sub = id;
-        else if (id >= 0x31 && id <= 0x54) entry.group = 2, entry.sub = id;
-        else if (id >= 0x01 && id <= 0x30) entry.group = 3, entry.sub = -id;
-        else if (id >= 0x6C && id <= 0x7D) entry.group = 4, entry.sub = -id;
+        else if (kind == data::ElementKind::Healing || kind == data::ElementKind::Consumable) entry.group = 1, entry.sub = id;
+        else if (kind == data::ElementKind::Support) entry.group = 2, entry.sub = id;
+        else if (kind == data::ElementKind::Attack || kind == data::ElementKind::Summon) entry.group = 3, entry.sub = -id;
+        else if (kind == data::ElementKind::Trap) entry.group = 4, entry.sub = -id;
         else entry.group = 5, entry.sub = id;
         break;
     }

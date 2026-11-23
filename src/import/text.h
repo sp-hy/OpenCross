@@ -149,6 +149,8 @@ class ExeStrings {
   bool loaded() const { return !tables_.empty(); }
   // The string's bytes up to (not including) its 0x00; empty for an unknown table or entry.
   ByteSpan get(int table, int index) const;
+  // Number of entries of a table; 0 for an unknown table.
+  size_t count(int table) const;
 
  private:
   Bytes exe_;

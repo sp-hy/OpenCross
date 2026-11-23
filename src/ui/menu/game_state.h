@@ -56,6 +56,8 @@ struct MenuRules {
   bool el_stack(int id) const;
   bool el_innate_only(int id) const;
   bool el_summon(int id) const;
+  // The record's kind (data::element_kind); Other without the tables.
+  data::ElementKind el_kind(int id) const { return tables ? data::element_kind(tables->elements, id) : data::ElementKind::Other; }
   int el_level(int id) const;
   int el_colour(int id) const;
   // Level window: legal in grid row r (0-based) iff L-hi <= r+1 <= L+lo.

@@ -175,6 +175,8 @@ void BattleView::begin_group() {
         act_.turn_targets_at_charge = pc && !hop_home;
       }
       fx_charge_ = fx_ready_ = false;
+      // The charge pack and the element pack build from here on, over the frames before they start.
+      fx_prefetch_cast();
       // The element confirm (and the item confirm) hops home ONLY if the PC is engaged (standing at the enemy); a PC at home goes straight to
       // the cast pose, no hop. The hop starts S5 entry 3 (return: crouch, the 16-tick arc hop to the stand position, clips 4 / 17 / 16 / 1)
       // on every acting unit and the cast waits for it, so a PC standing at the enemy hops home first and casts from there. The script

@@ -31,11 +31,8 @@ namespace oc::game {
 using namespace bv;
 
 namespace {
-// Canvas y per PS1 HUD line. Reference lines measured on a 236-line frame (the HUD layer stretched by 236 / 216) are scaled
-// to the PS1 row pitch: PS1 line = reference line * kRefLineY.
+// Canvas y per PS1 framebuffer row (the replay shows the rows in the battle picture's 224-row frame).
 constexpr float kRowScale = kCanvasH / 216.0f;
-constexpr float kRefLineY = 216.0f / 236.0f;
-inline float ref_y(float ref_line) { return ref_line * kRefLineY * kRowScale; }
 
 // Plate colour set of an element colour byte: 0..5 one colour, 6 every colour (0xFC, the rainbow set), -1 none.
 int plate_colour_of(u8 colour_bit) {
@@ -1477,7 +1474,7 @@ void BattleView::build_command_ui() {
   build_entry_outline();
   if (active_pc_ < 0 || !(ui_ == Ui::Top || hit_box_shown() || ui_ == Ui::Element || ui_ == Ui::Target)) return;
   const battle::Unit& unit = bunit(active_pc_);
-  // Command window (white-bordered black box at PS1 (28, 177), 68 x 54; rows 11 px apart, the animated red diamond cursor left of the row).
+  // Command window (white-bordered black box at PS1 (28, 160), 68 x 51.2; rows 10 px apart, the animated red diamond cursor left of the row).
   // The box is the PS1's own line box in both art modes. Top: Attack / Element / Defend / Run Away (sheet 0x04 g1..4,
   // XLAT 0x10002 -> style 2, gn_70 x 0.425). Engaged (the PC stands at its target): "1-(92%)" "2-(79%)" "3-(69%)" + Element, with the "HIT%"
   // caption; a strength the stamina cannot pay is dimmed.
@@ -1495,21 +1492,18 @@ void BattleView::build_command_ui() {
     constexpr u32 kDim = 0x404040, kYellowWord = 0x008080, kWhiteWord = 0x808080;
     // Party swap, or a versus battle's End Turn, adds a fifth top row: the box grows upward by one row pitch.
     const int rows = ui_ == Ui::Top && (battle_state.swap_enabled() || versus_) ? 5 : 4;
-    const float lift = 11.0f * static_cast<float>(rows - 4);
-    const float bx = 28 * kPs1Px, by = ref_y(177 - lift), bw = 68 * kPs1Px;
-    // Interior 52 x 36 + the 8 px skin frame; 0.8 row shorter than the nominal 52 so the top and bottom padding round the text are equal (0.67 row pitch).
-    // Disc mode: the PS1's own box, (28, 160) 68 x 52, growing up by the 10 px row pitch.
-    const float ps1_lift = 10.0f * static_cast<float>(rows - 4);
-    if (ps1_hud_) add_skin_box(bx, (160 - ps1_lift) * kRowScale, bw, (52 + ps1_lift) * kRowScale);
-    else add_skin_box(bx, by, bw, 51.2f * kRowScale + ref_y(lift));
+    const float lift = 10.0f * static_cast<float>(rows - 4);
+    const float bx = 28 * kPs1Px, by = (160 - lift) * kRowScale, bw = 68 * kPs1Px;
+    // The PS1's box at (28, 160), 52 rows tall, growing up by the 10-row pitch.
+    add_skin_box(bx, by, bw, (52 + lift) * kRowScale);
     const int cur = ui_ == Ui::Top ? top_cursor_ : chain_cursor_;
     const bool fatigued = (unit.lo & battle::st::kFatigued) != 0;
     const u32 hit_row_mask = battle_->costs_waived(unit) ? 0xFFFF00u : 0xFFFFFFu;
     // The translated text clears bit 16; JP keeps the JP font.
     const int cmd_flags = jp ? 0x10002 : 2;
     for (int k = 0; k < rows; ++k) {
-      // PS1 line of the row (+1.1: top pad = bottom pad with the 0.8 row shorter box).
-      const float yl = (182 - lift + 11.0f * static_cast<float>(k)) * kRefLineY + 1.1f;
+      // PS1 row of the HD text.
+      const float yl = 166.2f - lift + 10.0f * static_cast<float>(k);
       const bool sel = k == cur;
       u32 row_colour = kWhiteWord;
       std::u32string label;
@@ -1525,9 +1519,9 @@ void BattleView::build_command_ui() {
         if (command == 1 && (!any_element || unit.gauge < 0 || unit.stamina == 0)) row_colour = kDim;
       } else if (k < 3) {
         const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
-        // JP: the cmnmes key 弱－(　　％) / 中 / 強 with the percentage in its blanks; else "N-(pct%)".
+        // JP: the cmnmes key 弱－(　　％) / 中 / 強 with the percentage in its blanks; else the frame's glyphs below.
         static const char32_t* kStrengthJp[3] = {U"弱－(", U"中－(", U"強－("};
-        label = jp ? kStrengthJp[k] + digits_u32(pct) + U" ％)" : import::utf8_to_u32(std::format("{}-({}%)", k + 1, pct));
+        label = jp ? kStrengthJp[k] + digits_u32(pct) + U" ％)" : std::u32string();
         if (fatigued) {
           static const int kThr[3] = {12, 25, 37};
           row_colour = unit.stamina < kThr[k] ? kDim : unit.stamina < kThr[k] + 12 ? kYellowWord : kWhiteWord;
@@ -1543,9 +1537,9 @@ void BattleView::build_command_ui() {
       // Disc mode: the row is a battle-font frame (top menu 1..4; HIT% rows 7..9 "N-(  %)" with the percentage's digits at x 63 / 70,
       // Element 2) at PS1 (44, 166 + 10 row), in the row's colour word; the cursor's top-left at (34, the row's y).
       const int row_frame = ui_ == Ui::Top ? (command <= 3 ? command + 1 : 0) : k < 3 ? k + 7 : 2;
-      const float row_y = 166.0f + 10.0f * static_cast<float>(k) - ps1_lift;
+      const float row_y = 166.0f + 10.0f * static_cast<float>(k) - lift;
       if (sel && ps1_hud_) add_menu_cursor(34 * kPs1Px, row_y * kRowScale);
-      else if (sel) add_menu_cursor(32.5f * kPs1Px, yl * kRowScale + ref_y(5) - 4 * kRowScale);
+      else if (sel) add_menu_cursor(32.5f * kPs1Px, (yl + 0.58f) * kRowScale);
       if (ps1_hud_ && row_frame > 0) {
         add_sheet(0x04, row_frame, 44, row_y, row_colour & mask);
         if (ui_ != Ui::Top && k < 3) {
@@ -1553,6 +1547,20 @@ void BattleView::build_command_ui() {
           if ((pct / 10) % 10 != 0) add_sheet(0x04, (pct / 10) % 10 + 101, 63, row_y, row_colour & mask);
           add_sheet(0x04, pct % 10 + 101, 70, row_y, row_colour & mask);
         }
+        continue;
+      }
+      if (!jp && ui_ != Ui::Top && k < 3) {
+        // The HIT% row as RDE writes the sheet frame "N-(  %)": character c of it at x 44 + c x pitch (6.73 PS1 px in HD art, 6.45 in
+        // Classic art, whatever the glyph's own advance), the percentage's digits at x 63 / 70 as the frame's digit sprites (no tens digit
+        // when it is 0).
+        const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
+        const u32 ink = remap_text_colour(row_colour) & mask;
+        const float pitch = hd_ ? 6.73f : 6.45f;
+        const std::u32string frame = std::u32string(1, static_cast<char32_t>(U'1' + k)) + U"-(  %)";
+        for (size_t c = 0; c < frame.size(); ++c)
+          if (frame[c] != U' ') btext(cmd_flags, std::u32string(1, frame[c]), 44 + pitch * static_cast<float>(c), yl, ink);
+        if ((pct / 10) % 10 != 0) btext(cmd_flags, digits_u32((pct / 10) % 10), 63, yl, ink);
+        btext(cmd_flags, digits_u32(pct % 10), 70, yl, ink);
         continue;
       }
       // Disc mode: a row the sheet lacks (party swap, End Turn) in the PS1 font, level with the sheet rows (the USA font's capitals
@@ -1564,8 +1572,8 @@ void BattleView::build_command_ui() {
     } else if (hit_box_shown()) {
       // "HIT%" caption: battle-osak-010 (50 x 9 PS1 px leader line, drawn at (x, y - 8)) with the caption
       // (命中率 / "HIT%" per language, flags 0x10002, colour 0x757575) above it; the JP glyphs stand 4 lines higher, clear of the line.
-      add_img(hud_[kHOsak], 82 * kPs1Px, ref_y(170), 62 * kPs1Px, ref_y(11));
-      btext(cmd_flags, kHitCaption[li], 93, (165 - (jp ? 4.0f : 0.0f)) * kRefLineY, 0x757575);
+      add_img(hud_[kHOsak], 82 * kPs1Px, 153.6f * kRowScale, 62 * kPs1Px, 10 * kRowScale);
+      btext(cmd_flags, kHitCaption[li], 93, 149 - (jp ? 3.7f : 0.0f), 0x757575);
     }
   }
   // WideHudEdges: the command box (PS1 x 28, HIT% caption to 144) moves 21 px further out so its left margin equals the field-effect ring's (7 PS1 px).
@@ -1698,15 +1706,12 @@ void BattleView::build_target_ui(bool cam_hint) {
     if (zc < 1.0f) continue;
     // PS1 px per unit at the quad's depth.
     const float kk = cam_.h / zc;
-    // GTE screen (offset (160, 112)); the quad is a HUD sprite, so it maps like
-    // every HUD sprite: canvas x * kPs1Px, y * kRowScale (960 / 216), not through the picture's 224-row frame.
+    // GTE screen (offset (160, 112)).
     const float cx = cam_.ox + cam_.h * dot(cam_.right, to_eye) / zc, cy = cam_.oy + cam_.h * dot(cam_.down, to_eye) / zc;
-    // The quad sits on the 3D picture, so it takes the picture's own mapping (Cam::project: columns at kPs1Px, rows through the field crop / stretch),
-    // not the 216-row HUD mapping: the same mapping puts it on the enemy in widescreen (x < 0 or > 1280 for the extra columns) and in 4:3.
-    constexpr float kPicY = (render::kLayerH - 2.0f * render::kFieldCrop) / render::kFieldRows * (kCanvasH / render::kLayerH);
-    constexpr float kPicOy = render::kFieldCrop * (kCanvasH / render::kLayerH);
-    const float qx = (cx - 192.0f * kk) * kPs1Px, qy = kPicOy + (cy - 704.0f * kk) * kPicY;
-    const float qw = 384.0f * kk * kPs1Px, qh = 384.0f * kk * kPicY;
+    // Columns at kPs1Px and rows at kRowScale, as every HUD sprite: the HUD rows are the picture's rows, so it lands on the enemy in
+    // widescreen (x < 0 or > 1280 for the extra columns) and in 4:3.
+    const float qx = (cx - 192.0f * kk) * kPs1Px, qy = (cy - 704.0f * kk) * kRowScale;
+    const float qw = 384.0f * kk * kPs1Px, qh = 384.0f * kk * kRowScale;
     add_img(hud_[kHCursor], qx, qy, qw, qh, static_cast<float>(strip) * 0.25f + 0.0078125f, 0.04f, static_cast<float>(strip) * 0.25f + 0.25f, 0.96f);
     // Rides a unit of the 4:3 picture: never moved by the HUD edge groups.
     set_group(op_count() - 1, 2);
@@ -1828,9 +1833,9 @@ std::vector<int> BattleView::level_slots(int level) const {
 }
 
 // The battle element menu (PS1 px), the same art in both modes except the minimap plates:
-//  * grid minimap at (160 + 15 * level, 118 + 7.5 * slot) in measured lines, 13 x 6 cells = grid plates in the element colour (HD art
-//    menuelem_N, Classic art the PS1 sheet's); the selected level's column blinks to the empty plate, levels above the gauge are
-//    semi-transparent;
+//  * grid minimap at (160 + 15 * level, 72 + 7 * slot), cells = grid plates in the element colour (HD art menuelem_N at 16 x 8, each
+//    plate overlapping the top row of the next; Classic art the PS1 sheet's); the selected level's column blinks to
+//    the empty plate, levels above the gauge are semi-transparent;
 //  * the level's elements as name plates (battle-win4-large base + frame, 114 x 14 at x 11, one per valid slot at PS1 y 60 + 15 * slot, no
 //    scrolling; coloured ends in the element colour; the selected slot's plate is the bright one); the names are tech-title entries (style
 //    0x80081: 0x81 centred on the plate, y + 3; colour 0x757575, used cells 0x404040) with a "%+d" level-offset suffix;
@@ -1859,11 +1864,11 @@ void BattleView::build_element_ui() {
       const data::ElemRec& elem = tables_->elements[static_cast<size_t>(cell_element(active_pc_, idx))];
       const bool dark = blink && level == sel_lvl;
       const u8 a = level > unit.gauge ? 128 : 255;
-      const float x = (160 + 15.0f * static_cast<float>(level)) * kPs1Px, y = ref_y(118 + 7.5f * static_cast<float>(slot));
-      add_plate(dark ? -1 : plate_colour_of(elem.colour_bit()), x, y, 13 * kPs1Px, ref_y(6), col(255, 255, 255, a));
+      const float x = (160 + 15.0f * static_cast<float>(level)) * kPs1Px, y = (72 + 7.0f * static_cast<float>(slot)) * kRowScale;
+      add_plate(dark ? -1 : plate_colour_of(elem.colour_bit()), x, y, 16 * kPs1Px, 8 * kRowScale, col(255, 255, 255, a));
       set_group(op_count() - 1, 1);
       if (element_symbols() && !dark) {
-        add_icon(data::colour_index_of_bit(elem.colour_bit()), x + 6.5f * kPs1Px, y + ref_y(3), 24.0f, level > unit.gauge ? 150 : 255);
+        add_icon(data::colour_index_of_bit(elem.colour_bit()), x + 8 * kPs1Px, y + 4 * kRowScale, 24.0f, level > unit.gauge ? 150 : 255);
         set_group(op_count() - 1, 1);
       }
     }

@@ -33,7 +33,10 @@ bool carries_item(int id) {
   return true;
 }
 
-bool carries_element(int id) { return id > 0 && id < 0x7E && static_cast<unsigned>(id - 0x25) > 0xB; }
+bool carries_element(const std::vector<data::ElemRec>& elements, int id) {
+  const data::ElementKind kind = data::element_kind(elements, id);
+  return kind != data::ElementKind::Summon && kind != data::ElementKind::Other;
+}
 
 bool add_stack(std::span<save::ItemStack> stock, int id, int count) {
   if (id <= 0) return false;
@@ -81,8 +84,9 @@ void carry_over(const save::SaveSlot& cleared, save::SaveSlot& dst, const data::
   }
   for (const save::ItemStack& item : cleared.items)
     if (item.qty != 0 && carries_item(item.id)) add_stack(dst.items, item.id, item.qty);
-  for (const save::ItemStack& element : cleared.elements)
-    if (element.qty != 0 && carries_element(element.id)) add_stack(dst.elements, element.id, element.qty);
+  if (tables)
+    for (const save::ItemStack& element : cleared.elements)
+      if (element.qty != 0 && carries_element(tables->elements, element.id)) add_stack(dst.elements, element.id, element.qty);
   dst.unk_e1ec = cleared.unk_e1ec | rd32(cleared, save::head::kRecruited) | cleared.unk_e1e0;
   dst.unk_e1f0 = (cleared.unk_e1f0 | rd32(cleared, save::head::kRecruited + 4) | cleared.unk_e1e4) & 0xFFFu;
   dst.set_gold(std::min<u32>(dst.gold() + cleared.gold(), kGoldCap));

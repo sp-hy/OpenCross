@@ -20,6 +20,9 @@ using namespace field_internal;
 
 namespace {
 
+// Ticks of the screen's fade back from black at the end of a movie with flag 8.
+constexpr int kMovieFadeIn = 0x60;
+
 // Footstep sound of floor type `type` (0x11 dry / 0x12 water registers) for walker `who` (the party member's character id, or the
 // value a script set), `left` = foot event bit 0. Values >= 0x100 are effect00 program ids & 0xFF, smaller ones room frames.
 int footstep_sound(int type, int who, int left) {
@@ -389,13 +392,17 @@ void FieldWorld::movie_tick() {
   if (sequences_ && !movie_sequence_.empty()) sequences_->tick();
 }
 
-// The field display comes back at a movie's end without the screen fade: an A8 fade to black before the movie no longer covers the
-// picture, and a FADE 1 after the movie acts again (scripts that want black re-issue it).
+// A movie with flag 8 (every D4 in the data, or one that ends in a recorded DC jump) hands the field back with the screen fading in from
+// black over 0x60 ticks, the fade direction back to the picture: a FADE 1 before the movie no longer covers the scene, a FADE 0 after it
+// does nothing and a FADE 1 after it acts again. Without flag 8 (7E) the screen fade stays as the movie found it.
 void FieldWorld::movie_finished() {
   movie_state_ = MovieState::None;
   if (sequences_ && !movie_sequence_.empty()) sequences_->stop(movie_sequence_);
   movie_sequence_.clear();
-  clear_screen_fade();
+  if (movie_req_.fade) {
+    fade_hold_ = 0;
+    fade_in_from_black(kMovieFadeIn);
+  }
   start_movie_jump();
 }
 

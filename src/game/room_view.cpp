@@ -127,6 +127,7 @@ void RoomView::clear() {
   scene_.reset();
   chip2_.reset();
   group_tint_.clear();
+  group_tint_prev_.clear();
   hd_ready_ = hd_failed_ = false;
   loaded_ = false;
   art_key_ = 0;
@@ -177,6 +178,7 @@ bool RoomView::reuse_art(std::string_view name, const std::string& prd_request) 
   loaded_prd_path_ = prd ? prd_path : std::string{};
   walk_.init(scene_->walk, scene_->attr_flags);
   group_tint_.clear();
+  group_tint_prev_.clear();
   layer_mask_ = 0xFFFFFFFFu;
   set_scroll(0, 0, true);
   log::info("room {}: reloaded with its built art kept", name_);
@@ -781,6 +783,11 @@ void RoomView::draw(render::SpriteBatch& sprites, float vw, float vh, float alph
     const float depth = std::max(8.0f, static_cast<float>(it->z)) / render::kDepthRange;
     std::array<float, 3> tint = {1, 1, 1};
     if (it->group < group_tint_.size()) tint = group_tint_[it->group];
+    if (it->group < group_tint_prev_.size() || it->group < group_tint_.size()) {
+      const std::array<float, 3> from = it->group < group_tint_prev_.size() ? group_tint_prev_[it->group] : std::array<float, 3>{1, 1, 1};
+      const float share = interp_frozen_ ? 1.0f : alpha;
+      for (size_t channel = 0; channel < 3; ++channel) tint[channel] = from[channel] + (tint[channel] - from[channel]) * share;
+    }
     if (tint[0] <= 0.003f && tint[1] <= 0.003f && tint[2] <= 0.003f) continue;
     // Semi-transparent tiles (flags bit 7) blend their STP texels with the PS1 ABR mode: 0 = (B + F) / 2, 1 = B + F, 2 = B - F,
     // 3 = B + F / 4. The chip2 HD art draws ABR 0 as RDE does, B + F / 2: additive with the colour halved. The group tint modulates

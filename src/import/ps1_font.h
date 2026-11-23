@@ -16,6 +16,7 @@
 //   auto font = import::load_ps1_font(vfs);   // null when the disc's executable is not there
 //   int i = font->index_for(U'A');  font->level(i, x, y);  font->advance(i);
 #include <memory>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -81,6 +82,8 @@ class Ps1Font {
   const u16* rows(int index) const;
   // Pen advance in pixels.
   int advance(int index) const;
+  // Pen advance of a line of text: the advances of its characters, a character the font has no glyph for at a blank's.
+  int width(std::u32string_view text) const;
   // USA build: code point of glyph `index` (single-byte code 0x20 + index); U+E000 + the code for a
   // symbol with no Unicode form; 0 when out of range.
   static char32_t usa_char(int index);

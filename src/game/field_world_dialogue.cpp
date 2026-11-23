@@ -12,6 +12,7 @@
 #include "core/log.h"
 #include "data/char_name.h"
 #include "game/new_game_plus.h"
+#include "import/ps1_font.h"
 
 namespace oc::game {
 
@@ -254,7 +255,7 @@ bool FieldWorld::portrait_on_left(int heading, int portrait_yaw, int model_yaw, 
 // width record); the widest line wins. Names, items,
 // the speaker's grammar forms (0x12) and button names are measured as the strings the PS1 substitutes (its executable tables and
 // the save's names); a numeric field (0x0A / 0x0B) counts as 0x48 / 0x30, a digit entry (0x10) as -0x50.
-int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const {
+int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
   const u32 global_flags = vm_.global_flags();
   auto reads_as_lynx = [&](int char_id) { return model_byte(char_id) == data::kLynxBody && !(global_flags & script::gflag::kKeepCustomName); };
   auto var = [&](int arg) { return static_cast<int>(vm_.var(static_cast<u16>(arg * 2 + 0x1A))); };
@@ -328,12 +329,13 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) const 
 
 // Width of a substituted string, `table` numbered as in the JP executable: table 0 ids 0x200.. are elements / techs (table 23),
 // 0x400.. key items (24), from
-// data::kScriptElementBase elements again (table 23; a mod's records past the table measure 0); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
+// data::kScriptElementBase elements again (table 23; a record past the table, a mod's, measures the sysmes name the dialogue draws
+// in the build's font, Ps1Font::width); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
 // (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's; 27 the button
 // names; kGrammarTables + n grammar form n of speaker `id`. The table is looked up in the build's own string tables (the USA build
 // numbers them differently and reads a grammar form by the speaker's dialect column). Inside, glyphs count as in a message, a nested
 // name (code 8) adds its width, and the first other control code ends it.
-int FieldWorld::ps1_string_width(int table, int id) const {
+int FieldWorld::ps1_string_width(int table, int id) {
   if (table == 0 && id >= data::kScriptElementBase) {
     table = 23;
     id -= data::kScriptElementBase;
@@ -352,6 +354,8 @@ int FieldWorld::ps1_string_width(int table, int id) const {
         row = form == exe_build_->grammar_by_id ? id + 1 : id >= 0 && static_cast<size_t>(id) < grammar_columns_.size() ? grammar_columns_[static_cast<size_t>(id)] + 1 : 1;
     }
   }
+  if (table == 23 && exe_table >= 0 && static_cast<size_t>(row) >= exe_strings_.count(exe_table))
+    return exe_font_ ? exe_font_->width(dialogue_.tables().item_name(0x170000 | row, dialogue_.language())) : 0;
   std::span<const u8> text;
   size_t glyph_limit = std::numeric_limits<size_t>::max();
   if (table == 1 && (id & 0x80)) {

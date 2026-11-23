@@ -149,6 +149,20 @@ A value `v` unlocks bit `v % 10` of the character's unlock mask for grid row `v 
 
 **A mod's records** (OpenCross): a `pgdat.bin` longer than 527 records adds elements and techs with ids from 527 up (`data::kVanillaElemRecs`). For them the kind byte +0x01 decides: bit 1 set = a tech, else an element (`data::mod_element`); vanilla ids keep their blocks whatever their kind (1..0x7F elements and consumables, 0x80 up techs, enemy actions and specials). Wherever the game tells an element from a tech by its id (the grid editor, Remove All, the auto-fill, the shops' full list, the results screen's healers, the battle-script element pick, the grid strips and FE 69), a mod's element record counts as an element. Grid cells, stock stacks, trapped, stolen and dropped elements carry the full id (`& 0x3FFF` in a grid word); a save keeps ids past 511 in its side file (`save.md` section 16). A record without a `menu_pg.bin` row is eligible for every character, not sold (price 0) and not usable from the menu.
 
+**Element kinds** (`data::element_kind`). The element list's Attack first and Heal first orders (`rules/menus.md` section 5) and the New Game+ carry-over (`save.md` section 14) tell the kinds of element apart by the record's flag bytes, tested in this order: +0x00 bit `0x40` a summon, bit `0x02` a trap, `(b & 0x30) == 0x10` a consumable, bit `0x04` a healing element, bit `0x08` a support element, bit `0x01` with +0x01 bit 0 an attack element; anything else, and every id that is not an element (techs, enemy actions, a mod's techs, an id without a record), is of no kind. Over the game's records this gives exactly the id blocks the original's orders use:
+
+| ids | +0x00 | +0x01 | kind |
+|---|---|---|---|
+| 0x01..0x24 | 01 | 01 | attack |
+| 0x25..0x30 | 41 | 00 | summon |
+| 0x31..0x54 | 08 | 01 | support |
+| 0x55..0x60 | 04 | 01 | healing |
+| 0x61..0x6B | 14 | 00 | consumable (Medicine .. Nostrum) |
+| 0x6C..0x7D | 12 | 00 | trap |
+| 0x7E (Chrono Cross), 0x7F (no name) | 01 | 00 | none |
+
+A mod's element record takes the place of its kind in both, whatever its id.
+
 ### 5.1 Menu-side element data `menu_pg.bin` (16-byte rows, index = element id, 287 rows)
 | Off | Meaning | Conf |
 |---|---|---|

@@ -101,6 +101,25 @@ inline bool mod_element(const std::vector<ElemRec>& elements, int id) {
   return id >= kVanillaElemRecs && id < static_cast<int>(elements.size()) && (elements[static_cast<size_t>(id)].raw[1] & 0x02) == 0;
 }
 
+// What a stock element is, from its record's flag bytes +0x00 / +0x01, tested in this order: 0x40 summon, 0x02 trap, (b & 0x30) ==
+// 0x10 consumable, 0x04 healing, 0x08 support, 0x01 with +0x01 bit 0 an attack element, anything else Other. The vanilla blocks come
+// out as 1..0x24 attack, 0x25..0x30 summons, 0x31..0x54 support, 0x55..0x60 healing, 0x61..0x6B consumables, 0x6C..0x7D traps,
+// 0x7E (the Chrono Cross) and 0x7F Other. Ids that are not elements (techs, enemy actions, a mod's techs) and ids without a record
+// are Other.
+enum class ElementKind : u8 { Attack, Summon, Support, Healing, Consumable, Trap, Other };
+inline ElementKind element_kind(const std::vector<ElemRec>& elements, int id) {
+  if (id <= 0 || id >= static_cast<int>(elements.size()) || (id >= 0x80 && !mod_element(elements, id))) return ElementKind::Other;
+  const ElemRec& record = elements[static_cast<size_t>(id)];
+  const u8 flags = record.raw[0];
+  if (flags & 0x40) return ElementKind::Summon;
+  if (flags & 0x02) return ElementKind::Trap;
+  if ((flags & 0x30) == 0x10) return ElementKind::Consumable;
+  if (flags & 0x04) return ElementKind::Healing;
+  if (flags & 0x08) return ElementKind::Support;
+  if ((flags & 0x01) && (record.raw[1] & 0x01)) return ElementKind::Attack;
+  return ElementKind::Other;
+}
+
 // scenedat.bin record. boss() marks a star-up battle.
 struct SceneRec {
   std::array<u8, 28> raw{};

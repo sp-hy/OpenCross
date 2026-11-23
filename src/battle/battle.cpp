@@ -1815,7 +1815,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   Unit& caster = units_[static_cast<size_t>(actor)];
   if (element_id < 0 || element_id >= static_cast<int>(tables_.elements.size())) return;
   const data::ElemRec& element = tables_.elements[static_cast<size_t>(element_id)];
-  caster.result_code = 0xFF;
+  // A one-pass action (push_ring) marks the caster's result code slot itself; a multi-target cast marks it before its first pass.
+  if (push_ring) caster.result_code = 0xFF;
   summon_colour_ = (element.b(0) & 0x40) ? data::colour_index_of_bit(element.colour_bit()) : -1;
   Unit& target_unit = units_[static_cast<size_t>(target)];
   const int hp0 = target_unit.hp;
@@ -1886,6 +1887,17 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     in.exploit = (element.status_hi() & target_unit.hi & 0xE007FFFFu) != 0;
     return in;
   };
+  // ActionEvent code: the damage roll's, or the status / utility mode's (2 = nothing landed).
+  int code_override = -1;
+  // What this target's pass writes into the caster's result code slot (-1 = nothing): the hit (0), heal (3) and miss (2) results write
+  // the target's code into the caster's slot too, "no damage" (1) only while the slot is still marked (0xFF). A status-only result, a
+  // revive and the field and ring modes write only the target's slot or none.
+  int caster_write = -1;
+  bool caster_write_if_marked = false;
+  auto write_caster = [&](int code, bool if_marked = false) {
+    caster_write = code;
+    caster_write_if_marked = if_marked;
+  };
   // The damage rolled, which is what the number shows; an overkill is not cut to the target's HP. -1 = no damage roll.
   int rolled_damage = -1;
   // replace >= 0: the value a mode writes over the roll of a target that is not immune; the roll's result code stays, and only a non-zero
@@ -1898,13 +1910,25 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     god_filter(target, damage);
     damage.value = reduce(damage.value);
     if (damage.code != 3) rolled_damage = damage.value;
-    if ((caster.hi & st::kHiDrain) && mode != 35 && roll_landed && damage.value != 0) drain_ = {actor, damage.value};
+    code_override = damage.code;
+    write_caster(damage.code, damage.code == 1);
+    if ((caster.hi & st::kHiDrain) && mode != 35 && roll_landed && damage.value != 0) {
+      drain_ = {actor, damage.value};
+      write_caster(3);
+    }
     say(std::format("{} casts {} on {}: {}{} (mode {}, slot {}, x{})", caster.name, nm, target_unit.name, damage.value, damage.code == 3 ? " healed" : "", mode, slot, cmul));
     damage_unit(actor, target, damage.value, damage.code);
     return damage;
   };
   // A heal hurts a target with hi 0x2000000 (code 0) and heals anyone else (code 3).
   auto heal_code = [&]() { return (target_unit.hi & 0x2000000u) ? 0 : 3; };
+  // The heal's write into the caster's slot: a zero heal is "no damage"; a heal that hurts writes hit (0) for the flat heal (mode 43) and
+  // nothing for the formula heal.
+  auto write_caster_heal = [&](int amount) {
+    if (amount == 0) write_caster(1, true);
+    else if (heal_code() == 3) write_caster(3);
+    else if (mode == 43) write_caster(0);
+  };
   // The cure of the record's +0x18 / +0x1C statuses: the inflicted bits leave the target with their timers, no roll; the permanent ones stay.
   auto cure = [&]() {
     const u32 lo = element.status_lo() & ~target_unit.perm_lo;
@@ -1923,8 +1947,6 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     if (woken & st::kAsleep) target_unit.timers.erase(14);
     if (woken & st::kConfused) target_unit.timers.erase(20);
   };
-  // ActionEvent code for the status / utility modes (2 = nothing landed).
-  int code_override = -1;
   // Mode 30: message row (record +4) and the stolen word (record +0).
   int steal_msg = -1, steal_word = 0;
   // Modes 47 / 48: the caster's result word.
@@ -1946,6 +1968,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         kill(target);
       }
       code_override = 0;
+      write_caster(0);
     } else if (!(flags & 0x8000) || !status_landed) {
       return deal(elem_in(0), replace).code;
     } else {
@@ -1963,6 +1986,8 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       ElementIn in = elem_in(0);
       in.target_absorb = false;
       const DamageOut damage = deal(in);
+      // A damaging hit writes heal (3) into the caster's slot and hit (0) into the target's.
+      if (damage.code == 0) write_caster(3);
       if (damage.code == 0 && damage.value > 0) {
         const int div = static_cast<s16>(element.rd16(0xE));
         caster.hp = std::min(caster.max_hp, caster.hp + (div != 0 ? damage.value / div : damage.value));
@@ -2018,11 +2043,15 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       if (creature_state_ == 2) {
         ElementIn in = elem_in(0);
         in.slot_mille = std::max(10, (10000 - creature_model_) / 200) * 100;
+        // The hit writes hit (0) into both slots whatever the roll gave.
         deal(in);
+        code_override = 0;
+        write_caster(0);
         say(std::format("{} hooks pool slot {} (model {})", caster.name, creature_slot_, creature_model_));
       } else {
         say(std::format("{} casts {} on {}: the line breaks, no creature", caster.name, nm, target_unit.name));
         code_override = 2;
+        write_caster(2);
       }
       break;
     }
@@ -2030,6 +2059,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       if (apply_status(target, element, caster_side)) {
         say(std::format("{} casts {} on {}: status", caster.name, nm, target_unit.name));
         code_override = 0;
+        write_caster(0);
       } else {
         deal(elem_in(0));
       }
@@ -2040,6 +2070,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       if (!ok) ok = apply_status_bits(target, 1u << (17 + rng_.rnd(0, 1)), 0, element.status_pct());
       say(std::format("{} casts {} on {}: {}", caster.name, nm, target_unit.name, ok ? "status" : "no effect"));
       code_override = ok ? 0 : 2;
+      if (!ok) write_caster(2);
       break;
     }
     case 10: {  // gate rnd(1,99) <= element record +0xA, a random lo bit of 0x8E8EA939, then the normal roll for it
@@ -2055,6 +2086,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       }
       say(std::format("{} casts {} on {}: {}", caster.name, nm, target_unit.name, ok ? "random status" : "no effect"));
       code_override = ok ? 0 : 2;
+      if (!ok) write_caster(2);
       break;
     }
     case 36: {  // rnd(0,99) < element record +0xA sets the lo bits of the target's innate colour, no further roll; a failed gate clears
@@ -2075,6 +2107,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       say(std::format("{} uses {} on {}: {}", caster.name, nm, target_unit.name, seal_swap ? "sealed, miss" : "miss"));
       chain_hits_ = 0;
       code_override = 2;
+      write_caster(2);
       landed = false;
       break;
     case 6: {  // element record +0xE & 0xFC = a colour: the whole ring takes it; else the timed field state (1 weaker / 2 stronger elements)
@@ -2133,6 +2166,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
               // lose their used bit: its lower levels are recharged
       if (row < 2) {
         code_override = 2;
+        write_caster(2);
         landed = false;
       } else {
         for (int cell = 0; cell < 10 * row && cell < static_cast<int>(data::kGridCells); ++cell) target_unit.used[static_cast<size_t>(cell)] = false;
@@ -2146,6 +2180,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         say(std::format("{} casts {} on {}: no effect", caster.name, nm, target_unit.name));
         landed = false;
         code_override = 2;
+        write_caster(2);
         break;
       }
       const u32 moved = caster.lo & ~caster.perm_lo & kRevengeStatuses;
@@ -2294,6 +2329,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
     case 44:  // actor := unit 0, partner := unit 4 for a scripted steal (mode 30 reads it): no damage
       say(std::format("{} uses {} on {}", caster.name, nm, target_unit.name));
       code_override = 0;
+      write_caster(0);
       break;
     case 14:  // by the target's slot: an enemy slot takes mode 0's hit pass, a party slot the mode 3 heal (Saints hurts the enemies and
               // heals the party, whoever casts it); in a versus battle by the caster's side: the other side is hurt, its own healed
@@ -2310,6 +2346,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       if (caster.eq.gear_flags & data::gearflag::kDmgUp) amount = amount * 125 / 100;
       if (target_unit.eq.gear_flags & data::gearflag::kDmgDown) amount = amount * 75 / 100;
       code_override = mode == 43 && amount == 0 ? 1 : heal_code();
+      write_caster_heal(amount);
       amount = reduce(amount);
       if (target_unit.lo & st::kKO) say(std::format("{} casts {} on {}: {} is down, no effect", caster.name, nm, target_unit.name, target_unit.name));
       else say(std::format("{} casts {} on {}: heals {}", caster.name, nm, target_unit.name, amount));
@@ -2364,6 +2401,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         if (!landed) {
           say(std::format("{} casts {} on {}: no effect", caster.name, nm, target_unit.name));
           code_override = 2;
+          write_caster(2);
         } else {
           say(std::format("{} casts {} on {}: stat modifier {}%", caster.name, nm, target_unit.name, element.power()));
           const u32 bits = (element.status_hi() & 0xFC0u) >> 6;
@@ -2375,6 +2413,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         int amount = heal_amount(rng_, caster.mag, element.variance(), slot);
         if (caster.eq.gear_flags & data::gearflag::kDmgUp) amount = amount * 125 / 100;
         if (target_unit.eq.gear_flags & data::gearflag::kDmgDown) amount = amount * 75 / 100;
+        write_caster_heal(amount);
         amount = reduce(amount);
         say(std::format("{} casts {} on {}: heals {}", caster.name, nm, target_unit.name, amount));
         damage_unit(actor, target, amount, heal_code());
@@ -2387,6 +2426,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         say(std::format("{} uses {} on {}: no effect without the hero set", caster.name, nm, target_unit.name));
         landed = false;
         code_override = 2;
+        write_caster(2);
         break;
       }
       [[fallthrough]];
@@ -2445,6 +2485,7 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
         say(std::format("{} uses {} on {}: immune ({} hits)", caster.name, nm, target_unit.name, hits));
         if (total < -1 && target_unit.in_turn_order()) target_unit.hp -= total;
         code_override = 2;
+        write_caster(2);
         break;
       }
       // Otherwise the sum takes the gear steps once more (the last hitter's flag 0x04, the target's 0x08); that value decides "no damage"
@@ -2459,8 +2500,12 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
       say(std::format("{} uses {} on {}: {}{} ({} hits)", caster.name, nm, target_unit.name, any ? rolled_damage : 0, code == 3 ? " absorbed" : "", hits));
       damage_unit(actor, target, rolled_damage, code);
       if (code != 0) code_override = code;
+      write_caster(code);
       if (code == 3) rolled_damage = -1;
-      if ((last.hi & st::kHiDrain) && geared != 0) drain_ = {last_hitter, reduce(geared)};
+      if ((last.hi & st::kHiDrain) && geared != 0) {
+        drain_ = {last_hitter, reduce(geared)};
+        write_caster(3);
+      }
       break;
     }
     default:
@@ -2512,6 +2557,14 @@ void Battle::do_element(int actor, int element_id, int row, int target, bool pus
   else if (element.b(0x13) != 0 && landed) ev.sys_msg = element.b(0x13);
   if (log_.size() > log0) ev.text = log_[log0];
   note_event(ev);
+  // The caster's slot is written after the target's (a caster that is its own target keeps the later write). Saints (mode 14) writes
+  // heal into it on every target; a steal writes its code into the three party slots instead of the caster's.
+  if (mode == 14) write_caster(3);
+  if (caster_write >= 0 && (!caster_write_if_marked || caster.result_code == 0xFF)) caster.result_code = caster_write;
+  if (mode == 30)
+    for (int pc = 0; pc < kPcSlots; ++pc) units_[static_cast<size_t>(pc)].result_code = ev.code;
+  for (int unit = 0; unit < kUnits; ++unit) events_.back().result_slots[static_cast<size_t>(unit)] = static_cast<u8>(units_[static_cast<size_t>(unit)].result_code);
+  events_.back().result_slots_written = true;
   if (ring_done) ring_repainted_ = true;
   if (push_ring) {
     pay_drain();
@@ -2579,6 +2632,8 @@ void Battle::cast_element_targets(int actor, int element_id, int row, int target
   } const seal_scope{seal_swap_};
   seal_swap_ = seal_swap_colour(actor, element_id);
   thaw_on_action(actor);
+  // The caster's result code slot is marked once, before the first target's pass; the passes then write it (do_element).
+  if (actor >= 0 && actor < kUnits) units_[static_cast<size_t>(actor)].result_code = 0xFF;
   drain_ = {-1, 0};
   ring_repainted_ = false;
   fizzled_ = false;

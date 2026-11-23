@@ -9,6 +9,7 @@
 // path (entry 6 + the 4 + 6k stagger). Camera tracks play on BattleCamera through a per-effect bank, AKAO sounds (op 0x4C) through BattleAudio,
 // bespoke overlays through the BespokeRegistry.
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -75,7 +76,7 @@ void BattleView::fx_reset_scene() {
   // The pseudo-actor points into a pack's models (FxGpu::models, its own group 0xE handle): it goes with them. A scene that starts while
   // a pack still plays (an editor's run restarted mid-action) would otherwise tick a pose on freed memory.
   pa_ = PseudoActor{};
-  fx_prefetch_.reset();
+  fx_prefetch_.clear();
   fx_gpu_.clear();
   fx_lib_gpu_.reset();
   fx_lib_key_ = nullptr;
@@ -98,8 +99,8 @@ void BattleView::fx_reset_scene() {
 // ---- charge ---------------------------------------------------------------------------------------------------------------------------
 // The action's effect start: instantiates the type-0x25 "ch0<colour>" of battle.prd > sato
 // (colour = the first set bit of the action's colour byte, i.e. data::colour_index_of_bit) and plays "sing" (a PC) / "msin"
-// (a monster); starts the sequence "ch0<colour>", runs S5 entry 5 on every caster and
-// queues the element pack load. The charge sequence's op 0x41 (about tick 108, +5 wait) hands over to the pack.
+// (a monster); starts the sequence "ch0<colour>" and runs S5 entry 5 on every caster. The charge sequence's op 0x41 (about tick 108,
+// +5 wait) hands over to the element pack.
 void BattleView::fx_charge_begin() {
   if (act_.ev.empty() || act_.actor < 0) return;
   if (act_.turn_targets_at_charge) {
@@ -140,14 +141,13 @@ void BattleView::fx_charge_begin() {
   if (const std::string chant = bunit(act_.actor).pc ? "sing" : "msin"; charged && !audio_.play(chant, 127, 64, 0x100)) log::debug("battle audio: no sound '{}'", chant);
   // The theme fades to 0x66 over 0x6D frames while the spell runs, unless op 0x7B's flag is set.
   if (!fx_bti_gate_) audio_.duck_cast();
-  // The element pack builds during the charge (fx_prefetch_step), so fx_begin's hand-over does not stall the view.
-  fx_prefetch_pack();
   if (!dbg_.effects || fx_) return;
   const battle::ActionEvent& e0 = act_.ev.front();
   if (e0.element <= 0 || static_cast<size_t>(e0.element) >= tables_->elements.size()) return;
   if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
   if (!fxlib_ready_) return;
-  const int colour = data::colour_index_of_bit(tables_->elements[static_cast<size_t>(e0.element)].colour_bit());
+  const int colour = fx_charge_colour();
+  // Built since the confirm (fx_prefetch_cast); what is left of the build runs here.
   std::shared_ptr<const FxPack> pack = fxlib_.charge_pack(colour);
   if (!pack || !fx_gpu_for(pack)) {
     log::debug("battle fx: no charge pack for colour {}", colour);
@@ -340,27 +340,46 @@ int BattleView::fx_action_eid() const {
   return eid <= 1 ? -1 : eid;
 }
 
-// Opens the build of the current element's pack GPU resources at the charge start; fx_prefetch_step runs it during the charge, so fx_begin's
-// hand-over hits the fx_gpu_ cache. The heavy cases are the summons (the creature model) and the level-6 elements (their meshes and atlases):
-// read, baked and uploaded in the one frame fx_begin runs, they would freeze the view on the last charge frame. A no-op once the pack is
-// cached. The charge's own instance is running here, so `fx_` is no reason to skip.
-void BattleView::fx_prefetch_pack() {
-  fx_prefetch_.reset();
-  if (!dbg_.effects) return;
-  const int eid = fx_action_eid();
-  if (eid < 0 || fx_gpu_.count(eid)) return;
-  if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
-  if (!fxlib_ready_) return;
-  fx_prefetch_.emplace();
-  fx_prefetch_->eid = eid;
+// The colour of the current element's charge pack "ch0<colour>" (data::colour_index_of_bit of its colour byte); -1 without an element.
+int BattleView::fx_charge_colour() const {
+  if (act_.ev.empty()) return -1;
+  const int element = act_.ev.front().element;
+  if (element <= 0 || static_cast<size_t>(element) >= tables_->elements.size()) return -1;
+  return data::colour_index_of_bit(tables_->elements[static_cast<size_t>(element)].colour_bit());
 }
 
-// One step of the prefetch, the mesh textures in slices of a few milliseconds: the work is spread over the charge's frames.
+// Queues the builds of the current element's GPU resources at its confirm: the colour's charge pack, which starts kCastLead ticks later (or
+// after the hop home), then the element pack, which the charge hands over to about 108 ticks after that. fx_prefetch_step runs them in
+// that order over the frames in between, so fx_charge_begin and fx_begin find their packs in the fx_gpu_ cache. Read, decoded and uploaded
+// in the frame that needs them, the charge's sheets and the element pack's file (a summon's creature model, a level-6 element's meshes and
+// atlases) would hold the view for that frame. A pack already cached or queued is not queued again.
+void BattleView::fx_prefetch_cast() {
+  if (!dbg_.effects) return;
+  if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
+  if (!fxlib_ready_) return;
+  if (const int colour = fx_charge_colour(); colour >= 0) fx_prefetch_open(BattleFxLibrary::charge_eid(colour));
+  if (const int eid = fx_action_eid(); eid >= 0) fx_prefetch_open(eid);
+}
+
+void BattleView::fx_prefetch_open(int eid) {
+  if (fx_gpu_.count(eid) || std::ranges::find(fx_prefetch_, eid, &FxGpuBuild::eid) != fx_prefetch_.end()) return;
+  fx_prefetch_.emplace_back().eid = eid;
+}
+
+// The prefetch steps of one video frame: the sprite sheets and the mesh textures run in slices of a few milliseconds, and steps that
+// cost under a millisecond (a pack with nothing for a step) let the next one run in the same frame, so the work is spread over the frames
+// before the packs are needed without leaving frames idle.
 void BattleView::fx_prefetch_step() {
-  constexpr double kSliceMs = 4.0;
-  if (!fx_prefetch_ || !fx_gpu_step(*fx_prefetch_, kSliceMs)) return;
-  log::debug("battle fx: eid {} built ahead {} at tick {}", fx_prefetch_->eid, fx_prefetch_->failed ? "failed" : "done", tick_count_);
-  fx_prefetch_.reset();
+  constexpr double kSliceMs = 4.0, kChainMs = 1.0;
+  const auto started = std::chrono::steady_clock::now();
+  while (!fx_prefetch_.empty()) {
+    FxGpuBuild& build = fx_prefetch_.front();
+    if (fx_gpu_step(build, kSliceMs)) {
+      log::debug("battle fx: eid {} built ahead {} at tick {}", build.eid, build.failed ? "failed" : "done", tick_count_);
+      fx_prefetch_.pop_front();
+    }
+    if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() >= kChainMs) return;
+  }
 }
 
 bool BattleView::fx_begin() {

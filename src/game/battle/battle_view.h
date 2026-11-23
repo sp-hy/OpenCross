@@ -815,11 +815,14 @@ class BattleView {
   // element effects (battle_view_fx*.cpp)
   // start_release: starts the pack of the current element; false = generic path.
   bool fx_begin();
-  // The effect-pack id of the current action's element (-1 = none). fx_prefetch_pack opens the build of that pack's GPU resources at the
-  // charge start and fx_prefetch_step advances it one bounded step per video frame, so the charge -> pack hand-over finds it in the cache
-  // instead of loading, baking and uploading the pack (a summon's creature model, a level-6 element's meshes) in one frame.
+  // The effect-pack id of the current action's element (-1 = none) and the colour of its charge pack (-1 = none). fx_prefetch_cast queues
+  // the builds of both packs' GPU resources at the element's confirm and fx_prefetch_step advances them in bounded steps, one video frame
+  // at a time, so neither the charge start nor the charge -> pack hand-over loads, bakes and uploads a pack (the charge's sheets, a
+  // summon's creature model, a level-6 element's meshes) in one frame; fx_prefetch_open queues one pack.
   int fx_action_eid() const;
-  void fx_prefetch_pack();
+  int fx_charge_colour() const;
+  void fx_prefetch_cast();
+  void fx_prefetch_open(int eid);
   void fx_prefetch_step();
   std::vector<int> cast_elements_;
   std::vector<std::vector<battle::ActionEvent>> begun_actions_;
@@ -937,14 +940,16 @@ class BattleView {
     FxGpu& operator=(const FxGpu&) = delete;
   };
   FxGpu* fx_gpu_for(const std::shared_ptr<const FxPack>& pack);
-  // One pack's FxGpu built in steps: the pack read, the sprite upload, the mesh bake, the mesh textures (in slices of the budget), the mesh
-  // buffers, the HD mesh index, the models and the overlay's atlases. fx_gpu_step runs one step (true = finished: the result is in fx_gpu_,
-  // or `failed`).
+  // One pack's FxGpu built in steps: the pack read, the sprite bank, the sprite sheets (in slices of the budget), the mesh bake, the mesh
+  // textures (in slices), the mesh buffers, the HD mesh index (in slices), the models and the overlay's atlases. fx_gpu_step runs one step (true =
+  // finished: the result is in fx_gpu_, or `failed`).
   struct FxGpuBuild {
-    enum class Step { Pack, Sprites, Meshes, MeshTextures, MeshBuffers, HdIndex, Models, OverlayAtlases, Done };
+    enum class Step { Pack, Sprites, SpriteSheets, Meshes, MeshTextures, MeshBuffers, HdIndex, Models, OverlayAtlases, Done };
     int eid = -1;
     std::shared_ptr<const FxPack> pack;
     std::unique_ptr<FxGpu> gpu;
+    effects::EffectBank bank;
+    effects::GpuEffects::Which sheets = effects::GpuEffects::Which::All;
     render::StageCreateJob mesh_job;
     Step step = Step::Pack;
     bool failed = false;
@@ -962,10 +967,12 @@ class BattleView {
   // variant: `out_mdl` = mdl with the cdrom2 S1, `out_vram` = vram with the cdrom2 image + CLUT written at the same place. Returns the stem.
   std::string fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
                                 import::Vram& out_vram);
-  // FNV-1a of the disc S1 -> battle model stems with a cdrom2 .obj, built once per session by fx_hd_mesh_index.
+  // FNV-1a of the disc S1 -> battle model stems with a cdrom2 .obj, built once per session by fx_hd_mesh_index, one file at a time until
+  // about `budget_ms` of wall time is used (true = complete); fx_hd_mesh_files_ = the files still to read, the last one next.
   std::unordered_map<u64, std::vector<std::string>> fx_hd_mesh_index_;
   bool fx_hd_mesh_indexed_ = false;
-  void fx_hd_mesh_index();
+  std::optional<std::vector<std::string>> fx_hd_mesh_files_;
+  bool fx_hd_mesh_index(double budget_ms = 1e9);
   void fx_draw_models(const render::Frame& frame, const render::Letterbox& lb, FxGpu& gpu,
                       const std::vector<effects::EmitterSystem::MeshInstance>& inst);
   // A PC's weapon mesh is registered under the two-digit character number ("02" = Guile, "19" = Glenn, "37" = Sneff, "39" = Doc: the names
@@ -1543,8 +1550,8 @@ class BattleView {
   FxFrame fx_frame_;
   SpellLights spell_;
   std::map<int, std::unique_ptr<FxGpu>> fx_gpu_;
-  // The prefetch build of the current cast's pack (fx_prefetch_pack), while it is not finished.
-  std::optional<FxGpuBuild> fx_prefetch_;
+  // The unfinished prefetch builds (fx_prefetch_open), stepped in order.
+  std::deque<FxGpuBuild> fx_prefetch_;
   // The resident library sheets, uploaded once per scene and shared by every pack's GpuEffects.
   std::shared_ptr<effects::GpuEffects> fx_lib_gpu_;
   const void* fx_lib_key_ = nullptr;

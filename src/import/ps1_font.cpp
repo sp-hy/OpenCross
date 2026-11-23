@@ -281,6 +281,16 @@ int Ps1Font::advance(int index) const {
   return JpGlyphs::advance(index);
 }
 
+int Ps1Font::width(std::u32string_view text) const {
+  const int blank = index_for(U' ');
+  int pen = 0;
+  for (char32_t ch : text) {
+    const int index = index_for(ch);
+    pen += advance(index >= 0 ? index : blank);
+  }
+  return pen;
+}
+
 std::shared_ptr<const Ps1Font> load_ps1_menu_font(const vfs::Vfs& vfs) {
   auto pictures = vfs.read_disc("cdrom/menu/menutim.prd");
   auto menutest = vfs.read_disc("cdrom/menu/menutest.prd");

@@ -229,7 +229,7 @@ Source: `src/game/battle/demo_main.cpp`. First non-flag argument = scene (scened
 | `--shotdir` | `<dir>` | exe folder | Shot folder. |
 | `--frames` | `<n>` | unlimited | Deterministic run; exit after n frames. |
 
-Environment: `OC_LIST_ELEMENTS_EID`, `OC_LIGHTING` and the battle variables of section 3.3.
+Environment: `OC_LIST_ELEMENTS_EID`, `OC_LIGHTING`, `OC_FRAMETIME` (frame times, section 3) and the battle variables of section 3.3.
 
 ### 1.10 `ocbattleseq` (animation sequences, battle sounds)
 
@@ -340,7 +340,7 @@ Most `static const` reads are cached for the process lifetime, so set the variab
 | `OC_QUIET` | `src/platform/window.cpp`, `src/audio/mixer.cpp`, `src/app/app_boot.cpp` (no Steam connection); set by `src/game/battle/demo_main.cpp` (`--frames`), `tests/routes/run.ps1`, `tools/ours_cast34.ps1` | set | Test window is shown without activation, never focusable and kept behind every other window (sent to the back before and after it is shown, Windows only), and the mixer output gain is 0. |
 | `OC_SOURCE_SAVE` | `tests/routes/true_ending.prep.ps1`, `mojo_full_party.prep.ps1`, `mojo_swap_in.prep.ps1`, `relief_save.prep.ps1`, `relief_save_orig.prep.ps1`, `enc_k.prep.ps1`, `enc_l.prep.ps1`, `enc_p1.prep.ps1`, `ngplus_ending.prep.ps1`, `shop_ending.prep.ps1`, `lynx_aftermath.prep.ps1`, `lynx_no_kid.prep.ps1` | file path | The save.dat the route forges its Opassa Beach save from (default `tmp\save.dat`). |
 | `OC_GUIDE_BROWSER` | `src/platform/web_page.cpp` | `steam` | The guide overlay and `ocguide` read pages in Steam's browser even when the WebView2 runtime is installed (the Proton path, checked on Windows). |
-| `OC_FRAMETIME` | `src/app/app_run.cpp` | set; `2` | Logs the wall time of main-loop iterations while a field-to-battle hand-over runs: only those over 20 ms, or every iteration when the value starts with `2`. |
+| `OC_FRAMETIME` | `src/app/app_run.cpp`, `src/game/battle/demo_main.cpp` | set; `2` | Logs the wall time of main-loop iterations while a field-to-battle hand-over runs: only those over 20 ms, or every iteration when the value starts with `2`. `ocbattleview` logs each frame's update and draw time (`frametime: frame <n> update <ms> draw <ms>`): those over 17 ms together, or every frame with `2`. |
 | `OC_NO_WARP` | `src/app/app_draw.cpp` | `1`, `2` | A/B check of the screen ripple: `1` draws its frame unwarped; `2` (classic art) shows only the deep part, unwarped. |
 | `OC_SLOT_DUMP` | `src/app/app_route.cpp` | path prefix | A route `request slotdump N` writes the encoded save block to `<prefix>N.bin` (an error is logged when unset). |
 | `OC_SWEEP_ROOMS` | `src/app/app_boot.cpp` | `a,b,c` | Room sweep (`[Debug] SweepTicks` > 0) covers only these rooms. |

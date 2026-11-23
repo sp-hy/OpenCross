@@ -206,6 +206,10 @@ struct EmitterSystem::Impl {
   // -- spawn
   int spawn(size_t hi, const Basis* parent);
   static void build_matrix(Object& obj);
+  // The object's matrix and colour bytes at the draw fraction `alpha` between the previous step and this one (angles, scale and colour
+  // blended; an object that faces its velocity keeps this step's matrix).
+  static Mat3 blended_matrix(const Object& obj, float alpha);
+  static std::array<u8, 3> blended_rgb(const Object& obj, float alpha);
   static void integrate_step(Object& obj, int shift);
   static void integrate(Object& obj, int shift, int steps);
   int fire(size_t hi, const Basis* parent);

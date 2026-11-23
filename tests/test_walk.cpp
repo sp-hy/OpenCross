@@ -392,6 +392,49 @@ void test_attached_rigid() {
   rider.clear_attached();
   CHECK(!rider.attached());
 }
+// A follower whose step alternates 8.5 and 15 units a tick is drawn at the mean of its paths over the last 8 ticks: a steady 11.75
+// units a tick. Once the follow rules let go, the mean runs on until the actor has stood still for 8 ticks and then the drawn spot is
+// the actor's own; an actor never followed is drawn on its path; a jump over 150 units is drawn at once.
+void test_follow_mean() {
+  const game::WalkMesh empty;
+  game::Actor follower, walker;
+  float x = 0.0f;
+  follower.set_position(empty, x, 0.0f, true, true);
+  follower.end_tick();
+  walker.set_position(empty, x, 0.0f, true, true);
+  walker.end_tick();
+  float drawn_prev = 0.0f;
+  for (int tick = 0; tick < 16; ++tick) {
+    follower.begin_tick();
+    walker.begin_tick();
+    x += tick % 2 == 0 ? 8.5f : 15.0f;
+    follower.set_position(empty, x, 0.0f, false, true);
+    walker.set_position(empty, x, 0.0f, false, true);
+    follower.mark_followed();
+    follower.end_tick();
+    walker.end_tick();
+    const float drawn = follower.pose(1.0f).x;
+    if (tick >= 8) CHECK(near(drawn - drawn_prev, 11.75f));
+    CHECK(near(follower.pose(0.5f).x, (drawn_prev + drawn) * 0.5f));
+    CHECK(near(walker.pose(1.0f).x, x));
+    drawn_prev = drawn;
+  }
+  for (int tick = 0; tick < 6; ++tick) {
+    follower.begin_tick();
+    follower.end_tick();
+  }
+  CHECK(follower.pose(1.0f).x < x - 0.1f);
+  for (int tick = 0; tick < 3; ++tick) {
+    follower.begin_tick();
+    follower.end_tick();
+  }
+  CHECK(near(follower.pose(0.0f).x, x) && near(follower.pose(1.0f).x, x));
+  follower.begin_tick();
+  follower.set_position(empty, x + 400.0f, 0.0f, false, true);
+  follower.mark_followed();
+  follower.end_tick();
+  CHECK(near(follower.pose(0.0f).x, x + 400.0f));
+}
 // The shadow tile's reach is the posed mesh's, not its joints': a rigid mesh on one joint at the origin reaches as far as its widest vertex, a
 // skinned vertex as far as its joint plus its offset, blended by the weights; scaled and placed by the model matrix.
 void test_model_reach() {
@@ -417,7 +460,8 @@ void test_model_reach() {
   CHECK(near(game::ActorShadows::model_reach(asset, model, palette, 1000.0f, -500.0f, joints), 150.0f));
 }
 // The script-set model axes are drawn blended between ticks: a roll of 0 then 8 draws as 4 at half a tick; a jump past the snap limit,
-// a scale reset and the first tick after creation draw the current value.
+// a scale reset and the first tick after creation draw the current value. The B0 / B1 y offset blends the same way (0 then 40 draws
+// 10 at a quarter tick) and a rise past the snap limit is drawn at once.
 void test_axes_blend() {
   auto ticked = [](float roll0, float roll1, float scale0, float scale1) {
     game::Actor actor;
@@ -442,6 +486,16 @@ void test_axes_blend() {
   fresh.begin_tick();
   fresh.roll = 100;
   CHECK(same(fresh.model_matrix(0.25f), ticked(100, 100, 1, 1).model_matrix(0.25f)));
+  auto raised = [](float from, float to) {
+    game::Actor actor;
+    actor.begin_tick();
+    actor.y_offset = from;
+    actor.begin_tick();
+    actor.y_offset = to;
+    return actor;
+  };
+  CHECK(near(raised(0, 40).model_matrix(0.25f).at(1, 3), 10.0f));
+  CHECK(near(raised(0, 1000).model_matrix(0.25f).at(1, 3), 1000.0f));
 }
 // Screen ripple grid line of column 19 (the first grid quad's left edge): the exact cosine of the phase, and a fractional phase lands
 // between its neighbours.
@@ -764,6 +818,7 @@ int main() {
   test_actor_anim();
   test_stair_clip();
   test_attached_rigid();
+  test_follow_mean();
   test_model_reach();
   test_axes_blend();
   test_screen_warp();

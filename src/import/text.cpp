@@ -655,6 +655,10 @@ ByteSpan ExeStrings::get(int table, int index) const {
   return ByteSpan(exe_.data() + at, size);
 }
 
+size_t ExeStrings::count(int table) const {
+  return table < 0 || static_cast<size_t>(table) >= tables_.size() ? 0 : tables_[static_cast<size_t>(table)].size();
+}
+
 // ---------------------------------------------------------------------------------------------- PS1 stream
 std::optional<DialogueBlock> parse_dialogue_block(ByteSpan block) {
   if (block.size() < 8) return std::nullopt;

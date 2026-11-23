@@ -1471,6 +1471,57 @@ void test_status_mode_codes() {
   CHECK_EQ(last().code, 0xFF);
 }
 
+void test_caster_result_slot() {
+  // Each target's pass writes the caster's result code slot too: hit (0), heal (3) and miss (2) on every pass, so the last one stands; "no
+  // damage" (1) only while the slot still holds the action's mark 0xFF; a status-only pass leaves the mark. The event carries every slot.
+  // The passes of one action: the enemy (unit 3) and a party member (unit 1).
+  Fixture fixture;
+  Battle& battle = fixture.battle;
+  fixture.tables.elements.resize(8);
+  data::ElemRec& bolt = fixture.tables.elements[4];
+  bolt = data::ElemRec{};
+  bolt.raw[6] = 1, bolt.raw[8] = 12;
+  data::ElemRec& heal = fixture.tables.elements[5];
+  heal = data::ElemRec{};
+  heal.raw[4] = 0xC2, heal.raw[6] = 1, heal.raw[7] = 3, heal.raw[0xA] = 20;
+  data::ElemRec& sleep = fixture.tables.elements[6];
+  sleep = data::ElemRec{};
+  sleep.raw[6] = 1, sleep.raw[7] = 1, sleep.raw[0xA] = 30, sleep.raw[0x19] = 0x40;
+  data::ElemRec& dud = fixture.tables.elements[7];
+  dud = data::ElemRec{};
+  dud.raw[6] = 1;
+  for (const int unit : {1, 3}) battle.unit_mut(unit).hp = battle.unit_mut(unit).max_hp = 999;
+  const auto slot = [&]() { return battle.unit(0).result_code; };
+  battle.do_element(0, 4, 0, 3);
+  CHECK_EQ(slot(), 0);
+  battle.unit_mut(1).hi |= st::kHiImmune;
+  battle.do_element(0, 4, 0, 1, false);
+  CHECK_EQ(battle.events().back().code, 2);
+  CHECK_EQ(slot(), 2);
+  CHECK(battle.events().back().result_slots_written);
+  CHECK_EQ(battle.events().back().result_slots[0], 2);
+  CHECK_EQ(battle.events().back().result_slots[3], 0);
+  battle.do_element(0, 4, 0, 1);
+  battle.do_element(0, 4, 0, 3, false);
+  CHECK_EQ(slot(), 0);
+  battle.unit_mut(1).hi &= ~st::kHiImmune;
+  battle.do_element(0, 7, 0, 1);
+  CHECK_EQ(battle.events().back().code, 1);
+  CHECK_EQ(slot(), 1);
+  battle.do_element(0, 4, 0, 3);
+  battle.do_element(0, 7, 0, 1, false);
+  CHECK_EQ(battle.events().back().code, 1);
+  CHECK_EQ(slot(), 0);
+  battle.unit_mut(0).hp = 10;
+  battle.do_element(0, 5, 0, 0);
+  CHECK_EQ(slot(), 3);
+  fixture.rng.push(1);
+  battle.do_element(0, 6, 0, 3);
+  CHECK_EQ(battle.events().back().code, 0);
+  CHECK_EQ(slot(), 0xFF);
+  CHECK_EQ(battle.unit(3).result_code, 0);
+}
+
 struct AttackBrain final : EnemyBrain {
   EnemyAction choose(const Battle&, int, Rng&) override {
     EnemyAction action;
@@ -7080,6 +7131,7 @@ int main() {
   test_darkness_active_pc();
   test_status_message();
   test_status_mode_codes();
+  test_caster_result_slot();
   test_frozen_turns();
   test_field_ring_writes();
   test_queued_cast_targets();

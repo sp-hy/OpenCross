@@ -205,6 +205,11 @@ class Actor {
   // yaw each keep a segment (start, end, span): a change spreads over the gap since the previous change (1..4 ticks), so the
   // display runs continuously and an every-tick mover is unchanged. Warps (place, teleport, > 150 units) restart the segment.
   void end_tick();
+  // The party follow rules took this actor this tick (call before end_tick). A follower's step length changes from tick to tick as it
+  // crosses the distance thresholds (8.5 and 15 units a tick behind a running leader, or a walk and a stand in turn), which drawn
+  // tick by tick is a shudder. The position is then drawn as the mean of its paths over the last kFollowMeanTicks ticks, a steady
+  // speed, until the actor has stood still for that long. Warps restart it as they restart the segment.
+  void mark_followed() { followed_tick_ = true; }
   // x/z move; y comes from the walk-mesh plane when (x, z) is inside a triangle and `free_y` is false. `teleport` also
   // resets the interpolation source so the actor does not glide.
   void set_position(const WalkMesh& walk, float x, float z, bool teleport, bool free_y = false);
@@ -492,16 +497,17 @@ class Actor {
   std::string empty_;
 
   ActorPose prev_, cur_;
-  // The script-set model rotation (pitch, local_yaw, roll) and per-axis scale, drawn blended from their values at the start of the
-  // tick (begin_tick) by the draw fraction. A step of more than kAxisSnapUnits or a scale jump (sign change, ratio > kAxisSnapRatio) is
-  // a reset and drawn at once; so is everything before the second tick.
+  // The script-set model rotation (pitch, local_yaw, roll), per-axis scale and y offset, drawn blended from their values at the start of
+  // the tick (begin_tick) by the draw fraction. A step of more than kAxisSnapUnits or a scale jump (sign change, ratio > kAxisSnapRatio)
+  // is a reset and drawn at once; so is everything before the second tick.
   struct Axes {
     float pitch = 0, local_yaw = 0, roll = 0;
     float scale[3] = {1.0f, 1.0f, 1.0f};
+    float y_offset = 0;
   };
   static constexpr float kAxisSnapUnits = 512.0f;
   static constexpr float kAxisSnapRatio = 1.5f;
-  Axes axes_now() const { return {pitch, local_yaw, roll, {axis_scale[0], axis_scale[1], axis_scale[2]}}; }
+  Axes axes_now() const { return {pitch, local_yaw, roll, {axis_scale[0], axis_scale[1], axis_scale[2]}, y_offset}; }
   Axes axes_at(float alpha) const;
   render::Mat4 placed_matrix(float alpha, bool tilted) const;
   Axes axes_prev_;
@@ -517,6 +523,11 @@ class Actor {
   // A teleport / placement since the last end_tick(): the next end_tick restarts the segments.
   bool smooth_warp_ = true;
   void reset_smooth() { smooth_warp_ = true; }
+  // Positions at the end of the last kFollowMeanTicks + 1 ticks, newest first, and whether pose() draws the mean of their paths
+  // (mark_followed).
+  static constexpr int kFollowMeanTicks = 8;
+  float mean_pos_[kFollowMeanTicks + 1][3]{};
+  bool follow_mean_ = false, followed_tick_ = false;
   int tri_ = -1;
   // Target facing, 0..0xFFF.
   int facing_ = 0;
