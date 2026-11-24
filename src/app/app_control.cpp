@@ -16,6 +16,7 @@
 #include <iostream>
 #include <mutex>
 #include <sstream>
+#include <string_view>
 #include <thread>
 
 #include "core/log.h"
@@ -181,8 +182,8 @@ std::string App::control_state() {
 // monster's run otherwise goes on touching the leader; with [Debug] SkipBattles the scene goes on, a `b` note marks the fight),
 // none ran within kTraceStart ticks (`none`) or `ticks` ran (`limit`). The scene is the scripts a trigger started (a talk, a touch,
 // a collision, an editor's request) and what they started; the room's own (INIT, UPDATE and what they start: wandering, animating
-// NPCs, an opening scene) never end and don't count. The file holds 16 bytes per event: tick u32, pc u32, entity u16, record u8, script slot u8, class u8, flags u8 (1 yield, 2 end), 2 zero
-// bytes; little-endian. Reply: `trace <ticks run> <events> <why> <file>`.
+// NPCs, an opening scene) never end and don't count. The file holds 16 bytes per event: tick u32, pc u32, entity u16, record u8,
+// script slot u8, class u8, flags u8 (1 yield, 2 end), 2 zero bytes; little-endian. Reply: `trace <ticks run> <events> <why> <file>`.
 std::string App::control_trace(u64 from, u64 ticks, const std::string& file) {
   constexpr u32 kTraceStall = 600;
   constexpr u64 kTraceStart = 300;
@@ -274,7 +275,8 @@ std::string App::control_trace(u64 from, u64 ticks, const std::string& file) {
         if (stuck.queued || stuck.cycling || stuck.ticks < kTraceStall) continue;
         const size_t ent = static_cast<size_t>(stuck.ent);
         const u16 key = stuck.key;
-        const bool walk_op = key == 0x3F || key == 0x40 || (key >= 0x42 && key <= 0x46) || key == 0x5B || key == 0x5C || key == 0xB8 || key == 0xB9 || key == 0xBA;
+        const bool walk_op = key == 0x3F || key == 0x40 || (key >= 0x42 && key <= 0x46) || key == 0x5B || key == 0x5C ||
+                             (key >= 0xB8 && key <= 0xBA);
         walking |= walk_op && stuck.cls < 7 && ent < moved_at.size() && moved_at[ent] != 0 && ran + 1 - moved_at[ent] < kTraceStall;
         talking |= key == 0xE2 && stuck.cls < 7 && typed_at != 0 && ran + 1 - typed_at < kTraceStall;
       }
@@ -292,7 +294,7 @@ std::string App::control_trace(u64 from, u64 ticks, const std::string& file) {
   // `x <tick> <entity> <record> <pc> <op key> <ticks waited> <class> <state>`: on any end but `done`, each scene record still live
   // (what a stalled or over-long scene waits on); state 0 waits in place, 1 not run yet, its entity inactive (pc / op: its first
   // instruction), 2 loops (ticks: since it last ran a new place).
-  if (std::string(why) != "done")
+  if (std::string_view(why) != "done")
     for (const script::FieldVM::StuckInfo& stuck : world.vm().scene_records())
       trace.notes.push_back(std::format("x {} {} {} {} {} {} {} {}", ran, stuck.ent, stuck.rec, stuck.pc, stuck.key, stuck.ticks, stuck.cls,
                                         stuck.queued ? 1 : stuck.cycling ? 2 : 0));

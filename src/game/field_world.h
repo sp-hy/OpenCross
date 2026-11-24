@@ -680,6 +680,17 @@ class FieldWorld final : public script::FieldHost {
   // button talks at once. dist = centre distance (0 = inside talk range, outside touch range). Spot written to (x, z); false =
   // no walkable spot around it (the party stays).
   bool put_party_beside(int ent, float dist, float& x, float& z);
+  // The floor heights put_party_beside takes (Y down): the trigger pass's band target_y - target_height .. target_y + leader_height,
+  // 2 units inside it on each side when it is wider than 4.
+  struct FloorBand {
+    float lo, hi;
+  };
+  static FloorBand beside_floor_band(float target_y, float target_height, float leader_height);
+  // Rings put_party_beside searches round a circle entity when the middle of the talk band has no floor: 1 + one per 4 units of the
+  // band (one ring with a given distance or a box), and the centre distance of ring `ring` >= 1 (base = the two radii), nearest first
+  // from just outside the touch range.
+  static int beside_rings(float dist, bool box);
+  static float beside_ring_reach(float base, int ring);
   // Route `talk`: whether entity `ent` takes a talk now (the trigger pass's filter: active, not 0x400002, no no-action flag).
   bool takes_talk(int ent) const;
   // Route `talk`: an inactive entity made active and shown again (its inactive and hidden bits cleared); false when it was active.
@@ -883,6 +894,8 @@ class FieldWorld final : public script::FieldHost {
   void request_map_jump(int room, int param) override;
   void set_movie_jump(int room, int param) override;
   void request_menu(script::MenuKind kind, int arg) override;
+  // The same with the engine's shop rows (routes): no mod's [ElementShops] / [Smiths].
+  void request_engine_menu(script::MenuKind kind, int arg);
   bool menu_active() override;
   void field_reset() override;
   int party_member(int slot) override;

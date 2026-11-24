@@ -487,6 +487,16 @@ void FieldWorld::dialogue_choice(int first, int last) {
 // A8: mode 1 = to black, mode 0 = back to the picture; arg = ticks (0 = at once). Drawn as the room change's subtractive fade.
 
 void FieldWorld::request_menu(script::MenuKind kind, int arg) {
+  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] of the running room's owner.
+  if (menu_state_ == MenuState::None && (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop)) {
+    const std::optional<int> row = script_shop(kind, arg);
+    if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
+    arg = row.value_or(-1);
+  }
+  request_engine_menu(kind, arg);
+}
+
+void FieldWorld::request_engine_menu(script::MenuKind kind, int arg) {
   // FE 65: arg = disc - 1; PC mode swaps the index at once (the "Disc N" screen only fades). It is not a screen, so another pending
   // request does not hold it back.
   if (kind == script::MenuKind::ChangeDisc) {
@@ -495,11 +505,6 @@ void FieldWorld::request_menu(script::MenuKind kind, int arg) {
     return;
   }
   if (menu_state_ != MenuState::None) return;
-  if (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop) {
-    const std::optional<int> row = script_shop(kind, arg);
-    if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
-    arg = row.value_or(-1);
-  }
   if (kind == script::MenuKind::Save && gs_) {
     // FE 85: the roster's grids and gear go back to the stock and variable 0x7E = 3, so the
     // save written by the list that follows is a cleared save (summary flags 3).

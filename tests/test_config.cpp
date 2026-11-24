@@ -256,6 +256,14 @@ int main() {
     CHECK(parse_skip_battles("-1").empty() && parse_skip_battles("").empty() && parse_skip_battles("x,7").empty());
     CHECK(load_text("[Debug]\nSkipBattles=1,0\n").debug_skip_battles == std::vector<int>({1, 0}));
     CHECK(load_text("").debug_skip_battles.empty());
+    // A later layer that doesn't name the key keeps the list; one that names it, even empty, replaces it.
+    Config layered = load_text("[Debug]\nSkipBattles=2\n");
+    const std::filesystem::path layer = std::filesystem::temp_directory_path() / "oc_test_config_layer.ini";
+    { std::ofstream(layer) << "[Debug]\nControl=1\n"; }
+    CHECK(layered.load(layer) && layered.debug_skip_battles == std::vector<int>({2}));
+    { std::ofstream(layer) << "[Debug]\nSkipBattles=\n"; }
+    CHECK(layered.load(layer) && layered.debug_skip_battles.empty());
+    std::filesystem::remove(layer);
   }
   if (failures) return 1;
   std::printf("test_config: ok\n");

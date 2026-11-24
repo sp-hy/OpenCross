@@ -1,6 +1,6 @@
 // Walk-mesh helper checks on a hand-built 3-triangle strip: containment, plane height, edge crossing, wall blocking
 // by attr flags, boundary stop and wall sliding; the actor's script-animation rules and drawn blends, the screen ripple grid and the
-// frame echo's projection, the dialogue portrait side, the shadow tile's model reach; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
+// frame echo's projection, the dialogue portrait side, put beside's floor band and rings, the shadow tile's model reach; the field's item and grid script ops (FE 69 Kid's grid list, the FE 7D strip,
 // the key-item range), the FE 2F reset and the seeded script RAND; the button panel's rules (FE D1).
 #include <array>
 #include <cmath>
@@ -555,6 +555,24 @@ void test_portrait_side() {
   CHECK(FieldWorld::portrait_on_left(0x800, 0, 0, 0x1000));
 }
 
+// put beside: the floor band sits 2 units inside the trigger pass's height test, but a band 4 units wide or less is kept whole (a
+// short entity still has a floor); the fallback rings run from just outside the touch range out to the talk edge, nearest first,
+// and a given distance or a box entity gets the middle ring only.
+void test_put_beside_search() {
+  using game::FieldWorld;
+  const FieldWorld::FloorBand wide = FieldWorld::beside_floor_band(100, 40, 60);
+  CHECK(near(wide.lo, 62) && near(wide.hi, 158));
+  const FieldWorld::FloorBand thin = FieldWorld::beside_floor_band(100, 1, 2);
+  CHECK(near(thin.lo, 99) && near(thin.hi, 102) && thin.lo <= thin.hi);
+  CHECK(FieldWorld::beside_rings(30, false) == 1 && FieldWorld::beside_rings(0, true) == 1);
+  const int rings = FieldWorld::beside_rings(0, false);
+  CHECK(rings > 2);
+  CHECK(near(FieldWorld::beside_ring_reach(20, 1), 20 + game::kTouchMargin + 2));
+  for (int ring = 2; ring < rings; ++ring)
+    CHECK(FieldWorld::beside_ring_reach(20, ring) > FieldWorld::beside_ring_reach(20, ring - 1));
+  CHECK(FieldWorld::beside_ring_reach(20, rings - 1) < 20 + game::kTalkMargin);
+}
+
 // FE 4D writes the Vibration option the title screen and the pause screen set.
 void test_vibration_global() {
   ui::GameState state;
@@ -827,6 +845,7 @@ int main() {
   test_battle_pack_handover();
   test_frozen_actor();
   test_portrait_side();
+  test_put_beside_search();
   game::WalkMesh wm;
   wm.init(build(), {0, game::kFlagBlockAll});
 

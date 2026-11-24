@@ -182,9 +182,22 @@ bool FieldWorld::bring_in(int ent) {
   if (ent <= 0 || ent >= static_cast<int>(ents_.size())) return false;
   script::Entity& script_ent = vm_.entity(ent);
   if (!(script_ent.flags38 & script::flag38::kInactive)) return false;
-  script_ent.flags38 &= ~(script::flag38::kInactive | 0x20u);
+  script_ent.flags38 &= ~(script::flag38::kInactive | script::flag38::kHidden);
   return true;
 }
+
+FieldWorld::FloorBand FieldWorld::beside_floor_band(float target_y, float target_height, float leader_height) {
+  // Inside the trigger pass's test: the leader's height is kept whole, so a floor at the very edge can fail it by one.
+  const float lo = target_y - target_height, hi = target_y + leader_height;
+  const float inset = hi - lo > 4.0f ? 2.0f : 0.0f;
+  return {lo + inset, hi - inset};
+}
+
+int FieldWorld::beside_rings(float dist, bool box) {
+  return dist > 0 || box ? 1 : 1 + static_cast<int>((kTalkMargin - kTouchMargin) / 4.0f);
+}
+
+float FieldWorld::beside_ring_reach(float base, int ring) { return base + kTouchMargin + 2.0f + 4.0f * static_cast<float>(ring - 1); }
 
 bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_z) {
   const int player = player_entity();
@@ -226,11 +239,8 @@ bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_
   // walkable (+1: not across a counter or a wall gap). The first direction with the best score wins.
   // The floor: step_triggers' height test (Y down) takes a leader at py with target.y - h_target <= py <= target.y + h_leader;
   // an entity raised above the walk mesh (a figure on a pedestal) is talked to from the floor below it.
-  // 2 units inside the trigger pass's height test where the band allows it: the leader's height is kept whole, so a floor at the very
-  // edge can fail it by one.
-  const float band_lo = target.y - ent_height(ent), band_hi = target.y + ent_height(player);
-  const float inset = band_hi - band_lo > 4.0f ? 2.0f : 0.0f;
-  const float y_lo = band_lo + inset, y_hi = band_hi - inset, y_hint = (y_lo + y_hi) * 0.5f;
+  const FloorBand band = beside_floor_band(target.y, ent_height(ent), ent_height(player));
+  const float y_lo = band.lo, y_hi = band.hi, y_hint = (y_lo + y_hi) * 0.5f;
   auto floor_ok = [&](int tri, float px, float pz) {
     if (tri < 0) return false;
     const float py = walk.height(tri, px, pz);
@@ -240,12 +250,12 @@ bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_
   float bx = 0, bz = 0, by = 0;
   // The band's middle first; when no direction has walkable ground there (an entity behind a counter with a large talk radius), the
   // rest of the band from just outside the touch range to the talk edge, nearest first.
-  const int passes = dist > 0 || box ? 1 : 1 + static_cast<int>((kTalkMargin - kTouchMargin) / 4.0f);
-  for (int k = 0; k < 16 * passes && best < 6; ++k) {
+  const int rings = beside_rings(dist, box);
+  for (int k = 0; k < 16 * rings && best < 6; ++k) {
     if (k >= 16 && k % 16 == 0 && best >= 0) break;
     const int dir = k % 16;
     const float angle = home + static_cast<float>((dir + 1) / 2) * (dir % 2 ? 1.0f : -1.0f) * (2.0f * kPi / 16.0f);
-    const float centre = k < 16 ? reach(angle) : rp + ent_radius(ent) + kTouchMargin + 2.0f + 4.0f * static_cast<float>(k / 16 - 1);
+    const float centre = k < 16 ? reach(angle) : beside_ring_reach(rp + ent_radius(ent), k / 16);
     const float px = target.x + centre * std::cos(angle), pz = target.z + centre * std::sin(angle);
     const int tri = walk.find_triangle(px, pz, y_hint);
     if (!floor_ok(tri, px, pz)) continue;
@@ -298,10 +308,10 @@ u32 FieldWorld::walk_flags(int i) const {
 // drawn either: it stays attached and shows again on the parent's hand when the parent does.
 bool FieldWorld::ent_not_drawn(int i) const {
   const u32 flags = vm_.entity(i).flags38;
-  if (flags & (0x20 | script::flag38::kNo3dObject | (draw_offscreen_ ? 0u : script::flag38::kOffScreen))) return true;
+  if (flags & (script::flag38::kHidden | script::flag38::kNo3dObject | (draw_offscreen_ ? 0u : script::flag38::kOffScreen))) return true;
   const Ent& ent_state = ents_[static_cast<size_t>(i)];
   if (ent_state.actor.attached() && ent_state.attach_to >= 0 && ent_state.attach_to < static_cast<int>(ents_.size()) &&
-      (vm_.entity(ent_state.attach_to).flags38 & 0x20))
+      (vm_.entity(ent_state.attach_to).flags38 & script::flag38::kHidden))
     return true;
   return (flags & script::flag38::kInactive) && ent_state.slot_inactive;
 }
@@ -558,7 +568,7 @@ void FieldWorld::step_cull() {
       }
     }
     // A hidden entity (EF.5) is never tested, and its animation is frozen as a culled one's.
-    ent_state.actor.set_culled(culled || (script_ent.flags38 & 0x20u));
+    ent_state.actor.set_culled(culled || (script_ent.flags38 & script::flag38::kHidden));
     script_ent.flags38 = culled ? (script_ent.flags38 | script::flag38::kOffScreen) : (script_ent.flags38 & ~script::flag38::kOffScreen);
   }
 }

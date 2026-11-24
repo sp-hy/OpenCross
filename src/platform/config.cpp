@@ -439,7 +439,8 @@ bool Config::load(const std::filesystem::path& file) {
   debug_battle_intro_live = parse_bool(ini.get("Debug", "BattleIntroLive"), debug_battle_intro_live);
   debug_hold_scripts = parse_bool(ini.get("Debug", "HoldScripts"), debug_hold_scripts);
   debug_force_branches = ini.get("Debug", "ForceBranches", debug_force_branches);
-  if (const std::string skip = ini.get("Debug", "SkipBattles"); !skip.empty()) debug_skip_battles = parse_skip_battles(skip);
+  // A layer that names SkipBattles replaces the list, an empty value included (no ini value holds a line break).
+  if (const std::string skip = ini.get("Debug", "SkipBattles", "\n"); skip != "\n") debug_skip_battles = parse_skip_battles(skip);
   debug_skip_movies = parse_bool(ini.get("Debug", "SkipMovies"), debug_skip_movies);
   debug_skip_menus = parse_bool(ini.get("Debug", "SkipMenus"), debug_skip_menus);
   debug_auto_teleport = parse_bool(ini.get("Debug", "AutoTeleport"), debug_auto_teleport);

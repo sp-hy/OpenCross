@@ -29,6 +29,8 @@ namespace oc::data {
 inline constexpr u16 kSceneEnemySlots = 3;
 // An enemy slot holding this id is empty, so a mod's monster with this id cannot stand in a formation slot.
 inline constexpr size_t kEmptyEnemySlot = 0xFF;
+// The highest element id: a grid cell keeps its element in the low 14 bits.
+inline constexpr size_t kLastElementId = 0x3FFF;
 
 // One named field of a record: byte offset and width (1, 2 or 4 bytes, little-endian).
 struct TableField {
@@ -45,6 +47,8 @@ std::string_view table_names_of(std::string_view table);
 bool table_grows(std::string_view table);
 // Whether `table` is a list table (a shop row: entries added and removed, apply_lists).
 bool table_is_list(std::string_view table);
+// The highest id a named record of `table` may take (pgdat and menu_pg: kLastElementId); a name past it gets no record.
+size_t table_last_id(std::string_view table);
 
 // One mod's row files: table name (lower case) -> the file's bytes; `own_ids` = its mod.ini own-id sections (features::own_id_sections:
 // table -> own id -> record name).

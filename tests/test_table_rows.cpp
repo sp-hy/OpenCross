@@ -214,6 +214,17 @@ int main() {
     CHECK(scenes[0][2] == 9 && rows.wide_writes("scenedat").empty() && logged(rows, "monster:edge is record 255, the empty formation slot"));
   }
 
+  // Element ids end at kLastElementId (a grid cell's 14 bits): a name past it gets no record; other tables have no such end.
+  {
+    data::TableRows rows;
+    rows.build({mod_with("Many", {{"pgdat", "[last_one]\npower=1\n[one_more]\npower=1\n"}, {"monster", "[big]\nmax_hp=1\n"}})},
+               {{"pgdat", data::kLastElementId}, {"monster", data::kLastElementId + 1}});
+    CHECK(rows.id_of("pgdat", "last_one") == data::kLastElementId && !rows.id_of("pgdat", "one_more"));
+    CHECK(rows.id_of("menu_pg", "last_one") == data::kLastElementId);
+    CHECK(rows.total("pgdat", data::kLastElementId) == data::kLastElementId + 1);
+    CHECK(logged(rows, "no id left for one_more") && rows.id_of("monster", "big") == data::kLastElementId + 1);
+  }
+
   if (failures == 0) std::printf("table_rows: OK\n");
   return failures == 0 ? 0 : 1;
 }

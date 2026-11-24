@@ -42,7 +42,8 @@ constexpr u16 kScenario = 0x00, kRoomParam = 0x02, kChoiceResult = 0x04, kMapId 
 
 // Bits of Entity::flags38 / flags270 / the global flag word that the VM itself interprets (others are just stored).
 namespace flag38 {
-constexpr u32 kSelected = 0x1, kNoAction = 0x8, kNoCollision = 0x4, kInactive = 0x10, kNo3dObject = 0x4000, kOffScreen = 0x8000;
+constexpr u32 kSelected = 0x1, kNoAction = 0x8, kNoCollision = 0x4, kInactive = 0x10, kHidden = 0x20, kNo3dObject = 0x4000,
+              kOffScreen = 0x8000;
 }
 namespace flag270 {
 constexpr u32 kInputLock = 0x1, kTouchTrigger = 0x40, kActionRunning = 0x80, kMoving = 0x10000, kTrailReplay = 0x20000, kTrailWalk = 0x40000;

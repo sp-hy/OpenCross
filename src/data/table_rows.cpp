@@ -4,6 +4,7 @@
 #include <charconv>
 #include <deque>
 #include <format>
+#include <limits>
 #include <set>
 
 #include "core/features.h"
@@ -170,6 +171,8 @@ bool table_grows(std::string_view table) {
 }
 
 bool table_is_list(std::string_view table) { return table == "el_shop" || table == "waa_shop"; }
+
+size_t table_last_id(std::string_view table) { return table_names_of(table) == "pgdat" ? kLastElementId : std::numeric_limits<size_t>::max(); }
 
 void set_table_mods(const vfs::Vfs* files, std::vector<TableMod> mods) { mods_storage() = {files, std::move(mods)}; }
 
@@ -368,8 +371,17 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
       for (const auto& [own_id, name] : listed)
         if (mod_names.erase(name)) order.push_back(name);
       order.insert(order.end(), mod_names.begin(), mod_names.end());
-      for (const std::string& name : order)
-        if (names.ids.emplace(name, names.first + names.names.size()).second) names.names.push_back(name);
+      for (const std::string& name : order) {
+        if (names.ids.contains(name)) continue;
+        const size_t id = names.first + names.names.size();
+        if (id > table_last_id(names_table)) {
+          note(true, std::format("tables: '{}' {}: no id left for {} (the last is {})", mod_names_[mod_index], names_table, name,
+                                 table_last_id(names_table)));
+          continue;
+        }
+        names.ids.emplace(name, id);
+        names.names.push_back(name);
+      }
     }
   }
   for (const auto& [table, names] : names_)

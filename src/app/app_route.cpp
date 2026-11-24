@@ -207,8 +207,8 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "battle") world.request_engine_battle(out.request_arg, out.request_arg2, out.request_arg3);
   else if (rk == "battle_disguise") world.request_engine_battle(out.request_arg, 0, 4);
   else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);
-  else if (rk == "elementshop") world.request_menu(MK::ElementShop, out.request_arg);
-  else if (rk == "weaponshop") world.request_menu(MK::WeaponShop, out.request_arg);
+  else if (rk == "elementshop") world.request_engine_menu(MK::ElementShop, out.request_arg);
+  else if (rk == "weaponshop") world.request_engine_menu(MK::WeaponShop, out.request_arg);
   else {
     log::error("route: unknown request {}", rk);
     exit_code = 1;
