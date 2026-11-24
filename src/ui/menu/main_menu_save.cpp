@@ -67,7 +67,7 @@ void MainMenu::Impl::load_previews() {
       const save::SaveSlot data = save::read_slot(*card, ref.block);
       SavePrev& file = prev[box++];
       file = preview_of(data, ref.slot, ref.block);
-      file.leader = saved_leader(data, save_dat->peek_ext(save_card, ref.slot, static_cast<u32>(lang)).names);
+      file.leader = preview_name ? preview_name(data) : std::u32string();
     } catch (const std::exception& error) {
       log::warn("menu: save slot {} unreadable: {}", ref.slot, error.what());
     }

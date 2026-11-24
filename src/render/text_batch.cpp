@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <format>
 #include <functional>
+#include <memory>
+#include <unordered_set>
 
 #include "core/log.h"
 
@@ -104,10 +106,10 @@ void TextBatch::destroy() {
   sprites_ = nullptr;
 }
 
-std::unique_ptr<TextBatch::Atlas> TextBatch::make_atlas(u32 w, u32 h, const std::vector<u8>& rgba,
+std::unique_ptr<TextBatch::Atlas> TextBatch::make_atlas(u32 w, u32 h, const void* rgba,
                                                         const Sampler& sampler, bool with_nearest, UploadBatch* batch) {
   auto atlas = std::make_unique<Atlas>();
-  if (!atlas->tex.create(*ctx_, w, h, TextureFormat::Rgba8, rgba.data(), batch)) return nullptr;
+  if (!atlas->tex.create(*ctx_, w, h, TextureFormat::Rgba8, rgba, batch)) return nullptr;
   atlas->set = TexRef(atlas->tex, sampler);
   if (with_nearest) atlas->set_nearest = TexRef(atlas->tex, nearest_);
   return atlas;
@@ -156,7 +158,7 @@ bool TextBatch::build_ps1_atlas(Face& font_face) {
       }
     }
   }
-  font_face.fill = make_atlas(w, h, px, nearest_);
+  font_face.fill = make_atlas(w, h, px.data(), nearest_);
   return font_face.fill != nullptr;
 }
 
@@ -164,19 +166,48 @@ void TextBatch::prepare(FaceId id, std::u32string_view text) {
   Face* font_face = face(id);
   // The PS1 font atlas is complete from the start.
   if (!font_face || font_face->ps1) return;
-  bool added = false;
+  const size_t first = font_face->wanted.size();
   for (char32_t ch : text) {
     if (ch == U'\n' || font_face->entries.count(ch)) continue;
-    if (std::find(font_face->wanted.begin(), font_face->wanted.end(), ch) == font_face->wanted.end()) {
-      font_face->wanted.push_back(ch);
-      added = true;
-    }
+    if (std::find(font_face->wanted.begin(), font_face->wanted.end(), ch) == font_face->wanted.end()) font_face->wanted.push_back(ch);
   }
-  if (added || !font_face->fill) rebuild_spritefont(*font_face);
+  if (!font_face->fill) rebuild_spritefont(*font_face);
+  else if (font_face->wanted.size() > first) add_glyphs(*font_face, first);
 }
 
 bool TextBatch::rebuild_spritefont(Face& font_face) {
   const import::SpriteFont& sf = *font_face.font;
+  std::vector<const import::SfGlyph*> glyphs;
+  for (char32_t ch : font_face.wanted) glyphs.push_back(sf.find_or_default(static_cast<u32>(ch)));
+  Rect drawn;
+  if (!pack_glyphs(font_face, glyphs, true, drawn)) log::warn("text atlas overflow: some glyphs are missing");
+  build_entries(font_face);
+  return upload_atlases(font_face);
+}
+
+bool TextBatch::add_glyphs(Face& font_face, size_t first) {
+  const import::SpriteFont& sf = *font_face.font;
+  std::vector<const import::SfGlyph*> glyphs;
+  for (size_t i = first; i < font_face.wanted.size(); ++i) glyphs.push_back(sf.find_or_default(static_cast<u32>(font_face.wanted[i])));
+  const u32 tex_h = font_face.tex_h;
+  Rect drawn;
+  if (!pack_glyphs(font_face, glyphs, false, drawn)) return rebuild_spritefont(font_face);
+  build_entries(font_face);
+  if (font_face.tex_h != tex_h) return upload_atlases(font_face);
+  return drawn.y1 <= drawn.y0 || upload_atlases(font_face, &drawn);
+}
+
+bool TextBatch::pack_glyphs(Face& font_face, const std::vector<const import::SfGlyph*>& glyphs, bool fresh, Rect& drawn) {
+  // Rows the textures keep free below the glyphs for the glyphs asked for later (the height grows in steps of 32 rows).
+  constexpr u32 kSpareRows = 64;
+  const import::SpriteFont& sf = *font_face.font;
+  if (fresh) {
+    font_face.rects.clear();
+    font_face.grids.clear();
+    font_face.masks.clear();
+    font_face.tex_h = font_face.pen_x = font_face.pen_y = font_face.shelf_h = 0;
+    font_face.used_h = 1;
+  }
   struct Item {
     const import::SfGlyph* glyph = nullptr;
     u32 x = 0, y = 0;
@@ -186,24 +217,19 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
     int h() const { return px ? px->ny : glyph->height(); }
   };
   std::vector<Item> items;
-  std::unordered_map<const import::SfGlyph*, size_t> seen;
-  std::vector<std::pair<char32_t, const import::SfGlyph*>> map;
-  for (char32_t ch : font_face.wanted) {
-    const import::SfGlyph* glyph = sf.find_or_default(static_cast<u32>(ch));
-    map.emplace_back(ch, glyph);
-    if (!glyph || glyph->width() <= 0 || glyph->height() <= 0) continue;
-    if (seen.emplace(glyph, items.size()).second) items.push_back({glyph, 0, 0, nullptr});
+  std::unordered_set<const import::SfGlyph*> seen;
+  for (const import::SfGlyph* glyph : glyphs) {
+    if (!glyph || glyph->width() <= 0 || glyph->height() <= 0 || font_face.rects.count(glyph)) continue;
+    if (seen.insert(glyph).second) items.push_back({glyph, 0, 0, nullptr});
   }
   // Pixel fonts: the decoded grid of every glyph that has one, packed after the source rects (kept for tiny scales).
   std::unordered_map<const import::SfGlyph*, PixelGlyph> pixels;
-  std::unordered_map<const import::SfGlyph*, size_t> pixel_item;
   if (font_face.opt.pixel_pitch > 0.0f) {
     const size_t glyph_count = items.size();
     for (size_t i = 0; i < glyph_count; ++i) {
       PixelGlyph pg;
       if (!decode_pixel_glyph(sf, *items[i].glyph, font_face.opt.pixel_pitch, pg)) continue;
       auto it = pixels.emplace(items[i].glyph, std::move(pg)).first;
-      pixel_item[items[i].glyph] = items.size();
       items.push_back({items[i].glyph, 0, 0, &it->second});
     }
     // Face baseline from 'A' (all pixel faces have it; glyphs on it end there).
@@ -214,21 +240,23 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
         font_face.baseline = glyph_a->y_offset / font_face.opt.pixel_pitch + static_cast<float>(pa.ny);
     }
   }
-  // Shelf packing, tallest first, 1 px transparent padding.
+  // Shelf packing from the pen, tallest first, 1 px transparent padding.
   std::vector<size_t> order(items.size());
   for (size_t i = 0; i < order.size(); ++i) order[i] = i;
   std::sort(order.begin(), order.end(), [&](size_t index_a, size_t index_b) { return items[index_a].h() > items[index_b].h(); });
-  u32 x = 0, y = 0, shelf_h = 0, atlas_h = 1;
-  bool overflow = false;
+  u32 x = font_face.pen_x, y = font_face.pen_y, shelf_h = font_face.shelf_h, used_h = font_face.used_h;
+  bool fits = true;
+  drawn = {kAtlasWidth, kMaxAtlasHeight, 0, 0};
   for (size_t i : order) {
-    u32 gw = static_cast<u32>(items[i].w()) + 2, gh = static_cast<u32>(items[i].h()) + 2;
+    const u32 gw = static_cast<u32>(items[i].w()) + 2, gh = static_cast<u32>(items[i].h()) + 2;
     if (x + gw > kAtlasWidth) {
       y += shelf_h;
       x = 0;
       shelf_h = 0;
     }
     if (y + gh > kMaxAtlasHeight) {
-      overflow = true;
+      if (!fresh) return false;
+      fits = false;
       // Does not fit: drawn as missing.
       items[i].glyph = nullptr;
       continue;
@@ -237,47 +265,57 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
     items[i].y = y + 1;
     x += gw;
     shelf_h = std::max(shelf_h, gh);
-    atlas_h = std::max(atlas_h, y + gh);
+    used_h = std::max(used_h, y + gh);
+    drawn.x0 = std::min(drawn.x0, x - gw);
+    drawn.x1 = std::max(drawn.x1, x);
+    drawn.y0 = std::min(drawn.y0, y);
+    drawn.y1 = std::max(drawn.y1, y + gh);
   }
-  if (overflow) log::warn("text atlas overflow: some glyphs are missing");
-  const u32 aw = kAtlasWidth, ah = atlas_h;
-  std::vector<u8> fill(static_cast<size_t>(aw) * ah * 4, 0), back(fill.size(), 0);
-  std::vector<u8> outline(font_face.opt.outline_mask ? fill.size() : 0, 0);
+  font_face.pen_x = x;
+  font_face.pen_y = y;
+  font_face.shelf_h = shelf_h;
+  font_face.used_h = used_h;
+  if (fresh || used_h > font_face.tex_h) {
+    font_face.tex_h = std::min(kMaxAtlasHeight, (used_h + kSpareRows + 31) / 32 * 32);
+    font_face.masks.resize(static_cast<size_t>(kAtlasWidth) * font_face.tex_h * 4, 0);
+  }
+  std::vector<u8>& masks = font_face.masks;
   for (const Item& it : items) {
     if (!it.glyph) continue;
     if (it.px) {
+      font_face.grids[it.glyph] = {it.x, it.y, it.px->nx, it.px->ny};
       for (int gy = 0; gy < it.px->ny; ++gy)
         for (int gx = 0; gx < it.px->nx; ++gx) {
           const u8* texel = &it.px->rgb[(static_cast<size_t>(gy) * it.px->nx + gx) * 3];
-          size_t offset = (static_cast<size_t>(it.y + static_cast<u32>(gy)) * aw + it.x + static_cast<u32>(gx)) * 4;
-          fill[offset] = fill[offset + 1] = fill[offset + 2] = back[offset] = back[offset + 1] = back[offset + 2] = 255;
-          fill[offset + 3] = texel[0];
-          back[offset + 3] = texel[2];
-          if (!outline.empty()) {
-            outline[offset] = outline[offset + 1] = outline[offset + 2] = 255;
-            outline[offset + 3] = texel[1];
-          }
+          u8* mask = &masks[(static_cast<size_t>(it.y + static_cast<u32>(gy)) * kAtlasWidth + it.x + static_cast<u32>(gx)) * 4];
+          mask[0] = texel[0];
+          mask[1] = texel[1];
+          mask[2] = texel[2];
+          mask[3] = 255;
         }
       continue;
     }
-    for (int gy = 0; gy < it.glyph->height(); ++gy) {
+    font_face.rects[it.glyph] = {it.x, it.y, 0, 0};
+    for (int gy = 0; gy < it.glyph->height(); ++gy)
       for (int gx = 0; gx < it.glyph->width(); ++gx) {
         u8 texel[4];
         if (!sf.texel(static_cast<u32>(it.glyph->left + gx), static_cast<u32>(it.glyph->top + gy), texel)) continue;
-        size_t offset = (static_cast<size_t>(it.y + static_cast<u32>(gy)) * aw + it.x + static_cast<u32>(gx)) * 4;
-        fill[offset] = fill[offset + 1] = fill[offset + 2] = 255;
-        fill[offset + 3] = texel[0];
-        back[offset] = back[offset + 1] = back[offset + 2] = 255;
-        back[offset + 3] = texel[2];
-        if (!outline.empty()) {
-          outline[offset] = outline[offset + 1] = outline[offset + 2] = 255;
-          outline[offset + 3] = texel[1];
-        }
+        u8* mask = &masks[(static_cast<size_t>(it.y + static_cast<u32>(gy)) * kAtlasWidth + it.x + static_cast<u32>(gx)) * 4];
+        mask[0] = texel[0];
+        mask[1] = texel[1];
+        mask[2] = texel[2];
+        mask[3] = 255;
       }
-    }
   }
+  return fits;
+}
+
+void TextBatch::build_entries(Face& font_face) {
+  const import::SpriteFont& sf = *font_face.font;
+  const float aw = static_cast<float>(kAtlasWidth), ah = static_cast<float>(font_face.tex_h);
   font_face.entries.clear();
-  for (auto& [ch, glyph] : map) {
+  for (char32_t ch : font_face.wanted) {
+    const import::SfGlyph* glyph = sf.find_or_default(static_cast<u32>(ch));
     Entry glyph_entry;
     if (!glyph) {
       glyph_entry.adv = sf.line_spacing * 0.25f;
@@ -289,43 +327,64 @@ bool TextBatch::rebuild_spritefont(Face& font_face) {
     glyph_entry.adv = static_cast<float>(place.width()) + place.x_advance + place.x_offset;
     glyph_entry.off_x = place.x_offset;
     glyph_entry.off_y = glyph->y_offset;
-    auto it = seen.find(glyph);
-    if (it != seen.end() && items[it->second].glyph) {
-      const Item& item = items[it->second];
+    if (auto it = font_face.rects.find(glyph); it != font_face.rects.end()) {
+      const Slot& slot = it->second;
       // Drawn width (narrow: right - 1).
       const int dw = font_face.opt.narrow && glyph->width() > 1 ? glyph->width() - 1 : glyph->width();
       glyph_entry.has_quad = true;
       glyph_entry.w = static_cast<float>(dw);
       glyph_entry.h = static_cast<float>(glyph->height());
-      glyph_entry.u0 = static_cast<float>(item.x) / static_cast<float>(aw);
-      glyph_entry.v0 = static_cast<float>(item.y) / static_cast<float>(ah);
-      glyph_entry.u1 = static_cast<float>(item.x + static_cast<u32>(dw)) / static_cast<float>(aw);
-      glyph_entry.v1 = static_cast<float>(item.y + static_cast<u32>(glyph->height())) / static_cast<float>(ah);
+      glyph_entry.u0 = static_cast<float>(slot.x) / aw;
+      glyph_entry.v0 = static_cast<float>(slot.y) / ah;
+      glyph_entry.u1 = static_cast<float>(slot.x + static_cast<u32>(dw)) / aw;
+      glyph_entry.v1 = static_cast<float>(slot.y + static_cast<u32>(glyph->height())) / ah;
     }
-    if (auto pit = pixel_item.find(glyph); pit != pixel_item.end() && items[pit->second].glyph) {
-      const Item& item = items[pit->second];
+    if (auto it = font_face.grids.find(glyph); it != font_face.grids.end()) {
+      const Slot& slot = it->second;
       glyph_entry.px = true;
-      glyph_entry.nx = item.px->nx;
-      glyph_entry.ny = item.px->ny;
+      glyph_entry.nx = slot.nx;
+      glyph_entry.ny = slot.ny;
       // Font pixels below the pen line.
       const float top = glyph->y_offset / font_face.opt.pixel_pitch;
       glyph_entry.up = font_face.baseline > 0.0f ? static_cast<int>(std::lround(font_face.baseline - top)) : glyph_entry.ny;
-      glyph_entry.pu0 = static_cast<float>(item.x) / static_cast<float>(aw);
-      glyph_entry.pv0 = static_cast<float>(item.y) / static_cast<float>(ah);
-      glyph_entry.pu1 = static_cast<float>(item.x + static_cast<u32>(glyph_entry.nx)) / static_cast<float>(aw);
-      glyph_entry.pv1 = static_cast<float>(item.y + static_cast<u32>(glyph_entry.ny)) / static_cast<float>(ah);
+      glyph_entry.pu0 = static_cast<float>(slot.x) / aw;
+      glyph_entry.pv0 = static_cast<float>(slot.y) / ah;
+      glyph_entry.pu1 = static_cast<float>(slot.x + static_cast<u32>(slot.nx)) / aw;
+      glyph_entry.pv1 = static_cast<float>(slot.y + static_cast<u32>(slot.ny)) / ah;
     }
     font_face.entries[ch] = glyph_entry;
+  }
+}
+
+bool TextBatch::upload_atlases(Face& font_face, const Rect* region) {
+  const Rect area = region ? *region : Rect{0, 0, kAtlasWidth, font_face.tex_h};
+  const u32 w = area.x1 - area.x0, h = area.y1 - area.y0;
+  // One atlas's texels of the area: white where a glyph is drawn, the alpha its mask channel (RGBA8 in a little-endian word).
+  auto expand = [&](int channel) {
+    auto rgba = std::make_unique_for_overwrite<u32[]>(static_cast<size_t>(w) * h);
+    for (u32 row = 0; row < h; ++row) {
+      const u8* mask = &font_face.masks[(static_cast<size_t>(area.y0 + row) * kAtlasWidth + area.x0) * 4];
+      u32* out = &rgba[static_cast<size_t>(row) * w];
+      for (u32 col = 0; col < w; ++col, mask += 4) out[col] = (mask[3] ? 0x00FFFFFFu : 0u) | static_cast<u32>(mask[channel]) << 24;
+    }
+    return rgba;
+  };
+  const bool outline = font_face.opt.outline_mask;
+  if (region) {
+    bool ok = font_face.fill->tex.update_region(*ctx_, expand(0).get(), area.x0, area.y0, w, h) &&
+              font_face.back->tex.update_region(*ctx_, expand(2).get(), area.x0, area.y0, w, h);
+    if (outline && font_face.outline) ok = font_face.outline->tex.update_region(*ctx_, expand(1).get(), area.x0, area.y0, w, h) && ok;
+    return ok;
   }
   font_face.fill.reset();
   font_face.back.reset();
   font_face.outline.reset();
-  const bool nearest = !pixels.empty();
+  const bool nearest = !font_face.grids.empty();
   // The 2-3 atlases share one queue wait.
   UploadBatch batch;
-  font_face.fill = make_atlas(aw, ah, fill, linear_, nearest, &batch);
-  font_face.back = make_atlas(aw, ah, back, linear_, nearest, &batch);
-  if (!outline.empty()) font_face.outline = make_atlas(aw, ah, outline, linear_, nearest, &batch);
+  font_face.fill = make_atlas(kAtlasWidth, h, expand(0).get(), linear_, nearest, &batch);
+  font_face.back = make_atlas(kAtlasWidth, h, expand(2).get(), linear_, nearest, &batch);
+  if (outline) font_face.outline = make_atlas(kAtlasWidth, h, expand(1).get(), linear_, nearest, &batch);
   batch.flush(*ctx_);
   return font_face.fill && font_face.back;
 }

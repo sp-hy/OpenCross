@@ -64,6 +64,9 @@ class MainMenu {
   // A character's name in a saved game: its data, its ext_save.dat names, the character id.
   using SavedNameLookup = std::function<std::u32string(const save::SaveSlot&, const std::map<int, std::u32string>&, int)>;
   void set_saved_name_lookup(SavedNameLookup lookup);
+  // The leader name of a memory-card slot (the OpenCross page's files take SavedNameLookup).
+  using PreviewNameLookup = std::function<std::u32string(const save::SaveSlot&)>;
+  void set_preview_name_lookup(PreviewNameLookup lookup);
   void set_mode(ArtMode mode);
   ArtMode mode() const;
   void set_language(import::Lang lang);

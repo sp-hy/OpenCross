@@ -7,6 +7,8 @@
 #include "data/char_name.h"
 #include "game/new_game.h"
 #include "game/new_game_plus.h"
+#include "import/ps1_text.h"
+#include "import/text.h"
 #include "render/camera.h"
 #include "render/sprite_batch.h"
 #include "vfs/vfs.h"
@@ -265,6 +267,7 @@ bool GameFlow::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Sprite
   if (tables) machine_.rules().load_pg(vfs);
   title_.init(kit_, mixer);
   slots_.set_name_lookup([this](const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int id) { return saved_name(data, ext, id); });
+  slots_.set_preview_lookup([this](const save::SaveSlot& data) { return preview_name(data); });
   ready_ = true;
   return true;
 }
@@ -364,6 +367,16 @@ std::u32string GameFlow::display_name(int char_id) {
 std::u32string GameFlow::saved_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) {
   const std::u32string name = machine_.saved_custom_name(data, ext, char_id);
   return name.empty() ? lang_tables_.default_name(char_id, lang_) : name;
+}
+
+std::u32string GameFlow::preview_name(const save::SaveSlot& data) {
+  const ByteSpan field = ByteSpan(data.head).subspan(save::head::kLeaderName, save::head::kLeaderNameSize);
+  const auto text = import::sjis_to_utf8(field.first(static_cast<size_t>(std::find(field.begin(), field.end(), 0) - field.begin())));
+  if (!text || text->empty()) return {};
+  const std::u32string name = import::utf8_to_u32(*text);
+  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
+    if (lang_tables_.default_name(char_id, import::Lang::Jp) == name) return lang_tables_.default_name(char_id, lang_);
+  return {};
 }
 
 void GameFlow::begin_ng_plus(const save::SaveSlot& cleared) {

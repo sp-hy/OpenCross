@@ -318,6 +318,7 @@ void BattleView::prefetch_fonts() {
   fonts_.prefetch(ui::font::kKb);
   fonts_.prefetch(ui::font::kBattleJp);
   fonts_.prefetch(ui::font::kCh);
+  fonts_.prefetch(ui::font::kBn);
 }
 
 void BattleView::run_load_step(LoadJob& job) {
@@ -330,7 +331,7 @@ void BattleView::run_load_step(LoadJob& job) {
     job.done = true;
   };
   enum { kRules, kStageRead, kStageScene, kCommon, kFxLibrary, kFxMeshes, kUnits0, kFonts = kUnits0 + battle::kUnits };
-  // (kFonts is followed by two more steps: the JP face and the headline face)
+  // (kFonts is followed by three more steps: the JP face, the headline face and the element list's face)
   if (job.step == kRules) {
   unload_scene();
   // Reset the GetHokanFrame chain state and the weapon hand toggle.
@@ -590,20 +591,22 @@ void BattleView::run_load_step(LoadJob& job) {
       }
     return;
   }
-  // kFonts .. kFonts + 2: the HUD faces read by prefetch_fonts (kb_70, kt_70, the ch_100 command headline); one face per call (each builds its
-  // first glyph atlas: ~10 ms in Release), retried on a later frame while the worker is still reading the file.
+  // kFonts .. kFonts + 3: the HUD faces read by prefetch_fonts (kb_70, kt_70, the ch_100 command headline, bn_70: the element list and the
+  // cast title outside Japanese); one face per call (each builds its first glyph atlas: ~10 ms in Release), retried on a later frame while
+  // the worker is still reading the file. Built here, not by the first text that asks for it in the fight.
   if (!hud_assets_) {
     job.done = true;
     return;
   }
   const int face = job.step - kFonts;
-  const int slot = face == 0 ? ui::font::kKb : face == 1 ? ui::font::kBattleJp : ui::font::kCh;
+  constexpr int kHudSlots[] = {ui::font::kKb, ui::font::kBattleJp, ui::font::kCh, ui::font::kBn};
+  const int slot = kHudSlots[face];
   if (!job.block && !fonts_.ready(slot)) {
     job.wait = true;
     return;
   }
-  fonts_.prepare(slot, face == 0 ? U"●" : face == 1 ? U"♂♀" : U"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÉé ");
-  if (face == 2) job.done = true;
+  fonts_.prepare(slot, face == 0 ? U"●" : face == 1 ? U"♂♀" : face == 2 ? U"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÉé " : U"☆");
+  if (face == 3) job.done = true;
 }
 
 // The models and weapons bind_unit_model will load for the battle's units, read and decoded on a worker while the stage loads.

@@ -480,6 +480,12 @@ const effects::EffectSlot* BattleFxLibrary::slot(int eid) const {
 
 std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
   if (auto it = cache_.find(eid); it != cache_.end()) return it->second;
+  return adopt(eid, load(eid));
+}
+
+std::shared_ptr<const FxPack> BattleFxLibrary::adopt(int eid, std::shared_ptr<FxPack> pack) { return cache_.emplace(eid, std::move(pack)).first->second; }
+
+std::shared_ptr<FxPack> BattleFxLibrary::load(int eid) const {
   std::shared_ptr<FxPack> out;
   const effects::EffectSlot* slot_entry = slot(eid);
   if (slot_entry && slot_entry->prd.size() > 4 && slot_entry->prd.compare(slot_entry->prd.size() - 4, 4, ".prd") == 0) {
@@ -598,7 +604,6 @@ std::shared_ptr<const FxPack> BattleFxLibrary::get(int eid) {
       else log::debug("battle fx: eid {} has no main sequence, emitters nor script table", eid);
     }
   }
-  cache_[eid] = out;
   return out;
 }
 

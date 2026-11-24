@@ -74,7 +74,7 @@ The first table is the **summary/preview** that the load menu shows without deco
 
 | off | type | field |
 |---|---|---|
-| 0x28 | char[12], Shift-JIS | leader name (preview): "セルジュ"; the auto-save has "オートセーブ" |
+| 0x28 | char[12], Shift-JIS | leader name (preview): the leader's name record (section 7) converted to Shift-JIS, so a default name is its kana ("セルジュ") in every language; the auto-save has "オートセーブ". RDE's slot list shows "Serge" for "セルジュ" in English but no name at all for the Latin `Serge` |
 | 0x34..0x36 | u8 x3 | party faces (preview), written by the save from 0x59C: 0xFF for an empty seat, else the member's record model byte (+0x2D) when it is at most 0x31, else the character id. So Serge in the Lynx body saves 0x31 and Pip in a form his form's face (0x2C..0x30), while Glenn with two swords (model 0x32) saves his id 0x13 and a member Sneff turned into a cat (0x3C..0x3E, zel_a10i) saves his own id: Serge in the Lynx body shows Serge's face then. The Save / Load and Continue lists draw the faces from these bytes (an id above 0x31 shows no face); every other preview field uses 0x59C |
 | 0x37 | u32 | play time in 1/60 s frames, preview copy (unaligned; may be 1 frame ahead of 0x588) |
 | 0x3B | u32 | gold (preview) |
@@ -233,7 +233,7 @@ OpenCross: `ExtFile` (`src/save/ext_save.*`) parses by rule 1 and offers `slot(i
 
 ## 10. What OpenCross writes into a slot
 
-`FieldWorld::capture_state` + `write_slot`: script variables 0x000..0x3FF at `0x188 + 2*id`; location word 0x18E = the script room id of the disc in use; **head 0x40 = the scenario flag (variable 0, u16)**; preview stars 0x3F; preview leader name 0x28 (Shift-JIS); party at 0x59C and 0x34; recruited bits; key items 0x180; header title `クロノ・クロス　` + fullwidth (slot + 1). Script item ids split as: ids < 0x200 search the 0x180 item slots, 0x200.. the 0xC0 element slots (id - 0x200), 0x400.. key-item bit (id - 0x401), 0x1000.. the element slots again for any element record (id - 0x1000, one copy; OpenCross only, for a mod's records past 511).
+`FieldWorld::capture_state` + `write_slot`: script variables 0x000..0x3FF at `0x188 + 2*id`; location word 0x18E = the script room id of the disc in use; **head 0x40 = the scenario flag (variable 0, u16)**; preview stars 0x3F; preview leader name 0x28 (the leader's name record as Shift-JIS, section 4; not the name shown in the game's language); party at 0x59C and 0x34; recruited bits; key items 0x180; header title `クロノ・クロス　` + fullwidth (slot + 1). Script item ids split as: ids < 0x200 search the 0x180 item slots, 0x200.. the 0xC0 element slots (id - 0x200), 0x400.. key-item bit (id - 0x401), 0x1000.. the element slots again for any element record (id - 0x1000, one copy; OpenCross only, for a mod's records past 511).
 
 **Continue.** Loading a slot restores the party/inventory block, the script variables and the room/entrance, so scripts resume exactly as a retail Continue. The entrance (room parameter) is **script variable 0x3A**: room init sets 0x3A to the entrance and save events overwrite it (for example `gal_b09i` saves inside its wake-up event with 0x3A = 4 and Continue resumes that event). The room is variable 6. The saved leader position (variables 0x12 / 0x14) is not read: the entrance alone places the party. The slot codec is bit-exact (round-trip tested); element ids past 511 come back from the side file (section 16).
 

@@ -2,7 +2,9 @@
 // Text drawing on top of SpriteBatch: DirectXTK spritefont faces (RDE HD fonts) and the PS1's own 1-bit font.
 //
 // Each face owns one RGBA8 glyph atlas generated from the requested glyphs (the source spritefonts are up to 190 MB,
-// so they are never uploaded whole). RDE spritefonts pack masks in the colour channels: R = glyph fill,
+// so they are never uploaded whole). A glyph asked for later is added to it: placed after the others and uploaded in the rows it
+// touches, the textures kept (they have spare rows); only a glyph that no longer fits packs the whole atlas again.
+// RDE spritefonts pack masks in the colour channels: R = glyph fill,
 // B = fill + outline + shadow; the fill is drawn in the text colour and the B mask in a dark backdrop colour.
 // The PS1 font is drawn with nearest sampling; its backdrop is a black drop shadow one font pixel down and right.
 //
@@ -184,6 +186,15 @@ class TextBatch {
     int up = 0;
     float pu0 = 0, pv0 = 0, pu1 = 0, pv1 = 0;
   };
+  // Texels [x0, x1) x [y0, y1) of an atlas.
+  struct Rect {
+    u32 x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+  };
+  // Where a source glyph sits in its face's atlas (the texel of its top-left corner) and, for a pixel-grid decode, its size in font pixels.
+  struct Slot {
+    u32 x = 0, y = 0;
+    int nx = 0, ny = 0;
+  };
   struct Atlas {
     Texture tex;
     TexRef set;
@@ -204,6 +215,12 @@ class TextBatch {
     // Pixel fonts: baseline in font pixels below the pen line (from 'A'), 0 = per glyph.
     float baseline = 0.0f;
     bool baseline_set = false;
+    // The atlases' texels at the textures' height, 4 bytes each: the source's R (fill), G (fill + outline) and B (fill + outline + shadow)
+    // masks and 255 where a glyph is drawn (the atlases' colour there, 0 elsewhere). Then the shelf packer's pen (x, y, the shelf's
+    // height, the rows in use) and the slots of the glyphs placed so far, source rects and pixel-grid decodes apart.
+    std::vector<u8> masks;
+    u32 tex_h = 0, pen_x = 0, pen_y = 0, shelf_h = 0, used_h = 0;
+    std::unordered_map<const import::SfGlyph*, Slot> rects, grids;
   };
 
   Face* face(FaceId id) {
@@ -213,11 +230,22 @@ class TextBatch {
     return id >= 0 && id < static_cast<int>(faces_.size()) ? &faces_[static_cast<size_t>(id)] : nullptr;
   }
   const Entry* entry(const Face& font_face, char32_t ch) const;
+  // The whole atlas packed again (tallest glyph first) into new textures: a face's first build, or a glyph that no longer fits.
   bool rebuild_spritefont(Face& font_face);
+  // The glyphs of wanted[first..] without a slot placed after the others and uploaded in the rectangle they cover.
+  bool add_glyphs(Face& font_face, size_t first);
+  // Places `glyphs` (those without a slot; tallest first) at the face's pen and draws them into its masks; `fresh` starts an empty
+  // atlas. `drawn` = the texels they cover. False when one does not fit: with `fresh` it is left out (drawn as missing), else nothing
+  // is placed.
+  bool pack_glyphs(Face& font_face, const std::vector<const import::SfGlyph*>& glyphs, bool fresh, Rect& drawn);
+  // Every wanted character's entry from the slots, the UVs over the textures' height.
+  void build_entries(Face& font_face);
+  // New textures of the face's masks, or (`region`) that rectangle of them uploaded into the textures it has.
+  bool upload_atlases(Face& font_face, const Rect* region = nullptr);
   bool build_ps1_atlas(Face& font_face);
   // View units per PS1 font pixel on x at `scale`.
   static float ps1_pixel(float scale) { return kPs1PixelScale * scale; }
-  std::unique_ptr<Atlas> make_atlas(u32 w, u32 h, const std::vector<u8>& rgba, const Sampler& sampler, bool with_nearest = false, UploadBatch* batch = nullptr);
+  std::unique_ptr<Atlas> make_atlas(u32 w, u32 h, const void* rgba, const Sampler& sampler, bool with_nearest = false, UploadBatch* batch = nullptr);
 
   GpuContext* ctx_ = nullptr;
   SpriteBatch* sprites_ = nullptr;

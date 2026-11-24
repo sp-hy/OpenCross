@@ -148,6 +148,12 @@ class BattleFxLibrary {
   void clear_cache() { cache_.clear(); }
   // The pack of an effect id; null for ids without files (irregular slots, dummies) or packs that failed to parse. Cached.
   std::shared_ptr<const FxPack> get(int eid);
+  // get's read and decode without the cache: it reads only what init set up, so a worker thread may run it while this thread uses the
+  // library (not across an init). adopt caches its result (a pack cached meanwhile is kept) and returns the cached one; cached = get would
+  // not read.
+  std::shared_ptr<FxPack> load(int eid) const;
+  std::shared_ptr<const FxPack> adopt(int eid, std::shared_ptr<FxPack> pack);
+  bool cached(int eid) const { return cache_.count(eid) != 0; }
   // The cast "charge" pack of an element colour (0 green .. 5 blue, data::colour_index_of_bit): battle/battle.prd > nested 'sato' > the LZSS
   // type-0x25 entry "ch0<colour>" (a drp of ~15 emitters + the sequence "ch0<colour>" that picks one of the cameras ch10..ch13).
   // It is instantiated when a cast starts; its op 0x41 releases the element pack. Null without

@@ -269,6 +269,7 @@ struct MainMenu::Impl {
   std::map<int, std::u32string> name_cache;
   const std::map<int, std::u32string>* custom_names = nullptr;
   MainMenu::SavedNameLookup saved_name;
+  MainMenu::PreviewNameLookup preview_name;
 
   // Portrait folder of the faces, slot icons and playtim portraits: original art = 1999, HD art = the [Game] Portraits choice.
   std::string face_set() const { return mode == ArtMode::Hd ? portrait_set : std::string("1999"); }

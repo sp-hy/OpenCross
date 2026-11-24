@@ -940,19 +940,30 @@ class BattleView {
     FxGpu& operator=(const FxGpu&) = delete;
   };
   FxGpu* fx_gpu_for(const std::shared_ptr<const FxPack>& pack);
+  // A pack model read and decoded (fx_read_models, on any thread): its entry name, the page its name binds (none = HD art: the stem's
+  // cdrom2 mesh + texture) and the asset. fx_make_models gives each its GPU copy and pose on the render thread.
+  struct FxModelRead {
+    std::string name;
+    std::optional<FxModelPage> page;
+    std::string stem;
+    assets::ModelAsset asset;
+  };
   // One pack's FxGpu built in steps: the pack read, the sprite bank, the sprite sheets (in slices of the budget), the mesh bake, the mesh
-  // textures (in slices), the mesh buffers, the HD mesh index (in slices), the models and the overlay's atlases. fx_gpu_step runs one step (true =
-  // finished: the result is in fx_gpu_, or `failed`).
+  // textures (in slices), the mesh buffers, the HD mesh index (in slices), the model read, the models and the overlay's atlases.
+  // fx_gpu_step runs one step (true = finished: the result is in fx_gpu_, or `failed`). The pack read and the model read run on a worker
+  // thread: a step only looks whether its job is done, unless `wait` (the pack is needed now) makes it wait for it.
   struct FxGpuBuild {
-    enum class Step { Pack, Sprites, SpriteSheets, Meshes, MeshTextures, MeshBuffers, HdIndex, Models, OverlayAtlases, Done };
+    enum class Step { Pack, Sprites, SpriteSheets, Meshes, MeshTextures, MeshBuffers, HdIndex, ModelRead, Models, OverlayAtlases, Done };
     int eid = -1;
     std::shared_ptr<const FxPack> pack;
     std::unique_ptr<FxGpu> gpu;
     effects::EffectBank bank;
     effects::GpuEffects::Which sheets = effects::GpuEffects::Which::All;
     render::StageCreateJob mesh_job;
+    std::future<std::shared_ptr<FxPack>> pack_job;
+    std::future<std::vector<FxModelRead>> model_job;
     Step step = Step::Pack;
-    bool failed = false;
+    bool failed = false, wait = false;
   };
   bool fx_gpu_step(FxGpuBuild& build, double budget_ms);
   // battle.prd's meshes (once per scene).
@@ -960,13 +971,15 @@ class BattleView {
   // The mods' tile replacements of a mesh asset (render/stage_tiles.h): applied before its GPU copy is made (`fresh`), and again, with the object
   // textures re-uploaded, when the mod overlay changed since.
   void fx_apply_mesh_tiles(FxGpu& gpu, assets::StageAsset& asset, bool fresh);
-  // Sprite type 20: the pack's type-0x0B models.
-  void fx_load_models(FxGpu& gpu, const FxPack& pack);
+  // Sprite type 20: the pack's type-0x0B models, read in `hd` art (no state of the view is written: a worker thread runs it), then made.
+  std::vector<FxModelRead> fx_read_models(const FxPack& pack, bool hd) const;
+  void fx_make_models(FxGpu& gpu, std::vector<FxModelRead>& reads);
   // HD art: when the pack Mdl `mdl` is a byte copy of a battle model's disc mesh (S1) + skeleton (S2) and its texture page (8 bpp at halfword
   // (img_x, img_y), CLUT row (clut_x, clut_y)) holds that model's disc .ltd / .ltc main image + CLUT row 0, and the model has a cdrom2 (HD)
   // variant: `out_mdl` = mdl with the cdrom2 S1, `out_vram` = vram with the cdrom2 image + CLUT written at the same place. Returns the stem.
+  // Reads the HD mesh index as it stands (the build's HdIndex step completes it first).
   std::string fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
-                                import::Vram& out_vram);
+                                import::Vram& out_vram) const;
   // FNV-1a of the disc S1 -> battle model stems with a cdrom2 .obj, built once per session by fx_hd_mesh_index, one file at a time until
   // about `budget_ms` of wall time is used (true = complete); fx_hd_mesh_files_ = the files still to read, the last one next.
   std::unordered_map<u64, std::vector<std::string>> fx_hd_mesh_index_;

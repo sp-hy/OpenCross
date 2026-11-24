@@ -616,7 +616,9 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     if (fp.set) dl.image(fp.set, canvas_x(fx), canvas_y(sl::kFaceY), canvas_x(sl::kFace), canvas_y(sl::kFace));
     else if (party[i] < save::kNumChars) txt(fx + 2.0f, 262, name_of_ ? name_of_(save_data, cur->ext_names, party[i]) : std::u32string(), white, 0.6f);
   }
-  const std::u32string leader = !party.empty() && party[0] < save::kNumChars && name_of_ ? name_of_(save_data, cur->ext_names, party[0]) : std::u32string();
+  std::u32string leader;
+  if (cur->card != 0) leader = preview_of_ ? preview_of_(save_data) : std::u32string();
+  else if (!party.empty() && party[0] < save::kNumChars && name_of_) leader = name_of_(save_data, cur->ext_names, party[0]);
   // Card 1's CHRONO00 and the page's file 0 are the auto-saves.
   const bool auto_file = cur->slot == 0 && cur->card <= 1;
   const std::u32string name = auto_file ? import::utf8_to_u32(sl::auto_save_caption(li)) : leader;

@@ -217,6 +217,33 @@ bool Texture::update(GpuContext& ctx, const void* pixels) {
   return true;
 }
 
+bool Texture::update_region(GpuContext& ctx, const void* pixels, u32 x, u32 y, u32 width, u32 height) {
+  if (!texture_ || width == 0 || height == 0 || x + width > width_ || y + height > height_) return false;
+  const u32 row_bytes = width * bytes_per_pixel_, pitch = row_pitch(row_bytes);
+  SDL_GPUTransferBufferCreateInfo transfer_info{};
+  transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+  transfer_info.size = pitch * height;
+  SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device_, &transfer_info);
+  void* mapped = transfer ? SDL_MapGPUTransferBuffer(device_, transfer, false) : nullptr;
+  if (!mapped) {
+    log::error("texture region {}x{}: staging buffer: {}", width, height, SDL_GetError());
+    if (transfer) SDL_ReleaseGPUTransferBuffer(device_, transfer);
+    return false;
+  }
+  copy_rows(mapped, pixels, row_bytes, pitch, height);
+  SDL_UnmapGPUTransferBuffer(device_, transfer);
+  UploadOp op;
+  op.source = transfer;
+  op.texture = texture_;
+  op.width = width;
+  op.height = height;
+  op.x = x;
+  op.y = y;
+  op.pixels_per_row = pitch / bytes_per_pixel_;
+  ctx.upload(op);
+  return true;
+}
+
 void Texture::destroy() {
   if (device_ && staging_) SDL_ReleaseGPUTransferBuffer(device_, staging_);
   if (ctx_ && texture_) ctx_->release_texture(texture_, bytes_);

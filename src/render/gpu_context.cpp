@@ -498,7 +498,7 @@ void GpuContext::encode(SDL_GPUCommandBuffer* cmd, std::span<const UploadOp> ops
   for (const UploadOp& op : ops) {
     if (op.texture) {
       const SDL_GPUTextureTransferInfo source{op.source, op.source_offset, op.pixels_per_row ? op.pixels_per_row : op.width, op.height};
-      const SDL_GPUTextureRegion destination{op.texture, 0, 0, 0, 0, 0, op.width, op.height, 1};
+      const SDL_GPUTextureRegion destination{op.texture, 0, 0, op.x, op.y, 0, op.width, op.height, 1};
       SDL_UploadToGPUTexture(pass, &source, &destination, op.cycle);
     } else if (op.buffer) {
       const SDL_GPUTransferBufferLocation source{op.source, op.source_offset};

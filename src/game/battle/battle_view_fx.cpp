@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <format>
+#include <future>
 #include <optional>
 #include <string_view>
 
@@ -207,12 +209,13 @@ effects::ViewParams BattleView::fx_view() const {
 
 // Sprite type 20 = a type-0x0B record = an Mdl model used as the particle body, on the page its name binds (fx_model_page), cut from the
 // VRAM the pack plays in.
-void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
+std::vector<BattleView::FxModelRead> BattleView::fx_read_models(const FxPack& pack, bool hd) const {
+  std::vector<FxModelRead> reads;
   auto drp = import::parse_drp(pack.prd);
-  if (!drp || !meshes_) return;
+  if (!drp) return reads;
   bool any = false;
   for (const auto& entry : drp->entries) any = any || entry.type == 0x0B;
-  if (!any) return;
+  if (!any) return reads;
   const import::Vram vram = pack.build_vram();
   // Dev: OC_VRAM_DUMP writes the pack's VRAM as 1024 x 512 halfwords.
   if (const char* dump = std::getenv("OC_VRAM_DUMP")) {
@@ -226,7 +229,7 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
     }
   }
   for (const auto& entry : drp->entries) {
-    if (entry.type != 0x0B || entry.name.size() < 4 || gpu.models.count(entry.name)) continue;
+    if (entry.type != 0x0B || entry.name.size() < 4 || std::ranges::find(reads, entry.name, &FxModelRead::name) != reads.end()) continue;
     // No code in the name and none from the overlay (saraman binds its 'sara' itself at init): no texture.
     const std::optional<FxModelPage> page = fx_model_page(entry.name, pack.overlay);
     if (!page) {
@@ -240,7 +243,7 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
     // pack's own) on a page that holds selju.ltc's image + CLUT, so in HD it gets the mesh + texture the HD Serge unit is drawn with (cdrom2).
     Bytes hd_mdl;
     std::string stem;
-    if (hd_ && vfs_ && vfs_->hd_mode()) {
+    if (hd && vfs_ && vfs_->hd_mode()) {
       auto hd_vram = std::make_unique<import::Vram>();
       stem = fx_hd_counterpart(entry.data, vram, tpx, tpage_y, clut_x, clut_y, hd_mdl, *hd_vram);
       if (!stem.empty()) {
@@ -252,7 +255,6 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
               std::memcpy(&pages[static_cast<size_t>(row)].pixels[(static_cast<size_t>(y) * kPageW + static_cast<size_t>(x)) * 4], &texel, 4);
             }
         }
-        gpu.art_dependent = true;
         log::info("battle fx: model {}: HD art = {} (cdrom2 mesh + texture)", entry.name, stem);
       }
     }
@@ -262,27 +264,37 @@ void BattleView::fx_load_models(FxGpu& gpu, const FxPack& pack) {
       log::debug("battle fx: model {}: {}", entry.name, err);
       continue;
     }
+    reads.push_back({entry.name, stem.empty() ? page : std::nullopt, std::move(stem), std::move(*asset)});
+  }
+  return reads;
+}
+
+// The models' GPU copies: an HD counterpart takes its unit's art, a model on its own pages is tiled for the texture mods (a mod switched
+// on or off reaches it at the pack's next cast).
+void BattleView::fx_make_models(FxGpu& gpu, std::vector<FxModelRead>& reads) {
+  if (!meshes_) return;
+  for (FxModelRead& read : reads) {
+    if (gpu.models.count(read.name)) continue;
     auto model = std::make_unique<FxGpu::Model>();
-    model->asset = std::move(*asset);
-    if (!stem.empty()) {
-      if (const std::shared_ptr<ModelHandle> unit = load_model_for(stem)) paste_unit_art(model->asset, unit->asset);
+    model->asset = std::move(read.asset);
+    gpu.art_dependent = true;
+    if (!read.stem.empty()) {
+      if (const std::shared_ptr<ModelHandle> unit = load_model_for(read.stem)) paste_unit_art(model->asset, unit->asset);
     } else {
-      // On its own pages the model is tiled for the texture mods; a mod switched on or off reaches it at the pack's next cast.
       model->asset.source = kFxModelSource;
       render::resolve_model_textures(model->asset);
-      gpu.art_dependent = true;
     }
     model->gpu = meshes_->create_model(model->asset);
     if (!model->gpu) continue;
     model->pose.set_model(&model->asset);
-    if (stem.empty()) model->page = *page;
+    model->page = read.page;
     // Motion of a model object no op 49 started: the clip with the most keyframes; op 49's own choice is the object's
     // clip byte (fx_draw_models).
     for (size_t i = 0; i < model->asset.clips.size(); ++i)
       if (model->clip < 0 || model->asset.clips[i].frame_count > model->asset.clips[static_cast<size_t>(model->clip)].frame_count) model->clip = static_cast<int>(i);
-    log::debug("battle fx: model {}: {} joints, {} clips, tpage {},{} CLUT ({},{})", entry.name, model->asset.skeleton.joints.size(), model->asset.clips.size(), tpx,
-               tpage_y, clut_x, clut_y);
-    gpu.models.emplace(entry.name, std::move(model));
+    log::debug("battle fx: model {}: {} joints, {} clips{}", read.name, model->asset.skeleton.joints.size(), model->asset.clips.size(),
+               read.page ? std::format(", tpage {},{} CLUT ({},{})", read.page->x, read.page->y, read.page->clut_x, read.page->clut_y) : std::string());
+    gpu.models.emplace(read.name, std::move(model));
   }
 }
 
@@ -311,8 +323,7 @@ bool BattleView::fx_hd_mesh_index(double budget_ms) {
 }
 
 std::string BattleView::fx_hd_counterpart(ByteSpan mdl, const import::Vram& vram, int img_x, int img_y, int clut_x, int clut_y, Bytes& out_mdl,
-                                          import::Vram& out_vram) {
-  fx_hd_mesh_index();
+                                          import::Vram& out_vram) const {
   const ByteSpan s1 = import::mdl_section(mdl, 0);
   if (s1.empty()) return {};
   const auto it = fx_hd_mesh_index_.find(fnv1a(s1));
@@ -607,6 +618,7 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
     build.eid = pack->eid;
     build.pack = pack;
   }
+  build.wait = true;
   while (!fx_gpu_step(build, 1e9)) {
   }
   const bool failed = build.failed;
@@ -623,10 +635,21 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
     build.step = Step::Done;
     return true;
   };
+  // A worker's job: not done yet = this step again next time, unless the build waits for it.
+  auto pending = [&](const auto& job) { return !build.wait && job.wait_for(std::chrono::seconds(0)) != std::future_status::ready; };
   switch (build.step) {
     case Step::Pack:
-      // A charge pack's id is BattleFxLibrary::charge_eid(colour) = -1 - colour.
-      if (!build.pack) build.pack = build.eid < 0 ? fxlib_.charge_pack(-1 - build.eid) : fxlib_.get(build.eid);
+      // A charge pack's id is BattleFxLibrary::charge_eid(colour) = -1 - colour. An element pack's file is read and decoded on a worker;
+      // a build that waits and has no job running reads it here.
+      if (!build.pack && build.eid < 0) {
+        build.pack = fxlib_.charge_pack(-1 - build.eid);
+      } else if (!build.pack && !build.pack_job.valid() && (build.wait || fxlib_.cached(build.eid))) {
+        build.pack = fxlib_.get(build.eid);
+      } else if (!build.pack) {
+        if (!build.pack_job.valid()) build.pack_job = std::async(std::launch::async, [this, eid = build.eid] { return fxlib_.load(eid); });
+        if (pending(build.pack_job)) return false;
+        build.pack = fxlib_.adopt(build.eid, build.pack_job.get());
+      }
       if (!build.pack) return fail();
       // Built meanwhile (a pack can be both prefetched and asked for).
       if (fx_gpu_.count(build.pack->eid)) {
@@ -699,15 +722,25 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
       build.gpu->stage = stage_pipe_.create_finish(build.mesh_job, *build.pack->meshes);
       build.step = Step::HdIndex;
       return false;
-    case Step::HdIndex:
-      if (hd_ && vfs_ && vfs_->hd_mode() && pack_has_models(*build.pack) && !fx_hd_mesh_index(budget_ms)) return false;
+    case Step::HdIndex: {
+      const bool models = meshes_ && pack_has_models(*build.pack);
+      if (models && hd_ && vfs_ && vfs_->hd_mode() && !fx_hd_mesh_index(budget_ms)) return false;
+      build.step = models ? Step::ModelRead : Step::OverlayAtlases;
+      return false;
+    }
+    case Step::ModelRead:
+      // The models' decode (a summon's creature: its mesh, skeleton, clips and two texture pages) on a worker.
+      if (!build.model_job.valid())
+        build.model_job = std::async(std::launch::async, [this, pack = build.pack, hd = hd_] { return fx_read_models(*pack, hd); });
+      if (pending(build.model_job)) return false;
       build.step = Step::Models;
       return false;
     case Step::Models: {
       const auto models_start = std::chrono::steady_clock::now();
-      fx_load_models(*build.gpu, *build.pack);
+      std::vector<FxModelRead> reads = build.model_job.get();
+      fx_make_models(*build.gpu, reads);
       if (!build.gpu->models.empty())
-        log::debug("battle fx: eid {}: {} model(s) loaded in {:.1f} ms", build.eid, build.gpu->models.size(),
+        log::debug("battle fx: eid {}: {} model(s) made in {:.1f} ms", build.eid, build.gpu->models.size(),
                    std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - models_start).count());
       build.step = Step::OverlayAtlases;
       return false;

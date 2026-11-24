@@ -71,6 +71,7 @@ class FlowMachine {
   FlowMachine();
 
   void set_tables(const data::GameTables* tables, const ui::GameFontCodec* codec);
+  const ui::GameFontCodec* codec() const { return codec_; }
   void set_save_available(bool has) { has_saves_ = has; }
   FlowState state() const { return state_; }
   void start(FlowState state) { state_ = state; }
@@ -252,6 +253,9 @@ class GameFlow {
   int guide_page() const { return keymap_active_ || (rename_active_ && rename_guide_) ? keymap_.page() : 0; }
   // A character's name in a saved game, as the save lists show it: its typed name, else the language's default.
   std::u32string saved_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id);
+  // The leader name a memory-card slot shows: the header's preview name when it is a character's Japanese default name, as that
+  // character's name in the language; anything else shows no name.
+  std::u32string preview_name(const save::SaveSlot& data);
   bool take_rename_finished() {
     const bool finished = rename_finished_;
     rename_finished_ = false;

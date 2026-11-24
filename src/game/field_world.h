@@ -303,6 +303,8 @@ class FieldWorld final : public script::FieldHost {
   void set_custom_names(const std::map<int, std::u32string>* names);
   // Where a script-given custom name goes (FE 7E); the host stores it with the typed names.
   void set_name_store(std::function<void(int, std::u32string)> store) { name_store_ = std::move(store); }
+  // Decodes a game-font name record (save::SaveChar::name) to text, for the save header's preview name.
+  void set_record_decoder(std::function<std::u32string(ByteSpan)> decode) { record_decoder_ = std::move(decode); }
   void install_name_hooks();
   // Writes the world into the state before a save: global script variables 0x000..0x3FF into the head block, the room id, the
   // leader's position and the party ids.
@@ -583,9 +585,9 @@ class FieldWorld final : public script::FieldHost {
   // over its dismiss length starts; nullptr when there is none or it was taken down.
   const import::RoomCard* room_card() const { return room_card_; }
   // No screen fade left: the picture shows, and the next A8 to black acts. At a controlled run's restart (App::control_restart), as at
-  // boot.
+  // boot. This and fade_in_from_black set the fade outright: the next frame draws it without a blend from the last tick's.
   void clear_screen_fade() {
-    fade_ = fade_target_ = 0.0f;
+    fade_ = fade_target_ = drawn_prev_.fade = 0.0f;
     fade_step_ = 1.0f;
     fade_hold_ = 0;
     fade_add_ = fade_black_ = false;
@@ -593,7 +595,7 @@ class FieldWorld final : public script::FieldHost {
   }
   // Field menu closed: the field comes back from black over `ticks`.
   void fade_in_from_black(int ticks) {
-    fade_ = 1.0f;
+    fade_ = drawn_prev_.fade = 1.0f;
     fade_target_ = 0.0f;
     fade_step_ = 1.0f / static_cast<float>(ticks);
     fade_add_ = false;
@@ -1196,6 +1198,7 @@ class FieldWorld final : public script::FieldHost {
   ui::GameState* gs_ = &own_state_;
   const std::map<int, std::u32string>* custom_names_ = nullptr;
   std::function<void(int, std::u32string)> name_store_;
+  std::function<std::u32string(ByteSpan)> record_decoder_;
   // party_chars_ <- the state's party
   void sync_party();
   // state's party <- party_chars_

@@ -134,7 +134,7 @@ void FieldWorld::fade(int mode, int arg) {
 
 void FieldWorld::begin_entry_fade(int kind) {
   fade_hold_ = 0;
-  fade_ = 1.0f;
+  fade_ = drawn_prev_.fade = 1.0f;
   fade_target_ = 0.0f;
   fade_step_ = 1.0f / static_cast<float>(kind == 2 ? kWhiteFadeIn : kRoomFadeIn);
   fade_add_ = kind == 2;
@@ -289,6 +289,9 @@ void FieldWorld::end_battle(int result_code, int fade_delay) {
   if (!(handoff_.battle_req.flags & 0x20)) restore_field_song();
   handoff_.resume_song = -1;
   handoff_.battle_music_stopped = false;
+  // The host returns here between ticks and draws the field in the same frame: the frame blends from this state, not from the last tick
+  // before the battle (a clear screen and the encounter effect's dim and post pass, which showed the field and the foe just fought).
+  snapshot_drawn();
   log::info("field: battle ended, result {}", result_code);
 }
 

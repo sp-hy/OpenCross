@@ -15,7 +15,7 @@ def need(cond, msg):
 
 
 need(p["title_sjis"].endswith("０２"), "title does not end with the fullwidth file number 02: %r" % p["title_sjis"])
-need(p["leader_name"] == "Serge", "preview leader name %r" % p["leader_name"])
+need(h[0x28:0x34] == bytes.fromhex("835a838b8357838500000000"), "preview leader name %a: not the name record (Serge's default) in Shift-JIS" % p["leader_name"])
 need(p["party_ids"][0] == 0 and p["party_ids"][1] == 1, "preview party %r" % p["party_ids"])
 need(p["location"] == 27, "location word %r (alu_a01f = room id 27)" % p["location"])
 need(p["progression"] == 44, "progression (head 0x40) %r, expected the SCENARIO value 44" % p["progression"])

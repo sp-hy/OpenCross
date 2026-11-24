@@ -38,6 +38,8 @@ class Texture {
 
   // Streaming path: re-uploads the whole image (tightly packed, same size/format as create()) through a persistent staging buffer.
   bool update(GpuContext& ctx, const void* pixels);
+  // Uploads `pixels` (width x height, tightly packed as create()) into the rectangle at (x, y); the other texels keep their values.
+  bool update_region(GpuContext& ctx, const void* pixels, u32 x, u32 y, u32 width, u32 height);
 
   SDL_GPUTexture* handle() const { return texture_; }
   explicit operator bool() const { return texture_ != nullptr; }

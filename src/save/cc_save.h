@@ -45,6 +45,7 @@ inline constexpr int kNumElements = 192;
 // recruited 44 bits, party 3 bytes; kLeaderName is char[12] Shift-JIS; kFlags42 bits 0-1 = variable 0x7E & 3 (2 New Game+, 3 cleared).
 namespace head {
 inline constexpr size_t kLeaderName = 0x28;
+inline constexpr size_t kLeaderNameSize = 12;
 inline constexpr size_t kPreviewParty = 0x34;
 inline constexpr size_t kPreviewPlaytime = 0x37;
 inline constexpr size_t kPreviewGold = 0x3B;

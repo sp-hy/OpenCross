@@ -47,6 +47,9 @@ class SlotList {
   // A character's name in a saved game: its data, its ext_save.dat names, the character id.
   using NameLookup = std::function<std::u32string(const save::SaveSlot&, const std::map<int, std::u32string>&, int)>;
   void set_name_lookup(NameLookup fn) { name_of_ = std::move(fn); }
+  // The leader name of a memory-card slot (the page's files take NameLookup).
+  using PreviewLookup = std::function<std::u32string(const save::SaveSlot&)>;
+  void set_preview_lookup(PreviewLookup fn) { preview_of_ = std::move(fn); }
   void set_sfx(std::function<void(int)> fn) { sfx_ = std::move(fn); }
 
   void update(const Nav& nav, float dt);
@@ -97,6 +100,7 @@ class SlotList {
   bool picked_ = false, cancelled_ = false;
   bool plus_ = false;
   NameLookup name_of_;
+  PreviewLookup preview_of_;
   std::function<void(int)> sfx_;
 };
 

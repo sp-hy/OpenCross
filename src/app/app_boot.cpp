@@ -499,6 +499,7 @@ void App::init_menus() {
       menu.set_rules(&flow.machine().rules());
       menu.set_custom_names(&flow.machine().custom_names());
       menu.set_saved_name_lookup([this](const save::SaveSlot& data, const std::map<int, std::u32string>& ext_names, int id) { return flow.saved_name(data, ext_names, id); });
+      menu.set_preview_name_lookup([this](const save::SaveSlot& data) { return flow.preview_name(data); });
       menu.set_mode(art);
       menu.set_portrait_set(config.portraits);
       menu.set_sfx(ui_sfx);
@@ -602,6 +603,8 @@ void App::init_field() {
     world.set_game_state(&flow.game_state());
     world.set_custom_names(&flow.machine().custom_names());
     world.set_name_store([this](int char_id, std::u32string name) { flow.machine().set_custom_name(char_id, std::move(name)); });
+    if (const ui::GameFontCodec* codec = flow.machine().codec())
+      world.set_record_decoder([codec](ByteSpan record) { return codec->unpack_record(record); });
   }
   world_ok = true;
 }

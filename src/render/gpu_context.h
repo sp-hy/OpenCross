@@ -85,7 +85,8 @@ struct UploadOp {
   bool keep_source = false;
 
   SDL_GPUTexture* texture = nullptr;
-  u32 width = 0, height = 0;
+  // The texels written: width x height from (x, y).
+  u32 width = 0, height = 0, x = 0, y = 0;
   // Row stride of the source in pixels (0 = tightly packed).
   u32 pixels_per_row = 0;
   // Generate the texture's mip chain after the copy.

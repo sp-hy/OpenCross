@@ -682,13 +682,14 @@ void FieldWorld::install_name_hooks() {
 // The global variables 0x000..0x3FF are the save head block at 0x188 + id (MAP_ID 6 = location 0x18E, the party
 // ids 0x0C..0x10 = the hidden copy at 0x194; 0x3D0..0x3FF end exactly at the play time word 0x588).
 namespace {
-// Preview name of the save header (block 0x28, 12 bytes): standard Shift-JIS; kana to their double-byte codes, ASCII as is.
-std::array<u8, 12> sjis_preview_name(std::u32string_view text) {
-  std::array<u8, 12> out{};
+// Preview name of the save header (block 0x28, 12 bytes, NUL padded when shorter): standard Shift-JIS; kana to their double-byte
+// codes, ASCII as is.
+std::array<u8, save::head::kLeaderNameSize> sjis_preview_name(std::u32string_view text) {
+  std::array<u8, save::head::kLeaderNameSize> out{};
   size_t count = 0;
   for (char32_t ch : text) {
     if (ch >= 0x20 && ch < 0x7F) {
-      if (count + 1 > 11) break;
+      if (count + 1 > out.size()) break;
       out[count++] = static_cast<u8>(ch);
       continue;
     }
@@ -698,7 +699,7 @@ std::array<u8, 12> sjis_preview_name(std::u32string_view text) {
     else if (ch == 0x30FC) code = 0x815B;
     else if (ch == 0x3000) code = 0x8140;
     if (!code) continue;
-    if (count + 2 > 11) break;
+    if (count + 2 > out.size()) break;
     out[count++] = static_cast<u8>(code >> 8);
     out[count++] = static_cast<u8>(code & 0xFF);
   }
@@ -718,8 +719,10 @@ void FieldWorld::capture_state() {
   sl.head[save::head::kPreviewStars] = sl.head[save::head::kStarsTotal];
   // Head 0x40 mirrors SCENARIO_FLAG.
   sl.set_progression(static_cast<u16>(vm_.var(0)));
-  if (custom_names_ && !party_chars_.empty()) {
-    const std::u32string leader = data::own_name(party_chars_[0], {custom_names_, &dialogue_.tables(), lang_}, false);
+  // The preview name is the leader's name record converted to Shift-JIS, not the name shown in the game's language: RDE's slot list
+  // shows no leader name for a field holding the Latin display name.
+  if (record_decoder_ && !party_chars_.empty() && party_chars_[0] >= 0 && party_chars_[0] < save::kNumChars) {
+    const std::u32string leader = record_decoder_(sl.chars[static_cast<size_t>(party_chars_[0])].name);
     if (!leader.empty()) {
       const auto nm = sjis_preview_name(leader);
       std::copy(nm.begin(), nm.end(), sl.head.begin() + save::head::kLeaderName);
