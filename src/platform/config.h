@@ -449,6 +449,16 @@ struct Config {
   // [Debug] ForceBranches: `<pc>:<to>,...` (decimal script addresses): in a controlled run, after the instruction at <pc> runs the record
   // goes on at <to> (FieldVM::set_forced_branches): an editor's run of one way of a test. Also a `plan` key; empty = none.
   std::string debug_force_branches;
+  // [Debug] SkipBattles: in a controlled run, a battle the field asks for (A3 / C9) is not fought: after the encounter's hand-over it ends
+  // at once with a result (0 won, 1 lost, 2 fled; the field comes back as from a losable fight) and the scene goes on. A list `r,r,...`:
+  // the run's nth skipped battle takes the nth result, later ones the last. Empty or -1 = fought.
+  // An editor's scene preview: the scene around a fight or a movie plays out. Also `plan` keys.
+  std::vector<int> debug_skip_battles;
+  // [Debug] SkipMovies: a movie the field asks for (7E / D4) is over at once.
+  bool debug_skip_movies = false;
+  // [Debug] SkipMenus: a screen a script opens (a save point's menu, a shop, name entry; one a route's `request` opens too) closes at
+  // once, as when the player backs out of it; the scene goes on. Also a `plan` key.
+  bool debug_skip_menus = false;
 
   Cheats cheats;
   MultiplayerSettings multiplayer;
@@ -477,5 +487,7 @@ struct Config {
 std::string language_from_locales(const std::vector<std::string>& codes);
 // SDL_GetPreferredLocales() mapped by language_from_locales (SDL must be initialised); "en" when the OS reports nothing.
 std::string detect_os_language();
+// [Debug] SkipBattles' value: `r,r,...` results (0..2) in battle order; empty, -1 or nothing valid = none (the battles are fought).
+std::vector<int> parse_skip_battles(const std::string& text);
 
 }  // namespace oc::platform

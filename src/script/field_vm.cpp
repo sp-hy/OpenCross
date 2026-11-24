@@ -161,7 +161,7 @@ int FieldVM::pick_record(int ent) const {
 }
 
 // The slot flag (flag47) lives in the record array and survives a record being reused.
-FieldVM::Spawn FieldVM::spawn(int target, int id, int cls, bool hold, int* rec_index) {
+FieldVM::Spawn FieldVM::spawn(int target, int id, int cls, bool hold, int* rec_index, bool scene) {
   if (target < 0 || target >= static_cast<int>(ents_.size()) || id < 0 || id >= kScriptSlots) return Spawn::None;
   const u16 ptr = mod_.script_ptr(static_cast<size_t>(target), static_cast<size_t>(id));
   if (ptr == 0) return Spawn::None;
@@ -178,6 +178,7 @@ FieldVM::Spawn FieldVM::spawn(int target, int id, int cls, bool hold, int* rec_i
       record.state = static_cast<u16>(cls);
       record.id = static_cast<u16>(id);
       record.hold = hold ? 1 : 0;
+      record.scene = scene;
       if (rec_index) *rec_index = i;
       return Spawn::Spawned;
     }
@@ -187,7 +188,16 @@ FieldVM::Spawn FieldVM::spawn(int target, int id, int cls, bool hold, int* rec_i
 
 bool FieldVM::start_script(int ent, int slot, int cls) {
   int rec_index = -1;
-  return spawn(ent, slot, cls, false, &rec_index) == Spawn::Spawned;
+  return spawn(ent, slot, cls, false, &rec_index, true) == Spawn::Spawned;
+}
+
+bool FieldVM::request_script(int ent, int slot, int cls) {
+  int rec_index = -1;
+  const Spawn spawned = spawn(ent, slot, cls, false, &rec_index, true);
+  if (spawned != Spawn::Deduped) return spawned == Spawn::Spawned;
+  for (ScriptRecord& record : ents_[static_cast<size_t>(ent)].rec)
+    if (record.state != kRecIdle && record.id == slot) record.scene = true;
+  return true;
 }
 
 bool FieldVM::trigger_action(int ent) {
@@ -297,6 +307,8 @@ void FieldVM::dispatch(int ent, int rec_index, bool run_mode) {
   run_mode_ = run_mode;
   budget_ = 8;
   ended_ = false;
+  // A touch record's first tick is not a scene's start (scene_state: the leader in a box entity's talk box queues it every tick).
+  if (trace_ && !run_mode && rec_->scene && !(rec_->id == 3 && rec_->state == 4 && rec_->last_start_pc == kNoPc)) ++scene_runs_;
   int steps = 0, calls = 0;
   const u32 start_pc = rec_->pc;
   for (;;) {
@@ -353,7 +365,9 @@ void FieldVM::dispatch(int ent, int rec_index, bool run_mode) {
       rec_->stuck = rec_->loops = 0;
     } else {
       if (yield_ && rec_->pc == start_pc && steps == 1) ++rec_->stuck; else rec_->stuck = 0;
-      if (start_pc == rec_->last_start_pc) ++rec_->loops; else rec_->loops = 0;
+      // A repeat is a tick that starts and ends where the last one started (a polling wait); the tick a record gets past its wait
+      // and moves on is progress: counting it carried a long dialog's or walk's count onto the next line (a trace stalled there).
+      if (start_pc == rec_->last_start_pc && rec_->pc == start_pc) ++rec_->loops; else rec_->loops = 0;
     }
     rec_->last_start_pc = start_pc;
   }
@@ -366,24 +380,70 @@ void FieldVM::trace_event(int ent, int rec, u16 id, u16 cls, u32 pc, u8 flags) {
   if (trace_->last.size() <= at) trace_->last.resize(at + 1, kNoPc);
   if (pc == trace_->last[at] && !(flags & kTraceEnd)) return;
   trace_->last[at] = flags & kTraceEnd ? kNoPc : pc;
+  if (ents_[static_cast<size_t>(ent)].rec[static_cast<size_t>(rec)].scene) {
+    Trace::Places& places = trace_->places[static_cast<u32>(ent) << 8 | id];
+    if (places.seen.insert(pc).second) {
+      places.last_new = trace_->tick;
+      places.back = false;
+    } else {
+      places.back = true;
+    }
+  }
   trace_->events.push_back(
       {trace_->tick, pc, static_cast<u16>(ent), static_cast<u8>(rec), static_cast<u8>(id), static_cast<u8>(cls), flags});
 }
 
-FieldVM::SceneState FieldVM::scene_state(u32 stall) const {
+// run_entity's own tests: an inactive entity, or a party member's while a formation holds the party, runs no record.
+bool FieldVM::entity_runs(size_t ent) const {
+  if (ents_[ent].flags38 & flag38::kInactive) return false;
+  return !((gflags_ & gflag::kFormation) && host_.party_slot_of_entity(static_cast<int>(ent)) >= 0);
+}
+
+FieldVM::SceneState FieldVM::scene_state(u32 stall, bool scene_only) const {
   bool live = false;
-  for (const Entity& entity : ents_)
-    for (const ScriptRecord& record : entity.rec) {
-      if (record.state >= 7) continue;
+  for (size_t ent = 0; ent < ents_.size(); ++ent)
+    for (const ScriptRecord& record : ents_[ent].rec) {
+      if (record.state >= 7 || (scene_only && !record.scene)) continue;
       const u8 op = mod_.code_byte(record.pc);
       if (op == 0x0B || op == 0x3B || (op == 0xFE && mod_.code_byte(record.pc + 1) == 0x16)) continue;
       // A touch record the trigger pass queued this tick and that has not run yet: the leader standing in a touch range (a box
       // entity's talk box is its touch box too) queues it again every tick, so only one that runs on (yields) is the scene's.
       if (record.id == 3 && record.state == 4 && record.last_start_pc == kNoPc) continue;
-      if (record.stuck < stall && record.loops < stall) return SceneState::Running;
+      // A record whose entity doesn't run (inactive: a talk that hid its entity, 36 00 then STOP / RET, a monster gone after its
+      // fight; or one asked for on an inactive entity) goes on only if another script brings the entity back: while one runs the
+      // scene runs; with none left it never will. Not live.
+      if (!entity_runs(ent)) continue;
+      const bool waits = cycling_ticks(ent, record) != 0;
+      if (!waits && record.stuck < stall && record.loops < stall) return SceneState::Running;
       live = true;
     }
   return live ? SceneState::Stalled : SceneState::Done;
+}
+
+u32 FieldVM::cycling_ticks(size_t ent, const ScriptRecord& record) const {
+  if (!trace_ || !trace_->cycle || !record.scene) return 0;
+  const auto it = trace_->places.find(static_cast<u32>(ent) << 8 | (record.id & 0xFF));
+  if (it == trace_->places.end() || !it->second.back) return 0;
+  const u32 ticks = trace_->tick - it->second.last_new;
+  return ticks >= trace_->cycle ? ticks : 0;
+}
+
+std::vector<FieldVM::StuckInfo> FieldVM::scene_records() const {
+  std::vector<StuckInfo> out;
+  for (size_t ent = 0; ent < ents_.size(); ++ent)
+    for (size_t rec = 0; rec < ents_[ent].rec.size(); ++rec) {
+      const ScriptRecord& record = ents_[ent].rec[rec];
+      if (record.state >= 7 || !record.scene) continue;
+      const bool strict = record.stuck >= record.loops;
+      StuckInfo info = stuck_info(ent, rec, strict ? record.stuck : record.loops, strict);
+      info.queued = record.last_start_pc == kNoPc && !entity_runs(ent);
+      if (const u32 cycling = cycling_ticks(ent, record); cycling != 0) {
+        info.cycling = true;
+        info.ticks = cycling;
+      }
+      out.push_back(info);
+    }
+  return out;
 }
 
 namespace {

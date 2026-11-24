@@ -16,6 +16,7 @@
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "core/types.h"
@@ -56,8 +57,8 @@ constexpr u32 kCameraBusy = 0x1, kInputLock = 0x2, kFormation = 0x8, kFormationH
 // child spawned by a blocking RUN_SCRIPT (08 / 09): the record is not reused until the parent saw it finish. `wait` is
 // the WAIT (2D) countdown, `flag47` the per-record slot flag op 47 sets, `phase` the handshake state of the blocking ops
 // (08 / 09, battles, menus) and `child_ent` / `child_rec` the child record a blocking 08 / 09 waits for.
-// `stuck`, `loops` and `last_start_pc` feed the softlock watchdog only: ticks the record yielded on the same instruction,
-// and ticks its dispatch started at the same pc (a polling loop `3A / IF_JUMP / JUMP` never changes its start pc).
+// `stuck`, `loops` and `last_start_pc` feed the softlock watchdog and the Control trace only: ticks the record yielded on the same
+// instruction, and ticks its dispatch started and ended at the same pc (a polling loop `3A / IF_JUMP / JUMP` never changes its start pc).
 struct ScriptRecord {
   u32 pc = 0;
   u16 state = kRecIdle;
@@ -69,6 +70,9 @@ struct ScriptRecord {
   s16 child_ent = -1;
   s8 child_rec = -1;
   u32 stuck = 0, loops = 0, last_start_pc = 0xFFFFFFFFu;
+  // Started by a trigger (a talk, a touch, a collision, an editor's request) or by a record that was: a trace's scene. The room's
+  // own records (INIT, the UPDATE loops and what they start) are not.
+  bool scene = false;
 };
 
 // Script-visible state of one room entity. Besides the records, call stack and flag words it carries the plain values
@@ -145,6 +149,9 @@ class FieldVM {
   bool trigger_touch(int ent);
   // Starts script `slot` of `ent` with priority class `cls` unless it is already live or empty / no record is free.
   bool start_script(int ent, int slot, int cls);
+  // An editor's request for one script (route `request script`): start_script, or when the slot is live already (the room's own scene
+  // started it before) that record becomes the asked-for one: a trace counts it as the scene's (scene_state).
+  bool request_script(int ent, int slot, int cls);
 
   // ---- state access --------------------------------------------------------------------------------------------------
   const FieldScriptModule& module() const { return mod_; }
@@ -226,6 +233,17 @@ class FieldVM {
       bool typed = false;
     };
     std::vector<Window> windows;
+    // Per entity and script slot the scene ran (entity << 8 | slot): the code places it ran, the trace tick it last ran one for the
+    // first time, and whether it went back to one it ran before since then. A script that only goes round places it ran for `cycle`
+    // ticks (0: off) loops until something changes (a flag this run never sets, or never: an idle animation or patrol the scene left
+    // running, a touch started again and again: a wandering monster whose fight is skipped).
+    struct Places {
+      std::unordered_set<u32> seen;
+      u32 last_new = 0;
+      bool back = false;
+    };
+    std::unordered_map<u32, Places> places;
+    u32 cycle = 0;
   };
   static constexpr u32 kNoPc = 0xFFFFFFFFu;
   void set_trace(Trace* trace) { trace_ = trace; }
@@ -235,8 +253,13 @@ class FieldVM {
   // Where a triggered scene stands: Done = no record of class < 7 is live but parked ones (0B, 3B and FE 16 never advance),
   // Stalled = every other one has waited or polled in place for `stall` ticks, else Running. A touch (slot 3) record queued but
   // not run yet doesn't count: one that ends in the tick it runs is queued again every tick the leader stays in range.
+  // `scene_only`: only the scene's records count (ScriptRecord::scene): the room's own loops of class < 7 (wandering or animating
+  // NPCs, an opening scene) never end. A record on an entity that doesn't run (inactive) is not live, so the scene can be Done with it;
+  // one that only goes round code it ran before (Trace::cycle) loops on, a condition as a stalled record's.
   enum class SceneState { Running, Done, Stalled };
-  SceneState scene_state(u32 stall) const;
+  SceneState scene_state(u32 stall, bool scene_only = false) const;
+  // Ticks the scene's records were run (dispatches): a trace's scene has started once it grows.
+  u32 scene_runs() const { return scene_runs_; }
   // An editor's "this way" at branches ([Debug] ForceBranches): after the instruction at a key's address runs, the record goes on at
   // the value's address. Null = none. The map stays the caller's.
   void set_forced_branches(const std::unordered_map<u32, u32>* forced) { forced_ = forced; }
@@ -253,9 +276,16 @@ class FieldVM {
     u32 ticks = 0;
     bool strict = true;
     bool holds_lock = false;
+    // Not run yet: queued on an entity that is inactive (`pc` / `key`: its first instruction).
+    bool queued = false;
+    // Goes round places it ran before (Trace::cycle; `ticks`: since it last ran a new one).
+    bool cycling = false;
   };
   // Records that have waited at least `min_ticks` (strict waits of any class; polling loops only of class < 7 or lock holders).
   std::vector<StuckInfo> stuck_records(u32 min_ticks) const;
+  // Every live record of class < 7 of the scene (ScriptRecord::scene): `ticks` = how long it has waited or polled in place; queued
+  // ones that can't run yet included.
+  std::vector<StuckInfo> scene_records() const;
   // Every live record of every entity but the idle UPDATE loops, one line each (the report of a long input lock).
   std::string describe_records() const;
   // Some record of class < 7 (ON_ACTION, ON_COLLISION, touch, or an async script started with a class) is still live.
@@ -291,6 +321,10 @@ class FieldVM {
   std::array<u8, 8> slot_ent_{};
   std::array<u8, 256> ent_ref_tables_[3]{};
   VmStats stats_;
+  u32 scene_runs_ = 0;
+  bool entity_runs(size_t ent) const;
+  // Ticks since a scene record last ran a new place when it has looped for Trace::cycle ticks or more, else 0.
+  u32 cycling_ticks(size_t ent, const ScriptRecord& record) const;
   Trace* trace_ = nullptr;
   void trace_event(int ent, int rec, u16 id, u16 cls, u32 pc, u8 flags);
   ModUi ui_;
@@ -337,7 +371,8 @@ class FieldVM {
   bool has_model(int ent) const { return ent >= 0 && !(ents_[static_cast<size_t>(ent)].flags38 & flag38::kNo3dObject); }
 
   enum class Spawn { None, Spawned, Deduped, NoRecord };
-  Spawn spawn(int target, int id, int cls, bool hold, int* rec_index);
+  // `scene`: the new record's ScriptRecord::scene (a trigger's, or the spawning record's).
+  Spawn spawn(int target, int id, int cls, bool hold, int* rec_index, bool scene);
   int pick_record(int ent) const;
   void dispatch(int ent, int rec_index, bool run_mode);
   void run_entity(int ent);

@@ -1602,6 +1602,130 @@ void test_scene_state_queued_touch() {
   CHECK(vm.scene_state(600) == FieldVM::SceneState::Running);
 }
 
+// scene_state(stall, scene_only): a class < 7 loop the room's own UPDATE started is not the scene's (it never ends); a script asked for on
+// an inactive entity never runs and waits as a stall does (queued in scene_records); scene_runs() tells when the scene's records ran.
+void test_scene_state_lineage() {
+  Asm script;
+  const u16 upd = script.here();
+  script.wait_frame().jump(upd);
+  // RUN_SCRIPT THIS, script 5, class 2 (op 07: not blocking), every tick (a live one is not started twice).
+  const u16 upd_spawns = script.here();
+  script.raw({0x07, 0xFB, (2 << 5) | 5});
+  script.wait_frame().jump(upd_spawns);
+  const u16 loop = script.here();
+  script.wait(2).jump(loop);
+  const u16 waits = script.here();
+  script.wait(3);
+  script.stop();
+  NullHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{1, upd}}}, {{{1, upd_spawns}, {5, loop}}}, {{{1, upd}, {5, waits}}}, {{{1, upd}, {5, waits}}}}));
+  // The scene-run count counts while a trace runs, as in control_trace.
+  FieldVM::Trace trace;
+  vm.set_trace(&trace);
+  for (int i = 0; i < 4; ++i) vm.tick();
+  const u32 runs = vm.scene_runs();
+  CHECK(vm.scene_state(600) == FieldVM::SceneState::Running);
+  CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Done);
+  vm.entity(2).flags38 |= flag38::kInactive;
+  CHECK(vm.start_script(2, 5, 2));
+  vm.tick();
+  CHECK_EQ(vm.scene_runs(), runs);
+  // Not live (it never runs), but listed: a trace whose scene never ran ends `none` (scene_runs) and notes it as queued.
+  CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Done);
+  const std::vector<FieldVM::StuckInfo> records = vm.scene_records();
+  CHECK_EQ(records.size(), 1);
+  if (records.size() == 1) {
+    CHECK_EQ(records[0].ent, 2);
+    CHECK(records[0].queued);
+    CHECK_EQ(records[0].pc, waits);
+  }
+  CHECK(vm.start_script(3, 5, 2));
+  vm.tick();
+  CHECK(vm.scene_runs() > runs);
+  CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Running);
+  // An editor's request for a script the room's own UPDATE runs already (route `request script`): that record is the scene's now.
+  vm.entity(2).flags38 &= ~flag38::kInactive;
+  for (int i = 0; i < 8; ++i) vm.tick();
+  CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Done);
+  CHECK(!vm.start_script(1, 5, 2));
+  CHECK(vm.request_script(1, 5, 2));
+  CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Running);
+}
+
+// Trace::cycle: a scene record that only goes round code it ran before (a timed loop) counts as waiting once it has for `cycle` ticks; a
+// long wait at one place does not (it never goes back).
+void test_scene_state_cycling() {
+  Asm script;
+  const u16 upd = script.here();
+  script.wait_frame().jump(upd);
+  const u16 loop = script.here();
+  script.wait(2).jump(loop);
+  const u16 long_wait = script.here();
+  script.wait(100);
+  script.stop();
+  NullHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{1, upd}}}, {{{1, upd}, {5, loop}}}, {{{1, upd}, {5, long_wait}}}}));
+  FieldVM::Trace trace;
+  trace.cycle = 20;
+  vm.set_trace(&trace);
+  CHECK(vm.start_script(1, 5, 2));
+  CHECK(vm.start_script(2, 5, 2));
+  for (u32 tick = 0; tick < 40; ++tick) {
+    trace.tick = tick;
+    vm.tick();
+  }
+  CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Running);
+  bool cycling = false, waiting = false;
+  for (const FieldVM::StuckInfo& info : vm.scene_records()) {
+    if (info.ent == 1) cycling = info.cycling;
+    if (info.ent == 2) waiting = !info.cycling;
+  }
+  CHECK(cycling);
+  CHECK(waiting);
+  vm.set_trace(nullptr);
+}
+
+// A scene record whose entity made itself inactive (36 00) and ran out of its tick's budget before the STOP after it never runs again
+// (a talk that hides its own entity): the scene is over, wherever the record stopped, unless another scene script still runs (it could bring the
+// entity back).
+void test_scene_state_inactive_self() {
+  Asm script;
+  const u16 upd = script.here();
+  script.wait_frame().jump(upd);
+  const u16 ends = script.here();
+  for (int i = 0; i < 8; ++i) script.raw({0x36, 0x00, 0xFB});
+  script.stop();
+  const u16 mid = script.here();
+  for (int i = 0; i < 8; ++i) script.raw({0x36, 0x00, 0xFB});
+  script.wait(100);
+  script.stop();
+  const u16 other = script.here();
+  script.wait(5);
+  script.stop();
+  {
+    NullHost host;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{{{1, upd}}}, {{{1, upd}, {5, ends}}}}));
+    CHECK(vm.start_script(1, 5, 2));
+    for (int tick = 0; tick < 3; ++tick) vm.tick();
+    CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Done);
+  }
+  {
+    // Stopped mid-way: the scene runs while another of its scripts does, then it is over.
+    NullHost host;
+    FieldVM vm(host);
+    vm.load(make_module(script, {{{{1, upd}}}, {{{1, upd}, {5, mid}}}, {{{1, upd}, {5, other}}}}));
+    CHECK(vm.start_script(1, 5, 2));
+    CHECK(vm.start_script(2, 5, 2));
+    for (int tick = 0; tick < 3; ++tick) vm.tick();
+    CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Running);
+    for (int tick = 0; tick < 10; ++tick) vm.tick();
+    CHECK(vm.scene_state(600, true) == FieldVM::SceneState::Done);
+  }
+}
+
 // Control `trace` (a controller's timeline): the idle UPDATE loop leaves no events, a wait that runs again every tick is one event, the end
 // is its own; scene_state follows the class < 7 record; a room load ends the trace.
 void test_trace() {
@@ -2131,6 +2255,9 @@ int main() {
   test_stuck_watchdog();
   test_trace();
   test_scene_state_queued_touch();
+  test_scene_state_lineage();
+  test_scene_state_cycling();
+  test_scene_state_inactive_self();
   test_forced_branches();
   if (failures) {
     std::printf("%d failure(s)\n", failures);

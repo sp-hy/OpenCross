@@ -42,7 +42,7 @@ bool FieldVM::exec_game(u8 op) {
         if (rec_->phase == 2) {
           int ri = -1;
           Spawn spawned = Spawn::None;
-          if (character >= 0 && !(ents_[static_cast<size_t>(character)].flags38 & flag38::kInactive)) spawned = spawn(character, 2, 0, true, &ri);
+          if (character >= 0 && !(ents_[static_cast<size_t>(character)].flags38 & flag38::kInactive)) spawned = spawn(character, 2, 0, true, &ri, rec_->scene);
           if (spawned == Spawn::NoRecord) {
             // Retried next tick.
             yield_ = true;
