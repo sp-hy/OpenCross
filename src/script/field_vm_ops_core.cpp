@@ -133,13 +133,13 @@ bool FieldVM::exec_core(u8 op) {
           break;
         }
         int rec_index = -1;
-        if (spawn(target_ent, id, cls, false, &rec_index) == Spawn::NoRecord) break;
+        if (spawn(target_ent, id, cls, false, &rec_index, rec_->scene) == Spawn::NoRecord) break;
         advance(3);
         break;
       }
       if (rec_->phase == 0) {
         int rec_index = -1;
-        const Spawn spawned = spawn(target_ent, id, cls, true, &rec_index);
+        const Spawn spawned = spawn(target_ent, id, cls, true, &rec_index, rec_->scene);
         if (spawned == Spawn::NoRecord) break;
         if (spawned != Spawn::Spawned) {
           advance(3);

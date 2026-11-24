@@ -752,11 +752,23 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
     return;
   }
   if (!world_ok || !world.view().loaded()) return;
-  if (world.menu_pending()) {
+  if (world.menu_pending() && controlled && config.debug_skip_menus) {
+    // [Debug] SkipMenus: a screen a script opens (a save point's menu, a shop, name entry) closes at once, as when the player backs
+    // out of it (var 0x4C = 0: not saved); the scene goes on. A trace notes it (`u <tick> <kind>`).
+    const int kind = static_cast<int>(world.take_menu().kind);
+    world.menu_closed();
+    if (auto* trace = world.vm().trace()) trace->notes.push_back(std::format("u {} {}", trace->tick, kind));
+    log::info("menu: kind {} skipped ([Debug] SkipMenus)", kind);
+  } else if (world.menu_pending()) {
     handle_script_menu(world.take_menu());
     return;
   }
-  if (world.movie_pending()) {
+  if (world.movie_pending() && controlled && config.debug_skip_movies) {
+    world.take_movie();
+    world.movie_finished();
+    world.lock_input(kMovieInputLock);
+    log::info("movie: skipped ([Debug] SkipMovies)");
+  } else if (world.movie_pending()) {
     start_movie(world.take_movie());
     return;
   }
@@ -818,7 +830,8 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   }
   // The effects library + JP HUD fonts load on worker threads from the title / first room, not at the first encounter.
   if (battle_ready && !battle_warmed && flow_ready) battle.warm_up(), battle_warmed = true;
-  if (world.battle_requested()) {
+  const bool skip_battle = controlled && !config.debug_skip_battles.empty();
+  if (world.battle_requested() && !skip_battle) {
     // Fallback (a no-op when warmed): the JP fonts load on a worker thread during the swirl.
     if (!fb_prefetched && battle_ready) battle.prefetch_fonts(), fb_prefetched = true;
     // From the request on (the swirl is ~105 ticks of idle time) the load runs ~3 ms per frame; not on the frames that start the effect.
@@ -832,6 +845,15 @@ void App::advance(const platform::Input& raw, double dt, int ticks) {
   if (world.battle_ready() && flow_ready && flow.scene_mode()) {
     world.take_battle();
     world.end_battle(0);
+  } else if (world.battle_ready() && skip_battle) {
+    // [Debug] SkipBattles: the hand-over played, the fight is not; the field comes back with the result. A trace notes it
+    // (`b <tick> <battle id> <result>`).
+    const int id = world.take_battle().battle_id;
+    const std::vector<int>& results = config.debug_skip_battles;
+    const int result = results[std::min(skipped_battles++, results.size() - 1)];
+    world.end_battle(result);
+    if (auto* trace = world.vm().trace()) trace->notes.push_back(std::format("b {} {} {}", trace->tick, id, result));
+    log::info("battle: encounter {:#x} skipped as {} ([Debug] SkipBattles)", id, result);
   } else if (world.battle_ready() && (!battle_ready || battle.load_complete())) {
     // A late load keeps the field (white) up, never waits.
     start_field_battle();

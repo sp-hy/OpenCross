@@ -560,6 +560,10 @@ bool FieldWorld::load_room(std::string_view name, int param) {
   const RoomView::Limits lim = view_.default_limits();
   camera_.cam.limits = lim;
 
+  // The mod variable handles of this room's script are those of the mod that owns it.
+  room_vars_owner_ = room_owners_ ? room_owners_->owner(name) : std::string();
+  room_vars_ = mod_vars_ ? mod_vars_->handles_of(room_vars_owner_) : nullptr;
+  unlisted_vars_.clear();
   vm_.set_var(script::var::kRoomParam, param);
   // MAP_ID as this room's script knows it; PREVIOUS_MAP_ID, written by the jump in the old room's terms, is re-read in this room's when the
   // old room was a mod room (ModRooms: each mod has its own ids).
@@ -789,12 +793,32 @@ void FieldWorld::field_reset() {
 // ------------------------------------------------------------------------------------------------ host: party and items
 
 void FieldWorld::set_mod_rooms(const ModRooms* rooms) {
+  room_owners_ = rooms;
   mod_rooms_ = rooms && !rooms->empty() ? rooms : nullptr;
   stem_ids_.clear();
   if (!mod_rooms_) return;
   for (const std::string& stem : mod_rooms_->stems())
     if (files_ && !files_->exists("cdrom/map/mapbin/" + stem + ".bin")) log::warn("field: mod room '{}' has no cdrom/map/mapbin/{}.bin", stem, stem);
   log::info("field: {} mod room(s)", mod_rooms_->stems().size());
+}
+
+void FieldWorld::set_mod_vars(const ModVars* vars) {
+  mod_vars_ = vars && !vars->empty() ? vars : nullptr;
+  vm_.mod_variables().assign(mod_vars_ ? mod_vars_->names().size() : 0, 0);
+  room_vars_ = nullptr;
+  if (mod_vars_) log::info("field: {} mod variable(s)", mod_vars_->names().size());
+}
+
+int FieldWorld::mod_variable(u32 handle) {
+  if (room_vars_)
+    if (const auto it = room_vars_->find(static_cast<int>(handle)); it != room_vars_->end()) return it->second;
+  if (unlisted_vars_.insert(handle).second) {
+    if (room_vars_owner_.empty())
+      log::warn("field: variable 0x{:X} in {}, a game room no mod edits: it has no mod variables", handle, room_name());
+    else
+      log::warn("field: variable 0x{:X} is not in the [Variables] of '{}' (the mod that owns {})", handle, room_vars_owner_, room_name());
+  }
+  return -1;
 }
 
 int FieldWorld::script_room(int id) const {

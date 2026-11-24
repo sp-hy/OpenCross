@@ -235,6 +235,9 @@ Developer and automation switches, read once at boot (except `Log` and `Panels`,
 | `BattleField` | -1 | int | The standalone battle's battlefield (stage `bg_NN`); -1 = `ShowcaseStage`, else the scene's own. |
 | `BattleIntroLive` | 0 | bool | The standalone battle's stage intro plays live for the load's ticks instead of being fast-forwarded by the load (a stage previewer). |
 | `HoldScripts` | 0 | bool | With `Control`: the room's scripts stop after its INIT; effects, background animation and the clock go on (`routes.md` section 8). |
+| `SkipBattles` | empty | list | With `Control`: a battle the field asks for (A3 / C9) is not fought; after the hand-over it ends with a result (0 won, 1 lost, 2 fled; the field comes back as from a losable fight): `r,r,...`, the run's nth skipped battle takes the nth, later ones the last. Empty or -1 = fought (an empty value in a later ini layer clears an earlier layer's list); an item that is not 0, 1 or 2 is skipped. Also a `plan` key (`routes.md`). |
+| `SkipMovies` | 0 | bool | With `Control`: a movie the field asks for (7E / D4) is over at once. Also a `plan` key. |
+| `SkipMenus` | 0 | bool | With `Control`: a screen a script opens (a save point's menu, a shop, name entry; one a route's `request` opens too) closes at once, as when the player backs out of it. Also a `plan` key. |
 | `ForceBranches` | empty | `<pc>:<to>,...` | With `Control`: after the field script instruction at `<pc>` runs, its record goes on at `<to>` (decimal script addresses; `routes.md` section 8). |
 | `Record` | empty | file path | Write the session's inputs to this file (replayable). Ignored while replaying. |
 | `Replay` | empty | file path | Replay a recorded session; its room and entrance replace `Room` and `Entrance`. |

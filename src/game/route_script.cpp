@@ -524,7 +524,7 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
   if (op == "mash") {
     if (args.size() < 3 || args[1] != "until") return bad("mash until flow|room|movie|idle <value> [timeout]");
     if (args[2] == "idle") {
-      if (args.size() < 4) return bad("mash until idle <value=any> [timeout]");
+      if (args.size() < 4) return bad("mash until idle <n> [timeout]");
     } else if (args.size() < 4) {
       return bad("mash until flow|room|movie <value> [timeout]");
     }
@@ -532,7 +532,14 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     if (args[2] == "flow") done = st.flow == args[3] && !st.movie;
     else if (args[2] == "room") done = st.room_valid && st.room == args[3];
     else if (args[2] == "movie") done = st.movie == (args[3] == "start");
-    else if (args[2] == "idle") done = st.field_idle && !st.settling && !st.battle;
+    else if (args[2] == "idle") {
+      // `idle <n>`: the controls free for n ticks in a row (n <= 1: at once). A room's own scene can leave them free for a moment
+      // between its steps (an arrival scene between two walks), so a settled room is one whose controls stay free.
+      int need = 1;
+      to_int(args[3], need);
+      quiet_ = st.field_idle && !st.settling && !st.battle ? quiet_ + 1 : 0;
+      done = quiet_ >= std::max(1, need);
+    }
     else if (args[2] == "shop") done = st.shop == (args[3] == "open");
     else if (args[2] == "menu") done = st.menu == (args[3] == "open");
     else if (args[2] == "message") done = st.dialogue && std::to_string(st.message) == args[3];
@@ -543,7 +550,8 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
     }
     if (elapsed > timeout_arg(args, 4)) return bad("mash timed out waiting for " + args[2] + " " + args[3] + " (flow " + st.flow + ", room " + st.room + ")");
     const u64 phase = elapsed % 12;
-    hold(SDL_SCANCODE_RETURN, phase < 3);
+    // While the controls stay free the button rests: a press there would talk to whoever stands by the party.
+    hold(SDL_SCANCODE_RETURN, phase < 3 && !(args[2] == "idle" && quiet_ > 0));
     return false;
   }
   if (op == "choose") {
@@ -1139,6 +1147,15 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       return bad("put beside <ent> [dist]");
     out.put_beside = ent;
     out.put_dist = static_cast<float>(dist);
+    return true;
+  }
+  // talk <ent>: put beside it and its talk started in the same tick (the host starts its talk script directly when it can't be talked to)
+  if (op == "talk") {
+    int ent = 0;
+    if (args.size() < 2 || !to_int(args[1], ent) || ent <= 0) return bad("talk <ent>");
+    out.put_beside = ent;
+    out.put_dist = 0;
+    out.talk = true;
     return true;
   }
   // put [ent <n> | v] <x> <z>

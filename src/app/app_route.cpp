@@ -160,9 +160,9 @@ void App::route_request(const game::RouteOut& out) {
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
   else if (rk == "party_add") { world.party_add(out.request_arg); world.state_edited(); }
-  // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::start_script; class 3 = a talk's): an
-  // editor runs any one script of a room, not only the ones a talk or a touch starts
-  else if (rk == "script") world.vm().start_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
+  // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::request_script; class 3 = a talk's): an
+  // editor runs any one script of a room, not only the ones a talk or a touch starts; one live already is the asked-for one
+  else if (rk == "script") world.vm().request_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
   else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
@@ -204,11 +204,11 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "menu") world.request_menu(MK::MainMenu, 0);
   else if (rk == "disc") world.request_menu(MK::ChangeDisc, out.request_arg);
   else if (rk == "movie") world.play_movie(out.request_arg, out.request_arg2);
-  else if (rk == "battle") world.request_battle(out.request_arg, out.request_arg2, out.request_arg3);
-  else if (rk == "battle_disguise") world.request_battle(out.request_arg, 0, 4);
+  else if (rk == "battle") world.request_engine_battle(out.request_arg, out.request_arg2, out.request_arg3);
+  else if (rk == "battle_disguise") world.request_engine_battle(out.request_arg, 0, 4);
   else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);
-  else if (rk == "elementshop") world.request_menu(MK::ElementShop, out.request_arg);
-  else if (rk == "weaponshop") world.request_menu(MK::WeaponShop, out.request_arg);
+  else if (rk == "elementshop") world.request_engine_menu(MK::ElementShop, out.request_arg);
+  else if (rk == "weaponshop") world.request_engine_menu(MK::WeaponShop, out.request_arg);
   else {
     log::error("route: unknown request {}", rk);
     exit_code = 1;
@@ -293,11 +293,43 @@ bool App::route_step() {
     if (out.put && out.put_ent < 0 && out.put_v) world.place_followers();
     if (out.put_beside >= 0) {
       float bx = 0, bz = 0;
-      if (world.put_party_beside(out.put_beside, out.put_dist, bx, bz))
+      const bool placed = world.put_party_beside(out.put_beside, out.put_dist, bx, bz);
+      if (placed)
         log::info("route: put beside ent {}: the party at {:.0f},{:.0f}", out.put_beside, bx, bz);
       else
         log::warn("route: put beside ent {}: no walkable spot beside it (the party stays)", out.put_beside);
+      // `talk`: only when the field takes a talk (no transition, fade, modal window, input lock or other talk running), as for the
+      // player; then the asked-for entity's talk itself, as the trigger pass starts it (not a press: a press goes to the first entity
+      // in range in index order, which may be another one beside it). An entity the player can't talk to here (nowhere to stand on its
+      // floor, or no talk now) gets its talk script started directly. A trace notes every outcome but a talk the trigger pass
+      // would start (`k <tick> <entity> busy|nospot|notalk|absent|none`).
+      auto note_talk = [&](const char* why) {
+        if (auto* trace = world.vm().trace()) trace->notes.push_back(std::format("k {} {} {}", trace->tick, out.put_beside, why));
+      };
+      if (out.talk && !world.idle()) {
+        note_talk("busy");
+        log::warn("route: talk ent {}: the field takes no talk now (a script, window or fade holds it); nothing started", out.put_beside);
+      } else if (out.talk && placed && world.takes_talk(out.put_beside)) {
+        world.vm().trigger_action(out.put_beside);
+      } else if (out.talk) {
+        // Not in the room in this run (inactive: shown only by another scene, or hidden by one): brought in and shown, so its talk
+        // script runs and the editor sees what it does; put back when it has none.
+        const bool exists = static_cast<size_t>(out.put_beside) < world.vm().entity_count();
+        const u32 flags = exists ? world.vm().entity(out.put_beside).flags38 : 0;
+        const bool absent = world.bring_in(out.put_beside);
+        const char* why = absent ? "absent" : placed ? "notalk" : "nospot";
+        if (world.vm().request_script(out.put_beside, 2, 3)) {
+          note_talk(why);
+          log::info("route: talk ent {}: {}, its talk script started directly", out.put_beside, why);
+        } else {
+          if (absent) world.vm().entity(out.put_beside).flags38 = flags;
+          note_talk("none");
+          log::warn("route: talk ent {}: {}, and it has no talk script to start", out.put_beside, why);
+        }
+      }
     }
+    // The party moved by the route: the camera on the leader, as a walk there would have left it.
+    if ((out.put && out.put_ent < 0) || out.put_beside >= 0) world.settle_camera_on_player();
     if (out.set_buttons) world.game_state().slot.button_cfg[static_cast<size_t>(out.buttons_index)] = static_cast<u32>(out.buttons_value);
     if (out.set_option) world.game_state().set_option(static_cast<u16>(out.option_mask), out.option_on != 0);
     if (out.set_skin) {

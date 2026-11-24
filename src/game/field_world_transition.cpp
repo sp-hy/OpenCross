@@ -9,6 +9,7 @@
 #include "audio/bgm_table.h"
 #include "audio/voice.h"
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/cheats.h"
 #include "game/field_world_internal.h"
 
@@ -160,6 +161,17 @@ bool FieldWorld::skip_model_swap(int ent) {
 }
 
 void FieldWorld::request_battle(int battle_id, int field, int flags) {
+  // A scene id (0x200 + scene) from a mod's script is that mod's own: [Formations] of the running room's owner.
+  if (battle_id >= 0x200 && handoff_.battle_state == BattleState::None) {
+    const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+    if (const std::optional<size_t> scene = data::table_rows().record_for(owner, "scenedat", battle_id - 0x200))
+      battle_id = 0x200 + static_cast<int>(*scene);
+    else log::warn("field: battle {:#x} names no formation (the room owner's own ids)", battle_id);
+  }
+  request_engine_battle(battle_id, field, flags);
+}
+
+void FieldWorld::request_engine_battle(int battle_id, int field, int flags) {
   if (handoff_.battle_state != BattleState::None) return;
   handoff_.battle_req = {battle_id, field, flags};
   // A3 / C9 handler: unless flag 1 (C9: keep the field music) the field song is suspended at once
@@ -325,6 +337,12 @@ void FieldWorld::snap_camera_to_player(bool keep_scroll) {
   camera_.snap(view_, vm_.global_flags(), pose_of(player_entity()), keep_scroll);
   camera_.smooth.reset(camera_.cam.x, camera_.cam.y);
   view_.set_scroll(camera_.cam.x, camera_.cam.y, true);
+}
+
+void FieldWorld::settle_camera_on_player() {
+  if (camera_.cam.scripted || camera_override() || scroll_pinned_) return;
+  snap_camera_to_player(true);
+  step_cull();
 }
 
 void FieldWorld::debug_pin_scroll(int x, int y) {

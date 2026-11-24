@@ -1278,7 +1278,12 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
       return char_name ? char_name(id) : tables_.default_name(id, language());
     };
     tctx.script_item = [this, var](int index) {
-      const int value = var(index);
+      int value = var(index);
+      if (value >= data::kScriptElementBase && script_element) {
+        const std::optional<int> element = script_element(value);
+        if (!element) return std::u32string();
+        value = data::kScriptElementBase + *element;
+      }
       const int key = value >= data::kScriptElementBase ? (0x170000 | (value - data::kScriptElementBase))
                       : value > 0x400                   ? (0x180000 | (value - 0x400))
                       : value > 0x200                   ? (0x170000 | (value - 0x200))

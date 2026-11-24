@@ -709,6 +709,7 @@ void DebugTools::apply(const Ctx& ctx) {
   if (restore_scene_ >= 0 && ctx.tables && ctx.world && (ctx.battle_running || !ctx.world->battle_active())) {
     // The battle has loaded its units: put the record back.
     ctx.tables->scenes[static_cast<size_t>(restore_scene_)].raw = restore_raw_;
+    ctx.tables->scenes[static_cast<size_t>(restore_scene_)].wide = restore_wide_;
     restore_scene_ = -1;
     // The battle has started (or was dropped): the next one uses its script again.
     if (ctx.battle) {
@@ -778,8 +779,11 @@ void DebugTools::apply(const Ctx& ctx) {
         }
         if (action.custom_enemies) {
           restore_scene_ = scene;
-          restore_raw_ = ctx.tables->scenes[static_cast<size_t>(scene)].raw;
-          ctx.tables->scenes[static_cast<size_t>(scene)].raw = with_enemies(restore_raw_, action.ids, action.counts);
+          data::SceneRec& rec = ctx.tables->scenes[static_cast<size_t>(scene)];
+          restore_raw_ = rec.raw;
+          restore_wide_ = rec.wide;
+          rec.raw = with_enemies(restore_raw_, action.ids, action.counts);
+          rec.wide = {};
           // The scene's battle script addresses its own enemies (units, kill scripts, end-of-battle control): not these.
           if (ctx.battle) {
             BattleView::Debug debug = ctx.battle->debug();
@@ -788,7 +792,7 @@ void DebugTools::apply(const Ctx& ctx) {
           }
         }
         // Like A3 / C9 with the scene id: the field plays 'enct', then the battle starts.
-        world->request_battle(0x200 + scene, action.arg1, 0);
+        world->request_engine_battle(0x200 + scene, action.arg1, 0);
         status_ = std::format("Battle started: scene {}, battlefield {}{}.", scene, action.arg1 < 0 ? std::string("default") : std::format("bg_{:02}", action.arg1),
                               action.custom_enemies ? ", custom enemies" : "");
         break;

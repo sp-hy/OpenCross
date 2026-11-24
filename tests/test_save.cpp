@@ -239,9 +239,24 @@ void test_slot() {
     const SaveSlot back = decode_block(block);
     CHECK(back.elements[5].id == 600 && back.elements[5].qty == 3 && back.chars[1].grid[4] == 700 && back.chars[1].grid[5] == 12);
     CHECK(decode_block(encode_block(slot)).tail == slot.tail);
+    // A record mods add by name comes back under the id its name has now; a name no mod adds any more leaves its stacks empty.
+    set_element_names({[](u16 id) { return id == 600 ? std::string("zap") : std::string(); },
+                       [](std::string_view name) { return name == "zap" ? std::optional<u16>(650) : std::nullopt; }});
+    const Bytes named = encode_block(mod);
+    const SaveSlot moved = decode_block(named);
+    CHECK(moved.elements[5].id == 650 && moved.elements[5].qty == 3 && moved.chars[1].grid[4] == 700);
+    set_element_names({[](u16) { return std::string(); }, [](std::string_view) { return std::optional<u16>(); }});
+    CHECK(decode_block(named).elements[5].id == 0 && decode_block(named).chars[1].grid[4] == 700);
+    set_element_names({});
+    // The mods' variables come back by name; zeros are not kept; the block alone has none.
+    SaveSlot vars = slot;
+    vars.mod_vars = {{"run_depth", 12}, {"best_depth", 0xFFFF}, {"unused", 0}};
+    const Bytes var_block = encode_block(vars);
+    CHECK((decode_block(var_block).mod_vars == std::map<std::string, u16>{{"best_depth", 0xFFFF}, {"run_depth", 12}}));
     set_wide_store({});
     // The block alone, as RDE reads it.
     CHECK(decode_block(block).elements[5].id == 0);
+    CHECK(decode_block(var_block).mod_vars.empty());
     std::error_code ec;
     std::filesystem::remove_all(store, ec);
   }

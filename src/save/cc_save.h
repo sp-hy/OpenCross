@@ -8,6 +8,8 @@
 // unknown fields survive a round trip.
 #include <array>
 #include <filesystem>
+#include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -77,6 +79,15 @@ inline constexpr u8 kSideFile = 2;
 // save, as the stream would have to. Memory-card slots, the auto-save and the OCSV page all go through here.
 void set_wide_store(std::filesystem::path dir);
 
+// Element records mods add by name (data/table_rows.h) get their ids from the mods enabled, so the side file also keeps their names
+// and a load gives each name the id it has now (a name no mod adds any more leaves its stacks and cells empty). `name_of(id)` = ""
+// for an element that has no name; `id_of(name)` = the element that carries the name now. Without them the ids are kept as numbers.
+struct ElementNames {
+  std::function<std::string(u16)> name_of;
+  std::function<std::optional<u16>(std::string_view)> id_of;
+};
+void set_element_names(ElementNames names);
+
 // Item stack: id stored in 9 bits, qty in 7 bits.
 struct ItemStack {
   u16 id = 0;
@@ -120,6 +131,8 @@ struct SaveSlot {
   u32 unk_e1e0 = 0, unk_e1e4 = 0, unk_e1ec = 0, unk_e1f0 = 0;
   // Obtained Frames bitfield (new game 0x203); the picker skips clear bits.
   u16 frames = 0x203;
+  // The variables mods add (game/mod_vars.h), by name; only values other than 0. Kept in the side file (OpenCross only).
+  std::map<std::string, u16> mod_vars;
   // Not saved (session only): the records come from char20.bin (the dream: boot / FE 2F state until FE 3F reloads char.bin).
   // OpenCross looks the file's record bytes (level masks, growth column) up in this set (game/new_game.h).
   bool dream_records = false;

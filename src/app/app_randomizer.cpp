@@ -64,7 +64,7 @@ const game::randomizer::Plan* App::randomizer() {
     const game::ScriptScan* scan = scan_service.wait();
     if (!scan) return nullptr;
     ui::shop::ShopData smiths = ui::shop::ShopData::from_tables(tables);
-    if (!smiths.load_waa_shop(files)) log::warn("randomizer: waa_shop.bin missing; the smiths use the table loader rows");
+    if (!smiths.load_waa_shop(files)) log::warn("randomizer: waa_shop.bin missing; the smiths have no stock");
     randomizer_pools = game::randomizer::gather(*scan, tables, flow_ready ? &flow.machine().rules() : nullptr, smiths.waa_shop);
   }
   randomizer_plan = game::randomizer::build(randomizer_settings, *randomizer_pools);

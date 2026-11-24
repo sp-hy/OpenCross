@@ -106,6 +106,33 @@ void test_rooms() {
   CHECK(both.conflicts.empty() && both.issues.empty() && both.users.empty());
 }
 
+void test_elements() {
+  // [Elements] is not a feature either: "<id> = <record name>" lines, ids 527..0x3FFF, names [a-z][a-z0-9_]*; bad lines are problems.
+  const features::Manifest manifest =
+      features::parse_manifest("[Elements]\n527 = role_taunt\n600=zap2\n526=low\n20000=high\n601=Caps\n602=9lives\n527=again\n");
+  CHECK((manifest.own_ids.at("pgdat") == std::vector<std::pair<int, std::string>>{{527, "role_taunt"}, {600, "zap2"}}));
+  CHECK(manifest.sections.empty() && manifest.problems.size() == 5);
+  CHECK(features::is_record_name("a_b9") && !features::is_record_name("_a") && !features::is_record_name(""));
+  // [ElementShops] / [Smiths]: shop ids from 32 (the game's rows are 0..31).
+  const features::Manifest shops = features::parse_manifest("[ElementShops]\n32=hub_shop\n31=low\n[Smiths]\n40=hub_smith\n");
+  CHECK((shops.own_ids.at("el_shop") == std::vector<std::pair<int, std::string>>{{32, "hub_shop"}}));
+  CHECK((shops.own_ids.at("waa_shop") == std::vector<std::pair<int, std::string>>{{40, "hub_smith"}}));
+  CHECK(shops.problems.size() == 1 && !shops.own_ids.contains("pgdat"));
+  // [Monsters] from 222, [Formations] from 513 (a script starts formation n as battle 0x200 + n).
+  const features::Manifest battle = features::parse_manifest("[Monsters]\n222=big_boss\n221=low\n[Formations]\n513=boss_fight\n512=low\n");
+  CHECK((battle.own_ids.at("monster") == std::vector<std::pair<int, std::string>>{{222, "big_boss"}}));
+  CHECK((battle.own_ids.at("scenedat") == std::vector<std::pair<int, std::string>>{{513, "boss_fight"}}));
+  CHECK(battle.problems.size() == 2);
+}
+
+void test_variables() {
+  // [Variables]: "<handle> = <name>", even handles 0x800..0xFFE (hex or decimal), one handle per name and one name per handle.
+  const features::Manifest manifest = features::parse_manifest(
+      "[Variables]\n0x800 = run_depth\n2050=best_depth\n0x7FE=low\n0x1000=high\n0x805=odd\n0x806=Caps\n0x800=again\n0x808=run_depth\n");
+  CHECK((manifest.variables == std::vector<std::pair<int, std::string>>{{0x800, "run_depth"}, {0x802, "best_depth"}}));
+  CHECK(manifest.sections.empty() && manifest.problems.size() == 6);
+}
+
 }  // namespace
 
 int main() {
@@ -113,6 +140,8 @@ int main() {
   test_table();
   test_resolve();
   test_rooms();
+  test_elements();
+  test_variables();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

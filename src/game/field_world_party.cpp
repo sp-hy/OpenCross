@@ -10,6 +10,7 @@
 
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/table_rows.h"
 #include "game/field_world_internal.h"
 #include "game/new_game_plus.h"
 
@@ -402,15 +403,32 @@ void FieldWorld::set_reserve_member(int slot, int char_id) {
 
 // Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x401..0x43F key items (id - 0x400 =
 // key item number, 1-based as in GameState::has_key_item; the scripts reach only the first 63 of the 64 bits, higher ids are refused),
-// from data::kScriptElementBase any element record, a mod's past 511 included (id - kScriptElementBase, one copy).
+// from data::kScriptElementBase any element record, a mod's past 511 included (id - kScriptElementBase, one copy; a mod's script names
+// the records mods add by its own ids, script_element).
 namespace {
 constexpr int kScriptKeyItems = 63;
+}
+std::optional<int> FieldWorld::script_element(int item_id) const {
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> element = data::table_rows().element_for(owner, item_id - data::kScriptElementBase);
+  if (!element) return std::nullopt;
+  return static_cast<int>(*element);
+}
+std::optional<int> FieldWorld::script_shop(script::MenuKind kind, int row) const {
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> mapped =
+      data::table_rows().record_for(owner, kind == script::MenuKind::ElementShop ? "el_shop" : "waa_shop", row);
+  if (!mapped) return std::nullopt;
+  return static_cast<int>(*mapped);
 }
 int FieldWorld::item_count(int id) {
   if (id < 0) return 0;
   if (id < 0x200) return gs_->item_count(id);
   if (id < 0x400) return gs_->element_count(id - 0x200);
-  if (id >= data::kScriptElementBase) return gs_->element_count(id - data::kScriptElementBase);
+  if (id >= data::kScriptElementBase) {
+    const std::optional<int> element = script_element(id);
+    return element ? gs_->element_count(*element) : 0;
+  }
   return id - 0x400 <= kScriptKeyItems && gs_->has_key_item(id - 0x400) ? 1 : 0;
 }
 void FieldWorld::give_item(int id) {
@@ -422,7 +440,7 @@ void FieldWorld::give_item(int id) {
     const int copies = id >= 0x261 && id <= 0x26B ? 5 : 1;
     for (int i = 0; i < copies; ++i) gs_->add_element(id - 0x200);
   } else if (id >= data::kScriptElementBase) {
-    gs_->add_element(id - data::kScriptElementBase);
+    if (const std::optional<int> element = script_element(id)) gs_->add_element(*element);
   } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
     const bool had = gs_->has_key_item(key_item);
     gs_->slot.set_key_items(gs_->slot.key_items() | (1ull << (key_item - 1)));
@@ -436,7 +454,7 @@ void FieldWorld::take_item(int id) {
   } else if (id < 0x400) {
     gs_->take_element(id - 0x200);
   } else if (id >= data::kScriptElementBase) {
-    gs_->take_element(id - data::kScriptElementBase);
+    if (const std::optional<int> element = script_element(id)) gs_->take_element(*element);
   } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
     gs_->slot.set_key_items(gs_->slot.key_items() & ~(1ull << (key_item - 1)));
   }
@@ -460,7 +478,7 @@ void FieldWorld::use_key_item(int item) {
   if (item == 1) {
     menu_req_ = {script::MenuKind::PartyScreen, 0};
   } else if (item == 63) {
-    menu_req_ = {script::MenuKind::WeaponShop, vm_.var(0x4A)};
+    menu_req_ = {script::MenuKind::WeaponShop, script_shop(script::MenuKind::WeaponShop, vm_.var(0x4A)).value_or(-1)};
   } else {
     menu_req_ = {script::MenuKind::PartyScreen, 1};
   }
@@ -650,6 +668,7 @@ void FieldWorld::install_name_hooks() {
     };
     dialogue.speaker_name = [names](int speaker) -> std::u32string { return data::own_name(speaker, names(), false); };
     dialogue.script_var = [this](int var) -> int { return vm_.var(static_cast<u16>(var)); };
+    dialogue.script_element = [this](int item_id) { return script_element(item_id); };
     // script_set serves {fset(n)} (variable 0x22).
     dialogue.script_set = [this](int var, int value) { vm_.set_var(static_cast<u16>(var), value); };
   };
@@ -718,6 +737,13 @@ void FieldWorld::capture_state() {
     sl.head[0x188 + static_cast<size_t>(id)] = static_cast<u8>(value & 0xFF);
     sl.head[0x188 + static_cast<size_t>(id) + 1] = static_cast<u8>(value >> 8);
   }
+  // The mods' variables by name (0 = not kept); the values of names no enabled mod has stay in the state.
+  if (mod_vars_)
+    for (size_t i = 0; i < mod_vars_->names().size(); ++i) {
+      const u16 value = vm_.mod_variables()[i];
+      if (value) sl.mod_vars[mod_vars_->names()[i]] = value;
+      else sl.mod_vars.erase(mod_vars_->names()[i]);
+    }
   // The location word is variable 6 (head 0x18E): the room id, written into the state only - the VM's MAP_ID is the room load's
   // (FE 2F leaves it 0 in New Game+ until the MAP_JUMP).
   if (location >= 0) {
@@ -772,6 +798,11 @@ void FieldWorld::restore_vars() {
     const u16 value = static_cast<u16>(sl.head[0x188 + static_cast<size_t>(id)] | (sl.head[0x188 + static_cast<size_t>(id) + 1] << 8));
     vm_.set_var(static_cast<u16>(id), value);
   }
+  if (mod_vars_)
+    for (size_t i = 0; i < mod_vars_->names().size(); ++i) {
+      const auto it = sl.mod_vars.find(mod_vars_->names()[i]);
+      vm_.mod_variables()[i] = it == sl.mod_vars.end() ? u16{0} : it->second;
+    }
   // A save made on disc 2 continues on disc 2.
   if (const int need = vm_.var(0x42) + 1; need == 1 || need == 2) set_disc(need);
   sync_party();
@@ -784,6 +815,9 @@ void FieldWorld::reset_for_new_game() {
   // 0x3D2 = 0x3F; game/new_game.h) - zeros only for a state that never had them.
   for (u16 id = 0; id < 0x3D0; id += 2) vm_.set_var(id, 0);
   for (u16 id = 0x3D0; id < 0x400; id += 2) vm_.set_var(id, gs_ ? gs_->slot.var(id) : 0);
+  // The mods' variables start at 0 too.
+  std::fill(vm_.mod_variables().begin(), vm_.mod_variables().end(), u16{0});
+  if (gs_) gs_->slot.mod_vars.clear();
   last_song_ = -1;
   menu_state_ = MenuState::None;
   movie_state_ = MovieState::None;

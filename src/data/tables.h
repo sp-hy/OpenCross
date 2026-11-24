@@ -3,8 +3,10 @@
 // files; records keep their raw bytes so later code can reach fields that are not decoded yet.
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "core/types.h"
 
@@ -94,7 +96,10 @@ struct ElemRec {
 // Element records past vanilla's 527 are a mod's own: their kind byte (+0x01, bit 1 = tech) says element or tech. Vanilla ids keep
 // their blocks (1..0x7F elements and consumables, 0x80.. techs, enemy actions and specials), whatever their kind.
 inline constexpr int kVanillaElemRecs = 527;
-// Field-script item ids (BB / B4 / D5, ItemWork text) from here name element `id - kScriptElementBase`, any record: the vanilla
+// Rows of the element shop and blacksmith tables (el_shop.bin, waa_shop.bin); a mod's shops by name follow them.
+inline constexpr size_t kShopRows = 32;
+// Field-script item ids (BB / B4 / D5, ItemWork text) from here name element `id - kScriptElementBase` (in a mod's room its own id,
+// TableRows::element_for), any record: the vanilla
 // range 0x200 + id ends at 511 where the key items start (0x401..). Operands carry 15 bits, so ids up to 0x6FFF.
 inline constexpr int kScriptElementBase = 0x1000;
 inline bool mod_element(const std::vector<ElemRec>& elements, int id) {
@@ -121,9 +126,11 @@ inline ElementKind element_kind(const std::vector<ElemRec>& elements, int id) {
 }
 
 // scenedat.bin record. boss() marks a star-up battle.
+// wide = a slot's monster id that doesn't fit the record's byte (a monster mods add by name, data/table_rows.h); 0 = the byte's.
 struct SceneRec {
   std::array<u8, 28> raw{};
-  u8 enemy_id(int slot) const { return raw[static_cast<size_t>(slot)]; }
+  std::array<u16, 3> wide{};
+  int enemy_id(int slot) const { return wide[static_cast<size_t>(slot)] ? wide[static_cast<size_t>(slot)] : raw[static_cast<size_t>(slot)]; }
   u8 enemy_count(int slot) const { return raw[static_cast<size_t>(3 + slot)]; }
   bool boss() const { return (raw[0x1A] & 0x80) != 0; }
   u8 bg() const { return raw[0x1A] & 0x7F; }
@@ -187,7 +194,7 @@ struct CharSet {
 
 // The loaded tables. Sources: enemies = monster.bin; char_sets = "char", "char20", "char_w0".."char_w5"; elements = pgdat.bin;
 // growth = el_mask.bin (100 x 8); scenes = scenedat.bin; symtbl = 384 x 8; btbgdat = 100 x 3; drops = ditem (256); star_rows = exdat
-// part 0 rows {n, b, s lo, s hi} (100); el_shop / waa_shop have trailing zeros trimmed; gear = 256 records (empty if player.dat part 4
+// part 0 rows {n, b, s lo, s hi} (100); el_shop has trailing zeros trimmed (the smiths' waa_shop.bin is read by ui::shop::ShopData); gear = 256 records (empty if player.dat part 4
 // is missing); item_info = 256; forge = menu/waa_tbl.bin, per item id the units needed of material id 0..31; keyitem_jp_rows = u16
 // offsets in keyitem.dat; rng_table = the 256-byte permutation read from the executable (empty if absent); variant_bands = the 8
 // encounter-variant roll bands {lo, hi} of the battle loader btlinit.prg (empty if absent).
@@ -201,7 +208,7 @@ struct GameTables {
   std::vector<std::array<u8, 3>> btbgdat;
   std::vector<DropRow> drops;
   std::vector<std::array<u8, 4>> star_rows;
-  std::vector<std::vector<u16>> el_shop, waa_shop;
+  std::vector<std::vector<u16>> el_shop;
   std::vector<std::vector<TradeEntry>> trade;
   std::vector<GearRec> gear;
   std::vector<ItemInfo> item_info;
@@ -223,8 +230,10 @@ struct GameTables {
   // Scene for a battle id: id >= 0x200 -> id-0x200, else symtbl[id*8+variant].
   int scene_for(int battle_id, int variant) const;
 
-  // Loads everything; returns false (and fills `err`) if a mandatory table is missing.
-  bool load(const vfs::Vfs& game_fs,std::string* err = nullptr);
+  // Loads everything; returns false (and fills `err`) if a mandatory table is missing. `publish`: these are the app's tables, so the
+  // named records' ids and the mods' own ids for their text are handed to what reads them later (table_rows(), the text); a load on
+  // another thread (the background room scan) passes false and keeps them to itself.
+  bool load(const vfs::Vfs& game_fs,std::string* err = nullptr, bool publish = true);
 };
 
 // The versus battle protocol: raised whenever the battle rules change in a way that would put two games of different builds out of step.
@@ -233,6 +242,16 @@ inline constexpr u32 kVersusRulesVersion = 1;
 // battle reads (monster, character and element records, scenes, battlefield colours, gear, drops, the generator's table); names and
 // the tables of the field and menus are left out.
 std::string battle_data_fingerprint(const GameTables& tables);
+
+// The rows of menu_pg.bin (16 bytes each, index = element id) with the mods' table rows applied (data/table_rows.h) when `game_fs` is
+// the VFS they were set for: as many as there are elements once the mods' named records are added. Nothing when the file is missing.
+std::optional<std::vector<std::array<u8, 16>>> read_menu_elements(const vfs::Vfs& game_fs);
+
+class TableRows;
+struct TableMod;
+// Gives the mods' text their own ids' records (import::set_text_mod_ids): a mod's element and monster names and its battle text are
+// written under its own ids, and the text moves them to the records `rows` gives those ids.
+void set_text_mod_ids_of(const TableRows& rows, const std::vector<TableMod>& mods);
 
 // Colour bit (0x04..0x80) -> index 0..5 green white black red yellow blue; -1 if none.
 int colour_index_of_bit(u8 bit);

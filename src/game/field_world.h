@@ -32,6 +32,7 @@
 #include "game/button_panel.h"
 #include "game/disc_index.h"
 #include "game/mod_rooms.h"
+#include "game/mod_vars.h"
 #include "game/effects/emitter_system.h"
 #include "game/effects/gpu_effects.h"
 #include "game/effects/room_meshes.h"
@@ -339,10 +340,20 @@ class FieldWorld final : public script::FieldHost {
   // The rooms mods add and each mod's ids for them (game/mod_rooms.h; owned by the caller, null = none). A listed room with no .bin is
   // logged. Mod rooms run under their internal ids (map_id(), the dialogue text, jumps); scripts see their owner's ids.
   void set_mod_rooms(const ModRooms* rooms);
+  // The variables mods add and each mod's handles for them (game/mod_vars.h; owned by the caller, null = none): the VM gets one slot per
+  // name, a script's handle resolves in the [Variables] of the mod that owns the running room, and a save keeps the values by name.
+  void set_mod_vars(const ModVars* vars);
+  const ModVars* mod_vars() const { return mod_vars_; }
   // A room id from the running room's script -> the engine's id (a mod room's internal id; unchanged when the owner lists none).
   int script_room(int id) const;
   // The engine's id -> the id the running room's script uses for it (ModRooms::to_script).
   int script_room_id(int id) const;
+  // A script item id from data::kScriptElementBase -> the element it names: the element ids of a mod's script are its own (the
+  // [Elements] of the mod that owns the running room, data::TableRows::element_for); nothing when it names none.
+  std::optional<int> script_element(int item_id) const;
+  // A shop row a script names (FE 5E element shop, FE 68 blacksmith; the row in variable 0x4A) -> the row it means: a mod's own shop ids
+  // ([ElementShops] / [Smiths] of the running room's owner); nothing when it names none.
+  std::optional<int> script_shop(script::MenuKind kind, int row) const;
   const ModRooms* mod_rooms() const { return mod_rooms_; }
   // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).
   std::string mod_room() const { return mod_rooms_ ? mod_rooms_->stem(map_id_) : std::string(); }
@@ -669,6 +680,26 @@ class FieldWorld final : public script::FieldHost {
   // button talks at once. dist = centre distance (0 = inside talk range, outside touch range). Spot written to (x, z); false =
   // no walkable spot around it (the party stays).
   bool put_party_beside(int ent, float dist, float& x, float& z);
+  // The floor heights put_party_beside takes (Y down): the trigger pass's band target_y - target_height .. target_y + leader_height,
+  // 2 units inside it on each side when it is wider than 4.
+  struct FloorBand {
+    float lo, hi;
+  };
+  static FloorBand beside_floor_band(float target_y, float target_height, float leader_height);
+  // Rings put_party_beside searches round a circle entity when the middle of the talk band has no floor: 1 + one per 4 units of the
+  // band (one ring with a given distance or a box), and the centre distance of ring `ring` >= 1 (base = the two radii), nearest first
+  // from just outside the touch range.
+  static int beside_rings(float dist, bool box);
+  static float beside_ring_reach(float base, int ring);
+  // Route `talk`: whether entity `ent` takes a talk now (the trigger pass's filter: active, not 0x400002, no no-action flag).
+  bool takes_talk(int ent) const;
+  // Route `talk`: an inactive entity made active and shown again (its inactive and hidden bits cleared); false when it was active.
+  bool bring_in(int ent);
+  // Route `put` / `put beside`: the camera on the moved leader as a room entry leaves it (the kept-scroll ease), the off-screen cull
+  // redone. A player walks there with the camera following; a talk right after a jump locks the input, and the camera then holds
+  // short of the leader: the talked-to entity stays off screen and its animation (a WAIT_ANIMATION on it) never ends. Not while a
+  // script holds the camera.
+  void settle_camera_on_player();
   // Controlled runs: the field scroll held at (x, y) layer pixels from now on (the camera's follow and script targets ignored) and the
   // off-screen cull redone for it at once, so a frame of the same tick shows that part of the room; unpin = the camera again.
   void debug_pin_scroll(int x, int y);
@@ -852,6 +883,8 @@ class FieldWorld final : public script::FieldHost {
   void play_movie(int index, int flags) override;
   bool movie_playing() override;
   void request_battle(int battle_id, int arg, int flags) override;
+  // The same with the engine's scene ids (the debug tools, routes): no mod's [Formations].
+  void request_engine_battle(int battle_id, int arg, int flags);
   bool battle_active() override;
   // Cheats: No encounters
   bool skip_battle(int arg, bool c9, int ent) override;
@@ -861,6 +894,8 @@ class FieldWorld final : public script::FieldHost {
   void request_map_jump(int room, int param) override;
   void set_movie_jump(int room, int param) override;
   void request_menu(script::MenuKind kind, int arg) override;
+  // The same with the engine's shop rows (routes): no mod's [ElementShops] / [Smiths].
+  void request_engine_menu(script::MenuKind kind, int arg);
   bool menu_active() override;
   void field_reset() override;
   int party_member(int slot) override;
@@ -878,6 +913,7 @@ class FieldWorld final : public script::FieldHost {
   void var_bit_set(u32 bit_ref) override {
     if (on_var_bit_set_) on_var_bit_set_(bit_ref);
   }
+  int mod_variable(u32 handle) override;
   void take_item(int id) override;
   s32 money() override;
   void set_money(s32 amount) override;
@@ -1026,6 +1062,13 @@ class FieldWorld final : public script::FieldHost {
   // room stem -> script room id on the current disc, a mod room's internal id (lazy)
   std::map<std::string, int> stem_ids_;
   const ModRooms* mod_rooms_ = nullptr;
+  // The same, also without mod rooms: which mod owns a room (its script's element ids are that mod's own).
+  const ModRooms* room_owners_ = nullptr;
+  const ModVars* mod_vars_ = nullptr;
+  // The running room's owner: its [Variables] (handle -> slot; null = none), its name, and the handles it lacks that were logged.
+  const std::map<int, int>* room_vars_ = nullptr;
+  std::string room_vars_owner_;
+  std::set<u32> unlisted_vars_;
 
   const vfs::Vfs* files_ = nullptr;
   render::GpuContext* ctx_ = nullptr;

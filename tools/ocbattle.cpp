@@ -110,7 +110,7 @@ int cmd_scenes(const data::GameTables& tables) {
 }
 
 // ------------------------------------------------------------------------------------------------ tables
-int cmd_tables(const data::GameTables& tables) {
+int cmd_tables(const data::GameTables& tables, const vfs::Vfs& vfs) {
   auto nonempty = [](const auto& rows) {
     size_t count = 0;
     for (const auto& row : rows)
@@ -132,7 +132,9 @@ int cmd_tables(const data::GameTables& tables) {
   std::printf("drops: %zu\n", tables.drops.size());
   std::printf("star rows: %zu\n", tables.star_rows.size());
   std::printf("el_shop non-empty rows: %zu\n", nonempty(tables.el_shop));
-  std::printf("waa_shop non-empty rows: %zu\n", nonempty(tables.waa_shop));
+  ui::shop::ShopData shops = ui::shop::ShopData::from_tables(tables);
+  shops.load_waa_shop(vfs);
+  std::printf("waa_shop non-empty rows: %zu\n", nonempty(shops.waa_shop));
   std::printf("trade non-empty rows: %zu\n", nonempty(tables.trade));
   size_t kn = 0;
   for (size_t i = 1; i < tables.key_item_names.size(); ++i)
@@ -1379,7 +1381,7 @@ int ocbattle_main(int argc, char** argv) {
     std::fprintf(stderr, "table load failed: %s\n", err.c_str());
     return 1;
   }
-  if (args[0] == "tables") return cmd_tables(tables);
+  if (args[0] == "tables") return cmd_tables(tables, vfs);
   if (args[0] == "scenes") return cmd_scenes(tables);
   if (args[0] == "sim") return cmd_sim(tables, vfs, {args.begin() + 1, args.end()});
   if (args[0] == "xcheck") return cmd_xcheck(tables, vfs, {args.begin() + 1, args.end()});

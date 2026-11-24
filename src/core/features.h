@@ -58,10 +58,44 @@ int level(int id);
 constexpr int kModRoomFirst = 1000;
 constexpr int kModRoomLast = 0x7FFF;
 
+// Mod elements: the game's element records stop at 526, so a mod's own element ids (its scripts' and its text's numbers for the records
+// it adds by name, data/table_rows.h) run from kModElementFirst to kModElementLast. Two mods may both use 527; the name is the identity.
+constexpr int kModElementFirst = 527;
+constexpr int kModElementLast = 0x3FFF;
+// Mod shops: the game's element shops and blacksmiths are rows 0..31, so a mod's own shop ids run from kModShopFirst.
+constexpr int kModShopFirst = 32;
+constexpr int kModShopLast = 0x7FFF;
+// Mod monsters and formations: the game's monster records stop at 221 and its battle scenes at 512, so a mod's own ids start after
+// them. A formation id is a scene: a field script starts it as battle id 0x200 + id (15-bit operand, so ids up to 0x7DFF).
+constexpr int kModMonsterFirst = 222;
+constexpr int kModMonsterLast = 0x3FFF;
+constexpr int kModFormationFirst = 513;
+constexpr int kModFormationLast = 0x7DFF;
+// Mod variables: a field script's variable handles are byte offsets (0x000..0x3FE saved, 0x400..0x7FE the room's own), so a mod's own
+// saved variables take the even handles kModVarFirst..kModVarLast. A bit operand reaches them too (handle << 4 | bit: 0x8000..0xFFEF).
+// Two mods may both use 0x800; the name is the identity (game/mod_vars.h).
+constexpr int kModVarFirst = 0x800;
+constexpr int kModVarLast = 0xFFE;
+
+// A record name (a table row header, an [Elements] value, a variable name): a lower-case letter, then lower-case letters, digits and '_'.
+bool is_record_name(std::string_view name);
+
+// The mod.ini sections that give a mod's own ids for records mods add by name ("<id> = <record name>"), the table they name records of
+// (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop, [Monsters] monster,
+// [Formations] scenedat.
+struct OwnIdSection {
+  const char* section;
+  const char* table;
+  int first;
+  int last;
+};
+std::span<const OwnIdSection> own_id_sections();
+
 // A parsed mod.ini: [Mod] Name / Version / Author / Requires (a comma-separated list of feature sections the mod's own scripts use),
 // [Rooms] (the room ids this mod's scripts and text use, "<id> = <stem>": the files cdrom/map/mapbin/<stem>.bin / .prd / .ctd, its own
-// rooms or another mod's), and every other section as written (a feature section, checked by resolve). `problems` = lines that are not
-// understood.
+// rooms or another mod's), the own-id sections (own_id_sections: the record ids this mod's scripts and text use), [Variables] (the saved
+// variables this mod's scripts use, "<handle> = <name>"), and every other section as written (a feature section, checked by resolve).
+// `problems` = lines that are not understood.
 struct Manifest {
   struct Section {
     std::string name;
@@ -71,6 +105,10 @@ struct Manifest {
   std::vector<std::string> requires_features;
   // [Rooms]: ids kModRoomFirst..kModRoomLast, stems in lower case, in file order.
   std::vector<std::pair<int, std::string>> rooms;
+  // The own-id sections: table (OwnIdSection::table) -> its ids and record names, in file order.
+  std::map<std::string, std::vector<std::pair<int, std::string>>> own_ids;
+  // [Variables]: even handles kModVarFirst..kModVarLast (0x-prefixed hex or decimal), variable names (is_record_name), in file order.
+  std::vector<std::pair<int, std::string>> variables;
   std::vector<Section> sections;
   std::vector<std::string> problems;
 };

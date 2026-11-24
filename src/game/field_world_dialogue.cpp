@@ -338,7 +338,7 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
 int FieldWorld::ps1_string_width(int table, int id) {
   if (table == 0 && id >= data::kScriptElementBase) {
     table = 23;
-    id -= data::kScriptElementBase;
+    id = script_element(id).value_or(0);
   } else if (table == 0 && id >= 0x200) {
     table = id < 0x400 ? 23 : 24;
     id -= id < 0x400 ? 0x200 : 0x400;
@@ -487,6 +487,16 @@ void FieldWorld::dialogue_choice(int first, int last) {
 // A8: mode 1 = to black, mode 0 = back to the picture; arg = ticks (0 = at once). Drawn as the room change's subtractive fade.
 
 void FieldWorld::request_menu(script::MenuKind kind, int arg) {
+  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] of the running room's owner.
+  if (menu_state_ == MenuState::None && (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop)) {
+    const std::optional<int> row = script_shop(kind, arg);
+    if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
+    arg = row.value_or(-1);
+  }
+  request_engine_menu(kind, arg);
+}
+
+void FieldWorld::request_engine_menu(script::MenuKind kind, int arg) {
   // FE 65: arg = disc - 1; PC mode swaps the index at once (the "Disc N" screen only fades). It is not a screen, so another pending
   // request does not hold it back.
   if (kind == script::MenuKind::ChangeDisc) {

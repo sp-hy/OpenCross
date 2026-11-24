@@ -97,6 +97,7 @@ class DebugTools {
   // Temporary scene record (custom enemies): restored once the battle has started.
   int restore_scene_ = -1;
   std::array<u8, 28> restore_raw_{};
+  std::array<u16, 3> restore_wide_{};
 
   // picker state
   struct Pick {

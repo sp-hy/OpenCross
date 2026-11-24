@@ -560,6 +560,8 @@ class App {
   // The rooms the enabled mods add and each mod's ids for them ([Rooms] in mod.ini), with the per-mod text rows (text\ in a mod):
   // built once at launch with the features (App::init_vfs).
   game::ModRooms mod_rooms;
+  // The variables the enabled mods add and each mod's handles for them ([Variables] in mod.ini), built with mod_rooms.
+  game::ModVars mod_vars;
   game::TextureDumpJob texture_dump_job;
   game::ModelExportJob model_export_job;
 
@@ -783,6 +785,8 @@ class App {
   // results_shown: the standalone [Debug] Battle opens the screen once; battle_scene: scene of the running field encounter.
   bool results_shown = false;
   int battle_scene = -1;
+  // [Debug] SkipBattles: the battles this controlled run skipped so far (the next takes that index of the list); a restart clears it.
+  size_t skipped_battles = 0;
   // The randomizer's tuning of the running field encounter (a retry starts the same scene with it).
   std::array<battle::EnemyTuning, 3> battle_tuning{};
   game::TitleBackdrop title_bd;

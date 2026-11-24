@@ -29,6 +29,7 @@
 #include "import/text.h"
 #include "save/cc_save.h"
 #include "script/script_scan.h"
+#include "ui/shop/shop_logic.h"
 #include "vfs/vfs.h"
 
 using namespace oc;
@@ -225,7 +226,9 @@ int occ_scan(const vfs::Vfs& fs, const std::vector<std::string>& args) {
   for (const auto& row : tables.el_shop)
     for (u16 element : row)
       if (sources.contains(0x200 + element)) ++sources[0x200 + element].shops;
-  for (const auto& row : tables.waa_shop)
+  ui::shop::ShopData shops = ui::shop::ShopData::from_tables(tables);
+  shops.load_waa_shop(fs);
+  for (const auto& row : shops.waa_shop)
     for (u16 item : row)
       if (sources.contains(item)) ++sources[item].shops;
   for (const auto& row : tables.trade)
