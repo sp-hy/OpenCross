@@ -1,6 +1,9 @@
 #include "game/disc_index.h"
 
+#include <algorithm>
+
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "vfs/disc_names.h"
 #include "vfs/vfs.h"
 
@@ -22,6 +25,7 @@ void DiscIndex::load_builtin() {
 }
 
 bool DiscIndex::load(const vfs::Vfs& vfs) {
+  vfs_ = &vfs;
   const auto disc1 = vfs.read("cdrom/cdrom.fnd");
   if (!disc1) {
     load_builtin();
@@ -40,6 +44,11 @@ const std::string& DiscIndex::record(int disc, int index) const {
 }
 
 std::string DiscIndex::battle_script(int disc, int scene) const {
+  // A formation mods add by name has its script by name too (cdrom/battle/event/<name>.pac in the mod), not a record. The background
+  // scan's index (the unmodified game) has none.
+  if (vfs_ && data::table_mods(*vfs_))
+    if (const std::string& name = data::table_rows().name_of("scenedat", static_cast<size_t>(std::max(scene, 0))); !name.empty())
+      return "cdrom/battle/event/" + name + ".pac";
   const std::string& rec = record(disc, kBattleScriptBase + scene);
   const size_t at = rec.find("/battle/event/");
   return at == std::string::npos ? "cdrom/battle/event/evt0000.pac" : "cdrom" + rec.substr(at);

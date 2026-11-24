@@ -758,11 +758,6 @@ void App::install_mod_rooms_and_text() {
       text.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
     if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(mod.name))
       for (const auto& [id, stem] : *rooms) text.rooms[id] = mod_rooms.internal_id(stem);
-    // Its element ids ([Elements]) once the tables are loaded (a controlled run's reload); at launch the tables' load sets them.
-    if (const auto own = mod.manifest.own_ids.find("pgdat"); mod.has_manifest && own != mod.manifest.own_ids.end())
-      for (const auto& [own_id, name] : own->second)
-        if (const std::optional<size_t> element = data::table_rows().element_of(mod.name, own_id))
-          text.elements[own_id] = static_cast<int>(*element);
     // The draft folder (a controlled run's DraftDir: an editor's unsaved dialog) has no [Rooms]: its rows name a mod room by the id
     // the room's own mod gives it.
     if (mod.name == vfs::kDraftMod)
@@ -774,6 +769,9 @@ void App::install_mod_rooms_and_text() {
     text_mods.push_back(std::move(text));
   }
   import::set_text_mods(std::move(text_mods));
+  // The mods' own ids for their text, once the tables are loaded (a controlled run's reload); at launch the tables' load gives them.
+  if (const std::vector<data::TableMod>* table_mods = data::table_mods(files); table_mods && tables_ok)
+    data::set_text_mod_ids_of(data::table_rows(), *table_mods);
 }
 
 }  // namespace oc::app

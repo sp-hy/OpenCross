@@ -506,7 +506,9 @@ int main() {
     std::ofstream(game / "mods" / "Alpha" / "text" / "SYSMES.txt", std::ios::binary) << "key\ten\n0x000001\tHi-Potion\n0x000099\tNew item\n";
     std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta second\n1001\t0\tbeta room\n";
     // Beta's own element 527 (its [Elements]): the name and first help line, written under its own id.
-    std::ofstream(game / "mods" / "Beta" / "text" / "sysmes.txt", std::ios::binary) << "key\ten\n0x17020F\tDaze\n0x1A062D\tDazes a foe.\n";
+    std::ofstream(game / "mods" / "Beta" / "text" / "sysmes.txt", std::ios::binary) << "key\ten\n0x17020F\tDaze\n0x1A062D\tDazes a foe.\n0x1900DE\tGrunt\n";
+    // ... and its own formation 513's battle text (btel rows by scene).
+    std::ofstream(game / "mods" / "Beta" / "text" / "btel_en.csv", std::ios::binary) << "513\t0\tStand and fight!\n";
     vfs::Vfs text_files;
     CHECK(text_files.open(game));
     vfs::ModManager text_mods_found;
@@ -526,7 +528,9 @@ int main() {
     }
     import::set_text_mods(std::move(text_mods));
     // The tables gave Beta's element 527 the engine id 600: its rows move there.
-    import::set_text_mod_elements("Beta", {{527, 600}});
+    import::set_text_mod_ids("Beta", "pgdat", {{527, 600}});
+    import::set_text_mod_ids("Beta", "monster", {{222, 300}});
+    import::set_text_mod_ids("Beta", "scenedat", {{513, 700}});
     import::LangTables tables;
     tables.init(&text_files);
     const auto row = [&](int room, int msg) {
@@ -549,6 +553,9 @@ int main() {
     CHECK(tables.sysmes(0x170258, import::Lang::En) && *tables.sysmes(0x170258, import::Lang::En) == "Daze");
     CHECK(tables.sysmes(0x1A0708, import::Lang::En) && *tables.sysmes(0x1A0708, import::Lang::En) == "Dazes a foe.");
     CHECK(!tables.sysmes(0x17020F, import::Lang::En));
+    CHECK(tables.sysmes(0x19012C, import::Lang::En) && *tables.sysmes(0x19012C, import::Lang::En) == "Grunt");
+    CHECK(tables.battle_event(700, 0, import::Lang::En) && *tables.battle_event(700, 0, import::Lang::En) == "Stand and fight!");
+    CHECK(!tables.battle_event(513, 0, import::Lang::En));
     // The mods' rows set again (a controlled run's reload: an editor's draft text): a LangTables that read them reads them again.
     std::ofstream(game / "mods" / "Beta" / "text" / "en.csv", std::ios::binary) << "27\t1\tbeta edited\n";
     {

@@ -6917,6 +6917,11 @@ void test_versus_battlefield() {
   tables.enemy_names = {"renamed"};
   tables.elements[1].raw[8] = 12;
   CHECK(data::battle_data_fingerprint(tables) == fingerprint);
+  // A formation slot's wide monster id (a mod's) counts; unset slots add nothing, so the game's tables keep their fingerprint.
+  tables.scenes[0].wide[1] = 300;
+  CHECK(data::battle_data_fingerprint(tables) != fingerprint);
+  tables.scenes[0].wide[1] = 0;
+  CHECK(data::battle_data_fingerprint(tables) == fingerprint);
 }
 
 // A versus command belongs to the acting side: while a Dopplegang pick is open only the pick comes, even when the cast spent its side's

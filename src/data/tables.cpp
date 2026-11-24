@@ -102,6 +102,10 @@ std::string battle_data_fingerprint(const GameTables& tables) {
   }
   add_records(tables.elements);
   add_records(tables.scenes);
+  // A formation slot's wide monster id only where a mod set one: unset slots add nothing to the hash.
+  for (size_t scene = 0; scene < tables.scenes.size(); ++scene)
+    for (size_t slot = 0; slot < tables.scenes[scene].wide.size(); ++slot)
+      if (const u16 wide = tables.scenes[scene].wide[slot]) hash.add((static_cast<u64>(scene) << 8 | slot) << 16 | wide);
   add_records(tables.gear);
   hash.add(tables.btbgdat.size());
   for (const auto& row : tables.btbgdat) hash.add_bytes(row.data(), row.size());
@@ -124,6 +128,16 @@ std::optional<std::vector<std::array<u8, 16>>> read_menu_elements(const vfs::Vfs
   for (size_t i = count; i < out.size(); ++i) std::fill_n(out[i].begin(), 6, u8{0xFF});
   if (with_rows) table_rows().apply("menu_pg", out.size(), [&](size_t i) { return std::span<u8>(out[i]); });
   return out;
+}
+
+void set_text_mod_ids_of(const TableRows& rows, const std::vector<TableMod>& mods) {
+  for (const TableMod& mod : mods)
+    for (const auto& [table, ids] : mod.own_ids) {
+      std::map<int, int> records;
+      for (const auto& [own_id, name] : ids)
+        if (const std::optional<size_t> record = rows.record_of(mod.name, table, own_id)) records[own_id] = static_cast<int>(*record);
+      if (!records.empty()) import::set_text_mod_ids(mod.name, table, std::move(records));
+    }
 }
 
 int colour_index_of_bit(u8 bit) {
@@ -184,14 +198,7 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
                                       {"ditem", dd.size() / 8},
                                       {"el_shop", kShopRows},
                                       {"waa_shop", kShopRows}});
-  // A mod's element names and help rows are written under its own element ids: the text moves them to the elements those ids name.
-  for (const TableMod& mod : mods && publish ? *mods : no_mods) {
-    std::map<int, int> elements;
-    const auto own = mod.own_ids.find("pgdat");
-    for (const auto& [own_id, name] : own == mod.own_ids.end() ? std::vector<std::pair<int, std::string>>{} : own->second)
-      if (const std::optional<size_t> element = rows.element_of(mod.name, own_id)) elements[own_id] = static_cast<int>(*element);
-    if (!elements.empty()) import::set_text_mod_elements(mod.name, std::move(elements));
-  }
+  if (mods && publish) set_text_mod_ids_of(rows, *mods);
 
   // --- enemies
   enemies.resize(rows.total("monster", mon->size() / kStatRecSize));
@@ -236,6 +243,8 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   scenes.resize(rows.total("scenedat", player[0].size() / 28));
   for (size_t i = 0; i < player[0].size() / 28; ++i) copy_rec(scenes[i].raw, player[0], i * 28);
   rows.apply("scenedat", scenes.size(), [&](size_t i) { return std::span<u8>(scenes[i].raw); });
+  for (const TableRows::WideWrite& write : rows.wide_writes("scenedat"))
+    if (write.offset < kSceneEnemySlots) scenes[write.record].wide[write.offset] = static_cast<u16>(write.value);
   symtbl.resize(player[2].size() / 2);
   for (size_t i = 0; i < symtbl.size(); ++i) symtbl[i] = rd16(player[2], i * 2);
   btbgdat.resize(player[3].size() / 3);

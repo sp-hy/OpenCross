@@ -126,9 +126,11 @@ inline ElementKind element_kind(const std::vector<ElemRec>& elements, int id) {
 }
 
 // scenedat.bin record. boss() marks a star-up battle.
+// wide = a slot's monster id that doesn't fit the record's byte (a monster mods add by name, data/table_rows.h); 0 = the byte's.
 struct SceneRec {
   std::array<u8, 28> raw{};
-  u8 enemy_id(int slot) const { return raw[static_cast<size_t>(slot)]; }
+  std::array<u16, 3> wide{};
+  int enemy_id(int slot) const { return wide[static_cast<size_t>(slot)] ? wide[static_cast<size_t>(slot)] : raw[static_cast<size_t>(slot)]; }
   u8 enemy_count(int slot) const { return raw[static_cast<size_t>(3 + slot)]; }
   bool boss() const { return (raw[0x1A] & 0x80) != 0; }
   u8 bg() const { return raw[0x1A] & 0x7F; }
@@ -241,9 +243,15 @@ inline constexpr u32 kVersusRulesVersion = 1;
 // the tables of the field and menus are left out.
 std::string battle_data_fingerprint(const GameTables& tables);
 
-// The rows of menu_pg.bin (16 bytes each, index = element id) with the mods' table rows applied (data/table_rows.h): as many as there are
-// elements once the mods' named records are added. Nothing when the file is missing.
+// The rows of menu_pg.bin (16 bytes each, index = element id) with the mods' table rows applied (data/table_rows.h) when `game_fs` is
+// the VFS they were set for: as many as there are elements once the mods' named records are added. Nothing when the file is missing.
 std::optional<std::vector<std::array<u8, 16>>> read_menu_elements(const vfs::Vfs& game_fs);
+
+class TableRows;
+struct TableMod;
+// Gives the mods' text their own ids' records (import::set_text_mod_ids): a mod's element and monster names and its battle text are
+// written under its own ids, and the text moves them to the records `rows` gives those ids.
+void set_text_mod_ids_of(const TableRows& rows, const std::vector<TableMod>& mods);
 
 // Colour bit (0x04..0x80) -> index 0..5 green white black red yellow blue; -1 if none.
 int colour_index_of_bit(u8 bit);

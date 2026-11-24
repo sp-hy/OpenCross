@@ -227,16 +227,18 @@ struct LookupInfo {
 // reads (the game's, or a mod's whole replacement of it), the enabled mods' rows lowest priority first so the first mod in the list
 // wins a row; a row two mods give different text is logged as a conflict. Field text rows (<lang>.csv, Ex_<lang>.csv, mess_wend.csv) of
 // a room id the mod's [Rooms] lists are stored under that room's internal id (game::ModRooms); any other id is the game's own row. The
-// element names and help rows of sysmes.txt (0x17<id>, 0x1A<id * 3 + line>) of an element id the mod's [Elements] lists are stored
-// under the element's id (data/table_rows.h).
+// element names and help rows of sysmes.txt (0x17<id>, 0x1A<id * 3 + line>), the monster names (0x19<id>) and the battle text rows
+// (btel_<lang>.csv, by battle scene) of an id the mod's [Elements] / [Monsters] / [Formations] lists are stored under the record's id
+// (data/table_rows.h).
 struct TextMod {
   std::string name;
   // Member name in lower case -> the row file's bytes.
   std::map<std::string, std::function<std::optional<Bytes>()>> files;
   // The mod's room id -> internal id, for its field text rows of those rooms (other ids are the game's rows).
   std::map<int, int> rooms;
-  // The mod's element id -> the element, for its sysmes.txt name and help rows (set_text_mod_elements).
-  std::map<int, int> elements;
+  // The mod's element / monster / formation id -> the record, for its sysmes.txt names and help rows and its battle text rows
+  // (set_text_mod_ids).
+  std::map<int, int> elements, monsters, battles;
 };
 // Set at launch (priority order, first wins), before text is read; read by every LangTables. A controlled run sets them again when it
 // reads the mods again (Control `reload`, a plan with another DraftDir: an editor's unsaved dialog in its draft folder): each call bumps
@@ -244,8 +246,9 @@ struct TextMod {
 void set_text_mods(std::vector<TextMod> mods);
 const std::vector<TextMod>& text_mods();
 u32 text_mods_generation();
-// The element ids of mod `mod` (its [Elements] -> the elements): set when the tables load, which gives records added by name their ids.
-void set_text_mod_elements(std::string_view mod, std::map<int, int> elements);
+// The ids of mod `mod` for the records of `table` (pgdat, monster, scenedat: its [Elements] / [Monsters] / [Formations] -> the
+// records): set when the tables load, which gives records added by name their ids. Bumps text_mods_generation() as set_text_mods does.
+void set_text_mod_ids(std::string_view mod, std::string_view table, std::map<int, int> ids);
 
 // Field csv: (room, msg) -> text. `load_rows_rule` implements "a row is loaded only if no earlier row has a larger room".
 struct FieldTable {

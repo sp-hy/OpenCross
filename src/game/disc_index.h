@@ -68,6 +68,8 @@ class DiscIndex {
 
  private:
   std::vector<std::string> rec_[2];
+  // The VFS load() read: the formations mods add by name count only when it is the one the mods' rows were set for.
+  const vfs::Vfs* vfs_ = nullptr;
 };
 
 }  // namespace oc::game

@@ -424,6 +424,11 @@ std::optional<size_t> TableRows::record_for(std::string_view mod, std::string_vi
   return static_cast<size_t>(own_id);
 }
 
+const std::vector<TableRows::WideWrite>& TableRows::wide_writes(std::string_view table) const {
+  static const std::vector<WideWrite> kNone;
+  const auto it = wide_.find(table);
+  return it == wide_.end() ? kNone : it->second;
+}
 size_t TableRows::apply_lists(std::string_view table, std::vector<std::vector<u16>>& rows) const {
   rows.resize(total(table, rows.size()));
   const auto list = parsed_.find(table);
@@ -504,6 +509,13 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
         const std::span<u8> base = record(*block.base);
         const std::span<u8> rec = record(*index);
         std::copy_n(base.begin(), std::min(base.size(), rec.size()), rec.begin());
+        if (const auto wide = wide_.find(table); wide != wide_.end()) {
+          std::erase_if(wide->second, [&](const WideWrite& entry) { return entry.record == *index; });
+          std::vector<WideWrite> copied;
+          for (const WideWrite& entry : wide->second)
+            if (entry.record == *block.base) copied.push_back({*index, entry.offset, entry.value});
+          wide->second.insert(wide->second.end(), copied.begin(), copied.end());
+        }
         based.insert(*index);
       }
   };
@@ -532,13 +544,14 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
       std::span<u8> rec = record(*index);
       for (const RowWrite& write : block.writes) {
         u32 value = write.value;
+        const bool enemy_slot = table == "scenedat" && write.offset < kSceneEnemySlots;
         if (!write.ref_name.empty()) {
           const std::optional<size_t> target = id_of(write.ref_table, write.ref_name);
           if (!target) {
             problems.push_back(std::format("line {}: no record {}:{}", write.line, write.ref_table, write.ref_name));
             continue;
           }
-          if (write.width < 4 && *target + value >= (size_t{1} << (8 * write.width))) {
+          if (!enemy_slot && write.width < 4 && *target + value >= (size_t{1} << (8 * write.width))) {
             problems.push_back(std::format("line {}: {}:{} is record {}, past a {}-byte field", write.line, write.ref_table, write.ref_name,
                                            *target + value, write.width));
             continue;
@@ -549,6 +562,15 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
           problems.push_back(std::format("line {}: no field 0x{:X} in a {}-byte record", write.line, write.offset, rec.size()));
           continue;
         }
+        if (enemy_slot && !write.ref_name.empty() && value >= 0xFF) {
+          auto& wide = wide_[std::string(table)];
+          std::erase_if(wide, [&](const WideWrite& entry) { return entry.record == *index && entry.offset == write.offset; });
+          wide.push_back({*index, write.offset, value});
+          ++applied;
+          continue;
+        }
+        if (const auto wide = wide_.find(table); wide != wide_.end())
+          std::erase_if(wide->second, [&](const WideWrite& entry) { return entry.record == *index && entry.offset == write.offset; });
         const auto key = std::make_pair(*index, write.offset);
         if (auto prev = written.find(key); prev != written.end() && prev->second.mod != parsed->mod && prev->second.value != value)
           note(false, std::format("tables: {} [{}] 0x{:X}: '{}' wins over '{}'", table,
