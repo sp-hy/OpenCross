@@ -313,6 +313,33 @@ void test_forced_branches() {
   }
 }
 
+// Mod variables: handles 0x800..0xFFE (and bit operands 0x8000..0xFFEF) go to the slots the host names; a handle it names no slot for
+// reads 0 and drops writes; the game's variables are not touched.
+void test_mod_variables() {
+  class VarHost : public NullHost {
+   public:
+    int mod_variable(u32 handle) override { return handle == 0x800 ? 0 : handle == 0x802 ? 1 : -1; }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.set(0x800, -5).set(0x802, 7).set(0x804, 9);
+  script.add(0x800, 2);
+  script.raw({0x71}).word((0x802 << 4) | 4).raw({0x80});
+  script.raw({0x72}).word((0x802 << 4) | 0).raw({0x80});
+  script.raw({0x71}).word((0x804 << 4) | 1).raw({0x80});
+  script.stop();
+  VarHost host;
+  FieldVM vm(host);
+  vm.mod_variables().assign(2, 0);
+  vm.load(make_module(script, {{{{0, init}}}}, 0xFFFFFFFFu));
+  CHECK_EQ(vm.mod_variables()[0], 0xFFFD);
+  CHECK_EQ(vm.var(0x800), -3);
+  CHECK_EQ(vm.mod_variables()[1], 6 | 0x10);
+  CHECK(vm.var_bit((0x802 << 4) | 4) && !vm.var_bit((0x802 << 4) | 3) && !vm.var_bit((0x804 << 4) | 1));
+  CHECK_EQ(vm.var(0x804), 0);
+  for (u16 id = 0; id < 0x800; id += 2) CHECK_EQ(vm.var(id), id == 0x46 ? 1 : 0);
+}
+
 // IF_JUMP: execution falls through when the condition is TRUE and jumps when it is FALSE.
 void test_if_jump_polarity() {
   for (int value : {5, 6}) {
@@ -2052,6 +2079,7 @@ void test_walk_to_wait_form_keeps_free_height() {
 
 int main() {
   test_status_read_skips_nobody();
+  test_mod_variables();
   test_arithmetic();
   test_movie_end_jump();
   test_movie_operands();

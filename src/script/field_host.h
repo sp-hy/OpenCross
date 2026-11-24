@@ -431,6 +431,9 @@ class FieldHost {
   virtual void give_item(int id) = 0;
   // 71: the variable bit `bit_ref` was set
   virtual void var_bit_set(u32) {}
+  // A mod variable handle (features::kModVarFirst..kModVarLast, even) of the running script -> the slot of FieldVM::mod_variables it
+  // names, -1 when it names none (reads 0, writes are dropped).
+  virtual int mod_variable(u32) { return -1; }
   // BB b != 0
   virtual void take_item(int id) = 0;
   // BC

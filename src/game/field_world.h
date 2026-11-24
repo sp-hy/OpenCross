@@ -32,6 +32,7 @@
 #include "game/button_panel.h"
 #include "game/disc_index.h"
 #include "game/mod_rooms.h"
+#include "game/mod_vars.h"
 #include "game/effects/emitter_system.h"
 #include "game/effects/gpu_effects.h"
 #include "game/effects/room_meshes.h"
@@ -339,6 +340,10 @@ class FieldWorld final : public script::FieldHost {
   // The rooms mods add and each mod's ids for them (game/mod_rooms.h; owned by the caller, null = none). A listed room with no .bin is
   // logged. Mod rooms run under their internal ids (map_id(), the dialogue text, jumps); scripts see their owner's ids.
   void set_mod_rooms(const ModRooms* rooms);
+  // The variables mods add and each mod's handles for them (game/mod_vars.h; owned by the caller, null = none): the VM gets one slot per
+  // name, a script's handle resolves in the [Variables] of the mod that owns the running room, and a save keeps the values by name.
+  void set_mod_vars(const ModVars* vars);
+  const ModVars* mod_vars() const { return mod_vars_; }
   // A room id from the running room's script -> the engine's id (a mod room's internal id; unchanged when the owner lists none).
   int script_room(int id) const;
   // The engine's id -> the id the running room's script uses for it (ModRooms::to_script).
@@ -886,6 +891,7 @@ class FieldWorld final : public script::FieldHost {
   void var_bit_set(u32 bit_ref) override {
     if (on_var_bit_set_) on_var_bit_set_(bit_ref);
   }
+  int mod_variable(u32 handle) override;
   void take_item(int id) override;
   s32 money() override;
   void set_money(s32 amount) override;
@@ -1036,6 +1042,11 @@ class FieldWorld final : public script::FieldHost {
   const ModRooms* mod_rooms_ = nullptr;
   // The same, also without mod rooms: which mod owns a room (its script's element ids are that mod's own).
   const ModRooms* room_owners_ = nullptr;
+  const ModVars* mod_vars_ = nullptr;
+  // The running room's owner: its [Variables] (handle -> slot; null = none), its name, and the handles it lacks that were logged.
+  const std::map<int, int>* room_vars_ = nullptr;
+  std::string room_vars_owner_;
+  std::set<u32> unlisted_vars_;
 
   const vfs::Vfs* files_ = nullptr;
   render::GpuContext* ctx_ = nullptr;

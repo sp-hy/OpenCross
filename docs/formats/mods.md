@@ -384,7 +384,14 @@ Reserve=3
 222=big_boss
 [Formations]
 513=boss_fight
+
+; the saved variables this mod's scripts use: handle = variable name
+[Variables]
+0x800=run_depth
+0x802=best_depth
 ```
+
+* **`[Variables]`**: the saved variables this mod's field scripts use, `<handle>=<name>` (hex with `0x`, or decimal; names as for records: a lower-case letter, then lower-case letters, digits and `_`). The game's variable handles end at 0x7FE (`docs/formats/fieldscript.md` section 4), so a mod's handles are the even values 0x800 to 0xFFE: 1024 variables, read as signed 16-bit values by every op that takes a variable, and reached bit by bit by 71 / 72 / 73 (operand `handle << 4 | bit`, 0x8000..0xFFEF). **The handles are the mod's own** and **the name is the variable**: a script's handle means the variable the `[Variables]` of the running room's owner (as for `[Rooms]`) gives it; two mods naming the same variable share it, whatever handle each gives it. A handle the owner does not list reads 0 and drops writes (logged once per room). The lists are read at launch: a controlled run's `reload` keeps them. The game's variables never reach this range, and a game room nobody edits has no mod variables. Every mod variable is saved by name, as long as it is not 0 (`docs/formats/save.md` 16); a new game (and New Game+) starts them at 0. A value whose name no enabled mod has stays in the save, so a mod switched off and on again finds its values. An odd handle, one outside the range, a value that is not a name, a handle named twice and a name given two handles are problems.
 
 * **`[Monsters]`**, **`[Formations]`**: the monster and formation ids this mod's scripts and text use, `<id>=<name>` (records a mod adds by name to `monster` / `scenedat`, section 1.3). Monster ids run from 222 to 16383; formation ids from 513 to 32255, and a field script starts formation n with battle id 0x200 + n (A3), resolved through the running room's owner as for `[Elements]`; an id in the added range the owner does not list is logged and starts the engine's formation of that number. The debug tools and a route's `request battle` use the engine's ids. A mod's monster names (`text\sysmes.txt` `0x19<id>`) and battle text rows (`text\btel_<lang>.csv`, by formation id) are stored under the records they name.
 * **`[ElementShops]`**, **`[Smiths]`**: the element shop and blacksmith ids this mod's scripts open, `<id>=<name>` (rows a mod adds by name to `el_shop` / `waa_shop`, section 1.3); the game's shops are rows 0..31, so ids run from 32 to 32767. As for `[Elements]`, an id means the row the running room's owner lists; the game's rows keep their numbers and an unlisted id past them opens an empty shop. The blacksmith the Smith Spirit opens (variable 0x4A) resolves the same way.

@@ -66,6 +66,8 @@ In the data the `S` variable form never has bit 15 set and `U` immediates are 0.
 
 The 32-bit `locals[idx]` words in the file header are a per-room signedness mask: `idx = v >> 6`, `bit = (v >> 1) & 0x1F`; **bit set = the slot is read as unsigned (zero-extended), clear = signed (sign-extended)**. Writes always store the low 16 bits. The single-bit ops 71/72/73 are not a separate array: operand `n` = `(variable id << 4) | bit`, they test/modify bit `n & 0xF` of 16-bit variable `n >> 4`.
 
+**Mod variables (OpenCross).** Handles 0x800..0xFFE are a mod's own saved variables (bit operands 0x8000..0xFFEF: `n` is read as 16 bits): each names the variable the `[Variables]` of the running room's owner gives it (`docs/formats/mods.md` 8). They are read as signed (the signedness mask does not cover them), and a handle the owner does not list reads 0 and drops writes. The game's scripts never use these handles.
+
 ## 5. Control flow rules
 
 * Linear execution; **`00 STOP`, `03`, `04`, `0D RETURN`, `3B STOP_EXEC`** end a script/subroutine; `01 JUMP` and `D0` are unconditional gotos (the following bytes are never fall-through code).

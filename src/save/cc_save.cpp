@@ -392,6 +392,8 @@ namespace side_tag {
 inline constexpr u16 kElementIds = 1;
 // The names of those that are records mods add by name.
 inline constexpr u16 kElementNames = 3;
+// The variables mods add, by name.
+inline constexpr u16 kModVariables = 4;
 }  // namespace side_tag
 
 std::filesystem::path& wide_dir() {
@@ -503,10 +505,40 @@ void apply_element_names(SaveSlot& slot, ByteSpan bytes) {
         word = it->second ? static_cast<u16>((word & 0xC000) | it->second) : u16{0};
 }
 
+// Section kModVariables: u16 n + n x {u8 length, length bytes of name, u16 value}, in name order.
+Bytes mod_variable_section(const SaveSlot& slot) {
+  Bytes entries;
+  u32 count = 0;
+  for (const auto& [name, value] : slot.mod_vars) {
+    if (value == 0 || name.empty() || name.size() > 0xFF) continue;
+    entries.push_back(static_cast<u8>(name.size()));
+    entries.insert(entries.end(), name.begin(), name.end());
+    put16(entries, value);
+    ++count;
+  }
+  if (count == 0) return {};
+  Bytes out;
+  put16(out, count);
+  out.insert(out.end(), entries.begin(), entries.end());
+  return out;
+}
+void apply_mod_variables(SaveSlot& slot, ByteSpan bytes) {
+  if (bytes.size() < 2) return;
+  const u32 count = rd(&bytes[0], 2);
+  size_t pos = 2;
+  for (u32 i = 0; i < count && pos + 1 <= bytes.size(); ++i) {
+    const size_t length = bytes[pos];
+    if (pos + 1 + length + 2 > bytes.size()) break;
+    slot.mod_vars[std::string(reinterpret_cast<const char*>(&bytes[pos + 1]), length)] = rd16(&bytes[pos + 1 + length]);
+    pos += 1 + length + 2;
+  }
+}
+
 // The side file of a slot: empty when no section has anything.
 Bytes side_file(const SaveSlot& slot) {
   const std::pair<u16, Bytes> sections[] = {{side_tag::kElementIds, element_id_section(slot)},
-                                            {side_tag::kElementNames, element_name_section(slot)}};
+                                            {side_tag::kElementNames, element_name_section(slot)},
+                                            {side_tag::kModVariables, mod_variable_section(slot)}};
   Bytes out(kSideMagic.begin(), kSideMagic.end());
   put32(out, kSideVersion);
   for (const auto& [tag, bytes] : sections) {
@@ -547,6 +579,7 @@ void apply_side_file(SaveSlot& slot) {
     const ByteSpan section = ByteSpan(bytes).subspan(at + kSectionHeader, size);
     if (tag == side_tag::kElementIds) apply_element_ids(slot, section);
     if (tag == side_tag::kElementNames) names = section;
+    if (tag == side_tag::kModVariables) apply_mod_variables(slot, section);
     at += kSectionHeader + size;
   }
   apply_element_names(slot, names);
@@ -579,7 +612,7 @@ Bytes encode_block(const SaveSlot& full) {
   if (side.empty()) {
     slot.set_tail_entry(tail_tag::kSideFile, {});
   } else if (wide_dir().empty()) {
-    log::warn("save: {} bytes of element ids past 511 dropped (no OpenCross save folder)", side.size());
+    log::warn("save: {} bytes of side data dropped (no OpenCross save folder)", side.size());
     slot.set_tail_entry(tail_tag::kSideFile, {});
   } else {
     const u64 key = fnv1a(side);

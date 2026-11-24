@@ -90,18 +90,19 @@ bool FieldVM::exec_scene(u8 op) {
     }
     case 0x71:  // SET_VAR_BIT: operand = (id << 4) | bit
     case 0x72: {  // CLEAR_VAR_BIT
-      const u32 bit_ref = static_cast<u32>(operand_s(1, 3, 0x80));
-      u16& slot = vars_[(bit_ref >> 5) & (kVarSlots - 1)];
-      if (op == 0x71) {
-        slot = static_cast<u16>(slot | (1u << (bit_ref & 0xF)));
+      const u32 bit_ref = static_cast<u16>(operand_s(1, 3, 0x80));
+      u16* slot = var_slot((bit_ref >> 4) & 0xFFE);
+      if (slot && op == 0x71) {
+        *slot = static_cast<u16>(*slot | (1u << (bit_ref & 0xF)));
         host_.var_bit_set(bit_ref);
-      } else
-        slot = static_cast<u16>(slot & ~(1u << (bit_ref & 0xF)));
+      } else if (slot) {
+        *slot = static_cast<u16>(*slot & ~(1u << (bit_ref & 0xF)));
+      }
       advance(4);
       break;
     }
     case 0x73:  // JUMP_IF_BIT_CLEAR
-      jump_or_advance(!var_bit(static_cast<u32>(operand_s(1, 3, 0x80))), 4, 6);
+      jump_or_advance(!var_bit(static_cast<u16>(operand_s(1, 3, 0x80))), 4, 6);
       break;
     case 0x74: {  // SET_TARGET_10E
       const int target = entity_operand(4);

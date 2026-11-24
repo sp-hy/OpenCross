@@ -168,9 +168,12 @@ class FieldVM {
   void set_room_register(int room) { room_reg_ = room; }
   // A room change is committed: PREVIOUS_MAP_ID = the room register, then the register names the next room.
   void note_room_change(int room);
-  // `bit_ref` = (id << 4) | bit, as the bit opcodes 71 / 72 / 73 encode it.
+  // `bit_ref` = (id << 4) | bit, as the bit opcodes 71 / 72 / 73 encode it (16 bits).
   bool var_bit(u32 bit_ref) const;
   std::span<u16> variables() { return vars_; }
+  // The variables mods add (game/mod_vars.h), one slot each, read as signed: a script's handles features::kModVarFirst..kModVarLast
+  // name them through FieldHost::mod_variable. The host sizes and fills them; they are saved by name, not in the variable block.
+  std::vector<u16>& mod_variables() { return mod_vars_; }
   u32 global_flags() const { return gflags_; }
   void set_global_flags(u32 flags) { gflags_ = flags; }
   // Seeds a global the host keeps elsewhere (the saved window frames) without notifying the host; `global` reads the values
@@ -272,6 +275,7 @@ class FieldVM {
   FieldScriptModule mod_;
   std::vector<Entity> ents_;
   std::array<u16, kVarSlots> vars_{};
+  std::vector<u16> mod_vars_;
   // The room register: the host's MAP_ID write at a room load / Continue (-1 = none yet: variable 6 is used), 8 after
   // FE 2F (set while variable 6 ends 0). 5A and DC's movie-end jump store it in PREVIOUS_MAP_ID.
   int room_reg_ = -1;
@@ -323,6 +327,10 @@ class FieldVM {
   // Set by set_forced_branches.
   const std::unordered_map<u32, u32>* forced_ = nullptr;
   bool var_unsigned(u32 id) const;
+  static bool mod_handle(u32 id);
+  // The word handle `id` names: a game variable, or a mod variable (null when the running room's mod names none).
+  u16* var_slot(u32 id);
+  const u16* var_slot(u32 id) const;
   // Character reference (entity index, party slot, character id or self) -> entity index, -1 when absent.
   int resolve_character(u8 char_ref) const;
   int entity_operand(u32 offset) const { return resolve_character(byte_at(offset)); }
