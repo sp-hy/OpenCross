@@ -1,9 +1,6 @@
 #pragma once
 // Shop rules: element shop prices / sell rule, smith forge cost + breakdown + gear sale and
 // the trading post (elements paid by summed level). Pure data logic on a GameState; no rendering.
-//
-// Table caveat: data::GameTables::waa_shop is parsed as 32 u16 per row; the real layout is 32 rows x 64 u16, so
-// ShopData re-reads it with load_waa_shop() when a Vfs is available.
 #include <array>
 #include <functional>
 #include <map>
@@ -36,8 +33,9 @@ struct ShopData {
   // Applied to element_row / gear_row when set.
   StockMap stock_map;
 
-  static ShopData from_tables(const data::GameTables& tables) { return {tables.el_shop, tables.waa_shop, tables.trade}; }
-  // 32 rows x 64 u16 (0-terminated rows); false if the file is missing.
+  // The smiths' stock is empty until load_waa_shop() reads it.
+  static ShopData from_tables(const data::GameTables& tables) { return {tables.el_shop, {}, tables.trade}; }
+  // waa_shop.bin: 32 rows x 64 u16 (0-terminated rows), with the mods' list rows; false if the file is missing.
   bool load_waa_shop(const vfs::Vfs& vfs);
   // ids > 0 up to the first 0
   std::vector<int> element_row(int shop_id) const;

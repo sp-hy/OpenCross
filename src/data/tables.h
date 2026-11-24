@@ -194,7 +194,7 @@ struct CharSet {
 
 // The loaded tables. Sources: enemies = monster.bin; char_sets = "char", "char20", "char_w0".."char_w5"; elements = pgdat.bin;
 // growth = el_mask.bin (100 x 8); scenes = scenedat.bin; symtbl = 384 x 8; btbgdat = 100 x 3; drops = ditem (256); star_rows = exdat
-// part 0 rows {n, b, s lo, s hi} (100); el_shop / waa_shop have trailing zeros trimmed; gear = 256 records (empty if player.dat part 4
+// part 0 rows {n, b, s lo, s hi} (100); el_shop has trailing zeros trimmed (the smiths' waa_shop.bin is read by ui::shop::ShopData); gear = 256 records (empty if player.dat part 4
 // is missing); item_info = 256; forge = menu/waa_tbl.bin, per item id the units needed of material id 0..31; keyitem_jp_rows = u16
 // offsets in keyitem.dat; rng_table = the 256-byte permutation read from the executable (empty if absent); variant_bands = the 8
 // encounter-variant roll bands {lo, hi} of the battle loader btlinit.prg (empty if absent).
@@ -208,7 +208,7 @@ struct GameTables {
   std::vector<std::array<u8, 3>> btbgdat;
   std::vector<DropRow> drops;
   std::vector<std::array<u8, 4>> star_rows;
-  std::vector<std::vector<u16>> el_shop, waa_shop;
+  std::vector<std::vector<u16>> el_shop;
   std::vector<std::vector<TradeEntry>> trade;
   std::vector<GearRec> gear;
   std::vector<ItemInfo> item_info;

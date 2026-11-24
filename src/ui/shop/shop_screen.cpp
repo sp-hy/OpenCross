@@ -193,7 +193,7 @@ struct ShopScreen::Impl {
     lang = language;
     lang_tables.init(&files);
     shop_data = shop::ShopData::from_tables(game_tables);
-    if (!shop_data.load_waa_shop(files)) log::warn("shop: waa_shop.bin missing; using the table loader rows");
+    if (!shop_data.load_waa_shop(files)) log::warn("shop: waa_shop.bin missing; the smiths have no stock");
     if (!texs.init(context, files, sprite_batch, "shop")) return false;
     lowres.init(context, sprite_batch);
     fonts.init(files, text_batch, true);
