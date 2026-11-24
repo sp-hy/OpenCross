@@ -79,5 +79,12 @@ void pip_form_stats(const data::GameTables* tables, save::SaveSlot& slot);
 // After a fight that changed Pip's form at 99 stars: his masks gain those of a full 99-star growth in the form, the new-game masks
 // plus every el_mask cell of the form's growth column (no cell-existence test).
 void pip_form_unlocks(const data::GameTables* tables, save::SaveSlot& slot);
+// Load-time repair of records that missed star-up growth. From kRepairMinStars up, a record whose stats hold less than kRepairFloor
+// of the growth a typical record has at the save's star count (the mean of star-up histories from its char.bin start, averaged over
+// the stats that grow) cannot come from the star-ups; its stats are raised to that typical record, the snapshots follow, the current
+// HP gains what max HP gained. Returns how many records changed.
+inline constexpr int kRepairMinStars = 8;
+inline constexpr double kRepairFloor = 0.35;
+int repair_missed_star_ups(const data::GameTables* tables, save::SaveSlot& slot);
 
 }  // namespace oc::game::newgame

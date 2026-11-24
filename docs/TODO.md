@@ -20,4 +20,6 @@ Priority: P1 = player-visible with wide reach, P2 = visible or behaviour-changin
 
 ## 4. Code hygiene
 
+* **P3 - Remove the star-up repair on load once old saves are gone.** Builds before 2026-11-06 skipped the characters not yet recruited at every star-up; `newgame::repair_missed_star_ups` (`src/game/new_game.cpp`, called from `FlowMachine::on_load` in `src/game/game_flow.cpp`) raises such records on load (`formats/save.md` section 10). It is a migration, not game behaviour. Done when the owner decides enough time has passed: delete the function, its constants and declaration in `src/game/new_game.h`, the call and log line in `game_flow.cpp`, `test_repair_missed_star_ups` in `tests/test_battle.cpp` (and its `new_game.h` include) and the paragraph in `formats/save.md` section 10.
+
 ## 5. Tests and tooling

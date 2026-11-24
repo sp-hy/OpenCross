@@ -189,6 +189,8 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   if (const int form = gs_.slot.chars[static_cast<size_t>(newgame::kPip)].model_id; ext_form_sync_ && form >= 0x2C && form <= 0x30)
     newgame::pip_form_stats(tables_, gs_.slot);
   ext_form_sync_ = false;
+  if (const int repaired = newgame::repair_missed_star_ups(tables_, gs_.slot))
+    log::info("load: {} character record(s) behind their star-up growth raised to the typical growth", repaired);
   custom_names_.clear();
   for (int char_id = 0; char_id < save::kNumChars; ++char_id)
     if (std::u32string name = saved_custom_name(entry.data, ext_names_, char_id); !name.empty()) custom_names_[char_id] = std::move(name);

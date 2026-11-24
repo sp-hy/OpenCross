@@ -13,6 +13,7 @@
 #include "battle/pac_vm.h"
 #include "battle/versus.h"
 #include "game/game_session.h"
+#include "game/new_game.h"
 #include "ui/menu/game_state.h"
 
 using namespace oc;
@@ -7023,6 +7024,52 @@ data::GameTables make_versus_tables() {
   return tables;
 }
 
+// The load repair of records that missed star-up growth: a record still at its starting stats is raised to the
+// typical growth from 8 stars up (its snapshots follow, its current HP gains the max HP gained); a record grown by real star-ups, one
+// above the typical growth, a save below 8 stars and a dream-records state are left alone.
+void test_repair_missed_star_ups() {
+  const data::GameTables tables = make_versus_tables();
+  const data::CharSet& set = tables.char_sets.at("char");
+  auto start_stats = [&](int id) {
+    const data::StatRec& rec = set.rec[static_cast<size_t>(id)];
+    return std::array<int, 7>{rec.max_hp(), rec.atk(), rec.def(), rec.hit(), rec.evd(), rec.mag(), rec.mdef()};
+  };
+  auto put = [](save::SaveChar& rec, const std::array<int, 7>& stat) {
+    rec.max_hp = rec.cur_hp = rec.hp_extra = static_cast<u16>(stat[0]);
+    rec.atk = static_cast<u8>(stat[1]), rec.def = static_cast<u8>(stat[2]), rec.hit = static_cast<u8>(stat[3]);
+    rec.evd = static_cast<u8>(stat[4]), rec.mag = static_cast<u8>(stat[5]), rec.mdef = static_cast<u8>(stat[6]);
+  };
+  constexpr int kStars = 10;
+  const std::array<int, 7> lv99{850, 88, 78, 95, 25, 52, 43};
+  GameRng history_rng(7);
+  const std::array<int, 7> real = battle::star_growth(start_stats(1), lv99, kStars, history_rng);
+  std::array<int, 7> high = start_stats(2);
+  high[0] = 400;
+  save::SaveSlot slot;
+  put(slot.chars[0], start_stats(0));
+  slot.chars[0].cur_hp = 20;
+  put(slot.chars[1], real);
+  put(slot.chars[2], high);
+  for (const int stars : {0, 7}) {
+    slot.head[save::head::kStarsTotal] = static_cast<u8>(stars);
+    CHECK_EQ(game::newgame::repair_missed_star_ups(&tables, slot), 0);
+  }
+  slot.head[save::head::kStarsTotal] = kStars;
+  slot.dream_records = true;
+  CHECK_EQ(game::newgame::repair_missed_star_ups(&tables, slot), 0);
+  slot.dream_records = false;
+  CHECK_EQ(game::newgame::repair_missed_star_ups(&tables, slot), 1);
+  const save::SaveChar& raised = slot.chars[0];
+  CHECK(raised.max_hp > 100 && raised.atk > start_stats(0)[1]);
+  CHECK_EQ(raised.hp_extra, raised.max_hp);
+  CHECK_EQ(raised.bonus[0], raised.atk);
+  CHECK_EQ(raised.bonus[10], raised.mdef);
+  CHECK_EQ(static_cast<int>(raised.cur_hp), 20 + raised.max_hp - start_stats(0)[0]);
+  CHECK_EQ(static_cast<int>(slot.chars[1].max_hp), real[0]);
+  CHECK_EQ(static_cast<int>(slot.chars[2].max_hp), 400);
+  CHECK_EQ(game::newgame::repair_missed_star_ups(&tables, slot), 0);
+}
+
 // A received side is refused for anything a real game cannot send; a side built from the records passes.
 void test_versus_side_legality() {
   const data::GameTables tables = make_versus_tables();
@@ -7214,6 +7261,7 @@ int main() {
   test_dopple_form_gauge_cap();
   test_stolen_loot_needs_victory();
   test_star_up_grid_unlocks();
+  test_repair_missed_star_ups();
   test_scene_1d8_clears_status();
   test_pip_form_growth();
   test_pip_form_settles_at_99();

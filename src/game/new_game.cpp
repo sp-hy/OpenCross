@@ -203,4 +203,42 @@ void pip_form_unlocks(const data::GameTables* tables, save::SaveSlot& slot) {
   }
 }
 
+int repair_missed_star_ups(const data::GameTables* tables, save::SaveSlot& slot) {
+  constexpr int kHistories = 256;
+  const int star = std::min<int>(slot.stars_total(), 99);
+  if (!tables || slot.dream_records || star < kRepairMinStars) return 0;
+  const auto set = tables->char_sets.find("char");
+  if (set == tables->char_sets.end()) return 0;
+  int repaired = 0;
+  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+    save::SaveChar& rec = slot.chars[static_cast<size_t>(char_id)];
+    if (rec.max_hp == 0) continue;
+    const int record = char_id == kPip && rec.model_id >= 0x2B && rec.model_id <= 0x30 ? rec.model_id : char_id;
+    const data::StatRec& start = set->second.rec[static_cast<size_t>(record)];
+    const data::Lv99& lv99 = set->second.lv99[static_cast<size_t>(record)];
+    const std::array<int, 7> base{start.max_hp(), start.atk(), start.def(), start.hit(), start.evd(), start.mag(), start.mdef()};
+    const std::array<int, 7> top{lv99.hp, lv99.atk, lv99.def, lv99.hit, lv99.evd, lv99.mag, lv99.mdef};
+    battle::GameRng rng(0x5EED2000u + static_cast<u32>(char_id) * 977u, tables->rng_table);
+    const std::array<int, 7> typical = battle::typical_star_growth(base, top, star, rng, kHistories);
+    std::array<int, 7> stat{rec.max_hp, rec.atk, rec.def, rec.hit, rec.evd, rec.mag, rec.mdef};
+    double share = 0.0;
+    int grown = 0;
+    for (size_t k = 0; k < stat.size(); ++k) {
+      const int expected = typical[k] - base[k];
+      if (expected < 1) continue;
+      share += static_cast<double>(stat[k] - base[k]) / expected;
+      ++grown;
+    }
+    if (grown == 0 || share / grown >= kRepairFloor) continue;
+    for (size_t k = 0; k < stat.size(); ++k) stat[k] = std::max(stat[k], typical[k]);
+    rec.cur_hp = static_cast<u16>(std::clamp(rec.cur_hp + stat[0] - rec.max_hp, 1, stat[0]));
+    rec.max_hp = rec.hp_extra = static_cast<u16>(stat[0]);
+    rec.atk = u7(stat[1]), rec.def = u7(stat[2]), rec.hit = u7(stat[3]), rec.evd = u7(stat[4]), rec.mag = u7(stat[5]), rec.mdef = u7(stat[6]);
+    rec.bonus[0] = rec.atk, rec.bonus[2] = rec.hit, rec.bonus[4] = rec.def, rec.bonus[6] = rec.evd, rec.bonus[8] = rec.mag,
+    rec.bonus[10] = rec.mdef;
+    ++repaired;
+  }
+  return repaired;
+}
+
 }  // namespace oc::game::newgame
