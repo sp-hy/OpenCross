@@ -203,6 +203,17 @@ int main() {
     CHECK(scenes[0][0] == 0 && scenes[1][1] == 4);
   }
 
+  // An added monster whose id is the empty slot's (255) cannot stand in a formation slot: a problem, the slot keeps its value.
+  {
+    data::TableRows rows;
+    rows.build({mod_with("Edge", {{"monster", "[edge]\nmax_hp=1\n"}, {"scenedat", "[0]\nenemy_2=@monster:edge\n"}})},
+               {{"monster", 255}, {"scenedat", 1}});
+    std::vector<std::array<u8, 28>> scenes(1);
+    scenes[0][2] = 9;
+    rows.apply("scenedat", scenes.size(), [&](size_t i) { return std::span<u8>(scenes[i]); });
+    CHECK(scenes[0][2] == 9 && rows.wide_writes("scenedat").empty() && logged(rows, "monster:edge is record 255, the empty formation slot"));
+  }
+
   if (failures == 0) std::printf("table_rows: OK\n");
   return failures == 0 ? 0 : 1;
 }

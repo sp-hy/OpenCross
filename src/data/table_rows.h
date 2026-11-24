@@ -27,6 +27,8 @@ namespace oc::data {
 
 // The enemy slots at the start of a scenedat record (one byte each; a mod's monster id past 254 is kept beside the record).
 inline constexpr u16 kSceneEnemySlots = 3;
+// An enemy slot holding this id is empty, so a mod's monster with this id cannot stand in a formation slot.
+inline constexpr size_t kEmptyEnemySlot = 0xFF;
 
 // One named field of a record: byte offset and width (1, 2 or 4 bytes, little-endian).
 struct TableField {

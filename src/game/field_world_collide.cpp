@@ -226,8 +226,11 @@ bool FieldWorld::put_party_beside(int ent, float dist, float& out_x, float& out_
   // walkable (+1: not across a counter or a wall gap). The first direction with the best score wins.
   // The floor: step_triggers' height test (Y down) takes a leader at py with target.y - h_target <= py <= target.y + h_leader;
   // an entity raised above the walk mesh (a figure on a pedestal) is talked to from the floor below it.
-  // 2 units inside the trigger pass's height test: the leader's height is kept whole, so a floor at the very edge can fail it by one.
-  const float y_lo = target.y - ent_height(ent) + 2.0f, y_hi = target.y + ent_height(player) - 2.0f, y_hint = (y_lo + y_hi) * 0.5f;
+  // 2 units inside the trigger pass's height test where the band allows it: the leader's height is kept whole, so a floor at the very
+  // edge can fail it by one.
+  const float band_lo = target.y - ent_height(ent), band_hi = target.y + ent_height(player);
+  const float inset = band_hi - band_lo > 4.0f ? 2.0f : 0.0f;
+  const float y_lo = band_lo + inset, y_hi = band_hi - inset, y_hint = (y_lo + y_hi) * 0.5f;
   auto floor_ok = [&](int tri, float px, float pz) {
     if (tri < 0) return false;
     const float py = walk.height(tri, px, pz);

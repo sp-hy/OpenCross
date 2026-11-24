@@ -509,13 +509,8 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
         const std::span<u8> base = record(*block.base);
         const std::span<u8> rec = record(*index);
         std::copy_n(base.begin(), std::min(base.size(), rec.size()), rec.begin());
-        if (const auto wide = wide_.find(table); wide != wide_.end()) {
+        if (const auto wide = wide_.find(table); wide != wide_.end())
           std::erase_if(wide->second, [&](const WideWrite& entry) { return entry.record == *index; });
-          std::vector<WideWrite> copied;
-          for (const WideWrite& entry : wide->second)
-            if (entry.record == *block.base) copied.push_back({*index, entry.offset, entry.value});
-          wide->second.insert(wide->second.end(), copied.begin(), copied.end());
-        }
         based.insert(*index);
       }
   };
@@ -549,6 +544,11 @@ size_t TableRows::apply(std::string_view table, size_t count, const std::functio
           const std::optional<size_t> target = id_of(write.ref_table, write.ref_name);
           if (!target) {
             problems.push_back(std::format("line {}: no record {}:{}", write.line, write.ref_table, write.ref_name));
+            continue;
+          }
+          if (enemy_slot && *target + value == kEmptyEnemySlot) {
+            problems.push_back(std::format("line {}: {}:{} is record {}, the empty formation slot", write.line, write.ref_table, write.ref_name,
+                                           *target + value));
             continue;
           }
           if (!enemy_slot && write.width < 4 && *target + value >= (size_t{1} << (8 * write.width))) {

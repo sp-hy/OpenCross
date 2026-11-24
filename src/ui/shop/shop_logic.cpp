@@ -3,7 +3,6 @@
 #include <algorithm>
 
 #include "data/table_rows.h"
-
 #include "vfs/vfs.h"
 
 namespace oc::ui::shop {
