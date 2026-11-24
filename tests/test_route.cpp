@@ -191,6 +191,56 @@ int main() {
     bad.step();
     CHECK(bad.last.failed);
   }
+  // ---- talk: put beside the entity at no distance, with the talk asked for; put beside alone asks for none; a bad entity fails
+  {
+    Sim sim;
+    std::string err;
+    CHECK(sim.route.load(write_tmp("oc_route_talk.txt", "0 talk 5\n- put beside 6\n- quit\n"), &err));
+    sim.st.room = "r";
+    sim.st.room_valid = true;
+    sim.step();
+    CHECK(sim.last.put_beside == 5 && sim.last.put_dist == 0.0f && sim.last.talk);
+    sim.step();
+    CHECK(sim.last.put_beside == 6 && !sim.last.talk);
+    Sim bad;
+    CHECK(bad.route.load(write_tmp("oc_route_talk_bad.txt", "0 talk x\n"), &err));
+    bad.step();
+    CHECK(bad.last.failed);
+    Sim leader;
+    CHECK(leader.route.load(write_tmp("oc_route_talk_zero.txt", "0 talk 0\n"), &err));
+    leader.step();
+    CHECK(leader.last.failed);
+  }
+  // ---- mash until idle <n>: done once the controls stayed free n ticks in a row (a busy tick starts the count again); the button
+  // rests while they are free
+  {
+    Sim sim;
+    std::string err;
+    CHECK(sim.route.load(write_tmp("oc_route_mash_idle.txt", "0 mash until idle 5 500\n- log settled\n- quit\n"), &err));
+    sim.st.room = "r";
+    sim.st.room_valid = true;
+    bool pressed_busy = false;
+    for (int i = 0; i < 24; ++i) {
+      sim.step();
+      pressed_busy = pressed_busy || sim.held[SDL_SCANCODE_RETURN];
+    }
+    CHECK(pressed_busy);
+    sim.st.field_idle = true;
+    for (int i = 0; i < 3; ++i) {
+      sim.step();
+      CHECK(!sim.held[SDL_SCANCODE_RETURN]);
+    }
+    sim.st.field_idle = false;
+    sim.step();
+    sim.st.field_idle = true;
+    int free_ticks = 0;
+    while (sim.last.note != "settled" && free_ticks < 20) {
+      sim.step();
+      ++free_ticks;
+      CHECK(sim.last.note == "settled" || !sim.held[SDL_SCANCODE_RETURN]);
+    }
+    CHECK(free_ticks == 6);
+  }
   // ---- put / put ent / put v: the point, the entity and the party V flag
   {
     Sim sim;

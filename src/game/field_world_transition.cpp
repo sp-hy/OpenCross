@@ -339,6 +339,12 @@ void FieldWorld::snap_camera_to_player(bool keep_scroll) {
   view_.set_scroll(camera_.cam.x, camera_.cam.y, true);
 }
 
+void FieldWorld::settle_camera_on_player() {
+  if (camera_.cam.scripted || camera_override() || scroll_pinned_) return;
+  snap_camera_to_player(true);
+  step_cull();
+}
+
 void FieldWorld::debug_pin_scroll(int x, int y) {
   scroll_pinned_ = true;
   pin_x_ = x;

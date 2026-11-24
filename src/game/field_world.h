@@ -680,6 +680,15 @@ class FieldWorld final : public script::FieldHost {
   // button talks at once. dist = centre distance (0 = inside talk range, outside touch range). Spot written to (x, z); false =
   // no walkable spot around it (the party stays).
   bool put_party_beside(int ent, float dist, float& x, float& z);
+  // Route `talk`: whether entity `ent` takes a talk now (the trigger pass's filter: active, not 0x400002, no no-action flag).
+  bool takes_talk(int ent) const;
+  // Route `talk`: an inactive entity made active and shown again (its inactive and hidden bits cleared); false when it was active.
+  bool bring_in(int ent);
+  // Route `put` / `put beside`: the camera on the moved leader as a room entry leaves it (the kept-scroll ease), the off-screen cull
+  // redone. A player walks there with the camera following; a talk right after a jump locks the input, and the camera then holds
+  // short of the leader: the talked-to entity stays off screen and its animation (a WAIT_ANIMATION on it) never ends. Not while a
+  // script holds the camera.
+  void settle_camera_on_player();
   // Controlled runs: the field scroll held at (x, y) layer pixels from now on (the camera's follow and script targets ignored) and the
   // off-screen cull redone for it at once, so a frame of the same tick shows that part of the room; unpin = the camera again.
   void debug_pin_scroll(int x, int y);

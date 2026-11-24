@@ -72,6 +72,8 @@
 //                                 `v`: the leader there and the followers in the party V behind it
 //   put beside <ent> [dist]       debug: place the party on the walk mesh beside entity <ent> where it stands now, the leader facing
 //                                 it: in talk range, out of touch range (dist = centre distance, default the middle of that band)
+//   talk <ent>                    debug: put beside <ent> and press the action button the same tick (a walking entity can't leave the
+//                                 range first); one the player can't talk to (no spot beside it, no talk now) gets its slot 2 started
 //   set model <char> <byte>       D9 + DA on a party member (the character record model byte)
 //   set hp <char> <value> | set status <char> <hexbits>   debug write of a character's current HP / status bits (1 poison, 8 burn,
 //                                 10 sprain, 20 flu)
@@ -277,6 +279,10 @@ struct RouteOut {
   // `put beside <ent> [dist]`: the party beside entity put_beside (-1 = none), put_dist 0 = the host's default distance.
   int put_beside = -1;
   float put_dist = 0;
+  // `talk <ent>`: put_beside = ent and its talk started the same tick when the field takes a talk; when the entity can't be talked
+  // to from anywhere (no spot beside it on its floor, or it takes no talk now) its talk script (slot 2) starts directly
+  // (FieldVM::request_script).
+  bool talk = false;
   bool set_var = false;
   // `set option <hexmask> <0|1>`: one bit of the Settings options word.
   bool set_option = false;
