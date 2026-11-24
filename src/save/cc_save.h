@@ -8,6 +8,7 @@
 // unknown fields survive a round trip.
 #include <array>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -76,6 +77,15 @@ inline constexpr u8 kSideFile = 2;
 // file is a container of tagged sections, so more state the block can't hold can go there too. Without a store the ids are dropped on
 // save, as the stream would have to. Memory-card slots, the auto-save and the OCSV page all go through here.
 void set_wide_store(std::filesystem::path dir);
+
+// Element records mods add by name (data/table_rows.h) get their ids from the mods enabled, so the side file also keeps their names
+// and a load gives each name the id it has now (a name no mod adds any more leaves its stacks and cells empty). `name_of(id)` = ""
+// for an element that has no name; `id_of(name)` = the element that carries the name now. Without them the ids are kept as numbers.
+struct ElementNames {
+  std::function<std::string(u16)> name_of;
+  std::function<std::optional<u16>(std::string_view)> id_of;
+};
+void set_element_names(ElementNames names);
 
 // Item stack: id stored in 9 bits, qty in 7 bits.
 struct ItemStack {

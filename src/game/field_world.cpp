@@ -789,6 +789,7 @@ void FieldWorld::field_reset() {
 // ------------------------------------------------------------------------------------------------ host: party and items
 
 void FieldWorld::set_mod_rooms(const ModRooms* rooms) {
+  room_owners_ = rooms;
   mod_rooms_ = rooms && !rooms->empty() ? rooms : nullptr;
   stem_ids_.clear();
   if (!mod_rooms_) return;

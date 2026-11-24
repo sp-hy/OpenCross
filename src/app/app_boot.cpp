@@ -189,16 +189,9 @@ void App::init_vfs() {
       log::info("features: [{}] {}: '{}' wins over '{}'", conflict.section, conflict.key, conflict.winner, conflict.loser);
   }
   install_mod_rooms_and_text();
-  // The mods' table rows (tables\<table>.txt), read when the tables load.
-  std::vector<data::TableMod> table_mods;
-  for (const vfs::Mod& mod : mods.mods()) {
-    if (!(with_mods() || mod.name == vfs::kDraftMod) || !mod.enabled || mod.tables.empty()) continue;
-    data::TableMod table{mod.name, {}};
-    for (const vfs::ModFile& file : mod.tables)
-      table.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
-    table_mods.push_back(std::move(table));
-  }
-  data::set_table_mods(&files, std::move(table_mods));
+  // The mods' table rows (tables\<table>.txt) and their own element ids ([Elements]), read when the tables load. A run without mods
+  // has only its draft folder enabled.
+  data::set_table_mods(&files, data::table_mods_of(mods, files));
   // Texture replacement is always on; a texture mod is switched by its own Mods row. Per-visit dumping is off - the
   // "Dump all textures" button / `occ dump-textures` write the files.
   render::texture_registry::bind(&files);
@@ -462,6 +455,12 @@ void App::init_saves() {
     oc_saves.set_dir(save_path.parent_path() / (stem == "save" ? std::string("OpenCross") : stem + "_OpenCross"));
     // Element ids past 511 (a mod's records) go into side files there, for every slot write (save::set_wide_store).
     save::set_wide_store(oc_saves.dir() / "wide");
+    // ... with the names of the records mods add, so a save keeps them when the mods change.
+    save::set_element_names({[](u16 id) { return data::table_rows().name_of("pgdat", id); },
+                             [](std::string_view name) -> std::optional<u16> {
+                               const std::optional<size_t> id = data::table_rows().id_of("pgdat", name);
+                               return id ? std::optional<u16>(static_cast<u16>(*id)) : std::nullopt;
+                             }});
     oc_saves.load();
   }
   if (flow_ready && have_save_dat) flow.set_save_dat(&save_dat, &oc_saves);
@@ -759,6 +758,11 @@ void App::install_mod_rooms_and_text() {
       text.files[file.target] = [this, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
     if (const std::map<int, std::string>* rooms = mod_rooms.rooms_of(mod.name))
       for (const auto& [id, stem] : *rooms) text.rooms[id] = mod_rooms.internal_id(stem);
+    // Its element ids ([Elements]) once the tables are loaded (a controlled run's reload); at launch the tables' load sets them.
+    if (mod.has_manifest)
+      for (const auto& [own_id, name] : mod.manifest.elements)
+        if (const std::optional<size_t> element = data::table_rows().element_of(mod.name, own_id))
+          text.elements[own_id] = static_cast<int>(*element);
     // The draft folder (a controlled run's DraftDir: an editor's unsaved dialog) has no [Rooms]: its rows name a mod room by the id
     // the room's own mod gives it.
     if (mod.name == vfs::kDraftMod)

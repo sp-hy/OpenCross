@@ -343,6 +343,9 @@ class FieldWorld final : public script::FieldHost {
   int script_room(int id) const;
   // The engine's id -> the id the running room's script uses for it (ModRooms::to_script).
   int script_room_id(int id) const;
+  // A script item id from data::kScriptElementBase -> the element it names: the element ids of a mod's script are its own (the
+  // [Elements] of the mod that owns the running room, data::TableRows::element_for); nothing when it names none.
+  std::optional<int> script_element(int item_id) const;
   const ModRooms* mod_rooms() const { return mod_rooms_; }
   // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).
   std::string mod_room() const { return mod_rooms_ ? mod_rooms_->stem(map_id_) : std::string(); }
@@ -1026,6 +1029,8 @@ class FieldWorld final : public script::FieldHost {
   // room stem -> script room id on the current disc, a mod room's internal id (lazy)
   std::map<std::string, int> stem_ids_;
   const ModRooms* mod_rooms_ = nullptr;
+  // The same, also without mod rooms: which mod owns a room (its script's element ids are that mod's own).
+  const ModRooms* room_owners_ = nullptr;
 
   const vfs::Vfs* files_ = nullptr;
   render::GpuContext* ctx_ = nullptr;

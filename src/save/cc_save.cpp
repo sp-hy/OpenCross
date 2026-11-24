@@ -5,6 +5,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 
 #include "core/log.h"
@@ -389,11 +390,17 @@ constexpr size_t kSideHeader = 8, kSectionHeader = 6;
 namespace side_tag {
 // Element ids past 511.
 inline constexpr u16 kElementIds = 1;
+// The names of those that are records mods add by name.
+inline constexpr u16 kElementNames = 3;
 }  // namespace side_tag
 
 std::filesystem::path& wide_dir() {
   static std::filesystem::path dir;
   return dir;
+}
+ElementNames& element_names() {
+  static ElementNames names;
+  return names;
 }
 void put16(Bytes& out, u32 value) {
   out.push_back(static_cast<u8>(value));
@@ -447,9 +454,59 @@ void apply_element_ids(SaveSlot& slot, ByteSpan bytes) {
       slot.chars[bytes[pos]].grid[bytes[pos + 1]] = rd16(&bytes[pos + 2]);
 }
 
+// Section kElementNames: u16 n + n x {u16 id, u8 length, length bytes of name}, for every id past 511 of the slot that has a name.
+Bytes element_name_section(const SaveSlot& slot) {
+  if (!element_names().name_of) return {};
+  std::vector<u16> ids;
+  for (const ItemStack& stack : slot.elements)
+    if (stack.id >= 0x200) ids.push_back(stack.id);
+  for (const SaveChar& ch : slot.chars)
+    for (const u16 word : ch.grid)
+      if ((word & 0x3FFF) >= 0x200) ids.push_back(static_cast<u16>(word & 0x3FFF));
+  std::sort(ids.begin(), ids.end());
+  ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+  Bytes entries;
+  u32 count = 0;
+  for (const u16 id : ids) {
+    const std::string name = element_names().name_of(id);
+    if (name.empty() || name.size() > 0xFF) continue;
+    put16(entries, id);
+    entries.push_back(static_cast<u8>(name.size()));
+    entries.insert(entries.end(), name.begin(), name.end());
+    ++count;
+  }
+  if (count == 0) return {};
+  Bytes out;
+  put16(out, count);
+  out.insert(out.end(), entries.begin(), entries.end());
+  return out;
+}
+// Gives every saved name the id it carries now: stacks and cells of a name no mod adds any more are emptied.
+void apply_element_names(SaveSlot& slot, ByteSpan bytes) {
+  if (!element_names().id_of || bytes.size() < 2) return;
+  std::map<u16, u16> moved;
+  const u32 count = rd(&bytes[0], 2);
+  size_t pos = 2;
+  for (u32 i = 0; i < count && pos + 3 <= bytes.size(); ++i) {
+    const u16 id = rd16(&bytes[pos]);
+    const size_t length = bytes[pos + 2];
+    if (pos + 3 + length > bytes.size()) break;
+    const std::string name(reinterpret_cast<const char*>(&bytes[pos + 3]), length);
+    moved[id] = element_names().id_of(name).value_or(0);
+    pos += 3 + length;
+  }
+  for (ItemStack& stack : slot.elements)
+    if (const auto it = moved.find(stack.id); it != moved.end()) stack = it->second ? ItemStack{it->second, stack.qty} : ItemStack{};
+  for (SaveChar& ch : slot.chars)
+    for (u16& word : ch.grid)
+      if (const auto it = moved.find(static_cast<u16>(word & 0x3FFF)); it != moved.end())
+        word = it->second ? static_cast<u16>((word & 0xC000) | it->second) : u16{0};
+}
+
 // The side file of a slot: empty when no section has anything.
 Bytes side_file(const SaveSlot& slot) {
-  const std::pair<u16, Bytes> sections[] = {{side_tag::kElementIds, element_id_section(slot)}};
+  const std::pair<u16, Bytes> sections[] = {{side_tag::kElementIds, element_id_section(slot)},
+                                            {side_tag::kElementNames, element_name_section(slot)}};
   Bytes out(kSideMagic.begin(), kSideMagic.end());
   put32(out, kSideVersion);
   for (const auto& [tag, bytes] : sections) {
@@ -482,19 +539,23 @@ void apply_side_file(SaveSlot& slot) {
     log::warn("save: OpenCross side file {:016x} missing", key);
     return;
   }
+  ByteSpan names;
   for (size_t at = kSideHeader; at + kSectionHeader <= bytes.size();) {
     const u32 tag = rd(&bytes[at], 2);
     const u32 size = rd(&bytes[at + 2], 4);
     if (size > bytes.size() - at - kSectionHeader) break;
     const ByteSpan section = ByteSpan(bytes).subspan(at + kSectionHeader, size);
     if (tag == side_tag::kElementIds) apply_element_ids(slot, section);
+    if (tag == side_tag::kElementNames) names = section;
     at += kSectionHeader + size;
   }
+  apply_element_names(slot, names);
 }
 
 }  // namespace
 
 void set_wide_store(std::filesystem::path dir) { wide_dir() = std::move(dir); }
+void set_element_names(ElementNames names) { element_names() = std::move(names); }
 
 SaveSlot decode_block(ByteSpan block) {
   if (block.size() != kBlockSize) throw std::runtime_error("save: slot block must be 0x2000 bytes");

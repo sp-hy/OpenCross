@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <format>
@@ -1108,6 +1109,36 @@ std::atomic<u32>& mods_generation() {
   static std::atomic<u32> generation{0};
   return generation;
 }
+
+// A mod's sysmes.txt rows with the keys of its element names (0x17<id>) and help lines (0x1A<id * 3 + line>) moved to the elements its
+// [Elements] gives those ids; other rows as they are.
+std::string mod_element_rows(const TextMod& mod, std::string_view text) {
+  if (mod.elements.empty()) return std::string(text);
+  std::string out;
+  out.reserve(text.size());
+  while (!text.empty()) {
+    const size_t end = text.find('\n');
+    const std::string_view line = text.substr(0, end == std::string_view::npos ? text.size() : end + 1);
+    text.remove_prefix(line.size());
+    const size_t tab = line.find('\t');
+    unsigned key = 0;
+    const std::string_view cell = line.substr(0, tab);
+    const bool hex = tab != std::string_view::npos && cell.size() > 2 && cell[0] == '0' && (cell[1] == 'x' || cell[1] == 'X');
+    if (hex && std::from_chars(cell.data() + 2, cell.data() + cell.size(), key, 16).ptr == cell.data() + cell.size()) {
+      const unsigned category = key >> 16, index = key & 0xFFFF;
+      const int own_id = static_cast<int>(category == 0x1A ? index / 3 : index);
+      const auto element = category == 0x17 || category == 0x1A ? mod.elements.find(own_id) : mod.elements.end();
+      if (element != mod.elements.end()) {
+        const unsigned moved = category == 0x1A ? static_cast<unsigned>(element->second) * 3 + index % 3 : static_cast<unsigned>(element->second);
+        out += std::format("0x{:02X}{:04X}", category, moved);
+        out += line.substr(tab);
+        continue;
+      }
+    }
+    out += line;
+  }
+  return out;
+}
 }  // namespace
 
 u32 text_mods_generation() { return mods_generation().load(); }
@@ -1123,6 +1154,11 @@ void set_text_mods(std::vector<TextMod> mods) {
 }
 
 const std::vector<TextMod>& text_mods() { return text_mod_list(); }
+
+void set_text_mod_elements(std::string_view mod, std::map<int, int> elements) {
+  for (TextMod& entry : text_mod_list())
+    if (entry.name == mod) entry.elements = std::move(elements);
+}
 
 bool LangTables::read_member(std::string_view name, std::string& out) const {
   if (!vfs_) return false;
@@ -1383,7 +1419,7 @@ const TextTable* LangTables::table(std::string_view name) {
   RowSetters setters(key + ".txt");
   each_mod_rows(key + ".txt", [&](const TextMod& mod, std::string_view text) {
     TextTable rows;
-    rows.parse(text);
+    rows.parse(key == "sysmes" ? std::string_view(mod_element_rows(mod, text)) : text);
     loaded.overlay(rows, [&](const std::string& row, const std::string& heading, const std::string& value) {
       setters.set(row + " " + heading, value, mod.name);
     });

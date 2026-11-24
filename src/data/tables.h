@@ -3,8 +3,10 @@
 // files; records keep their raw bytes so later code can reach fields that are not decoded yet.
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "core/types.h"
 
@@ -94,7 +96,8 @@ struct ElemRec {
 // Element records past vanilla's 527 are a mod's own: their kind byte (+0x01, bit 1 = tech) says element or tech. Vanilla ids keep
 // their blocks (1..0x7F elements and consumables, 0x80.. techs, enemy actions and specials), whatever their kind.
 inline constexpr int kVanillaElemRecs = 527;
-// Field-script item ids (BB / B4 / D5, ItemWork text) from here name element `id - kScriptElementBase`, any record: the vanilla
+// Field-script item ids (BB / B4 / D5, ItemWork text) from here name element `id - kScriptElementBase` (in a mod's room its own id,
+// TableRows::element_for), any record: the vanilla
 // range 0x200 + id ends at 511 where the key items start (0x401..). Operands carry 15 bits, so ids up to 0x6FFF.
 inline constexpr int kScriptElementBase = 0x1000;
 inline bool mod_element(const std::vector<ElemRec>& elements, int id) {
@@ -223,8 +226,10 @@ struct GameTables {
   // Scene for a battle id: id >= 0x200 -> id-0x200, else symtbl[id*8+variant].
   int scene_for(int battle_id, int variant) const;
 
-  // Loads everything; returns false (and fills `err`) if a mandatory table is missing.
-  bool load(const vfs::Vfs& game_fs,std::string* err = nullptr);
+  // Loads everything; returns false (and fills `err`) if a mandatory table is missing. `publish`: these are the app's tables, so the
+  // named records' ids and the mods' own ids for their text are handed to what reads them later (table_rows(), the text); a load on
+  // another thread (the background room scan) passes false and keeps them to itself.
+  bool load(const vfs::Vfs& game_fs,std::string* err = nullptr, bool publish = true);
 };
 
 // The versus battle protocol: raised whenever the battle rules change in a way that would put two games of different builds out of step.
@@ -233,6 +238,10 @@ inline constexpr u32 kVersusRulesVersion = 1;
 // battle reads (monster, character and element records, scenes, battlefield colours, gear, drops, the generator's table); names and
 // the tables of the field and menus are left out.
 std::string battle_data_fingerprint(const GameTables& tables);
+
+// The rows of menu_pg.bin (16 bytes each, index = element id) with the mods' table rows applied (data/table_rows.h): as many as there are
+// elements once the mods' named records are added. Nothing when the file is missing.
+std::optional<std::vector<std::array<u8, 16>>> read_menu_elements(const vfs::Vfs& game_fs);
 
 // Colour bit (0x04..0x80) -> index 0..5 green white black red yellow blue; -1 if none.
 int colour_index_of_bit(u8 bit);

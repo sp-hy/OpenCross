@@ -106,6 +106,15 @@ void test_rooms() {
   CHECK(both.conflicts.empty() && both.issues.empty() && both.users.empty());
 }
 
+void test_elements() {
+  // [Elements] is not a feature either: "<id> = <record name>" lines, ids 527..0x3FFF, names [a-z][a-z0-9_]*; bad lines are problems.
+  const features::Manifest manifest =
+      features::parse_manifest("[Elements]\n527 = role_taunt\n600=zap2\n526=low\n20000=high\n601=Caps\n602=9lives\n527=again\n");
+  CHECK((manifest.elements == std::vector<std::pair<int, std::string>>{{527, "role_taunt"}, {600, "zap2"}}));
+  CHECK(manifest.sections.empty() && manifest.problems.size() == 5);
+  CHECK(features::is_record_name("a_b9") && !features::is_record_name("_a") && !features::is_record_name(""));
+}
+
 }  // namespace
 
 int main() {
@@ -113,6 +122,7 @@ int main() {
   test_table();
   test_resolve();
   test_rooms();
+  test_elements();
   if (failures) {
     std::printf("%d failure(s)\n", failures);
     return 1;

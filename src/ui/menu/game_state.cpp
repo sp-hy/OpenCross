@@ -46,10 +46,10 @@ int opposite_bit(int colour_bit) {
 // ---------------------------------------------------------------------------------------------------------- rules
 bool MenuRules::load_pg(const vfs::Vfs& vfs) {
   pg.clear();
-  auto bytes = vfs.read("cdrom/battle/data/menu_pg.bin");
-  if (!bytes) return false;
-  pg.resize(bytes->size() / 16);
-  for (size_t i = 0; i < pg.size(); ++i) std::copy_n(bytes->begin() + static_cast<std::ptrdiff_t>(i * 16), 16, pg[i].raw.begin());
+  auto rows = data::read_menu_elements(vfs);
+  if (!rows) return false;
+  pg.resize(rows->size());
+  for (size_t i = 0; i < pg.size(); ++i) pg[i].raw = (*rows)[i];
   return true;
 }
 

@@ -338,7 +338,7 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
 int FieldWorld::ps1_string_width(int table, int id) {
   if (table == 0 && id >= data::kScriptElementBase) {
     table = 23;
-    id -= data::kScriptElementBase;
+    id = script_element(id).value_or(0);
   } else if (table == 0 && id >= 0x200) {
     table = id < 0x400 ? 23 : 24;
     id -= id < 0x400 ? 0x200 : 0x400;
