@@ -110,6 +110,13 @@ int level(int id) {
   return feature ? feature->level : 0;
 }
 
+std::span<const OwnIdSection> own_id_sections() {
+  static constexpr OwnIdSection kSections[] = {{"Elements", "pgdat", kModElementFirst, kModElementLast},
+                                               {"ElementShops", "el_shop", kModShopFirst, kModShopLast},
+                                               {"Smiths", "waa_shop", kModShopFirst, kModShopLast}};
+  return kSections;
+}
+
 bool is_record_name(std::string_view name) {
   if (name.empty() || name.front() < 'a' || name.front() > 'z') return false;
   return std::all_of(name.begin(), name.end(),
@@ -121,7 +128,8 @@ bool is_record_name(std::string_view name) {
 Manifest parse_manifest(std::string_view text) {
   Manifest out;
   Manifest::Section* current = nullptr;
-  bool in_mod = false, in_rooms = false, in_elements = false, any_section = false;
+  bool in_mod = false, in_rooms = false, any_section = false;
+  const OwnIdSection* in_ids = nullptr;
   int line_no = 0;
   while (!text.empty()) {
     const size_t nl = text.find('\n');
@@ -134,15 +142,17 @@ Manifest parse_manifest(std::string_view text) {
       const std::string_view name = trim(line.substr(1, close == std::string_view::npos ? std::string_view::npos : close - 1));
       if (close == std::string_view::npos || name.empty()) {
         out.problems.push_back(std::format("line {}: bad section header", line_no));
-        current = nullptr, in_mod = in_rooms = in_elements = false;
+        current = nullptr, in_mod = in_rooms = false, in_ids = nullptr;
         continue;
       }
       any_section = true;
       in_mod = same(name, "Mod");
       in_rooms = same(name, "Rooms");
-      in_elements = same(name, "Elements");
+      in_ids = nullptr;
+      for (const OwnIdSection& section : own_id_sections())
+        if (same(name, section.section)) in_ids = &section;
       current = nullptr;
-      if (in_mod || in_rooms || in_elements) continue;
+      if (in_mod || in_rooms || in_ids) continue;
       const auto it = std::find_if(out.sections.begin(), out.sections.end(), [&](const Manifest::Section& section) { return same(section.name, name); });
       if (it != out.sections.end()) {
         current = &*it;
@@ -192,20 +202,22 @@ Manifest parse_manifest(std::string_view text) {
       }
       continue;
     }
-    if (in_elements) {
-      // "<id> = <record name>": an element id from kModElementFirst, the name of a record a mod adds (tables\pgdat.txt).
+    if (in_ids) {
+      // "<id> = <record name>": an id in the section's range, the name of a record a mod adds (tables\<table>.txt).
       int id = 0;
       const auto parsed = std::from_chars(key.data(), key.data() + key.size(), id);
-      if (parsed.ec != std::errc() || parsed.ptr != key.data() + key.size() || id < kModElementFirst || id > kModElementLast) {
+      std::vector<std::pair<int, std::string>>& ids = out.own_ids[in_ids->table];
+      if (parsed.ec != std::errc() || parsed.ptr != key.data() + key.size() || id < in_ids->first || id > in_ids->last) {
         out.problems.push_back(
-            std::format("line {}: [Elements] '{}' is not an element id {}..{}", line_no, key, kModElementFirst, kModElementLast));
+            std::format("line {}: [{}] '{}' is not an id {}..{}", line_no, in_ids->section, key, in_ids->first, in_ids->last));
       } else if (!is_record_name(value)) {
-        out.problems.push_back(std::format("line {}: [Elements] {}: '{}' is not a record name", line_no, id, value));
-      } else if (std::any_of(out.elements.begin(), out.elements.end(), [&](const auto& element) { return element.first == id; })) {
-        out.problems.push_back(std::format("line {}: [Elements] {} is named twice", line_no, id));
+        out.problems.push_back(std::format("line {}: [{}] {}: '{}' is not a record name", line_no, in_ids->section, id, value));
+      } else if (std::any_of(ids.begin(), ids.end(), [&](const auto& entry) { return entry.first == id; })) {
+        out.problems.push_back(std::format("line {}: [{}] {} is named twice", line_no, in_ids->section, id));
       } else {
-        out.elements.emplace_back(id, std::string(value));
+        ids.emplace_back(id, std::string(value));
       }
+      if (ids.empty()) out.own_ids.erase(in_ids->table);
       continue;
     }
     if (current) current->values.emplace_back(std::string(key), std::string(value));

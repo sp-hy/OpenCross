@@ -110,9 +110,14 @@ void test_elements() {
   // [Elements] is not a feature either: "<id> = <record name>" lines, ids 527..0x3FFF, names [a-z][a-z0-9_]*; bad lines are problems.
   const features::Manifest manifest =
       features::parse_manifest("[Elements]\n527 = role_taunt\n600=zap2\n526=low\n20000=high\n601=Caps\n602=9lives\n527=again\n");
-  CHECK((manifest.elements == std::vector<std::pair<int, std::string>>{{527, "role_taunt"}, {600, "zap2"}}));
+  CHECK((manifest.own_ids.at("pgdat") == std::vector<std::pair<int, std::string>>{{527, "role_taunt"}, {600, "zap2"}}));
   CHECK(manifest.sections.empty() && manifest.problems.size() == 5);
   CHECK(features::is_record_name("a_b9") && !features::is_record_name("_a") && !features::is_record_name(""));
+  // [ElementShops] / [Smiths]: shop ids from 32 (the game's rows are 0..31).
+  const features::Manifest shops = features::parse_manifest("[ElementShops]\n32=hub_shop\n31=low\n[Smiths]\n40=hub_smith\n");
+  CHECK((shops.own_ids.at("el_shop") == std::vector<std::pair<int, std::string>>{{32, "hub_shop"}}));
+  CHECK((shops.own_ids.at("waa_shop") == std::vector<std::pair<int, std::string>>{{40, "hub_smith"}}));
+  CHECK(shops.problems.size() == 1 && !shops.own_ids.contains("pgdat"));
 }
 
 }  // namespace

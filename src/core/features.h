@@ -62,14 +62,27 @@ constexpr int kModRoomLast = 0x7FFF;
 // it adds by name, data/table_rows.h) run from kModElementFirst to kModElementLast. Two mods may both use 527; the name is the identity.
 constexpr int kModElementFirst = 527;
 constexpr int kModElementLast = 0x3FFF;
+// Mod shops: the game's element shops and blacksmiths are rows 0..31, so a mod's own shop ids run from kModShopFirst.
+constexpr int kModShopFirst = 32;
+constexpr int kModShopLast = 0x7FFF;
 
 // A record name (a table row header, an [Elements] value): a lower-case letter, then lower-case letters, digits and '_'.
 bool is_record_name(std::string_view name);
 
+// The mod.ini sections that give a mod's own ids for records mods add by name ("<id> = <record name>"), the table they name records of
+// (data/table_rows.h) and the ids they take: [Elements] pgdat, [ElementShops] el_shop, [Smiths] waa_shop.
+struct OwnIdSection {
+  const char* section;
+  const char* table;
+  int first;
+  int last;
+};
+std::span<const OwnIdSection> own_id_sections();
+
 // A parsed mod.ini: [Mod] Name / Version / Author / Requires (a comma-separated list of feature sections the mod's own scripts use),
 // [Rooms] (the room ids this mod's scripts and text use, "<id> = <stem>": the files cdrom/map/mapbin/<stem>.bin / .prd / .ctd, its own
-// rooms or another mod's), [Elements] (the element ids this mod's scripts and text use, "<id> = <record name>"), and every other section
-// as written (a feature section, checked by resolve). `problems` = lines that are not understood.
+// rooms or another mod's), the own-id sections (own_id_sections: the record ids this mod's scripts and text use), and every other
+// section as written (a feature section, checked by resolve). `problems` = lines that are not understood.
 struct Manifest {
   struct Section {
     std::string name;
@@ -79,8 +92,8 @@ struct Manifest {
   std::vector<std::string> requires_features;
   // [Rooms]: ids kModRoomFirst..kModRoomLast, stems in lower case, in file order.
   std::vector<std::pair<int, std::string>> rooms;
-  // [Elements]: ids kModElementFirst..kModElementLast, record names, in file order.
-  std::vector<std::pair<int, std::string>> elements;
+  // The own-id sections: table (OwnIdSection::table) -> its ids and record names, in file order.
+  std::map<std::string, std::vector<std::pair<int, std::string>>> own_ids;
   std::vector<Section> sections;
   std::vector<std::string> problems;
 };

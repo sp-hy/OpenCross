@@ -166,8 +166,10 @@ std::span<const TableField> table_fields(std::string_view table) {
 std::string_view table_names_of(std::string_view table) { return table == "menu_pg" ? std::string_view("pgdat") : table; }
 
 bool table_grows(std::string_view table) {
-  return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem";
+  return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem" || table_is_list(table);
 }
+
+bool table_is_list(std::string_view table) { return table == "el_shop" || table == "waa_shop"; }
 
 void set_table_mods(const vfs::Vfs* files, std::vector<TableMod> mods) { mods_storage() = {files, std::move(mods)}; }
 
@@ -179,9 +181,9 @@ const std::vector<TableMod>* table_mods(const vfs::Vfs& files) {
 std::vector<TableMod> table_mods_of(const vfs::ModManager& mods, const vfs::Vfs& files) {
   std::vector<TableMod> out;
   for (const vfs::Mod& mod : mods.mods()) {
-    const bool lists_elements = mod.has_manifest && !mod.manifest.elements.empty();
-    if (!mod.enabled || (mod.tables.empty() && !lists_elements)) continue;
-    TableMod table{mod.name, {}, lists_elements ? mod.manifest.elements : std::vector<std::pair<int, std::string>>{}};
+    const bool lists_ids = mod.has_manifest && !mod.manifest.own_ids.empty();
+    if (!mod.enabled || (mod.tables.empty() && !lists_ids)) continue;
+    TableMod table{mod.name, {}, lists_ids ? mod.manifest.own_ids : std::map<std::string, std::vector<std::pair<int, std::string>>>{}};
     for (const vfs::ModFile& file : mod.tables)
       table.files[file.target] = [&files, source = vfs::OverlayFile{file.file, file.member}] { return files.read_mod_file(source); };
     out.push_back(std::move(table));
@@ -192,7 +194,8 @@ std::vector<TableMod> table_mods_of(const vfs::ModManager& mods, const vfs::Vfs&
 const TableRows& table_rows() { return rows_storage(); }
 void set_table_rows(TableRows rows) { rows_storage() = std::move(rows); }
 
-std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableField> fields, std::vector<std::string>* problems) {
+std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableField> fields, std::vector<std::string>* problems,
+                                 bool list) {
   std::vector<RowBlock> out;
   auto problem = [&](int line, std::string what) {
     if (problems) problems->push_back(std::format("line {}: {}", line, what));
@@ -240,6 +243,35 @@ std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableFie
       long long index = 0;
       if (block.name.empty() || !parse_number(value_text, index) || index < 0) problem(line_no, "base=<index> belongs to a named record");
       else block.base = static_cast<size_t>(index);
+      continue;
+    }
+    if (list) {
+      if (name == "clear") {
+        long long flag = 0;
+        if (!parse_number(value_text, flag) || (flag != 0 && flag != 1)) problem(line_no, "clear=1 empties the row");
+        else block.clear = flag == 1;
+        continue;
+      }
+      RowWrite entry;
+      entry.line = line_no;
+      entry.width = 2;
+      entry.op = name == "add" ? RowOp::Add : name == "remove" ? RowOp::Remove : RowOp::Set;
+      long long value = 0;
+      if (entry.op == RowOp::Set) {
+        problem(line_no, "a list row takes add=, remove= and clear=");
+        continue;
+      }
+      if (value_text.starts_with("@")) {
+        if (!parse_reference(value_text, entry.ref_table, entry.ref_name, value) || value > 0xFFFF) {
+          problem(line_no, "a reference is @<table>:<record name>[+<number>]");
+          continue;
+        }
+      } else if (!parse_number(value_text, value) || value <= 0 || value > 0xFFFF) {
+        problem(line_no, "an entry is 1..0xFFFF");
+        continue;
+      }
+      entry.value = static_cast<u32>(value);
+      block.writes.push_back(std::move(entry));
       continue;
     }
     RowWrite write;
@@ -296,14 +328,15 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
   for (size_t mod_index = 0; mod_index < mods.size(); ++mod_index) {
     for (const auto& [table, read] : mods[mod_index].files) {
       const std::span<const TableField> fields = table_fields(table);
-      if (fields.empty()) {
+      if (fields.empty() && !table_is_list(table)) {
         note(true, std::format("tables: '{}' {}.txt: not a table rows can change", mods[mod_index].name, table));
         continue;
       }
       const std::optional<Bytes> bytes = read();
       if (!bytes) continue;
       std::vector<std::string> problems;
-      Parsed parsed{mod_index, parse_rows(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()), fields, &problems)};
+      Parsed parsed{mod_index, parse_rows(std::string_view(reinterpret_cast<const char*>(bytes->data()), bytes->size()), fields, &problems,
+                                          table_is_list(table))};
       for (const std::string& problem : problems) note(true, std::format("tables: '{}' {}.txt {}", mods[mod_index].name, table, problem));
       parsed_[table].push_back(std::move(parsed));
     }
@@ -329,7 +362,7 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
     names.first = counts.at(names_table);
     for (auto& [mod_index, mod_names] : by_mod) {
       std::vector<std::pair<int, std::string>> listed;
-      if (names_table == "pgdat") listed = mods[mod_index].elements;
+      if (const auto own = mods[mod_index].own_ids.find(names_table); own != mods[mod_index].own_ids.end()) listed = own->second;
       std::sort(listed.begin(), listed.end());
       std::vector<std::string> order;
       for (const auto& [own_id, name] : listed)
@@ -342,11 +375,16 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
   for (const auto& [table, names] : names_)
     if (!names.names.empty())
       note(false, std::format("tables: {} adds {} named record(s) from {}", table, names.names.size(), names.first));
-  // The mods' own element ids: each listed name that some mod adds.
+  // The mods' own ids: each listed name that some mod adds.
   for (const TableMod& mod : mods)
-    for (const auto& [own_id, name] : mod.elements) {
-      if (const std::optional<size_t> id = id_of("pgdat", name)) element_ids_[mod.name][own_id] = *id;
-      else note(true, std::format("tables: '{}' [Elements] {}={}: no mod adds that record", mod.name, own_id, name));
+    for (const auto& [table, ids] : mod.own_ids) {
+      std::string_view section = table;
+      for (const features::OwnIdSection& own : features::own_id_sections())
+        if (table == own.table) section = own.section;
+      for (const auto& [own_id, name] : ids) {
+        if (const std::optional<size_t> id = id_of(table, name)) own_ids_[mod.name][table][own_id] = *id;
+        else note(true, std::format("tables: '{}' [{}] {}={}: no mod adds that record", mod.name, section, own_id, name));
+      }
     }
 }
 
@@ -369,21 +407,86 @@ const std::string& TableRows::name_of(std::string_view table, size_t id) const {
   return names->second.names[id - names->second.first];
 }
 
-std::optional<size_t> TableRows::element_of(std::string_view mod, int own_id) const {
-  const auto list = element_ids_.find(mod);
-  if (list == element_ids_.end()) return std::nullopt;
-  const auto it = list->second.find(own_id);
-  return it == list->second.end() ? std::nullopt : std::optional<size_t>(it->second);
+std::optional<size_t> TableRows::record_of(std::string_view mod, std::string_view table, int own_id) const {
+  const auto by_mod = own_ids_.find(mod);
+  if (by_mod == own_ids_.end()) return std::nullopt;
+  const auto by_table = by_mod->second.find(table);
+  if (by_table == by_mod->second.end()) return std::nullopt;
+  const auto it = by_table->second.find(own_id);
+  return it == by_table->second.end() ? std::nullopt : std::optional<size_t>(it->second);
 }
 
-std::optional<size_t> TableRows::element_for(std::string_view mod, int own_id) const {
+std::optional<size_t> TableRows::record_for(std::string_view mod, std::string_view table, int own_id) const {
   if (own_id < 0) return std::nullopt;
-  if (const std::optional<size_t> listed = element_of(mod, own_id)) return listed;
-  const auto names = names_.find(std::string_view("pgdat"));
+  if (const std::optional<size_t> listed = record_of(mod, table, own_id)) return listed;
+  const auto names = names_.find(table_names_of(table));
   if (names != names_.end() && !names->second.names.empty() && static_cast<size_t>(own_id) >= names->second.first) return std::nullopt;
   return static_cast<size_t>(own_id);
 }
 
+size_t TableRows::apply_lists(std::string_view table, std::vector<std::vector<u16>>& rows) const {
+  rows.resize(total(table, rows.size()));
+  const auto list = parsed_.find(table);
+  if (list == parsed_.end()) return 0;
+  // A new row starts as a copy of its base; the first mod in the list that gives a base decides.
+  std::set<size_t> based;
+  for (const Parsed& parsed : list->second)
+    for (const RowBlock& block : parsed.blocks) {
+      const std::optional<size_t> index = block.name.empty() ? std::nullopt : id_of(table, block.name);
+      if (!block.base || !index || *index >= rows.size() || based.contains(*index)) continue;
+      if (*block.base >= rows.size() || *block.base == *index) {
+        note(true, std::format("tables: '{}' {}.txt line {}: no base row {}", mod_names_[parsed.mod], table, block.line, *block.base));
+        continue;
+      }
+      rows[*index] = rows[*block.base];
+      based.insert(*index);
+    }
+  size_t total_changed = 0;
+  for (auto parsed = list->second.rbegin(); parsed != list->second.rend(); ++parsed) {
+    const std::string& mod = mod_names_[parsed->mod];
+    size_t changed = 0;
+    std::vector<std::string> problems;
+    for (const RowBlock& block : parsed->blocks) {
+      const std::optional<size_t> index = block.index ? block.index : id_of(table, block.name);
+      if (!index || *index >= rows.size()) {
+        problems.push_back(std::format("line {}: no row {} (the table has {})", block.line,
+                                       block.index ? std::to_string(*block.index) : block.name, rows.size()));
+        continue;
+      }
+      std::vector<u16>& row = rows[*index];
+      if (block.clear) row.clear();
+      for (const RowWrite& entry : block.writes) {
+        u32 value = entry.value;
+        if (!entry.ref_name.empty()) {
+          const std::optional<size_t> target = id_of(entry.ref_table, entry.ref_name);
+          if (!target) {
+            problems.push_back(std::format("line {}: no record {}:{}", entry.line, entry.ref_table, entry.ref_name));
+            continue;
+          }
+          if (*target + value > 0xFFFF) {
+            problems.push_back(std::format("line {}: {}:{} is record {}, past a list entry", entry.line, entry.ref_table, entry.ref_name,
+                                           *target + value));
+            continue;
+          }
+          value += static_cast<u32>(*target);
+        }
+        const u16 item = static_cast<u16>(value);
+        if (entry.op == RowOp::Add && std::find(row.begin(), row.end(), item) == row.end()) {
+          row.push_back(item);
+          ++changed;
+        } else if (entry.op == RowOp::Remove) {
+          const auto kept = std::remove(row.begin(), row.end(), item);
+          changed += static_cast<size_t>(row.end() - kept);
+          row.erase(kept, row.end());
+        }
+      }
+    }
+    for (const std::string& problem : problems) note(true, std::format("tables: '{}' {}.txt {}", mod, table, problem));
+    note(false, std::format("tables: '{}' {}: {} entr{} added or removed", mod, table, changed, changed == 1 ? "y" : "ies"));
+    total_changed += changed;
+  }
+  return total_changed;
+}
 size_t TableRows::apply(std::string_view table, size_t count, const std::function<std::span<u8>(size_t)>& record) const {
   // A new record starts as a copy of its base, before any field is written; the first mod in the list that gives a base decides. A
   // table that shares another's names (menu_pg) takes the base that table's rows give when its own rows give none.

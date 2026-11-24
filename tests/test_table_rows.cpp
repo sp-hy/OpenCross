@@ -23,8 +23,11 @@ int failures = 0;
   } while (0)
 
 data::TableMod mod_with(const std::string& name, std::map<std::string, std::string> files,
-                        std::vector<std::pair<int, std::string>> elements = {}) {
-  data::TableMod mod{name, {}, std::move(elements)};
+                        std::vector<std::pair<int, std::string>> elements = {},
+                        std::vector<std::pair<int, std::string>> element_shops = {}) {
+  data::TableMod mod{name, {}, {}};
+  if (!elements.empty()) mod.own_ids["pgdat"] = std::move(elements);
+  if (!element_shops.empty()) mod.own_ids["el_shop"] = std::move(element_shops);
   for (const auto& [table, text] : files) mod.files[table] = [text] { return std::optional<Bytes>(Bytes(text.begin(), text.end())); };
   return mod;
 }
@@ -158,6 +161,29 @@ int main() {
     scenes[0][0] = 7;
     rows.apply("scenedat", scenes.size(), [&](size_t i) { return std::span<u8>(scenes[i]); });
     CHECK(scenes[0][0] == 7 && logged(rows, "monster:big is record 256, past a 1-byte field"));
+  }
+
+  // Shops are lists: every mod's adds and removes land, lowest priority first (so the first mod's remove follows another's add); a
+  // shop by name follows the table's rows as a copy of its base; entries may name records; a mod's own shop ids ([ElementShops]).
+  {
+    const std::vector<data::TableMod> mods = {
+        mod_with("Top", {{"el_shop", "[3]\nremove=7\nadd=@pgdat:zap\n[hub_shop]\nbase=3\nadd=9\nset=1\n"}, {"pgdat", "[zap]\npower=1\n"}},
+                 {}, {{32, "hub_shop"}}),
+        mod_with("Bottom", {{"el_shop", "[3]\nadd=7\nadd=8\n[2]\nclear=1\nadd=5\n"}}),
+    };
+    data::TableRows rows;
+    rows.build(mods, {{"pgdat", 4}, {"el_shop", 32}});
+    std::vector<std::vector<u16>> shops(32);
+    shops[3] = {1, 7};
+    shops[2] = {4, 6};
+    rows.apply_lists("el_shop", shops);
+    CHECK(shops.size() == 33);
+    CHECK((shops[3] == std::vector<u16>{1, 8, 4}));
+    CHECK((shops[2] == std::vector<u16>{5}));
+    CHECK((shops[32] == std::vector<u16>{1, 7, 9}));
+    CHECK(logged(rows, "a list row takes add=, remove= and clear="));
+    CHECK(rows.record_for("Top", "el_shop", 32) == 32 && !rows.record_for("Bottom", "el_shop", 32) && rows.record_for("", "el_shop", 5) == 5);
+    CHECK(data::table_is_list("waa_shop") && !data::table_is_list("pgdat"));
   }
 
   if (failures == 0) std::printf("table_rows: OK\n");

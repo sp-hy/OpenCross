@@ -346,6 +346,9 @@ class FieldWorld final : public script::FieldHost {
   // A script item id from data::kScriptElementBase -> the element it names: the element ids of a mod's script are its own (the
   // [Elements] of the mod that owns the running room, data::TableRows::element_for); nothing when it names none.
   std::optional<int> script_element(int item_id) const;
+  // A shop row a script names (FE 5E element shop, FE 68 blacksmith; the row in variable 0x4A) -> the row it means: a mod's own shop ids
+  // ([ElementShops] / [Smiths] of the running room's owner); nothing when it names none.
+  std::optional<int> script_shop(script::MenuKind kind, int row) const;
   const ModRooms* mod_rooms() const { return mod_rooms_; }
   // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).
   std::string mod_room() const { return mod_rooms_ ? mod_rooms_->stem(map_id_) : std::string(); }
