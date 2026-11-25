@@ -264,13 +264,24 @@ std::vector<BattleView::FxModelRead> BattleView::fx_read_models(const FxPack& pa
       log::debug("battle fx: model {}: {}", entry.name, err);
       continue;
     }
-    reads.push_back({entry.name, stem.empty() ? page : std::nullopt, std::move(stem), std::move(*asset)});
+    FxModelRead& read = reads.emplace_back();
+    read.name = entry.name;
+    read.asset = std::move(*asset);
+    if (stem.empty()) {
+      read.page = page;
+      read.generation = render::texture_registry::generation();
+      read.asset.source = kFxModelSource;
+      render::resolve_model_textures(read.asset);
+      read.uploads = render::prepare_model_uploads(read.asset);
+      read.prepared = true;
+    }
+    read.stem = std::move(stem);
   }
   return reads;
 }
 
 // The models' GPU copies: an HD counterpart takes its unit's art, a model on its own pages is tiled for the texture mods (a mod switched
-// on or off reaches it at the pack's next cast).
+// on or off reaches it at the pack's next cast). A model prepared under other texture mods is resolved again here.
 void BattleView::fx_make_models(FxGpu& gpu, std::vector<FxModelRead>& reads) {
   if (!meshes_) return;
   for (FxModelRead& read : reads) {
@@ -278,13 +289,15 @@ void BattleView::fx_make_models(FxGpu& gpu, std::vector<FxModelRead>& reads) {
     auto model = std::make_unique<FxGpu::Model>();
     model->asset = std::move(read.asset);
     gpu.art_dependent = true;
+    const bool prepared = read.prepared && read.generation == render::texture_registry::generation();
     if (!read.stem.empty()) {
       if (const std::shared_ptr<ModelHandle> unit = load_model_for(read.stem)) paste_unit_art(model->asset, unit->asset);
-    } else {
+    } else if (!prepared) {
       model->asset.source = kFxModelSource;
+      model->asset.mod_textures.clear();
       render::resolve_model_textures(model->asset);
     }
-    model->gpu = meshes_->create_model(model->asset);
+    model->gpu = prepared ? meshes_->create_model(model->asset, &read.uploads) : meshes_->create_model(model->asset);
     if (!model->gpu) continue;
     model->pose.set_model(&model->asset);
     model->page = read.page;
@@ -604,6 +617,27 @@ void BattleView::fx_apply_mesh_tiles(FxGpu& gpu, assets::StageAsset& asset, bool
   if (!fresh) stage_pipe_.reload_textures(*gpu.stage, asset);
 }
 
+// Bespoke overlays' own textured packets sample the pack's mesh atlases through the particle batch, with normalised UVs: a texture mod's
+// effect_mesh image of any size stands in, as it does for the mesh sprites the stage pipeline draws.
+void BattleView::fx_make_overlay_atlas(FxGpu& gpu, const assets::StageAsset& st, size_t index) {
+  const assets::StageTexture& stage_tex = st.textures[index];
+  auto tex = std::make_unique<render::Texture>();
+  render::TexRef set;
+  u32 width = stage_tex.image.width, height = stage_tex.image.height;
+  if (width && height && !stage_tex.image.indexed) {
+    std::vector<u8> replaced;
+    if (render::texture_registry::active()) {
+      replaced.assign(stage_tex.image.pixels.begin(), stage_tex.image.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(width) * height * 4));
+      const render::TextureKey key = render::stage_group_key("effect_mesh", static_cast<int>(index), stage_tex.mode, stage_tex.clut_x, stage_tex.clut_y, width, height, replaced.data());
+      if (!render::texture_registry::replace(key, width, height, replaced)) replaced.clear();
+    }
+    if (tex->create(*ctx_, width, height, render::TextureFormat::Rgba8, replaced.empty() ? stage_tex.image.pixels.data() : replaced.data()))
+      set = render::TexRef(*tex, nearest_);
+  }
+  gpu.textures.push_back(std::move(tex));
+  gpu.sets.push_back(set);
+}
+
 BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& pack) {
   if (auto it = fx_gpu_.find(pack->eid); it != fx_gpu_.end()) {
     if (pack->meshes) fx_apply_mesh_tiles(*it->second, *pack->meshes, false);
@@ -748,27 +782,12 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
     case Step::OverlayAtlases: {
       const FxPack& pack = *build.pack;
       FxGpu& gpu = *build.gpu;
-      // Bespoke overlays' own textured packets sample the pack's mesh atlases through the particle batch, with normalised UVs: a texture mod's
-      // effect_mesh image of any size stands in, as it does for the mesh sprites the stage pipeline draws.
       if (pack.meshes && pack.bespoke) {
-        const assets::StageAsset& st = *pack.meshes;
         gpu.art_dependent = true;
-        for (size_t i = 0; i < st.textures.size(); ++i) {
-          const assets::StageTexture& stage_tex = st.textures[i];
-          auto tex = std::make_unique<render::Texture>();
-          render::TexRef set;
-          const bool usable = stage_tex.image.width && stage_tex.image.height && !stage_tex.image.indexed;
-          u32 width = stage_tex.image.width, height = stage_tex.image.height;
-          std::vector<u8> replaced;
-          if (usable && render::texture_registry::active()) {
-            replaced.assign(stage_tex.image.pixels.begin(), stage_tex.image.pixels.begin() + static_cast<std::ptrdiff_t>(size_t(width) * height * 4));
-            const render::TextureKey key = render::stage_group_key("effect_mesh", static_cast<int>(i), stage_tex.mode, stage_tex.clut_x, stage_tex.clut_y, width, height, replaced.data());
-            if (!render::texture_registry::replace(key, width, height, replaced)) replaced.clear();
-          }
-          if (usable && tex->create(*ctx_, width, height, render::TextureFormat::Rgba8, replaced.empty() ? stage_tex.image.pixels.data() : replaced.data()))
-            set = render::TexRef(*tex, nearest_);
-          gpu.textures.push_back(std::move(tex));
-          gpu.sets.push_back(set);
+        const auto started = std::chrono::steady_clock::now();
+        while (gpu.textures.size() < pack.meshes->textures.size()) {
+          fx_make_overlay_atlas(gpu, *pack.meshes, gpu.textures.size());
+          if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() >= budget_ms) return false;
         }
       }
       fx_gpu_[pack.eid] = std::move(build.gpu);

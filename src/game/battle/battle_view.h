@@ -941,15 +941,19 @@ class BattleView {
   };
   FxGpu* fx_gpu_for(const std::shared_ptr<const FxPack>& pack);
   // A pack model read and decoded (fx_read_models, on any thread): its entry name, the page its name binds (none = HD art: the stem's
-  // cdrom2 mesh + texture) and the asset. fx_make_models gives each its GPU copy and pose on the render thread.
+  // cdrom2 mesh + texture) and the asset. A model on its own pages also has its texture mods resolved and its texture uploads prepared
+  // there (`prepared`, under the texture registry's `generation`). fx_make_models gives each its GPU copy and pose on the render thread.
   struct FxModelRead {
     std::string name;
     std::optional<FxModelPage> page;
     std::string stem;
     assets::ModelAsset asset;
+    render::ModelUploads uploads;
+    unsigned generation = 0;
+    bool prepared = false;
   };
   // One pack's FxGpu built in steps: the pack read, the sprite bank, the sprite sheets (in slices of the budget), the mesh bake, the mesh
-  // textures (in slices), the mesh buffers, the HD mesh index (in slices), the model read, the models and the overlay's atlases.
+  // textures (in slices), the mesh buffers, the HD mesh index (in slices), the model read, the models and the overlay's atlases (in slices).
   // fx_gpu_step runs one step (true = finished: the result is in fx_gpu_, or `failed`). The pack read and the model read run on a worker
   // thread: a step only looks whether its job is done, unless `wait` (the pack is needed now) makes it wait for it.
   struct FxGpuBuild {
@@ -966,6 +970,9 @@ class BattleView {
     bool failed = false, wait = false;
   };
   bool fx_gpu_step(FxGpuBuild& build, double budget_ms);
+  // A bespoke overlay's atlas `index` (a texture per mesh texture of the pack, empty where it has no usable image), appended to gpu's
+  // textures and sets.
+  void fx_make_overlay_atlas(FxGpu& gpu, const assets::StageAsset& st, size_t index);
   // battle.prd's meshes (once per scene).
   FxGpu* fx_gpu_resident(const FxResident* resident);
   // The mods' tile replacements of a mesh asset (render/stage_tiles.h): applied before its GPU copy is made (`fresh`), and again, with the object

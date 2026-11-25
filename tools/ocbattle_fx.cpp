@@ -87,7 +87,7 @@ struct PackRow {
   std::vector<std::string> bespoke_issues;
   // op-05 names that resolve nowhere (type 3 sheets "s:", type 14 meshes "m:", type 20 models "o:" of objects the run spawned).
   std::set<std::string> missing_names;
-  // A spawned type-20 object names no loadable type-0x0B model of the pack (BattleView::fx_load_models). The model is looked up when an
+  // A spawned type-20 object names no loadable type-0x0B model of the pack (BattleView::fx_read_models). The model is looked up when an
   // object spawns, so an emitter no sequence reaches never needs its model.
   bool missing_model = false;
 };
