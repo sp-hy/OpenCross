@@ -461,14 +461,20 @@ void App::init_saves() {
     // The OpenCross page lives next to its save file: "OpenCross" for save.dat, "<name>_OpenCross" for another [Paths] SaveFile.
     const std::string stem = save_path.stem().string();
     oc_saves.set_dir(save_path.parent_path() / (stem == "save" ? std::string("OpenCross") : stem + "_OpenCross"));
-    // Element ids past 511 (a mod's records) go into side files there, for every slot write (save::set_wide_store).
+    // Element ids past 511, item ids past 255 and key items past 64 (a mod's records) go into side files there, for every slot write
+    // (save::set_wide_store).
     save::set_wide_store(oc_saves.dir() / "wide");
     // ... with the names of the records mods add, so a save keeps them when the mods change.
-    save::set_element_names({[](u16 id) { return data::table_rows().name_of("pgdat", id); },
-                             [](std::string_view name) -> std::optional<u16> {
-                               const std::optional<size_t> id = data::table_rows().id_of("pgdat", name);
-                               return id ? std::optional<u16>(static_cast<u16>(*id)) : std::nullopt;
-                             }});
+    auto record_names = [](std::string table) -> save::RecordNames {
+      return {[table](u16 id) { return data::table_rows().name_of(table, id); },
+              [table](std::string_view name) -> std::optional<u16> {
+                const std::optional<size_t> id = data::table_rows().id_of(table, name);
+                return id ? std::optional<u16>(static_cast<u16>(*id)) : std::nullopt;
+              }};
+    };
+    save::set_element_names(record_names("pgdat"));
+    save::set_item_names(record_names("waa"));
+    save::set_key_item_names(record_names("keyitem"));
     oc_saves.load();
   }
   if (flow_ready && have_save_dat) flow.set_save_dat(&save_dat, &oc_saves);

@@ -56,6 +56,7 @@ void App::init_route_state() {
   rstate.party_ent = [this](int slot) { return world.party_entity(slot); };
   rstate.path = [this](float x0, float z0, float x1, float z1, bool smooth) { return world.find_path(x0, z0, x1, z1, smooth); };
   rstate.var = [this](int id) { return world.vm().var(static_cast<u16>(id)); };
+  rstate.item_count = [this](int id) { return world.item_count(id); };
   rstate.char_stat = [this](int id, int what) { return world.debug_char_stat(id, what); };
   rstate.set_char_stat = [this](int id, int what, int value) { world.debug_set_char_stat(id, what, value); };
   rstate.remote_drawn = [this] { return world.remote_drawn(); };
@@ -148,7 +149,7 @@ void App::fill_route_state() {
 }
 
 // Route `request`: rename selects the character, then name entry; party_add adds a character and rebinds the party; party_remove
-// empties the slot of a character reference (REMOVE_FROM_PARTY); money sets the
+// empties the slot of a character reference (REMOVE_FROM_PARTY); item gives a field-script item id (BB's ranges); money sets the
 // gold; save is the ending's cleared-save prompt (strips the roster, variable 0x7E = 3, save list); ngplus is the New Game+ title list
 // over the current game; slotdump writes the game as one 0x2000 save block to $OC_SLOT_DUMP<N>.bin; savemark remembers that block (play
 // time left out) and savecheck fails the run when the game's block differs from it; battle starts an encounter id on
@@ -166,6 +167,7 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
+  else if (rk == "item") world.give_item(out.request_arg);
   else if (rk == "save") world.request_menu(MK::Save, 0);
   else if (rk == "ngplus") world.request_menu(MK::NewGamePlus, 0);
   else if (rk == "restart") restart_requested = true;
@@ -206,7 +208,7 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "movie") world.play_movie(out.request_arg, out.request_arg2);
   else if (rk == "battle") world.request_engine_battle(out.request_arg, out.request_arg2, out.request_arg3);
   else if (rk == "battle_disguise") world.request_engine_battle(out.request_arg, 0, 4);
-  else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);
+  else if (rk == "trading") world.request_engine_menu(MK::TradingPost, out.request_arg);
   else if (rk == "elementshop") world.request_engine_menu(MK::ElementShop, out.request_arg);
   else if (rk == "weaponshop") world.request_engine_menu(MK::WeaponShop, out.request_arg);
   else {

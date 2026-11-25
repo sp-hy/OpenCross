@@ -143,7 +143,8 @@ class GameState {
   std::string location_name(const import::LangTables& lt, import::Lang lang, std::string* second = nullptr) const {
     return location_name(lt, lang, slot.progression(), second);
   }
-  bool has_key_item(int id) const { return id >= 1 && id <= 64 && ((slot.key_items() >> (id - 1)) & 1) != 0; }
+  // Key item `id` (1-based): the game's 1..64, then the key items mods add by name (save::SaveSlot::key_items_wide).
+  bool has_key_item(int id) const { return slot.has_key_item(id); }
   // Key item ids, ascending.
   std::vector<int> key_items() const;
 

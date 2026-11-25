@@ -7,8 +7,12 @@
 #include <iterator>
 #include <optional>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "core/log.h"
+#include "data/table_rows.h"
+#include "game/battle/battle_model_cache.h"
 #include "game/battle/model_table.h"
 #include "import/battle_stage.h"
 #include "import/container.h"
@@ -395,8 +399,11 @@ std::set<u32> actor_script_tags(const vfs::Vfs& vfs) {
   };
   if (const auto prd = vfs.read("cdrom/battle/battle.prd")) walk(*prd);
   std::set<std::string> seen, packs;
-  for (const std::string_view sv : kBattleModels) {
-    const std::string stem(sv);
+  // The game's models, then the models of the monsters mods add by name (when `vfs` is the one the mods' rows were set for).
+  std::vector<std::string> stems(kBattleModels.begin(), kBattleModels.end());
+  if (data::table_mods(vfs))
+    for (const std::string& name : data::table_rows().added_names("monster")) stems.push_back(ModelCache::named_monster_model(vfs, name));
+  for (const std::string& stem : stems) {
     if (stem.empty() || !seen.insert(stem).second) continue;
     if (const std::string pack = attack_pack_of(stem); packs.insert(pack).second)
       if (const auto at0 = vfs.read("cdrom/" + pack)) walk(*at0);

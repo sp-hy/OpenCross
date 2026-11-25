@@ -5,9 +5,12 @@
 #include <algorithm>
 #include <chrono>
 #include <cstring>
+#include <format>
+#include <string_view>
 
 #include "battle/battle.h"
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "data/tables.h"
 #include "game/model_files.h"
 #include "import/model.h"
@@ -107,11 +110,27 @@ std::string ModelCache::player_model(const vfs::Vfs& vfs, int char_id) {
   return {};
 }
 
-// monster.bin byte 0x2D = battle model id: file-table entry 3194 + 3 * id is the model's .obj (model_table.h).
-std::string ModelCache::monster_model(const data::GameTables* tables, int monster_id) {
+std::string ModelCache::named_monster_model(const vfs::Vfs& vfs, std::string_view name) {
+  if (name.empty()) return {};
+  std::string stem = std::format("battle/monster/{}/{}", name, name);
+  return vfs.added("cdrom/" + stem + ".obj") ? stem : std::string{};
+}
+
+// A monster mods add by name with a model of its own (named_monster_model); else monster.bin byte 0x2D = battle model id: file-table
+// entry 3194 + 3 * id is the model's .obj (model_table.h).
+std::string ModelCache::monster_model(const vfs::Vfs& vfs, const data::GameTables* tables, int monster_id) {
   if (monster_id < 0 || static_cast<size_t>(monster_id) >= tables->enemies.size()) return {};
+  if (std::string own = named_monster_model(vfs, data::table_rows().name_of("monster", static_cast<size_t>(monster_id))); !own.empty())
+    return own;
   const size_t model = tables->enemies[static_cast<size_t>(monster_id)].model();
   return model < kBattleModels.size() ? std::string(kBattleModels[model]) : std::string{};
+}
+
+std::string ModelCache::monster_weapon_bin(const vfs::Vfs& vfs, const data::GameTables* tables, int monster_id) {
+  if (monster_id < 0 || static_cast<size_t>(monster_id) >= tables->enemies.size()) return {};
+  if (const std::string own = named_monster_model(vfs, data::table_rows().name_of("monster", static_cast<size_t>(monster_id))); !own.empty())
+    return vfs.added("cdrom/" + own + ".bin") ? own + ".bin" : std::string{};
+  return weapon_bin(static_cast<int>(tables->enemies[static_cast<size_t>(monster_id)].model()));
 }
 
 std::optional<assets::ModelAsset> ModelCache::read_model(const vfs::Vfs& vfs, const std::string& stem, std::string* err) {
@@ -142,7 +161,7 @@ std::string ModelCache::unit_model_stem(const vfs::Vfs& vfs, const data::GameTab
   if (unit.pc && unit.form < 0 && (unit.kind != unit.src_id || unit.src_id >= 44) && static_cast<size_t>(unit.kind) < kBattleModels.size() &&
       !kBattleModels[static_cast<size_t>(unit.kind)].empty())
     return std::string(kBattleModels[static_cast<size_t>(unit.kind)]);
-  return unit.pc && unit.form < 0 ? player_model(vfs, unit.src_id) : monster_model(tables, unit.form >= 0 ? unit.form : unit.src_id);
+  return unit.pc && unit.form < 0 ? player_model(vfs, unit.src_id) : monster_model(vfs, tables, unit.form >= 0 ? unit.form : unit.src_id);
 }
 
 int ModelCache::model_number(const data::GameTables& tables, const battle::Unit& unit) {
@@ -171,11 +190,12 @@ std::shared_ptr<ModelHandle> ModelCache::load_weapon(const vfs::Vfs& vfs, render
 // pair `item byte 0 & 0x7F` (TIM 4bpp 128x85 -> VRAM (416, 256 + 85 slot), CLUT row; mesh -> the weapon object), exactly like a PC's pack.
 // The 17 battle/wepon/*.kmd (file-table 3985 + weapon_model) only size the buffers; each equals one pair's mesh. It is then
 // hung on the model's two mount records.
-std::shared_ptr<ModelHandle> ModelCache::load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int model, int part) {
-  if (model < 0 || static_cast<size_t>(model) >= kBattleWeaponBins.size() || part < 0) return nullptr;
-  const std::string bin = weapon_bin(model);
+std::shared_ptr<ModelHandle> ModelCache::load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const data::GameTables* tables,
+                                                           int monster_id, int part) {
+  if (part < 0) return nullptr;
+  const std::string bin = monster_weapon_bin(vfs, tables, monster_id);
   if (bin.empty()) {
-    log::warn("battle: enemy weapon: model {} has no weapon .bin", model);
+    log::warn("battle: enemy weapon: monster {} has no weapon .bin", monster_id);
     return nullptr;
   }
   return weapon_part(vfs, meshes, bin, part);

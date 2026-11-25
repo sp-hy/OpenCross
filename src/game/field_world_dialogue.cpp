@@ -328,10 +328,11 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
 }
 
 // Width of a substituted string, `table` numbered as in the JP executable: table 0 ids 0x200.. are elements / techs (table 23),
-// 0x400.. key items (24), from
-// data::kScriptElementBase elements again (table 23; a record past the table, a mod's, measures the sysmes name the dialogue draws
-// in the build's font, Ps1Font::width); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
-// (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's; 27 the button
+// 0x400.. key items (24; past 0x440 a mod's own key items, script_key_item), from data::kScriptItemBase a mod's own items (table 0,
+// script_item), from data::kScriptElementBase elements again (table 23); an item, element or key item record past the executable's
+// table (a mod's) measures the sysmes name the dialogue draws in the build's font (Ps1Font::width); character names (table 1) below 0x2C are the save's names, 0x80 + n is the
+// first n glyphs of Serge's name (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read
+// as Lynx's; 27 the button
 // names; kGrammarTables + n grammar form n of speaker `id`. The table is looked up in the build's own string tables (the USA build
 // numbers them differently and reads a grammar form by the speaker's dialect column). Inside, glyphs count as in a message, a nested
 // name (code 8) adds its width, and the first other control code ends it.
@@ -339,6 +340,11 @@ int FieldWorld::ps1_string_width(int table, int id) {
   if (table == 0 && id >= data::kScriptElementBase) {
     table = 23;
     id = script_element(id).value_or(0);
+  } else if (table == 0 && id >= data::kScriptItemBase) {
+    id = script_item(id).value_or(0);
+  } else if (table == 0 && id > data::kScriptKeyItemBase + static_cast<int>(data::kGameKeyItems)) {
+    table = 24;
+    id = script_key_item(id).value_or(0);
   } else if (table == 0 && id >= 0x200) {
     table = id < 0x400 ? 23 : 24;
     id -= id < 0x400 ? 0x200 : 0x400;
@@ -354,8 +360,12 @@ int FieldWorld::ps1_string_width(int table, int id) {
         row = form == exe_build_->grammar_by_id ? id + 1 : id >= 0 && static_cast<size_t>(id) < grammar_columns_.size() ? grammar_columns_[static_cast<size_t>(id)] + 1 : 1;
     }
   }
-  if (table == 23 && exe_table >= 0 && static_cast<size_t>(row) >= exe_strings_.count(exe_table))
-    return exe_font_ ? exe_font_->width(dialogue_.tables().item_name(0x170000 | row, dialogue_.language())) : 0;
+  const bool mod_record = table == 23 || (table == 0 && id >= static_cast<int>(data::kGameItems)) ||
+                          (table == 24 && id > static_cast<int>(data::kGameKeyItems));
+  if (mod_record && exe_table >= 0 && static_cast<size_t>(row) >= exe_strings_.count(exe_table)) {
+    const u32 category = table == 23 ? 0x170000 : table == 24 ? 0x180000 : 0;
+    return exe_font_ ? exe_font_->width(dialogue_.tables().item_name(category | static_cast<u32>(row), dialogue_.language())) : 0;
+  }
   std::span<const u8> text;
   size_t glyph_limit = std::numeric_limits<size_t>::max();
   if (table == 1 && (id & 0x80)) {
@@ -487,8 +497,9 @@ void FieldWorld::dialogue_choice(int first, int last) {
 // A8: mode 1 = to black, mode 0 = back to the picture; arg = ticks (0 = at once). Drawn as the room change's subtractive fade.
 
 void FieldWorld::request_menu(script::MenuKind kind, int arg) {
-  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] of the running room's owner.
-  if (menu_state_ == MenuState::None && (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop)) {
+  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] / [TradingPosts] of the running room's owner.
+  if (menu_state_ == MenuState::None &&
+      (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop || kind == script::MenuKind::TradingPost)) {
     const std::optional<int> row = script_shop(kind, arg);
     if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
     arg = row.value_or(-1);

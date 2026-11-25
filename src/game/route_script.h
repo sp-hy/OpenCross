@@ -223,6 +223,8 @@ struct RouteState {
   std::function<int(int)> party_ent;
   // Script variable read.
   std::function<int(int)> var;
+  // Owned count of a field-script item id (D5's ranges).
+  std::function<int(int)> item_count;
   std::function<std::string(int)> char_name;
   std::function<std::string()> party;
   std::function<int()> disc;

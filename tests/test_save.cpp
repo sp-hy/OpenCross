@@ -164,7 +164,7 @@ SaveSlot synthetic_slot() {
     const u8 nm[] = {0xF8, 0x27, 0xF8, 0x42, 0xF8, 0x4E, 0xF8, 0x68, 0x75, 0x76, 0, 0};
     std::memcpy(character.name.data(), nm, sizeof nm);
   }
-  for (int k = 0; k < kNumItems; ++k) slot.items[k] = {static_cast<u16>(k % 512), static_cast<u8>(k % 100)};
+  for (int k = 0; k < kNumItems; ++k) slot.items[k] = {static_cast<u16>(k % 256), static_cast<u8>(k % 100)};
   for (int k = 0; k < kNumElements; ++k) slot.elements[k] = {static_cast<u16>((k * 3) % 512), static_cast<u8>(k % 100)};
   slot.button_cfg = {0x76543210, 0x76543211, 0x3210, 0x3211};
   slot.unk_e1b8 = {1, 2, 3, 4};
@@ -216,13 +216,16 @@ void test_slot() {
   us_card.set_dir(us_block, 0x51, MemCard::kBlock, 0xFFFF, "BASLUSP01041USCHRO07");
   CHECK(write_slot(us_card, 7, slot) == us_block);
   CHECK(list_slots(us_card).size() == 1 && list_slots(us_card)[0].name == "BASLUSP01041USCHRO07");
-  // Values wider than their stream field saturate instead of wrapping.
+  // Values wider than their stream field saturate instead of wrapping; an item id past the game's 255 is not the stream's (without a
+  // store it is dropped).
   SaveSlot wide = slot;
   wide.items[3].qty = 130;
   wide.chars[2].max_hp = 1500;
   wide.chars[2].weapon = 600;
+  wide.chars[2].model_id = 600;
   const SaveSlot narrowed = decode_block(encode_block(wide));
-  CHECK(narrowed.items[3].qty == 127 && narrowed.chars[2].max_hp == 1023 && narrowed.chars[2].weapon == 511);
+  CHECK(narrowed.items[3].qty == 127 && narrowed.chars[2].max_hp == 1023 && narrowed.chars[2].model_id == 511);
+  CHECK(narrowed.chars[2].weapon == 0);
   // Element ids past 511: the stream drops them; with a store they come back from the side file.
   {
     SaveSlot mod = slot;
@@ -248,6 +251,41 @@ void test_slot() {
     set_element_names({[](u16) { return std::string(); }, [](std::string_view) { return std::optional<u16>(); }});
     CHECK(decode_block(named).elements[5].id == 0 && decode_block(named).chars[1].grid[4] == 700);
     set_element_names({});
+    // Item ids past 255 (stacks and equipment slots): the stream has them empty, the side file brings them back, by name when named.
+    SaveSlot gear = slot;
+    gear.items[7] = {300, 2};
+    gear.chars[3].armour = 301;
+    gear.chars[3].accessory[2] = 302;
+    const Bytes gear_block = encode_block(gear);
+    set_wide_store({});
+    const SaveSlot gear_plain = decode_block(gear_block);
+    CHECK(gear_plain.items[7].id == 0 && gear_plain.chars[3].armour == 0 && gear_plain.chars[3].accessory[2] == 0);
+    set_wide_store(store);
+    const SaveSlot gear_back = decode_block(gear_block);
+    CHECK(gear_back.items[7].id == 300 && gear_back.items[7].qty == 2 && gear_back.chars[3].armour == 301 &&
+          gear_back.chars[3].accessory[2] == 302);
+    set_item_names({[](u16 id) { return id == 300 ? std::string("star_blade") : id == 301 ? std::string("old_mail") : std::string(); },
+                    [](std::string_view name) { return name == "star_blade" ? std::optional<u16>(280) : std::nullopt; }});
+    const Bytes gear_named = encode_block(gear);
+    const SaveSlot gear_moved = decode_block(gear_named);
+    CHECK(gear_moved.items[7].id == 280 && gear_moved.items[7].qty == 2 && gear_moved.chars[3].armour == 0 &&
+          gear_moved.chars[3].accessory[2] == 302);
+    set_item_names({});
+    // Key items past 64: not in the block; the side file brings them back, by name when named (a name gone: the key item is gone).
+    SaveSlot keys = slot;
+    keys.set_key_item(70, true);
+    keys.set_key_item(66, true);
+    keys.set_key_item(66, true);
+    CHECK((keys.key_items_wide == std::vector<u16>{66, 70}) && keys.has_key_item(70) && !keys.has_key_item(67));
+    keys.set_key_item(5, true);
+    CHECK(keys.has_key_item(5) && (keys.key_items() & 0x10) != 0);
+    const Bytes key_block = encode_block(keys);
+    CHECK((decode_block(key_block).key_items_wide == std::vector<u16>{66, 70}));
+    set_key_item_names({[](u16 id) { return id == 70 ? std::string("sky_key") : id == 66 ? std::string("old_key") : std::string(); },
+                        [](std::string_view name) { return name == "sky_key" ? std::optional<u16>(65) : std::nullopt; }});
+    const SaveSlot keys_moved = decode_block(encode_block(keys));
+    CHECK((keys_moved.key_items_wide == std::vector<u16>{65}) && keys_moved.has_key_item(5));
+    set_key_item_names({});
     // The mods' variables come back by name; zeros are not kept; the block alone has none.
     SaveSlot vars = slot;
     vars.mod_vars = {{"run_depth", 12}, {"best_depth", 0xFFFF}, {"unused", 0}};
@@ -257,6 +295,7 @@ void test_slot() {
     // The block alone, as RDE reads it.
     CHECK(decode_block(block).elements[5].id == 0);
     CHECK(decode_block(var_block).mod_vars.empty());
+    CHECK(decode_block(key_block).key_items_wide.empty());
     std::error_code ec;
     std::filesystem::remove_all(store, ec);
   }

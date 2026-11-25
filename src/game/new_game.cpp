@@ -100,6 +100,7 @@ void star_unlocks(const data::GameTables* tables, save::SaveSlot& slot, bool dre
 void reset_party(save::SaveSlot& slot) {
   slot.set_party({0, 0xFF, 0xFF});
   slot.set_key_items(kKeyTimeShifter);
+  slot.key_items_wide.clear();
   for (int char_id = 0; char_id < save::kNumChars; ++char_id) slot.set_recruited(char_id, char_id == 0);
   slot.unk_e1b8 = {1u, 0u, 0u, 0u};
   slot.unk_e1e0 = slot.unk_e1e4 = 0;

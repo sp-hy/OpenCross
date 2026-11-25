@@ -353,8 +353,17 @@ class FieldWorld final : public script::FieldHost {
   // A script item id from data::kScriptElementBase -> the element it names: the element ids of a mod's script are its own (the
   // [Elements] of the mod that owns the running room, data::TableRows::element_for); nothing when it names none.
   std::optional<int> script_element(int item_id) const;
-  // A shop row a script names (FE 5E element shop, FE 68 blacksmith; the row in variable 0x4A) -> the row it means: a mod's own shop ids
-  // ([ElementShops] / [Smiths] of the running room's owner); nothing when it names none.
+  // A script item id from data::kScriptItemBase (below kScriptElementBase) -> the item it names, by the mod's own item ids ([Items] of
+  // the running room's owner); nothing when it names none.
+  std::optional<int> script_item(int item_id) const;
+  // A script item id that names gear or a material (below 0x200 as it is, or script_item) -> the item; nothing for any other id.
+  std::optional<int> script_gear(int item_id) const;
+  // A script item id 0x400 + n -> key item n: the game's 1..63 as they are, past 64 by the mod's own key item ids ([KeyItems] of the
+  // running room's owner); nothing for any other id. script_key_item_id is the reverse (the id a script of the room knows; 0 = none).
+  std::optional<int> script_key_item(int item_id) const;
+  int script_key_item_id(int key_item) const;
+  // A shop row a script names (FE 5E element shop, FE 68 blacksmith, FE 67 trading post; the row in variable 0x4A) -> the row it means:
+  // a mod's own shop ids ([ElementShops] / [Smiths] / [TradingPosts] of the running room's owner); nothing when it names none.
   std::optional<int> script_shop(script::MenuKind kind, int row) const;
   const ModRooms* mod_rooms() const { return mod_rooms_; }
   // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).
@@ -429,7 +438,7 @@ class FieldWorld final : public script::FieldHost {
   // Field key-item list. Tele-Porter (1), Relief Charm (61) and Smith Spirit (63) are usable only
   // while script vars 0x46 and 0x3C are both 1; every other owned item always is.
   bool key_item_usable(int item) const;
-  // A key item chosen in the list: var 0x2A USED_KEY_ITEM = 0x400 + n; Tele-Porter -> party screen (as FE 5B), Smith Spirit -> smith
+  // A key item chosen in the list: var 0x2A USED_KEY_ITEM = 0x400 + n (a mod's key item: its script id, script_key_item_id); Tele-Porter -> party screen (as FE 5B), Smith Spirit -> smith
   // (as FE 68 with shop var 0x4A), any other item is shown to the entities in talk range (ON slot 4 of those that accept an item).
   void use_key_item(int item);
   // A disabled item confirmed in the list: var 0x2A = 0x400 + n all the same; the list stays open and nothing is shown or opened.

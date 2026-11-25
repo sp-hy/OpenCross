@@ -402,11 +402,28 @@ void FieldWorld::set_reserve_member(int slot, int char_id) {
 }
 
 // Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x401..0x43F key items (id - 0x400 =
-// key item number, 1-based as in GameState::has_key_item; the scripts reach only the first 63 of the 64 bits, higher ids are refused),
-// from data::kScriptElementBase any element record, a mod's past 511 included (id - kScriptElementBase, one copy; a mod's script names
-// the records mods add by its own ids, script_element).
+// key item number, 1-based as in GameState::has_key_item; the game's scripts reach only the first 63 of the 64 bits, 0x440 is
+// refused), 0x441..0x7FF a mod's own key item ids past 64 (script_key_item), from data::kScriptItemBase to kScriptElementBase gear and
+// materials by the mod's own item ids (id - kScriptItemBase, script_item), from data::kScriptElementBase any element record, a mod's
+// past 511 included (id - kScriptElementBase, one copy; a mod's script names the records mods add by its own ids, script_element).
 namespace {
 constexpr int kScriptKeyItems = 63;
+}
+std::optional<int> FieldWorld::script_key_item(int item_id) const {
+  const int number = item_id - data::kScriptKeyItemBase;
+  if (number >= 1 && number <= kScriptKeyItems) return number;
+  if (number <= static_cast<int>(data::kGameKeyItems) || item_id >= data::kScriptItemBase) return std::nullopt;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> key_item = data::table_rows().key_item_for(owner, number);
+  const size_t known = data::table_rows().total("keyitem", data::kGameKeyItems + 1);
+  if (!key_item || *key_item <= data::kGameKeyItems || *key_item >= known) return std::nullopt;
+  return static_cast<int>(*key_item);
+}
+int FieldWorld::script_key_item_id(int key_item) const {
+  if (key_item <= static_cast<int>(data::kGameKeyItems)) return data::kScriptKeyItemBase + key_item;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<int> own = data::table_rows().own_record_id(owner, "keyitem", static_cast<size_t>(key_item));
+  return own ? data::kScriptKeyItemBase + *own : 0;
 }
 std::optional<int> FieldWorld::script_element(int item_id) const {
   const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
@@ -414,49 +431,68 @@ std::optional<int> FieldWorld::script_element(int item_id) const {
   if (!element) return std::nullopt;
   return static_cast<int>(*element);
 }
+std::optional<int> FieldWorld::script_item(int item_id) const {
+  const int own_id = item_id - data::kScriptItemBase;
+  if (own_id < static_cast<int>(data::kGameItems)) return std::nullopt;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> item = data::table_rows().item_for(owner, own_id);
+  if (!item || *item < data::kGameItems || *item >= data::table_rows().total("waa", data::kGameItems)) return std::nullopt;
+  return static_cast<int>(*item);
+}
+std::optional<int> FieldWorld::script_gear(int item_id) const {
+  if (item_id < 0x200) return item_id;
+  if (item_id >= data::kScriptItemBase && item_id < data::kScriptElementBase) return script_item(item_id);
+  return std::nullopt;
+}
 std::optional<int> FieldWorld::script_shop(script::MenuKind kind, int row) const {
   const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
-  const std::optional<size_t> mapped =
-      data::table_rows().record_for(owner, kind == script::MenuKind::ElementShop ? "el_shop" : "waa_shop", row);
+  const char* table = kind == script::MenuKind::ElementShop ? "el_shop" : kind == script::MenuKind::TradingPost ? "trade" : "waa_shop";
+  const std::optional<size_t> mapped = data::table_rows().record_for(owner, table, row);
   if (!mapped) return std::nullopt;
   return static_cast<int>(*mapped);
 }
 int FieldWorld::item_count(int id) {
   if (id < 0) return 0;
-  if (id < 0x200) return gs_->item_count(id);
+  if (const std::optional<int> gear = script_gear(id)) return gs_->item_count(*gear);
+  if (id >= data::kScriptItemBase && id < data::kScriptElementBase) return 0;
   if (id < 0x400) return gs_->element_count(id - 0x200);
   if (id >= data::kScriptElementBase) {
     const std::optional<int> element = script_element(id);
     return element ? gs_->element_count(*element) : 0;
   }
-  return id - 0x400 <= kScriptKeyItems && gs_->has_key_item(id - 0x400) ? 1 : 0;
+  const std::optional<int> key_item = script_key_item(id);
+  return key_item && gs_->has_key_item(*key_item) ? 1 : 0;
 }
 void FieldWorld::give_item(int id) {
   if (id <= 0) return;
   if (on_item_given_) on_item_given_(id);
-  if (id < 0x200) {
-    gs_->add_item(id);
+  if (const std::optional<int> gear = script_gear(id)) {
+    gs_->add_item(*gear);
+  } else if (id >= data::kScriptItemBase && id < data::kScriptElementBase) {
+    return;
   } else if (id < 0x400) {
     const int copies = id >= 0x261 && id <= 0x26B ? 5 : 1;
     for (int i = 0; i < copies; ++i) gs_->add_element(id - 0x200);
   } else if (id >= data::kScriptElementBase) {
     if (const std::optional<int> element = script_element(id)) gs_->add_element(*element);
-  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
-    const bool had = gs_->has_key_item(key_item);
-    gs_->slot.set_key_items(gs_->slot.key_items() | (1ull << (key_item - 1)));
-    if (!had && on_key_item_) on_key_item_(key_item);
+  } else if (const std::optional<int> key_item = script_key_item(id)) {
+    const bool had = gs_->has_key_item(*key_item);
+    gs_->slot.set_key_item(*key_item, true);
+    if (!had && on_key_item_) on_key_item_(*key_item);
   }
 }
 void FieldWorld::take_item(int id) {
   if (id <= 0) return;
-  if (id < 0x200) {
-    gs_->take_item(id);
+  if (const std::optional<int> gear = script_gear(id)) {
+    gs_->take_item(*gear);
+  } else if (id >= data::kScriptItemBase && id < data::kScriptElementBase) {
+    return;
   } else if (id < 0x400) {
     gs_->take_element(id - 0x200);
   } else if (id >= data::kScriptElementBase) {
     if (const std::optional<int> element = script_element(id)) gs_->take_element(*element);
-  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
-    gs_->slot.set_key_items(gs_->slot.key_items() & ~(1ull << (key_item - 1)));
+  } else if (const std::optional<int> key_item = script_key_item(id)) {
+    gs_->slot.set_key_item(*key_item, false);
   }
 }
 // Field key-item list. Only Tele-Porter (1), Relief Charm (61) and Smith Spirit (63) are usable, and only when the script allows it.
@@ -464,10 +500,11 @@ bool FieldWorld::key_item_usable(int item) const {
   if (item != 1 && item != 61 && item != 63) return true;
   return vm_.var(0x46) == 1 && vm_.var(0x3C) == 1;
 }
+// USED_KEY_ITEM (variable 0x2A) holds the key item's script id: 0x400 + n, past 64 the running room's owner's own id (0 when it lists
+// none, so no script of the room matches it).
 void FieldWorld::use_key_item(int item) {
-  if (item < 1 || item > 64) return;
-  // USED_KEY_ITEM
-  vm_.set_var(0x2A, 0x400 + item);
+  if (item < 1) return;
+  vm_.set_var(0x2A, script_key_item_id(item));
   if (item != 1 && item != 61 && item != 63) {
     key_item_shown_ = true;
     return;
@@ -486,7 +523,7 @@ void FieldWorld::use_key_item(int item) {
   log::info("field: key item {} used -> menu kind {} arg {}", item,static_cast<int>(menu_req_.kind), menu_req_.arg);
 }
 void FieldWorld::refuse_key_item(int item) {
-  if (item >= 1 && item <= 64) vm_.set_var(0x2A, 0x400 + item);
+  if (item >= 1) vm_.set_var(0x2A, script_key_item_id(item));
 }
 s32 FieldWorld::money() { return static_cast<s32>(gs_->gold()); }
 void FieldWorld::set_money(s32 amount) { gs_->set_gold(static_cast<u32>(std::clamp(amount, 0, 9999999))); }
@@ -668,9 +705,13 @@ void FieldWorld::install_name_hooks() {
     };
     dialogue.speaker_name = [names](int speaker) -> std::u32string { return data::own_name(speaker, names(), false); };
     dialogue.script_var = [this](int var) -> int { return vm_.var(static_cast<u16>(var)); };
-    dialogue.script_element = [this](int item_id) { return script_element(item_id); };
     // script_set serves {fset(n)} (variable 0x22).
     dialogue.script_set = [this](int var, int value) { vm_.set_var(static_cast<u16>(var), value); };
+    dialogue.script_record = [this](int item_id) {
+      return item_id >= data::kScriptElementBase ? script_element(item_id)
+             : item_id >= data::kScriptItemBase  ? script_item(item_id)
+                                                 : script_key_item(item_id);
+    };
   };
   wire(dialogue_);
   for (auto& window : extra_win_)

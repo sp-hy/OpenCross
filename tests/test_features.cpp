@@ -114,15 +114,25 @@ void test_elements() {
   CHECK(manifest.sections.empty() && manifest.problems.size() == 5);
   CHECK(features::is_record_name("a_b9") && !features::is_record_name("_a") && !features::is_record_name(""));
   // [ElementShops] / [Smiths]: shop ids from 32 (the game's rows are 0..31).
-  const features::Manifest shops = features::parse_manifest("[ElementShops]\n32=hub_shop\n31=low\n[Smiths]\n40=hub_smith\n");
+  const features::Manifest shops =
+      features::parse_manifest("[ElementShops]\n32=hub_shop\n31=low\n[Smiths]\n40=hub_smith\n[TradingPosts]\n33=bazaar\n");
   CHECK((shops.own_ids.at("el_shop") == std::vector<std::pair<int, std::string>>{{32, "hub_shop"}}));
   CHECK((shops.own_ids.at("waa_shop") == std::vector<std::pair<int, std::string>>{{40, "hub_smith"}}));
+  CHECK((shops.own_ids.at("trade") == std::vector<std::pair<int, std::string>>{{33, "bazaar"}}));
   CHECK(shops.problems.size() == 1 && !shops.own_ids.contains("pgdat"));
   // [Monsters] from 222, [Formations] from 513 (a script starts formation n as battle 0x200 + n).
   const features::Manifest battle = features::parse_manifest("[Monsters]\n222=big_boss\n221=low\n[Formations]\n513=boss_fight\n512=low\n");
   CHECK((battle.own_ids.at("monster") == std::vector<std::pair<int, std::string>>{{222, "big_boss"}}));
   CHECK((battle.own_ids.at("scenedat") == std::vector<std::pair<int, std::string>>{{513, "boss_fight"}}));
   CHECK(battle.problems.size() == 2);
+  // [Items] from 256 (the game's items are 0..255) to 0x7FF (a script reaches item n as 0x800 + n).
+  const features::Manifest items = features::parse_manifest("[Items]\n256=star_blade\n2047=last_ring\n255=low\n2048=high\n");
+  CHECK((items.own_ids.at("waa") == std::vector<std::pair<int, std::string>>{{256, "star_blade"}, {2047, "last_ring"}}));
+  CHECK(items.problems.size() == 2);
+  // [KeyItems] from 65 (the game's are 1..64) to 0x3FF (a script reaches key item n as 0x400 + n).
+  const features::Manifest keys = features::parse_manifest("[KeyItems]\n65=sky_key\n1023=last_key\n64=low\n1024=high\n");
+  CHECK((keys.own_ids.at("keyitem") == std::vector<std::pair<int, std::string>>{{65, "sky_key"}, {1023, "last_key"}}));
+  CHECK(keys.problems.size() == 2);
 }
 
 void test_variables() {
