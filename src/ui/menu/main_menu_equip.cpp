@@ -1,8 +1,10 @@
 #include "ui/menu/main_menu_impl.h"
 
 #include <algorithm>
-#include <cstdio>
+#include <format>
+#include <string>
 
+#include "data/table_rows.h"
 #include "ui/menu/menu_common.h"
 #include "ui/menu/ps1_art.h"
 #include "ui/ps1_font.h"
@@ -337,9 +339,9 @@ void MainMenu::Impl::build_keyitems() {
   if (cnt > 0 && ki_cur < cnt) {
     const int id = ids[static_cast<size_t>(ki_cur)];
     {
-      // Picture: hd/menu/keyitem/NN.png in both art modes.
-      char path[48];
-      std::snprintf(path, sizeof path, "hd/menu/keyitem/%02d.png", id);
+      // Picture: hd/menu/keyitem/NN.png in both art modes; a key item a mod adds: hd/menu/keyitem/<its name>.png.
+      std::string path = std::format("hd/menu/keyitem/{:02}.png", id);
+      if (id > static_cast<int>(data::kGameKeyItems)) path = std::format("hd/menu/keyitem/{}.png", data::table_rows().name_of("keyitem", static_cast<size_t>(id)));
       // Classic art + Ps1ResUi: cdrom/menu/keyitem/<name>.tim (255 x 255 texels at (0xEA, 0x24)).
       if (Tex* p1 = ps1_screen() ? texs.ps1("ps1:keyitem" + std::to_string(id), [&] { return ps1::keyitem(*vfs, id); }) : nullptr)
         Img(p1, PX(234), PY(36), PX(255), PY(255), 0, 0, ps1::kKeyItemUv, ps1::kKeyItemUv);

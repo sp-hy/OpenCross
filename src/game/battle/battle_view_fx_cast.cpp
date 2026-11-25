@@ -17,6 +17,7 @@
 #include <string_view>
 
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/battle/battle_view.h"
 #include "game/battle/battle_view_util.h"
 
@@ -348,6 +349,20 @@ int BattleView::fx_charge_colour() const {
   return data::colour_index_of_bit(tables_->elements[static_cast<size_t>(element)].colour_bit());
 }
 
+// An element mods add by name may ship its own pack (cdrom/battle/effects/<name>.prd), played with its effect id's handler; a caught cast
+// keeps the trap's.
+std::shared_ptr<const FxPack> BattleView::fx_named_pack(int eid) {
+  if (act_.ev.empty()) return nullptr;
+  const battle::ActionEvent& e0 = act_.ev.front();
+  if (e0.caught || e0.fx_eid >= 0 || e0.element < static_cast<int>(data::kVanillaElemRecs)) return nullptr;
+  return fxlib_.get_named(eid, data::table_rows().name_of("pgdat", static_cast<size_t>(e0.element)));
+}
+
+std::shared_ptr<const FxPack> BattleView::fx_action_pack(int eid) {
+  std::shared_ptr<const FxPack> pack = fx_named_pack(eid);
+  return pack ? pack : fxlib_.get(eid);
+}
+
 // Queues the builds of the current element's GPU resources at its confirm: the colour's charge pack, which starts kCastLead ticks later (or
 // after the hop home), then the element pack, which the charge hands over to about 108 ticks after that. fx_prefetch_step runs them in
 // that order over the frames in between, so fx_charge_begin and fx_begin find their packs in the fx_gpu_ cache. Read, decoded and uploaded
@@ -358,12 +373,16 @@ void BattleView::fx_prefetch_cast() {
   if (!fxlib_ready_) fxlib_ready_ = fxlib_.init(*vfs_);
   if (!fxlib_ready_) return;
   if (const int colour = fx_charge_colour(); colour >= 0) fx_prefetch_open(BattleFxLibrary::charge_eid(colour));
-  if (const int eid = fx_action_eid(); eid >= 0) fx_prefetch_open(eid);
+  // A named element's own pack is read here (its file is the mod's, not the slot's: the worker reads only slot packs).
+  if (const int eid = fx_action_eid(); eid >= 0) fx_prefetch_open(eid, fx_named_pack(eid));
 }
 
-void BattleView::fx_prefetch_open(int eid) {
-  if (fx_gpu_.count(eid) || std::ranges::find(fx_prefetch_, eid, &FxGpuBuild::eid) != fx_prefetch_.end()) return;
-  fx_prefetch_.emplace_back().eid = eid;
+void BattleView::fx_prefetch_open(int eid, std::shared_ptr<const FxPack> pack) {
+  const int key = pack ? pack->gpu_key() : eid;
+  if (fx_gpu_.count(key) || std::ranges::find(fx_prefetch_, key, &FxGpuBuild::eid) != fx_prefetch_.end()) return;
+  FxGpuBuild& build = fx_prefetch_.emplace_back();
+  build.eid = key;
+  build.pack = std::move(pack);
 }
 
 // The prefetch steps of one video frame: the sprite sheets and the mesh textures run in slices of a few milliseconds, and steps that
@@ -391,7 +410,7 @@ bool BattleView::fx_begin() {
   if (!fxlib_ready_) return false;
   const int eid = fx_action_eid();
   if (eid < 0) return false;
-  std::shared_ptr<const FxPack> pack = fxlib_.get(eid);
+  std::shared_ptr<const FxPack> pack = fx_action_pack(eid);
   if (!pack || !fx_gpu_for(pack)) return false;
   fx_state_log("pack start");
   // The effect start switches the depth cue off.

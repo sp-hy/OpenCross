@@ -148,7 +148,7 @@ void test_new_game_plus() {
   CHECK(plus.ng_flag() == 2 && plus.summary_flags() == 2 && plus.new_game_plus());
   CHECK(plus.key_items() == (ng::kKeyReliefCharm | ng::kKeyTimeShifter));
   // After New Game+: party bytes FF FF FF, MAP_ID (variable 6 = the location word) 0.
-  CHECK(plus.recruited(0) && !plus.recruited(1) && plus.party()[0] == 0xFF && plus.party()[1] == 0xFF);
+  CHECK(plus.recruited(0) && !plus.recruited(1) && plus.party()[0] == -1 && plus.party()[1] == -1);
   // Around playinit: relief 0xFF, default pad tables, element nibbles 5, real (not dream) records.
   CHECK(plus.head[0x59F] == 0xFF && plus.button_cfg == nw::kDefaultButtons && plus.chars[3].equipped_qty[0] == nw::kEquippedFill && !plus.dream_records);
   CHECK(plus.playtime_frames() == 0 && plus.location() == 0 && plus.var(6) == 0 && plus.var(0x42) == 0 && plus.var(0x3D2) == 0x3F);
@@ -262,7 +262,7 @@ void test_new_game_state() {
   // Column 1: 5.
   CHECK(boot.chars[1].unlocked[0] == (0x40 | 0x20));
   CHECK(serge.equipped_qty[0] == 5 && serge.hp_extra == 243 && serge.bonus[0] == 26 && serge.bonus[2] == 85 && serge.bonus[4] == 5 && serge.unk_be >= 2);
-  CHECK(boot.key_items() == nw::kKeyTimeShifter && boot.recruited(0) && !boot.recruited(1) && boot.party()[0] == 0 && boot.party()[1] == 0xFF);
+  CHECK(boot.key_items() == nw::kKeyTimeShifter && boot.recruited(0) && !boot.recruited(1) && boot.party()[0] == 0 && boot.party()[1] == -1);
   CHECK(boot.head[0x5A0] == 2 && boot.head[0x5A1] == 0 && boot.button_cfg == nw::kDefaultButtons && boot.playtime_frames() == 0 && boot.frames == 0x203);
   CHECK(boot.var(0x3D2) == 0x3F && boot.var(0x3E0) == 0x40A && boot.var(0x3E2) == 0x404 && boot.var(0x3E6) == 0x2060 && boot.var(0x3E8) == 0x80 && boot.var(0x3F0) == 0x2000);
   CHECK(boot.var(0) == 0 && boot.var(0x42) == 0 && boot.unk_e1ec == 0 && boot.unk_e1b8[0] == 1);
@@ -359,6 +359,31 @@ void test_box_icons() {
   CHECK(sl::saving_number(used) == -1);
 }
 
+// A slot saved before a mod added a character holds no record for it: the load gives it a new game's record at the slot's stars
+// (name and flags kept); the game's characters and a record the side file gave are not touched.
+void test_fill_added_records() {
+  data::GameTables tables = make_tables();
+  for (auto& [name, set] : tables.char_sets) {
+    set.rec.resize(53, set.rec[1]);
+    set.lv99.resize(53, set.lv99[1]);
+  }
+  save::set_character_names({}, 53);
+  save::SaveSlot slot = nw::boot_state(&tables, 7);
+  nw::real_records(&tables, slot, 9);
+  slot.head[save::head::kStarsTotal] = 3;
+  slot.chars[0].atk = 77;
+  slot.chars[51] = save::SaveChar{};
+  slot.chars[51].name = {'A', 0};
+  slot.chars[52].max_hp = 400;
+  CHECK(nw::fill_added_records(&tables, slot, 5) == 1);
+  const save::SaveChar& added = slot.chars[51];
+  CHECK(added.max_hp == 50 && added.atk == 9 && added.grid[0] == 0x69 && added.name[0] == 'A' && added.equipped_qty[0] == 5);
+  // Growth column 1 (record 1's): star 1 unlocks cell 5.
+  CHECK(added.unlocked[0] == (nw::kInitialUnlocks[0] | 0x20));
+  CHECK(slot.chars[0].atk == 77 && slot.chars[52].max_hp == 400 && nw::fill_added_records(&tables, slot, 5) == 0);
+  save::set_character_names({}, save::kNumChars);
+}
+
 int main() {
   test_box_icons();
   test_variant();
@@ -367,6 +392,7 @@ int main() {
   test_strip_and_fe3f();
   test_new_game_state();
   test_add_stack();
+  test_fill_added_records();
   if (failures) std::printf("%d failure(s)\n", failures);
   else std::printf("ngplus: all passed\n");
   return failures ? 1 : 0;

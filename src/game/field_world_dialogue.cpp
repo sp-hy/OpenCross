@@ -11,6 +11,7 @@
 #include "audio/voice.h"
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/table_rows.h"
 #include "game/new_game_plus.h"
 #include "import/ps1_font.h"
 
@@ -23,6 +24,12 @@ void FieldWorld::setup_dialog_window(int ent, std::span<const s32> v5) {
 void FieldWorld::set_dialog_face(int face) {
   // The portrait belongs to the entity whose script sets it (entity 9 sets it once in INIT and talks later).
   const int runner = vm_.current_entity();
+  // 0x100..0x17F = 0x100 + a character id (the running room's owner's, script_character): that character's face, as a party member
+  // shows it; other values are face ids as before.
+  if (face >= kScriptCharacterFace && face < kScriptCharacterFace + 0x80) {
+    const int character = character_of_script(face - kScriptCharacterFace);
+    face = character >= 0 ? kCharacterFace + character : -1;
+  }
   if (runner >= 0 && runner < static_cast<int>(ents_.size())) ents_[static_cast<size_t>(runner)].face = face;
   dialogue_face_ = face;
   log::debug("field: ent {} SET_DIALOG_FACE {}", runner, face);
@@ -163,12 +170,22 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   const int target = speaker >= 0 && speaker < static_cast<int>(ents_.size()) ? speaker : vm_.current_entity();
   {
     int face = -1;
+    // A character's face (a party member, or SET_DIALOG_FACE 0x100 + id): the game's characters read as their id; a character mods add
+    // shows its own face by name in its own body, else its model byte's.
+    bool character_face = false;
     if (target >= 0 && target < static_cast<int>(ents_.size())) {
       face = ents_[static_cast<size_t>(target)].face;
+      if (face >= kCharacterFace) face -= kCharacterFace, character_face = true;
       if (face < 0)
         for (int slot = 0; slot < 3 && slot < static_cast<int>(party_chars_.size()); ++slot)
-          if (party_ent_[static_cast<size_t>(slot)] == target) face = party_chars_[static_cast<size_t>(slot)];
+          if (party_ent_[static_cast<size_t>(slot)] == target) face = party_chars_[static_cast<size_t>(slot)], character_face = true;
     }
+    std::string face_name;
+    if (character_face && face >= data::kNumChars && gs_) {
+      if (gs_->own_body(face)) face_name = data::table_rows().name_of("char", static_cast<size_t>(face));
+      face = gs_->slot.is_character(face) ? gs_->slot.chars[static_cast<size_t>(face)].model_id & 0xFF : -1;
+    }
+    dialogue_face_name_ = face_name;
     // Faces that follow the story: Pip's is his current form (his record's model byte 0x2B..0x30), Kid's is her alternate face while
     // global bit 18 (FE 71) is set, Serge's is Lynx's (0x31) while his model byte is Lynx's body unless global bit 17 (FE 6C) is set.
     if (gs_) {
@@ -180,7 +197,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     }
     dialogue_face_ = face;
     portrait_left_ = false;
-    if (face >= 0) {
+    if (face >= 0 || !dialogue_face_name_.empty()) {
       // The heading is the one scripts set and read (SET_ROTATION / GET_ROTATION), the model yaw is axis 1 (op 28 / AA). The control
       // yaw that turns the pad (op 63) does not enter.
       const int model_yaw = static_cast<s16>(vm_.entity(target).axis[1]);
@@ -204,7 +221,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
     extra_win_[static_cast<size_t>(win_slot - 1)].owner = vm_.current_entity();
   }
   dlg.set_label(lbl);
-  dlg.set_portrait(lbl ? -1 : dialogue_face_);
+  dlg.set_portrait(lbl ? -1 : dialogue_face_, lbl ? std::string() : dialogue_face_name_);
   last_dialogue_msg_ = message;
   choice_pending_ = false;
   log::debug("field: tick {} dialogue room {} message {} (running ent {}, speaker ent {}, face {}, window {}, portrait {})", tick_count_, room_id_,
@@ -229,7 +246,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   // The portrait panel exists only when the window flags have bit 0; the face is the
   // speaker (name tag of the line / script speaker) unless SET_DIALOG_FACE chose one; (flags & 0x1001) == 1 = left.
   dlg.set_portrait_flags(true, portrait_left_);
-  dlg.set_portrait(lbl ? -1 : dialogue_face_);
+  dlg.set_portrait(lbl ? -1 : dialogue_face_, lbl ? std::string() : dialogue_face_name_);
   if (!lbl && dialogue_face_ >= 0 && on_face_) on_face_(dialogue_face_);
   // E0 passes no entity: it speaks as the running entity, which also places the window (labels too).
   const bool below = place_dialogue_window(dlg, speaker >= 0 ? speaker : target, message, flag_byte, !lbl && dialogue_face_ >= 0);
@@ -286,7 +303,7 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
         width += ps1_string_width(0, arg | (i + 2 < bytes.size() ? bytes[i + 2] << 8 : 0));
         i += 3;
         break;
-      case 8: width += ps1_string_width(1, arg); i += 2; break;
+      case 8: width += ps1_string_width(1, arg & 0x80 ? arg : text_character(arg)); i += 2; break;
       case 9: i += 3; break;
       case 0xA: width += 0x48; i += 2; break;
       case 0xB: width += 0x30; i += 2; break;
@@ -298,8 +315,8 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
         break;
       }
       case 0x15: {
-        int char_id = var(arg);
-        char_id = char_id >= 0x2C ? 0 : reads_as_lynx(char_id) ? data::kLynxBody : char_id;
+        int char_id = text_character(var(arg));
+        char_id = !gs_ || !gs_->slot.is_character(char_id) ? 0 : reads_as_lynx(char_id) ? data::kLynxBody : char_id;
         width += ps1_string_width(1, char_id) + (char_id == 5 ? 0x18 : 0);
         i += 2;
         break;
@@ -328,10 +345,11 @@ int FieldWorld::ps1_message_width(std::span<const u8> bytes, int speaker) {
 }
 
 // Width of a substituted string, `table` numbered as in the JP executable: table 0 ids 0x200.. are elements / techs (table 23),
-// 0x400.. key items (24), from
-// data::kScriptElementBase elements again (table 23; a record past the table, a mod's, measures the sysmes name the dialogue draws
-// in the build's font, Ps1Font::width); character names (table 1) below 0x2C are the save's names, 0x80 + n is the first n glyphs of Serge's name
-// (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read as Lynx's; 27 the button
+// 0x400.. key items (24; past 0x440 a mod's own key items, script_key_item), from data::kScriptItemBase a mod's own items (table 0,
+// script_item), from data::kScriptElementBase elements again (table 23); an item, element or key item record past the executable's
+// table (a mod's) measures the sysmes name the dialogue draws in the build's font (Ps1Font::width); character names (table 1) below 0x2C are the save's names, 0x80 + n is the
+// first n glyphs of Serge's name (Lynx's while his body is Lynx's and GF.16 is clear; 0x83 = 2 glyphs of name 0x0D), other ids read
+// as Lynx's; 27 the button
 // names; kGrammarTables + n grammar form n of speaker `id`. The table is looked up in the build's own string tables (the USA build
 // numbers them differently and reads a grammar form by the speaker's dialect column). Inside, glyphs count as in a message, a nested
 // name (code 8) adds its width, and the first other control code ends it.
@@ -339,6 +357,11 @@ int FieldWorld::ps1_string_width(int table, int id) {
   if (table == 0 && id >= data::kScriptElementBase) {
     table = 23;
     id = script_element(id).value_or(0);
+  } else if (table == 0 && id >= data::kScriptItemBase) {
+    id = script_item(id).value_or(0);
+  } else if (table == 0 && id > data::kScriptKeyItemBase + static_cast<int>(data::kGameKeyItems)) {
+    table = 24;
+    id = script_key_item(id).value_or(0);
   } else if (table == 0 && id >= 0x200) {
     table = id < 0x400 ? 23 : 24;
     id -= id < 0x400 ? 0x200 : 0x400;
@@ -354,8 +377,12 @@ int FieldWorld::ps1_string_width(int table, int id) {
         row = form == exe_build_->grammar_by_id ? id + 1 : id >= 0 && static_cast<size_t>(id) < grammar_columns_.size() ? grammar_columns_[static_cast<size_t>(id)] + 1 : 1;
     }
   }
-  if (table == 23 && exe_table >= 0 && static_cast<size_t>(row) >= exe_strings_.count(exe_table))
-    return exe_font_ ? exe_font_->width(dialogue_.tables().item_name(0x170000 | row, dialogue_.language())) : 0;
+  const bool mod_record = table == 23 || (table == 0 && id >= static_cast<int>(data::kGameItems)) ||
+                          (table == 24 && id > static_cast<int>(data::kGameKeyItems));
+  if (mod_record && exe_table >= 0 && static_cast<size_t>(row) >= exe_strings_.count(exe_table)) {
+    const u32 category = table == 23 ? 0x170000 : table == 24 ? 0x180000 : 0;
+    return exe_font_ ? exe_font_->width(dialogue_.tables().item_name(category | static_cast<u32>(row), dialogue_.language())) : 0;
+  }
   std::span<const u8> text;
   size_t glyph_limit = std::numeric_limits<size_t>::max();
   if (table == 1 && (id & 0x80)) {
@@ -363,11 +390,11 @@ int FieldWorld::ps1_string_width(int table, int id) {
     glyph_limit = id == 0x83 ? 2 : static_cast<size_t>(id - 0x80);
     id = id == 0x83 ? 0xD : lynx ? data::kLynxBody : 0;
   }
-  if (table == 1 && id < 0x2C && gs_) {
+  if (table == 1 && gs_ && gs_->slot.is_character(id)) {
     const auto& name = gs_->slot.chars[static_cast<size_t>(id)].name;
     text = std::span<const u8>(name.data(), static_cast<size_t>(std::find(name.begin(), name.end(), u8{0}) - name.begin()));
   } else {
-    text = exe_strings_.get(exe_table, table == 1 && id >= 0x2C ? data::kLynxBody : row);
+    text = exe_strings_.get(exe_table, table != 1 ? row : id < 0 || id >= save::kNumChars ? data::kLynxBody : id);
   }
   int width = 0;
   size_t glyphs = 0;
@@ -487,8 +514,9 @@ void FieldWorld::dialogue_choice(int first, int last) {
 // A8: mode 1 = to black, mode 0 = back to the picture; arg = ticks (0 = at once). Drawn as the room change's subtractive fade.
 
 void FieldWorld::request_menu(script::MenuKind kind, int arg) {
-  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] of the running room's owner.
-  if (menu_state_ == MenuState::None && (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop)) {
+  // A shop id from a mod's script is that mod's own: [ElementShops] / [Smiths] / [TradingPosts] of the running room's owner.
+  if (menu_state_ == MenuState::None &&
+      (kind == script::MenuKind::ElementShop || kind == script::MenuKind::WeaponShop || kind == script::MenuKind::TradingPost)) {
     const std::optional<int> row = script_shop(kind, arg);
     if (!row) log::warn("field: shop {} names no shop (the room owner's own ids)", arg);
     arg = row.value_or(-1);

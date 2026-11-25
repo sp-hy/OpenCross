@@ -4,11 +4,16 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <format>
 #include <iterator>
 #include <optional>
 #include <set>
+#include <string>
+#include <vector>
 
 #include "core/log.h"
+#include "data/table_rows.h"
+#include "game/battle/battle_model_cache.h"
 #include "game/battle/model_table.h"
 #include "import/battle_stage.h"
 #include "import/container.h"
@@ -395,8 +400,14 @@ std::set<u32> actor_script_tags(const vfs::Vfs& vfs) {
   };
   if (const auto prd = vfs.read("cdrom/battle/battle.prd")) walk(*prd);
   std::set<std::string> seen, packs;
-  for (const std::string_view sv : kBattleModels) {
-    const std::string stem(sv);
+  // The game's models, then the models of the monsters and characters mods add by name (when `vfs` is the one the mods' rows were set
+  // for).
+  std::vector<std::string> stems(kBattleModels.begin(), kBattleModels.end());
+  if (data::table_mods(vfs)) {
+    for (const std::string& name : data::table_rows().added_names("monster")) stems.push_back(ModelCache::named_monster_model(vfs, name));
+    for (const std::string& name : data::table_rows().added_names("char")) stems.push_back(ModelCache::named_player_model(vfs, name));
+  }
+  for (const std::string& stem : stems) {
     if (stem.empty() || !seen.insert(stem).second) continue;
     if (const std::string pack = attack_pack_of(stem); packs.insert(pack).second)
       if (const auto at0 = vfs.read("cdrom/" + pack)) walk(*at0);
@@ -488,8 +499,33 @@ std::shared_ptr<const FxPack> BattleFxLibrary::adopt(int eid, std::shared_ptr<Fx
 std::shared_ptr<FxPack> BattleFxLibrary::load(int eid) const {
   std::shared_ptr<FxPack> out;
   const effects::EffectSlot* slot_entry = slot(eid);
-  if (slot_entry && slot_entry->prd.size() > 4 && slot_entry->prd.compare(slot_entry->prd.size() - 4, 4, ".prd") == 0) {
-    auto prd = vfs_->read("cdrom/" + slot_entry->prd);
+  if (slot_entry && slot_entry->prd.size() > 4 && slot_entry->prd.compare(slot_entry->prd.size() - 4, 4, ".prd") == 0)
+    out = load(eid, *slot_entry, slot_entry->prd);
+  return out;
+}
+
+std::shared_ptr<const FxPack> BattleFxLibrary::get_named(int eid, const std::string& name) {
+  // Keyed by name and effect id: one element's pack runs with another handler when its cast takes another slot (a monster's trap).
+  const std::string key = std::format("{}#{}", name, eid);
+  if (auto it = named_cache_.find(key); it != named_cache_.end()) return it->second;
+  std::shared_ptr<FxPack> out;
+  const std::string path = "battle/effects/" + name + ".prd";
+  if (const effects::EffectSlot* slot_entry = slot(eid); slot_entry && !name.empty() && vfs_->added("cdrom/" + path)) {
+    out = load(eid, *slot_entry, path);
+    if (out) {
+      out->named_key = FxPack::kNamedKeyBase - static_cast<int>(named_cache_.size());
+      log::info("battle fx: element '{}' plays its own pack {} (eid {}'s handler)", name, path, eid);
+    }
+  }
+  named_cache_[key] = out;
+  return out;
+}
+
+std::shared_ptr<FxPack> BattleFxLibrary::load(int eid, const effects::EffectSlot& slot_ref, const std::string& prd_path) const {
+  std::shared_ptr<FxPack> out;
+  const effects::EffectSlot* slot_entry = &slot_ref;
+  {
+    auto prd = vfs_->read("cdrom/" + prd_path);
     if (prd && prd->size() >= 0x40) prd = with_unpacked_block(std::move(*prd), unpacked_block(effects::overlay_stem(slot_entry->prg)), eid);
     if (prd && prd->size() >= 0x40) {
       Bytes ctd;
@@ -498,6 +534,7 @@ std::shared_ptr<FxPack> BattleFxLibrary::load(int eid) const {
       auto pack = std::make_shared<FxPack>();
       pack->eid = eid;
       pack->slot = *slot_entry;
+      pack->slot.prd = prd_path;
       pack->resident = resident_;
       // VRAM at the time the pack plays: battle.prd's TIMs (resident since battle init), then the egfx streamed in, then the
       // eins' own TIMs (registration). The particle library of the field is not part of it.

@@ -49,6 +49,11 @@ struct FxResident {
 // One loaded effect pack (slot files of an effect id).
 struct FxPack {
   int eid = 0;
+  // A pack an element mods add by name ships (BattleFxLibrary::get_named) plays with its effect id's handler but has its own GPU
+  // resources: gpu_key tells them apart from the effect id's own pack (kNamedKeyBase - n for the n-th named pack, 0 = none).
+  static constexpr int kNamedKeyBase = -2000;
+  int named_key = 0;
+  int gpu_key() const { return named_key ? named_key : eid; }
   effects::EffectSlot slot;
   assets::RoomEffects fx;
   // Sheet sprites of `fx` with an HD image (EffectSprite::hd_rgba, RDE's 4x sheet pages).
@@ -139,13 +144,16 @@ bool script_calls_damage(const bseq::Table& table, int entry);
 // it: the weapon techs' packs ("02" Guile's wand) and the units' own at0.prd emitters (a thrown boomerang: Mel's "34", Van's "36"). The
 // character id a sprite name denotes, -1 for any other name.
 int weapon_mesh_character(std::string_view name);
+// A mesh sprite named so draws the acting unit's own equipped weapon, whoever casts: a pack a mod ships for an element it adds throws the
+// caster's weapon instead of a mesh of its own (no game pack uses the name).
+inline constexpr std::string_view kCasterWeaponMesh = "cwpn";
 
 class BattleFxLibrary {
  public:
   // slot table, particle library, bespoke bindings. False if the slot table is missing. `bind_globals` false (the texture dump worker thread, a second
   // library next to the game's own): do not touch the process-wide bespoke slot registry / PS1 exe.
   bool init(const vfs::Vfs& vfs, bool bind_globals = true);
-  void clear_cache() { cache_.clear(); }
+  void clear_cache() { cache_.clear(), named_cache_.clear(); }
   // The pack of an effect id; null for ids without files (irregular slots, dummies) or packs that failed to parse. Cached.
   std::shared_ptr<const FxPack> get(int eid);
   // get's read and decode without the cache: it reads only what init set up, so a worker thread may run it while this thread uses the
@@ -154,6 +162,9 @@ class BattleFxLibrary {
   std::shared_ptr<FxPack> load(int eid) const;
   std::shared_ptr<const FxPack> adopt(int eid, std::shared_ptr<FxPack> pack);
   bool cached(int eid) const { return cache_.count(eid) != 0; }
+  // The pack of an element mods add by name whose mod adds its own (cdrom/battle/effects/<name>.prd): that file, with the handler and the
+  // egfx of effect id `eid`'s slot and a gpu_key of its own; null when the mod adds none. Cached by name and effect id.
+  std::shared_ptr<const FxPack> get_named(int eid, const std::string& name);
   // The cast "charge" pack of an element colour (0 green .. 5 blue, data::colour_index_of_bit): battle/battle.prd > nested 'sato' > the LZSS
   // type-0x25 entry "ch0<colour>" (a drp of ~15 emitters + the sequence "ch0<colour>" that picks one of the cameras ch10..ch13).
   // It is instantiated when a cast starts; its op 0x41 releases the element pack. Null without
@@ -180,12 +191,15 @@ class BattleFxLibrary {
 
  private:
   void load_resident();
+  // The pack of effect id `eid` read from `prd_path` (its slot's own .prd or an element's by name), with the slot's handler and egfx.
+  std::shared_ptr<FxPack> load(int eid, const effects::EffectSlot& slot, const std::string& prd_path) const;
   const vfs::Vfs* vfs_ = nullptr;
   std::shared_ptr<FxResident> resident_;
   std::vector<effects::EffectSlot> slots_;
   Bytes lib_bytes_;
   assets::RoomEffects lib_;
   std::map<int, std::shared_ptr<FxPack>> cache_;
+  std::map<std::string, std::shared_ptr<FxPack>> named_cache_;
   Bytes battle_prd_;
   // The nested 'sato' drp (sheets, meshes, ch0N packs, ch1N cameras).
   Bytes sato_;

@@ -179,7 +179,7 @@ bool FieldVM::exec_core(u8 op) {
       }
       break;
     case 0x0E:  // SETUP_PC
-      host_.setup_pc(ent_, byte_at(1), byte_at(2));
+      host_.setup_pc(ent_, character_ref(byte_at(1)), byte_at(2));
       advance(3);
       break;
     case 0x0F:  // SETUP_NPC

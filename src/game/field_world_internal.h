@@ -36,15 +36,4 @@ inline constexpr const char* kCharFolders[44] = {
     "harley", "jyaness", "dragon", "hosi",      "spri",    "dan",    "kabuo",  "rablue", "jilbelt", "hone",     "kinoko",
     "ilenes", "mell",    "liia",   "banc",      "sunef",   "steena", "doc",    "gyada",  "pierre",  "olha",     "tumaru"};
 
-// Character reference of the party / model / life ops: FD, FE, FF = the character in party slot 0, 1, 2 (FF is the THIRD member,
-// unlike the entity references where FF = slot 0's entity), FC = none, 0..0x2B = that character id, anything else = none.
-// Returns -1 for none / an empty slot.
-inline int char_from_ref(const std::vector<int>& party, int ref) {
-  if (ref >= 0xFD && ref <= 0xFF) {
-    const size_t slot = static_cast<size_t>(ref - 0xFD);
-    return slot < party.size() ? party[slot] : -1;
-  }
-  return ref >= 0 && ref < 0x2C ? ref : -1;
-}
-
 }  // namespace oc::game::field_internal

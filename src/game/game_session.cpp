@@ -105,7 +105,7 @@ battle::PartyMember party_member_from_state(const data::GameTables& tables, cons
   // The record set of the state: the dream (char20.bin) until FE 3F, else char.bin (SaveSlot::dream_records, game/new_game.h).
   const bool dream = gs.slot.dream_records && tables.char_sets.count("char20") != 0;
   battle::PartyMember member = battle::make_party_member(tables, char_id, star, dream ? "char20" : "char");
-  if (char_id < 0 || char_id >= save::kNumChars) return member;
+  if (!gs.slot.is_character(char_id)) return member;
   // Pip's forms: the evolution rewrites only the record's growth column (3 3 3 4 5 6 for kinds 0x2B..0x30 = char.bin 43..48) and
   // the 2-3 tech cells; the grid layout stays record 43's (identical in 43..48). The kind comes from the record's model id.
   member.growth_col = static_cast<u8>(newgame::growth_column(&tables, gs.slot, char_id, dream));
@@ -167,7 +167,7 @@ battle::VersusSide versus_side(const data::GameTables& tables, const ui::GameSta
   std::vector<int> ids;
   for (const int char_id : party_ids) {
     if (ids.size() >= battle::kPcSlots) break;
-    if (char_id < 0 || char_id >= save::kNumChars) continue;
+    if (!gs.slot.is_character(char_id)) continue;
     ids.push_back(char_id);
     side.party.push_back(party_member_from_state(tables, gs, char_id, names));
   }
@@ -183,7 +183,7 @@ net::PartyCard party_card(const ui::GameState& gs, const std::vector<int>& party
   if (!gs.rules) return card;
   for (const int char_id : party_ids) {
     if (card.members.size() >= 3) break;
-    if (char_id < 0 || char_id >= save::kNumChars) continue;
+    if (!gs.slot.is_character(char_id)) continue;
     const ui::Stats stats = gs.stats(char_id);
     net::CardMember member;
     const int body = record_body(gs, char_id);
@@ -219,7 +219,7 @@ BattleSetup battle_setup(const data::GameTables& tables, const ui::GameState& gs
   out.growth.star = session_star(gs);
   out.growth.progress = progress;
   out.growth.counter = gs.slot.head[kCounterOff];
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : gs.slot.character_ids()) {
     if (std::find(party_ids.begin(), party_ids.end(), char_id) != party_ids.end()) continue;
     if (gs.slot.chars[static_cast<size_t>(char_id)].max_hp == 0) continue;
     out.bench.push_back(party_member_from_state(tables, gs, char_id, names));
@@ -234,7 +234,7 @@ namespace {
 void star_up_unlocks(ui::GameState& gs, const data::GameTables& tables, int star) {
   const bool dream = gs.slot.dream_records && tables.char_sets.count("char20") != 0;
   const int last = std::min<int>(star, static_cast<int>(tables.growth.size()) - 1);
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : gs.slot.character_ids()) {
     const int growth_col = newgame::growth_column(&tables, gs.slot, char_id, dream) & 7;
     save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(char_id)];
     for (int level = 0; level <= last; ++level) {
@@ -274,7 +274,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
       fought.push_back(&member);
   for (const battle::PartyMember* fought_member : fought) {
     const battle::PartyMember& member = *fought_member;
-    if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
+    if (!gs.slot.is_character(member.char_id)) continue;
     save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
     for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
     save_char.cur_hp = static_cast<u16>(std::clamp(member.hp, 1, static_cast<int>(save_char.max_hp)));
@@ -312,7 +312,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   for (u16 id : rewards.trapped)
     if (gs.add_element(id)) ++trapped;
   for (const auto& [char_id, cell] : rewards.lost_cells) {
-    if (char_id < 0 || char_id >= save::kNumChars) continue;
+    if (!gs.slot.is_character(char_id)) continue;
     const int k = gs.cell_index(char_id, cell / ui::GameState::kCols, cell % ui::GameState::kCols);
     if (k < 0) continue;
     u16& grid_word = gs.slot.chars[static_cast<size_t>(char_id)].grid[static_cast<size_t>(k)];
@@ -341,7 +341,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
     if (session_star(gs) < 99) star_up_unlocks(gs, tables, session_star(gs));
     // The bench got its old pending deltas and a new roll (stats / snapshots / pending in `bench()`).
     for (const battle::PartyMember& member : finished_battle.bench()) {
-      if (member.char_id < 0 || member.char_id >= save::kNumChars) continue;
+      if (!gs.slot.is_character(member.char_id)) continue;
       save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
       for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
       write_growth(save_char, member);
@@ -349,7 +349,7 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
   } else if (!rewards.bench_gains.empty()) {
     // Shared growth: the recruited characters outside the party grew with it in a normal fight.
     for (const battle::PartyMember& member : finished_battle.bench()) {
-      if (member.char_id < 0 || member.char_id >= save::kNumChars || !gs.slot.recruited(member.char_id)) continue;
+      if (!gs.slot.recruited(member.char_id)) continue;
       save::SaveChar& save_char = gs.slot.chars[static_cast<size_t>(member.char_id)];
       for (int k = 0; k < 7; ++k) set_stat(save_char, k, member.stat[static_cast<size_t>(k)]);
       write_growth(save_char, member);
@@ -362,35 +362,34 @@ BattleSummary apply_battle_result(ui::GameState& gs, const data::GameTables& tab
 
 bool keep_swapped_lineup(ui::GameState& gs, const battle::Battle& finished_battle, int stand_in, int reserve_size) {
   if (finished_battle.swaps() == 0) return false;
-  const std::array<u8, 3> saved = gs.slot.party();
-  std::array<u8, 3> ids{0xFF, 0xFF, 0xFF};
+  const std::array<int, 3> saved = gs.slot.party();
+  std::array<int, 3> ids{-1, -1, -1};
   const auto& party = finished_battle.party();
-  for (size_t i = 0; i < party.size() && i < ids.size(); ++i) ids[i] = static_cast<u8>(party[i].char_id);
-  const auto holds = [&](u8 char_id) { return std::find(ids.begin(), ids.end(), char_id) != ids.end(); };
+  for (size_t i = 0; i < party.size() && i < ids.size(); ++i) ids[i] = party[i].char_id;
+  const auto holds = [&](int char_id) { return char_id >= 0 && std::find(ids.begin(), ids.end(), char_id) != ids.end(); };
   if (stand_in >= 0 && !holds(0)) {
     // The stand-in fought in Serge's place: its slot is Serge's; when it swapped out, Serge takes back his saved slot.
-    if (holds(static_cast<u8>(stand_in))) {
-      for (u8& id : ids)
+    if (holds(stand_in)) {
+      for (int& id : ids)
         if (id == stand_in) id = 0;
     } else {
       for (size_t i = 0; i < saved.size(); ++i)
         if (saved[i] == 0) ids[i] = 0;
     }
   }
-  // The party lock bitmap: words 0-1 of the slot's FE 5D / FE 60 table (FieldWorld::table_op).
-  const auto locked = [&](u8 char_id) { return char_id < 0x40 && (gs.slot.unk_e1b8[static_cast<size_t>(char_id >> 5)] >> (char_id & 31) & 1u) != 0; };
+  // The party lock (FE 5D, FieldWorld::table_op).
   for (size_t i = 0; i < saved.size(); ++i)
-    if (saved[i] != 0xFF && locked(saved[i]) && !holds(saved[i])) ids[i] = saved[i];
+    if (saved[i] >= 0 && gs.slot.char_flag(saved[i], save::kCharLocked) && !holds(saved[i])) ids[i] = saved[i];
   if (ids == saved) return false;
   if (reserve_size > 0) {
     // Read before the party changes (GameState::reserve leaves party members out).
     std::vector<int> reserve = gs.reserve(reserve_size);
     std::vector<int> left;
-    for (u8 id : saved)
-      if (id != 0xFF && !holds(id)) left.push_back(id);
+    for (const int id : saved)
+      if (id >= 0 && !holds(id)) left.push_back(id);
     size_t next = 0;
     for (int& slot : reserve)
-      if (next < left.size() && slot >= 0 && holds(static_cast<u8>(slot))) slot = left[next++];
+      if (next < left.size() && holds(slot)) slot = left[next++];
     for (int& slot : reserve)
       if (next < left.size() && slot < 0) slot = left[next++];
     gs.slot.set_reserve(reserve);

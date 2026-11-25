@@ -10,6 +10,7 @@
 
 #include "audio/voice.h"
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/field_world_internal.h"
 #include "import/model.h"
 
@@ -679,10 +680,20 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
   // against that model's own skeleton.
   // An NPC wearing a model from elsewhere (FE D0) decodes against that model: a field player model by its byte, another room's model by
   // its own Mdl; a battle model takes no field packs (its own clips are 0x80 + k).
+  // A character mods add decodes against the model it wears: its own field model (named_character_model), else its model byte's.
   int field_byte = ent_state.char_id >= 0 && ent_state.char_id < 44 ? ent_state.char_model : -1;
+  std::string own_stem;
+  if (gs_ && ent_state.char_id >= save::kFirstAddedChar && gs_->slot.is_character(ent_state.char_id)) {
+    if (named_character_model(ent_state.char_id)) {
+      const std::string& own_name = data::table_rows().name_of("char", static_cast<size_t>(ent_state.char_id));
+      own_stem = own_name + "/" + own_name;
+    } else {
+      field_byte = ent_state.char_model;
+    }
+  }
   std::string room = view_.room_name();
   int room_k = ent_state.model;
-  if (const auto source = model_sources_.find(ent_state.model); field_byte < 0 && source != model_sources_.end()) {
+  if (const auto source = model_sources_.find(ent_state.model); own_stem.empty() && field_byte < 0 && source != model_sources_.end()) {
     const ModelSource& from = source->second;
     if (from.kind == ModelSource::kCharacter) field_byte = model_byte(from.id);
     else if (from.kind == ModelSource::kFieldModel) field_byte = from.id;
@@ -692,7 +703,8 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
       return;
     }
   }
-  const bool pc_model = field_byte >= 0 && !model_stem(field_byte).empty();
+  const std::string pc_stem = !own_stem.empty() ? own_stem : field_byte >= 0 ? model_stem(field_byte) : std::string();
+  const bool pc_model = !pc_stem.empty();
   const assets::RoomScene* scene = view_.scene();
   const bool own_room = room == view_.room_name();
   const bool room_mdl = !pc_model && room_k >= 0 && (own_room ? scene && room_k < static_cast<int>(scene->models.size()) : !room.empty());
@@ -700,14 +712,16 @@ void FieldWorld::extra_animation(u16 key, bool start, int ent, int arg) {
     log::debug("field: tick {} ent {} LOAD_ANIMATION {}: entity has no model", tick_count_, ent, name);
     return;
   }
-  const std::string cache_key = pc_model ? std::format("{}/{}", field_byte, name) : std::format("room:{}:{}/{}", room, room_k, name);
+  const std::string cache_key = !own_stem.empty() ? std::format("own:{}/{}", own_stem, name)
+                                : pc_model        ? std::format("{}/{}", field_byte, name)
+                                                  : std::format("room:{}:{}/{}", room, room_k, name);
   auto it = ex_pack_cache_.find(cache_key);
   if (it == ex_pack_cache_.end()) {
     ExPack pack;
     std::optional<std::vector<u8>> obj;
     std::string owner;
     if (pc_model) {
-      owner = model_stem(field_byte);
+      owner = pc_stem;
       obj = files_->read("cdrom/fieldobj/player/" + owner + ".obj");
     } else if (own_room) {
       owner = std::format("room model {}", room_k);

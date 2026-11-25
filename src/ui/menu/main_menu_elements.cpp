@@ -422,10 +422,10 @@ void MainMenu::Impl::build_use() {
     else Frame(52, 47, 27);
     // The roster panel: 12 rows from use.roster_top, 20 px apart; the cursor on the left, the pointer on the right edge.
     Frame(143, 8, 167);
-    if (use.roster_top + 12 < save::kNumChars) scroll_arrow(237, 394, false);
+    if (use.roster_top + 12 < gs->roster_rows()) scroll_arrow(237, 394, false);
     if (use.roster_top > 0) scroll_arrow(237, 185, true);
     for (int row = 0; row < 12; ++row)
-      if (gs->available(use.roster_top + row)) roster_line(use.roster_top + row, 177.2f + 20.0f * static_cast<float>(row));
+      if (gs->available(gs->roster_at(use.roster_top + row))) roster_line(gs->roster_at(use.roster_top + row), 177.2f + 20.0f * static_cast<float>(row));
     tri(0, 177.0f + 20.0f * static_cast<float>(use.roster_row), true);
     pointer(240.0f + bounce, 224.0f, false);
   } else {

@@ -181,14 +181,14 @@ void prism_light(const render::Mat4& world, int ticks, render::MeshPipeline::Dra
 }
 }  // namespace
 
-StatusModelView::Entry* StatusModelView::entry(int model, bool hd_art) {
-  const std::string stem = game::menu_model_stem(model);
+StatusModelView::Entry* StatusModelView::entry(int model, bool hd_art, const std::string& own_model) {
+  const std::string stem = own_model.empty() ? game::menu_model_stem(model) : own_model;
   if (stem.empty()) return nullptr;
-  const int key = model * 2 + (hd_art ? 1 : 0);
+  const std::string key = stem + (hd_art ? "/hd" : "");
   if (auto it = cache_.find(key); it != cache_.end()) return it->second.get();
   auto created = std::make_unique<Entry>();
   std::string err;
-  if (auto asset = game::read_menu_model(vfs_, model, hd_art, &err)) {
+  if (auto asset = game::read_menu_model_stem(vfs_, stem, hd_art, &err)) {
     // Entry 1 = the eye-block positions, entry 4 = the closed-eye TIM, entry 5 = the Atim.
     if (const auto ome = vfs_.read("cdrom/menu/player/" + stem + ".ome"))
       if (const auto cpt = import::parse_cpt(*ome); cpt && cpt->entries.size() >= 6)
@@ -358,7 +358,7 @@ void StatusModelView::draw(const render::Frame& frame, float vw, float vh, const
     cache_.clear();
     weapons_.clear();
   }
-  Entry* shown = entry(slot.model, slot.hd);
+  Entry* shown = entry(slot.model, slot.hd, slot.own_model);
   if (!shown || !shown->body) return;
   const bool restarted = shown->session != slot.session;
   if (restarted) {

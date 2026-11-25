@@ -233,7 +233,7 @@ int occ_scan(const vfs::Vfs& fs, const std::vector<std::string>& args) {
       if (sources.contains(item)) ++sources[item].shops;
   for (const auto& row : tables.trade)
     for (const auto& entry : row)
-      if (const int goods = entry.id & 0xFF; sources.contains(goods)) ++sources[goods].trade;
+      if (const int goods = entry.goods; sources.contains(goods)) ++sources[goods].trade;
   for (const auto& [enemy, entry] : seen) {
     if (static_cast<size_t>(enemy) >= tables.enemies.size()) continue;
     const size_t row = tables.enemies[static_cast<size_t>(enemy)].drop_row();

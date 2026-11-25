@@ -15,6 +15,7 @@
 #include "core/element_icon.h"
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/table_rows.h"
 #include "data/tables.h"
 #include "platform/config.h"
 #include "platform/keymap.h"
@@ -41,6 +42,8 @@ struct Nav {
   bool ok_rep = false;
   // page: the item key / pad Square (the gear compare panel's next page).
   bool page = false;
+  // The party strip's scroll: -1 a row up (L2), 1 a row down (R2).
+  int strip_step = 0;
 };
 
 // One drawing command of the frame: a rectangle, an image, or a text drawn through FontSet in a font slot at canvas (x, y).
@@ -104,12 +107,16 @@ struct ShopScreen::Impl {
   int cur = 0, scroll = 0;
   int qty = 1, qty_max = 1;
   int conf_cur = 1;
-  // Element Sell past the bag count: the copies each character still has placed, the copies picked, the cursor over the 44 characters
-  // (two columns of 22) or the Confirm cell, and the frames since the picker opened (the list answers after 30).
+  // Element Sell past the bag count: per position the character (GameState::roster_at), the copies it
+  // still has placed and the copies picked; the cursor over a page of 44 positions (two columns of 22; left / right past a column
+  // turns the page when there is more than one) or the Confirm cell, and the frames since the picker opened (the list answers after 30).
+  static constexpr int kPickColumn = save::kNumChars / 2, kPickPage = save::kNumChars;
   struct Pick {
-    std::array<int, save::kNumChars> placed{}, taken{};
+    std::vector<int> who, placed, taken;
     int cursor = 0, wait = 0;
     bool on_confirm = false;
+    int pages() const { return std::max(1, (static_cast<int>(who.size()) + kPickPage - 1) / kPickPage); }
+    int at(int position) const { return position < static_cast<int>(who.size()) ? who[static_cast<size_t>(position)] : -1; }
     int taken_total() const {
       int total = 0;
       for (int count : taken) total += count;
@@ -263,6 +270,11 @@ struct ShopScreen::Impl {
     for (bool pressed : in.key_pressed) any_key = any_key || pressed;
     if (any_pad) kb_mode = false;
     if (any_key) kb_mode = true;
+    // L2 / R2: the speed keys or the pad's triggers, one row per press.
+    const bool l2 = key_down(Action::SlowSpeed) || (in.pad_connected && in.pad_axis[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] >= 0.5f);
+    const bool r2 = key_down(Action::FastSpeed) || (in.pad_connected && in.pad_axis[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] >= 0.5f);
+    nav.strip_step = (r2 && !strip_r2_held ? 1 : 0) - (l2 && !strip_l2_held ? 1 : 0);
+    strip_l2_held = l2, strip_r2_held = r2;
     return nav;
   }
 
@@ -338,6 +350,11 @@ struct ShopScreen::Impl {
     frames += std::max(ticks, 0);
     if (msg_frames > 0 && --msg_frames == 0) msg.clear();
     const Nav nav = poll(in);
+    if (nav.strip_step != 0 && strip_scrolls()) {
+      const int before = strip_top;
+      strip_top = std::clamp(strip_top + nav.strip_step, 0, std::max(0, strip_rows() - kStripRows));
+      if (strip_top != before) sfx(1);
+    }
     if (refuse_ticks > 0) {
       refuse_ticks -= std::max(ticks, 0);
       return;
@@ -516,9 +533,11 @@ struct ShopScreen::Impl {
   }
 
   void start_pick(int id) {
-    for (int character = 0; character < save::kNumChars; ++character)
-      pick.placed[static_cast<size_t>(character)] = gs->available(character) ? shop::placed_copies(*gs, character, id) : 0;
-    pick.taken.fill(0);
+    pick.who.clear();
+    for (int row = 0; row < gs->roster_rows(); ++row) pick.who.push_back(gs->roster_at(row));
+    pick.placed.clear();
+    for (const int character : pick.who) pick.placed.push_back(gs->available(character) ? shop::placed_copies(*gs, character, id) : 0);
+    pick.taken.assign(pick.who.size(), 0);
     pick.cursor = 0;
     pick.wait = 0;
     pick.on_confirm = false;
@@ -536,31 +555,41 @@ struct ShopScreen::Impl {
       return;
     }
     const int id = ids[static_cast<size_t>(cur)];
+    const int page = pick.cursor / kPickPage, place = pick.cursor % kPickPage;
     if (!pick.on_confirm) {
       const size_t member = static_cast<size_t>(pick.cursor);
-      if (nav.ok_rep && gs->available(pick.cursor) && pick.placed[member] > 0) {
+      if (nav.ok_rep && gs->available(pick.at(pick.cursor)) && pick.placed[member] > 0) {
         --pick.placed[member];
         ++pick.taken[member];
         sfx(8);
       }
       if (nav.up) {
-        --pick.cursor;
-        if (pick.cursor < 0 || pick.cursor == save::kNumChars / 2 - 1) pick.on_confirm = true;
+        if (place == 0 || place == kPickColumn) pick.on_confirm = true;
+        else --pick.cursor;
         sfx(1);
       }
       if (nav.down) {
-        ++pick.cursor;
-        if (pick.cursor >= save::kNumChars || pick.cursor == save::kNumChars / 2) pick.on_confirm = true;
+        if (place == kPickColumn - 1 || place == kPickPage - 1) pick.on_confirm = true;
+        else ++pick.cursor;
         sfx(1);
       }
       if (nav.left || nav.right) {
-        pick.cursor += pick.cursor < save::kNumChars / 2 ? save::kNumChars / 2 : -save::kNumChars / 2;
+        const bool right_column = place >= kPickColumn, turn = pick.pages() > 1 && (nav.right == right_column);
+        const int to_page = !turn ? page : (page + (nav.right ? 1 : pick.pages() - 1)) % pick.pages();
+        pick.cursor = to_page * kPickPage + (right_column ? place - kPickColumn : place + kPickColumn);
         sfx(1);
       }
       return;
     }
     if (nav.ok) {
-      const shop::Res result = shop::sell_element(*gs, id, qty, std::vector<int>(pick.taken.begin(), pick.taken.end()));
+      std::vector<int> taken_by_id;
+      for (size_t position = 0; position < pick.who.size(); ++position)
+        if (pick.taken[position] > 0) {
+          const size_t character = static_cast<size_t>(pick.who[position]);
+          taken_by_id.resize(std::max(taken_by_id.size(), character + 1), 0);
+          taken_by_id[character] = pick.taken[position];
+        }
+      const shop::Res result = shop::sell_element(*gs, id, qty, taken_by_id);
       if (result != shop::Res::Ok) {
         stage = Stage::List;
         return deny(result_text(result));
@@ -571,8 +600,8 @@ struct ShopScreen::Impl {
       after_change();
       return;
     }
-    if (nav.up) pick.cursor = save::kNumChars - 1, pick.on_confirm = false, sfx(1);
-    if (nav.down) pick.cursor = 0, pick.on_confirm = false, sfx(1);
+    if (nav.up) pick.cursor = page * kPickPage + kPickPage - 1, pick.on_confirm = false, sfx(1);
+    if (nav.down) pick.cursor = page * kPickPage, pick.on_confirm = false, sfx(1);
   }
 
   // The stock changed: rebuild the list and fall back to the menu above when nothing is left.
@@ -1388,11 +1417,12 @@ struct ShopScreen::Impl {
     const bool listed = pick.wait > kPickWait;
     message(ss(listed ? 0x801DF470 : 0x801DF438));
     group(Left);
-    for (int character = 0; character < save::kNumChars; ++character) {
+    const int first = pick.cursor / kPickPage * kPickPage;
+    for (int place = 0; place < kPickPage; ++place) {
+      const int character = pick.at(first + place);
       if (!gs->available(character)) continue;
-      const int half = save::kNumChars / 2;
-      const float x = character < half ? 40.0f : 168.0f, y = 28.0f + 16.0f * static_cast<float>(character % half);
-      const int count = pick.placed[static_cast<size_t>(character)];
+      const float x = place < kPickColumn ? 40.0f : 168.0f, y = 28.0f + 16.0f * static_cast<float>(place % kPickColumn);
+      const int count = pick.placed[static_cast<size_t>(first + place)];
       RT(1, x, y, char_name(character), count != 0 ? 0x4E77u : 0x808080u);
       if (count == 0) continue;
       // Played from the discs the count is the "suji" sheet's "x" and digits from x + 0x60.
@@ -1407,7 +1437,7 @@ struct ShopScreen::Impl {
     Frame(140, 200, 392);
     RT(1, !texs.hd() && usa_disc() ? 0xE0 : 0xFA, 0x194, ss(0x801DF590));
     if (pick.on_confirm) marker(0xD0, 0x195, true);
-    else marker(pick.cursor < save::kNumChars / 2 ? 16.0f : 144.0f, 16.0f * static_cast<float>(pick.cursor % (save::kNumChars / 2)) + 29.0f, true);
+    else marker(pick.cursor % kPickPage < kPickColumn ? 16.0f : 144.0f, 16.0f * static_cast<float>(pick.cursor % kPickColumn) + 29.0f, true);
   }
   void build_element_list() {
     if (stage == Stage::Pick) return build_pick();
@@ -1469,8 +1499,11 @@ struct ShopScreen::Impl {
     const data::ItemInfo* ii = item >= 0 && item < static_cast<int>(tb.item_info.size()) ? &tb.item_info[static_cast<size_t>(item)] : nullptr;
     auto power = [&](int id) { return id >= 0 && id < static_cast<int>(tb.gear.size()) ? tb.gear[static_cast<size_t>(id)].power() : 0; };
     Tex* smithy = disc ? nullptr : texs.load("hd/menu/smithy.png");
-    for (int character = 0; character < 44; ++character) {
-      const float x = 230.0f + 24.0f * static_cast<float>(character % 11), y = 314.0f + 24.0f * static_cast<float>(character / 11);
+    strip_top = std::clamp(strip_top, 0, std::max(0, strip_rows() - kStripRows));
+    for (int place = 0; place < kStripRows * kStripColumns; ++place) {
+      const int character = gs->roster_at(strip_top * kStripColumns + place);
+      if (character < 0) continue;
+      const float x = 230.0f + 24.0f * static_cast<float>(place % kStripColumns), y = 314.0f + 24.0f * static_cast<float>(place / kStripColumns);
       const save::SaveChar& ch = gs->slot.chars[static_cast<size_t>(character)];
       int brightness = 0x70;
       if (!gs->slot.recruited(character)) brightness = 0;
@@ -1501,10 +1534,31 @@ struct ShopScreen::Impl {
       Img(smithy, SX(x), SY(y), SX(kMw[mark_index] / 4.0f), SY(kMh[mark_index] / 4.0f), kU[mark_index] / smithy->w, 972.0f / smithy->h,
           (kU[mark_index] + kMw[mark_index]) / smithy->w, (972.0f + kMh[mark_index]) / smithy->h);
     }
+    if (strip_top > 0) scroll_arrow(497, 310, true);
+    if (strip_top + kStripRows < strip_rows()) scroll_arrow(497, 408, false);
   }
-  // A face of the party strip, 24 x 24 units at (x, y) and PS1 brightness `brightness`: the smithy sheet's face frame (model id + 1, frames
-  // 1..0x33) played from the discs, else face_tex.
+  // The party strip: rows of 11 characters (GameState::roster_at), 4 shown from strip_top; the game's 44 fill it exactly, the
+  // characters mods add follow in more rows (L2 / R2 scroll a row, arrows at the edge).
+  static constexpr int kStripColumns = 11, kStripRows = 4;
+  int strip_top = 0;
+  // L2 / R2 held on the last poll (a scroll per press).
+  bool strip_l2_held = false, strip_r2_held = false;
+  int strip_rows() const { return gs ? (gs->roster_rows() + kStripColumns - 1) / kStripColumns : 0; }
+  bool strip_scrolls() const { return !closed && operation == Operation::Forge && !compare.on && strip_rows() > kStripRows; }
+  // A character mods add in its own body: its face by name (hd/face/<2021 | 1999>/<name>.png) when its mod adds one.
+  const Tex* own_face(int character) {
+    if (!gs || !gs->own_body(character)) return nullptr;
+    const std::string path = std::string(mode == ArtMode::Original ? "hd/face/1999/" : "hd/face/2021/") +
+                             data::table_rows().name_of("char", static_cast<size_t>(character)) + ".png";
+    return vfs->added(path) ? texs.load(path) : nullptr;
+  }
+  // A face of the party strip, 24 x 24 units at (x, y) and PS1 brightness `brightness`: a character mods add, its own face (own_face);
+  // else the smithy sheet's face frame (model id + 1, frames 1..0x33) played from the discs, else face_tex.
   void strip_face(int character, float x, float y, int brightness) {
+    if (const Tex* own = own_face(character)) {
+      Img(own, SX(x), SY(y), SX(24), SY(24), 0, 0, 1, 1, grey(brightness));
+      return;
+    }
     const int frame_no = (gs->slot.chars[static_cast<size_t>(character)].model_id & 0xFF) + 1;
     if (frame_no < 1 || frame_no > 0x33) return;
     if (!texs.hd()) {
@@ -2316,6 +2370,7 @@ void ShopScreen::set_sfx(std::function<void(int)> fn) { impl_->sfx_fn = std::mov
 void ShopScreen::open(GameState& state, ShopKind kind, int shop_id) { impl_->open(state, kind, shop_id); }
 void ShopScreen::close() { impl_->closed = true; }
 bool ShopScreen::closed() const { return impl_->closed; }
+bool ShopScreen::strip_takes_triggers() const { return impl_->strip_scrolls(); }
 ShopKind ShopScreen::kind() const { return impl_->kind; }
 int ShopScreen::shop_id() const { return impl_->shop_id; }
 std::string ShopScreen::state_name() const {

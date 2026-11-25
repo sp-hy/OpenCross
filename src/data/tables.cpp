@@ -165,6 +165,25 @@ const std::string& GameTables::element_name(int i) const { return pick(element_n
 const std::string& GameTables::char_name(int i) const { return pick(char_names, i); }
 const std::string& GameTables::item_name(int i) const { return pick(item_names, i); }
 
+void GameTables::fill_eligibility(const TableRows& table_rows, std::string_view table, std::vector<Eligibility*> rows,
+                                  const std::function<bool(size_t, int)>& bits) const {
+  for (const TableRows::WideWrite& write : table_rows.character_writes(table)) {
+    if (write.record >= rows.size()) continue;
+    Eligibility& who = *rows[write.record];
+    const int character = static_cast<int>(write.value);
+    std::erase(who.allow, character);
+    std::erase(who.deny, character);
+    (write.offset == kCharacterAdd ? who.allow : who.deny).push_back(character);
+  }
+  for (size_t row = 0; row < rows.size(); ++row)
+    for (size_t character = kNumChars; character < equips_like.size(); ++character) {
+      Eligibility& who = *rows[row];
+      const int id = static_cast<int>(character);
+      if (who.rule(id) || !bits(row, equips_like[character])) continue;
+      who.allow.push_back(id);
+    }
+}
+
 int GameTables::scene_for(int battle_id, int variant) const {
   if (battle_id >= 0x200) return battle_id - 0x200;
   size_t i = static_cast<size_t>(battle_id) * 8 + static_cast<size_t>(variant & 7);
@@ -188,16 +207,22 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   if (!dit) return fail("battle/data/ditem.dat missing");
   Bytes dd = import::is_lzss(*dit) ? import::lzss_decode(*dit).value_or(Bytes{}) : *dit;
   // The mods' rows belong to the VFS they were set for: tables read through another (the background scan's unmodified game) get none,
-  // and leave the named records' ids and the text's element ids as they are.
+  // and leave the named records' ids and the text's own ids as they are.
   const std::vector<TableMod>* mods = table_mods(game_fs);
   const std::vector<TableMod> no_mods;
+  const bool has_gear = player.size() > 4 && player[4].size() >= kGameItems * kGearRecSize;
   TableRows rows;
-  rows.build(mods ? *mods : no_mods, {{"monster", mon->size() / kStatRecSize},
-                                      {"pgdat", pg->size() / kElemRecSize},
-                                      {"scenedat", player[0].size() / 28},
-                                      {"ditem", dd.size() / 8},
-                                      {"el_shop", kShopRows},
-                                      {"waa_shop", kShopRows}});
+  std::map<std::string, size_t> counts = {{"monster", mon->size() / kStatRecSize},
+                                          {"pgdat", pg->size() / kElemRecSize},
+                                          {"scenedat", player[0].size() / 28},
+                                          {"ditem", dd.size() / 8},
+                                          {"el_shop", kShopRows},
+                                          {"waa_shop", kShopRows},
+                                          {"trade", kShopRows},
+                                          {"keyitem", kGameKeyItems + 1},
+                                          {"char", kNumChars}};
+  if (has_gear) counts["waa"] = kGameItems;
+  rows.build(mods ? *mods : no_mods, counts);
   if (mods && publish) set_text_mod_ids_of(rows, *mods);
 
   // --- enemies
@@ -206,9 +231,12 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   rows.apply("monster", enemies.size(), [&](size_t i) { return std::span<u8>(enemies[i].raw); });
 
   // --- characters (+ presets). Every set takes its Lv 99 targets from lv99para.bin; the bytes after the 51 records of char_w1..5 are
-  // leftover record copies, not Lv 99 rows.
+  // leftover record copies, not Lv 99 rows. The characters mods add by name follow in every set: a new character's record in a set
+  // its rows don't name, and its Lv 99 row, are its base's (char.txt's base=, else Serge).
   Bytes lv99_file;
   if (auto lv99_bytes = read_battle(game_fs, "lv99para.bin")) lv99_file = *lv99_bytes;
+  const size_t char_count = rows.total("char", kNumChars);
+  const auto char_base = [&](size_t i) { return rows.base_of("char", i).value_or(0); };
   for (const char* set_name : {"char", "char20", "char_w0", "char_w1", "char_w2", "char_w3", "char_w4", "char_w5"}) {
     auto set_bytes = read_battle(game_fs, std::string(set_name) + ".bin");
     if (!set_bytes || set_bytes->size() < kNumChars * kStatRecSize) {
@@ -216,14 +244,29 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
       continue;
     }
     CharSet char_set;
+    char_set.rec.resize(char_count);
+    char_set.lv99.resize(char_count);
     for (size_t i = 0; i < kNumChars; ++i) copy_rec(char_set.rec[i].raw, *set_bytes, i * kStatRecSize);
-    rows.apply(set_name, kNumChars, [&](size_t i) { return std::span<u8>(char_set.rec[i].raw); });
+    for (size_t i = kNumChars; i < char_count; ++i) char_set.rec[i] = char_set.rec[std::min<size_t>(char_base(i), kNumChars - 1)];
+    rows.apply(set_name, char_count, [&](size_t i) { return std::span<u8>(char_set.rec[i].raw); });
     for (size_t i = 0; i < kNumChars && i * 8 + 8 <= lv99_file.size(); ++i) {
       const size_t offset = i * 8;
       char_set.lv99[i] = {rd16(lv99_file, offset), lv99_file[offset + 2], lv99_file[offset + 3], lv99_file[offset + 4],
                           lv99_file[offset + 5], lv99_file[offset + 6], lv99_file[offset + 7]};
     }
+    for (size_t i = kNumChars; i < char_count; ++i) char_set.lv99[i] = char_set.lv99[std::min<size_t>(char_base(i), kNumChars - 1)];
     char_sets.emplace(set_name, std::move(char_set));
+  }
+  // Equipment and elements: a character mods add takes its equips_like's (the first mod in the list that gives one), else its base's.
+  std::vector<int> like(char_count);
+  for (size_t i = 0; i < char_count; ++i) like[i] = static_cast<int>(i < kNumChars ? i : char_base(i));
+  for (const TableRows::WideWrite& write : rows.character_writes("char"))
+    if (write.record >= kNumChars && write.record < char_count) like[write.record] = static_cast<int>(write.value);
+  equips_like.assign(char_count, 0);
+  for (size_t i = 0; i < char_count; ++i) {
+    int id = static_cast<int>(i);
+    for (size_t step = 0; step < char_count && id >= kNumChars && static_cast<size_t>(id) < char_count; ++step) id = like[static_cast<size_t>(id)];
+    equips_like[i] = id >= 0 && id < kNumChars ? id : 0;
   }
 
   // --- elements / techs
@@ -251,11 +294,12 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   for (size_t i = 0; i < btbgdat.size(); ++i) copy_rec(btbgdat[i], player[3], i * 3);
 
   // --- equipment stats (player.dat part 4)
-  if (player.size() > 4 && player[4].size() >= 256 * kGearRecSize) {
-    gear.resize(256);
-    for (size_t i = 0; i < 256; ++i) copy_rec(gear[i].raw, player[4], i * kGearRecSize);
+  if (has_gear) {
+    gear.resize(rows.total("waa", kGameItems));
+    for (size_t i = 0; i < kGameItems; ++i) copy_rec(gear[i].raw, player[4], i * kGearRecSize);
     rows.apply("waa", gear.size(), [&](size_t i) { return std::span<u8>(gear[i].raw); });
   }
+  const size_t item_count = rows.total("waa", kGameItems);
 
   // --- drops
   dd.resize(rows.total("ditem", dd.size() / 8) * 8);
@@ -267,10 +311,11 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   // --- exdat part 0 (star progress rows)
   auto ex = load_bundle(game_fs, "exdat.dat");
   if (!ex.empty()) {
-    if (ex.size() > 5 && ex[5].size() >= 256 * 12) {
-      rows.apply("menu_waa", 256, [&](size_t i) { return std::span<u8>(ex[5].data() + i * 12, 12); });
-      item_info.resize(256);
-      for (size_t i = 0; i < 256; ++i) {
+    if (ex.size() > 5 && ex[5].size() >= kGameItems * 12) {
+      ex[5].resize(item_count * 12);
+      rows.apply("menu_waa", item_count, [&](size_t i) { return std::span<u8>(ex[5].data() + i * 12, 12); });
+      item_info.resize(item_count);
+      for (size_t i = 0; i < item_count; ++i) {
         const size_t offset = i * 12;
         item_info[i].equip_lo = static_cast<u32>(rd16(ex[5], offset)) | (static_cast<u32>(rd16(ex[5], offset + 2)) << 16);
         item_info[i].equip_hi = static_cast<u32>(rd16(ex[5], offset + 4)) | (static_cast<u32>(rd16(ex[5], offset + 6)) << 16);
@@ -278,6 +323,9 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
         item_info[i].cat = ex[5][offset + 10];
         item_info[i].extra = ex[5][offset + 11];
       }
+      std::vector<Eligibility*> who;
+      for (ItemInfo& info : item_info) who.push_back(&info.who);
+      fill_eligibility(rows, "menu_waa", who, [&](size_t row, int char_id) { return item_info[row].can_equip(char_id); });
     }
     star_rows.resize(ex[0].size() / 4);
     for (size_t i = 0; i < star_rows.size(); ++i) copy_rec(star_rows[i], ex[0], i * 4);
@@ -286,16 +334,21 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   // --- shops / trade
   if (auto shop_bytes = game_fs.read("cdrom/menu/el_shop.bin")) el_shop = rows_u16(*shop_bytes, kShopRows);
   rows.apply_lists("el_shop", el_shop);
+  // A post's entries run to the first goods byte 0.
   if (auto trade_bytes = game_fs.read("cdrom/menu/trade.bin")) {
     for (auto& row : rows_u16(*trade_bytes, 32)) {
       std::vector<TradeEntry> entries;
-      for (size_t k = 0; k + 1 < row.size(); k += 2) entries.push_back({row[k], row[k + 1]});
+      for (size_t k = 0; k < row.size() && entries.size() < kTradeSlots && (row[k] & 0xFF) != 0; k += 2)
+        entries.push_back({static_cast<u16>(row[k] & 0xFF), static_cast<u8>(row[k] >> 8), k + 1 < row.size() ? row[k + 1] : u16{0}});
       trade.push_back(std::move(entries));
     }
   }
-  if (auto forge_bytes = game_fs.read("cdrom/menu/waa_tbl.bin"); forge_bytes && forge_bytes->size() >= 256 * 32) {
-    forge.resize(256);
-    for (size_t i = 0; i < 256; ++i) copy_rec(forge[i], *forge_bytes, i * 32);
+  trade.resize(std::max(trade.size(), kShopRows));
+  rows.apply_trade(trade);
+  if (auto forge_bytes = game_fs.read("cdrom/menu/waa_tbl.bin"); forge_bytes && forge_bytes->size() >= kGameItems * 32) {
+    forge.resize(item_count);
+    for (size_t i = 0; i < kGameItems; ++i) copy_rec(forge[i], *forge_bytes, i * 32);
+    rows.apply("waa_tbl", forge.size(), [&](size_t i) { return std::span<u8>(forge[i]); });
   }
   if (auto keyitem_bytes = game_fs.read("cdrom/menu/keyitem.dat"); keyitem_bytes && keyitem_bytes->size() >= 2)
     keyitem_jp_rows = rd16(*keyitem_bytes, 0) / 2u - 1u;
@@ -319,9 +372,9 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   };
   enemy_names = names(0x19, enemies.size());
   element_names = names(0x17, elements.size());
-  char_names = names(0x01, kNumChars);
-  item_names = names(0x00, 256);
-  key_item_names = names(0x18, 65);
+  char_names = names(0x01, char_count);
+  item_names = names(0x00, item_count);
+  key_item_names = names(0x18, rows.total("keyitem", kGameKeyItems + 1));
   // The named records' ids and the mods' own element ids, for what reads tables later (menu_pg, scripts, text, saves).
   if (mods && publish) set_table_rows(std::move(rows));
   return true;

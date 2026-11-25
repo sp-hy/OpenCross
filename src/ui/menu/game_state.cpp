@@ -50,6 +50,11 @@ bool MenuRules::load_pg(const vfs::Vfs& vfs) {
   if (!rows) return false;
   pg.resize(rows->size());
   for (size_t i = 0; i < pg.size(); ++i) pg[i].raw = (*rows)[i];
+  if (tables) {
+    std::vector<data::Eligibility*> who;
+    for (PgRow& row : pg) who.push_back(&row.who);
+    tables->fill_eligibility(data::table_rows(), "menu_pg", who, [this](size_t row, int character) { return pg[row].eligible(character); });
+  }
   return true;
 }
 
@@ -88,30 +93,32 @@ bool MenuRules::window_ok(int id, int row) const {
 // ---------------------------------------------------------------------------------------------------------- basics
 std::vector<int> GameState::party() const {
   std::vector<int> out;
-  for (u8 id : slot.party())
-    if (id < save::kNumChars) out.push_back(id);
+  for (const int id : slot.party())
+    if (id >= 0) out.push_back(id);
   return out;
 }
 
 std::vector<int> GameState::roster() const {
   std::vector<int> out;
-  for (int character = 0; character < save::kNumChars; ++character)
+  for (const int character : slot.character_ids())
     if (slot.recruited(character)) out.push_back(character);
   return out;
 }
 
-bool GameState::available(int character) const {
-  if (character < 0 || character >= save::kNumChars) return false;
-  const bool excluded = ((slot.unk_e1b8[static_cast<size_t>(2 + (character >> 5))] >> (character & 31)) & 1) != 0;
-  return slot.recruited(character) && !excluded;
+bool GameState::available(int character) const { return slot.recruited(character) && !slot.char_flag(character, save::kCharExcluded); }
+
+bool GameState::own_body(int character) const {
+  const data::StatRec* record = character >= data::kNumChars && slot.is_character(character) ? rec(character) : nullptr;
+  return record && slot.chars[static_cast<size_t>(character)].model_id == record->model();
 }
 
 std::vector<int> GameState::reserve(int size) const {
   std::vector<int> out = slot.reserve();
   const std::vector<int> members = party();
   if (out.empty())
-    for (int character = 0; character < save::kNumChars && static_cast<int>(out.size()) < size; ++character)
-      if (available(character) && std::find(members.begin(), members.end(), character) == members.end()) out.push_back(character);
+    for (const int character : slot.character_ids())
+      if (static_cast<int>(out.size()) < size && available(character) && std::find(members.begin(), members.end(), character) == members.end())
+        out.push_back(character);
   out.resize(static_cast<size_t>(std::max(0, size)), -1);
   for (size_t i = 0; i < out.size(); ++i) {
     const int character = out[i];
@@ -151,16 +158,17 @@ int GameState::stamina_recovery(int character) const {
 }
 
 const data::StatRec* GameState::rec(int character) const {
-  if (!rules || !rules->tables || character < 0 || character >= data::kNumChars) return nullptr;
+  if (!rules || !rules->tables || character < 0) return nullptr;
   // The record set of the state (the dream's char20.bin until FE 3F, else char.bin; SaveSlot::dream_records): the +0x30 level masks
   // place the grid cells, +3 / +0x1F the growth column and stamina rate.
   auto it = rules->tables->char_sets.find(slot.dream_records ? "char20" : "char");
   if (it == rules->tables->char_sets.end()) it = rules->tables->char_sets.find("char");
-  return it == rules->tables->char_sets.end() ? nullptr : &it->second.rec[static_cast<size_t>(character)];
+  if (it == rules->tables->char_sets.end() || static_cast<size_t>(character) >= it->second.rec.size()) return nullptr;
+  return &it->second.rec[static_cast<size_t>(character)];
 }
 
 int GameState::innate(int character) const {
-  if (character < 0 || character >= save::kNumChars) return 0;
+  if (!slot.is_character(character)) return 0;
   if (character == 0 || character == 43) return slot.chars[static_cast<size_t>(character)].colour_bit;
   const data::StatRec* record = rec(character);
   return record ? record->innate() : 0;
@@ -170,6 +178,7 @@ std::vector<int> GameState::key_items() const {
   std::vector<int> out;
   for (int id = 1; id <= 64; ++id)
     if (has_key_item(id)) out.push_back(id);
+  out.insert(out.end(), slot.key_items_wide.begin(), slot.key_items_wide.end());
   return out;
 }
 
@@ -228,7 +237,7 @@ bool GameState::take_item(int id) { return take_from(slot.items.data(), slot.ite
 // ---------------------------------------------------------------------------------------------------------- grid
 int GameState::cell_index(int character, int row, int col) const {
   const data::StatRec* record = rec(character);
-  if (!record || character >= save::kNumChars || row < 0 || row >= kRows || col < 0 || col >= kCols) return -1;
+  if (!record || !slot.is_character(character) || row < 0 || row >= kRows || col < 0 || col >= kCols) return -1;
   const u16 mask = record->level_mask(row);
   if (!((mask >> col) & 1)) return -1;
   int cell = 0;
@@ -355,7 +364,7 @@ bool GameState::counts_copies(int id) const {
 }
 
 void GameState::strip_grid(int character) {
-  if (character < 0 || character >= save::kNumChars) return;
+  if (!slot.is_character(character)) return;
   save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
   for (size_t k = 0; k < ch.grid.size(); ++k) {
     const int id = ch.grid[k] & 0x3FFF;
@@ -379,14 +388,14 @@ void GameState::return_gear(u16& word) {
   } else if (word >= data::kScriptElementBase) {
     add_element(word - data::kScriptElementBase);
   } else if (word > 0x400 && word < 0x440) {
-    slot.set_key_items(slot.key_items() | 1ull << (word - 0x401));
+    slot.set_key_item(word - 0x400, true);
   }
   word = 0;
 }
 
 int GameState::learn_tech(int character, int rows, int tech) {
   const data::StatRec* record = rec(character);
-  if (!record || character >= save::kNumChars || rows < 1 || rows > kRows) return -1;
+  if (!record || !slot.is_character(character) || rows < 1 || rows > kRows) return -1;
   int cells = 0;
   for (int row = 0; row < rows; ++row) cells += std::popcount(static_cast<unsigned>(record->level_mask(row) & (row == rows - 1 ? 0xFF : 0xFFFF)));
   if (cells < 1 || cells > 48) return -1;
@@ -478,7 +487,7 @@ int GameState::auto_fill_members(const std::vector<int>& members, bool reset) {
 }
 
 int GameState::auto_fill(int character, bool reset) {
-  if (character < 0 || character >= save::kNumChars) return 0;
+  if (!slot.is_character(character)) return 0;
   return auto_fill_members({character}, reset);
 }
 
@@ -633,7 +642,7 @@ Why GameState::use_element(int id, int target) {
 
 // ---------------------------------------------------------------------------------------------------------- equipment
 int GameState::equipped(int character, int eslot) const {
-  if (character < 0 || character >= save::kNumChars) return 0;
+  if (!slot.is_character(character)) return 0;
   const save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
   if (eslot == 0) return ch.weapon;
   if (eslot == 1) return ch.armour;
@@ -643,7 +652,7 @@ int GameState::equipped(int character, int eslot) const {
 
 Stats GameState::stats_with(int character, int eslot, int item) const {
   Stats result;
-  if (character < 0 || character >= save::kNumChars) return result;
+  if (!slot.is_character(character)) return result;
   const save::SaveChar& ch = slot.chars[static_cast<size_t>(character)];
   auto id_at = [&](int equip_slot) { return equip_slot == eslot ? item : equipped(character, equip_slot); };
   auto gear = [&](int id) -> const data::GearRec* { return id > 0 && rules->tables ? rules->tables->gear_rec(id) : nullptr; };
@@ -708,7 +717,7 @@ std::vector<EquipCand> GameState::equip_candidates(int character, int eslot) con
 }
 
 bool GameState::can_equip(int character, int eslot, int item) const {
-  if (character < 0 || character >= save::kNumChars || eslot < 0 || eslot >= kEquipSlots || !rules->tables) return false;
+  if (!slot.is_character(character) || eslot < 0 || eslot >= kEquipSlots || !rules->tables) return false;
   if (item == 0) return eslot >= 2 && equipped(character, eslot) != 0;
   const data::ItemInfo* info = rules->tables->item(item);
   if (!info || !listed(item, eslot) || !info->can_equip(character)) return false;

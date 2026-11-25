@@ -118,7 +118,7 @@ class FlowMachine {
   // The name a saved character gets once `data` is loaded with its ext_save.dat names `ext`; empty = none typed, the default name applies.
   std::u32string saved_custom_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) const;
   // The save records of the characters' Japanese default names: what a record holds until a name is typed.
-  using NameRecords = std::array<std::array<u8, ui::kNameRecord>, save::kNumChars>;
+  using NameRecords = std::vector<std::array<u8, ui::kNameRecord>>;
   void set_default_records(const NameRecords& records) { default_records_ = records; }
   ui::MenuRules& rules() { return rules_; }
 

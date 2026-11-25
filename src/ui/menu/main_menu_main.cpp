@@ -96,7 +96,7 @@ void MainMenu::Impl::update_roster(const Nav& nav) {
     if (roster_anim == 0) roster = Roster::Off, pick_cur = 0;
     return;
   }
-  const int character = roster_top + roster_row;
+  const int character = gs->roster_at(roster_top + roster_row);
   if (roster_ask) {
     if (nav.left || nav.right) roster_no ^= 1, sfx(1);
     if (nav.ok) {
@@ -119,7 +119,7 @@ void MainMenu::Impl::update_roster(const Nav& nav) {
   }
   if (nav.down) {
     if (roster_row < kRosterRows - 1) ++roster_row;
-    else if (roster_top < save::kNumChars - kRosterRows) ++roster_top;
+    else if (roster_top < gs->roster_rows() - kRosterRows) ++roster_top;
     sfx(1);
   }
   if (nav.right || nav.cancel) {
@@ -127,7 +127,7 @@ void MainMenu::Impl::update_roster(const Nav& nav) {
     sfx(nav.cancel ? 6 : 1);
   } else if (nav.ok) {
     sfx(8);
-    const int picked = roster_top + roster_row;
+    const int picked = gs->roster_at(roster_top + roster_row);
     if (!gs->available(picked)) {
       sfx(0x18);
       return;
@@ -516,10 +516,10 @@ void MainMenu::Impl::build_roster() {
   }
   Frame(141, 8, 32);
   pointer(240.0f + static_cast<float>(((frames % 23) * 0x3000) >> 16), 202, false);
-  if (roster_top + kRosterRows < save::kNumChars) scroll_arrow(237, 354, false);
+  if (roster_top + kRosterRows < gs->roster_rows()) scroll_arrow(237, 354, false);
   if (roster_top > 0) scroll_arrow(237, 50, true);
   for (int row = 0; row < kRosterRows; ++row) {
-    const int character = roster_top + row;
+    const int character = gs->roster_at(roster_top + row);
     if (gs->available(character)) roster_line(character, 42.2f + 20.0f * static_cast<float>(row));
   }
   tri(0, 42.0f + 20.0f * static_cast<float>(roster_row), !roster_ask);
@@ -567,11 +567,14 @@ void MainMenu::Impl::status_panel(int character, float panel_x, float panel_y) {
 // ---- status: panel (40, 42), equipment frames below it, title + bottom bar, member-switch glyphs. The PS1 draws a live 3D model on
 // the right standing on the parchment with no panel, casting a flat floor shadow (the host's MenuModelView draws it after the sprite pass);
 // without one the member portrait stands in for it. This screen sits 2 PS1 px left of the other screens' coordinates.
-// Profile of a character (ome.txt): up to 7 lines, keyed by the body the character wears (e.g. Serge's cat form or Pip's forms).
+// Profile of a character (ome.txt): up to 7 lines, keyed by the body the character wears (e.g. Serge's cat form or Pip's forms); a
+// character mods add, in its own body, by its own id when its mod gives it a row.
 std::vector<std::u32string> MainMenu::Impl::profile_lines(int character) {
   std::vector<std::u32string> lines;
   const import::TextTable* table = lt.table("ome");
-  const std::string* cell = table ? table->get(static_cast<u64>(model_number(character)), lang) : nullptr;
+  if (!table) return lines;
+  const std::string* cell = gs && gs->own_body(character) ? table->get(static_cast<u64>(character), lang) : nullptr;
+  if (!cell) cell = table->get(static_cast<u64>(model_number(character)), lang);
   if (!cell) return lines;
   size_t start = 0;
   while (start <= cell->size() && lines.size() < 7) {

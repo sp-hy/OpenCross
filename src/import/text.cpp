@@ -1110,10 +1110,9 @@ std::atomic<u32>& mods_generation() {
   return generation;
 }
 
-// A mod's sysmes.txt rows with the keys of its element names (0x17<id>), help lines (0x1A<id * 3 + line>) and monster names (0x19<id>)
-// moved to the records its [Elements] / [Monsters] give those ids; other rows as they are.
-std::string mod_record_rows(const TextMod& mod, std::string_view text) {
-  if (mod.elements.empty() && mod.monsters.empty()) return std::string(text);
+// A row file's lines with the first cell (the key: 0x-prefixed hex when `hex`, else decimal) of each row `move` maps rewritten; other
+// rows as they are.
+std::string move_row_keys(std::string_view text, bool hex, const std::function<std::optional<std::string>(unsigned key)>& move) {
   std::string out;
   out.reserve(text.size());
   while (!text.empty()) {
@@ -1121,17 +1120,14 @@ std::string mod_record_rows(const TextMod& mod, std::string_view text) {
     const std::string_view line = text.substr(0, end == std::string_view::npos ? text.size() : end + 1);
     text.remove_prefix(line.size());
     const size_t tab = line.find('\t');
+    std::string_view cell = line.substr(0, tab);
+    const bool prefixed = cell.size() > 2 && cell[0] == '0' && (cell[1] == 'x' || cell[1] == 'X');
+    if (prefixed) cell.remove_prefix(2);
     unsigned key = 0;
-    const std::string_view cell = line.substr(0, tab);
-    const bool hex = tab != std::string_view::npos && cell.size() > 2 && cell[0] == '0' && (cell[1] == 'x' || cell[1] == 'X');
-    if (hex && std::from_chars(cell.data() + 2, cell.data() + cell.size(), key, 16).ptr == cell.data() + cell.size()) {
-      const unsigned category = key >> 16, index = key & 0xFFFF;
-      const int own_id = static_cast<int>(category == 0x1A ? index / 3 : index);
-      const std::map<int, int>* ids = category == 0x17 || category == 0x1A ? &mod.elements : category == 0x19 ? &mod.monsters : nullptr;
-      const auto found = ids ? ids->find(own_id) : std::map<int, int>::const_iterator();
-      if (ids && found != ids->end()) {
-        const unsigned moved = category == 0x1A ? static_cast<unsigned>(found->second) * 3 + index % 3 : static_cast<unsigned>(found->second);
-        out += std::format("0x{:02X}{:04X}", category, moved);
+    if (tab != std::string_view::npos && prefixed == hex && !cell.empty() &&
+        std::from_chars(cell.data(), cell.data() + cell.size(), key, hex ? 16 : 10).ptr == cell.data() + cell.size()) {
+      if (const std::optional<std::string> moved = move(key)) {
+        out += *moved;
         out += line.substr(tab);
         continue;
       }
@@ -1139,6 +1135,39 @@ std::string mod_record_rows(const TextMod& mod, std::string_view text) {
     out += line;
   }
   return out;
+}
+
+// A mod's sysmes.txt rows with the keys of its item names (0x00<id>), character names (0x01<id>), element names (0x17<id>), help
+// lines (0x1A<id * 3 + line>), key item names (0x18<id>) and monster names (0x19<id>) moved to the records its [Items] / [Characters] /
+// [Elements] / [KeyItems] / [Monsters] give those ids; other rows as they are.
+std::string mod_record_rows(const TextMod& mod, std::string_view text) {
+  if (mod.items.empty() && mod.elements.empty() && mod.key_items.empty() && mod.monsters.empty() && mod.characters.empty())
+    return std::string(text);
+  return move_row_keys(text, true, [&](unsigned key) -> std::optional<std::string> {
+    const unsigned category = key >> 16, index = key & 0xFFFF;
+    const std::map<int, int>* ids = category == 0x00                     ? &mod.items
+                                    : category == 0x01                     ? &mod.characters
+                                    : category == 0x17 || category == 0x1A ? &mod.elements
+                                    : category == 0x18                     ? &mod.key_items
+                                    : category == 0x19                     ? &mod.monsters
+                                                                           : nullptr;
+    if (!ids) return std::nullopt;
+    const auto record = ids->find(static_cast<int>(category == 0x1A ? index / 3 : index));
+    if (record == ids->end()) return std::nullopt;
+    const unsigned moved = category == 0x1A ? static_cast<unsigned>(record->second) * 3 + index % 3 : static_cast<unsigned>(record->second);
+    return std::format("0x{:02X}{:04X}", category, moved);
+  });
+}
+
+// A mod's rows of a table keyed by record (<id * lines + line>: waa_spec.txt item and keyitem.txt key item descriptions, 3 lines; ome.txt
+// character profiles, 1) moved to the records `ids` give those ids.
+std::string mod_id_rows(const std::map<int, int>& ids, unsigned lines, std::string_view text) {
+  if (ids.empty()) return std::string(text);
+  return move_row_keys(text, false, [&](unsigned key) -> std::optional<std::string> {
+    const auto record = ids.find(static_cast<int>(key / lines));
+    if (record == ids.end()) return std::nullopt;
+    return std::to_string(static_cast<unsigned>(record->second) * lines + key % lines);
+  });
 }
 }  // namespace
 
@@ -1160,8 +1189,11 @@ void set_text_mod_ids(std::string_view mod, std::string_view table, std::map<int
   for (TextMod& entry : text_mod_list()) {
     if (entry.name != mod) continue;
     if (table == "pgdat") entry.elements = std::move(ids);
+    else if (table == "waa") entry.items = std::move(ids);
+    else if (table == "keyitem") entry.key_items = std::move(ids);
     else if (table == "monster") entry.monsters = std::move(ids);
     else if (table == "scenedat") entry.battles = std::move(ids);
+    else if (table == "char") entry.characters = std::move(ids);
     ++mods_generation();
     return;
   }
@@ -1430,7 +1462,12 @@ const TextTable* LangTables::table(std::string_view name) {
   RowSetters setters(key + ".txt");
   each_mod_rows(key + ".txt", [&](const TextMod& mod, std::string_view text) {
     TextTable rows;
-    rows.parse(key == "sysmes" ? std::string_view(mod_record_rows(mod, text)) : text);
+    const std::string moved = key == "sysmes"     ? mod_record_rows(mod, text)
+                              : key == "waa_spec" ? mod_id_rows(mod.items, 3, text)
+                              : key == "keyitem"  ? mod_id_rows(mod.key_items, 3, text)
+                              : key == "ome"      ? mod_id_rows(mod.characters, 1, text)
+                                                  : std::string(text);
+    rows.parse(moved);
     loaded.overlay(rows, [&](const std::string& row, const std::string& heading, const std::string& value) {
       setters.set(row + " " + heading, value, mod.name);
     });

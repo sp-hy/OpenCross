@@ -368,6 +368,11 @@ class FieldVM {
   const u16* var_slot(u32 id) const;
   // Character reference (entity index, party slot, character id or self) -> entity index, -1 when absent.
   int resolve_character(u8 char_ref) const;
+  // A character operand that may name a party slot (FD / FE / FF = the character in slot 0 / 1 / 2: FF is the THIRD member, unlike
+  // the entity references where FF = slot 0's entity) or, for FE 36 / 3D / 3E, a group (F9 every recruited character, FA the party):
+  // the engine's character id (FieldHost::script_character), kRefRecruited / kRefParty for the groups, -1 for none (an empty slot,
+  // FC, any other value from 0x80).
+  int character_ref(int ref) const;
   int entity_operand(u32 offset) const { return resolve_character(byte_at(offset)); }
   bool has_model(int ent) const { return ent >= 0 && !(ents_[static_cast<size_t>(ent)].flags38 & flag38::kNo3dObject); }
 
@@ -399,7 +404,7 @@ class FieldVM {
   s32 isqrt_dist(s32 dx, s32 dy, s32 dz) const;
   // Character id in party slot `slot`, 0xFF when the slot is empty (the word the original party table holds).
   s32 party_table(int slot) const {
-    const int char_id = host_.party_member(slot);
+    const int char_id = host_.script_character_id(host_.party_member(slot));
     return char_id < 0 ? 0xFF : char_id;
   }
   StuckInfo stuck_info(size_t ent, size_t rec, u32 ticks, bool strict) const;

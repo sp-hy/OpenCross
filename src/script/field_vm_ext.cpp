@@ -184,24 +184,24 @@ void FieldVM::exec_ext(u8 sub) {
       if (!(self.flags38 & flag38::kNo3dObject)) host_.head_op(HeadOp::Facing, ent_, -1, 0, operand_s(1, 3, 0x80), 0, self.head_turn_rate);
       advance(4);
       break;
-    case 0x36: host_.heal_group(operand_u(1)); advance(3); break;
-    case 0x37: write_var(word_at(1), host_.char_life(operand_u(3))); advance(5); break;
+    case 0x36: host_.heal_group(character_ref(operand_u(1))); advance(3); break;
+    case 0x37: write_var(word_at(1), host_.char_life(character_ref(operand_u(3)))); advance(5); break;
     case 0x38:
     case 0x39:
     case 0x3A:
-      host_.change_char_life(sub == 0x38 ? LifeOp::SetClamped : sub == 0x39 ? LifeOp::AddCapped : LifeOp::Damage, operand_u(3),
+      host_.change_char_life(sub == 0x38 ? LifeOp::SetClamped : sub == 0x39 ? LifeOp::AddCapped : LifeOp::Damage, character_ref(operand_u(3)),
                              operand_s(1, 5, 0x80));
       advance(6);
       break;
     case 0x3B:
-      if (const int status = host_.char_status(operand_u(3)); status >= 0) write_var(word_at(1), status & 0xFF);
+      if (const int status = host_.char_status(character_ref(operand_u(3))); status >= 0) write_var(word_at(1), status & 0xFF);
       advance(5);
       break;
     case 0x3C: self.head_turn_rate = static_cast<u16>(operand_u(1)); advance(3); break;
     // FE 3D: inflict (OR).
-    case 0x3D: host_.change_status(operand_u(1), operand_u(3), true); advance(5); break;
+    case 0x3D: host_.change_status(character_ref(operand_u(1)), operand_u(3), true); advance(5); break;
     // FE 3E: cure (AND NOT, low byte).
-    case 0x3E: host_.change_status(operand_u(1), operand_u(3), false); advance(5); break;
+    case 0x3E: host_.change_status(character_ref(operand_u(1)), operand_u(3), false); advance(5); break;
     case 0x3F: opaque(0xFE3F, 0, 0); advance(1); break;
     case 0x40:
       if (!(self.flags38 & 0x400000)) {
@@ -263,7 +263,13 @@ void FieldVM::exec_ext(u8 sub) {
       if (!(self.flags38 & flag38::kNo3dObject)) host_.head_op(HeadOp::Facing, ent_, -1, operand_s(3, 5, 0x40), operand_s(1, 5, 0x80), 0, self.head_turn_rate);
       advance(6);
       break;
-    case 0x4A: open_screen(MenuKind::NameEntry, operand_u(1), 3); break;
+    case 0x4A: {
+      // A mod's character id its room's owner does not list names nobody: no name entry opens.
+      const int character = host_.script_character(operand_u(1));
+      if (character < 0) advance(3);
+      else open_screen(MenuKind::NameEntry, character, 3);
+      break;
+    }
     case 0x4B: set_flag(self.flags38, 20, byte_at(1) != 0); advance(2); break;
     case 0x4C: {
       const int target = entity_operand(1);
@@ -289,7 +295,7 @@ void FieldVM::exec_ext(u8 sub) {
       advance(1);
       break;
     case 0x51: opaque(0xFE51, 1, 2); advance(3); break;
-    case 0x52: host_.swap_leader(operand_u(1)); advance(3); break;
+    case 0x52: host_.swap_leader(host_.script_character(operand_u(1))); advance(3); break;
     case 0x53: {  // entity c@6, yaw offset S@3, y = S@1
       const int target = entity_operand(6);
       if (target >= 0 && !(ents_[static_cast<size_t>(target)].flags38 & flag38::kNo3dObject))
@@ -356,10 +362,10 @@ void FieldVM::exec_ext(u8 sub) {
       advance(5);
       break;
     }
-    case 0x5D: host_.table_op(0xFE5D, byte_at(1), operand_u(2)); advance(4); break;
+    case 0x5D: host_.table_op(0xFE5D, byte_at(1), host_.script_character(operand_u(2))); advance(4); break;
     case 0x5E: open_screen(MenuKind::ElementShop, operand_u(1), 3); break;
     case 0x5F: set_flag(self.flags274, 9, byte_at(1) & 1); advance(2); break;
-    case 0x60: host_.table_op(0xFE60, byte_at(1), operand_u(2)); advance(4); break;
+    case 0x60: host_.table_op(0xFE60, byte_at(1), host_.script_character(operand_u(2))); advance(4); break;
     // FE 61 opens nothing: it waits in place while a screen opened by the op before it is pending or open.
     case 0x61:
       if (host_.menu_active()) yield_ = true;
@@ -428,9 +434,9 @@ void FieldVM::exec_ext(u8 sub) {
         advance(1);
       }
       break;
-    case 0x73: host_.learn_limit(2, operand_u(1), operand_u(3)); advance(5); break;
-    case 0x74: host_.learn_limit(1, operand_u(1), operand_u(3)); advance(5); break;
-    case 0x79: host_.learn_limit(0, operand_u(1), operand_u(3)); advance(5); break;
+    case 0x73: host_.learn_limit(2, host_.script_character(operand_u(1)), operand_u(3)); advance(5); break;
+    case 0x74: host_.learn_limit(1, host_.script_character(operand_u(1)), operand_u(3)); advance(5); break;
+    case 0x79: host_.learn_limit(0, host_.script_character(operand_u(1)), operand_u(3)); advance(5); break;
     case 0x75:
       if (!host_.system_ready()) {
         yield_ = true;
@@ -458,8 +464,8 @@ void FieldVM::exec_ext(u8 sub) {
       break;
     }
     case 0x7B: host_.set_limit_mode(operand_u(1)); advance(3); break;
-    case 0x7C: host_.table_op(0xFE7C, operand_u(1), operand_u(3)); advance(5); break;
-    case 0x7D: host_.table_op(0xFE7D, operand_u(1), 0); advance(3); break;
+    case 0x7C: host_.table_op(0xFE7C, host_.script_character(operand_u(1)), operand_u(3)); advance(5); break;
+    case 0x7D: host_.table_op(0xFE7D, host_.script_character(operand_u(1)), 0); advance(3); break;
     case 0x7E: opaque(0xFE7E, 0, 0); advance(1); break;
     case 0x80: set_global_bit(13, byte_at(1) & 1); advance(2); break;
     case 0x81: set_global_bit(19, byte_at(1) & 1); advance(2); break;
