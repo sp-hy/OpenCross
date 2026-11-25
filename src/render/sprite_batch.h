@@ -53,8 +53,9 @@ bool create_quad_index_buffer(GpuContext& ctx, Buffer& buffer, u32 quad_count);
 
 class SpriteBatch {
  public:
-  // Per frame.
-  static constexpr u32 kMaxQuads = 4096;
+  // Per frame: the most the 16-bit quad indices reach (4 vertices a quad, 65536 vertices).
+  static constexpr u32 kMaxQuads = 16384;
+  static_assert(kMaxQuads * 4 <= 65536, "quad indices are 16-bit");
 
   SpriteBatch() = default;
   ~SpriteBatch() { destroy(); }
