@@ -61,16 +61,16 @@ class PartyScreen {
   void set_return_to_slot(bool on);
   // Snapshot of the party, the grid (recruited and not excluded), the lock bitmap, the reserve and the shown records.
   void open(const GameState& gs);
-  // Relief Charm (memmenu2): the same grid; the relief member is save head 0x59F.
+  // Relief Charm (memmenu2): the same grid; the relief member is SaveSlot::relief.
   void open_relief(const GameState& gs);
   bool active() const;
   Kind kind() const;
   // One update: input edges + key repeat, `dt` seconds of 60 Hz frames (scroll, fades). Returns the sound effect to play (0 none).
   int update(const platform::Input& in, float dt);
-  // True once, after the closing fade: the party to write back (0xFF = empty, compacted) / the relief member (0xFF = none).
+  // True once, after the closing fade: the party to write back (-1 = empty, compacted) / the relief member (-1 = none).
   bool take_finished();
-  std::array<u8, 3> result() const;
-  u8 relief_result() const;
+  std::array<int, 3> result() const;
+  int relief_result() const;
   // The reserve slots to write back (-1 = empty); empty when the screen had no reserve.
   std::vector<int> reserve_result() const;
 
@@ -84,8 +84,5 @@ class PartyScreen {
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
-
-// Save head byte of the relief member (the byte after the three party bytes, head 0x59C..0x59E).
-inline constexpr size_t kReliefHead = 0x59F;
 
 }  // namespace oc::ui

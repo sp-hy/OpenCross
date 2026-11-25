@@ -55,7 +55,7 @@ class StatusModelView : public MenuModelView {
     u32 session = 0;
   };
   // Cached per (menu model, art mode).
-  Entry* entry(int model, bool hd_art);
+  Entry* entry(int model, bool hd_art, const std::string& own_model = {});
   void set_weapon(Entry& shown, int weapon_model, int part);
   // One menu frame of the eye blink.
   void step_blink();
@@ -71,7 +71,8 @@ class StatusModelView : public MenuModelView {
   bool cast_shadows_ = false, shadow_pipe_failed_ = false;
   render::CharacterShading shading_;
   const vfs::Vfs& vfs_;
-  std::map<int, std::unique_ptr<Entry>> cache_;  // key = model * 2 + hd_art
+  // Key = the model's stem and "/hd" for HD art.
+  std::map<std::string, std::unique_ptr<Entry>> cache_;
   std::map<std::string, std::shared_ptr<game::ModelHandle>> weapons_;  // "<pack>#<part>"
   // vfs::Vfs::generation() the caches were built for.
   u32 generation_ = 0;

@@ -470,16 +470,20 @@ void BattleView::fx_draw_models(const render::Frame& frame, const render::Letter
 
 // The weapon techs' mesh sprites name the caster's weapon mesh by the PC's two-digit character number (guill_1-3 "02" = Guile, stick / stick2
 // "19" = Glenn, bigcard "37" = Sneff, high "39" = Doc; the weapon .bin is a cpt, so the battle registers the equipped part under that name),
-// and so do the units' own at0.prd emitters that throw the weapon (weapon_mesh_character).
+// and so do the units' own at0.prd emitters that throw the weapon (weapon_mesh_character). A mod's pack may name "cwpn" instead: the acting
+// unit's own weapon, whoever casts (kCasterWeaponMesh).
 // Returns the present PC it denotes, with a weapon mesh loaded; in a versus battle the acting one first (both parties may hold the character).
 int BattleView::fx_weapon_mesh_unit(std::string_view name) const {
-  const int character = weapon_mesh_character(name);
-  if (character < 0 || !battle_) return -1;
-  const auto denotes = [&](int i) {
+  if (!battle_) return -1;
+  const auto armed = [&](int i) {
     const battle::Unit& unit = bunit(i);
     const Visual& visual = vis_[static_cast<size_t>(i)];
-    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu && unit.src_id == character;
+    return unit.present && unit.pc && visual.weapon && visual.weapon->gpu;
   };
+  if (name == kCasterWeaponMesh) return act_.actor >= 0 && act_.actor < battle::kUnits && armed(act_.actor) ? act_.actor : -1;
+  const int character = weapon_mesh_character(name);
+  if (character < 0) return -1;
+  const auto denotes = [&](int i) { return armed(i) && bunit(i).src_id == character; };
   if (versus_ && act_.actor >= 0 && act_.actor < battle::kUnits && denotes(act_.actor)) return act_.actor;
   for (int i = 0; i < battle::kUnits; ++i)
     if (denotes(i)) return i;
@@ -639,17 +643,17 @@ void BattleView::fx_make_overlay_atlas(FxGpu& gpu, const assets::StageAsset& st,
 }
 
 BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& pack) {
-  if (auto it = fx_gpu_.find(pack->eid); it != fx_gpu_.end()) {
+  if (auto it = fx_gpu_.find(pack->gpu_key()); it != fx_gpu_.end()) {
     if (pack->meshes) fx_apply_mesh_tiles(*it->second, *pack->meshes, false);
     return it->second.get();
   }
   // The rest of a prefetch of this pack, or a build of its own.
   FxGpuBuild local;
-  const auto queued = std::ranges::find(fx_prefetch_, pack->eid, &FxGpuBuild::eid);
+  const auto queued = std::ranges::find(fx_prefetch_, pack->gpu_key(), &FxGpuBuild::eid);
   const bool prefetched = queued != fx_prefetch_.end();
   FxGpuBuild& build = prefetched ? *queued : local;
   if (!prefetched) {
-    build.eid = pack->eid;
+    build.eid = pack->gpu_key();
     build.pack = pack;
   }
   build.wait = true;
@@ -658,7 +662,7 @@ BattleView::FxGpu* BattleView::fx_gpu_for(const std::shared_ptr<const FxPack>& p
   const bool failed = build.failed;
   if (prefetched) fx_prefetch_.erase(queued);
   if (failed) return nullptr;
-  const auto it = fx_gpu_.find(pack->eid);
+  const auto it = fx_gpu_.find(pack->gpu_key());
   return it == fx_gpu_.end() ? nullptr : it->second.get();
 }
 
@@ -686,7 +690,7 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
       }
       if (!build.pack) return fail();
       // Built meanwhile (a pack can be both prefetched and asked for).
-      if (fx_gpu_.count(build.pack->eid)) {
+      if (fx_gpu_.count(build.pack->gpu_key())) {
         build.step = Step::Done;
         return true;
       }
@@ -790,7 +794,7 @@ bool BattleView::fx_gpu_step(FxGpuBuild& build, double budget_ms) {
           if (std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count() >= budget_ms) return false;
         }
       }
-      fx_gpu_[pack.eid] = std::move(build.gpu);
+      fx_gpu_[pack.gpu_key()] = std::move(build.gpu);
       build.step = Step::Done;
       return true;
     }

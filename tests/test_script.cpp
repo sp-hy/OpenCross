@@ -2007,12 +2007,40 @@ void test_screen_ops_and_fe61() {
   }
 }
 
-// FE 3B writes the status byte of the referenced character; a reference that resolves to nobody (an empty party slot) leaves the
-// variable as it was.
+// A script names the characters mods add by its own ids: the VM reads every character operand through the host's script_character
+// and writes ids back through script_character_id (here own id 0x40 = the engine's character 60, 0x41 = none).
+void test_character_operands_by_own_id() {
+  class OwnIdHost : public NullHost {
+   public:
+    std::vector<int> recruited;
+    int script_character(int id) override { return id == 0x40 ? 60 : id >= 51 && id < 0x80 ? -1 : id; }
+    int script_character_id(int id) override { return id == 60 ? 0x40 : id >= 51 ? -1 : id; }
+    int party_member(int slot) override { return slot == 0 ? 0 : slot == 1 ? 60 : -1; }
+    void roster_add(int char_id) override { recruited.push_back(char_id); }
+  };
+  Asm script;
+  const u16 init = script.here();
+  script.raw({0x99}).word(V(0)).word(I(1));
+  script.raw({0x98}).word(V(1)).word(I(0x40));
+  script.raw({0x96}).word(I(0x40));
+  script.raw({0x96}).word(I(0x41));
+  script.raw({0x96}).word(I(5));
+  script.stop();
+  OwnIdHost host;
+  FieldVM vm(host);
+  vm.load(make_module(script, {{{{0, init}}}}));
+  CHECK_EQ(vm.var(V(0)), 0x40);
+  CHECK_EQ(vm.var(V(1)), 1);
+  CHECK((host.recruited == std::vector<int>{60, -1, 5}));
+}
+
+// FE 3B writes the status byte of the referenced character (the VM resolves the slot reference to the character in it); a reference
+// that resolves to nobody (an empty party slot) leaves the variable as it was.
 void test_status_read_skips_nobody() {
   class StatusHost : public NullHost {
    public:
-    int char_status(int char_id) override { return char_id == 0xFD ? 0x109 : -1; }
+    int party_member(int slot) override { return slot == 0 ? 7 : -1; }
+    int char_status(int char_id) override { return char_id == 7 ? 0x109 : -1; }
   };
   Asm script;
   const u16 init = script.here();
@@ -2203,6 +2231,7 @@ void test_walk_to_wait_form_keeps_free_height() {
 
 int main() {
   test_status_read_skips_nobody();
+  test_character_operands_by_own_id();
   test_mod_variables();
   test_arithmetic();
   test_movie_end_jump();

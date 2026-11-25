@@ -111,9 +111,16 @@ int FieldVM::resolve_character(u8 char_ref) const {
   } else if (char_ref == 0xFF || char_ref == 0xFE || char_ref == 0xFD) {
     entity = host_.party_entity(char_ref == 0xFF ? 0 : char_ref == 0xFE ? 1 : 2);
   } else if (char_ref != 0xFC) {
-    entity = host_.character_entity(char_ref - 0x80);
+    entity = host_.character_entity(host_.script_character(char_ref - 0x80));
   }
   return entity >= 0 && entity < count ? entity : -1;
+}
+
+int FieldVM::character_ref(int ref) const {
+  if (ref == 0xF9) return kRefRecruited;
+  if (ref == 0xFA) return kRefParty;
+  if (ref >= 0xFD && ref <= 0xFF) return host_.party_member(ref - 0xFD);
+  return ref >= 0 && ref < 0x80 ? host_.script_character(ref) : -1;
 }
 
 s32 FieldVM::isqrt_dist(s32 dx, s32 dy, s32 dz) const {
@@ -267,7 +274,7 @@ void FieldVM::relink_party_entity(int char_id) {
     const u16 ptr = mod_.script_ptr(static_cast<size_t>(ent), 0);
     if (mod_.code_byte(ptr) != 0x0E) continue;
     const u8 ref = mod_.code_byte(ptr + 1);
-    const s32 named = ref >= 0xFD ? party_table(ref - 0xFD) : ref < 0x2C ? ref : 0xFF;
+    const int named = ref >= 0xFD ? host_.party_member(ref - 0xFD) : ref < 0x80 ? host_.script_character(ref) : -1;
     if (named != char_id) continue;
     Entity& target = ents_[static_cast<size_t>(ent)];
     const ScriptRecord kept_record = target.rec[0];

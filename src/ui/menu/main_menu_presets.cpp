@@ -86,6 +86,11 @@ void MainMenu::Impl::build_preset_window() {
 // elements were missing; true when the grid was rebuilt. The log line gives the stock and grid copies before and after, whose sum only
 // changes by what was missing.
 bool MainMenu::Impl::run_preset(int character) {
+  // The GRID chunk keeps the game's characters only: a character mods add has no presets.
+  if (character >= save::kNumChars) {
+    sfx(0x18);
+    return false;
+  }
   if (prompt == GridPrompt::PresetSave) {
     save::GridPreset preset = gs->preset_of(character);
     preset.slot = static_cast<u8>(prompt_cur);

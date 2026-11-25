@@ -53,9 +53,9 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
   {  // Relief Charm: outside battle 0x3DD the relief member takes every battle slot holding Serge
     // A relief member who is no longer recruited is cleared first, as the field does when it leaves for a battle.
     save::SaveSlot& slot = world.game_state().slot;
-    if (const int member = slot.head[ui::kReliefHead]; member != 0xFF && (member >= 0x2C || !slot.recruited(member))) slot.head[ui::kReliefHead] = 0xFF;
-    const int relief = slot.head[ui::kReliefHead];
-    if (rq.battle_id != 0x3DD && relief != 0xFF && std::find(battle_ids.begin(), battle_ids.end(), relief) == battle_ids.end())
+    if (!slot.recruited(slot.relief())) slot.set_relief(-1);
+    const int relief = slot.relief();
+    if (rq.battle_id != 0x3DD && relief >= 0 && std::find(battle_ids.begin(), battle_ids.end(), relief) == battle_ids.end())
       for (int& id : battle_ids)
         if (id == 0) id = relief;
   }
@@ -100,7 +100,7 @@ FieldBattleArgs App::make_field_battle_args(const game::FieldWorld::BattleReques
     }
     if (battle_args.scene == 0x1DD) {
       bopt.duel_names = game::duel_names(gstate, names);
-      if (const int relief = gstate.slot.head[ui::kReliefHead]; relief != 0xFF) bopt.duel_relief = relief;
+      if (const int relief = gstate.slot.relief(); relief >= 0) bopt.duel_relief = relief;
     }
     randomize_battle(battle_args.scene, bopt);
   }
@@ -268,8 +268,8 @@ void App::finish_field_battle(bool after_results) {
   // Serge when he is in the party and it is not (make_field_battle_args).
   if (written_back && features.value(features::kPartySwap, "KeepLineup") != 0) {
     const std::vector<int> saved = world.game_state().party();
-    const int relief = world.game_state().slot.head[ui::kReliefHead];
-    const bool stood_in = relief != 0xFF && std::find(saved.begin(), saved.end(), 0) != saved.end() && std::find(saved.begin(), saved.end(), relief) == saved.end();
+    const int relief = world.game_state().slot.relief();
+    const bool stood_in = relief >= 0 && std::find(saved.begin(), saved.end(), 0) != saved.end() && std::find(saved.begin(), saved.end(), relief) == saved.end();
     if (game::keep_swapped_lineup(world.game_state(), *battle.battle(), stood_in ? relief : -1, features.value(features::kPartySwap, "Reserve")))
       world.state_edited();
   }
@@ -282,7 +282,7 @@ void App::finish_field_battle(bool after_results) {
   if (std::array<int, battle::kPcSlots> hp; results_ok && written_back && results.take_final_hp(hp)) {
     const auto& pm = battle.battle()->party();
     for (size_t i = 0; i < pm.size() && i < hp.size(); ++i)
-      if (hp[i] >= 0 && pm[i].char_id >= 0 && pm[i].char_id < save::kNumChars) {
+      if (hp[i] >= 0 && world.game_state().slot.is_character(pm[i].char_id)) {
         save::SaveChar& save_char = world.game_state().slot.chars[static_cast<size_t>(pm[i].char_id)];
         save_char.cur_hp = static_cast<u16>(std::clamp(hp[i], 1, static_cast<int>(save_char.max_hp)));
       }
@@ -313,8 +313,11 @@ std::string retry_state_line(const ui::GameState& gs) {
   for (const save::ItemStack& stack : gs.slot.elements)
     if (stack.id != 0 && stack.qty != 0) ++elements, element_copies += stack.qty;
   std::string hp;
-  for (const u8 id : gs.slot.party())
-    if (id < save::kNumChars) hp += std::format("{}{}/{}", hp.empty() ? "" : " ", gs.slot.chars[id].cur_hp, gs.slot.chars[id].max_hp);
+  for (const int id : gs.slot.party()) {
+    if (!gs.slot.is_character(id)) continue;
+    const save::SaveChar& member = gs.slot.chars[static_cast<size_t>(id)];
+    hp += std::format("{}{}/{}", hp.empty() ? "" : " ", member.cur_hp, member.max_hp);
+  }
   return std::format("gold {}, items {} ({} copies), elements {} ({} copies), HP {}", gs.gold(), items, item_copies, elements, element_copies, hp);
 }
 

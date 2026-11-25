@@ -291,18 +291,21 @@ void App::rde_toggle_keys() {
     return platform::action_down(input, action);
   };
   game::HotkeyLevels levels;
-  levels.slow_key = held(platform::Action::SlowSpeed);
-  levels.fast_key = held(platform::Action::FastSpeed);
-  // The Status screen's pad camera reads them as L2 / R2.
+  // The Status screen's pad camera and the forge's scrolling party strip read them as L2 / R2.
   const bool menu_camera = menu_ok && menu.camera_takes_triggers();
-  if (menu_camera) levels.slow_key = levels.fast_key = false;
+  const bool shop_strip = shop_ok && shop_open && shop.strip_takes_triggers();
+  if (!shop_strip) {
+    levels.slow_key = held(platform::Action::SlowSpeed);
+    levels.fast_key = held(platform::Action::FastSpeed);
+  }
+  if (menu_camera || shop_strip) levels.slow_key = levels.fast_key = false;
   levels.encounters_key = input.key_down[SDL_SCANCODE_F3];
   levels.boost_key = input.key_down[SDL_SCANCODE_F4];
   levels.auto_key = input.key_down[SDL_SCANCODE_F5];
   // The Debug free camera flies on the triggers and stick clicks. A trigger counts as pressed from half way.
   if (input.pad_connected && !game::free_cam().on()) {
-    levels.lt = !menu_camera && input.pad_axis[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] >= 0.5f;
-    levels.rt = !menu_camera && input.pad_axis[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] >= 0.5f;
+    levels.lt = !menu_camera && !shop_strip && input.pad_axis[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] >= 0.5f;
+    levels.rt = !menu_camera && !shop_strip && input.pad_axis[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] >= 0.5f;
     levels.l3 = input.pad_down[SDL_GAMEPAD_BUTTON_LEFT_STICK];
     levels.r3 = input.pad_down[SDL_GAMEPAD_BUTTON_RIGHT_STICK];
   }

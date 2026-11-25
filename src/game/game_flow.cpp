@@ -57,7 +57,7 @@ void FlowMachine::set_tables(const data::GameTables* tables, const ui::GameFontC
 
 void FlowMachine::set_custom_name(int char_id, std::u32string name) {
   custom_names_[char_id] = std::move(name);
-  if (codec_ && char_id >= 0 && char_id < save::kNumChars) {
+  if (codec_ && gs_.slot.is_character(char_id)) {
     gs_.slot.chars[static_cast<size_t>(char_id)].name = codec_->pack_record(custom_names_[char_id]);
     fill_default_names(gs_.slot);
   }
@@ -65,7 +65,7 @@ void FlowMachine::set_custom_name(int char_id, std::u32string name) {
 
 void FlowMachine::clear_custom_name(int char_id) {
   custom_names_.erase(char_id);
-  if (char_id >= 0 && char_id < save::kNumChars) {
+  if (gs_.slot.is_character(char_id) && static_cast<size_t>(char_id) < default_records_.size()) {
     gs_.slot.chars[static_cast<size_t>(char_id)].name = default_records_[static_cast<size_t>(char_id)];
     fill_default_names(gs_.slot);
   }
@@ -73,7 +73,8 @@ void FlowMachine::clear_custom_name(int char_id) {
 
 // RDE's name entry validates the record, which it never updates: an empty record refuses every name, so no record may stay empty.
 void FlowMachine::fill_default_names(save::SaveSlot& slot) const {
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : slot.character_ids()) {
+    if (static_cast<size_t>(char_id) >= default_records_.size()) continue;
     auto& record = slot.chars[static_cast<size_t>(char_id)].name;
     if (record[0] == 0) record = default_records_[static_cast<size_t>(char_id)];
   }
@@ -95,7 +96,7 @@ save::SaveSlot FlowMachine::new_game_slot(const data::GameTables* tables, const 
     // The title script after the name entry: ADD_TO_PARTY #0, #1, then RAND_MOD 14 -> the code table -> ADD_TO_PARTY (recruited too).
     const int third = kOpeningThird[rnd % 14];
     for (int id : {0, 1, third}) slot.set_recruited(id, true);
-    slot.set_party({0, 1, static_cast<u8>(third)});
+    slot.set_party({0, 1, third});
   } else {
     // Dev start straight into a field room (no title, no dream): the state FE 3F leaves (frames 0x203).
     newgame::real_records(tables, slot, rnd | 1u);
@@ -164,9 +165,10 @@ FlowAction FlowMachine::on_name(std::u32string_view name) {
 std::u32string FlowMachine::saved_custom_name(const save::SaveSlot& data, const std::map<int, std::u32string>& ext, int char_id) const {
   // ext_save.dat names: what the player typed (the record only holds what the game font can show).
   if (const auto it = ext.find(char_id); it != ext.end() && usable_name(it->second, lang_)) return it->second;
-  if (!codec_ || char_id < 0 || char_id >= save::kNumChars) return {};
+  if (!codec_ || !data.is_character(char_id)) return {};
   const auto& record = data.chars[static_cast<size_t>(char_id)].name;
-  if (default_records_[static_cast<size_t>(char_id)][0] != 0 && record == default_records_[static_cast<size_t>(char_id)]) return {};
+  const size_t index = static_cast<size_t>(char_id);
+  if (index < default_records_.size() && default_records_[index][0] != 0 && record == default_records_[index]) return {};
   // Records of characters that were never named hold the JP default (the RDE names live host-side): a name made only of blanks or
   // undecodable codes, or kana outside JP, is "unset" and the default sysmes name applies.
   std::u32string name = ui::trim_blanks(codec_->unpack_record(record));
@@ -189,13 +191,15 @@ FlowAction FlowMachine::on_load(const ui::SlotEntry& entry) {
   if (const int form = gs_.slot.chars[static_cast<size_t>(newgame::kPip)].model_id; ext_form_sync_ && form >= 0x2C && form <= 0x30)
     newgame::pip_form_stats(tables_, gs_.slot);
   ext_form_sync_ = false;
+  if (const int filled = newgame::fill_added_records(tables_, gs_.slot, gs_.slot.playtime_frames() | 1u))
+    log::info("load: {} character(s) mods add had no record in the save: given a new game's", filled);
   if (const int repaired = newgame::repair_missed_star_ups(tables_, gs_.slot))
     log::info("load: {} character record(s) behind their star-up growth raised to the typical growth", repaired);
   custom_names_.clear();
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
+  for (const int char_id : entry.data.character_ids())
     if (std::u32string name = saved_custom_name(entry.data, ext_names_, char_id); !name.empty()) custom_names_[char_id] = std::move(name);
   for (const auto& [char_id, name] : ext_names_)
-    if (codec_ && char_id >= 0 && char_id < save::kNumChars && usable_name(name, lang_))
+    if (codec_ && gs_.slot.is_character(char_id) && usable_name(name, lang_))
       gs_.slot.chars[static_cast<size_t>(char_id)].name = codec_->pack_record(name);
   ext_names_.clear();
   fill_default_names(gs_.slot);
@@ -262,9 +266,13 @@ bool GameFlow::init(render::GpuContext& ctx, const vfs::Vfs& vfs, render::Sprite
   codec_ = std::make_unique<ui::GameFontCodec>(kit_.glyphs());
   lang_tables_.init(&vfs);
   machine_.set_tables(tables, codec_.get());
-  FlowMachine::NameRecords default_records{};
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
-    default_records[static_cast<size_t>(char_id)] = codec_->pack_record(lang_tables_.default_name(char_id, import::Lang::Jp));
+  // An added character's record holds its name in the game's language when it has no Japanese one.
+  FlowMachine::NameRecords default_records(static_cast<size_t>(save::character_count()));
+  for (int char_id = 0; char_id < save::character_count(); ++char_id) {
+    std::u32string name = lang_tables_.default_name(char_id, import::Lang::Jp);
+    if (name.empty() && char_id >= save::kFirstAddedChar) name = lang_tables_.default_name(char_id, lang);
+    default_records[static_cast<size_t>(char_id)] = codec_->pack_record(name);
+  }
   machine_.set_default_records(default_records);
   if (tables) machine_.rules().load_pg(vfs);
   title_.init(kit_, mixer);
@@ -376,7 +384,7 @@ std::u32string GameFlow::preview_name(const save::SaveSlot& data) {
   const auto text = import::sjis_to_utf8(field.first(static_cast<size_t>(std::find(field.begin(), field.end(), 0) - field.begin())));
   if (!text || text->empty()) return {};
   const std::u32string name = import::utf8_to_u32(*text);
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id)
+  for (const int char_id : data.character_ids())
     if (lang_tables_.default_name(char_id, import::Lang::Jp) == name) return lang_tables_.default_name(char_id, lang_);
   return {};
 }
@@ -554,9 +562,9 @@ FlowAction GameFlow::update(const platform::Input& in, float dt) {
     else if (nav.cancel) sfx = party_editor_.press(Key::Cancel);
     if (sfx && sfx_) sfx_(sfx);
     if (party_editor_.done()) {
-      std::array<u8, 3> ids{0xFF, 0xFF, 0xFF};
+      std::array<int, 3> ids{-1, -1, -1};
       const std::vector<int> result = party_editor_.result();
-      for (size_t i = 0; i < result.size() && i < 3; ++i) ids[i] = static_cast<u8>(result[i]);
+      for (size_t i = 0; i < result.size() && i < 3; ++i) ids[i] = result[i];
       machine_.game_state().slot.set_party(ids);
       party_active_ = false;
       party_finished_ = true;

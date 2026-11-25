@@ -56,6 +56,9 @@ void reset_party(save::SaveSlot& slot);
 void reset_options(save::SaveSlot& slot);
 // char.bin records (names kept), stars 0, growth, no star unlocks, nibbles 5. dream_records = false.
 void real_records(const data::GameTables* tables, save::SaveSlot& slot, u32 seed);
+// A loaded slot made before a mod added characters holds no record for them (max HP 0): each gets the record a new game gives it
+// (real_records' record, growth and the star unlocks of the slot's stars; name and flags kept). Returns how many records it filled.
+int fill_added_records(const data::GameTables* tables, save::SaveSlot& slot, u32 seed);
 // The boot / title state: dream records, names reset, 20 stars, relief member 0xFF, Serge alone recruited, frames 0x203,
 // variables 0..0x3CF = 0, the two carry-over bitmaps 0. dream_records = true.
 save::SaveSlot boot_state(const data::GameTables* tables, u32 seed);

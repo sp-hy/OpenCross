@@ -222,7 +222,7 @@ void BattleView::set_art_mode(bool hd, bool force) {
   // Pack models (their tiles follow the texture mods; some took their battle model's cdrom2 mesh + texture) are rebuilt at the pack's next cast; the
   // pack playing now keeps its copy to its end (the pseudo-actor points into it).
   for (auto it = fx_gpu_.begin(); it != fx_gpu_.end();)
-    it = it->second && it->second->art_dependent && !(fx_pack_ && fx_pack_->eid == it->first) ? fx_gpu_.erase(it) : std::next(it);
+    it = it->second && it->second->art_dependent && !(fx_pack_ && fx_pack_->gpu_key() == it->first) ? fx_gpu_.erase(it) : std::next(it);
   // The prefetches under way uploaded the old art's sheets: their packs build again when they are drawn.
   fx_prefetch_.clear();
   std::vector<std::string> stems;
@@ -624,7 +624,7 @@ void BattleView::prefetch_unit_models() {
     const data::StatRec& er = tables_->enemies[static_cast<size_t>(unit.form >= 0 ? unit.form : unit.src_id)];
     if (er.weapon() != 0 && er.weapon_model() != 0) {
       const data::GearRec* wg = tables_->gear_rec(er.weapon());
-      weapon_parts.emplace_back(ModelCache::weapon_bin(static_cast<int>(er.model())), wg ? (wg->tier() & 0x7F) : 0);
+      weapon_parts.emplace_back(ModelCache::monster_weapon_bin(*vfs_, tables_, unit.form >= 0 ? unit.form : unit.src_id), wg ? (wg->tier() & 0x7F) : 0);
     }
   }
   model_cache_.prefetch(*vfs_, std::move(stems), std::move(weapon_parts));
@@ -689,7 +689,7 @@ void BattleView::bind_unit_model(int unit_id) {
         const auto& pts = handle->asset.attach.points;
         const assets::MountPoint& mount = handle->asset.attach.mounts[0];
         const data::GearRec* wg = tables_->gear_rec(er.weapon());
-        visual.weapon = load_enemy_weapon(static_cast<int>(er.model()), wg ? (wg->tier() & 0x7F) : 0);
+        visual.weapon = load_enemy_weapon(mon, wg ? (wg->tier() & 0x7F) : 0);
         visual.weapon_attach = mount.used ? mount.attach : pts[0x12].used ? 0x12 : pts[7].used ? 7 : 15;
         log::info("battle: unit {} {} weapon_model {} -> {} attach {} (joint {}){} slot1 {} entry-8 hide mask {}", unit_id, unit.name, er.weapon_model(),
                   visual.weapon ? "loaded" : "FAILED", visual.weapon_attach, pts[static_cast<size_t>(visual.weapon_attach)].joint,

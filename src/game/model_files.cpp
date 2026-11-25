@@ -159,6 +159,11 @@ std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int mod
     if (err) *err = "no menu model " + std::to_string(model);
     return std::nullopt;
   }
+  return read_menu_model_stem(files, stem, hd_art, err, mods);
+}
+
+std::optional<assets::ModelAsset> read_menu_model_stem(const vfs::Vfs& files, const std::string& stem, bool hd_art, std::string* err,
+                                                       MenuModelMods mods) {
   const auto ome = files.read("cdrom/menu/player/" + stem + ".ome");
   if (!ome) {
     if (err) *err = "menu/player/" + stem + ".ome not found";

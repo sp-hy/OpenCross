@@ -173,7 +173,7 @@ void BattleView::anm_effect(int unit, const bseq::Event& event) {
   // pack carries its hit sparks itself ("0s00" / "0m00" / "0l00", Just 4 Kicks has only the medium one: the kick that lands with class
   // 1 sparks, the small and large ones find no header) - the reaction script of the pack runs on the target and names them.
   if (fx_pack_ && (pack_react || std::any_of(fx_pack_->fx.emitters.begin(), fx_pack_->fx.emitters.end(), [&](const assets::Emitter& em) { return em.name == name; }))) {
-    const std::string pkey = "pack#" + std::to_string(fx_pack_->eid);
+    const std::string pkey = "pack#" + std::to_string(fx_pack_->gpu_key());
     std::shared_ptr<AnmFx>& pslot = anm_[pkey];
     if (!pslot) {
       auto pa = std::make_shared<AnmFx>();

@@ -85,7 +85,7 @@ int MainMenu::Impl::body(int character) const {
 }
 
 std::u32string MainMenu::Impl::char_name(int id) {
-  if (!gs || id < 0 || id >= save::kNumChars) return default_char_name(id);
+  if (!gs || !gs->slot.is_character(id)) return default_char_name(id);
   const std::u32string name = data::character_name(id, body(id), data::NameContext::Menu, false, {custom_names, &lt, lang});
   return name.empty() ? default_char_name(id) : name;
 }

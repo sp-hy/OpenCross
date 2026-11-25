@@ -9,6 +9,7 @@
 #include "core/element_icon.h"
 #include "core/log.h"
 #include "data/char_name.h"
+#include "data/table_rows.h"
 #include "game/party_editor.h"
 #include "import/party_menu.h"
 #include "import/tim.h"
@@ -66,6 +67,8 @@ struct Rec {
   // The six stats in the screen's order.
   std::array<int, 6> st{};
   int innate = 0, portrait = 0, body = 0;
+  // A character mods add in its own body: its name, for its own face (hd/face/<set>/<name>.png); else empty.
+  std::string own_face;
 };
 
 // A PS1 quad maps `texels` over `pixels` and gives a pixel the texel nearest the texture coordinate at its left (top) edge; the target is
@@ -118,7 +121,7 @@ struct PartyScreen::Impl {
   game::PartyEditor ed;
   game::ReliefEditor rel;
   NavPoller nav;
-  std::array<Rec, 44> recs{};
+  std::vector<Rec> recs;
   enum class Phase { Idle, Run, Close, Finished } phase = Phase::Idle;
   // frame: frames since open (fade-in: k = 0xE0 - 0x20 (frame - 1) for frames 1..7);
   // close_frame: frames of the closing loop.
@@ -126,8 +129,8 @@ struct PartyScreen::Impl {
   int close_frame = 0;
   float acc = 0;
   bool finished_flag = false;
-  std::array<u8, 3> out{0xFF, 0xFF, 0xFF};
-  u8 relief_out = 0xFF;
+  std::array<int, 3> out{-1, -1, -1};
+  int relief_out = -1;
   // Party swap's reserve slots (0 = none) and the slots to write back.
   int reserve_size = 0;
   std::vector<int> reserve_out;
@@ -181,7 +184,11 @@ struct PartyScreen::Impl {
   std::string face_set() const { return hd ? portrait_set : std::string("1999"); }
   // Portrait of a character by its portrait byte (0x0E -> 0x5A).
   Tex* face(int character) {
-    if (character < 0 || character >= 44) return nullptr;
+    if (character < 0 || static_cast<size_t>(character) >= recs.size()) return nullptr;
+    if (const std::string& own = recs[static_cast<size_t>(character)].own_face; !own.empty()) {
+      const std::string path = "hd/face/" + face_set() + "/" + own + ".png";
+      if (Tex* own_tex = vfs->added(path) ? png(path) : nullptr; own_tex && own_tex->set) return own_tex;
+    }
     int pb = recs[static_cast<size_t>(character)].portrait;
     if (pb < 0 || pb >= 92) return nullptr;
     if (pb == 0x0E) pb = 0x5A;
@@ -228,7 +235,7 @@ struct PartyScreen::Impl {
     return to_u32(key);
   }
   std::u32string name(int character) {
-    if (character < 0 || character >= 44) return {};
+    if (character < 0 || static_cast<size_t>(character) >= recs.size()) return {};
     return data::character_name(character, recs[static_cast<size_t>(character)].body, data::NameContext::Menu, false, {custom, &lt, lang});
   }
 
@@ -443,10 +450,8 @@ namespace {
 // The grid = recruited and not excluded characters, ascending ids.
 std::vector<int> grid_of(const save::SaveSlot& sl) {
   std::vector<int> grid;
-  for (int character = 0; character < 44; ++character) {
-    const bool excl = ((sl.unk_e1b8[static_cast<size_t>(2 + (character >> 5))] >> (character & 31)) & 1) != 0;
-    if (sl.recruited(character) && !excl) grid.push_back(character);
-  }
+  for (const int character : sl.character_ids())
+    if (sl.recruited(character) && !sl.char_flag(character, save::kCharExcluded)) grid.push_back(character);
   return grid;
 }
 }  // namespace
@@ -455,12 +460,15 @@ void PartyScreen::open(const GameState& gs) {
   Impl& impl = *impl_;
   const save::SaveSlot& sl = gs.slot;
   const std::vector<int> grid = grid_of(sl);
-  const std::array<u8, 3> party = sl.party();
+  const std::array<int, 3> party = sl.party();
+  std::vector<int> locked;
+  for (const int character : sl.character_ids())
+    if (sl.char_flag(character, save::kCharLocked)) locked.push_back(character);
   impl.kind = Kind::Party;
-  impl.ed.begin(grid, {party[0] == 0xFF ? -1 : party[0], party[1] == 0xFF ? -1 : party[1], party[2] == 0xFF ? -1 : party[2]},
-                {sl.unk_e1b8[0], sl.unk_e1b8[1]}, impl.reserve_size > 0 ? gs.reserve(impl.reserve_size) : std::vector<int>{});
+  impl.ed.begin(grid, party, locked, impl.reserve_size > 0 ? gs.reserve(impl.reserve_size) : std::vector<int>{});
   impl.reserve_out = impl.ed.reserve();
-  for (int character = 0; character < 44; ++character) {
+  impl.recs.assign(sl.chars.size(), {});
+  for (const int character : sl.character_ids()) {
     const save::SaveChar& ch = sl.chars[static_cast<size_t>(character)];
     Rec& rec = impl.recs[static_cast<size_t>(character)];
     rec.hp = ch.cur_hp, rec.max_hp = ch.max_hp;
@@ -468,6 +476,8 @@ void PartyScreen::open(const GameState& gs) {
     rec.innate = gs.innate(character);
     rec.portrait = ch.model_id;
     rec.body = data::character_body(ch.model_id, [&](int var) { return sl.var(var); });
+    if (gs.own_body(character))
+      rec.own_face = data::table_rows().name_of("char", static_cast<size_t>(character));
   }
   impl.phase = Impl::Phase::Run;
   impl.frame = 0, impl.close_frame = 0, impl.acc = 0;
@@ -484,12 +494,12 @@ void PartyScreen::open_relief(const GameState& gs) {
   open(gs);
   Impl& impl = *impl_;
   const save::SaveSlot& sl = gs.slot;
-  int relief_member = sl.head[kReliefHead];
-  // A relief member that is no longer recruited (id < 0x2C with its recruited bit clear) -> 0xFF.
-  if (relief_member >= 0x2C || !sl.recruited(relief_member)) relief_member = -1;
+  int relief_member = sl.relief();
+  // A relief member that is no longer recruited -> none.
+  if (!sl.recruited(relief_member)) relief_member = -1;
   impl.kind = Kind::Relief;
   impl.rel.begin(grid_of(sl), relief_member);
-  impl.relief_out = relief_member < 0 ? 0xFF : static_cast<u8>(relief_member);
+  impl.relief_out = relief_member;
   log::info("party screen: relief screen opened, relief member {}", relief_member);
 }
 
@@ -529,12 +539,12 @@ int PartyScreen::update(const platform::Input& in, float dt) {
       impl.phase = Impl::Phase::Close;
       impl.close_frame = 0;
       if (relief) {
-        impl.relief_out = impl.rel.relief() < 0 ? 0xFF : static_cast<u8>(impl.rel.relief());
+        impl.relief_out = impl.rel.relief();
         log::info("party screen: relief screen closed, relief member {}", impl.rel.relief());
       } else {
         const std::vector<int> result = impl.ed.result();
-        impl.out = {0xFF, 0xFF, 0xFF};
-        for (size_t i = 0; i < result.size() && i < 3; ++i) impl.out[i] = static_cast<u8>(result[i]);
+        impl.out = {-1, -1, -1};
+        for (size_t i = 0; i < result.size() && i < 3; ++i) impl.out[i] = result[i];
         impl.reserve_out = impl.ed.reserve();
         log::info("party screen: closed, party {} {} {}{}", impl.out[0], impl.out[1], impl.out[2], impl.reserve_text());
       }
@@ -557,8 +567,8 @@ bool PartyScreen::take_finished() {
   impl.phase = Impl::Phase::Idle;
   return true;
 }
-std::array<u8, 3> PartyScreen::result() const { return impl_->out; }
-u8 PartyScreen::relief_result() const { return impl_->relief_out; }
+std::array<int, 3> PartyScreen::result() const { return impl_->out; }
+int PartyScreen::relief_result() const { return impl_->relief_out; }
 std::vector<int> PartyScreen::reserve_result() const { return impl_->reserve_out; }
 void PartyScreen::set_reserve_size(int size) { impl_->reserve_size = std::clamp(size, 0, 41); }
 void PartyScreen::set_return_to_slot(bool on) { impl_->ed.set_return_to_slot(on); }

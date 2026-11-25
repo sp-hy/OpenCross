@@ -98,6 +98,7 @@ void FieldWorld::shutdown() {
   remote_.clear();
   room_models_.clear();
   char_models_.clear();
+  named_models_.clear();
   menu_bodies_.clear();
   worn_models_.clear();
   sourced_models_.clear();
@@ -132,6 +133,7 @@ void FieldWorld::set_art_mode(bool hd, bool force) {
       swap_art();
     } else {
       char_models_.clear();
+      named_models_.clear();
       sourced_models_.clear();
     }
     menu_bodies_.clear();
@@ -161,6 +163,7 @@ void FieldWorld::swap_art() {
   const auto old_room = std::move(room_models_);
   const auto old_chars = std::move(char_models_);
   char_models_.clear();
+  named_models_.clear();
   const auto old_sourced = std::move(sourced_models_);
   sourced_models_.clear();
   const size_t n_room = view_.scene() ? view_.scene()->models.size() : 0;
@@ -318,6 +321,19 @@ std::shared_ptr<ModelHandle> FieldWorld::character_model(int char_id) {
       handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
   }
   char_models_[char_id] = handle;
+  return handle;
+}
+
+std::shared_ptr<ModelHandle> FieldWorld::named_character_model(int char_id) {
+  if (!gs_ || !files_ || !gs_->own_body(char_id)) return nullptr;
+  const std::string& name = data::table_rows().name_of("char", static_cast<size_t>(char_id));
+  if (name.empty()) return nullptr;
+  if (const auto it = named_models_.find(name); it != named_models_.end()) return it->second;
+  std::shared_ptr<ModelHandle> handle;
+  const std::string stem = name + "/" + name;
+  if (files_->added("cdrom/fieldobj/player/" + stem + ".obj"))
+    if (std::optional<assets::ModelAsset> asset = read_character_model(*files_, stem, name)) handle = Actor::make_resolved_model(*meshes_, std::move(*asset));
+  named_models_[name] = handle;
   return handle;
 }
 

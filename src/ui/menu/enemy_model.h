@@ -1,5 +1,6 @@
 #pragma once
-// The Bestiary page's creature (EnemyModelSlot): the battle model of the record's model number (the shared battle model table) in its
+// The Bestiary page's creature (EnemyModelSlot): the record's battle model as the battle picks it (a monster mods add by name with a
+// model of its own wears that, any other the model of its model number in the shared battle model table) in its
 // stand-by clip 1, looping at the battle's rate (half a keyframe per 30 Hz model tick), turning about its vertical axis by 8 (4096 = a turn)
 // per model tick. Its centre and extent are measured once over the whole clip (with the weapon it holds); the camera stands just far enough
 // back for every point to stay inside the slot's box at every turn, the box centre on the creature's centre. A silhouette is the same model drawn with its colour multiplied
@@ -12,6 +13,7 @@
 #include <array>
 #include <list>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "game/actor.h"
@@ -31,7 +33,9 @@ class EnemyModelLibrary : public EnemyModelView {
 
  private:
   struct Entry {
-    int model = -1, weapon_part = -1;
+    // The model's file stem and its weapon pack ("" = none).
+    std::string stem, weapon_bin;
+    int weapon_part = -1;
     std::shared_ptr<game::ModelHandle> body, weapon;
     // Slot 0's attach point; -1 = none. The spawn script's attached-object hide words (bit s = slot s hidden) and part words.
     int weapon_attach = -1;
@@ -43,8 +47,9 @@ class EnemyModelLibrary : public EnemyModelView {
     float centre[3] = {0, 0, 0};
     std::vector<std::array<float, 2>> reach;
   };
-  // The entry of `model` holding `weapon_part`, loaded when missing (null when the model cannot be read); the newest entry is first.
-  Entry* entry(int model, int weapon_part);
+  // The entry of model `stem` holding part `weapon_part` of `weapon_bin`, loaded when missing (null when the model cannot be read); the
+  // newest entry is first.
+  Entry* entry(const std::string& stem, const std::string& weapon_bin, int weapon_part);
   // The matrix the weapon of attached slot `weapon_slot` is drawn with in the pose `palette`; false when the slot carries none.
   static bool weapon_matrix(const Entry& held, size_t weapon_slot, const std::vector<render::Mat4>& palette, render::Mat4& out);
   render::MeshPipeline& meshes_;
@@ -53,7 +58,8 @@ class EnemyModelLibrary : public EnemyModelView {
   // vfs::Vfs::generation() the cache was built for.
   u32 generation_ = 0;
   // The model shown and the turn: model ticks are taken from the time drawn, `accum` is the part of the next one.
-  int shown_ = -1, shown_weapon_ = -1;
+  std::string shown_;
+  int shown_weapon_ = -1;
   float accum_ = 0, yaw_ = 0;
   std::vector<render::Mat4> palette_;
 };

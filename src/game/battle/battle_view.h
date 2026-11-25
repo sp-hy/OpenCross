@@ -566,7 +566,9 @@ class BattleView {
   std::shared_ptr<ModelHandle> load_model_for(const std::string& dir_stem) { return model_cache_.load_model_for(*vfs_, *meshes_, dir_stem); }
   void prefetch_unit_models();
   std::shared_ptr<ModelHandle> load_weapon(int kind, int part) { return model_cache_.load_weapon(*vfs_, *meshes_, kind, part); }
-  std::shared_ptr<ModelHandle> load_enemy_weapon(int model, int part) { return model_cache_.load_enemy_weapon(*vfs_, *meshes_, model, part); }
+  std::shared_ptr<ModelHandle> load_enemy_weapon(int monster_id, int part) {
+    return model_cache_.load_enemy_weapon(*vfs_, *meshes_, tables_, monster_id, part);
+  }
   int weapon_digit(const battle::Unit& unit) const { return ModelCache::weapon_digit(tables_, unit); }
   std::shared_ptr<ModelScripts> load_scripts_for(const std::string& dir_stem) { return model_cache_.load_scripts_for(*vfs_, &bank_, dir_stem); }
   std::string unit_model_stem(const battle::Unit& unit) const { return ModelCache::unit_model_stem(*vfs_, tables_, unit); }
@@ -818,12 +820,17 @@ class BattleView {
   // The effect-pack id of the current action's element (-1 = none) and the colour of its charge pack (-1 = none). fx_prefetch_cast queues
   // the builds of both packs' GPU resources at the element's confirm and fx_prefetch_step advances them in bounded steps, one video frame
   // at a time, so neither the charge start nor the charge -> pack hand-over loads, bakes and uploads a pack (the charge's sheets, a
-  // summon's creature model, a level-6 element's meshes) in one frame; fx_prefetch_open queues one pack.
+  // summon's creature model, a level-6 element's meshes) in one frame; fx_prefetch_open queues one pack (an effect id's, or `pack`, a
+  // named element's own, under its gpu_key).
   int fx_action_eid() const;
   int fx_charge_colour() const;
   void fx_prefetch_cast();
-  void fx_prefetch_open(int eid);
+  void fx_prefetch_open(int eid, std::shared_ptr<const FxPack> pack = nullptr);
   void fx_prefetch_step();
+  // The pack fx_begin plays for effect id `eid` of the current action: a named element's own pack (fx_named_pack, null when it ships
+  // none), else the effect id's.
+  std::shared_ptr<const FxPack> fx_named_pack(int eid);
+  std::shared_ptr<const FxPack> fx_action_pack(int eid);
   std::vector<int> cast_elements_;
   std::vector<std::vector<battle::ActionEvent>> begun_actions_;
   // Cast start: cast pose, chant, the colour's charge pack "ch0N".
@@ -958,6 +965,7 @@ class BattleView {
   // thread: a step only looks whether its job is done, unless `wait` (the pack is needed now) makes it wait for it.
   struct FxGpuBuild {
     enum class Step { Pack, Sprites, SpriteSheets, Meshes, MeshTextures, MeshBuffers, HdIndex, ModelRead, Models, OverlayAtlases, Done };
+    // The pack's fx_gpu_ key (FxPack::gpu_key): an effect id, a charge pack's, or a named element pack's, which comes with `pack` set.
     int eid = -1;
     std::shared_ptr<const FxPack> pack;
     std::unique_ptr<FxGpu> gpu;

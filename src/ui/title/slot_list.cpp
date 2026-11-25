@@ -453,8 +453,8 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
       const save::SaveSlot& data = rows_[file_no]->data;
       const auto party = data.party();
       std::u32string name = file_no == 0 && !ps1_rows ? import::utf8_to_u32(sl::auto_save_caption(li))
-                            : party[0] < save::kNumChars && name_of_ ? name_of_(data, rows_[file_no]->ext_names, party[0])
-                                                                     : std::u32string();
+                            : party[0] >= 0 && name_of_ ? name_of_(data, rows_[file_no]->ext_names, party[0])
+                                                        : std::u32string();
       std::replace(name.begin(), name.end(), U'\n', U' ');
       labels[file_no] = {std::move(name), sl::row_location(location_lines(data).first)};
       while (ink && !ps1_rows && row_scale > 0.18f && (dl.measure(bnf, labels[file_no].first, row_scale) > canvas_x(name_w) ||
@@ -614,11 +614,11 @@ void SlotList::draw(DrawList& dl, UiKit& kit) const {
     const NamePic fp = face_pic(faces[i]);
     const float fx = sl::kFaceX + sl::kFaceStep * static_cast<float>(i);
     if (fp.set) dl.image(fp.set, canvas_x(fx), canvas_y(sl::kFaceY), canvas_x(sl::kFace), canvas_y(sl::kFace));
-    else if (party[i] < save::kNumChars) txt(fx + 2.0f, 262, name_of_ ? name_of_(save_data, cur->ext_names, party[i]) : std::u32string(), white, 0.6f);
+    else if (party[i] >= 0) txt(fx + 2.0f, 262, name_of_ ? name_of_(save_data, cur->ext_names, party[i]) : std::u32string(), white, 0.6f);
   }
   std::u32string leader;
   if (cur->card != 0) leader = preview_of_ ? preview_of_(save_data) : std::u32string();
-  else if (!party.empty() && party[0] < save::kNumChars && name_of_) leader = name_of_(save_data, cur->ext_names, party[0]);
+  else if (!party.empty() && party[0] >= 0 && name_of_) leader = name_of_(save_data, cur->ext_names, party[0]);
   // Card 1's CHRONO00 and the page's file 0 are the auto-saves.
   const bool auto_file = cur->slot == 0 && cur->card <= 1;
   const std::u32string name = auto_file ? import::utf8_to_u32(sl::auto_save_caption(li)) : leader;
