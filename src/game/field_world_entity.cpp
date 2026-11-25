@@ -314,6 +314,7 @@ bool FieldWorld::motion_wait(int ent) {
     return true;
   }
   motion.active = false;
+  ent_state.actor.clear_play();
   return false;
 }
 

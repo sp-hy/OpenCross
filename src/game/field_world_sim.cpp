@@ -467,6 +467,8 @@ void FieldWorld::step_motions() {
         break;
       }
     }
+    // A walk that ends leaves the stand slot in force as the request, so a stand slot changed during the walk plays at once.
+    if (motion.walking && !motion.active) ent_state.actor.clear_play();
   }
 }
 

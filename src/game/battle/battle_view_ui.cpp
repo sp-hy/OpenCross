@@ -1543,7 +1543,8 @@ void BattleView::build_command_ui() {
       if (ps1_hud_ && row_frame > 0) {
         add_sheet(0x04, row_frame, 44, row_y, row_colour & mask);
         if (ui_ != Ui::Top && k < 3) {
-          const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
+          // The sheet frame has room for two digits only.
+          const int pct = std::min(hit_chance_shown_for(active_pc_, engaged_target_, k), 99);
           if ((pct / 10) % 10 != 0) add_sheet(0x04, (pct / 10) % 10 + 101, 63, row_y, row_colour & mask);
           add_sheet(0x04, pct % 10 + 101, 70, row_y, row_colour & mask);
         }
@@ -1552,13 +1553,22 @@ void BattleView::build_command_ui() {
       if (!jp && ui_ != Ui::Top && k < 3) {
         // The HIT% row as RDE writes the sheet frame "N-(  %)": character c of it at x 44 + c x pitch (6.73 PS1 px in HD art, 6.45 in
         // Classic art, whatever the glyph's own advance), the percentage's digits at x 63 / 70 as the frame's digit sprites (no tens digit
-        // when it is 0).
+        // when it is 0). The always-hit cheat's 100 packs three digits at a 5.5 pitch from x 62, with "%)" moved 2 px right after them.
         const int pct = hit_chance_shown_for(active_pc_, engaged_target_, k);
         const u32 ink = remap_text_colour(row_colour) & mask;
         const float pitch = hd_ ? 6.73f : 6.45f;
         const std::u32string frame = std::u32string(1, static_cast<char32_t>(U'1' + k)) + U"-(  %)";
-        for (size_t c = 0; c < frame.size(); ++c)
-          if (frame[c] != U' ') btext(cmd_flags, std::u32string(1, frame[c]), 44 + pitch * static_cast<float>(c), yl, ink);
+        const float tail_shift = pct >= 100 ? 2.0f : 0.0f;
+        for (size_t c = 0; c < frame.size(); ++c) {
+          if (frame[c] == U' ') continue;
+          const float shift = c >= 5 ? tail_shift : 0.0f;
+          btext(cmd_flags, std::u32string(1, frame[c]), 44 + pitch * static_cast<float>(c) + shift, yl, ink);
+        }
+        if (pct >= 100) {
+          const std::u32string text = digits_u32(pct);
+          for (size_t c = 0; c < text.size(); ++c) btext(cmd_flags, text.substr(c, 1), 62 + 5.5f * static_cast<float>(c), yl, ink);
+          continue;
+        }
         if ((pct / 10) % 10 != 0) btext(cmd_flags, digits_u32((pct / 10) % 10), 63, yl, ink);
         btext(cmd_flags, digits_u32(pct % 10), 70, yl, ink);
         continue;
