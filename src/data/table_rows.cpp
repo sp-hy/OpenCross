@@ -93,6 +93,13 @@ std::vector<TableField> scene_fields() {
   return out;
 }
 
+// menu/waa_tbl.bin records (forge recipes: units of material 0..31, per item).
+std::vector<TableField> forge_fields() {
+  std::vector<TableField> out;
+  add_series(out, "mat", 0, 32, 1);
+  return out;
+}
+
 // ditem.dat records (data::DropRow).
 std::vector<TableField> drop_fields() {
   std::vector<TableField> out;
@@ -153,26 +160,39 @@ bool parse_reference(std::string_view text, std::string& table, std::string& nam
 
 std::span<const TableField> table_fields(std::string_view table) {
   static const std::vector<TableField> stat = stat_fields(), elem = elem_fields(), menu_elem = menu_elem_fields(), gear = gear_fields(),
-                                       item = item_fields(), scene = scene_fields(), drop = drop_fields();
+                                       item = item_fields(), forge = forge_fields(), scene = scene_fields(), drop = drop_fields();
   if (table == "monster" || table == "char" || table == "char20" || (table.starts_with("char_w") && table.size() == 7)) return stat;
   if (table == "pgdat") return elem;
   if (table == "menu_pg") return menu_elem;
   if (table == "waa") return gear;
   if (table == "menu_waa") return item;
+  if (table == "waa_tbl") return forge;
   if (table == "scenedat") return scene;
   if (table == "ditem") return drop;
   return {};
 }
 
-std::string_view table_names_of(std::string_view table) { return table == "menu_pg" ? std::string_view("pgdat") : table; }
-
-bool table_grows(std::string_view table) {
-  return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem" || table_is_list(table);
+std::string_view table_names_of(std::string_view table) {
+  if (table == "menu_pg") return "pgdat";
+  if (table == "menu_waa" || table == "waa_tbl") return "waa";
+  return table;
 }
 
-bool table_is_list(std::string_view table) { return table == "el_shop" || table == "waa_shop"; }
+bool table_grows(std::string_view table) {
+  return table == "monster" || table == "pgdat" || table == "menu_pg" || table == "scenedat" || table == "ditem" || table == "waa" ||
+         table == "menu_waa" || table == "waa_tbl" || table_is_list(table);
+}
 
-size_t table_last_id(std::string_view table) { return table_names_of(table) == "pgdat" ? kLastElementId : std::numeric_limits<size_t>::max(); }
+bool table_is_list(std::string_view table) { return table == "el_shop" || table == "waa_shop" || table == "trade"; }
+
+size_t table_last_id(std::string_view table) {
+  const std::string_view names = table_names_of(table);
+  if (names == "pgdat") return kLastElementId;
+  if (names == "waa") return kLastItemId;
+  return std::numeric_limits<size_t>::max();
+}
+
+bool table_declared_by_ids(std::string_view table) { return table == "keyitem"; }
 
 void set_table_mods(const vfs::Vfs* files, std::vector<TableMod> mods) { mods_storage() = {files, std::move(mods)}; }
 
@@ -264,12 +284,36 @@ std::vector<RowBlock> parse_rows(std::string_view text, std::span<const TableFie
         problem(line_no, "a list row takes add=, remove= and clear=");
         continue;
       }
-      if (value_text.starts_with("@")) {
-        if (!parse_reference(value_text, entry.ref_table, entry.ref_name, value) || value > 0xFFFF) {
+      // "add=<value> <name>=<number> ...": the words after the value.
+      std::string_view entry_text = value_text;
+      bool words_ok = true;
+      if (const size_t space = value_text.find_first_of(" \t"); space != std::string_view::npos) {
+        entry_text = value_text.substr(0, space);
+        std::string_view rest = trim(value_text.substr(space));
+        while (!rest.empty()) {
+          const size_t end_word = rest.find_first_of(" \t");
+          const std::string_view word = rest.substr(0, end_word);
+          rest = end_word == std::string_view::npos ? std::string_view{} : trim(rest.substr(end_word));
+          const size_t word_eq = word.find('=');
+          long long number = 0;
+          if (entry.op != RowOp::Add || word_eq == std::string_view::npos || !parse_number(word.substr(word_eq + 1), number) || number < 0 ||
+              number > std::numeric_limits<u32>::max()) {
+            words_ok = false;
+            break;
+          }
+          entry.extra.emplace_back(lower(word.substr(0, word_eq)), static_cast<u32>(number));
+        }
+      }
+      if (!words_ok) {
+        problem(line_no, "an entry's words are <name>=<number> after add=<entry>");
+        continue;
+      }
+      if (entry_text.starts_with("@")) {
+        if (!parse_reference(entry_text, entry.ref_table, entry.ref_name, value) || value > 0xFFFF) {
           problem(line_no, "a reference is @<table>:<record name>[+<number>]");
           continue;
         }
-      } else if (!parse_number(value_text, value) || value <= 0 || value > 0xFFFF) {
+      } else if (!parse_number(entry_text, value) || value <= 0 || value > 0xFFFF) {
         problem(line_no, "an entry is 1..0xFFFF");
         continue;
       }
@@ -360,6 +404,11 @@ void TableRows::build(const std::vector<TableMod>& mods, const std::map<std::str
         added[names_table][parsed.mod].insert(block.name);
       }
   }
+  // A table of names only (key items): a mod's own-id section entry adds the record.
+  for (size_t mod_index = 0; mod_index < mods.size(); ++mod_index)
+    for (const auto& [table, ids] : mods[mod_index].own_ids)
+      if (table_declared_by_ids(table) && counts.contains(table))
+        for (const auto& [own_id, name] : ids) added[table][mod_index].insert(name);
   for (auto& [names_table, by_mod] : added) {
     Names& names = names_[names_table];
     names.first = counts.at(names_table);
@@ -436,6 +485,16 @@ std::optional<size_t> TableRows::record_for(std::string_view mod, std::string_vi
   return static_cast<size_t>(own_id);
 }
 
+std::optional<int> TableRows::own_record_id(std::string_view mod, std::string_view table, size_t id) const {
+  const auto by_mod = own_ids_.find(mod);
+  if (by_mod == own_ids_.end()) return std::nullopt;
+  const auto by_table = by_mod->second.find(table);
+  if (by_table == by_mod->second.end()) return std::nullopt;
+  for (const auto& [own_id, record] : by_table->second)
+    if (record == id) return own_id;
+  return std::nullopt;
+}
+
 const std::vector<TableRows::WideWrite>& TableRows::wide_writes(std::string_view table) const {
   static const std::vector<WideWrite> kNone;
   const auto it = wide_.find(table);
@@ -473,6 +532,10 @@ size_t TableRows::apply_lists(std::string_view table, std::vector<std::vector<u1
       std::vector<u16>& row = rows[*index];
       if (block.clear) row.clear();
       for (const RowWrite& entry : block.writes) {
+        if (!entry.extra.empty()) {
+          problems.push_back(std::format("line {}: a shop entry takes no words after it", entry.line));
+          continue;
+        }
         u32 value = entry.value;
         if (!entry.ref_name.empty()) {
           const std::optional<size_t> target = id_of(entry.ref_table, entry.ref_name);
@@ -500,6 +563,92 @@ size_t TableRows::apply_lists(std::string_view table, std::vector<std::vector<u1
     }
     for (const std::string& problem : problems) note(true, std::format("tables: '{}' {}.txt {}", mod, table, problem));
     note(false, std::format("tables: '{}' {}: {} entr{} added or removed", mod, table, changed, changed == 1 ? "y" : "ies"));
+    total_changed += changed;
+  }
+  return total_changed;
+}
+
+size_t TableRows::apply_trade(std::vector<std::vector<TradeEntry>>& posts) const {
+  constexpr std::string_view kTable = "trade";
+  posts.resize(total(kTable, posts.size()));
+  const auto list = parsed_.find(kTable);
+  if (list == parsed_.end()) return 0;
+  // A new post starts as a copy of its base; the first mod in the list that gives a base decides.
+  std::set<size_t> based;
+  for (const Parsed& parsed : list->second)
+    for (const RowBlock& block : parsed.blocks) {
+      const std::optional<size_t> index = block.name.empty() ? std::nullopt : id_of(kTable, block.name);
+      if (!block.base || !index || *index >= posts.size() || based.contains(*index)) continue;
+      if (*block.base >= posts.size() || *block.base == *index) {
+        note(true, std::format("tables: '{}' trade.txt line {}: no base row {}", mod_names_[parsed.mod], block.line, *block.base));
+        continue;
+      }
+      posts[*index] = posts[*block.base];
+      based.insert(*index);
+    }
+  size_t total_changed = 0;
+  for (auto parsed = list->second.rbegin(); parsed != list->second.rend(); ++parsed) {
+    const std::string& mod = mod_names_[parsed->mod];
+    size_t changed = 0;
+    std::vector<std::string> problems;
+    for (const RowBlock& block : parsed->blocks) {
+      const std::optional<size_t> index = block.index ? block.index : id_of(kTable, block.name);
+      if (!index || *index >= posts.size()) {
+        problems.push_back(std::format("line {}: no row {} (the table has {})", block.line,
+                                       block.index ? std::to_string(*block.index) : block.name, posts.size()));
+        continue;
+      }
+      std::vector<TradeEntry>& post = posts[*index];
+      if (block.clear) post.clear();
+      for (const RowWrite& entry : block.writes) {
+        u32 goods = entry.value;
+        if (!entry.ref_name.empty()) {
+          const std::optional<size_t> target = id_of(entry.ref_table, entry.ref_name);
+          if (!target) {
+            problems.push_back(std::format("line {}: no record {}:{}", entry.line, entry.ref_table, entry.ref_name));
+            continue;
+          }
+          goods += static_cast<u32>(*target);
+        }
+        if (goods == 0 || goods > 0xFFFF) {
+          problems.push_back(std::format("line {}: goods {} is not an item id", entry.line, goods));
+          continue;
+        }
+        const auto held = std::find_if(post.begin(), post.end(), [&](const TradeEntry& slot) { return slot.goods == goods; });
+        if (entry.op == RowOp::Remove) {
+          if (held != post.end()) {
+            post.erase(held);
+            ++changed;
+          }
+          continue;
+        }
+        std::optional<u32> colour, levels;
+        bool words_ok = true;
+        for (const auto& [word, number] : entry.extra) {
+          if (word == "colour" && number <= 0xFF) colour = number;
+          else if (word == "levels" && number <= 0xFFFF) levels = number;
+          else words_ok = false;
+        }
+        if (!words_ok) {
+          problems.push_back(std::format("line {}: a trade entry's words are colour=<0..255> and levels=<0..65535>", entry.line));
+          continue;
+        }
+        if (held != post.end()) {
+          if (colour) held->colour = static_cast<u8>(*colour);
+          if (levels) held->levels = static_cast<u16>(*levels);
+          ++changed;
+        } else if (!levels) {
+          problems.push_back(std::format("line {}: a new trade entry needs levels=", entry.line));
+        } else if (post.size() >= kTradeSlots) {
+          problems.push_back(std::format("line {}: the post already has {} entries", entry.line, kTradeSlots));
+        } else {
+          post.push_back({static_cast<u16>(goods), static_cast<u8>(colour.value_or(0)), static_cast<u16>(*levels)});
+          ++changed;
+        }
+      }
+    }
+    for (const std::string& problem : problems) note(true, std::format("tables: '{}' trade.txt {}", mod, problem));
+    note(false, std::format("tables: '{}' trade: {} entr{} added, changed or removed", mod, changed, changed == 1 ? "y" : "ies"));
     total_changed += changed;
   }
   return total_changed;

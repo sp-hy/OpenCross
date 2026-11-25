@@ -739,6 +739,11 @@ bool Route::run(const Cmd& cmd, const RouteState& st, platform::Input&, RouteOut
       if (args.size() < 4 || !to_hex(args[2], id) || !to_int(args[3], want) || !st.var) return bad("assert var <hexid> <value>");
       const int got = st.var(id);
       if (got != want) return bad(std::format("var {:X} is {}, expected {}", id, got, want));
+    } else if (args[1] == "item") {
+      int id = 0, want = 0;
+      if (args.size() < 4 || !to_hex(args[2], id) || !to_int(args[3], want) || !st.item_count) return bad("assert item <hexid> <count>");
+      const int got = st.item_count(id);
+      if (got != want) return bad(std::format("item {:X}: {} owned, expected {}", id, got, want));
     } else if (args[1] == "moved") {
       // assert moved <ent> <min_distance>: the entity is at least that far from its `mark ent` position
       int ent_id = 0, want = 0;

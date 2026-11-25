@@ -74,20 +74,24 @@ inline constexpr u8 kSideFile = 2;
 }  // namespace tail_tag
 
 // The stream stores element ids in 9 bits (stock stacks and grid cells), with no spare bit. encode_block writes an id past 511 as an
-// empty stack / cell there (RDE and the PS1 game see nothing) and, when a store folder is set, the full ids into <dir>/<key>.ocx (key =
+// empty stack / cell there (RDE and the PS1 game see nothing), and the same for an item id past the game's 255 (an item stack or an
+// equipment slot: the game's tables end there), and, when a store folder is set, the full ids into <dir>/<key>.ocx (key =
 // the FNV-1a hash of the file's content, in the tail record as tail_tag::kSideFile); decode_block lays them back over the block. The
 // file is a container of tagged sections, so more state the block can't hold can go there too. Without a store the ids are dropped on
 // save, as the stream would have to. Memory-card slots, the auto-save and the OCSV page all go through here.
 void set_wide_store(std::filesystem::path dir);
 
-// Element records mods add by name (data/table_rows.h) get their ids from the mods enabled, so the side file also keeps their names
-// and a load gives each name the id it has now (a name no mod adds any more leaves its stacks and cells empty). `name_of(id)` = ""
-// for an element that has no name; `id_of(name)` = the element that carries the name now. Without them the ids are kept as numbers.
-struct ElementNames {
+// Element and item records mods add by name (data/table_rows.h) get their ids from the mods enabled, so the side file also keeps their
+// names and a load gives each name the id it has now (a name no mod adds any more leaves its stacks, cells and equipment slots empty).
+// `name_of(id)` = "" for a record that has no name; `id_of(name)` = the record that carries the name now. Without them the ids are kept
+// as numbers.
+struct RecordNames {
   std::function<std::string(u16)> name_of;
   std::function<std::optional<u16>(std::string_view)> id_of;
 };
-void set_element_names(ElementNames names);
+void set_element_names(RecordNames names);
+void set_item_names(RecordNames names);
+void set_key_item_names(RecordNames names);
 
 // Item stack: id stored in 9 bits, qty in 7 bits.
 struct ItemStack {
@@ -134,6 +138,9 @@ struct SaveSlot {
   u16 frames = 0x203;
   // The variables mods add (game/mod_vars.h), by name; only values other than 0. Kept in the side file (OpenCross only).
   std::map<std::string, u16> mod_vars;
+  // The key items past the head's 64 bits that are owned (key items mods add by name, data/table_rows.h), ascending. Kept in the side
+  // file (OpenCross only).
+  std::vector<u16> key_items_wide;
   // Not saved (session only): the records come from char20.bin (the dream: boot / FE 2F state until FE 3F reloads char.bin).
   // OpenCross looks the file's record bytes (level masks, growth column) up in this set (game/new_game.h).
   bool dream_records = false;
@@ -149,6 +156,9 @@ struct SaveSlot {
   void stamp_preview_party();
   u64 key_items() const;
   void set_key_items(u64 bits);
+  // Key item `id` (1-based): 1..64 the head's bits, past them key_items_wide.
+  bool has_key_item(int id) const;
+  void set_key_item(int id, bool owned);
   u32 playtime_frames() const;
   void set_playtime_frames(u32 frame_count);
   u32 gold() const;

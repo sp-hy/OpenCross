@@ -84,7 +84,7 @@ bitmap = FONT + idx * 22
 
 `.txt` tables are UTF-16LE with BOM (`btmes` is UTF-8), TSV with `"` quoting; the header row names the language columns (`# Text JP EN FR IT DE ES`; `cmnmes` is `EN FR IT DE ES JP`), the column is chosen by header name, and the `Text` column is documentation. `{66}` / `{99}` become curly quotes and a literal `\n` becomes LF. `cc_text.py sysmes [lang] [--table T] [--cat N]` dumps any of them.
 
-sysmes categories (2,683 rows): 00 items/equipment (256), 01 default character names (50; key `0x10000+id`), 17 elements/techs (512), 18 key items (65), 19 enemy names (256), 1A battle strings/descriptions (1,536), 1B misc (8). `{itemwork(n)}` maps ids: `id > 0x400` -> `0x180000 | (id-0x400)`, `id > 0x200` -> `0x170000 | (id-0x200)`, else `id`.
+sysmes categories (2,683 rows): 00 items/equipment (256), 01 default character names (50; key `0x10000+id`), 17 elements/techs (512), 18 key items (65), 19 enemy names (256), 1A battle strings/descriptions (1,536), 1B misc (8). `{itemwork(n)}` maps ids: `id > 0x400` -> `0x180000 | (id-0x400)`, `id > 0x200` -> `0x170000 | (id-0x200)`, else `id`. OpenCross adds the field script's own ranges: from 0x1000 an element (`0x170000 |` the record the running room's owner's own element id `id-0x1000` names), from 0x800 an item (the record its own item id `id-0x800` names), from 0x441 a key item (`0x180000 |` the key item its own key item id `id-0x400` names; `docs/formats/mods.md` 8).
 
 ### 5.1 Field lookup `resolve(lang, room, msg)`
 

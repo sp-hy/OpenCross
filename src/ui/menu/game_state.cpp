@@ -170,6 +170,7 @@ std::vector<int> GameState::key_items() const {
   std::vector<int> out;
   for (int id = 1; id <= 64; ++id)
     if (has_key_item(id)) out.push_back(id);
+  out.insert(out.end(), slot.key_items_wide.begin(), slot.key_items_wide.end());
   return out;
 }
 
@@ -379,7 +380,7 @@ void GameState::return_gear(u16& word) {
   } else if (word >= data::kScriptElementBase) {
     add_element(word - data::kScriptElementBase);
   } else if (word > 0x400 && word < 0x440) {
-    slot.set_key_items(slot.key_items() | 1ull << (word - 0x401));
+    slot.set_key_item(word - 0x400, true);
   }
   word = 0;
 }

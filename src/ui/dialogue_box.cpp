@@ -1278,16 +1278,17 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
       return char_name ? char_name(id) : tables_.default_name(id, language());
     };
     tctx.script_item = [this, var](int index) {
-      int value = var(index);
-      if (value >= data::kScriptElementBase && script_element) {
-        const std::optional<int> element = script_element(value);
-        if (!element) return std::u32string();
-        value = data::kScriptElementBase + *element;
+      const int value = var(index);
+      if (value >= data::kScriptItemBase || value > data::kScriptKeyItemBase + static_cast<int>(data::kGameKeyItems)) {
+        const int base = value >= data::kScriptElementBase ? data::kScriptElementBase
+                         : value >= data::kScriptItemBase  ? data::kScriptItemBase
+                                                           : data::kScriptKeyItemBase;
+        const std::optional<int> record = script_record ? script_record(value) : std::optional<int>(value - base);
+        if (!record) return std::u32string();
+        const int category = base == data::kScriptElementBase ? 0x170000 : base == data::kScriptItemBase ? 0 : 0x180000;
+        return tables_.item_name(category | *record, language());
       }
-      const int key = value >= data::kScriptElementBase ? (0x170000 | (value - data::kScriptElementBase))
-                      : value > 0x400                   ? (0x180000 | (value - 0x400))
-                      : value > 0x200                   ? (0x170000 | (value - 0x200))
-                                                        : value;
+      const int key = value > 0x400 ? (0x180000 | (value - 0x400)) : value > 0x200 ? (0x170000 | (value - 0x200)) : value;
       return tables_.item_name(key, language());
     };
   }
