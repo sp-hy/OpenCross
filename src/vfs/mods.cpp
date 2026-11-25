@@ -57,6 +57,8 @@ bool is_zip(const fs::path& file) {
 struct Index {
   std::unordered_map<std::string, std::vector<std::vector<std::string>>> by_name;
   std::set<std::string> archives;
+  // Every folder that holds a shipped member, at any depth ("cdrom/battle", "cdrom/battle/monster/komodo", ...).
+  std::set<std::string> folders;
 };
 
 Index build_index(const Vfs& vfs) {
@@ -71,6 +73,8 @@ Index build_index(const Vfs& vfs) {
       const bool is_directory = logical.back() == '/';
       if (is_directory) continue;
       if (!seen.insert(logical).second) continue;
+      for (size_t slash = logical.find('/'); slash != std::string::npos; slash = logical.find('/', slash + 1))
+        idx.folders.insert(logical.substr(0, slash));
       std::vector<std::string> comps = split(logical);
       idx.by_name[comps.back()].push_back(std::move(comps));
     }
@@ -108,6 +112,28 @@ int resolve(const Index& idx, const std::vector<std::string>& rel, std::string& 
   if (count > 1) return 2;
   target = join(*winner);
   return 1;
+}
+
+// Whether the game ships any member in the folder that holds `path`.
+bool in_shipped_folder(const Index& idx, const std::string& path) {
+  const size_t slash = path.rfind('/');
+  return slash != std::string::npos && idx.folders.contains(path.substr(0, slash));
+}
+
+// A path spelled below an archive folder (`spelled`, from added_target) that the one member of its name contradicts: a folder it names
+// below the archive is not among the member's folders in that order (fieldobj/player/dario/dario.obj against the game's
+// battle/monster/dario/dario.obj). Such a file is a new member, not that member's replacement; a path that only leaves folders out
+// (cdrom/alu_a01f.bin, cdrom/map/alu_a01f.bin for cdrom/map/mapbin/alu_a01f.bin) still matches. The archive folders themselves are not
+// compared (a member is found in any archive, as before).
+bool contradicts(const std::string& spelled, const std::string& member) {
+  const std::vector<std::string> mine = split(spelled), theirs = split(member);
+  size_t at = 1;
+  for (size_t k = 1; k + 1 < mine.size(); ++k) {
+    while (at + 1 < theirs.size() && theirs[at] != mine[k]) ++at;
+    if (at + 1 >= theirs.size()) return true;
+    ++at;
+  }
+  return false;
 }
 
 // A file that matches no shipped member is a new member when its path names an archive: the first folder called after one (cdrom2 as
@@ -206,7 +232,9 @@ void add_archive(Mod& mod, const Vfs& vfs, const Index& idx, ModFile dat, const 
     mod_file.file = dat.file;
     mod_file.member = member;
     mod_file.rel = dat.rel + "/" + member;
-    switch (resolve(idx, split(prefix + "/" + member), mod_file.target)) {
+    int found = resolve(idx, split(prefix + "/" + member), mod_file.target);
+    if (found == 1 && contradicts(normalise_path(prefix + "/" + member), mod_file.target)) found = 0;
+    switch (found) {
       case 1: add_matched(mod, std::move(mod_file)); break;
       case 2: mod.ambiguous.push_back(mod_file.rel); break;
       default:
@@ -285,9 +313,22 @@ void add_file(Mod& mod, const Vfs& vfs, const Index& idx, ModFile mod_file, bool
     mod.voices.push_back(std::move(mod_file));
     return;
   }
-  switch (resolve(idx, rel, mod_file.target)) {
+  int found = resolve(idx, rel, mod_file.target);
+  if (std::string spelled; found == 1 && added_target(idx, rel, root, spelled) && contradicts(spelled, mod_file.target))
+    found = 0;
+  switch (found) {
     case 1: add_matched(mod, std::move(mod_file)); break;
-    case 2: mod.ambiguous.push_back(mod_file.rel); break;
+    case 2:
+      // A name several members carry (at0.prd) under an archive folder, in a folder the game ships nothing in (a new monster's own
+      // folder): a new member. In one of the game's folders it stays ambiguous (a folder left out, most likely).
+      if (std::string target; added_target(idx, rel, root, target) && !in_shipped_folder(idx, target)) {
+        mod_file.target = std::move(target);
+        mod.added.push_back(mod_file.rel);
+        add_matched(mod, std::move(mod_file));
+      } else {
+        mod.ambiguous.push_back(mod_file.rel);
+      }
+      break;
     default:
       if (added_target(idx, rel, root, mod_file.target)) {
         mod.added.push_back(mod_file.rel);

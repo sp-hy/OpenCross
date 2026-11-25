@@ -28,6 +28,9 @@ struct Vec3 {
   s32 x = 0, y = 0, z = 0;
 };
 
+// The groups a resolved character operand of FE 36 / 3D / 3E may name (FieldVM::character_ref): every recruited character, the party.
+inline constexpr int kRefRecruited = -2, kRefParty = -3;
+
 // Walk / move families (start forms; the wait form polls motion_busy()).
 enum class MotionKind : u8 {
   // 3F  walk to (x, y, z); mode 0 absolute, 2 relative
@@ -404,15 +407,23 @@ class FieldHost {
   virtual void field_reset() = 0;
 
   // ---- party, roster, items, money, characters -----------------------------------------------------------------------
+  // The VM reads every character operand through script_character and hands every character id it writes back through
+  // script_character_id. A script names a character mods add by the running room's owner's own id ([Characters], 0x33..0x7F): the
+  // engine's id for it, -1 when the owner lists no such id; any other value is passed on as it is (the game's ids, slot references).
+  // script_character_id is the inverse: the owner's own id for an added character, -1 when it has none.
+  virtual int script_character(int id) { return id; }
+  virtual int script_character_id(int id) { return id; }
+  // The character operands that may name a party slot or a group arrive resolved (FieldVM::character_ref): a character id, -1 none,
+  // or one of the groups below.
   // Character id in party slot 0..2, -1 empty.
   virtual int party_member(int slot) = 0;
   // 94
   virtual bool in_party(int char_id) = 0;
   // 7B: false = not added (id >= 0x2C, already in the party or no free slot); the engine then skips the next byte (the 7C).
   virtual bool party_add(int char_id) = 0;
-  // 7D: character reference (FD / FE / FF = the character in slot 0 / 1 / 2, else a character id);
-  // its first slot is removed and the members behind it move up.
-  virtual void party_remove(int char_ref) = 0;
+  // 7D: the character (the VM resolves FD / FE / FF to the character in slot 0 / 1 / 2); its first slot is removed and the members
+  // behind it move up.
+  virtual void party_remove(int char_id) = 0;
   // B2
   virtual void party_override(bool enter, int key) = 0;
   // FE 52
@@ -588,7 +599,7 @@ class NullHost : public FieldHost {
   int party_member(int slot) override;
   bool in_party(int char_id) override;
   bool party_add(int char_id) override;
-  void party_remove(int char_ref) override;
+  void party_remove(int char_id) override;
   void party_override(bool enter, int key) override;
   void swap_leader(int char_id) override;
   void roster_add(int char_id) override;

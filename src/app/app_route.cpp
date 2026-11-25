@@ -3,11 +3,14 @@
 #include "app/app.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <optional>
 
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/game_session.h"
 #include "script/field_host.h"
 
@@ -56,6 +59,7 @@ void App::init_route_state() {
   rstate.party_ent = [this](int slot) { return world.party_entity(slot); };
   rstate.path = [this](float x0, float z0, float x1, float z1, bool smooth) { return world.find_path(x0, z0, x1, z1, smooth); };
   rstate.var = [this](int id) { return world.vm().var(static_cast<u16>(id)); };
+  rstate.item_count = [this](int id) { return world.item_count(id); };
   rstate.char_stat = [this](int id, int what) { return world.debug_char_stat(id, what); };
   rstate.set_char_stat = [this](int id, int what, int value) { world.debug_set_char_stat(id, what, value); };
   rstate.remote_drawn = [this] { return world.remote_drawn(); };
@@ -69,8 +73,8 @@ void App::init_route_state() {
   };
   rstate.party = [this] {
     std::string party_text;
-    for (u8 id : world.game_state().slot.party())
-      party_text += (party_text.empty() ? "" : ",") + (id == 0xFF ? std::string("-") : std::to_string(id));
+    for (const int id : world.game_state().slot.party())
+      party_text += (party_text.empty() ? "" : ",") + (id < 0 ? std::string("-") : std::to_string(id));
     return party_text;
   };
   rstate.disc = [this] { return world.disc(); };
@@ -148,7 +152,7 @@ void App::fill_route_state() {
 }
 
 // Route `request`: rename selects the character, then name entry; party_add adds a character and rebinds the party; party_remove
-// empties the slot of a character reference (REMOVE_FROM_PARTY); money sets the
+// empties the slot of a character reference (REMOVE_FROM_PARTY); item gives a field-script item id (BB's ranges); money sets the
 // gold; save is the ending's cleared-save prompt (strips the roster, variable 0x7E = 3, save list); ngplus is the New Game+ title list
 // over the current game; slotdump writes the game as one 0x2000 save block to $OC_SLOT_DUMP<N>.bin; savemark remembers that block (play
 // time left out) and savecheck fails the run when the game's block differs from it; battle starts an encounter id on
@@ -159,13 +163,28 @@ void App::route_request(const game::RouteOut& out) {
   const std::string& rk = out.request;
   if (rk == "rename") world.request_menu(MK::NameEntry, out.request_arg);
   else if (rk == "party") world.request_menu(MK::PartyScreen, 0);
-  else if (rk == "party_add") { world.party_add(out.request_arg); world.state_edited(); }
+  // The character id as a script of the running room names it (a mod's own id through the room's owner), or a character mods add by
+  // its name (any room).
+  else if (rk == "party_add") {
+    const std::string& text = out.request_text;
+    const bool named = !text.empty() && !std::isdigit(static_cast<unsigned char>(text[0])) && text[0] != '-';
+    const std::optional<size_t> by_name = named ? data::table_rows().id_of("char", text) : std::nullopt;
+    const int character = named ? (by_name ? static_cast<int>(*by_name) : -1) : world.script_character(out.request_arg);
+    if (!world.party_add(character))
+      log::warn("route: party_add {}: not added (no such character here, already in the party or the party is full)", text);
+    world.state_edited();
+  }
   // script <ent> <slot> [class]: start that entity's script slot as a spawn would (FieldVM::request_script; class 3 = a talk's): an
   // editor runs any one script of a room, not only the ones a talk or a touch starts; one live already is the asked-for one
   else if (rk == "script") world.vm().request_script(out.request_arg, out.request_arg2, out.request_arg3 > 0 ? out.request_arg3 : 3);
-  else if (rk == "party_remove") { world.party_remove(out.request_arg); world.state_edited(); }
+  else if (rk == "party_remove") {
+    const int ref = out.request_arg;
+    world.party_remove(ref >= 0xFD && ref <= 0xFF ? world.party_member(ref - 0xFD) : world.script_character(ref));
+    world.state_edited();
+  }
   else if (rk == "money") world.set_money(out.request_arg);
   else if (rk == "keyitem") { world.take_item(0x400 + out.request_arg); world.give_item(0x400 + out.request_arg); }
+  else if (rk == "item") world.give_item(out.request_arg);
   else if (rk == "save") world.request_menu(MK::Save, 0);
   else if (rk == "ngplus") world.request_menu(MK::NewGamePlus, 0);
   else if (rk == "restart") restart_requested = true;
@@ -206,7 +225,7 @@ void App::route_request(const game::RouteOut& out) {
   else if (rk == "movie") world.play_movie(out.request_arg, out.request_arg2);
   else if (rk == "battle") world.request_engine_battle(out.request_arg, out.request_arg2, out.request_arg3);
   else if (rk == "battle_disguise") world.request_engine_battle(out.request_arg, 0, 4);
-  else if (rk == "trading") world.request_menu(MK::TradingPost, out.request_arg);
+  else if (rk == "trading") world.request_engine_menu(MK::TradingPost, out.request_arg);
   else if (rk == "elementshop") world.request_engine_menu(MK::ElementShop, out.request_arg);
   else if (rk == "weaponshop") world.request_engine_menu(MK::WeaponShop, out.request_arg);
   else {

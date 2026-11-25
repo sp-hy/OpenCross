@@ -8,6 +8,7 @@
 #include <format>
 #include <functional>
 
+#include "core/features.h"
 #include "core/log.h"
 #include "data/char_name.h"
 #include "data/table_rows.h"
@@ -52,9 +53,10 @@ void FieldWorld::bind_party_entity(int slot) {
   }
   ent_state.char_id = party_chars_[static_cast<size_t>(slot)];
   ent_state.char_model = model_byte(ent_state.char_id);
-  if (auto model = character_model(ent_state.char_model)) ent_state.actor.set_model(model);
-  // In another body: the character's own model is made ready for the switch back.
-  if (ent_state.char_model != ent_state.char_id) prefetch_character_model(ent_state.char_id);
+  if (auto model = named_character_model(ent_state.char_id)) ent_state.actor.set_model(model);
+  else if (auto byte_model = character_model(ent_state.char_model)) ent_state.actor.set_model(byte_model);
+  // In another body: the character's own model is made ready for the switch back (a game character's own model byte is its id).
+  if (ent_state.char_id < save::kNumChars && ent_state.char_model != ent_state.char_id) prefetch_character_model(ent_state.char_id);
   // A 3D object, not solid; bit 22 marks the player class that attr 4 / 5 walls block.
   ve.flags38 = (ve.flags38 & ~script::flag38::kNo3dObject) | 0x400000;
 }
@@ -63,12 +65,12 @@ void FieldWorld::rebind_party() {
   for (int slot = 0; slot < 3; ++slot) bind_party_entity(slot);
 }
 
-void FieldWorld::setup_pc(int ent, int char_ref, int) {
+void FieldWorld::setup_pc(int ent, int char_id, int) {
   if (ent < 0 || ent >= static_cast<int>(ents_.size())) return;
-  // SETUP_PC: slot = first party slot holding the referenced character, so `0E FD` binds the leader and `0E FF` the third member
+  // SETUP_PC: slot = first party slot holding the referenced character (resolved by the VM), so `0E FD` binds the leader and `0E FF` the third member
   // (opn_a01i / dem_01: entity 1 = FD runs the leader's SET_CONTROLLED_ENTITY THIS).
   int slot = -1;
-  if (const int char_id = char_from_ref(party_chars_, char_ref); char_id >= 0)
+  if (char_id >= 0)
     for (size_t party_slot = 0; party_slot < party_chars_.size() && slot < 0; ++party_slot)
       if (party_chars_[party_slot] == char_id) slot = static_cast<int>(party_slot);
   Ent& ent_state = ents_[static_cast<size_t>(ent)];
@@ -154,7 +156,7 @@ void FieldWorld::set_model_source(int model, int kind, int id, int sub) {
   const ModelSource source{kind, id, sub};
   bool known = false;
   switch (kind) {
-    case ModelSource::kCharacter: known = id >= 0 && id <= 0x2B && id < save::kNumChars; break;
+    case ModelSource::kCharacter: known = gs_->slot.is_character(id); break;
     case ModelSource::kFieldModel: known = id >= 0 && id <= 0xFF && !model_stem(id).empty(); break;
     case ModelSource::kRoomModel:
     case ModelSource::kBattleModel:
@@ -263,14 +265,15 @@ void FieldWorld::sync_party() {
   if (party_chars_.empty()) party_chars_.push_back(0);
 }
 void FieldWorld::write_party() {
-  std::array<u8, 3> ids{0xFF, 0xFF, 0xFF};
-  for (size_t i = 0; i < party_chars_.size() && i < 3; ++i) ids[i] = static_cast<u8>(party_chars_[i]);
+  std::array<int, 3> ids{-1, -1, -1};
+  for (size_t i = 0; i < party_chars_.size() && i < 3; ++i) ids[i] = party_chars_[i];
   gs_->slot.set_party(ids);
 }
 
 bool FieldWorld::party_add(int char_id) {
-  // Ids >= 0x2C are refused. Any other id is recruited first: a character already in the party or a full party only refuses the slot.
-  if (char_id < 0 || char_id >= 0x2C || char_id >= save::kNumChars) return false;
+  // An id that is not a character is refused. A character is recruited first: one already in the party or a full party only refuses
+  // the slot.
+  if (!gs_->slot.is_character(char_id)) return false;
   gs_->slot.set_recruited(char_id, true);
   if (in_party(char_id) || party_chars_.size() >= 3) return false;
   party_chars_.push_back(char_id);
@@ -278,11 +281,10 @@ bool FieldWorld::party_add(int char_id) {
   return true;
 }
 
-void FieldWorld::party_remove(int char_ref) {
+void FieldWorld::party_remove(int char_id) {
   // 7D: the slot of the referenced character (first match) is emptied and the slots behind it move up;
   // the party may become empty (the attract demo dem_01 removes FF, FE, FD, then adds Serge, Kid and Glenn). A title-screen save
   // slot reads as party {0, 0, 0}: every removal finds Serge in slot 0, so three removals still empty it.
-  const int char_id = char_from_ref(party_chars_, char_ref);
   auto it = std::find(party_chars_.begin(), party_chars_.end(), char_id);
   const bool slot2_moves_up = char_id >= 0 && it != party_chars_.end() && it - party_chars_.begin() < 2 && party_chars_.size() == 3;
   if (char_id >= 0 && it != party_chars_.end()) party_chars_.erase(it);
@@ -373,28 +375,29 @@ void FieldWorld::rotate_party() {
   log::info("field: tick {} party rotated (Select): leader char {}, leader ent {}", tick_count_, party_chars_[0], party_ent_[0]);
 }
 void FieldWorld::roster_add(int char_id) {
-  if (char_id >= 0 && char_id < save::kNumChars) gs_->slot.set_recruited(char_id, true);
+  gs_->slot.set_recruited(char_id, true);
 }
 void FieldWorld::roster_remove(int char_id) {
-  if (char_id >= 0 && char_id < save::kNumChars) gs_->slot.set_recruited(char_id, false);
+  gs_->slot.set_recruited(char_id, false);
 }
 
 // The reserve lives in the save's tail record (SaveSlot::reserve); GameState::reserve applies the rules.
 int FieldWorld::reserve_member(int slot) {
-  if (slot < 0 || slot >= save::kNumChars) return -1;
+  if (slot < 0 || slot >= static_cast<int>(gs_->slot.character_ids().size())) return -1;
   const std::vector<int> reserve = gs_->reserve(std::max(slot + 1, static_cast<int>(gs_->slot.reserve().size())));
   return reserve[static_cast<size_t>(slot)];
 }
 void FieldWorld::set_reserve_member(int slot, int char_id) {
-  if (slot < 0 || slot >= save::kNumChars - 3) return;
+  const int reserve_size = static_cast<int>(gs_->slot.character_ids().size()) - 3;
+  if (slot < 0 || slot >= reserve_size) return;
   std::vector<int> reserve = gs_->slot.reserve();
   // A save that never set a reserve starts from the one FE CD reports (the first available characters outside the party).
   if (reserve.empty()) {
-    reserve = gs_->reserve(save::kNumChars - 3);
+    reserve = gs_->reserve(reserve_size);
     while (!reserve.empty() && reserve.back() < 0) reserve.pop_back();
   }
   if (static_cast<int>(reserve.size()) <= slot) reserve.resize(static_cast<size_t>(slot) + 1, -1);
-  if (char_id < 0 || char_id >= save::kNumChars) char_id = -1;
+  if (!gs_->slot.is_character(char_id)) char_id = -1;
   for (int& other : reserve)
     if (char_id >= 0 && other == char_id) other = -1;
   reserve[static_cast<size_t>(slot)] = char_id;
@@ -402,11 +405,48 @@ void FieldWorld::set_reserve_member(int slot, int char_id) {
 }
 
 // Script item ids (BB / B4 / D5): < 0x200 gear and materials, < 0x400 elements (id - 0x200), 0x401..0x43F key items (id - 0x400 =
-// key item number, 1-based as in GameState::has_key_item; the scripts reach only the first 63 of the 64 bits, higher ids are refused),
-// from data::kScriptElementBase any element record, a mod's past 511 included (id - kScriptElementBase, one copy; a mod's script names
-// the records mods add by its own ids, script_element).
+// key item number, 1-based as in GameState::has_key_item; the game's scripts reach only the first 63 of the 64 bits, 0x440 is
+// refused), 0x441..0x7FF a mod's own key item ids past 64 (script_key_item), from data::kScriptItemBase to kScriptElementBase gear and
+// materials by the mod's own item ids (id - kScriptItemBase, script_item), from data::kScriptElementBase any element record, a mod's
+// past 511 included (id - kScriptElementBase, one copy; a mod's script names the records mods add by its own ids, script_element).
 namespace {
 constexpr int kScriptKeyItems = 63;
+}
+std::optional<int> FieldWorld::script_key_item(int item_id) const {
+  const int number = item_id - data::kScriptKeyItemBase;
+  if (number >= 1 && number <= kScriptKeyItems) return number;
+  if (number <= static_cast<int>(data::kGameKeyItems) || item_id >= data::kScriptItemBase) return std::nullopt;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> key_item = data::table_rows().key_item_for(owner, number);
+  const size_t known = data::table_rows().total("keyitem", data::kGameKeyItems + 1);
+  if (!key_item || *key_item <= data::kGameKeyItems || *key_item >= known) return std::nullopt;
+  return static_cast<int>(*key_item);
+}
+// A script's character id from the mods' own range (features::kModCharacterFirst..kModCharacterLast) names a character mods add by the
+// running room's owner's [Characters]; the game's records keep their ids, and any other value goes on as it is.
+int FieldWorld::character_of_script(int id) const {
+  if (id < features::kModCharacterFirst || id >= 0x80) return id;
+  if (id > features::kModCharacterLast) return -1;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> character = data::table_rows().record_of(owner, "char", id);
+  return character && gs_ && gs_->slot.is_character(static_cast<int>(*character)) ? static_cast<int>(*character) : -1;
+}
+int FieldWorld::script_id_of_character(int id) const {
+  if (id < save::kFirstAddedChar) return id;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  return data::table_rows().own_record_id(owner, "char", static_cast<size_t>(id)).value_or(-1);
+}
+int FieldWorld::text_character(int id) const {
+  const bool mod_room = room_owners_ && !room_owners_->owner(room_name()).empty();
+  return mod_room ? character_of_script(id) : id;
+}
+int FieldWorld::script_character(int id) { return character_of_script(id); }
+int FieldWorld::script_character_id(int id) { return script_id_of_character(id); }
+int FieldWorld::script_key_item_id(int key_item) const {
+  if (key_item <= static_cast<int>(data::kGameKeyItems)) return data::kScriptKeyItemBase + key_item;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<int> own = data::table_rows().own_record_id(owner, "keyitem", static_cast<size_t>(key_item));
+  return own ? data::kScriptKeyItemBase + *own : 0;
 }
 std::optional<int> FieldWorld::script_element(int item_id) const {
   const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
@@ -414,49 +454,68 @@ std::optional<int> FieldWorld::script_element(int item_id) const {
   if (!element) return std::nullopt;
   return static_cast<int>(*element);
 }
+std::optional<int> FieldWorld::script_item(int item_id) const {
+  const int own_id = item_id - data::kScriptItemBase;
+  if (own_id < static_cast<int>(data::kGameItems)) return std::nullopt;
+  const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
+  const std::optional<size_t> item = data::table_rows().item_for(owner, own_id);
+  if (!item || *item < data::kGameItems || *item >= data::table_rows().total("waa", data::kGameItems)) return std::nullopt;
+  return static_cast<int>(*item);
+}
+std::optional<int> FieldWorld::script_gear(int item_id) const {
+  if (item_id < 0x200) return item_id;
+  if (item_id >= data::kScriptItemBase && item_id < data::kScriptElementBase) return script_item(item_id);
+  return std::nullopt;
+}
 std::optional<int> FieldWorld::script_shop(script::MenuKind kind, int row) const {
   const std::string owner = room_owners_ ? room_owners_->owner(room_name()) : std::string();
-  const std::optional<size_t> mapped =
-      data::table_rows().record_for(owner, kind == script::MenuKind::ElementShop ? "el_shop" : "waa_shop", row);
+  const char* table = kind == script::MenuKind::ElementShop ? "el_shop" : kind == script::MenuKind::TradingPost ? "trade" : "waa_shop";
+  const std::optional<size_t> mapped = data::table_rows().record_for(owner, table, row);
   if (!mapped) return std::nullopt;
   return static_cast<int>(*mapped);
 }
 int FieldWorld::item_count(int id) {
   if (id < 0) return 0;
-  if (id < 0x200) return gs_->item_count(id);
+  if (const std::optional<int> gear = script_gear(id)) return gs_->item_count(*gear);
+  if (id >= data::kScriptItemBase && id < data::kScriptElementBase) return 0;
   if (id < 0x400) return gs_->element_count(id - 0x200);
   if (id >= data::kScriptElementBase) {
     const std::optional<int> element = script_element(id);
     return element ? gs_->element_count(*element) : 0;
   }
-  return id - 0x400 <= kScriptKeyItems && gs_->has_key_item(id - 0x400) ? 1 : 0;
+  const std::optional<int> key_item = script_key_item(id);
+  return key_item && gs_->has_key_item(*key_item) ? 1 : 0;
 }
 void FieldWorld::give_item(int id) {
   if (id <= 0) return;
   if (on_item_given_) on_item_given_(id);
-  if (id < 0x200) {
-    gs_->add_item(id);
+  if (const std::optional<int> gear = script_gear(id)) {
+    gs_->add_item(*gear);
+  } else if (id >= data::kScriptItemBase && id < data::kScriptElementBase) {
+    return;
   } else if (id < 0x400) {
     const int copies = id >= 0x261 && id <= 0x26B ? 5 : 1;
     for (int i = 0; i < copies; ++i) gs_->add_element(id - 0x200);
   } else if (id >= data::kScriptElementBase) {
     if (const std::optional<int> element = script_element(id)) gs_->add_element(*element);
-  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
-    const bool had = gs_->has_key_item(key_item);
-    gs_->slot.set_key_items(gs_->slot.key_items() | (1ull << (key_item - 1)));
-    if (!had && on_key_item_) on_key_item_(key_item);
+  } else if (const std::optional<int> key_item = script_key_item(id)) {
+    const bool had = gs_->has_key_item(*key_item);
+    gs_->slot.set_key_item(*key_item, true);
+    if (!had && on_key_item_) on_key_item_(*key_item);
   }
 }
 void FieldWorld::take_item(int id) {
   if (id <= 0) return;
-  if (id < 0x200) {
-    gs_->take_item(id);
+  if (const std::optional<int> gear = script_gear(id)) {
+    gs_->take_item(*gear);
+  } else if (id >= data::kScriptItemBase && id < data::kScriptElementBase) {
+    return;
   } else if (id < 0x400) {
     gs_->take_element(id - 0x200);
   } else if (id >= data::kScriptElementBase) {
     if (const std::optional<int> element = script_element(id)) gs_->take_element(*element);
-  } else if (const int key_item = id - 0x400; key_item >= 1 && key_item <= kScriptKeyItems) {
-    gs_->slot.set_key_items(gs_->slot.key_items() & ~(1ull << (key_item - 1)));
+  } else if (const std::optional<int> key_item = script_key_item(id)) {
+    gs_->slot.set_key_item(*key_item, false);
   }
 }
 // Field key-item list. Only Tele-Porter (1), Relief Charm (61) and Smith Spirit (63) are usable, and only when the script allows it.
@@ -464,10 +523,11 @@ bool FieldWorld::key_item_usable(int item) const {
   if (item != 1 && item != 61 && item != 63) return true;
   return vm_.var(0x46) == 1 && vm_.var(0x3C) == 1;
 }
+// USED_KEY_ITEM (variable 0x2A) holds the key item's script id: 0x400 + n, past 64 the running room's owner's own id (0 when it lists
+// none, so no script of the room matches it).
 void FieldWorld::use_key_item(int item) {
-  if (item < 1 || item > 64) return;
-  // USED_KEY_ITEM
-  vm_.set_var(0x2A, 0x400 + item);
+  if (item < 1) return;
+  vm_.set_var(0x2A, script_key_item_id(item));
   if (item != 1 && item != 61 && item != 63) {
     key_item_shown_ = true;
     return;
@@ -486,7 +546,7 @@ void FieldWorld::use_key_item(int item) {
   log::info("field: key item {} used -> menu kind {} arg {}", item,static_cast<int>(menu_req_.kind), menu_req_.arg);
 }
 void FieldWorld::refuse_key_item(int item) {
-  if (item >= 1 && item <= 64) vm_.set_var(0x2A, 0x400 + item);
+  if (item >= 1) vm_.set_var(0x2A, script_key_item_id(item));
 }
 s32 FieldWorld::money() { return static_cast<s32>(gs_->gold()); }
 void FieldWorld::set_money(s32 amount) { gs_->set_gold(static_cast<u32>(std::clamp(amount, 0, 9999999))); }
@@ -494,14 +554,12 @@ void FieldWorld::set_money(s32 amount) { gs_->set_gold(static_cast<u32>(std::cla
 // FE 37 / 38 / 39 / 3A: HP of a character record; 38 clamps to [1, max], 39 adds with a cap and no floor,
 // 3A damages and never kills (floor 1).
 // FE 37-3B take a character reference: FD / FE / FF = the member in slot 0 / 1 / 2.
-int FieldWorld::char_life(int char_ref) {
-  const int char_id = char_from_ref(party_chars_, char_ref);
-  if (char_id < 0 || char_id >= save::kNumChars) return 0;
+int FieldWorld::char_life(int char_id) {
+  if (!gs_->slot.is_character(char_id)) return 0;
   return gs_->slot.chars[static_cast<size_t>(char_id)].cur_hp;
 }
-void FieldWorld::change_char_life(script::LifeOp op, int char_ref, s32 value) {
-  const int char_id = char_from_ref(party_chars_, char_ref);
-  if (char_id < 0 || char_id >= save::kNumChars) return;
+void FieldWorld::change_char_life(script::LifeOp op, int char_id, s32 value) {
+  if (!gs_->slot.is_character(char_id)) return;
   save::SaveChar& character = gs_->slot.chars[static_cast<size_t>(char_id)];
   const int max = character.max_hp;
   int hp = character.cur_hp;
@@ -512,25 +570,21 @@ void FieldWorld::change_char_life(script::LifeOp op, int char_ref, s32 value) {
   }
   character.cur_hp = static_cast<u16>(std::max(0, hp));
 }
-int FieldWorld::char_status(int char_ref) {
-  const int char_id = char_from_ref(party_chars_, char_ref);
-  if (char_id < 0 || char_id >= save::kNumChars) return -1;
+int FieldWorld::char_status(int char_id) {
+  if (!gs_->slot.is_character(char_id)) return -1;
   return gs_->slot.chars[static_cast<size_t>(char_id)].status;
 }
-// The character operand of FE 36 / 3D / 3E: 0xF9 = every recruited character (chars 0..43), 0xFA = the three party slots (empty slots skipped), 0xFD / 0xFE / 0xFF = party slot 0 / 1 / 2, any other
-// value < 0x2C = that character id; everything else (0xFB, 0xFC, 0x80 ...) does nothing.
+// The resolved character operand of FE 36 / 3D / 3E (FieldVM::character_ref): every recruited character, the party (empty slots
+// skipped) or one character; -1 does nothing.
 void FieldWorld::for_char_targets(int ref, const std::function<void(save::SaveChar&)>& fn) {
   auto one = [&](int id) {
-    if (id >= 0 && id < save::kNumChars && id < 0x2C) fn(gs_->slot.chars[static_cast<size_t>(id)]);
+    if (gs_->slot.is_character(id)) fn(gs_->slot.chars[static_cast<size_t>(id)]);
   };
-  if (ref == 0xF9) {
-    for (int id = 0; id < 0x2C && id < save::kNumChars; ++id)
-      if (gs_->slot.recruited(id)) one(id);
-  } else if (ref == 0xFA) {
+  if (ref == script::kRefRecruited) {
+    for (const int id : gs_->roster()) one(id);
+  } else if (ref == script::kRefParty) {
     for (int id : party_chars_) one(id);
-  } else if (ref >= 0xFD && ref <= 0xFF) {
-    one(char_from_ref(party_chars_, ref));
-  } else if (ref >= 0 && ref < 0x2C) {
+  } else {
     one(ref);
   }
 }
@@ -545,7 +599,7 @@ void FieldWorld::change_status(int ref, int mask, bool set) {
     if (set) character.status = static_cast<u8>(character.status | (mask & 0xFF));
     else character.status = static_cast<u8>(character.status & ~(mask & 0xFF));
   });
-  log::debug("field: tick {} {} status {:#x} on {:#x}", tick_count_, set ? "SET" : "CURE", mask, ref);
+  log::debug("field: tick {} {} status {:#x} on {}", tick_count_, set ? "SET" : "CURE", mask, ref);
 }
 // FE 79 / FE 74 / FE 73 (level 0 / 1 / 2): the tech `value - 0x200` goes into the cell that closes star level 3 / 5 / 7.
 void FieldWorld::learn_limit(int level, int char_id, int value) {
@@ -565,15 +619,15 @@ void FieldWorld::set_limit_mode(int mode) {
 int FieldWorld::model_byte(int char_id) const { return model_byte_in(gs_->slot, char_id); }
 
 int FieldWorld::model_byte_in(const save::SaveSlot& slot, int char_id) {
-  if (char_id < 0 || char_id >= save::kNumChars) return char_id;
+  if (!slot.is_character(char_id)) return char_id;
   const int model_id = slot.chars[static_cast<size_t>(char_id)].model_id;
   // A record OpenCross' new-game builder did not fill (byte 0 on a character other than Serge) shows the character's own model.
   return model_id == 0 && char_id != 0 && slot.chars[static_cast<size_t>(char_id)].max_hp == 0 ? char_id : model_id;
 }
 
 void FieldWorld::prefetch_party_models(const save::SaveSlot& slot) {
-  for (const u8 char_id : slot.party())
-    if (char_id < save::kNumChars) prefetch_character_model(model_byte_in(slot, char_id));
+  for (const int char_id : slot.party())
+    if (char_id >= 0) prefetch_character_model(model_byte_in(slot, char_id));
 }
 
 std::string FieldWorld::model_stem(int model_byte) const {
@@ -588,12 +642,11 @@ std::string FieldWorld::model_pack(int model_byte) const {
   return stem.substr(stem.find_last_of('/') + 1);
 }
 
-// D9: char = U@1 (FD / FE / FF = slot 0 / 1 / 2, <= 0x2B an id, else none). Nothing to do (none, or the
+// D9: char = U@1 (FD / FE / FF = slot 0 / 1 / 2, else a character id; resolved by the VM). Nothing to do (none, or the
 // byte already b) -> pc += 6. Else the byte is written; a character outside the party -> pc += 6; a party member's model is replaced:
 // files read, pc += 5 onto the DA, which installs the model on that slot's entity once loaded.
-int FieldWorld::set_character_model(int char_ref, int value) {
-  const int char_id = char_ref == 0xFC ? -1 : char_from_ref(party_chars_, char_ref);
-  if (char_id < 0 || char_id > 0x2B || char_id >= save::kNumChars) return 0;
+int FieldWorld::set_character_model(int char_id, int value) {
+  if (!gs_->slot.is_character(char_id)) return 0;
   save::SaveChar& rec = gs_->slot.chars[static_cast<size_t>(char_id)];
   if (rec.model_id == (value & 0x1FF)) return 0;
   int slot = -1;
@@ -615,9 +668,8 @@ void FieldWorld::model_swap_commit() {
   model_swap_slot_ = -1;
 }
 // DB: the model byte of the referenced character, 0 when there is none.
-int FieldWorld::character_model_byte(int char_ref) {
-  const int char_id = char_ref == 0xFC ? -1 : char_from_ref(party_chars_, char_ref);
-  if (char_id < 0 || char_id > 0x2B || char_id >= save::kNumChars) return 0;
+int FieldWorld::character_model_byte(int char_id) {
+  if (!gs_->slot.is_character(char_id)) return 0;
   return gs_->slot.chars[static_cast<size_t>(char_id)].model_id;
 }
 
@@ -661,16 +713,27 @@ void FieldWorld::install_name_hooks() {
     return data::character_name(id, body, data::NameContext::Field, (vm_.global_flags() & script::gflag::kKeepCustomName) != 0, names(), false);
   };
   auto wire = [&](ui::DialogueDemo& dialogue) {
-    dialogue.char_name = char_name;
+    // A script's variable and a text's name code name characters by the room owner's ids in a mod's room (text_character).
+    dialogue.char_name = [this, char_name](int id) -> std::u32string {
+      const int char_id = text_character(id);
+      return char_id < 0 ? std::u32string() : char_name(char_id);
+    };
     dialogue.party_name = [this, char_name](int slot) -> std::u32string {
       if (slot < 0 || slot >= static_cast<int>(party_chars_.size())) return {};
       return char_name(party_chars_[static_cast<size_t>(slot)]);
     };
-    dialogue.speaker_name = [names](int speaker) -> std::u32string { return data::own_name(speaker, names(), false); };
+    dialogue.speaker_name = [this, names](int speaker) -> std::u32string {
+      const int char_id = text_character(speaker);
+      return char_id < 0 ? std::u32string() : data::own_name(char_id, names(), false);
+    };
     dialogue.script_var = [this](int var) -> int { return vm_.var(static_cast<u16>(var)); };
-    dialogue.script_element = [this](int item_id) { return script_element(item_id); };
     // script_set serves {fset(n)} (variable 0x22).
     dialogue.script_set = [this](int var, int value) { vm_.set_var(static_cast<u16>(var), value); };
+    dialogue.script_record = [this](int item_id) {
+      return item_id >= data::kScriptElementBase ? script_element(item_id)
+             : item_id >= data::kScriptItemBase  ? script_item(item_id)
+                                                 : script_key_item(item_id);
+    };
   };
   wire(dialogue_);
   for (auto& window : extra_win_)
@@ -721,9 +784,11 @@ void FieldWorld::capture_state() {
   sl.set_progression(static_cast<u16>(vm_.var(0)));
   // The preview name is the leader's name record converted to Shift-JIS, not the name shown in the game's language: RDE's slot list
   // shows no leader name for a field holding the Latin display name.
-  if (record_decoder_ && !party_chars_.empty() && party_chars_[0] >= 0 && party_chars_[0] < save::kNumChars) {
+  // A character mods add always writes it (zero-filled when its name converts to nothing), so the field never keeps the last game
+  // leader's name.
+  if (record_decoder_ && !party_chars_.empty() && sl.is_character(party_chars_[0])) {
     const std::u32string leader = record_decoder_(sl.chars[static_cast<size_t>(party_chars_[0])].name);
-    if (!leader.empty()) {
+    if (!leader.empty() || party_chars_[0] >= save::kNumChars) {
       const auto nm = sjis_preview_name(leader);
       std::copy(nm.begin(), nm.end(), sl.head.begin() + save::head::kLeaderName);
     }

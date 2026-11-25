@@ -39,6 +39,20 @@ bool load_test_image(const vfs::Vfs& files, render::GpuContext& ctx, render::Tex
   return texture.create(ctx, img.width, img.height, render::TextureFormat::Rgba8, img.rgba.data(), nullptr, true);
 }
 
+// The names of a table's records mods add, for the save's side file (save::RecordNames).
+save::RecordNames record_names(std::string table) {
+  return {[table](u16 id) { return data::table_rows().name_of(table, id); },
+          [table](std::string_view name) -> std::optional<u16> {
+            const std::optional<size_t> id = data::table_rows().id_of(table, name);
+            return id ? std::optional<u16>(static_cast<u16>(*id)) : std::nullopt;
+          }};
+}
+
+// The characters mods add: a slot holds them (by name in the side file).
+void set_save_characters(const data::GameTables& tables) {
+  save::set_character_names(record_names("char"), static_cast<int>(tables.chars().rec.size()));
+}
+
 }  // namespace
 
 int App::init(int argc, char** argv) {
@@ -404,6 +418,7 @@ bool App::init_routes() {
 
 void App::init_flow() {
   if (data_ready() && !sweeping) tables_ok = tables.load(files);
+  if (tables_ok) set_save_characters(tables);
 
   if (tables_ok) {
     flow_ready = flow.init(ctx, files, sprites, &tables, lang, &mixer);
@@ -461,14 +476,13 @@ void App::init_saves() {
     // The OpenCross page lives next to its save file: "OpenCross" for save.dat, "<name>_OpenCross" for another [Paths] SaveFile.
     const std::string stem = save_path.stem().string();
     oc_saves.set_dir(save_path.parent_path() / (stem == "save" ? std::string("OpenCross") : stem + "_OpenCross"));
-    // Element ids past 511 (a mod's records) go into side files there, for every slot write (save::set_wide_store).
+    // Element ids past 511, item ids past 255 and key items past 64 (a mod's records) go into side files there, for every slot write
+    // (save::set_wide_store).
     save::set_wide_store(oc_saves.dir() / "wide");
     // ... with the names of the records mods add, so a save keeps them when the mods change.
-    save::set_element_names({[](u16 id) { return data::table_rows().name_of("pgdat", id); },
-                             [](std::string_view name) -> std::optional<u16> {
-                               const std::optional<size_t> id = data::table_rows().id_of("pgdat", name);
-                               return id ? std::optional<u16>(static_cast<u16>(*id)) : std::nullopt;
-                             }});
+    save::set_element_names(record_names("pgdat"));
+    save::set_item_names(record_names("waa"));
+    save::set_key_item_names(record_names("keyitem"));
     oc_saves.load();
   }
   if (flow_ready && have_save_dat) flow.set_save_dat(&save_dat, &oc_saves);
@@ -612,7 +626,7 @@ void App::init_field() {
 // [Debug] Battle=<scene>: start straight in a battle (development view) instead of the field.
 void App::init_battle() {
   if (data_ready() && !sweeping && (config.debug_battle >= 0 || world_ok)) {
-    if (!tables_ok) tables_ok = tables.load(files);
+    if (!tables_ok && (tables_ok = tables.load(files))) set_save_characters(tables);
     battle_ready = tables_ok && battle.init(ctx, files, sprites, meshes, tables, &mixer);
     if (battle_ready) {
       battle.set_art_mode(platform::art_is_hd(config.art_mode));

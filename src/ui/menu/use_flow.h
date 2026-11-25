@@ -18,7 +18,7 @@ struct UseFlow {
     bool leave = false;
   };
 
-  static constexpr int kRosterRows = 12, kRosterLastTop = save::kNumChars - kRosterRows;
+  static constexpr int kRosterRows = 12;
 
   // list_cur / list_scroll: the list cursor (absolute row; it may rest on a blank row) and scroll. target_cur: the party target cursor.
   // roster_row / roster_top: the roster cursor row (0..11) and its first character. target: the target (or roster) is up. wait / next:

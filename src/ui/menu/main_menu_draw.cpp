@@ -8,6 +8,7 @@
 
 #include "core/element_icon.h"
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "platform/keymap.h"
 #include "platform/pad_remap.h"
 #include "render/camera.h"
@@ -693,8 +694,15 @@ void MainMenu::Impl::glyph_button(float x, float y, int button, u32 colour, bool
   cmds.resize(first);
 }
 
+// A character mods add in its own body shows its own strip (hd/menu/playtim/<set>/<name>.png) when its mod adds one.
 void MainMenu::Impl::portrait_strip(int character, float x, u32 col, float dy) {
-  if (const Tex* tex = portrait(model_number(character))) {
+  const Tex* own = nullptr;
+  if (gs && gs->own_body(character)) {
+    const std::string& name = data::table_rows().name_of("char", static_cast<size_t>(character));
+    const std::string path = "hd/menu/playtim/" + face_set() + "/" + name + ".png";
+    if (vfs->added(path)) own = texs.load(path);
+  }
+  if (const Tex* tex = own ? own : portrait(model_number(character))) {
     Img(tex, PX(x), PY(dy), PX(64), PY(224), 0, 0, 0.5f, 1, col);
     Img(tex, PX(x), PY(224 + dy), PX(64), PY(224), 0.5f, 0, 1, 1, col);
   }
@@ -848,6 +856,10 @@ void MainMenu::Impl::draw_view(const render::Frame& pass_frame, float vw, float 
       MenuModelSlot slot;
       slot.char_id = character;
       slot.model = model_number(character, kLastMenuModel);
+      if (gs->own_body(character)) {
+        const std::string& name = data::table_rows().name_of("char", static_cast<size_t>(character));
+        if (vfs->added("cdrom/menu/player/" + name + ".ome")) slot.own_model = name;
+      }
       slot.weapon_model = model_number(character);
       slot.origin_x = origin_x, slot.origin_y = origin_y;
       slot.unit_x = unit_x, slot.unit_y = unit_y;

@@ -1,6 +1,7 @@
 #include "game/new_game.h"
 
 #include <algorithm>
+#include <vector>
 
 #include "battle/rng.h"
 #include "battle/rules.h"
@@ -30,13 +31,15 @@ std::array<u16, 24> globals() {
 
 void load_records(const data::GameTables* tables, save::SaveSlot& slot, bool dream, bool reset_names) {
   const data::CharSet* set = char_set(tables, dream);
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : slot.character_ids()) {
     save::SaveChar& rec = slot.chars[static_cast<size_t>(char_id)];
     const auto name = rec.name;
+    const u8 flags = rec.flags;
     rec = save::SaveChar{};
+    rec.flags = flags;
     if (!reset_names) rec.name = name;
     rec.unlocked = kInitialUnlocks;
-    if (!set) continue;
+    if (!set || static_cast<size_t>(char_id) >= set->rec.size()) continue;
     const data::StatRec& file_rec = set->rec[static_cast<size_t>(char_id)];
     rec.colour_bit = file_rec.raw[0x01];
     rec.rec02 = file_rec.raw[0x02];
@@ -65,7 +68,8 @@ void derive_growth(const data::GameTables* tables, save::SaveSlot& slot, bool dr
   const int star = slot.head[save::head::kStarsTotal];
   battle::GameRng rng(seed ? seed : 0x5EED0001u, tables->rng_table);
   auto roll = [&](int gap) { return battle::growth_roll(rng, gap, star); };
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : slot.character_ids()) {
+    if (static_cast<size_t>(char_id) >= set->lv99.size()) continue;
     save::SaveChar& rec = slot.chars[static_cast<size_t>(char_id)];
     const data::Lv99& lv99 = set->lv99[static_cast<size_t>(char_id)];
     rec.hp_extra = rec.max_hp;
@@ -82,7 +86,7 @@ void derive_growth(const data::GameTables* tables, save::SaveSlot& slot, bool dr
 void star_unlocks(const data::GameTables* tables, save::SaveSlot& slot, bool dream, bool fresh) {
   const data::CharSet* set = char_set(tables, dream);
   const int stars = slot.head[save::head::kStarsTotal];
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : slot.character_ids()) {
     save::SaveChar& rec = slot.chars[static_cast<size_t>(char_id)];
     if (set && tables) {
       const int col = growth_column(tables, slot, char_id, dream);
@@ -98,11 +102,15 @@ void star_unlocks(const data::GameTables* tables, save::SaveSlot& slot, bool dre
 }
 
 void reset_party(save::SaveSlot& slot) {
-  slot.set_party({0, 0xFF, 0xFF});
+  slot.set_party({0, -1, -1});
   slot.set_key_items(kKeyTimeShifter);
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) slot.set_recruited(char_id, char_id == 0);
+  slot.key_items_wide.clear();
   slot.unk_e1b8 = {1u, 0u, 0u, 0u};
   slot.unk_e1e0 = slot.unk_e1e4 = 0;
+  for (const int char_id : slot.character_ids()) {
+    if (char_id >= save::kNumChars) slot.chars[static_cast<size_t>(char_id)].flags = 0;
+    slot.set_recruited(char_id, char_id == 0);
+  }
 }
 
 void reset_options(save::SaveSlot& slot) {
@@ -121,13 +129,27 @@ void real_records(const data::GameTables* tables, save::SaveSlot& slot, u32 seed
   slot.dream_records = false;
 }
 
+int fill_added_records(const data::GameTables* tables, save::SaveSlot& slot, u32 seed) {
+  std::vector<int> missing;
+  for (const int char_id : slot.character_ids())
+    if (char_id >= save::kFirstAddedChar && slot.chars[static_cast<size_t>(char_id)].max_hp == 0) missing.push_back(char_id);
+  if (missing.empty()) return 0;
+  // The records a new game would give, at the slot's stars, built on a copy (load_records also resets the stock and the gold).
+  save::SaveSlot fresh = slot;
+  load_records(tables, fresh, slot.dream_records, false);
+  derive_growth(tables, fresh, slot.dream_records, seed);
+  star_unlocks(tables, fresh, slot.dream_records, true);
+  for (const int char_id : missing) slot.chars[static_cast<size_t>(char_id)] = fresh.chars[static_cast<size_t>(char_id)];
+  return static_cast<int>(missing.size());
+}
+
 // A fresh slot already has variables 0..0x3CF = 0; variable 0x42 = disc - 1 = 0.
 save::SaveSlot boot_state(const data::GameTables* tables, u32 seed) {
   save::SaveSlot slot;
   load_records(tables, slot, true, true);
   slot.head[save::head::kStarsTotal] = slot.head[save::head::kStarsCurrent] = kDreamStars;
   slot.head[save::head::kPreviewStars] = kDreamStars;
-  slot.head[0x59F] = 0xFF;
+  slot.set_relief(-1);
   derive_growth(tables, slot, true, seed);
   star_unlocks(tables, slot, true, true);
   reset_options(slot);
@@ -143,7 +165,7 @@ void ensure_time_shifter(save::SaveSlot& slot) { slot.set_key_items(slot.key_ite
 
 int growth_column(const data::GameTables* tables, const save::SaveSlot& slot, int char_id, bool dream) {
   const data::CharSet* set = char_set(tables, dream);
-  if (!set || char_id < 0 || char_id >= save::kNumChars) return 0;
+  if (!set || !slot.is_character(char_id) || static_cast<size_t>(char_id) >= set->rec.size()) return 0;
   const int form = slot.chars[static_cast<size_t>(char_id)].model_id;
   if (char_id == kPip && form >= 0x2B && form <= 0x30) return set->rec[static_cast<size_t>(form)].growth_col();
   return set->rec[static_cast<size_t>(char_id)].growth_col();
@@ -210,10 +232,11 @@ int repair_missed_star_ups(const data::GameTables* tables, save::SaveSlot& slot)
   const auto set = tables->char_sets.find("char");
   if (set == tables->char_sets.end()) return 0;
   int repaired = 0;
-  for (int char_id = 0; char_id < save::kNumChars; ++char_id) {
+  for (const int char_id : slot.character_ids()) {
     save::SaveChar& rec = slot.chars[static_cast<size_t>(char_id)];
     if (rec.max_hp == 0) continue;
     const int record = char_id == kPip && rec.model_id >= 0x2B && rec.model_id <= 0x30 ? rec.model_id : char_id;
+    if (static_cast<size_t>(record) >= set->second.rec.size() || static_cast<size_t>(record) >= set->second.lv99.size()) continue;
     const data::StatRec& start = set->second.rec[static_cast<size_t>(record)];
     const data::Lv99& lv99 = set->second.lv99[static_cast<size_t>(record)];
     const std::array<int, 7> base{start.max_hp(), start.atk(), start.def(), start.hit(), start.evd(), start.mag(), start.mdef()};

@@ -51,8 +51,8 @@ UseFlow::Result UseFlow::step(const Input& in, GameState& gs, int visible_rows) 
   if (in.up) --roster_row, result.sfx = kCursorSfx;
   if (in.down) ++roster_row, result.sfx = kCursorSfx;
   if (roster_row < 0) roster_top = std::max(0, roster_top - 1), roster_row = 0;
-  if (roster_row >= kRosterRows) roster_top = std::min(kRosterLastTop, roster_top + 1), roster_row = kRosterRows - 1;
-  stand_in = roster_top + roster_row;
+  if (roster_row >= kRosterRows) roster_top = std::min(gs.roster_rows() - kRosterRows, roster_top + 1), roster_row = kRosterRows - 1;
+  stand_in = gs.roster_at(roster_top + roster_row);
   if (in.right || in.cancel) {
     roster = false;
     stand_in = -1;

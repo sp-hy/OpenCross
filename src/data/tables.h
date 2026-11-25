@@ -1,14 +1,18 @@
 #pragma once
 // Typed loaders for every battle / menu table. All integers are little-endian in the
 // files; records keep their raw bytes so later code can reach fields that are not decoded yet.
+#include <algorithm>
 #include <array>
+#include <functional>
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "core/types.h"
+#include "data/table_rows.h"
 
 namespace oc::vfs {
 class Vfs;
@@ -102,6 +106,17 @@ inline constexpr size_t kShopRows = 32;
 // TableRows::element_for), any record: the vanilla
 // range 0x200 + id ends at 511 where the key items start (0x401..). Operands carry 15 bits, so ids up to 0x6FFF.
 inline constexpr int kScriptElementBase = 0x1000;
+// The game's item records (equipment and materials: waa.bin, menu_waa.bin, waa_tbl.bin, names sysmes 0x00<id>); a mod's items by name
+// follow them. A save's stream holds only these ids.
+inline constexpr size_t kGameItems = 256;
+// Field-script item ids from here (to kScriptElementBase) name item `id - kScriptItemBase`: a mod's own item ids (features::kModItemFirst..),
+// resolved through the running room's owner as element ids are.
+inline constexpr int kScriptItemBase = 0x800;
+// The game's key items (1..64: the save's 64 bits; names sysmes 0x18<id>, descriptions keyitem.txt <id * 3 + line>); a mod's key items
+// by name ([KeyItems]) follow them. Field-script item ids 0x400 + n name key item n (the game's scripts reach 1..63; past 64 a mod's
+// own key item ids through the running room's owner).
+inline constexpr size_t kGameKeyItems = 64;
+inline constexpr int kScriptKeyItemBase = 0x400;
 inline bool mod_element(const std::vector<ElemRec>& elements, int id) {
   return id >= kVanillaElemRecs && id < static_cast<int>(elements.size()) && (elements[static_cast<size_t>(id)].raw[1] & 0x02) == 0;
 }
@@ -139,11 +154,8 @@ struct SceneRec {
 struct DropRow {
   std::array<u16, 4> slot{};
 };
-struct TradeEntry {
-  u16 id = 0, qty = 0;
-};
 
-// Equipment stat record (player.dat part 4 "waa.bin": 256 x 0x1C, index = item id). Field notes: tier() is the material tier 0..9;
+// Equipment stat record (player.dat part 4 "waa.bin": 256 x 0x1C, index = item id; mods' items by name follow). Field notes: tier() is the material tier 0..9;
 // klass() the weapon class (CRIT table index); sweeps() its bit 7 (rods and boomerangs: a PC's heavy hit strikes every enemy); mode() the
 // weapon attack mode 0x10..0x1B (animation group);
 // colour() the colour bits of materials / plates; power() is weapon wp | armour DEF term | accessory value; mag() weapon MAG bonus |
@@ -174,28 +186,45 @@ struct GearRec {
   u32 rd32(size_t offset) const { return static_cast<u32>(rd16(offset)) | (static_cast<u32>(rd16(offset + 2)) << 16); }
 };
 
-// Item info (exdat part 5 "menu_waa.bin": 256 x 12): who can equip, price, category. equip_lo / equip_hi form a 51-bit mask (bit =
-// character id); price10 is the price / 10; cat's low nibble is 0 weapon 1 armour 2 accessory 4 material, its high nibble the tier.
+// Who besides / unlike a record's character bits may equip an item or place an element: the characters mods add (each takes its
+// "equips like" character's answer, GameTables::equips_like) and the rows' equip_add / equip_remove (data/table_rows.h).
+struct Eligibility {
+  std::vector<int> allow, deny;
+  // True / false when the lists decide `char_id`, nothing when the record's bits do.
+  std::optional<bool> rule(int char_id) const {
+    if (std::find(deny.begin(), deny.end(), char_id) != deny.end()) return false;
+    if (std::find(allow.begin(), allow.end(), char_id) != allow.end()) return true;
+    return std::nullopt;
+  }
+};
+
+// Item info (exdat part 5 "menu_waa.bin": 256 x 12, then mods' items by name): who can equip, price, category. equip_lo / equip_hi form a 51-bit mask (bit =
+// character id; `who` decides the characters mods add and the rows' exceptions); price10 is the price / 10; cat's low nibble is 0
+// weapon 1 armour 2 accessory 4 material, its high nibble the tier.
 struct ItemInfo {
   u32 equip_lo = 0, equip_hi = 0;
   s16 price10 = 0;
   u8 cat = 0, extra = 0;
+  Eligibility who;
   bool can_equip(int char_id) const {
-    return char_id < 32 ? ((equip_lo >> char_id) & 1) != 0 : char_id < 64 && ((equip_hi >> (char_id - 32)) & 1) != 0;
+    if (const std::optional<bool> listed = who.rule(char_id)) return *listed;
+    if (char_id < 0 || char_id >= kNumChars) return false;
+    return char_id < 32 ? ((equip_lo >> char_id) & 1) != 0 : ((equip_hi >> (char_id - 32)) & 1) != 0;
   }
   int price() const { return price10 * 10; }
   int kind() const { return cat & 0xF; }
 };
 
+// One character record set: the game's kNumChars records, then the characters mods add by name (data/table_rows.h).
 struct CharSet {
-  std::array<StatRec, kNumChars> rec;
-  std::array<Lv99, kNumChars> lv99;
+  std::vector<StatRec> rec = std::vector<StatRec>(kNumChars);
+  std::vector<Lv99> lv99 = std::vector<Lv99>(kNumChars);
 };
 
 // The loaded tables. Sources: enemies = monster.bin; char_sets = "char", "char20", "char_w0".."char_w5"; elements = pgdat.bin;
 // growth = el_mask.bin (100 x 8); scenes = scenedat.bin; symtbl = 384 x 8; btbgdat = 100 x 3; drops = ditem (256); star_rows = exdat
-// part 0 rows {n, b, s lo, s hi} (100); el_shop has trailing zeros trimmed (the smiths' waa_shop.bin is read by ui::shop::ShopData); gear = 256 records (empty if player.dat part 4
-// is missing); item_info = 256; forge = menu/waa_tbl.bin, per item id the units needed of material id 0..31; keyitem_jp_rows = u16
+// part 0 rows {n, b, s lo, s hi} (100); el_shop has trailing zeros trimmed (the smiths' waa_shop.bin is read by ui::shop::ShopData); gear = 256 records and the items mods add by
+// name (empty if player.dat part 4 is missing); item_info and item_names = as many; forge = menu/waa_tbl.bin, per item id the units needed of material id 0..31; keyitem_jp_rows = u16
 // offsets in keyitem.dat; rng_table = the 256-byte permutation read from the executable (empty if absent); variant_bands = the 8
 // encounter-variant roll bands {lo, hi} of the battle loader btlinit.prg (empty if absent).
 struct GameTables {
@@ -221,6 +250,13 @@ struct GameTables {
   std::vector<std::array<u16, 2>> variant_bands;
 
   const CharSet& chars(const std::string& set = "char") const { return char_sets.at(set); }
+  // Per character id, the game's character whose equipment and elements it takes: itself for the game's records, for a character mods
+  // add its equips_like (char.txt), else its base, followed to a game character (Serge when there is none).
+  std::vector<int> equips_like;
+  // Fills `rows`' eligibility from the rows' equip_add / equip_remove of `table` (applied in priority order) and gives every character
+  // mods add the answer of its equips_like character (`bits(row, char_id)`: the record's own bits), unless a row names it.
+  void fill_eligibility(const TableRows& table_rows, std::string_view table, std::vector<Eligibility*> rows,
+                        const std::function<bool(size_t, int)>& bits) const;
   const std::string& enemy_name(int i) const;
   const std::string& element_name(int i) const;
   const std::string& char_name(int i) const;

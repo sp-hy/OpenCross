@@ -21,7 +21,7 @@ void BattleHandoff::apply_battle_disguise(ui::GameState* game_state, const std::
   if (!(battle_req.flags & 4) || !game_state) return;
   for (size_t slot = 0; slot < party_chars.size() && slot < 3; ++slot) {
     const int char_id = party_chars[slot];
-    if (char_id < 0 || char_id >= save::kNumChars || char_id == 12 || char_id == 27) continue;
+    if (!game_state->slot.is_character(char_id) || char_id == 12 || char_id == 27) continue;
     game_state->slot.chars[static_cast<size_t>(char_id)].model_id = 0x3B;
     log::debug("field: tick {} battle flag 4: character {} model byte 0x3B", tick_count, char_id);
   }
