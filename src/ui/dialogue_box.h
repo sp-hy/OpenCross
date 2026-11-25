@@ -415,8 +415,9 @@ class DialogueDemo {
   std::function<int(int var)> script_var;
   std::function<void(int var, int value)> script_set;
   std::function<std::u32string(int char_id)> char_name;
-  // The element an item value from data::kScriptElementBase names in the running room's scripts (a mod's own ids), or nothing.
-  std::function<std::optional<int>(int item_id)> script_element;
+  // {itemwork(n)} of a script item id that is a mod's own id (a key item past 64, an item from data::kScriptItemBase, an element from
+  // kScriptElementBase) -> the record it names, through the running room's owner; unset = the id less the range's base.
+  std::function<std::optional<int>(int item_id)> script_record;
   // Voice events (audio::VoicePlayer): on_page(room, msg, script speaker, {NAME%}-tag speaker, page) when a page is first shown
   // (page 0 right after show()); on_close() once when the window closes. Unset in the demo viewer.
   std::function<void(int room, int msg, int speaker, int tag_speaker, int page)> on_page;

@@ -188,16 +188,20 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   if (!dit) return fail("battle/data/ditem.dat missing");
   Bytes dd = import::is_lzss(*dit) ? import::lzss_decode(*dit).value_or(Bytes{}) : *dit;
   // The mods' rows belong to the VFS they were set for: tables read through another (the background scan's unmodified game) get none,
-  // and leave the named records' ids and the text's element ids as they are.
+  // and leave the named records' ids and the text's own ids as they are.
   const std::vector<TableMod>* mods = table_mods(game_fs);
   const std::vector<TableMod> no_mods;
+  const bool has_gear = player.size() > 4 && player[4].size() >= kGameItems * kGearRecSize;
   TableRows rows;
-  rows.build(mods ? *mods : no_mods, {{"monster", mon->size() / kStatRecSize},
-                                      {"pgdat", pg->size() / kElemRecSize},
-                                      {"scenedat", player[0].size() / 28},
-                                      {"ditem", dd.size() / 8},
-                                      {"el_shop", kShopRows},
-                                      {"waa_shop", kShopRows}});
+  std::map<std::string, size_t> counts = {{"monster", mon->size() / kStatRecSize},
+                                          {"pgdat", pg->size() / kElemRecSize},
+                                          {"scenedat", player[0].size() / 28},
+                                          {"ditem", dd.size() / 8},
+                                          {"el_shop", kShopRows},
+                                          {"waa_shop", kShopRows},
+                                          {"keyitem", kGameKeyItems + 1}};
+  if (has_gear) counts["waa"] = kGameItems;
+  rows.build(mods ? *mods : no_mods, counts);
   if (mods && publish) set_text_mod_ids_of(rows, *mods);
 
   // --- enemies
@@ -251,11 +255,12 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   for (size_t i = 0; i < btbgdat.size(); ++i) copy_rec(btbgdat[i], player[3], i * 3);
 
   // --- equipment stats (player.dat part 4)
-  if (player.size() > 4 && player[4].size() >= 256 * kGearRecSize) {
-    gear.resize(256);
-    for (size_t i = 0; i < 256; ++i) copy_rec(gear[i].raw, player[4], i * kGearRecSize);
+  if (has_gear) {
+    gear.resize(rows.total("waa", kGameItems));
+    for (size_t i = 0; i < kGameItems; ++i) copy_rec(gear[i].raw, player[4], i * kGearRecSize);
     rows.apply("waa", gear.size(), [&](size_t i) { return std::span<u8>(gear[i].raw); });
   }
+  const size_t item_count = rows.total("waa", kGameItems);
 
   // --- drops
   dd.resize(rows.total("ditem", dd.size() / 8) * 8);
@@ -267,10 +272,11 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   // --- exdat part 0 (star progress rows)
   auto ex = load_bundle(game_fs, "exdat.dat");
   if (!ex.empty()) {
-    if (ex.size() > 5 && ex[5].size() >= 256 * 12) {
-      rows.apply("menu_waa", 256, [&](size_t i) { return std::span<u8>(ex[5].data() + i * 12, 12); });
-      item_info.resize(256);
-      for (size_t i = 0; i < 256; ++i) {
+    if (ex.size() > 5 && ex[5].size() >= kGameItems * 12) {
+      ex[5].resize(item_count * 12);
+      rows.apply("menu_waa", item_count, [&](size_t i) { return std::span<u8>(ex[5].data() + i * 12, 12); });
+      item_info.resize(item_count);
+      for (size_t i = 0; i < item_count; ++i) {
         const size_t offset = i * 12;
         item_info[i].equip_lo = static_cast<u32>(rd16(ex[5], offset)) | (static_cast<u32>(rd16(ex[5], offset + 2)) << 16);
         item_info[i].equip_hi = static_cast<u32>(rd16(ex[5], offset + 4)) | (static_cast<u32>(rd16(ex[5], offset + 6)) << 16);
@@ -293,9 +299,10 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
       trade.push_back(std::move(entries));
     }
   }
-  if (auto forge_bytes = game_fs.read("cdrom/menu/waa_tbl.bin"); forge_bytes && forge_bytes->size() >= 256 * 32) {
-    forge.resize(256);
-    for (size_t i = 0; i < 256; ++i) copy_rec(forge[i], *forge_bytes, i * 32);
+  if (auto forge_bytes = game_fs.read("cdrom/menu/waa_tbl.bin"); forge_bytes && forge_bytes->size() >= kGameItems * 32) {
+    forge.resize(item_count);
+    for (size_t i = 0; i < kGameItems; ++i) copy_rec(forge[i], *forge_bytes, i * 32);
+    rows.apply("waa_tbl", forge.size(), [&](size_t i) { return std::span<u8>(forge[i]); });
   }
   if (auto keyitem_bytes = game_fs.read("cdrom/menu/keyitem.dat"); keyitem_bytes && keyitem_bytes->size() >= 2)
     keyitem_jp_rows = rd16(*keyitem_bytes, 0) / 2u - 1u;
@@ -320,8 +327,8 @@ bool GameTables::load(const vfs::Vfs& game_fs, std::string* err, bool publish) {
   enemy_names = names(0x19, enemies.size());
   element_names = names(0x17, elements.size());
   char_names = names(0x01, kNumChars);
-  item_names = names(0x00, 256);
-  key_item_names = names(0x18, 65);
+  item_names = names(0x00, item_count);
+  key_item_names = names(0x18, rows.total("keyitem", kGameKeyItems + 1));
   // The named records' ids and the mods' own element ids, for what reads tables later (menu_pg, scripts, text, saves).
   if (mods && publish) set_table_rows(std::move(rows));
   return true;

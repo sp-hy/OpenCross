@@ -123,6 +123,14 @@ void test_elements() {
   CHECK((battle.own_ids.at("monster") == std::vector<std::pair<int, std::string>>{{222, "big_boss"}}));
   CHECK((battle.own_ids.at("scenedat") == std::vector<std::pair<int, std::string>>{{513, "boss_fight"}}));
   CHECK(battle.problems.size() == 2);
+  // [Items] from 256 (the game's items are 0..255) to 0x7FF (a script reaches item n as 0x800 + n).
+  const features::Manifest items = features::parse_manifest("[Items]\n256=star_blade\n2047=last_ring\n255=low\n2048=high\n");
+  CHECK((items.own_ids.at("waa") == std::vector<std::pair<int, std::string>>{{256, "star_blade"}, {2047, "last_ring"}}));
+  CHECK(items.problems.size() == 2);
+  // [KeyItems] from 65 (the game's are 1..64) to 0x3FF (a script reaches key item n as 0x400 + n).
+  const features::Manifest keys = features::parse_manifest("[KeyItems]\n65=sky_key\n1023=last_key\n64=low\n1024=high\n");
+  CHECK((keys.own_ids.at("keyitem") == std::vector<std::pair<int, std::string>>{{65, "sky_key"}, {1023, "last_key"}}));
+  CHECK(keys.problems.size() == 2);
 }
 
 void test_variables() {
