@@ -130,7 +130,8 @@ std::vector<StatChange> stat_changes(const Stats& now, const Stats& with);
 // who can wear the piece first, each part by id. `others` (optional) receives the available characters outside the party who can wear it.
 std::vector<int> compare_order(const GameState& gs, int item, int* others = nullptr);
 
-// ---- trading post. trade.bin row = 16 entries {u8 goods id, u8 colour mask, u16 level sum}.
+// ---- trading post. trade.bin row = 16 entries {u8 goods id, u8 colour mask, u16 level sum}; a mod's rows may name any item as goods
+// (data::TradeEntry).
 struct TradeSlot {
   int item = 0, mask = 0, need = 0;
 };

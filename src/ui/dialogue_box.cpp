@@ -235,8 +235,27 @@ const char* dialogue_face_art(int face_id) { return face_id >= 0 && face_id < kD
 
 void DialogueBox::refresh_face() {
   face_now_ = nullptr;
-  if (portrait_ < 0 || portrait_ >= 92 || !vfs_ || !ctx_ || !sprites_) return;
+  if (!vfs_ || !ctx_ || !sprites_) return;
   const bool hd = mode_ == ArtMode::Hd;
+  if (!portrait_name_.empty()) {
+    const std::string path = "hd/face/" + (hd ? portrait_set_ : std::string("1999")) + "/" + portrait_name_ + ".png";
+    const std::string key = vfs_->cache_key(path);
+    if (auto it = faces_.find(key); it != faces_.end() && it->second) {
+      face_now_ = it->second.get();
+      return;
+    }
+    render::DecodedImage img;
+    if (auto png = vfs_->added(path) ? vfs_->read(path) : std::nullopt; png && render::decode_image(*png, img)) {
+      auto face = std::make_unique<Face>();
+      if (face->tex.create(*ctx_, img.width, img.height, render::TextureFormat::Rgba8, img.rgba.data())) {
+        face->set = render::TexRef(face->tex, linear_);
+        face_now_ = face.get();
+        faces_[key] = std::move(face);
+        return;
+      }
+    }
+  }
+  if (portrait_ < 0 || portrait_ >= 92) return;
   const std::string key = vfs_->cache_key((hd ? portrait_set_ : std::string("ps1")) + "/" + kFaceNames[portrait_]);
   if (auto it = faces_.find(key); it != faces_.end()) {
     face_now_ = it->second.get();
@@ -323,8 +342,9 @@ void DialogueBox::draw_key(int key, float x, float y, float size, float vw, floa
   sprites_->set_view(vw, vh);
 }
 
-void DialogueBox::set_portrait(int face_id) {
+void DialogueBox::set_portrait(int face_id, std::string name) {
   portrait_ = face_id;
+  portrait_name_ = std::move(name);
   refresh_face();
 }
 
@@ -1278,16 +1298,17 @@ void DialogueDemo::show(int room_id, int msg_index, int speaker, int line_speake
       return char_name ? char_name(id) : tables_.default_name(id, language());
     };
     tctx.script_item = [this, var](int index) {
-      int value = var(index);
-      if (value >= data::kScriptElementBase && script_element) {
-        const std::optional<int> element = script_element(value);
-        if (!element) return std::u32string();
-        value = data::kScriptElementBase + *element;
+      const int value = var(index);
+      if (value >= data::kScriptItemBase || value > data::kScriptKeyItemBase + static_cast<int>(data::kGameKeyItems)) {
+        const int base = value >= data::kScriptElementBase ? data::kScriptElementBase
+                         : value >= data::kScriptItemBase  ? data::kScriptItemBase
+                                                           : data::kScriptKeyItemBase;
+        const std::optional<int> record = script_record ? script_record(value) : std::optional<int>(value - base);
+        if (!record) return std::u32string();
+        const int category = base == data::kScriptElementBase ? 0x170000 : base == data::kScriptItemBase ? 0 : 0x180000;
+        return tables_.item_name(category | *record, language());
       }
-      const int key = value >= data::kScriptElementBase ? (0x170000 | (value - data::kScriptElementBase))
-                      : value > 0x400                   ? (0x180000 | (value - 0x400))
-                      : value > 0x200                   ? (0x170000 | (value - 0x200))
-                                                        : value;
+      const int key = value > 0x400 ? (0x180000 | (value - 0x400)) : value > 0x200 ? (0x170000 | (value - 0x200)) : value;
       return tables_.item_name(key, language());
     };
   }
@@ -1442,7 +1463,7 @@ void DialogueDemo::move_digit(int step, int shift) {
   impl_->box.move_digit(step, shift);
   if (script_set && impl_->box.digit_entry()) script_set(kDigitEntryVar, impl_->box.digit_value());
 }
-void DialogueDemo::set_portrait(int id) { impl_->box.set_portrait(id); }
+void DialogueDemo::set_portrait(int id, std::string name) { impl_->box.set_portrait(id, std::move(name)); }
 void DialogueDemo::set_portrait_flags(bool on, bool left) { impl_->box.set_portrait_flags(on, left); }
 void DialogueDemo::set_skin_byte(int config_byte) { impl_->box.set_skin_byte(config_byte); }
 void DialogueDemo::set_key_caps(bool keyboard) { impl_->box.set_button_style(keyboard, static_cast<int>(impl_->lang)); }

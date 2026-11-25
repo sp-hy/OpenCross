@@ -44,7 +44,7 @@ class StatusModelView : public MenuModelView {
     std::shared_ptr<game::ModelHandle> body_shut;
     game::UnitPose pose;
     std::shared_ptr<game::ModelHandle> weapon;
-    int weapon_model = -1, weapon_part = -2;
+    int weapon_item = -1, weapon_model = -1, weapon_part = -2;
     // Interpolation between the last two menu ticks (0..1).
     float accum = 0;
     // Menu ticks since the screen (re)started the model.
@@ -55,8 +55,9 @@ class StatusModelView : public MenuModelView {
     u32 session = 0;
   };
   // Cached per (menu model, art mode).
-  Entry* entry(int model, bool hd_art);
-  void set_weapon(Entry& shown, int weapon_model, int part);
+  Entry* entry(int model, bool hd_art, const std::string& own_model = {});
+  // The weapon `slot` holds: the pack of its weapon item when an item mods add by name ships one (part 0), else the body's pack.
+  void set_weapon(Entry& shown, const MenuModelSlot& slot);
   // One menu frame of the eye blink.
   void step_blink();
   // The status effects: menu/stef.prd restarted for a new session, the effects of the absent statuses stopped.
@@ -71,7 +72,8 @@ class StatusModelView : public MenuModelView {
   bool cast_shadows_ = false, shadow_pipe_failed_ = false;
   render::CharacterShading shading_;
   const vfs::Vfs& vfs_;
-  std::map<int, std::unique_ptr<Entry>> cache_;  // key = model * 2 + hd_art
+  // Key = the model's stem and "/hd" for HD art.
+  std::map<std::string, std::unique_ptr<Entry>> cache_;
   std::map<std::string, std::shared_ptr<game::ModelHandle>> weapons_;  // "<pack>#<part>"
   // vfs::Vfs::generation() the caches were built for.
   u32 generation_ = 0;

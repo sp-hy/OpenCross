@@ -275,6 +275,21 @@ int main() {
     bad.step();
     CHECK(bad.last.failed);
   }
+  // ---- request: the first argument also as written (party_add by a character's name)
+  {
+    Sim sim;
+    std::string err;
+    CHECK(sim.route.load(write_tmp("oc_route_request.txt", "0 request party_add dario\n- request party_add 3\n- quit\n"), &err));
+    sim.st.room = "r";
+    sim.st.room_valid = true;
+    int guard = 0;
+    bool named = false, numbered = false;
+    while (sim.step() && ++guard < 40) {
+      if (sim.last.request == "party_add" && sim.last.request_text == "dario" && sim.last.request_arg == 0) named = true;
+      if (sim.last.request == "party_add" && sim.last.request_text == "3" && sim.last.request_arg == 3) numbered = true;
+    }
+    CHECK(named && numbered);
+  }
   // ---- bad command
   {
     Sim sim;

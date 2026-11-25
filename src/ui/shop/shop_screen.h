@@ -59,6 +59,8 @@ class ShopScreen {
   void open(GameState& state, ShopKind kind, int shop_id);
   void close();
   bool closed() const;
+  // The forge's party strip scrolls with L2 / R2 (more rows than it shows: characters mods add), so the speed keys stay off meanwhile.
+  bool strip_takes_triggers() const;
   ShopKind kind() const;
   int shop_id() const;
   // Current state for logs / demo: "top", "category", "list", "quantity", "pick", "confirm", "offer".

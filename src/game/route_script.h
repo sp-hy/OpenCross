@@ -81,7 +81,7 @@
 //   assert hp <char> <min> <max>  current HP of a character in [min, max]     assert status <char> <hexmask> set|clear
 //   request <kind> [arg]          debug: ask the host for what a field opcode would (money <n> = set the gold, battle <encounter> = A3 (battlefield 0), rename <char> = FE 4A, party = FE 5B,
 //                                 save = FE 85 (cleared-save prompt), ngplus = FE 84 (New Game+ list), menu = FE 72 (save-point main menu), disc <n> = FE 65 (n = disc - 1), movie <n> = 7E / D4 (on the disc in use), trading <row> = FE 67, weaponshop <row> = FE 68,
-//                                 party_add <char> = add a character to the party, party_remove <ref> = 7D, keyitem <n> = give key item n, slotdump <n> = write the game as one save
+//                                 party_add <char|name> = add a character to the party (a name: a character mods add, by its name), party_remove <ref> = 7D, keyitem <n> = give key item n, slotdump <n> = write the game as one save
 //                                 block to $OC_SLOT_DUMP<n>.bin, battle_disguise <encounter> = the disguised-fight variant of `battle`, versus <seed> [side] =
 //                                 a versus battle against the local opponent, savemark / savecheck = remember the save / fail unless it is unchanged);
 //                                 issued once, finishes 4 ticks later (wait for the screen with `wait menu|shop`)
@@ -223,6 +223,8 @@ struct RouteState {
   std::function<int(int)> party_ent;
   // Script variable read.
   std::function<int(int)> var;
+  // Owned count of a field-script item id (D5's ranges).
+  std::function<int(int)> item_count;
   std::function<std::string(int)> char_name;
   std::function<std::string()> party;
   std::function<int()> disc;
@@ -321,6 +323,8 @@ struct RouteOut {
   // `settings`: the tab the settings window opens on, or `close`.
   std::string settings;
   int request_arg = 0;
+  // The request's first argument as written (party_add takes a character's name).
+  std::string request_text;
   int request_arg2 = 0;
   int request_arg3 = 0;
   // `remote`: add / move / state / clear, and the party it names (add: every member; move: the pose; state: the pose's state).

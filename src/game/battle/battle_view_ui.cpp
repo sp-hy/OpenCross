@@ -20,6 +20,7 @@
 
 #include "core/element_icon.h"
 #include "core/log.h"
+#include "game/model_files.h"
 #include "import/text.h"
 #include "platform/config.h"
 #include "platform/keymap.h"
@@ -2052,7 +2053,7 @@ void BattleView::open_swap() {
     reserve.src_id = member.char_id;
     reserve.kind = member.kind >= 0 ? member.kind : member.char_id;
     stems.push_back(unit_model_stem(reserve));
-    if (const data::GearRec* gear = tables_->gear_rec(member.eq.weapon_id)) weapon_parts.emplace_back(ModelCache::weapon_bin(reserve.kind), gear->tier() & 0xF);
+    if (WeaponPick pick = pc_weapon(*vfs_, *tables_, member.eq.weapon_id, reserve.kind); pick.part >= 0) weapon_parts.emplace_back(std::move(pick.bin), pick.part);
   }
   model_cache_.prefetch(*vfs_, std::move(stems), std::move(weapon_parts));
 }

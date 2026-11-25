@@ -30,12 +30,9 @@ void strip_character(ui::GameState& gs, int char_id) {
 }  // namespace
 
 void FieldWorld::table_op(u16 key, int arg, int index) {
-  // FE 5D / FE 60: arg == 0 sets, else clears bit `index` (< 0x2C) of the party lock bitmap or the party-screen exclusion bitmap
-  // (both saved in the slot).
-  if ((key == 0xFE5D || key == 0xFE60) && index >= 0 && index < 0x2C) {
-    u32& word = gs_->slot.unk_e1b8[static_cast<size_t>((key == 0xFE5D ? 0 : 2) + (index >> 5))];
-    const u32 bit = 1u << (index & 31);
-    word = arg == 0 ? (word | bit) : (word & ~bit);
+  // FE 5D / FE 60: arg == 0 sets, else clears character `index`'s party lock or party-screen exclusion (both saved in the slot).
+  if (key == 0xFE5D || key == 0xFE60) {
+    gs_->slot.set_char_flag(index, key == 0xFE5D ? save::kCharLocked : save::kCharExcluded, arg == 0);
     return;
   }
   // C7: the sounds C6 started on slot (U & 7) end and the slot's record is cleared.
@@ -84,38 +81,35 @@ void FieldWorld::table_op(u16 key, int arg, int index) {
     return;
   }
   if (key == 0xFE6F && gs_) {
-    // FE 6F on the recruited roster (44 bits): b == 0 SAVE refunds every recruited character's element grid (every cell, locked
+    // FE 6F on the recruited roster: b == 0 SAVE refunds every recruited character's element grid (every cell, locked
     // ones too) and accessories to the stock, saves the roster, leaves only Serge recruited and
     // sets the party lock bitmap to 1 (the rest 0); b != 0 RESTORE ORs the saved roster back. Grids and accessories stay
     // empty.
     save::SaveSlot& sl = gs_->slot;
     if (arg == 0) {
-      u32 lo = 0, hi = 0;
-      for (int char_id = 0; char_id < 0x2C; ++char_id) {
-        if (!sl.recruited(char_id)) continue;
-        (char_id < 32 ? lo : hi) |= 1u << (char_id & 31);
-        strip_character(*gs_, char_id);
+      for (const int char_id : sl.character_ids()) {
+        const bool recruited = sl.recruited(char_id);
+        sl.set_char_flag(char_id, save::kCharRosterSaved, recruited);
+        if (recruited) strip_character(*gs_, char_id);
+        sl.set_recruited(char_id, char_id == 0);
+        sl.set_char_flag(char_id, save::kCharLocked, char_id == 0);
+        sl.set_char_flag(char_id, save::kCharExcluded, false);
       }
-      sl.unk_e1e0 = lo;
-      sl.unk_e1e4 = hi;
-      for (int char_id = 1; char_id < 0x2C; ++char_id) sl.set_recruited(char_id, false);
-      sl.set_recruited(0, true);
-      sl.unk_e1b8 = {1u, 0u, 0u, 0u};
     } else {
-      for (int char_id = 0; char_id < 0x2C; ++char_id)
-        if ((char_id < 32 ? sl.unk_e1e0 : sl.unk_e1e4) >> (char_id & 31) & 1u) sl.set_recruited(char_id, true);
+      for (const int char_id : sl.character_ids())
+        if (sl.char_flag(char_id, save::kCharRosterSaved)) sl.set_recruited(char_id, true);
     }
     return;
   }
   // FE 7C: character `arg` gets weapon `index`; the weapon it held goes to the item stock.
-  if (key == 0xFE7C && gs_ && arg >= 0 && arg < save::kNumChars) {
+  if (key == 0xFE7C && gs_ && gs_->slot.is_character(arg)) {
     save::SaveChar& ch = gs_->slot.chars[static_cast<size_t>(arg)];
     if (ch.weapon) gs_->add_item(ch.weapon);
     ch.weapon = static_cast<u16>(index);
     return;
   }
   // FE 7D: character `arg` leaves its grid elements and its three accessories in the stock (FE 6F's per-character step).
-  if (key == 0xFE7D && gs_ && arg >= 0 && arg < save::kNumChars) {
+  if (key == 0xFE7D && gs_ && gs_->slot.is_character(arg)) {
     strip_character(*gs_, arg);
     return;
   }
@@ -140,22 +134,20 @@ void FieldWorld::button_panel() {
   panel_.watch(input_.latched_keys());
 }
 
-// Jump predicates (true = jump for 95 / E5 / E6 / E8). The character bitmaps are 44-bit words: the recruited roster
-// (SaveSlot::recruited) and two saved bitmaps (unk_e1e0/e4 and unk_e1ec/f0; a New Game+ start ORs the
-// three together). Ids >= 0x2C always jump.
+// Jump predicates (true = jump for 95 / E5 / E6 / E8) over three character flags: recruited, in the saved roster (FE 6F) and carried
+// over (a New Game+ start ORs the three together). An id that is not a character always jumps.
 bool FieldWorld::predicate(script::Predicate op, int arg) {
   using P = script::Predicate;
-  const auto bit = [&](u32 lo, u32 hi) { return arg >= 0 && arg < 0x2C && (((arg < 32 ? lo : hi) >> (arg & 31)) & 1u) != 0; };
-  const auto recruited = [&] { return arg >= 0 && arg < 0x2C && arg < save::kNumChars && gs_->slot.recruited(arg); };
+  const auto recruited = [&] { return gs_->slot.recruited(arg); };
   switch (op) {
     // 95: jump unless recruited. E5: jump unless the bit is set in the saved roster. E6: also unless recruited.
     // E8: test-and-clear in the second saved bitmap.
     case P::Op95: return !recruited();
-    case P::OpE5: return !bit(gs_->slot.unk_e1e0, gs_->slot.unk_e1e4);
-    case P::OpE6: return !bit(gs_->slot.unk_e1e0, gs_->slot.unk_e1e4) && !recruited();
+    case P::OpE5: return !gs_->slot.char_flag(arg, save::kCharRosterSaved);
+    case P::OpE6: return !gs_->slot.char_flag(arg, save::kCharRosterSaved) && !recruited();
     case P::OpE8: {
-      const bool set = bit(gs_->slot.unk_e1ec, gs_->slot.unk_e1f0) && !recruited();
-      if (arg >= 0 && arg < 0x2C) (arg < 32 ? gs_->slot.unk_e1ec : gs_->slot.unk_e1f0) &= ~(1u << (arg & 31));
+      const bool set = gs_->slot.char_flag(arg, save::kCharCarried) && !recruited();
+      gs_->slot.set_char_flag(arg, save::kCharCarried, false);
       return !set;
     }
     // D2: result code of the last battle (0 won, 1 wiped).
@@ -779,12 +771,12 @@ std::string FieldWorld::describe_ent(int i) const {
 // ================================================================================================ field status / HP effects
 
 int FieldWorld::debug_char_stat(int id, int what) const {
-  if (!gs_ || id < 0 || id >= save::kNumChars) return -1;
+  if (!gs_ || !gs_->slot.is_character(id)) return -1;
   const save::SaveChar& character = gs_->slot.chars[static_cast<size_t>(id)];
   return what == 0 ? character.cur_hp : what == 1 ? character.max_hp : character.status;
 }
 void FieldWorld::debug_set_char_stat(int id, int what, int value) {
-  if (!gs_ || id < 0 || id >= save::kNumChars) return;
+  if (!gs_ || !gs_->slot.is_character(id)) return;
   save::SaveChar& character = gs_->slot.chars[static_cast<size_t>(id)];
   if (what == 0) character.cur_hp = static_cast<u16>(std::clamp(value, 0, 9999));
   else if (what == 2) character.status = static_cast<u8>(value);
@@ -799,7 +791,7 @@ int FieldWorld::party_status_bits() const {
   int bits = 0;
   if (!gs_) return 0;
   for (int id : party_chars_)
-    if (id >= 0 && id < save::kNumChars) bits |= gs_->slot.chars[static_cast<size_t>(id)].status;
+    if (gs_->slot.is_character(id)) bits |= gs_->slot.chars[static_cast<size_t>(id)].status;
   return bits;
 }
 
@@ -823,7 +815,7 @@ void FieldWorld::step_status() {
   if (!gs_ || (vm_.global_flags() & script::gflag::kInputLock)) return;
   auto drain = [&](int need, int amount, int amount_burn) {
     for (int id : party_chars_) {
-      if (id < 0 || id >= save::kNumChars) continue;
+      if (!gs_->slot.is_character(id)) continue;
       save::SaveChar& character = gs_->slot.chars[static_cast<size_t>(id)];
       if (need && !(character.status & need)) continue;
       const int hp = static_cast<int>(character.cur_hp) - ((character.status & kStBurn) ? amount_burn : amount);

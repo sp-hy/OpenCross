@@ -8,9 +8,11 @@
 #include <string>
 
 #include "core/log.h"
+#include "data/table_rows.h"
 #include "game/battle/battle_model_cache.h"
 #include "game/battle/battle_seq.h"
 #include "game/battle/model_table.h"
+#include "game/model_files.h"
 #include "render/mat4.h"
 
 namespace oc::ui {
@@ -61,25 +63,26 @@ bool EnemyModelLibrary::weapon_matrix(const Entry& held, size_t weapon_slot, con
   return true;
 }
 
-EnemyModelLibrary::Entry* EnemyModelLibrary::entry(int model, int weapon_part) {
-  const auto found = std::find_if(cache_.begin(), cache_.end(),
-                                  [&](const std::unique_ptr<Entry>& held) { return held->model == model && held->weapon_part == weapon_part; });
+EnemyModelLibrary::Entry* EnemyModelLibrary::entry(const std::string& stem, const std::string& weapon_bin, int weapon_part) {
+  const auto found = std::find_if(cache_.begin(), cache_.end(), [&](const std::unique_ptr<Entry>& held) {
+    return held->stem == stem && held->weapon_bin == weapon_bin && held->weapon_part == weapon_part;
+  });
   if (found != cache_.end()) {
     cache_.splice(cache_.begin(), cache_, found);
     return cache_.front().get();
   }
-  if (model < 0 || static_cast<size_t>(model) >= game::kBattleModels.size() || game::kBattleModels[static_cast<size_t>(model)].empty()) return nullptr;
+  if (stem.empty()) return nullptr;
   std::string err;
-  auto asset = game::ModelCache::read_model(vfs_, std::string(game::kBattleModels[static_cast<size_t>(model)]), &err);
+  auto asset = game::ModelCache::read_model(vfs_, stem, &err);
   if (!asset) {
-    log::warn("bestiary page: model {}: {}", game::kBattleModels[static_cast<size_t>(model)], err);
+    log::warn("bestiary page: model {}: {}", stem, err);
     return nullptr;
   }
   auto held = std::make_unique<Entry>();
-  held->model = model;
+  held->stem = stem;
+  held->weapon_bin = weapon_bin;
   held->weapon_part = weapon_part;
   held->body = game::Actor::make_resolved_model(meshes_, std::move(*asset));
-  const std::string stem(game::kBattleModels[static_cast<size_t>(model)]);
   // The spawn script's first tick (S5 entry 8 up to its first wait): the attached-object hide words and the parts it hides / shows.
   game::bseq::Table spawn;
   if (const auto obj = vfs_.read("cdrom/" + stem + ".obj"); obj && game::bseq::load_model_table(*obj, spawn)) {
@@ -100,8 +103,8 @@ EnemyModelLibrary::Entry* EnemyModelLibrary::entry(int model, int weapon_part) {
       }
     }
   }
-  if (const std::string bin = game::ModelCache::weapon_bin(model); weapon_part >= 0 && !bin.empty() && held->body && (held->weapon_hide & 3) != 3) {
-    held->weapon = game::ModelCache::build_weapon(vfs_, meshes_, bin, weapon_part);
+  if (weapon_part >= 0 && !weapon_bin.empty() && held->body && (held->weapon_hide & 3) != 3) {
+    held->weapon = game::ModelCache::build_weapon(vfs_, meshes_, weapon_bin, weapon_part);
     const auto& points = held->body->asset.attach.points;
     const assets::MountPoint& mount = held->body->asset.attach.mounts[0];
     if (held->weapon) held->weapon_attach = mount.used ? mount.attach : points[0x12].used ? 0x12 : points[7].used ? 7 : 15;
@@ -154,11 +157,26 @@ void EnemyModelLibrary::draw(const render::Frame& frame, float vw, float vh, con
     generation_ = generation;
     cache_.clear();
   }
-  Entry* shown = entry(slot.model, slot.weapon_part);
+  // A monster mods add by name with a model of its own wears it, as in battle; any other the model of its model number.
+  std::string stem, weapon_bin;
+  if (slot.monster >= 0)
+    stem = game::ModelCache::named_monster_model(vfs_, data::table_rows().name_of("monster", static_cast<size_t>(slot.monster)));
+  if (!stem.empty()) {
+    if (vfs_.added("cdrom/" + stem + ".bin")) weapon_bin = stem + ".bin";
+  } else if (slot.model >= 0 && static_cast<size_t>(slot.model) < game::kBattleModels.size()) {
+    stem = game::kBattleModels[static_cast<size_t>(slot.model)];
+    weapon_bin = game::ModelCache::weapon_bin(slot.model);
+  }
+  // A weapon mods add by name with its own pack: that pack's first part.
+  int weapon_part = slot.weapon_part;
+  if (std::string own = slot.weapon_item > 0 ? game::own_weapon_bin(vfs_, slot.weapon_item) : std::string(); !own.empty())
+    weapon_bin = std::move(own), weapon_part = 0;
+  Entry* shown = entry(stem, weapon_bin, weapon_part);
   if (!shown || !shown->body || !shown->body->gpu) return;
-  if (slot.model != shown_ || slot.weapon_part != shown_weapon_) {
-    shown_ = slot.model;
-    shown_weapon_ = slot.weapon_part;
+  if (stem != shown_ || weapon_part != shown_weapon_ || weapon_bin != shown_bin_) {
+    shown_ = stem;
+    shown_bin_ = weapon_bin;
+    shown_weapon_ = weapon_part;
     shown->pose.play(kClip, 0);
     accum_ = 0;
   }

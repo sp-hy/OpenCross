@@ -38,7 +38,7 @@ SavePrev preview_of(const save::SaveSlot& data, int slot, int block) {
 
 std::u32string MainMenu::Impl::saved_leader(const save::SaveSlot& data, const std::map<int, std::u32string>& ext_names) {
   const int leader = data.party()[0];
-  if (leader >= save::kNumChars) return {};
+  if (leader < 0) return {};
   return saved_name ? saved_name(data, ext_names, leader) : default_char_name(leader);
 }
 

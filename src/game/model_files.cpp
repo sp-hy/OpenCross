@@ -7,6 +7,8 @@
 #include <string_view>
 #include <utility>
 
+#include "data/table_rows.h"
+#include "data/tables.h"
 #include "game/battle/model_table.h"
 #include "game/model_mods.h"
 #include "import/container.h"
@@ -159,6 +161,11 @@ std::optional<assets::ModelAsset> read_menu_model(const vfs::Vfs& files, int mod
     if (err) *err = "no menu model " + std::to_string(model);
     return std::nullopt;
   }
+  return read_menu_model_stem(files, stem, hd_art, err, mods);
+}
+
+std::optional<assets::ModelAsset> read_menu_model_stem(const vfs::Vfs& files, const std::string& stem, bool hd_art, std::string* err,
+                                                       MenuModelMods mods) {
   const auto ome = files.read("cdrom/menu/player/" + stem + ".ome");
   if (!ome) {
     if (err) *err = "menu/player/" + stem + ".ome not found";
@@ -245,6 +252,22 @@ std::optional<assets::ModelAsset> read_body_model(const vfs::Vfs& files, int bod
     return std::nullopt;
   }
   return read_model_files(files, std::string(kBattleModels[static_cast<size_t>(body)]), err);
+}
+
+std::string own_weapon_bin(const vfs::Vfs& files, int item) {
+  if (item <= 0 || !data::table_mods(files)) return {};
+  const std::string& name = data::table_rows().name_of("waa", static_cast<size_t>(item));
+  if (name.empty()) return {};
+  std::string own = "battle/wepon/" + name + ".bin";
+  return files.added("cdrom/" + own) ? own : std::string{};
+}
+
+WeaponPick pc_weapon(const vfs::Vfs& files, const data::GameTables& tables, int item, int body) {
+  const data::GearRec* gear = tables.gear_rec(item);
+  if (!gear) return {};
+  if (std::string own = own_weapon_bin(files, item); !own.empty()) return {std::move(own), 0};
+  const bool listed = body >= 0 && static_cast<size_t>(body) < kBattleWeaponBins.size();
+  return {listed ? std::string(kBattleWeaponBins[static_cast<size_t>(body)]) : std::string{}, gear->tier() & 0xF};
 }
 
 }  // namespace oc::game

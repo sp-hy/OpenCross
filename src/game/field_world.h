@@ -353,8 +353,23 @@ class FieldWorld final : public script::FieldHost {
   // A script item id from data::kScriptElementBase -> the element it names: the element ids of a mod's script are its own (the
   // [Elements] of the mod that owns the running room, data::TableRows::element_for); nothing when it names none.
   std::optional<int> script_element(int item_id) const;
-  // A shop row a script names (FE 5E element shop, FE 68 blacksmith; the row in variable 0x4A) -> the row it means: a mod's own shop ids
-  // ([ElementShops] / [Smiths] of the running room's owner); nothing when it names none.
+  // A script item id from data::kScriptItemBase (below kScriptElementBase) -> the item it names, by the mod's own item ids ([Items] of
+  // the running room's owner); nothing when it names none.
+  std::optional<int> script_item(int item_id) const;
+  // A script item id that names gear or a material (below 0x200 as it is, or script_item) -> the item; nothing for any other id.
+  std::optional<int> script_gear(int item_id) const;
+  // A script item id 0x400 + n -> key item n: the game's 1..63 as they are, past 64 by the mod's own key item ids ([KeyItems] of the
+  // running room's owner); nothing for any other id. script_key_item_id is the reverse (the id a script of the room knows; 0 = none).
+  std::optional<int> script_key_item(int item_id) const;
+  int script_key_item_id(int key_item) const;
+  // script_character / script_character_id (script::FieldHost) for the const paths (text widths).
+  int character_of_script(int id) const;
+  int script_id_of_character(int id) const;
+  // A text's character id (a name code, {playwork(n)}, a speaker): in a room a mod owns the owner's own ids (character_of_script), in
+  // the game's rooms the id itself, as the game reads it.
+  int text_character(int id) const;
+  // A shop row a script names (FE 5E element shop, FE 68 blacksmith, FE 67 trading post; the row in variable 0x4A) -> the row it means:
+  // a mod's own shop ids ([ElementShops] / [Smiths] / [TradingPosts] of the running room's owner); nothing when it names none.
   std::optional<int> script_shop(script::MenuKind kind, int row) const;
   const ModRooms* mod_rooms() const { return mod_rooms_; }
   // The stem of the current room when it is a mod room, "" otherwise (saved by name: mod room ids are each mod's own).
@@ -429,7 +444,7 @@ class FieldWorld final : public script::FieldHost {
   // Field key-item list. Tele-Porter (1), Relief Charm (61) and Smith Spirit (63) are usable only
   // while script vars 0x46 and 0x3C are both 1; every other owned item always is.
   bool key_item_usable(int item) const;
-  // A key item chosen in the list: var 0x2A USED_KEY_ITEM = 0x400 + n; Tele-Porter -> party screen (as FE 5B), Smith Spirit -> smith
+  // A key item chosen in the list: var 0x2A USED_KEY_ITEM = 0x400 + n (a mod's key item: its script id, script_key_item_id); Tele-Porter -> party screen (as FE 5B), Smith Spirit -> smith
   // (as FE 68 with shop var 0x4A), any other item is shown to the entities in talk range (ON slot 4 of those that accept an item).
   void use_key_item(int item);
   // A disabled item confirmed in the list: var 0x2A = 0x400 + n all the same; the list stays open and nothing is shown or opened.
@@ -900,10 +915,12 @@ class FieldWorld final : public script::FieldHost {
   void request_engine_menu(script::MenuKind kind, int arg);
   bool menu_active() override;
   void field_reset() override;
+  int script_character(int id) override;
+  int script_character_id(int id) override;
   int party_member(int slot) override;
   bool in_party(int char_id) override;
   bool party_add(int char_id) override;
-  void party_remove(int char_ref) override;
+  void party_remove(int char_id) override;
   void party_override(bool enter, int key) override;
   void swap_leader(int char_id) override;
   void roster_add(int char_id) override;
@@ -968,6 +985,9 @@ class FieldWorld final : public script::FieldHost {
   // set_art_mode on a loaded room: art from the other file set, simulation state untouched
   void swap_art();
   std::shared_ptr<ModelHandle> character_model(int char_id);
+  // The field model of a character mods add by name when its mod ships one (fieldobj/player/<name>/<name>.obj) and the character is in
+  // its own body (its model byte is its record's); else null (the model byte's model applies).
+  std::shared_ptr<ModelHandle> named_character_model(int char_id);
   // The CPU half of character_model (files, import, texture mods, bled uploads) for a model byte not loaded yet, on a worker: a party
   // member shown in another body (Viper Manor's uniforms) gets its own model ready for the script that switches it back.
   void prefetch_character_model(int model_byte);
@@ -1148,6 +1168,8 @@ class FieldWorld final : public script::FieldHost {
   std::map<int, ModelSource> model_sources_;
   // by character id, kept across rooms
   std::map<int, std::shared_ptr<ModelHandle>> char_models_;
+  // named_character_model's, by the character's name (null: the mod ships none)
+  std::map<std::string, std::shared_ptr<ModelHandle>> named_models_;
   // HD models in fields, by battle model (the model byte for a character) and field mesh (WornModel::field_mesh): the detailed
   // body (a character's menu model, an NPC's battle model) and how it follows a field model with skeleton `skeleton` (texture registry
   // generation `generation`). No body = drawn with the field model (no detailed body, or the skeletons do not match). all_uses: read
@@ -1537,6 +1559,13 @@ class FieldWorld final : public script::FieldHost {
   // entity whose script opened it
   int dialogue_owner_ = -1;
   int dialogue_face_ = -1;
+  // The face by name of a character mods add for the open dialogue (hd/face/<set>/<name>.png), "" none.
+  std::string dialogue_face_name_;
+  // A face of a character rather than a face id (SET_DIALOG_FACE 0x100 + a character id; Ent::face keeps kCharacterFace + the engine's
+  // id, past any face id a script gives).
+  static constexpr int kCharacterFace = 0x10000;
+  // SET_DIALOG_FACE's character form: 0x100 + a 7-bit character id.
+  static constexpr int kScriptCharacterFace = 0x100;
   int last_dialogue_msg_ = -1;
   int pending_choice_first_ = 0, pending_choice_last_ = -1;
 

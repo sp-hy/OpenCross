@@ -12,6 +12,7 @@
 #include <format>
 
 #include "core/log.h"
+#include "game/model_files.h"
 namespace oc::game {
 
 
@@ -609,6 +610,11 @@ void BattleView::run_load_step(LoadJob& job) {
   if (face == 3) job.done = true;
 }
 
+std::shared_ptr<ModelHandle> BattleView::load_pc_weapon(int item, int body) {
+  const WeaponPick pick = pc_weapon(*vfs_, *tables_, item, body);
+  return pick.bin.empty() ? nullptr : model_cache_.weapon_part(*vfs_, *meshes_, pick.bin, pick.part);
+}
+
 // The models and weapons bind_unit_model will load for the battle's units, read and decoded on a worker while the stage loads.
 void BattleView::prefetch_unit_models() {
   std::vector<std::string> stems;
@@ -618,13 +624,14 @@ void BattleView::prefetch_unit_models() {
     if (!unit.present) continue;
     stems.push_back(unit_model_stem(unit));
     if ((unit.pc && unit.form < 0) || unit.body >= 0) {
-      if (const data::GearRec* gear = tables_->gear_rec(unit.eq.weapon_id)) weapon_parts.emplace_back(ModelCache::weapon_bin(unit.body >= 0 ? unit.body : unit.kind), gear->tier() & 0xF);
+      if (WeaponPick pick = pc_weapon(*vfs_, *tables_, unit.eq.weapon_id, unit.body >= 0 ? unit.body : unit.kind); pick.part >= 0)
+        weapon_parts.emplace_back(std::move(pick.bin), pick.part);
       continue;
     }
     const data::StatRec& er = tables_->enemies[static_cast<size_t>(unit.form >= 0 ? unit.form : unit.src_id)];
     if (er.weapon() != 0 && er.weapon_model() != 0) {
       const data::GearRec* wg = tables_->gear_rec(er.weapon());
-      weapon_parts.emplace_back(ModelCache::weapon_bin(static_cast<int>(er.model())), wg ? (wg->tier() & 0x7F) : 0);
+      weapon_parts.emplace_back(ModelCache::monster_weapon_bin(*vfs_, tables_, unit.form >= 0 ? unit.form : unit.src_id), wg ? (wg->tier() & 0x7F) : 0);
     }
   }
   model_cache_.prefetch(*vfs_, std::move(stems), std::move(weapon_parts));
@@ -672,8 +679,8 @@ void BattleView::bind_unit_model(int unit_id) {
     if (pcm) {
       const auto& pts = handle->asset.attach.points;
       const assets::MountPoint& mount = handle->asset.attach.mounts[0];
-      if (const data::GearRec* gear = tables_->gear_rec(unit.eq.weapon_id)) {
-        visual.weapon = load_weapon(unit.body >= 0 ? unit.body : unit.kind, gear->tier() & 0xF);
+      if (tables_->gear_rec(unit.eq.weapon_id)) {
+        visual.weapon = load_pc_weapon(unit.eq.weapon_id, unit.body >= 0 ? unit.body : unit.kind);
         // An all-zero record (Viper, Zoah, Poshul ...: no mount object) uses attach 0x12 (grip) when the model
         // has it, else the right hand (07), else 15 (status screen rule).
         visual.weapon_attach = mount.used ? mount.attach : pts[0x12].used ? 0x12 : pts[7].used ? 7 : 15;
@@ -689,7 +696,7 @@ void BattleView::bind_unit_model(int unit_id) {
         const auto& pts = handle->asset.attach.points;
         const assets::MountPoint& mount = handle->asset.attach.mounts[0];
         const data::GearRec* wg = tables_->gear_rec(er.weapon());
-        visual.weapon = load_enemy_weapon(static_cast<int>(er.model()), wg ? (wg->tier() & 0x7F) : 0);
+        visual.weapon = load_enemy_weapon(mon, wg ? (wg->tier() & 0x7F) : 0);
         visual.weapon_attach = mount.used ? mount.attach : pts[0x12].used ? 0x12 : pts[7].used ? 7 : 15;
         log::info("battle: unit {} {} weapon_model {} -> {} attach {} (joint {}){} slot1 {} entry-8 hide mask {}", unit_id, unit.name, er.weapon_model(),
                   visual.weapon ? "loaded" : "FAILED", visual.weapon_attach, pts[static_cast<size_t>(visual.weapon_attach)].joint,

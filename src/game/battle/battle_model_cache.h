@@ -78,7 +78,15 @@ struct ModelCache {
   bool prefetch_ready() const;
 
   static std::string player_model(const vfs::Vfs& vfs, int char_id);
-  static std::string monster_model(const data::GameTables* tables, int monster_id);
+  // A character mods add by name (tables\char.txt `[name]`) whose mod adds cdrom/battle/player/<name>/<name>.obj (with its at0.prd
+  // beside it); empty when it adds none (the character then wears its model byte's model, unit_model_stem).
+  static std::string named_player_model(const vfs::Vfs& vfs, std::string_view name);
+  // A monster's model: one mods add by name (tables\monster.txt `[name]`) whose mod adds cdrom/battle/monster/<name>/<name>.obj uses it
+  // (named_monster_model; a model the game ships under that name does not count), any other its model byte (kBattleModels).
+  static std::string monster_model(const vfs::Vfs& vfs, const data::GameTables* tables, int monster_id);
+  static std::string named_monster_model(const vfs::Vfs& vfs, std::string_view name);
+  // A monster's weapon pack: a model of its own takes <stem>.bin beside it ("" = none), any other the model byte's (weapon_bin).
+  static std::string monster_weapon_bin(const vfs::Vfs& vfs, const data::GameTables* tables, int monster_id);
   // The unit's model folder: the character's, or the creature's after a Dopplegang form change.
   static std::string unit_model_stem(const vfs::Vfs& vfs, const data::GameTables* tables, const battle::Unit& unit);
   // The model number the animation scripts read (GetModelNum): a PC's kind byte (the record's model byte: Glenn with the Einlanzer pair
@@ -94,8 +102,8 @@ struct ModelCache {
   static std::optional<assets::ModelAsset> read_weapon(const vfs::Vfs& vfs, const std::string& bin, int part);
 
   std::shared_ptr<ModelHandle> load_model_for(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& dir_stem);
-  std::shared_ptr<ModelHandle> load_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int kind, int part);
-  std::shared_ptr<ModelHandle> load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, int model, int part);
+  std::shared_ptr<ModelHandle> load_enemy_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const data::GameTables* tables,
+                                                 int monster_id, int part);
   // Part `part` of the weapon pack `bin` ("battle/wepon/sword.bin"), cached; build_weapon is the uncached load.
   std::shared_ptr<ModelHandle> weapon_part(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& bin, int part);
   static std::shared_ptr<ModelHandle> build_weapon(const vfs::Vfs& vfs, render::MeshPipeline& meshes, const std::string& bin, int part);

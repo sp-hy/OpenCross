@@ -3,7 +3,7 @@
 // without linking oc_game.
 //
 // PartyGrid: the portrait grid both overlays share. Grid = the recruited characters that are not excluded, ascending ids, 4
-// columns, 11 rows, 5 visible rows (cursor row 0..4) and a scroll of 0..6 rows that animates 2 px per frame for 17 frames (18
+// columns, 11 rows (more when mods add characters), 5 visible rows (cursor row 0..4) and a scroll of 0..6 rows (to the last row) that animates 2 px per frame for 17 frames (18
 // frames, input ignored). Left / right wrap over the 4 columns, up / down move the row and scroll at the visible edge (sfx 1 on
 // every press, also at the ends).
 //
@@ -39,7 +39,7 @@ enum class PartyKey { Left, Right, Up, Down, Confirm, Cancel };
 class PartyGrid {
  public:
   using Key = PartyKey;
-  static constexpr int kColumns = 4, kVisibleRows = 5, kMaxScroll = 6, kCells = 44;
+  static constexpr int kColumns = 4, kVisibleRows = 5, kMaxScroll = 6;
   // PS1 px per grid row; the scroll animation steps 2 px per frame for 17 frames.
   static constexpr int kRowPitch = 0x22, kScrollFrames = 0x11;
 
@@ -66,12 +66,13 @@ class PartyGrid {
   int cursor() const { return (scroll_ + row_) * kColumns + col_; }
   int cell(int index) const { return index >= 0 && index < static_cast<int>(roster_.size()) ? roster_[static_cast<size_t>(index)] : -1; }
   const std::vector<int>& roster() const { return roster_; }
+  // The last first-visible row: 6 for the game's 44 cells, more for a longer roster.
+  int max_scroll() const { return std::max(kMaxScroll, (static_cast<int>(roster_.size()) + kColumns - 1) / kColumns - kVisibleRows); }
 
  protected:
   void reset(std::vector<int> roster) {
     std::sort(roster.begin(), roster.end());
     roster.erase(std::unique(roster.begin(), roster.end()), roster.end());
-    if (roster.size() > kCells) roster.resize(kCells);
     roster_ = std::move(roster);
     col_ = row_ = scroll_ = 0;
     scroll_dir_ = scroll_left_ = 0;
@@ -89,7 +90,7 @@ class PartyGrid {
         return 1;
       case Key::Down:
         if (row_ < kVisibleRows - 1) ++row_;
-        else if (scroll_ < kMaxScroll) ++scroll_, scroll_dir_ = 1, scroll_left_ = kScrollFrames;
+        else if (scroll_ < max_scroll()) ++scroll_, scroll_dir_ = 1, scroll_left_ = kScrollFrames;
         return 1;
       default: return 0;
     }
@@ -108,19 +109,19 @@ class PartyEditor : public PartyGrid {
 
   // `roster`: the grid characters (any order; sorted ascending). `party`: character id per slot, -1 / 0xFF = empty; packed (empty
   // slots and duplicates dropped); members stay even when they are not in the grid (an excluded member keeps its slot, as on the
-  // PS1). `locked`: 64-bit bitmap, bit c = character c's slot cannot be opened for a
+  // PS1). `locked`: the characters whose slot cannot be opened for a
   // replacement (a swap from another slot may still move the member, it never leaves the party). `reserve`: the reserve slots
   // (-1 = empty; none = the vanilla screen); a party member or a repeated character there leaves its slot empty.
-  void begin(std::vector<int> roster, const std::array<int, 3>& party, std::array<u32, 2> locked = {0, 0}, std::vector<int> reserve = {}) {
+  void begin(std::vector<int> roster, const std::array<int, 3>& party, std::vector<int> locked = {}, std::vector<int> reserve = {}) {
     reset(std::move(roster));
-    locked_ = locked;
+    locked_ = std::move(locked);
     party_ = {-1, -1, -1};
     int count = 0;
     for (int id : party)
-      if (id >= 0 && id < kCells && std::find(party_.begin(), party_.end(), id) == party_.end()) party_[static_cast<size_t>(count++)] = id;
+      if (id >= 0 && std::find(party_.begin(), party_.end(), id) == party_.end()) party_[static_cast<size_t>(count++)] = id;
     for (size_t i = 0; i < reserve.size(); ++i) {
       const int id = reserve[i];
-      if (id < 0 || id >= kCells || in_party(id) || std::find(reserve.begin(), reserve.begin() + static_cast<std::ptrdiff_t>(i), id) != reserve.begin() + static_cast<std::ptrdiff_t>(i))
+      if (id < 0 || in_party(id) || std::find(reserve.begin(), reserve.begin() + static_cast<std::ptrdiff_t>(i), id) != reserve.begin() + static_cast<std::ptrdiff_t>(i))
         reserve[i] = -1;
     }
     reserve_ = std::move(reserve);
@@ -193,7 +194,7 @@ class PartyEditor : public PartyGrid {
   int reserve_scroll() const { return reserve_scroll_; }
   bool in_party(int id) const { return id >= 0 && std::find(party_.begin(), party_.end(), id) != party_.end(); }
   bool in_reserve(int id) const { return id >= 0 && std::find(reserve_.begin(), reserve_.end(), id) != reserve_.end(); }
-  bool locked(int id) const { return id >= 0 && id < 64 && ((locked_[static_cast<size_t>(id >> 5)] >> (id & 31)) & 1) != 0; }
+  bool locked(int id) const { return id >= 0 && std::find(locked_.begin(), locked_.end(), id) != locked_.end(); }
   // The character whose stats / name the screen shows: mode A the cursor slot's member, mode B the cursor cell (kept while the
   // grid scrolls); -1 = none.
   int shown() const { return mode_ == Mode::Slots ? at(slot_) : cell(cursor()); }
@@ -248,7 +249,7 @@ class PartyEditor : public PartyGrid {
 
   std::array<int, 3> party_{-1, -1, -1};
   std::vector<int> reserve_;
-  std::array<u32, 2> locked_{0, 0};
+  std::vector<int> locked_;
   Mode mode_ = Mode::Slots;
   int slot_ = 0;
   int reserve_scroll_ = 0;
@@ -262,7 +263,7 @@ class ReliefEditor : public PartyGrid {
   // The shown character starts as the relief member, else record 0.
   void begin(std::vector<int> roster, int relief) {
     reset(std::move(roster));
-    relief_ = relief >= 0 && relief < kCells ? relief : -1;
+    relief_ = relief >= 0 ? relief : -1;
     shown_ = relief_ >= 0 ? relief_ : 0;
     done_ = false;
   }

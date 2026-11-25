@@ -165,7 +165,7 @@ Equip make_equip(const data::GameTables& tables, int weapon, int armour, const s
 // fresh save record.
 std::array<int, 7> lv99_targets(const data::GameTables& tables, int record, const std::string& set) {
   const auto it = tables.char_sets.find(set);
-  if (it == tables.char_sets.end() || record < 0 || record >= data::kNumChars) return {};
+  if (it == tables.char_sets.end() || record < 0 || static_cast<size_t>(record) >= it->second.rec.size()) return {};
   const auto& lv99 = it->second.lv99[static_cast<size_t>(record)];
   return {lv99.hp, lv99.atk, lv99.def, lv99.hit, lv99.evd, lv99.mag, lv99.mdef};
 }
@@ -210,7 +210,7 @@ std::optional<Battle::DuelBody> Battle::duel_body(int slot, int monster_id, int 
   const u16 own_gender = tables_.enemies[static_cast<size_t>(monster_id)].rd16(0x14);
   const auto gender_of = [&](int char_id) {
     const auto chars = tables_.char_sets.find("char");
-    if (chars == tables_.char_sets.end() || char_id < 0 || char_id >= data::kNumChars) return own_gender;
+    if (chars == tables_.char_sets.end() || char_id < 0 || static_cast<size_t>(char_id) >= chars->second.rec.size()) return own_gender;
     return static_cast<u16>(chars->second.rec[static_cast<size_t>(char_id)].rd16(0x14));
   };
   const auto fixed = [&](int char_id, u16 fallback_weapon) {
@@ -267,7 +267,7 @@ void Battle::init_pc(int slot, const PartyMember& member) {
   unit.skip_lo = unit.eq.resist_lo, unit.skip_hi = unit.eq.resist_hi;
   unit.lo |= unit.perm_lo, unit.hi |= unit.perm_hi;
   unit.hero_set = wears_hero_set(unit.eq);
-  if (const auto chars = tables_.char_sets.find("char"); chars != tables_.char_sets.end() && member.char_id >= 0 && member.char_id < data::kNumChars)
+  if (const auto chars = tables_.char_sets.find("char"); chars != tables_.char_sets.end() && member.char_id >= 0 && static_cast<size_t>(member.char_id) < chars->second.rec.size())
     unit.gender = static_cast<u16>(chars->second.rec[static_cast<size_t>(member.char_id)].rd16(0x14));
   unit.rate = static_cast<int>(std::clamp<s64>(static_cast<s64>(unit.rate) + unit.eq.stamina_mod, 0, kStatLimit));
   unit.gauge = std::clamp(std::clamp(unit.eq.start_gauge, 0, data::kGridRows) - 1, -1, unit.gauge_max);
