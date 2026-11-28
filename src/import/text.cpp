@@ -433,7 +433,7 @@ Message flatten(const Message& message, const TextContext& ctx) {
   builder.msg.source = message.source;
   int case_mode = 0;
   bool hide = false;
-  // USA rules: the pending name suffix (1 y, 2 i).
+  // The pending name suffix (1 y, 2 i).
   int suffix = 0;
   constexpr int kZoah = 8, kLeah = 35;
   if (ctx.usa_rules && ctx.speaker == kZoah) case_mode = 2;
@@ -466,7 +466,7 @@ Message flatten(const Message& message, const TextContext& ctx) {
     if (name.empty()) {
       for (const char* ch = fallback; *ch; ++ch) name.push_back(static_cast<char32_t>(*ch));
     }
-    if (suffix && ctx.usa_rules) {
+    if (suffix) {
       if (name.size() > 6) name.resize(6);
       const char32_t last = name.empty() ? 0 : name.back();
       if (last != U'I' && last != U'Y' && last != U'i' && last != U'y') {
@@ -513,7 +513,7 @@ Message flatten(const Message& message, const TextContext& ctx) {
         break;
       case TokKind::HideName: hide = true; break;
       case TokKind::Suffix:
-        if (ctx.usa_rules) suffix = token.arg;
+        suffix = token.arg;
         break;
       case TokKind::Accent:
         // No display form.

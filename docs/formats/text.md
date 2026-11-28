@@ -373,7 +373,7 @@ The block layout, record header and terminators are those of section 1. Message 
 | 1F | (none) | no-op, no argument; dialect strings use it as an empty form | `◆` |
 
 * **Upper case** maps `a`-`z` to `A`-`Z` and `ä ë ï ö ü` to `Ä Ë Ï Ö Ü`; other accented letters stay small. A window whose speaker is character 8 (Zoah) draws its whole message in capitals.
-* **OpenCross.** Played from the USA discs the message window flattens with `TextContext::usa_rules` (and the speaker): `{CAP}` lasts to the end of the message, case codes reach a following name, `{CapL}` acts only for speaker 35, `{-y}` / `{-i}` cut and append as above, speaker 8 in capitals. RDE's own text keeps its rules (`{CAP}` capitalises the next text run, a case code before a name does nothing, no suffix letter). Test `test_text` `test_usa_rules`.
+* **OpenCross.** Played from the USA discs the message window flattens with `TextContext::usa_rules` (and the speaker): `{CAP}` lasts to the end of the message, case codes reach a following name, `{CapL}` acts only for speaker 35, speaker 8 in capitals. RDE's own text keeps its rules (`{CAP}` capitalises the next text run, a case code before a name does nothing). Both cut the name and append the letter for `{-y}` / `{-i}` as above: RDE draws Poshul's `{-i}{SERGE%}poo` as `Sergeipoo`. Test `test_text` `test_usa_rules`.
 * `09 0C 0D 0F 11 13 14 1A 1D` do not occur in field text.
 * **Battle packs.** Part 1 of the `.pac` has the record layout of section 1 and the same codes; the USA packs use only `00 01 02 04 06 0E 15`.
 

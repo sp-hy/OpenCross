@@ -127,8 +127,8 @@ void test_markup() {
   CHECK(flat.tokens.back().kind == TokKind::End);
 }
 
-// The USA discs' text rules are off by default, so RDE's text flattens as before; switched on, {-y} / {-i} cut the next name to six
-// glyphs and append the letter (nothing after a final y), {CAP} lasts and reaches names, {CapL} only for Leah, Zoah in capitals.
+// {-y} / {-i} cut the next name to six glyphs and append the letter (nothing after a final y) under both rule sets; the USA discs'
+// rules, off by default, add: {CAP} lasts and reaches names, {CapL} only for Leah, Zoah in capitals.
 void test_usa_rules() {
   import::TextContext ctx;
   ctx.speaker_name = [](int id) {
@@ -136,7 +136,8 @@ void test_usa_rules() {
   };
   const auto flat = [&](const char* markup) { return text_of(import::flatten(import::parse_markup(markup, import::Lang::En), ctx)); };
   const char* sample = "{-y}SERGE%, {-i}KID%, {-y}RAZZLY%, {-i}GUILE%. {CAP}hi SERGE% ok{mend}";
-  CHECK(flat(sample) == "Serge, Kidkidkid, Razzly, GUILE. HI Serge ok");
+  CHECK(flat(sample) == "Sergey, Kidkidi, Razzly, GUILEI. HI Serge ok");
+  CHECK(flat("Oh, hi {-i}SERGE%poo.{mend}") == "Oh, hi Sergeipoo.");
   CHECK(flat("{CapL}hi{mend}") == "hi");
   ctx.usa_rules = true;
   CHECK(flat(sample) == "Sergey, Kidkidi, Razzly, GUILEI. HI SERGE OK");

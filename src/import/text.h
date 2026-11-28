@@ -83,8 +83,8 @@ struct TextContext {
   std::function<std::u32string(int var)> script_item;   // {itemwork(n)}
   std::function<int(int var)> script_number;            // {num(n)}
   // The USA discs' rules (off for RDE's text): {CAP} lasts to the end of the message, case codes reach a following name, {CapL}
-  // acts only for speaker 35, {-y} / {-i} cut the next name to 6 glyphs and append y / i (a capital after a capital; nothing after
-  // I Y i y), and speaker 8 speaks in capitals throughout.
+  // acts only for speaker 35, and speaker 8 speaks in capitals throughout. Both rule sets let {-y} / {-i} cut the next name to 6
+  // glyphs and append y / i (a capital after a capital; nothing after I Y i y).
   bool usa_rules = false;
   int speaker = -1;
 };

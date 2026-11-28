@@ -158,8 +158,7 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
   int speaker_id = 0;
   if (speaker >= 0 && speaker < static_cast<int>(ents_.size())) speaker_id = std::max(0, ents_[static_cast<size_t>(speaker)].char_id);
   // Portrait: the speaking entity's face (party members: their character id; others only after
-  // SET_DIALOG_FACE; none = no portrait) is the face id. Window flag
-  // bit 0 = portrait present, unless the dialog op's flag byte has 0x40.
+  // SET_DIALOG_FACE; none = no portrait) is the face id; window flag 0x40 drops it.
   const int target = speaker >= 0 && speaker < static_cast<int>(ents_.size()) ? speaker : vm_.current_entity();
   {
     int face = -1;
@@ -187,12 +186,15 @@ void FieldWorld::open_dialogue(int speaker, int message, int flag_byte) {
       portrait_left_ = portrait_on_left(get_facing(target), portrait_yaw_, model_yaw, static_cast<u32>(flags_hi_for(flag_byte)));
     }
   }
+  // The window flags: the dialog op's flag byte, when non-zero, replaces the low byte of the running entity's op 62 word.
   bool lbl = false, kept = false;
   {
     const int runner = vm_.current_entity();
     const int wf = runner >= 0 && runner < static_cast<int>(ents_.size()) ? ents_[static_cast<size_t>(runner)].win[4] : 0;
-    lbl = (wf & 0x10) != 0;
-    kept = (wf & 0x400) != 0;
+    const int fl = (flag_byte ? flag_byte : (wf & 0xFF)) | (wf & 0xFF00);
+    lbl = (fl & 0x10) != 0;
+    kept = (fl & 0x400) != 0;
+    if (fl & 0x40) dialogue_face_ = -1;
   }
   if (win_slot == 0) {
     label_ = lbl;
